@@ -1,0 +1,10 @@
+schema_version: 1
+vmid: 203
+name: ha-flat2
+type: lxc
+node: pve
+
+description: Reserved Home Assistant instance for the second apartment
+
+boot:
+  onboot: false
