@@ -5,7 +5,7 @@ type: lxc
 state: planned
 node: pve
 
-description: Git, CI and development services
+description: Ansible, Semaphore, Git, CI and development services
 
 boot:
   onboot: true
