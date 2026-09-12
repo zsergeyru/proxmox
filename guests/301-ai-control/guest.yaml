@@ -1,0 +1,15 @@
+schema_version: 1
+vmid: 301
+name: ai-control
+type: vm
+node: pve
+
+description: Target central AI infrastructure control plane
+
+boot:
+  onboot: true
+
+management:
+  ssh:
+    user: infra-agent
+    port: 22
