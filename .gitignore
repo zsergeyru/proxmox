@@ -1,0 +1,56 @@
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+!.env.sample
+**/.env
+**/.env.*
+!**/.env.example
+!**/.env.sample
+
+# Private keys / credentials
+id_rsa
+id_rsa.*
+id_ed25519
+id_ed25519.*
+*.p12
+*.pfx
+*.jks
+*.keystore
+*.private
+*.psk
+privatekey
+presharedkey
+**/.secrets/
+**/secrets.local/
+
+# Runtime / generated data
+**/runtime/
+**/tmp/
+**/.cache/
+*.log
+*.pid
+*.sock
+
+# Local backups and exports
+*.bak
+*.backup
+*.old
+*.swp
+*.swo
+*~
+**/backups.local/
+**/exports.local/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
