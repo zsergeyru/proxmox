@@ -9,6 +9,8 @@
 - M.2 SSD 512 GB
 - Proxmox VE
 
+Фактическое состояние работающего хоста `pve` хранится в [`host/pve/README.md`](host/pve/README.md).
+
 ## Основной принцип
 
 Репозиторий организован вокруг гостей Proxmox: всё, что относится к конкретной VM/LXC, хранится в `guests/<VMID>-<name>/`. Общие решения, правила и архитектура находятся в `docs/`.
@@ -35,7 +37,7 @@ VM/LXC не обязаны клонировать весь репозитори�
 | 401 | LXC | `monitoring` | Uptime Kuma и стек мониторинга |
 | 501 | VM/LXC | `frigate` | видеонаблюдение и детекция |
 
-`320-ai-control` сохраняется как текущий bootstrap-узел до развёртывания и проверки целевой `301-ai-control`. Существующие legacy VM не перенумеровываются только ради новой схемы.
+Текущая production VM `100 HAOS` сохраняется как legacy-гость и описана в [`guests/100-haos/`](guests/100-haos/). `320-ai-control` сохраняется как текущий bootstrap-узел до развёртывания и проверки целевой `301-ai-control`. Существующие legacy/bootstrap VM не перенумеровываются только ради новой схемы.
 
 ## Структура репозитория
 
@@ -62,7 +64,7 @@ guests/<VMID>-<name>/
 └── rootfs/
 ```
 
-`guest.yaml` описывает объект VM/LXC в Proxmox: VMID, тип, ресурсы, сеть, автозапуск и способ управления.
+`guest.yaml` описывает объект VM/LXC в Proxmox: VMID, тип, state, ресурсы, сеть, автозапуск и способ управления.
 
 `rootfs/` повторяет корневую файловую систему гостя. Например:
 
@@ -83,6 +85,8 @@ guests/101-network-gateway/rootfs/etc/nftables.conf
 4. README конкретного гостя — его назначение и эксплуатационные особенности.
 5. [`docs/architecture.md`](docs/architecture.md) — сводная архитектура без дублирования низкоуровневой конфигурации.
 
+Наблюдаемое текущее состояние хоста хранится в `host/pve/`, а временный observed drift конкретного гостя — в его `STATUS.md`.
+
 ## Главные документы
 
 - [`docs/architecture.md`](docs/architecture.md) — сводная архитектура Proxmox-платформы.
@@ -90,6 +94,8 @@ guests/101-network-gateway/rootfs/etc/nftables.conf
 - [`docs/ai-control.md`](docs/ai-control.md) — архитектура AI-управления.
 - [`docs/local-ai.md`](docs/local-ai.md) — локальные модели и inference.
 - [`docs/network.md`](docs/network.md) — сеть Proxmox и роль `network-gateway`.
+- [`docs/dns.md`](docs/dns.md) — `home.arpa`, локальный DNS, mDNS `.local` и reflection между VLAN.
+- [`docs/ipv6.md`](docs/ipv6.md) — dual stack и IPv6.
 - [`docs/apartment-infrastructure.md`](docs/apartment-infrastructure.md) — граница между этим репозиторием и проектом квартиры.
 - [`guests/320-ai-control/README.md`](guests/320-ai-control/README.md) — текущий bootstrap Hermes/MCP.
 
