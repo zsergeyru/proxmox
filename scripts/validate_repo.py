@@ -17,11 +17,14 @@ ALLOWED_TYPES = {"vm", "lxc"}
 ALLOWED_STATES = {"planned", "active", "bootstrap", "legacy"}
 GUEST_DIR_RE = re.compile(r"^(\d{3})-(.+)$")
 MARKDOWN_LINK_RE = re.compile(r"!?\[[^\]]*\]\(([^)]+)\)")
-PRIVATE_KEY_MARKERS = (
-    "-----BEGIN PRIVATE KEY-----",
-    "-----BEGIN OPENSSH PRIVATE KEY-----",
-    "-----BEGIN RSA PRIVATE KEY-----",
-    "-----BEGIN EC PRIVATE KEY-----",
+PRIVATE_KEY_MARKERS = tuple(
+    "-----BEGIN " + key_type + "-----"
+    for key_type in (
+        "PRIVATE KEY",
+        "OPENSSH PRIVATE KEY",
+        "RSA PRIVATE KEY",
+        "EC PRIVATE KEY",
+    )
 )
 
 errors: list[str] = []
