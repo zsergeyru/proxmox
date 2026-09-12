@@ -24,7 +24,7 @@ AI-агент
 
 ## Структура каталога
 
-`320-ai-control` следует общему правилу `guests/`: всё, что должно существовать внутри VM, хранится в `files/`, а путь после `files/` повторяет абсолютный путь на гостевой системе.
+`320-ai-control` следует общему правилу `guests/`: всё, что должно существовать внутри VM, хранится в `rootfs/`, а путь после `rootfs/` повторяет абсолютный путь на гостевой системе.
 
 ```text
 guests/320-ai-control/
@@ -32,7 +32,7 @@ guests/320-ai-control/
 ├── guest.yaml                 # когда будет утверждён формат
 ├── decisions/
 │   └── 001-simple-management-model.md
-└── files/
+└── rootfs/
     └── opt/
         └── ai-control/
             ├── agents/
@@ -48,7 +48,7 @@ guests/320-ai-control/
 Например:
 
 ```text
-guests/320-ai-control/files/opt/ai-control/agents/hermes/
+guests/320-ai-control/rootfs/opt/ai-control/agents/hermes/
 ```
 
 соответствует реальному пути:
@@ -57,15 +57,17 @@ guests/320-ai-control/files/opt/ai-control/agents/hermes/
 /opt/ai-control/agents/hermes/
 ```
 
-Отдельного каталога `services/` нет: агенты, MCP, web-интерфейсы, Compose-файлы, исходный код и другие приложения — это такие же файлы целевой VM и поэтому размещаются под `files/` по своим реальным путям.
+`rootfs/` — это не каталог, который создаётся внутри VM. Его содержимое разворачивается относительно корня `/` гостевой системы.
 
-Если позже понадобятся системные конфиги самой VM, они также помещаются в `files/`. Например:
+Отдельного каталога `services/` нет: агенты, MCP, web-интерфейсы, Compose-файлы, исходный код и другие приложения — это такие же файлы целевой VM и поэтому размещаются под `rootfs/` по своим реальным путям.
+
+Если позже понадобятся системные конфиги самой VM, они также помещаются в `rootfs/`. Например:
 
 ```text
-files/etc/ssh/sshd_config.d/90-ai-control.conf
+rootfs/etc/ssh/sshd_config.d/90-ai-control.conf
 → /etc/ssh/sshd_config.d/90-ai-control.conf
 
-files/etc/docker/daemon.json
+rootfs/etc/docker/daemon.json
 → /etc/docker/daemon.json
 ```
 
@@ -129,7 +131,7 @@ Hermes и будущие агенты рассматриваются как ад
    → установить Docker и Compose
 
 3. SSH
-   → перенести нужные файлы из каталога соответствующего guest
+   → перенести нужное содержимое rootfs/ соответствующего guest
    → docker compose up -d
 
 4. SSH
@@ -148,7 +150,7 @@ Hermes и будущие агенты рассматриваются как ад
 guests/321-ha-test/
 ├── README.md
 ├── guest.yaml
-└── files/
+└── rootfs/
     └── opt/
         └── home-assistant/
             └── compose.yaml
