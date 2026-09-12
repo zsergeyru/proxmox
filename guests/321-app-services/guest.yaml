@@ -1,0 +1,10 @@
+schema_version: 1
+vmid: 321
+name: app-services
+type: lxc
+node: pve
+
+description: General application services including Homarr
+
+boot:
+  onboot: true
