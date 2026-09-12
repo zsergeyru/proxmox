@@ -15,6 +15,7 @@
 - маршрутизация remote-access клиентов в домашние сегменты;
 - IPv6 forwarding и DHCPv6 Prefix Delegation при включении IPv6;
 - Router Advertisement и IPv6 firewall для клиентских сегментов;
+- при необходимости mDNS reflector/repeater между явно разрешёнными сегментами;
 - health-check/watchdog.
 
 ## В Docker
@@ -23,6 +24,31 @@
 - SmartDNS.
 
 Маршрутизация, PBR и VPN принадлежат ОС VM, а не Docker networking.
+
+## DNS и mDNS
+
+Основной управляемый внутренний DNS-домен:
+
+```text
+home.arpa
+```
+
+Постоянные инфраструктурные имена должны использовать обычный DNS, например:
+
+```text
+pve.home.arpa
+ha.home.arpa
+mqtt.home.arpa
+apps.home.arpa
+```
+
+mDNS работает параллельно через специальный домен `.local` и используется прежде всего для автоматического обнаружения устройств. Критичные зависимости инфраструктуры не должны строиться только на mDNS.
+
+Поскольку mDNS обычно не маршрутизируется между VLAN, при необходимости обнаружения IOT-устройств из MAIN на `101-network-gateway` может быть включён reflector/repeater, например Avahi или эквивалент. Reflection включается только между нужными сегментами и с учётом firewall; без необходимости CAMERAS в такой reflection не включать.
+
+Remote-access VPN должен получать домашний DNS и разрешать `*.home.arpa`. Перенос mDNS через VPN не является обязательной частью базовой архитектуры.
+
+Полное решение описано в [`../../docs/dns.md`](../../docs/dns.md).
 
 ## Целевые сети
 
