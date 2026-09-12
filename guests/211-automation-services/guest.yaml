@@ -2,6 +2,7 @@ schema_version: 1
 vmid: 211
 name: automation-services
 type: lxc
+state: planned
 node: pve
 
 description: MQTT, Zigbee2MQTT and ESPHome infrastructure services
