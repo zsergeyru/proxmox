@@ -1,0 +1,10 @@
+schema_version: 1
+vmid: 311
+name: dev-services
+type: lxc
+node: pve
+
+description: Git, CI and development services
+
+boot:
+  onboot: true
