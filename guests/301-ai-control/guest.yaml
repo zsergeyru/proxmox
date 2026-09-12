@@ -2,6 +2,7 @@ schema_version: 1
 vmid: 301
 name: ai-control
 type: vm
+state: planned
 node: pve
 
 description: Target central AI infrastructure control plane
