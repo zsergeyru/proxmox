@@ -1,0 +1,23 @@
+schema_version: 1
+vmid: 101
+name: network-gateway
+type: vm
+node: pve
+
+description: Network gateway, DNS, VPN and policy routing
+
+resources:
+  cpu:
+    cores: 2
+  memory_mb: 2048
+  disk:
+    size_gb: 16
+    storage: local-lvm
+
+boot:
+  onboot: true
+
+management:
+  ssh:
+    user: infra-agent
+    port: 22
