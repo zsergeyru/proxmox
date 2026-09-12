@@ -2,6 +2,7 @@ schema_version: 1
 vmid: 401
 name: monitoring
 type: lxc
+state: planned
 node: pve
 
 description: Infrastructure monitoring services
