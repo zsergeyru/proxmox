@@ -2,6 +2,7 @@ schema_version: 1
 vmid: 201
 name: ha-main
 type: lxc
+state: planned
 node: pve
 
 description: Main Home Assistant for the new apartment
