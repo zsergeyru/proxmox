@@ -2,6 +2,7 @@ schema_version: 1
 vmid: 202
 name: ha-test
 type: lxc
+state: planned
 node: pve
 
 description: Test Home Assistant instance
