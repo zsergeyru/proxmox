@@ -2,6 +2,7 @@ schema_version: 1
 vmid: 101
 name: network-gateway
 type: vm
+state: planned
 node: pve
 
 description: Network gateway, DNS, VPN and policy routing
