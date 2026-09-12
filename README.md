@@ -17,7 +17,7 @@
 
 По умолчанию используется один monorepo `proxmox`. Конфигурация гостя, системные файлы, Docker Compose, скрипты и собственный инфраструктурный код хранятся рядом с соответствующим гостем. Отдельный Git-репозиторий создаётся только для действительно самостоятельного компонента с отдельным жизненным циклом.
 
-VM/LXC не обязаны клонировать весь репозиторий. Управляющий контур получает только описание нужного гостя и синхронизирует содержимое его `rootfs/` в корень `/` гостевой ОС.
+VM/LXC не обязаны клонировать весь репозиторий. Повторяемое применение конфигурации из `rootfs/` выполняется через Ansible на `311-dev-services` по SSH.
 
 ## Целевая карта гостей
 
@@ -31,7 +31,7 @@ VM/LXC не обязаны клонировать весь репозитори�
 | 203 | LXC | `ha-flat2` | Home Assistant второй квартиры при необходимости |
 | 211 | LXC | `automation-services` | MQTT, Zigbee2MQTT, ESPHome Dashboard |
 | 301 | VM | `ai-control` | целевой AI-контур управления инфраструктурой |
-| 311 | LXC | `dev-services` | Gitea/Gogs, Jenkins и DevOps-сервисы |
+| 311 | LXC | `dev-services` | Ansible, Semaphore, Git, CI/CD и DevOps-сервисы |
 | 321 | LXC | `app-services` | Homarr и прочие прикладные сервисы |
 | 331 | LXC | `ai-services` | общий STT/TTS API, Whisper и TTS |
 | 401 | LXC | `monitoring` | Uptime Kuma и стек мониторинга |
@@ -75,6 +75,26 @@ guests/101-network-gateway/rootfs/etc/nftables.conf
 
 Отдельных универсальных каталогов `files/` и `services/` у гостя нет. Приложения, Compose-файлы, MCP, агенты и системные конфиги размещаются внутри `rootfs/` по реальному пути назначения.
 
+## Управление и deploy
+
+Целевая схема:
+
+```text
+Proxmox MCP
+→ создание и lifecycle VM/LXC
+
+Ansible на 311-dev-services
+→ повторяемая настройка гостевых ОС и deploy rootfs через SSH
+
+прямой SSH из AI Control
+→ bootstrap, диагностика, разовые и аварийные действия
+
+Semaphore на 311-dev-services
+→ ручной web-интерфейс к Ansible для пользователя
+```
+
+Ansible и Semaphore не относятся к AI и не размещаются внутри `301-ai-control`. Подробное решение: [`guests/311-dev-services/decisions/001-deployment-tooling.md`](guests/311-dev-services/decisions/001-deployment-tooling.md).
+
 ## Источники истины
 
 При расхождении документов использовать такой приоритет:
@@ -97,6 +117,7 @@ guests/101-network-gateway/rootfs/etc/nftables.conf
 - [`docs/dns.md`](docs/dns.md) — `home.arpa`, локальный DNS, mDNS `.local` и reflection между VLAN.
 - [`docs/ipv6.md`](docs/ipv6.md) — dual stack и IPv6.
 - [`docs/apartment-infrastructure.md`](docs/apartment-infrastructure.md) — граница между этим репозиторием и проектом квартиры.
+- [`guests/311-dev-services/README.md`](guests/311-dev-services/README.md) — DevOps и deploy-контур.
 - [`guests/320-ai-control/README.md`](guests/320-ai-control/README.md) — текущий bootstrap Hermes/MCP.
 
 ## Общие правила
@@ -104,6 +125,8 @@ guests/101-network-gateway/rootfs/etc/nftables.conf
 - Git является источником истины для повторяемой конфигурации и собственного инфраструктурного кода;
 - на гостя разворачивается только его собственное содержимое `rootfs/`;
 - конфигурации других VM/LXC не копируются внутрь `ai-control`;
-- Ansible допускается как инструмент поверх SSH, но не является обязательным слоем;
-- отдельный deploy-MCP не требуется: Proxmox MCP управляет VM/LXC, SSH — содержимым гостевых ОС;
+- Ansible на `311-dev-services` является штатным механизмом повторяемого deploy внутри гостей поверх SSH;
+- прямой SSH сохраняется для bootstrap, диагностики, разовых и аварийных действий;
+- Semaphore — необязательный для автоматики web-интерфейс к Ansible;
+- отдельный deploy-MCP не требуется;
 - секреты, токены, пароли и приватные ключи в Git не добавляются.
