@@ -2,6 +2,7 @@ schema_version: 1
 vmid: 331
 name: ai-services
 type: lxc
+state: planned
 node: pve
 
 description: Shared STT and TTS services
