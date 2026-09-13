@@ -1,10 +1,6 @@
 # Базовый шаблон Debian 13 для Proxmox
 
-Статус: **политика template согласована; финальный скрипт ещё должен быть переписан под сборку без `virt-customize`**.
-
-> Старая версия `create-template.sh`, использовавшая `virt-customize/libguestfs-tools`, признана устаревшей. До её замены она не должна использоваться для создания template.
-
-## Назначение
+Статус: **скрипт сборки реализован**.
 
 Базовый template — универсальная основа для Linux VM в Proxmox:
 
@@ -16,15 +12,43 @@ OS: Debian 13 (Trixie)
 
 Рабочие VM по умолчанию создаются как **Full Clone**.
 
-Template содержит только общие настройки ОС и базовые утилиты. Docker, SmartDNS, VPN, Gitea, Jenkins, базы данных и другие прикладные роли устанавливаются после клонирования.
+## Источники истины
 
-## Документация
+- [`build-policy.md`](./build-policy.md) — политика сборки и базовых настроек;
+- [`users-and-keys.md`](./users-and-keys.md) — пользователи и SSH-ключи;
+- [`filesystem-layout.md`](./filesystem-layout.md) — файловая структура сервисов;
+- [`create-template.sh`](./create-template.sh) — фактическая автоматизированная сборка.
 
-- [`build-policy.md`](./build-policy.md) — окончательная политика сборки и базовых настроек;
-- [`users-and-keys.md`](./users-and-keys.md) — пользователи, SSH-ключи и backup ключей;
-- [`filesystem-layout.md`](./filesystem-layout.md) — назначение `/opt`, `/etc`, `/var/lib`, `/srv`, `/var/log`, `/var/cache`, `/run`, `/tmp`.
+## Что делает скрипт
 
-Эти документы являются источником истины для финальной версии скрипта.
+Сборка выполняется без `virt-customize` и без установки `libguestfs-tools` на Proxmox:
+
+```text
+официальный Debian 13 genericcloud image
+        ↓
+VMID 9000 builder-debian13
+        ↓
+временный Cloud-Init bootstrap
+        ↓
+apt update + full-upgrade
+базовые пакеты и настройки
+        ↓
+проверка через QEMU Guest Agent
+        ↓
+очистка machine-specific данных
+        ↓
+shutdown
+        ↓
+удаление builder-only Cloud-Init
+        ↓
+qm template
+        ↓
+tpl-debian13
+```
+
+Скрипт проверяет SHA-512 образа по официальному `SHA512SUMS` Debian.
+
+При ошибке существующая builder-VM **не удаляется автоматически**. Это сделано намеренно, чтобы можно было проверить console, Cloud-Init и логи. Существующий VMID `9000` скрипт никогда не перезаписывает.
 
 ## Базовые параметры
 
@@ -33,15 +57,16 @@ Template содержит только общие настройки ОС и б�
 | CPU | 1 vCPU, type `host` |
 | RAM | 1 GiB |
 | System disk | 16 GiB |
+| Storage | `local-lvm` по умолчанию |
 | Controller | VirtIO SCSI Single |
 | I/O thread | enabled |
 | Discard/TRIM | enabled |
-| SSD emulation | для SSD-backed storage |
+| SSD emulation | enabled |
 | Network | VirtIO, `vmbr0` |
+| Template network | DHCP |
 | Cloud-Init | да |
 | QEMU Guest Agent | да |
 | Serial console | да |
-| Template network | DHCP |
 | Admin user | `ops` |
 | Root SSH | запрещён |
 | Password SSH | запрещён |
@@ -50,59 +75,66 @@ Template содержит только общие настройки ОС и б�
 | Swap | не создаётся |
 | Template-Version | `1` |
 
-После клонирования для конкретной VM задаются hostname, IP, SSH public keys, CPU, RAM и при необходимости увеличивается диск.
+## Требования перед запуском
 
-## Сборка
-
-Принята схема без `virt-customize` и без установки `libguestfs-tools` на PVE-хост:
+На Proxmox должны быть доступны:
 
 ```text
-Debian genericcloud image
-        ↓
-временная builder-VM
-        ↓
-Cloud-Init/bootstrap внутри Debian
-        ↓
-apt update + apt full-upgrade
-установка пакетов и базовая настройка
-        ↓
-очистка machine-specific данных
-        ↓
-shutdown
-        ↓
-qm template
+qm
+pvesm
+sha512sum
+curl или wget
 ```
 
-Proxmox-хост должен оставаться максимально чистым.
+Storage `local` должен поддерживать content type **Snippets**, потому что custom Cloud-Init нужен только на время сборки builder-VM.
 
-## Пользователи и SSH
-
-Основной административный пользователь — `ops`, группы:
+Если `Snippets` выключен:
 
 ```text
-ops
-sudo
-adm
+Datacenter → Storage → local → Edit → Content → Snippets
 ```
 
-`root` как системная учётная запись Debian не удаляется, но удалённый вход для него полностью отключается:
+Скрипт сам не меняет конфигурацию storage.
+
+VMID `9000` должен быть свободен.
+
+## Запуск
+
+Репозиторий должен быть доступен на Proxmox-хосте. Затем:
+
+```bash
+cd /path/to/proxmox/templates/debian13
+chmod +x create-template.sh
+sudo ./create-template.sh
+```
+
+По умолчанию используются:
 
 ```text
-PermitRootLogin no
-PasswordAuthentication no
-PubkeyAuthentication yes
+VMID=9000
+DISK_STORAGE=local-lvm
+SNIPPET_STORAGE=local
+BRIDGE=vmbr0
+DISK_SIZE=16G
 ```
 
-Аварийный root-доступ остаётся через консоль Proxmox.
+При необходимости значения можно переопределить без изменения скрипта:
 
-SSH public keys передаются через Cloud-Init. Private keys в template не хранятся.
+```bash
+DISK_STORAGE=local-lvm BRIDGE=vmbr0 ./create-template.sh
+```
+
+URL cloud image тоже можно переопределить через `IMAGE_URL` и `CHECKSUM_URL`, но штатный сценарий использует latest Debian 13 Trixie genericcloud image.
 
 ## Базовые пакеты
+
+В template устанавливаются:
 
 ```text
 qemu-guest-agent
 openssh-server
 sudo
+locales
 
 git
 mc
@@ -137,135 +169,73 @@ cron
 logrotate
 ```
 
-Порядок размера самих перечисленных пакетов — около **110–120 MiB** без полного учёта зависимостей.
+Docker и прикладные сервисы в base template не устанавливаются.
 
-### Назначение групп пакетов
+## SSH и пользователь `ops`
 
-- `qemu-guest-agent`, `openssh-server`, `sudo` — управление VM и SSH;
-- `git`, `mc`, `nano`, `tree`, `acl`, `bash-completion` — администрирование файлов и конфигурации;
-- `curl`, `wget`, `jq`, `ca-certificates`, `openssl` — HTTP/API/TLS;
-- `htop`, `ncdu`, `lsof`, `tmux`, `cron`, `logrotate` — диагностика и обслуживание;
-- `dnsutils`, `iproute2`, `iputils-ping`, `net-tools` — сеть и DNS;
-- `tar`, `rsync`, `restic`, `zstd`, `unzip` — архивирование и backup.
-
-## Обновления
-
-При сборке нового template выполняются:
+В template создаётся пользователь `ops` с группами:
 
 ```text
-apt update
-apt full-upgrade
+adm
+sudo
 ```
 
-`unattended-upgrades` автоматически не включается. Рабочие VM обновляются контролируемо.
-
-## Время
-
-Timezone:
+SSH-политика:
 
 ```text
-Europe/Moscow
+PermitRootLogin no
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PubkeyAuthentication yes
 ```
 
-Синхронизация времени выполняется штатными средствами Debian/systemd.
+Private keys и постоянные пароли в template не записываются. Public key нужно передавать каждому клону через обычный Proxmox Cloud-Init.
 
-## Диск и swap
-
-Базовый диск:
-
-```text
-VirtIO SCSI Single
-16 GiB
-iothread=1
-discard=on
-```
-
-Для SSD-backed storage допускается `ssd=1`.
-
-Swap в base template не создаётся. При необходимости он добавляется конкретной VM.
-
-## Serial console
-
-Template должен иметь аварийную serial console:
-
-```text
-serial0
-vga: serial0
-```
-
-Она нужна для доступа к VM даже при проблемах с сетью или SSH.
+После завершения сборки custom builder user-data отключается. Клоны получают стандартный Proxmox Cloud-Init с `ciuser=ops` и DHCP по умолчанию.
 
 ## Очистка перед template
 
-Перед `qm template` очищаются:
+Перед `qm template` внутри builder выполняется очистка:
 
 - Cloud-Init state;
 - machine-id;
 - SSH host keys;
 - DHCP lease/state;
-- APT cache;
-- builder/bootstrap temporary files;
-- ненужные journal/logs процесса сборки.
+- random seed;
+- APT cache/lists;
+- временные файлы;
+- journal/build logs;
+- shell history процесса сборки.
 
-Каждый клон должен получить собственные machine-id и SSH host keys.
+Каждый клон должен сформировать собственные machine-id и SSH host keys.
 
-## Дополнительные базовые настройки
+## Проверка после сборки
 
-В template предусматриваются:
+Перед использованием template для инфраструктуры рекомендуется создать один тестовый **Full Clone** и проверить:
 
-- timestamp в shell history и увеличенный разумный history size;
-- короткий MOTD;
-- `/etc/vm-template-info`.
+1. загрузку VM;
+2. получение DHCP;
+3. создание нового machine-id;
+4. создание уникальных SSH host keys;
+5. вход `ops` по переданному public key;
+6. работу `sudo`;
+7. QEMU Guest Agent;
+8. serial console;
+9. корректный размер root filesystem после growpart/resize;
+10. содержимое `/etc/vm-template-info`.
 
-Пример `/etc/vm-template-info`:
-
-```text
-Template: tpl-debian13
-Template-Version: 1
-OS: Debian 13
-Source: zsergeyru/proxmox
-Build-Date: <actual build date>
-```
-
-## Backup
-
-На первом этапе схема простая:
-
-```text
-Proxmox backup → VM целиком
-restic/rsync   → отдельные файловые сценарии при необходимости
-Git            → код и конфигурации без секретов
-```
-
-Отдельный secret-backup пока не создаётся. Технические private keys, находящиеся внутри VM, резервируются вместе с полным backup VM.
+После этой проверки template можно использовать для `109-network-gateway`, `301-ai-control` и других Debian VM.
 
 ## Что не входит в base template
 
 Не устанавливаются заранее:
 
-- Docker Engine / Docker Compose;
+- Docker Engine / Compose;
 - SmartDNS / AdGuard Home;
-- `sing-box`;
-- AmneziaWG / другие VPN;
-- специальные `nftables`/policy-routing rules;
-- Gitea / Jenkins;
+- sing-box;
+- AmneziaWG и другие VPN;
+- специальные nftables/PBR rules;
+- Gitea/Jenkins;
 - базы данных;
 - reverse proxy;
-- service-specific users;
-- service-specific directories.
-
-При необходимости позднее можно сделать отдельный производный `tpl-debian13-docker`.
-
-## Требования к финальному `create-template.sh`
-
-1. Не использовать `virt-customize`.
-2. Не устанавливать `libguestfs-tools` на Proxmox.
-3. Создавать временную builder-VM.
-4. Выполнять bootstrap внутри Debian.
-5. Использовать `ops` и SSH key-only policy.
-6. Использовать `Europe/Moscow`.
-7. Включать QEMU Guest Agent, serial console, iothread и discard.
-8. Не создавать swap.
-9. Очищать machine-specific данные.
-10. Не удалять и не перезаписывать существующий VMID автоматически.
-11. После успешной подготовки превращать builder-VM в `tpl-debian13`.
+- service-specific users и directories.
