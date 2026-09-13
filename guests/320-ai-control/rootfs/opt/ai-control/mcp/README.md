@@ -6,22 +6,21 @@ MCP являются общими capabilities управляющего конт
 
 ## Proxmox
 
-Для общего Proxmox MCP принят:
+На `320-ai-control` уже установлен и принят как общий Proxmox MCP:
 
 ```text
-lidless-labs/proxmox-mcp
-@solomonneas/proxmox-mcp
+gordcurrie/proxmox-mcp
 ```
 
 Архитектурное решение и safety model описаны в [`../../../../decisions/003-proxmox-mcp.md`](../../../../decisions/003-proxmox-mcp.md).
 
-`proxmox-full`, установленный ранее как agent skill, не заменяет общий MCP backend и не является границей авторизации.
+Он выбран в том числе из-за HTTP transport: MCP работает как отдельный общий сервис для нескольких AI-агентов, а не как stdio-only процесс одного клиента.
 
 Базовое разделение ответственности:
 
 ```text
 Proxmox MCP
-→ управление уровнем виртуализации: VM/LXC, ресурсы, lifecycle, snapshots, backups
+→ управление уровнем виртуализации: VM/LXC, ресурсы, lifecycle, snapshots, backups, status/tasks
 
 Ansible на 311-dev-services
 → повторяемая конфигурация гостевых ОС и приложений
@@ -35,6 +34,18 @@ SSH
 
 `deploy-mcp` не является частью целевой архитектуры.
 
-Права общего Proxmox MCP определяются отдельным Proxmox API token и ACL согласно [`../../../../decisions/002-proxmox-permissions.md`](../../../../decisions/002-proxmox-permissions.md). Возможность MCP зарегистрировать некоторый tool не означает, что token должен иметь право выполнить соответствующую host-level операцию.
+### Безопасность
+
+По умолчанию destructive tools должны оставаться выключенными:
+
+```text
+PROXMOX_ALLOW_DESTRUCTIVE=false
+```
+
+Host-level write operations, особенно изменение сети PVE node, storage configuration, ACL/IAM, SDN и reboot/shutdown гипервизора, не входят в штатную зону AI control.
+
+Read-only host/network диагностика допустима. Возможность MCP предоставить какой-либо tool не означает, что API token должен иметь право его выполнить.
+
+Права общего Proxmox MCP определяются отдельным Proxmox API token и ACL согласно [`../../../../decisions/002-proxmox-permissions.md`](../../../../decisions/002-proxmox-permissions.md).
 
 Секреты, токены, пароли и приватные ключи в Git не добавлять.
