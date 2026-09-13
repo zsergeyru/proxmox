@@ -1,0 +1,38 @@
+schema_version: 1
+vmid: 109
+name: network-gateway
+type: vm
+state: planned
+node: pve
+
+description: Network gateway, DNS, VPN and policy routing
+
+resources:
+  cpu:
+    cores: 2
+  memory_mb: 2048
+  disk:
+    size_gb: 16
+    storage: local-lvm
+
+network:
+  bridge: vmbr0
+  current:
+    ipv4:
+      address: 192.168.1.9/16
+      gateway: 192.168.1.1
+  target:
+    ipv4:
+      address: 10.0.1.9/16
+      gateway: 10.0.0.1
+
+boot:
+  onboot: true
+
+management:
+  ssh:
+    user: ops
+    port: 22
+
+vm:
+  guest_agent: true
