@@ -142,6 +142,11 @@ def validate_guest_manifests() -> None:
         network = data.get("network") or {}
         ipv4 = network.get("ipv4") or {} if isinstance(network, dict) else {}
         address_text = ipv4.get("address") if isinstance(ipv4, dict) else None
+        gateway_text = ipv4.get("gateway") if isinstance(ipv4, dict) else None
+
+        if data["state"] == "planned" and not address_text:
+            fail(f"{rel}: planned guest must define network.ipv4.address")
+            continue
 
         if not address_text:
             continue
@@ -167,6 +172,8 @@ def validate_guest_manifests() -> None:
             expected = expected_management_ip(vmid)
             if address != expected:
                 fail(f"{rel}: management IP {address} does not match VMID rule, expected {expected}")
+            if gateway_text != "10.0.0.1":
+                fail(f"{rel}: target MAIN guest gateway must be '10.0.0.1', got {gateway_text!r}")
 
 
 def validate_secret_files(files: list[Path]) -> None:
