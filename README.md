@@ -13,120 +13,105 @@
 
 ## Основной принцип
 
-Репозиторий организован вокруг гостей Proxmox: всё, что относится к конкретной VM/LXC, хранится в `guests/<VMID>-<name>/`. Общие решения, правила и архитектура находятся в `docs/`.
+Репозиторий организован вокруг гостей Proxmox: всё, что относится к конкретной VM/LXC, хранится в `guests/<VMID>-<name>/`. Общие решения и архитектура находятся в `docs/`.
 
-По умолчанию используется один monorepo `proxmox`. Конфигурация гостя, системные файлы, Docker Compose, скрипты и собственный инфраструктурный код хранятся рядом с соответствующим гостем. Отдельный Git-репозиторий создаётся только для действительно самостоятельного компонента с отдельным жизненным циклом.
+Используется один основной monorepo `proxmox`. Отдельный Git-репозиторий создаётся только для действительно самостоятельного компонента с отдельным жизненным циклом.
 
-VM/LXC не обязаны клонировать весь репозиторий. Повторяемое применение конфигурации из `rootfs/` выполняется через Ansible на `311-dev-services` по SSH.
+VM/LXC не обязаны клонировать весь репозиторий. Повторяемое применение управляемых файлов выполняется Ansible на `311-dev-services` по SSH.
 
-## Целевая карта гостей
+## Текущая и целевая карта гостей
 
-Актуальная нумерация определяется только файлом [`docs/vmid-plan.md`](docs/vmid-plan.md).
+Актуальная нумерация определяется только [`docs/vmid-plan.md`](docs/vmid-plan.md).
 
-| ID | Тип | Имя | Назначение |
+| ID | Тип | Имя | Статус/назначение |
 |---:|---|---|---|
-| 101 | VM | `network-gateway` | DNS, VPN, PBR, routing, nftables |
-| 201 | LXC | `ha-main` | основной Home Assistant новой квартиры |
-| 202 | LXC | `ha-test` | тестовый Home Assistant |
-| 203 | LXC | `ha-flat2` | Home Assistant второй квартиры при необходимости |
-| 211 | LXC | `automation-services` | MQTT, Zigbee2MQTT, ESPHome Dashboard |
-| 301 | VM | `ai-control` | целевой AI-контур управления инфраструктурой |
-| 311 | LXC | `dev-services` | Ansible, Semaphore, Git, CI/CD и DevOps-сервисы |
-| 321 | LXC | `app-services` | Homarr и прочие прикладные сервисы |
-| 331 | LXC | `ai-services` | общий STT/TTS API, Whisper и TTS |
-| 401 | LXC | `monitoring` | Uptime Kuma и стек мониторинга |
-| 501 | VM/LXC | `frigate` | видеонаблюдение и детекция |
+| 100 | VM | `haos` | текущий production Home Assistant |
+| 101 | VM | `network-gateway` | DNS, VPN, PBR, remote-access VPN |
+| 201 | LXC | `ha-main` | только возможная будущая миграция с 100 |
+| 202 | LXC | `ha-test` | тестовый HA при необходимости |
+| 203 | LXC | `ha-flat2` | второй HA при необходимости |
+| 211 | LXC | `automation-services` | MQTT, Zigbee2MQTT, ESPHome |
+| 301 | VM | `ai-control` | целевой AI control plane |
+| 311 | LXC | `dev-services` | Ansible, Semaphore, Git/CI |
+| 320 | VM | `ai-control` | текущий bootstrap до перехода на 301 |
+| 321 | LXC | `app-services` | Homarr и прикладные сервисы |
+| 331 | LXC | `ai-services` | STT/TTS API |
+| 401 | LXC | `monitoring` | мониторинг при необходимости |
+| 501 | VM/LXC | `frigate` | видеонаблюдение после теста |
 
-Текущая production VM `100 HAOS` сохраняется как legacy-гость и описана в [`guests/100-haos/`](guests/100-haos/). `320-ai-control` сохраняется как текущий bootstrap-узел до развёртывания и проверки целевой `301-ai-control`. Существующие legacy/bootstrap VM не перенумеровываются только ради новой схемы.
+Запланированный VMID не означает, что гостя нужно создавать заранее. Рабочая VM `100 HAOS` не мигрирует только ради красивой нумерации.
 
-## Структура репозитория
+## Структура
 
 ```text
 proxmox/
 ├── README.md
-├── docs/                 # общая архитектура, правила и решения
-├── host/pve/             # конфигурация самого Proxmox-хоста
-├── guests/               # VM/LXC: паспорт гостя и дерево его файлов
-├── ansible/              # общие inventory, roles и playbooks
-├── scripts/              # повторяемые операции общего назначения
-├── templates/            # шаблоны VM/LXC и конфигураций
-└── archive/              # устаревшие материалы для истории
+├── docs/                 # общая архитектура и решения
+├── host/pve/             # фактическое состояние Proxmox-хоста
+├── guests/               # паспорта VM/LXC и управляемые файлы
+├── ansible/              # inventory, roles и playbooks
+├── scripts/              # общие повторяемые операции
+├── templates/            # базовые VM/LXC templates
+└── archive/              # устаревшие материалы
 ```
 
-Типовая структура гостя:
-
-```text
-guests/<VMID>-<name>/
-├── README.md
-├── guest.yaml
-├── decisions/            # при необходимости
-├── STATUS.md             # при необходимости
-└── rootfs/
-```
-
-`guest.yaml` описывает объект VM/LXC в Proxmox: VMID, тип, state, ресурсы, сеть, автозапуск и способ управления.
-
-`rootfs/` повторяет корневую файловую систему гостя. Например:
-
-```text
-guests/101-network-gateway/rootfs/etc/nftables.conf
-→ /etc/nftables.conf
-```
-
-Отдельных универсальных каталогов `files/` и `services/` у гостя нет. Приложения, Compose-файлы, MCP, агенты и системные конфиги размещаются внутри `rootfs/` по реальному пути назначения.
+Правила структуры гостя и `guest.yaml` находятся только в [`guests/README.md`](guests/README.md).
 
 ## Управление и deploy
 
-Целевая схема:
-
 ```text
 Proxmox MCP
-→ создание и lifecycle VM/LXC
+→ lifecycle VM/LXC
 
 Ansible на 311-dev-services
-→ повторяемая настройка гостевых ОС и deploy rootfs через SSH
+→ повторяемая настройка гостевых ОС по SSH
 
-прямой SSH из AI Control
-→ bootstrap, диагностика, разовые и аварийные действия
+прямой SSH
+→ bootstrap, диагностика и аварийные действия
 
-Semaphore на 311-dev-services
-→ ручной web-интерфейс к Ansible для пользователя
+Semaphore
+→ необязательный web-интерфейс к Ansible
 ```
 
-Ansible и Semaphore не относятся к AI и не размещаются внутри `301-ai-control`. Подробное решение: [`guests/311-dev-services/decisions/001-deployment-tooling.md`](guests/311-dev-services/decisions/001-deployment-tooling.md).
+Для Debian-инфраструктуры используется единый административный пользователь `ops`; отдельный `infra-agent` сейчас не вводится.
+
+## Сеть
+
+До переезда Keenetic остаётся edge-router, а `101-network-gateway` запускается в общей LAN.
+
+После переезда физический OpenWrt отвечает за WAN, VLAN, DHCP и базовый L3/firewall. `101` отвечает за SmartDNS, VPN/PBR, remote-access VPN и сопутствующие сетевые сервисы. Поэтому остановка Proxmox/101 не должна отключать базовый интернет и межсетевую маршрутизацию квартиры.
+
+Источник истины: [`docs/network.md`](docs/network.md).
 
 ## Источники истины
 
 При расхождении документов использовать такой приоритет:
 
-1. [`docs/vmid-plan.md`](docs/vmid-plan.md) — VMID/CTID и целевая карта гостей.
-2. [`guests/README.md`](guests/README.md) — формат `guest.yaml`, `rootfs/` и правила каталогов гостей.
-3. ADR в `guests/<guest>/decisions/` — принятые архитектурные решения конкретного гостя.
-4. README конкретного гостя — его назначение и эксплуатационные особенности.
-5. [`docs/architecture.md`](docs/architecture.md) — сводная архитектура без дублирования низкоуровневой конфигурации.
+1. [`docs/vmid-plan.md`](docs/vmid-plan.md) — VMID/CTID и management IP.
+2. [`guests/README.md`](guests/README.md) — формат `guest.yaml`, `rootfs/` и deploy.
+3. ADR в `guests/<guest>/decisions/` — принятые решения конкретного гостя.
+4. профильный документ в `docs/` (`network.md`, `dns.md`, `storage-and-backup.md` и т. п.).
+5. README конкретного гостя — его эксплуатационные особенности.
+6. [`docs/architecture.md`](docs/architecture.md) — сводка без дублирования деталей.
 
-Наблюдаемое текущее состояние хоста хранится в `host/pve/`, а временный observed drift конкретного гостя — в его `STATUS.md`.
+Наблюдаемое состояние PVE хранится в `host/pve/`, временный drift конкретного гостя — в его `STATUS.md`.
 
 ## Главные документы
 
-- [`docs/architecture.md`](docs/architecture.md) — сводная архитектура Proxmox-платформы.
-- [`docs/vmid-plan.md`](docs/vmid-plan.md) — правила VMID/CTID.
-- [`docs/ai-control.md`](docs/ai-control.md) — архитектура AI-управления.
-- [`docs/local-ai.md`](docs/local-ai.md) — локальные модели и inference.
-- [`docs/network.md`](docs/network.md) — сеть Proxmox и роль `network-gateway`.
-- [`docs/dns.md`](docs/dns.md) — `home.arpa`, локальный DNS, mDNS `.local` и reflection между VLAN.
-- [`docs/ipv6.md`](docs/ipv6.md) — dual stack и IPv6.
-- [`docs/apartment-infrastructure.md`](docs/apartment-infrastructure.md) — граница между этим репозиторием и проектом квартиры.
-- [`guests/311-dev-services/README.md`](guests/311-dev-services/README.md) — DevOps и deploy-контур.
-- [`guests/320-ai-control/README.md`](guests/320-ai-control/README.md) — текущий bootstrap Hermes/MCP.
+- [`docs/architecture.md`](docs/architecture.md) — сводная архитектура.
+- [`docs/vmid-plan.md`](docs/vmid-plan.md) — VMID/CTID и management IP.
+- [`docs/network.md`](docs/network.md) — IPv4/VLAN/VPN и граница OpenWrt ↔ 101.
+- [`docs/dns.md`](docs/dns.md) — SmartDNS, `home.arpa`, mDNS.
+- [`docs/ai-control.md`](docs/ai-control.md) — AI-управление.
+- [`docs/storage-and-backup.md`](docs/storage-and-backup.md) — backup, retention, RPO/RTO и restore-test.
+- [`templates/debian13/README.md`](templates/debian13/README.md) — базовый Debian 13 template.
 
 ## Общие правила
 
-- Git является источником истины для повторяемой конфигурации и собственного инфраструктурного кода;
-- на гостя разворачивается только его собственное содержимое `rootfs/`;
-- конфигурации других VM/LXC не копируются внутрь `ai-control`;
-- Ansible на `311-dev-services` является штатным механизмом повторяемого deploy внутри гостей поверх SSH;
-- прямой SSH сохраняется для bootstrap, диагностики, разовых и аварийных действий;
-- Semaphore — необязательный для автоматики web-интерфейс к Ansible;
-- отдельный deploy-MCP не требуется;
-- секреты, токены, пароли и приватные ключи в Git не добавляются.
+- Git — источник истины для повторяемой конфигурации и собственного инфраструктурного кода;
+- на гость разворачивается только его собственное содержимое `rootfs/`;
+- persistent data и секреты не являются `rootfs/`;
+- Ansible — штатный повторяемый deploy внутри Linux-гостей;
+- SSH сохраняется как базовый и аварийный административный канал;
+- отдельный универсальный deploy-MCP не требуется;
+- секреты, токены, пароли и private keys в Git не добавляются.
