@@ -4,12 +4,12 @@
 
 ## Назначение
 
-AI-агент должен уметь администрировать домашнюю инфраструктуру, а не только собственный контейнер.
+AI-агенты должны уметь администрировать домашнюю инфраструктуру, а не только собственный контейнер.
 
 Базовое разделение ответственности:
 
 ```text
-Proxmox MCP
+общий Proxmox MCP
 → создание и жизненный цикл VM/LXC, ресурсы, start/stop/reboot, snapshots и backups
 
 Ansible в 311-dev-services
@@ -24,21 +24,35 @@ Ansible в 311-dev-services
 
 Отдельный универсальный `deploy-mcp` не является частью целевой архитектуры.
 
-Решение по Ansible/Semaphore и простой модели `rootfs/` зафиксировано в [`../guests/311-dev-services/decisions/001-deployment-tooling.md`](../guests/311-dev-services/decisions/001-deployment-tooling.md). Исходная простая модель управления bootstrap-узла описана в [`../guests/320-ai-control/decisions/001-simple-management-model.md`](../guests/320-ai-control/decisions/001-simple-management-model.md). Точная матрица разрешённых и запрещённых Proxmox-операций Hermes зафиксирована в [`../guests/320-ai-control/decisions/002-proxmox-permissions.md`](../guests/320-ai-control/decisions/002-proxmox-permissions.md).
+Решение по Ansible/Semaphore и простой модели `rootfs/` зафиксировано в [`../guests/311-dev-services/decisions/001-deployment-tooling.md`](../guests/311-dev-services/decisions/001-deployment-tooling.md). Исходная простая модель управления bootstrap-узла описана в [`../guests/320-ai-control/decisions/001-simple-management-model.md`](../guests/320-ai-control/decisions/001-simple-management-model.md). Матрица Proxmox-прав управляющего контура зафиксирована в [`../guests/320-ai-control/decisions/002-proxmox-permissions.md`](../guests/320-ai-control/decisions/002-proxmox-permissions.md), а выбор общего Proxmox MCP — в [`../guests/320-ai-control/decisions/003-proxmox-mcp.md`](../guests/320-ai-control/decisions/003-proxmox-mcp.md).
 
 ## Размещение компонентов
 
 В `ai-control` находятся только компоненты AI-управляющего контура:
 
-- Hermes и другие AI-агенты;
+- Hermes, Agent Zero и другие AI-агенты;
 - Proxmox MCP и другие специализированные MCP;
 - Git/SSH/API-клиенты, необходимые агентам;
 - web/voice интерфейсы к агентам;
 - служебный код, относящийся непосредственно к AI-управлению инфраструктурой.
 
+Каталоги конкретных агентов разделены:
+
+```text
+/opt/ai-control/agents/hermes/
+/opt/ai-control/agents/agent-zero/
+/opt/ai-control/agents/<future-agent>/
+```
+
+Общие MCP не дублируются по агентам и размещаются в:
+
+```text
+/opt/ai-control/mcp/
+```
+
 Ansible и Semaphore не размещаются здесь как постоянные компоненты: это DevOps-инструменты `311-dev-services`.
 
-Общие сервисы не должны жить внутри `ai-control` только потому, что ими пользуется Hermes:
+Общие сервисы не должны жить внутри `ai-control` только потому, что ими пользуется один из агентов:
 
 - DNS/VPN/PBR → `109-network-gateway`;
 - MQTT/Zigbee2MQTT/ESPHome → `211-automation-services`;
@@ -50,12 +64,12 @@ Ansible и Semaphore не размещаются здесь как постоя�
 
 ## Типовой сценарий управления
 
-Для операции уровня виртуализации Hermes использует Proxmox MCP.
+Для операции уровня виртуализации AI-агент использует общий Proxmox MCP.
 
 Для повторяемого изменения внутри гостя целевой путь такой:
 
 ```text
-Hermes
+AI-агент
 → подготовить/изменить конфигурацию в Git
 → инициировать Ansible на 311-dev-services
 → Ansible подключается по SSH к нужному гостю
@@ -63,7 +77,7 @@ Hermes
 → проверяется результат
 ```
 
-Semaphore предназначен прежде всего для ручного запуска тех же Ansible-сценариев человеком и не является обязательным звеном между Hermes и Ansible.
+Semaphore предназначен прежде всего для ручного запуска тех же Ansible-сценариев человеком и не является обязательным звеном между AI-агентом и Ansible.
 
 Прямой SSH сохраняется: он нужен для первоначального bootstrap, диагностики, разовых операций и восстановления, когда стандартный deploy-сценарий ещё не готов или недоступен.
 
@@ -75,11 +89,11 @@ Semaphore предназначен прежде всего для ручного
 
 ## Права и модель защиты
 
-Агенту предоставляются достаточные административные права для поставленных задач, но граница проходит между управлением гостями и управлением самим PVE host.
+AI control получает достаточные административные права для поставленных задач, но граница проходит между управлением гостями и управлением самим PVE host.
 
-Hermes может полноценно управлять lifecycle выделенных VM/LXC в managed pool: создавать и клонировать, менять guest-level ресурсы, start/stop/reboot, делать snapshots/backups и выполнять другие разрешённые guest-level операции. При этом ему не выдаются права на изменение PVE host network, storage configuration, ACL, пользователей, API tokens, Datacenter/host firewall, SDN, сертификатов, PVE repositories или reboot/shutdown самого гипервизора.
+Разрешён lifecycle выделенных VM/LXC в managed pool: создавать и клонировать, менять guest-level ресурсы, start/stop/reboot, делать snapshots/backups и выполнять другие разрешённые guest-level операции. При этом management identity не получает права на изменение PVE host network, storage configuration, ACL, пользователей, API tokens, Datacenter/host firewall, SDN, сертификатов, PVE repositories или reboot/shutdown самого гипервизора.
 
-Защищённые объекты `100`, текущий bootstrap `320` и template `9000` на первом этапе не входят в обычную write-зону Hermes; для `9000` требуется read/clone-доступ без права изменения template.
+Защищённые объекты `100`, текущий bootstrap `320` и template `9000` на первом этапе не входят в обычную write-зону AI control; для `9000` требуется read/clone-доступ без права изменения template.
 
 Полная матрица и правила destructive actions определены в [`../guests/320-ai-control/decisions/002-proxmox-permissions.md`](../guests/320-ai-control/decisions/002-proxmox-permissions.md).
 
@@ -98,7 +112,7 @@ Hermes может полноценно управлять lifecycle выделе
 
 ## Текущий bootstrap и переход на 301
 
-`320-ai-control` используется для отработки Hermes, MCP, SSH-доступа и модели управления. Пока `311-dev-services` ещё не развёрнут, bootstrap-операции допустимо выполнять напрямую по SSH.
+`320-ai-control` используется для отработки AI agents, общего Proxmox MCP, SSH-доступа и модели управления. Пока `311-dev-services` ещё не развёрнут, bootstrap-операции допустимо выполнять напрямую по SSH.
 
 Переход выполняется поэтапно:
 
@@ -108,7 +122,7 @@ Hermes может полноценно управлять lifecycle выделе
 → Ansible становится штатным повторяемым deploy-механизмом
 → создаётся 301-ai-control
 → переносится воспроизводимая AI-конфигурация из Git
-→ проверяются Hermes, Proxmox MCP, прямой SSH и запуск deploy через 311
+→ проверяются AI agents, Proxmox MCP, прямой SSH и запуск deploy через 311
 → 301 становится основным control plane
 → 320 выводится из эксплуатации отдельным решением
 ```
