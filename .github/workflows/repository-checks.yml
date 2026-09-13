@@ -26,5 +26,11 @@ jobs:
       - name: Validate repository
         run: python scripts/validate_repo.py
 
+      - name: Validate shell syntax
+        run: |
+          while IFS= read -r -d '' file; do
+            bash -n "$file"
+          done < <(find . -type f -name '*.sh' -print0)
+
       - name: Check whitespace errors
         run: git diff --check
