@@ -13,7 +13,7 @@ lidless-labs/proxmox-mcp
 @solomonneas/proxmox-mcp
 ```
 
-Архитектурное решение и safety model описаны в [`../../../decisions/003-proxmox-mcp.md`](../../../decisions/003-proxmox-mcp.md).
+Архитектурное решение и safety model описаны в [`../../../../decisions/003-proxmox-mcp.md`](../../../../decisions/003-proxmox-mcp.md).
 
 `proxmox-full`, установленный ранее как agent skill, не заменяет общий MCP backend и не является границей авторизации.
 
@@ -35,6 +35,6 @@ SSH
 
 `deploy-mcp` не является частью целевой архитектуры.
 
-Права общего Proxmox MCP определяются отдельным Proxmox API token и ACL согласно [`../../../decisions/002-proxmox-permissions.md`](../../../decisions/002-proxmox-permissions.md). Возможность MCP зарегистрировать некоторый tool не означает, что token должен иметь право выполнить соответствующую host-level операцию.
+Права общего Proxmox MCP определяются отдельным Proxmox API token и ACL согласно [`../../../../decisions/002-proxmox-permissions.md`](../../../../decisions/002-proxmox-permissions.md). Возможность MCP зарегистрировать некоторый tool не означает, что token должен иметь право выполнить соответствующую host-level операцию.
 
 Секреты, токены, пароли и приватные ключи в Git не добавлять.
