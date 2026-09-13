@@ -12,5 +12,5 @@ boot:
 
 management:
   ssh:
-    user: infra-agent
+    user: ops
     port: 22
