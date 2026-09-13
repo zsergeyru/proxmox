@@ -7,5 +7,11 @@ node: pve
 
 description: MQTT, Zigbee2MQTT and ESPHome infrastructure services
 
+network:
+  bridge: vmbr0
+  ipv4:
+    address: 10.0.2.11/16
+    gateway: 10.0.0.1
+
 boot:
   onboot: true
