@@ -24,7 +24,7 @@ Ansible в 311-dev-services
 
 Отдельный универсальный `deploy-mcp` не является частью целевой архитектуры.
 
-Решение по Ansible/Semaphore и простой модели `rootfs/` зафиксировано в [`../guests/311-dev-services/decisions/001-deployment-tooling.md`](../guests/311-dev-services/decisions/001-deployment-tooling.md). Исходная простая модель управления bootstrap-узла описана в [`../guests/320-ai-control/decisions/001-simple-management-model.md`](../guests/320-ai-control/decisions/001-simple-management-model.md).
+Решение по Ansible/Semaphore и простой модели `rootfs/` зафиксировано в [`../guests/311-dev-services/decisions/001-deployment-tooling.md`](../guests/311-dev-services/decisions/001-deployment-tooling.md). Исходная простая модель управления bootstrap-узла описана в [`../guests/320-ai-control/decisions/001-simple-management-model.md`](../guests/320-ai-control/decisions/001-simple-management-model.md). Точная матрица разрешённых и запрещённых Proxmox-операций Hermes зафиксирована в [`../guests/320-ai-control/decisions/002-proxmox-permissions.md`](../guests/320-ai-control/decisions/002-proxmox-permissions.md).
 
 ## Размещение компонентов
 
@@ -40,7 +40,7 @@ Ansible и Semaphore не размещаются здесь как постоя�
 
 Общие сервисы не должны жить внутри `ai-control` только потому, что ими пользуется Hermes:
 
-- DNS/VPN/PBR → `101-network-gateway`;
+- DNS/VPN/PBR → `109-network-gateway`;
 - MQTT/Zigbee2MQTT/ESPHome → `211-automation-services`;
 - Ansible/Semaphore/Git/CI → `311-dev-services`;
 - Homarr и обычные приложения → `321-app-services`;
@@ -75,7 +75,13 @@ Semaphore предназначен прежде всего для ручного
 
 ## Права и модель защиты
 
-Агенту предоставляются достаточные административные права для поставленных задач. Не строится отдельная песочница для каждого типа операции только ради дополнительного слоя абстракции.
+Агенту предоставляются достаточные административные права для поставленных задач, но граница проходит между управлением гостями и управлением самим PVE host.
+
+Hermes может полноценно управлять lifecycle выделенных VM/LXC в managed pool: создавать и клонировать, менять guest-level ресурсы, start/stop/reboot, делать snapshots/backups и выполнять другие разрешённые guest-level операции. При этом ему не выдаются права на изменение PVE host network, storage configuration, ACL, пользователей, API tokens, Datacenter/host firewall, SDN, сертификатов, PVE repositories или reboot/shutdown самого гипервизора.
+
+Защищённые объекты `100`, текущий bootstrap `320` и template `9000` на первом этапе не входят в обычную write-зону Hermes; для `9000` требуется read/clone-доступ без права изменения template.
+
+Полная матрица и правила destructive actions определены в [`../guests/320-ai-control/decisions/002-proxmox-permissions.md`](../guests/320-ai-control/decisions/002-proxmox-permissions.md).
 
 Основная защита:
 
