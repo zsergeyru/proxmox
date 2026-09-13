@@ -15,10 +15,20 @@ resources:
     size_gb: 16
     storage: local-lvm
 
+network:
+  bridge: vmbr0
+  ipv4:
+    method: static
+    address: 192.168.1.32/16
+    gateway: 192.168.1.1
+
 boot:
   onboot: true
 
 management:
   ssh:
-    user: infra-agent
+    user: ops
     port: 22
+
+vm:
+  guest_agent: true
