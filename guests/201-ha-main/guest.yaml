@@ -7,5 +7,16 @@ node: pve
 
 description: Optional future Home Assistant migration target; current production is VM 100 HAOS
 
+network:
+  bridge: vmbr0
+  current:
+    ipv4:
+      address: 192.168.2.1/16
+      gateway: 192.168.1.1
+  target:
+    ipv4:
+      address: 10.0.2.1/16
+      gateway: 10.0.0.1
+
 boot:
   onboot: true

@@ -1,5 +1,5 @@
 schema_version: 1
-vmid: 101
+vmid: 109
 name: network-gateway
 type: vm
 state: planned
@@ -17,10 +17,14 @@ resources:
 
 network:
   bridge: vmbr0
-  ipv4:
-    method: static
-    address: 192.168.1.32/16
-    gateway: 192.168.1.1
+  current:
+    ipv4:
+      address: 192.168.1.9/16
+      gateway: 192.168.1.1
+  target:
+    ipv4:
+      address: 10.0.1.9/16
+      gateway: 10.0.0.1
 
 boot:
   onboot: true

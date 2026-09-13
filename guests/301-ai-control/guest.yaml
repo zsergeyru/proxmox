@@ -7,6 +7,17 @@ node: pve
 
 description: Target central AI infrastructure control plane
 
+network:
+  bridge: vmbr0
+  current:
+    ipv4:
+      address: 192.168.3.1/16
+      gateway: 192.168.1.1
+  target:
+    ipv4:
+      address: 10.0.3.1/16
+      gateway: 10.0.0.1
+
 boot:
   onboot: true
 

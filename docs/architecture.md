@@ -3,7 +3,7 @@
 Этот документ даёт только общую картину. Детали не дублируются здесь и берутся из профильных источников истины:
 
 - [`vmid-plan.md`](vmid-plan.md) — VMID/CTID и management IP;
-- [`network.md`](network.md) — сеть, VLAN, VPN и граница OpenWrt ↔ 101;
+- [`network.md`](network.md) — сеть, VLAN, VPN и граница OpenWrt ↔ 109;
 - [`../guests/README.md`](../guests/README.md) — `guest.yaml`, `rootfs` и deploy;
 - [`ai-control.md`](ai-control.md) — AI-контур;
 - [`storage-and-backup.md`](storage-and-backup.md) — backup и restore;
@@ -28,7 +28,7 @@ PVE остаётся максимально чистым гипервизоро�
 
 ```text
 100  VM       HAOS production
-101  VM       network-gateway
+109  VM       network-gateway
 201  LXC      optional HA migration target
 211  LXC      automation-services
 301  VM       target ai-control
@@ -50,7 +50,7 @@ MQTT/Zigbee2MQTT/ESPHome выносятся в `211-automation-services`, есл
 
 ## Network gateway
 
-`101-network-gateway` предоставляет:
+`109-network-gateway` предоставляет:
 
 - SmartDNS;
 - DoH/DoT;
@@ -59,7 +59,9 @@ MQTT/Zigbee2MQTT/ESPHome выносятся в `211-automation-services`, есл
 - remote-access VPN;
 - mDNS reflection при необходимости.
 
-После переезда физический OpenWrt отвечает за WAN, локальные VLAN, DHCP и базовый inter-VLAN firewall/L3. Поэтому отказ 101 или PVE не должен отключать обычный интернет и базовую маршрутизацию квартиры.
+После переезда физический OpenWrt отвечает за WAN, локальные VLAN, DHCP и базовый inter-VLAN firewall/L3. Поэтому отказ 109 или PVE не должен отключать обычный интернет и базовую маршрутизацию квартиры.
+
+VM 109 подчиняется общей адресной формуле: `192.168.1.9/16` в переходной сети и `10.0.1.9/16` в целевой.
 
 ## AI и DevOps
 
@@ -131,7 +133,7 @@ guests/<VMID>-<name>/
 
 VMID не задаёт порядок запуска. Startup order определяется по зависимостям.
 
-Важно: базовый доступ к PVE и базовая L3-сеть квартиры не должны зависеть от успешного запуска `101-network-gateway`, `311-dev-services` или `301-ai-control`.
+Важно: базовый доступ к PVE и базовая L3-сеть квартиры не должны зависеть от успешного запуска `109-network-gateway`, `311-dev-services` или `301-ai-control`.
 
 ## Граница с проектом квартиры
 

@@ -25,7 +25,7 @@ Schema version: `1`.
 
 ```yaml
 schema_version: 1
-vmid: 101
+vmid: 109
 name: network-gateway
 type: vm
 state: planned
@@ -60,27 +60,29 @@ resources:
 
 ### Сеть
 
-Пример DHCP:
+Для planned-гостей фиксируются сразу два состояния: текущая сеть и целевая сеть после миграции.
 
 ```yaml
 network:
   bridge: vmbr0
-  ipv4:
-    method: dhcp
+  current:
+    ipv4:
+      address: 192.168.3.21/16
+      gateway: 192.168.1.1
+  target:
+    ipv4:
+      address: 10.0.3.21/16
+      gateway: 10.0.0.1
 ```
 
-Пример статического management IP в MAIN:
+Обе адресации выводятся из VMID по единому правилу:
 
-```yaml
-network:
-  bridge: vmbr0
-  ipv4:
-    method: static
-    address: 10.0.3.21/16
-    gateway: 10.0.0.1
+```text
+current: VMID XYZ → 192.168.X.YZ/16
+target:  VMID XYZ → 10.0.X.YZ/16
 ```
 
-Переходные `192.168.x.x` допустимы до завершения миграции. Постоянная целевая адресация описана в [`../docs/network.md`](../docs/network.md).
+Это описание этапов миграции, а не требование одновременно иметь два default gateway. В работающей ОС default gateway должен быть один. Подробности — в [`../docs/network.md`](../docs/network.md).
 
 ### Управление
 
@@ -121,7 +123,7 @@ lxc:
 `rootfs/` повторяет абсолютные пути внутри гостя:
 
 ```text
-guests/101-network-gateway/rootfs/etc/nftables.conf
+guests/109-network-gateway/rootfs/etc/nftables.conf
 → /etc/nftables.conf
 
 guests/301-ai-control/rootfs/opt/ai-control/...

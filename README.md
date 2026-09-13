@@ -26,7 +26,7 @@ VM/LXC не обязаны клонировать весь репозитори�
 | ID | Тип | Имя | Статус/назначение |
 |---:|---|---|---|
 | 100 | VM | `haos` | текущий production Home Assistant |
-| 101 | VM | `network-gateway` | DNS, VPN, PBR, remote-access VPN |
+| 109 | VM | `network-gateway` | DNS, VPN, PBR, remote-access VPN |
 | 201 | LXC | `ha-main` | только возможная будущая миграция с 100 |
 | 202 | LXC | `ha-test` | тестовый HA при необходимости |
 | 203 | LXC | `ha-flat2` | второй HA при необходимости |
@@ -77,9 +77,9 @@ Semaphore
 
 ## Сеть
 
-До переезда Keenetic остаётся edge-router, а `101-network-gateway` запускается в общей LAN.
+До переезда Keenetic остаётся edge-router, а `109-network-gateway` запускается в общей LAN.
 
-После переезда физический OpenWrt отвечает за WAN, VLAN, DHCP и базовый L3/firewall. `101` отвечает за SmartDNS, VPN/PBR, remote-access VPN и сопутствующие сетевые сервисы. Поэтому остановка Proxmox/101 не должна отключать базовый интернет и межсетевую маршрутизацию квартиры.
+После переезда физический OpenWrt отвечает за WAN, VLAN, DHCP и базовый L3/firewall. `109` отвечает за SmartDNS, VPN/PBR, remote-access VPN и сопутствующие сетевые сервисы. Поэтому остановка Proxmox/109 не должна отключать базовый интернет и межсетевую маршрутизацию квартиры.
 
 Источник истины: [`docs/network.md`](docs/network.md).
 
@@ -100,7 +100,7 @@ Semaphore
 
 - [`docs/architecture.md`](docs/architecture.md) — сводная архитектура.
 - [`docs/vmid-plan.md`](docs/vmid-plan.md) — VMID/CTID и management IP.
-- [`docs/network.md`](docs/network.md) — IPv4/VLAN/VPN и граница OpenWrt ↔ 101.
+- [`docs/network.md`](docs/network.md) — IPv4/VLAN/VPN и граница OpenWrt ↔ 109.
 - [`docs/dns.md`](docs/dns.md) — SmartDNS, `home.arpa`, mDNS.
 - [`docs/ai-control.md`](docs/ai-control.md) — AI-управление.
 - [`docs/storage-and-backup.md`](docs/storage-and-backup.md) — backup, retention, RPO/RTO и restore-test.
