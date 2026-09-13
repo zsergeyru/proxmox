@@ -66,9 +66,56 @@ def planned_vmids() -> set[int]:
     return set(values)
 
 
-def expected_management_ip(vmid: int) -> ipaddress.IPv4Address:
+def expected_management_ip(vmid: int, stage: str) -> ipaddress.IPv4Address:
     text = f"{vmid:03d}"
-    return ipaddress.ip_address(f"10.0.{int(text[0])}.{int(text[1:])}")
+    third = int(text[0])
+    fourth = int(text[1:])
+    if stage == "current":
+        return ipaddress.ip_address(f"192.168.{third}.{fourth}")
+    if stage == "target":
+        return ipaddress.ip_address(f"10.0.{third}.{fourth}")
+    raise ValueError(f"unknown network stage: {stage}")
+
+
+def validate_stage_ip(
+    *,
+    rel: Path,
+    vmid: int,
+    stage: str,
+    network: dict,
+    static_ips: dict[ipaddress._BaseAddress, Path],
+) -> None:
+    stage_data = network.get(stage) or {}
+    ipv4 = stage_data.get("ipv4") or {} if isinstance(stage_data, dict) else {}
+    address_text = ipv4.get("address") if isinstance(ipv4, dict) else None
+    gateway_text = ipv4.get("gateway") if isinstance(ipv4, dict) else None
+
+    if not address_text:
+        fail(f"{rel}: planned guest must define network.{stage}.ipv4.address")
+        return
+
+    try:
+        interface = ipaddress.ip_interface(address_text)
+    except ValueError as exc:
+        fail(f"{rel}: invalid network.{stage}.ipv4.address {address_text!r}: {exc}")
+        return
+
+    address = interface.ip
+    if address in static_ips:
+        fail(f"duplicate static IP {address}: {static_ips[address]} and {rel}")
+    else:
+        static_ips[address] = rel
+
+    expected = expected_management_ip(vmid, stage)
+    if address != expected:
+        fail(f"{rel}: {stage} management IP {address} does not match VMID rule, expected {expected}")
+
+    expected_gateway = "192.168.1.1" if stage == "current" else "10.0.0.1"
+    if gateway_text != expected_gateway:
+        fail(
+            f"{rel}: {stage} gateway must be {expected_gateway!r}, "
+            f"got {gateway_text!r}"
+        )
 
 
 def validate_guest_manifests() -> None:
@@ -139,41 +186,19 @@ def validate_guest_manifests() -> None:
             if not ssh_user:
                 fail(f"{rel}: managed planned/bootstrap VM must define management.ssh.user")
 
-        network = data.get("network") or {}
-        ipv4 = network.get("ipv4") or {} if isinstance(network, dict) else {}
-        address_text = ipv4.get("address") if isinstance(ipv4, dict) else None
-        gateway_text = ipv4.get("gateway") if isinstance(ipv4, dict) else None
-
-        if data["state"] == "planned" and not address_text:
-            fail(f"{rel}: planned guest must define network.ipv4.address")
-            continue
-
-        if not address_text:
-            continue
-
-        try:
-            interface = ipaddress.ip_interface(address_text)
-        except ValueError as exc:
-            fail(f"{rel}: invalid network.ipv4.address {address_text!r}: {exc}")
-            continue
-
-        address = interface.ip
-        if address in static_ips:
-            fail(f"duplicate static IP {address}: {static_ips[address]} and {rel}")
-        else:
-            static_ips[address] = rel
-
-        if (
-            isinstance(vmid, int)
-            and vmid != 101
-            and isinstance(address, ipaddress.IPv4Address)
-            and address in ipaddress.ip_network("10.0.0.0/16")
-        ):
-            expected = expected_management_ip(vmid)
-            if address != expected:
-                fail(f"{rel}: management IP {address} does not match VMID rule, expected {expected}")
-            if gateway_text != "10.0.0.1":
-                fail(f"{rel}: target MAIN guest gateway must be '10.0.0.1', got {gateway_text!r}")
+        if data["state"] == "planned" and isinstance(vmid, int):
+            network = data.get("network") or {}
+            if not isinstance(network, dict):
+                fail(f"{rel}: network must be a mapping")
+                continue
+            for stage in ("current", "target"):
+                validate_stage_ip(
+                    rel=rel,
+                    vmid=vmid,
+                    stage=stage,
+                    network=network,
+                    static_ips=static_ips,
+                )
 
 
 def validate_secret_files(files: list[Path]) -> None:
