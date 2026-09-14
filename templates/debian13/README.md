@@ -16,7 +16,7 @@ Template-Version: 2
 ## Источники истины
 
 - [`build-policy.md`](./build-policy.md) — политика сборки и базовых настроек;
-- [`users-and-keys.md`](./users-and-keys.md) — пользователи и SSH-ключи;
+- [`users-and-keys.md`](./users-and-keys.md) — пользователи, SSH-ключи и доступ через Proxmox console;
 - [`filesystem-layout.md`](./filesystem-layout.md) — файловая структура сервисов;
 - [`create-template.sh`](./create-template.sh) — автоматизированная сборка.
 
@@ -34,6 +34,8 @@ VMID 9000 builder-debian13
 apt update + full-upgrade
 базовые пакеты и настройки
         ↓
+настройка tty1 autologin для ops
+        ↓
 проверка через QEMU Guest Agent
         ↓
 очистка machine-specific данных
@@ -50,7 +52,7 @@ qm template
 tpl-debian13
 ```
 
-Template **не содержит** личного SSH public key и **не содержит рабочего пароля `ops`**. При создании конкретной VM через Cloud-Init передаётся только нужный SSH public key; пароль `ops` остаётся заблокированным.
+Template **не содержит** личного SSH public key и **не содержит рабочего пароля `ops`**. При создании конкретной VM через Cloud-Init передаётся нужный SSH public key; пароль `ops` остаётся заблокированным.
 
 ## Базовые параметры
 
@@ -68,7 +70,9 @@ Template **не содержит** личного SSH public key и **не со�
 | Template network | DHCP |
 | Cloud-Init | да |
 | QEMU Guest Agent | да |
-| Serial console | да, для диагностики |
+| Proxmox display | `vga: std` |
+| Proxmox console | noVNC → `tty1` → autologin `ops` |
+| Serial console | `serial0: socket`, резервная диагностика |
 | Admin user | `ops` |
 | Root SSH | запрещён |
 | Password SSH | запрещён |
@@ -79,14 +83,14 @@ Template **не содержит** личного SSH public key и **не со�
 | Swap | не создаётся |
 | Template-Version | `2` |
 
-## Доступ к клонам
+## Модель доступа
 
-После создания Full Clone для конкретной VM через Cloud-Init задаются:
+Штатный удалённый доступ к VM:
 
 ```text
-User: ops
-SSH public key: ключ нужного административного устройства/роли
-Network: DHCP или статический IP
+SSH
+→ ops + private key на административном устройстве
+→ соответствующий public key передан VM через Cloud-Init
 ```
 
 SSH-политика:
@@ -98,17 +102,46 @@ KbdInteractiveAuthentication no
 PubkeyAuthentication yes
 ```
 
-Итоговая модель доступа:
+Пароля у `ops` нет: его password остаётся locked.
+
+### Доступ через Proxmox Web UI
+
+Для обычной кнопки **Console** в Proxmox используется стандартный виртуальный VGA-дисплей:
 
 ```text
-SSH
-→ ops + private key на компьютере
-→ соответствующий public key передан VM через Cloud-Init
+vga: std
 ```
 
-Пароль для `ops` не создаётся. Serial console Proxmox сохраняется для просмотра загрузки и диагностики, но штатного парольного login через неё нет. Для аварийных действий при доступном QEMU Guest Agent используется `qm guest exec`; если недоступны и сеть, и Guest Agent — recovery/single-user сценарий Proxmox.
+Внутри Debian на `tty1` настроен автоматический вход:
 
-Сам template остаётся без персональных credentials.
+```text
+Proxmox Web UI
+→ VM → Console
+→ noVNC
+→ tty1
+→ autologin ops
+→ shell
+```
+
+Это **не пустой пароль** и не единый пароль между Proxmox и Debian. Linux получает уже аутентифицированного пользователя `ops` через настройку `agetty --autologin`. Пароль `ops` по-прежнему заблокирован.
+
+Доверенной границей считается сам доступ к Proxmox console. Пользователь, которому разрешено открыть console этой VM в Proxmox, фактически получает shell `ops`. Поскольку `ops` имеет `NOPASSWD: sudo`, такой console-доступ эквивалентен административному доступу к гостевой VM.
+
+`serial0` сохраняется отдельно как резервный диагностический канал. На `serial0` autologin не настраивается.
+
+## Cloud-Init конкретного клона
+
+После Full Clone для конкретной VM задаются:
+
+```text
+ciuser = ops
+sshkeys = один или несколько public keys
+ipconfig0 = DHCP или статический адрес
+```
+
+При необходимости также задаются hostname, DNS и другие параметры первого запуска.
+
+`cipassword` в штатном deploy-сценарии **не используется**.
 
 ## Требования перед запуском
 
@@ -201,7 +234,13 @@ adm
 sudo
 ```
 
-Пароль `ops` остаётся заблокированным как в template, так и в обычных клонах. Cloud-Init конкретного клона добавляет только SSH public keys.
+и правом:
+
+```text
+ALL=(ALL) NOPASSWD:ALL
+```
+
+Пароль `ops` остаётся заблокированным как в template, так и в обычных клонах. Для SSH Cloud-Init добавляет только public keys. Для `tty1` используется локальный autologin.
 
 `root` как системная учётная запись Debian сохраняется, но прямой SSH-login root запрещён.
 
@@ -230,12 +269,14 @@ sudo
 2. получение сети;
 3. новый machine-id;
 4. уникальные SSH host keys;
-5. вход `ops` по SSH-ключу;
-6. `sudo`;
-7. QEMU Guest Agent;
-8. serial console как диагностический канал;
-9. размер root filesystem;
-10. `/etc/vm-template-info`.
+5. `VM → Console` открывает noVNC и автоматически даёт shell `ops` на `tty1`;
+6. пароль `ops` по-прежнему заблокирован;
+7. вход `ops` по SSH-ключу;
+8. `sudo` без пароля;
+9. QEMU Guest Agent;
+10. `serial0` как резервный диагностический канал;
+11. размер root filesystem;
+12. `/etc/vm-template-info`.
 
 ## Что не входит в base template
 
