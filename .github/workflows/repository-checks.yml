@@ -24,7 +24,10 @@ jobs:
           python-version: "3.12"
 
       - name: Apply Proximo migration
-        run: python scripts/standardize_proximo.py
+        run: |
+          cp scripts/standardize_proximo.py /tmp/standardize_proximo.py
+          rm scripts/standardize_proximo.py
+          python /tmp/standardize_proximo.py
 
       - name: Install validation dependency
         run: python -m pip install --disable-pip-version-check PyYAML==6.0.2
@@ -41,9 +44,8 @@ jobs:
       - name: Check whitespace errors
         run: git diff --check
 
-      - name: Show MCP references
-        run: |
-          git grep -n -E 'Proxmox MCP|Proximo MCP|proximo@pve|gordcurrie/proxmox-mcp|ai-agent@pve!proximo' -- ':!archive/**' || true
+      - name: Show Proximo references
+        run: git grep -n -E 'Proximo MCP|proximo@pve|proximo-proxmox' -- ':!archive/**' || true
 
       - name: Commit migration
         run: |
