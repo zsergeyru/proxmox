@@ -40,11 +40,11 @@ deploy/create 301
 → Hermes + Dashboard
 ```
 
-Полная спецификация инициализации PVE: [`pve-initialization.md`](./pve-initialization.md).
+Полная спецификация инициализации PVE: [`20-pve-initialization.md`](./20-pve-initialization.md).
 
-Спецификация manifests: [`guest-manifest.md`](./guest-manifest.md).
+Спецификация manifests: [`30-guest-manifest.md`](./30-guest-manifest.md).
 
-Спецификация AI Control: [`ai-control-bootstrap.md`](./ai-control-bootstrap.md).
+Спецификация AI Control: [`51-ai-control-bootstrap.md`](./51-ai-control-bootstrap.md).
 
 ## Почему Git на PVE допустим
 
