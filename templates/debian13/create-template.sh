@@ -6,9 +6,13 @@ set -Eeuo pipefail
 # through temporary Cloud-Init user-data, finalized through QEMU Guest Agent,
 # and then converted to a Proxmox template.
 #
-# The template contains no personal SSH public key and no usable ops password.
-# Each clone receives its SSH public key through normal Proxmox Cloud-Init.
-# Password-based access is not part of the standard deployment model.
+# Access model:
+#   - ops has no usable password;
+#   - SSH password authentication is disabled;
+#   - SSH public keys are supplied per clone through Proxmox Cloud-Init;
+#   - tty1 uses autologin for ops and is exposed through the trusted Proxmox
+#     noVNC console;
+#   - serial0 remains available as a diagnostic channel without autologin.
 
 VMID="${VMID:-9000}"
 TEMPLATE_NAME="${TEMPLATE_NAME:-tpl-debian13}"
@@ -156,6 +160,14 @@ write_files:
       KbdInteractiveAuthentication no
       PubkeyAuthentication yes
 
+  - path: /etc/systemd/system/getty@tty1.service.d/autologin.conf
+    owner: root:root
+    permissions: '0644'
+    content: |
+      [Service]
+      ExecStart=
+      ExecStart=-/sbin/agetty --autologin ops --noclear %I $TERM
+
   - path: /etc/profile.d/99-admin-history.sh
     owner: root:root
     permissions: '0644'
@@ -198,9 +210,11 @@ write_files:
       timedatectl set-timezone Europe/Moscow
       timedatectl set-ntp true || true
 
+      systemctl daemon-reload
       systemctl enable --now qemu-guest-agent
       systemctl enable ssh
       systemctl restart ssh
+      systemctl enable getty@tty1.service
       systemctl enable serial-getty@ttyS0.service || true
 
       if id debian >/dev/null 2>&1; then
@@ -260,7 +274,7 @@ qm create "$VMID" \
     --scsihw virtio-scsi-single \
     --net0 "virtio,bridge=${BRIDGE}" \
     --serial0 socket \
-    --vga serial0 \
+    --vga std \
     --agent 1 \
     --onboot 0
 
@@ -298,7 +312,7 @@ qm set "$VMID" --delete cicustom
 qm set "$VMID" --ciuser ops
 qm set "$VMID" --ipconfig0 ip=dhcp
 qm set "$VMID" --name "$TEMPLATE_NAME"
-qm set "$VMID" --description "Debian 13 (Trixie) base template; version ${TEMPLATE_VERSION}; SSH public keys supplied per clone through Cloud-Init"
+qm set "$VMID" --description "Debian 13 (Trixie) base template; version ${TEMPLATE_VERSION}; Proxmox tty1 autologin; SSH keys supplied per clone"
 
 rm -f "$SNIPPET_PATH"
 trap - ERR
@@ -316,9 +330,10 @@ Version: ${TEMPLATE_VERSION}
 Storage: ${DISK_STORAGE}
 Network: DHCP by default
 User:    ops (password locked)
-Console: diagnostic only; no standard password login
+Console: Proxmox noVNC / tty1 autologin as ops
+Serial:  serial0 kept as a diagnostic channel without autologin
 SSH:     inject one or more public keys on each clone through Cloud-Init
 
 Recommended next step: create a FULL clone, configure its SSH public key through
-Cloud-Init, then verify boot, QEMU Guest Agent, serial console output and SSH access.
+Cloud-Init, then verify noVNC tty1 autologin, QEMU Guest Agent and SSH access.
 EOF
