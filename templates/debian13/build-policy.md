@@ -1,7 +1,7 @@
 # Политика сборки и базовой настройки `tpl-debian13`
 
 ```text
-Template-Version: 2
+Template-Version: 3
 ```
 
 ## 1. Proxmox-хост остаётся чистым
@@ -67,14 +67,15 @@ PubkeyAuthentication yes
 
 ## 5. Доверенная Proxmox console
 
-Основная консоль VM:
+Начиная с v3 основная VM console — текстовая serial-консоль:
 
 ```text
-vga: std
-noVNC → tty1
+serial0: socket
+vga: serial0
+Proxmox xterm.js → ttyS0
 ```
 
-На `tty1` используется:
+На `ttyS0` используется:
 
 ```text
 agetty --autologin ops
@@ -82,13 +83,7 @@ agetty --autologin ops
 
 Пароль при этом не разблокируется. Право Proxmox `VM.Console` для такой VM следует считать административным доступом к гостевой ОС, поскольку `ops` может выполнять `sudo` без пароля.
 
-Дополнительно сохраняется:
-
-```text
-serial0: socket
-```
-
-На `serial0` autologin не включается.
+Специальный autologin на `tty1` в v3 не настраивается.
 
 ## 6. Cloud-Init lifecycle
 
@@ -197,7 +192,7 @@ base size: 16 GiB
 - `/usr/local/sbin/template-bootstrap`;
 - `/usr/local/sbin/template-finalize`.
 
-Настройки `tty1` autologin, SSH hardening, sudo policy, timesync и fstrim являются частью base template и не удаляются.
+Настройки serial0/xterm.js autologin, SSH hardening, sudo policy, timesync и fstrim являются частью base template и не удаляются.
 
 ## 13. Информация о происхождении
 
@@ -207,7 +202,8 @@ base size: 16 GiB
 Template: tpl-debian13
 Template-Version: <TEMPLATE_VERSION>
 OS: Debian 13
-Source: zsergeyru/proxmox
+Infrastructure-Source: zsergeyru/proxmox
+Bootstrap-Source: zsergeyru/proxmox-bootstrap
 Source-Image: <image filename>
 Source-Image-SHA512: <sha512>
 Build-Date: <UTC date>
@@ -222,7 +218,7 @@ Build-Date: <UTC date>
 ```text
 template: 1
 protection: 1
-vga: std
+vga: serial0
 serial0: socket
 ciupgrade: 0
 ```
