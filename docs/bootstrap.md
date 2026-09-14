@@ -66,6 +66,18 @@ GitHub token в этом сценарии не нужен.
 
 Приватная executable-копия специально не хранится.
 
+## Проверка в GitHub Actions
+
+CI публичного репозитория проверяет:
+
+- внешний `create-template.sh` через `bash -n`;
+- встроенный Cloud-Init как YAML;
+- встроенный `/usr/local/sbin/template-bootstrap` через `bash -n`;
+- встроенный `/usr/local/sbin/template-finalize` через `bash -n`;
+- whitespace errors.
+
+CI ловит ошибки структуры heredoc/YAML и синтаксиса вложенных guest-скриптов, но не заменяет реальный clean build на PVE.
+
 ## Security boundary
 
 `proxmox-bootstrap` публичный. В него запрещено помещать пароли/PIN, PAT/API tokens, приватные SSH/VPN/TLS ключи, реальные `.env`, credentials сервисов и иные нежелательные для публикации данные.
@@ -131,8 +143,13 @@ regular amd64 kernel → fb0 = 1280,800
 3. настраивает `Fixed 8x16`;
 4. удаляет `linux-image-*cloud-amd64`;
 5. перезагружает builder;
-6. проверяет, что реально загружено обычное ядро, framebuffer равен `1280,800`, QEMU Guest Agent отвечает, `tty1` и `ttyS0` активны;
-7. только после этого выполняет final cleanup и создаёт template.
+6. проверяет, что реально загружено обычное ядро, `fb0` существует и сообщает валидное непустое разрешение, QEMU Guest Agent отвечает, `tty1` и `ttyS0` активны;
+7. проверяет locked-пароли `ops`/`root` и эффективную SSH policy;
+8. только после этого выполняет final cleanup и создаёт template.
+
+Конкретное разрешение framebuffer не зашито как требование. На текущем PVE экспериментально получено `1280,800`; builder выводит фактическое значение в итоговом отчёте.
+
+После создания template дополнительно проверяются `template=1`, `protection=1`, `agent=1`, `vga=std`, `serial0=socket`, `ciuser=ops`, `ciupgrade=0`, DHCP и отсутствие builder-only `cicustom`.
 
 Таким образом, проверяется не только наличие пакетов на диске, но и фактическая загрузка VM с нужным ядром и console stack.
 
