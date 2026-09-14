@@ -16,7 +16,7 @@ Template-Version: 4
 
 ## 3. Ядро и VGA console
 
-Исходный genericcloud image содержит `cloud-amd64` kernel. На наших VM он даёт VGA text mode без framebuffer, из-за чего noVNC показывает слишком крупный текст.
+Исходный genericcloud image содержит `cloud-amd64` kernel. На наших VM он не создавал framebuffer, из-за чего noVNC показывал крупный VGA text mode.
 
 Поэтому v4 во время bootstrap:
 
@@ -41,15 +41,15 @@ FONTSIZE="8x16"
 
 ```text
 uname -r → обычный *-amd64 kernel, без cloud
-/sys/class/graphics/fb0/virtual_size → 1280,800
+/sys/class/graphics/fb0/virtual_size существует и содержит непустое WIDTH,HEIGHT
 QEMU Guest Agent отвечает
 getty@tty1 active
 serial-getty@ttyS0 active
 ```
 
-Это не косметическая настройка: verification reboot гарантирует, что template реально загружается с тем ядром и VGA-режимом, которые будут использовать клоны.
+Конкретное разрешение framebuffer не фиксируется как обязательное. На текущем PVE фактически получено `1280x800`; скрипт записывает реально обнаруженное значение в итоговый отчёт.
 
-## 4. Базовый пользователь
+## 4. Базовый пользователь и root
 
 Основной административный пользователь:
 
@@ -66,9 +66,11 @@ Sudo policy:
 ops ALL=(ALL:ALL) NOPASSWD:ALL
 ```
 
-Пароль `ops` остаётся locked. Пустой пароль не используется.
+Пароль `ops` остаётся locked. Пароль `root` также явно блокируется через `passwd -l root` и проверяется перед завершением bootstrap. Пустые пароли не используются.
 
 ## 5. SSH
+
+SSH policy:
 
 ```text
 PermitRootLogin no
@@ -84,31 +86,40 @@ PubkeyAuthentication yes
 /etc/ssh/sshd_config.d/00-template-security.conf
 ```
 
-Конфигурация проверяется через `sshd -t`. Персональных SSH-ключей в base template нет; public key задаётся конкретному клону через Cloud-Init до первого запуска.
+Builder выполняет две проверки:
+
+```text
+sshd -t                         → синтаксис
+sshd -T -C user=ops,...         → эффективные параметры
+```
+
+Сборка прерывается, если эффективная конфигурация не подтверждает запрет root/password/kbd-interactive/empty-password и разрешение public-key authentication.
+
+Персональных SSH-ключей в base template нет; public key задаётся конкретному клону через Cloud-Init до первого запуска.
 
 ## 6. Доверенная Proxmox console
 
-Начиная с v4 штатная Web Console снова использует обычный VGA/noVNC:
+Основная Web Console:
 
 ```text
 vga: std
 Proxmox Console → noVNC/VGA → tty1 → autologin ops
 ```
 
-Autologin `tty1` задаётся через:
+Autologin `tty1`:
 
 ```text
 /etc/systemd/system/getty@tty1.service.d/autologin.conf
 ```
 
-Параллельно сохраняется резервная serial-консоль:
+Резервная serial-консоль:
 
 ```text
 serial0: socket
 xterm.js / qm terminal → ttyS0 → autologin ops
 ```
 
-Её override:
+Override:
 
 ```text
 /etc/systemd/system/serial-getty@ttyS0.service.d/autologin.conf
@@ -160,9 +171,30 @@ Full Clone
 
 Template `9000` остаётся `protection=1`. Proxmox может перенести protection в конфигурацию клона, поэтому deploy-сценарий/AI-агент обязан явно выставлять `protection=0`, если паспорт конкретной VM не требует защиты.
 
-Linked Clone не используется для обычных рабочих VM. Если инструмент автоматизации утверждает, что создал Full Clone, результат следует проверять по Proxmox task log или LVM `Origin`: у основного диска Full Clone поле `Origin` должно быть пустым.
+Linked Clone не используется для обычных рабочих VM. Результат клонирования проверяется по Proxmox task log или LVM `Origin`: у основного диска Full Clone поле `Origin` должно быть пустым.
 
-## 9. Обновления
+## 9. Базовые пакеты
+
+В base template оставляем универсальный набор администрирования и диагностики:
+
+```text
+qemu-guest-agent openssh-server sudo locales cloud-guest-utils systemd-timesyncd
+linux-image-amd64 console-setup console-setup-linux
+git mc nano
+curl wget jq ca-certificates openssl
+htop ncdu lsof tree tmux bash-completion
+tar rsync zstd unzip acl
+dnsutils iproute2 iputils-ping net-tools
+cron logrotate
+```
+
+`wget` и `net-tools` намеренно оставлены: они небольшие и удобны при ручной диагностике/аварийном администрировании.
+
+`restic` удалён из base template: backup-клиент нужен не каждой VM и устанавливается только там, где действительно используется guest-level backup.
+
+Docker/Compose и прикладные сервисы в base template не устанавливаются.
+
+## 10. Обновления
 
 Builder выполняет:
 
@@ -173,7 +205,7 @@ apt full-upgrade
 
 Template получает актуальные пакеты на дату сборки. Автоматический package upgrade клонов через Cloud-Init выключен (`ciupgrade=0`). `unattended-upgrades` автоматически не включается.
 
-## 10. Время
+## 11. Время
 
 Устанавливается и включается `systemd-timesyncd`.
 
@@ -182,7 +214,7 @@ Timezone: Europe/Moscow
 Locale: en_US.UTF-8
 ```
 
-## 11. Диск, growpart и TRIM
+## 12. Диск, growpart и TRIM
 
 ```text
 Controller: VirtIO SCSI Single
@@ -194,11 +226,11 @@ base size: 16 GiB
 
 В template установлен `cloud-guest-utils`, чтобы root partition/filesystem клона расширялись после увеличения виртуального диска. Включён `fstrim.timer`; перед финальным shutdown выполняется `fstrim -av`.
 
-## 12. QEMU Guest Agent
+## 13. QEMU Guest Agent
 
 `qemu-guest-agent` обязателен. Он используется для build lifecycle, shutdown, status/IP, guest exec и диагностики. После verification reboot builder обязан снова ответить на QGA ping; иначе template не создаётся.
 
-## 13. Очистка machine-specific данных
+## 14. Очистка machine-specific данных
 
 Перед `qm template` удаляются:
 
@@ -217,7 +249,7 @@ base size: 16 GiB
 
 Настройки VGA/noVNC tty1 autologin, serial0 fallback, console font, SSH hardening, sudo policy, timesync и fstrim являются частью base template и не удаляются.
 
-## 14. Информация о происхождении
+## 15. Информация о происхождении
 
 `/etc/vm-template-info` содержит как минимум:
 
@@ -235,21 +267,37 @@ Source-Image-SHA512: <sha512>
 Build-Date: <UTC date>
 ```
 
-## 15. Финальные проверки
+## 16. Финальные проверки
 
 Перед успешным завершением builder проверяет конфигурацию template:
 
 ```text
 template: 1
 protection: 1
+agent: 1
 vga: std
 serial0: socket
+ciuser: ops
 ciupgrade: 0
+ipconfig0: ip=dhcp
+cicustom: отсутствует
 ```
 
 Builder-only Cloud-Init не должен остаться в стандартном Cloud-Init drive.
 
-## 16. Защита template и клонов
+## 17. CI канонического builder
+
+GitHub Actions в `zsergeyru/proxmox-bootstrap` проверяет:
+
+1. внешний `create-template.sh` через `bash -n`;
+2. встроенный Cloud-Init как YAML;
+3. извлечённый `/usr/local/sbin/template-bootstrap` через `bash -n`;
+4. извлечённый `/usr/local/sbin/template-finalize` через `bash -n`;
+5. whitespace errors.
+
+CI не заменяет реальный clean build на PVE, но ловит ошибки структуры heredoc/YAML и синтаксиса вложенных guest-скриптов до запуска на сервере.
+
+## 18. Защита template и клонов
 
 Base template VMID `9000`:
 
@@ -265,10 +313,10 @@ protection=0
 
 Защита включается на конкретной VM только по явному решению.
 
-## 17. Поведение при ошибке
+## 19. Поведение при ошибке
 
 Скрипт никогда автоматически не уничтожает существующую VM или storage. При ошибке builder сохраняется для диагностики. `trap ERR` остаётся активным до успешного `qm template`, включения protection и финальных проверок.
 
-## 18. Что не входит в base template
+## 20. Что не входит в base template
 
-Не устанавливаются заранее Docker/Compose, SmartDNS, AdGuard Home, sing-box, VPN, специальные nftables/PBR rules, Gitea/Jenkins, базы данных, reverse proxy и service-specific users/directories.
+Не устанавливаются заранее Docker/Compose, SmartDNS, AdGuard Home, sing-box, VPN, специальные nftables/PBR rules, Gitea/Jenkins, базы данных, reverse proxy, backup-клиенты вроде `restic` и service-specific users/directories.
