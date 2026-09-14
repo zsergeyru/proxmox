@@ -2,9 +2,9 @@
 
 ## Статус
 
-Политика общего bootstrap **снята с канонического статуса и будет спроектирована заново**.
+Политика общего bootstrap снята с канонического статуса и будет спроектирована заново.
 
-Сейчас этот документ фиксирует только требования, которые остаются актуальны для действующего `create-template.sh`.
+Для действующего template также отказались от избыточной схемы с pinned Debian build, отдельным version lock и `snapshot.debian.org`.
 
 ## Template
 
@@ -14,47 +14,57 @@
 zsergeyru/proxmox-bootstrap/create-template.sh
 ```
 
-Текущая реализация Template-Version 5 использует:
+Текущая версия:
 
 ```text
-Debian cloud build: 20260601-2496
-build-time APT snapshot: 20260914T000000Z
-SHA-512 verification исходного image
+Template-Version: 4
 ```
 
-После build обычные Debian repositories восстанавливаются, поэтому будущие clones не остаются привязаны к build snapshot.
-
-Такой подход пока сохраняется для template, потому что позволяет точно понимать, из какого base image и package universe собран `9000`.
-
-## Что больше не является принятой общей policy
-
-Предыдущий документ распространял pinned/recovery модель на:
+Builder использует:
 
 ```text
-PVE bootstrap
-Docker
-Proximo
-Hermes
-AI Control
-общий deploy workflow
+Debian 13 Trixie current cloud image из trixie/latest
+SHA-512 verification из того же upstream каталога
+обычные Debian repositories
+apt update/full-upgrade на момент сборки
 ```
 
-Эта часть решения отменена вместе со старым bootstrap design.
+То есть две сборки в разные даты могут получить разные версии Debian packages. Для домашней инфраструктуры это сейчас принято как нормальный и более простой вариант.
 
-Предыдущие pins и scripts сохранены в Git history и в public archive, но **не являются требованиями новой реализации**.
+## Что фиксируется
 
-В частности, новая система позже может выбрать другой баланс между:
+В `/etc/vm-template-info` сохраняются фактические данные конкретной сборки:
 
 ```text
-latest stable для обычного deploy
-и
-pinned known-good versions для recovery/rollback
+Template-Version
+Source-Image
+Source-Image-SHA512
+Build-Date
+Kernel-Flavor
+Console modes
 ```
 
-Это решение будет принято заново при проектировании нового bootstrap.
+Это даёт достаточную трассируемость без отдельной системы version lock.
+
+## Что больше не используется
+
+Для template больше не являются требованиями:
+
+```text
+фиксированный Debian cloud build ID
+Debian APT snapshot timestamp
+bootstrap-versions.env
+recovery lock для template
+```
+
+Экспериментальная Template v5 с такой схемой сохранена в Git history, но не является действующей архитектурой.
+
+## Остальной bootstrap
+
+Предыдущие решения по PVE bootstrap, Docker, Proximo, Hermes, AI Control, recovery и deploy workflow также не считаются принятыми и будут спроектированы заново.
+
+Нельзя автоматически переносить прежние assumptions о `BOOTSTRAP_REF`, package pins, Docker hold, Hermes commit pin и подобных механизмах в новую реализацию.
 
 ## Главный текущий принцип
 
-До появления нового bootstrap design нельзя переносить старые assumptions о `BOOTSTRAP_REF`, AI version lock, Docker hold, Hermes commit pin и подобных механизмах в новую реализацию автоматически.
-
-Для template source provenance и checksum остаются обязательными; для остальных компонентов policy пока TBD.
+Для template важны простота, проверка скачанного образа и понятный smoke test после изменений. Полная повторяемость package universe сейчас не является целью.
