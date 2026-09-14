@@ -140,6 +140,8 @@ properties:
     type: object
     additionalProperties: false
     properties:
+      container_runtime:
+        enum: [docker]
       source:
         type: object
         additionalProperties: false
@@ -222,6 +224,28 @@ allOf:
           required: [cpu, memory_mb, swap_mb, disk]
         lxc:
           required: [source, unprivileged, features]
+  - if:
+      properties:
+        lxc:
+          type: object
+          required: [container_runtime]
+          properties:
+            container_runtime:
+              const: docker
+      required: [lxc]
+    then:
+      properties:
+        lxc:
+          required: [unprivileged, features]
+          properties:
+            unprivileged:
+              const: true
+            features:
+              properties:
+                nesting:
+                  const: true
+                keyctl:
+                  const: true
   - if:
       properties:
         type:

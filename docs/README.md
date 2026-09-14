@@ -22,8 +22,9 @@
 
 - [`30-guest-manifest.md`](30-guest-manifest.md) — канонический формат `guest.yaml` и PVE-side deploy.
 - [`31-bootstrap.md`](31-bootstrap.md) — публичный bootstrap и переход к private source of truth.
+- [`32-docker-in-lxc-policy.md`](32-docker-in-lxc-policy.md) — принятое решение B: Docker внутри unprivileged LXC, security boundary и backup/restore gate.
 
-Диапазон `32–39` зарезервирован для общих deploy/guest policy.
+Диапазон `33–39` зарезервирован для общих deploy/guest policy.
 
 ### 40–49 — сеть
 
@@ -50,15 +51,6 @@
 ## Правило нумерации
 
 Новый документ получает номер внутри соответствующего блока. Не нужно перенумеровывать существующие файлы ради плотной последовательности: свободные номера оставляются для будущего расширения.
-
-Например:
-
-```text
-24-pve-templates.md
-43-vpn.md
-44-policy-routing.md
-53-ai-model-routing.md
-```
 
 Если один тематический блок разрастается примерно до 5–10 самостоятельных документов, можно отдельно решить вопрос о создании подкаталога. До этого `docs/` остаётся плоским.
 
