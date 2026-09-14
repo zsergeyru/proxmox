@@ -10,4 +10,4 @@
 - журналировать действия AI Control;
 - особенно защищать `vmbr0`, management IP, default gateway, storage, firewall, API tokens и root-доступ.
 
-Для AI-управления дополнительные правила описаны в [`ai-control.md`](ai-control.md).
+Для AI-управления дополнительные правила описаны в [`50-ai-control.md`](50-ai-control.md).
