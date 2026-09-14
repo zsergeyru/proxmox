@@ -58,4 +58,4 @@ rootfs/opt/ai-control/interfaces/
 - проверка health/status/logs после изменений;
 - секреты и private keys в Git не хранятся.
 
-Подробная целевая модель AI: [`../../docs/ai-control.md`](../../docs/ai-control.md). Решение по deploy: [`../311-dev-services/decisions/001-deployment-tooling.md`](../311-dev-services/decisions/001-deployment-tooling.md).
+Подробная целевая модель AI: [`../../docs/50-ai-control.md`](../../docs/50-ai-control.md). Решение по deploy: [`../311-dev-services/decisions/001-deployment-tooling.md`](../311-dev-services/decisions/001-deployment-tooling.md).
