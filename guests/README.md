@@ -2,9 +2,9 @@
 
 Каждый каталог `guests/<VMID>-<name>/` соответствует одной VM/LXC и содержит её паспорт, локальные решения и управляемые файлы гостевой ОС.
 
-Актуальная нумерация определяется только [`../docs/vmid-plan.md`](../docs/vmid-plan.md).
+Актуальная нумерация определяется только [`../docs/11-vmid-plan.md`](../docs/11-vmid-plan.md).
 
-Подробная машинно-читаемая спецификация `guest.yaml` и правила универсального PVE-deployer описаны в [`../docs/guest-manifest.md`](../docs/guest-manifest.md).
+Подробная машинно-читаемая спецификация `guest.yaml` и правила универсального PVE-deployer описаны в [`../docs/30-guest-manifest.md`](../docs/30-guest-manifest.md).
 
 ## Структура
 
@@ -98,7 +98,7 @@ current: VMID XYZ → 192.168.X.YZ/16
 target:  VMID XYZ → 10.0.X.YZ/16
 ```
 
-Это описание этапов миграции, а не требование одновременно иметь два default gateway. В работающей ОС default gateway должен быть один. Подробности — в [`../docs/network.md`](../docs/network.md).
+Это описание этапов миграции, а не требование одновременно иметь два default gateway. В работающей ОС default gateway должен быть один. Подробности — в [`../docs/40-network.md`](../docs/40-network.md).
 
 ### Управление
 
@@ -152,7 +152,7 @@ lxc:
   nesting: true
 ```
 
-Пустые секции не добавляются. Полные правила и примеры — в [`../docs/guest-manifest.md`](../docs/guest-manifest.md).
+Пустые секции не добавляются. Полные правила и примеры — в [`../docs/30-guest-manifest.md`](../docs/30-guest-manifest.md).
 
 ## rootfs
 
@@ -186,7 +186,7 @@ read-only checkout zsergeyru/proxmox
 → VM/LXC
 ```
 
-По умолчанию он строит PLAN; фактическое применение требует явного `--apply`. Подробности: [`../docs/guest-manifest.md`](../docs/guest-manifest.md) и [`../docs/pve-initialization.md`](../docs/pve-initialization.md).
+По умолчанию он строит PLAN; фактическое применение требует явного `--apply`. Подробности: [`../docs/30-guest-manifest.md`](../docs/30-guest-manifest.md) и [`../docs/20-pve-initialization.md`](../docs/20-pve-initialization.md).
 
 ### Управление после появления AI/DevOps
 
