@@ -1,51 +1,61 @@
-# MCP
+# MCP on 320-ai-control
 
-Каталог содержит конфигурации и исходники MCP-сервисов, используемых агентами `320-ai-control`.
+Каталог отражает MCP-сервисы текущего bootstrap-узла `320-ai-control`.
 
-MCP являются общими capabilities управляющего контура и не дублируются внутри `agents/<name>/`. Hermes, Agent Zero и будущие агенты могут использовать один и тот же MCP backend при наличии соответствующего доступа.
+## Фактическое состояние 320
 
-## Proxmox
-
-На `320-ai-control` уже установлен и принят как общий Proxmox MCP:
+На `320-ai-control` уже установлен:
 
 ```text
 gordcurrie/proxmox-mcp
 ```
 
-Архитектурное решение и safety model описаны в [`../../../../decisions/003-proxmox-mcp.md`](../../../../decisions/003-proxmox-mcp.md).
+Это **legacy/observed state текущей VM 320**, а не целевой выбор для нового `301-ai-control`.
 
-Он выбран в том числе из-за HTTP transport: MCP работает как отдельный общий сервис для нескольких AI-агентов, а не как stdio-only процесс одного клиента.
+Переустанавливать работающий `320` только ради унификации не требуется. Он сохраняется до успешной проверки целевого control plane.
 
-Базовое разделение ответственности:
+## Целевой 301
+
+Для `301-ai-control` канонический Proxmox MCP изменён на:
 
 ```text
-Proxmox MCP
-→ управление уровнем виртуализации: VM/LXC, ресурсы, lifecycle, snapshots, backups, status/tasks
+Proximo / proximo-proxmox
+```
+
+Подробное решение: [`../../../../decisions/003-proxmox-mcp.md`](../../../../decisions/003-proxmox-mcp.md) и [`../../../../../301-ai-control/README.md`](../../../../../301-ai-control/README.md).
+
+Целевая схема:
+
+```text
+Hermes
+→ local stdio Proximo
+→ Proxmox API token + ACL
+→ managed guests
+```
+
+Proximo в `301` ограничивается как минимум двумя уровнями:
+
+```text
+PROXIMO_TOOLSETS=pve.guests
+        ↓
+privilege-separated Proxmox token/ACL
+```
+
+Host-level write operations — PVE network, storage definitions, ACL/IAM, SDN, repositories, certificates и reboot/shutdown самого гипервизора — не входят в штатную зону AI control.
+
+## Разделение ответственности
+
+```text
+Proximo
+→ уровень виртуализации и guest-level Proxmox operations
 
 Ansible на 311-dev-services
-→ повторяемая конфигурация гостевых ОС и приложений
+→ повторяемая конфигурация гостевых ОС
 
-SSH
-→ bootstrap, диагностика, аварийные и разовые действия внутри гостевых ОС
-
-другие MCP
-→ специализированные API там, где они реально удобнее обычного SSH/API
+SSH из ai-control
+→ bootstrap, диагностика, аварийные и разовые действия
 ```
 
 `deploy-mcp` не является частью целевой архитектуры.
 
-### Безопасность
-
-По умолчанию destructive tools должны оставаться выключенными:
-
-```text
-PROXMOX_ALLOW_DESTRUCTIVE=false
-```
-
-Host-level write operations, особенно изменение сети PVE node, storage configuration, ACL/IAM, SDN и reboot/shutdown гипервизора, не входят в штатную зону AI control.
-
-Read-only host/network диагностика допустима. Возможность MCP предоставить какой-либо tool не означает, что API token должен иметь право его выполнить.
-
-Права общего Proxmox MCP определяются отдельным Proxmox API token и ACL согласно [`../../../../decisions/002-proxmox-permissions.md`](../../../../decisions/002-proxmox-permissions.md).
-
-Секреты, токены, пароли и приватные ключи в Git не добавлять.
+Секреты, API token secrets и private SSH keys в Git не добавляются.
