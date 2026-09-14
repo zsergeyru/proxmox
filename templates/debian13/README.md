@@ -16,7 +16,7 @@ Template-Version: 4
 - [`build-policy.md`](./build-policy.md) — политика сборки и базовых настроек;
 - [`users-and-keys.md`](./users-and-keys.md) — пользователи, SSH-ключи и console access;
 - [`filesystem-layout.md`](./filesystem-layout.md) — файловая структура сервисов;
-- [`../../docs/bootstrap.md`](../../docs/bootstrap.md) — расположение и запуск bootstrap-скрипта.
+- [`../../docs/31-bootstrap.md`](../../docs/31-bootstrap.md) — расположение и запуск bootstrap-скрипта.
 
 Единственный канонический экземпляр `create-template.sh` хранится в публичном `zsergeyru/proxmox-bootstrap`. В приватном `proxmox` executable-копия не хранится.
 
