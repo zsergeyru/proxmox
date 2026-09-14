@@ -1,6 +1,6 @@
 # Пользователи, SSH-ключи и доступ через Proxmox console
 
-## 1. `ops`
+## 1. `ops` и `root`
 
 `ops` — основной административный пользователь Linux VM.
 
@@ -10,7 +10,7 @@ password: locked
 sudo: NOPASSWD
 ```
 
-Рабочего и пустого пароля нет.
+Пароль `root` также явно заблокирован. Рабочего и пустого пароля ни у `ops`, ни у `root` нет.
 
 ## 2. SSH
 
@@ -32,7 +32,7 @@ PermitEmptyPasswords no
 PubkeyAuthentication yes
 ```
 
-Root SSH запрещён полностью.
+Root SSH запрещён полностью. Builder проверяет как синтаксис `sshd -t`, так и эффективные значения через `sshd -T`.
 
 ## 3. Основная Proxmox console
 
@@ -51,12 +51,14 @@ Autologin задаётся через:
 
 Это не password authentication. `agetty` автоматически запускает локальную сессию `ops` на `tty1`, а пароль `ops` остаётся locked.
 
-Для нормального размера текста template использует обычное Debian-ядро `linux-image-amd64`, framebuffer `1280x800` и `console-setup`:
+Для нормального размера текста template использует обычное Debian-ядро `linux-image-amd64`, framebuffer и `console-setup`:
 
 ```text
 FONTFACE="Fixed"
 FONTSIZE="8x16"
 ```
+
+Builder требует наличие валидного `fb0`, но не фиксирует конкретное разрешение. На текущем PVE фактически получается `1280x800`, и это значение выводится в отчёте сборки.
 
 ## 4. Резервная serial-консоль
 
@@ -94,6 +96,7 @@ Serial-консоль нужна как резервный администра�
 
 ```text
 ops password = locked
+root password = locked
 ops authorized_keys = empty
 ```
 
@@ -174,7 +177,8 @@ Base template `9000` остаётся защищённым (`protection=1`), н�
 ```text
 Base template
 ├── ops account
-├── password locked
+├── ops password locked
+├── root password locked
 ├── authorized_keys empty
 ├── vga: std
 ├── tty1 autologin ops
