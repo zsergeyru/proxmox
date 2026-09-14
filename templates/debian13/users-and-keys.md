@@ -1,6 +1,6 @@
-# Пользователи, SSH-ключи и простой backup
+# Пользователи, SSH-ключи и доступ через Proxmox console
 
-Этот документ фиксирует модель пользователей и SSH-доступа для VM из `tpl-debian13`.
+Этот документ фиксирует модель пользователей и административного доступа для VM из `tpl-debian13`.
 
 ## 1. `root`
 
@@ -17,6 +17,7 @@ PermitRootLogin no
 `ops` создаётся в base template и используется для:
 
 - SSH-входа по ключу;
+- локального shell через Proxmox noVNC console;
 - ручного администрирования;
 - `sudo`;
 - работы с Git, конфигами, логами и сервисами.
@@ -29,22 +30,32 @@ sudo
 adm
 ```
 
+`ops` имеет:
+
+```text
+ALL=(ALL) NOPASSWD:ALL
+```
+
 Специальные группы (`docker`, `www-data`, `backup` и т. п.) добавляются только там, где нужны.
 
-## 3. Template не содержит credentials
+## 3. Пароль `ops`
 
-В самом `tpl-debian13`:
+В самом `tpl-debian13` и в обычных клонах:
 
 ```text
 ops password = locked
-ops authorized_keys = empty
 ```
 
-Template не содержит личных public keys, private keys или рабочего пароля администратора.
+Пустого пароля нет. Рабочего пароля тоже нет.
 
-Это намеренно: credentials относятся к конкретной VM/устройству, а не к универсальному template.
+Это означает:
 
-## 4. Cloud-Init конкретной VM
+- SSH по паролю невозможен;
+- обычная password authentication для `ops` не используется;
+- агенту не нужно получать, хранить или передавать пароль;
+- `cipassword` в штатном deploy-сценарии не используется.
+
+## 4. SSH-доступ
 
 После клонирования через Proxmox Cloud-Init задаются:
 
@@ -54,17 +65,16 @@ SSH public key(s): ключи нужных устройств/ролей
 Network: DHCP или статический IP
 ```
 
-Пароль `ops` в штатном сценарии не задаётся.
-
-SSH по паролю запрещён:
+SSH-политика:
 
 ```text
+PermitRootLogin no
 PasswordAuthentication no
 KbdInteractiveAuthentication no
 PubkeyAuthentication yes
 ```
 
-## 5. Основной административный доступ
+Штатный сетевой доступ:
 
 ```text
 SSH
@@ -72,11 +82,59 @@ SSH
 → соответствующий public key передан VM через Cloud-Init
 ```
 
-Serial console Proxmox остаётся диагностическим каналом: через неё можно наблюдать загрузку и сообщения системы, но штатного парольного login для `ops` нет.
+## 5. Доступ через Proxmox console
 
-Если SSH недоступен, но QEMU Guest Agent работает, для аварийной диагностики и команд можно использовать `qm guest exec`. Если одновременно недоступны сеть и Guest Agent, используется recovery/single-user сценарий через Proxmox.
+Основная console VM в Proxmox использует:
 
-## 6. Личные SSH-ключи
+```text
+vga: std
+```
+
+и открывается через noVNC.
+
+В Debian на `tty1` настроен autologin:
+
+```text
+Proxmox Web UI
+→ VM → Console
+→ noVNC
+→ tty1
+→ autologin ops
+→ shell
+```
+
+Это **не вход с пустым паролем**. `agetty` запускает заранее доверенный локальный login для пользователя `ops`; password остаётся locked.
+
+Таким образом право открыть console этой VM в Proxmox считается правом получить shell внутри гостевой ОС.
+
+Поскольку `ops` имеет `NOPASSWD: sudo`, пользователь с Proxmox console access фактически получает административный доступ к этой VM. Поэтому права на console в Proxmox должны выдаваться только доверенным пользователям/ролям.
+
+## 6. Serial console
+
+Дополнительно сохраняется:
+
+```text
+serial0: socket
+```
+
+с обычным `serial-getty@ttyS0.service`.
+
+На `serial0` autologin **не включается**. Он нужен как резервный диагностический канал для загрузки и troubleshooting.
+
+## 7. Template не содержит персональных credentials
+
+В самом `tpl-debian13`:
+
+```text
+ops password = locked
+ops authorized_keys = empty
+```
+
+Template не содержит личных public keys, private keys или паролей администратора.
+
+Public keys добавляются конкретным клонам через Cloud-Init.
+
+## 8. Личные SSH-ключи
 
 Личный SSH key pair принадлежит **устройству**, а не VM.
 
@@ -114,15 +172,7 @@ Public key:
 - public keys можно хранить в Git;
 - для нового устройства создавать отдельный key pair.
 
-## 7. Пароли
-
-Для обычных VM пароль `ops` **не используется** и остаётся заблокированным.
-
-Это упрощает автоматическое развёртывание: агенту не нужно получать, хранить или передавать пароль. Доступ строится только на SSH public keys, передаваемых через Cloud-Init.
-
-Если в будущем для отдельной VM действительно понадобится локальный пароль, это должно быть отдельным решением для этой VM, а не свойством базового template.
-
-## 8. Пользователи сервисов
+## 9. Пользователи сервисов
 
 Service users не создаются в base template.
 
@@ -139,7 +189,7 @@ deploy
 
 Они создаются только по необходимости.
 
-## 9. Технические SSH-ключи
+## 10. Технические SSH-ключи
 
 Технический ключ принадлежит роли или сервису:
 
@@ -168,7 +218,7 @@ chmod 600 ~/.ssh/id_ed25519
 chmod 644 ~/.ssh/id_ed25519.pub
 ```
 
-## 10. Публичные технические ключи
+## 11. Public keys в Git
 
 Public keys можно хранить в Git и передавать нужным VM через Cloud-Init/Ansible.
 
@@ -182,13 +232,13 @@ ssh/
     └── backup.pub
 ```
 
-## 11. SSH host keys самой VM
+## 12. SSH host keys самой VM
 
 Host keys находятся в `/etc/ssh/ssh_host_*` и идентифицируют сам сервер.
 
 Перед превращением builder-VM в template они удаляются. Каждый клон создаёт собственные уникальные host keys.
 
-## 12. Простой backup технических ключей
+## 13. Простой backup технических ключей
 
 Отдельную secret-backup инфраструктуру пока не создаём.
 
@@ -196,13 +246,15 @@ Host keys находятся в `/etc/ssh/ssh_host_*` и идентифицир�
 
 Backup VM с private keys считается чувствительным объектом и хранится только на доверенном storage.
 
-## 13. Итоговая модель
+## 14. Итоговая модель
 
 ```text
 Base template
 ├── ops account
 ├── password locked
-└── authorized_keys empty
+├── authorized_keys empty
+├── tty1 autologin ops
+└── serial0 without autologin
 
         ↓ Full Clone + Cloud-Init
 
@@ -216,15 +268,24 @@ Administrative device
 └── corresponding private SSH key
 ```
 
+Два штатных канала административного доступа:
+
+```text
+1. SSH → ops + key
+2. Proxmox noVNC → tty1 autologin ops
+```
+
 Основные правила:
 
 1. `root` по SSH запрещён.
 2. `ops` — основной администратор.
-3. Template не содержит персональных credentials.
-4. Пароль `ops` штатно не создаётся.
-5. SSH public keys задаются конкретной VM через Cloud-Init.
-6. SSH по паролю запрещён.
-7. Private SSH keys никогда не хранятся в Git/template.
-8. Public keys можно хранить в Git.
-9. Technical keys разделяются по ролям.
-10. Technical private keys на первом этапе резервируются вместе с полной VM.
+3. Пароль `ops` штатно не создаётся и остаётся locked.
+4. SSH public keys задаются конкретной VM через Cloud-Init.
+5. SSH по паролю запрещён.
+6. `tty1` autologin доступен только через основную Proxmox console VM.
+7. `serial0` сохраняется без autologin.
+8. Proxmox console access считается административным доступом к гостевой VM.
+9. Private SSH keys никогда не хранятся в Git/template.
+10. Public keys можно хранить в Git.
+11. Technical keys разделяются по ролям.
+12. Technical private keys на первом этапе резервируются вместе с полной VM.
