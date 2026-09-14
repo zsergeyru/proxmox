@@ -154,7 +154,6 @@ cat >"$SNIPPET_PATH" <<'CLOUDCFG'
 hostname: builder-debian13
 manage_etc_hosts: true
 timezone: Europe/Moscow
-locale: en_US.UTF-8
 ssh_pwauth: false
 disable_root: true
 
@@ -248,10 +247,6 @@ write_files:
       id ops >/dev/null
       passwd -S ops | grep -q ' L '
 
-      if id debian >/dev/null 2>&1; then
-        userdel -r debian || true
-      fi
-
       cat >/etc/vm-template-info <<EOF
       Template: tpl-debian13
       Template-Version: __TEMPLATE_VERSION__
@@ -272,6 +267,10 @@ write_files:
     content: |
       #!/usr/bin/env bash
       set -Eeuo pipefail
+
+      if id debian >/dev/null 2>&1; then
+        userdel -r debian || true
+      fi
 
       rm -f /var/lib/template-build/bootstrap-complete
       cloud-init clean --logs --seed
