@@ -2,8 +2,6 @@
 
 Статус: **скрипт сборки реализован**.
 
-Базовый template — универсальная основа для Linux VM в Proxmox:
-
 ```text
 VMID: 9000
 Name: tpl-debian13
@@ -22,37 +20,36 @@ Template-Version: 2
 
 ## Что делает скрипт
 
-Сборка выполняется без `virt-customize` и без установки `libguestfs-tools` на Proxmox:
-
 ```text
 официальный Debian 13 genericcloud image
+        ↓
+проверка SHA-512 по официальному SHA512SUMS
         ↓
 VMID 9000 builder-debian13
         ↓
 временный Cloud-Init bootstrap
         ↓
 apt update + full-upgrade
-базовые пакеты и настройки
+базовые пакеты и системные настройки
         ↓
-настройка tty1 autologin для ops
-        ↓
-проверка через QEMU Guest Agent
+ожидание QEMU Guest Agent
+ожидание окончания Cloud-Init
         ↓
 очистка machine-specific данных
-        ↓
+fstrim
 shutdown
         ↓
 удаление builder-only Cloud-Init
+стандартный Cloud-Init: ciuser=ops, DHCP, ciupgrade=0
         ↓
-стандартный Cloud-Init для клонов
-ciuser=ops + DHCP
+регенерация Cloud-Init drive и проверка
         ↓
 qm template
         ↓
-tpl-debian13
+protection=1
 ```
 
-Template **не содержит** личного SSH public key и **не содержит рабочего пароля `ops`**. При создании конкретной VM через Cloud-Init передаётся нужный SSH public key; пароль `ops` остаётся заблокированным.
+При ошибке builder-VM автоматически не удаляется. Существующий VMID `9000` скрипт не перезаписывает.
 
 ## Базовые параметры
 
@@ -69,50 +66,46 @@ Template **не содержит** личного SSH public key и **не со�
 | Network | VirtIO, `vmbr0` |
 | Template network | DHCP |
 | Cloud-Init | да |
+| Cloud-Init package upgrade | выключен (`ciupgrade=0`) |
 | QEMU Guest Agent | да |
 | Proxmox display | `vga: std` |
-| Proxmox console | noVNC → `tty1` → autologin `ops` |
-| Serial console | `serial0: socket`, резервная диагностика |
+| Main console | noVNC → `tty1` → autologin `ops` |
+| Serial console | `serial0: socket`, без autologin |
 | Admin user | `ops` |
+| `ops` password | locked |
 | Root SSH | запрещён |
 | Password SSH | запрещён |
-| `ops` password | заблокирован |
-| SSH public key | задаётся каждому клону через Cloud-Init |
+| SSH public key | задаётся каждому клону до первого старта |
 | Timezone | `Europe/Moscow` |
 | Locale | `en_US.UTF-8` |
 | Swap | не создаётся |
-| Template-Version | `2` |
+| Template protection | включена |
 
 ## Модель доступа
 
-Штатный удалённый доступ к VM:
+Штатный сетевой доступ:
 
 ```text
-SSH
-→ ops + private key на административном устройстве
-→ соответствующий public key передан VM через Cloud-Init
+SSH → ops + private key
 ```
 
-SSH-политика:
+SSH hardening:
 
 ```text
 PermitRootLogin no
 PasswordAuthentication no
 KbdInteractiveAuthentication no
+PermitEmptyPasswords no
 PubkeyAuthentication yes
 ```
 
-Пароля у `ops` нет: его password остаётся locked.
-
-### Доступ через Proxmox Web UI
-
-Для обычной кнопки **Console** в Proxmox используется стандартный виртуальный VGA-дисплей:
+Файл настроек:
 
 ```text
-vga: std
+/etc/ssh/sshd_config.d/00-template-security.conf
 ```
 
-Внутри Debian на `tty1` настроен автоматический вход:
+### Proxmox Console
 
 ```text
 Proxmox Web UI
@@ -123,25 +116,153 @@ Proxmox Web UI
 → shell
 ```
 
-Это **не пустой пароль** и не единый пароль между Proxmox и Debian. Linux получает уже аутентифицированного пользователя `ops` через настройку `agetty --autologin`. Пароль `ops` по-прежнему заблокирован.
+Это не пустой пароль. Пароль `ops` остаётся заблокированным. Autologin разрешён только на `tty1`.
 
-Доверенной границей считается сам доступ к Proxmox console. Пользователь, которому разрешено открыть console этой VM в Proxmox, фактически получает shell `ops`. Поскольку `ops` имеет `NOPASSWD: sudo`, такой console-доступ эквивалентен административному доступу к гостевой VM.
+Право открыть console VM в Proxmox считается административным доступом к гостевой ОС: `ops` имеет `NOPASSWD: sudo`.
 
-`serial0` сохраняется отдельно как резервный диагностический канал. На `serial0` autologin не настраивается.
+`serial0` остаётся отдельным резервным диагностическим каналом без autologin.
 
 ## Cloud-Init конкретного клона
 
-После Full Clone для конкретной VM задаются:
+Base template не содержит персональных SSH-ключей. Для каждой VM ключ и сеть задаются **до первого запуска**.
+
+Правильная последовательность развёртывания:
 
 ```text
-ciuser = ops
-sshkeys = один или несколько public keys
-ipconfig0 = DHCP или статический адрес
+Full Clone
+→ задать name/hostname
+→ ciuser=ops
+→ задать sshkeys
+→ задать IP/DHCP и DNS
+→ qm cloudinit update
+→ start VM
 ```
 
-При необходимости также задаются hostname, DNS и другие параметры первого запуска.
+`cipassword` в штатном deploy-сценарии не используется.
 
-`cipassword` в штатном deploy-сценарии **не используется**.
+## Обновления
+
+При сборке template выполняются:
+
+```text
+apt update
+apt full-upgrade
+```
+
+Для клонов автоматический package upgrade на первом запуске выключен:
+
+```text
+ciupgrade=0
+```
+
+Дальнейшие обновления VM выполняются контролируемо через deploy/Ansible/ручное администрирование.
+
+## Disk growth и TRIM
+
+В template установлен `cloud-guest-utils`, чтобы `growpart` был доступен при увеличении диска клона.
+
+Включён `fstrim.timer`, а перед финальным shutdown выполняется `fstrim -av`.
+
+## Синхронизация времени
+
+Установлен и включён `systemd-timesyncd`.
+
+```text
+Timezone: Europe/Moscow
+Locale: en_US.UTF-8
+```
+
+## Информация о происхождении
+
+В каждой VM сохраняется:
+
+```text
+/etc/vm-template-info
+```
+
+Пример:
+
+```text
+Template: tpl-debian13
+Template-Version: 2
+OS: Debian 13
+Source: zsergeyru/proxmox
+Source-Image: debian-13-genericcloud-amd64.qcow2
+Source-Image-SHA512: <128 hex chars>
+Build-Date: YYYY-MM-DD
+```
+
+`TEMPLATE_VERSION` подставляется в этот файл из параметра build-скрипта.
+
+## Базовые пакеты
+
+```text
+qemu-guest-agent
+openssh-server
+sudo
+locales
+cloud-guest-utils
+systemd-timesyncd
+
+git
+mc
+nano
+curl
+wget
+jq
+ca-certificates
+openssl
+htop
+ncdu
+lsof
+tree
+tmux
+bash-completion
+tar
+rsync
+restic
+zstd
+unzip
+acl
+dnsutils
+iproute2
+iputils-ping
+net-tools
+cron
+logrotate
+```
+
+Docker и прикладные сервисы в base template не устанавливаются.
+
+## Очистка перед template
+
+Скрипт очищает:
+
+- Cloud-Init state, logs и seed;
+- `/etc/machine-id` и dbus machine-id;
+- SSH host keys;
+- DHCP/network state;
+- systemd random seed;
+- APT cache/lists;
+- journal/build logs;
+- temporary files;
+- shell history;
+- `/home/ops/.ssh`;
+- builder scripts `template-bootstrap` и `template-finalize`.
+
+После удаления временного `cicustom` скрипт выполняет `qm cloudinit update` и проверяет, что builder-only user-data больше не присутствует.
+
+## Защита template
+
+После успешного `qm template` включается:
+
+```text
+protection=1
+```
+
+Это защита от случайного удаления, а не отдельная security boundary.
+
+Для осознанной пересборки VMID `9000` сначала нужно снять protection и удалить старый template вручную.
 
 ## Требования перед запуском
 
@@ -151,6 +272,9 @@ ipconfig0 = DHCP или статический адрес
 qm
 pvesm
 sha512sum
+awk
+grep
+sed
 curl или wget
 ```
 
@@ -178,106 +302,23 @@ DISK_STORAGE=local-lvm
 SNIPPET_STORAGE=local
 BRIDGE=vmbr0
 DISK_SIZE=16G
+WAIT_SECONDS=1200
+TEMPLATE_VERSION=2
 ```
-
-При необходимости значения переопределяются переменными окружения.
-
-## Базовые пакеты
-
-```text
-qemu-guest-agent
-openssh-server
-sudo
-locales
-
-git
-mc
-nano
-
-curl
-wget
-jq
-ca-certificates
-openssl
-
-htop
-ncdu
-lsof
-tree
-tmux
-bash-completion
-
-tar
-rsync
-restic
-zstd
-unzip
-acl
-
-dnsutils
-iproute2
-iputils-ping
-net-tools
-
-cron
-logrotate
-```
-
-Docker и прикладные сервисы в base template не устанавливаются.
-
-## Пользователь `ops`
-
-В template создаётся `ops` с группами:
-
-```text
-adm
-sudo
-```
-
-и правом:
-
-```text
-ALL=(ALL) NOPASSWD:ALL
-```
-
-Пароль `ops` остаётся заблокированным как в template, так и в обычных клонах. Для SSH Cloud-Init добавляет только public keys. Для `tty1` используется локальный autologin.
-
-`root` как системная учётная запись Debian сохраняется, но прямой SSH-login root запрещён.
-
-## Очистка перед template
-
-Перед `qm template` очищаются:
-
-- Cloud-Init state;
-- machine-id;
-- SSH host keys;
-- DHCP lease/state;
-- random seed;
-- APT cache/lists;
-- временные файлы;
-- journal/build logs;
-- shell history;
-- `.ssh` пользователя `ops`.
-
-Каждый клон формирует собственные machine-id и SSH host keys.
 
 ## Проверка после сборки
 
-Создать тестовый **Full Clone**, передать ему через Cloud-Init SSH public key и затем проверить:
+Создать тестовый Full Clone, задать SSH public key и network **до первого старта**, затем проверить:
 
-1. загрузку VM;
-2. получение сети;
-3. новый machine-id;
-4. уникальные SSH host keys;
-5. `VM → Console` открывает noVNC и автоматически даёт shell `ops` на `tty1`;
-6. пароль `ops` по-прежнему заблокирован;
-7. вход `ops` по SSH-ключу;
-8. `sudo` без пароля;
-9. QEMU Guest Agent;
-10. `serial0` как резервный диагностический канал;
-11. размер root filesystem;
-12. `/etc/vm-template-info`.
-
-## Что не входит в base template
-
-Не устанавливаются заранее Docker/Compose, SmartDNS, AdGuard Home, sing-box, VPN, специальные nftables/PBR rules, Gitea/Jenkins, базы данных, reverse proxy и service-specific users/directories.
+1. VM загружается и получает сеть;
+2. `VM → Console` открывает noVNC и автоматически даёт shell `ops`;
+3. пароль `ops` остаётся locked;
+4. SSH доступен только по ключу;
+5. `sudo` работает без пароля;
+6. QEMU Guest Agent отвечает;
+7. `serial0` работает без autologin;
+8. machine-id уникален;
+9. SSH host keys уникальны;
+10. root filesystem увеличивается после resize диска;
+11. `/etc/vm-template-info` содержит правильную версию и SHA-512 исходного образа;
+12. в конфигурации template есть `ciupgrade: 0`, `protection: 1`, `vga: std`, `serial0: socket`.
