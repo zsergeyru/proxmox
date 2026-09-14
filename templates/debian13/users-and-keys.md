@@ -85,7 +85,7 @@ Private keys:
 /opt/ai-control/ssh/ai_control_ed25519.pub
 ```
 
-Пара создаётся **внутри `301`** скриптом `install-ai-control.sh`.
+Пара создаётся **внутри `301`** общим platform-скриптом `prepare-ai-control.sh`, а не installer конкретного AI-агента.
 
 Правила:
 
@@ -100,7 +100,7 @@ public key
 → передаётся пользователю ops через Cloud-Init до first boot
 ```
 
-После этого Hermes может использовать:
+После установки конкретного агента он может использовать:
 
 ```text
 301-ai-control
@@ -119,13 +119,13 @@ public key
 /opt/ai-control/ssh/github_proxmox_ed25519.pub
 ```
 
-Она также создаётся внутри `301`, но используется только для:
+Она также создаётся общим `prepare-ai-control.sh` внутри `301`, но используется только для:
 
 ```text
 git@github.com:zsergeyru/proxmox.git
 ```
 
-Public key вручную регистрируется как GitHub Deploy Key. Если Hermes должен выполнять push, Deploy Key получает `Allow write access`.
+Public key вручную регистрируется как GitHub Deploy Key. Если AI-агент должен выполнять push, Deploy Key получает `Allow write access`.
 
 Не использовать GitHub key для SSH в инфраструктурные VM и не использовать infrastructure key как GitHub Deploy Key. Разделение identities уменьшает blast radius компрометации одного credential.
 
