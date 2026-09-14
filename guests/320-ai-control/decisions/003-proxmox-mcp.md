@@ -1,183 +1,175 @@
-# ADR 003 — Общий Proxmox MCP для AI control
+# ADR 003 — Proxmox MCP для AI control
 
 ## Статус
 
-Принято для bootstrap `320-ai-control`; переносится без изменения принципа на будущий `301-ai-control`.
+**Обновлено.**
 
-## Фактическое состояние
+- `320-ai-control`: фактически установленный `gordcurrie/proxmox-mcp` остаётся legacy/observed state и не требует немедленной замены только ради унификации.
+- `301-ai-control`: целевой канонический MCP — **Proximo** (`proximo-proxmox`).
 
-На VM `320-ai-control` уже установлен и используется:
-
-```text
-gordcurrie/proxmox-mcp
-```
-
-Это текущий выбранный общий Proxmox MCP проекта.
+То есть старый выбор не переносится автоматически в новую control-plane VM.
 
 ## Контекст
 
-`ai-control` является мультиагентным контуром. В `/opt/ai-control/agents/` могут одновременно существовать Hermes, Agent Zero и другие агенты.
+`ai-control` должен уметь создавать и сопровождать управляемые VM/LXC, но не должен получать обычный административный доступ к самому PVE host.
 
-Поэтому Proxmox integration не должна быть зашита внутрь каталога одного агента. Общий MCP-сервис размещается в:
+Нужны:
 
-```text
-/opt/ai-control/mcp/
-```
+- Proxmox API вместо shell на гипервизоре;
+- privilege-separated API token;
+- видимая/проверяемая граница разрешений;
+- guest provisioning/configuration, включая Cloud-Init;
+- snapshots/backups/lifecycle;
+- возможность уменьшить MCP tool surface;
+- audit trail для изменений.
 
-и может использоваться несколькими агентами.
+## Решение для 301
 
-## Почему выбран `gordcurrie/proxmox-mcp`
-
-При выборе рассматривались другие Proxmox MCP, но один из первоначально понравившихся вариантов не имел подходящего HTTP transport. Для нашей архитектуры это было существенным ограничением: MCP должен работать как отдельный общий сервис и быть доступен нескольким агентам, а не запускаться только как локальный stdio-процесс одного клиента.
-
-`gordcurrie/proxmox-mcp` был выбран потому, что сочетает:
-
-- HTTP transport для отдельного общего MCP-сервиса;
-- работу через Proxmox API;
-- VM и LXC inventory/config/status;
-- create/clone/configure;
-- start/stop/reboot VM и LXC;
-- snapshots и backups;
-- асинхронные Proxmox tasks;
-- поддержку API token и стандартной Proxmox ACL-модели;
-- дополнительное ограничение destructive tools.
-
-Для нашей мультиагентной схемы HTTP transport принципиально удобнее stdio-only варианта:
+Для `301-ai-control` используется:
 
 ```text
-Hermes ---------┐
-Agent Zero -----+--> shared gordcurrie/proxmox-mcp --> Proxmox API
-Future agent ---┘
+Proximo / proximo-proxmox
 ```
 
-## Destructive operations
+Установка выполняется zero-day bootstrap-скриптом из публичного `zsergeyru/proxmox-bootstrap`.
 
-У MCP есть отдельный предохранитель для destructive-команд. Они не должны быть доступны в обычном режиме и включаются только отдельной настройкой сервиса.
-
-Текущая политика проекта:
+Proximo запускается локально как stdio MCP-процесс Hermes. Отдельный HTTP MCP daemon для одного локального Hermes не нужен:
 
 ```text
-PROXMOX_ALLOW_DESTRUCTIVE=false
+Hermes
+  │ stdio MCP
+  ▼
+Proximo
+  │ HTTPS Proxmox API
+  ▼
+PVE
 ```
 
-по умолчанию.
-
-Delete VM/LXC, node reboot/shutdown и другие destructive tools включаются только отдельным осознанным решением. Даже при включении destructive tool окончательное разрешение всё равно задаётся Proxmox API token и ACL.
-
-## Host/network tools
-
-Важный недостаток выбранного MCP — он умеет не только управлять гостями, но и выполнять host-level операции, в том числе работать с сетевой конфигурацией PVE node.
-
-Для проекта это считается слишком опасным для обычного AI-agent workflow.
-
-Агентам полезно оставить read-only диагностику сети PVE, например просмотр интерфейсов и текущей конфигурации, но write-операции уровня host network не должны быть доступны для выполнения.
-
-Запрещённая зона включает изменение:
-
-```text
-PVE physical NIC
-Linux bridge / vmbr*
-host routes
-gateway
-/etc/network/interfaces
-apply/reload host network configuration
-```
-
-Даже если соответствующие tools присутствуют в MCP, API token не должен иметь Proxmox privileges/ACL, позволяющие выполнить эти операции.
-
-Иными словами, безопасность строится в два слоя:
-
-```text
-MCP tool policy
-        ↓
-Proxmox API token + ACL
-        ↓
-managed guest/resource pool
-```
-
-Скрытие или отключение опасного MCP tool является дополнительной защитой, но не заменяет ACL.
-
-## Storage и другие host-level возможности
-
-Аналогичный принцип применяется к storage и прочим возможностям самого гипервизора.
-
-Разрешается использовать уже существующий storage для операций с управляемыми гостями: clone, disk allocation и backup в рамках выданных Proxmox прав.
-
-Не разрешается через обычный AI control workflow:
-
-- создавать/удалять/перенастраивать PVE storage;
-- менять Datacenter/host firewall;
-- менять ACL/users/roles/API tokens;
-- управлять SDN;
-- reboot/shutdown самого PVE host;
-- менять сертификаты, repositories или конфигурацию гипервизора.
-
-Полная матрица прав описана в [`002-proxmox-permissions.md`](./002-proxmox-permissions.md).
-
-## Разделение функций
-
-Proxmox MCP используется для уровня виртуализации:
-
-```text
-VM/LXC lifecycle
-resource/config changes
-snapshots
-backups
-status/tasks
-```
-
-Повторяемая настройка ОС и приложений остаётся за Ansible на `311-dev-services`.
-
-Прямой SSH остаётся bootstrap/diagnostic/emergency каналом.
-
-Если MCP умеет выполнять дополнительные команды внутри гостей или на PVE host, это не делает их штатным deploy-механизмом проекта.
+Если позже появится реальная необходимость в общем сетевом MCP для нескольких клиентов, это оформляется отдельно; Proximo поддерживает отдельные remote faces, но zero-day архитектура ими не усложняется.
 
 ## Management identity
 
-MCP подключается к PVE через отдельный API user/token с privilege separation.
-
-Права определяются ADR [`002-proxmox-permissions.md`](./002-proxmox-permissions.md), а не полным набором capabilities самого MCP.
-
-Запрещено использовать для общего MCP:
-
-- `root@pam` token;
-- `PVEAdmin` на `/`;
-- token, способный менять ACL/roles/users/tokens;
-- token с правом reboot/shutdown самого PVE host;
-- token с правом менять host network/storage configuration/SDN без отдельного решения.
-
-## Мультиагентная модель
-
-Каталоги агентов остаются независимыми:
+Bootstrap создаёт отдельную identity:
 
 ```text
-/opt/ai-control/agents/hermes/
-/opt/ai-control/agents/agent-zero/
-/opt/ai-control/agents/<future-agent>/
+user:       proximo@pve
+token:      proximo@pve!ai-control
+privsep:    true
+pool:       managed
 ```
 
-Общий MCP не копируется в каждый каталог:
+Token secret:
+
+- создаётся локально на PVE;
+- показывается Proxmox только при создании;
+- напрямую передаётся в `301` через QEMU Guest Agent;
+- хранится внутри `301` в файле режима `0600`;
+- не записывается в Git;
+- не должен оставаться отдельным plaintext-файлом на PVE.
+
+При privilege separation эффективные права являются пересечением прав пользователя и token, поэтому нужные ACL выдаются обоим.
+
+## Tool surface
+
+В Hermes по умолчанию используется:
 
 ```text
-/opt/ai-control/mcp/proxmox/
+PROXIMO_TOOLSETS=pve.guests
 ```
 
-Агент получает доступ к MCP как к общей capability управляющего контура.
+Цель — не публиковать агенту без необходимости MCP domains для host network, SDN, access/IAM и других административных плоскостей.
 
-## Обновление
+Tool filtering — только дополнительная защита. Hard boundary задаётся Proxmox ACL/token.
 
-MCP не обновляется автоматически на непроверенную версию.
+## Разрешённая зона
 
-Порядок обновления:
+AI control должен уметь:
 
-1. зафиксировать текущую рабочую версию;
-2. проверить release notes и изменение tool surface;
-3. проверить, не появились ли новые host/network/destructive tools;
-4. убедиться, что Proxmox ACL по-прежнему ограничивает их;
-5. проверить read operations;
-6. проверить lifecycle на тестовом managed guest;
-7. только после этого обновлять production AI control.
+- видеть PVE/node/guest state в пределах необходимых audit-прав;
+- использовать template `9000` как источник Full Clone;
+- создавать новые гости сразу в `managed` resource pool;
+- изменять CPU/RAM/disk/network/Cloud-Init управляемых гостей;
+- start/stop/reboot управляемых гостей;
+- делать snapshots/backups;
+- выполнять guest-level diagnostics, которые разрешены выданными правами.
+
+Template `9000` остаётся защищённым и не должен быть доступен на изменение/удаление.
+
+Сам `301-ai-control` не обязан входить в обычную self-managed write-зону: control plane не должен случайно удалить/остановить самого себя.
+
+## Запрещённая зона
+
+Обычный AI control workflow не получает прав на:
+
+```text
+PVE physical NIC / vmbr* / host routes
+storage definitions
+users / groups / realms
+roles / ACL / API tokens
+Datacenter/host firewall
+SDN
+PVE repositories
+certificates / ACME
+reboot/shutdown PVE host
+shell/exec на PVE host
+```
+
+Если Proximo технически содержит tools для этих областей, это не означает, что token должен уметь их выполнить.
+
+Полная проектная матрица прав остаётся в [`002-proxmox-permissions.md`](./002-proxmox-permissions.md).
+
+## Проверка границы
+
+После bootstrap обязательно выполняется:
+
+```bash
+proximo doctor
+```
+
+Результат сохраняется внутри `301` для диагностики. До перевода `301` в основной control plane нужно убедиться, что ожидаемые guest capabilities находятся в `can`, а host/IAM опасные действия остаются в `cannot`.
+
+Затем проводится live-test:
+
+```text
+Hermes + Proximo
+→ Full Clone 9000 в managed pool
+→ protection=0
+→ Cloud-Init ops + ai_control_ed25519.pub
+→ first start
+→ QEMU Agent
+→ SSH ops из 301
+```
+
+Без этой проверки zero-day bootstrap считается подготовленным, но не полностью live-validated.
+
+## Почему не переносим gordcurrie/proxmox-mcp с 320
+
+На `320` он уже установлен и может продолжать работать до миграции. Но целевой `301` строится заново и не обязан наследовать исторически выбранный transport.
+
+Proximo выбран для новой схемы потому, что сочетает:
+
+- least-privilege модель поверх Proxmox ACL;
+- встроенный `doctor` для проверки фактической границы token;
+- PLAN/PROVE/UNDO подход для mutations;
+- provisioning/config/cloud-init surface;
+- управляемое сокращение tool surface через `PROXIMO_TOOLSETS`;
+- локальный stdio transport, достаточный для одного Hermes в `301`.
+
+## Разделение функций
+
+```text
+Proximo
+→ уровень виртуализации и guest-level Proxmox operations
+
+Ansible на 311-dev-services
+→ повторяемая конфигурация гостевых ОС и приложений
+
+прямой SSH из 301
+→ bootstrap, диагностика, аварийные и разовые действия
+```
+
+Даже если MCP умеет выполнять дополнительные операции, он не заменяет Ansible как штатный повторяемый deploy-механизм внутри ОС.
 
 ## Главный принцип
 
-> `gordcurrie/proxmox-mcp` — общий transport/API слой AI control; конкретный AI-агент является сменяемым клиентом, а окончательная граница полномочий задаётся Proxmox API token и ACL.
+> Proximo — канонический Proxmox MCP для `301-ai-control`; реальная граница его власти задаётся отдельным privilege-separated Proxmox token и ACL, а не возможностями самого MCP.
