@@ -34,16 +34,23 @@ PubkeyAuthentication yes
 
 Root SSH запрещён полностью.
 
-## 3. Proxmox noVNC console
+## 3. Основная Proxmox console
 
-Для основной VM console используется:
+Начиная с Template-Version 3 основная VM console — настоящая текстовая serial-консоль:
 
 ```text
-vga: std
-noVNC → tty1 → autologin ops
+vga: serial0
+serial0: socket
+Proxmox Web UI → Console → xterm.js → ttyS0 → autologin ops
 ```
 
-Это не password authentication. `agetty` автоматически запускает локальную сессию `ops` на `tty1`, а password остаётся locked.
+Autologin задаётся через:
+
+```text
+/etc/systemd/system/serial-getty@ttyS0.service.d/autologin.conf
+```
+
+Это не password authentication. `agetty` автоматически запускает локальную сессию `ops` на `ttyS0`, а пароль `ops` остаётся locked.
 
 Следствие:
 
@@ -52,17 +59,17 @@ noVNC → tty1 → autologin ops
 = административный shell внутри гостевой VM
 ```
 
-Так как `ops` имеет `NOPASSWD: sudo`, console access практически эквивалентен root-доступу к гостевой ОС. Proxmox ACL на console нужно выдавать только доверенным пользователям/ролям.
+Так как `ops` имеет `NOPASSWD: sudo`, console access практически эквивалентен root-доступу к гостевой ОС. Proxmox ACL на `VM.Console` нужно выдавать только доверенным пользователям/ролям.
 
-## 4. Serial console
+## 4. tty1/noVNC
+
+В v3 специальный autologin на `tty1` не настраивается. Framebuffer/noVNC больше не является основной административной консолью шаблона.
+
+Основной интерфейс для работы через Proxmox Web UI:
 
 ```text
-serial0: socket
+xterm.js / serial0
 ```
-
-сохраняется как резервный диагностический канал.
-
-На `serial0` autologin не включается. Заблокированный пароль `ops` через serial login не работает.
 
 ## 5. Template не содержит персональных credentials
 
@@ -155,8 +162,9 @@ Base template
 ├── ops account
 ├── password locked
 ├── authorized_keys empty
-├── tty1 autologin ops
-└── serial0 without autologin
+├── serial0: socket
+├── vga: serial0
+└── ttyS0 autologin ops
 
         ↓ Full Clone + Cloud-Init before first boot
 
@@ -173,5 +181,5 @@ Administrative device
 
 ```text
 1. SSH → ops + key
-2. Proxmox noVNC → tty1 autologin ops
+2. Proxmox xterm.js → serial0/ttyS0 → autologin ops
 ```
