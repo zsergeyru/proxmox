@@ -1,78 +1,101 @@
-# Политика сборки и базовой настройки `tpl-debian13`
+# Политика сборки `tpl-debian13`
 
 ```text
-Template-Version: 4
+Template-Version: 5
 ```
 
-## 1. Proxmox-хост остаётся чистым
+## 1. Роль PVE host
 
-Не устанавливаем на PVE `virt-customize`, `libguestfs-tools`, Git, Docker и другие build-инструменты, нужные только для подготовки гостевой ОС. Сборка выполняется штатными средствами Proxmox и временной builder-VM.
+PVE остаётся hypervisor/deployer, а не application/build workstation.
 
-## 2. Источник образа и проверка
-
-Используется официальный Debian 13 Trixie `genericcloud` image. Перед импортом скачивается официальный `SHA512SUMS` и проверяется SHA-512 образа. Использованный hash записывается в `/etc/vm-template-info`.
-
-Скрипт не продолжает сборку, если checksum отсутствует, имеет неверный формат или не совпадает.
-
-## 3. Ядро и VGA console
-
-Исходный genericcloud image содержит `cloud-amd64` kernel. На наших VM он не создавал framebuffer, из-за чего noVNC показывал крупный VGA text mode.
-
-Поэтому v4 во время bootstrap:
+Разрешён минимальный runtime, нужный host-side deployment, включая:
 
 ```text
-install linux-image-amd64
-install console-setup + console-setup-linux
-remove linux-image-*cloud-amd64
-update-grub
+git
+openssh-client
+python3/python3-yaml
+curl/jq/CA tools
 ```
 
-Настройка консоли:
+`git` нужен для read-only private source-of-truth checkout и является принятым исключением. На PVE не устанавливаются Docker, Hermes, application services и произвольные guest build toolchains.
+
+Template строится штатными `qm/pvesm` и временной builder-VM.
+
+## 2. Воспроизводимый source image
+
+Не использовать:
 
 ```text
-ACTIVE_CONSOLES="/dev/tty[1-6]"
-CHARMAP="UTF-8"
-CODESET="CyrSlav"
-FONTFACE="Fixed"
-FONTSIZE="8x16"
+trixie/latest
 ```
 
-После bootstrap builder обязательно перезагружается. Сборка продолжается только если после reboot одновременно выполнены условия:
+Текущий baseline:
 
 ```text
-uname -r → обычный *-amd64 kernel, без cloud
-/sys/class/graphics/fb0/virtual_size существует и содержит непустое WIDTH,HEIGHT
-QEMU Guest Agent отвечает
-getty@tty1 active
-serial-getty@ttyS0 active
+Debian cloud build: 20260601-2496
+image: debian-13-genericcloud-amd64-20260601-2496.qcow2
 ```
 
-Конкретное разрешение framebuffer не фиксируется как обязательное. На текущем PVE фактически получено `1280x800`; скрипт записывает реально обнаруженное значение в итоговый отчёт.
+Builder получает `SHA512SUMS` из того же versioned cloud build и требует strict SHA-512 verification до `qm importdisk`.
 
-## 4. Базовый пользователь и root
+Использованные filename/hash/build id записываются в `/etc/vm-template-info`.
 
-Основной административный пользователь:
+## 3. Воспроизводимый APT build
+
+Live Debian repositories нельзя использовать для `apt full-upgrade` во время reproducible build, иначе одинаковый script в разные дни создаёт разные template.
+
+Текущий build snapshot:
 
 ```text
-ops
+20260914T000000Z
 ```
 
-Группы: `ops`, `sudo`, `adm`.
+Builder временно использует timestamped `snapshot.debian.org` для Debian и Debian Security, выполняет update/full-upgrade/package install и только после завершения build возвращает обычные live repositories.
 
-Sudo policy:
+Следствие:
 
 ```text
-/etc/sudoers.d/90-ops
-ops ALL=(ALL:ALL) NOPASSWD:ALL
+snapshot → фиксирует состав template build
+live repos → используются клонами для дальнейших контролируемых обновлений
 ```
 
-Пароль `ops` остаётся locked. Пароль `root` также явно блокируется через `passwd -l root` и проверяется перед завершением bootstrap. Пустые пароли не используются.
+`ciupgrade=0`: Cloud-Init не выполняет автоматический package upgrade при первом boot клона.
 
-## 5. SSH
+## 4. Kernel и VGA console
 
-SSH policy:
+Устанавливаются:
 
 ```text
+linux-image-amd64
+console-setup
+console-setup-linux
+```
+
+`linux-image-*cloud-amd64` удаляется.
+
+Console policy:
+
+```text
+vga: std
+tty1 autologin ops
+serial0: socket
+ttyS0 autologin ops
+Fixed 8x16
+```
+
+После bootstrap обязателен verification reboot. Builder продолжает только если:
+
+- kernel `*-amd64` и не `*cloud*`;
+- `/sys/class/graphics/fb0/virtual_size` существует и валиден;
+- QGA active;
+- tty1/ttyS0 getty active.
+
+## 5. Users / SSH / sudo
+
+```text
+ops password: locked
+root password: locked
+ops sudo: NOPASSWD
 PermitRootLogin no
 PasswordAuthentication no
 KbdInteractiveAuthentication no
@@ -80,243 +103,112 @@ PermitEmptyPasswords no
 PubkeyAuthentication yes
 ```
 
-Файл:
+Builder проверяет `sshd -t` и effective `sshd -T`.
+
+Персональных SSH keys в base template нет.
+
+## 6. Cloud-Init lifecycle
+
+Builder-only custom Cloud-Init используется только для сборки.
+
+Перед `qm template`:
 
 ```text
-/etc/ssh/sshd_config.d/00-template-security.conf
-```
-
-Builder выполняет две проверки:
-
-```text
-sshd -t                         → синтаксис
-sshd -T -C user=ops,...         → эффективные параметры
-```
-
-Сборка прерывается, если эффективная конфигурация не подтверждает запрет root/password/kbd-interactive/empty-password и разрешение public-key authentication.
-
-Персональных SSH-ключей в base template нет; public key задаётся конкретному клону через Cloud-Init до первого запуска.
-
-## 6. Доверенная Proxmox console
-
-Основная Web Console:
-
-```text
-vga: std
-Proxmox Console → noVNC/VGA → tty1 → autologin ops
-```
-
-Autologin `tty1`:
-
-```text
-/etc/systemd/system/getty@tty1.service.d/autologin.conf
-```
-
-Резервная serial-консоль:
-
-```text
-serial0: socket
-xterm.js / qm terminal → ttyS0 → autologin ops
-```
-
-Override:
-
-```text
-/etc/systemd/system/serial-getty@ttyS0.service.d/autologin.conf
-```
-
-Пароль при этом не разблокируется. Право Proxmox `VM.Console` следует считать административным доступом к гостевой ОС, потому что `ops` имеет `NOPASSWD: sudo`.
-
-## 7. Cloud-Init lifecycle
-
-Временный custom Cloud-Init используется только при сборке builder-VM.
-
-Host-сценарий обязан:
-
-1. дождаться QEMU Guest Agent;
-2. дождаться маркера завершения bootstrap;
-3. дождаться `cloud-init status --wait`;
-4. выполнить verification reboot в обычное Debian-ядро;
-5. проверить kernel/framebuffer/QGA/tty1/ttyS0;
-6. выполнить final cleanup;
-7. удалить builder-only `cicustom`;
-8. задать стандартные defaults template;
-9. выполнить `qm cloudinit update`;
-10. проверить, что builder-only user-data больше не присутствует.
-
-Для template:
-
-```text
-ciuser=ops
-ipconfig0=ip=dhcp
-ciupgrade=0
-```
-
-`cipassword` штатно не используется.
-
-## 8. Порядок персонализации клона
-
-Для каждого рабочего VM используется **Full Clone**. Параметры задаются до первого старта:
-
-```text
-Full Clone
-→ protection=0 по умолчанию для обычного клона
-→ name/hostname
+final cleanup
+→ remove cicustom
 → ciuser=ops
-→ sshkeys
-→ network/DNS
+→ ipconfig0=ip=dhcp
+→ ciupgrade=0
 → qm cloudinit update
-→ start
+→ проверить отсутствие builder-only user-data
 ```
 
-Template `9000` остаётся `protection=1`. Proxmox может перенести protection в конфигурацию клона, поэтому deploy-сценарий/AI-агент обязан явно выставлять `protection=0`, если паспорт конкретной VM не требует защиты.
+## 7. Full Clone policy
 
-Linked Clone не используется для обычных рабочих VM. Результат клонирования проверяется по Proxmox task log или LVM `Origin`: у основного диска Full Clone поле `Origin` должно быть пустым.
+Рабочие Debian VM создаются как Full Clone.
 
-## 9. Базовые пакеты
+До первого start задаются:
 
-В base template оставляем универсальный набор администрирования и диагностики:
+```text
+protection
+name/hostname
+CPU/RAM/disk
+ciuser=ops
+SSH public key
+network/DNS
+qm cloudinit update
+```
+
+Template `9000` остаётся `protection=1`. Protection клона задаётся по `guest.yaml`.
+
+## 8. Base packages
+
+Базовый набор включает инструменты администрирования/диагностики и QGA, включая:
 
 ```text
 qemu-guest-agent openssh-server sudo locales cloud-guest-utils systemd-timesyncd
 linux-image-amd64 console-setup console-setup-linux
-git mc nano
-curl wget jq ca-certificates openssl
+git mc nano curl wget jq ca-certificates openssl
 htop ncdu lsof tree tmux bash-completion
 tar rsync zstd unzip acl
 dnsutils iproute2 iputils-ping net-tools
 cron logrotate
 ```
 
-`wget` и `net-tools` намеренно оставлены: они небольшие и удобны при ручной диагностике/аварийном администрировании.
+Docker/Compose и service-specific software не входят в VM template.
 
-`restic` удалён из base template: backup-клиент нужен не каждой VM и устанавливается только там, где действительно используется guest-level backup.
-
-Docker/Compose и прикладные сервисы в base template не устанавливаются.
-
-## 10. Обновления
-
-Builder выполняет:
+## 9. Disk / TRIM
 
 ```text
-apt update
-apt full-upgrade
+VirtIO SCSI Single
+iothread=1
+discard=on
+ssd=1
+base disk=16 GiB
 ```
 
-Template получает актуальные пакеты на дату сборки. Автоматический package upgrade клонов через Cloud-Init выключен (`ciupgrade=0`). `unattended-upgrades` автоматически не включается.
+`cloud-guest-utils` обеспечивает growpart; включён `fstrim.timer`; перед seal выполняется `fstrim -av`.
 
-## 11. Время
+## 10. Cleanup
 
-Устанавливается и включается `systemd-timesyncd`.
-
-```text
-Timezone: Europe/Moscow
-Locale: en_US.UTF-8
-```
-
-## 12. Диск, growpart и TRIM
-
-```text
-Controller: VirtIO SCSI Single
-iothread: enabled
-discard: enabled
-ssd: enabled
-base size: 16 GiB
-```
-
-В template установлен `cloud-guest-utils`, чтобы root partition/filesystem клона расширялись после увеличения виртуального диска. Включён `fstrim.timer`; перед финальным shutdown выполняется `fstrim -av`.
-
-## 13. QEMU Guest Agent
-
-`qemu-guest-agent` обязателен. Он используется для build lifecycle, shutdown, status/IP, guest exec и диагностики. После verification reboot builder обязан снова ответить на QGA ping; иначе template не создаётся.
-
-## 14. Очистка machine-specific данных
-
-Перед `qm template` удаляются:
+Удаляются machine-specific/runtime данные:
 
 - Cloud-Init state/logs/seed;
-- machine-id и dbus machine-id;
+- machine-id;
 - SSH host keys;
 - DHCP/network state;
-- random seed;
-- APT cache/lists;
+- systemd random seed;
+- APT lists/cache;
 - journal/build logs;
-- temporary files;
-- shell history;
+- temp/history;
 - `/home/ops/.ssh`;
-- `/usr/local/sbin/template-bootstrap`;
-- `/usr/local/sbin/template-finalize`.
+- builder scripts.
 
-Настройки VGA/noVNC tty1 autologin, serial0 fallback, console font, SSH hardening, sudo policy, timesync и fstrim являются частью base template и не удаляются.
+Сохраняются SSH hardening, sudo, console, timesync и fstrim policy.
 
-## 15. Информация о происхождении
+## 11. Provenance
 
 `/etc/vm-template-info` содержит как минимум:
 
 ```text
-Template: tpl-debian13
-Template-Version: <TEMPLATE_VERSION>
-OS: Debian 13
-Kernel-Flavor: amd64
-Primary-Console: VGA/noVNC tty1 autologin ops
-Fallback-Console: serial0 ttyS0 autologin ops
-Infrastructure-Source: zsergeyru/proxmox
-Bootstrap-Source: zsergeyru/proxmox-bootstrap
-Source-Image: <image filename>
-Source-Image-SHA512: <sha512>
-Build-Date: <UTC date>
+Template-Version
+Source-Image
+Source-Image-SHA512
+Debian-Cloud-Build
+Build-Apt-Snapshot
+Build-Date
+Kernel-Flavor
+Console modes
 ```
 
-## 16. Финальные проверки
+## 12. Failure policy
 
-Перед успешным завершением builder проверяет конфигурацию template:
+Существующий VMID 9000 не перезаписывается.
 
-```text
-template: 1
-protection: 1
-agent: 1
-vga: std
-serial0: socket
-ciuser: ops
-ciupgrade: 0
-ipconfig0: ip=dhcp
-cicustom: отсутствует
-```
+При build error временная VM/disks не уничтожаются автоматически: состояние сохраняется для диагностики.
 
-Builder-only Cloud-Init не должен остаться в стандартном Cloud-Init drive.
+## 13. Проверка
 
-## 17. CI канонического builder
+CI проверяет shell/YAML/pin policy, но acceptance новой Template-Version требует реального clean build + Full Clone smoke test.
 
-GitHub Actions в `zsergeyru/proxmox-bootstrap` проверяет:
-
-1. внешний `create-template.sh` через `bash -n`;
-2. встроенный Cloud-Init как YAML;
-3. извлечённый `/usr/local/sbin/template-bootstrap` через `bash -n`;
-4. извлечённый `/usr/local/sbin/template-finalize` через `bash -n`;
-5. whitespace errors.
-
-CI не заменяет реальный clean build на PVE, но ловит ошибки структуры heredoc/YAML и синтаксиса вложенных guest-скриптов до запуска на сервере.
-
-## 18. Защита template и клонов
-
-Base template VMID `9000`:
-
-```text
-protection=1
-```
-
-Обычный рабочий Full Clone:
-
-```text
-protection=0
-```
-
-Защита включается на конкретной VM только по явному решению.
-
-## 19. Поведение при ошибке
-
-Скрипт никогда автоматически не уничтожает существующую VM или storage. При ошибке builder сохраняется для диагностики. `trap ERR` остаётся активным до успешного `qm template`, включения protection и финальных проверок.
-
-## 20. Что не входит в base template
-
-Не устанавливаются заранее Docker/Compose, SmartDNS, AdGuard Home, sing-box, VPN, специальные nftables/PBR rules, Gitea/Jenkins, базы данных, reverse proxy, backup-клиенты вроде `restic` и service-specific users/directories.
+Подробная reproducibility policy: [`../../docs/24-reproducible-bootstrap.md`](../../docs/24-reproducible-bootstrap.md).

@@ -15,13 +15,14 @@
 - [`21-pve-filesystem-layout.md`](21-pve-filesystem-layout.md) — файловая структура PVE bootstrap/deployer.
 - [`22-storage-and-backup.md`](22-storage-and-backup.md) — storage, backup, retention и restore.
 - [`23-security.md`](23-security.md) — общие правила безопасности.
+- [`24-reproducible-bootstrap.md`](24-reproducible-bootstrap.md) — immutable revisions, version lock и reproducible template/bootstrap policy.
 
-Диапазон `24–29` зарезервирован для новых документов уровня PVE, например template/host policy.
+Диапазон `25–29` зарезервирован для новых документов уровня PVE.
 
 ### 30–39 — развёртывание гостей
 
 - [`30-guest-manifest.md`](30-guest-manifest.md) — канонический формат `guest.yaml` и PVE-side deploy.
-- [`31-bootstrap.md`](31-bootstrap.md) — публичный bootstrap и переход к private source of truth.
+- [`31-bootstrap.md`](31-bootstrap.md) — public zero-day, private source of truth и переходное состояние bootstrap.
 - [`32-docker-in-lxc-policy.md`](32-docker-in-lxc-policy.md) — принятое решение B: Docker внутри unprivileged LXC, security boundary и backup/restore gate.
 
 Диапазон `33–39` зарезервирован для общих deploy/guest policy.
@@ -31,8 +32,6 @@
 - [`40-network.md`](40-network.md) — IPv4, VLAN, VPN/PBR и граница OpenWrt ↔ VM 109.
 - [`41-dns.md`](41-dns.md) — SmartDNS, `home.arpa`, DoH/DoT и DNS policy.
 - [`42-ipv6.md`](42-ipv6.md) — IPv6 и dual-stack модель.
-
-Диапазон `43–49` зарезервирован для VPN, routing и других сетевых документов.
 
 ### 50–59 — AI control plane
 
@@ -50,10 +49,8 @@
 
 ## Правило нумерации
 
-Новый документ получает номер внутри соответствующего блока. Не нужно перенумеровывать существующие файлы ради плотной последовательности: свободные номера оставляются для будущего расширения.
-
-Если один тематический блок разрастается примерно до 5–10 самостоятельных документов, можно отдельно решить вопрос о создании подкаталога. До этого `docs/` остаётся плоским.
+Новый документ получает номер внутри соответствующего блока. Существующие файлы не перенумеровываются ради плотной последовательности.
 
 ## Источники истины
 
-Числовой префикс определяет навигацию, но не приоритет источника истины. При конфликте документов действует приоритет, зафиксированный в корневом [`../README.md`](../README.md) и профильных README/ADR.
+Числовой префикс задаёт навигацию, но не приоритет. При конфликте действует приоритет корневого [`../README.md`](../README.md), профильных README и принятых ADR/policy.
