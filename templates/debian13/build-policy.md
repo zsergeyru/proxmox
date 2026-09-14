@@ -1,67 +1,48 @@
 # Политика сборки `tpl-debian13`
 
 ```text
-Template-Version: 5
+Template-Version: 4
 ```
 
-## 1. Роль PVE host
+## 1. Общий принцип
 
-PVE остаётся hypervisor/deployer, а не application/build workstation.
+Template должен быть простым и понятным. Для текущего проекта не используем отдельные lock-файлы версий Debian, pinned cloud build или `snapshot.debian.org`.
 
-Разрешён минимальный runtime, нужный host-side deployment, включая:
+Сборка каждый раз берёт актуальный Debian 13 Trixie cloud image и актуальные stable packages на момент запуска.
+
+## 2. Source image
+
+Используется:
 
 ```text
-git
-openssh-client
-python3/python3-yaml
-curl/jq/CA tools
+https://cloud.debian.org/images/cloud/trixie/latest/debian-13-genericcloud-amd64.qcow2
 ```
 
-`git` нужен для read-only private source-of-truth checkout и является принятым исключением. На PVE не устанавливаются Docker, Hermes, application services и произвольные guest build toolchains.
-
-Template строится штатными `qm/pvesm` и временной builder-VM.
-
-## 2. Воспроизводимый source image
-
-Не использовать:
+Checksum:
 
 ```text
-trixie/latest
+https://cloud.debian.org/images/cloud/trixie/latest/SHA512SUMS
 ```
 
-Текущий baseline:
+Builder обязан проверить SHA-512 до `qm importdisk`.
+
+Это защищает от повреждённой загрузки, но не пытается сделать две сборки в разные даты идентичными.
+
+## 3. APT
+
+Внутри builder VM используются обычные Debian repositories из cloud image:
 
 ```text
-Debian cloud build: 20260601-2496
-image: debian-13-genericcloud-amd64-20260601-2496.qcow2
+apt-get update
+apt-get -y full-upgrade
+apt-get install ...
 ```
 
-Builder получает `SHA512SUMS` из того же versioned cloud build и требует strict SHA-512 verification до `qm importdisk`.
+APT snapshot и version pinning не применяются.
 
-Использованные filename/hash/build id записываются в `/etc/vm-template-info`.
+`ciupgrade=0`: Cloud-Init не делает автоматический package upgrade при первом boot клона.
 
-## 3. Воспроизводимый APT build
-
-Live Debian repositories нельзя использовать для `apt full-upgrade` во время reproducible build, иначе одинаковый script в разные дни создаёт разные template.
-
-Текущий build snapshot:
-
-```text
-20260914T000000Z
-```
-
-Builder временно использует timestamped `snapshot.debian.org` для Debian и Debian Security, выполняет update/full-upgrade/package install и только после завершения build возвращает обычные live repositories.
-
-Следствие:
-
-```text
-snapshot → фиксирует состав template build
-live repos → используются клонами для дальнейших контролируемых обновлений
-```
-
-`ciupgrade=0`: Cloud-Init не выполняет автоматический package upgrade при первом boot клона.
-
-## 4. Kernel и VGA console
+## 4. Kernel и console
 
 Устанавливаются:
 
@@ -83,7 +64,7 @@ ttyS0 autologin ops
 Fixed 8x16
 ```
 
-После bootstrap обязателен verification reboot. Builder продолжает только если:
+После bootstrap выполняется verification reboot. Builder продолжает только если:
 
 - kernel `*-amd64` и не `*cloud*`;
 - `/sys/class/graphics/fb0/virtual_size` существует и валиден;
@@ -127,23 +108,11 @@ final cleanup
 
 Рабочие Debian VM создаются как Full Clone.
 
-До первого start задаются:
+До первого start задаются CPU/RAM/disk/network, `ciuser=ops`, SSH public key и Cloud-Init параметры.
 
-```text
-protection
-name/hostname
-CPU/RAM/disk
-ciuser=ops
-SSH public key
-network/DNS
-qm cloudinit update
-```
-
-Template `9000` остаётся `protection=1`. Protection клона задаётся по `guest.yaml`.
+Template `9000` остаётся `protection=1`.
 
 ## 8. Base packages
-
-Базовый набор включает инструменты администрирования/диагностики и QGA, включая:
 
 ```text
 qemu-guest-agent openssh-server sudo locales cloud-guest-utils systemd-timesyncd
@@ -155,7 +124,7 @@ dnsutils iproute2 iputils-ping net-tools
 cron logrotate
 ```
 
-Docker/Compose и service-specific software не входят в VM template.
+Docker/Compose и service-specific software в base template не входят.
 
 ## 9. Disk / TRIM
 
@@ -167,7 +136,7 @@ ssd=1
 base disk=16 GiB
 ```
 
-`cloud-guest-utils` обеспечивает growpart; включён `fstrim.timer`; перед seal выполняется `fstrim -av`.
+Включён `fstrim.timer`; перед seal выполняется `fstrim -av`.
 
 ## 10. Cleanup
 
@@ -184,22 +153,20 @@ base disk=16 GiB
 - `/home/ops/.ssh`;
 - builder scripts.
 
-Сохраняются SSH hardening, sudo, console, timesync и fstrim policy.
-
 ## 11. Provenance
 
-`/etc/vm-template-info` содержит как минимум:
+`/etc/vm-template-info` содержит:
 
 ```text
 Template-Version
 Source-Image
 Source-Image-SHA512
-Debian-Cloud-Build
-Build-Apt-Snapshot
 Build-Date
 Kernel-Flavor
 Console modes
 ```
+
+Pinned cloud build ID и APT snapshot больше не являются частью policy.
 
 ## 12. Failure policy
 
@@ -209,6 +176,4 @@ Console modes
 
 ## 13. Проверка
 
-CI проверяет shell/YAML/pin policy, но acceptance новой Template-Version требует реального clean build + Full Clone smoke test.
-
-Подробная reproducibility policy: [`../../docs/24-reproducible-bootstrap.md`](../../docs/24-reproducible-bootstrap.md).
+CI проверяет shell/YAML структуру. После существенного изменения builder требуется реальный clean build + Full Clone smoke test.
