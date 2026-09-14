@@ -65,7 +65,7 @@ MAIN — специальный native/untagged сегмент; VLAN 0 не ис
 
 ## Серверные management IP
 
-Для VM/LXC действует единое правило из [`vmid-plan.md`](vmid-plan.md):
+Для VM/LXC действует единое правило из [`11-vmid-plan.md`](11-vmid-plan.md):
 
 ```text
 current: VMID XYZ → 192.168.X.YZ/16
@@ -101,7 +101,7 @@ target:  VMID XYZ → 10.0.X.YZ/16
 
 ## DNS
 
-Постоянные сервисы используют `home.arpa`; `.local` остаётся для mDNS. Подробности — [`dns.md`](dns.md).
+Постоянные сервисы используют `home.arpa`; `.local` остаётся для mDNS. Подробности — [`41-dns.md`](41-dns.md).
 
 Клиенты могут использовать SmartDNS на 109. DNS не является механизмом маршрутизации сам по себе: фактический выбор ISP/VPN выполняется через nftables/PBR.
 
@@ -136,7 +136,7 @@ REMOTE-VPN → 10.60.0.0/16
 
 ## IPv6
 
-IPv6 включается позднее как dual stack. Базовые DHCPv6-PD, Router Advertisement и firewall локальных VLAN принадлежат edge-router/OpenWrt. NAT66 по умолчанию не используется. Детали — [`ipv6.md`](ipv6.md).
+IPv6 включается позднее как dual stack. Базовые DHCPv6-PD, Router Advertisement и firewall локальных VLAN принадлежат edge-router/OpenWrt. NAT66 по умолчанию не используется. Детали — [`42-ipv6.md`](42-ipv6.md).
 
 ## Ключевой критерий отказоустойчивости
 
