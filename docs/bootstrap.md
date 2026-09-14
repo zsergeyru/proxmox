@@ -30,12 +30,7 @@ zsergeyru/proxmox-bootstrap
 
 GitHub не позволяет сделать отдельный файл публичным внутри приватного репозитория. Поэтому для файлов, которые PVE должен скачивать напрямую через HTTPS без авторизации, используется отдельный public repository.
 
-На Proxmox-хосте при этом не требуется:
-
-- устанавливать Git;
-- клонировать весь инфраструктурный репозиторий;
-- хранить GitHub PAT;
-- давать хосту постоянный доступ к приватному GitHub-репозиторию.
+На Proxmox-хосте при этом не требуется устанавливать Git, клонировать весь инфраструктурный репозиторий или хранить GitHub PAT.
 
 ## Debian 13 template builder
 
@@ -66,62 +61,80 @@ GitHub token в этом сценарии не нужен.
 1. изменить `create-template.sh` непосредственно в `zsergeyru/proxmox-bootstrap`;
 2. убедиться, что файл не содержит секретов;
 3. дождаться успешной проверки GitHub Actions;
-4. при изменении поведения или параметров обновить соответствующую документацию в приватном `zsergeyru/proxmox`;
-5. использовать этот же raw URL для запуска на PVE.
+4. обновить соответствующую документацию в приватном `zsergeyru/proxmox`;
+5. использовать тот же raw URL для запуска на PVE.
 
-Приватная копия executable-файла специально не хранится.
+Приватная executable-копия специально не хранится.
 
 ## Security boundary
 
-`proxmox-bootstrap` является публичным репозиторием. В него запрещено помещать:
-
-- пароли и PIN;
-- GitHub PAT/API tokens;
-- приватные SSH-ключи;
-- WireGuard/Amnezia/VPN private keys и preshared keys;
-- `.env` с реальными секретами;
-- приватные TLS-ключи и client certificates;
-- credentials сервисов;
-- иные данные, публикация которых нежелательна.
-
-Допустимы только самодостаточные bootstrap-скрипты и документация, рассчитанные на публичное чтение.
+`proxmox-bootstrap` публичный. В него запрещено помещать пароли/PIN, PAT/API tokens, приватные SSH/VPN/TLS ключи, реальные `.env`, credentials сервисов и иные нежелательные для публикации данные.
 
 ## Текущий статус
 
-Публично опубликован единственный builder-скрипт:
+Публично опубликован один builder-скрипт:
 
 ```text
 create-template.sh
 ```
 
-Текущая версия builder по умолчанию создаёт Debian 13 template `tpl-debian13`, VMID `9000`, `Template-Version: 3`.
-
-### Проверенная v2
-
-**2026-09-14: Template-Version 2 успешно проверена полной чистой сборкой и тестовым Full Clone на реальном PVE-хосте.** Сборка прошла весь цикл: загрузка и SHA-512-проверка Debian genericcloud image, импорт и resize диска, временный Cloud-Init, bootstrap, QEMU Guest Agent, успешное завершение Cloud-Init final stage, финальная очистка, shutdown, регенерация штатного Cloud-Init, `qm template` и `protection=1`.
-
-Во время первого прогона v2 были выявлены и исправлены две ошибки порядка выполнения Cloud-Init:
-
-- `locale: en_US.UTF-8` нельзя задавать до установки/генерации `locales`;
-- пользователя `debian` нельзя удалять в `runcmd`, пока Cloud-Init ещё выполняет `ssh-authkey-fingerprints`.
-
-После исправлений новая сборка v2 с нуля завершилась сообщением `Template created successfully.`. Тестовый клон подтвердил SSH по ключу, locked password, sudo, QEMU Agent, timesync, growpart/filesystem growth, очистку builder artifacts и уникальные machine-id/SSH host keys.
-
-### Изменение v3
-
-В v3 Proxmox console переведена на настоящую текстовую serial-консоль:
+Текущая версия по умолчанию создаёт:
 
 ```text
-serial0: socket
+VMID: 9000
+Name: tpl-debian13
+Template-Version: 4
+```
+
+### v2
+
+2026-09-14 Template-Version 2 успешно проверена полной чистой сборкой и тестовым Full Clone на реальном PVE-хосте. Были подтверждены SSH по ключу, locked password, sudo, QEMU Agent, timesync, growpart/filesystem growth, очистка builder artifacts и уникальные machine-id/SSH host keys.
+
+### v3
+
+В v3 основная Proxmox console была переведена на:
+
+```text
 vga: serial0
 xterm.js → ttyS0 → autologin ops
 ```
 
-`vga: serial0` выбран специально: при `vga: std` штатная кнопка Web Console в Proxmox открывает noVNC, даже если serial0 настроен и xterm.js доступен отдельным пунктом. Для обычных headless Debian VM нужен именно прямой вход в xterm.js.
+Технически схема работала, но тестирование показало, что serial console менее удобна как основная Web Console: это поток, а не framebuffer, старое содержимое экрана не сохраняется.
 
-Отдельный VGA/noVNC-канал в base template не сохраняется. Если конкретному гостю понадобится графический display, он настраивается отдельно.
+### v4
 
-2026-09-14 guest-level часть v3 успешно прошла чистую сборку. После окончательного возврата `vga: serial0` требуется финально проверить поведение штатной Web Console на тестовом клоне.
+v4 возвращает:
+
+```text
+vga: std
+Proxmox Console → noVNC/VGA → tty1 → autologin ops
+```
+
+и оставляет резервный канал:
+
+```text
+serial0: socket
+xterm.js / qm terminal → ttyS0 → autologin ops
+```
+
+Во время теста выяснилась причина крупного шрифта в noVNC: исходный Debian genericcloud image загружался с `cloud-amd64` kernel без framebuffer. У тестовой VM:
+
+```text
+cloud-amd64 kernel → /sys/class/graphics/fb0 отсутствует
+regular amd64 kernel → fb0 = 1280,800
+```
+
+Поэтому v4 автоматически:
+
+1. устанавливает `linux-image-amd64`;
+2. устанавливает `console-setup` и `console-setup-linux`;
+3. настраивает `Fixed 8x16`;
+4. удаляет `linux-image-*cloud-amd64`;
+5. перезагружает builder;
+6. проверяет, что реально загружено обычное ядро, framebuffer равен `1280,800`, QEMU Guest Agent отвечает, `tty1` и `ttyS0` активны;
+7. только после этого выполняет final cleanup и создаёт template.
+
+Таким образом, проверяется не только наличие пакетов на диске, но и фактическая загрузка VM с нужным ядром и console stack.
 
 ### Protection при клонировании
 
@@ -131,10 +144,29 @@ Base template `9000` защищён:
 protection=1
 ```
 
-Обычные Full Clone по умолчанию должны быть без защиты:
+Обычные Full Clone по умолчанию должны иметь:
 
 ```text
 protection=0
 ```
 
-Так как protection может оказаться в конфигурации клона после clone, AI/deploy-сценарий обязан явно выставлять `protection=0`, если паспорт конкретной VM не требует обратного. Защиту нельзя снимать с самого template ради удобства клонирования.
+Deploy/AI workflow обязан явно выставлять `protection=0`, если паспорт конкретной VM не требует обратного.
+
+### Full Clone vs Linked Clone
+
+Для рабочих VM принят Full Clone. Проверять тип клона только по словам автоматизации нельзя.
+
+Надёжные признаки Full Clone:
+
+```text
+Proxmox task log:
+create full clone of drive scsi0 (...)
+```
+
+и на LVM-thin:
+
+```bash
+lvs -o lv_name,origin
+```
+
+У основного диска настоящего Full Clone поле `Origin` пустое. Если там `base-9000-disk-0`, создан Linked Clone.
