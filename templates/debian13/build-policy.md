@@ -67,13 +67,21 @@ PubkeyAuthentication yes
 
 ## 5. Доверенная Proxmox console
 
-Начиная с v3 основная VM console — текстовая serial-консоль:
+Начиная с v3 основной рабочий канал VM console — текстовая serial-консоль:
 
 ```text
 serial0: socket
-vga: serial0
-Proxmox xterm.js → ttyS0
+Proxmox xterm.js → ttyS0 → autologin ops
 ```
+
+При этом виртуальная VGA не отключается:
+
+```text
+vga: std
+noVNC → VGA/tty1
+```
+
+То есть `xterm.js` используется как основной административный интерфейс, а noVNC/VGA сохраняется как независимый резервный канал. На `tty1` специальный autologin не настраивается.
 
 На `ttyS0` используется:
 
@@ -82,8 +90,6 @@ agetty --autologin ops
 ```
 
 Пароль при этом не разблокируется. Право Proxmox `VM.Console` для такой VM следует считать административным доступом к гостевой ОС, поскольку `ops` может выполнять `sudo` без пароля.
-
-Специальный autologin на `tty1` в v3 не настраивается.
 
 ## 6. Cloud-Init lifecycle
 
@@ -192,7 +198,7 @@ base size: 16 GiB
 - `/usr/local/sbin/template-bootstrap`;
 - `/usr/local/sbin/template-finalize`.
 
-Настройки serial0/xterm.js autologin, SSH hardening, sudo policy, timesync и fstrim являются частью base template и не удаляются.
+Настройки serial0/xterm.js autologin, VGA/noVNC fallback, SSH hardening, sudo policy, timesync и fstrim являются частью base template и не удаляются.
 
 ## 13. Информация о происхождении
 
@@ -218,7 +224,7 @@ Build-Date: <UTC date>
 ```text
 template: 1
 protection: 1
-vga: serial0
+vga: std
 serial0: socket
 ciupgrade: 0
 ```
