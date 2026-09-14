@@ -7,6 +7,16 @@ node: pve
 
 description: Target central AI infrastructure control plane
 
+protection: false
+
+resources:
+  cpu:
+    cores: 2
+  memory_mb: 4096
+  disk:
+    size_gb: 24
+    storage: local-lvm
+
 network:
   bridge: vmbr0
   current:
@@ -25,3 +35,6 @@ management:
   ssh:
     user: ops
     port: 22
+
+vm:
+  guest_agent: true
