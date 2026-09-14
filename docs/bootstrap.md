@@ -109,12 +109,18 @@ create-template.sh
 
 ### Изменение v3
 
-В v3 основная Proxmox-консоль переведена с noVNC/tty1 на настоящую текстовую serial-консоль:
+В v3 основной рабочий интерфейс Proxmox console переведён на настоящую текстовую serial-консоль:
 
 ```text
 serial0: socket
-vga: serial0
 xterm.js → ttyS0 → autologin ops
 ```
 
-Специальный autologin на `tty1` удалён. Для v3 требуется новая чистая сборка и проверка тестового Full Clone.
+При этом VGA не отключается и остаётся независимым резервным каналом:
+
+```text
+vga: std
+noVNC → VGA/tty1
+```
+
+Специальный autologin на `tty1` удалён. Для v3 требуется новая чистая сборка и проверка тестового Full Clone, включая оба канала console.
