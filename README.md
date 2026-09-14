@@ -13,7 +13,7 @@
 
 ## Основной принцип
 
-Репозиторий организован вокруг гостей Proxmox: всё, что относится к конкретной VM/LXC, хранится в `guests/<VMID>-<name>/`. Общие решения и архитектура находятся в `docs/`.
+Репозиторий организован вокруг гостей Proxmox: всё, что относится к конкретной VM/LXC, хранится в `guests/<VMID>-<name>/`. Общие решения и архитектура находятся в `docs/`. Навигация и правило нумерации документов описаны в [`docs/README.md`](docs/README.md).
 
 Используется один основной monorepo `proxmox`. Отдельный Git-репозиторий создаётся только для действительно самостоятельного компонента с отдельным жизненным циклом.
 
@@ -21,7 +21,7 @@ VM/LXC не обязаны клонировать весь репозитори�
 
 ## Текущая и целевая карта гостей
 
-Актуальная нумерация определяется только [`docs/vmid-plan.md`](docs/vmid-plan.md).
+Актуальная нумерация определяется только [`docs/11-vmid-plan.md`](docs/11-vmid-plan.md).
 
 | ID | Тип | Имя | Статус/назначение |
 |---:|---|---|---|
@@ -81,29 +81,30 @@ Semaphore
 
 После переезда физический OpenWrt отвечает за WAN, VLAN, DHCP и базовый L3/firewall. `109` отвечает за SmartDNS, VPN/PBR, remote-access VPN и сопутствующие сетевые сервисы. Поэтому остановка Proxmox/109 не должна отключать базовый интернет и межсетевую маршрутизацию квартиры.
 
-Источник истины: [`docs/network.md`](docs/network.md).
+Источник истины: [`docs/40-network.md`](docs/40-network.md).
 
 ## Источники истины
 
 При расхождении документов использовать такой приоритет:
 
-1. [`docs/vmid-plan.md`](docs/vmid-plan.md) — VMID/CTID и management IP.
+1. [`docs/11-vmid-plan.md`](docs/11-vmid-plan.md) — VMID/CTID и management IP.
 2. [`guests/README.md`](guests/README.md) — формат `guest.yaml`, `rootfs/` и deploy.
 3. ADR в `guests/<guest>/decisions/` — принятые решения конкретного гостя.
-4. профильный документ в `docs/` (`network.md`, `dns.md`, `storage-and-backup.md` и т. п.).
+4. профильный документ в `docs/` (`40-network.md`, `41-dns.md`, `22-storage-and-backup.md` и т. п.).
 5. README конкретного гостя — его эксплуатационные особенности.
-6. [`docs/architecture.md`](docs/architecture.md) — сводка без дублирования деталей.
+6. [`docs/10-architecture.md`](docs/10-architecture.md) — сводка без дублирования деталей.
 
 Наблюдаемое состояние PVE хранится в `host/pve/`, временный drift конкретного гостя — в его `STATUS.md`.
 
 ## Главные документы
 
-- [`docs/architecture.md`](docs/architecture.md) — сводная архитектура.
-- [`docs/vmid-plan.md`](docs/vmid-plan.md) — VMID/CTID и management IP.
-- [`docs/network.md`](docs/network.md) — IPv4/VLAN/VPN и граница OpenWrt ↔ 109.
-- [`docs/dns.md`](docs/dns.md) — SmartDNS, `home.arpa`, mDNS.
-- [`docs/ai-control.md`](docs/ai-control.md) — AI-управление.
-- [`docs/storage-and-backup.md`](docs/storage-and-backup.md) — backup, retention, RPO/RTO и restore-test.
+- [`docs/README.md`](docs/README.md) — оглавление и правило нумерации документации.
+- [`docs/10-architecture.md`](docs/10-architecture.md) — сводная архитектура.
+- [`docs/11-vmid-plan.md`](docs/11-vmid-plan.md) — VMID/CTID и management IP.
+- [`docs/40-network.md`](docs/40-network.md) — IPv4/VLAN/VPN и граница OpenWrt ↔ 109.
+- [`docs/41-dns.md`](docs/41-dns.md) — SmartDNS, `home.arpa`, mDNS.
+- [`docs/50-ai-control.md`](docs/50-ai-control.md) — AI-управление.
+- [`docs/22-storage-and-backup.md`](docs/22-storage-and-backup.md) — backup, retention, RPO/RTO и restore-test.
 - [`templates/debian13/README.md`](templates/debian13/README.md) — базовый Debian 13 template.
 
 ## Общие правила
