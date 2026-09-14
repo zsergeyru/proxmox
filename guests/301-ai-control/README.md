@@ -169,4 +169,4 @@ Ansible/Semaphore не размещаются внутри `301`.
 10. `301` входит в неё по SSH как `ops`;
 11. затем проверен `311-dev-services`/Ansible.
 
-Подробности: [`../../docs/ai-control-bootstrap.md`](../../docs/ai-control-bootstrap.md), [`../../docs/ai-control.md`](../../docs/ai-control.md), [`../../docs/bootstrap.md`](../../docs/bootstrap.md).
+Подробности: [`../../docs/51-ai-control-bootstrap.md`](../../docs/51-ai-control-bootstrap.md), [`../../docs/50-ai-control.md`](../../docs/50-ai-control.md), [`../../docs/31-bootstrap.md`](../../docs/31-bootstrap.md).
