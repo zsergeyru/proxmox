@@ -4,6 +4,8 @@
 
 Актуальная нумерация определяется только [`../docs/vmid-plan.md`](../docs/vmid-plan.md).
 
+Подробная машинно-читаемая спецификация `guest.yaml` и правила универсального PVE-deployer описаны в [`../docs/guest-manifest.md`](../docs/guest-manifest.md).
+
 ## Структура
 
 ```text
@@ -54,7 +56,7 @@ protection: false
 
 Base template `9000` — отдельное исключение и всегда остаётся `protection=1`.
 
-При Full Clone из защищённого template AI/deploy-сценарий обязан **явно** выставить новому гостю `protection=0`, если в его паспорте не указано `protection: true`. Нельзя снимать protection с template ради создания обычных VM.
+При Full Clone из защищённого template deploy-сценарий обязан **явно** выставить новому гостю `protection=0`, если в его паспорте не указано `protection: true`. Нельзя снимать protection с template ради создания обычных VM.
 
 ### Ресурсы
 
@@ -70,7 +72,7 @@ resources:
     storage: local-lvm
 ```
 
-Не нужно копировать все значения Proxmox по умолчанию.
+Не нужно копировать все значения Proxmox по умолчанию. Для автоматического deploy конкретный manifest должен содержать все параметры, без которых его тип нельзя создать однозначно.
 
 ### Сеть
 
@@ -109,39 +111,48 @@ management:
     port: 22
 ```
 
-`ops` используется и человеком, и Ansible/AI-управлением; разграничение выполняется отдельными SSH-ключами и sudo-политиками. Отдельный `infra-agent` сейчас не вводится.
+`ops` используется человеком и Ansible/AI-управлением; разграничение выполняется отдельными SSH-ключами и sudo-политиками.
 
-Целевой `301-ai-control` создаёт свою infrastructure identity при bootstrap:
+Целевой `301-ai-control` создаёт свою infrastructure identity:
 
 ```text
-/home/ops/.ssh/ai_control_ed25519
-/home/ops/.ssh/ai_control_ed25519.pub
+/opt/ai-control/ssh/ai_control_ed25519
+/opt/ai-control/ssh/ai_control_ed25519.pub
 ```
 
-Именно содержимое `.pub` Hermes передаёт обычным новым Debian VM через Cloud-Init. Private key остаётся только в `301`.
+Именно содержимое `.pub` может передаваться обычным новым Debian VM через Cloud-Init. Private key остаётся только в `301`.
 
 GitHub Deploy Key `github_proxmox_ed25519` — отдельная identity и **не используется** для доступа к гостям.
 
 Пароли, токены и private keys в `guest.yaml` не хранятся.
 
-### VM/LXC-специфичные параметры
+### VM/LXC-специфичные параметры и source
+
+Для автоматического создания source должен быть явным.
+
+Обычная VM из template:
 
 ```yaml
 vm:
-  machine: q35
-  bios: ovmf
+  source:
+    template_vmid: 9000
+    clone: full
   guest_agent: true
 ```
 
-или:
+Deployer не должен предполагать, что любая `type: vm` всегда создаётся из `9000`.
+
+LXC:
 
 ```yaml
 lxc:
+  source:
+    ostemplate: local:vztmpl/debian-13-standard_13.x-amd64.tar.zst
   unprivileged: true
   nesting: true
 ```
 
-Пустые секции не добавляются.
+Пустые секции не добавляются. Полные правила и примеры — в [`../docs/guest-manifest.md`](../docs/guest-manifest.md).
 
 ## rootfs
 
@@ -161,11 +172,27 @@ guests/301-ai-control/rootfs/opt/ai-control/...
 
 ## Deploy
 
-Штатная схема:
+Есть два уровня deploy.
+
+### PVE-side создание объекта
+
+Универсальный deployer на самом PVE должен быть независим от AI:
+
+```text
+read-only checkout zsergeyru/proxmox
+→ deploy-guest <VMID>
+→ guest.yaml
+→ qm/pct/pvesh/pvesm
+→ VM/LXC
+```
+
+По умолчанию он строит PLAN; фактическое применение требует явного `--apply`. Подробности: [`../docs/guest-manifest.md`](../docs/guest-manifest.md) и [`../docs/pve-initialization.md`](../docs/pve-initialization.md).
+
+### Управление после появления AI/DevOps
 
 ```text
 Proximo в 301-ai-control
-→ создание и lifecycle VM/LXC на уровне Proxmox
+→ lifecycle/guest-level операции Proxmox
 
 Ansible на 311-dev-services
 → повторяемая настройка ОС и применение rootfs по SSH
@@ -177,15 +204,15 @@ Semaphore
 → необязательный web-интерфейс к тем же Ansible playbook
 ```
 
-Для создания обычной Debian VM из `tpl-debian13` порядок уровня Proxmox должен быть таким:
+Для обычной Debian VM из `tpl-debian13` порядок уровня Proxmox:
 
 ```text
 Full Clone from 9000
-→ создать/поместить guest в managed pool
-→ protection=0, если guest.yaml явно не требует true
+→ managed pool при необходимости
+→ protection по manifest
 → CPU/RAM/disk/network
 → ciuser=ops
-→ sshkeys=<301:/home/ops/.ssh/ai_control_ed25519.pub>
+→ optional sshkeys=<301:/opt/ai-control/ssh/ai_control_ed25519.pub>
 → Cloud-Init update
 → start
 → QEMU Agent/SSH/health check
@@ -199,7 +226,7 @@ Base template `9000` не содержит ключей. `301` не переда
 
 Persistent data, Docker volumes, базы данных, записи камер, пользовательские Git-репозитории, runtime state и секреты не относятся к `rootfs/`.
 
-Подробное решение по deploy: [`311-dev-services/decisions/001-deployment-tooling.md`](311-dev-services/decisions/001-deployment-tooling.md).
+Подробное решение по repeatable deploy: [`311-dev-services/decisions/001-deployment-tooling.md`](311-dev-services/decisions/001-deployment-tooling.md).
 
 ## Текущие исключения
 
