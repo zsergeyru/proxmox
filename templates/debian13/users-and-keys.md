@@ -1,8 +1,8 @@
-# Пользователи, SSH-ключи и доступ через Proxmox console
+# Пользователи, SSH-ключи и доступ к Debian VM
 
-## 1. `ops` и `root`
+## `ops` и `root`
 
-`ops` — основной административный пользователь Linux VM.
+`ops` — основной административный пользователь Linux VM:
 
 ```text
 groups: ops, sudo, adm
@@ -10,19 +10,9 @@ password: locked
 sudo: NOPASSWD
 ```
 
-Пароль `root` также явно заблокирован. Рабочего и пустого пароля ни у `ops`, ни у `root` нет.
+Пароль `root` также locked.
 
-## 2. SSH
-
-Штатный сетевой доступ:
-
-```text
-SSH → ops + private key
-```
-
-На каждой VM public key передаётся через Cloud-Init **до первого запуска**.
-
-SSH policy:
+Штатная SSH policy:
 
 ```text
 PermitRootLogin no
@@ -32,65 +22,13 @@ PermitEmptyPasswords no
 PubkeyAuthentication yes
 ```
 
-Root SSH запрещён полностью. Builder проверяет как синтаксис `sshd -t`, так и эффективные значения через `sshd -T`.
-
-## 3. Основная Proxmox console
-
-Начиная с Template-Version 4 основной Web Console используется в обычном VGA/noVNC режиме:
+То есть сетевой административный доступ:
 
 ```text
-vga: std
-Proxmox Web UI → VM → Console → noVNC/VGA → tty1 → autologin ops
+SSH → ops + private key
 ```
 
-Autologin задаётся через:
-
-```text
-/etc/systemd/system/getty@tty1.service.d/autologin.conf
-```
-
-Это не password authentication. `agetty` автоматически запускает локальную сессию `ops` на `tty1`, а пароль `ops` остаётся locked.
-
-Для нормального размера текста template использует обычное Debian-ядро `linux-image-amd64`, framebuffer и `console-setup`:
-
-```text
-FONTFACE="Fixed"
-FONTSIZE="8x16"
-```
-
-Builder требует наличие валидного `fb0`, но не фиксирует конкретное разрешение. На текущем PVE фактически получается `1280x800`, и это значение выводится в отчёте сборки.
-
-## 4. Резервная serial-консоль
-
-Параллельно сохраняется:
-
-```text
-serial0: socket
-xterm.js / qm terminal → ttyS0 → autologin ops
-```
-
-Override:
-
-```text
-/etc/systemd/system/serial-getty@ttyS0.service.d/autologin.conf
-```
-
-Serial-консоль нужна как резервный административный канал. Она не является основной Web Console при `vga: std`.
-
-Не следует одновременно держать несколько клиентов, подключённых к одному `serial0`: serial — поток, а не framebuffer, и несколько одновременных terminal clients могут мешать друг другу.
-
-## 5. Что означает доступ к Console
-
-Следствие для обоих console-каналов:
-
-```text
-право открыть VM Console в Proxmox
-= административный shell внутри гостевой VM
-```
-
-Так как `ops` имеет `NOPASSWD: sudo`, console access практически эквивалентен root-доступу к гостевой ОС. Proxmox ACL на `VM.Console` нужно выдавать только доверенным пользователям/ролям.
-
-## 6. Template не содержит credentials
+## Template не содержит credentials
 
 В `tpl-debian13`:
 
@@ -100,13 +38,29 @@ root password = locked
 ops authorized_keys = empty
 ```
 
-Base template не содержит личных или машинных public/private keys и паролей администратора.
+Ни personal keys, ни AI keys в template не зашиваются. Каждый конкретный clone получает public keys отдельно через Cloud-Init до первого запуска.
 
-Это принципиально: SSH identity возникает у конкретного управляющего устройства/VM, а не внутри общего template.
+## Cloud-Init порядок
 
-## 7. Личные SSH keys
+Для обычной managed Debian VM:
 
-Key pair принадлежит устройству:
+```text
+Full Clone from 9000
+→ protection=0, если guest.yaml не требует обратного
+→ hostname/name
+→ CPU/RAM/disk/network
+→ ciuser=ops
+→ sshkeys=<нужные public keys>
+→ cloud-init update
+→ first start
+→ QEMU Agent/SSH/health check
+```
+
+Private key через Cloud-Init никогда не передаётся.
+
+## Personal SSH keys
+
+Personal key pair принадлежит устройству человека, например:
 
 ```text
 proxmox_ops_laptop
@@ -114,77 +68,70 @@ proxmox_ops_desktop
 proxmox_ops_phone
 ```
 
-Private key хранится только на соответствующем устройстве.
-
-Public key не является секретом и при необходимости может храниться в Git.
+Private key хранится только на соответствующем устройстве. Public key может храниться в Git, если это удобно.
 
 Private keys:
 
 - не хранить в Git;
 - не хранить в base template;
-- не размещать на PVE-хосте как постоянное хранилище.
+- не размещать на PVE как постоянное хранилище без необходимости.
 
-## 8. AI Control infrastructure key
+## AI Control infrastructure identity
 
-При zero-day bootstrap `301-ai-control` **внутри самой VM 301** создаёт собственную пару:
+У `301-ai-control` есть собственная technical identity для прямого SSH в managed guests:
 
 ```text
-/home/ops/.ssh/ai_control_ed25519
-/home/ops/.ssh/ai_control_ed25519.pub
+/opt/ai-control/ssh/ai_control_ed25519
+/opt/ai-control/ssh/ai_control_ed25519.pub
 ```
 
-Назначение:
+Пара создаётся **внутри `301`** скриптом `install-ai-control.sh`.
+
+Правила:
 
 ```text
 private key
-→ остаётся только в 301
-→ используется Hermes для прямого SSH в managed guests
+→ остаётся только внутри 301
+→ не попадает в Git
+→ не попадает в tpl-debian13
 
 public key
-→ передаётся новым Debian VM через Cloud-Init
-→ попадает в /home/ops/.ssh/authorized_keys конкретного гостя
+→ используется при создании managed VM
+→ передаётся пользователю ops через Cloud-Init до first boot
 ```
 
-Таким образом, агент не должен «откуда-то получить» заранее созданный private key: ключ рождается внутри control plane при его bootstrap и с этого момента становится его машинной identity.
-
-Private key не копируется обратно на PVE и не выводится bootstrap-скриптом.
-
-## 9. Отдельный GitHub Deploy Key
-
-Доступ к приватному `zsergeyru/proxmox` не смешивается с SSH-доступом к VM.
-
-`301` создаёт вторую пару:
+После этого Hermes может использовать:
 
 ```text
-/home/ops/.ssh/github_proxmox_ed25519
-/home/ops/.ssh/github_proxmox_ed25519.pub
+301-ai-control
+→ /opt/ai-control/ssh/ai_control_ed25519
+→ SSH ops@managed-guest
 ```
 
-Она используется **только** для:
+Этот direct SSH предназначен для bootstrap, diagnostics, one-off и emergency действий. Повторяемая конфигурация после появления `311-dev-services` выполняется Ansible.
+
+## GitHub identity AI Control
+
+Для доступа к приватному инфраструктурному Git используется **другая** пара:
+
+```text
+/opt/ai-control/ssh/github_proxmox_ed25519
+/opt/ai-control/ssh/github_proxmox_ed25519.pub
+```
+
+Она также создаётся внутри `301`, но используется только для:
 
 ```text
 git@github.com:zsergeyru/proxmox.git
 ```
 
-Zero-day bootstrap выводит только `github_proxmox_ed25519.pub`. Оператор вручную регистрирует его как Deploy Key репозитория. Для автономного `commit/push` включается `Allow write access`.
+Public key вручную регистрируется как GitHub Deploy Key. Если Hermes должен выполнять push, Deploy Key получает `Allow write access`.
 
-GitHub PAT для базового bootstrap не требуется.
+Не использовать GitHub key для SSH в инфраструктурные VM и не использовать infrastructure key как GitHub Deploy Key. Разделение identities уменьшает blast radius компрометации одного credential.
 
-Разделение ключей обязательно:
+## Другие technical keys
 
-```text
-ai_control_ed25519
-→ SSH в домашние VM
-
-github_proxmox_ed25519
-→ SSH transport GitHub
-```
-
-Компрометация GitHub Deploy Key не должна автоматически давать SSH-доступ к нашим гостевым ОС.
-
-## 10. Другие технические keys
-
-Другие машинные роли при необходимости получают отдельные ключи, например:
+Для независимых ролей допускаются отдельные пары, например:
 
 ```text
 deploy_ed25519
@@ -192,83 +139,62 @@ backup_ed25519
 ci_ed25519
 ```
 
-Private key хранится там, откуда инициируется действие. Public key передаётся только тем VM, где эта роль нужна.
+Общий принцип тот же: private key находится там, откуда инициируется действие; public key получают только необходимые targets.
 
-После появления `311-dev-services` Ansible может получить отдельный `deploy_ed25519`; это не отменяет прямой `ai_control_ed25519` у `301` для bootstrap/diagnostic/emergency задач.
+## SSH host keys VM
 
-## 11. Cloud-Init и AI-агент
+`/etc/ssh/ssh_host_*` идентифицируют сервер, а не клиента. Перед превращением builder в template они удаляются, поэтому каждый clone создаёт уникальные host keys при первом boot.
 
-Для стандартного автоматического развёртывания Hermes берёт public infrastructure key локально из:
+## Proxmox Console
+
+Template-Version 4 использует основной Web Console:
 
 ```text
-/home/ops/.ssh/ai_control_ed25519.pub
+vga: std
+Proxmox Web UI
+→ noVNC/VGA
+→ tty1
+→ autologin ops
 ```
 
-Порядок:
+Fallback:
 
 ```text
-Full Clone 9000
-→ поместить guest в managed pool
-→ protection=0, если паспорт VM явно не требует защиты
-→ hostname/name
-→ ciuser=ops
-→ sshkeys=<содержимое ai_control_ed25519.pub>
-→ network/DNS
-→ Cloud-Init update
-→ first start
-→ QEMU Agent/SSH/health check
+serial0: socket
+→ ttyS0
+→ autologin ops
 ```
 
-Base template `9000` остаётся защищённым (`protection=1`), но обычные рабочие Full Clone по умолчанию должны иметь `protection=0`.
+Autologin на локальной console не является password authentication; passwords `ops` и `root` остаются locked.
 
-Public key для этого сценария не обязан храниться в Git: он доступен непосредственно внутри `301` рядом с соответствующим private key.
+Поскольку `ops` имеет `NOPASSWD sudo`, право открыть VM Console фактически является административным доступом к гостю. Proxmox ACL на `VM.Console` выдаётся только доверенным identities.
 
-## 12. SSH host keys VM
+## Backup и private keys
 
-`/etc/ssh/ssh_host_*` идентифицируют сервер, а не пользователя. Перед превращением builder в template они удаляются. Каждый клон создаёт собственные host keys при первом запуске.
+Если technical private key находится внутри рабочей VM, полный Proxmox backup этой VM содержит этот key. Поэтому backup `301-ai-control` считается чувствительным объектом: кроме SSH identities в нём находятся и другие control-plane secrets.
 
-## 13. Backup private keys
-
-Если technical private key находится внутри рабочей VM, полный Proxmox backup этой VM сохраняет его вместе с остальными данными. Такой backup считается чувствительным объектом.
-
-Для `301-ai-control` это особенно важно: его backup содержит как минимум infrastructure private key, GitHub Deploy Key и credentials AI/MCP, появившиеся после bootstrap.
-
-## 14. Итоговая модель
+## Итоговая модель
 
 ```text
-Base template 9000
+9000 tpl-debian13
 ├── ops account
-├── ops password locked
-├── root password locked
-├── authorized_keys empty
-├── никаких персональных/машинных SSH keys
-├── vga: std
-├── tty1 autologin ops
-├── regular Debian amd64 kernel + framebuffer
-├── serial0: socket
-└── ttyS0 autologin ops (fallback)
+├── passwords locked
+└── authorized_keys empty
 
-        ↓ Full Clone 9000 → 301
+          ↓ Full Clone + Cloud-Init
+
+managed VM
+└── /home/ops/.ssh/authorized_keys
+    ├── AI Control public key
+    └── другие разрешённые public keys при необходимости
 
 301-ai-control
-├── ai_control_ed25519
-│   └── identity для SSH в managed guests
-├── github_proxmox_ed25519
-│   └── Deploy Key только для private Git
-└── Hermes + Proximo
+└── /opt/ai-control/ssh/ai_control_ed25519
+    └── private infrastructure identity
 
-        ↓ Full Clone + Cloud-Init before first boot
-
-Managed Debian VM
-├── ops authorized_keys содержит ai_control_ed25519.pub
-├── hostname/network
-└── protection=0 по умолчанию
+301-ai-control
+└── /opt/ai-control/ssh/github_proxmox_ed25519
+    └── private GitHub-only identity
 ```
 
-Административные каналы обычной VM:
-
-```text
-1. SSH → ops + соответствующий key
-2. Proxmox Console/noVNC → VGA/tty1 → autologin ops
-3. xterm.js или qm terminal → serial0/ttyS0 → autologin ops (fallback)
-```
+Таким образом private keys никогда не требуется копировать в создаваемую VM: clone получает только public half.
