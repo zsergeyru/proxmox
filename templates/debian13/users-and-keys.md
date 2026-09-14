@@ -17,7 +17,6 @@ PermitRootLogin no
 `ops` создаётся в base template и используется для:
 
 - SSH-входа по ключу;
-- входа через Proxmox serial console по паролю;
 - ручного администрирования;
 - `sudo`;
 - работы с Git, конфигами, логами и сервисами.
@@ -51,14 +50,13 @@ Template не содержит личных public keys, private keys или р�
 
 ```text
 User: ops
-Password: пароль конкретной VM
 SSH public key(s): ключи нужных устройств/ролей
 Network: DHCP или статический IP
 ```
 
-Пароль используется для локальной/Proxmox console.
+Пароль `ops` в штатном сценарии не задаётся.
 
-SSH по паролю остаётся запрещённым:
+SSH по паролю запрещён:
 
 ```text
 PasswordAuthentication no
@@ -66,20 +64,17 @@ KbdInteractiveAuthentication no
 PubkeyAuthentication yes
 ```
 
-Поэтому наличие `cipassword` не открывает парольный SSH.
-
-## 5. Два канала административного доступа
+## 5. Основной административный доступ
 
 ```text
-Proxmox serial console
-→ ops + password конкретной VM
-
 SSH
 → ops + private key на устройстве
 → соответствующий public key передан VM через Cloud-Init
 ```
 
-Если сеть/SSH недоступны, остаётся console login. Если console password неизвестен, его можно изменить в Cloud-Init конфигурации VM и применить по правилам Cloud-Init/перезапуска конкретной машины.
+Serial console Proxmox остаётся диагностическим каналом: через неё можно наблюдать загрузку и сообщения системы, но штатного парольного login для `ops` нет.
+
+Если SSH недоступен, но QEMU Guest Agent работает, для аварийной диагностики и команд можно использовать `qm guest exec`. Если одновременно недоступны сеть и Guest Agent, используется recovery/single-user сценарий через Proxmox.
 
 ## 6. Личные SSH-ключи
 
@@ -119,18 +114,13 @@ Public key:
 - public keys можно хранить в Git;
 - для нового устройства создавать отдельный key pair.
 
-## 7. Пароли console
+## 7. Пароли
 
-Пароль `ops` задаётся **для конкретного клона**, а не при сборке template.
+Для обычных VM пароль `ops` **не используется** и остаётся заблокированным.
 
-Это позволяет:
+Это упрощает автоматическое развёртывание: агенту не нужно получать, хранить или передавать пароль. Доступ строится только на SSH public keys, передаваемых через Cloud-Init.
 
-- использовать разные пароли на разных VM;
-- менять пароль VM без пересборки template;
-- не хранить общий пароль во всех клонах;
-- не вводить пароль в скрипт сборки template.
-
-Пароли не хранятся в Git и не передаются в документацию/чат.
+Если в будущем для отдельной VM действительно понадобится локальный пароль, это должно быть отдельным решением для этой VM, а не свойством базового template.
 
 ## 8. Пользователи сервисов
 
@@ -217,7 +207,7 @@ Base template
         ↓ Full Clone + Cloud-Init
 
 Concrete VM
-├── ops console password
+├── ops password still locked
 ├── one or more SSH public keys
 ├── hostname
 └── IP/network settings
@@ -231,7 +221,7 @@ Administrative device
 1. `root` по SSH запрещён.
 2. `ops` — основной администратор.
 3. Template не содержит персональных credentials.
-4. Console password задаётся конкретной VM через Cloud-Init.
+4. Пароль `ops` штатно не создаётся.
 5. SSH public keys задаются конкретной VM через Cloud-Init.
 6. SSH по паролю запрещён.
 7. Private SSH keys никогда не хранятся в Git/template.
