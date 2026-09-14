@@ -16,10 +16,9 @@ Template-Version: 2
 - [`build-policy.md`](./build-policy.md) — политика сборки и базовых настроек;
 - [`users-and-keys.md`](./users-and-keys.md) — пользователи, SSH-ключи и доступ через Proxmox console;
 - [`filesystem-layout.md`](./filesystem-layout.md) — файловая структура сервисов;
-- [`create-template.sh`](./create-template.sh) — рабочая инфраструктурная копия автоматизированной сборки;
-- [`../../docs/bootstrap.md`](../../docs/bootstrap.md) — публичный bootstrap-репозиторий и способ запуска непосредственно на PVE.
+- [`../../docs/bootstrap.md`](../../docs/bootstrap.md) — расположение и способ запуска bootstrap-скрипта непосредственно на PVE.
 
-Публичная утверждённая копия скрипта распространяется через `zsergeyru/proxmox-bootstrap`. Она позволяет PVE скачать один файл по HTTPS без Git и GitHub PAT.
+Единственный канонический экземпляр `create-template.sh` хранится в публичном репозитории `zsergeyru/proxmox-bootstrap`. В приватном `proxmox` executable-копия не хранится, чтобы не поддерживать две версии одного скрипта.
 
 ## Что делает скрипт
 
@@ -294,7 +293,7 @@ VMID `9000` должен быть свободен.
 
 ## Запуск на Proxmox
 
-Штатный способ — скачать утверждённую публичную копию bootstrap-скрипта. Git и GitHub token на PVE для этого не нужны:
+Штатный способ — скачать канонический bootstrap-скрипт из публичного `zsergeyru/proxmox-bootstrap`. Git и GitHub token на PVE для этого не нужны:
 
 ```bash
 curl -fsSL \
@@ -305,8 +304,6 @@ bash -n /root/create-template.sh
 chmod +x /root/create-template.sh
 /root/create-template.sh
 ```
-
-Приватная копия `templates/debian13/create-template.sh` используется как инфраструктурный source of truth и должна синхронизироваться с публичной утверждённой копией перед запуском.
 
 По умолчанию:
 
