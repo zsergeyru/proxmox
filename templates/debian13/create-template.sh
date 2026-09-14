@@ -92,6 +92,12 @@ wait_for_bootstrap() {
     return 1
 }
 
+wait_for_cloud_init() {
+    local out
+    out="$(qm guest exec "$VMID" -- /bin/bash -lc "timeout ${WAIT_SECONDS}s cloud-init status --wait && printf CLOUD_INIT_DONE")"
+    grep -q 'CLOUD_INIT_DONE' <<<"$out"
+}
+
 wait_for_stopped() {
     local deadline=$((SECONDS + 300))
     while (( SECONDS < deadline )); do
@@ -107,6 +113,10 @@ wait_for_stopped() {
 for cmd in qm pvesm sha512sum awk grep sed; do
     require_cmd "$cmd"
 done
+
+[[ "$VMID" =~ ^[0-9]+$ ]] || die "VMID must be numeric"
+[[ "$TEMPLATE_VERSION" =~ ^[0-9]+$ ]] || die "TEMPLATE_VERSION must be numeric"
+[[ "$WAIT_SECONDS" =~ ^[0-9]+$ ]] || die "WAIT_SECONDS must be numeric"
 
 vm_exists && die "VMID ${VMID} already exists. Refusing to overwrite or destroy it."
 pvesm status --storage "$DISK_STORAGE" >/dev/null 2>&1 || die "Storage '${DISK_STORAGE}' is not available"
@@ -126,6 +136,8 @@ fetch_file "$CHECKSUM_URL" "$CHECKSUM_PATH"
 log "Verifying SHA-512 checksum"
 checksum_line="$(awk -v f="$IMAGE_NAME" '$2 == f || $2 == ("*" f) {print; exit}' "$CHECKSUM_PATH")"
 [[ -n "$checksum_line" ]] || die "No checksum entry found for ${IMAGE_NAME} in ${CHECKSUM_URL}"
+IMAGE_SHA512="$(awk '{print $1}' <<<"$checksum_line")"
+[[ "$IMAGE_SHA512" =~ ^[0-9a-fA-F]{128}$ ]] || die "Invalid SHA-512 checksum entry for ${IMAGE_NAME}"
 (
     cd "$IMAGE_DIR"
     printf '%s\n' "$checksum_line" | sha512sum --check --strict -
@@ -151,13 +163,14 @@ users:
     sudo: ["ALL=(ALL) NOPASSWD:ALL"]
 
 write_files:
-  - path: /etc/ssh/sshd_config.d/99-template-security.conf
+  - path: /etc/ssh/sshd_config.d/00-template-security.conf
     owner: root:root
     permissions: '0644'
     content: |
       PermitRootLogin no
       PasswordAuthentication no
       KbdInteractiveAuthentication no
+      PermitEmptyPasswords no
       PubkeyAuthentication yes
 
   - path: /etc/systemd/system/getty@tty1.service.d/autologin.conf
@@ -167,6 +180,12 @@ write_files:
       [Service]
       ExecStart=
       ExecStart=-/sbin/agetty --autologin ops --noclear %I $TERM
+
+  - path: /etc/sudoers.d/90-ops
+    owner: root:root
+    permissions: '0440'
+    content: |
+      ops ALL=(ALL:ALL) NOPASSWD:ALL
 
   - path: /etc/profile.d/99-admin-history.sh
     owner: root:root
@@ -196,7 +215,7 @@ write_files:
       apt-get update
       apt-get -y full-upgrade
       apt-get install -y --no-install-recommends \
-        qemu-guest-agent openssh-server sudo locales \
+        qemu-guest-agent openssh-server sudo locales cloud-guest-utils systemd-timesyncd \
         git mc nano \
         curl wget jq ca-certificates openssl \
         htop ncdu lsof tree tmux bash-completion \
@@ -208,14 +227,20 @@ write_files:
       locale-gen en_US.UTF-8
       update-locale LANG=en_US.UTF-8
       timedatectl set-timezone Europe/Moscow
-      timedatectl set-ntp true || true
+      systemctl enable --now systemd-timesyncd.service
+      timedatectl set-ntp true
 
       systemctl daemon-reload
       systemctl enable --now qemu-guest-agent
-      systemctl enable ssh
-      systemctl restart ssh
+      systemctl enable --now ssh
       systemctl enable getty@tty1.service
       systemctl enable serial-getty@ttyS0.service || true
+      systemctl enable --now fstrim.timer
+
+      /usr/sbin/sshd -t
+      /usr/sbin/visudo -cf /etc/sudoers.d/90-ops
+      id ops >/dev/null
+      passwd -S ops | grep -q ' L '
 
       if id debian >/dev/null 2>&1; then
         userdel -r debian || true
@@ -223,9 +248,11 @@ write_files:
 
       cat >/etc/vm-template-info <<EOF
       Template: tpl-debian13
-      Template-Version: 2
+      Template-Version: __TEMPLATE_VERSION__
       OS: Debian 13
       Source: zsergeyru/proxmox
+      Source-Image: __IMAGE_NAME__
+      Source-Image-SHA512: __IMAGE_SHA512__
       Build-Date: $(date -u +%F)
       EOF
 
@@ -240,7 +267,7 @@ write_files:
       set -Eeuo pipefail
 
       rm -f /var/lib/template-build/bootstrap-complete
-      cloud-init clean --logs --seed || true
+      cloud-init clean --logs --seed
 
       truncate -s 0 /etc/machine-id
       rm -f /var/lib/dbus/machine-id
@@ -256,12 +283,21 @@ write_files:
       rm -f /root/.bash_history /home/ops/.bash_history
       rm -rf /home/ops/.ssh
       rm -rf /var/lib/template-build
+      rm -f /usr/local/sbin/template-bootstrap /usr/local/sbin/template-finalize
+
+      fstrim -av || printf 'WARNING: fstrim did not complete successfully; continuing template finalization\n' >&2
       sync
       printf 'FINALIZE_OK\n'
 
 runcmd:
   - [bash, -lc, /usr/local/sbin/template-bootstrap]
 CLOUDCFG
+
+sed -i \
+    -e "s/__TEMPLATE_VERSION__/${TEMPLATE_VERSION}/g" \
+    -e "s/__IMAGE_NAME__/${IMAGE_NAME}/g" \
+    -e "s/__IMAGE_SHA512__/${IMAGE_SHA512}/g" \
+    "$SNIPPET_PATH"
 
 log "Creating builder VM ${VMID}"
 qm create "$VMID" \
@@ -299,6 +335,9 @@ wait_for_agent || die "QEMU Guest Agent did not become available within ${WAIT_S
 log "Waiting for bootstrap to complete"
 wait_for_bootstrap || die "Guest bootstrap did not finish within ${WAIT_SECONDS}s. Inspect VM ${VMID} console and cloud-init logs."
 
+log "Waiting for Cloud-Init final stage"
+wait_for_cloud_init || die "Cloud-Init did not reach the done state cleanly"
+
 log "Running final cleanup inside the guest"
 FINALIZE_OUTPUT="$(qm guest exec "$VMID" -- /usr/local/sbin/template-finalize)"
 grep -q 'FINALIZE_OK' <<<"$FINALIZE_OUTPUT" || die "Guest finalization did not report success"
@@ -310,15 +349,34 @@ wait_for_stopped || die "Builder VM did not stop cleanly"
 log "Removing builder-only Cloud-Init and setting clone defaults"
 qm set "$VMID" --delete cicustom
 qm set "$VMID" --ciuser ops
+qm set "$VMID" --ciupgrade 0
 qm set "$VMID" --ipconfig0 ip=dhcp
 qm set "$VMID" --name "$TEMPLATE_NAME"
 qm set "$VMID" --description "Debian 13 (Trixie) base template; version ${TEMPLATE_VERSION}; Proxmox tty1 autologin; SSH keys supplied per clone"
 
+log "Regenerating standard Proxmox Cloud-Init drive"
+qm cloudinit update "$VMID"
+CLOUDINIT_USER_DATA="$(qm cloudinit dump "$VMID" user)"
+if grep -qE 'template-bootstrap|builder-debian13|/usr/local/sbin/template-finalize' <<<"$CLOUDINIT_USER_DATA"; then
+    die "Builder-only Cloud-Init content is still present after regeneration"
+fi
+
 rm -f "$SNIPPET_PATH"
-trap - ERR
 
 log "Converting VM ${VMID} to template"
 qm template "$VMID"
+
+log "Protecting base template from accidental deletion"
+qm set "$VMID" --protection 1
+
+FINAL_CONFIG="$(qm config "$VMID")"
+grep -q '^template: 1$' <<<"$FINAL_CONFIG" || die "VM ${VMID} was not marked as a template"
+grep -q '^protection: 1$' <<<"$FINAL_CONFIG" || die "Template protection was not enabled"
+grep -q '^vga: std$' <<<"$FINAL_CONFIG" || die "Template VGA is not set to std"
+grep -q '^serial0: socket$' <<<"$FINAL_CONFIG" || die "Template serial0 is not configured as socket"
+grep -q '^ciupgrade: 0$' <<<"$FINAL_CONFIG" || die "Cloud-Init automatic package upgrade is not disabled"
+
+trap - ERR
 
 cat <<EOF
 
@@ -333,7 +391,13 @@ User:    ops (password locked)
 Console: Proxmox noVNC / tty1 autologin as ops
 Serial:  serial0 kept as a diagnostic channel without autologin
 SSH:     inject one or more public keys on each clone through Cloud-Init
+Updates: automatic Cloud-Init package upgrade disabled (ciupgrade=0)
+Protect: Proxmox protection enabled on the base template
+Image:   ${IMAGE_NAME}
+SHA-512: ${IMAGE_SHA512}
 
-Recommended next step: create a FULL clone, configure its SSH public key through
-Cloud-Init, then verify noVNC tty1 autologin, QEMU Guest Agent and SSH access.
+Recommended next step: create a FULL clone, set SSH public key/network before the
+first start, regenerate its Cloud-Init drive, then verify noVNC tty1 autologin,
+QEMU Guest Agent, SSH access, unique machine-id/host keys and filesystem growth.
+
 EOF
