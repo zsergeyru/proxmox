@@ -7,7 +7,8 @@ set -Eeuo pipefail
 # and then converted to a Proxmox template.
 #
 # The template contains no personal SSH public key and no usable ops password.
-# Both are supplied per clone through normal Proxmox Cloud-Init settings.
+# Each clone receives its SSH public key through normal Proxmox Cloud-Init.
+# Password-based access is not part of the standard deployment model.
 
 VMID="${VMID:-9000}"
 TEMPLATE_NAME="${TEMPLATE_NAME:-tpl-debian13}"
@@ -297,7 +298,7 @@ qm set "$VMID" --delete cicustom
 qm set "$VMID" --ciuser ops
 qm set "$VMID" --ipconfig0 ip=dhcp
 qm set "$VMID" --name "$TEMPLATE_NAME"
-qm set "$VMID" --description "Debian 13 (Trixie) base template; version ${TEMPLATE_VERSION}; credentials supplied per clone through Cloud-Init"
+qm set "$VMID" --description "Debian 13 (Trixie) base template; version ${TEMPLATE_VERSION}; SSH public keys supplied per clone through Cloud-Init"
 
 rm -f "$SNIPPET_PATH"
 trap - ERR
@@ -314,10 +315,10 @@ Name:    ${TEMPLATE_NAME}
 Version: ${TEMPLATE_VERSION}
 Storage: ${DISK_STORAGE}
 Network: DHCP by default
-User:    ops
-Console: set an ops password on each clone through Cloud-Init
+User:    ops (password locked)
+Console: diagnostic only; no standard password login
 SSH:     inject one or more public keys on each clone through Cloud-Init
 
-Recommended next step: create a FULL clone, configure its Cloud-Init password and
-SSH key, then verify boot, QEMU Guest Agent, serial console login and SSH access.
+Recommended next step: create a FULL clone, configure its SSH public key through
+Cloud-Init, then verify boot, QEMU Guest Agent, serial console output and SSH access.
 EOF
