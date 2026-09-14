@@ -36,12 +36,15 @@ Root SSH запрещён полностью.
 
 ## 3. Основная Proxmox console
 
-Начиная с Template-Version 3 основной рабочий интерфейс VM console — настоящая текстовая serial-консоль:
+Начиная с Template-Version 3 основная VM console — настоящая текстовая serial-консоль:
 
 ```text
 serial0: socket
+vga: serial0
 Proxmox Web UI → Console → xterm.js → ttyS0 → autologin ops
 ```
+
+`vga: serial0` нужен не для графики, а для того, чтобы штатная кнопка `Console` в Proxmox открывала serial/xterm.js, а не noVNC.
 
 Autologin задаётся через:
 
@@ -60,22 +63,15 @@ Autologin задаётся через:
 
 Так как `ops` имеет `NOPASSWD: sudo`, console access практически эквивалентен root-доступу к гостевой ОС. Proxmox ACL на `VM.Console` нужно выдавать только доверенным пользователям/ролям.
 
-## 4. Резервная VGA/noVNC console
+## 4. noVNC/VGA
 
-VGA в v3 не отключается:
-
-```text
-vga: std
-noVNC → VGA/tty1
-```
-
-Специальный autologin на `tty1` не настраивается. noVNC сохраняется как отдельный резервный канал на случай проблем с serial console или для диагностики вывода на виртуальный экран.
-
-Штатный интерфейс для повседневной работы через Proxmox Web UI:
+Для обычных Debian VM на базе v3 отдельный VGA/noVNC-канал не сохраняется:
 
 ```text
-xterm.js / serial0
+vga: serial0
 ```
+
+Это осознанный выбор для headless server VM. Графический desktop/installer для таких гостей не является штатным сценарием. Если конкретной VM в будущем понадобится полноценный VGA/noVNC или SPICE, это задаётся отдельно в паспорте этой VM и не меняет базовую политику template.
 
 ## 5. Template не содержит персональных credentials
 
@@ -141,11 +137,14 @@ Private key хранится там, откуда инициируется де�
 
 ```text
 clone
+→ снять у клона наследованную protection, если она есть
 → sshkeys
 → network/DNS
 → qm cloudinit update
 → first start
 ```
+
+Base template `9000` остаётся защищённым (`protection=1`), но обычные рабочие Full Clone по умолчанию должны иметь `protection=0`, если их паспорт явно не требует обратного.
 
 Если public key хранится в Git, агент может получить его из репозитория; private key при этом остаётся на административном устройстве.
 
@@ -169,24 +168,24 @@ Base template
 ├── password locked
 ├── authorized_keys empty
 ├── serial0: socket
-├── ttyS0 autologin ops
-└── vga: std / noVNC fallback
+├── vga: serial0
+└── ttyS0 autologin ops
 
         ↓ Full Clone + Cloud-Init before first boot
 
 Concrete VM
 ├── one or more SSH public keys
 ├── hostname
-└── network settings
+├── network settings
+└── protection=0 by default unless explicitly required
 
 Administrative device
 └── corresponding private SSH key
 ```
 
-Три административных канала:
+Два штатных административных канала:
 
 ```text
 1. SSH → ops + key
 2. Proxmox xterm.js → serial0/ttyS0 → autologin ops
-3. Proxmox noVNC → VGA/tty1 → резервный канал
 ```
