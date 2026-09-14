@@ -1,11 +1,17 @@
-schema_version: 1
+schema_version: 2
 vmid: 109
 name: network-gateway
 type: vm
 state: planned
+deployable: true
 node: pve
 
 description: Network gateway, DNS, VPN and policy routing
+
+protection: false
+
+placement:
+  pool: managed
 
 resources:
   cpu:
@@ -28,6 +34,7 @@ network:
 
 boot:
   onboot: true
+  start_after_deploy: true
 
 management:
   ssh:
@@ -35,4 +42,7 @@ management:
     port: 22
 
 vm:
+  source:
+    template_vmid: 9000
+    clone: full
   guest_agent: true

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Consistency checks for the Proxmox infrastructure repository."""
+"""Consistency and deploy-readiness checks for the Proxmox infrastructure repository."""
 
 from __future__ import annotations
 
@@ -11,15 +11,30 @@ from pathlib import Path
 from urllib.parse import unquote
 
 import yaml
+from jsonschema import Draft202012Validator
 
 ROOT = Path(__file__).resolve().parents[1]
 GUESTS = ROOT / "guests"
 VMID_PLAN = ROOT / "docs" / "11-vmid-plan.md"
-ALLOWED_TYPES = {"vm", "lxc"}
-ALLOWED_STATES = {"planned", "active", "bootstrap", "legacy"}
+GUEST_SCHEMA = ROOT / "schemas" / "guest.schema.yaml"
+
 GUEST_DIR_RE = re.compile(r"^(\d{3})-(.+)$")
 PLAN_VMID_RE = re.compile(r"^- `(?P<vmid>\d{3})`\s+—", re.MULTILINE)
 MARKDOWN_LINK_RE = re.compile(r"!?\[[^\]]*\]\(([^)]+)\)")
+LXC_OSTEMPLATE_RE = re.compile(
+    r"^[A-Za-z0-9._-]+:vztmpl/[A-Za-z0-9._+-]+_amd64\.tar\.(?:zst|gz|xz)$"
+)
+FORBIDDEN_SOURCE_MARKERS = ("<", ">", "*", "?", "13.x", "latest", "tbd", "todo")
+FORBIDDEN_MANIFEST_KEYS = {
+    "password",
+    "passwd",
+    "secret",
+    "token",
+    "token_secret",
+    "private_key",
+    "preshared_key",
+}
+SELF_MANAGED_EXCLUSIONS = {100, 301, 320, 9000}
 PRIVATE_KEY_MARKERS = tuple(
     "-----BEGIN " + key_type + "-----"
     for key_type in (
@@ -66,6 +81,33 @@ def planned_vmids() -> set[int]:
     return set(values)
 
 
+def load_guest_schema() -> Draft202012Validator:
+    try:
+        schema = yaml.safe_load(GUEST_SCHEMA.read_text(encoding="utf-8"))
+        Draft202012Validator.check_schema(schema)
+    except Exception as exc:
+        fail(f"invalid guest schema {GUEST_SCHEMA.relative_to(ROOT)}: {exc}")
+        return Draft202012Validator({})
+    return Draft202012Validator(schema)
+
+
+def format_schema_path(error) -> str:
+    parts = [str(part) for part in error.absolute_path]
+    return ".".join(parts) if parts else "<root>"
+
+
+def validate_manifest_schema(
+    *, rel: Path, data: dict, schema_validator: Draft202012Validator
+) -> bool:
+    manifest_errors = sorted(
+        schema_validator.iter_errors(data),
+        key=lambda error: (list(error.absolute_path), error.message),
+    )
+    for error in manifest_errors:
+        fail(f"{rel}: schema error at {format_schema_path(error)}: {error.message}")
+    return not manifest_errors
+
+
 def expected_management_ip(vmid: int, stage: str) -> ipaddress.IPv4Address:
     text = f"{vmid:03d}"
     third = int(text[0])
@@ -83,22 +125,31 @@ def validate_stage_ip(
     vmid: int,
     stage: str,
     network: dict,
-    static_ips: dict[ipaddress._BaseAddress, Path],
+    static_ips: dict[ipaddress.IPv4Address, Path],
 ) -> None:
-    stage_data = network.get(stage) or {}
-    ipv4 = stage_data.get("ipv4") or {} if isinstance(stage_data, dict) else {}
-    address_text = ipv4.get("address") if isinstance(ipv4, dict) else None
-    gateway_text = ipv4.get("gateway") if isinstance(ipv4, dict) else None
-
-    if not address_text:
-        fail(f"{rel}: planned guest must define network.{stage}.ipv4.address")
+    stage_data = network.get(stage)
+    if stage_data is None:
         return
+
+    ipv4 = stage_data.get("ipv4", {})
+    address_text = ipv4.get("address")
+    gateway_text = ipv4.get("gateway")
 
     try:
         interface = ipaddress.ip_interface(address_text)
     except ValueError as exc:
         fail(f"{rel}: invalid network.{stage}.ipv4.address {address_text!r}: {exc}")
         return
+
+    if not isinstance(interface, ipaddress.IPv4Interface):
+        fail(f"{rel}: network.{stage}.ipv4.address must be IPv4")
+        return
+
+    if interface.network.prefixlen != 16:
+        fail(
+            f"{rel}: network.{stage}.ipv4.address must use /16, "
+            f"got /{interface.network.prefixlen}"
+        )
 
     address = interface.ip
     if address in static_ips:
@@ -108,20 +159,102 @@ def validate_stage_ip(
 
     expected = expected_management_ip(vmid, stage)
     if address != expected:
-        fail(f"{rel}: {stage} management IP {address} does not match VMID rule, expected {expected}")
-
-    expected_gateway = "192.168.1.1" if stage == "current" else "10.0.0.1"
-    if gateway_text != expected_gateway:
         fail(
-            f"{rel}: {stage} gateway must be {expected_gateway!r}, "
-            f"got {gateway_text!r}"
+            f"{rel}: {stage} management IP {address} does not match VMID rule, "
+            f"expected {expected}"
         )
+
+    try:
+        gateway = ipaddress.ip_address(gateway_text)
+    except ValueError as exc:
+        fail(f"{rel}: invalid network.{stage}.ipv4.gateway {gateway_text!r}: {exc}")
+        return
+
+    if not isinstance(gateway, ipaddress.IPv4Address):
+        fail(f"{rel}: network.{stage}.ipv4.gateway must be IPv4")
+        return
+
+    if gateway not in interface.network:
+        fail(
+            f"{rel}: network.{stage}.ipv4.gateway {gateway} is outside "
+            f"{interface.network}"
+        )
+
+    expected_gateway = ipaddress.ip_address(
+        "192.168.1.1" if stage == "current" else "10.0.0.1"
+    )
+    if gateway != expected_gateway:
+        fail(f"{rel}: {stage} gateway must be {expected_gateway}, got {gateway}")
+
+
+def walk_mapping_keys(value, path: tuple[str, ...] = ()):
+    if isinstance(value, dict):
+        for key, child in value.items():
+            child_path = path + (str(key),)
+            yield child_path, str(key)
+            yield from walk_mapping_keys(child, child_path)
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            yield from walk_mapping_keys(child, path + (str(index),))
+
+
+def validate_manifest_secrets(rel: Path, data: dict) -> None:
+    for key_path, key in walk_mapping_keys(data):
+        if key.lower() in FORBIDDEN_MANIFEST_KEYS:
+            fail(
+                f"{rel}: secret-like key is forbidden in guest.yaml: "
+                f"{'.'.join(key_path)}"
+            )
+
+
+def validate_deployable(rel: Path, data: dict) -> None:
+    if not data["deployable"]:
+        return
+
+    vmid = data["vmid"]
+    guest_type = data["type"]
+    pool = data["placement"]["pool"]
+
+    if guest_type == "undecided":
+        fail(f"{rel}: deployable guest cannot have type 'undecided'")
+
+    if vmid in SELF_MANAGED_EXCLUSIONS:
+        if pool is not None:
+            fail(f"{rel}: VMID {vmid} must not be placed in ordinary managed pool")
+    elif pool != "managed":
+        fail(f"{rel}: deployable managed guest must use placement.pool: managed")
+
+    ssh = data["management"]["ssh"]
+    if ssh["user"] != "ops":
+        fail(f"{rel}: deployable guest management.ssh.user must be 'ops'")
+    if ssh["port"] != 22:
+        fail(f"{rel}: deployable guest management.ssh.port must be 22")
+
+    if guest_type == "vm":
+        source = data["vm"]["source"]
+        if source["template_vmid"] == vmid:
+            fail(f"{rel}: VM cannot clone from itself")
+        if data["vm"]["guest_agent"] is not True:
+            fail(f"{rel}: deployable VM must enable QEMU guest agent")
+
+    if guest_type == "lxc":
+        source = data["lxc"]["source"]
+        ostemplate = source["ostemplate"]
+        lowered = ostemplate.lower()
+        if any(marker in lowered for marker in FORBIDDEN_SOURCE_MARKERS):
+            fail(f"{rel}: lxc.source.ostemplate must be pinned, got {ostemplate!r}")
+        if not LXC_OSTEMPLATE_RE.fullmatch(ostemplate):
+            fail(
+                f"{rel}: lxc.source.ostemplate must be a concrete Proxmox "
+                f"vztmpl volume, got {ostemplate!r}"
+            )
 
 
 def validate_guest_manifests() -> None:
     plan = planned_vmids()
+    schema_validator = load_guest_schema()
     seen_vmids: dict[int, Path] = {}
-    static_ips: dict[ipaddress._BaseAddress, Path] = {}
+    static_ips: dict[ipaddress.IPv4Address, Path] = {}
 
     for directory in sorted(p for p in GUESTS.iterdir() if p.is_dir()):
         match = GUEST_DIR_RE.match(directory.name)
@@ -131,68 +264,52 @@ def validate_guest_manifests() -> None:
         expected_vmid = int(match.group(1))
         expected_name = match.group(2)
         manifest = directory / "guest.yaml"
+        rel = manifest.relative_to(ROOT)
 
         if not manifest.exists():
-            print(f"SKIP {directory.relative_to(ROOT)}: no guest.yaml")
+            fail(
+                f"{directory.relative_to(ROOT)}: missing guest.yaml; "
+                "reserved/undecided guests must use deployable: false"
+            )
             continue
 
         try:
             data = yaml.safe_load(manifest.read_text(encoding="utf-8"))
         except Exception as exc:
-            fail(f"cannot parse {manifest.relative_to(ROOT)}: {exc}")
+            fail(f"cannot parse {rel}: {exc}")
             continue
 
         if not isinstance(data, dict):
-            fail(f"{manifest.relative_to(ROOT)} must contain a YAML mapping")
+            fail(f"{rel} must contain a YAML mapping")
             continue
 
-        required = {"schema_version", "vmid", "name", "type", "state"}
-        missing = sorted(required - set(data))
-        if missing:
-            fail(f"{manifest.relative_to(ROOT)} missing required fields: {', '.join(missing)}")
+        if not validate_manifest_schema(
+            rel=rel, data=data, schema_validator=schema_validator
+        ):
             continue
 
         vmid = data["vmid"]
-        rel = manifest.relative_to(ROOT)
 
-        if data["schema_version"] != 1:
-            fail(f"{rel}: schema_version must be 1")
         if vmid != expected_vmid:
             fail(f"{rel}: vmid {vmid!r} does not match directory VMID {expected_vmid}")
         if data["name"] != expected_name:
-            fail(f"{rel}: name {data['name']!r} does not match directory name {expected_name!r}")
-        if data["type"] not in ALLOWED_TYPES:
-            fail(f"{rel}: type must be one of {sorted(ALLOWED_TYPES)}, got {data['type']!r}")
-        if data["state"] not in ALLOWED_STATES:
-            fail(f"{rel}: state must be one of {sorted(ALLOWED_STATES)}, got {data['state']!r}")
-        if "protection" in data and not isinstance(data["protection"], bool):
-            fail(f"{rel}: protection must be a boolean when specified")
+            fail(
+                f"{rel}: name {data['name']!r} does not match "
+                f"directory name {expected_name!r}"
+            )
 
-        if isinstance(vmid, int):
-            if vmid in seen_vmids:
-                fail(f"duplicate guest VMID {vmid}: {seen_vmids[vmid]} and {rel}")
-            else:
-                seen_vmids[vmid] = rel
+        if vmid in seen_vmids:
+            fail(f"duplicate guest VMID {vmid}: {seen_vmids[vmid]} and {rel}")
+        else:
+            seen_vmids[vmid] = rel
 
-            if vmid not in plan and data["state"] not in {"bootstrap", "legacy"}:
-                fail(f"{rel}: VMID {vmid} is not listed in docs/11-vmid-plan.md")
+        if vmid not in plan and data["state"] != "legacy":
+            fail(f"{rel}: VMID {vmid} is not listed in docs/11-vmid-plan.md")
 
-        management = data.get("management") or {}
-        ssh = management.get("ssh") or {} if isinstance(management, dict) else {}
-        ssh_user = ssh.get("user") if isinstance(ssh, dict) else None
+        validate_manifest_secrets(rel, data)
 
-        if ssh_user and ssh_user != "ops":
-            fail(f"{rel}: management.ssh.user must be 'ops', got {ssh_user!r}")
-
-        if data["type"] == "vm" and data["state"] in {"planned", "bootstrap"}:
-            if not ssh_user:
-                fail(f"{rel}: managed planned/bootstrap VM must define management.ssh.user")
-
-        if data["state"] == "planned" and isinstance(vmid, int):
-            network = data.get("network") or {}
-            if not isinstance(network, dict):
-                fail(f"{rel}: network must be a mapping")
-                continue
+        network = data.get("network")
+        if isinstance(network, dict):
             for stage in ("current", "target"):
                 validate_stage_ip(
                     rel=rel,
@@ -201,6 +318,8 @@ def validate_guest_manifests() -> None:
                     network=network,
                     static_ips=static_ips,
                 )
+
+        validate_deployable(rel, data)
 
 
 def validate_secret_files(files: list[Path]) -> None:
@@ -248,10 +367,21 @@ def validate_markdown_links(files: list[Path]) -> None:
             if not target:
                 continue
 
-            resolved = (ROOT / target.lstrip("/")) if target.startswith("/") else (path.parent / target)
+            resolved = (
+                (ROOT / target.lstrip("/"))
+                if target.startswith("/")
+                else (path.parent / target)
+            )
             if not resolved.exists():
-                shown = resolved.relative_to(ROOT) if resolved.is_relative_to(ROOT) else resolved
-                fail(f"broken local link in {path.relative_to(ROOT)}: {raw_target} -> {shown}")
+                shown = (
+                    resolved.relative_to(ROOT)
+                    if resolved.is_relative_to(ROOT)
+                    else resolved
+                )
+                fail(
+                    f"broken local link in {path.relative_to(ROOT)}: "
+                    f"{raw_target} -> {shown}"
+                )
 
 
 def main() -> int:

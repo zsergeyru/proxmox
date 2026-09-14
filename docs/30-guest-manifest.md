@@ -1,10 +1,10 @@
-# `guest.yaml` — манифест развёртывания VM/LXC
+# `guest.yaml` — deploy source of truth для VM/LXC
 
 ## Назначение
 
-Каждый каталог `guests/<VMID>-<name>/` содержит `guest.yaml`, который является каноническим машинно-читаемым описанием объекта Proxmox.
+Каждый каталог `guests/<VMID>-<name>/` обязан содержать `guest.yaml`.
 
-Цель — чтобы один и тот же manifest мог использоваться человеком, PVE-deployer и AI:
+`guest.yaml` — канонический машинно-читаемый desired state объекта Proxmox:
 
 ```text
 guest.yaml
@@ -14,37 +14,68 @@ guest.yaml
 → verify
 ```
 
-Манифест описывает именно объект Proxmox и параметры его создания. Конфигурация ОС и приложений внутри гостя остаётся в `rootfs/`/Ansible и не смешивается с `guest.yaml`.
+Манифест описывает сам объект Proxmox и параметры, необходимые для его однозначного создания/сверки. Конфигурация ОС и приложений внутри гостя остаётся в `rootfs/` и Ansible.
 
-## Поиск по VMID
+## Schema version
 
-Универсальный deployer на PVE получает только номер:
-
-```bash
-deploy-guest 311
-```
-
-и ищет ровно один каталог:
-
-```text
-guests/311-*/guest.yaml
-```
-
-Если найдено 0 или больше 1 совпадения, выполнение прекращается. Имя каталога не является источником параметров VM — после обнаружения все значения берутся из YAML.
-
-## Базовая schema
-
-Используется существующая `schema_version: 1`.
-
-Минимум:
+Текущая schema:
 
 ```yaml
-schema_version: 1
+schema_version: 2
+```
+
+Версия `2` вводит явный признак `deployable` и строгую deploy-ready схему. Это намеренно новая версия: обязательные поля не добавляются задним числом в `schema_version: 1`.
+
+Формальная JSON Schema хранится в:
+
+```text
+schemas/guest.schema.yaml
+```
+
+CI сначала проверяет manifest по этой schema, затем выполняет дополнительные семантические проверки.
+
+## `deployable`
+
+Каждый manifest обязан явно содержать:
+
+```yaml
+deployable: true
+```
+
+или:
+
+```yaml
+deployable: false
+```
+
+Смысл:
+
+```text
+deployable: true
+→ manifest является полным deploy source of truth
+→ deploy-guest может строить PLAN/APPLY только из него
+→ обязательны source, resources, network, boot, placement, protection и management
+
+deployable: false
+→ объект зарезервирован, наблюдается или временно существует
+→ deploy-guest обязан отказаться от создания/пересоздания
+→ manifest может быть неполным
+```
+
+`state: planned` не означает автоматически `deployable: true`. Например, будущий вариант миграции может быть `planned`, но оставаться `deployable: false` до принятия всех параметров.
+
+## Базовые поля
+
+```yaml
+schema_version: 2
 vmid: 321
 name: app-services
-type: vm
+type: lxc
 state: planned
+deployable: true
 node: pve
+
+description: General application services
 ```
 
 Допустимые `type`:
@@ -52,13 +83,36 @@ node: pve
 ```text
 vm
 lxc
+undecided
 ```
 
-Допустимые `state` определены в `guests/README.md`.
+`undecided` разрешён только при `deployable: false`. Это нужно для зарезервированных объектов вроде `501-frigate`, где VM/LXC ещё не выбран, но отсутствие manifest больше не допускается.
+
+## Placement и protection
+
+Для deployable-гостя значения задаются явно:
+
+```yaml
+protection: false
+
+placement:
+  pool: managed
+```
+
+Если объект не должен входить в обычную self-managed write-zone:
+
+```yaml
+placement:
+  pool: null
+```
+
+В частности, `301-ai-control` не помещается в `managed`.
+
+Deployer не выбирает pool и protection по скрытым defaults.
 
 ## Ресурсы
 
-Существующий раздел `resources` остаётся каноническим:
+Для deployable VM/LXC:
 
 ```yaml
 resources:
@@ -68,22 +122,30 @@ resources:
   disk:
     size_gb: 24
     storage: local-lvm
+```
+
+Для LXC дополнительно фиксируется swap:
+
+```yaml
+resources:
+  swap_mb: 512
 ```
 
 Правила:
 
 - `cores` — число vCPU;
 - `memory_mb` — RAM в MiB;
+- `swap_mb` — swap LXC в MiB;
 - `disk.size_gb` — целевой размер основного диска/rootfs;
-- `disk.storage` — существующий Proxmox storage;
+- `disk.storage` — Proxmox storage;
 - deployer не уменьшает существующий диск автоматически;
-- отсутствующие поля не должны молча заменяться произвольными значениями deployer, если без них создание невозможно.
+- обязательные значения не заменяются внутренними defaults deployer.
 
-Не все существующие manifests пока полностью заполнены. Перед автоматическим deploy конкретного гостя его `guest.yaml` должен содержать все обязательные для данного типа параметры.
+Параметры, отсутствующие в schema и manifest, считаются неуправляемыми этим слоем и могут наследоваться от source/template. Это должно быть осознанным наследованием, а не догадкой deployer.
 
 ## Сеть
 
-Используется существующая структура:
+Для deployable planned-гостя обязательны оба этапа:
 
 ```yaml
 network:
@@ -98,31 +160,46 @@ network:
       gateway: 10.0.0.1
 ```
 
-Deployer получает явный режим адресации, по умолчанию `current`. Он не должен одновременно конфигурировать два default gateway.
+Правила CI:
 
-Планируемый CLI:
+```text
+current: VMID XYZ → 192.168.X.YZ/16
+target:  VMID XYZ → 10.0.X.YZ/16
+```
+
+Также проверяются:
+
+- точный prefix `/16`;
+- корректный IPv4;
+- gateway находится в указанной сети;
+- текущий gateway — `192.168.1.1`;
+- целевой gateway — `10.0.0.1`;
+- отсутствие дублирующихся статических IP.
+
+Это описание двух стадий миграции. Одновременно два default gateway в госте не настраиваются.
+
+CLI выбирает одну стадию:
 
 ```bash
 deploy-guest 321 --network current --apply
 deploy-guest 321 --network target --apply
 ```
 
-## Boot и protection
+## Boot
+
+Deployable manifest явно определяет как автозапуск после reboot PVE, так и поведение после самого deploy:
 
 ```yaml
 boot:
   onboot: true
-
-protection: false
+  start_after_deploy: true
 ```
 
-Для обычных managed guests default проекта — `protection: false`.
-
-Base template `9000` — отдельное исключение и остаётся защищённым. При Full Clone deployer явно задаёт protection нового гостя по manifest и никогда не снимает protection с source template.
+Deployer не должен сам решать, запускать ли только что созданный объект.
 
 ## Management
 
-Для обычных Debian VM:
+Для управляемых Debian VM/LXC проекта:
 
 ```yaml
 management:
@@ -131,13 +208,15 @@ management:
     port: 22
 ```
 
-Если deploy выполняется после появления `301-ai-control`, public infrastructure key может быть передан через Cloud-Init. Сам PVE-deployer не должен требовать private AI key и не должен хранить его на PVE.
+CI для deployable-гостей требует именно `ops:22`.
 
-## Источник создания VM
+Создание OS user/authorized keys относится к bootstrap гостевой ОС, но желаемая management identity фиксируется в manifest.
 
-Для `type: vm` источник должен быть указан явно в секции `vm`.
+Пароли, API token secrets и private keys в `guest.yaml` запрещены.
 
-Обычная Debian VM из проекта:
+## Источник VM
+
+Обычная Debian VM:
 
 ```yaml
 vm:
@@ -147,49 +226,59 @@ vm:
   guest_agent: true
 ```
 
-Допустимый основной сценарий:
+Для текущей schema автоматизированный clone-сценарий — только `full`.
 
-```text
-template_vmid: 9000
-clone: full
-```
+Deployer обязан проверить наличие source VMID и `template: 1` на PVE до APPLY.
 
-Не следует зашивать правило `type: vm → всегда template 9000` в deployer. В проекте могут существовать HAOS, Windows, appliance/router VM и другие источники.
+Нельзя зашивать правило «любая VM всегда из 9000» внутрь deployer. Если появится VM другого типа, schema/source расширяются явно.
 
-Если VM не создаётся клонированием template, для неё должен быть описан отдельный поддерживаемый `vm.source` до включения автоматического deploy.
+## Источник LXC
 
-## Источник создания LXC
-
-Для `type: lxc` источник задаётся в секции `lxc`:
+Deployable LXC содержит точный pinned `ostemplate`:
 
 ```yaml
 lxc:
   source:
-    ostemplate: local:vztmpl/debian-13-standard_13.x-amd64.tar.zst
+    ostemplate: local:vztmpl/debian-13-standard_13.6-1_amd64.tar.zst
+    download_if_missing: true
   unprivileged: true
-  nesting: true
+  features:
+    nesting: true
+    keyctl: true
 ```
 
-`ostemplate` должен существовать на PVE или deployer должен иметь отдельный явно описанный механизм его получения. Он не должен случайно выбирать «последний Debian template» без manifest/policy.
+Правила:
 
-## Пример VM manifest
+- `ostemplate` — конкретный Proxmox volume, а не `latest`, `13.x`, wildcard или TBD;
+- если `download_if_missing: true`, deployer может получить **именно этот** template через `pveam`;
+- переход на новую revision Debian template выполняется изменением Git manifest;
+- `unprivileged`, `nesting` и `keyctl` задаются явно;
+- Docker-heavy LXC проекта используют `nesting: true` и `keyctl: true`.
+
+CI не проверяет фактическое наличие template/storage/bridge на конкретном PVE — это preflight самого deployer.
+
+## Полный пример VM
 
 ```yaml
-schema_version: 1
-vmid: 321
-name: app-services
+schema_version: 2
+vmid: 301
+name: ai-control
 type: vm
 state: planned
+deployable: true
 node: pve
 
-description: Application services
+description: Target central AI infrastructure control plane
 
 protection: false
+
+placement:
+  pool: null
 
 resources:
   cpu:
     cores: 2
-  memory_mb: 2048
+  memory_mb: 4096
   disk:
     size_gb: 24
     storage: local-lvm
@@ -198,15 +287,16 @@ network:
   bridge: vmbr0
   current:
     ipv4:
-      address: 192.168.3.21/16
+      address: 192.168.3.1/16
       gateway: 192.168.1.1
   target:
     ipv4:
-      address: 10.0.3.21/16
+      address: 10.0.3.1/16
       gateway: 10.0.0.1
 
 boot:
   onboot: true
+  start_after_deploy: true
 
 management:
   ssh:
@@ -220,24 +310,31 @@ vm:
   guest_agent: true
 ```
 
-## Пример LXC manifest
+## Полный пример LXC
 
 ```yaml
-schema_version: 1
+schema_version: 2
 vmid: 311
 name: dev-services
 type: lxc
 state: planned
+deployable: true
 node: pve
 
+description: Ansible, Semaphore, Git, CI and development services
+
 protection: false
+
+placement:
+  pool: managed
 
 resources:
   cpu:
     cores: 2
-  memory_mb: 2048
+  memory_mb: 4096
+  swap_mb: 1024
   disk:
-    size_gb: 16
+    size_gb: 32
     storage: local-lvm
 
 network:
@@ -246,64 +343,97 @@ network:
     ipv4:
       address: 192.168.3.11/16
       gateway: 192.168.1.1
+  target:
+    ipv4:
+      address: 10.0.3.11/16
+      gateway: 10.0.0.1
 
 boot:
   onboot: true
+  start_after_deploy: true
+
+management:
+  ssh:
+    user: ops
+    port: 22
 
 lxc:
   source:
-    ostemplate: local:vztmpl/debian-13-standard_13.x-amd64.tar.zst
+    ostemplate: local:vztmpl/debian-13-standard_13.6-1_amd64.tar.zst
+    download_if_missing: true
   unprivileged: true
-  nesting: true
+  features:
+    nesting: true
+    keyctl: true
 ```
+
+Этот пример проходит тот же validator, что и реальные manifests.
+
+## Reserved / undecided пример
+
+```yaml
+schema_version: 2
+vmid: 501
+name: frigate
+type: undecided
+state: planned
+deployable: false
+node: pve
+
+description: Frigate; VM/LXC type and resources are pending hardware testing
+```
+
+Такой manifest сохраняет резерв VMID в Git, но deployer обязан завершиться без APPLY.
 
 ## Поведение `deploy-guest`
 
-Планируемый PVE-side deployer работает непосредственно штатными инструментами Proxmox (`qm`, `pct`, `pvesh`, `pvesm`) и не зависит от `301`, Hermes или Proximo.
-
-По умолчанию команда только строит PLAN:
+По умолчанию:
 
 ```bash
-deploy-guest 321
+deploy-guest 311
 ```
 
-Применение требует явного флага:
+строит PLAN.
+
+Применение:
 
 ```bash
-deploy-guest 321 --apply
+deploy-guest 311 --apply
 ```
 
-Алгоритм:
+Перед любым PLAN/APPLY:
 
 ```text
-обновить локальный read-only checkout zsergeyru/proxmox
-→ найти guests/<VMID>-*/guest.yaml
-→ проверить schema и обязательные поля
-→ проверить конфликт VMID/name/type
-→ проверить source template/ostemplate/storage/bridge
-→ сравнить с существующим объектом, если он уже есть
-→ вывести PLAN и drift
-→ при --apply создать или безопасно привести поддерживаемые параметры
-→ start, если policy/manifest это требует
-→ проверить status/QEMU Agent/health, где применимо
+найти ровно один guests/<VMID>-*/guest.yaml
+→ schema_version == 2
+→ deployable == true
+→ пройти JSON Schema
+→ пройти semantic validation
+→ проверить source/storage/bridge на реальном PVE
+→ сравнить desired state с существующим объектом
+→ PLAN
+→ --apply
+→ verify
 ```
 
-Deployer не должен автоматически уничтожать существующий неизвестный объект, менять тип `vm ↔ lxc`, уменьшать диск, удалять production guest или выполнять destructive replacement без отдельного режима.
+Если `deployable: false`, команда должна явно сообщить причину и ничего не создавать.
+
+Deployer не должен:
+
+- уничтожать неизвестный существующий объект;
+- менять `vm ↔ lxc`;
+- уменьшать диск;
+- выбирать source/template «по последней версии»;
+- подставлять отсутствующие обязательные значения;
+- автоматически добавлять protected/control-plane объекты в `managed`;
+- выполнять destructive replacement без отдельного явного режима.
 
 ## Git как source of truth
 
-PVE-deployer использует локальный read-only checkout приватного `zsergeyru/proxmox`. На PVE для него создаётся отдельный GitHub Deploy Key без write access.
+PVE-deployer читает manifest из read-only checkout приватного `zsergeyru/proxmox`.
 
-```text
-PVE Deploy Key
-→ read-only zsergeyru/proxmox
+PLAN и APPLY выполняются по одному зафиксированному commit SHA.
 
-301 Deploy Key
-→ отдельная identity; может иметь write access для AI workflow
-```
+Главный принцип:
 
-Эти ключи не переиспользуются между PVE и `301`.
-
-## Главный принцип
-
-> `guest.yaml` должен содержать достаточно данных, чтобы PVE мог однозначно построить PLAN создания VM/LXC без догадок, а сам deployer должен быть независим от любого AI-агента.
+> `deployable: true` означает, что `guest.yaml` сам содержит все проектные параметры, необходимые для однозначного создания объекта Proxmox; отсутствие обязательного параметра является ошибкой CI, а не поводом для deployer что-либо угадывать.

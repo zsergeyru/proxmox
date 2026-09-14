@@ -1,22 +1,22 @@
 schema_version: 2
-vmid: 203
-name: ha-flat2
-type: lxc
+vmid: 501
+name: frigate
+type: undecided
 state: planned
 deployable: false
 node: pve
 
-description: Reserved Home Assistant instance for the second apartment
+description: Frigate video surveillance; VM/LXC type and resources are pending iGPU/OpenVINO testing
 
 network:
   bridge: vmbr0
   current:
     ipv4:
-      address: 192.168.2.3/16
+      address: 192.168.5.1/16
       gateway: 192.168.1.1
   target:
     ipv4:
-      address: 10.0.2.3/16
+      address: 10.0.5.1/16
       gateway: 10.0.0.1
 
 boot:

@@ -1,0 +1,233 @@
+$schema: https://json-schema.org/draft/2020-12/schema
+$title: Proxmox guest manifest
+type: object
+additionalProperties: false
+required:
+  - schema_version
+  - vmid
+  - name
+  - type
+  - state
+  - deployable
+  - node
+  - description
+properties:
+  schema_version:
+    const: 2
+  vmid:
+    type: integer
+    minimum: 100
+    maximum: 999
+  name:
+    type: string
+    pattern: '^[a-z0-9][a-z0-9-]*$'
+  type:
+    enum: [vm, lxc, undecided]
+  state:
+    enum: [planned, active, bootstrap, legacy]
+  deployable:
+    type: boolean
+  node:
+    type: string
+    minLength: 1
+  description:
+    type: string
+    minLength: 1
+  protection:
+    type: boolean
+  placement:
+    type: object
+    additionalProperties: false
+    required: [pool]
+    properties:
+      pool:
+        type: [string, 'null']
+        minLength: 1
+  resources:
+    type: object
+    additionalProperties: false
+    required: [cpu, memory_mb, disk]
+    properties:
+      cpu:
+        type: object
+        additionalProperties: false
+        required: [cores]
+        properties:
+          cores:
+            type: integer
+            minimum: 1
+          type:
+            type: string
+            minLength: 1
+      memory_mb:
+        type: integer
+        minimum: 256
+      ballooning_mb:
+        type: integer
+        minimum: 0
+      swap_mb:
+        type: integer
+        minimum: 0
+      disk:
+        type: object
+        additionalProperties: false
+        required: [size_gb, storage]
+        properties:
+          size_gb:
+            type: integer
+            minimum: 1
+          storage:
+            type: string
+            minLength: 1
+  network:
+    type: object
+    additionalProperties: false
+    required: [bridge]
+    properties:
+      bridge:
+        type: string
+        minLength: 1
+      current:
+        $ref: '#/$defs/networkStage'
+      target:
+        $ref: '#/$defs/networkStage'
+  boot:
+    type: object
+    additionalProperties: false
+    required: [onboot]
+    properties:
+      onboot:
+        type: boolean
+      start_after_deploy:
+        type: boolean
+  management:
+    type: object
+    additionalProperties: false
+    required: [ssh]
+    properties:
+      ssh:
+        type: object
+        additionalProperties: false
+        required: [user, port]
+        properties:
+          user:
+            type: string
+            minLength: 1
+          port:
+            type: integer
+            minimum: 1
+            maximum: 65535
+  vm:
+    type: object
+    additionalProperties: false
+    properties:
+      source:
+        type: object
+        additionalProperties: false
+        required: [template_vmid, clone]
+        properties:
+          template_vmid:
+            type: integer
+            minimum: 100
+            maximum: 9999
+          clone:
+            enum: [full]
+      guest_agent:
+        type: boolean
+      bios:
+        enum: [ovmf, seabios]
+  lxc:
+    type: object
+    additionalProperties: false
+    properties:
+      source:
+        type: object
+        additionalProperties: false
+        required: [ostemplate, download_if_missing]
+        properties:
+          ostemplate:
+            type: string
+            minLength: 1
+          download_if_missing:
+            type: boolean
+      unprivileged:
+        type: boolean
+      features:
+        type: object
+        additionalProperties: false
+        required: [nesting, keyctl]
+        properties:
+          nesting:
+            type: boolean
+          keyctl:
+            type: boolean
+$defs:
+  networkStage:
+    type: object
+    additionalProperties: false
+    required: [ipv4]
+    properties:
+      ipv4:
+        type: object
+        additionalProperties: false
+        required: [address, gateway]
+        properties:
+          address:
+            type: string
+            minLength: 1
+          gateway:
+            type: string
+            minLength: 1
+allOf:
+  - if:
+      properties:
+        deployable:
+          const: true
+    then:
+      required:
+        - protection
+        - placement
+        - resources
+        - network
+        - boot
+        - management
+      properties:
+        network:
+          required: [bridge, current, target]
+        boot:
+          required: [onboot, start_after_deploy]
+  - if:
+      properties:
+        type:
+          const: vm
+        deployable:
+          const: true
+      required: [type, deployable]
+    then:
+      required: [vm]
+      properties:
+        vm:
+          required: [source, guest_agent]
+  - if:
+      properties:
+        type:
+          const: lxc
+        deployable:
+          const: true
+      required: [type, deployable]
+    then:
+      required: [lxc]
+      properties:
+        resources:
+          required: [cpu, memory_mb, swap_mb, disk]
+        lxc:
+          required: [source, unprivileged, features]
+  - if:
+      properties:
+        type:
+          const: undecided
+      required: [type]
+    then:
+      properties:
+        deployable:
+          const: false

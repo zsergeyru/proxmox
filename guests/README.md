@@ -1,10 +1,10 @@
 # Guests
 
-Каждый каталог `guests/<VMID>-<name>/` соответствует одной VM/LXC и содержит её паспорт, локальные решения и управляемые файлы гостевой ОС.
+Каждый каталог `guests/<VMID>-<name>/` соответствует одной VM/LXC либо зарезервированному объекту и содержит его паспорт, локальные решения и управляемые файлы гостевой ОС.
 
-Актуальная нумерация определяется только [`../docs/11-vmid-plan.md`](../docs/11-vmid-plan.md).
+Актуальная нумерация определяется [`../docs/11-vmid-plan.md`](../docs/11-vmid-plan.md).
 
-Подробная машинно-читаемая спецификация `guest.yaml` и правила универсального PVE-deployer описаны в [`../docs/30-guest-manifest.md`](../docs/30-guest-manifest.md).
+Машинно-читаемая спецификация: [`../docs/30-guest-manifest.md`](../docs/30-guest-manifest.md).
 
 ## Структура
 
@@ -13,24 +13,35 @@
 ├── README.md
 ├── guest.yaml
 ├── decisions/        # при необходимости
-├── STATUS.md         # временный observed drift/миграция
+├── STATUS.md         # observed drift/миграция
 └── rootfs/           # управляемые файлы по реальным абсолютным путям
 ```
 
-`README.md` описывает назначение и особенности гостя. `guest.yaml` описывает объект Proxmox. `rootfs/` содержит только файлы, которыми управляет проект, а не полный образ `/`.
+`guest.yaml` обязателен для каждого каталога с VMID. Отсутствие manifest теперь является ошибкой CI.
 
-## guest.yaml
-
-Schema version: `1`.
-
-Обязательные поля:
+Если параметры ещё не приняты, это выражается самим manifest:
 
 ```yaml
-schema_version: 1
+type: undecided
+deployable: false
+```
+
+а не отсутствием файла.
+
+## guest.yaml schema v2
+
+Базовые обязательные поля:
+
+```yaml
+schema_version: 2
 vmid: 109
 name: network-gateway
 type: vm
 state: planned
+deployable: true
+node: pve
+
+description: Network gateway, DNS, VPN and policy routing
 ```
 
 Допустимые `state`:
@@ -42,25 +53,51 @@ bootstrap → временный рабочий объект для развёр
 legacy    → старый объект, сохраняемый до планового вывода
 ```
 
-Нельзя переводить гостя в `active` только потому, что каталог создан в Git.
+Допустимые `type`:
 
-### Protection
+```text
+vm
+lxc
+undecided
+```
 
-Для обычных управляемых VM/LXC политика по умолчанию:
+`undecided` разрешён только при `deployable: false`.
+
+### `deployable`
+
+```text
+true
+→ manifest полностью достаточен для PVE PLAN/APPLY
+→ CI требует source/resources/network/boot/management/placement/protection
+
+false
+→ объект нельзя создавать через универсальный deployer
+→ manifest хранит резерв, observed state или временную миграционную запись
+```
+
+`state` и `deployable` решают разные задачи. `planned` может быть как deployable, так и пока недоопределённым.
+
+### Protection и pool
+
+Deployable guest задаёт значения явно:
 
 ```yaml
 protection: false
+
+placement:
+  pool: managed
 ```
 
-Поле можно не дублировать в каждом `guest.yaml`, если используется default `false`. `protection: true` фиксируется только для объектов, которые действительно должны быть защищены от случайного удаления.
+Control-plane/защищённые объекты используют:
 
-Base template `9000` — отдельное исключение и всегда остаётся `protection=1`.
+```yaml
+placement:
+  pool: null
+```
 
-При Full Clone из защищённого template deploy-сценарий обязан **явно** выставить новому гостю `protection=0`, если в его паспорте не указано `protection: true`. Нельзя снимать protection с template ради создания обычных VM.
+`301-ai-control` не входит в обычную self-managed write-zone.
 
 ### Ресурсы
-
-В `guest.yaml` фиксируются только параметры, которыми действительно управляет проект:
 
 ```yaml
 resources:
@@ -72,11 +109,13 @@ resources:
     storage: local-lvm
 ```
 
-Не нужно копировать все значения Proxmox по умолчанию. Для автоматического deploy конкретный manifest должен содержать все параметры, без которых его тип нельзя создать однозначно.
+LXC дополнительно фиксирует `swap_mb`.
+
+Deployer не подставляет отсутствующие обязательные параметры.
 
 ### Сеть
 
-Для planned-гостей фиксируются сразу два состояния: текущая сеть и целевая сеть после миграции.
+Для deployable planned-гостя:
 
 ```yaml
 network:
@@ -91,18 +130,28 @@ network:
       gateway: 10.0.0.1
 ```
 
-Обе адресации выводятся из VMID по единому правилу:
+VMID-правило:
 
 ```text
 current: VMID XYZ → 192.168.X.YZ/16
 target:  VMID XYZ → 10.0.X.YZ/16
 ```
 
-Это описание этапов миграции, а не требование одновременно иметь два default gateway. В работающей ОС default gateway должен быть один. Подробности — в [`../docs/40-network.md`](../docs/40-network.md).
+Это две стадии миграции, а не два одновременных default gateway.
 
-### Управление
+### Boot
 
-Для обычных Debian VM из базового template единый административный SSH-пользователь:
+```yaml
+boot:
+  onboot: true
+  start_after_deploy: true
+```
+
+Оба значения обязательны у deployable guest.
+
+### Management
+
+Единая management identity Debian-гостей:
 
 ```yaml
 management:
@@ -111,26 +160,9 @@ management:
     port: 22
 ```
 
-`ops` используется человеком и Ansible/AI-управлением; разграничение выполняется отдельными SSH-ключами и sudo-политиками.
+Private keys, passwords и token secrets в manifest не хранятся.
 
-Целевой `301-ai-control` создаёт свою infrastructure identity:
-
-```text
-/opt/ai-control/ssh/ai_control_ed25519
-/opt/ai-control/ssh/ai_control_ed25519.pub
-```
-
-Именно содержимое `.pub` может передаваться обычным новым Debian VM через Cloud-Init. Private key остаётся только в `301`.
-
-GitHub Deploy Key `github_proxmox_repo_ed25519` — отдельная identity и **не используется** для доступа к гостям.
-
-Пароли, токены и private keys в `guest.yaml` не хранятся.
-
-### VM/LXC-специфичные параметры и source
-
-Для автоматического создания source должен быть явным.
-
-Обычная VM из template:
+### VM source
 
 ```yaml
 vm:
@@ -140,19 +172,20 @@ vm:
   guest_agent: true
 ```
 
-Deployer не должен предполагать, что любая `type: vm` всегда создаётся из `9000`.
-
-LXC:
+### LXC source
 
 ```yaml
 lxc:
   source:
-    ostemplate: local:vztmpl/debian-13-standard_13.x-amd64.tar.zst
+    ostemplate: local:vztmpl/debian-13-standard_13.6-1_amd64.tar.zst
+    download_if_missing: true
   unprivileged: true
-  nesting: true
+  features:
+    nesting: true
+    keyctl: true
 ```
 
-Пустые секции не добавляются. Полные правила и примеры — в [`../docs/30-guest-manifest.md`](../docs/30-guest-manifest.md).
+Source pin должен быть конкретным. `latest`, `13.x`, wildcard и TBD в deployable manifest запрещены CI.
 
 ## rootfs
 
@@ -166,82 +199,82 @@ guests/301-ai-control/rootfs/opt/ai-control/...
 → /opt/ai-control/...
 ```
 
-Отдельных универсальных каталогов `services/`, `docker/`, `dns/`, `vpn/` и подобных не создаём, если это обычные файлы гостевой ОС.
+Monorepo целиком внутрь каждого гостя не копируется.
 
-Сам monorepo целиком на каждый гость не копируется.
+Для каталогов, полностью принадлежащих проекту (`/opt/<service>/`), допустима синхронизация с удалением файлов, исчезнувших из Git. В общих системных каталогах файлы устанавливаются/удаляются только по конкретным путям.
+
+Persistent data, Docker volumes, БД, записи камер, пользовательские Git repositories, runtime state и secrets не относятся к `rootfs/`.
 
 ## Deploy
 
-Есть два уровня deploy.
-
-### PVE-side создание объекта
-
-Универсальный deployer на самом PVE должен быть независим от AI:
+PVE-side создание объекта:
 
 ```text
 read-only checkout zsergeyru/proxmox
 → deploy-guest <VMID>
 → guest.yaml
+→ validate
+→ PLAN
 → qm/pct/pvesh/pvesm
-→ VM/LXC
+→ verify
 ```
 
-По умолчанию он строит PLAN; фактическое применение требует явного `--apply`. Подробности: [`../docs/30-guest-manifest.md`](../docs/30-guest-manifest.md) и [`../docs/20-pve-initialization.md`](../docs/20-pve-initialization.md).
+`deploy-guest` обязан отказать при `deployable: false`.
 
-### Управление после появления AI/DevOps
+После появления AI/DevOps:
 
 ```text
 Proximo в 301-ai-control
-→ lifecycle/guest-level операции Proxmox
+→ разрешённый runtime lifecycle
 
 Ansible на 311-dev-services
-→ повторяемая настройка ОС и применение rootfs по SSH
-
-прямой SSH
-→ bootstrap, диагностика, разовые и аварийные действия
+→ повторяемая настройка ОС/rootfs по SSH
 
 Semaphore
-→ необязательный web-интерфейс к тем же Ansible playbook
+→ необязательный web UI к Ansible
 ```
 
-Для обычной Debian VM из `tpl-debian13` порядок уровня Proxmox:
+Для обычной Debian VM из `tpl-debian13`:
 
 ```text
 Full Clone from 9000
-→ managed pool при необходимости
-→ protection по manifest
+→ placement/pool
+→ protection
 → CPU/RAM/disk/network
 → ciuser=ops
-→ optional sshkeys=<301:/opt/ai-control/ssh/ai_control_ed25519.pub>
-→ Cloud-Init update
-→ start
-→ QEMU Agent/SSH/health check
+→ Cloud-Init
+→ start согласно boot.start_after_deploy
+→ QEMU Agent/SSH verification
 ```
 
-Base template `9000` не содержит ключей. `301` не передаёт private key новой VM — только соответствующий public key.
-
-Для полностью принадлежащих проекту каталогов (`/opt/<service>/`) допустима синхронизация с удалением отсутствующих файлов. В общих системных каталогах (`/etc`, `/usr/local/bin`, `/etc/systemd/system`) файлы устанавливаются и удаляются только по конкретным путям.
-
-Глобальный эквивалент `rsync --delete rootfs/ /` запрещён.
-
-Persistent data, Docker volumes, базы данных, записи камер, пользовательские Git-репозитории, runtime state и секреты не относятся к `rootfs/`.
-
-Подробное решение по repeatable deploy: [`311-dev-services/decisions/001-deployment-tooling.md`](311-dev-services/decisions/001-deployment-tooling.md).
+Base template `9000` остаётся protected.
 
 ## Текущие исключения
 
-- `100-haos` — действующая production VM Home Assistant и сохраняет исторический VMID `100`;
-- `201-ha-main` — только возможная будущая цель миграции и не создаётся ради унификации;
-- `301-ai-control` — control plane и не должен автоматически попадать в собственную обычную write-зону;
-- `320-ai-control` — временный bootstrap до проверки `301-ai-control`;
-- `9000 tpl-debian13` — protected base template, разрешён как источник clone, но не как managed guest;
-- `501-frigate` может не иметь полного manifest до выбора VM/LXC.
+- `100-haos` — production HAOS; `deployable: false`, исторический VMID сохраняется;
+- `201-ha-main`, `202-ha-test`, `203-ha-flat2` — варианты/резервы; до принятия полных параметров `deployable: false`;
+- `301-ai-control` — deployable target control plane, но `placement.pool: null`;
+- `320-ai-control` — временный bootstrap; `deployable: false`;
+- `501-frigate` — manifest существует, но `type: undecided` и `deployable: false` до теста iGPU/OpenVINO;
+- `9000 tpl-debian13` — protected template, source для clone, но не managed guest.
 
-## Общие правила
+## Проверка CI
 
-- `proxmox` остаётся основным инфраструктурным monorepo;
-- Ansible roles/playbooks находятся в `/ansible` и исполняются из `311-dev-services`;
-- шаблоны VM/LXC находятся в `/templates`;
-- фиктивные Compose-файлы и пустые конфиги заранее не создаются;
-- отдельный репозиторий появляется только у действительно независимого компонента;
-- секреты, токены, пароли и private keys в Git не добавляются.
+CI проверяет:
+
+- JSON Schema v2;
+- наличие `guest.yaml` в каждом VMID-каталоге;
+- совпадение VMID/name с именем каталога;
+- уникальность VMID и статических IP;
+- наличие VMID в плане;
+- VMID/IP формулу и `/16`;
+- gateway и принадлежность subnet;
+- deploy-ready обязательные поля;
+- pinned VM/LXC source;
+- `ops:22`;
+- managed-pool boundary;
+- отсутствие secret-like keys.
+
+Главный принцип:
+
+> Неполный объект не маскируется defaults. Он явно `deployable: false` до момента, когда manifest станет полным.

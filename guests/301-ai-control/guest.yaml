@@ -1,13 +1,17 @@
-schema_version: 1
+schema_version: 2
 vmid: 301
 name: ai-control
 type: vm
 state: planned
+deployable: true
 node: pve
 
 description: Target central AI infrastructure control plane
 
 protection: false
+
+placement:
+  pool: null
 
 resources:
   cpu:
@@ -30,6 +34,7 @@ network:
 
 boot:
   onboot: true
+  start_after_deploy: true
 
 management:
   ssh:
@@ -37,4 +42,7 @@ management:
     port: 22
 
 vm:
+  source:
+    template_vmid: 9000
+    clone: full
   guest_agent: true

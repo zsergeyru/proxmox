@@ -1,11 +1,26 @@
-schema_version: 1
+schema_version: 2
 vmid: 401
 name: monitoring
 type: lxc
 state: planned
+deployable: true
 node: pve
 
 description: Infrastructure monitoring services
+
+protection: false
+
+placement:
+  pool: managed
+
+resources:
+  cpu:
+    cores: 1
+  memory_mb: 1024
+  swap_mb: 512
+  disk:
+    size_gb: 16
+    storage: local-lvm
 
 network:
   bridge: vmbr0
@@ -20,3 +35,18 @@ network:
 
 boot:
   onboot: true
+  start_after_deploy: true
+
+management:
+  ssh:
+    user: ops
+    port: 22
+
+lxc:
+  source:
+    ostemplate: local:vztmpl/debian-13-standard_13.6-1_amd64.tar.zst
+    download_if_missing: true
+  unprivileged: true
+  features:
+    nesting: true
+    keyctl: true
