@@ -36,10 +36,9 @@ Root SSH запрещён полностью.
 
 ## 3. Основная Proxmox console
 
-Начиная с Template-Version 3 основная VM console — настоящая текстовая serial-консоль:
+Начиная с Template-Version 3 основной рабочий интерфейс VM console — настоящая текстовая serial-консоль:
 
 ```text
-vga: serial0
 serial0: socket
 Proxmox Web UI → Console → xterm.js → ttyS0 → autologin ops
 ```
@@ -61,11 +60,18 @@ Autologin задаётся через:
 
 Так как `ops` имеет `NOPASSWD: sudo`, console access практически эквивалентен root-доступу к гостевой ОС. Proxmox ACL на `VM.Console` нужно выдавать только доверенным пользователям/ролям.
 
-## 4. tty1/noVNC
+## 4. Резервная VGA/noVNC console
 
-В v3 специальный autologin на `tty1` не настраивается. Framebuffer/noVNC больше не является основной административной консолью шаблона.
+VGA в v3 не отключается:
 
-Основной интерфейс для работы через Proxmox Web UI:
+```text
+vga: std
+noVNC → VGA/tty1
+```
+
+Специальный autologin на `tty1` не настраивается. noVNC сохраняется как отдельный резервный канал на случай проблем с serial console или для диагностики вывода на виртуальный экран.
+
+Штатный интерфейс для повседневной работы через Proxmox Web UI:
 
 ```text
 xterm.js / serial0
@@ -163,8 +169,8 @@ Base template
 ├── password locked
 ├── authorized_keys empty
 ├── serial0: socket
-├── vga: serial0
-└── ttyS0 autologin ops
+├── ttyS0 autologin ops
+└── vga: std / noVNC fallback
 
         ↓ Full Clone + Cloud-Init before first boot
 
@@ -177,9 +183,10 @@ Administrative device
 └── corresponding private SSH key
 ```
 
-Два штатных административных канала:
+Три административных канала:
 
 ```text
 1. SSH → ops + key
 2. Proxmox xterm.js → serial0/ttyS0 → autologin ops
+3. Proxmox noVNC → VGA/tty1 → резервный канал
 ```
