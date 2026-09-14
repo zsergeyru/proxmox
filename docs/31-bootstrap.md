@@ -2,9 +2,15 @@
 
 ## Статус
 
-По состоянию на 2026-09-14 принято решение перезапустить проектирование bootstrap/deploy с нуля.
+Архитектура bootstrap/deploy **не пересматривается**. С нуля переписывается только её исполняемая реализация.
 
-В публичном `zsergeyru/proxmox-bootstrap` активным и поддерживаемым остаётся только:
+Канонические архитектурные решения остаются в:
+
+- [`20-pve-initialization.md`](20-pve-initialization.md);
+- [`21-pve-filesystem-layout.md`](21-pve-filesystem-layout.md);
+- guest manifests и ADR соответствующих VM/LXC.
+
+В публичном `zsergeyru/proxmox-bootstrap` сейчас активным и поддерживаемым остаётся только:
 
 ```text
 create-template.sh
@@ -12,36 +18,51 @@ create-template.sh
 
 Он создаёт базовый Debian 13 template `9000 tpl-debian13`.
 
-Все прежние сценарии AI Control и общего bootstrap перенесены в:
+Прежние executable-сценарии общего bootstrap и AI Control перенесены в:
 
 ```text
 zsergeyru/proxmox-bootstrap/archive/2026-09-14/
 ```
 
-Архивные файлы не являются рабочими entrypoints и не должны использоваться для нового развёртывания.
+Архивные скрипты не являются рабочими entrypoints и не должны использоваться для нового развёртывания. Новые скрипты будут написаны заново по действующей документации.
 
-## Что пока не считается реализованным
+## Что нужно реализовать заново
 
-Следующие части будут спроектированы заново и до нового решения считаются TBD:
+Нужно заново написать и проверить код, реализующий уже принятую архитектуру, в том числе:
 
 ```text
-init-pve.sh
-PVE zero-day bootstrap
-deploy-guest
-универсальное создание VM/LXC
-bootstrap 301-ai-control
-установка AI agent/runtime
-PVE ↔ AI permission model в части bootstrap workflow
-normal/recovery orchestration
+public zero-day init PVE
+private PVE-side deployer
+создание/клонирование VM и LXC по guest.yaml
+bootstrap/configuration 301-ai-control
+установку runtime и AI agent
+передачу SSH/Git credentials по принятой модели
+health checks, idempotency и recovery logic
 ```
 
-Предыдущие реализации сохранены только в Git history и public archive как материал для анализа.
+Названия и внутренняя структура новых скриптов могут измениться. Архивные реализации не являются шаблоном, который нужно механически восстанавливать.
 
 ## Что остаётся source of truth
 
-Приватный `zsergeyru/proxmox` продолжает хранить архитектуру, VMID plan, `guest.yaml`, schema/validator, network/storage/security policy и решения по template.
+Приватный `zsergeyru/proxmox` продолжает хранить:
 
-Но наличие planned/deployable manifest само по себе не означает, что универсальный deployer уже реализован.
+```text
+архитектуру
+VMID plan
+guest.yaml
+schema/validator
+network/storage/security policy
+PVE bootstrap/deployer requirements
+AI Control и DevOps ADR
+решения по template
+```
+
+То есть различаем:
+
+```text
+архитектура / desired state → действуют
+старые scripts             → сняты и переписываются
+```
 
 ## Активный template builder
 
@@ -72,23 +93,30 @@ trixie/latest Debian cloud image
 → template 9000
 ```
 
-Pinned Debian build, APT snapshot и отдельный version lock больше не используются.
+Pinned Debian build, APT snapshot и отдельный version lock для template не используются.
 
 Документация template:
 
 - [`../templates/debian13/README.md`](../templates/debian13/README.md)
 - [`../templates/debian13/build-policy.md`](../templates/debian13/build-policy.md)
 
-Именно template builder остаётся единственным executable bootstrap-компонентом, который сейчас считаем действующим.
+## Правило для новой реализации
 
-## Будущая zero-day архитектура
+При написании новых скриптов сначала читается действующая архитектура, затем код реализует её. Если в процессе обнаруживается, что архитектурное решение нужно изменить, это оформляется отдельно как изменение документации/ADR, а не молча меняется внутри shell/python-кода.
 
-Старая схема больше не считается канонической. Новую цепочку определим отдельно перед реализацией.
+Особенно это относится к:
 
-До этого нельзя ссылаться на прежние `create-ai-control-vm.sh`, `prepare-ai-control.sh`, `install-ai-agent.sh` или `bootstrap-ai-control.sh` как на рабочий путь.
+- public/private границе bootstrap;
+- PVE Git checkout;
+- API users/tokens/ACL;
+- managed pool и protected objects;
+- 301-ai-control;
+- SSH identities;
+- Ansible/Semaphore на 311;
+- backup/recovery и secrets.
 
 ## Security
 
-Public repo по-прежнему не должен содержать secrets, private keys, API token secrets, passwords или реальные `.env`.
+Public repo не должен содержать secrets, private keys, API token secrets, passwords или реальные `.env`.
 
-Новая модель credentials, Git access, PVE roles/tokens и recovery будет зафиксирована только после нового проектирования bootstrap.
+Новая реализация обязана соблюдать уже принятые security boundaries и filesystem/credential policy проекта.
