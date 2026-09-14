@@ -2,11 +2,11 @@
 
 Этот документ даёт только общую картину. Детали не дублируются здесь и берутся из профильных источников истины:
 
-- [`vmid-plan.md`](vmid-plan.md) — VMID/CTID и management IP;
-- [`network.md`](network.md) — сеть, VLAN, VPN и граница OpenWrt ↔ 109;
+- [`11-vmid-plan.md`](11-vmid-plan.md) — VMID/CTID и management IP;
+- [`40-network.md`](40-network.md) — сеть, VLAN, VPN и граница OpenWrt ↔ 109;
 - [`../guests/README.md`](../guests/README.md) — `guest.yaml`, `rootfs` и deploy;
-- [`ai-control.md`](ai-control.md) — AI-контур;
-- [`storage-and-backup.md`](storage-and-backup.md) — backup и restore;
+- [`50-ai-control.md`](50-ai-control.md) — AI-контур;
+- [`22-storage-and-backup.md`](22-storage-and-backup.md) — backup и restore;
 - README/ADR конкретного гостя — локальные особенности.
 
 ## Аппаратная платформа
@@ -127,7 +127,7 @@ guests/<VMID>-<name>/
 - действия автоматизации журналируются;
 - после изменений проверяются health/status/logs.
 
-Подробная backup-политика: [`storage-and-backup.md`](storage-and-backup.md).
+Подробная backup-политика: [`22-storage-and-backup.md`](22-storage-and-backup.md).
 
 ## Startup order
 
@@ -139,4 +139,4 @@ VMID не задаёт порядок запуска. Startup order опреде
 
 Физическая сеть, камеры, оборудование и общие решения квартиры остаются в `zsergeyru/appart-rennovation`. В этот репозиторий попадают только серверные и эксплуатационные части, относящиеся к Proxmox и его гостям.
 
-См. [`apartment-infrastructure.md`](apartment-infrastructure.md).
+См. [`60-apartment-infrastructure.md`](60-apartment-infrastructure.md).
