@@ -2,7 +2,7 @@
 
 ## Статус
 
-По состоянию на 2026-09-14 принято решение **перезапустить проектирование bootstrap/deploy с нуля**.
+По состоянию на 2026-09-14 принято решение перезапустить проектирование bootstrap/deploy с нуля.
 
 В публичном `zsergeyru/proxmox-bootstrap` активным и поддерживаемым остаётся только:
 
@@ -22,7 +22,7 @@ zsergeyru/proxmox-bootstrap/archive/2026-09-14/
 
 ## Что пока не считается реализованным
 
-Следующие части будут спроектированы заново и до нового решения считаются **TBD**:
+Следующие части будут спроектированы заново и до нового решения считаются TBD:
 
 ```text
 init-pve.sh
@@ -39,18 +39,9 @@ normal/recovery orchestration
 
 ## Что остаётся source of truth
 
-Приватный `zsergeyru/proxmox` продолжает хранить:
+Приватный `zsergeyru/proxmox` продолжает хранить архитектуру, VMID plan, `guest.yaml`, schema/validator, network/storage/security policy и решения по template.
 
-```text
-архитектуру
-VMID plan
-guest.yaml
-schema/validator
-network/storage/security policy
-решения по template
-```
-
-Но наличие planned/deployable manifest само по себе **не означает**, что универсальный deployer уже реализован.
+Но наличие planned/deployable manifest само по себе не означает, что универсальный deployer уже реализован.
 
 ## Активный template builder
 
@@ -60,13 +51,28 @@ network/storage/security policy
 zsergeyru/proxmox-bootstrap/create-template.sh
 ```
 
-Текущая реализация создаёт:
+Он создаёт:
 
 ```text
 VMID: 9000
 Name: tpl-debian13
-Template-Version: 5
+Template-Version: 4
 ```
+
+Версия 4 намеренно использует простую модель:
+
+```text
+trixie/latest Debian cloud image
+→ SHA-512 verification
+→ обычные Debian repositories
+→ apt update/full-upgrade
+→ regular amd64 kernel
+→ console/QGA verification
+→ cleanup
+→ template 9000
+```
+
+Pinned Debian build, APT snapshot и отдельный version lock больше не используются.
 
 Документация template:
 
