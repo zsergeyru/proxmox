@@ -1,6 +1,6 @@
 # Базовый шаблон Debian 13 для Proxmox
 
-Статус: **Template-Version 3 реализована в builder-скрипте; предыдущая v2 успешно проверена полной чистой сборкой на реальном PVE-хосте 2026-09-14. Для v3 требуется новая чистая сборка и проверка клона.**
+Статус: **Template-Version 3 успешно прошла чистую сборку на реальном PVE-хосте 2026-09-14. Guest-level часть и Full Clone были проверены; после окончательного выбора `vga: serial0` требуется финальная проверка штатной Web Console на тестовом клоне.**
 
 ```text
 VMID: 9000
@@ -34,9 +34,9 @@ VMID 9000 builder-debian13
 apt update + full-upgrade
 базовые пакеты и системные настройки
         ↓
-serial0 + xterm.js как основной рабочий текстовый канал
+serial0 + xterm.js как основная Proxmox console
 serial-getty@ttyS0 → autologin ops
-vga: std + noVNC как независимый резервный канал
+vga: serial0
         ↓
 ожидание QEMU Guest Agent
 ожидание окончания Cloud-Init
@@ -75,9 +75,8 @@ protection=1
 | Cloud-Init | да |
 | Cloud-Init package upgrade | выключен (`ciupgrade=0`) |
 | QEMU Guest Agent | да |
-| Proxmox display | `vga: std` |
+| Proxmox display | `vga: serial0` |
 | Main console | xterm.js → `serial0` → autologin `ops` |
-| Fallback console | noVNC → VGA/`tty1`, без специального autologin |
 | Serial device | `serial0: socket` |
 | Admin user | `ops` |
 | `ops` password | locked |
@@ -88,6 +87,7 @@ protection=1
 | Locale | `en_US.UTF-8` |
 | Swap | не создаётся |
 | Template protection | включена |
+| Default clone protection | выключена (`protection=0`) |
 
 ## Модель доступа
 
@@ -115,7 +115,7 @@ PubkeyAuthentication yes
 
 ### Proxmox Console
 
-Основной рабочий console-канал текстовый:
+Основная console текстовая:
 
 ```text
 Proxmox Web UI
@@ -125,6 +125,8 @@ Proxmox Web UI
 → autologin ops
 → shell
 ```
+
+`vga: serial0` используется именно для того, чтобы штатная кнопка `Console` открывала serial/xterm.js, а не noVNC.
 
 Это не пустой пароль. Пароль `ops` остаётся заблокированным. Autologin разрешён локально на `serial0` через `serial-getty@ttyS0`.
 
@@ -136,14 +138,7 @@ Proxmox Web UI
 /etc/systemd/system/serial-getty@ttyS0.service.d/autologin.conf
 ```
 
-Параллельно сохраняется отдельный резервный канал:
-
-```text
-vga: std
-noVNC → VGA/tty1
-```
-
-На `tty1` специальный autologin не настраивается. noVNC нужен как fallback и для диагностики экранного вывода.
+Отдельный VGA/noVNC для обычных headless Debian VM на базе template не сохраняется. Если конкретному гостю нужен графический display, это настраивается отдельно для него.
 
 ## Cloud-Init конкретного клона
 
@@ -153,6 +148,7 @@ Base template не содержит персональных SSH-ключей. �
 
 ```text
 Full Clone
+→ protection=0, если паспорт VM явно не требует защиты
 → задать name/hostname
 → ciuser=ops
 → задать sshkeys
@@ -162,6 +158,8 @@ Full Clone
 ```
 
 `cipassword` в штатном deploy-сценарии не используется.
+
+Важно: base template `9000` имеет `protection=1`; обычный deploy/AI-agent workflow после clone обязан явно выставить клону `protection=0`, если конкретная VM не должна быть защищена.
 
 ## Обновления
 
@@ -185,6 +183,8 @@ ciupgrade=0
 В template установлен `cloud-guest-utils`, чтобы `growpart` был доступен при увеличении диска клона.
 
 Включён `fstrim.timer`, а перед финальным shutdown выполняется `fstrim -av`.
+
+Тестовый Full Clone подтвердил автоматическое расширение root partition/filesystem с базовых 16 GiB до диска клона 24 GiB.
 
 ## Синхронизация времени
 
@@ -289,6 +289,8 @@ protection=1
 
 Для осознанной пересборки VMID `9000` сначала нужно снять protection и удалить старый template вручную.
 
+Обычные рабочие клоны по умолчанию должны иметь `protection=0`; protection включается на конкретном госте только по явному решению.
+
 ## Требования перед запуском
 
 На Proxmox должны быть доступны:
@@ -345,33 +347,34 @@ TEMPLATE_VERSION=3
 
 Первый прогон выявил две ошибки порядка Cloud-Init: раннюю настройку `locale` и слишком раннее удаление default-user `debian`. Обе исправлены до успешного clean build v2.
 
-### Изменение v3
+Тестовый Full Clone v2 подтвердил: `ops` locked, `sudo NOPASSWD`, SSH только по ключу, QEMU Guest Agent, timesync, fstrim, отсутствие builder artifacts, полный набор базовых пакетов, уникальные machine-id/SSH host keys и growpart/filesystem growth до 24 GiB.
 
-В v3 основной рабочий console-канал переведён с framebuffer/noVNC/tty1 на настоящую текстовую serial-консоль, но VGA/noVNC не удаляется:
+### Изменение и clean build v3
+
+В v3 административная console перенесена на настоящую текстовую serial-консоль:
 
 ```text
 serial0: socket
+vga: serial0
 xterm.js → ttyS0 → autologin ops
-vga: std
-noVNC → VGA/tty1 → fallback
 ```
 
-После изменения требуется новая чистая сборка v3 и повторная проверка тестового Full Clone.
+2026-09-14 guest-level v3 успешно прошла чистую сборку. Во время проверки выяснилось, что `vga: std` заставляет штатную кнопку Proxmox `Console` открывать noVNC, поэтому окончательная политика возвращена на `vga: serial0`.
 
-## Проверка после сборки v3
+## Проверка после окончательной настройки v3
 
-Создать тестовый Full Clone, задать SSH public key и network **до первого старта**, затем проверить:
+На тестовом Full Clone проверить:
 
 1. VM загружается и получает сеть;
-2. `VM → Console → xterm.js` открывает текстовую консоль через `serial0`;
+2. штатная кнопка `VM → Console` открывает xterm.js/serial0, а не noVNC;
 3. xterm.js автоматически даёт shell `ops`;
-4. `VM → Console → noVNC` остаётся доступным как отдельный VGA fallback;
-5. пароль `ops` остаётся locked;
-6. SSH доступен только по ключу;
-7. `sudo` работает без пароля;
-8. QEMU Guest Agent отвечает;
-9. machine-id уникален;
-10. SSH host keys уникальны;
-11. root filesystem увеличивается после resize диска;
-12. `/etc/vm-template-info` содержит правильную версию и SHA-512 исходного образа;
-13. в конфигурации template есть `ciupgrade: 0`, `protection: 1`, `vga: std`, `serial0: socket`.
+4. пароль `ops` остаётся locked;
+5. SSH доступен только по ключу;
+6. `sudo` работает без пароля;
+7. QEMU Guest Agent отвечает;
+8. machine-id уникален;
+9. SSH host keys уникальны;
+10. root filesystem увеличивается после resize диска;
+11. `/etc/vm-template-info` содержит правильную версию и SHA-512 исходного образа;
+12. у обычного клона `protection=0`, если паспорт VM не требует защиты;
+13. в конфигурации template есть `ciupgrade: 0`, `protection: 1`, `vga: serial0`, `serial0: socket`.
