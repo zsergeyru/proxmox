@@ -36,25 +36,50 @@ Root SSH запрещён полностью.
 
 ## 3. Основная Proxmox console
 
-Начиная с Template-Version 3 основная VM console — настоящая текстовая serial-консоль:
+Начиная с Template-Version 4 основной Web Console используется в обычном VGA/noVNC режиме:
+
+```text
+vga: std
+Proxmox Web UI → VM → Console → noVNC/VGA → tty1 → autologin ops
+```
+
+Autologin задаётся через:
+
+```text
+/etc/systemd/system/getty@tty1.service.d/autologin.conf
+```
+
+Это не password authentication. `agetty` автоматически запускает локальную сессию `ops` на `tty1`, а пароль `ops` остаётся locked.
+
+Для нормального размера текста template использует обычное Debian-ядро `linux-image-amd64`, framebuffer `1280x800` и `console-setup`:
+
+```text
+FONTFACE="Fixed"
+FONTSIZE="8x16"
+```
+
+## 4. Резервная serial-консоль
+
+Параллельно сохраняется:
 
 ```text
 serial0: socket
-vga: serial0
-Proxmox Web UI → Console → xterm.js → ttyS0 → autologin ops
+xterm.js / qm terminal → ttyS0 → autologin ops
 ```
 
-`vga: serial0` нужен не для графики, а для того, чтобы штатная кнопка `Console` в Proxmox открывала serial/xterm.js, а не noVNC.
-
-Autologin задаётся через:
+Override:
 
 ```text
 /etc/systemd/system/serial-getty@ttyS0.service.d/autologin.conf
 ```
 
-Это не password authentication. `agetty` автоматически запускает локальную сессию `ops` на `ttyS0`, а пароль `ops` остаётся locked.
+Serial-консоль нужна как резервный административный канал. Она не является основной Web Console при `vga: std`.
 
-Следствие:
+Не следует одновременно держать несколько клиентов, подключённых к одному `serial0`: serial — поток, а не framebuffer, и несколько одновременных terminal clients могут мешать друг другу.
+
+## 5. Что означает доступ к Console
+
+Следствие для обоих console-каналов:
 
 ```text
 право открыть VM Console в Proxmox
@@ -63,17 +88,7 @@ Autologin задаётся через:
 
 Так как `ops` имеет `NOPASSWD: sudo`, console access практически эквивалентен root-доступу к гостевой ОС. Proxmox ACL на `VM.Console` нужно выдавать только доверенным пользователям/ролям.
 
-## 4. noVNC/VGA
-
-Для обычных Debian VM на базе v3 отдельный VGA/noVNC-канал не сохраняется:
-
-```text
-vga: serial0
-```
-
-Это осознанный выбор для headless server VM. Графический desktop/installer для таких гостей не является штатным сценарием. Если конкретной VM в будущем понадобится полноценный VGA/noVNC или SPICE, это задаётся отдельно в паспорте этой VM и не меняет базовую политику template.
-
-## 5. Template не содержит персональных credentials
+## 6. Template не содержит персональных credentials
 
 В `tpl-debian13`:
 
@@ -84,7 +99,7 @@ ops authorized_keys = empty
 
 Base template не содержит личных public/private keys и паролей администратора.
 
-## 6. Личные SSH keys
+## 7. Личные SSH keys
 
 Key pair принадлежит устройству:
 
@@ -113,7 +128,7 @@ Private keys:
 - не передавать AI-агенту без отдельной необходимости;
 - не размещать на PVE-хосте как постоянное хранилище.
 
-## 7. Технические keys
+## 8. Технические keys
 
 Технические ключи разделяются по ролям:
 
@@ -125,51 +140,48 @@ ci_ed25519
 
 Private key хранится там, откуда инициируется действие. Public key передаётся только тем VM, где эта роль нужна.
 
-Не использовать один общий private key для всех сервисов и пользователей.
-
-## 8. Cloud-Init и агент
+## 9. Cloud-Init и агент
 
 Для стандартного автоматического развёртывания агенту достаточно public key, hostname/network параметров и права клонировать template.
-
-Секретный пароль не нужен.
 
 Порядок:
 
 ```text
-clone
-→ снять у клона наследованную protection, если она есть
+Full Clone
+→ protection=0, если паспорт VM явно не требует защиты
+→ hostname/name
+→ ciuser=ops
 → sshkeys
 → network/DNS
 → qm cloudinit update
 → first start
 ```
 
-Base template `9000` остаётся защищённым (`protection=1`), но обычные рабочие Full Clone по умолчанию должны иметь `protection=0`, если их паспорт явно не требует обратного.
+Base template `9000` остаётся защищённым (`protection=1`), но обычные рабочие Full Clone по умолчанию должны иметь `protection=0`.
 
 Если public key хранится в Git, агент может получить его из репозитория; private key при этом остаётся на административном устройстве.
 
-## 9. SSH host keys VM
+## 10. SSH host keys VM
 
-`/etc/ssh/ssh_host_*` идентифицируют сервер, а не пользователя.
+`/etc/ssh/ssh_host_*` идентифицируют сервер, а не пользователя. Перед превращением builder в template они удаляются. Каждый клон создаёт собственные host keys при первом запуске.
 
-Перед превращением builder в template они удаляются. Каждый клон должен создать собственные host keys при первом запуске.
+## 11. Backup technical private keys
 
-## 10. Backup technical private keys
+Отдельную secret-backup инфраструктуру пока не создаём. Если technical private key находится внутри рабочей VM, полный Proxmox backup этой VM сохраняет его вместе с остальными данными. Такой backup считается чувствительным объектом.
 
-Отдельную secret-backup инфраструктуру пока не создаём.
-
-Если technical private key находится внутри рабочей VM, полный Proxmox backup этой VM сохраняет его вместе с остальными данными. Такой backup считается чувствительным объектом.
-
-## 11. Итоговая модель
+## 12. Итоговая модель
 
 ```text
 Base template
 ├── ops account
 ├── password locked
 ├── authorized_keys empty
+├── vga: std
+├── tty1 autologin ops
+├── regular Debian amd64 kernel + framebuffer
+├── console font Fixed 8x16
 ├── serial0: socket
-├── vga: serial0
-└── ttyS0 autologin ops
+└── ttyS0 autologin ops (fallback)
 
         ↓ Full Clone + Cloud-Init before first boot
 
@@ -183,9 +195,10 @@ Administrative device
 └── corresponding private SSH key
 ```
 
-Два штатных административных канала:
+Три административных канала:
 
 ```text
 1. SSH → ops + key
-2. Proxmox xterm.js → serial0/ttyS0 → autologin ops
+2. Proxmox Console/noVNC → VGA/tty1 → autologin ops
+3. xterm.js или qm terminal → serial0/ttyS0 → autologin ops (fallback)
 ```
