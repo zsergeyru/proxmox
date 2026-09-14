@@ -11,7 +11,7 @@
 Активный builder:
 
 ```text
-zsergeyru/proxmox-bootstrap/create-template.sh
+zsergeyru/proxmox/scripts/pve/create-template.sh
 ```
 
 Текущая модель Template-Version 4 намеренно простая:
