@@ -21,7 +21,7 @@ jobs:
           python-version: "3.12"
 
       - name: Rename canonical GitHub repository key
-        if: github.event_name == 'push' && github.event.head_commit.message == 'chore: run repository key rename'
+        if: "${{ github.event_name == 'push' && github.event.head_commit.message == 'chore: run repository key rename' }}"
         run: |
           python - <<'PY'
           from pathlib import Path
