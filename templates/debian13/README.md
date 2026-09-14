@@ -8,75 +8,53 @@
 VMID: 9000
 Name: tpl-debian13
 OS: Debian 13 (Trixie)
-Template-Version: 5
+Template-Version: 4
 Clone policy: Full Clone
 Protection: 1
 ```
 
-Версия 5 сохраняет проверенные решения v4 по console/kernel и добавляет воспроизводимость build inputs.
+Template v4 снова является действующей версией. От усложнения v5 с pinned Debian build, version lock и `snapshot.debian.org` отказались.
 
-## Source of truth и переходное состояние
-
-Целевая архитектура:
+Рабочая реализация находится в публичном:
 
 ```text
-PUBLIC proxmox-bootstrap
-└── init-pve.sh
-
-PRIVATE proxmox
-└── scripts/pve/create-template.sh
+zsergeyru/proxmox-bootstrap/create-template.sh
 ```
-
-Private builder ещё не перенесён. Текущая рабочая **переходная** реализация Template v5 находится в public `zsergeyru/proxmox-bootstrap/create-template.sh`.
-
-Проверенный public code baseline:
-
-```text
-ef0e3f21532c6e0fe19b79ea83f5c9b8d420d1f2
-```
-
-Нельзя считать `main` recovery reference.
-
-Политика воспроизводимости: [`../../docs/24-reproducible-bootstrap.md`](../../docs/24-reproducible-bootstrap.md).
 
 Политика сборки: [`build-policy.md`](build-policy.md).
 
-## Что делает Template v5
+## Что делает Template v4
 
 ```text
-pinned Debian 13 cloud build
+Debian 13 trixie/latest generic cloud image
 → SHA-512 verification
 → VMID 9000 builder
-→ build-time Debian snapshot
-→ apt update/full-upgrade + base packages
+→ apt update/full-upgrade из обычных Debian repositories
+→ установка base packages
 → regular linux-image-amd64
 → remove cloud-amd64 kernel
 → verification reboot
 → framebuffer + VGA/noVNC tty1 verification
 → QGA + SSH policy + locked-password verification
-→ restore normal live Debian repositories
 → clean machine-specific state
 → standard Cloud-Init defaults
 → qm template
 → protection=1
 ```
 
-## Reproducible inputs
+## Источник Debian
 
-Текущий lock:
+Builder использует текущий официальный image:
 
 ```text
-Debian cloud build: 20260601-2496
-Debian APT snapshot: 20260914T000000Z
+https://cloud.debian.org/images/cloud/trixie/latest/debian-13-genericcloud-amd64.qcow2
 ```
 
-Image не берётся из `trixie/latest`.
+Перед импортом скачивается `SHA512SUMS` из того же каталога и выполняется строгая SHA-512 проверка.
 
-`apt full-upgrade` во время build не идёт в меняющийся live archive: package universe фиксируется snapshot timestamp. Перед превращением VM в template normal Debian repositories возвращаются, поэтому рабочие clones можно обновлять обычным способом.
+Отдельный фиксированный Debian build и APT snapshot не используются. При новой сборке template получает актуальное на этот момент состояние Debian 13.
 
 ## Kernel и console
-
-Сохраняется принятое решение v4:
 
 ```text
 linux-image-amd64
@@ -94,8 +72,6 @@ Builder после reboot требует:
 - active QEMU Guest Agent;
 - active `getty@tty1` и `serial-getty@ttyS0`;
 - корректную effective SSH policy.
-
-Исторически на текущем PVE regular kernel дал `fb0 1280x800`; конкретное разрешение не зашивается как обязательное.
 
 ## Доступ
 
@@ -135,7 +111,6 @@ Docker и application services в base template не устанавливают�
 
 ```text
 Full Clone from 9000
-→ protection по guest.yaml
 → CPU/RAM/disk/network
 → ciuser=ops
 → SSH public keys
@@ -148,38 +123,39 @@ Linked Clone не является штатным вариантом.
 
 ## `/etc/vm-template-info`
 
-Template записывает provenance:
+Template v4 записывает:
 
 ```text
 Template: tpl-debian13
-Template-Version: 5
-Source-Image: debian-13-genericcloud-amd64-20260601-2496.qcow2
+Template-Version: 4
+OS: Debian 13
+Kernel-Flavor: amd64
+Source-Image: debian-13-genericcloud-amd64.qcow2
 Source-Image-SHA512: <verified hash>
-Debian-Cloud-Build: 20260601-2496
-Build-Apt-Snapshot: 20260914T000000Z
 Build-Date: <UTC date>
 ```
 
-## Clean build gate
+Этого достаточно, чтобы видеть фактически использованный image и его checksum без отдельной системы version lock.
 
-После изменения v5/pins требуется:
+## Проверка после изменения builder
+
+После существенного изменения `create-template.sh`:
 
 1. clean build VMID 9000;
-2. новый Full Clone;
+2. Full Clone;
 3. noVNC/tty1 и serial fallback;
 4. regular kernel + framebuffer;
 5. QGA;
 6. locked passwords / SSH key-only;
 7. unique machine-id и SSH host keys;
 8. filesystem growth после resize;
-9. отсутствие builder artifacts;
-10. normal Debian repositories в sealed clone/template.
+9. отсутствие builder artifacts.
 
-CI проверяет структуру scripts/Cloud-Init, но не заменяет этот PVE integration test.
+CI проверяет shell/Cloud-Init структуру, но не заменяет этот PVE integration test.
 
 ## История
 
-- **v2** — подтверждены базовый build/Full Clone, QGA, SSH, timesync, TRIM, cleanup и disk growth.
+- **v2** — базовый build/Full Clone, QGA, SSH, timesync, TRIM, cleanup и disk growth.
 - **v3** — тестировалась serial-only Web Console; признана менее удобной.
-- **v4** — возвращён `vga: std`, установлен regular amd64 kernel, подтверждены framebuffer/noVNC и `tty1` autologin.
-- **v5** — pinned Debian cloud build + build-time APT snapshot; moving `latest` исключён из recovery build path.
+- **v4** — возвращён `vga: std`, установлен regular amd64 kernel, подтверждены framebuffer/noVNC и `tty1` autologin; текущая действующая версия.
+- **v5** — эксперимент с pinned Debian build и APT snapshot; отменён как избыточно сложный для текущего проекта.
