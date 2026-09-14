@@ -66,6 +66,20 @@ Ansible и Semaphore не размещаются здесь как постоя�
 
 Для операции уровня виртуализации AI-агент использует общий Proxmox MCP.
 
+Для создания обычной Debian VM из `tpl-debian13` агент обязан соблюдать порядок:
+
+```text
+Full Clone from 9000
+→ явно выставить protection=0, если guest.yaml не требует protection: true
+→ применить CPU/RAM/disk/network
+→ задать ciuser=ops и SSH public key
+→ обновить Cloud-Init
+→ first start
+→ проверить QEMU Agent/SSH/health
+```
+
+Причина явного `protection=0`: base template `9000` защищён (`protection=1`), и protection может оказаться в конфигурации нового клона. Снимать protection с самого template ради клонирования запрещено.
+
 Для повторяемого изменения внутри гостя целевой путь такой:
 
 ```text
