@@ -4,7 +4,7 @@
 **ОС:** Debian 13  
 **Назначение:** DNS, исходящие VPN, policy-based routing, remote-access VPN и сетевые сервисы, которые удобнее держать на Linux-сервере.
 
-Общая сеть и VLAN описаны в [`../../docs/network.md`](../../docs/network.md). Граница ответственности физического OpenWrt и этой VM зафиксирована в [`decisions/001-edge-router-boundary.md`](decisions/001-edge-router-boundary.md).
+Общая сеть и VLAN описаны в [`../../docs/40-network.md`](../../docs/40-network.md). Граница ответственности физического OpenWrt и этой VM зафиксирована в [`decisions/001-edge-router-boundary.md`](decisions/001-edge-router-boundary.md).
 
 ## Что делает 109
 
@@ -45,7 +45,7 @@ ip rule / routing tables
 
 SmartDNS поддерживает обычные upstream DNS, DoH/DoT и группы доменов. `keen-pbr` внутри VM не используется.
 
-Постоянный внутренний домен — `home.arpa`. `.local` используется только для mDNS. Полная DNS-модель: [`../../docs/dns.md`](../../docs/dns.md).
+Постоянный внутренний домен — `home.arpa`. `.local` используется только для mDNS. Полная DNS-модель: [`../../docs/41-dns.md`](../../docs/41-dns.md).
 
 ## Адресация
 
