@@ -2,95 +2,83 @@
 
 ## Назначение
 
-Для безопасных скриптов, которые должны запускаться непосредственно на чистом Proxmox-хосте или внутри новой bootstrap-VM без доступа к приватному Git, используется отдельный публичный репозиторий:
+Публичный репозиторий:
 
 ```text
 https://github.com/zsergeyru/proxmox-bootstrap
 ```
 
-Основной репозиторий инфраструктуры остаётся приватным:
+содержит единственные канонические executable bootstrap-скрипты, которые можно скачать на чистый PVE или новую bootstrap-VM без доступа к приватному Git.
+
+Приватный:
 
 ```text
 https://github.com/zsergeyru/proxmox
 ```
 
-Распределение ответственности:
+остаётся source of truth для архитектуры, `guest.yaml`, `rootfs/`, политик и дальнейшего desired state.
 
-```text
-zsergeyru/proxmox
-→ документация инфраструктуры, архитектура, описания VM/LXC и политики
-
-zsergeyru/proxmox-bootstrap
-→ единственные канонические executable bootstrap-скрипты
-```
-
-Скрипты не дублируются между репозиториями.
+Скрипты между двумя репозиториями не дублируются.
 
 ## Zero-day recovery chain
-
-На совершенно новом компьютере исходной точкой считаются только установленный Proxmox VE и доступ в интернет к публичному bootstrap-репозиторию.
-
-Целевая последовательность:
 
 ```text
 чистый Proxmox VE
 → create-template.sh
-→ VM 9000 tpl-debian13
+→ 9000 tpl-debian13
 → create-ai-control-vm.sh
-→ VM 301 ai-control
+→ 301 ai-control
 → install-ai-control.sh внутри 301
-→ Hermes + WebUI + Proximo + SSH identities
-→ оператор регистрирует показанный GitHub Deploy Key
-→ Hermes клонирует приватный zsergeyru/proxmox
-→ дальше инфраструктура восстанавливается/разворачивается из Git
+→ Hermes + Dashboard + Proximo + SSH identities
+→ вручную зарегистрировать GitHub Deploy Key
+→ повторный install-ai-control.sh
+→ clone zsergeyru/proxmox
+→ дальнейшее развёртывание из Git
 ```
 
-Приватный Git **не нужен до тех пор, пока AI уже не развёрнут**. GitHub PAT в zero-day сценарии не используется.
+Приватный Git появляется только после того, как AI уже установлен. GitHub PAT для zero-day пути не нужен.
 
-Подробная спецификация двух скриптов находится в [`ai-control-bootstrap.md`](./ai-control-bootstrap.md).
+Подробности: [`ai-control-bootstrap.md`](./ai-control-bootstrap.md).
 
-## Почему отдельный публичный репозиторий
+## Скрипты
 
-GitHub не позволяет сделать отдельный файл публичным внутри приватного репозитория. Поэтому для файлов, которые PVE или новая VM должны скачать напрямую через HTTPS без авторизации, используется отдельный public repository.
+### `create-template.sh`
 
-На Proxmox-хосте при этом не требуется устанавливать Git, клонировать весь инфраструктурный репозиторий или хранить GitHub PAT.
-
-## Debian 13 template builder
-
-Канонический builder-скрипт:
+Создаёт базовый Debian 13 template:
 
 ```text
-zsergeyru/proxmox-bootstrap/create-template.sh
+VMID: 9000
+Name: tpl-debian13
+Template-Version: 4
 ```
 
-Прямая загрузка на PVE:
+Основные свойства:
+
+- Debian 13 generic cloud image с SHA-512 verification;
+- `ops` + locked password + `NOPASSWD sudo`;
+- root password locked;
+- SSH password auth disabled, public keys передаются клонам отдельно;
+- QEMU Guest Agent и Cloud-Init;
+- regular `linux-image-amd64` вместо cloud-kernel;
+- VGA/noVNC `tty1` autologin `ops`;
+- `serial0`/`ttyS0` как fallback;
+- machine-id и SSH host keys очищаются перед template;
+- `protection=1` включается только после успешной verification.
+
+Запуск:
 
 ```bash
 curl -fsSL \
   https://raw.githubusercontent.com/zsergeyru/proxmox-bootstrap/main/create-template.sh \
   -o /root/create-template.sh
-
 bash -n /root/create-template.sh
 chmod +x /root/create-template.sh
 /root/create-template.sh
 ```
 
-GitHub token в этом сценарии не нужен.
-
-## Планируемые скрипты 301 AI Control
-
-На текущем этапе два следующих скрипта **спроектированы, но ещё не считаются реализованными/live-validated**:
-
-```text
-create-ai-control-vm.sh
-install-ai-control.sh
-```
-
-После реализации их канонические экземпляры должны находиться только в `zsergeyru/proxmox-bootstrap`.
-
 ### `create-ai-control-vm.sh`
 
-Запускается на PVE от `root` и отвечает за слой виртуализации:
+**Реализован.** Выполняется от `root` на PVE. Отвечает только за уровень VM и host-side credential для Proximo:
 
 ```text
 9000 tpl-debian13
@@ -99,87 +87,112 @@ install-ai-control.sh
 → protection=0
 → onboot=1
 → first start
-→ QEMU Guest Agent/cloud-init health
+→ QGA/cloud-init health
+→ Proximo PVE user/token/ACL
+→ передача token/config/CA внутрь 301
 ```
 
-Кроме самой VM этот скрипт создаёт только необходимую host-side bootstrap identity для Proximo, потому что PVE user/token/ACL нельзя безопасно поручать самому AI-гостю.
+Он не устанавливает Hermes, не ставит Proximo package и не клонирует private Git.
 
-Целевая identity:
+Запуск:
+
+```bash
+curl -fsSL \
+  https://raw.githubusercontent.com/zsergeyru/proxmox-bootstrap/main/create-ai-control-vm.sh \
+  -o /root/create-ai-control-vm.sh
+bash -n /root/create-ai-control-vm.sh
+chmod +x /root/create-ai-control-vm.sh
+/root/create-ai-control-vm.sh
+```
+
+По умолчанию:
 
 ```text
-user:  proximo@pve
-token: proximo@pve!ai-control
-privilege separation: enabled
-pool: managed
+VMID:       301
+Name:       ai-control
+CPU:        2
+RAM:        4096 MiB
+Disk:       24 GiB
+IPv4:       192.168.3.1/16
+Gateway:    192.168.1.1
+Bridge:     vmbr0
 ```
 
-Token secret передаётся непосредственно в `301` через QEMU Guest Agent и не должен оставаться постоянным plaintext-файлом на PVE.
+Proximo identity:
 
-Скрипт **не устанавливает Hermes/Proximo packages и не клонирует Git**.
+```text
+proximo@pve!ai-control
+privilege separation: enabled
+managed pool: managed
+```
+
+Если token существует, но его secret внутри `301` утрачен, автоматической ротации нет. Явное восстановление:
+
+```bash
+ROTATE_PROXIMO_TOKEN=1 /root/create-ai-control-vm.sh
+```
 
 ### `install-ai-control.sh`
 
-Запускается уже внутри `301` и отвечает за программный AI control plane.
+**Реализован.** Выполняется от `root` внутри `301`; обычно его удобно запускать через QEMU Guest Agent с PVE:
 
-Обязательная структура:
+```bash
+qm guest exec 301 -- /bin/bash -lc \
+  'curl -fsSL https://raw.githubusercontent.com/zsergeyru/proxmox-bootstrap/main/install-ai-control.sh | bash'
+```
+
+Он создаёт:
 
 ```text
 /opt/ai-control/
 ├── agents/
 │   └── hermes/
+│       └── hermes-agent/
 ├── mcp/
 │   └── proximo/
-├── repos/
-│   └── proxmox/
-└── state/
+├── ssh/
+│   ├── ai_control_ed25519(.pub)
+│   └── github_proxmox_ed25519(.pub)
+└── repos/
+    └── proxmox/
 ```
 
-Ключевое правило: Hermes устанавливается именно в:
+Hermes устанавливается строго в `agents/hermes`:
 
 ```text
-/opt/ai-control/agents/hermes
+HERMES_HOME=/opt/ai-control/agents/hermes
+code=/opt/ai-control/agents/hermes/hermes-agent
 ```
 
-а общий Proximo — отдельно:
+Общий Proximo располагается отдельно:
 
 ```text
 /opt/ai-control/mcp/proximo
 ```
 
-Installer:
+Installer также:
 
-- ставит runtime dependencies;
-- устанавливает Hermes в `agents/hermes`;
-- настраивает штатный Hermes WebUI, целевой порт `9119`;
-- устанавливает Proximo в `mcp/proximo`;
-- связывает Proximo с уже подготовленным PVE token;
-- включает TLS verification и при необходимости использует pinned PVE certificate/CA bundle;
 - запускает `proximo doctor`;
-- создаёт две независимые SSH identity;
-- показывает GitHub Deploy Key public key;
-- после ручной регистрации ключа проверяет GitHub и клонирует private repo.
+- регистрирует Proximo как MCP Hermes;
+- поднимает Hermes Dashboard на `tcp/9119` с auth;
+- создаёт infrastructure SSH key;
+- создаёт отдельный GitHub Deploy Key;
+- показывает только публичные части ключей;
+- после ручной регистрации Deploy Key клонирует `zsergeyru/proxmox` в `/opt/ai-control/repos/proxmox`.
 
-## SSH identities внутри 301
+### `bootstrap-ai-control.sh`
 
-### Infrastructure key
+Старое имя сохранено как совместимая convenience-wrapper. Оно последовательно вызывает оба этапа. Для диагностики и recovery предпочтительнее использовать `create-ai-control-vm.sh` и `install-ai-control.sh` отдельно.
 
-```text
-/home/ops/.ssh/ai_control_ed25519
-/home/ops/.ssh/ai_control_ed25519.pub
-```
+## GitHub onboarding
 
-Private key остаётся внутри `301`. Public key Hermes передаёт новым managed Debian VM через Cloud-Init до первого запуска.
-
-### GitHub Deploy Key
+После первого `install-ai-control.sh` оператор получает:
 
 ```text
-/home/ops/.ssh/github_proxmox_ed25519
-/home/ops/.ssh/github_proxmox_ed25519.pub
+/opt/ai-control/ssh/github_proxmox_ed25519.pub
 ```
 
-Этот ключ используется только для `zsergeyru/proxmox`.
-
-После первого запуска installer показывает `.pub`. Оператор добавляет его в:
+Его нужно добавить:
 
 ```text
 zsergeyru/proxmox
@@ -187,198 +200,92 @@ zsergeyru/proxmox
 → Deploy keys
 ```
 
-Для `commit/push` включается `Allow write access`.
+Для возможности `commit/push` включить `Allow write access`.
 
-GitHub PAT не нужен.
+После этого повторный `install-ai-control.sh` использует тот же private key, проверяет `git ls-remote` и завершает clone.
 
-После регистрации ключа целевой checkout находится в:
+## Infrastructure SSH identity
 
-```text
-/opt/ai-control/repos/proxmox
-```
-
-## Proximo
-
-Целевой `301` использует **Proximo** как канонический Proxmox MCP.
-
-Hard boundary задаётся отдельным privilege-separated PVE token и ACL. Дополнительно Hermes по умолчанию получает сокращённую MCP surface:
+Для управления будущими Debian VM используется:
 
 ```text
-PROXIMO_TOOLSETS=pve.guests
+/opt/ai-control/ssh/ai_control_ed25519
+/opt/ai-control/ssh/ai_control_ed25519.pub
 ```
 
-Обычный AI workflow не получает прав на PVE host network, storage definitions, IAM/ACL, SDN, repositories/certificates и reboot/shutdown гипервизора.
+Private key остаётся только в `301`. Public key передаётся новой VM через Cloud-Init пользователю `ops` до первого запуска.
 
-После установки обязательно выполняется:
+## CI
 
-```bash
-proximo doctor
-```
-
-и проверяется фактическая граница `can/cannot`.
-
-## Повторный запуск
-
-Оба будущих скрипта должны проектироваться как безопасно повторно запускаемые.
-
-`create-ai-control-vm.sh`:
-
-- не удаляет существующую правильную `301`;
-- не делает новый clone поверх неё;
-- не уменьшает диск;
-- не ротирует Proximo token без явного recovery-флага;
-- прекращает работу, если VMID `301` занят другим объектом.
-
-`install-ai-control.sh`:
-
-- не перегенерирует SSH keys;
-- не сбрасывает provider credentials;
-- не удаляет Git checkout;
-- не меняет версию Hermes без явного upgrade-режима;
-- повторяет health checks и доделывает безопасно пропущенные шаги.
-
-## Правило изменения скриптов
-
-При изменении любого публичного bootstrap-скрипта необходимо:
-
-1. изменить его непосредственно в `zsergeyru/proxmox-bootstrap`;
-2. убедиться, что файл не содержит секретов;
-3. дождаться успешной проверки GitHub Actions;
-4. обновить соответствующую документацию в приватном `zsergeyru/proxmox`;
-5. выполнить реальный clean/live test для сценариев, которые CI не способен проверить на PVE.
-
-Приватные executable-копии специально не хранятся.
-
-## План проверки CI и live-test
-
-После реализации CI публичного репозитория должен как минимум проверять:
-
-- `create-template.sh` через `bash -n`;
-- `create-ai-control-vm.sh` через `bash -n`;
-- `install-ai-control.sh` через `bash -n`;
-- встроенный в template builder Cloud-Init как YAML;
-- встроенные template guest scripts через `bash -n`;
-- whitespace errors.
-
-CI не заменяет real PVE test.
-
-Первый полный live-test zero-day цепочки:
+GitHub Actions публичного repo проверяет:
 
 ```text
-create-template.sh
-→ Full Clone 9000 → 301 через create-ai-control-vm.sh
-→ QGA/cloud-init health
+bash -n create-template.sh
+bash -n create-ai-control-vm.sh
+bash -n install-ai-control.sh
+bash -n bootstrap-ai-control.sh
+```
+
+Для `create-template.sh` дополнительно проверяются встроенный Cloud-Init YAML и вложенные guest scripts.
+
+CI не заменяет реальный PVE test.
+
+## Live-test, который ещё требуется
+
+До перевода `301` в production нужно проверить на реальном PVE:
+
+```text
+create-ai-control-vm.sh
+→ правильный Full Clone 9000 → 301
 → install-ai-control.sh
-→ Hermes WebUI
-→ Proximo doctor
+→ Hermes в /opt/ai-control/agents/hermes
+→ Dashboard + auth
+→ proximo doctor
 → Deploy Key registration
-→ Git clone в /opt/ai-control/repos/proxmox
-→ Proximo Full Clone test guest + Cloud-Init infrastructure SSH public key
-→ SSH from 301 to test guest
+→ clone private repo
+→ Proximo создаёт test managed VM
+→ ai_control_ed25519.pub передаётся через Cloud-Init
+→ SSH 301 → test VM
 ```
 
-## Security boundary
+Только после этой проверки `320-ai-control` можно выводить из эксплуатации.
 
-`proxmox-bootstrap` публичный. В него запрещено помещать пароли/PIN, PAT/API tokens, приватные SSH/VPN/TLS ключи, реальные `.env`, credentials сервисов и иные нежелательные для публикации данные.
+## Template-Version 4
 
-Секреты zero-day bootstrap (`Proximo token`, private SSH keys, model/provider credentials и WebUI secrets) создаются/передаются на месте и не находятся в исходных скриптах.
-
-Полный backup `301` считается чувствительным, потому что содержит control-plane credentials.
-
-## Текущий статус template
-
-Текущая версия по умолчанию создаёт:
-
-```text
-VMID: 9000
-Name: tpl-debian13
-Template-Version: 4
-```
-
-### v2
-
-2026-09-14 Template-Version 2 успешно проверена полной чистой сборкой и тестовым Full Clone на реальном PVE-хосте. Были подтверждены SSH по ключу, locked password, sudo, QEMU Agent, timesync, growpart/filesystem growth, очистка builder artifacts и уникальные machine-id/SSH host keys.
-
-### v3
-
-В v3 основная Proxmox console была переведена на:
-
-```text
-vga: serial0
-xterm.js → ttyS0 → autologin ops
-```
-
-Технически схема работала, но тестирование показало, что serial console менее удобна как основная Web Console: это поток, а не framebuffer, старое содержимое экрана не сохраняется.
-
-### v4
-
-v4 возвращает:
+`v4` использует:
 
 ```text
 vga: std
 Proxmox Console → noVNC/VGA → tty1 → autologin ops
+serial0: socket → ttyS0 → autologin ops (fallback)
 ```
 
-и оставляет резервный канал:
+Builder устанавливает regular Debian kernel и framebuffer, настраивает `Fixed 8x16`, проверяет QGA/console/SSH policy, затем очищает machine-specific state и делает template.
 
-```text
-serial0: socket
-xterm.js / qm terminal → ttyS0 → autologin ops
-```
-
-Во время теста выяснилась причина крупного шрифта в noVNC: исходный Debian genericcloud image загружался с `cloud-amd64` kernel без framebuffer. У тестовой VM:
-
-```text
-cloud-amd64 kernel → /sys/class/graphics/fb0 отсутствует
-regular amd64 kernel → fb0 = 1280,800
-```
-
-Поэтому v4 автоматически:
-
-1. устанавливает `linux-image-amd64`;
-2. устанавливает `console-setup` и `console-setup-linux`;
-3. настраивает `Fixed 8x16`;
-4. удаляет `linux-image-*cloud-amd64`;
-5. перезагружает builder;
-6. проверяет, что реально загружено обычное ядро, `fb0` существует и сообщает валидное непустое разрешение, QEMU Guest Agent отвечает, `tty1` и `ttyS0` активны;
-7. проверяет locked-пароли `ops`/`root` и эффективную SSH policy;
-8. только после этого выполняет final cleanup и создаёт template.
-
-Конкретное разрешение framebuffer не зашито как требование. На текущем PVE экспериментально получено `1280,800`; builder выводит фактическое значение в итоговом отчёте.
-
-После создания template дополнительно проверяются `template=1`, `protection=1`, `agent=1`, `vga=std`, `serial0=socket`, `ciuser=ops`, `ciupgrade=0`, DHCP и отсутствие builder-only `cicustom`.
-
-### Protection при клонировании
-
-Base template `9000` защищён:
+Base template остаётся:
 
 ```text
 protection=1
 ```
 
-Обычные Full Clone по умолчанию должны иметь:
+Обычный рабочий Full Clone получает:
 
 ```text
 protection=0
 ```
 
-Deploy/AI workflow обязан явно выставлять `protection=0`, если паспорт конкретной VM не требует обратного.
+если паспорт гостя явно не требует обратного.
 
-### Full Clone vs Linked Clone
+## Security boundary
 
-Для рабочих VM принят Full Clone. Проверять тип клона только по словам автоматизации нельзя.
+Публичный `proxmox-bootstrap` не должен содержать:
 
-Надёжные признаки Full Clone:
+- PAT/API tokens;
+- пароли/PIN;
+- private SSH/VPN/TLS keys;
+- реальные `.env` с secrets;
+- model-provider credentials.
 
-```text
-Proxmox task log:
-create full clone of drive scsi0 (...)
-```
+Proximo token создаётся на месте на PVE и передаётся напрямую в `301`; private SSH keys создаются уже внутри `301`.
 
-и на LVM-thin:
-
-```bash
-lvs -o lv_name,origin
-```
-
-У основного диска настоящего Full Clone поле `Origin` пустое. Если там `base-9000-disk-0`, создан Linked Clone.
+Полный backup `301` считается чувствительным объектом.
