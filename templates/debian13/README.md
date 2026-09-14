@@ -8,6 +8,7 @@
 VMID: 9000
 Name: tpl-debian13
 OS: Debian 13 (Trixie)
+Template-Version: 2
 ```
 
 Рабочие VM по умолчанию создаются как **Full Clone**.
@@ -15,7 +16,7 @@ OS: Debian 13 (Trixie)
 ## Источники истины
 
 - [`build-policy.md`](./build-policy.md) — политика сборки и базовых настроек;
-- [`users-and-keys.md`](./users-and-keys.md) — пользователи и SSH-ключи;
+- [`users-and-keys.md`](./users-and-keys.md) — пользователи, console access и SSH-ключи;
 - [`filesystem-layout.md`](./filesystem-layout.md) — файловая структура сервисов;
 - [`create-template.sh`](./create-template.sh) — фактическая автоматизированная сборка.
 
@@ -41,6 +42,9 @@ shutdown
         ↓
 удаление builder-only Cloud-Init
         ↓
+настройка стандартного Cloud-Init:
+ops + console password + SSH public key + DHCP
+        ↓
 qm template
         ↓
 tpl-debian13
@@ -48,7 +52,7 @@ tpl-debian13
 
 Скрипт проверяет SHA-512 образа по официальному `SHA512SUMS` Debian.
 
-При ошибке существующая builder-VM **не удаляется автоматически**. Это сделано намеренно, чтобы можно было проверить console, Cloud-Init и логи. Существующий VMID `9000` скрипт никогда не перезаписывает.
+При ошибке builder-VM **не удаляется автоматически**, чтобы можно было проверить console, Cloud-Init и логи. Существующий VMID `9000` скрипт никогда не перезаписывает.
 
 ## Базовые параметры
 
@@ -68,12 +72,48 @@ tpl-debian13
 | QEMU Guest Agent | да |
 | Serial console | да |
 | Admin user | `ops` |
+| Console login | `ops` + пароль |
 | Root SSH | запрещён |
 | Password SSH | запрещён |
+| SSH | public key |
 | Timezone | `Europe/Moscow` |
 | Locale | `en_US.UTF-8` |
 | Swap | не создаётся |
-| Template-Version | `1` |
+| Template-Version | `2` |
+
+## Доступ к клонам
+
+В версии 2 шаблон получает два заранее настроенных способа доступа:
+
+```text
+Proxmox serial console
+→ ops + password
+
+SSH
+→ ops + private key на компьютере
+→ public key в Cloud-Init template
+```
+
+Пароль используется для локальной/Proxmox-консоли, но парольный SSH остаётся запрещённым:
+
+```text
+PermitRootLogin no
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PubkeyAuthentication yes
+```
+
+Во время сборки скрипт интерактивно запрашивает:
+
+1. SSH public key администратора;
+2. пароль `ops` для console login;
+3. повтор пароля.
+
+Пароль и private SSH key **не хранятся в Git**.
+
+Public key не является секретом. Скрипт записывает его в стандартные Cloud-Init параметры template, поэтому обычные клоны наследуют этот ключ автоматически.
+
+Console password также становится Cloud-Init default template. Поэтому клоны по умолчанию получают один и тот же console password. При необходимости его можно заменить на конкретной VM через Cloud-Init.
 
 ## Требования перед запуском
 
@@ -84,6 +124,7 @@ qm
 pvesm
 sha512sum
 curl или wget
+mktemp
 ```
 
 Storage `local` должен поддерживать content type **Snippets**, потому что custom Cloud-Init нужен только на время сборки builder-VM.
@@ -98,15 +139,17 @@ Datacenter → Storage → local → Edit → Content → Snippets
 
 VMID `9000` должен быть свободен.
 
-## Запуск
+Перед сборкой необходимо иметь SSH key pair на административном компьютере. В скрипт вставляется только содержимое файла `.pub`.
 
-Репозиторий должен быть доступен на Proxmox-хосте. Затем:
+## Запуск
 
 ```bash
 cd /path/to/proxmox/templates/debian13
 chmod +x create-template.sh
 sudo ./create-template.sh
 ```
+
+Скрипт попросит public key и console password, после чего выполнит сборку.
 
 По умолчанию используются:
 
@@ -171,27 +214,28 @@ logrotate
 
 Docker и прикладные сервисы в base template не устанавливаются.
 
-## SSH и пользователь `ops`
+## Пользователь `ops`
 
-В template создаётся пользователь `ops` с группами:
+В template создаётся `ops` с группами:
 
 ```text
 adm
 sudo
 ```
 
-SSH-политика:
+Обычное администрирование:
 
 ```text
-PermitRootLogin no
-PasswordAuthentication no
-KbdInteractiveAuthentication no
-PubkeyAuthentication yes
+SSH → ops → sudo
 ```
 
-Private keys и постоянные пароли в template не записываются. Public key нужно передавать каждому клону через обычный Proxmox Cloud-Init.
+Аварийный доступ без сети:
 
-После завершения сборки custom builder user-data отключается. Клоны получают стандартный Proxmox Cloud-Init с `ciuser=ops` и DHCP по умолчанию.
+```text
+Proxmox serial console → ops → password → sudo
+```
+
+`root` как системная учётная запись Debian сохраняется, но прямой SSH-login root запрещён. Основной console login также выполняется через `ops`, а не через root.
 
 ## Очистка перед template
 
@@ -217,12 +261,13 @@ Private keys и постоянные пароли в template не записы�
 2. получение DHCP;
 3. создание нового machine-id;
 4. создание уникальных SSH host keys;
-5. вход `ops` по переданному public key;
-6. работу `sudo`;
-7. QEMU Guest Agent;
-8. serial console;
-9. корректный размер root filesystem после growpart/resize;
-10. содержимое `/etc/vm-template-info`.
+5. вход `ops` через Proxmox console по паролю;
+6. вход `ops` по SSH-ключу без пароля;
+7. работу `sudo`;
+8. QEMU Guest Agent;
+9. serial console;
+10. корректный размер root filesystem;
+11. содержимое `/etc/vm-template-info`.
 
 После этой проверки template можно использовать для `109-network-gateway`, `301-ai-control` и других Debian VM.
 
