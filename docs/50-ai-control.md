@@ -1,66 +1,135 @@
-# AI Control — статус архитектуры
+# AI Control — архитектурные принципы
 
 ## Статус
 
-Архитектура `301-ai-control` **отправлена на перепроектирование** вместе с bootstrap/deploy workflow.
+Архитектура `301-ai-control` остаётся принятой. Переписывается только исполняемая реализация bootstrap/install/deploy scripts.
 
-Предыдущая схема с Proximo, Docker, отдельными public bootstrap stages и Hermes сохранена в Git history, но больше не считается канонической.
+Старые public scripts перенесены в архив и больше не считаются рабочим кодом, но это **не отменяет** принятые архитектурные решения.
 
-## Что остаётся зафиксировано
-
-Пока сохраняются только общие инфраструктурные намерения:
+## Разделение ответственности
 
 ```text
-301 → ai-control
-320 → старый bootstrap/legacy control node до отдельного решения
-9000 → tpl-debian13
+Proximo MCP
+→ VM/LXC lifecycle, guest-level Proxmox operations, snapshots/backups и diagnostics
+
+Ansible на 311-dev-services
+→ повторяемая конфигурация ОС и приложений внутри гостей через SSH
+
+прямой SSH из 301
+→ bootstrap, диагностика, разовые и аварийные действия
 ```
 
-`301` не должен автоматически попадать в обычную self-managed write-zone. Любые права AI на PVE должны снова пройти отдельное проектирование и проверку.
+Ansible/Semaphore не размещаются в `301`; они относятся к `311-dev-services`.
 
-Приватные keys, API token secrets и provider credentials по-прежнему не должны храниться в Git.
+## 301-ai-control
 
-## Что больше не считаем принятым
+`301-ai-control` — целевая VM центрального AI-контура. `320-ai-control` остаётся текущим bootstrap/legacy control node до успешного ввода `301` и отдельного решения о выводе `320`.
 
-До нового решения не считать каноническими:
-
-- Proximo как обязательный MCP для `301`;
-- прежнюю PVE user/token/ACL схему;
-- Docker как обязательную часть control plane;
-- прежнюю структуру `/opt/ai-control/`;
-- Hermes как обязательный или первый агент;
-- прежнюю схему GitHub Deploy Key;
-- прямой bootstrap `301` специальным public script;
-- прежнюю цепочку `create-ai-control-vm → prepare-ai-control → install-ai-agent`;
-- старую границу ответственности между `301`, `311` и Ansible.
-
-Все эти решения можно использовать как материал для сравнения, но новая архитектура должна быть выведена заново из требований.
-
-## Что нужно решить заново
-
-Новая версия документа должна ответить как минимум на вопросы:
-
-1. Для чего именно нужен `301` и какие действия он должен выполнять.
-2. Должен ли AI управлять PVE напрямую, через ограниченный API/MCP или через другой control service.
-3. Где проходит hard security boundary.
-4. Как создаются VM/LXC без зависимости от AI.
-5. Как AI получает SSH/Git access к уже созданным гостям.
-6. Где живут repeatable OS/application configuration и orchestration.
-7. Как устроены backup, recovery, token/key rotation и audit.
-8. Как менять AI agent без перестройки всей инфраструктуры.
-
-## Активная часть
-
-Единственный поддерживаемый public bootstrap-компонент сейчас — создание base template:
+Общая структура control plane сохраняется:
 
 ```text
-zsergeyru/proxmox-bootstrap/create-template.sh
-→ 9000 tpl-debian13
+/opt/ai-control/
+├── agents/
+│   ├── hermes/
+│   └── <future-agent>/
+├── mcp/
+│   └── proximo/
+├── ssh/
+├── repos/
+│   └── proxmox/
+└── state/
 ```
 
-AI Control будет проектироваться поверх этого заново.
+Конкретный AI-agent отделён от общих capabilities. Docker/runtime, Proximo, SSH identities и Git checkout не должны дублироваться внутри каждого агента.
 
-См. также:
+## Proximo
 
-- [`31-bootstrap.md`](31-bootstrap.md);
-- [`51-ai-control-bootstrap.md`](51-ai-control-bootstrap.md).
+Канонический Proxmox MCP для управляющего контура — Proximo (`proximo-proxmox`).
+
+Hard security boundary задаётся PVE identity/token/ACL. AI Control не получает штатных прав на host network, IAM/ACL, SDN, storage definitions, certificates/repositories или reboot/shutdown самого PVE.
+
+`301` не должен входить в собственную обычную self-managed write-zone.
+
+Подробная матрица прав остаётся в:
+
+[`../guests/320-ai-control/decisions/002-proxmox-permissions.md`](../guests/320-ai-control/decisions/002-proxmox-permissions.md)
+
+## SSH
+
+Единый административный пользователь Debian-инфраструктуры — `ops`.
+
+Управляющий контур использует отдельные SSH identities по назначению. Private keys и provider credentials не хранятся в Git.
+
+Public infrastructure key передаётся managed Debian VM через Cloud-Init пользователю `ops` до первого запуска.
+
+## Git
+
+Приватный `zsergeyru/proxmox` остаётся source of truth.
+
+GitHub access для AI Control выполняется отдельной Deploy Key identity. Конкретные шаги создания/регистрации ключа реализуются новыми scripts, но архитектурное разделение Git credential и infrastructure SSH identity сохраняется.
+
+## Managed Debian VM
+
+Целевая модель остаётся:
+
+```text
+Full Clone from 9000
+→ managed pool, если guest не является исключением
+→ CPU/RAM/disk/network по guest.yaml
+→ ciuser=ops
+→ SSH public key через Cloud-Init
+→ first start
+→ QGA/SSH/health verification
+```
+
+Template `9000` остаётся защищённым и используется как источник clone, но не входит в обычную write-zone автоматизации.
+
+## Repeatable deploy
+
+После развёртывания `311-dev-services` штатный repeatable flow:
+
+```text
+AI agent / пользователь
+→ конфигурация в Git
+→ Ansible на 311
+→ SSH
+→ нужный guest
+→ health/status/log verification
+```
+
+Прямой SSH из `301` остаётся для bootstrap, диагностики, разовых и аварийных действий.
+
+## Что именно переписывается с нуля
+
+Не считаются действующей реализацией старые файлы:
+
+```text
+create-ai-control-vm.sh
+prepare-ai-control.sh
+install-ai-agent.sh
+bootstrap-ai-control.sh
+```
+
+Они находятся в public archive только как история.
+
+Новые scripts должны реализовать описанную здесь архитектуру и требования из:
+
+- [`20-pve-initialization.md`](20-pve-initialization.md);
+- [`21-pve-filesystem-layout.md`](21-pve-filesystem-layout.md);
+- [`51-ai-control-bootstrap.md`](51-ai-control-bootstrap.md);
+- ADR `311-dev-services` и `320-ai-control`.
+
+Их названия, язык реализации и внутренняя структура могут быть другими.
+
+## Security boundary
+
+1. PVE privilege-separated token + ACL — hard boundary.
+2. MCP surface ограничивается необходимыми guest-level operations.
+3. Common platform отделена от agent-specific software.
+4. Private SSH keys и provider credentials не хранятся в Git.
+5. Snapshots/backups используются перед рискованными изменениями.
+6. `301`, production HA и template не входят автоматически в self-managed write-zone.
+
+## Готовность к замене 320
+
+`320-ai-control` выводится из эксплуатации только после live-проверки новой реализации `301`, включая Proximo, Git/SSH, доступ к managed test guest и взаимодействие с Ansible на `311`.
