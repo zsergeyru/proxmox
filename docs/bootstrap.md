@@ -98,29 +98,43 @@ create-template.sh
 
 ### Проверенная v2
 
-**2026-09-14: Template-Version 2 успешно проверена полной чистой сборкой на реальном PVE-хосте.** Сборка прошла весь цикл: загрузка и SHA-512-проверка Debian genericcloud image, импорт и resize диска, временный Cloud-Init, bootstrap, QEMU Guest Agent, успешное завершение Cloud-Init final stage, финальная очистка, shutdown, регенерация штатного Cloud-Init, `qm template` и `protection=1`.
+**2026-09-14: Template-Version 2 успешно проверена полной чистой сборкой и тестовым Full Clone на реальном PVE-хосте.** Сборка прошла весь цикл: загрузка и SHA-512-проверка Debian genericcloud image, импорт и resize диска, временный Cloud-Init, bootstrap, QEMU Guest Agent, успешное завершение Cloud-Init final stage, финальная очистка, shutdown, регенерация штатного Cloud-Init, `qm template` и `protection=1`.
 
 Во время первого прогона v2 были выявлены и исправлены две ошибки порядка выполнения Cloud-Init:
 
 - `locale: en_US.UTF-8` нельзя задавать до установки/генерации `locales`;
 - пользователя `debian` нельзя удалять в `runcmd`, пока Cloud-Init ещё выполняет `ssh-authkey-fingerprints`.
 
-После исправлений новая сборка v2 с нуля завершилась сообщением `Template created successfully.`.
+После исправлений новая сборка v2 с нуля завершилась сообщением `Template created successfully.`. Тестовый клон подтвердил SSH по ключу, locked password, sudo, QEMU Agent, timesync, growpart/filesystem growth, очистку builder artifacts и уникальные machine-id/SSH host keys.
 
 ### Изменение v3
 
-В v3 основной рабочий интерфейс Proxmox console переведён на настоящую текстовую serial-консоль:
+В v3 Proxmox console переведена на настоящую текстовую serial-консоль:
 
 ```text
 serial0: socket
+vga: serial0
 xterm.js → ttyS0 → autologin ops
 ```
 
-При этом VGA не отключается и остаётся независимым резервным каналом:
+`vga: serial0` выбран специально: при `vga: std` штатная кнопка Web Console в Proxmox открывает noVNC, даже если serial0 настроен и xterm.js доступен отдельным пунктом. Для обычных headless Debian VM нужен именно прямой вход в xterm.js.
+
+Отдельный VGA/noVNC-канал в base template не сохраняется. Если конкретному гостю понадобится графический display, он настраивается отдельно.
+
+2026-09-14 guest-level часть v3 успешно прошла чистую сборку. После окончательного возврата `vga: serial0` требуется финально проверить поведение штатной Web Console на тестовом клоне.
+
+### Protection при клонировании
+
+Base template `9000` защищён:
 
 ```text
-vga: std
-noVNC → VGA/tty1
+protection=1
 ```
 
-Специальный autologin на `tty1` удалён. Для v3 требуется новая чистая сборка и проверка тестового Full Clone, включая оба канала console.
+Обычные Full Clone по умолчанию должны быть без защиты:
+
+```text
+protection=0
+```
+
+Так как protection может оказаться в конфигурации клона после clone, AI/deploy-сценарий обязан явно выставлять `protection=0`, если паспорт конкретной VM не требует обратного. Защиту нельзя снимать с самого template ради удобства клонирования.
