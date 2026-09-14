@@ -37,7 +37,7 @@ Proxmox VE
 → дальнейшее развёртывание из Git
 ```
 
-Executable-скрипты хранятся только в публичном `zsergeyru/proxmox-bootstrap`. Подробности: [`ai-control-bootstrap.md`](./ai-control-bootstrap.md).
+Executable-скрипты хранятся только в публичном `zsergeyru/proxmox-bootstrap`. Подробности: [`51-ai-control-bootstrap.md`](./51-ai-control-bootstrap.md).
 
 GitHub PAT для zero-day пути не нужен.
 
