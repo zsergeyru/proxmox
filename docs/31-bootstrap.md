@@ -10,13 +10,17 @@
 - [`21-pve-filesystem-layout.md`](21-pve-filesystem-layout.md);
 - guest manifests и ADR соответствующих VM/LXC.
 
-В публичном `zsergeyru/proxmox-bootstrap` сейчас активным и поддерживаемым остаётся только:
+Публичный `zsergeyru/proxmox-bootstrap` предназначен для zero-day входа в новый PVE. В нём будет реализован:
 
 ```text
-create-template.sh
+init-pve.sh
 ```
 
-Он создаёт базовый Debian 13 template `9000 tpl-debian13`.
+Скрипт `create-template.sh` перенесён в приватный `zsergeyru/proxmox` и является частью PVE-side инфраструктурного кода:
+
+```text
+scripts/pve/create-template.sh
+```
 
 Прежние executable-сценарии общего bootstrap и AI Control перенесены в:
 
@@ -53,6 +57,7 @@ guest.yaml
 schema/validator
 network/storage/security policy
 PVE bootstrap/deployer requirements
+PVE-side scripts после получения private Git access
 AI Control и DevOps ADR
 решения по template
 ```
@@ -66,10 +71,10 @@ AI Control и DevOps ADR
 
 ## Активный template builder
 
-Текущий поддерживаемый public script:
+Текущий поддерживаемый builder:
 
 ```text
-zsergeyru/proxmox-bootstrap/create-template.sh
+zsergeyru/proxmox/scripts/pve/create-template.sh
 ```
 
 Он создаёт:
