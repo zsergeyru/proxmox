@@ -32,5 +32,47 @@ jobs:
             bash -n "$file"
           done < <(find . -type f -name '*.sh' -print0)
 
+      - name: Validate template builder Cloud-Init
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import subprocess
+          import tempfile
+          import yaml
+
+          path = Path("scripts/pve/create-template.sh")
+          text = path.read_text(encoding="utf-8")
+          marker = 'cat >"$SNIPPET_PATH" <<\'CLOUDCFG\'\n'
+          if marker not in text or "\nCLOUDCFG\n" not in text:
+              raise SystemExit("Cloud-Init heredoc markers were not found")
+
+          cloud_cfg = text.split(marker, 1)[1].split("\nCLOUDCFG\n", 1)[0]
+          data = yaml.safe_load(cloud_cfg)
+          if not isinstance(data, dict):
+              raise SystemExit("Cloud-Init document is not a mapping")
+
+          write_files = {
+              item.get("path"): item.get("content")
+              for item in data.get("write_files", [])
+              if isinstance(item, dict)
+          }
+
+          required_scripts = (
+              "/usr/local/sbin/template-bootstrap",
+              "/usr/local/sbin/template-finalize",
+          )
+
+          with tempfile.TemporaryDirectory() as temp_dir:
+              for guest_path in required_scripts:
+                  content = write_files.get(guest_path)
+                  if not isinstance(content, str) or not content.strip():
+                      raise SystemExit(f"Missing embedded script: {guest_path}")
+                  temp_path = Path(temp_dir) / Path(guest_path).name
+                  temp_path.write_text(content, encoding="utf-8")
+                  subprocess.run(["bash", "-n", str(temp_path)], check=True)
+
+          print("Cloud-Init YAML and embedded guest Bash syntax are valid")
+          PY
+
       - name: Check whitespace errors
         run: git diff --check
