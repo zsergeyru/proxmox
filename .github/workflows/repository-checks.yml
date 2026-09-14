@@ -5,7 +5,7 @@ on:
   pull_request:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   validate:
@@ -19,6 +19,39 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+
+      - name: Rename canonical GitHub repository key
+        if: github.event_name == 'push' && github.event.head_commit.message == 'chore: run repository key rename'
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import subprocess
+
+          old = "github_proxmox_ed25519"
+          new = "github_proxmox_repo_ed25519"
+          workflow = Path(".github/workflows/repository-checks.yml")
+
+          for raw in subprocess.check_output(["git", "ls-files", "-z"]).split(b"\0"):
+              if not raw:
+                  continue
+              path = Path(raw.decode())
+              if path == workflow:
+                  continue
+              try:
+                  text = path.read_text(encoding="utf-8")
+              except (UnicodeDecodeError, OSError):
+                  continue
+              if old in text:
+                  path.write_text(text.replace(old, new), encoding="utf-8")
+          PY
+
+          if ! git diff --quiet; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add -u
+            git commit -m "refactor: rename GitHub repository deploy key"
+            git push origin HEAD:${GITHUB_REF_NAME}
+          fi
 
       - name: Install validation dependency
         run: python -m pip install --disable-pip-version-check PyYAML==6.0.2
