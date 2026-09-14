@@ -315,8 +315,8 @@ PVEAdmin на /
 │   ├── host-deploy.token
 │   └── ai-agent-proximo.token
 └── ssh/
-    ├── github_proxmox_ed25519
-    └── github_proxmox_ed25519.pub
+    ├── github_proxmox_repo_ed25519
+    └── github_proxmox_repo_ed25519.pub
 ```
 
 Здесь:
@@ -328,7 +328,7 @@ host-deploy.token
 ai-agent-proximo.token
 → secret ai-agent@pve!proximo
 
-github_proxmox_ed25519
+github_proxmox_repo_ed25519
 → private read-only GitHub Deploy Key PVE
 ```
 
@@ -391,8 +391,8 @@ NOPASSWD: ALL
 PVE получает собственную пару, независимую от `301`:
 
 ```text
-/etc/proxmox-deployer/ssh/github_proxmox_ed25519
-/etc/proxmox-deployer/ssh/github_proxmox_ed25519.pub
+/etc/proxmox-deployer/ssh/github_proxmox_repo_ed25519
+/etc/proxmox-deployer/ssh/github_proxmox_repo_ed25519.pub
 ```
 
 Public key оператор один раз регистрирует:

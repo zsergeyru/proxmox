@@ -30,8 +30,8 @@
 /etc/proxmox-deployer/
 ├── config.yaml
 ├── ssh/
-│   ├── github_proxmox_ed25519
-│   ├── github_proxmox_ed25519.pub
+│   ├── github_proxmox_repo_ed25519
+│   ├── github_proxmox_repo_ed25519.pub
 │   ├── config
 │   └── known_hosts
 └── secrets/
@@ -45,10 +45,10 @@
 config.yaml
 → настройки PVE deployer: repo, branch, пути, имена identities/tokens, pool managed и другие постоянные параметры
 
-ssh/github_proxmox_ed25519
+ssh/github_proxmox_repo_ed25519
 → private read-only GitHub Deploy Key для zsergeyru/proxmox
 
-ssh/github_proxmox_ed25519.pub
+ssh/github_proxmox_repo_ed25519.pub
 → public часть того же key
 
 ssh/config
@@ -274,8 +274,8 @@ Source code остаётся в private Git checkout, а `/usr/local/sbin` да�
 │   └── proxmox-deployer/
 │       ├── config.yaml
 │       ├── ssh/
-│       │   ├── github_proxmox_ed25519
-│       │   ├── github_proxmox_ed25519.pub
+│       │   ├── github_proxmox_repo_ed25519
+│       │   ├── github_proxmox_repo_ed25519.pub
 │       │   ├── config
 │       │   └── known_hosts
 │       └── secrets/

@@ -127,8 +127,8 @@ Docker устанавливается из официального Docker APT r
 ├── ssh/
 │   ├── ai_control_ed25519
 │   ├── ai_control_ed25519.pub
-│   ├── github_proxmox_ed25519
-│   └── github_proxmox_ed25519.pub
+│   ├── github_proxmox_repo_ed25519
+│   └── github_proxmox_repo_ed25519.pub
 ├── repos/                     # private repo ещё не обязан существовать
 └── state/
     ├── platform-prepared
@@ -182,8 +182,8 @@ Private key остаётся только внутри `301`. Public key пер�
 ### GitHub Deploy Key
 
 ```text
-/opt/ai-control/ssh/github_proxmox_ed25519
-/opt/ai-control/ssh/github_proxmox_ed25519.pub
+/opt/ai-control/ssh/github_proxmox_repo_ed25519
+/opt/ai-control/ssh/github_proxmox_repo_ed25519.pub
 ```
 
 Этот ключ используется только для `git@github.com:zsergeyru/proxmox.git`.

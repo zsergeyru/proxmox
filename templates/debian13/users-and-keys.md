@@ -115,8 +115,8 @@ public key
 Для доступа к приватному инфраструктурному Git используется **другая** пара:
 
 ```text
-/opt/ai-control/ssh/github_proxmox_ed25519
-/opt/ai-control/ssh/github_proxmox_ed25519.pub
+/opt/ai-control/ssh/github_proxmox_repo_ed25519
+/opt/ai-control/ssh/github_proxmox_repo_ed25519.pub
 ```
 
 Она также создаётся общим `prepare-ai-control.sh` внутри `301`, но используется только для:
@@ -193,7 +193,7 @@ managed VM
     └── private infrastructure identity
 
 301-ai-control
-└── /opt/ai-control/ssh/github_proxmox_ed25519
+└── /opt/ai-control/ssh/github_proxmox_repo_ed25519
     └── private GitHub-only identity
 ```
 

@@ -122,7 +122,7 @@ management:
 
 Именно содержимое `.pub` может передаваться обычным новым Debian VM через Cloud-Init. Private key остаётся только в `301`.
 
-GitHub Deploy Key `github_proxmox_ed25519` — отдельная identity и **не используется** для доступа к гостям.
+GitHub Deploy Key `github_proxmox_repo_ed25519` — отдельная identity и **не используется** для доступа к гостям.
 
 Пароли, токены и private keys в `guest.yaml` не хранятся.
 

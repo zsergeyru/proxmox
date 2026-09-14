@@ -52,7 +52,7 @@ GitHub PAT для zero-day пути не нужен.
 │   └── proximo/
 ├── ssh/
 │   ├── ai_control_ed25519(.pub)
-│   └── github_proxmox_ed25519(.pub)
+│   └── github_proxmox_repo_ed25519(.pub)
 ├── repos/
 │   └── proxmox/
 └── state/
@@ -126,8 +126,8 @@ Private key остаётся в `301`; `.pub` передаётся managed Debia
 GitHub Deploy Key:
 
 ```text
-/opt/ai-control/ssh/github_proxmox_ed25519
-/opt/ai-control/ssh/github_proxmox_ed25519.pub
+/opt/ai-control/ssh/github_proxmox_repo_ed25519
+/opt/ai-control/ssh/github_proxmox_repo_ed25519.pub
 ```
 
 Он используется только для `zsergeyru/proxmox`. `.pub` регистрируется вручную в Deploy keys; для `commit/push` включается `Allow write access`.

@@ -159,7 +159,7 @@ Template содержит Cloud-Init, QEMU Guest Agent, пользователя
 └── state/
 ```
 
-Также создаёт `ai_control_ed25519(.pub)` и отдельный `github_proxmox_ed25519(.pub)` для AI workflow.
+Также создаёт `ai_control_ed25519(.pub)` и отдельный `github_proxmox_repo_ed25519(.pub)` для AI workflow.
 
 ### `install-ai-agent.sh`
 

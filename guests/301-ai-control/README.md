@@ -14,7 +14,7 @@
 │   └── proximo/
 ├── ssh/
 │   ├── ai_control_ed25519(.pub)
-│   └── github_proxmox_ed25519(.pub)
+│   └── github_proxmox_repo_ed25519(.pub)
 ├── repos/
 │   └── proxmox/
 └── state/
@@ -67,7 +67,7 @@
 
 ```text
 /opt/ai-control/ssh/ai_control_ed25519(.pub)
-/opt/ai-control/ssh/github_proxmox_ed25519(.pub)
+/opt/ai-control/ssh/github_proxmox_repo_ed25519(.pub)
 ```
 
 и выполняет `proximo doctor`.
@@ -124,8 +124,8 @@ Public key передаётся будущим managed Debian VM через Clou
 GitHub Deploy Key:
 
 ```text
-/opt/ai-control/ssh/github_proxmox_ed25519
-/opt/ai-control/ssh/github_proxmox_ed25519.pub
+/opt/ai-control/ssh/github_proxmox_repo_ed25519
+/opt/ai-control/ssh/github_proxmox_repo_ed25519.pub
 ```
 
 `.pub` вручную регистрируется в `zsergeyru/proxmox → Settings → Deploy keys`. Для `commit/push` включается `Allow write access`.
