@@ -1,10 +1,15 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-# Build the canonical Debian 13 Proxmox template without libguestfs/virt-customize.
-# The generic cloud image is booted as VMID 9000, configured inside the guest
-# through temporary Cloud-Init user-data, finalized through QEMU Guest Agent,
-# and then converted to a Proxmox template.
+# Public bootstrap for the canonical Debian 13 Proxmox template.
+# Distribution repository: https://github.com/zsergeyru/proxmox-bootstrap
+# Infrastructure documentation/source of truth: https://github.com/zsergeyru/proxmox
+#
+# The generic Debian cloud image is booted as VMID 9000, configured inside the
+# guest through temporary Cloud-Init user-data, finalized through QEMU Guest
+# Agent, and then converted to a protected Proxmox template.
+#
+# This file intentionally contains no secrets and is safe to publish.
 #
 # Access model:
 #   - ops has no usable password;
@@ -201,6 +206,7 @@ write_files:
       Managed VM
       Base template: tpl-debian13
       Infrastructure: zsergeyru/proxmox
+      Bootstrap: zsergeyru/proxmox-bootstrap
       Do not store secrets in Git.
 
   - path: /usr/local/sbin/template-bootstrap
@@ -250,7 +256,8 @@ write_files:
       Template: tpl-debian13
       Template-Version: __TEMPLATE_VERSION__
       OS: Debian 13
-      Source: zsergeyru/proxmox
+      Infrastructure-Source: zsergeyru/proxmox
+      Bootstrap-Source: zsergeyru/proxmox-bootstrap
       Source-Image: __IMAGE_NAME__
       Source-Image-SHA512: __IMAGE_SHA512__
       Build-Date: $(date -u +%F)
