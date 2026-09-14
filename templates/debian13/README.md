@@ -1,12 +1,12 @@
 # Базовый шаблон Debian 13 для Proxmox
 
-Статус: **Template-Version 3 успешно прошла чистую сборку на реальном PVE-хосте 2026-09-14. Guest-level часть и Full Clone были проверены; после окончательного выбора `vga: serial0` требуется финальная проверка штатной Web Console на тестовом клоне.**
+Статус: **Template-Version 4 реализована в каноническом builder-скрипте и прошла GitHub syntax validation. Изменения v4 подтверждены вручную на тестовой VM: обычное `amd64` ядро даёт framebuffer `1280x800`, VGA/noVNC console работает с нормальным размером шрифта, `tty1` autologin `ops` работает. Требуется чистая сборка VMID 9000 и финальная проверка нового Full Clone.**
 
 ```text
 VMID: 9000
 Name: tpl-debian13
 OS: Debian 13 (Trixie)
-Template-Version: 3
+Template-Version: 4
 ```
 
 Рабочие VM по умолчанию создаются как **Full Clone**.
@@ -14,49 +14,72 @@ Template-Version: 3
 ## Источники истины
 
 - [`build-policy.md`](./build-policy.md) — политика сборки и базовых настроек;
-- [`users-and-keys.md`](./users-and-keys.md) — пользователи, SSH-ключи и доступ через Proxmox console;
+- [`users-and-keys.md`](./users-and-keys.md) — пользователи, SSH-ключи и console access;
 - [`filesystem-layout.md`](./filesystem-layout.md) — файловая структура сервисов;
-- [`../../docs/bootstrap.md`](../../docs/bootstrap.md) — расположение и способ запуска bootstrap-скрипта непосредственно на PVE.
+- [`../../docs/bootstrap.md`](../../docs/bootstrap.md) — расположение и запуск bootstrap-скрипта.
 
-Единственный канонический экземпляр `create-template.sh` хранится в публичном репозитории `zsergeyru/proxmox-bootstrap`. В приватном `proxmox` executable-копия не хранится.
+Единственный канонический экземпляр `create-template.sh` хранится в публичном `zsergeyru/proxmox-bootstrap`. В приватном `proxmox` executable-копия не хранится.
 
-## Что делает скрипт
+## Что делает v4
 
 ```text
 официальный Debian 13 genericcloud image
         ↓
-проверка SHA-512 по официальному SHA512SUMS
+SHA-512 verification
         ↓
 VMID 9000 builder-debian13
         ↓
 временный Cloud-Init bootstrap
         ↓
 apt update + full-upgrade
-базовые пакеты и системные настройки
+базовые пакеты
+linux-image-amd64
+console-setup + console-setup-linux
         ↓
-serial0 + xterm.js как основная Proxmox console
-serial-getty@ttyS0 → autologin ops
-vga: serial0
+удаление cloud-amd64 kernel
+console font Fixed 8x16
         ↓
-ожидание QEMU Guest Agent
-ожидание окончания Cloud-Init
+vga: std
+VGA/noVNC → tty1 → autologin ops
+serial0: socket → ttyS0 → autologin ops (fallback)
         ↓
-финальная очистка и удаление builder-only пользователя debian
-очистка machine-specific данных
-fstrim
+ожидание QEMU Guest Agent и Cloud-Init
+        ↓
+verification reboot
+        ↓
+проверка:
+обычный *-amd64 kernel
+не cloud kernel
+framebuffer 1280x800
+QEMU Guest Agent
+getty@tty1
+serial-getty@ttyS0
+        ↓
+final cleanup
+machine-id/SSH host keys/cloud-init state/logs и прочее
+        ↓
 shutdown
         ↓
-удаление builder-only Cloud-Init
 стандартный Cloud-Init: ciuser=ops, DHCP, ciupgrade=0
         ↓
-регенерация Cloud-Init drive и проверка
-        ↓
 qm template
-        ↓
 protection=1
 ```
 
 При ошибке builder-VM автоматически не удаляется. Существующий VMID `9000` скрипт не перезаписывает.
+
+## Почему обычное ядро, а не cloud kernel
+
+В исходном `genericcloud` image Debian используется `cloud-amd64` kernel. На нашей VM с `vga: std` он не создавал framebuffer (`fb0` отсутствовал), поэтому noVNC работал в старом VGA text mode с крупными символами.
+
+На тестовой VM после установки и загрузки обычного ядра:
+
+```text
+uname -r → 6.12.107+deb13-amd64
+/sys/class/graphics/fb0/virtual_size → 1280,800
+```
+
+и Proxmox Console стала визуально такой же, как обычная Debian VM с мелким консольным шрифтом. Поэтому v4 устанавливает `linux-image-amd64`, удаляет cloud-kernel и проверяет результат реальной перезагрузкой builder.
 
 ## Базовые параметры
 
@@ -65,7 +88,7 @@ protection=1
 | CPU | 1 vCPU, type `host` |
 | RAM | 1 GiB |
 | System disk | 16 GiB |
-| Storage | `local-lvm` по умолчанию |
+| Storage | `local-lvm` |
 | Controller | VirtIO SCSI Single |
 | I/O thread | enabled |
 | Discard/TRIM | enabled |
@@ -73,25 +96,28 @@ protection=1
 | Network | VirtIO, `vmbr0` |
 | Template network | DHCP |
 | Cloud-Init | да |
-| Cloud-Init package upgrade | выключен (`ciupgrade=0`) |
+| Cloud-Init package upgrade | `ciupgrade=0` |
 | QEMU Guest Agent | да |
-| Proxmox display | `vga: serial0` |
-| Main console | xterm.js → `serial0` → autologin `ops` |
-| Serial device | `serial0: socket` |
+| Kernel | `linux-image-amd64`, cloud kernel удалён |
+| Proxmox display | `vga: std` |
+| Main console | noVNC/VGA → `tty1` → autologin `ops` |
+| Console font | Fixed 8x16 |
+| Verified framebuffer | 1280x800 |
+| Serial fallback | `serial0: socket` → `ttyS0` → autologin `ops` |
 | Admin user | `ops` |
 | `ops` password | locked |
 | Root SSH | запрещён |
 | Password SSH | запрещён |
-| SSH public key | задаётся каждому клону до первого старта |
+| SSH public key | задаётся клону до первого старта |
 | Timezone | `Europe/Moscow` |
 | Locale | `en_US.UTF-8` |
 | Swap | не создаётся |
-| Template protection | включена |
-| Default clone protection | выключена (`protection=0`) |
+| Template protection | `1` |
+| Default clone protection | `0` |
 
 ## Модель доступа
 
-Штатный сетевой доступ:
+Сетевой доступ:
 
 ```text
 SSH → ops + private key
@@ -107,116 +133,99 @@ PermitEmptyPasswords no
 PubkeyAuthentication yes
 ```
 
-Файл настроек:
-
-```text
-/etc/ssh/sshd_config.d/00-template-security.conf
-```
-
-### Proxmox Console
-
-Основная console текстовая:
+Основная локальная console:
 
 ```text
 Proxmox Web UI
 → VM → Console
-→ xterm.js
-→ serial0 / ttyS0
-→ autologin ops
+→ noVNC / VGA
+→ tty1
+→ automatic login ops
 → shell
 ```
 
-`vga: serial0` используется именно для того, чтобы штатная кнопка `Console` открывала serial/xterm.js, а не noVNC.
-
-Это не пустой пароль. Пароль `ops` остаётся заблокированным. Autologin разрешён локально на `serial0` через `serial-getty@ttyS0`.
-
-Право открыть console VM в Proxmox считается административным доступом к гостевой ОС: `ops` имеет `NOPASSWD: sudo`.
-
-Файл override:
+Резервная console:
 
 ```text
-/etc/systemd/system/serial-getty@ttyS0.service.d/autologin.conf
+xterm.js или qm terminal
+→ serial0 / ttyS0
+→ automatic login ops
+→ shell
 ```
 
-Отдельный VGA/noVNC для обычных headless Debian VM на базе template не сохраняется. Если конкретному гостю нужен графический display, это настраивается отдельно для него.
+Autologin не разблокирует пароль `ops`. Право `VM.Console` считается административным доступом, поскольку `ops` имеет `NOPASSWD: sudo`.
 
 ## Cloud-Init конкретного клона
 
-Base template не содержит персональных SSH-ключей. Для каждой VM ключ и сеть задаются **до первого запуска**.
-
-Правильная последовательность развёртывания:
+Base template не содержит персональных SSH-ключей. Для каждой VM параметры задаются **до первого запуска**:
 
 ```text
 Full Clone
-→ protection=0, если паспорт VM явно не требует защиты
-→ задать name/hostname
+→ protection=0, если VM не должна быть защищена
+→ name/hostname
 → ciuser=ops
-→ задать sshkeys
-→ задать IP/DHCP и DNS
+→ sshkeys
+→ IP/DHCP и DNS
 → qm cloudinit update
 → start VM
 ```
 
 `cipassword` в штатном deploy-сценарии не используется.
 
-Важно: base template `9000` имеет `protection=1`; обычный deploy/AI-agent workflow после clone обязан явно выставить клону `protection=0`, если конкретная VM не должна быть защищена.
+Важно: template `9000` имеет `protection=1`; обычный deploy/AI-agent workflow после clone должен явно выставлять клону `protection=0`, если паспорт VM не требует защиты.
+
+### Проверка Full Clone
+
+При LVM-thin Linked Clone также может выглядеть как обычный диск в GUI. Надёжные проверки:
+
+```text
+Proxmox task log:
+create full clone of drive scsi0 (...)
+```
+
+или на PVE:
+
+```bash
+lvs -o lv_name,origin
+```
+
+Для настоящего Full Clone поле `Origin` у `vm-<VMID>-disk-0` должно быть пустым. Если там `base-9000-disk-0`, это Linked Clone.
 
 ## Обновления
 
-При сборке template выполняются:
-
-```text
-apt update
-apt full-upgrade
-```
-
-Для клонов автоматический package upgrade на первом запуске выключен:
-
-```text
-ciupgrade=0
-```
-
-Дальнейшие обновления VM выполняются контролируемо через deploy/Ansible/ручное администрирование.
+При сборке template выполняются `apt update` и `apt full-upgrade`. Для клонов автоматический package upgrade на первом запуске выключен (`ciupgrade=0`). Дальнейшие обновления выполняются контролируемо через deploy/Ansible/ручное администрирование.
 
 ## Disk growth и TRIM
 
-В template установлен `cloud-guest-utils`, чтобы `growpart` был доступен при увеличении диска клона.
+В template установлен `cloud-guest-utils`, чтобы `growpart` был доступен при увеличении диска клона. Включён `fstrim.timer`, а перед финальным shutdown выполняется `fstrim -av`.
 
-Включён `fstrim.timer`, а перед финальным shutdown выполняется `fstrim -av`.
-
-Тестовый Full Clone подтвердил автоматическое расширение root partition/filesystem с базовых 16 GiB до диска клона 24 GiB.
+Ранее тестовый Full Clone подтвердил автоматическое расширение root partition/filesystem с 16 GiB до 24 GiB.
 
 ## Синхронизация времени
 
-Установлен и включён `systemd-timesyncd`.
-
 ```text
+systemd-timesyncd: enabled
 Timezone: Europe/Moscow
 Locale: en_US.UTF-8
 ```
 
 ## Информация о происхождении
 
-В каждой VM сохраняется:
-
-```text
-/etc/vm-template-info
-```
-
-Пример:
+В каждой VM сохраняется `/etc/vm-template-info`:
 
 ```text
 Template: tpl-debian13
-Template-Version: 3
+Template-Version: 4
 OS: Debian 13
+Kernel-Flavor: amd64
+Primary-Console: VGA/noVNC tty1 autologin ops
+Fallback-Console: serial0 ttyS0 autologin ops
 Infrastructure-Source: zsergeyru/proxmox
 Bootstrap-Source: zsergeyru/proxmox-bootstrap
 Source-Image: debian-13-genericcloud-amd64.qcow2
 Source-Image-SHA512: <128 hex chars>
 Build-Date: YYYY-MM-DD
 ```
-
-`TEMPLATE_VERSION` подставляется в этот файл из параметра build-скрипта.
 
 ## Базовые пакеты
 
@@ -227,6 +236,9 @@ sudo
 locales
 cloud-guest-utils
 systemd-timesyncd
+linux-image-amd64
+console-setup
+console-setup-linux
 
 git
 mc
@@ -262,7 +274,7 @@ Docker и прикладные сервисы в base template не устана
 
 Скрипт очищает:
 
-- builder-only пользователя `debian` после успешного завершения Cloud-Init;
+- builder-only пользователя `debian` после завершения Cloud-Init;
 - Cloud-Init state, logs и seed;
 - `/etc/machine-id` и dbus machine-id;
 - SSH host keys;
@@ -273,49 +285,27 @@ Docker и прикладные сервисы в base template не устана
 - temporary files;
 - shell history;
 - `/home/ops/.ssh`;
-- builder scripts `template-bootstrap` и `template-finalize`.
+- builder scripts.
 
-После удаления временного `cicustom` скрипт выполняет `qm cloudinit update` и проверяет, что builder-only user-data больше не присутствует.
+После удаления временного `cicustom` выполняется `qm cloudinit update` и проверяется отсутствие builder-only user-data.
 
 ## Защита template
 
-После успешного `qm template` включается:
+После успешного `qm template`:
 
 ```text
-protection=1
+9000 → protection=1
 ```
 
-Это защита от случайного удаления, а не отдельная security boundary.
-
-Для осознанной пересборки VMID `9000` сначала нужно снять protection и удалить старый template вручную.
-
-Обычные рабочие клоны по умолчанию должны иметь `protection=0`; protection включается на конкретном госте только по явному решению.
-
-## Требования перед запуском
-
-На Proxmox должны быть доступны:
+Обычные рабочие клоны:
 
 ```text
-qm
-pvesm
-sha512sum
-awk
-grep
-sed
-curl или wget
+protection=0
 ```
 
-Storage `local` должен поддерживать content type **Snippets**:
-
-```text
-Datacenter → Storage → local → Edit → Content → Snippets
-```
-
-VMID `9000` должен быть свободен.
+Protection включается на конкретном госте только по явному решению.
 
 ## Запуск на Proxmox
-
-Штатный способ — скачать канонический bootstrap-скрипт из публичного `zsergeyru/proxmox-bootstrap`. Git и GitHub token на PVE для этого не нужны:
 
 ```bash
 curl -fsSL \
@@ -336,45 +326,38 @@ SNIPPET_STORAGE=local
 BRIDGE=vmbr0
 DISK_SIZE=16G
 WAIT_SECONDS=1200
-TEMPLATE_VERSION=3
+TEMPLATE_VERSION=4
 ```
 
-## История проверки
+## История
 
-### Проверенный clean build v2
+### v2
 
-2026-09-14 выполнена полная повторная сборка v2 с нуля на реальном PVE-хосте после устранения ошибок первого прогона. Успешно пройдены загрузка и SHA-512 verification, импорт и resize диска, Cloud-Init bootstrap, QEMU Guest Agent, `Cloud-Init final stage`, cleanup, shutdown, регенерация Cloud-Init drive, `qm template` и `protection=1`.
+2026-09-14 успешно проверены clean build и тестовый Full Clone: locked `ops`, `sudo NOPASSWD`, SSH по ключу, QGA, timesync, fstrim, очистка builder artifacts, уникальные machine-id/SSH host keys и filesystem growth.
 
-Первый прогон выявил две ошибки порядка Cloud-Init: раннюю настройку `locale` и слишком раннее удаление default-user `debian`. Обе исправлены до успешного clean build v2.
+### v3
 
-Тестовый Full Clone v2 подтвердил: `ops` locked, `sudo NOPASSWD`, SSH только по ключу, QEMU Guest Agent, timesync, fstrim, отсутствие builder artifacts, полный набор базовых пакетов, уникальные machine-id/SSH host keys и growpart/filesystem growth до 24 GiB.
+Проверялся вариант, где штатная Web Console была направлена на `serial0` через `vga: serial0`. Он работал технически, но serial-консоль ведёт себя как поток: не хранит старое содержимое экрана и менее удобна для обычной работы.
 
-### Изменение и clean build v3
+### v4
 
-В v3 административная console перенесена на настоящую текстовую serial-консоль:
+Возвращён `vga: std`. Эксперимент на тестовой VM показал, что крупный текст был вызван не noVNC, а `cloud-amd64` kernel без framebuffer. После загрузки обычного `amd64` kernel появился `fb0` `1280x800`, а console стала нормального размера. Также подтверждён `tty1` autologin `ops`.
 
-```text
-serial0: socket
-vga: serial0
-xterm.js → ttyS0 → autologin ops
-```
+## Финальная проверка v4
 
-2026-09-14 guest-level v3 успешно прошла чистую сборку. Во время проверки выяснилось, что `vga: std` заставляет штатную кнопку Proxmox `Console` открывать noVNC, поэтому окончательная политика возвращена на `vga: serial0`.
+После чистой сборки создать новый **Full Clone** и проверить:
 
-## Проверка после окончательной настройки v3
-
-На тестовом Full Clone проверить:
-
-1. VM загружается и получает сеть;
-2. штатная кнопка `VM → Console` открывает xterm.js/serial0, а не noVNC;
-3. xterm.js автоматически даёт shell `ops`;
-4. пароль `ops` остаётся locked;
-5. SSH доступен только по ключу;
-6. `sudo` работает без пароля;
-7. QEMU Guest Agent отвечает;
-8. machine-id уникален;
-9. SSH host keys уникальны;
-10. root filesystem увеличивается после resize диска;
-11. `/etc/vm-template-info` содержит правильную версию и SHA-512 исходного образа;
-12. у обычного клона `protection=0`, если паспорт VM не требует защиты;
-13. в конфигурации template есть `ciupgrade: 0`, `protection: 1`, `vga: serial0`, `serial0: socket`.
+1. `VM → Console` открывает VGA/noVNC и автоматически даёт shell `ops` на `tty1`;
+2. размер текста соответствует `Fixed 8x16`, framebuffer `1280x800`;
+3. `uname -r` не содержит `cloud`;
+4. `serial0` остаётся рабочим резервным каналом;
+5. пароль `ops` locked, `sudo` без пароля;
+6. SSH работает только по public key;
+7. QEMU Guest Agent отвечает сразу после boot и после reboot;
+8. machine-id и SSH host keys уникальны;
+9. filesystem увеличивается после resize;
+10. builder artifacts отсутствуют;
+11. `/etc/vm-template-info` содержит `Template-Version: 4` и правильный SHA-512;
+12. template имеет `protection=1`, клон — `protection=0`;
+13. `lvs ... origin` подтверждает Full Clone;
+14. config template содержит `vga: std`, `serial0: socket`, `ciupgrade: 0`.
