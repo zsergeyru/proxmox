@@ -6,11 +6,8 @@ set -Eeuo pipefail
 # through temporary Cloud-Init user-data, finalized through QEMU Guest Agent,
 # and then converted to a Proxmox template.
 #
-# Clone-access defaults are configured on the resulting template through normal
-# Proxmox Cloud-Init settings:
-#   - ops has a console password;
-#   - SSH password authentication remains disabled;
-#   - an administrator SSH public key is inherited by clones.
+# The template contains no personal SSH public key and no usable ops password.
+# Both are supplied per clone through normal Proxmox Cloud-Init settings.
 
 VMID="${VMID:-9000}"
 TEMPLATE_NAME="${TEMPLATE_NAME:-tpl-debian13}"
@@ -33,21 +30,8 @@ CHECKSUM_PATH="${IMAGE_DIR}/SHA512SUMS"
 SNIPPET_NAME="debian13-template-builder-${VMID}.yaml"
 SNIPPET_VOL="${SNIPPET_STORAGE}:snippets/${SNIPPET_NAME}"
 
-OPS_SSH_PUBLIC_KEY="${OPS_SSH_PUBLIC_KEY:-}"
-OPS_CONSOLE_PASSWORD="${OPS_CONSOLE_PASSWORD:-}"
-OPS_CONSOLE_PASSWORD_CONFIRM=""
-SSHKEY_TMP=""
-
 log() { printf '\n==> %s\n' "$*"; }
 die() { printf '\nERROR: %s\n' "$*" >&2; exit 1; }
-
-cleanup_sensitive() {
-    if [[ -n "${SSHKEY_TMP:-}" ]]; then
-        rm -f "$SSHKEY_TMP" || true
-    fi
-    unset OPS_CONSOLE_PASSWORD OPS_CONSOLE_PASSWORD_CONFIRM
-}
-trap cleanup_sensitive EXIT
 
 on_error() {
     local rc=$?
@@ -114,41 +98,8 @@ wait_for_stopped() {
     return 1
 }
 
-collect_clone_access_defaults() {
-    if [[ -z "$OPS_SSH_PUBLIC_KEY" ]]; then
-        [[ -t 0 ]] || die "OPS_SSH_PUBLIC_KEY is required for non-interactive build"
-        printf '\nPaste the SSH public key that should be available to ops on every clone.\n'
-        read -r -p 'ops SSH public key: ' OPS_SSH_PUBLIC_KEY
-    fi
-
-    OPS_SSH_PUBLIC_KEY="${OPS_SSH_PUBLIC_KEY//$'\r'/}"
-    [[ -n "$OPS_SSH_PUBLIC_KEY" ]] || die "SSH public key must not be empty"
-    [[ "$OPS_SSH_PUBLIC_KEY" != *$'\n'* ]] || die "SSH public key must be a single line"
-
-    case "$OPS_SSH_PUBLIC_KEY" in
-        ssh-ed25519\ *|ssh-rsa\ *|ecdsa-sha2-nistp256\ *|ecdsa-sha2-nistp384\ *|ecdsa-sha2-nistp521\ *|sk-ssh-ed25519@openssh.com\ *|sk-ecdsa-sha2-nistp256@openssh.com\ *) ;;
-        *) die "Unsupported or malformed SSH public key"
-    esac
-
-    if [[ -z "$OPS_CONSOLE_PASSWORD" ]]; then
-        [[ -t 0 ]] || die "OPS_CONSOLE_PASSWORD is required for non-interactive build"
-        printf '\nSet the default console password for ops. SSH password login will remain disabled.\n'
-        read -r -s -p 'ops console password: ' OPS_CONSOLE_PASSWORD
-        printf '\n'
-        read -r -s -p 'Repeat console password: ' OPS_CONSOLE_PASSWORD_CONFIRM
-        printf '\n'
-        [[ "$OPS_CONSOLE_PASSWORD" == "$OPS_CONSOLE_PASSWORD_CONFIRM" ]] || die "Passwords do not match"
-    fi
-
-    [[ -n "$OPS_CONSOLE_PASSWORD" ]] || die "Console password must not be empty"
-
-    SSHKEY_TMP="$(mktemp /tmp/tpl-debian13-ops-key.XXXXXX)"
-    chmod 600 "$SSHKEY_TMP"
-    printf '%s\n' "$OPS_SSH_PUBLIC_KEY" >"$SSHKEY_TMP"
-}
-
 [[ $EUID -eq 0 ]] || die "Run this script as root on the Proxmox host"
-for cmd in qm pvesm sha512sum awk grep sed mktemp; do
+for cmd in qm pvesm sha512sum awk grep sed; do
     require_cmd "$cmd"
 done
 
@@ -162,8 +113,6 @@ fi
 
 [[ ! -e "$SNIPPET_PATH" ]] || die "Temporary snippet already exists: ${SNIPPET_PATH}"
 mkdir -p "$(dirname "$SNIPPET_PATH")" "$IMAGE_DIR"
-
-collect_clone_access_defaults
 
 log "Downloading Debian 13 generic cloud image"
 fetch_file "$IMAGE_URL" "$IMAGE_PATH"
@@ -251,6 +200,7 @@ write_files:
       systemctl enable --now qemu-guest-agent
       systemctl enable ssh
       systemctl restart ssh
+      systemctl enable serial-getty@ttyS0.service || true
 
       if id debian >/dev/null 2>&1; then
         userdel -r debian || true
@@ -289,6 +239,7 @@ write_files:
       journalctl --vacuum-time=1s || true
       rm -rf /tmp/* /var/tmp/*
       rm -f /root/.bash_history /home/ops/.bash_history
+      rm -rf /home/ops/.ssh
       rm -rf /var/lib/template-build
       sync
       printf 'FINALIZE_OK\n'
@@ -344,14 +295,11 @@ wait_for_stopped || die "Builder VM did not stop cleanly"
 log "Removing builder-only Cloud-Init and setting clone defaults"
 qm set "$VMID" --delete cicustom
 qm set "$VMID" --ciuser ops
-qm set "$VMID" --cipassword "$OPS_CONSOLE_PASSWORD"
-qm set "$VMID" --sshkeys "$SSHKEY_TMP"
 qm set "$VMID" --ipconfig0 ip=dhcp
 qm set "$VMID" --name "$TEMPLATE_NAME"
-qm set "$VMID" --description "Debian 13 (Trixie) base template; version ${TEMPLATE_VERSION}; console password + default SSH key via Cloud-Init"
+qm set "$VMID" --description "Debian 13 (Trixie) base template; version ${TEMPLATE_VERSION}; credentials supplied per clone through Cloud-Init"
 
 rm -f "$SNIPPET_PATH"
-unset OPS_CONSOLE_PASSWORD OPS_CONSOLE_PASSWORD_CONFIRM
 trap - ERR
 
 log "Converting VM ${VMID} to template"
@@ -367,9 +315,9 @@ Version: ${TEMPLATE_VERSION}
 Storage: ${DISK_STORAGE}
 Network: DHCP by default
 User:    ops
-Console: password enabled for ops through Cloud-Init
-SSH:     default public key configured; password login disabled
+Console: set an ops password on each clone through Cloud-Init
+SSH:     inject one or more public keys on each clone through Cloud-Init
 
-Recommended next step: create a FULL clone and verify boot, QEMU Guest Agent,
-serial console password login, SSH key login and disk growth before using the template broadly.
+Recommended next step: create a FULL clone, configure its Cloud-Init password and
+SSH key, then verify boot, QEMU Guest Agent, serial console login and SSH access.
 EOF
