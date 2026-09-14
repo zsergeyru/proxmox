@@ -57,4 +57,4 @@ Snapshot не считается заменой полноценному backup.
 - выполнить практическую проверку восстановления из backup;
 - позднее решить, нужен ли отдельный NAS или Proxmox Backup Server.
 
-Общая backup-политика проекта находится в [`../../../docs/storage-and-backup.md`](../../../docs/storage-and-backup.md).
+Общая backup-политика проекта находится в [`../../../docs/22-storage-and-backup.md`](../../../docs/22-storage-and-backup.md).
