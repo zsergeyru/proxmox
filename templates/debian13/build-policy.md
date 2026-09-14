@@ -1,57 +1,32 @@
 # Политика сборки и базовой настройки `tpl-debian13`
 
-Этот документ фиксирует согласованные решения для базового Debian 13 template в Proxmox.
-
 ```text
 Template-Version: 2
 ```
 
-## 1. Главный принцип
+## 1. Proxmox-хост остаётся чистым
 
-Proxmox-хост остаётся максимально чистым. Не устанавливаем `virt-customize`, `libguestfs-tools` и другие build-инструменты, нужные только для подготовки гостевой ОС.
+Не устанавливаем на PVE `virt-customize`, `libguestfs-tools` и другие build-инструменты, нужные только для подготовки гостевой ОС.
 
-Сборка выполняется через временную VM:
+Сборка выполняется штатными средствами Proxmox и временной builder-VM.
 
-```text
-Debian 13 genericcloud image
-        ↓
-builder-VM
-        ↓
-Cloud-Init первого запуска
-        ↓
-apt update / full-upgrade
-установка базовых пакетов
-настройка ОС
-настройка tty1 autologin
-очистка machine-specific данных
-        ↓
-shutdown
-        ↓
-qm template
-```
+## 2. Источник образа и проверка
 
-## 2. Средства Proxmox-хоста
+Используется официальный Debian 13 Trixie genericcloud image.
 
-Скрипт использует штатные средства:
+Перед импортом обязательно скачивается официальный `SHA512SUMS` и проверяется SHA-512 образа. Использованный hash записывается в `/etc/vm-template-info`.
 
-- `qm`;
-- `pvesm`;
-- Cloud-Init support Proxmox;
-- `curl` или `wget`;
-- `sha512sum`;
-- штатный импорт дисков и управление VM.
+Скрипт не продолжает сборку, если checksum отсутствует, имеет неверный формат или не совпадает.
 
-Дополнительные пакеты на PVE-хост автоматически не устанавливаются.
+## 3. Базовый пользователь
 
-## 3. Пользователь `ops`
-
-Основной административный пользователь Linux VM:
+Основной административный пользователь:
 
 ```text
 ops
 ```
 
-Базовые группы:
+Группы:
 
 ```text
 ops
@@ -59,241 +34,217 @@ sudo
 adm
 ```
 
-`ops` имеет:
+Sudo policy задаётся отдельным файлом:
 
 ```text
-ALL=(ALL) NOPASSWD:ALL
+/etc/sudoers.d/90-ops
+ops ALL=(ALL:ALL) NOPASSWD:ALL
 ```
 
-Специальные группы добавляются только по роли конкретной VM.
+Конфигурация проверяется через `visudo -cf`.
 
-## 4. Root и SSH
+## 4. Пароли и SSH
 
-`root` не удаляется, но удалённый вход полностью запрещён:
+Пароль `ops` остаётся locked. Пустой пароль не используется.
+
+SSH policy:
 
 ```text
 PermitRootLogin no
-```
-
-SSH-политика:
-
-```text
 PasswordAuthentication no
 KbdInteractiveAuthentication no
+PermitEmptyPasswords no
 PubkeyAuthentication yes
 ```
 
-Обычное сетевое администрирование:
+Файл должен называться:
 
 ```text
-SSH → ops → sudo
+/etc/ssh/sshd_config.d/00-template-security.conf
 ```
 
-## 5. Credentials не входят в template
+Конфигурация проверяется через `sshd -t`.
 
-Base template **не содержит**:
+## 5. Доверенная Proxmox console
 
-- личных SSH public keys;
-- private SSH keys;
-- рабочего пароля `ops`;
-- других персональных credentials.
-
-Пользователь `ops` существует в template, его пароль заблокирован и остаётся заблокированным в обычных клонах.
-
-Это позволяет одному template обслуживать разные VM, устройства и наборы ключей без пересборки.
-
-## 6. Cloud-Init конкретного клона
-
-После Full Clone через стандартный Proxmox Cloud-Init задаются:
-
-```text
-ciuser = ops
-sshkeys = один или несколько public keys
-ipconfig0 = DHCP или статический адрес
-```
-
-Также через Cloud-Init задаются hostname, DNS и другие параметры первого запуска при необходимости.
-
-`cipassword` в штатном сценарии не используется.
-
-Публичный SSH-ключ конкретного устройства или роли попадает в:
-
-```text
-/home/ops/.ssh/authorized_keys
-```
-
-## 7. Доверенный доступ через Proxmox console
-
-Proxmox Web UI уже имеет собственную аутентификацию и ACL. Для VM console принимается следующая модель доверия:
-
-```text
-право открыть console VM в Proxmox
-= право получить локальный shell ops внутри этой VM
-```
-
-Это реализуется не пустым паролем и не передачей Proxmox credentials в Debian, а локальным autologin на `tty1`:
-
-```text
-getty@tty1
-→ agetty --autologin ops
-→ shell ops
-```
-
-Пароль `ops` при этом остаётся **locked**.
-
-Следствие: пользователь Proxmox, которому выдано право на console конкретной VM, фактически получает административный доступ к гостевой ОС, потому что `ops` имеет `NOPASSWD: sudo`. Это осознанная trust boundary проекта.
-
-## 8. VGA/noVNC и serial console
-
-Основная интерактивная console:
+Основная консоль VM:
 
 ```text
 vga: std
+noVNC → tty1
 ```
 
-Кнопка `VM → Console` в Proxmox должна открывать noVNC с обычной Linux text console `tty1`.
-
-Внутри гостя должен быть включён:
+На `tty1` используется:
 
 ```text
-getty@tty1.service
+agetty --autologin ops
 ```
 
-с override:
+Пароль при этом не разблокируется. Право Proxmox `VM.Console` для такой VM следует считать административным доступом к гостевой ОС, поскольку `ops` может выполнять `sudo` без пароля.
 
-```ini
-[Service]
-ExecStart=
-ExecStart=-/sbin/agetty --autologin ops --noclear %I $TERM
-```
-
-Одновременно сохраняется:
+Дополнительно сохраняется:
 
 ```text
 serial0: socket
 ```
 
-и `serial-getty@ttyS0.service` как резервный диагностический канал. На `serial0` autologin **не настраивается**.
+На `serial0` autologin не включается.
 
-## 9. Временная зона и локаль
+## 6. Cloud-Init lifecycle
+
+Временный custom Cloud-Init используется только при сборке builder-VM.
+
+Host-сценарий обязан:
+
+1. дождаться QEMU Guest Agent;
+2. дождаться маркера завершения bootstrap;
+3. дополнительно дождаться `cloud-init status --wait`;
+4. только после этого запускать final cleanup;
+5. выполнить `cloud-init clean --logs --seed` без игнорирования ошибок;
+6. удалить builder-only `cicustom`;
+7. задать стандартные defaults template;
+8. выполнить `qm cloudinit update`;
+9. проверить, что builder-only user-data больше не присутствует.
+
+Для template:
 
 ```text
-Timezone: Europe/Moscow
-Locale:   en_US.UTF-8
+ciuser=ops
+ipconfig0=ip=dhcp
+ciupgrade=0
 ```
 
-Системное время синхронизируется штатными средствами Linux.
+`cipassword` штатно не используется.
 
-## 10. Обновление при сборке
+## 7. Порядок персонализации клона
 
-В builder-VM выполняется:
+Для каждого Full Clone параметры Cloud-Init задаются **до первого старта**:
+
+```text
+clone
+→ name/hostname
+→ ciuser=ops
+→ sshkeys
+→ network/DNS
+→ qm cloudinit update
+→ start
+```
+
+SSH key после первого boot добавлять не следует как штатный сценарий: Cloud-Init предназначен для первичной персонализации.
+
+## 8. Обновления
+
+Builder выполняет:
 
 ```text
 apt update
 apt full-upgrade
 ```
 
-После этого устанавливается согласованный базовый набор пакетов.
+Template получает актуальные пакеты на дату сборки.
+
+Автоматический package upgrade клонов через Cloud-Init выключен:
+
+```text
+ciupgrade=0
+```
 
 `unattended-upgrades` автоматически не включается.
 
-## 11. Swap
+## 9. Время
 
-В base template swap не создаётся. При необходимости он добавляется конкретной VM.
+Устанавливается и включается `systemd-timesyncd`.
 
-## 12. Виртуальный диск
+```text
+Timezone: Europe/Moscow
+Locale: en_US.UTF-8
+```
+
+Ошибку включения NTP не следует молча игнорировать.
+
+## 10. Диск, growpart и TRIM
 
 ```text
 Controller: VirtIO SCSI Single
-iothread:   enabled
-discard:    enabled
-ssd:        enabled
-size:       16 GiB
+iothread: enabled
+discard: enabled
+ssd: enabled
+base size: 16 GiB
 ```
 
-## 13. QEMU Guest Agent
+В template должен быть `cloud-guest-utils`, чтобы `growpart` был доступен клонам после увеличения диска.
 
-`qemu-guest-agent` обязателен и включается внутри Debian и в конфигурации VM Proxmox.
+Включается `fstrim.timer`. Перед финальным shutdown выполняется `fstrim -av`; ошибка fstrim логируется как предупреждение и не считается причиной провала сборки.
 
-Кроме штатного shutdown и получения сетевой информации, Guest Agent используется как дополнительный аварийный канал управления через `qm guest exec`.
+## 11. QEMU Guest Agent
 
-## 14. Очистка перед template
+`qemu-guest-agent` обязателен. Он используется для shutdown, IP/status, guest exec и части диагностических сценариев.
 
-Перед финальным shutdown очищаются:
+## 12. Очистка machine-specific данных
 
-- Cloud-Init state;
-- `/etc/machine-id`;
+Перед `qm template` удаляются:
+
+- Cloud-Init state/logs/seed;
+- machine-id и dbus machine-id;
 - SSH host keys;
 - DHCP/network state;
 - random seed;
 - APT cache/lists;
-- временные файлы;
-- build artifacts и build logs;
+- journal/build logs;
+- temporary files;
 - shell history;
-- `/home/ops/.ssh`.
+- `/home/ops/.ssh`;
+- `/usr/local/sbin/template-bootstrap`;
+- `/usr/local/sbin/template-finalize`.
 
-Клон должен сформировать собственные machine-id и SSH host keys.
+Настройки `tty1` autologin, SSH hardening, sudo policy, timesync и fstrim являются частью base template и не удаляются.
 
-Настройка `getty@tty1` autologin является частью базовой политики template и при очистке не удаляется.
+## 13. Информация о происхождении
 
-## 15. Shell history и MOTD
-
-Через `/etc/profile.d/` включаются timestamps истории и увеличенный history size.
-
-MOTD:
-
-```text
-Managed VM
-Base template: tpl-debian13
-Infrastructure: zsergeyru/proxmox
-Do not store secrets in Git.
-```
-
-## 16. Информация о template
-
-```text
-/etc/vm-template-info
-```
-
-содержит:
+`/etc/vm-template-info` содержит:
 
 ```text
 Template: tpl-debian13
-Template-Version: 2
+Template-Version: <TEMPLATE_VERSION>
 OS: Debian 13
 Source: zsergeyru/proxmox
-Build-Date: <дата сборки>
+Source-Image: <image filename>
+Source-Image-SHA512: <sha512>
+Build-Date: <UTC date>
 ```
 
-## 17. Backup
+Версия подставляется из одной переменной `TEMPLATE_VERSION`, а не дублируется жёстко в нескольких местах.
 
-На первом этапе:
+## 14. Финальные проверки
 
-- полный VM backup средствами Proxmox;
-- `restic`/`rsync` доступны для файловых сценариев;
-- отдельный secret-backup не создаётся;
-- technical private keys внутри VM попадают в её полный backup.
+Перед успешным завершением скрипт проверяет конфигурацию template:
 
-Backup с секретами считается чувствительным объектом.
+```text
+template: 1
+protection: 1
+vga: std
+serial0: socket
+ciupgrade: 0
+```
 
-## 18. Что не входит в base template
+Builder-only Cloud-Init не должен остаться в стандартном Cloud-Init drive.
+
+## 15. Защита template
+
+После успешного `qm template` устанавливается:
+
+```text
+protection=1
+```
+
+Цель — защита от случайного удаления VMID 9000. Это не полноценная security boundary: пользователь с достаточными правами Proxmox способен снять protection.
+
+## 16. Поведение при ошибке
+
+Скрипт никогда не уничтожает автоматически существующую VM или storage.
+
+При ошибке builder сохраняется для диагностики. `trap ERR` остаётся активным до успешного завершения `qm template`, включения protection и финальных проверок.
+
+## 17. Что не входит в base template
 
 Не устанавливаются заранее Docker/Compose, SmartDNS, AdGuard Home, sing-box, VPN, специальные nftables/PBR rules, Gitea/Jenkins, базы данных, reverse proxy и service-specific users/directories.
-
-## 19. Требования к `create-template.sh`
-
-Скрипт должен:
-
-1. не использовать `virt-customize`;
-2. не устанавливать `libguestfs-tools` на Proxmox;
-3. готовить Debian внутри временной VM;
-4. не запрашивать и не сохранять credentials конкретного администратора;
-5. оставлять `ops` без рабочего пароля и без `authorized_keys` в самом template;
-6. сохранять `ciuser=ops` и DHCP как нейтральные defaults;
-7. ожидать, что `sshkeys`, hostname/IP задаются конкретному клону через Cloud-Init;
-8. не использовать `cipassword` в штатном deploy-сценарии;
-9. оставлять SSH password authentication выключенным;
-10. использовать `vga: std` для основной noVNC console;
-11. настраивать autologin `ops` только на `tty1`;
-12. сохранять `serial0: socket` без autologin как резервный диагностический канал;
-13. при ошибке не удалять существующие VM/storage автоматически.
