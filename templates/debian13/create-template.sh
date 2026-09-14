@@ -160,7 +160,6 @@ users:
     groups: [adm, sudo]
     shell: /bin/bash
     lock_passwd: true
-    sudo: ["ALL=(ALL) NOPASSWD:ALL"]
 
 write_files:
   - path: /etc/ssh/sshd_config.d/00-template-security.conf
@@ -234,7 +233,8 @@ write_files:
       systemctl enable --now qemu-guest-agent
       systemctl enable --now ssh
       systemctl enable getty@tty1.service
-      systemctl enable serial-getty@ttyS0.service || true
+      systemctl restart getty@tty1.service
+      systemctl enable serial-getty@ttyS0.service
       systemctl enable --now fstrim.timer
 
       /usr/sbin/sshd -t
