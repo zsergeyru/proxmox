@@ -34,8 +34,9 @@ VMID 9000 builder-debian13
 apt update + full-upgrade
 базовые пакеты и системные настройки
         ↓
-serial0 + xterm.js как основная текстовая консоль
+serial0 + xterm.js как основной рабочий текстовый канал
 serial-getty@ttyS0 → autologin ops
+vga: std + noVNC как независимый резервный канал
         ↓
 ожидание QEMU Guest Agent
 ожидание окончания Cloud-Init
@@ -74,8 +75,9 @@ protection=1
 | Cloud-Init | да |
 | Cloud-Init package upgrade | выключен (`ciupgrade=0`) |
 | QEMU Guest Agent | да |
-| Proxmox display | `vga: serial0` |
+| Proxmox display | `vga: std` |
 | Main console | xterm.js → `serial0` → autologin `ops` |
+| Fallback console | noVNC → VGA/`tty1`, без специального autologin |
 | Serial device | `serial0: socket` |
 | Admin user | `ops` |
 | `ops` password | locked |
@@ -113,7 +115,7 @@ PubkeyAuthentication yes
 
 ### Proxmox Console
 
-Основная console теперь текстовая:
+Основной рабочий console-канал текстовый:
 
 ```text
 Proxmox Web UI
@@ -134,7 +136,14 @@ Proxmox Web UI
 /etc/systemd/system/serial-getty@ttyS0.service.d/autologin.conf
 ```
 
-`tty1` больше не является основной административной консолью и специальный autologin на нём не настраивается.
+Параллельно сохраняется отдельный резервный канал:
+
+```text
+vga: std
+noVNC → VGA/tty1
+```
+
+На `tty1` специальный autologin не настраивается. noVNC нужен как fallback и для диагностики экранного вывода.
 
 ## Cloud-Init конкретного клона
 
@@ -338,12 +347,13 @@ TEMPLATE_VERSION=3
 
 ### Изменение v3
 
-В v3 основная консоль изменена с framebuffer/noVNC/tty1 на настоящую текстовую serial-консоль:
+В v3 основной рабочий console-канал переведён с framebuffer/noVNC/tty1 на настоящую текстовую serial-консоль, но VGA/noVNC не удаляется:
 
 ```text
-vga: serial0
 serial0: socket
 xterm.js → ttyS0 → autologin ops
+vga: std
+noVNC → VGA/tty1 → fallback
 ```
 
 После изменения требуется новая чистая сборка v3 и повторная проверка тестового Full Clone.
@@ -353,14 +363,15 @@ xterm.js → ttyS0 → autologin ops
 Создать тестовый Full Clone, задать SSH public key и network **до первого старта**, затем проверить:
 
 1. VM загружается и получает сеть;
-2. `VM → Console` открывает текстовую xterm.js-консоль через `serial0`;
+2. `VM → Console → xterm.js` открывает текстовую консоль через `serial0`;
 3. xterm.js автоматически даёт shell `ops`;
-4. пароль `ops` остаётся locked;
-5. SSH доступен только по ключу;
-6. `sudo` работает без пароля;
-7. QEMU Guest Agent отвечает;
-8. machine-id уникален;
-9. SSH host keys уникальны;
-10. root filesystem увеличивается после resize диска;
-11. `/etc/vm-template-info` содержит правильную версию и SHA-512 исходного образа;
-12. в конфигурации template есть `ciupgrade: 0`, `protection: 1`, `vga: serial0`, `serial0: socket`.
+4. `VM → Console → noVNC` остаётся доступным как отдельный VGA fallback;
+5. пароль `ops` остаётся locked;
+6. SSH доступен только по ключу;
+7. `sudo` работает без пароля;
+8. QEMU Guest Agent отвечает;
+9. machine-id уникален;
+10. SSH host keys уникальны;
+11. root filesystem увеличивается после resize диска;
+12. `/etc/vm-template-info` содержит правильную версию и SHA-512 исходного образа;
+13. в конфигурации template есть `ciupgrade: 0`, `protection: 1`, `vga: std`, `serial0: socket`.
