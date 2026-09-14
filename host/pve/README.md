@@ -51,7 +51,7 @@ VM `320` соответствует bootstrap-каталогу [`../../guests/32
 - [`network/`](network/) — фактическая сеть хоста и bridge;
 - [`storage/`](storage/) — storage, LVM и mount points;
 - [`backup/`](backup/) — текущее backup-хранилище и открытые вопросы;
-- общая целевая архитектура сети находится в [`../../docs/network.md`](../../docs/network.md).
+- общая целевая архитектура сети находится в [`../../docs/40-network.md`](../../docs/40-network.md).
 
 ## Принцип
 
