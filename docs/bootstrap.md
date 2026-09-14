@@ -92,3 +92,12 @@ create-template.sh
 ```
 
 Он создаёт Debian 13 template `tpl-debian13`, VMID `9000`, `Template-Version: 2`.
+
+**2026-09-14: Template-Version 2 успешно проверена полной чистой сборкой на реальном PVE-хосте.** Сборка прошла весь цикл: загрузка и SHA-512-проверка Debian genericcloud image, импорт и resize диска, временный Cloud-Init, bootstrap, QEMU Guest Agent, успешное завершение Cloud-Init final stage, финальная очистка, shutdown, регенерация штатного Cloud-Init, `qm template` и `protection=1`.
+
+Во время первого прогона v2 были выявлены и исправлены две ошибки порядка выполнения Cloud-Init:
+
+- `locale: en_US.UTF-8` нельзя задавать до установки/генерации `locales`; locale теперь настраивается внутри `template-bootstrap` после установки пакета;
+- пользователя `debian` нельзя удалять в `runcmd`, пока Cloud-Init ещё выполняет `ssh-authkey-fingerprints`; его удаление перенесено в `template-finalize`, после успешного завершения Cloud-Init.
+
+После исправлений выполнена новая сборка с нуля; она завершилась сообщением `Template created successfully.`. Это считается базовой проверенной реализацией версии 2.
