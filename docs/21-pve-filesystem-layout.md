@@ -1,6 +1,8 @@
 # Файловая структура PVE bootstrap/deployer
 
-Этот документ фиксирует каноническое размещение файлов `init-pve.sh`, PVE-side deployer, private Git checkout, secrets, runtime state, logs и bootstrap snapshots.
+Этот документ фиксирует каноническое размещение файлов `init-pve.sh`, PVE-side deployer, private Git checkout, обоих PVE API token secrets, runtime state, logs и bootstrap snapshots.
+
+Он является парным документом к [`20-pve-initialization.md`](20-pve-initialization.md). Для PVE bootstrap эти два документа определяют каноническую public/private границу и файловую модель.
 
 Основной принцип:
 
@@ -9,10 +11,10 @@
 → постоянная конфигурация и secrets
 
 /var/lib
-→ Git checkout и runtime/state
+→ private Git checkout и mutable runtime/state
 
 /var/log
-→ logs
+→ logs/audit
 
 /var/backups
 → bootstrap snapshots и защищённые backup secrets
@@ -21,10 +23,43 @@
 → стабильные команды/entrypoints
 
 /root
-→ только zero-day init script
+→ только локальная копия zero-day init script
 ```
 
-## 1. Постоянная конфигурация deployer
+---
+
+## 1. Каноническая граница public/private
+
+Для нового PVE существует одна public zero-day entrypoint:
+
+```text
+PUBLIC zsergeyru/proxmox-bootstrap
+└── init-pve.sh
+```
+
+После получения read-only Git access весь основной PVE deploy tooling берётся из private source of truth:
+
+```text
+PRIVATE zsergeyru/proxmox
+├── scripts/pve/create-template.sh
+├── scripts/pve/deploy-guest.py
+├── guests/*/guest.yaml
+├── templates/
+├── ansible/
+└── docs/
+```
+
+Для PVE bootstrap не должно существовать двух канонических копий `create-template.sh` или `deploy-guest` в public и private repositories одновременно.
+
+Публичный `init-pve.sh` после появления private checkout вызывает код из зафиксированного revision `zsergeyru/proxmox`.
+
+Существующие публичные AI/bootstrap-скрипты старой переходной схемы могут использоваться отдельно для миграции `301`, но не являются source of truth host-side PVE deployer.
+
+---
+
+## 2. Постоянная конфигурация deployer
+
+Канонический каталог:
 
 ```text
 /etc/proxmox-deployer/
@@ -35,14 +70,16 @@
 │   ├── config
 │   └── known_hosts
 └── secrets/
-    └── host-deploy.token
+    ├── host-deploy.token
+    └── proximo-ai-control.token
 ```
 
 Назначение:
 
 ```text
 config.yaml
-→ настройки PVE deployer: repo, branch, пути, имена identities/tokens, pool managed и другие постоянные параметры
+→ настройки PVE deployer: repo, branch, пути, identities/tokens,
+  managed pool и другие постоянные параметры
 
 ssh/github_proxmox_repo_ed25519
 → private read-only GitHub Deploy Key для zsergeyru/proxmox
@@ -51,27 +88,99 @@ ssh/github_proxmox_repo_ed25519.pub
 → public часть того же key
 
 ssh/config
-→ SSH alias/config для GitHub transport
+→ SSH config для GitHub transport
 
 ssh/known_hosts
-→ проверенный host key GitHub
+→ проверенный GitHub host key
 
 secrets/host-deploy.token
-→ secret deployer@pve!host-deploy
+→ token id + secret deployer@pve!host-deploy
+
+secrets/proximo-ai-control.token
+→ token id + secret proximo@pve!ai-control
 ```
 
-Proximo использует отдельную identity `proximo@pve!ai-control`, но её secret после создания передаётся внутрь `301` и хранится там в `/etc/ai-control/secrets/proximo-pve-token`. Отдельный plaintext-файл с Proximo token на PVE не является частью канонической файловой структуры.
+### Почему оба token secrets остаются на PVE
 
-Правила:
+Оба credentials принадлежат PVE infrastructure layer и создаются host-side bootstrap.
 
-- secrets и private key никогда не попадают в Git;
-- перед созданием secret files использовать `umask 077`;
-- private key и token files имеют mode `0600` либо более узкие права, требуемые runtime;
-- каталоги `ssh/` и `secrets/` имеют mode `0700`;
-- `pvedeploy` получает доступ только к secret, нужному host-side deploy runtime;
-- потеря Proximo credential вместе с `301` требует явной ротации token, потому что PVE API не позволяет повторно получить его secret.
+```text
+host-deploy.token
+→ нужен обычному PVE deployer
 
-## 2. Private Git checkout и deployer runtime
+proximo-ai-control.token
+→ recovery/source copy для runtime Proximo credential
+```
+
+При создании/восстановлении `301-ai-control` Proximo credential копируется из:
+
+```text
+/etc/proxmox-deployer/secrets/proximo-ai-control.token
+```
+
+в runtime-файл внутри `301`:
+
+```text
+/etc/ai-control/secrets/proximo-pve-token
+```
+
+После передачи host-side copy **не удаляется**.
+
+Это позволяет пересоздать `301` без обязательной ротации API token, если PVE и его защищённый secret backup сохранились.
+
+---
+
+## 3. Права на `/etc/proxmox-deployer`
+
+Нужно разделять обычный host deploy credential и recovery credential Proximo.
+
+Рекомендуемая модель:
+
+```text
+/etc/proxmox-deployer/
+→ root:root
+
+/etc/proxmox-deployer/secrets/
+→ root:pvedeploy
+→ mode 0710
+
+host-deploy.token
+→ root:pvedeploy
+→ mode 0640
+
+proximo-ai-control.token
+→ root:root
+→ mode 0600
+```
+
+Таким образом `pvedeploy` может читать только credential, необходимый `deploy-guest`, но не получает Proximo token.
+
+SSH identity PVE принадлежит runtime, выполняющему private Git fetch:
+
+```text
+ssh/github_proxmox_repo_ed25519
+→ pvedeploy:pvedeploy
+→ mode 0600
+
+ssh/github_proxmox_repo_ed25519.pub
+→ pvedeploy:pvedeploy
+→ mode 0644
+```
+
+`ssh/config` и `known_hosts` должны иметь права, позволяющие `pvedeploy` использовать их, но не изменяться посторонними пользователями.
+
+Общие правила:
+
+- перед созданием secrets использовать `umask 077`;
+- token secrets и private SSH keys никогда не попадают в Git;
+- secrets не записываются в `state.json`;
+- secrets не выводятся в обычные logs;
+- rotation выполняется только явно;
+- потеря host-side secret при существующем PVE token не должна приводить к молчаливому созданию нового credential.
+
+---
+
+## 4. Private Git checkout и deployer runtime
 
 ```text
 /var/lib/proxmox-deployer/
@@ -98,14 +207,13 @@ repo/
 ├── guests/
 ├── templates/
 ├── scripts/
-│   ├── pve/
-│   └── ai-control/
+│   └── pve/
 ├── docs/
 ├── ansible/
 └── ...
 ```
 
-Именно отсюда PVE читает, например:
+Именно отсюда PVE читает:
 
 ```text
 guests/311-dev-services/guest.yaml
@@ -120,11 +228,14 @@ Checkout:
 - PVE не выполняет из него commit/push;
 - первая версия использует shallow clone (`depth=1`);
 - sparse checkout пока не используется;
-- PLAN и APPLY должны работать по одному и тому же зафиксированному commit SHA.
+- перед PLAN фиксируется конкретный commit SHA;
+- PLAN и APPLY должны работать по одному и тому же revision.
+
+Public `main` bootstrap repo не используется как второй источник builder/deployer после появления private checkout.
 
 ### `state/`
 
-Хранит runtime state самого deployer, например последний применённый/проверенный revision и данные, необходимые для безопасного продолжения операции.
+Хранит runtime state самого deployer, например последний применённый/проверенный revision и данные для безопасного продолжения операции.
 
 Secrets здесь не хранятся.
 
@@ -132,7 +243,9 @@ Secrets здесь не хранятся.
 
 Только воспроизводимый временный cache. Его удаление не должно уничтожать source of truth или credentials.
 
-## 3. Bootstrap state
+---
+
+## 5. Bootstrap state
 
 ```text
 /var/lib/proxmox-bootstrap/
@@ -151,14 +264,18 @@ version
 → установленная bootstrap schema/version
 
 last-run.json
-→ сведения о последнем запуске: timestamp, result, repo revision и другие несекретные метаданные
+→ timestamp, result, repo revision и другие несекретные метаданные
 ```
 
-Это не source of truth: при повторном запуске фактическое состояние PVE/Git/template всегда перепроверяется.
+State может содержать факт существования identity/token/secret-файла, но никогда не значение secret.
+
+Это не source of truth: при повторном запуске фактическое состояние PVE, secret files, Git checkout и template перепроверяется.
 
 Secrets в `/var/lib/proxmox-bootstrap/` не хранятся.
 
-## 4. Логи
+---
+
+## 6. Логи
 
 ```text
 /var/log/proxmox-deployer/
@@ -175,10 +292,14 @@ Secrets в `/var/lib/proxmox-bootstrap/` не хранятся.
 - не писать token secrets;
 - не писать private SSH keys;
 - не делать полный dump environment, если там могут быть credentials;
-- логировать используемый repo commit SHA и итог PLAN/APPLY;
-- audit должен позволять понять, какой VMID и какой revision применялся.
+- логировать используемый private repo commit SHA;
+- логировать итог PLAN/APPLY;
+- audit должен позволять понять, какой VMID и какой revision применялся;
+- rotation/recovery credential логируется как событие без значения secret.
 
-## 5. Bootstrap snapshots конфигурации PVE
+---
+
+## 7. Bootstrap snapshots конфигурации PVE
 
 ```text
 /var/backups/proxmox-bootstrap/
@@ -213,24 +334,56 @@ YYYYMMDD-HHMMSS/
 
 Не нужно бездумно архивировать весь `/etc/pve`, потому что это `pmxcfs`.
 
-## 6. Backup infrastructure secrets
+---
 
-Для защищённой копии infrastructure credentials выделяется отдельная область:
+## 8. Backup infrastructure secrets
+
+Для защищённой копии host-side infrastructure credentials выделяется отдельная область:
 
 ```text
 /var/backups/proxmox-secrets/
 ```
 
-В backup должны попадать как минимум необходимые для восстановления PVE bootstrap/deployer identities данные из:
+В backup должны входить **оба API token secrets** и PVE GitHub SSH identity:
 
 ```text
-/etc/proxmox-deployer/secrets/
-/etc/proxmox-deployer/ssh/
+/etc/proxmox-deployer/secrets/host-deploy.token
+/etc/proxmox-deployer/secrets/proximo-ai-control.token
+/etc/proxmox-deployer/ssh/github_proxmox_repo_ed25519
+/etc/proxmox-deployer/ssh/github_proxmox_repo_ed25519.pub
+/etc/proxmox-deployer/ssh/config
+/etc/proxmox-deployer/ssh/known_hosts
 ```
 
-Proximo token из `301` в этот host-side backup не входит; он защищается резервным копированием самого AI control plane либо явной ротацией credential. Такой backup является чувствительным объектом и должен быть защищён не хуже самих secrets. В дальнейшем предпочтительно иметь внешнюю копию, потому что локальный `/var/backups` на том же системном SSD не помогает при физической потере диска.
+Host-side backup secrets является чувствительным объектом и должен быть защищён не хуже исходных credentials.
 
-## 7. Стабильные команды
+Локальный `/var/backups` на том же SSD не является достаточным disaster-recovery backup. Должна существовать внешняя защищённая копия согласно общей backup policy проекта.
+
+### Взаимосвязь с backup `301`
+
+Backup `301-ai-control` также чувствителен, потому что содержит runtime copy:
+
+```text
+/etc/ai-control/secrets/proximo-pve-token
+```
+
+Но backup `301` **не заменяет** host-side backup `proximo-ai-control.token`.
+
+Каноническая модель:
+
+```text
+PVE secret backup
+→ infrastructure/recovery source
+
+301 backup
+→ runtime/control-plane recovery
+```
+
+При потере `301`, но сохранённом PVE secret, тот же Proximo credential можно повторно передать в новую VM.
+
+---
+
+## 9. Стабильные команды
 
 Пользовательские/system entrypoints:
 
@@ -252,9 +405,13 @@ Proximo token из `301` в этот host-side backup не входит; он з
 
 Source code остаётся в private Git checkout, а `/usr/local/sbin` даёт стабильную команду независимо от физического расположения implementation.
 
-## 8. Public zero-day script
+Wrapper должен работать с зафиксированным revision и не скачивать при каждом запуске независимую public-копию deployer.
 
-Публичный initial script допускается хранить после скачивания как:
+---
+
+## 10. Public zero-day script
+
+После скачивания public entrypoint допускается хранить как:
 
 ```text
 /root/init-pve.sh
@@ -262,9 +419,27 @@ Source code остаётся в private Git checkout, а `/usr/local/sbin` да�
 
 Он нужен для zero-day bootstrap/recovery и не является основным runtime deployer после завершения initialization.
 
-Публичный `zsergeyru/proxmox-bootstrap` в целевой архитектуре содержит только `init-pve.sh` и сопутствующий README. Остальные executable scripts после получения read-only Git access берутся из private `zsergeyru/proxmox`.
+Каноническая целевая структура публичного bootstrap repo для PVE:
 
-## 9. Итоговое дерево
+```text
+zsergeyru/proxmox-bootstrap/
+├── init-pve.sh
+└── README.md
+```
+
+После появления read-only доступа к private repo:
+
+```text
+init-pve.sh
+→ /var/lib/proxmox-deployer/repo/scripts/pve/create-template.sh
+→ /var/lib/proxmox-deployer/repo/scripts/pve/deploy-guest.py
+```
+
+Builder/deployer не копируются в public repo как второй source of truth.
+
+---
+
+## 11. Итоговое дерево PVE
 
 ```text
 /
@@ -277,12 +452,18 @@ Source code остаётся в private Git checkout, а `/usr/local/sbin` да�
 │       │   ├── config
 │       │   └── known_hosts
 │       └── secrets/
-│           └── host-deploy.token
+│           ├── host-deploy.token
+│           └── proximo-ai-control.token
 │
 ├── var/
 │   ├── lib/
 │   │   ├── proxmox-deployer/
 │   │   │   ├── repo/
+│   │   │   │   ├── guests/
+│   │   │   │   ├── templates/
+│   │   │   │   ├── scripts/pve/
+│   │   │   │   ├── ansible/
+│   │   │   │   └── docs/
 │   │   │   ├── state/
 │   │   │   └── cache/
 │   │   └── proxmox-bootstrap/
@@ -308,6 +489,12 @@ Source code остаётся в private Git checkout, а `/usr/local/sbin` да�
     └── init-pve.sh
 ```
 
-## 10. Главный принцип
+---
 
-> Конфигурация и credentials живут в `/etc`, mutable runtime/source cache — в `/var/lib`, logs — в `/var/log`, backup — в `/var/backups`, стабильные команды — в `/usr/local/sbin`, а `/root/init-pve.sh` остаётся только zero-day входной точкой.
+## 12. Главный принцип
+
+> Public repo даёт только zero-day вход в новый PVE. После получения read-only доступа source of truth для builder/deployer находится в private `zsergeyru/proxmox`. Конфигурация и оба API token secrets живут в `/etc`, private Git checkout и mutable runtime — в `/var/lib`, logs — в `/var/log`, backup — в `/var/backups`, стабильные команды — в `/usr/local/sbin`.
+
+И отдельно:
+
+> `deployer@pve!host-deploy` и `proximo@pve!ai-control` имеют разные роли и права, но **оба token secrets постоянно сохраняются на PVE** и входят в защищённый infrastructure backup.
