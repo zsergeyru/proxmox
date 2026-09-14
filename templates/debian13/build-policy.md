@@ -2,22 +2,20 @@
 
 Этот документ фиксирует согласованные решения для базового Debian 13 template в Proxmox.
 
-Текущая значимая версия базовой политики:
-
 ```text
 Template-Version: 2
 ```
 
-## 1. Главный принцип: Proxmox-хост остаётся чистым
+## 1. Главный принцип
 
-На Proxmox-хост **не устанавливаем `virt-customize`, `libguestfs-tools` и другие build-инструменты**, которые нужны только для подготовки гостевой ОС.
+Proxmox-хост остаётся максимально чистым. Не устанавливаем `virt-customize`, `libguestfs-tools` и другие build-инструменты, нужные только для подготовки гостевой ОС.
 
 Сборка выполняется через временную VM:
 
 ```text
 Debian 13 genericcloud image
         ↓
-временная builder-VM в Proxmox
+builder-VM
         ↓
 Cloud-Init первого запуска
         ↓
@@ -28,40 +26,29 @@ apt update / full-upgrade
         ↓
 shutdown
         ↓
-стандартные Cloud-Init defaults для клонов
-        ↓
-преобразование в tpl-debian13
+qm template
 ```
 
-После успешной подготовки отдельная builder-VM не сохраняется как самостоятельная рабочая машина: подготовленная VM становится template.
+## 2. Средства Proxmox-хоста
 
-## 2. Что разрешено использовать на Proxmox-хосте
-
-Скрипт должен опираться прежде всего на штатные средства Proxmox и базовой Debian-системы хоста:
+Скрипт использует штатные средства:
 
 - `qm`;
 - `pvesm`;
 - Cloud-Init support Proxmox;
-- стандартные средства скачивания и проверки образа;
-- штатные операции импорта диска и управления VM.
+- `curl` или `wget`;
+- `sha512sum`;
+- штатный импорт дисков и управление VM.
 
-Если для новой реализации потребуется дополнительный пакет на PVE-хосте, это считается отдельным архитектурным решением и не должно происходить автоматически.
+Дополнительные пакеты на PVE-хост автоматически не устанавливаются.
 
-## 3. Базовый пользователь
+## 3. Пользователь `ops`
 
-Основной административный пользователь рабочих Linux VM:
+Основной административный пользователь Linux VM:
 
 ```text
 ops
 ```
-
-`ops` используется для:
-
-- SSH-входа по ключу;
-- входа через Proxmox serial console по паролю;
-- ручного администрирования;
-- `sudo`;
-- работы с Git, конфигурацией и логами.
 
 Базовые группы:
 
@@ -71,137 +58,91 @@ sudo
 adm
 ```
 
-Специальные группы (`docker`, `www-data`, `backup` и т. п.) добавляются только на конкретных VM по необходимости.
+Специальные группы добавляются только по роли конкретной VM.
 
-## 4. Root
+## 4. Root и SSH
 
-Учётная запись `root` как системная часть Debian **не удаляется**.
-
-Удалённый SSH-login для `root` полностью запрещается:
+`root` не удаляется, но удалённый вход полностью запрещён:
 
 ```text
 PermitRootLogin no
-```
-
-Прямой пользовательский вход под root не является штатным способом администрирования. Аварийный доступ через Proxmox console выполняется пользователем `ops`, после чего административные команды запускаются через `sudo`.
-
-## 5. Политика доступа
-
-Целевая модель состоит из двух каналов:
-
-```text
-Proxmox serial console
-→ ops + password
-
-SSH
-→ ops + private key на административном компьютере
 ```
 
 SSH-политика:
 
 ```text
-PermitRootLogin no
 PasswordAuthentication no
 KbdInteractiveAuthentication no
 PubkeyAuthentication yes
 ```
 
-Наличие password у `ops` не включает password authentication в SSH.
+Обычное администрирование:
 
-## 6. Console password
+```text
+SSH → ops → sudo
+```
 
-При сборке template скрипт интерактивно запрашивает пароль пользователя `ops` для console login.
+## 5. Credentials не входят в template
 
-Требования:
+Base template **не содержит**:
 
-- пароль не записывается в Git;
-- пароль не должен вводиться в командной строке открытым текстом;
-- скрипт запрашивает его скрыто;
-- template получает этот пароль как стандартный Cloud-Init default для клонов;
-- обычные клоны по умолчанию наследуют тот же console password;
-- при необходимости password конкретной VM можно заменить через её Cloud-Init настройки.
+- личных SSH public keys;
+- private SSH keys;
+- рабочего пароля `ops`;
+- других персональных credentials.
 
-Общий console password для клонов является осознанным упрощением домашней инфраструктуры и не отменяет SSH key authentication.
+Пользователь `ops` существует в template, но его пароль остаётся заблокированным до персонализации конкретного клона.
 
-## 7. SSH public key по умолчанию
+Это позволяет одному template обслуживать разные VM, устройства и наборы ключей без пересборки.
 
-Административный private SSH key хранится только на пользовательском компьютере.
+## 6. Cloud-Init конкретного клона
 
-При сборке `create-template.sh` запрашивает только public key и записывает его в стандартную Cloud-Init конфигурацию template.
+После Full Clone через стандартный Proxmox Cloud-Init задаются:
 
-В результате обычный клон сразу получает:
+```text
+ciuser = ops
+cipassword = пароль конкретной VM для console login
+sshkeys = один или несколько public keys
+ipconfig0 = DHCP или статический адрес
+```
+
+Также через Cloud-Init задаются hostname, DNS и другие параметры первого запуска при необходимости.
+
+Пароль `ops` нужен для входа через Proxmox serial console. Несмотря на наличие системного пароля, SSH по паролю остаётся запрещённым настройкой `sshd`.
+
+Публичный SSH-ключ конкретного устройства попадает в:
 
 ```text
 /home/ops/.ssh/authorized_keys
 ```
 
-с согласованным public key.
-
-Public key не является секретом и при необходимости может также храниться в Git. Private key в template и на Proxmox-хосте не хранится.
-
-Подробная модель описана в [`users-and-keys.md`](./users-and-keys.md).
-
-## 8. Cloud-Init
-
-Cloud-Init используется для первоначальной персонализации VM и bootstrap-подготовки template.
-
-После завершения builder-подготовки custom Cloud-Init удаляется, а для template задаются стандартные defaults:
+## 7. Временная зона и локаль
 
 ```text
-ciuser = ops
-console password = заданный при сборке
-SSH public key = заданный при сборке
-network = DHCP
-```
-
-Для конкретных рабочих клонов Cloud-Init может дополнительно задавать:
-
-- hostname;
-- другой password;
-- дополнительные SSH public keys;
-- IP/network configuration;
-- DNS и другие параметры первого запуска.
-
-Cloud-Init не должен превращаться в систему конфигурационного управления прикладными сервисами. SmartDNS, Docker, Gitea, monitoring и другие роли устанавливаются отдельными deploy/Ansible/script механизмами после клонирования.
-
-## 9. Временная зона и локаль
-
-Временная зона:
-
-```text
-Europe/Moscow
-```
-
-Основная локаль:
-
-```text
-en_US.UTF-8
+Timezone: Europe/Moscow
+Locale:   en_US.UTF-8
 ```
 
 Системное время синхронизируется штатными средствами Linux.
 
-## 10. Обновление системы при сборке
+## 8. Обновление при сборке
 
-При создании template выполняется:
+В builder-VM выполняется:
 
 ```text
 apt update
 apt full-upgrade
 ```
 
-После этого устанавливается согласованный базовый набор утилит.
+После этого устанавливается согласованный базовый набор пакетов.
 
 `unattended-upgrades` автоматически не включается.
 
-## 11. Swap
+## 9. Swap
 
-В base template отдельный swap-раздел или swap-файл **не создаётся**.
+В base template swap не создаётся. При необходимости он добавляется конкретной VM.
 
-При необходимости swap добавляется конкретной VM.
-
-## 12. Виртуальный диск
-
-Базовые параметры:
+## 10. Виртуальный диск
 
 ```text
 Controller: VirtIO SCSI Single
@@ -211,59 +152,47 @@ ssd:        enabled
 size:       16 GiB
 ```
 
-После клонирования диск можно увеличить под конкретную роль.
+## 11. QEMU Guest Agent
 
-## 13. QEMU Guest Agent
+`qemu-guest-agent` обязателен и включается внутри Debian и в конфигурации VM Proxmox.
 
-`qemu-guest-agent` обязательно входит в template и включается как внутри Debian, так и в конфигурации VM Proxmox.
-
-Он используется для:
-
-- корректного shutdown;
-- получения информации о гостевой системе;
-- IP-информации;
-- guest diagnostics;
-- поддерживаемых backup-операций.
-
-## 14. Serial console
-
-Template должен иметь рабочую serial console:
+## 12. Serial console
 
 ```text
 serial0: socket
 vga: serial0
 ```
 
-Внутри гостя должен работать `serial-getty@ttyS0.service`.
+Внутри гостя должен быть включён `serial-getty@ttyS0.service`.
 
-Console является аварийным каналом управления VM и использует вход `ops` + password.
+После задания `cipassword` конкретному клону console login выполняется как:
 
-## 15. Очистка перед template
+```text
+ops + password
+```
 
-Перед финальным shutdown и `qm template` очищаются machine-specific и временные данные:
+## 13. Очистка перед template
+
+Перед финальным shutdown очищаются:
 
 - Cloud-Init state;
 - `/etc/machine-id`;
 - SSH host keys;
-- DHCP lease/state;
+- DHCP/network state;
 - random seed;
 - APT cache/lists;
 - временные файлы;
-- builder artifacts;
-- build journal/logs;
-- shell history процесса сборки.
+- build artifacts и build logs;
+- shell history;
+- `/home/ops/.ssh`.
 
-При первом запуске клона должны сформироваться собственные machine-id и SSH host keys.
+Клон должен сформировать собственные machine-id и SSH host keys.
 
-## 16. Shell history
+## 14. Shell history и MOTD
 
-Для административных пользователей включаются timestamps команд и увеличенный разумный history size через `/etc/profile.d/`.
+Через `/etc/profile.d/` включаются timestamps истории и увеличенный history size.
 
-История не должна использоваться для хранения секретов.
-
-## 17. MOTD
-
-Template получает короткий нейтральный MOTD:
+MOTD:
 
 ```text
 Managed VM
@@ -272,69 +201,47 @@ Infrastructure: zsergeyru/proxmox
 Do not store secrets in Git.
 ```
 
-## 18. Информация о происхождении template
-
-В template создаётся:
+## 15. Информация о template
 
 ```text
 /etc/vm-template-info
 ```
 
-с содержимым вида:
+содержит:
 
 ```text
 Template: tpl-debian13
 Template-Version: 2
 OS: Debian 13
 Source: zsergeyru/proxmox
-Build-Date: <дата фактической сборки>
+Build-Date: <дата сборки>
 ```
 
-Версию повышаем, когда меняется значимая базовая политика или состав образа.
+## 16. Backup
 
-## 19. Структура файлов сервисов
+На первом этапе:
 
-Template не создаёт заранее каталоги будущих сервисов.
-
-Правила `/opt`, `/etc`, `/var/lib`, `/srv`, `/var/log`, `/var/cache`, `/run` и `/tmp` описаны в [`filesystem-layout.md`](./filesystem-layout.md).
-
-## 20. Backup
-
-На первом этапе backup остаётся простым:
-
-- полные VM backup средствами Proxmox;
+- полный VM backup средствами Proxmox;
 - `restic`/`rsync` доступны для файловых сценариев;
-- отдельный secret-backup пока не создаётся;
-- технические private SSH keys внутри VM попадают в полный backup этой VM.
+- отдельный secret-backup не создаётся;
+- technical private keys внутри VM попадают в её полный backup.
 
-Backup, содержащий secrets, считается чувствительным объектом и хранится только на доверенном storage.
+Backup с секретами считается чувствительным объектом.
 
-## 21. Что не входит в base template
+## 17. Что не входит в base template
 
-Не устанавливаем заранее:
+Не устанавливаются заранее Docker/Compose, SmartDNS, AdGuard Home, sing-box, VPN, специальные nftables/PBR rules, Gitea/Jenkins, базы данных, reverse proxy и service-specific users/directories.
 
-- Docker Engine / Docker Compose;
-- SmartDNS;
-- AdGuard Home;
-- `sing-box`;
-- AmneziaWG и другие VPN;
-- специальные `nftables`/policy-routing правила;
-- Gitea;
-- Jenkins;
-- базы данных;
-- reverse proxy;
-- пользователей и каталоги прикладных сервисов.
-
-## 22. Требования к `create-template.sh`
+## 18. Требования к `create-template.sh`
 
 Скрипт должен:
 
 1. не использовать `virt-customize`;
 2. не устанавливать `libguestfs-tools` на Proxmox;
-3. выполнять подготовку Debian внутри временной VM;
-4. не хранить private SSH keys, passwords или tokens в Git;
-5. интерактивно получать console password и SSH public key;
-6. оставлять SSH password authentication выключенным;
-7. задавать public key и console password через стандартные Proxmox Cloud-Init defaults template;
-8. после успешной подготовки преобразовывать VM в `tpl-debian13`;
-9. при опасной или неоднозначной ситуации останавливаться, а не удалять существующие VM/storage автоматически.
+3. готовить Debian внутри временной VM;
+4. не запрашивать и не сохранять credentials конкретного администратора;
+5. оставлять `ops` без рабочего пароля и без `authorized_keys` в самом template;
+6. сохранять `ciuser=ops` и DHCP как нейтральные defaults;
+7. ожидать, что `cipassword`, `sshkeys`, hostname/IP задаются конкретному клону через Cloud-Init;
+8. оставлять SSH password authentication выключенным;
+9. при ошибке не удалять существующие VM/storage автоматически.
