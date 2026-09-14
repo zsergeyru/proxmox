@@ -18,7 +18,7 @@ Template-Version: 2
 - [`build-policy.md`](./build-policy.md) — политика сборки и базовых настроек;
 - [`users-and-keys.md`](./users-and-keys.md) — пользователи, console access и SSH-ключи;
 - [`filesystem-layout.md`](./filesystem-layout.md) — файловая структура сервисов;
-- [`create-template.sh`](./create-template.sh) — фактическая автоматизированная сборка.
+- [`create-template.sh`](./create-template.sh) — автоматизированная сборка.
 
 ## Что делает скрипт
 
@@ -42,17 +42,15 @@ shutdown
         ↓
 удаление builder-only Cloud-Init
         ↓
-настройка стандартного Cloud-Init:
-ops + console password + SSH public key + DHCP
+стандартный Cloud-Init для клонов
+ciuser=ops + DHCP
         ↓
 qm template
         ↓
 tpl-debian13
 ```
 
-Скрипт проверяет SHA-512 образа по официальному `SHA512SUMS` Debian.
-
-При ошибке builder-VM **не удаляется автоматически**, чтобы можно было проверить console, Cloud-Init и логи. Существующий VMID `9000` скрипт никогда не перезаписывает.
+Template **не содержит** личного SSH public key и **не содержит рабочего пароля `ops`**. Оба значения задаются конкретной VM через Cloud-Init после клонирования.
 
 ## Базовые параметры
 
@@ -72,10 +70,10 @@ tpl-debian13
 | QEMU Guest Agent | да |
 | Serial console | да |
 | Admin user | `ops` |
-| Console login | `ops` + пароль |
 | Root SSH | запрещён |
 | Password SSH | запрещён |
-| SSH | public key |
+| Console password | задаётся каждому клону через Cloud-Init |
+| SSH public key | задаётся каждому клону через Cloud-Init |
 | Timezone | `Europe/Moscow` |
 | Locale | `en_US.UTF-8` |
 | Swap | не создаётся |
@@ -83,18 +81,16 @@ tpl-debian13
 
 ## Доступ к клонам
 
-В версии 2 шаблон получает два заранее настроенных способа доступа:
+После создания Full Clone для конкретной VM через Cloud-Init задаются:
 
 ```text
-Proxmox serial console
-→ ops + password
-
-SSH
-→ ops + private key на компьютере
-→ public key в Cloud-Init template
+User: ops
+Password: пароль для локальной/Proxmox console
+SSH public key: ключ нужного административного устройства
+Network: DHCP или статический IP
 ```
 
-Пароль используется для локальной/Proxmox-консоли, но парольный SSH остаётся запрещённым:
+Пароль нужен для console login, но SSH по паролю остаётся запрещённым:
 
 ```text
 PermitRootLogin no
@@ -103,17 +99,18 @@ KbdInteractiveAuthentication no
 PubkeyAuthentication yes
 ```
 
-Во время сборки скрипт интерактивно запрашивает:
+То есть итоговая модель:
 
-1. SSH public key администратора;
-2. пароль `ops` для console login;
-3. повтор пароля.
+```text
+Proxmox serial console
+→ ops + password конкретной VM
 
-Пароль и private SSH key **не хранятся в Git**.
+SSH
+→ ops + private key на компьютере
+→ public key передан VM через Cloud-Init
+```
 
-Public key не является секретом. Скрипт записывает его в стандартные Cloud-Init параметры template, поэтому обычные клоны наследуют этот ключ автоматически.
-
-Console password также становится Cloud-Init default template. Поэтому клоны по умолчанию получают один и тот же console password. При необходимости его можно заменить на конкретной VM через Cloud-Init.
+Сам template остаётся без персональных credentials.
 
 ## Требования перед запуском
 
@@ -124,22 +121,15 @@ qm
 pvesm
 sha512sum
 curl или wget
-mktemp
 ```
 
-Storage `local` должен поддерживать content type **Snippets**, потому что custom Cloud-Init нужен только на время сборки builder-VM.
-
-Если `Snippets` выключен:
+Storage `local` должен поддерживать content type **Snippets**:
 
 ```text
 Datacenter → Storage → local → Edit → Content → Snippets
 ```
 
-Скрипт сам не меняет конфигурацию storage.
-
 VMID `9000` должен быть свободен.
-
-Перед сборкой необходимо иметь SSH key pair на административном компьютере. В скрипт вставляется только содержимое файла `.pub`.
 
 ## Запуск
 
@@ -149,9 +139,7 @@ chmod +x create-template.sh
 sudo ./create-template.sh
 ```
 
-Скрипт попросит public key и console password, после чего выполнит сборку.
-
-По умолчанию используются:
+По умолчанию:
 
 ```text
 VMID=9000
@@ -161,17 +149,9 @@ BRIDGE=vmbr0
 DISK_SIZE=16G
 ```
 
-При необходимости значения можно переопределить без изменения скрипта:
-
-```bash
-DISK_STORAGE=local-lvm BRIDGE=vmbr0 ./create-template.sh
-```
-
-URL cloud image тоже можно переопределить через `IMAGE_URL` и `CHECKSUM_URL`, но штатный сценарий использует latest Debian 13 Trixie genericcloud image.
+При необходимости значения переопределяются переменными окружения.
 
 ## Базовые пакеты
-
-В template устанавливаются:
 
 ```text
 qemu-guest-agent
@@ -223,23 +203,13 @@ adm
 sudo
 ```
 
-Обычное администрирование:
+В самом template пароль `ops` заблокирован. Cloud-Init конкретного клона задаёт рабочий пароль и SSH public keys.
 
-```text
-SSH → ops → sudo
-```
-
-Аварийный доступ без сети:
-
-```text
-Proxmox serial console → ops → password → sudo
-```
-
-`root` как системная учётная запись Debian сохраняется, но прямой SSH-login root запрещён. Основной console login также выполняется через `ops`, а не через root.
+`root` как системная учётная запись Debian сохраняется, но прямой SSH-login root запрещён.
 
 ## Очистка перед template
 
-Перед `qm template` внутри builder выполняется очистка:
+Перед `qm template` очищаются:
 
 - Cloud-Init state;
 - machine-id;
@@ -249,38 +219,27 @@ Proxmox serial console → ops → password → sudo
 - APT cache/lists;
 - временные файлы;
 - journal/build logs;
-- shell history процесса сборки.
+- shell history;
+- `.ssh` пользователя `ops`.
 
-Каждый клон должен сформировать собственные machine-id и SSH host keys.
+Каждый клон формирует собственные machine-id и SSH host keys.
 
 ## Проверка после сборки
 
-Перед использованием template для инфраструктуры рекомендуется создать один тестовый **Full Clone** и проверить:
+Создать тестовый **Full Clone**, задать ему через Cloud-Init пароль и SSH public key, затем проверить:
 
 1. загрузку VM;
-2. получение DHCP;
-3. создание нового machine-id;
-4. создание уникальных SSH host keys;
+2. получение сети;
+3. новый machine-id;
+4. уникальные SSH host keys;
 5. вход `ops` через Proxmox console по паролю;
-6. вход `ops` по SSH-ключу без пароля;
-7. работу `sudo`;
+6. вход `ops` по SSH-ключу;
+7. `sudo`;
 8. QEMU Guest Agent;
 9. serial console;
-10. корректный размер root filesystem;
-11. содержимое `/etc/vm-template-info`.
-
-После этой проверки template можно использовать для `109-network-gateway`, `301-ai-control` и других Debian VM.
+10. размер root filesystem;
+11. `/etc/vm-template-info`.
 
 ## Что не входит в base template
 
-Не устанавливаются заранее:
-
-- Docker Engine / Compose;
-- SmartDNS / AdGuard Home;
-- sing-box;
-- AmneziaWG и другие VPN;
-- специальные nftables/PBR rules;
-- Gitea/Jenkins;
-- базы данных;
-- reverse proxy;
-- service-specific users и directories.
+Не устанавливаются заранее Docker/Compose, SmartDNS, AdGuard Home, sing-box, VPN, специальные nftables/PBR rules, Gitea/Jenkins, базы данных, reverse proxy и service-specific users/directories.
