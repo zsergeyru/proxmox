@@ -1,6 +1,6 @@
 # Базовый шаблон Debian 13 для Proxmox
 
-Статус: **Template-Version 4 реализована в каноническом builder-скрипте и прошла GitHub syntax validation. Изменения v4 подтверждены вручную на тестовой VM: обычное `amd64` ядро даёт framebuffer `1280x800`, VGA/noVNC console работает с нормальным размером шрифта, `tty1` autologin `ops` работает. Требуется чистая сборка VMID 9000 и финальная проверка нового Full Clone.**
+Статус: **Template-Version 4 реализована в каноническом builder-скрипте. GitHub CI проверяет внешний Bash, встроенный Cloud-Init YAML и оба guest-скрипта. Изменения v4 подтверждены вручную на тестовой VM: обычное `amd64` ядро создаёт framebuffer, VGA/noVNC console работает с нормальным размером шрифта, `tty1` autologin `ops` работает. Требуется чистая сборка VMID 9000 и финальная проверка нового Full Clone.**
 
 ```text
 VMID: 9000
@@ -50,10 +50,12 @@ verification reboot
 проверка:
 обычный *-amd64 kernel
 не cloud kernel
-framebuffer 1280x800
+fb0 существует и сообщает непустое WIDTH,HEIGHT
 QEMU Guest Agent
 getty@tty1
 serial-getty@ttyS0
+SSH effective policy
+locked ops/root passwords
         ↓
 final cleanup
 machine-id/SSH host keys/cloud-init state/logs и прочее
@@ -81,6 +83,8 @@ uname -r → 6.12.107+deb13-amd64
 
 и Proxmox Console стала визуально такой же, как обычная Debian VM с мелким консольным шрифтом. Поэтому v4 устанавливает `linux-image-amd64`, удаляет cloud-kernel и проверяет результат реальной перезагрузкой builder.
 
+Скрипт не требует именно `1280x800`: он проверяет наличие валидного framebuffer и выводит реально обнаруженное разрешение в итоговом отчёте. На текущем PVE фактическое значение — `1280x800`.
+
 ## Базовые параметры
 
 | Параметр | Значение |
@@ -102,10 +106,11 @@ uname -r → 6.12.107+deb13-amd64
 | Proxmox display | `vga: std` |
 | Main console | noVNC/VGA → `tty1` → autologin `ops` |
 | Console font | Fixed 8x16 |
-| Verified framebuffer | 1280x800 |
+| Framebuffer | обязателен; текущий PVE даёт 1280x800 |
 | Serial fallback | `serial0: socket` → `ttyS0` → autologin `ops` |
 | Admin user | `ops` |
 | `ops` password | locked |
+| `root` password | locked |
 | Root SSH | запрещён |
 | Password SSH | запрещён |
 | SSH public key | задаётся клону до первого старта |
@@ -132,6 +137,8 @@ KbdInteractiveAuthentication no
 PermitEmptyPasswords no
 PubkeyAuthentication yes
 ```
+
+Builder проверяет не только `sshd -t`, но и эффективные значения через `sshd -T`.
 
 Основная локальная console:
 
@@ -256,7 +263,6 @@ tmux
 bash-completion
 tar
 rsync
-restic
 zstd
 unzip
 acl
@@ -267,6 +273,8 @@ net-tools
 cron
 logrotate
 ```
+
+`wget` и `net-tools` намеренно остаются в base template: они небольшие и полезны при ручной диагностике. `restic` удалён из base template и должен устанавливаться только на VM, где реально нужен guest-level backup.
 
 Docker и прикладные сервисы в base template не устанавливаются.
 
@@ -288,6 +296,34 @@ Docker и прикладные сервисы в base template не устана
 - builder scripts.
 
 После удаления временного `cicustom` выполняется `qm cloudinit update` и проверяется отсутствие builder-only user-data.
+
+## Финальные проверки builder
+
+После `qm template` скрипт дополнительно проверяет:
+
+```text
+template: 1
+protection: 1
+agent: 1
+vga: std
+serial0: socket
+ciuser: ops
+ciupgrade: 0
+ipconfig0: ip=dhcp
+cicustom: отсутствует
+```
+
+## CI канонического скрипта
+
+GitHub Actions публичного `proxmox-bootstrap` проверяет:
+
+- синтаксис внешнего `create-template.sh`;
+- встроенный Cloud-Init как YAML;
+- синтаксис встроенного `template-bootstrap`;
+- синтаксис встроенного `template-finalize`;
+- whitespace errors.
+
+Эта CI-проверка дополняет, но не заменяет clean build на реальном PVE.
 
 ## Защита template
 
@@ -348,11 +384,11 @@ TEMPLATE_VERSION=4
 После чистой сборки создать новый **Full Clone** и проверить:
 
 1. `VM → Console` открывает VGA/noVNC и автоматически даёт shell `ops` на `tty1`;
-2. размер текста соответствует `Fixed 8x16`, framebuffer `1280x800`;
+2. применяется `Fixed 8x16`, `fb0` существует и сообщает валидное разрешение; текущее ожидаемое на нашем PVE — `1280x800`;
 3. `uname -r` не содержит `cloud`;
 4. `serial0` остаётся рабочим резервным каналом;
-5. пароль `ops` locked, `sudo` без пароля;
-6. SSH работает только по public key;
+5. пароли `ops` и `root` locked, `sudo` без пароля;
+6. SSH работает только по public key и эффективная SSH policy соответствует требованиям;
 7. QEMU Guest Agent отвечает сразу после boot и после reboot;
 8. machine-id и SSH host keys уникальны;
 9. filesystem увеличивается после resize;
@@ -360,4 +396,4 @@ TEMPLATE_VERSION=4
 11. `/etc/vm-template-info` содержит `Template-Version: 4` и правильный SHA-512;
 12. template имеет `protection=1`, клон — `protection=0`;
 13. `lvs ... origin` подтверждает Full Clone;
-14. config template содержит `vga: std`, `serial0: socket`, `ciupgrade: 0`.
+14. config template содержит `agent: 1`, `vga: std`, `serial0: socket`, `ciuser: ops`, `ciupgrade: 0`, `ipconfig0: ip=dhcp` и не содержит `cicustom`.
