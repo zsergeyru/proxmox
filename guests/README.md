@@ -109,7 +109,18 @@ management:
     port: 22
 ```
 
-`ops` используется и человеком, и Ansible/AI-управлением; разграничение выполняется отдельными SSH-ключами и sudo-политиками. Отдельный `infra-agent` сейчас не вводится. Если позднее появится практическая необходимость разделить человеческую и машинную учётные записи, это оформляется отдельным решением.
+`ops` используется и человеком, и Ansible/AI-управлением; разграничение выполняется отдельными SSH-ключами и sudo-политиками. Отдельный `infra-agent` сейчас не вводится.
+
+Целевой `301-ai-control` создаёт свою infrastructure identity при bootstrap:
+
+```text
+/home/ops/.ssh/ai_control_ed25519
+/home/ops/.ssh/ai_control_ed25519.pub
+```
+
+Именно содержимое `.pub` Hermes передаёт обычным новым Debian VM через Cloud-Init. Private key остаётся только в `301`.
+
+GitHub Deploy Key `github_proxmox_ed25519` — отдельная identity и **не используется** для доступа к гостям.
 
 Пароли, токены и private keys в `guest.yaml` не хранятся.
 
@@ -153,8 +164,8 @@ guests/301-ai-control/rootfs/opt/ai-control/...
 Штатная схема:
 
 ```text
-Proxmox MCP
-→ создание и lifecycle VM/LXC
+Proximo в 301-ai-control
+→ создание и lifecycle VM/LXC на уровне Proxmox
 
 Ansible на 311-dev-services
 → повторяемая настройка ОС и применение rootfs по SSH
@@ -169,13 +180,18 @@ Semaphore
 Для создания обычной Debian VM из `tpl-debian13` порядок уровня Proxmox должен быть таким:
 
 ```text
-Full Clone
+Full Clone from 9000
+→ создать/поместить guest в managed pool
 → protection=0, если guest.yaml явно не требует true
 → CPU/RAM/disk/network
-→ ciuser=ops + sshkeys
-→ qm cloudinit update
+→ ciuser=ops
+→ sshkeys=<301:/home/ops/.ssh/ai_control_ed25519.pub>
+→ Cloud-Init update
 → start
+→ QEMU Agent/SSH/health check
 ```
+
+Base template `9000` не содержит ключей. `301` не передаёт private key новой VM — только соответствующий public key.
 
 Для полностью принадлежащих проекту каталогов (`/opt/<service>/`) допустима синхронизация с удалением отсутствующих файлов. В общих системных каталогах (`/etc`, `/usr/local/bin`, `/etc/systemd/system`) файлы устанавливаются и удаляются только по конкретным путям.
 
@@ -189,7 +205,9 @@ Persistent data, Docker volumes, базы данных, записи камер,
 
 - `100-haos` — действующая production VM Home Assistant и сохраняет исторический VMID `100`;
 - `201-ha-main` — только возможная будущая цель миграции и не создаётся ради унификации;
+- `301-ai-control` — control plane и не должен автоматически попадать в собственную обычную write-зону;
 - `320-ai-control` — временный bootstrap до проверки `301-ai-control`;
+- `9000 tpl-debian13` — protected base template, разрешён как источник clone, но не как managed guest;
 - `501-frigate` может не иметь полного manifest до выбора VM/LXC.
 
 ## Общие правила
