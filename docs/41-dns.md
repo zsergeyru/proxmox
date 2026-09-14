@@ -149,6 +149,6 @@ mDNS через VPN не считается обязательной часть�
 
 ## Связанные документы
 
-- [`network.md`](network.md) — IPv4/VLAN/VPN-архитектура.
-- [`ipv6.md`](ipv6.md) — dual stack и IPv6.
+- [`40-network.md`](40-network.md) — IPv4/VLAN/VPN-архитектура.
+- [`42-ipv6.md`](42-ipv6.md) — dual stack и IPv6.
 - [`../guests/109-network-gateway/README.md`](../guests/109-network-gateway/README.md) — реализация DNS и маршрутизации на сетевом шлюзе.
