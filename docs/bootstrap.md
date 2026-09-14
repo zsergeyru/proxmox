@@ -26,6 +26,26 @@ zsergeyru/proxmox-bootstrap
 
 Скрипты не дублируются между репозиториями.
 
+## Zero-day recovery chain
+
+На совершенно новом компьютере исходной точкой считаются только установленный Proxmox VE и доступ в интернет к публичному bootstrap-репозиторию.
+
+Каноническая последовательность:
+
+```text
+чистый Proxmox VE
+→ create-template.sh
+→ VM 9000 tpl-debian13
+→ bootstrap-ai-control.sh
+→ VM 301 ai-control
+→ Hermes + Dashboard + Proximo + SSH identities
+→ оператор регистрирует показанный GitHub Deploy Key
+→ Hermes клонирует приватный zsergeyru/proxmox
+→ дальше инфраструктура восстанавливается/разворачивается из Git
+```
+
+Приватный Git **не нужен до тех пор, пока AI уже не развёрнут**. GitHub PAT в zero-day сценарии не используется.
+
 ## Почему отдельный репозиторий
 
 GitHub не позволяет сделать отдельный файл публичным внутри приватного репозитория. Поэтому для файлов, которые PVE должен скачивать напрямую через HTTPS без авторизации, используется отдельный public repository.
@@ -34,7 +54,7 @@ GitHub не позволяет сделать отдельный файл пуб
 
 ## Debian 13 template builder
 
-Единственный исходный файл builder-скрипта:
+Канонический builder-скрипт:
 
 ```text
 zsergeyru/proxmox-bootstrap/create-template.sh
@@ -54,41 +74,184 @@ chmod +x /root/create-template.sh
 
 GitHub token в этом сценарии не нужен.
 
-## Правило изменения скрипта
+## 301 AI Control bootstrap
 
-При изменении template builder необходимо:
+После появления `9000 tpl-debian13` запускается второй публичный скрипт:
 
-1. изменить `create-template.sh` непосредственно в `zsergeyru/proxmox-bootstrap`;
+```text
+zsergeyru/proxmox-bootstrap/bootstrap-ai-control.sh
+```
+
+Прямая загрузка:
+
+```bash
+curl -fsSL \
+  https://raw.githubusercontent.com/zsergeyru/proxmox-bootstrap/main/bootstrap-ai-control.sh \
+  -o /root/bootstrap-ai-control.sh
+
+bash -n /root/bootstrap-ai-control.sh
+chmod +x /root/bootstrap-ai-control.sh
+/root/bootstrap-ai-control.sh
+```
+
+По умолчанию он создаёт:
+
+```text
+VMID: 301
+Name: ai-control
+Template: Full Clone from 9000
+CPU: 2 cores
+RAM: 4096 MiB
+Disk: 24 GiB
+IPv4: 192.168.3.1/16
+Gateway: 192.168.1.1
+Dashboard: tcp/9119
+```
+
+Параметры можно переопределять environment variables самого bootstrap-скрипта.
+
+### Почему bootstrap 301 не требует SSH
+
+На момент создания `301` SSH identity control plane ещё не существует. Поэтому первичная настройка выполняется через QEMU Guest Agent:
+
+```text
+PVE root
+→ qm guest exec
+→ 301
+→ установить Hermes/Proximo
+→ создать ключи
+→ настроить Dashboard
+```
+
+После этого прямой SSH становится штатным bootstrap/diagnostic/emergency каналом уже для следующих гостей.
+
+### Что создаётся внутри 301
+
+Две разные SSH identity:
+
+```text
+~/.ssh/ai_control_ed25519
+~/.ssh/ai_control_ed25519.pub
+→ вход ops в будущие managed Debian VM
+
+~/.ssh/github_proxmox_ed25519
+~/.ssh/github_proxmox_ed25519.pub
+→ только private repo zsergeyru/proxmox
+```
+
+Private keys никогда не выводятся. GitHub public key показывается оператору в конце скрипта.
+
+### GitHub после AI, а не до него
+
+Оператор вручную добавляет показанный `.pub` в:
+
+```text
+zsergeyru/proxmox
+→ Settings
+→ Deploy keys
+```
+
+Если Hermes должен делать `commit/push`, включается `Allow write access`.
+
+После этого Hermes может выполнить:
+
+```bash
+git clone git@github.com:zsergeyru/proxmox.git ~/proxmox
+```
+
+До регистрации Deploy Key не требуется ни PAT, ни personal SSH key пользователя.
+
+### Proximo
+
+Целевой `301` использует **Proximo** как канонический Proxmox MCP.
+
+Bootstrap создаёт отдельные:
+
+```text
+Proxmox user:  proximo@pve
+API token:     proximo@pve!ai-control
+resource pool: managed
+```
+
+Token создаётся с privilege separation. Его secret показывается Proxmox только один раз и напрямую передаётся через QEMU Guest Agent в `301`; постоянной secret-копии на PVE bootstrap не создаёт.
+
+В Hermes публикуется сокращённая MCP surface:
+
+```text
+PROXIMO_TOOLSETS=pve.guests
+```
+
+При этом hard boundary остаётся на уровне Proxmox ACL: AI control управляет managed guests, но не получает штатных прав на PVE host network, storage definitions, IAM/ACL, SDN, repositories/certificates и reboot/shutdown гипервизора.
+
+### Hermes Web Dashboard
+
+Используется встроенный Hermes Dashboard:
+
+```text
+http://192.168.3.1:9119/
+```
+
+Bootstrap создаёт случайный пароль `admin`, сохраняет только его scrypt hash и stable signing secret, а исходный пароль показывает один раз. Через Dashboard оператор затем задаёт model/provider credentials.
+
+Это единственный обязательный секретный шаг, который новый сервер не может выполнить самостоятельно: провайдер модели должен быть авторизован человеком.
+
+### Повторный запуск
+
+`bootstrap-ai-control.sh` спроектирован как продолжение bootstrap, а не destructive rebuild:
+
+- существующую `301` с правильным именем не удаляет и не клонирует заново;
+- существующие SSH keys не меняет;
+- Hermes повторно не переустанавливает;
+- Dashboard password повторно не генерирует;
+- если Proxmox token существует, а его secret-файл внутри `301` потерян, token пересоздаётся, потому что старый secret не восстановим.
+
+Если VMID `301` занят другим объектом, скрипт прекращает работу.
+
+## Правило изменения скриптов
+
+При изменении любого публичного bootstrap-скрипта необходимо:
+
+1. изменить его непосредственно в `zsergeyru/proxmox-bootstrap`;
 2. убедиться, что файл не содержит секретов;
 3. дождаться успешной проверки GitHub Actions;
 4. обновить соответствующую документацию в приватном `zsergeyru/proxmox`;
-5. использовать тот же raw URL для запуска на PVE.
+5. выполнить реальный clean/live test для сценариев, которые CI не способен проверить на PVE.
 
-Приватная executable-копия специально не хранится.
+Приватные executable-копии специально не хранятся.
 
 ## Проверка в GitHub Actions
 
 CI публичного репозитория проверяет:
 
-- внешний `create-template.sh` через `bash -n`;
-- встроенный Cloud-Init как YAML;
+- `create-template.sh` через `bash -n`;
+- `bootstrap-ai-control.sh` через `bash -n`;
+- встроенный в template builder Cloud-Init как YAML;
 - встроенный `/usr/local/sbin/template-bootstrap` через `bash -n`;
 - встроенный `/usr/local/sbin/template-finalize` через `bash -n`;
 - whitespace errors.
 
 CI ловит ошибки структуры heredoc/YAML и синтаксиса вложенных guest-скриптов, но не заменяет реальный clean build на PVE.
 
+Для `bootstrap-ai-control.sh` отдельно требуется первый live-test цепочки:
+
+```text
+Full Clone 9000 → 301
+→ QGA bootstrap
+→ Hermes Dashboard
+→ Proximo doctor
+→ Deploy Key registration
+→ Git clone
+→ Proximo Full Clone test guest + Cloud-Init SSH public key
+→ SSH from 301 to test guest
+```
+
 ## Security boundary
 
 `proxmox-bootstrap` публичный. В него запрещено помещать пароли/PIN, PAT/API tokens, приватные SSH/VPN/TLS ключи, реальные `.env`, credentials сервисов и иные нежелательные для публикации данные.
 
-## Текущий статус
+Секреты, которые создаются во время bootstrap (`Proximo token`, private SSH keys, Dashboard auth secret), генерируются на месте и не находятся в исходном файле.
 
-Публично опубликован один builder-скрипт:
-
-```text
-create-template.sh
-```
+## Текущий статус template
 
 Текущая версия по умолчанию создаёт:
 
@@ -150,8 +313,6 @@ regular amd64 kernel → fb0 = 1280,800
 Конкретное разрешение framebuffer не зашито как требование. На текущем PVE экспериментально получено `1280,800`; builder выводит фактическое значение в итоговом отчёте.
 
 После создания template дополнительно проверяются `template=1`, `protection=1`, `agent=1`, `vga=std`, `serial0=socket`, `ciuser=ops`, `ciupgrade=0`, DHCP и отсутствие builder-only `cicustom`.
-
-Таким образом, проверяется не только наличие пакетов на диске, но и фактическая загрузка VM с нужным ядром и console stack.
 
 ### Protection при клонировании
 
