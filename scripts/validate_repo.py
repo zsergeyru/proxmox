@@ -165,6 +165,8 @@ def validate_guest_manifests() -> None:
             fail(f"{rel}: type must be one of {sorted(ALLOWED_TYPES)}, got {data['type']!r}")
         if data["state"] not in ALLOWED_STATES:
             fail(f"{rel}: state must be one of {sorted(ALLOWED_STATES)}, got {data['state']!r}")
+        if "protection" in data and not isinstance(data["protection"], bool):
+            fail(f"{rel}: protection must be a boolean when specified")
 
         if isinstance(vmid, int):
             if vmid in seen_vmids:
