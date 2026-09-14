@@ -71,7 +71,7 @@ PRIVATE zsergeyru/proxmox
 │   └── known_hosts
 └── secrets/
     ├── host-deploy.token
-    └── proximo-ai-control.token
+    └── ai-agent-infra.token
 ```
 
 Назначение:
@@ -96,8 +96,8 @@ ssh/known_hosts
 secrets/host-deploy.token
 → token id + secret deployer@pve!host-deploy
 
-secrets/proximo-ai-control.token
-→ token id + secret proximo@pve!ai-control
+secrets/ai-agent-infra.token
+→ token id + secret ai-agent@pve!infra
 ```
 
 ### Почему оба token secrets остаются на PVE
@@ -108,20 +108,20 @@ secrets/proximo-ai-control.token
 host-deploy.token
 → нужен обычному PVE deployer
 
-proximo-ai-control.token
-→ recovery/source copy для runtime Proximo credential
+ai-agent-infra.token
+→ recovery/source copy для AI infrastructure credential
 ```
 
-При создании/восстановлении `301-ai-control` Proximo credential копируется из:
+При создании/восстановлении `301-ai-control` рабочая копия credential `ai-agent@pve!infra` передаётся из:
 
 ```text
-/etc/proxmox-deployer/secrets/proximo-ai-control.token
+/etc/proxmox-deployer/secrets/ai-agent-infra.token
 ```
 
 в runtime-файл внутри `301`:
 
 ```text
-/etc/ai-control/secrets/proximo-pve-token
+/etc/ai-control/secrets/proxmox-infra.token
 ```
 
 После передачи host-side copy **не удаляется**.
@@ -132,7 +132,7 @@ proximo-ai-control.token
 
 ## 3. Права на `/etc/proxmox-deployer`
 
-Нужно разделять обычный host deploy credential и recovery credential Proximo.
+Нужно разделять обычный host deploy credential и recovery credential AI control.
 
 Рекомендуемая модель:
 
@@ -148,12 +148,12 @@ host-deploy.token
 → root:pvedeploy
 → mode 0640
 
-proximo-ai-control.token
+ai-agent-infra.token
 → root:root
 → mode 0600
 ```
 
-Таким образом `pvedeploy` может читать только credential, необходимый `deploy-guest`, но не получает Proximo token.
+Таким образом `pvedeploy` может читать только credential, необходимый `deploy-guest`, но не получает AI infrastructure token.
 
 SSH identity PVE принадлежит runtime, выполняющему private Git fetch:
 
@@ -348,7 +348,7 @@ YYYYMMDD-HHMMSS/
 
 ```text
 /etc/proxmox-deployer/secrets/host-deploy.token
-/etc/proxmox-deployer/secrets/proximo-ai-control.token
+/etc/proxmox-deployer/secrets/ai-agent-infra.token
 /etc/proxmox-deployer/ssh/github_proxmox_repo_ed25519
 /etc/proxmox-deployer/ssh/github_proxmox_repo_ed25519.pub
 /etc/proxmox-deployer/ssh/config
@@ -364,10 +364,10 @@ Host-side backup secrets является чувствительным объе�
 Backup `301-ai-control` также чувствителен, потому что содержит runtime copy:
 
 ```text
-/etc/ai-control/secrets/proximo-pve-token
+/etc/ai-control/secrets/proxmox-infra.token
 ```
 
-Но backup `301` **не заменяет** host-side backup `proximo-ai-control.token`.
+Но backup `301` **не заменяет** host-side backup `ai-agent-infra.token`.
 
 Каноническая модель:
 
@@ -379,7 +379,7 @@ PVE secret backup
 → runtime/control-plane recovery
 ```
 
-При потере `301`, но сохранённом PVE secret, тот же Proximo credential можно повторно передать в новую VM.
+При потере `301`, но сохранённом PVE secret, тот же credential `ai-agent@pve!infra` можно повторно передать в новую VM.
 
 ---
 
@@ -453,7 +453,7 @@ Builder/deployer не копируются в public repo как второй so
 │       │   └── known_hosts
 │       └── secrets/
 │           ├── host-deploy.token
-│           └── proximo-ai-control.token
+│           └── ai-agent-infra.token
 │
 ├── var/
 │   ├── lib/
@@ -497,4 +497,4 @@ Builder/deployer не копируются в public repo как второй so
 
 И отдельно:
 
-> `deployer@pve!host-deploy` и `proximo@pve!ai-control` имеют разные роли и права, но **оба token secrets постоянно сохраняются на PVE** и входят в защищённый infrastructure backup.
+> `deployer@pve!host-deploy` и `ai-agent@pve!infra` имеют разные роли и права, но **оба token secrets постоянно сохраняются на PVE** и входят в защищённый infrastructure backup.
