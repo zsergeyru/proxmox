@@ -27,6 +27,7 @@ jobs:
         run: |
           cp scripts/standardize_proximo.py /tmp/standardize_proximo.py
           rm scripts/standardize_proximo.py
+          sed -i 's/ai-agent@pve!proximo/proximo@pve!ai-control/g' docs/20-pve-initialization.md
           python /tmp/standardize_proximo.py
 
       - name: Install validation dependency
