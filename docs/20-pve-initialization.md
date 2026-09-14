@@ -50,7 +50,7 @@ PVE
 ├── shallow read-only checkout zsergeyru/proxmox
 ├── resource pool managed
 ├── PVE identity deployer@pve!host-deploy
-├── PVE identity ai-agent@pve!proximo
+├── PVE identity proximo@pve!ai-control
 ├── локальное защищённое хранилище secrets
 ├── template 9000 tpl-debian13
 ├── private deploy tooling из zsergeyru/proxmox
@@ -225,7 +225,7 @@ managed
 
 # 7. Proxmox identities — принято
 
-Имена отражают **актора/роль**, а не название инструмента.
+Для host deployer и Proximo используются разные service identities и разные credentials.
 
 ## Host deployer
 
@@ -245,16 +245,14 @@ token: deployer@pve!host-deploy
 - lifecycle, необходимый для deploy/verification;
 - работа без `301` и без AI.
 
-## AI actor
+## Proximo MCP
 
 ```text
-user:  ai-agent@pve
-token: ai-agent@pve!proximo
+user:  proximo@pve
+token: proximo@pve!ai-control
 ```
 
-Актор — AI agent в `301-ai-control`.
-
-Инструмент доступа — Proximo MCP.
+Актор — Proximo (`proximo-proxmox`), которым пользуются разрешённые AI-агенты в `301-ai-control`.
 
 Назначение:
 
@@ -266,14 +264,14 @@ token: ai-agent@pve!proximo
 Naming:
 
 ```text
-ai-agent@pve
-→ кто действует
+proximo@pve
+→ отдельная service identity канонического Proximo MCP
 
-!proximo
-→ через какой credential/tool path действует
+!ai-control
+→ credential целевого AI control plane
 ```
 
-Если Proximo заменится, `ai-agent@pve` остаётся корректным; меняется только client/token при необходимости.
+Если в будущем Proximo будет заменён другим MCP, для нового backend создаётся отдельная identity/credential вместо неявного переиспользования существующей.
 
 ## Почему две identity
 
@@ -282,7 +280,7 @@ ai-agent@pve
 - host recovery/deploy не зависит от AI credential;
 - понятнее audit trail;
 - credentials можно независимо отозвать/ротировать;
-- права host deployer и runtime AI не обязаны совпадать.
+- права host deployer и runtime Proximo не обязаны совпадать.
 
 Не использовать ради удобства:
 
@@ -297,23 +295,14 @@ PVEAdmin на /
 
 # 8. Хранение secrets на PVE — принято
 
-Для простоты и удобного recovery **все infrastructure secrets, создаваемые bootstrap, постоянно хранятся на самом PVE**.
+PVE постоянно хранит только credentials, необходимые самому host-side bootstrap/deployer. Secret токена Proximo — отдельное исключение: Proxmox показывает его только при создании, после чего `create-ai-control-vm.sh` сразу передаёт credential внутрь `301` через QEMU Guest Agent и не оставляет отдельный plaintext-файл с этим secret на PVE.
 
-Не делаем специальную схему, при которой secret `ai-agent@pve!proximo` удаляется с PVE после передачи в `301`.
-
-Целевой каталог:
-
-```text
-/etc/proxmox-deployer/secrets/
-```
-
-Пример:
+Целевой host-side каталог:
 
 ```text
 /etc/proxmox-deployer/
 ├── secrets/
-│   ├── host-deploy.token
-│   └── ai-agent-proximo.token
+│   └── host-deploy.token
 └── ssh/
     ├── github_proxmox_repo_ed25519
     └── github_proxmox_repo_ed25519.pub
@@ -325,28 +314,33 @@ PVEAdmin на /
 host-deploy.token
 → secret deployer@pve!host-deploy
 
-ai-agent-proximo.token
-→ secret ai-agent@pve!proximo
-
 github_proxmox_repo_ed25519
 → private read-only GitHub Deploy Key PVE
 ```
 
+Credential Proximo внутри `301`:
+
+```text
+/etc/ai-control/secrets/proximo-pve-token
+→ token id + secret для proximo@pve!ai-control
+
+/etc/ai-control/proximo/proximo.env
+→ параметры подключения Proximo к PVE
+```
+
 Правила:
 
-- каталог secrets доступен только root и явно нужному runtime;
-- token files — `0600`;
-- private SSH key — `0600`;
+- каталог host-side secrets доступен только root и явно нужному runtime;
+- token files и private SSH keys защищаются строгими правами;
 - перед созданием secret files использовать безопасный `umask 077`;
 - secrets не выводить повторно в обычные logs;
 - secrets не сохранять в `state.json`;
 - secrets никогда не помещать в Git;
-- bootstrap повторно использует существующий token secret, если он есть и соответствующий token существует;
-- потерянный secret требует явной ротации token, а не молчаливого создания нового.
+- существующий secret `host-deploy` переиспользуется, если token существует;
+- secret `proximo@pve!ai-control` не восстанавливается из PVE API: если `301` утрачен вместе с credential, требуется явная ротация Proximo token;
+- ротация Proximo не должна происходить молча и выполняется только явным recovery/rotation действием.
 
-`pvedeploy` должен иметь доступ только к тем secrets, которые нужны host-side deployer. AI token может храниться root-only и передаваться в `301` bootstrap tooling по необходимости.
-
-Преимущество выбранной схемы: PVE остаётся центральной recovery-точкой. При пересоздании `301` существующий `ai-agent@pve!proximo` можно передать новой VM без обязательной ротации.
+`pvedeploy` получает доступ только к host-side credential `deployer@pve!host-deploy`. Backup `301` считается чувствительным, потому что содержит Proximo token и другие private credentials AI control plane.
 
 ---
 
@@ -567,7 +561,7 @@ PVE INIT STATUS
 [OK] private repo checkout
 [OK] managed pool
 [OK] deployer@pve!host-deploy
-[OK] ai-agent@pve!proximo
+[OK] proximo@pve!ai-control
 [OK] secrets storage
 [OK] template 9000
 [OK] deploy-guest
@@ -646,7 +640,7 @@ init-pve.sh
 → зафиксировать repo commit SHA
 → создать managed pool
 → создать/проверить deployer@pve!host-deploy
-→ создать/проверить ai-agent@pve!proximo
+→ создать/проверить proximo@pve!ai-control
 → сохранить оба token secrets на PVE
 → запустить private create-template.sh
 → установить private deploy-guest tooling
@@ -656,7 +650,7 @@ init-pve.sh
 → READY
 ```
 
-При bootstrap `301` существующий secret `ai-agent@pve!proximo` передаётся из защищённого PVE storage в AI control plane. Копия на PVE остаётся.
+При bootstrap `301` существующий secret `proximo@pve!ai-control` передаётся из защищённого PVE storage в AI control plane. Копия на PVE остаётся.
 
 Все стадии должны быть идемпотентными.
 
@@ -692,7 +686,7 @@ pvedeploy (Linux)
 PVE deployer@pve!host-deploy
 → host-side guest deployment role
 
-PVE ai-agent@pve!proximo
+PVE proximo@pve!ai-control
 → AI runtime role через Proximo
 
 /etc/proxmox-deployer/secrets/

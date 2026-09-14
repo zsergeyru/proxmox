@@ -4,19 +4,17 @@
 
 ## Фактическое состояние 320
 
-На `320-ai-control` уже установлен:
+На `320-ai-control` установлен канонический MCP проекта:
 
 ```text
-gordcurrie/proxmox-mcp
+Proximo / proximo-proxmox
 ```
 
-Это **legacy/observed state текущей VM 320**, а не целевой выбор для нового `301-ai-control`.
-
-Переустанавливать работающий `320` только ради унификации не требуется. Он сохраняется до успешной проверки целевого control plane.
+`320` уже мигрирован на Proximo. Его MCP backend больше не отличается от целевого выбора для нового `301-ai-control`.
 
 ## Целевой 301
 
-Для `301-ai-control` канонический Proxmox MCP изменён на:
+Для `301-ai-control` используется тот же канонический MCP:
 
 ```text
 Proximo / proximo-proxmox
@@ -33,7 +31,7 @@ Hermes
 → managed guests
 ```
 
-Proximo в `301` ограничивается как минимум двумя уровнями:
+Proximo ограничивается как минимум двумя уровнями:
 
 ```text
 PROXIMO_TOOLSETS=pve.guests

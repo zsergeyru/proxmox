@@ -1,13 +1,13 @@
-# ADR 003 — Proxmox MCP для AI control
+# ADR 003 — Proximo MCP для AI control
 
 ## Статус
 
-**Обновлено.**
+**Актуально.**
 
-- `320-ai-control`: фактически установленный `gordcurrie/proxmox-mcp` остаётся legacy/observed state и не требует немедленной замены только ради унификации.
+- `320-ai-control`: уже переведён на **Proximo** (`proximo-proxmox`).
 - `301-ai-control`: целевой канонический MCP — **Proximo** (`proximo-proxmox`).
 
-То есть старый выбор не переносится автоматически в новую control-plane VM.
+Таким образом, для текущего bootstrap control plane и будущего основного control plane используется один и тот же Proximo MCP.
 
 ## Контекст
 
@@ -23,17 +23,17 @@
 - возможность уменьшить MCP tool surface;
 - audit trail для изменений.
 
-## Решение для 301
+## Каноническое решение
 
-Для `301-ai-control` используется:
+Для `320-ai-control` и `301-ai-control` используется:
 
 ```text
 Proximo / proximo-proxmox
 ```
 
-Установка выполняется zero-day bootstrap-скриптом из публичного `zsergeyru/proxmox-bootstrap`.
+Для целевого `301` установка выполняется zero-day bootstrap-скриптом из публичного `zsergeyru/proxmox-bootstrap`.
 
-Proximo запускается локально как stdio MCP-процесс Hermes. Отдельный HTTP MCP daemon для одного локального Hermes не нужен:
+Целевая локальная схема `301`:
 
 ```text
 Hermes
@@ -45,11 +45,11 @@ Proximo
 PVE
 ```
 
-Если позже появится реальная необходимость в общем сетевом MCP для нескольких клиентов, это оформляется отдельно; Proximo поддерживает отдельные remote faces, но zero-day архитектура ими не усложняется.
+Отдельный HTTP MCP daemon для одного локального Hermes в `301` не нужен. Если позже появится реальная необходимость в общем сетевом MCP для нескольких клиентов, это оформляется отдельным решением.
 
 ## Management identity
 
-Bootstrap создаёт отдельную identity:
+Каноническая PVE identity Proximo:
 
 ```text
 user:       proximo@pve
@@ -63,15 +63,16 @@ Token secret:
 - создаётся локально на PVE;
 - показывается Proxmox только при создании;
 - напрямую передаётся в `301` через QEMU Guest Agent;
-- хранится внутри `301` в файле режима `0600`;
+- хранится внутри `301` в `/etc/ai-control/secrets/proximo-pve-token`;
 - не записывается в Git;
-- не должен оставаться отдельным plaintext-файлом на PVE.
+- не хранится отдельным plaintext-файлом на PVE;
+- при утрате требует явной ротации.
 
-При privilege separation эффективные права являются пересечением прав пользователя и token, поэтому нужные ACL выдаются обоим.
+При privilege separation эффективные права являются пересечением прав пользователя и token, поэтому необходимые ACL выдаются обоим.
 
 ## Tool surface
 
-В Hermes по умолчанию используется:
+По умолчанию используется:
 
 ```text
 PROXIMO_TOOLSETS=pve.guests
@@ -79,7 +80,7 @@ PROXIMO_TOOLSETS=pve.guests
 
 Цель — не публиковать агенту без необходимости MCP domains для host network, SDN, access/IAM и других административных плоскостей.
 
-Tool filtering — только дополнительная защита. Hard boundary задаётся Proxmox ACL/token.
+Tool filtering — дополнительная защита. Hard boundary задаётся Proxmox ACL/token.
 
 ## Разрешённая зона
 
@@ -95,7 +96,7 @@ AI control должен уметь:
 
 Template `9000` остаётся защищённым и не должен быть доступен на изменение/удаление.
 
-Сам `301-ai-control` не обязан входить в обычную self-managed write-зону: control plane не должен случайно удалить/остановить самого себя.
+`301-ai-control` не входит в обычную self-managed write-зону: control plane не должен случайно удалить или остановить самого себя. Для `320` действует тот же принцип до его вывода из эксплуатации.
 
 ## Запрещённая зона
 
@@ -114,21 +115,23 @@ reboot/shutdown PVE host
 shell/exec на PVE host
 ```
 
-Если Proximo технически содержит tools для этих областей, это не означает, что token должен уметь их выполнить.
+Наличие соответствующих tools в Proximo не означает, что token должен уметь их выполнить.
 
 Полная проектная матрица прав остаётся в [`002-proxmox-permissions.md`](./002-proxmox-permissions.md).
 
 ## Проверка границы
 
-После bootstrap обязательно выполняется:
+После установки/обновления Proximo обязательно выполняется:
 
 ```bash
 proximo doctor
 ```
 
-Результат сохраняется внутри `301` для диагностики. До перевода `301` в основной control plane нужно убедиться, что ожидаемые guest capabilities находятся в `can`, а host/IAM опасные действия остаются в `cannot`.
+Нужно убедиться, что ожидаемые guest capabilities находятся в `can`, а host/IAM опасные действия остаются в `cannot`.
 
-Затем проводится live-test:
+Для `301` результат сохраняется в `/opt/ai-control/state/proximo-doctor.json`.
+
+Live-test целевой цепочки:
 
 ```text
 Hermes + Proximo
@@ -140,21 +143,6 @@ Hermes + Proximo
 → SSH ops из 301
 ```
 
-Без этой проверки zero-day bootstrap считается подготовленным, но не полностью live-validated.
-
-## Почему не переносим gordcurrie/proxmox-mcp с 320
-
-На `320` он уже установлен и может продолжать работать до миграции. Но целевой `301` строится заново и не обязан наследовать исторически выбранный transport.
-
-Proximo выбран для новой схемы потому, что сочетает:
-
-- least-privilege модель поверх Proxmox ACL;
-- встроенный `doctor` для проверки фактической границы token;
-- PLAN/PROVE/UNDO подход для mutations;
-- provisioning/config/cloud-init surface;
-- управляемое сокращение tool surface через `PROXIMO_TOOLSETS`;
-- локальный stdio transport, достаточный для одного Hermes в `301`.
-
 ## Разделение функций
 
 ```text
@@ -164,12 +152,12 @@ Proximo
 Ansible на 311-dev-services
 → повторяемая конфигурация гостевых ОС и приложений
 
-прямой SSH из 301
+прямой SSH из ai-control
 → bootstrap, диагностика, аварийные и разовые действия
 ```
 
-Даже если MCP умеет выполнять дополнительные операции, он не заменяет Ansible как штатный повторяемый deploy-механизм внутри ОС.
+Proximo не заменяет Ansible как штатный повторяемый deploy-механизм внутри ОС.
 
 ## Главный принцип
 
-> Proximo — канонический Proxmox MCP для `301-ai-control`; реальная граница его власти задаётся отдельным privilege-separated Proxmox token и ACL, а не возможностями самого MCP.
+> Proximo (`proximo-proxmox`) — единственный канонический Proxmox MCP для `320-ai-control` и `301-ai-control`; реальная граница его власти задаётся privilege-separated Proxmox token и ACL, а не возможностями самого MCP.

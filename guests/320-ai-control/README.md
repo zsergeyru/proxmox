@@ -4,13 +4,13 @@
 
 ## Роль
 
-На 320 отрабатываются Hermes/другие агенты, Proxmox MCP, SSH-доступ и модель управления инфраструктурой до готовности целевого контура.
+На 320 отрабатываются Hermes/другие агенты, Proximo MCP, SSH-доступ и модель управления инфраструктурой до готовности целевого контура.
 
 Целевая схема:
 
 ```text
 AI-агент
-├── Proxmox MCP → lifecycle VM/LXC, snapshots, backups
+├── Proximo MCP → lifecycle VM/LXC, snapshots, backups
 ├── Ansible на 311-dev-services → повторяемый deploy по SSH
 └── прямой SSH → bootstrap, диагностика и аварийные действия
 ```
@@ -42,7 +42,7 @@ rootfs/opt/ai-control/interfaces/
 → развернуть 311-dev-services
 → создать 301-ai-control
 → применить конфигурацию 301
-→ проверить Hermes, Proxmox MCP, SSH и Ansible через 311
+→ проверить Hermes, Proximo MCP, SSH и Ansible через 311
 → назначить 301 основным control plane
 → вывести 320 из эксплуатации отдельным решением
 ```

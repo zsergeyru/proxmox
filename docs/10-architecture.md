@@ -68,7 +68,7 @@ VM 109 подчиняется общей адресной формуле: `192.1
 Разделение ответственности:
 
 ```text
-Proxmox MCP
+Proximo MCP
 → lifecycle VM/LXC, snapshots, backups
 
 Ansible на 311-dev-services
@@ -108,7 +108,7 @@ guests/<VMID>-<name>/
 
 ```text
 изменить конфигурацию в Git
-→ при необходимости изменить VM/LXC через Proxmox MCP
+→ при необходимости изменить VM/LXC через Proximo MCP
 → выполнить bootstrap по SSH
 → применить конфигурацию Ansible из 311
 → проверить health/status/logs

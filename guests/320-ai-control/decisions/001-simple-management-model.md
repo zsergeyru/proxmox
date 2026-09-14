@@ -25,14 +25,14 @@ AI Control должен уметь:
 ```text
 AI-агент
    │
-   ├── Proxmox MCP
+   ├── Proximo MCP
    │      └── уровень виртуализации
    │
    └── SSH
           └── базовый канал доступа внутрь VM/LXC
 ```
 
-### Proxmox MCP
+### Proximo MCP
 
 Используется для операций уровня Proxmox:
 
@@ -79,7 +79,7 @@ Semaphore в `311-dev-services` даёт пользователю web-интер
 Типовая целевая последовательность:
 
 ```text
-1. Proxmox MCP
+1. Proximo MCP
    → создать VM/LXC
    → настроить CPU/RAM/disk/network
 

@@ -35,8 +35,7 @@
 │   ├── config
 │   └── known_hosts
 └── secrets/
-    ├── host-deploy.token
-    └── ai-agent-proximo.token
+    └── host-deploy.token
 ```
 
 Назначение:
@@ -59,19 +58,18 @@ ssh/known_hosts
 
 secrets/host-deploy.token
 → secret deployer@pve!host-deploy
-
-secrets/ai-agent-proximo.token
-→ secret ai-agent@pve!proximo
 ```
+
+Proximo использует отдельную identity `proximo@pve!ai-control`, но её secret после создания передаётся внутрь `301` и хранится там в `/etc/ai-control/secrets/proximo-pve-token`. Отдельный plaintext-файл с Proximo token на PVE не является частью канонической файловой структуры.
 
 Правила:
 
 - secrets и private key никогда не попадают в Git;
 - перед созданием secret files использовать `umask 077`;
-- private key и token files имеют mode `0600`;
+- private key и token files имеют mode `0600` либо более узкие права, требуемые runtime;
 - каталоги `ssh/` и `secrets/` имеют mode `0700`;
-- `pvedeploy` получает доступ только к тем secrets, которые нужны host-side deploy runtime;
-- AI token может оставаться root-readable и передаваться в `301` bootstrap tooling по необходимости.
+- `pvedeploy` получает доступ только к secret, нужному host-side deploy runtime;
+- потеря Proximo credential вместе с `301` требует явной ротации token, потому что PVE API не позволяет повторно получить его secret.
 
 ## 2. Private Git checkout и deployer runtime
 
@@ -230,7 +228,7 @@ YYYYMMDD-HHMMSS/
 /etc/proxmox-deployer/ssh/
 ```
 
-Такой backup является чувствительным объектом и должен быть защищён не хуже самих secrets. В дальнейшем предпочтительно иметь внешнюю копию, потому что локальный `/var/backups` на том же системном SSD не помогает при физической потере диска.
+Proximo token из `301` в этот host-side backup не входит; он защищается резервным копированием самого AI control plane либо явной ротацией credential. Такой backup является чувствительным объектом и должен быть защищён не хуже самих secrets. В дальнейшем предпочтительно иметь внешнюю копию, потому что локальный `/var/backups` на том же системном SSD не помогает при физической потере диска.
 
 ## 7. Стабильные команды
 
@@ -279,8 +277,7 @@ Source code остаётся в private Git checkout, а `/usr/local/sbin` да�
 │       │   ├── config
 │       │   └── known_hosts
 │       └── secrets/
-│           ├── host-deploy.token
-│           └── ai-agent-proximo.token
+│           └── host-deploy.token
 │
 ├── var/
 │   ├── lib/

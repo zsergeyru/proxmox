@@ -33,18 +33,18 @@ local:iso/debian-13.6.0-amd64-netinst.iso
 
 Это отличается от желаемого `guest.yaml`, где `boot.onboot: true`. Пока настройка на сервере не изменена, это считается известным drift между desired state и observed state.
 
-## AI control / Proxmox MCP
+## AI control / Proximo MCP
 
-На VM `320-ai-control` установлен выбранный общий Proxmox MCP:
+На VM `320-ai-control` установлен канонический MCP проекта:
 
 ```text
-gordcurrie/proxmox-mcp
+Proximo / proximo-proxmox
 ```
 
-Он используется как общий MCP backend управляющего контура и рассчитан на доступ нескольких AI-агентов через HTTP transport.
+`320` уже переведён на Proximo и больше не считается узлом со старым MCP backend.
+
+Для Proximo действует та же проектная граница, что и для целевого `301`: guest-level operations разрешаются только выданным Proxmox token/ACL, host-level write operations не входят в штатную зону AI control.
 
 Архитектура и ограничения описаны в [`decisions/003-proxmox-mcp.md`](decisions/003-proxmox-mcp.md). Права Proxmox API token/ACL описаны в [`decisions/002-proxmox-permissions.md`](decisions/002-proxmox-permissions.md).
-
-Важно: наличие в MCP host/network tools не означает, что они разрешены проектом. Host-level write operations должны блокироваться ограниченным Proxmox token/ACL; destructive tools по умолчанию отключены.
 
 Архитектурное имя каталога остаётся `320-ai-control`, а текущее имя объекта в Proxmox — `ai-agent`. Переименование работающей VM не требуется только ради документации; вопрос можно решить при миграции на целевой `301-ai-control`.

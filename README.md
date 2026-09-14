@@ -60,7 +60,7 @@ proxmox/
 ## Управление и deploy
 
 ```text
-Proxmox MCP
+Proximo MCP
 → lifecycle VM/LXC
 
 Ansible на 311-dev-services
