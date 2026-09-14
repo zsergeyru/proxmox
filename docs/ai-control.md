@@ -26,44 +26,81 @@ Ansible в 311-dev-services
 
 Решение по Ansible/Semaphore и простой модели `rootfs/` зафиксировано в [`../guests/311-dev-services/decisions/001-deployment-tooling.md`](../guests/311-dev-services/decisions/001-deployment-tooling.md). Матрица Proxmox-прав управляющего контура зафиксирована в [`../guests/320-ai-control/decisions/002-proxmox-permissions.md`](../guests/320-ai-control/decisions/002-proxmox-permissions.md). Историческое решение по MCP для `320` и переход на Proximo для `301` описаны в [`../guests/320-ai-control/decisions/003-proxmox-mcp.md`](../guests/320-ai-control/decisions/003-proxmox-mcp.md).
 
+Подробная спецификация zero-day развёртывания `301` находится в [`ai-control-bootstrap.md`](./ai-control-bootstrap.md).
+
 ## Zero-day bootstrap 301
 
 Для нового компьютера не предполагается наличие Git, AI-агентов или доступа к приватному `zsergeyru/proxmox`. Единственная обязательная база — установленный Proxmox VE и готовый template `9000 tpl-debian13`.
+
+Zero-day bootstrap разделён на два независимых публичных скрипта:
+
+```text
+create-ai-control-vm.sh
+→ выполняется на PVE
+→ создаёт и подготавливает VM 301
+→ создаёт bootstrap management identity/token для Proximo
+
+install-ai-control.sh
+→ выполняется внутри 301
+→ устанавливает Hermes/WebUI/Proximo
+→ создаёт SSH identities
+→ подготавливает GitHub Deploy Key onboarding
+```
 
 Канонический путь:
 
 ```text
 чистый PVE + template 9000
-→ публичный zsergeyru/proxmox-bootstrap/bootstrap-ai-control.sh
+→ public create-ai-control-vm.sh
 → Full Clone 9000 → 301
-→ первоначальная настройка через QEMU Guest Agent
-→ Hermes + встроенный Web Dashboard
+→ базовая VM 301 готова
+→ public install-ai-control.sh внутри 301
+→ Hermes + встроенный WebUI
 → Proximo
 → management SSH identity
 → GitHub Deploy Key identity
 → вывести public key человеку
 → человек регистрирует Deploy Key для zsergeyru/proxmox
-→ Hermes получает приватный repo
+→ повторная проверка install-ai-control.sh
+→ clone приватного repo в /opt/ai-control/repos/proxmox
 → дальше инфраструктура разворачивается из Git
 ```
 
-Bootstrap до запуска Hermes **не зависит от приватного Git** и не требует GitHub PAT. Это специально позволяет восстановить control plane на совершенно новом сервере.
+Bootstrap до запуска Hermes **не зависит от приватного Git** и не требует GitHub PAT. Это позволяет восстановить control plane на совершенно новом сервере.
 
-Канонический executable-скрипт хранится только в публичном репозитории `zsergeyru/proxmox-bootstrap`; здесь хранится документация и desired state.
+Канонические executable-скрипты хранятся только в публичном репозитории `zsergeyru/proxmox-bootstrap`; здесь хранится документация и desired state.
 
 ## Hermes и WebUI
 
-Основной AI-агент `301-ai-control` — Hermes. Для первичной настройки и дальнейшей работы используется встроенный Hermes Web Dashboard на `tcp/9119`.
+Основной AI-агент `301-ai-control` — Hermes.
 
-Bootstrap привязывает Dashboard к доступному сетевому адресу и включает username/password auth. В `.env` остаются только password hash и signing secret; исходный случайно сгенерированный пароль показывается оператору один раз при первом успешном bootstrap.
+Ключевое правило размещения:
+
+```text
+/opt/ai-control/agents/hermes/
+```
+
+Все будущие агенты также размещаются только в `/opt/ai-control/agents/<agent>/`.
+
+Для первичной настройки и дальнейшей работы используется штатный WebUI/Dashboard Hermes; целевой порт проекта — `tcp/9119`.
+
+`install-ai-control.sh` обязан использовать поддерживаемый Hermes механизм авторизации и не оставлять WebUI намеренно открытым без auth. Конкретные config/env names проверяются по фактической версии Hermes при реализации скрипта.
 
 Через Dashboard после развёртывания задаются model/provider credentials. Эти секреты невозможно получить из пустого сервера автоматически, поэтому это нормальный первый ручной шаг после создания `301`.
 
 ## Proximo
 
-Для целевого `301-ai-control` канонический Proxmox MCP — **Proximo** (`proximo-proxmox`). Он запускается как локальный stdio MCP-процесс Hermes, поэтому отдельный сетевой MCP-порт не требуется.
+Для целевого `301-ai-control` канонический Proxmox MCP — **Proximo** (`proximo-proxmox`).
 
-Bootstrap создаёт отдельную Proxmox management identity:
+Размещение:
+
+```text
+/opt/ai-control/mcp/proximo/
+```
+
+Общие MCP не устанавливаются внутрь каталога Hermes.
+
+`create-ai-control-vm.sh` создаёт отдельную Proxmox management identity:
 
 ```text
 user:  proximo@pve
@@ -71,7 +108,9 @@ token: proximo@pve!ai-control
 privilege separation: enabled
 ```
 
-Secret token передаётся непосредственно с PVE в `301` через QEMU Guest Agent и хранится только внутри `301` в файле режима `0600`.
+Secret token передаётся непосредственно с PVE в `301` через QEMU Guest Agent и хранится только внутри `301` в защищённом файле. Из PVE временная копия удаляется после передачи.
+
+`install-ai-control.sh` устанавливает сам Proximo, связывает его с подготовленным credential и проверяет границу прав через `proximo doctor`.
 
 Для Hermes по умолчанию публикуется только guest-oriented surface:
 
@@ -85,7 +124,7 @@ PROXIMO_TOOLSETS=pve.guests
 
 ## SSH identities 301
 
-У `301` две независимые SSH identity. Они создаются **внутри самой VM** и никогда не помещаются в template или Git.
+У `301` две независимые SSH identity. Они создаются `install-ai-control.sh` **внутри самой VM** и никогда не помещаются в template или Git.
 
 ### Infrastructure key
 
@@ -111,9 +150,9 @@ Private key остаётся только в `301`. Public key использу�
 /home/ops/.ssh/github_proxmox_ed25519.pub
 ```
 
-Этот ключ используется только для `git@github.com:zsergeyru/proxmox.git` и не используется для SSH в инфраструктурные VM.
+Этот ключ используется только для приватного `zsergeyru/proxmox` и не используется для SSH в инфраструктурные VM.
 
-Bootstrap выводит только `.pub`. Оператор вручную добавляет его в:
+`install-ai-control.sh` выводит только `.pub`. Оператор вручную добавляет его в:
 
 ```text
 zsergeyru/proxmox
@@ -126,6 +165,21 @@ zsergeyru/proxmox
 ## Размещение компонентов
 
 В `ai-control` находятся только компоненты AI-управляющего контура:
+
+```text
+/opt/ai-control/
+├── agents/
+│   ├── hermes/
+│   └── <future-agent>/
+├── mcp/
+│   ├── proximo/
+│   └── <future-mcp>/
+├── repos/
+│   └── proxmox/
+└── state/
+```
+
+В `ai-control` находятся:
 
 - Hermes и возможные будущие AI-агенты;
 - Proximo и другие специализированные MCP;
@@ -191,8 +245,8 @@ Semaphore предназначен прежде всего для ручного
 После регистрации ключа Hermes клонирует:
 
 ```text
-git@github.com:zsergeyru/proxmox.git
-→ /home/ops/proxmox
+zsergeyru/proxmox
+→ /opt/ai-control/repos/proxmox
 ```
 
 После этого документация, `guest.yaml`, `rootfs/` и решения из Git становятся источником истины.
@@ -216,7 +270,7 @@ AI control получает достаточные guest-level права для
 3. Ограниченный `PROXIMO_TOOLSETS=pve.guests` — дополнительное уменьшение MCP surface.
 4. Proxmox snapshots перед рискованными изменениями.
 5. Регулярные Proxmox backups.
-6. Отдельный backup persistent data и Docker volumes.
+6. Отдельный backup persistent data и Docker volumes, если они появятся.
 7. Логирование действий агента и Proximo audit log.
 8. Проверка health/status/logs после изменений.
 9. Поэтапная замена: сначала создать/проверить новое, затем удалять старое.
@@ -231,10 +285,11 @@ AI control получает достаточные guest-level права для
 
 ```text
 9000 template готов
-→ bootstrap-ai-control.sh создаёт 301
-→ проверены Hermes Dashboard + Proximo
+→ create-ai-control-vm.sh создаёт 301
+→ install-ai-control.sh устанавливает Hermes/WebUI/Proximo и ключи
+→ проверен Proximo
 → зарегистрирован GitHub Deploy Key
-→ Hermes клонировал zsergeyru/proxmox
+→ Hermes клонировал zsergeyru/proxmox в /opt/ai-control/repos/proxmox
 → проверено создание тестовой managed VM с Cloud-Init SSH key
 → разворачивается 311-dev-services
 → проверяется Ansible deploy
