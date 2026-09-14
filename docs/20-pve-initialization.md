@@ -70,7 +70,7 @@ PVE
 ├── shallow read-only checkout zsergeyru/proxmox
 ├── resource pool managed
 ├── PVE identity deployer@pve!host-deploy
-├── PVE identity proximo@pve!ai-control
+├── PVE identity ai-agent@pve!infra
 ├── защищённые локальные копии обоих token secrets
 ├── template 9000 tpl-debian13
 ├── private deploy tooling из zsergeyru/proxmox
@@ -245,7 +245,7 @@ managed
 
 # 7. Proxmox identities — принято
 
-Для host deployer и Proximo используются разные service identities и разные credentials.
+Для host deployer и AI control используются разные service identities и разные credentials.
 
 ## Host deployer
 
@@ -265,14 +265,14 @@ token: deployer@pve!host-deploy
 - lifecycle, необходимый для deploy/verification;
 - работа без `301` и без AI.
 
-## Proximo MCP
+## AI infrastructure access
 
 ```text
-user:  proximo@pve
-token: proximo@pve!ai-control
+user:  ai-agent@pve
+token: ai-agent@pve!infra
 ```
 
-Актор — Proximo (`proximo-proxmox`), которым пользуются разрешённые AI-агенты в `301-ai-control`.
+Эта identity принадлежит AI control как контуру автоматизации, а не конкретному агенту или MCP. Текущий потребитель credential — Proximo (`proximo-proxmox`), которым пользуются разрешённые AI-агенты в `301-ai-control`.
 
 Назначение:
 
@@ -284,14 +284,14 @@ token: proximo@pve!ai-control
 Naming:
 
 ```text
-proximo@pve
-→ отдельная service identity канонического Proximo MCP
+ai-agent@pve
+→ service identity AI-контура
 
-!ai-control
-→ credential целевого AI control plane
+!infra
+→ token для инфраструктурного доступа к Proxmox
 ```
 
-Если в будущем Proximo будет заменён другим MCP, для нового backend создаётся отдельная identity/credential вместо неявного переиспользования существующей.
+Если в будущем Proximo будет заменён другим MCP, identity `ai-agent@pve!infra` может продолжить использоваться без переименования, если назначение и права остаются теми же. Новый отдельный token создаётся только если действительно нужно разделить права, потребителей или отзыв credentials.
 
 ## Почему две identity
 
@@ -300,7 +300,7 @@ proximo@pve
 - host recovery/deploy не зависит от AI credential;
 - понятнее audit trail;
 - credentials можно независимо отозвать/ротировать;
-- права host deployer и runtime Proximo не обязаны совпадать.
+- права host deployer и AI runtime не обязаны совпадать.
 
 Не использовать ради удобства:
 
@@ -319,10 +319,10 @@ PVE является постоянным защищённым хранилищ�
 
 ```text
 deployer@pve!host-deploy
-proximo@pve!ai-control
+ai-agent@pve!infra
 ```
 
-Это сознательное решение для восстановления: потеря или пересоздание `301-ai-control` не должна автоматически требовать ротации рабочего Proximo credential, если защищённая host-side копия сохранилась.
+Это сознательное решение для восстановления: потеря или пересоздание `301-ai-control` не должна автоматически требовать ротации рабочего AI infrastructure credential, если защищённая host-side копия сохранилась.
 
 Целевой каталог:
 
@@ -330,7 +330,7 @@ proximo@pve!ai-control
 /etc/proxmox-deployer/
 ├── secrets/
 │   ├── host-deploy.token
-│   └── proximo-ai-control.token
+│   └── ai-agent-infra.token
 └── ssh/
     ├── github_proxmox_repo_ed25519
     └── github_proxmox_repo_ed25519.pub
@@ -342,46 +342,46 @@ proximo@pve!ai-control
 secrets/host-deploy.token
 → token id + secret для deployer@pve!host-deploy
 
-secrets/proximo-ai-control.token
-→ token id + secret для proximo@pve!ai-control
+secrets/ai-agent-infra.token
+→ token id + secret для ai-agent@pve!infra
 
 ssh/github_proxmox_repo_ed25519
 → private read-only GitHub Deploy Key PVE
 ```
 
-Credential Proximo также передаётся внутрь `301`:
+Рабочая копия AI infrastructure credential также передаётся внутрь `301` для Proximo:
 
 ```text
-/etc/ai-control/secrets/proximo-pve-token
-→ рабочая копия token id + secret для Proximo
+/etc/ai-control/secrets/proxmox-infra.token
+→ рабочая копия token id + secret для ai-agent@pve!infra
 
 /etc/ai-control/proximo/proximo.env
 → параметры подключения Proximo к PVE
 ```
 
-Таким образом существует две контролируемые копии Proximo credential:
+Таким образом существует две контролируемые копии AI infrastructure credential:
 
 ```text
 PVE
-/etc/proxmox-deployer/secrets/proximo-ai-control.token
+/etc/proxmox-deployer/secrets/ai-agent-infra.token
         │
         └── защищённая infrastructure/recovery copy
 
 301-ai-control
-/etc/ai-control/secrets/proximo-pve-token
+/etc/ai-control/secrets/proxmox-infra.token
         └── runtime copy для Proximo
 ```
 
 ## Правила хранения
 
 - оба token secrets создаются host-side bootstrap и сразу сохраняются в `/etc/proxmox-deployer/secrets/`;
-- secret сначала должен быть безопасно сохранён на PVE, и только затем Proximo credential передаётся внутрь `301`;
+- secret сначала должен быть безопасно сохранён на PVE, и только затем AI infrastructure credential передаётся внутрь `301`;
 - перед созданием secret files используется `umask 077`;
 - secrets не выводятся повторно в обычные logs;
 - secrets не сохраняются в `state.json` или других runtime state files;
 - secrets никогда не помещаются в Git;
 - `pvedeploy` получает доступ только к `host-deploy.token`;
-- `proximo-ai-control.token` доступен только `root`/явному recovery/bootstrap коду и не нужен обычному `deploy-guest`;
+- `ai-agent-infra.token` доступен только `root`/явному recovery/bootstrap коду и не нужен обычному `deploy-guest`;
 - backup каталога infrastructure secrets является чувствительным объектом и должен быть защищён не хуже самих credentials.
 
 ## Повторный запуск и восстановление
@@ -409,17 +409,17 @@ token существует, но локальный secret потерян
 → требовать явную rotation/recovery operation
 ```
 
-Если `301` утрачен, но `/etc/proxmox-deployer/secrets/proximo-ai-control.token` сохранён:
+Если `301` утрачен, но `/etc/proxmox-deployer/secrets/ai-agent-infra.token` сохранён:
 
 ```text
 пересоздать 301
 → передать существующий credential внутрь VM
-→ Proximo продолжает использовать тот же token
+→ Proximo продолжает использовать тот же token ai-agent@pve!infra
 ```
 
-Ротация любого token выполняется только явным действием. Новое значение сначала безопасно сохраняется на PVE; для Proximo после этого обновляется runtime copy внутри `301`.
+Ротация любого token выполняется только явным действием. Новое значение сначала безопасно сохраняется на PVE; для AI infrastructure credential после этого обновляется runtime copy внутри `301`.
 
-Backup `301` также считается чувствительным, потому что содержит runtime-копию Proximo token, private SSH identities и другие credentials AI control plane.
+Backup `301` также считается чувствительным, потому что содержит runtime-копию AI infrastructure token, private SSH identities и другие credentials AI control plane.
 
 ---
 
@@ -449,7 +449,7 @@ pvedeploy
 /var/log/proxmox-deployer/
 ```
 
-`pvedeploy` не получает доступ к `proximo-ai-control.token`.
+`pvedeploy` не получает доступ к `ai-agent-infra.token`.
 
 Не выдавать:
 
@@ -644,8 +644,8 @@ PVE INIT STATUS
 [OK] managed pool
 [OK] deployer@pve!host-deploy
 [OK] host-deploy secret stored
-[OK] proximo@pve!ai-control
-[OK] Proximo secret stored
+[OK] ai-agent@pve!infra
+[OK] AI infra secret stored
 [OK] template 9000
 [OK] deploy-guest
 
@@ -728,7 +728,7 @@ init-pve.sh
 → зафиксировать repo commit SHA
 → создать managed pool
 → создать/проверить deployer@pve!host-deploy
-→ создать/проверить proximo@pve!ai-control
+→ создать/проверить ai-agent@pve!infra
 → проверить наличие host-side secrets обоих tokens
 → при первом создании безопасно сохранить оба token secrets на PVE
 → запустить private scripts/pve/create-template.sh
@@ -746,13 +746,13 @@ init-pve.sh
 При создании или восстановлении `301-ai-control`:
 
 ```text
-PVE читает /etc/proxmox-deployer/secrets/proximo-ai-control.token
+PVE читает /etc/proxmox-deployer/secrets/ai-agent-infra.token
 → передаёт credential внутрь 301 через предусмотренный защищённый канал
-→ создаёт/обновляет /etc/ai-control/secrets/proximo-pve-token
+→ создаёт/обновляет /etc/ai-control/secrets/proxmox-infra.token
 → host-side recovery copy на PVE остаётся
 ```
 
-`301` не является владельцем lifecycle Proximo credential. Identity/token создаются и ротируются host-side инфраструктурой.
+`301` не является владельцем lifecycle AI infrastructure credential. Identity/token создаются и ротируются host-side инфраструктурой.
 
 Если runtime copy внутри `301` потеряна, но PVE copy цела, выполняется повторная передача того же credential без ротации.
 
@@ -793,12 +793,12 @@ pvedeploy (Linux)
 PVE deployer@pve!host-deploy
 → host-side guest deployment role
 
-PVE proximo@pve!ai-control
-→ AI runtime role через Proximo
+PVE ai-agent@pve!infra
+→ AI infrastructure role; текущий потребитель — Proximo
 
 /etc/proxmox-deployer/secrets/
 ├── host-deploy.token
-└── proximo-ai-control.token
+└── ai-agent-infra.token
 → постоянное локальное защищённое хранилище обоих infrastructure token secrets
 
 managed pool
@@ -811,6 +811,6 @@ PVE GitHub Deploy Key — read-only.
 
 Оба API token secrets сохраняются на PVE и должны входить в защищённый backup конфигурации хоста.
 
-Runtime copy Proximo credential внутри `301` не отменяет обязательную recovery copy на PVE.
+Runtime copy AI infrastructure credential внутри `301` не отменяет обязательную recovery copy на PVE.
 
 `100`, `301`, `320`, `9000` и другие явно защищённые объекты не должны автоматически попадать под обычную self-managed write policy.
