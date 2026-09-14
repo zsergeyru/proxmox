@@ -15,10 +15,10 @@ Protection: 1
 
 Template v4 снова является действующей версией. От усложнения v5 с pinned Debian build, version lock и `snapshot.debian.org` отказались.
 
-Рабочая реализация находится в публичном:
+Рабочая реализация находится в приватном репозитории:
 
 ```text
-zsergeyru/proxmox-bootstrap/create-template.sh
+scripts/pve/create-template.sh
 ```
 
 Политика сборки: [`build-policy.md`](build-policy.md).
@@ -130,6 +130,7 @@ Template: tpl-debian13
 Template-Version: 4
 OS: Debian 13
 Kernel-Flavor: amd64
+Template-Builder-Source: zsergeyru/proxmox
 Source-Image: debian-13-genericcloud-amd64.qcow2
 Source-Image-SHA512: <verified hash>
 Build-Date: <UTC date>
@@ -151,7 +152,7 @@ Build-Date: <UTC date>
 8. filesystem growth после resize;
 9. отсутствие builder artifacts.
 
-CI проверяет shell/Cloud-Init структуру, но не заменяет этот PVE integration test.
+CI проверяет shell-синтаксис и структуру репозитория, но не заменяет этот PVE integration test.
 
 ## История
 
