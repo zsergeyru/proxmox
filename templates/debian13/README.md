@@ -1,12 +1,12 @@
 # Базовый шаблон Debian 13 для Proxmox
 
-Статус: **скрипт сборки реализован и проверен полной чистой сборкой на реальном PVE-хосте 2026-09-14**.
+Статус: **Template-Version 3 реализована в builder-скрипте; предыдущая v2 успешно проверена полной чистой сборкой на реальном PVE-хосте 2026-09-14. Для v3 требуется новая чистая сборка и проверка клона.**
 
 ```text
 VMID: 9000
 Name: tpl-debian13
 OS: Debian 13 (Trixie)
-Template-Version: 2
+Template-Version: 3
 ```
 
 Рабочие VM по умолчанию создаются как **Full Clone**.
@@ -18,7 +18,7 @@ Template-Version: 2
 - [`filesystem-layout.md`](./filesystem-layout.md) — файловая структура сервисов;
 - [`../../docs/bootstrap.md`](../../docs/bootstrap.md) — расположение и способ запуска bootstrap-скрипта непосредственно на PVE.
 
-Единственный канонический экземпляр `create-template.sh` хранится в публичном репозитории `zsergeyru/proxmox-bootstrap`. В приватном `proxmox` executable-копия не хранится, чтобы не поддерживать две версии одного скрипта.
+Единственный канонический экземпляр `create-template.sh` хранится в публичном репозитории `zsergeyru/proxmox-bootstrap`. В приватном `proxmox` executable-копия не хранится.
 
 ## Что делает скрипт
 
@@ -33,6 +33,9 @@ VMID 9000 builder-debian13
         ↓
 apt update + full-upgrade
 базовые пакеты и системные настройки
+        ↓
+serial0 + xterm.js как основная текстовая консоль
+serial-getty@ttyS0 → autologin ops
         ↓
 ожидание QEMU Guest Agent
 ожидание окончания Cloud-Init
@@ -71,9 +74,9 @@ protection=1
 | Cloud-Init | да |
 | Cloud-Init package upgrade | выключен (`ciupgrade=0`) |
 | QEMU Guest Agent | да |
-| Proxmox display | `vga: std` |
-| Main console | noVNC → `tty1` → autologin `ops` |
-| Serial console | `serial0: socket`, без autologin |
+| Proxmox display | `vga: serial0` |
+| Main console | xterm.js → `serial0` → autologin `ops` |
+| Serial device | `serial0: socket` |
 | Admin user | `ops` |
 | `ops` password | locked |
 | Root SSH | запрещён |
@@ -110,20 +113,28 @@ PubkeyAuthentication yes
 
 ### Proxmox Console
 
+Основная console теперь текстовая:
+
 ```text
 Proxmox Web UI
 → VM → Console
-→ noVNC
-→ tty1
+→ xterm.js
+→ serial0 / ttyS0
 → autologin ops
 → shell
 ```
 
-Это не пустой пароль. Пароль `ops` остаётся заблокированным. Autologin разрешён только на `tty1`.
+Это не пустой пароль. Пароль `ops` остаётся заблокированным. Autologin разрешён локально на `serial0` через `serial-getty@ttyS0`.
 
 Право открыть console VM в Proxmox считается административным доступом к гостевой ОС: `ops` имеет `NOPASSWD: sudo`.
 
-`serial0` остаётся отдельным резервным диагностическим каналом без autologin.
+Файл override:
+
+```text
+/etc/systemd/system/serial-getty@ttyS0.service.d/autologin.conf
+```
+
+`tty1` больше не является основной административной консолью и специальный autologin на нём не настраивается.
 
 ## Cloud-Init конкретного клона
 
@@ -187,7 +198,7 @@ Locale: en_US.UTF-8
 
 ```text
 Template: tpl-debian13
-Template-Version: 2
+Template-Version: 3
 OS: Debian 13
 Infrastructure-Source: zsergeyru/proxmox
 Bootstrap-Source: zsergeyru/proxmox-bootstrap
@@ -314,41 +325,42 @@ SNIPPET_STORAGE=local
 BRIDGE=vmbr0
 DISK_SIZE=16G
 WAIT_SECONDS=1200
-TEMPLATE_VERSION=2
+TEMPLATE_VERSION=3
 ```
 
-## Проверенный clean build v2
+## История проверки
 
-2026-09-14 выполнена полная повторная сборка с нуля на реальном PVE-хосте после устранения ошибок первого прогона. Успешно пройдены:
+### Проверенный clean build v2
 
-1. загрузка Debian 13 genericcloud image;
-2. SHA-512 verification;
-3. импорт 3 GiB cloud image в `local-lvm` и resize системного диска до 16 GiB;
-4. временный Cloud-Init bootstrap;
-5. установка пакетов и настройка locale/timezone;
-6. запуск QEMU Guest Agent;
-7. успешное завершение `Cloud-Init final stage`;
-8. `template-finalize`, очистка machine-specific данных и shutdown;
-9. удаление builder-only `cicustom` и регенерация стандартного Cloud-Init drive;
-10. `qm template`;
-11. включение `protection=1`;
-12. финальное сообщение `Template created successfully.`.
+2026-09-14 выполнена полная повторная сборка v2 с нуля на реальном PVE-хосте после устранения ошибок первого прогона. Успешно пройдены загрузка и SHA-512 verification, импорт и resize диска, Cloud-Init bootstrap, QEMU Guest Agent, `Cloud-Init final stage`, cleanup, shutdown, регенерация Cloud-Init drive, `qm template` и `protection=1`.
 
-Первый прогон выявил две ошибки порядка Cloud-Init: раннюю настройку `locale` и слишком раннее удаление default-user `debian`. Обе исправлены до успешного clean build.
+Первый прогон выявил две ошибки порядка Cloud-Init: раннюю настройку `locale` и слишком раннее удаление default-user `debian`. Обе исправлены до успешного clean build v2.
 
-## Проверка после сборки
+### Изменение v3
 
-После успешного clean build остаётся проверить поведение **клона**. Создать тестовый Full Clone, задать SSH public key и network **до первого старта**, затем проверить:
+В v3 основная консоль изменена с framebuffer/noVNC/tty1 на настоящую текстовую serial-консоль:
+
+```text
+vga: serial0
+serial0: socket
+xterm.js → ttyS0 → autologin ops
+```
+
+После изменения требуется новая чистая сборка v3 и повторная проверка тестового Full Clone.
+
+## Проверка после сборки v3
+
+Создать тестовый Full Clone, задать SSH public key и network **до первого старта**, затем проверить:
 
 1. VM загружается и получает сеть;
-2. `VM → Console` открывает noVNC и автоматически даёт shell `ops`;
-3. пароль `ops` остаётся locked;
-4. SSH доступен только по ключу;
-5. `sudo` работает без пароля;
-6. QEMU Guest Agent отвечает;
-7. `serial0` работает без autologin;
+2. `VM → Console` открывает текстовую xterm.js-консоль через `serial0`;
+3. xterm.js автоматически даёт shell `ops`;
+4. пароль `ops` остаётся locked;
+5. SSH доступен только по ключу;
+6. `sudo` работает без пароля;
+7. QEMU Guest Agent отвечает;
 8. machine-id уникален;
 9. SSH host keys уникальны;
 10. root filesystem увеличивается после resize диска;
 11. `/etc/vm-template-info` содержит правильную версию и SHA-512 исходного образа;
-12. в конфигурации template есть `ciupgrade: 0`, `protection: 1`, `vga: std`, `serial0: socket`.
+12. в конфигурации template есть `ciupgrade: 0`, `protection: 1`, `vga: serial0`, `serial0: socket`.
