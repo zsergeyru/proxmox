@@ -14,7 +14,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 GUESTS = ROOT / "guests"
-VMID_PLAN = ROOT / "docs" / "vmid-plan.md"
+VMID_PLAN = ROOT / "docs" / "11-vmid-plan.md"
 ALLOWED_TYPES = {"vm", "lxc"}
 ALLOWED_STATES = {"planned", "active", "bootstrap", "legacy"}
 GUEST_DIR_RE = re.compile(r"^(\d{3})-(.+)$")
@@ -62,7 +62,7 @@ def planned_vmids() -> set[int]:
     values = [int(match.group("vmid")) for match in PLAN_VMID_RE.finditer(text)]
     duplicates = sorted(vmid for vmid in set(values) if values.count(vmid) > 1)
     for vmid in duplicates:
-        fail(f"docs/vmid-plan.md contains duplicate VMID entry: {vmid}")
+        fail(f"docs/11-vmid-plan.md contains duplicate VMID entry: {vmid}")
     return set(values)
 
 
@@ -175,7 +175,7 @@ def validate_guest_manifests() -> None:
                 seen_vmids[vmid] = rel
 
             if vmid not in plan and data["state"] not in {"bootstrap", "legacy"}:
-                fail(f"{rel}: VMID {vmid} is not listed in docs/vmid-plan.md")
+                fail(f"{rel}: VMID {vmid} is not listed in docs/11-vmid-plan.md")
 
         management = data.get("management") or {}
         ssh = management.get("ssh") or {} if isinstance(management, dict) else {}
