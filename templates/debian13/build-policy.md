@@ -22,6 +22,7 @@ Cloud-Init первого запуска
 apt update / full-upgrade
 установка базовых пакетов
 настройка ОС
+настройка tty1 autologin
 очистка machine-specific данных
         ↓
 shutdown
@@ -58,6 +59,12 @@ sudo
 adm
 ```
 
+`ops` имеет:
+
+```text
+ALL=(ALL) NOPASSWD:ALL
+```
+
 Специальные группы добавляются только по роли конкретной VM.
 
 ## 4. Root и SSH
@@ -76,7 +83,7 @@ KbdInteractiveAuthentication no
 PubkeyAuthentication yes
 ```
 
-Обычное администрирование:
+Обычное сетевое администрирование:
 
 ```text
 SSH → ops → sudo
@@ -115,7 +122,60 @@ ipconfig0 = DHCP или статический адрес
 /home/ops/.ssh/authorized_keys
 ```
 
-## 7. Временная зона и локаль
+## 7. Доверенный доступ через Proxmox console
+
+Proxmox Web UI уже имеет собственную аутентификацию и ACL. Для VM console принимается следующая модель доверия:
+
+```text
+право открыть console VM в Proxmox
+= право получить локальный shell ops внутри этой VM
+```
+
+Это реализуется не пустым паролем и не передачей Proxmox credentials в Debian, а локальным autologin на `tty1`:
+
+```text
+getty@tty1
+→ agetty --autologin ops
+→ shell ops
+```
+
+Пароль `ops` при этом остаётся **locked**.
+
+Следствие: пользователь Proxmox, которому выдано право на console конкретной VM, фактически получает административный доступ к гостевой ОС, потому что `ops` имеет `NOPASSWD: sudo`. Это осознанная trust boundary проекта.
+
+## 8. VGA/noVNC и serial console
+
+Основная интерактивная console:
+
+```text
+vga: std
+```
+
+Кнопка `VM → Console` в Proxmox должна открывать noVNC с обычной Linux text console `tty1`.
+
+Внутри гостя должен быть включён:
+
+```text
+getty@tty1.service
+```
+
+с override:
+
+```ini
+[Service]
+ExecStart=
+ExecStart=-/sbin/agetty --autologin ops --noclear %I $TERM
+```
+
+Одновременно сохраняется:
+
+```text
+serial0: socket
+```
+
+и `serial-getty@ttyS0.service` как резервный диагностический канал. На `serial0` autologin **не настраивается**.
+
+## 9. Временная зона и локаль
 
 ```text
 Timezone: Europe/Moscow
@@ -124,7 +184,7 @@ Locale:   en_US.UTF-8
 
 Системное время синхронизируется штатными средствами Linux.
 
-## 8. Обновление при сборке
+## 10. Обновление при сборке
 
 В builder-VM выполняется:
 
@@ -137,11 +197,11 @@ apt full-upgrade
 
 `unattended-upgrades` автоматически не включается.
 
-## 9. Swap
+## 11. Swap
 
 В base template swap не создаётся. При необходимости он добавляется конкретной VM.
 
-## 10. Виртуальный диск
+## 12. Виртуальный диск
 
 ```text
 Controller: VirtIO SCSI Single
@@ -151,24 +211,13 @@ ssd:        enabled
 size:       16 GiB
 ```
 
-## 11. QEMU Guest Agent
+## 13. QEMU Guest Agent
 
 `qemu-guest-agent` обязателен и включается внутри Debian и в конфигурации VM Proxmox.
 
-Кроме штатного shutdown и получения сетевой информации, Guest Agent используется как один из аварийных каналов управления через `qm guest exec`, если SSH недоступен.
+Кроме штатного shutdown и получения сетевой информации, Guest Agent используется как дополнительный аварийный канал управления через `qm guest exec`.
 
-## 12. Serial console
-
-```text
-serial0: socket
-vga: serial0
-```
-
-Внутри гостя должен быть включён `serial-getty@ttyS0.service`.
-
-Serial console сохраняется для наблюдения за загрузкой и диагностики. Поскольку пароль `ops` заблокирован, штатный login по паролю через console не используется. Если недоступны и сеть, и QEMU Guest Agent, применяется recovery/single-user сценарий через Proxmox.
-
-## 13. Очистка перед template
+## 14. Очистка перед template
 
 Перед финальным shutdown очищаются:
 
@@ -185,7 +234,9 @@ Serial console сохраняется для наблюдения за загр�
 
 Клон должен сформировать собственные machine-id и SSH host keys.
 
-## 14. Shell history и MOTD
+Настройка `getty@tty1` autologin является частью базовой политики template и при очистке не удаляется.
+
+## 15. Shell history и MOTD
 
 Через `/etc/profile.d/` включаются timestamps истории и увеличенный history size.
 
@@ -198,7 +249,7 @@ Infrastructure: zsergeyru/proxmox
 Do not store secrets in Git.
 ```
 
-## 15. Информация о template
+## 16. Информация о template
 
 ```text
 /etc/vm-template-info
@@ -214,7 +265,7 @@ Source: zsergeyru/proxmox
 Build-Date: <дата сборки>
 ```
 
-## 16. Backup
+## 17. Backup
 
 На первом этапе:
 
@@ -225,11 +276,11 @@ Build-Date: <дата сборки>
 
 Backup с секретами считается чувствительным объектом.
 
-## 17. Что не входит в base template
+## 18. Что не входит в base template
 
 Не устанавливаются заранее Docker/Compose, SmartDNS, AdGuard Home, sing-box, VPN, специальные nftables/PBR rules, Gitea/Jenkins, базы данных, reverse proxy и service-specific users/directories.
 
-## 18. Требования к `create-template.sh`
+## 19. Требования к `create-template.sh`
 
 Скрипт должен:
 
@@ -242,4 +293,7 @@ Backup с секретами считается чувствительным о�
 7. ожидать, что `sshkeys`, hostname/IP задаются конкретному клону через Cloud-Init;
 8. не использовать `cipassword` в штатном deploy-сценарии;
 9. оставлять SSH password authentication выключенным;
-10. при ошибке не удалять существующие VM/storage автоматически.
+10. использовать `vga: std` для основной noVNC console;
+11. настраивать autologin `ops` только на `tty1`;
+12. сохранять `serial0: socket` без autologin как резервный диагностический канал;
+13. при ошибке не удалять существующие VM/storage автоматически.
