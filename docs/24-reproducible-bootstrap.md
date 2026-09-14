@@ -1,70 +1,88 @@
-# Воспроизводимость bootstrap и template
+# Версии и воспроизводимость bootstrap/template
 
 ## Статус
 
-Политика общего bootstrap снята с канонического статуса и будет спроектирована заново.
+Архитектура bootstrap/deploy сохраняется. Пересмотрено только прежнее усложнённое решение по жёсткой фиксации версий и recovery lock.
 
-Для действующего template также отказались от избыточной схемы с pinned Debian build, отдельным version lock и `snapshot.debian.org`.
+С нуля переписываются scripts; архитектурные требования определяются другими документами проекта.
 
 ## Template
 
-Активный builder находится в публичном:
+Активный builder:
 
 ```text
 zsergeyru/proxmox-bootstrap/create-template.sh
 ```
 
-Текущая версия:
+Текущая модель Template-Version 4 намеренно простая:
 
 ```text
-Template-Version: 4
+официальный Debian 13 trixie/latest
+→ SHA-512 verification
+→ обычные Debian repositories
+→ apt update/full-upgrade
+→ сборка template
 ```
 
-Builder использует:
+Не используются:
 
 ```text
-Debian 13 Trixie current cloud image из trixie/latest
-SHA-512 verification из того же upstream каталога
-обычные Debian repositories
-apt update/full-upgrade на момент сборки
+pinned Debian cloud build
+snapshot.debian.org
+отдельный template version lock
+recovery mode для builder
 ```
 
-То есть две сборки в разные даты могут получить разные версии Debian packages. Для домашней инфраструктуры это сейчас принято как нормальный и более простой вариант.
+При этом фактически использованный image и его SHA-512 записываются в `/etc/vm-template-info`, поэтому происхождение конкретного созданного template остаётся видимым.
 
-## Что фиксируется
+## Новые bootstrap/deploy scripts
 
-В `/etc/vm-template-info` сохраняются фактические данные конкретной сборки:
+Для будущих scripts не действует прежнее требование обязательно фиксировать каждую внешнюю версию.
+
+Базовый принцип для домашней инфраструктуры:
 
 ```text
-Template-Version
-Source-Image
-Source-Image-SHA512
-Build-Date
-Kernel-Flavor
-Console modes
+обычная установка
+→ актуальные stable версии
+→ проверка результата
 ```
 
-Это даёт достаточную трассируемость без отдельной системы version lock.
+Если для конкретного компонента позже потребуется pin/recovery baseline, это добавляется точечно и обоснованно, а не как обязательный общий механизм для всей инфраструктуры.
 
-## Что больше не используется
+Это implementation/versioning policy и она не отменяет архитектуру из:
 
-Для template больше не являются требованиями:
+- [`20-pve-initialization.md`](20-pve-initialization.md);
+- [`21-pve-filesystem-layout.md`](21-pve-filesystem-layout.md);
+- [`31-bootstrap.md`](31-bootstrap.md);
+- AI/guest ADR.
+
+## Что отменено из предыдущего эксперимента
+
+Не являются обязательными требованиями новой реализации:
 
 ```text
-фиксированный Debian cloud build ID
-Debian APT snapshot timestamp
-bootstrap-versions.env
-recovery lock для template
+BOOTSTRAP_MODE=normal/recovery
+общий bootstrap-versions.env
+immutable BOOTSTRAP_REF для каждого запуска
+Docker exact-version + apt-mark hold
+Hermes exact commit pin
+Proximo exact package pin
+Debian APT snapshot
 ```
 
-Экспериментальная Template v5 с такой схемой сохранена в Git history, но не является действующей архитектурой.
+Эти механизмы сохранены в Git history/archive и могут быть использованы точечно, если появится реальная необходимость.
 
-## Остальной bootstrap
+## Что остаётся обязательным
 
-Предыдущие решения по PVE bootstrap, Docker, Proximo, Hermes, AI Control, recovery и deploy workflow также не считаются принятыми и будут спроектированы заново.
+Даже при простой модели новые scripts должны:
 
-Нельзя автоматически переносить прежние assumptions о `BOOTSTRAP_REF`, package pins, Docker hold, Hermes commit pin и подобных механизмах в новую реализацию.
+- проверять скачиваемые artefacts штатными checksum/signature механизмами, если они доступны;
+- не хранить secrets в Git;
+- явно проверять результат установки;
+- не делать молчаливый destructive overwrite;
+- оставлять достаточно информации для диагностики того, что фактически установлено;
+- соблюдать принятую архитектуру и security boundaries.
 
-## Главный текущий принцип
+## Главный принцип
 
-Для template важны простота, проверка скачанного образа и понятный smoke test после изменений. Полная повторяемость package universe сейчас не является целью.
+> Не усложнять управление версиями без практической необходимости: использовать актуальные stable-компоненты, проверять результат и добавлять pin/recovery механизмы только там, где они действительно нужны.
