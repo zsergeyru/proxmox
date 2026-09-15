@@ -71,7 +71,7 @@ Semaphore
 → необязательный web-интерфейс к Ansible
 ```
 
-Для Debian-инфраструктуры используется единый административный пользователь `ops`.
+Для управляемой Debian-инфраструктуры используется единый management user `root`. Пароль root заблокирован; SSH допускается только по public key. Разные потребители используют разные SSH identities, а не разные Linux-пользователи.
 
 ## Сеть
 
@@ -129,5 +129,6 @@ guest.yaml
 - persistent data и secrets не являются `rootfs/`;
 - deployer может выполнять только ограниченный bootstrap, необходимый для handoff;
 - Ansible — штатный повторяемый deploy внутри Linux-гостей;
-- SSH сохраняется как базовый аварийный канал;
+- SSH сохраняется как базовый административный и аварийный канал;
+- root password authentication отключён, доступ выдаётся независимыми SSH-ключами;
 - secrets, tokens, passwords и private keys в Git не добавляются.
