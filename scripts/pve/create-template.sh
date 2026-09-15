@@ -171,6 +171,12 @@ timezone: Europe/Moscow
 ssh_pwauth: false
 disable_root: true
 
+# В проекте используется обычный SSH по сети. Автоматические SSH-сокеты
+# systemd через AF_VSOCK/AF_UNIX не нужны и отключаются максимально рано.
+bootcmd:
+  - [mkdir, -p, /etc/systemd/system-generators]
+  - [ln, -sfn, /dev/null, /etc/systemd/system-generators/systemd-ssh-generator]
+
 users:
   - default
   - name: ops
