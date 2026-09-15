@@ -1,14 +1,11 @@
-schema_version: 3
+schema_version: 4
 vmid: 301
 name: ai-control
-type: vm
+profile: debian-vm
 state: planned
 deployable: true
-node: pve
 
 description: Target central AI infrastructure control plane
-
-protection: false
 
 placement:
   pool: null
@@ -19,32 +16,11 @@ resources:
   memory_mb: 4096
   disk:
     size_gb: 24
-    storage: local-lvm
 
 network:
-  bridge: vmbr0
-  mode: current
-  default_gateway: current
   current:
     ipv4:
       address: 192.168.3.1/16
-      gateway: 192.168.1.1
   target:
     ipv4:
       address: 10.0.3.1/16
-      gateway: 10.0.0.1
-
-boot:
-  onboot: true
-  start_after_deploy: true
-
-management:
-  ssh:
-    user: ops
-    port: 22
-
-vm:
-  source:
-    template_vmid: 9000
-    clone: full
-  guest_agent: true

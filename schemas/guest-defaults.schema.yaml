@@ -1,0 +1,196 @@
+$schema: https://json-schema.org/draft/2020-12/schema
+$title: Proxmox guest defaults and profiles
+type: object
+additionalProperties: false
+required: [schema_version, defaults, network_stages, profiles]
+properties:
+  schema_version:
+    const: 1
+  defaults:
+    $ref: '#/$defs/fragment'
+  network_stages:
+    type: object
+    additionalProperties: false
+    required: [current, target]
+    properties:
+      current:
+        $ref: '#/$defs/networkStage'
+      target:
+        $ref: '#/$defs/networkStage'
+  profiles:
+    type: object
+    minProperties: 1
+    propertyNames:
+      pattern: '^[a-z0-9][a-z0-9-]*$'
+    additionalProperties:
+      $ref: '#/$defs/profile'
+$defs:
+  networkStage:
+    type: object
+    additionalProperties: false
+    required: [subnet, gateway]
+    properties:
+      subnet:
+        type: string
+        minLength: 1
+      gateway:
+        type: string
+        minLength: 1
+  profile:
+    allOf:
+      - $ref: '#/$defs/fragment'
+      - required: [type]
+      - if:
+          properties:
+            type:
+              const: vm
+        then:
+          required: [vm]
+          properties:
+            vm:
+              required: [source, guest_agent]
+              properties:
+                source:
+                  required: [template_vmid, clone]
+      - if:
+          properties:
+            type:
+              const: lxc
+        then:
+          required: [lxc]
+          properties:
+            lxc:
+              required: [source, unprivileged, features]
+              properties:
+                source:
+                  required: [ostemplate, download_if_missing]
+                features:
+                  required: [nesting, keyctl]
+  fragment:
+    type: object
+    additionalProperties: false
+    properties:
+      type:
+        enum: [vm, lxc]
+      node:
+        type: string
+        minLength: 1
+      protection:
+        type: boolean
+      placement:
+        type: object
+        additionalProperties: false
+        properties:
+          pool:
+            type: [string, 'null']
+            minLength: 1
+      resources:
+        type: object
+        additionalProperties: false
+        properties:
+          cpu:
+            type: object
+            additionalProperties: false
+            properties:
+              cores:
+                type: integer
+                minimum: 1
+              type:
+                type: string
+                minLength: 1
+          memory_mb:
+            type: integer
+            minimum: 256
+          ballooning_mb:
+            type: integer
+            minimum: 0
+          swap_mb:
+            type: integer
+            minimum: 0
+          disk:
+            type: object
+            additionalProperties: false
+            properties:
+              size_gb:
+                type: integer
+                minimum: 1
+              storage:
+                type: string
+                minLength: 1
+      network:
+        type: object
+        additionalProperties: false
+        properties:
+          bridge:
+            type: string
+            minLength: 1
+          mode:
+            enum: [current, dual, target]
+          default_gateway:
+            enum: [current, target]
+      boot:
+        type: object
+        additionalProperties: false
+        properties:
+          onboot:
+            type: boolean
+          start_after_deploy:
+            type: boolean
+      management:
+        type: object
+        additionalProperties: false
+        properties:
+          ssh:
+            type: object
+            additionalProperties: false
+            properties:
+              user:
+                type: string
+                minLength: 1
+              port:
+                type: integer
+                minimum: 1
+                maximum: 65535
+      vm:
+        type: object
+        additionalProperties: false
+        properties:
+          source:
+            type: object
+            additionalProperties: false
+            properties:
+              template_vmid:
+                type: integer
+                minimum: 100
+                maximum: 9999
+              clone:
+                enum: [full]
+          guest_agent:
+            type: boolean
+          bios:
+            enum: [ovmf, seabios]
+      lxc:
+        type: object
+        additionalProperties: false
+        properties:
+          container_runtime:
+            enum: [docker]
+          source:
+            type: object
+            additionalProperties: false
+            properties:
+              ostemplate:
+                type: string
+                minLength: 1
+              download_if_missing:
+                type: boolean
+          unprivileged:
+            type: boolean
+          features:
+            type: object
+            additionalProperties: false
+            properties:
+              nesting:
+                type: boolean
+              keyctl:
+                type: boolean

@@ -85,26 +85,45 @@ target:  VMID XYZ → 10.0.X.YZ/16
 
 Исключения для `network-gateway` больше нет: VMID `109` подчиняется общей формуле и не конфликтует с gateway `.1`.
 
-## Сетевая модель guest manifest
+## Централизованная сетевая конфигурация guests
 
-`guest.yaml` хранит обе адресные точки и явное состояние миграции:
+Общие stage-параметры больше не дублируются в каждом `guest.yaml`.
+
+Канонический файл `guests/defaults.yaml` содержит:
+
+```yaml
+defaults:
+  network:
+    bridge: vmbr0
+    mode: current
+    default_gateway: current
+
+network_stages:
+  current:
+    subnet: 192.168.0.0/16
+    gateway: 192.168.1.1
+  target:
+    subnet: 10.0.0.0/16
+    gateway: 10.0.0.1
+```
+
+То есть bridge, обычный migration mode и gateway selector имеют project default; subnet и реальный gateway IP каждой стадии имеют один источник истины; gateway IP не копируется по manifests.
+
+Конкретный guest хранит свои management addresses:
 
 ```yaml
 network:
-  bridge: vmbr0
-  mode: current
-  default_gateway: current
   current:
     ipv4:
       address: 192.168.3.11/16
-      gateway: 192.168.1.1
   target:
     ipv4:
       address: 10.0.3.11/16
-      gateway: 10.0.0.1
 ```
 
-Режимы:
+Effective state для текущего project default: `bridge=vmbr0`, `mode=current`, default gateway `192.168.1.1`, активен current address, target address остаётся будущим состоянием.
+
+## Сетевые режимы
 
 ```text
 current → активен только 192.168.x.x
@@ -112,11 +131,11 @@ dual    → одновременно активны 192.168.x.x и 10.0.x.x
 target  → активен только 10.0.x.x
 ```
 
-`default_gateway` выбирается отдельно, но default route всегда один:
+`default_gateway` выбирает stage, но default route всегда один:
 
 ```text
-current → 192.168.1.1
-target  → 10.0.0.1
+current → gateway из network_stages.current
+target  → gateway из network_stages.target
 ```
 
 Допустимая последовательность миграции:
@@ -130,30 +149,39 @@ mode=current, default_gateway=current
 
 Невалидны `current + target gateway` и `target + current gateway`.
 
+Общий mode/default можно изменить централизованно. Если миграцию нужно проводить по гостям, конкретный `guest.yaml` может временно переопределить `network.mode` и `network.default_gateway`.
+
 ## Текущее состояние
 
 Сейчас Keenetic и основной gateway не меняются.
 
-Deployable manifests используют:
+В `guests/defaults.yaml` используется:
 
 ```yaml
 mode: current
 default_gateway: current
 ```
 
-То есть target-адреса уже зафиксированы как будущий desired state, но не активируются текущим deploy.
+а central current stage остаётся:
 
-Добавление `10.0.0.1/16` на Keenetic или другой временный router может использоваться позднее для проверки target-сети до переезда, но **не является частью текущего этапа**.
+```yaml
+subnet: 192.168.0.0/16
+gateway: 192.168.1.1
+```
+
+Target-адреса уже записаны в guests как будущий desired state, но текущим deploy не активируются.
+
+Добавление `10.0.0.1/16` на Keenetic или другой временный router может использоваться позднее для проверки target-сети до переезда, но не является частью текущего этапа.
 
 ## Переход на 10.0.0.0/16
 
-Когда будет принято решение начать сетевую миграцию, изменение выполняется через Git manifest по шагам:
+Когда будет принято решение начать миграцию:
 
-1. `current → dual`, gateway остаётся `current`;
+1. перевести нужные guests или общий default `current → dual`, сохранив `default_gateway: current`;
 2. проверить доступ к обоим IP и зависимости сервисов;
 3. в `dual` переключить `default_gateway: target`;
 4. проверить исходящий трафик, DNS, VPN/PBR и management;
-5. после проверки перейти `dual → target` и удалить legacy IPv4.
+5. после проверки перейти `dual → target`.
 
 В новой квартире `10.0.0.1` предоставляет OpenWrt. Если target-адреса проверены заранее, физический переезд не требует массовой смены серверных IP.
 

@@ -1,8 +1,17 @@
 $schema: https://json-schema.org/draft/2020-12/schema
-$title: Proxmox guest source manifest
+$title: Proxmox effective guest desired state
 type: object
 additionalProperties: false
-required: [schema_version, vmid, name, state, deployable, description]
+required:
+  - schema_version
+  - vmid
+  - name
+  - profile
+  - type
+  - state
+  - deployable
+  - node
+  - description
 properties:
   schema_version:
     const: 4
@@ -17,11 +26,11 @@ properties:
     type: string
     pattern: '^[a-z0-9][a-z0-9-]*$'
   type:
-    enum: [vm, lxc, undecided]
+    enum: [vm, lxc]
   state:
     enum: [planned, active, bootstrap, legacy]
   deployable:
-    type: boolean
+    const: true
   node:
     type: string
     minLength: 1
@@ -31,23 +40,9 @@ properties:
   protection:
     type: boolean
   placement:
-    $ref: '#/$defs/placement'
-  resources:
-    $ref: '#/$defs/resources'
-  network:
-    $ref: '#/$defs/sourceNetwork'
-  boot:
-    $ref: '#/$defs/boot'
-  management:
-    $ref: '#/$defs/management'
-  vm:
-    $ref: '#/$defs/vm'
-  lxc:
-    $ref: '#/$defs/lxc'
-$defs:
-  placement:
     type: object
     additionalProperties: false
+    required: [pool]
     properties:
       pool:
         type: [string, 'null']
@@ -55,10 +50,12 @@ $defs:
   resources:
     type: object
     additionalProperties: false
+    required: [cpu, memory_mb, disk]
     properties:
       cpu:
         type: object
         additionalProperties: false
+        required: [cores]
         properties:
           cores:
             type: integer
@@ -78,6 +75,7 @@ $defs:
       disk:
         type: object
         additionalProperties: false
+        required: [size_gb, storage]
         properties:
           size_gb:
             type: integer
@@ -85,9 +83,10 @@ $defs:
           storage:
             type: string
             minLength: 1
-  sourceNetwork:
+  network:
     type: object
     additionalProperties: false
+    required: [bridge, mode, default_gateway, current, target]
     properties:
       bridge:
         type: string
@@ -97,25 +96,30 @@ $defs:
       default_gateway:
         enum: [current, target]
       current:
-        $ref: '#/$defs/sourceNetworkStage'
+        $ref: '#/$defs/networkStage'
       target:
-        $ref: '#/$defs/sourceNetworkStage'
-  sourceNetworkStage:
-    type: object
-    additionalProperties: false
-    required: [ipv4]
-    properties:
-      ipv4:
-        type: object
-        additionalProperties: false
-        required: [address]
-        properties:
-          address:
-            type: string
-            minLength: 1
+        $ref: '#/$defs/networkStage'
+    allOf:
+      - if:
+          properties:
+            mode:
+              const: current
+        then:
+          properties:
+            default_gateway:
+              const: current
+      - if:
+          properties:
+            mode:
+              const: target
+        then:
+          properties:
+            default_gateway:
+              const: target
   boot:
     type: object
     additionalProperties: false
+    required: [onboot, start_after_deploy]
     properties:
       onboot:
         type: boolean
@@ -124,10 +128,12 @@ $defs:
   management:
     type: object
     additionalProperties: false
+    required: [ssh]
     properties:
       ssh:
         type: object
         additionalProperties: false
+        required: [user, port]
         properties:
           user:
             type: string
@@ -143,6 +149,7 @@ $defs:
       source:
         type: object
         additionalProperties: false
+        required: [template_vmid, clone]
         properties:
           template_vmid:
             type: integer
@@ -163,6 +170,7 @@ $defs:
       source:
         type: object
         additionalProperties: false
+        required: [ostemplate, download_if_missing]
         properties:
           ostemplate:
             type: string
@@ -174,42 +182,69 @@ $defs:
       features:
         type: object
         additionalProperties: false
+        required: [nesting, keyctl]
         properties:
           nesting:
             type: boolean
           keyctl:
             type: boolean
+$defs:
+  networkStage:
+    type: object
+    additionalProperties: false
+    required: [ipv4]
+    properties:
+      ipv4:
+        type: object
+        additionalProperties: false
+        required: [address, gateway]
+        properties:
+          address:
+            type: string
+            minLength: 1
+          gateway:
+            type: string
+            minLength: 1
 allOf:
+  - required: [protection, placement, resources, network, boot, management]
   - if:
-      required: [deployable]
-      properties:
-        deployable:
-          const: true
-    then:
-      required: [profile, resources, network]
-      properties:
-        resources:
-          required: [cpu, memory_mb, disk]
-          properties:
-            cpu:
-              required: [cores]
-            disk:
-              required: [size_gb]
-        network:
-          required: [current, target]
-  - if:
-      required: [deployable]
-      properties:
-        deployable:
-          const: false
-    then:
-      required: [type]
-  - if:
-      required: [type]
       properties:
         type:
-          const: undecided
+          const: vm
+    then:
+      required: [vm]
+      properties:
+        vm:
+          required: [source, guest_agent]
+  - if:
+      properties:
+        type:
+          const: lxc
+    then:
+      required: [lxc]
+      properties:
+        resources:
+          required: [swap_mb]
+        lxc:
+          required: [source, unprivileged, features]
+  - if:
+      properties:
+        lxc:
+          type: object
+          required: [container_runtime]
+          properties:
+            container_runtime:
+              const: docker
+      required: [lxc]
     then:
       properties:
-        deployable:
-          const: false
+        lxc:
+          properties:
+            unprivileged:
+              const: true
+            features:
+              properties:
+                nesting:
+                  const: true
+                keyctl:
+                  const: true

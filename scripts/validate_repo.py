@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import copy
 import ipaddress
 import re
 import subprocess
@@ -15,8 +16,11 @@ from jsonschema import Draft202012Validator
 
 ROOT = Path(__file__).resolve().parents[1]
 GUESTS = ROOT / "guests"
+GUEST_DEFAULTS = GUESTS / "defaults.yaml"
 VMID_PLAN = ROOT / "docs" / "11-vmid-plan.md"
 GUEST_SCHEMA = ROOT / "schemas" / "guest.schema.yaml"
+GUEST_DEFAULTS_SCHEMA = ROOT / "schemas" / "guest-defaults.schema.yaml"
+GUEST_EFFECTIVE_SCHEMA = ROOT / "schemas" / "guest-effective.schema.yaml"
 
 GUEST_DIR_RE = re.compile(r"^(\d{3})-(.+)$")
 PLAN_VMID_RE = re.compile(r"^- `(?P<vmid>\d{3})`\s+—", re.MULTILINE)
@@ -81,12 +85,24 @@ def planned_vmids() -> set[int]:
     return set(values)
 
 
-def load_guest_schema() -> Draft202012Validator:
+def load_mapping(path: Path) -> dict | None:
     try:
-        schema = yaml.safe_load(GUEST_SCHEMA.read_text(encoding="utf-8"))
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        fail(f"cannot parse {path.relative_to(ROOT)}: {exc}")
+        return None
+    if not isinstance(data, dict):
+        fail(f"{path.relative_to(ROOT)} must contain a YAML mapping")
+        return None
+    return data
+
+
+def load_schema(path: Path) -> Draft202012Validator:
+    try:
+        schema = yaml.safe_load(path.read_text(encoding="utf-8"))
         Draft202012Validator.check_schema(schema)
     except Exception as exc:
-        fail(f"invalid guest schema {GUEST_SCHEMA.relative_to(ROOT)}: {exc}")
+        fail(f"invalid schema {path.relative_to(ROOT)}: {exc}")
         return Draft202012Validator({})
     return Draft202012Validator(schema)
 
@@ -96,95 +112,37 @@ def format_schema_path(error) -> str:
     return ".".join(parts) if parts else "<root>"
 
 
-def validate_manifest_schema(
-    *, rel: Path, data: dict, schema_validator: Draft202012Validator
-) -> bool:
-    manifest_errors = sorted(
-        schema_validator.iter_errors(data),
-        key=lambda error: (list(error.absolute_path), error.message),
-    )
-    for error in manifest_errors:
-        fail(f"{rel}: schema error at {format_schema_path(error)}: {error.message}")
-    return not manifest_errors
-
-
-def expected_management_ip(vmid: int, stage: str) -> ipaddress.IPv4Address:
-    text = f"{vmid:03d}"
-    third = int(text[0])
-    fourth = int(text[1:])
-    if stage == "current":
-        return ipaddress.ip_address(f"192.168.{third}.{fourth}")
-    if stage == "target":
-        return ipaddress.ip_address(f"10.0.{third}.{fourth}")
-    raise ValueError(f"unknown network stage: {stage}")
-
-
-def validate_stage_ip(
+def validate_schema(
     *,
     rel: Path,
-    vmid: int,
-    stage: str,
-    network: dict,
-    static_ips: dict[ipaddress.IPv4Address, Path],
-) -> None:
-    stage_data = network.get(stage)
-    if stage_data is None:
-        return
-
-    ipv4 = stage_data.get("ipv4", {})
-    address_text = ipv4.get("address")
-    gateway_text = ipv4.get("gateway")
-
-    try:
-        interface = ipaddress.ip_interface(address_text)
-    except ValueError as exc:
-        fail(f"{rel}: invalid network.{stage}.ipv4.address {address_text!r}: {exc}")
-        return
-
-    if not isinstance(interface, ipaddress.IPv4Interface):
-        fail(f"{rel}: network.{stage}.ipv4.address must be IPv4")
-        return
-
-    if interface.network.prefixlen != 16:
-        fail(
-            f"{rel}: network.{stage}.ipv4.address must use /16, "
-            f"got /{interface.network.prefixlen}"
-        )
-
-    address = interface.ip
-    if address in static_ips:
-        fail(f"duplicate static IP {address}: {static_ips[address]} and {rel}")
-    else:
-        static_ips[address] = rel
-
-    expected = expected_management_ip(vmid, stage)
-    if address != expected:
-        fail(
-            f"{rel}: {stage} management IP {address} does not match VMID rule, "
-            f"expected {expected}"
-        )
-
-    try:
-        gateway = ipaddress.ip_address(gateway_text)
-    except ValueError as exc:
-        fail(f"{rel}: invalid network.{stage}.ipv4.gateway {gateway_text!r}: {exc}")
-        return
-
-    if not isinstance(gateway, ipaddress.IPv4Address):
-        fail(f"{rel}: network.{stage}.ipv4.gateway must be IPv4")
-        return
-
-    if gateway not in interface.network:
-        fail(
-            f"{rel}: network.{stage}.ipv4.gateway {gateway} is outside "
-            f"{interface.network}"
-        )
-
-    expected_gateway = ipaddress.ip_address(
-        "192.168.1.1" if stage == "current" else "10.0.0.1"
+    data: dict,
+    validator: Draft202012Validator,
+    label: str = "schema",
+) -> bool:
+    schema_errors = sorted(
+        validator.iter_errors(data),
+        key=lambda error: (list(error.absolute_path), error.message),
     )
-    if gateway != expected_gateway:
-        fail(f"{rel}: {stage} gateway must be {expected_gateway}, got {gateway}")
+    for error in schema_errors:
+        fail(
+            f"{rel}: {label} error at {format_schema_path(error)}: "
+            f"{error.message}"
+        )
+    return not schema_errors
+
+
+def deep_merge(base: dict, overlay: dict) -> dict:
+    result = copy.deepcopy(base)
+    for key, value in overlay.items():
+        if (
+            key in result
+            and isinstance(result[key], dict)
+            and isinstance(value, dict)
+        ):
+            result[key] = deep_merge(result[key], value)
+        else:
+            result[key] = copy.deepcopy(value)
+    return result
 
 
 def walk_mapping_keys(value, path: tuple[str, ...] = ()):
@@ -202,21 +160,190 @@ def validate_manifest_secrets(rel: Path, data: dict) -> None:
     for key_path, key in walk_mapping_keys(data):
         if key.lower() in FORBIDDEN_MANIFEST_KEYS:
             fail(
-                f"{rel}: secret-like key is forbidden in guest.yaml: "
+                f"{rel}: secret-like key is forbidden: "
                 f"{'.'.join(key_path)}"
             )
 
 
-def validate_deployable(rel: Path, data: dict) -> None:
-    if not data["deployable"]:
+def validate_network_defaults(defaults: dict) -> dict[str, dict]:
+    rel = GUEST_DEFAULTS.relative_to(ROOT)
+    stages = defaults.get("network_stages", {})
+    validated: dict[str, dict] = {}
+
+    for stage in ("current", "target"):
+        stage_data = stages.get(stage)
+        if not isinstance(stage_data, dict):
+            continue
+
+        subnet_text = stage_data.get("subnet")
+        gateway_text = stage_data.get("gateway")
+        try:
+            subnet = ipaddress.ip_network(subnet_text, strict=True)
+        except ValueError as exc:
+            fail(f"{rel}: invalid network_stages.{stage}.subnet {subnet_text!r}: {exc}")
+            continue
+
+        if not isinstance(subnet, ipaddress.IPv4Network):
+            fail(f"{rel}: network_stages.{stage}.subnet must be IPv4")
+            continue
+        if subnet.prefixlen != 16:
+            fail(f"{rel}: network_stages.{stage}.subnet must use /16")
+
+        try:
+            gateway = ipaddress.ip_address(gateway_text)
+        except ValueError as exc:
+            fail(
+                f"{rel}: invalid network_stages.{stage}.gateway "
+                f"{gateway_text!r}: {exc}"
+            )
+            continue
+
+        if not isinstance(gateway, ipaddress.IPv4Address):
+            fail(f"{rel}: network_stages.{stage}.gateway must be IPv4")
+            continue
+        if gateway not in subnet:
+            fail(
+                f"{rel}: network_stages.{stage}.gateway {gateway} "
+                f"is outside {subnet}"
+            )
+            continue
+
+        validated[stage] = {"subnet": subnet, "gateway": gateway}
+
+    return validated
+
+
+def resolve_effective_manifest(
+    *,
+    rel: Path,
+    source: dict,
+    defaults: dict,
+) -> dict | None:
+    profile_name = source.get("profile")
+    profiles = defaults.get("profiles", {})
+    profile = profiles.get(profile_name)
+
+    if not isinstance(profile, dict):
+        fail(f"{rel}: unknown guest profile {profile_name!r}")
+        return None
+
+    effective = deep_merge(defaults.get("defaults", {}), profile)
+    effective = deep_merge(effective, source)
+
+    network = effective.get("network")
+    if isinstance(network, dict):
+        stage_defaults = defaults.get("network_stages", {})
+        for stage in ("current", "target"):
+            stage_data = network.get(stage)
+            if not isinstance(stage_data, dict):
+                continue
+            ipv4 = stage_data.get("ipv4")
+            central = stage_defaults.get(stage)
+            if isinstance(ipv4, dict) and isinstance(central, dict):
+                ipv4["gateway"] = central.get("gateway")
+
+    return effective
+
+
+def expected_management_ip(
+    vmid: int,
+    stage_config: dict,
+) -> ipaddress.IPv4Address:
+    subnet: ipaddress.IPv4Network = stage_config["subnet"]
+    octets = str(subnet.network_address).split(".")
+    vmid_text = f"{vmid:03d}"
+    third = int(vmid_text[0])
+    fourth = int(vmid_text[1:])
+    return ipaddress.ip_address(f"{octets[0]}.{octets[1]}.{third}.{fourth}")
+
+
+def validate_stage_address(
+    *,
+    rel: Path,
+    vmid: int,
+    stage: str,
+    network: dict,
+    stage_configs: dict[str, dict],
+    static_ips: dict[ipaddress.IPv4Address, Path],
+    require_gateway: bool,
+) -> None:
+    stage_data = network.get(stage)
+    if stage_data is None:
         return
 
-    vmid = data["vmid"]
-    guest_type = data["type"]
-    pool = data["placement"]["pool"]
+    ipv4 = stage_data.get("ipv4", {})
+    address_text = ipv4.get("address")
 
-    if guest_type == "undecided":
-        fail(f"{rel}: deployable guest cannot have type 'undecided'")
+    try:
+        interface = ipaddress.ip_interface(address_text)
+    except ValueError as exc:
+        fail(f"{rel}: invalid network.{stage}.ipv4.address {address_text!r}: {exc}")
+        return
+
+    if not isinstance(interface, ipaddress.IPv4Interface):
+        fail(f"{rel}: network.{stage}.ipv4.address must be IPv4")
+        return
+
+    config = stage_configs.get(stage)
+    if config is None:
+        fail(f"{rel}: no validated central network stage {stage!r}")
+        return
+
+    subnet: ipaddress.IPv4Network = config["subnet"]
+    if interface.network.prefixlen != subnet.prefixlen:
+        fail(
+            f"{rel}: network.{stage}.ipv4.address must use /{subnet.prefixlen}, "
+            f"got /{interface.network.prefixlen}"
+        )
+
+    address = interface.ip
+    if address not in subnet:
+        fail(f"{rel}: network.{stage}.ipv4.address {address} is outside {subnet}")
+
+    if address in static_ips:
+        fail(f"duplicate static IP {address}: {static_ips[address]} and {rel}")
+    else:
+        static_ips[address] = rel
+
+    expected = expected_management_ip(vmid, config)
+    if address != expected:
+        fail(
+            f"{rel}: {stage} management IP {address} does not match VMID rule, "
+            f"expected {expected}"
+        )
+
+    if not require_gateway:
+        return
+
+    gateway_text = ipv4.get("gateway")
+    try:
+        gateway = ipaddress.ip_address(gateway_text)
+    except ValueError as exc:
+        fail(f"{rel}: invalid effective {stage} gateway {gateway_text!r}: {exc}")
+        return
+
+    expected_gateway: ipaddress.IPv4Address = config["gateway"]
+    if gateway != expected_gateway:
+        fail(
+            f"{rel}: effective {stage} gateway must come from guests/defaults.yaml "
+            f"and equal {expected_gateway}, got {gateway}"
+        )
+
+
+def validate_deployable(rel: Path, source: dict, effective: dict) -> None:
+    if not source["deployable"]:
+        return
+
+    for forbidden in ("type", "vm", "lxc"):
+        if forbidden in source:
+            fail(
+                f"{rel}: deployable guest must get {forbidden!r} from its profile; "
+                f"create or change a profile instead of overriding it locally"
+            )
+
+    vmid = effective["vmid"]
+    guest_type = effective["type"]
+    pool = effective["placement"]["pool"]
 
     if vmid in SELF_MANAGED_EXCLUSIONS:
         if pool is not None:
@@ -224,22 +351,22 @@ def validate_deployable(rel: Path, data: dict) -> None:
     elif pool != "managed":
         fail(f"{rel}: deployable managed guest must use placement.pool: managed")
 
-    ssh = data["management"]["ssh"]
+    ssh = effective["management"]["ssh"]
     if ssh["user"] != "ops":
-        fail(f"{rel}: deployable guest management.ssh.user must be 'ops'")
+        fail(f"{rel}: effective management.ssh.user must be 'ops'")
     if ssh["port"] != 22:
-        fail(f"{rel}: deployable guest management.ssh.port must be 22")
+        fail(f"{rel}: effective management.ssh.port must be 22")
 
     if guest_type == "vm":
-        source = data["vm"]["source"]
-        if source["template_vmid"] == vmid:
+        source_vm = effective["vm"]["source"]
+        if source_vm["template_vmid"] == vmid:
             fail(f"{rel}: VM cannot clone from itself")
-        if data["vm"]["guest_agent"] is not True:
+        if effective["vm"]["guest_agent"] is not True:
             fail(f"{rel}: deployable VM must enable QEMU guest agent")
 
     if guest_type == "lxc":
-        source = data["lxc"]["source"]
-        ostemplate = source["ostemplate"]
+        source_lxc = effective["lxc"]["source"]
+        ostemplate = source_lxc["ostemplate"]
         lowered = ostemplate.lower()
         if any(marker in lowered for marker in FORBIDDEN_SOURCE_MARKERS):
             fail(f"{rel}: lxc.source.ostemplate must be pinned, got {ostemplate!r}")
@@ -250,9 +377,66 @@ def validate_deployable(rel: Path, data: dict) -> None:
             )
 
 
+def validate_profiles(defaults: dict) -> None:
+    rel = GUEST_DEFAULTS.relative_to(ROOT)
+    for name, profile in defaults.get("profiles", {}).items():
+        if not isinstance(profile, dict):
+            continue
+
+        guest_type = profile.get("type")
+        if guest_type == "vm":
+            vm = profile.get("vm", {})
+            if vm.get("guest_agent") is not True:
+                fail(f"{rel}: profile {name!r} must enable QEMU guest agent")
+
+        if guest_type == "lxc":
+            lxc = profile.get("lxc", {})
+            source = lxc.get("source", {})
+            ostemplate = source.get("ostemplate", "")
+            lowered = ostemplate.lower()
+            if any(marker in lowered for marker in FORBIDDEN_SOURCE_MARKERS):
+                fail(
+                    f"{rel}: profile {name!r} lxc.source.ostemplate "
+                    f"must be pinned, got {ostemplate!r}"
+                )
+            if not LXC_OSTEMPLATE_RE.fullmatch(ostemplate):
+                fail(
+                    f"{rel}: profile {name!r} lxc.source.ostemplate must be "
+                    f"a concrete Proxmox vztmpl volume, got {ostemplate!r}"
+                )
+            if lxc.get("container_runtime") == "docker":
+                features = lxc.get("features", {})
+                if lxc.get("unprivileged") is not True:
+                    fail(f"{rel}: Docker profile {name!r} must be unprivileged")
+                if features.get("nesting") is not True or features.get("keyctl") is not True:
+                    fail(
+                        f"{rel}: Docker profile {name!r} must enable nesting and keyctl"
+                    )
+
+
 def validate_guest_manifests() -> None:
     plan = planned_vmids()
-    schema_validator = load_guest_schema()
+    source_validator = load_schema(GUEST_SCHEMA)
+    defaults_validator = load_schema(GUEST_DEFAULTS_SCHEMA)
+    effective_validator = load_schema(GUEST_EFFECTIVE_SCHEMA)
+
+    defaults = load_mapping(GUEST_DEFAULTS)
+    if defaults is None:
+        return
+
+    defaults_rel = GUEST_DEFAULTS.relative_to(ROOT)
+    validate_manifest_secrets(defaults_rel, defaults)
+    defaults_ok = validate_schema(
+        rel=defaults_rel,
+        data=defaults,
+        validator=defaults_validator,
+        label="defaults schema",
+    )
+    stage_configs = validate_network_defaults(defaults)
+    validate_profiles(defaults)
+    if not defaults_ok:
+        return
+
     seen_vmids: dict[int, Path] = {}
     static_ips: dict[ipaddress.IPv4Address, Path] = {}
 
@@ -273,18 +457,15 @@ def validate_guest_manifests() -> None:
             )
             continue
 
-        try:
-            data = yaml.safe_load(manifest.read_text(encoding="utf-8"))
-        except Exception as exc:
-            fail(f"cannot parse {rel}: {exc}")
+        data = load_mapping(manifest)
+        if data is None:
             continue
 
-        if not isinstance(data, dict):
-            fail(f"{rel} must contain a YAML mapping")
-            continue
-
-        if not validate_manifest_schema(
-            rel=rel, data=data, schema_validator=schema_validator
+        if not validate_schema(
+            rel=rel,
+            data=data,
+            validator=source_validator,
+            label="source schema",
         ):
             continue
 
@@ -308,18 +489,45 @@ def validate_guest_manifests() -> None:
 
         validate_manifest_secrets(rel, data)
 
-        network = data.get("network")
-        if isinstance(network, dict):
+        if data["deployable"]:
+            effective = resolve_effective_manifest(rel=rel, source=data, defaults=defaults)
+            if effective is None:
+                continue
+
+            if not validate_schema(
+                rel=rel,
+                data=effective,
+                validator=effective_validator,
+                label="effective schema",
+            ):
+                continue
+
+            network = effective["network"]
             for stage in ("current", "target"):
-                validate_stage_ip(
+                validate_stage_address(
                     rel=rel,
                     vmid=vmid,
                     stage=stage,
                     network=network,
+                    stage_configs=stage_configs,
                     static_ips=static_ips,
+                    require_gateway=True,
                 )
 
-        validate_deployable(rel, data)
+            validate_deployable(rel, data, effective)
+        else:
+            network = data.get("network")
+            if isinstance(network, dict):
+                for stage in ("current", "target"):
+                    validate_stage_address(
+                        rel=rel,
+                        vmid=vmid,
+                        stage=stage,
+                        network=network,
+                        stage_configs=stage_configs,
+                        static_ips=static_ips,
+                        require_gateway=False,
+                    )
 
 
 def validate_secret_files(files: list[Path]) -> None:
@@ -373,11 +581,7 @@ def validate_markdown_links(files: list[Path]) -> None:
                 else (path.parent / target)
             )
             if not resolved.exists():
-                shown = (
-                    resolved.relative_to(ROOT)
-                    if resolved.is_relative_to(ROOT)
-                    else resolved
-                )
+                shown = resolved.relative_to(ROOT) if resolved.is_relative_to(ROOT) else resolved
                 fail(
                     f"broken local link in {path.relative_to(ROOT)}: "
                     f"{raw_target} -> {shown}"

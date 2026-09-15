@@ -1,17 +1,11 @@
-schema_version: 3
+schema_version: 4
 vmid: 109
 name: network-gateway
-type: vm
+profile: debian-vm
 state: planned
 deployable: true
-node: pve
 
 description: Network gateway, DNS, VPN and policy routing
-
-protection: false
-
-placement:
-  pool: managed
 
 resources:
   cpu:
@@ -19,32 +13,11 @@ resources:
   memory_mb: 2048
   disk:
     size_gb: 16
-    storage: local-lvm
 
 network:
-  bridge: vmbr0
-  mode: current
-  default_gateway: current
   current:
     ipv4:
       address: 192.168.1.9/16
-      gateway: 192.168.1.1
   target:
     ipv4:
       address: 10.0.1.9/16
-      gateway: 10.0.0.1
-
-boot:
-  onboot: true
-  start_after_deploy: true
-
-management:
-  ssh:
-    user: ops
-    port: 22
-
-vm:
-  source:
-    template_vmid: 9000
-    clone: full
-  guest_agent: true

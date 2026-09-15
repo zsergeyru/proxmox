@@ -9,99 +9,112 @@
 ## Структура
 
 ```text
-<VMID>-<name>/
+guests/
+├── defaults.yaml      # общие deploy defaults, network stages и profiles
 ├── README.md
-├── guest.yaml
-├── decisions/        # при необходимости
-├── STATUS.md         # observed drift/миграция
-└── rootfs/           # управляемые файлы по реальным абсолютным путям
+└── <VMID>-<name>/
+    ├── README.md
+    ├── guest.yaml     # индивидуальные параметры/overrides
+    ├── decisions/     # при необходимости
+    ├── STATUS.md      # observed drift/миграция
+    └── rootfs/        # управляемые файлы по реальным абсолютным путям
 ```
 
-`guest.yaml` обязателен для каждого каталога с VMID. Если параметры ещё не приняты, это выражается самим manifest через `deployable: false`, а не отсутствием файла.
+`guest.yaml` обязателен для каждого каталога с VMID. Если параметры ещё не приняты, это выражается через `deployable: false`, а не отсутствием файла.
 
-## guest.yaml schema v3
+## guest schema v4
 
-Базовые обязательные поля:
+Effective deploy state строится так:
+
+```text
+defaults.yaml
+→ profile
+→ guest.yaml overrides
+→ central network gateway
+→ effective desired state
+```
+
+Все слои находятся в Git. Никаких скрытых deploy defaults внутри `deploy-guest` быть не должно.
+
+### Central defaults
+
+`defaults.yaml` централизует node, обычный pool/protection, disk storage, bridge, network mode/default-gateway selector, current/target subnet и gateway, boot policy, management SSH identity и VM/LXC source profiles.
+
+Сейчас общая сеть остаётся:
+
+```text
+mode=current
+default_gateway=current
+current gateway=192.168.1.1
+```
+
+То есть текущий Keenetic не меняется.
+
+### Profiles
+
+Текущие profiles:
+
+```text
+debian-vm
+→ full clone from VM template 9000
+→ QEMU guest agent
+
+docker-lxc
+→ pinned Debian 13 LXC appliance
+→ unprivileged + nesting + keyctl
+```
+
+Если меняется общий LXC archive/template contract, изменение делается в profile один раз.
+
+### Индивидуальный guest
+
+Типичный `311-dev-services/guest.yaml`:
 
 ```yaml
-schema_version: 3
-vmid: 109
-name: network-gateway
-type: vm
+schema_version: 4
+vmid: 311
+name: dev-services
+profile: docker-lxc
 state: planned
 deployable: true
-node: pve
 
-description: Network gateway, DNS, VPN and policy routing
-```
+description: Ansible, Semaphore, Git, CI and development services
 
-Допустимые `state`:
-
-```text
-planned   → запланирован, ещё не рабочий
-active    → рабочий production/целевой объект
-bootstrap → временный рабочий объект для развёртывания/миграции
-legacy    → старый объект, сохраняемый до планового вывода
-```
-
-Допустимые `type`: `vm`, `lxc`, `undecided`. `undecided` разрешён только при `deployable: false`.
-
-### `deployable`
-
-```text
-true
-→ manifest полностью достаточен для PVE PLAN/APPLY
-→ CI требует source/resources/network/boot/management/placement/protection
-
-false
-→ объект нельзя создавать через универсальный deployer
-→ manifest хранит резерв, observed state или временную миграционную запись
-```
-
-### Protection и pool
-
-Deployable guest задаёт значения явно:
-
-```yaml
-protection: false
-
-placement:
-  pool: managed
-```
-
-Control-plane/защищённые объекты используют `placement.pool: null`. `301-ai-control` не входит в обычную self-managed write-zone.
-
-### Ресурсы
-
-```yaml
 resources:
   cpu:
     cores: 2
-  memory_mb: 2048
+  memory_mb: 4096
+  swap_mb: 1024
   disk:
-    size_gb: 16
-    storage: local-lvm
-```
+    size_gb: 32
 
-LXC дополнительно фиксирует `swap_mb`. Deployer не подставляет отсутствующие обязательные параметры.
-
-### Сеть
-
-Для deployable guest:
-
-```yaml
 network:
-  bridge: vmbr0
-  mode: current
-  default_gateway: current
   current:
     ipv4:
-      address: 192.168.3.21/16
-      gateway: 192.168.1.1
+      address: 192.168.3.11/16
   target:
     ipv4:
-      address: 10.0.3.21/16
-      gateway: 10.0.0.1
+      address: 10.0.3.11/16
+```
+
+В guest остаётся то, что действительно различается: identity, profile, описание, CPU/RAM/swap/disk size, IP и осознанные overrides.
+
+`301-ai-control` переопределяет общий pool через `placement.pool: null`.
+
+### Network
+
+Gateway IP больше не хранится в каждом guest.
+
+Центрально:
+
+```yaml
+network_stages:
+  current:
+    subnet: 192.168.0.0/16
+    gateway: 192.168.1.1
+  target:
+    subnet: 10.0.0.0/16
+    gateway: 10.0.0.1
 ```
 
 VMID-правило:
@@ -111,77 +124,24 @@ current: VMID XYZ → 192.168.X.YZ/16
 target:  VMID XYZ → 10.0.X.YZ/16
 ```
 
-Сетевые режимы:
+Режимы: `current`, `dual`, `target`. Default route всегда один.
+
+### `deployable`
 
 ```text
-current → только current IP
-dual    → current + target IP
-target  → только target IP
+true
+→ defaults/profile разрешаются
+→ строится и валидируется полный effective desired state
+
+false
+→ deployer ничего не создаёт/пересоздаёт
+→ manifest может быть неполным
+→ defaults не делают его deployable автоматически
 ```
-
-Default gateway всегда один. Нормальная миграция: `current/current → dual/current → dual/target → target/target`.
-
-Текущее состояние проекта — `mode: current`, `default_gateway: current`; Keenetic и основной gateway на этом этапе не меняются.
-
-### Boot
-
-```yaml
-boot:
-  onboot: true
-  start_after_deploy: true
-```
-
-### Management
-
-Единая management identity Debian-гостей:
-
-```yaml
-management:
-  ssh:
-    user: ops
-    port: 22
-```
-
-Private keys, passwords и token secrets в manifest не хранятся.
-
-### VM source
-
-```yaml
-vm:
-  source:
-    template_vmid: 9000
-    clone: full
-  guest_agent: true
-```
-
-### LXC source
-
-```yaml
-lxc:
-  source:
-    ostemplate: local:vztmpl/debian-13-standard_13.6-1_amd64.tar.zst
-    download_if_missing: true
-  unprivileged: true
-  features:
-    nesting: true
-    keyctl: true
-```
-
-Source pin должен быть конкретным. `latest`, `13.x`, wildcard и TBD в deployable manifest запрещены CI.
 
 ## rootfs
 
-`rootfs/` повторяет абсолютные пути внутри гостя:
-
-```text
-guests/109-network-gateway/rootfs/etc/nftables.conf
-→ /etc/nftables.conf
-
-guests/301-ai-control/rootfs/opt/ai-control/...
-→ /opt/ai-control/...
-```
-
-Monorepo целиком внутрь каждого гостя не копируется.
+`rootfs/` повторяет абсолютные пути внутри гостя. Monorepo целиком внутрь каждого гостя не копируется.
 
 Persistent data, Docker volumes, БД, записи камер, пользовательские Git repositories, runtime state и secrets не относятся к `rootfs/`.
 
@@ -191,15 +151,15 @@ PVE-side создание объекта:
 
 ```text
 read-only checkout zsergeyru/proxmox
+→ defaults.yaml + guest.yaml
+→ resolve effective desired state
 → deploy-guest <VMID>
-→ guest.yaml
-→ validate
 → PLAN
 → APPLY
 → verify
 ```
 
-`deploy-guest` обязан отказать при `deployable: false`. Сетевой режим штатного APPLY берётся из `guest.yaml`, а не выбирается скрытым CLI-default.
+`deploy-guest` обязан показывать в PLAN не только значение, но и его provenance: `[defaults]`, `[profile]`, `[guest]` или `[network_stages.*]`.
 
 После появления AI/DevOps:
 
@@ -214,48 +174,19 @@ Semaphore
 → необязательный web UI к Ansible
 ```
 
-Для обычной Debian VM из `tpl-debian13`:
-
-```text
-Full Clone from 9000
-→ placement/pool
-→ protection
-→ CPU/RAM/disk/network
-→ ciuser=ops
-→ Cloud-Init
-→ start согласно boot.start_after_deploy
-→ QEMU Agent/SSH verification
-```
-
-Base template `9000` остаётся protected.
-
 ## Текущие исключения
 
-- `100-haos` — production HAOS; `deployable: false`, исторический VMID сохраняется;
-- `201-ha-main`, `202-ha-test`, `203-ha-flat2` — варианты/резервы; до принятия полных параметров `deployable: false`;
+- `100-haos` — production HAOS; `deployable: false`;
+- `201-ha-main`, `202-ha-test`, `203-ha-flat2` — варианты/резервы;
 - `301-ai-control` — deployable target control plane, но `placement.pool: null`;
 - `320-ai-control` — временный bootstrap; `deployable: false`;
-- `501-frigate` — `type: undecided` и `deployable: false` до теста iGPU/OpenVINO;
-- `9000 tpl-debian13` — protected template, source для clone, но не managed guest.
+- `501-frigate` — `type: undecided`, `deployable: false`;
+- `9000 tpl-debian13` — protected source template, не managed guest.
 
 ## Проверка CI
 
-CI проверяет:
-
-- JSON Schema v3;
-- наличие `guest.yaml` в каждом VMID-каталоге;
-- совпадение VMID/name с именем каталога;
-- уникальность VMID и статических IP;
-- наличие VMID в плане;
-- VMID/IP формулу и `/16`;
-- gateway и принадлежность subnet;
-- network mode/default gateway contract;
-- deploy-ready обязательные поля;
-- pinned VM/LXC source;
-- `ops:22`;
-- managed-pool boundary;
-- отсутствие secret-like keys.
+CI проверяет source guest schema v4, `guests/defaults.yaml` schema, effective deploy schema после inheritance, наличие `guest.yaml`, VMID/name, уникальность VMID/IP, VMID/IP формулу, central subnet/gateway contract, network mode/default gateway, profile, pinned source, `ops:22`, managed-pool boundary и отсутствие secrets.
 
 Главный принцип:
 
-> Неполный объект не маскируется defaults. Он явно `deployable: false` до момента, когда manifest станет полным.
+> Дублирование выносится в versioned defaults/profile, но итоговый desired state остаётся полным, детерминированным и проверяемым.
