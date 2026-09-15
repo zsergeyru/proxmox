@@ -2,7 +2,7 @@
 
 ## Статус
 
-Bootstrap PVE теперь разделён на две исполняемые стадии.
+Bootstrap PVE разделён на две исполняемые стадии.
 
 ```text
 PUBLIC Stage 0
@@ -56,29 +56,115 @@ root/PVE check
 scripts/pve/bootstrap/init-pve.sh
 ```
 
+Текущая версия private bootstrap:
+
+```text
+BOOTSTRAP_VERSION=5
+```
+
 Он выполняет:
 
 ```text
-host preflight
-configuration snapshot
-pve-no-subscription
-packages
-DNS/time/network checks
-storage/snippets
-pvedeploy
-принятие Deploy Key от Stage 0
-canonical private checkout
-managed pool
-roles/users/API tokens/ACL
-protected template 9000
-local wrappers/status
+exclusive run lock
+→ state=running
+→ host preflight
+→ configuration snapshot
+→ pve-no-subscription
+→ packages
+→ DNS/time/network checks
+→ storage/snippets
+→ pvedeploy
+→ принятие Deploy Key от Stage 0
+→ canonical private checkout + проверка origin
+→ managed pool
+→ roles/users/API tokens/ACL
+→ effective permissions checks
+→ real API-token authentication checks
+→ capacity/source checks для template
+→ protected template 9000
+→ local wrappers/status
+→ final state
 ```
 
-Для проектных ролей применяется additive policy: если требуемых privileges не хватает, bootstrap добавляет только недостающие через append. Уже существующие privileges не удаляются автоматически.
+### Поведение проектных ролей
+
+Для проектных ролей применяется additive policy:
+
+```text
+роль отсутствует
+→ создать
+
+роль существует, но не хватает privileges
+→ добавить только недостающие через append
+
+в роли есть дополнительные privileges
+→ оставить без изменения
+```
+
+Bootstrap не удаляет существующие privileges автоматически.
+
+### Поведение API-токенов
+
+Новый токен создаётся с `privsep=1`.
 
 Для существующих API-токенов bootstrap не меняет `privsep` автоматически. Если обнаружен `privsep=0`, выводится предупреждение и конфигурация токена сохраняется без изменения, чтобы не сломать уже работающий доступ.
 
-Существующие дополнительные ACL также не удаляются автоматически.
+После создания/обнаружения токена bootstrap выполняет две дополнительные проверки:
+
+```text
+pveum effective permissions
++
+реальная локальная авторизация этим token+secret через Proxmox API
+```
+
+Если secret-файл существует, но реальный API credential уже не работает, bootstrap останавливается вместо ложного статуса `ready`.
+
+### Существующие PVE users
+
+Если проектный PVE user уже существует, но имеет `enable=0`, bootstrap **не включает его автоматически**.
+
+Такой случай считается конфликтом и останавливает Stage 1 с объяснением. Это нужно, чтобы bootstrap случайно не отменил осознанную блокировку служебной учётной записи.
+
+### Existing ACL
+
+Существующие дополнительные ACL не удаляются автоматически.
+
+Если нужный ACL отсутствует, он добавляется. Если уже существующий ACL отличается по `propagate`, bootstrap выводит предупреждение и не сужает его автоматически.
+
+### Private checkout
+
+Если `${REPO_DIR}` уже содержит Git checkout, перед `fetch/reset` проверяется `origin`.
+
+Ожидается только канонический repository URL проекта. Неожиданный `origin` не переписывается автоматически: bootstrap останавливается и требует явного решения.
+
+### Надёжность повторного запуска
+
+Private Stage 1 использует эксклюзивный `flock`, поэтому два экземпляра bootstrap не могут одновременно изменять PVE.
+
+Состояние запуска записывается в:
+
+```text
+/var/lib/proxmox-bootstrap/state.json
+/var/lib/proxmox-bootstrap/last-run.json
+```
+
+В начале запуска устанавливается `running`. При штатной ошибке и при неожиданной shell-ошибке состояние меняется на `failed`, поэтому старый `ready` не остаётся после неудачного повторного запуска.
+
+### Template safety
+
+Перед первым созданием template выполняется проверка свободного места на `local` и `local-lvm`, а также доступности Debian cloud image.
+
+Для уже существующего VMID `9000` проверяются:
+
+```text
+name = tpl-debian13
+template = 1
+protection = 1
+```
+
+Если существующий template не защищён, bootstrap не включает protection молча, а останавливается для явной проверки ситуации.
+
+Содержимое resource pool `managed` bootstrap специально не анализирует: существующий состав пула считается текущим административным состоянием Proxmox.
 
 ---
 
@@ -108,6 +194,7 @@ Debian 13 trixie/latest cloud image
 → console/QGA verification
 → cleanup
 → template 9000
+→ protection=1
 ```
 
 Документация:
@@ -203,6 +290,8 @@ Public repo не должен содержать:
 Deploy Key создаётся на конкретном PVE и выдаётся только на чтение private repository.
 
 После успешного handoff временная Stage 0 копия credential удаляется, а каноническая copy хранится по private filesystem policy.
+
+При проверке API credential token secret не выводится в лог и не передаётся непосредственно в аргументах `curl`; временный header-файл создаётся с закрытыми правами и удаляется сразу после проверки.
 
 ---
 
