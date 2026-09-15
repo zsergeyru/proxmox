@@ -2,79 +2,90 @@
 
 ## Статус
 
-Архитектура bootstrap/deploy **не пересматривается**. С нуля переписывается только её исполняемая реализация.
+Bootstrap PVE теперь разделён на две исполняемые стадии.
 
-Канонические архитектурные решения остаются в:
+```text
+PUBLIC Stage 0
+zsergeyru/proxmox-bootstrap/init-pve.sh
+
+PRIVATE Stage 1
+zsergeyru/proxmox/scripts/pve/bootstrap/init-pve.sh
+```
+
+Канонические архитектурные документы:
 
 - [`20-pve-initialization.md`](20-pve-initialization.md);
 - [`21-pve-filesystem-layout.md`](21-pve-filesystem-layout.md);
+- [`25-pve-access-control.md`](25-pve-access-control.md);
 - guest manifests и ADR соответствующих VM/LXC.
 
-Публичный `zsergeyru/proxmox-bootstrap` предназначен для zero-day входа в новый PVE. В нём будет реализован:
+---
+
+## Public Stage 0 — реализована
+
+Публичный `zsergeyru/proxmox-bootstrap` теперь содержит только zero-day loader.
+
+Он выполняет:
 
 ```text
-init-pve.sh
+root/PVE check
+→ minimal Git/SSH packages
+→ временный read-only GitHub Deploy Key
+→ ожидание добавления key в private repo
+→ проверка read-only доступа
+→ временный clone zsergeyru/proxmox
+→ запуск private Stage 1
+→ cleanup временного key/checkout после успешного handoff
 ```
 
-Скрипт `create-template.sh` перенесён в приватный `zsergeyru/proxmox` и является частью PVE-side инфраструктурного кода:
+Публичный script не содержит внутренние PVE roles, ACL, pools, API identities, VMID plan, template logic, Proximo configuration или deployer implementation.
+
+После успешного handoff остаётся marker:
+
+```text
+/var/lib/proxmox-bootstrap/stage0-complete
+```
+
+---
+
+## Private Stage 1 — реализована
+
+Канонический full bootstrap:
+
+```text
+scripts/pve/bootstrap/init-pve.sh
+```
+
+Он выполняет:
+
+```text
+host preflight
+configuration snapshot
+pve-no-subscription
+packages
+DNS/time/network checks
+storage/snippets
+pvedeploy
+принятие Deploy Key от Stage 0
+canonical private checkout
+managed pool
+roles/users/API tokens/ACL
+protected template 9000
+local wrappers/status
+```
+
+Существующие роли, которые отличаются от ожидаемой модели, не переписываются автоматически: выводится warning с missing/extra privileges, после чего bootstrap продолжается.
+
+Существующие дополнительные ACL также не удаляются автоматически.
+
+---
+
+## Active template builder
+
+Поддерживаемый builder:
 
 ```text
 scripts/pve/create-template.sh
-```
-
-Прежние executable-сценарии общего bootstrap и AI Control перенесены в:
-
-```text
-zsergeyru/proxmox-bootstrap/archive/2026-09-14/
-```
-
-Архивные скрипты не являются рабочими entrypoints и не должны использоваться для нового развёртывания. Новые скрипты будут написаны заново по действующей документации.
-
-## Что нужно реализовать заново
-
-Нужно заново написать и проверить код, реализующий уже принятую архитектуру, в том числе:
-
-```text
-public zero-day init PVE
-private PVE-side deployer
-создание/клонирование VM и LXC по guest.yaml
-bootstrap/configuration 301-ai-control
-установку runtime и AI agent
-передачу SSH/Git credentials по принятой модели
-health checks, idempotency и recovery logic
-```
-
-Названия и внутренняя структура новых скриптов могут измениться. Архивные реализации не являются шаблоном, который нужно механически восстанавливать.
-
-## Что остаётся source of truth
-
-Приватный `zsergeyru/proxmox` продолжает хранить:
-
-```text
-архитектуру
-VMID plan
-guest.yaml
-schema/validator
-network/storage/security policy
-PVE bootstrap/deployer requirements
-PVE-side scripts после получения private Git access
-AI Control и DevOps ADR
-решения по template
-```
-
-То есть различаем:
-
-```text
-архитектура / desired state → действуют
-старые scripts             → сняты и переписываются
-```
-
-## Активный template builder
-
-Текущий поддерживаемый builder:
-
-```text
-zsergeyru/proxmox/scripts/pve/create-template.sh
 ```
 
 Он создаёт:
@@ -85,12 +96,11 @@ Name: tpl-debian13
 Template-Version: 4
 ```
 
-Версия 4 намеренно использует простую модель:
+Модель:
 
 ```text
-trixie/latest Debian cloud image
+Debian 13 trixie/latest cloud image
 → SHA-512 verification
-→ обычные Debian repositories
 → apt update/full-upgrade
 → regular amd64 kernel
 → console/QGA verification
@@ -98,30 +108,102 @@ trixie/latest Debian cloud image
 → template 9000
 ```
 
-Pinned Debian build, APT snapshot и отдельный version lock для template не используются.
-
-Документация template:
+Документация:
 
 - [`../templates/debian13/README.md`](../templates/debian13/README.md)
 - [`../templates/debian13/build-policy.md`](../templates/debian13/build-policy.md)
 
-## Правило для новой реализации
+---
 
-При написании новых скриптов сначала читается действующая архитектура, затем код реализует её. Если в процессе обнаруживается, что архитектурное решение нужно изменить, это оформляется отдельно как изменение документации/ADR, а не молча меняется внутри shell/python-кода.
+## Access control
 
-Особенно это относится к:
+Принята схема двух отдельных PVE identities:
 
-- public/private границе bootstrap;
-- PVE Git checkout;
-- API users/tokens/ACL;
-- managed pool и protected objects;
-- 301-ai-control;
-- SSH identities;
-- Ansible/Semaphore на 311;
-- backup/recovery и secrets.
+```text
+deployer@pve!host-deploy
+→ человек / deploy-guest / host-side tools
+
+ai-agent@pve!infra
+→ AI / Proximo
+```
+
+Основная AI write-zone:
+
+```text
+managed
+```
+
+Новые обычные VM/LXC AI создаёт сразу в `managed`. Protected guests/templates остаются вне этого pool.
+
+Подробности: [`25-pve-access-control.md`](25-pve-access-control.md).
+
+---
+
+## Что ещё не реализовано
+
+Основной оставшийся PVE-side компонент:
+
+```text
+scripts/pve/deploy-guest.py
+```
+
+После его появления private bootstrap автоматически сможет установить стабильную wrapper-команду:
+
+```text
+/usr/local/sbin/deploy-guest
+```
+
+До этого private Stage 1 корректно завершает основную настройку со статусом `partial`/предупреждением о недостающем deploy-guest.
+
+Также остаются отдельные последующие задачи:
+
+```text
+создание/клонирование VM и LXC по guest.yaml через deploy-guest
+bootstrap/configuration 301-ai-control
+передача runtime copy AI credential внутрь 301
+SSH/Cloud-Init policy для новых guests
+health checks для конкретных guest deployments
+backup/recovery automation
+```
+
+---
+
+## Source of truth
+
+Приватный `zsergeyru/proxmox` хранит:
+
+```text
+архитектуру
+VMID plan
+guest.yaml
+network/storage/security policy
+private Stage 1 bootstrap
+PVE-side deployer
+API users/tokens/ACL policy
+AI Control и DevOps ADR
+template builder/policy
+```
+
+Public repo хранит только Stage 0 loader и архив старых публичных экспериментов.
+
+---
 
 ## Security
 
-Public repo не должен содержать secrets, private keys, API token secrets, passwords или реальные `.env`.
+Public repo не должен содержать:
 
-Новая реализация обязана соблюдать уже принятые security boundaries и filesystem/credential policy проекта.
+- private keys;
+- API token secrets;
+- passwords;
+- реальные `.env`;
+- детальную внутреннюю ACL/VMID/runtime configuration.
+
+Deploy Key создаётся на конкретном PVE и выдаётся только на чтение private repository.
+
+После успешного handoff временная Stage 0 копия credential удаляется, а каноническая copy хранится по private filesystem policy.
+
+---
+
+## Главный принцип
+
+> Public Stage 0 только открывает безопасный read-only путь к private source of truth. Всё, что реально конфигурирует Proxmox и описывает внутреннее устройство инфраструктуры, находится и развивается только в `zsergeyru/proxmox`.
