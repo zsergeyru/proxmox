@@ -367,14 +367,21 @@ configure_ceph_repository() {
     if [[ "$uri" =~ ^https?://enterprise\.proxmox\.com/debian/(ceph-[A-Za-z0-9._-]+)$ \
         && "$suite" == "trixie" && "$component" == "enterprise" ]]; then
         release="${BASH_REMATCH[1]}"
-        tmp="$(mktemp "${ceph_sources}.XXXXXX")"
+        tmp="$(mktemp "${ceph_sources}.tmp.XXXXXX")"
 
-        sed \
+        if ! sed \
             -e "s#^URIs:[[:space:]]*https\?://enterprise\.proxmox\.com/debian/${release}[[:space:]]*\$#URIs: http://download.proxmox.com/debian/${release}#" \
             -e 's/^Components:[[:space:]]*enterprise[[:space:]]*$/Components: no-subscription/' \
-            "$ceph_sources" >"$tmp"
-        install -o root -g root -m 0644 "$tmp" "$ceph_sources"
-        rm -f "$tmp"
+            "$ceph_sources" >"$tmp"; then
+            rm -f -- "$tmp"
+            die "Не удалось преобразовать Ceph enterprise repository в no-subscription"
+        fi
+
+        if ! install -o root -g root -m 0644 "$tmp" "$ceph_sources"; then
+            rm -f -- "$tmp"
+            die "Не удалось установить обновлённую конфигурацию Ceph repository"
+        fi
+        rm -f -- "$tmp"
 
         uri="$(sed -n 's/^URIs:[[:space:]]*//p' "$ceph_sources" | head -n1)"
         component="$(sed -n 's/^Components:[[:space:]]*//p' "$ceph_sources" | head -n1)"
