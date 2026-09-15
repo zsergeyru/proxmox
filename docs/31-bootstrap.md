@@ -59,7 +59,7 @@ scripts/pve/bootstrap/init-pve.sh
 Текущая версия private bootstrap:
 
 ```text
-BOOTSTRAP_VERSION=5
+BOOTSTRAP_VERSION=6
 ```
 
 Он выполняет:
@@ -154,15 +154,30 @@ Private Stage 1 использует эксклюзивный `flock`, поэт�
 
 Перед первым созданием template выполняется проверка свободного места на `local` и `local-lvm`, а также доступности Debian cloud image.
 
-Для уже существующего VMID `9000` проверяются:
+Для уже существующего VMID `9000` сначала проверяются:
+
+```text
+name = tpl-debian13
+template = 1
+```
+
+Если VMID `9000` не является именно этим canonical template, bootstrap останавливается и ничего не переписывает.
+
+Если canonical template найден, но `protection=1` отсутствует, bootstrap автоматически выполняет:
+
+```bash
+qm set 9000 --protection 1
+```
+
+После этого значение повторно проверяется. Если protection уже включён, изменений не производится.
+
+Таким образом canonical template `9000` всегда приводится к состоянию:
 
 ```text
 name = tpl-debian13
 template = 1
 protection = 1
 ```
-
-Если существующий template не защищён, bootstrap не включает protection молча, а останавливается для явной проверки ситуации.
 
 Содержимое resource pool `managed` bootstrap специально не анализирует: существующий состав пула считается текущим административным состоянием Proxmox.
 
