@@ -44,7 +44,7 @@ defaults.yaml
 → effective desired state
 ```
 
-Все значения находятся в Git. Deployer не должен иметь скрытых project defaults.
+Все project defaults находятся в Git. Deployer не должен иметь скрытых project defaults.
 
 ## Централизованные defaults
 
@@ -58,6 +58,20 @@ defaults:
     gateway: 192.168.1.1
     addressing: vmid
 ```
+
+Management SSH для deployable Debian guests также централизован:
+
+```yaml
+defaults:
+  management:
+    ssh:
+      user: root
+      port: 22
+```
+
+Root password authentication не используется; доступ выдаётся public SSH keys.
+
+## VMID-addressing
 
 В каждый момент времени у гостя один management IPv4 и один default gateway.
 
@@ -119,20 +133,11 @@ network:
 
 Указывать `/16` нельзя. Префикс всё равно приходит из `defaults.network.subnet`.
 
-Validator выводит русское предупреждение, если override не соответствует VMID-формуле:
-
-```text
-management IP 192.168.8.50 не соответствует правилу VMID 311;
-ожидается 192.168.3.11
-```
-
-Если override совпадает с вычисляемым адресом, validator предупреждает, что он избыточен.
+Validator выводит предупреждение, если override не соответствует VMID-формуле. Если override совпадает с вычисляемым адресом, validator предупреждает, что он избыточен.
 
 `subnet`, `gateway` и `addressing` на уровне отдельного guest не переопределяются.
 
 ## Миграция сети
-
-Два IP, `current/target`, `dual` и два набора gateway больше не используются.
 
 Для перехода, например, с:
 
@@ -148,7 +153,7 @@ gateway 192.168.1.1
 gateway 10.0.0.1
 ```
 
-меняются только два значения в `guests/defaults.yaml`:
+меняются central values в `guests/defaults.yaml`:
 
 ```yaml
 defaults:
@@ -157,19 +162,9 @@ defaults:
     gateway: 10.0.0.1
 ```
 
-После этого effective IP автоматически станет:
+После этого effective IP автоматически пересчитывается по VMID.
 
-```text
-109 → 10.0.1.9
-211 → 10.0.2.11
-301 → 10.0.3.1
-311 → 10.0.3.11
-...
-```
-
-Будущий migration/deploy script должен применять изменение к гостям последовательно: изменить штатную Proxmox network-конфигурацию, перезапустить при необходимости, проверить новый IP и только после успешной проверки переходить к следующему гостю.
-
-Для гостя с явным `network.ipv4.address` override адрес не пересчитывается. При смене subnet такой override нужно изменить осознанно; если он окажется вне новой subnet, validator выдаст ошибку.
+Для guest с явным `network.ipv4.address` override адрес не пересчитывается; при смене subnet такой override нужно проверить осознанно.
 
 ## Profiles
 
@@ -177,15 +172,33 @@ defaults:
 
 ```text
 debian-vm
-→ full clone from VM template 9000
+→ Full Clone from VM template 9000 Template-Version 6
 → QEMU guest agent
+→ root key-only SSH через Cloud-Init
 
 docker-lxc
-→ pinned Debian 13 LXC appliance
+→ Debian 13 LXC family selector local:vztmpl/debian-13-standard
+→ runtime resolution наиболее нового установленного archive этого семейства
 → unprivileged + nesting + keyctl
+→ root key-only SSH через ssh-public-keys
 ```
 
+Конкретная версия LXC archive **не хранится** в defaults.
+
 Profiles не должны переопределять общую сеть.
+
+## SSH identities
+
+Один Linux-user `root` может иметь несколько независимых public keys:
+
+```text
+PVE/deployer key
+AI Control key
+Ansible/311 key
+personal key при необходимости
+```
+
+Pool `managed` и набор SSH keys являются независимыми механизмами. Изменение pool membership не должно автоматически редактировать `authorized_keys`.
 
 ## `deployable`
 
@@ -203,55 +216,50 @@ deployable: false
 
 ## Validator
 
-`python scripts/validate_repo.py` анализирует проектные данные только из:
+`python scripts/validate_repo.py` анализирует проектные данные из:
 
 ```text
 guests/defaults.yaml
 guests/*/guest.yaml
 ```
 
-Schema-файлы используются только как правила проверки.
-
-Validator не читает `docs/*.md`, README, `rootfs/` и другие проектные файлы.
+Schema-файлы задают машинные правила.
 
 Блокирующие ошибки включают, в частности:
 
 - schema/YAML ошибки;
 - duplicate VMID/IP;
 - management IP вне central subnet;
-- IP, совпадающий с gateway;
-- network/broadcast IP;
+- IP, совпадающий с gateway/network/broadcast;
 - неправильный central subnet/gateway;
 - `ballooning_mb > memory_mb`;
 - нарушение profile/source contracts;
+- `management.ssh`, отличный от `root:22` для deployable guest;
+- versioned LXC archive вместо family selector;
 - secrets/private keys в `defaults.yaml` или `guest.yaml`.
 
-Неблокирующие предупреждения на русском языке включают:
-
-- явный IP override не соответствует VMID-формуле;
-- избыточный IP override;
-- избыточное значение, уже наследуемое из defaults/profile;
-- override общего node/bridge/storage/SSH;
-- неиспользуемый profile;
-- подозрительные state/boot/protection combinations.
+Warnings не делают CI красным и используются для подозрительных, но не обязательно неправильных overrides/state combinations.
 
 ## Deploy
 
-`deploy-guest` должен показывать provenance каждого effective значения:
+`deploy-guest` должен показывать provenance effective values, например:
 
 ```text
-Node               pve                 [defaults]
-Pool               managed             [defaults]
-Storage            local-lvm           [defaults]
-Profile            docker-lxc          [guest]
-Network subnet     192.168.0.0/16      [defaults]
-Default gateway    192.168.1.1         [defaults]
-Management IP      192.168.3.11/16     [vmid]
-Memory             4096 MiB            [guest]
+Node               pve                         [defaults]
+Pool               managed                     [defaults]
+Storage            local-lvm                   [defaults]
+Profile            docker-lxc                  [guest]
+LXC selector       debian-13-standard          [profile]
+Resolved archive   debian-13-standard_<...>    [runtime PVE]
+SSH user           root                        [defaults]
+Network subnet     192.168.0.0/16              [defaults]
+Default gateway    192.168.1.1                 [defaults]
+Management IP      192.168.3.11/16             [vmid]
+Memory             4096 MiB                    [guest]
 ```
 
-Если задан IP override, provenance адреса меняется на `[guest]`.
+Initial SSH access является частью deploy readiness и не зависит от optional `base` capability.
 
 Главный принцип:
 
-> В `guest.yaml` хранится только действительно индивидуальное. Сеть является общей, а обычный management IP детерминированно выводится из VMID.
+> В `guest.yaml` хранится только действительно индивидуальное. Общая сеть и management user централизованы; IP выводится из VMID; runtime-версия LXC appliance и фактические SSH authorized keys не хардкодятся в guest defaults.
