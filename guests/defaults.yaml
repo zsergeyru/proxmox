@@ -35,7 +35,7 @@ profiles:
     lxc:
       container_runtime: docker
       source:
-        ostemplate: local:vztmpl/debian-13-standard_13.6-1_amd64.tar.zst
+        ostemplate: local:vztmpl/debian-13-standard
       unprivileged: true
       features:
         nesting: true
