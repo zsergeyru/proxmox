@@ -819,8 +819,7 @@ ensure_pve_guest_key() {
     chmod 0600 "$PVE_GUEST_KEY"
 
     tmp_pub="$(mktemp "${SSH_DIR}/.pve-guest-pub.XXXXXX")"
-    printf '%s %s
-' "$derived_pub" 'pve-guest' >"$tmp_pub"
+    printf '%s %s\n' "$derived_pub" 'pve-guest' >"$tmp_pub"
     install -o "$DEPLOY_USER" -g "$DEPLOY_USER" -m 0644 "$tmp_pub" "$PVE_GUEST_PUB"
     rm -f "$tmp_pub"
 
