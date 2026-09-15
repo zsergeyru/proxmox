@@ -83,21 +83,79 @@ target:  VMID XYZ → 10.0.X.YZ/16
 401 → 192.168.4.1  → 10.0.4.1
 ```
 
-Исключения для `network-gateway` больше нет: VMID `109` выбран именно так, чтобы сетевой сервер подчинялся общей формуле и не конфликтовал с gateway `.1`.
+Исключения для `network-gateway` больше нет: VMID `109` подчиняется общей формуле и не конфликтует с gateway `.1`.
+
+## Сетевая модель guest manifest
+
+`guest.yaml` хранит обе адресные точки и явное состояние миграции:
+
+```yaml
+network:
+  bridge: vmbr0
+  mode: current
+  default_gateway: current
+  current:
+    ipv4:
+      address: 192.168.3.11/16
+      gateway: 192.168.1.1
+  target:
+    ipv4:
+      address: 10.0.3.11/16
+      gateway: 10.0.0.1
+```
+
+Режимы:
+
+```text
+current → активен только 192.168.x.x
+dual    → одновременно активны 192.168.x.x и 10.0.x.x
+target  → активен только 10.0.x.x
+```
+
+`default_gateway` выбирается отдельно, но default route всегда один:
+
+```text
+current → 192.168.1.1
+target  → 10.0.0.1
+```
+
+Допустимая последовательность миграции:
+
+```text
+mode=current, default_gateway=current
+→ mode=dual, default_gateway=current
+→ mode=dual, default_gateway=target
+→ mode=target, default_gateway=target
+```
+
+Невалидны `current + target gateway` и `target + current gateway`.
+
+## Текущее состояние
+
+Сейчас Keenetic и основной gateway не меняются.
+
+Deployable manifests используют:
+
+```yaml
+mode: current
+default_gateway: current
+```
+
+То есть target-адреса уже зафиксированы как будущий desired state, но не активируются текущим deploy.
+
+Добавление `10.0.0.1/16` на Keenetic или другой временный router может использоваться позднее для проверки target-сети до переезда, но **не является частью текущего этапа**.
 
 ## Переход на 10.0.0.0/16
 
-Будущую MAIN-адресацию можно проверить до переезда на той же физической LAN. На текущем Keenetic временно добавляется адрес `10.0.0.1/16`.
+Когда будет принято решение начать сетевую миграцию, изменение выполняется через Git manifest по шагам:
 
-В manifests planned-гостей заранее записаны оба состояния — `network.current` и `network.target`. Это не означает два одновременных default gateway.
+1. `current → dual`, gateway остаётся `current`;
+2. проверить доступ к обоим IP и зависимости сервисов;
+3. в `dual` переключить `default_gateway: target`;
+4. проверить исходящий трафик, DNS, VPN/PBR и management;
+5. после проверки перейти `dual → target` и удалить legacy IPv4.
 
-Правила миграции:
-
-- default gateway на сервере всегда один;
-- сначала добавить и проверить новый IP;
-- затем перевести default gateway;
-- legacy-IP удалить после проверки зависимостей;
-- в новой квартире `10.0.0.1` переходит от временной реализации к OpenWrt без массовой смены серверных IP.
+В новой квартире `10.0.0.1` предоставляет OpenWrt. Если target-адреса проверены заранее, физический переезд не требует массовой смены серверных IP.
 
 ## DNS
 

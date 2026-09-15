@@ -14,17 +14,17 @@ guest.yaml
 → verify
 ```
 
-Манифест описывает сам объект Proxmox и параметры, необходимые для его однозначного создания/сверки. Конфигурация ОС и приложений внутри гостя остаётся в `rootfs/` и Ansible.
+Манифест описывает сам объект Proxmox и параметры, необходимые для его однозначного создания и сверки. Конфигурация ОС и приложений внутри гостя остаётся в `rootfs/` и Ansible.
 
 ## Schema version
 
 Текущая schema:
 
 ```yaml
-schema_version: 2
+schema_version: 3
 ```
 
-Версия `2` вводит явный признак `deployable` и строгую deploy-ready схему. Это намеренно новая версия: обязательные поля не добавляются задним числом в `schema_version: 1`.
+Версия `3` добавляет явную сетевую модель миграции: `network.mode` и `network.default_gateway`. Это новая версия, потому что для deployable manifest эти поля обязательны и не должны добавляться задним числом к `schema_version: 2`.
 
 Формальная JSON Schema хранится в:
 
@@ -62,12 +62,12 @@ deployable: false
 → manifest может быть неполным
 ```
 
-`state: planned` не означает автоматически `deployable: true`. Например, будущий вариант миграции может быть `planned`, но оставаться `deployable: false` до принятия всех параметров.
+`state: planned` не означает автоматически `deployable: true`.
 
 ## Базовые поля
 
 ```yaml
-schema_version: 2
+schema_version: 3
 vmid: 321
 name: app-services
 type: lxc
@@ -86,7 +86,7 @@ lxc
 undecided
 ```
 
-`undecided` разрешён только при `deployable: false`. Это нужно для зарезервированных объектов вроде `501-frigate`, где VM/LXC ещё не выбран, но отсутствие manifest больше не допускается.
+`undecided` разрешён только при `deployable: false`.
 
 ## Placement и protection
 
@@ -141,15 +141,15 @@ resources:
 - deployer не уменьшает существующий диск автоматически;
 - обязательные значения не заменяются внутренними defaults deployer.
 
-Параметры, отсутствующие в schema и manifest, считаются неуправляемыми этим слоем и могут наследоваться от source/template. Это должно быть осознанным наследованием, а не догадкой deployer.
-
 ## Сеть
 
-Для deployable planned-гостя обязательны оба этапа:
+Deployable manifest всегда хранит обе адресные точки миграции и отдельно указывает, какие адреса активны и какой профиль предоставляет единственный default gateway:
 
 ```yaml
 network:
   bridge: vmbr0
+  mode: current
+  default_gateway: current
   current:
     ipv4:
       address: 192.168.3.21/16
@@ -160,42 +160,81 @@ network:
       gateway: 10.0.0.1
 ```
 
-Правила CI:
+### `network.mode`
+
+Поддерживаются три режима:
+
+```text
+current
+→ активен только current IPv4
+
+dual
+→ одновременно активны current и target IPv4
+
+target
+→ активен только target IPv4
+```
+
+В `dual` оба IPv4 относятся к одному логическому сетевому подключению гостя. Это режим плавной миграции, а не два независимых default route.
+
+### `network.default_gateway`
+
+Допустимые значения:
+
+```text
+current → default route через network.current.ipv4.gateway
+target  → default route через network.target.ipv4.gateway
+```
+
+Правила комбинаций:
+
+```text
+mode: current → default_gateway: current
+mode: dual    → default_gateway: current или target
+mode: target  → default_gateway: target
+```
+
+Таким образом default gateway у гостя всегда один.
+
+Нормальная последовательность миграции:
+
+```text
+current + current gateway
+→ dual + current gateway
+→ dual + target gateway
+→ target + target gateway
+```
+
+На текущем этапе проекта используется первое состояние. Оно не требует изменения Keenetic и не активирует target-адреса. Переход выполняется отдельным изменением Git manifest.
+
+### Адресное правило
 
 ```text
 current: VMID XYZ → 192.168.X.YZ/16
 target:  VMID XYZ → 10.0.X.YZ/16
 ```
 
-Также проверяются:
+CI также проверяет:
 
 - точный prefix `/16`;
 - корректный IPv4;
 - gateway находится в указанной сети;
-- текущий gateway — `192.168.1.1`;
-- целевой gateway — `10.0.0.1`;
-- отсутствие дублирующихся статических IP.
+- current gateway — `192.168.1.1`;
+- target gateway — `10.0.0.1`;
+- отсутствие дублирующихся статических IP;
+- допустимую комбинацию `mode` и `default_gateway`.
 
-Это описание двух стадий миграции. Одновременно два default gateway в госте не настраиваются.
-
-CLI выбирает одну стадию:
-
-```bash
-deploy-guest 321 --network current --apply
-deploy-guest 321 --network target --apply
-```
+`deploy-guest` не выбирает сетевой этап отдельным CLI-флагом: штатный PLAN/APPLY использует сеть из зафиксированного `guest.yaml`. Это сохраняет Git единственным desired state.
 
 ## Boot
 
-Deployable manifest явно определяет как автозапуск после reboot PVE, так и поведение после самого deploy:
+Deployable manifest явно определяет автозапуск после reboot PVE и поведение после самого deploy:
 
 ```yaml
 boot:
   onboot: true
   start_after_deploy: true
 ```
-
-Deployer не должен сам решать, запускать ли только что созданный объект.
 
 ## Management
 
@@ -209,8 +248,6 @@ management:
 ```
 
 CI для deployable-гостей требует именно `ops:22`.
-
-Создание OS user/authorized keys относится к bootstrap гостевой ОС, но желаемая management identity фиксируется в manifest.
 
 Пароли, API token secrets и private keys в `guest.yaml` запрещены.
 
@@ -228,9 +265,7 @@ vm:
 
 Для текущей schema автоматизированный clone-сценарий — только `full`.
 
-Deployer обязан проверить наличие source VMID и `template: 1` на PVE до APPLY.
-
-Нельзя зашивать правило «любая VM всегда из 9000» внутрь deployer. Если появится VM другого типа, schema/source расширяются явно.
+Deployer обязан проверить наличие source VMID и `template: 1` на PVE до APPLY. Нельзя зашивать правило «любая VM всегда из 9000» внутрь deployer: source задаётся manifest.
 
 ## Источник LXC
 
@@ -250,17 +285,14 @@ lxc:
 Правила:
 
 - `ostemplate` — конкретный Proxmox volume, а не `latest`, `13.x`, wildcard или TBD;
-- если `download_if_missing: true`, deployer может получить **именно этот** template через `pveam`;
+- если `download_if_missing: true`, deployer может получить именно этот template;
 - переход на новую revision Debian template выполняется изменением Git manifest;
-- `unprivileged`, `nesting` и `keyctl` задаются явно;
-- Docker-heavy LXC проекта используют `nesting: true` и `keyctl: true`.
-
-CI не проверяет фактическое наличие template/storage/bridge на конкретном PVE — это preflight самого deployer.
+- `unprivileged`, `nesting` и `keyctl` задаются явно.
 
 ## Полный пример VM
 
 ```yaml
-schema_version: 2
+schema_version: 3
 vmid: 301
 name: ai-control
 type: vm
@@ -285,6 +317,8 @@ resources:
 
 network:
   bridge: vmbr0
+  mode: current
+  default_gateway: current
   current:
     ipv4:
       address: 192.168.3.1/16
@@ -313,7 +347,7 @@ vm:
 ## Полный пример LXC
 
 ```yaml
-schema_version: 2
+schema_version: 3
 vmid: 311
 name: dev-services
 type: lxc
@@ -339,6 +373,8 @@ resources:
 
 network:
   bridge: vmbr0
+  mode: current
+  default_gateway: current
   current:
     ipv4:
       address: 192.168.3.11/16
@@ -367,12 +403,10 @@ lxc:
     keyctl: true
 ```
 
-Этот пример проходит тот же validator, что и реальные manifests.
-
 ## Reserved / undecided пример
 
 ```yaml
-schema_version: 2
+schema_version: 3
 vmid: 501
 name: frigate
 type: undecided
@@ -405,18 +439,19 @@ deploy-guest 311 --apply
 
 ```text
 найти ровно один guests/<VMID>-*/guest.yaml
-→ schema_version == 2
+→ schema_version == 3
 → deployable == true
 → пройти JSON Schema
 → пройти semantic validation
 → проверить source/storage/bridge на реальном PVE
+→ прочитать network.mode/default_gateway
 → сравнить desired state с существующим объектом
 → PLAN
 → --apply
 → verify
 ```
 
-Если `deployable: false`, команда должна явно сообщить причину и ничего не создавать.
+Если `deployable: false`, команда явно сообщает причину и ничего не создаёт.
 
 Deployer не должен:
 
@@ -425,6 +460,7 @@ Deployer не должен:
 - уменьшать диск;
 - выбирать source/template «по последней версии»;
 - подставлять отсутствующие обязательные значения;
+- переопределять сеть скрытым CLI-default;
 - автоматически добавлять protected/control-plane объекты в `managed`;
 - выполнять destructive replacement без отдельного явного режима.
 

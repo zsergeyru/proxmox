@@ -1,4 +1,4 @@
-schema_version: 2
+schema_version: 3
 vmid: 501
 name: frigate
 type: undecided
@@ -10,6 +10,8 @@ description: Frigate video surveillance; VM/LXC type and resources are pending i
 
 network:
   bridge: vmbr0
+  mode: current
+  default_gateway: current
   current:
     ipv4:
       address: 192.168.5.1/16

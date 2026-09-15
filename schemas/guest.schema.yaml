@@ -13,7 +13,7 @@ required:
   - description
 properties:
   schema_version:
-    const: 2
+    const: 3
   vmid:
     type: integer
     minimum: 100
@@ -87,10 +87,42 @@ properties:
       bridge:
         type: string
         minLength: 1
+      mode:
+        enum: [current, dual, target]
+      default_gateway:
+        enum: [current, target]
       current:
         $ref: '#/$defs/networkStage'
       target:
         $ref: '#/$defs/networkStage'
+    allOf:
+      - if:
+          required: [mode]
+          properties:
+            mode:
+              const: current
+        then:
+          required: [current, default_gateway]
+          properties:
+            default_gateway:
+              const: current
+      - if:
+          required: [mode]
+          properties:
+            mode:
+              const: dual
+        then:
+          required: [current, target, default_gateway]
+      - if:
+          required: [mode]
+          properties:
+            mode:
+              const: target
+        then:
+          required: [target, default_gateway]
+          properties:
+            default_gateway:
+              const: target
   boot:
     type: object
     additionalProperties: false
@@ -195,7 +227,7 @@ allOf:
         - management
       properties:
         network:
-          required: [bridge, current, target]
+          required: [bridge, mode, default_gateway, current, target]
         boot:
           required: [onboot, start_after_deploy]
   - if:

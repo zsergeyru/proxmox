@@ -17,23 +17,14 @@
 └── rootfs/           # управляемые файлы по реальным абсолютным путям
 ```
 
-`guest.yaml` обязателен для каждого каталога с VMID. Отсутствие manifest теперь является ошибкой CI.
+`guest.yaml` обязателен для каждого каталога с VMID. Если параметры ещё не приняты, это выражается самим manifest через `deployable: false`, а не отсутствием файла.
 
-Если параметры ещё не приняты, это выражается самим manifest:
-
-```yaml
-type: undecided
-deployable: false
-```
-
-а не отсутствием файла.
-
-## guest.yaml schema v2
+## guest.yaml schema v3
 
 Базовые обязательные поля:
 
 ```yaml
-schema_version: 2
+schema_version: 3
 vmid: 109
 name: network-gateway
 type: vm
@@ -53,15 +44,7 @@ bootstrap → временный рабочий объект для развёр
 legacy    → старый объект, сохраняемый до планового вывода
 ```
 
-Допустимые `type`:
-
-```text
-vm
-lxc
-undecided
-```
-
-`undecided` разрешён только при `deployable: false`.
+Допустимые `type`: `vm`, `lxc`, `undecided`. `undecided` разрешён только при `deployable: false`.
 
 ### `deployable`
 
@@ -75,8 +58,6 @@ false
 → manifest хранит резерв, observed state или временную миграционную запись
 ```
 
-`state` и `deployable` решают разные задачи. `planned` может быть как deployable, так и пока недоопределённым.
-
 ### Protection и pool
 
 Deployable guest задаёт значения явно:
@@ -88,14 +69,7 @@ placement:
   pool: managed
 ```
 
-Control-plane/защищённые объекты используют:
-
-```yaml
-placement:
-  pool: null
-```
-
-`301-ai-control` не входит в обычную self-managed write-zone.
+Control-plane/защищённые объекты используют `placement.pool: null`. `301-ai-control` не входит в обычную self-managed write-zone.
 
 ### Ресурсы
 
@@ -109,17 +83,17 @@ resources:
     storage: local-lvm
 ```
 
-LXC дополнительно фиксирует `swap_mb`.
-
-Deployer не подставляет отсутствующие обязательные параметры.
+LXC дополнительно фиксирует `swap_mb`. Deployer не подставляет отсутствующие обязательные параметры.
 
 ### Сеть
 
-Для deployable planned-гостя:
+Для deployable guest:
 
 ```yaml
 network:
   bridge: vmbr0
+  mode: current
+  default_gateway: current
   current:
     ipv4:
       address: 192.168.3.21/16
@@ -137,7 +111,17 @@ current: VMID XYZ → 192.168.X.YZ/16
 target:  VMID XYZ → 10.0.X.YZ/16
 ```
 
-Это две стадии миграции, а не два одновременных default gateway.
+Сетевые режимы:
+
+```text
+current → только current IP
+dual    → current + target IP
+target  → только target IP
+```
+
+Default gateway всегда один. Нормальная миграция: `current/current → dual/current → dual/target → target/target`.
+
+Текущее состояние проекта — `mode: current`, `default_gateway: current`; Keenetic и основной gateway на этом этапе не меняются.
 
 ### Boot
 
@@ -146,8 +130,6 @@ boot:
   onboot: true
   start_after_deploy: true
 ```
-
-Оба значения обязательны у deployable guest.
 
 ### Management
 
@@ -201,8 +183,6 @@ guests/301-ai-control/rootfs/opt/ai-control/...
 
 Monorepo целиком внутрь каждого гостя не копируется.
 
-Для каталогов, полностью принадлежащих проекту (`/opt/<service>/`), допустима синхронизация с удалением файлов, исчезнувших из Git. В общих системных каталогах файлы устанавливаются/удаляются только по конкретным путям.
-
 Persistent data, Docker volumes, БД, записи камер, пользовательские Git repositories, runtime state и secrets не относятся к `rootfs/`.
 
 ## Deploy
@@ -215,11 +195,11 @@ read-only checkout zsergeyru/proxmox
 → guest.yaml
 → validate
 → PLAN
-→ qm/pct/pvesh/pvesm
+→ APPLY
 → verify
 ```
 
-`deploy-guest` обязан отказать при `deployable: false`.
+`deploy-guest` обязан отказать при `deployable: false`. Сетевой режим штатного APPLY берётся из `guest.yaml`, а не выбирается скрытым CLI-default.
 
 После появления AI/DevOps:
 
@@ -255,20 +235,21 @@ Base template `9000` остаётся protected.
 - `201-ha-main`, `202-ha-test`, `203-ha-flat2` — варианты/резервы; до принятия полных параметров `deployable: false`;
 - `301-ai-control` — deployable target control plane, но `placement.pool: null`;
 - `320-ai-control` — временный bootstrap; `deployable: false`;
-- `501-frigate` — manifest существует, но `type: undecided` и `deployable: false` до теста iGPU/OpenVINO;
+- `501-frigate` — `type: undecided` и `deployable: false` до теста iGPU/OpenVINO;
 - `9000 tpl-debian13` — protected template, source для clone, но не managed guest.
 
 ## Проверка CI
 
 CI проверяет:
 
-- JSON Schema v2;
+- JSON Schema v3;
 - наличие `guest.yaml` в каждом VMID-каталоге;
 - совпадение VMID/name с именем каталога;
 - уникальность VMID и статических IP;
 - наличие VMID в плане;
 - VMID/IP формулу и `/16`;
 - gateway и принадлежность subnet;
+- network mode/default gateway contract;
 - deploy-ready обязательные поля;
 - pinned VM/LXC source;
 - `ops:22`;

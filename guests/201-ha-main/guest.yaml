@@ -1,4 +1,4 @@
-schema_version: 2
+schema_version: 3
 vmid: 201
 name: ha-main
 type: lxc
@@ -10,6 +10,8 @@ description: Optional future Home Assistant migration target; current production
 
 network:
   bridge: vmbr0
+  mode: current
+  default_gateway: current
   current:
     ipv4:
       address: 192.168.2.1/16

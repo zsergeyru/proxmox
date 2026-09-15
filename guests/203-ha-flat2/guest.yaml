@@ -1,4 +1,4 @@
-schema_version: 2
+schema_version: 3
 vmid: 203
 name: ha-flat2
 type: lxc
@@ -10,6 +10,8 @@ description: Reserved Home Assistant instance for the second apartment
 
 network:
   bridge: vmbr0
+  mode: current
+  default_gateway: current
   current:
     ipv4:
       address: 192.168.2.3/16
