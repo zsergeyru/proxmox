@@ -23,7 +23,7 @@ zsergeyru/proxmox/scripts/pve/bootstrap/init-pve.sh
 
 ## Public Stage 0 — реализована
 
-Публичный `zsergeyru/proxmox-bootstrap` теперь содержит только zero-day loader.
+Публичный `zsergeyru/proxmox-bootstrap` содержит только zero-day loader.
 
 Он выполняет:
 
@@ -74,7 +74,9 @@ protected template 9000
 local wrappers/status
 ```
 
-Существующие роли, которые отличаются от ожидаемой модели, не переписываются автоматически: выводится warning с missing/extra privileges, после чего bootstrap продолжается.
+Для проектных ролей применяется additive policy: если требуемых privileges не хватает, bootstrap добавляет только недостающие через append. Уже существующие privileges не удаляются автоматически.
+
+Для существующих API-токенов bootstrap не меняет `privsep` автоматически. Если обнаружен `privsep=0`, выводится предупреждение и конфигурация токена сохраняется без изменения, чтобы не сломать уже работающий доступ.
 
 Существующие дополнительные ACL также не удаляются автоматически.
 
@@ -184,7 +186,7 @@ AI Control и DevOps ADR
 template builder/policy
 ```
 
-Public repo хранит только Stage 0 loader и архив старых публичных экспериментов.
+Public repo хранит только Stage 0 loader.
 
 ---
 
