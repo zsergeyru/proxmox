@@ -124,6 +124,8 @@ current: VMID XYZ → 192.168.X.YZ/16
 target:  VMID XYZ → 10.0.X.YZ/16
 ```
 
+Несоответствие IP этому правилу считается предупреждением, а не ошибкой: нестандартный адрес допустим, если он назначен осознанно.
+
 Режимы: `current`, `dual`, `target`. Default route всегда один.
 
 ### `deployable`
@@ -185,7 +187,34 @@ Semaphore
 
 ## Проверка CI
 
-CI проверяет source guest schema v4, `guests/defaults.yaml` schema, effective deploy schema после inheritance, наличие `guest.yaml`, VMID/name, уникальность VMID/IP, VMID/IP формулу, central subnet/gateway contract, network mode/default gateway, profile, pinned source, `ops:22`, managed-pool boundary и отсутствие secrets.
+CI проверяет source guest schema v4, `guests/defaults.yaml` schema, effective deploy schema после inheritance, наличие `guest.yaml`, VMID/name, уникальность VMID/IP, central subnet/gateway contract, network mode/default gateway, profile, pinned source, `ops:22`, managed-pool boundary и отсутствие secrets.
+
+Блокирующими ошибками также считаются, в частности:
+
+- IP вне соответствующей central subnet;
+- IP, совпадающий со шлюзом;
+- network/broadcast IP в качестве адреса гостя;
+- одинаковый current и target IP;
+- duplicate static IP;
+- `ballooning_mb > memory_mb`;
+- некорректная комбинация network mode/default gateway.
+
+Предупреждения выводятся на русском языке и не делают CI красным. Валидатор предупреждает о следующих ситуациях:
+
+- management IP не соответствует рекомендуемой VMID-формуле;
+- current и target IP имеют разные идентификаторные части;
+- `guest.yaml` повторяет значение, уже наследуемое из defaults/profile;
+- guest переопределяет общий node, bridge, storage или management SSH;
+- guest переопределяет общий `network.mode` или `network.default_gateway`;
+- profile из `defaults.yaml` не используется ни одним deployable-гостем;
+- VMID присутствует в `docs/11-vmid-plan.md`, но для него нет guest manifest;
+- в каталоге гостя отсутствует `README.md`;
+- deployable description содержит `TODO`/`TBD`/`pending`/`unknown` или аналогичный маркер незавершённости;
+- `state: bootstrap` или `state: legacy` используется вместе с `deployable: true`;
+- `state: active` имеет `boot.onboot: false`;
+- `protection: true` используется у гостя в pool `managed`.
+
+Предупреждения предназначены для архитектурного linting: допустимое исключение можно оставить, но оно остаётся видимым в каждом запуске CI.
 
 Главный принцип:
 

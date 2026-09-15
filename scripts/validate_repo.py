@@ -29,6 +29,17 @@ LXC_OSTEMPLATE_RE = re.compile(
     r"^[A-Za-z0-9._-]+:vztmpl/[A-Za-z0-9._+-]+_amd64\.tar\.(?:zst|gz|xz)$"
 )
 FORBIDDEN_SOURCE_MARKERS = ("<", ">", "*", "?", "13.x", "latest", "tbd", "todo")
+UNRESOLVED_DESCRIPTION_MARKERS = (
+    "todo",
+    "tbd",
+    "pending",
+    "unknown",
+    "не определено",
+    "не определён",
+    "не определен",
+    "не решено",
+    "требует уточнения",
+)
 FORBIDDEN_MANIFEST_KEYS = {
     "password",
     "passwd",
@@ -39,6 +50,17 @@ FORBIDDEN_MANIFEST_KEYS = {
     "preshared_key",
 }
 SELF_MANAGED_EXCLUSIONS = {100, 301, 320, 9000}
+PROJECT_DEFAULT_OVERRIDE_PATHS = {
+    ("node",),
+    ("resources", "disk", "storage"),
+    ("network", "bridge"),
+    ("management", "ssh", "user"),
+    ("management", "ssh", "port"),
+}
+NETWORK_MIGRATION_PATHS = {
+    ("network", "mode"),
+    ("network", "default_gateway"),
+}
 PRIVATE_KEY_MARKERS = tuple(
     "-----BEGIN " + key_type + "-----"
     for key_type in (
@@ -48,6 +70,7 @@ PRIVATE_KEY_MARKERS = tuple(
         "EC PRIVATE KEY",
     )
 )
+_MISSING = object()
 
 errors: list[str] = []
 warnings: list[str] = []
@@ -161,6 +184,30 @@ def walk_mapping_keys(value, path: tuple[str, ...] = ()):
             yield from walk_mapping_keys(child, path + (str(index),))
 
 
+def walk_leaf_values(value, path: tuple[str, ...] = ()):
+    if isinstance(value, dict):
+        for key, child in value.items():
+            yield from walk_leaf_values(child, path + (str(key),))
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            yield from walk_leaf_values(child, path + (str(index),))
+    else:
+        yield path, value
+
+
+def nested_get(mapping: dict, path: tuple[str, ...]):
+    value = mapping
+    for part in path:
+        if not isinstance(value, dict) or part not in value:
+            return _MISSING
+        value = value[part]
+    return value
+
+
+def path_text(path: tuple[str, ...]) -> str:
+    return ".".join(path)
+
+
 def validate_manifest_secrets(rel: Path, data: dict) -> None:
     for key_path, key in walk_mapping_keys(data):
         if key.lower() in FORBIDDEN_MANIFEST_KEYS:
@@ -210,6 +257,12 @@ def validate_network_defaults(defaults: dict) -> dict[str, dict]:
             fail(
                 f"{rel}: network_stages.{stage}.gateway {gateway} "
                 f"is outside {subnet}"
+            )
+            continue
+        if gateway in {subnet.network_address, subnet.broadcast_address}:
+            fail(
+                f"{rel}: network_stages.{stage}.gateway {gateway} "
+                f"cannot be network/broadcast address"
             )
             continue
 
@@ -262,6 +315,48 @@ def expected_management_ip(
     return ipaddress.ip_address(f"{octets[0]}.{octets[1]}.{third}.{fourth}")
 
 
+def validate_source_overrides(
+    *,
+    rel: Path,
+    source: dict,
+    defaults: dict,
+) -> None:
+    if not source.get("deployable"):
+        return
+
+    profile_name = source.get("profile")
+    profile = defaults.get("profiles", {}).get(profile_name)
+    if not isinstance(profile, dict):
+        return
+
+    inherited = deep_merge(defaults.get("defaults", {}), profile)
+
+    for path, value in walk_leaf_values(source):
+        inherited_value = nested_get(inherited, path)
+        if inherited_value is _MISSING:
+            continue
+
+        dotted = path_text(path)
+        if value == inherited_value:
+            warn(
+                f"{rel}: избыточное переопределение {dotted}={value!r}; "
+                "такое же значение уже наследуется из defaults/profile"
+            )
+            continue
+
+        if path in NETWORK_MIGRATION_PATHS:
+            warn(
+                f"{rel}: {dotted} переопределяет общий сетевой default "
+                f"{inherited_value!r} на {value!r}; проверьте, что это "
+                "осознанный этап сетевой миграции"
+            )
+        elif path in PROJECT_DEFAULT_OVERRIDE_PATHS:
+            warn(
+                f"{rel}: {dotted} переопределяет проектное значение "
+                f"{inherited_value!r} на {value!r}"
+            )
+
+
 def validate_stage_address(
     *,
     rel: Path,
@@ -271,10 +366,10 @@ def validate_stage_address(
     stage_configs: dict[str, dict],
     static_ips: dict[ipaddress.IPv4Address, Path],
     require_gateway: bool,
-) -> None:
+) -> ipaddress.IPv4Address | None:
     stage_data = network.get(stage)
     if stage_data is None:
-        return
+        return None
 
     ipv4 = stage_data.get("ipv4", {})
     address_text = ipv4.get("address")
@@ -283,16 +378,16 @@ def validate_stage_address(
         interface = ipaddress.ip_interface(address_text)
     except ValueError as exc:
         fail(f"{rel}: invalid network.{stage}.ipv4.address {address_text!r}: {exc}")
-        return
+        return None
 
     if not isinstance(interface, ipaddress.IPv4Interface):
         fail(f"{rel}: network.{stage}.ipv4.address must be IPv4")
-        return
+        return None
 
     config = stage_configs.get(stage)
     if config is None:
         fail(f"{rel}: no validated central network stage {stage!r}")
-        return
+        return None
 
     subnet: ipaddress.IPv4Network = config["subnet"]
     if interface.network.prefixlen != subnet.prefixlen:
@@ -305,6 +400,19 @@ def validate_stage_address(
     if address not in subnet:
         fail(f"{rel}: network.{stage}.ipv4.address {address} is outside {subnet}")
 
+    if address in {subnet.network_address, subnet.broadcast_address}:
+        fail(
+            f"{rel}: network.{stage}.ipv4.address {address} "
+            f"cannot be network/broadcast address of {subnet}"
+        )
+
+    expected_gateway: ipaddress.IPv4Address = config["gateway"]
+    if address == expected_gateway:
+        fail(
+            f"{rel}: network.{stage}.ipv4.address {address} "
+            "cannot equal the default gateway"
+        )
+
     if address in static_ips:
         fail(f"duplicate static IP {address}: {static_ips[address]} and {rel}")
     else:
@@ -313,26 +421,115 @@ def validate_stage_address(
     expected = expected_management_ip(vmid, config)
     if address != expected:
         warn(
-            f"{rel}: {stage} management IP {address} does not match VMID rule, "
-            f"expected {expected}"
+            f"{rel}: management IP стадии {stage} ({address}) не соответствует "
+            f"правилу VMID {vmid}; ожидается {expected}"
         )
 
     if not require_gateway:
-        return
+        return address
 
     gateway_text = ipv4.get("gateway")
     try:
         gateway = ipaddress.ip_address(gateway_text)
     except ValueError as exc:
         fail(f"{rel}: invalid effective {stage} gateway {gateway_text!r}: {exc}")
-        return
+        return address
 
-    expected_gateway: ipaddress.IPv4Address = config["gateway"]
     if gateway != expected_gateway:
         fail(
             f"{rel}: effective {stage} gateway must come from guests/defaults.yaml "
             f"and equal {expected_gateway}, got {gateway}"
         )
+
+    return address
+
+
+def validate_network_pair(
+    *,
+    rel: Path,
+    addresses: dict[str, ipaddress.IPv4Address],
+    stage_configs: dict[str, dict],
+) -> None:
+    current = addresses.get("current")
+    target = addresses.get("target")
+    if current is None or target is None:
+        return
+
+    if current == target:
+        fail(f"{rel}: current and target management IP cannot be identical ({current})")
+        return
+
+    current_cfg = stage_configs.get("current")
+    target_cfg = stage_configs.get("target")
+    if current_cfg is None or target_cfg is None:
+        return
+
+    current_offset = int(current) - int(current_cfg["subnet"].network_address)
+    target_offset = int(target) - int(target_cfg["subnet"].network_address)
+    if current_offset != target_offset:
+        warn(
+            f"{rel}: current IP {current} и target IP {target} имеют разные "
+            "идентификаторные части; проверьте соответствие адресов между стадиями"
+        )
+
+
+def validate_resource_semantics(rel: Path, data: dict) -> None:
+    resources = data.get("resources")
+    if not isinstance(resources, dict):
+        return
+
+    memory = resources.get("memory_mb")
+    ballooning = resources.get("ballooning_mb")
+    if (
+        isinstance(memory, int)
+        and isinstance(ballooning, int)
+        and ballooning > memory
+    ):
+        fail(
+            f"{rel}: resources.ballooning_mb ({ballooning}) "
+            f"cannot exceed resources.memory_mb ({memory})"
+        )
+
+
+def validate_state_warnings(rel: Path, source: dict, effective: dict) -> None:
+    state = source.get("state")
+    deployable = source.get("deployable")
+
+    if deployable and state in {"bootstrap", "legacy"}:
+        warn(
+            f"{rel}: state={state!r} используется вместе с deployable: true; "
+            "проверьте, что временный/устаревший объект действительно должен "
+            "разворачиваться универсальным deployer"
+        )
+
+    description = source.get("description", "")
+    if deployable and isinstance(description, str):
+        lowered = description.lower()
+        found = next(
+            (marker for marker in UNRESOLVED_DESCRIPTION_MARKERS if marker in lowered),
+            None,
+        )
+        if found is not None:
+            warn(
+                f"{rel}: deployable-гость содержит в description маркер "
+                f"незавершённости {found!r}"
+            )
+
+    boot = effective.get("boot")
+    if state == "active" and isinstance(boot, dict) and boot.get("onboot") is False:
+        warn(
+            f"{rel}: активный объект имеет boot.onboot=false; после перезагрузки "
+            "PVE он не запустится автоматически"
+        )
+
+    if deployable:
+        placement = effective.get("placement")
+        pool = placement.get("pool") if isinstance(placement, dict) else None
+        if effective.get("protection") is True and pool == "managed":
+            warn(
+                f"{rel}: protection=true у гостя в pool 'managed'; автоматический "
+                "reconcile/delete может быть ограничен защитой"
+            )
 
 
 def validate_deployable(rel: Path, source: dict, effective: dict) -> None:
@@ -443,7 +640,10 @@ def validate_guest_manifests() -> None:
         return
 
     seen_vmids: dict[int, Path] = {}
+    manifest_vmids: set[int] = set()
     static_ips: dict[ipaddress.IPv4Address, Path] = {}
+    used_profiles: set[str] = set()
+    profiles = defaults.get("profiles", {})
 
     for directory in sorted(p for p in GUESTS.iterdir() if p.is_dir()):
         match = GUEST_DIR_RE.match(directory.name)
@@ -455,6 +655,12 @@ def validate_guest_manifests() -> None:
         manifest = directory / "guest.yaml"
         rel = manifest.relative_to(ROOT)
 
+        if not (directory / "README.md").exists():
+            warn(
+                f"{directory.relative_to(ROOT)}: отсутствует README.md "
+                "с документацией гостя"
+            )
+
         if not manifest.exists():
             fail(
                 f"{directory.relative_to(ROOT)}: missing guest.yaml; "
@@ -462,6 +668,7 @@ def validate_guest_manifests() -> None:
             )
             continue
 
+        manifest_vmids.add(expected_vmid)
         data = load_mapping(manifest)
         if data is None:
             continue
@@ -495,6 +702,11 @@ def validate_guest_manifests() -> None:
         validate_manifest_secrets(rel, data)
 
         if data["deployable"]:
+            profile_name = data.get("profile")
+            if profile_name in profiles:
+                used_profiles.add(profile_name)
+
+            validate_source_overrides(rel=rel, source=data, defaults=defaults)
             effective = resolve_effective_manifest(rel=rel, source=data, defaults=defaults)
             if effective is None:
                 continue
@@ -507,9 +719,11 @@ def validate_guest_manifests() -> None:
             ):
                 continue
 
+            validate_resource_semantics(rel, effective)
             network = effective["network"]
+            addresses: dict[str, ipaddress.IPv4Address] = {}
             for stage in ("current", "target"):
-                validate_stage_address(
+                address = validate_stage_address(
                     rel=rel,
                     vmid=vmid,
                     stage=stage,
@@ -518,13 +732,23 @@ def validate_guest_manifests() -> None:
                     static_ips=static_ips,
                     require_gateway=True,
                 )
+                if address is not None:
+                    addresses[stage] = address
 
+            validate_network_pair(
+                rel=rel,
+                addresses=addresses,
+                stage_configs=stage_configs,
+            )
             validate_deployable(rel, data, effective)
+            validate_state_warnings(rel, data, effective)
         else:
+            validate_resource_semantics(rel, data)
             network = data.get("network")
+            addresses: dict[str, ipaddress.IPv4Address] = {}
             if isinstance(network, dict):
                 for stage in ("current", "target"):
-                    validate_stage_address(
+                    address = validate_stage_address(
                         rel=rel,
                         vmid=vmid,
                         stage=stage,
@@ -533,6 +757,28 @@ def validate_guest_manifests() -> None:
                         static_ips=static_ips,
                         require_gateway=False,
                     )
+                    if address is not None:
+                        addresses[stage] = address
+
+                validate_network_pair(
+                    rel=rel,
+                    addresses=addresses,
+                    stage_configs=stage_configs,
+                )
+
+            validate_state_warnings(rel, data, data)
+
+    for vmid in sorted(plan - manifest_vmids):
+        warn(
+            f"{VMID_PLAN.relative_to(ROOT)}: VMID {vmid} присутствует в плане, "
+            "но для него нет каталога гостя с guest.yaml"
+        )
+
+    for profile_name in sorted(set(profiles) - used_profiles):
+        warn(
+            f"{defaults_rel}: профиль {profile_name!r} не используется "
+            "ни одним deployable-гостем"
+        )
 
 
 def validate_secret_files(files: list[Path]) -> None:
@@ -600,9 +846,10 @@ def main() -> int:
     validate_secret_files(files)
     validate_markdown_links(files)
 
-    if warnings:
-        print("Repository validation warnings:")
-        for warning in warnings:
+    unique_warnings = list(dict.fromkeys(warnings))
+    if unique_warnings:
+        print("Предупреждения проверки репозитория:")
+        for warning in unique_warnings:
             print(f" - {warning}")
 
     if errors:
