@@ -396,17 +396,56 @@ configure_ceph_repository() {
     die "Файл ${ceph_sources} имеет нестандартную Ceph repository configuration (URIs='${uri:-не задан}', Suites='${suite:-не задан}', Components='${component:-не задан}'). Bootstrap не будет переписывать её автоматически."
 }
 
-configure_apt() {
-    log "Настройка PVE/Ceph repository policy без subscription"
+configure_pve_repository() {
+    local pve_sources="/etc/apt/sources.list.d/proxmox.sources"
+    local old_bootstrap_sources="/etc/apt/sources.list.d/pve-no-subscription.sources"
+    local uri suite component uri_count suite_count component_count
 
-    install -d -m 0755 /etc/apt/sources.list.d
-    cat >/etc/apt/sources.list.d/pve-no-subscription.sources <<'EOF_APT'
+    if [[ -f "$pve_sources" ]]; then
+        uri_count="$(grep -Ec '^URIs:[[:space:]]*' "$pve_sources" || true)"
+        suite_count="$(grep -Ec '^Suites:[[:space:]]*' "$pve_sources" || true)"
+        component_count="$(grep -Ec '^Components:[[:space:]]*' "$pve_sources" || true)"
+        [[ "$uri_count" == "1" && "$suite_count" == "1" && "$component_count" == "1" ]] \
+            || die "Файл ${pve_sources} содержит несколько или неполные repository stanzas. Bootstrap не будет переписывать нестандартную PVE-конфигурацию автоматически."
+
+        uri="$(sed -n 's/^URIs:[[:space:]]*//p' "$pve_sources" | head -n1)"
+        suite="$(sed -n 's/^Suites:[[:space:]]*//p' "$pve_sources" | head -n1)"
+        component="$(sed -n 's/^Components:[[:space:]]*//p' "$pve_sources" | head -n1)"
+        [[ "$uri" == "http://download.proxmox.com/debian/pve" \
+            && "$suite" == "trixie" && "$component" == "pve-no-subscription" ]] \
+            || die "Существующий ${pve_sources} имеет неожиданную конфигурацию; автоматическая перезапись запрещена"
+        ok "PVE repository уже использует pve-no-subscription"
+    else
+        cat >"$pve_sources" <<'EOF_PVE_REPO'
 Types: deb
 URIs: http://download.proxmox.com/debian/pve
 Suites: trixie
 Components: pve-no-subscription
 Signed-By: /usr/share/keyrings/proxmox-archive-keyring.gpg
-EOF_APT
+EOF_PVE_REPO
+        chmod 0644 "$pve_sources"
+        ok "Создан PVE no-subscription repository: ${pve_sources}"
+    fi
+
+    if [[ -f "$old_bootstrap_sources" ]]; then
+        uri="$(sed -n 's/^URIs:[[:space:]]*//p' "$old_bootstrap_sources" | head -n1)"
+        suite="$(sed -n 's/^Suites:[[:space:]]*//p' "$old_bootstrap_sources" | head -n1)"
+        component="$(sed -n 's/^Components:[[:space:]]*//p' "$old_bootstrap_sources" | head -n1)"
+        if [[ "$uri" == "http://download.proxmox.com/debian/pve" \
+            && "$suite" == "trixie" && "$component" == "pve-no-subscription" ]]; then
+            rm -f -- "$old_bootstrap_sources"
+            ok "Удалён дублирующий старый bootstrap repository: ${old_bootstrap_sources}"
+        else
+            die "${old_bootstrap_sources} существует, но имеет неожиданное содержимое; автоматическое удаление запрещено"
+        fi
+    fi
+}
+
+configure_apt() {
+    log "Настройка PVE/Ceph repository policy без subscription"
+
+    install -d -m 0755 /etc/apt/sources.list.d
+    configure_pve_repository
 
     local f
     for f in \
