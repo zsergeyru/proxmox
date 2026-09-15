@@ -9,9 +9,11 @@
 ```text
 Stage 0
 → только временный zero-day handoff
+→ /var/lib/proxmox-bootstrap после успеха удаляется целиком
 
 Stage 1
 → создаёт постоянную инфраструктурную файловую структуру
+→ постоянный state хранится в /var/lib/proxmox-deployer/state
 ```
 
 ---
@@ -25,7 +27,7 @@ zsergeyru/proxmox-bootstrap
 └── init-pve.sh
 ```
 
-Публичная стадия не знает внутреннюю структуру deployer и не создаёт PVE roles/tokens/pools/template.
+Публичная стадия не создаёт PVE roles/tokens/pools/template.
 
 До успешной передачи управления private bootstrap она использует временную область:
 
@@ -38,35 +40,51 @@ zsergeyru/proxmox-bootstrap
 └── private-repo/
 ```
 
+Каталог создаётся как `root:root 0700`.
+
 Назначение:
 
 ```text
 github_proxmox_repo_ed25519
 → временный read-only GitHub Deploy Key Stage 0
 
+github_proxmox_repo_ed25519.pub
+→ public часть, которую человек добавляет в GitHub Deploy keys
+
 known_hosts + ssh_config
 → безопасный SSH transport к GitHub
 
 private-repo/
-→ временный clone zsergeyru/proxmox только для запуска Stage 1
+→ временный shallow clone zsergeyru/proxmox глубиной 1 commit
+→ нужен только для запуска Stage 1
 ```
 
-После успешной Stage 1 public loader создаёт:
+Если private key уже существует, `.pub` каждый запуск восстанавливается из него. Private key является source of truth для временной пары ключей.
+
+Если Deploy Key ещё не авторизован, public loader выводит `.pub`, инструкцию, ждёт Enter через `/dev/tty` и один раз повторяет проверку доступа.
+
+После успешной private Stage 1:
 
 ```text
-/var/lib/proxmox-bootstrap/stage0-complete
+canonical Deploy Key уже сохранён в /etc/proxmox-deployer/ssh
+canonical private checkout уже создан в /var/lib/proxmox-deployer/repo
+bootstrap state уже находится в /var/lib/proxmox-deployer/state
 ```
 
-и удаляет:
+После этого public loader:
 
 ```text
-временный private key
-его public часть
-Stage 0 ssh_config/known_hosts
-временный private-repo checkout
+→ удаляет /var/lib/proxmox-bootstrap целиком
+→ только после успешного удаления публикует stage0-complete marker
 ```
 
-То есть Stage 0 не оставляет вторую постоянную копию Git credential или private repository.
+Постоянный marker:
+
+```text
+/var/lib/proxmox-deployer/state/stage0-complete
+```
+
+То есть после успешного Stage 0 каталога `/var/lib/proxmox-bootstrap` быть не должно.
 
 ---
 
@@ -183,7 +201,7 @@ ssh/github_proxmox_repo_ed25519.pub
 
 `deploy-guest.py` добавляется после реализации; до этого private bootstrap корректно сообщает состояние `partial`.
 
-Этот checkout принадлежит host-side infrastructure runtime и обновляется read-only из GitHub.
+Этот checkout принадлежит host-side infrastructure runtime и обновляется read-only из GitHub. Полная Git history не требуется: bootstrap использует shallow clone/fetch глубиной 1 commit.
 
 ---
 
@@ -203,7 +221,7 @@ repo/
 → private source of truth checkout
 
 state/
-→ deployer runtime state, last applied revision и т.п.
+→ deployer/bootstrap runtime state, last applied revision и stage0 marker
 
 cache/
 → безопасно пересоздаваемый cache
@@ -215,15 +233,16 @@ cache/
 
 # 7. Bootstrap state
 
+Постоянный bootstrap state входит в общий runtime deployer:
+
 ```text
-/var/lib/proxmox-bootstrap/
+/var/lib/proxmox-deployer/state/
 ├── state.json
 ├── version
 ├── last-run.json
+├── last-revision
 └── stage0-complete
 ```
-
-После завершения public handoff временных credentials здесь быть не должно.
 
 Назначение:
 
@@ -237,11 +256,16 @@ version
 last-run.json
 → timestamp/result/private revision без secrets
 
+last-revision
+→ revision канонического private checkout
+
 stage0-complete
 → public zero-day handoff уже успешно завершён
 ```
 
 State не является source of truth: повторный private bootstrap перепроверяет реальное состояние PVE.
+
+`/var/lib/proxmox-bootstrap` не является постоянным state-каталогом и после успешного Stage 0 отсутствует.
 
 ---
 
@@ -262,6 +286,8 @@ State не является source of truth: повторный private bootstra
 - логировать итоговые стадии и warnings;
 - логировать private repo revision;
 - не делать полный dump environment с credentials.
+
+Каталог логов `proxmox-bootstrap` является постоянным журналом и не относится к временной `/var/lib/proxmox-bootstrap`.
 
 ---
 
@@ -335,7 +361,11 @@ Backup `301-ai-control` также чувствителен, но не заме�
 └── pve-bootstrap-status
 ```
 
-`pve-bootstrap-status` устанавливается private Stage 1.
+`pve-bootstrap-status` устанавливается private Stage 1 и читает:
+
+```text
+/var/lib/proxmox-deployer/state/state.json
+```
 
 `deploy-guest` после реализации является небольшой wrapper-командой к source из private checkout:
 
@@ -364,6 +394,8 @@ Backup `301-ai-control` также чувствителен, но не заме�
 
 # 13. Итоговое дерево
 
+После успешного Stage 0 временного `/var/lib/proxmox-bootstrap` в итоговом дереве нет:
+
 ```text
 /
 ├── etc/
@@ -380,15 +412,15 @@ Backup `301-ai-control` также чувствителен, но не заме�
 │
 ├── var/
 │   ├── lib/
-│   │   ├── proxmox-deployer/
-│   │   │   ├── repo/
-│   │   │   ├── state/
-│   │   │   └── cache/
-│   │   └── proxmox-bootstrap/
-│   │       ├── state.json
-│   │       ├── version
-│   │       ├── last-run.json
-│   │       └── stage0-complete
+│   │   └── proxmox-deployer/
+│   │       ├── repo/
+│   │       ├── state/
+│   │       │   ├── state.json
+│   │       │   ├── version
+│   │       │   ├── last-run.json
+│   │       │   ├── last-revision
+│   │       │   └── stage0-complete
+│   │       └── cache/
 │   ├── log/
 │   │   ├── proxmox-bootstrap/
 │   │   └── proxmox-deployer/
@@ -403,4 +435,4 @@ Backup `301-ai-control` также чувствителен, но не заме�
 
 Главный принцип:
 
-> Public Stage 0 оставляет после себя только факт успешного handoff. Постоянные credentials, private checkout, PVE configuration и runtime принадлежат private Stage 1 и размещаются по канонической структуре проекта.
+> Public Stage 0 использует `/var/lib/proxmox-bootstrap` только как закрытую временную рабочую область. После успешного handoff она удаляется целиком. Постоянные credentials, private checkout, bootstrap state, PVE configuration и runtime принадлежат private Stage 1 и размещаются в канонической структуре deployer.
