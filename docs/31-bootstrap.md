@@ -25,25 +25,62 @@ zsergeyru/proxmox/scripts/pve/bootstrap/init-pve.sh
 
 Публичный `zsergeyru/proxmox-bootstrap` содержит только zero-day loader.
 
-Он выполняет:
+Текущая версия public Stage 0:
+
+```text
+STAGE0_VERSION=2
+```
+
+Обычный сценарий выполняется за один интерактивный запуск:
 
 ```text
 root/PVE check
+→ exclusive Stage 0 lock
 → minimal Git/SSH packages
+→ DNS/HTTPS check GitHub
 → временный read-only GitHub Deploy Key
-→ ожидание добавления key в private repo
-→ проверка read-only доступа
-→ временный clone zsergeyru/proxmox
+→ проверка read-only доступа к private repo
+```
+
+Если Deploy Key уже авторизован, Stage 0 сразу продолжает работу.
+
+Если доступа ещё нет:
+
+```text
+вывести public key
+→ показать путь GitHub Settings → Deploy keys
+→ напомнить Allow write access = OFF
+→ ждать Enter через /dev/tty
+→ повторно проверить GitHub connectivity
+→ один раз повторить read-only Git access check
+```
+
+Если после Enter доступ не появился, Stage 0 завершается с явной ошибкой. При следующем запуске существующий временный private key используется повторно, public часть восстанавливается из него и снова показывается человеку.
+
+После успешной авторизации:
+
+```text
+проверка origin временного checkout, если он уже существует
+→ shallow clone/fetch zsergeyru/proxmox, depth=1
 → запуск private Stage 1
-→ cleanup временного key/checkout после успешного handoff
+→ после успешного handoff полное удаление /var/lib/proxmox-bootstrap
+→ создание постоянного stage0-complete marker
 ```
 
 Публичный script не содержит внутренние PVE roles, ACL, pools, API identities, VMID plan, template logic, Proximo configuration или deployer implementation.
 
-После успешного handoff остаётся marker:
+Временная область Stage 0:
 
 ```text
-/var/lib/proxmox-bootstrap/stage0-complete
+/var/lib/proxmox-bootstrap/
+```
+
+существует только до успешного handoff и после него удаляется целиком вместе с временным Deploy Key, `known_hosts`, SSH config и temporary checkout.
+
+Постоянный marker успешного Stage 0 хранится в:
+
+```text
+/var/lib/proxmox-deployer/state/stage0-complete
 ```
 
 ---
@@ -59,7 +96,7 @@ scripts/pve/bootstrap/init-pve.sh
 Текущая версия private bootstrap:
 
 ```text
-BOOTSTRAP_VERSION=6
+BOOTSTRAP_VERSION=7
 ```
 
 Он выполняет:
@@ -85,6 +122,23 @@ exclusive run lock
 → local wrappers/status
 → final state
 ```
+
+### Постоянный bootstrap state
+
+Private Stage 1 больше не использует временный каталог Stage 0 для постоянного состояния.
+
+Bootstrap state хранится в:
+
+```text
+/var/lib/proxmox-deployer/state/
+├── state.json
+├── last-run.json
+├── version
+├── last-revision
+└── stage0-complete
+```
+
+`stage0-complete` создаётся public Stage 0 только после успешного возврата из private Stage 1 и удаления временной `/var/lib/proxmox-bootstrap`.
 
 ### Поведение проектных ролей
 
@@ -144,8 +198,8 @@ Private Stage 1 использует эксклюзивный `flock`, поэт�
 Состояние запуска записывается в:
 
 ```text
-/var/lib/proxmox-bootstrap/state.json
-/var/lib/proxmox-bootstrap/last-run.json
+/var/lib/proxmox-deployer/state/state.json
+/var/lib/proxmox-deployer/state/last-run.json
 ```
 
 В начале запуска устанавливается `running`. При штатной ошибке и при неожиданной shell-ошибке состояние меняется на `failed`, поэтому старый `ready` не остаётся после неудачного повторного запуска.
@@ -304,7 +358,9 @@ Public repo не должен содержать:
 
 Deploy Key создаётся на конкретном PVE и выдаётся только на чтение private repository.
 
-После успешного handoff временная Stage 0 копия credential удаляется, а каноническая copy хранится по private filesystem policy.
+До успешного handoff временный private key хранится только в закрытой `/var/lib/proxmox-bootstrap` с режимом `0700` для каталога и `0600` для private key.
+
+Private Stage 1 переносит Deploy Key в каноническое `/etc/proxmox-deployer/ssh`. После успешного handoff временная Stage 0 область удаляется целиком.
 
 При проверке API credential token secret не выводится в лог и не передаётся непосредственно в аргументах `curl`; временный header-файл создаётся с закрытыми правами и удаляется сразу после проверки.
 
@@ -312,4 +368,4 @@ Deploy Key создаётся на конкретном PVE и выдаётся 
 
 ## Главный принцип
 
-> Public Stage 0 только открывает безопасный read-only путь к private source of truth. Всё, что реально конфигурирует Proxmox и описывает внутреннее устройство инфраструктуры, находится и развивается только в `zsergeyru/proxmox`.
+> Public Stage 0 только открывает безопасный read-only путь к private source of truth и после успешной передачи управления исчезает как временный runtime. Всё, что постоянно конфигурирует Proxmox и описывает внутреннее устройство инфраструктуры, находится и развивается только в `zsergeyru/proxmox`.
