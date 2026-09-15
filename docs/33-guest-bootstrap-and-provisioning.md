@@ -31,15 +31,15 @@ deploy-guest.py
 
 Deployer не должен становиться вторым configuration-management framework.
 
-## Первичный SSH-доступ deployer
+## PVE SSH-доступ к гостям
 
-Отдельную SSH identity для первичного доступа к новым VM/LXC создаёт **PVE Private Stage 1**, а не `deploy-guest.py`.
+Отдельную постоянную SSH identity для host-side доступа PVE к управляемым VM/LXC создаёт **PVE Private Stage 1**, а не `deploy-guest.py`.
 
 Канонические файлы на PVE:
 
 ```text
-/etc/proxmox-deployer/ssh/guest_bootstrap_ed25519
-/etc/proxmox-deployer/ssh/guest_bootstrap_ed25519.pub
+/etc/proxmox-deployer/ssh/pve_guest_ed25519
+/etc/proxmox-deployer/ssh/pve_guest_ed25519.pub
 ```
 
 Разделение credentials:
@@ -48,14 +48,14 @@ Deployer не должен становиться вторым configuration-man
 github_proxmox_repo_ed25519
 → только read-only доступ PVE к GitHub repository
 
-guest_bootstrap_ed25519
-→ только первичный host-side SSH/bootstrap новых гостей
+pve_guest_ed25519
+→ постоянный host-side SSH-доступ PVE к управляемым гостям
 
 Ansible identity на 311
 → отдельный последующий credential штатного provisioning
 ```
 
-`deploy-guest` не создаёт и не ротирует `guest_bootstrap_ed25519`. Он использует public key при создании гостя штатным для VM/LXC способом, а private key — для первичного SSH-доступа после запуска.
+`deploy-guest` не создаёт и не ротирует `pve_guest_ed25519`. Он использует public key при создании гостя штатным для VM/LXC способом, а private key — для разрешённых host-side SSH-операций PVE после запуска.
 
 Stage 1 автоматически не ротирует существующий keypair. Если private key существует, `.pub` восстанавливается из него. Если private key потерян, но public key остался, bootstrap останавливается и требует явного recovery, потому что этот public key уже может быть установлен на существующих гостях.
 
@@ -194,7 +194,7 @@ Semaphore, Git service, CI и другие сервисы 311 не относя�
 
 На управляемых гостях Ansible устанавливать не требуется. Для штатного управления достаточно SSH, пользователя `ops`, Python и необходимых privilege escalation prerequisites.
 
-Host-side `guest_bootstrap_ed25519` нужен для первичного handoff. После появления Ansible штатное повторяемое управление не должно зависеть от использования этого ключа как Ansible credential.
+Host-side `pve_guest_ed25519` является постоянной PVE identity для доступа к управляемым гостям. Ansible/311 использует отдельную SSH identity; эти credentials не подменяют друг друга.
 
 ## Docker workloads
 
@@ -234,7 +234,7 @@ scripts/
 
 - secrets, private keys, passwords и tokens не хранятся в `guest.yaml`;
 - bootstrap handlers не должны печатать secrets в PLAN/log;
-- `guest_bootstrap_ed25519` хранится только на PVE и читается `pvedeploy`;
+- `pve_guest_ed25519` хранится только на PVE и читается `pvedeploy`;
 - deployer не генерирует и не ротирует infrastructure SSH credentials;
 - GitHub Deploy Key не используется для SSH в гостей;
 - Ansible EE получает только минимально необходимые mounts/credentials;
@@ -246,7 +246,7 @@ scripts/
 
 ```text
 PVE Stage 1
-   └─ guest_bootstrap_ed25519
+   └─ pve_guest_ed25519
 
             ↓
 
@@ -258,7 +258,7 @@ effective desired state
    ↓
 deploy-guest.py
    ├─ PVE PLAN/APPLY
-   ├─ inject guest-bootstrap public key
+   ├─ inject PVE guest public key
    └─ limited bootstrap capabilities
              ↓
        Ansible EE на 311

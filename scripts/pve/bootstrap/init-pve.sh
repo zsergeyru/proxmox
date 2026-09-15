@@ -14,7 +14,7 @@ set -Eeuo pipefail
 # недостающие privileges, но не удаляет уже существующие. Существующие ACL и
 # свойства API-токенов также не сужаются автоматически.
 
-BOOTSTRAP_VERSION=10
+BOOTSTRAP_VERSION=11
 
 PRIVATE_REPO="git@github.com:zsergeyru/proxmox.git"
 PRIVATE_BRANCH="main"
@@ -51,8 +51,12 @@ SECRETS_BACKUP_ROOT="/var/backups/proxmox-secrets"
 KEY_FILE="${SSH_DIR}/github_proxmox_repo_ed25519"
 SSH_CONFIG="${SSH_DIR}/config"
 KNOWN_HOSTS="${SSH_DIR}/known_hosts"
-GUEST_BOOTSTRAP_KEY="${SSH_DIR}/guest_bootstrap_ed25519"
-GUEST_BOOTSTRAP_PUB="${GUEST_BOOTSTRAP_KEY}.pub"
+PVE_GUEST_KEY="${SSH_DIR}/pve_guest_ed25519"
+PVE_GUEST_PUB="${PVE_GUEST_KEY}.pub"
+# Legacy name from BOOTSTRAP_VERSION=10. Used only for one-time migration
+# without rotating a key that may already be authorized in existing guests.
+LEGACY_GUEST_BOOTSTRAP_KEY="${SSH_DIR}/guest_bootstrap_ed25519"
+LEGACY_GUEST_BOOTSTRAP_PUB="${LEGACY_GUEST_BOOTSTRAP_KEY}.pub"
 
 TEMPLATE_VMID=9000
 TEMPLATE_NAME="tpl-debian13"
@@ -208,7 +212,7 @@ write_state() {
   "private_repo_checkout_exists": $( [[ -d "$REPO_DIR/.git" ]] && echo true || echo false ),
   "host_deploy_secret_exists": $( [[ -f "$HOST_TOKEN_FILE" ]] && echo true || echo false ),
   "ai_infra_secret_exists": $( [[ -f "$AI_TOKEN_FILE" ]] && echo true || echo false ),
-  "guest_bootstrap_key_exists": $( [[ -f "$GUEST_BOOTSTRAP_KEY" ]] && echo true || echo false ),
+  "pve_guest_key_exists": $( [[ -f "$PVE_GUEST_KEY" ]] && echo true || echo false ),
   "template_vmid": ${TEMPLATE_VMID},
   "warnings": ${WARN_COUNT}
 }
@@ -762,45 +766,66 @@ EOF_CONFIG
     ok "${CONFIG_DIR}/config.yaml соответствует текущей bootstrap-конфигурации"
 }
 
-ensure_guest_bootstrap_key() {
-    log "Проверка SSH identity для первичного guest bootstrap"
+ensure_pve_guest_key() {
+    log "Проверка постоянной PVE guest SSH identity"
 
-    if [[ ! -f "$GUEST_BOOTSTRAP_KEY" ]]; then
-        [[ ! -e "$GUEST_BOOTSTRAP_PUB" ]] \
-            || die "Private key ${GUEST_BOOTSTRAP_KEY} отсутствует, но ${GUEST_BOOTSTRAP_PUB} существует. Возможна потеря ранее использованного guest-bootstrap credential; автоматическая ротация запрещена. Восстановите private key из backup либо выполните отдельную осознанную ротацию."
+    if [[ ! -e "$PVE_GUEST_KEY" && ! -e "$PVE_GUEST_PUB" ]]; then
+        if [[ -f "$LEGACY_GUEST_BOOTSTRAP_KEY" ]]; then
+            install -o "$DEPLOY_USER" -g "$DEPLOY_USER" -m 0600 \
+                "$LEGACY_GUEST_BOOTSTRAP_KEY" "$PVE_GUEST_KEY"
+            rm -f -- "$LEGACY_GUEST_BOOTSTRAP_KEY" "$LEGACY_GUEST_BOOTSTRAP_PUB"
+            ok "Legacy PVE guest SSH private key перенесён в canonical path без ротации"
+        elif [[ -e "$LEGACY_GUEST_BOOTSTRAP_PUB" ]]; then
+            die "Обнаружен legacy public key ${LEGACY_GUEST_BOOTSTRAP_PUB}, но legacy private key отсутствует. Автоматическая ротация запрещена: восстановите private key из backup либо выполните отдельную осознанную rotation operation."
+        fi
+    fi
+
+    if [[ -f "$PVE_GUEST_KEY" && -f "$LEGACY_GUEST_BOOTSTRAP_KEY" ]]; then
+        local canonical_pub legacy_pub
+        canonical_pub="$(ssh-keygen -y -f "$PVE_GUEST_KEY" 2>/dev/null)" \
+            || die "Не удалось прочитать canonical PVE guest private key ${PVE_GUEST_KEY}"
+        legacy_pub="$(ssh-keygen -y -f "$LEGACY_GUEST_BOOTSTRAP_KEY" 2>/dev/null)" \
+            || die "Не удалось прочитать legacy PVE guest private key ${LEGACY_GUEST_BOOTSTRAP_KEY}"
+        [[ "$canonical_pub" == "$legacy_pub" ]] \
+            || die "Одновременно существуют разные canonical и legacy PVE guest SSH identities. Автоматический выбор запрещён."
+        rm -f -- "$LEGACY_GUEST_BOOTSTRAP_KEY" "$LEGACY_GUEST_BOOTSTRAP_PUB"
+        ok "Удалена совпадающая legacy-копия PVE guest SSH identity"
+    fi
+
+    if [[ ! -f "$PVE_GUEST_KEY" ]]; then
+        [[ ! -e "$PVE_GUEST_PUB" ]] \
+            || die "Private key ${PVE_GUEST_KEY} отсутствует, но ${PVE_GUEST_PUB} существует. Возможна потеря PVE guest credential; автоматическая ротация запрещена. Восстановите private key из backup либо выполните отдельную осознанную rotation operation."
 
         local old_umask
         old_umask="$(umask)"
         umask 077
-        if ! ssh-keygen -q -t ed25519 -N '' \
-            -C 'pve-guest-bootstrap' -f "$GUEST_BOOTSTRAP_KEY"; then
+        if ! ssh-keygen -q -t ed25519 -N '' -C 'pve-guest' -f "$PVE_GUEST_KEY"; then
             umask "$old_umask"
-            die "Не удалось создать guest-bootstrap SSH keypair"
+            die "Не удалось создать PVE guest SSH keypair"
         fi
         umask "$old_umask"
-        ok "Создан новый guest-bootstrap SSH private key"
+        ok "Создан новый PVE guest SSH private key"
     else
-        ok "Guest-bootstrap SSH private key уже существует и не ротируется"
+        ok "PVE guest SSH private key уже существует и не ротируется"
     fi
 
     local derived_pub tmp_pub
-    derived_pub="$(ssh-keygen -y -f "$GUEST_BOOTSTRAP_KEY" 2>/dev/null)" \
-        || die "Не удалось прочитать guest-bootstrap private key ${GUEST_BOOTSTRAP_KEY}"
+    derived_pub="$(ssh-keygen -y -f "$PVE_GUEST_KEY" 2>/dev/null)" \
+        || die "Не удалось прочитать PVE guest private key ${PVE_GUEST_KEY}"
     [[ "$derived_pub" == ssh-ed25519\ * ]] \
-        || die "Guest-bootstrap key ${GUEST_BOOTSTRAP_KEY} должен быть Ed25519"
+        || die "PVE guest key ${PVE_GUEST_KEY} должен быть Ed25519"
 
-    chown "$DEPLOY_USER:$DEPLOY_USER" "$GUEST_BOOTSTRAP_KEY"
-    chmod 0600 "$GUEST_BOOTSTRAP_KEY"
+    chown "$DEPLOY_USER:$DEPLOY_USER" "$PVE_GUEST_KEY"
+    chmod 0600 "$PVE_GUEST_KEY"
 
-    tmp_pub="$(mktemp "${SSH_DIR}/.guest-bootstrap-pub.XXXXXX")"
-    printf '%s %s\n' "$derived_pub" 'pve-guest-bootstrap' >"$tmp_pub"
-    install -o "$DEPLOY_USER" -g "$DEPLOY_USER" -m 0644 \
-        "$tmp_pub" "$GUEST_BOOTSTRAP_PUB"
+    tmp_pub="$(mktemp "${SSH_DIR}/.pve-guest-pub.XXXXXX")"
+    printf '%s %s
+' "$derived_pub" 'pve-guest' >"$tmp_pub"
+    install -o "$DEPLOY_USER" -g "$DEPLOY_USER" -m 0644 "$tmp_pub" "$PVE_GUEST_PUB"
     rm -f "$tmp_pub"
 
-    [[ -s "$GUEST_BOOTSTRAP_PUB" ]] \
-        || die "Guest-bootstrap public key не создан: ${GUEST_BOOTSTRAP_PUB}"
-    ok "Guest-bootstrap SSH identity проверена: ${GUEST_BOOTSTRAP_KEY}"
+    [[ -s "$PVE_GUEST_PUB" ]] || die "PVE guest public key не создан: ${PVE_GUEST_PUB}"
+    ok "PVE guest SSH identity проверена: ${PVE_GUEST_KEY}"
 }
 
 refresh_canonical_public_key() {
@@ -1319,7 +1344,7 @@ report_status() {
     printf '[ОК] local/local-lvm готовы для images/rootdir/vztmpl/snippets\n'
     printf '[ОК] Debian 13 LXC template подготовлен: %s\n' "${LXC_TEMPLATE_VOLUME:-не определён}"
     printf '[ОК] pvedeploy, config.yaml и файловая структура проверены\n'
-    printf '[ОК] Guest-bootstrap SSH identity создана/проверена\n'
+    printf '[ОК] PVE guest SSH identity создана/проверена\n'
     printf '[ОК] Канонический read-only Deploy Key установлен\n'
     printf '[ОК] Приватный репозиторий синхронизирован и origin проверен\n'
     printf '[ОК] managed и роли Proxmox проверены\n'
@@ -1377,7 +1402,7 @@ main() {
     ensure_storage_layout
     ensure_lxc_template
     ensure_runtime_layout
-    ensure_guest_bootstrap_key
+    ensure_pve_guest_key
     prepare_canonical_github_access
     verify_private_repo_access
     sync_private_repo

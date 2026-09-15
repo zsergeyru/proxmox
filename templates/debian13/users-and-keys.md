@@ -63,8 +63,8 @@ Private key через Cloud-Init никогда не передаётся.
 Private PVE Stage 1 создаёт отдельную technical identity для первичного SSH-доступа `deploy-guest` к создаваемым Linux-гостям:
 
 ```text
-/etc/proxmox-deployer/ssh/guest_bootstrap_ed25519
-/etc/proxmox-deployer/ssh/guest_bootstrap_ed25519.pub
+/etc/proxmox-deployer/ssh/pve_guest_ed25519
+/etc/proxmox-deployer/ssh/pve_guest_ed25519.pub
 ```
 
 Правила:
@@ -96,7 +96,7 @@ deploy-guest
 
 `deploy-guest` **не создаёт и не ротирует** эту пару. Lifecycle credential принадлежит PVE Stage 1.
 
-`guest_bootstrap_ed25519` нельзя переиспользовать как GitHub Deploy Key, AI Control key или будущую Ansible identity 311. Потеря private key считается recovery-ситуацией: автоматическая незаметная генерация новой пары запрещена, потому что старый public key может уже находиться в `authorized_keys` существующих гостей.
+`pve_guest_ed25519` нельзя переиспользовать как GitHub Deploy Key, AI Control key или будущую Ansible identity 311. Потеря private key считается recovery-ситуацией: автоматическая незаметная генерация новой пары запрещена, потому что старый public key может уже находиться в `authorized_keys` существующих гостей.
 
 ## Personal SSH keys
 
@@ -148,7 +148,7 @@ public key
 → SSH ops@managed-guest
 ```
 
-Этот direct SSH предназначен для diagnostics, one-off и emergency действий AI control plane. Первичный host-side bootstrap выполняется отдельным `guest_bootstrap_ed25519`, а повторяемая конфигурация после появления `311-dev-services` выполняется Ansible.
+Этот direct SSH предназначен для diagnostics, one-off и emergency действий AI control plane. Первичный host-side bootstrap выполняется отдельным `pve_guest_ed25519`, а повторяемая конфигурация после появления `311-dev-services` выполняется Ansible.
 
 ## GitHub identity AI Control
 
@@ -171,7 +171,7 @@ Public key вручную регистрируется как GitHub Deploy Key.
 
 ## Ansible / 311 identity
 
-Provisioning-контур `311-dev-services` должен иметь собственную SSH identity. Она не должна совпадать ни с host-side `guest_bootstrap_ed25519`, ни с ключом `301-ai-control`.
+Provisioning-контур `311-dev-services` должен иметь собственную SSH identity. Она не должна совпадать ни с host-side `pve_guest_ed25519`, ни с ключом `301-ai-control`.
 
 Принцип:
 
@@ -231,7 +231,7 @@ Autologin на локальной console не является password authent
 
 Если technical private key находится внутри рабочей VM, полный Proxmox backup этой VM содержит этот key. Поэтому backup `301-ai-control` и будущего `311-dev-services` с provisioning credentials считается чувствительным объектом.
 
-Host-side `/etc/proxmox-deployer/ssh/guest_bootstrap_ed25519` не входит в backup конкретной VM и должен резервироваться отдельно как PVE infrastructure secret.
+Host-side `/etc/proxmox-deployer/ssh/pve_guest_ed25519` не входит в backup конкретной VM и должен резервироваться отдельно как PVE infrastructure secret.
 
 ## Итоговая модель
 
@@ -245,13 +245,13 @@ Host-side `/etc/proxmox-deployer/ssh/guest_bootstrap_ed25519` не входит 
 
 managed VM
 └── /home/ops/.ssh/authorized_keys
-    ├── PVE guest-bootstrap public key
+    ├── PVE PVE guest public key
     ├── AI Control public key — если требуется direct AI SSH
     ├── Ansible/311 public key — после ввода provisioning-контура
     └── personal public keys — при необходимости
 
 PVE host
-└── /etc/proxmox-deployer/ssh/guest_bootstrap_ed25519
+└── /etc/proxmox-deployer/ssh/pve_guest_ed25519
     └── private host-side bootstrap identity
 
 301-ai-control

@@ -67,7 +67,7 @@ private-repo/
 
 ```text
 canonical Deploy Key уже сохранён в /etc/proxmox-deployer/ssh
-guest-bootstrap SSH identity уже создана в /etc/proxmox-deployer/ssh
+PVE guest SSH identity уже создана в /etc/proxmox-deployer/ssh
 canonical private checkout уже создан в /var/lib/proxmox-deployer/repo
 bootstrap state уже находится в /var/lib/proxmox-deployer/state
 ```
@@ -99,7 +99,7 @@ zsergeyru/proxmox/scripts/pve/bootstrap/init-pve.sh
 
 Он принимает временный Deploy Key от Stage 0, автономно конфигурирует сам PVE и формирует постоянную структуру.
 
-Stage 1 создаёт отдельную SSH identity для первичного доступа deployer к новым гостям. Эта identity не является GitHub Deploy Key и не является будущей Ansible identity 311.
+Stage 1 создаёт отдельную SSH identity для host-side доступа PVE к новым гостям. Эта identity не является GitHub Deploy Key и не является будущей Ansible identity 311.
 
 ---
 
@@ -111,8 +111,8 @@ Stage 1 создаёт отдельную SSH identity для первичног
 ├── ssh/
 │   ├── github_proxmox_repo_ed25519
 │   ├── github_proxmox_repo_ed25519.pub
-│   ├── guest_bootstrap_ed25519
-│   ├── guest_bootstrap_ed25519.pub
+│   ├── pve_guest_ed25519
+│   ├── pve_guest_ed25519.pub
 │   ├── config
 │   └── known_hosts
 └── secrets/
@@ -129,10 +129,10 @@ config.yaml
 ssh/github_proxmox_repo_ed25519
 → canonical read-only Deploy Key для zsergeyru/proxmox
 
-ssh/guest_bootstrap_ed25519
-→ отдельный private key host-side deployer для первичного SSH-доступа к новым VM/LXC
+ssh/pve_guest_ed25519
+→ отдельный private key PVE host-side tooling для SSH-доступа PVE к управляемым VM/LXC
 
-ssh/guest_bootstrap_ed25519.pub
+ssh/pve_guest_ed25519.pub
 → public key, который deploy-guest передаёт создаваемому гостю штатным для его типа способом
 
 ssh/config + known_hosts
@@ -145,7 +145,7 @@ secrets/ai-agent-infra.token
 → recovery/source credential ai-agent@pve!infra
 ```
 
-`guest_bootstrap_ed25519` создаётся Private Stage 1 один раз и автоматически не ротируется. При повторном bootstrap public часть восстанавливается из private key. Потеря private key при сохранившемся `.pub` считается recovery-ситуацией и не должна приводить к молчаливой генерации новой identity.
+`pve_guest_ed25519` создаётся Private Stage 1 один раз и автоматически не ротируется. При повторном bootstrap public часть восстанавливается из private key. Потеря private key при сохранившемся `.pub` считается recovery-ситуацией и не должна приводить к молчаливой генерации новой identity.
 
 ---
 
@@ -177,11 +177,11 @@ ssh/github_proxmox_repo_ed25519.pub
 → pvedeploy:pvedeploy
 → 0644
 
-ssh/guest_bootstrap_ed25519
+ssh/pve_guest_ed25519
 → pvedeploy:pvedeploy
 → 0600
 
-ssh/guest_bootstrap_ed25519.pub
+ssh/pve_guest_ed25519.pub
 → pvedeploy:pvedeploy
 → 0644
 ```
@@ -192,7 +192,7 @@ ssh/guest_bootstrap_ed25519.pub
 - private keys и token secrets не попадают в Git;
 - secrets не выводятся в обычные logs;
 - потеря local token secret при существующем PVE token требует явной recovery/rotation operation;
-- потеря `guest_bootstrap_ed25519` не вызывает автоматическую ротацию: новый ключ создаётся только осознанно;
+- потеря `pve_guest_ed25519` не вызывает автоматическую ротацию: новый ключ создаётся только осознанно;
 - `pvedeploy` не получает `ai-agent-infra.token`.
 
 ---
@@ -365,13 +365,13 @@ diagnostics/
 /etc/proxmox-deployer/secrets/ai-agent-infra.token
 /etc/proxmox-deployer/ssh/github_proxmox_repo_ed25519
 /etc/proxmox-deployer/ssh/github_proxmox_repo_ed25519.pub
-/etc/proxmox-deployer/ssh/guest_bootstrap_ed25519
-/etc/proxmox-deployer/ssh/guest_bootstrap_ed25519.pub
+/etc/proxmox-deployer/ssh/pve_guest_ed25519
+/etc/proxmox-deployer/ssh/pve_guest_ed25519.pub
 /etc/proxmox-deployer/ssh/config
 /etc/proxmox-deployer/ssh/known_hosts
 ```
 
-`guest_bootstrap_ed25519` особенно важен для recovery: он может уже быть установлен в `authorized_keys` существующих гостей. Его потеря не должна компенсироваться автоматической незаметной генерацией новой пары.
+`pve_guest_ed25519` особенно важен для recovery: он может уже быть установлен в `authorized_keys` существующих гостей. Его потеря не должна компенсироваться автоматической незаметной генерацией новой пары.
 
 Локальный backup на том же SSD не считается полноценным disaster-recovery backup.
 
@@ -430,8 +430,8 @@ Backup `301-ai-control` также чувствителен, но не заме�
 │       ├── ssh/
 │       │   ├── github_proxmox_repo_ed25519
 │       │   ├── github_proxmox_repo_ed25519.pub
-│       │   ├── guest_bootstrap_ed25519
-│       │   ├── guest_bootstrap_ed25519.pub
+│       │   ├── pve_guest_ed25519
+│       │   ├── pve_guest_ed25519.pub
 │       │   ├── config
 │       │   └── known_hosts
 │       └── secrets/
@@ -463,4 +463,4 @@ Backup `301-ai-control` также чувствителен, но не заме�
 
 Главный принцип:
 
-> Public Stage 0 использует `/var/lib/proxmox-bootstrap` только как закрытую временную рабочую область. После успешного handoff она удаляется целиком. Постоянные credentials, включая отдельную guest-bootstrap SSH identity, private checkout, bootstrap state, PVE configuration и runtime принадлежат private Stage 1 и размещаются в канонической структуре deployer.
+> Public Stage 0 использует `/var/lib/proxmox-bootstrap` только как закрытую временную рабочую область. После успешного handoff она удаляется целиком. Постоянные credentials, включая отдельную PVE guest SSH identity, private checkout, bootstrap state, PVE configuration и runtime принадлежат private Stage 1 и размещаются в канонической структуре deployer.

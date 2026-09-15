@@ -136,12 +136,12 @@ RTO ≤ несколько часов при доступном backup и исп
 
 ```text
 /etc/proxmox-deployer/ssh/github_proxmox_repo_ed25519
-/etc/proxmox-deployer/ssh/guest_bootstrap_ed25519
+/etc/proxmox-deployer/ssh/pve_guest_ed25519
 /etc/proxmox-deployer/secrets/host-deploy.token
 /etc/proxmox-deployer/secrets/ai-agent-infra.token
 ```
 
-`guest_bootstrap_ed25519` нельзя считать просто пересоздаваемым ключом. Его public half может уже находиться в `authorized_keys` существующих VM/LXC. Поэтому потеря private half при сохранённых гостях требует осознанной recovery/rotation процедуры, а не автоматической генерации новой пары.
+`pve_guest_ed25519` нельзя считать просто пересоздаваемым ключом. Его public half может уже находиться в `authorized_keys` существующих VM/LXC. Поэтому потеря private half при сохранённых гостях требует осознанной recovery/rotation процедуры, а не автоматической генерации новой пары.
 
 GitHub Deploy Key также является постоянным credential после handoff. При его потере потребуется зарегистрировать новый Deploy Key на GitHub и выполнить явное восстановление canonical credential.
 
@@ -177,7 +177,7 @@ GitHub Deploy Key также является постоянным credential п
 8. после проверки критичных сервисов восстановить остальные гости;
 9. проверить сеть, основные сервисы и работу нового резервного копирования.
 
-Если старый `guest_bootstrap_ed25519` восстановить невозможно, его ротация выполняется как отдельная операция с обновлением public key на нужных гостях.
+Если старый `pve_guest_ed25519` восстановить невозможно, его ротация выполняется как отдельная операция с обновлением public key на нужных гостях.
 
 ### Проверка восстановления PVE
 
@@ -200,7 +200,7 @@ GitHub Deploy Key также является постоянным credential п
 - настроить и проверить SMB/CIFS storage;
 - проверить USB automount после reboot;
 - реализовать расписание и retention;
-- включить `/etc/proxmox-deployer/ssh/guest_bootstrap_ed25519` и остальные permanent infrastructure credentials во внешнюю encrypted backup policy;
+- включить `/etc/proxmox-deployer/ssh/pve_guest_ed25519` и остальные permanent infrastructure credentials во внешнюю encrypted backup policy;
 - определить RPO/RTO для каждого production-сервиса по мере его ввода;
 - провести первый документированный restore-test;
 - после нового `init-pve.sh` провести учебное восстановление PVE;
