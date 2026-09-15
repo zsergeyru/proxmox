@@ -25,7 +25,6 @@ lxc:
   container_runtime: docker
   source:
     ostemplate: local:vztmpl/debian-13-standard_13.6-1_amd64.tar.zst
-    download_if_missing: true
   unprivileged: true
   features:
     nesting: true
@@ -33,6 +32,8 @@ lxc:
 ```
 
 `container_runtime: docker` является машинно-читаемым признаком принятого исключения. CI запрещает Docker-LXC без `unprivileged: true`, `nesting: true` и `keyctl: true`.
+
+Конкретный `ostemplate` задаётся Git desired state. `deploy-guest` не скачивает LXC template и не выбирает другую версию; отсутствие требуемого template считается host prerequisite и блокирует APPLY до подготовки PVE Stage 1/bootstrap.
 
 ## Почему выбран LXC
 

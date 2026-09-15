@@ -27,29 +27,45 @@ zsergeyru/proxmox-bootstrap/archive/2026-09-14/
 
 - [`20-pve-initialization.md`](20-pve-initialization.md) — zero-day PVE и host-side deploy;
 - [`21-pve-filesystem-layout.md`](21-pve-filesystem-layout.md) — файловая модель PVE bootstrap/deployer;
+- [`25-pve-access-control.md`](25-pve-access-control.md) — канонические PVE identities, роли и граница `managed`;
+- [`33-guest-bootstrap-and-provisioning.md`](33-guest-bootstrap-and-provisioning.md) — guest bootstrap и передача управления Ansible;
 - [`50-ai-control.md`](50-ai-control.md) — архитектура `301-ai-control`;
 - ADR `311-dev-services` — Ansible/Semaphore и repeatable deploy;
 - ADR `320-ai-control` — management/security model, пока не заменён отдельным новым ADR.
 
-То есть мы не выводим архитектуру заново из требований. Мы заново пишем код, который её реализует.
+`25-pve-access-control.md` является источником истины по тому, кто и какими PVE credentials создаёт и управляет обычными VM/LXC.
 
-## Целевая последовательность
+## Целевая последовательность bootstrap самого 301
 
-Host-side создание VM должно быть частью общей PVE deploy-модели, а не зависеть от работающего AI:
+`301` является специальным control-plane объектом и не должен быть необходим для собственного создания.
+
+Поэтому его первоначальное развёртывание остаётся host-side:
 
 ```text
 чистый PVE
-→ zero-day PVE bootstrap
+→ zero-day PVE bootstrap Stage 0 + Stage 1
 → private zsergeyru/proxmox доступен на PVE
 → template 9000
-→ deploy 301-ai-control по guest.yaml
-→ подготовка общей AI platform внутри 301
+→ host-side deploy 301-ai-control по guest.yaml
+→ guest bootstrap/common platform внутри 301
 → установка выбранного AI agent
 → Git/SSH/MCP health checks
 → ввод 301 как control plane
 ```
 
-`301` не должен быть необходим для собственного создания.
+Здесь использование host-side deploy не означает, что после запуска 301 все новые гости обязаны создаваться через `deploy-guest`.
+
+После ввода control plane обычный AI lifecycle выглядит иначе:
+
+```text
+301 AI agent
+→ Proximo
+→ ai-agent@pve!infra
+→ create/clone обычного guest сразу в managed
+→ configure/start/verify
+```
+
+То есть `deploy-guest` остаётся человеческим/direct-host инструментом и bootstrap-механизмом для специальных случаев вроде первоначального создания самого `301`, а обычные разрешённые managed guests AI может создавать и обслуживать напрямую через Proximo согласно `25-pve-access-control.md`.
 
 ## Разделение этапов внутри 301
 
@@ -57,7 +73,7 @@ Host-side создание VM должно быть частью общей PVE 
 
 ```text
 создание VM 301
-→ уровень Proxmox / generic guest deploy
+→ уровень Proxmox / generic host-side guest deploy
 
 подготовка общей AI platform
 → Docker/runtime, Git/OpenSSH, Python/tooling, общий Proximo, identities
@@ -92,9 +108,13 @@ PVE credential создаётся и хранится по принятой PVE 
 
 Hard boundary задаётся PVE ACL. `301` не получает host-level administration и не входит в собственную обычную self-managed write-zone.
 
+После ввода 301 Proximo является штатным путём AI для create/clone/configure/start/stop/snapshot/backup/delete обычных разрешённых VM/LXC в `managed`.
+
+Новый обычный guest должен создаваться сразу в `managed`. AI не должен получать возможность произвольно принимать существующие protected/self-managed VM вне этого pool.
+
 ## SSH identities
 
-Сохраняются две разные задачи:
+Сохраняются разные задачи и разные credentials:
 
 ```text
 infrastructure SSH identity
@@ -104,7 +124,7 @@ GitHub Deploy Key
 → доступ к private zsergeyru/proxmox
 ```
 
-Private keys не хранятся в Git. Способ генерации, доставки и проверки реализуется новыми scripts.
+Private keys не хранятся в Git. Эти credentials не используются взаимозаменяемо. Способ генерации, доставки и проверки реализуется новыми scripts.
 
 ## AI agent
 
@@ -130,6 +150,8 @@ AI agent / пользователь
 → guest
 ```
 
+Это отдельный слой от PVE lifecycle. AI может создать обычный guest через Proximo, после чего штатный guest bootstrap/provisioning доводит ОС и приложения до Git desired state.
+
 Прямой SSH из `301` сохраняется для bootstrap, диагностики, разовых и аварийных действий.
 
 ## Требования к новым scripts
@@ -144,6 +166,8 @@ AI agent / пользователь
 - с health verification после каждого существенного этапа;
 - с возможностью отдельно диагностировать host deploy, platform preparation и agent install;
 - согласованной с `guest.yaml`, PVE ACL и filesystem policy.
+
+Bootstrap самого `301` не должен требовать работающего AI control plane. После ввода 301 обычное создание managed guests, наоборот, не должно искусственно маршрутизироваться через host-side `deploy-guest`.
 
 ## Что не переносим автоматически из старого кода
 
@@ -161,15 +185,17 @@ AI agent / пользователь
 
 До вывода `320-ai-control` нужно проверить полный новый путь на реальном PVE:
 
-1. `301` создаётся из принятого PVE deploy flow;
+1. `301` создаётся host-side из принятого PVE deploy flow без зависимости от собственного control plane;
 2. QGA/Cloud-Init/SSH работают;
 3. common platform устанавливается повторяемо;
-4. Proximo видит только разрешённую PVE surface;
-5. infrastructure SSH key работает на test managed guest;
-6. private repo доступен через отдельную Git identity;
-7. AI agent запускается и использует common capabilities;
-8. Ansible на `311` может применять desired state;
-9. `301` не может изменять собственную VM через обычную write-zone;
-10. backup/recovery/credential handling соответствует принятой policy.
+4. Proximo авторизуется как `ai-agent@pve!infra` и видит только разрешённую PVE surface;
+5. AI через Proximo создаёт/clone тестовый обычный guest сразу в `managed`;
+6. infrastructure SSH key работает на test managed guest;
+7. private repo доступен через отдельную Git identity;
+8. AI agent запускается и использует common capabilities;
+9. Ansible на `311` может применять desired state к test guest;
+10. `301` не может изменять собственную VM через обычную write-zone;
+11. protected/self-managed объекты вне `managed` не становятся автоматически доступны AI write-access;
+12. backup/recovery/credential handling соответствует принятой policy.
 
 До успешной проверки `320-ai-control` не удаляется.

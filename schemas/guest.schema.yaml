@@ -154,8 +154,6 @@ $defs:
           ostemplate:
             type: string
             minLength: 1
-          download_if_missing:
-            type: boolean
       unprivileged:
         type: boolean
       features:

@@ -161,13 +161,11 @@ properties:
       source:
         type: object
         additionalProperties: false
-        required: [ostemplate, download_if_missing]
+        required: [ostemplate]
         properties:
           ostemplate:
             type: string
             minLength: 1
-          download_if_missing:
-            type: boolean
       unprivileged:
         type: boolean
       features:

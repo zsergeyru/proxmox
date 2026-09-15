@@ -90,7 +90,6 @@ profiles:
       container_runtime: docker
       source:
         ostemplate: local:vztmpl/debian-13-standard_13.6-1_amd64.tar.zst
-        download_if_missing: true
       unprivileged: true
       features:
         nesting: true
@@ -120,6 +119,28 @@ placement:
 и остаётся вне обычного `managed`.
 
 Для deployable guest `type`, `vm` и `lxc` принадлежат profile.
+
+## Source LXC template
+
+Для LXC Git является source of truth для конкретного `ostemplate`:
+
+```yaml
+lxc:
+  source:
+    ostemplate: local:vztmpl/debian-13-standard_13.6-1_amd64.tar.zst
+```
+
+Имя template должно быть pinned и не содержит `latest`, wildcard или плавающую версию.
+
+`deploy-guest` **не скачивает LXC template и не выбирает другой template автоматически**. Его обязанность:
+
+```text
+прочитать effective lxc.source.ostemplate
+→ проверить, что указанный volume уже доступен на PVE
+→ если отсутствует — BLOCKED/STOP до изменений гостя
+```
+
+Подготовка host-side prerequisite, включая наличие требуемого LXC template, относится к PVE Stage 1/bootstrap хоста. Это отделено от guest deployment и не требует выдавать `deployer@pve!host-deploy` право загрузки template.
 
 ## Сеть
 
@@ -287,6 +308,8 @@ Validator проверяет только `guests/defaults.yaml` и сущест
 
 Warnings не делают CI красным. IP override вне VMID-формулы — warning; IP вне central subnet, duplicate IP, gateway/network/broadcast collision — error.
 
+Pinned `lxc.source.ostemplate` является частью Git desired state. Отсутствие template на конкретном PVE — runtime prerequisite/preflight deployer, а не задача schema validator.
+
 ## Git как source of truth
 
 Источник desired state:
@@ -300,5 +323,7 @@ guest.yaml
 =
 effective desired state
 ```
+
+Для LXC это также означает: конкретный `ostemplate` берётся из Git без автоматической подмены deployer'ом.
 
 `/etc/proxmox-deployer/config.yaml` остаётся host-side runtime/bootstrap config и не является источником guest defaults.
