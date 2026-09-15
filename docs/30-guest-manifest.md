@@ -89,7 +89,7 @@ profiles:
     lxc:
       container_runtime: docker
       source:
-        ostemplate: local:vztmpl/debian-13-standard_13.6-1_amd64.tar.zst
+        ostemplate: local:vztmpl/debian-13-standard
       unprivileged: true
       features:
         nesting: true
@@ -122,25 +122,35 @@ placement:
 
 ## Source LXC template
 
-Для LXC Git является source of truth для конкретного `ostemplate`:
+Для LXC Git фиксирует **семейство appliance**, но не конкретную версию архива:
 
 ```yaml
 lxc:
   source:
-    ostemplate: local:vztmpl/debian-13-standard_13.6-1_amd64.tar.zst
+    ostemplate: local:vztmpl/debian-13-standard
 ```
 
-Имя template должно быть pinned и не содержит `latest`, wildcard или плавающую версию.
-
-`deploy-guest` **не скачивает LXC template и не выбирает другой template автоматически**. Его обязанность:
+`lxc.source.ostemplate` является selector, а не точным Proxmox volume. В `defaults.yaml` не хранится строка вида:
 
 ```text
-прочитать effective lxc.source.ostemplate
-→ проверить, что указанный volume уже доступен на PVE
-→ если отсутствует — BLOCKED/STOP до изменений гостя
+local:vztmpl/debian-13-standard_13.6-1_amd64.tar.zst
 ```
 
-Наличие нужного LXC template — host-side prerequisite, но guest deployment не определяет, как именно он был подготовлен. PVE Stage 1 не читает `guest.yaml`, `guests/defaults.yaml`, profiles или другие guest-данные ради выбора template: Stage 1 является автономным bootstrap самого хоста и исполняет только собственную встроенную логику. Если требуемого profile template на PVE нет, `deploy-guest` останавливается без попытки скачать или подменить его.
+Версия Debian 13 standard appliance определяется состоянием PVE. Private Stage 1 обновляет каталог `pveam`, выбирает актуальный `debian-13-standard_*_amd64` и при необходимости заранее скачивает его в `local:vztmpl`.
+
+`deploy-guest` не скачивает и не обновляет LXC templates. Его runtime flow:
+
+```text
+прочитать effective lxc.source.ostemplate selector
+→ найти уже установленные на указанном storage volumes этого семейства
+→ если найден один — использовать его
+→ если найдено несколько — выбрать наиболее новую версию version-aware сравнением
+→ если не найдено ни одного — BLOCKED/STOP до изменений гостя
+```
+
+Таким образом Git определяет нужное семейство ОС (`debian-13-standard`), а конкретный build/timestamp appliance является host-side runtime detail. Stage 1 остаётся автономным bootstrap PVE и не читает guest manifests для выбора версии template.
+
+Selector не должен содержать `latest`, wildcard, `13.x`, точную версию или имя архива `.tar.zst/.tar.xz/.tar.gz`. Канонический пример — `local:vztmpl/debian-13-standard`.
 
 ## Сеть
 
@@ -287,17 +297,18 @@ boot:
 Ожидаемый вывод:
 
 ```text
-Node               pve                 [defaults]
-Pool               managed             [defaults]
-Storage            local-lvm           [defaults]
-Profile            docker-lxc          [guest]
-LXC appliance      debian-13-...       [profile]
-Bridge             vmbr0               [defaults]
-Subnet             192.168.0.0/16      [defaults]
-Gateway            192.168.1.1         [defaults]
-Management IP      192.168.3.11/16     [vmid]
-Memory             4096 MiB            [guest]
-Disk size          32 GiB              [guest]
+Node               pve                                      [defaults]
+Pool               managed                                  [defaults]
+Storage            local-lvm                                [defaults]
+Profile            docker-lxc                               [guest]
+LXC selector       local:vztmpl/debian-13-standard          [profile]
+LXC appliance      local:vztmpl/debian-13-standard_...tar.zst [runtime]
+Bridge             vmbr0                                    [defaults]
+Subnet             192.168.0.0/16                           [defaults]
+Gateway            192.168.1.1                              [defaults]
+Management IP      192.168.3.11/16                          [vmid]
+Memory             4096 MiB                                 [guest]
+Disk size          32 GiB                                   [guest]
 ```
 
 При `network.ipv4.address` override источник IP — `[guest]`.
@@ -308,7 +319,7 @@ Validator проверяет только `guests/defaults.yaml` и сущест
 
 Warnings не делают CI красным. IP override вне VMID-формулы — warning; IP вне central subnet, duplicate IP, gateway/network/broadcast collision — error.
 
-Pinned `lxc.source.ostemplate` является частью Git desired state. Отсутствие template на конкретном PVE — runtime prerequisite/preflight deployer, а не задача schema validator.
+Для LXC validator требует versionless family selector в `lxc.source.ostemplate` и отклоняет конкретное имя appliance archive, wildcard, `latest` и другие плавающие/неоднозначные значения. Наличие подходящего установленного template на конкретном PVE — runtime prerequisite/preflight deployer.
 
 ## Git как source of truth
 
@@ -324,6 +335,6 @@ guest.yaml
 effective desired state
 ```
 
-Для LXC это также означает: конкретный `ostemplate` берётся из Git без автоматической подмены deployer'ом.
+Для LXC Git является source of truth для семейства appliance и storage selector. Конкретная версия установленного архива выбирается на PVE из уже подготовленных Stage 1 templates и не фиксируется в `defaults.yaml`.
 
 `/etc/proxmox-deployer/config.yaml` остаётся host-side runtime/bootstrap config и не является источником guest defaults.
