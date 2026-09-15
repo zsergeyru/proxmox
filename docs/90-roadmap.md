@@ -4,11 +4,11 @@
 
 1. Проверить automount USB storage `/mnt/pve/backup`; подтвердить отсутствие `nic1` и убрать остаточную строку `iface nic1 inet manual` из рабочего конфига PVE.
 2. Завершить базовый Debian 13 template без `virt-customize`, проверить `ops`, QEMU Guest Agent, serial console и Cloud-Init.
-3. Реализовать `scripts/pve/deploy-guest.py`: PLAN по умолчанию, `--apply`, safe reconciliation, task wait и verify.
+3. Реализовать `scripts/pve/deploy-guest.py`: PLAN по умолчанию, `--apply`, safe reconciliation, task wait и verify; использовать общий `scripts/guest_config.py` и ограниченный whitelist `bootstrap.capabilities` вместо универсального package/application installer.
 4. Перед сетевой миграцией реализовать последовательное переключение central `subnet + gateway`: новый IP каждого обычного гостя вычислять из VMID, применять по одному гостю и проверять доступность после переключения.
 5. Развернуть `109-network-gateway` в текущей LAN: SmartDNS, исходящие VPN, PBR, remote-access VPN и health-check, сохранив обычный интернет через Keenetic независимо от 109.
-6. Развернуть `311-dev-services`: Ansible как штатный повторяемый deploy по SSH; Semaphore как необязательный ручной web-интерфейс.
-7. Реализовать минимальные Ansible playbook для применения `rootfs/`.
+6. Развернуть `311-dev-services` специальным bootstrap: довести до `base + git + docker + ansible_controller`; сам Ansible запускать контейнеризированно как воспроизводимый Execution Environment, а не устанавливать в Debian как основной runtime.
+7. Реализовать универсальный Ansible provisioning playbook: передавать `provisioning.capabilities` как variables, условно подключать стандартные roles; Semaphore, Git service, CI и прочие приложения 311 устанавливать уже этим слоем.
 8. Подготовить `301-ai-control`, проверить Hermes, Proxmox MCP, SSH и вызов Ansible на 311; только после этого вывести bootstrap `320`.
 9. Определить startup/shutdown order гостей. Аварийный доступ к PVE не должен зависеть от 109, 301 или 311.
 10. Настроить SMB/CIFS backup-хранилище, проверить USB-копию, retention и первый документированный restore-test.
@@ -34,7 +34,9 @@
 - IOT `10.20.0.0/16`, CAMERAS `10.30.0.0/16`, REMOTE-VPN `10.60.0.0/16`;
 - `home.arpa` — внутренний DNS-домен, `.local` — mDNS;
 - SmartDNS — основной DNS-движок; AdGuard Home опционален; sing-box используется точечно;
-- Ansible на 311 — штатный повторяемый deploy, Semaphore — необязательный UI;
+- deployer получает ограниченный bootstrap-интерфейс только для первичного handoff к штатному provisioning; начальный набор — `base`, `git`, `docker`, `ansible_controller`;
+- `bootstrap` не является произвольным списком пакетов или Docker workloads; прикладные сервисы устанавливаются Ansible/Docker Compose;
+- Ansible на 311 — штатный повторяемый deploy по SSH и работает контейнеризированно через Execution Environment; Semaphore — необязательный UI;
 - `rootfs/` хранит только управляемые проектом файлы и не включает persistent data;
 - backup: SMB/CIFS как основная внешняя копия + USB как дополнительная; для критичных систем базово 7 daily + 4 weekly и restore-test не реже раза в три месяца;
 - запланированный VMID не означает обязательное немедленное создание гостя.
