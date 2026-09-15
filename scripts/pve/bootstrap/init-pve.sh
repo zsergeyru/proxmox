@@ -14,7 +14,7 @@ set -Eeuo pipefail
 # недостающие privileges, но не удаляет уже существующие. Существующие ACL и
 # свойства API-токенов также не сужаются автоматически.
 
-BOOTSTRAP_VERSION=7
+BOOTSTRAP_VERSION=8
 
 PRIVATE_REPO="git@github.com:zsergeyru/proxmox.git"
 PRIVATE_BRANCH="main"
@@ -242,14 +242,10 @@ check_root_and_pve() {
         if [[ "$name" != "$TEMPLATE_NAME" || "$template_flag" != "1" ]]; then
             die "VMID ${TEMPLATE_VMID} уже существует, но это не ожидаемый шаблон ${TEMPLATE_NAME}; перезапись запрещена"
         fi
-        if [[ "$protection_flag" != "1" ]]; then
-            qm set "$TEMPLATE_VMID" --protection 1
-            protection_flag="$(qm config "$TEMPLATE_VMID" | awk -F': ' '$1=="protection" {print $2}')"
-            [[ "$protection_flag" == "1" ]] \
-                || die "Не удалось установить protection=1 для шаблона ${TEMPLATE_VMID} ${TEMPLATE_NAME}"
-            ok "Для существующего шаблона ${TEMPLATE_VMID} автоматически включён protection=1"
-        else
+        if [[ "$protection_flag" == "1" ]]; then
             ok "Защищённый шаблон ${TEMPLATE_VMID} уже существует"
+        else
+            printf '[ИНФО] Канонический шаблон %s найден без protection=1; защита будет включена только после снимка конфигурации.\n' "$TEMPLATE_VMID"
         fi
     fi
 }
@@ -292,6 +288,9 @@ snapshot_host_config() {
     pveum pool list >"$dst/diagnostics/pools.txt" 2>&1 || true
     ip addr >"$dst/diagnostics/ip-addr.txt" 2>&1 || true
     ip route >"$dst/diagnostics/ip-route.txt" 2>&1 || true
+    if qm config "$TEMPLATE_VMID" >/dev/null 2>&1; then
+        qm config "$TEMPLATE_VMID" >"$dst/diagnostics/template-${TEMPLATE_VMID}-before.txt" 2>&1 || true
+    fi
 
     ok "Сохранён снимок конфигурации хоста: $dst"
 }
@@ -300,8 +299,68 @@ snapshot_host_config() {
 # Репозитории, пакеты, сеть и storage
 # =============================================================================
 
+configure_ceph_repository() {
+    local ceph_sources="/etc/apt/sources.list.d/ceph.sources"
+    local legacy_ceph_list="/etc/apt/sources.list.d/ceph.list"
+    local uri suite component uri_count suite_count component_count release tmp
+
+    # PVE 9 использует deb822 ceph.sources. Активный legacy ceph.list на trixie
+    # считаем нестандартной конфигурацией: автоматически смешивать/переписывать
+    # разные форматы Ceph repositories небезопасно.
+    if [[ -f "$legacy_ceph_list" ]] \
+        && grep -Ev '^[[:space:]]*(#|$)' "$legacy_ceph_list" | grep -qi 'ceph'; then
+        die "Обнаружен активный legacy Ceph repository ${legacy_ceph_list}. Для PVE 9 ожидается ceph.sources; автоматическое изменение нестандартной конфигурации запрещено."
+    fi
+
+    if [[ ! -f "$ceph_sources" ]]; then
+        ok "Ceph repository не настроен; изменений не требуется"
+        return
+    fi
+
+    uri_count="$(grep -Ec '^URIs:[[:space:]]*' "$ceph_sources" || true)"
+    suite_count="$(grep -Ec '^Suites:[[:space:]]*' "$ceph_sources" || true)"
+    component_count="$(grep -Ec '^Components:[[:space:]]*' "$ceph_sources" || true)"
+
+    [[ "$uri_count" == "1" && "$suite_count" == "1" && "$component_count" == "1" ]] \
+        || die "Файл ${ceph_sources} содержит несколько или неполные repository stanzas. Bootstrap не будет переписывать нестандартную Ceph-конфигурацию автоматически."
+
+    uri="$(awk -F':[[:space:]]*' '$1=="URIs" {print $2; exit}' "$ceph_sources")"
+    suite="$(awk -F':[[:space:]]*' '$1=="Suites" {print $2; exit}' "$ceph_sources")"
+    component="$(awk -F':[[:space:]]*' '$1=="Components" {print $2; exit}' "$ceph_sources")"
+
+    if [[ "$uri" =~ ^https?://download\.proxmox\.com/debian/(ceph-[A-Za-z0-9._-]+)$ \
+        && "$suite" == "trixie" && "$component" == "no-subscription" ]]; then
+        ok "Ceph repository уже использует no-subscription (${BASH_REMATCH[1]})"
+        return
+    fi
+
+    if [[ "$uri" =~ ^https?://enterprise\.proxmox\.com/debian/(ceph-[A-Za-z0-9._-]+)$ \
+        && "$suite" == "trixie" && "$component" == "enterprise" ]]; then
+        release="${BASH_REMATCH[1]}"
+        tmp="$(mktemp "${ceph_sources}.XXXXXX")"
+
+        sed \
+            -e "s#^URIs:[[:space:]]*https\?://enterprise\.proxmox\.com/debian/${release}[[:space:]]*$#URIs: http://download.proxmox.com/debian/${release}#" \
+            -e 's/^Components:[[:space:]]*enterprise[[:space:]]*$/Components: no-subscription/' \
+            "$ceph_sources" >"$tmp"
+        install -o root -g root -m 0644 "$tmp" "$ceph_sources"
+        rm -f "$tmp"
+
+        uri="$(awk -F':[[:space:]]*' '$1=="URIs" {print $2; exit}' "$ceph_sources")"
+        component="$(awk -F':[[:space:]]*' '$1=="Components" {print $2; exit}' "$ceph_sources")"
+        [[ "$uri" == "http://download.proxmox.com/debian/${release}" \
+            && "$component" == "no-subscription" ]] \
+            || die "После изменения не удалось подтвердить Ceph no-subscription repository для ${release}"
+
+        ok "Ceph ${release}: enterprise repository переведён на no-subscription без смены release"
+        return
+    fi
+
+    die "Файл ${ceph_sources} имеет нестандартную Ceph repository configuration (URIs='${uri:-не задан}', Suites='${suite:-не задан}', Components='${component:-не задан}'). Bootstrap не будет переписывать её автоматически."
+}
+
 configure_apt() {
-    log "Настройка репозитория pve-no-subscription"
+    log "Настройка PVE/Ceph repository policy без subscription"
 
     install -d -m 0755 /etc/apt/sources.list.d
     cat >/etc/apt/sources.list.d/pve-no-subscription.sources <<'EOF_APT'
@@ -321,6 +380,8 @@ EOF_APT
             ok "Отключён репозиторий enterprise: $f"
         fi
     done
+
+    configure_ceph_repository
 
     apt-get update
     if (( UPDATE_SYSTEM )); then
@@ -949,7 +1010,7 @@ report_status() {
     printf '\nСОСТОЯНИЕ ПРИВАТНОЙ ИНИЦИАЛИЗАЦИИ PVE\n\n'
     printf '[ОК] Proxmox и KVM проверены\n'
     printf '[ОК] Эксклюзивная блокировка bootstrap используется\n'
-    printf '[ОК] pve-no-subscription настроен\n'
+    printf '[ОК] PVE/Ceph repository policy без subscription проверена\n'
     printf '[ОК] DNS и исходящий HTTPS работают\n'
     printf '[ОК] local/local-lvm/snippets подготовлены\n'
     printf '[ОК] pvedeploy и файловая структура подготовлены\n'
