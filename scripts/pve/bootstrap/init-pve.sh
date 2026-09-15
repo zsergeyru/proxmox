@@ -498,10 +498,11 @@ check_time_dns_network() {
 
     curl -fsS --connect-timeout 10 -o /dev/null https://github.com/ \
         || die "Нет HTTPS-доступа к GitHub"
-    curl -fsS --connect-timeout 10 -o /dev/null https://download.proxmox.com/ \
-        || die "Нет HTTPS-доступа к download.proxmox.com"
+    curl -fsS --connect-timeout 10 -o /dev/null \
+        http://download.proxmox.com/debian/pve/dists/trixie/InRelease \
+        || die "Нет доступа к PVE repository download.proxmox.com"
 
-    ok "DNS и исходящий HTTPS работают"
+    ok "DNS, GitHub HTTPS и доступ к PVE repository работают"
 }
 
 storage_content_list() {
@@ -1259,7 +1260,7 @@ report_status() {
     printf '[ОК] Proxmox VE 9 / Debian trixie / KVM проверены\n'
     printf '[ОК] Эксклюзивная блокировка bootstrap используется\n'
     printf '[ОК] PVE/Ceph repository policy без subscription проверена\n'
-    printf '[ОК] DNS и исходящий HTTPS работают\n'
+    printf '[ОК] DNS, GitHub HTTPS и доступ к PVE repository работают\n'
     printf '[ОК] local/local-lvm готовы для images/rootdir/vztmpl/snippets\n'
     printf '[ОК] Debian 13 LXC template подготовлен: %s\n' "${LXC_TEMPLATE_VOLUME:-не определён}"
     printf '[ОК] pvedeploy, config.yaml и файловая структура проверены\n'
