@@ -100,7 +100,7 @@ guests/<VMID>-<name>/
 
 `guest.yaml` описывает объект Proxmox. `rootfs/` содержит только управляемые проектом файлы по реальным абсолютным путям гостевой ОС.
 
-Для Debian-инфраструктуры единый административный SSH-пользователь — `ops`.
+Для управляемой Debian-инфраструктуры единый management SSH-user — `root`. Пароль root заблокирован; SSH работает только по ключам. Deployer, AI и Ansible различаются отдельными SSH identities, а не отдельными Linux-пользователями.
 
 ## Deploy
 
@@ -121,6 +121,8 @@ guests/<VMID>-<name>/
 
 - секреты/private keys не хранятся в Git;
 - используются отдельные API tokens/SSH keys;
+- root password authentication отключён;
+- доступ к guest OS можно отзывать удалением соответствующего public key без изменения остальных identities;
 - перед рискованными изменениями применяются snapshot/backup по ситуации;
 - persistent data резервируется отдельно от конфигурации;
 - критичные backup регулярно проверяются реальным restore-test;
