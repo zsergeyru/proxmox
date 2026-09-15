@@ -507,7 +507,8 @@ check_time_dns_network() {
 
 storage_content_list() {
     local storage=$1
-    pvesm config "$storage" | awk '$1=="content" {print $2; exit}'
+    pvesh get "/storage/${storage}" --output-format json \
+        | jq -r '.content // empty'
 }
 
 storage_has_content() {
