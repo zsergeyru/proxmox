@@ -127,12 +127,9 @@ properties:
         required: [user, port]
         properties:
           user:
-            type: string
-            minLength: 1
+            const: root
           port:
-            type: integer
-            minimum: 1
-            maximum: 65535
+            const: 22
   vm:
     type: object
     additionalProperties: false
