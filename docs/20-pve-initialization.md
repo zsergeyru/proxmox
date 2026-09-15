@@ -19,8 +19,8 @@ zsergeyru/proxmox/scripts/pve/bootstrap/init-pve.sh
 Текущие версии:
 
 ```text
-Public Stage 0:  STAGE0_VERSION=2
-Private Stage 1: BOOTSTRAP_VERSION=7
+Public Stage 0:  STAGE0_VERSION=3
+Private Stage 1: BOOTSTRAP_VERSION=9
 ```
 
 ---
@@ -60,7 +60,7 @@ zsergeyru/proxmox-bootstrap/init-pve.sh
 → обеспечить минимальный git/ssh toolset
 → проверить DNS/HTTPS-доступность GitHub
 → создать или переиспользовать временный read-only GitHub Deploy Key
-→ проверить read-only доступ к zsergeyru/proxmox
+→ проверить read-only доступ к zsergeyru/proxmox и ветке main
 ```
 
 Если Deploy Key ещё не авторизован:
@@ -71,7 +71,7 @@ zsergeyru/proxmox-bootstrap/init-pve.sh
 → напомнить Allow write access = OFF
 → ждать Enter через /dev/tty
 → повторно проверить доступность GitHub
-→ один раз повторить Git access check
+→ один раз повторить Git access check ветки main
 ```
 
 Если после Enter доступ по-прежнему отсутствует, Stage 0 завершается с явной ошибкой. При следующем запуске существующий временный private key переиспользуется, а public часть восстанавливается из него.
@@ -156,6 +156,12 @@ Allow write access: OFF
 
 Никакие private keys или token secrets через Git не передаются.
 
+После успешного Stage 0 повторный public запуск с `--update-system` не игнорируется молча: скрипт явно направляет оператора к canonical private init:
+
+```bash
+/var/lib/proxmox-deployer/repo/scripts/pve/bootstrap/init-pve.sh --update-system
+```
+
 ---
 
 # 4. Stage 1 — приватная полная инициализация
@@ -176,8 +182,9 @@ configuration snapshot
 APT policy
 packages
 DNS/time/outbound checks
-storage/snippets
-pvedeploy
+storage/content types
+Debian 13 LXC template
+pvedeploy + config.yaml
 canonical Git checkout
 managed pool
 PVE roles
@@ -199,6 +206,7 @@ status/reporting
 ```text
 PVE
 ├── pve-no-subscription repository
+├── согласованный Ceph no-subscription channel, если Ceph repo был enterprise
 ├── bootstrap/admin toolset
 ├── Linux user pvedeploy
 ├── canonical read-only GitHub Deploy Key
@@ -207,6 +215,7 @@ PVE
 ├── deployer@pve!host-deploy
 ├── ai-agent@pve!infra
 ├── защищённые локальные копии API token secrets
+├── Debian 13 LXC template в local:vztmpl
 ├── template 9000 tpl-debian13
 ├── private PVE tooling
 ├── /var/lib/proxmox-deployer/state bootstrap/runtime state
@@ -230,11 +239,12 @@ Host-side deploy должен работать независимо от AI cont
 Перед существенными изменениями проверяются:
 
 - запуск от `root`;
-- `pveversion`, `qm`, `pct`, `pvesh`, `pveum`, `pvesm`;
-- Debian `trixie` для текущего PVE baseline;
+- Proxmox VE **9.x**;
+- Debian `trixie`;
+- `pveversion`, `qm`, `pct`, `pvesh`, `pveum`, `pvesm`, `pveam`;
 - KVM;
 - `vmbr0`;
-- `local` и `local-lvm`;
+- наличие `local` и `local-lvm`;
 - конфликт VMID `9000`;
 - DNS/outbound connectivity;
 - источник Debian cloud image, если template ещё отсутствует.
@@ -262,7 +272,9 @@ Private bootstrap сохраняет диагностический snapshot т�
 - `datacenter.cfg`;
 - PVE version;
 - users/roles/ACL/pools;
-- storage/network diagnostics.
+- storage/network diagnostics;
+- список уже загруженных LXC templates;
+- исходный `qm config 9000`, если canonical template уже существует.
 
 Это bootstrap snapshot, а не VM backup и не полный disaster recovery PVE.
 
@@ -282,7 +294,27 @@ Components: pve-no-subscription
 Signed-By: /usr/share/keyrings/proxmox-archive-keyring.gpg
 ```
 
-Enterprise repository отключается, если подписки нет.
+Основной `pve-enterprise` отключается.
+
+Ceph repository обрабатывается консервативно:
+
+```text
+ceph.sources отсутствует
+→ ничего не менять
+
+уже download.proxmox.com + no-subscription
+→ ничего не менять
+
+enterprise.proxmox.com + Components: enterprise
+→ сохранить тот же ceph-* release
+→ перевести только channel на download.proxmox.com + no-subscription
+
+legacy ceph.list, multi-stanza или другая нестандартная конфигурация
+→ STOP
+→ не переписывать автоматически
+```
+
+Bootstrap не выбирает другую Ceph major/release самостоятельно.
 
 Обычная Stage 1 делает `apt update` и ставит нужные пакеты, но не обязана выполнять полный upgrade.
 
@@ -292,7 +324,7 @@ Enterprise repository отключается, если подписки нет.
 init-pve.sh --update-system
 ```
 
-Public Stage 0 этот параметр только передаёт private Stage 1.
+Public Stage 0 этот параметр передаёт private Stage 1 только при первоначальном handoff.
 
 ---
 
@@ -326,7 +358,7 @@ Public Stage 0 устанавливает только минимальные п
 
 ---
 
-# 10. Storage
+# 10. Storage и LXC template
 
 Базовые storage:
 
@@ -335,7 +367,33 @@ local
 local-lvm
 ```
 
-Private Stage 1 проверяет `snippets` в `local` и при необходимости добавляет этот content type, не удаляя уже разрешённые типы.
+Stage 1 проверяет, что оба storage включены и активны, после чего additive-only policy обеспечивает content types:
+
+```text
+local:
+  snippets
+  vztmpl
+
+local-lvm:
+  images
+  rootdir
+```
+
+Недостающие content types добавляются без удаления существующих.
+
+Для LXC Stage 1 выполняет:
+
+```text
+pveam update
+→ найти актуальный debian-13-standard_*_amd64 template в section system
+→ проверить local:vztmpl
+→ при отсутствии скачать через pveam download local <template>
+→ повторно проверить наличие
+```
+
+Точное имя template не хардкодится, поэтому timestamp/version appliance определяется текущим каталогом `pveam`.
+
+Это позволяет создавать LXC после bootstrap без выдачи AI права `Datastore.AllocateTemplate`: загрузку base template выполняет root/Stage 1 заранее.
 
 ---
 
@@ -436,6 +494,8 @@ AIManagedPool
 
 Bootstrap может безопасно расширять наши проектные роли, но автоматически не сужает уже существующую конфигурацию.
 
+Если среди дополнительных прав обнаруживаются особенно опасные `Permissions.Modify` или `Sys.Modify`, bootstrap выводит заметное предупреждение, но по принятой additive policy всё равно не удаляет их автоматически.
+
 Аналогично дополнительные существующие ACL не удаляются автоматически.
 
 ---
@@ -461,7 +521,8 @@ Bootstrap может безопасно расширять наши проект
 - если token существует, а локальный secret утрачен, bootstrap останавливается и требует явную rotation/recovery operation;
 - bootstrap не пытается молча пересоздать такой credential;
 - после ACL setup проверяются effective permissions токена;
-- затем этим token+secret выполняется реальная локальная авторизация в Proxmox API.
+- затем этим token+secret выполняется реальная локальная авторизация в Proxmox API;
+- временный `.api-check.*` header удаляется штатно, по `INT/TERM`, а stale-файлы после возможного `SIGKILL` очищаются на следующей проверке.
 
 ---
 
@@ -482,11 +543,15 @@ Private Stage 1 принимает её и сохраняет каноничес
 /etc/proxmox-deployer/ssh/known_hosts
 ```
 
+Canonical `.pub` каждый запуск восстанавливается из private key, поэтому потеря или повреждение только public-файла не требует ротации ключа.
+
+Если canonical private key уже существует, а Stage 0 принесла другой ключ, Stage 1 не заменяет постоянный credential автоматически. При отказе canonical credential bootstrap останавливается с явным recovery/rotation сообщением.
+
 После успешного завершения private Stage 1 public Stage 0 удаляет **всю** временную `/var/lib/proxmox-bootstrap`, а не только отдельные key/checkout files.
 
 ---
 
-# 16. Канонический private checkout
+# 16. Канонический private checkout и config.yaml
 
 ```text
 /var/lib/proxmox-deployer/repo
@@ -497,6 +562,26 @@ Private Stage 1 принимает её и сохраняет каноничес
 Bootstrap использует shallow clone/fetch глубиной 1 commit: полная Git history на PVE для runtime не требуется.
 
 Перед повторным `fetch/reset` проверяется, что `origin` совпадает с каноническим private repository URL.
+
+Host-side bootstrap config:
+
+```text
+/etc/proxmox-deployer/config.yaml
+```
+
+Если файла нет, Stage 1 создаёт его. Если файл уже существует, он **не перезаписывается**, но обязательные project-owned keys валидируются:
+
+```text
+repo
+branch
+checkout
+managed_pool
+host_deploy_identity
+ai_infra_identity
+template_vmid
+```
+
+Отсутствующий или конфликтующий обязательный ключ приводит к STOP вместо продолжения с ложной конфигурацией. Дополнительные неизвестные keys разрешены.
 
 ---
 
@@ -524,6 +609,8 @@ protection = 1
 
 Если `9000` существует, но это не canonical template, bootstrap останавливается и не перезаписывает объект.
 
+Preflight только проверяет identity существующего template. Если `protection=1` отсутствует, изменение выполняется позднее, уже после configuration snapshot.
+
 ---
 
 # 18. deploy-guest
@@ -546,9 +633,11 @@ scripts/pve/deploy-guest.py
 
 AI не обязан использовать `deploy-guest`: AI работает через Proximo и `ai-agent@pve!infra`.
 
+Старая executable wrapper без существующего source больше не считается готовым `deploy-guest` и не даёт ложный `[ОК]` в итоговом отчёте.
+
 ---
 
-# 19. Повторный запуск
+# 19. Повторный запуск и state
 
 ## Public Stage 0
 
@@ -585,14 +674,14 @@ Private bootstrap рассчитан на повторный запуск и п�
 └── stage0-complete
 ```
 
-При начале private запуска `state.json` получает `running`; при ошибке — `failed`; после нормального завершения — итоговый `ready`, `ready-with-warnings` или `partial`.
+При начале private запуска `state.json` получает `running`; при штатной shell/API ошибке — `failed`; при `SIGINT`/`SIGTERM` — `interrupted`; после нормального завершения — итоговый `ready`, `ready-with-warnings` или `partial`.
 
 ---
 
 # 20. Итоговый flow
 
 ```text
-чистый PVE
+чистый PVE 9 / Debian trixie
     │
     ▼
 PUBLIC Stage 0
@@ -600,13 +689,14 @@ PUBLIC Stage 0
     ├── lock + GitHub connectivity
     ├── временный read-only Deploy Key
     ├── при необходимости: показать key → ждать Enter → retry
-    └── shallow private clone depth=1
+    └── shallow private clone depth=1, branch=main
              │
              ▼
 PRIVATE Stage 1
     │
-    ├── PVE configuration
-    ├── pvedeploy
+    ├── PVE/Ceph repository policy
+    ├── storage content types + Debian 13 LXC template
+    ├── pvedeploy + validated config.yaml
     ├── canonical Git checkout
     ├── managed + roles + ACL
     ├── API identities/secrets
