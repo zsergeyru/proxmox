@@ -8,12 +8,14 @@
 VMID: 9000
 Name: tpl-debian13
 OS: Debian 13 (Trixie)
-Template-Version: 4
+Template-Version: 6
 Clone policy: Full Clone
 Protection: 1
+Management user: root
+SSH: public key only
 ```
 
-Template v4 снова является действующей версией. От усложнения v5 с pinned Debian build, version lock и `snapshot.debian.org` отказались.
+Template v6 является текущей действующей версией. Версия v5 ранее использовалась для отменённого эксперимента с pinned Debian build/APT snapshot и не переиспользуется.
 
 Рабочая реализация находится в приватном репозитории:
 
@@ -23,7 +25,7 @@ scripts/pve/create-template.sh
 
 Политика сборки: [`build-policy.md`](build-policy.md).
 
-## Что делает Template v4
+## Что делает Template v6
 
 ```text
 Debian 13 trixie/latest generic cloud image
@@ -33,11 +35,14 @@ Debian 13 trixie/latest generic cloud image
 → установка base packages
 → regular linux-image-amd64
 → remove cloud-amd64 kernel
+→ root password locked
+→ root SSH key-only
 → verification reboot
 → framebuffer + VGA/noVNC tty1 verification
-→ QGA + SSH policy + locked-password verification
-→ clean machine-specific state
+→ QGA + SSH policy verification
+→ clean machine-specific state и authorized_keys
 → standard Cloud-Init defaults
+→ ciuser=root
 → qm template
 → protection=1
 ```
@@ -60,8 +65,8 @@ https://cloud.debian.org/images/cloud/trixie/latest/debian-13-genericcloud-amd64
 linux-image-amd64
 cloud kernel удалён
 vga: std
-noVNC/VGA → tty1 → autologin ops
-serial0 → ttyS0 → autologin ops (fallback)
+noVNC/VGA → tty1 → autologin root
+serial0 → ttyS0 → autologin root (fallback)
 Fixed 8x16
 ```
 
@@ -71,22 +76,25 @@ Builder после reboot требует:
 - существующий framebuffer `fb0` с валидным размером;
 - active QEMU Guest Agent;
 - active `getty@tty1` и `serial-getty@ttyS0`;
+- root autologin на обеих локальных консолях;
 - корректную effective SSH policy.
+
+Console autologin не является сетевой password authentication. Право Proxmox `VM.Console` фактически даёт root-доступ внутрь гостя и выдаётся только доверенным PVE identities.
 
 ## Доступ
 
 ```text
-admin user: ops
-ops password: locked
+management user: root
 root password: locked
-sudo: NOPASSWD
-SSH: public key only
-Root SSH: disabled
+PasswordAuthentication: no
+KbdInteractiveAuthentication: no
+PermitRootLogin: prohibit-password
+PubkeyAuthentication: yes
 ```
 
-Base template не содержит персональных SSH keys. Ключи, сеть и hostname задаются Full Clone до первого запуска через Cloud-Init.
+То есть root по сети доступен только с разрешённым private key.
 
-Право Proxmox `VM.Console` считается административным доступом, потому что console autologin приводит к `ops`, имеющему `sudo`.
+Base template не содержит personal, deployer, AI или Ansible public keys. Перед seal удаляется `/root/.ssh`, а каждый clone получает необходимые public keys отдельно до первого запуска.
 
 ## Базовые параметры
 
@@ -99,7 +107,7 @@ Controller: VirtIO SCSI Single
 Network: VirtIO / vmbr0
 Template network: DHCP
 QEMU Guest Agent: enabled
-ciuser: ops
+ciuser: root
 ciupgrade: 0
 Timezone: Europe/Moscow
 Locale: en_US.UTF-8
@@ -112,31 +120,50 @@ Docker и application services в base template не устанавливают�
 ```text
 Full Clone from 9000
 → CPU/RAM/disk/network
-→ ciuser=ops
-→ SSH public keys
+→ ciuser=root
+→ установить один или несколько SSH public keys
 → qm cloudinit update
 → start
 → verify QGA/SSH/health
 ```
 
+Для host-side deployer используется `pve_guest_ed25519.pub`. AI и Ansible используют собственные независимые public keys. Несколько ключей могут давать доступ одному Linux-пользователю `root` и при этом независимо отзываться удалением соответствующей строки из `/root/.ssh/authorized_keys`.
+
 Linked Clone не является штатным вариантом.
+
+## Идентификация версии
+
+Кроме `/etc/vm-template-info`, Proxmox description содержит машинно-читаемый marker:
+
+```text
+template-version=6
+```
+
+Stage 1 требует одновременно:
+
+```text
+name = tpl-debian13
+template = 1
+ciuser = root
+description содержит template-version=6
+```
+
+Старый template v4 автоматически не изменяется и не удаляется. При его обнаружении Stage 1 останавливается: переход на v6 является отдельной осознанной пересборкой защищённого VMID 9000.
 
 ## `/etc/vm-template-info`
 
-Template v4 записывает:
+Template v6 записывает, в частности:
 
 ```text
-Template: tpl-debian13
-Template-Version: 4
-OS: Debian 13
-Kernel-Flavor: amd64
-Template-Builder-Source: zsergeyru/proxmox
-Source-Image: debian-13-genericcloud-amd64.qcow2
-Source-Image-SHA512: <verified hash>
-Build-Date: <UTC date>
+Шаблон: tpl-debian13
+Версия-шаблона: 6
+ОС: Debian 13
+Тип-ядра: amd64
+Management-user: root
+SSH: root key-only
 ```
 
-Этого достаточно, чтобы видеть фактически использованный image и его checksum без отдельной системы version lock.
+Также сохраняются source image, SHA-512 и дата сборки.
 
 ## Проверка после изменения builder
 
@@ -147,16 +174,18 @@ Build-Date: <UTC date>
 3. noVNC/tty1 и serial fallback;
 4. regular kernel + framebuffer;
 5. QGA;
-6. locked passwords / SSH key-only;
-7. unique machine-id и SSH host keys;
-8. filesystem growth после resize;
-9. отсутствие builder artifacts.
+6. locked root password / SSH key-only;
+7. root SSH с injected public key;
+8. unique machine-id и SSH host keys;
+9. filesystem growth после resize;
+10. отсутствие builder artifacts и baked-in authorized_keys.
 
-CI проверяет shell-синтаксис и структуру репозитория, но не заменяет этот PVE integration test.
+CI проверяет shell-синтаксис и структуру Cloud-Init, но не заменяет реальный PVE integration test.
 
 ## История
 
 - **v2** — базовый build/Full Clone, QGA, SSH, timesync, TRIM, cleanup и disk growth.
 - **v3** — тестировалась serial-only Web Console; признана менее удобной.
-- **v4** — возвращён `vga: std`, установлен regular amd64 kernel, подтверждены framebuffer/noVNC и `tty1` autologin; текущая действующая версия.
-- **v5** — эксперимент с pinned Debian build и APT snapshot; отменён как избыточно сложный для текущего проекта.
+- **v4** — `ops + NOPASSWD sudo`, VGA/noVNC и regular amd64 kernel; прежний baseline.
+- **v5** — эксперимент с pinned Debian build и APT snapshot; отменён и номер не переиспользуется.
+- **v6** — единый management user `root`, пароль root locked, root SSH только по ключу, отдельные SSH identities различаются ключами.
