@@ -38,7 +38,7 @@ root password = locked
 ops authorized_keys = empty
 ```
 
-Ни personal keys, ни AI keys в template не зашиваются. Каждый конкретный clone получает public keys отдельно через Cloud-Init до первого запуска.
+Ни personal keys, ни deployer/AI/Ansible keys в template не зашиваются. Каждый конкретный clone получает нужные public keys отдельно через Cloud-Init до первого запуска.
 
 ## Cloud-Init порядок
 
@@ -57,6 +57,46 @@ Full Clone from 9000
 ```
 
 Private key через Cloud-Init никогда не передаётся.
+
+## Host-side guest-bootstrap identity
+
+Private PVE Stage 1 создаёт отдельную technical identity для первичного SSH-доступа `deploy-guest` к создаваемым Linux-гостям:
+
+```text
+/etc/proxmox-deployer/ssh/guest_bootstrap_ed25519
+/etc/proxmox-deployer/ssh/guest_bootstrap_ed25519.pub
+```
+
+Правила:
+
+```text
+private key
+→ остаётся только на PVE
+→ принадлежит host-side deployer/pvedeploy
+→ не попадает в Git
+→ не попадает в tpl-debian13
+→ не передаётся гостю
+
+public key
+→ передаётся конкретному создаваемому гостю
+→ для VM попадает в ops authorized_keys через Cloud-Init
+→ для LXC передаётся штатным механизмом создания/bootstrap контейнера
+```
+
+Этот ключ нужен для цепочки:
+
+```text
+deploy-guest
+→ создать/запустить гостя
+→ дождаться management-доступа
+→ SSH как ops
+→ выполнить ограниченный bootstrap
+→ передать дальнейшее управление provisioning-контуру
+```
+
+`deploy-guest` **не создаёт и не ротирует** эту пару. Lifecycle credential принадлежит PVE Stage 1.
+
+`guest_bootstrap_ed25519` нельзя переиспользовать как GitHub Deploy Key, AI Control key или будущую Ansible identity 311. Потеря private key считается recovery-ситуацией: автоматическая незаметная генерация новой пары запрещена, потому что старый public key может уже находиться в `authorized_keys` существующих гостей.
 
 ## Personal SSH keys
 
@@ -85,7 +125,7 @@ Private keys:
 /opt/ai-control/ssh/ai_control_ed25519.pub
 ```
 
-Пара создаётся **внутри `301`** общим platform-скриптом `prepare-ai-control.sh`, а не installer конкретного AI-агента.
+Пара создаётся **внутри `301`** общим platform-скриптом `prepare-ai-control.sh`, а не installer конкретного AI-агента и не PVE Stage 1.
 
 Правила:
 
@@ -96,8 +136,8 @@ private key
 → не попадает в tpl-debian13
 
 public key
-→ используется при создании managed VM
-→ передаётся пользователю ops через Cloud-Init до first boot
+→ может добавляться конкретным managed VM, которым требуется direct AI SSH
+→ передаётся пользователю ops, а не заменяет host-side guest-bootstrap identity
 ```
 
 После установки конкретного агента он может использовать:
@@ -108,7 +148,7 @@ public key
 → SSH ops@managed-guest
 ```
 
-Этот direct SSH предназначен для bootstrap, diagnostics, one-off и emergency действий. Повторяемая конфигурация после появления `311-dev-services` выполняется Ansible.
+Этот direct SSH предназначен для diagnostics, one-off и emergency действий AI control plane. Первичный host-side bootstrap выполняется отдельным `guest_bootstrap_ed25519`, а повторяемая конфигурация после появления `311-dev-services` выполняется Ansible.
 
 ## GitHub identity AI Control
 
@@ -129,12 +169,30 @@ Public key вручную регистрируется как GitHub Deploy Key.
 
 Не использовать GitHub key для SSH в инфраструктурные VM и не использовать infrastructure key как GitHub Deploy Key. Разделение identities уменьшает blast radius компрометации одного credential.
 
+## Ansible / 311 identity
+
+Provisioning-контур `311-dev-services` должен иметь собственную SSH identity. Она не должна совпадать ни с host-side `guest_bootstrap_ed25519`, ни с ключом `301-ai-control`.
+
+Принцип:
+
+```text
+PVE / deploy-guest key
+→ initial bootstrap/handoff
+
+311 / Ansible key
+→ повторяемый provisioning Linux-гостей
+
+301 / AI Control key
+→ AI diagnostics/one-off/emergency при необходимости
+```
+
+Конкретный lifecycle Ansible key фиксируется вместе с реализацией provisioning 311.
+
 ## Другие technical keys
 
 Для независимых ролей допускаются отдельные пары, например:
 
 ```text
-deploy_ed25519
 backup_ed25519
 ci_ed25519
 ```
@@ -171,7 +229,9 @@ Autologin на локальной console не является password authent
 
 ## Backup и private keys
 
-Если technical private key находится внутри рабочей VM, полный Proxmox backup этой VM содержит этот key. Поэтому backup `301-ai-control` считается чувствительным объектом: кроме SSH identities в нём находятся и другие control-plane secrets.
+Если technical private key находится внутри рабочей VM, полный Proxmox backup этой VM содержит этот key. Поэтому backup `301-ai-control` и будущего `311-dev-services` с provisioning credentials считается чувствительным объектом.
+
+Host-side `/etc/proxmox-deployer/ssh/guest_bootstrap_ed25519` не входит в backup конкретной VM и должен резервироваться отдельно как PVE infrastructure secret.
 
 ## Итоговая модель
 
@@ -185,16 +245,23 @@ Autologin на локальной console не является password authent
 
 managed VM
 └── /home/ops/.ssh/authorized_keys
-    ├── AI Control public key
-    └── другие разрешённые public keys при необходимости
+    ├── PVE guest-bootstrap public key
+    ├── AI Control public key — если требуется direct AI SSH
+    ├── Ansible/311 public key — после ввода provisioning-контура
+    └── personal public keys — при необходимости
+
+PVE host
+└── /etc/proxmox-deployer/ssh/guest_bootstrap_ed25519
+    └── private host-side bootstrap identity
 
 301-ai-control
-└── /opt/ai-control/ssh/ai_control_ed25519
-    └── private infrastructure identity
-
-301-ai-control
+├── /opt/ai-control/ssh/ai_control_ed25519
+│   └── private AI infrastructure identity
 └── /opt/ai-control/ssh/github_proxmox_repo_ed25519
     └── private GitHub-only identity
+
+311-dev-services
+└── отдельная private Ansible/provisioning identity
 ```
 
-Таким образом private keys никогда не требуется копировать в создаваемую VM: clone получает только public half.
+Таким образом private keys никогда не требуется копировать в создаваемую VM: guest получает только необходимые public halves.
