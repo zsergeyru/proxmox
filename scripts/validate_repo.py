@@ -339,8 +339,8 @@ def check_deployable(rel: Path, source: dict, effective: dict) -> None:
         fail(f"{rel}: обычный deployable-гость должен использовать pool 'managed'")
 
     ssh = effective["management"]["ssh"]
-    if ssh != {"user": "ops", "port": 22}:
-        fail(f"{rel}: effective management.ssh должен быть ops:22")
+    if ssh != {"user": "root", "port": 22}:
+        fail(f"{rel}: effective management.ssh должен быть root:22")
 
     if kind == "vm":
         vm_source = effective["vm"]["source"]
