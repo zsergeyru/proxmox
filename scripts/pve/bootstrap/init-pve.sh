@@ -353,9 +353,10 @@ configure_ceph_repository() {
     [[ "$uri_count" == "1" && "$suite_count" == "1" && "$component_count" == "1" ]] \
         || die "Файл ${ceph_sources} содержит несколько или неполные repository stanzas. Bootstrap не будет переписывать нестандартную Ceph-конфигурацию автоматически."
 
-    uri="$(awk -F':[[:space:]]*' '$1=="URIs" {print $2; exit}' "$ceph_sources")"
-    suite="$(awk -F':[[:space:]]*' '$1=="Suites" {print $2; exit}' "$ceph_sources")"
-    component="$(awk -F':[[:space:]]*' '$1=="Components" {print $2; exit}' "$ceph_sources")"
+    # Не разбиваем поле по ':' — URI содержит https:// и должен оставаться целиком.
+    uri="$(sed -n 's/^URIs:[[:space:]]*//p' "$ceph_sources" | head -n1)"
+    suite="$(sed -n 's/^Suites:[[:space:]]*//p' "$ceph_sources" | head -n1)"
+    component="$(sed -n 's/^Components:[[:space:]]*//p' "$ceph_sources" | head -n1)"
 
     if [[ "$uri" =~ ^https?://download\.proxmox\.com/debian/(ceph-[A-Za-z0-9._-]+)$ \
         && "$suite" == "trixie" && "$component" == "no-subscription" ]]; then
@@ -375,8 +376,8 @@ configure_ceph_repository() {
         install -o root -g root -m 0644 "$tmp" "$ceph_sources"
         rm -f "$tmp"
 
-        uri="$(awk -F':[[:space:]]*' '$1=="URIs" {print $2; exit}' "$ceph_sources")"
-        component="$(awk -F':[[:space:]]*' '$1=="Components" {print $2; exit}' "$ceph_sources")"
+        uri="$(sed -n 's/^URIs:[[:space:]]*//p' "$ceph_sources" | head -n1)"
+        component="$(sed -n 's/^Components:[[:space:]]*//p' "$ceph_sources" | head -n1)"
         [[ "$uri" == "http://download.proxmox.com/debian/${release}" \
             && "$component" == "no-subscription" ]] \
             || die "После изменения не удалось подтвердить Ceph no-subscription repository для ${release}"
