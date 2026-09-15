@@ -20,7 +20,7 @@ guests/
     └── rootfs/        # управляемые файлы по реальным абсолютным путям
 ```
 
-`guest.yaml` обязателен для каждого каталога с VMID. Если параметры ещё не приняты, это выражается через `deployable: false`, а не отсутствием файла.
+`guest.yaml` является машинно-читаемым паспортом конкретного объекта. Если параметры ещё не приняты, это выражается через `deployable: false`.
 
 ## guest schema v4
 
@@ -34,7 +34,7 @@ defaults.yaml
 → effective desired state
 ```
 
-Все слои находятся в Git. Никаких скрытых deploy defaults внутри `deploy-guest` быть не должно.
+Все deploy-значения находятся в Git. Никаких скрытых defaults внутри `deploy-guest` быть не должно.
 
 ### Central defaults
 
@@ -163,19 +163,6 @@ read-only checkout zsergeyru/proxmox
 
 `deploy-guest` обязан показывать в PLAN не только значение, но и его provenance: `[defaults]`, `[profile]`, `[guest]` или `[network_stages.*]`.
 
-После появления AI/DevOps:
-
-```text
-Proximo в 301-ai-control
-→ разрешённый runtime lifecycle
-
-Ansible на 311-dev-services
-→ повторяемая настройка ОС/rootfs по SSH
-
-Semaphore
-→ необязательный web UI к Ansible
-```
-
 ## Текущие исключения
 
 - `100-haos` — production HAOS; `deployable: false`;
@@ -185,11 +172,22 @@ Semaphore
 - `501-frigate` — `type: undecided`, `deployable: false`;
 - `9000 tpl-debian13` — protected source template, не managed guest.
 
-## Проверка CI
+## Проверка guest-конфигурации
 
-CI проверяет source guest schema v4, `guests/defaults.yaml` schema, effective deploy schema после inheritance, наличие `guest.yaml`, VMID/name, уникальность VMID/IP, central subnet/gateway contract, network mode/default gateway, profile, pinned source, `ops:22`, managed-pool boundary и отсутствие secrets.
+`scripts/validate_repo.py` намеренно имеет узкую область ответственности.
 
-Блокирующими ошибками также считаются, в частности:
+Из проектных данных он читает только:
+
+```text
+guests/defaults.yaml
+guests/*/guest.yaml
+```
+
+Файлы `schemas/*.yaml` используются только как формальное описание правил валидации. Валидатор не анализирует `docs/*.md`, `README.md`, VMID-plan, `rootfs/` и остальные файлы репозитория и не строит по ним warnings/errors.
+
+Проверяются source guest schema v4, `guests/defaults.yaml`, effective deploy state после inheritance, VMID/name относительно пути самого `guest.yaml`, уникальность VMID/IP, central subnet/gateway contract, network mode/default gateway, profiles, pinned source, `ops:22`, managed-pool boundary и отсутствие секретов непосредственно в `defaults.yaml`/`guest.yaml`.
+
+Блокирующими ошибками считаются, в частности:
 
 - IP вне соответствующей central subnet;
 - IP, совпадающий со шлюзом;
@@ -207,15 +205,11 @@ CI проверяет source guest schema v4, `guests/defaults.yaml` schema, eff
 - guest переопределяет общий node, bridge, storage или management SSH;
 - guest переопределяет общий `network.mode` или `network.default_gateway`;
 - profile из `defaults.yaml` не используется ни одним deployable-гостем;
-- VMID присутствует в `docs/11-vmid-plan.md`, но для него нет guest manifest;
-- в каталоге гостя отсутствует `README.md`;
 - deployable description содержит `TODO`/`TBD`/`pending`/`unknown` или аналогичный маркер незавершённости;
 - `state: bootstrap` или `state: legacy` используется вместе с `deployable: true`;
 - `state: active` имеет `boot.onboot: false`;
 - `protection: true` используется у гостя в pool `managed`.
 
-Предупреждения предназначены для архитектурного linting: допустимое исключение можно оставить, но оно остаётся видимым в каждом запуске CI.
-
 Главный принцип:
 
-> Дублирование выносится в versioned defaults/profile, но итоговый desired state остаётся полным, детерминированным и проверяемым.
+> Guest-validator проверяет только машинно-читаемый desired state гостей и не связывает его корректность с документацией репозитория.
