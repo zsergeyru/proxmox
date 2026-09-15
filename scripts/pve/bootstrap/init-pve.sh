@@ -14,7 +14,7 @@ set -Eeuo pipefail
 # недостающие privileges, но не удаляет уже существующие. Существующие ACL и
 # свойства API-токенов также не сужаются автоматически.
 
-BOOTSTRAP_VERSION=8
+BOOTSTRAP_VERSION=9
 
 PRIVATE_REPO="git@github.com:zsergeyru/proxmox.git"
 PRIVATE_BRANCH="main"
@@ -56,6 +56,7 @@ TEMPLATE_VMID=9000
 TEMPLATE_NAME="tpl-debian13"
 MANAGED_POOL="managed"
 BRIDGE="vmbr0"
+LXC_TEMPLATE_STORAGE="local"
 
 # Минимальный безопасный запас для первого создания Debian template.
 TEMPLATE_MIN_LOCAL_BYTES=$((2 * 1024 * 1024 * 1024))
@@ -66,6 +67,8 @@ WARN_COUNT=0
 REPO_REVISION=""
 BOOTSTRAP_RUNNING=0
 API_HEADER_FILE=""
+CANONICAL_KEY_DIFFERS_FROM_STAGE0=0
+LXC_TEMPLATE_VOLUME=""
 
 # Учётная запись для человека и локальных инструментов, работающих напрямую с PVE.
 HOST_PVE_USER="deployer@pve"
@@ -148,10 +151,22 @@ on_error() {
     printf '\nПриватная инициализация PVE аварийно остановлена. Код возврата: %s.\n' "$rc" >&2
     exit "$rc"
 }
+
+on_signal() {
+    local rc=$1 signal_name=$2
+    trap - ERR INT TERM
+    cleanup_api_header_file
+    if (( BOOTSTRAP_RUNNING )); then
+        write_state "interrupted" "$REPO_REVISION" >/dev/null 2>&1 || true
+    fi
+    printf '\nПриватная инициализация PVE прервана сигналом %s.\n' "$signal_name" >&2
+    exit "$rc"
+}
+
 trap on_error ERR
 trap cleanup_api_header_file EXIT
-trap 'cleanup_api_header_file; exit 130' INT
-trap 'cleanup_api_header_file; exit 143' TERM
+trap 'on_signal 130 INT' INT
+trap 'on_signal 143 TERM' TERM
 
 require_cmd() {
     command -v "$1" >/dev/null 2>&1 || die "Не найдена обязательная команда: $1"
@@ -218,15 +233,17 @@ check_root_and_pve() {
     [[ $EUID -eq 0 ]] || die "Запустите скрипт от root на хосте Proxmox"
 
     for cmd in \
-        pveversion qm pct pvesh pveum pvesm \
+        pveversion qm pct pvesh pveum pvesm pveam \
         ip systemctl apt-get getent groupadd useradd; do
         require_cmd "$cmd"
     done
 
-    pveversion >/dev/null
-    ok "Обнаружен Proxmox: $(pveversion | head -n1)"
+    local pve_line codename
+    pve_line="$(pveversion | head -n1)"
+    [[ "$pve_line" =~ ^pve-manager/9\. ]] \
+        || die "Для текущей инициализации ожидается Proxmox VE 9.x, обнаружено: ${pve_line:-неизвестно}"
+    ok "Обнаружен Proxmox VE 9: ${pve_line}"
 
-    local codename
     codename="$(. /etc/os-release && printf '%s' "${VERSION_CODENAME:-}")"
     [[ "$codename" == "trixie" ]] \
         || die "Для текущей инициализации ожидается Debian trixie, обнаружено: '${codename:-неизвестно}'"
@@ -237,9 +254,9 @@ check_root_and_pve() {
     ip link show "$BRIDGE" >/dev/null 2>&1 || die "Не найден обязательный сетевой мост ${BRIDGE}"
     ok "Сетевой мост ${BRIDGE} найден"
 
-    pvesm status --storage local >/dev/null 2>&1 || die "Хранилище 'local' недоступно"
-    pvesm status --storage local-lvm >/dev/null 2>&1 || die "Хранилище 'local-lvm' недоступно"
-    ok "Хранилища local и local-lvm доступны"
+    pvesm status --storage local >/dev/null 2>&1 || die "Хранилище 'local' не определено или недоступно"
+    pvesm status --storage local-lvm >/dev/null 2>&1 || die "Хранилище 'local-lvm' не определено или недоступно"
+    ok "Хранилища local и local-lvm найдены"
 
     if pct config "$TEMPLATE_VMID" >/dev/null 2>&1; then
         die "VMID ${TEMPLATE_VMID} уже занят LXC-контейнером; скрипт не будет его изменять"
@@ -293,6 +310,7 @@ snapshot_host_config() {
     pveversion -v >"$dst/diagnostics/pveversion.txt" 2>&1 || true
     pvesm status >"$dst/diagnostics/storage-status.txt" 2>&1 || true
     pvesm status --content snippets >"$dst/diagnostics/storage-snippets.txt" 2>&1 || true
+    pveam list local >"$dst/diagnostics/lxc-templates-local.txt" 2>&1 || true
     pveum user list >"$dst/diagnostics/users.txt" 2>&1 || true
     pveum role list >"$dst/diagnostics/roles.txt" 2>&1 || true
     pveum acl list >"$dst/diagnostics/acl.txt" 2>&1 || true
@@ -411,7 +429,7 @@ install_packages() {
 
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "${packages[@]}"
 
-    for cmd in git ssh ssh-keygen python3 curl jq runuser; do
+    for cmd in git ssh ssh-keygen python3 curl jq runuser find; do
         require_cmd "$cmd"
     done
 
@@ -437,6 +455,107 @@ check_time_dns_network() {
         || die "Нет HTTPS-доступа к download.proxmox.com"
 
     ok "DNS и исходящий HTTPS работают"
+}
+
+storage_content_list() {
+    local storage=$1
+    pvesm config "$storage" | awk '$1=="content" {print $2; exit}'
+}
+
+storage_has_content() {
+    local storage=$1 required=$2 content
+    content="$(storage_content_list "$storage")"
+    tr ',' '\n' <<<"$content" | grep -qx "$required"
+}
+
+ensure_storage_contents() {
+    local storage=$1
+    shift
+    local content new_content required
+    local -a missing=()
+
+    content="$(storage_content_list "$storage")"
+    [[ -n "$content" ]] || die "Не удалось определить content types storage ${storage}"
+
+    for required in "$@"; do
+        if ! tr ',' '\n' <<<"$content" | grep -qx "$required"; then
+            missing+=("$required")
+        fi
+    done
+
+    if (( ${#missing[@]} == 0 )); then
+        ok "Storage ${storage} уже содержит обязательные content types: $*"
+        return
+    fi
+
+    new_content="$content"
+    for required in "${missing[@]}"; do
+        new_content="${new_content},${required}"
+    done
+
+    pvesm set "$storage" --content "$new_content"
+
+    for required in "$@"; do
+        storage_has_content "$storage" "$required" \
+            || die "После изменения storage ${storage} по-прежнему не поддерживает content type ${required}"
+    done
+
+    ok "В storage ${storage} добавлены content types без удаления существующих: ${missing[*]}"
+}
+
+storage_is_active_enabled() {
+    local storage=$1
+    pvesm status --storage "$storage" --enabled 1 --output-format json \
+        | jq -e --arg storage "$storage" \
+            '.[] | select(.storage == $storage and (.active == 1 or .active == true))' >/dev/null
+}
+
+ensure_storage_layout() {
+    log "Проверка активности и content types базовых storage"
+
+    storage_is_active_enabled local \
+        || die "Storage local не активен или отключён на этом PVE node"
+    storage_is_active_enabled local-lvm \
+        || die "Storage local-lvm не активен или отключён на этом PVE node"
+
+    ensure_storage_contents local snippets vztmpl
+    ensure_storage_contents local-lvm images rootdir
+
+    ok "Storage local/local-lvm активны и готовы для VM, LXC, templates и snippets"
+}
+
+ensure_lxc_template() {
+    log "Проверка Debian 13 LXC template"
+
+    pveam update || die "Не удалось обновить каталог Proxmox LXC templates через pveam update"
+
+    local template
+    template="$(pveam available --section system \
+        | awk '$1=="system" && $2 ~ /^debian-13-standard_.*_amd64\.tar\.(zst|xz|gz)$/ {print $2}' \
+        | sort -V \
+        | tail -n1)"
+
+    [[ -n "$template" ]] \
+        || die "В каталоге pveam не найден Debian 13 standard LXC template"
+
+    LXC_TEMPLATE_VOLUME="${LXC_TEMPLATE_STORAGE}:vztmpl/${template}"
+
+    if pveam list "$LXC_TEMPLATE_STORAGE" \
+        | awk 'NR>1 {print $1}' \
+        | grep -Fxq "$LXC_TEMPLATE_VOLUME"; then
+        ok "Актуальный Debian 13 LXC template уже загружен: ${LXC_TEMPLATE_VOLUME}"
+        return
+    fi
+
+    pveam download "$LXC_TEMPLATE_STORAGE" "$template" \
+        || die "Не удалось скачать Debian 13 LXC template ${template} в storage ${LXC_TEMPLATE_STORAGE}"
+
+    pveam list "$LXC_TEMPLATE_STORAGE" \
+        | awk 'NR>1 {print $1}' \
+        | grep -Fxq "$LXC_TEMPLATE_VOLUME" \
+        || die "pveam download завершился, но ${LXC_TEMPLATE_VOLUME} не найден в storage"
+
+    ok "Debian 13 LXC template загружен: ${LXC_TEMPLATE_VOLUME}"
 }
 
 storage_available_bytes() {
@@ -483,31 +602,57 @@ check_template_source() {
     ok "Источник облачного образа Debian доступен"
 }
 
-ensure_snippets() {
-    log "Проверка поддержки snippets в хранилище local"
-
-    local content new_content
-    content="$(pvesm config local | awk -F' ' '$1=="content" {print $2}')"
-
-    if tr ',' '\n' <<<"$content" | grep -qx snippets; then
-        ok "В local уже разрешён тип содержимого snippets"
-        return
-    fi
-
-    [[ -n "$content" ]] || die "Не удалось определить текущие типы содержимого хранилища local"
-    new_content="${content},snippets"
-    pvesm set local --content "$new_content"
-
-    content="$(pvesm config local | awk -F' ' '$1=="content" {print $2}')"
-    tr ',' '\n' <<<"$content" | grep -qx snippets \
-        || die "После изменения хранилище local по-прежнему не поддерживает snippets"
-
-    ok "В local добавлен snippets без удаления существующих типов содержимого"
-}
-
 # =============================================================================
 # Каноническая файловая структура и принятие Deploy Key от Stage 0
 # =============================================================================
+
+validate_config_yaml() {
+    local file="$CONFIG_DIR/config.yaml"
+
+    python3 - "$file" \
+        "zsergeyru/proxmox" "$PRIVATE_BRANCH" "$REPO_DIR" "$MANAGED_POOL" \
+        "$HOST_PVE_TOKEN" "$AI_PVE_TOKEN" "$TEMPLATE_VMID" <<'PY_CONFIG'
+import sys
+import yaml
+
+path = sys.argv[1]
+expected = {
+    "repo": sys.argv[2],
+    "branch": sys.argv[3],
+    "checkout": sys.argv[4],
+    "managed_pool": sys.argv[5],
+    "host_deploy_identity": sys.argv[6],
+    "ai_infra_identity": sys.argv[7],
+    "template_vmid": sys.argv[8],
+}
+
+try:
+    with open(path, "r", encoding="utf-8") as fh:
+        data = yaml.safe_load(fh)
+except Exception as exc:
+    print(f"Не удалось прочитать {path}: {exc}", file=sys.stderr)
+    raise SystemExit(1)
+
+if not isinstance(data, dict):
+    print(f"{path} должен содержать YAML mapping", file=sys.stderr)
+    raise SystemExit(1)
+
+errors = []
+for key, expected_value in expected.items():
+    if key not in data:
+        errors.append(f"отсутствует ключ {key}")
+        continue
+    actual = data[key]
+    if str(actual) != str(expected_value):
+        errors.append(f"{key}: ожидается {expected_value!r}, обнаружено {actual!r}")
+
+if errors:
+    print(f"{path} не соответствует текущей bootstrap-конфигурации:", file=sys.stderr)
+    for item in errors:
+        print(f"  - {item}", file=sys.stderr)
+    raise SystemExit(1)
+PY_CONFIG
+}
 
 ensure_runtime_layout() {
     log "Подготовка каталогов и локального пользователя pvedeploy"
@@ -549,26 +694,50 @@ EOF_CONFIG
     else
         ok "Файл ${CONFIG_DIR}/config.yaml уже существует и не перезаписывается"
     fi
+
+    validate_config_yaml \
+        || die "Существующий ${CONFIG_DIR}/config.yaml конфликтует с текущей моделью bootstrap. Автоматическая перезапись запрещена."
+    ok "${CONFIG_DIR}/config.yaml соответствует текущей bootstrap-конфигурации"
+}
+
+refresh_canonical_public_key() {
+    local derived_pub tmp_pub
+    derived_pub="$(ssh-keygen -y -f "$KEY_FILE" 2>/dev/null)" \
+        || die "Не удалось прочитать canonical Deploy Key ${KEY_FILE}"
+    [[ -n "$derived_pub" ]] || die "Из canonical Deploy Key не удалось получить public key"
+
+    tmp_pub="$(mktemp "${SSH_DIR}/.github-key-pub.XXXXXX")"
+    printf '%s %s\n' "$derived_pub" 'pve-canonical-readonly-zsergeyru-proxmox' >"$tmp_pub"
+    install -o "$DEPLOY_USER" -g "$DEPLOY_USER" -m 0644 "$tmp_pub" "${KEY_FILE}.pub"
+    rm -f "$tmp_pub"
 }
 
 prepare_canonical_github_access() {
     log "Принятие read-only Deploy Key из публичной Stage 0"
 
     if [[ ! -f "$KEY_FILE" ]]; then
-        [[ -f "$STAGE0_KEY_FILE" && -f "$STAGE0_KEY_PUB_FILE" ]] \
-            || die "Канонический GitHub Deploy Key отсутствует и Stage 0 не передала временный ключ. Сначала запустите публичный proxmox-bootstrap/init-pve.sh."
+        [[ -f "$STAGE0_KEY_FILE" ]] \
+            || die "Канонический GitHub Deploy Key отсутствует и Stage 0 не передала временный private key. Сначала запустите публичный proxmox-bootstrap/init-pve.sh."
 
         install -o "$DEPLOY_USER" -g "$DEPLOY_USER" -m 0600 "$STAGE0_KEY_FILE" "$KEY_FILE"
-        install -o "$DEPLOY_USER" -g "$DEPLOY_USER" -m 0644 "$STAGE0_KEY_PUB_FILE" "${KEY_FILE}.pub"
         ok "Deploy Key перенесён в каноническое хранилище"
     else
         chown "$DEPLOY_USER:$DEPLOY_USER" "$KEY_FILE"
         chmod 0600 "$KEY_FILE"
-        [[ ! -f "${KEY_FILE}.pub" ]] || {
-            chown "$DEPLOY_USER:$DEPLOY_USER" "${KEY_FILE}.pub"
-            chmod 0644 "${KEY_FILE}.pub"
-        }
         ok "Канонический GitHub Deploy Key уже существует"
+    fi
+
+    refresh_canonical_public_key
+
+    if [[ -f "$STAGE0_KEY_FILE" ]]; then
+        local canonical_pub stage0_pub
+        canonical_pub="$(ssh-keygen -y -f "$KEY_FILE" 2>/dev/null || true)"
+        stage0_pub="$(ssh-keygen -y -f "$STAGE0_KEY_FILE" 2>/dev/null || true)"
+        [[ -n "$stage0_pub" ]] || die "Stage 0 передала нечитаемый private Deploy Key: ${STAGE0_KEY_FILE}"
+        if [[ "$canonical_pub" != "$stage0_pub" ]]; then
+            CANONICAL_KEY_DIFFERS_FROM_STAGE0=1
+            warn "Stage 0 использует другой Deploy Key, чем уже существующий canonical key. Bootstrap не заменяет постоянный credential автоматически."
+        fi
     fi
 
     if [[ -f "$STAGE0_KNOWN_HOSTS" ]]; then
@@ -604,9 +773,16 @@ git_as_deployer() {
 }
 
 verify_private_repo_access() {
-    git_as_deployer ls-remote "$PRIVATE_REPO" HEAD >/dev/null 2>&1 \
-        || die "Канонический Deploy Key не даёт read-only доступ к ${PRIVATE_REPO}"
-    ok "Read-only доступ к приватному GitHub-репозиторию подтверждён"
+    local refs
+    if ! refs="$(git_as_deployer ls-remote "$PRIVATE_REPO" "refs/heads/${PRIVATE_BRANCH}" 2>/dev/null)"; then
+        if (( CANONICAL_KEY_DIFFERS_FROM_STAGE0 )); then
+            die "Canonical Deploy Key ${KEY_FILE} не даёт доступ к ${PRIVATE_REPO}, при этом Stage 0 использует другой ключ. Автоматическая замена постоянного ключа запрещена. Проверьте ${KEY_FILE}.pub, Deploy keys GitHub и явно выполните recovery/rotation canonical credential."
+        fi
+        die "Канонический Deploy Key не даёт read-only доступ к ${PRIVATE_REPO}"
+    fi
+    [[ -n "$refs" ]] \
+        || die "Канонический Deploy Key работает, но в ${PRIVATE_REPO} отсутствует ожидаемая ветка ${PRIVATE_BRANCH}"
+    ok "Read-only доступ к приватному GitHub-репозиторию и ветке ${PRIVATE_BRANCH} подтверждён"
 }
 
 sync_private_repo() {
@@ -659,7 +835,7 @@ join_lines() {
 
 ensure_role() {
     local role=$1 expected_raw=$2
-    local role_json actual_raw expected actual missing extra missing_raw missing_after
+    local role_json actual_raw expected actual missing extra missing_raw missing_after dangerous_extra
 
     role_json="$(pveum role list --output-format json)"
     if ! jq -e --arg role "$role" '.[] | select(.roleid == $role)' <<<"$role_json" >/dev/null; then
@@ -692,6 +868,10 @@ ensure_role() {
     fi
 
     if [[ -n "$extra" ]]; then
+        dangerous_extra="$(printf '%s\n' "$extra" | grep -E '^(Permissions\.Modify|Sys\.Modify)$' || true)"
+        if [[ -n "$dangerous_extra" ]]; then
+            warn "Роль ${role} содержит опасные дополнительные privileges, которые bootstrap по принятой additive policy не удаляет автоматически: $(join_lines "$dangerous_extra")"
+        fi
         printf '[ИНФО] Роль %s содержит дополнительные privileges, они сохранены без изменений: %s\n' \
             "$role" "$(join_lines "$extra")"
     fi
@@ -999,7 +1179,11 @@ EOF_STATUS
 
     local deployer_src="${REPO_DIR}/scripts/pve/deploy-guest.py"
     if [[ ! -f "$deployer_src" ]]; then
-        warn "Исходный файл deploy-guest пока отсутствует: ${deployer_src}"
+        if [[ -x /usr/local/sbin/deploy-guest ]]; then
+            warn "Исходный файл deploy-guest отсутствует, а старая wrapper-команда /usr/local/sbin/deploy-guest всё ещё существует. Она не считается готовым компонентом."
+        else
+            warn "Исходный файл deploy-guest пока отсутствует: ${deployer_src}"
+        fi
         return
     fi
 
@@ -1022,14 +1206,16 @@ EOF_DEPLOY
 
 report_status() {
     local ready=1
+    local deployer_src="${REPO_DIR}/scripts/pve/deploy-guest.py"
 
     printf '\nСОСТОЯНИЕ ПРИВАТНОЙ ИНИЦИАЛИЗАЦИИ PVE\n\n'
-    printf '[ОК] Proxmox и KVM проверены\n'
+    printf '[ОК] Proxmox VE 9 / Debian trixie / KVM проверены\n'
     printf '[ОК] Эксклюзивная блокировка bootstrap используется\n'
     printf '[ОК] PVE/Ceph repository policy без subscription проверена\n'
     printf '[ОК] DNS и исходящий HTTPS работают\n'
-    printf '[ОК] local/local-lvm/snippets подготовлены\n'
-    printf '[ОК] pvedeploy и файловая структура подготовлены\n'
+    printf '[ОК] local/local-lvm готовы для images/rootdir/vztmpl/snippets\n'
+    printf '[ОК] Debian 13 LXC template подготовлен: %s\n' "${LXC_TEMPLATE_VOLUME:-не определён}"
+    printf '[ОК] pvedeploy, config.yaml и файловая структура проверены\n'
     printf '[ОК] Канонический read-only Deploy Key установлен\n'
     printf '[ОК] Приватный репозиторий синхронизирован и origin проверен\n'
     printf '[ОК] managed и роли Proxmox проверены\n'
@@ -1043,8 +1229,11 @@ report_status() {
         ready=0
     fi
 
-    if [[ -x /usr/local/sbin/deploy-guest ]]; then
-        printf '[ОК] Команда deploy-guest установлена\n'
+    if [[ -x /usr/local/sbin/deploy-guest && -f "$deployer_src" ]]; then
+        printf '[ОК] Команда deploy-guest установлена и source существует\n'
+    elif [[ -x /usr/local/sbin/deploy-guest ]]; then
+        printf '[ОЖИДАНИЕ] Обнаружена старая deploy-guest wrapper, но её source отсутствует\n'
+        ready=0
     else
         printf '[ОЖИДАНИЕ] deploy-guest пока не реализован\n'
         ready=0
@@ -1081,7 +1270,8 @@ main() {
     configure_apt
     install_packages
     check_time_dns_network
-    ensure_snippets
+    ensure_storage_layout
+    ensure_lxc_template
     ensure_runtime_layout
     prepare_canonical_github_access
     verify_private_repo_access
