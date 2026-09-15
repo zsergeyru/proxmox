@@ -370,7 +370,7 @@ configure_ceph_repository() {
         tmp="$(mktemp "${ceph_sources}.XXXXXX")"
 
         sed \
-            -e "s#^URIs:[[:space:]]*https\?://enterprise\.proxmox\.com/debian/${release}[[:space:]]*$#URIs: http://download.proxmox.com/debian/${release}#" \
+            -e "s#^URIs:[[:space:]]*https\?://enterprise\.proxmox\.com/debian/${release}[[:space:]]*\$#URIs: http://download.proxmox.com/debian/${release}#" \
             -e 's/^Components:[[:space:]]*enterprise[[:space:]]*$/Components: no-subscription/' \
             "$ceph_sources" >"$tmp"
         install -o root -g root -m 0644 "$tmp" "$ceph_sources"
