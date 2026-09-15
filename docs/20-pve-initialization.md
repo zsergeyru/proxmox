@@ -2,43 +2,23 @@
 
 ## Статус решения
 
-Архитектура первой версии PVE bootstrap **принята**.
-
-Для нового физического Proxmox VE существует одна zero-day входная точка:
+Архитектура PVE bootstrap разделена на **две стадии**.
 
 ```text
+Stage 0 — PUBLIC
 zsergeyru/proxmox-bootstrap/init-pve.sh
+
+Stage 1 — PRIVATE
+zsergeyru/proxmox/scripts/pve/bootstrap/init-pve.sh
 ```
 
-Публичный bootstrap нужен только до получения новым PVE read-only доступа к приватному `zsergeyru/proxmox`. После этого канонические executable-скрипты PVE, manifests и deploy logic берутся из приватного репозитория.
+Публичная Stage 0 является только zero-day загрузчиком. Она не содержит внутреннюю модель инфраструктуры и после получения read-only доступа передаёт управление private source of truth.
 
-Главная цель:
-
-> После одного публичного `init-pve.sh` и однократной регистрации read-only GitHub Deploy Key новый PVE должен самостоятельно получить private source of truth, создать базовый template и уметь разворачивать VM/LXC по `guest.yaml` без зависимости от `301-ai-control` или конкретного AI-агента.
-
-### Каноническая граница public/private
-
-Для **PVE bootstrap** действует только следующая модель:
-
-```text
-PUBLIC zsergeyru/proxmox-bootstrap
-└── init-pve.sh
-
-PRIVATE zsergeyru/proxmox
-├── scripts/pve/create-template.sh
-├── scripts/pve/deploy-guest.py
-├── guests/*/guest.yaml
-├── templates/
-└── остальной desired state
-```
-
-`create-template.sh`, `deploy-guest` и другая host-side deploy logic не должны иметь второй канонический экземпляр в публичном репозитории.
-
-Существующие публичные AI/bootstrap-скрипты, созданные до этой схемы, могут временно использоваться для переходного bootstrap `301`, но они не определяют архитектуру и source of truth нового PVE. При расхождении старой документации с этим документом для PVE bootstrap приоритет имеет модель, зафиксированная здесь и в [`21-pve-filesystem-layout.md`](21-pve-filesystem-layout.md).
+Полная конфигурация PVE выполняется только Stage 1 из приватного `zsergeyru/proxmox`.
 
 ---
 
-# Исходное состояние
+# 1. Исходное состояние
 
 ```text
 новый компьютер
@@ -57,59 +37,198 @@ PRIVATE zsergeyru/proxmox
 
 ---
 
-# Целевое состояние
+# 2. Stage 0 — публичный zero-day handoff
 
-После инициализации:
+Активная публичная точка входа:
+
+```text
+zsergeyru/proxmox-bootstrap/init-pve.sh
+```
+
+Её задача намеренно минимальна:
+
+```text
+проверить root + наличие Proxmox VE
+→ обеспечить минимальный git/ssh toolset
+→ создать временный read-only GitHub Deploy Key
+→ показать public key человеку
+→ после добавления ключа проверить доступ к zsergeyru/proxmox
+→ временно clone private repo
+→ вызвать private scripts/pve/bootstrap/init-pve.sh
+```
+
+Stage 0 не должна содержать сведения и код, относящиеся к:
+
+- `managed` и другим resource pools;
+- PVE roles/ACL;
+- `deployer@pve!host-deploy`;
+- `ai-agent@pve!infra`;
+- API token secrets;
+- VMID plan;
+- template `9000`;
+- Proximo/AI runtime;
+- deploy-guest implementation;
+- внутренней файловой структуре deployer.
+
+Единственная неизбежная инфраструктурная информация в public repo — адрес приватного GitHub repository и путь private bootstrap entrypoint.
+
+## Временные файлы Stage 0
+
+До успешного handoff допускается использовать:
+
+```text
+/var/lib/proxmox-bootstrap/
+├── github_proxmox_repo_ed25519
+├── github_proxmox_repo_ed25519.pub
+├── known_hosts
+├── ssh_config
+└── private-repo/
+```
+
+После успешной private Stage 1:
+
+```text
+→ canonical Deploy Key уже сохранён private bootstrap
+→ canonical private checkout уже создан
+→ временный Stage 0 key удаляется
+→ временный checkout удаляется
+→ остаётся stage0-complete marker
+```
+
+Stage 0 не является постоянным runtime layer.
+
+---
+
+# 3. Однократная авторизация GitHub
+
+Stage 0 генерирует отдельный SSH Deploy Key непосредственно на PVE.
+
+Ключ добавляется в:
+
+```text
+zsergeyru/proxmox
+Settings → Deploy keys → Add deploy key
+```
+
+Обязательно:
+
+```text
+Allow write access: OFF
+```
+
+После добавления ключа тот же public `init-pve.sh` запускается повторно.
+
+Никакие private keys или token secrets через Git не передаются.
+
+---
+
+# 4. Stage 1 — приватная полная инициализация
+
+Канонический executable:
+
+```text
+zsergeyru/proxmox/scripts/pve/bootstrap/init-pve.sh
+```
+
+Stage 1 принимает read-only Deploy Key от Stage 0, переносит его в постоянную файловую структуру и затем самостоятельно выполняет всю настройку PVE.
+
+Именно private Stage 1 отвечает за:
+
+```text
+host preflight
+configuration snapshot
+APT policy
+packages
+DNS/time/outbound checks
+storage/snippets
+pvedeploy
+canonical Git checkout
+managed pool
+PVE roles
+PVE users/API tokens/ACL
+secrets
+protected template 9000
+stable local commands
+status/reporting
+```
+
+После этого публичный repository больше не нужен для обычной эксплуатации.
+
+---
+
+# 5. Целевое состояние
+
+После успешной Stage 1 PVE имеет:
 
 ```text
 PVE
-├── корректный pve-no-subscription repository
-├── минимальный bootstrap/admin toolset
+├── pve-no-subscription repository
+├── bootstrap/admin toolset
 ├── Linux user pvedeploy
-├── PVE read-only GitHub Deploy Key
-├── shallow read-only checkout zsergeyru/proxmox
+├── canonical read-only GitHub Deploy Key
+├── canonical read-only checkout zsergeyru/proxmox
 ├── resource pool managed
-├── PVE identity deployer@pve!host-deploy
-├── PVE identity ai-agent@pve!infra
-├── защищённые локальные копии обоих token secrets
+├── deployer@pve!host-deploy
+├── ai-agent@pve!infra
+├── защищённые локальные копии API token secrets
 ├── template 9000 tpl-debian13
-├── private deploy tooling из zsergeyru/proxmox
-├── bootstrap state/version
-└── итоговый health report
+├── private PVE tooling
+├── bootstrap state/version/log
+└── health report
 ```
 
-После этого host-side deploy должен работать независимо от AI:
-
-```bash
-deploy-guest 301 --apply
-deploy-guest 311 --apply
-```
+Host-side deploy должен работать независимо от AI control plane.
 
 ---
 
-# 1. Preflight host — принято
+# 6. Preflight private Stage 1
 
-Перед изменениями `init-pve.sh` проверяет:
+Перед существенными изменениями проверяются:
 
 - запуск от `root`;
 - `pveversion`, `qm`, `pct`, `pvesh`, `pveum`, `pvesm`;
-- node name;
-- аппаратную виртуализацию/KVM;
-- наличие и состояние `local` и `local-lvm`;
-- наличие `vmbr0`;
-- свободное место на root и основных storage;
-- DNS resolution;
-- доступ к `download.proxmox.com`, GitHub и публичному bootstrap repo;
-- фактическое время и синхронизацию;
-- отсутствие конфликтов bootstrap VMID, в первую очередь `9000`.
+- Debian `trixie` для текущего PVE baseline;
+- KVM;
+- `vmbr0`;
+- `local` и `local-lvm`;
+- конфликт VMID `9000`;
+- DNS/outbound connectivity;
+- источник Debian cloud image, если template ещё отсутствует.
 
-Критическая ошибка останавливает bootstrap до существенных изменений.
+VMID `9000`, занятый неизвестной VM или LXC, не перезаписывается.
 
 ---
 
-# 2. Бесплатный Proxmox repository — принято
+# 7. Snapshot перед изменениями
 
-Для PVE без subscription используется штатный бесплатный repository:
+Private bootstrap сохраняет диагностический snapshot текущей host-конфигурации до значимых изменений.
+
+Целевой каталог:
+
+```text
+/var/backups/proxmox-bootstrap/YYYYMMDD-HHMMSS/
+```
+
+Сохраняются, где применимо:
+
+- network/hostname/resolver;
+- APT source files;
+- `storage.cfg`;
+- `user.cfg`;
+- `datacenter.cfg`;
+- PVE version;
+- users/roles/ACL/pools;
+- storage/network diagnostics.
+
+Это bootstrap snapshot, а не VM backup и не полный disaster recovery PVE.
+
+---
+
+# 8. APT policy
+
+Полная APT policy является private implementation detail.
+
+Для PVE без subscription используется:
 
 ```text
 Types: deb
@@ -119,29 +238,23 @@ Components: pve-no-subscription
 Signed-By: /usr/share/keyrings/proxmox-archive-keyring.gpg
 ```
 
-Также сохраняются корректные Debian base/security repositories.
+Enterprise repository отключается, если подписки нет.
 
-Правила:
+Обычная Stage 1 делает `apt update` и ставит нужные пакеты, но не обязана выполнять полный upgrade.
 
-- `pve-test` по умолчанию не включать;
-- enterprise repository отключать, если подписки нет;
-- сторонние APT repositories не добавлять без отдельного решения;
-- перед изменением APT sources сохранить snapshot;
-- обычный повторный init не должен автоматически выполнять большой upgrade.
-
-Полное обновление хоста — явный режим:
+Полное обновление запускается явно:
 
 ```bash
 init-pve.sh --update-system
 ```
 
-Обычный init может выполнять `apt update` и устанавливать только требуемые bootstrap packages.
+Public Stage 0 этот параметр только передаёт private Stage 1.
 
 ---
 
-# 3. Пакеты — принято
+# 9. Пакеты
 
-## Обязательный runtime
+Private Stage 1 обеспечивает runtime:
 
 ```text
 git
@@ -153,9 +266,7 @@ jq
 ca-certificates
 ```
 
-Они нужны для SSH Deploy Key, private Git checkout, разбора `guest.yaml`, bootstrap/deploy tooling и HTTPS/API diagnostics.
-
-## Небольшой host-admin набор
+и небольшой host-admin набор:
 
 ```text
 mc
@@ -165,652 +276,267 @@ smartmontools
 lm-sensors
 ```
 
-## Условные пакеты
+Public Stage 0 устанавливает только минимальные пакеты, необходимые для GitHub handoff.
 
-`rsync`, `tar`, `unzip`, `lsof`, `ethtool`, `pciutils`, `usbutils` и подобные ставятся только если отсутствуют **и реально нужны** bootstrap/deployer/diagnostics.
-
-На PVE не устанавливать без отдельного решения:
-
-- Docker;
-- AI runtimes;
-- Hermes;
-- application services;
-- произвольные development toolchains.
+На PVE не устанавливать без отдельного решения Docker, AI runtimes и application services.
 
 ---
 
-# 4. Время и DNS — принято
+# 10. Storage
 
-Проверять:
-
-- timezone;
-- синхронизацию времени;
-- фактические дату/время;
-- DNS resolution;
-- доступность GitHub и Proxmox repositories по DNS.
-
-Timezone не менять на захардкоженное значение без явной policy/параметра.
-
----
-
-# 5. Storage preparation — принято
-
-Обязательные базовые storage:
+Базовые storage:
 
 ```text
 local
 local-lvm
 ```
 
-Для `local` проверить необходимые content types. Проекту нужны только реально используемые возможности, включая `snippets`, а при необходимости также `iso`, `vztmpl`, `backup`.
-
-При изменении `content` нельзя удалить уже разрешённые типы.
-
-Алгоритм:
-
-```text
-прочитать текущий storage config
-→ определить только недостающие capabilities
-→ показать PLAN
-→ добавить недостающее
-→ повторно проверить результат
-```
+Private Stage 1 проверяет `snippets` в `local` и при необходимости добавляет этот content type, не удаляя уже разрешённые типы.
 
 ---
 
-# 6. `managed` pool — принято
+# 11. Pool `managed`
 
-Создаётся project resource pool:
+Создаётся private Stage 1:
 
 ```text
 managed
 ```
 
-Его назначение — **security и organization boundary** для обычной runtime automation.
+`managed` — основная organization/security boundary для обычной AI/runtime automation.
 
-В `managed` попадают обычные VM/LXC, которыми разрешено штатно управлять автоматизации.
+```text
+guest в managed
+→ AI получает предусмотренные guest-level права
 
-Не включать автоматически в обычную self-managed write-zone:
+guest вне managed
+→ права через managed на него не распространяются
+```
+
+Protected объекты по умолчанию не помещаются в обычную AI write-zone, в частности:
 
 ```text
 100   production HAOS
 301   AI control plane
-320   bootstrap/recovery AI
+320   bootstrap/legacy AI control
 9000  protected template
 ```
 
-и другие объекты, для которых документация задаёт исключение.
+Полная ACL policy находится в [`25-pve-access-control.md`](25-pve-access-control.md).
 
 ---
 
-# 7. Proxmox identities — принято
+# 12. Две PVE identity
 
-Для host deployer и AI control используются разные service identities и разные credentials.
+Private Stage 1 создаёт/проверяет две отдельные identity.
 
-## Host deployer
+## Человек и host-side tooling
 
 ```text
 user:  deployer@pve
 token: deployer@pve!host-deploy
 ```
 
-Актор — PVE-side `deploy-guest`.
-
 Назначение:
 
-- deterministic deployment по `guest.yaml`;
-- create/clone VM/LXC;
-- поддерживаемая конфигурация CPU/RAM/disk/network/Cloud-Init;
-- помещение обычных объектов в `managed`;
-- lifecycle, необходимый для deploy/verification;
-- работа без `301` и без AI.
+```text
+человек
+локальные PVE tools
+deploy-guest
+```
 
-## AI infrastructure access
+Это не AI identity.
+
+## AI / Proximo
 
 ```text
 user:  ai-agent@pve
 token: ai-agent@pve!infra
 ```
 
-Эта identity принадлежит AI control как контуру автоматизации, а не конкретному агенту или MCP. Текущий потребитель credential — Proximo (`proximo-proxmox`), которым пользуются разрешённые AI-агенты в `301-ai-control`.
-
 Назначение:
 
-- runtime lifecycle разрешённых guests;
-- snapshots/backups, если разрешены ACL policy;
-- diagnostics/status;
-- дальнейшее управление из AI control plane.
-
-Naming:
-
 ```text
-ai-agent@pve
-→ service identity AI-контура
-
-!infra
-→ token для инфраструктурного доступа к Proxmox
+AI control
+→ Proximo
+→ Proxmox API
 ```
 
-Если в будущем Proximo будет заменён другим MCP, identity `ai-agent@pve!infra` может продолжить использоваться без переименования, если назначение и права остаются теми же. Новый отдельный token создаётся только если действительно нужно разделить права, потребителей или отзыв credentials.
+Ключевое разделение — разные потребители, audit trail и независимая ротация credentials.
 
-## Почему две identity
-
-Разделение принято, потому что:
-
-- host recovery/deploy не зависит от AI credential;
-- понятнее audit trail;
-- credentials можно независимо отозвать/ротировать;
-- права host deployer и AI runtime не обязаны совпадать.
-
-Не использовать ради удобства:
-
-```text
-root@pam API token
-PVEAdmin на /
-```
-
-Точная матрица ACL должна соответствовать отдельной принятой политике проекта.
+Не использовать вместо них `root@pam` API token или `PVEAdmin` на `/`.
 
 ---
 
-# 8. Хранение обоих token secrets на PVE — принято
+# 13. Roles и существующая конфигурация
 
-PVE является постоянным защищённым хранилищем **обоих infrastructure token secrets**:
+Private Stage 1 использует принятую схему ролей, включая:
 
 ```text
-deployer@pve!host-deploy
-ai-agent@pve!infra
+AICloneSource
+AIManagedGuest
+AINetworkUse
+AIStorage
+AIManagedPool
 ```
 
-Это сознательное решение для восстановления: потеря или пересоздание `301-ai-control` не должна автоматически требовать ротации рабочего AI infrastructure credential, если защищённая host-side копия сохранилась.
-
-Целевой каталог:
+Правило идемпотентности:
 
 ```text
-/etc/proxmox-deployer/
-├── secrets/
-│   ├── host-deploy.token
-│   └── ai-agent-infra.token
-└── ssh/
-    ├── github_proxmox_repo_ed25519
-    └── github_proxmox_repo_ed25519.pub
+роль отсутствует
+→ создать
+
+роль существует и совпадает
+→ переиспользовать
+
+роль существует, но отличается
+→ вывести warning + missing/extra
+→ НЕ менять автоматически
+→ НЕ останавливать bootstrap
 ```
 
-Назначение:
+Аналогично дополнительные старые ACL не удаляются автоматически.
+
+---
+
+# 14. API token secrets
+
+Канонические файлы:
 
 ```text
-secrets/host-deploy.token
-→ token id + secret для deployer@pve!host-deploy
-
-secrets/ai-agent-infra.token
-→ token id + secret для ai-agent@pve!infra
-
-ssh/github_proxmox_repo_ed25519
-→ private read-only GitHub Deploy Key PVE
-```
-
-Рабочая копия AI infrastructure credential также передаётся внутрь `301` для Proximo:
-
-```text
-/etc/ai-control/secrets/proxmox-infra.token
-→ рабочая копия token id + secret для ai-agent@pve!infra
-
-/etc/ai-control/proximo/proximo.env
-→ параметры подключения Proximo к PVE
-```
-
-Таким образом существует две контролируемые копии AI infrastructure credential:
-
-```text
-PVE
+/etc/proxmox-deployer/secrets/host-deploy.token
 /etc/proxmox-deployer/secrets/ai-agent-infra.token
-        │
-        └── защищённая infrastructure/recovery copy
-
-301-ai-control
-/etc/ai-control/secrets/proxmox-infra.token
-        └── runtime copy для Proximo
 ```
 
-## Правила хранения
+Правила:
 
-- оба token secrets создаются host-side bootstrap и сразу сохраняются в `/etc/proxmox-deployer/secrets/`;
-- secret сначала должен быть безопасно сохранён на PVE, и только затем AI infrastructure credential передаётся внутрь `301`;
-- перед созданием secret files используется `umask 077`;
-- secrets не выводятся повторно в обычные logs;
-- secrets не сохраняются в `state.json` или других runtime state files;
 - secrets никогда не помещаются в Git;
-- `pvedeploy` получает доступ только к `host-deploy.token`;
-- `ai-agent-infra.token` доступен только `root`/явному recovery/bootstrap коду и не нужен обычному `deploy-guest`;
-- backup каталога infrastructure secrets является чувствительным объектом и должен быть защищён не хуже самих credentials.
-
-## Повторный запуск и восстановление
-
-Proxmox API не позволяет повторно получить secret уже созданного token. Поэтому bootstrap проверяет **две сущности одновременно**:
-
-```text
-PVE token существует
-+ локальный secret-файл существует
-```
-
-Нормальные случаи:
-
-```text
-token + secret file существуют
-→ переиспользовать credential
-
-token отсутствует
-→ создать token
-→ сохранить secret на PVE
-
-token существует, но локальный secret потерян
-→ не пытаться угадать/получить secret через API
-→ остановиться с понятной ошибкой
-→ требовать явную rotation/recovery operation
-```
-
-Если `301` утрачен, но `/etc/proxmox-deployer/secrets/ai-agent-infra.token` сохранён:
-
-```text
-пересоздать 301
-→ передать существующий credential внутрь VM
-→ Proximo продолжает использовать тот же token ai-agent@pve!infra
-```
-
-Ротация любого token выполняется только явным действием. Новое значение сначала безопасно сохраняется на PVE; для AI infrastructure credential после этого обновляется runtime copy внутри `301`.
-
-Backup `301` также считается чувствительным, потому что содержит runtime-копию AI infrastructure token, private SSH identities и другие credentials AI control plane.
+- `host-deploy.token` доступен `root:pvedeploy` с ограниченными правами;
+- `ai-agent-infra.token` — только `root`;
+- Proxmox token secret сохраняется сразу после создания;
+- существующий token + существующий secret переиспользуются;
+- если token существует, а локальный secret утрачен, bootstrap останавливается и требует явную rotation/recovery operation;
+- bootstrap не пытается молча пересоздать такой credential.
 
 ---
 
-# 9. Linux user `pvedeploy` — принято
+# 15. GitHub Deploy Key после handoff
 
-`root` нужен для `init-pve.sh` и реальных host-level изменений.
+Stage 0 создаёт временную zero-day копию ключа.
 
-Штатный Git/deploy runtime выполняет отдельный технический Linux user:
-
-```text
-pvedeploy
-```
-
-Его задачи:
-
-- хранить/использовать PVE read-only GitHub SSH identity;
-- владеть private repo checkout;
-- запускать manifest parser/deployer;
-- использовать credential `deployer@pve!host-deploy`;
-- вести runtime/log/state deployer.
-
-Каталоги:
-
-```text
-/etc/proxmox-deployer/
-/var/lib/proxmox-deployer/
-/var/log/proxmox-deployer/
-```
-
-`pvedeploy` не получает доступ к `ai-agent-infra.token`.
-
-Не выдавать:
-
-```text
-NOPASSWD: ALL
-```
-
-Нормальный deploy path должен работать через Proxmox API token, а не через полный root/sudo.
-
----
-
-# 10. PVE GitHub identity — принято
-
-PVE получает собственную пару, независимую от `301`:
+Private Stage 1 принимает её и сохраняет канонически:
 
 ```text
 /etc/proxmox-deployer/ssh/github_proxmox_repo_ed25519
 /etc/proxmox-deployer/ssh/github_proxmox_repo_ed25519.pub
+/etc/proxmox-deployer/ssh/config
+/etc/proxmox-deployer/ssh/known_hosts
 ```
 
-Public key оператор один раз регистрирует:
-
-```text
-GitHub
-→ zsergeyru/proxmox
-→ Settings
-→ Deploy keys
-→ Allow write access = OFF
-```
-
-PVE key:
-
-- только read-only;
-- только для одного repo;
-- не переиспользуется в `301`;
-- не является personal credential.
+После успешного завершения private Stage 1 public Stage 0 удаляет временную копию key и временный checkout.
 
 ---
 
-# 11. Read-only Git checkout — принято
-
-Каталог:
+# 16. Канонический private checkout
 
 ```text
 /var/lib/proxmox-deployer/repo
 ```
 
-Владелец:
+Это read-only checkout `zsergeyru/proxmox` для host-side infrastructure tooling.
 
-```text
-pvedeploy:pvedeploy
-```
-
-PVE никогда не делает commit/push из этого checkout.
-
-Первая версия использует shallow checkout (`depth=1`): полное текущее дерево репозитория с минимальной историей Git. Sparse checkout пока не нужен.
-
-Перед deploy:
-
-```text
-fetch origin/main
-→ определить commit SHA
-→ привести read-only checkout к выбранному revision
-→ построить PLAN
-→ APPLY выполнять по тому же SHA
-```
-
-Manifest не должен меняться между PLAN и APPLY.
-
-Deployer показывает revision:
-
-```text
-Repository revision: abcdef123456
-```
-
-В дальнейшем желательно поддержать:
-
-```bash
-deploy-guest 311 --ref <commit> --apply
-```
+При повторной синхронизации используется текущий `main` согласно принятой versioning policy проекта.
 
 ---
 
-# 12. Snapshot host configuration перед изменениями — принято
+# 17. Template
 
-Это **не VM backup и не полноценный disaster-recovery backup PVE**.
-
-Задача — сохранить конфигурацию, которую bootstrap собирается изменить, чтобы можно было сравнить состояние и вручную откатить ошибочную миграцию.
-
-Каталог:
+Канонический builder:
 
 ```text
-/var/backups/proxmox-bootstrap/YYYYMMDD-HHMMSS/
+scripts/pve/create-template.sh
 ```
 
-Сохранять релевантные конфиги и диагностическое состояние, например:
+Целевой template:
 
 ```text
-/etc/network/interfaces
-/etc/hosts
-/etc/hostname
-/etc/resolv.conf
-APT source files
-/etc/pve/storage.cfg
-/etc/pve/user.cfg
-/etc/pve/datacenter.cfg
-
-pveversion -v
-storage config/status
-users
-roles
-ACL
-pools
-network state
+VMID: 9000
+Name: tpl-debian13
 ```
 
-Не архивировать бездумно весь `/etc/pve`: это `pmxcfs`, а не обычный каталог.
-
-Этот snapshot не заменяет внешний backup конфигурации хоста.
-
-Infrastructure secrets из `/etc/proxmox-deployer/`, включая **оба API token secrets**, должны входить в отдельный защищённый backup PVE, поскольку они нужны для полноценного восстановления bootstrap/deploy/AI-control identities.
+Template остаётся protected и вне обычной write-zone `managed`.
 
 ---
 
-# 13. Bootstrap state — принято
+# 18. deploy-guest
 
-Файл:
+`deploy-guest` — private host-side инструмент и удобный интерфейс для человека.
 
-```text
-/var/lib/proxmox-bootstrap/state.json
-```
+Он не должен находиться в public bootstrap repository.
 
-Назначение:
+Целевой source:
 
 ```text
-resume + idempotency + понятный progress
+scripts/pve/deploy-guest.py
 ```
 
-State может помнить:
+Стабильная host-side команда:
 
-- создан ли GitHub key;
-- GitHub authorization status;
-- bootstrap schema/version;
-- последний использованный repo commit;
-- ожидаемую template version;
-- какие фазы успешно завершались;
-- созданы ли PVE identities/tokens;
-- существуют ли ожидаемые secret files, но не их содержимое.
+```text
+/usr/local/sbin/deploy-guest
+```
 
-Но **самих secrets в state нет**.
-
-`state.json` не является source of truth. Каждый повторный запуск перепроверяет реальное состояние PVE, secret files, Git и template.
+AI не обязан использовать `deploy-guest`: AI работает через Proximo и `ai-agent@pve!infra`.
 
 ---
 
-# 14. Bootstrap version — принято
+# 19. Повторный запуск
 
-У bootstrap есть собственная версия/schema, например:
+## Public Stage 0
+
+После успешного handoff создаётся:
 
 ```text
-PVE-Bootstrap-Version: 1
+/var/lib/proxmox-bootstrap/stage0-complete
 ```
 
-Она нужна, чтобы:
+Повторный public запуск больше не пытается строить инфраструктуру.
 
-- понимать уже применённую версию;
-- выполнять миграции `v1 → v2`;
-- не повторять одноразовые/destructive стадии;
-- сообщать operator о необходимости migration.
+## Private Stage 1
+
+Private bootstrap рассчитан на повторный запуск и перепроверяет фактическое состояние PVE.
+
+Он не должен молча выполнять destructive overwrite существующих VM/LXC, roles, credentials или ACL.
 
 ---
 
-# 15. Итоговый health report — принято
-
-После каждого запуска выводится понятный итоговый статус, например:
+# 20. Итоговый flow
 
 ```text
-PVE INIT STATUS
-
-[OK] Proxmox detected
-[OK] KVM
-[OK] pve-no-subscription repository
-[OK] DNS
-[OK] time sync
-[OK] local
-[OK] local-lvm
-[OK] snippets
-[OK] pvedeploy Linux user
-[OK] GitHub Deploy Key
-[OK] GitHub read-only access
-[OK] private repo checkout
-[OK] managed pool
-[OK] deployer@pve!host-deploy
-[OK] host-deploy secret stored
-[OK] ai-agent@pve!infra
-[OK] AI infra secret stored
-[OK] template 9000
-[OK] deploy-guest
-
-Repository revision: abcdef123456
-Bootstrap version: 1
-
-READY
+чистый PVE
+    │
+    ▼
+PUBLIC Stage 0
+    │
+    ├── minimal Git/SSH
+    ├── read-only Deploy Key
+    └── private clone
+             │
+             ▼
+PRIVATE Stage 1
+    │
+    ├── PVE configuration
+    ├── pvedeploy
+    ├── canonical Git checkout
+    ├── managed + roles + ACL
+    ├── API identities/secrets
+    ├── template 9000
+    └── local tooling
+             │
+             ▼
+        рабочий PVE
 ```
 
-Если требуется ручная регистрация GitHub key:
+Главный принцип:
 
-```text
-WAITING FOR GITHUB AUTHORIZATION
-```
-
-а не ложный `READY`.
-
-Если PVE token существует, но его обязательный host-side secret-файл потерян, итог не должен быть `READY`: bootstrap останавливается и требует явной recovery/rotation operation.
-
----
-
-# 16. Создание template 9000 — принято
-
-После получения private repo публичный `init-pve.sh` не содержит копию большого template builder и не скачивает отдельный канонический builder из public repo.
-
-Целевая модель:
-
-```text
-PUBLIC zsergeyru/proxmox-bootstrap
-└── init-pve.sh
-
-PRIVATE zsergeyru/proxmox
-├── scripts/pve/create-template.sh
-├── scripts/pve/deploy-guest.py
-├── guests/*/guest.yaml
-└── остальной desired state
-```
-
-Flow:
-
-```text
-private Git access появился
-→ init-pve фиксирует private repo commit SHA
-→ вызывает именно scripts/pve/create-template.sh из этого checkout
-→ проверяет результат
-→ template 9000 tpl-debian13 готов
-```
-
-Builder и deployer используются из **того же private source-of-truth/revision**, а не из независимо меняющейся публичной копии.
-
-Если template уже существует и соответствует принятой версии/policy, он не пересоздаётся без отдельного rebuild режима.
-
----
-
-# 17. Целевой flow `init-pve.sh`
-
-## Первый запуск
-
-```text
-root запускает public init-pve.sh
-→ preflight
-→ snapshot изменяемой host configuration
-→ настроить pve-no-subscription
-→ установить минимальные packages
-→ проверить DNS/time/storage
-→ создать pvedeploy
-→ создать PVE read-only GitHub key
-→ показать .pub
-→ WAITING FOR GITHUB AUTHORIZATION
-```
-
-Оператор один раз регистрирует `.pub` как read-only Deploy Key.
-
-## Повторный запуск
-
-```text
-init-pve.sh
-→ проверить GitHub SSH auth
-→ shallow clone/fetch private zsergeyru/proxmox
-→ зафиксировать repo commit SHA
-→ создать managed pool
-→ создать/проверить deployer@pve!host-deploy
-→ создать/проверить ai-agent@pve!infra
-→ проверить наличие host-side secrets обоих tokens
-→ при первом создании безопасно сохранить оба token secrets на PVE
-→ запустить private scripts/pve/create-template.sh
-→ установить private deploy-guest tooling
-→ фактически проверить каждую фазу
-→ записать state/version
-→ health report
-→ READY
-```
-
-Создание token и сохранение его secret — одна bootstrap-операция: успешное создание token не считается завершённым этапом, пока secret не записан в защищённый host-side файл.
-
-## Bootstrap/recovery `301`
-
-При создании или восстановлении `301-ai-control`:
-
-```text
-PVE читает /etc/proxmox-deployer/secrets/ai-agent-infra.token
-→ передаёт credential внутрь 301 через предусмотренный защищённый канал
-→ создаёт/обновляет /etc/ai-control/secrets/proxmox-infra.token
-→ host-side recovery copy на PVE остаётся
-```
-
-`301` не является владельцем lifecycle AI infrastructure credential. Identity/token создаются и ротируются host-side инфраструктурой.
-
-Если runtime copy внутри `301` потеряна, но PVE copy цела, выполняется повторная передача того же credential без ротации.
-
-Все стадии должны быть идемпотентными.
-
----
-
-# 18. Что не входит в `init-pve.sh`
-
-Не устанавливать и не настраивать здесь:
-
-- Docker;
-- Hermes/другой AI agent;
-- SmartDNS/VPN/PBR;
-- Ansible/Semaphore;
-- monitoring stack;
-- приложения конкретных VM;
-- guest `rootfs`;
-- model/provider credentials.
-
-Это private desired state соответствующих guests/services.
-
-`init-pve.sh` может создать infrastructure identities/tokens, потому что они относятся к PVE control plane, но не устанавливает runtime Proximo/Hermes внутрь `301`.
-
----
-
-# Security summary
-
-```text
-root
-→ zero-day host initialization, token creation/recovery и host-level операции
-
-pvedeploy (Linux)
-→ read-only Git
-→ host deploy runtime
-→ доступ только к host-deploy credential
-
-PVE deployer@pve!host-deploy
-→ host-side guest deployment role
-
-PVE ai-agent@pve!infra
-→ AI infrastructure role; текущий потребитель — Proximo
-
-/etc/proxmox-deployer/secrets/
-├── host-deploy.token
-└── ai-agent-infra.token
-→ постоянное локальное защищённое хранилище обоих infrastructure token secrets
-
-managed pool
-→ обычная runtime write-zone
-```
-
-Private keys, token secrets и passwords не хранятся в Git или `state.json`.
-
-PVE GitHub Deploy Key — read-only.
-
-Оба API token secrets сохраняются на PVE и должны входить в защищённый backup конфигурации хоста.
-
-Runtime copy AI infrastructure credential внутри `301` не отменяет обязательную recovery copy на PVE.
-
-`100`, `301`, `320`, `9000` и другие явно защищённые объекты не должны автоматически попадать под обычную self-managed write policy.
+> Public repo обеспечивает только безопасный переход к private source of truth. Вся инфраструктурная логика и сведения о внутреннем устройстве PVE находятся в `zsergeyru/proxmox`.
