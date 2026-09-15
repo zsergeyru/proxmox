@@ -14,14 +14,14 @@ set -Eeuo pipefail
 # недостающие privileges, но не удаляет уже существующие. Существующие ACL и
 # свойства API-токенов также не сужаются автоматически.
 
-BOOTSTRAP_VERSION=6
+BOOTSTRAP_VERSION=7
 
 PRIVATE_REPO="git@github.com:zsergeyru/proxmox.git"
 PRIVATE_BRANCH="main"
 
 # Временные файлы Stage 0. После успешного завершения этой стадии публичный
-# bootstrap удалит их. При повторном запуске этого приватного скрипта используется
-# уже канонический Deploy Key из /etc/proxmox-deployer/ssh.
+# bootstrap удалит временную область целиком. Постоянный Deploy Key хранится
+# уже в /etc/proxmox-deployer/ssh, а bootstrap state — в RUNTIME_DIR/state.
 STAGE0_DIR="${PVE_STAGE0_DIR:-/var/lib/proxmox-bootstrap}"
 STAGE0_KEY_FILE="${PVE_STAGE0_KEY_FILE:-${STAGE0_DIR}/github_proxmox_repo_ed25519}"
 STAGE0_KEY_PUB_FILE="${STAGE0_KEY_FILE}.pub"
@@ -36,7 +36,7 @@ SECRETS_DIR="${CONFIG_DIR}/secrets"
 RUNTIME_DIR="/var/lib/proxmox-deployer"
 REPO_DIR="${RUNTIME_DIR}/repo"
 
-STATE_DIR="/var/lib/proxmox-bootstrap"
+STATE_DIR="${RUNTIME_DIR}/state"
 STATE_FILE="${STATE_DIR}/state.json"
 VERSION_FILE="${STATE_DIR}/version"
 LAST_RUN_FILE="${STATE_DIR}/last-run.json"
@@ -169,7 +169,7 @@ write_state() {
     now="$(date --iso-8601=seconds)"
 
     mkdir -p "$STATE_DIR"
-    chmod 0755 "$STATE_DIR"
+    chmod 0750 "$STATE_DIR"
 
     cat >"$STATE_FILE" <<EOF_STATE
 {
@@ -458,7 +458,6 @@ ensure_runtime_layout() {
     install -d -o root -g "$DEPLOY_USER" -m 0710 "$SECRETS_DIR"
     install -d -o "$DEPLOY_USER" -g "$DEPLOY_USER" -m 0750 \
         "$RUNTIME_DIR" "$RUNTIME_DIR/state" "$RUNTIME_DIR/cache"
-    install -d -o root -g root -m 0755 "$STATE_DIR"
     install -d -o "$DEPLOY_USER" -g "$DEPLOY_USER" -m 0750 "$LOG_DIR" "$LOG_DIR/audit"
     install -d -o root -g root -m 0700 "$BACKUP_ROOT" "$SECRETS_BACKUP_ROOT"
     install -d -o root -g root -m 0755 /usr/local/sbin
@@ -915,7 +914,7 @@ install_private_tooling() {
     cat >/usr/local/sbin/pve-bootstrap-status <<'EOF_STATUS'
 #!/usr/bin/env bash
 set -Eeuo pipefail
-STATE=/var/lib/proxmox-bootstrap/state.json
+STATE=/var/lib/proxmox-deployer/state/state.json
 [[ -f "$STATE" ]] || { echo "Файл состояния инициализации не найден: $STATE" >&2; exit 1; }
 exec jq . "$STATE"
 EOF_STATUS
