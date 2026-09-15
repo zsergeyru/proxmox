@@ -59,8 +59,9 @@ Proximo MCP
 
 deploy-guest на PVE
 → человек / deterministic PLAN/APPLY из guest manifests
+→ ограниченный bootstrap для handoff к provisioning
 
-Ansible на 311-dev-services
+Ansible Execution Environment на 311-dev-services
 → повторяемая настройка гостевых ОС по SSH
 
 прямой SSH
@@ -114,6 +115,7 @@ guest.yaml
 - [`docs/10-architecture.md`](docs/10-architecture.md) — сводная архитектура.
 - [`docs/11-vmid-plan.md`](docs/11-vmid-plan.md) — VMID/CTID и addressing rule.
 - [`docs/30-guest-manifest.md`](docs/30-guest-manifest.md) — guest/defaults contract.
+- [`docs/33-guest-bootstrap-and-provisioning.md`](docs/33-guest-bootstrap-and-provisioning.md) — limited deployer bootstrap, 311 и Ansible provisioning.
 - [`docs/40-network.md`](docs/40-network.md) — IPv4/VLAN/VPN.
 - [`docs/41-dns.md`](docs/41-dns.md) — SmartDNS, `home.arpa`, mDNS.
 - [`docs/50-ai-control.md`](docs/50-ai-control.md) — AI-управление.
@@ -125,6 +127,7 @@ guest.yaml
 - Git — source of truth для повторяемой конфигурации;
 - на гость разворачивается только его собственное содержимое `rootfs/`;
 - persistent data и secrets не являются `rootfs/`;
+- deployer может выполнять только ограниченный bootstrap, необходимый для handoff;
 - Ansible — штатный повторяемый deploy внутри Linux-гостей;
 - SSH сохраняется как базовый аварийный канал;
 - secrets, tokens, passwords и private keys в Git не добавляются.
