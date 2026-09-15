@@ -33,7 +33,7 @@ lxc:
 
 `container_runtime: docker` является машинно-читаемым признаком принятого исключения. CI запрещает Docker-LXC без `unprivileged: true`, `nesting: true` и `keyctl: true`.
 
-Конкретный `ostemplate` задаётся Git desired state. `deploy-guest` не скачивает LXC template и не выбирает другую версию; отсутствие требуемого template считается host prerequisite и блокирует APPLY до подготовки PVE Stage 1/bootstrap.
+Конкретный `ostemplate` задаётся Git desired state. `deploy-guest` не скачивает LXC template и не выбирает другую версию; отсутствие требуемого template считается host prerequisite и блокирует APPLY. PVE Stage 1 при этом не читает guest manifests ради выбора template: bootstrap хоста автономен и выполняет только собственную встроенную логику.
 
 ## Почему выбран LXC
 
