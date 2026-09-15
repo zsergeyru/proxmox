@@ -16,6 +16,13 @@ zsergeyru/proxmox/scripts/pve/bootstrap/init-pve.sh
 
 Полная конфигурация PVE выполняется только Stage 1 из приватного `zsergeyru/proxmox`.
 
+Текущие версии:
+
+```text
+Public Stage 0:  STAGE0_VERSION=2
+Private Stage 1: BOOTSTRAP_VERSION=7
+```
+
 ---
 
 # 1. Исходное состояние
@@ -49,12 +56,34 @@ zsergeyru/proxmox-bootstrap/init-pve.sh
 
 ```text
 проверить root + наличие Proxmox VE
+→ получить exclusive Stage 0 lock
 → обеспечить минимальный git/ssh toolset
-→ создать временный read-only GitHub Deploy Key
-→ показать public key человеку
-→ после добавления ключа проверить доступ к zsergeyru/proxmox
-→ временно clone private repo
+→ проверить DNS/HTTPS-доступность GitHub
+→ создать или переиспользовать временный read-only GitHub Deploy Key
+→ проверить read-only доступ к zsergeyru/proxmox
+```
+
+Если Deploy Key ещё не авторизован:
+
+```text
+вывести public key человеку
+→ показать GitHub Settings → Deploy keys
+→ напомнить Allow write access = OFF
+→ ждать Enter через /dev/tty
+→ повторно проверить доступность GitHub
+→ один раз повторить Git access check
+```
+
+Если после Enter доступ по-прежнему отсутствует, Stage 0 завершается с явной ошибкой. При следующем запуске существующий временный private key переиспользуется, а public часть восстанавливается из него.
+
+После успешной авторизации:
+
+```text
+проверить origin существующего временного checkout, если он есть
+→ shallow clone/fetch private repo с depth=1
 → вызвать private scripts/pve/bootstrap/init-pve.sh
+→ после успешного handoff удалить временную Stage 0 область целиком
+→ создать постоянный stage0-complete marker
 ```
 
 Stage 0 не должна содержать сведения и код, относящиеся к:
@@ -67,14 +96,13 @@ Stage 0 не должна содержать сведения и код, отн�
 - VMID plan;
 - template `9000`;
 - Proximo/AI runtime;
-- deploy-guest implementation;
-- внутренней файловой структуре deployer.
+- deploy-guest implementation.
 
-Единственная неизбежная инфраструктурная информация в public repo — адрес приватного GitHub repository и путь private bootstrap entrypoint.
+Публичная стадия знает только минимум, необходимый для handoff: адрес private repository, private bootstrap entrypoint и путь постоянного marker завершения Stage 0.
 
 ## Временные файлы Stage 0
 
-До успешного handoff допускается использовать:
+До успешного handoff используется закрытая область `root:root 0700`:
 
 ```text
 /var/lib/proxmox-bootstrap/
@@ -90,9 +118,15 @@ Stage 0 не должна содержать сведения и код, отн�
 ```text
 → canonical Deploy Key уже сохранён private bootstrap
 → canonical private checkout уже создан
-→ временный Stage 0 key удаляется
-→ временный checkout удаляется
-→ остаётся stage0-complete marker
+→ private bootstrap state уже хранится в /var/lib/proxmox-deployer/state
+→ /var/lib/proxmox-bootstrap удаляется целиком
+→ stage0-complete создаётся только после успешного cleanup
+```
+
+Постоянный marker:
+
+```text
+/var/lib/proxmox-deployer/state/stage0-complete
 ```
 
 Stage 0 не является постоянным runtime layer.
@@ -116,7 +150,9 @@ Settings → Deploy keys → Add deploy key
 Allow write access: OFF
 ```
 
-После добавления ключа тот же public `init-pve.sh` запускается повторно.
+Обычный сценарий больше не требует обязательного второго запуска: после показа public key Stage 0 ждёт Enter, затем повторяет проверку и продолжает тот же запуск.
+
+Если человек нажал Enter, а ключ не был добавлен или SSH-доступ к GitHub не работает, Stage 0 завершается. После исправления можно повторно запустить тот же public `init-pve.sh`: временный private key сохраняется до успешного handoff.
 
 Никакие private keys или token secrets через Git не передаются.
 
@@ -173,9 +209,17 @@ PVE
 ├── защищённые локальные копии API token secrets
 ├── template 9000 tpl-debian13
 ├── private PVE tooling
-├── bootstrap state/version/log
+├── /var/lib/proxmox-deployer/state bootstrap/runtime state
 └── health report
 ```
+
+При этом:
+
+```text
+/var/lib/proxmox-bootstrap
+```
+
+после успешного handoff отсутствует.
 
 Host-side deploy должен работать независимо от AI control plane.
 
@@ -313,14 +357,7 @@ guest вне managed
 → права через managed на него не распространяются
 ```
 
-Protected объекты по умолчанию не помещаются в обычную AI write-zone, в частности:
-
-```text
-100   production HAOS
-301   AI control plane
-320   bootstrap/legacy AI control
-9000  protected template
-```
+Существующий состав `managed` bootstrap специально не анализирует и не исправляет: текущее содержимое pool считается административным состоянием Proxmox.
 
 Полная ACL policy находится в [`25-pve-access-control.md`](25-pve-access-control.md).
 
@@ -380,22 +417,26 @@ AIStorage
 AIManagedPool
 ```
 
-Правило идемпотентности:
+Правило идемпотентности для наших custom roles:
 
 ```text
 роль отсутствует
-→ создать
+→ создать с требуемыми privileges
 
-роль существует и совпадает
+роль существует и содержит все требуемые privileges
 → переиспользовать
 
-роль существует, но отличается
-→ вывести warning + missing/extra
-→ НЕ менять автоматически
-→ НЕ останавливать bootstrap
+роль существует, но части требуемых privileges нет
+→ добавить только недостающие через append
+→ повторно проверить
+
+в роли есть дополнительные privileges
+→ сохранить их без автоматического удаления
 ```
 
-Аналогично дополнительные старые ACL не удаляются автоматически.
+Bootstrap может безопасно расширять наши проектные роли, но автоматически не сужает уже существующую конфигурацию.
+
+Аналогично дополнительные существующие ACL не удаляются автоматически.
 
 ---
 
@@ -413,16 +454,24 @@ AIManagedPool
 - secrets никогда не помещаются в Git;
 - `host-deploy.token` доступен `root:pvedeploy` с ограниченными правами;
 - `ai-agent-infra.token` — только `root`;
-- Proxmox token secret сохраняется сразу после создания;
+- новый Proxmox token создаётся с `privsep=1` и его одноразовый secret сразу сохраняется;
 - существующий token + существующий secret переиспользуются;
+- существующий `privsep=1` сохраняется;
+- существующий `privsep=0` не меняется автоматически: bootstrap выводит явное предупреждение, чтобы не сломать уже работающий доступ;
 - если token существует, а локальный secret утрачен, bootstrap останавливается и требует явную rotation/recovery operation;
-- bootstrap не пытается молча пересоздать такой credential.
+- bootstrap не пытается молча пересоздать такой credential;
+- после ACL setup проверяются effective permissions токена;
+- затем этим token+secret выполняется реальная локальная авторизация в Proxmox API.
 
 ---
 
 # 15. GitHub Deploy Key после handoff
 
-Stage 0 создаёт временную zero-day копию ключа.
+Stage 0 создаёт временную zero-day копию ключа:
+
+```text
+/var/lib/proxmox-bootstrap/github_proxmox_repo_ed25519
+```
 
 Private Stage 1 принимает её и сохраняет канонически:
 
@@ -433,7 +482,7 @@ Private Stage 1 принимает её и сохраняет каноничес
 /etc/proxmox-deployer/ssh/known_hosts
 ```
 
-После успешного завершения private Stage 1 public Stage 0 удаляет временную копию key и временный checkout.
+После успешного завершения private Stage 1 public Stage 0 удаляет **всю** временную `/var/lib/proxmox-bootstrap`, а не только отдельные key/checkout files.
 
 ---
 
@@ -445,7 +494,9 @@ Private Stage 1 принимает её и сохраняет каноничес
 
 Это read-only checkout `zsergeyru/proxmox` для host-side infrastructure tooling.
 
-При повторной синхронизации используется текущий `main` согласно принятой versioning policy проекта.
+Bootstrap использует shallow clone/fetch глубиной 1 commit: полная Git history на PVE для runtime не требуется.
+
+Перед повторным `fetch/reset` проверяется, что `origin` совпадает с каноническим private repository URL.
 
 ---
 
@@ -464,7 +515,14 @@ VMID: 9000
 Name: tpl-debian13
 ```
 
-Template остаётся protected и вне обычной write-zone `managed`.
+Для canonical `tpl-debian13` bootstrap обеспечивает:
+
+```text
+template = 1
+protection = 1
+```
+
+Если `9000` существует, но это не canonical template, bootstrap останавливается и не перезаписывает объект.
 
 ---
 
@@ -497,16 +555,37 @@ AI не обязан использовать `deploy-guest`: AI работае�
 После успешного handoff создаётся:
 
 ```text
-/var/lib/proxmox-bootstrap/stage0-complete
+/var/lib/proxmox-deployer/state/stage0-complete
 ```
 
-Повторный public запуск больше не пытается строить инфраструктуру.
+а временный:
+
+```text
+/var/lib/proxmox-bootstrap
+```
+
+уже отсутствует.
+
+Повторный public запуск видит marker и больше не пытается выполнять zero-day handoff.
+
+Если первый запуск прервался до успешного handoff, marker отсутствует, временный Deploy Key сохраняется и следующий запуск может продолжить с той же key pair.
 
 ## Private Stage 1
 
 Private bootstrap рассчитан на повторный запуск и перепроверяет фактическое состояние PVE.
 
-Он не должен молча выполнять destructive overwrite существующих VM/LXC, roles, credentials или ACL.
+Постоянный state:
+
+```text
+/var/lib/proxmox-deployer/state/
+├── state.json
+├── version
+├── last-run.json
+├── last-revision
+└── stage0-complete
+```
+
+При начале private запуска `state.json` получает `running`; при ошибке — `failed`; после нормального завершения — итоговый `ready`, `ready-with-warnings` или `partial`.
 
 ---
 
@@ -518,9 +597,10 @@ Private bootstrap рассчитан на повторный запуск и п�
     ▼
 PUBLIC Stage 0
     │
-    ├── minimal Git/SSH
-    ├── read-only Deploy Key
-    └── private clone
+    ├── lock + GitHub connectivity
+    ├── временный read-only Deploy Key
+    ├── при необходимости: показать key → ждать Enter → retry
+    └── shallow private clone depth=1
              │
              ▼
 PRIVATE Stage 1
@@ -531,7 +611,14 @@ PRIVATE Stage 1
     ├── managed + roles + ACL
     ├── API identities/secrets
     ├── template 9000
+    ├── permanent bootstrap state
     └── local tooling
+             │
+             ▼
+PUBLIC Stage 0 cleanup
+    │
+    ├── удалить /var/lib/proxmox-bootstrap целиком
+    └── создать permanent stage0-complete marker
              │
              ▼
         рабочий PVE
@@ -539,4 +626,4 @@ PRIVATE Stage 1
 
 Главный принцип:
 
-> Public repo обеспечивает только безопасный переход к private source of truth. Вся инфраструктурная логика и сведения о внутреннем устройстве PVE находятся в `zsergeyru/proxmox`.
+> Public repo обеспечивает только безопасный переход к private source of truth. Временная zero-day область исчезает после успешного handoff; постоянные credentials, checkout, state и вся инфраструктурная логика принадлежат private Stage 1.
