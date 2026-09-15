@@ -104,8 +104,10 @@ scripts/pve/bootstrap/init-pve.sh
 Текущая версия private bootstrap:
 
 ```text
-BOOTSTRAP_VERSION=9
+BOOTSTRAP_VERSION=10
 ```
+
+Stage 1 автономно настраивает сам PVE. Он не читает `guests/defaults.yaml`, `guest.yaml` или profiles для принятия host-side решений.
 
 Он выполняет:
 
@@ -120,6 +122,7 @@ exclusive run lock
 → active storage + content types
 → Debian 13 LXC template
 → pvedeploy + config.yaml validation
+→ guest-bootstrap SSH identity
 → принятие Deploy Key от Stage 0
 → canonical private checkout + проверка origin
 → managed pool
@@ -186,7 +189,58 @@ pveam update
 → verify
 ```
 
-Точное имя appliance не хардкодится. Root/bootstrap заранее подготавливает base template, поэтому AI не требуется `Datastore.AllocateTemplate` только ради загрузки appliance.
+Точное имя appliance не хардкодится. Stage 1 сам подготавливает актуальный Debian 13 base template как часть bootstrap хоста; он не получает эту версию из guest manifests.
+
+### Guest-bootstrap SSH identity
+
+Private Stage 1 создаёт отдельную постоянную SSH identity для первичного доступа host-side deployer к новым VM/LXC:
+
+```text
+/etc/proxmox-deployer/ssh/guest_bootstrap_ed25519
+/etc/proxmox-deployer/ssh/guest_bootstrap_ed25519.pub
+```
+
+Назначение:
+
+```text
+PVE Stage 1
+→ один раз создаёт keypair
+
+deploy-guest
+→ использует public key при создании гостя
+→ использует private key для первичного SSH/bootstrap
+```
+
+Это отдельный credential. Он не используется для GitHub и не является Ansible identity 311.
+
+Правила повторного запуска:
+
+```text
+private key отсутствует + public key отсутствует
+→ создать новую Ed25519 keypair
+
+private key существует
+→ не ротировать
+→ проверить, что ключ читается и является Ed25519
+→ восстановить .pub непосредственно из private key
+→ привести owner/mode к каноническим
+
+private key отсутствует + public key существует
+→ STOP
+→ возможна потеря существующего credential; автоматическая ротация запрещена
+```
+
+Канонические права:
+
+```text
+guest_bootstrap_ed25519
+→ pvedeploy:pvedeploy 0600
+
+guest_bootstrap_ed25519.pub
+→ pvedeploy:pvedeploy 0644
+```
+
+Private key не выводится в logs и должен входить во внешнюю backup policy infrastructure secrets.
 
 ### Постоянный bootstrap state
 
@@ -202,6 +256,8 @@ Bootstrap state хранится в:
 ├── last-revision
 └── stage0-complete
 ```
+
+`state.json` дополнительно отражает наличие guest-bootstrap private key без публикации его содержимого.
 
 `stage0-complete` создаётся public Stage 0 только после успешного возврата из private Stage 1 и удаления временной `/var/lib/proxmox-bootstrap`.
 
@@ -226,6 +282,8 @@ host_deploy_identity
 ai_infra_identity
 template_vmid
 ```
+
+Путь guest-bootstrap key не добавляется как обязательный config key: он является частью канонической host filesystem layout и имеет фиксированный project path.
 
 Missing/mismatched обязательный key считается конфликтом и приводит к STOP. Дополнительные keys разрешены.
 
@@ -289,6 +347,8 @@ Canonical key:
 Public часть каждый запуск восстанавливается непосредственно из canonical private key и сохраняется как `.pub`.
 
 Если permanent canonical key уже существует, а Stage 0 передала другой private key, bootstrap это замечает и не заменяет credential автоматически. Если canonical key при этом больше не авторизуется в GitHub, Stage 1 останавливается с явным recovery/rotation сообщением.
+
+GitHub Deploy Key и `guest_bootstrap_ed25519` принципиально не переиспользуют друг друга.
 
 ### Private checkout
 
@@ -428,13 +488,15 @@ scripts/pve/deploy-guest.py
 
 До появления source private Stage 1 корректно завершает основную настройку со статусом `partial`/предупреждением о недостающем deploy-guest.
 
+Stage 1 уже подготавливает для будущего deployer отдельную SSH identity `guest_bootstrap_ed25519`; сам deployer не создаёт и не ротирует этот credential.
+
 Также остаются отдельные последующие задачи:
 
 ```text
 создание/клонирование VM и LXC по guest.yaml через deploy-guest
 bootstrap/configuration 301-ai-control
 передача runtime copy AI credential внутрь 301
-SSH/Cloud-Init policy для новых guests
+точная initial-access policy для VM/LXC с использованием guest-bootstrap public key
 health checks для конкретных guest deployments
 backup/recovery automation
 ```
@@ -459,6 +521,8 @@ template builder/policy
 
 Public repo хранит только Stage 0 loader.
 
+Private Stage 1 получает свой код из Git, но после запуска не использует guest manifests как конфигурационный вход для bootstrap самого PVE.
+
 ---
 
 ## Security
@@ -473,9 +537,11 @@ Public repo не должен содержать:
 
 Deploy Key создаётся на конкретном PVE и выдаётся только на чтение private repository.
 
-До успешного handoff временный private key хранится только в закрытой `/var/lib/proxmox-bootstrap` с режимом `0700` для каталога и `0600` для private key.
+Guest-bootstrap SSH keypair создаётся Private Stage 1 непосредственно на PVE и никогда не хранится в Git.
 
-Private Stage 1 переносит Deploy Key в каноническое `/etc/proxmox-deployer/ssh`. После успешного handoff временная Stage 0 область удаляется целиком.
+До успешного handoff временный private GitHub key хранится только в закрытой `/var/lib/proxmox-bootstrap` с режимом `0700` для каталога и `0600` для private key.
+
+Private Stage 1 переносит GitHub Deploy Key в каноническое `/etc/proxmox-deployer/ssh` и отдельно создаёт там guest-bootstrap SSH identity. После успешного handoff временная Stage 0 область удаляется целиком.
 
 При проверке API credential token secret не выводится в лог и не передаётся непосредственно в аргументах `curl`; временный header-файл создаётся с закрытыми правами и гарантированно очищается при штатном завершении и обрабатываемых сигналах.
 
@@ -483,4 +549,4 @@ Private Stage 1 переносит Deploy Key в каноническое `/etc/
 
 ## Главный принцип
 
-> Public Stage 0 только открывает безопасный read-only путь к private source of truth и после успешной передачи управления исчезает как временный runtime. Всё, что постоянно конфигурирует Proxmox и описывает внутреннее устройство инфраструктуры, находится и развивается только в `zsergeyru/proxmox`.
+> Public Stage 0 только открывает безопасный read-only путь к private source и запускает Stage 1. Private Stage 1 затем автономно конфигурирует PVE, создаёт постоянные host-side credentials и runtime, не используя guest manifests как входные данные для bootstrap хоста.
