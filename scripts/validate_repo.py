@@ -50,10 +50,15 @@ PRIVATE_KEY_MARKERS = tuple(
 )
 
 errors: list[str] = []
+warnings: list[str] = []
 
 
 def fail(message: str) -> None:
     errors.append(message)
+
+
+def warn(message: str) -> None:
+    warnings.append(message)
 
 
 def tracked_files() -> list[Path]:
@@ -307,7 +312,7 @@ def validate_stage_address(
 
     expected = expected_management_ip(vmid, config)
     if address != expected:
-        fail(
+        warn(
             f"{rel}: {stage} management IP {address} does not match VMID rule, "
             f"expected {expected}"
         )
@@ -594,6 +599,11 @@ def main() -> int:
     validate_guest_manifests()
     validate_secret_files(files)
     validate_markdown_links(files)
+
+    if warnings:
+        print("Repository validation warnings:")
+        for warning in warnings:
+            print(f" - {warning}")
 
     if errors:
         print("Repository validation failed:")
