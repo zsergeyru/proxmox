@@ -12,6 +12,9 @@
 Proximo MCP
 → VM/LXC lifecycle, guest-level Proxmox operations, snapshots/backups и diagnostics
 
+host-side deploy-guest
+→ создание новых VM/LXC по guest.yaml
+
 Ansible на 311-dev-services
 → повторяемая конфигурация ОС и приложений внутри гостей через SSH
 
@@ -48,11 +51,15 @@ Ansible/Semaphore не размещаются в `301`; они относятс�
 
 Hard security boundary задаётся PVE identity/token/ACL. AI Control не получает штатных прав на host network, IAM/ACL, SDN, storage definitions, certificates/repositories или reboot/shutdown самого PVE.
 
-`301` не должен входить в собственную обычную self-managed write-zone.
+Основная write-zone `ai-agent@pve!infra` — resource pool `managed`. `301` не должен входить в собственную обычную self-managed write-zone.
 
-Подробная матрица прав остаётся в:
+Новые VM/LXC AI control не создаёт напрямую через права своего Proxmox token. Агент инициирует host-side `deploy-guest`, а фактическое создание/clone/configuration выполняет `deployer@pve!host-deploy` по `guest.yaml`. После успешного deploy обычный guest помещается в `managed`, и далее им может управлять AI runtime.
 
-[`../guests/320-ai-control/decisions/002-proxmox-permissions.md`](../guests/320-ai-control/decisions/002-proxmox-permissions.md)
+Каноническая политика двух PVE identities и границы `managed` описана в:
+
+[`25-pve-access-control.md`](25-pve-access-control.md)
+
+ADR в `guests/320-ai-control/` относится к существующему bootstrap/legacy-контру `320` и не является source of truth для прав новой схемы `301`.
 
 ## SSH
 
@@ -73,20 +80,22 @@ GitHub access для AI Control выполняется отдельной Deploy
 Целевая модель остаётся:
 
 ```text
-Full Clone from 9000
-→ managed pool, если guest не является исключением
+AI request / operator
+→ deploy-guest <VMID>
+→ Full Clone from 9000
 → CPU/RAM/disk/network по guest.yaml
 → ciuser=ops
 → SSH public key через Cloud-Init
+→ managed pool, если guest не является исключением
 → first start
 → QGA/SSH/health verification
 ```
 
-Template `9000` остаётся защищённым и используется как источник clone, но не входит в обычную write-zone автоматизации.
+Template `9000` остаётся защищённым и используется host deployer как источник clone, но не входит в обычную write-zone AI runtime.
 
 ## Repeatable deploy
 
-После развёртывания `311-dev-services` штатный repeatable flow:
+После развёртывания `311-dev-services` штатный repeatable flow для изменений внутри ОС:
 
 ```text
 AI agent / пользователь
@@ -96,6 +105,8 @@ AI agent / пользователь
 → нужный guest
 → health/status/log verification
 ```
+
+Создание нового guest выполняется отдельно через `deploy-guest`.
 
 Прямой SSH из `301` остаётся для bootstrap, диагностики, разовых и аварийных действий.
 
@@ -116,20 +127,23 @@ bootstrap-ai-control.sh
 
 - [`20-pve-initialization.md`](20-pve-initialization.md);
 - [`21-pve-filesystem-layout.md`](21-pve-filesystem-layout.md);
+- [`25-pve-access-control.md`](25-pve-access-control.md);
 - [`51-ai-control-bootstrap.md`](51-ai-control-bootstrap.md);
-- ADR `311-dev-services` и `320-ai-control`.
+- актуальных ADR `311-dev-services` и `301-ai-control`.
 
 Их названия, язык реализации и внутренняя структура могут быть другими.
 
 ## Security boundary
 
 1. PVE privilege-separated token + ACL — hard boundary.
-2. MCP surface ограничивается необходимыми guest-level operations.
-3. Common platform отделена от agent-specific software.
-4. Private SSH keys и provider credentials не хранятся в Git.
-5. Snapshots/backups используются перед рискованными изменениями.
-6. `301`, production HA и template не входят автоматически в self-managed write-zone.
+2. `ai-agent@pve!infra` штатно управляет гостями в `managed`.
+3. Создание новых VM/LXC идёт через host-side `deploy-guest`, а не через прямой `VM.Allocate/VM.Clone` AI token.
+4. MCP surface ограничивается необходимыми guest-level operations.
+5. Common platform отделена от agent-specific software.
+6. Private SSH keys и provider credentials не хранятся в Git.
+7. Snapshots/backups используются перед рискованными изменениями.
+8. `301`, production HA и template не входят автоматически в self-managed write-zone.
 
 ## Готовность к замене 320
 
-`320-ai-control` выводится из эксплуатации только после live-проверки новой реализации `301`, включая Proximo, Git/SSH, доступ к managed test guest и взаимодействие с Ansible на `311`.
+`320-ai-control` выводится из эксплуатации только после live-проверки новой реализации `301`, включая Proximo, Git/SSH, вызов `deploy-guest`, доступ к managed test guest и взаимодействие с Ansible на `311`.
