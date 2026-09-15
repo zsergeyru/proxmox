@@ -65,6 +65,7 @@ UPDATE_SYSTEM=0
 WARN_COUNT=0
 REPO_REVISION=""
 BOOTSTRAP_RUNNING=0
+API_HEADER_FILE=""
 
 # Учётная запись для человека и локальных инструментов, работающих напрямую с PVE.
 HOST_PVE_USER="deployer@pve"
@@ -131,6 +132,13 @@ while (($#)); do
     shift
 done
 
+cleanup_api_header_file() {
+    if [[ -n "${API_HEADER_FILE:-}" ]]; then
+        rm -f -- "$API_HEADER_FILE" 2>/dev/null || true
+        API_HEADER_FILE=""
+    fi
+}
+
 on_error() {
     local rc=$?
     trap - ERR
@@ -141,6 +149,9 @@ on_error() {
     exit "$rc"
 }
 trap on_error ERR
+trap cleanup_api_header_file EXIT
+trap 'cleanup_api_header_file; exit 130' INT
+trap 'cleanup_api_header_file; exit 143' TERM
 
 require_cmd() {
     command -v "$1" >/dev/null 2>&1 || die "Не найдена обязательная команда: $1"
@@ -861,7 +872,7 @@ verify_effective_permissions() {
 
 verify_token_api_auth() {
     local full_token=$1 secret_file=$2
-    local stored_id secret header_file old_umask
+    local stored_id secret old_umask
 
     stored_id="$(sed -n 's/^token_id=//p' "$secret_file" | head -n1)"
     secret="$(sed -n 's/^token_secret=//p' "$secret_file" | head -n1)"
@@ -870,24 +881,29 @@ verify_token_api_auth() {
         || die "В ${secret_file} записан token_id '${stored_id:-не задан}', ожидается '${full_token}'"
     [[ -n "$secret" ]] || die "В ${secret_file} отсутствует token_secret"
 
+    # Если предыдущий процесс был убит SIGKILL, trap выполнить невозможно.
+    # Перед новой проверкой удаляем только наши закрытые временные API-header files.
+    find "$SECRETS_DIR" -maxdepth 1 -type f -name '.api-check.*' -delete \
+        || die "Не удалось удалить оставшиеся временные файлы проверки API credential"
+
     old_umask="$(umask)"
     umask 077
-    header_file="$(mktemp "${SECRETS_DIR}/.api-check.XXXXXX")"
+    API_HEADER_FILE="$(mktemp "${SECRETS_DIR}/.api-check.XXXXXX")"
     umask "$old_umask"
-    printf 'Authorization: PVEAPIToken=%s=%s\n' "$full_token" "$secret" >"$header_file"
-    chmod 0600 "$header_file"
+    printf 'Authorization: PVEAPIToken=%s=%s\n' "$full_token" "$secret" >"$API_HEADER_FILE"
+    chmod 0600 "$API_HEADER_FILE"
 
     if ! curl --fail --silent --show-error --insecure \
         --connect-timeout 10 --max-time 20 \
-        --header "@${header_file}" \
+        --header "@${API_HEADER_FILE}" \
         https://127.0.0.1:8006/api2/json/version \
         | jq -e '(.data.version // .data.release // empty) != ""' >/dev/null; then
-        rm -f "$header_file"
+        cleanup_api_header_file
         unset secret
         die "API-токен ${full_token} не прошёл локальную проверку авторизации. Возможен устаревший secret или другая проблема credential."
     fi
 
-    rm -f "$header_file"
+    cleanup_api_header_file
     unset secret
     ok "API-токен ${full_token} успешно авторизуется в локальном Proxmox API"
 }
