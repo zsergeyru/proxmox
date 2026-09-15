@@ -551,11 +551,21 @@ ensure_storage_contents() {
     ok "В storage ${storage} добавлены content types без удаления существующих: ${missing[*]}"
 }
 
+storage_status_json() {
+    local node
+    node="$(hostname -s)"
+    pvesh get "/nodes/${node}/storage" --output-format json
+}
+
 storage_is_active_enabled() {
     local storage=$1
-    pvesm status --storage "$storage" --enabled 1 --output-format json \
-        | jq -e --arg storage "$storage" \
-            '.[] | select(.storage == $storage and (.active == 1 or .active == true))' >/dev/null
+    storage_status_json \
+        | jq -e --arg storage "$storage" '
+            .[]
+            | select(.storage == $storage)
+            | select((.enabled // 1) == 1 or (.enabled // 1) == true)
+            | select(.active == 1 or .active == true)
+        ' >/dev/null
 }
 
 ensure_storage_layout() {
@@ -608,7 +618,7 @@ ensure_lxc_template() {
 
 storage_available_bytes() {
     local storage=$1
-    pvesm status --storage "$storage" --output-format json \
+    storage_status_json \
         | jq -r --arg storage "$storage" '.[] | select(.storage == $storage) | (.avail // empty)' \
         | head -n1
 }
