@@ -14,7 +14,7 @@ set -Eeuo pipefail
 # недостающие privileges, но не удаляет уже существующие. Существующие ACL и
 # свойства API-токенов также не сужаются автоматически.
 
-BOOTSTRAP_VERSION=4
+BOOTSTRAP_VERSION=5
 
 PRIVATE_REPO="git@github.com:zsergeyru/proxmox.git"
 PRIVATE_BRANCH="main"
@@ -40,6 +40,7 @@ STATE_DIR="/var/lib/proxmox-bootstrap"
 STATE_FILE="${STATE_DIR}/state.json"
 VERSION_FILE="${STATE_DIR}/version"
 LAST_RUN_FILE="${STATE_DIR}/last-run.json"
+LOCK_FILE="/run/lock/proxmox-bootstrap-init.lock"
 
 LOG_DIR="/var/log/proxmox-deployer"
 BOOTSTRAP_LOG_DIR="/var/log/proxmox-bootstrap"
@@ -56,9 +57,14 @@ TEMPLATE_NAME="tpl-debian13"
 MANAGED_POOL="managed"
 BRIDGE="vmbr0"
 
+# Минимальный безопасный запас для первого создания Debian template.
+TEMPLATE_MIN_LOCAL_BYTES=$((2 * 1024 * 1024 * 1024))
+TEMPLATE_MIN_DISK_STORAGE_BYTES=$((18 * 1024 * 1024 * 1024))
+
 UPDATE_SYSTEM=0
 WARN_COUNT=0
 REPO_REVISION=""
+BOOTSTRAP_RUNNING=0
 
 # Учётная запись для человека и локальных инструментов, работающих напрямую с PVE.
 HOST_PVE_USER="deployer@pve"
@@ -92,7 +98,12 @@ warn() {
     printf '[ПРЕДУПРЕЖДЕНИЕ] %s\n' "$*" >&2
 }
 die() {
-    printf '\nОШИБКА: %s\n' "$*" >&2
+    local message=$*
+    printf '\nОШИБКА: %s\n' "$message" >&2
+    if (( BOOTSTRAP_RUNNING )); then
+        trap - ERR
+        write_state "failed" "$REPO_REVISION" >/dev/null 2>&1 || true
+    fi
     exit 1
 }
 
@@ -123,6 +134,9 @@ done
 on_error() {
     local rc=$?
     trap - ERR
+    if (( BOOTSTRAP_RUNNING )); then
+        write_state "failed" "$REPO_REVISION" >/dev/null 2>&1 || true
+    fi
     printf '\nПриватная инициализация PVE аварийно остановлена. Код возврата: %s.\n' "$rc" >&2
     exit "$rc"
 }
@@ -138,6 +152,14 @@ setup_bootstrap_log() {
     touch "$BOOTSTRAP_LOG_DIR/init-pve.log"
     chmod 0600 "$BOOTSTRAP_LOG_DIR/init-pve.log"
     exec > >(tee -a "$BOOTSTRAP_LOG_DIR/init-pve.log") 2>&1
+}
+
+acquire_bootstrap_lock() {
+    require_cmd flock
+    install -d -m 0755 /run/lock
+    exec 9>"$LOCK_FILE"
+    flock -n 9 || die "Другой экземпляр приватного init-pve.sh уже выполняется. Параллельный запуск запрещён."
+    ok "Получена эксклюзивная блокировка bootstrap"
 }
 
 write_state() {
@@ -213,12 +235,15 @@ check_root_and_pve() {
     fi
 
     if qm config "$TEMPLATE_VMID" >/dev/null 2>&1; then
-        local name template_flag
+        local name template_flag protection_flag
         name="$(qm config "$TEMPLATE_VMID" | awk -F': ' '$1=="name" {print $2}')"
         template_flag="$(qm config "$TEMPLATE_VMID" | awk -F': ' '$1=="template" {print $2}')"
+        protection_flag="$(qm config "$TEMPLATE_VMID" | awk -F': ' '$1=="protection" {print $2}')"
         if [[ "$name" != "$TEMPLATE_NAME" || "$template_flag" != "1" ]]; then
             die "VMID ${TEMPLATE_VMID} уже существует, но это не ожидаемый шаблон ${TEMPLATE_NAME}; перезапись запрещена"
         fi
+        [[ "$protection_flag" == "1" ]] \
+            || die "Шаблон ${TEMPLATE_VMID} ${TEMPLATE_NAME} существует, но protection=1 не установлен. Bootstrap не изменяет защиту существующего шаблона автоматически."
         ok "Защищённый шаблон ${TEMPLATE_VMID} уже существует"
     fi
 }
@@ -334,6 +359,37 @@ check_time_dns_network() {
         || die "Нет HTTPS-доступа к download.proxmox.com"
 
     ok "DNS и исходящий HTTPS работают"
+}
+
+storage_available_bytes() {
+    local storage=$1
+    pvesm status --storage "$storage" --output-format json \
+        | jq -r --arg storage "$storage" '.[] | select(.storage == $storage) | (.avail // empty)' \
+        | head -n1
+}
+
+check_template_capacity() {
+    if qm config "$TEMPLATE_VMID" >/dev/null 2>&1; then
+        return
+    fi
+
+    log "Проверка свободного места для создания Debian-шаблона"
+
+    local local_avail disk_avail
+    local_avail="$(storage_available_bytes local)"
+    disk_avail="$(storage_available_bytes local-lvm)"
+
+    [[ "$local_avail" =~ ^[0-9]+$ ]] \
+        || die "Не удалось определить доступное место на storage local"
+    [[ "$disk_avail" =~ ^[0-9]+$ ]] \
+        || die "Не удалось определить доступное место на storage local-lvm"
+
+    (( local_avail >= TEMPLATE_MIN_LOCAL_BYTES )) \
+        || die "Недостаточно свободного места на local для образа Debian: доступно $((local_avail / 1024 / 1024)) MiB, требуется минимум $((TEMPLATE_MIN_LOCAL_BYTES / 1024 / 1024)) MiB"
+    (( disk_avail >= TEMPLATE_MIN_DISK_STORAGE_BYTES )) \
+        || die "Недостаточно свободного места на local-lvm для template disk: доступно $((disk_avail / 1024 / 1024 / 1024)) GiB, требуется минимум $((TEMPLATE_MIN_DISK_STORAGE_BYTES / 1024 / 1024 / 1024)) GiB"
+
+    ok "Свободного места для создания template достаточно"
 }
 
 check_template_source() {
@@ -483,7 +539,13 @@ sync_private_repo() {
         rm -rf "$REPO_DIR"
         git_as_deployer clone --depth 1 --branch "$PRIVATE_BRANCH" "$PRIVATE_REPO" "$REPO_DIR"
     else
+        local origin_url
         chown -R "$DEPLOY_USER:$DEPLOY_USER" "$REPO_DIR"
+        origin_url="$(git_as_deployer -C "$REPO_DIR" remote get-url origin 2>/dev/null || true)"
+        [[ "$origin_url" == "$PRIVATE_REPO" ]] \
+            || die "Существующий checkout ${REPO_DIR} имеет неожиданный origin '${origin_url:-не задан}'. Ожидается '${PRIVATE_REPO}'. Автоматическая подмена origin запрещена."
+        ok "Origin существующего private checkout соответствует каноническому репозиторию"
+
         git_as_deployer -C "$REPO_DIR" fetch --depth 1 origin "$PRIVATE_BRANCH"
         git_as_deployer -C "$REPO_DIR" reset --hard FETCH_HEAD
         git_as_deployer -C "$REPO_DIR" clean -ffd
@@ -574,8 +636,9 @@ ensure_pve_user() {
     if jq -e --arg id "$userid" '.[] | select(.userid == $id)' <<<"$users_json" >/dev/null; then
         enabled="$(jq -r --arg id "$userid" '.[] | select(.userid == $id) | (.enable // 1)' \
             <<<"$users_json" | head -n1)"
-        ok "Пользователь PVE ${userid} уже существует"
-        [[ "$enabled" != "0" ]] || warn "Пользователь PVE ${userid} отключён; скрипт не включает его автоматически"
+        [[ "$enabled" != "0" ]] \
+            || die "Пользователь PVE ${userid} существует, но отключён. Bootstrap не включает существующую учётную запись автоматически, чтобы не отменить осознанную блокировку. Сначала проверьте причину и включите пользователя вручную, если это действительно требуется."
+        ok "Пользователь PVE ${userid} уже существует и включён"
     else
         pveum user add "$userid" --comment "$comment" --enable 1
         ok "Создан пользователь PVE ${userid}"
@@ -694,6 +757,81 @@ ensure_identity_acls() {
     done
 }
 
+verify_permission_set() {
+    local full_token=$1 permissions_json=$2 path=$3 required_raw=$4
+    local priv missing=""
+
+    while IFS= read -r priv; do
+        [[ -n "$priv" ]] || continue
+        if ! jq -e --arg path "$path" --arg priv "$priv" \
+            '((.[$path] // {}) | has($priv))' <<<"$permissions_json" >/dev/null; then
+            missing+="${priv}"$'\n'
+        fi
+    done < <(priv_lines "$required_raw")
+
+    [[ -z "$missing" ]] \
+        || die "API-токен ${full_token} не имеет ожидаемых effective permissions на ${path}: $(join_lines "${missing%$'\n'}")"
+}
+
+verify_effective_permissions() {
+    local full_token=$1 permissions_json
+
+    permissions_json="$(pveum user permissions "$full_token" --output-format json)" \
+        || die "Не удалось получить effective permissions для ${full_token}"
+
+    verify_permission_set "$full_token" "$permissions_json" "/pool/${MANAGED_POOL}" \
+        "${ROLE_GUEST_PRIVS} ${ROLE_POOL_PRIVS}"
+    verify_permission_set "$full_token" "$permissions_json" "/vms/${TEMPLATE_VMID}" \
+        "$ROLE_CLONE_PRIVS"
+    verify_permission_set "$full_token" "$permissions_json" "/storage/local" \
+        "$ROLE_STORAGE_PRIVS"
+    verify_permission_set "$full_token" "$permissions_json" "/storage/local-lvm" \
+        "$ROLE_STORAGE_PRIVS"
+    verify_permission_set "$full_token" "$permissions_json" "/sdn/zones/localnetwork/${BRIDGE}" \
+        "$ROLE_NETWORK_PRIVS"
+
+    ok "Effective permissions API-токена ${full_token} соответствуют требуемой модели"
+}
+
+verify_token_api_auth() {
+    local full_token=$1 secret_file=$2
+    local stored_id secret header_file old_umask
+
+    stored_id="$(sed -n 's/^token_id=//p' "$secret_file" | head -n1)"
+    secret="$(sed -n 's/^token_secret=//p' "$secret_file" | head -n1)"
+
+    [[ "$stored_id" == "$full_token" ]] \
+        || die "В ${secret_file} записан token_id '${stored_id:-не задан}', ожидается '${full_token}'"
+    [[ -n "$secret" ]] || die "В ${secret_file} отсутствует token_secret"
+
+    old_umask="$(umask)"
+    umask 077
+    header_file="$(mktemp "${SECRETS_DIR}/.api-check.XXXXXX")"
+    umask "$old_umask"
+    printf 'Authorization: PVEAPIToken=%s=%s\n' "$full_token" "$secret" >"$header_file"
+    chmod 0600 "$header_file"
+
+    if ! curl --fail --silent --show-error --insecure \
+        --connect-timeout 10 --max-time 20 \
+        --header "@${header_file}" \
+        https://127.0.0.1:8006/api2/json/version \
+        | jq -e '(.data.version // .data.release // empty) != ""' >/dev/null; then
+        rm -f "$header_file"
+        unset secret
+        die "API-токен ${full_token} не прошёл локальную проверку авторизации. Возможен устаревший secret или другая проблема credential."
+    fi
+
+    rm -f "$header_file"
+    unset secret
+    ok "API-токен ${full_token} успешно авторизуется в локальном Proxmox API"
+}
+
+verify_pve_identity() {
+    local full_token=$1 secret_file=$2
+    verify_effective_permissions "$full_token"
+    verify_token_api_auth "$full_token" "$secret_file"
+}
+
 ensure_pve_identities() {
     log "Проверка служебных учётных записей, API-токенов и ACL Proxmox"
 
@@ -711,6 +849,9 @@ ensure_pve_identities() {
 
     ensure_identity_acls "$HOST_PVE_USER" "$HOST_PVE_TOKEN"
     ensure_identity_acls "$AI_PVE_USER" "$AI_PVE_TOKEN"
+
+    verify_pve_identity "$HOST_PVE_TOKEN" "$HOST_TOKEN_FILE"
+    verify_pve_identity "$AI_PVE_TOKEN" "$AI_TOKEN_FILE"
 }
 
 # =============================================================================
@@ -723,12 +864,15 @@ ensure_template() {
     fi
 
     if qm config "$TEMPLATE_VMID" >/dev/null 2>&1; then
-        local name template_flag
+        local name template_flag protection_flag
         name="$(qm config "$TEMPLATE_VMID" | awk -F': ' '$1=="name" {print $2}')"
         template_flag="$(qm config "$TEMPLATE_VMID" | awk -F': ' '$1=="template" {print $2}')"
+        protection_flag="$(qm config "$TEMPLATE_VMID" | awk -F': ' '$1=="protection" {print $2}')"
         [[ "$name" == "$TEMPLATE_NAME" && "$template_flag" == "1" ]] \
             || die "VMID ${TEMPLATE_VMID} существует, но не соответствует шаблону ${TEMPLATE_NAME}"
-        ok "Шаблон ${TEMPLATE_VMID} ${TEMPLATE_NAME} уже существует"
+        [[ "$protection_flag" == "1" ]] \
+            || die "Шаблон ${TEMPLATE_VMID} ${TEMPLATE_NAME} существует без protection=1"
+        ok "Шаблон ${TEMPLATE_VMID} ${TEMPLATE_NAME} уже существует и защищён"
         return
     fi
 
@@ -740,9 +884,17 @@ ensure_template() {
 
     qm config "$TEMPLATE_VMID" >/dev/null 2>&1 \
         || die "Скрипт создания шаблона завершился, но VMID ${TEMPLATE_VMID} не создан"
-    [[ "$(qm config "$TEMPLATE_VMID" | awk -F': ' '$1=="template" {print $2}')" == "1" ]] \
+
+    local final_config
+    final_config="$(qm config "$TEMPLATE_VMID")"
+    grep -q "^name: ${TEMPLATE_NAME}$" <<<"$final_config" \
+        || die "VMID ${TEMPLATE_VMID} создан, но имеет неожиданное имя"
+    grep -q '^template: 1$' <<<"$final_config" \
         || die "VMID ${TEMPLATE_VMID} создан, но не является шаблоном Proxmox"
-    ok "Создан шаблон ${TEMPLATE_VMID} ${TEMPLATE_NAME}"
+    grep -q '^protection: 1$' <<<"$final_config" \
+        || die "VMID ${TEMPLATE_VMID} создан, но protection=1 не установлен"
+
+    ok "Создан защищённый шаблон ${TEMPLATE_VMID} ${TEMPLATE_NAME}"
 }
 
 install_private_tooling() {
@@ -785,18 +937,19 @@ report_status() {
 
     printf '\nСОСТОЯНИЕ ПРИВАТНОЙ ИНИЦИАЛИЗАЦИИ PVE\n\n'
     printf '[ОК] Proxmox и KVM проверены\n'
+    printf '[ОК] Эксклюзивная блокировка bootstrap используется\n'
     printf '[ОК] pve-no-subscription настроен\n'
     printf '[ОК] DNS и исходящий HTTPS работают\n'
     printf '[ОК] local/local-lvm/snippets подготовлены\n'
     printf '[ОК] pvedeploy и файловая структура подготовлены\n'
     printf '[ОК] Канонический read-only Deploy Key установлен\n'
-    printf '[ОК] Приватный репозиторий синхронизирован\n'
+    printf '[ОК] Приватный репозиторий синхронизирован и origin проверен\n'
     printf '[ОК] managed и роли Proxmox проверены\n'
-    printf '[ОК] %s проверен\n' "$HOST_PVE_TOKEN"
-    printf '[ОК] %s проверен\n' "$AI_PVE_TOKEN"
+    printf '[ОК] %s: effective permissions и API credential проверены\n' "$HOST_PVE_TOKEN"
+    printf '[ОК] %s: effective permissions и API credential проверены\n' "$AI_PVE_TOKEN"
 
     if qm config "$TEMPLATE_VMID" >/dev/null 2>&1; then
-        printf '[ОК] Шаблон %s существует\n' "$TEMPLATE_VMID"
+        printf '[ОК] Шаблон %s существует и protection проверен\n' "$TEMPLATE_VMID"
     else
         printf '[НЕТ] Шаблон %s отсутствует\n' "$TEMPLATE_VMID"
         ready=0
@@ -830,6 +983,10 @@ report_status() {
 main() {
     [[ $EUID -eq 0 ]] || die "Запустите скрипт от root на хосте Proxmox"
     setup_bootstrap_log
+    acquire_bootstrap_lock
+
+    BOOTSTRAP_RUNNING=1
+    write_state "running" "$REPO_REVISION"
 
     check_root_and_pve
     snapshot_host_config
@@ -844,10 +1001,13 @@ main() {
     ensure_managed_pool
     ensure_roles
     ensure_pve_identities
+    check_template_capacity
     check_template_source
     ensure_template
     install_private_tooling
     report_status
+
+    BOOTSTRAP_RUNNING=0
 }
 
 main "$@"
