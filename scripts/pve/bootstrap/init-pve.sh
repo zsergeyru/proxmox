@@ -10,10 +10,11 @@ set -Eeuo pipefail
 # устанавливает минимальный Git/SSH-набор, создаёт read-only Deploy Key,
 # получает доступ к этому приватному репозиторию и передаёт управление сюда.
 #
-# Скрипт можно запускать повторно. Он старается переиспользовать уже существующие
-# объекты и не перезаписывает отличающиеся роли/ACL без явного решения.
+# Скрипт можно запускать повторно. Для проектных ролей он безопасно добавляет
+# недостающие privileges, но не удаляет уже существующие. Существующие ACL и
+# свойства API-токенов также не сужаются автоматически.
 
-BOOTSTRAP_VERSION=3
+BOOTSTRAP_VERSION=4
 
 PRIVATE_REPO="git@github.com:zsergeyru/proxmox.git"
 PRIVATE_BRANCH="main"
@@ -519,7 +520,7 @@ join_lines() {
 
 ensure_role() {
     local role=$1 expected_raw=$2
-    local role_json actual_raw expected actual missing extra
+    local role_json actual_raw expected actual missing extra missing_raw missing_after
 
     role_json="$(pveum role list --output-format json)"
     if ! jq -e --arg role "$role" '.[] | select(.roleid == $role)' <<<"$role_json" >/dev/null; then
@@ -532,17 +533,29 @@ ensure_role() {
         <<<"$role_json" | head -n1)"
     expected="$(priv_lines "$expected_raw")"
     actual="$(priv_lines "$actual_raw")"
-
-    if [[ "$expected" == "$actual" ]]; then
-        ok "Роль ${role} уже существует и полностью совпадает"
-        return
-    fi
-
     missing="$(comm -23 <(printf '%s\n' "$expected") <(printf '%s\n' "$actual") || true)"
     extra="$(comm -13 <(printf '%s\n' "$expected") <(printf '%s\n' "$actual") || true)"
-    warn "Роль ${role} уже существует, но отличается; существующая роль не изменяется, инициализация продолжается"
-    printf '       недостаёт: %s\n' "$(join_lines "$missing")"
-    printf '       лишние:    %s\n' "$(join_lines "$extra")"
+
+    if [[ -n "$missing" ]]; then
+        missing_raw="$(printf '%s\n' "$missing" | paste -sd' ' -)"
+        pveum role modify "$role" --append 1 --privs "$missing_raw"
+        ok "Роль ${role} дополнена недостающими privileges: $(join_lines "$missing")"
+
+        role_json="$(pveum role list --output-format json)"
+        actual_raw="$(jq -r --arg role "$role" '.[] | select(.roleid == $role) | (.privs // "")' \
+            <<<"$role_json" | head -n1)"
+        actual="$(priv_lines "$actual_raw")"
+        missing_after="$(comm -23 <(printf '%s\n' "$expected") <(printf '%s\n' "$actual") || true)"
+        [[ -z "$missing_after" ]] \
+            || die "После дополнения роли ${role} по-прежнему отсутствуют privileges: $(join_lines "$missing_after")"
+    else
+        ok "Роль ${role} уже содержит все требуемые privileges"
+    fi
+
+    if [[ -n "$extra" ]]; then
+        printf '[ИНФО] Роль %s содержит дополнительные privileges, они сохранены без изменений: %s\n' \
+            "$role" "$(join_lines "$extra")"
+    fi
 }
 
 ensure_roles() {
@@ -593,8 +606,14 @@ ensure_token() {
     entry="$(token_entry "$userid" "$token_name" || true)"
     if [[ -n "$entry" ]]; then
         privsep="$(jq -r '.privsep // 1' <<<"$entry")"
-        [[ "$privsep" == "1" ]] \
-            || warn "API-токен ${full_token} уже существует с privsep=${privsep}; скрипт его не изменяет"
+        if [[ "$privsep" != "1" ]]; then
+            warn "API-токен ${full_token} уже существует с privsep=${privsep}; настройка не изменяется автоматически, чтобы не ограничить уже работающий доступ"
+            printf '       При privsep=0 токен использует права базового пользователя %s.\n' "$userid"
+            printf '       Отдельные ACL токена в этом режиме не служат дополнительным ограничителем.\n'
+            printf '       Если перевод на privsep=1 понадобится, это должно быть отдельным осознанным действием после проверки текущих потребителей токена.\n'
+        else
+            ok "API-токен ${full_token} использует privsep=1"
+        fi
 
         [[ -f "$secret_file" ]] \
             || die "API-токен ${full_token} существует, но локальный файл секрета ${secret_file} отсутствует. Требуется явная ротация или восстановление учётных данных."
@@ -618,7 +637,7 @@ ensure_token() {
 
     write_token_secret "$secret_file" "$full_token" "$secret" "$file_group" "$file_mode"
     unset secret out
-    ok "Создан API-токен ${full_token}, секрет сохранён на PVE"
+    ok "Создан API-токен ${full_token} с privsep=1, секрет сохранён на PVE"
 }
 
 acl_entry() {
@@ -657,7 +676,9 @@ ensure_acl_entry() {
 ensure_identity_acls() {
     local userid=$1 tokenid=$2 principal_type principal
 
-    # При privsep=1 одинаковые ACL нужны базовому пользователю и самому API-токену.
+    # Для privsep=1 одинаковые ACL нужны базовому пользователю и самому API-токену.
+    # Если существующий токен имеет privsep=0, bootstrap всё равно подготавливает
+    # его ACL, но не меняет режим токена автоматически.
     for principal_type in user token; do
         if [[ "$principal_type" == "user" ]]; then principal="$userid"; else principal="$tokenid"; fi
 
