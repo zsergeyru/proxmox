@@ -14,7 +14,7 @@ set -Eeuo pipefail
 # недостающие privileges, но не удаляет уже существующие. Существующие ACL и
 # свойства API-токенов также не сужаются автоматически.
 
-BOOTSTRAP_VERSION=11
+BOOTSTRAP_VERSION=12
 
 PRIVATE_REPO="git@github.com:zsergeyru/proxmox.git"
 PRIVATE_BRANCH="main"
@@ -60,6 +60,7 @@ LEGACY_GUEST_BOOTSTRAP_PUB="${LEGACY_GUEST_BOOTSTRAP_KEY}.pub"
 
 TEMPLATE_VMID=9000
 TEMPLATE_NAME="tpl-debian13"
+TEMPLATE_VERSION=6
 MANAGED_POOL="managed"
 BRIDGE="vmbr0"
 LXC_TEMPLATE_STORAGE="local"
@@ -214,6 +215,7 @@ write_state() {
   "ai_infra_secret_exists": $( [[ -f "$AI_TOKEN_FILE" ]] && echo true || echo false ),
   "pve_guest_key_exists": $( [[ -f "$PVE_GUEST_KEY" ]] && echo true || echo false ),
   "template_vmid": ${TEMPLATE_VMID},
+  "template_version": ${TEMPLATE_VERSION},
   "warnings": ${WARN_COUNT}
 }
 EOF_STATE
@@ -270,17 +272,23 @@ check_root_and_pve() {
     fi
 
     if qm config "$TEMPLATE_VMID" >/dev/null 2>&1; then
-        local name template_flag protection_flag
-        name="$(qm config "$TEMPLATE_VMID" | awk -F': ' '$1=="name" {print $2}')"
-        template_flag="$(qm config "$TEMPLATE_VMID" | awk -F': ' '$1=="template" {print $2}')"
-        protection_flag="$(qm config "$TEMPLATE_VMID" | awk -F': ' '$1=="protection" {print $2}')"
+        local config name template_flag protection_flag description ciuser
+        config="$(qm config "$TEMPLATE_VMID")"
+        name="$(awk -F': ' '$1=="name" {print $2}' <<<"$config")"
+        template_flag="$(awk -F': ' '$1=="template" {print $2}' <<<"$config")"
+        protection_flag="$(awk -F': ' '$1=="protection" {print $2}' <<<"$config")"
+        description="$(awk -F': ' '$1=="description" {sub(/^description: /, ""); print; exit}' <<<"$config")"
+        ciuser="$(awk -F': ' '$1=="ciuser" {print $2}' <<<"$config")"
         if [[ "$name" != "$TEMPLATE_NAME" || "$template_flag" != "1" ]]; then
             die "VMID ${TEMPLATE_VMID} уже существует, но это не ожидаемый шаблон ${TEMPLATE_NAME}; перезапись запрещена"
         fi
+        if [[ "$description" != *"template-version=${TEMPLATE_VERSION}"* || "$ciuser" != "root" ]]; then
+            die "Шаблон ${TEMPLATE_VMID} ${TEMPLATE_NAME} существует, но не соответствует root-only Template-Version ${TEMPLATE_VERSION}. Автоматическая замена защищённого шаблона запрещена; выполните отдельную осознанную пересборку template 9000 по актуальному scripts/pve/create-template.sh."
+        fi
         if [[ "$protection_flag" == "1" ]]; then
-            ok "Защищённый шаблон ${TEMPLATE_VMID} уже существует"
+            ok "Защищённый шаблон ${TEMPLATE_VMID} Template-Version ${TEMPLATE_VERSION} уже существует"
         else
-            printf '[ИНФО] Канонический шаблон %s найден без protection=1; защита будет включена только после снимка конфигурации.\n' "$TEMPLATE_VMID"
+            printf '[ИНФО] Канонический шаблон %s версии %s найден без protection=1; защита будет включена только после снимка конфигурации.\n' "$TEMPLATE_VMID" "$TEMPLATE_VERSION"
         fi
     fi
 }
@@ -1282,12 +1290,17 @@ ensure_template() {
     fi
 
     if qm config "$TEMPLATE_VMID" >/dev/null 2>&1; then
-        local name template_flag protection_flag
-        name="$(qm config "$TEMPLATE_VMID" | awk -F': ' '$1=="name" {print $2}')"
-        template_flag="$(qm config "$TEMPLATE_VMID" | awk -F': ' '$1=="template" {print $2}')"
-        protection_flag="$(qm config "$TEMPLATE_VMID" | awk -F': ' '$1=="protection" {print $2}')"
+        local config name template_flag protection_flag description ciuser
+        config="$(qm config "$TEMPLATE_VMID")"
+        name="$(awk -F': ' '$1=="name" {print $2}' <<<"$config")"
+        template_flag="$(awk -F': ' '$1=="template" {print $2}' <<<"$config")"
+        protection_flag="$(awk -F': ' '$1=="protection" {print $2}' <<<"$config")"
+        description="$(awk -F': ' '$1=="description" {sub(/^description: /, ""); print; exit}' <<<"$config")"
+        ciuser="$(awk -F': ' '$1=="ciuser" {print $2}' <<<"$config")"
         [[ "$name" == "$TEMPLATE_NAME" && "$template_flag" == "1" ]] \
             || die "VMID ${TEMPLATE_VMID} существует, но не соответствует шаблону ${TEMPLATE_NAME}"
+        [[ "$description" == *"template-version=${TEMPLATE_VERSION}"* && "$ciuser" == "root" ]] \
+            || die "Шаблон ${TEMPLATE_VMID} не соответствует root-only Template-Version ${TEMPLATE_VERSION}; автоматическая миграция существующего template запрещена"
         if [[ "$protection_flag" != "1" ]]; then
             qm set "$TEMPLATE_VMID" --protection 1
             protection_flag="$(qm config "$TEMPLATE_VMID" | awk -F': ' '$1=="protection" {print $2}')"
@@ -1295,7 +1308,7 @@ ensure_template() {
                 || die "Не удалось установить protection=1 для шаблона ${TEMPLATE_VMID} ${TEMPLATE_NAME}"
             ok "Для существующего шаблона ${TEMPLATE_VMID} автоматически включён protection=1"
         else
-            ok "Шаблон ${TEMPLATE_VMID} ${TEMPLATE_NAME} уже существует и защищён"
+            ok "Шаблон ${TEMPLATE_VMID} ${TEMPLATE_NAME} Template-Version ${TEMPLATE_VERSION} уже существует и защищён"
         fi
         return
     fi
@@ -1303,7 +1316,7 @@ ensure_template() {
     local builder="${REPO_DIR}/scripts/pve/create-template.sh"
     [[ -f "$builder" ]] || die "Не найден канонический скрипт создания шаблона: $builder"
 
-    log "Создание защищённого Debian-шаблона ${TEMPLATE_VMID}"
+    log "Создание защищённого Debian-шаблона ${TEMPLATE_VMID} Template-Version ${TEMPLATE_VERSION}"
     bash "$builder"
 
     qm config "$TEMPLATE_VMID" >/dev/null 2>&1 \
@@ -1317,8 +1330,12 @@ ensure_template() {
         || die "VMID ${TEMPLATE_VMID} создан, но не является шаблоном Proxmox"
     grep -q '^protection: 1$' <<<"$final_config" \
         || die "VMID ${TEMPLATE_VMID} создан, но protection=1 не установлен"
+    grep -q '^ciuser: root$' <<<"$final_config" \
+        || die "VMID ${TEMPLATE_VMID} создан, но ciuser не root"
+    grep -q "template-version=${TEMPLATE_VERSION}" <<<"$final_config" \
+        || die "VMID ${TEMPLATE_VMID} создан, но description не содержит ожидаемую Template-Version ${TEMPLATE_VERSION}"
 
-    ok "Создан защищённый шаблон ${TEMPLATE_VMID} ${TEMPLATE_NAME}"
+    ok "Создан защищённый шаблон ${TEMPLATE_VMID} ${TEMPLATE_NAME} Template-Version ${TEMPLATE_VERSION}"
 }
 
 install_private_tooling() {
@@ -1380,7 +1397,7 @@ report_status() {
     printf '[ОК] %s: managed-only effective permissions и API credential проверены\n' "$AI_PVE_TOKEN"
 
     if qm config "$TEMPLATE_VMID" >/dev/null 2>&1; then
-        printf '[ОК] Шаблон %s существует и protection проверен\n' "$TEMPLATE_VMID"
+        printf '[ОК] Шаблон %s Template-Version %s существует и protection проверен\n' "$TEMPLATE_VMID" "$TEMPLATE_VERSION"
     else
         printf '[НЕТ] Шаблон %s отсутствует\n' "$TEMPLATE_VMID"
         ready=0
