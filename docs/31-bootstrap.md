@@ -96,7 +96,7 @@ scripts/pve/bootstrap/init-pve.sh
 Текущая версия private bootstrap:
 
 ```text
-BOOTSTRAP_VERSION=7
+BOOTSTRAP_VERSION=8
 ```
 
 Он выполняет:
@@ -106,7 +106,7 @@ exclusive run lock
 → state=running
 → host preflight
 → configuration snapshot
-→ pve-no-subscription
+→ PVE/Ceph repository policy без subscription
 → packages
 → DNS/time/network checks
 → storage/snippets
@@ -122,6 +122,32 @@ exclusive run lock
 → local wrappers/status
 → final state
 ```
+
+### APT и Ceph repository policy
+
+Для основного PVE используется `pve-no-subscription`, а `pve-enterprise` отключается.
+
+Ceph обрабатывается отдельно и консервативно:
+
+```text
+ceph.sources отсутствует
+→ ничего не менять
+
+ceph.sources уже указывает на download.proxmox.com + no-subscription
+→ ничего не менять
+
+ceph.sources содержит enterprise.proxmox.com + Components: enterprise
+→ сохранить тот же ceph-* release
+→ заменить только канал на download.proxmox.com + no-subscription
+
+активный legacy ceph.list или нестандартный/multi-stanza ceph.sources
+→ STOP
+→ не переписывать автоматически
+```
+
+Bootstrap не выбирает новую Ceph major/release самостоятельно. Например, если существующий repository указывает на `ceph-squid`, при переводе enterprise → no-subscription остаётся именно `ceph-squid`.
+
+Изменение Ceph repository выполняется после configuration snapshot, поэтому исходные APT source files уже сохранены в `/var/backups/proxmox-bootstrap/...`.
 
 ### Постоянный bootstrap state
 
@@ -208,7 +234,7 @@ Private Stage 1 использует эксклюзивный `flock`, поэт�
 
 Перед первым созданием template выполняется проверка свободного места на `local` и `local-lvm`, а также доступности Debian cloud image.
 
-Для уже существующего VMID `9000` сначала проверяются:
+Для уже существующего VMID `9000` preflight сначала только проверяет:
 
 ```text
 name = tpl-debian13
@@ -217,7 +243,9 @@ template = 1
 
 Если VMID `9000` не является именно этим canonical template, bootstrap останавливается и ничего не переписывает.
 
-Если canonical template найден, но `protection=1` отсутствует, bootstrap автоматически выполняет:
+Preflight **не меняет** `protection`. До любых изменений выполняется configuration snapshot. Если template уже существует, его исходный `qm config 9000` дополнительно записывается в diagnostics snapshot.
+
+Только позже, в `ensure_template`, если canonical template найден без `protection=1`, bootstrap выполняет:
 
 ```bash
 qm set 9000 --protection 1
@@ -225,13 +253,15 @@ qm set 9000 --protection 1
 
 После этого значение повторно проверяется. Если protection уже включён, изменений не производится.
 
-Таким образом canonical template `9000` всегда приводится к состоянию:
+Таким образом canonical template `9000` приводится к состоянию:
 
 ```text
 name = tpl-debian13
 template = 1
 protection = 1
 ```
+
+но изменение protection всегда происходит уже **после** снимка исходной конфигурации.
 
 Содержимое resource pool `managed` bootstrap специально не анализирует: существующий состав пула считается текущим административным состоянием Proxmox.
 
