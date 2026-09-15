@@ -11,13 +11,13 @@ set -Eeuo pipefail
 # Agent и затем преобразуется в защищённый шаблон Proxmox.
 #
 # Модель доступа:
-#   - у пользователя ops нет рабочего пароля;
 #   - у root нет рабочего пароля;
 #   - аутентификация SSH по паролю отключена;
+#   - root SSH разрешён только по публичному ключу;
 #   - публичные SSH-ключи передаются каждому клону отдельно через Proxmox Cloud-Init;
-#   - VGA/noVNC tty1 — основная консоль Proxmox с автоматическим входом под ops;
-#   - serial0 остаётся независимой резервной текстовой консолью с автовходом под ops;
-#   - наличие права Proxmox VM.Console фактически даёт административный доступ к гостю.
+#   - VGA/noVNC tty1 — основная консоль Proxmox с автоматическим входом под root;
+#   - serial0 остаётся независимой резервной текстовой консолью с автовходом под root;
+#   - наличие права Proxmox VM.Console фактически даёт административный root-доступ к гостю.
 
 VMID="${VMID:-9000}"
 TEMPLATE_NAME="${TEMPLATE_NAME:-tpl-debian13}"
@@ -29,7 +29,7 @@ MEMORY_MB="${MEMORY_MB:-1024}"
 CORES="${CORES:-1}"
 DISK_SIZE="${DISK_SIZE:-16G}"
 WAIT_SECONDS="${WAIT_SECONDS:-1200}"
-TEMPLATE_VERSION="${TEMPLATE_VERSION:-4}"
+TEMPLATE_VERSION="${TEMPLATE_VERSION:-6}"
 
 IMAGE_URL="${IMAGE_URL:-https://cloud.debian.org/images/cloud/trixie/latest/debian-13-genericcloud-amd64.qcow2}"
 CHECKSUM_URL="${CHECKSUM_URL:-https://cloud.debian.org/images/cloud/trixie/latest/SHA512SUMS}"
@@ -169,7 +169,7 @@ hostname: builder-debian13
 manage_etc_hosts: true
 timezone: Europe/Moscow
 ssh_pwauth: false
-disable_root: true
+disable_root: false
 
 # В проекте используется обычный SSH по сети. Автоматические SSH-сокеты
 # systemd через AF_VSOCK/AF_UNIX не нужны и отключаются максимально рано.
@@ -179,18 +179,13 @@ bootcmd:
 
 users:
   - default
-  - name: ops
-    gecos: Администратор инфраструктуры
-    groups: [adm, sudo]
-    shell: /bin/bash
-    lock_passwd: true
 
 write_files:
   - path: /etc/ssh/sshd_config.d/00-template-security.conf
     owner: root:root
     permissions: '0644'
     content: |
-      PermitRootLogin no
+      PermitRootLogin prohibit-password
       PasswordAuthentication no
       KbdInteractiveAuthentication no
       PermitEmptyPasswords no
@@ -202,7 +197,7 @@ write_files:
     content: |
       [Service]
       ExecStart=
-      ExecStart=-/sbin/agetty --autologin ops --noclear %I $TERM
+      ExecStart=-/sbin/agetty --autologin root --noclear %I $TERM
 
   - path: /etc/systemd/system/serial-getty@ttyS0.service.d/autologin.conf
     owner: root:root
@@ -210,13 +205,7 @@ write_files:
     content: |
       [Service]
       ExecStart=
-      ExecStart=-/sbin/agetty --autologin ops --noclear --keep-baud 115200,57600,38400,9600 %I $TERM
-
-  - path: /etc/sudoers.d/90-ops
-    owner: root:root
-    permissions: '0440'
-    content: |
-      ops ALL=(ALL:ALL) NOPASSWD:ALL
+      ExecStart=-/sbin/agetty --autologin root --noclear --keep-baud 115200,57600,38400,9600 %I $TERM
 
   - path: /etc/profile.d/99-admin-history.sh
     owner: root:root
@@ -300,15 +289,12 @@ write_files:
       systemctl enable --now fstrim.timer
 
       /usr/sbin/sshd -t
-      sshd_effective="$(/usr/sbin/sshd -T -C user=ops,host=localhost,addr=127.0.0.1)"
-      grep -q '^permitrootlogin no$' <<<"$sshd_effective"
+      sshd_effective="$(/usr/sbin/sshd -T -C user=root,host=localhost,addr=127.0.0.1)"
+      grep -Eq '^permitrootlogin (prohibit-password|without-password)$' <<<"$sshd_effective"
       grep -q '^passwordauthentication no$' <<<"$sshd_effective"
       grep -q '^kbdinteractiveauthentication no$' <<<"$sshd_effective"
       grep -q '^permitemptypasswords no$' <<<"$sshd_effective"
       grep -q '^pubkeyauthentication yes$' <<<"$sshd_effective"
-      /usr/sbin/visudo -cf /etc/sudoers.d/90-ops
-      id ops >/dev/null
-      passwd -S ops | grep -q ' L '
       passwd -S root | grep -q ' L '
 
       cat >/etc/vm-template-info <<EOF
@@ -316,8 +302,10 @@ write_files:
       Версия-шаблона: __TEMPLATE_VERSION__
       ОС: Debian 13
       Тип-ядра: amd64
-      Основная-консоль: VGA/noVNC tty1, автовход ops
-      Резервная-консоль: serial0 ttyS0, автовход ops
+      Management-user: root
+      SSH: root key-only
+      Основная-консоль: VGA/noVNC tty1, автовход root
+      Резервная-консоль: serial0 ttyS0, автовход root
       Источник-инфраструктуры: zsergeyru/proxmox
       Источник-сборщика-шаблона: zsergeyru/proxmox
       Исходный-образ: __IMAGE_NAME__
@@ -353,8 +341,8 @@ write_files:
       journalctl --rotate || true
       journalctl --vacuum-time=1s || true
       rm -rf /tmp/* /var/tmp/*
-      rm -f /root/.bash_history /home/ops/.bash_history
-      rm -rf /home/ops/.ssh
+      rm -f /root/.bash_history
+      rm -rf /root/.ssh
       rm -rf /var/lib/template-build
       rm -f /usr/local/sbin/template-bootstrap /usr/local/sbin/template-finalize
 
@@ -431,8 +419,8 @@ systemctl is-active --quiet qemu-guest-agent.service
 systemctl is-active --quiet getty@tty1.service
 systemctl is-active --quiet serial-getty@ttyS0.service
 grep -q "^FONTSIZE=\"8x16\"$" /etc/default/console-setup
-grep -q -- "--autologin ops" /etc/systemd/system/getty@tty1.service.d/autologin.conf
-grep -q -- "--autologin ops" /etc/systemd/system/serial-getty@ttyS0.service.d/autologin.conf
+grep -q -- "--autologin root" /etc/systemd/system/getty@tty1.service.d/autologin.conf
+grep -q -- "--autologin root" /etc/systemd/system/serial-getty@ttyS0.service.d/autologin.conf
 printf "VERIFY_KERNEL=%s VERIFY_FRAMEBUFFER=%s CONSOLES_OK\n" "$kernel" "$framebuffer"
 ')"
 grep -q 'CONSOLES_OK' <<<"$VERIFY_OUTPUT" || die "Проверка консолей после перезагрузки не сообщила об успешном завершении"
@@ -453,11 +441,11 @@ wait_for_stopped || die "VM-сборщик не выключилась корр�
 
 log "Удаление временного Cloud-Init сборщика и настройка параметров клона"
 qm set "$VMID" --delete cicustom
-qm set "$VMID" --ciuser ops
+qm set "$VMID" --ciuser root
 qm set "$VMID" --ciupgrade 0
 qm set "$VMID" --ipconfig0 ip=dhcp
 qm set "$VMID" --name "$TEMPLATE_NAME"
-qm set "$VMID" --description "Базовый шаблон Debian 13 (Trixie); версия ${TEMPLATE_VERSION}; VGA/noVNC tty1 с автовходом; резервный serial0; SSH-ключи передаются каждому клону отдельно"
+qm set "$VMID" --description "Базовый шаблон Debian 13 (Trixie); template-version=${TEMPLATE_VERSION}; root SSH key-only; VGA/noVNC tty1 с автовходом; резервный serial0; SSH-ключи передаются каждому клону отдельно"
 
 log "Пересоздание стандартного Cloud-Init диска Proxmox"
 qm cloudinit update "$VMID"
@@ -480,9 +468,10 @@ grep -q '^protection: 1$' <<<"$FINAL_CONFIG" || die "Защита шаблона
 grep -q '^agent: 1$' <<<"$FINAL_CONFIG" || die "Поддержка QEMU Guest Agent не включена в конфигурации шаблона"
 grep -q '^vga: std$' <<<"$FINAL_CONFIG" || die "Для шаблона не установлен VGA-дисплей std"
 grep -q '^serial0: socket$' <<<"$FINAL_CONFIG" || die "serial0 шаблона не настроен как socket"
-grep -q '^ciuser: ops$' <<<"$FINAL_CONFIG" || die "Пользователь Cloud-Init шаблона должен быть ops"
+grep -q '^ciuser: root$' <<<"$FINAL_CONFIG" || die "Пользователь Cloud-Init шаблона должен быть root"
 grep -q '^ciupgrade: 0$' <<<"$FINAL_CONFIG" || die "Автоматическое обновление пакетов Cloud-Init не отключено"
 grep -q '^ipconfig0: ip=dhcp$' <<<"$FINAL_CONFIG" || die "Сеть шаблона по умолчанию должна использовать DHCP"
+grep -q "template-version=${TEMPLATE_VERSION}" <<<"$FINAL_CONFIG" || die "Description шаблона не содержит ожидаемую версию ${TEMPLATE_VERSION}"
 if grep -q '^cicustom:' <<<"$FINAL_CONFIG"; then
     die "В конфигурации шаблона остался временный cicustom сборщика"
 fi
@@ -498,10 +487,11 @@ VMID:              ${VMID}
 Версия:            ${TEMPLATE_VERSION}
 Хранилище:         ${DISK_STORAGE}
 Сеть:              DHCP по умолчанию
-Пользователь:      ops (пароль заблокирован)
-Root:              пароль заблокирован; вход по SSH запрещён
-Консоль:           Proxmox noVNC / VGA tty1, автовход под ops
-Serial:            serial0 / ttyS0, автовход под ops (резервная консоль)
+Management user:   root
+Root password:     заблокирован
+Root SSH:          только по публичному ключу
+Консоль:           Proxmox noVNC / VGA tty1, автовход под root
+Serial:            serial0 / ttyS0, автовход под root (резервная консоль)
 Ядро:              ${KERNEL_VERSION}
 Framebuffer:       ${FRAMEBUFFER_SIZE}
 SSH:               передавайте один или несколько публичных ключей каждому клону через Cloud-Init
@@ -511,8 +501,8 @@ SSH:               передавайте один или несколько п�
 SHA-512:           ${IMAGE_SHA512}
 
 Рекомендуемый следующий шаг: создать FULL-клон, до первого запуска задать ему
-публичный SSH-ключ и сетевые параметры, пересоздать Cloud-Init диск, затем проверить
-автовход noVNC/tty1, резервную консоль serial0, QEMU Guest Agent, доступ по SSH,
+публичные SSH-ключи и сетевые параметры, пересоздать Cloud-Init диск, затем проверить
+автовход noVNC/tty1, резервную консоль serial0, QEMU Guest Agent, root-доступ по SSH,
 уникальные machine-id и host keys, обычное ядро amd64, наличие framebuffer и
 расширение файловой системы.
 
