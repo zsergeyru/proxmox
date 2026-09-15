@@ -32,9 +32,10 @@ SCHEMAS = {
     "effective": ROOT / "schemas/guest-effective.schema.yaml",
 }
 DIR_RE = re.compile(r"^(\d{3})-(.+)$")
-LXC_RE = re.compile(
-    r"^[A-Za-z0-9._-]+:vztmpl/[A-Za-z0-9._+-]+_amd64\.tar\.(?:zst|gz|xz)$"
+LXC_SELECTOR_RE = re.compile(
+    r"^[A-Za-z0-9._-]+:vztmpl/[A-Za-z0-9][A-Za-z0-9._+-]*$"
 )
+LXC_ARCHIVE_RE = re.compile(r"_amd64\.tar\.(?:zst|gz|xz)$")
 BAD_SOURCE = ("<", ">", "*", "?", "13.x", "latest", "tbd", "todo")
 UNRESOLVED = (
     "todo",
@@ -280,6 +281,17 @@ def check_state(rel: Path, source: dict, effective: dict) -> None:
         warn(f"{rel}: protection=true у гостя в pool 'managed'")
 
 
+def valid_lxc_selector(value: object) -> bool:
+    if not isinstance(value, str):
+        return False
+    lower = value.lower()
+    return (
+        not any(marker in lower for marker in BAD_SOURCE)
+        and LXC_SELECTOR_RE.fullmatch(value) is not None
+        and LXC_ARCHIVE_RE.search(value) is None
+    )
+
+
 def check_profiles(defaults: dict) -> None:
     rel = DEFAULTS.relative_to(ROOT)
     for name, profile in defaults.get("profiles", {}).items():
@@ -294,14 +306,11 @@ def check_profiles(defaults: dict) -> None:
             fail(f"{rel}: VM-профиль {name!r} должен включать QEMU guest agent")
         if profile.get("type") == "lxc":
             lxc = profile.get("lxc", {})
-            template = lxc.get("source", {}).get("ostemplate", "")
-            if (
-                any(marker in template.lower() for marker in BAD_SOURCE)
-                or not LXC_RE.fullmatch(template)
-            ):
+            selector = lxc.get("source", {}).get("ostemplate", "")
+            if not valid_lxc_selector(selector):
                 fail(
                     f"{rel}: профиль {name!r} должен использовать "
-                    "pinned Proxmox vztmpl"
+                    "селектор семейства Proxmox vztmpl без версии и имени архива"
                 )
             if lxc.get("container_runtime") == "docker":
                 features = lxc.get("features", {})
@@ -340,12 +349,12 @@ def check_deployable(rel: Path, source: dict, effective: dict) -> None:
         if effective["vm"]["guest_agent"] is not True:
             fail(f"{rel}: deployable VM должна включать QEMU guest agent")
     elif kind == "lxc":
-        template = effective["lxc"]["source"]["ostemplate"]
-        if (
-            any(marker in template.lower() for marker in BAD_SOURCE)
-            or not LXC_RE.fullmatch(template)
-        ):
-            fail(f"{rel}: lxc.source.ostemplate должен быть pinned Proxmox vztmpl")
+        selector = effective["lxc"]["source"]["ostemplate"]
+        if not valid_lxc_selector(selector):
+            fail(
+                f"{rel}: lxc.source.ostemplate должен быть селектором семейства "
+                "Proxmox vztmpl без версии и имени архива"
+            )
 
 
 def manifests() -> list[Path]:
