@@ -1120,20 +1120,35 @@ ensure_acl_entry() {
     ok "Добавлен ACL: ${path}, ${label}=${ugid}, роль=${role}"
 }
 
-ensure_identity_acls() {
+ensure_host_identity_acls() {
     local userid=$1 tokenid=$2 principal_type principal
 
-    # Для privsep=1 одинаковые ACL нужны базовому пользователю и самому API-токену.
-    # Если существующий токен имеет privsep=0, bootstrap всё равно подготавливает
-    # его ACL, но не меняет режим токена автоматически.
+    # Host-side deployer не ограничивается pool managed: он должен уметь
+    # разворачивать и обслуживать все VM/LXC, включая специальные объекты вне pool.
+    # Для privsep=1 одинаковые ACL назначаются backing user и самому API-токену.
     for principal_type in user token; do
         if [[ "$principal_type" == "user" ]]; then principal="$userid"; else principal="$tokenid"; fi
 
-        # managed — основная write-zone обычных VM/LXC.
-        ensure_acl_entry "/pool/${MANAGED_POOL}" "$principal_type" "$principal" "$ROLE_GUEST"
-        # Pool.Allocate разрешает явное изменение состава managed.
+        ensure_acl_entry "/vms" "$principal_type" "$principal" "$ROLE_GUEST"
+        # Pool.Allocate нужен deployer для размещения обычных guests в managed.
         ensure_acl_entry "/pool/${MANAGED_POOL}" "$principal_type" "$principal" "$ROLE_POOL"
-        # 9000 доступен отдельно только как источник clone.
+        ensure_acl_entry "/storage/local" "$principal_type" "$principal" "$ROLE_STORAGE"
+        ensure_acl_entry "/storage/local-lvm" "$principal_type" "$principal" "$ROLE_STORAGE"
+        ensure_acl_entry "/sdn/zones/localnetwork/${BRIDGE}" "$principal_type" "$principal" "$ROLE_NETWORK"
+    done
+}
+
+ensure_ai_identity_acls() {
+    local userid=$1 tokenid=$2 principal_type principal
+
+    # AI automation ограничена pool managed. Для privsep=1 одинаковые ACL нужны
+    # backing user и самому API-токену. Существующий privsep=0 не меняется.
+    for principal_type in user token; do
+        if [[ "$principal_type" == "user" ]]; then principal="$userid"; else principal="$tokenid"; fi
+
+        ensure_acl_entry "/pool/${MANAGED_POOL}" "$principal_type" "$principal" "$ROLE_GUEST"
+        ensure_acl_entry "/pool/${MANAGED_POOL}" "$principal_type" "$principal" "$ROLE_POOL"
+        # Template 9000 доступен AI отдельно только как источник clone.
         ensure_acl_entry "/vms/${TEMPLATE_VMID}" "$principal_type" "$principal" "$ROLE_CLONE"
         ensure_acl_entry "/storage/local" "$principal_type" "$principal" "$ROLE_STORAGE"
         ensure_acl_entry "/storage/local-lvm" "$principal_type" "$principal" "$ROLE_STORAGE"
@@ -1158,15 +1173,29 @@ verify_permission_set() {
 }
 
 verify_effective_permissions() {
-    local full_token=$1 permissions_json
+    local full_token=$1 scope=$2 permissions_json
 
     permissions_json="$(pveum user permissions "$full_token" --output-format json)" \
         || die "Не удалось получить effective permissions для ${full_token}"
 
-    verify_permission_set "$full_token" "$permissions_json" "/pool/${MANAGED_POOL}" \
-        "${ROLE_GUEST_PRIVS} ${ROLE_POOL_PRIVS}"
-    verify_permission_set "$full_token" "$permissions_json" "/vms/${TEMPLATE_VMID}" \
-        "$ROLE_CLONE_PRIVS"
+    case "$scope" in
+        host)
+            verify_permission_set "$full_token" "$permissions_json" "/vms" \
+                "$ROLE_GUEST_PRIVS"
+            verify_permission_set "$full_token" "$permissions_json" "/pool/${MANAGED_POOL}" \
+                "$ROLE_POOL_PRIVS"
+            ;;
+        ai)
+            verify_permission_set "$full_token" "$permissions_json" "/pool/${MANAGED_POOL}" \
+                "${ROLE_GUEST_PRIVS} ${ROLE_POOL_PRIVS}"
+            verify_permission_set "$full_token" "$permissions_json" "/vms/${TEMPLATE_VMID}" \
+                "$ROLE_CLONE_PRIVS"
+            ;;
+        *)
+            die "Неизвестная модель effective permissions '${scope}' для ${full_token}"
+            ;;
+    esac
+
     verify_permission_set "$full_token" "$permissions_json" "/storage/local" \
         "$ROLE_STORAGE_PRIVS"
     verify_permission_set "$full_token" "$permissions_json" "/storage/local-lvm" \
@@ -1174,7 +1203,7 @@ verify_effective_permissions() {
     verify_permission_set "$full_token" "$permissions_json" "/sdn/zones/localnetwork/${BRIDGE}" \
         "$ROLE_NETWORK_PRIVS"
 
-    ok "Effective permissions API-токена ${full_token} соответствуют требуемой модели"
+    ok "Effective permissions API-токена ${full_token} соответствуют модели ${scope}"
 }
 
 verify_token_api_auth() {
@@ -1216,8 +1245,8 @@ verify_token_api_auth() {
 }
 
 verify_pve_identity() {
-    local full_token=$1 secret_file=$2
-    verify_effective_permissions "$full_token"
+    local full_token=$1 secret_file=$2 scope=$3
+    verify_effective_permissions "$full_token" "$scope"
     verify_token_api_auth "$full_token" "$secret_file"
 }
 
@@ -1236,11 +1265,11 @@ ensure_pve_identities() {
         "$AI_TOKEN_FILE" root 0600 \
         "Инфраструктурный API-токен для контура AI / Proximo"
 
-    ensure_identity_acls "$HOST_PVE_USER" "$HOST_PVE_TOKEN"
-    ensure_identity_acls "$AI_PVE_USER" "$AI_PVE_TOKEN"
+    ensure_host_identity_acls "$HOST_PVE_USER" "$HOST_PVE_TOKEN"
+    ensure_ai_identity_acls "$AI_PVE_USER" "$AI_PVE_TOKEN"
 
-    verify_pve_identity "$HOST_PVE_TOKEN" "$HOST_TOKEN_FILE"
-    verify_pve_identity "$AI_PVE_TOKEN" "$AI_TOKEN_FILE"
+    verify_pve_identity "$HOST_PVE_TOKEN" "$HOST_TOKEN_FILE" host
+    verify_pve_identity "$AI_PVE_TOKEN" "$AI_TOKEN_FILE" ai
 }
 
 # =============================================================================
@@ -1347,8 +1376,8 @@ report_status() {
     printf '[ОК] Канонический read-only Deploy Key установлен\n'
     printf '[ОК] Приватный репозиторий синхронизирован и origin проверен\n'
     printf '[ОК] managed и роли Proxmox проверены\n'
-    printf '[ОК] %s: effective permissions и API credential проверены\n' "$HOST_PVE_TOKEN"
-    printf '[ОК] %s: effective permissions и API credential проверены\n' "$AI_PVE_TOKEN"
+    printf '[ОК] %s: guest-level /vms, effective permissions и API credential проверены\n' "$HOST_PVE_TOKEN"
+    printf '[ОК] %s: managed-only effective permissions и API credential проверены\n' "$AI_PVE_TOKEN"
 
     if qm config "$TEMPLATE_VMID" >/dev/null 2>&1; then
         printf '[ОК] Шаблон %s существует и protection проверен\n' "$TEMPLATE_VMID"
