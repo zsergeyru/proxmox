@@ -59,7 +59,7 @@ Hard security boundary задаётся PVE identity/token/ACL. AI Control не 
 
 [`25-pve-access-control.md`](25-pve-access-control.md)
 
-ADR в `guests/320-ai-control/` относится к существующему bootstrap/legacy-контру `320` и не является source of truth для прав новой схемы `301`.
+ADR в `guests/320-ai-control/` относится к существующему bootstrap/legacy-контуру `320` и не является source of truth для прав новой схемы `301`.
 
 ## SSH
 
