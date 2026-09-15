@@ -2,76 +2,92 @@
 
 Каждый каталог `guests/<VMID>-<name>/` соответствует одной VM/LXC либо зарезервированному объекту и содержит его паспорт, локальные решения и управляемые файлы гостевой ОС.
 
-Актуальная нумерация определяется [`../docs/11-vmid-plan.md`](../docs/11-vmid-plan.md).
-
 Машинно-читаемая спецификация: [`../docs/30-guest-manifest.md`](../docs/30-guest-manifest.md).
 
 ## Структура
 
 ```text
 guests/
-├── defaults.yaml      # общие deploy defaults, network stages и profiles
+├── defaults.yaml      # общие deploy defaults, сеть и profiles
 ├── README.md
 └── <VMID>-<name>/
     ├── README.md
     ├── guest.yaml     # индивидуальные параметры/overrides
-    ├── decisions/     # при необходимости
-    ├── STATUS.md      # observed drift/миграция
-    └── rootfs/        # управляемые файлы по реальным абсолютным путям
+    ├── decisions/
+    ├── STATUS.md
+    └── rootfs/
 ```
 
-`guest.yaml` является машинно-читаемым паспортом конкретного объекта. Если параметры ещё не приняты, это выражается через `deployable: false`.
+`guest.yaml` обязателен только для каталогов, которые уже заведены в `guests/`. Если объект ещё не готов к универсальному deploy, используется `deployable: false`.
 
-## guest schema v4
+## Schema
+
+Текущий source manifest:
+
+```yaml
+schema_version: 5
+```
+
+Текущий `guests/defaults.yaml`:
+
+```yaml
+schema_version: 2
+```
 
 Effective deploy state строится так:
 
 ```text
 defaults.yaml
-→ profile
+→ выбранный profile
 → guest.yaml overrides
-→ central network gateway
+→ вычисление management IP из VMID
 → effective desired state
 ```
 
-Все deploy-значения находятся в Git. Никаких скрытых defaults внутри `deploy-guest` быть не должно.
+Все значения находятся в Git. Deployer не должен иметь скрытых project defaults.
 
-### Central defaults
+## Централизованные defaults
 
-`defaults.yaml` централизует node, обычный pool/protection, disk storage, bridge, network mode/default-gateway selector, current/target subnet и gateway, boot policy, management SSH identity и VM/LXC source profiles.
+Каноническая сеть задаётся один раз:
 
-Сейчас общая сеть остаётся:
-
-```text
-mode=current
-default_gateway=current
-current gateway=192.168.1.1
+```yaml
+defaults:
+  network:
+    bridge: vmbr0
+    subnet: 192.168.0.0/16
+    gateway: 192.168.1.1
+    addressing: vmid
 ```
 
-То есть текущий Keenetic не меняется.
+В каждый момент времени у гостя один management IPv4 и один default gateway.
 
-### Profiles
-
-Текущие profiles:
+Обычный management IP вычисляется из VMID:
 
 ```text
-debian-vm
-→ full clone from VM template 9000
-→ QEMU guest agent
-
-docker-lxc
-→ pinned Debian 13 LXC appliance
-→ unprivileged + nesting + keyctl
+VMID XYZ + subnet A.B.0.0/16
+→ A.B.X.YZ
 ```
 
-Если меняется общий LXC archive/template contract, изменение делается в profile один раз.
+Примеры для текущей сети:
 
-### Индивидуальный guest
+```text
+109 → 192.168.1.9
+211 → 192.168.2.11
+301 → 192.168.3.1
+311 → 192.168.3.11
+321 → 192.168.3.21
+331 → 192.168.3.31
+401 → 192.168.4.1
+```
+
+Префикс `/16` берётся из `defaults.network.subnet` и в `guest.yaml` не дублируется.
+
+## Обычный deployable guest
 
 Типичный `311-dev-services/guest.yaml`:
 
 ```yaml
-schema_version: 4
+schema_version: 5
 vmid: 311
 name: dev-services
 profile: docker-lxc
@@ -87,129 +103,155 @@ resources:
   swap_mb: 1024
   disk:
     size_gb: 32
-
-network:
-  current:
-    ipv4:
-      address: 192.168.3.11/16
-  target:
-    ipv4:
-      address: 10.0.3.11/16
 ```
 
-В guest остаётся то, что действительно различается: identity, profile, описание, CPU/RAM/swap/disk size, IP и осознанные overrides.
+Секция `network` отсутствует полностью, потому что bridge, subnet, gateway и management IP однозначно выводятся из `defaults.yaml` и VMID.
 
-`301-ai-control` переопределяет общий pool через `placement.pool: null`.
+## Необязательный IP override
 
-### Network
-
-Gateway IP больше не хранится в каждом guest.
-
-Центрально:
+Если конкретному гостю действительно нужен адрес, не соответствующий VMID-формуле, допускается только явный override самого host-IP:
 
 ```yaml
-network_stages:
-  current:
-    subnet: 192.168.0.0/16
-    gateway: 192.168.1.1
-  target:
+network:
+  ipv4:
+    address: 192.168.8.50
+```
+
+Указывать `/16` нельзя. Префикс всё равно приходит из `defaults.network.subnet`.
+
+Validator выводит русское предупреждение, если override не соответствует VMID-формуле:
+
+```text
+management IP 192.168.8.50 не соответствует правилу VMID 311;
+ожидается 192.168.3.11
+```
+
+Если override совпадает с вычисляемым адресом, validator предупреждает, что он избыточен.
+
+`subnet`, `gateway` и `addressing` на уровне отдельного guest не переопределяются.
+
+## Миграция сети
+
+Два IP, `current/target`, `dual` и два набора gateway больше не используются.
+
+Для перехода, например, с:
+
+```text
+192.168.0.0/16
+gateway 192.168.1.1
+```
+
+на:
+
+```text
+10.0.0.0/16
+gateway 10.0.0.1
+```
+
+меняются только два значения в `guests/defaults.yaml`:
+
+```yaml
+defaults:
+  network:
     subnet: 10.0.0.0/16
     gateway: 10.0.0.1
 ```
 
-VMID-правило:
+После этого effective IP автоматически станет:
 
 ```text
-current: VMID XYZ → 192.168.X.YZ/16
-target:  VMID XYZ → 10.0.X.YZ/16
+109 → 10.0.1.9
+211 → 10.0.2.11
+301 → 10.0.3.1
+311 → 10.0.3.11
+...
 ```
 
-Несоответствие IP этому правилу считается предупреждением, а не ошибкой: нестандартный адрес допустим, если он назначен осознанно.
+Будущий migration/deploy script должен применять изменение к гостям последовательно: изменить штатную Proxmox network-конфигурацию, перезапустить при необходимости, проверить новый IP и только после успешной проверки переходить к следующему гостю.
 
-Режимы: `current`, `dual`, `target`. Default route всегда один.
+Для гостя с явным `network.ipv4.address` override адрес не пересчитывается. При смене subnet такой override нужно изменить осознанно; если он окажется вне новой subnet, validator выдаст ошибку.
 
-### `deployable`
+## Profiles
+
+Текущие profiles:
 
 ```text
-true
-→ defaults/profile разрешаются
-→ строится и валидируется полный effective desired state
+debian-vm
+→ full clone from VM template 9000
+→ QEMU guest agent
 
-false
-→ deployer ничего не создаёт/пересоздаёт
-→ manifest может быть неполным
-→ defaults не делают его deployable автоматически
+docker-lxc
+→ pinned Debian 13 LXC appliance
+→ unprivileged + nesting + keyctl
 ```
 
-## rootfs
+Profiles не должны переопределять общую сеть.
 
-`rootfs/` повторяет абсолютные пути внутри гостя. Monorepo целиком внутрь каждого гостя не копируется.
-
-Persistent data, Docker volumes, БД, записи камер, пользовательские Git repositories, runtime state и secrets не относятся к `rootfs/`.
-
-## Deploy
-
-PVE-side создание объекта:
+## `deployable`
 
 ```text
-read-only checkout zsergeyru/proxmox
-→ defaults.yaml + guest.yaml
-→ resolve effective desired state
-→ deploy-guest <VMID>
-→ PLAN
-→ APPLY
-→ verify
+deployable: true
+→ defaults/profile применяются
+→ вычисляется management IP
+→ строится полный effective desired state
+→ deploy-guest может PLAN/APPLY
+
+deployable: false
+→ universal deployer объект не создаёт и не пересоздаёт
+→ manifest может содержать только известные/наблюдаемые параметры
 ```
 
-`deploy-guest` обязан показывать в PLAN не только значение, но и его provenance: `[defaults]`, `[profile]`, `[guest]` или `[network_stages.*]`.
+## Validator
 
-## Текущие исключения
-
-- `100-haos` — production HAOS; `deployable: false`;
-- `201-ha-main`, `202-ha-test`, `203-ha-flat2` — варианты/резервы;
-- `301-ai-control` — deployable target control plane, но `placement.pool: null`;
-- `320-ai-control` — временный bootstrap; `deployable: false`;
-- `501-frigate` — `type: undecided`, `deployable: false`;
-- `9000 tpl-debian13` — protected source template, не managed guest.
-
-## Проверка guest-конфигурации
-
-`scripts/validate_repo.py` намеренно имеет узкую область ответственности.
-
-Из проектных данных он читает только:
+`python scripts/validate_repo.py` анализирует проектные данные только из:
 
 ```text
 guests/defaults.yaml
 guests/*/guest.yaml
 ```
 
-Файлы `schemas/*.yaml` используются только как формальное описание правил валидации. Валидатор не анализирует `docs/*.md`, `README.md`, VMID-plan, `rootfs/` и остальные файлы репозитория и не строит по ним warnings/errors.
+Schema-файлы используются только как правила проверки.
 
-Проверяются source guest schema v4, `guests/defaults.yaml`, effective deploy state после inheritance, VMID/name относительно пути самого `guest.yaml`, уникальность VMID/IP, central subnet/gateway contract, network mode/default gateway, profiles, pinned source, `ops:22`, managed-pool boundary и отсутствие секретов непосредственно в `defaults.yaml`/`guest.yaml`.
+Validator не читает `docs/*.md`, README, `rootfs/` и другие проектные файлы.
 
-Блокирующими ошибками считаются, в частности:
+Блокирующие ошибки включают, в частности:
 
-- IP вне соответствующей central subnet;
-- IP, совпадающий со шлюзом;
-- network/broadcast IP в качестве адреса гостя;
-- одинаковый current и target IP;
-- duplicate static IP;
+- schema/YAML ошибки;
+- duplicate VMID/IP;
+- management IP вне central subnet;
+- IP, совпадающий с gateway;
+- network/broadcast IP;
+- неправильный central subnet/gateway;
 - `ballooning_mb > memory_mb`;
-- некорректная комбинация network mode/default gateway.
+- нарушение profile/source contracts;
+- secrets/private keys в `defaults.yaml` или `guest.yaml`.
 
-Предупреждения выводятся на русском языке и не делают CI красным. Валидатор предупреждает о следующих ситуациях:
+Неблокирующие предупреждения на русском языке включают:
 
-- management IP не соответствует рекомендуемой VMID-формуле;
-- current и target IP имеют разные идентификаторные части;
-- `guest.yaml` повторяет значение, уже наследуемое из defaults/profile;
-- guest переопределяет общий node, bridge, storage или management SSH;
-- guest переопределяет общий `network.mode` или `network.default_gateway`;
-- profile из `defaults.yaml` не используется ни одним deployable-гостем;
-- deployable description содержит `TODO`/`TBD`/`pending`/`unknown` или аналогичный маркер незавершённости;
-- `state: bootstrap` или `state: legacy` используется вместе с `deployable: true`;
-- `state: active` имеет `boot.onboot: false`;
-- `protection: true` используется у гостя в pool `managed`.
+- явный IP override не соответствует VMID-формуле;
+- избыточный IP override;
+- избыточное значение, уже наследуемое из defaults/profile;
+- override общего node/bridge/storage/SSH;
+- неиспользуемый profile;
+- подозрительные state/boot/protection combinations.
+
+## Deploy
+
+`deploy-guest` должен показывать provenance каждого effective значения:
+
+```text
+Node               pve                 [defaults]
+Pool               managed             [defaults]
+Storage            local-lvm           [defaults]
+Profile            docker-lxc          [guest]
+Network subnet     192.168.0.0/16      [defaults]
+Default gateway    192.168.1.1         [defaults]
+Management IP      192.168.3.11/16     [vmid]
+Memory             4096 MiB            [guest]
+```
+
+Если задан IP override, provenance адреса меняется на `[guest]`.
 
 Главный принцип:
 
-> Guest-validator проверяет только машинно-читаемый desired state гостей и не связывает его корректность с документацией репозитория.
+> В `guest.yaml` хранится только действительно индивидуальное. Сеть является общей, а обычный management IP детерминированно выводится из VMID.

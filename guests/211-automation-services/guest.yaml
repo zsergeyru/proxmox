@@ -1,4 +1,4 @@
-schema_version: 4
+schema_version: 5
 vmid: 211
 name: automation-services
 profile: docker-lxc
@@ -14,11 +14,3 @@ resources:
   swap_mb: 512
   disk:
     size_gb: 16
-
-network:
-  current:
-    ipv4:
-      address: 192.168.2.11/16
-  target:
-    ipv4:
-      address: 10.0.2.11/16

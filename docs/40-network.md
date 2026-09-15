@@ -8,17 +8,13 @@
 - PVE не является неявным маршрутизатором между сегментами;
 - до переезда VLAN не нужны;
 - после переезда `nic0` используется как trunk через VLAN-aware `vmbr0`;
-- физический OpenWrt edge-router отвечает за WAN, локальные VLAN, DHCP и базовый L3/firewall;
+- OpenWrt edge-router отвечает за WAN, VLAN, DHCP и базовый L3/firewall;
 - `109-network-gateway` отвечает за DNS, исходящие VPN, PBR, remote-access VPN и связанные сервисы;
 - отказ Proxmox/109 не должен отключать обычный интернет и базовую маршрутизацию квартиры.
 
-Подробное решение о границе ролей: [`../guests/109-network-gateway/decisions/001-edge-router-boundary.md`](../guests/109-network-gateway/decisions/001-edge-router-boundary.md).
+## Текущая квартира
 
-## Этап 1 — текущая квартира
-
-Сейчас Keenetic остаётся WAN/edge-router. Компьютеры, Proxmox и VM/LXC находятся в одной плоской LAN без VLAN.
-
-Наблюдаемая сеть PVE:
+Сейчас Keenetic остаётся WAN/edge-router. PVE и гости находятся в одной плоской LAN:
 
 ```text
 LAN:      192.168.0.0/16
@@ -27,18 +23,20 @@ gateway:  192.168.1.1
 bridge:   vmbr0 → nic0
 ```
 
-`109-network-gateway` разворачивается в той же LAN:
+Central guest network в `guests/defaults.yaml`:
 
-```text
-109:      192.168.1.9/16
-gateway:  192.168.1.1
+```yaml
+defaults:
+  network:
+    bridge: vmbr0
+    subnet: 192.168.0.0/16
+    gateway: 192.168.1.1
+    addressing: vmid
 ```
 
-На 109 запускаются SmartDNS, VPN/PBR, remote-access VPN и сопутствующие сервисы. Keenetic продолжает обеспечивать обычный выход в интернет независимо от доступности VM 109.
+## Целевая квартира
 
-## Этап 2 — новая квартира
-
-Целевая физическая модель:
+Физическая модель:
 
 ```text
 Internet
@@ -61,135 +59,95 @@ managed switch / VLAN
 | CAMERAS | 30 | `10.30.0.0/16` | `10.30.0.1` OpenWrt |
 | REMOTE-VPN | tunnel | `10.60.0.0/16` | VPN endpoint on 109 |
 
-MAIN — специальный native/untagged сегмент; VLAN 0 не используется. Серверы остаются в MAIN, отдельный server VLAN пока не нужен.
+Серверы пока остаются в MAIN; отдельный server VLAN не вводится.
 
-## Серверные management IP
+## Management IP
 
-Для VM/LXC действует единое правило из [`11-vmid-plan.md`](11-vmid-plan.md):
-
-```text
-current: VMID XYZ → 192.168.X.YZ/16
-target:  VMID XYZ → 10.0.X.YZ/16
-```
-
-Например:
+Обычный адрес не хранится в каждом `guest.yaml`. Он вычисляется из active central subnet и VMID:
 
 ```text
-109 → 192.168.1.9  → 10.0.1.9
-211 → 192.168.2.11 → 10.0.2.11
-301 → 192.168.3.1  → 10.0.3.1
-311 → 192.168.3.11 → 10.0.3.11
-321 → 192.168.3.21 → 10.0.3.21
-401 → 192.168.4.1  → 10.0.4.1
+VMID XYZ + A.B.0.0/16
+→ A.B.X.YZ
 ```
 
-Исключения для `network-gateway` больше нет: VMID `109` подчиняется общей формуле и не конфликтует с gateway `.1`.
+Текущие примеры:
 
-## Централизованная сетевая конфигурация guests
+```text
+109 → 192.168.1.9
+211 → 192.168.2.11
+301 → 192.168.3.1
+311 → 192.168.3.11
+321 → 192.168.3.21
+331 → 192.168.3.31
+401 → 192.168.4.1
+```
 
-Общие stage-параметры больше не дублируются в каждом `guest.yaml`.
+После смены central subnet на `10.0.0.0/16` те же VMID автоматически дают:
 
-Канонический файл `guests/defaults.yaml` содержит:
+```text
+109 → 10.0.1.9
+211 → 10.0.2.11
+301 → 10.0.3.1
+311 → 10.0.3.11
+321 → 10.0.3.21
+331 → 10.0.3.31
+401 → 10.0.4.1
+```
+
+Для исключения допустим `network.ipv4.address` override в конкретном `guest.yaml`. Он хранит только IPv4 без prefix.
+
+## Один IP и один gateway
+
+Архитектура больше не использует:
+
+```text
+current/target address pair
+mode=current/dual/target
+два IP одновременно
+default_gateway selector
+```
+
+В каждый момент времени у гостя одна штатная Proxmox network-конфигурация, один management IP и один default gateway.
+
+Это одинаково соответствует VM и LXC и не требует второго механизма конфигурирования сети внутри гостевой ОС.
+
+## Миграция `192.168 → 10.0`
+
+Перед переключением новый gateway `10.0.0.1` и L2-доступ к новой сети должны быть готовы.
+
+В Git меняются только central values:
 
 ```yaml
 defaults:
   network:
-    bridge: vmbr0
-    mode: current
-    default_gateway: current
-
-network_stages:
-  current:
-    subnet: 192.168.0.0/16
-    gateway: 192.168.1.1
-  target:
     subnet: 10.0.0.0/16
     gateway: 10.0.0.1
 ```
 
-То есть bridge, обычный migration mode и gateway selector имеют project default; subnet и реальный gateway IP каждой стадии имеют один источник истины; gateway IP не копируется по manifests.
+Обычные `guest.yaml` не изменяются.
 
-Конкретный guest хранит свои management addresses:
-
-```yaml
-network:
-  current:
-    ipv4:
-      address: 192.168.3.11/16
-  target:
-    ipv4:
-      address: 10.0.3.11/16
-```
-
-Effective state для текущего project default: `bridge=vmbr0`, `mode=current`, default gateway `192.168.1.1`, активен current address, target address остаётся будущим состоянием.
-
-## Сетевые режимы
+Будущий migration script должен применять новый desired state по одному гостю:
 
 ```text
-current → активен только 192.168.x.x
-dual    → одновременно активны 192.168.x.x и 10.0.x.x
-target  → активен только 10.0.x.x
+preflight нового gateway/L2
+→ guest N
+   вычислить новый IP из VMID
+   изменить IP + gateway штатным механизмом Proxmox
+   применить/reboot
+   проверить доступ по новому IP
+→ только после успеха перейти к guest N+1
+→ STOP при первой ошибке
 ```
 
-`default_gateway` выбирает stage, но default route всегда один:
+Такой процесс уменьшает blast radius и позволяет явно восстановить конкретного гостя, не переключая всю инфраструктуру одновременно.
 
-```text
-current → gateway из network_stages.current
-target  → gateway из network_stages.target
-```
-
-Допустимая последовательность миграции:
-
-```text
-mode=current, default_gateway=current
-→ mode=dual, default_gateway=current
-→ mode=dual, default_gateway=target
-→ mode=target, default_gateway=target
-```
-
-Невалидны `current + target gateway` и `target + current gateway`.
-
-Общий mode/default можно изменить централизованно. Если миграцию нужно проводить по гостям, конкретный `guest.yaml` может временно переопределить `network.mode` и `network.default_gateway`.
-
-## Текущее состояние
-
-Сейчас Keenetic и основной gateway не меняются.
-
-В `guests/defaults.yaml` используется:
-
-```yaml
-mode: current
-default_gateway: current
-```
-
-а central current stage остаётся:
-
-```yaml
-subnet: 192.168.0.0/16
-gateway: 192.168.1.1
-```
-
-Target-адреса уже записаны в guests как будущий desired state, но текущим deploy не активируются.
-
-Добавление `10.0.0.1/16` на Keenetic или другой временный router может использоваться позднее для проверки target-сети до переезда, но не является частью текущего этапа.
-
-## Переход на 10.0.0.0/16
-
-Когда будет принято решение начать миграцию:
-
-1. перевести нужные guests или общий default `current → dual`, сохранив `default_gateway: current`;
-2. проверить доступ к обоим IP и зависимости сервисов;
-3. в `dual` переключить `default_gateway: target`;
-4. проверить исходящий трафик, DNS, VPN/PBR и management;
-5. после проверки перейти `dual → target`.
-
-В новой квартире `10.0.0.1` предоставляет OpenWrt. Если target-адреса проверены заранее, физический переезд не требует массовой смены серверных IP.
+Гость с явным IP override требует отдельного внимания: при смене subnet override должен быть вручную приведён к новой сети. Validator блокирует override вне active central subnet.
 
 ## DNS
 
-Постоянные сервисы используют `home.arpa`; `.local` остаётся для mDNS. Подробности — [`41-dns.md`](41-dns.md).
+Постоянные сервисы используют `home.arpa`; `.local` остаётся для mDNS.
 
-Клиенты могут использовать SmartDNS на 109. DNS не является механизмом маршрутизации сам по себе: фактический выбор ISP/VPN выполняется через nftables/PBR.
+На 109 работает SmartDNS. DNS не является механизмом маршрутизации сам по себе: выбор ISP/VPN выполняется через nftables/PBR.
 
 ## Policy routing и VPN
 
@@ -206,7 +164,7 @@ ip rule / routing tables
         └── другие VPN/outbound
 ```
 
-OpenWrt остаётся базовым default gateway VLAN. Способ передачи выбранного трафика через 109 выбирается при внедрении PBR и должен иметь простой bypass без routing loop.
+OpenWrt остаётся базовым default gateway VLAN.
 
 ## Remote-access VPN
 
@@ -216,15 +174,13 @@ OpenWrt остаётся базовым default gateway VLAN. Способ пе�
 REMOTE-VPN → 10.60.0.0/16
 ```
 
-Удалённые клиенты должны получать домашний DNS и доступ только к разрешённым сегментам. Поддерживаются full-tunnel и split-tunnel профили.
-
 На физическом роутере допускается отдельный ограниченный аварийный VPN, чтобы административный доступ не зависел от Proxmox.
 
 ## IPv6
 
-IPv6 включается позднее как dual stack. Базовые DHCPv6-PD, Router Advertisement и firewall локальных VLAN принадлежат edge-router/OpenWrt. NAT66 по умолчанию не используется. Детали — [`42-ipv6.md`](42-ipv6.md).
+IPv6 включается позднее как dual stack. DHCPv6-PD, RA и firewall локальных VLAN принадлежат OpenWrt. NAT66 по умолчанию не используется.
 
-## Ключевой критерий отказоустойчивости
+## Критерий отказоустойчивости
 
 При остановке Proxmox или VM 109 должны сохраняться:
 
@@ -235,4 +191,4 @@ DHCP
 базовый firewall
 ```
 
-Могут временно быть недоступны только сознательно вынесенные на 109 функции: SmartDNS, специальные VPN/PBR, remote-access VPN и mDNS reflection.
+Могут быть недоступны только сознательно вынесенные на 109 функции: SmartDNS, специальные VPN/PBR, remote-access VPN и mDNS reflection.

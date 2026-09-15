@@ -1,4 +1,4 @@
-schema_version: 4
+schema_version: 5
 vmid: 109
 name: network-gateway
 profile: debian-vm
@@ -13,11 +13,3 @@ resources:
   memory_mb: 2048
   disk:
     size_gb: 16
-
-network:
-  current:
-    ipv4:
-      address: 192.168.1.9/16
-  target:
-    ipv4:
-      address: 10.0.1.9/16

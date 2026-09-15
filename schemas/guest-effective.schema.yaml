@@ -14,7 +14,7 @@ required:
   - description
 properties:
   schema_version:
-    const: 4
+    const: 5
   vmid:
     type: integer
     minimum: 100
@@ -86,36 +86,27 @@ properties:
   network:
     type: object
     additionalProperties: false
-    required: [bridge, mode, default_gateway, current, target]
+    required: [bridge, subnet, gateway, addressing, ipv4]
     properties:
       bridge:
         type: string
         minLength: 1
-      mode:
-        enum: [current, dual, target]
-      default_gateway:
-        enum: [current, target]
-      current:
-        $ref: '#/$defs/networkStage'
-      target:
-        $ref: '#/$defs/networkStage'
-    allOf:
-      - if:
-          properties:
-            mode:
-              const: current
-        then:
-          properties:
-            default_gateway:
-              const: current
-      - if:
-          properties:
-            mode:
-              const: target
-        then:
-          properties:
-            default_gateway:
-              const: target
+      subnet:
+        type: string
+        minLength: 1
+      gateway:
+        type: string
+        minLength: 1
+      addressing:
+        const: vmid
+      ipv4:
+        type: object
+        additionalProperties: false
+        required: [address]
+        properties:
+          address:
+            type: string
+            minLength: 1
   boot:
     type: object
     additionalProperties: false
@@ -188,23 +179,6 @@ properties:
             type: boolean
           keyctl:
             type: boolean
-$defs:
-  networkStage:
-    type: object
-    additionalProperties: false
-    required: [ipv4]
-    properties:
-      ipv4:
-        type: object
-        additionalProperties: false
-        required: [address, gateway]
-        properties:
-          address:
-            type: string
-            minLength: 1
-          gateway:
-            type: string
-            minLength: 1
 allOf:
   - required: [protection, placement, resources, network, boot, management]
   - if:

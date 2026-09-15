@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 
 defaults:
   node: pve
@@ -10,8 +10,9 @@ defaults:
       storage: local-lvm
   network:
     bridge: vmbr0
-    mode: current
-    default_gateway: current
+    subnet: 192.168.0.0/16
+    gateway: 192.168.1.1
+    addressing: vmid
   boot:
     onboot: true
     start_after_deploy: true
@@ -19,14 +20,6 @@ defaults:
     ssh:
       user: ops
       port: 22
-
-network_stages:
-  current:
-    subnet: 192.168.0.0/16
-    gateway: 192.168.1.1
-  target:
-    subnet: 10.0.0.0/16
-    gateway: 10.0.0.1
 
 profiles:
   debian-vm:

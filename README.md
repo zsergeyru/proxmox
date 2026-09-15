@@ -13,22 +13,18 @@
 
 ## Основной принцип
 
-Репозиторий организован вокруг гостей Proxmox: всё, что относится к конкретной VM/LXC, хранится в `guests/<VMID>-<name>/`. Общие решения и архитектура находятся в `docs/`. Навигация и правило нумерации документов описаны в [`docs/README.md`](docs/README.md).
+Репозиторий организован вокруг гостей Proxmox: всё, что относится к конкретной VM/LXC, хранится в `guests/<VMID>-<name>/`. Общие решения и архитектура находятся в `docs/`.
 
-Используется один основной monorepo `proxmox`. Отдельный Git-репозиторий создаётся только для действительно самостоятельного компонента с отдельным жизненным циклом.
+Используется один основной monorepo `proxmox`. VM/LXC не обязаны клонировать весь репозиторий; повторяемое применение управляемых файлов выполняется Ansible на `311-dev-services` по SSH.
 
-VM/LXC не обязаны клонировать весь репозиторий. Повторяемое применение управляемых файлов выполняется Ansible на `311-dev-services` по SSH.
-
-## Текущая и целевая карта гостей
-
-Актуальная нумерация определяется только [`docs/11-vmid-plan.md`](docs/11-vmid-plan.md).
+## Гости
 
 | ID | Тип | Имя | Статус/назначение |
 |---:|---|---|---|
 | 100 | VM | `haos` | текущий production Home Assistant |
 | 109 | VM | `network-gateway` | DNS, VPN, PBR, remote-access VPN |
-| 201 | LXC | `ha-main` | только возможная будущая миграция с 100 |
-| 202 | LXC | `ha-test` | тестовый HA при необходимости |
+| 201 | LXC | `ha-main` | возможная будущая миграция с 100 |
+| 202 | LXC | `ha-test` | тестовый HA |
 | 203 | LXC | `ha-flat2` | второй HA при необходимости |
 | 211 | LXC | `automation-services` | MQTT, Zigbee2MQTT, ESPHome |
 | 301 | VM | `ai-control` | целевой AI control plane |
@@ -36,32 +32,33 @@ VM/LXC не обязаны клонировать весь репозитори�
 | 320 | VM | `ai-control` | текущий bootstrap до перехода на 301 |
 | 321 | LXC | `app-services` | Homarr и прикладные сервисы |
 | 331 | LXC | `ai-services` | STT/TTS API |
-| 401 | LXC | `monitoring` | мониторинг при необходимости |
+| 401 | LXC | `monitoring` | мониторинг |
 | 501 | VM/LXC | `frigate` | видеонаблюдение после теста |
 
-Запланированный VMID не означает, что гостя нужно создавать заранее. Рабочая VM `100 HAOS` не мигрирует только ради красивой нумерации.
+Запланированный VMID не означает, что гостя нужно создавать заранее.
 
 ## Структура
 
 ```text
 proxmox/
 ├── README.md
-├── docs/                 # общая архитектура и решения
-├── host/pve/             # фактическое состояние Proxmox-хоста
-├── guests/               # паспорта VM/LXC и управляемые файлы
-├── ansible/              # inventory, roles и playbooks
-├── scripts/              # общие повторяемые операции
-├── templates/            # базовые VM/LXC templates
-└── archive/              # устаревшие материалы
+├── docs/
+├── host/pve/
+├── guests/
+├── ansible/
+├── scripts/
+├── templates/
+└── archive/
 ```
-
-Правила структуры гостя и `guest.yaml` находятся только в [`guests/README.md`](guests/README.md).
 
 ## Управление и deploy
 
 ```text
 Proximo MCP
-→ lifecycle VM/LXC
+→ runtime lifecycle VM/LXC
+
+deploy-guest на PVE
+→ человек / deterministic PLAN/APPLY из guest manifests
 
 Ansible на 311-dev-services
 → повторяемая настройка гостевых ОС по SSH
@@ -73,46 +70,61 @@ Semaphore
 → необязательный web-интерфейс к Ansible
 ```
 
-Для Debian-инфраструктуры используется единый административный пользователь `ops`; отдельный `infra-agent` сейчас не вводится.
+Для Debian-инфраструктуры используется единый административный пользователь `ops`.
 
 ## Сеть
 
-До переезда Keenetic остаётся edge-router, а `109-network-gateway` запускается в общей LAN.
+До переезда Keenetic остаётся edge-router, а `109-network-gateway` работает в общей LAN.
 
-После переезда физический OpenWrt отвечает за WAN, VLAN, DHCP и базовый L3/firewall. `109` отвечает за SmartDNS, VPN/PBR, remote-access VPN и сопутствующие сетевые сервисы. Поэтому остановка Proxmox/109 не должна отключать базовый интернет и межсетевую маршрутизацию квартиры.
+После переезда OpenWrt отвечает за WAN, VLAN, DHCP и базовый L3/firewall. `109` отвечает за SmartDNS, VPN/PBR, remote-access VPN и сопутствующие сервисы.
 
-Источник истины: [`docs/40-network.md`](docs/40-network.md).
+Guest network описывается централизованно:
+
+```text
+guests/defaults.yaml
+→ active subnet + gateway + bridge
+
+VMID
+→ management IP
+
+guest.yaml
+→ optional IP override только для исключения
+```
+
+В каждый момент времени у гостя один management IP и один default gateway.
+
+Источник истины по сети: [`docs/40-network.md`](docs/40-network.md).
 
 ## Источники истины
 
-При расхождении документов использовать такой приоритет:
+При расхождении использовать такой приоритет:
 
-1. [`docs/11-vmid-plan.md`](docs/11-vmid-plan.md) — VMID/CTID и management IP.
-2. [`guests/README.md`](guests/README.md) — формат `guest.yaml`, `rootfs/` и deploy.
-3. ADR в `guests/<guest>/decisions/` — принятые решения конкретного гостя.
-4. профильный документ в `docs/` (`40-network.md`, `41-dns.md`, `22-storage-and-backup.md` и т. п.).
-5. README конкретного гостя — его эксплуатационные особенности.
-6. [`docs/10-architecture.md`](docs/10-architecture.md) — сводка без дублирования деталей.
+1. `guests/defaults.yaml` + существующий `guests/*/guest.yaml` — deploy desired state VM/LXC.
+2. [`docs/11-vmid-plan.md`](docs/11-vmid-plan.md) — план VMID/CTID и описание VMID-addressing rule.
+3. ADR в `guests/<guest>/decisions/` — решения конкретного гостя.
+4. профильный документ в `docs/`.
+5. README конкретного гостя — эксплуатационные особенности.
+6. [`docs/10-architecture.md`](docs/10-architecture.md) — сводка.
 
 Наблюдаемое состояние PVE хранится в `host/pve/`, временный drift конкретного гостя — в его `STATUS.md`.
 
 ## Главные документы
 
-- [`docs/README.md`](docs/README.md) — оглавление и правило нумерации документации.
+- [`docs/README.md`](docs/README.md) — оглавление.
 - [`docs/10-architecture.md`](docs/10-architecture.md) — сводная архитектура.
-- [`docs/11-vmid-plan.md`](docs/11-vmid-plan.md) — VMID/CTID и management IP.
-- [`docs/40-network.md`](docs/40-network.md) — IPv4/VLAN/VPN и граница OpenWrt ↔ 109.
+- [`docs/11-vmid-plan.md`](docs/11-vmid-plan.md) — VMID/CTID и addressing rule.
+- [`docs/30-guest-manifest.md`](docs/30-guest-manifest.md) — guest/defaults contract.
+- [`docs/40-network.md`](docs/40-network.md) — IPv4/VLAN/VPN.
 - [`docs/41-dns.md`](docs/41-dns.md) — SmartDNS, `home.arpa`, mDNS.
 - [`docs/50-ai-control.md`](docs/50-ai-control.md) — AI-управление.
-- [`docs/22-storage-and-backup.md`](docs/22-storage-and-backup.md) — backup, retention, RPO/RTO и restore-test.
-- [`templates/debian13/README.md`](templates/debian13/README.md) — базовый Debian 13 template.
+- [`docs/22-storage-and-backup.md`](docs/22-storage-and-backup.md) — backup/restore.
+- [`templates/debian13/README.md`](templates/debian13/README.md) — Debian 13 template.
 
 ## Общие правила
 
-- Git — источник истины для повторяемой конфигурации и собственного инфраструктурного кода;
+- Git — source of truth для повторяемой конфигурации;
 - на гость разворачивается только его собственное содержимое `rootfs/`;
-- persistent data и секреты не являются `rootfs/`;
+- persistent data и secrets не являются `rootfs/`;
 - Ansible — штатный повторяемый deploy внутри Linux-гостей;
-- SSH сохраняется как базовый и аварийный административный канал;
-- отдельный универсальный deploy-MCP не требуется;
-- секреты, токены, пароли и private keys в Git не добавляются.
+- SSH сохраняется как базовый аварийный канал;
+- secrets, tokens, passwords и private keys в Git не добавляются.

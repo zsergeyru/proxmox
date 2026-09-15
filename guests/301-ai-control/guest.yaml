@@ -1,4 +1,4 @@
-schema_version: 4
+schema_version: 5
 vmid: 301
 name: ai-control
 profile: debian-vm
@@ -16,11 +16,3 @@ resources:
   memory_mb: 4096
   disk:
     size_gb: 24
-
-network:
-  current:
-    ipv4:
-      address: 192.168.3.1/16
-  target:
-    ipv4:
-      address: 10.0.3.1/16

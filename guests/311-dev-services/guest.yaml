@@ -1,4 +1,4 @@
-schema_version: 4
+schema_version: 5
 vmid: 311
 name: dev-services
 profile: docker-lxc
@@ -14,11 +14,3 @@ resources:
   swap_mb: 1024
   disk:
     size_gb: 32
-
-network:
-  current:
-    ipv4:
-      address: 192.168.3.11/16
-  target:
-    ipv4:
-      address: 10.0.3.11/16

@@ -2,21 +2,31 @@ $schema: https://json-schema.org/draft/2020-12/schema
 $title: Proxmox guest defaults and profiles
 type: object
 additionalProperties: false
-required: [schema_version, defaults, network_stages, profiles]
+required: [schema_version, defaults, profiles]
 properties:
   schema_version:
-    const: 1
+    const: 2
   defaults:
-    $ref: '#/$defs/fragment'
-  network_stages:
-    type: object
-    additionalProperties: false
-    required: [current, target]
-    properties:
-      current:
-        $ref: '#/$defs/networkStage'
-      target:
-        $ref: '#/$defs/networkStage'
+    allOf:
+      - $ref: '#/$defs/fragment'
+      - required: [node, protection, placement, resources, network, boot, management]
+      - properties:
+          placement:
+            required: [pool]
+          resources:
+            required: [disk]
+            properties:
+              disk:
+                required: [storage]
+          network:
+            required: [bridge, subnet, gateway, addressing]
+          boot:
+            required: [onboot, start_after_deploy]
+          management:
+            required: [ssh]
+            properties:
+              ssh:
+                required: [user, port]
   profiles:
     type: object
     minProperties: 1
@@ -25,17 +35,6 @@ properties:
     additionalProperties:
       $ref: '#/$defs/profile'
 $defs:
-  networkStage:
-    type: object
-    additionalProperties: false
-    required: [subnet, gateway]
-    properties:
-      subnet:
-        type: string
-        minLength: 1
-      gateway:
-        type: string
-        minLength: 1
   profile:
     allOf:
       - $ref: '#/$defs/fragment'
@@ -124,10 +123,14 @@ $defs:
           bridge:
             type: string
             minLength: 1
-          mode:
-            enum: [current, dual, target]
-          default_gateway:
-            enum: [current, target]
+          subnet:
+            type: string
+            minLength: 1
+          gateway:
+            type: string
+            minLength: 1
+          addressing:
+            const: vmid
       boot:
         type: object
         additionalProperties: false

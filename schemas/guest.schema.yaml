@@ -5,7 +5,7 @@ additionalProperties: false
 required: [schema_version, vmid, name, state, deployable, description]
 properties:
   schema_version:
-    const: 4
+    const: 5
   vmid:
     type: integer
     minimum: 100
@@ -92,19 +92,6 @@ $defs:
       bridge:
         type: string
         minLength: 1
-      mode:
-        enum: [current, dual, target]
-      default_gateway:
-        enum: [current, target]
-      current:
-        $ref: '#/$defs/sourceNetworkStage'
-      target:
-        $ref: '#/$defs/sourceNetworkStage'
-  sourceNetworkStage:
-    type: object
-    additionalProperties: false
-    required: [ipv4]
-    properties:
       ipv4:
         type: object
         additionalProperties: false
@@ -186,7 +173,7 @@ allOf:
         deployable:
           const: true
     then:
-      required: [profile, resources, network]
+      required: [profile, resources]
       properties:
         resources:
           required: [cpu, memory_mb, disk]
@@ -195,8 +182,6 @@ allOf:
               required: [cores]
             disk:
               required: [size_gb]
-        network:
-          required: [current, target]
   - if:
       required: [deployable]
       properties:

@@ -1,4 +1,4 @@
-schema_version: 4
+schema_version: 5
 vmid: 202
 name: ha-test
 type: lxc
@@ -10,12 +10,6 @@ description: Test Home Assistant instance
 
 network:
   bridge: vmbr0
-  current:
-    ipv4:
-      address: 192.168.2.2/16
-  target:
-    ipv4:
-      address: 10.0.2.2/16
 
 boot:
   onboot: false
