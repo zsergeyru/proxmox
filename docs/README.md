@@ -14,17 +14,18 @@
 - [`20-pve-initialization.md`](20-pve-initialization.md) — инициализация нового Proxmox VE host.
 - [`21-pve-filesystem-layout.md`](21-pve-filesystem-layout.md) — файловая структура PVE bootstrap/deployer.
 - [`22-storage-and-backup.md`](22-storage-and-backup.md) — storage, backup, retention и restore.
-- [`23-security.md`](23-security.md) — общие правила безопасности.
-- [`24-reproducible-bootstrap.md`](24-reproducible-bootstrap.md) — immutable revisions, version lock и reproducible template/bootstrap policy.
+- [`23-security.md`](23-security.md) — общие правила безопасности и root key-only management model.
+- [`24-reproducible-bootstrap.md`](24-reproducible-bootstrap.md) — versioning/reproducibility policy и project contract versions.
+- [`25-pve-access-control.md`](25-pve-access-control.md) — PVE identities, roles, ACL и граница `managed`.
 
-Диапазон `25–29` зарезервирован для новых документов уровня PVE.
+Диапазон `26–29` зарезервирован для новых документов уровня PVE.
 
 ### 30–39 — развёртывание гостей
 
-- [`30-guest-manifest.md`](30-guest-manifest.md) — канонический формат `guest.yaml` и PVE-side deploy.
-- [`31-bootstrap.md`](31-bootstrap.md) — public zero-day, private source of truth и переходное состояние bootstrap.
-- [`32-docker-in-lxc-policy.md`](32-docker-in-lxc-policy.md) — принятое решение B: Docker внутри unprivileged LXC, security boundary и backup/restore gate.
-- [`33-guest-bootstrap-and-provisioning.md`](33-guest-bootstrap-and-provisioning.md) — граница deployer bootstrap ↔ Ansible provisioning, bootstrap capabilities и специальный bootstrap 311.
+- [`30-guest-manifest.md`](30-guest-manifest.md) — канонический формат `guest.yaml`, root management contract и PVE-side deploy.
+- [`31-bootstrap.md`](31-bootstrap.md) — текущее состояние Stage 0/Stage 1, Template-Version 6 и bootstrap safety.
+- [`32-docker-in-lxc-policy.md`](32-docker-in-lxc-policy.md) — Docker внутри unprivileged LXC, security boundary и backup/restore gate.
+- [`33-guest-bootstrap-and-provisioning.md`](33-guest-bootstrap-and-provisioning.md) — management readiness, deployer bootstrap ↔ Ansible provisioning и bootstrap capabilities.
 
 Диапазон `34–39` зарезервирован для общих deploy/guest policy.
 
@@ -36,8 +37,8 @@
 
 ### 50–59 — AI control plane
 
-- [`50-ai-control.md`](50-ai-control.md) — целевая архитектура AI-управления.
-- [`51-ai-control-bootstrap.md`](51-ai-control-bootstrap.md) — bootstrap AI control plane.
+- [`50-ai-control.md`](50-ai-control.md) — целевая архитектура AI-управления, PVE ACL и direct root SSH.
+- [`51-ai-control-bootstrap.md`](51-ai-control-bootstrap.md) — bootstrap AI control plane и SSH identities.
 - [`52-local-ai.md`](52-local-ai.md) — локальный AI.
 
 ### 60–69 — интеграция с квартирой
@@ -54,4 +55,4 @@
 
 ## Источники истины
 
-Числовой префикс задаёт навигацию, но не приоритет. При конфликте действует приоритет корневого [`../README.md`](../README.md), профильных README и принятых ADR/policy.
+Числовой префикс задаёт навигацию, но не приоритет. При конфликте действует приоритет корневого [`../README.md`](../README.md), машинно-читаемых guest defaults/manifests, профильных policy и актуальных ADR.
