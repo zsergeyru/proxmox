@@ -47,6 +47,8 @@ schemas/guest-effective.schema.yaml
 → полный deployable desired state после merge и вычисления IP
 ```
 
+Переход с generic user `ops` на `root` не меняет структуру schema, поэтому номера schema не повышаются.
+
 ## `guests/defaults.yaml`
 
 Канонический пример:
@@ -72,7 +74,7 @@ defaults:
     start_after_deploy: true
   management:
     ssh:
-      user: ops
+      user: root
       port: 22
 
 profiles:
@@ -120,9 +122,33 @@ placement:
 
 Для deployable guest `type`, `vm` и `lxc` принадлежат profile.
 
+## Management SSH contract
+
+Для всех deployable Debian VM/LXC effective state должен содержать:
+
+```yaml
+management:
+  ssh:
+    user: root
+    port: 22
+```
+
+Root password не является частью manifest и не хранится в Git. Проектная policy требует locked root password и public-key-only SSH.
+
+Разные управляющие контуры используют разные SSH keypairs, но один Linux-user `root`:
+
+```text
+PVE/deploy-guest key
+AI Control key
+Ansible/311 key
+personal key при необходимости
+```
+
+Наличие конкретного public key в `/root/.ssh/authorized_keys` является отдельным access state и не выводится автоматически из pool membership.
+
 ## Source LXC template
 
-Для LXC Git фиксирует **семейство appliance**, но не конкретную версию архива:
+Для LXC Git хранит **семейство** template, а не конкретную версию архива:
 
 ```yaml
 lxc:
@@ -130,27 +156,48 @@ lxc:
     ostemplate: local:vztmpl/debian-13-standard
 ```
 
-`lxc.source.ostemplate` является selector, а не точным Proxmox volume. В `defaults.yaml` не хранится строка вида:
+Это стабильный selector. В `defaults.yaml` запрещено указывать конкретный файл вида:
 
 ```text
-local:vztmpl/debian-13-standard_13.6-1_amd64.tar.zst
+debian-13-standard_13.6-1_amd64.tar.zst
 ```
 
-Версия Debian 13 standard appliance определяется состоянием PVE. Private Stage 1 обновляет каталог `pveam`, выбирает актуальный `debian-13-standard_*_amd64` и при необходимости заранее скачивает его в `local:vztmpl`.
+Также запрещены `latest`, wildcard, `13.x`, `tbd` и подобные плавающие pseudo-values.
 
-`deploy-guest` не скачивает и не обновляет LXC templates. Его runtime flow:
+Stage 1 автономно подготавливает актуальный Debian 13 standard appliance на PVE:
+
+```text
+pveam update
+→ выбрать актуальный debian-13-standard_*_amd64 archive
+→ скачать в local:vztmpl, если его нет
+```
+
+`deploy-guest` при runtime resolution должен:
 
 ```text
 прочитать effective lxc.source.ostemplate selector
-→ найти уже установленные на указанном storage volumes этого семейства
-→ если найден один — использовать его
-→ если найдено несколько — выбрать наиболее новую версию version-aware сравнением
-→ если не найдено ни одного — BLOCKED/STOP до изменений гостя
+→ найти на разрешённом storage установленные archives этого семейства
+→ выбрать наиболее новую доступную версию
+→ если подходящего archive нет — BLOCKED/STOP до изменений guest
 ```
 
-Таким образом Git определяет нужное семейство ОС (`debian-13-standard`), а конкретный build/timestamp appliance является host-side runtime detail. Stage 1 остаётся автономным bootstrap PVE и не читает guest manifests для выбора версии template.
+`deploy-guest` не должен подменять семейство другим дистрибутивом и не должен сам скачивать base template в обход host bootstrap.
 
-Selector не должен содержать `latest`, wildcard, `13.x`, точную версию или имя архива `.tar.zst/.tar.xz/.tar.gz`. Канонический пример — `local:vztmpl/debian-13-standard`.
+## Initial SSH keys
+
+### VM
+
+Template `9000` v6 содержит `ciuser=root`, root password locked и root SSH key-only, но не содержит baked-in `authorized_keys`.
+
+До первого start clone получает нужные public keys через Cloud-Init.
+
+### LXC
+
+При создании LXC `deploy-guest` передаёт public keys через штатный `ssh-public-keys`. Они сразу устанавливаются для `root`.
+
+Отдельное создание `ops`, `sudo` или перенос ключа после первого входа не требуется.
+
+Capability `base` не участвует в initial SSH access.
 
 ## Сеть
 
@@ -214,7 +261,7 @@ Override имеет приоритет над VMID-формулой, но valida
 
 ## Миграция сети
 
-Переезд сети теперь означает изменение central desired state:
+Переезд сети означает изменение central desired state:
 
 ```yaml
 # было
@@ -266,7 +313,7 @@ resources:
     size_gb: 32
 ```
 
-Из defaults/profile будут получены node, pool, storage, network, boot, SSH, type и LXC source/features. Management IP будет вычислен из VMID.
+Из defaults/profile будут получены node, pool, storage, network, boot, SSH user/port, type и LXC source/features. Management IP будет вычислен из VMID.
 
 ## Reserved / observed manifests
 
@@ -297,29 +344,32 @@ boot:
 Ожидаемый вывод:
 
 ```text
-Node               pve                                      [defaults]
-Pool               managed                                  [defaults]
-Storage            local-lvm                                [defaults]
-Profile            docker-lxc                               [guest]
-LXC selector       local:vztmpl/debian-13-standard          [profile]
-LXC appliance      local:vztmpl/debian-13-standard_...tar.zst [runtime]
-Bridge             vmbr0                                    [defaults]
-Subnet             192.168.0.0/16                           [defaults]
-Gateway            192.168.1.1                              [defaults]
-Management IP      192.168.3.11/16                          [vmid]
-Memory             4096 MiB                                 [guest]
-Disk size          32 GiB                                   [guest]
+Node               pve                         [defaults]
+Pool               managed                     [defaults]
+Storage            local-lvm                   [defaults]
+Profile            docker-lxc                  [guest]
+LXC selector       debian-13-standard          [profile]
+Resolved archive   debian-13-standard_<...>    [runtime PVE]
+SSH user           root                        [defaults]
+Bridge             vmbr0                       [defaults]
+Subnet             192.168.0.0/16              [defaults]
+Gateway            192.168.1.1                 [defaults]
+Management IP      192.168.3.11/16             [vmid]
+Memory             4096 MiB                    [guest]
+Disk size          32 GiB                      [guest]
 ```
 
 При `network.ipv4.address` override источник IP — `[guest]`.
 
 ## Validator
 
-Validator проверяет только `guests/defaults.yaml` и существующие `guests/*/guest.yaml` плюс schema-файлы как описание правил.
+Validator проверяет `guests/defaults.yaml` и существующие `guests/*/guest.yaml` плюс schema-файлы как описание правил.
 
 Warnings не делают CI красным. IP override вне VMID-формулы — warning; IP вне central subnet, duplicate IP, gateway/network/broadcast collision — error.
 
-Для LXC validator требует versionless family selector в `lxc.source.ostemplate` и отклоняет конкретное имя appliance archive, wildcard, `latest` и другие плавающие/неоднозначные значения. Наличие подходящего установленного template на конкретном PVE — runtime prerequisite/preflight deployer.
+Для deployable guests validator требует `management.ssh == root:22`.
+
+`lxc.source.ostemplate` должен быть selector семейства без версии и имени архива. Отсутствие подходящего archive на конкретном PVE — runtime prerequisite/preflight deployer, а не задача schema validator.
 
 ## Git как source of truth
 
@@ -335,6 +385,6 @@ guest.yaml
 effective desired state
 ```
 
-Для LXC Git является source of truth для семейства appliance и storage selector. Конкретная версия установленного архива выбирается на PVE из уже подготовленных Stage 1 templates и не фиксируется в `defaults.yaml`.
+Runtime-факты, которые зависят от конкретного PVE, например фактическое имя актуального LXC archive или набор установленных SSH public keys, не должны превращаться в жёстко зашитые версии внутри `defaults.yaml`.
 
 `/etc/proxmox-deployer/config.yaml` остаётся host-side runtime/bootstrap config и не является источником guest defaults.
