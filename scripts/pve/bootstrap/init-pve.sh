@@ -14,7 +14,7 @@ set -Eeuo pipefail
 # недостающие privileges, но не удаляет уже существующие. Существующие ACL и
 # свойства API-токенов также не сужаются автоматически.
 
-BOOTSTRAP_VERSION=5
+BOOTSTRAP_VERSION=6
 
 PRIVATE_REPO="git@github.com:zsergeyru/proxmox.git"
 PRIVATE_BRANCH="main"
@@ -242,9 +242,15 @@ check_root_and_pve() {
         if [[ "$name" != "$TEMPLATE_NAME" || "$template_flag" != "1" ]]; then
             die "VMID ${TEMPLATE_VMID} уже существует, но это не ожидаемый шаблон ${TEMPLATE_NAME}; перезапись запрещена"
         fi
-        [[ "$protection_flag" == "1" ]] \
-            || die "Шаблон ${TEMPLATE_VMID} ${TEMPLATE_NAME} существует, но protection=1 не установлен. Bootstrap не изменяет защиту существующего шаблона автоматически."
-        ok "Защищённый шаблон ${TEMPLATE_VMID} уже существует"
+        if [[ "$protection_flag" != "1" ]]; then
+            qm set "$TEMPLATE_VMID" --protection 1
+            protection_flag="$(qm config "$TEMPLATE_VMID" | awk -F': ' '$1=="protection" {print $2}')"
+            [[ "$protection_flag" == "1" ]] \
+                || die "Не удалось установить protection=1 для шаблона ${TEMPLATE_VMID} ${TEMPLATE_NAME}"
+            ok "Для существующего шаблона ${TEMPLATE_VMID} автоматически включён protection=1"
+        else
+            ok "Защищённый шаблон ${TEMPLATE_VMID} уже существует"
+        fi
     fi
 }
 
@@ -870,9 +876,15 @@ ensure_template() {
         protection_flag="$(qm config "$TEMPLATE_VMID" | awk -F': ' '$1=="protection" {print $2}')"
         [[ "$name" == "$TEMPLATE_NAME" && "$template_flag" == "1" ]] \
             || die "VMID ${TEMPLATE_VMID} существует, но не соответствует шаблону ${TEMPLATE_NAME}"
-        [[ "$protection_flag" == "1" ]] \
-            || die "Шаблон ${TEMPLATE_VMID} ${TEMPLATE_NAME} существует без protection=1"
-        ok "Шаблон ${TEMPLATE_VMID} ${TEMPLATE_NAME} уже существует и защищён"
+        if [[ "$protection_flag" != "1" ]]; then
+            qm set "$TEMPLATE_VMID" --protection 1
+            protection_flag="$(qm config "$TEMPLATE_VMID" | awk -F': ' '$1=="protection" {print $2}')"
+            [[ "$protection_flag" == "1" ]] \
+                || die "Не удалось установить protection=1 для шаблона ${TEMPLATE_VMID} ${TEMPLATE_NAME}"
+            ok "Для существующего шаблона ${TEMPLATE_VMID} автоматически включён protection=1"
+        else
+            ok "Шаблон ${TEMPLATE_VMID} ${TEMPLATE_NAME} уже существует и защищён"
+        fi
         return
     fi
 
