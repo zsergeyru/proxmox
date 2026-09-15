@@ -24,8 +24,9 @@
 - [`30-guest-manifest.md`](30-guest-manifest.md) — канонический формат `guest.yaml` и PVE-side deploy.
 - [`31-bootstrap.md`](31-bootstrap.md) — public zero-day, private source of truth и переходное состояние bootstrap.
 - [`32-docker-in-lxc-policy.md`](32-docker-in-lxc-policy.md) — принятое решение B: Docker внутри unprivileged LXC, security boundary и backup/restore gate.
+- [`33-guest-bootstrap-and-provisioning.md`](33-guest-bootstrap-and-provisioning.md) — граница deployer bootstrap ↔ Ansible provisioning, bootstrap capabilities и специальный bootstrap 311.
 
-Диапазон `33–39` зарезервирован для общих deploy/guest policy.
+Диапазон `34–39` зарезервирован для общих deploy/guest policy.
 
 ### 40–49 — сеть
 
