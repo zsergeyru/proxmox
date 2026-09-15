@@ -1,23 +1,23 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-# Canonical Debian 13 Proxmox template builder.
-# Implementation and infrastructure source of truth: https://github.com/zsergeyru/proxmox
-# Public zero-day bootstrap repository: https://github.com/zsergeyru/proxmox-bootstrap
+# Канонический скрипт создания шаблона Debian 13 для Proxmox.
+# Основной источник реализации и инфраструктурной конфигурации: https://github.com/zsergeyru/proxmox
+# Публичный репозиторий начальной Stage 0: https://github.com/zsergeyru/proxmox-bootstrap
 #
-# The generic Debian cloud image is booted as VMID 9000, configured inside the
-# guest through temporary Cloud-Init user-data, rebooted into the regular Debian
-# kernel for console/QGA verification, finalized through QEMU Guest Agent, and
-# then converted to a protected Proxmox template.
+# Стандартный cloud-образ Debian запускается как VMID 9000, настраивается внутри
+# гостевой системы через временный Cloud-Init user-data, перезагружается на обычное
+# ядро Debian для проверки консоли и QEMU Guest Agent, очищается через QEMU Guest
+# Agent и затем преобразуется в защищённый шаблон Proxmox.
 #
-# Access model:
-#   - ops has no usable password;
-#   - root has no usable password;
-#   - SSH password authentication is disabled;
-#   - SSH public keys are supplied per clone through Proxmox Cloud-Init;
-#   - VGA/noVNC tty1 is the primary Proxmox console and autologins ops;
-#   - serial0 remains an independent text-console fallback and autologins ops;
-#   - Proxmox VM.Console possession is therefore administrative guest access.
+# Модель доступа:
+#   - у пользователя ops нет рабочего пароля;
+#   - у root нет рабочего пароля;
+#   - аутентификация SSH по паролю отключена;
+#   - публичные SSH-ключи передаются каждому клону отдельно через Proxmox Cloud-Init;
+#   - VGA/noVNC tty1 — основная консоль Proxmox с автоматическим входом под ops;
+#   - serial0 остаётся независимой резервной текстовой консолью с автовходом под ops;
+#   - наличие права Proxmox VM.Console фактически даёт административный доступ к гостю.
 
 VMID="${VMID:-9000}"
 TEMPLATE_NAME="${TEMPLATE_NAME:-tpl-debian13}"
@@ -41,19 +41,19 @@ SNIPPET_NAME="debian13-template-builder-${VMID}.yaml"
 SNIPPET_VOL="${SNIPPET_STORAGE}:snippets/${SNIPPET_NAME}"
 
 log() { printf '\n==> %s\n' "$*"; }
-die() { printf '\nERROR: %s\n' "$*" >&2; exit 1; }
+die() { printf '\nОШИБКА: %s\n' "$*" >&2; exit 1; }
 
 on_error() {
     local rc=$?
-    printf '\nBuild stopped with exit code %s.\n' "$rc" >&2
-    printf 'The builder VM and its disks are intentionally left in place for inspection.\n' >&2
-    printf 'Nothing is destroyed automatically.\n' >&2
+    printf '\nСоздание шаблона остановлено с кодом возврата %s.\n' "$rc" >&2
+    printf 'Временная VM-сборщик и её диски намеренно оставлены для диагностики.\n' >&2
+    printf 'Ничего автоматически не удаляется.\n' >&2
     exit "$rc"
 }
 trap on_error ERR
 
 require_cmd() {
-    command -v "$1" >/dev/null 2>&1 || die "Required command not found: $1"
+    command -v "$1" >/dev/null 2>&1 || die "Не найдена обязательная команда: $1"
 }
 
 fetch_file() {
@@ -65,7 +65,7 @@ fetch_file() {
     elif command -v wget >/dev/null 2>&1; then
         wget --tries=3 --output-document="$dst" "$url"
     else
-        die "Neither curl nor wget is installed on the Proxmox host"
+        die "На хосте Proxmox не установлен ни curl, ни wget"
     fi
 }
 
@@ -128,41 +128,41 @@ wait_for_stopped() {
     return 1
 }
 
-[[ $EUID -eq 0 ]] || die "Run this script as root on the Proxmox host"
+[[ $EUID -eq 0 ]] || die "Запустите этот скрипт от root на хосте Proxmox"
 for cmd in qm pvesm sha512sum awk grep sed; do
     require_cmd "$cmd"
 done
 
-[[ "$VMID" =~ ^[0-9]+$ ]] || die "VMID must be numeric"
-[[ "$TEMPLATE_VERSION" =~ ^[0-9]+$ ]] || die "TEMPLATE_VERSION must be numeric"
-[[ "$WAIT_SECONDS" =~ ^[0-9]+$ ]] || die "WAIT_SECONDS must be numeric"
+[[ "$VMID" =~ ^[0-9]+$ ]] || die "VMID должен быть числом"
+[[ "$TEMPLATE_VERSION" =~ ^[0-9]+$ ]] || die "TEMPLATE_VERSION должен быть числом"
+[[ "$WAIT_SECONDS" =~ ^[0-9]+$ ]] || die "WAIT_SECONDS должен быть числом"
 
-vm_exists && die "VMID ${VMID} already exists. Refusing to overwrite or destroy it."
-pvesm status --storage "$DISK_STORAGE" >/dev/null 2>&1 || die "Storage '${DISK_STORAGE}' is not available"
-pvesm status --storage "$SNIPPET_STORAGE" >/dev/null 2>&1 || die "Snippet storage '${SNIPPET_STORAGE}' is not available"
+vm_exists && die "VMID ${VMID} уже существует. Скрипт не будет перезаписывать или удалять его."
+pvesm status --storage "$DISK_STORAGE" >/dev/null 2>&1 || die "Хранилище '${DISK_STORAGE}' недоступно"
+pvesm status --storage "$SNIPPET_STORAGE" >/dev/null 2>&1 || die "Хранилище snippets '${SNIPPET_STORAGE}' недоступно"
 
 if ! SNIPPET_PATH="$(pvesm path "$SNIPPET_VOL" 2>/dev/null)"; then
-    die "Storage '${SNIPPET_STORAGE}' is not enabled for snippets. Enable the 'Snippets' content type in Proxmox storage settings and rerun."
+    die "Для хранилища '${SNIPPET_STORAGE}' не включён тип содержимого Snippets. Включите 'Snippets' в настройках хранилища Proxmox и повторите запуск."
 fi
 
-[[ ! -e "$SNIPPET_PATH" ]] || die "Temporary snippet already exists: ${SNIPPET_PATH}"
+[[ ! -e "$SNIPPET_PATH" ]] || die "Временный snippet уже существует: ${SNIPPET_PATH}"
 mkdir -p "$(dirname "$SNIPPET_PATH")" "$IMAGE_DIR"
 
-log "Downloading Debian 13 generic cloud image"
+log "Загрузка стандартного cloud-образа Debian 13"
 fetch_file "$IMAGE_URL" "$IMAGE_PATH"
 fetch_file "$CHECKSUM_URL" "$CHECKSUM_PATH"
 
-log "Verifying SHA-512 checksum"
+log "Проверка контрольной суммы SHA-512"
 checksum_line="$(awk -v f="$IMAGE_NAME" '$2 == f || $2 == ("*" f) {print; exit}' "$CHECKSUM_PATH")"
-[[ -n "$checksum_line" ]] || die "No checksum entry found for ${IMAGE_NAME} in ${CHECKSUM_URL}"
+[[ -n "$checksum_line" ]] || die "Для ${IMAGE_NAME} не найдена контрольная сумма в ${CHECKSUM_URL}"
 IMAGE_SHA512="$(awk '{print $1}' <<<"$checksum_line")"
-[[ "$IMAGE_SHA512" =~ ^[0-9a-fA-F]{128}$ ]] || die "Invalid SHA-512 checksum entry for ${IMAGE_NAME}"
+[[ "$IMAGE_SHA512" =~ ^[0-9a-fA-F]{128}$ ]] || die "Некорректная контрольная сумма SHA-512 для ${IMAGE_NAME}"
 (
     cd "$IMAGE_DIR"
     printf '%s\n' "$checksum_line" | sha512sum --check --strict -
 )
 
-log "Creating temporary Cloud-Init bootstrap"
+log "Создание временной конфигурации Cloud-Init для сборки"
 cat >"$SNIPPET_PATH" <<'CLOUDCFG'
 #cloud-config
 hostname: builder-debian13
@@ -174,7 +174,7 @@ disable_root: true
 users:
   - default
   - name: ops
-    gecos: Infrastructure administrator
+    gecos: Администратор инфраструктуры
     groups: [adm, sudo]
     shell: /bin/bash
     lock_passwd: true
@@ -224,10 +224,10 @@ write_files:
     owner: root:root
     permissions: '0644'
     content: |
-      Managed VM
-      Base template: tpl-debian13
-      Infrastructure: zsergeyru/proxmox
-      Do not store secrets in Git.
+      Управляемая виртуальная машина
+      Базовый шаблон: tpl-debian13
+      Инфраструктура: zsergeyru/proxmox
+      Не храните секреты в Git.
 
   - path: /usr/local/sbin/template-bootstrap
     owner: root:root
@@ -270,7 +270,7 @@ write_files:
 
       dpkg-query -W -f='${db:Status-Abbrev}\n' linux-image-amd64 | grep -q '^ii'
       if dpkg -l 'linux-image-*cloud-amd64' 2>/dev/null | grep -q '^ii'; then
-        printf 'Cloud kernel package is still installed after purge\n' >&2
+        printf 'Пакет cloud-ядра всё ещё установлен после удаления\n' >&2
         exit 1
       fi
       compgen -G '/boot/vmlinuz-*-amd64' >/dev/null
@@ -306,17 +306,17 @@ write_files:
       passwd -S root | grep -q ' L '
 
       cat >/etc/vm-template-info <<EOF
-      Template: tpl-debian13
-      Template-Version: __TEMPLATE_VERSION__
-      OS: Debian 13
-      Kernel-Flavor: amd64
-      Primary-Console: VGA/noVNC tty1 autologin ops
-      Fallback-Console: serial0 ttyS0 autologin ops
-      Infrastructure-Source: zsergeyru/proxmox
-      Template-Builder-Source: zsergeyru/proxmox
-      Source-Image: __IMAGE_NAME__
-      Source-Image-SHA512: __IMAGE_SHA512__
-      Build-Date: $(date -u +%F)
+      Шаблон: tpl-debian13
+      Версия-шаблона: __TEMPLATE_VERSION__
+      ОС: Debian 13
+      Тип-ядра: amd64
+      Основная-консоль: VGA/noVNC tty1, автовход ops
+      Резервная-консоль: serial0 ttyS0, автовход ops
+      Источник-инфраструктуры: zsergeyru/proxmox
+      Источник-сборщика-шаблона: zsergeyru/proxmox
+      Исходный-образ: __IMAGE_NAME__
+      SHA512-исходного-образа: __IMAGE_SHA512__
+      Дата-сборки: $(date -u +%F)
       EOF
 
       mkdir -p /var/lib/template-build
@@ -352,7 +352,7 @@ write_files:
       rm -rf /var/lib/template-build
       rm -f /usr/local/sbin/template-bootstrap /usr/local/sbin/template-finalize
 
-      fstrim -av || printf 'WARNING: fstrim did not complete successfully; continuing template finalization\n' >&2
+      fstrim -av || printf 'ПРЕДУПРЕЖДЕНИЕ: fstrim завершился с ошибкой; финализация шаблона продолжается\n' >&2
       sync
       printf 'FINALIZE_OK\n'
 
@@ -366,7 +366,7 @@ sed -i \
     -e "s/__IMAGE_SHA512__/${IMAGE_SHA512}/g" \
     "$SNIPPET_PATH"
 
-log "Creating builder VM ${VMID}"
+log "Создание временной VM-сборщика ${VMID}"
 qm create "$VMID" \
     --name "$BUILDER_NAME" \
     --ostype l26 \
@@ -381,10 +381,10 @@ qm create "$VMID" \
     --agent 1 \
     --onboot 0
 
-log "Importing system disk"
+log "Импорт системного диска"
 qm importdisk "$VMID" "$IMAGE_PATH" "$DISK_STORAGE"
 IMPORTED_DISK="$(qm config "$VMID" | awk -F': ' '/^unused[0-9]+:/ {print $2; exit}')"
-[[ -n "$IMPORTED_DISK" ]] || die "Imported disk was not found in VM configuration"
+[[ -n "$IMPORTED_DISK" ]] || die "Импортированный диск не найден в конфигурации VM"
 
 qm set "$VMID" --scsi0 "${IMPORTED_DISK},discard=on,iothread=1,ssd=1"
 qm resize "$VMID" scsi0 "$DISK_SIZE"
@@ -393,25 +393,25 @@ qm set "$VMID" --boot "order=scsi0"
 qm set "$VMID" --ipconfig0 ip=dhcp
 qm set "$VMID" --cicustom "user=${SNIPPET_VOL}"
 
-log "Starting builder VM"
+log "Запуск временной VM-сборщика"
 qm start "$VMID"
 
-log "Waiting for QEMU Guest Agent"
-wait_for_agent || die "QEMU Guest Agent did not become available within ${WAIT_SECONDS}s"
+log "Ожидание QEMU Guest Agent"
+wait_for_agent || die "QEMU Guest Agent не стал доступен за ${WAIT_SECONDS} секунд"
 
-log "Waiting for bootstrap to complete"
-wait_for_bootstrap || die "Guest bootstrap did not finish within ${WAIT_SECONDS}s. Inspect VM ${VMID} console and cloud-init logs."
+log "Ожидание завершения начальной настройки гостя"
+wait_for_bootstrap || die "Начальная настройка гостя не завершилась за ${WAIT_SECONDS} секунд. Проверьте консоль VM ${VMID} и журналы cloud-init."
 
-log "Waiting for Cloud-Init final stage"
-wait_for_cloud_init || die "Cloud-Init did not reach the done state cleanly"
+log "Ожидание финальной стадии Cloud-Init"
+wait_for_cloud_init || die "Cloud-Init не завершился корректно со статусом done"
 
-log "Rebooting builder into regular Debian kernel"
+log "Перезагрузка VM-сборщика на обычное ядро Debian"
 BOOT_ID_BEFORE="$(qm guest exec "$VMID" -- /bin/cat /proc/sys/kernel/random/boot_id)"
 qm reboot "$VMID"
-wait_for_new_boot_id "$BOOT_ID_BEFORE" || die "Builder VM did not complete the verification reboot within ${WAIT_SECONDS}s"
-wait_for_agent || die "QEMU Guest Agent did not reconnect after the verification reboot"
+wait_for_new_boot_id "$BOOT_ID_BEFORE" || die "VM-сборщик не завершила проверочную перезагрузку за ${WAIT_SECONDS} секунд"
+wait_for_agent || die "QEMU Guest Agent не подключился повторно после проверочной перезагрузки"
 
-log "Verifying kernel, framebuffer and console services after reboot"
+log "Проверка ядра, framebuffer и консольных служб после перезагрузки"
 VERIFY_OUTPUT="$(qm guest exec "$VMID" -- /bin/bash -lc '
 set -Eeuo pipefail
 kernel="$(uname -r)"
@@ -429,84 +429,85 @@ grep -q -- "--autologin ops" /etc/systemd/system/getty@tty1.service.d/autologin.
 grep -q -- "--autologin ops" /etc/systemd/system/serial-getty@ttyS0.service.d/autologin.conf
 printf "VERIFY_KERNEL=%s VERIFY_FRAMEBUFFER=%s CONSOLES_OK\n" "$kernel" "$framebuffer"
 ')"
-grep -q 'CONSOLES_OK' <<<"$VERIFY_OUTPUT" || die "Post-reboot console verification did not report success"
+grep -q 'CONSOLES_OK' <<<"$VERIFY_OUTPUT" || die "Проверка консолей после перезагрузки не сообщила об успешном завершении"
 KERNEL_TOKEN="$(grep -oE 'VERIFY_KERNEL=[^[:space:]\"]+' <<<"$VERIFY_OUTPUT" | head -1)"
 FRAMEBUFFER_TOKEN="$(grep -oE 'VERIFY_FRAMEBUFFER=[0-9]+,[0-9]+' <<<"$VERIFY_OUTPUT" | head -1)"
 KERNEL_VERSION="${KERNEL_TOKEN#*=}"
 FRAMEBUFFER_SIZE="${FRAMEBUFFER_TOKEN#*=}"
-[[ -n "$KERNEL_VERSION" ]] || die "Verified kernel version was not reported"
-[[ -n "$FRAMEBUFFER_SIZE" ]] || die "Verified framebuffer size was not reported"
+[[ -n "$KERNEL_VERSION" ]] || die "Проверенная версия ядра не была получена"
+[[ -n "$FRAMEBUFFER_SIZE" ]] || die "Проверенный размер framebuffer не был получен"
 
-log "Running final cleanup inside the guest"
+log "Финальная очистка внутри гостевой системы"
 FINALIZE_OUTPUT="$(qm guest exec "$VMID" -- /usr/local/sbin/template-finalize)"
-grep -q 'FINALIZE_OK' <<<"$FINALIZE_OUTPUT" || die "Guest finalization did not report success"
+grep -q 'FINALIZE_OK' <<<"$FINALIZE_OUTPUT" || die "Финализация гостя не сообщила об успешном завершении"
 
-log "Shutting down builder VM"
+log "Выключение VM-сборщика"
 qm shutdown "$VMID" --timeout 180 || true
-wait_for_stopped || die "Builder VM did not stop cleanly"
+wait_for_stopped || die "VM-сборщик не выключилась корректно"
 
-log "Removing builder-only Cloud-Init and setting clone defaults"
+log "Удаление временного Cloud-Init сборщика и настройка параметров клона"
 qm set "$VMID" --delete cicustom
 qm set "$VMID" --ciuser ops
 qm set "$VMID" --ciupgrade 0
 qm set "$VMID" --ipconfig0 ip=dhcp
 qm set "$VMID" --name "$TEMPLATE_NAME"
-qm set "$VMID" --description "Debian 13 (Trixie) base template; version ${TEMPLATE_VERSION}; VGA/noVNC tty1 autologin; serial0 fallback; SSH keys supplied per clone"
+qm set "$VMID" --description "Базовый шаблон Debian 13 (Trixie); версия ${TEMPLATE_VERSION}; VGA/noVNC tty1 с автовходом; резервный serial0; SSH-ключи передаются каждому клону отдельно"
 
-log "Regenerating standard Proxmox Cloud-Init drive"
+log "Пересоздание стандартного Cloud-Init диска Proxmox"
 qm cloudinit update "$VMID"
 CLOUDINIT_USER_DATA="$(qm cloudinit dump "$VMID" user)"
 if grep -qE 'template-bootstrap|builder-debian13|/usr/local/sbin/template-finalize' <<<"$CLOUDINIT_USER_DATA"; then
-    die "Builder-only Cloud-Init content is still present after regeneration"
+    die "После пересоздания Cloud-Init всё ещё содержит временные данные сборщика"
 fi
 
 rm -f "$SNIPPET_PATH"
 
-log "Converting VM ${VMID} to template"
+log "Преобразование VM ${VMID} в шаблон"
 qm template "$VMID"
 
-log "Protecting base template from accidental deletion"
+log "Защита базового шаблона от случайного удаления"
 qm set "$VMID" --protection 1
 
 FINAL_CONFIG="$(qm config "$VMID")"
-grep -q '^template: 1$' <<<"$FINAL_CONFIG" || die "VM ${VMID} was not marked as a template"
-grep -q '^protection: 1$' <<<"$FINAL_CONFIG" || die "Template protection was not enabled"
-grep -q '^agent: 1$' <<<"$FINAL_CONFIG" || die "QEMU Guest Agent support is not enabled in template config"
-grep -q '^vga: std$' <<<"$FINAL_CONFIG" || die "Template VGA display is not set to std"
-grep -q '^serial0: socket$' <<<"$FINAL_CONFIG" || die "Template serial0 is not configured as socket"
-grep -q '^ciuser: ops$' <<<"$FINAL_CONFIG" || die "Template Cloud-Init user is not ops"
-grep -q '^ciupgrade: 0$' <<<"$FINAL_CONFIG" || die "Cloud-Init automatic package upgrade is not disabled"
-grep -q '^ipconfig0: ip=dhcp$' <<<"$FINAL_CONFIG" || die "Template default network is not DHCP"
+grep -q '^template: 1$' <<<"$FINAL_CONFIG" || die "VM ${VMID} не была отмечена как шаблон"
+grep -q '^protection: 1$' <<<"$FINAL_CONFIG" || die "Защита шаблона не была включена"
+grep -q '^agent: 1$' <<<"$FINAL_CONFIG" || die "Поддержка QEMU Guest Agent не включена в конфигурации шаблона"
+grep -q '^vga: std$' <<<"$FINAL_CONFIG" || die "Для шаблона не установлен VGA-дисплей std"
+grep -q '^serial0: socket$' <<<"$FINAL_CONFIG" || die "serial0 шаблона не настроен как socket"
+grep -q '^ciuser: ops$' <<<"$FINAL_CONFIG" || die "Пользователь Cloud-Init шаблона должен быть ops"
+grep -q '^ciupgrade: 0$' <<<"$FINAL_CONFIG" || die "Автоматическое обновление пакетов Cloud-Init не отключено"
+grep -q '^ipconfig0: ip=dhcp$' <<<"$FINAL_CONFIG" || die "Сеть шаблона по умолчанию должна использовать DHCP"
 if grep -q '^cicustom:' <<<"$FINAL_CONFIG"; then
-    die "Builder-only cicustom is still present in template configuration"
+    die "В конфигурации шаблона остался временный cicustom сборщика"
 fi
 
 trap - ERR
 
 cat <<EOF
 
-Template created successfully.
+Шаблон успешно создан.
 
-VMID:        ${VMID}
-Name:        ${TEMPLATE_NAME}
-Version:     ${TEMPLATE_VERSION}
-Storage:     ${DISK_STORAGE}
-Network:     DHCP by default
-User:        ops (password locked)
-Root:        password locked; SSH login disabled
-Console:     Proxmox noVNC / VGA tty1 autologin as ops
-Serial:      serial0 / ttyS0 autologin as ops (fallback)
-Kernel:      ${KERNEL_VERSION}
-Framebuffer: ${FRAMEBUFFER_SIZE}
-SSH:         inject one or more public keys on each clone through Cloud-Init
-Updates:     automatic Cloud-Init package upgrade disabled (ciupgrade=0)
-Protect:     Proxmox protection enabled on the base template
-Image:       ${IMAGE_NAME}
-SHA-512:     ${IMAGE_SHA512}
+VMID:              ${VMID}
+Имя:               ${TEMPLATE_NAME}
+Версия:            ${TEMPLATE_VERSION}
+Хранилище:         ${DISK_STORAGE}
+Сеть:              DHCP по умолчанию
+Пользователь:      ops (пароль заблокирован)
+Root:              пароль заблокирован; вход по SSH запрещён
+Консоль:           Proxmox noVNC / VGA tty1, автовход под ops
+Serial:            serial0 / ttyS0, автовход под ops (резервная консоль)
+Ядро:              ${KERNEL_VERSION}
+Framebuffer:       ${FRAMEBUFFER_SIZE}
+SSH:               передавайте один или несколько публичных ключей каждому клону через Cloud-Init
+Обновления:        автоматическое обновление пакетов Cloud-Init отключено (ciupgrade=0)
+Защита:            для базового шаблона включена Proxmox protection
+Образ:             ${IMAGE_NAME}
+SHA-512:           ${IMAGE_SHA512}
 
-Recommended next step: create a FULL clone, set SSH public key/network before the
-first start, regenerate its Cloud-Init drive, then verify noVNC/tty1 autologin,
-serial0 fallback, QEMU Guest Agent, SSH access, unique machine-id/host keys,
-regular amd64 kernel, framebuffer availability and filesystem growth.
+Рекомендуемый следующий шаг: создать FULL-клон, до первого запуска задать ему
+публичный SSH-ключ и сетевые параметры, пересоздать Cloud-Init диск, затем проверить
+автовход noVNC/tty1, резервную консоль serial0, QEMU Guest Agent, доступ по SSH,
+уникальные machine-id и host keys, обычное ядро amd64, наличие framebuffer и
+расширение файловой системы.
 
 EOF
