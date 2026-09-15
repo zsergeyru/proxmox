@@ -1,0 +1,832 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+# =============================================================================
+# Приватная стадия инициализации Proxmox VE
+# =============================================================================
+#
+# Этот скрипт является канонической полной инициализацией PVE.
+# Публичный zsergeyru/proxmox-bootstrap/init-pve.sh выполняет только Stage 0:
+# устанавливает минимальный Git/SSH-набор, создаёт read-only Deploy Key,
+# получает доступ к этому приватному репозиторию и передаёт управление сюда.
+#
+# Скрипт можно запускать повторно. Он старается переиспользовать уже существующие
+# объекты и не перезаписывает отличающиеся роли/ACL без явного решения.
+
+BOOTSTRAP_VERSION=3
+
+PRIVATE_REPO="git@github.com:zsergeyru/proxmox.git"
+PRIVATE_BRANCH="main"
+
+# Временные файлы Stage 0. После успешного завершения этой стадии публичный
+# bootstrap удалит их. При повторном запуске этого приватного скрипта используется
+# уже канонический Deploy Key из /etc/proxmox-deployer/ssh.
+STAGE0_DIR="${PVE_STAGE0_DIR:-/var/lib/proxmox-bootstrap}"
+STAGE0_KEY_FILE="${PVE_STAGE0_KEY_FILE:-${STAGE0_DIR}/github_proxmox_repo_ed25519}"
+STAGE0_KEY_PUB_FILE="${STAGE0_KEY_FILE}.pub"
+STAGE0_KNOWN_HOSTS="${PVE_STAGE0_KNOWN_HOSTS:-${STAGE0_DIR}/known_hosts}"
+
+DEPLOY_USER="pvedeploy"
+
+CONFIG_DIR="/etc/proxmox-deployer"
+SSH_DIR="${CONFIG_DIR}/ssh"
+SECRETS_DIR="${CONFIG_DIR}/secrets"
+
+RUNTIME_DIR="/var/lib/proxmox-deployer"
+REPO_DIR="${RUNTIME_DIR}/repo"
+
+STATE_DIR="/var/lib/proxmox-bootstrap"
+STATE_FILE="${STATE_DIR}/state.json"
+VERSION_FILE="${STATE_DIR}/version"
+LAST_RUN_FILE="${STATE_DIR}/last-run.json"
+
+LOG_DIR="/var/log/proxmox-deployer"
+BOOTSTRAP_LOG_DIR="/var/log/proxmox-bootstrap"
+
+BACKUP_ROOT="/var/backups/proxmox-bootstrap"
+SECRETS_BACKUP_ROOT="/var/backups/proxmox-secrets"
+
+KEY_FILE="${SSH_DIR}/github_proxmox_repo_ed25519"
+SSH_CONFIG="${SSH_DIR}/config"
+KNOWN_HOSTS="${SSH_DIR}/known_hosts"
+
+TEMPLATE_VMID=9000
+TEMPLATE_NAME="tpl-debian13"
+MANAGED_POOL="managed"
+BRIDGE="vmbr0"
+
+UPDATE_SYSTEM=0
+WARN_COUNT=0
+REPO_REVISION=""
+
+# Учётная запись для человека и локальных инструментов, работающих напрямую с PVE.
+HOST_PVE_USER="deployer@pve"
+HOST_PVE_TOKEN_NAME="host-deploy"
+HOST_PVE_TOKEN="${HOST_PVE_USER}!${HOST_PVE_TOKEN_NAME}"
+HOST_TOKEN_FILE="${SECRETS_DIR}/host-deploy.token"
+
+# Учётная запись именно для контура AI / Proximo.
+AI_PVE_USER="ai-agent@pve"
+AI_PVE_TOKEN_NAME="infra"
+AI_PVE_TOKEN="${AI_PVE_USER}!${AI_PVE_TOKEN_NAME}"
+AI_TOKEN_FILE="${SECRETS_DIR}/ai-agent-infra.token"
+
+# Существующая схема ролей проекта.
+ROLE_CLONE="AICloneSource"
+ROLE_GUEST="AIManagedGuest"
+ROLE_NETWORK="AINetworkUse"
+ROLE_STORAGE="AIStorage"
+ROLE_POOL="AIManagedPool"
+
+ROLE_CLONE_PRIVS="VM.Audit VM.Clone"
+ROLE_GUEST_PRIVS="VM.Allocate VM.Audit VM.Backup VM.Clone VM.Config.CDROM VM.Config.Cloudinit VM.Config.CPU VM.Config.Disk VM.Config.HWType VM.Config.Memory VM.Config.Network VM.Config.Options VM.Console VM.GuestAgent.Audit VM.PowerMgmt VM.Snapshot VM.Snapshot.Rollback"
+ROLE_NETWORK_PRIVS="SDN.Use"
+ROLE_STORAGE_PRIVS="Datastore.AllocateSpace Datastore.Audit"
+ROLE_POOL_PRIVS="Pool.Allocate Pool.Audit"
+
+log()  { printf '\n==> %s\n' "$*"; }
+ok()   { printf '[ОК] %s\n' "$*"; }
+warn() {
+    WARN_COUNT=$((WARN_COUNT + 1))
+    printf '[ПРЕДУПРЕЖДЕНИЕ] %s\n' "$*" >&2
+}
+die() {
+    printf '\nОШИБКА: %s\n' "$*" >&2
+    exit 1
+}
+
+usage() {
+    cat <<'USAGE'
+Использование:
+  init-pve.sh [--update-system] [--help]
+
+Приватная полная инициализация нового или частично настроенного Proxmox VE.
+Обычно запускается автоматически публичной Stage 0 после получения read-only
+доступа к zsergeyru/proxmox.
+
+Параметры:
+  --update-system  после настройки репозиториев выполнить apt full-upgrade
+  -h, --help       показать эту справку
+USAGE
+}
+
+while (($#)); do
+    case "$1" in
+        --update-system) UPDATE_SYSTEM=1 ;;
+        -h|--help) usage; exit 0 ;;
+        *) die "Неизвестный параметр: $1" ;;
+    esac
+    shift
+done
+
+on_error() {
+    local rc=$?
+    trap - ERR
+    printf '\nПриватная инициализация PVE аварийно остановлена. Код возврата: %s.\n' "$rc" >&2
+    exit "$rc"
+}
+trap on_error ERR
+
+require_cmd() {
+    command -v "$1" >/dev/null 2>&1 || die "Не найдена обязательная команда: $1"
+}
+
+setup_bootstrap_log() {
+    mkdir -p "$BOOTSTRAP_LOG_DIR"
+    chmod 0750 "$BOOTSTRAP_LOG_DIR"
+    touch "$BOOTSTRAP_LOG_DIR/init-pve.log"
+    chmod 0600 "$BOOTSTRAP_LOG_DIR/init-pve.log"
+    exec > >(tee -a "$BOOTSTRAP_LOG_DIR/init-pve.log") 2>&1
+}
+
+write_state() {
+    local status=$1
+    local revision=${2:-}
+    local now
+    now="$(date --iso-8601=seconds)"
+
+    mkdir -p "$STATE_DIR"
+    chmod 0755 "$STATE_DIR"
+
+    cat >"$STATE_FILE" <<EOF_STATE
+{
+  "bootstrap_version": ${BOOTSTRAP_VERSION},
+  "stage": "private",
+  "status": "${status}",
+  "repository_revision": "${revision}",
+  "private_repo_checkout_exists": $( [[ -d "$REPO_DIR/.git" ]] && echo true || echo false ),
+  "host_deploy_secret_exists": $( [[ -f "$HOST_TOKEN_FILE" ]] && echo true || echo false ),
+  "ai_infra_secret_exists": $( [[ -f "$AI_TOKEN_FILE" ]] && echo true || echo false ),
+  "template_vmid": ${TEMPLATE_VMID},
+  "warnings": ${WARN_COUNT}
+}
+EOF_STATE
+
+    cat >"$LAST_RUN_FILE" <<EOF_LAST
+{
+  "timestamp": "${now}",
+  "stage": "private",
+  "result": "${status}",
+  "repository_revision": "${revision}",
+  "warnings": ${WARN_COUNT}
+}
+EOF_LAST
+
+    printf '%s\n' "$BOOTSTRAP_VERSION" >"$VERSION_FILE"
+    chmod 0644 "$STATE_FILE" "$LAST_RUN_FILE" "$VERSION_FILE"
+}
+
+# =============================================================================
+# Предварительные проверки
+# =============================================================================
+
+check_root_and_pve() {
+    [[ $EUID -eq 0 ]] || die "Запустите скрипт от root на хосте Proxmox"
+
+    for cmd in \
+        pveversion qm pct pvesh pveum pvesm \
+        ip systemctl apt-get getent groupadd useradd; do
+        require_cmd "$cmd"
+    done
+
+    pveversion >/dev/null
+    ok "Обнаружен Proxmox: $(pveversion | head -n1)"
+
+    local codename
+    codename="$(. /etc/os-release && printf '%s' "${VERSION_CODENAME:-}")"
+    [[ "$codename" == "trixie" ]] \
+        || die "Для текущей инициализации ожидается Debian trixie, обнаружено: '${codename:-неизвестно}'"
+
+    [[ -e /dev/kvm ]] || die "Не найден /dev/kvm: аппаратная виртуализация/KVM недоступна"
+    ok "KVM доступен"
+
+    ip link show "$BRIDGE" >/dev/null 2>&1 || die "Не найден обязательный сетевой мост ${BRIDGE}"
+    ok "Сетевой мост ${BRIDGE} найден"
+
+    pvesm status --storage local >/dev/null 2>&1 || die "Хранилище 'local' недоступно"
+    pvesm status --storage local-lvm >/dev/null 2>&1 || die "Хранилище 'local-lvm' недоступно"
+    ok "Хранилища local и local-lvm доступны"
+
+    if pct config "$TEMPLATE_VMID" >/dev/null 2>&1; then
+        die "VMID ${TEMPLATE_VMID} уже занят LXC-контейнером; скрипт не будет его изменять"
+    fi
+
+    if qm config "$TEMPLATE_VMID" >/dev/null 2>&1; then
+        local name template_flag
+        name="$(qm config "$TEMPLATE_VMID" | awk -F': ' '$1=="name" {print $2}')"
+        template_flag="$(qm config "$TEMPLATE_VMID" | awk -F': ' '$1=="template" {print $2}')"
+        if [[ "$name" != "$TEMPLATE_NAME" || "$template_flag" != "1" ]]; then
+            die "VMID ${TEMPLATE_VMID} уже существует, но это не ожидаемый шаблон ${TEMPLATE_NAME}; перезапись запрещена"
+        fi
+        ok "Защищённый шаблон ${TEMPLATE_VMID} уже существует"
+    fi
+}
+
+snapshot_host_config() {
+    local stamp dst f rel
+    stamp="$(date +%Y%m%d-%H%M%S)"
+    dst="${BACKUP_ROOT}/${stamp}"
+
+    mkdir -p "$dst/files" "$dst/diagnostics"
+    chmod 0700 "$dst"
+
+    for f in \
+        /etc/network/interfaces \
+        /etc/hosts \
+        /etc/hostname \
+        /etc/resolv.conf \
+        /etc/pve/storage.cfg \
+        /etc/pve/user.cfg \
+        /etc/pve/datacenter.cfg; do
+        if [[ -e "$f" ]]; then
+            rel="${f#/}"
+            mkdir -p "$dst/files/$(dirname "$rel")"
+            cp -a "$f" "$dst/files/$rel"
+        fi
+    done
+
+    if [[ -d /etc/apt/sources.list.d ]]; then
+        mkdir -p "$dst/files/etc/apt"
+        cp -a /etc/apt/sources.list "$dst/files/etc/apt/" 2>/dev/null || true
+        cp -a /etc/apt/sources.list.d "$dst/files/etc/apt/" 2>/dev/null || true
+    fi
+
+    pveversion -v >"$dst/diagnostics/pveversion.txt" 2>&1 || true
+    pvesm status >"$dst/diagnostics/storage-status.txt" 2>&1 || true
+    pvesm status --content snippets >"$dst/diagnostics/storage-snippets.txt" 2>&1 || true
+    pveum user list >"$dst/diagnostics/users.txt" 2>&1 || true
+    pveum role list >"$dst/diagnostics/roles.txt" 2>&1 || true
+    pveum acl list >"$dst/diagnostics/acl.txt" 2>&1 || true
+    pveum pool list >"$dst/diagnostics/pools.txt" 2>&1 || true
+    ip addr >"$dst/diagnostics/ip-addr.txt" 2>&1 || true
+    ip route >"$dst/diagnostics/ip-route.txt" 2>&1 || true
+
+    ok "Сохранён снимок конфигурации хоста: $dst"
+}
+
+# =============================================================================
+# Репозитории, пакеты, сеть и storage
+# =============================================================================
+
+configure_apt() {
+    log "Настройка репозитория pve-no-subscription"
+
+    install -d -m 0755 /etc/apt/sources.list.d
+    cat >/etc/apt/sources.list.d/pve-no-subscription.sources <<'EOF_APT'
+Types: deb
+URIs: http://download.proxmox.com/debian/pve
+Suites: trixie
+Components: pve-no-subscription
+Signed-By: /usr/share/keyrings/proxmox-archive-keyring.gpg
+EOF_APT
+
+    local f
+    for f in \
+        /etc/apt/sources.list.d/pve-enterprise.list \
+        /etc/apt/sources.list.d/pve-enterprise.sources; do
+        if [[ -f "$f" ]]; then
+            mv -f "$f" "${f}.disabled"
+            ok "Отключён репозиторий enterprise: $f"
+        fi
+    done
+
+    apt-get update
+    if (( UPDATE_SYSTEM )); then
+        log "Выполняется явно запрошенное полное обновление системы"
+        DEBIAN_FRONTEND=noninteractive apt-get -y full-upgrade
+    fi
+}
+
+install_packages() {
+    log "Установка обязательных пакетов инициализации и администрирования"
+
+    local packages=(
+        git openssh-client python3 python3-yaml curl jq ca-certificates
+        mc htop tmux smartmontools lm-sensors
+    )
+
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "${packages[@]}"
+
+    for cmd in git ssh ssh-keygen python3 curl jq runuser; do
+        require_cmd "$cmd"
+    done
+
+    ok "Обязательные пакеты установлены"
+}
+
+check_time_dns_network() {
+    log "Проверка времени, DNS и исходящего подключения"
+
+    date --iso-8601=seconds
+
+    if command -v timedatectl >/dev/null 2>&1; then
+        timedatectl show -p NTPSynchronized --value 2>/dev/null | grep -qx yes \
+            || warn "Синхронизация времени NTP пока не подтверждена"
+    fi
+
+    getent ahosts github.com >/dev/null || die "Не работает DNS-разрешение имени github.com"
+    getent ahosts download.proxmox.com >/dev/null || die "Не работает DNS-разрешение имени download.proxmox.com"
+
+    curl -fsS --connect-timeout 10 -o /dev/null https://github.com/ \
+        || die "Нет HTTPS-доступа к GitHub"
+    curl -fsS --connect-timeout 10 -o /dev/null https://download.proxmox.com/ \
+        || die "Нет HTTPS-доступа к download.proxmox.com"
+
+    ok "DNS и исходящий HTTPS работают"
+}
+
+check_template_source() {
+    if qm config "$TEMPLATE_VMID" >/dev/null 2>&1; then
+        return
+    fi
+
+    log "Проверка источника облачного образа Debian"
+    getent ahosts cloud.debian.org >/dev/null || die "Не работает DNS-разрешение имени cloud.debian.org"
+    curl -fsS --connect-timeout 10 -o /dev/null \
+        https://cloud.debian.org/images/cloud/trixie/latest/SHA512SUMS \
+        || die "Нет HTTPS-доступа к облачным образам Debian"
+    ok "Источник облачного образа Debian доступен"
+}
+
+ensure_snippets() {
+    log "Проверка поддержки snippets в хранилище local"
+
+    local content new_content
+    content="$(pvesm config local | awk -F' ' '$1=="content" {print $2}')"
+
+    if tr ',' '\n' <<<"$content" | grep -qx snippets; then
+        ok "В local уже разрешён тип содержимого snippets"
+        return
+    fi
+
+    [[ -n "$content" ]] || die "Не удалось определить текущие типы содержимого хранилища local"
+    new_content="${content},snippets"
+    pvesm set local --content "$new_content"
+
+    content="$(pvesm config local | awk -F' ' '$1=="content" {print $2}')"
+    tr ',' '\n' <<<"$content" | grep -qx snippets \
+        || die "После изменения хранилище local по-прежнему не поддерживает snippets"
+
+    ok "В local добавлен snippets без удаления существующих типов содержимого"
+}
+
+# =============================================================================
+# Каноническая файловая структура и принятие Deploy Key от Stage 0
+# =============================================================================
+
+ensure_runtime_layout() {
+    log "Подготовка каталогов и локального пользователя pvedeploy"
+
+    if ! getent group "$DEPLOY_USER" >/dev/null 2>&1; then
+        groupadd --system "$DEPLOY_USER"
+        ok "Создана Linux-группа ${DEPLOY_USER}"
+    fi
+
+    if ! id "$DEPLOY_USER" >/dev/null 2>&1; then
+        useradd --system --gid "$DEPLOY_USER" --create-home \
+            --home-dir /var/lib/pvedeploy --shell /bin/bash "$DEPLOY_USER"
+        ok "Создан Linux-пользователь ${DEPLOY_USER}"
+    else
+        ok "Linux-пользователь ${DEPLOY_USER} уже существует"
+    fi
+
+    install -d -o root -g root -m 0755 "$CONFIG_DIR"
+    install -d -o root -g "$DEPLOY_USER" -m 0750 "$SSH_DIR"
+    install -d -o root -g "$DEPLOY_USER" -m 0710 "$SECRETS_DIR"
+    install -d -o "$DEPLOY_USER" -g "$DEPLOY_USER" -m 0750 \
+        "$RUNTIME_DIR" "$RUNTIME_DIR/state" "$RUNTIME_DIR/cache"
+    install -d -o root -g root -m 0755 "$STATE_DIR"
+    install -d -o "$DEPLOY_USER" -g "$DEPLOY_USER" -m 0750 "$LOG_DIR" "$LOG_DIR/audit"
+    install -d -o root -g root -m 0700 "$BACKUP_ROOT" "$SECRETS_BACKUP_ROOT"
+    install -d -o root -g root -m 0755 /usr/local/sbin
+
+    if [[ ! -f "$CONFIG_DIR/config.yaml" ]]; then
+        cat >"$CONFIG_DIR/config.yaml" <<EOF_CONFIG
+repo: zsergeyru/proxmox
+branch: ${PRIVATE_BRANCH}
+checkout: ${REPO_DIR}
+managed_pool: ${MANAGED_POOL}
+host_deploy_identity: ${HOST_PVE_TOKEN}
+ai_infra_identity: ${AI_PVE_TOKEN}
+template_vmid: ${TEMPLATE_VMID}
+EOF_CONFIG
+        chmod 0644 "$CONFIG_DIR/config.yaml"
+        ok "Создан ${CONFIG_DIR}/config.yaml"
+    else
+        ok "Файл ${CONFIG_DIR}/config.yaml уже существует и не перезаписывается"
+    fi
+}
+
+prepare_canonical_github_access() {
+    log "Принятие read-only Deploy Key из публичной Stage 0"
+
+    if [[ ! -f "$KEY_FILE" ]]; then
+        [[ -f "$STAGE0_KEY_FILE" && -f "$STAGE0_KEY_PUB_FILE" ]] \
+            || die "Канонический GitHub Deploy Key отсутствует и Stage 0 не передала временный ключ. Сначала запустите публичный proxmox-bootstrap/init-pve.sh."
+
+        install -o "$DEPLOY_USER" -g "$DEPLOY_USER" -m 0600 "$STAGE0_KEY_FILE" "$KEY_FILE"
+        install -o "$DEPLOY_USER" -g "$DEPLOY_USER" -m 0644 "$STAGE0_KEY_PUB_FILE" "${KEY_FILE}.pub"
+        ok "Deploy Key перенесён в каноническое хранилище"
+    else
+        chown "$DEPLOY_USER:$DEPLOY_USER" "$KEY_FILE"
+        chmod 0600 "$KEY_FILE"
+        [[ ! -f "${KEY_FILE}.pub" ]] || {
+            chown "$DEPLOY_USER:$DEPLOY_USER" "${KEY_FILE}.pub"
+            chmod 0644 "${KEY_FILE}.pub"
+        }
+        ok "Канонический GitHub Deploy Key уже существует"
+    fi
+
+    if [[ -f "$STAGE0_KNOWN_HOSTS" ]]; then
+        install -o "$DEPLOY_USER" -g "$DEPLOY_USER" -m 0644 "$STAGE0_KNOWN_HOSTS" "$KNOWN_HOSTS"
+    elif [[ ! -f "$KNOWN_HOSTS" ]]; then
+        local tmp_hosts
+        tmp_hosts="$(mktemp)"
+        curl -fsSL https://api.github.com/meta \
+            | jq -r '.ssh_keys[] | "github.com " + .' >"$tmp_hosts"
+        [[ -s "$tmp_hosts" ]] || {
+            rm -f "$tmp_hosts"
+            die "Не удалось получить SSH-ключи хоста GitHub через api.github.com/meta"
+        }
+        install -o "$DEPLOY_USER" -g "$DEPLOY_USER" -m 0644 "$tmp_hosts" "$KNOWN_HOSTS"
+        rm -f "$tmp_hosts"
+    fi
+
+    cat >"$SSH_CONFIG" <<EOF_SSH
+Host github.com
+    HostName github.com
+    User git
+    IdentityFile ${KEY_FILE}
+    IdentitiesOnly yes
+    UserKnownHostsFile ${KNOWN_HOSTS}
+    StrictHostKeyChecking yes
+EOF_SSH
+    chown "$DEPLOY_USER:$DEPLOY_USER" "$SSH_CONFIG"
+    chmod 0600 "$SSH_CONFIG"
+}
+
+git_as_deployer() {
+    runuser -u "$DEPLOY_USER" -- env GIT_SSH_COMMAND="ssh -F ${SSH_CONFIG}" git "$@"
+}
+
+verify_private_repo_access() {
+    git_as_deployer ls-remote "$PRIVATE_REPO" HEAD >/dev/null 2>&1 \
+        || die "Канонический Deploy Key не даёт read-only доступ к ${PRIVATE_REPO}"
+    ok "Read-only доступ к приватному GitHub-репозиторию подтверждён"
+}
+
+sync_private_repo() {
+    log "Синхронизация приватного источника истины"
+
+    if [[ ! -d "$REPO_DIR/.git" ]]; then
+        rm -rf "$REPO_DIR"
+        git_as_deployer clone --depth 1 --branch "$PRIVATE_BRANCH" "$PRIVATE_REPO" "$REPO_DIR"
+    else
+        chown -R "$DEPLOY_USER:$DEPLOY_USER" "$REPO_DIR"
+        git_as_deployer -C "$REPO_DIR" fetch --depth 1 origin "$PRIVATE_BRANCH"
+        git_as_deployer -C "$REPO_DIR" reset --hard FETCH_HEAD
+        git_as_deployer -C "$REPO_DIR" clean -ffd
+    fi
+
+    REPO_REVISION="$(git_as_deployer -C "$REPO_DIR" rev-parse HEAD)"
+    printf '%s\n' "$REPO_REVISION" >"$RUNTIME_DIR/state/last-revision"
+    chown "$DEPLOY_USER:$DEPLOY_USER" "$RUNTIME_DIR/state/last-revision"
+    ok "Приватный репозиторий синхронизирован: ${REPO_REVISION}"
+}
+
+# =============================================================================
+# managed, роли, пользователи, токены и ACL
+# =============================================================================
+
+ensure_managed_pool() {
+    log "Проверка пула ресурсов ${MANAGED_POOL}"
+    if pveum pool list --output-format json 2>/dev/null \
+        | jq -e --arg p "$MANAGED_POOL" '.[] | select(.poolid == $p)' >/dev/null; then
+        ok "Пул ресурсов ${MANAGED_POOL} уже существует"
+    else
+        pveum pool add "$MANAGED_POOL" --comment "Рабочая зона автоматизации проекта Proxmox"
+        ok "Создан пул ресурсов ${MANAGED_POOL}"
+    fi
+}
+
+priv_lines() {
+    printf '%s\n' "$1" | tr ', ' '\n\n' | sed '/^$/d' | sort -u
+}
+
+join_lines() {
+    if [[ -z "${1:-}" ]]; then printf 'нет'; else printf '%s\n' "$1" | paste -sd, -; fi
+}
+
+ensure_role() {
+    local role=$1 expected_raw=$2
+    local role_json actual_raw expected actual missing extra
+
+    role_json="$(pveum role list --output-format json)"
+    if ! jq -e --arg role "$role" '.[] | select(.roleid == $role)' <<<"$role_json" >/dev/null; then
+        pveum role add "$role" --privs "$expected_raw"
+        ok "Создана роль ${role}"
+        return
+    fi
+
+    actual_raw="$(jq -r --arg role "$role" '.[] | select(.roleid == $role) | (.privs // "")' \
+        <<<"$role_json" | head -n1)"
+    expected="$(priv_lines "$expected_raw")"
+    actual="$(priv_lines "$actual_raw")"
+
+    if [[ "$expected" == "$actual" ]]; then
+        ok "Роль ${role} уже существует и полностью совпадает"
+        return
+    fi
+
+    missing="$(comm -23 <(printf '%s\n' "$expected") <(printf '%s\n' "$actual") || true)"
+    extra="$(comm -13 <(printf '%s\n' "$expected") <(printf '%s\n' "$actual") || true)"
+    warn "Роль ${role} уже существует, но отличается; существующая роль не изменяется, инициализация продолжается"
+    printf '       недостаёт: %s\n' "$(join_lines "$missing")"
+    printf '       лишние:    %s\n' "$(join_lines "$extra")"
+}
+
+ensure_roles() {
+    log "Проверка ролей Proxmox"
+    ensure_role "$ROLE_CLONE" "$ROLE_CLONE_PRIVS"
+    ensure_role "$ROLE_GUEST" "$ROLE_GUEST_PRIVS"
+    ensure_role "$ROLE_NETWORK" "$ROLE_NETWORK_PRIVS"
+    ensure_role "$ROLE_STORAGE" "$ROLE_STORAGE_PRIVS"
+    ensure_role "$ROLE_POOL" "$ROLE_POOL_PRIVS"
+}
+
+ensure_pve_user() {
+    local userid=$1 comment=$2 users_json enabled
+    users_json="$(pveum user list --output-format json)"
+
+    if jq -e --arg id "$userid" '.[] | select(.userid == $id)' <<<"$users_json" >/dev/null; then
+        enabled="$(jq -r --arg id "$userid" '.[] | select(.userid == $id) | (.enable // 1)' \
+            <<<"$users_json" | head -n1)"
+        ok "Пользователь PVE ${userid} уже существует"
+        [[ "$enabled" != "0" ]] || warn "Пользователь PVE ${userid} отключён; скрипт не включает его автоматически"
+    else
+        pveum user add "$userid" --comment "$comment" --enable 1
+        ok "Создан пользователь PVE ${userid}"
+    fi
+}
+
+token_entry() {
+    local userid=$1 token_name=$2
+    pveum user token list "$userid" --output-format json 2>/dev/null \
+        | jq -c --arg id "$token_name" '.[] | select(.tokenid == $id)' | head -n1
+}
+
+write_token_secret() {
+    local file=$1 full_token=$2 secret=$3 group=$4 mode=$5 old_umask
+    old_umask="$(umask)"
+    umask 077
+    printf 'token_id=%s\ntoken_secret=%s\n' "$full_token" "$secret" >"$file"
+    umask "$old_umask"
+    chown root:"$group" "$file"
+    chmod "$mode" "$file"
+}
+
+ensure_token() {
+    local userid=$1 token_name=$2 full_token=$3 secret_file=$4
+    local file_group=$5 file_mode=$6 comment=$7
+    local entry privsep out secret returned_id
+
+    entry="$(token_entry "$userid" "$token_name" || true)"
+    if [[ -n "$entry" ]]; then
+        privsep="$(jq -r '.privsep // 1' <<<"$entry")"
+        [[ "$privsep" == "1" ]] \
+            || warn "API-токен ${full_token} уже существует с privsep=${privsep}; скрипт его не изменяет"
+
+        [[ -f "$secret_file" ]] \
+            || die "API-токен ${full_token} существует, но локальный файл секрета ${secret_file} отсутствует. Требуется явная ротация или восстановление учётных данных."
+
+        chown root:"$file_group" "$secret_file"
+        chmod "$file_mode" "$secret_file"
+        ok "API-токен ${full_token} уже существует, локальный секрет найден"
+        return
+    fi
+
+    [[ ! -f "$secret_file" ]] \
+        || warn "Файл ${secret_file} существует, но API-токен ${full_token} отсутствует; будет создан новый токен и локальное значение будет заменено"
+
+    out="$(pveum user token add "$userid" "$token_name" --privsep 1 --comment "$comment" --output-format json)"
+    secret="$(jq -r '.value // .data.value // empty' <<<"$out")"
+    returned_id="$(jq -r '."full-tokenid" // .data."full-tokenid" // empty' <<<"$out")"
+
+    [[ -n "$secret" ]] || die "Proxmox создал ${full_token}, но одноразовый секрет не удалось разобрать"
+    [[ -z "$returned_id" || "$returned_id" == "$full_token" ]] \
+        || die "Proxmox вернул неожиданный идентификатор API-токена: ${returned_id}"
+
+    write_token_secret "$secret_file" "$full_token" "$secret" "$file_group" "$file_mode"
+    unset secret out
+    ok "Создан API-токен ${full_token}, секрет сохранён на PVE"
+}
+
+acl_entry() {
+    local path=$1 type=$2 ugid=$3 role=$4
+    pveum acl list --output-format json \
+        | jq -c --arg path "$path" --arg type "$type" --arg ugid "$ugid" --arg role "$role" \
+            '.[] | select(.path == $path and .type == $type and .ugid == $ugid and .roleid == $role)' \
+        | head -n1
+}
+
+ensure_acl_entry() {
+    local path=$1 type=$2 ugid=$3 role=$4
+    local entry propagate option label
+
+    entry="$(acl_entry "$path" "$type" "$ugid" "$role" || true)"
+    if [[ -n "$entry" ]]; then
+        propagate="$(jq -r '.propagate // 1' <<<"$entry")"
+        if [[ "$propagate" == "1" ]]; then
+            ok "ACL уже существует: ${path}, ${type}=${ugid}, роль=${role}"
+        else
+            warn "ACL ${path}, ${type}=${ugid}, роль=${role} существует с propagate=${propagate}; скрипт его не изменяет"
+        fi
+        return
+    fi
+
+    case "$type" in
+        user) option="--users"; label="пользователь" ;;
+        token) option="--tokens"; label="API-токен" ;;
+        *) die "Неподдерживаемый тип субъекта ACL: $type" ;;
+    esac
+
+    pveum acl modify "$path" "$option" "$ugid" --roles "$role" --propagate 1
+    ok "Добавлен ACL: ${path}, ${label}=${ugid}, роль=${role}"
+}
+
+ensure_identity_acls() {
+    local userid=$1 tokenid=$2 principal_type principal
+
+    # При privsep=1 одинаковые ACL нужны базовому пользователю и самому API-токену.
+    for principal_type in user token; do
+        if [[ "$principal_type" == "user" ]]; then principal="$userid"; else principal="$tokenid"; fi
+
+        # managed — основная write-zone обычных VM/LXC.
+        ensure_acl_entry "/pool/${MANAGED_POOL}" "$principal_type" "$principal" "$ROLE_GUEST"
+        # Pool.Allocate разрешает явное изменение состава managed.
+        ensure_acl_entry "/pool/${MANAGED_POOL}" "$principal_type" "$principal" "$ROLE_POOL"
+        # 9000 доступен отдельно только как источник clone.
+        ensure_acl_entry "/vms/${TEMPLATE_VMID}" "$principal_type" "$principal" "$ROLE_CLONE"
+        ensure_acl_entry "/storage/local" "$principal_type" "$principal" "$ROLE_STORAGE"
+        ensure_acl_entry "/storage/local-lvm" "$principal_type" "$principal" "$ROLE_STORAGE"
+        ensure_acl_entry "/sdn/zones/localnetwork/${BRIDGE}" "$principal_type" "$principal" "$ROLE_NETWORK"
+    done
+}
+
+ensure_pve_identities() {
+    log "Проверка служебных учётных записей, API-токенов и ACL Proxmox"
+
+    ensure_pve_user "$HOST_PVE_USER" \
+        "Учётная запись человека и локальных инструментов PVE для прямого развёртывания"
+    ensure_pve_user "$AI_PVE_USER" \
+        "Учётная запись контура AI, используемая Proximo"
+
+    ensure_token "$HOST_PVE_USER" "$HOST_PVE_TOKEN_NAME" "$HOST_PVE_TOKEN" \
+        "$HOST_TOKEN_FILE" "$DEPLOY_USER" 0640 \
+        "API-токен для deploy-guest и прямой локальной автоматизации PVE"
+    ensure_token "$AI_PVE_USER" "$AI_PVE_TOKEN_NAME" "$AI_PVE_TOKEN" \
+        "$AI_TOKEN_FILE" root 0600 \
+        "Инфраструктурный API-токен для контура AI / Proximo"
+
+    ensure_identity_acls "$HOST_PVE_USER" "$HOST_PVE_TOKEN"
+    ensure_identity_acls "$AI_PVE_USER" "$AI_PVE_TOKEN"
+}
+
+# =============================================================================
+# Template и локальные команды
+# =============================================================================
+
+ensure_template() {
+    if pct config "$TEMPLATE_VMID" >/dev/null 2>&1; then
+        die "VMID ${TEMPLATE_VMID} занят LXC-контейнером; создание шаблона невозможно"
+    fi
+
+    if qm config "$TEMPLATE_VMID" >/dev/null 2>&1; then
+        local name template_flag
+        name="$(qm config "$TEMPLATE_VMID" | awk -F': ' '$1=="name" {print $2}')"
+        template_flag="$(qm config "$TEMPLATE_VMID" | awk -F': ' '$1=="template" {print $2}')"
+        [[ "$name" == "$TEMPLATE_NAME" && "$template_flag" == "1" ]] \
+            || die "VMID ${TEMPLATE_VMID} существует, но не соответствует шаблону ${TEMPLATE_NAME}"
+        ok "Шаблон ${TEMPLATE_VMID} ${TEMPLATE_NAME} уже существует"
+        return
+    fi
+
+    local builder="${REPO_DIR}/scripts/pve/create-template.sh"
+    [[ -f "$builder" ]] || die "Не найден канонический скрипт создания шаблона: $builder"
+
+    log "Создание защищённого Debian-шаблона ${TEMPLATE_VMID}"
+    bash "$builder"
+
+    qm config "$TEMPLATE_VMID" >/dev/null 2>&1 \
+        || die "Скрипт создания шаблона завершился, но VMID ${TEMPLATE_VMID} не создан"
+    [[ "$(qm config "$TEMPLATE_VMID" | awk -F': ' '$1=="template" {print $2}')" == "1" ]] \
+        || die "VMID ${TEMPLATE_VMID} создан, но не является шаблоном Proxmox"
+    ok "Создан шаблон ${TEMPLATE_VMID} ${TEMPLATE_NAME}"
+}
+
+install_private_tooling() {
+    log "Установка стабильных локальных команд PVE"
+
+    cat >/usr/local/sbin/pve-bootstrap-status <<'EOF_STATUS'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+STATE=/var/lib/proxmox-bootstrap/state.json
+[[ -f "$STATE" ]] || { echo "Файл состояния инициализации не найден: $STATE" >&2; exit 1; }
+exec jq . "$STATE"
+EOF_STATUS
+    chmod 0755 /usr/local/sbin/pve-bootstrap-status
+
+    local deployer_src="${REPO_DIR}/scripts/pve/deploy-guest.py"
+    if [[ ! -f "$deployer_src" ]]; then
+        warn "Исходный файл deploy-guest пока отсутствует: ${deployer_src}"
+        return
+    fi
+
+    cat >/usr/local/sbin/deploy-guest <<EOF_DEPLOY
+#!/usr/bin/env bash
+set -Eeuo pipefail
+SOURCE="${deployer_src}"
+if [[ \$EUID -eq 0 ]]; then
+    exec runuser -u ${DEPLOY_USER} -- /usr/bin/python3 "\$SOURCE" "\$@"
+elif [[ \$(id -un) == "${DEPLOY_USER}" ]]; then
+    exec /usr/bin/python3 "\$SOURCE" "\$@"
+else
+    echo "deploy-guest нужно запускать от root или ${DEPLOY_USER}" >&2
+    exit 1
+fi
+EOF_DEPLOY
+    chmod 0755 /usr/local/sbin/deploy-guest
+    ok "Установлена обёртка /usr/local/sbin/deploy-guest"
+}
+
+report_status() {
+    local ready=1
+
+    printf '\nСОСТОЯНИЕ ПРИВАТНОЙ ИНИЦИАЛИЗАЦИИ PVE\n\n'
+    printf '[ОК] Proxmox и KVM проверены\n'
+    printf '[ОК] pve-no-subscription настроен\n'
+    printf '[ОК] DNS и исходящий HTTPS работают\n'
+    printf '[ОК] local/local-lvm/snippets подготовлены\n'
+    printf '[ОК] pvedeploy и файловая структура подготовлены\n'
+    printf '[ОК] Канонический read-only Deploy Key установлен\n'
+    printf '[ОК] Приватный репозиторий синхронизирован\n'
+    printf '[ОК] managed и роли Proxmox проверены\n'
+    printf '[ОК] %s проверен\n' "$HOST_PVE_TOKEN"
+    printf '[ОК] %s проверен\n' "$AI_PVE_TOKEN"
+
+    if qm config "$TEMPLATE_VMID" >/dev/null 2>&1; then
+        printf '[ОК] Шаблон %s существует\n' "$TEMPLATE_VMID"
+    else
+        printf '[НЕТ] Шаблон %s отсутствует\n' "$TEMPLATE_VMID"
+        ready=0
+    fi
+
+    if [[ -x /usr/local/sbin/deploy-guest ]]; then
+        printf '[ОК] Команда deploy-guest установлена\n'
+    else
+        printf '[ОЖИДАНИЕ] deploy-guest пока не реализован\n'
+        ready=0
+    fi
+
+    printf '\nРевизия приватного репозитория: %s\n' "$REPO_REVISION"
+    printf 'Версия приватной инициализации: %s\n' "$BOOTSTRAP_VERSION"
+    printf 'Предупреждений: %s\n' "$WARN_COUNT"
+
+    if (( ready )); then
+        if (( WARN_COUNT )); then
+            printf '\nГОТОВО С ПРЕДУПРЕЖДЕНИЯМИ\n'
+            write_state "ready-with-warnings" "$REPO_REVISION"
+        else
+            printf '\nГОТОВО\n'
+            write_state "ready" "$REPO_REVISION"
+        fi
+    else
+        printf '\nЧАСТИЧНО: основная инициализация выполнена, но один или несколько рабочих компонентов ещё не готовы.\n'
+        write_state "partial" "$REPO_REVISION"
+    fi
+}
+
+main() {
+    [[ $EUID -eq 0 ]] || die "Запустите скрипт от root на хосте Proxmox"
+    setup_bootstrap_log
+
+    check_root_and_pve
+    snapshot_host_config
+    configure_apt
+    install_packages
+    check_time_dns_network
+    ensure_snippets
+    ensure_runtime_layout
+    prepare_canonical_github_access
+    verify_private_repo_access
+    sync_private_repo
+    ensure_managed_pool
+    ensure_roles
+    ensure_pve_identities
+    check_template_source
+    ensure_template
+    install_private_tooling
+    report_status
+}
+
+main "$@"
