@@ -140,7 +140,7 @@ lxc:
 → если отсутствует — BLOCKED/STOP до изменений гостя
 ```
 
-Подготовка host-side prerequisite, включая наличие требуемого LXC template, относится к PVE Stage 1/bootstrap хоста. Это отделено от guest deployment и не требует выдавать `deployer@pve!host-deploy` право загрузки template.
+Наличие нужного LXC template — host-side prerequisite, но guest deployment не определяет, как именно он был подготовлен. PVE Stage 1 не читает `guest.yaml`, `guests/defaults.yaml`, profiles или другие guest-данные ради выбора template: Stage 1 является автономным bootstrap самого хоста и исполняет только собственную встроенную логику. Если требуемого profile template на PVE нет, `deploy-guest` останавливается без попытки скачать или подменить его.
 
 ## Сеть
 
