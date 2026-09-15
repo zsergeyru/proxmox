@@ -4,112 +4,217 @@
 
 Это каноническая политика прав для новой схемы PVE bootstrap/deploy и `301-ai-control`.
 
-Она относится к двум актуальным service identities:
+Она относится к двум актуальным Proxmox service identities:
 
 ```text
 deployer@pve!host-deploy
 ai-agent@pve!infra
 ```
 
-ADR из `guests/320-ai-control/` описывает существующий bootstrap/legacy-контур `320` и не является source of truth для новой схемы прав.
+У этих identities разное назначение. Их не следует считать двумя взаимозаменяемыми токенами одного назначения.
 
-Главный принцип:
-
-```text
-deployer@pve!host-deploy
-→ создаёт и разворачивает VM/LXC по guest.yaml
-
-ai-agent@pve!infra
-→ управляет уже разрешёнными гостями в pool managed
-→ новые гости создаются только через deploy-guest
-```
+ADR из `guests/320-ai-control/` описывает существующий bootstrap/legacy-контур `320` и может использоваться как историческая справка, но не является source of truth для новой схемы прав.
 
 ---
 
-## 1. Host deployer
+# 1. Общая модель
+
+Принята простая схема:
+
+```text
+человек / локальная host-side automation
+→ deployer@pve!host-deploy
+
+AI control / Proximo / AI agents
+→ ai-agent@pve!infra
+```
+
+Основная граница для AI automation — Proxmox resource pool:
+
+```text
+managed
+```
+
+AI agent получает широкие guest-level возможности внутри `managed`, включая создание, clone, настройку и удаление VM/LXC.
+
+Объекты вне `managed` не должны автоматически становиться доступны AI agent.
+
+---
+
+# 2. `deployer@pve!host-deploy`
 
 ```text
 user:  deployer@pve
 token: deployer@pve!host-deploy
 ```
 
-Актор — host-side команда `deploy-guest`.
+## Назначение
 
-Назначение:
+Это инфраструктурная учётная запись для работы **человека или локальной host-side automation непосредственно с Proxmox**.
 
-- читать manifest `guests/*/guest.yaml`;
+Она нужна для сценариев, когда управление выполняется не AI agent через Proximo, а непосредственно на стороне PVE или оператором через подготовленные инструменты проекта.
+
+Типичные потребители:
+
+```text
+человек
+→ deploy-guest
+→ deployer@pve!host-deploy
+
+локальный PVE deploy/runtime
+→ deployer@pve!host-deploy
+```
+
+Эта identity не является учёткой AI agent.
+
+## `deploy-guest`
+
+`deploy-guest` — удобный интерфейс для человека и host-side automation, а не обязательный security gateway для AI agent.
+
+Пример:
+
+```bash
+deploy-guest 311 --apply
+```
+
+Он должен уметь:
+
+- читать `guests/*/guest.yaml`;
 - создавать VM/LXC;
 - clone из template `9000`;
 - задавать CPU/RAM/disks/network/Cloud-Init и другие guest-level параметры;
 - использовать разрешённые storage и bridge;
 - запускать/останавливать guest во время deploy и verification;
-- помещать обычный guest в pool `managed`;
+- помещать обычный guest в `managed`;
 - выполнять проверки после deploy.
 
-`deployer@pve!host-deploy` не предназначен для администрирования самого PVE host: IAM/ACL, host network, storage definitions, repositories, certificates и reboot/shutdown физического PVE остаются вне его штатной зоны.
+Таким образом `deploy-guest` остаётся удобным, воспроизводимым способом для человека развернуть guest по Git desired state.
+
+AI agent при этом не обязан использовать `deploy-guest`: для штатной AI automation он работает через собственную identity `ai-agent@pve!infra` и Proximo.
+
+## Граница прав
+
+`deployer@pve!host-deploy` предназначен для guest-level deployment и работы с разрешёнными ресурсами Proxmox.
+
+Он не предназначен для произвольного администрирования самого PVE host, включая IAM/ACL, изменение host network, storage definitions, repositories, certificates и reboot/shutdown физического PVE.
 
 ---
 
-## 2. AI infrastructure identity
+# 3. `ai-agent@pve!infra`
 
 ```text
 user:  ai-agent@pve
 token: ai-agent@pve!infra
 ```
 
-Основная write-zone этой identity:
+## Назначение
+
+Это отдельная инфраструктурная учётная запись **именно для AI control plane**.
+
+Текущий основной потребитель:
+
+```text
+301-ai-control
+→ Proximo MCP
+→ ai-agent@pve!infra
+→ Proxmox API
+```
+
+Любой разрешённый AI agent внутри `301` использует Proximo, а Proximo обращается к PVE от имени `ai-agent@pve!infra`.
+
+Эта identity не используется как обычная человеческая учётка для ручной работы.
+
+## Возможности AI agent
+
+В своей разрешённой зоне AI agent может самостоятельно:
+
+- создавать VM;
+- создавать LXC;
+- clone существующего template;
+- задавать CPU/RAM/disks/network/guest options;
+- использовать Cloud-Init через поддерживаемые операции Proximo;
+- start/stop/reboot/shutdown;
+- делать snapshots;
+- выполнять rollback;
+- запускать backup;
+- менять конфигурацию guest;
+- удалять VM/LXC;
+- выполнять diagnostics/status и разрешённые guest-level операции.
+
+То есть создание и удаление VM/LXC **не требуется проводить через `deploy-guest`**.
+
+---
+
+# 4. Что такое pool `managed`
+
+`managed` — это Proxmox resource pool, который используется одновременно как:
+
+```text
+organization boundary
++
+security boundary
+```
+
+Простыми словами:
+
+> `managed` содержит VM/LXC, которыми AI automation разрешено штатно управлять.
+
+Основная write-zone AI identity:
 
 ```text
 /pool/managed
 ```
 
-Внутри `managed` AI control получает обычные guest-level возможности:
-
-- читать config/status;
-- менять CPU/RAM/disks/NIC и guest options;
-- start/stop/reboot/shutdown;
-- snapshots и rollback;
-- backup;
-- console и diagnostics;
-- QEMU Guest Agent operations, необходимые для диагностики и управления гостем;
-- удаление managed guest с защитными проверками automation layer.
-
-### Создание новых VM/LXC
-
-`ai-agent@pve!infra` не получает прямые права на произвольное создание/clone новых VM/LXC и помещение их в pools.
-
-Новый guest создаётся так:
+Логика:
 
 ```text
-AI agent
-→ запрос deploy guest <VMID>
-→ host-side deploy-guest
-→ deployer@pve!host-deploy
-→ guest.yaml
-→ create/clone/configure
-→ pool managed, если manifest не задаёт исключение
-→ verification
+guest находится в managed
+→ AI agent получает разрешённые guest-level права
+
+guest находится вне managed
+→ AI agent штатно не должен иметь write-доступ к нему
 ```
 
-Таким образом агент может инициировать создание новой VM/LXC, но фактический deploy выполняется детерминированным host-side механизмом по source of truth из Git.
-
-Способ безопасного вызова `deploy-guest` из AI control является отдельной implementation detail. Он не должен требовать выдачи `ai-agent@pve!infra` прямого `VM.Allocate`/`VM.Clone` только ради создания гостей.
+Это позволяет не строить сложную систему индивидуальных ACL для каждой обычной VM/LXC.
 
 ---
 
-## 3. Pool `managed`
+# 5. Создание новых VM/LXC агентом
 
-`managed` — основная security и organization boundary для runtime automation.
+AI agent разрешено самостоятельно создавать новые VM/LXC.
+
+Основное правило:
+
+> Новый обычный guest, создаваемый AI automation, должен сразу создаваться в pool `managed`.
+
+Для clone Proximo поддерживает параметр pool непосредственно в `pve_clone`:
 
 ```text
-внутри managed
-→ ai-agent может штатно управлять гостем
-
-вне managed
-→ write-доступ AI control не предполагается
+pve_clone(..., pool="managed")
 ```
 
-Обычный `deploy-guest` помещает новый guest в `managed`, если manifest/документация не определяют его как защищённое исключение.
+Для создания VM/LXC с нуля Proximo позволяет передать Proxmox create options, включая:
+
+```text
+options:
+  pool: managed
+```
+
+Поэтому нормальный flow выглядит так:
+
+```text
+AI agent
+→ Proximo
+→ create/clone
+→ pool=managed
+→ новый VM/LXC сразу появляется в managed
+```
+
+Не требуется сначала создать guest вне `managed`, а затем отдельной операцией переносить его в pool.
+
+---
+
+# 6. Почему protected VM вне `managed` остаются защищёнными
 
 По умолчанию не включать в обычную AI write-zone:
 
@@ -120,54 +225,184 @@ AI agent
 9000  protected template
 ```
 
-Template `9000` используется host deployer как источник clone и не управляется AI runtime напрямую.
+И другие объекты, для которых документация явно задаёт исключение.
 
----
-
-## 4. Разделение ответственности
+Например:
 
 ```text
-deploy-guest + deployer@pve!host-deploy
-→ desired-state deployment
-→ создание нового guest
-→ первичная конфигурация
-→ добавление в managed
-
-Proximo + ai-agent@pve!infra
-→ runtime lifecycle managed guests
-→ изменения guest resources
-→ snapshots/backups
-→ diagnostics
+VM 100 вне managed
 ```
 
-Это разделение сохраняется независимо от конкретного AI-агента или MCP implementation.
+AI agent не получает на неё обычные guest-level права через `/pool/managed`.
+
+То есть наличие у AI права работать с pool `managed` не означает автоматически права взять произвольную существующую VM вне pool и начать ею управлять.
+
+Для создания нового объекта agent использует свои allocate/clone права в разрешённом deployment flow и создаёт новый guest сразу в `managed`.
+
+Не выдавать `ai-agent@pve!infra` широкие guest-management ACL на весь `/` или на все `/vms`, потому что это разрушит смысл `managed` как основной security boundary.
 
 ---
 
-## 5. Роли Proxmox
-
-Реализация должна использовать две отдельные custom roles, например:
+# 7. Template `9000`
 
 ```text
-PVEHostDeployer
-PVEAIManaged
+9000  tpl-debian13
 ```
 
-`PVEHostDeployer` получает guest-level privileges, необходимые `deploy-guest` для create/clone/configure/start/verify и работы с разрешёнными storage/network resources.
+Template остаётся вне обычной write-zone `managed`.
 
-`PVEAIManaged` получает широкий guest-level runtime набор, но ACL применяется к `managed`, а права прямого создания/clone новых объектов не выдаются.
+AI agent должен иметь возможность:
 
-Точные privilege names и команды `pveum` проверяются по установленной версии Proxmox VE перед реализацией, без изменения описанной здесь модели доступа.
+```text
+видеть template
+→ clone из 9000
+→ создать новый VMID сразу в managed
+```
+
+Но сам template не должен автоматически становиться обычным managed guest.
+
+Для этого используется отдельный ограниченный доступ к clone source.
 
 ---
 
-## 6. Запрещённая зона для AI identity
+# 8. Принятые Proxmox roles
 
-`ai-agent@pve!infra` штатно не получает права на:
+На текущем PVE уже существуют роли:
+
+## `AICloneSource`
+
+```text
+VM.Audit
+VM.Clone
+```
+
+Назначение:
+
+```text
+разрешить видеть template/source guest
+и использовать его как источник clone
+```
+
+Основной объект — template `9000`.
+
+## `AIManagedGuest`
+
+```text
+VM.Allocate
+VM.Audit
+VM.Backup
+VM.Clone
+VM.Config.CPU
+VM.Config.Disk
+VM.Config.Memory
+VM.Config.Network
+VM.Config.Options
+VM.PowerMgmt
+VM.Snapshot
+VM.Snapshot.Rollback
+```
+
+Назначение:
+
+```text
+широкое управление обычными VM/LXC в managed
+```
+
+Эта роль позволяет AI automation создавать/удалять и администрировать guest-level объекты в разрешённой зоне.
+
+## `AINetworkUse`
+
+```text
+SDN.Use
+```
+
+Назначение:
+
+```text
+использование разрешённой сети/bridge гостем
+```
+
+Это не право администрировать host network или SDN infrastructure.
+
+## `AIStorage`
+
+```text
+Datastore.AllocateSpace
+Datastore.Audit
+```
+
+Назначение:
+
+```text
+видеть разрешённый storage
+и выделять пространство под guest disks/clone/другие разрешённые guest-level операции
+```
+
+Это не право изменять определения Proxmox storage.
+
+## Права на pool
+
+Для работы с `managed` AI identity должны быть выданы необходимые pool-level privileges на сам `/pool/managed`, включая возможность создавать обычные объекты сразу в этом pool и управлять membership в рамках возможностей Proxmox RBAC.
+
+Допускается отдельная небольшая роль для pool-level privileges, если это требуется фактической версией PVE.
+
+Точные privilege names для pool-level роли перед реализацией проверяются на установленной версии Proxmox VE.
+
+---
+
+# 9. Роли для двух identities
+
+## `deployer@pve!host-deploy`
+
+Получает права, достаточные для прямого host-side deployment:
+
+```text
+clone source
+managed guests
+authorized storage
+authorized network
+managed pool membership
+```
+
+Эта identity используется человеком/host-side tooling.
+
+## `ai-agent@pve!infra`
+
+Получает аналогичные guest-level возможности, необходимые AI automation:
+
+```text
+clone source
+managed guests
+authorized storage
+authorized network
+managed pool membership
+```
+
+Но эта identity используется только AI control/Proximo.
+
+Ключевое различие двух identities — не попытка искусственно сделать одну из них значительно слабее другой, а **разделение потребителей и audit trail**:
+
+```text
+deployer
+→ человек / host-side tools
+
+ai-agent
+→ AI / Proximo
+```
+
+Credentials могут независимо ротироваться и отзываться.
+
+---
+
+# 10. Что AI identity не должна администрировать
+
+`ai-agent@pve!infra` штатно не предназначена для управления самим гипервизором.
+
+Не выдавать ей без отдельного решения права на:
 
 - PVE users/groups/realms;
 - ACL/roles/API tokens;
-- host network/bridges/routes;
+- host network/physical NIC/routes;
 - изменение storage definitions;
 - SDN infrastructure administration;
 - repositories/update policy;
@@ -176,14 +411,130 @@ PVEAIManaged
 - reboot/shutdown физического PVE host;
 - изменение собственного уровня доступа.
 
-## Итог
+То же общее правило действует и для обычной host-deployer identity: guest deployment не должен автоматически превращаться в полный PVE administrator access.
+
+---
+
+# 11. Поведение bootstrap при уже существующих ролях
+
+Новый `init-pve.sh` обязан учитывать, что PVE может быть уже частично настроен и нужные роли могут существовать до запуска bootstrap.
+
+Скрипт не должен считать сам факт существования роли ошибкой.
+
+## Роль отсутствует
 
 ```text
-CREATE
-AI request → deploy-guest → host-deploy token → guest.yaml → managed
-
-RUNTIME
-AI agent → ai-agent@pve!infra → /pool/managed
+роль отсутствует
+→ создать роль с ожидаемым набором privileges
+→ продолжить bootstrap
 ```
 
-Основная защита runtime AI — граница `managed`; основная защита создания VM/LXC — обязательный проход через `deploy-guest` и `guest.yaml`.
+Пример:
+
+```text
+[CREATE] role AICloneSource
+```
+
+## Роль существует и совпадает
+
+```text
+роль существует
++ privileges совпадают
+→ использовать существующую роль
+→ ничего не пересоздавать
+→ продолжить bootstrap
+```
+
+Пример:
+
+```text
+[OK] role AICloneSource already exists and matches
+```
+
+## Роль существует, но набор privileges отличается
+
+```text
+роль существует
++ privileges отличаются от ожидаемых
+→ НЕ перезаписывать автоматически
+→ НЕ удалять роль
+→ НЕ останавливать bootstrap
+→ показать warning
+→ показать missing/extra privileges
+→ продолжить остальные стадии
+```
+
+Пример:
+
+```text
+[WARN] role AIManagedGuest already exists and differs
+       missing: VM.Config.Cloudinit
+       extra:   none
+       existing role left unchanged
+       bootstrap continues
+```
+
+Причина такой политики: существующая роль уже может использоваться текущей инфраструктурой, например legacy/bootstrap `320`, и молчаливое изменение её privileges может нарушить работающий доступ.
+
+Отличие existing role от desired role — это diagnostic warning, а не fatal bootstrap error.
+
+---
+
+# 12. Поведение bootstrap с существующими ACL
+
+Аналогичный принцип применяется к ACL.
+
+```text
+нужный ACL существует
+→ использовать
+
+нужного ACL нет
+→ добавить
+
+существуют дополнительные старые ACL
+→ не удалять автоматически
+→ при необходимости показать warning/report
+→ продолжить bootstrap
+```
+
+Bootstrap не должен выполнять массовую очистку существующих ACL только ради приведения PVE к своей модели.
+
+Удаление или сужение старых ACL выполняется отдельным осознанным действием после проверки их текущего использования.
+
+---
+
+# 13. Итоговая схема
+
+## Работа человека
+
+```text
+человек
+→ deploy-guest или другой host-side tool
+→ deployer@pve!host-deploy
+→ Proxmox
+```
+
+`deploy-guest` — удобный интерфейс для воспроизводимого deployment по `guest.yaml`.
+
+## Работа AI
+
+```text
+AI agent
+→ Proximo
+→ ai-agent@pve!infra
+→ Proxmox
+```
+
+AI самостоятельно создаёт, настраивает, обслуживает и удаляет разрешённые VM/LXC.
+
+Для обычных новых объектов:
+
+```text
+create/clone
+→ сразу managed
+→ дальнейшее управление в managed
+```
+
+## Главный принцип
+
+> `managed` — рабочая зона AI automation. `deployer@pve!host-deploy` — отдельная identity для человека и прямой host-side работы с Proxmox. `ai-agent@pve!infra` — отдельная identity именно для AI/Proximo. Новые обычные гости AI создаёт сразу в `managed`, а protected guests остаются вне этого pool и не получают автоматически права AI write-access.
