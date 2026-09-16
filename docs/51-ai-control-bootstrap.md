@@ -12,11 +12,12 @@
 
 - [`20-pve-initialization.md`](20-pve-initialization.md) — zero-day PVE и host-side deploy;
 - [`21-pve-filesystem-layout.md`](21-pve-filesystem-layout.md) — файловая модель PVE bootstrap/deployer;
+- [`23-security.md`](23-security.md) — management SSH identities и credential lifecycle;
 - [`25-pve-access-control.md`](25-pve-access-control.md) — PVE identities, роли и `managed`;
 - [`30-guest-manifest.md`](30-guest-manifest.md) — guest contract;
 - [`33-guest-bootstrap-and-provisioning.md`](33-guest-bootstrap-and-provisioning.md) — initial management access, bootstrap и Ansible;
 - [`50-ai-control.md`](50-ai-control.md) — архитектура `301-ai-control`;
-- [`../templates/debian13/users-and-keys.md`](../templates/debian13/users-and-keys.md) — SSH identities.
+- [`../templates/debian13/build-policy.md`](../templates/debian13/build-policy.md) — contract template `9000`.
 
 ## Целевая последовательность bootstrap самого 301
 
@@ -24,9 +25,9 @@
 
 ```text
 чистый PVE
-→ Stage 0 + Stage 1
+→ Public Bootstrap + PVE Configuration
 → private zsergeyru/proxmox доступен на PVE
-→ template 9000 Template-Version 6
+→ current template 9000
 → host-side deploy 301-ai-control
 → root SSH по pve_guest_ed25519
 → подготовка common platform
@@ -35,6 +36,8 @@
 → Git/SSH/MCP health checks
 → ввод 301 как control plane
 ```
+
+Версия template здесь намеренно не фиксируется. Текущий baseline определяется только [`../templates/debian13/README.md`](../templates/debian13/README.md) и [`../templates/debian13/build-policy.md`](../templates/debian13/build-policy.md).
 
 После ввода 301 обычный AI lifecycle:
 
@@ -124,6 +127,8 @@ public key
 
 AI infrastructure key и GitHub Deploy Key — разные credentials.
 
+Полный credential contract определён в [`23-security.md`](23-security.md) и не дублируется здесь.
+
 ## Независимость SSH от `managed`
 
 ```text
@@ -140,7 +145,7 @@ AI public key в guest
 
 ## Public-key registration
 
-Public key не является секретом. Новая common-platform implementation должна уметь показать/экспортировать `ai_control_ed25519.pub` для регистрации в host-side deploy workflow.
+Public key не является секретом. Common-platform implementation должна уметь показать/экспортировать `ai_control_ed25519.pub` для регистрации в host-side deploy workflow.
 
 Private key при этом не покидает 301.
 
@@ -189,7 +194,7 @@ AI agent / пользователь
 
 До вывода `320-ai-control` нужно проверить:
 
-1. `301` создаётся host-side из Template-Version 6;
+1. `301` создаётся host-side из текущего template `9000`;
 2. QGA/Cloud-Init работают;
 3. host-side root SSH по `pve_guest_ed25519` работает;
 4. common platform создаёт отдельный `ai_control_ed25519`;
