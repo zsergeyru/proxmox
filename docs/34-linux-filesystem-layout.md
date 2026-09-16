@@ -1,6 +1,6 @@
 # Файловая структура Linux-сервисов
 
-**Type:** Policy / Reference  
+**Type:** Policy  
 **Status:** Active  
 **Source of truth:** Yes — для размещения кода, конфигурации, persistent data, логов, cache и runtime-файлов внутри Linux-гостей проекта.
 
