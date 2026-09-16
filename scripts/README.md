@@ -22,7 +22,7 @@ scripts/
 
 Общий модуль преобразования исходной конфигурации гостевой системы в итоговое требуемое состояние.
 
-Его должны переиспользовать проверяющий скрипт и будущие средства развёртывания гостевых систем, чтобы правила объединения и адресации существовали в одном месте.
+Его должны переиспользовать проверяющий скрипт и средства развёртывания гостевых систем, чтобы правила объединения и адресации существовали в одном месте.
 
 Основная спецификация данных: [`../docs/30-guest-manifest.md`](../docs/30-guest-manifest.md).
 
@@ -87,7 +87,11 @@ scripts/pve/setup/tests/
 
 ## `deploy-guest`
 
-Основные требования к будущему развёртыванию гостевых систем со стороны PVE описывают:
+Основной источник требований к поведению будущего `scripts/pve/deploy-guest.py`:
+
+- [`../docs/31-deploy-guest.md`](../docs/31-deploy-guest.md) — PLAN/APPLY, работа с API Proxmox, создание и изменение VM/LXC, защита существующих объектов, обработка ошибок и проверка результата.
+
+Связанные основные документы:
 
 - [`../docs/26-deploy-guest-and-agent-access.md`](../docs/26-deploy-guest-and-agent-access.md) — рабочая схема и разделение учётных записей;
 - [`../docs/30-guest-manifest.md`](../docs/30-guest-manifest.md) — исходные данные и итоговое требуемое состояние;
@@ -109,4 +113,5 @@ scripts/pve/setup/tests/
 - [`../docs/24-reproducible-bootstrap.md`](../docs/24-reproducible-bootstrap.md) — воспроизводимость и версионирование.
 - [`../docs/25-pve-access-control.md`](../docs/25-pve-access-control.md) — роли и ACL PVE.
 - [`../docs/30-guest-manifest.md`](../docs/30-guest-manifest.md) — модель данных гостевых систем.
+- [`../docs/31-deploy-guest.md`](../docs/31-deploy-guest.md) — спецификация `deploy-guest`.
 - [`../templates/debian13/build-policy.md`](../templates/debian13/build-policy.md) — спецификация сборки шаблона.
