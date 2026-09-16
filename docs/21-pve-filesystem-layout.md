@@ -1,6 +1,10 @@
 # Файловая структура Public Bootstrap / PVE Configuration
 
-Парный документ: [`20-pve-initialization.md`](20-pve-initialization.md).
+**Type:** Reference  
+**Status:** Active  
+**Source of truth:** Yes — для host-side filesystem, state, credential paths, ownership и runtime layout PVE bootstrap/deployer.
+
+Парный runbook: [`20-pve-initialization.md`](20-pve-initialization.md).
 
 Основной принцип:
 
