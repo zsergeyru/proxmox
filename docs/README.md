@@ -5,232 +5,230 @@
 При этом каждый крупный документ имеет **ровно один основной тип**:
 
 ```text
-Overview
-Policy
-Specification
-Reference
-Runbook
+Обзор
+Политика
+Спецификация
+Справочник
+Инструкция
 ```
 
-Смешанные типы вроде `Policy / Reference` или `Design / Runbook` больше не используются. Если в одном файле накопились разные виды информации, её нужно разнести по отдельным документам и связать ссылками.
+Смешанные типы больше не используются. Если в одном файле накопились разные виды информации, её нужно разнести по отдельным документам и связать ссылками.
 
 ## Типы документов
 
-### Overview
+### Обзор
 
 Объясняет систему человеку: что существует, как части связаны и куда идти дальше.
 
-Overview:
+Обзор:
 
-- не владеет точными privilege sets, версиями, IP и machine-readable contracts;
+- не хранит точные наборы привилегий, версии, IP-адреса и машинные контракты;
 - не содержит длинных пошаговых процедур;
-- должен быть коротким и ссылаться на профильные источники истины.
+- должен быть коротким и ссылаться на профильные основные источники.
 
-### Policy
+### Политика
 
 Фиксирует принятые правила, ограничения и причины решений.
 
-Policy отвечает на вопросы:
+Политика отвечает на вопросы:
 
 ```text
-что разрешено / запрещено
+что разрешено и запрещено
 какие гарантии требуются
-какие safety boundaries приняты
+какие границы безопасности приняты
 почему проект действует именно так
 ```
 
-Policy не должна превращаться в пошаговую инструкцию эксплуатации.
+Политика не должна превращаться в пошаговую инструкцию эксплуатации.
 
-### Specification
+### Спецификация
 
-Фиксирует **точный desired contract** системы или интерфейса.
+Фиксирует **точное требуемое состояние** системы или интерфейса.
 
 Здесь допустимы:
 
-- schema;
-- exact fields/semantics;
-- роли и privilege sets;
-- network topology/contracts;
-- machine-visible parameters;
-- обязательные invariants.
+- схемы данных;
+- точные поля и правила их обработки;
+- роли и наборы привилегий;
+- топология сети и её обязательные параметры;
+- параметры, видимые программам и автоматике;
+- обязательные условия и ограничения.
 
-Specification отвечает на вопрос **«каким должно быть состояние»**.
+Спецификация отвечает на вопрос **«каким должно быть состояние»**.
 
-### Reference
+### Справочник
 
-Справочник для поиска фактов и структуры.
+Служит для поиска фактов и структуры.
 
 Примеры:
 
-- filesystem paths;
-- ownership/layout;
-- перечень runtime/state locations;
-- observed inventory, если документ явно так помечен;
-- экспериментальная справка, которая не является production contract.
+- пути в файловой системе;
+- владельцы и права доступа;
+- расположение рабочих данных и файлов состояния;
+- фактическое состояние оборудования или системы, если документ явно так помечен;
+- экспериментальная справка, которая не является рабочим контрактом.
 
-Reference не должна повторять policy и не должна учить оператора последовательности действий.
+Справочник не должен повторять политику и не должен учить оператора последовательности действий.
 
-### Runbook
+### Инструкция
 
 Пошаговая эксплуатационная процедура.
 
-Runbook отвечает на вопрос **«что делать оператору»** и может содержать команды, последовательность проверок, STOP conditions и acceptance checklist.
+Инструкция отвечает на вопрос **«что делать оператору»** и может содержать команды, последовательность проверок, условия остановки и критерии успешного завершения.
 
-Runbook должен ссылаться на Policy/Specification/Reference вместо копирования их точных contracts.
+Инструкция должна ссылаться на Политику, Спецификацию и Справочник вместо копирования их точных значений.
 
 ## Быстрый маршрут
 
 | Задача | Куда идти |
 |---|---|
 | Понять общую архитектуру | [`10-architecture.md`](10-architecture.md) |
-| Найти VMID/CTID и addressing contract | [`11-vmid-plan.md`](11-vmid-plan.md) |
-| Инициализировать или повторно применить PVE configuration | [`20-pve-initialization.md`](20-pve-initialization.md) |
-| Найти host-side paths/state/credentials | [`21-pve-filesystem-layout.md`](21-pve-filesystem-layout.md) |
-| Понять backup/retention/RPO/RTO policy | [`22-storage-and-backup.md`](22-storage-and-backup.md) |
-| Выполнить restore/disaster recovery | [`27-backup-and-disaster-recovery-runbook.md`](27-backup-and-disaster-recovery-runbook.md) |
-| SSH identities и общая security policy | [`23-security.md`](23-security.md) |
-| Versioning/reproducibility rules | [`24-reproducible-bootstrap.md`](24-reproducible-bootstrap.md) |
-| Точные PVE roles/privileges/ACL | [`25-pve-access-control.md`](25-pve-access-control.md) |
-| Простое объяснение deployer ↔ AI flow | [`26-deploy-guest-and-agent-access.md`](26-deploy-guest-and-agent-access.md) |
-| Формат `guest.yaml` и merge semantics | [`30-guest-manifest.md`](30-guest-manifest.md) |
-| Docker inside LXC rules | [`32-docker-in-lxc-policy.md`](32-docker-in-lxc-policy.md) |
-| Initial SSH/bootstrap/provisioning contract | [`33-guest-bootstrap-and-provisioning.md`](33-guest-bootstrap-and-provisioning.md) |
-| Размещение code/config/data внутри Linux | [`34-linux-filesystem-layout.md`](34-linux-filesystem-layout.md) |
-| IPv4/VLAN/VPN/PBR contract | [`40-network.md`](40-network.md) |
-| DNS contract | [`41-dns.md`](41-dns.md) |
-| IPv6 policy | [`42-ipv6.md`](42-ipv6.md) |
-| AI control plane contract | [`50-ai-control.md`](50-ai-control.md) |
+| Найти VMID/CTID и правила адресации | [`11-vmid-plan.md`](11-vmid-plan.md) |
+| Инициализировать или повторно применить конфигурацию PVE | [`20-pve-initialization.md`](20-pve-initialization.md) |
+| Найти пути, файлы состояния и учётные данные на PVE-хосте | [`21-pve-filesystem-layout.md`](21-pve-filesystem-layout.md) |
+| Понять правила резервного копирования, сроки хранения, RPO и RTO | [`22-storage-and-backup.md`](22-storage-and-backup.md) |
+| Выполнить восстановление или аварийное восстановление | [`27-backup-and-disaster-recovery-runbook.md`](27-backup-and-disaster-recovery-runbook.md) |
+| SSH-ключи и общие правила безопасности | [`23-security.md`](23-security.md) |
+| Правила версионирования и воспроизводимости | [`24-reproducible-bootstrap.md`](24-reproducible-bootstrap.md) |
+| Точные роли, привилегии и ACL Proxmox | [`25-pve-access-control.md`](25-pve-access-control.md) |
+| Простое объяснение взаимодействия средства развёртывания и AI | [`26-deploy-guest-and-agent-access.md`](26-deploy-guest-and-agent-access.md) |
+| Формат `guest.yaml` и правила объединения настроек | [`30-guest-manifest.md`](30-guest-manifest.md) |
+| Правила Docker внутри LXC | [`32-docker-in-lxc-policy.md`](32-docker-in-lxc-policy.md) |
+| Начальный SSH-доступ, первичная настройка и передача управления Ansible | [`33-guest-bootstrap-and-provisioning.md`](33-guest-bootstrap-and-provisioning.md) |
+| Размещение кода, конфигурации и данных внутри Linux | [`34-linux-filesystem-layout.md`](34-linux-filesystem-layout.md) |
+| Контракт IPv4, VLAN, VPN и PBR | [`40-network.md`](40-network.md) |
+| Контракт DNS | [`41-dns.md`](41-dns.md) |
+| Политика IPv6 | [`42-ipv6.md`](42-ipv6.md) |
+| Контракт контура AI Control | [`50-ai-control.md`](50-ai-control.md) |
 | Ввести `301-ai-control` в работу | [`51-ai-control-bootstrap.md`](51-ai-control-bootstrap.md) |
-| Посмотреть текущие local-AI эксперименты | [`52-local-ai.md`](52-local-ai.md) |
-| Граница server repo ↔ apartment repo | [`60-apartment-infrastructure.md`](60-apartment-infrastructure.md) |
+| Посмотреть текущие эксперименты с локальным AI | [`52-local-ai.md`](52-local-ai.md) |
+| Граница репозитория сервера и проекта квартиры | [`60-apartment-infrastructure.md`](60-apartment-infrastructure.md) |
 
-Template `9000` документируется отдельно:
+Шаблон `9000` документируется отдельно:
 
-- [`../templates/debian13/README.md`](../templates/debian13/README.md) — Overview/passport;
-- [`../templates/debian13/build-policy.md`](../templates/debian13/build-policy.md) — фактически Specification полного template contract.
+- [`../templates/debian13/README.md`](../templates/debian13/README.md) — обзор и паспорт;
+- [`../templates/debian13/build-policy.md`](../templates/debian13/build-policy.md) — точная спецификация шаблона.
 
 ## Карта документов по типам
 
-### Overview
+### Обзор
 
 | Документ | Область |
 |---|---|
 | [`10-architecture.md`](10-architecture.md) | общая картина платформы |
-| [`26-deploy-guest-and-agent-access.md`](26-deploy-guest-and-agent-access.md) | человеческое объяснение Git/deployer/AI flows |
+| [`26-deploy-guest-and-agent-access.md`](26-deploy-guest-and-agent-access.md) | понятное описание взаимодействия Git, средства развёртывания и AI |
 
-### Policy
+### Политика
 
 | Документ | Что фиксирует |
 |---|---|
-| [`22-storage-and-backup.md`](22-storage-and-backup.md) | backup classes, retention, RPO/RTO, restore requirements |
-| [`23-security.md`](23-security.md) | общая security и SSH credential model |
-| [`24-reproducible-bootstrap.md`](24-reproducible-bootstrap.md) | versioning/reproducibility/source revision rules |
-| [`32-docker-in-lxc-policy.md`](32-docker-in-lxc-policy.md) | допустимые границы Docker inside unprivileged LXC |
-| [`34-linux-filesystem-layout.md`](34-linux-filesystem-layout.md) | правила размещения application/config/persistent data/logs/cache/runtime |
-| [`42-ipv6.md`](42-ipv6.md) | принятая IPv6/dual-stack policy |
-| [`60-apartment-infrastructure.md`](60-apartment-infrastructure.md) | граница ответственности server infrastructure и apartment project |
+| [`22-storage-and-backup.md`](22-storage-and-backup.md) | классы резервных копий, сроки хранения, RPO/RTO и требования к восстановлению |
+| [`23-security.md`](23-security.md) | общие правила безопасности и модель SSH-ключей |
+| [`24-reproducible-bootstrap.md`](24-reproducible-bootstrap.md) | версионирование, воспроизводимость и правила фиксации ревизии исходного кода |
+| [`32-docker-in-lxc-policy.md`](32-docker-in-lxc-policy.md) | допустимые границы Docker внутри непривилегированного LXC |
+| [`34-linux-filesystem-layout.md`](34-linux-filesystem-layout.md) | размещение приложений, конфигурации, постоянных данных, журналов, кэша и временных рабочих файлов |
+| [`42-ipv6.md`](42-ipv6.md) | принятая политика IPv6 и двойного стека |
+| [`60-apartment-infrastructure.md`](60-apartment-infrastructure.md) | граница ответственности серверной инфраструктуры и проекта квартиры |
 
-### Specification
+### Спецификация
 
 | Документ | Что задаёт точно |
 |---|---|
-| [`11-vmid-plan.md`](11-vmid-plan.md) | VMID/CTID и addressing contract |
-| [`25-pve-access-control.md`](25-pve-access-control.md) | PVE identities, roles, privileges, ACL, `managed` boundary |
-| [`30-guest-manifest.md`](30-guest-manifest.md) | manifest/defaults/effective-state schema и semantics |
-| [`33-guest-bootstrap-and-provisioning.md`](33-guest-bootstrap-and-provisioning.md) | management readiness/bootstrap/provisioning contract |
-| [`40-network.md`](40-network.md) | IPv4/VLAN/routing/VPN/PBR architecture contract |
-| [`41-dns.md`](41-dns.md) | DNS/home.arpa/SmartDNS/mDNS contract |
-| [`50-ai-control.md`](50-ai-control.md) | target AI control plane contract |
+| [`11-vmid-plan.md`](11-vmid-plan.md) | VMID/CTID и правила адресации |
+| [`25-pve-access-control.md`](25-pve-access-control.md) | учётные записи PVE, роли, привилегии, ACL и граница `managed` |
+| [`30-guest-manifest.md`](30-guest-manifest.md) | схема манифеста, общих настроек и итогового состояния |
+| [`33-guest-bootstrap-and-provisioning.md`](33-guest-bootstrap-and-provisioning.md) | готовность к управлению, первичная настройка и передача управления Ansible |
+| [`40-network.md`](40-network.md) | архитектурный контракт IPv4, VLAN, маршрутизации, VPN и PBR |
+| [`41-dns.md`](41-dns.md) | контракт DNS, `home.arpa`, SmartDNS и mDNS |
+| [`50-ai-control.md`](50-ai-control.md) | целевой контракт контура AI Control |
 
-### Reference
+### Справочник
 
 | Документ | Справочная область |
 |---|---|
-| [`21-pve-filesystem-layout.md`](21-pve-filesystem-layout.md) | host-side filesystem/state/credentials layout |
-| [`52-local-ai.md`](52-local-ai.md) | Draft reference по текущей experimental local-inference среде |
+| [`21-pve-filesystem-layout.md`](21-pve-filesystem-layout.md) | файловая структура, состояние и учётные данные на PVE-хосте |
+| [`52-local-ai.md`](52-local-ai.md) | черновая справка по текущей экспериментальной среде локального AI |
 
-Observed state PVE также является Reference, но живёт отдельно в [`../host/pve/`](../host/pve/) и всегда датируется/описывается как фактическое состояние, а не desired state.
+Фактическое состояние PVE также относится к справочной документации, но хранится отдельно в [`../host/pve/`](../host/pve/) и всегда описывается как наблюдаемое состояние, а не как требуемое.
 
-### Runbook
+### Инструкция
 
 | Документ | Процедура |
 |---|---|
-| [`20-pve-initialization.md`](20-pve-initialization.md) | first run / rerun / resume PVE bootstrap/configuration |
-| [`27-backup-and-disaster-recovery-runbook.md`](27-backup-and-disaster-recovery-runbook.md) | restore-test и восстановление после потери host |
-| [`51-ai-control-bootstrap.md`](51-ai-control-bootstrap.md) | создание, ввод и acceptance test `301-ai-control` |
+| [`20-pve-initialization.md`](20-pve-initialization.md) | первый запуск, повторный запуск и продолжение настройки PVE после ошибки |
+| [`27-backup-and-disaster-recovery-runbook.md`](27-backup-and-disaster-recovery-runbook.md) | проверка восстановления и восстановление после потери хоста |
+| [`51-ai-control-bootstrap.md`](51-ai-control-bootstrap.md) | создание, ввод в работу и приёмочная проверка `301-ai-control` |
 
 ## Что не является отдельным типом большой документации
 
 ### README
 
-README — entry point или локальный индекс каталога. Он не должен становиться ещё одним source of truth при наличии профильной Specification/Policy.
+README — точка входа или локальный индекс каталога. Он не должен становиться ещё одним основным источником, если для темы уже есть отдельная Спецификация или Политика.
 
-### ADR / decision record
+### ADR / запись решения
 
-ADR фиксирует устойчивое решение **конкретного компонента/гостя** и причины выбора. ADR живёт рядом с объектом, например:
+ADR фиксирует устойчивое решение **конкретного компонента или гостевой системы** и причины выбора. ADR живёт рядом с объектом, например:
 
 ```text
 guests/<guest>/decisions/
 ```
 
-Он не заменяет общепроектную Policy или Specification.
+Он не заменяет общепроектную Политику или Спецификацию.
 
 ### STATUS.md
 
-`STATUS.md` — временное observed/drift состояние конкретного объекта. Это не архитектурная документация и не permanent backlog.
+`STATUS.md` — временное фактическое состояние или расхождение конкретного объекта. Это не архитектурная документация и не постоянный список задач.
 
-### План/backlog
+### План задач
 
-Отдельный `90-roadmap.md` не ведётся. Незавершённая работа не должна смешиваться с действующими contracts. Реализованное устойчивое решение переносится в Policy/Specification/ADR; observed состояние — в `STATUS.md`.
+Отдельный `90-roadmap.md` не ведётся. Незавершённая работа не должна смешиваться с действующими контрактами. Реализованное устойчивое решение переносится в Политику, Спецификацию или ADR; фактическое состояние — в `STATUS.md`.
 
-## Source-of-truth rules
+## Правила основных источников
 
-Числовой префикс — только навигация. Источник истины определяется областью.
-
-Основные владельцы:
+Числовой префикс — только навигация. Основной источник определяется предметной областью.
 
 ```text
-guest desired state
+требуемое состояние гостевых систем
 → guests/defaults.yaml + guests/<guest>/guest.yaml
 
-manifest semantics
+правила манифестов
 → 30-guest-manifest.md + schemas/
 
-PVE permissions
+права PVE
 → 25-pve-access-control.md
 
-SSH/security
+SSH и безопасность
 → 23-security.md
 
-PVE filesystem/runtime paths
+пути и рабочие данные PVE
 → 21-pve-filesystem-layout.md
 
-backup guarantees
+гарантии резервного копирования
 → 22-storage-and-backup.md
 
-operator recovery procedure
+процедура восстановления оператором
 → 27-backup-and-disaster-recovery-runbook.md
 
-template 9000 exact contract
+точная спецификация шаблона 9000
 → templates/debian13/build-policy.md
 
-actual running PVE state
+фактическое состояние работающего PVE
 → host/pve/
 ```
 
-Overview/README/Runbook должны ссылаться на эти owners, а не копировать быстро меняющиеся contract values.
+Обзоры, README и инструкции должны ссылаться на эти основные источники, а не копировать быстро меняющиеся значения.
 
-## Metadata крупных документов
+## Служебный блок крупных документов
 
-Каждый крупный документ `docs/*.md` должен начинаться единым metadata-блоком:
+Каждый крупный документ `docs/*.md` должен начинаться единым блоком:
 
 ```text
-Type: Overview | Policy | Specification | Reference | Runbook
-Status: Active | Draft | Historical
-Source of truth: Yes | No — и для какой области
+Тип: Обзор | Политика | Спецификация | Справочник | Инструкция
+Статус: Действующий | Черновик | Исторический
+Основной источник: Да | Нет — и для какой области
 ```
 
-У документа должен быть **один** `Type`.
+У документа должен быть **один** тип.
 
 Если не удаётся выбрать один тип, это сигнал, что файл нужно разделить.
 
@@ -239,12 +237,12 @@ Source of truth: Yes | No — и для какой области
 Нумерация остаётся тематической:
 
 ```text
-10–19  architecture / inventory contracts
-20–29  PVE host / storage / security / access / recovery
-30–39  guest deploy / provisioning / Linux policy
-40–49  network
-50–59  AI control plane
-60–69  external integration boundaries
+10–19  архитектура и правила инвентаризации
+20–29  PVE-хост, хранилища, безопасность, доступ и восстановление
+30–39  развёртывание гостевых систем, настройка и правила Linux
+40–49  сеть
+50–59  контур AI Control
+60–69  границы внешних интеграций
 ```
 
 Новый документ получает номер внутри соответствующего тематического блока. Файлы не перенумеровываются только ради плотной последовательности.
