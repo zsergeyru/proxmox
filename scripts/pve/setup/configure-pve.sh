@@ -103,11 +103,54 @@ for module in \
     source "${LIB_DIR}/${module}"
 done
 
+configuration_banner_border() {
+    local left=$1 right=$2 rule=''
+    printf -v rule '%*s' 68 ''
+    rule=${rule// /─}
+    printf '%s%s%s\n' "$left" "$rule" "$right"
+}
+
+configuration_banner_line() {
+    local text=$1 width=66 pad=''
+    local LC_ALL=C.UTF-8
+    if (( ${#text} > width )); then
+        printf '│ %s │\n' "$text"
+        return
+    fi
+    printf -v pad '%*s' "$((width - ${#text}))" ''
+    printf '│ %s%s │\n' "$text" "$pad"
+}
+
+configuration_mode() {
+    printf '%s%s[РЕЖИМ]%s %s\n' "$C_BOLD" "$C_MAGENTA" "$C_RESET" "$*"
+}
+
+show_configuration_banner() {
+    printf '\n%s%s' "$C_BOLD" "$C_CYAN"
+    configuration_banner_border '┌' '┐'
+    configuration_banner_line 'Proxmox Project — PVE Configuration'
+    configuration_banner_line ''
+    configuration_banner_line 'Проверяет и настраивает Proxmox host, доступы, storage,'
+    configuration_banner_line 'Debian template 9000 и инфраструктуру deployment.'
+    configuration_banner_line ''
+    configuration_banner_line "PVE Configuration: v${PVE_CONFIGURATION_VERSION}    Template: v${TEMPLATE_VERSION}"
+    configuration_banner_border '└' '┘'
+    printf '%s' "$C_RESET"
+
+    if (( SMOKE_TEST_TEMPLATE )); then
+        configuration_mode "Full Clone smoke-test template ${TEMPLATE_VMID} через временную VM ${SMOKE_VMID}"
+    fi
+    if (( UPDATE_SYSTEM )); then
+        configuration_mode 'Включено полное обновление Proxmox/Debian'
+    fi
+}
+
 parse_configuration_args "$@"
 install_configuration_traps
 
 main() {
     setup_configuration_log
+    show_configuration_banner
     acquire_configuration_lock
 
     CONFIGURATION_RUNNING=1
