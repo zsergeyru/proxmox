@@ -14,7 +14,7 @@
 - [`20-pve-initialization.md`](20-pve-initialization.md) — инициализация нового Proxmox VE host.
 - [`21-pve-filesystem-layout.md`](21-pve-filesystem-layout.md) — файловая структура PVE bootstrap/deployer.
 - [`22-storage-and-backup.md`](22-storage-and-backup.md) — storage, backup, retention и restore.
-- [`23-security.md`](23-security.md) — общие правила безопасности и root key-only management model.
+- [`23-security.md`](23-security.md) — **каноническая общая security policy**: root key-only management, независимые PVE/AI/Ansible SSH identities и private-key lifecycle.
 - [`24-reproducible-bootstrap.md`](24-reproducible-bootstrap.md) — versioning/reproducibility policy и project contract versions.
 - [`25-pve-access-control.md`](25-pve-access-control.md) — **каноническая техническая policy** PVE identities, roles, privileges, ACL и границы `managed`.
 - [`26-deploy-guest-and-agent-access.md`](26-deploy-guest-and-agent-access.md) — **короткий обзор для человека**: `root`, `pvedeploy`, host deployer, AI agent, Git и два независимых management flow.
@@ -23,14 +23,15 @@
 
 Диапазон `27–29` зарезервирован для новых документов уровня PVE.
 
-### 30–39 — развёртывание гостей
+### 30–39 — развёртывание и устройство Linux-гостей
 
 - [`30-guest-manifest.md`](30-guest-manifest.md) — канонический формат `guest.yaml`, root management contract и PVE-side deploy.
 - [`31-bootstrap.md`](31-bootstrap.md) — текущее состояние Stage 0/Stage 1 и bootstrap safety.
 - [`32-docker-in-lxc-policy.md`](32-docker-in-lxc-policy.md) — Docker внутри unprivileged LXC, security boundary и backup/restore gate.
-- [`33-guest-bootstrap-and-provisioning.md`](33-guest-bootstrap-and-provisioning.md) — management readiness, deployer bootstrap ↔ Ansible provisioning и bootstrap capabilities.
+- [`33-guest-bootstrap-and-provisioning.md`](33-guest-bootstrap-and-provisioning.md) — initial management readiness, deployer bootstrap ↔ Ansible provisioning и bootstrap capabilities.
+- [`34-linux-filesystem-layout.md`](34-linux-filesystem-layout.md) — **каноническая policy** размещения application/config/persistent data/logs/cache/runtime внутри Linux VM/LXC.
 
-Диапазон `34–39` зарезервирован для общих deploy/guest policy.
+Диапазон `35–39` зарезервирован для общих deploy/guest policy.
 
 ### 40–49 — сеть
 
