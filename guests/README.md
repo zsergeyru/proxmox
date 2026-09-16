@@ -172,7 +172,7 @@ defaults:
 
 ```text
 debian-vm
-→ Full Clone from VM template 9000 Template-Version 6
+→ Full Clone from current VM template 9000
 → QEMU guest agent
 → root key-only SSH через Cloud-Init
 
@@ -182,6 +182,8 @@ docker-lxc
 → unprivileged + nesting + keyctl
 → root key-only SSH через ssh-public-keys
 ```
+
+Точная версия и contract `9000` определяются в [`../templates/debian13/README.md`](../templates/debian13/README.md) и [`../templates/debian13/build-policy.md`](../templates/debian13/build-policy.md), а не дублируются в guest documentation.
 
 Конкретная версия LXC archive **не хранится** в defaults.
 
@@ -199,6 +201,8 @@ personal key при необходимости
 ```
 
 Pool `managed` и набор SSH keys являются независимыми механизмами. Изменение pool membership не должно автоматически редактировать `authorized_keys`.
+
+Общая credential policy находится в [`../docs/23-security.md`](../docs/23-security.md).
 
 ## `deployable`
 
