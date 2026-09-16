@@ -131,7 +131,7 @@ Full Clone from 9000
 
 Linked Clone не является штатным вариантом.
 
-## Идентификация версии
+## Идентификация версии и contract
 
 Кроме `/etc/vm-template-info`, Proxmox description содержит машинно-читаемый marker:
 
@@ -139,16 +139,25 @@ Linked Clone не является штатным вариантом.
 template-version=6
 ```
 
-Stage 1 требует одновременно:
+PVE Configuration проверяет существующий VMID 9000 по полному host-visible contract:
 
 ```text
 name = tpl-debian13
 template = 1
+protection = 1 после ensure_template
+agent = 1
+vga = std
+serial0 = socket
 ciuser = root
+ciupgrade = 0
+ipconfig0 = ip=dhcp
+cicustom отсутствует
 description содержит template-version=6
 ```
 
-Старый template v4 автоматически не изменяется и не удаляется. При его обнаружении Stage 1 останавливается: переход на v6 является отдельной осознанной пересборкой защищённого VMID 9000.
+До snapshot допускается единственное автоматически исправляемое отклонение: отсутствие `protection=1` у уже совместимого template. Остальные несовпадения вызывают STOP и требуют осознанной пересборки.
+
+Старый template другой версии автоматически не изменяется и не удаляется.
 
 ## `/etc/vm-template-info`
 
