@@ -1,5 +1,9 @@
 # Docker внутри LXC — принятая политика
 
+**Type:** Policy  
+**Status:** Active  
+**Source of truth:** Yes — для допустимых границ Docker внутри unprivileged LXC и обязательных safety conditions.
+
 ## Статус решения
 
 **Принят вариант B:** сервисные application-контейнеры Docker разрешено запускать внутри unprivileged Proxmox LXC ради меньшего расхода RAM/CPU и более простой плотной консолидации сервисов.
