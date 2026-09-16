@@ -1,8 +1,8 @@
 # Guest bootstrap и provisioning
 
-**Type:** Policy / Design  
+**Type:** Specification  
 **Status:** Active  
-**Source of truth:** Yes — для границы `deploy-guest` ↔ bootstrap ↔ Ansible provisioning и initial management readiness.
+**Source of truth:** Yes — для границы `deploy-guest` ↔ bootstrap ↔ Ansible provisioning и initial management readiness contract.
 
 Общая SSH identity policy находится в [`23-security.md`](23-security.md). Формат guest manifest — в [`30-guest-manifest.md`](30-guest-manifest.md).
 
