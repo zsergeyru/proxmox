@@ -71,7 +71,7 @@ Semaphore
 → необязательный web-интерфейс к Ansible
 ```
 
-Подробная схема прав `root`, `pvedeploy`, `deployer@pve!host-deploy` и AI-агента, а также порядок обновления Git описаны в [`docs/26-deploy-guest-and-agent-access.md`](docs/26-deploy-guest-and-agent-access.md).
+Простая схема участников, Git и двух management flow описана в [`docs/26-deploy-guest-and-agent-access.md`](docs/26-deploy-guest-and-agent-access.md). Канонические Proxmox identities, roles, privileges и ACL задаёт [`docs/25-pve-access-control.md`](docs/25-pve-access-control.md).
 
 Для управляемой Debian-инфраструктуры используется единый management user `root`. Пароль root заблокирован; SSH допускается только по public key. Разные потребители используют разные SSH identities, а не разные Linux-пользователи.
 
@@ -116,7 +116,8 @@ guest.yaml
 - [`docs/README.md`](docs/README.md) — оглавление.
 - [`docs/10-architecture.md`](docs/10-architecture.md) — сводная архитектура.
 - [`docs/11-vmid-plan.md`](docs/11-vmid-plan.md) — VMID/CTID и addressing rule.
-- [`docs/26-deploy-guest-and-agent-access.md`](docs/26-deploy-guest-and-agent-access.md) — кто обновляет Git, кто запускает `deploy-guest` и какие права есть у AI-агента.
+- [`docs/25-pve-access-control.md`](docs/25-pve-access-control.md) — канонические PVE identities, roles, privileges и ACL.
+- [`docs/26-deploy-guest-and-agent-access.md`](docs/26-deploy-guest-and-agent-access.md) — обзор: кто обновляет Git, кто запускает `deploy-guest` и как отдельно работает AI-агент.
 - [`docs/30-guest-manifest.md`](docs/30-guest-manifest.md) — guest/defaults contract.
 - [`docs/33-guest-bootstrap-and-provisioning.md`](docs/33-guest-bootstrap-and-provisioning.md) — limited deployer bootstrap, 311 и Ansible provisioning.
 - [`docs/40-network.md`](docs/40-network.md) — IPv4/VLAN/VPN.
