@@ -6,7 +6,7 @@
 
 ## С чего начать
 
-- [`docs/README.md`](docs/README.md) — карта документации и источников истины.
+- [`docs/README.md`](docs/README.md) — карта документации, типов документов и источников истины.
 - [`guests/README.md`](guests/README.md) — как организованы VM/LXC и их manifests.
 - [`host/pve/README.md`](host/pve/README.md) — наблюдаемое состояние работающего PVE host.
 - [`scripts/README.md`](scripts/README.md) — карта исполняемого кода и проверок.
@@ -17,7 +17,7 @@
 
 ```text
 proxmox/
-├── docs/        # архитектура, policy, specifications и runbooks
+├── docs/        # Overview / Policy / Specification / Reference / Runbook
 ├── guests/      # desired state и файлы конкретных VM/LXC
 ├── host/pve/    # наблюдаемое состояние физического PVE host
 ├── scripts/     # bootstrap/configuration/validation tooling
@@ -59,13 +59,16 @@ AI Control
 |---|---|
 | Desired state VM/LXC | `guests/defaults.yaml` + `guests/<guest>/guest.yaml` |
 | Формат и merge semantics manifests | [`docs/30-guest-manifest.md`](docs/30-guest-manifest.md) + `schemas/` |
-| VMID/CTID и addressing plan | [`docs/11-vmid-plan.md`](docs/11-vmid-plan.md) |
-| PVE initialization | [`docs/20-pve-initialization.md`](docs/20-pve-initialization.md) |
+| VMID/CTID и addressing contract | [`docs/11-vmid-plan.md`](docs/11-vmid-plan.md) |
+| PVE initialization procedure | [`docs/20-pve-initialization.md`](docs/20-pve-initialization.md) |
+| PVE filesystem/runtime reference | [`docs/21-pve-filesystem-layout.md`](docs/21-pve-filesystem-layout.md) |
+| Backup/retention/RPO/RTO policy | [`docs/22-storage-and-backup.md`](docs/22-storage-and-backup.md) |
+| Restore/disaster-recovery procedure | [`docs/27-backup-and-disaster-recovery-runbook.md`](docs/27-backup-and-disaster-recovery-runbook.md) |
 | Security и SSH identities | [`docs/23-security.md`](docs/23-security.md) |
 | PVE API identities / roles / ACL | [`docs/25-pve-access-control.md`](docs/25-pve-access-control.md) |
-| Guest bootstrap / provisioning boundary | [`docs/33-guest-bootstrap-and-provisioning.md`](docs/33-guest-bootstrap-and-provisioning.md) |
-| Network policy | [`docs/40-network.md`](docs/40-network.md) |
-| DNS policy | [`docs/41-dns.md`](docs/41-dns.md) |
+| Guest bootstrap / provisioning contract | [`docs/33-guest-bootstrap-and-provisioning.md`](docs/33-guest-bootstrap-and-provisioning.md) |
+| Network contract | [`docs/40-network.md`](docs/40-network.md) |
+| DNS contract | [`docs/41-dns.md`](docs/41-dns.md) |
 | Debian VM template `9000` | [`templates/debian13/build-policy.md`](templates/debian13/build-policy.md) |
 | Фактическое состояние PVE | `host/pve/` |
 
