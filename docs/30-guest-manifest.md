@@ -187,9 +187,11 @@ pveam update
 
 ### VM
 
-Template `9000` v6 содержит `ciuser=root`, root password locked и root SSH key-only, но не содержит baked-in `authorized_keys`.
+Текущий template `9000` использует `ciuser=root`, root password locked и root SSH key-only, но не содержит baked-in `authorized_keys`.
 
 До первого start clone получает нужные public keys через Cloud-Init.
+
+Точная версия и contract template определяются только в [`../templates/debian13/README.md`](../templates/debian13/README.md) и [`../templates/debian13/build-policy.md`](../templates/debian13/build-policy.md).
 
 ### LXC
 
