@@ -1,61 +1,61 @@
-# `guest.yaml` — deploy source of truth для VM/LXC
+# `guest.yaml` — основной источник требуемого состояния VM/LXC
 
-**Type:** Specification  
-**Status:** Active  
-**Source of truth:** Yes — для manifest/defaults/effective-state schema, merge semantics и deployable guest contract.
+**Тип:** Спецификация  
+**Статус:** Действующий  
+**Основной источник:** Да — для схем `guest.yaml`/`defaults.yaml`, правил построения итогового состояния и требований к развёртываемой гостевой системе.
 
 ## Назначение
 
-Desired state гостя строится из одного Git commit:
+Требуемое состояние гостевой системы строится из одного Git-коммита:
 
 ```text
 guests/defaults.yaml
         +
-profile из defaults.yaml
+профиль из defaults.yaml
         +
 guests/<VMID>-<name>/guest.yaml
         +
-VMID addressing rule
+правило адресации по VMID
         ↓
-effective desired state
+итоговое требуемое состояние
         ↓
-validate → PLAN → APPLY → verify
+проверка → ПЛАН → ПРИМЕНЕНИЕ → проверка результата
 ```
 
-Конфигурация ОС и приложений внутри гостя остаётся в `rootfs/` и Ansible.
+Конфигурация ОС и приложений внутри гостевой системы остаётся в `rootfs/` и Ansible.
 
-## Версии schema
+## Версии схем
 
-Source guest manifest:
+Исходный манифест гостевой системы:
 
 ```yaml
 schema_version: 5
 ```
 
-Central defaults:
+Центральные общие настройки:
 
 ```yaml
 schema_version: 2
 ```
 
-Используются три schema:
+Используются три схемы:
 
 ```text
 schemas/guest.schema.yaml
-→ компактный source guest.yaml
+→ компактный исходный guest.yaml
 
 schemas/guest-defaults.schema.yaml
 → guests/defaults.yaml
 
 schemas/guest-effective.schema.yaml
-→ полный deployable desired state после merge и вычисления IP
+→ полное итоговое состояние после объединения и вычисления IP
 ```
 
-Переход с generic user `ops` на `root` не меняет структуру schema, поэтому номера schema не повышаются.
+Переход с универсального пользователя `ops` на `root` не меняет структуру схем, поэтому номера схем не повышаются.
 
 ## `guests/defaults.yaml`
 
-Канонический пример:
+Основной пример:
 
 ```yaml
 schema_version: 2
@@ -102,18 +102,20 @@ profiles:
         keyctl: true
 ```
 
-## Merge
+Имена полей YAML не переводятся: это машинный интерфейс проекта.
 
-Порядок строго детерминирован:
+## Правила объединения
+
+Порядок строго определён:
 
 ```text
-defaults
-→ profile
+общие настройки
+→ профиль
 → guest.yaml
-→ management IP resolution
+→ вычисление административного IP
 ```
 
-Maps объединяются deep-merge; более поздний scalar/null перекрывает более ранний.
+Словари объединяются рекурсивно; более позднее простое значение или `null` перекрывает более раннее.
 
 Например `301-ai-control` использует:
 
@@ -124,11 +126,11 @@ placement:
 
 и остаётся вне обычного `managed`.
 
-Для deployable guest `type`, `vm` и `lxc` принадлежат profile.
+Для развёртываемой гостевой системы поля `type`, `vm` и `lxc` принадлежат профилю.
 
-## Management SSH contract
+## Требования к административному SSH
 
-Для всех deployable Debian VM/LXC effective state должен содержать:
+Для всех развёртываемых Debian VM/LXC итоговое состояние должно содержать:
 
 ```yaml
 management:
@@ -137,22 +139,22 @@ management:
     port: 22
 ```
 
-Root password не является частью manifest и не хранится в Git. Проектная policy требует locked root password и public-key-only SSH.
+Пароль `root` не является частью манифеста и не хранится в Git. Политика проекта требует заблокированного пароля `root` и SSH-доступа только по открытым ключам.
 
-Разные управляющие контуры используют разные SSH keypairs, но один Linux-user `root`:
+Разные контуры управления используют разные пары SSH-ключей, но одного Linux-пользователя `root`:
 
 ```text
-PVE/deploy-guest key
-AI Control key
-Ansible/311 key
-personal key при необходимости
+ключ PVE/deploy-guest
+ключ AI Control
+ключ Ansible/311
+личный ключ при необходимости
 ```
 
-Наличие конкретного public key в `/root/.ssh/authorized_keys` является отдельным access state и не выводится автоматически из pool membership.
+Наличие конкретного открытого ключа в `/root/.ssh/authorized_keys` является отдельным состоянием доступа и не определяется автоматически членством в пуле PVE.
 
-## Source LXC template
+## Источник LXC-шаблона
 
-Для LXC Git хранит **семейство** template, а не конкретную версию архива:
+Для LXC Git хранит **семейство** шаблона, а не конкретную версию архива:
 
 ```yaml
 lxc:
@@ -160,58 +162,58 @@ lxc:
     ostemplate: local:vztmpl/debian-13-standard
 ```
 
-Это стабильный selector. В `defaults.yaml` запрещено указывать конкретный файл вида:
+Это стабильное обозначение семейства. В `defaults.yaml` запрещено указывать конкретный файл вида:
 
 ```text
 debian-13-standard_13.6-1_amd64.tar.zst
 ```
 
-Также запрещены `latest`, wildcard, `13.x`, `tbd` и подобные плавающие pseudo-values.
+Также запрещены `latest`, шаблоны с `*`, `13.x`, `tbd` и подобные плавающие значения.
 
-Stage 1 автономно подготавливает актуальный Debian 13 standard appliance на PVE:
+PVE Configuration самостоятельно подготавливает актуальный стандартный образ Debian 13:
 
 ```text
 pveam update
-→ выбрать актуальный debian-13-standard_*_amd64 archive
+→ выбрать актуальный debian-13-standard_*_amd64
 → скачать в local:vztmpl, если его нет
 ```
 
-`deploy-guest` при runtime resolution должен:
+`deploy-guest` во время запуска должен:
 
 ```text
-прочитать effective lxc.source.ostemplate selector
-→ найти на разрешённом storage установленные archives этого семейства
+прочитать lxc.source.ostemplate из итогового состояния
+→ найти на разрешённом хранилище установленные архивы этого семейства
 → выбрать наиболее новую доступную версию
-→ если подходящего archive нет — BLOCKED/STOP до изменений guest
+→ если подходящего архива нет — остановиться до любых изменений гостевой системы
 ```
 
-`deploy-guest` не должен подменять семейство другим дистрибутивом и не должен сам скачивать base template в обход host bootstrap.
+`deploy-guest` не должен подменять семейство другим дистрибутивом и не должен сам скачивать базовый LXC-образ в обход настройки PVE-хоста.
 
-## Initial SSH keys
+## Начальные SSH-ключи
 
 ### VM
 
-Текущий template `9000` использует `ciuser=root`, root password locked и root SSH key-only, но не содержит baked-in `authorized_keys`.
+Текущий шаблон `9000` использует `ciuser=root`, заблокированный пароль `root` и SSH-доступ `root` только по ключам, но не содержит заранее записанный `authorized_keys`.
 
-До первого start clone получает нужные public keys через Cloud-Init.
+До первого запуска полный клон получает нужные открытые ключи через Cloud-Init.
 
-Точная версия и contract template определяются только в [`../templates/debian13/README.md`](../templates/debian13/README.md) и [`../templates/debian13/build-policy.md`](../templates/debian13/build-policy.md).
+Точная версия и спецификация шаблона определяются только в [`../templates/debian13/README.md`](../templates/debian13/README.md) и [`../templates/debian13/build-policy.md`](../templates/debian13/build-policy.md).
 
 ### LXC
 
-При создании LXC `deploy-guest` передаёт public keys через штатный `ssh-public-keys`. Они сразу устанавливаются для `root`.
+При создании LXC `deploy-guest` передаёт открытые ключи через штатный параметр `ssh-public-keys`. Они сразу устанавливаются для `root`.
 
-Отдельное создание `ops`, `sudo` или перенос ключа после первого входа не требуется.
+Отдельное создание `ops`, настройка `sudo` или перенос ключа после первого входа не требуется.
 
-Capability `base` не участвует в initial SSH access.
+Возможность первичной настройки `base` не участвует в получении начального SSH-доступа.
 
 ## Сеть
 
 ### Один активный IP
 
-У каждого гостя в desired state один management IPv4 и один default gateway.
+У каждой гостевой системы в требуемом состоянии один административный IPv4-адрес и один шлюз по умолчанию.
 
-Central network:
+Центральная сеть:
 
 ```yaml
 defaults:
@@ -222,9 +224,9 @@ defaults:
     addressing: vmid
 ```
 
-`current/target`, `mode`, `dual` и `default_gateway selector` удалены из manifest contract.
+Поля `current/target`, `mode`, `dual` и выбор `default_gateway` удалены из спецификации манифеста.
 
-### VMID-addressing
+### Адресация по VMID
 
 Для `/16` применяется правило:
 
@@ -240,18 +242,18 @@ VMID 311 + 192.168.0.0/16
 → 192.168.3.11/16
 ```
 
-После изменения central subnet:
+После изменения центральной подсети:
 
 ```text
 VMID 311 + 10.0.0.0/16
 → 10.0.3.11/16
 ```
 
-В `guest.yaml` обычный IP вообще не записывается.
+В обычном `guest.yaml` IP не записывается.
 
-### Optional override
+### Необязательное переопределение
 
-Для исключения разрешён только host-address:
+Для исключения разрешено только явное указание адреса узла:
 
 ```yaml
 network:
@@ -261,13 +263,13 @@ network:
 
 Префикс запрещено указывать локально. Он всегда берётся из `defaults.network.subnet`.
 
-Override имеет приоритет над VMID-формулой, но validator выводит warning, если адрес отличается от ожидаемого. Override, равный вычисляемому адресу, также даёт warning как избыточный.
+Явный адрес имеет приоритет над формулой VMID, но проверка репозитория выдаёт предупреждение, если адрес отличается от ожидаемого. Явный адрес, совпадающий с вычисляемым, также считается избыточным и вызывает предупреждение.
 
-`subnet`, `gateway` и addressing policy отдельный guest менять не может.
+Отдельная гостевая система не может менять `subnet`, `gateway` и общие правила адресации.
 
 ## Миграция сети
 
-Переезд сети означает изменение central desired state:
+Переезд сети означает изменение центрального требуемого состояния:
 
 ```yaml
 # было
@@ -279,26 +281,26 @@ subnet: 10.0.0.0/16
 gateway: 10.0.0.1
 ```
 
-Обычные manifests не меняются.
+Обычные манифесты не меняются.
 
-Migration tool должен:
+Средство миграции должно:
 
 ```text
-зафиксировать Git commit
-→ проверить доступность нового gateway/L2
-→ получить список управляемых гостей
-→ для каждого гостя по очереди:
-     вычислить новый effective IP
-     записать штатную Proxmox network-конфигурацию
-     применить/reboot при необходимости
+зафиксировать Git-коммит
+→ проверить доступность нового шлюза и L2
+→ получить список управляемых гостевых систем
+→ для каждой системы по очереди:
+     вычислить новый итоговый IP
+     записать штатную сетевую конфигурацию Proxmox
+     применить изменения или перезагрузить при необходимости
      проверить новый IP
-     STOP при ошибке
-→ завершить после проверки всех гостей
+     остановиться при ошибке
+→ завершить после проверки всех систем
 ```
 
 Массовое одновременное переключение не требуется.
 
-## Compact manifest
+## Компактный манифест
 
 ```yaml
 schema_version: 5
@@ -308,7 +310,7 @@ profile: docker-lxc
 state: planned
 deployable: true
 
-description: Ansible, Semaphore, Git, CI and development services
+description: Ansible, Semaphore, Git, CI и сервисы разработки
 
 resources:
   cpu:
@@ -319,11 +321,11 @@ resources:
     size_gb: 32
 ```
 
-Из defaults/profile будут получены node, pool, storage, network, boot, SSH user/port, type и LXC source/features. Management IP будет вычислен из VMID.
+Из общих настроек и профиля будут получены `node`, `pool`, `storage`, сеть, параметры запуска, SSH-пользователь и порт, тип и источник LXC. Административный IP будет вычислен из VMID.
 
-## Reserved / observed manifests
+## Зарезервированные и наблюдаемые манифесты
 
-`deployable: false` не получает deploy defaults автоматически. Такой manifest может хранить известные факты, например:
+`deployable: false` не получает параметры развёртывания автоматически. Такой манифест может хранить известные факты, например:
 
 ```yaml
 schema_version: 5
@@ -334,7 +336,7 @@ state: planned
 deployable: false
 node: pve
 
-description: Frigate video surveillance; VM/LXC type and resources are pending iGPU/OpenVINO testing
+description: Frigate; тип VM/LXC и ресурсы будут определены после тестирования iGPU/OpenVINO
 
 network:
   bridge: vmbr0
@@ -343,11 +345,11 @@ boot:
   onboot: false
 ```
 
-Если у non-deployable объекта нужен явный management IP, он также может использовать `network.ipv4.address` без prefix.
+Если для неразвёртываемого объекта нужен явный административный IP, он также может использовать `network.ipv4.address` без префикса.
 
-## PLAN provenance
+## Происхождение значений в плане
 
-Ожидаемый вывод:
+Ожидаемый вывод может выглядеть так:
 
 ```text
 Node               pve                         [defaults]
@@ -365,32 +367,30 @@ Memory             4096 MiB                    [guest]
 Disk size          32 GiB                      [guest]
 ```
 
-При `network.ipv4.address` override источник IP — `[guest]`.
+Эти подписи являются частью интерфейса программы и могут оставаться краткими техническими обозначениями. При `network.ipv4.address` источник IP — `[guest]`.
 
-## Validator
+## Проверка репозитория
 
-Validator проверяет `guests/defaults.yaml` и существующие `guests/*/guest.yaml` плюс schema-файлы как описание правил.
+Проверяющий скрипт анализирует `guests/defaults.yaml`, существующие `guests/*/guest.yaml` и файлы схем.
 
-Warnings не делают CI красным. IP override вне VMID-формулы — warning; IP вне central subnet, duplicate IP, gateway/network/broadcast collision — error.
+Предупреждения не делают CI красным. Явный IP вне формулы VMID — предупреждение; IP вне центральной подсети, повторяющийся IP или конфликт со шлюзом/адресом сети/broadcast — ошибка.
 
-Для deployable guests validator требует `management.ssh == root:22`.
+Для развёртываемых гостевых систем требуется `management.ssh == root:22`.
 
-`lxc.source.ostemplate` должен быть selector семейства без версии и имени архива. Отсутствие подходящего archive на конкретном PVE — runtime prerequisite/preflight deployer, а не задача schema validator.
+`lxc.source.ostemplate` должен обозначать семейство без версии и имени архива. Отсутствие подходящего архива на конкретном PVE — предварительное условие запуска `deploy-guest`, а не задача проверки схемы.
 
-## Git как source of truth
-
-Источник desired state:
+## Git как основной источник требуемого состояния
 
 ```text
 guests/defaults.yaml
 +
 guest.yaml
 +
-детерминированная VMID-формула
+детерминированная формула VMID
 =
-effective desired state
+требуемое итоговое состояние
 ```
 
-Runtime-факты, которые зависят от конкретного PVE, например фактическое имя актуального LXC archive или набор установленных SSH public keys, не должны превращаться в жёстко зашитые версии внутри `defaults.yaml`.
+Факты, зависящие от конкретного PVE, например реальное имя актуального LXC-архива или набор установленных открытых SSH-ключей, не должны превращаться в жёстко записанные версии внутри `defaults.yaml`.
 
-`/etc/proxmox-deployer/config.yaml` остаётся host-side runtime/bootstrap config и не является источником guest defaults.
+`/etc/proxmox-deployer/config.yaml` остаётся конфигурацией рабочей среды и первоначальной настройки на стороне PVE-хоста и не является источником общих параметров гостевых систем.
