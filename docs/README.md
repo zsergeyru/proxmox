@@ -65,7 +65,8 @@ Specification отвечает на вопрос **«каким должно б�
 - filesystem paths;
 - ownership/layout;
 - перечень runtime/state locations;
-- observed inventory, если документ явно так помечен.
+- observed inventory, если документ явно так помечен;
+- экспериментальная справка, которая не является production contract.
 
 Reference не должна повторять policy и не должна учить оператора последовательности действий.
 
@@ -100,7 +101,7 @@ Runbook должен ссылаться на Policy/Specification/Reference вм
 | IPv6 policy | [`42-ipv6.md`](42-ipv6.md) |
 | AI control plane contract | [`50-ai-control.md`](50-ai-control.md) |
 | Ввести `301-ai-control` в работу | [`51-ai-control-bootstrap.md`](51-ai-control-bootstrap.md) |
-| Понять направление local AI | [`52-local-ai.md`](52-local-ai.md) |
+| Посмотреть текущие local-AI эксперименты | [`52-local-ai.md`](52-local-ai.md) |
 | Граница server repo ↔ apartment repo | [`60-apartment-infrastructure.md`](60-apartment-infrastructure.md) |
 
 Template `9000` документируется отдельно:
@@ -116,7 +117,6 @@ Template `9000` документируется отдельно:
 |---|---|
 | [`10-architecture.md`](10-architecture.md) | общая картина платформы |
 | [`26-deploy-guest-and-agent-access.md`](26-deploy-guest-and-agent-access.md) | человеческое объяснение Git/deployer/AI flows |
-| [`52-local-ai.md`](52-local-ai.md) | направление и роль local AI |
 
 ### Policy
 
@@ -147,6 +147,7 @@ Template `9000` документируется отдельно:
 | Документ | Справочная область |
 |---|---|
 | [`21-pve-filesystem-layout.md`](21-pve-filesystem-layout.md) | host-side filesystem/state/credentials layout |
+| [`52-local-ai.md`](52-local-ai.md) | Draft reference по текущей experimental local-inference среде |
 
 Observed state PVE также является Reference, но живёт отдельно в [`../host/pve/`](../host/pve/) и всегда датируется/описывается как фактическое состояние, а не desired state.
 
@@ -221,7 +222,7 @@ Overview/README/Runbook должны ссылаться на эти owners, а �
 
 ## Metadata крупных документов
 
-При создании или существенной переработке документа использовать единый заголовок:
+Каждый крупный документ `docs/*.md` должен начинаться единым metadata-блоком:
 
 ```text
 Type: Overview | Policy | Specification | Reference | Runbook
