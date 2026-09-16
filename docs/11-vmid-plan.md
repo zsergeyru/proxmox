@@ -1,5 +1,9 @@
 # План VMID / CTID
 
+**Type:** Specification  
+**Status:** Active  
+**Source of truth:** Yes — для функциональной нумерации VMID/CTID и VMID-based addressing convention; фактический deploy desired state конкретного guest остаётся в `guest.yaml`.
+
 Функциональная нумерация применяется только к новым VM/LXC. VMID не определяет startup order и не является причиной перенумеровывать уже работающие системы.
 
 | Диапазон | Назначение |
