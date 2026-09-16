@@ -93,6 +93,7 @@ for module in \
     61-template-source.sh \
     62-template-build.sh \
     63-template-smoke.sh \
+    64-cloud-init-status.sh \
     70-tooling.sh; do
     [[ -f "${LIB_DIR}/${module}" ]] || {
         printf 'ОШИБКА: не найден модуль PVE Configuration: %s\n' "${LIB_DIR}/${module}" >&2
