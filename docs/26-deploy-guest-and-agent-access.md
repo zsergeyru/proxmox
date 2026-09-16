@@ -1,353 +1,228 @@
 # Кто и как управляет Git и гостями Proxmox
 
-Этот документ простыми словами описывает, кто обновляет репозиторий, кто запускает `deploy-guest`, зачем нужен пользователь `pvedeploy` и какие права есть у ИИ-агента.
+**Type:** Overview  
+**Status:** Active  
+**Source of truth:** No — точные PVE roles, privileges и ACL задаёт [`25-pve-access-control.md`](25-pve-access-control.md).
 
-Главное правило:
+Этот документ объясняет схему простыми словами: кто обновляет проект на PVE, кто выполняет `deploy-guest`, чем Linux-user `pvedeploy` отличается от Proxmox identity и как отдельно работает AI agent.
 
-> GitHub хранит общую версию проекта. На самом PVE рабочую копию репозитория обновляет только `root`. Основной код `deploy-guest.py` выполняется не от `root`, а от ограниченного пользователя `pvedeploy`. ИИ-агент работает отдельно и не получает право изменять рабочую копию репозитория на PVE.
-
-## 1. Какие участники есть в этой схеме
-
-Используются четыре разных участника. Они нужны для разных задач и не заменяют друг друга.
+## 1. Четыре разных участника
 
 ### `root` на PVE
 
-`root` нужен только там, где действительно требуются права администратора самого сервера Proxmox.
+`root` выполняет только host-side действия, для которых действительно нужны административные права:
 
-В этой схеме `root`:
+- запускает `/usr/local/sbin/deploy-guest`;
+- обновляет root-owned canonical checkout проекта на PVE;
+- использует отдельный GitHub credential PVE;
+- передаёт выполнение основной deploy-логики ограниченному Linux-user `pvedeploy`.
 
-- запускает команду `deploy-guest`;
-- обновляет рабочую копию репозитория на PVE;
-- использует отдельный ключ GitHub, доступный только `root`;
-- после обновления репозитория запускает основной код развёртывания от имени `pvedeploy`.
-
-Сам основной код развёртывания не должен работать от `root`.
+Основной `deploy-guest.py` не должен постоянно работать от `root`.
 
 ### `pvedeploy` на PVE
 
-`pvedeploy` — служебный пользователь Linux на самом сервере PVE.
+`pvedeploy` — Linux service user, под которым выполняется основная host-side deploy-логика.
 
-Он нужен для безопасного запуска основного кода `deploy-guest.py`.
+Он может читать project source и необходимые deployment credentials/runtime, но не может изменять canonical Git checkout или использовать root-only GitHub credential.
 
-`pvedeploy` может:
-
-- читать рабочую копию проекта в `/var/lib/proxmox-deployer/repo`;
-- читать параметры, необходимые для развёртывания;
-- читать токен `deployer@pve!host-deploy`;
-- использовать SSH-ключ `/etc/proxmox-deployer/ssh/pve_guest_ed25519` для проверки доступа к созданным VM/LXC;
-- писать служебные журналы и временные данные в разрешённые ему каталоги.
-
-`pvedeploy` не может:
-
-- обновлять репозиторий на PVE;
-- изменять `/var/lib/proxmox-deployer/repo` и каталог `.git`;
-- читать закрытый GitHub-ключ, которым `root` получает проект;
-- изменять системные настройки PVE как `root`;
-- запускать `/usr/local/sbin/deploy-guest`.
+Это **не** Proxmox API account.
 
 ### `deployer@pve!host-deploy`
 
-Это не пользователь Linux. Это отдельная учётная запись Proxmox API.
+Это Proxmox API identity, которой `deploy-guest.py` представляется самому Proxmox.
 
-Её использует `deploy-guest.py`, когда нужно создать или изменить VM/LXC через Proxmox.
+Она предназначена для человека и host-side tooling. Точный guest-level scope, project roles и ACL описаны только в [`25-pve-access-control.md`](25-pve-access-control.md).
 
-Она имеет права на операции с гостями, которые нужны для развёртывания, но не является полным администратором самого сервера PVE.
+### AI agent / `ai-agent@pve!infra`
 
-### ИИ-агент в `301-ai-control`
+AI agent работает отдельно от host-side `deploy-guest`:
 
-ИИ-агент работает отдельно от `deploy-guest`.
+```text
+AI agent
+→ Proximo
+→ ai-agent@pve!infra
+→ разрешённые объекты Proxmox
+```
 
-У него есть:
+Его обычная PVE write-zone — pool `managed`. AI не получает `root` на PVE и не изменяет canonical checkout проекта на PVE.
 
-- своя копия проекта в `/opt/ai-control/repos/proxmox`;
-- свой GitHub-ключ;
-- своя учётная запись Proxmox API `ai-agent@pve!infra` через Proximo;
-- свой SSH-ключ для прямого входа в те гостевые системы, где такой доступ разрешён.
+## 2. Две независимые копии Git
 
-ИИ-агент не получает `root` на PVE и не получает доступ к закрытому GitHub-ключу PVE.
-
-## 2. Где находятся две копии проекта
-
-На PVE находится рабочая копия, которой пользуется `deploy-guest`:
+На PVE:
 
 ```text
 /var/lib/proxmox-deployer/repo
 ```
 
-Она принадлежит `root` и не может изменяться пользователем `pvedeploy`.
+Это root-owned canonical checkout для host-side tooling.
 
-В `301-ai-control` находится отдельная копия для ИИ-агента:
+В `301-ai-control`:
 
 ```text
 /opt/ai-control/repos/proxmox
 ```
 
-Эти две копии не синхронизируются напрямую друг с другом.
+Это отдельная рабочая копия AI control plane.
 
-Общим местом для обмена изменениями является GitHub:
+Они не синхронизируются напрямую. Общая точка обмена — GitHub:
 
 ```text
-ИИ-агент
+AI / человек
 → GitHub
-→ PVE
+→ PVE при следующем host-side refresh
 ```
 
-## 3. Как человек запускает `deploy-guest`
+AI может подготовить и отправить изменение проекта в GitHub своей отдельной identity, но это само по себе ничего не меняет на PVE.
 
-Обычная команда:
+## 3. Как работает `deploy-guest`
+
+Оператор запускает:
 
 ```bash
 deploy-guest 311
 ```
 
-или:
+для PLAN либо:
 
 ```bash
 deploy-guest 311 --apply
 ```
 
-Эта команда запускается только от `root`.
+для применения.
 
-Файл:
-
-```text
-/usr/local/sbin/deploy-guest
-```
-
-должен принадлежать:
-
-```text
-root:root
-```
-
-и быть недоступен для запуска другим пользователям.
-
-Предполагаемый режим доступа:
-
-```text
-0700
-```
-
-## 4. Что делает `/usr/local/sbin/deploy-guest`
-
-Этот файл остаётся небольшим. Он не содержит основную логику создания VM/LXC.
-
-Его задача:
-
-```text
-1. убедиться, что команда запущена от root;
-2. взять общую блокировку;
-3. проверить рабочую копию Git на PVE;
-4. получить свежую версию ветки main с GitHub;
-5. обновить /var/lib/proxmox-deployer/repo;
-6. запомнить точный номер полученной версии Git;
-7. убедиться, что scripts/pve/deploy-guest.py существует;
-8. запустить этот Python-файл от имени pvedeploy.
-```
-
-После запуска `deploy-guest.py` Git в рамках этого запуска больше не обновляется.
-
-Таким образом один запуск всегда использует одну и ту же версию проекта.
-
-## 5. Зачем основной код запускается от `pvedeploy`
-
-Основной код развёртывания со временем станет достаточно большим. В нём будут проверки, работа с Proxmox API, сетью, SSH и состоянием гостей.
-
-Если такой код работает от `root`, любая серьёзная ошибка в нём получает права администратора всего PVE.
-
-Поэтому используется схема:
+Высокоуровневый flow:
 
 ```text
 root
-→ только обновляет Git и запускает следующий этап
+→ взять orchestration lock
+→ проверить canonical checkout
+→ получить актуальную revision из GitHub
+→ зафиксировать точный Git SHA текущего run
+→ запустить основную deploy-логику от pvedeploy
 
 pvedeploy
-→ выполняет основной код развёртывания
-
-Proxmox API
-→ ограничивает действия pvedeploy ещё и правами deployer@pve!host-deploy
+→ прочитать guest desired state
+→ построить PLAN
+→ обратиться к Proxmox как deployer@pve!host-deploy
+→ APPLY при явном запросе
+→ verify
 ```
 
-То есть ошибка в `deploy-guest.py` не должна автоматически означать полный доступ к самому серверу PVE.
+После handoff текущий run не должен переключаться на другую Git revision.
 
-## 6. Может ли `pvedeploy` сам запустить `deploy-guest`
+Точная файловая модель PVE runtime описана в [`21-pve-filesystem-layout.md`](21-pve-filesystem-layout.md), а guest desired state — в [`30-guest-manifest.md`](30-guest-manifest.md).
 
-Нет.
+## 4. Почему нужен `pvedeploy`
 
-После принятия этой схемы `/usr/local/sbin/deploy-guest` предназначен только для запуска от `root`.
+Основной deploy-код работает с Proxmox API, SSH, guest state и проверками. Если весь этот код постоянно выполнялся бы от `root`, ошибка в deployer автоматически получала бы полный host access.
 
-Причина простая: перед каждым развёртыванием рабочая копия проекта должна быть обновлена с GitHub. `pvedeploy` специально не имеет права изменять эту копию и не имеет доступа к GitHub-ключу PVE.
-
-Поэтому не должно существовать второго режима, при котором `pvedeploy` запускает старую копию проекта без обновления Git.
-
-## 7. Что может делать ИИ-агент с Git
-
-ИИ-агент работает со своей копией проекта в `301-ai-control`.
-
-Он может получать изменения из GitHub.
-
-В целевой схеме ИИ-агент также может подготавливать изменения проекта и отправлять их в GitHub своей отдельной учётной записью GitHub или отдельным ключом с правом записи.
-
-Например, агент может изменить описание гостя:
-
-```text
-guests/311-dev-services/guest.yaml
-```
-
-и отправить это изменение в GitHub.
-
-После этого на PVE ничего не меняется автоматически.
-
-Изменение попадёт на PVE только тогда, когда `root` запустит:
-
-```bash
-deploy-guest 311 --apply
-```
-
-Перед началом работы эта команда сама получит свежую версию проекта с GitHub.
-
-## 8. Может ли ИИ-агент обновлять Git на самом PVE
-
-Нет.
-
-ИИ-агент не должен:
-
-- изменять `/var/lib/proxmox-deployer/repo`;
-- выполнять там `git pull`, `git fetch`, `git reset` или другие команды изменения рабочей копии;
-- получать закрытый GitHub-ключ PVE;
-- запускать `/usr/local/sbin/deploy-guest`;
-- получать `root` на PVE только ради обновления Git.
-
-Это принципиальное разделение прав.
-
-ИИ-агент меняет проект через GitHub, а PVE сам забирает эти изменения при запуске `deploy-guest`.
-
-## 9. Как ИИ-агент управляет обычными VM/LXC
-
-Для обычной работы ИИ-агенту не нужен `deploy-guest`.
-
-Его обычный путь:
-
-```text
-ИИ-агент
-→ Proximo
-→ ai-agent@pve!infra
-→ разрешённые VM/LXC в группе managed
-```
-
-В разрешённой области агент может создавать, изменять, запускать, останавливать и удалять гостей в пределах выданных ему прав.
-
-`deploy-guest` остаётся отдельным инструментом для человека и работы непосредственно со стороны PVE по описанию из Git.
-
-## 10. Пример полного пути изменения
-
-Допустим, нужно увеличить память гостя `311`.
-
-ИИ-агент меняет в своей копии проекта файл:
-
-```text
-guests/311-dev-services/guest.yaml
-```
-
-Затем изменение отправляется в GitHub:
-
-```text
-301-ai-control
-→ GitHub
-```
-
-На PVE пока ничего не происходит.
-
-Позже человек выполняет:
-
-```bash
-deploy-guest 311 --apply
-```
-
-Дальше происходит:
+Поэтому разделены две границы:
 
 ```text
 root
-→ получает свежую версию проекта с GitHub
-→ обновляет /var/lib/proxmox-deployer/repo
-→ запоминает точную версию Git
-→ запускает deploy-guest.py от pvedeploy
+→ только host trust / Git refresh / запуск
 
 pvedeploy
-→ читает новый guest.yaml
-→ обращается к Proxmox как deployer@pve!host-deploy
-→ показывает план изменений
-→ применяет разрешённые изменения
-→ проверяет результат
+→ основная deploy-программа
+
+Proxmox API identity
+→ дополнительно ограничивает допустимые PVE operations
 ```
 
-ИИ-агент при этом не входил на PVE как `root` и не изменял рабочую копию проекта на PVE.
+`pvedeploy` не должен иметь альтернативный режим запуска старой mutable-копии проекта в обход root-controlled refresh.
 
-## 11. Краткая таблица прав
+## 5. Как AI управляет гостями
 
-| Кто | Может обновлять GitHub | Может обновлять копию Git на PVE | Может запускать `/usr/local/sbin/deploy-guest` | Может управлять гостями Proxmox |
-|---|---|---|---|---|
-| `root` на PVE | получает изменения | да | да | через подготовленные средства |
-| `pvedeploy` | нет | нет | нет | через `deployer@pve!host-deploy` |
-| `deployer@pve!host-deploy` | не относится к Git | не относится к Git | нет | да, в пределах выданных прав |
-| ИИ-агент в `301` | да, своей отдельной учётной записью GitHub | нет | нет | да, через `ai-agent@pve!infra` в разрешённой области |
-
-## 12. Что нельзя смешивать
-
-Нельзя считать одним и тем же:
+Для обычного guest lifecycle AI не вызывает `deploy-guest`:
 
 ```text
-pvedeploy
-```
-
-и:
-
-```text
-deployer@pve!host-deploy
-```
-
-Первое — пользователь Linux на PVE, под которым выполняется программа.
-
-Второе — учётная запись Proxmox API, которой программа представляется самому Proxmox.
-
-Также нельзя смешивать GitHub-ключ PVE и GitHub-ключ ИИ-агента. Это разные ключи, находящиеся в разных системах.
-
-## 13. Итоговая схема
-
-```text
-                         GitHub
-                        /      \
-                       /        \
-              ИИ-агент          root на PVE
-                 |                  |
- /opt/ai-control/repos/proxmox      |
-                                    v
-                  /var/lib/proxmox-deployer/repo
-                                    |
-                                    v
-                     /usr/local/sbin/deploy-guest
-                                    |
-                          запуск от pvedeploy
-                                    |
-                                    v
-                    scripts/pve/deploy-guest.py
-                                    |
-                                    v
-                    deployer@pve!host-deploy
-                                    |
-                                    v
-                              Proxmox API
-```
-
-Отдельный обычный путь ИИ-агента к Proxmox:
-
-```text
-ИИ-агент
+AI agent
 → Proximo
 → ai-agent@pve!infra
 → managed
 ```
 
-Главное правило можно сформулировать одной фразой:
+В своей разрешённой области AI может создавать, клонировать, конфигурировать, запускать, останавливать и удалять гостей в пределах PVE ACL.
 
-> ИИ-агент может менять проект через GitHub, но не меняет рабочую копию Git на PVE. На PVE свежую версию проекта получает только `root`; после этого основной код развёртывания выполняется от ограниченного пользователя `pvedeploy`.
+Новый обычный AI-created guest должен сразу попадать в `managed`.
+
+Template `9000` и специальные/protected гости могут находиться вне `managed`; точные исключения и clone permissions задаёт `25-pve-access-control.md`.
+
+## 6. PVE access и SSH access — разные вещи
+
+Наличие гостя в `managed` означает PVE-level access AI через Proximo, но не добавляет автоматически SSH key внутрь Linux.
+
+```text
+PVE pool/ACL
+→ lifecycle и hardware/config operations
+
+/root/.ssh/authorized_keys
+→ direct shell access внутри guest OS
+```
+
+Host-side deployer, AI Control и Ansible используют независимые SSH identities одного management user `root`. Подробнее: [`33-guest-bootstrap-and-provisioning.md`](33-guest-bootstrap-and-provisioning.md) и [`50-ai-control.md`](50-ai-control.md).
+
+## 7. Что нельзя смешивать
+
+```text
+pvedeploy
+```
+
+— Linux user на PVE, под которым выполняется программа.
+
+```text
+deployer@pve!host-deploy
+```
+
+— Proxmox API identity host-side deployer.
+
+```text
+ai-agent@pve!infra
+```
+
+— отдельная Proxmox API identity AI Control.
+
+Также отдельны друг от друга:
+
+- GitHub credential PVE;
+- GitHub credential AI Control;
+- host-side guest SSH key;
+- AI guest SSH key;
+- Ansible provisioning SSH key.
+
+Private credentials одного контура не копируются в другой только ради удобства.
+
+## 8. Краткая схема
+
+```text
+                         GitHub
+                        /      \
+                       /        \
+               AI Control       root на PVE
+                    |                |
+     AI workspace checkout           v
+                    |      canonical PVE checkout
+                    |                |
+                    |          deploy-guest wrapper
+                    |                |
+                    |            pvedeploy
+                    |                |
+                    |   deployer@pve!host-deploy
+                    |                |
+                    |                v
+                    |          Proxmox API
+                    |
+                    └→ Proximo → ai-agent@pve!infra → managed
+```
+
+## 9. Где искать точные правила
+
+- [`25-pve-access-control.md`](25-pve-access-control.md) — канонические PVE identities, roles, privileges и ACL;
+- [`21-pve-filesystem-layout.md`](21-pve-filesystem-layout.md) — ownership canonical checkout, credentials и runtime;
+- [`30-guest-manifest.md`](30-guest-manifest.md) — desired state гостя;
+- [`33-guest-bootstrap-and-provisioning.md`](33-guest-bootstrap-and-provisioning.md) — initial SSH, bootstrap и Ansible handoff;
+- [`50-ai-control.md`](50-ai-control.md) — AI Control / Proximo architecture.
+
+Главное правило:
+
+> PVE обновляет свою canonical копию проекта только через root-controlled host flow; основная deploy-логика выполняется от `pvedeploy` и обращается к Proxmox как `deployer@pve!host-deploy`. AI работает отдельно через Proximo и `ai-agent@pve!infra`, не изменяя canonical checkout на PVE.
