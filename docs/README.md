@@ -93,6 +93,7 @@
 | Точные роли, привилегии и ACL Proxmox | [`25-pve-access-control.md`](25-pve-access-control.md) |
 | Простое объяснение взаимодействия средства развёртывания и AI | [`26-deploy-guest-and-agent-access.md`](26-deploy-guest-and-agent-access.md) |
 | Формат `guest.yaml` и правила объединения настроек | [`30-guest-manifest.md`](30-guest-manifest.md) |
+| Поведение `deploy-guest`, PLAN/APPLY и безопасное приведение VM/LXC | [`31-deploy-guest.md`](31-deploy-guest.md) |
 | Правила Docker внутри LXC | [`32-docker-in-lxc-policy.md`](32-docker-in-lxc-policy.md) |
 | Начальный SSH-доступ, первичная настройка и передача управления Ansible | [`33-guest-bootstrap-and-provisioning.md`](33-guest-bootstrap-and-provisioning.md) |
 | Размещение кода, конфигурации и данных внутри Linux | [`34-linux-filesystem-layout.md`](34-linux-filesystem-layout.md) |
@@ -137,6 +138,7 @@
 | [`11-vmid-plan.md`](11-vmid-plan.md) | VMID/CTID и правила адресации |
 | [`25-pve-access-control.md`](25-pve-access-control.md) | учётные записи PVE, роли, привилегии, ACL и граница `managed` |
 | [`30-guest-manifest.md`](30-guest-manifest.md) | схема манифеста, общих настроек и итогового состояния |
+| [`31-deploy-guest.md`](31-deploy-guest.md) | поведение `deploy-guest`, PLAN/APPLY, безопасное применение и проверка результата |
 | [`33-guest-bootstrap-and-provisioning.md`](33-guest-bootstrap-and-provisioning.md) | готовность к управлению, первичная настройка и передача управления Ansible |
 | [`40-network.md`](40-network.md) | архитектурный контракт IPv4, VLAN, маршрутизации, VPN и PBR |
 | [`41-dns.md`](41-dns.md) | контракт DNS, `home.arpa`, SmartDNS и mDNS |
@@ -193,6 +195,9 @@ guests/<guest>/decisions/
 
 правила манифестов
 → 30-guest-manifest.md + schemas/
+
+поведение deploy-guest и PLAN/APPLY
+→ 31-deploy-guest.md
 
 права PVE
 → 25-pve-access-control.md
