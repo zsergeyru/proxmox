@@ -1,8 +1,8 @@
-# Scripts
+# Скрипты
 
-`scripts/` содержит исполняемый код проекта, который относится к инфраструктуре в целом, а не к одному конкретному guest.
+`scripts/` содержит исполняемый код проекта, который относится к инфраструктуре в целом, а не к одной конкретной гостевой системе.
 
-Этот README — карта кода. Архитектурные правила и contracts должны жить в `docs/`, а не дублироваться здесь.
+Этот README — карта кода. Архитектурные правила и точные требования должны жить в `docs/`, а не дублироваться здесь.
 
 ## Структура
 
@@ -20,15 +20,15 @@ scripts/
 
 ## `guest_config.py`
 
-Общий resolver source guest configuration → effective desired state.
+Общий модуль преобразования исходной конфигурации гостевой системы в итоговое требуемое состояние.
 
-Его должны переиспользовать validator и будущий guest deploy tooling, чтобы merge/addressing logic существовала в одном месте.
+Его должны переиспользовать проверяющий скрипт и будущие средства развёртывания гостевых систем, чтобы правила объединения и адресации существовали в одном месте.
 
-Канонический data contract: [`../docs/30-guest-manifest.md`](../docs/30-guest-manifest.md).
+Основная спецификация данных: [`../docs/30-guest-manifest.md`](../docs/30-guest-manifest.md).
 
 ## `validate_repo.py`
 
-Repository validator для guest/defaults/schema и связанных project invariants.
+Проверяющий скрипт репозитория для `guest.yaml`, `defaults.yaml`, схем и связанных обязательных правил проекта.
 
 Запуск:
 
@@ -36,19 +36,19 @@ Repository validator для guest/defaults/schema и связанных project 
 python scripts/validate_repo.py
 ```
 
-CI использует тот же repository contract; отдельную упрощённую реализацию правил для локальной проверки добавлять не следует.
+CI использует те же правила репозитория; отдельную упрощённую реализацию для локальной проверки добавлять не следует.
 
 ## `pve/setup/`
 
-Host-side PVE Configuration pipeline.
+Контур настройки PVE на стороне хоста.
 
-Основной entrypoint:
+Основная точка входа:
 
 ```text
 scripts/pve/setup/configure-pve.sh
 ```
 
-Он оркестрирует numbered modules из `lib/` и владеет общими lock/state/log/error semantics.
+Она последовательно запускает пронумерованные модули из `lib/` и отвечает за общую блокировку, файлы состояния, журналы и обработку ошибок.
 
 Текущие группы модулей:
 
@@ -67,46 +67,46 @@ scripts/pve/setup/configure-pve.sh
 70-tooling.sh
 ```
 
-Нумерация задаёт порядок/группировку host configuration pipeline. Подробное назначение и safety contract определяются кодом, тестами и профильной документацией.
+Имена файлов не переводятся, поскольку являются частью структуры кода. Нумерация задаёт порядок и группировку этапов настройки PVE. Подробное назначение и правила безопасности определяются кодом, тестами и профильной документацией.
 
-## Template renderer
+## Генератор Cloud-Init шаблона
 
 ```text
 scripts/pve/setup/render-template-cloud-init.py
 ```
 
-Это canonical renderer guest-side Cloud-Init для Debian template `9000`. Его contract описан в [`../templates/debian13/build-policy.md`](../templates/debian13/build-policy.md).
+Это основной генератор Cloud-Init для Debian-шаблона `9000`. Его точные требования описаны в [`../templates/debian13/build-policy.md`](../templates/debian13/build-policy.md).
 
-## Tests
+## Тесты
 
 ```text
 scripts/pve/setup/tests/
 ```
 
-Здесь находятся unit/contract/safety tests PVE setup и template pipeline. При изменении поведения соответствующие тесты должны меняться вместе с кодом.
+Здесь находятся модульные проверки, проверки требований и безопасности настройки PVE и сборки шаблона. При изменении поведения соответствующие тесты должны меняться вместе с кодом.
 
 ## `deploy-guest`
 
-Канонический проектный contract будущего host-side guest deployment описывают:
+Основные требования к будущему развёртыванию гостевых систем со стороны PVE описывают:
 
-- [`../docs/26-deploy-guest-and-agent-access.md`](../docs/26-deploy-guest-and-agent-access.md) — operational flow и разделение identities;
-- [`../docs/30-guest-manifest.md`](../docs/30-guest-manifest.md) — input/effective-state contract;
-- [`../docs/33-guest-bootstrap-and-provisioning.md`](../docs/33-guest-bootstrap-and-provisioning.md) — management readiness и provisioning boundary.
+- [`../docs/26-deploy-guest-and-agent-access.md`](../docs/26-deploy-guest-and-agent-access.md) — рабочая схема и разделение учётных записей;
+- [`../docs/30-guest-manifest.md`](../docs/30-guest-manifest.md) — исходные данные и итоговое требуемое состояние;
+- [`../docs/33-guest-bootstrap-and-provisioning.md`](../docs/33-guest-bootstrap-and-provisioning.md) — готовность административного доступа и граница повторяемой настройки.
 
-До появления соответствующего исполняемого файла README не должен описывать несуществующую внутреннюю структуру handlers как уже реализованную.
+До появления соответствующего исполняемого файла README не должен описывать несуществующую внутреннюю структуру обработчиков как уже реализованную.
 
 ## Правила для кода
 
-- Не дублировать business rules между validator, deployer и bootstrap scripts.
-- Опасные операции должны иметь preflight и fail-safe/fail-closed поведение там, где это возможно.
-- Повторный запуск должен быть безопасным либо побочный эффект должен быть явно задокументирован.
-- Secrets не встраиваются в код и не выводятся в logs.
-- Изменение contract должно сопровождаться изменением canonical документа и тестов, а не новым описанием в этом README.
+- Не дублировать правила предметной области между проверяющим скриптом, `deploy-guest` и скриптами первоначальной настройки.
+- Опасные операции должны иметь предварительные проверки и безопасно останавливаться при неоднозначном состоянии.
+- Повторный запуск должен быть безопасным либо его побочный эффект должен быть явно задокументирован.
+- Секреты не встраиваются в код и не выводятся в журналы.
+- Изменение требований должно сопровождаться изменением основного документа и тестов, а не новым описанием в этом README.
 
 ## Связанные документы
 
-- [`../docs/20-pve-initialization.md`](../docs/20-pve-initialization.md) — PVE initialization runbook.
-- [`../docs/24-reproducible-bootstrap.md`](../docs/24-reproducible-bootstrap.md) — reproducibility/versioning.
-- [`../docs/25-pve-access-control.md`](../docs/25-pve-access-control.md) — PVE roles/ACL.
-- [`../docs/30-guest-manifest.md`](../docs/30-guest-manifest.md) — guest data model.
-- [`../templates/debian13/build-policy.md`](../templates/debian13/build-policy.md) — template pipeline contract.
+- [`../docs/20-pve-initialization.md`](../docs/20-pve-initialization.md) — инструкция инициализации PVE.
+- [`../docs/24-reproducible-bootstrap.md`](../docs/24-reproducible-bootstrap.md) — воспроизводимость и версионирование.
+- [`../docs/25-pve-access-control.md`](../docs/25-pve-access-control.md) — роли и ACL PVE.
+- [`../docs/30-guest-manifest.md`](../docs/30-guest-manifest.md) — модель данных гостевых систем.
+- [`../templates/debian13/build-policy.md`](../templates/debian13/build-policy.md) — спецификация сборки шаблона.
