@@ -1,17 +1,16 @@
 #!/usr/bin/env bash
 
-PVE_CONFIGURATION_VERSION=13
+PVE_CONFIGURATION_VERSION=14
 
 PRIVATE_REPO="git@github.com:zsergeyru/proxmox.git"
 PRIVATE_BRANCH="main"
 DEPLOY_USER="pvedeploy"
 
-# Временный runtime Public Bootstrap. Новые имена переменных канонические;
-# PVE_STAGE0_* читаются только для совместимости с незавершённым старым bootstrap.
-BOOTSTRAP_TEMP_DIR="${PVE_BOOTSTRAP_TEMP_DIR:-${PVE_STAGE0_DIR:-/var/lib/proxmox-bootstrap}}"
-BOOTSTRAP_KEY_FILE="${PVE_BOOTSTRAP_KEY_FILE:-${PVE_STAGE0_KEY_FILE:-${BOOTSTRAP_TEMP_DIR}/github_proxmox_repo_ed25519}}"
+# Временный runtime Public Bootstrap.
+BOOTSTRAP_TEMP_DIR="${PVE_BOOTSTRAP_TEMP_DIR:-/var/lib/proxmox-bootstrap}"
+BOOTSTRAP_KEY_FILE="${PVE_BOOTSTRAP_KEY_FILE:-${BOOTSTRAP_TEMP_DIR}/github_proxmox_repo_ed25519}"
 BOOTSTRAP_KEY_PUB_FILE="${BOOTSTRAP_KEY_FILE}.pub"
-BOOTSTRAP_KNOWN_HOSTS="${PVE_BOOTSTRAP_KNOWN_HOSTS:-${PVE_STAGE0_KNOWN_HOSTS:-${BOOTSTRAP_TEMP_DIR}/known_hosts}}"
+BOOTSTRAP_KNOWN_HOSTS="${PVE_BOOTSTRAP_KNOWN_HOSTS:-${BOOTSTRAP_TEMP_DIR}/known_hosts}"
 
 CONFIG_DIR="/etc/proxmox-deployer"
 SSH_DIR="${CONFIG_DIR}/ssh"
@@ -24,9 +23,9 @@ VERSION_FILE="${STATE_DIR}/version"
 LAST_RUN_FILE="${STATE_DIR}/last-run.json"
 LOCK_FILE="/run/lock/proxmox-pve-configuration.lock"
 LOG_DIR="/var/log/proxmox-deployer"
-CONFIGURATION_LOG_DIR="/var/log/proxmox-bootstrap"
+CONFIGURATION_LOG_DIR="$LOG_DIR"
 CONFIGURATION_LOG_FILE="${CONFIGURATION_LOG_DIR}/configure-pve.log"
-BACKUP_ROOT="/var/backups/proxmox-bootstrap"
+BACKUP_ROOT="/var/backups/proxmox-configuration"
 SECRETS_BACKUP_ROOT="/var/backups/proxmox-secrets"
 
 KEY_FILE="${SSH_DIR}/github_proxmox_repo_ed25519"
@@ -34,8 +33,6 @@ SSH_CONFIG="${SSH_DIR}/config"
 KNOWN_HOSTS="${SSH_DIR}/known_hosts"
 PVE_GUEST_KEY="${SSH_DIR}/pve_guest_ed25519"
 PVE_GUEST_PUB="${PVE_GUEST_KEY}.pub"
-LEGACY_GUEST_BOOTSTRAP_KEY="${SSH_DIR}/guest_bootstrap_ed25519"
-LEGACY_GUEST_BOOTSTRAP_PUB="${LEGACY_GUEST_BOOTSTRAP_KEY}.pub"
 
 TEMPLATE_VMID=9000
 TEMPLATE_NAME="tpl-debian13"
