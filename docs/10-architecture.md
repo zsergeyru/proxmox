@@ -1,45 +1,45 @@
 # Proxmox — сводная архитектура платформы
 
-**Type:** Overview  
-**Status:** Active  
-**Source of truth:** No — это сводная картина; точные contracts находятся в профильных документах.
+**Тип:** Обзор  
+**Статус:** Действующий  
+**Основной источник:** Нет — это сводная картина; точные требования находятся в профильных документах.
 
-Этот документ отвечает только на вопрос **«из каких частей состоит система и как они связаны»**. Он намеренно не дублирует VMID, IP, privilege sets, template version, filesystem paths и другие быстро меняющиеся значения.
+Этот документ отвечает только на вопрос **«из каких частей состоит система и как они связаны»**. Он намеренно не дублирует VMID, IP, наборы привилегий, версию шаблона, пути файловой системы и другие быстро меняющиеся значения.
 
 ## 1. Общая модель
 
 ```text
-Physical PVE host
+физический PVE-хост
       │
-      ├─ VM/LXC infrastructure
-      │    ├─ Home Assistant / automation
-      │    ├─ network services
-      │    ├─ AI control plane
-      │    ├─ DevOps / Ansible
-      │    ├─ application services
-      │    └─ monitoring / video
+      ├─ инфраструктура VM/LXC
+      │    ├─ Home Assistant и автоматизация
+      │    ├─ сетевые сервисы
+      │    ├─ контур AI Control
+      │    ├─ DevOps и Ansible
+      │    ├─ прикладные сервисы
+      │    └─ мониторинг и видео
       │
-      ├─ host-side deploy tooling
-      └─ backup / recovery
+      ├─ средства развёртывания на стороне хоста
+      └─ резервное копирование и восстановление
 ```
 
-PVE остаётся максимально чистым гипервизором. Обычные application services размещаются внутри VM/LXC, а не непосредственно на host.
+PVE остаётся максимально чистым гипервизором. Обычные прикладные сервисы размещаются внутри VM/LXC, а не непосредственно на хосте.
 
-Фактическое состояние host хранится в [`../host/pve/`](../host/pve/).
+Фактическое состояние хоста хранится в [`../host/pve/`](../host/pve/).
 
-## 2. Desired state и фактическое состояние
+## 2. Требуемое и фактическое состояние
 
 Проект разделяет:
 
 ```text
-Git desired state
+требуемое состояние в Git
 → что должно быть
 
-PVE / guest runtime
+PVE и работающие гостевые системы
 → что реально работает сейчас
 ```
 
-Guest desired state задаётся через:
+Требуемое состояние гостевых систем задаётся через:
 
 ```text
 guests/defaults.yaml
@@ -49,105 +49,105 @@ guests/<guest>/guest.yaml
 schemas/
 ```
 
-Точный contract: [`30-guest-manifest.md`](30-guest-manifest.md).
+Точная спецификация: [`30-guest-manifest.md`](30-guest-manifest.md).
 
-Observed host state хранится в `host/pve/`, а временный drift конкретного guest — в `STATUS.md`.
+Фактическое состояние хоста хранится в `host/pve/`, а временное расхождение конкретной гостевой системы — в `STATUS.md`.
 
 ## 3. VM и LXC
 
-VM используется там, где нужна более сильная изоляция, отдельный kernel/network stack или специальный control plane.
+VM используется там, где нужна более сильная изоляция, отдельное ядро, отдельный сетевой стек или специальный управляющий контур.
 
-LXC используется для лёгких доверенных infrastructure/application workloads, когда это не нарушает security boundary.
+LXC используется для лёгких доверенных инфраструктурных и прикладных сервисов, когда это не нарушает принятую границу безопасности.
 
-Docker внутри LXC допускается только по отдельной project policy: [`32-docker-in-lxc-policy.md`](32-docker-in-lxc-policy.md).
+Docker внутри LXC допускается только по отдельной политике проекта: [`32-docker-in-lxc-policy.md`](32-docker-in-lxc-policy.md).
 
-VMID/CTID и addressing convention находятся в [`11-vmid-plan.md`](11-vmid-plan.md).
+VMID/CTID и правила адресации находятся в [`11-vmid-plan.md`](11-vmid-plan.md).
 
 ## 4. Управление Proxmox
 
-Есть два независимых PVE management flow.
+Есть два независимых пути управления PVE.
 
-### Человек / host-side tooling
+### Человек и инструменты на стороне PVE-хоста
 
 ```text
-operator
+оператор
 → deploy-guest
 → deployer@pve!host-deploy
-→ Proxmox API
+→ API Proxmox
 ```
 
-Этот путь нужен для deterministic PLAN/APPLY из Git desired state и специальных host-side операций.
+Этот путь нужен для детерминированного планирования и применения изменений из требуемого состояния Git, а также для специальных операций на стороне хоста.
 
 ### AI Control
 
 ```text
-AI agent
+AI-агент
 → Proximo
 → ai-agent@pve!infra
-→ managed guest lifecycle
+→ жизненный цикл разрешённых гостевых систем managed
 ```
 
-AI использует отдельную PVE identity и ограниченную write-zone.
+AI использует отдельную учётную запись PVE и ограниченную зону изменения.
 
-Человеческое объяснение схемы: [`26-deploy-guest-and-agent-access.md`](26-deploy-guest-and-agent-access.md).  
-Точный access contract: [`25-pve-access-control.md`](25-pve-access-control.md).
+Понятное объяснение схемы: [`26-deploy-guest-and-agent-access.md`](26-deploy-guest-and-agent-access.md).  
+Точные правила доступа: [`25-pve-access-control.md`](25-pve-access-control.md).
 
-## 5. Управление Linux внутри guests
+## 5. Управление Linux внутри гостевых систем
 
-PVE lifecycle и configuration внутри guest — разные уровни.
+Жизненный цикл объекта PVE и настройка ОС внутри гостевой системы — разные уровни.
 
 ```text
-PVE lifecycle/config
+создание и изменение VM/LXC в PVE
 → deploy-guest / Proximo
 
-initial management readiness
-→ root SSH key-only
+начальная готовность к управлению
+→ SSH root только по ключу
 
-repeatable OS/application configuration
+повторяемая настройка ОС и приложений
 → Ansible на dev-services
 
-one-off / diagnostics
-→ direct SSH соответствующей identity
+разовые действия и диагностика
+→ прямой SSH соответствующим ключом
 ```
 
-Initial access/bootstrap/provisioning contract: [`33-guest-bootstrap-and-provisioning.md`](33-guest-bootstrap-and-provisioning.md).
+Требования к начальному доступу и передаче управления Ansible: [`33-guest-bootstrap-and-provisioning.md`](33-guest-bootstrap-and-provisioning.md).
 
-Общая SSH/security policy: [`23-security.md`](23-security.md).
+Общие правила SSH и безопасности: [`23-security.md`](23-security.md).
 
-## 6. Template `9000`
+## 6. Шаблон `9000`
 
-Управляемые Debian VM создаются из общего базового template.
+Управляемые Debian VM создаются из общего базового шаблона.
 
-Template является универсальным OS baseline и не содержит credentials или application-specific state.
+Шаблон является универсальной базой ОС и не содержит учётных данных или состояния конкретных приложений.
 
 ```text
-template
-→ Full Clone
-→ guest-specific resources/network/public keys
-→ first boot
-→ provisioning
+шаблон
+→ полный клон
+→ ресурсы, сеть и открытые ключи конкретной гостевой системы
+→ первый запуск
+→ повторяемая настройка
 ```
 
 Паспорт: [`../templates/debian13/README.md`](../templates/debian13/README.md).  
-Точный contract: [`../templates/debian13/build-policy.md`](../templates/debian13/build-policy.md).
+Точная спецификация: [`../templates/debian13/build-policy.md`](../templates/debian13/build-policy.md).
 
-## 7. Network architecture
+## 7. Сетевая архитектура
 
-Базовый L3/WAN/DHCP/firewall остаётся на физическом edge-router, чтобы отказ PVE не отключал основную сеть квартиры.
+Базовые WAN, L3, DHCP и межсетевой экран остаются на физическом пограничном маршрутизаторе, чтобы отказ PVE не отключал основную сеть квартиры.
 
-Отдельный network guest предоставляет расширенные server-side функции:
+Отдельная сетевая гостевая система предоставляет расширенные серверные функции:
 
 ```text
 DNS
 VPN
 PBR
-remote-access VPN
-optional mDNS reflection
+VPN для удалённого доступа
+при необходимости отражение mDNS между сегментами
 ```
 
-Точные сегменты, addressing и routing boundary: [`40-network.md`](40-network.md).  
-DNS contract: [`41-dns.md`](41-dns.md).  
-IPv6 policy: [`42-ipv6.md`](42-ipv6.md).
+Точные сегменты, адресация и граница маршрутизации: [`40-network.md`](40-network.md).  
+Спецификация DNS: [`41-dns.md`](41-dns.md).  
+Политика IPv6: [`42-ipv6.md`](42-ipv6.md).
 
 ## 8. AI и DevOps
 
@@ -155,20 +155,20 @@ AI Control и DevOps разделены:
 
 ```text
 AI Control
-→ agents + Proximo + AI SSH/Git identities
+→ агенты + Proximo + отдельные SSH/Git-ключи AI
 
 Dev services
-→ Ansible + provisioning tooling + optional human UI
+→ Ansible + средства повторяемой настройки + необязательный веб-интерфейс для человека
 ```
 
-AI architecture contract: [`50-ai-control.md`](50-ai-control.md).  
-Runbook ввода AI Control: [`51-ai-control-bootstrap.md`](51-ai-control-bootstrap.md).
+Спецификация AI Control: [`50-ai-control.md`](50-ai-control.md).  
+Инструкция ввода AI Control: [`51-ai-control-bootstrap.md`](51-ai-control-bootstrap.md).
 
-## 9. Filesystem и application data
+## 9. Файловая структура и данные приложений
 
-Template не создаёт структуру будущих services заранее.
+Шаблон не создаёт структуру будущих сервисов заранее.
 
-Provisioning размещает code/config/persistent data по общей Linux policy:
+Ansible размещает код, конфигурацию и постоянные данные по общей политике Linux:
 
 ```text
 /opt
@@ -182,33 +182,33 @@ Provisioning размещает code/config/persistent data по общей Linu
 
 Точные правила: [`34-linux-filesystem-layout.md`](34-linux-filesystem-layout.md).
 
-## 10. Backup и recovery
+## 10. Резервное копирование и восстановление
 
-Git восстанавливает воспроизводимую configuration, но не заменяет backup persistent data и credentials.
+Git восстанавливает воспроизводимую конфигурацию, но не заменяет резервное копирование постоянных данных и учётных данных.
 
 ```text
-Policy
-→ что резервировать, retention, RPO/RTO
+Политика
+→ что резервировать, как долго хранить, какие RPO/RTO требуются
 
-Runbook
-→ как выполнять restore-test и disaster recovery
+Инструкция
+→ как проверять восстановление и выполнять аварийное восстановление
 ```
 
-Backup policy: [`22-storage-and-backup.md`](22-storage-and-backup.md).  
-Recovery runbook: [`27-backup-and-disaster-recovery-runbook.md`](27-backup-and-disaster-recovery-runbook.md).
+Политика резервного копирования: [`22-storage-and-backup.md`](22-storage-and-backup.md).  
+Инструкция по восстановлению: [`27-backup-and-disaster-recovery-runbook.md`](27-backup-and-disaster-recovery-runbook.md).
 
 ## 11. Граница с проектом квартиры
 
-В `proxmox` хранится серверная и эксплуатационная часть infrastructure.
+В `proxmox` хранится серверная и эксплуатационная часть инфраструктуры.
 
-Физическая сеть, кабели, размещение оборудования, камеры и apartment-level решения принадлежат `appart-rennovation`.
+Физическая сеть, кабели, размещение оборудования, камеры и решения уровня квартиры принадлежат `appart-rennovation`.
 
 Граница двух репозиториев: [`60-apartment-infrastructure.md`](60-apartment-infrastructure.md).
 
 ## 12. Куда идти дальше
 
-Полная карта типов документации и sources of truth: [`README.md`](README.md).
+Полная карта типов документации и основных источников: [`README.md`](README.md).
 
 Главный принцип архитектуры:
 
-> PVE lifecycle, guest configuration, AI control, network services, provisioning, backup и physical apartment infrastructure имеют отдельные boundaries и отдельные источники истины; Overview только связывает их между собой.
+> Жизненный цикл PVE, настройка гостевых систем, AI Control, сетевые сервисы, Ansible, резервное копирование и физическая инфраструктура квартиры имеют отдельные границы ответственности и отдельные основные источники. Обзор только связывает их между собой.
