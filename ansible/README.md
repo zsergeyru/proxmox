@@ -1,8 +1,8 @@
 # Ansible
 
-`ansible/` предназначен для повторяемого provisioning и configuration management Linux VM/LXC после того, как guest уже создан и доступен по management SSH.
+`ansible/` предназначен для повторяемой настройки Linux VM/LXC после того, как гостевая система уже создана и доступна по административному SSH.
 
-Граница ответственности описана в [`../docs/33-guest-bootstrap-and-provisioning.md`](../docs/33-guest-bootstrap-and-provisioning.md): PVE/deployer создаёт guest и обеспечивает management readiness, а Ansible отвечает за повторяемую настройку ОС и приложений.
+Граница ответственности описана в [`../docs/33-guest-bootstrap-and-provisioning.md`](../docs/33-guest-bootstrap-and-provisioning.md): PVE и `deploy-guest` создают гостевую систему и обеспечивают готовность административного доступа, а Ansible отвечает за повторяемую настройку ОС и приложений.
 
 ## Целевая структура
 
@@ -10,26 +10,28 @@
 
 ```text
 ansible/
-├── inventory/    # hosts/groups и inventory variables
-├── playbooks/    # entrypoint playbooks для provisioning/operations
+├── inventory/    # узлы, группы и переменные инвентаря
+├── playbooks/    # основные playbook для настройки и обслуживания
 └── roles/        # переиспользуемые роли
 ```
+
+Термины `inventory`, `playbook` и `role` оставлены без перевода там, где они обозначают конкретные сущности Ansible.
 
 Пустые каталоги и README-заглушки только ради сохранения структуры в Git не нужны. Каталог создаётся тогда, когда в нём появляется реальный inventory, playbook или role.
 
 ## Основные правила
 
-- Target Linux guests управляются по SSH отдельной Ansible/provisioning identity.
-- Ansible identity не совпадает с host-side `pve_guest_ed25519` и AI Control identity.
-- На target guest не требуется устанавливать полный Ansible controller; достаточно SSH и prerequisites используемых modules.
-- Application/service configuration должна быть идемпотентной и повторяемой.
-- Secrets, passwords, tokens и private keys не хранятся в Git.
-- Runtime/persistent application data не следует превращать в содержимое Ansible repository; для него действует отдельный backup/recovery contract.
-- Структура файлов внутри Linux guests следует [`../docs/34-linux-filesystem-layout.md`](../docs/34-linux-filesystem-layout.md).
+- Целевые Linux-гости управляются по SSH отдельным ключом Ansible.
+- Ключ Ansible не совпадает с `pve_guest_ed25519` на стороне PVE и ключом AI Control.
+- На целевой гостевой системе не требуется устанавливать полный управляющий Ansible; достаточно SSH и системных предпосылок используемых модулей.
+- Конфигурация приложений и сервисов должна быть идемпотентной и повторяемой.
+- Секреты, пароли, токены и закрытые ключи не хранятся в Git.
+- Рабочее состояние и постоянные данные приложений не следует превращать в содержимое каталога Ansible; для них действуют отдельные правила резервного копирования и восстановления.
+- Структура файлов внутри Linux-гостей следует [`../docs/34-linux-filesystem-layout.md`](../docs/34-linux-filesystem-layout.md).
 
 ## Связанные документы
 
-- [`../docs/23-security.md`](../docs/23-security.md) — SSH identities и secret lifecycle.
-- [`../docs/33-guest-bootstrap-and-provisioning.md`](../docs/33-guest-bootstrap-and-provisioning.md) — deployer ↔ Ansible responsibility boundary.
-- [`../docs/34-linux-filesystem-layout.md`](../docs/34-linux-filesystem-layout.md) — filesystem/data placement policy.
-- [`../guests/README.md`](../guests/README.md) — guest desired state и per-guest files.
+- [`../docs/23-security.md`](../docs/23-security.md) — SSH-ключи и жизненный цикл секретов.
+- [`../docs/33-guest-bootstrap-and-provisioning.md`](../docs/33-guest-bootstrap-and-provisioning.md) — граница ответственности `deploy-guest` и Ansible.
+- [`../docs/34-linux-filesystem-layout.md`](../docs/34-linux-filesystem-layout.md) — правила размещения файлов и данных.
+- [`../guests/README.md`](../guests/README.md) — требуемое состояние и файлы конкретных гостевых систем.
