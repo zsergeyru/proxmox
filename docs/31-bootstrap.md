@@ -7,7 +7,7 @@ Bootstrap PVE разделён на две исполняемые стадии:
 ```text
 PUBLIC Stage 0
 zsergeyru/proxmox-bootstrap/init-pve.sh
-STAGE0_VERSION=3
+STAGE0_VERSION=4
 
 PRIVATE Stage 1
 zsergeyru/proxmox/scripts/pve/bootstrap/init-pve.sh
@@ -24,7 +24,7 @@ BOOTSTRAP_VERSION=12
 
 ## Public Stage 0
 
-Stage 0 остаётся минимальным zero-day loader:
+При первичной установке Stage 0 остаётся минимальным zero-day loader:
 
 ```text
 root/PVE check
@@ -47,6 +47,38 @@ Stage 0 не знает про pools, PVE roles, API identities, VMID plan, temp
 
 ```text
 /var/lib/proxmox-deployer/state/stage0-complete
+```
+
+### Повторный public запуск
+
+Начиная со `STAGE0_VERSION=4`, та же public curl-команда является штатной точкой входа и после уже завершённой Stage 0.
+
+При наличии `stage0-complete` public bootstrap **не создаёт новый Deploy Key и не повторяет zero-day setup**. Он выполняет только безопасный refresh/handoff:
+
+```text
+проверить pvedeploy
+→ проверить canonical Deploy Key/known_hosts/SSH config
+→ проверить canonical checkout /var/lib/proxmox-deployer/repo
+→ проверить ожидаемый origin
+→ подтвердить read-only доступ к zsergeyru/proxmox/main
+→ fetch main
+→ reset --hard FETCH_HEAD
+→ clean -ffd
+→ запустить уже обновлённую private Stage 1
+```
+
+Обновление выполняется от имени `pvedeploy` и использует постоянный SSH config private Stage 1. Если canonical credential, SSH runtime или checkout отсутствует/повреждён, public bootstrap останавливается: новый credential автоматически не генерируется.
+
+Обычный повторный запуск:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/zsergeyru/proxmox-bootstrap/main/init-pve.sh | bash
+```
+
+Повторный запуск с полным системным обновлением:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/zsergeyru/proxmox-bootstrap/main/init-pve.sh | bash -s -- --update-system
 ```
 
 ## Private Stage 1 v12
@@ -294,7 +326,7 @@ Stable wrapper после реализации:
 
 ## Повторный запуск
 
-Stage 1 рассчитана на повторный запуск и использует `flock`. Однако safety-sensitive drift не исправляется молча:
+Public entrypoint сначала обновляет canonical private checkout и запускает свежую Stage 1. Сама Stage 1 рассчитана на повторный запуск и использует `flock`. Однако safety-sensitive drift не исправляется молча:
 
 - неизвестный/несовместимый VMID 9000 → STOP;
 - disabled project PVE user → STOP;
@@ -305,4 +337,4 @@ Stage 1 рассчитана на повторный запуск и испол�
 
 Главный принцип:
 
-> Bootstrap автоматически восстанавливает только однозначное безопасное desired state. Замена credentials, protected template и другие потенциально разрушительные миграции требуют отдельного осознанного действия.
+> Public Stage 0 создаёт zero-day credential только один раз; после завершения Stage 0 тот же public entrypoint лишь обновляет проверенный private source of truth и передаёт управление свежей Stage 1. Замена credentials, protected template и другие потенциально разрушительные миграции требуют отдельного осознанного действия.
