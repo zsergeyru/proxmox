@@ -4,7 +4,7 @@
 
 Архитектура `301-ai-control` остаётся принятой. Исполняемая реализация bootstrap/install/deploy scripts переписывается под текущий guest contract.
 
-Каноническая модель PVE access/deploy задаётся [`25-pve-access-control.md`](25-pve-access-control.md), management SSH — [`../templates/debian13/users-and-keys.md`](../templates/debian13/users-and-keys.md).
+Каноническая модель PVE access/deploy задаётся [`25-pve-access-control.md`](25-pve-access-control.md), общая management SSH identity policy — [`23-security.md`](23-security.md), initial guest access — [`33-guest-bootstrap-and-provisioning.md`](33-guest-bootstrap-and-provisioning.md).
 
 ## Разделение ответственности
 
@@ -126,13 +126,15 @@ Host-side deployer использует другой keypair `pve_guest_ed25519`
 
 GitHub credential и guest-management SSH identity — разные credentials.
 
+Подробный credential lifecycle не дублируется здесь и определяется [`23-security.md`](23-security.md).
+
 ## Создание гостя host-side
 
 ```text
 оператор
 → deploy-guest <VMID> [--apply]
 → deployer@pve!host-deploy
-→ Full Clone from 9000 v6 либо создание LXC из Debian 13 family selector
+→ Full Clone from current template 9000 либо создание LXC из Debian 13 family selector
 → установить host-side public key для root
 → при наличии зарегистрированного AI public key включить его в initial keyset, если direct AI SSH нужен
 → start
@@ -186,11 +188,12 @@ GitHub access AI Control выполняется отдельной Deploy Key id
 
 - [`20-pve-initialization.md`](20-pve-initialization.md);
 - [`21-pve-filesystem-layout.md`](21-pve-filesystem-layout.md);
+- [`23-security.md`](23-security.md);
 - [`25-pve-access-control.md`](25-pve-access-control.md);
 - [`30-guest-manifest.md`](30-guest-manifest.md);
 - [`33-guest-bootstrap-and-provisioning.md`](33-guest-bootstrap-and-provisioning.md);
 - [`51-ai-control-bootstrap.md`](51-ai-control-bootstrap.md);
-- [`../templates/debian13/users-and-keys.md`](../templates/debian13/users-and-keys.md).
+- [`../templates/debian13/build-policy.md`](../templates/debian13/build-policy.md).
 
 ## Security boundary
 
