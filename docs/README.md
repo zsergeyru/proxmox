@@ -16,15 +16,17 @@
 - [`22-storage-and-backup.md`](22-storage-and-backup.md) — storage, backup, retention и restore.
 - [`23-security.md`](23-security.md) — общие правила безопасности и root key-only management model.
 - [`24-reproducible-bootstrap.md`](24-reproducible-bootstrap.md) — versioning/reproducibility policy и project contract versions.
-- [`25-pve-access-control.md`](25-pve-access-control.md) — PVE identities, roles, ACL и граница `managed`.
-- [`26-deploy-guest-and-agent-access.md`](26-deploy-guest-and-agent-access.md) — простая схема: кто обновляет Git, кто запускает `deploy-guest`, зачем нужен `pvedeploy` и какие права есть у ИИ-агента.
+- [`25-pve-access-control.md`](25-pve-access-control.md) — **каноническая техническая policy** PVE identities, roles, privileges, ACL и границы `managed`.
+- [`26-deploy-guest-and-agent-access.md`](26-deploy-guest-and-agent-access.md) — **короткий обзор для человека**: `root`, `pvedeploy`, host deployer, AI agent, Git и два независимых management flow.
+
+Точные Proxmox privileges и ACL не дублируются в `26`: при расхождении всегда действует `25-pve-access-control.md`.
 
 Диапазон `27–29` зарезервирован для новых документов уровня PVE.
 
 ### 30–39 — развёртывание гостей
 
 - [`30-guest-manifest.md`](30-guest-manifest.md) — канонический формат `guest.yaml`, root management contract и PVE-side deploy.
-- [`31-bootstrap.md`](31-bootstrap.md) — текущее состояние Stage 0/Stage 1, Template-Version 6 и bootstrap safety.
+- [`31-bootstrap.md`](31-bootstrap.md) — текущее состояние Stage 0/Stage 1 и bootstrap safety.
 - [`32-docker-in-lxc-policy.md`](32-docker-in-lxc-policy.md) — Docker внутри unprivileged LXC, security boundary и backup/restore gate.
 - [`33-guest-bootstrap-and-provisioning.md`](33-guest-bootstrap-and-provisioning.md) — management readiness, deployer bootstrap ↔ Ansible provisioning и bootstrap capabilities.
 
@@ -46,13 +48,11 @@
 
 - [`60-apartment-infrastructure.md`](60-apartment-infrastructure.md) — граница между серверной инфраструктурой и проектом квартиры.
 
-### 90–99 — планы и развитие
-
-- [`90-roadmap.md`](90-roadmap.md) — roadmap проекта.
-
 ## Правило нумерации
 
-Новый документ получает номер внутри соответствующего блока. Существующие файлы не перенумеровываются ради плотной последовательности.
+Новый документ получает номер внутри соответствующего тематического блока. Существующие файлы не перенумеровываются ради плотной последовательности.
+
+Временный backlog/roadmap не является архитектурной документацией и в `docs/` отдельным блоком не ведётся. Текущие состояния конкретных гостей фиксируются в `guest.yaml` и при необходимости `STATUS.md`; устойчивые решения переносятся в профильные документы или ADR.
 
 ## Источники истины
 
