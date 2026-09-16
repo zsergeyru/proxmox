@@ -1,4 +1,4 @@
-# Host storage
+# Хранилища PVE-хоста
 
 ## Фактическое состояние на 2026-09-12
 
@@ -9,6 +9,8 @@ NVMe: 512 GB nominal / 476.9 GiB visible
 model: SSD 512GB
 ```
 
+Технические поля в блоках оставлены в виде, близком к фактическому выводу системы.
+
 Разметка:
 
 ```text
@@ -18,7 +20,7 @@ pve-swap   8 GiB
 pve-data   ~395.9 GiB LVM-thin
 ```
 
-Volume group:
+Группа томов:
 
 ```text
 VG: pve
@@ -26,9 +28,9 @@ size: ~475.94 GiB
 free: 16 GiB
 ```
 
-LVM-thin pool `data` на момент снимка занят примерно на `7.63%`.
+Тонкий пул LVM `data` на момент снимка занят примерно на `7.63%`.
 
-## Proxmox storage
+## Хранилища Proxmox
 
 ```text
 local
@@ -48,29 +50,31 @@ backup
   content: backup
 ```
 
+Имена параметров Proxmox оставлены без перевода.
+
 Состояние на момент снимка:
 
 ```text
-local       ~46.9 GiB total, ~6.5 GiB used
-local-lvm   ~395.9 GiB total, ~30.2 GiB allocated/used by thin volumes
-backup      ~56.5 GiB total, ~19.7 GiB used, ~33.9 GiB available
+local       ~46.9 GiB всего, ~6.5 GiB занято
+local-lvm   ~395.9 GiB всего, ~30.2 GiB выделено тонким томам
+backup      ~56.5 GiB всего, ~19.7 GiB занято, ~33.9 GiB свободно
 ```
 
 ## Текущие виртуальные диски
 
 ```text
 VM 100 HAOS
-  EFI disk: 4 MiB
-  system disk: 32 GiB
-  snapshot/state good_restore exists
+  EFI-диск: 4 MiB
+  системный диск: 32 GiB
+  существует снимок/состояние good_restore
 
 VM 320 ai-agent
-  system disk: 16 GiB
+  системный диск: 16 GiB
 ```
 
-## USB backup storage
+## USB-хранилище резервных копий
 
-Физически storage `backup` находится на USB Kingston DataTraveler объёмом около `58 GiB`, файловая система `ext4`, mount point:
+Физически хранилище `backup` находится на USB-накопителе Kingston DataTraveler объёмом около `58 GiB`, файловая система `ext4`, точка монтирования:
 
 ```text
 /mnt/pve/backup
@@ -78,4 +82,4 @@ VM 320 ai-agent
 
 Способ гарантированного монтирования после перезагрузки ещё нужно проверить: в снятом `/etc/fstab` записи для этого USB-раздела не было.
 
-Backup-политика и этот открытый вопрос описаны в [`../backup/README.md`](../backup/README.md).
+Политика резервного копирования и этот открытый вопрос описаны в [`../backup/README.md`](../backup/README.md).
