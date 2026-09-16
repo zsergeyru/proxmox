@@ -233,7 +233,7 @@ shared lock + root-trusted clean source revision check
 → builder VM + provisioning
 → ASCII builder stage telemetry через QGA
 → host-side локализация этапов
-→ verification reboot + guest-status check
+→ verification reboot
 → fail-closed guest cleanup
 → seal template
 → final template contract
@@ -336,7 +336,6 @@ Host-side stages:
 → локальная русская подпись этапа на PVE host
 → verification reboot
 → normalized guest exec
-→ guest-status verification
 → fail-closed cleanup assertions
 → standard Cloud-Init
 → qm template
@@ -357,15 +356,7 @@ templates/debian13/template-bootstrap.sh
 templates/debian13/template-finalize.sh
 ```
 
-Template v7 добавляет постоянную команду:
-
-```bash
-guest-status
-```
-
-Она остаётся в `/usr/local/sbin/guest-status` после seal и во всех Full Clone. Вывод ASCII-only и показывает текущий build stage, QGA package/service/enabled state, virtio channel, Cloud-Init, IP и uptime. Такая форма специально пригодна для ранней Proxmox Console до полной настройки locale/font.
-
-Builder публикует в `/var/lib/template-build/bootstrap-status` только ASCII stage identifiers. Кириллица больше не проходит через QGA progress transport; PVE Configuration отображает русские названия уже после чтения кода на host-side. Это устраняет наблюдавшийся mojibake `Ð...`.
+Builder публикует в `/var/lib/template-build/bootstrap-status` только ASCII stage identifiers. Кириллица не проходит через QGA progress transport; PVE Configuration отображает русские названия уже после чтения кода на host-side. Это устраняет наблюдавшийся mojibake `Ð...`.
 
 Host-visible contract включает:
 
@@ -399,7 +390,7 @@ Exact `vm-9000-cloudinit` check нужен, чтобы обычный ISO/CD-ROM
 
 `template_guest_exec` считает incomplete structured QGA result (`pid` без завершения либо `exited=0`), signal и ненулевой exitcode ошибкой. Timeout больше не может быть принят за stdout успешной команды.
 
-Guest cleanup до seal подтверждает отсутствие `debian`, machine-id, SSH host keys, `/root/.ssh`, builder state и builder scripts. Дополнительно подтверждается наличие executable `guest-status`, которая является частью guest contract v7.
+Guest cleanup до seal подтверждает отсутствие `debian`, machine-id, SSH host keys, `/root/.ssh`, builder state и builder scripts.
 
 Совместимый template без `protection=1` может получить protection после snapshot. Другие contract mismatches вызывают STOP. Unfinished builder и foreign VMID 9000 не удаляются автоматически.
 
@@ -441,7 +432,7 @@ bash -n
 ShellCheck
 production Cloud-Init render
 cloud-init schema
-embedded guest-status bash -n / ShellCheck
+absence of embedded guest-status helper
 exact ASCII builder stage-code set
 Template contract unit tests
 Guest exec result/timeout + stage-label unit tests
@@ -453,7 +444,7 @@ whitespace check
 
 Validator проверяет **все** `guests/*/guest.yaml`; malformed directory больше не пропускается молча.
 
-CI не заменяет реальный clean PVE build + Full Clone smoke-test, который остаётся отдельным integration check по принятой policy. Для v7 smoke-test также проверяет `guest-status`.
+CI не заменяет реальный clean PVE build + Full Clone smoke-test, который остаётся отдельным integration check по принятой policy.
 
 ## Runtime и status
 

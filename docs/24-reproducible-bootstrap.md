@@ -158,9 +158,7 @@ Host-side pipeline:
 → ASCII stage telemetry через QGA
 → host-side русские подписи этапов
 → verification reboot
-→ проверить guest-status
 → fail-closed guest cleanup
-→ сохранить guest-status как часть guest contract
 → standard Proxmox Cloud-Init
 → qm template
 → protection=1
@@ -192,7 +190,6 @@ Template-Version 7
 → обычные Debian repositories
 → apt update/full-upgrade
 → root-only key-based SSH policy
-→ persistent /usr/local/sbin/guest-status
 → сборка template
 ```
 
@@ -202,7 +199,7 @@ Template-Version 7
 template-version=7
 ```
 
-`Template-Version` — версия guest/template contract, а не pin внешнего Debian build. v7 отличается от v6 содержимым guest: в template сохраняется диагностическая команда `guest-status`, а builder telemetry имеет новый ASCII stage-code contract.
+`Template-Version` — версия guest/template contract, а не pin внешнего Debian build. v7 отличается от v6 прежде всего новым ASCII stage-code contract builder telemetry; localized presentation формируется только на host-side.
 
 PVE Configuration принимает существующий template только если полный host-visible contract соответствует текущему baseline. Проверяются CPU/RAM, SCSI controller, system disk/storage/flags/minimum size, exact Cloud-Init volume `local-lvm:vm-9000-cloudinit` с `media=cdrom`, VirtIO network/bridge, boot order, QGA, console и protection. Exact Cloud-Init volume не позволяет обычному ISO/CD-ROM формально пройти contract.
 
@@ -210,9 +207,7 @@ PVE Configuration принимает существующий template толь�
 
 Builder stage-файл `/var/lib/template-build/bootstrap-status` содержит только ASCII identifiers (`apt-metadata`, `qga-install`, `base-packages`, `services` и т. п.). Localized русские подписи формируются на PVE host и поэтому не проходят через QGA byte/string transport. Это устраняет mojibake в progress output независимо от обработки non-ASCII `guest-exec` data конкретной версией Proxmox/QEMU.
 
-`guest-status` выводит собственную диагностику ASCII-only и доступна как в builder, так и в Full Clone. Она показывает stage, package/service state QGA, virtio channel, Cloud-Init status, IP addresses и uptime.
-
-Guest cleanup fail-closed: до `qm template` подтверждается отсутствие generic `debian`, machine-id, SSH host keys, `/root/.ssh`, build state и builder scripts. Одновременно проверяется, что `/usr/local/sbin/guest-status` осталась executable. Незавершённая VM-сборщик сохраняется для диагностики.
+Guest cleanup fail-closed: до `qm template` подтверждается отсутствие generic `debian`, machine-id, SSH host keys, `/root/.ssh`, build state и builder scripts. Незавершённая VM-сборщик сохраняется для диагностики.
 
 ## LXC appliance
 
@@ -265,7 +260,7 @@ Repository checks должны проверять как минимум:
 - ShellCheck с учётом sourced-module architecture;
 - production Cloud-Init renderer;
 - `cloud-init schema` итогового документа;
-- embedded `guest-status` extraction + `bash -n` + ShellCheck;
+- отсутствие embedded `guest-status` helper;
 - точный ASCII stage-code contract builder-а;
 - template contract unit tests, включая ложный обычный CD-ROM;
 - guest-exec result/timeout и local stage-label unit tests;

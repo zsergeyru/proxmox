@@ -210,7 +210,7 @@ shared lock + root-trusted source SHA/clean check
 → effective permissions + real API auth
 → optional template source preparation
 → builder/provisioning + ASCII stage telemetry
-→ verification reboot + guest-status check
+→ verification reboot
 → guest cleanup
 → seal template
 → final template contract
@@ -419,7 +419,6 @@ Template pipeline встроен в PVE Configuration:
 → русская подпись этапа формируется host-side
 → verification reboot
 → normalized guest exec
-→ guest-status verification
 → cleanup assertions
 → standard Cloud-Init
 → qm template
@@ -439,14 +438,6 @@ templates/debian13/cloud-init.yaml
 templates/debian13/template-bootstrap.sh
 templates/debian13/template-finalize.sh
 ```
-
-В Template v7 сохраняется:
-
-```text
-/usr/local/sbin/guest-status
-```
-
-Команда предназначена для быстрой диагностики из Proxmox Console и Full Clone. Она выводит ASCII-only информацию о текущем builder stage, QGA package/service, virtio channel, Cloud-Init, IP и uptime. ASCII выбран намеренно, чтобы диагностика была читаема ещё до полной настройки console font/locale.
 
 Во время build `/var/lib/template-build/bootstrap-status` содержит только machine-readable ASCII stage code. Это устраняет mojibake при прохождении статуса через `qm guest exec`/QGA; локализованная русская строка строится уже PVE Configuration на host.
 
@@ -480,7 +471,7 @@ protection=1 после pipeline
 
 `template_guest_exec` принимает plain-output CLI variants и structured QGA results. Structured result с `pid`/`exited=0`, отсутствующим подтверждённым `exitcode`, ненулевым exitcode или signal считается ошибкой; timeout не может быть принят за успешный guest stdout.
 
-Guest cleanup fail-closed подтверждает отсутствие `debian`, machine-id, SSH host keys, `/root/.ssh`, build-state и builder scripts до `qm template`. Одновременно host-side проверяется, что `guest-status` осталась executable и будет частью v7.
+Guest cleanup fail-closed подтверждает отсутствие `debian`, machine-id, SSH host keys, `/root/.ssh`, build-state и builder scripts до `qm template`.
 
 Unfinished builder намеренно сохраняется для диагностики. Foreign/incompatible VMID 9000 не удаляется автоматически.
 
@@ -501,7 +492,7 @@ bash -n
 ShellCheck
 production Cloud-Init renderer
 cloud-init schema
-embedded guest-status bash -n / ShellCheck
+absence of embedded guest-status helper
 ASCII builder stage-code contract
 Template contract unit tests
 Guest exec result/timeout + stage-label unit tests
@@ -513,7 +504,7 @@ git diff --check
 
 `validate_repo.py` рассматривает каждый `guests/*/guest.yaml`; каталог, не соответствующий `NNN-name`, является ошибкой, а не молча пропускается.
 
-CI не заменяет реальный PVE integration test. По принятой policy после существенного изменения guest/template assets требуется clean template build + Full Clone smoke-test, включая `guest-status`.
+CI не заменяет реальный PVE integration test. По принятой policy после существенного изменения guest/template assets требуется clean template build + Full Clone smoke-test.
 
 ## 16. Status
 

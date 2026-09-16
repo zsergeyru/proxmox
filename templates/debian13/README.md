@@ -15,7 +15,7 @@ Management user: root
 SSH: public key only
 ```
 
-Template v7 является текущей действующей guest-contract версией. Она сохраняет модель v6 с единым management user `root` и добавляет постоянную диагностическую команду `guest-status`, а внутренние этапы builder-а передаются через QGA как ASCII-коды и отображаются PVE Configuration по-русски уже на host-side.
+Template v7 является текущей действующей guest-contract версией. Она сохраняет модель v6 с единым management user `root` и добавляет стабильную диагностику этапов builder-а: внутри guest публикуются короткие ASCII stage-коды, а PVE Configuration отображает их по-русски уже на host-side.
 
 Создание template является частью PVE Configuration. Отдельного standalone `scripts/pve/create-template.sh` нет.
 
@@ -52,7 +52,6 @@ Debian 13 trixie/latest generic cloud image
 → apt update/full-upgrade
 → base packages
 → early QGA + ASCII build-stage telemetry
-→ persistent guest-status diagnostics
 → regular linux-image-amd64
 → remove cloud-amd64 kernel
 → root password locked
@@ -87,10 +86,9 @@ Debian 13 trixie/latest generic cloud image
 → дождаться QGA/Cloud-Init/bootstrap
 → читать ASCII stage-code через QGA и отображать локальную русскую подпись
 → verification reboot
-→ проверить kernel/framebuffer/consoles/guest-status
+→ проверить kernel/framebuffer/consoles
 → выполнить guest cleanup
 → повторно подтвердить cleanup через QGA
-→ сохранить guest-status как часть итогового guest contract
 → вернуть стандартный Proxmox Cloud-Init
 → qm template
 → protection=1
@@ -131,34 +129,31 @@ Fixed 8x16
 - active QEMU Guest Agent;
 - active `getty@tty1` и `serial-getty@ttyS0`;
 - root autologin на обеих локальных консолях;
-- executable `/usr/local/sbin/guest-status`;
 - корректную effective SSH policy.
 
 Console autologin не является сетевой password authentication. Право Proxmox `VM.Console` фактически даёт root-доступ внутрь гостя и выдаётся только доверенным PVE identities.
 
-## Диагностика внутри VM
+## Диагностика этапов builder
 
-Команда:
-
-```bash
-guest-status
-```
-
-показывает без дополнительных зависимостей:
+Во время builder-run `/var/lib/template-build/bootstrap-status` содержит только короткий ASCII-код текущего этапа:
 
 ```text
-Build stage code
-Build stage
-QGA package
-QGA service
-QGA enabled
-QGA virtio port
-Cloud-Init
-IP addresses
-Uptime
+apt-metadata
+qga-install
+apt-upgrade
+base-packages
+console
+kernel
+locale-time
+services
+security
+metadata
+done
 ```
 
-Её вывод намеренно ASCII-only: утилита должна оставаться читаемой в ранней консоли ещё до полной настройки локалей и console font. Во время builder-run stage-файл `/var/lib/template-build/bootstrap-status` также содержит только ASCII-код. Это исключает mojibake при передаче stage через `qm guest exec`/QGA. После seal builder state удаляется, но `guest-status` остаётся полезной для обычных Full Clone VM.
+После запуска QEMU Guest Agent PVE Configuration читает этот код через QGA и уже на host-side выводит русскую подпись в строках `[ЭТАП VM]` и `[ОЖИДАНИЕ]`. Кириллица через QGA telemetry не передаётся, поэтому исключается mojibake вида `Ð...`. До появления QGA host показывает только ожидание Guest Agent.
+
+Stage-файл является временным builder state и удаляется перед seal вместе с `/var/lib/template-build`.
 
 ## Доступ
 
@@ -217,10 +212,9 @@ SSH host keys отсутствуют
 /var/lib/template-build отсутствует
 template-bootstrap отсутствует
 template-finalize отсутствует
-guest-status существует и executable
 ```
 
-Эти assertions выполняются и внутри guest finalize, и повторно host-side через QGA. `guest-status` не является builder-only artifact и сохраняется в итоговом template v7.
+Эти assertions выполняются и внутри guest finalize, и повторно host-side через QGA. Это делает root-only/machine-clean contract fail-closed.
 
 ## Cloud-Init renderer
 
@@ -239,7 +233,7 @@ Renderer:
 - запрещает unresolved markers;
 - атомарно записывает итоговый Cloud-Init.
 
-CI дополнительно запускает `cloud-init schema` на результате production renderer, извлекает встроенный `guest-status`, проверяет его `bash -n`/ShellCheck и подтверждает фиксированный набор ASCII stage-codes.
+CI дополнительно запускает `cloud-init schema` на результате production renderer и подтверждает фиксированный набор ASCII stage-codes.
 
 ## Clone lifecycle
 
@@ -302,7 +296,6 @@ ShellCheck
 production renderer
 YAML parse
 cloud-init schema
-embedded guest-status syntax/ShellCheck
 ASCII builder stage-code contract
 template contract unit tests
 absence of legacy create-template.sh
@@ -315,12 +308,11 @@ absence of legacy create-template.sh
 3. noVNC/tty1 и serial fallback;
 4. regular kernel + framebuffer;
 5. QGA;
-6. `guest-status` в builder и Full Clone;
-7. locked root password / SSH key-only;
-8. root SSH с injected public key;
-9. unique machine-id и SSH host keys;
-10. filesystem growth после resize;
-11. отсутствие builder artifacts и baked-in authorized_keys.
+6. locked root password / SSH key-only;
+7. root SSH с injected public key;
+8. unique machine-id и SSH host keys;
+9. filesystem growth после resize;
+10. отсутствие builder artifacts и baked-in authorized_keys.
 
 ## История
 
@@ -329,4 +321,4 @@ absence of legacy create-template.sh
 - **v4** — `ops + NOPASSWD sudo`, VGA/noVNC и regular amd64 kernel; прежний baseline.
 - **v5** — эксперимент с pinned Debian build и APT snapshot; отменён и номер не переиспользуется.
 - **v6** — единый management user `root`, пароль root locked, root SSH только по ключу, разные identities различаются ключами.
-- **v7** — постоянная `guest-status`, ASCII telemetry builder stage через QGA и host-side русские подписи без mojibake.
+- **v7** — ASCII telemetry builder stage через QGA и host-side русские подписи без mojibake.

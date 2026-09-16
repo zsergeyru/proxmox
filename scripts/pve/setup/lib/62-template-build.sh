@@ -243,11 +243,11 @@ provision_template_builder() {
     log "Запуск и provisioning VM-сборщика ${TEMPLATE_VMID}"
     qm start "$TEMPLATE_VMID"
 
-    info "Cloud-Init сначала устанавливает qemu-guest-agent, после чего PVE Configuration начинает видеть внутренние этапы сборки. В консоли VM доступна команда guest-status."
+    info "Cloud-Init сначала устанавливает qemu-guest-agent, после чего PVE Configuration начинает видеть внутренние этапы сборки."
     template_wait_for_agent "QEMU Guest Agent" \
         || die "QEMU Guest Agent не стал доступен за ${TEMPLATE_WAIT_SECONDS} секунд"
     template_wait_for_bootstrap \
-        || die "Начальная настройка гостя не завершилась за ${TEMPLATE_WAIT_SECONDS} секунд. Проверьте консоль VM ${TEMPLATE_VMID}, команду guest-status и журналы cloud-init."
+        || die "Начальная настройка гостя не завершилась за ${TEMPLATE_WAIT_SECONDS} секунд. Проверьте консоль VM ${TEMPLATE_VMID} и журналы cloud-init."
     template_wait_for_cloud_init \
         || die "Cloud-Init не завершился корректно со статусом done"
 }
@@ -265,7 +265,7 @@ verify_template_builder() {
     template_wait_for_agent "QEMU Guest Agent после перезагрузки" \
         || die "QEMU Guest Agent не подключился повторно после проверочной перезагрузки"
 
-    log "Проверка ядра, framebuffer, диагностической команды и консольных служб"
+    log "Проверка ядра, framebuffer и консольных служб"
     verify_output="$(template_guest_exec /bin/bash -lc '
 set -Eeuo pipefail
 kernel="$(uname -r)"
@@ -278,8 +278,6 @@ framebuffer="$(cat /sys/class/graphics/fb0/virtual_size)"
 systemctl is-active --quiet qemu-guest-agent.service
 systemctl is-active --quiet getty@tty1.service
 systemctl is-active --quiet serial-getty@ttyS0.service
-[[ -x /usr/local/sbin/guest-status ]]
-/usr/local/sbin/guest-status >/dev/null
 grep -q "^FONTSIZE=\"8x16\"$" /etc/default/console-setup
 grep -q -- "--autologin root" /etc/systemd/system/getty@tty1.service.d/autologin.conf
 grep -q -- "--autologin root" /etc/systemd/system/serial-getty@ttyS0.service.d/autologin.conf
@@ -295,7 +293,7 @@ printf "VERIFY_KERNEL=%s VERIFY_FRAMEBUFFER=%s CONSOLES_OK\n" "$kernel" "$frameb
     [[ -n "$TEMPLATE_KERNEL_VERSION" ]] || die "Проверенная версия ядра не была получена"
     [[ -n "$TEMPLATE_FRAMEBUFFER_SIZE" ]] || die "Проверенный размер framebuffer не был получен"
 
-    ok "Проверки builder пройдены: kernel=${TEMPLATE_KERNEL_VERSION}, framebuffer=${TEMPLATE_FRAMEBUFFER_SIZE}, guest-status=ok"
+    ok "Проверки builder пройдены: kernel=${TEMPLATE_KERNEL_VERSION}, framebuffer=${TEMPLATE_FRAMEBUFFER_SIZE}"
 }
 
 finalize_template_builder() {
@@ -319,11 +317,10 @@ set -Eeuo pipefail
 [[ ! -e /var/lib/template-build ]]
 [[ ! -e /usr/local/sbin/template-bootstrap ]]
 [[ ! -e /usr/local/sbin/template-finalize ]]
-[[ -x /usr/local/sbin/guest-status ]]
 printf "CLEANUP_OK\n"
 ' | grep -q 'CLEANUP_OK' \
         || die "Guest cleanup assertions не пройдены; VM-сборщик оставлена для диагностики"
-    ok "Guest cleanup assertions подтверждены; guest-status сохранён в template"
+    ok "Guest cleanup assertions подтверждены"
 
     log "Выключение VM-сборщика"
     qm shutdown "$TEMPLATE_VMID" --timeout 180 || true
@@ -335,7 +332,7 @@ printf "CLEANUP_OK\n"
     qm set "$TEMPLATE_VMID" --ciupgrade 0
     qm set "$TEMPLATE_VMID" --ipconfig0 ip=dhcp
     qm set "$TEMPLATE_VMID" --name "$TEMPLATE_NAME"
-    qm set "$TEMPLATE_VMID" --description "Базовый шаблон Debian 13 (Trixie); template-version=${TEMPLATE_VERSION}; root SSH key-only; guest-status; VGA/noVNC tty1 с автовходом; резервный serial0; SSH-ключи передаются каждому клону отдельно"
+    qm set "$TEMPLATE_VMID" --description "Базовый шаблон Debian 13 (Trixie); template-version=${TEMPLATE_VERSION}; root SSH key-only; VGA/noVNC tty1 с автовходом; резервный serial0; SSH-ключи передаются каждому клону отдельно"
 
     qm cloudinit update "$TEMPLATE_VMID"
     cloudinit_user_data="$(qm cloudinit dump "$TEMPLATE_VMID" user)"

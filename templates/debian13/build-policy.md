@@ -10,7 +10,7 @@ Template должен быть простым и понятным. Не испо
 
 Сборка берёт актуальный Debian 13 Trixie cloud image и stable packages на момент запуска.
 
-Template v7 использует единый management user `root`. Отдельный generic `ops` не создаётся. В итоговой системе сохраняется минимальная diagnostic command `/usr/local/sbin/guest-status`.
+Template v7 использует единый management user `root`. Отдельный generic `ops` не создаётся.
 
 Host-side orchestration является частью `scripts/pve/setup/configure-pve.sh`; standalone `create-template.sh` отсутствует.
 
@@ -110,8 +110,7 @@ Fixed 8x16
 - framebuffer существует и валиден;
 - QGA active;
 - tty1/ttyS0 getty active;
-- обе console override используют `--autologin root`;
-- `/usr/local/sbin/guest-status` существует, executable и успешно запускается.
+- обе console override используют `--autologin root`.
 
 ## 6. Root / SSH
 
@@ -147,7 +146,7 @@ Renderer должен:
 
 CI дополнительно проверяет результат через `cloud-init schema`.
 
-## 8. Build telemetry и `guest-status`
+## 8. Build telemetry
 
 `template-bootstrap` публикует текущий этап в:
 
@@ -173,13 +172,7 @@ done
 
 Русские подписи этапов формируются host-side в `62-template-build.sh`. Кириллица не передаётся через QGA status channel, потому что вывод `guest-exec` проходит через несколько уровней byte/string serialization и не должен использоваться как транспорт localized telemetry.
 
-Внутри builder и будущих Full Clone доступна команда:
-
-```bash
-guest-status
-```
-
-Её собственный вывод ASCII-only и показывает build stage, package/service state QGA, virtio channel, Cloud-Init, IP и uptime. `guest-status` является частью guest contract v7 и не удаляется при seal.
+До запуска QEMU Guest Agent host может показывать только ожидание QGA. После появления агента PVE Configuration читает `bootstrap-status` и выводит текущий этап в строках `[ЭТАП VM]`/`[ОЖИДАНИЕ]`.
 
 ## 9. Cloud-Init lifecycle
 
@@ -190,7 +183,6 @@ Builder-only custom Cloud-Init существует только во время
 ```text
 guest cleanup
 → host-side cleanup assertions через QGA
-→ подтвердить сохранение guest-status
 → shutdown
 → remove cicustom
 → ciuser=root
@@ -293,10 +285,9 @@ SSH host keys absent
 /var/lib/template-build absent
 template-bootstrap absent
 template-finalize absent
-guest-status present + executable
 ```
 
-Builder-only state удаляется, но `guest-status` сохраняется намеренно как часть guest contract v7. Assertions выполняются внутри guest и повторно host-side через QGA до seal.
+Assertions выполняются внутри guest и повторно host-side через QGA до seal.
 
 ## 15. Provenance
 
@@ -336,11 +327,11 @@ CI проверяет:
 - production renderer;
 - YAML parsing;
 - `cloud-init schema`;
-- embedded `guest-status` syntax + ShellCheck;
+- отсутствие embedded `guest-status` helper;
 - exact ASCII stage-code set;
 - template contract unit tests;
 - malformed guest directory negative test;
 - отсутствие legacy `scripts/pve/create-template.sh`;
 - whitespace.
 
-После существенного изменения pipeline/guest assets требуется реальный clean build + Full Clone smoke-test, включая `guest-status` и root login по injected SSH key.
+После существенного изменения pipeline/guest assets требуется реальный clean build + Full Clone smoke-test, включая root login по injected SSH key.

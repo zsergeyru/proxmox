@@ -52,8 +52,7 @@ jobs:
       - name: Validate template pipeline assets with production renderer
         run: |
           tmp="$(mktemp)"
-          guest_status_tmp="$(mktemp)"
-          trap 'rm -f "$tmp" "$guest_status_tmp"' EXIT
+          trap 'rm -f "$tmp"' EXIT
           sha512="$(printf 'a%.0s' {1..128})"
           python scripts/pve/setup/render-template-cloud-init.py \
             --base templates/debian13/cloud-init.yaml \
@@ -63,14 +62,13 @@ jobs:
             --template-version 7 \
             --image-name debian-13-genericcloud-amd64.qcow2 \
             --image-sha512 "$sha512"
-          python - "$tmp" "$guest_status_tmp" <<'PY'
+          python - "$tmp" <<'PY'
           from pathlib import Path
           import re
           import sys
           import yaml
 
           path = Path(sys.argv[1])
-          guest_status_path = Path(sys.argv[2])
           text = path.read_text(encoding="utf-8")
           data = yaml.safe_load(text)
           if not isinstance(data, dict):
@@ -97,16 +95,8 @@ jobs:
           bootstrap = bootstrap_entries[0].get("content")
           if not isinstance(bootstrap, str):
               raise SystemExit("Rendered template-bootstrap content is not text")
-
-          start_marker = "cat >/usr/local/sbin/guest-status <<'EOF_GUEST_STATUS'\n"
-          end_marker = "\nEOF_GUEST_STATUS\n"
-          if start_marker not in bootstrap:
-              raise SystemExit("Embedded guest-status start marker is missing")
-          after_start = bootstrap.split(start_marker, 1)[1]
-          if end_marker not in after_start:
-              raise SystemExit("Embedded guest-status end marker is missing")
-          guest_status = after_start.split(end_marker, 1)[0] + "\n"
-          guest_status_path.write_text(guest_status, encoding="utf-8")
+          if "guest-status" in bootstrap:
+              raise SystemExit("Manual guest-status helper must not be embedded in template-bootstrap")
 
           stage_codes = []
           for line in bootstrap.splitlines():
@@ -126,8 +116,6 @@ jobs:
           cloud-init schema -c "$tmp"
           bash -n templates/debian13/template-bootstrap.sh
           bash -n templates/debian13/template-finalize.sh
-          bash -n "$guest_status_tmp"
-          shellcheck -S warning "$guest_status_tmp"
 
           if [[ -e scripts/pve/create-template.sh ]]; then
             echo "Legacy standalone scripts/pve/create-template.sh must not exist" >&2
