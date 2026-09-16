@@ -1,6 +1,10 @@
 # Сеть Proxmox
 
-Этот документ — источник истины для общей IPv4/VLAN/VPN-архитектуры. Фактическое состояние PVE хранится в [`../host/pve/network/README.md`](../host/pve/network/README.md), детали VM 109 — в [`../guests/109-network-gateway/README.md`](../guests/109-network-gateway/README.md).
+**Type:** Specification  
+**Status:** Active  
+**Source of truth:** Yes — для общей IPv4/VLAN/VPN/PBR архитектуры и network contracts проекта.
+
+Фактическое состояние PVE хранится в [`../host/pve/network/README.md`](../host/pve/network/README.md), детали VM 109 — в [`../guests/109-network-gateway/README.md`](../guests/109-network-gateway/README.md).
 
 ## Базовые принципы
 
