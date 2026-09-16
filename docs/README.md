@@ -17,8 +17,9 @@
 - [`23-security.md`](23-security.md) — общие правила безопасности и root key-only management model.
 - [`24-reproducible-bootstrap.md`](24-reproducible-bootstrap.md) — versioning/reproducibility policy и project contract versions.
 - [`25-pve-access-control.md`](25-pve-access-control.md) — PVE identities, roles, ACL и граница `managed`.
+- [`26-deploy-guest-and-agent-access.md`](26-deploy-guest-and-agent-access.md) — простая схема: кто обновляет Git, кто запускает `deploy-guest`, зачем нужен `pvedeploy` и какие права есть у AI-агента.
 
-Диапазон `26–29` зарезервирован для новых документов уровня PVE.
+Диапазон `27–29` зарезервирован для новых документов уровня PVE.
 
 ### 30–39 — развёртывание гостей
 
