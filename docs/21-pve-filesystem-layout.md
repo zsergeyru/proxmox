@@ -1,28 +1,28 @@
 # Файловая структура Public Bootstrap / PVE Configuration
 
-**Type:** Reference  
-**Status:** Active  
-**Source of truth:** Yes — для host-side filesystem, state, credential paths, ownership и runtime layout PVE bootstrap/deployer.
+**Тип:** Справочник  
+**Статус:** Действующий  
+**Основной источник:** Да — для путей, файлов состояния, учётных данных, владельцев и рабочей структуры на стороне PVE-хоста.
 
-Парный runbook: [`20-pve-initialization.md`](20-pve-initialization.md).
+Парная инструкция: [`20-pve-initialization.md`](20-pve-initialization.md).
 
 Основной принцип:
 
 ```text
 Public Bootstrap
-→ временный runtime только для первоначального доступа к private repo
-→ /var/lib/proxmox-bootstrap после успешного first run удаляется
+→ временная рабочая область только для первоначального доступа к закрытому репозиторию
+→ /var/lib/proxmox-bootstrap удаляется после успешного первого запуска
 
 PVE Configuration
 → создаёт и обслуживает постоянную инфраструктурную структуру
-→ state хранится в /var/lib/proxmox-deployer/state
+→ состояние хранится в /var/lib/proxmox-deployer/state
 
 оба компонента
 → используют /run/lock/proxmox-orchestration.lock
 
-trust boundary
-→ root владеет canonical source/Git credential
-→ pvedeploy владеет только своим mutable deployment runtime
+граница доверия
+→ root владеет основной копией исходного кода и Git-ключом
+→ pvedeploy владеет только своей изменяемой рабочей областью развёртывания
 ```
 
 ## 1. Public Bootstrap
@@ -34,7 +34,7 @@ zsergeyru/proxmox-bootstrap
 └── bootstrap-pve.sh
 ```
 
-До первого успешного handoff используется временная область:
+До первого успешного перехода к PVE Configuration используется временная область:
 
 ```text
 /var/lib/proxmox-bootstrap/
@@ -47,7 +47,7 @@ zsergeyru/proxmox-bootstrap
 
 Каталог создаётся как `root:root 0700`.
 
-`private-repo/` является disposable checkout. При resume он может быть приведён к свежему `FETCH_HEAD` через `reset --hard` и `git clean -ffdx`, включая ignored cache/build artifacts. Это правило относится только к temporary runtime.
+`private-repo/` — одноразовая рабочая копия репозитория. При продолжении прерванного запуска её можно привести к свежему `FETCH_HEAD` через `reset --hard` и `git clean -ffdx`, включая игнорируемые кэши и артефакты сборки. Это правило относится только к временной области.
 
 После успешной PVE Configuration Public Bootstrap удаляет `/var/lib/proxmox-bootstrap` и записывает:
 
@@ -55,9 +55,9 @@ zsergeyru/proxmox-bootstrap
 /var/lib/proxmox-deployer/state/bootstrap-complete
 ```
 
-## 2. PVE Configuration source
+## 2. Исходный код PVE Configuration
 
-Канонический private entrypoint:
+Основная закрытая точка входа:
 
 ```text
 zsergeyru/proxmox/scripts/pve/setup/configure-pve.sh
@@ -89,39 +89,46 @@ scripts/pve/setup/
     └── 70-tooling.sh
 ```
 
-Канонический постоянный checkout:
+Постоянная основная копия репозитория:
 
 ```text
 /var/lib/proxmox-deployer/repo/
 ```
 
-Это **root-trusted runtime-copy** private source of truth:
+Это доверенная `root` рабочая копия закрытого репозитория:
 
 ```text
-owner: root:root для repo tree
-write: запрещён group/other
-parent /var/lib/proxmox-deployer: root:pvedeploy 0750
+владелец дерева repo: root:root
+запись для group/other: запрещена
+родитель /var/lib/proxmox-deployer: root:pvedeploy 0750
 ```
 
-Родитель намеренно не writable для `pvedeploy`: иначе ограниченный пользователь мог бы удалить/переименовать даже root-owned `repo/` и заменить его целиком.
+Родитель намеренно недоступен `pvedeploy` на запись: иначе ограниченный пользователь мог бы удалить или переименовать даже каталог `repo/`, принадлежащий `root`, и заменить его целиком.
 
-Перед автоматическим Git refresh проверяется полный clean state; local tracked/staged/untracked/ignored drift не стирается молча. В отличие от temporary checkout, `git clean -ffdx` здесь не применяется.
+Перед автоматическим обновлением Git проверяется полное отсутствие локальных изменений: отслеживаемых, подготовленных к коммиту, неотслеживаемых и игнорируемых. Такие изменения не стираются молча. В отличие от временной копии, `git clean -ffdx` здесь не применяется.
 
-`pvedeploy` может читать source через group traverse родителя и обычные read bits файлов, но не может писать в repo или `.git`. Отдельного `scripts/pve/create-template.sh` нет. `deploy-guest.py` появится после реализации deployer.
+`pvedeploy` может читать исходный код, но не может изменять `repo`, `.git` или Git-ключ. Отдельного `scripts/pve/create-template.sh` нет. `deploy-guest.py` появится после реализации средства развёртывания.
 
-## 3. Общая orchestration lock
+## 3. Общая блокировка запуска
 
 ```text
 /run/lock/proxmox-orchestration.lock
 ```
 
-Public Bootstrap открывает lock на fd 9 и передаёт этот fd PVE Configuration. Прямой `configure-pve.sh` берёт тот же lock самостоятельно.
+Public Bootstrap открывает блокировку на `fd 9` и передаёт этот дескриптор PVE Configuration. При прямом запуске `configure-pve.sh` берёт ту же блокировку самостоятельно.
 
-Lock защищает одновременно canonical private checkout, permanent runtime mutation, host configuration, Template 9000 pipeline, Full Clone smoke VMID 9099 и state/final marker transitions.
+Блокировка защищает одновременно:
 
-Lock дополняет, но не заменяет filesystem trust boundary: `pvedeploy` физически не имеет права записи в canonical source.
+- обновление основной копии закрытого репозитория;
+- изменение постоянной рабочей структуры;
+- конфигурацию PVE-хоста;
+- сборку шаблона `9000`;
+- проверочную VM `9099`;
+- переходы файлов состояния и итоговых отметок.
 
-## 4. Постоянная конфигурация deployer
+Блокировка дополняет, но не заменяет файловую границу доверия: `pvedeploy` физически не имеет права записи в основной исходный код.
+
+## 4. Постоянная конфигурация средства развёртывания
 
 ```text
 /etc/proxmox-deployer/
@@ -142,28 +149,28 @@ Lock дополняет, но не заменяет filesystem trust boundary: `
 
 ```text
 config.yaml
-→ постоянные параметры host-side deployer
+→ постоянные параметры средства развёртывания на PVE-хосте
 
 ssh/github_proxmox_repo_ed25519
-→ root-only canonical read-only Deploy Key для zsergeyru/proxmox
+→ доступный только root ключ GitHub Deploy Key только для чтения zsergeyru/proxmox
 
 ssh/pve_guest_ed25519
-→ pvedeploy-owned SSH identity для управляемых VM/LXC
-→ этим же key PVE Configuration проверяет реальный root SSH smoke clone
+→ SSH-ключ pvedeploy для управляемых VM/LXC
+→ этим же ключом PVE Configuration проверяет реальный root SSH на проверочном клоне
 
 ssh/config + known_hosts
-→ root-owned SSH transport private Git checkout
+→ принадлежащие root настройки SSH для доступа к закрытому Git-репозиторию
 
 secrets/host-deploy.token
-→ credential deployer@pve!host-deploy
+→ учётные данные deployer@pve!host-deploy
 
 secrets/ai-agent-infra.token
-→ credential ai-agent@pve!infra
+→ учётные данные ai-agent@pve!infra
 ```
 
-Canonical SSH config включает strict host-key checking, `BatchMode yes`, bounded `ConnectTimeout` и server-alive policy.
+Основная конфигурация SSH включает строгую проверку ключа сервера, `BatchMode yes`, ограниченный `ConnectTimeout` и параметры контроля живого соединения.
 
-## 5. Права и Linux runtime user
+## 5. Владельцы и права
 
 Ключевое разделение:
 
@@ -187,7 +194,7 @@ ai-agent-infra.token                       root:root 0600
 /var/log/proxmox-deployer/audit            pvedeploy:pvedeploy 0750
 ```
 
-`pvedeploy` contract:
+Требования к `pvedeploy`:
 
 ```text
 system UID < 1000
@@ -196,38 +203,38 @@ home = /var/lib/pvedeploy
 shell = /bin/bash
 ```
 
-Таким образом будущий `deploy-guest`, запущенный с ограниченными правами, сможет читать manifests/source и использовать свои runtime credentials, но не сможет изменить код или Git metadata, который затем исполняет `root`.
+Будущий `deploy-guest`, запущенный с ограниченными правами, сможет читать манифесты и исходный код и использовать свои учётные данные, но не сможет изменить код или метаданные Git, которые затем исполняет `root`.
 
-Secrets создаются с безопасным `umask`, не попадают в Git и не выводятся в обычные logs. Новый API token secret записывается атомарно; обычный failure/interruption откатывает только newly-created pending token.
+Секреты создаются с безопасным `umask`, не попадают в Git и не выводятся в обычные журналы. Новый секрет API-токена записывается атомарно; обычная ошибка или прерывание откатывает только новый токен, созданный текущим запуском и ещё не зафиксированный как готовый.
 
-## 6. Mutable runtime
+## 6. Изменяемая рабочая область
 
 ```text
 /var/lib/proxmox-deployer/
-├── repo/    root-trusted, immutable для pvedeploy
-├── state/   orchestration + smoke state
-└── cache/   mutable pvedeploy runtime
+├── repo/    доверенная root копия, неизменяемая для pvedeploy
+├── state/   состояние настройки и проверки шаблона
+└── cache/   изменяемый кэш pvedeploy
 ```
 
-Private SSH keys и token secrets здесь не хранятся.
+Закрытые SSH-ключи и секреты токенов здесь не хранятся.
 
-Template image cache:
+Кэш образов шаблона:
 
 ```text
 /var/lib/vz/template/cache/debian13/
 ```
 
-Temporary Cloud-Init builder snippet создаётся в `local:snippets` только на время сборки 9000. При существующей unfinished builder VM автоматический cleanup не выполняется.
+Временный фрагмент Cloud-Init для сборщика создаётся в `local:snippets` только на время сборки `9000`. Если существует незавершённая VM-сборщик, автоматическая очистка не выполняется.
 
-Smoke-specific ephemeral host file:
+Временный файл проверки SSH-ключа VM `9099`:
 
 ```text
 /run/pve-template-smoke-known-hosts.XXXXXX
 ```
 
-Он используется только для проверки SSH host key временной VM `9099` до/после reboot и удаляется после success либо при обычном EXIT/INT/TERM. Failed VM `9099` при этом не удаляется.
+Он используется только для проверки SSH-ключа сервера временной VM до и после перезагрузки и удаляется после успеха либо при обычном `EXIT/INT/TERM`. При ошибке сама VM `9099` не удаляется.
 
-## 7. State
+## 7. Файлы состояния
 
 ```text
 /var/lib/proxmox-deployer/state/
@@ -249,26 +256,28 @@ version
 → PVE_CONFIGURATION_VERSION
 
 last-run.json
-→ timestamp/result/source revision без secrets
+→ время, результат и ревизия исходного кода без секретов
 
 last-revision
-→ revision canonical private checkout
+→ ревизия основной постоянной копии закрытого репозитория
 
 template-smoke.json
-→ pending/passed состояние реального Full Clone smoke-test template 9000
-→ в passed state хранит revision, machine-id, kernel, rootfs bytes и SSH host-key fingerprint тестового clone
+→ состояние pending/passed реальной проверки полного клона шаблона 9000
+→ при passed хранит ревизию, machine-id, ядро, размер rootfs и fingerprint SSH-ключа проверочного клона
 
 bootstrap-complete
 → первоначальный Public Bootstrap успешно завершён
 ```
 
-`state.json`, `last-run.json`, `version` и `template-smoke.json` записываются через temporary file + atomic `mv`.
+Названия `state.json`, `last-run.json`, `template-smoke.json`, значения `pending/passed` и другие машинные поля оставлены без перевода, потому что это часть программного интерфейса.
 
-`template-smoke.json=status=pending` является durable resume marker: после interruption следующий обычный PVE Configuration обязан вернуться к smoke-test. `passed` записывается только после полного smoke success и удаления VMID `9099`.
+`state.json`, `last-run.json`, `version` и `template-smoke.json` записываются через временный файл и атомарный `mv`.
 
-State не является единственным source of truth: каждый запуск перепроверяет PVE, credentials, Git state, source ownership и фактическое состояние VMID 9000/9099.
+`template-smoke.json=status=pending` — долговечная отметка незавершённой проверки: после прерывания следующий обычный запуск PVE Configuration обязан вернуться к проверке. `passed` записывается только после полного успешного цикла и удаления VMID `9099`.
 
-## 8. Logs
+Файлы состояния не являются единственным основанием считать систему исправной: каждый запуск заново проверяет PVE, учётные данные, состояние Git, владельцев исходного кода и фактическое состояние VMID `9000/9099`.
+
+## 8. Журналы
 
 ```text
 /var/log/proxmox-deployer/
@@ -276,19 +285,19 @@ State не является единственным source of truth: кажды
 └── audit/
 ```
 
-Создание template 9000 и Full Clone smoke-test 9099 пишут в тот же `configure-pve.log`; отдельных orchestrator/log pipeline нет.
+Создание шаблона `9000` и проверка полного клона `9099` пишут в тот же `configure-pve.log`; отдельного контура журналирования для этих операций нет.
 
-Правила: persistent log без ANSI, без token secrets/private keys, с operations/warnings/revision и без полного environment dump.
+Правила: постоянный журнал без ANSI-кодов, без секретов токенов и закрытых ключей, с операциями, предупреждениями и ревизией исходного кода, но без полного дампа переменных окружения.
 
-## 9. Configuration snapshots
+## 9. Снимки конфигурации
 
 ```text
 /var/backups/proxmox-configuration/YYYYMMDD-HHMMSS/
 ```
 
-Это snapshot host configuration/diagnostics перед значимыми изменениями, а не VM backup. Не архивировать бездумно весь `/etc/pve`, так как это `pmxcfs`.
+Это снимок конфигурации и диагностических данных PVE-хоста перед значимыми изменениями, а не резервная копия VM. Не следует бездумно архивировать весь `/etc/pve`, поскольку это `pmxcfs`.
 
-## 10. Backup infrastructure secrets
+## 10. Резервирование инфраструктурных секретов
 
 Защищённая локальная область:
 
@@ -296,7 +305,15 @@ State не является единственным source of truth: кажды
 /var/backups/proxmox-secrets/
 ```
 
-Внешняя backup policy должна включать как минимум token secrets, canonical GitHub Deploy Key, PVE guest SSH keypair, SSH config и known_hosts. Локальная копия на том же SSD не считается полноценным disaster-recovery backup.
+Внешняя политика резервного копирования должна включать как минимум:
+
+- секреты API-токенов;
+- основной GitHub Deploy Key;
+- пару SSH-ключей PVE для гостевых систем;
+- конфигурацию SSH;
+- `known_hosts`.
+
+Локальная копия на том же SSD не считается полноценной копией для аварийного восстановления.
 
 ## 11. Стабильные команды
 
@@ -308,9 +325,9 @@ State не является единственным source of truth: кажды
 
 `pve-configuration-status` читает `state.json`.
 
-`deploy-guest` после реализации будет небольшой wrapper-командой к source из canonical private checkout. Его runtime не получает write-доступ к canonical source.
+`deploy-guest` после реализации будет небольшой командой-обёрткой над исходным кодом из основной закрытой копии репозитория. Его рабочая среда не получает права записи в эту копию.
 
-Smoke-test не устанавливает отдельную постоянную CLI-команду: штатный явный запуск идёт через `bootstrap-pve.sh --smoke-test-template` либо напрямую через `configure-pve.sh --smoke-test-template`.
+Для проверки шаблона отдельная постоянная команда не устанавливается: явный запуск выполняется через `bootstrap-pve.sh --smoke-test-template` либо напрямую через `configure-pve.sh --smoke-test-template`.
 
 ## 12. Итоговое дерево
 
@@ -338,4 +355,4 @@ Smoke-test не устанавливает отдельную постоянну
 
 Главный принцип:
 
-> Public Bootstrap использует отдельную temporary область только для первоначального доступа. Canonical source и Git credential принадлежат root; `pvedeploy` получает только нужный mutable runtime. Smoke state durable и fail-closed: failed clone сохраняется для диагностики, а `passed` возникает только после реального Full Clone lifecycle и успешного удаления временной VM.
+> Public Bootstrap использует отдельную временную область только для первоначального доступа. Основная копия исходного кода и Git-ключ принадлежат `root`; `pvedeploy` получает только необходимую изменяемую рабочую область. При сомнительном состоянии проверка шаблона останавливается без разрушительной очистки: неуспешный клон сохраняется для диагностики, а `passed` появляется только после полного успешного жизненного цикла Full Clone и удаления временной VM.
