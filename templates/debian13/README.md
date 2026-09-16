@@ -15,9 +15,9 @@ Management user: root
 SSH: public key only
 ```
 
-Template v6 является текущей действующей версией. Версия v5 ранее использовалась для отменённого эксперимента с pinned Debian build/APT snapshot и не переиспользуется.
+Template v6 является текущей действующей guest-contract версией. Усиление host-side orchestration, validation и CI само по себе не меняет Template-Version, пока итоговый guest contract остаётся v6.
 
-Создание template является частью PVE Configuration. Отдельного standalone `scripts/pve/create-template.sh` больше нет.
+Создание template является частью PVE Configuration. Отдельного standalone `scripts/pve/create-template.sh` нет.
 
 Host-side stages:
 
@@ -25,6 +25,12 @@ Host-side stages:
 scripts/pve/setup/lib/60-template-contract.sh
 scripts/pve/setup/lib/61-template-source.sh
 scripts/pve/setup/lib/62-template-build.sh
+```
+
+Canonical Cloud-Init renderer:
+
+```text
+scripts/pve/setup/render-template-cloud-init.py
 ```
 
 Guest-side versioned assets:
@@ -43,8 +49,8 @@ templates/debian13/template-finalize.sh
 Debian 13 trixie/latest generic cloud image
 → SHA-512 verification
 → VMID 9000 builder
-→ apt update/full-upgrade из обычных Debian repositories
-→ установка base packages
+→ apt update/full-upgrade
+→ base packages
 → regular linux-image-amd64
 → remove cloud-amd64 kernel
 → root password locked
@@ -52,8 +58,8 @@ Debian 13 trixie/latest generic cloud image
 → verification reboot
 → framebuffer + VGA/noVNC tty1 verification
 → QGA + SSH policy verification
-→ clean machine-specific state и authorized_keys
-→ standard Cloud-Init defaults
+→ fail-closed machine-specific cleanup
+→ standard Proxmox Cloud-Init
 → ciuser=root
 → qm template
 → protection=1
@@ -61,36 +67,37 @@ Debian 13 trixie/latest generic cloud image
 
 ## Template pipeline
 
-PVE Configuration выполняет сборку по этапам:
-
 ```text
 60-template-contract.sh
 → определить состояние VMID 9000
-→ проверить существующий template
-→ отличить unfinished builder от посторонней VM
+→ проверить полный hardware + Cloud-Init contract
+→ отличить unfinished builder от foreign VM
 
 61-template-source.sh
 → проверить capacity и cloud.debian.org
 → скачать image + SHA512SUMS
 → проверить SHA-512
-→ собрать temporary Cloud-Init snippet из versioned assets
+→ вызвать production renderer
+→ получить temporary Cloud-Init snippet
 
 62-template-build.sh
 → создать builder VM
 → дождаться QGA/Cloud-Init/bootstrap
-→ выполнить verification reboot
+→ verification reboot
 → проверить kernel/framebuffer/consoles
 → выполнить guest cleanup
+→ повторно подтвердить cleanup через QGA
 → вернуть стандартный Proxmox Cloud-Init
 → qm template
 → protection=1
+→ финальный contract check
 ```
 
-Один и тот же `configure-pve.sh` владеет lock, state, log и error handling для host configuration и template build. Второго host-side orchestrator нет.
+Один `configure-pve.sh` владеет общей orchestration lock, state, log и error handling для host configuration и template build.
 
 ## Источник Debian
 
-Pipeline использует текущий официальный image:
+Pipeline использует:
 
 ```text
 https://cloud.debian.org/images/cloud/trixie/latest/debian-13-genericcloud-amd64.qcow2
@@ -98,7 +105,9 @@ https://cloud.debian.org/images/cloud/trixie/latest/debian-13-genericcloud-amd64
 
 Перед импортом скачивается `SHA512SUMS` из того же каталога и выполняется строгая SHA-512 проверка.
 
-Отдельный фиксированный Debian build и APT snapshot не используются. При новой сборке template получает актуальное на этот момент состояние Debian 13.
+Download policy включает retries, connection timeout и low-speed timeout. Temporary download удаляется trap-ом, а stale temp-файлы предыдущего interrupted run очищаются под общей orchestration lock.
+
+Отдельный фиксированный Debian build и APT snapshot не используются. При новой сборке template получает актуальное состояние Debian 13 на момент build.
 
 ## Kernel и console
 
@@ -133,28 +142,74 @@ PermitRootLogin: prohibit-password
 PubkeyAuthentication: yes
 ```
 
-То есть root по сети доступен только с разрешённым private key.
+Base template не содержит personal, deployer, AI или Ansible public keys. Каждый Full Clone получает необходимые public keys отдельно до первого start.
 
-Base template не содержит personal, deployer, AI или Ansible public keys. Перед seal удаляется `/root/.ssh`, а каждый clone получает необходимые public keys отдельно до первого запуска.
-
-## Базовые параметры
+## Базовые параметры и host-visible contract
 
 ```text
-CPU: 1 vCPU, type host
-RAM: 1 GiB
-Disk: 16 GiB
-Storage: local-lvm
-Controller: VirtIO SCSI Single
+ostype: l26
+CPU: host, sockets=1, cores=1
+RAM: 1024 MiB
+Controller: virtio-scsi-single
+System disk: scsi0, local-lvm, >=16 GiB
+discard=on
+iothread=1
+ssd=1
+Cloud-Init drive: ide2, local-lvm, media=cdrom
 Network: VirtIO / vmbr0
-Template network: DHCP
+Boot: scsi0 first
 QEMU Guest Agent: enabled
+VGA: std
+serial0: socket
+Template network: DHCP
 ciuser: root
 ciupgrade: 0
-Timezone: Europe/Moscow
-Locale: en_US.UTF-8
+onboot: 0/default
+cicustom: absent after build
+protection: 1 after pipeline
 ```
 
-Docker и application services в base template не устанавливаются.
+PVE Configuration проверяет этот contract и у существующего 9000, и после новой сборки. Размер system disk может быть больше 16 GiB, но не меньше.
+
+Единственное автоматически исправляемое отклонение у в остальном совместимого template — отсутствие `protection=1`; защита восстанавливается после configuration snapshot. Остальные несовпадения вызывают STOP.
+
+## Guest cleanup contract
+
+Перед seal `template-finalize.sh` выполняет cleanup и завершает работу с ошибкой, если `debian` user не удалось удалить.
+
+До `qm template` должны быть подтверждены:
+
+```text
+user debian отсутствует
+/etc/machine-id пуст
+/var/lib/dbus/machine-id отсутствует
+SSH host keys отсутствуют
+/root/.ssh отсутствует
+/var/lib/template-build отсутствует
+template-bootstrap отсутствует
+template-finalize отсутствует
+```
+
+Эти assertions выполняются и внутри guest finalize, и повторно host-side через QGA. Это делает root-only/machine-clean contract fail-closed.
+
+## Cloud-Init renderer
+
+Production и CI используют один файл:
+
+```text
+scripts/pve/setup/render-template-cloud-init.py
+```
+
+Renderer:
+
+- валидирует base YAML;
+- требует ровно по одному `write_files` entry для bootstrap/finalize;
+- подставляет Template-Version, image name и SHA-512;
+- вставляет guest scripts;
+- запрещает unresolved markers;
+- атомарно записывает итоговый Cloud-Init.
+
+CI дополнительно запускает `cloud-init schema` на результате production renderer.
 
 ## Clone lifecycle
 
@@ -162,45 +217,34 @@ Docker и application services в base template не устанавливают�
 Full Clone from 9000
 → CPU/RAM/disk/network
 → ciuser=root
-→ установить один или несколько SSH public keys
+→ установить SSH public keys
 → qm cloudinit update
 → start
 → verify QGA/SSH/health
 ```
 
-Для host-side deployer используется `pve_guest_ed25519.pub`. AI и Ansible используют собственные независимые public keys. Несколько ключей могут давать доступ одному Linux-пользователю `root` и при этом независимо отзываться удалением соответствующей строки из `/root/.ssh/authorized_keys`.
+Для host-side deployer используется `pve_guest_ed25519.pub`. AI и Ansible используют собственные независимые public keys. Linked Clone не является штатным вариантом.
 
-Linked Clone не является штатным вариантом.
-
-## Идентификация версии и contract
-
-Кроме `/etc/vm-template-info`, Proxmox description содержит машинно-читаемый marker:
+## Failure policy
 
 ```text
-template-version=6
+9000 отсутствует
+→ BUILD
+
+валидный template v6
+→ SKIP
+
+валидный template без protection
+→ восстановить protection после snapshot
+
+unfinished builder
+→ STOP, оставить VM/disks для диагностики
+
+foreign VM/LXC или incompatible template
+→ STOP без destructive overwrite
 ```
 
-PVE Configuration проверяет существующий VMID 9000 по полному host-visible contract:
-
-```text
-name = tpl-debian13
-template = 1
-protection = 1 после pipeline
-agent = 1
-vga = std
-serial0 = socket
-ciuser = root
-ciupgrade = 0
-ipconfig0 = ip=dhcp
-cicustom отсутствует
-description содержит template-version=6
-```
-
-Единственное автоматически исправляемое отклонение у совместимого template — отсутствие `protection=1`; защита восстанавливается после configuration snapshot. Остальные несовпадения вызывают STOP и требуют осознанной пересборки.
-
-Незавершённая VM-сборщик `builder-debian13` распознаётся отдельно. Она и её диски не удаляются автоматически: состояние сохраняется для диагностики.
-
-Старый template другой версии автоматически не изменяется и не удаляется.
+Если VMID свободен, но остался только temporary builder snippet, он считается orphaned artefact предыдущей попытки и безопасно пересоздаётся.
 
 ## `/etc/vm-template-info`
 
@@ -213,13 +257,26 @@ Template v6 записывает, в частности:
 Тип-ядра: amd64
 Management-user: root
 SSH: root key-only
+Исходный-образ
+SHA512-исходного-образа
+Дата-сборки
 ```
-
-Также сохраняются source image, SHA-512 и дата сборки.
 
 ## Проверка после изменения template assets или pipeline
 
-После существенного изменения `60/61/62` или файлов `templates/debian13/`:
+CI проверяет:
+
+```text
+bash syntax
+ShellCheck
+production renderer
+YAML parse
+cloud-init schema
+template contract unit tests
+absence of legacy create-template.sh
+```
+
+После существенного изменения guest/template assets по принятой policy требуется реальный integration test:
 
 1. clean build VMID 9000;
 2. Full Clone;
@@ -232,12 +289,10 @@ SSH: root key-only
 9. filesystem growth после resize;
 10. отсутствие builder artifacts и baked-in authorized_keys.
 
-CI проверяет shell-синтаксис, YAML и сборку Cloud-Init из assets, но не заменяет реальный PVE integration test.
-
 ## История
 
 - **v2** — базовый build/Full Clone, QGA, SSH, timesync, TRIM, cleanup и disk growth.
 - **v3** — тестировалась serial-only Web Console; признана менее удобной.
 - **v4** — `ops + NOPASSWD sudo`, VGA/noVNC и regular amd64 kernel; прежний baseline.
 - **v5** — эксперимент с pinned Debian build и APT snapshot; отменён и номер не переиспользуется.
-- **v6** — единый management user `root`, пароль root locked, root SSH только по ключу, отдельные SSH identities различаются ключами.
+- **v6** — единый management user `root`, пароль root locked, root SSH только по ключу, разные identities различаются ключами.

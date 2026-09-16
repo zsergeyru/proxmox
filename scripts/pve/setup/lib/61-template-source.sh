@@ -34,20 +34,40 @@ check_template_source() {
 
     log "Проверка источника облачного образа Debian"
     getent ahosts cloud.debian.org >/dev/null || die "Не работает DNS-разрешение имени cloud.debian.org"
-    curl -fsS --connect-timeout 10 -o /dev/null "$TEMPLATE_CHECKSUM_URL" \
+    curl -fsS --connect-timeout 10 --max-time 30 -o /dev/null "$TEMPLATE_CHECKSUM_URL" \
         || die "Нет HTTPS-доступа к облачным образам Debian"
     ok "Источник облачного образа Debian доступен"
 }
 
 download_template_file() {
-    local url=$1 dst=$2 tmp
-    tmp="${dst}.tmp.$$"
-    rm -f -- "$tmp"
-    if ! curl --fail --location --retry 3 --connect-timeout 15 --output "$tmp" "$url"; then
-        rm -f -- "$tmp"
+    local url=$1 dst=$2 dst_dir dst_name
+    dst_dir="$(dirname "$dst")"
+    dst_name="$(basename "$dst")"
+    mkdir -p "$dst_dir"
+
+    # Общая orchestration lock гарантирует отсутствие параллельной загрузки. Поэтому
+    # временные файлы того же назначения являются остатками прерванных запусков.
+    find "$dst_dir" -maxdepth 1 -type f -name ".${dst_name}.tmp.*" -delete \
+        || die "Не удалось удалить stale temporary downloads для ${dst}"
+
+    TEMPLATE_DOWNLOAD_TMP="$(mktemp "${dst_dir}/.${dst_name}.tmp.XXXXXX")"
+    if ! curl \
+        --fail \
+        --location \
+        --retry 3 \
+        --retry-delay 2 \
+        --retry-all-errors \
+        --connect-timeout 15 \
+        --speed-limit 1024 \
+        --speed-time 60 \
+        --output "$TEMPLATE_DOWNLOAD_TMP" \
+        "$url"; then
+        cleanup_template_download_tmp
         die "Не удалось скачать ${url}"
     fi
-    mv -f -- "$tmp" "$dst"
+
+    mv -f -- "$TEMPLATE_DOWNLOAD_TMP" "$dst"
+    TEMPLATE_DOWNLOAD_TMP=""
 }
 
 prepare_template_image() {
@@ -89,6 +109,7 @@ prepare_template_cloud_init() {
     [[ -f "$base_yaml" ]] || die "Не найден template asset: ${base_yaml}"
     [[ -f "$bootstrap_asset" ]] || die "Не найден template asset: ${bootstrap_asset}"
     [[ -f "$finalize_asset" ]] || die "Не найден template asset: ${finalize_asset}"
+    [[ -f "$TEMPLATE_RENDERER" ]] || die "Не найден canonical Cloud-Init renderer: ${TEMPLATE_RENDERER}"
     [[ -n "$TEMPLATE_IMAGE_SHA512" ]] || die "SHA-512 исходного образа не определён до сборки Cloud-Init"
 
     pvesm status --storage "$TEMPLATE_DISK_STORAGE" >/dev/null 2>&1 \
@@ -108,70 +129,20 @@ prepare_template_cloud_init() {
     fi
     mkdir -p "$(dirname "$TEMPLATE_SNIPPET_PATH")"
 
-    python3 - \
-        "$base_yaml" "$bootstrap_asset" "$finalize_asset" "$TEMPLATE_SNIPPET_PATH" \
-        "$TEMPLATE_VERSION" "$TEMPLATE_IMAGE_NAME" "$TEMPLATE_IMAGE_SHA512" <<'PY_TEMPLATE_CLOUD_INIT'
-from pathlib import Path
-import sys
-import yaml
+    python3 "$TEMPLATE_RENDERER" \
+        --base "$base_yaml" \
+        --bootstrap "$bootstrap_asset" \
+        --finalize "$finalize_asset" \
+        --output "$TEMPLATE_SNIPPET_PATH" \
+        --template-version "$TEMPLATE_VERSION" \
+        --image-name "$TEMPLATE_IMAGE_NAME" \
+        --image-sha512 "$TEMPLATE_IMAGE_SHA512" \
+        || die "Canonical renderer не смог сформировать Cloud-Init builder snippet"
 
-base_path, bootstrap_path, finalize_path, output_path = map(Path, sys.argv[1:5])
-template_version, image_name, image_sha512 = sys.argv[5:8]
+    [[ -s "$TEMPLATE_SNIPPET_PATH" ]] \
+        || die "Canonical renderer завершился без создания непустого ${TEMPLATE_SNIPPET_PATH}"
 
-data = yaml.safe_load(base_path.read_text(encoding="utf-8"))
-if not isinstance(data, dict):
-    raise SystemExit(f"{base_path} must contain a YAML mapping")
-
-bootstrap = bootstrap_path.read_text(encoding="utf-8")
-bootstrap = (
-    bootstrap.replace("__TEMPLATE_VERSION__", template_version)
-    .replace("__IMAGE_NAME__", image_name)
-    .replace("__IMAGE_SHA512__", image_sha512)
-)
-finalize = finalize_path.read_text(encoding="utf-8")
-
-replacement = {
-    "/usr/local/sbin/template-bootstrap": bootstrap,
-    "/usr/local/sbin/template-finalize": finalize,
-}
-found = set()
-for item in data.get("write_files", []):
-    if not isinstance(item, dict):
-        continue
-    path = item.get("path")
-    if path in replacement:
-        item["content"] = replacement[path]
-        found.add(path)
-
-missing = set(replacement) - found
-if missing:
-    raise SystemExit(f"Cloud-Init asset lacks write_files entries: {sorted(missing)}")
-
-rendered = "#cloud-config\n" + yaml.safe_dump(
-    data,
-    allow_unicode=True,
-    sort_keys=False,
-    default_flow_style=False,
-)
-Path(output_path).write_text(rendered, encoding="utf-8")
-PY_TEMPLATE_CLOUD_INIT
-
-    python3 - "$TEMPLATE_SNIPPET_PATH" <<'PY_VALIDATE_RENDERED_CLOUD_INIT'
-from pathlib import Path
-import sys
-import yaml
-
-path = Path(sys.argv[1])
-text = path.read_text(encoding="utf-8")
-data = yaml.safe_load(text)
-if not isinstance(data, dict):
-    raise SystemExit("Rendered Cloud-Init is not a mapping")
-for marker in ("__TEMPLATE_BOOTSTRAP_CONTENT__", "__TEMPLATE_FINALIZE_CONTENT__", "__TEMPLATE_VERSION__", "__IMAGE_NAME__", "__IMAGE_SHA512__"):
-    if marker in text:
-        raise SystemExit(f"Unresolved template marker: {marker}")
-PY_VALIDATE_RENDERED_CLOUD_INIT
-
-    ok "Cloud-Init builder snippet подготовлен: ${TEMPLATE_SNIPPET_VOL}"
+    ok "Cloud-Init builder snippet подготовлен canonical renderer: ${TEMPLATE_SNIPPET_VOL}"
 }
 
 prepare_template_source() {

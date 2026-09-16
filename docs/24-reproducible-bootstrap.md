@@ -7,8 +7,8 @@
 Текущие версии:
 
 ```text
-Public Bootstrap:        PUBLIC_BOOTSTRAP_VERSION=7
-PVE Configuration:      PVE_CONFIGURATION_VERSION=16
+Public Bootstrap:        PUBLIC_BOOTSTRAP_VERSION=8
+PVE Configuration:      PVE_CONFIGURATION_VERSION=17
 Debian VM template:     Template-Version 6
 ```
 
@@ -20,9 +20,17 @@ Debian VM template:     Template-Version 6
 zsergeyru/proxmox-bootstrap/bootstrap-pve.sh
 ```
 
-`PUBLIC_BOOTSTRAP_VERSION` повышается, когда меняется поведение публичной точки входа: first-run bootstrap, resume, handoff, permanent refresh, marker contract или передаваемые параметры.
+`PUBLIC_BOOTSTRAP_VERSION` повышается, когда меняется поведение публичной точки входа: first-run bootstrap, resume, handoff, permanent refresh, marker contract, orchestration locking или передаваемые параметры.
 
-Public Bootstrap не pin'ит private `main` заранее между разными запусками: в начале каждого штатного запуска получает текущую ветку `main`. Но после выбора revision конкретный запуск фиксирует её и передаёт SHA в PVE Configuration. Одна PVE Configuration не должна смешивать код из разных Git revisions.
+Public Bootstrap не pin'ит private `main` между разными запусками: в начале каждого штатного запуска получает текущую ветку `main`. Но после выбора revision конкретный запуск фиксирует её и передаёт SHA в PVE Configuration. Одна PVE Configuration не должна смешивать код из разных Git revisions.
+
+Public Bootstrap и PVE Configuration используют одну lock:
+
+```text
+/run/lock/proxmox-orchestration.lock
+```
+
+Lock удерживается до завершения configuration run. Поэтому другой Bootstrap или прямой `configure-pve.sh` не может одновременно переключить canonical checkout или изменить host configuration.
 
 Если первый запуск прервался после создания permanent runtime, повторная та же команда продолжает bootstrap с существующими credentials и canonical checkout, а не требует удаления runtime.
 
@@ -42,15 +50,34 @@ zsergeyru/proxmox/scripts/pve/setup/configure-pve.sh
 - storage requirements;
 - template pipeline requirements;
 - state/reporting schema;
-- поведение rerun/safety checks.
+- rerun/locking/safety checks.
 
-Фактически применённая private revision записывается в:
+Перед `source lib/*.sh` entrypoint проверяет сам исполняемый checkout:
+
+```text
+Git worktree существует
+→ HEAD = PVE_CONFIGURATION_SOURCE_REVISION
+→ tracked/staged/untracked/ignored drift отсутствует
+→ только затем source модулей
+```
+
+Это означает, что SHA в state/log действительно соответствует исполняемому коду. Dirty checkout не очищается автоматически: run останавливается, чтобы не потерять локальные данные и не скрыть drift.
+
+Canonical checkout `/var/lib/proxmox-deployer/repo` также должен быть чистым до автоматического `fetch/reset`. Если обнаружен локальный drift, Bootstrap/PVE Configuration останавливаются вместо destructive overwrite.
+
+Revision текущего run известна до первого host-side изменения и используется в `running/failed/interrupted` state. После sync canonical checkout обязан иметь тот же SHA. Фактически применённая revision записывается в:
 
 ```text
 /var/lib/proxmox-deployer/state/last-revision
 ```
 
-При handoff Public Bootstrap передаёт `PVE_CONFIGURATION_SOURCE_REVISION`. Canonical checkout должен совпасть именно с этой revision. Если ветка `main` успела измениться во время первого clone/fetch, PVE Configuration останавливается вместо смешивания уже загруженных модулей с более новым template/tooling кодом.
+State-файлы записываются атомарно через temporary file + `mv`:
+
+```text
+state.json
+last-run.json
+version
+```
 
 ## Debian VM template
 
@@ -66,20 +93,28 @@ Host-side pipeline:
 → capacity/source checks
 → Debian cloud image + SHA512SUMS
 → строгая SHA-512 verification
-→ сборка temporary Cloud-Init snippet из versioned assets
+→ canonical Cloud-Init renderer
 
 62-template-build.sh
 → создать VM builder
 → provisioning/QGA/Cloud-Init
 → verification reboot
-→ guest cleanup
+→ fail-closed guest cleanup
 → standard Proxmox Cloud-Init
 → qm template
 → protection=1
 → final contract check
 ```
 
-Guest-side assets находятся в:
+Canonical renderer:
+
+```text
+scripts/pve/setup/render-template-cloud-init.py
+```
+
+Он используется и runtime, и CI. Поэтому CI не поддерживает вторую независимую реализацию render-логики.
+
+Guest-side assets:
 
 ```text
 templates/debian13/cloud-init.yaml
@@ -105,9 +140,31 @@ Template-Version 6
 template-version=6
 ```
 
-`Template-Version` — версия нашего guest/template contract, а не pin внешнего Debian build. Перенос orchestration из отдельного `create-template.sh` в модули PVE Configuration сам по себе не требует повышения Template-Version, пока итоговое содержимое и contract гостя не изменены.
+`Template-Version` — версия guest/template contract, а не pin внешнего Debian build. Усиление host-side validation/locking/CI не повышает Template-Version, пока содержимое guest contract остаётся v6.
 
-PVE Configuration принимает существующий template только если полный host-visible contract соответствует текущей версии. Несовместимый VMID `9000` автоматически не удаляется и не заменяется. Незавершённая VM-сборщик также сохраняется для диагностики и распознаётся как отдельное состояние.
+PVE Configuration принимает существующий template только если полный host-visible contract соответствует текущему baseline. Проверяются не только name/Cloud-Init markers, но и CPU/RAM, SCSI controller, system disk/storage/flags/minimum size, Cloud-Init drive, VirtIO network/bridge, boot order, QGA, console и protection.
+
+Guest cleanup fail-closed: до `qm template` подтверждается отсутствие generic `debian`, machine-id, SSH host keys, `/root/.ssh`, build state и builder scripts. Незавершённая VM-сборщик сохраняется для диагностики.
+
+## LXC appliance
+
+PVE Configuration сначала обнаруживает уже загруженный Debian 13 LXC template, затем пытается обновить `pveam` catalog.
+
+```text
+pveam update успешен
+→ использовать newest Debian 13
+→ скачать при необходимости
+→ удалить старые Debian 13 template caches
+
+pveam update временно недоступен + локальный Debian 13 есть
+→ WARNING
+→ использовать локальный template
+
+pveam update недоступен + локального Debian 13 нет
+→ STOP
+```
+
+Таким образом кратковременная недоступность appliance catalog не ломает rerun уже подготовленного host.
 
 ## Внешние версии
 
@@ -124,13 +181,28 @@ PVE Configuration принимает существующий template толь�
 
 ```text
 snapshot.debian.org для всех пакетов
-общий immutable ref для каждого bootstrap run
 exact-version pin каждого Debian package
-общий recovery mode
 автоматический hold всех установленных версий
 ```
 
 Такие механизмы добавляются только для конкретного компонента, если появляется практическая причина.
+
+## CI
+
+Repository checks должны проверять как минимум:
+
+- `scripts/validate_repo.py`;
+- Python compilation;
+- `bash -n`;
+- ShellCheck с учётом sourced-module architecture;
+- production Cloud-Init renderer;
+- `cloud-init schema` итогового документа;
+- template contract unit tests;
+- негативный тест malformed guest directory;
+- whitespace errors;
+- отсутствие legacy `scripts/pve/create-template.sh`.
+
+CI не заменяет реальный PVE integration test. После существенного изменения template guest assets по-прежнему требуется clean build + Full Clone smoke-test по принятой policy.
 
 ## Обязательные правила воспроизводимости
 
@@ -139,10 +211,12 @@ Project scripts должны:
 - проверять скачиваемые artefacts checksum/signature механизмами, если они доступны;
 - не хранить secrets в Git;
 - явно проверять результат установки;
-- фиксировать фактически применённую private revision;
+- фиксировать source revision с начала run;
 - не смешивать несколько Git revisions внутри одного configuration run;
+- не исполнять dirty worktree под именем чистого SHA;
+- не делать молчаливый destructive overwrite локального drift;
+- использовать общий orchestration lock для операций над canonical runtime;
 - версионировать собственные contracts;
-- не делать молчаливый destructive overwrite;
 - соблюдать security boundaries;
 - останавливать выполнение при неоднозначном или несовместимом state.
 
@@ -156,4 +230,4 @@ Project scripts должны:
 
 Главный принцип:
 
-> Не фиксировать внешние версии без практической необходимости, но явно версионировать собственные contracts, сохранять provenance и выполнять каждый configuration run из одной точно определённой private revision.
+> Не фиксировать внешние версии без практической необходимости, но явно версионировать собственные contracts, сохранять provenance и выполнять каждый configuration run из одного чистого checkout одной точно определённой private revision.

@@ -109,6 +109,23 @@ EOF_PVE_REPO
     fi
 }
 
+disable_enterprise_repository_file() {
+    local active=$1 disabled="${1}.disabled"
+    [[ -f "$active" ]] || return 0
+
+    if [[ -e "$disabled" ]]; then
+        if cmp -s "$active" "$disabled"; then
+            rm -f -- "$active"
+            ok "Активный enterprise repository совпадает с уже сохранённой disabled-копией и удалён: ${active}"
+            return
+        fi
+        die "Нельзя отключить ${active}: ${disabled} уже существует с другим содержимым. Автоматическая перезапись backup запрещена."
+    fi
+
+    mv -- "$active" "$disabled"
+    ok "Отключён репозиторий enterprise: ${active} -> ${disabled}"
+}
+
 configure_apt() {
     log "Настройка PVE/Ceph repository policy без subscription"
 
@@ -119,10 +136,7 @@ configure_apt() {
     for f in \
         /etc/apt/sources.list.d/pve-enterprise.list \
         /etc/apt/sources.list.d/pve-enterprise.sources; do
-        if [[ -f "$f" ]]; then
-            mv -f "$f" "${f}.disabled"
-            ok "Отключён репозиторий enterprise: $f"
-        fi
+        disable_enterprise_repository_file "$f"
     done
 
     configure_ceph_repository

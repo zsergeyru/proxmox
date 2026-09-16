@@ -48,6 +48,28 @@ if errors:
 PY_CONFIG
 }
 
+validate_deploy_user_contract() {
+    local entry uid gid home shell primary_group
+    entry="$(getent passwd "$DEPLOY_USER" || true)"
+    [[ -n "$entry" ]] || die "Linux-пользователь ${DEPLOY_USER} отсутствует после подготовки runtime"
+
+    IFS=: read -r _ _ uid gid _ home shell <<<"$entry"
+    primary_group="$(getent group "$gid" | awk -F: 'NR==1 {print $1}')"
+
+    [[ "$uid" =~ ^[0-9]+$ ]] \
+        || die "Не удалось определить UID пользователя ${DEPLOY_USER}"
+    (( uid < 1000 )) \
+        || die "Существующий ${DEPLOY_USER} имеет UID=${uid}; ожидается system user с UID < 1000. Автоматическое изменение существующего пользователя запрещено."
+    [[ "$primary_group" == "$DEPLOY_USER" ]] \
+        || die "Существующий ${DEPLOY_USER} имеет primary group '${primary_group:-не определена}', ожидается '${DEPLOY_USER}'. Автоматическое изменение запрещено."
+    [[ "$home" == "/var/lib/pvedeploy" ]] \
+        || die "Существующий ${DEPLOY_USER} имеет home '${home}', ожидается '/var/lib/pvedeploy'. Автоматическое изменение запрещено."
+    [[ "$shell" == "/bin/bash" ]] \
+        || die "Существующий ${DEPLOY_USER} имеет shell '${shell}', ожидается '/bin/bash'. Автоматическое изменение запрещено."
+
+    ok "Linux-пользователь ${DEPLOY_USER} соответствует runtime contract"
+}
+
 ensure_runtime_layout() {
     log "Подготовка каталогов и локального пользователя pvedeploy"
 
@@ -63,6 +85,8 @@ ensure_runtime_layout() {
     else
         ok "Linux-пользователь ${DEPLOY_USER} уже существует"
     fi
+
+    validate_deploy_user_contract
 
     install -d -o root -g root -m 0755 "$CONFIG_DIR"
     install -d -o root -g "$DEPLOY_USER" -m 0750 "$SSH_DIR"
@@ -231,6 +255,14 @@ configuration_source_revision() {
     printf '%s\n' "$revision"
 }
 
+assert_clean_git_worktree() {
+    local repo=$1 label=$2 status
+    status="$(git_as_deployer -C "$repo" status --porcelain=v1 --untracked-files=all)" \
+        || die "Не удалось проверить чистоту ${label} Git checkout ${repo}"
+    [[ -z "$status" ]] \
+        || die "${label} Git checkout ${repo} содержит локальные изменения или untracked-файлы. Автоматический reset/clean запрещён, чтобы не потерять данные. Первый элемент: $(head -n1 <<<"$status")"
+}
+
 sync_private_repo() {
     log "Фиксация canonical private checkout на revision текущей PVE Configuration"
 
@@ -243,6 +275,7 @@ sync_private_repo() {
         current_revision="$(git_as_deployer -C "$REPO_DIR" rev-parse HEAD)"
         [[ "$current_revision" == "$expected_revision" ]] \
             || die "Во время первого canonical clone ветка ${PRIVATE_BRANCH} изменилась: PVE Configuration запущена из ${expected_revision}, а clone получил ${current_revision}. Ничего из новой revision не применяется; повторите Public Bootstrap."
+        assert_clean_git_worktree "$REPO_DIR" "Canonical"
     else
         chown -R "$DEPLOY_USER:$DEPLOY_USER" "$REPO_DIR"
         origin_url="$(git_as_deployer -C "$REPO_DIR" remote get-url origin 2>/dev/null || true)"
@@ -250,6 +283,7 @@ sync_private_repo() {
             || die "Существующий checkout ${REPO_DIR} имеет неожиданный origin '${origin_url:-не задан}'. Ожидается '${PRIVATE_REPO}'. Автоматическая подмена origin запрещена."
         ok "Origin существующего private checkout соответствует каноническому репозиторию"
 
+        assert_clean_git_worktree "$REPO_DIR" "Canonical"
         current_revision="$(git_as_deployer -C "$REPO_DIR" rev-parse HEAD)"
         if [[ "$current_revision" != "$expected_revision" ]]; then
             git_as_deployer -C "$REPO_DIR" fetch --depth 1 origin "$PRIVATE_BRANCH"
@@ -258,8 +292,9 @@ sync_private_repo() {
                 || die "Ветка ${PRIVATE_BRANCH} изменилась во время PVE Configuration: ожидается ${expected_revision}, fetch получил ${fetched_revision}. Canonical checkout не переключён; повторите Public Bootstrap."
             git_as_deployer -C "$REPO_DIR" reset --hard "$expected_revision"
             git_as_deployer -C "$REPO_DIR" clean -ffd
+            assert_clean_git_worktree "$REPO_DIR" "Canonical"
         else
-            ok "Canonical checkout уже находится на revision текущей PVE Configuration"
+            ok "Canonical checkout уже находится на revision текущей PVE Configuration и не имеет локального drift"
         fi
     fi
 

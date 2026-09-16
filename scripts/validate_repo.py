@@ -358,9 +358,16 @@ def check_deployable(rel: Path, source: dict, effective: dict) -> None:
 
 
 def manifests() -> list[Path]:
-    return sorted(
-        path for path in GUESTS.glob("*/guest.yaml") if DIR_RE.match(path.parent.name)
-    )
+    found: list[Path] = []
+    for path in sorted(GUESTS.glob("*/guest.yaml")):
+        if not DIR_RE.fullmatch(path.parent.name):
+            fail(
+                f"{path.relative_to(ROOT)}: каталог гостя должен иметь имя "
+                "NNN-name (ровно три цифры VMID, дефис и непустое имя)"
+            )
+            continue
+        found.append(path)
+    return found
 
 
 def validate() -> None:
@@ -389,7 +396,7 @@ def validate() -> None:
 
     for path in manifests():
         rel = path.relative_to(ROOT)
-        match = DIR_RE.match(path.parent.name)
+        match = DIR_RE.fullmatch(path.parent.name)
         assert match is not None
 
         data = load_yaml(path)

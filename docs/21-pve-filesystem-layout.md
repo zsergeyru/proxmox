@@ -7,11 +7,14 @@
 ```text
 Public Bootstrap
 → временный runtime только для первоначального доступа к private repo
-→ /var/lib/proxmox-bootstrap после успешного первого запуска удаляется
+→ /var/lib/proxmox-bootstrap после успешного first run удаляется
 
 PVE Configuration
 → создаёт и обслуживает постоянную инфраструктурную структуру
 → state хранится в /var/lib/proxmox-deployer/state
+
+оба компонента
+→ используют /run/lock/proxmox-orchestration.lock
 ```
 
 ## 1. Public Bootstrap
@@ -36,23 +39,6 @@ zsergeyru/proxmox-bootstrap
 
 Каталог создаётся как `root:root 0700`.
 
-Назначение:
-
-```text
-github_proxmox_repo_ed25519
-→ временный read-only GitHub Deploy Key
-
-github_proxmox_repo_ed25519.pub
-→ public half для GitHub Deploy keys
-
-known_hosts + ssh_config
-→ SSH transport к GitHub
-
-private-repo/
-→ temporary shallow checkout zsergeyru/proxmox
-→ нужен только для первого запуска PVE Configuration
-```
-
 После успешной PVE Configuration Public Bootstrap удаляет `/var/lib/proxmox-bootstrap` и записывает:
 
 ```text
@@ -67,11 +53,14 @@ private-repo/
 zsergeyru/proxmox/scripts/pve/setup/configure-pve.sh
 ```
 
-Модули:
+Структура:
 
 ```text
 scripts/pve/setup/
 ├── configure-pve.sh
+├── render-template-cloud-init.py
+├── tests/
+│   └── test-template-contract.sh
 └── lib/
     ├── 00-common.sh
     ├── 10-preflight.sh
@@ -91,6 +80,8 @@ scripts/pve/setup/
 /var/lib/proxmox-deployer/repo/
 ```
 
+Он является runtime-copy private source of truth. Перед автоматическим Git refresh проверяется полный clean state; local tracked/staged/untracked/ignored drift не стирается молча.
+
 Пример:
 
 ```text
@@ -107,15 +98,34 @@ scripts/pve/setup/
 ├── ansible/
 └── scripts/
     └── pve/
-        ├── setup/
-        │   ├── configure-pve.sh
-        │   └── lib/
-        └── deploy-guest.py
+        └── setup/
+            ├── configure-pve.sh
+            ├── render-template-cloud-init.py
+            ├── tests/
+            └── lib/
 ```
 
-Отдельного `scripts/pve/create-template.sh` больше нет: создание VMID `9000` является частью PVE Configuration. `deploy-guest.py` появляется после реализации deployer.
+Отдельного `scripts/pve/create-template.sh` нет. `deploy-guest.py` появится после реализации deployer.
 
-## 3. Постоянная конфигурация deployer
+## 3. Общая orchestration lock
+
+```text
+/run/lock/proxmox-orchestration.lock
+```
+
+Public Bootstrap открывает lock на fd 9 и передаёт этот fd PVE Configuration. Прямой `configure-pve.sh` берёт тот же lock самостоятельно.
+
+Lock защищает одновременно:
+
+```text
+canonical private checkout
+permanent runtime mutation
+host configuration
+Template 9000 pipeline
+state/final marker transition
+```
+
+## 4. Постоянная конфигурация deployer
 
 ```text
 /etc/proxmox-deployer/
@@ -142,7 +152,7 @@ ssh/github_proxmox_repo_ed25519
 → canonical read-only Deploy Key для zsergeyru/proxmox
 
 ssh/pve_guest_ed25519
-→ host-side SSH identity для доступа PVE tooling к управляемым VM/LXC
+→ host-side SSH identity для управляемых VM/LXC
 
 ssh/config + known_hosts
 → SSH transport private Git checkout
@@ -154,53 +164,39 @@ secrets/ai-agent-infra.token
 → credential ai-agent@pve!infra
 ```
 
-## 4. Права доступа
-
-Рекомендуемая модель:
+## 5. Права и Linux runtime user
 
 ```text
 /etc/proxmox-deployer/
 → root:root
 
 /etc/proxmox-deployer/secrets/
-→ root:pvedeploy
-→ 0710
+→ root:pvedeploy 0710
 
 host-deploy.token
-→ root:pvedeploy
-→ 0640
+→ root:pvedeploy 0640
 
 ai-agent-infra.token
-→ root:root
-→ 0600
+→ root:root 0600
 
-ssh/github_proxmox_repo_ed25519
-→ pvedeploy:pvedeploy
-→ 0600
-
-ssh/github_proxmox_repo_ed25519.pub
-→ pvedeploy:pvedeploy
-→ 0644
-
-ssh/pve_guest_ed25519
-→ pvedeploy:pvedeploy
-→ 0600
-
-ssh/pve_guest_ed25519.pub
-→ pvedeploy:pvedeploy
-→ 0644
+GitHub/PVE guest private keys
+→ pvedeploy:pvedeploy 0600
 ```
 
-Правила:
+`pvedeploy` contract:
 
-- secrets создаются с безопасным `umask`;
-- private keys и token secrets не попадают в Git;
-- secrets не выводятся в обычные logs;
-- потеря local token secret при существующем PVE token требует явного recovery/rotation;
-- потеря `pve_guest_ed25519` не вызывает автоматическую ротацию;
-- `pvedeploy` не получает `ai-agent-infra.token`.
+```text
+system UID < 1000
+primary group = pvedeploy
+home = /var/lib/pvedeploy
+shell = /bin/bash
+```
 
-## 5. Mutable runtime
+Если существующий user не соответствует contract, PVE Configuration не меняет его автоматически.
+
+Secrets создаются с безопасным `umask`, не попадают в Git и не выводятся в обычные logs. Потеря существующего token secret/private key требует явного recovery/rotation.
+
+## 6. Mutable runtime
 
 ```text
 /var/lib/proxmox-deployer/
@@ -209,30 +205,19 @@ ssh/pve_guest_ed25519.pub
 └── cache/
 ```
 
-Назначение:
-
-```text
-repo/
-→ canonical private source checkout
-
-state/
-→ configuration state и revision metadata
-
-cache/
-→ безопасно пересоздаваемый cache
-```
-
 Private SSH keys и token secrets здесь не хранятся.
 
-Template source image cache расположен штатно в:
+Template image cache:
 
 ```text
 /var/lib/vz/template/cache/debian13/
 ```
 
-Temporary Cloud-Init builder snippet создаётся в storage `local:snippets` только на время сборки VMID `9000` и удаляется после успешного перехода к стандартному Proxmox Cloud-Init.
+Temporary Cloud-Init builder snippet создаётся в `local:snippets` только на время сборки 9000. Если VMID свободен, orphan snippet предыдущего interrupted run может быть пересоздан. При существующей unfinished builder VM автоматический cleanup не выполняется.
 
-## 6. State
+Temporary image downloads используют скрытые уникальные файлы рядом с target и очищаются trap-ом/stale cleanup под общей lock.
+
+## 7. State
 
 ```text
 /var/lib/proxmox-deployer/state/
@@ -253,7 +238,7 @@ version
 → PVE_CONFIGURATION_VERSION
 
 last-run.json
-→ timestamp/result/private revision без secrets
+→ timestamp/result/source revision без secrets
 
 last-revision
 → revision canonical private checkout
@@ -262,14 +247,15 @@ bootstrap-complete
 → первоначальный Public Bootstrap успешно завершён
 ```
 
-State не является source of truth: каждый запуск перепроверяет реальное состояние PVE и credentials.
+`state.json`, `last-run.json` и `version` записываются атомарно через temporary file + `mv`. Source revision известна уже в `running` state и сохраняется также при early failure/interruption.
 
-## 7. Logs
+State не является source of truth: каждый запуск перепроверяет PVE, credentials и Git state.
+
+## 8. Logs
 
 ```text
 /var/log/proxmox-deployer/
 ├── configure-pve.log
-├── deploy-guest.log
 └── audit/
 ```
 
@@ -277,20 +263,18 @@ State не является source of truth: каждый запуск пере�
 
 Правила:
 
-- persistent log хранится без ANSI color codes;
+- persistent log без ANSI color codes;
 - не писать token secrets/private keys;
-- логировать итоговые операции и warnings;
-- логировать private repo revision;
-- не делать полный dump environment с credentials.
+- логировать operations/warnings/revision;
+- не делать полный environment dump.
 
-## 8. Configuration snapshots
+## 9. Configuration snapshots
 
 ```text
-/var/backups/proxmox-configuration/
-└── YYYYMMDD-HHMMSS/
+/var/backups/proxmox-configuration/YYYYMMDD-HHMMSS/
 ```
 
-Это snapshot host-конфигурации перед значимыми изменениями, а не VM backup.
+Это snapshot host configuration/diagnostics перед значимыми изменениями, а не VM backup.
 
 Типичное содержимое:
 
@@ -318,7 +302,7 @@ diagnostics/
 
 Не архивировать бездумно весь `/etc/pve`, так как это `pmxcfs`.
 
-## 9. Backup infrastructure secrets
+## 10. Backup infrastructure secrets
 
 Защищённая локальная область:
 
@@ -326,22 +310,11 @@ diagnostics/
 /var/backups/proxmox-secrets/
 ```
 
-Внешняя backup policy должна включать как минимум:
-
-```text
-/etc/proxmox-deployer/secrets/host-deploy.token
-/etc/proxmox-deployer/secrets/ai-agent-infra.token
-/etc/proxmox-deployer/ssh/github_proxmox_repo_ed25519
-/etc/proxmox-deployer/ssh/github_proxmox_repo_ed25519.pub
-/etc/proxmox-deployer/ssh/pve_guest_ed25519
-/etc/proxmox-deployer/ssh/pve_guest_ed25519.pub
-/etc/proxmox-deployer/ssh/config
-/etc/proxmox-deployer/ssh/known_hosts
-```
+Внешняя backup policy должна включать как минимум token secrets, canonical GitHub Deploy Key, PVE guest SSH keypair, SSH config и known_hosts.
 
 Локальная копия на том же SSD не считается полноценным disaster-recovery backup.
 
-## 10. Стабильные команды
+## 11. Стабильные команды
 
 ```text
 /usr/local/sbin/
@@ -349,58 +322,27 @@ diagnostics/
 └── deploy-guest
 ```
 
-`pve-configuration-status` читает:
+`pve-configuration-status` читает `state.json`.
 
-```text
-/var/lib/proxmox-deployer/state/state.json
-```
+`deploy-guest` после реализации будет небольшой wrapper-командой к source из canonical private checkout.
 
-`deploy-guest` после реализации является небольшой wrapper-командой к source из canonical private checkout:
-
-```text
-/usr/local/sbin/deploy-guest
-→ /var/lib/proxmox-deployer/repo/scripts/pve/deploy-guest.py
-```
-
-## 11. Итоговое дерево
-
-После успешного первоначального bootstrap временного `/var/lib/proxmox-bootstrap` в итоговом дереве нет:
+## 12. Итоговое дерево
 
 ```text
 /
-├── etc/
-│   └── proxmox-deployer/
-│       ├── config.yaml
-│       ├── ssh/
-│       │   ├── github_proxmox_repo_ed25519
-│       │   ├── github_proxmox_repo_ed25519.pub
-│       │   ├── pve_guest_ed25519
-│       │   ├── pve_guest_ed25519.pub
-│       │   ├── config
-│       │   └── known_hosts
-│       └── secrets/
-│           ├── host-deploy.token
-│           └── ai-agent-infra.token
-│
-├── var/
-│   ├── lib/
-│   │   └── proxmox-deployer/
-│   │       ├── repo/
-│   │       ├── state/
-│   │       │   ├── state.json
-│   │       │   ├── version
-│   │       │   ├── last-run.json
-│   │       │   ├── last-revision
-│   │       │   └── bootstrap-complete
-│   │       └── cache/
-│   ├── log/
-│   │   └── proxmox-deployer/
-│   │       ├── configure-pve.log
-│   │       └── audit/
-│   └── backups/
-│       ├── proxmox-configuration/
-│       └── proxmox-secrets/
-│
+├── etc/proxmox-deployer/
+│   ├── config.yaml
+│   ├── ssh/
+│   └── secrets/
+├── run/lock/
+│   └── proxmox-orchestration.lock
+├── var/lib/proxmox-deployer/
+│   ├── repo/
+│   ├── state/
+│   └── cache/
+├── var/log/proxmox-deployer/
+├── var/backups/proxmox-configuration/
+├── var/backups/proxmox-secrets/
 └── usr/local/sbin/
     ├── pve-configuration-status
     └── deploy-guest
@@ -408,4 +350,4 @@ diagnostics/
 
 Главный принцип:
 
-> Public Bootstrap использует отдельную временную область только для первоначального доступа к private source of truth. PVE Configuration владеет постоянным runtime, credentials, state, logs, configuration snapshots и host-side template pipeline.
+> Public Bootstrap использует отдельную temporary область только для первоначального доступа. Permanent runtime принадлежит PVE Configuration, а shared orchestration lock и clean Git checks защищают его от параллельного изменения и скрытого local drift.

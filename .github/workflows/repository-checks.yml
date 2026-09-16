@@ -21,10 +21,20 @@ jobs:
           python-version: "3.12"
 
       - name: Install validation dependencies
-        run: python -m pip install --disable-pip-version-check PyYAML==6.0.2 jsonschema==4.25.1
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck cloud-init
+          python -m pip install --disable-pip-version-check PyYAML==6.0.2 jsonschema==4.25.1
 
       - name: Validate repository
         run: python scripts/validate_repo.py
+
+      - name: Compile Python tooling
+        run: |
+          python -m py_compile \
+            scripts/guest_config.py \
+            scripts/validate_repo.py \
+            scripts/pve/setup/render-template-cloud-init.py
 
       - name: Validate shell syntax
         run: |
@@ -32,57 +42,70 @@ jobs:
             bash -n "$file"
           done < <(find . -type f -name '*.sh' -print0)
 
-      - name: Validate template pipeline assets
+      - name: ShellCheck
         run: |
-          python - <<'PY'
+          mapfile -d '' files < <(find . -type f -name '*.sh' -print0)
+          # SC2034 is intentionally excluded: lib/*.sh are sourced modules and
+          # shared globals declared in 00-common.sh are consumed across files.
+          shellcheck -S warning -e SC2034 "${files[@]}"
+
+      - name: Validate template pipeline assets with production renderer
+        run: |
+          tmp="$(mktemp)"
+          trap 'rm -f "$tmp"' EXIT
+          sha512="$(printf 'a%.0s' {1..128})"
+          python scripts/pve/setup/render-template-cloud-init.py \
+            --base templates/debian13/cloud-init.yaml \
+            --bootstrap templates/debian13/template-bootstrap.sh \
+            --finalize templates/debian13/template-finalize.sh \
+            --output "$tmp" \
+            --template-version 6 \
+            --image-name debian-13-genericcloud-amd64.qcow2 \
+            --image-sha512 "$sha512"
+          python - "$tmp" <<'PY'
           from pathlib import Path
-          import subprocess
-          import tempfile
+          import sys
           import yaml
 
-          asset_dir = Path("templates/debian13")
-          base_path = asset_dir / "cloud-init.yaml"
-          bootstrap_path = asset_dir / "template-bootstrap.sh"
-          finalize_path = asset_dir / "template-finalize.sh"
-
-          data = yaml.safe_load(base_path.read_text(encoding="utf-8"))
+          path = Path(sys.argv[1])
+          text = path.read_text(encoding="utf-8")
+          data = yaml.safe_load(text)
           if not isinstance(data, dict):
-              raise SystemExit("templates/debian13/cloud-init.yaml is not a mapping")
-
-          replacement = {
-              "/usr/local/sbin/template-bootstrap": bootstrap_path.read_text(encoding="utf-8"),
-              "/usr/local/sbin/template-finalize": finalize_path.read_text(encoding="utf-8"),
-          }
-          found = set()
-          for item in data.get("write_files", []):
-              if isinstance(item, dict) and item.get("path") in replacement:
-                  item["content"] = replacement[item["path"]]
-                  found.add(item["path"])
-
-          if found != set(replacement):
-              raise SystemExit(f"Cloud-Init guest script entries mismatch: found={sorted(found)}")
-
-          rendered = "#cloud-config\n" + yaml.safe_dump(
-              data,
-              allow_unicode=True,
-              sort_keys=False,
-              default_flow_style=False,
-          )
-          parsed = yaml.safe_load(rendered)
-          if not isinstance(parsed, dict):
               raise SystemExit("Rendered Cloud-Init is not a mapping")
-
-          with tempfile.TemporaryDirectory() as temp_dir:
-              for source in (bootstrap_path, finalize_path):
-                  temp_path = Path(temp_dir) / source.name
-                  temp_path.write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
-                  subprocess.run(["bash", "-n", str(temp_path)], check=True)
-
-          if Path("scripts/pve/create-template.sh").exists():
-              raise SystemExit("Legacy standalone scripts/pve/create-template.sh must not exist")
-
-          print("Template Cloud-Init assets and guest scripts are valid")
+          for marker in (
+              "__TEMPLATE_BOOTSTRAP_CONTENT__",
+              "__TEMPLATE_FINALIZE_CONTENT__",
+              "__TEMPLATE_VERSION__",
+              "__IMAGE_NAME__",
+              "__IMAGE_SHA512__",
+          ):
+              if marker in text:
+                  raise SystemExit(f"Unresolved template marker: {marker}")
           PY
+          cloud-init schema -c "$tmp"
+          bash -n templates/debian13/template-bootstrap.sh
+          bash -n templates/debian13/template-finalize.sh
+
+          if [[ -e scripts/pve/create-template.sh ]]; then
+            echo "Legacy standalone scripts/pve/create-template.sh must not exist" >&2
+            exit 1
+          fi
+
+      - name: Run template contract unit checks
+        run: bash scripts/pve/setup/tests/test-template-contract.sh
+
+      - name: Verify malformed guest directory is rejected
+        run: |
+          mkdir -p guests/not-a-valid-guest-directory
+          cp guests/100-haos/guest.yaml guests/not-a-valid-guest-directory/guest.yaml
+          if python scripts/validate_repo.py > /tmp/invalid-layout.out 2>&1; then
+            cat /tmp/invalid-layout.out
+            echo "Validator unexpectedly accepted malformed guest directory" >&2
+            exit 1
+          fi
+          grep -q 'каталог гостя должен иметь имя' /tmp/invalid-layout.out
+          rm -rf guests/not-a-valid-guest-directory
+          python scripts/validate_repo.py
 
       - name: Check whitespace errors
         run: git diff --check

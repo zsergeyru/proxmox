@@ -8,6 +8,31 @@ template_vm_stage() {
     printf '%s%s[ЭТАП VM]%s %s\n' "$C_BOLD" "$C_MAGENTA" "$C_RESET" "$*"
 }
 
+template_guest_exec() {
+    local raw exitcode errdata
+    if ! raw="$(qm guest exec "$TEMPLATE_VMID" --timeout "$TEMPLATE_WAIT_SECONDS" -- "$@" 2>&1)"; then
+        [[ -n "$raw" ]] && printf '%s\n' "$raw" >&2
+        return 1
+    fi
+
+    # PVE CLI historically printed guest stdout directly, while structured
+    # invocations expose out-data/err-data/exitcode. Accept both forms and
+    # normalize them to guest stdout for the rest of the pipeline.
+    if jq -e 'type == "object" and (has("out-data") or has("err-data") or has("exitcode"))' \
+        >/dev/null 2>&1 <<<"$raw"; then
+        exitcode="$(jq -r '.exitcode // 0' <<<"$raw")"
+        errdata="$(jq -r '."err-data" // empty' <<<"$raw")"
+        if [[ "$exitcode" =~ ^[0-9]+$ ]] && (( exitcode != 0 )); then
+            [[ -n "$errdata" ]] && printf '%s\n' "$errdata" >&2
+            return 1
+        fi
+        jq -r '."out-data" // empty' <<<"$raw"
+        return
+    fi
+
+    printf '%s\n' "$raw"
+}
+
 template_wait_progress() {
     local phase=$1 started=$2 limit=$3 detail=${4:-}
     local elapsed vm_state
@@ -35,16 +60,15 @@ template_wait_for_agent() {
 }
 
 template_read_bootstrap_status() {
-    local out
-    out="$(qm guest exec "$TEMPLATE_VMID" -- /bin/cat /var/lib/template-build/bootstrap-status 2>/dev/null || true)"
-    sed -n 's/.*"out-data":"\([^"]*\)".*/\1/p' <<<"$out" | sed 's/\\n$//' | head -1
+    template_guest_exec /bin/cat /var/lib/template-build/bootstrap-status 2>/dev/null \
+        | head -n1 || true
 }
 
 template_wait_for_bootstrap() {
     local started=$SECONDS deadline=$((SECONDS + TEMPLATE_WAIT_SECONDS)) next_report=$SECONDS
     local out status last_status=''
     while (( SECONDS < deadline )); do
-        out="$(qm guest exec "$TEMPLATE_VMID" -- /bin/cat /var/lib/template-build/bootstrap-complete 2>/dev/null || true)"
+        out="$(template_guest_exec /bin/cat /var/lib/template-build/bootstrap-complete 2>/dev/null || true)"
         if grep -q 'BOOTSTRAP_OK' <<<"$out"; then
             ok "Начальная настройка гостя завершена через $((SECONDS - started)) с"
             return 0
@@ -73,7 +97,7 @@ template_wait_for_cloud_init() {
     local started=$SECONDS deadline=$((SECONDS + TEMPLATE_WAIT_SECONDS)) next_report=$SECONDS
     local out
     while (( SECONDS < deadline )); do
-        out="$(qm guest exec "$TEMPLATE_VMID" -- /bin/bash -lc 'cloud-init status' 2>/dev/null || true)"
+        out="$(template_guest_exec /bin/bash -lc 'cloud-init status' 2>/dev/null || true)"
         if grep -q 'status: done' <<<"$out"; then
             ok "Cloud-Init завершён через $((SECONDS - started)) с"
             return 0
@@ -95,7 +119,7 @@ template_wait_for_new_boot_id() {
     local previous=$1
     local started=$SECONDS deadline=$((SECONDS + TEMPLATE_WAIT_SECONDS)) next_report=$SECONDS current
     while (( SECONDS < deadline )); do
-        current="$(qm guest exec "$TEMPLATE_VMID" -- /bin/cat /proc/sys/kernel/random/boot_id 2>/dev/null || true)"
+        current="$(template_guest_exec /bin/cat /proc/sys/kernel/random/boot_id 2>/dev/null || true)"
         if [[ -n "$current" && "$current" != "$previous" ]]; then
             ok "Проверочная перезагрузка завершена через $((SECONDS - started)) с"
             return 0
@@ -182,7 +206,8 @@ verify_template_builder() {
 
     log "Проверочная перезагрузка VM-сборщика на обычное ядро Debian"
     local boot_id_before verify_output kernel_token framebuffer_token
-    boot_id_before="$(qm guest exec "$TEMPLATE_VMID" -- /bin/cat /proc/sys/kernel/random/boot_id)"
+    boot_id_before="$(template_guest_exec /bin/cat /proc/sys/kernel/random/boot_id)"
+    [[ -n "$boot_id_before" ]] || die "Не удалось получить boot_id VM-сборщика перед перезагрузкой"
     qm reboot "$TEMPLATE_VMID"
     template_wait_for_new_boot_id "$boot_id_before" \
         || die "VM-сборщик не завершила проверочную перезагрузку за ${TEMPLATE_WAIT_SECONDS} секунд"
@@ -190,7 +215,7 @@ verify_template_builder() {
         || die "QEMU Guest Agent не подключился повторно после проверочной перезагрузки"
 
     log "Проверка ядра, framebuffer и консольных служб"
-    verify_output="$(qm guest exec "$TEMPLATE_VMID" -- /bin/bash -lc '
+    verify_output="$(template_guest_exec /bin/bash -lc '
 set -Eeuo pipefail
 kernel="$(uname -r)"
 [[ "$kernel" == *-amd64 ]]
@@ -206,7 +231,7 @@ grep -q "^FONTSIZE=\"8x16\"$" /etc/default/console-setup
 grep -q -- "--autologin root" /etc/systemd/system/getty@tty1.service.d/autologin.conf
 grep -q -- "--autologin root" /etc/systemd/system/serial-getty@ttyS0.service.d/autologin.conf
 printf "VERIFY_KERNEL=%s VERIFY_FRAMEBUFFER=%s CONSOLES_OK\n" "$kernel" "$framebuffer"
-')"
+')" || die "Guest verification command завершилась ошибкой"
     grep -q 'CONSOLES_OK' <<<"$verify_output" \
         || die "Проверка консолей после перезагрузки не сообщила об успешном завершении"
 
@@ -225,9 +250,26 @@ finalize_template_builder() {
 
     log "Финальная очистка гостевой системы"
     local finalize_output cloudinit_user_data
-    finalize_output="$(qm guest exec "$TEMPLATE_VMID" -- /usr/local/sbin/template-finalize)"
+    finalize_output="$(template_guest_exec /usr/local/sbin/template-finalize)" \
+        || die "Финализация гостя завершилась ошибкой"
     grep -q 'FINALIZE_OK' <<<"$finalize_output" \
         || die "Финализация гостя не сообщила об успешном завершении"
+
+    # Проверяем фактический результат cleanup до превращения VM в template.
+    template_guest_exec /bin/bash -lc '
+set -Eeuo pipefail
+! id debian >/dev/null 2>&1
+[[ ! -s /etc/machine-id ]]
+[[ ! -e /var/lib/dbus/machine-id ]]
+! compgen -G "/etc/ssh/ssh_host_*" >/dev/null
+[[ ! -e /root/.ssh ]]
+[[ ! -e /var/lib/template-build ]]
+[[ ! -e /usr/local/sbin/template-bootstrap ]]
+[[ ! -e /usr/local/sbin/template-finalize ]]
+printf "CLEANUP_OK\n"
+' | grep -q 'CLEANUP_OK' \
+        || die "Guest cleanup assertions не пройдены; VM-сборщик оставлена для диагностики"
+    ok "Guest cleanup assertions подтверждены"
 
     log "Выключение VM-сборщика"
     qm shutdown "$TEMPLATE_VMID" --timeout 180 || true

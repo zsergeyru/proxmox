@@ -6,30 +6,34 @@ Template-Version: 6
 
 ## 1. Общий принцип
 
-Template должен быть простым и понятным. Для текущего проекта не используем отдельные lock-файлы версий Debian, pinned cloud build или `snapshot.debian.org`.
+Template должен быть простым и понятным. Не используются отдельные lock-файлы версий Debian, pinned cloud build или `snapshot.debian.org`.
 
-Сборка каждый раз берёт актуальный Debian 13 Trixie cloud image и актуальные stable packages на момент запуска.
+Сборка берёт актуальный Debian 13 Trixie cloud image и stable packages на момент запуска.
 
 Template v6 использует единый management user `root`. Отдельный generic `ops` не создаётся.
 
-Host-side orchestration является частью `scripts/pve/setup/configure-pve.sh`; отдельного standalone `create-template.sh` нет.
+Host-side orchestration является частью `scripts/pve/setup/configure-pve.sh`; standalone `create-template.sh` отсутствует.
 
 ## 2. Pipeline ownership
 
-Создание VMID `9000` разделено на три host-side stage-модуля:
-
 ```text
 60-template-contract.sh
-→ state detection + template contract
+→ state detection + полный host-visible contract
 
 61-template-source.sh
-→ capacity/source checks + image/checksum + Cloud-Init render
+→ capacity/source + image/checksum + production Cloud-Init render
 
 62-template-build.sh
-→ VM builder lifecycle + verification + seal
+→ VM builder lifecycle + QGA normalization + verification + cleanup + seal
 ```
 
-Guest-side файлы версионируются отдельно от host orchestration:
+Canonical renderer:
+
+```text
+scripts/pve/setup/render-template-cloud-init.py
+```
+
+Guest-side assets:
 
 ```text
 templates/debian13/cloud-init.yaml
@@ -55,11 +59,18 @@ https://cloud.debian.org/images/cloud/trixie/latest/SHA512SUMS
 
 Source stage обязан проверить SHA-512 до `qm importdisk`.
 
-Это защищает от повреждённой загрузки, но не пытается сделать две сборки в разные даты идентичными.
+Download policy:
 
-## 4. APT
+```text
+retry transient errors
+connect timeout
+low-speed timeout
+unique temporary file
+cleanup temp on EXIT/INT/TERM
+cleanup stale same-target temp under shared orchestration lock
+```
 
-Внутри builder VM используются обычные Debian repositories из cloud image:
+## 4. APT внутри guest
 
 ```text
 apt-get update
@@ -69,7 +80,7 @@ apt-get install ...
 
 APT snapshot и version pinning не применяются.
 
-`ciupgrade=0`: Cloud-Init не делает автоматический package upgrade при первом boot клона.
+`ciupgrade=0`: Cloud-Init не делает automatic package upgrade при первом boot клона.
 
 ## 5. Kernel и console
 
@@ -96,10 +107,10 @@ Fixed 8x16
 После bootstrap выполняется verification reboot. Pipeline продолжает только если:
 
 - kernel `*-amd64` и не `*cloud*`;
-- `/sys/class/graphics/fb0/virtual_size` существует и валиден;
+- framebuffer существует и валиден;
 - QGA active;
 - tty1/ttyS0 getty active;
-- обе console override действительно используют `--autologin root`.
+- обе console override используют `--autologin root`.
 
 ## 6. Root / SSH
 
@@ -112,35 +123,39 @@ PermitEmptyPasswords no
 PubkeyAuthentication yes
 ```
 
-Таким образом пароль root не используется, но SSH root по public key разрешён.
-
 Guest bootstrap проверяет `sshd -t`, effective `sshd -T` для `root` и locked password state.
 
-В base template не должно быть ни одного management public key. Перед seal удаляется `/root/.ssh`.
+В base template не должно быть management public keys. Перед seal `/root/.ssh` удаляется.
 
-Разные субъекты доступа используют независимые keypairs:
+## 7. Production Cloud-Init renderer
+
+Runtime и CI обязаны использовать один renderer:
 
 ```text
-PVE / deploy-guest
-→ pve_guest_ed25519
-
-AI control
-→ ai_control_ed25519
-
-Ansible / 311
-→ отдельная provisioning identity
+scripts/pve/setup/render-template-cloud-init.py
 ```
 
-Все они могут входить как `root`; разграничение и отзыв доступа выполняются по ключам.
+Renderer должен:
 
-## 7. Cloud-Init lifecycle
+- прочитать и проверить `cloud-init.yaml`;
+- обнаружить ровно по одному bootstrap/finalize `write_files` entry;
+- вставить guest scripts;
+- подставить Template-Version, image name и SHA-512;
+- запретить unresolved placeholders;
+- атомарно записать итоговый документ.
 
-Builder-only custom Cloud-Init собирается PVE Configuration из versioned assets только для процесса сборки.
+CI дополнительно проверяет результат через `cloud-init schema`.
+
+## 8. Cloud-Init lifecycle
+
+Builder-only custom Cloud-Init существует только во время build.
 
 Перед `qm template`:
 
 ```text
-final cleanup
+guest cleanup
+→ host-side cleanup assertions через QGA
+→ shutdown
 → remove cicustom
 → ciuser=root
 → ipconfig0=ip=dhcp
@@ -150,15 +165,48 @@ final cleanup
 → удалить temporary snippet
 ```
 
-Description шаблона должен содержать:
+Description содержит:
 
 ```text
 template-version=6
 ```
 
-PVE Configuration использует этот marker вместе с остальными параметрами полного template contract для проверки совместимости существующего VMID 9000.
+## 9. Host-visible template contract
 
-## 8. Full Clone policy
+Существующий и только что созданный 9000 должны соответствовать:
+
+```text
+name = tpl-debian13
+template = 1
+ostype = l26
+cpu = host
+sockets = 1
+cores = 1
+memory = 1024
+scsihw = virtio-scsi-single
+scsi0 storage = local-lvm
+scsi0 discard=on
+iothread=1
+ssd=1
+scsi0 size >= 16G
+ide2 = local-lvm Cloud-Init CD-ROM
+net0 = VirtIO, bridge=vmbr0
+boot order starts with scsi0
+onboot = 0/default
+agent = 1
+vga = std
+serial0 = socket
+ciuser = root
+ciupgrade = 0
+ipconfig0 = ip=dhcp
+cicustom absent
+description contains template-version=6
+protection = 1 after pipeline
+```
+
+Отсутствующий `protection=1` у в остальном совместимого template можно восстановить после configuration snapshot. Другой mismatch вызывает STOP.
+
+## 10. Full Clone policy
 
 Рабочие Debian VM создаются как Full Clone.
 
@@ -166,9 +214,9 @@ PVE Configuration использует этот marker вместе с оста�
 
 Template `9000` остаётся `protection=1`.
 
-Старый template другой версии не перезаписывается автоматически. Его замена должна быть отдельной осознанной операцией.
+Старый/incompatible template автоматически не заменяется.
 
-## 9. Base packages
+## 11. Base packages
 
 ```text
 qemu-guest-agent openssh-server sudo locales cloud-guest-utils systemd-timesyncd
@@ -180,38 +228,40 @@ dnsutils iproute2 iputils-ping net-tools
 cron logrotate
 ```
 
-Наличие `sudo` как utility package не означает наличие отдельного обязательного admin user. Management automation работает как `root`.
-
 Docker/Compose и service-specific software в base template не входят.
 
-## 10. Disk / TRIM
+## 12. Disk / TRIM
 
 ```text
 VirtIO SCSI Single
 iothread=1
 discard=on
 ssd=1
-base disk=16 GiB
+base disk >=16 GiB
 ```
 
 Включён `fstrim.timer`; перед seal выполняется `fstrim -av`.
 
-## 11. Cleanup
+## 13. Fail-closed cleanup
 
-Удаляются machine-specific/runtime данные:
+`template-finalize.sh` обязан завершиться ошибкой, если generic `debian` user существует и его не удалось удалить.
 
-- Cloud-Init state/logs/seed;
-- machine-id;
-- SSH host keys;
-- `/root/.ssh`;
-- DHCP/network state;
-- systemd random seed;
-- APT lists/cache;
-- journal/build logs;
-- temp/history;
-- builder scripts.
+После cleanup обязательны assertions:
 
-## 12. Provenance
+```text
+debian absent
+/etc/machine-id empty
+/var/lib/dbus/machine-id absent
+SSH host keys absent
+/root/.ssh absent
+/var/lib/template-build absent
+template-bootstrap absent
+template-finalize absent
+```
+
+Эти assertions выполняются внутри guest и повторно host-side через QGA до seal.
+
+## 14. Provenance
 
 `/etc/vm-template-info` содержит:
 
@@ -228,24 +278,30 @@ Console modes
 
 Pinned cloud build ID и APT snapshot не являются частью policy.
 
-## 13. Failure policy
+## 15. Failure policy
 
 Существующий VMID 9000 не перезаписывается.
 
-При build error временная VM/disks не уничтожаются автоматически: состояние сохраняется для диагностики. PVE Configuration выводит отдельную diagnostic hint, а следующий запуск распознаёт `builder-debian13` как незавершённую сборку и останавливается вместо попытки перезаписать её.
+При build error VM/disks не уничтожаются автоматически. Следующий run распознаёт `builder-debian13` и останавливается для диагностики.
 
-Temporary snippet также не удаляется при аварийном build path, чтобы сохранить диагностический контекст. После осознанной диагностики/очистки запускается та же PVE Configuration повторно.
+Если VMID свободен, но остался builder snippet без builder VM, snippet считается orphaned build artefact и пересоздаётся.
 
-PVE Configuration не мигрирует старый template на v6 автоматически: несовместимая версия или другой параметр template contract вызывает STOP до любых попыток использовать его как clone source.
+PVE Configuration не мигрирует incompatible template на v6 автоматически.
 
-## 14. Проверка
+## 16. Проверка
 
 CI проверяет:
 
-- shell syntax всех `.sh` файлов;
-- YAML структуры `cloud-init.yaml`;
-- наличие обеих guest script entries;
-- возможность собрать итоговый Cloud-Init документ из assets;
-- отсутствие legacy `scripts/pve/create-template.sh`.
+- repository validator;
+- Python compilation;
+- `bash -n`;
+- ShellCheck;
+- production renderer;
+- YAML parsing;
+- `cloud-init schema`;
+- template contract unit tests;
+- malformed guest directory negative test;
+- отсутствие legacy `scripts/pve/create-template.sh`;
+- whitespace.
 
-После существенного изменения pipeline или guest assets требуется реальный clean build + Full Clone smoke test, включая вход `root` по injected SSH key.
+После существенного изменения pipeline/guest assets требуется реальный clean build + Full Clone smoke-test, включая root login по injected SSH key.

@@ -78,19 +78,58 @@ ensure_storage_layout() {
     ok "Storage local/local-lvm активны и готовы для VM, LXC, templates и snippets"
 }
 
+local_debian13_lxc_volumes() {
+    pveam list "$LXC_TEMPLATE_STORAGE" 2>/dev/null \
+        | awk 'NR>1 {print $1}' \
+        | grep -E "^${LXC_TEMPLATE_STORAGE}:vztmpl/debian-13-standard_.*_amd64\\.tar\\.(zst|xz|gz)$" \
+        | sort -V || true
+}
+
+newest_local_debian13_lxc_volume() {
+    local_debian13_lxc_volumes | tail -n1
+}
+
+cleanup_old_debian13_lxc_templates() {
+    local keep=$1 volume
+    while IFS= read -r volume; do
+        [[ -n "$volume" && "$volume" != "$keep" ]] || continue
+        if pveam remove "$volume"; then
+            ok "Удалён устаревший Debian 13 LXC template cache: ${volume}"
+        else
+            warn "Не удалось удалить устаревший Debian 13 LXC template cache ${volume}; рабочий template ${keep} уже готов"
+        fi
+    done < <(local_debian13_lxc_volumes)
+}
+
 ensure_lxc_template() {
     log "Проверка Debian 13 LXC template"
 
-    pveam update || die "Не удалось обновить каталог Proxmox LXC templates через pveam update"
+    local local_volume template catalog_updated=0
+    local_volume="$(newest_local_debian13_lxc_volume)"
 
-    local template
-    template="$(pveam available --section system \
+    if pveam update; then
+        catalog_updated=1
+    elif [[ -n "$local_volume" ]]; then
+        warn "pveam update временно недоступен; используется уже загруженный Debian 13 LXC template ${local_volume}"
+        LXC_TEMPLATE_VOLUME="$local_volume"
+        return
+    else
+        die "Не удалось обновить каталог Proxmox LXC templates, а локальный Debian 13 template отсутствует"
+    fi
+
+    template="$(pveam available --section system 2>/dev/null \
         | awk '$1=="system" && $2 ~ /^debian-13-standard_.*_amd64\.tar\.(zst|xz|gz)$/ {print $2}' \
         | sort -V \
         | tail -n1)"
 
-    [[ -n "$template" ]] \
-        || die "В каталоге pveam не найден Debian 13 standard LXC template"
+    if [[ -z "$template" ]]; then
+        if [[ -n "$local_volume" ]]; then
+            warn "Свежий каталог pveam не содержит Debian 13 standard; сохраняется локальный ${local_volume}"
+            LXC_TEMPLATE_VOLUME="$local_volume"
+            return
+        fi
+        die "В каталоге pveam не найден Debian 13 standard LXC template"
+    fi
 
     LXC_TEMPLATE_VOLUME="${LXC_TEMPLATE_STORAGE}:vztmpl/${template}"
 
@@ -98,16 +137,19 @@ ensure_lxc_template() {
         | awk 'NR>1 {print $1}' \
         | grep -Fxq "$LXC_TEMPLATE_VOLUME"; then
         ok "Актуальный Debian 13 LXC template уже загружен: ${LXC_TEMPLATE_VOLUME}"
-        return
+    else
+        pveam download "$LXC_TEMPLATE_STORAGE" "$template" \
+            || die "Не удалось скачать Debian 13 LXC template ${template} в storage ${LXC_TEMPLATE_STORAGE}"
+
+        pveam list "$LXC_TEMPLATE_STORAGE" \
+            | awk 'NR>1 {print $1}' \
+            | grep -Fxq "$LXC_TEMPLATE_VOLUME" \
+            || die "pveam download завершился, но ${LXC_TEMPLATE_VOLUME} не найден в storage"
+
+        ok "Debian 13 LXC template загружен: ${LXC_TEMPLATE_VOLUME}"
     fi
 
-    pveam download "$LXC_TEMPLATE_STORAGE" "$template" \
-        || die "Не удалось скачать Debian 13 LXC template ${template} в storage ${LXC_TEMPLATE_STORAGE}"
-
-    pveam list "$LXC_TEMPLATE_STORAGE" \
-        | awk 'NR>1 {print $1}' \
-        | grep -Fxq "$LXC_TEMPLATE_VOLUME" \
-        || die "pveam download завершился, но ${LXC_TEMPLATE_VOLUME} не найден в storage"
-
-    ok "Debian 13 LXC template загружен: ${LXC_TEMPLATE_VOLUME}"
+    if (( catalog_updated )); then
+        cleanup_old_debian13_lxc_templates "$LXC_TEMPLATE_VOLUME"
+    fi
 }

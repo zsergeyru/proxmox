@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-PVE_CONFIGURATION_VERSION=16
+PVE_CONFIGURATION_VERSION=17
 
 PRIVATE_REPO="git@github.com:zsergeyru/proxmox.git"
 PRIVATE_BRANCH="main"
@@ -21,7 +21,7 @@ STATE_DIR="${RUNTIME_DIR}/state"
 STATE_FILE="${STATE_DIR}/state.json"
 VERSION_FILE="${STATE_DIR}/version"
 LAST_RUN_FILE="${STATE_DIR}/last-run.json"
-LOCK_FILE="/run/lock/proxmox-pve-configuration.lock"
+LOCK_FILE="/run/lock/proxmox-orchestration.lock"
 LOG_DIR="/var/log/proxmox-deployer"
 CONFIGURATION_LOG_DIR="$LOG_DIR"
 CONFIGURATION_LOG_FILE="${CONFIGURATION_LOG_DIR}/configure-pve.log"
@@ -54,6 +54,7 @@ TEMPLATE_CHECKSUM_PATH="${TEMPLATE_IMAGE_DIR}/SHA512SUMS"
 TEMPLATE_SNIPPET_NAME="debian13-template-builder-${TEMPLATE_VMID}.yaml"
 TEMPLATE_SNIPPET_VOL="${TEMPLATE_SNIPPET_STORAGE}:snippets/${TEMPLATE_SNIPPET_NAME}"
 TEMPLATE_ASSET_DIR="${REPO_DIR}/templates/debian13"
+TEMPLATE_RENDERER="${REPO_DIR}/scripts/pve/setup/render-template-cloud-init.py"
 TEMPLATE_MIN_LOCAL_BYTES=$((2 * 1024 * 1024 * 1024))
 TEMPLATE_MIN_DISK_STORAGE_BYTES=$((18 * 1024 * 1024 * 1024))
 
@@ -63,9 +64,11 @@ LXC_TEMPLATE_STORAGE="local"
 
 UPDATE_SYSTEM=0
 WARN_COUNT=0
+RUN_SOURCE_REVISION="${PVE_CONFIGURATION_SOURCE_REVISION:-}"
 REPO_REVISION=""
 CONFIGURATION_RUNNING=0
 API_HEADER_FILE=""
+TEMPLATE_DOWNLOAD_TMP=""
 CANONICAL_KEY_DIFFERS_FROM_BOOTSTRAP=0
 LXC_TEMPLATE_VOLUME=""
 TEMPLATE_BUILD_REQUIRED=0
@@ -123,6 +126,14 @@ warn() {
     printf '%s%s[ПРЕДУПРЕЖДЕНИЕ]%s %s\n' "$C_BOLD" "$C_YELLOW" "$C_RESET" "$*" >&2
 }
 
+state_revision() {
+    if [[ -n "$REPO_REVISION" ]]; then
+        printf '%s\n' "$REPO_REVISION"
+    else
+        printf '%s\n' "$RUN_SOURCE_REVISION"
+    fi
+}
+
 template_build_diagnostic_hint() {
     if (( TEMPLATE_BUILD_ACTIVE )); then
         printf '%s%s[ДИАГНОСТИКА]%s VM-сборщик %s и её диски оставлены без автоматического удаления.\n' \
@@ -138,7 +149,7 @@ die() {
     template_build_diagnostic_hint
     if (( CONFIGURATION_RUNNING )); then
         trap - ERR
-        write_state "failed" "$REPO_REVISION" >/dev/null 2>&1 || true
+        write_state "failed" "$(state_revision)" >/dev/null 2>&1 || true
     fi
     exit 1
 }
@@ -176,11 +187,23 @@ cleanup_api_header_file() {
     fi
 }
 
+cleanup_template_download_tmp() {
+    if [[ -n "${TEMPLATE_DOWNLOAD_TMP:-}" ]]; then
+        rm -f -- "$TEMPLATE_DOWNLOAD_TMP" 2>/dev/null || true
+        TEMPLATE_DOWNLOAD_TMP=""
+    fi
+}
+
+cleanup_ephemeral_files() {
+    cleanup_api_header_file
+    cleanup_template_download_tmp
+}
+
 on_error() {
     local rc=$?
     trap - ERR
     if (( CONFIGURATION_RUNNING )); then
-        write_state "failed" "$REPO_REVISION" >/dev/null 2>&1 || true
+        write_state "failed" "$(state_revision)" >/dev/null 2>&1 || true
     fi
     printf '\n%s%sPVE Configuration аварийно остановлена.%s Код возврата: %s.\n' "$C_BOLD" "$C_RED" "$C_RESET" "$rc" >&2
     template_build_diagnostic_hint
@@ -190,9 +213,9 @@ on_error() {
 on_signal() {
     local rc=$1 signal_name=$2
     trap - ERR INT TERM
-    cleanup_api_header_file
+    cleanup_ephemeral_files
     if (( CONFIGURATION_RUNNING )); then
-        write_state "interrupted" "$REPO_REVISION" >/dev/null 2>&1 || true
+        write_state "interrupted" "$(state_revision)" >/dev/null 2>&1 || true
     fi
     printf '\n%s%sPVE Configuration прервана сигналом %s.%s\n' "$C_BOLD" "$C_RED" "$signal_name" "$C_RESET" >&2
     template_build_diagnostic_hint
@@ -201,7 +224,7 @@ on_signal() {
 
 install_configuration_traps() {
     trap on_error ERR
-    trap cleanup_api_header_file EXIT
+    trap cleanup_ephemeral_files EXIT
     trap 'on_signal 130 INT' INT
     trap 'on_signal 143 TERM' TERM
 }
@@ -227,21 +250,38 @@ setup_configuration_log() {
 acquire_configuration_lock() {
     require_cmd flock
     install -d -m 0755 /run/lock
+
+    if [[ "${PVE_ORCHESTRATION_LOCK_HELD:-0}" == "1" ]]; then
+        local inherited_target
+        [[ -e /proc/$$/fd/9 ]] \
+            || die "Public Bootstrap сообщил об унаследованной orchestration lock, но fd 9 отсутствует"
+        inherited_target="$(readlink "/proc/$$/fd/9" 2>/dev/null || true)"
+        [[ "$inherited_target" == "$LOCK_FILE" ]] \
+            || die "Унаследованный fd 9 указывает на '${inherited_target:-неизвестно}', ожидается ${LOCK_FILE}"
+        ok "Используется orchestration lock, унаследованная от Public Bootstrap"
+        return
+    fi
+
     exec 9>"$LOCK_FILE"
-    flock -n 9 || die "Другой экземпляр configure-pve.sh уже выполняется. Параллельный запуск запрещён."
-    ok "Получена эксклюзивная блокировка PVE Configuration"
+    flock -n 9 \
+        || die "Другой Public Bootstrap или PVE Configuration уже выполняется. Параллельное изменение canonical runtime запрещено."
+    ok "Получена эксклюзивная orchestration lock PVE Configuration"
 }
 
 write_state() {
     local status=$1
-    local revision=${2:-}
-    local now
+    local revision=${2:-$(state_revision)}
+    local now state_tmp last_tmp version_tmp
     now="$(date --iso-8601=seconds)"
 
     mkdir -p "$STATE_DIR"
     chmod 0750 "$STATE_DIR"
 
-    cat >"$STATE_FILE" <<EOF_STATE
+    state_tmp="$(mktemp "${STATE_DIR}/.state.json.tmp.XXXXXX")"
+    last_tmp="$(mktemp "${STATE_DIR}/.last-run.json.tmp.XXXXXX")"
+    version_tmp="$(mktemp "${STATE_DIR}/.version.tmp.XXXXXX")"
+
+    cat >"$state_tmp" <<EOF_STATE
 {
   "configuration_version": ${PVE_CONFIGURATION_VERSION},
   "component": "pve-configuration",
@@ -257,7 +297,7 @@ write_state() {
 }
 EOF_STATE
 
-    cat >"$LAST_RUN_FILE" <<EOF_LAST
+    cat >"$last_tmp" <<EOF_LAST
 {
   "timestamp": "${now}",
   "component": "pve-configuration",
@@ -267,6 +307,9 @@ EOF_STATE
 }
 EOF_LAST
 
-    printf '%s\n' "$PVE_CONFIGURATION_VERSION" >"$VERSION_FILE"
-    chmod 0644 "$STATE_FILE" "$LAST_RUN_FILE" "$VERSION_FILE"
+    printf '%s\n' "$PVE_CONFIGURATION_VERSION" >"$version_tmp"
+    chmod 0644 "$state_tmp" "$last_tmp" "$version_tmp"
+    mv -f "$state_tmp" "$STATE_FILE"
+    mv -f "$last_tmp" "$LAST_RUN_FILE"
+    mv -f "$version_tmp" "$VERSION_FILE"
 }
