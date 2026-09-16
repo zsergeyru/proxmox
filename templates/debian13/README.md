@@ -25,6 +25,7 @@ Host-side stages:
 scripts/pve/setup/lib/60-template-contract.sh
 scripts/pve/setup/lib/61-template-source.sh
 scripts/pve/setup/lib/62-template-build.sh
+scripts/pve/setup/lib/63-template-smoke.sh
 ```
 
 Canonical Cloud-Init renderer:
@@ -93,9 +94,18 @@ Debian 13 trixie/latest generic cloud image
 → qm template
 → protection=1
 → финальный contract check
+
+63-template-smoke.sh
+→ Full Clone 9000 → 9099
+→ увеличить scsi0 до 20G до первого boot
+→ передать PVE guest SSH public key через Cloud-Init
+→ проверить QGA/Cloud-Init/root SSH/kernel/machine-id/SSH host keys/disk grow
+→ reboot + повторная QGA/SSH/identity проверка
+→ при успехе shutdown + destroy 9099
+→ при ошибке оставить 9099 для диагностики
 ```
 
-Один `configure-pve.sh` владеет общей orchestration lock, state, log и error handling для host configuration и template build.
+Один `configure-pve.sh` владеет общей orchestration lock, state, log и error handling для host configuration, template build и smoke-test.
 
 ## Источник Debian
 
@@ -154,6 +164,80 @@ done
 После запуска QEMU Guest Agent PVE Configuration читает этот код через QGA и уже на host-side выводит русскую подпись в строках `[ЭТАП VM]` и `[ОЖИДАНИЕ]`. Кириллица через QGA telemetry не передаётся, поэтому исключается mojibake вида `Ð...`. До появления QGA host показывает только ожидание Guest Agent.
 
 Stage-файл является временным builder state и удаляется перед seal вместе с `/var/lib/template-build`.
+
+## Full Clone smoke-test
+
+После новой сборки `9000` smoke-test запускается автоматически. Для уже существующего template он запускается явно:
+
+```bash
+configure-pve.sh --smoke-test-template
+```
+
+или через Public Bootstrap:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/zsergeyru/proxmox-bootstrap/main/bootstrap-pve.sh | bash -s -- --smoke-test-template
+```
+
+Smoke VM имеет фиксированные параметры:
+
+```text
+VMID: 9099
+Name: smoke-debian13-9099
+Clone: Full Clone
+Disk: scsi0 → 20G до первого boot
+Network: DHCP
+ciuser: root
+SSH key: /etc/proxmox-deployer/ssh/pve_guest_ed25519.pub
+```
+
+Проверяются:
+
+```text
+Full Clone config
+Cloud-Init user-data и injected SSH public key
+QEMU Guest Agent
+Cloud-Init status=done
+regular Debian kernel *-amd64 без cloud
+root password locked
+root SSH key-only policy
+реальный root SSH по pve_guest_ed25519
+валидный новый machine-id
+созданные SSH host keys
+root filesystem >=18 GiB после resize 16G→20G
+reboot с новым boot_id
+тот же machine-id и SSH host key после reboot
+повторный QGA и строгий SSH host-key check
+```
+
+Состояние теста хранится в:
+
+```text
+/var/lib/proxmox-deployer/state/template-smoke.json
+```
+
+Новая сборка сначала записывает `pending`. Только полностью успешный smoke-test переводит state в `passed`. Это защищает от ситуации, когда host был перезапущен между seal template и smoke-test: следующий обычный PVE Configuration увидит `pending` и продолжит проверку.
+
+Safety policy VMID 9099:
+
+```text
+9099 свободен
+→ создать smoke VM
+
+9099 содержит project smoke marker
+→ STOP: предыдущая smoke VM оставлена для диагностики
+
+9099 занят обычной VM или LXC
+→ STOP без изменения/удаления
+
+smoke SUCCESS
+→ shutdown
+→ qm destroy --purge
+→ подтвердить, что 9099 снова свободен
+
+smoke ERROR / interrupt
+→ 9099 НЕ удалять
+```
 
 ## Доступ
 
@@ -214,7 +298,7 @@ template-bootstrap отсутствует
 template-finalize отсутствует
 ```
 
-Эти assertions выполняются и внутри guest finalize, и повторно host-side через QGA. Это делает root-only/machine-clean contract fail-closed.
+Эти assertions выполняются и внутри guest finalize, и повторно host-side через QGA. Это делает root-only/machine-clean contract fail-closed. Smoke-test затем подтверждает обратную сторону lifecycle: в Full Clone появляются новый непустой machine-id и новые SSH host keys.
 
 ## Cloud-Init renderer
 
@@ -266,6 +350,12 @@ unfinished builder
 
 foreign VM/LXC или incompatible template
 → STOP без destructive overwrite
+
+smoke pending
+→ выполнить/возобновить smoke-test
+
+предыдущая project smoke VM 9099 существует
+→ STOP, оставить для диагностики
 ```
 
 Если VMID свободен, но остался только temporary builder snippet, он считается orphaned artefact предыдущей попытки и безопасно пересоздаётся.
@@ -298,21 +388,11 @@ YAML parse
 cloud-init schema
 ASCII builder stage-code contract
 template contract unit tests
+smoke safety/state unit tests
 absence of legacy create-template.sh
 ```
 
-После существенного изменения guest/template assets по принятой policy требуется реальный integration test:
-
-1. clean build VMID 9000;
-2. Full Clone;
-3. noVNC/tty1 и serial fallback;
-4. regular kernel + framebuffer;
-5. QGA;
-6. locked root password / SSH key-only;
-7. root SSH с injected public key;
-8. unique machine-id и SSH host keys;
-9. filesystem growth после resize;
-10. отсутствие builder artifacts и baked-in authorized_keys.
+Реальный PVE smoke-test теперь является штатным этапом PVE Configuration. Для новой сборки он обязателен автоматически; для уже существующего `9000` используется `--smoke-test-template`.
 
 ## История
 

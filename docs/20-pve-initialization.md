@@ -7,14 +7,14 @@
 ```text
 Public Bootstrap
 zsergeyru/proxmox-bootstrap/bootstrap-pve.sh
-PUBLIC_BOOTSTRAP_VERSION=10
+PUBLIC_BOOTSTRAP_VERSION=11
 
 PVE Configuration
 zsergeyru/proxmox/scripts/pve/setup/configure-pve.sh
-PVE_CONFIGURATION_VERSION=20
+PVE_CONFIGURATION_VERSION=21
 ```
 
-`Public Bootstrap` отвечает за безопасное получение/обновление private source of truth, выбор точной Git revision, root trust boundary canonical source и handoff. `PVE Configuration` является единственным host-side orchestrator и повторяемо приводит Proxmox VE к ожидаемому состоянию проекта, включая template `9000`.
+`Public Bootstrap` отвечает за безопасное получение/обновление private source of truth, выбор точной Git revision, root trust boundary canonical source и handoff. `PVE Configuration` является единственным host-side orchestrator и повторяемо приводит Proxmox VE к ожидаемому состоянию проекта, включая template `9000` и штатный Full Clone smoke-test.
 
 ## 1. Канонический запуск
 
@@ -30,7 +30,13 @@ curl -fsSL https://raw.githubusercontent.com/zsergeyru/proxmox-bootstrap/main/bo
 curl -fsSL https://raw.githubusercontent.com/zsergeyru/proxmox-bootstrap/main/bootstrap-pve.sh | bash -s -- --update-system
 ```
 
-Одна команда используется для first run, штатного rerun и resume после частичной ошибки.
+Явный smoke-test уже существующего template `9000`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/zsergeyru/proxmox-bootstrap/main/bootstrap-pve.sh | bash -s -- --smoke-test-template
+```
+
+После новой сборки `9000` smoke-test запускается автоматически. Одна public-команда используется для first run, штатного rerun и resume после частичной ошибки.
 
 ## 2. Общая orchestration lock
 
@@ -102,7 +108,7 @@ Canonical source, из которого `root` запускает PVE Configurat
 
 Это важно не только для файлов внутри `repo`, но и для его родителя: если `/var/lib/proxmox-deployer` был бы writable для `pvedeploy`, ограниченный user мог бы удалить/переименовать root-owned `repo` и подменить каталог целиком.
 
-Public Bootstrap v10 автоматически переводит старую `pvedeploy`-owned модель в root trust boundary до запуска новой PVE Configuration.
+Public Bootstrap v10+ автоматически переводит старую `pvedeploy`-owned модель в root trust boundary до запуска новой PVE Configuration.
 
 Для rerun Public Bootstrap проверяет:
 
@@ -171,6 +177,7 @@ scripts/pve/setup/
 ├── tests/
 │   ├── test-template-contract.sh
 │   ├── test-template-guest-exec.sh
+│   ├── test-template-smoke.sh
 │   ├── test-token-rollback.sh
 │   └── test-source-trust.sh
 └── lib/
@@ -183,6 +190,7 @@ scripts/pve/setup/
     ├── 60-template-contract.sh
     ├── 61-template-source.sh
     ├── 62-template-build.sh
+    ├── 63-template-smoke.sh
     └── 70-tooling.sh
 ```
 
@@ -212,8 +220,10 @@ shared lock + root-trusted source SHA/clean check
 → builder/provisioning + ASCII stage telemetry
 → verification reboot
 → guest cleanup
+→ smoke state=pending
 → seal template
 → final template contract
+→ automatic/explicit/pending Full Clone smoke-test 9099
 → local tooling/status
 → final state
 ```
@@ -231,6 +241,8 @@ Host preflight проверяет:
 - обязательные PVE CLI tools.
 
 Состояние `9000` проверяется сразу после configuration snapshot и до остальных host-side изменений. Foreign VM/LXC, unfinished builder, incompatible template, неожиданный origin, dirty Git checkout, потерянный credential, нарушенный source ownership или нестандартная repository configuration приводят к STOP вместо destructive overwrite.
+
+Для smoke VMID `9099` действует отдельная fail-closed policy: project smoke residue сохраняется для диагностики; обычная VM или LXC на этом VMID никогда не изменяется и не удаляется автоматически.
 
 Исходящие HTTP/HTTPS sanity-checks используют connection и total timeout, а canonical SSH transport работает в `BatchMode` с bounded connect/server-alive policy, чтобы сетевой сбой не превращался в неограниченное ожидание.
 
@@ -252,10 +264,13 @@ Runtime state:
 ├── version
 ├── last-run.json
 ├── last-revision
+├── template-smoke.json
 └── bootstrap-complete
 ```
 
 `state.json`, `last-run.json` и `version` обновляются атомарно через temporary file + `mv`, чтобы interrupt не оставлял частично записанный JSON.
+
+`template-smoke.json` также записывается атомарно и имеет статус `pending` или `passed`. Pending после interrupted run заставляет следующий обычный PVE Configuration продолжить smoke-test; успешно проверенная временная VM `9099` удаляется только перед записью `passed`.
 
 ## 9. APT repository policy
 
@@ -359,7 +374,7 @@ PVE guest SSH identity:
 /etc/proxmox-deployer/ssh/pve_guest_ed25519.pub
 ```
 
-Именно этот guest-side key остаётся `pvedeploy`-owned. Canonical GitHub Deploy Key ему больше не выдаётся. Private keys не ротируются автоматически.
+Именно этот guest-side key остаётся `pvedeploy`-owned. Smoke-test использует тот же key для реальной проверки root SSH в Full Clone. Canonical GitHub Deploy Key `pvedeploy` не выдаётся. Private keys не ротируются автоматически.
 
 ## 12. PVE identities и ACL
 
@@ -423,6 +438,15 @@ Template pipeline встроен в PVE Configuration:
 → standard Cloud-Init
 → qm template
 → protection=1
+
+63-template-smoke.sh
+→ Full Clone 9000 → 9099
+→ resize scsi0 16G→20G до первого boot
+→ Cloud-Init root + PVE guest SSH key + DHCP
+→ QGA/Cloud-Init/kernel/SSH/machine-id/host-keys/filesystem checks
+→ reboot + повторные QGA/SSH/identity checks
+→ success: shutdown + destroy 9099
+→ failure: сохранить 9099
 ```
 
 Canonical renderer:
@@ -469,11 +493,19 @@ protection=1 после pipeline
 
 Проверка exact Cloud-Init volume нужна, чтобы обычный ISO/CD-ROM на `ide2` не мог формально пройти contract только из-за `media=cdrom`.
 
-`template_guest_exec` принимает plain-output CLI variants и structured QGA results. Structured result с `pid`/`exited=0`, отсутствующим подтверждённым `exitcode`, ненулевым exitcode или signal считается ошибкой; timeout не может быть принят за успешный guest stdout.
+`template_guest_exec` принимает plain-output CLI variants и structured QGA results. Smoke module повторно использует тот же normalized executor для VMID `9099`. Structured result с `pid`/`exited=0`, отсутствующим подтверждённым `exitcode`, ненулевым exitcode или signal считается ошибкой; timeout не может быть принят за успешный guest stdout.
 
-Guest cleanup fail-closed подтверждает отсутствие `debian`, machine-id, SSH host keys, `/root/.ssh`, build-state и builder scripts до `qm template`.
+Guest cleanup fail-closed подтверждает отсутствие `debian`, machine-id, SSH host keys, `/root/.ssh`, build-state и builder scripts до `qm template`. Smoke-test подтверждает обратную сторону lifecycle: в Full Clone создаются новый machine-id и SSH host keys, root filesystem расширяется, а injected management key реально работает.
 
-Unfinished builder намеренно сохраняется для диагностики. Foreign/incompatible VMID 9000 не удаляется автоматически.
+Smoke trigger policy:
+
+```text
+template создан текущим run → AUTO
+--smoke-test-template → FORCE для существующего template
+template-smoke.json=pending → RESUME автоматически
+```
+
+Unfinished builder намеренно сохраняется для диагностики. Foreign/incompatible VMID 9000 и foreign VM/LXC на `9099` не удаляются автоматически.
 
 ## 14. Download и temporary artefacts
 
@@ -496,6 +528,7 @@ absence of embedded guest-status helper
 ASCII builder stage-code contract
 Template contract unit tests
 Guest exec result/timeout + stage-label unit tests
+Template smoke safety/state unit tests
 API token rollback unit tests
 source trust boundary test
 negative malformed guest directory test
@@ -504,7 +537,7 @@ git diff --check
 
 `validate_repo.py` рассматривает каждый `guests/*/guest.yaml`; каталог, не соответствующий `NNN-name`, является ошибкой, а не молча пропускается.
 
-CI не заменяет реальный PVE integration test. По принятой policy после существенного изменения guest/template assets требуется clean template build + Full Clone smoke-test.
+CI проверяет safety/state логику smoke-модуля, но не может заменить реальный Proxmox runtime. Реальный Full Clone smoke теперь выполняется самой PVE Configuration: автоматически после нового build либо явно через `--smoke-test-template` для существующего `9000`.
 
 ## 16. Status
 
@@ -527,4 +560,4 @@ ready-with-warnings
 
 Главный принцип:
 
-> Один configuration run = одна точная private Git revision, один общий orchestration lock и один чистый root-trusted source tree. `pvedeploy` может использовать проект для deployment, но не может изменять код или Git credential, которые затем использует `root`. Неоднозначный state, local drift или нарушенная trust boundary приводят к STOP.
+> Один configuration run = одна точная private Git revision, один общий orchestration lock и один чистый root-trusted source tree. `pvedeploy` может использовать проект для deployment, но не может изменять код или Git credential, которые затем использует `root`. Новая template-сборка считается runtime-проверенной только после успешного Full Clone smoke-test. Неоднозначный state, local drift или нарушенная trust boundary приводят к STOP.

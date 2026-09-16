@@ -92,6 +92,7 @@ for module in \
     60-template-contract.sh \
     61-template-source.sh \
     62-template-build.sh \
+    63-template-smoke.sh \
     70-tooling.sh; do
     [[ -f "${LIB_DIR}/${module}" ]] || {
         printf 'ОШИБКА: не найден модуль PVE Configuration: %s\n' "${LIB_DIR}/${module}" >&2
@@ -139,10 +140,13 @@ main() {
         provision_template_builder
         verify_template_builder
         finalize_template_builder
+        template_smoke_mark_pending
         seal_template
+        TEMPLATE_BUILT_THIS_RUN=1
     fi
 
     verify_template_contract
+    run_template_smoke_test_if_needed
 
     install_private_tooling
     report_status

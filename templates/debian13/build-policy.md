@@ -25,6 +25,9 @@ Host-side orchestration является частью `scripts/pve/setup/configu
 
 62-template-build.sh
 → VM builder lifecycle + QGA normalization + stage rendering + verification + cleanup + seal
+
+63-template-smoke.sh
+→ Full Clone smoke lifecycle + runtime verification + safe cleanup
 ```
 
 Canonical renderer:
@@ -244,7 +247,83 @@ Template `9000` остаётся `protection=1`.
 
 Старый/incompatible template автоматически не заменяется.
 
-## 12. Base packages
+## 12. Full Clone smoke-test
+
+Штатный smoke VM:
+
+```text
+VMID = 9099
+name = smoke-debian13-9099
+source = template 9000
+clone = --full 1
+storage = local-lvm
+scsi0 = 20G до первого boot
+ciuser = root
+ipconfig0 = ip=dhcp
+SSH public key = pve_guest_ed25519.pub
+```
+
+Trigger policy:
+
+```text
+новый template создан текущим run
+→ smoke-test обязателен автоматически
+
+существующий template
+→ smoke-test только по --smoke-test-template
+
+/template-smoke.json status=pending
+→ smoke-test обязателен при следующем обычном run
+```
+
+Перед `qm template`/seal нового builder-а PVE Configuration записывает pending smoke state. Поэтому power loss между seal и smoke не позволяет следующему run молча считать pipeline полностью проверенным.
+
+Runtime checks smoke VM:
+
+```text
+Full Clone действительно обычная VM, не template
+project safety marker в description
+Cloud-Init содержит PVE guest SSH public key
+QGA active
+Cloud-Init done
+kernel *-amd64 и не cloud
+root password locked
+root SSH policy key-only
+реальный root SSH по PVE guest key
+валидный непустой /etc/machine-id
+новые SSH host keys
+root filesystem >=18 GiB после resize до 20G
+reboot меняет boot_id
+machine-id и SSH host key сохраняются после reboot
+QGA и SSH повторно доступны
+StrictHostKeyChecking=yes проходит с host key, принятым до reboot
+```
+
+Success cleanup:
+
+```text
+shutdown
+→ дождаться stopped
+→ qm destroy 9099 --purge 1
+→ убедиться, что VMID свободен
+→ template-smoke.json status=passed
+```
+
+Failure policy:
+
+```text
+ошибка или interruption после создания 9099
+→ НЕ удалять 9099
+→ вывести diagnostic hint
+
+9099 с project smoke marker уже существует
+→ STOP как residue предыдущего неуспешного smoke
+
+9099 занят обычной VM или LXC
+→ STOP без изменения/удаления
+```
+
+## 13. Base packages
 
 ```text
 qemu-guest-agent openssh-server sudo locales cloud-guest-utils systemd-timesyncd
@@ -258,7 +337,7 @@ cron logrotate
 
 Docker/Compose и service-specific software в base template не входят.
 
-## 13. Disk / TRIM
+## 14. Disk / TRIM
 
 ```text
 VirtIO SCSI Single
@@ -270,7 +349,9 @@ base disk >=16 GiB
 
 Включён `fstrim.timer`; перед seal выполняется `fstrim -av`.
 
-## 14. Fail-closed cleanup
+Smoke-test отдельно расширяет Full Clone до `20G` до первого boot и требует root filesystem не меньше `18 GiB`, тем самым проверяя штатный growpart/resize filesystem lifecycle.
+
+## 15. Fail-closed cleanup
 
 `template-finalize.sh` обязан завершиться ошибкой, если generic `debian` user существует и его не удалось удалить.
 
@@ -287,9 +368,9 @@ template-bootstrap absent
 template-finalize absent
 ```
 
-Assertions выполняются внутри guest и повторно host-side через QGA до seal.
+Assertions выполняются внутри guest и повторно host-side через QGA до seal. Smoke-test затем подтверждает, что Full Clone генерирует новый machine-id и SSH host keys.
 
-## 15. Provenance
+## 16. Provenance
 
 `/etc/vm-template-info` содержит:
 
@@ -306,7 +387,15 @@ Console modes
 
 Pinned cloud build ID и APT snapshot не являются частью policy.
 
-## 16. Failure policy
+Smoke provenance хранится отдельно host-side:
+
+```text
+/var/lib/proxmox-deployer/state/template-smoke.json
+```
+
+В `passed` state фиксируются template VMID/version, source revision, machine-id smoke clone, kernel, root filesystem bytes и SSH host-key fingerprint.
+
+## 17. Failure policy
 
 Существующий VMID 9000 не перезаписывается.
 
@@ -316,7 +405,9 @@ Pinned cloud build ID и APT snapshot не являются частью policy.
 
 PVE Configuration не мигрирует incompatible template на v7 автоматически.
 
-## 17. Проверка
+Smoke VM удаляется только после полного SUCCESS. Любое неоднозначное состояние VMID 9099 приводит к STOP без destructive cleanup.
+
+## 18. Проверка
 
 CI проверяет:
 
@@ -330,8 +421,9 @@ CI проверяет:
 - отсутствие embedded `guest-status` helper;
 - exact ASCII stage-code set;
 - template contract unit tests;
+- template smoke safety/state unit tests;
 - malformed guest directory negative test;
 - отсутствие legacy `scripts/pve/create-template.sh`;
 - whitespace.
 
-После существенного изменения pipeline/guest assets требуется реальный clean build + Full Clone smoke-test, включая root login по injected SSH key.
+CI не подменяет real PVE runtime. Реальный Full Clone smoke-test является частью PVE Configuration: автоматически после нового build либо явно через `--smoke-test-template` для уже существующего template.

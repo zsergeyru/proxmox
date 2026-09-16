@@ -7,8 +7,14 @@ install_private_tooling() {
 #!/usr/bin/env bash
 set -Eeuo pipefail
 STATE=/var/lib/proxmox-deployer/state/state.json
+SMOKE=/var/lib/proxmox-deployer/state/template-smoke.json
 [[ -f "$STATE" ]] || { echo "Файл состояния PVE Configuration не найден: $STATE" >&2; exit 1; }
-exec jq . "$STATE"
+printf '%s\n' '=== PVE Configuration ==='
+jq . "$STATE"
+if [[ -f "$SMOKE" ]]; then
+    printf '\n%s\n' '=== Template Full Clone smoke ==='
+    jq . "$SMOKE"
+fi
 EOF_STATUS
     chmod 0755 /usr/local/sbin/pve-configuration-status
 
@@ -40,7 +46,7 @@ EOF_DEPLOY
 }
 
 report_status() {
-    local ready=1
+    local ready=1 smoke_state
     local deployer_src="${REPO_DIR}/scripts/pve/deploy-guest.py"
 
     printf '\n%s%sPVE CONFIGURATION STATUS%s\n\n' "$C_BOLD" "$C_CYAN" "$C_RESET"
@@ -64,6 +70,26 @@ report_status() {
         printf '%s%s[НЕТ]%s Шаблон %s отсутствует\n' "$C_BOLD" "$C_RED" "$C_RESET" "$TEMPLATE_VMID"
         ready=0
     fi
+
+    smoke_state="$(template_smoke_state_status)"
+    case "$smoke_state" in
+        passed)
+            ok "Full Clone smoke-test template ${TEMPLATE_VMID} подтверждён; временный VMID ${SMOKE_VMID} освобождён"
+            ;;
+        pending)
+            printf '%s%s[ОЖИДАНИЕ]%s Full Clone smoke-test template %s имеет pending state\n' \
+                "$C_BOLD" "$C_YELLOW" "$C_RESET" "$TEMPLATE_VMID"
+            ready=0
+            ;;
+        none)
+            info "Full Clone smoke state для существующего template ещё не записан; для явной проверки используйте --smoke-test-template"
+            ;;
+        *)
+            printf '%s%s[ОШИБКА]%s Неизвестный template smoke state: %s\n' \
+                "$C_BOLD" "$C_RED" "$C_RESET" "$smoke_state"
+            ready=0
+            ;;
+    esac
 
     if [[ -x /usr/local/sbin/deploy-guest && -f "$deployer_src" ]]; then
         ok "Команда deploy-guest установлена и source существует"

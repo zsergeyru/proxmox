@@ -128,6 +128,9 @@ jobs:
       - name: Run guest exec unit checks
         run: bash scripts/pve/setup/tests/test-template-guest-exec.sh
 
+      - name: Run template smoke safety checks
+        run: bash scripts/pve/setup/tests/test-template-smoke.sh
+
       - name: Run API token rollback unit checks
         run: bash scripts/pve/setup/tests/test-token-rollback.sh
 

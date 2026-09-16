@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-PVE_CONFIGURATION_VERSION=20
+PVE_CONFIGURATION_VERSION=21
 
 PRIVATE_REPO="git@github.com:zsergeyru/proxmox.git"
 PRIVATE_BRANCH="main"
@@ -58,22 +58,33 @@ TEMPLATE_RENDERER="${REPO_DIR}/scripts/pve/setup/render-template-cloud-init.py"
 TEMPLATE_MIN_LOCAL_BYTES=$((2 * 1024 * 1024 * 1024))
 TEMPLATE_MIN_DISK_STORAGE_BYTES=$((18 * 1024 * 1024 * 1024))
 
+# Штатный Full Clone smoke-test базового VM template.
+SMOKE_VMID=9099
+SMOKE_NAME="smoke-debian13-9099"
+SMOKE_DISK_SIZE="20G"
+SMOKE_MIN_ROOT_BYTES=$((18 * 1024 * 1024 * 1024))
+TEMPLATE_SMOKE_STATE_FILE="${STATE_DIR}/template-smoke.json"
+
 MANAGED_POOL="managed"
 BRIDGE="vmbr0"
 LXC_TEMPLATE_STORAGE="local"
 
 UPDATE_SYSTEM=0
+SMOKE_TEST_TEMPLATE=0
 WARN_COUNT=0
 RUN_SOURCE_REVISION="${PVE_CONFIGURATION_SOURCE_REVISION:-}"
 REPO_REVISION=""
 CONFIGURATION_RUNNING=0
 API_HEADER_FILE=""
 TEMPLATE_DOWNLOAD_TMP=""
+SMOKE_SSH_KNOWN_HOSTS=""
 CANONICAL_KEY_DIFFERS_FROM_BOOTSTRAP=0
 LXC_TEMPLATE_VOLUME=""
 TEMPLATE_BUILD_REQUIRED=0
 TEMPLATE_NEEDS_PROTECTION=0
 TEMPLATE_BUILD_ACTIVE=0
+TEMPLATE_BUILT_THIS_RUN=0
+SMOKE_ACTIVE=0
 TEMPLATE_IMAGE_SHA512=""
 TEMPLATE_SNIPPET_PATH=""
 TEMPLATE_KERNEL_VERSION=""
@@ -146,10 +157,19 @@ template_build_diagnostic_hint() {
     fi
 }
 
+smoke_test_diagnostic_hint() {
+    if (( SMOKE_ACTIVE )); then
+        printf '%s%s[ДИАГНОСТИКА]%s Full Clone smoke VM %s намеренно оставлена для разбора ошибки.\n' \
+            "$C_BOLD" "$C_YELLOW" "$C_RESET" "$SMOKE_VMID" >&2
+        printf '             Не удаляйте её автоматически: проверьте qm config/status, QGA, Cloud-Init и SSH.\n' >&2
+    fi
+}
+
 die() {
     local message=$*
     printf '\n%s%sОШИБКА:%s %s\n' "$C_BOLD" "$C_RED" "$C_RESET" "$message" >&2
     template_build_diagnostic_hint
+    smoke_test_diagnostic_hint
     if (( CONFIGURATION_RUNNING )); then
         trap - ERR
         write_state "failed" "$(state_revision)" >/dev/null 2>&1 || true
@@ -160,15 +180,16 @@ die() {
 usage() {
     cat <<'USAGE'
 Использование:
-  configure-pve.sh [--update-system] [--help]
+  configure-pve.sh [--update-system] [--smoke-test-template] [--help]
 
 PVE Configuration — повторяемое приведение Proxmox VE к конфигурации проекта.
 Обычно запускается автоматически через публичный bootstrap-pve.sh после получения
 или обновления приватного репозитория zsergeyru/proxmox.
 
 Параметры:
-  --update-system  дополнительно выполнить apt full-upgrade Proxmox/Debian
-  -h, --help       показать эту справку
+  --update-system        дополнительно выполнить apt full-upgrade Proxmox/Debian
+  --smoke-test-template  выполнить Full Clone smoke-test существующего template 9000 через VMID 9099
+  -h, --help             показать эту справку
 USAGE
 }
 
@@ -176,6 +197,7 @@ parse_configuration_args() {
     while (($#)); do
         case "$1" in
             --update-system) UPDATE_SYSTEM=1 ;;
+            --smoke-test-template) SMOKE_TEST_TEMPLATE=1 ;;
             -h|--help) usage; exit 0 ;;
             *) die "Неизвестный параметр: $1" ;;
         esac
@@ -194,6 +216,13 @@ cleanup_template_download_tmp() {
     if [[ -n "${TEMPLATE_DOWNLOAD_TMP:-}" ]]; then
         rm -f -- "$TEMPLATE_DOWNLOAD_TMP" 2>/dev/null || true
         TEMPLATE_DOWNLOAD_TMP=""
+    fi
+}
+
+cleanup_smoke_known_hosts() {
+    if [[ -n "${SMOKE_SSH_KNOWN_HOSTS:-}" ]]; then
+        rm -f -- "$SMOKE_SSH_KNOWN_HOSTS" 2>/dev/null || true
+        SMOKE_SSH_KNOWN_HOSTS=""
     fi
 }
 
@@ -217,6 +246,7 @@ cleanup_pending_token() {
 cleanup_ephemeral_files() {
     cleanup_api_header_file
     cleanup_template_download_tmp
+    cleanup_smoke_known_hosts
     cleanup_pending_token
 }
 
@@ -228,6 +258,7 @@ on_error() {
     fi
     printf '\n%s%sPVE Configuration аварийно остановлена.%s Код возврата: %s.\n' "$C_BOLD" "$C_RED" "$C_RESET" "$rc" >&2
     template_build_diagnostic_hint
+    smoke_test_diagnostic_hint
     exit "$rc"
 }
 
@@ -240,6 +271,7 @@ on_signal() {
     fi
     printf '\n%s%sPVE Configuration прервана сигналом %s.%s\n' "$C_BOLD" "$C_RED" "$signal_name" "$C_RESET" >&2
     template_build_diagnostic_hint
+    smoke_test_diagnostic_hint
     exit "$rc"
 }
 

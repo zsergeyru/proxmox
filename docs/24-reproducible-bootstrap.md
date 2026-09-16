@@ -7,8 +7,8 @@
 Текущие версии:
 
 ```text
-Public Bootstrap:        PUBLIC_BOOTSTRAP_VERSION=10
-PVE Configuration:      PVE_CONFIGURATION_VERSION=20
+Public Bootstrap:        PUBLIC_BOOTSTRAP_VERSION=11
+PVE Configuration:      PVE_CONFIGURATION_VERSION=21
 Debian VM template:     Template-Version 7
 ```
 
@@ -21,6 +21,12 @@ zsergeyru/proxmox-bootstrap/bootstrap-pve.sh
 ```
 
 `PUBLIC_BOOTSTRAP_VERSION` повышается, когда меняется поведение публичной точки входа: first-run bootstrap, resume, handoff, permanent refresh, marker contract, orchestration locking, source trust boundary или передаваемые параметры.
+
+Public Bootstrap v11 дополнительно принимает `--smoke-test-template` и без изменения смысла передаёт его private PVE Configuration. Для уже существующего template штатная команда выглядит так:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/zsergeyru/proxmox-bootstrap/main/bootstrap-pve.sh | bash -s -- --smoke-test-template
+```
 
 Public Bootstrap не pin'ит private `main` между разными запусками: в начале каждого штатного запуска получает текущую ветку `main`. Но после выбора revision конкретный запуск фиксирует её и передаёт SHA в PVE Configuration. Одна PVE Configuration не должна смешивать код из разных Git revisions.
 
@@ -59,7 +65,7 @@ Contract:
 
 Родитель canonical repo также не writable для `pvedeploy`, поэтому ограниченный runtime user не может заменить root-owned каталог целиком.
 
-Public Bootstrap v10 переводит существующую старую `pvedeploy`-owned установку в эту модель до handoff. Git refresh permanent source после этого выполняется от root. `pvedeploy` сохраняет read access к source и свои deployment credentials/runtime, но не Git credential и не write access к repo/.git.
+Public Bootstrap v10+ переводит существующую старую `pvedeploy`-owned установку в эту модель до handoff. Git refresh permanent source после этого выполняется от root. `pvedeploy` сохраняет read access к source и свои deployment credentials/runtime, но не Git credential и не write access к repo/.git.
 
 ## PVE Configuration
 
@@ -69,16 +75,7 @@ Public Bootstrap v10 переводит существующую старую `p
 zsergeyru/proxmox/scripts/pve/setup/configure-pve.sh
 ```
 
-`PVE_CONFIGURATION_VERSION` повышается, когда меняется contract host configuration, например:
-
-- runtime layout;
-- credentials model;
-- filesystem/source trust boundary;
-- PVE roles/ACL;
-- storage requirements;
-- template pipeline requirements;
-- state/reporting schema;
-- rerun/locking/safety checks.
+`PVE_CONFIGURATION_VERSION` повышается, когда меняется contract host configuration, например runtime layout, credentials model, filesystem/source trust boundary, PVE roles/ACL, storage requirements, template pipeline, state schema или safety checks. Version 21 добавляет штатный Full Clone smoke lifecycle и persistent smoke state.
 
 Перед `source lib/*.sh` entrypoint проверяет сам исполняемый checkout:
 
@@ -92,9 +89,7 @@ zsergeyru/proxmox/scripts/pve/setup/configure-pve.sh
 → только затем source модулей
 ```
 
-Это означает, что SHA в state/log соответствует исполняемому коду и что менее привилегированный runtime user не может подменить код перед выполнением root. Dirty или non-root-trusted checkout не очищается/исправляется на этапе исполнения: run останавливается.
-
-Canonical checkout `/var/lib/proxmox-deployer/repo` должен одновременно соответствовать source SHA, clean-state и root ownership contract. Если обнаружен local drift, Bootstrap/PVE Configuration останавливаются вместо destructive overwrite.
+Canonical checkout `/var/lib/proxmox-deployer/repo` обязан одновременно соответствовать source SHA, clean-state и root ownership contract. Если обнаружен local drift, Bootstrap/PVE Configuration останавливаются вместо destructive overwrite.
 
 Revision текущего run известна до первого host-side изменения и используется в `running/failed/interrupted` state. После sync canonical checkout обязан иметь тот же SHA. Фактически применённая revision записывается в:
 
@@ -108,15 +103,16 @@ State-файлы записываются атомарно через temporary 
 state.json
 last-run.json
 version
+template-smoke.json
 ```
+
+`template-smoke.json` содержит `pending` или `passed`. `pending` переживает interruption и делает smoke-test обязательным при следующем обычном run.
 
 Canonical GitHub SSH transport использует strict host checking, `BatchMode`, bounded connect timeout и server-alive policy. HTTP/HTTPS sanity-checks также имеют connection и total timeout.
 
 ## API token durability
 
-Новый PVE API token имеет одноразовый secret, поэтому создание token и сохранение secret рассматриваются как одна операция.
-
-Алгоритм:
+Новый PVE API token имеет одноразовый secret, поэтому создание token и сохранение secret рассматриваются как одна операция:
 
 ```text
 pveum user token add
@@ -128,15 +124,9 @@ pveum user token add
 → снять pending marker
 ```
 
-Если parsing или запись не удались, новый token текущего run удаляется через:
+Parsing/write failure и обычные error/INT/TERM/EXIT paths пытаются удалить только новый pending token текущего run. Уже существующие tokens не удаляются и не ротируются автоматически. `SIGKILL`/авария питания не могут сделать межсистемную операцию полностью атомарной.
 
-```text
-pveum user token delete <userid> <tokenid>
-```
-
-Обычные error/INT/TERM/EXIT paths также пытаются удалить pending token, пока его secret не подтверждён на диске. Уже существующие tokens этим механизмом не удаляются и не ротируются автоматически. `SIGKILL`/авария питания, как и для любой межсистемной операции, не могут быть превращены в полностью атомарную транзакцию.
-
-## Debian VM template
+## Debian VM template и smoke-test
 
 Создание VMID `9000` является встроенной частью PVE Configuration, а не отдельным самостоятельным host-side скриптом.
 
@@ -160,9 +150,19 @@ Host-side pipeline:
 → verification reboot
 → fail-closed guest cleanup
 → standard Proxmox Cloud-Init
+→ smoke state=pending
 → qm template
 → protection=1
 → final contract check
+
+63-template-smoke.sh
+→ Full Clone 9000 → 9099
+→ scsi0 16G → 20G до первого boot
+→ Cloud-Init root + pve_guest SSH key + DHCP
+→ QGA/Cloud-Init/kernel/SSH/machine-id/SSH-host-key/rootfs checks
+→ reboot + повторная проверка
+→ SUCCESS: shutdown + destroy 9099 + state=passed
+→ ERROR/interrupt: сохранить 9099 + state остаётся pending
 ```
 
 Canonical renderer:
@@ -170,8 +170,6 @@ Canonical renderer:
 ```text
 scripts/pve/setup/render-template-cloud-init.py
 ```
-
-Он используется и runtime, и CI. Поэтому CI не поддерживает вторую независимую реализацию render-логики.
 
 Guest-side assets:
 
@@ -181,53 +179,50 @@ templates/debian13/template-bootstrap.sh
 templates/debian13/template-finalize.sh
 ```
 
-Текущая модель:
+Текущая guest model остаётся `Template-Version 7`; smoke lifecycle меняет host-side configuration contract, поэтому поднимается PVE Configuration, а не Template-Version.
+
+Фактически использованный image и SHA-512 записываются в `/etc/vm-template-info`, а Proxmox description содержит `template-version=7`.
+
+PVE Configuration принимает существующий template только если полный host-visible contract соответствует baseline. Проверяются CPU/RAM, SCSI controller, system disk/storage/flags/minimum size, exact Cloud-Init volume `local-lvm:vm-9000-cloudinit` с `media=cdrom`, VirtIO network/bridge, boot order, QGA, console и protection.
+
+`template_guest_exec` нормализует plain CLI output и structured QGA output. Incomplete structured result (`pid` без завершения, `exited=0`), signal или ненулевой exitcode считается ошибкой. Smoke module повторно использует этот же executor для VMID `9099`, а не реализует второй QGA parser.
+
+Builder stage-файл `/var/lib/template-build/bootstrap-status` содержит только ASCII identifiers. Localized русские подписи формируются на PVE host и не проходят через QGA byte/string transport.
+
+Guest cleanup fail-closed: до `qm template` подтверждается отсутствие generic `debian`, machine-id, SSH host keys, `/root/.ssh`, build state и builder scripts. Smoke-test проверяет обратный lifecycle: Full Clone получает новый machine-id, новые SSH host keys, injected root SSH key и расширенный filesystem.
+
+Smoke trigger policy:
 
 ```text
-Template-Version 7
-официальный Debian 13 trixie/latest
-→ SHA-512 verification
-→ обычные Debian repositories
-→ apt update/full-upgrade
-→ root-only key-based SSH policy
-→ сборка template
+новый template создан текущим run
+→ AUTO smoke
+
+--smoke-test-template
+→ FORCE smoke существующего template
+
+template-smoke.json status=pending
+→ RESUME smoke при обычном rerun
 ```
 
-Фактически использованный image и SHA-512 записываются в `/etc/vm-template-info`, а Proxmox description содержит:
+Safety policy для `9099`:
 
 ```text
-template-version=7
+9099 свободен
+→ разрешён smoke clone
+
+9099 = project smoke residue
+→ STOP, оставить для диагностики
+
+9099 = обычная VM или LXC
+→ STOP, ничего не менять и не удалять
+
+полный SUCCESS
+→ удалить 9099 только после всех проверок
 ```
-
-`Template-Version` — версия guest/template contract, а не pin внешнего Debian build. v7 отличается от v6 прежде всего новым ASCII stage-code contract builder telemetry; localized presentation формируется только на host-side.
-
-PVE Configuration принимает существующий template только если полный host-visible contract соответствует текущему baseline. Проверяются CPU/RAM, SCSI controller, system disk/storage/flags/minimum size, exact Cloud-Init volume `local-lvm:vm-9000-cloudinit` с `media=cdrom`, VirtIO network/bridge, boot order, QGA, console и protection. Exact Cloud-Init volume не позволяет обычному ISO/CD-ROM формально пройти contract.
-
-`template_guest_exec` нормализует plain CLI output и structured QGA output. Incomplete structured result (`pid` без завершения, `exited=0`), signal или ненулевой exitcode считается ошибкой; synchronous timeout не может быть принят за успешный stdout.
-
-Builder stage-файл `/var/lib/template-build/bootstrap-status` содержит только ASCII identifiers (`apt-metadata`, `qga-install`, `base-packages`, `services` и т. п.). Localized русские подписи формируются на PVE host и поэтому не проходят через QGA byte/string transport. Это устраняет mojibake в progress output независимо от обработки non-ASCII `guest-exec` data конкретной версией Proxmox/QEMU.
-
-Guest cleanup fail-closed: до `qm template` подтверждается отсутствие generic `debian`, machine-id, SSH host keys, `/root/.ssh`, build state и builder scripts. Незавершённая VM-сборщик сохраняется для диагностики.
 
 ## LXC appliance
 
-PVE Configuration сначала обнаруживает уже загруженный Debian 13 LXC template, затем пытается обновить `pveam` catalog.
-
-```text
-pveam update успешен
-→ использовать newest Debian 13
-→ скачать при необходимости
-→ удалить старые Debian 13 template caches
-
-pveam update временно недоступен + локальный Debian 13 есть
-→ WARNING
-→ использовать локальный template
-
-pveam update недоступен + локального Debian 13 нет
-→ STOP
-```
-
-Таким образом кратковременная недоступность appliance catalog не ломает rerun уже подготовленного host.
+PVE Configuration сначала обнаруживает уже загруженный Debian 13 LXC template, затем пытается обновить `pveam` catalog. При временной недоступности catalog локальный Debian 13 можно использовать повторно; при отсутствии и catalog, и local template выполняется STOP.
 
 ## Внешние версии
 
@@ -240,15 +235,7 @@ pveam update недоступен + локального Debian 13 нет
 → явная проверка результата
 ```
 
-Не являются обязательными общепроектными механизмами:
-
-```text
-snapshot.debian.org для всех пакетов
-exact-version pin каждого Debian package
-автоматический hold всех установленных версий
-```
-
-Такие механизмы добавляются только для конкретного компонента, если появляется практическая причина.
+Не являются обязательными общепроектными механизмами `snapshot.debian.org`, exact-version pin каждого Debian package и автоматический hold всех установленных версий. Они добавляются только для конкретного компонента при практической необходимости.
 
 ## CI
 
@@ -258,18 +245,19 @@ Repository checks должны проверять как минимум:
 - Python compilation;
 - `bash -n`;
 - ShellCheck с учётом sourced-module architecture;
-- production Cloud-Init renderer;
-- `cloud-init schema` итогового документа;
+- production Cloud-Init renderer и `cloud-init schema`;
 - отсутствие embedded `guest-status` helper;
 - точный ASCII stage-code contract builder-а;
-- template contract unit tests, включая ложный обычный CD-ROM;
+- template contract unit tests;
 - guest-exec result/timeout и local stage-label unit tests;
+- template smoke safety/state unit tests;
 - API token rollback unit tests;
-- негативный тест malformed guest directory;
+- source trust boundary test;
+- malformed guest directory negative test;
 - whitespace errors;
 - отсутствие legacy `scripts/pve/create-template.sh`.
 
-CI не заменяет реальный PVE integration test. После существенного изменения template guest assets по-прежнему требуется clean build + Full Clone smoke-test по принятой policy.
+CI не может эмулировать реальный Proxmox/QEMU runtime. Реальный Full Clone smoke теперь выполняется самой PVE Configuration: автоматически после новой сборки либо явно через `--smoke-test-template` для существующего template.
 
 ## Обязательные правила воспроизводимости
 
@@ -278,17 +266,16 @@ Project scripts должны:
 - проверять скачиваемые artefacts checksum/signature механизмами, если они доступны;
 - не хранить secrets в Git;
 - явно проверять результат установки;
-- фиксировать source revision с начала run;
-- не смешивать несколько Git revisions внутри одного configuration run;
-- не исполнять dirty worktree под именем чистого SHA;
-- не исполнять root orchestration из checkout, writable менее привилегированным user;
+- фиксировать source revision с начала run и не смешивать revisions;
+- не исполнять dirty или non-root-trusted source;
 - держать canonical Git credential root-only;
-- не делать молчаливый destructive overwrite локального drift;
-- использовать общий orchestration lock для операций над canonical runtime;
-- сохранять одноразовые credentials атомарно и откатывать только вновь созданные текущим run credentials при обычном failure/interruption;
-- для QGA progress telemetry передавать machine-readable ASCII identifiers, а localized presentation формировать host-side;
+- не делать молчаливый destructive overwrite local drift;
+- использовать общий orchestration lock;
+- сохранять одноразовые credentials атомарно и откатывать только вновь созданные текущим run credentials;
+- для QGA progress передавать ASCII identifiers, localized presentation формировать host-side;
+- оставлять failed smoke VM для диагностики и удалять её только после полного success;
+- сохранять smoke `pending` до подтверждённого real Full Clone lifecycle;
 - версионировать собственные contracts;
-- соблюдать security boundaries;
 - останавливать выполнение при неоднозначном или несовместимом state.
 
 ## Связанные документы
@@ -301,4 +288,4 @@ Project scripts должны:
 
 Главный принцип:
 
-> Не фиксировать внешние версии без практической необходимости, но явно версионировать собственные contracts, сохранять provenance и выполнять каждый configuration run из одного чистого root-trusted checkout одной точно определённой private revision.
+> Не фиксировать внешние версии без практической необходимости, но явно версионировать собственные contracts, сохранять provenance и выполнять каждый configuration run из одного чистого root-trusted checkout одной точно определённой private revision; новый template считается runtime-проверенным только после успешного Full Clone smoke-test.
