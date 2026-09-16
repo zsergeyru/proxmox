@@ -41,13 +41,57 @@ CHECKSUM_PATH="${IMAGE_DIR}/SHA512SUMS"
 SNIPPET_NAME="debian13-template-builder-${VMID}.yaml"
 SNIPPET_VOL="${SNIPPET_STORAGE}:snippets/${SNIPPET_NAME}"
 
-log() { printf '\n==> %s\n' "$*"; }
-die() { printf '\nОШИБКА: %s\n' "$*" >&2; exit 1; }
+if [[ -t 1 && -z "${NO_COLOR:-}" && "${TERM:-dumb}" != "dumb" ]]; then
+    C_RESET=$'\033[0m'
+    C_BOLD=$'\033[1m'
+    C_DIM=$'\033[2m'
+    C_BLUE=$'\033[1;34m'
+    C_GREEN=$'\033[1;32m'
+    C_YELLOW=$'\033[1;33m'
+    C_MAGENTA=$'\033[1;35m'
+    C_RED=$'\033[1;31m'
+    C_CYAN=$'\033[1;36m'
+else
+    C_RESET=''
+    C_BOLD=''
+    C_DIM=''
+    C_BLUE=''
+    C_GREEN=''
+    C_YELLOW=''
+    C_MAGENTA=''
+    C_RED=''
+    C_CYAN=''
+fi
+
+log() {
+    printf '\n%b==>%b %b%s%b\n' "$C_BLUE" "$C_RESET" "$C_BOLD" "$*" "$C_RESET"
+}
+
+ok() {
+    printf '%b[ОК]%b %s\n' "$C_GREEN" "$C_RESET" "$*"
+}
+
+wait_msg() {
+    printf '%b[ОЖИДАНИЕ]%b %s\n' "$C_YELLOW" "$C_RESET" "$*"
+}
+
+vm_stage() {
+    printf '%b[ЭТАП VM]%b %b%s%b\n' "$C_MAGENTA" "$C_RESET" "$C_BOLD" "$*" "$C_RESET"
+}
+
+info() {
+    printf '%b[ИНФО]%b %s\n' "$C_CYAN" "$C_RESET" "$*"
+}
+
+die() {
+    printf '\n%bОШИБКА:%b %s\n' "$C_RED" "$C_RESET" "$*" >&2
+    exit 1
+}
 
 on_error() {
     local rc=$?
-    printf '\nСоздание шаблона остановлено с кодом возврата %s.\n' "$rc" >&2
-    printf 'Временная VM-сборщик и её диски намеренно оставлены для диагностики.\n' >&2
+    printf '\n%bСоздание шаблона остановлено с кодом возврата %s.%b\n' "$C_RED" "$rc" "$C_RESET" >&2
+    printf '%bВременная VM-сборщик и её диски намеренно оставлены для диагностики.%b\n' "$C_YELLOW" "$C_RESET" >&2
     printf 'Ничего автоматически не удаляется.\n' >&2
     exit "$rc"
 }
@@ -83,15 +127,7 @@ wait_progress() {
     local vm_state
     vm_state="$(qm status "$VMID" 2>/dev/null | awk '{print $2}' || true)"
     [[ -n "$vm_state" ]] || vm_state="unknown"
-    printf '[ОЖИДАНИЕ] %s: %ss/%ss, VM=%s%s\n' "$phase" "$elapsed" "$limit" "$vm_state" "$detail"
-}
-
-guest_bootstrap_status() {
-    local out status
-    out="$(qm guest exec "$VMID" -- /bin/bash -lc 'if [[ -r /var/lib/template-build/bootstrap-status ]]; then printf TEMPLATE_STATUS=; cat /var/lib/template-build/bootstrap-status; fi' 2>/dev/null || true)"
-    status="$(grep -oE 'TEMPLATE_STATUS=[^"\\]+' <<<"$out" | head -1 || true)"
-    status="${status#TEMPLATE_STATUS=}"
-    printf '%s' "$status"
+    wait_msg "${phase}: ${elapsed}s/${limit}s, VM=${vm_state}${detail}"
 }
 
 wait_for_agent() {
@@ -101,11 +137,11 @@ wait_for_agent() {
     local next_report=$started
     while (( SECONDS < deadline )); do
         if qm agent "$VMID" ping >/dev/null 2>&1; then
-            printf '[ОК] %s доступен через %s с\n' "$phase" "$((SECONDS - started))"
+            ok "${phase} доступен через $((SECONDS - started)) с"
             return 0
         fi
         if (( SECONDS >= next_report )); then
-            wait_progress "$phase" "$started" "$WAIT_SECONDS" ', agent=нет ответа; гостевая ОС загружается/выполняет apt update и первичную установку agent'
+            wait_progress "$phase" "$started" "$WAIT_SECONDS" ', agent=нет ответа'
             next_report=$((SECONDS + WAIT_PROGRESS_SECONDS))
         fi
         sleep 5
@@ -113,29 +149,35 @@ wait_for_agent() {
     return 1
 }
 
+read_guest_bootstrap_status() {
+    local out
+    out="$(qm guest exec "$VMID" -- /bin/cat /var/lib/template-build/bootstrap-status 2>/dev/null || true)"
+    sed -n 's/.*"out-data":"\([^"]*\)".*/\1/p' <<<"$out" | sed 's/\\n$//' | head -1
+}
+
 wait_for_bootstrap() {
     local started=$SECONDS
     local deadline=$((started + WAIT_SECONDS))
     local next_report=$started
-    local out current_status last_status=''
+    local out status last_status=''
     while (( SECONDS < deadline )); do
         out="$(qm guest exec "$VMID" -- /bin/cat /var/lib/template-build/bootstrap-complete 2>/dev/null || true)"
         if grep -q 'BOOTSTRAP_OK' <<<"$out"; then
-            printf '[ОК] Начальная настройка гостя завершена через %s с\n' "$((SECONDS - started))"
+            ok "Начальная настройка гостя завершена через $((SECONDS - started)) с"
             return 0
         fi
 
-        current_status="$(guest_bootstrap_status)"
-        if [[ -n "$current_status" && "$current_status" != "$last_status" ]]; then
-            printf '[ЭТАП VM] %s\n' "$current_status"
-            last_status="$current_status"
+        status="$(read_guest_bootstrap_status || true)"
+        if [[ -n "$status" && "$status" != "$last_status" ]]; then
+            vm_stage "$status"
+            last_status="$status"
         fi
 
         if (( SECONDS >= next_report )); then
-            if [[ -n "$current_status" ]]; then
-                wait_progress "Начальная настройка гостя" "$started" "$WAIT_SECONDS" ", QGA=ok; этап=${current_status}"
+            if [[ -n "$status" ]]; then
+                wait_progress "Начальная настройка гостя" "$started" "$WAIT_SECONDS" ", QGA=ok; этап=${status}"
             else
-                wait_progress "Начальная настройка гостя" "$started" "$WAIT_SECONDS" ', QGA=ok; status-файл пока недоступен'
+                wait_progress "Начальная настройка гостя" "$started" "$WAIT_SECONDS" ', QGA=ok; ожидается status от template-bootstrap'
             fi
             next_report=$((SECONDS + WAIT_PROGRESS_SECONDS))
         fi
@@ -152,7 +194,7 @@ wait_for_cloud_init() {
     while (( SECONDS < deadline )); do
         out="$(qm guest exec "$VMID" -- /bin/bash -lc 'cloud-init status' 2>/dev/null || true)"
         if grep -q 'status: done' <<<"$out"; then
-            printf '[ОК] Cloud-Init завершён через %s с\n' "$((SECONDS - started))"
+            ok "Cloud-Init завершён через $((SECONDS - started)) с"
             return 0
         fi
         if grep -q 'status: error' <<<"$out"; then
@@ -177,7 +219,7 @@ wait_for_new_boot_id() {
     while (( SECONDS < deadline )); do
         current="$(qm guest exec "$VMID" -- /bin/cat /proc/sys/kernel/random/boot_id 2>/dev/null || true)"
         if [[ -n "$current" && "$current" != "$previous" ]]; then
-            printf '[ОК] Проверочная перезагрузка завершена через %s с\n' "$((SECONDS - started))"
+            ok "Проверочная перезагрузка завершена через $((SECONDS - started)) с"
             return 0
         fi
         if (( SECONDS >= next_report )); then
@@ -196,7 +238,7 @@ wait_for_stopped() {
     local next_report=$started
     while (( SECONDS < deadline )); do
         if [[ "$(qm status "$VMID" | awk '{print $2}')" == "stopped" ]]; then
-            printf '[ОК] VM-сборщик выключена через %s с\n' "$((SECONDS - started))"
+            ok "VM-сборщик выключена через $((SECONDS - started)) с"
             return 0
         fi
         if (( SECONDS >= next_report )); then
@@ -317,21 +359,21 @@ write_files:
       STATUS_DIR=/var/lib/template-build
       STATUS_FILE=${STATUS_DIR}/bootstrap-status
       mkdir -p "$STATUS_DIR"
-
-      set_status() {
-        printf '%s\n' "$1" >"$STATUS_FILE"
+      status() {
+        printf '%s\n' "$*" >"$STATUS_FILE"
       }
 
-      set_status 'APT update — обновление индексов пакетов'
+      status 'APT metadata — обновление списка пакетов'
       apt-get update
 
-      set_status 'QEMU Guest Agent — первичная установка'
+      status 'QEMU Guest Agent — ранняя установка канала наблюдения'
       apt-get install -y --no-install-recommends qemu-guest-agent
       systemctl enable --now qemu-guest-agent
-      set_status 'APT full-upgrade — полное обновление Debian'
+
+      status 'APT full-upgrade — полное обновление Debian'
       apt-get -y full-upgrade
 
-      set_status 'Базовые пакеты — установка инструментов и служб'
+      status 'Базовые пакеты — установка инструментов и служб'
       apt-get install -y --no-install-recommends \
         openssh-server sudo locales cloud-guest-utils systemd-timesyncd \
         linux-image-amd64 console-setup console-setup-linux \
@@ -342,7 +384,7 @@ write_files:
         dnsutils iproute2 iputils-ping net-tools \
         cron logrotate
 
-      set_status 'Консоль — настройка шрифта и tty'
+      status 'Консоль — настройка шрифта и tty'
       cat >/etc/default/console-setup <<'EOF'
       ACTIVE_CONSOLES="/dev/tty[1-6]"
       CHARMAP="UTF-8"
@@ -353,7 +395,7 @@ write_files:
       EOF
       setupcon --save-only
 
-      set_status 'Ядро — переход с cloud kernel на linux-image-amd64'
+      status 'Ядро — переход с cloud kernel на linux-image-amd64'
       mapfile -t cloud_kernel_packages < <(
         dpkg-query -W -f='${db:Status-Abbrev} ${binary:Package}\n' 'linux-image-*cloud-amd64' 2>/dev/null \
           | awk '$1 == "ii" {print $2}'
@@ -370,7 +412,7 @@ write_files:
       fi
       compgen -G '/boot/vmlinuz-*-amd64' >/dev/null
 
-      set_status 'Locale/time — локаль, timezone и синхронизация времени'
+      status 'Locale/time — локаль, timezone и синхронизация времени'
       sed -i 's/^# *en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen
       locale-gen en_US.UTF-8
       update-locale LANG=en_US.UTF-8
@@ -378,9 +420,9 @@ write_files:
       systemctl enable --now systemd-timesyncd.service
       timedatectl set-ntp true
 
-      set_status 'Сервисы — SSH, QGA, консоли и fstrim'
       passwd -l root >/dev/null
 
+      status 'Сервисы — SSH, QGA, консоли и fstrim'
       systemctl daemon-reload
       systemctl enable --now qemu-guest-agent
       systemctl enable --now ssh
@@ -390,7 +432,7 @@ write_files:
       systemctl restart serial-getty@ttyS0.service
       systemctl enable --now fstrim.timer
 
-      set_status 'Security checks — проверка sshd и root key-only policy'
+      status 'Security checks — проверка sshd и root key-only policy'
       /usr/sbin/sshd -t
       sshd_effective="$(/usr/sbin/sshd -T -C user=root,host=localhost,addr=127.0.0.1)"
       grep -Eq '^permitrootlogin (prohibit-password|without-password)$' <<<"$sshd_effective"
@@ -400,7 +442,7 @@ write_files:
       grep -q '^pubkeyauthentication yes$' <<<"$sshd_effective"
       passwd -S root | grep -q ' L '
 
-      set_status 'Метаданные — запись информации о template'
+      status 'Метаданные — запись информации о template'
       cat >/etc/vm-template-info <<EOF
       Шаблон: tpl-debian13
       Версия-шаблона: __TEMPLATE_VERSION__
@@ -417,8 +459,8 @@ write_files:
       Дата-сборки: $(date -u +%F)
       EOF
 
-      set_status 'Готово — начальная настройка завершена'
-      printf 'BOOTSTRAP_OK\n' >"$STATUS_DIR/bootstrap-complete"
+      status 'Готово — начальная настройка завершена'
+      printf 'BOOTSTRAP_OK\n' >${STATUS_DIR}/bootstrap-complete
 
   - path: /usr/local/sbin/template-finalize
     owner: root:root
@@ -494,10 +536,11 @@ qm set "$VMID" --cicustom "user=${SNIPPET_VOL}"
 log "Запуск временной VM-сборщика"
 qm start "$VMID"
 
-log "Ожидание первого QEMU Guest Agent (сначала Cloud-Init делает apt update и ставит минимальный qemu-guest-agent)"
+log "Ожидание первого QEMU Guest Agent"
+info "Сначала Cloud-Init выполняет apt update и раннюю установку qemu-guest-agent; затем host сможет видеть реальные внутренние этапы сборки."
 wait_for_agent "QEMU Guest Agent" || die "QEMU Guest Agent не стал доступен за ${WAIT_SECONDS} секунд"
 
-log "Ожидание завершения начальной настройки гостя с отображением реального этапа внутри VM"
+log "Ожидание завершения начальной настройки гостя"
 wait_for_bootstrap || die "Начальная настройка гостя не завершилась за ${WAIT_SECONDS} секунд. Проверьте консоль VM ${VMID} и журналы cloud-init."
 
 log "Ожидание финальной стадии Cloud-Init"
@@ -534,10 +577,12 @@ KERNEL_VERSION="${KERNEL_TOKEN#*=}"
 FRAMEBUFFER_SIZE="${FRAMEBUFFER_TOKEN#*=}"
 [[ -n "$KERNEL_VERSION" ]] || die "Проверенная версия ядра не была получена"
 [[ -n "$FRAMEBUFFER_SIZE" ]] || die "Проверенный размер framebuffer не был получен"
+ok "Проверки ядра и консолей пройдены: kernel=${KERNEL_VERSION}, framebuffer=${FRAMEBUFFER_SIZE}"
 
 log "Финальная очистка внутри гостевой системы"
 FINALIZE_OUTPUT="$(qm guest exec "$VMID" -- /usr/local/sbin/template-finalize)"
 grep -q 'FINALIZE_OK' <<<"$FINALIZE_OUTPUT" || die "Финализация гостя не сообщила об успешном завершении"
+ok "Финальная очистка гостевой системы завершена"
 
 log "Выключение VM-сборщика"
 qm shutdown "$VMID" --timeout 180 || true
@@ -582,10 +627,10 @@ fi
 
 trap - ERR
 
+printf '\n%b%s%b\n' "$C_GREEN" '════════════════════════════════════════════════════════════' "$C_RESET"
+printf '%b%bШаблон успешно создан%b\n' "$C_GREEN" "$C_BOLD" "$C_RESET"
+printf '%b%s%b\n\n' "$C_GREEN" '════════════════════════════════════════════════════════════' "$C_RESET"
 cat <<EOF
-
-Шаблон успешно создан.
-
 VMID:              ${VMID}
 Имя:               ${TEMPLATE_NAME}
 Версия:            ${TEMPLATE_VERSION}
