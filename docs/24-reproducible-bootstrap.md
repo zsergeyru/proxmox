@@ -2,9 +2,53 @@
 
 ## Статус
 
-Архитектура bootstrap/deploy сохраняется простой: мы явно версионируем собственные project contracts, но не фиксируем каждую внешнюю stable-версию без практической необходимости.
+Архитектура остаётся простой: project-owned contracts версионируются явно, внешние stable-компоненты не pin'ятся без практической необходимости.
 
-## Template
+Текущие версии:
+
+```text
+Public Bootstrap:        PUBLIC_BOOTSTRAP_VERSION=6
+PVE Configuration:      PVE_CONFIGURATION_VERSION=14
+Debian VM template:     Template-Version 6
+```
+
+## Public Bootstrap
+
+Канонический entrypoint:
+
+```text
+zsergeyru/proxmox-bootstrap/bootstrap-pve.sh
+```
+
+`PUBLIC_BOOTSTRAP_VERSION` повышается, когда меняется поведение публичной точки входа: first-run bootstrap, handoff, permanent refresh, marker contract или передаваемые параметры.
+
+Public Bootstrap не содержит private infrastructure policy и не pin'ит private revision заранее: при штатном запуске используется текущая ветка `main`, после чего фиксируется фактически применённый commit.
+
+## PVE Configuration
+
+Канонический entrypoint:
+
+```text
+zsergeyru/proxmox/scripts/pve/setup/configure-pve.sh
+```
+
+`PVE_CONFIGURATION_VERSION` повышается, когда меняется contract host configuration, например:
+
+- runtime layout;
+- credentials model;
+- PVE roles/ACL;
+- storage requirements;
+- template requirements;
+- state/reporting schema;
+- поведение rerun/safety checks.
+
+Фактически применённая private revision записывается в:
+
+```text
+/var/lib/proxmox-deployer/state/last-revision
+```
+
+## Debian VM template
 
 Активный builder:
 
@@ -30,81 +74,45 @@ Template-Version 6
 template-version=6
 ```
 
-Это позволяет PVE Configuration отличить совместимый root-only template от старых baseline.
+`Template-Version` — версия нашего project contract, а не pin внешнего Debian build.
 
-## Совместимость template
+PVE Configuration принимает существующий template только если он соответствует текущему contract. Несовместимый protected VMID `9000` автоматически не удаляется и не заменяется.
 
-`Template-Version` — версия project contract, а не pin внешнего Debian build.
+## Внешние версии
 
-```text
-v4
-→ management user ops
-
-v6
-→ management user root
-→ root password locked
-→ root SSH only by public key
-```
-
-PVE Configuration не мигрирует и не перезаписывает защищённый старый `9000` автоматически. Несовместимая версия вызывает STOP и отдельную осознанную пересборку.
-
-## Версии project-owned компонентов
-
-Public entrypoint:
-
-```text
-PUBLIC_BOOTSTRAP_VERSION=5
-zsergeyru/proxmox-bootstrap/bootstrap-pve.sh
-```
-
-Private host configuration:
-
-```text
-PVE_CONFIGURATION_VERSION=13
-scripts/pve/setup/configure-pve.sh
-```
-
-Версии повышаются, когда меняется контракт или поведение компонента. Они не означают номер последовательного «этапа».
-
-Legacy `STAGE0_VERSION` и `BOOTSTRAP_VERSION` больше не являются каноническими version names; старые paths/marker поддерживаются только как compatibility layer.
-
-Для внешних stable components принцип:
+Для внешних stable components базовый принцип:
 
 ```text
 обычная установка
-→ актуальные stable версии
-→ штатная checksum/signature verification
-→ проверка результата
+→ актуальная stable версия из выбранного trusted channel
+→ штатная checksum/signature verification, если доступна
+→ явная проверка результата
 ```
 
-Если конкретному компоненту позже потребуется pin/recovery baseline, он добавляется точечно.
-
-## Что не является обязательным
+Не являются обязательными общепроектными механизмами:
 
 ```text
-BOOTSTRAP_MODE=normal/recovery
-общий bootstrap-versions.env
-immutable BOOTSTRAP_REF для каждого запуска
-Docker exact-version + apt-mark hold
-Hermes exact commit pin
-Proximo exact package pin
-Debian APT snapshot
+snapshot.debian.org для всех пакетов
+общий immutable ref для каждого bootstrap run
+exact-version pin каждого Debian package
+общий recovery mode
+автоматический hold всех установленных версий
 ```
 
-Эти механизмы могут использоваться только при появлении практической необходимости.
+Такие механизмы добавляются только для конкретного компонента, если появляется практическая причина.
 
-## Обязательные правила
+## Обязательные правила воспроизводимости
 
 Project scripts должны:
 
 - проверять скачиваемые artefacts checksum/signature механизмами, если они доступны;
 - не хранить secrets в Git;
 - явно проверять результат установки;
+- фиксировать фактически применённую private revision;
+- версионировать собственные contracts;
 - не делать молчаливый destructive overwrite;
-- фиксировать достаточную provenance-информацию;
-- проверять compatibility project contracts, например Template-Version 6;
 - соблюдать security boundaries;
-- сохранять совместимость старых entrypoint только через тонкие wrappers, а не дублировать реализацию.
+- останавливать выполнение при неоднозначном или несовместимом state.
 
 ## Связанные документы
 
@@ -114,6 +122,6 @@ Project scripts должны:
 - [`../templates/debian13/README.md`](../templates/debian13/README.md);
 - [`../templates/debian13/build-policy.md`](../templates/debian13/build-policy.md).
 
-## Главный принцип
+Главный принцип:
 
-> Не фиксировать внешние версии без практической необходимости, но явно версионировать собственные contracts, когда изменение влияет на совместимость и безопасность deploy.
+> Не фиксировать внешние версии без практической необходимости, но явно версионировать собственные contracts и сохранять provenance фактически применённого состояния.
