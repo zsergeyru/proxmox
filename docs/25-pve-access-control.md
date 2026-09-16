@@ -1,12 +1,12 @@
-# PVE access control
+# Управление доступом PVE
 
-**Type:** Specification  
-**Status:** Active  
-**Source of truth:** Yes — для PVE identities, project roles, privilege sets, ACL boundary и bootstrap reconciliation.
+**Тип:** Спецификация  
+**Статус:** Действующий  
+**Основной источник:** Да — для учётных записей PVE, ролей проекта, наборов привилегий, границ ACL и правил повторного применения настроек доступа.
 
-Короткое объяснение operational flow находится в [`26-deploy-guest-and-agent-access.md`](26-deploy-guest-and-agent-access.md). Здесь фиксируется только технический контракт Proxmox access control.
+Короткое объяснение рабочей схемы находится в [`26-deploy-guest-and-agent-access.md`](26-deploy-guest-and-agent-access.md). Здесь фиксируется только точная техническая модель доступа Proxmox.
 
-## 1. Актуальные identities
+## 1. Актуальные учётные записи
 
 ```text
 deployer@pve!host-deploy
@@ -17,69 +17,69 @@ ai-agent@pve!infra
 
 ```text
 deployer@pve!host-deploy
-→ человек / host-side tooling / deploy-guest
-→ guest-level scope: /vms
+→ человек / инструменты на стороне PVE-хоста / deploy-guest
+→ область гостевых систем: /vms
 
 ai-agent@pve!infra
 → AI Control / Proximo
-→ guest-level write-zone: /pool/managed
-→ отдельный clone access к template 9000
+→ зона изменения гостевых систем: /pool/managed
+→ отдельное право клонирования шаблона 9000
 ```
 
-ADR в `guests/320-ai-control/` относятся к bootstrap/legacy-контуру `320` и не являются source of truth для этой модели.
+ADR в `guests/320-ai-control/` относятся к временному контуру `320` и не являются основным источником для этой модели.
 
-## 2. Security boundaries
+## 2. Границы безопасности
 
-### Host-side deployer
+### Средство развёртывания на PVE-хосте
 
-`deployer@pve!host-deploy` получает guest-level права на:
+`deployer@pve!host-deploy` получает права уровня гостевых систем на:
 
 ```text
 /vms
 ```
 
-с наследованием на все VM/LXC. Это позволяет `deploy-guest` работать с обычными managed guests и со специальными объектами вне `managed`.
+с наследованием на все VM/LXC. Это позволяет `deploy-guest` работать и с обычными управляемыми гостями, и со специальными объектами вне `managed`.
 
-Широкий `/vms` scope не означает administrative access к самому PVE host.
+Широкая область `/vms` не означает административный доступ к самому PVE-хосту.
 
-### AI automation
+### Автоматизация AI
 
-Основная write-zone AI:
+Основная зона, которую AI может изменять:
 
 ```text
 /pool/managed
 ```
 
 ```text
-guest в managed
-→ разрешённые guest-level AI operations доступны
+гость в managed
+→ разрешённые операции AI уровня VM/LXC доступны
 
-guest вне managed
-→ обычный AI guest-management ACL на него не распространяется
+гость вне managed
+→ обычные ACL AI для управления гостевыми системами на него не распространяются
 ```
 
-Новый обычный guest, создаваемый AI, должен сразу создаваться или клонироваться в `managed`.
+Новая обычная гостевая система, создаваемая AI, должна сразу создаваться или клонироваться в `managed`.
 
-PVE pool membership и direct SSH внутри guest — независимые access mechanisms.
+Членство в пуле PVE и прямой SSH-доступ внутрь гостевой системы — независимые механизмы доступа.
 
-## 3. Protected objects и template 9000
+## 3. Защищённые объекты и шаблон 9000
 
-По умолчанию не включать в обычную AI write-zone:
+По умолчанию не включать в обычную зону изменения AI:
 
 ```text
-100   production HAOS
-301   AI control plane
-320   bootstrap/legacy AI control
-9000  protected template
+100   рабочий HAOS
+301   основной AI control plane
+320   временный/устаревающий AI control
+9000  защищённый шаблон
 ```
 
 и другие объекты, для которых профильная документация задаёт исключение.
 
-Template `9000` остаётся вне `managed`. AI получает к нему только audit/clone access. Host-side deployer видит template через `/vms`.
+Шаблон `9000` остаётся вне `managed`. AI получает к нему только права просмотра и клонирования. `deployer@pve!host-deploy` видит шаблон через `/vms`.
 
-`protection=1` является дополнительным механизмом защиты и не заменяет ACL boundary.
+`protection=1` является дополнительным механизмом защиты и не заменяет ACL.
 
-## 4. Project roles
+## 4. Роли проекта
 
 ### `AICloneSource`
 
@@ -88,11 +88,11 @@ VM.Audit
 VM.Clone
 ```
 
-Назначение: использовать разрешённый guest/template как clone source. Основной объект — `/vms/9000`.
+Назначение: использовать разрешённую VM или шаблон как источник клонирования. Основной объект — `/vms/9000`.
 
 ### `AIManagedGuest`
 
-Минимальный обязательный privilege set:
+Минимальный обязательный набор привилегий:
 
 ```text
 VM.Allocate
@@ -114,7 +114,9 @@ VM.Snapshot
 VM.Snapshot.Rollback
 ```
 
-Область определяется ACL path:
+Имена привилегий оставлены без перевода, поскольку это точные идентификаторы Proxmox.
+
+Область определяется путём ACL:
 
 ```text
 deployer@pve!host-deploy
@@ -124,7 +126,7 @@ ai-agent@pve!infra
 → AIManagedGuest на /pool/managed
 ```
 
-`VM.Console` фактически даёт административный доступ внутрь guest через Proxmox Console и выдаётся только доверенным project identities.
+`VM.Console` фактически даёт административный доступ внутрь гостевой системы через консоль Proxmox и выдаётся только доверенным учётным записям проекта.
 
 ### `AINetworkUse`
 
@@ -132,7 +134,7 @@ ai-agent@pve!infra
 SDN.Use
 ```
 
-Разрешает использовать авторизованную guest network/bridge. Не даёт права администрировать host network или SDN infrastructure.
+Разрешает использовать разрешённую гостевую сеть или мост. Не даёт права администрировать сеть хоста или инфраструктуру SDN.
 
 ### `AIStorage`
 
@@ -141,7 +143,7 @@ Datastore.AllocateSpace
 Datastore.Audit
 ```
 
-Разрешает использовать авторизованный storage для guest disks/clone. Не даёт права менять storage definitions.
+Разрешает использовать разрешённое хранилище для дисков и клонирования. Не даёт права менять определения хранилищ.
 
 ### `AIManagedPool`
 
@@ -150,9 +152,9 @@ Pool.Allocate
 Pool.Audit
 ```
 
-Разрешает работать с pool `managed` и membership объектов в пределах Proxmox RBAC.
+Разрешает работать с пулом `managed` и членством объектов в пределах RBAC Proxmox.
 
-## 5. Каноническая ACL matrix
+## 5. Основная матрица ACL
 
 ### `deployer@pve!host-deploy`
 
@@ -163,14 +165,14 @@ Pool.Audit
 /pool/managed
 → AIManagedPool
 
-authorized storage
+разрешённое хранилище
 → AIStorage
 
-authorized network
+разрешённая сеть
 → AINetworkUse
 ```
 
-Отдельный `AICloneSource` на `/vms/9000` deployer не нужен: `VM.Audit` и `VM.Clone` уже входят в `AIManagedGuest` на `/vms`.
+Отдельная роль `AICloneSource` на `/vms/9000` этому токену не нужна: `VM.Audit` и `VM.Clone` уже входят в `AIManagedGuest` на `/vms`.
 
 ### `ai-agent@pve!infra`
 
@@ -181,163 +183,163 @@ authorized network
 /vms/9000
 → AICloneSource
 
-authorized storage
+разрешённое хранилище
 → AIStorage
 
-authorized network
+разрешённая сеть
 → AINetworkUse
 ```
 
-AI identity не получает обычный guest-management ACL на весь `/vms` или `/`.
+Учётная запись AI не получает обычные права управления гостевыми системами на весь `/vms` или `/`.
 
-## 6. Разрешённый AI lifecycle
+## 6. Разрешённый жизненный цикл для AI
 
-Внутри разрешённой зоны AI может выполнять guest-level операции, поддерживаемые Proximo и выданными privileges:
+Внутри разрешённой зоны AI может выполнять операции уровня VM/LXC, поддерживаемые Proximo и выданными привилегиями:
 
-- create VM/LXC;
-- clone;
-- CPU/RAM/disk/network/Cloud-Init configuration;
-- start/stop/reboot/shutdown;
-- snapshot и rollback;
-- backup;
-- guest configuration changes;
-- delete;
-- status/diagnostics и Guest Agent audit.
+- создавать VM/LXC;
+- клонировать;
+- менять CPU, RAM, диски, сеть и Cloud-Init;
+- запускать, останавливать, перезагружать и выключать;
+- создавать снимки и откатываться к ним;
+- запускать резервное копирование;
+- менять параметры гостевой системы;
+- удалять;
+- получать состояние, диагностику и сведения Guest Agent.
 
-Нормальный flow:
+Обычная схема:
 
 ```text
-AI agent
+AI-агент
 → Proximo
 → ai-agent@pve!infra
-→ create/clone сразу с pool=managed
-→ дальнейшее управление в managed
+→ создать или клонировать сразу в pool=managed
+→ дальше управлять объектом внутри managed
 ```
 
-AI не обязан использовать host-side `deploy-guest` для обычного guest lifecycle.
+AI не обязан использовать `deploy-guest` на PVE-хосте для обычного жизненного цикла гостевых систем.
 
-## 7. Что project identities не администрируют
+## 7. Что учётные записи проекта не администрируют
 
 Без отдельного решения не выдавать им права на:
 
-- PVE users/groups/realms;
-- roles, ACL и API-token administration;
-- host network, physical NIC, routes;
-- изменение storage definitions;
-- SDN infrastructure administration;
-- repository/update policy;
-- certificates/ACME;
-- firewall самого PVE;
-- reboot/shutdown физического PVE;
-- самостоятельное расширение собственного уровня доступа.
+- пользователей, группы и realms PVE;
+- роли, ACL и администрирование API-токенов;
+- сеть хоста, физические интерфейсы и маршруты;
+- изменение определений хранилищ;
+- администрирование инфраструктуры SDN;
+- репозитории и правила обновлений;
+- сертификаты и ACME;
+- межсетевой экран самого PVE;
+- перезагрузку и выключение физического PVE;
+- самостоятельное расширение собственных прав.
 
-Широкий guest-level scope deployer не превращает его в host administrator.
+Широкие права уровня гостевых систем у `deployer@pve!host-deploy` не превращают его в администратора хоста.
 
-## 8. Bootstrap reconciliation
+## 8. Повторное применение настроек доступа
 
-Project RBAC применяется **additive-only**.
+RBAC проекта применяется **только с добавлением недостающего**, без автоматического сужения существующих прав.
 
-### Roles
+### Роли
 
 ```text
 роль отсутствует
-→ создать с обязательным privilege set
+→ создать с обязательным набором привилегий
 
-роль существует и required privileges присутствуют
+роль существует и все обязательные привилегии присутствуют
 → оставить как есть
 
-роль существует, required privileges неполны
-→ вычислить missing privileges
-→ append только missing set
+роль существует, но часть обязательных привилегий отсутствует
+→ вычислить недостающие привилегии
+→ добавить только их
 → повторно проверить
 ```
 
-Используется семантика `role modify --append 1`. Дополнительные существующие privileges автоматически не удаляются.
+Используется семантика `role modify --append 1`. Дополнительные существующие привилегии автоматически не удаляются.
 
-### API tokens
+### API-токены
 
-Новые project tokens создаются с:
+Новые токены проекта создаются с:
 
 ```text
 privsep=1
 ```
 
-Существующий `privsep=1` не пересоздаётся и его secret не меняется.
+Существующий `privsep=1` не пересоздаётся, его секрет не меняется.
 
 Существующий `privsep=0` автоматически не переводится на `privsep=1`:
 
 ```text
 privsep=0
-→ WARNING
-→ token оставить без изменения
-→ desired token ACL можно подготовить
+→ предупреждение
+→ токен оставить без изменения
+→ требуемые ACL токена можно подготовить
 ```
 
 Переход на `privsep=1` выполняется отдельным осознанным действием после проверки текущих потребителей.
 
-Если token существует, но canonical local secret потерян:
+Если токен существует, но основной локальный секрет потерян:
 
 ```text
-→ STOP
-→ требуется явное recovery/rotation решение
+→ остановиться
+→ требуется явное решение по восстановлению или смене токена
 ```
 
-Bootstrap не удаляет и не пересоздаёт такой token молча.
+Первоначальная настройка не удаляет и не пересоздаёт такой токен молча.
 
-Детали безопасного сохранения нового one-time secret и rollback описаны в [`24-reproducible-bootstrap.md`](24-reproducible-bootstrap.md).
+Правила безопасного сохранения нового одноразового секрета и отката описаны в [`24-reproducible-bootstrap.md`](24-reproducible-bootstrap.md).
 
 ### ACL
 
 ```text
-required ACL существует
+обязательная ACL существует
 → оставить
 
-required ACL отсутствует
+обязательная ACL отсутствует
 → добавить
 
-дополнительные legacy ACL существуют
+дополнительные старые ACL существуют
 → не удалять автоматически
-→ при необходимости warning/report
+→ при необходимости показать предупреждение или отчёт
 ```
 
-Сужение roles/ACL выполняется только отдельной операцией после проверки существующих потребителей.
+Сужение ролей и ACL выполняется только отдельной операцией после проверки существующих потребителей.
 
 ## 9. Проверка результата
 
-После bootstrap проверяются не только записи конфигурации, но и effective permissions:
+После настройки проверяются не только записи конфигурации, но и фактические права:
 
 ```text
-project role содержит required privileges
-required ACL существуют
-API token существует
-canonical local credential доступен ожидаемому consumer
-pveum user token permissions показывает ожидаемый scope
-реальный API request проходит authentication
+роль проекта содержит обязательные привилегии
+обязательные ACL существуют
+API-токен существует
+локальные учётные данные доступны ожидаемому потребителю
+pveum user token permissions показывает ожидаемую область
+реальный API-запрос проходит аутентификацию
 ```
 
-Для AI дополнительно проверяется boundary:
+Для AI дополнительно проверяется граница:
 
 ```text
-managed guest
-→ разрешённые guest-level operations доступны
+гость в managed
+→ разрешённые операции уровня VM/LXC доступны
 
-protected guest вне managed
-→ обычные AI guest-management operations недоступны
+защищённый гость вне managed
+→ обычные операции AI по управлению гостем недоступны
 
-template 9000
-→ audit/clone доступен
-→ обычный AI write access отсутствует
+шаблон 9000
+→ просмотр и клонирование доступны
+→ обычное изменение AI запрещено
 ```
 
 ## 10. Связанные документы
 
-- [`26-deploy-guest-and-agent-access.md`](26-deploy-guest-and-agent-access.md) — короткая схема участников и operational flow;
-- [`21-pve-filesystem-layout.md`](21-pve-filesystem-layout.md) — filesystem/credential ownership на PVE;
-- [`23-security.md`](23-security.md) — общие security invariants;
-- [`30-guest-manifest.md`](30-guest-manifest.md) — desired state VM/LXC;
-- [`33-guest-bootstrap-and-provisioning.md`](33-guest-bootstrap-and-provisioning.md) — management readiness и provisioning;
-- [`50-ai-control.md`](50-ai-control.md) — AI Control architecture.
+- [`26-deploy-guest-and-agent-access.md`](26-deploy-guest-and-agent-access.md) — короткая схема участников и рабочих потоков;
+- [`21-pve-filesystem-layout.md`](21-pve-filesystem-layout.md) — файловая структура и владельцы учётных данных на PVE;
+- [`23-security.md`](23-security.md) — общие правила безопасности;
+- [`30-guest-manifest.md`](30-guest-manifest.md) — требуемое состояние VM/LXC;
+- [`33-guest-bootstrap-and-provisioning.md`](33-guest-bootstrap-and-provisioning.md) — готовность к управлению и дальнейшая настройка;
+- [`50-ai-control.md`](50-ai-control.md) — архитектура AI Control.
 
 Главный технический принцип:
 
-> `deployer@pve!host-deploy` — host-side guest-level identity на `/vms`; `ai-agent@pve!infra` — отдельная AI identity с write-zone `/pool/managed` и ограниченным clone access к template `9000`. Bootstrap расширяет project roles/ACL только до требуемого минимума и автоматически не сужает существующий доступ.
+> `deployer@pve!host-deploy` — отдельная учётная запись для управления гостевыми системами на `/vms`; `ai-agent@pve!infra` — отдельная учётная запись AI с зоной изменения `/pool/managed` и ограниченным правом клонировать шаблон `9000`. Автоматика добавляет только недостающие роли и ACL и не сужает существующий доступ без отдельного решения.
