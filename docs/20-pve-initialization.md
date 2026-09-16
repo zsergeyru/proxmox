@@ -7,14 +7,14 @@ Bootstrap разделён на две стадии:
 ```text
 Stage 0 — PUBLIC
 zsergeyru/proxmox-bootstrap/init-pve.sh
-STAGE0_VERSION=3
+STAGE0_VERSION=4
 
 Stage 1 — PRIVATE
 zsergeyru/proxmox/scripts/pve/bootstrap/init-pve.sh
 BOOTSTRAP_VERSION=12
 ```
 
-Stage 0 — минимальный zero-day loader. Полная инфраструктурная логика находится только в private Stage 1.
+Stage 0 — минимальный zero-day loader при первом запуске и безопасный updater/handoff при последующих запусках. Полная инфраструктурная логика находится только в private Stage 1.
 
 ## 1. Исходное состояние
 
@@ -36,7 +36,9 @@ Stage 0 — минимальный zero-day loader. Полная инфраст�
 zsergeyru/proxmox-bootstrap/init-pve.sh
 ```
 
-Назначение Stage 0:
+### Первый запуск
+
+Назначение Stage 0 при отсутствии `stage0-complete`:
 
 ```text
 проверить root + Proxmox
@@ -85,6 +87,47 @@ Allow write access = OFF
 ```
 
 После подтверждения Stage 0 повторно проверяет доступ и продолжает тот же run. Private key не передаётся через Git.
+
+### Повторный запуск после stage0-complete
+
+Начиная с Public Stage 0 v4 повторный запуск той же curl-команды не завершается сразу и не создаёт новый keypair.
+
+Вместо этого public entrypoint использует уже созданную private Stage 1 постоянную инфраструктуру:
+
+```text
+Linux user pvedeploy
+/etc/proxmox-deployer/ssh/github_proxmox_repo_ed25519
+/etc/proxmox-deployer/ssh/config
+/etc/proxmox-deployer/ssh/known_hosts
+/var/lib/proxmox-deployer/repo
+```
+
+Алгоритм:
+
+```text
+проверить постоянный runtime
+→ проверить origin canonical checkout
+→ проверить read-only доступ к zsergeyru/proxmox/main
+→ fetch main
+→ reset canonical checkout на FETCH_HEAD
+→ clean project checkout
+→ проверить наличие private init
+→ запустить уже обновлённую private Stage 1
+```
+
+Git-команды выполняются от имени `pvedeploy`. Public bootstrap не создаёт новый постоянный Deploy Key, не ротирует credential и не делает новый clone при повреждённой permanent infrastructure: такой случай приводит к STOP и явному recovery.
+
+Единая штатная команда первого и последующих запусков:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/zsergeyru/proxmox-bootstrap/main/init-pve.sh | bash
+```
+
+С полным обновлением системы:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/zsergeyru/proxmox-bootstrap/main/init-pve.sh | bash -s -- --update-system
+```
 
 ## 3. Private Stage 1
 
@@ -535,7 +578,7 @@ Stage 1 v12 записывает также expected `template_version: 6`.
 
 ## 22. Повторный запуск и safety
 
-Stage 1 использует exclusive `flock` и рассчитана на rerun.
+Штатный повторный запуск начинается с public entrypoint: он сначала обновляет canonical private checkout, затем запускает уже свежую Stage 1. Stage 1 использует собственный exclusive `flock` и рассчитана на rerun.
 
 Автоматически исправляются только однозначные безопасные вещи. Требуют STOP и отдельного решения:
 
@@ -548,4 +591,4 @@ Stage 1 использует exclusive `flock` и рассчитана на reru
 
 Главный принцип:
 
-> Stage 0 только получает private source of truth. Stage 1 воспроизводимо настраивает host, но не выполняет молчаливые destructive migrations credentials или protected template.
+> Public Stage 0 создаёт initial credential/runtime только при zero-day bootstrap. После `stage0-complete` тот же public entrypoint безопасно обновляет проверенный private source of truth и запускает свежую Stage 1; сама Stage 1 воспроизводимо настраивает host, но не выполняет молчаливые destructive migrations credentials или protected template.
