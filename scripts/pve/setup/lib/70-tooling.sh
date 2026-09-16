@@ -94,11 +94,12 @@ origin_url="\$(canonical_git -C "\$REPO_DIR" remote get-url origin 2>/dev/null |
 assert_clean_repo
 
 current_revision="\$(canonical_git -C "\$REPO_DIR" rev-parse HEAD 2>/dev/null || true)"
-known_origin_revision="\$(canonical_git -C "\$REPO_DIR" rev-parse "refs/remotes/origin/\$PRIVATE_BRANCH" 2>/dev/null || true)"
+recorded_revision="\$(cat "\$STATE_DIR/last-revision" 2>/dev/null || true)"
 [[ "\$current_revision" =~ ^[0-9a-f]{40}\$ ]] || fail "Не удалось определить текущую версию Git"
-[[ "\$known_origin_revision" =~ ^[0-9a-f]{40}\$ ]] || fail "Не удалось определить ранее полученную origin/\$PRIVATE_BRANCH"
-[[ "\$current_revision" == "\$known_origin_revision" ]] \\
-    || fail "Текущая версия Git отличается от ранее полученной origin/\$PRIVATE_BRANCH. Автоматическое переключение запрещено."
+[[ "\$recorded_revision" =~ ^[0-9a-f]{40}\$ ]] \\
+    || fail "Не найдена сохранённая версия Git в \$STATE_DIR/last-revision. Сначала выполните PVE Configuration."
+[[ "\$current_revision" == "\$recorded_revision" ]] \\
+    || fail "Текущая версия Git отличается от сохранённой версии. Автоматическое переключение запрещено."
 
 printf 'Обновление Git %s...\\n' "\$PRIVATE_BRANCH"
 canonical_git -C "\$REPO_DIR" fetch --depth 1 origin "\$PRIVATE_BRANCH"
