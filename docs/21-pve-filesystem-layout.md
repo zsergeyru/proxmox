@@ -15,6 +15,10 @@ PVE Configuration
 
 оба компонента
 → используют /run/lock/proxmox-orchestration.lock
+
+trust boundary
+→ root владеет canonical source/Git credential
+→ pvedeploy владеет только своим mutable deployment runtime
 ```
 
 ## 1. Public Bootstrap
@@ -84,7 +88,17 @@ scripts/pve/setup/
 /var/lib/proxmox-deployer/repo/
 ```
 
-Он является runtime-copy private source of truth. Перед автоматическим Git refresh проверяется полный clean state; local tracked/staged/untracked/ignored drift не стирается молча. В отличие от temporary checkout, `git clean -ffdx` здесь не применяется.
+Это **root-trusted runtime-copy** private source of truth:
+
+```text
+owner: root:root для repo tree
+write: запрещён group/other
+parent /var/lib/proxmox-deployer: root:pvedeploy 0750
+```
+
+Родитель намеренно не writable для `pvedeploy`: иначе ограниченный пользователь мог бы удалить/переименовать даже root-owned `repo/` и заменить его целиком.
+
+Перед автоматическим Git refresh проверяется полный clean state; local tracked/staged/untracked/ignored drift не стирается молча. В отличие от temporary checkout, `git clean -ffdx` здесь не применяется.
 
 Пример:
 
@@ -109,7 +123,7 @@ scripts/pve/setup/
             └── lib/
 ```
 
-Отдельного `scripts/pve/create-template.sh` нет. `deploy-guest.py` появится после реализации deployer.
+`pvedeploy` может читать этот source через group traverse родителя и обычные read bits файлов, но не может писать в repo или `.git`. Отдельного `scripts/pve/create-template.sh` нет. `deploy-guest.py` появится после реализации deployer.
 
 ## 3. Общая orchestration lock
 
@@ -128,6 +142,8 @@ host configuration
 Template 9000 pipeline
 state/final marker transition
 ```
+
+Lock дополняет, но не заменяет filesystem trust boundary: `pvedeploy` физически не имеет права записи в canonical source.
 
 ## 4. Постоянная конфигурация deployer
 
@@ -153,13 +169,13 @@ config.yaml
 → постоянные параметры host-side deployer
 
 ssh/github_proxmox_repo_ed25519
-→ canonical read-only Deploy Key для zsergeyru/proxmox
+→ root-only canonical read-only Deploy Key для zsergeyru/proxmox
 
 ssh/pve_guest_ed25519
-→ host-side SSH identity для управляемых VM/LXC
+→ pvedeploy-owned SSH identity для управляемых VM/LXC
 
 ssh/config + known_hosts
-→ SSH transport private Git checkout
+→ root-owned SSH transport private Git checkout
 
 secrets/host-deploy.token
 → credential deployer@pve!host-deploy
@@ -172,9 +188,32 @@ Canonical SSH config включает strict host-key checking, `BatchMode yes`,
 
 ## 5. Права и Linux runtime user
 
+Ключевое разделение:
+
 ```text
 /etc/proxmox-deployer/
 → root:root
+
+/etc/proxmox-deployer/ssh/
+→ root:pvedeploy 0750
+
+github_proxmox_repo_ed25519
+→ root:root 0600
+
+github_proxmox_repo_ed25519.pub
+→ root:root 0644
+
+ssh/config
+→ root:root 0600
+
+ssh/known_hosts
+→ root:root 0644
+
+pve_guest_ed25519
+→ pvedeploy:pvedeploy 0600
+
+pve_guest_ed25519.pub
+→ pvedeploy:pvedeploy 0644
 
 /etc/proxmox-deployer/secrets/
 → root:pvedeploy 0710
@@ -185,8 +224,23 @@ host-deploy.token
 ai-agent-infra.token
 → root:root 0600
 
-GitHub/PVE guest private keys
-→ pvedeploy:pvedeploy 0600
+/var/lib/proxmox-deployer
+→ root:pvedeploy 0750
+
+/var/lib/proxmox-deployer/repo
+→ root-owned, group/other non-writable
+
+/var/lib/proxmox-deployer/state
+→ root:pvedeploy 0750
+
+/var/lib/proxmox-deployer/cache
+→ pvedeploy:pvedeploy 0750
+
+/var/log/proxmox-deployer
+→ root:pvedeploy 0750
+
+/var/log/proxmox-deployer/audit
+→ pvedeploy:pvedeploy 0750
 ```
 
 `pvedeploy` contract:
@@ -200,15 +254,17 @@ shell = /bin/bash
 
 Если существующий user не соответствует contract, PVE Configuration не меняет его автоматически.
 
+Таким образом будущий `deploy-guest`, запущенный с ограниченными правами, сможет читать manifests/source и использовать свои runtime credentials, но не сможет изменить код или Git metadata, который затем исполняет `root`.
+
 Secrets создаются с безопасным `umask`, не попадают в Git и не выводятся в обычные logs. Для нового API token one-time secret сначала записывается во временный файл, owner/mode выставляются до atomic `mv`. До успешного rename token считается pending; обычный failure/interruption пытается удалить только этот вновь созданный token. Потеря уже существующего token secret/private key требует явного recovery/rotation.
 
 ## 6. Mutable runtime
 
 ```text
 /var/lib/proxmox-deployer/
-├── repo/
-├── state/
-└── cache/
+├── repo/    root-trusted, immutable для pvedeploy
+├── state/   orchestration state
+└── cache/   mutable pvedeploy runtime
 ```
 
 Private SSH keys и token secrets здесь не хранятся.
@@ -255,7 +311,7 @@ bootstrap-complete
 
 `state.json`, `last-run.json` и `version` записываются атомарно через temporary file + `mv`. Source revision известна уже в `running` state и сохраняется также при early failure/interruption.
 
-State не является source of truth: каждый запуск перепроверяет PVE, credentials и Git state.
+State не является source of truth: каждый запуск перепроверяет PVE, credentials, Git state и source ownership.
 
 ## 8. Logs
 
@@ -330,7 +386,7 @@ diagnostics/
 
 `pve-configuration-status` читает `state.json`.
 
-`deploy-guest` после реализации будет небольшой wrapper-командой к source из canonical private checkout.
+`deploy-guest` после реализации будет небольшой wrapper-командой к source из canonical private checkout. Его runtime не получает write-доступ к canonical source.
 
 ## 12. Итоговое дерево
 
@@ -342,11 +398,12 @@ diagnostics/
 │   └── secrets/
 ├── run/lock/
 │   └── proxmox-orchestration.lock
-├── var/lib/proxmox-deployer/
-│   ├── repo/
-│   ├── state/
-│   └── cache/
-├── var/log/proxmox-deployer/
+├── var/lib/proxmox-deployer/       root:pvedeploy 0750
+│   ├── repo/                       root-owned
+│   ├── state/                      root:pvedeploy
+│   └── cache/                      pvedeploy:pvedeploy
+├── var/log/proxmox-deployer/       root:pvedeploy
+│   └── audit/                      pvedeploy:pvedeploy
 ├── var/backups/proxmox-configuration/
 ├── var/backups/proxmox-secrets/
 └── usr/local/sbin/
@@ -356,4 +413,4 @@ diagnostics/
 
 Главный принцип:
 
-> Public Bootstrap использует отдельную temporary область только для первоначального доступа. Permanent runtime принадлежит PVE Configuration, а shared orchestration lock и clean Git checks защищают его от параллельного изменения и скрытого local drift.
+> Public Bootstrap использует отдельную temporary область только для первоначального доступа. Canonical source и Git credential принадлежат root; `pvedeploy` получает только тот mutable runtime и те credentials, которые нужны deployment-задачам. Shared orchestration lock, ownership checks и clean Git checks вместе защищают root-trusted source от параллельной или непривилегированной подмены.

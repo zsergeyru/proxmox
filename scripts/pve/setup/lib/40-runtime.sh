@@ -71,7 +71,7 @@ validate_deploy_user_contract() {
 }
 
 ensure_runtime_layout() {
-    log "Подготовка каталогов и локального пользователя pvedeploy"
+    log "Подготовка root-trusted source и локального runtime пользователя pvedeploy"
 
     if ! getent group "$DEPLOY_USER" >/dev/null 2>&1; then
         groupadd --system "$DEPLOY_USER"
@@ -91,9 +91,14 @@ ensure_runtime_layout() {
     install -d -o root -g root -m 0755 "$CONFIG_DIR"
     install -d -o root -g "$DEPLOY_USER" -m 0750 "$SSH_DIR"
     install -d -o root -g "$DEPLOY_USER" -m 0710 "$SECRETS_DIR"
-    install -d -o "$DEPLOY_USER" -g "$DEPLOY_USER" -m 0750 \
-        "$RUNTIME_DIR" "$RUNTIME_DIR/state" "$RUNTIME_DIR/cache"
-    install -d -o "$DEPLOY_USER" -g "$DEPLOY_USER" -m 0750 "$LOG_DIR" "$LOG_DIR/audit"
+
+    # Родитель canonical repo не должен быть writable для pvedeploy: иначе даже
+    # root-owned repo можно было бы удалить/переименовать и заменить целиком.
+    install -d -o root -g "$DEPLOY_USER" -m 0750 "$RUNTIME_DIR" "$STATE_DIR"
+    install -d -o "$DEPLOY_USER" -g "$DEPLOY_USER" -m 0750 "$RUNTIME_DIR/cache"
+
+    install -d -o root -g "$DEPLOY_USER" -m 0750 "$LOG_DIR"
+    install -d -o "$DEPLOY_USER" -g "$DEPLOY_USER" -m 0750 "$LOG_DIR/audit"
     install -d -o root -g root -m 0700 "$BACKUP_ROOT" "$SECRETS_BACKUP_ROOT"
     install -d -o root -g root -m 0755 /usr/local/sbin
 
@@ -164,23 +169,23 @@ refresh_canonical_public_key() {
 
     tmp_pub="$(mktemp "${SSH_DIR}/.github-key-pub.XXXXXX")"
     printf '%s %s\n' "$derived_pub" 'pve-canonical-readonly-zsergeyru-proxmox' >"$tmp_pub"
-    install -o "$DEPLOY_USER" -g "$DEPLOY_USER" -m 0644 "$tmp_pub" "${KEY_FILE}.pub"
+    install -o root -g root -m 0644 "$tmp_pub" "${KEY_FILE}.pub"
     rm -f "$tmp_pub"
 }
 
 prepare_canonical_github_access() {
-    log "Принятие read-only Deploy Key из Public Bootstrap"
+    log "Подготовка root-only GitHub identity для canonical source"
 
     if [[ ! -f "$KEY_FILE" ]]; then
         [[ -f "$BOOTSTRAP_KEY_FILE" ]] \
             || die "Канонический GitHub Deploy Key отсутствует и Public Bootstrap не передал временный private key. Сначала запустите публичный proxmox-bootstrap/bootstrap-pve.sh."
 
-        install -o "$DEPLOY_USER" -g "$DEPLOY_USER" -m 0600 "$BOOTSTRAP_KEY_FILE" "$KEY_FILE"
-        ok "Deploy Key перенесён в каноническое хранилище"
+        install -o root -g root -m 0600 "$BOOTSTRAP_KEY_FILE" "$KEY_FILE"
+        ok "Deploy Key перенесён в root-only каноническое хранилище"
     else
-        chown "$DEPLOY_USER:$DEPLOY_USER" "$KEY_FILE"
+        chown root:root "$KEY_FILE"
         chmod 0600 "$KEY_FILE"
-        ok "Канонический GitHub Deploy Key уже существует"
+        ok "Канонический GitHub Deploy Key уже существует и закреплён за root"
     fi
 
     refresh_canonical_public_key
@@ -197,7 +202,7 @@ prepare_canonical_github_access() {
     fi
 
     if [[ -f "$BOOTSTRAP_KNOWN_HOSTS" ]]; then
-        install -o "$DEPLOY_USER" -g "$DEPLOY_USER" -m 0644 "$BOOTSTRAP_KNOWN_HOSTS" "$KNOWN_HOSTS"
+        install -o root -g root -m 0644 "$BOOTSTRAP_KNOWN_HOSTS" "$KNOWN_HOSTS"
     elif [[ ! -f "$KNOWN_HOSTS" ]]; then
         local tmp_hosts
         tmp_hosts="$(mktemp)"
@@ -207,8 +212,11 @@ prepare_canonical_github_access() {
             rm -f "$tmp_hosts"
             die "Не удалось получить SSH-ключи хоста GitHub через api.github.com/meta"
         }
-        install -o "$DEPLOY_USER" -g "$DEPLOY_USER" -m 0644 "$tmp_hosts" "$KNOWN_HOSTS"
+        install -o root -g root -m 0644 "$tmp_hosts" "$KNOWN_HOSTS"
         rm -f "$tmp_hosts"
+    else
+        chown root:root "$KNOWN_HOSTS"
+        chmod 0644 "$KNOWN_HOSTS"
     fi
 
     cat >"$SSH_CONFIG" <<EOF_SSH
@@ -224,25 +232,26 @@ Host github.com
     ServerAliveInterval 15
     ServerAliveCountMax 2
 EOF_SSH
-    chown "$DEPLOY_USER:$DEPLOY_USER" "$SSH_CONFIG"
+    chown root:root "$SSH_CONFIG"
     chmod 0600 "$SSH_CONFIG"
 }
 
-git_as_deployer() {
-    runuser -u "$DEPLOY_USER" -- env GIT_SSH_COMMAND="ssh -F ${SSH_CONFIG}" git "$@"
+canonical_git() {
+    env GIT_SSH_COMMAND="ssh -F ${SSH_CONFIG}" \
+        git -c "safe.directory=${REPO_DIR}" "$@"
 }
 
 verify_private_repo_access() {
     local refs
-    if ! refs="$(git_as_deployer ls-remote "$PRIVATE_REPO" "refs/heads/${PRIVATE_BRANCH}" 2>/dev/null)"; then
+    if ! refs="$(canonical_git ls-remote "$PRIVATE_REPO" "refs/heads/${PRIVATE_BRANCH}" 2>/dev/null)"; then
         if (( CANONICAL_KEY_DIFFERS_FROM_BOOTSTRAP )); then
             die "Canonical Deploy Key ${KEY_FILE} не даёт доступ к ${PRIVATE_REPO}, при этом Public Bootstrap использует другой ключ. Автоматическая замена постоянного ключа запрещена. Проверьте ${KEY_FILE}.pub, Deploy keys GitHub и явно выполните recovery/rotation canonical credential."
         fi
-        die "Канонический Deploy Key не даёт read-only доступ к ${PRIVATE_REPO}"
+        die "Канонический root-only Deploy Key не даёт read-only доступ к ${PRIVATE_REPO}"
     fi
     [[ -n "$refs" ]] \
         || die "Канонический Deploy Key работает, но в ${PRIVATE_REPO} отсутствует ожидаемая ветка ${PRIVATE_BRANCH}"
-    ok "Read-only доступ к приватному GitHub-репозиторию и ветке ${PRIVATE_BRANCH} подтверждён"
+    ok "Root-only read-only доступ к приватному GitHub-репозиторию и ветке ${PRIVATE_BRANCH} подтверждён"
 }
 
 configuration_source_revision() {
@@ -259,54 +268,83 @@ configuration_source_revision() {
     printf '%s\n' "$revision"
 }
 
+harden_canonical_repo_permissions() {
+    [[ -e "$REPO_DIR" ]] || return 0
+
+    chown -R root:root "$REPO_DIR"
+    chmod -R go-w "$REPO_DIR"
+}
+
+assert_canonical_repo_trust() {
+    local violation parent_owner parent_mode
+
+    parent_owner="$(stat -c '%U:%G' "$RUNTIME_DIR" 2>/dev/null || true)"
+    parent_mode="$(stat -c '%a' "$RUNTIME_DIR" 2>/dev/null || true)"
+    [[ "$parent_owner" == "root:${DEPLOY_USER}" && "$parent_mode" == "750" ]] \
+        || die "${RUNTIME_DIR} должен быть root:${DEPLOY_USER} 0750, обнаружено ${parent_owner:-?} ${parent_mode:-?}; иначе pvedeploy может подменить canonical repo целиком"
+
+    violation="$(find "$REPO_DIR" -xdev \( -type f -o -type d \) \( ! -uid 0 -o -perm /022 \) -print -quit 2>/dev/null || true)"
+    [[ -z "$violation" ]] \
+        || die "Canonical checkout не является root-trusted: '${violation}' не root-owned или доступен на запись группе/остальным"
+}
+
 assert_clean_git_worktree() {
     local repo=$1 label=$2 status
-    status="$(git_as_deployer -C "$repo" status --porcelain=v1 --untracked-files=all)" \
+    status="$(canonical_git -C "$repo" status --porcelain=v1 --untracked-files=all --ignored)" \
         || die "Не удалось проверить чистоту ${label} Git checkout ${repo}"
     [[ -z "$status" ]] \
-        || die "${label} Git checkout ${repo} содержит локальные изменения или untracked-файлы. Автоматический reset/clean запрещён, чтобы не потерять данные. Первый элемент: $(head -n1 <<<"$status")"
+        || die "${label} Git checkout ${repo} содержит tracked/staged/untracked/ignored drift. Автоматический reset/clean запрещён, чтобы не потерять данные. Первый элемент: $(head -n1 <<<"$status")"
 }
 
 sync_private_repo() {
-    log "Фиксация canonical private checkout на revision текущей PVE Configuration"
+    log "Фиксация root-trusted canonical private checkout на revision текущей PVE Configuration"
 
     local expected_revision origin_url current_revision fetched_revision
     expected_revision="$(configuration_source_revision)"
 
     if [[ ! -d "$REPO_DIR/.git" ]]; then
         rm -rf "$REPO_DIR"
-        git_as_deployer clone --depth 1 --branch "$PRIVATE_BRANCH" "$PRIVATE_REPO" "$REPO_DIR"
-        current_revision="$(git_as_deployer -C "$REPO_DIR" rev-parse HEAD)"
+        canonical_git clone --depth 1 --branch "$PRIVATE_BRANCH" "$PRIVATE_REPO" "$REPO_DIR"
+        harden_canonical_repo_permissions
+        assert_canonical_repo_trust
+        current_revision="$(canonical_git -C "$REPO_DIR" rev-parse HEAD)"
         [[ "$current_revision" == "$expected_revision" ]] \
             || die "Во время первого canonical clone ветка ${PRIVATE_BRANCH} изменилась: PVE Configuration запущена из ${expected_revision}, а clone получил ${current_revision}. Ничего из новой revision не применяется; повторите Public Bootstrap."
         assert_clean_git_worktree "$REPO_DIR" "Canonical"
     else
-        chown -R "$DEPLOY_USER:$DEPLOY_USER" "$REPO_DIR"
-        origin_url="$(git_as_deployer -C "$REPO_DIR" remote get-url origin 2>/dev/null || true)"
+        # Миграция старой модели pvedeploy-owned checkout выполняется до любых
+        # Git-команд от root. Содержимое не очищается: local drift всё равно STOP.
+        harden_canonical_repo_permissions
+        assert_canonical_repo_trust
+
+        origin_url="$(canonical_git -C "$REPO_DIR" remote get-url origin 2>/dev/null || true)"
         [[ "$origin_url" == "$PRIVATE_REPO" ]] \
             || die "Существующий checkout ${REPO_DIR} имеет неожиданный origin '${origin_url:-не задан}'. Ожидается '${PRIVATE_REPO}'. Автоматическая подмена origin запрещена."
         ok "Origin существующего private checkout соответствует каноническому репозиторию"
 
         assert_clean_git_worktree "$REPO_DIR" "Canonical"
-        current_revision="$(git_as_deployer -C "$REPO_DIR" rev-parse HEAD)"
+        current_revision="$(canonical_git -C "$REPO_DIR" rev-parse HEAD)"
         if [[ "$current_revision" != "$expected_revision" ]]; then
-            git_as_deployer -C "$REPO_DIR" fetch --depth 1 origin "$PRIVATE_BRANCH"
-            fetched_revision="$(git_as_deployer -C "$REPO_DIR" rev-parse FETCH_HEAD)"
+            canonical_git -C "$REPO_DIR" fetch --depth 1 origin "$PRIVATE_BRANCH"
+            fetched_revision="$(canonical_git -C "$REPO_DIR" rev-parse FETCH_HEAD)"
             [[ "$fetched_revision" == "$expected_revision" ]] \
                 || die "Ветка ${PRIVATE_BRANCH} изменилась во время PVE Configuration: ожидается ${expected_revision}, fetch получил ${fetched_revision}. Canonical checkout не переключён; повторите Public Bootstrap."
-            git_as_deployer -C "$REPO_DIR" reset --hard "$expected_revision"
-            git_as_deployer -C "$REPO_DIR" clean -ffd
+            canonical_git -C "$REPO_DIR" reset --hard "$expected_revision"
+            canonical_git -C "$REPO_DIR" clean -ffd
+            harden_canonical_repo_permissions
+            assert_canonical_repo_trust
             assert_clean_git_worktree "$REPO_DIR" "Canonical"
         else
             ok "Canonical checkout уже находится на revision текущей PVE Configuration и не имеет локального drift"
         fi
     fi
 
-    REPO_REVISION="$(git_as_deployer -C "$REPO_DIR" rev-parse HEAD)"
+    REPO_REVISION="$(canonical_git -C "$REPO_DIR" rev-parse HEAD)"
     [[ "$REPO_REVISION" == "$expected_revision" ]] \
         || die "Canonical checkout ${REPO_DIR} имеет revision ${REPO_REVISION}, ожидается ${expected_revision}"
 
-    printf '%s\n' "$REPO_REVISION" >"$RUNTIME_DIR/state/last-revision"
-    chown "$DEPLOY_USER:$DEPLOY_USER" "$RUNTIME_DIR/state/last-revision"
-    ok "Canonical private checkout зафиксирован на revision: ${REPO_REVISION}"
+    printf '%s\n' "$REPO_REVISION" >"$STATE_DIR/last-revision"
+    chown root:"$DEPLOY_USER" "$STATE_DIR/last-revision"
+    chmod 0640 "$STATE_DIR/last-revision"
+    ok "Canonical private checkout root-trusted и зафиксирован на revision: ${REPO_REVISION}"
 }

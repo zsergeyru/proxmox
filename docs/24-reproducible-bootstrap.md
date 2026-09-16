@@ -7,8 +7,8 @@
 Текущие версии:
 
 ```text
-Public Bootstrap:        PUBLIC_BOOTSTRAP_VERSION=9
-PVE Configuration:      PVE_CONFIGURATION_VERSION=18
+Public Bootstrap:        PUBLIC_BOOTSTRAP_VERSION=10
+PVE Configuration:      PVE_CONFIGURATION_VERSION=19
 Debian VM template:     Template-Version 6
 ```
 
@@ -20,7 +20,7 @@ Debian VM template:     Template-Version 6
 zsergeyru/proxmox-bootstrap/bootstrap-pve.sh
 ```
 
-`PUBLIC_BOOTSTRAP_VERSION` повышается, когда меняется поведение публичной точки входа: first-run bootstrap, resume, handoff, permanent refresh, marker contract, orchestration locking или передаваемые параметры.
+`PUBLIC_BOOTSTRAP_VERSION` повышается, когда меняется поведение публичной точки входа: first-run bootstrap, resume, handoff, permanent refresh, marker contract, orchestration locking, source trust boundary или передаваемые параметры.
 
 Public Bootstrap не pin'ит private `main` между разными запусками: в начале каждого штатного запуска получает текущую ветку `main`. Но после выбора revision конкретный запуск фиксирует её и передаёт SHA в PVE Configuration. Одна PVE Configuration не должна смешивать код из разных Git revisions.
 
@@ -36,6 +36,31 @@ Lock удерживается до завершения configuration run. По�
 
 Temporary checkout `/var/lib/proxmox-bootstrap/private-repo` является disposable. При resume он обновляется на текущий `FETCH_HEAD` и очищается `git clean -ffdx`, включая ignored cache/build artifacts. Permanent checkout остаётся fail-closed: local drift там не удаляется автоматически.
 
+## Root trust boundary
+
+Canonical source — это root-trusted host configuration, а не mutable workspace `pvedeploy`.
+
+Contract:
+
+```text
+/var/lib/proxmox-deployer
+→ root:pvedeploy 0750
+
+/var/lib/proxmox-deployer/repo
+→ root-owned files/directories
+→ group/other write отсутствует
+
+/etc/proxmox-deployer/ssh/github_proxmox_repo_ed25519
+→ root:root 0600
+
+/etc/proxmox-deployer/ssh/config
+→ root:root 0600
+```
+
+Родитель canonical repo также не writable для `pvedeploy`, поэтому ограниченный runtime user не может заменить root-owned каталог целиком.
+
+Public Bootstrap v10 переводит существующую старую `pvedeploy`-owned установку в эту модель до handoff. Git refresh permanent source после этого выполняется от root. `pvedeploy` сохраняет read access к source и свои deployment credentials/runtime, но не Git credential и не write access к repo/.git.
+
 ## PVE Configuration
 
 Канонический entrypoint:
@@ -48,6 +73,7 @@ zsergeyru/proxmox/scripts/pve/setup/configure-pve.sh
 
 - runtime layout;
 - credentials model;
+- filesystem/source trust boundary;
 - PVE roles/ACL;
 - storage requirements;
 - template pipeline requirements;
@@ -57,15 +83,18 @@ zsergeyru/proxmox/scripts/pve/setup/configure-pve.sh
 Перед `source lib/*.sh` entrypoint проверяет сам исполняемый checkout:
 
 ```text
-Git worktree существует
+процесс запущен от root
+→ Git worktree существует
+→ regular files/directories root-owned
+→ group/other write отсутствует
 → HEAD = PVE_CONFIGURATION_SOURCE_REVISION
 → tracked/staged/untracked/ignored drift отсутствует
 → только затем source модулей
 ```
 
-Это означает, что SHA в state/log действительно соответствует исполняемому коду. Dirty checkout не очищается автоматически: run останавливается, чтобы не потерять локальные данные и не скрыть drift.
+Это означает, что SHA в state/log соответствует исполняемому коду и что менее привилегированный runtime user не может подменить код перед выполнением root. Dirty или non-root-trusted checkout не очищается/исправляется на этапе исполнения: run останавливается.
 
-Canonical checkout `/var/lib/proxmox-deployer/repo` также должен быть чистым до автоматического `fetch/reset`. Если обнаружен локальный drift, Bootstrap/PVE Configuration останавливаются вместо destructive overwrite.
+Canonical checkout `/var/lib/proxmox-deployer/repo` должен одновременно соответствовать source SHA, clean-state и root ownership contract. Если обнаружен local drift, Bootstrap/PVE Configuration останавливаются вместо destructive overwrite.
 
 Revision текущего run известна до первого host-side изменения и используется в `running/failed/interrupted` state. После sync canonical checkout обязан иметь тот же SHA. Фактически применённая revision записывается в:
 
@@ -168,7 +197,7 @@ Template-Version 6
 template-version=6
 ```
 
-`Template-Version` — версия guest/template contract, а не pin внешнего Debian build. Усиление host-side validation/locking/CI не повышает Template-Version, пока содержимое guest contract остаётся v6.
+`Template-Version` — версия guest/template contract, а не pin внешнего Debian build. Усиление host-side validation/locking/ownership/CI не повышает Template-Version, пока содержимое guest contract остаётся v6.
 
 PVE Configuration принимает существующий template только если полный host-visible contract соответствует текущему baseline. Проверяются CPU/RAM, SCSI controller, system disk/storage/flags/minimum size, exact Cloud-Init volume `local-lvm:vm-9000-cloudinit` с `media=cdrom`, VirtIO network/bridge, boot order, QGA, console и protection. Exact Cloud-Init volume не позволяет обычному ISO/CD-ROM формально пройти contract.
 
@@ -246,6 +275,8 @@ Project scripts должны:
 - фиксировать source revision с начала run;
 - не смешивать несколько Git revisions внутри одного configuration run;
 - не исполнять dirty worktree под именем чистого SHA;
+- не исполнять root orchestration из checkout, writable менее привилегированным user;
+- держать canonical Git credential root-only;
 - не делать молчаливый destructive overwrite локального drift;
 - использовать общий orchestration lock для операций над canonical runtime;
 - сохранять одноразовые credentials атомарно и откатывать только вновь созданные текущим run credentials при обычном failure/interruption;
@@ -263,4 +294,4 @@ Project scripts должны:
 
 Главный принцип:
 
-> Не фиксировать внешние версии без практической необходимости, но явно версионировать собственные contracts, сохранять provenance и выполнять каждый configuration run из одного чистого checkout одной точно определённой private revision.
+> Не фиксировать внешние версии без практической необходимости, но явно версионировать собственные contracts, сохранять provenance и выполнять каждый configuration run из одного чистого root-trusted checkout одной точно определённой private revision.

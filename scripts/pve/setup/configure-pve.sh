@@ -38,16 +38,32 @@ acquire_pre_source_lock() {
 }
 
 verify_source_checkout_before_source() {
+    [[ $EUID -eq 0 ]] \
+        || pre_source_die "PVE Configuration должна запускаться от root; проверка выполняется до загрузки lib/*.sh"
     command -v git >/dev/null 2>&1 \
         || pre_source_die "Не найдена команда git; невозможно проверить revision исполняемого PVE Configuration"
+    command -v find >/dev/null 2>&1 \
+        || pre_source_die "Не найдена команда find; невозможно проверить ownership исполняемого checkout"
 
     git -C "$SOURCE_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1 \
         || pre_source_die "${SOURCE_ROOT} не является Git worktree"
 
-    local actual expected top status
+    local actual expected top status trust_violation source_parent parent_owner parent_mode
     top="$(git -C "$SOURCE_ROOT" rev-parse --show-toplevel 2>/dev/null)"
     [[ "$top" == "$SOURCE_ROOT" ]] \
         || pre_source_die "PVE Configuration должна запускаться из корня checkout ${SOURCE_ROOT}, Git сообщает ${top:-неизвестно}"
+
+    source_parent="$(dirname -- "$SOURCE_ROOT")"
+    parent_owner="$(stat -c '%U' "$source_parent" 2>/dev/null || true)"
+    parent_mode="$(stat -c '%A' "$source_parent" 2>/dev/null || true)"
+    [[ "$parent_owner" == "root" ]] \
+        || pre_source_die "Родитель исполняемого checkout ${source_parent} должен принадлежать root; обнаружено ${parent_owner:-неизвестно}"
+    [[ ${#parent_mode} -ge 9 && "${parent_mode:5:1}" != "w" && "${parent_mode:8:1}" != "w" ]] \
+        || pre_source_die "Родитель исполняемого checkout ${source_parent} writable для group/other (${parent_mode:-неизвестно}); весь repo можно подменить целиком"
+
+    trust_violation="$(find "$SOURCE_ROOT" -xdev \( -type f -o -type d \) \( ! -uid 0 -o -perm /022 \) -print -quit 2>/dev/null || true)"
+    [[ -z "$trust_violation" ]] \
+        || pre_source_die "Исполняемый checkout не является root-trusted: '${trust_violation}' не root-owned или доступен на запись группе/остальным. Запустите Public Bootstrap для безопасной миграции canonical source."
 
     actual="$(git -C "$SOURCE_ROOT" rev-parse HEAD 2>/dev/null)"
     expected="${PVE_CONFIGURATION_SOURCE_REVISION:-$actual}"
@@ -89,8 +105,6 @@ parse_configuration_args "$@"
 install_configuration_traps
 
 main() {
-    [[ $EUID -eq 0 ]] || die "Запустите configure-pve.sh от root на хосте Proxmox"
-
     setup_configuration_log
     acquire_configuration_lock
 

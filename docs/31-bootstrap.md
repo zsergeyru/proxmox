@@ -7,11 +7,11 @@
 ```text
 PUBLIC BOOTSTRAP
 zsergeyru/proxmox-bootstrap/bootstrap-pve.sh
-PUBLIC_BOOTSTRAP_VERSION=9
+PUBLIC_BOOTSTRAP_VERSION=10
 
 PVE CONFIGURATION
 zsergeyru/proxmox/scripts/pve/setup/configure-pve.sh
-PVE_CONFIGURATION_VERSION=18
+PVE_CONFIGURATION_VERSION=19
 ```
 
 Канонические документы:
@@ -68,10 +68,11 @@ root/PVE check
 → DNS/HTTPS GitHub check
 → temporary read-only GitHub Deploy Key
 → private repo authorization
-→ temporary shallow checkout main
+→ temporary root-owned shallow checkout main
 → определить точный HEAD
 → PVE_CONFIGURATION_SOURCE_REVISION=<HEAD>
 → запуск PVE Configuration с унаследованным lock
+→ создать root-trusted canonical runtime
 → cleanup /var/lib/proxmox-bootstrap
 → bootstrap-complete
 ```
@@ -96,23 +97,48 @@ Public Bootstrap использует существующие credentials и ch
 
 Если first-run path всё ещё использует `/var/lib/proxmox-bootstrap/private-repo`, этот checkout считается disposable: после fetch/reset выполняется `git clean -ffdx`, поэтому ignored cache/build artifacts не блокируют строгую source-проверку. Permanent checkout этим правилом не очищается.
 
+### Root trust boundary
+
+Permanent source intentionally разделён с runtime user `pvedeploy`:
+
+```text
+/var/lib/proxmox-deployer
+→ root:pvedeploy 0750
+
+/var/lib/proxmox-deployer/repo
+→ root-owned
+→ group/other write запрещён
+
+/etc/proxmox-deployer/ssh/github_proxmox_repo_ed25519
+→ root:root 0600
+
+/etc/proxmox-deployer/ssh/config
+→ root:root 0600
+```
+
+`pvedeploy` не владеет Git credential и не может менять canonical checkout или `.git`. При этом он может читать project source и использовать собственные deployment credentials/runtime.
+
+Public Bootstrap v10 перед permanent refresh переводит старую `pvedeploy`-owned установку в эту модель. После этого canonical Git operations выполняются от root. Перед handoff ownership и отсутствие group/other write проверяются явно.
+
 ### Повторный запуск и local drift
 
 Перед обновлением canonical checkout Public Bootstrap проверяет:
 
 ```text
+root trust boundary соблюдена
 origin == git@github.com:zsergeyru/proxmox.git
 Git worktree полностью clean
 ```
 
 Dirty/staged/untracked/ignored state вызывает STOP. Bootstrap не делает `reset --hard/clean` поверх локального drift и не уничтожает локальные данные молча.
 
-Только для заранее подтверждённого clean checkout выполняется:
+Только для заранее подтверждённого root-trusted clean checkout выполняется:
 
 ```text
-fetch main
+fetch main от root
 → reset --hard FETCH_HEAD
 → clean -ffd
+→ восстановить/проверить root ownership
 → повторная clean-check
 → определить SHA
 → handoff
@@ -129,13 +155,16 @@ PVE_CONFIGURATION_SOURCE_REVISION=<40-char SHA>
 PVE Configuration ещё **до `source lib/*.sh`** проверяет executable source checkout:
 
 ```text
+процесс = root
+source regular files/directories = root-owned
+source не writable для group/other
 HEAD == expected SHA
 tracked/staged/untracked/ignored drift отсутствует
 ```
 
-Только после этого загружаются модули. Таким образом записанный SHA соответствует реально исполняемому коду, включая template assets и Python helpers.
+Только после этого загружаются модули. Таким образом записанный SHA соответствует реально исполняемому коду, а менее привилегированный runtime user не может подменить код перед root execution.
 
-Canonical checkout после sync обязан иметь тот же SHA. Если `main` успел измениться между source checkout и canonical fetch/clone, текущий run останавливается вместо смешивания revisions.
+Canonical checkout после sync обязан иметь тот же SHA и root ownership contract. Если `main` успел измениться между source checkout и canonical fetch/clone, текущий run останавливается вместо смешивания revisions.
 
 `running`, `failed` и `interrupted` state с самого начала содержат source revision. После sync SHA также фиксируется в:
 
@@ -179,7 +208,7 @@ scripts/pve/setup/
 Основная последовательность:
 
 ```text
-shared lock + clean source revision check
+shared lock + root-trusted clean source revision check
 → state=running с source SHA
 → PVE 9 / Debian trixie / KVM preflight
 → configuration snapshot
@@ -191,9 +220,10 @@ shared lock + clean source revision check
 → active storage + content types
 → Debian 13 LXC appliance
 → pvedeploy contract + config.yaml
-→ PVE guest SSH identity
-→ canonical GitHub Deploy Key
-→ clean canonical checkout той же source revision
+→ filesystem trust boundary root/pvedeploy
+→ PVE guest SSH identity (pvedeploy)
+→ canonical GitHub Deploy Key (root-only)
+→ root-owned clean canonical checkout той же source revision
 → managed pool
 → roles/users/API tokens/ACL
 → effective token permission checks
@@ -224,6 +254,25 @@ shell = /bin/bash
 ```
 
 Несовместимый существующий user не меняется автоматически и вызывает STOP.
+
+Filesystem responsibilities:
+
+```text
+root
+→ canonical repo/.git
+→ canonical GitHub Deploy Key и Git SSH config
+→ parent /var/lib/proxmox-deployer
+→ orchestration state
+
+pvedeploy
+→ /var/lib/pvedeploy
+→ /var/lib/proxmox-deployer/cache
+→ /var/log/proxmox-deployer/audit
+→ PVE guest SSH key
+→ host-deploy token read access
+```
+
+Такой split сохраняет `pvedeploy` пригодным для будущего `deploy-guest`, но исключает возможность заменить source, который позже будет исполнен root.
 
 ## LXC readiness
 
@@ -408,4 +457,4 @@ Stable status command:
 
 Главный принцип:
 
-> Public Bootstrap отвечает за safe refresh private source of truth, resume и выбор точной revision. PVE Configuration является единственным host-side orchestrator. Shared lock, clean worktree checks и source SHA гарантируют, что один run не может смешать разные revisions или молча уничтожить local drift.
+> Public Bootstrap отвечает за safe refresh private source of truth, resume, root trust boundary и выбор точной revision. PVE Configuration является единственным host-side orchestrator. Shared lock, ownership checks, clean worktree checks и source SHA гарантируют, что один run не может смешать revisions или исполнять root-код из writable `pvedeploy` checkout.
