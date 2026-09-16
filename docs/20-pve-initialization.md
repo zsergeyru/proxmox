@@ -1,49 +1,49 @@
-# Инициализация нового Proxmox VE host
+# Инициализация нового Proxmox VE хоста
 
-**Type:** Runbook  
-**Status:** Active  
-**Source of truth:** Yes — для порядка запуска Public Bootstrap / PVE Configuration и операторских действий при first run, rerun и smoke-test.
+**Тип:** Инструкция  
+**Статус:** Действующий  
+**Основной источник:** Да — для порядка запуска Public Bootstrap / PVE Configuration и действий оператора при первом, повторном и проверочном запуске.
 
-Этот документ отвечает на вопрос **«что запускать и в каком порядке»**. Он не дублирует точные filesystem permissions, versioning policy, PVE ACL или contract template `9000`.
+Этот документ отвечает на вопрос **«что запускать и в каком порядке»**. Он не дублирует точные права на файловую систему, правила версионирования, ACL PVE или спецификацию шаблона `9000`.
 
-Связанные канонические документы:
+Связанные основные документы:
 
-- [`21-pve-filesystem-layout.md`](21-pve-filesystem-layout.md) — host-side каталоги, state и credentials;
-- [`24-reproducible-bootstrap.md`](24-reproducible-bootstrap.md) — versioning/reproducibility policy;
-- [`25-pve-access-control.md`](25-pve-access-control.md) — PVE identities, roles, privileges и ACL;
-- [`../templates/debian13/build-policy.md`](../templates/debian13/build-policy.md) — contract template `9000`;
-- [`27-backup-and-disaster-recovery-runbook.md`](27-backup-and-disaster-recovery-runbook.md) — восстановление после потери host.
+- [`21-pve-filesystem-layout.md`](21-pve-filesystem-layout.md) — каталоги, файлы состояния и учётные данные на стороне PVE-хоста;
+- [`24-reproducible-bootstrap.md`](24-reproducible-bootstrap.md) — правила версионирования и воспроизводимости;
+- [`25-pve-access-control.md`](25-pve-access-control.md) — учётные записи PVE, роли, привилегии и ACL;
+- [`../templates/debian13/build-policy.md`](../templates/debian13/build-policy.md) — спецификация шаблона `9000`;
+- [`27-backup-and-disaster-recovery-runbook.md`](27-backup-and-disaster-recovery-runbook.md) — восстановление после потери хоста.
 
-## 1. Когда использовать этот runbook
+## 1. Когда использовать эту инструкцию
 
-Использовать его для:
+Использовать её для:
 
 - первого запуска проекта на чистом Proxmox VE;
-- обычного повторного применения host configuration;
+- обычного повторного применения конфигурации хоста;
 - продолжения после исправимой ошибки предыдущего запуска;
 - явного полного обновления системы;
-- явного smoke-test уже существующего template `9000`.
+- явной проверки уже существующего шаблона `9000`.
 
-Обычный rerun должен быть штатным сценарием. Не требуется вручную удалять runtime или credentials только потому, что предыдущий запуск завершился ошибкой.
+Повторный запуск должен быть штатным сценарием. Не требуется вручную удалять рабочие данные или учётные данные только потому, что предыдущий запуск завершился ошибкой.
 
 ## 2. Предварительные условия
 
 Перед запуском:
 
-1. установлен поддерживаемый Proxmox VE host;
-2. есть `root` shell;
-3. работает DNS и исходящий HTTPS/SSH к GitHub;
-4. public bootstrap repository доступен;
-5. при первом запуске можно зарегистрировать read-only Deploy Key для private repository;
-6. на host нет другого одновременно работающего bootstrap/configuration процесса.
+1. установлен поддерживаемый Proxmox VE;
+2. есть оболочка `root`;
+3. работают DNS и исходящие HTTPS/SSH-соединения с GitHub;
+4. доступен публичный репозиторий первоначальной настройки;
+5. при первом запуске можно зарегистрировать GitHub Deploy Key только для чтения закрытого репозитория;
+6. на хосте нет другого одновременно работающего процесса Public Bootstrap или PVE Configuration.
 
-Public Bootstrap и PVE Configuration используют общую orchestration lock:
+Public Bootstrap и PVE Configuration используют общую блокировку:
 
 ```text
 /run/lock/proxmox-orchestration.lock
 ```
 
-Параллельные runs запрещены.
+Параллельные запуски запрещены.
 
 ## 3. Обычный запуск
 
@@ -56,53 +56,53 @@ curl -fsSL https://raw.githubusercontent.com/zsergeyru/proxmox-bootstrap/main/bo
 Эта же команда используется для:
 
 - первого запуска;
-- обычного rerun;
-- resume после исправления причины предыдущей ошибки.
+- обычного повторного запуска;
+- продолжения после исправления причины предыдущей ошибки.
 
 ## 4. Что происходит на первом запуске
 
-Высокоуровневая последовательность:
+Общая последовательность:
 
 ```text
-проверка root / Proxmox
-→ общая orchestration lock
-→ минимальный Git/SSH runtime
-→ проверка GitHub connectivity
-→ временный read-only Deploy Key
-→ временный root-owned checkout private repo
-→ фиксация exact Git revision текущего run
+проверка root и Proxmox
+→ общая блокировка
+→ минимальный набор Git/SSH
+→ проверка связи с GitHub
+→ временный Deploy Key только для чтения
+→ временная копия закрытого репозитория, принадлежащая root
+→ фиксация точной Git-ревизии текущего запуска
 → запуск PVE Configuration
-→ создание permanent root-trusted runtime
-→ проверка host configuration
-→ template 9000 build/verification при необходимости
-→ Full Clone smoke-test после новой сборки
-→ cleanup temporary bootstrap runtime
-→ marker успешного bootstrap
+→ создание постоянной доверенной структуры root
+→ проверка конфигурации хоста
+→ сборка/проверка шаблона 9000 при необходимости
+→ проверка полного клона после новой сборки
+→ удаление временной области Public Bootstrap
+→ отметка об успешном завершении первоначальной настройки
 ```
 
-Точные пути и ownership не повторяются здесь; они определены в [`21-pve-filesystem-layout.md`](21-pve-filesystem-layout.md).
+Точные пути и владельцы не повторяются здесь; они определены в [`21-pve-filesystem-layout.md`](21-pve-filesystem-layout.md).
 
 ## 5. Повторный запуск
 
-При rerun Public Bootstrap должен использовать permanent root-trusted checkout.
+При повторном запуске Public Bootstrap должен использовать постоянную доверенную копию репозитория.
 
-Нормальный flow:
+Нормальная последовательность:
 
 ```text
-взять orchestration lock
-→ проверить trust boundary и clean Git state
-→ получить актуальный main
-→ зафиксировать exact revision
-→ запустить PVE Configuration на этой revision
+взять общую блокировку
+→ проверить границу доверия и отсутствие локальных изменений Git
+→ получить актуальное состояние main
+→ зафиксировать точную ревизию
+→ запустить PVE Configuration на этой ревизии
 → выполнить только необходимые изменения
-→ verify
+→ проверить результат
 ```
 
-Если permanent checkout содержит локальный drift, запуск должен остановиться. Локальные tracked/staged/untracked/ignored изменения не стираются молча.
+Если постоянная копия репозитория содержит локальные изменения, запуск должен остановиться. Отслеживаемые, подготовленные к коммиту, неотслеживаемые и игнорируемые изменения не стираются молча.
 
-## 6. Resume после ошибки
+## 6. Продолжение после ошибки
 
-После исправления причины ошибки повторить обычную команду bootstrap.
+После исправления причины ошибки повторить обычную команду Public Bootstrap.
 
 Не выполнять без отдельной причины:
 
@@ -111,9 +111,9 @@ rm -rf /etc/proxmox-deployer
 rm -rf /var/lib/proxmox-deployer
 ```
 
-Существующие API-token secrets, SSH private keys и другие постоянные credentials не должны автоматически ротироваться при обычном rerun.
+Существующие секреты API-токенов, закрытые SSH-ключи и другие постоянные учётные данные не должны автоматически меняться при обычном повторном запуске.
 
-Если предыдущая попытка оставила диагностический builder/template/smoke object, PVE Configuration должна остановиться или продолжить по соответствующей safety policy, а не уничтожать неоднозначный объект автоматически.
+Если предыдущая попытка оставила диагностическую VM-сборщик, шаблон или проверочную VM, PVE Configuration должна остановиться либо продолжить работу согласно правилам безопасности, но не уничтожать неоднозначный объект автоматически.
 
 ## 7. Полное системное обновление
 
@@ -123,87 +123,89 @@ rm -rf /var/lib/proxmox-deployer
 curl -fsSL https://raw.githubusercontent.com/zsergeyru/proxmox-bootstrap/main/bootstrap-pve.sh | bash -s -- --update-system
 ```
 
-Обычный bootstrap не должен незаметно превращаться в full system upgrade.
+Обычная первоначальная настройка не должна незаметно превращаться в полное обновление системы.
 
-## 8. Явный smoke-test template `9000`
+## 8. Явная проверка шаблона `9000`
 
-Для уже существующего template:
+Для уже существующего шаблона:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/zsergeyru/proxmox-bootstrap/main/bootstrap-pve.sh | bash -s -- --smoke-test-template
 ```
 
-После новой сборки `9000` smoke-test выполняется автоматически и отдельный флаг не нужен.
+После новой сборки `9000` проверка выполняется автоматически и отдельный флаг не нужен.
 
-Smoke-test использует проектный VMID `9099`. При успехе test guest удаляется; при ошибке он сохраняется для диагностики. Полный contract находится в [`../templates/debian13/build-policy.md`](../templates/debian13/build-policy.md).
+Проверка использует проектный VMID `9099`. При успехе тестовая гостевая система удаляется; при ошибке она сохраняется для диагностики. Полная спецификация находится в [`../templates/debian13/build-policy.md`](../templates/debian13/build-policy.md).
 
 ## 9. Прямой запуск PVE Configuration
 
-Штатный пользовательский entrypoint — Public Bootstrap. Прямой запуск `configure-pve.sh` допустим для разработки/диагностики только из корректного root-trusted project source.
+Обычная пользовательская точка входа — Public Bootstrap. Прямой запуск `configure-pve.sh` допустим для разработки и диагностики только из корректной доверенной `root` копии проекта.
 
-Entry point:
+Точка входа:
 
 ```text
 scripts/pve/setup/configure-pve.sh
 ```
 
-Прямой запуск использует ту же orchestration lock и те же safety checks.
+Прямой запуск использует ту же общую блокировку и те же проверки безопасности.
 
-## 10. Что проверить после успешного run
+## 10. Что проверить после успешного запуска
 
-Минимальная операторская проверка:
+Минимальная проверка оператором:
 
 ```text
-PVE Configuration завершилась SUCCESS
-canonical checkout clean и доступен
+PVE Configuration завершилась успешно
+основная копия репозитория не содержит локальных изменений и доступна
 state/last-run обновлены
-storage доступен
-project identities/ACL прошли effective-permission checks
-template 9000 соответствует contract
-если smoke был нужен — он завершился passed
-нет оставленного unexpected builder/smoke guest
+хранилища доступны
+учётные записи и ACL проекта прошли проверку фактических прав
+шаблон 9000 соответствует спецификации
+если проверка шаблона требовалась — её состояние passed
+не осталось неожиданной VM-сборщика или проверочной VM
 ```
 
-Дополнительно проверить фактическое состояние host в [`../host/pve/README.md`](../host/pve/README.md) и профильных `host/pve/*` документах.
+Названия `state/last-run` и значение `passed` оставлены без перевода, поскольку это реальные имена файлов и машинных состояний.
+
+Дополнительно проверить фактическое состояние хоста в [`../host/pve/README.md`](../host/pve/README.md) и профильных документах `host/pve/*`.
 
 ## 11. Если запуск остановился
 
-Не пытаться обходить STOP вручную destructive-командами до понимания причины.
+Не обходить остановку разрушительными командами до понимания причины.
 
 Порядок действий:
 
 ```text
-прочитать финальную ошибку и log
+прочитать итоговую ошибку и журнал
 → определить предметную область
-→ исправить prerequisite / drift / conflict
+→ исправить предварительное условие, расхождение или конфликт
 → сохранить диагностический объект, если на него указывает ошибка
-→ повторить обычный bootstrap
+→ повторить обычный Public Bootstrap
 ```
 
-Типовые владельцы contract:
+Документы по областям:
 
 | Проблема | Документ |
 |---|---|
-| Git/source trust, версии, state | [`24-reproducible-bootstrap.md`](24-reproducible-bootstrap.md) |
-| Каталоги/ownership/credentials | [`21-pve-filesystem-layout.md`](21-pve-filesystem-layout.md) |
-| API identities/roles/ACL | [`25-pve-access-control.md`](25-pve-access-control.md) |
-| Template 9000 / smoke | [`../templates/debian13/build-policy.md`](../templates/debian13/build-policy.md) |
-| Storage/backup policy | [`22-storage-and-backup.md`](22-storage-and-backup.md) |
-| Disaster recovery | [`27-backup-and-disaster-recovery-runbook.md`](27-backup-and-disaster-recovery-runbook.md) |
+| доверие к исходному коду Git, версии, файлы состояния | [`24-reproducible-bootstrap.md`](24-reproducible-bootstrap.md) |
+| каталоги, владельцы и учётные данные | [`21-pve-filesystem-layout.md`](21-pve-filesystem-layout.md) |
+| учётные записи API, роли и ACL | [`25-pve-access-control.md`](25-pve-access-control.md) |
+| шаблон `9000` и его проверка | [`../templates/debian13/build-policy.md`](../templates/debian13/build-policy.md) |
+| политика хранилищ и резервного копирования | [`22-storage-and-backup.md`](22-storage-and-backup.md) |
+| аварийное восстановление | [`27-backup-and-disaster-recovery-runbook.md`](27-backup-and-disaster-recovery-runbook.md) |
 
 ## 12. Результат
 
-Успешный run должен привести host к состоянию, в котором:
+Успешный запуск должен привести хост к состоянию, в котором:
 
 ```text
-private project source доверенно доступен на PVE
-PVE Configuration может безопасно rerun
-host-side runtime и credentials подготовлены
-PVE identities/ACL готовы
-Debian LXC source подготовлен
-current template 9000 валиден
-smoke state согласован
-будущий deploy-guest имеет подготовленную host-side основу
+закрытый исходный код проекта доверенно доступен на PVE
+PVE Configuration можно безопасно запускать повторно
+рабочая структура и учётные данные на стороне хоста подготовлены
+учётные записи и ACL PVE готовы
+источник Debian LXC подготовлен
+текущий шаблон 9000 валиден
+состояние проверки шаблона согласовано
+для будущего deploy-guest подготовлена основа на стороне PVE-хоста
 ```
 
-Точные значения этих contracts принадлежат профильным Specification/Reference/Policy документам, а не этому runbook.
+Точные значения этих требований принадлежат профильным Спецификациям, Справочникам и Политикам, а не этой инструкции.
