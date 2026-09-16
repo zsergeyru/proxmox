@@ -217,27 +217,57 @@ verify_private_repo_access() {
     ok "Read-only доступ к приватному GitHub-репозиторию и ветке ${PRIVATE_BRANCH} подтверждён"
 }
 
+configuration_source_revision() {
+    local revision="${PVE_CONFIGURATION_SOURCE_REVISION:-}"
+    local source_root
+
+    if [[ -z "$revision" ]]; then
+        source_root="$(cd -- "${SCRIPT_DIR}/../../.." && pwd)"
+        revision="$(git -C "$source_root" rev-parse HEAD 2>/dev/null || true)"
+    fi
+
+    [[ "$revision" =~ ^[0-9a-f]{40}$ ]] \
+        || die "Не удалось определить точную Git revision, из которой запущена PVE Configuration"
+    printf '%s\n' "$revision"
+}
+
 sync_private_repo() {
-    log "Синхронизация приватного источника истины"
+    log "Фиксация canonical private checkout на revision текущей PVE Configuration"
+
+    local expected_revision origin_url current_revision fetched_revision
+    expected_revision="$(configuration_source_revision)"
 
     if [[ ! -d "$REPO_DIR/.git" ]]; then
         rm -rf "$REPO_DIR"
         git_as_deployer clone --depth 1 --branch "$PRIVATE_BRANCH" "$PRIVATE_REPO" "$REPO_DIR"
+        current_revision="$(git_as_deployer -C "$REPO_DIR" rev-parse HEAD)"
+        [[ "$current_revision" == "$expected_revision" ]] \
+            || die "Во время первого canonical clone ветка ${PRIVATE_BRANCH} изменилась: PVE Configuration запущена из ${expected_revision}, а clone получил ${current_revision}. Ничего из новой revision не применяется; повторите Public Bootstrap."
     else
-        local origin_url
         chown -R "$DEPLOY_USER:$DEPLOY_USER" "$REPO_DIR"
         origin_url="$(git_as_deployer -C "$REPO_DIR" remote get-url origin 2>/dev/null || true)"
         [[ "$origin_url" == "$PRIVATE_REPO" ]] \
             || die "Существующий checkout ${REPO_DIR} имеет неожиданный origin '${origin_url:-не задан}'. Ожидается '${PRIVATE_REPO}'. Автоматическая подмена origin запрещена."
         ok "Origin существующего private checkout соответствует каноническому репозиторию"
 
-        git_as_deployer -C "$REPO_DIR" fetch --depth 1 origin "$PRIVATE_BRANCH"
-        git_as_deployer -C "$REPO_DIR" reset --hard FETCH_HEAD
-        git_as_deployer -C "$REPO_DIR" clean -ffd
+        current_revision="$(git_as_deployer -C "$REPO_DIR" rev-parse HEAD)"
+        if [[ "$current_revision" != "$expected_revision" ]]; then
+            git_as_deployer -C "$REPO_DIR" fetch --depth 1 origin "$PRIVATE_BRANCH"
+            fetched_revision="$(git_as_deployer -C "$REPO_DIR" rev-parse FETCH_HEAD)"
+            [[ "$fetched_revision" == "$expected_revision" ]] \
+                || die "Ветка ${PRIVATE_BRANCH} изменилась во время PVE Configuration: ожидается ${expected_revision}, fetch получил ${fetched_revision}. Canonical checkout не переключён; повторите Public Bootstrap."
+            git_as_deployer -C "$REPO_DIR" reset --hard "$expected_revision"
+            git_as_deployer -C "$REPO_DIR" clean -ffd
+        else
+            ok "Canonical checkout уже находится на revision текущей PVE Configuration"
+        fi
     fi
 
     REPO_REVISION="$(git_as_deployer -C "$REPO_DIR" rev-parse HEAD)"
+    [[ "$REPO_REVISION" == "$expected_revision" ]] \
+        || die "Canonical checkout ${REPO_DIR} имеет revision ${REPO_REVISION}, ожидается ${expected_revision}"
+
     printf '%s\n' "$REPO_REVISION" >"$RUNTIME_DIR/state/last-revision"
     chown "$DEPLOY_USER:$DEPLOY_USER" "$RUNTIME_DIR/state/last-revision"
-    ok "Приватный репозиторий синхронизирован: ${REPO_REVISION}"
+    ok "Canonical private checkout зафиксирован на revision: ${REPO_REVISION}"
 }
