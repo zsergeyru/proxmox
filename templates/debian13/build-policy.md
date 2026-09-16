@@ -1,7 +1,7 @@
 # Политика сборки `tpl-debian13`
 
 ```text
-Template-Version: 6
+Template-Version: 7
 ```
 
 ## 1. Общий принцип
@@ -10,7 +10,7 @@ Template должен быть простым и понятным. Не испо
 
 Сборка берёт актуальный Debian 13 Trixie cloud image и stable packages на момент запуска.
 
-Template v6 использует единый management user `root`. Отдельный generic `ops` не создаётся.
+Template v7 использует единый management user `root`. Отдельный generic `ops` не создаётся. В итоговой системе сохраняется минимальная diagnostic command `/usr/local/sbin/guest-status`.
 
 Host-side orchestration является частью `scripts/pve/setup/configure-pve.sh`; standalone `create-template.sh` отсутствует.
 
@@ -24,7 +24,7 @@ Host-side orchestration является частью `scripts/pve/setup/configu
 → capacity/source + image/checksum + production Cloud-Init render
 
 62-template-build.sh
-→ VM builder lifecycle + QGA normalization + verification + cleanup + seal
+→ VM builder lifecycle + QGA normalization + stage rendering + verification + cleanup + seal
 ```
 
 Canonical renderer:
@@ -110,7 +110,8 @@ Fixed 8x16
 - framebuffer существует и валиден;
 - QGA active;
 - tty1/ttyS0 getty active;
-- обе console override используют `--autologin root`.
+- обе console override используют `--autologin root`;
+- `/usr/local/sbin/guest-status` существует, executable и успешно запускается.
 
 ## 6. Root / SSH
 
@@ -146,7 +147,41 @@ Renderer должен:
 
 CI дополнительно проверяет результат через `cloud-init schema`.
 
-## 8. Cloud-Init lifecycle
+## 8. Build telemetry и `guest-status`
+
+`template-bootstrap` публикует текущий этап в:
+
+```text
+/var/lib/template-build/bootstrap-status
+```
+
+В этом файле разрешены только ASCII stage-codes:
+
+```text
+apt-metadata
+qga-install
+apt-upgrade
+base-packages
+console
+kernel
+locale-time
+services
+security
+metadata
+done
+```
+
+Русские подписи этапов формируются host-side в `62-template-build.sh`. Кириллица не передаётся через QGA status channel, потому что вывод `guest-exec` проходит через несколько уровней byte/string serialization и не должен использоваться как транспорт localized telemetry.
+
+Внутри builder и будущих Full Clone доступна команда:
+
+```bash
+guest-status
+```
+
+Её собственный вывод ASCII-only и показывает build stage, package/service state QGA, virtio channel, Cloud-Init, IP и uptime. `guest-status` является частью guest contract v7 и не удаляется при seal.
+
+## 9. Cloud-Init lifecycle
 
 Builder-only custom Cloud-Init существует только во время build.
 
@@ -155,6 +190,7 @@ Builder-only custom Cloud-Init существует только во время
 ```text
 guest cleanup
 → host-side cleanup assertions через QGA
+→ подтвердить сохранение guest-status
 → shutdown
 → remove cicustom
 → ciuser=root
@@ -168,10 +204,10 @@ guest cleanup
 Description содержит:
 
 ```text
-template-version=6
+template-version=7
 ```
 
-## 9. Host-visible template contract
+## 10. Host-visible template contract
 
 Существующий и только что созданный 9000 должны соответствовать:
 
@@ -200,13 +236,13 @@ ciuser = root
 ciupgrade = 0
 ipconfig0 = ip=dhcp
 cicustom absent
-description contains template-version=6
+description contains template-version=7
 protection = 1 after pipeline
 ```
 
 Отсутствующий `protection=1` у в остальном совместимого template можно восстановить после configuration snapshot. Другой mismatch вызывает STOP.
 
-## 10. Full Clone policy
+## 11. Full Clone policy
 
 Рабочие Debian VM создаются как Full Clone.
 
@@ -216,7 +252,7 @@ Template `9000` остаётся `protection=1`.
 
 Старый/incompatible template автоматически не заменяется.
 
-## 11. Base packages
+## 12. Base packages
 
 ```text
 qemu-guest-agent openssh-server sudo locales cloud-guest-utils systemd-timesyncd
@@ -230,7 +266,7 @@ cron logrotate
 
 Docker/Compose и service-specific software в base template не входят.
 
-## 12. Disk / TRIM
+## 13. Disk / TRIM
 
 ```text
 VirtIO SCSI Single
@@ -242,7 +278,7 @@ base disk >=16 GiB
 
 Включён `fstrim.timer`; перед seal выполняется `fstrim -av`.
 
-## 13. Fail-closed cleanup
+## 14. Fail-closed cleanup
 
 `template-finalize.sh` обязан завершиться ошибкой, если generic `debian` user существует и его не удалось удалить.
 
@@ -257,11 +293,12 @@ SSH host keys absent
 /var/lib/template-build absent
 template-bootstrap absent
 template-finalize absent
+guest-status present + executable
 ```
 
-Эти assertions выполняются внутри guest и повторно host-side через QGA до seal.
+Builder-only state удаляется, но `guest-status` сохраняется намеренно как часть guest contract v7. Assertions выполняются внутри guest и повторно host-side через QGA до seal.
 
-## 14. Provenance
+## 15. Provenance
 
 `/etc/vm-template-info` содержит:
 
@@ -278,7 +315,7 @@ Console modes
 
 Pinned cloud build ID и APT snapshot не являются частью policy.
 
-## 15. Failure policy
+## 16. Failure policy
 
 Существующий VMID 9000 не перезаписывается.
 
@@ -286,9 +323,9 @@ Pinned cloud build ID и APT snapshot не являются частью policy.
 
 Если VMID свободен, но остался builder snippet без builder VM, snippet считается orphaned build artefact и пересоздаётся.
 
-PVE Configuration не мигрирует incompatible template на v6 автоматически.
+PVE Configuration не мигрирует incompatible template на v7 автоматически.
 
-## 16. Проверка
+## 17. Проверка
 
 CI проверяет:
 
@@ -299,9 +336,11 @@ CI проверяет:
 - production renderer;
 - YAML parsing;
 - `cloud-init schema`;
+- embedded `guest-status` syntax + ShellCheck;
+- exact ASCII stage-code set;
 - template contract unit tests;
 - malformed guest directory negative test;
 - отсутствие legacy `scripts/pve/create-template.sh`;
 - whitespace.
 
-После существенного изменения pipeline/guest assets требуется реальный clean build + Full Clone smoke-test, включая root login по injected SSH key.
+После существенного изменения pipeline/guest assets требуется реальный clean build + Full Clone smoke-test, включая `guest-status` и root login по injected SSH key.

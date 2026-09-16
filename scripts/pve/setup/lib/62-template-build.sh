@@ -8,6 +8,24 @@ template_vm_stage() {
     printf '%s%s[ЭТАП VM]%s %s\n' "$C_BOLD" "$C_MAGENTA" "$C_RESET" "$*"
 }
 
+template_stage_label() {
+    case "${1:-}" in
+        apt-metadata) printf '%s' 'APT metadata — обновление списка пакетов' ;;
+        qga-install) printf '%s' 'QEMU Guest Agent — ранняя установка канала наблюдения' ;;
+        apt-upgrade) printf '%s' 'APT full-upgrade — полное обновление Debian' ;;
+        base-packages) printf '%s' 'Базовые пакеты — установка инструментов и служб' ;;
+        console) printf '%s' 'Консоль — настройка шрифта и tty' ;;
+        kernel) printf '%s' 'Ядро — переход с cloud kernel на linux-image-amd64' ;;
+        locale-time) printf '%s' 'Locale/time — локаль, timezone и синхронизация времени' ;;
+        services) printf '%s' 'Сервисы — SSH, QGA, консоли и fstrim' ;;
+        security) printf '%s' 'Security checks — проверка sshd и root key-only policy' ;;
+        metadata) printf '%s' 'Метаданные — запись информации о template' ;;
+        done) printf '%s' 'Готово — начальная настройка завершена' ;;
+        '') printf '%s' 'этап ещё не опубликован' ;;
+        *) printf 'Неизвестный этап (%s)' "$1" ;;
+    esac
+}
+
 template_guest_exec() {
     local raw exitcode errdata outdata exited pid signal
     if ! raw="$(qm guest exec "$TEMPLATE_VMID" --timeout "$TEMPLATE_WAIT_SECONDS" -- "$@" 2>&1)"; then
@@ -98,7 +116,7 @@ template_read_bootstrap_status() {
 
 template_wait_for_bootstrap() {
     local started=$SECONDS deadline=$((SECONDS + TEMPLATE_WAIT_SECONDS)) next_report=$SECONDS
-    local out status last_status=''
+    local out status_code status_label last_status_code=''
     while (( SECONDS < deadline )); do
         out="$(template_guest_exec /bin/cat /var/lib/template-build/bootstrap-complete 2>/dev/null || true)"
         if grep -q 'BOOTSTRAP_OK' <<<"$out"; then
@@ -106,15 +124,16 @@ template_wait_for_bootstrap() {
             return 0
         fi
 
-        status="$(template_read_bootstrap_status || true)"
-        if [[ -n "$status" && "$status" != "$last_status" ]]; then
-            template_vm_stage "$status"
-            last_status="$status"
+        status_code="$(template_read_bootstrap_status || true)"
+        status_label="$(template_stage_label "$status_code")"
+        if [[ -n "$status_code" && "$status_code" != "$last_status_code" ]]; then
+            template_vm_stage "$status_label"
+            last_status_code="$status_code"
         fi
 
         if (( SECONDS >= next_report )); then
-            if [[ -n "$status" ]]; then
-                template_wait_progress "Начальная настройка гостя" "$started" "$TEMPLATE_WAIT_SECONDS" ", QGA=ok; этап=${status}"
+            if [[ -n "$status_code" ]]; then
+                template_wait_progress "Начальная настройка гостя" "$started" "$TEMPLATE_WAIT_SECONDS" ", QGA=ok; этап=${status_label}"
             else
                 template_wait_progress "Начальная настройка гостя" "$started" "$TEMPLATE_WAIT_SECONDS" ', QGA=ok; ожидается status от template-bootstrap'
             fi
@@ -224,11 +243,11 @@ provision_template_builder() {
     log "Запуск и provisioning VM-сборщика ${TEMPLATE_VMID}"
     qm start "$TEMPLATE_VMID"
 
-    info "Cloud-Init сначала устанавливает qemu-guest-agent, после чего PVE Configuration начинает видеть внутренние этапы сборки."
+    info "Cloud-Init сначала устанавливает qemu-guest-agent, после чего PVE Configuration начинает видеть внутренние этапы сборки. В консоли VM доступна команда guest-status."
     template_wait_for_agent "QEMU Guest Agent" \
         || die "QEMU Guest Agent не стал доступен за ${TEMPLATE_WAIT_SECONDS} секунд"
     template_wait_for_bootstrap \
-        || die "Начальная настройка гостя не завершилась за ${TEMPLATE_WAIT_SECONDS} секунд. Проверьте консоль VM ${TEMPLATE_VMID} и журналы cloud-init."
+        || die "Начальная настройка гостя не завершилась за ${TEMPLATE_WAIT_SECONDS} секунд. Проверьте консоль VM ${TEMPLATE_VMID}, команду guest-status и журналы cloud-init."
     template_wait_for_cloud_init \
         || die "Cloud-Init не завершился корректно со статусом done"
 }
@@ -246,7 +265,7 @@ verify_template_builder() {
     template_wait_for_agent "QEMU Guest Agent после перезагрузки" \
         || die "QEMU Guest Agent не подключился повторно после проверочной перезагрузки"
 
-    log "Проверка ядра, framebuffer и консольных служб"
+    log "Проверка ядра, framebuffer, диагностической команды и консольных служб"
     verify_output="$(template_guest_exec /bin/bash -lc '
 set -Eeuo pipefail
 kernel="$(uname -r)"
@@ -259,6 +278,8 @@ framebuffer="$(cat /sys/class/graphics/fb0/virtual_size)"
 systemctl is-active --quiet qemu-guest-agent.service
 systemctl is-active --quiet getty@tty1.service
 systemctl is-active --quiet serial-getty@ttyS0.service
+[[ -x /usr/local/sbin/guest-status ]]
+/usr/local/sbin/guest-status >/dev/null
 grep -q "^FONTSIZE=\"8x16\"$" /etc/default/console-setup
 grep -q -- "--autologin root" /etc/systemd/system/getty@tty1.service.d/autologin.conf
 grep -q -- "--autologin root" /etc/systemd/system/serial-getty@ttyS0.service.d/autologin.conf
@@ -274,7 +295,7 @@ printf "VERIFY_KERNEL=%s VERIFY_FRAMEBUFFER=%s CONSOLES_OK\n" "$kernel" "$frameb
     [[ -n "$TEMPLATE_KERNEL_VERSION" ]] || die "Проверенная версия ядра не была получена"
     [[ -n "$TEMPLATE_FRAMEBUFFER_SIZE" ]] || die "Проверенный размер framebuffer не был получен"
 
-    ok "Проверки builder пройдены: kernel=${TEMPLATE_KERNEL_VERSION}, framebuffer=${TEMPLATE_FRAMEBUFFER_SIZE}"
+    ok "Проверки builder пройдены: kernel=${TEMPLATE_KERNEL_VERSION}, framebuffer=${TEMPLATE_FRAMEBUFFER_SIZE}, guest-status=ok"
 }
 
 finalize_template_builder() {
@@ -298,10 +319,11 @@ set -Eeuo pipefail
 [[ ! -e /var/lib/template-build ]]
 [[ ! -e /usr/local/sbin/template-bootstrap ]]
 [[ ! -e /usr/local/sbin/template-finalize ]]
+[[ -x /usr/local/sbin/guest-status ]]
 printf "CLEANUP_OK\n"
 ' | grep -q 'CLEANUP_OK' \
         || die "Guest cleanup assertions не пройдены; VM-сборщик оставлена для диагностики"
-    ok "Guest cleanup assertions подтверждены"
+    ok "Guest cleanup assertions подтверждены; guest-status сохранён в template"
 
     log "Выключение VM-сборщика"
     qm shutdown "$TEMPLATE_VMID" --timeout 180 || true
@@ -313,7 +335,7 @@ printf "CLEANUP_OK\n"
     qm set "$TEMPLATE_VMID" --ciupgrade 0
     qm set "$TEMPLATE_VMID" --ipconfig0 ip=dhcp
     qm set "$TEMPLATE_VMID" --name "$TEMPLATE_NAME"
-    qm set "$TEMPLATE_VMID" --description "Базовый шаблон Debian 13 (Trixie); template-version=${TEMPLATE_VERSION}; root SSH key-only; VGA/noVNC tty1 с автовходом; резервный serial0; SSH-ключи передаются каждому клону отдельно"
+    qm set "$TEMPLATE_VMID" --description "Базовый шаблон Debian 13 (Trixie); template-version=${TEMPLATE_VERSION}; root SSH key-only; guest-status; VGA/noVNC tty1 с автовходом; резервный serial0; SSH-ключи передаются каждому клону отдельно"
 
     qm cloudinit update "$TEMPLATE_VMID"
     cloudinit_user_data="$(qm cloudinit dump "$TEMPLATE_VMID" user)"

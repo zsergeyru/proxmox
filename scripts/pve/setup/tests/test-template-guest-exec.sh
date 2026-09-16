@@ -47,4 +47,8 @@ for QM_CASE in timeout running failed signaled; do
     fi
 done
 
+[[ "$(template_stage_label base-packages)" == 'Базовые пакеты — установка инструментов и служб' ]]
+[[ "$(template_stage_label services)" == 'Сервисы — SSH, QGA, консоли и fstrim' ]]
+[[ "$(template_stage_label unexpected-stage)" == 'Неизвестный этап (unexpected-stage)' ]]
+
 printf 'Template guest exec tests passed.\n'

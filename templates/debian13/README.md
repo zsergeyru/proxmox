@@ -8,14 +8,14 @@
 VMID: 9000
 Name: tpl-debian13
 OS: Debian 13 (Trixie)
-Template-Version: 6
+Template-Version: 7
 Clone policy: Full Clone
 Protection: 1
 Management user: root
 SSH: public key only
 ```
 
-Template v6 является текущей действующей guest-contract версией. Усиление host-side orchestration, validation и CI само по себе не меняет Template-Version, пока итоговый guest contract остаётся v6.
+Template v7 является текущей действующей guest-contract версией. Она сохраняет модель v6 с единым management user `root` и добавляет постоянную диагностическую команду `guest-status`, а внутренние этапы builder-а передаются через QGA как ASCII-коды и отображаются PVE Configuration по-русски уже на host-side.
 
 Создание template является частью PVE Configuration. Отдельного standalone `scripts/pve/create-template.sh` нет.
 
@@ -43,7 +43,7 @@ templates/debian13/template-finalize.sh
 
 Политика сборки: [`build-policy.md`](build-policy.md).
 
-## Что делает Template v6
+## Что делает Template v7
 
 ```text
 Debian 13 trixie/latest generic cloud image
@@ -51,6 +51,8 @@ Debian 13 trixie/latest generic cloud image
 → VMID 9000 builder
 → apt update/full-upgrade
 → base packages
+→ early QGA + ASCII build-stage telemetry
+→ persistent guest-status diagnostics
 → regular linux-image-amd64
 → remove cloud-amd64 kernel
 → root password locked
@@ -83,10 +85,12 @@ Debian 13 trixie/latest generic cloud image
 62-template-build.sh
 → создать builder VM
 → дождаться QGA/Cloud-Init/bootstrap
+→ читать ASCII stage-code через QGA и отображать локальную русскую подпись
 → verification reboot
-→ проверить kernel/framebuffer/consoles
+→ проверить kernel/framebuffer/consoles/guest-status
 → выполнить guest cleanup
 → повторно подтвердить cleanup через QGA
+→ сохранить guest-status как часть итогового guest contract
 → вернуть стандартный Proxmox Cloud-Init
 → qm template
 → protection=1
@@ -127,9 +131,34 @@ Fixed 8x16
 - active QEMU Guest Agent;
 - active `getty@tty1` и `serial-getty@ttyS0`;
 - root autologin на обеих локальных консолях;
+- executable `/usr/local/sbin/guest-status`;
 - корректную effective SSH policy.
 
 Console autologin не является сетевой password authentication. Право Proxmox `VM.Console` фактически даёт root-доступ внутрь гостя и выдаётся только доверенным PVE identities.
+
+## Диагностика внутри VM
+
+Команда:
+
+```bash
+guest-status
+```
+
+показывает без дополнительных зависимостей:
+
+```text
+Build stage code
+Build stage
+QGA package
+QGA service
+QGA enabled
+QGA virtio port
+Cloud-Init
+IP addresses
+Uptime
+```
+
+Её вывод намеренно ASCII-only: утилита должна оставаться читаемой в ранней консоли ещё до полной настройки локалей и console font. Во время builder-run stage-файл `/var/lib/template-build/bootstrap-status` также содержит только ASCII-код. Это исключает mojibake при передаче stage через `qm guest exec`/QGA. После seal builder state удаляется, но `guest-status` остаётся полезной для обычных Full Clone VM.
 
 ## Доступ
 
@@ -188,9 +217,10 @@ SSH host keys отсутствуют
 /var/lib/template-build отсутствует
 template-bootstrap отсутствует
 template-finalize отсутствует
+guest-status существует и executable
 ```
 
-Эти assertions выполняются и внутри guest finalize, и повторно host-side через QGA. Это делает root-only/machine-clean contract fail-closed.
+Эти assertions выполняются и внутри guest finalize, и повторно host-side через QGA. `guest-status` не является builder-only artifact и сохраняется в итоговом template v7.
 
 ## Cloud-Init renderer
 
@@ -209,7 +239,7 @@ Renderer:
 - запрещает unresolved markers;
 - атомарно записывает итоговый Cloud-Init.
 
-CI дополнительно запускает `cloud-init schema` на результате production renderer.
+CI дополнительно запускает `cloud-init schema` на результате production renderer, извлекает встроенный `guest-status`, проверяет его `bash -n`/ShellCheck и подтверждает фиксированный набор ASCII stage-codes.
 
 ## Clone lifecycle
 
@@ -231,7 +261,7 @@ Full Clone from 9000
 9000 отсутствует
 → BUILD
 
-валидный template v6
+валидный template v7
 → SKIP
 
 валидный template без protection
@@ -248,11 +278,11 @@ foreign VM/LXC или incompatible template
 
 ## `/etc/vm-template-info`
 
-Template v6 записывает, в частности:
+Template v7 записывает, в частности:
 
 ```text
 Шаблон: tpl-debian13
-Версия-шаблона: 6
+Версия-шаблона: 7
 ОС: Debian 13
 Тип-ядра: amd64
 Management-user: root
@@ -272,6 +302,8 @@ ShellCheck
 production renderer
 YAML parse
 cloud-init schema
+embedded guest-status syntax/ShellCheck
+ASCII builder stage-code contract
 template contract unit tests
 absence of legacy create-template.sh
 ```
@@ -283,11 +315,12 @@ absence of legacy create-template.sh
 3. noVNC/tty1 и serial fallback;
 4. regular kernel + framebuffer;
 5. QGA;
-6. locked root password / SSH key-only;
-7. root SSH с injected public key;
-8. unique machine-id и SSH host keys;
-9. filesystem growth после resize;
-10. отсутствие builder artifacts и baked-in authorized_keys.
+6. `guest-status` в builder и Full Clone;
+7. locked root password / SSH key-only;
+8. root SSH с injected public key;
+9. unique machine-id и SSH host keys;
+10. filesystem growth после resize;
+11. отсутствие builder artifacts и baked-in authorized_keys.
 
 ## История
 
@@ -296,3 +329,4 @@ absence of legacy create-template.sh
 - **v4** — `ops + NOPASSWD sudo`, VGA/noVNC и regular amd64 kernel; прежний baseline.
 - **v5** — эксперимент с pinned Debian build и APT snapshot; отменён и номер не переиспользуется.
 - **v6** — единый management user `root`, пароль root locked, root SSH только по ключу, разные identities различаются ключами.
+- **v7** — постоянная `guest-status`, ASCII telemetry builder stage через QGA и host-side русские подписи без mojibake.

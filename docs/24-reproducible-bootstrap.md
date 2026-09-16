@@ -8,8 +8,8 @@
 
 ```text
 Public Bootstrap:        PUBLIC_BOOTSTRAP_VERSION=10
-PVE Configuration:      PVE_CONFIGURATION_VERSION=19
-Debian VM template:     Template-Version 6
+PVE Configuration:      PVE_CONFIGURATION_VERSION=20
+Debian VM template:     Template-Version 7
 ```
 
 ## Public Bootstrap
@@ -155,8 +155,12 @@ Host-side pipeline:
 62-template-build.sh
 → создать VM builder
 → provisioning/QGA/Cloud-Init
+→ ASCII stage telemetry через QGA
+→ host-side русские подписи этапов
 → verification reboot
+→ проверить guest-status
 → fail-closed guest cleanup
+→ сохранить guest-status как часть guest contract
 → standard Proxmox Cloud-Init
 → qm template
 → protection=1
@@ -182,28 +186,33 @@ templates/debian13/template-finalize.sh
 Текущая модель:
 
 ```text
-Template-Version 6
+Template-Version 7
 официальный Debian 13 trixie/latest
 → SHA-512 verification
 → обычные Debian repositories
 → apt update/full-upgrade
 → root-only key-based SSH policy
+→ persistent /usr/local/sbin/guest-status
 → сборка template
 ```
 
 Фактически использованный image и SHA-512 записываются в `/etc/vm-template-info`, а Proxmox description содержит:
 
 ```text
-template-version=6
+template-version=7
 ```
 
-`Template-Version` — версия guest/template contract, а не pin внешнего Debian build. Усиление host-side validation/locking/ownership/CI не повышает Template-Version, пока содержимое guest contract остаётся v6.
+`Template-Version` — версия guest/template contract, а не pin внешнего Debian build. v7 отличается от v6 содержимым guest: в template сохраняется диагностическая команда `guest-status`, а builder telemetry имеет новый ASCII stage-code contract.
 
 PVE Configuration принимает существующий template только если полный host-visible contract соответствует текущему baseline. Проверяются CPU/RAM, SCSI controller, system disk/storage/flags/minimum size, exact Cloud-Init volume `local-lvm:vm-9000-cloudinit` с `media=cdrom`, VirtIO network/bridge, boot order, QGA, console и protection. Exact Cloud-Init volume не позволяет обычному ISO/CD-ROM формально пройти contract.
 
 `template_guest_exec` нормализует plain CLI output и structured QGA output. Incomplete structured result (`pid` без завершения, `exited=0`), signal или ненулевой exitcode считается ошибкой; synchronous timeout не может быть принят за успешный stdout.
 
-Guest cleanup fail-closed: до `qm template` подтверждается отсутствие generic `debian`, machine-id, SSH host keys, `/root/.ssh`, build state и builder scripts. Незавершённая VM-сборщик сохраняется для диагностики.
+Builder stage-файл `/var/lib/template-build/bootstrap-status` содержит только ASCII identifiers (`apt-metadata`, `qga-install`, `base-packages`, `services` и т. п.). Localized русские подписи формируются на PVE host и поэтому не проходят через QGA byte/string transport. Это устраняет mojibake в progress output независимо от обработки non-ASCII `guest-exec` data конкретной версией Proxmox/QEMU.
+
+`guest-status` выводит собственную диагностику ASCII-only и доступна как в builder, так и в Full Clone. Она показывает stage, package/service state QGA, virtio channel, Cloud-Init status, IP addresses и uptime.
+
+Guest cleanup fail-closed: до `qm template` подтверждается отсутствие generic `debian`, machine-id, SSH host keys, `/root/.ssh`, build state и builder scripts. Одновременно проверяется, что `/usr/local/sbin/guest-status` осталась executable. Незавершённая VM-сборщик сохраняется для диагностики.
 
 ## LXC appliance
 
@@ -256,8 +265,10 @@ Repository checks должны проверять как минимум:
 - ShellCheck с учётом sourced-module architecture;
 - production Cloud-Init renderer;
 - `cloud-init schema` итогового документа;
+- embedded `guest-status` extraction + `bash -n` + ShellCheck;
+- точный ASCII stage-code contract builder-а;
 - template contract unit tests, включая ложный обычный CD-ROM;
-- guest-exec result/timeout unit tests;
+- guest-exec result/timeout и local stage-label unit tests;
 - API token rollback unit tests;
 - негативный тест malformed guest directory;
 - whitespace errors;
@@ -280,6 +291,7 @@ Project scripts должны:
 - не делать молчаливый destructive overwrite локального drift;
 - использовать общий orchestration lock для операций над canonical runtime;
 - сохранять одноразовые credentials атомарно и откатывать только вновь созданные текущим run credentials при обычном failure/interruption;
+- для QGA progress telemetry передавать machine-readable ASCII identifiers, а localized presentation формировать host-side;
 - версионировать собственные contracts;
 - соблюдать security boundaries;
 - останавливать выполнение при неоднозначном или несовместимом state.

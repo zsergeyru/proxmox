@@ -26,7 +26,7 @@ agent: 1
 vga: std
 serial0: socket
 ipconfig0: ip=dhcp
-description: template-version=6
+description: template-version=7
 protection: 1'
 
 validate_template_contract "$valid_config" 1

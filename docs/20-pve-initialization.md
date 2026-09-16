@@ -11,7 +11,7 @@ PUBLIC_BOOTSTRAP_VERSION=10
 
 PVE Configuration
 zsergeyru/proxmox/scripts/pve/setup/configure-pve.sh
-PVE_CONFIGURATION_VERSION=19
+PVE_CONFIGURATION_VERSION=20
 ```
 
 `Public Bootstrap` отвечает за безопасное получение/обновление private source of truth, выбор точной Git revision, root trust boundary canonical source и handoff. `PVE Configuration` является единственным host-side orchestrator и повторяемо приводит Proxmox VE к ожидаемому состоянию проекта, включая template `9000`.
@@ -171,7 +171,8 @@ scripts/pve/setup/
 ├── tests/
 │   ├── test-template-contract.sh
 │   ├── test-template-guest-exec.sh
-│   └── test-token-rollback.sh
+│   ├── test-token-rollback.sh
+│   └── test-source-trust.sh
 └── lib/
     ├── 00-common.sh
     ├── 10-preflight.sh
@@ -208,7 +209,8 @@ shared lock + root-trusted source SHA/clean check
 → roles/users/API tokens/ACL
 → effective permissions + real API auth
 → optional template source preparation
-→ builder/provision/reboot verification
+→ builder/provisioning + ASCII stage telemetry
+→ verification reboot + guest-status check
 → guest cleanup
 → seal template
 → final template contract
@@ -392,7 +394,7 @@ Target:
 ```text
 VMID: 9000
 name: tpl-debian13
-Template-Version: 6
+Template-Version: 7
 root password: locked
 root SSH: public-key only
 protection: 1
@@ -413,8 +415,11 @@ Template pipeline встроен в PVE Configuration:
 62-template-build.sh
 → VM builder
 → QGA/Cloud-Init/bootstrap
+→ ASCII stage-code через QGA
+→ русская подпись этапа формируется host-side
 → verification reboot
 → normalized guest exec
+→ guest-status verification
 → cleanup assertions
 → standard Cloud-Init
 → qm template
@@ -434,6 +439,16 @@ templates/debian13/cloud-init.yaml
 templates/debian13/template-bootstrap.sh
 templates/debian13/template-finalize.sh
 ```
+
+В Template v7 сохраняется:
+
+```text
+/usr/local/sbin/guest-status
+```
+
+Команда предназначена для быстрой диагностики из Proxmox Console и Full Clone. Она выводит ASCII-only информацию о текущем builder stage, QGA package/service, virtio channel, Cloud-Init, IP и uptime. ASCII выбран намеренно, чтобы диагностика была читаема ещё до полной настройки console font/locale.
+
+Во время build `/var/lib/template-build/bootstrap-status` содержит только machine-readable ASCII stage code. Это устраняет mojibake при прохождении статуса через `qm guest exec`/QGA; локализованная русская строка строится уже PVE Configuration на host.
 
 Host-visible contract проверяет:
 
@@ -457,7 +472,7 @@ ciuser=root
 ciupgrade=0
 ipconfig0=ip=dhcp
 cicustom отсутствует
-description содержит template-version=6
+description содержит template-version=7
 protection=1 после pipeline
 ```
 
@@ -465,7 +480,7 @@ protection=1 после pipeline
 
 `template_guest_exec` принимает plain-output CLI variants и structured QGA results. Structured result с `pid`/`exited=0`, отсутствующим подтверждённым `exitcode`, ненулевым exitcode или signal считается ошибкой; timeout не может быть принят за успешный guest stdout.
 
-Guest cleanup fail-closed подтверждает отсутствие `debian`, machine-id, SSH host keys, `/root/.ssh`, build-state и builder scripts до `qm template`.
+Guest cleanup fail-closed подтверждает отсутствие `debian`, machine-id, SSH host keys, `/root/.ssh`, build-state и builder scripts до `qm template`. Одновременно host-side проверяется, что `guest-status` осталась executable и будет частью v7.
 
 Unfinished builder намеренно сохраняется для диагностики. Foreign/incompatible VMID 9000 не удаляется автоматически.
 
@@ -486,16 +501,19 @@ bash -n
 ShellCheck
 production Cloud-Init renderer
 cloud-init schema
+embedded guest-status bash -n / ShellCheck
+ASCII builder stage-code contract
 Template contract unit tests
-Guest exec result/timeout unit tests
+Guest exec result/timeout + stage-label unit tests
 API token rollback unit tests
+source trust boundary test
 negative malformed guest directory test
 git diff --check
 ```
 
 `validate_repo.py` рассматривает каждый `guests/*/guest.yaml`; каталог, не соответствующий `NNN-name`, является ошибкой, а не молча пропускается.
 
-CI не заменяет реальный PVE integration test. По принятой policy после существенного изменения guest/template assets требуется clean template build + Full Clone smoke-test.
+CI не заменяет реальный PVE integration test. По принятой policy после существенного изменения guest/template assets требуется clean template build + Full Clone smoke-test, включая `guest-status`.
 
 ## 16. Status
 
