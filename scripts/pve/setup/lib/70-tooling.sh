@@ -20,8 +20,9 @@ EOF_STATUS
 
     local deployer_src="${REPO_DIR}/scripts/pve/deploy-guest.py"
     if [[ ! -f "$deployer_src" ]]; then
-        if [[ -x /usr/local/sbin/deploy-guest ]]; then
-            warn "Команда /usr/local/sbin/deploy-guest существует, но её source ${deployer_src} отсутствует."
+        if [[ -e /usr/local/sbin/deploy-guest ]]; then
+            rm -f /usr/local/sbin/deploy-guest
+            warn "Исходный файл deploy-guest отсутствует: ${deployer_src}. Старая локальная команда удалена."
         else
             warn "Исходный файл deploy-guest пока отсутствует: ${deployer_src}"
         fi
@@ -31,22 +32,115 @@ EOF_STATUS
     cat >/usr/local/sbin/deploy-guest <<EOF_DEPLOY
 #!/usr/bin/env bash
 set -Eeuo pipefail
+
+REPO_DIR="${REPO_DIR}"
+RUNTIME_DIR="${RUNTIME_DIR}"
+STATE_DIR="${STATE_DIR}"
+PRIVATE_REPO="${PRIVATE_REPO}"
+PRIVATE_BRANCH="${PRIVATE_BRANCH}"
+SSH_CONFIG="${SSH_CONFIG}"
+DEPLOY_USER="${DEPLOY_USER}"
+LOCK_FILE="${LOCK_FILE}"
 SOURCE="${deployer_src}"
-if [[ \$EUID -eq 0 ]]; then
-    exec runuser -u ${DEPLOY_USER} -- /usr/bin/python3 "\$SOURCE" "\$@"
-elif [[ \$(id -un) == "${DEPLOY_USER}" ]]; then
-    exec /usr/bin/python3 "\$SOURCE" "\$@"
-else
-    echo "deploy-guest нужно запускать от root или ${DEPLOY_USER}" >&2
+
+fail() {
+    printf 'ОШИБКА: %s\\n' "\$*" >&2
     exit 1
+}
+
+[[ \$EUID -eq 0 ]] || fail "deploy-guest нужно запускать только от root"
+
+for cmd in git ssh flock runuser find stat; do
+    command -v "\$cmd" >/dev/null 2>&1 || fail "Не найдена обязательная команда: \$cmd"
+done
+
+[[ -d "\$REPO_DIR/.git" ]] || fail "Каноническая копия Git отсутствует: \$REPO_DIR. Сначала выполните PVE Configuration."
+[[ -r "\$SSH_CONFIG" ]] || fail "Не найден root-only SSH config для GitHub: \$SSH_CONFIG"
+
+exec 9>"\$LOCK_FILE"
+flock -n 9 || fail "Другой Public Bootstrap, PVE Configuration или deploy-guest уже выполняется"
+
+canonical_git() {
+    env GIT_SSH_COMMAND="ssh -F \$SSH_CONFIG" \\
+        git -c "safe.directory=\$REPO_DIR" "\$@"
+}
+
+assert_repo_trust() {
+    local violation parent_owner parent_mode
+    parent_owner="\$(stat -c '%U:%G' "\$RUNTIME_DIR" 2>/dev/null || true)"
+    parent_mode="\$(stat -c '%a' "\$RUNTIME_DIR" 2>/dev/null || true)"
+    [[ "\$parent_owner" == "root:\$DEPLOY_USER" && "\$parent_mode" == "750" ]] \\
+        || fail "\$RUNTIME_DIR должен быть root:\$DEPLOY_USER 0750, обнаружено \${parent_owner:-?} \${parent_mode:-?}"
+
+    violation="\$(find "\$REPO_DIR" -xdev \\( -type f -o -type d \\) \\( ! -uid 0 -o -perm /022 \\) -print -quit 2>/dev/null || true)"
+    [[ -z "\$violation" ]] \\
+        || fail "Каноническая копия Git не защищена: \$violation не принадлежит root или доступен на запись группе/остальным"
+}
+
+assert_clean_repo() {
+    local status
+    status="\$(canonical_git -C "\$REPO_DIR" status --porcelain=v1 --untracked-files=all --ignored)" \\
+        || fail "Не удалось проверить состояние Git в \$REPO_DIR"
+    [[ -z "\$status" ]] \\
+        || fail "В \$REPO_DIR есть локальные изменения. Автоматическое удаление запрещено. Первый элемент: \$(head -n1 <<<"\$status")"
+}
+
+assert_repo_trust
+
+origin_url="\$(canonical_git -C "\$REPO_DIR" remote get-url origin 2>/dev/null || true)"
+[[ "\$origin_url" == "\$PRIVATE_REPO" ]] \\
+    || fail "Неожиданный адрес Git: \${origin_url:-не задан}. Ожидается \$PRIVATE_REPO"
+
+assert_clean_repo
+
+current_revision="\$(canonical_git -C "\$REPO_DIR" rev-parse HEAD 2>/dev/null || true)"
+known_origin_revision="\$(canonical_git -C "\$REPO_DIR" rev-parse "refs/remotes/origin/\$PRIVATE_BRANCH" 2>/dev/null || true)"
+[[ "\$current_revision" =~ ^[0-9a-f]{40}\$ ]] || fail "Не удалось определить текущую версию Git"
+[[ "\$known_origin_revision" =~ ^[0-9a-f]{40}\$ ]] || fail "Не удалось определить ранее полученную origin/\$PRIVATE_BRANCH"
+[[ "\$current_revision" == "\$known_origin_revision" ]] \\
+    || fail "Текущая версия Git отличается от ранее полученной origin/\$PRIVATE_BRANCH. Автоматическое переключение запрещено."
+
+printf 'Обновление Git %s...\\n' "\$PRIVATE_BRANCH"
+canonical_git -C "\$REPO_DIR" fetch --depth 1 origin "\$PRIVATE_BRANCH"
+revision="\$(canonical_git -C "\$REPO_DIR" rev-parse FETCH_HEAD 2>/dev/null || true)"
+[[ "\$revision" =~ ^[0-9a-f]{40}\$ ]] || fail "Не удалось определить полученную версию Git"
+
+if [[ "\$current_revision" != "\$revision" ]]; then
+    canonical_git -C "\$REPO_DIR" reset --hard "\$revision"
+    canonical_git -C "\$REPO_DIR" clean -ffd
 fi
+
+chmod -R go-w "\$REPO_DIR"
+assert_repo_trust
+assert_clean_repo
+
+final_revision="\$(canonical_git -C "\$REPO_DIR" rev-parse HEAD 2>/dev/null || true)"
+[[ "\$final_revision" == "\$revision" ]] \\
+    || fail "После обновления Git ожидалась версия \$revision, получена \$final_revision"
+
+revision_tmp="\$(mktemp "\$STATE_DIR/.last-revision.deploy.XXXXXX")"
+printf '%s\\n' "\$revision" >"\$revision_tmp"
+chown root:"\$DEPLOY_USER" "\$revision_tmp"
+chmod 0640 "\$revision_tmp"
+mv -f "\$revision_tmp" "\$STATE_DIR/last-revision"
+
+[[ -f "\$SOURCE" ]] || fail "После обновления Git не найден основной файл deploy-guest: \$SOURCE"
+printf 'Версия Git: %s\\n' "\$revision"
+
+set +e
+runuser -u "\$DEPLOY_USER" -- env DEPLOY_GUEST_SOURCE_REVISION="\$revision" \\
+    /usr/bin/python3 "\$SOURCE" "\$@"
+rc=\$?
+set -e
+exit "\$rc"
 EOF_DEPLOY
-    chmod 0755 /usr/local/sbin/deploy-guest
-    ok "Установлена обёртка /usr/local/sbin/deploy-guest"
+    chown root:root /usr/local/sbin/deploy-guest
+    chmod 0700 /usr/local/sbin/deploy-guest
+    ok "Установлена root-only обёртка /usr/local/sbin/deploy-guest"
 }
 
 report_status() {
-    local ready=1 smoke_state
+    local ready=1 smoke_state deploy_owner deploy_mode
     local deployer_src="${REPO_DIR}/scripts/pve/deploy-guest.py"
 
     printf '\n%s%sPVE CONFIGURATION STATUS%s\n\n' "$C_BOLD" "$C_CYAN" "$C_RESET"
@@ -91,10 +185,20 @@ report_status() {
             ;;
     esac
 
-    if [[ -x /usr/local/sbin/deploy-guest && -f "$deployer_src" ]]; then
-        ok "Команда deploy-guest установлена и source существует"
-    elif [[ -x /usr/local/sbin/deploy-guest ]]; then
-        printf '%s%s[ОЖИДАНИЕ]%s Команда deploy-guest существует, но её source отсутствует\n' "$C_BOLD" "$C_YELLOW" "$C_RESET"
+    if [[ -e /usr/local/sbin/deploy-guest ]]; then
+        deploy_owner="$(stat -c '%U:%G' /usr/local/sbin/deploy-guest 2>/dev/null || true)"
+        deploy_mode="$(stat -c '%a' /usr/local/sbin/deploy-guest 2>/dev/null || true)"
+    else
+        deploy_owner=""
+        deploy_mode=""
+    fi
+
+    if [[ -x /usr/local/sbin/deploy-guest && -f "$deployer_src" \
+        && "$deploy_owner" == "root:root" && "$deploy_mode" == "700" ]]; then
+        ok "Команда deploy-guest установлена как root:root 0700 и source существует"
+    elif [[ -e /usr/local/sbin/deploy-guest ]]; then
+        printf '%s%s[ОШИБКА]%s deploy-guest имеет неверное состояние: owner=%s mode=%s source=%s\n' \
+            "$C_BOLD" "$C_RED" "$C_RESET" "${deploy_owner:-?}" "${deploy_mode:-?}" "$deployer_src"
         ready=0
     else
         printf '%s%s[ОЖИДАНИЕ]%s deploy-guest пока не реализован\n' "$C_BOLD" "$C_YELLOW" "$C_RESET"
