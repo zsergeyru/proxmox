@@ -1,4 +1,8 @@
-# Политика сборки `tpl-debian13`
+# Контракт сборки `tpl-debian13`
+
+**Type:** Specification  
+**Status:** Active  
+**Source of truth:** Yes — для полного build/runtime contract template `9000`, его host-visible параметров, cleanup и Full Clone smoke-test.
 
 ```text
 Template-Version: 7
