@@ -1,8 +1,8 @@
-# Версии и воспроизводимость bootstrap/template
+# Версии и воспроизводимость Public Bootstrap / PVE Configuration / template
 
 ## Статус
 
-Архитектура bootstrap/deploy сохраняется. Не используется прежнее усложнённое решение по жёсткой фиксации каждой внешней версии и общему recovery lock.
+Архитектура bootstrap/deploy сохраняется простой: мы явно версионируем собственные project contracts, но не фиксируем каждую внешнюю stable-версию без практической необходимости.
 
 ## Template
 
@@ -24,28 +24,17 @@ Template-Version 6
 → сборка template
 ```
 
-Не используются:
-
-```text
-pinned Debian cloud build
-snapshot.debian.org
-отдельный external version lock
-общий recovery mode для builder
-```
-
-Фактически использованный image и его SHA-512 записываются в `/etc/vm-template-info`, а Proxmox description содержит marker:
+Фактически использованный image и SHA-512 записываются в `/etc/vm-template-info`, а Proxmox description содержит:
 
 ```text
 template-version=6
 ```
 
-Это позволяет Stage 1 отличить совместимый root-only template от старых baseline.
+Это позволяет PVE Configuration отличить совместимый root-only template от старых baseline.
 
 ## Совместимость template
 
-`Template-Version` является не pin внешнего Debian build, а **версией нашего project contract**.
-
-Поэтому переход v4 → v6 означает реальное изменение поведения:
+`Template-Version` — версия project contract, а не pin внешнего Debian build.
 
 ```text
 v4
@@ -57,17 +46,29 @@ v6
 → root SSH only by public key
 ```
 
-Stage 1 не мигрирует и не перезаписывает защищённый старый `9000` автоматически. Несовместимая версия вызывает STOP и требует отдельной осознанной пересборки.
+PVE Configuration не мигрирует и не перезаписывает защищённый старый `9000` автоматически. Несовместимая версия вызывает STOP и отдельную осознанную пересборку.
 
-## Bootstrap/deploy versions
+## Версии project-owned компонентов
 
-Для project-owned scripts версии повышаются, когда меняется их контракт/поведение. Текущий private bootstrap:
+Public entrypoint:
 
 ```text
-BOOTSTRAP_VERSION=12
+PUBLIC_BOOTSTRAP_VERSION=5
+zsergeyru/proxmox-bootstrap/bootstrap-pve.sh
 ```
 
-Для внешних stable components базовый принцип остаётся проще:
+Private host configuration:
+
+```text
+PVE_CONFIGURATION_VERSION=13
+scripts/pve/setup/configure-pve.sh
+```
+
+Версии повышаются, когда меняется контракт или поведение компонента. Они не означают номер последовательного «этапа».
+
+Legacy `STAGE0_VERSION` и `BOOTSTRAP_VERSION` больше не являются каноническими version names; старые paths/marker поддерживаются только как compatibility layer.
+
+Для внешних stable components принцип:
 
 ```text
 обычная установка
@@ -76,11 +77,9 @@ BOOTSTRAP_VERSION=12
 → проверка результата
 ```
 
-Если для конкретного компонента позже потребуется pin/recovery baseline, он добавляется точечно и обоснованно.
+Если конкретному компоненту позже потребуется pin/recovery baseline, он добавляется точечно.
 
-## Что отменено из предыдущего эксперимента
-
-Не являются обязательными требованиями:
+## Что не является обязательным
 
 ```text
 BOOTSTRAP_MODE=normal/recovery
@@ -92,27 +91,29 @@ Proximo exact package pin
 Debian APT snapshot
 ```
 
-Эти механизмы могут использоваться точечно, если появится практическая необходимость.
+Эти механизмы могут использоваться только при появлении практической необходимости.
 
-## Что остаётся обязательным
+## Обязательные правила
 
-Даже при простой version policy scripts должны:
+Project scripts должны:
 
 - проверять скачиваемые artefacts checksum/signature механизмами, если они доступны;
 - не хранить secrets в Git;
 - явно проверять результат установки;
 - не делать молчаливый destructive overwrite;
 - фиксировать достаточную provenance-информацию;
-- проверять compatibility project contracts (например Template-Version 6);
-- соблюдать security boundaries.
+- проверять compatibility project contracts, например Template-Version 6;
+- соблюдать security boundaries;
+- сохранять совместимость старых entrypoint только через тонкие wrappers, а не дублировать реализацию.
 
 ## Связанные документы
 
 - [`20-pve-initialization.md`](20-pve-initialization.md);
+- [`21-pve-filesystem-layout.md`](21-pve-filesystem-layout.md);
 - [`31-bootstrap.md`](31-bootstrap.md);
 - [`../templates/debian13/README.md`](../templates/debian13/README.md);
 - [`../templates/debian13/build-policy.md`](../templates/debian13/build-policy.md).
 
 ## Главный принцип
 
-> Не фиксировать внешние версии без практической необходимости, но явно версионировать собственные контракты, когда изменение влияет на совместимость и безопасность deploy.
+> Не фиксировать внешние версии без практической необходимости, но явно версионировать собственные contracts, когда изменение влияет на совместимость и безопасность deploy.
