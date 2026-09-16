@@ -1,66 +1,66 @@
-# Bootstrap `301-ai-control`
+# Ввод в работу `301-ai-control`
 
-**Type:** Runbook  
-**Status:** Active  
-**Source of truth:** Yes — для последовательности создания, ввода и проверки `301-ai-control`.
+**Тип:** Инструкция  
+**Статус:** Действующий  
+**Основной источник:** Да — для последовательности создания, ввода и проверки `301-ai-control`.
 
-Этот документ отвечает на вопрос **«как ввести `301-ai-control` в работу»**. Архитектура и границы ответственности принадлежат [`50-ai-control.md`](50-ai-control.md), credential policy — [`23-security.md`](23-security.md), PVE permissions — [`25-pve-access-control.md`](25-pve-access-control.md), initial guest access — [`33-guest-bootstrap-and-provisioning.md`](33-guest-bootstrap-and-provisioning.md).
+Этот документ отвечает на вопрос **«как ввести `301-ai-control` в работу»**. Архитектура и границы ответственности принадлежат [`50-ai-control.md`](50-ai-control.md), правила учётных данных — [`23-security.md`](23-security.md), права PVE — [`25-pve-access-control.md`](25-pve-access-control.md), начальный доступ к гостевой системе — [`33-guest-bootstrap-and-provisioning.md`](33-guest-bootstrap-and-provisioning.md).
 
 ## 1. Предварительные условия
 
 Перед созданием `301` должны быть готовы:
 
-- успешно настроенный PVE host;
-- current template `9000`, соответствующий contract;
-- host-side `pve_guest_ed25519`;
-- `deployer@pve!host-deploy` для host-side deployment;
-- `ai-agent@pve!infra` и ACL model, подготовленные PVE Configuration;
-- private project repository доступен host-side;
-- manifest `guests/301-ai-control/guest.yaml` соответствует текущему guest contract.
+- успешно настроенный PVE-хост;
+- текущий шаблон `9000`, соответствующий спецификации;
+- SSH-ключ PVE `pve_guest_ed25519`;
+- `deployer@pve!host-deploy` для развёртывания со стороны PVE;
+- `ai-agent@pve!infra` и ACL, подготовленные PVE Configuration;
+- закрытый репозиторий проекта доступен со стороны PVE;
+- манифест `guests/301-ai-control/guest.yaml` соответствует текущей спецификации гостевых систем.
 
 `301` не должен быть необходим для собственного первоначального создания.
 
 ## 2. Создание VM 301
 
-Первоначальный lifecycle выполняется host-side:
+Первоначальный жизненный цикл выполняется со стороны PVE:
 
 ```text
-operator / deploy-guest
+оператор / deploy-guest
 → deployer@pve!host-deploy
-→ Full Clone current template 9000
-→ применить guest desired state
-→ передать host-side public SSH key через Cloud-Init
-→ start
+→ полный клон текущего шаблона 9000
+→ применить требуемое состояние гостевой системы
+→ передать открытый SSH-ключ PVE через Cloud-Init
+→ запустить
 → дождаться QGA/Cloud-Init
-→ verify root SSH
+→ проверить SSH root
 ```
 
-Management user:
+Административный пользователь:
 
 ```text
 root
 ```
 
-Password authentication запрещена; initial access выполняется по `pve_guest_ed25519`.
+Вход по паролю запрещён; начальный доступ выполняется по `pve_guest_ed25519`.
 
-## 3. Проверка initial readiness
+## 3. Проверка начальной готовности
 
-До установки AI platform подтвердить:
+До установки AI-платформы подтвердить:
 
 ```text
 VM запущена
 QEMU Guest Agent доступен
 Cloud-Init завершён
-root SSH по host-side key работает
-hostname/network соответствуют desired state
-нет неожиданного password SSH
+SSH root по ключу PVE работает
+имя хоста и сеть соответствуют требуемому состоянию
+вход по SSH с паролем неожиданно не включён
 ```
 
-Optional bootstrap capabilities запускаются только после работающего management SSH.
+Необязательная первичная настройка запускается только после появления рабочего административного SSH-доступа.
 
-## 4. Подготовка common AI platform
+## 4. Подготовка общей AI-платформы
 
-Внутри 301 создать базовую структуру:
+Внутри `301` создать базовую структуру:
 
 ```text
 /opt/ai-control/
@@ -72,11 +72,11 @@ Optional bootstrap capabilities запускаются только после �
 └── state/
 ```
 
-Common platform должна подготовить необходимые runtime dependencies, Git/OpenSSH и container/runtime tooling согласно реализации проекта.
+Общая платформа должна подготовить необходимые зависимости, Git/OpenSSH и средства запуска контейнеров согласно реализации проекта.
 
-Agent-specific software не должен владеть common Proximo, infrastructure SSH identity или project checkout как отдельными дубликатами.
+Программное обеспечение конкретного агента не должно владеть собственной копией общего Proximo, инфраструктурного SSH-ключа или репозитория проекта.
 
-## 5. Создание AI guest-management SSH identity
+## 5. Создание SSH-ключа AI для гостевых систем
 
 Создать отдельную пару:
 
@@ -88,20 +88,20 @@ Agent-specific software не должен владеть common Proximo, infrast
 Правила:
 
 ```text
-private key
+закрытый ключ
 → остаётся внутри 301
 → не копируется на PVE
 → не хранится в Git
 
-public key
-→ может передаваться Linux guests, которым разрешён direct AI SSH
+открытый ключ
+→ может передаваться Linux-гостям, которым разрешён прямой SSH AI
 ```
 
-Не использовать этот keypair как GitHub credential.
+Не использовать эту пару как GitHub-ключ.
 
-## 6. GitHub identity
+## 6. GitHub-ключ
 
-Для private infrastructure repository использовать отдельный Git credential/keypair.
+Для закрытого инфраструктурного репозитория использовать отдельный Git-ключ.
 
 Цель:
 
@@ -112,19 +112,19 @@ git@github.com:zsergeyru/proxmox.git
 После настройки:
 
 ```text
-clone/fetch project
+клонировать или обновить проект
 → /opt/ai-control/repos/proxmox
-→ verify expected origin
-→ verify clean checkout
+→ проверить ожидаемый origin
+→ проверить отсутствие локальных изменений
 ```
 
-GitHub identity и guest-management SSH identity не взаимозаменяемы.
+GitHub-ключ и SSH-ключ управления гостевыми системами не взаимозаменяемы.
 
 ## 7. Настройка Proximo
 
-Установить/настроить Proximo как общий MCP к Proxmox.
+Установить и настроить Proximo как общий MCP к Proxmox.
 
-Credential:
+Учётная запись:
 
 ```text
 ai-agent@pve!infra
@@ -133,136 +133,136 @@ ai-agent@pve!infra
 После настройки проверить минимум:
 
 ```text
-API authentication
-read/status permitted objects
-clone access к template 9000
-write access в /pool/managed
-отсутствие ожидаемо запрещённых host-level permissions
+аутентификация API
+чтение состояния разрешённых объектов
+право клонирования шаблона 9000
+право изменения объектов в /pool/managed
+отсутствие ожидаемо запрещённых прав уровня PVE-хоста
 ```
 
-Точная ACL matrix определяется [`25-pve-access-control.md`](25-pve-access-control.md).
+Точная матрица ACL определяется [`25-pve-access-control.md`](25-pve-access-control.md).
 
-## 8. Установка AI agent
+## 8. Установка AI-агента
 
-Agent-specific runtime размещается в:
+Программное обеспечение конкретного агента размещается в:
 
 ```text
 /opt/ai-control/agents/<agent>/
 ```
 
-Hermes или другой agent должен использовать common platform:
+Hermes или другой агент должен использовать общую платформу:
 
 ```text
-common Proximo
-common project checkout
-common AI guest-management SSH identity
+общий Proximo
+общая рабочая копия проекта
+общая SSH-пара AI для гостевых систем
 ```
 
-Не генерировать отдельную infrastructure keypair на каждый agent без отдельного решения.
+Не генерировать отдельную инфраструктурную пару ключей для каждого агента без отдельного решения.
 
-## 9. Проверка PVE lifecycle через test guest
+## 9. Проверка жизненного цикла PVE на тестовой гостевой системе
 
-После ввода Proximo выполнить контролируемый live-test:
+После ввода Proximo выполнить контролируемую проверку:
 
 ```text
-AI agent
+AI-агент
 → Proximo
-→ clone/create test guest
-→ сразу pool=managed
-→ CPU/RAM/disk/network config
-→ передать AI public key
-→ start
-→ verify
+→ клонировать или создать тестовую гостевую систему
+→ сразу поместить в pool=managed
+→ настроить CPU/RAM/диск/сеть
+→ передать открытый ключ AI
+→ запустить
+→ проверить
 ```
 
 Проверить:
 
-1. test guest действительно создан в `managed`;
-2. AI может выполнять разрешённые guest-level PVE operations;
-3. template `9000` не стал managed guest;
-4. AI не получил широкого host-level доступа;
-5. direct root SSH по `ai_control_ed25519` работает, если key был передан.
+1. тестовая гостевая система действительно создана в `managed`;
+2. AI может выполнять разрешённые операции уровня VM/LXC;
+3. шаблон `9000` не стал гостевой системой `managed`;
+4. AI не получил широкого доступа уровня PVE-хоста;
+5. прямой SSH `root` по `ai_control_ed25519` работает, если ключ был передан.
 
-## 10. Проверка независимости PVE ACL и SSH
+## 10. Проверка независимости ACL PVE и SSH
 
 Отдельно подтвердить два независимых механизма:
 
 ```text
-managed membership
-→ PVE lifecycle/config permissions
+членство в managed
+→ права на жизненный цикл и конфигурацию в PVE
 
 ai_control_ed25519.pub в authorized_keys
-→ direct SSH внутрь guest OS
+→ прямой SSH внутрь гостевой ОС
 ```
 
-Тест:
+Проверка:
 
-1. удалить AI public key из test guest;
-2. убедиться, что direct AI SSH перестал работать;
-3. убедиться, что host-side SSH продолжает работать;
-4. убедиться, что PVE permissions в `managed` не изменились;
-5. переместить test guest в/из `managed` только в безопасной тестовой процедуре и подтвердить, что это само по себе не редактирует `authorized_keys`.
+1. удалить открытый AI-ключ из тестовой гостевой системы;
+2. убедиться, что прямой SSH AI перестал работать;
+3. убедиться, что SSH со стороны PVE продолжает работать;
+4. убедиться, что права PVE в `managed` не изменились;
+5. переместить тестовую гостевую систему в `managed` или из него только в безопасной тестовой процедуре и подтвердить, что это само по себе не редактирует `authorized_keys`.
 
-## 11. Handoff к Ansible / 311
+## 11. Передача повторяемой настройки Ansible / 311
 
-После готовности `311-dev-services` проверить, что provisioning использует отдельную SSH identity.
+После готовности `311-dev-services` проверить, что Ansible использует отдельную SSH-пару.
 
 ```text
-301 AI / operator
-→ Git desired configuration
+301 AI / оператор
+→ конфигурация в Git
 → Ansible на 311
-→ root SSH отдельным provisioning key
-→ target guest
+→ SSH root отдельным ключом Ansible
+→ целевая гостевая система
 ```
 
-AI direct SSH и Ansible SSH остаются независимыми.
+Прямой SSH AI и SSH Ansible остаются независимыми.
 
-## 12. Backup и recovery
+## 12. Резервное копирование и восстановление
 
-До признания 301 production-ready:
+До признания `301` готовым к постоянной эксплуатации:
 
-- включить VM backup согласно [`22-storage-and-backup.md`](22-storage-and-backup.md);
-- учитывать, что backup 301 содержит чувствительные private credentials;
-- проверить способ восстановления Git credential, AI SSH identity и Proximo configuration;
-- выполнить restore-test согласно [`27-backup-and-disaster-recovery-runbook.md`](27-backup-and-disaster-recovery-runbook.md).
+- включить резервное копирование VM согласно [`22-storage-and-backup.md`](22-storage-and-backup.md);
+- учитывать, что резервная копия `301` содержит чувствительные закрытые ключи и другие учётные данные;
+- проверить способ восстановления Git-ключа, SSH-ключа AI и конфигурации Proximo;
+- выполнить практическую проверку восстановления согласно [`27-backup-and-disaster-recovery-runbook.md`](27-backup-and-disaster-recovery-runbook.md).
 
-## 13. Acceptance checklist
+## 13. Приёмочные проверки
 
-`301-ai-control` готов к замене legacy `320`, когда подтверждено:
+`301-ai-control` готов к замене устаревающего `320`, когда подтверждено:
 
 ```text
-301 создаётся host-side без зависимости от работающего 301
-QGA + Cloud-Init healthy
-host-side root SSH работает
-AI guest-management SSH identity отдельная
-GitHub identity отдельная
-project checkout работает
-Proximo authenticates as ai-agent@pve!infra
-AI создаёт test guest сразу в managed
-AI выполняет разрешённые lifecycle operations
-AI direct SSH работает своим ключом
-удаление AI key отзывает только AI SSH
-managed membership не синхронизирует authorized_keys
-Ansible/311 использует отдельную identity
-301 не получает обычную managed write-zone на собственную VM
-backup/recovery проверены
+301 создаётся со стороны PVE без зависимости от работающего 301
+QGA и Cloud-Init работают
+SSH root со стороны PVE работает
+SSH-ключ AI для гостевых систем отдельный
+GitHub-ключ отдельный
+рабочая копия проекта работает
+Proximo входит как ai-agent@pve!infra
+AI создаёт тестовую гостевую систему сразу в managed
+AI выполняет разрешённые операции жизненного цикла
+прямой SSH AI работает собственным ключом
+удаление AI-ключа отзывает только SSH AI
+членство managed не синхронизирует authorized_keys
+Ansible/311 использует отдельный ключ
+301 не получает обычную зону изменения managed на собственную VM
+резервное копирование и восстановление проверены
 ```
 
-До прохождения checklist `320-ai-control` не удаляется.
+До прохождения всех проверок `320-ai-control` не удаляется.
 
-## 14. Failure / rollback
+## 14. Ошибка и безопасное восстановление
 
-Если bootstrap 301 остановился:
+Если настройка `301` остановилась:
 
 ```text
 не удалять 320
-не ротировать working credentials без необходимости
-сохранить logs/state
-определить failed layer: guest / SSH / Git / Proximo / agent
-исправить prerequisite
-повторить только безопасный idempotent stage
+не менять работающие учётные данные без необходимости
+сохранить журналы и состояние
+определить проблемный слой: гостевая система / SSH / Git / Proximo / агент
+исправить предварительное условие
+повторить только безопасный идемпотентный этап
 ```
 
-Если live-test оставил test guest, сначала определить его происхождение и состояние. Не удалять неизвестный VM/LXC только по VMID без проверки.
+Если проверка оставила тестовую гостевую систему, сначала определить её происхождение и состояние. Не удалять неизвестный VM/LXC только по VMID без проверки.
 
-Главное правило: **runbook описывает последовательность ввода 301; архитектурные решения и permission contracts остаются в профильных Specification/Policy документах.**
+Главное правило: **эта инструкция описывает последовательность ввода `301`; архитектурные решения и точные права остаются в профильных Спецификациях и Политиках.**
