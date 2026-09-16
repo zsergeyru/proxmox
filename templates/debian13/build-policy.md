@@ -128,7 +128,7 @@ Description шаблона должен содержать:
 template-version=6
 ```
 
-Stage 1 использует этот marker вместе с `ciuser=root` для проверки совместимости существующего VMID 9000.
+PVE Configuration использует этот marker вместе с остальными параметрами полного template contract для проверки совместимости существующего VMID 9000.
 
 ## 7. Full Clone policy
 
@@ -206,7 +206,7 @@ Pinned cloud build ID и APT snapshot не являются частью policy.
 
 При build error временная VM/disks не уничтожаются автоматически: состояние сохраняется для диагностики.
 
-Stage 1 также не мигрирует старый template на v6 автоматически: несовместимая версия вызывает STOP до любых попыток использовать её как clone source.
+PVE Configuration также не мигрирует старый template на v6 автоматически: несовместимая версия или другой параметр template contract вызывает STOP до любых попыток использовать его как clone source.
 
 ## 13. Проверка
 
