@@ -7,11 +7,11 @@
 ```text
 PUBLIC BOOTSTRAP
 zsergeyru/proxmox-bootstrap/bootstrap-pve.sh
-PUBLIC_BOOTSTRAP_VERSION=6
+PUBLIC_BOOTSTRAP_VERSION=7
 
 PVE CONFIGURATION
 zsergeyru/proxmox/scripts/pve/setup/configure-pve.sh
-PVE_CONFIGURATION_VERSION=14
+PVE_CONFIGURATION_VERSION=15
 ```
 
 Канонические документы:
@@ -39,7 +39,7 @@ curl -fsSL https://raw.githubusercontent.com/zsergeyru/proxmox-bootstrap/main/bo
 curl -fsSL https://raw.githubusercontent.com/zsergeyru/proxmox-bootstrap/main/bootstrap-pve.sh | bash -s -- --update-system
 ```
 
-### Первый запуск
+### Чистый первый запуск
 
 ```text
 root/PVE check
@@ -49,6 +49,8 @@ root/PVE check
 → temporary read-only GitHub Deploy Key
 → private repo authorization
 → temporary shallow checkout main
+→ определить точный HEAD
+→ PVE_CONFIGURATION_SOURCE_REVISION=<HEAD>
 → запуск PVE Configuration
 → cleanup /var/lib/proxmox-bootstrap
 → bootstrap-complete
@@ -56,32 +58,68 @@ root/PVE check
 
 Если Deploy Key ещё не зарегистрирован, Public Bootstrap показывает public half, ждёт подтверждение пользователя и повторно проверяет доступ. Private keys и token secrets через Git не передаются.
 
-Постоянный marker:
+### Resume незавершённого первого запуска
+
+Отсутствие `bootstrap-complete` больше не означает, что созданный permanent runtime надо удалять.
+
+Если canonical runtime уже готов для Git refresh:
 
 ```text
-/var/lib/proxmox-deployer/state/bootstrap-complete
+pvedeploy существует
+canonical Deploy Key существует
+known_hosts существует
+SSH config существует
+/var/lib/proxmox-deployer/repo/.git существует
 ```
 
-Если marker отсутствует, но permanent checkout или permanent Deploy Key уже существуют, запуск останавливается как на несогласованном test-state. Для нового проекта такой state не мигрируется автоматически.
-
-### Повторный запуск
-
-После завершённого первоначального bootstrap новый Deploy Key не создаётся. Public Bootstrap выполняет refresh/handoff:
+Public Bootstrap:
 
 ```text
-проверить pvedeploy
-→ проверить canonical Deploy Key/known_hosts/SSH config
-→ проверить /var/lib/proxmox-deployer/repo и origin
+использует существующий credential
+→ обновляет canonical checkout
+→ запускает текущую PVE Configuration
+→ после успешного завершения удаляет оставшийся temporary runtime
+→ создаёт bootstrap-complete
+```
+
+Если permanent runtime только частично создан, first-run path продолжается через temporary runtime. Существующие permanent credentials не удаляются и не ротируются автоматически.
+
+Это позволяет после ошибки исправить причину и запустить **ту же команду ещё раз**, не теряя одноразовые API token secrets.
+
+### Повторный запуск после завершённого bootstrap
+
+При наличии `bootstrap-complete` выполняется:
+
+```text
+проверить permanent runtime
+→ проверить origin canonical checkout
 → подтвердить read-only доступ к zsergeyru/proxmox/main
 → fetch main
 → reset --hard FETCH_HEAD
 → clean -ffd
-→ запустить актуальный scripts/pve/setup/configure-pve.sh
+→ определить полученный HEAD
+→ передать его в PVE Configuration
 ```
 
-Git-команды выполняются от имени `pvedeploy` с постоянным SSH config.
+Повреждённый permanent credential не восстанавливается путём молчаливой ротации.
 
-Повреждённый permanent runtime не восстанавливается путём молчаливой ротации credentials.
+## Одна private revision на один run
+
+Public Bootstrap выбирает revision до запуска PVE Configuration и передаёт:
+
+```text
+PVE_CONFIGURATION_SOURCE_REVISION=<40-char SHA>
+```
+
+Дальше весь configuration run привязан к этому SHA.
+
+Если canonical checkout уже находится на ожидаемой revision, PVE Configuration не выполняет лишний fetch/reset. Если checkout отстаёт, допускается fetch только при условии, что `FETCH_HEAD` **точно совпадает** с source revision текущего run. Если `main` успел продвинуться дальше, выполнение останавливается вместо смешивания кода из разных commits.
+
+Фактически применённая revision записывается в:
+
+```text
+/var/lib/proxmox-deployer/state/last-revision
+```
 
 ## PVE Configuration
 
@@ -121,10 +159,10 @@ exclusive configuration lock
 → pvedeploy + config.yaml
 → PVE guest SSH identity
 → canonical GitHub Deploy Key
-→ canonical private checkout
+→ canonical private checkout той же source revision
 → managed pool
 → roles/users/API tokens/ACL
-→ effective permission checks
+→ effective token permission checks
 → token API authentication checks
 → capacity/source checks
 → template 9000
@@ -144,11 +182,7 @@ PVE Configuration не читает `guest.yaml` или `guests/defaults.yaml` �
 --update-system
 ```
 
-включает:
-
-```text
-apt full-upgrade
-```
+включает `apt full-upgrade`.
 
 ## PVE guest SSH identity
 
@@ -164,18 +198,10 @@ PVE Configuration создаёт и сохраняет:
 Поведение:
 
 ```text
-private + public отсутствуют
-→ создать Ed25519 keypair
-
-private существует
-→ не ротировать
-→ восстановить .pub из private
-
-private отсутствует, public существует
-→ STOP
+private + public отсутствуют → создать Ed25519 keypair
+private существует → не ротировать, восстановить .pub
+private отсутствует, public существует → STOP
 ```
-
-Private key должен входить во внешнюю backup policy infrastructure secrets.
 
 ## LXC readiness
 
@@ -214,13 +240,24 @@ Builder:
 scripts/pve/create-template.sh
 ```
 
-Template description содержит:
+PVE Configuration теперь использует один полный host-visible contract как для существующего template, так и после новой сборки:
 
 ```text
-template-version=6
+name=tpl-debian13
+template=1
+agent=1
+vga=std
+serial0=socket
+ciuser=root
+ciupgrade=0
+ipconfig0=ip=dhcp
+cicustom отсутствует
+description содержит template-version=6
 ```
 
-Если существующий VMID `9000` не соответствует contract, PVE Configuration выполняет STOP. Protected template автоматически не удаляется и не заменяется.
+После `ensure_template` дополнительно обязательно `protection=1`.
+
+Если существующий VMID `9000` не соответствует contract, выполняется STOP. Единственное автоматически исправляемое отклонение — отсутствие `protection=1` у в остальном совместимого template после предварительного configuration snapshot.
 
 ## Root-only guest management
 
@@ -241,7 +278,7 @@ LXC → ssh-public-keys для root
 
 ## PVE identities и ACL
 
-Используются две разные PVE identities:
+Используются две PVE identities:
 
 ```text
 deployer@pve!host-deploy
@@ -254,25 +291,17 @@ ai-agent@pve!infra
 → template 9000 отдельно как clone source
 ```
 
-Разрешённые storage/network paths выдаются отдельно согласно [`25-pve-access-control.md`](25-pve-access-control.md).
+Policy ролей и ACL остаётся additive-only. Новый token создаётся с `privsep=1`; существующий `privsep=0` по принятой политике не меняется автоматически.
 
-Policy ролей и ACL additive-only: недостающие privileges/ACL добавляются, существующие дополнительные автоматически не удаляются.
-
-Новый token создаётся с `privsep=1`. После настройки выполняются effective permission checks и реальная token+secret авторизация в локальном Proxmox API.
-
-## `managed` и SSH — разные границы
+Effective permissions API-токенов проверяются штатной PVE-командой:
 
 ```text
-managed pool
-→ PVE permissions AI
-
-AI public key в guest
-→ direct SSH AI
+pveum user token permissions <userid> <tokenid>
 ```
 
-Pool membership не управляет `authorized_keys` внутри guest OS.
+После этого выполняется реальная token+secret авторизация в локальном Proxmox API.
 
-## Runtime
+## Runtime и status
 
 Постоянные каталоги:
 
@@ -301,57 +330,12 @@ PVE Configuration log:
 /var/log/proxmox-deployer/configure-pve.log
 ```
 
-## Canonical private checkout
-
-```text
-/var/lib/proxmox-deployer/repo
-```
-
-Existing checkout проверяется на ожидаемый origin до fetch/reset. Неожиданный origin не переписывается автоматически.
-
-Canonical GitHub Deploy Key и `pve_guest_ed25519` никогда не переиспользуются друг вместо друга.
-
-## Stable status command
+Stable status command:
 
 ```text
 /usr/local/sbin/pve-configuration-status
 ```
 
-Команда читает:
-
-```text
-/var/lib/proxmox-deployer/state/state.json
-```
-
-## `deploy-guest`
-
-Планируемый source:
-
-```text
-scripts/pve/deploy-guest.py
-```
-
-Stable wrapper после реализации:
-
-```text
-/usr/local/sbin/deploy-guest
-```
-
-Пока source отсутствует, PVE Configuration сообщает `partial`.
-
-## Повторный запуск и safety
-
-Штатный повторный запуск всегда начинается с Public Bootstrap, который обновляет canonical private checkout и запускает актуальную PVE Configuration.
-
-Safety-sensitive drift не исправляется молча:
-
-- неизвестный/несовместимый VMID `9000` → STOP;
-- disabled project PVE user → STOP;
-- token существует, а secret потерян → STOP;
-- guest private SSH key потерян при сохранившемся public → STOP;
-- неожиданный Git origin → STOP;
-- нестандартная PVE/Ceph repository configuration → STOP.
-
 Главный принцип:
 
-> Public Bootstrap отвечает только за private source acquisition/refresh и handoff. PVE Configuration отвечает за воспроизводимое состояние PVE host. Credentials, protected template и другие потенциально разрушительные объекты не меняются автоматически при неоднозначном state.
+> Public Bootstrap отвечает за доступ к private source of truth, resume и выбор точной revision. PVE Configuration отвечает за воспроизводимое состояние Proxmox host. Credentials не ротируются молча, а один configuration run никогда не должен смешивать две private Git revisions.
