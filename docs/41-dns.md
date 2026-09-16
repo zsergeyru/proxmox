@@ -1,5 +1,11 @@
 # DNS и mDNS
 
+**Type:** Specification  
+**Status:** Active  
+**Source of truth:** Yes — для DNS/home.arpa/SmartDNS/mDNS contract проекта.
+
+Фактическое DNS-состояние работающего PVE хранится в [`../host/pve/network/README.md`](../host/pve/network/README.md), а не в этом документе.
+
 ## Основной внутренний DNS-домен
 
 Для управляемых имён домашней инфраструктуры принимается домен:
@@ -67,18 +73,9 @@ target:  10.0.1.9
 
 На текущем этапе клиенты, переведённые на новый DNS-контур, используют `192.168.1.9` как DNS-сервер. После миграции MAIN-сети постоянным адресом становится `10.0.1.9`.
 
-## Текущее состояние
+## `home.arpa` и search suffix
 
-На Proxmox-хосте `pve` по состоянию на 2026-09-12 наблюдается:
-
-```text
-search home.arpa
-nameserver 192.168.1.1
-```
-
-То есть текущим DNS-сервером для хоста является Keenetic `192.168.1.1`, а `home.arpa` уже используется как DNS search suffix.
-
-`search home.arpa` не создаёт DNS-зону сам по себе. Он означает, что короткое имя, например:
+`search home.arpa` на клиенте не создаёт DNS-зону сам по себе. Он означает только, что короткое имя, например:
 
 ```text
 pve
@@ -92,7 +89,7 @@ pve.home.arpa
 
 если соответствующая DNS-запись существует.
 
-После перехода DNS-функций на `109-network-gateway` именно SmartDNS-контур и локальные/authoritative records должны обслуживать `home.arpa`.
+После перехода DNS-функций на `109-network-gateway` SmartDNS-контур и локальные/authoritative records должны обслуживать `home.arpa`.
 
 ## mDNS
 
@@ -128,8 +125,8 @@ mDNS по умолчанию рассчитан на локальный L2-се�
 Целевая сеть имеет отдельные сегменты:
 
 ```text
-MAIN             10.0.0.0/16
-IOT / VLAN 20    10.20.0.0/16
+MAIN              10.0.0.0/16
+IOT / VLAN 20     10.20.0.0/16
 CAMERAS / VLAN 30 10.30.0.0/16
 ```
 
@@ -149,6 +146,7 @@ mDNS через VPN не считается обязательной часть�
 
 ## Связанные документы
 
-- [`40-network.md`](40-network.md) — IPv4/VLAN/VPN-архитектура.
-- [`42-ipv6.md`](42-ipv6.md) — dual stack и IPv6.
+- [`40-network.md`](40-network.md) — IPv4/VLAN/VPN contract;
+- [`42-ipv6.md`](42-ipv6.md) — dual-stack policy;
+- [`../host/pve/network/README.md`](../host/pve/network/README.md) — observed network/DNS state PVE;
 - [`../guests/109-network-gateway/README.md`](../guests/109-network-gateway/README.md) — реализация DNS и маршрутизации на сетевом шлюзе.
