@@ -1,6 +1,6 @@
 # Безопасность инфраструктуры
 
-**Type:** Policy / Reference  
+**Type:** Policy  
 **Status:** Active  
 **Source of truth:** Yes — для общих security rules, management SSH model и lifecycle технических SSH identities.
 
