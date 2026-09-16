@@ -29,6 +29,7 @@ MEMORY_MB="${MEMORY_MB:-1024}"
 CORES="${CORES:-1}"
 DISK_SIZE="${DISK_SIZE:-16G}"
 WAIT_SECONDS="${WAIT_SECONDS:-1200}"
+WAIT_PROGRESS_SECONDS="${WAIT_PROGRESS_SECONDS:-15}"
 TEMPLATE_VERSION="${TEMPLATE_VERSION:-6}"
 
 IMAGE_URL="${IMAGE_URL:-https://cloud.debian.org/images/cloud/trixie/latest/debian-13-genericcloud-amd64.qcow2}"
@@ -73,11 +74,31 @@ vm_exists() {
     qm status "$VMID" >/dev/null 2>&1
 }
 
+wait_progress() {
+    local phase=$1
+    local started=$2
+    local limit=$3
+    local detail=${4:-}
+    local elapsed=$((SECONDS - started))
+    local vm_state
+    vm_state="$(qm status "$VMID" 2>/dev/null | awk '{print $2}' || true)"
+    [[ -n "$vm_state" ]] || vm_state="unknown"
+    printf '[ОЖИДАНИЕ] %s: %ss/%ss, VM=%s%s\n' "$phase" "$elapsed" "$limit" "$vm_state" "$detail"
+}
+
 wait_for_agent() {
-    local deadline=$((SECONDS + WAIT_SECONDS))
+    local phase=${1:-QEMU Guest Agent}
+    local started=$SECONDS
+    local deadline=$((started + WAIT_SECONDS))
+    local next_report=$started
     while (( SECONDS < deadline )); do
         if qm agent "$VMID" ping >/dev/null 2>&1; then
+            printf '[ОК] %s доступен через %s с\n' "$phase" "$((SECONDS - started))"
             return 0
+        fi
+        if (( SECONDS >= next_report )); then
+            wait_progress "$phase" "$started" "$WAIT_SECONDS" ', agent=нет ответа'
+            next_report=$((SECONDS + WAIT_PROGRESS_SECONDS))
         fi
         sleep 5
     done
@@ -85,12 +106,19 @@ wait_for_agent() {
 }
 
 wait_for_bootstrap() {
-    local deadline=$((SECONDS + WAIT_SECONDS))
+    local started=$SECONDS
+    local deadline=$((started + WAIT_SECONDS))
+    local next_report=$started
     local out
     while (( SECONDS < deadline )); do
         out="$(qm guest exec "$VMID" -- /bin/cat /var/lib/template-build/bootstrap-complete 2>/dev/null || true)"
         if grep -q 'BOOTSTRAP_OK' <<<"$out"; then
+            printf '[ОК] Начальная настройка гостя завершена через %s с\n' "$((SECONDS - started))"
             return 0
+        fi
+        if (( SECONDS >= next_report )); then
+            wait_progress "Начальная настройка гостя" "$started" "$WAIT_SECONDS" ', QGA=ok; выполняются apt/full-upgrade/install'
+            next_report=$((SECONDS + WAIT_PROGRESS_SECONDS))
         fi
         sleep 5
     done
@@ -98,19 +126,44 @@ wait_for_bootstrap() {
 }
 
 wait_for_cloud_init() {
+    local started=$SECONDS
+    local deadline=$((started + WAIT_SECONDS))
+    local next_report=$started
     local out
-    out="$(qm guest exec "$VMID" -- /bin/bash -lc "timeout ${WAIT_SECONDS}s cloud-init status --wait && printf CLOUD_INIT_DONE")"
-    grep -q 'CLOUD_INIT_DONE' <<<"$out"
+    while (( SECONDS < deadline )); do
+        out="$(qm guest exec "$VMID" -- /bin/bash -lc 'cloud-init status' 2>/dev/null || true)"
+        if grep -q 'status: done' <<<"$out"; then
+            printf '[ОК] Cloud-Init завершён через %s с\n' "$((SECONDS - started))"
+            return 0
+        fi
+        if grep -q 'status: error' <<<"$out"; then
+            printf '%s\n' "$out" >&2
+            return 1
+        fi
+        if (( SECONDS >= next_report )); then
+            wait_progress "Cloud-Init" "$started" "$WAIT_SECONDS" ', QGA=ok; status ещё не done'
+            next_report=$((SECONDS + WAIT_PROGRESS_SECONDS))
+        fi
+        sleep 5
+    done
+    return 1
 }
 
 wait_for_new_boot_id() {
     local previous=$1
-    local deadline=$((SECONDS + WAIT_SECONDS))
+    local started=$SECONDS
+    local deadline=$((started + WAIT_SECONDS))
+    local next_report=$started
     local current
     while (( SECONDS < deadline )); do
         current="$(qm guest exec "$VMID" -- /bin/cat /proc/sys/kernel/random/boot_id 2>/dev/null || true)"
         if [[ -n "$current" && "$current" != "$previous" ]]; then
+            printf '[ОК] Проверочная перезагрузка завершена через %s с\n' "$((SECONDS - started))"
             return 0
+        fi
+        if (( SECONDS >= next_report )); then
+            wait_progress "Проверочная перезагрузка" "$started" "$WAIT_SECONDS" ', ожидается новый boot_id/QGA'
+            next_report=$((SECONDS + WAIT_PROGRESS_SECONDS))
         fi
         sleep 5
     done
@@ -118,10 +171,18 @@ wait_for_new_boot_id() {
 }
 
 wait_for_stopped() {
-    local deadline=$((SECONDS + 300))
+    local limit=300
+    local started=$SECONDS
+    local deadline=$((started + limit))
+    local next_report=$started
     while (( SECONDS < deadline )); do
         if [[ "$(qm status "$VMID" | awk '{print $2}')" == "stopped" ]]; then
+            printf '[ОК] VM-сборщик выключена через %s с\n' "$((SECONDS - started))"
             return 0
+        fi
+        if (( SECONDS >= next_report )); then
+            wait_progress "Выключение VM-сборщика" "$started" "$limit"
+            next_report=$((SECONDS + WAIT_PROGRESS_SECONDS))
         fi
         sleep 3
     done
@@ -136,6 +197,8 @@ done
 [[ "$VMID" =~ ^[0-9]+$ ]] || die "VMID должен быть числом"
 [[ "$TEMPLATE_VERSION" =~ ^[0-9]+$ ]] || die "TEMPLATE_VERSION должен быть числом"
 [[ "$WAIT_SECONDS" =~ ^[0-9]+$ ]] || die "WAIT_SECONDS должен быть числом"
+[[ "$WAIT_PROGRESS_SECONDS" =~ ^[0-9]+$ ]] || die "WAIT_PROGRESS_SECONDS должен быть числом"
+(( WAIT_PROGRESS_SECONDS >= 5 )) || die "WAIT_PROGRESS_SECONDS должен быть не меньше 5 секунд"
 
 vm_exists && die "VMID ${VMID} уже существует. Скрипт не будет перезаписывать или удалять его."
 pvesm status --storage "$DISK_STORAGE" >/dev/null 2>&1 || die "Хранилище '${DISK_STORAGE}' недоступно"
@@ -390,8 +453,8 @@ qm set "$VMID" --cicustom "user=${SNIPPET_VOL}"
 log "Запуск временной VM-сборщика"
 qm start "$VMID"
 
-log "Ожидание QEMU Guest Agent"
-wait_for_agent || die "QEMU Guest Agent не стал доступен за ${WAIT_SECONDS} секунд"
+log "Ожидание первого QEMU Guest Agent (Cloud-Init выполняет apt update/full-upgrade и устанавливает agent)"
+wait_for_agent "QEMU Guest Agent" || die "QEMU Guest Agent не стал доступен за ${WAIT_SECONDS} секунд"
 
 log "Ожидание завершения начальной настройки гостя"
 wait_for_bootstrap || die "Начальная настройка гостя не завершилась за ${WAIT_SECONDS} секунд. Проверьте консоль VM ${VMID} и журналы cloud-init."
@@ -403,7 +466,7 @@ log "Перезагрузка VM-сборщика на обычное ядро D
 BOOT_ID_BEFORE="$(qm guest exec "$VMID" -- /bin/cat /proc/sys/kernel/random/boot_id)"
 qm reboot "$VMID"
 wait_for_new_boot_id "$BOOT_ID_BEFORE" || die "VM-сборщик не завершила проверочную перезагрузку за ${WAIT_SECONDS} секунд"
-wait_for_agent || die "QEMU Guest Agent не подключился повторно после проверочной перезагрузки"
+wait_for_agent "QEMU Guest Agent после перезагрузки" || die "QEMU Guest Agent не подключился повторно после проверочной перезагрузки"
 
 log "Проверка ядра, framebuffer и консольных служб после перезагрузки"
 VERIFY_OUTPUT="$(qm guest exec "$VMID" -- /bin/bash -lc '
