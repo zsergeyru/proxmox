@@ -1,7 +1,9 @@
 # 301 — ai-control
 
 **Тип:** VM  
-**Статус:** целевой управляющий AI-узел; `320-ai-control` сохраняется до завершения live-проверки.
+**Статус:** целевой управляющий AI-узел; `320-ai-control` сохраняется до завершения приёмочной проверки.
+
+Основная архитектурная спецификация находится в [`../../docs/50-ai-control.md`](../../docs/50-ai-control.md), а порядок ввода в работу — в [`../../docs/51-ai-control-bootstrap.md`](../../docs/51-ai-control-bootstrap.md). Этот README фиксирует только особенности конкретной VM `301`.
 
 ## Архитектура каталогов
 
@@ -22,43 +24,45 @@
 
 Ключевое правило:
 
-> Конкретный AI-агент устанавливается в `/opt/ai-control/agents/<agent>/`. Docker, Proximo, SSH identities и Git checkout являются общими компонентами `301` и не принадлежат Hermes.
+> Конкретный AI-агент устанавливается в `/opt/ai-control/agents/<agent>/`. Docker, Proximo, SSH-ключи и рабочая копия Git являются общими компонентами `301` и не принадлежат Hermes.
 
 ## Целевая последовательность
 
-Старые archived scripts не считаются канонической реализацией. Новый flow должен логически разделять:
+Старые архивные скрипты не считаются действующей реализацией. Последовательность логически разделяется на три этапа:
 
 ```text
-1. host-side deploy VM 301
-   PVE → Full Clone Template-Version 6 → root SSH по pve_guest_ed25519
+1. создание VM 301 со стороны PVE
+   PVE → Full Clone текущего шаблона 9000 → SSH root по pve_guest_ed25519
 
-2. common platform внутри 301
-   Docker + common tooling + Proximo + SSH identities
+2. общая платформа внутри 301
+   Docker + общие инструменты + Proximo + отдельные SSH-ключи
 
-3. agent-specific install
-   Hermes или другой agent → UI/integration/config
+3. установка конкретного агента
+   Hermes или другой агент → интерфейс, интеграции и конфигурация
 ```
 
-Это позволяет заменить агента или установить несколько агентов без пересоздания общей platform части.
+Это позволяет заменить агента или установить несколько агентов без пересоздания общей платформы.
 
 ## Этап 1 — VM
 
-Первоначальное создание `301` выполняется host-side, потому что control plane не должен зависеть от собственного существования.
+Первоначальное создание `301` выполняется со стороны PVE, потому что управляющий контур не должен зависеть от собственного существования.
 
 Ожидается:
 
-- Full Clone `9000 → 301` из Template-Version 6;
-- CPU/RAM/disk/network/Cloud-Init;
+- Full Clone текущего шаблона `9000`;
+- настройка CPU, RAM, диска, сети и Cloud-Init;
 - `ciuser=root`;
-- host-side `pve_guest_ed25519.pub` в root authorized_keys;
-- `protection=0`, `onboot=1` согласно manifest;
-- first boot + QGA/cloud-init/root-SSH health.
+- открытый ключ `pve_guest_ed25519.pub` в `authorized_keys` пользователя `root`;
+- `protection=0`, `onboot=1` согласно манифесту;
+- первый запуск, работа QGA/Cloud-Init и SSH `root`.
 
-PVE identity AI (`ai-agent@pve!infra`) создаётся Stage 1 по общей ACL policy и затем безопасно передаётся Proximo runtime внутри `301`.
+Точная версия и параметры шаблона не дублируются здесь и определяются [`../../templates/debian13/build-policy.md`](../../templates/debian13/build-policy.md).
 
-## Этап 2 — common AI platform
+Учётная запись AI в PVE (`ai-agent@pve!infra`) создаётся PVE Configuration по общей политике ACL и затем используется Proximo внутри `301`.
 
-Common platform должна подготовить независимо от выбранного агента:
+## Этап 2 — общая AI-платформа
+
+Общая платформа должна подготовить независимо от выбранного агента:
 
 - Docker Engine;
 - Docker Buildx;
@@ -66,43 +70,36 @@ Common platform должна подготовить независимо от в
 - Git/OpenSSH/curl/jq/OpenSSL;
 - Python/venv/pip;
 - Proximo в `/opt/ai-control/mcp/proximo`;
-- AI guest-management identity;
-- отдельную GitHub identity.
+- отдельный SSH-ключ AI для гостевых систем;
+- отдельный GitHub-ключ.
 
-SSH identities:
-
-```text
-/opt/ai-control/ssh/ai_control_ed25519(.pub)
-/opt/ai-control/ssh/github_proxmox_repo_ed25519(.pub)
-```
-
-После common-platform этапа `/opt/ai-control/agents/` может оставаться пустым.
+После этого этапа `/opt/ai-control/agents/` может оставаться пустым.
 
 ## Этап 3 — конкретный агент
 
-Agent-specific software размещается строго под:
+Программное обеспечение конкретного агента размещается строго под:
 
 ```text
 /opt/ai-control/agents/<agent>/
 ```
 
-Agent installer использует уже подготовленные common Proximo и SSH identities, а не генерирует их заново.
+Установщик агента использует уже подготовленные общие Proximo и SSH-ключи, а не создаёт их заново.
 
 ## Proximo
 
-Канонический Proxmox MCP — **Proximo** (`proximo-proxmox`):
+Основной MCP для Proxmox — **Proximo** (`proximo-proxmox`):
 
 ```text
 /opt/ai-control/mcp/proximo/
 ```
 
-PVE hard boundary задаётся `ai-agent@pve!infra` и ACL. Основная write-zone — `managed`.
+Жёсткая граница прав PVE задаётся `ai-agent@pve!infra` и ACL. Основная зона изменения — `managed`.
 
-`301` не получает штатных прав на host network, IAM/ACL, SDN infrastructure, storage definitions, repositories/certificates или reboot/shutdown PVE и не входит в собственную обычную PVE write-zone.
+`301` штатно не получает прав на сеть PVE-хоста, управление пользователями и ACL, инфраструктуру SDN, определения хранилищ, репозитории и сертификаты PVE, а также перезагрузку или выключение физического PVE. Сам `301` не входит в собственную обычную зону изменения AI.
 
-## SSH identities
+## SSH-ключи
 
-AI guest-management identity:
+Ключ AI для управления гостевыми системами:
 
 ```text
 /opt/ai-control/ssh/ai_control_ed25519
@@ -112,83 +109,67 @@ AI guest-management identity:
 Использование:
 
 ```text
-private key
+закрытый ключ
 → остаётся только в 301
 
-public key
+открытый ключ
 → устанавливается в /root/.ssh/authorized_keys тех Debian VM/LXC,
-  где разрешён direct AI SSH
+  где разрешён прямой SSH AI
 
-AI agent
+AI-агент
 → ssh root@guest
 ```
 
-Generic user `ops` не используется.
+Универсальный пользователь `ops` не используется.
 
-AI public key не привязан автоматически к `managed`: pool регулирует PVE operations, а наличие key регулирует direct guest SSH. Если AI SSH к конкретной машине надо запретить, удаляется только AI public key.
+Открытый ключ AI не привязан автоматически к `managed`: пул регулирует операции PVE, а наличие ключа — прямой SSH внутрь гостевой системы. Если SSH-доступ AI к конкретной машине надо запретить, удаляется только открытый ключ AI.
 
-GitHub Deploy Key:
+Отдельный GitHub Deploy Key:
 
 ```text
 /opt/ai-control/ssh/github_proxmox_repo_ed25519
 /opt/ai-control/ssh/github_proxmox_repo_ed25519.pub
 ```
 
-используется только для private Git и не подменяет guest-management identity.
+используется только для закрытого Git-репозитория и не заменяет SSH-ключ управления гостевыми системами.
 
-## Создание гостя самим AI
+## Создание гостевой системы самим AI
 
-Для обычного нового guest:
+Для обычной новой гостевой системы:
 
 ```text
-AI agent
+AI-агент
 → Proximo
-→ create/clone сразу в managed
-→ передать ai_control_ed25519.pub в initial SSH keyset
+→ создать или клонировать сразу в managed
+→ передать ai_control_ed25519.pub в начальный набор SSH-ключей
 → для VM: Cloud-Init root sshkeys
 → для LXC: ssh-public-keys для root
-→ start
-→ verify root SSH
+→ запустить
+→ проверить SSH root
 ```
 
-Если AI control располагает зарегистрированным public half host-side key, в initial keyset также добавляется `pve_guest_ed25519.pub`. Private host key в 301 не копируется.
+Если AI Control располагает зарегистрированной открытой частью ключа PVE, в начальный набор также добавляется `pve_guest_ed25519.pub`. Закрытый ключ PVE в `301` не копируется.
 
 ## Git
 
-GitHub identity создаётся отдельно от infrastructure SSH identity. После регистрации Deploy Key private repo клонируется в:
+GitHub-ключ создаётся отдельно от инфраструктурного SSH-ключа. После регистрации Deploy Key закрытый репозиторий клонируется в:
 
 ```text
 /opt/ai-control/repos/proxmox
 ```
 
-Private keys не хранятся в Git.
+Закрытые ключи не хранятся в Git.
 
 ## Механизмы управления
 
 ```text
-Proximo MCP        → PVE lifecycle/config/snapshots/backups в разрешённой зоне
-AI direct SSH      → произвольные действия внутри guest OS
-Ansible на 311     → repeatable provisioning внутри guest OS
+Proximo MCP        → жизненный цикл, конфигурация, снимки и резервные копии PVE в разрешённой зоне
+прямой SSH AI      → произвольные действия внутри гостевой ОС
+Ansible на 311     → повторяемая настройка внутри гостевой ОС
 ```
 
-Ansible/Semaphore не размещаются внутри `301`.
+Ansible и Semaphore не размещаются внутри `301`.
 
-## Критерии готовности
+## Готовность
 
-До замены `320` проверить:
-
-1. Full Clone `9000 → 301` из Template-Version 6;
-2. host-side `root` SSH в 301 по `pve_guest_ed25519`;
-3. common platform создаёт рабочие Docker/Compose/Proximo;
-4. отдельные `ai_control_ed25519` и GitHub identity созданы;
-5. agent installer не дублирует common identities;
-6. Git Deploy Key зарегистрирован и private repo доступен;
-7. Proximo работает с `ai-agent@pve!infra`;
-8. Proximo создаёт test VM/LXC сразу в `managed`;
-9. `ai_control_ed25519.pub` попадает в root authorized_keys test guest;
-10. `301` входит в test guest по SSH как `root`;
-11. удаление AI public key отзывает direct AI SSH без потери host-side доступа;
-12. перенос guest в/из `managed` не редактирует SSH keys;
-13. затем проверен `311-dev-services`/Ansible отдельным keypair.
-
-Подробности: [`../../docs/51-ai-control-bootstrap.md`](../../docs/51-ai-control-bootstrap.md), [`../../docs/50-ai-control.md`](../../docs/50-ai-control.md), [`../../docs/33-guest-bootstrap-and-provisioning.md`](../../docs/33-guest-bootstrap-and-provisioning.md).
+Полный перечень приёмочных проверок не дублируется здесь. До замены `320` необходимо пройти инструкцию [`../../docs/51-ai-control-bootstrap.md`](../../docs/51-ai-control-bootstrap.md), включая проверку Proximo, `managed`, независимости SSH-ключей, Ansible и резервного копирования.
