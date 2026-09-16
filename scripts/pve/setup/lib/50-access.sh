@@ -224,10 +224,10 @@ verify_permission_set() {
 }
 
 verify_effective_permissions() {
-    local full_token=$1 scope=$2 permissions_json
+    local userid=$1 token_name=$2 full_token=$3 scope=$4 permissions_json
 
-    permissions_json="$(pveum user permissions "$full_token" --output-format json)" \
-        || die "Не удалось получить effective permissions для ${full_token}"
+    permissions_json="$(pveum user token permissions "$userid" "$token_name" --output-format json)" \
+        || die "Не удалось получить effective permissions для API-токена ${full_token}"
 
     case "$scope" in
         host)
@@ -286,8 +286,8 @@ verify_token_api_auth() {
 }
 
 verify_pve_identity() {
-    local full_token=$1 secret_file=$2 scope=$3
-    verify_effective_permissions "$full_token" "$scope"
+    local userid=$1 token_name=$2 full_token=$3 secret_file=$4 scope=$5
+    verify_effective_permissions "$userid" "$token_name" "$full_token" "$scope"
     verify_token_api_auth "$full_token" "$secret_file"
 }
 
@@ -309,6 +309,6 @@ ensure_pve_identities() {
     ensure_host_identity_acls "$HOST_PVE_USER" "$HOST_PVE_TOKEN"
     ensure_ai_identity_acls "$AI_PVE_USER" "$AI_PVE_TOKEN"
 
-    verify_pve_identity "$HOST_PVE_TOKEN" "$HOST_TOKEN_FILE" host
-    verify_pve_identity "$AI_PVE_TOKEN" "$AI_TOKEN_FILE" ai
+    verify_pve_identity "$HOST_PVE_USER" "$HOST_PVE_TOKEN_NAME" "$HOST_PVE_TOKEN" "$HOST_TOKEN_FILE" host
+    verify_pve_identity "$AI_PVE_USER" "$AI_PVE_TOKEN_NAME" "$AI_PVE_TOKEN" "$AI_TOKEN_FILE" ai
 }
