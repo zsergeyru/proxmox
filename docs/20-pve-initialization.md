@@ -7,11 +7,11 @@
 ```text
 Public Bootstrap
 zsergeyru/proxmox-bootstrap/bootstrap-pve.sh
-PUBLIC_BOOTSTRAP_VERSION=8
+PUBLIC_BOOTSTRAP_VERSION=9
 
 PVE Configuration
 zsergeyru/proxmox/scripts/pve/setup/configure-pve.sh
-PVE_CONFIGURATION_VERSION=17
+PVE_CONFIGURATION_VERSION=18
 ```
 
 `Public Bootstrap` отвечает за безопасное получение/обновление private source of truth, выбор точной Git revision и handoff. `PVE Configuration` является единственным host-side orchestrator и повторяемо приводит Proxmox VE к ожидаемому состоянию проекта, включая template `9000`.
@@ -76,6 +76,8 @@ Temporary area:
 ```
 
 Если первый запуск остановился после создания permanent runtime, повторный запуск не требует удаления `/etc/proxmox-deployer` или `/var/lib/proxmox-deployer`. Существующие credentials сохраняются; API token secret и SSH private keys не ротируются автоматически.
+
+Temporary checkout считается disposable. При его повторном использовании Public Bootstrap выполняет fresh fetch/reset и `git clean -ffdx`, поэтому ignored cache/build artifacts не могут заблокировать строгую source-проверку. Это правило не распространяется на permanent checkout, для которого local drift по-прежнему вызывает STOP.
 
 ## 4. Permanent refresh без потери local drift
 
@@ -143,7 +145,9 @@ scripts/pve/setup/
 ├── configure-pve.sh
 ├── render-template-cloud-init.py
 ├── tests/
-│   └── test-template-contract.sh
+│   ├── test-template-contract.sh
+│   ├── test-template-guest-exec.sh
+│   └── test-token-rollback.sh
 └── lib/
     ├── 00-common.sh
     ├── 10-preflight.sh
@@ -200,6 +204,8 @@ Host preflight проверяет:
 - обязательные PVE CLI tools.
 
 Состояние `9000` проверяется сразу после configuration snapshot и до остальных host-side изменений. Foreign VM/LXC, unfinished builder, incompatible template, неожиданный origin, dirty Git checkout, потерянный credential или нестандартная repository configuration приводят к STOP вместо destructive overwrite.
+
+Исходящие HTTP/HTTPS sanity-checks используют connection и total timeout, а canonical SSH transport работает в `BatchMode` с bounded connect/server-alive policy, чтобы сетевой сбой не превращался в неограниченное ожидание.
 
 ## 8. Configuration snapshot и state
 
@@ -327,6 +333,8 @@ ai-agent@pve!infra
 
 Role/ACL policy остаётся additive-only. Новый token создаётся с `privsep=1`; существующий `privsep=0` автоматически не ограничивается.
 
+Новый API token считается завершённо созданным только после атомарного сохранения одноразового secret. Если parsing или запись secret не удались, токен, созданный именно текущим run, удаляется через `pveum user token delete`. Пока secret не подтверждён на диске, token помечен как pending; обычный error/INT/TERM/EXIT cleanup также пытается откатить только этот новый token. Уже существующие tokens никогда не попадают под этот rollback.
+
 Effective permissions проверяются через:
 
 ```text
@@ -397,7 +405,7 @@ cores=1
 memory=1024
 scsihw=virtio-scsi-single
 scsi0 на local-lvm + discard/iothread/ssd + size>=16G
-ide2 Cloud-Init CD-ROM на local-lvm
+ide2 = local-lvm:vm-9000-cloudinit + media=cdrom
 net0 VirtIO / bridge=vmbr0
 boot from scsi0
 agent=1
@@ -410,6 +418,10 @@ cicustom отсутствует
 description содержит template-version=6
 protection=1 после pipeline
 ```
+
+Проверка exact Cloud-Init volume нужна, чтобы обычный ISO/CD-ROM на `ide2` не мог формально пройти contract только из-за `media=cdrom`.
+
+`template_guest_exec` принимает plain-output CLI variants и structured QGA results. Structured result с `pid`/`exited=0`, отсутствующим подтверждённым `exitcode`, ненулевым exitcode или signal считается ошибкой; timeout не может быть принят за успешный guest stdout.
 
 Guest cleanup fail-closed подтверждает отсутствие `debian`, machine-id, SSH host keys, `/root/.ssh`, build-state и builder scripts до `qm template`.
 
@@ -433,6 +445,8 @@ ShellCheck
 production Cloud-Init renderer
 cloud-init schema
 Template contract unit tests
+Guest exec result/timeout unit tests
+API token rollback unit tests
 negative malformed guest directory test
 git diff --check
 ```

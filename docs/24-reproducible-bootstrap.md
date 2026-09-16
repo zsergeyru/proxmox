@@ -7,8 +7,8 @@
 Текущие версии:
 
 ```text
-Public Bootstrap:        PUBLIC_BOOTSTRAP_VERSION=8
-PVE Configuration:      PVE_CONFIGURATION_VERSION=17
+Public Bootstrap:        PUBLIC_BOOTSTRAP_VERSION=9
+PVE Configuration:      PVE_CONFIGURATION_VERSION=18
 Debian VM template:     Template-Version 6
 ```
 
@@ -33,6 +33,8 @@ Public Bootstrap и PVE Configuration используют одну lock:
 Lock удерживается до завершения configuration run. Поэтому другой Bootstrap или прямой `configure-pve.sh` не может одновременно переключить canonical checkout или изменить host configuration.
 
 Если первый запуск прервался после создания permanent runtime, повторная та же команда продолжает bootstrap с существующими credentials и canonical checkout, а не требует удаления runtime.
+
+Temporary checkout `/var/lib/proxmox-bootstrap/private-repo` является disposable. При resume он обновляется на текущий `FETCH_HEAD` и очищается `git clean -ffdx`, включая ignored cache/build artifacts. Permanent checkout остаётся fail-closed: local drift там не удаляется автоматически.
 
 ## PVE Configuration
 
@@ -78,6 +80,32 @@ state.json
 last-run.json
 version
 ```
+
+Canonical GitHub SSH transport использует strict host checking, `BatchMode`, bounded connect timeout и server-alive policy. HTTP/HTTPS sanity-checks также имеют connection и total timeout.
+
+## API token durability
+
+Новый PVE API token имеет одноразовый secret, поэтому создание token и сохранение secret рассматриваются как одна операция.
+
+Алгоритм:
+
+```text
+pveum user token add
+→ отметить token как pending текущего run
+→ разобрать one-time secret
+→ записать secret во временный файл
+→ выставить owner/mode
+→ atomic mv в canonical secret file
+→ снять pending marker
+```
+
+Если parsing или запись не удались, новый token текущего run удаляется через:
+
+```text
+pveum user token delete <userid> <tokenid>
+```
+
+Обычные error/INT/TERM/EXIT paths также пытаются удалить pending token, пока его secret не подтверждён на диске. Уже существующие tokens этим механизмом не удаляются и не ротируются автоматически. `SIGKILL`/авария питания, как и для любой межсистемной операции, не могут быть превращены в полностью атомарную транзакцию.
 
 ## Debian VM template
 
@@ -142,7 +170,9 @@ template-version=6
 
 `Template-Version` — версия guest/template contract, а не pin внешнего Debian build. Усиление host-side validation/locking/CI не повышает Template-Version, пока содержимое guest contract остаётся v6.
 
-PVE Configuration принимает существующий template только если полный host-visible contract соответствует текущему baseline. Проверяются не только name/Cloud-Init markers, но и CPU/RAM, SCSI controller, system disk/storage/flags/minimum size, Cloud-Init drive, VirtIO network/bridge, boot order, QGA, console и protection.
+PVE Configuration принимает существующий template только если полный host-visible contract соответствует текущему baseline. Проверяются CPU/RAM, SCSI controller, system disk/storage/flags/minimum size, exact Cloud-Init volume `local-lvm:vm-9000-cloudinit` с `media=cdrom`, VirtIO network/bridge, boot order, QGA, console и protection. Exact Cloud-Init volume не позволяет обычному ISO/CD-ROM формально пройти contract.
+
+`template_guest_exec` нормализует plain CLI output и structured QGA output. Incomplete structured result (`pid` без завершения, `exited=0`), signal или ненулевой exitcode считается ошибкой; synchronous timeout не может быть принят за успешный stdout.
 
 Guest cleanup fail-closed: до `qm template` подтверждается отсутствие generic `debian`, machine-id, SSH host keys, `/root/.ssh`, build state и builder scripts. Незавершённая VM-сборщик сохраняется для диагностики.
 
@@ -197,7 +227,9 @@ Repository checks должны проверять как минимум:
 - ShellCheck с учётом sourced-module architecture;
 - production Cloud-Init renderer;
 - `cloud-init schema` итогового документа;
-- template contract unit tests;
+- template contract unit tests, включая ложный обычный CD-ROM;
+- guest-exec result/timeout unit tests;
+- API token rollback unit tests;
 - негативный тест malformed guest directory;
 - whitespace errors;
 - отсутствие legacy `scripts/pve/create-template.sh`.
@@ -216,6 +248,7 @@ Project scripts должны:
 - не исполнять dirty worktree под именем чистого SHA;
 - не делать молчаливый destructive overwrite локального drift;
 - использовать общий orchestration lock для операций над canonical runtime;
+- сохранять одноразовые credentials атомарно и откатывать только вновь созданные текущим run credentials при обычном failure/interruption;
 - версионировать собственные contracts;
 - соблюдать security boundaries;
 - останавливать выполнение при неоднозначном или несовместимом state.

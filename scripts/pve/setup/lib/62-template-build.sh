@@ -9,27 +9,59 @@ template_vm_stage() {
 }
 
 template_guest_exec() {
-    local raw exitcode errdata
+    local raw exitcode errdata outdata exited pid signal
     if ! raw="$(qm guest exec "$TEMPLATE_VMID" --timeout "$TEMPLATE_WAIT_SECONDS" -- "$@" 2>&1)"; then
         [[ -n "$raw" ]] && printf '%s\n' "$raw" >&2
         return 1
     fi
 
-    # PVE CLI historically printed guest stdout directly, while structured
-    # invocations expose out-data/err-data/exitcode. Accept both forms and
-    # normalize them to guest stdout for the rest of the pipeline.
-    if jq -e 'type == "object" and (has("out-data") or has("err-data") or has("exitcode"))' \
+    # Structured PVE responses can be either a completed exec-status object or,
+    # when the synchronous wait expires, only a PID / exited=0 state. Never
+    # treat the latter as guest stdout or as a successful command.
+    if jq -e 'type == "object" and (has("out-data") or has("err-data") or has("exitcode") or has("exited") or has("pid") or has("signal"))' \
         >/dev/null 2>&1 <<<"$raw"; then
-        exitcode="$(jq -r '.exitcode // 0' <<<"$raw")"
+        exited="$(jq -r '.exited // empty' <<<"$raw")"
+        pid="$(jq -r '.pid // empty' <<<"$raw")"
+        signal="$(jq -r '.signal // empty' <<<"$raw")"
+        exitcode="$(jq -r '.exitcode // empty' <<<"$raw")"
         errdata="$(jq -r '."err-data" // empty' <<<"$raw")"
-        if [[ "$exitcode" =~ ^[0-9]+$ ]] && (( exitcode != 0 )); then
+        outdata="$(jq -r '."out-data" // empty' <<<"$raw")"
+
+        if [[ "$exited" == "0" || "$exited" == "false" || ( -z "$exited" && -n "$pid" && -z "$exitcode" ) ]]; then
+            printf 'QEMU Guest Agent command не завершилась за timeout=%ss%s\n' \
+                "$TEMPLATE_WAIT_SECONDS" "${pid:+ (pid=${pid})}" >&2
+            [[ -n "$errdata" ]] && printf '%s\n' "$errdata" >&2
+            return 124
+        fi
+
+        if [[ -n "$signal" && "$signal" != "0" ]]; then
+            printf 'QEMU Guest Agent command завершилась сигналом %s%s\n' \
+                "$signal" "${pid:+ (pid=${pid})}" >&2
             [[ -n "$errdata" ]] && printf '%s\n' "$errdata" >&2
             return 1
         fi
-        jq -r '."out-data" // empty' <<<"$raw"
+
+        if [[ -n "$exitcode" ]]; then
+            [[ "$exitcode" =~ ^[0-9]+$ ]] || {
+                printf 'QEMU Guest Agent вернул некорректный exitcode: %s\n' "$exitcode" >&2
+                return 1
+            }
+            if (( exitcode != 0 )); then
+                [[ -n "$errdata" ]] && printf '%s\n' "$errdata" >&2
+                return 1
+            fi
+        elif [[ "$exited" == "1" || "$exited" == "true" ]]; then
+            printf 'QEMU Guest Agent сообщил exited=%s без exitcode%s\n' \
+                "$exited" "${pid:+ (pid=${pid})}" >&2
+            [[ -n "$errdata" ]] && printf '%s\n' "$errdata" >&2
+            return 1
+        fi
+
+        printf '%s\n' "$outdata"
         return
     fi
 
+    # Compatibility with CLI variants that print guest stdout directly.
     printf '%s\n' "$raw"
 }
 

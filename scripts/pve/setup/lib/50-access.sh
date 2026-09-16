@@ -93,14 +93,39 @@ token_entry() {
         | jq -c --arg id "$token_name" '.[] | select(.tokenid == $id)' | head -n1
 }
 
-write_token_secret() {
-    local file=$1 full_token=$2 secret=$3 group=$4 mode=$5 old_umask
+write_token_secret_atomic() {
+    local file=$1 full_token=$2 secret=$3 group=$4 mode=$5
+    local old_umask tmp
+
     old_umask="$(umask)"
     umask 077
-    printf 'token_id=%s\ntoken_secret=%s\n' "$full_token" "$secret" >"$file"
+    tmp="$(mktemp "${file}.tmp.XXXXXX")" || {
+        umask "$old_umask"
+        return 1
+    }
     umask "$old_umask"
-    chown root:"$group" "$file"
-    chmod "$mode" "$file"
+
+    if ! printf 'token_id=%s\ntoken_secret=%s\n' "$full_token" "$secret" >"$tmp" \
+        || ! chown root:"$group" "$tmp" \
+        || ! chmod "$mode" "$tmp" \
+        || ! mv -f -- "$tmp" "$file"; then
+        rm -f -- "$tmp" 2>/dev/null || true
+        return 1
+    fi
+}
+
+rollback_new_token() {
+    local userid=$1 token_name=$2 full_token=$3 reason=$4
+
+    if pveum user token delete "$userid" "$token_name"; then
+        PENDING_TOKEN_USER=""
+        PENDING_TOKEN_NAME=""
+        PENDING_TOKEN_FULL=""
+        warn "Только что созданный API-токен ${full_token} удалён, потому что его одноразовый secret не удалось надёжно сохранить"
+        die "${reason}. Создание токена откатилось; повторный запуск безопасно создаст его заново."
+    fi
+
+    die "${reason}. Кроме того, не удалось удалить только что созданный ${full_token}; EXIT cleanup повторит удаление, но перед повторным запуском всё равно проверьте состояние токена."
 }
 
 ensure_token() {
@@ -130,19 +155,39 @@ ensure_token() {
     fi
 
     [[ ! -f "$secret_file" ]] \
-        || warn "Файл ${secret_file} существует, но API-токен ${full_token} отсутствует; будет создан новый токен и локальное значение будет заменено"
+        || warn "Файл ${secret_file} существует, но API-токен ${full_token} отсутствует; будет создан новый токен и локальное значение будет заменено только после успешного получения secret"
 
-    out="$(pveum user token add "$userid" "$token_name" --privsep 1 --comment "$comment" --output-format json)"
-    secret="$(jq -r '.value // .data.value // empty' <<<"$out")"
-    returned_id="$(jq -r '."full-tokenid" // .data."full-tokenid" // empty' <<<"$out")"
+    if ! out="$(pveum user token add "$userid" "$token_name" --privsep 1 --comment "$comment" --output-format json)"; then
+        die "Не удалось создать API-токен ${full_token}"
+    fi
 
-    [[ -n "$secret" ]] || die "Proxmox создал ${full_token}, но одноразовый секрет не удалось разобрать"
-    [[ -z "$returned_id" || "$returned_id" == "$full_token" ]] \
-        || die "Proxmox вернул неожиданный идентификатор API-токена: ${returned_id}"
+    # From this point until the secret is durably renamed into place, EXIT/INT/TERM
+    # cleanup may delete only this newly-created token to avoid losing its one-time secret.
+    PENDING_TOKEN_USER="$userid"
+    PENDING_TOKEN_NAME="$token_name"
+    PENDING_TOKEN_FULL="$full_token"
 
-    write_token_secret "$secret_file" "$full_token" "$secret" "$file_group" "$file_mode"
+    if ! secret="$(jq -er '.value // .data.value // empty' <<<"$out")"; then
+        rollback_new_token "$userid" "$token_name" "$full_token" \
+            "Proxmox создал ${full_token}, но одноразовый secret не удалось разобрать"
+    fi
+    returned_id="$(jq -r '."full-tokenid" // .data."full-tokenid" // empty' <<<"$out" 2>/dev/null || true)"
+
+    if [[ -n "$returned_id" && "$returned_id" != "$full_token" ]]; then
+        rollback_new_token "$userid" "$token_name" "$full_token" \
+            "Proxmox вернул неожиданный идентификатор API-токена '${returned_id}'"
+    fi
+
+    if ! write_token_secret_atomic "$secret_file" "$full_token" "$secret" "$file_group" "$file_mode"; then
+        rollback_new_token "$userid" "$token_name" "$full_token" \
+            "Не удалось атомарно сохранить одноразовый secret API-токена ${full_token} в ${secret_file}"
+    fi
+
+    PENDING_TOKEN_USER=""
+    PENDING_TOKEN_NAME=""
+    PENDING_TOKEN_FULL=""
     unset secret out
-    ok "Создан API-токен ${full_token} с privsep=1, секрет сохранён на PVE"
+    ok "Создан API-токен ${full_token} с privsep=1, secret атомарно сохранён на PVE"
 }
 
 acl_entry() {

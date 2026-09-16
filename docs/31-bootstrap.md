@@ -7,11 +7,11 @@
 ```text
 PUBLIC BOOTSTRAP
 zsergeyru/proxmox-bootstrap/bootstrap-pve.sh
-PUBLIC_BOOTSTRAP_VERSION=8
+PUBLIC_BOOTSTRAP_VERSION=9
 
 PVE CONFIGURATION
 zsergeyru/proxmox/scripts/pve/setup/configure-pve.sh
-PVE_CONFIGURATION_VERSION=17
+PVE_CONFIGURATION_VERSION=18
 ```
 
 Канонические документы:
@@ -94,6 +94,8 @@ SSH config существует
 
 Public Bootstrap использует существующие credentials и checkout и повторно запускает PVE Configuration. Частично созданные permanent credentials не удаляются и не ротируются автоматически.
 
+Если first-run path всё ещё использует `/var/lib/proxmox-bootstrap/private-repo`, этот checkout считается disposable: после fetch/reset выполняется `git clean -ffdx`, поэтому ignored cache/build artifacts не блокируют строгую source-проверку. Permanent checkout этим правилом не очищается.
+
 ### Повторный запуск и local drift
 
 Перед обновлением canonical checkout Public Bootstrap проверяет:
@@ -158,7 +160,9 @@ scripts/pve/setup/
 ├── configure-pve.sh
 ├── render-template-cloud-init.py
 ├── tests/
-│   └── test-template-contract.sh
+│   ├── test-template-contract.sh
+│   ├── test-template-guest-exec.sh
+│   └── test-token-rollback.sh
 └── lib/
     ├── 00-common.sh
     ├── 10-preflight.sh
@@ -205,6 +209,8 @@ shared lock + clean source revision check
 ```
 
 PVE Configuration не читает `guest.yaml` или `guests/defaults.yaml` как вход для host configuration.
+
+Canonical GitHub SSH transport использует strict host-key checking, `BatchMode`, `ConnectTimeout` и server-alive limits. HTTP/HTTPS connectivity checks имеют как connection timeout, так и total timeout.
 
 ## `pvedeploy` runtime contract
 
@@ -311,7 +317,7 @@ discard=on
 iothread=1
 ssd=1
 system disk >=16G
-ide2 Cloud-Init CD-ROM на local-lvm
+ide2 = local-lvm:vm-9000-cloudinit,media=cdrom
 VirtIO net0 / bridge=vmbr0
 boot order from scsi0
 agent=1
@@ -323,6 +329,10 @@ ipconfig0=ip=dhcp
 cicustom отсутствует
 protection=1 после pipeline
 ```
+
+Exact `vm-9000-cloudinit` check нужен, чтобы обычный ISO/CD-ROM не мог пройти Cloud-Init contract только благодаря `media=cdrom`.
+
+`template_guest_exec` считает incomplete structured QGA result (`pid` без завершения либо `exited=0`), signal и ненулевой exitcode ошибкой. Timeout больше не может быть принят за stdout успешной команды.
 
 Guest cleanup до seal подтверждает отсутствие `debian`, machine-id, SSH host keys, `/root/.ssh`, builder state и builder scripts.
 
@@ -345,6 +355,8 @@ ai-agent@pve!infra
 
 Policy ролей и ACL остаётся additive-only. Новый token создаётся с `privsep=1`; существующий `privsep=0` по принятой policy не меняется автоматически.
 
+Одноразовый secret нового token сначала сохраняется во временный файл, затем owner/mode выставляются до atomic rename. До успешного rename новый token отмечен как pending. Parsing/write failure и обычный error/INT/TERM/EXIT пытаются удалить только этот token через `pveum user token delete`; уже существующие tokens не ротируются автоматически.
+
 Effective permissions API tokens проверяются через:
 
 ```text
@@ -365,6 +377,8 @@ ShellCheck
 production Cloud-Init render
 cloud-init schema
 Template contract unit tests
+Guest exec result/timeout unit tests
+API token rollback unit tests
 malformed guest directory negative test
 whitespace check
 ```

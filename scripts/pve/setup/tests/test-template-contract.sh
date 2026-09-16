@@ -42,6 +42,7 @@ expect_invalid() {
 expect_invalid "wrong bridge" "${valid_config/bridge=vmbr0/bridge=vmbr9}"
 expect_invalid "undersized disk" "${valid_config/size=16G/size=8G}"
 expect_invalid "missing cloud-init media" "${valid_config/media=cdrom/media=disk}"
+expect_invalid "ordinary cdrom instead of cloud-init" "${valid_config/vm-9000-cloudinit/debian-installer.iso}"
 expect_invalid "builder cicustom leaked" "${valid_config}"$'\n''cicustom: user=local:snippets/builder.yaml'
 expect_invalid "wrong scsi controller" "${valid_config/virtio-scsi-single/virtio-scsi-pci}"
 

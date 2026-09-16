@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-PVE_CONFIGURATION_VERSION=17
+PVE_CONFIGURATION_VERSION=18
 
 PRIVATE_REPO="git@github.com:zsergeyru/proxmox.git"
 PRIVATE_BRANCH="main"
@@ -78,6 +78,9 @@ TEMPLATE_IMAGE_SHA512=""
 TEMPLATE_SNIPPET_PATH=""
 TEMPLATE_KERNEL_VERSION=""
 TEMPLATE_FRAMEBUFFER_SIZE=""
+PENDING_TOKEN_USER=""
+PENDING_TOKEN_NAME=""
+PENDING_TOKEN_FULL=""
 
 HOST_PVE_USER="deployer@pve"
 HOST_PVE_TOKEN_NAME="host-deploy"
@@ -194,9 +197,27 @@ cleanup_template_download_tmp() {
     fi
 }
 
+cleanup_pending_token() {
+    [[ -n "${PENDING_TOKEN_USER:-}" && -n "${PENDING_TOKEN_NAME:-}" ]] || return 0
+
+    if command -v pveum >/dev/null 2>&1 \
+        && pveum user token delete "$PENDING_TOKEN_USER" "$PENDING_TOKEN_NAME" >/dev/null 2>&1; then
+        printf '%s%s[ОТКАТ]%s Удалён незавершённый API-токен %s; его одноразовый secret не был подтверждён на диске.\n' \
+            "$C_BOLD" "$C_YELLOW" "$C_RESET" "${PENDING_TOKEN_FULL:-${PENDING_TOKEN_USER}!${PENDING_TOKEN_NAME}}" >&2
+    else
+        printf '%s%s[ОШИБКА ОТКАТА]%s Не удалось удалить pending API-токен %s. Перед повторным запуском проверьте/ротируйте этот token вручную.\n' \
+            "$C_BOLD" "$C_RED" "$C_RESET" "${PENDING_TOKEN_FULL:-${PENDING_TOKEN_USER}!${PENDING_TOKEN_NAME}}" >&2
+    fi
+
+    PENDING_TOKEN_USER=""
+    PENDING_TOKEN_NAME=""
+    PENDING_TOKEN_FULL=""
+}
+
 cleanup_ephemeral_files() {
     cleanup_api_header_file
     cleanup_template_download_tmp
+    cleanup_pending_token
 }
 
 on_error() {

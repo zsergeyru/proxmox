@@ -201,7 +201,7 @@ prepare_canonical_github_access() {
     elif [[ ! -f "$KNOWN_HOSTS" ]]; then
         local tmp_hosts
         tmp_hosts="$(mktemp)"
-        curl -fsSL https://api.github.com/meta \
+        curl -fsSL --connect-timeout 10 --max-time 20 https://api.github.com/meta \
             | jq -r '.ssh_keys[] | "github.com " + .' >"$tmp_hosts"
         [[ -s "$tmp_hosts" ]] || {
             rm -f "$tmp_hosts"
@@ -219,6 +219,10 @@ Host github.com
     IdentitiesOnly yes
     UserKnownHostsFile ${KNOWN_HOSTS}
     StrictHostKeyChecking yes
+    BatchMode yes
+    ConnectTimeout 10
+    ServerAliveInterval 15
+    ServerAliveCountMax 2
 EOF_SSH
     chown "$DEPLOY_USER:$DEPLOY_USER" "$SSH_CONFIG"
     chmod 0600 "$SSH_CONFIG"

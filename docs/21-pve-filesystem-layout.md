@@ -39,6 +39,8 @@ zsergeyru/proxmox-bootstrap
 
 Каталог создаётся как `root:root 0700`.
 
+`private-repo/` является disposable checkout. При resume он может быть приведён к свежему `FETCH_HEAD` через `reset --hard` и `git clean -ffdx`, включая ignored cache/build artifacts. Это правило относится только к temporary runtime.
+
 После успешной PVE Configuration Public Bootstrap удаляет `/var/lib/proxmox-bootstrap` и записывает:
 
 ```text
@@ -60,7 +62,9 @@ scripts/pve/setup/
 ├── configure-pve.sh
 ├── render-template-cloud-init.py
 ├── tests/
-│   └── test-template-contract.sh
+│   ├── test-template-contract.sh
+│   ├── test-template-guest-exec.sh
+│   └── test-token-rollback.sh
 └── lib/
     ├── 00-common.sh
     ├── 10-preflight.sh
@@ -80,7 +84,7 @@ scripts/pve/setup/
 /var/lib/proxmox-deployer/repo/
 ```
 
-Он является runtime-copy private source of truth. Перед автоматическим Git refresh проверяется полный clean state; local tracked/staged/untracked/ignored drift не стирается молча.
+Он является runtime-copy private source of truth. Перед автоматическим Git refresh проверяется полный clean state; local tracked/staged/untracked/ignored drift не стирается молча. В отличие от temporary checkout, `git clean -ffdx` здесь не применяется.
 
 Пример:
 
@@ -164,6 +168,8 @@ secrets/ai-agent-infra.token
 → credential ai-agent@pve!infra
 ```
 
+Canonical SSH config включает strict host-key checking, `BatchMode yes`, bounded `ConnectTimeout` и server-alive policy.
+
 ## 5. Права и Linux runtime user
 
 ```text
@@ -194,7 +200,7 @@ shell = /bin/bash
 
 Если существующий user не соответствует contract, PVE Configuration не меняет его автоматически.
 
-Secrets создаются с безопасным `umask`, не попадают в Git и не выводятся в обычные logs. Потеря существующего token secret/private key требует явного recovery/rotation.
+Secrets создаются с безопасным `umask`, не попадают в Git и не выводятся в обычные logs. Для нового API token one-time secret сначала записывается во временный файл, owner/mode выставляются до atomic `mv`. До успешного rename token считается pending; обычный failure/interruption пытается удалить только этот вновь созданный token. Потеря уже существующего token secret/private key требует явного recovery/rotation.
 
 ## 6. Mutable runtime
 

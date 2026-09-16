@@ -178,9 +178,9 @@ check_time_dns_network() {
     getent ahosts github.com >/dev/null || die "Не работает DNS-разрешение имени github.com"
     getent ahosts download.proxmox.com >/dev/null || die "Не работает DNS-разрешение имени download.proxmox.com"
 
-    curl -fsS --connect-timeout 10 -o /dev/null https://github.com/ \
+    curl -fsS --connect-timeout 10 --max-time 20 -o /dev/null https://github.com/ \
         || die "Нет HTTPS-доступа к GitHub"
-    curl -fsS --connect-timeout 10 -o /dev/null \
+    curl -fsS --connect-timeout 10 --max-time 20 -o /dev/null \
         http://download.proxmox.com/debian/pve/dists/trixie/InRelease \
         || die "Нет доступа к PVE repository download.proxmox.com"
 

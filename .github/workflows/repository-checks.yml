@@ -23,7 +23,7 @@ jobs:
       - name: Install validation dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y shellcheck cloud-init
+          sudo apt-get install -y shellcheck cloud-init jq
           python -m pip install --disable-pip-version-check PyYAML==6.0.2 jsonschema==4.25.1
 
       - name: Validate repository
@@ -93,6 +93,12 @@ jobs:
 
       - name: Run template contract unit checks
         run: bash scripts/pve/setup/tests/test-template-contract.sh
+
+      - name: Run guest exec unit checks
+        run: bash scripts/pve/setup/tests/test-template-guest-exec.sh
+
+      - name: Run API token rollback unit checks
+        run: bash scripts/pve/setup/tests/test-token-rollback.sh
 
       - name: Verify malformed guest directory is rejected
         run: |

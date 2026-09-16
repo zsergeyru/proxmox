@@ -23,7 +23,7 @@ validate_template_contract() {
     local config=$1
     local require_protection=${2:-1}
     local errors=""
-    local scsi0 ide2 net0 boot onboot disk_size disk_kib required_kib
+    local scsi0 ide2 ide2_volume net0 boot onboot disk_size disk_kib required_kib
 
     template_contract_expect() {
         local pattern=$1 message=$2
@@ -75,8 +75,9 @@ validate_template_contract() {
     if [[ -z "$ide2" ]]; then
         errors+="ide2 Cloud-Init drive отсутствует"$'\n'
     else
-        [[ "$ide2" == "${TEMPLATE_DISK_STORAGE}:"* ]] \
-            || errors+="ide2 Cloud-Init drive должен находиться на storage ${TEMPLATE_DISK_STORAGE}"$'\n'
+        ide2_volume="${ide2%%,*}"
+        [[ "$ide2_volume" == "${TEMPLATE_DISK_STORAGE}:vm-${TEMPLATE_VMID}-cloudinit" ]] \
+            || errors+="ide2 должен ссылаться именно на Cloud-Init volume ${TEMPLATE_DISK_STORAGE}:vm-${TEMPLATE_VMID}-cloudinit"$'\n'
         template_csv_has "$ide2" 'media=cdrom' \
             || errors+="ide2 должен быть Cloud-Init CD-ROM (media=cdrom)"$'\n'
     fi
