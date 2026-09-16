@@ -1,6 +1,6 @@
 # Debian 13 template `9000`
 
-**Type:** Template passport / Entry point  
+**Type:** Overview  
 **Status:** Active  
 **Source of truth:** No — полный технический contract находится в [`build-policy.md`](build-policy.md).
 
