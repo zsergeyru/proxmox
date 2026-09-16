@@ -1,5 +1,9 @@
 # Локальный AI и inference
 
+**Type:** Reference  
+**Status:** Draft  
+**Source of truth:** No — это экспериментальная справка по текущей local-inference среде; production contracts живут в профильных документах AI Control.
+
 Документ отделяет эксперименты с локальными моделями от эксплуатационной документации VM `ai-control`.
 
 ## Текущая inference-платформа
