@@ -1,12 +1,12 @@
-# AI Control — архитектурные принципы
+# AI Control — архитектурный contract
 
-## Статус
+**Type:** Specification  
+**Status:** Active  
+**Source of truth:** Yes — для target architecture `301-ai-control`, его management boundaries и взаимодействия Proximo/Git/SSH/Ansible.
 
-Архитектура `301-ai-control` остаётся принятой. Исполняемая реализация bootstrap/install/deploy scripts переписывается под текущий guest contract.
+Пошаговый ввод `301-ai-control` находится в [`51-ai-control-bootstrap.md`](51-ai-control-bootstrap.md). Точные PVE permissions задаёт [`25-pve-access-control.md`](25-pve-access-control.md), credential policy — [`23-security.md`](23-security.md), initial guest access — [`33-guest-bootstrap-and-provisioning.md`](33-guest-bootstrap-and-provisioning.md).
 
-Каноническая модель PVE access/deploy задаётся [`25-pve-access-control.md`](25-pve-access-control.md), общая management SSH identity policy — [`23-security.md`](23-security.md), initial guest access — [`33-guest-bootstrap-and-provisioning.md`](33-guest-bootstrap-and-provisioning.md).
-
-## Разделение ответственности
+## 1. Разделение ответственности
 
 ```text
 Proximo MCP + ai-agent@pve!infra
@@ -21,16 +21,20 @@ Ansible на 311-dev-services
 → повторяемая конфигурация ОС и приложений внутри гостей через SSH
 
 прямой SSH из 301
-→ произвольная диагностика, bootstrap, one-off и аварийные действия внутри guest OS
+→ диагностика, bootstrap, one-off и аварийные действия внутри guest OS
 ```
 
 `deploy-guest` не является обязательным security gateway для AI agent. AI и человек используют разные PVE identities.
 
 Ansible/Semaphore не размещаются в `301`; они относятся к `311-dev-services`.
 
-## 301-ai-control
+## 2. `301-ai-control`
 
-`301-ai-control` — целевая VM центрального AI-контура. `320-ai-control` остаётся bootstrap/legacy control node до успешного ввода `301` и отдельного решения о выводе `320`.
+`301-ai-control` — целевая VM центрального AI-контура.
+
+`320-ai-control` остаётся bootstrap/legacy control node до успешного ввода `301` по runbook и отдельного решения о выводе `320`.
+
+Целевая структура:
 
 ```text
 /opt/ai-control/
@@ -45,25 +49,24 @@ Ansible/Semaphore не размещаются в `301`; они относятс�
 └── state/
 ```
 
-Docker/runtime, Proximo, SSH identities и Git checkout являются common platform и не дублируются внутри каждого агента.
+Docker/runtime, Proximo, infrastructure SSH identities и Git checkout являются common platform и не дублируются внутри каждого агента.
 
-## Proximo и `managed`
+## 3. Proximo и `managed`
 
 Канонический Proxmox MCP — Proximo (`proximo-proxmox`).
 
-Hard boundary PVE задаётся identity/token/ACL. AI Control не получает штатных прав на host network, IAM/ACL, SDN infrastructure, storage definitions, certificates/repositories или reboot/shutdown самого PVE.
+Hard boundary PVE задаётся identity/token/ACL.
 
 Основная PVE write-zone `ai-agent@pve!infra`:
 
 ```text
-managed
+/pool/managed
 ```
 
-Нормальный flow:
+Нормальный lifecycle:
 
 ```text
 AI agent
-→ Git desired state
 → Proximo
 → create/clone сразу с pool=managed
 → CPU/RAM/disk/network и guest-level options
@@ -75,14 +78,26 @@ AI может самостоятельно создавать, клониров�
 
 Template `9000` остаётся отдельным clone source и не входит в обычную write-zone AI.
 
-## Важная граница: PVE access != SSH access
+AI Control не получает штатных прав на:
 
-Pool `managed` определяет **права AI на объект Proxmox**, но не является списком SSH authorized keys внутри Linux.
+- host network;
+- IAM/ACL administration;
+- SDN infrastructure administration;
+- storage definitions;
+- certificates/repositories самого PVE;
+- host firewall;
+- reboot/shutdown физического PVE.
+
+Точный privilege set и ACL matrix принадлежат [`25-pve-access-control.md`](25-pve-access-control.md).
+
+## 4. PVE access и guest SSH независимы
+
+Pool `managed` определяет **права AI на объект Proxmox**, но не определяет содержимое `authorized_keys` внутри Linux.
 
 ```text
 PVE:
 guest в managed
-→ ai-agent@pve!infra получает предусмотренные guest-level PVE permissions
+→ ai-agent@pve!infra получает предусмотренные guest-level permissions
 
 guest вне managed
 → эти PVE permissions не распространяются
@@ -99,11 +114,11 @@ Guest OS:
 → direct AI SSH запрещён
 ```
 
-Перемещение VM/LXC в `managed` или из него само по себе **не должно изменять `authorized_keys`**. Это предотвращает необходимость синхронизировать две независимые системы доступа.
+Перемещение VM/LXC в `managed` или из него само по себе не должно изменять `authorized_keys`.
 
-Поэтому guest вне `managed` может сознательно оставаться доступным AI по SSH для диагностики/конфигурации ОС, при этом AI не получает права менять его PVE hardware/lifecycle через Proximo.
+Поэтому guest вне `managed` может сознательно оставаться доступным AI по SSH для диагностики ОС, при этом AI не получает права менять его PVE hardware/lifecycle через Proximo.
 
-## SSH
+## 5. Management SSH
 
 Единый management user управляемой Debian-инфраструктуры:
 
@@ -122,21 +137,23 @@ AI Control использует отдельную infrastructure identity:
 
 Private key остаётся в AI control plane. Public key устанавливается тем Linux guests, которым разрешён direct AI SSH.
 
-Host-side deployer использует другой keypair `pve_guest_ed25519`; Ansible/311 — свою provisioning identity. Все они могут авторизоваться как `root`.
+Host-side deployer использует другой keypair `pve_guest_ed25519`; Ansible/311 — свою provisioning identity.
 
 GitHub credential и guest-management SSH identity — разные credentials.
 
-Подробный credential lifecycle не дублируется здесь и определяется [`23-security.md`](23-security.md).
+Полный lifecycle credentials находится в [`23-security.md`](23-security.md).
 
-## Создание гостя host-side
+## 6. Host-side создание guest
+
+Host-side flow по Git desired state:
 
 ```text
 оператор
 → deploy-guest <VMID> [--apply]
 → deployer@pve!host-deploy
-→ Full Clone from current template 9000 либо создание LXC из Debian 13 family selector
+→ Full Clone current template 9000 либо LXC из Debian 13 family selector
 → установить host-side public key для root
-→ при наличии зарегистрированного AI public key включить его в initial keyset, если direct AI SSH нужен
+→ при необходимости включить зарегистрированный AI public key
 → start
 → verify root SSH
 → optional bootstrap
@@ -144,7 +161,11 @@ GitHub credential и guest-management SSH identity — разные credentials.
 
 Initial root SSH не зависит от `base` capability.
 
-## Создание гостя AI
+Сам `301` является специальным случаем: его initial creation выполняется host-side и не зависит от уже работающего AI Control.
+
+## 7. AI-created guest
+
+AI lifecycle:
 
 ```text
 AI agent
@@ -159,66 +180,57 @@ AI agent
 
 AI не обязан вызывать host-side `deploy-guest`.
 
-`301` — специальный случай: initial creation самого control plane выполняется host-side и не зависит от уже работающего 301.
+Public infrastructure keys можно передавать между control planes; private halves не копируются.
 
-## Repeatable deploy
+## 8. Repeatable provisioning
 
-После развёртывания `311-dev-services`:
+После развёртывания `311-dev-services` повторяемая конфигурация Linux выполняется через отдельный Ansible credential:
 
 ```text
 AI agent / пользователь
 → конфигурация в Git
 → Ansible на 311
-→ SSH root по отдельному provisioning key
-→ нужный guest
+→ SSH root по provisioning key
+→ target guest
 → health/status/log verification
 ```
 
-Это не ограничивает AI только Ansible playbooks: прямой SSH из `301` по `ai_control_ed25519` сохраняется для произвольных действий внутри ОС.
+Это не запрещает прямой AI SSH для one-off/diagnostic действий.
 
-## Git
+## 9. Git
 
-Приватный `zsergeyru/proxmox` остаётся source of truth.
+Private `zsergeyru/proxmox` остаётся source of truth для project configuration.
 
-GitHub access AI Control выполняется отдельной Deploy Key identity. Public/private части Git credential не используются как guest SSH credential.
+AI Control имеет собственный Git credential и отдельный checkout:
 
-## Что переписывается
+```text
+/opt/ai-control/repos/proxmox
+```
 
-Старые public scripts из archive не являются действующими entrypoints. Новая реализация должна соответствовать:
+Git credential не используется как guest SSH credential.
 
-- [`20-pve-initialization.md`](20-pve-initialization.md);
-- [`21-pve-filesystem-layout.md`](21-pve-filesystem-layout.md);
-- [`23-security.md`](23-security.md);
-- [`25-pve-access-control.md`](25-pve-access-control.md);
-- [`30-guest-manifest.md`](30-guest-manifest.md);
-- [`33-guest-bootstrap-and-provisioning.md`](33-guest-bootstrap-and-provisioning.md);
-- [`51-ai-control-bootstrap.md`](51-ai-control-bootstrap.md);
-- [`../templates/debian13/build-policy.md`](../templates/debian13/build-policy.md).
+AI может подготавливать project changes через Git/GitHub, но это не даёт ему права изменять root-trusted canonical checkout на самом PVE.
 
-## Security boundary
+## 10. Security invariants
 
-1. PVE privilege-separated token + ACL определяют PVE operations AI.
-2. `ai-agent@pve!infra` штатно управляет обычными гостями в `managed` через Proximo.
-3. Direct guest SSH является отдельным credential boundary и определяется наличием AI public key.
-4. AI SSH key не привязан автоматически к pool membership.
-5. AI может create/clone/delete обычные managed guests напрямую.
-6. MCP surface ограничивается необходимыми guest-level operations.
-7. Private SSH keys и provider credentials не хранятся в Git.
+1. PVE token + ACL определяют PVE operations AI.
+2. `ai-agent@pve!infra` штатно управляет обычными гостями только в `managed`.
+3. Direct guest SSH является отдельным credential boundary.
+4. AI SSH key не выводится автоматически из pool membership.
+5. AI может create/clone/delete обычные managed guests напрямую через Proximo.
+6. MCP surface ограничивается guest-level operations, необходимых проекту.
+7. Private SSH keys, tokens и provider credentials не хранятся в Git.
 8. Root password authentication отключена.
-9. Snapshots/backups используются перед рискованными изменениями.
-10. `301`, production HA, bootstrap `320` и template `9000` не входят автоматически в PVE write-zone `managed`.
+9. `301`, production HA, legacy `320` и template `9000` не входят автоматически в AI write-zone `managed`.
+10. Ansible provisioning использует отдельную identity.
 
-## Готовность к замене 320
+## 11. Связанные документы
 
-До вывода `320-ai-control` проверить:
+- [`25-pve-access-control.md`](25-pve-access-control.md) — точные PVE roles/privileges/ACL;
+- [`23-security.md`](23-security.md) — SSH identities и credential lifecycle;
+- [`30-guest-manifest.md`](30-guest-manifest.md) — guest desired state;
+- [`33-guest-bootstrap-and-provisioning.md`](33-guest-bootstrap-and-provisioning.md) — initial management access и provisioning boundary;
+- [`51-ai-control-bootstrap.md`](51-ai-control-bootstrap.md) — Runbook создания/ввода/acceptance test `301`;
+- [`../templates/debian13/build-policy.md`](../templates/debian13/build-policy.md) — template `9000` contract.
 
-1. host-side создание самого `301` без зависимости от работающего 301;
-2. root key-only SSH;
-3. отдельные Git и AI guest-management SSH identities;
-4. Proximo и авторизацию `ai-agent@pve!infra`;
-5. создание/clone тестового guest сразу в `managed`;
-6. прямой root SSH AI в тестовый guest по `ai_control_ed25519`;
-7. удаление AI public key действительно отзывает только AI SSH;
-8. PVE membership `managed` не модифицирует SSH keys;
-9. взаимодействие с Ansible на `311`;
-10. backup/recovery и credential handling.
+Главный contract: **`301-ai-control` предоставляет AI common platform, Proximo и независимый SSH/Git access; PVE lifecycle AI ограничен `managed`, а guest SSH и provisioning остаются отдельными boundaries.**
