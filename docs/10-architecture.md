@@ -1,12 +1,17 @@
 # Proxmox — сводная архитектура платформы
 
+**Type:** Overview  
+**Status:** Active  
+**Source of truth:** No — это сводная картина; точные contracts находятся в профильных документах.
+
 Этот документ даёт только общую картину. Детали не дублируются здесь и берутся из профильных источников истины:
 
 - [`11-vmid-plan.md`](11-vmid-plan.md) — VMID/CTID и management IP;
 - [`40-network.md`](40-network.md) — сеть, VLAN, VPN и граница OpenWrt ↔ 109;
 - [`../guests/README.md`](../guests/README.md) — `guest.yaml`, `rootfs` и deploy;
 - [`50-ai-control.md`](50-ai-control.md) — AI-контур;
-- [`22-storage-and-backup.md`](22-storage-and-backup.md) — backup и restore;
+- [`22-storage-and-backup.md`](22-storage-and-backup.md) — backup policy;
+- [`27-backup-and-disaster-recovery-runbook.md`](27-backup-and-disaster-recovery-runbook.md) — restore/disaster recovery procedure;
 - README/ADR конкретного гостя — локальные особенности.
 
 ## Аппаратная платформа
@@ -129,7 +134,8 @@ guests/<VMID>-<name>/
 - действия автоматизации журналируются;
 - после изменений проверяются health/status/logs.
 
-Подробная backup-политика: [`22-storage-and-backup.md`](22-storage-and-backup.md).
+Backup policy: [`22-storage-and-backup.md`](22-storage-and-backup.md).  
+Restore/disaster recovery: [`27-backup-and-disaster-recovery-runbook.md`](27-backup-and-disaster-recovery-runbook.md).
 
 ## Startup order
 
