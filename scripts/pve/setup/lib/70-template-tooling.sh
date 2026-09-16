@@ -66,18 +66,10 @@ exec jq . "$STATE"
 EOF_STATUS
     chmod 0755 /usr/local/sbin/pve-configuration-status
 
-    cat >/usr/local/sbin/pve-bootstrap-status <<'EOF_LEGACY_STATUS'
-#!/usr/bin/env bash
-set -Eeuo pipefail
-printf '[ПРЕДУПРЕЖДЕНИЕ] pve-bootstrap-status устарела; используйте pve-configuration-status\n' >&2
-exec /usr/local/sbin/pve-configuration-status "$@"
-EOF_LEGACY_STATUS
-    chmod 0755 /usr/local/sbin/pve-bootstrap-status
-
     local deployer_src="${REPO_DIR}/scripts/pve/deploy-guest.py"
     if [[ ! -f "$deployer_src" ]]; then
         if [[ -x /usr/local/sbin/deploy-guest ]]; then
-            warn "Исходный файл deploy-guest отсутствует, а старая wrapper-команда /usr/local/sbin/deploy-guest всё ещё существует. Она не считается готовым компонентом."
+            warn "Команда /usr/local/sbin/deploy-guest существует, но её source ${deployer_src} отсутствует."
         else
             warn "Исходный файл deploy-guest пока отсутствует: ${deployer_src}"
         fi
@@ -130,7 +122,7 @@ report_status() {
     if [[ -x /usr/local/sbin/deploy-guest && -f "$deployer_src" ]]; then
         ok "Команда deploy-guest установлена и source существует"
     elif [[ -x /usr/local/sbin/deploy-guest ]]; then
-        printf '%s%s[ОЖИДАНИЕ]%s Обнаружена старая deploy-guest wrapper, но её source отсутствует\n' "$C_BOLD" "$C_YELLOW" "$C_RESET"
+        printf '%s%s[ОЖИДАНИЕ]%s Команда deploy-guest существует, но её source отсутствует\n' "$C_BOLD" "$C_YELLOW" "$C_RESET"
         ready=0
     else
         printf '%s%s[ОЖИДАНИЕ]%s deploy-guest пока не реализован\n' "$C_BOLD" "$C_YELLOW" "$C_RESET"
