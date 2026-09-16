@@ -1,45 +1,45 @@
 # Безопасность инфраструктуры
 
-**Type:** Policy  
-**Status:** Active  
-**Source of truth:** Yes — для общих security rules, management SSH model и lifecycle технических SSH identities.
+**Тип:** Политика  
+**Статус:** Действующий  
+**Основной источник:** Да — для общих правил безопасности, модели административного SSH-доступа и жизненного цикла технических SSH-ключей.
 
-Частные ограничения отдельных VM/LXC и сервисов описываются в их собственной документации. Точные Proxmox roles/privileges/ACL задаёт [`25-pve-access-control.md`](25-pve-access-control.md).
+Частные ограничения отдельных VM/LXC и сервисов описываются в их собственной документации. Точные роли, привилегии и ACL Proxmox задаёт [`25-pve-access-control.md`](25-pve-access-control.md).
 
 ## 1. Основные правила
 
 1. Автоматизация управляет только теми VM/LXC, для которых это явно разрешено соответствующим механизмом доступа.
 
-2. Сам Proxmox не изменяется guest automation без отдельного решения. Особенно это относится к:
-   - host network и physical NIC;
+2. Сам Proxmox не изменяется автоматикой гостевых систем без отдельного решения. Особенно это относится к:
+   - сети хоста и физическим сетевым интерфейсам;
    - маршрутам самого PVE;
-   - storage definitions;
-   - users, roles, ACL и API tokens;
-   - repositories/update policy и certificates;
-   - firewall самого PVE;
-   - reboot/shutdown физического host.
+   - определениям хранилищ;
+   - пользователям, ролям, ACL и API-токенам;
+   - репозиториям обновлений и сертификатам;
+   - межсетевому экрану самого PVE;
+   - перезагрузке и выключению физического хоста.
 
-3. Для управляемых Debian VM/LXC единый management user — `root`. Пароль root заблокирован; password и keyboard-interactive authentication отключены. Root SSH допускается только по public key.
+3. Для управляемых Debian VM/LXC единый административный пользователь — `root`. Пароль `root` заблокирован; вход по паролю и интерактивная аутентификация с клавиатуры отключены. SSH-доступ `root` разрешён только по открытому ключу.
 
-4. Разные субъекты управления используют разные SSH keypairs, а не разные generic Linux-users.
+4. Разные субъекты управления используют разные пары SSH-ключей, а не разных универсальных Linux-пользователей.
 
-5. PVE ACL и guest SSH решают разные задачи. Pool `managed` ограничивает Proxmox guest-level операции AI через PVE API; наличие AI public key определяет прямой SSH внутрь конкретного guest. Эти механизмы не синхронизируются автоматически.
+5. ACL PVE и SSH-доступ внутрь гостевой системы решают разные задачи. Пул `managed` ограничивает действия AI через API Proxmox; наличие открытого AI-ключа определяет прямой SSH-доступ внутрь конкретной гостевой системы. Эти механизмы не синхронизируются автоматически.
 
-6. Passwords, tokens, private keys и другие secrets не хранятся в Git. Public SSH keys секретами не являются, но их происхождение и lifecycle должны быть явными.
+6. Пароли, токены, закрытые ключи и другие секреты не хранятся в Git. Открытые SSH-ключи секретами не являются, но их происхождение и жизненный цикл должны быть явными.
 
-7. Перед destructive operation проверяются правильность target и наличие способа восстановления: backup, snapshot либо воспроизводимая configuration.
+7. Перед разрушительной операцией проверяются правильность выбранного объекта и наличие способа восстановления: резервной копии, снимка состояния либо воспроизводимой конфигурации.
 
-8. После изменения проверяются фактическое состояние guest, нужные services и ошибки.
+8. После изменения проверяются фактическое состояние гостевой системы, работа нужных сервисов и ошибки.
 
-9. Действия automation по возможности журналируются без secret values.
+9. Действия автоматики по возможности журналируются без значений секретов.
 
-10. Для LXC используются минимально необходимые privileges. Если workload требует широких system privileges или сложного hardware access, предпочтительнее VM. Docker/LXC policy: [`32-docker-in-lxc-policy.md`](32-docker-in-lxc-policy.md).
+10. Для LXC используются минимально необходимые привилегии. Если сервису нужны широкие системные права или сложный доступ к оборудованию, предпочтительнее VM. Правила Docker/LXC: [`32-docker-in-lxc-policy.md`](32-docker-in-lxc-policy.md).
 
-11. Если automation не хватает прав, она не расширяет их самостоятельно. Изменение доступа является отдельным infrastructure decision.
+11. Если автоматике не хватает прав, она не расширяет их самостоятельно. Изменение доступа является отдельным инфраструктурным решением.
 
-## 2. Management SSH model
+## 2. Модель административного SSH-доступа
 
-Для Debian-гостей принят единый contract:
+Для Debian-гостей принят единый набор требований:
 
 ```text
 user: root
@@ -52,23 +52,25 @@ PermitEmptyPasswords: no
 PubkeyAuthentication: yes
 ```
 
-Generic management user `ops` не является частью project contract.
+Названия параметров `sshd` оставлены без перевода, поскольку это буквальные настройки OpenSSH.
 
-Разделение субъектов управления происходит по keypair:
+Универсальный административный пользователь `ops` не является частью требований проекта.
+
+Субъекты управления различаются по парам ключей:
 
 ```text
-PVE host-side deployer key
-AI Control key
-Ansible/provisioning key
-personal key — при необходимости
-other dedicated technical keys — при необходимости
+ключ средства развёртывания на PVE-хосте
+ключ AI Control
+ключ Ansible для настройки
+личный ключ — при необходимости
+другие отдельные технические ключи — при необходимости
 ```
 
-Несколько identities могут одновременно входить как `root`, но каждая использует собственный private key. Отзыв одного public key не должен ломать остальные management channels.
+Несколько субъектов могут одновременно входить как `root`, но каждый использует собственный закрытый ключ. Отзыв одного открытого ключа не должен ломать остальные каналы управления.
 
-## 3. Host-side PVE guest identity
+## 3. SSH-ключ PVE для гостевых систем
 
-Постоянная technical identity host-side deployer:
+Постоянная техническая пара ключей средства развёртывания на PVE:
 
 ```text
 /etc/proxmox-deployer/ssh/pve_guest_ed25519
@@ -78,25 +80,25 @@ other dedicated technical keys — при необходимости
 Правила:
 
 ```text
-private key
+закрытый ключ
 → остаётся на PVE
-→ доступен только host-side deployment runtime по необходимым правам
+→ доступен только рабочей среде развёртывания с необходимыми правами
 → не хранится в Git
-→ не попадает в template
+→ не попадает в шаблон
 
-public key
-→ устанавливается в guest для root SSH
+открытый ключ
+→ устанавливается для root в гостевой системе
 → VM: через Cloud-Init sshkeys
 → LXC: через ssh-public-keys
 ```
 
-Keypair создаётся инфраструктурным bootstrap/configuration слоем, а не `deploy-guest.py`.
+Пара ключей создаётся инфраструктурным слоем первоначальной настройки и конфигурации, а не `deploy-guest.py`.
 
-Обычный deploy не генерирует и не ротирует этот keypair. Потеря private key при уже разложенном public key считается recovery-ситуацией; silent rotation запрещена.
+Обычное развёртывание не генерирует и не меняет эту пару. Потеря закрытого ключа при уже разложенном открытом ключе считается отдельной ситуацией восстановления; незаметная автоматическая смена запрещена.
 
-## 4. AI Control SSH identity
+## 4. SSH-ключ AI Control
 
-AI Control использует отдельную guest-management identity, например:
+AI Control использует отдельную пару ключей для управления гостевыми системами, например:
 
 ```text
 /opt/ai-control/ssh/ai_control_ed25519
@@ -106,62 +108,62 @@ AI Control использует отдельную guest-management identity, н
 Назначение:
 
 ```text
-AI agent
+AI-агент
 → ai_control_ed25519
 → SSH root@guest
 ```
 
-Наличие AI public key внутри guest независимо от PVE pool membership:
+Наличие открытого AI-ключа внутри гостевой системы не зависит от членства объекта в пуле PVE:
 
 ```text
-managed ACL
-→ право AI управлять lifecycle/configuration через Proxmox API
+ACL пула managed
+→ право AI управлять жизненным циклом и конфигурацией через API Proxmox
 
 ai_control_ed25519.pub в authorized_keys
-→ право AI на direct root SSH внутрь ОС
+→ право AI на прямой SSH-доступ root внутрь ОС
 ```
 
-Перемещение guest в/из `managed` само по себе не добавляет и не удаляет AI SSH key.
+Перемещение гостевой системы в `managed` или из него само по себе не добавляет и не удаляет AI-ключ.
 
-Если direct AI SSH нужно отозвать, удаляется только AI public key. Host-side deployer, Ansible и другие identities продолжают использовать свои credentials.
+Если прямой SSH-доступ AI нужно отозвать, удаляется только его открытый ключ. Средство развёртывания на PVE, Ansible и другие субъекты продолжают использовать собственные ключи.
 
-## 5. GitHub identity AI Control
+## 5. GitHub-ключ AI Control
 
-Git-доступ AI Control использует отдельный keypair, например:
+Для Git-доступа AI Control использует отдельную пару, например:
 
 ```text
 /opt/ai-control/ssh/github_proxmox_repo_ed25519
 /opt/ai-control/ssh/github_proxmox_repo_ed25519.pub
 ```
 
-Этот key используется только для Git repository access.
+Этот ключ используется только для доступа к Git-репозиторию.
 
 Нельзя:
 
 ```text
-GitHub key → использовать как guest management SSH key
-guest management key → использовать как GitHub Deploy Key
+GitHub-ключ → использовать для административного SSH-доступа в гостевые системы
+ключ управления гостевыми системами → использовать как GitHub Deploy Key
 ```
 
-Разные trust domains должны оставаться разными credentials.
+Разные области доверия должны использовать разные учётные данные.
 
-## 6. Ansible / provisioning identity
+## 6. Ключ Ansible
 
-`311-dev-services` должен иметь собственную provisioning SSH identity, отличную от PVE и AI Control.
+`311-dev-services` должен иметь собственную пару SSH-ключей для повторяемой настройки, отличную от PVE и AI Control.
 
 Модель:
 
 ```text
-PVE key     → host-side deploy/verification
-AI key      → AI direct management
-Ansible key → repeatable provisioning
+ключ PVE     → развёртывание и проверка со стороны хоста
+ключ AI      → прямое управление AI
+ключ Ansible → повторяемая настройка
 ```
 
-Все они могут входить как `root`, но имеют независимые private keys, audit trail и rotation lifecycle.
+Все они могут входить как `root`, но имеют независимые закрытые ключи, историю использования и жизненный цикл смены.
 
-## 7. Personal и другие technical keys
+## 7. Личные и другие технические ключи
 
-Personal private key хранится только на устройстве человека. В guest при необходимости добавляется только public half.
+Личный закрытый ключ хранится только на устройстве человека. В гостевую систему при необходимости добавляется только открытая часть.
 
 Для независимых технических ролей допустимы отдельные пары, например:
 
@@ -170,61 +172,61 @@ backup_ed25519
 ci_ed25519
 ```
 
-Правило одинаково для всех identities:
+Общее правило:
 
-> private key находится там, откуда инициируется действие; target получает только public key.
+> Закрытый ключ находится там, откуда инициируется действие; целевая система получает только открытый ключ.
 
-## 8. Guest `authorized_keys`
+## 8. `authorized_keys` гостевой системы
 
-Один Debian guest может содержать несколько независимых public keys пользователя `root`:
+Одна Debian-гостевая система может содержать несколько независимых открытых ключей пользователя `root`:
 
 ```text
 /root/.ssh/authorized_keys
 ├── pve_guest_ed25519.pub
-├── ai_control_ed25519.pub      # если разрешён direct AI SSH
-├── ansible/provisioning key    # если guest управляется 311
+├── ai_control_ed25519.pub      # если разрешён прямой SSH AI
+├── ansible/provisioning key    # если системой управляет 311
 └── personal/other keys         # при необходимости
 ```
 
-Initial injection для VM/LXC и граница deployer ↔ provisioning описаны в [`33-guest-bootstrap-and-provisioning.md`](33-guest-bootstrap-and-provisioning.md).
+Буквальные имена файлов и комментарии, относящиеся к реальным ключам, сохраняются. Начальная установка ключей для VM/LXC и граница между `deploy-guest` и Ansible описаны в [`33-guest-bootstrap-and-provisioning.md`](33-guest-bootstrap-and-provisioning.md).
 
-## 9. Template credentials policy
+## 9. Учётные данные в шаблоне
 
-Template `9000` не содержит management credentials:
+Шаблон `9000` не содержит административных учётных данных:
 
 ```text
-root password = locked
-/root/.ssh absent before seal
-management authorized_keys = empty
-private keys = absent
+пароль root заблокирован
+/root/.ssh отсутствует перед финализацией
+список административных authorized_keys пуст
+закрытые ключи отсутствуют
 ```
 
-Каждый clone получает нужные public keys отдельно до первого start.
+Каждый клон получает нужные открытые ключи отдельно до первого запуска.
 
-SSH host keys (`/etc/ssh/ssh_host_*`) идентифицируют сервер, а не клиента. Они удаляются перед seal template, чтобы каждый clone сгенерировал собственные уникальные host keys.
+SSH host keys (`/etc/ssh/ssh_host_*`) идентифицируют сервер, а не клиента. Они удаляются перед финализацией шаблона, чтобы каждый клон создал собственные уникальные ключи сервера.
 
-Подробный template contract: [`../templates/debian13/build-policy.md`](../templates/debian13/build-policy.md).
+Подробная спецификация шаблона: [`../templates/debian13/build-policy.md`](../templates/debian13/build-policy.md).
 
-## 10. Console access
+## 10. Доступ через консоль Proxmox
 
-Proxmox Console для Debian template приводит к локальной root console. Поэтому privilege `VM.Console` является фактическим административным доступом внутрь guest и выдаётся только доверенным PVE identities.
+Консоль Proxmox для Debian-шаблона даёт локальный доступ `root`. Поэтому привилегия `VM.Console` фактически является административным доступом внутрь гостевой системы и выдаётся только доверенным учётным записям PVE.
 
-Точная PVE ACL policy находится в [`25-pve-access-control.md`](25-pve-access-control.md).
+Точные ACL PVE находятся в [`25-pve-access-control.md`](25-pve-access-control.md).
 
-## 11. Backup и private keys
+## 11. Резервные копии и закрытые ключи
 
-Если private technical key находится внутри рабочей VM, полный Proxmox backup этой VM содержит этот credential и должен считаться чувствительным объектом.
+Если закрытый технический ключ находится внутри рабочей VM, полная резервная копия этой VM содержит такой ключ и должна считаться чувствительным объектом.
 
-Например, backups AI Control и provisioning/control-node VM/LXC требуют соответствующей защиты.
+Например, резервные копии AI Control и узла Ansible требуют соответствующей защиты.
 
-Host-side key:
+Ключ на стороне PVE:
 
 ```text
 /etc/proxmox-deployer/ssh/pve_guest_ed25519
 ```
 
-не входит в backup отдельного guest и должен резервироваться как отдельный PVE infrastructure secret.
+не входит в резервную копию отдельной гостевой системы и должен отдельно резервироваться как инфраструктурный секрет PVE.
 
 ## 12. Главный принцип
 
-> Proxmox access, guest SSH и application permissions — независимые уровни. Для Debian management используется `root` только по public key, а каждый субъект управления имеет собственную SSH identity, которую можно независимо выдать, отозвать, ротировать и аудитировать.
+> Доступ к Proxmox, SSH-доступ внутрь гостевой системы и права приложения — независимые уровни. Для управления Debian используется `root` только по открытому ключу, а каждый субъект управления имеет собственную пару SSH-ключей, которую можно независимо выдать, отозвать, заменить и проверить по журналам.
