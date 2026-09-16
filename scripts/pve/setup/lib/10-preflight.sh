@@ -28,26 +28,6 @@ check_root_and_pve() {
     pvesm status --storage local >/dev/null 2>&1 || die "Хранилище 'local' не определено или недоступно"
     pvesm status --storage local-lvm >/dev/null 2>&1 || die "Хранилище 'local-lvm' не определено или недоступно"
     ok "Хранилища local и local-lvm найдены"
-
-    if pct config "$TEMPLATE_VMID" >/dev/null 2>&1; then
-        die "VMID ${TEMPLATE_VMID} уже занят LXC-контейнером; скрипт не будет его изменять"
-    fi
-
-    if qm config "$TEMPLATE_VMID" >/dev/null 2>&1; then
-        local config protection_flag
-        config="$(qm config "$TEMPLATE_VMID")"
-        validate_template_contract "$config" 0 \
-            || die "Шаблон ${TEMPLATE_VMID} существует, но не соответствует полному root-only Template-Version ${TEMPLATE_VERSION}. Автоматическая замена запрещена; выполните отдельную осознанную пересборку template 9000 по актуальному scripts/pve/create-template.sh."
-
-        protection_flag="$(awk -F': ' '$1=="protection" {print $2}' <<<"$config")"
-        if [[ "$protection_flag" == "1" ]]; then
-            validate_template_contract "$config" 1 \
-                || die "Защищённый шаблон ${TEMPLATE_VMID} не прошёл полный contract check"
-            ok "Защищённый шаблон ${TEMPLATE_VMID} Template-Version ${TEMPLATE_VERSION} полностью соответствует contract"
-        else
-            info "Канонический шаблон ${TEMPLATE_VMID} версии ${TEMPLATE_VERSION} найден без protection=1; остальные параметры полного contract проверены, защита будет включена только после снимка конфигурации."
-        fi
-    fi
 }
 
 snapshot_host_config() {

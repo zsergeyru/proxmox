@@ -14,7 +14,10 @@ for module in \
     30-storage.sh \
     40-runtime.sh \
     50-access.sh \
-    70-template-tooling.sh; do
+    60-template-contract.sh \
+    61-template-source.sh \
+    62-template-build.sh \
+    70-tooling.sh; do
     [[ -f "${LIB_DIR}/${module}" ]] || {
         printf 'ОШИБКА: не найден модуль PVE Configuration: %s\n' "${LIB_DIR}/${module}" >&2
         exit 1
@@ -37,6 +40,8 @@ main() {
 
     check_root_and_pve
     snapshot_host_config
+    check_template_state
+    ensure_template_protection
 
     configure_apt
     install_packages
@@ -55,9 +60,16 @@ main() {
     ensure_roles
     ensure_pve_identities
 
-    check_template_capacity
-    check_template_source
-    ensure_template
+    if (( TEMPLATE_BUILD_REQUIRED )); then
+        prepare_template_source
+        create_template_builder
+        provision_template_builder
+        verify_template_builder
+        finalize_template_builder
+        seal_template
+    fi
+
+    verify_template_contract
 
     install_private_tooling
     report_status

@@ -8,7 +8,7 @@
 
 ```text
 Public Bootstrap:        PUBLIC_BOOTSTRAP_VERSION=7
-PVE Configuration:      PVE_CONFIGURATION_VERSION=15
+PVE Configuration:      PVE_CONFIGURATION_VERSION=16
 Debian VM template:     Template-Version 6
 ```
 
@@ -40,7 +40,7 @@ zsergeyru/proxmox/scripts/pve/setup/configure-pve.sh
 - credentials model;
 - PVE roles/ACL;
 - storage requirements;
-- template requirements;
+- template pipeline requirements;
 - state/reporting schema;
 - поведение rerun/safety checks.
 
@@ -50,14 +50,41 @@ zsergeyru/proxmox/scripts/pve/setup/configure-pve.sh
 /var/lib/proxmox-deployer/state/last-revision
 ```
 
-При handoff Public Bootstrap передаёт `PVE_CONFIGURATION_SOURCE_REVISION`. Canonical checkout должен совпасть именно с этой revision. Если ветка `main` успела измениться во время первого clone/fetch, PVE Configuration останавливается вместо смешивания уже загруженных модулей с более новым builder/tooling.
+При handoff Public Bootstrap передаёт `PVE_CONFIGURATION_SOURCE_REVISION`. Canonical checkout должен совпасть именно с этой revision. Если ветка `main` успела измениться во время первого clone/fetch, PVE Configuration останавливается вместо смешивания уже загруженных модулей с более новым template/tooling кодом.
 
 ## Debian VM template
 
-Активный builder:
+Создание VMID `9000` является встроенной частью PVE Configuration, а не отдельным самостоятельным host-side скриптом.
+
+Host-side pipeline:
 
 ```text
-zsergeyru/proxmox/scripts/pve/create-template.sh
+60-template-contract.sh
+→ состояние VMID 9000 + полный host-visible contract
+
+61-template-source.sh
+→ capacity/source checks
+→ Debian cloud image + SHA512SUMS
+→ строгая SHA-512 verification
+→ сборка temporary Cloud-Init snippet из versioned assets
+
+62-template-build.sh
+→ создать VM builder
+→ provisioning/QGA/Cloud-Init
+→ verification reboot
+→ guest cleanup
+→ standard Proxmox Cloud-Init
+→ qm template
+→ protection=1
+→ final contract check
+```
+
+Guest-side assets находятся в:
+
+```text
+templates/debian13/cloud-init.yaml
+templates/debian13/template-bootstrap.sh
+templates/debian13/template-finalize.sh
 ```
 
 Текущая модель:
@@ -78,9 +105,9 @@ Template-Version 6
 template-version=6
 ```
 
-`Template-Version` — версия нашего project contract, а не pin внешнего Debian build.
+`Template-Version` — версия нашего guest/template contract, а не pin внешнего Debian build. Перенос orchestration из отдельного `create-template.sh` в модули PVE Configuration сам по себе не требует повышения Template-Version, пока итоговое содержимое и contract гостя не изменены.
 
-PVE Configuration принимает существующий template только если полный host-visible contract соответствует текущей версии. Несовместимый protected VMID `9000` автоматически не удаляется и не заменяется.
+PVE Configuration принимает существующий template только если полный host-visible contract соответствует текущей версии. Несовместимый VMID `9000` автоматически не удаляется и не заменяется. Незавершённая VM-сборщик также сохраняется для диагностики и распознаётся как отдельное состояние.
 
 ## Внешние версии
 

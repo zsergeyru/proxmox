@@ -11,7 +11,7 @@ PUBLIC_BOOTSTRAP_VERSION=7
 
 PVE CONFIGURATION
 zsergeyru/proxmox/scripts/pve/setup/configure-pve.sh
-PVE_CONFIGURATION_VERSION=15
+PVE_CONFIGURATION_VERSION=16
 ```
 
 Канонические документы:
@@ -141,7 +141,10 @@ scripts/pve/setup/
     ├── 30-storage.sh
     ├── 40-runtime.sh
     ├── 50-access.sh
-    └── 70-template-tooling.sh
+    ├── 60-template-contract.sh
+    ├── 61-template-source.sh
+    ├── 62-template-build.sh
+    └── 70-tooling.sh
 ```
 
 Основная последовательность:
@@ -151,6 +154,8 @@ exclusive configuration lock
 → state=running
 → PVE 9 / Debian trixie / KVM preflight
 → configuration snapshot
+→ определить состояние template 9000
+→ при необходимости восстановить protection совместимого template
 → PVE/Ceph repository policy
 → packages
 → DNS/time/outbound checks
@@ -164,11 +169,18 @@ exclusive configuration lock
 → roles/users/API tokens/ACL
 → effective token permission checks
 → token API authentication checks
-→ capacity/source checks
-→ template 9000
+→ если template отсутствует: source preparation
+→ создать builder VM
+→ provisioning
+→ verification reboot
+→ guest cleanup
+→ seal template
+→ final template contract
 → local tooling/status
 → final state
 ```
+
+Так несовместимый или незавершённый VMID `9000` обнаруживается сразу после snapshot, до остальных изменений host configuration.
 
 PVE Configuration не читает `guest.yaml` или `guests/defaults.yaml` как вход для host configuration.
 
@@ -234,13 +246,42 @@ root SSH: public-key only
 protection: 1
 ```
 
-Builder:
+Создание template встроено в PVE Configuration. Отдельного `scripts/pve/create-template.sh` больше нет.
+
+Host-side stages:
 
 ```text
-scripts/pve/create-template.sh
+60-template-contract.sh
+→ классифицировать VMID 9000
+→ проверить существующий template
+→ отличить незавершённый builder от посторонней VM
+
+61-template-source.sh
+→ capacity/source checks
+→ Debian image + SHA512SUMS
+→ SHA-512 verification
+→ собрать Cloud-Init snippet из templates/debian13 assets
+
+62-template-build.sh
+→ создать VM builder
+→ provisioning/QGA/Cloud-Init
+→ verification reboot
+→ kernel/framebuffer/console checks
+→ guest finalize
+→ standard Cloud-Init
+→ qm template
+→ protection=1
 ```
 
-PVE Configuration теперь использует один полный host-visible contract как для существующего template, так и после новой сборки:
+Guest-side assets:
+
+```text
+templates/debian13/cloud-init.yaml
+templates/debian13/template-bootstrap.sh
+templates/debian13/template-finalize.sh
+```
+
+PVE Configuration использует один полный host-visible contract как для существующего template, так и после новой сборки:
 
 ```text
 name=tpl-debian13
@@ -253,11 +294,14 @@ ciupgrade=0
 ipconfig0=ip=dhcp
 cicustom отсутствует
 description содержит template-version=6
+protection=1 после pipeline
 ```
 
-После `ensure_template` дополнительно обязательно `protection=1`.
+Если существующий VMID `9000` является совместимым template без `protection=1`, защита восстанавливается автоматически после configuration snapshot.
 
-Если существующий VMID `9000` не соответствует contract, выполняется STOP. Единственное автоматически исправляемое отклонение — отсутствие `protection=1` у в остальном совместимого template после предварительного configuration snapshot.
+Если `9000` занят незавершённой VM-сборщиком, PVE Configuration останавливается с отдельной диагностикой. Builder и диски намеренно не удаляются автоматически. После осознанной диагностики/очистки запускается та же PVE Configuration повторно.
+
+Любой другой несовместимый или посторонний VMID `9000` вызывает STOP без destructive overwrite.
 
 ## Root-only guest management
 
@@ -338,4 +382,4 @@ Stable status command:
 
 Главный принцип:
 
-> Public Bootstrap отвечает за доступ к private source of truth, resume и выбор точной revision. PVE Configuration отвечает за воспроизводимое состояние Proxmox host. Credentials не ротируются молча, а один configuration run никогда не должен смешивать две private Git revisions.
+> Public Bootstrap отвечает за доступ к private source of truth, resume и выбор точной revision. PVE Configuration является единственным host-side orchestrator, включая создание template 9000. Credentials не ротируются молча, а один configuration run никогда не должен смешивать две private Git revisions.

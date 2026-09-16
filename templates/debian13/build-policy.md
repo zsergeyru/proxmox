@@ -12,7 +12,34 @@ Template должен быть простым и понятным. Для тек
 
 Template v6 использует единый management user `root`. Отдельный generic `ops` не создаётся.
 
-## 2. Source image
+Host-side orchestration является частью `scripts/pve/setup/configure-pve.sh`; отдельного standalone `create-template.sh` нет.
+
+## 2. Pipeline ownership
+
+Создание VMID `9000` разделено на три host-side stage-модуля:
+
+```text
+60-template-contract.sh
+→ state detection + template contract
+
+61-template-source.sh
+→ capacity/source checks + image/checksum + Cloud-Init render
+
+62-template-build.sh
+→ VM builder lifecycle + verification + seal
+```
+
+Guest-side файлы версионируются отдельно от host orchestration:
+
+```text
+templates/debian13/cloud-init.yaml
+templates/debian13/template-bootstrap.sh
+templates/debian13/template-finalize.sh
+```
+
+`configure-pve.sh` остаётся единственным orchestrator и владеет общими lock/state/log/error semantics.
+
+## 3. Source image
 
 Используется:
 
@@ -26,11 +53,11 @@ Checksum:
 https://cloud.debian.org/images/cloud/trixie/latest/SHA512SUMS
 ```
 
-Builder обязан проверить SHA-512 до `qm importdisk`.
+Source stage обязан проверить SHA-512 до `qm importdisk`.
 
 Это защищает от повреждённой загрузки, но не пытается сделать две сборки в разные даты идентичными.
 
-## 3. APT
+## 4. APT
 
 Внутри builder VM используются обычные Debian repositories из cloud image:
 
@@ -44,7 +71,7 @@ APT snapshot и version pinning не применяются.
 
 `ciupgrade=0`: Cloud-Init не делает автоматический package upgrade при первом boot клона.
 
-## 4. Kernel и console
+## 5. Kernel и console
 
 Устанавливаются:
 
@@ -66,7 +93,7 @@ ttyS0 autologin root
 Fixed 8x16
 ```
 
-После bootstrap выполняется verification reboot. Builder продолжает только если:
+После bootstrap выполняется verification reboot. Pipeline продолжает только если:
 
 - kernel `*-amd64` и не `*cloud*`;
 - `/sys/class/graphics/fb0/virtual_size` существует и валиден;
@@ -74,7 +101,7 @@ Fixed 8x16
 - tty1/ttyS0 getty active;
 - обе console override действительно используют `--autologin root`.
 
-## 5. Root / SSH
+## 6. Root / SSH
 
 ```text
 root password: locked
@@ -87,7 +114,7 @@ PubkeyAuthentication yes
 
 Таким образом пароль root не используется, но SSH root по public key разрешён.
 
-Builder проверяет `sshd -t`, effective `sshd -T` для `root` и locked password state.
+Guest bootstrap проверяет `sshd -t`, effective `sshd -T` для `root` и locked password state.
 
 В base template не должно быть ни одного management public key. Перед seal удаляется `/root/.ssh`.
 
@@ -106,9 +133,9 @@ Ansible / 311
 
 Все они могут входить как `root`; разграничение и отзыв доступа выполняются по ключам.
 
-## 6. Cloud-Init lifecycle
+## 7. Cloud-Init lifecycle
 
-Builder-only custom Cloud-Init используется только для сборки.
+Builder-only custom Cloud-Init собирается PVE Configuration из versioned assets только для процесса сборки.
 
 Перед `qm template`:
 
@@ -120,6 +147,7 @@ final cleanup
 → ciupgrade=0
 → qm cloudinit update
 → проверить отсутствие builder-only user-data
+→ удалить temporary snippet
 ```
 
 Description шаблона должен содержать:
@@ -130,7 +158,7 @@ template-version=6
 
 PVE Configuration использует этот marker вместе с остальными параметрами полного template contract для проверки совместимости существующего VMID 9000.
 
-## 7. Full Clone policy
+## 8. Full Clone policy
 
 Рабочие Debian VM создаются как Full Clone.
 
@@ -140,7 +168,7 @@ Template `9000` остаётся `protection=1`.
 
 Старый template другой версии не перезаписывается автоматически. Его замена должна быть отдельной осознанной операцией.
 
-## 8. Base packages
+## 9. Base packages
 
 ```text
 qemu-guest-agent openssh-server sudo locales cloud-guest-utils systemd-timesyncd
@@ -156,7 +184,7 @@ cron logrotate
 
 Docker/Compose и service-specific software в base template не входят.
 
-## 9. Disk / TRIM
+## 10. Disk / TRIM
 
 ```text
 VirtIO SCSI Single
@@ -168,7 +196,7 @@ base disk=16 GiB
 
 Включён `fstrim.timer`; перед seal выполняется `fstrim -av`.
 
-## 10. Cleanup
+## 11. Cleanup
 
 Удаляются machine-specific/runtime данные:
 
@@ -183,7 +211,7 @@ base disk=16 GiB
 - temp/history;
 - builder scripts.
 
-## 11. Provenance
+## 12. Provenance
 
 `/etc/vm-template-info` содержит:
 
@@ -200,14 +228,24 @@ Console modes
 
 Pinned cloud build ID и APT snapshot не являются частью policy.
 
-## 12. Failure policy
+## 13. Failure policy
 
 Существующий VMID 9000 не перезаписывается.
 
-При build error временная VM/disks не уничтожаются автоматически: состояние сохраняется для диагностики.
+При build error временная VM/disks не уничтожаются автоматически: состояние сохраняется для диагностики. PVE Configuration выводит отдельную diagnostic hint, а следующий запуск распознаёт `builder-debian13` как незавершённую сборку и останавливается вместо попытки перезаписать её.
 
-PVE Configuration также не мигрирует старый template на v6 автоматически: несовместимая версия или другой параметр template contract вызывает STOP до любых попыток использовать его как clone source.
+Temporary snippet также не удаляется при аварийном build path, чтобы сохранить диагностический контекст. После осознанной диагностики/очистки запускается та же PVE Configuration повторно.
 
-## 13. Проверка
+PVE Configuration не мигрирует старый template на v6 автоматически: несовместимая версия или другой параметр template contract вызывает STOP до любых попыток использовать его как clone source.
 
-CI проверяет shell/YAML структуру. После существенного изменения builder требуется реальный clean build + Full Clone smoke test, включая вход `root` по injected SSH key.
+## 14. Проверка
+
+CI проверяет:
+
+- shell syntax всех `.sh` файлов;
+- YAML структуры `cloud-init.yaml`;
+- наличие обеих guest script entries;
+- возможность собрать итоговый Cloud-Init документ из assets;
+- отсутствие legacy `scripts/pve/create-template.sh`.
+
+После существенного изменения pipeline или guest assets требуется реальный clean build + Full Clone smoke test, включая вход `root` по injected SSH key.

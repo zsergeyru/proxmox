@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-PVE_CONFIGURATION_VERSION=15
+PVE_CONFIGURATION_VERSION=16
 
 PRIVATE_REPO="git@github.com:zsergeyru/proxmox.git"
 PRIVATE_BRANCH="main"
@@ -37,11 +37,29 @@ PVE_GUEST_PUB="${PVE_GUEST_KEY}.pub"
 TEMPLATE_VMID=9000
 TEMPLATE_NAME="tpl-debian13"
 TEMPLATE_VERSION=6
+TEMPLATE_BUILDER_NAME="builder-debian13"
+TEMPLATE_DISK_STORAGE="local-lvm"
+TEMPLATE_SNIPPET_STORAGE="local"
+TEMPLATE_MEMORY_MB=1024
+TEMPLATE_CORES=1
+TEMPLATE_DISK_SIZE="16G"
+TEMPLATE_WAIT_SECONDS=1200
+TEMPLATE_WAIT_PROGRESS_SECONDS=15
+TEMPLATE_IMAGE_URL="https://cloud.debian.org/images/cloud/trixie/latest/debian-13-genericcloud-amd64.qcow2"
+TEMPLATE_CHECKSUM_URL="https://cloud.debian.org/images/cloud/trixie/latest/SHA512SUMS"
+TEMPLATE_IMAGE_NAME="${TEMPLATE_IMAGE_URL##*/}"
+TEMPLATE_IMAGE_DIR="/var/lib/vz/template/cache/debian13"
+TEMPLATE_IMAGE_PATH="${TEMPLATE_IMAGE_DIR}/${TEMPLATE_IMAGE_NAME}"
+TEMPLATE_CHECKSUM_PATH="${TEMPLATE_IMAGE_DIR}/SHA512SUMS"
+TEMPLATE_SNIPPET_NAME="debian13-template-builder-${TEMPLATE_VMID}.yaml"
+TEMPLATE_SNIPPET_VOL="${TEMPLATE_SNIPPET_STORAGE}:snippets/${TEMPLATE_SNIPPET_NAME}"
+TEMPLATE_ASSET_DIR="${REPO_DIR}/templates/debian13"
+TEMPLATE_MIN_LOCAL_BYTES=$((2 * 1024 * 1024 * 1024))
+TEMPLATE_MIN_DISK_STORAGE_BYTES=$((18 * 1024 * 1024 * 1024))
+
 MANAGED_POOL="managed"
 BRIDGE="vmbr0"
 LXC_TEMPLATE_STORAGE="local"
-TEMPLATE_MIN_LOCAL_BYTES=$((2 * 1024 * 1024 * 1024))
-TEMPLATE_MIN_DISK_STORAGE_BYTES=$((18 * 1024 * 1024 * 1024))
 
 UPDATE_SYSTEM=0
 WARN_COUNT=0
@@ -50,6 +68,13 @@ CONFIGURATION_RUNNING=0
 API_HEADER_FILE=""
 CANONICAL_KEY_DIFFERS_FROM_BOOTSTRAP=0
 LXC_TEMPLATE_VOLUME=""
+TEMPLATE_BUILD_REQUIRED=0
+TEMPLATE_NEEDS_PROTECTION=0
+TEMPLATE_BUILD_ACTIVE=0
+TEMPLATE_IMAGE_SHA512=""
+TEMPLATE_SNIPPET_PATH=""
+TEMPLATE_KERNEL_VERSION=""
+TEMPLATE_FRAMEBUFFER_SIZE=""
 
 HOST_PVE_USER="deployer@pve"
 HOST_PVE_TOKEN_NAME="host-deploy"
@@ -97,9 +122,20 @@ warn() {
     WARN_COUNT=$((WARN_COUNT + 1))
     printf '%s%s[ПРЕДУПРЕЖДЕНИЕ]%s %s\n' "$C_BOLD" "$C_YELLOW" "$C_RESET" "$*" >&2
 }
+
+template_build_diagnostic_hint() {
+    if (( TEMPLATE_BUILD_ACTIVE )); then
+        printf '%s%s[ДИАГНОСТИКА]%s VM-сборщик %s и её диски оставлены без автоматического удаления.\n' \
+            "$C_BOLD" "$C_YELLOW" "$C_RESET" "$TEMPLATE_VMID" >&2
+        printf '             Проверьте VM %s, Cloud-Init/QGA и snippet %s перед осознанной очисткой.\n' \
+            "$TEMPLATE_VMID" "$TEMPLATE_SNIPPET_VOL" >&2
+    fi
+}
+
 die() {
     local message=$*
     printf '\n%s%sОШИБКА:%s %s\n' "$C_BOLD" "$C_RED" "$C_RESET" "$message" >&2
+    template_build_diagnostic_hint
     if (( CONFIGURATION_RUNNING )); then
         trap - ERR
         write_state "failed" "$REPO_REVISION" >/dev/null 2>&1 || true
@@ -147,6 +183,7 @@ on_error() {
         write_state "failed" "$REPO_REVISION" >/dev/null 2>&1 || true
     fi
     printf '\n%s%sPVE Configuration аварийно остановлена.%s Код возврата: %s.\n' "$C_BOLD" "$C_RED" "$C_RESET" "$rc" >&2
+    template_build_diagnostic_hint
     exit "$rc"
 }
 
@@ -158,6 +195,7 @@ on_signal() {
         write_state "interrupted" "$REPO_REVISION" >/dev/null 2>&1 || true
     fi
     printf '\n%s%sPVE Configuration прервана сигналом %s.%s\n' "$C_BOLD" "$C_RED" "$signal_name" "$C_RESET" >&2
+    template_build_diagnostic_hint
     exit "$rc"
 }
 

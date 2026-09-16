@@ -32,7 +32,7 @@ jobs:
             bash -n "$file"
           done < <(find . -type f -name '*.sh' -print0)
 
-      - name: Validate template builder Cloud-Init
+      - name: Validate template pipeline assets
         run: |
           python - <<'PY'
           from pathlib import Path
@@ -40,38 +40,48 @@ jobs:
           import tempfile
           import yaml
 
-          path = Path("scripts/pve/create-template.sh")
-          text = path.read_text(encoding="utf-8")
-          marker = 'cat >"$SNIPPET_PATH" <<\'CLOUDCFG\'\n'
-          if marker not in text or "\nCLOUDCFG\n" not in text:
-              raise SystemExit("Cloud-Init heredoc markers were not found")
+          asset_dir = Path("templates/debian13")
+          base_path = asset_dir / "cloud-init.yaml"
+          bootstrap_path = asset_dir / "template-bootstrap.sh"
+          finalize_path = asset_dir / "template-finalize.sh"
 
-          cloud_cfg = text.split(marker, 1)[1].split("\nCLOUDCFG\n", 1)[0]
-          data = yaml.safe_load(cloud_cfg)
+          data = yaml.safe_load(base_path.read_text(encoding="utf-8"))
           if not isinstance(data, dict):
-              raise SystemExit("Cloud-Init document is not a mapping")
+              raise SystemExit("templates/debian13/cloud-init.yaml is not a mapping")
 
-          write_files = {
-              item.get("path"): item.get("content")
-              for item in data.get("write_files", [])
-              if isinstance(item, dict)
+          replacement = {
+              "/usr/local/sbin/template-bootstrap": bootstrap_path.read_text(encoding="utf-8"),
+              "/usr/local/sbin/template-finalize": finalize_path.read_text(encoding="utf-8"),
           }
+          found = set()
+          for item in data.get("write_files", []):
+              if isinstance(item, dict) and item.get("path") in replacement:
+                  item["content"] = replacement[item["path"]]
+                  found.add(item["path"])
 
-          required_scripts = (
-              "/usr/local/sbin/template-bootstrap",
-              "/usr/local/sbin/template-finalize",
+          if found != set(replacement):
+              raise SystemExit(f"Cloud-Init guest script entries mismatch: found={sorted(found)}")
+
+          rendered = "#cloud-config\n" + yaml.safe_dump(
+              data,
+              allow_unicode=True,
+              sort_keys=False,
+              default_flow_style=False,
           )
+          parsed = yaml.safe_load(rendered)
+          if not isinstance(parsed, dict):
+              raise SystemExit("Rendered Cloud-Init is not a mapping")
 
           with tempfile.TemporaryDirectory() as temp_dir:
-              for guest_path in required_scripts:
-                  content = write_files.get(guest_path)
-                  if not isinstance(content, str) or not content.strip():
-                      raise SystemExit(f"Missing embedded script: {guest_path}")
-                  temp_path = Path(temp_dir) / Path(guest_path).name
-                  temp_path.write_text(content, encoding="utf-8")
+              for source in (bootstrap_path, finalize_path):
+                  temp_path = Path(temp_dir) / source.name
+                  temp_path.write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
                   subprocess.run(["bash", "-n", str(temp_path)], check=True)
 
-          print("Cloud-Init YAML and embedded guest Bash syntax are valid")
+          if Path("scripts/pve/create-template.sh").exists():
+              raise SystemExit("Legacy standalone scripts/pve/create-template.sh must not exist")
+
+          print("Template Cloud-Init assets and guest scripts are valid")
           PY
 
       - name: Check whitespace errors

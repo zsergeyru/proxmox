@@ -17,10 +17,22 @@ SSH: public key only
 
 Template v6 является текущей действующей версией. Версия v5 ранее использовалась для отменённого эксперимента с pinned Debian build/APT snapshot и не переиспользуется.
 
-Рабочая реализация находится в приватном репозитории:
+Создание template является частью PVE Configuration. Отдельного standalone `scripts/pve/create-template.sh` больше нет.
+
+Host-side stages:
 
 ```text
-scripts/pve/create-template.sh
+scripts/pve/setup/lib/60-template-contract.sh
+scripts/pve/setup/lib/61-template-source.sh
+scripts/pve/setup/lib/62-template-build.sh
+```
+
+Guest-side versioned assets:
+
+```text
+templates/debian13/cloud-init.yaml
+templates/debian13/template-bootstrap.sh
+templates/debian13/template-finalize.sh
 ```
 
 Политика сборки: [`build-policy.md`](build-policy.md).
@@ -47,9 +59,38 @@ Debian 13 trixie/latest generic cloud image
 → protection=1
 ```
 
+## Template pipeline
+
+PVE Configuration выполняет сборку по этапам:
+
+```text
+60-template-contract.sh
+→ определить состояние VMID 9000
+→ проверить существующий template
+→ отличить unfinished builder от посторонней VM
+
+61-template-source.sh
+→ проверить capacity и cloud.debian.org
+→ скачать image + SHA512SUMS
+→ проверить SHA-512
+→ собрать temporary Cloud-Init snippet из versioned assets
+
+62-template-build.sh
+→ создать builder VM
+→ дождаться QGA/Cloud-Init/bootstrap
+→ выполнить verification reboot
+→ проверить kernel/framebuffer/consoles
+→ выполнить guest cleanup
+→ вернуть стандартный Proxmox Cloud-Init
+→ qm template
+→ protection=1
+```
+
+Один и тот же `configure-pve.sh` владеет lock, state, log и error handling для host configuration и template build. Второго host-side orchestrator нет.
+
 ## Источник Debian
 
-Builder использует текущий официальный image:
+Pipeline использует текущий официальный image:
 
 ```text
 https://cloud.debian.org/images/cloud/trixie/latest/debian-13-genericcloud-amd64.qcow2
@@ -70,7 +111,7 @@ serial0 → ttyS0 → autologin root (fallback)
 Fixed 8x16
 ```
 
-Builder после reboot требует:
+После reboot pipeline требует:
 
 - kernel `*-amd64` без `cloud`;
 - существующий framebuffer `fb0` с валидным размером;
@@ -144,7 +185,7 @@ PVE Configuration проверяет существующий VMID 9000 по п�
 ```text
 name = tpl-debian13
 template = 1
-protection = 1 после ensure_template
+protection = 1 после pipeline
 agent = 1
 vga = std
 serial0 = socket
@@ -155,7 +196,9 @@ cicustom отсутствует
 description содержит template-version=6
 ```
 
-До snapshot допускается единственное автоматически исправляемое отклонение: отсутствие `protection=1` у уже совместимого template. Остальные несовпадения вызывают STOP и требуют осознанной пересборки.
+Единственное автоматически исправляемое отклонение у совместимого template — отсутствие `protection=1`; защита восстанавливается после configuration snapshot. Остальные несовпадения вызывают STOP и требуют осознанной пересборки.
+
+Незавершённая VM-сборщик `builder-debian13` распознаётся отдельно. Она и её диски не удаляются автоматически: состояние сохраняется для диагностики.
 
 Старый template другой версии автоматически не изменяется и не удаляется.
 
@@ -174,9 +217,9 @@ SSH: root key-only
 
 Также сохраняются source image, SHA-512 и дата сборки.
 
-## Проверка после изменения builder
+## Проверка после изменения template assets или pipeline
 
-После существенного изменения `create-template.sh`:
+После существенного изменения `60/61/62` или файлов `templates/debian13/`:
 
 1. clean build VMID 9000;
 2. Full Clone;
@@ -189,7 +232,7 @@ SSH: root key-only
 9. filesystem growth после resize;
 10. отсутствие builder artifacts и baked-in authorized_keys.
 
-CI проверяет shell-синтаксис и структуру Cloud-Init, но не заменяет реальный PVE integration test.
+CI проверяет shell-синтаксис, YAML и сборку Cloud-Init из assets, но не заменяет реальный PVE integration test.
 
 ## История
 

@@ -11,10 +11,10 @@ PUBLIC_BOOTSTRAP_VERSION=7
 
 PVE Configuration
 zsergeyru/proxmox/scripts/pve/setup/configure-pve.sh
-PVE_CONFIGURATION_VERSION=15
+PVE_CONFIGURATION_VERSION=16
 ```
 
-`Public Bootstrap` отвечает за получение или обновление private source of truth, выбор точной Git revision и передачу управления. `PVE Configuration` повторяемо приводит сам Proxmox VE host к ожидаемому состоянию проекта.
+`Public Bootstrap` отвечает за получение или обновление private source of truth, выбор точной Git revision и передачу управления. `PVE Configuration` повторяемо приводит сам Proxmox VE host к ожидаемому состоянию проекта, включая создание базового Debian template `9000`.
 
 ## 1. Канонический запуск
 
@@ -156,7 +156,10 @@ scripts/pve/setup/
     ├── 30-storage.sh
     ├── 40-runtime.sh
     ├── 50-access.sh
-    └── 70-template-tooling.sh
+    ├── 60-template-contract.sh
+    ├── 61-template-source.sh
+    ├── 62-template-build.sh
+    └── 70-tooling.sh
 ```
 
 Модули при `source` только объявляют функции. Основная последовательность:
@@ -166,6 +169,8 @@ configuration log + exclusive lock
 → state=running
 → PVE 9 / Debian trixie / KVM preflight
 → configuration snapshot
+→ template state/contract
+→ при необходимости восстановить protection совместимого template
 → repository policy
 → packages
 → DNS/time/outbound checks
@@ -179,8 +184,12 @@ configuration log + exclusive lock
 → roles/users/API tokens/ACL
 → effective token permission checks
 → token API authentication checks
-→ template capacity/source checks
-→ template 9000
+→ если 9000 отсутствует: source/image/Cloud-Init preparation
+→ builder VM provisioning
+→ verification reboot
+→ guest cleanup
+→ seal template
+→ final template contract
 → local tooling/status
 → final state
 ```
@@ -193,7 +202,7 @@ PVE Configuration не использует `guest.yaml` или `guests/defaults
 
 Только явный:
 
-```text
+```bash
 --update-system
 ```
 
@@ -205,7 +214,7 @@ apt full-upgrade
 
 ## 6. Preflight и safety
 
-Проверяются:
+Host preflight проверяет:
 
 - запуск от `root`;
 - Proxmox VE 9.x;
@@ -214,11 +223,9 @@ apt full-upgrade
 - `vmbr0`;
 - `local` и `local-lvm`;
 - обязательные PVE CLI tools;
-- конфликт VMID `9000`;
-- полный host-visible contract существующего template `9000`;
 - DNS/outbound access.
 
-Неизвестный VMID `9000`, неожиданный Git origin, потерянный private credential или нестандартная repository configuration не исправляются разрушительно и приводят к STOP.
+Состояние VMID `9000` проверяется отдельным template-contract stage сразу после configuration snapshot и до остальных host-side изменений. Неизвестный VMID `9000`, неожиданный Git origin, потерянный private credential или нестандартная repository configuration не исправляются разрушительно и приводят к STOP.
 
 ## 7. Configuration snapshot
 
@@ -304,6 +311,8 @@ PVE Configuration log:
 /var/log/proxmox-deployer/configure-pve.log
 ```
 
+Template build использует тот же lock, state и log; отдельного host-side template orchestrator нет.
+
 ## 11. PVE guest SSH identity
 
 ```text
@@ -349,12 +358,6 @@ pveum user token permissions <userid> <tokenid>
 
 ## 13. Debian VM template 9000
 
-Builder:
-
-```text
-scripts/pve/create-template.sh
-```
-
 Target:
 
 ```text
@@ -365,6 +368,37 @@ ciuser: root
 root password: locked
 root SSH: public-key only
 protection: 1
+```
+
+Отдельного `scripts/pve/create-template.sh` нет. Host-side pipeline встроен в PVE Configuration:
+
+```text
+60-template-contract.sh
+→ состояние/contract VMID 9000
+
+61-template-source.sh
+→ capacity/source
+→ Debian image + SHA512SUMS
+→ SHA-512 verification
+→ temporary Cloud-Init из versioned assets
+
+62-template-build.sh
+→ builder VM
+→ provisioning/QGA/Cloud-Init
+→ verification reboot
+→ kernel/framebuffer/console checks
+→ finalize guest
+→ standard Cloud-Init
+→ qm template
+→ protection=1
+```
+
+Guest-side assets:
+
+```text
+templates/debian13/cloud-init.yaml
+templates/debian13/template-bootstrap.sh
+templates/debian13/template-finalize.sh
 ```
 
 Существующий template проверяется по полному host-visible contract:
@@ -380,11 +414,12 @@ ciupgrade=0
 ipconfig0=ip=dhcp
 cicustom отсутствует
 description содержит template-version=6
+protection=1 после pipeline
 ```
 
-`protection=1` также обязателен после `ensure_template`; отсутствие защиты у в остальном совместимого template допускается только до snapshot и исправляется автоматически после него.
+Отсутствие защиты у в остальном совместимого template исправляется автоматически после snapshot.
 
-Любое другое несовпадение вызывает STOP и не приводит к автоматической замене VMID 9000.
+Если VMID `9000` содержит незавершённый `builder-debian13`, PVE Configuration останавливается с диагностическим сообщением и **не удаляет** VM/disks/snippet автоматически. Посторонняя VM или несовместимый template также вызывают STOP без destructive overwrite.
 
 ## 14. State и status
 
@@ -416,4 +451,4 @@ ready-with-warnings
 
 Главный принцип:
 
-> Public Bootstrap отвечает за доступ к private source of truth, resume и выбор точной revision. PVE Configuration отвечает за воспроизводимое состояние Proxmox host и не смешивает разные revisions внутри одного запуска. Потенциально разрушительные изменения credentials и protected template не выполняются молча.
+> Public Bootstrap отвечает за доступ к private source of truth, resume и выбор точной revision. PVE Configuration является единственным host-side orchestrator и отвечает за воспроизводимое состояние Proxmox host, включая template 9000. Потенциально разрушительные изменения credentials и template state не выполняются молча.

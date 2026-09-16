@@ -79,7 +79,10 @@ scripts/pve/setup/
     ├── 30-storage.sh
     ├── 40-runtime.sh
     ├── 50-access.sh
-    └── 70-template-tooling.sh
+    ├── 60-template-contract.sh
+    ├── 61-template-source.sh
+    ├── 62-template-build.sh
+    └── 70-tooling.sh
 ```
 
 Канонический постоянный checkout:
@@ -95,17 +98,22 @@ scripts/pve/setup/
 ├── docs/
 ├── guests/
 ├── templates/
+│   └── debian13/
+│       ├── README.md
+│       ├── build-policy.md
+│       ├── cloud-init.yaml
+│       ├── template-bootstrap.sh
+│       └── template-finalize.sh
 ├── ansible/
 └── scripts/
     └── pve/
         ├── setup/
         │   ├── configure-pve.sh
         │   └── lib/
-        ├── create-template.sh
         └── deploy-guest.py
 ```
 
-`deploy-guest.py` появляется после реализации deployer.
+Отдельного `scripts/pve/create-template.sh` больше нет: создание VMID `9000` является частью PVE Configuration. `deploy-guest.py` появляется после реализации deployer.
 
 ## 3. Постоянная конфигурация deployer
 
@@ -216,6 +224,14 @@ cache/
 
 Private SSH keys и token secrets здесь не хранятся.
 
+Template source image cache расположен штатно в:
+
+```text
+/var/lib/vz/template/cache/debian13/
+```
+
+Temporary Cloud-Init builder snippet создаётся в storage `local:snippets` только на время сборки VMID `9000` и удаляется после успешного перехода к стандартному Proxmox Cloud-Init.
+
 ## 6. State
 
 ```text
@@ -256,6 +272,8 @@ State не является source of truth: каждый запуск пере�
 ├── deploy-guest.log
 └── audit/
 ```
+
+Создание template 9000 пишет в тот же `configure-pve.log`; отдельного template-builder log/orchestrator нет.
 
 Правила:
 
@@ -390,4 +408,4 @@ diagnostics/
 
 Главный принцип:
 
-> Public Bootstrap использует отдельную временную область только для первоначального доступа к private source of truth. PVE Configuration владеет постоянным runtime, credentials, state, logs и configuration snapshots.
+> Public Bootstrap использует отдельную временную область только для первоначального доступа к private source of truth. PVE Configuration владеет постоянным runtime, credentials, state, logs, configuration snapshots и host-side template pipeline.
