@@ -86,6 +86,14 @@ wait_progress() {
     printf '[ОЖИДАНИЕ] %s: %ss/%ss, VM=%s%s\n' "$phase" "$elapsed" "$limit" "$vm_state" "$detail"
 }
 
+guest_bootstrap_status() {
+    local out status
+    out="$(qm guest exec "$VMID" -- /bin/bash -lc 'if [[ -r /var/lib/template-build/bootstrap-status ]]; then printf TEMPLATE_STATUS=; cat /var/lib/template-build/bootstrap-status; fi' 2>/dev/null || true)"
+    status="$(grep -oE 'TEMPLATE_STATUS=[^"\\]+' <<<"$out" | head -1 || true)"
+    status="${status#TEMPLATE_STATUS=}"
+    printf '%s' "$status"
+}
+
 wait_for_agent() {
     local phase=${1:-QEMU Guest Agent}
     local started=$SECONDS
@@ -97,7 +105,7 @@ wait_for_agent() {
             return 0
         fi
         if (( SECONDS >= next_report )); then
-            wait_progress "$phase" "$started" "$WAIT_SECONDS" ', agent=нет ответа'
+            wait_progress "$phase" "$started" "$WAIT_SECONDS" ', agent=нет ответа; гостевая ОС загружается/выполняет apt update и первичную установку agent'
             next_report=$((SECONDS + WAIT_PROGRESS_SECONDS))
         fi
         sleep 5
@@ -109,15 +117,26 @@ wait_for_bootstrap() {
     local started=$SECONDS
     local deadline=$((started + WAIT_SECONDS))
     local next_report=$started
-    local out
+    local out current_status last_status=''
     while (( SECONDS < deadline )); do
         out="$(qm guest exec "$VMID" -- /bin/cat /var/lib/template-build/bootstrap-complete 2>/dev/null || true)"
         if grep -q 'BOOTSTRAP_OK' <<<"$out"; then
             printf '[ОК] Начальная настройка гостя завершена через %s с\n' "$((SECONDS - started))"
             return 0
         fi
+
+        current_status="$(guest_bootstrap_status)"
+        if [[ -n "$current_status" && "$current_status" != "$last_status" ]]; then
+            printf '[ЭТАП VM] %s\n' "$current_status"
+            last_status="$current_status"
+        fi
+
         if (( SECONDS >= next_report )); then
-            wait_progress "Начальная настройка гостя" "$started" "$WAIT_SECONDS" ', QGA=ok; выполняются apt/full-upgrade/install'
+            if [[ -n "$current_status" ]]; then
+                wait_progress "Начальная настройка гостя" "$started" "$WAIT_SECONDS" ", QGA=ok; этап=${current_status}"
+            else
+                wait_progress "Начальная настройка гостя" "$started" "$WAIT_SECONDS" ', QGA=ok; status-файл пока недоступен'
+            fi
             next_report=$((SECONDS + WAIT_PROGRESS_SECONDS))
         fi
         sleep 5
@@ -295,10 +314,26 @@ write_files:
       set -Eeuo pipefail
       export DEBIAN_FRONTEND=noninteractive
 
+      STATUS_DIR=/var/lib/template-build
+      STATUS_FILE=${STATUS_DIR}/bootstrap-status
+      mkdir -p "$STATUS_DIR"
+
+      set_status() {
+        printf '%s\n' "$1" >"$STATUS_FILE"
+      }
+
+      set_status 'APT update — обновление индексов пакетов'
       apt-get update
+
+      set_status 'QEMU Guest Agent — первичная установка'
+      apt-get install -y --no-install-recommends qemu-guest-agent
+      systemctl enable --now qemu-guest-agent
+      set_status 'APT full-upgrade — полное обновление Debian'
       apt-get -y full-upgrade
+
+      set_status 'Базовые пакеты — установка инструментов и служб'
       apt-get install -y --no-install-recommends \
-        qemu-guest-agent openssh-server sudo locales cloud-guest-utils systemd-timesyncd \
+        openssh-server sudo locales cloud-guest-utils systemd-timesyncd \
         linux-image-amd64 console-setup console-setup-linux \
         git mc nano \
         curl wget jq ca-certificates openssl \
@@ -307,6 +342,7 @@ write_files:
         dnsutils iproute2 iputils-ping net-tools \
         cron logrotate
 
+      set_status 'Консоль — настройка шрифта и tty'
       cat >/etc/default/console-setup <<'EOF'
       ACTIVE_CONSOLES="/dev/tty[1-6]"
       CHARMAP="UTF-8"
@@ -317,6 +353,7 @@ write_files:
       EOF
       setupcon --save-only
 
+      set_status 'Ядро — переход с cloud kernel на linux-image-amd64'
       mapfile -t cloud_kernel_packages < <(
         dpkg-query -W -f='${db:Status-Abbrev} ${binary:Package}\n' 'linux-image-*cloud-amd64' 2>/dev/null \
           | awk '$1 == "ii" {print $2}'
@@ -333,6 +370,7 @@ write_files:
       fi
       compgen -G '/boot/vmlinuz-*-amd64' >/dev/null
 
+      set_status 'Locale/time — локаль, timezone и синхронизация времени'
       sed -i 's/^# *en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen
       locale-gen en_US.UTF-8
       update-locale LANG=en_US.UTF-8
@@ -340,6 +378,7 @@ write_files:
       systemctl enable --now systemd-timesyncd.service
       timedatectl set-ntp true
 
+      set_status 'Сервисы — SSH, QGA, консоли и fstrim'
       passwd -l root >/dev/null
 
       systemctl daemon-reload
@@ -351,6 +390,7 @@ write_files:
       systemctl restart serial-getty@ttyS0.service
       systemctl enable --now fstrim.timer
 
+      set_status 'Security checks — проверка sshd и root key-only policy'
       /usr/sbin/sshd -t
       sshd_effective="$(/usr/sbin/sshd -T -C user=root,host=localhost,addr=127.0.0.1)"
       grep -Eq '^permitrootlogin (prohibit-password|without-password)$' <<<"$sshd_effective"
@@ -360,6 +400,7 @@ write_files:
       grep -q '^pubkeyauthentication yes$' <<<"$sshd_effective"
       passwd -S root | grep -q ' L '
 
+      set_status 'Метаданные — запись информации о template'
       cat >/etc/vm-template-info <<EOF
       Шаблон: tpl-debian13
       Версия-шаблона: __TEMPLATE_VERSION__
@@ -376,8 +417,8 @@ write_files:
       Дата-сборки: $(date -u +%F)
       EOF
 
-      mkdir -p /var/lib/template-build
-      printf 'BOOTSTRAP_OK\n' >/var/lib/template-build/bootstrap-complete
+      set_status 'Готово — начальная настройка завершена'
+      printf 'BOOTSTRAP_OK\n' >"$STATUS_DIR/bootstrap-complete"
 
   - path: /usr/local/sbin/template-finalize
     owner: root:root
@@ -453,10 +494,10 @@ qm set "$VMID" --cicustom "user=${SNIPPET_VOL}"
 log "Запуск временной VM-сборщика"
 qm start "$VMID"
 
-log "Ожидание первого QEMU Guest Agent (Cloud-Init выполняет apt update/full-upgrade и устанавливает agent)"
+log "Ожидание первого QEMU Guest Agent (сначала Cloud-Init делает apt update и ставит минимальный qemu-guest-agent)"
 wait_for_agent "QEMU Guest Agent" || die "QEMU Guest Agent не стал доступен за ${WAIT_SECONDS} секунд"
 
-log "Ожидание завершения начальной настройки гостя"
+log "Ожидание завершения начальной настройки гостя с отображением реального этапа внутри VM"
 wait_for_bootstrap || die "Начальная настройка гостя не завершилась за ${WAIT_SECONDS} секунд. Проверьте консоль VM ${VMID} и журналы cloud-init."
 
 log "Ожидание финальной стадии Cloud-Init"
