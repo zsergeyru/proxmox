@@ -1,5 +1,9 @@
 # `guest.yaml` — deploy source of truth для VM/LXC
 
+**Type:** Specification  
+**Status:** Active  
+**Source of truth:** Yes — для manifest/defaults/effective-state schema, merge semantics и deployable guest contract.
+
 ## Назначение
 
 Desired state гостя строится из одного Git commit:
