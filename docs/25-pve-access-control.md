@@ -1,8 +1,8 @@
 # PVE access control
 
-**Type:** Policy / Reference  
+**Type:** Specification  
 **Status:** Active  
-**Source of truth:** Yes — для PVE identities, project roles, ACL boundary и bootstrap reconciliation.
+**Source of truth:** Yes — для PVE identities, project roles, privilege sets, ACL boundary и bootstrap reconciliation.
 
 Короткое объяснение operational flow находится в [`26-deploy-guest-and-agent-access.md`](26-deploy-guest-and-agent-access.md). Здесь фиксируется только технический контракт Proxmox access control.
 
