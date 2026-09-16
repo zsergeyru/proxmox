@@ -83,16 +83,20 @@ network:
 
 ## Proxmox host
 
-Сам PVE не обязан следовать VMID-формуле:
+Сам PVE host не обязан следовать VMID-формуле и не вычисляет management address из собственного ID.
+
+Целевой management address после сетевой миграции:
 
 ```text
-current observed PVE → 192.168.1.11/16
-target PVE           → 10.0.0.10/16
+10.0.0.10/16
+gateway 10.0.0.1
 ```
+
+Фактическое текущее состояние host хранится только в [`../host/pve/network/README.md`](../host/pve/network/README.md).
 
 ## Шлюзы
 
-Текущий central gateway:
+Текущий central gateway guest-сети:
 
 ```text
 192.168.1.1
