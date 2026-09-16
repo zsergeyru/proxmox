@@ -1,10 +1,19 @@
 # Templates
 
-Шаблоны конфигураций, VM/LXC и повторяемых заготовок. Шаблон не должен содержать реальные секреты, токены, пароли или приватные ключи.
+Шаблоны VM/LXC и повторяемые заготовки. Template не должен содержать реальные secrets, tokens, passwords, private keys или credentials конкретного consumer.
 
-## VM templates
+## Debian 13 / VMID 9000
 
-- [`debian13/`](./debian13/) — базовый универсальный шаблон Debian 13 для Proxmox: параметры VM, состав системных утилит, backup-инструменты и границы ответственности template.
-- [`debian13/build-policy.md`](./debian13/build-policy.md) — согласованная политика сборки без `virt-customize`, базовые настройки ОС, root-only key-based SSH, `Europe/Moscow`, диск/TRIM/iothread, console, обновления, очистка и versioning.
-- [`debian13/filesystem-layout.md`](./debian13/filesystem-layout.md) — стандарт размещения кода, конфигурации, persistent state, пользовательских данных, логов, cache и runtime-файлов (`/opt`, `/etc`, `/var/lib`, `/srv`, `/var/log`, `/var/cache`, `/run`, `/tmp`) с правилами backup и восстановления.
-- [`debian13/users-and-keys.md`](./debian13/users-and-keys.md) — root management model, независимые технические SSH identities, Cloud-Init и правила backup private technical keys.
+- [`debian13/README.md`](./debian13/README.md) — короткий паспорт `tpl-debian13`, текущий baseline и карта документации.
+- [`debian13/build-policy.md`](./debian13/build-policy.md) — **канонический подробный contract** сборки, hardware/Cloud-Init, kernel/console, cleanup, Full Clone smoke-test и failure policy.
+- [`debian13/cloud-init.yaml`](./debian13/cloud-init.yaml) — base Cloud-Init source.
+- [`debian13/template-bootstrap.sh`](./debian13/template-bootstrap.sh) — guest-side build/bootstrap.
+- [`debian13/template-finalize.sh`](./debian13/template-finalize.sh) — guest-side cleanup перед seal.
+
+Общие правила, которые не являются свойствами самого template, вынесены в проектную документацию:
+
+- [`../docs/23-security.md`](../docs/23-security.md) — management SSH, PVE/AI/Ansible identities и private-key lifecycle;
+- [`../docs/33-guest-bootstrap-and-provisioning.md`](../docs/33-guest-bootstrap-and-provisioning.md) — initial access VM/LXC и handoff к provisioning;
+- [`../docs/34-linux-filesystem-layout.md`](../docs/34-linux-filesystem-layout.md) — размещение application/config/persistent data/logs/cache/runtime внутри Linux guests.
+
+Главное правило: каталог `templates/debian13/` содержит только то, что непосредственно описывает или строит template `9000`.
