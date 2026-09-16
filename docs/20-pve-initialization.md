@@ -7,28 +7,18 @@
 ```text
 Public Bootstrap
 zsergeyru/proxmox-bootstrap/bootstrap-pve.sh
-PUBLIC_BOOTSTRAP_VERSION=6
+PUBLIC_BOOTSTRAP_VERSION=7
 
 PVE Configuration
 zsergeyru/proxmox/scripts/pve/setup/configure-pve.sh
-PVE_CONFIGURATION_VERSION=14
+PVE_CONFIGURATION_VERSION=15
 ```
 
-`Public Bootstrap` отвечает за получение или обновление private source of truth и передачу управления. `PVE Configuration` повторяемо приводит сам Proxmox VE host к ожидаемому состоянию проекта.
+`Public Bootstrap` отвечает за получение или обновление private source of truth, выбор точной Git revision и передачу управления. `PVE Configuration` повторяемо приводит сам Proxmox VE host к ожидаемому состоянию проекта.
 
-## 1. Исходное состояние
+## 1. Канонический запуск
 
-Ожидается новый или частично настроенный Proxmox VE host без обязательного наличия:
-
-- private Git checkout;
-- AI control plane;
-- Proximo;
-- project PVE users/tokens/ACL;
-- PVE guest SSH identity;
-- Debian VM template `9000`;
-- Debian 13 LXC appliance.
-
-Канонический публичный запуск выполняется от `root`:
+Ожидается новый или частично настроенный Proxmox VE host. Основная команда выполняется от `root`:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/zsergeyru/proxmox-bootstrap/main/bootstrap-pve.sh | bash
@@ -40,6 +30,12 @@ curl -fsSL https://raw.githubusercontent.com/zsergeyru/proxmox-bootstrap/main/bo
 curl -fsSL https://raw.githubusercontent.com/zsergeyru/proxmox-bootstrap/main/bootstrap-pve.sh | bash -s -- --update-system
 ```
 
+Одна и та же основная команда используется для:
+
+- первого запуска;
+- штатного повторного применения конфигурации;
+- продолжения незавершённого первого запуска после исправления причины ошибки.
+
 ## 2. Public Bootstrap
 
 Канонический public entrypoint:
@@ -48,15 +44,9 @@ curl -fsSL https://raw.githubusercontent.com/zsergeyru/proxmox-bootstrap/main/bo
 zsergeyru/proxmox-bootstrap/bootstrap-pve.sh
 ```
 
-### Первый запуск
+### Чистый первый запуск
 
-При отсутствии:
-
-```text
-/var/lib/proxmox-deployer/state/bootstrap-complete
-```
-
-Public Bootstrap выполняет:
+При отсутствии permanent runtime выполняется:
 
 ```text
 root + Proxmox check
@@ -66,9 +56,10 @@ root + Proxmox check
 → temporary read-only GitHub Deploy Key
 → authorization private repo/main
 → temporary shallow checkout
-→ запуск PVE Configuration
-→ удаление temporary bootstrap runtime
-→ запись bootstrap-complete
+→ определить точный private HEAD
+→ запустить PVE Configuration с PVE_CONFIGURATION_SOURCE_REVISION=<HEAD>
+→ удалить temporary bootstrap runtime
+→ записать bootstrap-complete
 ```
 
 Временная область:
@@ -82,25 +73,36 @@ root + Proxmox check
 └── private-repo/
 ```
 
-Если Deploy Key ещё не добавлен в GitHub, Public Bootstrap показывает public key и ждёт подтверждение пользователя через терминал. Write access для Deploy Key не включается.
+Если Deploy Key ещё не добавлен в GitHub, Public Bootstrap показывает public key и ждёт подтверждение пользователя через терминал. Write access не включается.
 
-После успешной PVE Configuration временная область полностью удаляется.
+### Resume после частичной ошибки
 
-Если `bootstrap-complete` отсутствует, но постоянный checkout или постоянный Deploy Key уже существуют, Public Bootstrap останавливается. В новом проекте это считается несогласованным test-state, который нужно очистить перед чистым bootstrap.
+Если PVE Configuration остановилась после создания permanent runtime, следующий запуск **не требует очистки** `/etc/proxmox-deployer` или `/var/lib/proxmox-deployer`.
 
-### Повторный запуск
-
-При наличии `bootstrap-complete` Public Bootstrap использует постоянный runtime:
+Если уже готовы:
 
 ```text
 pvedeploy
-/etc/proxmox-deployer/ssh/github_proxmox_repo_ed25519
-/etc/proxmox-deployer/ssh/config
-/etc/proxmox-deployer/ssh/known_hosts
-/var/lib/proxmox-deployer/repo
+canonical Deploy Key
+canonical known_hosts + SSH config
+/var/lib/proxmox-deployer/repo/.git
 ```
 
-Алгоритм:
+Public Bootstrap считает это resumable permanent runtime, обновляет canonical checkout и повторно запускает PVE Configuration.
+
+Если permanent runtime создан только частично, Public Bootstrap продолжает first-run path через temporary runtime. Существующие постоянные credentials не удаляются и не ротируются автоматически.
+
+Такой recovery принципиален для API tokens: secret выдаётся Proxmox только в момент создания токена, поэтому удаление локального token secret вместо resume недопустимо.
+
+### Повторный запуск после завершённого bootstrap
+
+При наличии:
+
+```text
+/var/lib/proxmox-deployer/state/bootstrap-complete
+```
+
+Public Bootstrap выполняет:
 
 ```text
 проверить permanent runtime
@@ -109,12 +111,32 @@ pvedeploy
 → fetch main
 → reset --hard FETCH_HEAD
 → clean -ffd
-→ запустить scripts/pve/setup/configure-pve.sh
+→ определить точный HEAD
+→ запустить PVE Configuration с этим SHA
+→ обновить bootstrap-complete
 ```
 
-Public Bootstrap не ротирует постоянные credentials и не пересоздаёт damaged runtime автоматически.
+Повреждённые permanent credentials не ротируются автоматически.
 
-## 3. PVE Configuration
+## 3. Одна Git revision на один запуск
+
+После того как Public Bootstrap выбрал private revision, эта revision является immutable input текущего configuration run.
+
+```text
+PVE_CONFIGURATION_SOURCE_REVISION=<40-char SHA>
+```
+
+PVE Configuration должна привести canonical checkout ровно к этому SHA. Она не должна во время уже выполняющегося run молча переключаться на новый `main`.
+
+Если `main` изменился между temporary checkout и canonical clone/fetch, выполнение останавливается. Повторный Public Bootstrap начинает новый run уже из новой согласованной revision.
+
+Фактически применённый SHA сохраняется в:
+
+```text
+/var/lib/proxmox-deployer/state/last-revision
+```
+
+## 4. PVE Configuration
 
 Канонический private entrypoint:
 
@@ -122,7 +144,7 @@ Public Bootstrap не ротирует постоянные credentials и не 
 scripts/pve/setup/configure-pve.sh
 ```
 
-Внутренняя структура:
+Структура:
 
 ```text
 scripts/pve/setup/
@@ -137,16 +159,14 @@ scripts/pve/setup/
     └── 70-template-tooling.sh
 ```
 
-`configure-pve.sh` содержит orchestration и вызывает функции модулей. Модули при `source` только объявляют функции и не выполняют самостоятельных действий.
-
-Основная последовательность:
+Модули при `source` только объявляют функции. Основная последовательность:
 
 ```text
 configuration log + exclusive lock
 → state=running
 → PVE 9 / Debian trixie / KVM preflight
 → configuration snapshot
-→ PVE/Ceph repository policy
+→ repository policy
 → packages
 → DNS/time/outbound checks
 → storage/content types
@@ -154,34 +174,38 @@ configuration log + exclusive lock
 → pvedeploy + config.yaml
 → PVE guest SSH identity
 → canonical GitHub Deploy Key
-→ canonical private checkout
+→ canonical private checkout той же source revision
 → managed pool
-→ PVE roles/users/API tokens/ACL
-→ effective permission checks
+→ roles/users/API tokens/ACL
+→ effective token permission checks
 → token API authentication checks
 → template capacity/source checks
 → template 9000
-→ stable local tooling
-→ final state/report
+→ local tooling/status
+→ final state
 ```
 
 PVE Configuration не использует `guest.yaml` или `guests/defaults.yaml` как вход для host configuration.
 
-## 4. `--update-system`
+## 5. `--update-system`
 
-Обычная PVE Configuration может выполнять `apt update` и устанавливать необходимые проекту пакеты.
+Обычный run может выполнить `apt update` и установить необходимые project packages.
 
-`apt full-upgrade` выполняется только при:
+Только явный:
 
 ```text
 --update-system
 ```
 
-Это отделяет применение инфраструктурной конфигурации от осознанного полного обновления Proxmox/Debian.
+включает:
 
-## 5. Preflight и safety
+```text
+apt full-upgrade
+```
 
-PVE Configuration проверяет:
+## 6. Preflight и safety
+
+Проверяются:
 
 - запуск от `root`;
 - Proxmox VE 9.x;
@@ -191,12 +215,12 @@ PVE Configuration проверяет:
 - `local` и `local-lvm`;
 - обязательные PVE CLI tools;
 - конфликт VMID `9000`;
-- совместимость существующего template `9000`;
+- полный host-visible contract существующего template `9000`;
 - DNS/outbound access.
 
 Неизвестный VMID `9000`, неожиданный Git origin, потерянный private credential или нестандартная repository configuration не исправляются разрушительно и приводят к STOP.
 
-## 6. Configuration snapshot
+## 7. Configuration snapshot
 
 Перед значимыми host-side изменениями создаётся snapshot:
 
@@ -208,7 +232,7 @@ PVE Configuration проверяет:
 
 Это не backup VM и не замена disaster recovery.
 
-## 7. Repository policy и packages
+## 8. Repository policy и packages
 
 PVE channel без subscription:
 
@@ -218,47 +242,23 @@ trixie
 pve-no-subscription
 ```
 
-Enterprise PVE repository отключается.
-
-Ceph configuration меняется консервативно:
-
-- отсутствует → не создавать;
-- стандартный no-subscription → оставить;
-- стандартный enterprise stanza → переключить на тот же `ceph-*` release без subscription;
-- нестандартный/multi-stanza вариант → STOP.
+Enterprise PVE repository отключается. Ceph configuration меняется консервативно: стандартный enterprise stanza переводится на тот же `ceph-*` release без subscription; нестандартный/multi-stanza вариант вызывает STOP.
 
 Минимальный runtime:
 
 ```text
-git
-openssh-client
-python3
-python3-yaml
-curl
-jq
-ca-certificates
+git openssh-client python3 python3-yaml curl jq ca-certificates
 ```
 
 Host-admin набор:
 
 ```text
-mc
-htop
-tmux
-smartmontools
-lm-sensors
+mc htop tmux smartmontools lm-sensors
 ```
 
 Docker и application services на PVE host не устанавливаются.
 
-## 8. Storage и Debian 13 LXC appliance
-
-Базовые storage:
-
-```text
-local
-local-lvm
-```
+## 9. Storage и Debian 13 LXC appliance
 
 Additive policy обеспечивает:
 
@@ -272,15 +272,7 @@ local-lvm:
   rootdir
 ```
 
-PVE Configuration выполняет:
-
-```text
-pveam update
-→ найти newest debian-13-standard_*_amd64 archive
-→ проверить local:vztmpl
-→ скачать при отсутствии
-→ verify
-```
+PVE Configuration выполняет `pveam update`, находит newest `debian-13-standard_*_amd64` и скачивает template при отсутствии.
 
 Guest contract хранит family selector:
 
@@ -288,7 +280,7 @@ Guest contract хранит family selector:
 local:vztmpl/debian-13-standard
 ```
 
-## 9. Постоянный runtime
+## 10. Постоянный runtime
 
 Основные каталоги:
 
@@ -312,11 +304,7 @@ PVE Configuration log:
 /var/log/proxmox-deployer/configure-pve.log
 ```
 
-Терминал может быть цветным; persistent log хранится без ANSI escape sequences.
-
-## 10. PVE guest SSH identity
-
-Host-side guest-management identity:
+## 11. PVE guest SSH identity
 
 ```text
 /etc/proxmox-deployer/ssh/pve_guest_ed25519
@@ -326,20 +314,14 @@ Host-side guest-management identity:
 Policy:
 
 ```text
-оба файла отсутствуют
-→ создать Ed25519 keypair
-
-private существует
-→ не ротировать
-→ восстановить public half
-
-private отсутствует, public существует
-→ STOP
+оба отсутствуют → создать Ed25519 keypair
+private существует → не ротировать, восстановить public half
+private отсутствует, public существует → STOP
 ```
 
 Эта identity не является GitHub Deploy Key и не является AI SSH identity.
 
-## 11. PVE identities и ACL
+## 12. PVE identities и ACL
 
 Host-side / human tooling:
 
@@ -357,11 +339,15 @@ ai-agent@pve!infra
 
 `ai-agent@pve!infra` ограничен рабочей зоной `/pool/managed`; template `9000` доступен отдельно как clone source.
 
-Role/ACL policy additive-only: недостающие разрешения добавляются, существующие дополнительные автоматически не удаляются.
+Role/ACL policy остаётся additive-only. После настройки effective permissions API tokens проверяются штатной командой Proxmox:
 
-После настройки выполняются effective permission checks и реальная token+secret авторизация через локальный Proxmox API.
+```text
+pveum user token permissions <userid> <tokenid>
+```
 
-## 12. Debian VM template 9000
+Затем выполняется реальная token+secret авторизация через локальный Proxmox API.
+
+## 13. Debian VM template 9000
 
 Builder:
 
@@ -381,17 +367,26 @@ root SSH: public-key only
 protection: 1
 ```
 
-Description содержит:
+Существующий template проверяется по полному host-visible contract:
 
 ```text
-template-version=6
+name=tpl-debian13
+template=1
+agent=1
+vga=std
+serial0=socket
+ciuser=root
+ciupgrade=0
+ipconfig0=ip=dhcp
+cicustom отсутствует
+description содержит template-version=6
 ```
 
-Если существующий VMID `9000` не соответствует contract, PVE Configuration останавливается и не заменяет protected object автоматически.
+`protection=1` также обязателен после `ensure_template`; отсутствие защиты у в остальном совместимого template допускается только до snapshot и исправляется автоматически после него.
 
-## 13. State и status
+Любое другое несовпадение вызывает STOP и не приводит к автоматической замене VMID 9000.
 
-State directory:
+## 14. State и status
 
 ```text
 /var/lib/proxmox-deployer/state/
@@ -402,13 +397,13 @@ State directory:
 └── bootstrap-complete
 ```
 
-Основная status-команда:
+Status-команда:
 
 ```text
 /usr/local/sbin/pve-configuration-status
 ```
 
-Возможные состояния PVE Configuration:
+Возможные состояния:
 
 ```text
 running
@@ -419,16 +414,6 @@ ready
 ready-with-warnings
 ```
 
-## 14. Повторный запуск
-
-Штатный повторный запуск начинается с Public Bootstrap:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/zsergeyru/proxmox-bootstrap/main/bootstrap-pve.sh | bash
-```
-
-Public Bootstrap сначала обновляет private source of truth, затем запускает текущую PVE Configuration. Внутри PVE Configuration используется отдельный `flock`, поэтому параллельные configuration runs запрещены.
-
 Главный принцип:
 
-> Public Bootstrap отвечает за доступ к private source of truth и handoff. PVE Configuration отвечает за воспроизводимое состояние Proxmox host. Потенциально разрушительные изменения credentials, protected template или неизвестной конфигурации не выполняются молча.
+> Public Bootstrap отвечает за доступ к private source of truth, resume и выбор точной revision. PVE Configuration отвечает за воспроизводимое состояние Proxmox host и не смешивает разные revisions внутри одного запуска. Потенциально разрушительные изменения credentials и protected template не выполняются молча.
