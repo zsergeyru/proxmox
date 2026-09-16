@@ -1,59 +1,59 @@
-# Debian 13 template `9000`
+# Шаблон Debian 13 `9000`
 
-**Type:** Overview  
-**Status:** Active  
-**Source of truth:** No — полный технический contract находится в [`build-policy.md`](build-policy.md).
+**Тип:** Обзор  
+**Статус:** Действующий  
+**Основной источник:** Нет — полная техническая спецификация находится в [`build-policy.md`](build-policy.md).
 
-## Текущий baseline
+## Текущая базовая версия
 
 ```text
 VMID: 9000
-Name: tpl-debian13
-OS: Debian 13 (Trixie)
+Имя: tpl-debian13
+ОС: Debian 13 (Trixie)
 Template-Version: 7
-Clone policy: Full Clone
+Клонирование: Full Clone
 Protection: 1
-Management user: root
-SSH: public key only
+Административный пользователь: root
+SSH: только открытый ключ
 ```
 
-Template `9000` — универсальная база для управляемых Debian VM. Он не содержит application-specific software, service directories, personal keys или других credentials конкретного потребителя.
+Шаблон `9000` — универсальная база для управляемых Debian VM. Он не содержит программ конкретного приложения, каталогов будущих сервисов, личных ключей или других учётных данных конкретного потребителя.
 
-## Что гарантирует template
+## Что гарантирует шаблон
 
 Коротко:
 
 ```text
-Debian 13 generic cloud image
-→ SHA-512 verification
-→ current Debian packages на момент build
-→ regular linux-image-amd64
+универсальный облачный образ Debian 13
+→ проверка SHA-512
+→ актуальные пакеты Debian на момент сборки
+→ обычное ядро linux-image-amd64
 → QEMU Guest Agent
 → Cloud-Init
-→ root password locked
-→ root SSH key-only
-→ VGA/noVNC + serial console
-→ machine-specific cleanup
-→ Full Clone ready
+→ пароль root заблокирован
+→ SSH root только по открытому ключу
+→ VGA/noVNC + последовательная консоль
+→ очистка данных, уникальных для VM-сборщика
+→ готовность к Full Clone
 → protection=1
 ```
 
-После clone конкретный guest получает CPU/RAM/disk/network и необходимые **public** SSH keys до первого start.
+После клонирования конкретная гостевая система получает CPU, RAM, диск, сеть и необходимые **открытые** SSH-ключи до первого запуска.
 
-Точные параметры hardware, Cloud-Init, kernel/console, cleanup, smoke-test, failure policy и provenance определены только в [`build-policy.md`](build-policy.md).
+Точные параметры оборудования, Cloud-Init, ядра, консоли, очистки, проверки полного клона, поведения при ошибке и сведений о происхождении сборки определены только в [`build-policy.md`](build-policy.md).
 
-## Файлы template
+## Файлы шаблона
 
 ```text
 templates/debian13/
 ├── README.md                  # этот паспорт
-├── build-policy.md            # канонический технический contract
-├── cloud-init.yaml            # base guest Cloud-Init source
-├── template-bootstrap.sh      # guest-side build/bootstrap
-└── template-finalize.sh       # cleanup и seal preparation
+├── build-policy.md            # основная техническая спецификация
+├── cloud-init.yaml            # базовая конфигурация Cloud-Init
+├── template-bootstrap.sh      # настройка внутри VM-сборщика
+└── template-finalize.sh       # очистка и подготовка к финализации
 ```
 
-Host-side pipeline:
+Контур сборки на стороне PVE:
 
 ```text
 scripts/pve/setup/lib/60-template-contract.sh
@@ -62,19 +62,19 @@ scripts/pve/setup/lib/62-template-build.sh
 scripts/pve/setup/lib/63-template-smoke.sh
 ```
 
-Canonical renderer:
+Основной генератор Cloud-Init:
 
 ```text
 scripts/pve/setup/render-template-cloud-init.py
 ```
 
-Создание template является частью PVE Configuration; отдельного standalone `create-template.sh` нет.
+Создание шаблона является частью PVE Configuration; отдельного `create-template.sh` нет.
 
-## Build и smoke-test
+## Сборка и проверка полного клона
 
-Новая сборка `9000` выполняется штатным PVE Configuration pipeline. После новой сборки Full Clone smoke-test обязателен автоматически.
+Новая сборка `9000` выполняется штатным контуром PVE Configuration. После новой сборки проверка реального Full Clone запускается автоматически.
 
-Для явной проверки уже существующего template:
+Для явной проверки уже существующего шаблона:
 
 ```bash
 configure-pve.sh --smoke-test-template
@@ -86,36 +86,36 @@ configure-pve.sh --smoke-test-template
 curl -fsSL https://raw.githubusercontent.com/zsergeyru/proxmox-bootstrap/main/bootstrap-pve.sh | bash -s -- --smoke-test-template
 ```
 
-Smoke VM использует VMID `9099`. При успешной проверке она удаляется; при ошибке остаётся для диагностики. Подробная safety/state policy находится в [`build-policy.md`](build-policy.md).
+Проверочная VM использует VMID `9099`. При успешной проверке она удаляется; при ошибке остаётся для диагностики. Подробные правила безопасности и состояния находятся в [`build-policy.md`](build-policy.md).
 
-## Credentials
+## Учётные данные
 
-Template не содержит management credentials:
+Шаблон не содержит административных учётных данных:
 
 ```text
-root password locked
-/root/.ssh absent before seal
-management authorized_keys empty
-private keys absent
-SSH host keys removed before seal
+пароль root заблокирован
+/root/.ssh отсутствует перед финализацией
+список административных authorized_keys пуст
+закрытые ключи отсутствуют
+SSH host keys удалены перед финализацией
 ```
 
-Каждый clone получает свой набор public keys отдельно. Общая модель PVE/AI/Ansible/personal SSH identities описана в [`../../docs/23-security.md`](../../docs/23-security.md), а initial injection VM/LXC — в [`../../docs/33-guest-bootstrap-and-provisioning.md`](../../docs/33-guest-bootstrap-and-provisioning.md).
+Каждый клон получает собственный набор открытых ключей отдельно. Общая модель SSH-ключей PVE, AI, Ansible и человека описана в [`../../docs/23-security.md`](../../docs/23-security.md), а начальная установка ключей в VM/LXC — в [`../../docs/33-guest-bootstrap-and-provisioning.md`](../../docs/33-guest-bootstrap-and-provisioning.md).
 
-## Filesystem/application layout
+## Файловая структура приложений
 
-Template не создаёт заранее каталоги будущих сервисов и не задаёт структуру конкретных workloads.
+Шаблон не создаёт заранее каталоги будущих сервисов и не задаёт структуру конкретных приложений.
 
-Общая policy размещения `/opt`, `/etc`, `/var/lib`, `/srv`, logs/cache/runtime находится в [`../../docs/34-linux-filesystem-layout.md`](../../docs/34-linux-filesystem-layout.md).
+Общие правила размещения `/opt`, `/etc`, `/var/lib`, `/srv`, журналов, кэша и файлов текущего запуска находятся в [`../../docs/34-linux-filesystem-layout.md`](../../docs/34-linux-filesystem-layout.md).
 
 ## Где искать детали
 
-| Вопрос | Канонический документ |
+| Вопрос | Основной документ |
 |---|---|
 | Как строится и проверяется `9000` | [`build-policy.md`](build-policy.md) |
-| SSH identities и secrets | [`../../docs/23-security.md`](../../docs/23-security.md) |
-| Initial SSH VM/LXC и provisioning handoff | [`../../docs/33-guest-bootstrap-and-provisioning.md`](../../docs/33-guest-bootstrap-and-provisioning.md) |
+| SSH-ключи и секреты | [`../../docs/23-security.md`](../../docs/23-security.md) |
+| Начальный SSH-доступ VM/LXC и передача настройки Ansible | [`../../docs/33-guest-bootstrap-and-provisioning.md`](../../docs/33-guest-bootstrap-and-provisioning.md) |
 | Файловая структура сервисов | [`../../docs/34-linux-filesystem-layout.md`](../../docs/34-linux-filesystem-layout.md) |
-| PVE roles/ACL для template clone | [`../../docs/25-pve-access-control.md`](../../docs/25-pve-access-control.md) |
+| Роли и ACL PVE для клонирования шаблона | [`../../docs/25-pve-access-control.md`](../../docs/25-pve-access-control.md) |
 
-Главный принцип: **`README.md` отвечает на вопрос «что такое template 9000 и куда смотреть дальше», а `build-policy.md` является единственным подробным contract его сборки и runtime-проверки.**
+Главный принцип: **`README.md` отвечает на вопрос «что такое шаблон `9000` и куда смотреть дальше», а `build-policy.md` является единственной подробной спецификацией его сборки и проверки.**
