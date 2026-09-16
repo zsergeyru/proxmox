@@ -1,50 +1,50 @@
-# Guest bootstrap и provisioning
+# Первичная и повторяемая настройка гостевых систем
 
-**Type:** Specification  
-**Status:** Active  
-**Source of truth:** Yes — для границы `deploy-guest` ↔ bootstrap ↔ Ansible provisioning и initial management readiness contract.
+**Тип:** Спецификация  
+**Статус:** Действующий  
+**Основной источник:** Да — для границы `deploy-guest` ↔ первичная настройка ↔ Ansible и требований к готовности административного доступа.
 
-Общая SSH identity policy находится в [`23-security.md`](23-security.md). Формат guest manifest — в [`30-guest-manifest.md`](30-guest-manifest.md).
+Общая политика SSH-ключей находится в [`23-security.md`](23-security.md). Формат `guest.yaml` — в [`30-guest-manifest.md`](30-guest-manifest.md).
 
 ## 1. Принятая модель
 
 ```text
 deploy-guest.py
-→ PVE lifecycle
-→ initial management access
-→ verify root SSH
-→ optional ограниченный bootstrap
-→ handoff к Ansible
-→ штатный provisioning ОС и приложений
+→ жизненный цикл PVE
+→ начальный административный доступ
+→ проверка SSH root
+→ необязательная ограниченная первичная настройка
+→ передача управления Ansible
+→ штатная повторяемая настройка ОС и приложений
 ```
 
-Поля `bootstrap` и `provisioning` пока не входят в действующие guest schema и должны появиться одновременно с их реализацией в resolver, validator и deployer.
+Поля `bootstrap` и `provisioning` пока не входят в действующие схемы гостевых систем и должны появиться одновременно с их реализацией в resolver, validator и `deploy-guest`. Имена этих полей не переводятся, поскольку это будущий машинный интерфейс.
 
 Ключевое правило:
 
-> Initial SSH access является частью deploy readiness, а не bootstrap capability.
+> Начальный SSH-доступ является частью готовности гостевой системы к управлению, а не отдельной возможностью первичной настройки.
 
-Guest должен быть доступен как `root` по management key до запуска `base`, `git`, `docker` или другой optional capability.
+Гостевая система должна быть доступна как `root` по административному ключу до запуска `base`, `git`, `docker` или другой необязательной возможности.
 
 ## 2. Ответственность `deploy-guest.py`
 
-Deployer отвечает прежде всего за Proxmox-side desired state и management readiness:
+`deploy-guest.py` отвечает прежде всего за требуемое состояние объекта Proxmox и готовность административного доступа:
 
 ```text
-создать/найти VM или LXC
-→ CPU / RAM / disk / network
-→ pool / protection / boot
-→ установить initial SSH public keys штатным механизмом типа guest
-→ start
-→ дождаться root SSH
-→ verify management access
+создать или найти VM/LXC
+→ CPU / RAM / диск / сеть
+→ пул / protection / параметры запуска
+→ установить начальные открытые SSH-ключи штатным механизмом типа гостя
+→ запустить
+→ дождаться SSH root
+→ проверить административный доступ
 ```
 
-После этого он может выполнить только небольшой whitelist bootstrap capabilities.
+После этого он может выполнить только небольшой список разрешённых действий первичной настройки.
 
-Deployer не должен становиться вторым configuration-management framework.
+`deploy-guest` не должен становиться вторым полноценным средством управления конфигурацией.
 
-## 3. Management user
+## 3. Административный пользователь
 
 Для управляемых Debian VM/LXC используется:
 
@@ -52,15 +52,15 @@ Deployer не должен становиться вторым configuration-man
 root:22
 ```
 
-Root password locked, password SSH disabled, разрешён только public-key authentication.
+Пароль `root` заблокирован, вход по паролю отключён, разрешена только аутентификация по открытому ключу.
 
-Generic user `ops` не является частью guest contract.
+Универсальный пользователь `ops` не является частью требований гостевой системы.
 
-Полная credential policy и список независимых identities описаны в [`23-security.md`](23-security.md).
+Полная политика учётных данных и список независимых SSH-ключей описаны в [`23-security.md`](23-security.md).
 
-## 4. Host-side PVE SSH identity
+## 4. SSH-ключ PVE-хоста
 
-Host-side deployment использует постоянный keypair:
+Развёртывание со стороны PVE использует постоянную пару ключей:
 
 ```text
 /etc/proxmox-deployer/ssh/pve_guest_ed25519
@@ -69,18 +69,18 @@ Host-side deployment использует постоянный keypair:
 
 `deploy-guest`:
 
-- не создаёт keypair;
-- не ротирует его;
-- использует public key при initial guest creation;
-- использует private key для SSH verification/bootstrap после start.
+- не создаёт эту пару;
+- не меняет её автоматически;
+- использует открытый ключ при первоначальном создании гостевой системы;
+- использует закрытый ключ для проверки SSH и первичной настройки после запуска.
 
-Credential создаёт и восстанавливает PVE bootstrap/configuration layer. Потеря private key — recovery case, а не повод для silent rotation.
+Пару ключей создаёт и восстанавливает слой первоначальной настройки PVE. Потеря закрытого ключа — отдельная ситуация восстановления, а не повод для незаметной автоматической смены.
 
-## 5. Initial access: VM
+## 5. Начальный доступ: VM
 
-Текущий template `9000` предоставляет универсальный Debian baseline без baked-in management keys.
+Текущий шаблон `9000` предоставляет универсальную Debian-базу без заранее встроенных административных ключей.
 
-Новый Full Clone до первого start получает необходимые public keys через Cloud-Init:
+Новый Full Clone до первого запуска получает необходимые открытые ключи через Cloud-Init:
 
 ```text
 Full Clone from 9000
@@ -89,63 +89,65 @@ Full Clone from 9000
 → sshkeys=<initial public keys>
 → qm cloudinit update
 → start
-→ verify QGA/Cloud-Init при необходимости
-→ verify root SSH
+→ при необходимости проверить QGA/Cloud-Init
+→ проверить SSH root
 ```
 
-Private keys через Cloud-Init не передаются.
+Команды и имена параметров оставлены без перевода, поскольку это интерфейс Proxmox.
 
-Точный contract template находится в [`../templates/debian13/build-policy.md`](../templates/debian13/build-policy.md).
+Закрытые ключи через Cloud-Init не передаются.
 
-## 6. Initial access: LXC
+Точная спецификация шаблона находится в [`../templates/debian13/build-policy.md`](../templates/debian13/build-policy.md).
+
+## 6. Начальный доступ: LXC
 
 Для Debian LXC:
 
 ```text
-resolve Debian appliance
-→ собрать initial public key set
-→ create LXC с ssh-public-keys
-→ start
-→ verify root SSH
+найти подходящий Debian-образ
+→ собрать набор начальных открытых ключей
+→ создать LXC с ssh-public-keys
+→ запустить
+→ проверить SSH root
 ```
 
-Proxmox устанавливает переданные public keys для `root` при создании контейнера. Промежуточный bootstrap-user, `ops` и настройка sudo для получения первого доступа не нужны.
+Proxmox устанавливает переданные открытые ключи для `root` при создании контейнера. Промежуточный пользователь первичной настройки, `ops` и настройка `sudo` для получения первого доступа не нужны.
 
-`base` capability в этом flow не участвует.
+Возможность `base` в этом процессе не участвует.
 
-## 7. Initial public key set
+## 7. Начальный набор открытых ключей
 
-Минимально host-side deploy должен уметь создать guest с:
+Минимально развёртывание со стороны PVE должно уметь создать гостевую систему с:
 
 ```text
 pve_guest_ed25519.pub
 ```
 
-Дополнительно initial set может включать зарегистрированные public infrastructure credentials:
+Дополнительно начальный набор может включать зарегистрированные открытые инфраструктурные ключи:
 
 ```text
 ai_control_ed25519.pub
-ansible/provisioning public key
-other explicitly requested public keys
+открытый ключ Ansible
+другие явно запрошенные открытые ключи
 ```
 
-Public keys можно передавать между управляющими контурами; private halves между ними не копируются.
+Открытые ключи можно передавать между управляющими контурами; закрытые части между ними не копируются.
 
-Если AI public key ещё не зарегистрирован в host-side deploy runtime, это не должно блокировать базовое создание guest с PVE management key.
+Если открытый ключ AI ещё не зарегистрирован на стороне PVE, это не должно блокировать базовое создание гостевой системы с ключом PVE.
 
-Pool `managed` не является источником guest SSH policy: membership в pool само по себе не добавляет и не удаляет public keys.
+Пул `managed` не является источником правил SSH: членство в пуле само по себе не добавляет и не удаляет открытые ключи.
 
-## 8. Guests, создаваемые AI
+## 8. Гостевые системы, создаваемые AI
 
-Если guest создаёт AI через Proximo, он может передать свой public key через поддерживаемые VM/LXC create options.
+Если гостевую систему создаёт AI через Proximo, он может передать свой открытый ключ через поддерживаемые параметры создания VM/LXC.
 
-Когда host-side public key доступен AI control plane как зарегистрированный **public** infrastructure credential, его также следует включать, чтобы сохранить независимый PVE management channel.
+Когда открытый ключ PVE доступен контуру AI Control как зарегистрированный **открытый** инфраструктурный ключ, его также следует включать, чтобы сохранить независимый административный канал со стороны PVE.
 
-Private host-side key на AI Control не копируется.
+Закрытый ключ PVE в AI Control не копируется.
 
-## 9. Bootstrap capabilities
+## 9. Возможности первичной настройки
 
-Планируемый manifest contract:
+Планируемый машинный интерфейс манифеста:
 
 ```yaml
 bootstrap:
@@ -156,20 +158,20 @@ bootstrap:
     ansible_controller: true
 ```
 
-Начальный whitelist:
+Начальный разрешённый набор:
 
-- `base` — минимальные OS prerequisites после уже работающего root SSH;
-- `git` — Git там, где он нужен для bootstrap/handoff;
-- `docker` — project Docker runtime и Compose plugin;
-- `ansible_controller` — containerized Ansible controller / Execution Environment.
+- `base` — минимальные системные предпосылки после уже работающего SSH root;
+- `git` — Git там, где он нужен для первоначальной настройки и передачи управления;
+- `docker` — проектная установка Docker и Compose;
+- `ansible_controller` — контейнеризированный управляющий узел Ansible / Execution Environment.
 
-Отсутствующая capability считается не запрошенной. Capability должна быть идемпотентной.
+Отсутствующая возможность считается не запрошенной. Каждая возможность должна быть идемпотентной.
 
-`base: false` или отсутствие `base` не должно влиять на возможность management SSH.
+`base: false` или отсутствие `base` не должно влиять на административный SSH-доступ.
 
-## 10. Что не относится к bootstrap
+## 10. Что не относится к первичной настройке
 
-Не вводить generic package interface вроде:
+Не вводить универсальный список пакетов вида:
 
 ```yaml
 bootstrap:
@@ -179,9 +181,9 @@ bootstrap:
     - redis
 ```
 
-PostgreSQL, MQTT, Grafana, Gitea, Semaphore, Jenkins и другие application services устанавливаются provisioning-слоем.
+PostgreSQL, MQTT, Grafana, Gitea, Semaphore, Jenkins и другие прикладные сервисы устанавливаются слоем повторяемой настройки через Ansible.
 
-## 11. Provisioning
+## 11. Повторяемая настройка через Ansible
 
 Для штатной конфигурации ОС и приложений используется Ansible.
 
@@ -196,28 +198,28 @@ provisioning:
     monitoring: true
 ```
 
-Resolver строит effective desired state, а provisioning layer передаёт capabilities в Ansible playbook как variables.
+Resolver строит итоговое требуемое состояние, а слой Ansible передаёт выбранные возможности в playbook как переменные.
 
-Знания о конкретной установке и настройке ПО живут в Ansible roles, а не в `guest.yaml` и не в deployer.
+Знания о конкретной установке и настройке ПО живут в ролях Ansible, а не в `guest.yaml` и не в `deploy-guest`.
 
-Стандарт размещения application/config/data внутри Linux guest находится в [`34-linux-filesystem-layout.md`](34-linux-filesystem-layout.md).
+Стандарт размещения приложений, конфигурации и данных внутри Linux-гостя находится в [`34-linux-filesystem-layout.md`](34-linux-filesystem-layout.md).
 
-## 12. Специальный bootstrap `311-dev-services`
+## 12. Специальная первичная настройка `311-dev-services`
 
-`311-dev-services` — штатный Ansible/control node.
+`311-dev-services` — штатный управляющий узел Ansible.
 
-Первоначальный flow:
+Первоначальная последовательность:
 
 ```text
 deploy-guest 311 --apply
-→ create LXC 311 с root SSH public keys
-→ start
-→ verify root SSH
-→ optional base
+→ создать LXC 311 с открытыми SSH-ключами root
+→ запустить
+→ проверить SSH root
+→ при необходимости base
 → Git
 → Docker
 → Ansible controller
-→ handoff к Ansible
+→ передать управление Ansible
 ```
 
 Целевая структура:
@@ -225,18 +227,18 @@ deploy-guest 311 --apply
 ```text
 311-dev-services
 ├── Debian 13
-├── root SSH key-only
+├── SSH root только по ключу
 ├── Git
 ├── Docker Engine + Compose plugin
-├── checkout проекта proxmox
-└── containerized Ansible Execution Environment
+├── рабочая копия проекта proxmox
+└── контейнеризированная Ansible Execution Environment
 ```
 
-Semaphore, Git service, CI и другие workloads 311 не относятся к bootstrap.
+Semaphore, Git-сервис, CI и другие сервисы `311` не относятся к первичной настройке.
 
-## 13. Обычные Linux guests
+## 13. Обычные Linux-гости
 
-Для обычных VM/LXC deployer гарантирует PVE desired state и management access, после чего штатная конфигурация выполняется с 311:
+Для обычных VM/LXC `deploy-guest` гарантирует требуемое состояние в Proxmox и административный доступ, после чего штатная конфигурация выполняется с `311`:
 
 ```text
 311 / Ansible EE
@@ -250,11 +252,11 @@ Semaphore, Git service, CI и другие workloads 311 не относятся
       └─ SSH root → 401
 ```
 
-На target-гостях Ansible устанавливать не требуется. Нужны SSH и prerequisites используемых modules.
+На целевых гостевых системах сам Ansible устанавливать не требуется. Нужны SSH и системные предпосылки используемых модулей.
 
-Host-side, AI и Ansible credentials не подменяют друг друга.
+Ключи PVE, AI и Ansible не подменяют друг друга.
 
-## 14. Реализация bootstrap interface
+## 14. Реализация интерфейса первичной настройки
 
 Предпочтительная структура:
 
@@ -269,26 +271,26 @@ scripts/
     └── ansible_controller.py
 ```
 
-Initial SSH injection/verification находится в ядре `deploy-guest.py`, а не в `bootstrap/base.py`.
+Начальная установка и проверка SSH находятся в ядре `deploy-guest.py`, а не в `bootstrap/base.py`.
 
-`scripts/guest_config.py` остаётся единым resolver source → effective state для validator и deployer.
+`scripts/guest_config.py` остаётся единым модулем преобразования исходной конфигурации в итоговое состояние для проверяющего скрипта и `deploy-guest`.
 
-## 15. Security constraints
+## 15. Ограничения безопасности
 
-- secrets/private keys/passwords/tokens не хранятся в `guest.yaml`;
-- deployer не генерирует и не ротирует infrastructure SSH credentials;
-- bootstrap handlers не печатают secrets;
-- GitHub key не используется для guest SSH;
-- AI и Ansible имеют собственные independent keypairs;
-- Ansible EE получает только необходимые credentials;
-- application не получает bootstrap capability только ради удобства установки.
+- секреты, закрытые ключи, пароли и токены не хранятся в `guest.yaml`;
+- `deploy-guest` не генерирует и не меняет инфраструктурные SSH-ключи;
+- обработчики первичной настройки не печатают секреты;
+- GitHub-ключ не используется для SSH в гостевые системы;
+- AI и Ansible имеют собственные независимые пары ключей;
+- Ansible EE получает только необходимые учётные данные;
+- приложение не получает возможность первичной настройки только ради удобства установки.
 
-Общие правила security и backup private keys — в [`23-security.md`](23-security.md).
+Общие правила безопасности и резервирования закрытых ключей — в [`23-security.md`](23-security.md).
 
 ## 16. Итоговая цепочка
 
 ```text
-PVE bootstrap/configuration
+первоначальная настройка PVE
    └─ pve_guest_ed25519
 
             ↓
@@ -297,19 +299,19 @@ guest.yaml
    ↓
 scripts/guest_config.py
    ↓
-effective desired state
+итоговое требуемое состояние
    ↓
 deploy-guest.py
-   ├─ PVE PLAN/APPLY
-   ├─ inject root SSH public keys
-   ├─ verify root SSH
-   └─ optional bootstrap capabilities
+   ├─ план / применение PVE
+   ├─ установка открытых SSH-ключей root
+   ├─ проверка SSH root
+   └─ необязательные возможности первичной настройки
              ↓
        Ansible EE на 311
              ↓
-   provisioning playbooks/roles
+   playbook и роли Ansible
              ↓
-     application workloads
+     прикладные сервисы
 ```
 
-Главное правило: **management SSH — часть deploy readiness. Bootstrap начинается только после появления проверенного management channel и заканчивается там, где начинается repeatable provisioning.**
+Главное правило: **административный SSH-доступ — часть готовности к управлению. Первичная настройка начинается только после появления проверенного административного канала и заканчивается там, где начинается повторяемая настройка через Ansible.**
