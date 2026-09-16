@@ -34,23 +34,18 @@ check_root_and_pve() {
     fi
 
     if qm config "$TEMPLATE_VMID" >/dev/null 2>&1; then
-        local config name template_flag protection_flag description ciuser
+        local config protection_flag
         config="$(qm config "$TEMPLATE_VMID")"
-        name="$(awk -F': ' '$1=="name" {print $2}' <<<"$config")"
-        template_flag="$(awk -F': ' '$1=="template" {print $2}' <<<"$config")"
+        validate_template_contract "$config" 0 \
+            || die "Шаблон ${TEMPLATE_VMID} существует, но не соответствует полному root-only Template-Version ${TEMPLATE_VERSION}. Автоматическая замена запрещена; выполните отдельную осознанную пересборку template 9000 по актуальному scripts/pve/create-template.sh."
+
         protection_flag="$(awk -F': ' '$1=="protection" {print $2}' <<<"$config")"
-        description="$(awk -F': ' '$1=="description" {sub(/^description: /, ""); print; exit}' <<<"$config")"
-        ciuser="$(awk -F': ' '$1=="ciuser" {print $2}' <<<"$config")"
-        if [[ "$name" != "$TEMPLATE_NAME" || "$template_flag" != "1" ]]; then
-            die "VMID ${TEMPLATE_VMID} уже существует, но это не ожидаемый шаблон ${TEMPLATE_NAME}; перезапись запрещена"
-        fi
-        if [[ "$description" != *"template-version=${TEMPLATE_VERSION}"* || "$ciuser" != "root" ]]; then
-            die "Шаблон ${TEMPLATE_VMID} ${TEMPLATE_NAME} существует, но не соответствует root-only Template-Version ${TEMPLATE_VERSION}. Автоматическая замена защищённого шаблона запрещена; выполните отдельную осознанную пересборку template 9000 по актуальному scripts/pve/create-template.sh."
-        fi
         if [[ "$protection_flag" == "1" ]]; then
-            ok "Защищённый шаблон ${TEMPLATE_VMID} Template-Version ${TEMPLATE_VERSION} уже существует"
+            validate_template_contract "$config" 1 \
+                || die "Защищённый шаблон ${TEMPLATE_VMID} не прошёл полный contract check"
+            ok "Защищённый шаблон ${TEMPLATE_VMID} Template-Version ${TEMPLATE_VERSION} полностью соответствует contract"
         else
-            info "Канонический шаблон ${TEMPLATE_VMID} версии ${TEMPLATE_VERSION} найден без protection=1; защита будет включена только после снимка конфигурации."
+            info "Канонический шаблон ${TEMPLATE_VMID} версии ${TEMPLATE_VERSION} найден без protection=1; остальные параметры полного contract проверены, защита будет включена только после снимка конфигурации."
         fi
     fi
 }
