@@ -97,29 +97,6 @@ EOF_CONFIG
 ensure_pve_guest_key() {
     log "Проверка постоянной PVE guest SSH identity"
 
-    if [[ ! -e "$PVE_GUEST_KEY" && ! -e "$PVE_GUEST_PUB" ]]; then
-        if [[ -f "$LEGACY_GUEST_BOOTSTRAP_KEY" ]]; then
-            install -o "$DEPLOY_USER" -g "$DEPLOY_USER" -m 0600 \
-                "$LEGACY_GUEST_BOOTSTRAP_KEY" "$PVE_GUEST_KEY"
-            rm -f -- "$LEGACY_GUEST_BOOTSTRAP_KEY" "$LEGACY_GUEST_BOOTSTRAP_PUB"
-            ok "Legacy PVE guest SSH private key перенесён в canonical path без ротации"
-        elif [[ -e "$LEGACY_GUEST_BOOTSTRAP_PUB" ]]; then
-            die "Обнаружен legacy public key ${LEGACY_GUEST_BOOTSTRAP_PUB}, но legacy private key отсутствует. Автоматическая ротация запрещена: восстановите private key из backup либо выполните отдельную осознанную rotation operation."
-        fi
-    fi
-
-    if [[ -f "$PVE_GUEST_KEY" && -f "$LEGACY_GUEST_BOOTSTRAP_KEY" ]]; then
-        local canonical_pub legacy_pub
-        canonical_pub="$(ssh-keygen -y -f "$PVE_GUEST_KEY" 2>/dev/null)" \
-            || die "Не удалось прочитать canonical PVE guest private key ${PVE_GUEST_KEY}"
-        legacy_pub="$(ssh-keygen -y -f "$LEGACY_GUEST_BOOTSTRAP_KEY" 2>/dev/null)" \
-            || die "Не удалось прочитать legacy PVE guest private key ${LEGACY_GUEST_BOOTSTRAP_KEY}"
-        [[ "$canonical_pub" == "$legacy_pub" ]] \
-            || die "Одновременно существуют разные canonical и legacy PVE guest SSH identities. Автоматический выбор запрещён."
-        rm -f -- "$LEGACY_GUEST_BOOTSTRAP_KEY" "$LEGACY_GUEST_BOOTSTRAP_PUB"
-        ok "Удалена совпадающая legacy-копия PVE guest SSH identity"
-    fi
-
     if [[ ! -f "$PVE_GUEST_KEY" ]]; then
         [[ ! -e "$PVE_GUEST_PUB" ]] \
             || die "Private key ${PVE_GUEST_KEY} отсутствует, но ${PVE_GUEST_PUB} существует. Возможна потеря PVE guest credential; автоматическая ротация запрещена. Восстановите private key из backup либо выполните отдельную осознанную rotation operation."
