@@ -1,30 +1,67 @@
 #!/usr/bin/env bash
 
+validate_template_contract() {
+    local config=$1
+    local require_protection=${2:-1}
+    local errors=""
+
+    template_contract_expect() {
+        local pattern=$1 message=$2
+        if ! grep -qE "$pattern" <<<"$config"; then
+            errors+="${message}"$'\n'
+        fi
+    }
+
+    template_contract_expect "^name: ${TEMPLATE_NAME}$" "name должен быть ${TEMPLATE_NAME}"
+    template_contract_expect '^template: 1$' "объект должен быть template=1"
+    template_contract_expect '^ciuser: root$' "ciuser должен быть root"
+    template_contract_expect '^ciupgrade: 0$' "ciupgrade должен быть 0"
+    template_contract_expect '^agent: 1$' "QEMU Guest Agent должен быть включён (agent=1)"
+    template_contract_expect '^vga: std$' "vga должен быть std"
+    template_contract_expect '^serial0: socket$' "serial0 должен быть socket"
+    template_contract_expect '^ipconfig0: ip=dhcp$' "ipconfig0 должен быть ip=dhcp"
+    template_contract_expect "template-version=${TEMPLATE_VERSION}" "description должен содержать template-version=${TEMPLATE_VERSION}"
+
+    if grep -q '^cicustom:' <<<"$config"; then
+        errors+="cicustom builder-а не должен оставаться в template"$'\n'
+    fi
+    if (( require_protection )) && ! grep -q '^protection: 1$' <<<"$config"; then
+        errors+="protection должен быть 1"$'\n'
+    fi
+
+    unset -f template_contract_expect
+
+    if [[ -n "$errors" ]]; then
+        printf 'Template %s не соответствует contract Template-Version %s:\n' "$TEMPLATE_VMID" "$TEMPLATE_VERSION" >&2
+        while IFS= read -r item; do
+            [[ -n "$item" ]] && printf '  - %s\n' "$item" >&2
+        done <<<"$errors"
+        return 1
+    fi
+}
+
 ensure_template() {
     if pct config "$TEMPLATE_VMID" >/dev/null 2>&1; then
         die "VMID ${TEMPLATE_VMID} занят LXC-контейнером; создание шаблона невозможно"
     fi
 
     if qm config "$TEMPLATE_VMID" >/dev/null 2>&1; then
-        local config name template_flag protection_flag description ciuser
+        local config protection_flag
         config="$(qm config "$TEMPLATE_VMID")"
-        name="$(awk -F': ' '$1=="name" {print $2}' <<<"$config")"
-        template_flag="$(awk -F': ' '$1=="template" {print $2}' <<<"$config")"
+        validate_template_contract "$config" 0 \
+            || die "Существующий VMID ${TEMPLATE_VMID} не соответствует полному contract шаблона ${TEMPLATE_NAME}; автоматическая миграция запрещена"
+
         protection_flag="$(awk -F': ' '$1=="protection" {print $2}' <<<"$config")"
-        description="$(awk -F': ' '$1=="description" {sub(/^description: /, ""); print; exit}' <<<"$config")"
-        ciuser="$(awk -F': ' '$1=="ciuser" {print $2}' <<<"$config")"
-        [[ "$name" == "$TEMPLATE_NAME" && "$template_flag" == "1" ]] \
-            || die "VMID ${TEMPLATE_VMID} существует, но не соответствует шаблону ${TEMPLATE_NAME}"
-        [[ "$description" == *"template-version=${TEMPLATE_VERSION}"* && "$ciuser" == "root" ]] \
-            || die "Шаблон ${TEMPLATE_VMID} не соответствует root-only Template-Version ${TEMPLATE_VERSION}; автоматическая миграция существующего template запрещена"
         if [[ "$protection_flag" != "1" ]]; then
             qm set "$TEMPLATE_VMID" --protection 1
-            protection_flag="$(qm config "$TEMPLATE_VMID" | awk -F': ' '$1=="protection" {print $2}')"
-            [[ "$protection_flag" == "1" ]] \
-                || die "Не удалось установить protection=1 для шаблона ${TEMPLATE_VMID} ${TEMPLATE_NAME}"
+            config="$(qm config "$TEMPLATE_VMID")"
+            validate_template_contract "$config" 1 \
+                || die "После включения protection шаблон ${TEMPLATE_VMID} не прошёл полный contract check"
             ok "Для существующего шаблона ${TEMPLATE_VMID} автоматически включён protection=1"
         else
-            ok "Шаблон ${TEMPLATE_VMID} ${TEMPLATE_NAME} Template-Version ${TEMPLATE_VERSION} уже существует и защищён"
+            validate_template_contract "$config" 1 \
+                || die "Существующий защищённый шаблон ${TEMPLATE_VMID} не прошёл полный contract check"
+            ok "Шаблон ${TEMPLATE_VMID} ${TEMPLATE_NAME} Template-Version ${TEMPLATE_VERSION} уже существует и полностью проверен"
         fi
         return
     fi
@@ -40,18 +77,10 @@ ensure_template() {
 
     local final_config
     final_config="$(qm config "$TEMPLATE_VMID")"
-    grep -q "^name: ${TEMPLATE_NAME}$" <<<"$final_config" \
-        || die "VMID ${TEMPLATE_VMID} создан, но имеет неожиданное имя"
-    grep -q '^template: 1$' <<<"$final_config" \
-        || die "VMID ${TEMPLATE_VMID} создан, но не является шаблоном Proxmox"
-    grep -q '^protection: 1$' <<<"$final_config" \
-        || die "VMID ${TEMPLATE_VMID} создан, но protection=1 не установлен"
-    grep -q '^ciuser: root$' <<<"$final_config" \
-        || die "VMID ${TEMPLATE_VMID} создан, но ciuser не root"
-    grep -q "template-version=${TEMPLATE_VERSION}" <<<"$final_config" \
-        || die "VMID ${TEMPLATE_VMID} создан, но description не содержит ожидаемую Template-Version ${TEMPLATE_VERSION}"
+    validate_template_contract "$final_config" 1 \
+        || die "VMID ${TEMPLATE_VMID} создан, но не прошёл полный contract check"
 
-    ok "Создан защищённый шаблон ${TEMPLATE_VMID} ${TEMPLATE_NAME} Template-Version ${TEMPLATE_VERSION}"
+    ok "Создан защищённый шаблон ${TEMPLATE_VMID} ${TEMPLATE_NAME} Template-Version ${TEMPLATE_VERSION}; полный contract проверен"
 }
 
 install_private_tooling() {
@@ -113,7 +142,7 @@ report_status() {
     ok "${AI_PVE_TOKEN}: managed-only effective permissions и API credential проверены"
 
     if qm config "$TEMPLATE_VMID" >/dev/null 2>&1; then
-        ok "Шаблон ${TEMPLATE_VMID} Template-Version ${TEMPLATE_VERSION} существует и protection проверен"
+        ok "Шаблон ${TEMPLATE_VMID} Template-Version ${TEMPLATE_VERSION} существует и полный contract проверен"
     else
         printf '%s%s[НЕТ]%s Шаблон %s отсутствует\n' "$C_BOLD" "$C_RED" "$C_RESET" "$TEMPLATE_VMID"
         ready=0
