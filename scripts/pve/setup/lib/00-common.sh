@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-PVE_CONFIGURATION_VERSION=23
+PVE_CONFIGURATION_VERSION=24
 
 PRIVATE_REPO="git@github.com:zsergeyru/proxmox.git"
 PRIVATE_BRANCH="main"
