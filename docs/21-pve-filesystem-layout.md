@@ -23,7 +23,7 @@ PVE Configuration
 
 граница доверия
 → root владеет основной копией исходного кода и мастер-копией общего Git read-key
-→ pvedeploy владеет только своей изменяемой рабочей областью развёртывания
+→ pvedeploy владеет изменяемой рабочей областью deploy-контура, включая public-key registry
 → pvedeploy не имеет постоянного доступа к root-only Git read-key
 ```
 
@@ -132,6 +132,8 @@ Public Bootstrap открывает блокировку на `fd 9` и пере
 
 ## 4. Постоянная конфигурация средства развёртывания
 
+Root-controlled конфигурация и секреты:
+
 ```text
 /etc/proxmox-deployer/
 ├── config.yaml
@@ -142,13 +144,22 @@ Public Bootstrap открывает блокировку на `fd 9` и пере
 │   ├── pve_guest_ed25519.pub
 │   ├── config
 │   └── known_hosts
-├── public-keys/
-│   ├── deployer.pub
-│   ├── <VMID>-<name>.pub
-│   └── management-authorized-keys
 └── secrets/
     ├── host-deploy.token
     └── ai-agent-infra.token
+```
+
+Постоянное изменяемое состояние deploy-контура:
+
+```text
+/var/lib/proxmox-deployer/
+├── repo/
+├── state/
+├── cache/
+└── public-keys/
+    ├── deployer.pub
+    ├── <VMID>.pub
+    └── management-authorized-keys
 ```
 
 Назначение:
@@ -168,11 +179,13 @@ ssh/pve_guest_ed25519
 → закрытый SSH-ключ deployer для управляемых VM/LXC
 → этим же ключом PVE Configuration проверяет реальный root SSH на проверочном клоне
 
-public-keys/
+/var/lib/proxmox-deployer/public-keys/
 → канонический каталог только открытых административных SSH-ключей
-→ deployer.pub соответствует ssh/pve_guest_ed25519.pub
-→ <VMID>-<name>.pub появляется для гостя с management.ssh_identity: true
+→ deployer.pub соответствует /etc/proxmox-deployer/ssh/pve_guest_ed25519.pub
+→ <VMID>.pub появляется для гостя с management.ssh_identity: true
+→ имя гостя в имени файла не используется
 → management-authorized-keys детерминированно собирается из зарегистрированных *.pub
+→ каталог изменяется pvedeploy напрямую без отдельного привилегированного helper
 
 ssh/config + known_hosts
 → принадлежащие root настройки SSH для доступа к закрытому Git-репозиторию
@@ -192,6 +205,8 @@ secrets/ai-agent-infra.token
 
 Основная конфигурация SSH включает строгую проверку ключа сервера, `BatchMode yes`, ограниченный `ConnectTimeout` и параметры контроля живого соединения.
 
+Текущий PVE-хост вводится как новая машина без старого management-контура. Поэтому отдельная миграция прежнего deployer SSH key сейчас не нужна: если пары `pve_guest_ed25519` ещё нет, PVE Configuration создаёт её по текущей схеме; после первого создания ключ больше не заменяется автоматически.
+
 ## 5. Владельцы и права
 
 Ключевое разделение:
@@ -205,9 +220,6 @@ ssh/config                                 root:root 0600
 ssh/known_hosts                            root:root 0644
 pve_guest_ed25519                          pvedeploy:pvedeploy 0600
 pve_guest_ed25519.pub                      pvedeploy:pvedeploy 0644
-/etc/proxmox-deployer/public-keys/         root:pvedeploy 0755
-public-keys/*.pub                          root:pvedeploy 0644
-public-keys/management-authorized-keys     root:pvedeploy 0644
 /etc/proxmox-deployer/secrets/             root:pvedeploy 0710
 host-deploy.token                          root:pvedeploy 0640
 ai-agent-infra.token                       root:root 0600
@@ -215,6 +227,9 @@ ai-agent-infra.token                       root:root 0600
 /var/lib/proxmox-deployer/repo             root-owned, group/other non-writable
 /var/lib/proxmox-deployer/state            root:pvedeploy 0750
 /var/lib/proxmox-deployer/cache            pvedeploy:pvedeploy 0750
+/var/lib/proxmox-deployer/public-keys      pvedeploy:pvedeploy 0750
+public-keys/*.pub                          pvedeploy:pvedeploy 0644
+public-keys/management-authorized-keys     pvedeploy:pvedeploy 0644
 /var/lib/pvedeploy                         pvedeploy:pvedeploy
 /var/lib/pvedeploy/.ssh                    pvedeploy:pvedeploy 0700
 /var/lib/pvedeploy/.ssh/known_hosts        pvedeploy:pvedeploy 0600
@@ -222,7 +237,9 @@ ai-agent-infra.token                       root:root 0600
 /var/log/proxmox-deployer/audit            pvedeploy:pvedeploy 0750
 ```
 
-Права `public-keys/` позволяют deploy runtime читать открытые ключи, но изменение канонического каталога выполняется только штатным привилегированным механизмом deploy/sync с проверкой формата и fingerprint. Сам факт, что public key не является секретом, не означает право любого процесса произвольно менять доверенный список административного доступа.
+`pvedeploy` может изменять только собственное runtime-состояние deploy-контура, включая public-key registry и базу SSH host keys управляемых гостей. Это не даёт ему права записи в доверенную root-owned копию проекта и не открывает root-only Git credential или AI token.
+
+Отдельный привилегированный helper для добавления/удаления management public keys не требуется. Запись в registry всё равно выполняется только штатной логикой с полной проверкой формата, fingerprint, имени `<VMID>.pub`, отсутствия дубликатов и атомарной заменой файлов.
 
 Требования к `pvedeploy`:
 
@@ -269,9 +286,13 @@ Root-only файл:
 /var/lib/pvedeploy/.ssh/known_hosts
 ```
 
-принадлежит `pvedeploy` и используется `deploy-guest` и `sync-management-keys` для строгой проверки SSH-ключей серверов гостевых систем.
+принадлежит `pvedeploy` и используется `deploy-guest` и `sync-management-keys` для проверки SSH-ключей серверов гостевых систем.
 
-Правила первичного принятия и реакции на неожиданную смену ключа определяет [`31-deploy-guest.md`](31-deploy-guest.md).
+Для только что созданного нового гостя в доверенной домашней сети допускается первое запоминание ключа сервера для вычисленного ожидаемого адреса. Сразу после сохранения все дальнейшие подключения выполняются со строгой сверкой этой записи.
+
+Для уже известного гостя неожиданная смена SSH host key означает остановку автоматической работы. Старый ключ не удаляется автоматически ради продолжения.
+
+Подробные правила определяет [`31-deploy-guest.md`](31-deploy-guest.md).
 
 Потеря этого файла не является потерей закрытых учётных данных, но уничтожает сохранённую базу доверия к SSH host key существующих гостей. Поэтому существующие объекты после такой потери не должны молча приниматься заново без отдельного подтверждённого сценария восстановления.
 
@@ -279,14 +300,15 @@ Root-only файл:
 
 ```text
 /var/lib/proxmox-deployer/
-├── repo/    доверенная root копия, неизменяемая для pvedeploy
-├── state/   состояние настройки и проверки шаблона
-└── cache/   изменяемый кэш pvedeploy
+├── repo/          доверенная root копия, неизменяемая для pvedeploy
+├── state/         состояние настройки и проверки шаблона
+├── cache/         изменяемый кэш pvedeploy
+└── public-keys/   изменяемый канонический registry открытых management keys
 ```
 
-Закрытые SSH-ключи и секреты токенов здесь не хранятся.
+Закрытые SSH-ключи и секреты токенов в `state/`, `cache/` и `public-keys/` не хранятся. Исключение по всему дереву `/var/lib/proxmox-deployer` — только root-owned доверенная копия Git в `repo/`; её содержимое определяется самим репозиторием и не является secret store.
 
-Домашний каталог `pvedeploy` содержит только пользовательское служебное состояние, которое должно быть изменяемым самим `pvedeploy`, в частности постоянную базу SSH host key гостевых систем.
+Домашний каталог `pvedeploy` содержит пользовательское служебное состояние, которое должно быть изменяемым самим `pvedeploy`, в частности постоянную базу SSH host key гостевых систем.
 
 Кэш образов шаблона:
 
@@ -388,10 +410,10 @@ bootstrap-complete
 Канонический каталог открытых management keys:
 
 ```text
-/etc/proxmox-deployer/public-keys/
+/var/lib/proxmox-deployer/public-keys/
 ```
 
-секретом не является, но его полезно сохранять как инфраструктурное состояние. Он также может быть восстановлен из проверенных `.pub` владельцев соответствующих identities.
+секретом не является, но его полезно сохранять как инфраструктурное состояние. Он также может быть восстановлен из проверенных `.pub` владельцев соответствующих identities. Дополнительные ключи именуются только `<VMID>.pub`.
 
 Отдельно следует сохранять либо иметь документированный сценарий восстановления базы доверия:
 
@@ -435,10 +457,6 @@ PVE tag `management-ssh` также не является секретом, но
 │   │   ├── pve_guest_ed25519.pub
 │   │   ├── config
 │   │   └── known_hosts
-│   ├── public-keys/
-│   │   ├── deployer.pub
-│   │   ├── <VMID>-<name>.pub
-│   │   └── management-authorized-keys
 │   └── secrets/
 ├── run/lock/
 │   └── proxmox-orchestration.lock
@@ -446,7 +464,11 @@ PVE tag `management-ssh` также не является секретом, но
 │   ├── repo/                       root-owned
 │   ├── state/                      root:pvedeploy
 │   │   └── template-smoke.json
-│   └── cache/                      pvedeploy:pvedeploy
+│   ├── cache/                      pvedeploy:pvedeploy
+│   └── public-keys/                pvedeploy:pvedeploy 0750
+│       ├── deployer.pub
+│       ├── <VMID>.pub
+│       └── management-authorized-keys
 ├── var/lib/pvedeploy/
 │   └── .ssh/                       pvedeploy:pvedeploy 0700
 │       └── known_hosts             pvedeploy:pvedeploy 0600
@@ -469,7 +491,7 @@ PVE tag `management-ssh` также не является секретом, но
 │   └── management_ed25519.pub
 ├── public-keys/
 │   ├── deployer.pub
-│   ├── <VMID>-<name>.pub
+│   ├── <VMID>.pub
 │   └── management-authorized-keys
 └── credentials/
     └── github-proxmox-read          # только если management.project_repo_read: true
@@ -479,4 +501,4 @@ PVE tag `management-ssh` также не является секретом, но
 
 Главный принцип:
 
-> Public Bootstrap использует отдельную временную область только для первоначального доступа. Основная копия исходного кода и мастер-копия общего Git read-key принадлежат `root`; `pvedeploy` не получает постоянного доступа к этому секрету. Канонический набор открытых management SSH keys хранится отдельно в `/etc/proxmox-deployer/public-keys/` и распространяется только через `sync-management-keys` по доказанно участвующим объектам с `management-ssh`. При сомнительном состоянии проверка шаблона, гостя или ключевого каталога останавливается без разрушительной очистки.
+> Public Bootstrap использует отдельную временную область только для первоначального доступа. Основная копия исходного кода и мастер-копия общего Git read-key принадлежат `root`; `pvedeploy` не получает постоянного доступа к этому секрету. Канонический набор открытых management SSH keys является изменяемым состоянием `pvedeploy` и хранится в `/var/lib/proxmox-deployer/public-keys/`; отдельный привилегированный helper для него не нужен. Новому гостю один раз запоминается SSH host key ожидаемого адреса, после чего неожиданная смена ключа блокирует автоматическую работу. Дополнительные management identities привязаны к VMID через `<VMID>.pub`, а не к имени гостя.
