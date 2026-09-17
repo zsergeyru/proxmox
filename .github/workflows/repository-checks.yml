@@ -56,6 +56,9 @@ jobs:
       - name: Run deploy runtime contract checks
         run: bash scripts/pve/setup/tests/test-deploy-runtime-contract.sh
 
+      - name: Run management key registry unit checks
+        run: sudo bash scripts/pve/setup/tests/test-management-key-registry.sh
+
       - name: Validate template pipeline assets with production renderer
         run: |
           tmp="$(mktemp)"
