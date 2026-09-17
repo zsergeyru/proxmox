@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import importlib.util
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -13,6 +14,7 @@ spec = importlib.util.spec_from_file_location("sync_management_keys", SOURCE)
 if spec is None or spec.loader is None:
     raise SystemExit("cannot load sync-management-keys.py")
 mod = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = mod
 spec.loader.exec_module(mod)
 
 
