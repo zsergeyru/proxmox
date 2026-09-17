@@ -1,7 +1,9 @@
 # 311 — dev-services
 
 **Тип:** LXC  
-**Назначение:** DevOps, развёртывание, CI/CD и сервисы разработки, отделённые от AI Control и обычных прикладных сервисов.
+**Назначение:** DevOps, Ansible, CI/CD и сервисы разработки, отделённые от AI Control и обычных прикладных сервисов.
+
+Основной контракт административных SSH-ключей находится в [`../../docs/28-management-ssh-keys.md`](../../docs/28-management-ssh-keys.md).
 
 ## Guest Bootstrap v1
 
@@ -16,26 +18,57 @@ bootstrap:
     ansible_controller: true
 ```
 
-После реализации принятого manifest-интерфейса доступа к проектному Git целевой `guest.yaml` 311 также должен содержать:
+После реализации принятых manifest-интерфейсов целевой `guest.yaml` 311 также должен содержать:
 
 ```yaml
+management_key: true
+
 access:
   project_repo_read: true
 ```
 
-На момент фиксации этого решения `access.project_repo_read` ещё не реализован в schema v6, поэтому поле не добавляется в действующий manifest до изменения schemas/resolver/validator.
+`management_key` означает: после появления проверенного SSH deployer создаёт стандартную management SSH-пару **внутри 311**, оставляет private key только там и регистрирует на PVE только открытую часть.
 
-После создания LXC `deploy-guest` должен получить проверенный `root SSH`, при `project_repo_read` материализовать общий read-only Git credential, затем последовательно проверить/применить `base → git → docker → ansible_controller` и только после успешной финальной проверки снять `deploy-incomplete`.
+`project_repo_read` независимо выдаёт общий read-only Git credential для `zsergeyru/proxmox`.
 
-Bootstrap подготавливает сам управляющий узел Ansible, но **не** устанавливает Semaphore, Gitea/Gogs, Jenkins и другие прикладные сервисы. Они остаются зоной последующего Ansible provisioning.
+Оба поля пока не реализованы в действующей schema v6, поэтому до изменения schemas/resolver/validator в рабочий manifest не добавляются.
 
-Полный контракт: [`../../docs/31-deploy-guest.md`](../../docs/31-deploy-guest.md) и [`../../docs/33-guest-bootstrap-and-provisioning.md`](../../docs/33-guest-bootstrap-and-provisioning.md).
+После создания LXC `deploy-guest` должен получить проверенный `root SSH`, при необходимости создать/проверить management identity, зарегистрировать её `.pub`, материализовать Project Git READ credential, выполнить `base → git → docker → ansible_controller` и только после полной проверки завершить deploy.
+
+## Management SSH Ansible
+
+311 не получает специальный заранее известный `ansible_ed25519` от PVE и не передаёт ключ напрямую 301.
+
+При `management_key: true` используется общий стандарт проекта:
+
+```text
+/etc/proxmox-guest/ssh/management_ed25519
+/etc/proxmox-guest/ssh/management_ed25519.pub
+```
+
+Для 311 эта identity фактически является SSH-ключом Ansible:
+
+```text
+311 / Ansible
+→ /etc/proxmox-guest/ssh/management_ed25519
+→ SSH root@target
+```
+
+Закрытая часть остаётся только в 311.
+
+Открытую часть deployer забирает после генерации и регистрирует как, например:
+
+```text
+/etc/proxmox-deployer/public-keys/311-dev-services.pub
+```
+
+После регистрации `sync-management-keys` распространяет обновлённый public-key registry по управляемым Debian VM/LXC, включая 301. Сам 311 не подключается ни к PVE, ни к 301 ради регистрации или распространения ключа.
 
 ## Доступ к проектному Git
 
-311 не получает собственный отдельный GitHub Deploy Key для чтения.
+311 не получает собственного отдельного GitHub Deploy Key для чтения.
 
-Используется общий project read-only credential:
+Используется общий Project Git READ credential:
 
 ```text
 GitHub: zsergeyru/proxmox
@@ -44,50 +77,57 @@ master copy: PVE root-only
 local copy: /etc/proxmox-guest/credentials/github-proxmox-read
 ```
 
-Он выдаётся только при явном:
+Этот credential не является management SSH-ключом Ansible и не добавляется в `authorized_keys`.
 
-```yaml
-access:
-  project_repo_read: true
+## Локальная копия public-key registry
+
+Как и другие управляемые Debian-гости, 311 получает при синхронизации:
+
+```text
+/etc/proxmox-guest/public-keys/
+└── management-authorized-keys
 ```
 
-Поле не содержит имя секрета или путь к нему. Связка с конкретным read-only Deploy Key жёстко определена deploy-контуром.
+Это только открытые ключи. Закрытых ключей других управляющих систем внутри 311 нет.
 
-Общий Git read-key не является ключом Ansible для SSH в управляемые гости и не даёт write-доступ к GitHub.
+Основной источник каталога находится на PVE:
+
+```text
+/etc/proxmox-deployer/public-keys/
+```
+
+а распространение выполняет отдельная команда `sync-management-keys`.
 
 ## Планируемые сервисы
 
-- Ansible — штатный механизм повторяемой настройки внутри VM/LXC через SSH;
+- Ansible — штатный механизм повторяемой настройки VM/LXC через SSH;
 - Semaphore — веб-интерфейс к Ansible для ручного запуска, истории и журналов;
 - Gitea или Gogs;
 - Jenkins;
 - другие инструменты разработки, сборки и CI/CD при необходимости.
 
-Ansible и Semaphore относятся именно сюда, а не в `301-ai-control`: они являются инфраструктурными и DevOps-инструментами, а не AI-компонентами.
+Ansible и Semaphore относятся именно сюда, а не в `301-ai-control`: это инфраструктурные и DevOps-инструменты, а не AI-компоненты.
 
-Целевой вариант — запуск Ansible и Semaphore в Docker внутри `311-dev-services`. На управляемые гостевые системы отдельный агент Ansible не устанавливается; Ansible подключается к ним по SSH.
+Целевой вариант — запуск Ansible и Semaphore в Docker внутри `311-dev-services`. На управляемые гости отдельный агент Ansible не устанавливается; Ansible подключается к ним по SSH management key 311.
 
 ## Взаимодействие с AI Control
 
 ```text
 301-ai-control
-  Hermes
-  Proxmox MCP
+  агент + Proximo
        │
        │ инициирует повторяемую настройку
        ▼
 311-dev-services
   Ansible
-       │ SSH
+       │ SSH по собственной management identity
        ▼
 управляемые VM/LXC
 ```
 
-Hermes отвечает за принятие решения, изменение или подготовку конфигурации в Git и запуск операции. Ansible повторяемо применяет нужную конфигурацию внутри гостевой ОС.
+301 и 311 не синхронизируют ключи друг с другом напрямую. Оба получают единый набор открытых management keys от PVE через `sync-management-keys`.
 
-301 и 311 могут использовать одну и ту же **read-only** Git credential для получения актуального `zsergeyru/proxmox`, но их административные SSH-ключи остаются независимыми.
-
-Прямой SSH из AI Control остаётся допустимым для диагностики, разовых действий и аварийных случаев. Штатная первичная подготовка `311` теперь является частью `deploy-guest` через Guest Bootstrap v1.
+Прямой SSH из AI Control остаётся допустимым для диагностики и разовых действий. Штатная повторяемая настройка выполняется Ansible.
 
 ## Semaphore
 
@@ -101,7 +141,7 @@ Semaphore предназначен прежде всего для ручного
 → нужная гостевая система
 ```
 
-Semaphore показывает запуски, результат и журналы. Он не является обязательным промежуточным слоем между Hermes и Ansible: остановка Semaphore не должна блокировать автоматическое управление инфраструктурой.
+Semaphore показывает запуски, результаты и журналы. Он не является обязательным промежуточным слоем между AI и Ansible: остановка Semaphore не должна блокировать автоматическое управление инфраструктурой.
 
 ## Развёртывание `rootfs/`
 
@@ -119,6 +159,6 @@ Semaphore показывает запуски, результат и журна�
 
 Homarr и обычные пользовательские приложения сюда не относятся; они размещаются в `321-app-services`.
 
-Hermes, Agent Zero и MCP остаются в `301-ai-control`. Общие STT/TTS — в `331-ai-services`.
+Hermes, другие AI-агенты и MCP остаются в `301-ai-control`. Общие STT/TTS — в `331-ai-services`.
 
 Compose-файлы, конфигурация и локальный код `311-dev-services` после появления реальной установки хранятся под его `rootfs/`. Фиктивные Compose-файлы заранее не создаются.
