@@ -12,8 +12,10 @@ scripts/
 ├── validate_repo.py
 ├── tests/
 │   ├── test-guest-bootstrap.py
-│   └── test-sync-management-keys.py
+│   ├── test-sync-management-keys.py
+│   └── test-deploy-guest.py
 └── pve/
+    ├── deploy-guest.py
     ├── sync-management-keys.py
     └── setup/
         ├── configure-pve.sh
@@ -22,13 +24,11 @@ scripts/
         └── tests/
 ```
 
-После реализации `deploy-guest` здесь также появятся его основной модуль и bootstrap-handlers; до появления реального кода README не изображает их как уже существующие.
-
 ## `guest_config.py`
 
 Общий модуль преобразования исходной конфигурации гостевой системы в итоговое требуемое состояние.
 
-Его переиспользуют validator, `sync-management-keys` и будущий `deploy-guest`, чтобы в одном месте существовали:
+Его переиспользуют validator, `sync-management-keys` и `deploy-guest`, чтобы в одном месте существовали:
 
 - правила merge `defaults + profile + guest`;
 - VMID-адресация;
@@ -46,7 +46,7 @@ scripts/
 python scripts/validate_repo.py
 ```
 
-CI, `sync-management-keys` и будущий `deploy-guest` используют этот же validator. Отдельную упрощённую реализацию validation для runtime создавать нельзя.
+CI, `sync-management-keys` и `deploy-guest` используют этот же validator. Отдельную упрощённую реализацию validation для runtime создавать нельзя.
 
 ## `tests/`
 
@@ -57,9 +57,10 @@ Repo-level contract tests, которые не требуют живого PVE.
 ```text
 scripts/tests/test-guest-bootstrap.py
 scripts/tests/test-sync-management-keys.py
+scripts/tests/test-deploy-guest.py
 ```
 
-Первый фиксирует контракт Guest Bootstrap v1: явный набор capabilities, порядок, зависимости и требование `start_after_deploy=true`. Второй проверяет безопасную работу management-key registry, managed block `authorized_keys` и guest public catalog без подключения к живому PVE.
+Первый фиксирует контракт Guest Bootstrap v1: явный набор capabilities, порядок, зависимости и требование `start_after_deploy=true`. Второй проверяет безопасную работу management-key registry, managed block `authorized_keys` и guest public catalog. Третий проверяет PLAN/safety helpers, ownership/tags, disk rules и CLI `deploy-guest` без подключения к живому PVE.
 
 ## `pve/sync-management-keys.py`
 
@@ -80,7 +81,7 @@ Runtime:
 - использует PVE API token `deployer@pve!host-deploy` только для read-only discovery объектов с tag `management-ssh`;
 - для manifest-backed гостей использует общий `guest_config.py`, для внешне созданных tagged гостей — каноническую VMID-адресацию;
 - проверяет Debian и root SSH через deployer identity;
-- при первом PVE-side знакомстве с новым ожидаемым адресом staging-ом проверяет SSH host key и сохраняет его только после успешного общего preflight;
+- не принимает неизвестные SSH host keys: первичное доверие только что созданному ожидаемому объекту выполняет `deploy-guest`, а bulk sync требует уже сохранённый persistent host key;
 - синхронизирует `/etc/proxmox-guest/public-keys/` и только managed block `/root/.ssh/authorized_keys`;
 - не запускает offline-гостей ради sync;
 - после APPLY повторно проверяет фактическое состояние.
@@ -138,9 +139,9 @@ scripts/pve/setup/tests/
 
 Здесь находятся проверки контракта и безопасности настройки PVE и сборки шаблона. При изменении поведения тесты должны меняться вместе с кодом.
 
-## `deploy-guest`
+## `pve/deploy-guest.py`
 
-Основной источник требований к будущему `scripts/pve/deploy-guest.py`:
+Рабочий PLAN/APPLY runtime одной deployable VM/LXC. По умолчанию команда строит read-only PLAN, а изменения разрешаются только с `--apply`. Основной источник требований:
 
 - [`../docs/31-deploy-guest.md`](../docs/31-deploy-guest.md) — полный PLAN/APPLY, Proxmox API, VM/LXC, SSH trust, Guest Bootstrap v1, ошибки и финальная проверка.
 

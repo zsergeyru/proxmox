@@ -687,12 +687,12 @@ def prepare_participant(
     if not DEPLOYER_KEY.is_file() or DEPLOYER_KEY.is_symlink():
         fail(f"deployer private SSH key отсутствует или небезопасен: {DEPLOYER_KEY}")
 
-    if known_host_exists(participant):
-        known_hosts_file = KNOWN_HOSTS
-    else:
-        prepared.new_host_keys = scan_host_keys(participant)
-        known_hosts_file = temporary_known_hosts(prepared.new_host_keys)
-        temp_paths.append(known_hosts_file)
+    if not known_host_exists(participant):
+        raise UnsafeRemoteState(
+            f"VMID {participant.vmid}: SSH host key ещё не доверен; "
+            "первичное доверие разрешено только deploy-guest для только что созданного ожидаемого объекта"
+        )
+    known_hosts_file = KNOWN_HOSTS
     prepared.known_hosts_file = known_hosts_file
     state = inspect_remote(participant, known_hosts_file)
     validate_remote_catalog(state, participant)

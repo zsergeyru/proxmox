@@ -33,13 +33,13 @@
 | Правило individual-only management flags | Реализовано | `ssh_identity` и `project_repo_read` разрешены только в конкретном `guest.yaml`, не наследуются из defaults/profile и нормализуются в effective state |
 | `301-ai-control` management desired state | Зафиксировано в manifest | manifest уже содержит `ssh_identity: true` и `project_repo_read: true`; runtime-применение ждёт `deploy-guest` |
 | `311-dev-services` management desired state | Зафиксировано в manifest | manifest уже содержит `ssh_identity: true` и `project_repo_read: true`; runtime-применение ждёт `deploy-guest` |
-| `deploy-guest` | Принятый контракт, код ещё не реализован | поведение PLAN/APPLY и post-SSH handlers задаёт `31-deploy-guest.md` |
-| `management.ssh_identity` runtime handler | Принятый контракт, код ещё не реализован | создание guest-local keypair, регистрация `<VMID>.pub` и вызов sync появятся вместе с `deploy-guest` |
-| `management.project_repo_read` runtime handler | Принятый контракт, код ещё не реализован | materialize/verify/remove общего Git READ credential появится вместе с `deploy-guest` |
+| `deploy-guest` | Реализовано | `scripts/pve/deploy-guest.py` реализует read-only PLAN по умолчанию и `--apply` для VM/LXC через PVE REST API с ownership, SSH trust, management handlers, Bootstrap и final verify |
+| `management.ssh_identity` runtime handler | Реализовано | guest-local Ed25519 keypair создаётся только при полном отсутствии, private остаётся в guest, public регистрируется как `<VMID>.pub`, fingerprint conflict блокирует deploy, registry change запускает sync |
+| `management.project_repo_read` runtime handler | Реализовано | root-wrapper передаёт fixed read key только через FD; runtime materialize/verify/remove выполняет fixed credential/known_hosts/SSH alias и точный URL rewrite для `zsergeyru/proxmox` |
 | PVE public-key registry runtime | Реализовано | PVE Configuration создаёт и проверяет `/var/lib/proxmox-deployer/public-keys/`, `deployer.pub`, `<VMID>.pub` и детерминированный `management-authorized-keys` |
 | `sync-management-keys` | Реализовано | отдельная PVE-команда валидирует registry, обнаруживает tagged VM/LXC, проверяет SSH trust/Debian, синхронизирует guest public catalog и только managed block `authorized_keys`; offline-гости не запускаются |
-| Guest Bootstrap runtime handlers | Принятый контракт, код ещё не реализован полностью | schema/resolver для `bootstrap.capabilities` действуют, фактическое применение будет частью `deploy-guest` |
-| Расширенные CI-проверки management/runtime key contract | Частично реализовано | registry и `sync-management-keys` покрыты contract/unit checks; deploy-specific runtime checks будут расширены вместе с `deploy-guest` |
+| Guest Bootstrap runtime handlers | Реализовано v1 | `base`, `git`, `docker`, `ansible_controller` применяются только после verified root SSH, с read-only check → apply → final verify и без произвольного shell/package interface |
+| Расширенные CI-проверки management/runtime key contract | Реализовано для v1 | registry, sync, deploy-guest PLAN/safety helpers, wrapper trust boundary и source-revision/FD/strict-SSH invariants покрыты contract/unit checks |
 
 ## Правило обновления
 

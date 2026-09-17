@@ -159,7 +159,7 @@ management:
   project_repo_read: true
 ```
 
-означает фиксированный read-only доступ только к `zsergeyru/proxmox`. Это отдельный credential, не management SSH key и не capability `git`.
+означает фиксированный read-only credential/SSH transport только к `zsergeyru/proxmox`. Это не management SSH key и не capability `git`: handler не устанавливает Git client, а при его наличии дополнительно проверяет `git ls-remote`.
 
 При `false`/отсутствии поля ранее управляемые Project Git READ artifacts удаляются по контракту [`31-deploy-guest.md`](31-deploy-guest.md), но рабочие копии repo и чужие credentials не затрагиваются.
 
