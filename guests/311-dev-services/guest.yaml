@@ -1,4 +1,4 @@
-schema_version: 5
+schema_version: 6
 vmid: 311
 name: dev-services
 profile: docker-lxc
@@ -14,3 +14,10 @@ resources:
   swap_mb: 1024
   disk:
     size_gb: 32
+
+bootstrap:
+  capabilities:
+    base: true
+    git: true
+    docker: true
+    ansible_controller: true
