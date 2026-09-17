@@ -198,36 +198,16 @@ refresh_canonical_public_key() {
 }
 
 prepare_canonical_github_access() {
-    log "Подготовка root-only GitHub identity для canonical source"
+    log "Проверка постоянной root-only GitHub identity для canonical source"
 
-    if [[ ! -f "$KEY_FILE" ]]; then
-        [[ -f "$BOOTSTRAP_KEY_FILE" ]] \
-            || die "Канонический GitHub Deploy Key отсутствует и Public Bootstrap не передал временный private key. Сначала запустите публичный proxmox-bootstrap/bootstrap-pve.sh."
+    [[ -f "$KEY_FILE" ]] \
+        || die "Постоянный GitHub Deploy Key ${KEY_FILE} отсутствует. Public Bootstrap должен создать его до запуска PVE Configuration; автоматическая генерация или ротация здесь запрещена."
 
-        install -o root -g root -m 0600 "$BOOTSTRAP_KEY_FILE" "$KEY_FILE"
-        ok "Deploy Key перенесён в root-only каноническое хранилище"
-    else
-        chown root:root "$KEY_FILE"
-        chmod 0600 "$KEY_FILE"
-        ok "Канонический GitHub Deploy Key уже существует и закреплён за root"
-    fi
-
+    chown root:root "$KEY_FILE"
+    chmod 0600 "$KEY_FILE"
     refresh_canonical_public_key
 
-    if [[ -f "$BOOTSTRAP_KEY_FILE" ]]; then
-        local canonical_pub bootstrap_pub
-        canonical_pub="$(ssh-keygen -y -f "$KEY_FILE" 2>/dev/null || true)"
-        bootstrap_pub="$(ssh-keygen -y -f "$BOOTSTRAP_KEY_FILE" 2>/dev/null || true)"
-        [[ -n "$bootstrap_pub" ]] || die "Public Bootstrap передал нечитаемый private Deploy Key: ${BOOTSTRAP_KEY_FILE}"
-        if [[ "$canonical_pub" != "$bootstrap_pub" ]]; then
-            CANONICAL_KEY_DIFFERS_FROM_BOOTSTRAP=1
-            warn "Public Bootstrap использует другой Deploy Key, чем уже существующий canonical key. PVE Configuration не заменяет постоянный credential автоматически."
-        fi
-    fi
-
-    if [[ -f "$BOOTSTRAP_KNOWN_HOSTS" ]]; then
-        install -o root -g root -m 0644 "$BOOTSTRAP_KNOWN_HOSTS" "$KNOWN_HOSTS"
-    elif [[ ! -f "$KNOWN_HOSTS" ]]; then
+    if [[ ! -f "$KNOWN_HOSTS" ]]; then
         local tmp_hosts
         tmp_hosts="$(mktemp)"
         curl -fsSL --connect-timeout 10 --max-time 20 https://api.github.com/meta \
@@ -267,12 +247,8 @@ canonical_git() {
 
 verify_private_repo_access() {
     local refs
-    if ! refs="$(canonical_git ls-remote "$PRIVATE_REPO" "refs/heads/${PRIVATE_BRANCH}" 2>/dev/null)"; then
-        if (( CANONICAL_KEY_DIFFERS_FROM_BOOTSTRAP )); then
-            die "Canonical Deploy Key ${KEY_FILE} не даёт доступ к ${PRIVATE_REPO}, при этом Public Bootstrap использует другой ключ. Автоматическая замена постоянного ключа запрещена. Проверьте ${KEY_FILE}.pub, Deploy keys GitHub и явно выполните recovery/rotation canonical credential."
-        fi
-        die "Канонический root-only Deploy Key не даёт read-only доступ к ${PRIVATE_REPO}"
-    fi
+    refs="$(canonical_git ls-remote "$PRIVATE_REPO" "refs/heads/${PRIVATE_BRANCH}" 2>/dev/null)" \
+        || die "Канонический root-only Deploy Key не даёт read-only доступ к ${PRIVATE_REPO}"
     [[ -n "$refs" ]] \
         || die "Канонический Deploy Key работает, но в ${PRIVATE_REPO} отсутствует ожидаемая ветка ${PRIVATE_BRANCH}"
     ok "Root-only read-only доступ к приватному GitHub-репозиторию и ветке ${PRIVATE_BRANCH} подтверждён"
