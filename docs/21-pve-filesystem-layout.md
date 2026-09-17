@@ -272,28 +272,30 @@ shell = /bin/bash
 ```text
 root-wrapper
 → сам проверяет effective state текущего гостя
-→ если management.project_repo_read=false/отсутствует: ключ не открывается
+→ если management.project_repo_read=false/отсутствует: private key не открывается
 → если management.project_repo_read=true: root открывает только фиксированный github_proxmox_repo_ed25519
 → передаёт значение дочернему deploy-процессу через выделенный file descriptor
 → значение не помещается в argv/environment и не журналируется
 → после завершения процесса FD закрывается
 ```
 
+Если `management.project_repo_read=false/отсутствует`, `deploy-guest` всё равно может по SSH обнаружить ранее управляемые guest-local артефакты и показать `REMOVE`; для удаления private bytes с PVE не требуются.
+
 Это не даёт `pvedeploy` постоянного права чтения root-only файла и не создаёт интерфейс «запросить secret по имени».
 
 Секреты создаются с безопасным `umask`, не попадают в Git и не выводятся в обычные журналы. Новый секрет API-токена записывается атомарно; обычная ошибка или прерывание откатывает только новый токен, созданный текущим запуском и ещё не зафиксированный как готовый.
 
-### 5.1. SSH host key управляемых гостевых систем
+### 5.1. SSH host key управляемых гостевых систем и GitHub внутри гостя
 
-`known_hosts` для GitHub и `known_hosts` гостевых систем — разные файлы с разными владельцами.
+`known_hosts` для GitHub на PVE, SSH host keys управляемых гостей и GitHub host keys внутри конкретного гостя — разные состояния.
 
-Root-only файл:
+Root-only файл PVE:
 
 ```text
 /etc/proxmox-deployer/ssh/known_hosts
 ```
 
-используется для доступа PVE к GitHub. Гость, получивший локальную копию общего Git read-key, должен иметь собственную проверяемую запись host key GitHub; root-only `known_hosts` PVE гостю не копируется как скрытое состояние.
+используется самим PVE для доступа к GitHub.
 
 Постоянная база SSH host key управляемых VM/LXC:
 
@@ -307,9 +309,23 @@ Root-only файл:
 
 Для уже известного гостя неожиданная смена SSH host key означает остановку автоматической работы. Старый ключ не удаляется автоматически ради продолжения.
 
+Если гостю выдан `management.project_repo_read`, внутри него создаётся отдельная явная база доверия GitHub:
+
+```text
+/etc/proxmox-guest/ssh/github-proxmox-known_hosts
+```
+
+Она содержит только проверенные SSH host keys GitHub, принадлежит `root:root`, имеет режим `0644` и используется только dedicated SSH alias `github-proxmox-read` из:
+
+```text
+/etc/ssh/ssh_config.d/90-proxmox-project-repo-read.conf
+```
+
+Root-only `known_hosts` PVE не используется гостем как неявное состояние: guest-local файл материализуется и проверяется как самостоятельный управляемый артефакт Project Git READ.
+
 Подробные правила определяет [`31-deploy-guest.md`](31-deploy-guest.md).
 
-Потеря этого файла не является потерей закрытых учётных данных, но уничтожает сохранённую базу доверия к SSH host key существующих гостей. Поэтому существующие объекты после такой потери не должны молча приниматься заново без отдельного подтверждённого сценария восстановления.
+Потеря `/var/lib/pvedeploy/.ssh/known_hosts` не является потерей закрытых учётных данных, но уничтожает сохранённую базу доверия к SSH host key существующих гостей. Поэтому существующие объекты после такой потери не должны молча приниматься заново без отдельного подтверждённого сценария восстановления.
 
 ## 6. Изменяемая рабочая область
 
@@ -503,17 +519,30 @@ PVE tag `management-ssh` также не является секретом, но
 /etc/proxmox-guest/
 ├── ssh/
 │   ├── management_ed25519          # только если management.ssh_identity: true
-│   └── management_ed25519.pub
+│   ├── management_ed25519.pub
+│   └── github-proxmox-known_hosts  # только если management.project_repo_read: true
 ├── public-keys/
 │   ├── deployer.pub
 │   ├── <VMID>.pub
 │   └── management-authorized-keys
 └── credentials/
     └── github-proxmox-read          # только если management.project_repo_read: true
+
+/etc/ssh/ssh_config.d/
+└── 90-proxmox-project-repo-read.conf  # только если management.project_repo_read: true
 ```
+
+Для `management.project_repo_read=true` дополнительно существует точная управляемая Git URL rewrite-запись root, которая преобразует только:
+
+```text
+git@github.com:zsergeyru/proxmox.git
+→ git@github-proxmox-read:zsergeyru/proxmox.git
+```
+
+При переходе `management.project_repo_read` в `false`/отсутствует deploy удаляет private key, guest-local GitHub `known_hosts`, dedicated SSH config и эту точную rewrite-запись. Рабочие копии репозитория и чужие Git/SSH credentials не удаляются.
 
 Само участие гостя в массовой синхронизации обозначается в PVE tag `management-ssh`; этот marker не является файлом `/etc/proxmox-guest`.
 
 Главный принцип:
 
-> Public Bootstrap с первого запуска использует один постоянный root-only GitHub Deploy Key; временная область содержит только одноразовую копию закрытого репозитория. Основная копия исходного кода и мастер-копия общего Git read-key принадлежат `root`; `pvedeploy` не получает постоянного доступа к этому секрету. Канонический набор открытых management SSH keys является изменяемым состоянием `pvedeploy` и хранится в `/var/lib/proxmox-deployer/public-keys/`; отдельный привилегированный helper для него не нужен. Новому гостю один раз запоминается SSH host key ожидаемого адреса, после чего неожиданная смена ключа блокирует автоматическую работу. Дополнительные management identities привязаны к VMID через `<VMID>.pub`, а не к имени гостя.
+> Public Bootstrap с первого запуска использует один постоянный root-only GitHub Deploy Key; временная область содержит только одноразовую копию закрытого репозитория. Основная копия исходного кода и мастер-копия общего Git read-key принадлежат `root`; `pvedeploy` не получает постоянного доступа к этому секрету. Канонический набор открытых management SSH keys является изменяемым состоянием `pvedeploy` и хранится в `/var/lib/proxmox-deployer/public-keys/`; отдельный привилегированный helper для него не нужен. Новому гостю один раз запоминается SSH host key ожидаемого адреса, после чего неожиданная смена ключа блокирует автоматическую работу. Дополнительные management identities привязаны к VMID через `<VMID>.pub`, а не к имени гостя. Project Git READ внутри гостя имеет собственные управляемые key/known_hosts/SSH config и точную Git rewrite только для `zsergeyru/proxmox`; отключение флага удаляет только эти управляемые артефакты.
