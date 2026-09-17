@@ -17,7 +17,7 @@ deploy-guest.py
 → установить management-ssh для Debian-гостя management-контура
 → проверка SSH root private key deployer
 → management.ssh_identity, если явно запрошен
-→ management.project_repo_read, если явно запрошен
+→ management.project_repo_read согласно desired state
 → явно запрошенный Guest Bootstrap v1
 → финальная проверка
 → передача управления Ansible
@@ -26,7 +26,7 @@ deploy-guest.py
 
 Ключевое правило:
 
-> Административный SSH — часть готовности гостевой системы к управлению. Генерация собственной management identity, передача project Git credential и Guest Bootstrap начинаются только после проверенного `root SSH` со стороны deployer.
+> Административный SSH — часть готовности гостевой системы к управлению. Генерация собственной management identity, управление Project Git READ и Guest Bootstrap начинаются только после проверенного `root SSH` со стороны deployer.
 
 `bootstrap` является действующим машинным интерфейсом schema v6. `management.ssh_identity` и `management.project_repo_read` приняты как целевые интерфейсы внутри единого раздела `management`, но ещё не реализованы в действующей schema v6. Их реализация должна следовать зафиксированным контрактам без введения универсального secret API или специальных полей для AI/Ansible. `provisioning` остаётся будущим интерфейсом.
 
@@ -45,7 +45,7 @@ deploy-guest.py
 → проверить доступ private key deployer
 → при management.ssh_identity=true обеспечить собственную keypair гостя и зарегистрировать только .pub на PVE
 → после нового/изменённого public key вызвать sync-management-keys
-→ при management.project_repo_read=true materialize фиксированный общий Git READ credential
+→ привести management.project_repo_read к desired state: APPLY/NO CHANGE/REMOVE
 → проверить/применить явно запрошенные bootstrap capabilities
 → проверить результат каждого управляемого шага
 → завершить deploy только после полной приёмки
@@ -81,7 +81,7 @@ root:22
 `deploy-guest` не создаёт и не ротирует эту пару. PVE Configuration регистрирует её открытую часть как:
 
 ```text
-/etc/proxmox-deployer/public-keys/deployer.pub
+/var/lib/proxmox-deployer/public-keys/deployer.pub
 ```
 
 Она обязательно входит в `management-authorized-keys`, поэтому deployer должен иметь SSH-доступ к любой новой управляемой Debian VM/LXC независимо от того, создана она deployer или AI.
@@ -155,7 +155,7 @@ management:
 → private key оставить только в госте
 → получить наружу только .pub
 → проверить fingerprint
-→ зарегистрировать на PVE как <VMID>-<name>.pub
+→ зарегистрировать на PVE как <VMID>.pub
 → вызвать sync-management-keys
 ```
 
@@ -179,13 +179,13 @@ bootstrap:
 Если блока нет:
 
 ```text
-PVE state → SSH root → optional management.ssh_identity → optional management.project_repo_read → финальная проверка → SUCCESS
+PVE state → SSH root → optional management.ssh_identity → management.project_repo_read desired state → финальная проверка → SUCCESS
 ```
 
 Если блок есть:
 
 ```text
-PVE state → SSH root → optional management.ssh_identity → optional management.project_repo_read → Bootstrap PLAN/APPLY → финальная проверка → SUCCESS
+PVE state → SSH root → optional management.ssh_identity → management.project_repo_read desired state → Bootstrap PLAN/APPLY → финальная проверка → SUCCESS
 ```
 
 Разрешённый набор v1:
@@ -365,7 +365,7 @@ git=true, management.project_repo_read=false
 → Git client есть, credential проекта не выдаётся
 
 management.project_repo_read=true
-→ выдаётся фиксированный общий read-only credential проекта
+→ обеспечивается фиксированный общий read-only credential проекта и его точная SSH/Git-настройка
 → наличие Git client обеспечивается отдельно соответствующей системой/Bootstrap
 ```
 
@@ -388,19 +388,44 @@ management:
 
 Root-wrapper передаёт содержимое фиксированного read-key `deploy-guest` только на время конкретного APPLY через отдельный file descriptor. `pvedeploy` не получает постоянного доступа к исходному root-only файлу.
 
-Стандартная локальная копия:
+Стандартные управляемые артефакты в госте:
 
 ```text
 /etc/proxmox-guest/credentials/github-proxmox-read
+/etc/proxmox-guest/ssh/github-proxmox-known_hosts
+/etc/ssh/ssh_config.d/90-proxmox-project-repo-read.conf
 ```
 
-с `root:root 0600`.
+Права:
 
-Это **не** ключ административного входа в гостя и он не добавляется в `authorized_keys` или management public-key registry.
+```text
+github-proxmox-read                         root:root 0600
+github-proxmox-known_hosts                  root:root 0644
+90-proxmox-project-repo-read.conf           root:root 0644
+```
 
-Read-only check подтверждает наличие, владельца/права и ожидаемый fingerprint без вывода private key. Если Git client уже доступен, final verify может дополнительно выполнить read-only проверку доступа к `git@github.com:zsergeyru/proxmox.git`.
+SSH config содержит специальный alias `github-proxmox-read`, который использует только этот private key, отдельный guest-local `known_hosts`, `StrictHostKeyChecking yes` и `BatchMode yes`.
 
-Если credential уже соответствует — `NO CHANGE`. Обычный deploy не удаляет его автоматически только потому, что поле позже исчезло: отзыв общего credential требует отдельной явной операции.
+Дополнительно deploy управляет одной точной Git URL rewrite-записью:
+
+```text
+git@github.com:zsergeyru/proxmox.git
+→ git@github-proxmox-read:zsergeyru/proxmox.git
+```
+
+Поэтому обычный root `git clone/fetch` по каноническому project URL автоматически выбирает этот ключ, но другие GitHub repositories не получают его.
+
+Guest-local `known_hosts` содержит только проверенные SSH host keys GitHub и является явным управляемым состоянием этого доступа. Строгая проверка host key не отключается.
+
+Read-only check при `true` подтверждает наличие, владельца/права и ожидаемый fingerprint private key без вывода его содержимого, валидность GitHub host keys, SSH alias и точной URL rewrite. Если Git client доступен, final verify выполняет read-only `git ls-remote git@github.com:zsergeyru/proxmox.git`.
+
+Если всё уже соответствует — `NO CHANGE`.
+
+Если credential/config имеет неожиданный fingerprint или неоднозначно изменённое содержимое — `BLOCKED / STOP`; обычный deploy не перезаписывает его вслепую.
+
+Если `management.project_repo_read` позже становится `false` или поле исчезает, PLAN показывает `REMOVE`, а `--apply` удаляет только управляемые артефакты этого capability: private key, guest-local GitHub `known_hosts`, dedicated SSH config и точную Git URL rewrite-запись.
+
+Уже клонированные рабочие копии репозитория и любые другие пользовательские Git/SSH credentials при этом не удаляются и не меняются. Если управляемый файл был неожиданно изменён, удаление блокируется до явного разбора.
 
 Если AI требуется запись в GitHub, write credential является отдельным контуром.
 
@@ -443,9 +468,9 @@ management:
 
 ## 16. Ошибка management identity, Bootstrap или Project Git access
 
-`management.ssh_identity`, Guest Bootstrap и явно запрошенный `management.project_repo_read` являются частью полной приёмки deploy.
+`management.ssh_identity`, Guest Bootstrap и desired state `management.project_repo_read` являются частью полной приёмки deploy.
 
-Если собственная keypair не создана/не проверена, public key не зарегистрирован, обязательный `sync-management-keys` после новой регистрации не завершился, Git credential не прошёл проверку или capability завершилась ошибкой:
+Если собственная keypair не создана/не проверена, public key не зарегистрирован, обязательный `sync-management-keys` после новой регистрации не завершился, Project Git READ не приведён к требуемому состоянию или capability завершилась ошибкой:
 
 ```text
 → deploy считается FAILED
@@ -469,7 +494,7 @@ SSH root verified
 +
 management.ssh_identity verified and public key synced, если запрошен
 +
-management.project_repo_read verified, если запрошен
+management.project_repo_read desired state verified
 +
 все запрошенные bootstrap capabilities verified
 +
@@ -537,9 +562,9 @@ deploy-guest 311 --apply
 → запустить
 → проверить SSH root private key deployer
 → создать/проверить собственную management keypair 311
-→ зарегистрировать 311-dev-services.pub на PVE
+→ зарегистрировать 311.pub на PVE
 → sync-management-keys
-→ materialize общий Git READ credential
+→ materialize общий Git READ credential + GitHub trust + точную SSH/Git-настройку
 → base
 → git
 → docker
@@ -559,7 +584,7 @@ deploy-guest 311 --apply
 ├── PVE tag management-ssh
 ├── собственный management private key
 ├── локальная копия общего management public-key registry
-├── общий credential READ для zsergeyru/proxmox
+├── общий credential READ для zsergeyru/proxmox + строгая GitHub host-key проверка
 ├── Git
 ├── Docker Engine + Compose plugin
 └── Ansible controller / EE
@@ -598,7 +623,7 @@ scripts/
     └── ansible_controller.py
 ```
 
-Начальный management public-key set, PVE tag `management-ssh`, host-key trust, проверка SSH, обработка `management.ssh_identity`, регистрация `.pub` и материализация фиксированного `management.project_repo_read` находятся в ядре deploy/access, а не в `bootstrap/base.py`, `bootstrap/git.py` или `ansible_controller.py`.
+Начальный management public-key set, PVE tag `management-ssh`, host-key trust, проверка SSH, обработка `management.ssh_identity`, регистрация `.pub` и управление фиксированным `management.project_repo_read` находятся в ядре deploy/access, а не в `bootstrap/base.py`, `bootstrap/git.py` или `ansible_controller.py`.
 
 Массовое распространение public keys остаётся отдельной командой `sync-management-keys`, даже если `deploy-guest` вызывает её после появления нового ключа.
 
@@ -616,6 +641,8 @@ scripts/
 - общий GitHub Deploy Key используется только как read-only credential `zsergeyru/proxmox`;
 - мастер-копия общего Git read-key на PVE остаётся root-only;
 - `pvedeploy` получает содержимое read-key только через временный FD конкретного запуска с `management.project_repo_read=true`;
+- guest-local Project Git READ использует отдельный SSH alias, отдельный `known_hosts`, строгую проверку GitHub host key и точную URL rewrite только для `zsergeyru/proxmox`;
+- при `management.project_repo_read=false` удаляются только управляемые артефакты этого доступа, но не рабочие копии репозитория и не чужие Git/SSH credentials;
 - общий Git read-key не используется как SSH-ключ гостя или PVE;
 - возможный AI write credential в GitHub остаётся отдельным;
 - capability handlers не печатают секреты и полный environment;
@@ -650,7 +677,7 @@ deploy-guest.py
    ├─ verified root SSH deployer
    ├─ management.ssh_identity → guest-local private key + PVE public registry
    ├─ при новом .pub → sync-management-keys
-   ├─ management.project_repo_read → standard local credential
+   ├─ management.project_repo_read → APPLY / NO CHANGE / REMOVE управляемого Project Git READ
    ├─ Guest Bootstrap v1
    │    base → git → docker → ansible_controller
    └─ final verification
@@ -662,4 +689,4 @@ deploy-guest.py
      application services
 ```
 
-Главное правило: **Guest Bootstrap v1 доводит новую Debian VM/LXC от проверенного SSH до минимально требуемой инфраструктурной готовности; `management` является единым manifest-разделом административного управления, но собственная SSH identity и общий Git read-only credential остаются разными credentials с разным lifecycle; всё прикладное и долговременное управление остаётся Ansible.**
+Главное правило: **Guest Bootstrap v1 доводит новую Debian VM/LXC от проверенного SSH до минимально требуемой инфраструктурной готовности; `management` является единым manifest-разделом административного управления, но собственная SSH identity и общий Git read-only credential остаются разными credentials с разным lifecycle; `management.project_repo_read` — это полноценный desired state: при `true` обеспечиваются key + GitHub trust + точная SSH/Git-настройка, при `false` удаляются только эти управляемые артефакты; всё прикладное и долговременное управление остаётся Ansible.**
