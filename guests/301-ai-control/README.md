@@ -15,16 +15,18 @@
 ├── mcp/
 │   └── proximo/
 ├── ssh/
-│   ├── ai_control_ed25519(.pub)
-│   └── github_proxmox_repo_ed25519(.pub)
+│   └── ai_control_ed25519(.pub)
 ├── repos/
 │   └── proxmox/
 └── state/
+
+/etc/proxmox-guest/credentials/
+└── github-proxmox-read
 ```
 
 Ключевое правило:
 
-> Конкретный AI-агент устанавливается в `/opt/ai-control/agents/<agent>/`. Docker, Proximo, SSH-ключи и рабочая копия Git являются общими компонентами `301` и не принадлежат Hermes.
+> Конкретный AI-агент устанавливается в `/opt/ai-control/agents/<agent>/`. Docker, Proximo, административный SSH-ключ AI и рабочая копия Git являются общими компонентами `301` и не принадлежат Hermes. Read-only credential проектного Git выдаётся инфраструктурой отдельно и не является собственным Deploy Key 301.
 
 ## Целевая последовательность
 
@@ -35,7 +37,8 @@
    PVE → Full Clone текущего шаблона 9000 → SSH root по pve_guest_ed25519
 
 2. общая платформа внутри 301
-   Docker + общие инструменты + Proximo + отдельные SSH-ключи
+   Docker + общие инструменты + Proximo + отдельный SSH-ключ AI
+   + общий project Git READ credential
 
 3. установка конкретного агента
    Hermes или другой агент → интерфейс, интеграции и конфигурация
@@ -56,6 +59,15 @@
 - `protection=0`, `onboot=1` согласно манифесту;
 - первый запуск, работа QGA/Cloud-Init и SSH `root`.
 
+После реализации принятого `access.project_repo_read` целевой manifest 301 должен явно запрашивать:
+
+```yaml
+access:
+  project_repo_read: true
+```
+
+До реализации этого поля в schema v6 добавлять его в действующий `guest.yaml` нельзя.
+
 Точная версия и параметры шаблона не дублируются здесь и определяются [`../../templates/debian13/build-policy.md`](../../templates/debian13/build-policy.md).
 
 Учётная запись AI в PVE (`ai-agent@pve!infra`) создаётся PVE Configuration по общей политике ACL и затем используется Proximo внутри `301`.
@@ -71,7 +83,7 @@
 - Python/venv/pip;
 - Proximo в `/opt/ai-control/mcp/proximo`;
 - отдельный SSH-ключ AI для гостевых систем;
-- отдельный GitHub-ключ.
+- рабочую копию `zsergeyru/proxmox`, читаемую общим read-only credential.
 
 После этого этапа `/opt/ai-control/agents/` может оставаться пустым.
 
@@ -83,7 +95,7 @@
 /opt/ai-control/agents/<agent>/
 ```
 
-Установщик агента использует уже подготовленные общие Proximo и SSH-ключи, а не создаёт их заново.
+Установщик агента использует уже подготовленные общие Proximo, административный SSH-ключ AI и рабочую копию проекта, а не создаёт их заново.
 
 ## Proximo
 
@@ -124,14 +136,13 @@ AI-агент
 
 Открытый ключ AI не привязан автоматически к `managed`: пул регулирует операции PVE, а наличие ключа — прямой SSH внутрь гостевой системы. Если SSH-доступ AI к конкретной машине надо запретить, удаляется только открытый ключ AI.
 
-Отдельный GitHub Deploy Key:
+Общий Git read-key:
 
 ```text
-/opt/ai-control/ssh/github_proxmox_repo_ed25519
-/opt/ai-control/ssh/github_proxmox_repo_ed25519.pub
+/etc/proxmox-guest/credentials/github-proxmox-read
 ```
 
-используется только для закрытого Git-репозитория и не заменяет SSH-ключ управления гостевыми системами.
+не является AI SSH-ключом, не добавляется в `authorized_keys` и используется только для чтения `zsergeyru/proxmox`.
 
 ## Создание гостевой системы самим AI
 
@@ -150,9 +161,19 @@ AI-агент
 
 Если AI Control располагает зарегистрированной открытой частью ключа PVE, в начальный набор также добавляется `pve_guest_ed25519.pub`. Закрытый ключ PVE в `301` не копируется.
 
+`project_repo_read` для гостя не выводится автоматически из факта создания его AI-агентом или членства в `managed`.
+
 ## Git
 
-GitHub-ключ создаётся отдельно от инфраструктурного SSH-ключа. После регистрации Deploy Key закрытый репозиторий клонируется в:
+Для чтения закрытого проектного репозитория 301 использует **общий** GitHub Deploy Key только для чтения, а не собственный отдельный read-key.
+
+Мастер-копия ключа хранится root-only на PVE. При `access.project_repo_read: true` deploy-контур материализует локальную копию:
+
+```text
+/etc/proxmox-guest/credentials/github-proxmox-read
+```
+
+После этого закрытый репозиторий клонируется/обновляется в:
 
 ```text
 /opt/ai-control/repos/proxmox
@@ -160,11 +181,14 @@ GitHub-ключ создаётся отдельно от инфраструкт�
 
 Закрытые ключи не хранятся в Git.
 
+Если AI должен выполнять `git push`, это отдельный будущий write credential. Общий `github-proxmox-read` всегда остаётся read-only.
+
 ## Механизмы управления
 
 ```text
 Proximo MCP        → жизненный цикл, конфигурация, снимки и резервные копии PVE в разрешённой зоне
 прямой SSH AI      → произвольные действия внутри гостевой ОС
+Project Git READ   → общий read-only credential для clone/fetch
 Ansible на 311     → повторяемая настройка внутри гостевой ОС
 ```
 
@@ -172,4 +196,4 @@ Ansible и Semaphore не размещаются внутри `301`.
 
 ## Готовность
 
-Полный перечень приёмочных проверок не дублируется здесь. До замены `320` необходимо пройти инструкцию [`../../docs/51-ai-control-bootstrap.md`](../../docs/51-ai-control-bootstrap.md), включая проверку Proximo, `managed`, независимости SSH-ключей, Ansible и резервного копирования.
+Полный перечень приёмочных проверок не дублируется здесь. До замены `320` необходимо пройти инструкцию [`../../docs/51-ai-control-bootstrap.md`](../../docs/51-ai-control-bootstrap.md), включая проверку Proximo, `managed`, независимости административных SSH-ключей, общего read-only Git access, Ansible и резервного копирования.
