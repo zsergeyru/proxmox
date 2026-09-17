@@ -13,7 +13,7 @@
 - успешно настроенный PVE-хост;
 - текущий шаблон `9000`;
 - SSH identity deployer `pve_guest_ed25519`;
-- канонический public-key registry на PVE как минимум с `deployer.pub`;
+- канонический public-key registry `/var/lib/proxmox-deployer/public-keys/` как минимум с `deployer.pub`;
 - `deployer@pve!host-deploy` для развёртывания со стороны PVE;
 - `ai-agent@pve!infra` и ACL, подготовленные PVE Configuration;
 - закрытый репозиторий проекта доступен со стороны PVE через общий GitHub Deploy Key только для чтения;
@@ -46,9 +46,11 @@ management:
 → установить PVE tag management-ssh
 → запустить
 → дождаться QGA/Cloud-Init
+→ для ожидаемого адреса один раз сохранить SSH host key новой VM
+→ повторить подключение уже со строгой проверкой сохранённого ключа
 → проверить SSH root private key deployer
 → при management.ssh_identity=true создать/проверить собственную management keypair 301
-→ зарегистрировать только .pub на PVE
+→ зарегистрировать только .pub как /var/lib/proxmox-deployer/public-keys/301.pub
 → sync-management-keys
 → при management.project_repo_read=true материализовать общий Git READ credential
 ```
@@ -72,7 +74,8 @@ VM запущена
 QEMU Guest Agent доступен
 Cloud-Init завершён
 PVE tag management-ssh установлен
-SSH root private key deployer работает
+SSH host key сохранён для ожидаемого адреса
+SSH root private key deployer работает со строгой проверкой host key
 имя хоста и сеть соответствуют требуемому состоянию
 вход по SSH с паролем неожиданно не включён
 ```
@@ -84,7 +87,11 @@ SSH root private key deployer работает
 /etc/proxmox-guest/ssh/management_ed25519.pub
 ```
 
-и убедиться, что private key существует только внутри 301, а соответствующая `.pub` зарегистрирована в PVE public-key registry.
+и убедиться, что private key существует только внутри 301, а соответствующая `.pub` зарегистрирована на PVE как:
+
+```text
+/var/lib/proxmox-deployer/public-keys/301.pub
+```
 
 После успешного `sync-management-keys` в 301 должна быть актуальная локальная копия:
 
@@ -142,9 +149,11 @@ private
 public
 → /etc/proxmox-guest/ssh/management_ed25519.pub
 → deployer забирает только открытую часть
-→ регистрирует как 301-ai-control.pub на PVE
+→ регистрирует как /var/lib/proxmox-deployer/public-keys/301.pub
 → sync-management-keys распространяет её всем участвующим Debian-гостям с tag management-ssh
 ```
+
+Имя файла связано только с VMID. Переименование `301` не меняет identity и не переименовывает `301.pub`.
 
 Не использовать эту пару как GitHub credential.
 
@@ -255,9 +264,9 @@ AI-агент
 5. AI не получил широкого доступа уровня PVE-хоста;
 6. прямой SSH AI работает private key 301;
 7. прямой SSH deployer также работает, потому что новая машина получила `deployer.pub`;
-8. ручной `sync-management-keys` на PVE обнаруживает этот guest по tag и может обновить его без отдельной регистрации доступа.
+8. ручной `sync-management-keys` на PVE обнаруживает этот guest по tag, при первом подключении сохраняет SSH host key ожидаемого адреса и затем может обновлять его со строгой проверкой этого ключа.
 
-AI не вызывает `deploy-guest` на PVE и не пишет в `/etc/proxmox-deployer`.
+AI не вызывает `deploy-guest` на PVE и не пишет в файловую систему PVE.
 
 ## 10. Проверка независимости ACL PVE и management
 
@@ -291,14 +300,14 @@ management:
 ```text
 311 создаёт собственную pair внутри себя
 → deploy-guest забирает только 311 .pub
-→ регистрирует её на PVE
+→ регистрирует её как /var/lib/proxmox-deployer/public-keys/311.pub
 → sync-management-keys
 → 301 получает обновлённый management-authorized-keys
 ```
 
 301 не подключается к 311 для получения `.pub` и не подключается к PVE для записи registry.
 
-Проверить, что локальный каталог 301 теперь содержит public key 311, а уже существующие Debian-гости с tag `management-ssh` получили его в управляемый блок `authorized_keys`.
+Проверить, что локальный каталог 301 теперь содержит `311.pub`, а уже существующие Debian-гости с tag `management-ssh` получили его в управляемый блок `authorized_keys`.
 
 ## 12. Передача повторяемой настройки Ansible
 
@@ -325,6 +334,8 @@ management:
 - локальный management public-key catalog считать воспроизводимым через `sync-management-keys`;
 - выполнить практическую проверку восстановления согласно [`27-backup-and-disaster-recovery-runbook.md`](27-backup-and-disaster-recovery-runbook.md).
 
+Удаление 301 в будущем требует также удалить `/var/lib/proxmox-deployer/public-keys/301.pub` и выполнить `sync-management-keys`. Если VMID 301 затем используется для нового объекта, новая машина должна получить новую management identity; старый ключ не переиспользуется.
+
 ## 14. Приёмочные проверки
 
 `301-ai-control` готов к замене устаревающего `320`, когда подтверждено:
@@ -333,9 +344,10 @@ management:
 301 создаётся со стороны PVE без зависимости от работающего 301
 QGA и Cloud-Init работают
 PVE tag management-ssh установлен
+SSH host key 301 сохранён для ожидаемого адреса и строго проверяется
 SSH root со стороны deployer работает
 management.ssh_identity 301 создана внутри гостя и private не покидал 301
-301 public key зарегистрирован на PVE
+/var/lib/proxmox-deployer/public-keys/301.pub зарегистрирован на PVE
 sync-management-keys доставил полный public catalog в 301
 management.project_repo_read materialized после реализации interface
 рабочая копия проекта работает
@@ -365,6 +377,6 @@ Ansible/311 использует отдельный management private key
 повторить только безопасный идемпотентный этап
 ```
 
-Не генерировать новый management private key молча при неоднозначном состоянии существующей пары.
+Не генерировать новый management private key молча при неоднозначном состоянии существующей пары. Не удалять сохранённый SSH host key только ради того, чтобы принять неожиданно изменившийся ключ сервера.
 
-Главное правило: **301 получает собственную management identity через `management.ssh_identity`, получает полный набор открытых инфраструктурных ключей только в направлении PVE → guest через `sync-management-keys`, имеет PVE tag `management-ssh` и использует этот набор вместе с тем же tag при создании новых Debian VM/LXC; SSH-доступ AI к PVE для этой схемы не нужен.**
+Главное правило: **301 получает собственную management identity через `management.ssh_identity`, её открытая часть регистрируется как `/var/lib/proxmox-deployer/public-keys/301.pub`, полный набор открытых инфраструктурных ключей идёт только в направлении PVE → guest через `sync-management-keys`, а первое подключение к новой VM один раз сохраняет SSH host key ожидаемого адреса. SSH-доступ AI к PVE для этой схемы не нужен.**
