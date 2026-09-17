@@ -33,12 +33,10 @@ scripts/guest_config.py
 Исходный манифест гостевой системы и итоговое состояние:
 
 ```yaml
-schema_version: 6
+schema_version: 7
 ```
 
-Версия 6 вводит действующий машинный интерфейс `bootstrap.capabilities`.
-
-Отдельно приняты два целевых расширения внутри уже существующего раздела `management`, которые ещё требуют реализации schemas/resolver/validator:
+Версия 6 ввела машинный интерфейс `bootstrap.capabilities`. Версия 7 добавляет в действующий машинный контракт два individual-only boolean-поля внутри уже существующего раздела `management`:
 
 ```yaml
 management:
@@ -74,7 +72,7 @@ management.project_repo_read
 → должен ли guest иметь фиксированный исходящий read-only доступ к project Git
 ```
 
-На момент фиксации этих решений `management.ssh_identity` и `management.project_repo_read` **ещё не реализованы** в действующей schema v6 и не должны добавляться в реальные `guest.yaml` до соответствующего изменения schemas/resolver/validator/tests. Документация фиксирует целевой контракт заранее, чтобы реализация не вводила другой интерфейс.
+В schema v7 `management.ssh_identity` и `management.project_repo_read` уже поддерживаются `schemas/guest.schema.yaml`, `schemas/guest-effective.schema.yaml`, общим resolver `scripts/guest_config.py` и валидатором репозитория. Их runtime-применение остаётся обязанностью будущего `deploy-guest`, но сами поля уже являются допустимым и проверяемым desired state в рабочих `guest.yaml`.
 
 Центральные общие настройки:
 
@@ -169,9 +167,17 @@ profiles:
 - `management.ssh_identity` задаётся только явно конкретному гостю и не наследуется из defaults/profile;
 - `management.project_repo_read` также задаётся только явно конкретному гостю и не наследуется из defaults/profile.
 
-Один общий change не должен внезапно превратить все VM/LXC в владельцев собственных administrative private keys или раздать всем общий Git credential.
+`schemas/guest-defaults.schema.yaml` не разрешает эти два individual-only поля в defaults/profile, а resolver дополнительно проверяет это правило. Один общий change не должен внезапно превратить все VM/LXC в владельцев собственных administrative private keys или раздать всем общий Git credential.
 
-Для individual-only boolean-поля `management.project_repo_read` отсутствие поля в effective guest contract эквивалентно desired state `false`, а не «оставить как было». Поэтому ранее управляемый Project Git READ при следующем APPLY планируется к удалению только в части управляемых артефактов этого capability.
+В effective state schema v7 оба individual-only поля всегда нормализуются в boolean:
+
+```text
+поле явно true  → true
+поле явно false → false
+поле отсутствует → false
+```
+
+Поэтому отсутствие `management.project_repo_read` означает desired state «управляемого Project Git READ нет», а не «оставить как было». Для `management.ssh_identity` отсутствие поля аналогично означает, что собственная исходящая management identity этому гостю не запрошена; её lifecycle и явная ротация/отзыв определяются профильной спецификацией.
 
 ## Guest Bootstrap v1
 
@@ -230,6 +236,8 @@ Guest Bootstrap выполняется только после успешног�
 boot:
   start_after_deploy: true
 ```
+
+То же требование действует, если `management.ssh_identity=true` или `management.project_repo_read=true`: эти действия выполняются только после проверенного SSH root.
 
 Bootstrap v1 не является универсальным механизмом выполнения команд. В `guest.yaml` запрещено вводить произвольные `packages`, shell-команды, URL установщиков, пароли, токены или закрытые ключи. Точная граница capabilities определена в [`33-guest-bootstrap-and-provisioning.md`](33-guest-bootstrap-and-provisioning.md).
 
@@ -310,7 +318,7 @@ git@github.com:zsergeyru/proxmox.git
 
 ## Собственная management SSH identity гостя
 
-Для гостя, которому нужен собственный private key для исходящего административного SSH к другим управляемым Debian-гостям, принят один целевой флаг внутри `management`:
+Для гостя, которому нужен собственный private key для исходящего административного SSH к другим управляемым Debian-гостям, schema v7 предоставляет individual-only флаг внутри `management`:
 
 ```yaml
 management:
@@ -481,7 +489,7 @@ network:
 Обычный deployable-гость без Bootstrap:
 
 ```yaml
-schema_version: 6
+schema_version: 7
 vmid: 321
 name: app-services
 profile: docker-lxc
@@ -499,7 +507,7 @@ resources:
     size_gb: 24
 ```
 
-`311-dev-services` дополнительно явно включает Bootstrap. После реализации целевых management interfaces для управляющего Ansible-гостя ожидается:
+`311-dev-services` дополнительно явно включает management-контракт и Bootstrap:
 
 ```yaml
 management:
@@ -514,7 +522,7 @@ bootstrap:
     ansible_controller: true
 ```
 
-Для `301-ai-control` после реализации целевых interfaces также требуется собственная management identity и read-only доступ к проекту:
+`301-ai-control` также явно требует собственную management identity и read-only доступ к проекту:
 
 ```yaml
 management:
@@ -540,14 +548,14 @@ deployable: true
 
 Поэтому `state: planned` вместе с `deployable: true` разрешает создание. `legacy` не означает удаление.
 
-`deployable: false` не получает параметры развёртывания автоматически и может описывать наблюдаемый или зарезервированный объект. Такой объект не может содержать `bootstrap`. До реализации `management.ssh_identity` и `management.project_repo_read` schemas их ограничения должны быть определены вместе с соответствующим изменением schemas/resolver.
+`deployable: false` не получает параметры развёртывания автоматически и может описывать наблюдаемый или зарезервированный объект. Такой объект не может содержать `bootstrap`, `management.ssh_identity` или `management.project_repo_read`: individual-only deploy-контракт разрешён только для `deployable: true`.
 
 ## Зарезервированные и наблюдаемые манифесты
 
 Пример:
 
 ```yaml
-schema_version: 6
+schema_version: 7
 vmid: 501
 name: frigate
 type: undecided
@@ -598,13 +606,13 @@ python scripts/validate_repo.py
 
 Он проверяет исходные схемы, `defaults.yaml`, профили, структуру каталогов, конфликты VMID/IP, секретоподобные поля, ограничения VM/LXC и итоговое состояние, построенное через `scripts/guest_config.py`.
 
-Семантика Bootstrap также проверяется общим resolver, которым пользуются validator и будущий `deploy-guest`. Второй набор правил Bootstrap в `deploy-guest.py` создавать нельзя.
+Семантика Bootstrap и individual-only management flags проверяется общим resolver, которым пользуются validator и будущий `deploy-guest`. Второй набор этих правил в `deploy-guest.py` создавать нельзя.
 
-Когда `management.project_repo_read` будет реализован, schemas/resolver/validator должны принять только boolean-поле `project_repo_read` внутри `management`; `true` означает desired state «доступ есть», `false`/отсутствие — desired state «управляемого доступа нет»; произвольные имена credentials, секретные значения и пути должны оставаться запрещены.
+Для `management.project_repo_read` schema v7 принимает только boolean-поле внутри `management`; `true` означает desired state «доступ есть», `false`/отсутствие — desired state «управляемого доступа нет». Произвольные имена credentials, секретные значения и пути остаются запрещены.
 
-Когда `management.ssh_identity` будет реализован, schemas/resolver/validator должны принять только boolean-поле `ssh_identity` внутри `management` и не вводить рядом произвольные имена private key, пути, роли или VMID-получатели. Точный смысл поля уже зафиксирован в [`28-management-ssh-keys.md`](28-management-ssh-keys.md).
+Для `management.ssh_identity` schema v7 принимает только boolean-поле внутри `management` и не вводит рядом произвольные имена private key, пути, роли или VMID-получатели. Точный lifecycle поля зафиксирован в [`28-management-ssh-keys.md`](28-management-ssh-keys.md).
 
-Schemas/defaults также должны запрещать наследование `management.ssh_identity` и `management.project_repo_read` из `defaults.yaml` или profile, сохраняя возможность наследовать только базовый `management.ssh`.
+`schemas/guest-defaults.schema.yaml` запрещает наследование `management.ssh_identity` и `management.project_repo_read` из `defaults.yaml` или profile, сохраняя возможность наследовать только базовый `management.ssh`. Resolver повторно контролирует это правило и нормализует отсутствующие individual-only flags в `false` в effective state.
 
 ## Git как основной источник
 
