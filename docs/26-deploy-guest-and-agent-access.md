@@ -33,6 +33,8 @@ known_hosts управляемых гостей
 
 Это не учётная запись API Proxmox и не root на PVE.
 
+Канонический public-key registry является изменяемым состоянием deploy-контура и принадлежит `pvedeploy`. Для добавления и удаления открытых management keys отдельный привилегированный helper не нужен.
+
 ### `deployer@pve!host-deploy`
 
 Это PVE API identity, от имени которой `deploy-guest.py` управляет VM/LXC.
@@ -80,18 +82,24 @@ Project Git READ
 
 Private key остаётся на PVE. Public часть входит в канонический management public-key registry.
 
+Проект вводится на новом PVE-хосте, поэтому отдельная миграция старой deployer identity сейчас не требуется. Если пары ещё нет, PVE Configuration создаёт её по текущей схеме. После первого создания эта пара считается постоянной и не заменяется автоматически при обычных повторных запусках.
+
 ## 4. Канонический management public-key registry
 
 На PVE:
 
 ```text
-/etc/proxmox-deployer/public-keys/
+/var/lib/proxmox-deployer/public-keys/
 ├── deployer.pub
-├── <VMID>-<name>.pub
+├── <VMID>.pub
 └── management-authorized-keys
 ```
 
 Там только открытые SSH-ключи. Private keys и Git credentials туда не попадают.
+
+Каталог является постоянным изменяемым состоянием deploy-контура и принадлежит `pvedeploy:pvedeploy`. Это сознательное решение: `pvedeploy` уже обладает штатным административным SSH-доступом к управляемым гостям через deployer identity, поэтому root-only каталог открытых ключей не создавал бы отдельной полезной границы безопасности, но потребовал бы лишнего привилегированного посредника.
+
+Имя файла управляющей identity зависит только от VMID. Переименование гостя не переименовывает `.pub` и не создаёт новую identity.
 
 Если конкретному управляющему гостю нужна собственная SSH identity, целевой manifest содержит:
 
@@ -132,7 +140,7 @@ management-ssh
 
 `deploy-guest` вызывает sync после регистрации нового/изменённого public key. Оператор также может запускать sync вручную.
 
-Наличие `management-ssh` является необходимым условием участия, но не отменяет fail-closed проверки типа объекта, SSH host key и ожидаемого management-контракта перед записью.
+Наличие `management-ssh` является необходимым условием участия, но не отменяет проверку типа объекта, ожидаемого адреса, сохранённого SSH-ключа сервера и management-контракта перед записью.
 
 ## 6. Почему AI не нужен доступ к PVE для ключей
 
@@ -144,7 +152,7 @@ PVE canonical registry
 → 301 AI Control
 ```
 
-AI не пишет public key в `/etc/proxmox-deployer` и не подключается к PVE по SSH.
+AI не пишет public key в файловую систему PVE и не подключается к PVE по SSH.
 
 Когда появляется, например, management key 311:
 
@@ -152,7 +160,7 @@ AI не пишет public key в `/etc/proxmox-deployer` и не подключ�
 deploy-guest 311
 → private key создаётся внутри 311
 → deployer получает только 311 .pub
-→ PVE registry обновляется
+→ /var/lib/proxmox-deployer/public-keys/311.pub обновляется
 → sync-management-keys
 → 301 получает новый public key 311
 ```
@@ -169,11 +177,15 @@ deploy-guest
 → передаёт весь набор через Cloud-Init/LXC ssh-public-keys
 → ставит PVE tag management-ssh
 → запускает guest
+→ при первом SSH-подключении запоминает SSH-ключ сервера для ожидаемого адреса
+→ повторно подключается уже со строгой проверкой сохранённого ключа
 → проверяет root SSH private key deployer
 → выполняет остальные явно запрошенные шаги
 ```
 
 Поэтому новая машина сразу доступна всем уже зарегистрированным management identities и однозначно входит в область последующего `sync-management-keys`.
+
+Для уже известного гостя неожиданная смена SSH-ключа сервера означает остановку автоматической работы. Старая запись не удаляется автоматически.
 
 ## 8. Как AI создаёт новую Debian VM/LXC
 
@@ -196,6 +208,8 @@ AI
 ```
 
 Ключ deployer обязательно присутствует в наборе, поэтому PVE-side `sync-management-keys` сможет работать и с AI-created машиной.
+
+При первом PVE-side SSH-подключении к такой новой машине её SSH-ключ сервера принимается и сохраняется для ожидаемого адреса в доверенной домашней сети. После этого действует строгая проверка сохранённого ключа.
 
 AI штатно не вызывает `/usr/local/sbin/deploy-guest` на PVE.
 
@@ -259,7 +273,22 @@ sync-management-keys
 → массовое распространение только public management keys
 ```
 
-## 11. Где искать точные правила
+## 11. Жизненный цикл management identity
+
+Для собственной management identity гостя действует простой контракт:
+
+```text
+первое создание VM/LXC     → создать пару и зарегистрировать <VMID>.pub
+повторный deploy           → сохранить существующую пару
+переименование гостя       → ничего с ключом не менять
+удаление гостя             → удалить <VMID>.pub и синхронизировать общий набор
+новый гость с тем же VMID  → создать новую identity, старый ключ не переиспользовать
+ротация                    → только отдельным явным действием
+```
+
+Поскольку `deploy-guest` v1 сам не удаляет VM/LXC, удаление гостя с собственной management identity считается завершённым только после удаления соответствующего `<VMID>.pub` и успешного `sync-management-keys`.
+
+## 12. Где искать точные правила
 
 - [`21-pve-filesystem-layout.md`](21-pve-filesystem-layout.md) — точные пути и владельцы;
 - [`23-security.md`](23-security.md) — политика безопасности;
@@ -272,4 +301,4 @@ sync-management-keys
 
 Главное правило:
 
-> Deployer и AI создают VM/LXC разными PVE-контурами, но новые Debian-гости получают один и тот же актуальный набор management public keys и tag `management-ssh`. Канонический набор ведётся на PVE и распространяется отдельным `sync-management-keys`; private keys остаются у своих владельцев.
+> Deployer и AI создают VM/LXC разными PVE-контурами, но новые Debian-гости получают один и тот же актуальный набор management public keys и tag `management-ssh`. Канонический набор хранится в `/var/lib/proxmox-deployer/public-keys/`, изменяется `pvedeploy` без отдельного привилегированного helper и распространяется отдельным `sync-management-keys`; private keys остаются у своих владельцев.
