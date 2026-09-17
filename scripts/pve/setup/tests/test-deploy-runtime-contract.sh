@@ -8,14 +8,15 @@ RUNTIME="$ROOT/scripts/pve/setup/lib/40-runtime.sh"
 KEYS="$ROOT/scripts/pve/setup/lib/45-management-keys.sh"
 TOOLING="$ROOT/scripts/pve/setup/lib/70-tooling.sh"
 CONFIGURE="$ROOT/scripts/pve/setup/configure-pve.sh"
+PREFLIGHT="$ROOT/scripts/pve/setup/lib/10-preflight.sh"
 
 fail() {
     printf 'Deploy runtime contract test failed: %s\n' "$*" >&2
     exit 1
 }
 
-grep -Eq '^PVE_CONFIGURATION_VERSION=28$' "$COMMON" \
-    || fail "PVE_CONFIGURATION_VERSION must be 28"
+grep -Eq '^PVE_CONFIGURATION_VERSION=29$' "$COMMON" \
+    || fail "PVE_CONFIGURATION_VERSION must be 29"
 
 if grep -Eq 'BOOTSTRAP_KEY_FILE|PVE_BOOTSTRAP_KEY_FILE|BOOTSTRAP_KNOWN_HOSTS|CANONICAL_KEY_DIFFERS_FROM_BOOTSTRAP' "$COMMON" "$RUNTIME"; then
     fail "temporary GitHub Deploy Key contract must not remain in PVE Configuration"
@@ -26,6 +27,13 @@ grep -q 'Постоянный GitHub Deploy Key .* отсутствует. Publi
 
 grep -q 'python3-jsonschema' "$SYSTEM" \
     || fail "PVE Configuration must install python3-jsonschema"
+
+grep -Fq 'check_node_name_resolution()' "$PREFLIGHT" \
+    || fail "PVE preflight must validate node-name resolution"
+grep -Fq 'getent ahosts "$node"' "$PREFLIGHT" \
+    || fail "node-name resolution check must use system resolver"
+grep -Fq '    check_node_name_resolution' "$PREFLIGHT" \
+    || fail "PVE preflight must invoke node-name resolution check"
 grep -q 'from jsonschema import Draft202012Validator' "$SYSTEM" \
     || fail "PVE Configuration must verify Draft202012Validator import"
 

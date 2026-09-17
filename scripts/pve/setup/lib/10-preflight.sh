@@ -1,11 +1,39 @@
 #!/usr/bin/env bash
 
+check_node_name_resolution() {
+    local node resolved local_addresses addr nonlocal=""
+
+    node="$(hostname)"
+    [[ -n "$node" ]] || die "Не удалось определить hostname PVE-ноды"
+
+    resolved="$(getent ahosts "$node" 2>/dev/null | awk '{print $1}' | sort -u)"
+    [[ -n "$resolved" ]] \
+        || die "Имя PVE-ноды '${node}' не резолвится. Проверьте /etc/hosts или DNS до продолжения PVE Configuration."
+
+    local_addresses="$(ip -o addr show up | awk '$3 == \"inet\" || $3 == \"inet6\" {sub(/\\/.*/, \"\", $4); print $4}' | sort -u)"
+    [[ -n "$local_addresses" ]] \
+        || die "На PVE не найдено ни одного локального IP-адреса для проверки hostname '${node}'"
+
+    while IFS= read -r addr; do
+        [[ -n "$addr" ]] || continue
+        if ! grep -Fxq "$addr" <<<"$local_addresses"; then
+            nonlocal+="${addr}"$'\n'
+        fi
+    done <<<"$resolved"
+
+    if [[ -n "$nonlocal" ]]; then
+        die "Имя PVE-ноды '${node}' резолвится в нелокальный адрес(а): $(printf '%s' "$nonlocal" | paste -sd, -). Локальные адреса: $(printf '%s\n' "$local_addresses" | paste -sd, -). Проверьте /etc/hosts или DNS."
+    fi
+
+    ok "Hostname PVE-ноды ${node} резолвится только в локальный адрес(а): $(printf '%s\n' "$resolved" | paste -sd, -)"
+}
+
 check_root_and_pve() {
     [[ $EUID -eq 0 ]] || die "Запустите скрипт от root на хосте Proxmox"
 
     for cmd in \
         pveversion qm pct pvesh pveum pvesm pveam \
-        ip systemctl apt-get getent groupadd useradd; do
+        ip systemctl apt-get getent hostname groupadd useradd; do
         require_cmd "$cmd"
     done
 
@@ -24,6 +52,8 @@ check_root_and_pve() {
 
     ip link show "$BRIDGE" >/dev/null 2>&1 || die "Не найден обязательный сетевой мост ${BRIDGE}"
     ok "Сетевой мост ${BRIDGE} найден"
+
+    check_node_name_resolution
 
     pvesm status --storage local >/dev/null 2>&1 || die "Хранилище 'local' не определено или недоступно"
     pvesm status --storage local-lvm >/dev/null 2>&1 || die "Хранилище 'local-lvm' не определено или недоступно"
