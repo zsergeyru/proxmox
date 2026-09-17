@@ -68,15 +68,16 @@ grep -Fq 'Один management public key зарегистрирован дваж
 grep -Fq 'автоматическая ротация запрещена' "$KEYS" \
     || fail "deployer registry mismatch must STOP instead of rotating"
 
-grep -Fq 'PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3 "\$VALIDATOR"' "$TOOLING" \
-    || fail "root wrapper must run the shared repository validator without writing bytecode"
-if grep -Fq -- '--untracked-files=all --ignored' "$TOOLING"; then
-    fail "deploy wrapper must not treat gitignored runtime artifacts as repository dirt"
-fi
-grep -Fq 'status --porcelain=v1 --untracked-files=all)' "$TOOLING" \
-    || fail "deploy wrapper must still reject tracked and non-ignored untracked changes"
-grep -Fq 'PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3 - "\$REPO_DIR" "\$vmid"' "$TOOLING" \
-    || fail "effective-state resolver must not write __pycache__ into canonical checkout"
+grep -Fq 'PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/run/proxmox-deployer-disabled-pycache /usr/bin/python3 "\$VALIDATOR"' "$TOOLING" \
+    || fail "root wrapper must run validator without reading/writing canonical __pycache__"
+grep -Fq -- 'status --porcelain=v1 --untracked-files=all --ignored)' "$TOOLING" \
+    || fail "deploy wrapper must inspect ignored state too"
+grep -Fq "grep -Ev '^!! .*(__pycache__/|\\.py[co]$)'" "$TOOLING" \
+    || fail "deploy wrapper may exempt only Python bytecode from strict dirty-state checks"
+grep -Fq 'PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/run/proxmox-deployer-disabled-pycache /usr/bin/python3 - "\$REPO_DIR" "\$vmid"' "$TOOLING" \
+    || fail "effective-state resolver must bypass canonical __pycache__"
+grep -Fq 'PYTHONPYCACHEPREFIX=/run/proxmox-deployer-disabled-pycache' "$TOOLING" \
+    || fail "deploy runtime must use a non-canonical pycache prefix"
 grep -Fq 'runuser -u "\$DEPLOY_USER" -- env PYTHONDONTWRITEBYTECODE=1' "$TOOLING" \
     || fail "deploy runtime must disable bytecode writes for pvedeploy"
 [[ -f "$DEPLOY_GUEST" ]] \
