@@ -4,166 +4,168 @@
 **Статус:** Действующий  
 **Основной источник:** Да — для Guest Bootstrap v1, границы `deploy-guest` ↔ Ansible и требований к готовности административного доступа.
 
-Общая политика SSH и секретов находится в [`23-security.md`](23-security.md). Точный жизненный цикл management SSH keys — в [`28-management-ssh-keys.md`](28-management-ssh-keys.md). Формат `guest.yaml` — в [`30-guest-manifest.md`](30-guest-manifest.md). Общий PLAN/APPLY-контракт — в [`31-deploy-guest.md`](31-deploy-guest.md).
+Общая политика SSH — [`23-security.md`](23-security.md), management SSH keys — [`28-management-ssh-keys.md`](28-management-ssh-keys.md), manifest/schema — [`30-guest-manifest.md`](30-guest-manifest.md), общий PLAN/APPLY — [`31-deploy-guest.md`](31-deploy-guest.md). Текущая степень реализации отдельно фиксируется в [`29-implementation-status.md`](29-implementation-status.md).
 
 ## 1. Принятая модель
 
-Guest Bootstrap входит в первую версию `deploy-guest`.
+Guest Bootstrap входит в контракт первой версии `deploy-guest`:
 
 ```text
-deploy-guest.py
-→ жизненный цикл PVE
-→ передать актуальный management-authorized-keys при создании
-→ установить management-ssh для Debian-гостя management-контура
-→ проверка SSH root private key deployer
-→ management.ssh_identity, если явно запрошен
-→ management.project_repo_read согласно desired state
+PVE lifecycle
+→ current management-authorized-keys при создании
+→ management-ssh tag
+→ verified root SSH deployer
+→ management.ssh_identity desired state
+→ management.project_repo_read desired state
 → явно запрошенный Guest Bootstrap v1
-→ финальная проверка
-→ передача управления Ansible
-→ штатная повторяемая настройка ОС и приложений
+→ final verify
+→ Ansible
+→ повторяемая настройка ОС и приложений
 ```
 
 Ключевое правило:
 
-> Административный SSH — часть готовности гостевой системы к управлению. Генерация собственной management identity, управление Project Git READ и Guest Bootstrap начинаются только после проверенного `root SSH` со стороны deployer.
+> Административный SSH — часть готовности гостевой системы. Management identity, Project Git READ и Guest Bootstrap выполняются только после проверенного `root SSH` со стороны deployer.
 
-`bootstrap` является действующим машинным интерфейсом schema v6. `management.ssh_identity` и `management.project_repo_read` приняты как целевые интерфейсы внутри единого раздела `management`, но ещё не реализованы в действующей schema v6. Их реализация должна следовать зафиксированным контрактам без введения универсального secret API или специальных полей для AI/Ansible. `provisioning` остаётся будущим интерфейсом.
-
-## 2. Ответственность `deploy-guest.py`
-
-`deploy-guest.py` отвечает за:
+Schema v7 уже содержит действующие машинные интерфейсы:
 
 ```text
-создать или найти VM/LXC
-→ CPU / RAM / диск / сеть
-→ pool / protection / параметры запуска
-→ при создании установить текущий management-authorized-keys штатным механизмом типа гостя
-→ если effective state содержит management.ssh — установить PVE tag management-ssh
-→ запустить, если требуется
-→ дождаться SSH root
-→ проверить доступ private key deployer
-→ при management.ssh_identity=true обеспечить собственную keypair гостя и зарегистрировать только .pub на PVE
-→ после нового/изменённого public key вызвать sync-management-keys
-→ привести management.project_repo_read к desired state: APPLY/NO CHANGE/REMOVE
-→ проверить/применить явно запрошенные bootstrap capabilities
-→ проверить результат каждого управляемого шага
-→ завершить deploy только после полной приёмки
+management.ssh_identity
+management.project_repo_read
+bootstrap.capabilities
 ```
 
-`deploy-guest` не должен превращаться во второе средство управления конфигурацией Linux и приложений.
+`provisioning` как отдельный высокоуровневый интерфейс пока не вводится.
 
-Массовое распространение management public keys не является внутренним циклом `deploy-guest`; этим занимается отдельный [`sync-management-keys`](28-management-ssh-keys.md), который deploy вызывает только после фактического изменения канонического public-key registry.
+## 2. Граница ответственности
 
-## 3. Административный пользователь
+`deploy-guest` отвечает за минимальную инфраструктурную готовность новой Debian VM/LXC:
+
+```text
+создать/найти объект
+→ PVE state
+→ initial management public keys
+→ root SSH
+→ optional management identity
+→ optional Project Git READ
+→ optional Bootstrap capabilities
+→ acceptance
+```
+
+После этого долговременная конфигурация ОС и приложений выполняется Ansible.
+
+`deploy-guest` не превращается во второй Ansible и не принимает из manifest произвольные package lists, shell commands, installer URLs или secret values.
+
+## 3. Административный SSH
 
 Для управляемых Debian VM/LXC:
 
 ```text
-root:22
+user: root
+port: 22
+root password: locked
+password auth: disabled
+public-key auth: enabled
 ```
 
-Пароль `root` заблокирован, вход по паролю отключён, разрешена только аутентификация по ключам.
-
-Универсальный пользователь `ops` не является частью целевого контракта гостевых систем.
-
-## 4. SSH identity deployer
-
-Развёртывание со стороны PVE использует постоянную пару:
+Deployer использует постоянную пару:
 
 ```text
 /etc/proxmox-deployer/ssh/pve_guest_ed25519
 /etc/proxmox-deployer/ssh/pve_guest_ed25519.pub
 ```
 
-Историческое имя файла сохраняется, но по смыслу это SSH identity **deployer**, а не ключ самого Proxmox.
-
-`deploy-guest` не создаёт и не ротирует эту пару. PVE Configuration регистрирует её открытую часть как:
+Её public часть регистрируется как:
 
 ```text
 /var/lib/proxmox-deployer/public-keys/deployer.pub
 ```
 
-Она обязательно входит в `management-authorized-keys`, поэтому deployer должен иметь SSH-доступ к любой новой управляемой Debian VM/LXC независимо от того, создана она deployer или AI.
+и входит в `management-authorized-keys`.
 
-SSH host keys гостей хранятся отдельно:
+SSH host keys управляемых гостей хранятся отдельно:
 
 ```text
 /var/lib/pvedeploy/.ssh/known_hosts
 ```
 
-Правила первичного доверия и смены host key определены в [`31-deploy-guest.md`](31-deploy-guest.md).
+## 4. Начальный доступ к новой VM
 
-## 5. Начальный доступ: VM
+Template 9000 не содержит постоянного project `authorized_keys`, management private keys или общего Git READ key.
 
-Шаблон `9000` не содержит постоянного проектного `authorized_keys`, management private keys и общего Git read-key.
-
-Новый Full Clone до первого запуска получает актуальный публичный набор через Cloud-Init:
+Новый Full Clone получает до первого запуска:
 
 ```text
-Full Clone from 9000
-→ hostname / CPU / RAM / disk / network
+hostname / CPU / RAM / disk / network
 → ciuser=root
 → sshkeys=<management-authorized-keys>
 → PVE tag management-ssh
 → Cloud-Init update
-→ start
-→ QGA/Cloud-Init readiness при необходимости
-→ SSH root private key deployer
+→ start if requested
+→ readiness
+→ first SSH host-key trust for expected address
+→ verified root SSH deployer
 ```
 
-Никакие private management keys внутрь обычной VM не передаются.
+Никакие private management keys в обычную VM не передаются.
 
-## 6. Начальный доступ: LXC
+## 5. Начальный доступ к LXC
 
 Для Debian LXC:
 
 ```text
-разрешить конкретный установленный Debian template
-→ создать LXC с ssh-public-keys=<management-authorized-keys>
-→ установить PVE tag management-ssh
-→ запустить
-→ проверить SSH root private key deployer
+resolve allowed Debian template
+→ create LXC
+→ ssh-public-keys=<management-authorized-keys>
+→ PVE tag management-ssh
+→ start if requested
+→ readiness
+→ first SSH host-key trust
+→ verified root SSH deployer
 ```
 
-Proxmox устанавливает открытые ключи `root` при создании контейнера. `base` не участвует в получении начального SSH-доступа.
-
-Управляющий guest, создающий новую Debian VM/LXC напрямую через PVE API, использует свою локальную копию:
+Управляющий guest, создающий Debian VM/LXC напрямую через PVE API, использует локальную копию:
 
 ```text
 /etc/proxmox-guest/public-keys/management-authorized-keys
 ```
 
-и также передаёт весь набор новой машине и устанавливает ей PVE tag `management-ssh`.
+и также ставит новой машине `management-ssh`.
 
-## 7. Собственная management identity гостя
+## 6. Management identity и Project Git READ
 
-Целевой флаг находится внутри общего management-раздела:
+Эти механизмы относятся к ядру deploy/access, а не к Bootstrap capabilities.
+
+### Собственная management SSH identity
 
 ```yaml
 management:
   ssh_identity: true
 ```
 
-Он означает, что гостю нужна собственная SSH identity для исходящего административного доступа к другим управляемым Debian-гостям.
-
-После проверенного входа deployer:
+означает создание/проверку пары:
 
 ```text
-проверить /etc/proxmox-guest/ssh/management_ed25519[.pub]
-→ если пары нет — создать ed25519 внутри гостя
-→ private key оставить только в госте
-→ получить наружу только .pub
-→ проверить fingerprint
-→ зарегистрировать на PVE как <VMID>.pub
-→ вызвать sync-management-keys
+/etc/proxmox-guest/ssh/management_ed25519
+/etc/proxmox-guest/ssh/management_ed25519.pub
 ```
 
-`management.ssh_identity` не является capability `ansible_controller`, не означает AI/Ansible роль и не содержит path/name/private material. Точный контракт: [`28-management-ssh-keys.md`](28-management-ssh-keys.md).
+Private остаётся только внутри guest, наружу регистрируется только `<VMID>.pub`. Полный lifecycle — [`28-management-ssh-keys.md`](28-management-ssh-keys.md).
 
-## 8. Интерфейс Guest Bootstrap v1
+### Project Git READ
 
-Bootstrap задаётся только явно в конкретном `guest.yaml`:
+```yaml
+management:
+  project_repo_read: true
+```
+
+означает фиксированный read-only доступ только к `zsergeyru/proxmox`. Это отдельный credential, не management SSH key и не capability `git`.
+
+При `false`/отсутствии поля ранее управляемые Project Git READ artifacts удаляются по контракту [`31-deploy-guest.md`](31-deploy-guest.md), но рабочие копии repo и чужие credentials не затрагиваются.
+
+## 7. Guest Bootstrap v1
+
+Bootstrap задаётся только в конкретном `guest.yaml`:
 
 ```yaml
 bootstrap:
@@ -174,32 +176,24 @@ bootstrap:
     ansible_controller: true
 ```
 
-Он не наследуется из `defaults.yaml` или профиля.
-
-Если блока нет:
-
-```text
-PVE state → SSH root → optional management.ssh_identity → management.project_repo_read desired state → финальная проверка → SUCCESS
-```
-
-Если блок есть:
-
-```text
-PVE state → SSH root → optional management.ssh_identity → management.project_repo_read desired state → Bootstrap PLAN/APPLY → финальная проверка → SUCCESS
-```
+Он не наследуется из defaults/profile.
 
 Разрешённый набор v1:
 
-- `base` — минимальные системные предпосылки для дальнейшего управляемого обслуживания;
-- `git` — Git как инфраструктурный инструмент;
-- `docker` — проектная установка Docker Engine и Compose plugin;
-- `ansible_controller` — контейнеризированный управляющий Ansible / Execution Environment для `311-dev-services`.
+```text
+base
+git
+docker
+ansible_controller
+```
 
-Произвольные имена capabilities запрещены.
+Произвольные capability names запрещены schema.
 
-## 9. Зависимости и порядок
+Если `bootstrap` отсутствует, после management handlers выполняется final verify без установки Bootstrap-компонентов.
 
-Зависимости являются частью контракта и должны быть явно выражены в manifest:
+## 8. Зависимости и порядок
+
+Зависимости должны быть указаны явно:
 
 ```text
 base
@@ -216,15 +210,13 @@ ansible_controller
 └─ docker
 ```
 
-Resolver не добавляет зависимости автоматически.
+Resolver не включает зависимости автоматически.
 
 Канонический порядок:
 
 ```text
 base → git → docker → ansible_controller
 ```
-
-Даже если YAML записан в другом порядке, PLAN и APPLY используют этот порядок.
 
 Bootstrap требует:
 
@@ -233,86 +225,75 @@ boot:
   start_after_deploy: true
 ```
 
-поскольку он выполняется только через уже проверенный SSH root.
+поскольку применяется через SSH после запуска.
 
-## 10. PLAN для Bootstrap
+## 9. PLAN
 
-Без `--apply` Guest Bootstrap не имеет права изменять гостевую ОС.
+Без `--apply` Bootstrap не изменяет guest OS.
 
-Для работающего и доступного гостя PLAN может выполнить только read-only проверки, позволяющие определить состояние capability.
-
-Типовой вывод:
+Для доступного существующего гостя PLAN может выполнять только read-only checks:
 
 ```text
 Bootstrap
-  base                APPLY | NO CHANGE
-  git                 APPLY | NO CHANGE
-  docker              APPLY | NO CHANGE
-  ansible_controller  APPLY | NO CHANGE
+  base                APPLY | NO CHANGE | BLOCKED
+  git                 APPLY | NO CHANGE | BLOCKED
+  docker              APPLY | NO CHANGE | BLOCKED
+  ansible_controller  APPLY | NO CHANGE | BLOCKED
 ```
 
-Для нового объекта, который ещё не существует, или для объекта, который нельзя проверить по SSH без изменения его состояния, PLAN не запускает гостя и не выполняет команды установки. В таком случае он показывает детерминированно запрошенные действия как требующие выполнения после появления SSH, например `APPLY AFTER START`.
+Для нового ещё не запущенного объекта:
 
-PLAN не должен делать package install/update, менять файлы, генерировать management private key, регистрировать `.pub`, запускать sync, запускать/включать сервисы или выполнять другие изменяющие SSH-команды.
+```text
+APPLY AFTER START
+```
 
-## 11. APPLY каждой capability
+PLAN не имеет права:
 
-Каждый обработчик строится по модели:
+```text
+apt install/update
+generate management private key
+register .pub
+write Project Git credential
+run sync-management-keys
+change services
+```
+
+## 10. Общая модель APPLY capability
+
+Каждый handler:
 
 ```text
 read-only check
-→ если уже соответствует: NO CHANGE
-→ если не соответствует: apply
+→ если соответствует: NO CHANGE
+→ иначе: apply
 → final verify
 ```
 
-Capability должна быть идемпотентной: повторный `deploy-guest <VMID> --apply` не должен переустанавливать или ломать уже соответствующее состояние.
+Все remote operations имеют конечные timeout.
 
-Изменения выполняются только через административный SSH гостя. Основная PVE-логика не использует `pct exec`, `qm guest exec` или локальный root-обход как скрытый второй канал настройки ОС.
+Если `apt/dpkg` обнаружен в повреждённом/незавершённом состоянии => STOP; скрытый автоматический repair запрещён.
 
-### 11.1. Безопасное поведение установки
+`apt-get update` допустим только как подготовка к реально требуемой установке capability.
 
-Перед изменением handler сначала выполняет read-only check. Если требуемое состояние уже достигнуто, он возвращает `NO CHANGE` и не выполняет `apt-get update`, установку пакетов, перезапуск сервисов или сетевые скачивания только ради «обновления на всякий случай».
-
-Если изменение действительно нужно:
-
-- все удалённые команды и ожидания имеют конечный timeout;
-- блокировка `apt`/`dpkg` может ожидаться только конечное время;
-- перед изменяющей операцией пакетный менеджер должен быть в однозначно рабочем состоянии;
-- обнаруженный незавершённый или повреждённый `dpkg`/`apt` означает STOP, а не скрытый автоматический ремонт;
-- `apt-get update` разрешён только как подготовка к реально требуемой установке или настройке репозитория capability;
-- устанавливаются только явно перечисленные в версионируемом коде capability пакеты;
-- для обычных пакетов используется минимальная установка без необязательных рекомендаций, если capability явно не требует обратного;
-- уже установленная приемлемая версия не обновляется только потому, что появилась более новая;
-- после изменения handler обязан выполнить собственную final verify.
-
-В Guest Bootstrap v1 запрещены:
+В Bootstrap v1 запрещены:
 
 ```text
 apt upgrade
 apt full-upgrade
 apt dist-upgrade
 apt autoremove
-автоматический purge/remove пакетов
-автоматический reboot/shutdown гостя
-```
-
-Capability может запустить или перезапустить только принадлежащий ей сервис и только когда это необходимо для достижения её собственного состояния.
-
-Для сетевой установки запрещены:
-
-```text
+automatic purge/remove
+automatic reboot/shutdown
 curl ... | sh
 wget ... | sh
+TLS verification disable
 ```
 
-и отключение проверки TLS. Внешний repository, signing key, URL или прямой артефакт должен быть заранее определён версионируемым кодом capability, а не приходить произвольной строкой из `guest.yaml`.
+Capability может перезапустить только принадлежащий ей сервис и только если это необходимо для достижения desired state.
 
-## 12. `base`
+## 11. `base`
 
-`base` — узкая базовая подготовка, а не универсальный список полезных пакетов.
-
-В v1 она гарантирует только:
+`base` гарантирует минимальные системные предпосылки:
 
 ```text
 python3
@@ -321,127 +302,51 @@ ca-certificates
 rsync
 ```
 
-Read-only check `base` подтверждает как минимум:
+Read-only check подтверждает работоспособность Python, module `apt`, CA bundle и `rsync`.
 
-```text
-python3 запускается
-Python module apt импортируется
-системное CA bundle существует
-rsync запускается
-```
+`base` не владеет OpenSSH, Git, Docker, Ansible, locale/timezone или прикладными пакетами.
 
-Если всё уже присутствует, `base` возвращает `NO CHANGE`.
-
-`base` не владеет и не переустанавливает OpenSSH, Git, Docker, Ansible, locale/timezone, пользовательские пакеты или прикладные сервисы.
-
-Запрещён интерфейс вида:
+Интерфейс вида:
 
 ```yaml
 bootstrap:
   packages:
     - nginx
-    - postgresql
 ```
 
-Прикладное ПО не относится к `base`.
+запрещён.
 
-## 13. `git`
+## 12. `git`
 
-`git` обеспечивает наличие рабочего Git-клиента и проверяет его работоспособность.
+`git` обеспечивает наличие рабочего Git client.
 
-Capability `git` **не означает выдачу GitHub credential**. Она не создаёт Deploy Key, не выбирает repository и не клонирует произвольные репозитории из данных manifest.
+Capability **не выдаёт GitHub credential**, не выбирает repository и не клонирует произвольный repo из manifest.
 
-Доступ к основному приватному проектному репозиторию выражается отдельно, но в том же общем разделе `management`:
-
-```yaml
-management:
-  project_repo_read: true
-```
-
-Поэтому возможны разные состояния:
+Разделение:
 
 ```text
-git=true, management.project_repo_read=false
-→ Git client есть, credential проекта не выдаётся
+bootstrap.capabilities.git=true
+→ Git client должен работать
 
 management.project_repo_read=true
-→ обеспечивается фиксированный общий read-only credential проекта и его точная SSH/Git-настройка
-→ наличие Git client обеспечивается отдельно соответствующей системой/Bootstrap
+→ фиксированный Project Git READ credential должен работать
 ```
 
-### 13.1. `management.project_repo_read`
+Они независимы.
 
-Для `zsergeyru/proxmox` принят один общий GitHub Deploy Key только для чтения. Мастер-копия хранится root-only на PVE:
+## 13. `docker`
+
+`docker` обеспечивает проектно одобренный Docker Engine + Compose plugin.
+
+Для Docker в LXC должны выполняться требования [`32-docker-in-lxc-policy.md`](32-docker-in-lxc-policy.md), включая:
 
 ```text
-/etc/proxmox-deployer/ssh/github_proxmox_repo_ed25519
+unprivileged=true
+nesting=true
+keyctl=true
 ```
 
-`guest.yaml` может запросить только:
-
-```yaml
-management:
-  project_repo_read: true
-```
-
-Он не может выбрать имя секрета, другой ключ, путь на PVE, repository или write-доступ.
-
-Root-wrapper передаёт содержимое фиксированного read-key `deploy-guest` только на время конкретного APPLY через отдельный file descriptor. `pvedeploy` не получает постоянного доступа к исходному root-only файлу.
-
-Стандартные управляемые артефакты в госте:
-
-```text
-/etc/proxmox-guest/credentials/github-proxmox-read
-/etc/proxmox-guest/ssh/github-proxmox-known_hosts
-/etc/ssh/ssh_config.d/90-proxmox-project-repo-read.conf
-```
-
-Права:
-
-```text
-github-proxmox-read                         root:root 0600
-github-proxmox-known_hosts                  root:root 0644
-90-proxmox-project-repo-read.conf           root:root 0644
-```
-
-SSH config содержит специальный alias `github-proxmox-read`, который использует только этот private key, отдельный guest-local `known_hosts`, `StrictHostKeyChecking yes` и `BatchMode yes`.
-
-Дополнительно deploy управляет одной точной Git URL rewrite-записью:
-
-```text
-git@github.com:zsergeyru/proxmox.git
-→ git@github-proxmox-read:zsergeyru/proxmox.git
-```
-
-Поэтому обычный root `git clone/fetch` по каноническому project URL автоматически выбирает этот ключ, но другие GitHub repositories не получают его.
-
-Guest-local `known_hosts` содержит только проверенные SSH host keys GitHub и является явным управляемым состоянием этого доступа. Строгая проверка host key не отключается.
-
-Read-only check при `true` подтверждает наличие, владельца/права и ожидаемый fingerprint private key без вывода его содержимого, валидность GitHub host keys, SSH alias и точной URL rewrite. Если Git client доступен, final verify выполняет read-only `git ls-remote git@github.com:zsergeyru/proxmox.git`.
-
-Если всё уже соответствует — `NO CHANGE`.
-
-Если credential/config имеет неожиданный fingerprint или неоднозначно изменённое содержимое — `BLOCKED / STOP`; обычный deploy не перезаписывает его вслепую.
-
-Если `management.project_repo_read` позже становится `false` или поле исчезает, PLAN показывает `REMOVE`, а `--apply` удаляет только управляемые артефакты этого capability: private key, guest-local GitHub `known_hosts`, dedicated SSH config и точную Git URL rewrite-запись.
-
-Уже клонированные рабочие копии репозитория и любые другие пользовательские Git/SSH credentials при этом не удаляются и не меняются. Если управляемый файл был неожиданно изменён, удаление блокируется до явного разбора.
-
-Если AI требуется запись в GitHub, write credential является отдельным контуром.
-
-## 14. `docker`
-
-`docker` устанавливает и проверяет проектно одобренный Docker Engine + Compose plugin.
-
-Для Docker внутри LXC обязательны требования [`32-docker-in-lxc-policy.md`](32-docker-in-lxc-policy.md):
-
-```text
-unprivileged == true
-nesting == true
-keyctl == true
-```
-
-После APPLY должны успешно выполняться как минимум:
+Final verify минимум:
 
 ```bash
 docker version
@@ -449,93 +354,68 @@ docker info
 docker compose version
 ```
 
-Capability не должна бесконтрольно обновлять Docker при каждом запуске.
+Уже установленная приемлемая версия не обновляется на каждом deploy только потому, что появилась новая.
 
-## 15. `ansible_controller`
+## 14. `ansible_controller`
 
-`ansible_controller` предназначен для `311-dev-services` и создаёт управляющую среду Ansible / Execution Environment поверх уже работающего Docker.
+Capability предназначена для `311-dev-services` и обеспечивает управляющую Ansible/Execution Environment поверх Docker.
 
-Она **не создаёт отдельный Ansible SSH keypair**. Собственная административная identity 311 задаётся общим для всех управляющих гостей полем:
+Она **не создаёт отдельный SSH keypair**. Identity 311 задаётся:
 
 ```yaml
 management:
   ssh_identity: true
 ```
 
-Это сохраняет разделение: capability описывает ПО, а `management.ssh_identity` — SSH identity гостя.
+Capability не устанавливает Semaphore, Gitea/Gogs, Jenkins и другие прикладные DevOps-сервисы; они относятся к штатному Ansible provisioning.
 
-`ansible_controller` не устанавливает Semaphore, Gitea/Gogs, Jenkins или другие прикладные DevOps-сервисы. Эти сервисы относятся к штатному Ansible provisioning.
+## 15. Ошибки и `deploy-incomplete`
 
-## 16. Ошибка management identity, Bootstrap или Project Git access
+Requested management state и Bootstrap входят в полную приёмку deploy.
 
-`management.ssh_identity`, Guest Bootstrap и desired state `management.project_repo_read` являются частью полной приёмки deploy.
-
-Если собственная keypair не создана/не проверена, public key не зарегистрирован, обязательный `sync-management-keys` после новой регистрации не завершился, Project Git READ не приведён к требуемому состоянию или capability завершилась ошибкой:
+Если required handler не завершился:
 
 ```text
-→ deploy считается FAILED
+→ deploy FAILED
 → следующие зависимые шаги не выполняются
-→ автоматический разрушительный rollback не выполняется
+→ destructive rollback не выполняется
 → объект сохраняется
 → deploy-incomplete остаётся
-→ журнал фиксирует тип шага и ошибку без секретов
+→ audit фиксирует шаг/ошибку без secrets
 ```
 
-Следующий запуск заново проверяет фактическое состояние и выполняет только недостающие изменения.
+Следующий запуск заново читает actual state и выполняет только недостающее.
 
-## 17. `deploy-incomplete`
-
-Для нового объекта `deploy-incomplete` устанавливается как можно раньше после создания и снимается только после:
+`deploy-incomplete` снимается только после:
 
 ```text
-PVE configuration verified
-+
-SSH root verified
-+
-management.ssh_identity verified and public key synced, если запрошен
-+
-management.project_repo_read desired state verified
-+
-все запрошенные bootstrap capabilities verified
-+
-final PVE state verified
+PVE verified
++ root SSH verified
++ requested management.ssh_identity verified/synced
++ Project Git READ desired state verified
++ requested Bootstrap capabilities verified
++ final PVE verify
 ```
 
-Если существующий уже управляемый объект требует реального изменения management identity, Project Git access или Bootstrap, перед первой изменяющей SSH-командой deploy устанавливает `deploy-incomplete`. Read-only PLAN и `NO CHANGE` не должны создавать этот тег.
+Read-only PLAN и полный `NO CHANGE` tag не создают.
 
-## 18. Что не относится к Guest Bootstrap
+## 16. Передача управления Ansible
 
-В Bootstrap v1 не входят:
+После Bootstrap повторяемая конфигурация ОС и приложений выполняется Ansible с `311-dev-services`.
 
-- управление management SSH identity — это ядро deploy/access и [`28-management-ssh-keys.md`](28-management-ssh-keys.md);
-- массовая синхронизация public keys — это `sync-management-keys`;
-- произвольный список пакетов;
-- произвольные shell-команды из manifest;
-- `rootfs/` sync;
-- PostgreSQL, MQTT, Grafana, Gitea/Gogs, Semaphore, Jenkins и другие приложения;
-- прикладные Compose stacks;
-- управление секретами приложений;
-- универсальный secret broker;
-- произвольные Git credentials/repositories;
-- обычные Ansible roles для сервисов.
+Знания о конкретных сервисах находятся в roles/playbooks и guest-specific проектных файлах, а не в `deploy-guest.py`.
 
-Фиксированный `management.project_repo_read` также относится к ядру deploy/access, а не к capability `git`.
+Будущий интерфейс `provisioning` может быть введён отдельно; сейчас он не реализуется скрыто через Bootstrap.
 
-## 19. Повторяемая настройка через Ansible
+## 17. `311-dev-services`
 
-После Bootstrap штатная конфигурация ОС и приложений выполняется Ansible с `311-dev-services`.
-
-Будущий высокоуровневый интерфейс `provisioning` может быть введён позднее, но сейчас он не входит в schemas и не реализуется скрыто внутри `deploy-guest`.
-
-Знания о конкретной установке сервисов живут в Ansible roles/playbooks и соответствующих guest-файлах проекта, а не в `deploy-guest.py`.
-
-## 20. Специальный Bootstrap `311-dev-services`
-
-`311-dev-services` — штатный управляющий узел Ansible и первый целевой сценарий полного Bootstrap v1.
-
-Его действующий manifest сейчас явно содержит Bootstrap:
+Manifest 311 в schema v7 уже содержит:
 
 ```yaml
+management:
+  ssh_identity: true
+  project_repo_read: true
+
 bootstrap:
   capabilities:
     base: true
@@ -544,149 +424,85 @@ bootstrap:
     ansible_controller: true
 ```
 
-После реализации целевых management interfaces 311 также должен содержать:
-
-```yaml
-management:
-  ssh_identity: true
-  project_repo_read: true
-```
-
-Последовательность:
+Целевой deploy flow:
 
 ```text
-deploy-guest 311 --apply
-→ создать LXC 311 с текущим management-authorized-keys
-→ установить PVE tag management-ssh
-→ настроить PVE state
-→ запустить
-→ проверить SSH root private key deployer
-→ создать/проверить собственную management keypair 311
-→ зарегистрировать 311.pub на PVE
+create LXC 311 with management-authorized-keys
+→ management-ssh tag
+→ verified root SSH deployer
+→ own management keypair 311
+→ register 311.pub
 → sync-management-keys
-→ materialize общий Git READ credential + GitHub trust + точную SSH/Git-настройку
+→ Project Git READ desired state
 → base
 → git
 → docker
 → ansible_controller
-→ проверить management identity, Project Git access и capabilities
-→ финально сверить PVE
-→ снять deploy-incomplete
+→ final acceptance
 → SUCCESS
 ```
 
-Целевой базовый результат:
+После этого Semaphore, Git service, CI и другие приложения устанавливаются Ansible.
+
+## 18. Обычные Debian-гости
+
+Обычный deployable Debian guest без `ssh_identity`, `project_repo_read` и `bootstrap` всё равно получает:
 
 ```text
-311-dev-services
-├── Debian 13
-├── SSH root только по ключам
-├── PVE tag management-ssh
-├── собственный management private key
-├── локальная копия общего management public-key registry
-├── общий credential READ для zsergeyru/proxmox + строгая GitHub host-key проверка
-├── Git
-├── Docker Engine + Compose plugin
-└── Ansible controller / EE
+management.ssh из defaults
+management-authorized-keys
+PVE tag management-ssh
+root SSH deployer
 ```
 
-Semaphore, Git-сервис и CI устанавливаются уже после этого через Ansible.
+После этого он может конфигурироваться с 311.
 
-## 21. Обычные Linux-гости
+Гость может запросить только нужный поднабор Bootstrap, если зависимости явно соблюдены.
 
-Обычный Debian guest без `management.ssh_identity`, `bootstrap` и `management.project_repo_read` всё равно получает базовый `management.ssh` из defaults, актуальный `management-authorized-keys`, PVE tag `management-ssh` и административный SSH. Затем он может конфигурироваться с 311.
+## 19. Структура реализации
 
-Гость может явно запросить только нужный поднабор Bootstrap, например:
-
-```yaml
-bootstrap:
-  capabilities:
-    base: true
-    docker: true
-```
-
-Это не создаёт ему private management key и не выдаёт доступ к проектному Git.
-
-## 22. Структура реализации
-
-Для v1 ожидается разделение ядра deploy и capability handlers:
+Целевое логическое разделение:
 
 ```text
-scripts/
-├── pve/
-│   ├── deploy-guest.py
-│   └── sync-management-keys.py   # либо эквивалентный отдельный executable
-└── bootstrap/
-    ├── base.py
-    ├── git.py
-    ├── docker.py
-    └── ansible_controller.py
-```
+scripts/pve/deploy-guest.py
+→ PVE lifecycle + access + management handlers
 
-Начальный management public-key set, PVE tag `management-ssh`, host-key trust, проверка SSH, обработка `management.ssh_identity`, регистрация `.pub` и управление фиксированным `management.project_repo_read` находятся в ядре deploy/access, а не в `bootstrap/base.py`, `bootstrap/git.py` или `ansible_controller.py`.
+scripts/pve/sync-management-keys.py
+→ массовая public-key sync
 
-Массовое распространение public keys остаётся отдельной командой `sync-management-keys`, даже если `deploy-guest` вызывает её после появления нового ключа.
+bootstrap handlers
+→ base / git / docker / ansible_controller
 
-`scripts/guest_config.py` остаётся единым resolver для validator и deployer.
-
-## 23. Ограничения безопасности
-
-- секреты, пароли, токены и закрытые ключи не хранятся в `guest.yaml`;
-- `guest.yaml` не может запросить secret по имени или указать путь к нему;
-- `management.ssh_identity` — только boolean и не задаёт путь/private material/роль/VMID;
-- `management.project_repo_read` — только boolean и не задаёт произвольный credential/repository/path;
-- эти два поля не наследуются из defaults/profile;
-- private management key гостя создаётся и остаётся внутри владельца;
-- наружу из управляющего гостя забирается только `.pub`;
-- общий GitHub Deploy Key используется только как read-only credential `zsergeyru/proxmox`;
-- мастер-копия общего Git read-key на PVE остаётся root-only;
-- `pvedeploy` получает содержимое read-key только через временный FD конкретного запуска с `management.project_repo_read=true`;
-- guest-local Project Git READ использует отдельный SSH alias, отдельный `known_hosts`, строгую проверку GitHub host key и точную URL rewrite только для `zsergeyru/proxmox`;
-- при `management.project_repo_read=false` удаляются только управляемые артефакты этого доступа, но не рабочие копии репозитория и не чужие Git/SSH credentials;
-- общий Git read-key не используется как SSH-ключ гостя или PVE;
-- возможный AI write credential в GitHub остаётся отдельным;
-- capability handlers не печатают секреты и полный environment;
-- Bootstrap не расширяется произвольными командами ради удобства;
-- все сетевые скачивания/репозитории должны иметь явный проектный контракт и проверяемый источник.
-
-## 24. Итоговая цепочка
-
-```text
-PVE Configuration
-   ├─ deployer private key
-   ├─ public-key registry/deployer.pub
-   └─ github_proxmox_repo_ed25519  (master READ, root-only)
-
-            ↓
-
-guest.yaml
-   ├─ management
-   │    ├─ ssh                       # базовый administrative SSH contract
-   │    ├─ ssh_identity              # принятый, ожидает реализации schema
-   │    └─ project_repo_read         # принятый, ожидает реализации schema
-   └─ bootstrap.capabilities         # действующий schema v6
-            ↓
 scripts/guest_config.py
-            ↓
-PVE desired state + management contract + ordered bootstrap capabilities
-            ↓
-deploy-guest.py
-   ├─ PLAN / APPLY PVE
-   ├─ current management-authorized-keys при создании
-   ├─ management.ssh → PVE tag management-ssh
-   ├─ verified root SSH deployer
-   ├─ management.ssh_identity → guest-local private key + PVE public registry
-   ├─ при новом .pub → sync-management-keys
-   ├─ management.project_repo_read → APPLY / NO CHANGE / REMOVE управляемого Project Git READ
-   ├─ Guest Bootstrap v1
-   │    base → git → docker → ansible_controller
-   └─ final verification
-             ↓
-       Ansible on 311
-             ↓
-   roles / playbooks
-             ↓
-     application services
+→ единый resolver validator + deployer
 ```
 
-Главное правило: **Guest Bootstrap v1 доводит новую Debian VM/LXC от проверенного SSH до минимально требуемой инфраструктурной готовности; `management` является единым manifest-разделом административного управления, но собственная SSH identity и общий Git read-only credential остаются разными credentials с разным lifecycle; `management.project_repo_read` — это полноценный desired state: при `true` обеспечиваются key + GitHub trust + точная SSH/Git-настройка, при `false` удаляются только эти управляемые артефакты; всё прикладное и долговременное управление остаётся Ansible.**
+Точные filenames runtime modules могут быть уточнены при реализации, но граница ответственности сохраняется.
+
+## 20. Ограничения безопасности
+
+- secrets/private keys не хранятся в `guest.yaml`;
+- manifest не выбирает secret path/name;
+- `management.ssh_identity` — только boolean;
+- `management.project_repo_read` — только boolean;
+- individual management flags не наследуются из defaults/profile;
+- guest management private key остаётся у владельца;
+- Project Git master key на PVE остаётся root-only;
+- read key передаётся runtime только через отдельный FD;
+- Project Git READ не превращается в write credential;
+- Bootstrap не принимает произвольный shell/package interface;
+- handlers не печатают secret contents или полный environment.
+
+## 21. Состояние реализации
+
+Этот документ задаёт **действующий контракт**, а не текущую готовность всех runtime handlers.
+
+Schema v7 и resolver уже поддерживают management fields и `bootstrap.capabilities`; manifests `301`/`311` могут содержать принятый desired state. Какие runtime-компоненты уже написаны, фиксируется только в:
+
+[`29-implementation-status.md`](29-implementation-status.md)
+
+Расширенные CI-проверки management/runtime будут добавлены вместе с реальными `deploy-guest`/`sync-management-keys`, а не заранее для несуществующих handlers.
+
+## 22. Главный принцип
+
+> Guest Bootstrap доводит Debian VM/LXC от verified administrative SSH до минимально требуемой инфраструктурной готовности. Management SSH identity и Project Git READ остаются отдельными access-механизмами ядра deploy, а всё прикладное и долговременное управление передаётся Ansible.
