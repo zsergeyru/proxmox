@@ -14,7 +14,8 @@
 
 - запускает `/usr/local/sbin/deploy-guest`;
 - обновляет основную копию проекта на PVE, принадлежащую `root`;
-- использует отдельный GitHub-ключ PVE;
+- владеет мастер-копией общего GitHub Deploy Key только для чтения `zsergeyru/proxmox`;
+- при явном запросе `access.project_repo_read` передаёт этот credential конкретному запуску `deploy-guest` только на время выполнения;
 - передаёт выполнение основной логики развёртывания ограниченному Linux-пользователю `pvedeploy`.
 
 Основной `deploy-guest.py` не должен постоянно работать от `root`.
@@ -23,7 +24,7 @@
 
 `pvedeploy` — служебный Linux-пользователь, под которым выполняется основная логика развёртывания на PVE-хосте.
 
-Он может читать исходный код проекта и необходимые учётные данные и рабочие файлы развёртывания, но не может изменять основную Git-копию проекта или использовать GitHub-ключ, доступный только `root`.
+Он может читать исходный код проекта и необходимые рабочие файлы развёртывания, но не может изменять основную Git-копию проекта и не имеет постоянного доступа к root-only GitHub private key. Если конкретный deploy требует `project_repo_read`, root-wrapper передаёт значение фиксированного read-only credential только текущему процессу через отдельный file descriptor; путь к root-only файлу и выбор другого секрета `pvedeploy` не задаёт.
 
 Это **не** учётная запись API Proxmox.
 
@@ -46,7 +47,7 @@ AI-агент
 
 Его обычная зона изменения PVE — пул `managed`. AI не получает `root` на PVE и не изменяет основную копию проекта на PVE.
 
-## 2. Две независимые копии Git
+## 2. Независимые рабочие копии Git и общий read-only credential
 
 На PVE:
 
@@ -64,15 +65,18 @@ AI-агент
 
 Это отдельная рабочая копия контура AI Control.
 
-Они не синхронизируются напрямую. Общая точка обмена — GitHub:
+На `311-dev-services` также может быть собственная рабочая копия проекта для Ansible/DevOps-задач.
 
-```text
-AI или человек
-→ GitHub
-→ PVE при следующем обновлении основной копии
+Рабочие копии не синхронизируются напрямую. Общая точка чтения — GitHub. Для `clone/fetch` закрытого `zsergeyru/proxmox` принят **один общий GitHub Deploy Key только для чтения**. Его мастер-копия хранится root-only на PVE. Гость получает локальную копию этого ключа только если его `guest.yaml` явно запрашивает:
+
+```yaml
+access:
+  project_repo_read: true
 ```
 
-AI может подготовить и отправить изменение проекта в GitHub своей отдельной учётной записью, но это само по себе ничего не меняет на PVE.
+Это поле не является универсальным интерфейсом секретов. Оно означает ровно одно: разрешить чтение основного проектного репозитория фиксированным общим read-only credential. Манифест не задаёт имя ключа, путь к root-only секрету или другой credential.
+
+AI может подготавливать изменения проекта в своей рабочей копии. Если AI должен отправлять изменения обратно в GitHub, credential для записи является отдельным контуром и не заменяет общий read-only ключ.
 
 ## 3. Как работает `deploy-guest`
 
@@ -98,6 +102,8 @@ root
 → проверить основную копию проекта
 → получить актуальную ревизию из GitHub
 → зафиксировать точный Git SHA текущего запуска
+→ определить, нужен ли этому гостю project_repo_read
+→ при необходимости открыть фиксированный root-only read-key и передать его через FD
 → запустить основную логику развёртывания от pvedeploy
 
 pvedeploy
@@ -105,6 +111,7 @@ pvedeploy
 → построить план
 → обратиться к Proxmox как deployer@pve!host-deploy
 → применить изменения только по явному запросу
+→ при project_repo_read материализовать переданный credential внутри гостя в стандартном месте
 → проверить результат
 ```
 
@@ -120,10 +127,10 @@ pvedeploy
 
 ```text
 root
-→ только граница доверия хоста, обновление Git и запуск
+→ граница доверия хоста, обновление Git, чтение root-only секретов и запуск
 
 pvedeploy
-→ основная программа развёртывания
+→ основная программа развёртывания без постоянного доступа к root-only Git credential
 
 учётная запись API Proxmox
 → дополнительно ограничивает допустимые операции PVE
@@ -158,9 +165,12 @@ AI-агент
 
 /root/.ssh/authorized_keys
 → прямой доступ к оболочке внутри гостевой ОС
+
+access.project_repo_read
+→ только чтение zsergeyru/proxmox через общий Git credential
 ```
 
-Средство развёртывания на PVE, AI Control и Ansible используют независимые SSH-ключи одного административного пользователя `root`. Подробнее: [`33-guest-bootstrap-and-provisioning.md`](33-guest-bootstrap-and-provisioning.md) и [`50-ai-control.md`](50-ai-control.md).
+Средство развёртывания на PVE, AI Control и Ansible используют независимые SSH-ключи одного административного пользователя `root`. Общий Git read-key не является административным SSH-ключом гостевой системы. Подробнее: [`33-guest-bootstrap-and-provisioning.md`](33-guest-bootstrap-and-provisioning.md) и [`50-ai-control.md`](50-ai-control.md).
 
 ## 7. Что нельзя смешивать
 
@@ -182,47 +192,49 @@ ai-agent@pve!infra
 
 — отдельная учётная запись API Proxmox для AI Control.
 
-Также независимы друг от друга:
+Отдельны друг от друга:
 
-- GitHub-ключ PVE;
-- GitHub-ключ AI Control;
+- общий GitHub Deploy Key только для чтения `zsergeyru/proxmox` — один credential, который может иметь локальные копии у явно запросивших его гостей;
+- возможный credential AI для записи в GitHub — отдельный контур;
 - SSH-ключ PVE для гостевых систем;
 - SSH-ключ AI для гостевых систем;
 - SSH-ключ Ansible.
 
-Закрытые учётные данные одного контура не копируются в другой только ради удобства.
+Общий Git read-key сознательно является исключением из правила «один субъект — одна SSH-пара»: он даёт только чтение одного проектного репозитория и не предоставляет административный доступ к PVE или гостям.
 
 ## 8. Краткая схема
 
 ```text
                          GitHub
-                        /      \
-                       /        \
-               AI Control       root на PVE
-                    |                |
-          рабочая копия AI           v
-                    |      основная копия на PVE
-                    |                |
-                    |        обёртка deploy-guest
-                    |                |
-                    |            pvedeploy
-                    |                |
-                    |   deployer@pve!host-deploy
-                    |                |
-                    |                v
-                    |          Proxmox API
-                    |
-                    └→ Proximo → ai-agent@pve!infra → managed
+                            |
+             общий Deploy Key READ ONLY
+                /           |           \
+               /            |            \
+      root на PVE         301 AI         311
+           |                |             |
+ основная копия      рабочая копия   рабочая копия
+           |
+   wrapper deploy-guest
+           |
+       pvedeploy
+           |
+ deployer@pve!host-deploy
+           |
+           v
+      Proxmox API
+
+301 AI → Proximo → ai-agent@pve!infra → managed
 ```
 
 ## 9. Где искать точные правила
 
 - [`25-pve-access-control.md`](25-pve-access-control.md) — основные учётные записи PVE, роли, привилегии и ACL;
 - [`21-pve-filesystem-layout.md`](21-pve-filesystem-layout.md) — владельцы основной копии проекта, учётных данных и рабочих файлов;
-- [`30-guest-manifest.md`](30-guest-manifest.md) — требуемое состояние гостевой системы;
-- [`33-guest-bootstrap-and-provisioning.md`](33-guest-bootstrap-and-provisioning.md) — начальный SSH-доступ, первичная настройка и передача управления Ansible;
+- [`30-guest-manifest.md`](30-guest-manifest.md) — требуемое состояние гостевой системы и `project_repo_read`;
+- [`31-deploy-guest.md`](31-deploy-guest.md) — временная передача read-key от root к deployer;
+- [`33-guest-bootstrap-and-provisioning.md`](33-guest-bootstrap-and-provisioning.md) — начальный SSH-доступ, Git read access, первичная настройка и передача управления Ansible;
 - [`50-ai-control.md`](50-ai-control.md) — архитектура AI Control и Proximo.
 
 Главное правило:
 
-> PVE обновляет свою основную копию проекта только через процесс, контролируемый `root`; основная логика `deploy-guest` выполняется от `pvedeploy` и обращается к Proxmox как `deployer@pve!host-deploy`. AI работает отдельно через Proximo и `ai-agent@pve!infra`, не изменяя основную копию проекта на PVE.
+> PVE обновляет свою основную копию проекта только через процесс, контролируемый `root`; общий credential чтения Git хранится мастер-копией у `root` и материализуется только гостям с `access.project_repo_read: true`; основная логика `deploy-guest` выполняется от `pvedeploy`, а AI работает отдельно через Proximo и `ai-agent@pve!infra`.
