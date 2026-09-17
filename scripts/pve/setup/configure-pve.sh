@@ -95,7 +95,8 @@ for module in \
     62-template-build.sh \
     63-template-smoke.sh \
     64-cloud-init-status.sh \
-    70-tooling.sh; do
+    70-tooling.sh \
+    71-sync-management-keys-tooling.sh; do
     [[ -f "${LIB_DIR}/${module}" ]] || {
         printf 'ОШИБКА: не найден модуль PVE Configuration: %s\n' "${LIB_DIR}/${module}" >&2
         exit 1
@@ -195,6 +196,7 @@ main() {
     run_template_smoke_test_if_needed
 
     install_private_tooling
+    install_sync_management_keys_tooling
     report_status
 
     CONFIGURATION_RUNNING=0
