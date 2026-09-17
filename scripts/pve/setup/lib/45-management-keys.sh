@@ -110,6 +110,8 @@ validate_management_registry_entries() {
             die "Один management public key зарегистрирован дважды: ${seen_fingerprints[$fingerprint]} и ${name} (${fingerprint})"
         fi
         seen_fingerprints[$fingerprint]="$name"
+        chown "$DEPLOY_USER:$DEPLOY_USER" "$file"
+        chmod 0644 "$file"
     done < <(find "$PUBLIC_KEYS_DIR" -mindepth 1 -maxdepth 1 -printf '%f\n' | LC_ALL=C sort)
 }
 
