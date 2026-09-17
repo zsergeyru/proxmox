@@ -34,7 +34,11 @@ jobs:
           python -m py_compile \
             scripts/guest_config.py \
             scripts/validate_repo.py \
+            scripts/tests/test-guest-bootstrap.py \
             scripts/pve/setup/render-template-cloud-init.py
+
+      - name: Run Guest Bootstrap v1 contract checks
+        run: python scripts/tests/test-guest-bootstrap.py
 
       - name: Validate shell syntax
         run: |
