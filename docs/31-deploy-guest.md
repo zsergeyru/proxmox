@@ -64,8 +64,9 @@ SUCCESS
 - передачу текущего `management-authorized-keys` при создании Debian VM/LXC;
 - установку PVE tag `management-ssh` для Debian-гостя с `management.ssh`;
 - запуск гостя согласно `boot.start_after_deploy`;
+- первое запоминание SSH host key новой машины и строгую проверку при следующих подключениях;
 - проверку административного SSH `root` private key deployer;
-- после реализации `management.ssh_identity` — создание/проверку guest-local management keypair и регистрацию только `.pub`;
+- после реализации `management.ssh_identity` — создание/проверку guest-local management keypair и регистрацию только `.pub` как `<VMID>.pub`;
 - запуск `sync-management-keys` после нового/изменённого зарегистрированного public key;
 - после реализации `management.project_repo_read` — материализацию фиксированного общего Git read-only credential;
 - PLAN/APPLY явно запрошенных `bootstrap.capabilities`;
@@ -159,6 +160,8 @@ token_secret=<secret>
 
 Историческое имя сохраняется, но это identity deployer для входа в гостевые ОС.
 
+Текущий PVE-хост является новым, поэтому отдельная миграция прежней deployer identity сейчас не требуется. PVE Configuration создаёт пару, если её ещё нет; после первого создания она должна сохраняться при обычных повторных запусках.
+
 Постоянная база доверенных SSH host keys гостевых систем:
 
 ```text
@@ -170,16 +173,32 @@ token_secret=<secret>
 Канонический публичный каталог:
 
 ```text
-/etc/proxmox-deployer/public-keys/
+/var/lib/proxmox-deployer/public-keys/
+```
+
+Владелец:
+
+```text
+pvedeploy:pvedeploy
 ```
 
 Агрегированный текущий набор:
 
 ```text
-/etc/proxmox-deployer/public-keys/management-authorized-keys
+/var/lib/proxmox-deployer/public-keys/management-authorized-keys
 ```
 
-При создании новой управляемой Debian VM/LXC `deploy-guest` передаёт этот набор целиком через Cloud-Init `sshkeys` или LXC `ssh-public-keys` и устанавливает PVE tag `management-ssh`.
+Индивидуальная management identity гостя регистрируется как:
+
+```text
+/var/lib/proxmox-deployer/public-keys/<VMID>.pub
+```
+
+Имя гостя в имени файла не используется.
+
+`deploy-guest.py`, работающий как `pvedeploy`, изменяет этот каталог напрямую с обязательной валидацией и атомарной записью. Отдельный root-helper для public-key registry не требуется. Root-wrapper остаётся нужен для других root-only задач, в частности для выдачи фиксированного Project Git credential.
+
+При создании новой управляемой Debian VM/LXC `deploy-guest` передаёт `management-authorized-keys` целиком через Cloud-Init `sshkeys` или LXC `ssh-public-keys` и устанавливает PVE tag `management-ssh`.
 
 Если целевой interface ещё не реализован либо aggregate отсутствует в bootstrap-переходный период, минимально допустимый начальный ключ — `deployer.pub`; после реализации registry отсутствие валидного aggregate считается preflight error.
 
@@ -224,7 +243,7 @@ Python-код обязан проверить SHA и соответствие р
 
 Один запуск = одна Git revision.
 
-Management public keys не требуют secret FD: они находятся в отдельном публичном registry и управляются по контракту [`28-management-ssh-keys.md`](28-management-ssh-keys.md).
+Management public keys не требуют secret FD и не требуют привилегированного helper: они находятся в отдельном `pvedeploy`-owned registry и управляются по контракту [`28-management-ssh-keys.md`](28-management-ssh-keys.md).
 
 ## 6. Общий валидатор
 
@@ -265,7 +284,7 @@ management.project_repo_read
 9. `config.yaml` читается;
 10. API token читается и имеет ожидаемый token id;
 11. deployer private/public key существуют и согласованы;
-12. guest `known_hosts` доступен с ожидаемой trust-моделью;
+12. guest `known_hosts` доступен с ожидаемой моделью первого/последующих подключений;
 13. management public-key registry валиден, если механизм уже реализован;
 14. `deployer.pub` присутствует и соответствует `pve_guest_ed25519.pub`;
 15. локальный PVE API доступен;
@@ -275,12 +294,13 @@ management.project_repo_read
 19. pool существует, если задан;
 20. source VM/LXC существует;
 21. VMID не находится в неоднозначном или чужом состоянии;
-22. Bootstrap declaration корректна;
-23. `management.ssh_identity` корректен, если interface реализован;
-24. `management.project_repo_read` корректен, если interface реализован;
-25. если `management.project_repo_read=true`, root-wrapper передал ожидаемый FD;
-26. если effective state содержит `management.ssh`, PLAN предусматривает tag `management-ssh`;
-27. весь PVE + management identity + Project Git access + Bootstrap plan не содержит запрещённого действия.
+22. для новой management identity отсутствует неподтверждённый старый `<VMID>.pub` от ранее удалённого объекта;
+23. Bootstrap declaration корректна;
+24. `management.ssh_identity` корректен, если interface реализован;
+25. `management.project_repo_read` корректен, если interface реализован;
+26. если `management.project_repo_read=true`, root-wrapper передал ожидаемый FD;
+27. если effective state содержит `management.ssh`, PLAN предусматривает tag `management-ssh`;
+28. весь PVE + management identity + Project Git access + Bootstrap plan не содержит запрещённого действия.
 
 Любая ошибка preflight => STOP до изменения PVE, гостевой ОС или public-key registry.
 
@@ -388,7 +408,7 @@ VMID существует
 management-ssh
 ```
 
-`deploy-guest` ставит его Debian-гостю, если effective state содержит `management.ssh`. `sync-management-keys` рассматривает только объекты с этим tag, но дополнительно fail-closed проверяет объект и SSH trust.
+`deploy-guest` ставит его Debian-гостю, если effective state содержит `management.ssh`. `sync-management-keys` рассматривает только объекты с этим tag, но дополнительно проверяет объект и SSH trust.
 
 `management-ssh` не означает ownership со стороны `deploy-guest`: AI-created Debian guest может иметь `management-ssh` без `proxmox-deployer`.
 
@@ -475,7 +495,8 @@ Bootstrap
 → preboot verify
 → start, если требуется
 → readiness
-→ принять/проверить SSH host key по правилам trust
+→ для нового ожидаемого адреса получить и сохранить SSH host key
+→ повторить SSH-подключение уже со строгой сверкой сохранённого ключа
 → проверить root SSH private key deployer
 → management.ssh_identity handler, если запрошен
 → при новом public key зарегистрировать его и вызвать sync-management-keys
@@ -502,7 +523,9 @@ Bootstrap
 → onboot/pool/protection
 → prestart verify
 → start, если требуется
-→ SSH readiness/trust
+→ SSH readiness
+→ для нового ожидаемого адреса получить и сохранить SSH host key
+→ повторить SSH-подключение уже со строгой сверкой сохранённого ключа
 → проверить root SSH private key deployer
 → management.ssh_identity handler, если запрошен
 → при новом public key зарегистрировать его и вызвать sync-management-keys
@@ -557,7 +580,7 @@ APPLY при полном отсутствии пары:
 → private root:root 0600
 → public root:root 0644
 → вывести наружу только public line/fingerprint
-→ зарегистрировать /etc/proxmox-deployer/public-keys/<VMID>-<name>.pub
+→ зарегистрировать /var/lib/proxmox-deployer/public-keys/<VMID>.pub
 → проверить fingerprint
 → запустить sync-management-keys
 ```
@@ -565,6 +588,21 @@ APPLY при полном отсутствии пары:
 Private key не переносится на PVE.
 
 Если пара частично повреждена или registry содержит другой fingerprint, обычный deploy не ротирует identity автоматически.
+
+### 16.1. Жизненный цикл identity
+
+```text
+первое создание VM/LXC     → создать пару и зарегистрировать <VMID>.pub
+повторный deploy           → оставить существующую корректную пару
+переименование гостя       → ничего с ключом не менять
+удаление гостя             → удалить <VMID>.pub и выполнить sync-management-keys
+новый guest с тем же VMID  → создать новую пару, старую identity не использовать
+ротация                    → только отдельной явной операцией
+```
+
+`deploy-guest` v1 сам VM/LXC не удаляет. Поэтому удаление объекта другим механизмом считается полностью завершённым с точки зрения management identity только после удаления его `<VMID>.pub` и успешной синхронизации.
+
+Если VMID переиспользуется, оставшийся `<VMID>.pub` от старого объекта не принимается как identity новой машины. Такое состояние требует явной очистки/подтверждения до создания новой пары.
 
 ## 17. `sync-management-keys`
 
@@ -582,7 +620,8 @@ sync-management-keys
 валидирует весь PVE public-key registry
 → пересобирает management-authorized-keys
 → перечисляет PVE VM/LXC с tag management-ssh
-→ fail-closed проверяет объект и SSH trust
+→ для нового гостя один раз сохраняет SSH host key ожидаемого адреса
+→ для известного гостя строго сверяет сохранённый SSH host key
 → синхронизирует public catalog в участвующие Debian-гости
 → обновляет только управляемый блок /root/.ssh/authorized_keys
 → проверяет результат
@@ -631,7 +670,17 @@ read-only check
 
 ## 20. SSH trust
 
-Для нового гостя допускается первоначальное принятие SSH host key только для вычисленного ожидаемого адреса, после чего соединение немедленно повторяется со строгой проверкой.
+Проект работает в закрытой доверенной домашней сети. Для **только что созданного нового** гостя допускается простое первое знакомство:
+
+```text
+известен VMID и вычисленный ожидаемый IP
+→ дождаться SSH на этом адресе
+→ получить SSH host key
+→ сохранить запись в /var/lib/pvedeploy/.ssh/known_hosts
+→ немедленно повторить подключение уже со строгой проверкой сохранённого ключа
+```
+
+Первое запоминание выполняется только для объекта, который текущая операция действительно только что создала и для которого известен ожидаемый адрес.
 
 Для существующего гостя неожиданная смена SSH host key:
 
@@ -639,9 +688,11 @@ read-only check
 → STOP
 ```
 
-`deploy-guest` и `sync-management-keys` никогда не выполняют автоматический `ssh-keygen -R`/удаление known_hosts ради продолжения.
+`deploy-guest` и `sync-management-keys` никогда не выполняют автоматический `ssh-keygen -R`/удаление `known_hosts` ради продолжения.
 
 Потеря `/var/lib/pvedeploy/.ssh/known_hosts` требует отдельного явного сценария восстановления доверия.
+
+Практическая цель этой проверки в домашней сети — прежде всего не подключиться по ошибке к другой машине после переиспользования адреса или изменения объекта.
 
 ## 21. Изменение ресурсов
 
@@ -665,7 +716,7 @@ Storage move в v1 запрещён.
 
 Массовая миграция, временный dual-IP и изменение нескольких гостей одной командой не входят в v1.
 
-После сетевого изменения обязательна проверка ожидаемого адреса и SSH trust.
+После сетевого изменения обязательна проверка ожидаемого адреса и сохранённого SSH host key. Неожиданная смена ключа не принимается автоматически.
 
 ## 23. Повторный запуск
 
@@ -699,6 +750,7 @@ Bootstrap state
 - PVE UPID;
 - fingerprints public keys;
 - факт регистрации `.pub`;
+- факт первого сохранения SSH host key без закрытых данных;
 - факт/результат `sync-management-keys`;
 - Bootstrap result;
 - Project Git verification result;
@@ -740,7 +792,9 @@ AI Control штатно не вызывает `deploy-guest` на PVE. Для о
 management-ssh
 ```
 
-Поэтому новая AI-created машина сразу содержит deployer и остальные зарегистрированные public keys и однозначно доступна последующему PVE-side key sync.
+Поэтому новая AI-created машина сразу содержит deployer и остальные зарегистрированные public keys и доступна последующему PVE-side key sync.
+
+При первом PVE-side SSH-подключении к такой новой машине `sync-management-keys` может один раз сохранить её SSH host key для ожидаемого адреса в доверенной домашней сети; следующие подключения выполняются только со строгой проверкой.
 
 Если такой объект позже должен получить **собственную** management identity, в v1 это выполняется штатным `deploy-guest` для manifest с:
 
@@ -749,7 +803,7 @@ management:
   ssh_identity: true
 ```
 
-AI не получает remote write API к PVE public-key registry.
+AI не получает remote write API к PVE public-key registry и не пишет в файловую систему PVE.
 
 ## 27. Состояние реализации
 
@@ -767,10 +821,16 @@ management.ssh_identity
 
 management-ssh
 → принятый технический PVE tag для области sync, реализация ещё требуется
+
+/var/lib/proxmox-deployer/public-keys/<VMID>.pub
+→ принятый target contract, реализация ещё требуется
+
+первое запоминание SSH host key нового гостя
+→ принятый target contract, реализация ещё требуется
 ```
 
 Поэтому документация определяет требуемую реализацию, но рабочие `guest.yaml` не должны получать неизвестные schema v6 поля раньше соответствующего изменения schemas/resolver/tests.
 
 ## 28. Главный принцип
 
-> `deploy-guest` детерминированно управляет одной описанной в Git VM/LXC. Новая Debian-машина получает весь актуальный management public-key set и PVE tag `management-ssh`; собственный private management key создаётся только внутри гостя с `management.ssh_identity: true`, наружу регистрируется лишь `.pub`, а массовое распространение выполняет отдельный `sync-management-keys`. `management.project_repo_read` и Guest Bootstrap остаются независимыми последующими механизмами внутри единого manifest-раздела `management`.
+> `deploy-guest` детерминированно управляет одной описанной в Git VM/LXC. Новая Debian-машина получает весь актуальный management public-key set и PVE tag `management-ssh`; при первом подключении один раз запоминается SSH host key ожидаемого адреса, а дальнейшая смена ключа не принимается автоматически. Собственный private management key создаётся только внутри гостя с `management.ssh_identity: true`, наружу регистрируется лишь `/var/lib/proxmox-deployer/public-keys/<VMID>.pub`, а массовое распространение выполняет отдельный `sync-management-keys`. `management.project_repo_read` и Guest Bootstrap остаются независимыми последующими механизмами внутри единого manifest-раздела `management`.
