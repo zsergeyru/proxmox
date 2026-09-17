@@ -2,7 +2,7 @@
 
 **Тип:** Спецификация  
 **Статус:** Действующий  
-**Основной источник:** Да — для каталога инфраструктурных открытых SSH-ключей, `management_key`, генерации собственной пары гостя и синхронизации открытых ключей между управляемыми Debian VM/LXC.
+**Основной источник:** Да — для каталога инфраструктурных открытых SSH-ключей, `management.ssh_identity`, генерации собственной пары гостя, PVE tag `management-ssh` и синхронизации открытых ключей между управляемыми Debian VM/LXC.
 
 Общие правила безопасности задаёт [`23-security.md`](23-security.md). Поведение `deploy-guest` задаёт [`31-deploy-guest.md`](31-deploy-guest.md), а формат `guest.yaml` — [`30-guest-manifest.md`](30-guest-manifest.md). Этот документ является основным источником именно для жизненного цикла **административных SSH-ключей гостевых систем**.
 
@@ -85,12 +85,39 @@ Git в распространении этих административных 
 
 PVE Configuration обязана подготовить сам каталог и зарегистрировать в нём `deployer.pub`, но **не знает заранее**, какие будущие VM/LXC будут AI-, Ansible- или иными управляющими системами. Состав дополнительных ключей определяется только при развёртывании конкретных гостей.
 
-## 4. Один manifest-флаг `management_key`
+## 4. Единый manifest-раздел `management`
+
+Все запросы, относящиеся к административному управлению конкретным гостем, группируются в одном разделе:
+
+```yaml
+management:
+  ssh:
+    user: root
+    port: 22
+  ssh_identity: true
+  project_repo_read: true
+```
+
+Смысл полей разделён:
+
+```text
+management.ssh
+→ как проект входит в этот guest по административному SSH
+
+management.ssh_identity: true
+→ самому гостю нужна собственная management SSH identity
+
+management.project_repo_read: true
+→ гостю нужен фиксированный read-only credential проекта
+```
+
+Этот документ определяет `management.ssh_identity`. `management.project_repo_read` описан в [`30-guest-manifest.md`](30-guest-manifest.md), [`31-deploy-guest.md`](31-deploy-guest.md) и [`33-guest-bootstrap-and-provisioning.md`](33-guest-bootstrap-and-provisioning.md); Git credential не является частью SSH public-key registry.
 
 Для гостя, которому нужна собственная административная SSH-пара, целевой manifest-интерфейс:
 
 ```yaml
-management_key: true
+management:
+  ssh_identity: true
 ```
 
 Смысл поля ровно один:
@@ -109,15 +136,15 @@ VMID получателя
 произвольный secret
 ```
 
-Все пути и правила фиксированы реализацией. Поэтому `deploy-guest` не знает, является ли гость AI Control, Ansible или будущим контроллером. Он видит только `management_key: true`.
+Все пути и правила фиксированы реализацией. Поэтому `deploy-guest` не знает, является ли гость AI Control, Ansible или будущим контроллером. Он видит только `management.ssh_identity: true`.
 
-`management_key` задаётся только в конкретном `guest.yaml` и не наследуется из `defaults.yaml` или profile.
+`management.ssh_identity` задаётся только в конкретном `guest.yaml` и не наследуется из `defaults.yaml` или profile. То же правило действует для `management.project_repo_read`. При этом базовый `management.ssh.user/port` может приходить из общих defaults.
 
-На момент принятия этой спецификации поле ещё не реализовано в действующей schema/resolver. До реализации схемы, resolver, validator и tests его не следует добавлять в рабочие `guest.yaml`.
+На момент принятия этой спецификации `management.ssh_identity` и `management.project_repo_read` ещё не реализованы в действующей schema/resolver. До реализации schemas, resolver, validator и tests их не следует добавлять в рабочие `guest.yaml`.
 
 ## 5. Собственная пара внутри гостя
 
-Для `management_key: true` используется стандартное место внутри Debian-гостя:
+Для `management.ssh_identity: true` используется стандартное место внутри Debian-гостя:
 
 ```text
 /etc/proxmox-guest/ssh/management_ed25519
@@ -138,8 +165,8 @@ public key                          root:root 0644
 ```text
 создать/привести VM/LXC к требуемому состоянию
 → обеспечить вход root по ключу deployer
-→ если management_key != true: закончить обычный сценарий
-→ если management_key == true:
+→ если management.ssh_identity != true: не создавать собственную пару
+→ если management.ssh_identity == true:
      проверить стандартную пару внутри гостя
      если пары нет — создать её внутри гостя
      private key оставить внутри гостя
@@ -181,7 +208,9 @@ sync-management-keys
         ↓
 собрать management-authorized-keys
         ↓
-найти известные управляемые Debian VM/LXC
+найти PVE VM/LXC с tag management-ssh
+        ↓
+проверить принадлежность объекта management SSH-контуру
         ↓
 по SSH от имени root с ключом deployer
         ↓
@@ -200,19 +229,29 @@ sync-management-keys
 
 ## 7. Какие гости участвуют в синхронизации
 
-Не вводится отдельный список VMID получателей и не требуется `ansible_target`, `ai_target` или аналогичный тег.
+Для участия используется отдельный **технический PVE tag**:
 
-Базовый технический критерий участия:
+```text
+management-ssh
+```
 
-> Debian-гость относится к синхронизируемым, если проект ожидает административный SSH `root` и deployer может аутентифицироваться в него своей штатной SSH-идентичностью.
+Это runtime-маркер Proxmox, а не ещё одно поле manifest.
 
-Новая машина, созданная `deploy-guest`, изначально получает как минимум `deployer.pub`.
+Правила:
 
-Новая машина, создаваемая AI/другим управляющим гостем, должна получить **весь актуальный локальный `management-authorized-keys`**, включая `deployer.pub`. Поэтому после запуска она также становится доступной для последующих синхронизаций со стороны PVE.
+- `deploy-guest` устанавливает `management-ssh`, если effective state развёртываемого Debian-гостя содержит `management.ssh`;
+- AI Control или другой управляющий guest, создающий Debian VM/LXC напрямую через PVE API и передающий ей `management-authorized-keys`, также устанавливает `management-ssh`;
+- `sync-management-keys` рассматривает только VM/LXC с этим tag;
+- наличие tag является необходимым, но не достаточным условием записи: тип объекта, ожидаемый Debian management SSH-контракт, SSH host key и возможность безопасной аутентификации всё равно проверяются fail-closed;
+- отсутствие tag означает, что `sync-management-keys` объект не трогает.
 
-Шаблоны, HAOS и другие системы, не участвующие в Debian management SSH-контракте, не должны насильно переводиться в эту модель только ради синхронизации ключей.
+Тег `management-ssh` не означает владение lifecycle со стороны `deploy-guest`. Для этого существует отдельный tag `proxmox-deployer`. Поэтому AI-created гостевая система может иметь `management-ssh`, не имея `proxmox-deployer`.
 
-Точная реализация обнаружения должна быть fail-closed: неожиданный SSH host key, неоднозначный объект или невозможность доказать принадлежность к управляемому контуру не должны приводить к принудительной записи ключей.
+Новая машина, созданная `deploy-guest`, изначально получает как минимум `deployer.pub`, весь текущий `management-authorized-keys` и tag `management-ssh`.
+
+Новая машина, создаваемая AI/другим управляющим гостем, должна получить **весь актуальный локальный `management-authorized-keys`**, включая `deployer.pub`, и тот же tag `management-ssh`.
+
+Шаблоны, HAOS и другие системы, не участвующие в Debian management SSH-контракте, tag `management-ssh` не получают.
 
 ## 8. Локальная копия каталога в гостях
 
@@ -245,6 +284,7 @@ sync-management-keys
 ```text
 прочитать локальный management-authorized-keys
 → передать весь набор public keys новой VM/LXC
+→ установить PVE tag management-ssh
 → создать/клонировать объект
 → запустить
 → проверить доступность согласно своему сценарию
@@ -252,7 +292,14 @@ sync-management-keys
 
 Управляющий гость не регистрирует public keys на PVE и не получает право записи в `/etc/proxmox-deployer`.
 
-Если самой новой машине затем требуется собственная identity, она должна быть в проекте описана как `management_key: true` и пройти штатный `deploy-guest`, который создаст/проверит пару и зарегистрирует её `.pub`. В v1 не вводится удалённый API регистрации ключей со стороны AI.
+Если самой новой машине затем требуется собственная identity, она должна быть в проекте описана как:
+
+```yaml
+management:
+  ssh_identity: true
+```
+
+и пройти штатный `deploy-guest`, который создаст/проверит пару и зарегистрирует её `.pub`. В v1 не вводится удалённый API регистрации ключей со стороны AI.
 
 ## 10. Синхронизация `authorized_keys`
 
@@ -337,7 +384,7 @@ SSH host keys серверов
 
 не добавляется в `management-authorized-keys` и не используется для входа `root@guest`.
 
-`management_key: true` также никак не выдаёт Git credential и не изменяет PVE ACL.
+`management.ssh_identity: true` никак не выдаёт Git credential и не изменяет PVE ACL. `management.project_repo_read: true` использует другой private credential и другой lifecycle, несмотря на общее логическое пространство `management` в manifest.
 
 ## 14. Граница PVE Configuration
 
@@ -371,24 +418,29 @@ backup-controller
 PVE Configuration
 → создаёт механизм и identity deployer
 
-guest.yaml
-→ management_key: true означает «этому гостю нужна собственная management identity»
+guest.yaml / effective state
+→ management.ssh означает административный SSH-контур гостя
+→ management.ssh_identity: true означает «этому гостю нужна собственная management identity»
+→ management.project_repo_read: true означает «этому гостю нужен project Git READ credential»
 
 deploy-guest
-→ создаёт/проверяет пару внутри такого гостя
+→ для management.ssh ставит PVE tag management-ssh
+→ при management.ssh_identity создаёт/проверяет пару внутри гостя
 → private оставляет внутри гостя
 → забирает только .pub
 → регистрирует .pub в каноническом каталоге
 → после изменения каталога запускает sync-management-keys
 
 sync-management-keys
-→ единственный массовый механизм распространения каталога
+→ рассматривает только PVE-объекты с tag management-ssh
+→ fail-closed проверяет объект и SSH trust
 → обновляет локальную копию public keys и управляемый блок authorized_keys
 
-AI/другой создатель VM
-→ не пишет на PVE
+AI/другой создатель Debian VM/LXC
+→ не пишет на PVE filesystem
 → читает локальную копию management-authorized-keys
 → передаёт весь набор новой VM/LXC
+→ ставит новой машине tag management-ssh
 ```
 
 Это намеренно узкая модель. Универсальный secret broker, каталог закрытых ключей, VMID allowlist для публичных ключей, Git write-доступ ради регистрации ключей и SSH-доступ AI к PVE в неё не входят.
@@ -397,12 +449,15 @@ AI/другой создатель VM
 
 На момент принятия документа это **целевой контракт**, который ещё требует реализации:
 
-1. `management_key` в source/effective schema и resolver;
-2. проверки validator/tests;
-3. каталога `/etc/proxmox-deployer/public-keys/` в PVE Configuration;
-4. обработки `management_key` в `deploy-guest`;
-5. отдельного `sync-management-keys`;
-6. стандартных каталогов `/etc/proxmox-guest/ssh/` и `/etc/proxmox-guest/public-keys/`;
-7. использования локального `management-authorized-keys` AI-контуром при создании новых Debian VM/LXC.
+1. `management.ssh_identity` и `management.project_repo_read` в source/effective schemas и resolver;
+2. запрета наследования этих двух guest-local запросов из defaults/profile;
+3. проверок validator/tests;
+4. каталога `/etc/proxmox-deployer/public-keys/` в PVE Configuration;
+5. обработки `management.ssh_identity` в `deploy-guest`;
+6. автоматического PVE tag `management-ssh` для deployer-created Debian-гостей;
+7. требования ставить `management-ssh` при создании Debian-гостей AI/другим управляющим контуром;
+8. отдельного `sync-management-keys`, использующего tag как область обнаружения;
+9. стандартных каталогов `/etc/proxmox-guest/ssh/` и `/etc/proxmox-guest/public-keys/`;
+10. использования локального `management-authorized-keys` AI-контуром при создании новых Debian VM/LXC.
 
 До реализации этих пунктов документ определяет согласованную архитектуру, но не должен создавать ложное впечатление, что действующие schema v6 и текущие scripts уже поддерживают этот интерфейс.
