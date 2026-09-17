@@ -10,6 +10,19 @@ from typing import Any
 
 MISSING = object()
 
+BOOTSTRAP_CAPABILITY_ORDER = (
+    "base",
+    "git",
+    "docker",
+    "ansible_controller",
+)
+BOOTSTRAP_DEPENDENCIES = {
+    "base": (),
+    "git": ("base",),
+    "docker": ("base",),
+    "ansible_controller": ("base", "git", "docker"),
+}
+
 
 class GuestConfigError(ValueError):
     """Конфигурацию гостя нельзя однозначно преобразовать в effective state."""
@@ -27,6 +40,7 @@ class ResolvedGuest:
     network: NetworkConfig
     management_ip: ipaddress.IPv4Address
     management_ip_source: str
+    bootstrap_capabilities: tuple[str, ...]
 
 
 def deep_merge(base: dict, overlay: dict) -> dict:
@@ -122,6 +136,60 @@ def resolve_management_ip(
     return parse_bare_ipv4(override), "guest"
 
 
+def resolve_bootstrap_capabilities(effective: dict) -> tuple[str, ...]:
+    """Вернуть включённые bootstrap capabilities в каноническом порядке v1."""
+    bootstrap = effective.get("bootstrap")
+    if bootstrap is None:
+        return ()
+    if not isinstance(bootstrap, dict):
+        raise GuestConfigError("bootstrap должен быть mapping/object")
+
+    capabilities = bootstrap.get("capabilities")
+    if not isinstance(capabilities, dict):
+        raise GuestConfigError("bootstrap.capabilities должен быть mapping/object")
+
+    unknown = sorted(set(capabilities) - set(BOOTSTRAP_CAPABILITY_ORDER))
+    if unknown:
+        raise GuestConfigError(
+            "неизвестные bootstrap capabilities: " + ", ".join(unknown)
+        )
+
+    for name, enabled in capabilities.items():
+        if not isinstance(enabled, bool):
+            raise GuestConfigError(
+                f"bootstrap.capabilities.{name} должен быть boolean"
+            )
+
+    enabled = tuple(
+        name for name in BOOTSTRAP_CAPABILITY_ORDER if capabilities.get(name) is True
+    )
+    if not enabled:
+        raise GuestConfigError(
+            "bootstrap задан, но не включена ни одна capability; удалите bootstrap"
+        )
+
+    for name in enabled:
+        missing = [
+            dependency
+            for dependency in BOOTSTRAP_DEPENDENCIES[name]
+            if capabilities.get(dependency) is not True
+        ]
+        if missing:
+            raise GuestConfigError(
+                f"bootstrap capability {name!r} требует явно включить: "
+                + ", ".join(missing)
+            )
+
+    boot = effective.get("boot")
+    if not isinstance(boot, dict) or boot.get("start_after_deploy") is not True:
+        raise GuestConfigError(
+            "bootstrap требует boot.start_after_deploy=true, так как выполняется "
+            "только после проверенного SSH root"
+        )
+
+    return enabled
+
+
 def resolve_effective_guest(
     source: dict,
     defaults: dict,
@@ -147,9 +215,12 @@ def resolve_effective_guest(
         "address": f"{management_ip}/{network.subnet.prefixlen}"
     }
 
+    bootstrap_capabilities = resolve_bootstrap_capabilities(effective)
+
     return ResolvedGuest(
         effective=effective,
         network=network,
         management_ip=management_ip,
         management_ip_source=ip_source,
+        bootstrap_capabilities=bootstrap_capabilities,
     )
