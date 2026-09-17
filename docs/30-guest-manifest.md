@@ -36,6 +36,15 @@ schema_version: 6
 
 Версия 6 вводит действующий машинный интерфейс `bootstrap.capabilities`.
 
+Отдельно принято следующее расширение manifest для read-only доступа к проектному Git:
+
+```yaml
+access:
+  project_repo_read: true
+```
+
+На момент фиксации этого решения поле `access.project_repo_read` **ещё не реализовано** в действующей schema v6 и не должно добавляться в реальные `guest.yaml` до соответствующего изменения schemas/resolver/validator. Этот документ фиксирует целевой контракт заранее, чтобы его реализация не вводила другой интерфейс.
+
 Центральные общие настройки:
 
 ```yaml
@@ -123,6 +132,8 @@ profiles:
 
 `bootstrap` является исключением из обычного наследования: в v1 он задаётся только явно в конкретном `guest.yaml`. `defaults.yaml` и профили не имеют поля `bootstrap`. Это исключает скрытую установку ПО во всех гостях при одном изменении общего профиля.
 
+Целевое `access.project_repo_read` также задаётся только явно конкретному гостю. Оно не наследуется из defaults/profile, чтобы общий Git credential не начал автоматически появляться у всех гостевых систем после изменения одного общего файла.
+
 ## Guest Bootstrap v1
 
 Если гостю нужна первичная настройка после появления проверенного административного SSH, она задаётся явно:
@@ -183,6 +194,50 @@ boot:
 
 Bootstrap v1 не является универсальным механизмом выполнения команд. В `guest.yaml` запрещено вводить произвольные `packages`, shell-команды, URL установщиков, пароли, токены или закрытые ключи. Точная граница capabilities определена в [`33-guest-bootstrap-and-provisioning.md`](33-guest-bootstrap-and-provisioning.md).
 
+## Доступ к проектному Git только для чтения
+
+Принят один специальный логический запрос:
+
+```yaml
+access:
+  project_repo_read: true
+```
+
+Он означает ровно одно:
+
+```text
+гостю разрешена локальная копия общего read-only GitHub Deploy Key
+→ только для git@github.com:zsergeyru/proxmox.git
+→ только clone/fetch/read
+```
+
+`guest.yaml` **не** может задавать:
+
+```text
+имя secret/credential
+путь к закрытому ключу на PVE
+сам private key
+произвольный destination
+другой repository
+write-доступ
+```
+
+Связка `project_repo_read → конкретный общий Git read-key → стандартное место в госте` является фиксированной частью кода deploy, а не данными manifest.
+
+Мастер-копия read-key хранится root-only на PVE. Root-wrapper передаёт её содержимое `deploy-guest` только для текущего запуска и только если effective state требует `project_repo_read`; передача выполняется через отдельный file descriptor, не через argv/environment.
+
+Стандартное место локальной копии в Debian-госте:
+
+```text
+/etc/proxmox-guest/credentials/github-proxmox-read
+```
+
+с `root:root 0600`.
+
+Этот credential не является административным SSH-ключом и не добавляется в `/root/.ssh/authorized_keys`.
+
+Если AI требуется отправлять изменения обратно в GitHub, write credential проектируется отдельно и не выражается через `project_repo_read`.
+
 ## Требования к административному SSH
 
 Для всех развёртываемых Debian VM/LXC итоговое состояние должно содержать:
@@ -204,6 +259,8 @@ management:
 ключ Ansible/311
 личный ключ при необходимости
 ```
+
+Общий Git read-key к этому списку не относится: он используется только как исходящий клиентский credential к GitHub.
 
 Наличие конкретного открытого ключа в `/root/.ssh/authorized_keys` не определяется автоматически членством в пуле PVE.
 
@@ -257,6 +314,8 @@ PVE Configuration подготавливает подходящий Debian 13 te
 ### LXC
 
 При создании LXC `deploy-guest` передаёт открытый ключ PVE через штатный `ssh-public-keys`, после чего проверяет вход `root` по SSH.
+
+Общий Git read-key, если запрошен, материализуется отдельно после появления проверенного административного SSH и не является частью `authorized_keys`.
 
 ## Сеть
 
@@ -335,7 +394,7 @@ resources:
     size_gb: 24
 ```
 
-`311-dev-services` дополнительно явно включает Bootstrap:
+`311-dev-services` дополнительно явно включает Bootstrap. После реализации принятого `access` interface его целевой manifest также будет запрашивать read-only доступ к проектному репозиторию:
 
 ```yaml
 bootstrap:
@@ -344,7 +403,12 @@ bootstrap:
     git: true
     docker: true
     ansible_controller: true
+
+access:
+  project_repo_read: true
 ```
+
+Аналогично `301-ai-control` должен использовать `project_repo_read: true` для своей рабочей копии проекта вместо отдельного read-only Deploy Key.
 
 Из общих настроек и профиля будут получены node, pool, storage, сеть, параметры запуска, SSH-пользователь/порт, тип и источник гостя. IP вычисляется из VMID.
 
@@ -364,7 +428,7 @@ deployable: true
 
 Поэтому `state: planned` вместе с `deployable: true` разрешает создание. `legacy` не означает удаление.
 
-`deployable: false` не получает параметры развёртывания автоматически и может описывать наблюдаемый или зарезервированный объект. Такой объект не может содержать `bootstrap`.
+`deployable: false` не получает параметры развёртывания автоматически и может описывать наблюдаемый или зарезервированный объект. Такой объект не может содержать `bootstrap`. До реализации `access` schema его ограничения должны быть определены вместе с соответствующим изменением schemas/resolver.
 
 ## Зарезервированные и наблюдаемые манифесты
 
@@ -406,6 +470,7 @@ Management IP      192.168.3.11/16             [vmid]
 Memory             4096 MiB                    [guest]
 Disk size          32 GiB                      [guest]
 Bootstrap           base,git,docker,...          [guest]
+Project repo read   true                         [guest]
 ```
 
 Факты конкретного запуска, например конкретный LXC-архив, не записываются обратно в manifest.
@@ -421,6 +486,8 @@ python scripts/validate_repo.py
 Он проверяет исходные схемы, `defaults.yaml`, профили, структуру каталогов, конфликты VMID/IP, секретоподобные поля, ограничения VM/LXC и итоговое состояние, построенное через `scripts/guest_config.py`.
 
 Семантика Bootstrap также проверяется общим resolver, которым пользуются validator и будущий `deploy-guest`. Второй набор правил Bootstrap в `deploy-guest.py` создавать нельзя.
+
+Когда `access.project_repo_read` будет реализован, schemas/resolver/validator должны принять только boolean-поле `project_repo_read`; произвольные имена credentials, секретные значения и пути должны оставаться запрещены.
 
 ## Git как основной источник
 
@@ -440,7 +507,7 @@ guest.yaml
 
 Связанные основные документы:
 
-- [`31-deploy-guest.md`](31-deploy-guest.md) — PLAN/APPLY и безопасное применение;
-- [`33-guest-bootstrap-and-provisioning.md`](33-guest-bootstrap-and-provisioning.md) — Guest Bootstrap v1 и граница Ansible;
+- [`31-deploy-guest.md`](31-deploy-guest.md) — PLAN/APPLY, временная передача read-key и безопасное применение;
+- [`33-guest-bootstrap-and-provisioning.md`](33-guest-bootstrap-and-provisioning.md) — Guest Bootstrap v1, Git read access и граница Ansible;
 - [`32-docker-in-lxc-policy.md`](32-docker-in-lxc-policy.md) — Docker внутри LXC;
 - [`23-security.md`](23-security.md) — ключи и безопасность.
