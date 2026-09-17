@@ -29,47 +29,47 @@ grep -q 'python3-jsonschema' "$SYSTEM" \
 grep -q 'from jsonschema import Draft202012Validator' "$SYSTEM" \
     || fail "PVE Configuration must verify Draft202012Validator import"
 
-grep -q 'deploy_ssh_dir="/var/lib/pvedeploy/.ssh"' "$RUNTIME" \
+grep -Fq 'deploy_ssh_dir="/var/lib/pvedeploy/.ssh"' "$RUNTIME" \
     || fail "pvedeploy SSH directory contract is missing"
-grep -q 'guest_known_hosts="${deploy_ssh_dir}/known_hosts"' "$RUNTIME" \
+grep -Fq 'guest_known_hosts="${deploy_ssh_dir}/known_hosts"' "$RUNTIME" \
     || fail "guest known_hosts contract is missing"
-grep -q 'install -d -o "$DEPLOY_USER" -g "$DEPLOY_USER" -m 0700 "$deploy_ssh_dir"' "$RUNTIME" \
+grep -Fq 'install -d -o "$DEPLOY_USER" -g "$DEPLOY_USER" -m 0700 "$deploy_ssh_dir"' "$RUNTIME" \
     || fail "pvedeploy .ssh must be mode 0700"
-grep -q 'install -o "$DEPLOY_USER" -g "$DEPLOY_USER" -m 0600 /dev/null "$guest_known_hosts"' "$RUNTIME" \
+grep -Fq 'install -o "$DEPLOY_USER" -g "$DEPLOY_USER" -m 0600 /dev/null "$guest_known_hosts"' "$RUNTIME" \
     || fail "guest known_hosts must be created with mode 0600"
-grep -q '\[\[ ! -L "$deploy_ssh_dir" \]\]' "$RUNTIME" \
+grep -Fq '[[ ! -L "$deploy_ssh_dir" ]]' "$RUNTIME" \
     || fail "pvedeploy .ssh symlink guard is missing"
-grep -q '\[\[ ! -L "$guest_known_hosts" \]\]' "$RUNTIME" \
+grep -Fq '[[ ! -L "$guest_known_hosts" ]]' "$RUNTIME" \
     || fail "guest known_hosts symlink guard is missing"
 
-grep -q '^    45-management-keys.sh \\$' "$CONFIGURE" \
+grep -Fq '    45-management-keys.sh \' "$CONFIGURE" \
     || fail "PVE Configuration must source the management key registry module"
-grep -q '^    ensure_management_public_key_registry$' "$CONFIGURE" \
+grep -Fq '    ensure_management_public_key_registry' "$CONFIGURE" \
     || fail "PVE Configuration must prepare the management key registry after deployer identity"
-grep -q 'PUBLIC_KEYS_DIR="${RUNTIME_DIR}/public-keys"' "$KEYS" \
+grep -Fq 'PUBLIC_KEYS_DIR="${RUNTIME_DIR}/public-keys"' "$KEYS" \
     || fail "canonical public-key registry path is missing"
-grep -q 'DEPLOYER_REGISTRY_KEY="${PUBLIC_KEYS_DIR}/deployer.pub"' "$KEYS" \
+grep -Fq 'DEPLOYER_REGISTRY_KEY="${PUBLIC_KEYS_DIR}/deployer.pub"' "$KEYS" \
     || fail "deployer.pub registry contract is missing"
-grep -q 'MANAGEMENT_KEYS_AGGREGATE="${PUBLIC_KEYS_DIR}/management-authorized-keys"' "$KEYS" \
+grep -Fq 'MANAGEMENT_KEYS_AGGREGATE="${PUBLIC_KEYS_DIR}/management-authorized-keys"' "$KEYS" \
     || fail "management-authorized-keys aggregate contract is missing"
-grep -q 'install -d -o "$DEPLOY_USER" -g "$DEPLOY_USER" -m 0750 "$PUBLIC_KEYS_DIR"' "$KEYS" \
+grep -Fq 'install -d -o "$DEPLOY_USER" -g "$DEPLOY_USER" -m 0750 "$PUBLIC_KEYS_DIR"' "$KEYS" \
     || fail "public-key registry must belong to pvedeploy with mode 0750"
-grep -q 'Один management public key зарегистрирован дважды' "$KEYS" \
+grep -Fq 'Один management public key зарегистрирован дважды' "$KEYS" \
     || fail "registry duplicate fingerprint guard is missing"
-grep -q 'автоматическая ротация запрещена' "$KEYS" \
+grep -Fq 'автоматическая ротация запрещена' "$KEYS" \
     || fail "deployer registry mismatch must STOP instead of rotating"
 
-grep -q '/usr/bin/python3 "\\$VALIDATOR"' "$TOOLING" \
+grep -Fq '/usr/bin/python3 "\$VALIDATOR"' "$TOOLING" \
     || fail "root wrapper must run the shared repository validator"
-grep -q 'from guest_config import GuestConfigError, resolve_effective_guest' "$TOOLING" \
+grep -Fq 'from guest_config import GuestConfigError, resolve_effective_guest' "$TOOLING" \
     || fail "root wrapper must use the shared guest resolver"
-grep -q 'management.get("project_repo_read")' "$TOOLING" \
+grep -Fq 'management.get("project_repo_read")' "$TOOLING" \
     || fail "root wrapper must derive project_repo_read from effective state"
-grep -q 'exec 8<"\\$PROJECT_REPO_KEY"' "$TOOLING" \
+grep -Fq 'exec 8<"\$PROJECT_REPO_KEY"' "$TOOLING" \
     || fail "root wrapper must open the fixed Project Git key on a dedicated FD"
-grep -q 'DEPLOY_GUEST_PROJECT_REPO_KEY_FD=8' "$TOOLING" \
+grep -Fq 'DEPLOY_GUEST_PROJECT_REPO_KEY_FD=8' "$TOOLING" \
     || fail "root wrapper must pass only the Project Git key FD number to deploy-guest"
-if grep -q 'PROJECT_REPO_KEY=.*env' "$TOOLING"; then
+if grep -Fq 'PROJECT_REPO_KEY=.*env' "$TOOLING"; then
     fail "Project Git private key path/material must not be passed through environment"
 fi
 
