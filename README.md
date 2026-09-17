@@ -64,7 +64,7 @@ AI Control
 | Пути, рабочие данные и файлы состояния PVE | [`docs/21-pve-filesystem-layout.md`](docs/21-pve-filesystem-layout.md) |
 | Политика резервного копирования, сроков хранения, RPO/RTO | [`docs/22-storage-and-backup.md`](docs/22-storage-and-backup.md) |
 | Восстановление и аварийное восстановление | [`docs/27-backup-and-disaster-recovery-runbook.md`](docs/27-backup-and-disaster-recovery-runbook.md) |
-| Безопасность и SSH-ключи | [`docs/23-security.md`](docs/23-security.md) |
+| Безопасность, SSH-ключи и общий Project Git READ credential | [`docs/23-security.md`](docs/23-security.md) |
 | Учётные записи API PVE, роли и ACL | [`docs/25-pve-access-control.md`](docs/25-pve-access-control.md) |
 | Первичная и повторяемая настройка гостевых систем | [`docs/33-guest-bootstrap-and-provisioning.md`](docs/33-guest-bootstrap-and-provisioning.md) |
 | Сетевая спецификация | [`docs/40-network.md`](docs/40-network.md) |
@@ -78,7 +78,9 @@ README конкретной гостевой системы описывает �
 
 - Git хранит воспроизводимую конфигурацию и документацию, но не рабочие секреты.
 - Пароли, токены, закрытые ключи и другие секреты в репозиторий не добавляются.
-- Для управляемых Debian VM/LXC используется `root` с SSH-доступом только по открытому ключу; разные контуры имеют независимые пары SSH-ключей.
-- ACL PVE, SSH-доступ внутрь гостевой системы и права приложений являются разными уровнями доступа.
+- Для управляемых Debian VM/LXC используется `root` с SSH-доступом только по открытому ключу; разные административные контуры имеют независимые пары SSH-ключей.
+- Для чтения закрытого `zsergeyru/proxmox` допускается один общий GitHub Deploy Key только для чтения; это отдельный прикладной credential, не административный SSH-ключ.
+- Принятый целевой manifest-интерфейс для его выдачи гостю — `access.project_repo_read: true`; до реализации соответствующей schema/resolver это поле не добавляется в действующие `guest.yaml`.
+- ACL PVE, SSH-доступ внутрь гостевой системы, read-only доступ к проектному Git и права приложений являются разными уровнями доступа.
 - Опасные изменения должны иметь предварительные проверки, явную область воздействия и последующую проверку результата.
 - `archive/` не является источником действующей конфигурации.
