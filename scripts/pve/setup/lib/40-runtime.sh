@@ -105,6 +105,19 @@ ensure_runtime_layout() {
     install -d -o root -g root -m 0700 "$BACKUP_ROOT" "$SECRETS_BACKUP_ROOT"
     install -d -o root -g root -m 0755 /usr/local/sbin
 
+    # pvedeploy не читает /etc/pve напрямую. Публичный PVE CA копируется
+    # в root-owned runtime-файл с read-only доступом для pvedeploy.
+    [[ -f "$PVE_CA_SOURCE" ]] \
+        || die "Не найден исходный PVE CA: ${PVE_CA_SOURCE}"
+    [[ ! -L "$PVE_CA_FILE" ]] \
+        || die "Runtime PVE CA ${PVE_CA_FILE} является симлинком; автоматическое обновление запрещено"
+    install -o root -g "$DEPLOY_USER" -m 0640 "$PVE_CA_SOURCE" "$PVE_CA_FILE"
+    cmp -s "$PVE_CA_SOURCE" "$PVE_CA_FILE" \
+        || die "Runtime-копия PVE CA не совпадает с ${PVE_CA_SOURCE}"
+    runuser -u "$DEPLOY_USER" -- test -r "$PVE_CA_FILE" \
+        || die "Runtime PVE CA недоступен для ${DEPLOY_USER}: ${PVE_CA_FILE}"
+    ok "Публичный PVE CA подготовлен для ограниченного runtime: ${PVE_CA_FILE}"
+
     # deploy-guest хранит SSH host keys управляемых VM/LXC отдельно от
     # root-only known_hosts, используемого для GitHub. Не следуем симлинкам,
     # которые ограниченный пользователь мог подложить перед root-run.

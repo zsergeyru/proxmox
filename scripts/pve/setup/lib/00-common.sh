@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-PVE_CONFIGURATION_VERSION=27
+PVE_CONFIGURATION_VERSION=28
 
 PRIVATE_REPO="git@github.com:zsergeyru/proxmox.git"
 PRIVATE_BRANCH="main"
@@ -27,6 +27,8 @@ SSH_CONFIG="${SSH_DIR}/config"
 KNOWN_HOSTS="${SSH_DIR}/known_hosts"
 PVE_GUEST_KEY="${SSH_DIR}/pve_guest_ed25519"
 PVE_GUEST_PUB="${PVE_GUEST_KEY}.pub"
+PVE_CA_SOURCE="/etc/pve/pve-root-ca.pem"
+PVE_CA_FILE="${CONFIG_DIR}/pve-root-ca.pem"
 
 TEMPLATE_VMID=9000
 TEMPLATE_NAME="tpl-debian13"

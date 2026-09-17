@@ -40,7 +40,7 @@ SSH_DIR = CONFIG_DIR / "ssh"
 TOKEN_FILE = CONFIG_DIR / "secrets/host-deploy.token"
 DEPLOYER_KEY = SSH_DIR / "pve_guest_ed25519"
 DEPLOYER_PUB = SSH_DIR / "pve_guest_ed25519.pub"
-PVE_CA = Path("/etc/pve/pve-root-ca.pem")
+PVE_CA = CONFIG_DIR / "pve-root-ca.pem"
 RUNTIME_DIR = Path("/var/lib/proxmox-deployer")
 REGISTRY_DIR = RUNTIME_DIR / "public-keys"
 AGGREGATE_FILE = REGISTRY_DIR / "management-authorized-keys"
@@ -336,7 +336,10 @@ def load_api_token() -> tuple[str, str]:
 def api_get(base_url: str, path: str, token_id: str, token_secret: str) -> Any:
     if not PVE_CA.is_file():
         fail(f"не найден PVE CA: {PVE_CA}")
-    context = ssl.create_default_context(cafile=str(PVE_CA))
+    try:
+        context = ssl.create_default_context(cafile=str(PVE_CA))
+    except (OSError, ssl.SSLError) as exc:
+        raise SyncError(f"не удалось загрузить runtime PVE CA {PVE_CA}: {exc}") from exc
     request = urllib.request.Request(
         f"{base_url}{path}",
         headers={"Authorization": f"PVEAPIToken={token_id}={token_secret}"},
