@@ -3,6 +3,25 @@
 **Тип:** LXC  
 **Назначение:** DevOps, развёртывание, CI/CD и сервисы разработки, отделённые от AI Control и обычных прикладных сервисов.
 
+## Guest Bootstrap v1
+
+`311-dev-services` — первый целевой сценарий полного Guest Bootstrap v1. Его `guest.yaml` явно запрашивает:
+
+```yaml
+bootstrap:
+  capabilities:
+    base: true
+    git: true
+    docker: true
+    ansible_controller: true
+```
+
+После создания LXC `deploy-guest` должен получить проверенный `root SSH`, последовательно проверить/применить `base → git → docker → ansible_controller` и только после успешной финальной проверки снять `deploy-incomplete`.
+
+Bootstrap подготавливает сам управляющий узел Ansible, но **не** устанавливает Semaphore, Gitea/Gogs, Jenkins и другие прикладные сервисы. Они остаются зоной последующего Ansible provisioning.
+
+Полный контракт: [`../../docs/31-deploy-guest.md`](../../docs/31-deploy-guest.md) и [`../../docs/33-guest-bootstrap-and-provisioning.md`](../../docs/33-guest-bootstrap-and-provisioning.md).
+
 ## Планируемые сервисы
 
 - Ansible — штатный механизм повторяемой настройки внутри VM/LXC через SSH;
@@ -33,7 +52,7 @@ Ansible и Semaphore относятся именно сюда, а не в `301-a
 
 Hermes отвечает за принятие решения, изменение или подготовку конфигурации в Git и запуск операции. Ansible повторяемо применяет нужную конфигурацию внутри гостевой ОС.
 
-Прямой SSH из AI Control остаётся допустимым для первичной настройки, диагностики, разовых действий и аварийных случаев.
+Прямой SSH из AI Control остаётся допустимым для диагностики, разовых действий и аварийных случаев. Штатная первичная подготовка `311` теперь является частью `deploy-guest` через Guest Bootstrap v1.
 
 ## Semaphore
 
