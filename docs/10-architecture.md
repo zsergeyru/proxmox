@@ -103,6 +103,9 @@ AI использует отдельную учётную запись PVE и о
 начальная готовность к управлению
 → SSH root только по ключу
 
+read-only доступ к проектному Git при явном запросе
+→ общий GitHub Deploy Key только для чтения
+
 повторяемая настройка ОС и приложений
 → Ansible на dev-services
 
@@ -110,9 +113,9 @@ AI использует отдельную учётную запись PVE и о
 → прямой SSH соответствующим ключом
 ```
 
-Требования к начальному доступу и передаче управления Ansible: [`33-guest-bootstrap-and-provisioning.md`](33-guest-bootstrap-and-provisioning.md).
+Требования к начальному доступу, Project Git access и передаче управления Ansible: [`33-guest-bootstrap-and-provisioning.md`](33-guest-bootstrap-and-provisioning.md).
 
-Общие правила SSH и безопасности: [`23-security.md`](23-security.md).
+Общие правила SSH, Git credential и безопасности: [`23-security.md`](23-security.md).
 
 ## 6. Шаблон `9000`
 
@@ -125,6 +128,7 @@ AI использует отдельную учётную запись PVE и о
 → полный клон
 → ресурсы, сеть и открытые ключи конкретной гостевой системы
 → первый запуск
+→ при необходимости материализация Project Git READ credential
 → повторяемая настройка
 ```
 
@@ -155,11 +159,19 @@ AI Control и DevOps разделены:
 
 ```text
 AI Control
-→ агенты + Proximo + отдельные SSH/Git-ключи AI
+→ агенты + Proximo + собственный административный SSH-ключ AI
+→ отдельная рабочая копия проекта
 
 Dev services
-→ Ansible + средства повторяемой настройки + необязательный веб-интерфейс для человека
+→ Ansible + собственный административный SSH-ключ Ansible
+→ средства повторяемой настройки + необязательный веб-интерфейс для человека
+
+Project Git READ
+→ один общий read-only credential для zsergeyru/proxmox
+→ выдаётся только гостям, явно запросившим project_repo_read
 ```
+
+Административные SSH-ключи AI и Ansible остаются независимыми. Общим является только ограниченный read-only credential одного проектного Git-репозитория. Возможный Git write-доступ AI является отдельным контуром.
 
 Спецификация AI Control: [`50-ai-control.md`](50-ai-control.md).  
 Инструкция ввода AI Control: [`51-ai-control-bootstrap.md`](51-ai-control-bootstrap.md).
