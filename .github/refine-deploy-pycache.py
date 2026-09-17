@@ -4,14 +4,18 @@ root = Path('.')
 tooling = root / 'scripts/pve/setup/lib/70-tooling.sh'
 text = tooling.read_text(encoding='utf-8')
 
-old = '''    status="\\$(canonical_git -C "\\$REPO_DIR" status --porcelain=v1 --untracked-files=all)" \\
-        || fail "Не удалось проверить состояние Git в \\$REPO_DIR"'''
-new = '''    status="\\$(canonical_git -C "\\$REPO_DIR" status --porcelain=v1 --untracked-files=all --ignored)" \\
-        || fail "Не удалось проверить состояние Git в \\$REPO_DIR"
-    status="\\$(printf '%s\\n' "\\$status" | grep -Ev '^!! .*(__pycache__/|\\.py[co]$)' || true)"'''
-if old not in text:
-    raise SystemExit('missing clean-repo anchor')
-text = text.replace(old, new, 1)
+needle = 'status --porcelain=v1 --untracked-files=all)'
+if text.count(needle) != 1:
+    raise SystemExit(f'unexpected clean status anchor count: {text.count(needle)}')
+text = text.replace(needle, 'status --porcelain=v1 --untracked-files=all --ignored)', 1)
+
+marker = '        || fail "Не удалось проверить состояние Git в \\$REPO_DIR"\n    [[ -z "\\$status" ]]'
+insert = '''        || fail "Не удалось проверить состояние Git в \\$REPO_DIR"
+    status="\\$(printf '%s\\n' "\\$status" | grep -Ev '^!! .*(__pycache__/|\\.py[co]$)' || true)"
+    [[ -z "\\$status" ]]'''
+if marker not in text:
+    raise SystemExit('missing status filter insertion anchor')
+text = text.replace(marker, insert, 1)
 
 replacements = [
     (
