@@ -88,6 +88,7 @@ for module in \
     20-system.sh \
     30-storage.sh \
     40-runtime.sh \
+    45-management-keys.sh \
     50-access.sh \
     60-template-contract.sh \
     61-template-source.sh \
@@ -170,6 +171,7 @@ main() {
 
     ensure_runtime_layout
     ensure_pve_guest_key
+    ensure_management_public_key_registry
     prepare_canonical_github_access
     verify_private_repo_access
     sync_private_repo
