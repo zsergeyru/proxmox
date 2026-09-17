@@ -36,7 +36,9 @@ jobs:
             scripts/validate_repo.py \
             scripts/tests/test-guest-bootstrap.py \
             scripts/tests/test-sync-management-keys.py \
+            scripts/tests/test-deploy-guest.py \
             scripts/pve/sync-management-keys.py \
+            scripts/pve/deploy-guest.py \
             scripts/pve/setup/render-template-cloud-init.py
 
       - name: Run Guest Bootstrap v1 contract checks
@@ -44,6 +46,9 @@ jobs:
 
       - name: Run sync-management-keys unit checks
         run: python scripts/tests/test-sync-management-keys.py
+
+      - name: Run deploy-guest unit checks
+        run: python scripts/tests/test-deploy-guest.py
 
       - name: Validate shell syntax
         run: |
