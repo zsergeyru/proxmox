@@ -4,7 +4,7 @@
 **Статус:** Действующий  
 **Основной источник:** Да — для целевой архитектуры `301-ai-control`, границ управления и взаимодействия Proximo, Git, SSH и Ansible.
 
-Пошаговый ввод `301-ai-control` находится в [`51-ai-control-bootstrap.md`](51-ai-control-bootstrap.md). Точные права PVE задаёт [`25-pve-access-control.md`](25-pve-access-control.md), правила учётных данных — [`23-security.md`](23-security.md), начальный доступ к гостевым системам — [`33-guest-bootstrap-and-provisioning.md`](33-guest-bootstrap-and-provisioning.md).
+Пошаговый ввод `301-ai-control` находится в [`51-ai-control-bootstrap.md`](51-ai-control-bootstrap.md). Точные права PVE задаёт [`25-pve-access-control.md`](25-pve-access-control.md), общую политику безопасности — [`23-security.md`](23-security.md), а жизненный цикл management SSH keys и их синхронизацию — [`28-management-ssh-keys.md`](28-management-ssh-keys.md).
 
 ## 1. Разделение ответственности
 
@@ -20,13 +20,13 @@ deploy-guest + deployer@pve!host-deploy на стороне PVE
 Ansible на 311-dev-services
 → повторяемая настройка ОС и приложений внутри гостевых систем через SSH
 
-прямой SSH из 301
+прямой SSH из AI Control
 → диагностика, первичная настройка, разовые и аварийные действия внутри гостевой ОС
 ```
 
 `deploy-guest` не является обязательным защитным шлюзом для AI-агента. AI и человек используют разные учётные записи PVE.
 
-Ansible и Semaphore не размещаются в `301`; они относятся к `311-dev-services`.
+AI не получает SSH/root-доступ к самому PVE только ради создания гостевых систем или обмена management public keys.
 
 ## 2. `301-ai-control`
 
@@ -34,7 +34,7 @@ Ansible и Semaphore не размещаются в `301`; они относят
 
 `320-ai-control` остаётся временным устаревающим управляющим узлом до успешного ввода `301` по инструкции и отдельного решения о выводе `320`.
 
-Целевая структура:
+Целевая структура приложения:
 
 ```text
 /opt/ai-control/
@@ -43,19 +43,20 @@ Ansible и Semaphore не размещаются в `301`; они относят
 │   └── <future-agent>/
 ├── mcp/
 │   └── proximo/
-├── ssh/
 ├── repos/
 │   └── proxmox/
 └── state/
 ```
 
-Общий read-only credential проектного Git хранится не как отдельный AI Deploy Key в `/opt/ai-control/ssh`, а в стандартном управляемом месте гостя:
+Инфраструктурные credentials и management keys не обязаны жить внутри `/opt/ai-control`; для них используются стандартные пути управляемого гостя:
 
 ```text
-/etc/proxmox-guest/credentials/github-proxmox-read
+/etc/proxmox-guest/ssh/
+/etc/proxmox-guest/public-keys/
+/etc/proxmox-guest/credentials/
 ```
 
-Docker, Proximo, инфраструктурный SSH-ключ AI и рабочая копия Git являются общей платформой и не дублируются внутри каждого агента.
+Точные пути определяет [`28-management-ssh-keys.md`](28-management-ssh-keys.md) и файловая политика гостя.
 
 ## 3. Proximo и `managed`
 
@@ -76,8 +77,9 @@ AI-агент
 → Proximo
 → создать или клонировать сразу с pool=managed
 → настроить CPU, RAM, диски, сеть и параметры гостевой системы
+→ передать актуальный management-authorized-keys новой Debian VM/LXC
 → запустить и проверить
-→ дальнейшее управление гостевой системой через PVE
+→ дальнейшее управление гостевой системой через PVE и/или SSH в разрешённых пределах
 ```
 
 AI может самостоятельно создавать, клонировать, настраивать и удалять обычные разрешённые VM/LXC через Proximo.
@@ -92,7 +94,8 @@ AI Control штатно не получает прав на:
 - изменение определений хранилищ;
 - сертификаты и репозитории самого PVE;
 - межсетевой экран хоста;
-- перезагрузку и выключение физического PVE.
+- перезагрузку и выключение физического PVE;
+- изменение `/etc/proxmox-deployer` напрямую.
 
 Точный набор привилегий и матрица ACL принадлежат [`25-pve-access-control.md`](25-pve-access-control.md).
 
@@ -101,65 +104,75 @@ AI Control штатно не получает прав на:
 Пул `managed` определяет **права AI на объект Proxmox**, но не определяет содержимое `authorized_keys` внутри Linux.
 
 ```text
-PVE:
-гость в managed
-→ ai-agent@pve!infra получает предусмотренные права уровня VM/LXC
+PVE ACL / pool
+→ жизненный цикл и PVE-конфигурация объекта
 
-гость вне managed
-→ эти права PVE не распространяются
+management public keys внутри guest
+→ административный SSH root внутрь ОС
+
+access.project_repo_read
+→ только исходящий read-only доступ гостя к zsergeyru/proxmox
 ```
 
-Отдельно:
+Эти уровни не подменяют друг друга.
+
+Перемещение VM/LXC в `managed` или из него само по себе не должно генерировать private keys, регистрировать public keys или менять Git credential.
+
+## 5. Management SSH identity AI Control
+
+AI Control должен иметь собственную административную SSH identity, отличную от deployer и Ansible.
+
+После реализации целевого manifest-интерфейса для `301` используется:
+
+```yaml
+management_key: true
+```
+
+Это не означает специальной логики `301` внутри PVE Configuration или `deploy-guest`.
+
+Общий алгоритм одинаков для любого такого гостя:
 
 ```text
-гостевая ОС:
-есть ai_control_ed25519.pub в /root/.ssh/authorized_keys
-→ AI может войти по SSH как root
-
-ключ удалён
-→ прямой SSH-доступ AI запрещён
+deploy-guest получает SSH root своим deployer key
+→ внутри гостя создаёт/проверяет стандартную management keypair
+→ private key остаётся только внутри гостя
+→ наружу забирается только .pub
+→ public key регистрируется на PVE
+→ sync-management-keys распространяет обновлённый public registry
 ```
 
-Перемещение VM/LXC в `managed` или из него само по себе не должно изменять `authorized_keys`.
-
-Поэтому гостевая система вне `managed` может сознательно оставаться доступной AI по SSH для диагностики ОС, при этом AI не получает права менять её аппаратные параметры или жизненный цикл через Proximo.
-
-Read-only доступ к проектному Git — ещё одна независимая граница:
+Стандартная private identity гостя:
 
 ```text
-access.project_repo_read: true
-→ локальная копия общего Git READ credential
-→ clone/fetch zsergeyru/proxmox
+/etc/proxmox-guest/ssh/management_ed25519
 ```
 
-Это не меняет ACL PVE и не выдаёт административный SSH-доступ.
+AI использует её для прямого SSH к другим управляемым Debian-гостям.
 
-## 5. Административный SSH
+AI не должен передавать этот private key на PVE, в Git, в другие управляющие VM или в новый guest.
 
-Единый административный пользователь управляемой Debian-инфраструктуры:
+## 6. Локальная копия management public-key registry
+
+`sync-management-keys` с PVE доставляет в AI Control актуальный публичный каталог:
 
 ```text
-root
+/etc/proxmox-guest/public-keys/
+└── management-authorized-keys
 ```
 
-Пароль `root` заблокирован. Вход по SSH с паролем отключён. Вход `root` разрешён только по открытому ключу.
+В нём находятся только открытые административные SSH-ключи, например deployer, AI Control, Ansible и будущих зарегистрированных управляющих identities.
 
-AI Control использует отдельную инфраструктурную пару ключей:
+Этот файл является источником ключей для **новых Debian VM/LXC, создаваемых AI**.
+
+AI не запрашивает каталог с PVE по SSH и не записывает public keys обратно на PVE. Направление синхронизации:
 
 ```text
-/opt/ai-control/ssh/ai_control_ed25519
-/opt/ai-control/ssh/ai_control_ed25519.pub
+PVE canonical public-key registry
+→ sync-management-keys
+→ 301 local public-key copy
 ```
 
-Закрытый ключ остаётся внутри AI Control. Открытый ключ устанавливается в те Linux-гости, которым разрешён прямой SSH-доступ AI.
-
-Средство развёртывания на PVE использует другую пару `pve_guest_ed25519`; Ansible на `311` — собственный ключ.
-
-Общий Git read-key не используется как SSH-ключ управления гостевыми системами. Если AI когда-либо требуется GitHub write credential, он также не должен использоваться для административного SSH.
-
-Полный жизненный цикл ключей описан в [`23-security.md`](23-security.md).
-
-## 6. Создание гостевой системы со стороны PVE
+## 7. Создание гостевой системы со стороны PVE
 
 Последовательность по требуемому состоянию из Git:
 
@@ -167,71 +180,81 @@ AI Control использует отдельную инфраструктурн�
 оператор
 → deploy-guest <VMID> [--apply]
 → deployer@pve!host-deploy
-→ полный клон текущего шаблона 9000 либо LXC из семейства Debian 13
-→ установить открытый ключ PVE для root
-→ при необходимости включить зарегистрированный открытый ключ AI
+→ создать/клонировать Debian VM/LXC
+→ передать текущий management-authorized-keys
 → запустить
-→ проверить SSH root
+→ проверить SSH root private key deployer
+→ при management_key: true создать/проверить собственную keypair гостя и зарегистрировать .pub
 → при access.project_repo_read материализовать общий Git READ credential
-→ при необходимости выполнить ограниченную первичную настройку
+→ выполнить явно запрошенный Guest Bootstrap
+→ при появлении нового public key вызвать sync-management-keys
 ```
 
-Начальный SSH-доступ `root` не зависит от возможности `base`.
+Начальный SSH-доступ `root` не зависит от `bootstrap.capabilities.base`.
 
-Сам `301` является специальным случаем: его первоначальное создание выполняется со стороны PVE и не зависит от уже работающего AI Control.
+Сам `301` является специальным только с точки зрения порядка bootstrap: его первоначальное создание выполняется со стороны PVE и не зависит от уже работающего AI Control. Механизм management key при этом остаётся общим и не привязан к VMID 301.
 
-## 7. Гостевая система, создаваемая AI
+## 8. Гостевая система, создаваемая AI
+
+При создании обычной Debian VM/LXC AI обязан использовать локально синхронизированный набор:
+
+```text
+/etc/proxmox-guest/public-keys/management-authorized-keys
+```
+
+Последовательность:
 
 ```text
 AI-агент
+→ прочитать локальный management-authorized-keys
 → Proximo
 → ai-agent@pve!infra
-→ создать или клонировать сразу в managed
-→ передать открытый ключ AI через Cloud-Init или параметры создания LXC
-→ при доступном открытом ключе PVE добавить также его
+→ создать/клонировать объект в managed
+→ передать весь набор public keys через Cloud-Init/LXC ssh-public-keys
 → запустить
 → проверить
 ```
 
-AI не обязан вызывать `deploy-guest` на PVE-хосте.
+Ключ deployer присутствует в этом наборе обязательно. Поэтому PVE-side `sync-management-keys` впоследствии может войти в созданную AI машину без отдельной передачи SSH access.
 
-Открытые инфраструктурные ключи можно передавать между управляющими контурами; закрытые административные части между ними не копируются.
+AI не обязан и штатно не может запускать локальный `/usr/local/sbin/deploy-guest` на PVE.
 
-Общий Git read-key — отдельное осознанное исключение: его private copy может быть материализована в госте, который явно запросил `project_repo_read`, потому что credential даёт только чтение одного приватного репозитория и не является административным ключом.
+Если новой управляющей машине нужна **собственная** management identity, её целевой `guest.yaml` должен содержать `management_key: true`, и регистрация новой `.pub` выполняется штатным `deploy-guest`. В v1 AI не получает отдельный удалённый API записи в PVE public-key registry.
 
-## 8. Повторяемая настройка
+## 9. Ansible
 
-После развёртывания `311-dev-services` повторяемая конфигурация Linux выполняется через отдельный ключ Ansible:
+Ansible и Semaphore размещаются в `311-dev-services`, а не в AI Control.
 
-```text
-AI-агент или пользователь
-→ конфигурация в Git
-→ Ansible на 311
-→ SSH root по ключу Ansible
-→ целевая гостевая система
-→ проверка состояния, журналов и работы сервисов
+`311`, как и любой другой управляющий guest с собственной административной identity, после реализации целевого интерфейса использует:
+
+```yaml
+management_key: true
 ```
 
-Это не запрещает прямой SSH AI для разовых и диагностических действий.
+Его private key остаётся внутри 311. Открытая часть попадает в тот же PVE registry и затем `sync-management-keys` доставляет её в 301 и остальные управляемые Debian-гости.
 
-## 9. Git
+Поэтому 311 не должен подключаться к PVE или 301 для «регистрации» своего public key.
+
+После синхронизации AI автоматически знает Ansible public key через свой локальный public catalog, а уже существующие гости получают Ansible key в управляемом блоке `authorized_keys`.
+
+## 10. Git
 
 Закрытый `zsergeyru/proxmox` остаётся основным источником воспроизводимой конфигурации проекта.
 
-Для чтения проекта AI Control **не имеет собственного отдельного GitHub Deploy Key**. Используется общий проектный read-only Deploy Key, мастер-копия которого хранится root-only на PVE и выдаётся гостям по принятому manifest-интерфейсу:
+Для чтения проекта AI Control использует общий проектный read-only Deploy Key, выдаваемый по целевому manifest-интерфейсу:
 
 ```yaml
 access:
   project_repo_read: true
 ```
 
-Локальная рабочая копия AI остаётся отдельной:
+Локальная рабочая копия AI:
 
 ```text
 /opt/ai-control/repos/proxmox
 ```
 
-Локальная копия общего credential:
+Локальная копия общего Git READ credential:
 
 ```text
 /etc/proxmox-guest/credentials/github-proxmox-read
@@ -239,33 +262,45 @@ access:
 
 используется только для `clone/fetch/read` `zsergeyru/proxmox`.
 
-AI может подготавливать изменения проекта в своей рабочей копии. Возможность отправлять их обратно в GitHub (`push`, ветки, PR через Git credential) является **отдельным write-контуром** и не входит в `project_repo_read`. Способ и жизненный цикл write credential должны быть спроектированы отдельно.
+Git read-key не входит в management public-key registry и не используется для административного SSH.
 
-Наличие общей рабочей копии/credential внутри 301 не даёт AI права изменять доверенную `root` основную копию репозитория на самом PVE.
+AI может подготавливать изменения проекта в своей рабочей копии. Возможность отправлять их обратно в GitHub (`push`, ветки, PR через Git credential) является отдельным write-контуром и не входит ни в `project_repo_read`, ни в management key registry.
 
-## 10. Неизменяемые правила безопасности
+## 11. Неизменяемые правила безопасности
 
 1. Токен PVE и ACL определяют допустимые операции AI в Proxmox.
 2. `ai-agent@pve!infra` штатно управляет обычными гостевыми системами только в `managed`.
 3. Прямой SSH-доступ внутрь гостевой системы является отдельной границей доступа.
-4. Наличие AI SSH-ключа не определяется автоматически членством в пуле.
-5. AI может напрямую создавать, клонировать и удалять обычные гостевые системы `managed` через Proximo.
-6. Набор функций MCP ограничивается операциями уровня гостевых систем, необходимыми проекту.
-7. Закрытые SSH-ключи, токены и учётные данные внешних сервисов не хранятся в Git.
-8. Вход `root` по паролю отключён.
-9. `301`, рабочий Home Assistant, устаревающий `320` и шаблон `9000` не входят автоматически в зону изменения AI `managed`.
-10. Ansible использует отдельную пару административных SSH-ключей.
-11. Общий Git read-key даёт только чтение `zsergeyru/proxmox` и не повышается до write.
-12. `guest.yaml` не выбирает произвольный secret: `project_repo_read` связан только с фиксированным общим read-key.
+4. AI private management key остаётся внутри AI Control.
+5. AI не получает SSH/root-доступ к PVE ради management key sync.
+6. Канонический public-key registry изменяется только PVE-side deploy/sync механизмом.
+7. AI получает public registry только в направлении `PVE → guest` через `sync-management-keys`.
+8. Новая Debian VM/LXC, создаваемая AI, получает весь текущий `management-authorized-keys`, а не только AI key.
+9. Закрытые SSH-ключи, токены и credentials внешних сервисов не хранятся в Git.
+10. Вход `root` по паролю отключён.
+11. `301`, рабочий Home Assistant, устаревающий `320` и шаблон `9000` не входят автоматически в обычную зону изменения AI `managed`.
+12. Общий Git read-key даёт только чтение `zsergeyru/proxmox` и не повышается до write.
+13. `management_key` и `project_repo_read` не являются универсальными интерфейсами секретов.
 
-## 11. Связанные документы
+## 12. Состояние реализации
+
+`management_key`, PVE public-key registry и `sync-management-keys` уже приняты как целевой архитектурный контракт, но ещё требуют реализации schemas/resolver/deployer/scripts.
+
+Поэтому до реализации текущий `guest.yaml` 301 не должен получать неизвестное действующей schema v6 поле только ради соответствия документации.
+
+Основной источник по состоянию реализации: [`28-management-ssh-keys.md`](28-management-ssh-keys.md).
+
+## 13. Связанные документы
 
 - [`25-pve-access-control.md`](25-pve-access-control.md) — точные роли, привилегии и ACL PVE;
-- [`23-security.md`](23-security.md) — SSH-ключи и общий Git read-key;
-- [`30-guest-manifest.md`](30-guest-manifest.md) — требуемое состояние гостевой системы и принятый `project_repo_read`;
-- [`31-deploy-guest.md`](31-deploy-guest.md) — передача общего read-key через root-wrapper;
-- [`33-guest-bootstrap-and-provisioning.md`](33-guest-bootstrap-and-provisioning.md) — начальный административный доступ, Project Git access и граница повторяемой настройки;
-- [`51-ai-control-bootstrap.md`](51-ai-control-bootstrap.md) — инструкция создания, ввода и приёмочной проверки `301`;
+- [`23-security.md`](23-security.md) — общая политика SSH и секретов;
+- [`28-management-ssh-keys.md`](28-management-ssh-keys.md) — management keypair, public-key registry и `sync-management-keys`;
+- [`30-guest-manifest.md`](30-guest-manifest.md) — `management_key` и `project_repo_read` как целевые manifest interfaces;
+- [`31-deploy-guest.md`](31-deploy-guest.md) — поведение deploy и безопасное применение;
+- [`33-guest-bootstrap-and-provisioning.md`](33-guest-bootstrap-and-provisioning.md) — Guest Bootstrap и граница Ansible;
+- [`51-ai-control-bootstrap.md`](51-ai-control-bootstrap.md) — инструкция создания и ввода `301`;
 - [`../templates/debian13/build-policy.md`](../templates/debian13/build-policy.md) — спецификация шаблона `9000`.
 
-Главное правило: **`301-ai-control` предоставляет общую платформу AI, Proximo, собственный административный SSH-ключ и рабочую копию Git; чтение `zsergeyru/proxmox` выполняется общим read-only credential по `project_repo_read`, а любой будущий write-доступ к GitHub остаётся отдельным контуром.**
+Главное правило:
+
+> AI создаёт новые управляемые Debian VM/LXC со всем локально синхронизированным набором management public keys; его собственный private key остаётся внутри AI Control, а обновление общего публичного набора выполняется только PVE-side `deploy-guest` + `sync-management-keys`, без SSH-доступа AI к PVE.
