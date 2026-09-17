@@ -72,6 +72,7 @@ def main() -> None:
     expect_error(all_disabled, defaults, "не включена ни одна capability")
 
     stopped = copy.deepcopy(source_311)
+    stopped.pop("management", None)
     stopped["boot"] = {"start_after_deploy": False}
     expect_error(stopped, defaults, "bootstrap требует boot.start_after_deploy=true")
 
