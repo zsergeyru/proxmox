@@ -4,7 +4,7 @@
 **Статус:** Действующий  
 **Основной источник:** Да — для путей, файлов состояния, учётных данных, владельцев и рабочей структуры на стороне PVE-хоста.
 
-Парная инструкция: [`20-pve-initialization.md`](20-pve-initialization.md).
+Парная инструкция: [`20-pve-initialization.md`](20-pve-initialization.md). Точный контракт management SSH keys: [`28-management-ssh-keys.md`](28-management-ssh-keys.md).
 
 Основной принцип:
 
@@ -16,6 +16,7 @@ Public Bootstrap
 PVE Configuration
 → создаёт и обслуживает постоянную инфраструктурную структуру
 → состояние хранится в /var/lib/proxmox-deployer/state
+→ создаёт identity deployer и канонический каталог открытых management keys
 
 оба компонента
 → используют /run/lock/proxmox-orchestration.lock
@@ -141,6 +142,10 @@ Public Bootstrap открывает блокировку на `fd 9` и пере
 │   ├── pve_guest_ed25519.pub
 │   ├── config
 │   └── known_hosts
+├── public-keys/
+│   ├── deployer.pub
+│   ├── <VMID>-<name>.pub
+│   └── management-authorized-keys
 └── secrets/
     ├── host-deploy.token
     └── ai-agent-infra.token
@@ -160,8 +165,14 @@ ssh/github_proxmox_repo_ed25519
   если guest явно требует access.project_repo_read
 
 ssh/pve_guest_ed25519
-→ SSH-ключ pvedeploy для управляемых VM/LXC
+→ закрытый SSH-ключ deployer для управляемых VM/LXC
 → этим же ключом PVE Configuration проверяет реальный root SSH на проверочном клоне
+
+public-keys/
+→ канонический каталог только открытых административных SSH-ключей
+→ deployer.pub соответствует ssh/pve_guest_ed25519.pub
+→ <VMID>-<name>.pub появляется для гостя с management_key: true
+→ management-authorized-keys детерминированно собирается из зарегистрированных *.pub
 
 ssh/config + known_hosts
 → принадлежащие root настройки SSH для доступа к закрытому Git-репозиторию
@@ -172,6 +183,8 @@ secrets/host-deploy.token
 secrets/ai-agent-infra.token
 → учётные данные ai-agent@pve!infra
 ```
+
+`public-keys/` не является secret store. В нём запрещены private keys, API tokens и Git credentials. Жизненный цикл каталога и его распространение задаёт [`28-management-ssh-keys.md`](28-management-ssh-keys.md).
 
 Общий Git read-key не является универсальным secret store и не открывает `pvedeploy` доступ к другим root-only credentials. `guest.yaml` не задаёт путь этого файла и не может запросить произвольный secret.
 
@@ -190,6 +203,9 @@ ssh/config                                 root:root 0600
 ssh/known_hosts                            root:root 0644
 pve_guest_ed25519                          pvedeploy:pvedeploy 0600
 pve_guest_ed25519.pub                      pvedeploy:pvedeploy 0644
+/etc/proxmox-deployer/public-keys/         root:pvedeploy 0755
+public-keys/*.pub                          root:pvedeploy 0644
+public-keys/management-authorized-keys     root:pvedeploy 0644
 /etc/proxmox-deployer/secrets/             root:pvedeploy 0710
 host-deploy.token                          root:pvedeploy 0640
 ai-agent-infra.token                       root:root 0600
@@ -203,6 +219,8 @@ ai-agent-infra.token                       root:root 0600
 /var/log/proxmox-deployer                  root:pvedeploy 0750
 /var/log/proxmox-deployer/audit            pvedeploy:pvedeploy 0750
 ```
+
+Права `public-keys/` позволяют deploy runtime читать открытые ключи, но изменение канонического каталога выполняется только штатным кодом deploy/sync с проверкой формата и fingerprint. Сам факт, что public key не является секретом, не означает право любого процесса произвольно менять доверенный список административного доступа.
 
 Требования к `pvedeploy`:
 
@@ -249,7 +267,7 @@ Root-only файл:
 /var/lib/pvedeploy/.ssh/known_hosts
 ```
 
-принадлежит `pvedeploy` и используется `deploy-guest` для строгой проверки SSH-ключей серверов гостевых систем.
+принадлежит `pvedeploy` и используется `deploy-guest` и `sync-management-keys` для строгой проверки SSH-ключей серверов гостевых систем.
 
 Правила первичного принятия и реакции на неожиданную смену ключа определяет [`31-deploy-guest.md`](31-deploy-guest.md).
 
@@ -337,9 +355,9 @@ bootstrap-complete
 
 Создание шаблона `9000` и проверка полного клона `9099` пишут в тот же `configure-pve.log`; отдельного контура журналирования для этих операций нет.
 
-`deploy-guest` пишет отдельный журнал каждого запуска в `audit/` согласно [`31-deploy-guest.md`](31-deploy-guest.md).
+`deploy-guest` и `sync-management-keys` пишут аудит своих запусков в `audit/` согласно профильным спецификациям.
 
-Правила: постоянный журнал без ANSI-кодов, без секретов токенов и закрытых ключей, с операциями, предупреждениями и ревизией исходного кода, но без полного дампа переменных окружения.
+Правила: постоянный журнал без ANSI-кодов, без секретов токенов и закрытых ключей, с операциями, предупреждениями, fingerprints public keys и ревизией исходного кода, но без полного дампа переменных окружения.
 
 ## 9. Снимки конфигурации
 
@@ -361,9 +379,17 @@ bootstrap-complete
 
 - секреты API-токенов;
 - мастер-копию общего GitHub Deploy Key только для чтения;
-- пару SSH-ключей PVE для гостевых систем;
+- пару SSH-ключей deployer для гостевых систем;
 - конфигурацию SSH;
 - root-only `known_hosts` для GitHub.
+
+Канонический каталог открытых management keys:
+
+```text
+/etc/proxmox-deployer/public-keys/
+```
+
+секретом не является, но его полезно сохранять как инфраструктурное состояние. Он также может быть восстановлен из проверенных `.pub` владельцев соответствующих identities.
 
 Отдельно следует сохранять либо иметь документированный сценарий восстановления базы доверия:
 
@@ -380,12 +406,15 @@ bootstrap-complete
 ```text
 /usr/local/sbin/
 ├── pve-configuration-status
-└── deploy-guest
+├── deploy-guest
+└── sync-management-keys
 ```
 
 `pve-configuration-status` читает `state.json`.
 
 `deploy-guest` после реализации будет небольшой командой-обёрткой над исходным кодом из основной закрытой копии репозитория. Его рабочая среда не получает права записи в эту копию и не получает постоянного доступа к root-only Git read-key.
+
+`sync-management-keys` — отдельная команда массовой синхронизации только открытых management SSH keys. Она не создаёт VM/LXC и не заменяет `deploy-guest`. Точный контракт: [`28-management-ssh-keys.md`](28-management-ssh-keys.md).
 
 Для проверки шаблона отдельная постоянная команда не устанавливается: явный запуск выполняется через `bootstrap-pve.sh --smoke-test-template` либо напрямую через `configure-pve.sh --smoke-test-template`.
 
@@ -398,10 +427,14 @@ bootstrap-complete
 │   ├── ssh/
 │   │   ├── github_proxmox_repo_ed25519      # master Git READ credential, root-only
 │   │   ├── github_proxmox_repo_ed25519.pub
-│   │   ├── pve_guest_ed25519
+│   │   ├── pve_guest_ed25519                # deployer private key
 │   │   ├── pve_guest_ed25519.pub
 │   │   ├── config
 │   │   └── known_hosts
+│   ├── public-keys/
+│   │   ├── deployer.pub
+│   │   ├── <VMID>-<name>.pub
+│   │   └── management-authorized-keys
 │   └── secrets/
 ├── run/lock/
 │   └── proxmox-orchestration.lock
@@ -419,9 +452,25 @@ bootstrap-complete
 ├── var/backups/proxmox-secrets/
 └── usr/local/sbin/
     ├── pve-configuration-status
-    └── deploy-guest
+    ├── deploy-guest
+    └── sync-management-keys
+```
+
+Внутри участвующего Debian-гостя стандартные management-пути:
+
+```text
+/etc/proxmox-guest/
+├── ssh/
+│   ├── management_ed25519          # только если management_key: true
+│   └── management_ed25519.pub
+├── public-keys/
+│   ├── deployer.pub
+│   ├── <VMID>-<name>.pub
+│   └── management-authorized-keys
+└── credentials/
+    └── github-proxmox-read          # только если access.project_repo_read: true
 ```
 
 Главный принцип:
 
-> Public Bootstrap использует отдельную временную область только для первоначального доступа. Основная копия исходного кода и мастер-копия общего Git read-key принадлежат `root`; `pvedeploy` не получает постоянного доступа к этому секрету, но root-wrapper может передать его текущему deploy через FD только для гостя с `access.project_repo_read: true`. При сомнительном состоянии проверка шаблона или гостевой системы останавливается без разрушительной очистки.
+> Public Bootstrap использует отдельную временную область только для первоначального доступа. Основная копия исходного кода и мастер-копия общего Git read-key принадлежат `root`; `pvedeploy` не получает постоянного доступа к этому секрету. Канонический набор открытых management SSH keys хранится отдельно в `/etc/proxmox-deployer/public-keys/` и распространяется только через `sync-management-keys`. При сомнительном состоянии проверка шаблона, гостя или ключевого каталога останавливается без разрушительной очистки.
