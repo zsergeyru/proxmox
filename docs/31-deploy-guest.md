@@ -33,9 +33,9 @@ APPLY PVE
         ↓
 проверка root SSH deployer
         ↓
-management_key, если явно запрошен
+management.ssh_identity, если явно запрошен
         ↓
-project_repo_read, если явно запрошен
+management.project_repo_read, если явно запрошен
         ↓
 Guest Bootstrap v1, если явно запрошен
         ↓
@@ -46,7 +46,9 @@ SUCCESS
 
 `deploy-guest` не является универсальным средством управления Linux и не заменяет Ansible.
 
-Массовое распространение management public keys выполняет отдельный `sync-management-keys`; `deploy-guest` только регистрирует `.pub` гостя с `management_key: true` и вызывает sync после фактического изменения registry.
+Массовое распространение management public keys выполняет отдельный `sync-management-keys`; `deploy-guest` регистрирует `.pub` гостя с `management.ssh_identity: true` и вызывает sync после фактического изменения registry.
+
+Для Debian-гостя, effective state которого содержит `management.ssh`, `deploy-guest` устанавливает технический PVE tag `management-ssh`. Этот tag определяет область обнаружения для `sync-management-keys` и не заменяет ownership tag `proxmox-deployer`.
 
 ## 2. Ответственность v1
 
@@ -60,18 +62,19 @@ SUCCESS
 - создание новой VM или LXC;
 - безопасное изменение поддерживаемых параметров существующего управляемого объекта;
 - передачу текущего `management-authorized-keys` при создании Debian VM/LXC;
+- установку PVE tag `management-ssh` для Debian-гостя с `management.ssh`;
 - запуск гостя согласно `boot.start_after_deploy`;
 - проверку административного SSH `root` private key deployer;
-- после реализации `management_key` — создание/проверку guest-local management keypair и регистрацию только `.pub`;
+- после реализации `management.ssh_identity` — создание/проверку guest-local management keypair и регистрацию только `.pub`;
 - запуск `sync-management-keys` после нового/изменённого зарегистрированного public key;
-- после реализации `access.project_repo_read` — материализацию фиксированного общего Git read-only credential;
+- после реализации `management.project_repo_read` — материализацию фиксированного общего Git read-only credential;
 - PLAN/APPLY явно запрошенных `bootstrap.capabilities`;
 - проверку результата каждого управляемого шага;
 - безопасный повторный запуск после частичной ошибки;
 - финальную проверку PVE + SSH + management identity + Project Git access + Bootstrap;
 - аудит запуска.
 
-`management_key` и `access.project_repo_read` уже приняты как целевые контракты, но ещё не реализованы в действующей schema v6. Реализация schemas/resolver/tests должна следовать этим документам, а не вводить другой интерфейс.
+`management.ssh_identity` и `management.project_repo_read` уже приняты как целевые контракты, но ещё не реализованы в действующей schema v6. Реализация schemas/resolver/tests должна следовать этим документам, а не вводить другой интерфейс.
 
 В v1 не входят:
 
@@ -118,9 +121,9 @@ guests/<VMID>-<name>/guest.yaml
 scripts/guest_config.py
 ```
 
-`deploy-guest.py` не содержит параллельных скрытых default-значений CPU, RAM, диска, сети, storage, pool, source, Bootstrap, `management_key` или Project Git access.
+`deploy-guest.py` не содержит параллельных скрытых default-значений CPU, RAM, диска, сети, storage, pool, source, Bootstrap, management SSH identity или Project Git access.
 
-`bootstrap`, `management_key` и `access.project_repo_read` задаются только конкретным `guest.yaml` и не наследуются из defaults/profile.
+`bootstrap`, `management.ssh_identity` и `management.project_repo_read` задаются только конкретным `guest.yaml` и не наследуются из defaults/profile. Базовый `management.ssh` может приходить из общих defaults.
 
 ### 4.2. Локальная конфигурация PVE
 
@@ -176,7 +179,7 @@ token_secret=<secret>
 /etc/proxmox-deployer/public-keys/management-authorized-keys
 ```
 
-При создании новой управляемой Debian VM/LXC `deploy-guest` передаёт этот набор целиком через Cloud-Init `sshkeys` или LXC `ssh-public-keys`.
+При создании новой управляемой Debian VM/LXC `deploy-guest` передаёт этот набор целиком через Cloud-Init `sshkeys` или LXC `ssh-public-keys` и устанавливает PVE tag `management-ssh`.
 
 Если целевой interface ещё не реализован либо aggregate отсутствует в bootstrap-переходный период, минимально допустимый начальный ключ — `deployer.pub`; после реализации registry отсутствие валидного aggregate считается preflight error.
 
@@ -193,7 +196,7 @@ token_secret=<secret>
 Если effective state требует:
 
 ```yaml
-access:
+management:
   project_repo_read: true
 ```
 
@@ -209,7 +212,7 @@ Root-wrapper `/usr/local/sbin/deploy-guest` до запуска Python-кода:
 → проверяет origin/branch/clean state
 → фиксирует точный SHA
 → строит/проверяет effective state настолько, насколько нужно root-side решению о Git credential
-→ определяет project_repo_read
+→ определяет management.project_repo_read
 → при необходимости открывает только фиксированный root-only Git READ key
 → передаёт DEPLOY_GUEST_SOURCE_REVISION
 → запускает scripts/pve/deploy-guest.py от pvedeploy
@@ -233,17 +236,17 @@ python scripts/validate_repo.py
 
 который запускается CI.
 
-Схемы, зависимости Bootstrap, правила IP, profiles, `management_key` и `project_repo_read` не дублируются отдельным набором правил в `deploy-guest.py`.
+Схемы, зависимости Bootstrap, правила IP, profiles, `management.ssh_identity` и `management.project_repo_read` не дублируются отдельным набором правил в `deploy-guest.py`.
 
 После реализации:
 
 ```text
-management_key
+management.ssh_identity
 → только boolean
 → без role/key_name/path/target_vmid/private material
 
-access.project_repo_read
-→ только boolean project_repo_read
+management.project_repo_read
+→ только boolean
 → без произвольных credentials/paths/secrets
 ```
 
@@ -273,10 +276,11 @@ access.project_repo_read
 20. source VM/LXC существует;
 21. VMID не находится в неоднозначном или чужом состоянии;
 22. Bootstrap declaration корректна;
-23. `management_key` корректен, если interface реализован;
-24. `access.project_repo_read` корректен, если interface реализован;
-25. если `project_repo_read=true`, root-wrapper передал ожидаемый FD;
-26. весь PVE + management key + Project Git access + Bootstrap plan не содержит запрещённого действия.
+23. `management.ssh_identity` корректен, если interface реализован;
+24. `management.project_repo_read` корректен, если interface реализован;
+25. если `management.project_repo_read=true`, root-wrapper передал ожидаемый FD;
+26. если effective state содержит `management.ssh`, PLAN предусматривает tag `management-ssh`;
+27. весь PVE + management identity + Project Git access + Bootstrap plan не содержит запрещённого действия.
 
 Любая ошибка preflight => STOP до изменения PVE, гостевой ОС или public-key registry.
 
@@ -350,9 +354,9 @@ VM ↔ LXC mismatch
 
 Никакого автоматического пересоздания нет.
 
-## 11. Маркер управляемого объекта
+## 11. Маркеры PVE-объекта
 
-Созданный `deploy-guest` объект получает tag:
+Созданный `deploy-guest` объект получает ownership tag:
 
 ```text
 proxmox-deployer
@@ -368,7 +372,7 @@ manifest=guests/<VMID>-<name>/guest.yaml
 <description из guest.yaml>
 ```
 
-Объект считается управляемым `deploy-guest` только если одновременно:
+Объект считается управляемым `deploy-guest` по lifecycle только если одновременно:
 
 ```text
 VMID существует
@@ -378,7 +382,15 @@ VMID существует
 
 Чужой/непомеченный VMID => STOP. Автоматического adoption нет.
 
-Это правило владения lifecycle не означает, что `sync-management-keys` ограничен только объектами с `proxmox-deployer`: sync имеет собственный критерий участия, определённый в [`28-management-ssh-keys.md`](28-management-ssh-keys.md).
+Отдельно для management SSH-контура используется технический tag:
+
+```text
+management-ssh
+```
+
+`deploy-guest` ставит его Debian-гостю, если effective state содержит `management.ssh`. `sync-management-keys` рассматривает только объекты с этим tag, но дополнительно fail-closed проверяет объект и SSH trust.
+
+`management-ssh` не означает ownership со стороны `deploy-guest`: AI-created Debian guest может иметь `management-ssh` без `proxmox-deployer`.
 
 ## 12. `deploy-incomplete`
 
@@ -395,13 +407,13 @@ deploy-incomplete
 ```text
 PVE state verified
 + root SSH deployer verified
-+ management_key verified + public key synced, если запрошен
-+ project_repo_read verified, если запрошен
++ management.ssh_identity verified + public key synced, если запрошен
++ management.project_repo_read verified, если запрошен
 + Bootstrap verified, если запрошен
 + final PVE verification
 ```
 
-Если существующий полностью управляемый объект требует реального изменения внутри гостя — management key, Project Git access или Bootstrap — `deploy-incomplete` устанавливается перед первой изменяющей SSH-командой.
+Если существующий полностью управляемый объект требует реального изменения внутри гостя — management SSH identity, Project Git access или Bootstrap — `deploy-incomplete` устанавливается перед первой изменяющей SSH-командой.
 
 Read-only PLAN/NO CHANGE не создают тег.
 
@@ -433,7 +445,7 @@ FORBIDDEN
 Для post-SSH части PLAN показывает отдельно:
 
 ```text
-Management key
+Management SSH identity
   NOT REQUESTED | APPLY AFTER START | APPLY | NO CHANGE | BLOCKED
 
 Project repo read
@@ -444,7 +456,7 @@ Bootstrap
   ...
 ```
 
-Если management key требует новой регистрации `.pub`, PLAN также показывает, что после APPLY потребуется `sync-management-keys`, но сам sync в PLAN не запускается.
+Если management SSH identity требует новой регистрации `.pub`, PLAN также показывает, что после APPLY потребуется `sync-management-keys`, но сам sync в PLAN не запускается.
 
 ## 14. Создание VM
 
@@ -457,6 +469,7 @@ Bootstrap
 → настроить CPU/RAM/disk/network
 → ciuser=root
 → inject current management-authorized-keys через Cloud-Init sshkeys
+→ если management.ssh присутствует: установить PVE tag management-ssh
 → onboot/pool/protection
 → Cloud-Init update
 → preboot verify
@@ -464,9 +477,9 @@ Bootstrap
 → readiness
 → принять/проверить SSH host key по правилам trust
 → проверить root SSH private key deployer
-→ management_key handler, если запрошен
+→ management.ssh_identity handler, если запрошен
 → при новом public key зарегистрировать его и вызвать sync-management-keys
-→ project_repo_read handler, если запрошен
+→ management.project_repo_read handler, если запрошен
 → Bootstrap handlers
 → final verify
 → снять deploy-incomplete
@@ -485,14 +498,15 @@ Bootstrap
 → установить ownership marker + deploy-incomplete
 → CPU/RAM/swap/rootfs/network/features
 → ssh-public-keys=<current management-authorized-keys>
+→ если management.ssh присутствует: установить PVE tag management-ssh
 → onboot/pool/protection
 → prestart verify
 → start, если требуется
 → SSH readiness/trust
 → проверить root SSH private key deployer
-→ management_key handler, если запрошен
+→ management.ssh_identity handler, если запрошен
 → при новом public key зарегистрировать его и вызвать sync-management-keys
-→ project_repo_read handler, если запрошен
+→ management.project_repo_read handler, если запрошен
 → Bootstrap handlers
 → final verify
 → снять deploy-incomplete
@@ -500,9 +514,9 @@ Bootstrap
 
 `deploy-guest` не скачивает LXC template сам.
 
-## 16. Management key handler
+## 16. Management SSH identity handler
 
-Целевой `management_key: true` означает ровно контракт [`28-management-ssh-keys.md`](28-management-ssh-keys.md).
+Целевой `management.ssh_identity: true` означает ровно контракт [`28-management-ssh-keys.md`](28-management-ssh-keys.md).
 
 Стандартная пара внутри гостя:
 
@@ -567,6 +581,8 @@ sync-management-keys
 ```text
 валидирует весь PVE public-key registry
 → пересобирает management-authorized-keys
+→ перечисляет PVE VM/LXC с tag management-ssh
+→ fail-closed проверяет объект и SSH trust
 → синхронизирует public catalog в участвующие Debian-гости
 → обновляет только управляемый блок /root/.ssh/authorized_keys
 → проверяет результат
@@ -578,7 +594,7 @@ sync-management-keys
 
 ## 18. Project Git read handler
 
-При `access.project_repo_read: true` после проверенного SSH:
+При `management.project_repo_read: true` после проверенного SSH:
 
 ```text
 получить private bytes только из переданного root-wrapper FD
@@ -595,7 +611,7 @@ sync-management-keys
 
 ## 19. Guest Bootstrap
 
-После management key и Project Git access выполняются только явно включённые capabilities в порядке:
+После management SSH identity и Project Git access выполняются только явно включённые capabilities в порядке:
 
 ```text
 base → git → docker → ansible_controller
@@ -659,7 +675,7 @@ Storage move в v1 запрещён.
 Git desired state
 PVE actual state
 SSH actual state
-management key actual state/registry
+management SSH identity actual state/registry
 Project Git access
 Bootstrap state
 ```
@@ -718,9 +734,22 @@ AI Control штатно не вызывает `deploy-guest` на PVE. Для о
 /etc/proxmox-guest/public-keys/management-authorized-keys
 ```
 
-Поэтому новая AI-created машина сразу содержит deployer и остальные зарегистрированные public keys и доступна последующему PVE-side key sync.
+и установить PVE tag:
 
-Если такой объект позже должен получить **собственную** management identity, в v1 это выполняется штатным `deploy-guest` для manifest с `management_key: true`; AI не получает remote write API к PVE public-key registry.
+```text
+management-ssh
+```
+
+Поэтому новая AI-created машина сразу содержит deployer и остальные зарегистрированные public keys и однозначно доступна последующему PVE-side key sync.
+
+Если такой объект позже должен получить **собственную** management identity, в v1 это выполняется штатным `deploy-guest` для manifest с:
+
+```yaml
+management:
+  ssh_identity: true
+```
+
+AI не получает remote write API к PVE public-key registry.
 
 ## 27. Состояние реализации
 
@@ -730,15 +759,18 @@ AI Control штатно не вызывает `deploy-guest` на PVE. Для о
 bootstrap.capabilities
 → действующий schema v6 contract
 
-access.project_repo_read
+management.project_repo_read
 → принятый target contract, schema/resolver ещё не реализованы
 
-management_key
+management.ssh_identity
 → принятый target contract, schema/resolver/deployer/sync ещё не реализованы
+
+management-ssh
+→ принятый технический PVE tag для области sync, реализация ещё требуется
 ```
 
 Поэтому документация определяет требуемую реализацию, но рабочие `guest.yaml` не должны получать неизвестные schema v6 поля раньше соответствующего изменения schemas/resolver/tests.
 
 ## 28. Главный принцип
 
-> `deploy-guest` детерминированно управляет одной описанной в Git VM/LXC. Новая Debian-машина получает весь актуальный management public-key set; собственный private management key создаётся только внутри гостя с `management_key: true`, наружу регистрируется лишь `.pub`, а массовое распространение выполняет отдельный `sync-management-keys`. Git read credential и Guest Bootstrap остаются независимыми последующими механизмами.
+> `deploy-guest` детерминированно управляет одной описанной в Git VM/LXC. Новая Debian-машина получает весь актуальный management public-key set и PVE tag `management-ssh`; собственный private management key создаётся только внутри гостя с `management.ssh_identity: true`, наружу регистрируется лишь `.pub`, а массовое распространение выполняет отдельный `sync-management-keys`. `management.project_repo_read` и Guest Bootstrap остаются независимыми последующими механизмами внутри единого manifest-раздела `management`.
