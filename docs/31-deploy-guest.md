@@ -325,6 +325,8 @@ Bootstrap
 
 PLAN никогда не генерирует management key, не пишет credential и не запускает sync.
 
+В runtime v1 `boot.start_after_deploy=false` блокируется на preflight до любых мутаций: финальное принятие объекта требует verified running SSH. Текущие deployable manifests 301/311 используют `true`.
+
 ## 11. Создание VM
 
 ```text

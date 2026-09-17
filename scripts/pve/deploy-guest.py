@@ -248,6 +248,11 @@ def load_desired(vmid: int) -> Desired:
         resolved = resolve_effective_guest(source, defaults)
     except GuestConfigError as exc:
         raise DeployError(f"не удалось построить effective state VMID {vmid}: {exc}") from exc
+    if resolved.effective.get("boot", {}).get("start_after_deploy") is not True:
+        raise BlockedError(
+            f"VMID {vmid}: deploy-guest v1 требует boot.start_after_deploy=true; "
+            "final acceptance без verified running SSH пока не поддерживается"
+        )
     schema = read_yaml(EFFECTIVE_SCHEMA)
     errors = sorted(
         Draft202012Validator(schema).iter_errors(resolved.effective),
@@ -1433,8 +1438,6 @@ def apply_plan(api: PveApi, desired: Desired, actual: Actual, registry_module: A
             api.put(config_path(desired, actual.node), {"tags": format_tags(desired_incomplete_tags(cfg))})
         apply_existing_pve(api, desired, discover_actual(api, desired))
     start_guest_if_needed(api, desired)
-    if not desired.effective["boot"]["start_after_deploy"]:
-        raise BlockedError("v1 final acceptance требует running guest")
     establish_ssh_trust(desired, created_now)
     ensure_management_identity(desired, revision)
     if desired.effective["management"]["project_repo_read"]:

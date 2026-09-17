@@ -107,6 +107,9 @@ def main() -> None:
     assert "verify=False" not in text
     assert "subprocess" in text
     assert "DEPLOY_GUEST_SOURCE_REVISION" in text
+    load_start = text.index("def load_desired(")
+    load_end = text.index("\ndef load_local_config", load_start)
+    assert "start_after_deploy" in text[load_start:load_end]
     assert "deploy-incomplete" in text
     assert "management-ssh" in text
     assert "qm " not in text and "pct " not in text and "pvesh " not in text
