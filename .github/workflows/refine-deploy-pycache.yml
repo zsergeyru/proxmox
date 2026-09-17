@@ -1,0 +1,29 @@
+name: Refine deploy pycache guard
+
+on:
+  push:
+    branches:
+      - fix-deploy-guest-pycache
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix-deploy-guest-pycache
+      - name: Apply refinement
+        run: |
+          python .github/refine-deploy-pycache.py
+          git diff --check
+          bash -n scripts/pve/setup/lib/70-tooling.sh
+          bash scripts/pve/setup/tests/test-deploy-runtime-contract.sh
+          git config user.name github-actions[bot]
+          git config user.email 41898282+zsergeyru@users.noreply.github.com
+          git add scripts/pve/setup/lib/70-tooling.sh scripts/pve/setup/tests/test-deploy-runtime-contract.sh
+          git commit -m "fix: ограничить pycache exemption и исключить чтение stale bytecode"
+          git push origin HEAD:fix-deploy-guest-pycache
