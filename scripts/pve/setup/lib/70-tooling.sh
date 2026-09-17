@@ -81,7 +81,7 @@ assert_repo_trust() {
 
 assert_clean_repo() {
     local status
-    status="\$(canonical_git -C "\$REPO_DIR" status --porcelain=v1 --untracked-files=all --ignored)" \\
+    status="\$(canonical_git -C "\$REPO_DIR" status --porcelain=v1 --untracked-files=all)" \\
         || fail "Не удалось проверить состояние Git в \$REPO_DIR"
     [[ -z "\$status" ]] \\
         || fail "В \$REPO_DIR есть локальные изменения. Автоматическое удаление запрещено. Первый элемент: \$(head -n1 <<<"\$status")"
@@ -89,7 +89,7 @@ assert_clean_repo() {
 
 resolve_project_repo_read() {
     local vmid=\$1
-    /usr/bin/python3 - "\$REPO_DIR" "\$vmid" <<'PY_EFFECTIVE'
+    PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3 - "\$REPO_DIR" "\$vmid" <<'PY_EFFECTIVE'
 from pathlib import Path
 import sys
 import yaml
@@ -176,7 +176,7 @@ mv -f "\$revision_tmp" "\$STATE_DIR/last-revision"
 [[ -f "\$VALIDATOR" ]] || fail "После обновления Git не найден validator: \$VALIDATOR"
 [[ -f "\$REPO_DIR/scripts/guest_config.py" ]] || fail "После обновления Git не найден общий guest resolver"
 
-/usr/bin/python3 "\$VALIDATOR" || fail "Repository validation перед deploy-guest завершилась ошибкой"
+PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3 "\$VALIDATOR" || fail "Repository validation перед deploy-guest завершилась ошибкой"
 
 vmid="\${1:-}"
 [[ "\$vmid" =~ ^[0-9]{3}\$ ]] || fail "Первым параметром должен быть VMID 100-999"
@@ -200,6 +200,7 @@ if [[ "\$project_repo_read" == "1" ]]; then
     exec 8<"\$PROJECT_REPO_KEY"
     set +e
     runuser -u "\$DEPLOY_USER" -- env \\
+        PYTHONDONTWRITEBYTECODE=1 \\
         DEPLOY_GUEST_SOURCE_REVISION="\$revision" \\
         DEPLOY_GUEST_PROJECT_REPO_KEY_FD=8 \\
         /usr/bin/python3 "\$SOURCE" "\$@"
@@ -208,7 +209,8 @@ if [[ "\$project_repo_read" == "1" ]]; then
     exec 8<&-
 else
     set +e
-    runuser -u "\$DEPLOY_USER" -- env DEPLOY_GUEST_SOURCE_REVISION="\$revision" \\
+    runuser -u "\$DEPLOY_USER" -- env PYTHONDONTWRITEBYTECODE=1 \\
+        DEPLOY_GUEST_SOURCE_REVISION="\$revision" \\
         /usr/bin/python3 "\$SOURCE" "\$@"
     rc=\$?
     set -e

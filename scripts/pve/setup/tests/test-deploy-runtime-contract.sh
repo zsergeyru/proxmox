@@ -16,8 +16,8 @@ fail() {
     exit 1
 }
 
-grep -Eq '^PVE_CONFIGURATION_VERSION=30$' "$COMMON" \
-    || fail "PVE_CONFIGURATION_VERSION must be 30"
+grep -Eq '^PVE_CONFIGURATION_VERSION=31$' "$COMMON" \
+    || fail "PVE_CONFIGURATION_VERSION must be 31"
 
 if grep -Eq 'BOOTSTRAP_KEY_FILE|PVE_BOOTSTRAP_KEY_FILE|BOOTSTRAP_KNOWN_HOSTS|CANONICAL_KEY_DIFFERS_FROM_BOOTSTRAP' "$COMMON" "$RUNTIME"; then
     fail "temporary GitHub Deploy Key contract must not remain in PVE Configuration"
@@ -68,8 +68,17 @@ grep -Fq 'Один management public key зарегистрирован дваж
 grep -Fq 'автоматическая ротация запрещена' "$KEYS" \
     || fail "deployer registry mismatch must STOP instead of rotating"
 
-grep -Fq '/usr/bin/python3 "\$VALIDATOR"' "$TOOLING" \
-    || fail "root wrapper must run the shared repository validator"
+grep -Fq 'PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3 "\$VALIDATOR"' "$TOOLING" \
+    || fail "root wrapper must run the shared repository validator without writing bytecode"
+if grep -Fq -- '--untracked-files=all --ignored' "$TOOLING"; then
+    fail "deploy wrapper must not treat gitignored runtime artifacts as repository dirt"
+fi
+grep -Fq 'status --porcelain=v1 --untracked-files=all)' "$TOOLING" \
+    || fail "deploy wrapper must still reject tracked and non-ignored untracked changes"
+grep -Fq 'PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3 - "\$REPO_DIR" "\$vmid"' "$TOOLING" \
+    || fail "effective-state resolver must not write __pycache__ into canonical checkout"
+grep -Fq 'runuser -u "\$DEPLOY_USER" -- env PYTHONDONTWRITEBYTECODE=1' "$TOOLING" \
+    || fail "deploy runtime must disable bytecode writes for pvedeploy"
 [[ -f "$DEPLOY_GUEST" ]] \
     || fail "deploy-guest runtime source must exist"
 grep -Fq 'DEPLOY_GUEST_SOURCE_REVISION' "$DEPLOY_GUEST" \
