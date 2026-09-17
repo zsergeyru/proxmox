@@ -4,6 +4,8 @@ set -Eeuo pipefail
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 CONFIGURE="$ROOT/scripts/pve/setup/configure-pve.sh"
 TOOLING="$ROOT/scripts/pve/setup/lib/71-sync-management-keys-tooling.sh"
+RUNTIME_SETUP="$ROOT/scripts/pve/setup/lib/40-runtime.sh"
+COMMON="$ROOT/scripts/pve/setup/lib/00-common.sh"
 SOURCE="$ROOT/scripts/pve/sync-management-keys.py"
 
 fail() {
@@ -25,6 +27,12 @@ grep -Fq 'flock -n 9' "$TOOLING" \
     || fail "manual sync command must use orchestration lock"
 grep -Fq 'management-ssh' "$SOURCE" \
     || fail "runtime must discover management-ssh participants"
+grep -Fq 'PVE_CA_FILE="${CONFIG_DIR}/pve-root-ca.pem"' "$COMMON" \
+    || fail "runtime PVE CA destination must be defined outside /etc/pve"
+grep -Fq 'install -o root -g "$DEPLOY_USER" -m 0640 "$PVE_CA_SOURCE" "$PVE_CA_FILE"' "$RUNTIME_SETUP" \
+    || fail "PVE Configuration must provision a read-only runtime PVE CA copy"
+grep -Fq 'PVE_CA = CONFIG_DIR / "pve-root-ca.pem"' "$SOURCE" \
+    || fail "sync runtime must use the provisioned PVE CA copy"
 grep -Fq 'safe.directory={ROOT}' "$SOURCE" \
     || fail "runtime Git revision check must trust only the canonical root-owned checkout locally"
 grep -Fq 'BEGIN PROXMOX-MANAGEMENT-KEYS' "$SOURCE" \
