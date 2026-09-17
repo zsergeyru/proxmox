@@ -11,8 +11,15 @@ fail() {
     exit 1
 }
 
-grep -Eq '^PVE_CONFIGURATION_VERSION=22$' "$COMMON" \
-    || fail "PVE_CONFIGURATION_VERSION must be 22"
+grep -Eq '^PVE_CONFIGURATION_VERSION=23$' "$COMMON" \
+    || fail "PVE_CONFIGURATION_VERSION must be 23"
+
+if grep -Eq 'BOOTSTRAP_KEY_FILE|PVE_BOOTSTRAP_KEY_FILE|BOOTSTRAP_KNOWN_HOSTS|CANONICAL_KEY_DIFFERS_FROM_BOOTSTRAP' "$COMMON" "$RUNTIME"; then
+    fail "temporary GitHub Deploy Key contract must not remain in PVE Configuration"
+fi
+
+grep -q 'Постоянный GitHub Deploy Key .* отсутствует. Public Bootstrap должен создать его' "$RUNTIME" \
+    || fail "PVE Configuration must require the permanent GitHub Deploy Key created by Public Bootstrap"
 
 grep -q 'python3-jsonschema' "$SYSTEM" \
     || fail "PVE Configuration must install python3-jsonschema"
