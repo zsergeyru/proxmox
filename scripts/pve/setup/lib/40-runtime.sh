@@ -73,6 +73,9 @@ validate_deploy_user_contract() {
 ensure_runtime_layout() {
     log "Подготовка root-trusted source и локального runtime пользователя pvedeploy"
 
+    local deploy_ssh_dir="/var/lib/pvedeploy/.ssh"
+    local guest_known_hosts="${deploy_ssh_dir}/known_hosts"
+
     if ! getent group "$DEPLOY_USER" >/dev/null 2>&1; then
         groupadd --system "$DEPLOY_USER"
         ok "Создана Linux-группа ${DEPLOY_USER}"
@@ -101,6 +104,27 @@ ensure_runtime_layout() {
     install -d -o "$DEPLOY_USER" -g "$DEPLOY_USER" -m 0750 "$LOG_DIR/audit"
     install -d -o root -g root -m 0700 "$BACKUP_ROOT" "$SECRETS_BACKUP_ROOT"
     install -d -o root -g root -m 0755 /usr/local/sbin
+
+    # deploy-guest хранит SSH host keys управляемых VM/LXC отдельно от
+    # root-only known_hosts, используемого для GitHub. Не следуем симлинкам,
+    # которые ограниченный пользователь мог подложить перед root-run.
+    [[ ! -L "$deploy_ssh_dir" ]] \
+        || die "${deploy_ssh_dir} является симлинком; автоматическая подготовка SSH runtime запрещена"
+    install -d -o "$DEPLOY_USER" -g "$DEPLOY_USER" -m 0700 "$deploy_ssh_dir"
+
+    [[ ! -L "$guest_known_hosts" ]] \
+        || die "${guest_known_hosts} является симлинком; автоматическое изменение запрещено"
+    if [[ -e "$guest_known_hosts" && ! -f "$guest_known_hosts" ]]; then
+        die "${guest_known_hosts} существует, но не является обычным файлом"
+    fi
+    if [[ ! -e "$guest_known_hosts" ]]; then
+        install -o "$DEPLOY_USER" -g "$DEPLOY_USER" -m 0600 /dev/null "$guest_known_hosts"
+        ok "Создана отдельная база SSH host key гостевых систем: ${guest_known_hosts}"
+    else
+        chown "$DEPLOY_USER:$DEPLOY_USER" "$guest_known_hosts"
+        chmod 0600 "$guest_known_hosts"
+        ok "База SSH host key гостевых систем проверена: ${guest_known_hosts}"
+    fi
 
     if [[ ! -f "$CONFIG_DIR/config.yaml" ]]; then
         cat >"$CONFIG_DIR/config.yaml" <<EOF_CONFIG
