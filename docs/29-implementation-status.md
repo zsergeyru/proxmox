@@ -36,10 +36,10 @@
 | `deploy-guest` | Принятый контракт, код ещё не реализован | поведение PLAN/APPLY и post-SSH handlers задаёт `31-deploy-guest.md` |
 | `management.ssh_identity` runtime handler | Принятый контракт, код ещё не реализован | создание guest-local keypair, регистрация `<VMID>.pub` и вызов sync появятся вместе с `deploy-guest` |
 | `management.project_repo_read` runtime handler | Принятый контракт, код ещё не реализован | materialize/verify/remove общего Git READ credential появится вместе с `deploy-guest` |
-| PVE public-key registry runtime | Принятый контракт, код ещё не реализован полностью | целевая структура `/var/lib/proxmox-deployer/public-keys/` и lifecycle уже определены документами |
-| `sync-management-keys` | Принятый контракт, код ещё не реализован | отдельная команда будет реализована вместе с management SSH runtime |
+| PVE public-key registry runtime | Реализовано | PVE Configuration создаёт и проверяет `/var/lib/proxmox-deployer/public-keys/`, `deployer.pub`, `<VMID>.pub` и детерминированный `management-authorized-keys` |
+| `sync-management-keys` | Реализовано | отдельная PVE-команда валидирует registry, обнаруживает tagged VM/LXC, проверяет SSH trust/Debian, синхронизирует guest public catalog и только managed block `authorized_keys`; offline-гости не запускаются |
 | Guest Bootstrap runtime handlers | Принятый контракт, код ещё не реализован полностью | schema/resolver для `bootstrap.capabilities` действуют, фактическое применение будет частью `deploy-guest` |
-| Расширенные CI-проверки management/runtime key contract | Отложено до реализации runtime | добавляются после появления `deploy-guest` и `sync-management-keys`, чтобы проверять реальный код, а не заглушки |
+| Расширенные CI-проверки management/runtime key contract | Частично реализовано | registry и `sync-management-keys` покрыты contract/unit checks; deploy-specific runtime checks будут расширены вместе с `deploy-guest` |
 
 ## Правило обновления
 
