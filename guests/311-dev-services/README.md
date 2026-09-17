@@ -18,28 +18,36 @@ bootstrap:
     ansible_controller: true
 ```
 
-После реализации принятых manifest-интерфейсов целевой `guest.yaml` 311 также должен содержать:
+После реализации принятых management-интерфейсов целевой `guest.yaml` 311 также должен содержать:
 
 ```yaml
-management_key: true
-
-access:
+management:
+  ssh_identity: true
   project_repo_read: true
 ```
 
-`management_key` означает: после появления проверенного SSH deployer создаёт стандартную management SSH-пару **внутри 311**, оставляет private key только там и регистрирует на PVE только открытую часть.
+Базовый `management.ssh.user/port` приходит из общих defaults.
 
-`project_repo_read` независимо выдаёт общий read-only Git credential для `zsergeyru/proxmox`.
+`management.ssh_identity` означает: после появления проверенного SSH deployer создаёт стандартную management SSH-пару **внутри 311**, оставляет private key только там и регистрирует на PVE только открытую часть.
 
-Оба поля пока не реализованы в действующей schema v6, поэтому до изменения schemas/resolver/validator в рабочий manifest не добавляются.
+`management.project_repo_read` независимо выдаёт общий read-only Git credential для `zsergeyru/proxmox`.
 
-После создания LXC `deploy-guest` должен получить проверенный `root SSH`, при необходимости создать/проверить management identity, зарегистрировать её `.pub`, материализовать Project Git READ credential, выполнить `base → git → docker → ansible_controller` и только после полной проверки завершить deploy.
+Оба целевых поля пока не реализованы в действующей schema v6, поэтому до изменения schemas/resolver/validator в рабочий manifest не добавляются.
+
+После создания LXC `deploy-guest` должен передать `management-authorized-keys`, установить PVE tag `management-ssh`, получить проверенный `root SSH`, при необходимости создать/проверить management identity, зарегистрировать её `.pub`, материализовать Project Git READ credential, выполнить `base → git → docker → ansible_controller` и только после полной проверки завершить deploy.
 
 ## Management SSH Ansible
 
 311 не получает специальный заранее известный `ansible_ed25519` от PVE и не передаёт ключ напрямую 301.
 
-При `management_key: true` используется общий стандарт проекта:
+При:
+
+```yaml
+management:
+  ssh_identity: true
+```
+
+используется общий стандарт проекта:
 
 ```text
 /etc/proxmox-guest/ssh/management_ed25519
@@ -62,11 +70,18 @@ access:
 /etc/proxmox-deployer/public-keys/311-dev-services.pub
 ```
 
-После регистрации `sync-management-keys` распространяет обновлённый public-key registry по управляемым Debian VM/LXC, включая 301. Сам 311 не подключается ни к PVE, ни к 301 ради регистрации или распространения ключа.
+После регистрации `sync-management-keys` распространяет обновлённый public-key registry по Debian VM/LXC с PVE tag `management-ssh`, включая 301. Сам 311 не подключается ни к PVE, ни к 301 ради регистрации или распространения ключа.
 
 ## Доступ к проектному Git
 
 311 не получает собственного отдельного GitHub Deploy Key для чтения.
+
+Manifest-запрос:
+
+```yaml
+management:
+  project_repo_read: true
+```
 
 Используется общий Project Git READ credential:
 
@@ -81,7 +96,13 @@ local copy: /etc/proxmox-guest/credentials/github-proxmox-read
 
 ## Локальная копия public-key registry
 
-Как и другие управляемые Debian-гости, 311 получает при синхронизации:
+Как и другие Debian-гости management SSH-контура, 311 имеет PVE tag:
+
+```text
+management-ssh
+```
+
+и получает при синхронизации:
 
 ```text
 /etc/proxmox-guest/public-keys/
