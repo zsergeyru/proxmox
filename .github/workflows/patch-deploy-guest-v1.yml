@@ -1,0 +1,30 @@
+name: Patch deploy-guest v1
+
+on:
+  push:
+    branches: [feat-deploy-guest-v1]
+    paths:
+      - .github/patch-deploy-guest-v1.py
+      - .github/workflows/patch-deploy-guest-v1.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat-deploy-guest-v1
+      - name: Patch deploy-guest implementation
+        run: |
+          python .github/patch-deploy-guest-v1.py
+          git diff --check
+          python -m py_compile scripts/pve/deploy-guest.py scripts/tests/test-deploy-guest.py
+          bash -n scripts/pve/setup/tests/test-deploy-runtime-contract.sh
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add scripts/pve/deploy-guest.py scripts/tests/test-deploy-guest.py scripts/pve/setup/lib/00-common.sh scripts/pve/setup/tests/test-deploy-runtime-contract.sh .github/workflows/repository-checks.yml docs/29-implementation-status.md docs/31-deploy-guest.md scripts/README.md
+          git commit -m "feat: завершить deploy-guest v1 runtime"
+          git push origin HEAD:feat-deploy-guest-v1
