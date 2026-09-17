@@ -38,20 +38,43 @@ schema_version: 6
 
 Версия 6 вводит действующий машинный интерфейс `bootstrap.capabilities`.
 
-Отдельно приняты два целевых расширения manifest, которые ещё требуют реализации schemas/resolver/validator:
+Отдельно приняты два целевых расширения внутри уже существующего раздела `management`, которые ещё требуют реализации schemas/resolver/validator:
 
 ```yaml
-access:
+management:
+  ssh_identity: true
   project_repo_read: true
-
-management_key: true
 ```
 
-`access.project_repo_read` означает выдачу фиксированного общего Git read-only credential для одного проектного репозитория.
+`management.ssh_identity: true` означает, что после появления административного SSH deployer должен обеспечить собственную management SSH-пару **внутри этого гостя**, оставить private key в госте и зарегистрировать только `.pub` в каноническом PVE public-key registry.
 
-`management_key: true` означает, что после появления административного SSH deployer должен обеспечить собственную management SSH-пару **внутри этого гостя**, оставить private key в госте и зарегистрировать только `.pub` в каноническом PVE public-key registry.
+`management.project_repo_read: true` означает выдачу фиксированного общего Git read-only credential для одного проектного репозитория.
 
-На момент фиксации этих решений оба поля **ещё не реализованы** в действующей schema v6 и не должны добавляться в реальные `guest.yaml` до соответствующего изменения schemas/resolver/validator/tests. Документация фиксирует целевой контракт заранее, чтобы реализация не вводила другой интерфейс.
+Таким образом, весь гостевой management-контракт находится в одном логическом разделе:
+
+```yaml
+management:
+  ssh:
+    user: root
+    port: 22
+  ssh_identity: true
+  project_repo_read: true
+```
+
+При этом три части имеют разный смысл:
+
+```text
+management.ssh
+→ как проект входит в guest
+
+management.ssh_identity
+→ есть ли у guest собственная исходящая management SSH identity
+
+management.project_repo_read
+→ нужен ли guest исходящий read-only доступ к project Git
+```
+
+На момент фиксации этих решений `management.ssh_identity` и `management.project_repo_read` **ещё не реализованы** в действующей schema v6 и не должны добавляться в реальные `guest.yaml` до соответствующего изменения schemas/resolver/validator/tests. Документация фиксирует целевой контракт заранее, чтобы реализация не вводила другой интерфейс.
 
 Центральные общие настройки:
 
@@ -140,9 +163,13 @@ profiles:
 
 `bootstrap` является исключением из обычного наследования: в v1 он задаётся только явно в конкретном `guest.yaml`. `defaults.yaml` и профили не имеют поля `bootstrap`. Это исключает скрытую установку ПО во всех гостях при одном изменении общего профиля.
 
-Целевое `access.project_repo_read` также задаётся только явно конкретному гостю. Оно не наследуется из defaults/profile, чтобы общий Git credential не начал автоматически появляться у всех гостевых систем после изменения одного общего файла.
+Внутри `management` действуют разные правила наследования:
 
-Целевое `management_key` также задаётся только явно конкретному гостю и не наследуется из defaults/profile. Один общий change не должен внезапно превратить все VM/LXC в владельцев собственных administrative private keys.
+- `management.ssh` является общим административным контрактом и может приходить из `defaults.yaml`;
+- `management.ssh_identity` задаётся только явно конкретному гостю и не наследуется из defaults/profile;
+- `management.project_repo_read` также задаётся только явно конкретному гостю и не наследуется из defaults/profile.
+
+Один общий change не должен внезапно превратить все VM/LXC в владельцев собственных administrative private keys или раздать всем общий Git credential.
 
 ## Guest Bootstrap v1
 
@@ -206,10 +233,10 @@ Bootstrap v1 не является универсальным механизмо
 
 ## Доступ к проектному Git только для чтения
 
-Принят один специальный логический запрос:
+Принят один специальный логический запрос внутри общего management-раздела:
 
 ```yaml
-access:
+management:
   project_repo_read: true
 ```
 
@@ -232,9 +259,9 @@ access:
 write-доступ
 ```
 
-Связка `project_repo_read → конкретный общий Git read-key → стандартное место в госте` является фиксированной частью кода deploy, а не данными manifest.
+Связка `management.project_repo_read → конкретный общий Git read-key → стандартное место в госте` является фиксированной частью кода deploy, а не данными manifest.
 
-Мастер-копия read-key хранится root-only на PVE. Root-wrapper передаёт её содержимое `deploy-guest` только для текущего запуска и только если effective state требует `project_repo_read`; передача выполняется через отдельный file descriptor, не через argv/environment.
+Мастер-копия read-key хранится root-only на PVE. Root-wrapper передаёт её содержимое `deploy-guest` только для текущего запуска и только если effective state требует `management.project_repo_read`; передача выполняется через отдельный file descriptor, не через argv/environment.
 
 Стандартное место локальной копии в Debian-госте:
 
@@ -246,14 +273,15 @@ write-доступ
 
 Этот credential не является административным SSH-ключом и не добавляется в `/root/.ssh/authorized_keys`.
 
-Если AI требуется отправлять изменения обратно в GitHub, write credential проектируется отдельно и не выражается через `project_repo_read`.
+Если AI требуется отправлять изменения обратно в GitHub, write credential проектируется отдельно и не выражается через `management.project_repo_read`.
 
 ## Собственная management SSH identity гостя
 
-Для гостя, которому нужен собственный private key для исходящего административного SSH к другим управляемым Debian-гостям, принят один целевой флаг:
+Для гостя, которому нужен собственный private key для исходящего административного SSH к другим управляемым Debian-гостям, принят один целевой флаг внутри `management`:
 
 ```yaml
-management_key: true
+management:
+  ssh_identity: true
 ```
 
 Его смысл фиксирован:
@@ -283,6 +311,14 @@ management:
 ```
 
 Пароль `root` не является частью манифеста и не хранится в Git. Политика проекта требует заблокированного пароля `root` и SSH-доступа только по открытым ключам.
+
+Наличие `management.ssh` в effective state означает участие Debian-гостя в management SSH-контуре. `deploy-guest` отражает это в PVE runtime-состоянии техническим tag:
+
+```text
+management-ssh
+```
+
+Этот tag не задаётся в `guest.yaml`: он является производным признаком для `sync-management-keys`. Управляющий гость, создающий Debian VM/LXC напрямую через PVE API, обязан поставить тот же tag, если новая машина получает management SSH-контракт и `management-authorized-keys`.
 
 Все участвующие управляемые Debian-гости получают актуальный набор инфраструктурных public keys из канонического registry. Разные контуры используют разные private keys, но одного Linux-пользователя `root`.
 
@@ -335,13 +371,13 @@ PVE Configuration подготавливает подходящий Debian 13 te
 
 Шаблон `9000` использует `ciuser=root`, заблокированный пароль `root` и SSH только по ключам, но не содержит постоянный проектный `authorized_keys`.
 
-До первого запуска полный клон получает текущий `management-authorized-keys` через Cloud-Init. Никакие private management keys внутрь обычной VM не передаются.
+До первого запуска полный клон получает текущий `management-authorized-keys` через Cloud-Init. Никакие private management keys внутрь обычной VM не передаются. Для участвующего Debian-гостя `deploy-guest` также устанавливает PVE tag `management-ssh`.
 
 ### LXC
 
-При создании LXC `deploy-guest` передаёт текущий `management-authorized-keys` через штатный `ssh-public-keys`, после чего проверяет вход `root` своим deployer private key.
+При создании LXC `deploy-guest` передаёт текущий `management-authorized-keys` через штатный `ssh-public-keys`, устанавливает PVE tag `management-ssh`, после чего проверяет вход `root` своим deployer private key.
 
-Минимальный обязательный элемент этого набора — `deployer.pub`. После появления новых infrastructure identities отдельный `sync-management-keys` обновляет уже существующие управляемые Debian-гости.
+Минимальный обязательный элемент этого набора — `deployer.pub`. После появления новых infrastructure identities отдельный `sync-management-keys` обновляет уже существующие управляемые Debian-гости с tag `management-ssh`.
 
 Управляющий гость, создающий новую VM/LXC через PVE API, использует свою локальную копию:
 
@@ -349,7 +385,7 @@ PVE Configuration подготавливает подходящий Debian 13 te
 /etc/proxmox-guest/public-keys/management-authorized-keys
 ```
 
-и также передаёт весь актуальный набор новой машине.
+и также передаёт весь актуальный набор новой машине и ставит PVE tag `management-ssh`.
 
 Общий Git read-key, если запрошен, материализуется отдельно после появления проверенного административного SSH и не является частью `authorized_keys`.
 
@@ -430,10 +466,12 @@ resources:
     size_gb: 24
 ```
 
-`311-dev-services` дополнительно явно включает Bootstrap. После реализации целевых manifest interfaces для управляющего Ansible-гостя ожидается:
+`311-dev-services` дополнительно явно включает Bootstrap. После реализации целевых management interfaces для управляющего Ansible-гостя ожидается:
 
 ```yaml
-management_key: true
+management:
+  ssh_identity: true
+  project_repo_read: true
 
 bootstrap:
   capabilities:
@@ -441,17 +479,13 @@ bootstrap:
     git: true
     docker: true
     ansible_controller: true
-
-access:
-  project_repo_read: true
 ```
 
 Для `301-ai-control` после реализации целевых interfaces также требуется собственная management identity и read-only доступ к проекту:
 
 ```yaml
-management_key: true
-
-access:
+management:
+  ssh_identity: true
   project_repo_read: true
 ```
 
@@ -473,7 +507,7 @@ deployable: true
 
 Поэтому `state: planned` вместе с `deployable: true` разрешает создание. `legacy` не означает удаление.
 
-`deployable: false` не получает параметры развёртывания автоматически и может описывать наблюдаемый или зарезервированный объект. Такой объект не может содержать `bootstrap`. До реализации `access` и `management_key` schemas их ограничения должны быть определены вместе с соответствующим изменением schemas/resolver.
+`deployable: false` не получает параметры развёртывания автоматически и может описывать наблюдаемый или зарезервированный объект. Такой объект не может содержать `bootstrap`. До реализации `management.ssh_identity` и `management.project_repo_read` schemas их ограничения должны быть определены вместе с соответствующим изменением schemas/resolver.
 
 ## Зарезервированные и наблюдаемые манифесты
 
@@ -504,19 +538,19 @@ boot:
 PLAN по возможности показывает источник требуемого значения:
 
 ```text
-Node               pve                         [defaults]
-Pool               managed                     [defaults]
-Storage            local-lvm                   [defaults]
-Profile            docker-lxc                  [guest]
-LXC selector       debian-13-standard          [profile]
-Resolved archive   debian-13-standard_<...>    [runtime PVE]
-SSH user           root                        [defaults]
-Management IP      192.168.3.11/16             [vmid]
-Memory             4096 MiB                    [guest]
-Disk size          32 GiB                      [guest]
-Management key     true                         [guest]
-Bootstrap           base,git,docker,...          [guest]
-Project repo read   true                         [guest]
+Node                    pve                         [defaults]
+Pool                    managed                     [defaults]
+Storage                 local-lvm                   [defaults]
+Profile                 docker-lxc                  [guest]
+LXC selector            debian-13-standard          [profile]
+Resolved archive        debian-13-standard_<...>    [runtime PVE]
+SSH user                root                        [defaults]
+Management IP           192.168.3.11/16             [vmid]
+Memory                  4096 MiB                    [guest]
+Disk size               32 GiB                      [guest]
+Management SSH identity true                         [guest]
+Bootstrap                base,git,docker,...          [guest]
+Project repo read        true                         [guest]
 ```
 
 Факты конкретного запуска, например конкретный LXC-архив, не записываются обратно в manifest.
@@ -533,9 +567,11 @@ python scripts/validate_repo.py
 
 Семантика Bootstrap также проверяется общим resolver, которым пользуются validator и будущий `deploy-guest`. Второй набор правил Bootstrap в `deploy-guest.py` создавать нельзя.
 
-Когда `access.project_repo_read` будет реализован, schemas/resolver/validator должны принять только boolean-поле `project_repo_read`; произвольные имена credentials, секретные значения и пути должны оставаться запрещены.
+Когда `management.project_repo_read` будет реализован, schemas/resolver/validator должны принять только boolean-поле `project_repo_read` внутри `management`; произвольные имена credentials, секретные значения и пути должны оставаться запрещены.
 
-Когда `management_key` будет реализован, schemas/resolver/validator должны принять только boolean-флаг и не вводить рядом произвольные имена private key, пути, роли или VMID-получатели. Точный смысл поля уже зафиксирован в [`28-management-ssh-keys.md`](28-management-ssh-keys.md).
+Когда `management.ssh_identity` будет реализован, schemas/resolver/validator должны принять только boolean-поле `ssh_identity` внутри `management` и не вводить рядом произвольные имена private key, пути, роли или VMID-получатели. Точный смысл поля уже зафиксирован в [`28-management-ssh-keys.md`](28-management-ssh-keys.md).
+
+Schemas/defaults также должны запрещать наследование `management.ssh_identity` и `management.project_repo_read` из `defaults.yaml` или profile, сохраняя возможность наследовать только базовый `management.ssh`.
 
 ## Git как основной источник
 
@@ -555,7 +591,7 @@ guest.yaml
 
 Связанные основные документы:
 
-- [`28-management-ssh-keys.md`](28-management-ssh-keys.md) — management keypair, public-key registry и `sync-management-keys`;
+- [`28-management-ssh-keys.md`](28-management-ssh-keys.md) — management SSH identity, public-key registry, tag `management-ssh` и `sync-management-keys`;
 - [`31-deploy-guest.md`](31-deploy-guest.md) — PLAN/APPLY, временная передача read-key и безопасное применение;
 - [`33-guest-bootstrap-and-provisioning.md`](33-guest-bootstrap-and-provisioning.md) — Guest Bootstrap v1, Git read access и граница Ansible;
 - [`32-docker-in-lxc-policy.md`](32-docker-in-lxc-policy.md) — Docker внутри LXC;
