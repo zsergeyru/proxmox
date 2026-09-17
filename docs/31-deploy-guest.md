@@ -68,7 +68,7 @@ SUCCESS
 - проверку административного SSH `root` private key deployer;
 - после реализации `management.ssh_identity` — создание/проверку guest-local management keypair и регистрацию только `.pub` как `<VMID>.pub`;
 - запуск `sync-management-keys` после нового/изменённого зарегистрированного public key;
-- после реализации `management.project_repo_read` — материализацию фиксированного общего Git read-only credential;
+- после реализации `management.project_repo_read` — материализацию или отзыв фиксированного общего Git read-only credential и его управляемой SSH/Git-конфигурации;
 - PLAN/APPLY явно запрошенных `bootstrap.capabilities`;
 - проверку результата каждого управляемого шага;
 - безопасный повторный запуск после частичной ошибки;
@@ -220,6 +220,40 @@ management:
 ```
 
 root-wrapper открывает только этот фиксированный файл и передаёт содержимое дочернему deploy-процессу через выделенный FD. Private key запрещено передавать через argv, environment или постоянный файл, доступный `pvedeploy`.
+
+Стандартные управляемые артефакты внутри Debian-гостя:
+
+```text
+/etc/proxmox-guest/credentials/github-proxmox-read
+/etc/proxmox-guest/ssh/github-proxmox-known_hosts
+/etc/ssh/ssh_config.d/90-proxmox-project-repo-read.conf
+```
+
+Закрытый ключ имеет `root:root 0600`, guest-local `known_hosts` и SSH config — `root:root 0644`.
+
+SSH config создаёт только специальный alias:
+
+```text
+Host github-proxmox-read
+    HostName github.com
+    User git
+    IdentityFile /etc/proxmox-guest/credentials/github-proxmox-read
+    IdentitiesOnly yes
+    UserKnownHostsFile /etc/proxmox-guest/ssh/github-proxmox-known_hosts
+    StrictHostKeyChecking yes
+    BatchMode yes
+```
+
+Чтобы обычный root-вызов Git для единственного разрешённого project repo автоматически использовал этот alias, deploy управляет одной точной записью Git URL rewrite:
+
+```text
+git@github.com:zsergeyru/proxmox.git
+→ git@github-proxmox-read:zsergeyru/proxmox.git
+```
+
+Запись создаётся через стандартный root Git config и относится только к точному `zsergeyru/proxmox`; остальные GitHub repositories не перенаправляются на общий read-key.
+
+Guest-local `github-proxmox-known_hosts` содержит только проверенные SSH host keys GitHub и является явной частью этого capability, а не скрытой копией состояния PVE.
 
 ## 5. Root-wrapper и Git revision
 
@@ -428,7 +462,7 @@ deploy-incomplete
 PVE state verified
 + root SSH deployer verified
 + management.ssh_identity verified + public key synced, если запрошен
-+ management.project_repo_read verified, если запрошен
++ management.project_repo_read desired state verified
 + Bootstrap verified, если запрошен
 + final PVE verification
 ```
@@ -469,12 +503,14 @@ Management SSH identity
   NOT REQUESTED | APPLY AFTER START | APPLY | NO CHANGE | BLOCKED
 
 Project repo read
-  NOT REQUESTED | APPLY AFTER START | APPLY | NO CHANGE | BLOCKED
+  NOT REQUESTED | APPLY AFTER START | APPLY | REMOVE | NO CHANGE | BLOCKED
 
 Bootstrap
   base                APPLY AFTER START | APPLY | NO CHANGE | BLOCKED
   ...
 ```
+
+Для `Project repo read` состояние `REMOVE` означает: effective state больше не требует `management.project_repo_read`, но в госте ещё присутствуют управляемые артефакты этого доступа.
 
 Если management SSH identity требует новой регистрации `.pub`, PLAN также показывает, что после APPLY потребуется `sync-management-keys`, но сам sync в PLAN не запускается.
 
@@ -500,7 +536,7 @@ Bootstrap
 → проверить root SSH private key deployer
 → management.ssh_identity handler, если запрошен
 → при новом public key зарегистрировать его и вызвать sync-management-keys
-→ management.project_repo_read handler, если запрошен
+→ management.project_repo_read handler согласно desired state
 → Bootstrap handlers
 → final verify
 → снять deploy-incomplete
@@ -529,7 +565,7 @@ Bootstrap
 → проверить root SSH private key deployer
 → management.ssh_identity handler, если запрошен
 → при новом public key зарегистрировать его и вызвать sync-management-keys
-→ management.project_repo_read handler, если запрошен
+→ management.project_repo_read handler согласно desired state
 → Bootstrap handlers
 → final verify
 → снять deploy-incomplete
@@ -633,20 +669,103 @@ sync-management-keys
 
 ## 18. Project Git read handler
 
-При `management.project_repo_read: true` после проверенного SSH:
+`management.project_repo_read` управляет полным состоянием Project Git READ, а не только фактом одноразовой копии private key.
+
+### 18.1. Desired state `true`
+
+При:
+
+```yaml
+management:
+  project_repo_read: true
+```
+
+после проверенного SSH handler должен:
 
 ```text
 получить private bytes только из переданного root-wrapper FD
-→ атомарно записать в госте:
+→ проверить ожидаемый fingerprint
+→ атомарно записать:
   /etc/proxmox-guest/credentials/github-proxmox-read
 → root:root 0600
-→ проверить fingerprint ожидаемой public части
-→ не выводить private content
+→ обеспечить guest-local GitHub host keys:
+  /etc/proxmox-guest/ssh/github-proxmox-known_hosts
+→ root:root 0644
+→ обеспечить SSH alias:
+  /etc/ssh/ssh_config.d/90-proxmox-project-repo-read.conf
+→ root:root 0644
+→ обеспечить точный Git URL rewrite только для zsergeyru/proxmox
+→ выполнить final verify через git ls-remote
 ```
 
-Если Git client и доверенный GitHub host key доступны, final verify может выполнить read-only `git ls-remote` к точному `zsergeyru/proxmox`.
+SSH alias обязан использовать:
 
-Обычный deploy не удаляет уже выданный Git read credential автоматически только потому, что поле исчезло: отзыв/ротация — отдельная явная операция.
+```text
+Host github-proxmox-read
+HostName github.com
+User git
+IdentityFile /etc/proxmox-guest/credentials/github-proxmox-read
+IdentitiesOnly yes
+UserKnownHostsFile /etc/proxmox-guest/ssh/github-proxmox-known_hosts
+StrictHostKeyChecking yes
+BatchMode yes
+```
+
+Git URL rewrite обязан быть точным:
+
+```text
+git@github.com:zsergeyru/proxmox.git
+→ git@github-proxmox-read:zsergeyru/proxmox.git
+```
+
+Благодаря этому обычный root `git clone/fetch` для канонического project URL автоматически использует выданный read-only key, но другие GitHub repositories не получают этот credential.
+
+Guest-local `known_hosts` является управляемым публичным состоянием capability. Он содержит только проверенные host keys GitHub и не отключает `StrictHostKeyChecking`.
+
+Read-only check для `true` подтверждает:
+
+```text
+private key существует, root:root 0600 и имеет ожидаемый fingerprint
++ guest-local GitHub known_hosts существует и валиден
++ SSH alias существует и указывает только на фиксированные project paths
++ точный Git URL rewrite существует
++ git ls-remote git@github.com:zsergeyru/proxmox.git проходит read-only
+```
+
+Если всё соответствует — `NO CHANGE`.
+
+Неожиданный private key, неизвестное содержимое управляемого SSH config или конфликтующая Git rewrite-запись означают `BLOCKED / STOP`; обычный deploy не перезаписывает неоднозначный credential/config вслепую.
+
+### 18.2. Desired state `false` или поле отсутствует
+
+Если effective state не требует `management.project_repo_read`, новый credential не выдаётся.
+
+Если при этом управляемые артефакты Project Git READ уже существуют, PLAN показывает:
+
+```text
+Project repo read: REMOVE
+```
+
+`--apply` удаляет только управляемое состояние этого capability:
+
+```text
+/etc/proxmox-guest/credentials/github-proxmox-read
+/etc/proxmox-guest/ssh/github-proxmox-known_hosts
+/etc/ssh/ssh_config.d/90-proxmox-project-repo-read.conf
+точную Git URL rewrite-запись для zsergeyru/proxmox
+```
+
+Уже клонированные рабочие копии репозитория, их содержимое и другие пользовательские Git/SSH credentials не удаляются и не изменяются.
+
+Перед удалением handler обязан убедиться, что найденные файлы/записи действительно относятся к этому управляемому capability. Неоднозначное или изменённое посторонним состояние => `BLOCKED / STOP`, а не слепое удаление.
+
+После REMOVE проверяется отсутствие именно этих управляемых артефактов. Наличие у гостя какого-либо другого независимого GitHub-доступа не считается ошибкой и не является предметом `management.project_repo_read`.
+
+### 18.3. Ротация общего key
+
+Если мастер-копия общего read-only key была явно ротирована на PVE, следующий APPLY при `management.project_repo_read=true` может заменить guest-local управляемую копию только в рамках отдельной подтверждённой ротации с ожидаемым новым fingerprint. Обычная неоднозначная смена fingerprint без такого состояния означает STOP.
+
+Если AI требуется запись в GitHub, write credential является отдельным контуром.
 
 ## 19. Guest Bootstrap
 
@@ -814,7 +933,7 @@ bootstrap.capabilities
 → действующий schema v6 contract
 
 management.project_repo_read
-→ принятый target contract, schema/resolver ещё не реализованы
+→ принятый target contract, schema/resolver/deployer ещё не реализованы
 
 management.ssh_identity
 → принятый target contract, schema/resolver/deployer/sync ещё не реализованы
@@ -833,4 +952,4 @@ management-ssh
 
 ## 28. Главный принцип
 
-> `deploy-guest` детерминированно управляет одной описанной в Git VM/LXC. Новая Debian-машина получает весь актуальный management public-key set и PVE tag `management-ssh`; при первом подключении один раз запоминается SSH host key ожидаемого адреса, а дальнейшая смена ключа не принимается автоматически. Собственный private management key создаётся только внутри гостя с `management.ssh_identity: true`, наружу регистрируется лишь `/var/lib/proxmox-deployer/public-keys/<VMID>.pub`, а массовое распространение выполняет отдельный `sync-management-keys`. `management.project_repo_read` и Guest Bootstrap остаются независимыми последующими механизмами внутри единого manifest-раздела `management`.
+> `deploy-guest` детерминированно управляет одной описанной в Git VM/LXC. Новая Debian-машина получает весь актуальный management public-key set и PVE tag `management-ssh`; при первом подключении один раз запоминается SSH host key ожидаемого адреса, а дальнейшая смена ключа не принимается автоматически. Собственный private management key создаётся только внутри гостя с `management.ssh_identity: true`, наружу регистрируется лишь `/var/lib/proxmox-deployer/public-keys/<VMID>.pub`, а массовое распространение выполняет отдельный `sync-management-keys`. `management.project_repo_read` управляет фиксированным read-only доступом только к `zsergeyru/proxmox`: при `true` он обеспечивает key + GitHub host trust + точную SSH/Git-настройку, а при `false` удаляет только эти управляемые артефакты. Guest Bootstrap остаётся независимым последующим механизмом внутри общей цепочки deploy.
