@@ -30,13 +30,11 @@ jobs:
 
           tooling_test = Path('scripts/pve/setup/tests/test-sync-management-keys-tooling.sh')
           ttext = tooling_test.read_text(encoding='utf-8')
-          marker = '''grep -Fq 'management-ssh' "$SOURCE" \\
-    || fail "runtime must discover management-ssh participants"\n'''
-          addition = marker + '''grep -Fq 'safe.directory={ROOT}' "$SOURCE" \\
-    || fail "runtime Git revision check must trust only the canonical root-owned checkout locally"\n'''
-          if marker not in ttext:
+          anchor = "grep -Fq 'management-ssh' \"$SOURCE\" \\\n    || fail \"runtime must discover management-ssh participants\"\n"
+          extra = "grep -Fq 'safe.directory={ROOT}' \"$SOURCE\" \\\n    || fail \"runtime Git revision check must trust only the canonical root-owned checkout locally\"\n"
+          if anchor not in ttext:
               raise SystemExit('tooling test insertion marker not found')
-          tooling_test.write_text(ttext.replace(marker, addition, 1), encoding='utf-8')
+          tooling_test.write_text(ttext.replace(anchor, anchor + extra, 1), encoding='utf-8')
 
           common = Path('scripts/pve/setup/lib/00-common.sh')
           ctext = common.read_text(encoding='utf-8')
