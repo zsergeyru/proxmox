@@ -35,10 +35,15 @@ jobs:
             scripts/guest_config.py \
             scripts/validate_repo.py \
             scripts/tests/test-guest-bootstrap.py \
+            scripts/tests/test-sync-management-keys.py \
+            scripts/pve/sync-management-keys.py \
             scripts/pve/setup/render-template-cloud-init.py
 
       - name: Run Guest Bootstrap v1 contract checks
         run: python scripts/tests/test-guest-bootstrap.py
+
+      - name: Run sync-management-keys unit checks
+        run: python scripts/tests/test-sync-management-keys.py
 
       - name: Validate shell syntax
         run: |
@@ -58,6 +63,9 @@ jobs:
 
       - name: Run management key registry unit checks
         run: sudo bash scripts/pve/setup/tests/test-management-key-registry.sh
+
+      - name: Run sync-management-keys tooling contract checks
+        run: bash scripts/pve/setup/tests/test-sync-management-keys-tooling.sh
 
       - name: Validate template pipeline assets with production renderer
         run: |
