@@ -138,8 +138,8 @@
 |---|---|
 | [`11-vmid-plan.md`](11-vmid-plan.md) | VMID/CTID и правила адресации |
 | [`25-pve-access-control.md`](25-pve-access-control.md) | учётные записи PVE, роли, привилегии, ACL и граница `managed` |
-| [`28-management-ssh-keys.md`](28-management-ssh-keys.md) | канонический public-key registry, `management_key`, генерация собственной пары гостя и `sync-management-keys` |
-| [`30-guest-manifest.md`](30-guest-manifest.md) | схема манифеста, общих настроек и итогового состояния |
+| [`28-management-ssh-keys.md`](28-management-ssh-keys.md) | `management.ssh_identity`, public-key registry, PVE tag `management-ssh` и `sync-management-keys` |
+| [`30-guest-manifest.md`](30-guest-manifest.md) | единый раздел `management`, схема манифеста, общих настроек и итогового состояния |
 | [`31-deploy-guest.md`](31-deploy-guest.md) | поведение `deploy-guest`, PLAN/APPLY, безопасное применение и проверка результата |
 | [`33-guest-bootstrap-and-provisioning.md`](33-guest-bootstrap-and-provisioning.md) | готовность к управлению, первичная настройка и передача управления Ansible |
 | [`40-network.md`](40-network.md) | архитектурный контракт IPv4, VLAN, маршрутизации, VPN и PBR |
