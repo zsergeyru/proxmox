@@ -39,9 +39,11 @@ STATE_DIR="${STATE_DIR}"
 PRIVATE_REPO="${PRIVATE_REPO}"
 PRIVATE_BRANCH="${PRIVATE_BRANCH}"
 SSH_CONFIG="${SSH_CONFIG}"
+PROJECT_REPO_KEY="${KEY_FILE}"
 DEPLOY_USER="${DEPLOY_USER}"
 LOCK_FILE="${LOCK_FILE}"
 SOURCE="${deployer_src}"
+VALIDATOR="${REPO_DIR}/scripts/validate_repo.py"
 
 fail() {
     printf 'ОШИБКА: %s\\n' "\$*" >&2
@@ -85,6 +87,51 @@ assert_clean_repo() {
         || fail "В \$REPO_DIR есть локальные изменения. Автоматическое удаление запрещено. Первый элемент: \$(head -n1 <<<"\$status")"
 }
 
+resolve_project_repo_read() {
+    local vmid=\$1
+    /usr/bin/python3 - "\$REPO_DIR" "\$vmid" <<'PY_EFFECTIVE'
+from pathlib import Path
+import sys
+import yaml
+
+repo = Path(sys.argv[1])
+vmid = int(sys.argv[2])
+sys.path.insert(0, str(repo / "scripts"))
+
+from guest_config import GuestConfigError, resolve_effective_guest
+
+matches = sorted((repo / "guests").glob(f"{vmid:03d}-*/guest.yaml"))
+if len(matches) != 1:
+    raise SystemExit(f"для VMID {vmid} ожидается ровно один guest.yaml, найдено: {len(matches)}")
+
+try:
+    defaults = yaml.safe_load((repo / "guests" / "defaults.yaml").read_text(encoding="utf-8"))
+    source = yaml.safe_load(matches[0].read_text(encoding="utf-8"))
+except Exception as exc:
+    raise SystemExit(f"не удалось прочитать effective state для VMID {vmid}: {exc}") from exc
+
+if not isinstance(defaults, dict) or not isinstance(source, dict):
+    raise SystemExit("defaults.yaml и guest.yaml должны содержать YAML mapping")
+if source.get("vmid") != vmid:
+    raise SystemExit(f"guest.yaml не соответствует запрошенному VMID {vmid}")
+if source.get("deployable") is not True:
+    raise SystemExit(f"VMID {vmid} не является deployable")
+
+try:
+    effective = resolve_effective_guest(source, defaults).effective
+except GuestConfigError as exc:
+    raise SystemExit(f"не удалось построить effective state VMID {vmid}: {exc}") from exc
+
+management = effective.get("management")
+if not isinstance(management, dict):
+    raise SystemExit("effective management должен быть mapping")
+value = management.get("project_repo_read")
+if not isinstance(value, bool):
+    raise SystemExit("effective management.project_repo_read должен быть boolean")
+print("1" if value else "0")
+PY_EFFECTIVE
+}
+
 assert_repo_trust
 
 origin_url="\$(canonical_git -C "\$REPO_DIR" remote get-url origin 2>/dev/null || true)"
@@ -126,13 +173,47 @@ chmod 0640 "\$revision_tmp"
 mv -f "\$revision_tmp" "\$STATE_DIR/last-revision"
 
 [[ -f "\$SOURCE" ]] || fail "После обновления Git не найден основной файл deploy-guest: \$SOURCE"
+[[ -f "\$VALIDATOR" ]] || fail "После обновления Git не найден validator: \$VALIDATOR"
+[[ -f "\$REPO_DIR/scripts/guest_config.py" ]] || fail "После обновления Git не найден общий guest resolver"
+
+/usr/bin/python3 "\$VALIDATOR" || fail "Repository validation перед deploy-guest завершилась ошибкой"
+
+vmid="\${1:-}"
+[[ "\$vmid" =~ ^[0-9]{3}\$ ]] || fail "Первым параметром должен быть VMID 100-999"
+vmid_num=\$((10#\$vmid))
+(( vmid_num >= 100 && vmid_num <= 999 )) || fail "VMID должен находиться в диапазоне 100-999"
+project_repo_read="\$(resolve_project_repo_read "\$vmid_num")" \\
+    || fail "Не удалось определить effective management.project_repo_read для VMID \$vmid"
+[[ "\$project_repo_read" == "0" || "\$project_repo_read" == "1" ]] \\
+    || fail "Resolver вернул недопустимое значение project_repo_read: \$project_repo_read"
+
 printf 'Версия Git: %s\\n' "\$revision"
 
-set +e
-runuser -u "\$DEPLOY_USER" -- env DEPLOY_GUEST_SOURCE_REVISION="\$revision" \\
-    /usr/bin/python3 "\$SOURCE" "\$@"
-rc=\$?
-set -e
+if [[ "\$project_repo_read" == "1" ]]; then
+    [[ -f "\$PROJECT_REPO_KEY" && ! -L "\$PROJECT_REPO_KEY" ]] \\
+        || fail "Project Git READ key отсутствует или не является обычным файлом: \$PROJECT_REPO_KEY"
+    key_owner="\$(stat -c '%U:%G' "\$PROJECT_REPO_KEY" 2>/dev/null || true)"
+    key_mode="\$(stat -c '%a' "\$PROJECT_REPO_KEY" 2>/dev/null || true)"
+    [[ "\$key_owner" == "root:root" && "\$key_mode" == "600" ]] \\
+        || fail "Project Git READ key должен быть root:root 0600, обнаружено \${key_owner:-?} \${key_mode:-?}"
+
+    exec 8<"\$PROJECT_REPO_KEY"
+    set +e
+    runuser -u "\$DEPLOY_USER" -- env \\
+        DEPLOY_GUEST_SOURCE_REVISION="\$revision" \\
+        DEPLOY_GUEST_PROJECT_REPO_KEY_FD=8 \\
+        /usr/bin/python3 "\$SOURCE" "\$@"
+    rc=\$?
+    set -e
+    exec 8<&-
+else
+    set +e
+    runuser -u "\$DEPLOY_USER" -- env DEPLOY_GUEST_SOURCE_REVISION="\$revision" \\
+        /usr/bin/python3 "\$SOURCE" "\$@"
+    rc=\$?
+    set -e
+fi
+
 exit "\$rc"
 EOF_DEPLOY
     chown root:root /usr/local/sbin/deploy-guest
@@ -153,6 +234,7 @@ report_status() {
     ok "Debian 13 LXC template подготовлен: ${LXC_TEMPLATE_VOLUME:-не определён}"
     ok "pvedeploy, config.yaml и файловая структура проверены"
     ok "PVE guest SSH identity создана/проверена"
+    ok "Management public-key registry создан и проверен"
     ok "Канонический read-only Deploy Key установлен"
     ok "Приватный репозиторий синхронизирован и origin проверен"
     ok "managed и роли Proxmox проверены"
