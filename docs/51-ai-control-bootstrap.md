@@ -21,16 +21,17 @@
 
 `301` не должен быть необходим для собственного первоначального создания.
 
-Для целевой модели после реализации schemas/resolver 301 использует:
+Для целевой модели после реализации schemas/resolver 301 использует единый management-раздел:
 
 ```yaml
-management_key: true
-
-access:
+management:
+  ssh_identity: true
   project_repo_read: true
 ```
 
-На момент фиксации документа оба поля ещё не реализованы в действующей schema v6 и до реализации не добавляются в рабочий manifest.
+Базовый `management.ssh.user/port` приходит из общих defaults. `management.ssh_identity` и `management.project_repo_read` задаются только конкретному гостю и не наследуются.
+
+На момент фиксации документа два целевых поля ещё не реализованы в действующей schema v6 и до реализации не добавляются в рабочий manifest.
 
 ## 2. Создание VM 301
 
@@ -42,13 +43,14 @@ access:
 → полный клон текущего шаблона 9000
 → применить требуемое состояние
 → передать текущий management-authorized-keys через Cloud-Init
+→ установить PVE tag management-ssh
 → запустить
 → дождаться QGA/Cloud-Init
 → проверить SSH root private key deployer
-→ при management_key=true создать/проверить собственную management keypair 301
+→ при management.ssh_identity=true создать/проверить собственную management keypair 301
 → зарегистрировать только .pub на PVE
 → sync-management-keys
-→ при project_repo_read материализовать общий Git READ credential
+→ при management.project_repo_read=true материализовать общий Git READ credential
 ```
 
 Административный пользователь:
@@ -59,6 +61,8 @@ root
 
 Вход по паролю запрещён.
 
+Tag `management-ssh` — технический runtime-маркер участия в `sync-management-keys`, а не поле `guest.yaml` и не признак membership в pool `managed`.
+
 ## 3. Проверка начальной готовности
 
 До установки AI-платформы подтвердить:
@@ -67,12 +71,13 @@ root
 VM запущена
 QEMU Guest Agent доступен
 Cloud-Init завершён
+PVE tag management-ssh установлен
 SSH root private key deployer работает
 имя хоста и сеть соответствуют требуемому состоянию
 вход по SSH с паролем неожиданно не включён
 ```
 
-После реализации `management_key` дополнительно проверить:
+После реализации `management.ssh_identity` дополнительно проверить:
 
 ```text
 /etc/proxmox-guest/ssh/management_ed25519
@@ -87,7 +92,7 @@ SSH root private key deployer работает
 /etc/proxmox-guest/public-keys/management-authorized-keys
 ```
 
-Если `project_repo_read` уже реализован и запрошен, дополнительно подтвердить наличие Git credential в стандартном месте и его корректные права.
+Если `management.project_repo_read` уже реализован и запрошен, дополнительно подтвердить наличие Git credential в стандартном месте и его корректные права.
 
 ## 4. Подготовка общей AI-платформы
 
@@ -120,7 +125,14 @@ SSH root private key deployer работает
 
 Отдельный ручной шаг «создать `/opt/ai-control/ssh/ai_control_ed25519`» больше не является целевой моделью.
 
-Собственная identity 301 создаётся общим механизмом `management_key: true` во время `deploy-guest`:
+Собственная identity 301 создаётся общим механизмом:
+
+```yaml
+management:
+  ssh_identity: true
+```
+
+во время `deploy-guest`:
 
 ```text
 private
@@ -131,7 +143,7 @@ public
 → /etc/proxmox-guest/ssh/management_ed25519.pub
 → deployer забирает только открытую часть
 → регистрирует как 301-ai-control.pub на PVE
-→ sync-management-keys распространяет её всем участвующим Debian-гостям
+→ sync-management-keys распространяет её всем участвующим Debian-гостям с tag management-ssh
 ```
 
 Не использовать эту пару как GitHub credential.
@@ -146,10 +158,10 @@ git@github.com:zsergeyru/proxmox.git
 
 301 не создаёт отдельный read-only Deploy Key.
 
-После реализации `access.project_repo_read`:
+После реализации `management.project_repo_read`:
 
 ```text
-guest.yaml: project_repo_read=true
+guest.yaml: management.project_repo_read=true
 → root-wrapper на PVE открывает фиксированный общий Git READ key
 → передаёт его текущему deploy через отдельный FD
 → deploy-guest по проверенному SSH root материализует локальную копию
@@ -164,7 +176,7 @@ guest.yaml: project_repo_read=true
 /opt/ai-control/repos/proxmox
 ```
 
-Общий Git read-key и management SSH key не взаимозаменяемы.
+Общий Git read-key и management SSH key не взаимозаменяемы, хотя запросы на оба находятся в одном manifest-разделе `management`.
 
 Если AI потребуется GitHub write, это отдельный контур и отдельный credential.
 
@@ -185,6 +197,7 @@ ai-agent@pve!infra
 чтение состояния разрешённых объектов
 право клонирования шаблона 9000
 право изменения объектов в /pool/managed
+возможность устанавливать технический tag management-ssh на создаваемый разрешённый объект
 отсутствие ожидаемо запрещённых прав уровня PVE-хоста
 ```
 
@@ -218,7 +231,7 @@ management private key 301 в стандартном guest path
 /etc/proxmox-guest/public-keys/management-authorized-keys
 ```
 
-Последовательность:
+Последовательность для Debian-гостя management-контура:
 
 ```text
 AI-агент
@@ -228,6 +241,7 @@ AI-агент
 → сразу поместить в pool=managed
 → настроить CPU/RAM/диск/сеть
 → передать ВЕСЬ management-authorized-keys
+→ установить PVE tag management-ssh
 → запустить
 → проверить
 ```
@@ -235,16 +249,17 @@ AI-агент
 Проверить:
 
 1. тестовый объект действительно создан в `managed`;
-2. AI может выполнять разрешённые операции уровня VM/LXC;
-3. шаблон `9000` не стал гостем `managed`;
-4. AI не получил широкого доступа уровня PVE-хоста;
-5. прямой SSH AI работает private key 301;
-6. прямой SSH deployer также работает, потому что новая машина получила `deployer.pub`;
-7. ручной `sync-management-keys` на PVE может впоследствии обновить этот guest без отдельной регистрации доступа.
+2. на тестовом объекте присутствует tag `management-ssh`;
+3. AI может выполнять разрешённые операции уровня VM/LXC;
+4. шаблон `9000` не стал гостем `managed` и не получил `management-ssh`;
+5. AI не получил широкого доступа уровня PVE-хоста;
+6. прямой SSH AI работает private key 301;
+7. прямой SSH deployer также работает, потому что новая машина получила `deployer.pub`;
+8. ручной `sync-management-keys` на PVE обнаруживает этот guest по tag и может обновить его без отдельной регистрации доступа.
 
 AI не вызывает `deploy-guest` на PVE и не пишет в `/etc/proxmox-deployer`.
 
-## 10. Проверка независимости ACL PVE и SSH
+## 10. Проверка независимости ACL PVE и management
 
 Подтвердить независимость:
 
@@ -252,10 +267,13 @@ AI не вызывает `deploy-guest` на PVE и не пишет в `/etc/pro
 членство в managed
 → права на жизненный цикл и конфигурацию в PVE
 
+PVE tag management-ssh
+→ участие в области обнаружения sync-management-keys
+
 management public keys в authorized_keys
 → прямой SSH внутрь ОС
 
-project_repo_read
+management.project_repo_read
 → исходящий read-only Git access
 ```
 
@@ -263,7 +281,12 @@ project_repo_read
 
 ## 11. Проверка синхронизации после появления 311
 
-После того как `311-dev-services` будет развёрнут с `management_key: true`:
+После того как `311-dev-services` будет развёрнут с:
+
+```yaml
+management:
+  ssh_identity: true
+```
 
 ```text
 311 создаёт собственную pair внутри себя
@@ -275,7 +298,7 @@ project_repo_read
 
 301 не подключается к 311 для получения `.pub` и не подключается к PVE для записи registry.
 
-Проверить, что локальный каталог 301 теперь содержит public key 311, а уже существующие управляемые Debian-гости получили его в управляемый блок `authorized_keys`.
+Проверить, что локальный каталог 301 теперь содержит public key 311, а уже существующие Debian-гости с tag `management-ssh` получили его в управляемый блок `authorized_keys`.
 
 ## 12. Передача повторяемой настройки Ansible
 
@@ -309,18 +332,19 @@ project_repo_read
 ```text
 301 создаётся со стороны PVE без зависимости от работающего 301
 QGA и Cloud-Init работают
+PVE tag management-ssh установлен
 SSH root со стороны deployer работает
-management_key 301 создан внутри гостя и private не покидал 301
+management.ssh_identity 301 создана внутри гостя и private не покидал 301
 301 public key зарегистрирован на PVE
 sync-management-keys доставил полный public catalog в 301
-project_repo_read materialized после реализации interface
+management.project_repo_read materialized после реализации interface
 рабочая копия проекта работает
 Proximo входит как ai-agent@pve!infra
 AI создаёт тестовую Debian VM/LXC сразу в managed
-AI передаёт новой машине весь management-authorized-keys
+AI передаёт новой машине весь management-authorized-keys и ставит management-ssh
 SSH AI и SSH deployer к новой машине работают разными private keys
 AI не имеет SSH/root-доступа к PVE
-появление management key 311 доставляется в 301 через PVE-side sync
+появление management SSH identity 311 доставляется в 301 через PVE-side sync
 Ansible/311 использует отдельный management private key
 резервное копирование и восстановление проверены
 ```
@@ -336,11 +360,11 @@ Ansible/311 использует отдельный management private key
 не менять работающие credentials без необходимости
 сохранить журналы и состояние
 определить проблемный слой:
-  guest / SSH / management_key / key sync / Project Git read / Proximo / agent
+  guest / SSH / management.ssh_identity / key sync / management.project_repo_read / Proximo / agent
 исправить предварительное условие
 повторить только безопасный идемпотентный этап
 ```
 
 Не генерировать новый management private key молча при неоднозначном состоянии существующей пары.
 
-Главное правило: **301 получает собственную management identity через общий `management_key`, получает полный набор открытых инфраструктурных ключей только в направлении PVE → guest через `sync-management-keys` и использует этот набор при создании новых Debian VM/LXC; SSH-доступ AI к PVE для этой схемы не нужен.**
+Главное правило: **301 получает собственную management identity через `management.ssh_identity`, получает полный набор открытых инфраструктурных ключей только в направлении PVE → guest через `sync-management-keys`, имеет PVE tag `management-ssh` и использует этот набор вместе с тем же tag при создании новых Debian VM/LXC; SSH-доступ AI к PVE для этой схемы не нужен.**
