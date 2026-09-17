@@ -2,41 +2,44 @@
 
 **Тип:** Обзор  
 **Статус:** Действующий  
-**Основной источник:** Нет — точные роли, привилегии и ACL PVE задаёт [`25-pve-access-control.md`](25-pve-access-control.md).
+**Основной источник:** Нет — точные роли и ACL задаёт [`25-pve-access-control.md`](25-pve-access-control.md), management SSH keys — [`28-management-ssh-keys.md`](28-management-ssh-keys.md), поведение `deploy-guest` — [`31-deploy-guest.md`](31-deploy-guest.md).
 
-Этот документ объясняет схему простыми словами: кто обновляет проект на PVE, кто выполняет `deploy-guest`, чем Linux-пользователь `pvedeploy` отличается от учётной записи Proxmox и как отдельно работает AI-агент.
+Этот документ объясняет схему простыми словами: кто запускает `deploy-guest`, чем Linux-пользователь `pvedeploy` отличается от учётной записи Proxmox, как работает AI и как оба контура получают общий набор открытых SSH-ключей без SSH-доступа AI к PVE.
 
 ## 1. Четыре разных участника
 
 ### `root` на PVE
 
-`root` выполняет только действия на стороне хоста, для которых действительно нужны административные права:
+`root` выполняет только действия хоста, для которых действительно нужны административные права:
 
 - запускает `/usr/local/sbin/deploy-guest`;
-- обновляет основную копию проекта на PVE, принадлежащую `root`;
-- владеет мастер-копией общего GitHub Deploy Key только для чтения `zsergeyru/proxmox`;
-- при явном запросе `access.project_repo_read` передаёт этот credential конкретному запуску `deploy-guest` только на время выполнения;
-- передаёт выполнение основной логики развёртывания ограниченному Linux-пользователю `pvedeploy`.
-
-Основной `deploy-guest.py` не должен постоянно работать от `root`.
+- обновляет доверенную root-owned копию проекта на PVE;
+- владеет мастер-копией общего GitHub Deploy Key только для чтения;
+- при `access.project_repo_read` передаёт этот credential текущему deploy через отдельный FD;
+- запускает основную логику deploy от ограниченного `pvedeploy`.
 
 ### `pvedeploy` на PVE
 
-`pvedeploy` — служебный Linux-пользователь, под которым выполняется основная логика развёртывания на PVE-хосте.
+`pvedeploy` — служебный Linux-пользователь, под которым выполняется основная логика развёртывания.
 
-Он может читать исходный код проекта и необходимые рабочие файлы развёртывания, но не может изменять основную Git-копию проекта и не имеет постоянного доступа к root-only GitHub private key. Если конкретный deploy требует `project_repo_read`, root-wrapper передаёт значение фиксированного read-only credential только текущему процессу через отдельный file descriptor; путь к root-only файлу и выбор другого секрета `pvedeploy` не задаёт.
+Он использует:
 
-Это **не** учётная запись API Proxmox.
+```text
+PVE API token deployer@pve!host-deploy
+SSH private key deployer для root@guest
+public-key registry
+known_hosts управляемых гостей
+```
+
+Это не учётная запись API Proxmox и не root на PVE.
 
 ### `deployer@pve!host-deploy`
 
-Это учётная запись API Proxmox, от имени которой `deploy-guest.py` обращается к Proxmox.
-
-Она предназначена для человека и инструментов на стороне PVE-хоста. Точная область прав уровня VM/LXC, роли проекта и ACL описаны только в [`25-pve-access-control.md`](25-pve-access-control.md).
+Это PVE API identity, от имени которой `deploy-guest.py` управляет VM/LXC.
 
 ### AI-агент / `ai-agent@pve!infra`
 
-AI-агент работает отдельно от `deploy-guest` на PVE-хосте:
+AI работает отдельно:
 
 ```text
 AI-агент
@@ -45,9 +48,145 @@ AI-агент
 → разрешённые объекты Proxmox
 ```
 
-Его обычная зона изменения PVE — пул `managed`. AI не получает `root` на PVE и не изменяет основную копию проекта на PVE.
+Его обычная зона изменения PVE — `managed`. AI не получает root/SSH на PVE ради управления гостями или management public keys.
 
-## 2. Независимые рабочие копии Git и общий read-only credential
+## 2. Три разных вида доступа
+
+Нельзя смешивать:
+
+```text
+PVE API access
+→ создание/изменение/жизненный цикл VM/LXC
+
+management SSH access
+→ root внутри Debian-гостя
+
+Project Git READ
+→ clone/fetch zsergeyru/proxmox
+```
+
+Для них используются разные credentials и разные правила.
+
+## 3. SSH identity deployer
+
+На PVE существует пара:
+
+```text
+/etc/proxmox-deployer/ssh/pve_guest_ed25519
+/etc/proxmox-deployer/ssh/pve_guest_ed25519.pub
+```
+
+Несмотря на историческое имя, это SSH identity **deployer**, а не «ключ самого PVE».
+
+Private key остаётся на PVE. Public часть входит в канонический management public-key registry.
+
+## 4. Канонический management public-key registry
+
+На PVE:
+
+```text
+/etc/proxmox-deployer/public-keys/
+├── deployer.pub
+├── <VMID>-<name>.pub
+└── management-authorized-keys
+```
+
+Там только открытые SSH-ключи. Private keys и Git credentials туда не попадают.
+
+Если конкретному управляющему гостю нужна собственная SSH identity, целевой manifest содержит:
+
+```yaml
+management_key: true
+```
+
+После проверенного SSH deployer создаёт/проверяет стандартную пару **внутри этого гостя**, оставляет private key там и забирает только `.pub` в PVE registry.
+
+Это общий механизм: `deploy-guest` не знает, является ли гость AI, Ansible или будущим контроллером.
+
+## 5. Отдельная синхронизация public keys
+
+Отдельная команда на PVE:
+
+```bash
+sync-management-keys
+```
+
+берёт канонический registry и распространяет его по участвующим управляемым Debian-гостям.
+
+Каждый такой гость получает локальную копию:
+
+```text
+/etc/proxmox-guest/public-keys/management-authorized-keys
+```
+
+и актуальный управляемый блок `root` `authorized_keys`.
+
+`deploy-guest` вызывает sync после регистрации нового/изменённого public key. Оператор также может запускать sync вручную.
+
+## 6. Почему AI не нужен доступ к PVE для ключей
+
+Направление синхронизации только такое:
+
+```text
+PVE canonical registry
+→ sync-management-keys
+→ 301 AI Control
+```
+
+AI не пишет public key в `/etc/proxmox-deployer` и не подключается к PVE по SSH.
+
+Когда появляется, например, management key 311:
+
+```text
+deploy-guest 311
+→ private key создаётся внутри 311
+→ deployer получает только 311 .pub
+→ PVE registry обновляется
+→ sync-management-keys
+→ 301 получает новый public key 311
+```
+
+311 не подключается ни к PVE, ни к 301 ради регистрации.
+
+## 7. Как deployer создаёт новую Debian VM/LXC
+
+При создании:
+
+```text
+deploy-guest
+→ берёт текущий management-authorized-keys
+→ передаёт весь набор через Cloud-Init/LXC ssh-public-keys
+→ запускает guest
+→ проверяет root SSH private key deployer
+→ выполняет остальные явно запрошенные шаги
+```
+
+Поэтому новая машина сразу доступна всем уже зарегистрированным management identities.
+
+## 8. Как AI создаёт новую Debian VM/LXC
+
+AI использует локальную копию того же набора:
+
+```text
+/etc/proxmox-guest/public-keys/management-authorized-keys
+```
+
+Схема:
+
+```text
+AI
+→ прочитать local management-authorized-keys
+→ Proximo
+→ создать/клонировать guest в managed
+→ передать ВЕСЬ набор public keys
+→ запустить
+```
+
+Ключ deployer обязательно присутствует в наборе, поэтому PVE-side `sync-management-keys` сможет работать и с AI-created машиной.
+
+AI штатно не вызывает `/usr/local/sbin/deploy-guest` на PVE.
+
+## 9. Git остаётся отдельным контуром
 
 На PVE:
 
@@ -55,186 +194,63 @@ AI-агент
 /var/lib/proxmox-deployer/repo
 ```
 
-Это основная рабочая копия для инструментов на стороне PVE-хоста, принадлежащая `root`.
-
-В `301-ai-control`:
+В AI Control:
 
 ```text
 /opt/ai-control/repos/proxmox
 ```
 
-Это отдельная рабочая копия контура AI Control.
-
-На `311-dev-services` также может быть собственная рабочая копия проекта для Ansible/DevOps-задач.
-
-Рабочие копии не синхронизируются напрямую. Общая точка чтения — GitHub. Для `clone/fetch` закрытого `zsergeyru/proxmox` принят **один общий GitHub Deploy Key только для чтения**. Его мастер-копия хранится root-only на PVE. Гость получает локальную копию этого ключа только если его `guest.yaml` явно запрашивает:
+Для `clone/fetch` принят один общий GitHub Deploy Key READ ONLY. Его мастер-копия хранится root-only на PVE, а гостевая копия материализуется только по:
 
 ```yaml
 access:
   project_repo_read: true
 ```
 
-Это поле не является универсальным интерфейсом секретов. Оно означает ровно одно: разрешить чтение основного проектного репозитория фиксированным общим read-only credential. Манифест не задаёт имя ключа, путь к root-only секрету или другой credential.
-
-AI может подготавливать изменения проекта в своей рабочей копии. Если AI должен отправлять изменения обратно в GitHub, credential для записи является отдельным контуром и не заменяет общий read-only ключ.
-
-## 3. Как работает `deploy-guest`
-
-Оператор запускает:
-
-```bash
-deploy-guest 311
-```
-
-для предварительного плана либо:
-
-```bash
-deploy-guest 311 --apply
-```
-
-для применения.
-
-Общая последовательность:
+Стандартное место в госте:
 
 ```text
-root
-→ взять общую блокировку
-→ проверить основную копию проекта
-→ получить актуальную ревизию из GitHub
-→ зафиксировать точный Git SHA текущего запуска
-→ определить, нужен ли этому гостю project_repo_read
-→ при необходимости открыть фиксированный root-only read-key и передать его через FD
-→ запустить основную логику развёртывания от pvedeploy
-
-pvedeploy
-→ прочитать требуемое состояние гостевой системы
-→ построить план
-→ обратиться к Proxmox как deployer@pve!host-deploy
-→ применить изменения только по явному запросу
-→ при project_repo_read материализовать переданный credential внутри гостя в стандартном месте
-→ проверить результат
+/etc/proxmox-guest/credentials/github-proxmox-read
 ```
 
-После передачи управления текущий запуск не должен переключаться на другую Git-ревизию.
+Этот Git key не входит в `authorized_keys` и не входит в management public-key registry.
 
-Точная файловая модель на PVE описана в [`21-pve-filesystem-layout.md`](21-pve-filesystem-layout.md), а требуемое состояние гостевой системы — в [`30-guest-manifest.md`](30-guest-manifest.md).
-
-## 4. Почему нужен `pvedeploy`
-
-Основной код развёртывания работает с API Proxmox, SSH, состоянием гостевых систем и проверками. Если весь этот код постоянно выполнялся бы от `root`, любая ошибка в нём автоматически получала бы полные права на хост.
-
-Поэтому разделены три уровня:
-
-```text
-root
-→ граница доверия хоста, обновление Git, чтение root-only секретов и запуск
-
-pvedeploy
-→ основная программа развёртывания без постоянного доступа к root-only Git credential
-
-учётная запись API Proxmox
-→ дополнительно ограничивает допустимые операции PVE
-```
-
-`pvedeploy` не должен иметь альтернативный способ запуска старой изменяемой копии проекта в обход обновления, контролируемого `root`.
-
-## 5. Как AI управляет гостевыми системами
-
-Для обычного жизненного цикла VM/LXC AI не вызывает `deploy-guest`:
-
-```text
-AI-агент
-→ Proximo
-→ ai-agent@pve!infra
-→ managed
-```
-
-В своей разрешённой области AI может создавать, клонировать, настраивать, запускать, останавливать и удалять гостевые системы в пределах ACL PVE.
-
-Новая обычная гостевая система, созданная AI, должна сразу попадать в `managed`.
-
-Шаблон `9000` и специальные защищённые гостевые системы могут находиться вне `managed`; точные исключения и права на клонирование задаёт `25-pve-access-control.md`.
-
-## 6. Доступ PVE и SSH-доступ — разные вещи
-
-Наличие гостевой системы в `managed` означает права AI на уровне PVE через Proximo, но не добавляет автоматически SSH-ключ внутрь Linux.
-
-```text
-пул PVE и ACL
-→ жизненный цикл и изменение аппаратных/конфигурационных параметров
-
-/root/.ssh/authorized_keys
-→ прямой доступ к оболочке внутри гостевой ОС
-
-access.project_repo_read
-→ только чтение zsergeyru/proxmox через общий Git credential
-```
-
-Средство развёртывания на PVE, AI Control и Ansible используют независимые SSH-ключи одного административного пользователя `root`. Общий Git read-key не является административным SSH-ключом гостевой системы. Подробнее: [`33-guest-bootstrap-and-provisioning.md`](33-guest-bootstrap-and-provisioning.md) и [`50-ai-control.md`](50-ai-control.md).
-
-## 7. Что нельзя смешивать
+## 10. Что нельзя смешивать
 
 ```text
 pvedeploy
-```
+→ Linux-пользователь на PVE
 
-— Linux-пользователь на PVE, под которым выполняется программа.
-
-```text
 deployer@pve!host-deploy
-```
+→ PVE API identity deployer
 
-— учётная запись API Proxmox для средства развёртывания на стороне PVE-хоста.
+pve_guest_ed25519
+→ private SSH identity deployer для гостевых ОС
 
-```text
 ai-agent@pve!infra
+→ PVE API identity AI
+
+management_key: true
+→ запрос собственной SSH identity конкретного гостя
+
+sync-management-keys
+→ массовое распространение только public management keys
+
+project_repo_read
+→ только read-only Project Git credential
 ```
 
-— отдельная учётная запись API Proxmox для AI Control.
+## 11. Где искать точные правила
 
-Отдельны друг от друга:
-
-- общий GitHub Deploy Key только для чтения `zsergeyru/proxmox` — один credential, который может иметь локальные копии у явно запросивших его гостей;
-- возможный credential AI для записи в GitHub — отдельный контур;
-- SSH-ключ PVE для гостевых систем;
-- SSH-ключ AI для гостевых систем;
-- SSH-ключ Ansible.
-
-Общий Git read-key сознательно является исключением из правила «один субъект — одна SSH-пара»: он даёт только чтение одного проектного репозитория и не предоставляет административный доступ к PVE или гостям.
-
-## 8. Краткая схема
-
-```text
-                         GitHub
-                            |
-             общий Deploy Key READ ONLY
-                /           |           \
-               /            |            \
-      root на PVE         301 AI         311
-           |                |             |
- основная копия      рабочая копия   рабочая копия
-           |
-   wrapper deploy-guest
-           |
-       pvedeploy
-           |
- deployer@pve!host-deploy
-           |
-           v
-      Proxmox API
-
-301 AI → Proximo → ai-agent@pve!infra → managed
-```
-
-## 9. Где искать точные правила
-
-- [`25-pve-access-control.md`](25-pve-access-control.md) — основные учётные записи PVE, роли, привилегии и ACL;
-- [`21-pve-filesystem-layout.md`](21-pve-filesystem-layout.md) — владельцы основной копии проекта, учётных данных и рабочих файлов;
-- [`30-guest-manifest.md`](30-guest-manifest.md) — требуемое состояние гостевой системы и `project_repo_read`;
-- [`31-deploy-guest.md`](31-deploy-guest.md) — временная передача read-key от root к deployer;
-- [`33-guest-bootstrap-and-provisioning.md`](33-guest-bootstrap-and-provisioning.md) — начальный SSH-доступ, Git read access, первичная настройка и передача управления Ansible;
-- [`50-ai-control.md`](50-ai-control.md) — архитектура AI Control и Proximo.
+- [`21-pve-filesystem-layout.md`](21-pve-filesystem-layout.md) — точные пути и владельцы;
+- [`23-security.md`](23-security.md) — политика безопасности;
+- [`25-pve-access-control.md`](25-pve-access-control.md) — PVE identities, роли и ACL;
+- [`28-management-ssh-keys.md`](28-management-ssh-keys.md) — полный lifecycle management keys;
+- [`30-guest-manifest.md`](30-guest-manifest.md) — целевые `management_key` и `project_repo_read`;
+- [`31-deploy-guest.md`](31-deploy-guest.md) — PLAN/APPLY;
+- [`33-guest-bootstrap-and-provisioning.md`](33-guest-bootstrap-and-provisioning.md) — Guest Bootstrap;
+- [`50-ai-control.md`](50-ai-control.md) — AI Control.
 
 Главное правило:
 
-> PVE обновляет свою основную копию проекта только через процесс, контролируемый `root`; общий credential чтения Git хранится мастер-копией у `root` и материализуется только гостям с `access.project_repo_read: true`; основная логика `deploy-guest` выполняется от `pvedeploy`, а AI работает отдельно через Proximo и `ai-agent@pve!infra`.
+> Deployer и AI создают VM/LXC разными PVE-контурами, но новые Debian-гости получают один и тот же актуальный набор management public keys. Канонический набор ведётся на PVE и распространяется отдельным `sync-management-keys`; private keys остаются у своих владельцев.
