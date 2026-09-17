@@ -48,11 +48,12 @@ ensure_management_public_key_registry
 
 [[ "$(awk 'NF {count++} END {print count+0}' "$MANAGEMENT_KEYS_AGGREGATE")" == "2" ]] \
     || fail "aggregate must contain deployer.pub and 301.pub"
-first_fp="$(sed -n '1p' "$MANAGEMENT_KEYS_AGGREGATE" | ssh-keygen -lf - -E sha256 | awk '{print $2}')"
-second_fp="$(sed -n '2p' "$MANAGEMENT_KEYS_AGGREGATE" | ssh-keygen -lf - -E sha256 | awk '{print $2}')"
-guest_fp="$(ssh-keygen -lf "$PUBLIC_KEYS_DIR/301.pub" -E sha256 | awk '{print $2}')"
-[[ "$first_fp" == "$source_fp" ]] || fail "deployer.pub must be first in deterministic aggregate"
-[[ "$second_fp" == "$guest_fp" ]] || fail "301.pub must follow deployer.pub in aggregate"
+first_line="$(sed -n '1p' "$MANAGEMENT_KEYS_AGGREGATE")"
+second_line="$(sed -n '2p' "$MANAGEMENT_KEYS_AGGREGATE")"
+deployer_line="$(awk 'NF {print; exit}' "$DEPLOYER_REGISTRY_KEY")"
+guest_line="$(awk 'NF {print; exit}' "$PUBLIC_KEYS_DIR/301.pub")"
+[[ "$first_line" == "$deployer_line" ]] || fail "deployer.pub must be first in deterministic aggregate"
+[[ "$second_line" == "$guest_line" ]] || fail "301.pub must follow deployer.pub in aggregate"
 
 aggregate_before="$(sha256sum "$MANAGEMENT_KEYS_AGGREGATE" | awk '{print $1}')"
 ensure_management_public_key_registry
