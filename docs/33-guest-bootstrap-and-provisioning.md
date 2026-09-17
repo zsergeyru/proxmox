@@ -4,7 +4,7 @@
 **Статус:** Действующий  
 **Основной источник:** Да — для Guest Bootstrap v1, границы `deploy-guest` ↔ Ansible и требований к готовности административного доступа.
 
-Общая политика SSH-ключей находится в [`23-security.md`](23-security.md). Формат `guest.yaml` — в [`30-guest-manifest.md`](30-guest-manifest.md). Общий PLAN/APPLY-контракт — в [`31-deploy-guest.md`](31-deploy-guest.md).
+Общая политика SSH-ключей и общего Git read-only credential находится в [`23-security.md`](23-security.md). Формат `guest.yaml` — в [`30-guest-manifest.md`](30-guest-manifest.md). Общий PLAN/APPLY-контракт — в [`31-deploy-guest.md`](31-deploy-guest.md).
 
 ## 1. Принятая модель
 
@@ -15,6 +15,7 @@ deploy-guest.py
 → жизненный цикл PVE
 → начальный административный доступ
 → проверка SSH root
+→ project_repo_read, если явно запрошен
 → явно запрошенный Guest Bootstrap v1
 → финальная проверка
 → передача управления Ansible
@@ -23,9 +24,9 @@ deploy-guest.py
 
 Ключевое правило:
 
-> Административный SSH — часть готовности гостевой системы к управлению. Guest Bootstrap начинается только после проверенного `root SSH`.
+> Административный SSH — часть готовности гостевой системы к управлению. Любая передача project Git credential и Guest Bootstrap начинается только после проверенного `root SSH`.
 
-`bootstrap` является действующим машинным интерфейсом schema v6. `provisioning` остаётся будущим интерфейсом и в действующую схему пока не входит.
+`bootstrap` является действующим машинным интерфейсом schema v6. `access.project_repo_read` принят как целевой интерфейс, но ещё не реализован в действующей schema v6; его реализация должна следовать зафиксированному контракту без введения универсального secret API. `provisioning` остаётся будущим интерфейсом и в действующую схему пока не входит.
 
 ## 2. Ответственность `deploy-guest.py`
 
@@ -39,8 +40,9 @@ deploy-guest.py
 → запустить, если требуется
 → дождаться SSH root
 → проверить административный доступ
+→ при access.project_repo_read materialize фиксированный общий Git READ credential
 → проверить/применить явно запрошенные bootstrap capabilities
-→ проверить результат каждой capability
+→ проверить результат каждого управляемого шага
 → завершить deploy только после полной приёмки
 ```
 
@@ -67,7 +69,7 @@ root:22
 /etc/proxmox-deployer/ssh/pve_guest_ed25519.pub
 ```
 
-`deploy-guest` не создаёт и не ротирует эту пару. Открытый ключ используется при создании гостя, закрытый — для проверки SSH и выполнения Guest Bootstrap.
+`deploy-guest` не создаёт и не ротирует эту пару. Открытый ключ используется при создании гостя, закрытый — для проверки SSH и выполнения управляемых действий внутри гостя.
 
 SSH host keys гостей хранятся отдельно:
 
@@ -79,7 +81,7 @@ SSH host keys гостей хранятся отдельно:
 
 ## 5. Начальный доступ: VM
 
-Шаблон `9000` не содержит постоянного проектного `authorized_keys`.
+Шаблон `9000` не содержит постоянного проектного `authorized_keys` и не содержит общего Git read-key.
 
 Новый Full Clone до первого запуска получает открытый ключ PVE через Cloud-Init:
 
@@ -94,7 +96,7 @@ Full Clone from 9000
 → SSH root
 ```
 
-Закрытый ключ внутрь VM не передаётся.
+Закрытый административный ключ внутрь VM не передаётся.
 
 ## 6. Начальный доступ: LXC
 
@@ -127,13 +129,13 @@ bootstrap:
 Если блока нет:
 
 ```text
-PVE state → SSH root → финальная проверка → SUCCESS
+PVE state → SSH root → optional project_repo_read → финальная проверка → SUCCESS
 ```
 
 Если блок есть:
 
 ```text
-PVE state → SSH root → Bootstrap PLAN/APPLY → финальная проверка → SUCCESS
+PVE state → SSH root → optional project_repo_read → Bootstrap PLAN/APPLY → финальная проверка → SUCCESS
 ```
 
 Разрешённый набор v1:
@@ -321,9 +323,53 @@ bootstrap:
 
 `git` обеспечивает наличие рабочего Git-клиента и проверяет его работоспособность.
 
-Она не передаёт автоматически закрытые GitHub credentials и не клонирует произвольные репозитории из данных manifest.
+Capability `git` **не означает выдачу GitHub credential**. Она не создаёт Deploy Key, не выбирает repository и не клонирует произвольные репозитории из данных manifest.
 
-Если конкретному управляющему узлу нужен checkout проекта, его credential и точный сценарий должны иметь отдельный безопасный контракт, а не появляться как секрет внутри `guest.yaml`.
+Доступ к основному приватному проектному репозиторию выражается отдельно через принятый контракт:
+
+```yaml
+access:
+  project_repo_read: true
+```
+
+Поэтому возможны разные состояния:
+
+```text
+git=true, project_repo_read=false
+→ Git client есть, credential проекта не выдаётся
+
+project_repo_read=true
+→ выдаётся фиксированный общий read-only credential проекта
+→ наличие Git client обеспечивается отдельно соответствующей системой/Bootstrap
+```
+
+## 12.1. `project_repo_read`
+
+Для `zsergeyru/proxmox` принят один общий GitHub Deploy Key только для чтения. Мастер-копия хранится root-only на PVE:
+
+```text
+/etc/proxmox-deployer/ssh/github_proxmox_repo_ed25519
+```
+
+`guest.yaml` может запросить только логическую возможность `project_repo_read: true`. Он не может выбрать имя секрета, другой ключ, путь на PVE, repository или write-доступ.
+
+Root-wrapper передаёт содержимое фиксированного read-key `deploy-guest` только на время конкретного APPLY через отдельный file descriptor. `pvedeploy` не получает постоянного доступа к исходному root-only файлу.
+
+Стандартная локальная копия внутри Debian-гостя:
+
+```text
+/etc/proxmox-guest/credentials/github-proxmox-read
+```
+
+с `root:root 0600`.
+
+Это **не** ключ административного входа в гостя и он не добавляется в `authorized_keys`.
+
+Read-only check подтверждает наличие, владельца/права и ожидаемый fingerprint без вывода содержимого private key. Если Git client уже доступен, final verify может дополнительно выполнить read-only проверку доступа к `git@github.com:zsergeyru/proxmox.git`.
+
+Если credential уже соответствует — `NO CHANGE`. Обычный deploy не удаляет его автоматически только потому, что поле позже исчезло: отзыв общего credential требует отдельной явной операции.
+
+Если AI требуется запись в GitHub, write credential является отдельным контуром и не входит в `project_repo_read`.
 
 ## 13. `docker`
 
@@ -355,19 +401,19 @@ Capability не должна бесконтрольно обновлять Docke
 
 Capability должна иметь собственный read-only check и финальную проверку, позволяющую однозначно подтвердить готовность управляющего Ansible-окружения.
 
-## 15. Ошибка Bootstrap
+## 15. Ошибка Bootstrap или Project Git access
 
-Guest Bootstrap является частью полного deploy v1.
+Guest Bootstrap и явно запрошенный `project_repo_read` являются частью полной приёмки deploy.
 
-Если запрошенная capability завершилась ошибкой или не прошла финальную проверку:
+Если запрошенная capability завершилась ошибкой, Git credential не материализовался/не прошёл проверку или другая обязательная проверка не прошла:
 
 ```text
 → deploy считается FAILED
-→ следующие capabilities не выполняются
+→ следующие зависимые шаги не выполняются
 → автоматический разрушительный rollback не выполняется
 → объект сохраняется
 → deploy-incomplete остаётся
-→ журнал фиксирует capability и ошибку без секретов
+→ журнал фиксирует тип шага и ошибку без секретов
 ```
 
 Следующий запуск заново проверяет фактическое состояние и выполняет только недостающие изменения. Он не продолжает слепо с сохранённого номера шага.
@@ -381,12 +427,14 @@ PVE configuration verified
 +
 SSH root verified
 +
+project_repo_read verified, если запрошен
++
 все запрошенные bootstrap capabilities verified
 +
 final PVE state verified
 ```
 
-Если существующий уже управляемый объект без `deploy-incomplete` требует реального изменения Bootstrap, перед первой изменяющей SSH-командой deploy должен установить `deploy-incomplete`. После успешной полной приёмки тег снимается.
+Если существующий уже управляемый объект без `deploy-incomplete` требует реального изменения Project Git access или Bootstrap, перед первой изменяющей SSH-командой deploy должен установить `deploy-incomplete`. После успешной полной приёмки тег снимается.
 
 Read-only PLAN и `NO CHANGE` не должны создавать этот тег.
 
@@ -400,10 +448,14 @@ Read-only PLAN и `NO CHANGE` не должны создавать этот те
 - PostgreSQL, MQTT, Grafana, Gitea/Gogs, Semaphore, Jenkins и другие приложения;
 - прикладные Compose stacks;
 - управление секретами приложений;
+- универсальный secret broker;
+- произвольные Git credentials/repositories;
 - обычные Ansible roles для сервисов;
 - управление `authorized_keys` уже существующих гостей как универсальная функция.
 
-Всё это относится к последующей повторяемой конфигурации или отдельным специально спроектированным операциям.
+Фиксированный `project_repo_read` относится к ядру deploy/access, а не к capability `git` и не превращает Bootstrap в универсальное управление секретами.
+
+Всё прикладное относится к последующей повторяемой конфигурации или отдельным специально спроектированным операциям.
 
 ## 18. Повторяемая настройка через Ansible
 
@@ -417,7 +469,7 @@ Read-only PLAN и `NO CHANGE` не должны создавать этот те
 
 `311-dev-services` — штатный управляющий узел Ansible и первый целевой сценарий полного Bootstrap v1.
 
-Его manifest явно содержит:
+Его действующий manifest сейчас явно содержит Bootstrap:
 
 ```yaml
 bootstrap:
@@ -428,6 +480,13 @@ bootstrap:
     ansible_controller: true
 ```
 
+После реализации принятого `access` interface целевой manifest 311 также должен содержать:
+
+```yaml
+access:
+  project_repo_read: true
+```
+
 Последовательность:
 
 ```text
@@ -436,11 +495,12 @@ deploy-guest 311 --apply
 → настроить PVE state
 → запустить
 → проверить SSH root
+→ materialize общий Git READ credential
 → base
 → git
 → docker
 → ansible_controller
-→ проверить все capabilities
+→ проверить Project Git access и все capabilities
 → финально сверить PVE
 → снять deploy-incomplete
 → SUCCESS
@@ -452,6 +512,7 @@ deploy-guest 311 --apply
 311-dev-services
 ├── Debian 13
 ├── SSH root только по ключу
+├── общий credential READ для zsergeyru/proxmox
 ├── Git
 ├── Docker Engine + Compose plugin
 └── Ansible controller / EE
@@ -461,7 +522,7 @@ Semaphore, Git-сервис и CI устанавливаются уже посл
 
 ## 20. Обычные Linux-гости
 
-Обычный guest без `bootstrap` получает PVE-состояние и административный SSH, после чего конфигурируется с `311`.
+Обычный guest без `bootstrap` и без `project_repo_read` получает PVE-состояние и административный SSH, после чего конфигурируется с `311`.
 
 Гость может явно запросить только нужный поднабор Bootstrap. Например Docker-host может иметь:
 
@@ -472,7 +533,7 @@ bootstrap:
     docker: true
 ```
 
-Это не означает установку приложений внутри Docker.
+Это не означает установку приложений внутри Docker и не выдаёт ему доступ к проектному Git.
 
 ## 21. Структура реализации
 
@@ -489,17 +550,22 @@ scripts/
     └── ansible_controller.py
 ```
 
-Начальная установка SSH-ключа, host-key trust и проверка SSH находятся в ядре `deploy-guest.py`, а не в `bootstrap/base.py`.
+Начальная установка административного SSH-ключа, host-key trust, проверка SSH и материализация фиксированного `project_repo_read` credential находятся в ядре deploy/access, а не в `bootstrap/base.py` или `bootstrap/git.py`.
 
-`scripts/guest_config.py` остаётся единым resolver для validator и deployer и определяет допустимые capability, зависимости и канонический порядок.
+`scripts/guest_config.py` остаётся единым resolver для validator и deployer и после реализации `access` должен определять его допустимую семантику вместе со schemas.
 
 ## 22. Ограничения безопасности
 
 - секреты, пароли, токены и закрытые ключи не хранятся в `guest.yaml`;
-- GitHub Deploy Key PVE не используется как SSH-ключ гостя;
+- `guest.yaml` не может запросить secret по имени или указать путь к нему;
+- общий GitHub Deploy Key используется только как read-only credential `zsergeyru/proxmox`;
+- мастер-копия общего Git read-key на PVE остаётся root-only;
+- `pvedeploy` получает содержимое read-key только через временный FD конкретного запуска с `project_repo_read=true`;
+- общий Git read-key не используется как SSH-ключ гостя или PVE;
+- возможный AI write credential в GitHub остаётся отдельным;
 - Guest Bootstrap использует только выделенный административный PVE guest key;
 - capability handlers не печатают секреты и полный environment;
-- AI, PVE и Ansible сохраняют независимые пары ключей;
+- административные AI, PVE и Ansible SSH-пары остаются независимыми;
 - Bootstrap не расширяется произвольными командами ради удобства;
 - все сетевые скачивания/репозитории, которые появятся в handlers, должны иметь явный проектный контракт и проверяемый источник.
 
@@ -507,20 +573,24 @@ scripts/
 
 ```text
 PVE Configuration
-   └─ pve_guest_ed25519
+   ├─ pve_guest_ed25519
+   └─ github_proxmox_repo_ed25519  (master READ, root-only)
 
             ↓
 
-guest.yaml schema v6
-   ↓
+guest.yaml
+   ├─ access.project_repo_read       # принятый, ожидает реализации schema
+   └─ bootstrap.capabilities         # действующий schema v6
+            ↓
 scripts/guest_config.py
-   ↓
-PVE desired state + ordered bootstrap capabilities
-   ↓
+            ↓
+PVE desired state + Project Git access + ordered bootstrap capabilities
+            ↓
 deploy-guest.py
    ├─ PLAN / APPLY PVE
    ├─ initial root SSH
    ├─ verified root SSH
+   ├─ project_repo_read → standard local credential
    ├─ Guest Bootstrap v1
    │    base → git → docker → ansible_controller
    └─ final verification
@@ -532,4 +602,4 @@ deploy-guest.py
      application services
 ```
 
-Главное правило: **Guest Bootstrap v1 доводит новую Debian VM/LXC от проверенного SSH до минимально требуемой инфраструктурной готовности; всё прикладное и долговременное управление остаётся Ansible.**
+Главное правило: **Guest Bootstrap v1 доводит новую Debian VM/LXC от проверенного SSH до минимально требуемой инфраструктурной готовности; read-only доступ к основному Git выдаётся отдельно и только явным `project_repo_read`; всё прикладное и долговременное управление остаётся Ansible.**
