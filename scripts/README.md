@@ -2,7 +2,7 @@
 
 `scripts/` содержит исполняемый код проекта, который относится к инфраструктуре в целом, а не к одной конкретной гостевой системе.
 
-Этот README — карта кода. Архитектурные правила и точные требования должны жить в `docs/`, а не дублироваться здесь.
+Этот README — карта кода. Архитектурные правила и точные требования живут в `docs/`, а не дублируются здесь.
 
 ## Структура
 
@@ -10,6 +10,8 @@
 scripts/
 ├── guest_config.py
 ├── validate_repo.py
+├── tests/
+│   └── test-guest-bootstrap.py
 └── pve/
     └── setup/
         ├── configure-pve.sh
@@ -18,25 +20,43 @@ scripts/
         └── tests/
 ```
 
+После реализации `deploy-guest` здесь также появятся его основной модуль и bootstrap-handlers; до появления реального кода README не изображает их как уже существующие.
+
 ## `guest_config.py`
 
 Общий модуль преобразования исходной конфигурации гостевой системы в итоговое требуемое состояние.
 
-Его должны переиспользовать проверяющий скрипт и средства развёртывания гостевых систем, чтобы правила объединения и адресации существовали в одном месте.
+Его переиспользуют validator и `deploy-guest`, чтобы в одном месте существовали:
+
+- правила merge `defaults + profile + guest`;
+- VMID-адресация;
+- разрешение Guest Bootstrap v1;
+- канонический порядок capabilities;
+- зависимости capabilities.
 
 Основная спецификация данных: [`../docs/30-guest-manifest.md`](../docs/30-guest-manifest.md).
 
 ## `validate_repo.py`
 
-Проверяющий скрипт репозитория для `guest.yaml`, `defaults.yaml`, схем и связанных обязательных правил проекта.
-
-Запуск:
+Единый проверяющий скрипт репозитория для `guest.yaml`, `defaults.yaml`, schemas и связанных обязательных правил проекта.
 
 ```bash
 python scripts/validate_repo.py
 ```
 
-CI использует те же правила репозитория; отдельную упрощённую реализацию для локальной проверки добавлять не следует.
+CI и будущий `deploy-guest` используют этот же validator. Отдельную упрощённую реализацию validation для deployer создавать нельзя.
+
+## `tests/`
+
+Repo-level contract tests, которые не требуют живого PVE.
+
+Сейчас здесь находится:
+
+```text
+scripts/tests/test-guest-bootstrap.py
+```
+
+Он фиксирует контракт Guest Bootstrap v1: явный набор capabilities, порядок, зависимости и требование `start_after_deploy=true`.
 
 ## `pve/setup/`
 
@@ -67,7 +87,9 @@ scripts/pve/setup/configure-pve.sh
 70-tooling.sh
 ```
 
-Имена файлов не переводятся, поскольку являются частью структуры кода. Нумерация задаёт порядок и группировку этапов настройки PVE. Подробное назначение и правила безопасности определяются кодом, тестами и профильной документацией.
+Имена файлов являются частью структуры кода. Нумерация задаёт порядок и группировку этапов настройки PVE.
+
+PVE Configuration также подготавливает runtime, необходимый будущему deployer: Python/YAML/JSON Schema, API credentials, PVE guest SSH identity и отдельный guest `known_hosts`.
 
 ## Генератор Cloud-Init шаблона
 
@@ -75,37 +97,37 @@ scripts/pve/setup/configure-pve.sh
 scripts/pve/setup/render-template-cloud-init.py
 ```
 
-Это основной генератор Cloud-Init для Debian-шаблона `9000`. Его точные требования описаны в [`../templates/debian13/build-policy.md`](../templates/debian13/build-policy.md).
+Это основной генератор Cloud-Init для Debian-шаблона `9000`. Его требования описаны в [`../templates/debian13/build-policy.md`](../templates/debian13/build-policy.md).
 
-## Тесты
+## Тесты PVE Configuration
 
 ```text
 scripts/pve/setup/tests/
 ```
 
-Здесь находятся модульные проверки, проверки требований и безопасности настройки PVE и сборки шаблона. При изменении поведения соответствующие тесты должны меняться вместе с кодом.
+Здесь находятся проверки контракта и безопасности настройки PVE и сборки шаблона. При изменении поведения тесты должны меняться вместе с кодом.
 
 ## `deploy-guest`
 
-Основной источник требований к поведению будущего `scripts/pve/deploy-guest.py`:
+Основной источник требований к будущему `scripts/pve/deploy-guest.py`:
 
-- [`../docs/31-deploy-guest.md`](../docs/31-deploy-guest.md) — PLAN/APPLY, работа с API Proxmox, создание и изменение VM/LXC, защита существующих объектов, обработка ошибок и проверка результата.
+- [`../docs/31-deploy-guest.md`](../docs/31-deploy-guest.md) — полный PLAN/APPLY, Proxmox API, VM/LXC, SSH trust, Guest Bootstrap v1, ошибки и финальная проверка.
 
-Связанные основные документы:
+Связанные документы:
 
-- [`../docs/26-deploy-guest-and-agent-access.md`](../docs/26-deploy-guest-and-agent-access.md) — рабочая схема и разделение учётных записей;
-- [`../docs/30-guest-manifest.md`](../docs/30-guest-manifest.md) — исходные данные и итоговое требуемое состояние;
-- [`../docs/33-guest-bootstrap-and-provisioning.md`](../docs/33-guest-bootstrap-and-provisioning.md) — готовность административного доступа и граница повторяемой настройки.
-
-До появления соответствующего исполняемого файла README не должен описывать несуществующую внутреннюю структуру обработчиков как уже реализованную.
+- [`../docs/26-deploy-guest-and-agent-access.md`](../docs/26-deploy-guest-and-agent-access.md) — запуск и разделение учётных записей;
+- [`../docs/30-guest-manifest.md`](../docs/30-guest-manifest.md) — source/effective state и `bootstrap.capabilities`;
+- [`../docs/33-guest-bootstrap-and-provisioning.md`](../docs/33-guest-bootstrap-and-provisioning.md) — точный контракт Guest Bootstrap и граница с Ansible.
 
 ## Правила для кода
 
-- Не дублировать правила предметной области между проверяющим скриптом, `deploy-guest` и скриптами первоначальной настройки.
-- Опасные операции должны иметь предварительные проверки и безопасно останавливаться при неоднозначном состоянии.
-- Повторный запуск должен быть безопасным либо его побочный эффект должен быть явно задокументирован.
+- Не дублировать предметные правила между validator, resolver и deployer.
+- PLAN без `--apply` должен быть строго read-only и для PVE, и для SSH/Bootstrap.
+- Опасные и неоднозначные состояния должны приводить к `BLOCKED/STOP`, а не к догадке.
+- Bootstrap capability должна быть идемпотентной: `check → apply if needed → verify`.
+- Повторный запуск после частичной ошибки должен заново читать фактическое состояние.
 - Секреты не встраиваются в код и не выводятся в журналы.
-- Изменение требований должно сопровождаться изменением основного документа и тестов, а не новым описанием в этом README.
+- Изменение требований сопровождается изменением основного документа и тестов.
 
 ## Связанные документы
 
@@ -114,4 +136,5 @@ scripts/pve/setup/tests/
 - [`../docs/25-pve-access-control.md`](../docs/25-pve-access-control.md) — роли и ACL PVE.
 - [`../docs/30-guest-manifest.md`](../docs/30-guest-manifest.md) — модель данных гостевых систем.
 - [`../docs/31-deploy-guest.md`](../docs/31-deploy-guest.md) — спецификация `deploy-guest`.
+- [`../docs/33-guest-bootstrap-and-provisioning.md`](../docs/33-guest-bootstrap-and-provisioning.md) — Bootstrap и Ansible handoff.
 - [`../templates/debian13/build-policy.md`](../templates/debian13/build-policy.md) — спецификация сборки шаблона.
