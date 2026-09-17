@@ -70,14 +70,15 @@ AI не получает SSH/root-доступ к самому PVE только 
 /pool/managed
 ```
 
-Обычный жизненный цикл:
+Обычный жизненный цикл Debian-гостя management-контура:
 
 ```text
 AI-агент
 → Proximo
 → создать или клонировать сразу с pool=managed
 → настроить CPU, RAM, диски, сеть и параметры гостевой системы
-→ передать актуальный management-authorized-keys новой Debian VM/LXC
+→ передать актуальный management-authorized-keys
+→ установить PVE tag management-ssh
 → запустить и проверить
 → дальнейшее управление гостевой системой через PVE и/или SSH в разрешённых пределах
 ```
@@ -99,7 +100,7 @@ AI Control штатно не получает прав на:
 
 Точный набор привилегий и матрица ACL принадлежат [`25-pve-access-control.md`](25-pve-access-control.md).
 
-## 4. Доступ PVE и SSH-доступ гостя независимы
+## 4. Доступ PVE и гостевой management-контракт независимы
 
 Пул `managed` определяет **права AI на объект Proxmox**, но не определяет содержимое `authorized_keys` внутри Linux.
 
@@ -107,16 +108,21 @@ AI Control штатно не получает прав на:
 PVE ACL / pool
 → жизненный цикл и PVE-конфигурация объекта
 
-management public keys внутри guest
+management.ssh + public keys внутри guest
 → административный SSH root внутрь ОС
 
-access.project_repo_read
+management.ssh_identity
+→ собственная исходящая SSH identity гостя, если нужна
+
+management.project_repo_read
 → только исходящий read-only доступ гостя к zsergeyru/proxmox
 ```
 
 Эти уровни не подменяют друг друга.
 
 Перемещение VM/LXC в `managed` или из него само по себе не должно генерировать private keys, регистрировать public keys или менять Git credential.
+
+Технический PVE tag `management-ssh` означает участие Debian-гостя в `sync-management-keys`, но не означает членство в pool `managed` и не означает lifecycle ownership со стороны `deploy-guest`.
 
 ## 5. Management SSH identity AI Control
 
@@ -125,7 +131,8 @@ AI Control должен иметь собственную администрат
 После реализации целевого manifest-интерфейса для `301` используется:
 
 ```yaml
-management_key: true
+management:
+  ssh_identity: true
 ```
 
 Это не означает специальной логики `301` внутри PVE Configuration или `deploy-guest`.
@@ -172,6 +179,8 @@ PVE canonical public-key registry
 → 301 local public-key copy
 ```
 
+`sync-management-keys` рассматривает только PVE VM/LXC с tag `management-ssh` и дополнительно выполняет fail-closed проверки объекта и SSH trust.
+
 ## 7. Создание гостевой системы со стороны PVE
 
 Последовательность по требуемому состоянию из Git:
@@ -182,21 +191,22 @@ PVE canonical public-key registry
 → deployer@pve!host-deploy
 → создать/клонировать Debian VM/LXC
 → передать текущий management-authorized-keys
+→ установить PVE tag management-ssh
 → запустить
 → проверить SSH root private key deployer
-→ при management_key: true создать/проверить собственную keypair гостя и зарегистрировать .pub
-→ при access.project_repo_read материализовать общий Git READ credential
+→ при management.ssh_identity=true создать/проверить собственную keypair гостя и зарегистрировать .pub
+→ при management.project_repo_read=true материализовать общий Git READ credential
 → выполнить явно запрошенный Guest Bootstrap
 → при появлении нового public key вызвать sync-management-keys
 ```
 
 Начальный SSH-доступ `root` не зависит от `bootstrap.capabilities.base`.
 
-Сам `301` является специальным только с точки зрения порядка bootstrap: его первоначальное создание выполняется со стороны PVE и не зависит от уже работающего AI Control. Механизм management key при этом остаётся общим и не привязан к VMID 301.
+Сам `301` является специальным только с точки зрения порядка bootstrap: его первоначальное создание выполняется со стороны PVE и не зависит от уже работающего AI Control. Механизм management SSH identity при этом остаётся общим и не привязан к VMID 301.
 
 ## 8. Гостевая система, создаваемая AI
 
-При создании обычной Debian VM/LXC AI обязан использовать локально синхронизированный набор:
+При создании обычной Debian VM/LXC, участвующей в management SSH-контуре, AI обязан использовать локально синхронизированный набор:
 
 ```text
 /etc/proxmox-guest/public-keys/management-authorized-keys
@@ -211,15 +221,23 @@ AI-агент
 → ai-agent@pve!infra
 → создать/клонировать объект в managed
 → передать весь набор public keys через Cloud-Init/LXC ssh-public-keys
+→ установить PVE tag management-ssh
 → запустить
 → проверить
 ```
 
-Ключ deployer присутствует в этом наборе обязательно. Поэтому PVE-side `sync-management-keys` впоследствии может войти в созданную AI машину без отдельной передачи SSH access.
+Ключ deployer присутствует в этом наборе обязательно. Поэтому PVE-side `sync-management-keys` впоследствии может однозначно обнаружить по tag и войти в созданную AI машину без отдельной передачи SSH access.
 
 AI не обязан и штатно не может запускать локальный `/usr/local/sbin/deploy-guest` на PVE.
 
-Если новой управляющей машине нужна **собственная** management identity, её целевой `guest.yaml` должен содержать `management_key: true`, и регистрация новой `.pub` выполняется штатным `deploy-guest`. В v1 AI не получает отдельный удалённый API записи в PVE public-key registry.
+Если новой управляющей машине нужна **собственная** management identity, её целевой `guest.yaml` должен содержать:
+
+```yaml
+management:
+  ssh_identity: true
+```
+
+Регистрация новой `.pub` выполняется штатным `deploy-guest`. В v1 AI не получает отдельный удалённый API записи в PVE public-key registry.
 
 ## 9. Ansible
 
@@ -228,10 +246,11 @@ Ansible и Semaphore размещаются в `311-dev-services`, а не в AI
 `311`, как и любой другой управляющий guest с собственной административной identity, после реализации целевого интерфейса использует:
 
 ```yaml
-management_key: true
+management:
+  ssh_identity: true
 ```
 
-Его private key остаётся внутри 311. Открытая часть попадает в тот же PVE registry и затем `sync-management-keys` доставляет её в 301 и остальные управляемые Debian-гости.
+Его private key остаётся внутри 311. Открытая часть попадает в тот же PVE registry и затем `sync-management-keys` доставляет её в 301 и остальные управляемые Debian-гости с tag `management-ssh`.
 
 Поэтому 311 не должен подключаться к PVE или 301 для «регистрации» своего public key.
 
@@ -244,7 +263,7 @@ management_key: true
 Для чтения проекта AI Control использует общий проектный read-only Deploy Key, выдаваемый по целевому manifest-интерфейсу:
 
 ```yaml
-access:
+management:
   project_repo_read: true
 ```
 
@@ -262,9 +281,9 @@ access:
 
 используется только для `clone/fetch/read` `zsergeyru/proxmox`.
 
-Git read-key не входит в management public-key registry и не используется для административного SSH.
+Git read-key не входит в management public-key registry и не используется для административного SSH. Объединение полей в разделе `management` не объединяет сами credentials.
 
-AI может подготавливать изменения проекта в своей рабочей копии. Возможность отправлять их обратно в GitHub (`push`, ветки, PR через Git credential) является отдельным write-контуром и не входит ни в `project_repo_read`, ни в management key registry.
+AI может подготавливать изменения проекта в своей рабочей копии. Возможность отправлять их обратно в GitHub (`push`, ветки, PR через Git credential) является отдельным write-контуром и не входит ни в `management.project_repo_read`, ни в management key registry.
 
 ## 11. Неизменяемые правила безопасности
 
@@ -275,18 +294,19 @@ AI может подготавливать изменения проекта в 
 5. AI не получает SSH/root-доступ к PVE ради management key sync.
 6. Канонический public-key registry изменяется только PVE-side deploy/sync механизмом.
 7. AI получает public registry только в направлении `PVE → guest` через `sync-management-keys`.
-8. Новая Debian VM/LXC, создаваемая AI, получает весь текущий `management-authorized-keys`, а не только AI key.
+8. Новая Debian VM/LXC management-контура, создаваемая AI, получает весь текущий `management-authorized-keys` и tag `management-ssh`.
 9. Закрытые SSH-ключи, токены и credentials внешних сервисов не хранятся в Git.
 10. Вход `root` по паролю отключён.
 11. `301`, рабочий Home Assistant, устаревающий `320` и шаблон `9000` не входят автоматически в обычную зону изменения AI `managed`.
 12. Общий Git read-key даёт только чтение `zsergeyru/proxmox` и не повышается до write.
-13. `management_key` и `project_repo_read` не являются универсальными интерфейсами секретов.
+13. `management.ssh_identity` и `management.project_repo_read` не являются универсальными интерфейсами секретов и не наследуются из defaults/profile.
+14. `management-ssh` является техническим PVE tag, а не ещё одним manifest-флагом.
 
 ## 12. Состояние реализации
 
-`management_key`, PVE public-key registry и `sync-management-keys` уже приняты как целевой архитектурный контракт, но ещё требуют реализации schemas/resolver/deployer/scripts.
+`management.ssh_identity`, `management.project_repo_read`, PVE public-key registry, PVE tag `management-ssh` и `sync-management-keys` уже приняты как целевой архитектурный контракт, но ещё требуют реализации schemas/resolver/deployer/scripts.
 
-Поэтому до реализации текущий `guest.yaml` 301 не должен получать неизвестное действующей schema v6 поле только ради соответствия документации.
+Поэтому до реализации текущий `guest.yaml` 301 не должен получать неизвестные действующей schema v6 поля только ради соответствия документации.
 
 Основной источник по состоянию реализации: [`28-management-ssh-keys.md`](28-management-ssh-keys.md).
 
@@ -294,8 +314,8 @@ AI может подготавливать изменения проекта в 
 
 - [`25-pve-access-control.md`](25-pve-access-control.md) — точные роли, привилегии и ACL PVE;
 - [`23-security.md`](23-security.md) — общая политика SSH и секретов;
-- [`28-management-ssh-keys.md`](28-management-ssh-keys.md) — management keypair, public-key registry и `sync-management-keys`;
-- [`30-guest-manifest.md`](30-guest-manifest.md) — `management_key` и `project_repo_read` как целевые manifest interfaces;
+- [`28-management-ssh-keys.md`](28-management-ssh-keys.md) — management SSH identity, public-key registry, tag `management-ssh` и `sync-management-keys`;
+- [`30-guest-manifest.md`](30-guest-manifest.md) — единый раздел `management` и его целевые поля;
 - [`31-deploy-guest.md`](31-deploy-guest.md) — поведение deploy и безопасное применение;
 - [`33-guest-bootstrap-and-provisioning.md`](33-guest-bootstrap-and-provisioning.md) — Guest Bootstrap и граница Ansible;
 - [`51-ai-control-bootstrap.md`](51-ai-control-bootstrap.md) — инструкция создания и ввода `301`;
@@ -303,4 +323,4 @@ AI может подготавливать изменения проекта в 
 
 Главное правило:
 
-> AI создаёт новые управляемые Debian VM/LXC со всем локально синхронизированным набором management public keys; его собственный private key остаётся внутри AI Control, а обновление общего публичного набора выполняется только PVE-side `deploy-guest` + `sync-management-keys`, без SSH-доступа AI к PVE.
+> AI создаёт новые управляемые Debian VM/LXC со всем локально синхронизированным набором management public keys и tag `management-ssh`; его собственный private key остаётся внутри AI Control, а обновление общего публичного набора выполняется только PVE-side `deploy-guest` + `sync-management-keys`, без SSH-доступа AI к PVE.
