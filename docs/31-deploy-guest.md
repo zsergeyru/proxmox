@@ -8,7 +8,7 @@
 
 ## 1. Назначение
 
-`deploy-guest` — средство на стороне PVE-хоста для детерминированного приведения одной VM/LXC к требуемому состоянию, описанному в Git, включая явно запрошенную ограниченную первичную настройку Guest Bootstrap v1.
+`deploy-guest` — средство на стороне PVE-хоста для детерминированного приведения одной VM/LXC к требуемому состоянию, описанному в Git, включая явно запрошенную ограниченную первичную настройку Guest Bootstrap v1 и принятый контракт read-only доступа к проектному репозиторию.
 
 ```text
 guests/defaults.yaml
@@ -33,6 +33,8 @@ APPLY PVE
         ↓
 проверка root SSH
         ↓
+project_repo_read, если явно запрошен
+        ↓
 Guest Bootstrap v1, если явно запрошен
         ↓
 финальная проверка
@@ -56,11 +58,14 @@ SUCCESS
 - первоначальную установку открытого SSH-ключа PVE при создании;
 - запуск гостя согласно `boot.start_after_deploy`;
 - проверку административного SSH `root`;
+- материализацию фиксированного общего Git read-only credential при `access.project_repo_read: true` после реализации этого поля в schema/resolver;
 - PLAN/APPLY явно запрошенных `bootstrap.capabilities`;
 - проверку результата каждой capability;
 - безопасный повторный запуск после частичной ошибки;
-- финальную проверку PVE + SSH + Bootstrap;
+- финальную проверку PVE + SSH + Project Git access + Bootstrap;
 - аудит запуска.
+
+`access.project_repo_read` уже принят как контракт, но на момент фиксации этого документа ещё не реализован в действующей schema v6. Реализация schemas/resolver/tests должна следовать этому документу, а не вводить другой интерфейс.
 
 В v1 не входят:
 
@@ -76,7 +81,9 @@ SUCCESS
 - автоматическая cross-node migration;
 - массовая миграция сети и временный dual-IP;
 - автоматический stop/reboot уже работающего существующего гостя ради изменения PVE-конфигурации;
-- универсальное управление `authorized_keys` существующих гостей.
+- универсальное управление `authorized_keys` существующих гостей;
+- универсальный secret/credential API из manifest;
+- выбор произвольного Git credential, repository или write-доступа через `guest.yaml`.
 
 ## 3. CLI
 
@@ -116,6 +123,8 @@ scripts/guest_config.py
 
 `bootstrap` в v1 задаётся только явно в конкретном `guest.yaml`; он не наследуется из `defaults.yaml` или profile.
 
+После реализации `access.project_repo_read` он также задаётся только конкретным `guest.yaml` и не наследуется из defaults/profile.
+
 ### 4.2. Локальная конфигурация PVE
 
 ```text
@@ -154,7 +163,35 @@ token_secret=<secret>
 /var/lib/pvedeploy/.ssh/known_hosts
 ```
 
-## 5. Фиксация Git revision
+### 4.5. Общий Git read-only credential
+
+Мастер-копия:
+
+```text
+/etc/proxmox-deployer/ssh/github_proxmox_repo_ed25519
+```
+
+Назначение фиксировано:
+
+```text
+только GitHub Deploy Key READ ONLY
+только zsergeyru/proxmox
+```
+
+Файл остаётся `root:root 0600`. `pvedeploy` не получает постоянного доступа к нему.
+
+Если текущий effective state требует:
+
+```yaml
+access:
+  project_repo_read: true
+```
+
+root-wrapper открывает **только этот фиксированный файл** и передаёт его содержимое дочернему `deploy-guest.py` через отдельный file descriptor. Запрещено передавать private key через argv, environment или временный файл, читаемый `pvedeploy` после завершения запуска.
+
+`guest.yaml` не задаёт source path, credential id или destination path. Никакого интерфейса `secret: <name>` не существует.
+
+## 5. Фиксация Git revision и root-wrapper
 
 Root-wrapper `/usr/local/sbin/deploy-guest` до запуска Python-кода:
 
@@ -163,11 +200,24 @@ Root-wrapper `/usr/local/sbin/deploy-guest` до запуска Python-кода:
 → проверяет доверенную root-owned копию Git
 → проверяет origin/branch/clean state
 → фиксирует точный SHA
+→ строит/проверяет effective state настолько, насколько нужно для root-side решения о credential handoff
+→ определяет project_repo_read
+→ если false/отсутствует: не открывает Git private key
+→ если true: открывает фиксированный root-only Git READ key и передаёт его через выделенный FD
 → передаёт DEPLOY_GUEST_SOURCE_REVISION
 → запускает scripts/pve/deploy-guest.py от pvedeploy
 ```
 
 Python-код обязан проверить SHA и соответствие реально выполняемой trusted checkout.
+
+`pvedeploy` не может передать root-wrapper произвольный путь и попросить прочитать другой secret. Связка:
+
+```text
+project_repo_read
+→ /etc/proxmox-deployer/ssh/github_proxmox_repo_ed25519
+```
+
+фиксирована реализацией root-wrapper.
 
 Один запуск = одна Git revision.
 
@@ -184,6 +234,8 @@ python scripts/validate_repo.py
 который используется CI.
 
 Схемы, зависимости Bootstrap, правила IP, profiles и прочие repo-level invariants не дублируются в deployer.
+
+После реализации `access.project_repo_read` общий schema/resolver/validator должен принимать только boolean-поле `project_repo_read` и запрещать произвольные credentials/paths/secrets.
 
 Сам `deploy-guest` дополнительно проверяет только runtime-факты конкретного PVE и SSH-состояние, которые нельзя проверить по Git.
 
@@ -211,7 +263,9 @@ python scripts/validate_repo.py
 18. source VM/LXC существует;
 19. VMID не находится в неоднозначном или чужом состоянии;
 20. Bootstrap declaration корректна;
-21. весь PVE + Bootstrap plan не содержит запрещённого действия.
+21. `access.project_repo_read` корректен, если соответствующий interface уже реализован;
+22. если `project_repo_read=true`, root-wrapper передал ожидаемый FD, а не произвольный secret path;
+23. весь PVE + Project Git access + Bootstrap plan не содержит запрещённого действия.
 
 Любая ошибка preflight => STOP до изменения PVE или гостевой ОС.
 
@@ -325,13 +379,14 @@ deploy-incomplete
 
 Для нового VMID marker `proxmox-deployer`, service block и `deploy-incomplete` записываются как можно раньше после создания.
 
-Для уже управляемого объекта без `deploy-incomplete`, если APPLY должен выполнить реальное изменение Bootstrap, `deploy-incomplete` должен быть установлен перед первой изменяющей SSH-командой.
+Для уже управляемого объекта без `deploy-incomplete`, если APPLY должен выполнить реальное изменение Guest Bootstrap **или materialize/update `project_repo_read` credential**, `deploy-incomplete` должен быть установлен перед первой изменяющей SSH-командой.
 
 Tag снимается только после полного успеха:
 
 ```text
 PVE verified
 + SSH root verified, если guest работает
++ project_repo_read verified, если запрошен
 + все requested Bootstrap capabilities verified
 + final PVE compare successful
 ```
@@ -366,7 +421,7 @@ FORBIDDEN
 - если PLAN `BLOCKED`, `--apply` не выполняет никаких изменений, даже если в плане есть отдельные ONLINE-операции;
 - v1 не останавливает и не перезагружает существующий running guest автоматически.
 
-Bootstrap отображается отдельным разделом PLAN.
+Project Git access и Bootstrap отображаются отдельными разделами PLAN.
 
 ## 14. PLAN Guest Bootstrap
 
@@ -400,6 +455,31 @@ Bootstrap
 
 Bootstrap capability не должна влиять на классификацию PVE diff как ONLINE/REQUIRES-STOP/FORBIDDEN, но ошибка/неоднозначность read-only Bootstrap check может сделать полный PLAN `BLOCKED`.
 
+### 14.1. PLAN `project_repo_read`
+
+Если effective state запрашивает:
+
+```yaml
+access:
+  project_repo_read: true
+```
+
+PLAN показывает отдельное действие, например:
+
+```text
+Project repository access
+  project_repo_read   NO CHANGE | APPLY | APPLY AFTER START
+```
+
+PLAN не копирует private key и не изменяет файлы гостя. Для существующего доступного гостя read-only check может проверить:
+
+- наличие стандартного файла credential;
+- `root:root 0600`;
+- совпадение fingerprint с ожидаемым общим Git read-key без вывода private key;
+- при наличии Git и корректного SSH host trust — read-only `git ls-remote` основного репозитория.
+
+Для нового гостя PLAN показывает `APPLY AFTER START` и не запускает его.
+
 ## 15. Создание VM
 
 Поддерживается только:
@@ -427,12 +507,13 @@ verify template
 → start if start_after_deploy=true
 → readiness
 → root SSH
+→ materialize project_repo_read credential if requested
 → Bootstrap if requested
 → final PVE compare
 → remove deploy-incomplete
 ```
 
-Private SSH key внутрь VM не передаётся.
+Private административный SSH key внутрь VM не передаётся. Исключение по типу секрета — общий Git read-only credential: его локальная копия специально материализуется только при `project_repo_read=true` и не используется для входа в VM.
 
 ## 16. Создание LXC
 
@@ -460,6 +541,7 @@ resolve installed archive
 → verify pre-start
 → start if requested
 → root SSH
+→ materialize project_repo_read credential if requested
 → Bootstrap if requested
 → final PVE compare
 → remove deploy-incomplete
@@ -467,23 +549,50 @@ resolve installed archive
 
 ## 17. Начальные SSH-ключи
 
-На create v1 гарантированно устанавливается только:
+На create v1 гарантированно устанавливается административный открытый ключ:
 
 ```text
 pve_guest_ed25519.pub
 ```
 
-Другие инфраструктурные public keys могут быть введены позже отдельным явным контрактом.
+Другие административные public keys могут быть введены позже отдельным явным контрактом.
+
+`project_repo_read` не относится к `authorized_keys`: это исходящий Git client credential, который устанавливается отдельным шагом после проверенного root SSH.
 
 Для существующего управляемого объекта `deploy-guest` не переписывает автоматически `authorized_keys`.
 
 Если существующий running guest должен быть доступен, но PVE deploy key не проходит — STOP и отдельное восстановление доступа.
 
+### 17.1. Материализация общего Git read-key
+
+Стандартный destination:
+
+```text
+/etc/proxmox-guest/credentials/github-proxmox-read
+```
+
+Требования:
+
+```text
+parent directory root:root, не шире 0700
+credential root:root 0600
+атомарная запись
+никакого вывода содержимого в stdout/stderr/audit
+```
+
+Handler не принимает произвольный destination или credential name из manifest.
+
+Если файл уже существует и соответствует ожидаемому fingerprint/правам, `NO CHANGE`.
+
+Если существует другой файл по тому же managed path, его содержимое не выводится; APPLY заменяет его только если объект однозначно находится под управлением этого контракта. Неизвестное/неоднозначное состояние => STOP.
+
+Если `project_repo_read` перестал быть запрошен, v1 **не удаляет** существующую локальную копию автоматически. Отзыв/удаление credential требует отдельного явно спроектированного действия, чтобы обычное изменение manifest не отрезало доступ неожиданно.
+
 ## 18. SSH host key trust
 
 Глобальный `StrictHostKeyChecking=no` запрещён.
 
-Используется:
+Для SSH к гостям используется:
 
 ```text
 /var/lib/pvedeploy/.ssh/known_hosts
@@ -510,6 +619,8 @@ unexpected host-key change → STOP
 
 Потеря `known_hosts` не должна приводить к молчаливому повторному доверию всем существующим гостям; требуется осознанная recovery-процедура.
 
+Для исходящего Git SSH из гостя проверка host key GitHub также обязательна. PVE root-only `known_hosts` не копируется гостю как скрытый общий файл; способ установки доверенного GitHub host key должен быть детерминированным и проверяемым.
+
 ## 19. Readiness и power semantics
 
 `boot.start_after_deploy` означает только поведение deployer после успешного APPLY, а не постоянное desired power-state:
@@ -527,9 +638,9 @@ false + running  → не stop
 
 Для LXC ожидаются running state и SSH.
 
-Если guest намеренно остаётся stopped и Bootstrap не запрошен, SSH check пропускается с явным сообщением.
+Если guest намеренно остаётся stopped и Bootstrap и `project_repo_read` не запрошены, SSH check пропускается с явным сообщением.
 
-Manifest с Bootstrap обязан иметь `start_after_deploy: true`.
+Manifest с Bootstrap обязан иметь `start_after_deploy: true`. Для применения `project_repo_read` guest также должен быть доступен по SSH; если он намеренно остаётся stopped, PLAN показывает невозможность materialize credential без запуска, а APPLY не должен скрыто менять power policy.
 
 ## 20. CPU и RAM
 
@@ -566,7 +677,7 @@ Dual-IP и массовая subnet migration в обычном v1 отсутст
 
 Если PVE API позволяет, эти изменения могут применяться ONLINE.
 
-Pool не является политикой SSH.
+Pool не является политикой SSH или Git access.
 
 `protection` не используется как механизм защиты от удаления в `deploy-guest`, потому что delete в v1 вообще отсутствует.
 
@@ -648,19 +759,31 @@ Capability обязана быть идемпотентной.
 
 Точный смысл capabilities описан в [`33-guest-bootstrap-and-provisioning.md`](33-guest-bootstrap-and-provisioning.md).
 
-## 27. Ошибка Bootstrap
+`bootstrap.git` и `access.project_repo_read` — разные вещи:
 
-Если capability не применилась или verify не прошёл:
+```text
+bootstrap.git
+→ гарантирует наличие Git client
+
+access.project_repo_read
+→ разрешает локальную копию фиксированного read-only credential к zsergeyru/proxmox
+```
+
+Одно не должно скрыто означать другое.
+
+## 27. Ошибка Bootstrap или Git access
+
+Если capability не применилась, `project_repo_read` не материализовался/не прошёл verify или другая обязательная проверка не прошла:
 
 ```text
 FAILED
-→ следующие capabilities не выполняются
+→ следующие зависимые шаги не выполняются
 → deploy-incomplete остаётся
 → объект сохраняется
 → destructive rollback отсутствует
 ```
 
-Следующий run заново выполняет read-only checks всех requested capabilities и доводит только недостающее состояние.
+Следующий run заново выполняет read-only checks requested состояния и доводит только недостающее.
 
 Номер последнего шага не является источником истины.
 
@@ -681,16 +804,17 @@ FAILED
 10 start if needed
 11 readiness
 12 root SSH, если guest работает
-13 установить deploy-incomplete перед первым Bootstrap mutation у existing clean object
-14 Bootstrap capabilities в canonical order
-15 verify Bootstrap
-16 final PVE re-read/compare
-17 final SSH acceptance, если guest работает
-18 remove deploy-incomplete
-19 audit SUCCESS
+13 установить deploy-incomplete перед первой guest mutation у existing clean object
+14 materialize + verify project_repo_read, если запрошен
+15 Bootstrap capabilities в canonical order
+16 verify Bootstrap
+17 final PVE re-read/compare
+18 final SSH acceptance, если guest работает
+19 remove deploy-incomplete
+20 audit SUCCESS
 ```
 
-Если Bootstrap отсутствует, шаги 13–15 пропускаются.
+Если `project_repo_read` или Bootstrap отсутствуют, соответствующие шаги пропускаются.
 
 ## 29. Failure model
 
@@ -711,8 +835,9 @@ step
 - не удалять созданный объект автоматически;
 - не уменьшать/откатывать диск;
 - не пытаться восстановить «старую» сеть разрушительным guessing;
+- не печатать/сохранять переданный Git private key;
 - сохранить `deploy-incomplete`, если run уже начал изменять управляемый объект;
-- следующий run заново читает actual state PVE и Bootstrap.
+- следующий run заново читает actual state PVE, Project Git access и Bootstrap.
 
 ## 30. Финальная проверка
 
@@ -735,11 +860,13 @@ HTTP 200 или успешный UPID сами по себе не означаю
 
 Для running Debian VM/LXC обязательно подтвердить `root SSH` PVE deploy key.
 
+Если requested `project_repo_read=true`, обязательно подтвердить стандартный managed credential, владельца/права, ожидаемый fingerprint и, когда Git доступен, read-only доступ к `zsergeyru/proxmox`.
+
 Для каждой requested Bootstrap capability обязательно выполнить её final verify.
 
 ## 31. `NO CHANGE`
 
-Если PVE и Bootstrap уже соответствуют desired state:
+Если PVE, Project Git access и Bootstrap уже соответствуют desired state:
 
 ```text
 Action: NO CHANGE
@@ -756,6 +883,8 @@ Action: NO CHANGE
 `deploy-guest` v1 никогда не удаляет VM/LXC.
 
 Ни `state`, ни отсутствие manifest, ни source/type conflict не дают права на destroy.
+
+Аналогично удаление ранее материализованного общего Git read-key только потому, что поле исчезло из manifest, в v1 не выполняется автоматически. Отзыв credential — отдельная явная операция.
 
 Delete/recreate/adopt требуют отдельных будущих операций и спецификаций.
 
@@ -777,6 +906,7 @@ Delete/recreate/adopt требуют отдельных будущих опер�
 - полный plan;
 - executed mutations;
 - UPID;
+- Project Git access check/action/result без содержимого credential;
 - Bootstrap checks/actions/results;
 - final verification;
 - `SUCCESS`, `FAILED` или `BLOCKED`.
@@ -784,7 +914,8 @@ Delete/recreate/adopt требуют отдельных будущих опер�
 Нельзя журналировать:
 
 - `token_secret`;
-- private SSH key;
+- private SSH/Git key;
+- содержимое credential FD;
 - полный environment;
 - application secrets.
 
@@ -795,7 +926,7 @@ Delete/recreate/adopt требуют отдельных будущих опер�
 1  config/schema/repository/preflight error
 2  unsafe/ambiguous/BLOCKED
 3  PVE API или async task error
-4  readiness/QGA/Cloud-Init/SSH/Bootstrap verification error
+4  readiness/QGA/Cloud-Init/SSH/Project-Git/Bootstrap verification error
 ```
 
 Unexpected internal error => nonzero.
@@ -821,10 +952,13 @@ OpenSSH client
 pvedeploy runtime
 PVE API token
 pve_guest_ed25519
+root-only github_proxmox_repo_ed25519
 /var/lib/pvedeploy/.ssh/known_hosts
 ```
 
 Bootstrap handlers не должны хранить secrets в Git и не должны дублировать manifest validation.
+
+Root-wrapper должен владеть логикой безопасной передачи фиксированного Git read-key через FD; основной deployer не должен иметь API получения произвольных root-only секретов.
 
 ## 36. Обязательные тесты
 
@@ -841,7 +975,9 @@ Bootstrap handlers не должны хранить secrets в Git и не до�
 - Bootstrap при `start_after_deploy=false`;
 - unknown capability;
 - Bootstrap у non-deployable объекта;
-- отсутствие secrets в manifest/audit.
+- отсутствие secrets в manifest/audit;
+- после реализации: `access.project_repo_read` boolean only;
+- после реализации: запрет произвольных credential/path/secret полей.
 
 ### PLAN / PVE
 
@@ -862,11 +998,18 @@ Bootstrap handlers не должны хранить secrets в Git и не до�
 - failed UPID;
 - task timeout.
 
-### SSH / Bootstrap
+### SSH / Project Git / Bootstrap
 
 - SSH failure;
 - SSH host-key mismatch;
 - new guest host-key enrolment then strict reconnect;
+- `project_repo_read` отсутствует → root не передаёт FD и guest не меняется;
+- `project_repo_read=true` → передаётся только фиксированный Git read-key;
+- невозможность запросить другой root-only secret;
+- PLAN не materialize credential;
+- APPLY записывает credential `root:root 0600` атомарно;
+- повторный APPLY с совпадающим fingerprint => `NO CHANGE`;
+- credential никогда не попадает в audit/stdout/stderr/environment;
 - Bootstrap PLAN makes no guest mutations;
 - capability `NO CHANGE`;
 - capability APPLY + verify;
@@ -890,6 +1033,9 @@ auto stop/reboot existing running guest
 mass network migration
 temporary dual IP
 universal authorized_keys management
+universal secret broker
+arbitrary credential selection from guest.yaml
+GitHub write access through project_repo_read
 rootfs sync
 arbitrary bootstrap packages
 arbitrary bootstrap shell commands
@@ -908,6 +1054,7 @@ Git desired state
 → полный read-only PLAN
 → безопасный APPLY PVE
 → проверенный root SSH
+→ только явно запрошенный фиксированный Project Git READ access
 → только явно запрошенный идемпотентный Bootstrap
 → повторная проверка фактического состояния
 → SUCCESS
