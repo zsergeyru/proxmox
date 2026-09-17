@@ -445,8 +445,10 @@ sync-management-keys
   /etc/proxmox-guest/ssh/github-proxmox-known_hosts          root:root 0644
   /etc/ssh/ssh_config.d/90-proxmox-project-repo-read.conf    root:root 0644
 → обеспечить SSH alias github-proxmox-read
-→ обеспечить точный Git URL rewrite только для zsergeyru/proxmox
-→ verify git ls-remote по каноническому URL
+→ обеспечить точный managed block Git URL rewrite только для zsergeyru/proxmox
+→ verify GitHub SSH authentication этим credential без требования установленного Git client
+→ если Git client уже есть: дополнительно verify git ls-remote по каноническому URL
+→ после Bootstrap capability `git`: final verify обязательно включает git ls-remote
 ```
 
 SSH alias:

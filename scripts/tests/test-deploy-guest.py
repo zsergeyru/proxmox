@@ -96,6 +96,13 @@ def main() -> None:
     assert args.apply is True
 
     text = SOURCE.read_text(encoding="utf-8")
+    assert "PROJECT_GIT_BEGIN" in text and "PROJECT_GIT_END" in text
+    state_start = text.index("def project_repo_state(")
+    state_end = text.index("\ndef bootstrap_check", state_start)
+    state_block = text[state_start:state_end]
+    assert "command -v git" in state_block
+    assert "successfully authenticated" in state_block
+    assert "git ls-remote" in state_block
     assert "CERT_NONE" not in text
     assert "verify=False" not in text
     assert "subprocess" in text
