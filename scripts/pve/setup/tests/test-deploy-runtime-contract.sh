@@ -7,6 +7,7 @@ SYSTEM="$ROOT/scripts/pve/setup/lib/20-system.sh"
 RUNTIME="$ROOT/scripts/pve/setup/lib/40-runtime.sh"
 KEYS="$ROOT/scripts/pve/setup/lib/45-management-keys.sh"
 TOOLING="$ROOT/scripts/pve/setup/lib/70-tooling.sh"
+DEPLOY_GUEST="$ROOT/scripts/pve/deploy-guest.py"
 CONFIGURE="$ROOT/scripts/pve/setup/configure-pve.sh"
 PREFLIGHT="$ROOT/scripts/pve/setup/lib/10-preflight.sh"
 
@@ -15,8 +16,8 @@ fail() {
     exit 1
 }
 
-grep -Eq '^PVE_CONFIGURATION_VERSION=29$' "$COMMON" \
-    || fail "PVE_CONFIGURATION_VERSION must be 29"
+grep -Eq '^PVE_CONFIGURATION_VERSION=30$' "$COMMON" \
+    || fail "PVE_CONFIGURATION_VERSION must be 30"
 
 if grep -Eq 'BOOTSTRAP_KEY_FILE|PVE_BOOTSTRAP_KEY_FILE|BOOTSTRAP_KNOWN_HOSTS|CANONICAL_KEY_DIFFERS_FROM_BOOTSTRAP' "$COMMON" "$RUNTIME"; then
     fail "temporary GitHub Deploy Key contract must not remain in PVE Configuration"
@@ -69,6 +70,17 @@ grep -Fq 'автоматическая ротация запрещена' "$KEYS
 
 grep -Fq '/usr/bin/python3 "\$VALIDATOR"' "$TOOLING" \
     || fail "root wrapper must run the shared repository validator"
+[[ -f "$DEPLOY_GUEST" ]] \
+    || fail "deploy-guest runtime source must exist"
+grep -Fq 'DEPLOY_GUEST_SOURCE_REVISION' "$DEPLOY_GUEST" \
+    || fail "deploy-guest runtime must enforce pinned source revision"
+grep -Fq 'DEPLOY_GUEST_PROJECT_REPO_KEY_FD' "$DEPLOY_GUEST" \
+    || fail "deploy-guest runtime must consume Project Git key only through dedicated FD"
+grep -Fq 'StrictHostKeyChecking=yes' "$DEPLOY_GUEST" \
+    || fail "deploy-guest must use strict SSH host-key verification after trust establishment"
+if grep -Eq '(qm|pct|pvesh)' "$DEPLOY_GUEST"; then
+    fail "deploy-guest runtime must not bypass PVE REST API through qm/pct/pvesh"
+fi
 grep -Fq 'from guest_config import GuestConfigError, resolve_effective_guest' "$TOOLING" \
     || fail "root wrapper must use the shared guest resolver"
 grep -Fq 'management.get("project_repo_read")' "$TOOLING" \

@@ -244,7 +244,7 @@ https://<node>:8006/api2/json
 TLS verification обязательна с:
 
 ```text
-/etc/pve/pve-root-ca.pem
+/etc/proxmox-deployer/pve-root-ca.pem
 ```
 
 `verify=false`, `CERT_NONE`, локальные `qm/pct/pvesh` как обход RBAC запрещены.

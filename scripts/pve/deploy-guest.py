@@ -474,6 +474,11 @@ def boolish(value: object) -> bool:
     return str(value).lower() in {"1", "true", "yes", "on"}
 
 
+def option_enabled(value: object) -> bool:
+    """Parse PVE boolean option whose value may carry comma-separated suboptions."""
+    return str(value or "").split(",", 1)[0].lower() in {"1", "true", "yes", "on"}
+
+
 def update_kv_option(text: str, key: str, value: str) -> str:
     parts = text.split(",") if text else []
     out: list[str] = []
@@ -602,7 +607,7 @@ def plan_pve(desired: Desired, actual: Actual) -> list[PlanItem]:
                 compare_item("PVE name", cfg.get("name"), e["name"]),
                 compare_item("PVE cores", cfg.get("cores"), e["resources"]["cpu"]["cores"], "REQUIRES-STOP"),
                 compare_item("PVE memory", cfg.get("memory"), e["resources"]["memory_mb"], "REQUIRES-STOP"),
-                compare_item("PVE guest agent", boolish(cfg.get("agent")), bool(e["vm"]["guest_agent"]), "REQUIRES-STOP"),
+                compare_item("PVE guest agent", option_enabled(cfg.get("agent")), bool(e["vm"]["guest_agent"]), "REQUIRES-STOP"),
                 compare_item("PVE ciuser", cfg.get("ciuser"), "root", "REQUIRES-STOP"),
                 compare_item("PVE ipconfig0", cfg.get("ipconfig0"), expected_ipconfig(desired), "REQUIRES-STOP"),
             ]
@@ -623,7 +628,7 @@ def plan_pve(desired: Desired, actual: Actual) -> list[PlanItem]:
         )
         unprivileged = bool(e["lxc"]["unprivileged"])
         if boolish(cfg.get("unprivileged")) == unprivileged:
-            items.append(PlanItem("PVE unprivileged", "NO CHANGE", "FORBIDDEN", str(unprivileged)))
+            items.append(PlanItem("PVE unprivileged", "NO CHANGE", "ONLINE", str(unprivileged)))
         else:
             items.append(PlanItem("PVE unprivileged", "BLOCKED", "FORBIDDEN", "recreate required"))
         wanted_features = {
@@ -848,7 +853,13 @@ def bootstrap_check(address: str, capability: str) -> bool:
 def plan_remote(desired: Desired, actual: Actual) -> list[PlanItem]:
     e = desired.effective
     items: list[PlanItem] = []
-    if not actual.exists or actual.status != "running":
+    if not actual.exists:
+        if host_key_present(desired.management_ip):
+            return [PlanItem("SSH trust", "BLOCKED", "FORBIDDEN", "new guest address already exists in persistent known_hosts")]
+        if e["management"]["ssh_identity"]:
+            reg_state, _, _ = registry_key_state(desired.vmid)
+            if reg_state != "ABSENT":
+                return [PlanItem("Management SSH identity", "BLOCKED", "FORBIDDEN", f"new VMID has stale registry state={reg_state}")]
         after = "APPLY AFTER START"
         items.append(PlanItem("Management SSH identity", after if e["management"]["ssh_identity"] else "NOT REQUESTED", "ONLINE", "guest identity"))
         items.append(PlanItem("Project repo read", after if e["management"]["project_repo_read"] else "NOT REQUESTED", "ONLINE", EXPECTED_REPO if e["management"]["project_repo_read"] else "false"))
@@ -859,6 +870,15 @@ def plan_remote(desired: Desired, actual: Actual) -> list[PlanItem]:
         return items
     if not host_key_present(desired.management_ip):
         return [PlanItem("SSH trust", "BLOCKED", "FORBIDDEN", "existing guest absent from persistent known_hosts")]
+    if actual.status != "running":
+        after = "APPLY AFTER START"
+        items.append(PlanItem("Management SSH identity", after if e["management"]["ssh_identity"] else "NOT REQUESTED", "ONLINE", "guest identity"))
+        items.append(PlanItem("Project repo read", after if e["management"]["project_repo_read"] else "NOT REQUESTED", "ONLINE", EXPECTED_REPO if e["management"]["project_repo_read"] else "false"))
+        for capability in desired.bootstrap_capabilities:
+            items.append(PlanItem(f"Bootstrap {capability}", after, "ONLINE", capability))
+        if not desired.bootstrap_capabilities:
+            items.append(PlanItem("Bootstrap", "NOT REQUESTED", "ONLINE", "none"))
+        return items
     try:
         verify_root_ssh(desired.management_ip)
     except DeployError as exc:
