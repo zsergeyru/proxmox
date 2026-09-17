@@ -5,7 +5,7 @@ additionalProperties: false
 required: [schema_version, vmid, name, state, deployable, description]
 properties:
   schema_version:
-    const: 6
+    const: 7
   vmid:
     type: integer
     minimum: 100
@@ -125,6 +125,10 @@ $defs:
             type: integer
             minimum: 1
             maximum: 65535
+      ssh_identity:
+        type: boolean
+      project_repo_read:
+        type: boolean
   bootstrap:
     type: object
     additionalProperties: false
@@ -218,6 +222,17 @@ allOf:
           const: false
   - if:
       required: [bootstrap]
+    then:
+      properties:
+        deployable:
+          const: true
+  - if:
+      required: [management]
+      properties:
+        management:
+          anyOf:
+            - required: [ssh_identity]
+            - required: [project_repo_read]
     then:
       properties:
         deployable:

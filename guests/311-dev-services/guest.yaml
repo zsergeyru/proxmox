@@ -1,4 +1,4 @@
-schema_version: 6
+schema_version: 7
 vmid: 311
 name: dev-services
 profile: docker-lxc
@@ -6,6 +6,10 @@ state: planned
 deployable: true
 
 description: Ansible, Semaphore, Git, CI and development services
+
+management:
+  ssh_identity: true
+  project_repo_read: true
 
 resources:
   cpu:

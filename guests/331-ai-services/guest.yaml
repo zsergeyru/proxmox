@@ -1,4 +1,4 @@
-schema_version: 6
+schema_version: 7
 vmid: 331
 name: ai-services
 profile: docker-lxc

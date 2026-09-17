@@ -22,6 +22,10 @@ BOOTSTRAP_DEPENDENCIES = {
     "docker": ("base",),
     "ansible_controller": ("base", "git", "docker"),
 }
+INDIVIDUAL_MANAGEMENT_FIELDS = (
+    "ssh_identity",
+    "project_repo_read",
+)
 
 
 class GuestConfigError(ValueError):
@@ -136,6 +140,58 @@ def resolve_management_ip(
     return parse_bare_ipv4(override), "guest"
 
 
+def resolve_individual_management(
+    source: dict,
+    defaults: dict,
+    profile: dict,
+    effective: dict,
+) -> None:
+    """Нормализовать individual-only management flags только из guest.yaml."""
+    inherited_sources = (
+        ("defaults.management", defaults.get("defaults", {}).get("management")),
+        (f"profile {source.get('profile')!r}.management", profile.get("management")),
+    )
+    for label, management in inherited_sources:
+        if management is None:
+            continue
+        if not isinstance(management, dict):
+            raise GuestConfigError(f"{label} должен быть mapping/object")
+        forbidden = [name for name in INDIVIDUAL_MANAGEMENT_FIELDS if name in management]
+        if forbidden:
+            raise GuestConfigError(
+                f"{label} не может задавать individual-only поля: "
+                + ", ".join(forbidden)
+            )
+
+    source_management = source.get("management", {})
+    if not isinstance(source_management, dict):
+        raise GuestConfigError("management должен быть mapping/object")
+
+    present = [name for name in INDIVIDUAL_MANAGEMENT_FIELDS if name in source_management]
+    if present and source.get("deployable") is not True:
+        raise GuestConfigError(
+            "management.ssh_identity/project_repo_read разрешены только deployable-гостю"
+        )
+
+    effective_management = effective.get("management")
+    if not isinstance(effective_management, dict):
+        raise GuestConfigError("effective management должен быть mapping/object")
+
+    for name in INDIVIDUAL_MANAGEMENT_FIELDS:
+        value = source_management.get(name, False)
+        if not isinstance(value, bool):
+            raise GuestConfigError(f"management.{name} должен быть boolean")
+        effective_management[name] = value
+
+    if any(effective_management[name] for name in INDIVIDUAL_MANAGEMENT_FIELDS):
+        boot = effective.get("boot")
+        if not isinstance(boot, dict) or boot.get("start_after_deploy") is not True:
+            raise GuestConfigError(
+                "management.ssh_identity/project_repo_read=true требуют "
+                "boot.start_after_deploy=true, так как применяются после SSH root"
+            )
+
+
 def resolve_bootstrap_capabilities(effective: dict) -> tuple[str, ...]:
     """Вернуть включённые bootstrap capabilities в каноническом порядке v1."""
     bootstrap = effective.get("bootstrap")
@@ -206,6 +262,7 @@ def resolve_effective_guest(
 
     effective = deep_merge(defaults.get("defaults", {}), profile)
     effective = deep_merge(effective, source)
+    resolve_individual_management(source, defaults, profile, effective)
 
     management_ip, ip_source = resolve_management_ip(source, network)
     effective_network = effective.get("network")

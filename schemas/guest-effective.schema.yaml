@@ -14,7 +14,7 @@ required:
   - description
 properties:
   schema_version:
-    const: 6
+    const: 7
   vmid:
     type: integer
     minimum: 100
@@ -119,7 +119,7 @@ properties:
   management:
     type: object
     additionalProperties: false
-    required: [ssh]
+    required: [ssh, ssh_identity, project_repo_read]
     properties:
       ssh:
         type: object
@@ -130,6 +130,10 @@ properties:
             const: root
           port:
             const: 22
+      ssh_identity:
+        type: boolean
+      project_repo_read:
+        type: boolean
   bootstrap:
     type: object
     additionalProperties: false
@@ -235,3 +239,21 @@ allOf:
                   const: true
                 keyctl:
                   const: true
+  - if:
+      properties:
+        management:
+          anyOf:
+            - required: [ssh_identity]
+              properties:
+                ssh_identity:
+                  const: true
+            - required: [project_repo_read]
+              properties:
+                project_repo_read:
+                  const: true
+    then:
+      properties:
+        boot:
+          properties:
+            start_after_deploy:
+              const: true
