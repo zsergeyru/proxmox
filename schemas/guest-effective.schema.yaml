@@ -14,7 +14,7 @@ required:
   - description
 properties:
   schema_version:
-    const: 5
+    const: 6
   vmid:
     type: integer
     minimum: 100
@@ -130,6 +130,24 @@ properties:
             const: root
           port:
             const: 22
+  bootstrap:
+    type: object
+    additionalProperties: false
+    required: [capabilities]
+    properties:
+      capabilities:
+        type: object
+        additionalProperties: false
+        minProperties: 1
+        properties:
+          base:
+            type: boolean
+          git:
+            type: boolean
+          docker:
+            type: boolean
+          ansible_controller:
+            type: boolean
   vm:
     type: object
     additionalProperties: false
