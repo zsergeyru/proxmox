@@ -15,7 +15,7 @@
 - запускает `/usr/local/sbin/deploy-guest`;
 - обновляет доверенную root-owned копию проекта на PVE;
 - владеет мастер-копией общего GitHub Deploy Key только для чтения;
-- при `access.project_repo_read` передаёт этот credential текущему deploy через отдельный FD;
+- при `management.project_repo_read: true` передаёт этот credential текущему deploy через отдельный FD;
 - запускает основную логику deploy от ограниченного `pvedeploy`.
 
 ### `pvedeploy` на PVE
@@ -65,7 +65,7 @@ Project Git READ
 → clone/fetch zsergeyru/proxmox
 ```
 
-Для них используются разные credentials и разные правила.
+Для них используются разные credentials и разные правила. В `guest.yaml` связанные с управлением гостем параметры собраны в одном логическом разделе `management`.
 
 ## 3. SSH identity deployer
 
@@ -96,7 +96,8 @@ Private key остаётся на PVE. Public часть входит в кан�
 Если конкретному управляющему гостю нужна собственная SSH identity, целевой manifest содержит:
 
 ```yaml
-management_key: true
+management:
+  ssh_identity: true
 ```
 
 После проверенного SSH deployer создаёт/проверяет стандартную пару **внутри этого гостя**, оставляет private key там и забирает только `.pub` в PVE registry.
@@ -111,7 +112,15 @@ management_key: true
 sync-management-keys
 ```
 
-берёт канонический registry и распространяет его по участвующим управляемым Debian-гостям.
+берёт канонический registry и распространяет его по управляемым Debian-гостям с техническим PVE tag:
+
+```text
+management-ssh
+```
+
+Этот tag является производным runtime-маркером, а не отдельным полем `guest.yaml`.
+
+Для гостя, развёрнутого через `deploy-guest`, tag устанавливается, если его effective state содержит `management.ssh`. Управляющий гость, создающий Debian VM/LXC напрямую через PVE API, также ставит `management-ssh`, если новая машина входит в management SSH-контур и получает `management-authorized-keys`.
 
 Каждый такой гость получает локальную копию:
 
@@ -122,6 +131,8 @@ sync-management-keys
 и актуальный управляемый блок `root` `authorized_keys`.
 
 `deploy-guest` вызывает sync после регистрации нового/изменённого public key. Оператор также может запускать sync вручную.
+
+Наличие `management-ssh` является необходимым условием участия, но не отменяет fail-closed проверки типа объекта, SSH host key и ожидаемого management-контракта перед записью.
 
 ## 6. Почему AI не нужен доступ к PVE для ключей
 
@@ -156,12 +167,13 @@ deploy-guest 311
 deploy-guest
 → берёт текущий management-authorized-keys
 → передаёт весь набор через Cloud-Init/LXC ssh-public-keys
+→ ставит PVE tag management-ssh
 → запускает guest
 → проверяет root SSH private key deployer
 → выполняет остальные явно запрошенные шаги
 ```
 
-Поэтому новая машина сразу доступна всем уже зарегистрированным management identities.
+Поэтому новая машина сразу доступна всем уже зарегистрированным management identities и однозначно входит в область последующего `sync-management-keys`.
 
 ## 8. Как AI создаёт новую Debian VM/LXC
 
@@ -179,6 +191,7 @@ AI
 → Proximo
 → создать/клонировать guest в managed
 → передать ВЕСЬ набор public keys
+→ поставить PVE tag management-ssh
 → запустить
 ```
 
@@ -186,7 +199,7 @@ AI
 
 AI штатно не вызывает `/usr/local/sbin/deploy-guest` на PVE.
 
-## 9. Git остаётся отдельным контуром
+## 9. Git остаётся отдельным credential-контуром, но входит в `management`
 
 На PVE:
 
@@ -203,7 +216,7 @@ AI штатно не вызывает `/usr/local/sbin/deploy-guest` на PVE.
 Для `clone/fetch` принят один общий GitHub Deploy Key READ ONLY. Его мастер-копия хранится root-only на PVE, а гостевая копия материализуется только по:
 
 ```yaml
-access:
+management:
   project_repo_read: true
 ```
 
@@ -213,7 +226,7 @@ access:
 /etc/proxmox-guest/credentials/github-proxmox-read
 ```
 
-Этот Git key не входит в `authorized_keys` и не входит в management public-key registry.
+Этот Git key не входит в `authorized_keys` и не входит в management public-key registry. Помещение запроса в общий раздел `management` объединяет интерфейс манифеста, но не смешивает сами credentials.
 
 ## 10. Что нельзя смешивать
 
@@ -230,14 +243,20 @@ pve_guest_ed25519
 ai-agent@pve!infra
 → PVE API identity AI
 
-management_key: true
+management.ssh
+→ как проект административно входит в конкретного гостя
+
+management.ssh_identity: true
 → запрос собственной SSH identity конкретного гостя
+
+management.project_repo_read: true
+→ только read-only Project Git credential
+
+management-ssh
+→ технический PVE tag участия гостя в sync-management-keys
 
 sync-management-keys
 → массовое распространение только public management keys
-
-project_repo_read
-→ только read-only Project Git credential
 ```
 
 ## 11. Где искать точные правила
@@ -245,12 +264,12 @@ project_repo_read
 - [`21-pve-filesystem-layout.md`](21-pve-filesystem-layout.md) — точные пути и владельцы;
 - [`23-security.md`](23-security.md) — политика безопасности;
 - [`25-pve-access-control.md`](25-pve-access-control.md) — PVE identities, роли и ACL;
-- [`28-management-ssh-keys.md`](28-management-ssh-keys.md) — полный lifecycle management keys;
-- [`30-guest-manifest.md`](30-guest-manifest.md) — целевые `management_key` и `project_repo_read`;
+- [`28-management-ssh-keys.md`](28-management-ssh-keys.md) — полный lifecycle management keys и tag `management-ssh`;
+- [`30-guest-manifest.md`](30-guest-manifest.md) — единый раздел `management`;
 - [`31-deploy-guest.md`](31-deploy-guest.md) — PLAN/APPLY;
 - [`33-guest-bootstrap-and-provisioning.md`](33-guest-bootstrap-and-provisioning.md) — Guest Bootstrap;
 - [`50-ai-control.md`](50-ai-control.md) — AI Control.
 
 Главное правило:
 
-> Deployer и AI создают VM/LXC разными PVE-контурами, но новые Debian-гости получают один и тот же актуальный набор management public keys. Канонический набор ведётся на PVE и распространяется отдельным `sync-management-keys`; private keys остаются у своих владельцев.
+> Deployer и AI создают VM/LXC разными PVE-контурами, но новые Debian-гости получают один и тот же актуальный набор management public keys и tag `management-ssh`. Канонический набор ведётся на PVE и распространяется отдельным `sync-management-keys`; private keys остаются у своих владельцев.
