@@ -101,13 +101,19 @@ AI использует отдельную учётную запись PVE и о
 → deploy-guest / Proximo
 
 начальная готовность к управлению
+→ management.ssh
 → SSH root только по ключу
+→ PVE tag management-ssh для участвующего Debian-гостя
 
 инфраструктурные административные SSH-ключи
 → канонический public-key registry у deployer на PVE
-→ sync-management-keys распространяет его по управляемым Debian-гостям
+→ sync-management-keys распространяет его по Debian-гостям с tag management-ssh
+
+собственная исходящая SSH identity управляющего гостя при явном запросе
+→ management.ssh_identity: true
 
 read-only доступ к проектному Git при явном запросе
+→ management.project_repo_read: true
 → общий GitHub Deploy Key только для чтения
 
 повторяемая настройка ОС и приложений
@@ -117,7 +123,16 @@ read-only доступ к проектному Git при явном запро�
 → прямой SSH соответствующим management key
 ```
 
-Если конкретному управляющему гостю нужна собственная SSH identity, целевой manifest использует один логический флаг `management_key: true`. Закрытая часть такой пары создаётся и остаётся внутри гостя; deployer забирает только `.pub` и добавляет её в общий каталог открытых ключей.
+Связанные с управлением гостем manifest-параметры собраны в одном разделе `management`, но разные credentials по-прежнему имеют разные назначения и lifecycle.
+
+Если конкретному управляющему гостю нужна собственная SSH identity, целевой manifest использует:
+
+```yaml
+management:
+  ssh_identity: true
+```
+
+Закрытая часть такой пары создаётся и остаётся внутри гостя; deployer забирает только `.pub` и добавляет её в общий каталог открытых ключей.
 
 Точный жизненный цикл management SSH keys: [`28-management-ssh-keys.md`](28-management-ssh-keys.md).  
 Требования к начальному доступу, Project Git access и передаче управления Ansible: [`33-guest-bootstrap-and-provisioning.md`](33-guest-bootstrap-and-provisioning.md).  
@@ -133,6 +148,7 @@ read-only доступ к проектному Git при явном запро�
 шаблон
 → полный клон
 → ресурсы, сеть и актуальные открытые management SSH keys
+→ PVE tag management-ssh для management Debian-гостя
 → первый запуск
 → при необходимости собственная management identity гостя
 → при необходимости материализация Project Git READ credential
@@ -179,11 +195,13 @@ Dev services
 Public-key registry
 → один канонический каталог у deployer на PVE
 → отдельный sync-management-keys разносит только открытые ключи
+→ область sync задаёт технический PVE tag management-ssh
 → управляющий гость использует локальный management-authorized-keys при создании новой VM/LXC
+→ новой Debian-машине management-контура ставится тот же tag management-ssh
 
 Project Git READ
 → один общий read-only credential для zsergeyru/proxmox
-→ выдаётся только гостям, явно запросившим project_repo_read
+→ выдаётся только гостям с management.project_repo_read: true
 ```
 
 301 и 311 не обмениваются административными ключами напрямую и не получают SSH-доступ к PVE ради регистрации ключей. Закрытые management keys остаются только у своих владельцев; общий каталог содержит только их открытые части.
