@@ -3,7 +3,6 @@ from pathlib import Path
 p = Path("scripts/pve/deploy-guest.py")
 text = p.read_text(encoding="utf-8")
 
-# Add explicit managed gitconfig block constants.
 old = 'PROJECT_CONFIG_MARKER = "# managed-by=proxmox-deployer project-repo-read"\nMANAGEMENT_PRIVATE ='
 new = '''PROJECT_CONFIG_MARKER = "# managed-by=proxmox-deployer project-repo-read"
 PROJECT_GIT_CONFIG = "/etc/gitconfig"
@@ -16,7 +15,7 @@ text = text.replace(old, new, 1)
 
 start = text.index("def project_repo_state(")
 end = text.index("\ndef bootstrap_check", start)
-new_state = r'''def project_git_config_block() -> str:
+new_state = r"""def project_git_config_block() -> str:
     return (
         f"{PROJECT_GIT_BEGIN}\n"
         f'[url "{PROJECT_REWRITTEN_URL}"]\n'
@@ -37,56 +36,56 @@ present=0
 for f in "$cred" "$kh" "$cfg"; do [ -e "$f" ] && present=$((present+1)); done
 begin_count=0; end_count=0
 if [ -e "$gitcfg" ]; then
-    [ -f "$gitcfg" ] && [ ! -L "$gitcfg" ] || {{ printf 'BROKEN\n'; exit 0; }}
+    [ -f "$gitcfg" ] && [ ! -L "$gitcfg" ] || {{ printf 'BROKEN\\n'; exit 0; }}
     begin_count="$(grep -Fxc {shlex.quote(PROJECT_GIT_BEGIN)} "$gitcfg" || true)"
     end_count="$(grep -Fxc {shlex.quote(PROJECT_GIT_END)} "$gitcfg" || true)"
 fi
-if [ "$present" -eq 0 ] && [ "$begin_count" -eq 0 ] && [ "$end_count" -eq 0 ]; then printf 'ABSENT\n'; exit 0; fi
-[ "$present" -eq 3 ] || {{ printf 'BROKEN\n'; exit 0; }}
-[ "$begin_count" -eq 1 ] && [ "$end_count" -eq 1 ] || {{ printf 'BROKEN\n'; exit 0; }}
-[ -f "$cred" ] && [ ! -L "$cred" ] || {{ printf 'BROKEN\n'; exit 0; }}
-[ -f "$kh" ] && [ ! -L "$kh" ] || {{ printf 'BROKEN\n'; exit 0; }}
-[ -f "$cfg" ] && [ ! -L "$cfg" ] || {{ printf 'BROKEN\n'; exit 0; }}
-[ "$(stat -c '%U:%G:%a' "$cred")" = "root:root:600" ] || {{ printf 'BROKEN\n'; exit 0; }}
-[ "$(stat -c '%U:%G:%a' "$kh")" = "root:root:644" ] || {{ printf 'BROKEN\n'; exit 0; }}
-[ "$(stat -c '%U:%G:%a' "$cfg")" = "root:root:644" ] || {{ printf 'BROKEN\n'; exit 0; }}
-grep -Fxq {shlex.quote(PROJECT_CONFIG_MARKER)} "$cfg" || {{ printf 'BROKEN\n'; exit 0; }}
+if [ "$present" -eq 0 ] && [ "$begin_count" -eq 0 ] && [ "$end_count" -eq 0 ]; then printf 'ABSENT\\n'; exit 0; fi
+[ "$present" -eq 3 ] || {{ printf 'BROKEN\\n'; exit 0; }}
+[ "$begin_count" -eq 1 ] && [ "$end_count" -eq 1 ] || {{ printf 'BROKEN\\n'; exit 0; }}
+[ -f "$cred" ] && [ ! -L "$cred" ] || {{ printf 'BROKEN\\n'; exit 0; }}
+[ -f "$kh" ] && [ ! -L "$kh" ] || {{ printf 'BROKEN\\n'; exit 0; }}
+[ -f "$cfg" ] && [ ! -L "$cfg" ] || {{ printf 'BROKEN\\n'; exit 0; }}
+[ "$(stat -c '%U:%G:%a' "$cred")" = "root:root:600" ] || {{ printf 'BROKEN\\n'; exit 0; }}
+[ "$(stat -c '%U:%G:%a' "$kh")" = "root:root:644" ] || {{ printf 'BROKEN\\n'; exit 0; }}
+[ "$(stat -c '%U:%G:%a' "$cfg")" = "root:root:644" ] || {{ printf 'BROKEN\\n'; exit 0; }}
+grep -Fxq {shlex.quote(PROJECT_CONFIG_MARKER)} "$cfg" || {{ printf 'BROKEN\\n'; exit 0; }}
 begin_line="$(grep -nFx {shlex.quote(PROJECT_GIT_BEGIN)} "$gitcfg" | cut -d: -f1)"
 end_line="$(grep -nFx {shlex.quote(PROJECT_GIT_END)} "$gitcfg" | cut -d: -f1)"
-[ "$begin_line" -lt "$end_line" ] || {{ printf 'BROKEN\n'; exit 0; }}
+[ "$begin_line" -lt "$end_line" ] || {{ printf 'BROKEN\\n'; exit 0; }}
 actual_block="$(sed -n "${{begin_line}},${{end_line}}p" "$gitcfg")"
 expected_block="$(printf '%s' {shlex.quote(expected_block_b64)} | base64 -d)"
-[ "$actual_block" = "$expected_block" ] || {{ printf 'BROKEN\n'; exit 0; }}
-pub="$(ssh-keygen -y -f "$cred" 2>/dev/null)" || {{ printf 'BROKEN\n'; exit 0; }}
-fp="$(printf '%s\n' "$pub" | ssh-keygen -lf - -E sha256 2>/dev/null | awk '{{print $2}}')"
-[ "$fp" = {shlex.quote(expected_fp)} ] || {{ printf 'FOREIGN\n'; exit 0; }}
+[ "$actual_block" = "$expected_block" ] || {{ printf 'BROKEN\\n'; exit 0; }}
+pub="$(ssh-keygen -y -f "$cred" 2>/dev/null)" || {{ printf 'BROKEN\\n'; exit 0; }}
+fp="$(printf '%s\\n' "$pub" | ssh-keygen -lf - -E sha256 2>/dev/null | awk '{{print $2}}')"
+[ "$fp" = {shlex.quote(expected_fp)} ] || {{ printf 'FOREIGN\\n'; exit 0; }}
 auth="$(ssh -F "$cfg" -T {shlex.quote(PROJECT_ALIAS)} 2>&1 || true)"
-printf '%s\n' "$auth" | grep -qi 'successfully authenticated' || {{ printf 'BROKEN\n'; exit 0; }}
+printf '%s\\n' "$auth" | grep -qi 'successfully authenticated' || {{ printf 'BROKEN\\n'; exit 0; }}
 if command -v git >/dev/null 2>&1; then
-    git ls-remote --heads {shlex.quote(PROJECT_URL)} >/dev/null 2>&1 || {{ printf 'BROKEN\n'; exit 0; }}
+    git ls-remote --heads {shlex.quote(PROJECT_URL)} >/dev/null 2>&1 || {{ printf 'BROKEN\\n'; exit 0; }}
 fi
-printf 'VALID\n'
+printf 'VALID\\n'
 '''
     proc = ssh_run(address, script, timeout=45)
     return proc.stdout.strip().splitlines()[0] if proc.stdout.strip() else "BROKEN"
 
-'''
+"""
 text = text[:start] + new_state + text[end:]
 
-# Replace project SSH/config apply+remove implementation as one unit.
 start = text.index("def project_ssh_config_text()")
 end = text.index("\ndef apt_install", start)
-new_apply = r'''def project_ssh_config_text() -> str:
-    return f"""{PROJECT_CONFIG_MARKER}
-Host {PROJECT_ALIAS}
-    HostName github.com
-    User git
-    IdentityFile {PROJECT_CREDENTIAL}
-    IdentitiesOnly yes
-    UserKnownHostsFile {PROJECT_KNOWN_HOSTS}
-    StrictHostKeyChecking yes
-    BatchMode yes
-"""
+new_apply = r"""def project_ssh_config_text() -> str:
+    return (
+        f"{PROJECT_CONFIG_MARKER}\n"
+        f"Host {PROJECT_ALIAS}\n"
+        "    HostName github.com\n"
+        "    User git\n"
+        f"    IdentityFile {PROJECT_CREDENTIAL}\n"
+        "    IdentitiesOnly yes\n"
+        f"    UserKnownHostsFile {PROJECT_KNOWN_HOSTS}\n"
+        "    StrictHostKeyChecking yes\n"
+        "    BatchMode yes\n"
+    )
 
 
 def apply_project_repo_read(desired: Desired, private_data: bytes) -> None:
@@ -188,11 +187,10 @@ PY
     if project_repo_state(desired.management_ip, expected_fp) != "ABSENT":
         raise DeployError("Project Git READ REMOVE final verify не пройден")
 
-'''
+"""
 text = text[:start] + new_apply + text[end:]
 p.write_text(text, encoding="utf-8")
 
-# Tests pin that project credential state does not require a local git client.
 test = Path("scripts/tests/test-deploy-guest.py")
 t = test.read_text(encoding="utf-8")
 anchor = '''    text = SOURCE.read_text(encoding="utf-8")
@@ -213,7 +211,6 @@ if anchor not in t:
 t = t.replace(anchor, insert, 1)
 test.write_text(t, encoding="utf-8")
 
-# Clarify the credential/client independence in the normative docs.
 doc = Path("docs/31-deploy-guest.md")
 d = doc.read_text(encoding="utf-8")
 old = '''→ обеспечить SSH alias github-proxmox-read
