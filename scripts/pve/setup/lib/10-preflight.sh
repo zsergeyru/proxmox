@@ -10,7 +10,7 @@ check_node_name_resolution() {
     [[ -n "$resolved" ]] \
         || die "Имя PVE-ноды '${node}' не резолвится. Проверьте /etc/hosts или DNS до продолжения PVE Configuration."
 
-    local_addresses="$(ip -o addr show up | awk '$3 == \"inet\" || $3 == \"inet6\" {sub(/\\/.*/, \"\", $4); print $4}' | sort -u)"
+    local_addresses="$(ip -o addr show up | awk '$3 == "inet" || $3 == "inet6" {sub(/\/.*/, "", $4); print $4}' | sort -u)"
     [[ -n "$local_addresses" ]] \
         || die "На PVE не найдено ни одного локального IP-адреса для проверки hostname '${node}'"
 
