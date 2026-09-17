@@ -88,7 +88,8 @@
 | Найти пути, файлы состояния и учётные данные на PVE-хосте | [`21-pve-filesystem-layout.md`](21-pve-filesystem-layout.md) |
 | Понять правила резервного копирования, сроки хранения, RPO и RTO | [`22-storage-and-backup.md`](22-storage-and-backup.md) |
 | Выполнить восстановление или аварийное восстановление | [`27-backup-and-disaster-recovery-runbook.md`](27-backup-and-disaster-recovery-runbook.md) |
-| SSH-ключи и общие правила безопасности | [`23-security.md`](23-security.md) |
+| Общие правила безопасности | [`23-security.md`](23-security.md) |
+| Точный жизненный цикл management SSH keys и их синхронизация | [`28-management-ssh-keys.md`](28-management-ssh-keys.md) |
 | Правила версионирования и воспроизводимости | [`24-reproducible-bootstrap.md`](24-reproducible-bootstrap.md) |
 | Точные роли, привилегии и ACL Proxmox | [`25-pve-access-control.md`](25-pve-access-control.md) |
 | Простое объяснение взаимодействия средства развёртывания и AI | [`26-deploy-guest-and-agent-access.md`](26-deploy-guest-and-agent-access.md) |
@@ -124,7 +125,7 @@
 | Документ | Что фиксирует |
 |---|---|
 | [`22-storage-and-backup.md`](22-storage-and-backup.md) | классы резервных копий, сроки хранения, RPO/RTO и требования к восстановлению |
-| [`23-security.md`](23-security.md) | общие правила безопасности и модель SSH-ключей |
+| [`23-security.md`](23-security.md) | общие правила безопасности и границы административного SSH-доступа |
 | [`24-reproducible-bootstrap.md`](24-reproducible-bootstrap.md) | версионирование, воспроизводимость и правила фиксации ревизии исходного кода |
 | [`32-docker-in-lxc-policy.md`](32-docker-in-lxc-policy.md) | допустимые границы Docker внутри непривилегированного LXC |
 | [`34-linux-filesystem-layout.md`](34-linux-filesystem-layout.md) | размещение приложений, конфигурации, постоянных данных, журналов, кэша и временных рабочих файлов |
@@ -137,6 +138,7 @@
 |---|---|
 | [`11-vmid-plan.md`](11-vmid-plan.md) | VMID/CTID и правила адресации |
 | [`25-pve-access-control.md`](25-pve-access-control.md) | учётные записи PVE, роли, привилегии, ACL и граница `managed` |
+| [`28-management-ssh-keys.md`](28-management-ssh-keys.md) | канонический public-key registry, `management_key`, генерация собственной пары гостя и `sync-management-keys` |
 | [`30-guest-manifest.md`](30-guest-manifest.md) | схема манифеста, общих настроек и итогового состояния |
 | [`31-deploy-guest.md`](31-deploy-guest.md) | поведение `deploy-guest`, PLAN/APPLY, безопасное применение и проверка результата |
 | [`33-guest-bootstrap-and-provisioning.md`](33-guest-bootstrap-and-provisioning.md) | готовность к управлению, первичная настройка и передача управления Ansible |
@@ -202,8 +204,11 @@ guests/<guest>/decisions/
 права PVE
 → 25-pve-access-control.md
 
-SSH и безопасность
+общая политика SSH и безопасности
 → 23-security.md
+
+точный жизненный цикл management SSH keys
+→ 28-management-ssh-keys.md
 
 пути и рабочие данные PVE
 → 21-pve-filesystem-layout.md
