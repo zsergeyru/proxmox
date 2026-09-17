@@ -72,7 +72,7 @@ Ansible и Semaphore относятся именно сюда, а не в `301-a
 ```text
 301-ai-control
   Hermes
-  Proxmmox MCP
+  Proxmox MCP
        │
        │ инициирует повторяемую настройку
        ▼
