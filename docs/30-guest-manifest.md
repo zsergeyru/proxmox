@@ -48,7 +48,7 @@ management:
 
 `management.ssh_identity: true` означает, что после появления административного SSH deployer должен обеспечить собственную management SSH-пару **внутри этого гостя**, оставить private key в госте и зарегистрировать только `.pub` в каноническом PVE public-key registry.
 
-`management.project_repo_read: true` означает выдачу фиксированного общего Git read-only credential для одного проектного репозитория.
+`management.project_repo_read` является boolean desired state фиксированного общего Git read-only доступа только к `zsergeyru/proxmox`: `true` означает обеспечить доступ и его управляемую SSH/Git-конфигурацию; `false` или отсутствие поля означает не выдавать credential и, если ранее управляемый доступ уже существует, удалить только его управляемые артефакты.
 
 Таким образом, весь гостевой management-контракт находится в одном логическом разделе:
 
@@ -71,7 +71,7 @@ management.ssh_identity
 → есть ли у guest собственная исходящая management SSH identity
 
 management.project_repo_read
-→ нужен ли guest исходящий read-only доступ к project Git
+→ должен ли guest иметь фиксированный исходящий read-only доступ к project Git
 ```
 
 На момент фиксации этих решений `management.ssh_identity` и `management.project_repo_read` **ещё не реализованы** в действующей schema v6 и не должны добавляться в реальные `guest.yaml` до соответствующего изменения schemas/resolver/validator/tests. Документация фиксирует целевой контракт заранее, чтобы реализация не вводила другой интерфейс.
@@ -171,6 +171,8 @@ profiles:
 
 Один общий change не должен внезапно превратить все VM/LXC в владельцев собственных administrative private keys или раздать всем общий Git credential.
 
+Для individual-only boolean-поля `management.project_repo_read` отсутствие поля в effective guest contract эквивалентно desired state `false`, а не «оставить как было». Поэтому ранее управляемый Project Git READ при следующем APPLY планируется к удалению только в части управляемых артефактов этого capability.
+
 ## Guest Bootstrap v1
 
 Если гостю нужна первичная настройка после появления проверенного административного SSH, она задаётся явно:
@@ -233,19 +235,29 @@ Bootstrap v1 не является универсальным механизмо
 
 ## Доступ к проектному Git только для чтения
 
-Принят один специальный логический запрос внутри общего management-раздела:
+Принят один специальный boolean desired state внутри общего management-раздела:
 
 ```yaml
 management:
   project_repo_read: true
 ```
 
-Он означает ровно одно:
+`true` означает ровно одно:
 
 ```text
-гостю разрешена локальная копия общего read-only GitHub Deploy Key
-→ только для git@github.com:zsergeyru/proxmox.git
+гостю должна быть обеспечена локальная копия общего read-only GitHub Deploy Key
++ отдельная строгая проверка GitHub SSH host key
++ фиксированная SSH/Git-настройка только для zsergeyru/proxmox
 → только clone/fetch/read
+```
+
+`false` или отсутствие поля означает:
+
+```text
+новый credential не выдавать
+→ если управляемый Project Git READ уже существует, PLAN = REMOVE
+→ при --apply удалить только управляемые key/known_hosts/SSH config/Git rewrite
+→ не удалять рабочие копии репозитория и чужие Git/SSH credentials
 ```
 
 `guest.yaml` **не** может задавать:
@@ -259,19 +271,40 @@ management:
 write-доступ
 ```
 
-Связка `management.project_repo_read → конкретный общий Git read-key → стандартное место в госте` является фиксированной частью кода deploy, а не данными manifest.
+Связка `management.project_repo_read → конкретный общий Git read-key → стандартные управляемые guest-local paths` является фиксированной частью кода deploy, а не данными manifest.
 
-Мастер-копия read-key хранится root-only на PVE. Root-wrapper передаёт её содержимое `deploy-guest` только для текущего запуска и только если effective state требует `management.project_repo_read`; передача выполняется через отдельный file descriptor, не через argv/environment.
+Мастер-копия read-key хранится root-only на PVE. Root-wrapper передаёт её содержимое `deploy-guest` только для текущего запуска и только если effective state требует `management.project_repo_read=true`; передача выполняется через отдельный file descriptor, не через argv/environment. Для `false`/отсутствующего поля private key с PVE не открывается.
 
-Стандартное место локальной копии в Debian-госте:
+Стандартные управляемые артефакты в Debian-госте:
 
 ```text
 /etc/proxmox-guest/credentials/github-proxmox-read
+/etc/proxmox-guest/ssh/github-proxmox-known_hosts
+/etc/ssh/ssh_config.d/90-proxmox-project-repo-read.conf
 ```
 
-с `root:root 0600`.
+Права:
 
-Этот credential не является административным SSH-ключом и не добавляется в `/root/.ssh/authorized_keys`.
+```text
+github-proxmox-read                         root:root 0600
+github-proxmox-known_hosts                  root:root 0644
+90-proxmox-project-repo-read.conf           root:root 0644
+```
+
+Dedicated SSH config создаёт alias `github-proxmox-read`, который использует этот key, отдельный `known_hosts`, `StrictHostKeyChecking yes` и `BatchMode yes`.
+
+Точная управляемая Git URL rewrite-запись:
+
+```text
+git@github.com:zsergeyru/proxmox.git
+→ git@github-proxmox-read:zsergeyru/proxmox.git
+```
+
+позволяет обычному root `git clone/fetch` по каноническому project URL автоматически использовать этот read-only credential, не затрагивая другие GitHub repositories.
+
+Этот credential не является административным SSH-ключом и не добавляется в `/root/.ssh/authorized_keys` или management public-key registry.
+
+Точный APPLY/REMOVE/NO CHANGE lifecycle и правила безопасного удаления определяет [`31-deploy-guest.md`](31-deploy-guest.md).
 
 Если AI требуется отправлять изменения обратно в GitHub, write credential проектируется отдельно и не выражается через `management.project_repo_read`.
 
@@ -291,7 +324,7 @@ management:
 → обеспечить стандартную management keypair внутри этого гостя
 → private key оставить только в госте
 → забрать наружу только .pub
-→ зарегистрировать её на PVE как <VMID>-<name>.pub
+→ зарегистрировать её на PVE как <VMID>.pub
 → синхронизировать общий каталог public keys
 ```
 
@@ -567,7 +600,7 @@ python scripts/validate_repo.py
 
 Семантика Bootstrap также проверяется общим resolver, которым пользуются validator и будущий `deploy-guest`. Второй набор правил Bootstrap в `deploy-guest.py` создавать нельзя.
 
-Когда `management.project_repo_read` будет реализован, schemas/resolver/validator должны принять только boolean-поле `project_repo_read` внутри `management`; произвольные имена credentials, секретные значения и пути должны оставаться запрещены.
+Когда `management.project_repo_read` будет реализован, schemas/resolver/validator должны принять только boolean-поле `project_repo_read` внутри `management`; `true` означает desired state «доступ есть», `false`/отсутствие — desired state «управляемого доступа нет»; произвольные имена credentials, секретные значения и пути должны оставаться запрещены.
 
 Когда `management.ssh_identity` будет реализован, schemas/resolver/validator должны принять только boolean-поле `ssh_identity` внутри `management` и не вводить рядом произвольные имена private key, пути, роли или VMID-получатели. Точный смысл поля уже зафиксирован в [`28-management-ssh-keys.md`](28-management-ssh-keys.md).
 
