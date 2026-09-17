@@ -81,7 +81,7 @@ Runtime:
 - использует PVE API token `deployer@pve!host-deploy` только для read-only discovery объектов с tag `management-ssh`;
 - для manifest-backed гостей использует общий `guest_config.py`, для внешне созданных tagged гостей — каноническую VMID-адресацию;
 - проверяет Debian и root SSH через deployer identity;
-- при первом PVE-side знакомстве с новым ожидаемым адресом staging-ом проверяет SSH host key и сохраняет его только после успешного общего preflight;
+- не принимает неизвестные SSH host keys: первичное доверие только что созданному ожидаемому объекту выполняет `deploy-guest`, а bulk sync требует уже сохранённый persistent host key;
 - синхронизирует `/etc/proxmox-guest/public-keys/` и только managed block `/root/.ssh/authorized_keys`;
 - не запускает offline-гостей ради sync;
 - после APPLY повторно проверяет фактическое состояние.

@@ -168,6 +168,17 @@ def test_remote_catalog_policy() -> None:
         fail("unknown guest catalog file was accepted")
 
 
+def test_untrusted_host_boundary() -> None:
+    source = SOURCE.read_text(encoding="utf-8")
+    start = source.index("def prepare_participant(")
+    end = source.index("\ndef persist_new_host_keys", start)
+    block = source[start:end]
+    if "if not known_host_exists(participant):" not in block:
+        fail("prepare_participant must reject missing persistent host trust")
+    if "scan_host_keys(participant)" in block or "temporary_known_hosts" in block:
+        fail("bulk sync must not TOFU an unknown management-ssh participant")
+
+
 def test_helpers() -> None:
     if mod.parse_tags("foo;management-ssh;bar") != {"foo", "management-ssh", "bar"}:
         fail("PVE tag parser is wrong")
@@ -184,6 +195,7 @@ def main() -> None:
     test_authorized_keys_block()
     test_registry()
     test_remote_catalog_policy()
+    test_untrusted_host_boundary()
     test_helpers()
     print("sync-management-keys unit tests passed.")
 

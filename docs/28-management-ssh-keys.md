@@ -226,7 +226,7 @@ management-ssh
 - `deploy-guest` ставит tag Debian-гостю, если effective state содержит `management.ssh`;
 - AI или другой управляющий guest, создающий Debian VM/LXC напрямую через PVE API и передающий ей management public keys, ставит тот же tag;
 - `sync-management-keys` рассматривает только объекты с `management-ssh`;
-- tag является необходимым, но не достаточным условием записи: дополнительно проверяются объект, адрес, SSH trust и management-контракт;
+- tag является необходимым, но не достаточным условием записи: дополнительно проверяются объект, адрес, уже установленный persistent SSH trust и management-контракт; bulk `sync-management-keys` не выполняет TOFU неизвестного host key;
 - отсутствие tag означает: массовая синхронизация объект не трогает.
 
 `management-ssh` не заменяет ownership tag:
@@ -331,7 +331,7 @@ sync-management-keys
 
 Команда может запускаться вручную. `deploy-guest` вызывает её после фактического добавления/изменения зарегистрированного management public key.
 
-Offline guest не запускается автоматически только ради sync. Его состояние остаётся pending/error до следующей успешной синхронизации.
+Offline guest не запускается автоматически только ради sync. Его состояние остаётся pending/error до следующей успешной синхронизации. Неизвестный SSH host key также блокирует bulk sync: первичное доверие разрешено `deploy-guest` только для только что созданного ожидаемого VMID/IP.
 
 Ошибка sync не вызывает удаление созданного private key или разрушительный rollback VM/LXC.
 
