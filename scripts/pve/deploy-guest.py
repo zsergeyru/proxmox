@@ -479,6 +479,29 @@ def option_enabled(value: object) -> bool:
     return str(value or "").split(",", 1)[0].lower() in {"1", "true", "yes", "on"}
 
 
+def preserve_boolean_suboptions(value: object, enabled: bool) -> str:
+    parts = [part for part in str(value or "").split(",") if part]
+    tail = parts[1:] if parts else []
+    return ",".join(["1" if enabled else "0", *tail])
+
+
+def expected_lxc_features(desired: Desired, current: object) -> str:
+    values: dict[str, str] = {}
+    extras: list[str] = []
+    for part in str(current or "").split(","):
+        if not part:
+            continue
+        if "=" in part:
+            key, value = part.split("=", 1)
+            if key in {"keyctl", "nesting"}:
+                values[key] = value
+                continue
+        extras.append(part)
+    values["keyctl"] = str(int(bool(desired.effective["lxc"]["features"]["keyctl"])))
+    values["nesting"] = str(int(bool(desired.effective["lxc"]["features"]["nesting"])))
+    return ",".join([*extras, f"keyctl={values['keyctl']}", f"nesting={values['nesting']}"])
+
+
 def update_kv_option(text: str, key: str, value: str) -> str:
     parts = text.split(",") if text else []
     out: list[str] = []
@@ -569,6 +592,10 @@ def verify_sources(api: PveApi, desired: Desired) -> str | None:
         config = api.get(f"/nodes/{urllib.parse.quote(node)}/qemu/{template_vmid}/config")
         if not isinstance(config, dict) or not boolish(config.get("template")):
             raise DeployError(f"VM source {template_vmid} не является template")
+        if not isinstance(config.get("net0"), str) or not config.get("net0"):
+            raise DeployError(f"VM source {template_vmid} не содержит обязательный net0")
+        if not isinstance(config.get("scsi0"), str) or not config.get("scsi0"):
+            raise DeployError(f"VM source {template_vmid} не содержит обязательный scsi0")
         return None
     selector = str(e["lxc"]["source"]["ostemplate"])
     selector_storage = selector.split(":", 1)[0]
@@ -631,17 +658,14 @@ def plan_pve(desired: Desired, actual: Actual) -> list[PlanItem]:
             items.append(PlanItem("PVE unprivileged", "NO CHANGE", "ONLINE", str(unprivileged)))
         else:
             items.append(PlanItem("PVE unprivileged", "BLOCKED", "FORBIDDEN", "recreate required"))
-        wanted_features = {
-            f"keyctl={int(bool(e['lxc']['features']['keyctl']))}",
-            f"nesting={int(bool(e['lxc']['features']['nesting']))}",
-        }
-        current_features = set(str(cfg.get("features") or "").split(","))
+        current_features = str(cfg.get("features") or "")
+        target_features = expected_lxc_features(desired, current_features)
         items.append(
             PlanItem(
                 "PVE features",
-                "NO CHANGE" if wanted_features.issubset(current_features) else "UPDATE",
+                "NO CHANGE" if set(filter(None, current_features.split(","))) == set(filter(None, target_features.split(","))) else "UPDATE",
                 "REQUIRES-STOP",
-                ",".join(sorted(wanted_features)),
+                target_features,
             )
         )
         current_net = str(cfg.get("net0") or "")
@@ -955,7 +979,7 @@ def vm_update_payload(desired: Desired, cfg: dict[str, Any], incomplete: bool) -
         "name": e["name"],
         "cores": e["resources"]["cpu"]["cores"],
         "memory": e["resources"]["memory_mb"],
-        "agent": 1 if e["vm"]["guest_agent"] else 0,
+        "agent": preserve_boolean_suboptions(cfg.get("agent"), bool(e["vm"]["guest_agent"])),
         "ciuser": "root",
         "ipconfig0": expected_ipconfig(desired),
         "onboot": 1 if e["boot"]["onboot"] else 0,
@@ -1270,9 +1294,17 @@ def apt_install(address: str, packages: list[str]) -> None:
 set -eu
 if dpkg --audit | grep -q .; then echo 'dpkg --audit reports unfinished state' >&2; exit 81; fi
 if find /var/lib/dpkg/updates -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null | grep -q .; then echo 'dpkg updates directory is not empty' >&2; exit 82; fi
+missing=''
+for pkg in {args}; do
+    if ! dpkg-query -W -f='${{db:Status-Abbrev}}' "$pkg" 2>/dev/null | grep -q '^ii'; then
+        missing="$missing $pkg"
+    fi
+done
+[ -n "$missing" ] || exit 0
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
-apt-get install -y --no-install-recommends {args}
+# shellcheck disable=SC2086
+apt-get install -y --no-install-recommends $missing
 """
     ssh_run(address, script, timeout=300)
 

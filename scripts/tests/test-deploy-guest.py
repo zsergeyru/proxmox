@@ -67,6 +67,14 @@ def main() -> None:
     assert mod.update_kv_option("virtio=AA:BB,bridge=old", "bridge", "vmbr0") == "virtio=AA:BB,bridge=vmbr0"
     assert mod.update_kv_option("name=eth0", "ip", "192.168.3.1/16") == "name=eth0,ip=192.168.3.1/16"
     assert mod.expected_ipconfig(d) == "ip=192.168.3.1/16,gw=192.168.1.1"
+    assert mod.preserve_boolean_suboptions("1,fstrim_cloned_disks=1", True) == "1,fstrim_cloned_disks=1"
+    assert mod.preserve_boolean_suboptions("1,fstrim_cloned_disks=1", False) == "0,fstrim_cloned_disks=1"
+
+    lxc = desired("lxc")
+    lxc.effective["lxc"] = {"features": {"keyctl": True, "nesting": True}}
+    assert set(mod.expected_lxc_features(lxc, "fuse=1,keyctl=0,nesting=1").split(",")) == {
+        "fuse=1", "keyctl=1", "nesting=1"
+    }
 
     plan = mod.Plan(
         d,
