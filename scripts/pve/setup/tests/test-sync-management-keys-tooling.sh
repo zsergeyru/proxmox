@@ -25,6 +25,8 @@ grep -Fq 'flock -n 9' "$TOOLING" \
     || fail "manual sync command must use orchestration lock"
 grep -Fq 'management-ssh' "$SOURCE" \
     || fail "runtime must discover management-ssh participants"
+grep -Fq 'safe.directory={ROOT}' "$SOURCE" \
+    || fail "runtime Git revision check must trust only the canonical root-owned checkout locally"
 grep -Fq 'BEGIN PROXMOX-MANAGEMENT-KEYS' "$SOURCE" \
     || fail "managed authorized_keys block marker is missing"
 grep -Fq 'StrictHostKeyChecking=yes' "$SOURCE" \

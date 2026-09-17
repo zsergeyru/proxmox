@@ -166,7 +166,7 @@ def run_command(
 
 
 def git_revision() -> str:
-    proc = run_command(["git", "-C", str(ROOT), "rev-parse", "HEAD"])
+    proc = run_command(["git", "-c", f"safe.directory={ROOT}", "-C", str(ROOT), "rev-parse", "HEAD"])
     revision = proc.stdout.strip()
     if not re.fullmatch(r"[0-9a-f]{40}", revision):
         fail("не удалось определить точную Git revision sync-management-keys")
