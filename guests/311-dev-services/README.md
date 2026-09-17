@@ -34,7 +34,7 @@ management:
 
 Оба целевых поля пока не реализованы в действующей schema v6, поэтому до изменения schemas/resolver/validator в рабочий manifest не добавляются.
 
-После создания LXC `deploy-guest` должен передать `management-authorized-keys`, установить PVE tag `management-ssh`, получить проверенный `root SSH`, при необходимости создать/проверить management identity, зарегистрировать её `.pub`, материализовать Project Git READ credential, выполнить `base → git → docker → ansible_controller` и только после полной проверки завершить deploy.
+После создания LXC `deploy-guest` должен передать `management-authorized-keys`, установить PVE tag `management-ssh`, один раз сохранить SSH host key нового гостя для ожидаемого адреса, получить проверенный `root SSH`, при необходимости создать/проверить management identity, зарегистрировать её `.pub`, материализовать Project Git READ credential, выполнить `base → git → docker → ansible_controller` и только после полной проверки завершить deploy.
 
 ## Management SSH Ansible
 
@@ -64,13 +64,17 @@ management:
 
 Закрытая часть остаётся только в 311.
 
-Открытую часть deployer забирает после генерации и регистрирует как, например:
+Открытую часть deployer забирает после генерации и регистрирует как:
 
 ```text
-/etc/proxmox-deployer/public-keys/311-dev-services.pub
+/var/lib/proxmox-deployer/public-keys/311.pub
 ```
 
+Имя файла связано только с VMID. Переименование LXC не меняет identity и не переименовывает `311.pub`.
+
 После регистрации `sync-management-keys` распространяет обновлённый public-key registry по Debian VM/LXC с PVE tag `management-ssh`, включая 301. Сам 311 не подключается ни к PVE, ни к 301 ради регистрации или распространения ключа.
+
+При удалении 311 его `311.pub` должен быть удалён из канонического registry с последующим `sync-management-keys`. Если VMID 311 затем используется новым объектом, старый ключ не переиспользуется: новая машина получает новую management identity.
 
 ## Доступ к проектному Git
 
@@ -114,10 +118,10 @@ management-ssh
 Основной источник каталога находится на PVE:
 
 ```text
-/etc/proxmox-deployer/public-keys/
+/var/lib/proxmox-deployer/public-keys/
 ```
 
-а распространение выполняет отдельная команда `sync-management-keys`.
+Каталог принадлежит `pvedeploy:pvedeploy`, а распространение выполняет отдельная команда `sync-management-keys`.
 
 ## Планируемые сервисы
 
