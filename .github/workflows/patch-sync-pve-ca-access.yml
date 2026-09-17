@@ -1,0 +1,84 @@
+name: Patch sync PVE CA access
+
+on:
+  push:
+    branches: [fix-sync-pve-ca-access]
+    paths: [.github/workflows/patch-sync-pve-ca-access.yml]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix-sync-pve-ca-access
+      - name: Patch runtime CA access
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          common = Path('scripts/pve/setup/lib/00-common.sh')
+          text = common.read_text(encoding='utf-8')
+          text = text.replace('PVE_CONFIGURATION_VERSION=27', 'PVE_CONFIGURATION_VERSION=28', 1)
+          anchor = 'PVE_GUEST_PUB="${PVE_GUEST_KEY}.pub"\n'
+          insert = anchor + 'PVE_CA_SOURCE="/etc/pve/pve-root-ca.pem"\nPVE_CA_FILE="${CONFIG_DIR}/pve-root-ca.pem"\n'
+          if anchor not in text:
+              raise SystemExit('common CA anchor not found')
+          text = text.replace(anchor, insert, 1)
+          common.write_text(text, encoding='utf-8')
+
+          runtime = Path('scripts/pve/setup/lib/40-runtime.sh')
+          text = runtime.read_text(encoding='utf-8')
+          anchor = '    install -d -o root -g root -m 0755 /usr/local/sbin\n\n'
+          block = '''    install -d -o root -g root -m 0755 /usr/local/sbin\n\n    # pvedeploy не читает /etc/pve напрямую. Публичный PVE CA копируется\n    # в root-owned runtime-файл с read-only доступом для pvedeploy.\n    [[ -f "$PVE_CA_SOURCE" ]] \\\n        || die "Не найден исходный PVE CA: ${PVE_CA_SOURCE}"\n    [[ ! -L "$PVE_CA_FILE" ]] \\\n        || die "Runtime PVE CA ${PVE_CA_FILE} является симлинком; автоматическое обновление запрещено"\n    install -o root -g "$DEPLOY_USER" -m 0640 "$PVE_CA_SOURCE" "$PVE_CA_FILE"\n    cmp -s "$PVE_CA_SOURCE" "$PVE_CA_FILE" \\\n        || die "Runtime-копия PVE CA не совпадает с ${PVE_CA_SOURCE}"\n    runuser -u "$DEPLOY_USER" -- test -r "$PVE_CA_FILE" \\\n        || die "Runtime PVE CA недоступен для ${DEPLOY_USER}: ${PVE_CA_FILE}"\n    ok "Публичный PVE CA подготовлен для ограниченного runtime: ${PVE_CA_FILE}"\n\n'''
+          if anchor not in text:
+              raise SystemExit('runtime insertion anchor not found')
+          text = text.replace(anchor, block, 1)
+          runtime.write_text(text, encoding='utf-8')
+
+          sync = Path('scripts/pve/sync-management-keys.py')
+          text = sync.read_text(encoding='utf-8')
+          old = 'PVE_CA = Path("/etc/pve/pve-root-ca.pem")'
+          new = 'PVE_CA = CONFIG_DIR / "pve-root-ca.pem"'
+          if old not in text:
+              raise SystemExit('sync PVE_CA constant not found')
+          text = text.replace(old, new, 1)
+          old = '    context = ssl.create_default_context(cafile=str(PVE_CA))\n    request = urllib.request.Request('
+          new = '    try:\n        context = ssl.create_default_context(cafile=str(PVE_CA))\n    except (OSError, ssl.SSLError) as exc:\n        raise SyncError(f"не удалось загрузить runtime PVE CA {PVE_CA}: {exc}") from exc\n    request = urllib.request.Request('
+          if old not in text:
+              raise SystemExit('sync SSL context block not found')
+          text = text.replace(old, new, 1)
+          sync.write_text(text, encoding='utf-8')
+
+          test = Path('scripts/pve/setup/tests/test-sync-management-keys-tooling.sh')
+          text = test.read_text(encoding='utf-8')
+          anchor = 'TOOLING="$ROOT/scripts/pve/setup/lib/71-sync-management-keys-tooling.sh"\n'
+          if anchor not in text:
+              raise SystemExit('sync tooling test anchor not found')
+          text = text.replace(anchor, anchor + 'RUNTIME_SETUP="$ROOT/scripts/pve/setup/lib/40-runtime.sh"\nCOMMON="$ROOT/scripts/pve/setup/lib/00-common.sh"\n', 1)
+          marker = 'grep -Fq \'management-ssh\' "$SOURCE" \\\n    || fail "runtime must discover management-ssh participants"\n'
+          extra = marker + '''grep -Fq 'PVE_CA_FILE="${CONFIG_DIR}/pve-root-ca.pem"' "$COMMON" \\\n    || fail "runtime PVE CA destination must be defined outside /etc/pve"\ngrep -Fq 'install -o root -g "$DEPLOY_USER" -m 0640 "$PVE_CA_SOURCE" "$PVE_CA_FILE"' "$RUNTIME_SETUP" \\\n    || fail "PVE Configuration must provision a read-only runtime PVE CA copy"\ngrep -Fq 'PVE_CA = CONFIG_DIR / "pve-root-ca.pem"' "$SOURCE" \\\n    || fail "sync runtime must use the provisioned PVE CA copy"\n'''
+          if marker not in text:
+              raise SystemExit('sync tooling test insertion marker not found')
+          text = text.replace(marker, extra, 1)
+          test.write_text(text, encoding='utf-8')
+
+          contract = Path('scripts/pve/setup/tests/test-deploy-runtime-contract.sh')
+          text = contract.read_text(encoding='utf-8')
+          text = text.replace('PVE_CONFIGURATION_VERSION=27', 'PVE_CONFIGURATION_VERSION=28', 1)
+          text = text.replace('PVE_CONFIGURATION_VERSION must be 27', 'PVE_CONFIGURATION_VERSION must be 28', 1)
+          contract.write_text(text, encoding='utf-8')
+          PY
+          git diff --check
+          python -m py_compile scripts/pve/sync-management-keys.py
+          bash -n scripts/pve/setup/lib/40-runtime.sh
+          bash -n scripts/pve/setup/tests/test-sync-management-keys-tooling.sh
+          bash -n scripts/pve/setup/tests/test-deploy-runtime-contract.sh
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add scripts/pve/setup/lib/00-common.sh scripts/pve/setup/lib/40-runtime.sh scripts/pve/sync-management-keys.py scripts/pve/setup/tests/test-sync-management-keys-tooling.sh scripts/pve/setup/tests/test-deploy-runtime-contract.sh
+          git commit -m "fix: дать sync runtime отдельную копию PVE CA"
+          git push origin HEAD:fix-sync-pve-ca-access
