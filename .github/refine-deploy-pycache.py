@@ -27,12 +27,12 @@ replacements = [
         'PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/run/proxmox-deployer-disabled-pycache /usr/bin/python3 "\\$VALIDATOR"',
     ),
     (
-        '        PYTHONDONTWRITEBYTECODE=1 \\\n        DEPLOY_GUEST_SOURCE_REVISION=',
-        '        PYTHONDONTWRITEBYTECODE=1 \\\n        PYTHONPYCACHEPREFIX=/run/proxmox-deployer-disabled-pycache \\\n        DEPLOY_GUEST_SOURCE_REVISION=',
+        '        PYTHONDONTWRITEBYTECODE=1 \\',
+        '        PYTHONDONTWRITEBYTECODE=1 \\\n        PYTHONPYCACHEPREFIX=/run/proxmox-deployer-disabled-pycache \\',
     ),
     (
-        '    runuser -u "\\$DEPLOY_USER" -- env PYTHONDONTWRITEBYTECODE=1 \\\n        DEPLOY_GUEST_SOURCE_REVISION=',
-        '    runuser -u "\\$DEPLOY_USER" -- env PYTHONDONTWRITEBYTECODE=1 \\\n        PYTHONPYCACHEPREFIX=/run/proxmox-deployer-disabled-pycache \\\n        DEPLOY_GUEST_SOURCE_REVISION=',
+        '    runuser -u "\\$DEPLOY_USER" -- env PYTHONDONTWRITEBYTECODE=1 \\',
+        '    runuser -u "\\$DEPLOY_USER" -- env PYTHONDONTWRITEBYTECODE=1 \\\n        PYTHONPYCACHEPREFIX=/run/proxmox-deployer-disabled-pycache \\',
     ),
 ]
 for old, new in replacements:
