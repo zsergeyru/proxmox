@@ -10,7 +10,8 @@
 
 ```text
 Public Bootstrap
-→ временная рабочая область только для первоначального доступа к закрытому репозиторию
+→ с первого запуска создаёт/использует один постоянный root-only GitHub Deploy Key
+→ временная область нужна только для одноразовой копии закрытого репозитория
 → /var/lib/proxmox-bootstrap удаляется после успешного первого запуска
 
 PVE Configuration
@@ -36,20 +37,30 @@ zsergeyru/proxmox-bootstrap
 └── bootstrap-pve.sh
 ```
 
-До первого успешного перехода к PVE Configuration используется временная область:
+С первого запуска GitHub Deploy Key создаётся сразу в постоянном root-only месте:
 
 ```text
-/var/lib/proxmox-bootstrap/
+/etc/proxmox-deployer/ssh/
 ├── github_proxmox_repo_ed25519
 ├── github_proxmox_repo_ed25519.pub
 ├── known_hosts
-├── ssh_config
+└── config
+```
+
+Public Bootstrap не создаёт отдельный временный GitHub Deploy Key. Если постоянный ключ уже существует, используется именно он и новый ключ автоматически не создаётся.
+
+Временная область первого запуска содержит только одноразовую копию закрытого репозитория:
+
+```text
+/var/lib/proxmox-bootstrap/
 └── private-repo/
 ```
 
 Каталог создаётся как `root:root 0700`.
 
-`private-repo/` — одноразовая рабочая копия репозитория. При продолжении прерванного запуска её можно привести к свежему `FETCH_HEAD` через `reset --hard` и `git clean -ffdx`, включая игнорируемые кэши и артефакты сборки. Это правило относится только к временной области.
+`private-repo/` — одноразовая рабочая копия репозитория. При продолжении прерванного запуска её можно привести к свежему `FETCH_HEAD` через `reset --hard` и `git clean -ffdx`, включая игнорируемые кэши и артефакты сборки. Это правило относится только к временной копии.
+
+Для безопасного продолжения незавершённого запуска Public Bootstrap v11 допускается одноразовая миграция уже существующего старого ключа из `/var/lib/proxmox-bootstrap/` в постоянное место, если постоянного ключа ещё нет. Новый временный ключ при этом не создаётся.
 
 После успешной PVE Configuration Public Bootstrap удаляет `/var/lib/proxmox-bootstrap` и записывает:
 
@@ -170,8 +181,9 @@ config.yaml
 
 ssh/github_proxmox_repo_ed25519
 → мастер-копия общего GitHub Deploy Key только для чтения zsergeyru/proxmox
+→ создаётся или принимается Public Bootstrap ещё до первого чтения private repo
 → доступна постоянно только root
-→ используется самим PVE для обновления доверенной копии проекта
+→ используется самим PVE для первоначального и последующих чтений проекта
 → может временно передаваться конкретному запуску deploy-guest через отдельный FD,
   если guest явно требует management.project_repo_read: true
 
@@ -189,6 +201,7 @@ ssh/pve_guest_ed25519
 
 ssh/config + known_hosts
 → принадлежащие root настройки SSH для доступа к закрытому Git-репозиторию
+→ создаются сразу рядом с постоянным GitHub Deploy Key
 
 secrets/host-deploy.token
 → учётные данные deployer@pve!host-deploy
@@ -236,6 +249,8 @@ public-keys/management-authorized-keys     pvedeploy:pvedeploy 0644
 /var/log/proxmox-deployer                  root:pvedeploy 0750
 /var/log/proxmox-deployer/audit            pvedeploy:pvedeploy 0750
 ```
+
+На самом первом шаге, до создания Linux-группы `pvedeploy`, Public Bootstrap может временно держать `/etc/proxmox-deployer/ssh` как `root:root 0700`; PVE Configuration затем приводит каталог к штатному `root:pvedeploy 0750`. Сам GitHub private key всё время остаётся `root:root 0600`.
 
 `pvedeploy` может изменять только собственное runtime-состояние deploy-контура, включая public-key registry и базу SSH host keys управляемых гостей. Это не даёт ему права записи в доверенную root-owned копию проекта и не открывает root-only Git credential или AI token.
 
@@ -501,4 +516,4 @@ PVE tag `management-ssh` также не является секретом, но
 
 Главный принцип:
 
-> Public Bootstrap использует отдельную временную область только для первоначального доступа. Основная копия исходного кода и мастер-копия общего Git read-key принадлежат `root`; `pvedeploy` не получает постоянного доступа к этому секрету. Канонический набор открытых management SSH keys является изменяемым состоянием `pvedeploy` и хранится в `/var/lib/proxmox-deployer/public-keys/`; отдельный привилегированный helper для него не нужен. Новому гостю один раз запоминается SSH host key ожидаемого адреса, после чего неожиданная смена ключа блокирует автоматическую работу. Дополнительные management identities привязаны к VMID через `<VMID>.pub`, а не к имени гостя.
+> Public Bootstrap с первого запуска использует один постоянный root-only GitHub Deploy Key; временная область содержит только одноразовую копию закрытого репозитория. Основная копия исходного кода и мастер-копия общего Git read-key принадлежат `root`; `pvedeploy` не получает постоянного доступа к этому секрету. Канонический набор открытых management SSH keys является изменяемым состоянием `pvedeploy` и хранится в `/var/lib/proxmox-deployer/public-keys/`; отдельный привилегированный helper для него не нужен. Новому гостю один раз запоминается SSH host key ожидаемого адреса, после чего неожиданная смена ключа блокирует автоматическую работу. Дополнительные management identities привязаны к VMID через `<VMID>.pub`, а не к имени гостя.
