@@ -152,7 +152,7 @@ install_packages() {
     log "Установка обязательных пакетов конфигурации и администрирования"
 
     local packages=(
-        git openssh-client python3 python3-yaml curl jq ca-certificates
+        git openssh-client python3 python3-yaml python3-jsonschema curl jq ca-certificates
         mc htop tmux smartmontools lm-sensors
     )
 
@@ -161,6 +161,15 @@ install_packages() {
     for cmd in git ssh ssh-keygen python3 curl jq runuser find; do
         require_cmd "$cmd"
     done
+
+    python3 - <<'PY_DEPS' \
+        || die "Python-зависимости PVE Configuration установлены не полностью"
+import yaml
+from jsonschema import Draft202012Validator
+
+assert yaml is not None
+assert Draft202012Validator is not None
+PY_DEPS
 
     ok "Обязательные пакеты установлены"
 }
