@@ -69,8 +69,8 @@
 ├── ssh/                                   — SSH-ключи и параметры доверия
 │   ├── github_proxmox_repo_ed25519        — закрытый ключ чтения приватного GitHub-репозитория
 │   ├── github_proxmox_repo_ed25519.pub    — открытая часть ключа GitHub
-│   ├── pve_deployer_ed25519                  — закрытый ключ управления гостевыми системами
-│   ├── pve_deployer_ed25519.pub              — открытая часть ключа управления гостями
+│   ├── pve_deployer_ed25519                  — закрытый SSH-ключ PVE для управления гостевыми системами
+│   ├── pve_deployer_ed25519.pub              — открытая часть SSH-ключа PVE для управления гостевыми системами
 │   ├── config                             — локальная SSH-конфигурация доступа к GitHub
 │   └── known_hosts                        — доверенные SSH-ключи узлов GitHub
 └── secrets/                               — локальные секреты API-токенов Proxmox
@@ -325,7 +325,7 @@ VMID: 9099
 |---|---|---|---|---|
 | Локальная конфигурация | `/etc/proxmox-deployer/` | конфигурация | да | root |
 | GitHub Deploy Key | `/etc/proxmox-deployer/ssh/github_proxmox_repo_ed25519` | секрет | да | root |
-| SSH-ключ управления гостями | `/etc/proxmox-deployer/ssh/pve_deployer_ed25519` | секрет | да | pvedeploy |
+| SSH-ключ PVE для управления гостевыми системами | `/etc/proxmox-deployer/ssh/pve_deployer_ed25519` | секрет | да | pvedeploy |
 | API-секреты | `/etc/proxmox-deployer/secrets/` | секреты | да | root |
 | Канонический Git | `/var/lib/proxmox-deployer/repo/` | исходный код | да | root |
 | Состояние PVE Configuration | `/var/lib/proxmox-deployer/state/` | служебное состояние | да | root |
