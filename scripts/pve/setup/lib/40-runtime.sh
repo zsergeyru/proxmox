@@ -161,16 +161,16 @@ EOF_CONFIG
 }
 
 ensure_pve_guest_key() {
-    log "Проверка постоянной PVE guest SSH identity"
+    log "Проверка постоянной PVE deployer SSH identity"
 
-    if [[ ! -f "$PVE_GUEST_KEY" ]]; then
-        [[ ! -e "$PVE_GUEST_PUB" ]] \
-            || die "Private key ${PVE_GUEST_KEY} отсутствует, но ${PVE_GUEST_PUB} существует. Возможна потеря PVE guest credential; автоматическая ротация запрещена. Восстановите private key из backup либо выполните отдельную осознанную rotation operation."
+    if [[ ! -f "$PVE_DEPLOYER_KEY" ]]; then
+        [[ ! -e "$PVE_DEPLOYER_PUB" ]] \
+            || die "Private key ${PVE_DEPLOYER_KEY} отсутствует, но ${PVE_DEPLOYER_PUB} существует. Возможна потеря PVE deployer credential; автоматическая ротация запрещена. Восстановите private key из backup либо выполните отдельную осознанную rotation operation."
 
         local old_umask
         old_umask="$(umask)"
         umask 077
-        if ! ssh-keygen -q -t ed25519 -N '' -C 'pve-guest' -f "$PVE_GUEST_KEY"; then
+        if ! ssh-keygen -q -t ed25519 -N '' -C 'pve-deployer' -f "$PVE_DEPLOYER_KEY"; then
             umask "$old_umask"
             die "Не удалось создать PVE guest SSH keypair"
         fi
@@ -181,21 +181,21 @@ ensure_pve_guest_key() {
     fi
 
     local derived_pub tmp_pub
-    derived_pub="$(ssh-keygen -y -f "$PVE_GUEST_KEY" 2>/dev/null)" \
-        || die "Не удалось прочитать PVE guest private key ${PVE_GUEST_KEY}"
+    derived_pub="$(ssh-keygen -y -f "$PVE_DEPLOYER_KEY" 2>/dev/null)" \
+        || die "Не удалось прочитать PVE deployer private key ${PVE_DEPLOYER_KEY}"
     [[ "$derived_pub" == ssh-ed25519\ * ]] \
-        || die "PVE guest key ${PVE_GUEST_KEY} должен быть Ed25519"
+        || die "PVE deployer key ${PVE_DEPLOYER_KEY} должен быть Ed25519"
 
-    chown "$DEPLOY_USER:$DEPLOY_USER" "$PVE_GUEST_KEY"
-    chmod 0600 "$PVE_GUEST_KEY"
+    chown "$DEPLOY_USER:$DEPLOY_USER" "$PVE_DEPLOYER_KEY"
+    chmod 0600 "$PVE_DEPLOYER_KEY"
 
     tmp_pub="$(mktemp "${SSH_DIR}/.pve-guest-pub.XXXXXX")"
     printf '%s %s\n' "$derived_pub" 'pve-guest' >"$tmp_pub"
-    install -o "$DEPLOY_USER" -g "$DEPLOY_USER" -m 0644 "$tmp_pub" "$PVE_GUEST_PUB"
+    install -o "$DEPLOY_USER" -g "$DEPLOY_USER" -m 0644 "$tmp_pub" "$PVE_DEPLOYER_PUB"
     rm -f "$tmp_pub"
 
-    [[ -s "$PVE_GUEST_PUB" ]] || die "PVE guest public key не создан: ${PVE_GUEST_PUB}"
-    ok "PVE guest SSH identity проверена: ${PVE_GUEST_KEY}"
+    [[ -s "$PVE_DEPLOYER_PUB" ]] || die "PVE guest public key не создан: ${PVE_DEPLOYER_PUB}"
+    ok "PVE deployer SSH identity проверена: ${PVE_DEPLOYER_KEY}"
 }
 
 refresh_canonical_public_key() {
