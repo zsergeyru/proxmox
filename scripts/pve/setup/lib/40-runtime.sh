@@ -305,6 +305,7 @@ assert_clean_git_worktree() {
     local repo=$1 label=$2 status
     status="$(canonical_git -C "$repo" status --porcelain=v1 --untracked-files=all --ignored)" \
         || die "Не удалось проверить чистоту ${label} Git checkout ${repo}"
+    status="$(printf '%s\n' "$status" | grep -Ev '^!! .*(__pycache__/|\.py[co]$)' || true)"
     [[ -z "$status" ]] \
         || die "${label} Git checkout ${repo} содержит tracked/staged/untracked/ignored drift. Автоматический reset/clean запрещён, чтобы не потерять данные. Первый элемент: $(head -n1 <<<"$status")"
 }
