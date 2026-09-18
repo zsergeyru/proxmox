@@ -211,6 +211,7 @@ run_check() {
         violation="$(find "$REPO_DIR" -xdev \( -type f -o -type d \) \( ! -uid 0 -o -perm /022 \) -print -quit 2>/dev/null || true)"
         origin="$(git -c "safe.directory=$REPO_DIR" -C "$REPO_DIR" remote get-url origin 2>/dev/null || true)"
         drift="$(git -c "safe.directory=$REPO_DIR" -C "$REPO_DIR" status --porcelain=v1 --untracked-files=all --ignored 2>/dev/null || true)"
+        drift="$(printf '%s\n' "$drift" | grep -Ev '^!! .*(__pycache__/|\.py[co]$)' || true)"
         revision="$(git -c "safe.directory=$REPO_DIR" -C "$REPO_DIR" rev-parse HEAD 2>/dev/null || true)"
         recorded="$(cat "$LAST_REVISION" 2>/dev/null || true)"
         state_revision="$(jq -r '.repository_revision // empty' "$STATE" 2>/dev/null || true)"
