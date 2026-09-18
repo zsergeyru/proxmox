@@ -1,9 +1,7 @@
-schema_version: 7
+schema_version: 8
 vmid: 331
 name: ai-services
 profile: docker-lxc
-state: planned
-deployable: true
 
 description: Shared STT and TTS services
 

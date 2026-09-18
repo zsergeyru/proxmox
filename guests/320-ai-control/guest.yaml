@@ -1,9 +1,6 @@
-schema_version: 7
+schema_version: 8
 vmid: 320
 name: ai-control
-type: vm
-state: bootstrap
-deployable: false
 node: pve
 
 description: Current bootstrap AI control VM; target replacement is 301-ai-control

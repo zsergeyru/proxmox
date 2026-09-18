@@ -1,9 +1,7 @@
-schema_version: 7
+schema_version: 8
 vmid: 301
 name: ai-control
 profile: debian-vm
-state: planned
-deployable: true
 
 description: Target central AI infrastructure control plane
 

@@ -1,9 +1,7 @@
-schema_version: 7
+schema_version: 8
 vmid: 211
 name: automation-services
 profile: docker-lxc
-state: planned
-deployable: true
 
 description: MQTT, Zigbee2MQTT and ESPHome infrastructure services
 

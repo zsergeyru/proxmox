@@ -1,9 +1,6 @@
-schema_version: 7
+schema_version: 8
 vmid: 201
 name: ha-main
-type: lxc
-state: planned
-deployable: false
 node: pve
 
 description: Optional future Home Assistant migration target; current production is VM 100 HAOS

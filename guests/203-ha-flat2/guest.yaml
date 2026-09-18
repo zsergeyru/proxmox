@@ -1,9 +1,6 @@
-schema_version: 7
+schema_version: 8
 vmid: 203
 name: ha-flat2
-type: lxc
-state: planned
-deployable: false
 node: pve
 
 description: Reserved Home Assistant instance for the second apartment

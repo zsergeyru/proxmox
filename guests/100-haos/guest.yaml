@@ -1,9 +1,6 @@
-schema_version: 7
+schema_version: 8
 vmid: 100
 name: haos
-type: vm
-state: active
-deployable: false
 node: pve
 
 description: Current production Home Assistant OS VM migrated from Raspberry Pi
