@@ -608,8 +608,7 @@ report_status() {
         printf '\n%s%sЧАСТИЧНО:%s основная PVE Configuration выполнена, но один или несколько рабочих компонентов ещё не готовы.\n' "$C_BOLD" "$C_MAGENTA" "$C_RESET"
         write_state "partial" "$REPO_REVISION"
     fi
-}
-\033[0m'
+}\033[0m'
     C_BOLD=
 check_file_contract() {
     local path=$1 owner_group=$2 mode=$3 label=$4 actual_owner actual_mode
@@ -1151,8 +1150,7 @@ report_status() {
         printf '\n%s%sЧАСТИЧНО:%s основная PVE Configuration выполнена, но один или несколько рабочих компонентов ещё не готовы.\n' "$C_BOLD" "$C_MAGENTA" "$C_RESET"
         write_state "partial" "$REPO_REVISION"
     fi
-}
-\033[1m'
+}\033[1m'
     C_GREEN=
 check_file_contract() {
     local path=$1 owner_group=$2 mode=$3 label=$4 actual_owner actual_mode
@@ -1694,8 +1692,7 @@ report_status() {
         printf '\n%s%sЧАСТИЧНО:%s основная PVE Configuration выполнена, но один или несколько рабочих компонентов ещё не готовы.\n' "$C_BOLD" "$C_MAGENTA" "$C_RESET"
         write_state "partial" "$REPO_REVISION"
     fi
-}
-\033[32m'
+}\033[32m'
     C_YELLOW=
 check_file_contract() {
     local path=$1 owner_group=$2 mode=$3 label=$4 actual_owner actual_mode
@@ -2237,8 +2234,7 @@ report_status() {
         printf '\n%s%sЧАСТИЧНО:%s основная PVE Configuration выполнена, но один или несколько рабочих компонентов ещё не готовы.\n' "$C_BOLD" "$C_MAGENTA" "$C_RESET"
         write_state "partial" "$REPO_REVISION"
     fi
-}
-\033[33m'
+}\033[33m'
     C_RED=
 check_file_contract() {
     local path=$1 owner_group=$2 mode=$3 label=$4 actual_owner actual_mode
@@ -2780,8 +2776,7 @@ report_status() {
         printf '\n%s%sЧАСТИЧНО:%s основная PVE Configuration выполнена, но один или несколько рабочих компонентов ещё не готовы.\n' "$C_BOLD" "$C_MAGENTA" "$C_RESET"
         write_state "partial" "$REPO_REVISION"
     fi
-}
-\033[31m'
+}\033[31m'
     C_CYAN=
 check_file_contract() {
     local path=$1 owner_group=$2 mode=$3 label=$4 actual_owner actual_mode
@@ -3323,8 +3318,7 @@ report_status() {
         printf '\n%s%sЧАСТИЧНО:%s основная PVE Configuration выполнена, но один или несколько рабочих компонентов ещё не готовы.\n' "$C_BOLD" "$C_MAGENTA" "$C_RESET"
         write_state "partial" "$REPO_REVISION"
     fi
-}
-\033[36m'
+}\033[36m'
 else
     C_RESET=""
     C_BOLD=""
@@ -3334,19 +3328,9 @@ else
     C_CYAN=""
 fi
 
-check_ok() {
-    printf '%s%s[ОК]%s %s\n' "$C_BOLD" "$C_GREEN" "$C_RESET" "$1"
-}
-
-check_warn() {
-    WARNINGS=$((WARNINGS + 1))
-    printf '%s%s[ПРЕДУПРЕЖДЕНИЕ]%s %s\n' "$C_BOLD" "$C_YELLOW" "$C_RESET" "$1"
-}
-
-check_error() {
-    ERRORS=$((ERRORS + 1))
-    printf '%s%s[ОШИБКА]%s %s\n' "$C_BOLD" "$C_RED" "$C_RESET" "$1"
-}
+check_ok() { printf '%s%s[ОК]%s %s\n' "$C_BOLD" "$C_GREEN" "$C_RESET" "$1"; }
+check_warn() { WARNINGS=$((WARNINGS + 1)); printf '%s%s[ПРЕДУПРЕЖДЕНИЕ]%s %s\n' "$C_BOLD" "$C_YELLOW" "$C_RESET" "$1"; }
+check_error() { ERRORS=$((ERRORS + 1)); printf '%s%s[ОШИБКА]%s %s\n' "$C_BOLD" "$C_RED" "$C_RESET" "$1"; }
 
 check_file_contract() {
     local path=$1 owner_group=$2 mode=$3 label=$4 actual_owner actual_mode
