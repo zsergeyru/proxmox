@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-PVE_CONFIGURATION_VERSION="1.0.1"
+PVE_CONFIGURATION_VERSION="1.0.2"
 
 PRIVATE_REPO="git@github.com:zsergeyru/proxmox.git"
 PRIVATE_BRANCH="main"
@@ -25,8 +25,8 @@ SECRETS_BACKUP_ROOT="/var/backups/proxmox-secrets"
 KEY_FILE="${SSH_DIR}/github_proxmox_repo_ed25519"
 SSH_CONFIG="${SSH_DIR}/config"
 KNOWN_HOSTS="${SSH_DIR}/known_hosts"
-PVE_GUEST_KEY="${SSH_DIR}/pve_guest_ed25519"
-PVE_GUEST_PUB="${PVE_GUEST_KEY}.pub"
+PVE_DEPLOYER_KEY="${SSH_DIR}/pve_deployer_ed25519"
+PVE_DEPLOYER_PUB="${PVE_DEPLOYER_KEY}.pub"
 PVE_CA_SOURCE="/etc/pve/pve-root-ca.pem"
 PVE_CA_FILE="${CONFIG_DIR}/pve-root-ca.pem"
 
@@ -338,7 +338,7 @@ write_state() {
   "private_repo_checkout_exists": $( [[ -d "$REPO_DIR/.git" ]] && echo true || echo false ),
   "host_deploy_secret_exists": $( [[ -f "$HOST_TOKEN_FILE" ]] && echo true || echo false ),
   "ai_infra_secret_exists": $( [[ -f "$AI_TOKEN_FILE" ]] && echo true || echo false ),
-  "pve_guest_key_exists": $( [[ -f "$PVE_GUEST_KEY" ]] && echo true || echo false ),
+  "pve_deployer_key_exists": $( [[ -f "$PVE_DEPLOYER_KEY" ]] && echo true || echo false ),
   "template_vmid": ${TEMPLATE_VMID},
   "template_version": ${TEMPLATE_VERSION},
   "warnings": ${WARN_COUNT}
