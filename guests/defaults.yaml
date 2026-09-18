@@ -1,4 +1,4 @@
-schema_version: 4
+schema_version: 10
 
 defaults:
   node: pve
