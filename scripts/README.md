@@ -32,11 +32,11 @@ scripts/
 
 - правила merge `defaults + profile + guest`;
 - VMID-адресация;
-- разрешение Guest Bootstrap v1;
-- канонический порядок capabilities;
-- зависимости capabilities.
+- нормализация списков `management` и `bootstrap`;
+- VMID-адресация;
+- проверка высокоуровневых profile features.
 
-Основная спецификация данных: [`../docs/30-guest-manifest.md`](../docs/30-guest-manifest.md).
+Основная спецификация данных: [`../docs/300-guests/310-guest-state.md`](../docs/300-guests/310-guest-state.md).
 
 ## `validate_repo.py`
 
@@ -60,7 +60,7 @@ scripts/tests/test-sync-management-keys.py
 scripts/tests/test-deploy-guest.py
 ```
 
-Первый фиксирует контракт Guest Bootstrap v1: явный набор capabilities, порядок, зависимости и требование `start_after_deploy=true`. Второй проверяет безопасную работу management-key registry, managed block `authorized_keys` и guest public catalog. Третий проверяет PLAN/safety helpers, ownership/tags, disk rules и CLI `deploy-guest` без подключения к живому PVE.
+Первый проверяет новый guest resolver и Bootstrap-список, включая правило `docker` для LXC только при profile feature `container-host`. Второй проверяет безопасную работу management-key registry, managed block `authorized_keys` и guest public catalog. Третий относится к старому `deploy-guest` и будет пересмотрен вместе с его полной переработкой.
 
 ## `pve/sync-management-keys.py`
 
@@ -148,7 +148,7 @@ scripts/pve/setup/tests/
 Связанные документы:
 
 - [`../docs/26-deploy-guest-and-agent-access.md`](../docs/26-deploy-guest-and-agent-access.md) — запуск и разделение учётных записей;
-- [`../docs/30-guest-manifest.md`](../docs/30-guest-manifest.md) — source/effective state и `bootstrap.capabilities`;
+- [`../docs/300-guests/310-guest-state.md`](../docs/300-guests/310-guest-state.md) — source/effective state, Management, Bootstrap и профили;
 - [`../docs/33-guest-bootstrap-and-provisioning.md`](../docs/33-guest-bootstrap-and-provisioning.md) — точный контракт Guest Bootstrap и граница с Ansible.
 
 ## Правила для кода
