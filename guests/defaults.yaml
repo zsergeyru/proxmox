@@ -1,10 +1,9 @@
-schema_version: 3
+schema_version: 4
 
 defaults:
   node: pve
-  protection: false
-  placement:
-    pool: managed
+  protection: true
+  pve_management: true
   resources:
     disk_storage: local-lvm
   network:

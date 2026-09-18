@@ -1,4 +1,4 @@
-schema_version: 9
+schema_version: 10
 vmid: 311
 name: dev-services
 profile: debian-lxc-docker

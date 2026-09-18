@@ -5,7 +5,7 @@ additionalProperties: false
 required: [schema_version, vmid, name, description]
 properties:
   schema_version:
-    const: 9
+    const: 10
   vmid:
     type: integer
     minimum: 100
@@ -24,8 +24,8 @@ properties:
     minLength: 1
   protection:
     type: boolean
-  placement:
-    $ref: '#/$defs/placement'
+  pve_management:
+    type: boolean
   resources:
     $ref: '#/$defs/resources'
   network:
@@ -37,13 +37,6 @@ properties:
   bootstrap:
     $ref: '#/$defs/bootstrap'
 $defs:
-  placement:
-    type: object
-    additionalProperties: false
-    properties:
-      pool:
-        type: [string, 'null']
-        minLength: 1
   resources:
     type: object
     additionalProperties: false

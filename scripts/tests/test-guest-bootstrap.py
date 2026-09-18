@@ -41,6 +41,15 @@ def main() -> None:
     assert resolved.effective["features"] == ["container-host"]
     assert resolved.effective["resources"]["cores"] == 2
     assert resolved.effective["network"]["ipv4"] == "192.168.3.11/16"
+    assert resolved.effective["protection"] is True
+    assert resolved.effective["pve_management"] is True
+
+    local_pve_override = copy.deepcopy(source_109)
+    local_pve_override["protection"] = False
+    local_pve_override["pve_management"] = False
+    resolved_override = resolve_effective_guest(local_pve_override, defaults)
+    assert resolved_override.effective["protection"] is False
+    assert resolved_override.effective["pve_management"] is False
 
     no_bootstrap = copy.deepcopy(source_311)
     no_bootstrap.pop("bootstrap")

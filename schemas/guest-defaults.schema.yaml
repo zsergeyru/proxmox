@@ -5,7 +5,7 @@ additionalProperties: false
 required: [schema_version, defaults, profiles]
 properties:
   schema_version:
-    const: 3
+    const: 4
   defaults:
     $ref: '#/$defs/defaults'
   profiles:
@@ -19,21 +19,15 @@ $defs:
   defaults:
     type: object
     additionalProperties: false
-    required: [node, protection, placement, resources, network, boot]
+    required: [node, protection, pve_management, resources, network, boot]
     properties:
       node:
         type: string
         minLength: 1
       protection:
         type: boolean
-      placement:
-        type: object
-        additionalProperties: false
-        required: [pool]
-        properties:
-          pool:
-            type: [string, 'null']
-            minLength: 1
+      pve_management:
+        type: boolean
       resources:
         type: object
         additionalProperties: false

@@ -11,7 +11,7 @@ required:
   - node
   - description
   - protection
-  - placement
+  - pve_management
   - resources
   - network
   - boot
@@ -19,7 +19,7 @@ required:
   - bootstrap
 properties:
   schema_version:
-    const: 9
+    const: 10
   vmid:
     type: integer
     minimum: 100
@@ -40,14 +40,8 @@ properties:
     minLength: 1
   protection:
     type: boolean
-  placement:
-    type: object
-    additionalProperties: false
-    required: [pool]
-    properties:
-      pool:
-        type: [string, 'null']
-        minLength: 1
+  pve_management:
+    type: boolean
   resources:
     type: object
     additionalProperties: false

@@ -63,10 +63,10 @@ PRIVATE_KEY_MARKERS = (
     "-----BEGIN RSA PRIVATE KEY-----",
     "-----BEGIN EC PRIVATE KEY-----",
 )
-SELF_MANAGED = {100, 301, 320, 9000}
 OVERRIDE_PATHS = {
     ("node",),
-    ("placement", "pool"),
+    ("protection",),
+    ("pve_management",),
     ("resources", "disk_storage"),
 }
 errors: list[str] = []
@@ -300,16 +300,8 @@ def check_profiles(defaults: dict) -> None:
             )
 
 
-def check_managed_guest(rel: Path, source: dict, effective: dict) -> None:
+def check_profiled_guest(rel: Path, source: dict, effective: dict) -> None:
     vmid, kind = effective["vmid"], effective["type"]
-    pool = effective["placement"]["pool"]
-    if vmid in SELF_MANAGED:
-        if pool is not None:
-            fail(f"{rel}: VMID {vmid} не должен находиться в обычном managed pool")
-    elif pool != "managed":
-        fail(f"{rel}: обычный гость с profile должен использовать pool 'managed'")
-    if effective.get("protection") is True and pool == "managed":
-        warn(f"{rel}: protection=true у гостя в pool 'managed'")
 
     if kind == "vm":
         if effective["template_vmid"] == vmid:
@@ -417,7 +409,7 @@ def validate() -> None:
             ):
                 continue
             check_effective_network(rel, data, effective, cfg, used_ips)
-            check_managed_guest(rel, data, effective)
+            check_profiled_guest(rel, data, effective)
             check_description(rel, data)
         else:
             check_resources(rel, data)
