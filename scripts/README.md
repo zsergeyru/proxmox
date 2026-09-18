@@ -141,7 +141,7 @@ scripts/pve/setup/tests/
 
 ## `pve/deploy-guest.py`
 
-Рабочий PLAN/APPLY runtime одной deployable VM/LXC. По умолчанию команда строит read-only PLAN, а изменения разрешаются только с `--apply`. Основной источник требований:
+Рабочий PLAN/APPLY runtime одной управляемой VM/LXC с `profile`. По умолчанию команда строит read-only PLAN, а изменения разрешаются только с `--apply`. Основной источник требований:
 
 - [`../docs/31-deploy-guest.md`](../docs/31-deploy-guest.md) — полный PLAN/APPLY, Proxmox API, VM/LXC, SSH trust, Guest Bootstrap v1, ошибки и финальная проверка.
 
