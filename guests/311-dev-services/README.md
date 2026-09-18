@@ -5,30 +5,26 @@
 
 Основной контракт management SSH keys находится в [`../../docs/28-management-ssh-keys.md`](../../docs/28-management-ssh-keys.md), Guest Bootstrap — в [`../../docs/33-guest-bootstrap-and-provisioning.md`](../../docs/33-guest-bootstrap-and-provisioning.md), текущая степень реализации — в [`../../docs/29-implementation-status.md`](../../docs/29-implementation-status.md).
 
-## Действующий desired state schema v7
+## Действующий desired state schema v9
 
 `311-dev-services` — первый целевой сценарий полного Guest Bootstrap v1. Его рабочий `guest.yaml` уже явно содержит:
 
 ```yaml
 management:
-  ssh_identity: true
-  project_repo_read: true
+  - ssh_identity
+  - project_repo_read
 
 bootstrap:
-  capabilities:
-    base: true
-    git: true
-    docker: true
-    ansible_controller: true
+  - git
+  - docker
+  - ansible
 ```
 
-Базовый `management.ssh.user/port` приходит из defaults.
+`ssh_identity` означает: после verified SSH deployer обеспечивает стандартную management SSH pair **внутри 311**, private оставляет там и регистрирует на PVE только `311.pub`.
 
-`management.ssh_identity` означает: после verified SSH deployer обеспечивает стандартную management SSH pair **внутри 311**, private оставляет там и регистрирует на PVE только `311.pub`.
+`project_repo_read` независимо задаёт фиксированный read-only доступ к `zsergeyru/proxmox`.
 
-`management.project_repo_read` независимо задаёт фиксированный read-only доступ к `zsergeyru/proxmox`.
-
-Schema v7/resolver уже поддерживают оба поля; наличие runtime handlers отдельно отражается в `29-implementation-status.md`.
+Schema v9/resolver используют новый список Management и Bootstrap; состояние runtime handlers отдельно отражается в `29-implementation-status.md`.
 
 Целевой deploy flow:
 
@@ -41,7 +37,7 @@ create LXC 311 with management-authorized-keys
 → register 311.pub
 → sync-management-keys
 → Project Git READ desired state
-→ base → git → docker → ansible_controller
+→ git → docker → ansible
 → final acceptance
 ```
 
@@ -53,7 +49,7 @@ create LXC 311 with management-authorized-keys
 
 ```yaml
 management:
-  ssh_identity: true
+  - ssh_identity
 ```
 
 используется стандарт проекта:
@@ -93,7 +89,7 @@ Manifest:
 
 ```yaml
 management:
-  project_repo_read: true
+  - project_repo_read
 ```
 
 Используется общий read-only Project Git credential:
@@ -146,7 +142,7 @@ management-ssh
 
 Ansible и Semaphore относятся сюда, а не в `301-ai-control`.
 
-Целевой вариант — Ansible/Semaphore в Docker внутри `311-dev-services`. На target guests отдельный Ansible agent не устанавливается; Ansible подключается по SSH management identity 311.
+Ansible устанавливается напрямую в ОС LXC `311-dev-services` через Bootstrap `ansible` и не зависит от Docker. Semaphore и другие прикладные DevOps-сервисы могут разворачиваться отдельно, в том числе в Docker. На target guests отдельный Ansible agent не устанавливается; Ansible подключается по SSH management identity 311.
 
 ## Взаимодействие с AI Control
 

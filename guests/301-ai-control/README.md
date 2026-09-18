@@ -41,13 +41,13 @@
    → PVE tag management-ssh
    → verified SSH root deployer
 
-2. management.ssh_identity=true
+2. management: ssh_identity
    → создать/проверить стандартную pair внутри 301
    → private оставить только в 301
    → зарегистрировать 301.pub на PVE
    → sync-management-keys
 
-3. management.project_repo_read=true
+3. management: project_repo_read
    → обеспечить фиксированный Project Git READ desired state
 
 4. общая AI-платформа
@@ -59,19 +59,17 @@
 
 ## Действующий desired state
 
-Schema v7 уже поддерживает management-поля, и рабочий `guest.yaml` 301 явно содержит:
+Schema v9 использует список management-возможностей, и рабочий `guest.yaml` 301 явно содержит:
 
 ```yaml
 management:
-  ssh_identity: true
-  project_repo_read: true
+  - ssh_identity
+  - project_repo_read
 ```
 
-Базовый `management.ssh.user/port` получается из общих defaults.
+`ssh_identity` означает только собственную исходящую administrative SSH identity 301; элемент не содержит key path/name или роль `ai-control`.
 
-`management.ssh_identity` означает только собственную administrative SSH identity 301; поле не содержит key path/name или роль `ai-control`.
-
-`management.project_repo_read` означает только фиксированный read-only доступ к `zsergeyru/proxmox`.
+`project_repo_read` означает только фиксированный read-only доступ к `zsergeyru/proxmox`.
 
 Наличие этих полей в schema/manifest не означает, что соответствующие runtime handlers уже написаны; это отдельно показывает [`../../docs/29-implementation-status.md`](../../docs/29-implementation-status.md).
 
@@ -131,7 +129,7 @@ AI agent
 
 ```yaml
 management:
-  ssh_identity: true
+  - ssh_identity
 ```
 
 Регистрацию такой pair выполняет PVE-side deploy-контур.
@@ -144,7 +142,7 @@ Manifest:
 
 ```yaml
 management:
-  project_repo_read: true
+  - project_repo_read
 ```
 
 Управляемые guest-local artifacts:
