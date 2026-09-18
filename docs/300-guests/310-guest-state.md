@@ -566,7 +566,7 @@ bootstrap:
 | `vm.source.template_vmid` | integer, `100–9999` | VM-профиль | для deployable VM | VMID исходного шаблона |
 | `vm.source.clone` | enum, сейчас только `full` | VM-профиль | для deployable VM | способ клонирования |
 | `vm.guest_agent` | boolean | VM-профиль | для deployable VM | использование QEMU Guest Agent |
-| `vm.bios` | enum: `ovmf`, `seabios` | defaults/profile/guest по schema; для deployable обычно профиль | необязательно | тип BIOS VM |
+| `vm.bios` | enum: `ovmf`, `seabios` | для deployable VM — defaults/profile | необязательно | тип BIOS VM |
 
 Действующий базовый профиль:
 
@@ -613,8 +613,8 @@ resources:
 | `lxc.source.ostemplate` | string | LXC-профиль | для deployable LXC | селектор семейства Proxmox LXC template |
 | `lxc.unprivileged` | boolean | LXC-профиль | для deployable LXC | непривилегированный контейнер |
 | `lxc.container_runtime` | enum, сейчас только `docker` | LXC-профиль | если профиль предназначен для Docker | контейнерная среда внутри LXC |
-| `lxc.features.nesting` | boolean | LXC-профиль | для действующего Docker-профиля | разрешение nesting |
-| `lxc.features.keyctl` | boolean | LXC-профиль | для действующего Docker-профиля | разрешение keyctl |
+| `lxc.features.nesting` | boolean | LXC-профиль | для deployable LXC-профиля | разрешение nesting |
+| `lxc.features.keyctl` | boolean | LXC-профиль | для deployable LXC-профиля | разрешение keyctl |
 
 Действующий Docker-LXC профиль:
 
