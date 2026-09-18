@@ -73,6 +73,7 @@ verify_source_checkout_before_source() {
         || pre_source_die "Исполняемый checkout находится на ${actual}, а текущий run зафиксирован на ${expected}"
 
     status="$(git -C "$SOURCE_ROOT" status --porcelain=v1 --untracked-files=all --ignored)"
+    status="$(printf '%s\n' "$status" | grep -Ev '^!! .*(__pycache__/|\.py[co]$)' || true)"
     [[ -z "$status" ]] \
         || pre_source_die "Исполняемый Git checkout содержит tracked/staged/untracked/ignored drift; run остановлен, чтобы SHA соответствовал реально исполняемому коду. Первый элемент: $(head -n1 <<<"$status")"
 
