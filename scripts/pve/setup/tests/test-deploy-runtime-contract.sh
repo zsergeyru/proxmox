@@ -56,8 +56,8 @@ grep -Fq '    ensure_management_public_key_registry' "$CONFIGURE" \
     || fail "PVE Configuration must prepare the management key registry after deployer identity"
 grep -Fq 'PUBLIC_KEYS_DIR="${RUNTIME_DIR}/public-keys"' "$KEYS" \
     || fail "canonical public-key registry path is missing"
-grep -Fq 'DEPLOYER_REGISTRY_KEY="${PUBLIC_KEYS_DIR}/deployer.pub"' "$KEYS" \
-    || fail "deployer.pub registry contract is missing"
+grep -Fq 'PVE_DEPLOYER_REGISTRY_KEY="${PUBLIC_KEYS_DIR}/pve_deployer_ed25519.pub"' "$KEYS" \
+    || fail "PVE deployer registry key contract is missing"
 grep -Fq 'MANAGEMENT_KEYS_AGGREGATE="${PUBLIC_KEYS_DIR}/management-authorized-keys"' "$KEYS" \
     || fail "management-authorized-keys aggregate contract is missing"
 grep -Fq 'install -d -o "$DEPLOY_USER" -g "$DEPLOY_USER" -m 0750 "$PUBLIC_KEYS_DIR"' "$KEYS" \
