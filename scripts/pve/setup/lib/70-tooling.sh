@@ -207,17 +207,17 @@ run_check() {
     check_file_contract "$SSH_DIR/github_proxmox_repo_ed25519.pub" root:root 644 "открытая часть ключа GitHub"
     check_file_contract "$SSH_DIR/config" root:root 600 "конфигурация SSH GitHub"
     check_file_contract "$SSH_DIR/known_hosts" root:root 644 "доверие SSH GitHub"
-    check_file_contract "$SSH_DIR/pve_guest_ed25519" pvedeploy:pvedeploy 600 "закрытый ключ управления гостями"
-    check_file_contract "$SSH_DIR/pve_guest_ed25519.pub" pvedeploy:pvedeploy 644 "открытый ключ управления гостями"
+    check_file_contract "$SSH_DIR/pve_deployer_ed25519" pvedeploy:pvedeploy 600 "закрытый ключ управления гостями"
+    check_file_contract "$SSH_DIR/pve_deployer_ed25519.pub" pvedeploy:pvedeploy 644 "открытый ключ управления гостями"
     check_file_contract "$SECRETS_DIR/host-deploy.token" root:pvedeploy 640 "секрет host-deploy"
     check_file_contract "$SECRETS_DIR/ai-agent-infra.token" root:root 600 "секрет ai-agent"
-    check_file_contract "$PUBLIC_KEYS_DIR/deployer.pub" pvedeploy:pvedeploy 644 "deployer.pub"
+    check_file_contract "$PUBLIC_KEYS_DIR/pve_deployer_ed25519.pub" pvedeploy:pvedeploy 644 "pve_deployer_ed25519.pub"
     check_file_contract "$PUBLIC_KEYS_DIR/management-authorized-keys" pvedeploy:pvedeploy 644 "management-authorized-keys"
 
-    if [[ -f "$SSH_DIR/pve_guest_ed25519.pub" && -f "$PUBLIC_KEYS_DIR/deployer.pub" ]]; then
-        guest_fp="$(ssh-keygen -lf "$SSH_DIR/pve_guest_ed25519.pub" -E sha256 2>/dev/null | awk 'NR==1 {print $2}')"
-        reg_fp="$(ssh-keygen -lf "$PUBLIC_KEYS_DIR/deployer.pub" -E sha256 2>/dev/null | awk 'NR==1 {print $2}')"
-        [[ -n "$guest_fp" && "$guest_fp" == "$reg_fp" ]] && check_ok "deployer.pub соответствует PVE guest SSH identity" || check_error "deployer.pub не соответствует PVE guest SSH identity"
+    if [[ -f "$SSH_DIR/pve_deployer_ed25519.pub" && -f "$PUBLIC_KEYS_DIR/pve_deployer_ed25519.pub" ]]; then
+        guest_fp="$(ssh-keygen -lf "$SSH_DIR/pve_deployer_ed25519.pub" -E sha256 2>/dev/null | awk 'NR==1 {print $2}')"
+        reg_fp="$(ssh-keygen -lf "$PUBLIC_KEYS_DIR/pve_deployer_ed25519.pub" -E sha256 2>/dev/null | awk 'NR==1 {print $2}')"
+        [[ -n "$guest_fp" && "$guest_fp" == "$reg_fp" ]] && check_ok "pve_deployer_ed25519.pub соответствует PVE deployer SSH identity" || check_error "pve_deployer_ed25519.pub не соответствует PVE deployer SSH identity"
     fi
 
     if [[ -f "$CONFIG" ]]         && grep -Fxq 'repo: zsergeyru/proxmox' "$CONFIG"         && grep -Fxq 'branch: main' "$CONFIG"         && grep -Fxq 'checkout: /var/lib/proxmox-deployer/repo' "$CONFIG"         && grep -Fxq 'managed_pool: managed' "$CONFIG"         && grep -Fxq 'host_deploy_identity: deployer@pve!host-deploy' "$CONFIG"         && grep -Fxq 'ai_infra_identity: ai-agent@pve!infra' "$CONFIG"         && grep -Fxq 'template_vmid: 9000' "$CONFIG"; then
@@ -555,7 +555,7 @@ report_status() {
     ok "local/local-lvm готовы для images/rootdir/vztmpl/snippets"
     ok "Debian 13 LXC template подготовлен: ${LXC_TEMPLATE_VOLUME:-не определён}"
     ok "pvedeploy, config.yaml и файловая структура проверены"
-    ok "PVE guest SSH identity создана/проверена"
+    ok "PVE deployer SSH identity создана/проверена"
     ok "Management public-key registry создан и проверен"
     ok "Канонический read-only Deploy Key установлен"
     ok "Приватный репозиторий синхронизирован и origin проверен"
