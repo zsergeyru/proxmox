@@ -168,9 +168,9 @@ def resolve_individual_management(
         raise GuestConfigError("management должен быть mapping/object")
 
     present = [name for name in INDIVIDUAL_MANAGEMENT_FIELDS if name in source_management]
-    if present and source.get("deployable") is not True:
+    if present and not source.get("profile"):
         raise GuestConfigError(
-            "management.ssh_identity/project_repo_read разрешены только deployable-гостю"
+            "management.ssh_identity/project_repo_read разрешены только гостю с profile"
         )
 
     effective_management = effective.get("management")
@@ -251,7 +251,7 @@ def resolve_effective_guest(
     defaults: dict,
     network: NetworkConfig | None = None,
 ) -> ResolvedGuest:
-    """Собрать deterministic effective desired state deployable-гостя."""
+    """Собрать deterministic effective desired state гостя с profile."""
     profile_name = source.get("profile")
     profile = defaults.get("profiles", {}).get(profile_name)
     if not isinstance(profile, dict):

@@ -188,7 +188,7 @@ def check_address(
 
 
 def check_source_overrides(rel: Path, source: dict, defaults: dict) -> None:
-    if not source.get("deployable"):
+    if not source.get("profile"):
         return
     profile = defaults.get("profiles", {}).get(source.get("profile"))
     if not isinstance(profile, dict):
@@ -261,25 +261,16 @@ def check_resources(rel: Path, data: dict) -> None:
         )
 
 
-def check_state(rel: Path, source: dict, effective: dict) -> None:
-    state, deployable = source.get("state"), source.get("deployable")
-    if deployable and state in {"bootstrap", "legacy"}:
-        warn(f"{rel}: state={state!r} используется вместе с deployable: true")
-    if deployable:
-        text = str(source.get("description", "")).lower()
-        marker = next((item for item in UNRESOLVED if item in text), None)
-        if marker:
-            warn(
-                f"{rel}: deployable-гость содержит в description "
-                f"маркер незавершённости {marker!r}"
-            )
-    boot = effective.get("boot", {})
-    if state == "active" and boot.get("onboot") is False:
-        warn(f"{rel}: активный объект имеет boot.onboot=false")
-    pool = effective.get("placement", {}).get("pool")
-    if deployable and effective.get("protection") is True and pool == "managed":
-        warn(f"{rel}: protection=true у гостя в pool 'managed'")
-
+def check_description(rel: Path, source: dict) -> None:
+    if not source.get("profile"):
+        return
+    text = str(source.get("description", "")).lower()
+    marker = next((item for item in UNRESOLVED if item in text), None)
+    if marker:
+        warn(
+            f"{rel}: гость с profile содержит в description "
+            f"маркер незавершённости {marker!r}"
+        )
 
 def valid_lxc_selector(value: object) -> bool:
     if not isinstance(value, str):
@@ -325,10 +316,10 @@ def check_profiles(defaults: dict) -> None:
                     )
 
 
-def check_deployable(rel: Path, source: dict, effective: dict) -> None:
-    for key in ("type", "vm", "lxc"):
+def check_managed_guest(rel: Path, source: dict, effective: dict) -> None:
+    for key in ("vm", "lxc"):
         if key in source:
-            fail(f"{rel}: deployable-гость должен получать {key!r} из profile")
+            fail(f"{rel}: гость с profile должен получать {key!r} из profile")
 
     vmid, kind = effective["vmid"], effective["type"]
     pool = effective["placement"]["pool"]
@@ -336,7 +327,9 @@ def check_deployable(rel: Path, source: dict, effective: dict) -> None:
         if pool is not None:
             fail(f"{rel}: VMID {vmid} не должен находиться в обычном managed pool")
     elif pool != "managed":
-        fail(f"{rel}: обычный deployable-гость должен использовать pool 'managed'")
+        fail(f"{rel}: обычный гость с profile должен использовать pool 'managed'")
+    if effective.get("protection") is True and pool == "managed":
+        warn(f"{rel}: protection=true у гостя в pool 'managed'")
 
     ssh = effective["management"]["ssh"]
     if ssh != {"user": "root", "port": 22}:
@@ -347,7 +340,7 @@ def check_deployable(rel: Path, source: dict, effective: dict) -> None:
         if vm_source["template_vmid"] == vmid:
             fail(f"{rel}: VM не может клонироваться сама из себя")
         if effective["vm"]["guest_agent"] is not True:
-            fail(f"{rel}: deployable VM должна включать QEMU guest agent")
+            fail(f"{rel}: управляемая VM должна включать QEMU guest agent")
     elif kind == "lxc":
         selector = effective["lxc"]["source"]["ostemplate"]
         if not valid_lxc_selector(selector):
@@ -424,7 +417,7 @@ def validate() -> None:
             seen[vmid] = rel
         check_secrets(rel, data)
 
-        if data["deployable"]:
+        if data.get("profile"):
             if data.get("profile") in profiles:
                 used_profiles.add(data["profile"])
             check_source_overrides(rel, data, defaults)
@@ -444,8 +437,8 @@ def validate() -> None:
                 continue
             check_resources(rel, effective)
             check_effective_network(rel, data, effective, cfg, used_ips)
-            check_deployable(rel, data, effective)
-            check_state(rel, data, effective)
+            check_managed_guest(rel, data, effective)
+            check_description(rel, data)
         else:
             check_resources(rel, data)
             override = get_nested(data, ("network", "ipv4", "address"))
@@ -456,12 +449,12 @@ def validate() -> None:
                     fail(f"{rel}: {exc}")
                 else:
                     check_address(rel, vmid, address, cfg, used_ips)
-            check_state(rel, data, data)
+            check_description(rel, data)
 
     for profile in sorted(set(profiles) - used_profiles):
         warn(
             f"{rel_defaults}: профиль {profile!r} не используется "
-            "ни одним deployable-гостем"
+            "ни одним гостем с profile"
         )
 
 

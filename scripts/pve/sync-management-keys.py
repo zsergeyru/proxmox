@@ -394,8 +394,8 @@ def participant_from_resource(
         return Participant(vmid, name, kind, node, status, address, "root", 22, None)
 
     source = read_yaml(manifest)
-    if source.get("deployable") is not True:
-        fail(f"VMID {vmid}: tagged object имеет manifest, но deployable != true")
+    if not source.get("profile"):
+        fail(f"VMID {vmid}: tagged object имеет manifest без profile")
     try:
         resolved = resolve_effective_guest(source, defaults, network)
     except GuestConfigError as exc:

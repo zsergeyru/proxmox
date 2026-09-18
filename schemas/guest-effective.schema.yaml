@@ -8,13 +8,11 @@ required:
   - name
   - profile
   - type
-  - state
-  - deployable
   - node
   - description
 properties:
   schema_version:
-    const: 7
+    const: 8
   vmid:
     type: integer
     minimum: 100
@@ -27,10 +25,6 @@ properties:
     pattern: '^[a-z0-9][a-z0-9-]*$'
   type:
     enum: [vm, lxc]
-  state:
-    enum: [planned, active, bootstrap, legacy]
-  deployable:
-    const: true
   node:
     type: string
     minLength: 1

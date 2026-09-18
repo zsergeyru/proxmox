@@ -2,10 +2,10 @@ $schema: https://json-schema.org/draft/2020-12/schema
 $title: Proxmox guest source manifest
 type: object
 additionalProperties: false
-required: [schema_version, vmid, name, state, deployable, description]
+required: [schema_version, vmid, name, description]
 properties:
   schema_version:
-    const: 7
+    const: 8
   vmid:
     type: integer
     minimum: 100
@@ -16,12 +16,6 @@ properties:
   profile:
     type: string
     pattern: '^[a-z0-9][a-z0-9-]*$'
-  type:
-    enum: [vm, lxc, undecided]
-  state:
-    enum: [planned, active, bootstrap, legacy]
-  deployable:
-    type: boolean
   node:
     type: string
     minLength: 1
@@ -190,12 +184,9 @@ $defs:
             type: boolean
 allOf:
   - if:
-      required: [deployable]
-      properties:
-        deployable:
-          const: true
+      required: [profile]
     then:
-      required: [profile, resources]
+      required: [resources]
       properties:
         resources:
           required: [cpu, memory_mb, disk]
@@ -204,28 +195,14 @@ allOf:
               required: [cores]
             disk:
               required: [size_gb]
-  - if:
-      required: [deployable]
-      properties:
-        deployable:
-          const: false
-    then:
-      required: [type]
-  - if:
-      required: [type]
-      properties:
-        type:
-          const: undecided
-    then:
-      properties:
-        deployable:
-          const: false
+      not:
+        anyOf:
+          - required: [vm]
+          - required: [lxc]
   - if:
       required: [bootstrap]
     then:
-      properties:
-        deployable:
-          const: true
+      required: [profile]
   - if:
       required: [management]
       properties:
@@ -234,6 +211,4 @@ allOf:
             - required: [ssh_identity]
             - required: [project_repo_read]
     then:
-      properties:
-        deployable:
-          const: true
+      required: [profile]
