@@ -46,98 +46,62 @@
 
 ## 2. Общая структура PVE-хоста
 
-Основной локальный контур проекта имеет следующую структуру:
+Основной локальный контур проекта расположен в нескольких каталогах, каждый из которых имеет отдельное назначение.
 
 ```text
-/etc/proxmox-deployer/
-├── config.yaml
-├── pve-root-ca.pem
-├── ssh/
-│   ├── github_proxmox_repo_ed25519
-│   ├── github_proxmox_repo_ed25519.pub
-│   ├── pve_guest_ed25519
-│   ├── pve_guest_ed25519.pub
-│   ├── config
-│   └── known_hosts
-└── secrets/
-    ├── host-deploy.token
-    └── ai-agent-infra.token
+/var/lib/proxmox-deployer/                  — основная рабочая область проекта на PVE-хосте
+├── repo/                                  — каноническая локальная копия Git-репозитория проекта
+├── state/                                 — сохранённое машинное состояние PVE Configuration
+│   ├── state.json                         — итоговое состояние последнего запуска PVE Configuration
+│   ├── version                            — версия установленной PVE Configuration
+│   ├── last-run.json                      — сведения о последнем запуске
+│   ├── last-revision                      — принятая Git-ревизия проекта
+│   └── template-smoke.json                — состояние проверки полного клона шаблона
+├── public-keys/                           — реестр открытых управляющих SSH-ключей
+│   ├── deployer.pub                       — основной открытый ключ управления гостями
+│   ├── <VMID>.pub                         — открытый ключ конкретной VM/LXC
+│   └── management-authorized-keys         — общий набор разрешённых управляющих ключей
+└── cache/                                 — изменяемые служебные кэшированные данные
 
-/var/lib/proxmox-deployer/
-├── repo/
-├── state/
-│   ├── state.json
-│   ├── version
-│   ├── last-run.json
-│   ├── last-revision
-│   └── template-smoke.json
-├── cache/
-└── public-keys/
-    ├── deployer.pub
-    ├── <VMID>.pub
-    └── management-authorized-keys
+/etc/proxmox-deployer/                     — постоянная локальная конфигурация и защищённые данные доступа
+├── config.yaml                            — настройки конкретного PVE-хоста
+├── pve-root-ca.pem                        — локальная копия публичного CA Proxmox
+├── ssh/                                   — SSH-ключи и параметры доверия
+│   ├── github_proxmox_repo_ed25519        — закрытый ключ чтения приватного GitHub-репозитория
+│   ├── github_proxmox_repo_ed25519.pub    — открытая часть ключа GitHub
+│   ├── pve_guest_ed25519                  — закрытый ключ управления гостевыми системами
+│   ├── pve_guest_ed25519.pub              — открытая часть ключа управления гостями
+│   ├── config                             — локальная SSH-конфигурация доступа к GitHub
+│   └── known_hosts                        — доверенные SSH host keys GitHub
+└── secrets/                               — локальные секреты API-токенов Proxmox
+    ├── host-deploy.token                  — секрет deployer@pve!host-deploy
+    └── ai-agent-infra.token               — секрет ai-agent@pve!infra
 
-/var/lib/pvedeploy/
-└── .ssh/
-    └── known_hosts
+/var/lib/pvedeploy/                        — домашний и рабочий каталог системного пользователя pvedeploy
+└── .ssh/                                  — SSH-данные pvedeploy для подключения к гостям
+    └── known_hosts                        — доверенные SSH host keys управляемых VM/LXC
 
-/var/log/proxmox-deployer/
-├── configure-pve.log
-└── audit/
+/usr/local/sbin/                           — установленные административные команды проекта
+├── pve-configuration-status              — просмотр и проверка состояния PVE-хоста
+├── deploy-guest                           — развертывание VM/LXC
+└── sync-management-keys                   — синхронизация управляющих SSH-ключей
 
-/var/backups/proxmox-configuration/
-/var/backups/proxmox-secrets/
+/var/log/proxmox-deployer/                 — журналы и аудит работы проекта
+├── configure-pve.log                      — журнал PVE Configuration
+└── audit/                                 — структурированные записи служебных операций
 
-/usr/local/sbin/
-├── pve-configuration-status
-├── deploy-guest
-└── sync-management-keys
+/var/backups/proxmox-configuration/        — локальные резервные копии конфигурации проекта
+/var/backups/proxmox-secrets/              — локальные резервные копии защищённых данных
 
-/run/lock/
-└── proxmox-orchestration.lock
+/run/lock/                                 — временные системные блокировки
+└── proxmox-orchestration.lock             — общая блокировка конкурирующих операций проекта
 ```
 
 Помимо файловой структуры проект управляет отдельными объектами Proxmox: пользователями, API-токенами, ролями, ACL, пулом `managed`, базовым шаблоном VMID `9000` и временной smoke-VM VMID `9099`.
 
 ## 3. Файлы и каталоги проекта
 
-### 3.1. `/etc/proxmox-deployer/`
-
-Каталог содержит постоянную локальную конфигурацию и защищённые данные доступа.
-
-| Путь | Назначение | Владелец и группа | Права |
-|---|---|---|---|
-| `/etc/proxmox-deployer/` | Корень локальной конфигурации проекта | `root:root` | `0755` |
-| `config.yaml` | Локальная конфигурация конкретного PVE-хоста | `root:root` | управляется PVE Configuration |
-| `pve-root-ca.pem` | Копия публичного CA Proxmox для ограниченного локального контура | `root:pvedeploy` | `0640` |
-| `ssh/` | SSH-идентичности и доверие | `root:pvedeploy` | `0750` |
-| `secrets/` | Секреты локальных API-токенов | `root:pvedeploy` | `0710` |
-
-`config.yaml` содержит локальный контракт хоста, включая репозиторий, ветку, путь к локальной копии, пул `managed`, PVE-идентичности и VMID базового шаблона.
-
-### 3.2. SSH-данные
-
-| Путь | Назначение | Владелец и группа | Права |
-|---|---|---|---|
-| `ssh/github_proxmox_repo_ed25519` | Закрытый read-only Deploy Key для GitHub | `root:root` | `0600` |
-| `ssh/github_proxmox_repo_ed25519.pub` | Открытая часть Deploy Key | `root:root` | `0644` |
-| `ssh/config` | SSH-конфигурация доступа к GitHub | `root:root` | `0600` |
-| `ssh/known_hosts` | Доверие к GitHub SSH host key | `root:root` | `0644` |
-| `ssh/pve_guest_ed25519` | Закрытый ключ управления гостевыми системами | `pvedeploy:pvedeploy` | `0600` |
-| `ssh/pve_guest_ed25519.pub` | Открытая часть ключа управления гостями | `pvedeploy:pvedeploy` | `0644` |
-
-GitHub и гостевые системы используют разные SSH-контуры и разные `known_hosts`.
-
-### 3.3. Секреты API
-
-| Путь | Связанная PVE-идентичность | Назначение | Владелец и группа | Права |
-|---|---|---|---|---|
-| `secrets/host-deploy.token` | `deployer@pve!host-deploy` | Прямое управление PVE и локальные средства развертывания | `root:pvedeploy` | `0640` |
-| `secrets/ai-agent-infra.token` | `ai-agent@pve!infra` | Доступ AI Control к разрешённой области Proxmox | `root:root` | `0600` |
-
-Файлы содержат локально сохранённые значения `token_id` и `token_secret`. Политика доступа и ротации определяется документацией раздела безопасности.
-
-### 3.4. `/var/lib/proxmox-deployer/`
+### 3.1. `/var/lib/proxmox-deployer/`
 
 Это основной каталог постоянного служебного состояния проекта.
 
@@ -151,7 +115,7 @@ GitHub и гостевые системы используют разные SSH-
 
 Каталог `repo/` является доверенной локальной копией Git и не предназначен для ручного редактирования. Локальный drift блокирует управляемые операции, кроме явно разрешённых служебных Python-кэшей.
 
-### 3.5. Состояние PVE Configuration
+### 3.2. Состояние PVE Configuration
 
 Основные файлы `/var/lib/proxmox-deployer/state/`:
 
@@ -165,7 +129,7 @@ GitHub и гостевые системы используют разные SSH-
 
 Сохранённое состояние является снимком результата предыдущего запуска. Для проверки текущего фактического состояния используется `pve-configuration-status --check`.
 
-### 3.6. Реестр управляющих SSH-ключей
+### 3.3. Реестр управляющих SSH-ключей
 
 Каталог `/var/lib/proxmox-deployer/public-keys/` содержит только открытые ключи.
 
@@ -176,6 +140,42 @@ GitHub и гостевые системы используют разные SSH-
 | `management-authorized-keys` | Детерминированно собранный общий набор разрешённых управляющих ключей |
 
 Закрытые ключи в этом каталоге храниться не должны.
+
+### 3.4. `/etc/proxmox-deployer/`
+
+Каталог содержит постоянную локальную конфигурацию и защищённые данные доступа.
+
+| Путь | Назначение | Владелец и группа | Права |
+|---|---|---|---|
+| `/etc/proxmox-deployer/` | Корень локальной конфигурации проекта | `root:root` | `0755` |
+| `config.yaml` | Локальная конфигурация конкретного PVE-хоста | `root:root` | управляется PVE Configuration |
+| `pve-root-ca.pem` | Копия публичного CA Proxmox для ограниченного локального контура | `root:pvedeploy` | `0640` |
+| `ssh/` | SSH-идентичности и доверие | `root:pvedeploy` | `0750` |
+| `secrets/` | Секреты локальных API-токенов | `root:pvedeploy` | `0710` |
+
+`config.yaml` содержит локальный контракт хоста, включая репозиторий, ветку, путь к локальной копии, пул `managed`, PVE-идентичности и VMID базового шаблона.
+
+### 3.5. SSH-данные
+
+| Путь | Назначение | Владелец и группа | Права |
+|---|---|---|---|
+| `ssh/github_proxmox_repo_ed25519` | Закрытый read-only Deploy Key для GitHub | `root:root` | `0600` |
+| `ssh/github_proxmox_repo_ed25519.pub` | Открытая часть Deploy Key | `root:root` | `0644` |
+| `ssh/config` | SSH-конфигурация доступа к GitHub | `root:root` | `0600` |
+| `ssh/known_hosts` | Доверие к GitHub SSH host key | `root:root` | `0644` |
+| `ssh/pve_guest_ed25519` | Закрытый ключ управления гостевыми системами | `pvedeploy:pvedeploy` | `0600` |
+| `ssh/pve_guest_ed25519.pub` | Открытая часть ключа управления гостями | `pvedeploy:pvedeploy` | `0644` |
+
+GitHub и гостевые системы используют разные SSH-контуры и разные `known_hosts`.
+
+### 3.6. Секреты API
+
+| Путь | Связанная PVE-идентичность | Назначение | Владелец и группа | Права |
+|---|---|---|---|---|
+| `secrets/host-deploy.token` | `deployer@pve!host-deploy` | Прямое управление PVE и локальные средства развертывания | `root:pvedeploy` | `0640` |
+| `secrets/ai-agent-infra.token` | `ai-agent@pve!infra` | Доступ AI Control к разрешённой области Proxmox | `root:root` | `0600` |
+
+Файлы содержат локально сохранённые значения `token_id` и `token_secret`. Политика доступа и ротации определяется документацией раздела безопасности.
 
 ### 3.7. `/var/lib/pvedeploy/`
 
