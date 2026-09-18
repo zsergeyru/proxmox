@@ -267,6 +267,7 @@ PVE-раздел фиксирует только требования к под�
 - [`210-host-bootstrap.md`](210-host-bootstrap.md) — первоначальная подготовка PVE-хоста.
 - [`220-host-configuration.md`](220-host-configuration.md) — постоянное требуемое состояние PVE-хоста.
 - [`230-host-layout.md`](230-host-layout.md) — расположение каталогов, файлов и локальных компонентов.
+- [`290-decisions.md`](290-decisions.md) — причины ключевых решений по устройству и управлению PVE-хостом.
 - [`../100-architecture/100-overview.md`](../100-architecture/100-overview.md) — общий состав системы и связи между её частями.
 - [`../100-architecture/110-system-boundaries.md`](../100-architecture/110-system-boundaries.md) — границы ответственности между подсистемами.
 - [`../100-architecture/120-state-model.md`](../100-architecture/120-state-model.md) — модель требуемого и фактического состояния.
