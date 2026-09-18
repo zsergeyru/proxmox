@@ -129,7 +129,7 @@ run_check() {
     if [[ -f "$STATE" ]] && jq -e '.component == "pve-configuration"' "$STATE" >/dev/null 2>&1; then
         check_ok "машинное состояние PVE Configuration читается"
         saved_status="$(jq -r '.status // "unknown"' "$STATE")"
-        [[ "$saved_status" == "configured" || "$saved_status" == "success" ]] || check_warn "последний сохранённый статус: $saved_status"
+        [[ "$saved_status" == "ready" || "$saved_status" == "ready-with-warnings" ]] || check_warn "последний сохранённый статус: $saved_status"
     else
         check_error "машинное состояние отсутствует или повреждено: $STATE"
     fi
