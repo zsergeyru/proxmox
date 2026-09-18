@@ -166,8 +166,8 @@ shell = /bin/bash
 Также должна существовать отдельная SSH-пара для управления гостевыми системами:
 
 ```text
-/etc/proxmox-deployer/ssh/pve_guest_ed25519
-/etc/proxmox-deployer/ssh/pve_guest_ed25519.pub
+/etc/proxmox-deployer/ssh/pve_deployer_ed25519
+/etc/proxmox-deployer/ssh/pve_deployer_ed25519.pub
 ```
 
 Постоянные закрытые ключи не ротируются автоматически при обычном повторном применении конфигурации.
@@ -187,7 +187,7 @@ shell = /bin/bash
 Основные элементы:
 
 ```text
-deployer.pub
+pve_deployer_ed25519.pub
 <VMID>.pub
 management-authorized-keys
 ```
