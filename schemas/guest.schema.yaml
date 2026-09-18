@@ -102,3 +102,7 @@ allOf:
       required: [management]
     then:
       required: [profile]
+  - if:
+      required: [pve_management]
+    then:
+      required: [profile]
