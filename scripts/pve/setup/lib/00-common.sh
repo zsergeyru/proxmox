@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-PVE_CONFIGURATION_VERSION=33
+PVE_CONFIGURATION_VERSION="1.0.0"
 
 PRIVATE_REPO="git@github.com:zsergeyru/proxmox.git"
 PRIVATE_BRANCH="main"
@@ -331,7 +331,7 @@ write_state() {
 
     cat >"$state_tmp" <<EOF_STATE
 {
-  "configuration_version": ${PVE_CONFIGURATION_VERSION},
+  "configuration_version": "${PVE_CONFIGURATION_VERSION}",
   "component": "pve-configuration",
   "status": "${status}",
   "repository_revision": "${revision}",
