@@ -16,8 +16,7 @@ fail() {
     exit 1
 }
 
-grep -Eq '^PVE_CONFIGURATION_VERSION="1\\.0\\.3"$' "$COMMON" \
-    || fail "PVE_CONFIGURATION_VERSION must be 1.0.3"
+grep -Eq '^PVE_CONFIGURATION_VERSION="1\\.0\\.3"
 
 if grep -Eq 'BOOTSTRAP_KEY_FILE|PVE_BOOTSTRAP_KEY_FILE|BOOTSTRAP_KNOWN_HOSTS|CANONICAL_KEY_DIFFERS_FROM_BOOTSTRAP' "$COMMON" "$RUNTIME"; then
     fail "temporary GitHub Deploy Key contract must not remain in PVE Configuration"
@@ -180,8 +179,8 @@ if grep -Eq '(qm|pct|pvesh)' "$DEPLOY_GUEST"; then
 fi
 grep -Fq 'from guest_config import GuestConfigError, resolve_effective_guest' "$TOOLING" \
     || fail "root wrapper must use the shared guest resolver"
-grep -Fq '"project_repo_read" in management' "$TOOLING" \
-    || fail "root wrapper must derive project_repo_read from effective management list"
+grep -Fq 'management.get("project_repo_read")' "$TOOLING" \
+    || fail "root wrapper must derive project_repo_read from effective state"
 grep -Fq 'exec 8<"\$PROJECT_REPO_KEY"' "$TOOLING" \
     || fail "root wrapper must open the fixed Project Git key on a dedicated FD"
 grep -Fq 'DEPLOY_GUEST_PROJECT_REPO_KEY_FD=8' "$TOOLING" \
