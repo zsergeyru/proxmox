@@ -905,7 +905,7 @@ network:
 
 В требуемом состоянии конкретного гостя нужен только параметр, который описывает постоянную политику Proxmox.
 
-#### 3.6.1. `boot.onboot`
+#### 3.4.1. `boot.onboot`
 
 **Тип:** boolean.
 
@@ -934,7 +934,7 @@ boot:
 
 Параметры порядка запуска, задержек и shutdown timeout в базовый контракт пока не добавляются. Они должны появиться только при реальной необходимости управлять зависимостями запуска между гостями.
 
-#### 3.6.2. Запуск после развёртывания
+#### 3.4.2. Запуск после развёртывания
 
 Отдельного параметра `boot.start_after_deploy` в целевой модели нет.
 
@@ -956,7 +956,7 @@ boot:
 
 ### 3.5. Management и первоначальная подготовка
 
-#### 3.4.1. `management.ssh.user`
+#### 3.5.1. `management.ssh.user`
 
 **Тип:** string.
 
@@ -980,7 +980,7 @@ Schema технически допускает индивидуальное зн
 
 Если поле не указано у гостя, используется `root` из defaults.
 
-#### 3.4.2. `management.ssh.port`
+#### 3.5.2. `management.ssh.port`
 
 **Тип:** integer от `1` до `65535`.
 
@@ -1002,7 +1002,7 @@ management:
 
 Если поле не указано у гостя, используется значение из defaults.
 
-#### 3.6.3. `management.ssh_identity`
+#### 3.5.3. `management.ssh_identity`
 
 **Тип:** boolean.
 
@@ -1032,7 +1032,7 @@ management:
 
 То есть отсутствие не означает «неизвестно» или «оставить как есть» — желаемое значение равно `false`.
 
-#### 3.6.4. `management.project_repo_read`
+#### 3.5.4. `management.project_repo_read`
 
 **Тип:** boolean.
 
@@ -1062,7 +1062,7 @@ management:
 
 Точный APPLY/REMOVE lifecycle относится к спецификации `deploy-guest`.
 
-#### 3.6.5. `bootstrap.capabilities.base`
+#### 3.5.5. `bootstrap.capabilities.base`
 
 **Тип:** boolean.
 
@@ -1084,7 +1084,7 @@ bootstrap:
 
 Если другие включённые capabilities требуют `base`, а `base: true` не указан, resolver выдаёт ошибку.
 
-#### 3.6.6. `bootstrap.capabilities.git`
+#### 3.5.6. `bootstrap.capabilities.git`
 
 **Тип:** boolean.
 
@@ -1109,7 +1109,7 @@ base: true
 
 Если `git` отсутствует или равен `false`, Git-capability через Bootstrap не выполняется.
 
-#### 3.6.7. `bootstrap.capabilities.docker`
+#### 3.5.7. `bootstrap.capabilities.docker`
 
 **Тип:** boolean.
 
@@ -1139,7 +1139,7 @@ lxc:
 
 `lxc.container_runtime` описывает тип LXC-профиля, а `bootstrap.capabilities.docker` — действие первоначальной подготовки внутри гостя.
 
-#### 3.6.8. `bootstrap.capabilities.ansible_controller`
+#### 3.5.8. `bootstrap.capabilities.ansible_controller`
 
 **Тип:** boolean.
 
@@ -1174,7 +1174,7 @@ docker
 
 ### 3.6. Параметры VM и LXC
 
-#### 3.5.1. `vm.source.template_vmid`
+#### 3.6.1. `vm.source.template_vmid`
 
 **Тип:** integer от `100` до `9999`.
 
@@ -1199,7 +1199,7 @@ profiles:
 
 Если `template_vmid` совпадает с VMID создаваемого гостя, проверка завершается ошибкой: VM не может клонироваться сама из себя.
 
-#### 3.5.2. `vm.source.clone`
+#### 3.6.2. `vm.source.clone`
 
 **Тип:** enum; сейчас допустимо только:
 
@@ -1224,7 +1224,7 @@ vm:
 
 Если поле отсутствует в VM с `profile`-профиле, профиль не проходит проверку.
 
-#### 3.5.3. `vm.guest_agent`
+#### 3.6.3. `vm.guest_agent`
 
 **Тип:** boolean.
 
@@ -1249,7 +1249,7 @@ guest_agent: true
 
 В индивидуальный `guest.yaml` гостя с `profile` весь раздел `vm` помещать нельзя — значение должно приходить из профиля.
 
-#### 3.5.4. `vm.bios`
+#### 3.6.4. `vm.bios`
 
 **Тип:** enum:
 
@@ -1273,7 +1273,7 @@ vm:
 
 Если `vm.bios` отсутствует во всех источниках, effective schema это допускает: проект не фиксирует BIOS этим параметром.
 
-#### 3.5.5. `lxc.source.ostemplate`
+#### 3.6.5. `lxc.source.ostemplate`
 
 **Тип:** string — селектор семейства Proxmox `vztmpl`.
 
@@ -1301,7 +1301,7 @@ local:vztmpl/debian-13-standard
 
 В индивидуальном `guest.yaml` гостя с `profile` раздел `lxc` задавать нельзя.
 
-#### 3.5.6. `lxc.unprivileged`
+#### 3.6.6. `lxc.unprivileged`
 
 **Тип:** boolean.
 
@@ -1328,7 +1328,7 @@ unprivileged: true
 
 Если поле отсутствует в профиле, profile schema выдаёт ошибку.
 
-#### 3.5.7. `lxc.container_runtime`
+#### 3.6.7. `lxc.container_runtime`
 
 **Тип:** enum; сейчас поддерживается только:
 
@@ -1358,7 +1358,7 @@ features:
 
 Если `container_runtime` отсутствует, LXC не считается Docker-LXC по этому контракту, и Docker-специфическое правило не применяется.
 
-#### 3.5.8. `lxc.features.nesting`
+#### 3.6.8. `lxc.features.nesting`
 
 **Тип:** boolean.
 
