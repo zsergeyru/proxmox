@@ -66,10 +66,8 @@ PRIVATE_KEY_MARKERS = (
 SELF_MANAGED = {100, 301, 320, 9000}
 OVERRIDE_PATHS = {
     ("node",),
-    ("resources", "disk", "storage"),
-    ("network", "bridge"),
-    ("management", "ssh", "user"),
-    ("management", "ssh", "port"),
+    ("placement", "pool"),
+    ("resources", "disk_storage"),
 }
 errors: list[str] = []
 warnings: list[str] = []
@@ -196,7 +194,7 @@ def check_source_overrides(rel: Path, source: dict, defaults: dict) -> None:
 
     inherited = deep_merge(defaults.get("defaults", {}), profile)
     for path, value in leaves(source):
-        if path == ("network", "ipv4", "address"):
+        if path == ("network", "ipv4"):
             continue
         old = get_nested(inherited, path)
         if old is MISSING:
@@ -223,7 +221,7 @@ def check_effective_network(
 ) -> None:
     net = effective["network"]
     try:
-        iface = ipaddress.ip_interface(net["ipv4"]["address"])
+        iface = ipaddress.ip_interface(net["ipv4"])
         effective_subnet = ipaddress.ip_network(net["subnet"], strict=True)
         effective_gateway = ipaddress.ip_address(net["gateway"])
     except (TypeError, ValueError) as exc:
@@ -231,7 +229,7 @@ def check_effective_network(
         return
 
     if not isinstance(iface, ipaddress.IPv4Interface):
-        fail(f"{rel}: effective network.ipv4.address должен быть IPv4")
+        fail(f"{rel}: effective network.ipv4 должен быть IPv4")
         return
     if iface.network.prefixlen != cfg.subnet.prefixlen:
         fail(f"{rel}: effective IP должен использовать /{cfg.subnet.prefixlen}")
@@ -242,16 +240,18 @@ def check_effective_network(
 
     check_address(rel, source["vmid"], iface.ip, cfg, used)
 
-    override = get_nested(source, ("network", "ipv4", "address"))
+    override = get_nested(source, ("network", "ipv4"))
     if override is not MISSING and iface.ip == vmid_address(source["vmid"], cfg):
         warn(
-            f"{rel}: network.ipv4.address={iface.ip} совпадает с вычисляемым IP; "
+            f"{rel}: network.ipv4={iface.ip} совпадает с вычисляемым IP; "
             "override избыточен"
         )
 
 
-def check_resources(rel: Path, data: dict) -> None:
+def check_resources(rel: Path, data: dict, kind: str | None = None) -> None:
     resources = data.get("resources", {})
+    if not isinstance(resources, dict):
+        return
     memory = resources.get("memory_mb")
     ballooning = resources.get("ballooning_mb")
     if isinstance(memory, int) and isinstance(ballooning, int) and ballooning > memory:
@@ -259,6 +259,10 @@ def check_resources(rel: Path, data: dict) -> None:
             f"{rel}: ballooning_mb ({ballooning}) не может превышать "
             f"memory_mb ({memory})"
         )
+    if kind == "vm" and "swap_mb" in resources:
+        fail(f"{rel}: resources.swap_mb разрешён только для LXC")
+    if kind == "lxc" and "ballooning_mb" in resources:
+        fail(f"{rel}: resources.ballooning_mb разрешён только для VM")
 
 
 def check_description(rel: Path, source: dict) -> None:
@@ -271,6 +275,7 @@ def check_description(rel: Path, source: dict) -> None:
             f"{rel}: гость с profile содержит в description "
             f"маркер незавершённости {marker!r}"
         )
+
 
 def valid_lxc_selector(value: object) -> bool:
     if not isinstance(value, str):
@@ -288,39 +293,14 @@ def check_profiles(defaults: dict) -> None:
     for name, profile in defaults.get("profiles", {}).items():
         if not isinstance(profile, dict):
             continue
-        if "network" in profile:
-            fail(f"{rel}: профиль {name!r} не должен переопределять defaults.network")
-        if (
-            profile.get("type") == "vm"
-            and profile.get("vm", {}).get("guest_agent") is not True
-        ):
-            fail(f"{rel}: VM-профиль {name!r} должен включать QEMU guest agent")
-        if profile.get("type") == "lxc":
-            lxc = profile.get("lxc", {})
-            selector = lxc.get("source", {}).get("ostemplate", "")
-            if not valid_lxc_selector(selector):
-                fail(
-                    f"{rel}: профиль {name!r} должен использовать "
-                    "селектор семейства Proxmox vztmpl без версии и имени архива"
-                )
-            if lxc.get("container_runtime") == "docker":
-                features = lxc.get("features", {})
-                if (
-                    lxc.get("unprivileged") is not True
-                    or features.get("nesting") is not True
-                    or features.get("keyctl") is not True
-                ):
-                    fail(
-                        f"{rel}: Docker-профиль {name!r} должен быть "
-                        "unprivileged + nesting + keyctl"
-                    )
+        if profile.get("type") == "lxc" and not valid_lxc_selector(profile.get("ostemplate")):
+            fail(
+                f"{rel}: профиль {name!r} должен использовать "
+                "селектор семейства Proxmox vztmpl без версии и имени архива"
+            )
 
 
 def check_managed_guest(rel: Path, source: dict, effective: dict) -> None:
-    for key in ("vm", "lxc"):
-        if key in source:
-            fail(f"{rel}: гость с profile должен получать {key!r} из profile")
-
     vmid, kind = effective["vmid"], effective["type"]
     pool = effective["placement"]["pool"]
     if vmid in SELF_MANAGED:
@@ -331,22 +311,22 @@ def check_managed_guest(rel: Path, source: dict, effective: dict) -> None:
     if effective.get("protection") is True and pool == "managed":
         warn(f"{rel}: protection=true у гостя в pool 'managed'")
 
-    ssh = effective["management"]["ssh"]
-    if ssh != {"user": "root", "port": 22}:
-        fail(f"{rel}: effective management.ssh должен быть root:22")
-
     if kind == "vm":
-        vm_source = effective["vm"]["source"]
-        if vm_source["template_vmid"] == vmid:
+        if effective["template_vmid"] == vmid:
             fail(f"{rel}: VM не может клонироваться сама из себя")
-        if effective["vm"]["guest_agent"] is not True:
-            fail(f"{rel}: управляемая VM должна включать QEMU guest agent")
     elif kind == "lxc":
-        selector = effective["lxc"]["source"]["ostemplate"]
+        selector = effective["ostemplate"]
         if not valid_lxc_selector(selector):
             fail(
-                f"{rel}: lxc.source.ostemplate должен быть селектором семейства "
+                f"{rel}: ostemplate должен быть селектором семейства "
                 "Proxmox vztmpl без версии и имени архива"
+            )
+        bootstrap = effective.get("bootstrap", [])
+        features = effective.get("features", [])
+        if "docker" in bootstrap and "container-host" not in features:
+            fail(
+                f"{rel}: bootstrap 'docker' для LXC требует "
+                "profile feature 'container-host'"
             )
 
 
@@ -428,6 +408,7 @@ def validate() -> None:
                 continue
 
             effective = resolved.effective
+            check_resources(rel, effective, str(effective.get("type")))
             if not validate_schema(
                 rel,
                 effective,
@@ -435,13 +416,12 @@ def validate() -> None:
                 "effective schema",
             ):
                 continue
-            check_resources(rel, effective)
             check_effective_network(rel, data, effective, cfg, used_ips)
             check_managed_guest(rel, data, effective)
             check_description(rel, data)
         else:
             check_resources(rel, data)
-            override = get_nested(data, ("network", "ipv4", "address"))
+            override = get_nested(data, ("network", "ipv4"))
             if override is not MISSING:
                 try:
                     address = parse_bare_ipv4(override)

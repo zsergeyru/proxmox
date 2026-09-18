@@ -10,9 +10,16 @@ required:
   - type
   - node
   - description
+  - protection
+  - placement
+  - resources
+  - network
+  - boot
+  - management
+  - bootstrap
 properties:
   schema_version:
-    const: 8
+    const: 9
   vmid:
     type: integer
     minimum: 100
@@ -44,19 +51,11 @@ properties:
   resources:
     type: object
     additionalProperties: false
-    required: [cpu, memory_mb, disk]
+    required: [cores, memory_mb, disk_size_gb, disk_storage]
     properties:
-      cpu:
-        type: object
-        additionalProperties: false
-        required: [cores]
-        properties:
-          cores:
-            type: integer
-            minimum: 1
-          type:
-            type: string
-            minLength: 1
+      cores:
+        type: integer
+        minimum: 1
       memory_mb:
         type: integer
         minimum: 256
@@ -66,21 +65,16 @@ properties:
       swap_mb:
         type: integer
         minimum: 0
-      disk:
-        type: object
-        additionalProperties: false
-        required: [size_gb, storage]
-        properties:
-          size_gb:
-            type: integer
-            minimum: 1
-          storage:
-            type: string
-            minLength: 1
+      disk_size_gb:
+        type: integer
+        minimum: 1
+      disk_storage:
+        type: string
+        minLength: 1
   network:
     type: object
     additionalProperties: false
-    required: [bridge, subnet, gateway, addressing, ipv4]
+    required: [bridge, subnet, gateway, ipv4]
     properties:
       bridge:
         type: string
@@ -91,163 +85,76 @@ properties:
       gateway:
         type: string
         minLength: 1
-      addressing:
-        const: vmid
       ipv4:
-        type: object
-        additionalProperties: false
-        required: [address]
-        properties:
-          address:
-            type: string
-            minLength: 1
+        type: string
+        minLength: 1
   boot:
     type: object
     additionalProperties: false
-    required: [onboot, start_after_deploy]
+    required: [onboot]
     properties:
       onboot:
         type: boolean
-      start_after_deploy:
-        type: boolean
   management:
-    type: object
-    additionalProperties: false
-    required: [ssh, ssh_identity, project_repo_read]
-    properties:
-      ssh:
-        type: object
-        additionalProperties: false
-        required: [user, port]
-        properties:
-          user:
-            const: root
-          port:
-            const: 22
-      ssh_identity:
-        type: boolean
-      project_repo_read:
-        type: boolean
+    type: array
+    uniqueItems: true
+    items:
+      enum: [ssh_identity, project_repo_read]
   bootstrap:
-    type: object
-    additionalProperties: false
-    required: [capabilities]
-    properties:
-      capabilities:
-        type: object
-        additionalProperties: false
-        minProperties: 1
-        properties:
-          base:
-            type: boolean
-          git:
-            type: boolean
-          docker:
-            type: boolean
-          ansible_controller:
-            type: boolean
-  vm:
-    type: object
-    additionalProperties: false
-    properties:
-      source:
-        type: object
-        additionalProperties: false
-        required: [template_vmid, clone]
-        properties:
-          template_vmid:
-            type: integer
-            minimum: 100
-            maximum: 9999
-          clone:
-            enum: [full]
-      guest_agent:
-        type: boolean
-      bios:
-        enum: [ovmf, seabios]
-  lxc:
-    type: object
-    additionalProperties: false
-    properties:
-      container_runtime:
-        enum: [docker]
-      source:
-        type: object
-        additionalProperties: false
-        required: [ostemplate]
-        properties:
-          ostemplate:
-            type: string
-            minLength: 1
-      unprivileged:
-        type: boolean
-      features:
-        type: object
-        additionalProperties: false
-        required: [nesting, keyctl]
-        properties:
-          nesting:
-            type: boolean
-          keyctl:
-            type: boolean
+    type: array
+    uniqueItems: true
+    items:
+      enum: [git, docker, ansible]
+  template_vmid:
+    type: integer
+    minimum: 100
+    maximum: 9999
+  ostemplate:
+    type: string
+    minLength: 1
+  features:
+    type: array
+    uniqueItems: true
+    items:
+      enum: [container-host]
 allOf:
-  - required: [protection, placement, resources, network, boot, management]
   - if:
       properties:
         type:
           const: vm
     then:
-      required: [vm]
+      required: [template_vmid]
       properties:
-        vm:
-          required: [source, guest_agent]
+        resources:
+          not:
+            required: [swap_mb]
+      not:
+        anyOf:
+          - required: [ostemplate]
+          - required: [features]
   - if:
       properties:
         type:
           const: lxc
     then:
-      required: [lxc]
+      required: [ostemplate, features]
       properties:
         resources:
           required: [swap_mb]
-        lxc:
-          required: [source, unprivileged, features]
+          not:
+            required: [ballooning_mb]
+      not:
+        required: [template_vmid]
   - if:
+      required: [type, bootstrap]
       properties:
-        lxc:
-          type: object
-          required: [container_runtime]
-          properties:
-            container_runtime:
-              const: docker
-      required: [lxc]
+        type:
+          const: lxc
+        bootstrap:
+          contains:
+            const: docker
     then:
       properties:
-        lxc:
-          properties:
-            unprivileged:
-              const: true
-            features:
-              properties:
-                nesting:
-                  const: true
-                keyctl:
-                  const: true
-  - if:
-      properties:
-        management:
-          anyOf:
-            - required: [ssh_identity]
-              properties:
-                ssh_identity:
-                  const: true
-            - required: [project_repo_read]
-              properties:
-                project_repo_read:
-                  const: true
-    then:
-      properties:
-        boot:
-          properties:
-            start_after_deploy:
-              const: true
+        features:
+          contains:
+            const: container-host

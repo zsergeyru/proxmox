@@ -1,14 +1,12 @@
-schema_version: 8
+schema_version: 9
 vmid: 331
 name: ai-services
-profile: docker-lxc
+profile: debian-lxc-docker
 
 description: Shared STT and TTS services
 
 resources:
-  cpu:
-    cores: 2
+  cores: 2
   memory_mb: 4096
   swap_mb: 1024
-  disk:
-    size_gb: 32
+  disk_size_gb: 32

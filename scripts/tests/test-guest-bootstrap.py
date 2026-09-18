@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Контрактные проверки Guest Bootstrap v1 без доступа к PVE."""
+"""Контрактные проверки guest resolver/Bootstrap без доступа к PVE."""
 
 from __future__ import annotations
 
@@ -33,50 +33,54 @@ def expect_error(source: dict, defaults: dict, needle: str) -> None:
 def main() -> None:
     defaults = load_yaml(ROOT / "guests/defaults.yaml")
     source_311 = load_yaml(ROOT / "guests/311-dev-services/guest.yaml")
+    source_109 = load_yaml(ROOT / "guests/109-network-gateway/guest.yaml")
 
     resolved = resolve_effective_guest(source_311, defaults)
-    assert resolved.bootstrap_capabilities == (
-        "base",
-        "git",
-        "docker",
-        "ansible_controller",
-    )
+    assert resolved.bootstrap_capabilities == ("git", "docker", "ansible")
+    assert resolved.effective["management"] == ["ssh_identity", "project_repo_read"]
+    assert resolved.effective["features"] == ["container-host"]
+    assert resolved.effective["resources"]["cores"] == 2
+    assert resolved.effective["network"]["ipv4"] == "192.168.3.11/16"
 
     no_bootstrap = copy.deepcopy(source_311)
     no_bootstrap.pop("bootstrap")
-    assert resolve_effective_guest(no_bootstrap, defaults).bootstrap_capabilities == ()
+    resolved_no_bootstrap = resolve_effective_guest(no_bootstrap, defaults)
+    assert resolved_no_bootstrap.bootstrap_capabilities == ()
+    assert resolved_no_bootstrap.effective["bootstrap"] == []
 
-    docker_without_base = copy.deepcopy(source_311)
-    docker_without_base["bootstrap"] = {"capabilities": {"docker": True}}
-    expect_error(docker_without_base, defaults, "требует явно включить: base")
-
-    ansible_without_dependencies = copy.deepcopy(source_311)
-    ansible_without_dependencies["bootstrap"] = {
-        "capabilities": {"base": True, "ansible_controller": True}
-    }
-    expect_error(
-        ansible_without_dependencies,
-        defaults,
-        "требует явно включить: git, docker",
+    ansible_only = copy.deepcopy(source_109)
+    ansible_only["bootstrap"] = ["ansible"]
+    assert resolve_effective_guest(ansible_only, defaults).bootstrap_capabilities == (
+        "ansible",
     )
 
-    all_disabled = copy.deepcopy(source_311)
-    all_disabled["bootstrap"] = {
-        "capabilities": {
-            "base": False,
-            "git": False,
-            "docker": False,
-            "ansible_controller": False,
-        }
+    duplicate = copy.deepcopy(source_311)
+    duplicate["bootstrap"] = ["git", "git"]
+    expect_error(duplicate, defaults, "не должен содержать дубликаты")
+
+    unknown = copy.deepcopy(source_311)
+    unknown["bootstrap"] = ["git", "unknown"]
+    expect_error(unknown, defaults, "неизвестные элементы bootstrap")
+
+    empty = copy.deepcopy(source_311)
+    empty["bootstrap"] = []
+    expect_error(empty, defaults, "должен быть непустым list")
+
+    plain_lxc_defaults = copy.deepcopy(defaults)
+    plain_lxc_defaults["profiles"]["debian-lxc"] = {
+        "type": "lxc",
+        "ostemplate": "local:vztmpl/debian-13-standard",
     }
-    expect_error(all_disabled, defaults, "не включена ни одна capability")
+    docker_without_feature = copy.deepcopy(source_311)
+    docker_without_feature["profile"] = "debian-lxc"
+    docker_without_feature["bootstrap"] = ["docker"]
+    expect_error(
+        docker_without_feature,
+        plain_lxc_defaults,
+        "требует feature 'container-host'",
+    )
 
-    stopped = copy.deepcopy(source_311)
-    stopped.pop("management", None)
-    stopped["boot"] = {"start_after_deploy": False}
-    expect_error(stopped, defaults, "bootstrap требует boot.start_after_deploy=true")
-
-    print("Guest Bootstrap v1 contract tests passed.")
+    print("Guest configuration/Bootstrap contract tests passed.")
 
 
 if __name__ == "__main__":

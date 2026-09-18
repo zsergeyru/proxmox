@@ -93,8 +93,8 @@ if grep -Eq '(qm|pct|pvesh)' "$DEPLOY_GUEST"; then
 fi
 grep -Fq 'from guest_config import GuestConfigError, resolve_effective_guest' "$TOOLING" \
     || fail "root wrapper must use the shared guest resolver"
-grep -Fq 'management.get("project_repo_read")' "$TOOLING" \
-    || fail "root wrapper must derive project_repo_read from effective state"
+grep -Fq '"project_repo_read" in management' "$TOOLING" \
+    || fail "root wrapper must derive project_repo_read from effective management list"
 grep -Fq 'exec 8<"\$PROJECT_REPO_KEY"' "$TOOLING" \
     || fail "root wrapper must open the fixed Project Git key on a dedicated FD"
 grep -Fq 'DEPLOY_GUEST_PROJECT_REPO_KEY_FD=8' "$TOOLING" \

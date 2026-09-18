@@ -1,12 +1,9 @@
-schema_version: 8
+schema_version: 9
 vmid: 501
 name: frigate
 node: pve
 
 description: Frigate video surveillance; VM/LXC type and resources are pending iGPU/OpenVINO testing
-
-network:
-  bridge: vmbr0
 
 boot:
   onboot: false

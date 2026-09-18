@@ -404,14 +404,6 @@ def participant_from_resource(
     expected_kind = "qemu" if effective.get("type") == "vm" else "lxc"
     if kind != expected_kind:
         fail(f"VMID {vmid}: PVE type {kind} не соответствует manifest type {effective.get('type')}")
-    management = effective.get("management")
-    if not isinstance(management, dict) or not isinstance(management.get("ssh"), dict):
-        fail(f"VMID {vmid}: effective management.ssh отсутствует")
-    ssh = management["ssh"]
-    user = ssh.get("user")
-    port = ssh.get("port")
-    if user != "root" or port != 22:
-        fail(f"VMID {vmid}: sync v1 поддерживает только management.ssh root:22")
     return Participant(
         vmid=vmid,
         name=name,
@@ -419,8 +411,8 @@ def participant_from_resource(
         node=node,
         status=status,
         address=str(resolved.management_ip),
-        user=user,
-        port=port,
+        user="root",
+        port=22,
         manifest=str(manifest.relative_to(ROOT)),
     )
 

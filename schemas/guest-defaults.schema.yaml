@@ -5,28 +5,9 @@ additionalProperties: false
 required: [schema_version, defaults, profiles]
 properties:
   schema_version:
-    const: 2
+    const: 3
   defaults:
-    allOf:
-      - $ref: '#/$defs/fragment'
-      - required: [node, protection, placement, resources, network, boot, management]
-      - properties:
-          placement:
-            required: [pool]
-          resources:
-            required: [disk]
-            properties:
-              disk:
-                required: [storage]
-          network:
-            required: [bridge, subnet, gateway, addressing]
-          boot:
-            required: [onboot, start_after_deploy]
-          management:
-            required: [ssh]
-            properties:
-              ssh:
-                required: [user, port]
+    $ref: '#/$defs/defaults'
   profiles:
     type: object
     minProperties: 1
@@ -35,42 +16,11 @@ properties:
     additionalProperties:
       $ref: '#/$defs/profile'
 $defs:
-  profile:
-    allOf:
-      - $ref: '#/$defs/fragment'
-      - required: [type]
-      - if:
-          properties:
-            type:
-              const: vm
-        then:
-          required: [vm]
-          properties:
-            vm:
-              required: [source, guest_agent]
-              properties:
-                source:
-                  required: [template_vmid, clone]
-      - if:
-          properties:
-            type:
-              const: lxc
-        then:
-          required: [lxc]
-          properties:
-            lxc:
-              required: [source, unprivileged, features]
-              properties:
-                source:
-                  required: [ostemplate]
-                features:
-                  required: [nesting, keyctl]
-  fragment:
+  defaults:
     type: object
     additionalProperties: false
+    required: [node, protection, placement, resources, network, boot]
     properties:
-      type:
-        enum: [vm, lxc]
       node:
         type: string
         minLength: 1
@@ -79,6 +29,7 @@ $defs:
       placement:
         type: object
         additionalProperties: false
+        required: [pool]
         properties:
           pool:
             type: [string, 'null']
@@ -86,39 +37,15 @@ $defs:
       resources:
         type: object
         additionalProperties: false
+        required: [disk_storage]
         properties:
-          cpu:
-            type: object
-            additionalProperties: false
-            properties:
-              cores:
-                type: integer
-                minimum: 1
-              type:
-                type: string
-                minLength: 1
-          memory_mb:
-            type: integer
-            minimum: 256
-          ballooning_mb:
-            type: integer
-            minimum: 0
-          swap_mb:
-            type: integer
-            minimum: 0
-          disk:
-            type: object
-            additionalProperties: false
-            properties:
-              size_gb:
-                type: integer
-                minimum: 1
-              storage:
-                type: string
-                minLength: 1
+          disk_storage:
+            type: string
+            minLength: 1
       network:
         type: object
         additionalProperties: false
+        required: [bridge, subnet, gateway]
         properties:
           bridge:
             type: string
@@ -129,66 +56,49 @@ $defs:
           gateway:
             type: string
             minLength: 1
-          addressing:
-            const: vmid
       boot:
         type: object
         additionalProperties: false
+        required: [onboot]
         properties:
           onboot:
             type: boolean
-          start_after_deploy:
-            type: boolean
-      management:
-        type: object
-        additionalProperties: false
-        properties:
-          ssh:
-            type: object
-            additionalProperties: false
-            properties:
-              user:
-                const: root
-              port:
-                const: 22
-      vm:
-        type: object
-        additionalProperties: false
-        properties:
-          source:
-            type: object
-            additionalProperties: false
-            properties:
-              template_vmid:
-                type: integer
-                minimum: 100
-                maximum: 9999
-              clone:
-                enum: [full]
-          guest_agent:
-            type: boolean
-          bios:
-            enum: [ovmf, seabios]
-      lxc:
-        type: object
-        additionalProperties: false
-        properties:
-          container_runtime:
-            enum: [docker]
-          source:
-            type: object
-            additionalProperties: false
-            properties:
-              ostemplate:
-                type: string
-                minLength: 1
-          unprivileged:
-            type: boolean
-          features:
-            type: object
-            additionalProperties: false
-            properties:
-              nesting:
-                type: boolean
-              keyctl:
-                type: boolean
+  profile:
+    type: object
+    additionalProperties: false
+    required: [type]
+    properties:
+      type:
+        enum: [vm, lxc]
+      template_vmid:
+        type: integer
+        minimum: 100
+        maximum: 9999
+      ostemplate:
+        type: string
+        minLength: 1
+      features:
+        type: array
+        minItems: 1
+        uniqueItems: true
+        items:
+          enum: [container-host]
+    allOf:
+      - if:
+          properties:
+            type:
+              const: vm
+        then:
+          required: [template_vmid]
+          not:
+            anyOf:
+              - required: [ostemplate]
+              - required: [features]
+      - if:
+          properties:
+            type:
+              const: lxc
+        then:
+          required: [ostemplate]
+          not:
+            required: [template_vmid]

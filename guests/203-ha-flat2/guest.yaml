@@ -1,12 +1,9 @@
-schema_version: 8
+schema_version: 9
 vmid: 203
 name: ha-flat2
 node: pve
 
 description: Reserved Home Assistant instance for the second apartment
-
-network:
-  bridge: vmbr0
 
 boot:
   onboot: false

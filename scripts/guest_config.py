@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Общий resolver guest-конфигурации для validator и PVE deployer."""
+"""Общий resolver guest-конфигурации для validator и runtime-инструментов."""
 
 from __future__ import annotations
 
@@ -10,21 +10,17 @@ from typing import Any
 
 MISSING = object()
 
-BOOTSTRAP_CAPABILITY_ORDER = (
-    "base",
-    "git",
-    "docker",
-    "ansible_controller",
-)
-BOOTSTRAP_DEPENDENCIES = {
-    "base": (),
-    "git": ("base",),
-    "docker": ("base",),
-    "ansible_controller": ("base", "git", "docker"),
-}
-INDIVIDUAL_MANAGEMENT_FIELDS = (
+MANAGEMENT_ORDER = (
     "ssh_identity",
     "project_repo_read",
+)
+BOOTSTRAP_ORDER = (
+    "git",
+    "docker",
+    "ansible",
+)
+PROFILE_FEATURE_ORDER = (
+    "container-host",
 )
 
 
@@ -68,7 +64,7 @@ def get_nested(data: dict, path: tuple[str, ...]):
 
 
 def parse_network_config(defaults: dict) -> NetworkConfig:
-    """Прочитать и проверить единую активную management-сеть из defaults.yaml."""
+    """Прочитать и проверить единую active management-сеть из defaults.yaml."""
     net = defaults.get("defaults", {}).get("network", {})
     if not isinstance(net, dict):
         raise GuestConfigError("defaults.network должен быть mapping/object")
@@ -94,8 +90,6 @@ def parse_network_config(defaults: dict) -> NetworkConfig:
         raise GuestConfigError(f"gateway {gateway} находится вне {subnet}")
     if gateway in {subnet.network_address, subnet.broadcast_address}:
         raise GuestConfigError(f"gateway {gateway} не может быть network/broadcast")
-    if net.get("addressing") != "vmid":
-        raise GuestConfigError("defaults.network.addressing должен быть 'vmid'")
 
     return NetworkConfig(subnet=subnet, gateway=gateway)
 
@@ -112,7 +106,7 @@ def vmid_address(vmid: int, network: NetworkConfig) -> ipaddress.IPv4Address:
     )
 
 
-def parse_bare_ipv4(value: object, field: str = "network.ipv4.address") -> ipaddress.IPv4Address:
+def parse_bare_ipv4(value: object, field: str = "network.ipv4") -> ipaddress.IPv4Address:
     """Разобрать source override: только bare IPv4, prefix приходит из defaults."""
     if not isinstance(value, str):
         raise GuestConfigError(f"{field} должен быть строкой IPv4")
@@ -134,116 +128,79 @@ def resolve_management_ip(
     network: NetworkConfig,
 ) -> tuple[ipaddress.IPv4Address, str]:
     """Вернуть management IP и provenance: 'vmid' либо 'guest'."""
-    override = get_nested(source, ("network", "ipv4", "address"))
+    override = get_nested(source, ("network", "ipv4"))
     if override is MISSING:
         return vmid_address(source.get("vmid"), network), "vmid"
     return parse_bare_ipv4(override), "guest"
 
 
-def resolve_individual_management(
+def _canonical_source_list(
+    source: dict,
+    key: str,
+    allowed: tuple[str, ...],
+) -> tuple[str, ...]:
+    value = source.get(key)
+    if value is None:
+        return ()
+    if not isinstance(value, list) or not value:
+        raise GuestConfigError(f"{key} должен быть непустым list")
+    if not source.get("profile"):
+        raise GuestConfigError(f"{key} разрешён только гостю с profile")
+    if any(not isinstance(item, str) for item in value):
+        raise GuestConfigError(f"{key} должен содержать только строки")
+    unknown = sorted(set(value) - set(allowed))
+    if unknown:
+        raise GuestConfigError(
+            f"неизвестные элементы {key}: " + ", ".join(unknown)
+        )
+    if len(value) != len(set(value)):
+        raise GuestConfigError(f"{key} не должен содержать дубликаты")
+    return tuple(item for item in allowed if item in value)
+
+
+def resolve_management(
     source: dict,
     defaults: dict,
     profile: dict,
-    effective: dict,
-) -> None:
-    """Нормализовать individual-only management flags только из guest.yaml."""
-    inherited_sources = (
-        ("defaults.management", defaults.get("defaults", {}).get("management")),
-        (f"profile {source.get('profile')!r}.management", profile.get("management")),
-    )
-    for label, management in inherited_sources:
-        if management is None:
-            continue
-        if not isinstance(management, dict):
-            raise GuestConfigError(f"{label} должен быть mapping/object")
-        forbidden = [name for name in INDIVIDUAL_MANAGEMENT_FIELDS if name in management]
-        if forbidden:
-            raise GuestConfigError(
-                f"{label} не может задавать individual-only поля: "
-                + ", ".join(forbidden)
-            )
-
-    source_management = source.get("management", {})
-    if not isinstance(source_management, dict):
-        raise GuestConfigError("management должен быть mapping/object")
-
-    present = [name for name in INDIVIDUAL_MANAGEMENT_FIELDS if name in source_management]
-    if present and not source.get("profile"):
-        raise GuestConfigError(
-            "management.ssh_identity/project_repo_read разрешены только гостю с profile"
-        )
-
-    effective_management = effective.get("management")
-    if not isinstance(effective_management, dict):
-        raise GuestConfigError("effective management должен быть mapping/object")
-
-    for name in INDIVIDUAL_MANAGEMENT_FIELDS:
-        value = source_management.get(name, False)
-        if not isinstance(value, bool):
-            raise GuestConfigError(f"management.{name} должен быть boolean")
-        effective_management[name] = value
-
-    if any(effective_management[name] for name in INDIVIDUAL_MANAGEMENT_FIELDS):
-        boot = effective.get("boot")
-        if not isinstance(boot, dict) or boot.get("start_after_deploy") is not True:
-            raise GuestConfigError(
-                "management.ssh_identity/project_repo_read=true требуют "
-                "boot.start_after_deploy=true, так как применяются после SSH root"
-            )
+) -> tuple[str, ...]:
+    """Вернуть канонический список individual-only management-возможностей."""
+    if "management" in defaults.get("defaults", {}):
+        raise GuestConfigError("defaults не должны задавать management")
+    if "management" in profile:
+        raise GuestConfigError("profile не должен задавать management")
+    return _canonical_source_list(source, "management", MANAGEMENT_ORDER)
 
 
-def resolve_bootstrap_capabilities(effective: dict) -> tuple[str, ...]:
-    """Вернуть включённые bootstrap capabilities в каноническом порядке v1."""
-    bootstrap = effective.get("bootstrap")
-    if bootstrap is None:
+def resolve_bootstrap(
+    source: dict,
+    defaults: dict,
+    profile: dict,
+) -> tuple[str, ...]:
+    """Вернуть канонический список Bootstrap-инструментов."""
+    if "bootstrap" in defaults.get("defaults", {}):
+        raise GuestConfigError("defaults не должны задавать bootstrap")
+    if "bootstrap" in profile:
+        raise GuestConfigError("profile не должен задавать bootstrap")
+    return _canonical_source_list(source, "bootstrap", BOOTSTRAP_ORDER)
+
+
+def resolve_profile_features(profile: dict) -> tuple[str, ...]:
+    """Нормализовать список высокоуровневых features профиля."""
+    value = profile.get("features")
+    if value is None:
         return ()
-    if not isinstance(bootstrap, dict):
-        raise GuestConfigError("bootstrap должен быть mapping/object")
-
-    capabilities = bootstrap.get("capabilities")
-    if not isinstance(capabilities, dict):
-        raise GuestConfigError("bootstrap.capabilities должен быть mapping/object")
-
-    unknown = sorted(set(capabilities) - set(BOOTSTRAP_CAPABILITY_ORDER))
+    if not isinstance(value, list) or not value:
+        raise GuestConfigError("profile.features должен быть непустым list")
+    if any(not isinstance(item, str) for item in value):
+        raise GuestConfigError("profile.features должен содержать только строки")
+    unknown = sorted(set(value) - set(PROFILE_FEATURE_ORDER))
     if unknown:
         raise GuestConfigError(
-            "неизвестные bootstrap capabilities: " + ", ".join(unknown)
+            "неизвестные profile.features: " + ", ".join(unknown)
         )
-
-    for name, enabled in capabilities.items():
-        if not isinstance(enabled, bool):
-            raise GuestConfigError(
-                f"bootstrap.capabilities.{name} должен быть boolean"
-            )
-
-    enabled = tuple(
-        name for name in BOOTSTRAP_CAPABILITY_ORDER if capabilities.get(name) is True
-    )
-    if not enabled:
-        raise GuestConfigError(
-            "bootstrap задан, но не включена ни одна capability; удалите bootstrap"
-        )
-
-    for name in enabled:
-        missing = [
-            dependency
-            for dependency in BOOTSTRAP_DEPENDENCIES[name]
-            if capabilities.get(dependency) is not True
-        ]
-        if missing:
-            raise GuestConfigError(
-                f"bootstrap capability {name!r} требует явно включить: "
-                + ", ".join(missing)
-            )
-
-    boot = effective.get("boot")
-    if not isinstance(boot, dict) or boot.get("start_after_deploy") is not True:
-        raise GuestConfigError(
-            "bootstrap требует boot.start_after_deploy=true, так как выполняется "
-            "только после проверенного SSH root"
-        )
-
-    return enabled
+    if len(value) != len(set(value)):
+        raise GuestConfigError("profile.features не должен содержать дубликаты")
+    return tuple(item for item in PROFILE_FEATURE_ORDER if item in value)
 
 
 def resolve_effective_guest(
@@ -257,27 +214,66 @@ def resolve_effective_guest(
     if not isinstance(profile, dict):
         raise GuestConfigError(f"неизвестный профиль {profile_name!r}")
 
+    kind = profile.get("type")
+    if kind not in {"vm", "lxc"}:
+        raise GuestConfigError(f"профиль {profile_name!r} имеет неверный type {kind!r}")
+
+    if kind == "vm":
+        template_vmid = profile.get("template_vmid")
+        if not isinstance(template_vmid, int):
+            raise GuestConfigError(
+                f"VM-профиль {profile_name!r} должен задавать template_vmid"
+            )
+        if "ostemplate" in profile or "features" in profile:
+            raise GuestConfigError(
+                f"VM-профиль {profile_name!r} не должен задавать LXC-параметры"
+            )
+        features: tuple[str, ...] = ()
+    else:
+        ostemplate = profile.get("ostemplate")
+        if not isinstance(ostemplate, str) or not ostemplate:
+            raise GuestConfigError(
+                f"LXC-профиль {profile_name!r} должен задавать ostemplate"
+            )
+        if "template_vmid" in profile:
+            raise GuestConfigError(
+                f"LXC-профиль {profile_name!r} не должен задавать template_vmid"
+            )
+        features = resolve_profile_features(profile)
+
     if network is None:
         network = parse_network_config(defaults)
 
-    effective = deep_merge(defaults.get("defaults", {}), profile)
+    defaults_fragment = defaults.get("defaults")
+    if not isinstance(defaults_fragment, dict):
+        raise GuestConfigError("defaults.defaults должен быть mapping/object")
+
+    effective = deep_merge(defaults_fragment, profile)
     effective = deep_merge(effective, source)
-    resolve_individual_management(source, defaults, profile, effective)
+
+    management = resolve_management(source, defaults, profile)
+    bootstrap = resolve_bootstrap(source, defaults, profile)
+    effective["management"] = list(management)
+    effective["bootstrap"] = list(bootstrap)
+
+    if kind == "lxc":
+        effective["features"] = list(features)
+        if "docker" in bootstrap and "container-host" not in features:
+            raise GuestConfigError(
+                "bootstrap 'docker' для LXC требует feature 'container-host' "
+                "в выбранном профиле"
+            )
 
     management_ip, ip_source = resolve_management_ip(source, network)
     effective_network = effective.get("network")
     if not isinstance(effective_network, dict):
         raise GuestConfigError("effective network должен быть mapping/object")
-    effective_network["ipv4"] = {
-        "address": f"{management_ip}/{network.subnet.prefixlen}"
-    }
-
-    bootstrap_capabilities = resolve_bootstrap_capabilities(effective)
+    effective_network["ipv4"] = f"{management_ip}/{network.subnet.prefixlen}"
 
     return ResolvedGuest(
         effective=effective,
         network=network,
         management_ip=management_ip,
         management_ip_source=ip_source,
-        bootstrap_capabilities=bootstrap_capabilities,
+        bootstrap_capabilities=bootstrap,
     )

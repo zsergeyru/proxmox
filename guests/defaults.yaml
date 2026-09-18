@@ -1,4 +1,4 @@
-schema_version: 2
+schema_version: 3
 
 defaults:
   node: pve
@@ -6,37 +6,21 @@ defaults:
   placement:
     pool: managed
   resources:
-    disk:
-      storage: local-lvm
+    disk_storage: local-lvm
   network:
     bridge: vmbr0
     subnet: 192.168.0.0/16
     gateway: 192.168.1.1
-    addressing: vmid
   boot:
     onboot: true
-    start_after_deploy: true
-  management:
-    ssh:
-      user: root
-      port: 22
 
 profiles:
   debian-vm:
     type: vm
-    vm:
-      source:
-        template_vmid: 9000
-        clone: full
-      guest_agent: true
+    template_vmid: 9000
 
-  docker-lxc:
+  debian-lxc-docker:
     type: lxc
-    lxc:
-      container_runtime: docker
-      source:
-        ostemplate: local:vztmpl/debian-13-standard
-      unprivileged: true
-      features:
-        nesting: true
-        keyctl: true
+    ostemplate: local:vztmpl/debian-13-standard
+    features:
+      - container-host

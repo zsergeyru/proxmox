@@ -1,14 +1,12 @@
-schema_version: 8
+schema_version: 9
 vmid: 211
 name: automation-services
-profile: docker-lxc
+profile: debian-lxc-docker
 
 description: MQTT, Zigbee2MQTT and ESPHome infrastructure services
 
 resources:
-  cpu:
-    cores: 2
+  cores: 2
   memory_mb: 2048
   swap_mb: 512
-  disk:
-    size_gb: 16
+  disk_size_gb: 16

@@ -1,4 +1,4 @@
-schema_version: 8
+schema_version: 9
 vmid: 100
 name: haos
 node: pve
@@ -6,21 +6,11 @@ node: pve
 description: Current production Home Assistant OS VM migrated from Raspberry Pi
 
 resources:
-  cpu:
-    cores: 2
-    type: x86-64-v2-AES
+  cores: 2
   memory_mb: 4096
   ballooning_mb: 2048
-  disk:
-    size_gb: 32
-    storage: local-lvm
-
-network:
-  bridge: vmbr0
+  disk_size_gb: 32
+  disk_storage: local-lvm
 
 boot:
   onboot: true
-
-vm:
-  bios: ovmf
-  guest_agent: true

@@ -1,4 +1,4 @@
-schema_version: 8
+schema_version: 9
 vmid: 301
 name: ai-control
 profile: debian-vm
@@ -9,12 +9,10 @@ placement:
   pool: null
 
 management:
-  ssh_identity: true
-  project_repo_read: true
+  - ssh_identity
+  - project_repo_read
 
 resources:
-  cpu:
-    cores: 2
+  cores: 2
   memory_mb: 4096
-  disk:
-    size_gb: 24
+  disk_size_gb: 24

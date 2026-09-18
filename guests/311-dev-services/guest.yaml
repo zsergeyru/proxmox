@@ -1,25 +1,21 @@
-schema_version: 8
+schema_version: 9
 vmid: 311
 name: dev-services
-profile: docker-lxc
+profile: debian-lxc-docker
 
 description: Ansible, Semaphore, Git, CI and development services
 
 management:
-  ssh_identity: true
-  project_repo_read: true
+  - ssh_identity
+  - project_repo_read
 
 resources:
-  cpu:
-    cores: 2
+  cores: 2
   memory_mb: 4096
   swap_mb: 1024
-  disk:
-    size_gb: 32
+  disk_size_gb: 32
 
 bootstrap:
-  capabilities:
-    base: true
-    git: true
-    docker: true
-    ansible_controller: true
+  - git
+  - docker
+  - ansible

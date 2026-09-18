@@ -5,7 +5,7 @@ additionalProperties: false
 required: [schema_version, vmid, name, description]
 properties:
   schema_version:
-    const: 8
+    const: 9
   vmid:
     type: integer
     minimum: 100
@@ -36,10 +36,6 @@ properties:
     $ref: '#/$defs/management'
   bootstrap:
     $ref: '#/$defs/bootstrap'
-  vm:
-    $ref: '#/$defs/vm'
-  lxc:
-    $ref: '#/$defs/lxc'
 $defs:
   placement:
     type: object
@@ -52,16 +48,9 @@ $defs:
     type: object
     additionalProperties: false
     properties:
-      cpu:
-        type: object
-        additionalProperties: false
-        properties:
-          cores:
-            type: integer
-            minimum: 1
-          type:
-            type: string
-            minLength: 1
+      cores:
+        type: integer
+        minimum: 1
       memory_mb:
         type: integer
         minimum: 256
@@ -71,117 +60,39 @@ $defs:
       swap_mb:
         type: integer
         minimum: 0
-      disk:
-        type: object
-        additionalProperties: false
-        properties:
-          size_gb:
-            type: integer
-            minimum: 1
-          storage:
-            type: string
-            minLength: 1
+      disk_size_gb:
+        type: integer
+        minimum: 1
+      disk_storage:
+        type: string
+        minLength: 1
   sourceNetwork:
     type: object
     additionalProperties: false
+    required: [ipv4]
     properties:
-      bridge:
+      ipv4:
         type: string
         minLength: 1
-      ipv4:
-        type: object
-        additionalProperties: false
-        required: [address]
-        properties:
-          address:
-            type: string
-            minLength: 1
   boot:
     type: object
     additionalProperties: false
+    required: [onboot]
     properties:
       onboot:
         type: boolean
-      start_after_deploy:
-        type: boolean
   management:
-    type: object
-    additionalProperties: false
-    properties:
-      ssh:
-        type: object
-        additionalProperties: false
-        properties:
-          user:
-            type: string
-            minLength: 1
-          port:
-            type: integer
-            minimum: 1
-            maximum: 65535
-      ssh_identity:
-        type: boolean
-      project_repo_read:
-        type: boolean
+    type: array
+    minItems: 1
+    uniqueItems: true
+    items:
+      enum: [ssh_identity, project_repo_read]
   bootstrap:
-    type: object
-    additionalProperties: false
-    required: [capabilities]
-    properties:
-      capabilities:
-        type: object
-        additionalProperties: false
-        minProperties: 1
-        properties:
-          base:
-            type: boolean
-          git:
-            type: boolean
-          docker:
-            type: boolean
-          ansible_controller:
-            type: boolean
-  vm:
-    type: object
-    additionalProperties: false
-    properties:
-      source:
-        type: object
-        additionalProperties: false
-        properties:
-          template_vmid:
-            type: integer
-            minimum: 100
-            maximum: 9999
-          clone:
-            enum: [full]
-      guest_agent:
-        type: boolean
-      bios:
-        enum: [ovmf, seabios]
-  lxc:
-    type: object
-    additionalProperties: false
-    properties:
-      container_runtime:
-        enum: [docker]
-      source:
-        type: object
-        additionalProperties: false
-        properties:
-          ostemplate:
-            type: string
-            minLength: 1
-      unprivileged:
-        type: boolean
-      features:
-        type: object
-        additionalProperties: false
-        properties:
-          nesting:
-            type: boolean
-          keyctl:
-            type: boolean
+    type: array
+    minItems: 1
+    uniqueItems: true
+    items:
+      enum: [git, docker, ansible]
 allOf:
   - if:
       required: [profile]
@@ -189,26 +100,12 @@ allOf:
       required: [resources]
       properties:
         resources:
-          required: [cpu, memory_mb, disk]
-          properties:
-            cpu:
-              required: [cores]
-            disk:
-              required: [size_gb]
-      not:
-        anyOf:
-          - required: [vm]
-          - required: [lxc]
+          required: [cores, memory_mb, disk_size_gb]
   - if:
       required: [bootstrap]
     then:
       required: [profile]
   - if:
       required: [management]
-      properties:
-        management:
-          anyOf:
-            - required: [ssh_identity]
-            - required: [project_repo_read]
     then:
       required: [profile]

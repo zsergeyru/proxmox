@@ -1,12 +1,9 @@
-schema_version: 8
+schema_version: 9
 vmid: 202
 name: ha-test
 node: pve
 
 description: Test Home Assistant instance
-
-network:
-  bridge: vmbr0
 
 boot:
   onboot: false

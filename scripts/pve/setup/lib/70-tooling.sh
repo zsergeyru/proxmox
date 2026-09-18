@@ -432,8 +432,8 @@ if not isinstance(defaults, dict) or not isinstance(source, dict):
     raise SystemExit("defaults.yaml и guest.yaml должны содержать YAML mapping")
 if source.get("vmid") != vmid:
     raise SystemExit(f"guest.yaml не соответствует запрошенному VMID {vmid}")
-if source.get("deployable") is not True:
-    raise SystemExit(f"VMID {vmid} не является deployable")
+if not source.get("profile"):
+    raise SystemExit(f"VMID {vmid}: manifest не содержит profile")
 
 try:
     effective = resolve_effective_guest(source, defaults).effective
@@ -441,12 +441,9 @@ except GuestConfigError as exc:
     raise SystemExit(f"не удалось построить effective state VMID {vmid}: {exc}") from exc
 
 management = effective.get("management")
-if not isinstance(management, dict):
-    raise SystemExit("effective management должен быть mapping")
-value = management.get("project_repo_read")
-if not isinstance(value, bool):
-    raise SystemExit("effective management.project_repo_read должен быть boolean")
-print("1" if value else "0")
+if not isinstance(management, list):
+    raise SystemExit("effective management должен быть list")
+print("1" if "project_repo_read" in management else "0")
 PY_EFFECTIVE
 }
 
