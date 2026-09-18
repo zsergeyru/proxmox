@@ -72,14 +72,14 @@
 │   ├── pve_guest_ed25519                  — закрытый ключ управления гостевыми системами
 │   ├── pve_guest_ed25519.pub              — открытая часть ключа управления гостями
 │   ├── config                             — локальная SSH-конфигурация доступа к GitHub
-│   └── known_hosts                        — доверенные SSH host keys GitHub
+│   └── known_hosts                        — доверенные SSH-ключи узлов GitHub
 └── secrets/                               — локальные секреты API-токенов Proxmox
     ├── host-deploy.token                  — секрет deployer@pve!host-deploy
     └── ai-agent-infra.token               — секрет ai-agent@pve!infra
 
 /var/lib/pvedeploy/                        — домашний и рабочий каталог системного пользователя pvedeploy
 └── .ssh/                                  — SSH-данные pvedeploy для подключения к гостям
-    └── known_hosts                        — доверенные SSH host keys управляемых VM/LXC
+    └── known_hosts                        — доверенные SSH-ключи управляемых VM/LXC
 
 /usr/local/sbin/                           — установленные административные команды проекта
 ├── pve-configuration-status              — просмотр и проверка состояния PVE-хоста
@@ -97,7 +97,7 @@
 └── proxmox-orchestration.lock             — общая блокировка конкурирующих операций проекта
 ```
 
-Помимо файловой структуры проект управляет отдельными объектами Proxmox: пользователями, API-токенами, ролями, ACL, пулом `managed`, базовым шаблоном VMID `9000` и временной smoke-VM VMID `9099`.
+Помимо файловой структуры проект управляет отдельными объектами Proxmox: пользователями, API-токенами, ролями, ACL, пулом `managed`, базовым шаблоном VMID `9000` и временной проверочной VM с VMID `9099`.
 
 ## 3. Файлы и каталоги проекта
 
@@ -113,7 +113,7 @@
 | `cache/` | Изменяемый служебный кэш | `pvedeploy:pvedeploy` | `0750` |
 | `public-keys/` | Реестр открытых управляющих ключей | `pvedeploy:pvedeploy` | `0750` |
 
-Каталог `repo/` является доверенной локальной копией Git и не предназначен для ручного редактирования. Локальный drift блокирует управляемые операции, кроме явно разрешённых служебных Python-кэшей.
+Каталог `repo/` является доверенной локальной копией Git и не предназначен для ручного редактирования. Локальные изменения блокируют управляемые операции, кроме явно разрешённых служебного кэша Python.
 
 ### 3.2. Состояние PVE Configuration
 
@@ -159,14 +159,14 @@
 
 | Путь | Назначение | Владелец и группа | Права |
 |---|---|---|---|
-| `ssh/github_proxmox_repo_ed25519` | Закрытый read-only Deploy Key для GitHub | `root:root` | `0600` |
-| `ssh/github_proxmox_repo_ed25519.pub` | Открытая часть Deploy Key | `root:root` | `0644` |
+| `ssh/github_proxmox_repo_ed25519` | Закрытый ключ GitHub Deploy Key только для чтения | `root:root` | `0600` |
+| `ssh/github_proxmox_repo_ed25519.pub` | Открытая часть ключа GitHub Deploy Key | `root:root` | `0644` |
 | `ssh/config` | SSH-конфигурация доступа к GitHub | `root:root` | `0600` |
-| `ssh/known_hosts` | Доверие к GitHub SSH host key | `root:root` | `0644` |
+| `ssh/known_hosts` | Доверие к SSH-ключу узла GitHub | `root:root` | `0644` |
 | `ssh/pve_guest_ed25519` | Закрытый ключ управления гостевыми системами | `pvedeploy:pvedeploy` | `0600` |
 | `ssh/pve_guest_ed25519.pub` | Открытая часть ключа управления гостями | `pvedeploy:pvedeploy` | `0644` |
 
-GitHub и гостевые системы используют разные SSH-контуры и разные `known_hosts`.
+Для GitHub и гостевых систем используются отдельные SSH-контуры и отдельные файлы `known_hosts`.
 
 ### 3.6. Секреты API
 
@@ -190,7 +190,7 @@ shell: /bin/bash
 
 Каталог `/var/lib/pvedeploy/.ssh/` имеет владельца `pvedeploy:pvedeploy` и права `0700`.
 
-`/var/lib/pvedeploy/.ssh/known_hosts` хранит SSH host keys управляемых VM/LXC и не используется для GitHub.
+`/var/lib/pvedeploy/.ssh/known_hosts` хранит SSH-ключи управляемых VM/LXC и не используется для GitHub.
 
 ### 3.8. Журналы и аудит
 
@@ -227,7 +227,7 @@ PVE Configuration устанавливает стабильные админис
 
 | Команда | Путь | Запуск | Назначение |
 |---|---|---|---|
-| `pve-configuration-status` | `/usr/local/sbin/pve-configuration-status` | root / оператор | Просмотр сохранённого состояния и фактическая read-only проверка PVE-хоста |
+| `pve-configuration-status` | `/usr/local/sbin/pve-configuration-status` | root / оператор | Просмотр сохранённого состояния и фактическая проверка PVE-хоста без изменений |
 | `deploy-guest` | `/usr/local/sbin/deploy-guest` | только root | Управляемое развертывание VM/LXC по контракту проекта |
 | `sync-management-keys` | `/usr/local/sbin/sync-management-keys` | только root | Синхронизация управляющих SSH-ключей с гостевыми системами |
 
@@ -237,7 +237,7 @@ PVE Configuration устанавливает стабильные админис
 
 ## 5. Локальные службы и периодические механизмы
 
-На текущем этапе PVE Configuration не устанавливает обязательные собственные systemd service или timer для проекта.
+На текущем этапе PVE Configuration не устанавливает обязательные собственные службы или таймеры systemd для проекта.
 
 Основные операции запускаются явно:
 
@@ -247,7 +247,7 @@ PVE Configuration устанавливает стабильные админис
 - `deploy-guest`;
 - `sync-management-keys`.
 
-Если в дальнейшем появится постоянная служба или периодическая задача проекта, её имя, путь к unit-файлу, исполняемый компонент и назначение должны быть добавлены в этот раздел.
+Если в дальнейшем появится постоянная служба или периодическая задача проекта, в этот раздел должны быть добавлены её имя, файл systemd, исполняемый компонент и назначение.
 
 Системные службы самого Proxmox не перечисляются здесь, если проект не создаёт и не изменяет их как часть собственного контракта.
 
@@ -259,10 +259,10 @@ PVE Configuration устанавливает стабильные админис
 
 | Тип | Идентификатор | Назначение |
 |---|---|---|
-| PVE user | `deployer@pve` | Прямое управление PVE и локальные средства развертывания |
-| API token | `deployer@pve!host-deploy` | Токен прямого управления PVE |
-| PVE user | `ai-agent@pve` | Идентичность AI Control |
-| API token | `ai-agent@pve!infra` | Ограниченный инфраструктурный токен AI Control |
+| Пользователь PVE | `deployer@pve` | Прямое управление PVE и локальные средства развертывания |
+| API-токен | `deployer@pve!host-deploy` | Токен прямого управления PVE |
+| Пользователь PVE | `ai-agent@pve` | Идентичность AI Control |
+| API-токен | `ai-agent@pve!infra` | Ограниченный инфраструктурный токен AI Control |
 
 Оба API-токена создаются с `privsep=1`.
 
@@ -307,7 +307,7 @@ name: tpl-debian13
 
 Он создаётся и проверяется PVE Configuration и используется как источник для развертывания гостевых систем.
 
-### 6.6. Smoke VM
+### 6.6. Проверочная VM
 
 Для проверки полного клона используется:
 
@@ -317,7 +317,7 @@ VMID: 9099
 
 Это временный объект. После успешной проверки он удаляется и VMID снова становится свободным.
 
-Если проверка прервана или выявлена ошибка, подозрительная smoke-VM может быть намеренно оставлена для диагностики и не удаляется автоматически без подтверждения её происхождения.
+Если проверка прервана или выявлена ошибка, проверочная VM с неясным состоянием может быть намеренно оставлена для диагностики и не удаляется автоматически без подтверждения её происхождения.
 
 ## 7. Сводная карта компонентов
 
@@ -325,12 +325,12 @@ VMID: 9099
 |---|---|---|---|---|
 | Локальная конфигурация | `/etc/proxmox-deployer/` | конфигурация | да | root |
 | GitHub Deploy Key | `/etc/proxmox-deployer/ssh/github_proxmox_repo_ed25519` | секрет | да | root |
-| Guest SSH identity | `/etc/proxmox-deployer/ssh/pve_guest_ed25519` | секрет | да | pvedeploy |
+| SSH-ключ управления гостями | `/etc/proxmox-deployer/ssh/pve_guest_ed25519` | секрет | да | pvedeploy |
 | API-секреты | `/etc/proxmox-deployer/secrets/` | секреты | да | root |
 | Канонический Git | `/var/lib/proxmox-deployer/repo/` | исходный код | да | root |
 | Состояние PVE Configuration | `/var/lib/proxmox-deployer/state/` | служебное состояние | да | root |
 | Реестр открытых ключей | `/var/lib/proxmox-deployer/public-keys/` | реестр | да | pvedeploy |
-| Runtime пользователя | `/var/lib/pvedeploy/` | рабочее состояние | да | pvedeploy |
+| Рабочая среда пользователя | `/var/lib/pvedeploy/` | рабочее состояние | да | pvedeploy |
 | Журналы | `/var/log/proxmox-deployer/` | журналирование | да | root / pvedeploy |
 | Резервные каталоги | `/var/backups/proxmox-*` | локальные резервные данные | да | root |
 | Общая блокировка | `/run/lock/proxmox-orchestration.lock` | временная синхронизация | нет | root |
@@ -339,9 +339,9 @@ VMID: 9099
 | Синхронизация ключей | `sync-management-keys` | команда | воспроизводима | root |
 | Управляемый пул | `managed` | объект Proxmox | да | PVE Configuration |
 | Базовый шаблон | VMID `9000` | объект Proxmox | да | PVE Configuration |
-| Smoke VM | VMID `9099` | объект Proxmox | временный | PVE Configuration |
-| Host identity | `deployer@pve!host-deploy` | PVE identity | да | PVE Configuration |
-| AI identity | `ai-agent@pve!infra` | PVE identity | да | PVE Configuration |
+| Проверочная VM | VMID `9099` | объект Proxmox | временный | PVE Configuration |
+| Учётная запись хоста | `deployer@pve!host-deploy` | PVE identity | да | PVE Configuration |
+| Учётная запись AI | `ai-agent@pve!infra` | PVE identity | да | PVE Configuration |
 
 ## 8. Связанные документы
 
