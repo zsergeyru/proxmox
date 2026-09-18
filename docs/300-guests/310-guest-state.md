@@ -219,35 +219,36 @@ Effective state является интерфейсом между описан�
 
 ## 3. Параметры гостевой системы
 
+Этот раздел является справочником параметров исходного состояния.
+
+Для каждого параметра указывается:
+
+- его тип;
+- где он задаётся или откуда наследуется;
+- когда он обязателен;
+- что он означает.
+
+Точные взаимосвязи между полями и дополнительные ограничения собраны в разделе 4.
+
 ### 3.1. Основные параметры
 
-Основные поля исходного `guest.yaml`:
+Основные параметры определяют идентичность гостя, его место в проекте и возможность автоматического развёртывания.
 
-| Поле | Назначение |
-|---|---|
-| `schema_version` | версия машинного контракта исходного манифеста |
-| `vmid` | VMID/CTID гостевой системы |
-| `name` | имя гостя и имя каталога после числового префикса |
-| `description` | краткое назначение гостевой системы |
-| `profile` | профиль, из которого deployable-гость получает тип и типовые настройки |
-| `type` | тип `vm`, `lxc` или `undecided`; для deployable-гостя приходит из профиля |
-| `state` | логическое состояние объекта в проекте |
-| `deployable` | может ли объект управляться универсальным контуром развёртывания |
-| `node` | PVE-узел |
-| `protection` | требование защиты объекта средствами Proxmox |
-| `placement.pool` | pool Proxmox или явное `null` |
+| Поле | Тип | Где задаётся | Обязательность | Назначение |
+|---|---|---|---|---|
+| `schema_version` | integer, фиксированное значение `7` | `guest.yaml` | всегда | версия машинного контракта исходного манифеста |
+| `vmid` | integer, `100–999` | `guest.yaml` | всегда | VMID/CTID гостевой системы |
+| `name` | string | `guest.yaml` | всегда | имя гостя; должно совпадать с именем каталога после VMID |
+| `description` | непустая string | `guest.yaml` | всегда | краткое назначение гостевой системы |
+| `profile` | string | `guest.yaml` | для `deployable: true` | имя профиля из `guests/defaults.yaml` |
+| `type` | enum: `vm`, `lxc`, `undecided` | профиль либо `guest.yaml` | зависит от `deployable` | тип гостевой системы |
+| `state` | enum: `planned`, `active`, `bootstrap`, `legacy` | `guest.yaml` | всегда | логическое состояние объекта в проекте |
+| `deployable` | boolean | `guest.yaml` | всегда | разрешено ли универсальному контуру развёртывать гостя |
+| `node` | string | обычно `defaults`, допускается override | в effective state | PVE-узел |
+| `protection` | boolean | обычно `defaults`, допускается override | в effective state | защита VM/LXC средствами Proxmox |
+| `placement.pool` | string или `null` | обычно `defaults`, допускается override | в effective state | pool Proxmox или явное отсутствие pool |
 
-Действующая source schema использует:
-
-```yaml
-schema_version: 7
-```
-
-Для `guests/defaults.yaml` действует отдельная версия:
-
-```yaml
-schema_version: 2
-```
+Имена `name` и `profile` используют простой машинный формат: строчные латинские буквы, цифры и дефис. Имя начинается с буквы или цифры.
 
 Каталог гостя имеет форму:
 
@@ -255,80 +256,289 @@ schema_version: 2
 <VMID>-<name>
 ```
 
-и значения `vmid` и `name` в манифесте должны совпадать с именем каталога.
+Например:
+
+```text
+311-dev-services/
+└── guest.yaml
+```
+
+Начало соответствующего манифеста:
+
+```yaml
+schema_version: 7
+vmid: 311
+name: dev-services
+profile: docker-lxc
+state: planned
+deployable: true
+
+description: Ansible, Semaphore, Git, CI and development services
+```
+
+Для deployable-гостя `type` в обычном `guest.yaml` не повторяется. Он приходит из выбранного профиля:
+
+```yaml
+profiles:
+  docker-lxc:
+    type: lxc
+```
+
+Для объекта, который пока только описан и не должен развёртываться, допустима другая модель:
+
+```yaml
+schema_version: 7
+vmid: 550
+name: future-service
+type: undecided
+state: planned
+deployable: false
+
+description: Reserved guest for a future service
+```
+
+Явное исключение из обычного pool задаётся через `null`:
+
+```yaml
+placement:
+  pool: null
+```
+
+Это именно значение, а не отсутствие параметра.
 
 ### 3.2. Ресурсы
 
-Раздел `resources` описывает вычислительные ресурсы гостя.
+Раздел `resources` описывает вычислительные ресурсы и основной диск гостя.
 
-Основные поля:
+| Поле | Тип | Где задаётся | Обязательность | Назначение |
+|---|---|---|---|---|
+| `resources.cpu.cores` | integer, минимум `1` | обычно `guest.yaml` | для deployable-гостя | число виртуальных CPU |
+| `resources.cpu.type` | непустая string | defaults/profile/guest | необязательно | тип CPU Proxmox, если нужен явный выбор |
+| `resources.memory_mb` | integer, минимум `256` | обычно `guest.yaml` | для deployable-гостя | оперативная память в MiB |
+| `resources.ballooning_mb` | integer, минимум `0` | defaults/profile/guest | необязательно | нижняя граница ballooning для VM |
+| `resources.swap_mb` | integer, минимум `0` | defaults/profile/guest | обязателен в effective LXC | swap LXC в MiB |
+| `resources.disk.size_gb` | integer, минимум `1` | обычно `guest.yaml` | для deployable-гостя | требуемый размер основного диска |
+| `resources.disk.storage` | непустая string | обычно `defaults`, допускается override | в effective state | PVE storage для основного диска |
 
-| Поле | Назначение |
-|---|---|
-| `resources.cpu.cores` | число виртуальных CPU |
-| `resources.cpu.type` | тип CPU, если требуется явное значение |
-| `resources.memory_mb` | объём оперативной памяти |
-| `resources.ballooning_mb` | нижняя граница ballooning для VM, если используется |
-| `resources.swap_mb` | swap для LXC |
-| `resources.disk.size_gb` | требуемый размер основного диска |
-| `resources.disk.storage` | хранилище диска |
+Типичный индивидуальный блок ресурсов LXC:
 
-Для deployable-гостя должны быть определены как минимум CPU, память и размер диска.
+```yaml
+resources:
+  cpu:
+    cores: 2
+  memory_mb: 4096
+  swap_mb: 1024
+  disk:
+    size_gb: 32
+```
 
-Общее дисковое хранилище может приходить из `defaults.yaml`.
+При этом общее хранилище не требуется повторять в каждом госте:
 
-`ballooning_mb` не может превышать `memory_mb`.
+```yaml
+# guests/defaults.yaml
+defaults:
+  resources:
+    disk:
+      storage: local-lvm
+```
+
+После объединения effective state будет содержать и размер, и storage:
+
+```yaml
+resources:
+  cpu:
+    cores: 2
+  memory_mb: 4096
+  swap_mb: 1024
+  disk:
+    size_gb: 32
+    storage: local-lvm
+```
+
+Пример ресурсов VM:
+
+```yaml
+resources:
+  cpu:
+    cores: 2
+  memory_mb: 4096
+  disk:
+    size_gb: 24
+```
+
+`ballooning_mb`, если используется, не может превышать `memory_mb`.
+
+Например:
+
+```yaml
+resources:
+  memory_mb: 4096
+  ballooning_mb: 2048
+```
+
+допустимо, а `ballooning_mb: 8192` при `memory_mb: 4096` — нет.
 
 ### 3.3. Сеть и запуск
 
-Общая management-сеть хранится централизованно в `guests/defaults.yaml`.
+Сетевые параметры разделены на центральные настройки сети и индивидуальное состояние гостя.
 
-Её основные параметры:
+| Поле | Тип | Где задаётся | Обязательность | Назначение |
+|---|---|---|---|---|
+| `network.bridge` | непустая string | `defaults`; guest override допускается | в effective state | PVE bridge |
+| `network.subnet` | IPv4 network string | только центральные defaults | в defaults | management-подсеть проекта |
+| `network.gateway` | IPv4 address string | только центральные defaults | в defaults | общий gateway |
+| `network.addressing` | фиксированное значение `vmid` | только центральные defaults | в defaults | правило автоматического вычисления IP |
+| `network.ipv4.address` в source | bare IPv4 string без prefix | только конкретный `guest.yaml` | необязательно | явное исключение из VMID-адресации |
+| `network.ipv4.address` в effective state | IPv4 interface string с prefix | вычисляется resolver | всегда для deployable-гостя | итоговый management IPv4 |
 
-| Поле | Назначение |
-|---|---|
-| `network.bridge` | PVE bridge |
-| `network.subnet` | центральная management IPv4-подсеть |
-| `network.gateway` | общий gateway |
-| `network.addressing` | способ вычисления адресов; используется `vmid` |
-| `network.ipv4.address` | индивидуальное переопределение адреса конкретного гостя |
+Центральная сеть выглядит, например, так:
 
-Обычный `guest.yaml` не хранит `subnet`, `gateway` и способ адресации.
+```yaml
+# guests/defaults.yaml
+network:
+  bridge: vmbr0
+  subnet: 192.168.0.0/16
+  gateway: 192.168.1.1
+  addressing: vmid
+```
 
-Раздел запуска:
+Для VMID `311` обычный `guest.yaml` вообще не содержит IP. Resolver получает:
 
-| Поле | Назначение |
-|---|---|
-| `boot.onboot` | запускать ли гостя при старте PVE |
-| `boot.start_after_deploy` | должен ли гость быть запущен в конце инфраструктурного развёртывания |
+```yaml
+network:
+  bridge: vmbr0
+  subnet: 192.168.0.0/16
+  gateway: 192.168.1.1
+  addressing: vmid
+  ipv4:
+    address: 192.168.3.11/16
+```
 
-Если индивидуальный IPv4 не задан, effective state получает вычисленный адрес с префиксом центральной подсети.
+Если гостю нужен осознанный нестандартный адрес, в source-манифесте задаётся только bare IPv4:
+
+```yaml
+network:
+  ipv4:
+    address: 192.168.8.50
+```
+
+Записывать prefix в индивидуальном поле нельзя:
+
+```yaml
+# неверно
+network:
+  ipv4:
+    address: 192.168.8.50/16
+```
+
+Параметры запуска:
+
+| Поле | Тип | Где задаётся | Обязательность | Назначение |
+|---|---|---|---|---|
+| `boot.onboot` | boolean | обычно `defaults`, допускается override | в effective state | запускать ли гостя при старте PVE |
+| `boot.start_after_deploy` | boolean | обычно `defaults`, допускается override | в effective state | запускать ли гостя после инфраструктурного развёртывания |
+
+Базовая политика проекта сейчас задаётся централизованно:
+
+```yaml
+boot:
+  onboot: true
+  start_after_deploy: true
+```
+
+Индивидуальное изменение возможно только когда оно действительно требуется:
+
+```yaml
+boot:
+  onboot: false
+```
+
+Связанные ограничения для management и Bootstrap описаны в разделе 4.
 
 ### 3.4. Управление и первоначальная подготовка
 
-Раздел `management` описывает инфраструктурный административный контур гостя.
+Раздел `management` описывает административный доступ и дополнительные управляемые возможности гостя.
 
-| Поле | Назначение |
-|---|---|
-| `management.ssh.user` | пользователь административного SSH |
-| `management.ssh.port` | порт административного SSH |
-| `management.ssh_identity` | нужна ли гостю собственная исходящая management SSH identity |
-| `management.project_repo_read` | нужен ли гостю управляемый read-only доступ к проектному Git |
+| Поле | Тип | Где задаётся | Обязательность | Назначение |
+|---|---|---|---|---|
+| `management.ssh.user` | string; для управляемых Debian — `root` | обычно `defaults` | в effective state | пользователь административного SSH |
+| `management.ssh.port` | integer, `1–65535`; проектный контракт — `22` | обычно `defaults` | в effective state | порт административного SSH |
+| `management.ssh_identity` | boolean | только конкретный `guest.yaml` | необязательно в source; boolean в effective | собственная исходящая management SSH identity |
+| `management.project_repo_read` | boolean | только конкретный `guest.yaml` | необязательно в source; boolean в effective | управляемый read-only доступ к репозиторию проекта |
 
-Для управляемых Debian-гостей действующий административный контракт:
+Общий административный контракт задаётся один раз:
 
 ```yaml
+# guests/defaults.yaml
 management:
   ssh:
     user: root
     port: 22
 ```
 
-`management.ssh_identity` и `management.project_repo_read` являются individual-only boolean-полями.
+Обычному гостю не требуется повторять этот блок.
 
-Если они отсутствуют в исходном манифесте, effective state нормализует их в `false`.
+Гость, которому нужна собственная management identity:
 
-Первоначальная подготовка задаётся через:
+```yaml
+management:
+  ssh_identity: true
+```
+
+Гость, которому дополнительно нужен read-only доступ к проектному Git:
+
+```yaml
+management:
+  ssh_identity: true
+  project_repo_read: true
+```
+
+Если individual-only поле отсутствует, effective state нормализует его в `false`. Например, source:
+
+```yaml
+management:
+  ssh_identity: true
+```
+
+даёт в effective state:
+
+```yaml
+management:
+  ssh:
+    user: root
+    port: 22
+  ssh_identity: true
+  project_repo_read: false
+```
+
+Первоначальная подготовка задаётся отдельным блоком `bootstrap`.
+
+| Поле | Тип | Где задаётся | Обязательность | Назначение |
+|---|---|---|---|---|
+| `bootstrap.capabilities` | object/mapping | только конкретный `guest.yaml` | только если нужен Bootstrap | набор явно включённых возможностей |
+| `bootstrap.capabilities.base` | boolean | `guest.yaml` | по необходимости | базовая подготовка |
+| `bootstrap.capabilities.git` | boolean | `guest.yaml` | по необходимости | подготовка Git |
+| `bootstrap.capabilities.docker` | boolean | `guest.yaml` | по необходимости | подготовка Docker |
+| `bootstrap.capabilities.ansible_controller` | boolean | `guest.yaml` | по необходимости | подготовка Ansible controller |
+
+Минимальный Bootstrap:
+
+```yaml
+bootstrap:
+  capabilities:
+    base: true
+```
+
+Bootstrap для Docker-гостя:
+
+```yaml
+bootstrap:
+  capabilities:
+    base: true
+    docker: true
+```
+
+Полный набор для управляющего DevOps-гостя:
 
 ```yaml
 bootstrap:
@@ -339,45 +549,120 @@ bootstrap:
     ansible_controller: true
 ```
 
-Разрешённые capabilities первой версии:
+Если блок `bootstrap` присутствует, хотя бы одна capability должна иметь значение `true`.
 
-```text
-base
-git
-docker
-ansible_controller
-```
+Неизвестные capability names не разрешены.
 
-`bootstrap` задаётся только явно конкретному гостю и не наследуется из общих настроек или профиля.
+Зависимости capabilities и требования к запуску гостя описаны в разделе 4.
 
 ### 3.5. Параметры VM и LXC
 
-VM-профиль использует раздел `vm`.
+Параметры типа гостя обычно определяются профилем, а не индивидуальным `guest.yaml`.
 
-Основные поля:
+Для VM используется раздел `vm`:
 
-| Поле | Назначение |
-|---|---|
-| `vm.source.template_vmid` | VMID исходного шаблона |
-| `vm.source.clone` | способ клонирования; поддерживается `full` |
-| `vm.guest_agent` | требование QEMU Guest Agent |
-| `vm.bios` | `ovmf` или `seabios`, если требуется явное значение |
+| Поле | Тип | Где задаётся | Обязательность | Назначение |
+|---|---|---|---|---|
+| `vm.source.template_vmid` | integer, `100–9999` | VM-профиль | для deployable VM | VMID исходного шаблона |
+| `vm.source.clone` | enum, сейчас только `full` | VM-профиль | для deployable VM | способ клонирования |
+| `vm.guest_agent` | boolean | VM-профиль | для deployable VM | использование QEMU Guest Agent |
+| `vm.bios` | enum: `ovmf`, `seabios` | defaults/profile/guest по schema; для deployable обычно профиль | необязательно | тип BIOS VM |
 
-Deployable VM получает `type` и раздел `vm` из профиля и не должна дублировать их в индивидуальном манифесте.
+Действующий базовый профиль:
 
-LXC-профиль использует раздел `lxc`.
+```yaml
+profiles:
+  debian-vm:
+    type: vm
+    vm:
+      source:
+        template_vmid: 9000
+        clone: full
+      guest_agent: true
+```
 
-Основные поля:
+Индивидуальный deployable VM-манифест поэтому остаётся компактным:
 
-| Поле | Назначение |
-|---|---|
-| `lxc.source.ostemplate` | селектор семейства Proxmox LXC template |
-| `lxc.unprivileged` | непривилегированный LXC |
-| `lxc.container_runtime` | контейнерная среда внутри LXC; поддерживается `docker` |
-| `lxc.features.nesting` | разрешение nesting |
-| `lxc.features.keyctl` | разрешение keyctl |
+```yaml
+schema_version: 7
+vmid: 301
+name: ai-control
+profile: debian-vm
+state: planned
+deployable: true
 
-Deployable LXC также получает `type` и раздел `lxc` из профиля.
+description: Target central AI infrastructure control plane
+
+placement:
+  pool: null
+
+resources:
+  cpu:
+    cores: 2
+  memory_mb: 4096
+  disk:
+    size_gb: 24
+```
+
+В нём нет `type: vm`, `vm.source` и `vm.guest_agent`: эти значения приходят из профиля.
+
+Для LXC используется раздел `lxc`:
+
+| Поле | Тип | Где задаётся | Обязательность | Назначение |
+|---|---|---|---|---|
+| `lxc.source.ostemplate` | string | LXC-профиль | для deployable LXC | селектор семейства Proxmox LXC template |
+| `lxc.unprivileged` | boolean | LXC-профиль | для deployable LXC | непривилегированный контейнер |
+| `lxc.container_runtime` | enum, сейчас только `docker` | LXC-профиль | если профиль предназначен для Docker | контейнерная среда внутри LXC |
+| `lxc.features.nesting` | boolean | LXC-профиль | для действующего Docker-профиля | разрешение nesting |
+| `lxc.features.keyctl` | boolean | LXC-профиль | для действующего Docker-профиля | разрешение keyctl |
+
+Действующий Docker-LXC профиль:
+
+```yaml
+profiles:
+  docker-lxc:
+    type: lxc
+    lxc:
+      container_runtime: docker
+      source:
+        ostemplate: local:vztmpl/debian-13-standard
+      unprivileged: true
+      features:
+        nesting: true
+        keyctl: true
+```
+
+Индивидуальный LXC-манифест содержит только индивидуальные значения:
+
+```yaml
+schema_version: 7
+vmid: 321
+name: app-services
+profile: docker-lxc
+state: planned
+deployable: true
+
+description: General application services including Homarr
+
+resources:
+  cpu:
+    cores: 2
+  memory_mb: 2048
+  swap_mb: 512
+  disk:
+    size_gb: 24
+```
+
+Если этому же гостю понадобится Bootstrap Docker, он добавляется отдельно:
+
+```yaml
+bootstrap:
+  capabilities:
+    base: true
+    docker: true
+```
+
+Наличие `container_runtime: docker` в профиле и наличие Bootstrap capability `docker` решают разные задачи: первое описывает тип гостя, второе — явно запрошенную первоначальную подготовку внутри него.
 
 ## 4. Правила и ограничения
 
