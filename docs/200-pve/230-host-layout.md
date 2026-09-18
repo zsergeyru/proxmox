@@ -55,7 +55,8 @@
 │   ├── version                            — версия установленной PVE Configuration
 │   ├── last-run.json                      — сведения о последнем запуске
 │   ├── last-revision                      — принятая Git-ревизия проекта
-│   └── template-smoke.json                — состояние проверки полного клона шаблона
+│   ├── template-smoke.json                — состояние проверки полного клона шаблона
+│   └── bootstrap-complete                 — признак завершённой первоначальной подготовки
 ├── public-keys/                           — реестр открытых управляющих SSH-ключей
 │   ├── pve_deployer_ed25519.pub                       — открытая часть SSH-ключа PVE для управления гостевыми системами
 │   ├── <VMID>.pub                         — открытый ключ конкретной VM/LXC
@@ -348,4 +349,5 @@ VMID: 9099
 - [`200-overview.md`](200-overview.md) — общая роль PVE-хоста и его основные компоненты.
 - [`210-host-bootstrap.md`](210-host-bootstrap.md) — первоначальная подготовка и передача управления PVE Configuration.
 - [`220-host-configuration.md`](220-host-configuration.md) — постоянное требуемое состояние и проверка соответствия PVE-хоста.
+- [`290-decisions.md`](290-decisions.md) — причины ключевых решений по устройству и управлению PVE-хостом.
 - [`../100-architecture/120-state-model.md`](../100-architecture/120-state-model.md) — общая модель требуемого, фактического и служебного состояния.
