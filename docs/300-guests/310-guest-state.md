@@ -206,8 +206,8 @@ scripts/guest_config.py
 - объединяет defaults, профиль и индивидуальный манифест;
 - нормализует individual-only management-поля;
 - вычисляет административный IP;
-- проверяет зависимости Bootstrap capabilities;
-- возвращает включённые capabilities в каноническом порядке.
+- проверяет и нормализует запрошенный Bootstrap;
+- возвращает запрошенные Bootstrap-инструменты в каноническом порядке.
 
 Машинный формат итогового состояния проверяется схемой:
 
@@ -1062,115 +1062,119 @@ management:
 
 Точный APPLY/REMOVE lifecycle относится к спецификации `deploy-guest`.
 
-#### 3.5.5. `bootstrap.capabilities.base`
+#### 3.5.5. `bootstrap`
 
-**Тип:** boolean.
+**Тип:** список заранее определённых Bootstrap-инструментов.
 
-Задаётся только внутри индивидуального блока:
+Bootstrap используется только для минимальной первоначальной установки инфраструктурных инструментов внутри конкретной VM/LXC.
 
-```yaml
-bootstrap:
-  capabilities:
-    base: true
-```
-
-`base` включает базовую первоначальную подготовку гостевой ОС.
-
-Если `base: true`, capability входит в план Bootstrap и выполняется первой.
-
-Если `base: false`, capability не выполняется.
-
-Если `base` отсутствует, она также не считается включённой. Но capabilities `git`, `docker` и `ansible_controller` могут требовать её явно как зависимость.
-
-Если другие включённые capabilities требуют `base`, а `base: true` не указан, resolver выдаёт ошибку.
-
-#### 3.5.6. `bootstrap.capabilities.git`
-
-**Тип:** boolean.
-
-Пример:
+Целевая форма:
 
 ```yaml
 bootstrap:
-  capabilities:
-    base: true
-    git: true
+  - git
+  - docker
+  - ansible
 ```
 
-`git: true` запрашивает Git-capability первоначальной подготовки.
-
-Она требует явного:
-
-```yaml
-base: true
-```
-
-Если `git: true`, а `base` отсутствует или равен `false`, resolver завершится ошибкой.
-
-Если `git` отсутствует или равен `false`, Git-capability через Bootstrap не выполняется.
-
-#### 3.5.7. `bootstrap.capabilities.docker`
-
-**Тип:** boolean.
-
-Пример:
-
-```yaml
-bootstrap:
-  capabilities:
-    base: true
-    docker: true
-```
-
-`docker: true` запрашивает Docker-capability первоначальной подготовки внутри гостевой ОС.
-
-Она требует `base: true`.
-
-Если зависимость не включена явно, resolver выдаёт ошибку.
-
-Если поле отсутствует или равно `false`, Docker capability через Bootstrap не выполняется.
-
-Этот параметр не следует путать с:
-
-```yaml
-lxc:
-  container_runtime: docker
-```
-
-`lxc.container_runtime` описывает тип LXC-профиля, а `bootstrap.capabilities.docker` — действие первоначальной подготовки внутри гостя.
-
-#### 3.5.8. `bootstrap.capabilities.ansible_controller`
-
-**Тип:** boolean.
-
-Пример:
-
-```yaml
-bootstrap:
-  capabilities:
-    base: true
-    git: true
-    docker: true
-    ansible_controller: true
-```
-
-`ansible_controller: true` запрашивает подготовку гостя как Ansible controller.
-
-Она требует одновременно:
+Допустимы только:
 
 ```text
-base
 git
 docker
+ansible
 ```
 
-и все три зависимости должны быть явно указаны как `true`.
+Если Bootstrap этому гостю не нужен, поле `bootstrap` вообще не создаётся.
 
-Если хотя бы одной зависимости нет, resolver завершится ошибкой.
+Пустой список, произвольные имена, значения `true/false`, package lists и shell-команды в source-контракт не входят.
 
-Если поле отсутствует или равно `false`, capability не выполняется.
+> **Переходное состояние:** текущие schemas, resolver и `deploy-guest` ещё используют старую структуру `bootstrap.capabilities` с boolean-полями `base`, `git`, `docker` и `ansible_controller`. Они будут переведены на список отдельным общим изменением.
 
-Если блок `bootstrap` присутствует, но все capabilities отсутствуют или равны `false`, конфигурация считается ошибочной. Для гостя без Bootstrap блок `bootstrap` нужно просто не создавать.
+Базовая техническая готовность больше не является выбираемой capability.
+
+Для каждого управляемого Debian-гостя deploy-контур сам должен обеспечить необходимые базовые предпосылки для дальнейшего управления, например Python, CA certificates и `rsync`, и проверить их перед выполнением запрошенного Bootstrap.
+
+Поэтому в `guest.yaml` больше не требуется писать:
+
+```yaml
+bootstrap:
+  capabilities:
+    base: true
+```
+
+##### `git`
+
+`git` означает, что внутри гостевой ОС должен быть установлен и работать Git client.
+
+Пример:
+
+```yaml
+bootstrap:
+  - git
+```
+
+Эта возможность не выдаёт Git credential, не выбирает репозиторий и не клонирует произвольный repository.
+
+Доступ к приватному репозиторию проекта является отдельной management-возможностью:
+
+```yaml
+management:
+  project_repo_read: true
+```
+
+##### `docker`
+
+`docker` означает, что непосредственно внутри гостевой ОС должен быть установлен и работать проектно поддерживаемый Docker Engine вместе с Docker Compose.
+
+Пример:
+
+```yaml
+bootstrap:
+  - docker
+```
+
+Для LXC это не заменяет требования выбранного LXC-профиля к `unprivileged`, `nesting` и `keyctl`.
+
+Профиль определяет, **можно ли и как** использовать Docker внутри данного типа LXC, а Bootstrap `docker` определяет, **нужно ли установить Docker** в конкретный экземпляр.
+
+##### `ansible`
+
+`ansible` означает, что непосредственно внутри VM/LXC должен быть установлен и работать Ansible, в базовой реализации — `ansible-core`.
+
+Пример:
+
+```yaml
+bootstrap:
+  - ansible
+```
+
+Ansible устанавливается **не в Docker-контейнер и не через Docker**, а непосредственно в гостевую операционную систему развёрнутой VM или LXC.
+
+`ansible` не требует `docker`.
+
+`ansible` также не требует `git` как техническую dependency Bootstrap.
+
+Если конкретному гостю нужны все три инструмента, они указываются независимо:
+
+```yaml
+bootstrap:
+  - git
+  - docker
+  - ansible
+```
+
+Если Docker не нужен:
+
+```yaml
+bootstrap:
+  - git
+  - ansible
+```
+
+Bootstrap не устанавливает Semaphore, Gitea/Gogs, Jenkins, прикладные Docker Compose stacks или другие сервисы.
+
+После минимальной первоначальной подготовки дальнейшая повторяемая конфигурация ОС и приложений должна выполняться отдельным provisioning-контуром, прежде всего Ansible.
 
 ### 3.6. Параметры VM и LXC
 
@@ -1503,34 +1507,33 @@ management.project_repo_read
 
 Запуск гостя для этих действий является обязанностью deploy-контракта и не задаётся отдельным параметром в `guest.yaml`.
 
-Bootstrap capabilities имеют явные зависимости:
+Базовая техническая готовность гостя является обязанностью deploy-контура и не выбирается в `guest.yaml`.
+
+Опциональный Bootstrap содержит только явно требуемые инструменты:
 
 ```text
-base
-
 git
-└─ base
-
 docker
-└─ base
-
-ansible_controller
-├─ base
-├─ git
-└─ docker
+ansible
 ```
 
-Зависимости не включаются автоматически.
+Эти три пункта независимы друг от друга.
 
-Если capability требуется, она должна быть явно установлена в `true`.
-
-Канонический порядок:
+В частности:
 
 ```text
-base → git → docker → ansible_controller
+ansible
+≠ зависит от docker
+
+ansible
+≠ устанавливается внутри Docker
 ```
 
-Манифест не является интерфейсом для произвольных shell-команд, package lists, URL установщиков или секретов.
+Ansible устанавливается непосредственно в гостевую ОС VM/LXC.
+
+Если одному гостю нужны несколько инструментов, они перечисляются независимо в `bootstrap`.
+
+Манифест не является интерфейсом для произвольных shell-команд, package lists, URL установщиков, секретов или прикладных сервисов.
 
 ### 4.4. Правила VM и LXC
 
@@ -1625,7 +1628,7 @@ Validator и средство развёртывания должны испол
 - сеть;
 - management-контракт;
 - параметры VM/LXC;
-- зависимости Bootstrap.
+- корректность Bootstrap.
 
 Некоторые проверки нельзя выразить только YAML-схемой и выполняются программно.
 
@@ -1650,7 +1653,7 @@ python scripts/validate_repo.py
 - допустимость переопределений;
 - требования к гостя с `profile`м;
 - VM- и LXC-ограничения;
-- Bootstrap dependencies;
+- корректность Bootstrap;
 - отсутствие секретоподобных полей и private key material.
 
 Ошибка проверки означает, что состояние нельзя считать корректным входом для автоматического развёртывания.
