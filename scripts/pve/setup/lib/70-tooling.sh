@@ -6,15 +6,271 @@ install_private_tooling() {
     cat >/usr/local/sbin/pve-configuration-status <<'EOF_STATUS'
 #!/usr/bin/env bash
 set -Eeuo pipefail
+
 STATE=/var/lib/proxmox-deployer/state/state.json
 SMOKE=/var/lib/proxmox-deployer/state/template-smoke.json
-[[ -f "$STATE" ]] || { echo "Файл состояния PVE Configuration не найден: $STATE" >&2; exit 1; }
-printf '%s\n' '=== PVE Configuration ==='
-jq . "$STATE"
-if [[ -f "$SMOKE" ]]; then
-    printf '\n%s\n' '=== Template Full Clone smoke ==='
-    jq . "$SMOKE"
-fi
+LAST_REVISION=/var/lib/proxmox-deployer/state/last-revision
+CONFIG=/etc/proxmox-deployer/config.yaml
+SSH_DIR=/etc/proxmox-deployer/ssh
+SECRETS_DIR=/etc/proxmox-deployer/secrets
+RUNTIME_DIR=/var/lib/proxmox-deployer
+REPO_DIR=/var/lib/proxmox-deployer/repo
+PUBLIC_KEYS_DIR=/var/lib/proxmox-deployer/public-keys
+DEPLOY_USER=pvedeploy
+EXPECTED_REPO='git@github.com:zsergeyru/proxmox.git'
+TEMPLATE_VMID=9000
+TEMPLATE_NAME=tpl-debian13
+MANAGED_POOL=managed
+
+show_saved_status() {
+    [[ -f "$STATE" ]] || { echo "Файл состояния PVE Configuration не найден: $STATE" >&2; exit 1; }
+    printf '%s\n' '=== PVE Configuration: сохранённое состояние ==='
+    jq . "$STATE"
+    if [[ -f "$SMOKE" ]]; then
+        printf '\n%s\n' '=== Проверка полного клона шаблона ==='
+        jq . "$SMOKE"
+    fi
+}
+
+usage() {
+    cat <<'USAGE'
+Использование:
+  pve-configuration-status
+  pve-configuration-status --check
+
+Без параметров:
+  показывает последнее сохранённое состояние PVE Configuration.
+
+--check:
+  заново проверяет фактическое состояние PVE-хоста;
+  ничего не исправляет и не изменяет.
+
+Коды возврата --check:
+  0  все обязательные проверки пройдены
+  1  обнаружена ошибка или несоответствие
+  2  обязательные проверки пройдены, но есть предупреждения
+USAGE
+}
+
+ERRORS=0
+WARNINGS=0
+
+check_ok() { printf '[ОК] %s\n' "$1"; }
+check_warn() { WARNINGS=$((WARNINGS + 1)); printf '[ПРЕДУПРЕЖДЕНИЕ] %s\n' "$1"; }
+check_error() { ERRORS=$((ERRORS + 1)); printf '[ОШИБКА] %s\n' "$1"; }
+
+check_file_contract() {
+    local path=$1 owner_group=$2 mode=$3 label=$4 actual_owner actual_mode
+    if [[ ! -f "$path" || -L "$path" ]]; then check_error "$label: отсутствует обычный файл $path"; return; fi
+    actual_owner="$(stat -c '%U:%G' "$path" 2>/dev/null || true)"
+    actual_mode="$(stat -c '%a' "$path" 2>/dev/null || true)"
+    if [[ "$actual_owner" == "$owner_group" && "$actual_mode" == "$mode" ]]; then
+        check_ok "$label: $path"
+    else
+        check_error "$label: $path, ожидается $owner_group $mode, обнаружено ${actual_owner:-?} ${actual_mode:-?}"
+    fi
+}
+
+check_dir_contract() {
+    local path=$1 owner_group=$2 mode=$3 label=$4 actual_owner actual_mode
+    if [[ ! -d "$path" || -L "$path" ]]; then check_error "$label: отсутствует каталог $path"; return; fi
+    actual_owner="$(stat -c '%U:%G' "$path" 2>/dev/null || true)"
+    actual_mode="$(stat -c '%a' "$path" 2>/dev/null || true)"
+    if [[ "$actual_owner" == "$owner_group" && "$actual_mode" == "$mode" ]]; then
+        check_ok "$label: $path"
+    else
+        check_error "$label: $path, ожидается $owner_group $mode, обнаружено ${actual_owner:-?} ${actual_mode:-?}"
+    fi
+}
+
+check_required_command() {
+    local cmd=$1
+    command -v "$cmd" >/dev/null 2>&1 && check_ok "команда установлена: $cmd" || check_error "не найдена обязательная команда: $cmd"
+}
+
+check_role() {
+    local role=$1 required=$2 roles_json actual missing priv
+    roles_json="$(pveum role list --output-format json 2>/dev/null || true)"
+    actual="$(jq -r --arg role "$role" '.[] | select(.roleid == $role) | (.privs // "")' <<<"$roles_json" 2>/dev/null | head -n1)"
+    if [[ -z "$actual" ]]; then check_error "роль Proxmox отсутствует: $role"; return; fi
+    missing=""
+    for priv in $required; do
+        if ! tr ', ' '\n\n' <<<"$actual" | grep -Fxq "$priv"; then missing+="${priv} "; fi
+    done
+    [[ -z "$missing" ]] && check_ok "роль Proxmox: $role" || check_error "роль $role не содержит обязательные привилегии: ${missing% }"
+}
+
+check_token_permissions() {
+    local user=$1 token=$2 label=$3 scope=$4 required=$5 json priv
+    json="$(pveum user token permissions "$user" "$token" --output-format json 2>/dev/null || true)"
+    if [[ -z "$json" ]] || ! jq -e . >/dev/null 2>&1 <<<"$json"; then check_error "$label: не удалось получить фактические права"; return; fi
+    for priv in $required; do
+        if ! jq -e --arg path "$scope" --arg priv "$priv" '((.[$path] // {}) | has($priv))' <<<"$json" >/dev/null; then
+            check_error "$label: на $scope отсутствует $priv"
+            return
+        fi
+    done
+    check_ok "$label: права на $scope"
+}
+
+run_check() {
+    local saved_status user_record uid gid_name home shell guest_fp reg_fp parent_owner parent_mode violation origin drift revision recorded state_revision
+    local users_json host_token ai_token pools_json storage template_cfg smoke_status
+
+    printf '%s\n' '=== PVE Configuration: фактическая проверка ==='
+
+    for cmd in jq git find stat getent id ssh-keygen pveversion pveum pvesm qm; do
+        command -v "$cmd" >/dev/null 2>&1 || check_error "не найдена команда, необходимая для проверки: $cmd"
+    done
+    if (( ERRORS > 0 )); then printf '\n[ИТОГ] ERROR: errors=%d warnings=%d\n' "$ERRORS" "$WARNINGS"; return 1; fi
+
+    pveversion >/dev/null 2>&1 && check_ok "Proxmox VE доступен" || check_error "не удалось получить версию Proxmox VE"
+
+    if [[ -f "$STATE" ]] && jq -e '.component == "pve-configuration"' "$STATE" >/dev/null 2>&1; then
+        check_ok "машинное состояние PVE Configuration читается"
+        saved_status="$(jq -r '.status // "unknown"' "$STATE")"
+        [[ "$saved_status" == "configured" || "$saved_status" == "success" ]] || check_warn "последний сохранённый статус: $saved_status"
+    else
+        check_error "машинное состояние отсутствует или повреждено: $STATE"
+    fi
+
+    check_dir_contract /etc/proxmox-deployer root:root 755 "каталог конфигурации"
+    check_dir_contract "$SSH_DIR" root:pvedeploy 750 "каталог SSH"
+    check_dir_contract "$SECRETS_DIR" root:pvedeploy 710 "каталог секретов"
+    check_dir_contract "$RUNTIME_DIR" root:pvedeploy 750 "каталог служебного состояния"
+    check_dir_contract /var/lib/proxmox-deployer/state root:pvedeploy 750 "каталог состояния"
+    check_dir_contract /var/lib/proxmox-deployer/cache pvedeploy:pvedeploy 750 "каталог кэша"
+    check_dir_contract "$PUBLIC_KEYS_DIR" pvedeploy:pvedeploy 750 "реестр открытых управляющих ключей"
+    check_dir_contract /var/lib/pvedeploy/.ssh pvedeploy:pvedeploy 700 "SSH-каталог pvedeploy"
+    check_dir_contract /var/log/proxmox-deployer root:pvedeploy 750 "каталог журналов"
+
+    if getent passwd "$DEPLOY_USER" >/dev/null 2>&1; then
+        user_record="$(getent passwd "$DEPLOY_USER")"
+        uid="$(cut -d: -f3 <<<"$user_record")"
+        gid_name="$(id -gn "$DEPLOY_USER" 2>/dev/null || true)"
+        home="$(cut -d: -f6 <<<"$user_record")"
+        shell="$(cut -d: -f7 <<<"$user_record")"
+        if (( uid < 1000 )) && [[ "$gid_name" == "$DEPLOY_USER" && "$home" == "/var/lib/pvedeploy" && "$shell" == "/bin/bash" ]]; then
+            check_ok "пользователь pvedeploy соответствует контракту"
+        else
+            check_error "пользователь pvedeploy не соответствует контракту: uid=$uid group=$gid_name home=$home shell=$shell"
+        fi
+    else
+        check_error "пользователь pvedeploy отсутствует"
+    fi
+
+    check_file_contract "$SSH_DIR/github_proxmox_repo_ed25519" root:root 600 "ключ чтения GitHub"
+    check_file_contract "$SSH_DIR/github_proxmox_repo_ed25519.pub" root:root 644 "открытая часть ключа GitHub"
+    check_file_contract "$SSH_DIR/config" root:root 600 "конфигурация SSH GitHub"
+    check_file_contract "$SSH_DIR/known_hosts" root:root 644 "доверие SSH GitHub"
+    check_file_contract "$SSH_DIR/pve_guest_ed25519" pvedeploy:pvedeploy 600 "закрытый ключ управления гостями"
+    check_file_contract "$SSH_DIR/pve_guest_ed25519.pub" pvedeploy:pvedeploy 644 "открытый ключ управления гостями"
+    check_file_contract "$SECRETS_DIR/host-deploy.token" root:pvedeploy 640 "секрет host-deploy"
+    check_file_contract "$SECRETS_DIR/ai-agent-infra.token" root:root 600 "секрет ai-agent"
+    check_file_contract "$PUBLIC_KEYS_DIR/deployer.pub" pvedeploy:pvedeploy 644 "deployer.pub"
+    check_file_contract "$PUBLIC_KEYS_DIR/management-authorized-keys" pvedeploy:pvedeploy 644 "management-authorized-keys"
+
+    if [[ -f "$SSH_DIR/pve_guest_ed25519.pub" && -f "$PUBLIC_KEYS_DIR/deployer.pub" ]]; then
+        guest_fp="$(ssh-keygen -lf "$SSH_DIR/pve_guest_ed25519.pub" -E sha256 2>/dev/null | awk 'NR==1 {print $2}')"
+        reg_fp="$(ssh-keygen -lf "$PUBLIC_KEYS_DIR/deployer.pub" -E sha256 2>/dev/null | awk 'NR==1 {print $2}')"
+        [[ -n "$guest_fp" && "$guest_fp" == "$reg_fp" ]] && check_ok "deployer.pub соответствует PVE guest SSH identity" || check_error "deployer.pub не соответствует PVE guest SSH identity"
+    fi
+
+    if [[ -f "$CONFIG" ]]         && grep -Fxq 'repo: zsergeyru/proxmox' "$CONFIG"         && grep -Fxq 'branch: main' "$CONFIG"         && grep -Fxq 'checkout: /var/lib/proxmox-deployer/repo' "$CONFIG"         && grep -Fxq 'managed_pool: managed' "$CONFIG"         && grep -Fxq 'host_deploy_identity: deployer@pve!host-deploy' "$CONFIG"         && grep -Fxq 'ai_infra_identity: ai-agent@pve!infra' "$CONFIG"         && grep -Fxq 'template_vmid: 9000' "$CONFIG"; then
+        check_ok "локальная конфигурация соответствует контракту"
+    else
+        check_error "локальная конфигурация отсутствует или не соответствует ожидаемой модели: $CONFIG"
+    fi
+
+    if [[ -d "$REPO_DIR/.git" ]]; then
+        parent_owner="$(stat -c '%U:%G' "$RUNTIME_DIR" 2>/dev/null || true)"
+        parent_mode="$(stat -c '%a' "$RUNTIME_DIR" 2>/dev/null || true)"
+        violation="$(find "$REPO_DIR" -xdev \( -type f -o -type d \) \( ! -uid 0 -o -perm /022 \) -print -quit 2>/dev/null || true)"
+        origin="$(git -c "safe.directory=$REPO_DIR" -C "$REPO_DIR" remote get-url origin 2>/dev/null || true)"
+        drift="$(git -c "safe.directory=$REPO_DIR" -C "$REPO_DIR" status --porcelain=v1 --untracked-files=all --ignored 2>/dev/null || true)"
+        revision="$(git -c "safe.directory=$REPO_DIR" -C "$REPO_DIR" rev-parse HEAD 2>/dev/null || true)"
+        recorded="$(cat "$LAST_REVISION" 2>/dev/null || true)"
+        state_revision="$(jq -r '.repository_revision // empty' "$STATE" 2>/dev/null || true)"
+
+        [[ "$parent_owner" == "root:pvedeploy" && "$parent_mode" == "750" ]] && check_ok "родитель доверенной копии защищён" || check_error "родитель доверенной копии имеет неверные владельца или права"
+        [[ -z "$violation" ]] && check_ok "доверенная копия принадлежит root и защищена от записи" || check_error "нарушена граница доверия Git: ${violation:-неизвестно}"
+        [[ "$origin" == "$EXPECTED_REPO" ]] && check_ok "origin доверенной копии соответствует проекту" || check_error "неожиданный origin: ${origin:-не задан}"
+        [[ -z "$drift" ]] && check_ok "локальные изменения в доверенной копии отсутствуют" || check_error "в доверенной копии есть локальные изменения: $(head -n1 <<<"$drift")"
+
+        if [[ "$revision" =~ ^[0-9a-f]{40}$ && "$revision" == "$recorded" && "$revision" == "$state_revision" ]]; then
+            check_ok "ревизия Git согласована со служебным состоянием"
+        else
+            check_error "ревизия Git не согласована: git=${revision:-?} last-revision=${recorded:-?} state=${state_revision:-?}"
+        fi
+    else
+        check_error "доверенная локальная копия проекта отсутствует: $REPO_DIR"
+    fi
+
+    users_json="$(pveum user list --output-format json 2>/dev/null || true)"
+    for user in deployer@pve ai-agent@pve; do
+        jq -e --arg id "$user" '.[] | select(.userid == $id and ((.enable // 1) != 0))' <<<"$users_json" >/dev/null 2>&1             && check_ok "пользователь Proxmox: $user" || check_error "пользователь Proxmox отсутствует или отключён: $user"
+    done
+
+    host_token="$(pveum user token list deployer@pve --output-format json 2>/dev/null || true)"
+    ai_token="$(pveum user token list ai-agent@pve --output-format json 2>/dev/null || true)"
+    jq -e '.[] | select(.tokenid == "host-deploy" and ((.privsep // 1) == 1))' <<<"$host_token" >/dev/null 2>&1         && check_ok "API-токен deployer@pve!host-deploy" || check_error "API-токен deployer@pve!host-deploy отсутствует или имеет privsep != 1"
+    jq -e '.[] | select(.tokenid == "infra" and ((.privsep // 1) == 1))' <<<"$ai_token" >/dev/null 2>&1         && check_ok "API-токен ai-agent@pve!infra" || check_error "API-токен ai-agent@pve!infra отсутствует или имеет privsep != 1"
+
+    check_role AICloneSource 'VM.Audit VM.Clone'
+    check_role AIManagedGuest 'VM.Allocate VM.Audit VM.Backup VM.Clone VM.Config.CDROM VM.Config.Cloudinit VM.Config.CPU VM.Config.Disk VM.Config.HWType VM.Config.Memory VM.Config.Network VM.Config.Options VM.Console VM.GuestAgent.Audit VM.PowerMgmt VM.Snapshot VM.Snapshot.Rollback'
+    check_role AINetworkUse 'SDN.Use'
+    check_role AIStorage 'Datastore.AllocateSpace Datastore.Audit'
+    check_role AIManagedPool 'Pool.Allocate Pool.Audit'
+
+    pools_json="$(pveum pool list --output-format json 2>/dev/null || true)"
+    jq -e --arg p "$MANAGED_POOL" '.[] | select(.poolid == $p)' <<<"$pools_json" >/dev/null 2>&1         && check_ok "пул Proxmox: $MANAGED_POOL" || check_error "пул Proxmox отсутствует: $MANAGED_POOL"
+
+    check_token_permissions deployer@pve host-deploy "deployer@pve!host-deploy" /vms 'VM.Allocate VM.Audit VM.Clone VM.Config.CPU VM.Config.Disk VM.Config.Memory VM.Config.Network VM.PowerMgmt'
+    check_token_permissions deployer@pve host-deploy "deployer@pve!host-deploy" /pool/managed 'Pool.Allocate Pool.Audit'
+    check_token_permissions ai-agent@pve infra "ai-agent@pve!infra" /pool/managed 'VM.Allocate VM.Audit VM.Clone VM.Config.CPU VM.Config.Disk VM.Config.Memory VM.Config.Network VM.PowerMgmt Pool.Allocate Pool.Audit'
+    check_token_permissions ai-agent@pve infra "ai-agent@pve!infra" /vms/9000 'VM.Audit VM.Clone'
+
+    for storage in local local-lvm; do
+        pvesm status --storage "$storage" >/dev/null 2>&1 && check_ok "хранилище доступно: $storage" || check_error "хранилище недоступно: $storage"
+    done
+
+    if template_cfg="$(qm config "$TEMPLATE_VMID" 2>/dev/null)"; then
+        if grep -Fxq 'template: 1' <<<"$template_cfg" && grep -Fxq "name: $TEMPLATE_NAME" <<<"$template_cfg"; then
+            check_ok "базовый шаблон VMID $TEMPLATE_VMID соответствует основным признакам"
+        else
+            check_error "VMID $TEMPLATE_VMID существует, но не соответствует базовому шаблону $TEMPLATE_NAME"
+        fi
+    else
+        check_error "базовый шаблон VMID $TEMPLATE_VMID отсутствует"
+    fi
+
+    check_required_command pve-configuration-status
+    check_required_command deploy-guest
+    check_required_command sync-management-keys
+
+    if [[ -f "$SMOKE" ]]; then
+        smoke_status="$(jq -r '.status // .result // "unknown"' "$SMOKE" 2>/dev/null || true)"
+        case "$smoke_status" in
+            passed|success) check_ok "последняя проверка полного клона шаблона: $smoke_status" ;;
+            pending|unknown|"") check_warn "состояние проверки полного клона шаблона: ${smoke_status:-unknown}" ;;
+            *) check_error "проверка полного клона шаблона имеет состояние: $smoke_status" ;;
+        esac
+    else
+        check_warn "файл состояния проверки полного клона шаблона отсутствует"
+    fi
+
+    printf '\n'
+    if (( ERRORS > 0 )); then printf '[ИТОГ] ERROR: errors=%d warnings=%d\n' "$ERRORS" "$WARNINGS"; return 1; fi
+    if (( WARNINGS > 0 )); then printf '[ИТОГ] PARTIAL: errors=0 warnings=%d\n' "$WARNINGS"; return 2; fi
+    printf '[ИТОГ] OK: фактическое состояние соответствует обязательным проверкам\n'
+}
+
+case "${1:-}" in
+    "") show_saved_status ;;
+    --check) [[ $# -eq 1 ]] || { usage >&2; exit 1; }; run_check ;;
+    -h|--help) usage ;;
+    *) usage >&2; exit 1 ;;
+esac
 EOF_STATUS
     chmod 0755 /usr/local/sbin/pve-configuration-status
 
