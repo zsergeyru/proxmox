@@ -113,13 +113,36 @@ check_token_permissions() {
     check_ok "$label: права на $scope"
 }
 
+check_token_auth() {
+    local token_id=$1 secret_file=$2 label=$3 stored_id secret response
+
+    if [[ ! -f "$secret_file" || -L "$secret_file" ]]; then
+        check_error "$label: файл секрета отсутствует или небезопасен"
+        return
+    fi
+
+    stored_id="$(sed -n 's/^token_id=//p' "$secret_file" | head -n1)"
+    secret="$(sed -n 's/^token_secret=//p' "$secret_file" | head -n1)"
+    if [[ "$stored_id" != "$token_id" || -z "$secret" ]]; then
+        check_error "$label: локальный secret не соответствует ожидаемому token_id"
+        return
+    fi
+
+    if response="$(curl --fail --silent --show-error --insecure         --connect-timeout 10 --max-time 20         --header "Authorization: PVEAPIToken=${token_id}=${secret}"         https://127.0.0.1:8006/api2/json/version 2>/dev/null)"         && jq -e '(.data.version // .data.release // empty) != ""' <<<"$response" >/dev/null 2>&1; then
+        check_ok "$label: локальная авторизация API работает"
+    else
+        check_error "$label: локальная авторизация API не прошла"
+    fi
+    unset secret response
+}
+
 run_check() {
     local saved_status user_record uid gid_name home shell guest_fp reg_fp parent_owner parent_mode violation origin drift revision recorded state_revision
     local users_json host_token ai_token pools_json storage template_cfg smoke_status
 
     printf '%s\n' '=== PVE Configuration: фактическая проверка ==='
 
-    for cmd in jq git find stat getent id ssh-keygen pveversion pveum pvesm qm; do
+    for cmd in jq git find stat getent id ssh-keygen curl pveversion pveum pvesm qm; do
         command -v "$cmd" >/dev/null 2>&1 || check_error "не найдена команда, необходимая для проверки: $cmd"
     done
     if (( ERRORS > 0 )); then printf '\n[ИТОГ] ERROR: errors=%d warnings=%d\n' "$ERRORS" "$WARNINGS"; return 1; fi
@@ -225,10 +248,20 @@ run_check() {
     pools_json="$(pveum pool list --output-format json 2>/dev/null || true)"
     jq -e --arg p "$MANAGED_POOL" '.[] | select(.poolid == $p)' <<<"$pools_json" >/dev/null 2>&1         && check_ok "пул Proxmox: $MANAGED_POOL" || check_error "пул Proxmox отсутствует: $MANAGED_POOL"
 
-    check_token_permissions deployer@pve host-deploy "deployer@pve!host-deploy" /vms 'VM.Allocate VM.Audit VM.Clone VM.Config.CPU VM.Config.Disk VM.Config.Memory VM.Config.Network VM.PowerMgmt'
+    check_token_permissions deployer@pve host-deploy "deployer@pve!host-deploy" /vms 'VM.Allocate VM.Audit VM.Backup VM.Clone VM.Config.CDROM VM.Config.Cloudinit VM.Config.CPU VM.Config.Disk VM.Config.HWType VM.Config.Memory VM.Config.Network VM.Config.Options VM.Console VM.GuestAgent.Audit VM.PowerMgmt VM.Snapshot VM.Snapshot.Rollback'
     check_token_permissions deployer@pve host-deploy "deployer@pve!host-deploy" /pool/managed 'Pool.Allocate Pool.Audit'
-    check_token_permissions ai-agent@pve infra "ai-agent@pve!infra" /pool/managed 'VM.Allocate VM.Audit VM.Clone VM.Config.CPU VM.Config.Disk VM.Config.Memory VM.Config.Network VM.PowerMgmt Pool.Allocate Pool.Audit'
+    check_token_permissions deployer@pve host-deploy "deployer@pve!host-deploy" /storage/local 'Datastore.AllocateSpace Datastore.Audit'
+    check_token_permissions deployer@pve host-deploy "deployer@pve!host-deploy" /storage/local-lvm 'Datastore.AllocateSpace Datastore.Audit'
+    check_token_permissions deployer@pve host-deploy "deployer@pve!host-deploy" /sdn/zones/localnetwork/vmbr0 'SDN.Use'
+
+    check_token_permissions ai-agent@pve infra "ai-agent@pve!infra" /pool/managed 'VM.Allocate VM.Audit VM.Backup VM.Clone VM.Config.CDROM VM.Config.Cloudinit VM.Config.CPU VM.Config.Disk VM.Config.HWType VM.Config.Memory VM.Config.Network VM.Config.Options VM.Console VM.GuestAgent.Audit VM.PowerMgmt VM.Snapshot VM.Snapshot.Rollback Pool.Allocate Pool.Audit'
     check_token_permissions ai-agent@pve infra "ai-agent@pve!infra" /vms/9000 'VM.Audit VM.Clone'
+    check_token_permissions ai-agent@pve infra "ai-agent@pve!infra" /storage/local 'Datastore.AllocateSpace Datastore.Audit'
+    check_token_permissions ai-agent@pve infra "ai-agent@pve!infra" /storage/local-lvm 'Datastore.AllocateSpace Datastore.Audit'
+    check_token_permissions ai-agent@pve infra "ai-agent@pve!infra" /sdn/zones/localnetwork/vmbr0 'SDN.Use'
+
+    check_token_auth 'deployer@pve!host-deploy' "$SECRETS_DIR/host-deploy.token" "deployer@pve!host-deploy"
+    check_token_auth 'ai-agent@pve!infra' "$SECRETS_DIR/ai-agent-infra.token" "ai-agent@pve!infra"
 
     for storage in local local-lvm; do
         pvesm status --storage "$storage" >/dev/null 2>&1 && check_ok "хранилище доступно: $storage" || check_error "хранилище недоступно: $storage"
