@@ -58,7 +58,7 @@
 │   ├── last-revision                      — принятая Git-ревизия проекта
 │   └── template-smoke.json                — состояние проверки полного клона шаблона
 ├── public-keys/                           — реестр открытых управляющих SSH-ключей
-│   ├── deployer.pub                       — основной открытый ключ управления гостями
+│   ├── pve_deployer_ed25519.pub                       — открытая часть SSH-ключа PVE для управления гостевыми системами
 │   ├── <VMID>.pub                         — открытый ключ конкретной VM/LXC
 │   └── management-authorized-keys         — общий набор разрешённых управляющих ключей
 └── cache/                                 — изменяемые служебные кэшированные данные
@@ -69,8 +69,8 @@
 ├── ssh/                                   — SSH-ключи и параметры доверия
 │   ├── github_proxmox_repo_ed25519        — закрытый ключ чтения приватного GitHub-репозитория
 │   ├── github_proxmox_repo_ed25519.pub    — открытая часть ключа GitHub
-│   ├── pve_guest_ed25519                  — закрытый ключ управления гостевыми системами
-│   ├── pve_guest_ed25519.pub              — открытая часть ключа управления гостями
+│   ├── pve_deployer_ed25519                  — закрытый ключ управления гостевыми системами
+│   ├── pve_deployer_ed25519.pub              — открытая часть ключа управления гостями
 │   ├── config                             — локальная SSH-конфигурация доступа к GitHub
 │   └── known_hosts                        — доверенные SSH-ключи узлов GitHub
 └── secrets/                               — локальные секреты API-токенов Proxmox
@@ -135,7 +135,7 @@
 
 | Файл | Назначение |
 |---|---|
-| `deployer.pub` | Канонический открытый ключ PVE для управления гостями |
+| `pve_deployer_ed25519.pub` | Зарегистрированная открытая часть SSH-ключа PVE для управления гостевыми системами |
 | `<VMID>.pub` | Индивидуальный управляющий открытый ключ конкретного гостя |
 | `management-authorized-keys` | Детерминированно собранный общий набор разрешённых управляющих ключей |
 
@@ -163,8 +163,8 @@
 | `ssh/github_proxmox_repo_ed25519.pub` | Открытая часть ключа GitHub Deploy Key | `root:root` | `0644` |
 | `ssh/config` | SSH-конфигурация доступа к GitHub | `root:root` | `0600` |
 | `ssh/known_hosts` | Доверие к SSH-ключу узла GitHub | `root:root` | `0644` |
-| `ssh/pve_guest_ed25519` | Закрытый ключ управления гостевыми системами | `pvedeploy:pvedeploy` | `0600` |
-| `ssh/pve_guest_ed25519.pub` | Открытая часть ключа управления гостями | `pvedeploy:pvedeploy` | `0644` |
+| `ssh/pve_deployer_ed25519` | Закрытый ключ управления гостевыми системами | `pvedeploy:pvedeploy` | `0600` |
+| `ssh/pve_deployer_ed25519.pub` | Открытая часть ключа управления гостями | `pvedeploy:pvedeploy` | `0644` |
 
 Для GitHub и гостевых систем используются отдельные SSH-контуры и отдельные файлы `known_hosts`.
 
@@ -325,7 +325,7 @@ VMID: 9099
 |---|---|---|---|---|
 | Локальная конфигурация | `/etc/proxmox-deployer/` | конфигурация | да | root |
 | GitHub Deploy Key | `/etc/proxmox-deployer/ssh/github_proxmox_repo_ed25519` | секрет | да | root |
-| SSH-ключ управления гостями | `/etc/proxmox-deployer/ssh/pve_guest_ed25519` | секрет | да | pvedeploy |
+| SSH-ключ управления гостями | `/etc/proxmox-deployer/ssh/pve_deployer_ed25519` | секрет | да | pvedeploy |
 | API-секреты | `/etc/proxmox-deployer/secrets/` | секреты | да | root |
 | Канонический Git | `/var/lib/proxmox-deployer/repo/` | исходный код | да | root |
 | Состояние PVE Configuration | `/var/lib/proxmox-deployer/state/` | служебное состояние | да | root |
