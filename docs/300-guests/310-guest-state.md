@@ -115,22 +115,17 @@ guests/<VMID>-<name>/guest.yaml
 profiles:
   debian-vm:
     type: vm
-    vm:
-      source:
-        template_vmid: 9000
-        clone: full
-      guest_agent: true
+    template_vmid: 9000
 
-  docker-lxc:
+  debian-lxc:
     type: lxc
-    lxc:
-      container_runtime: docker
-      source:
-        ostemplate: local:vztmpl/debian-13-standard
-      unprivileged: true
-      features:
-        nesting: true
-        keyctl: true
+    ostemplate: local:vztmpl/debian-13-standard
+
+  debian-lxc-docker:
+    type: lxc
+    ostemplate: local:vztmpl/debian-13-standard
+    features:
+      - container-host
 ```
 
 Индивидуальный `guest.yaml` содержит параметры конкретной VM/LXC и осознанные отклонения от общих значений.
@@ -336,7 +331,7 @@ description: Ansible, Semaphore, Git, CI and development services
 Пример:
 
 ```yaml
-profile: docker-lxc
+profile: debian-lxc-docker
 ```
 
 Параметр выбирает типовую основу гостя.
@@ -345,16 +340,11 @@ profile: docker-lxc
 
 ```yaml
 profiles:
-  docker-lxc:
+  debian-lxc-docker:
     type: lxc
-    lxc:
-      container_runtime: docker
-      source:
-        ostemplate: local:vztmpl/debian-13-standard
-      unprivileged: true
-      features:
-        nesting: true
-        keyctl: true
+    ostemplate: local:vztmpl/debian-13-standard
+    features:
+      - container-host
 ```
 
 передаёт гостю тип `lxc` и параметры LXC.
@@ -1100,9 +1090,9 @@ bootstrap:
   - docker
 ```
 
-Для LXC это не заменяет требования выбранного LXC-профиля к `unprivileged`, `nesting` и `keyctl`.
+Для LXC это не заменяет требование выбрать профиль с feature `container-host`.
 
-Профиль определяет, **можно ли и как** использовать Docker внутри данного типа LXC, а Bootstrap `docker` определяет, **нужно ли установить Docker** в конкретный экземпляр.
+`container-host` означает, что LXC технически подготовлен для запуска вложенного container runtime. Bootstrap `docker` отдельно определяет, **нужно ли установить Docker** в конкретный экземпляр.
 
 #### 3.6.3. `ansible`
 
@@ -1142,14 +1132,96 @@ Bootstrap не устанавливает Semaphore, Gitea/Gogs, Jenkins, при
 
 После минимальной первоначальной подготовки дальнейшая повторяемая конфигурация ОС и приложений должна выполняться отдельным provisioning-контуром, прежде всего Ansible.
 
-### 3.7. Параметры VM и LXC
+### 3.7. Параметры профилей VM и LXC
 
+Параметры этого раздела задаются в `guests/defaults.yaml` внутри определения профиля.
 
-#### 3.7.1. `vm.source.template_vmid`
+Они описывают **тип и способ создания** класса гостей, а не индивидуальные настройки конкретной VM/LXC.
+
+В индивидуальном `guest.yaml` гостя с `profile` эти параметры не повторяются.
+
+Целевая модель профилей:
+
+```yaml
+profiles:
+  debian-vm:
+    type: vm
+    template_vmid: 9000
+
+  debian-lxc:
+    type: lxc
+    ostemplate: local:vztmpl/debian-13-standard
+
+  debian-lxc-docker:
+    type: lxc
+    ostemplate: local:vztmpl/debian-13-standard
+    features:
+      - container-host
+```
+
+Имя профиля выбирается для удобства человека и может отражать ОС, тип гостя и назначение, например:
+
+```text
+debian-vm
+debian-lxc
+debian-lxc-docker
+ubuntu-vm
+ubuntu-lxc
+ubuntu-lxc-docker
+```
+
+Машинная логика не должна определяться разбором имени профиля. Она определяется только его полями.
+
+> **Переходное состояние:** текущие defaults, schemas и runtime-код ещё используют вложенные `vm/lxc`, `clone`, `guest_agent`, `unprivileged`, `container_runtime`, `nesting` и `keyctl`. Они будут приведены к целевой модели отдельным общим изменением.
+
+#### 3.7.1. `type`
+
+**Тип:** enum:
+
+```text
+vm
+lxc
+```
+
+`type` определяет технический тип объекта Proxmox, создаваемого этим профилем.
+
+Пример VM:
+
+```yaml
+debian-vm:
+  type: vm
+  template_vmid: 9000
+```
+
+Пример LXC:
+
+```yaml
+debian-lxc:
+  type: lxc
+  ostemplate: local:vztmpl/debian-13-standard
+```
+
+Дополнительные особенности профиля не создают новые технические типы.
+
+Например профиль `debian-lxc-docker` всё равно имеет:
+
+```yaml
+type: lxc
+```
+
+а способность запускать вложенный container runtime описывается через `features`.
+
+#### 3.7.2. `template_vmid`
 
 **Тип:** integer от `100` до `9999`.
 
-Используется в VM-профиле.
+Параметр допустим только для профиля с:
+
+```yaml
+type: vm
+```
+
+Он определяет VM-шаблон, из которого создаются VM этого профиля.
 
 Пример:
 
@@ -1157,221 +1229,117 @@ Bootstrap не устанавливает Semaphore, Gitea/Gogs, Jenkins, при
 profiles:
   debian-vm:
     type: vm
-    vm:
-      source:
-        template_vmid: 9000
-```
-
-Параметр определяет VM-шаблон, из которого создаётся VM с `profile`.
-
-Для VM с `profile` он должен приходить из профиля, а не из индивидуального `guest.yaml`.
-
-Если поле отсутствует в VM-профиле, профиль не проходит schema validation.
-
-Если `template_vmid` совпадает с VMID создаваемого гостя, проверка завершается ошибкой: VM не может клонироваться сама из себя.
-
-#### 3.7.2. `vm.source.clone`
-
-**Тип:** enum; сейчас допустимо только:
-
-```text
-full
-```
-
-Пример:
-
-```yaml
-vm:
-  source:
     template_vmid: 9000
-    clone: full
 ```
 
-Параметр фиксирует способ клонирования VM.
+Для управляемой VM используется Full Clone как фиксированное правило проекта.
 
-Если указано `full`, используется поддерживаемая проектом модель Full Clone.
+Отдельного параметра `clone` в целевой модели нет.
 
-Другие значения текущая schema не принимает.
+QEMU Guest Agent также является обязательной частью контракта каждой управляемой VM и не задаётся отдельным boolean-полем профиля.
 
-Если поле отсутствует в VM с `profile`-профиле, профиль не проходит проверку.
+BIOS/UEFI наследуется от выбранного VM template и отдельно профилем не переопределяется.
 
-#### 3.7.3. `vm.guest_agent`
+Если `template_vmid` совпадает с VMID создаваемого гостя, проверка должна завершаться ошибкой: VM не может клонироваться сама из себя.
 
-**Тип:** boolean.
-
-Пример:
-
-```yaml
-vm:
-  guest_agent: true
-```
-
-Параметр определяет требование QEMU Guest Agent для VM.
-
-Для VM с `profile` проект требует именно:
-
-```yaml
-guest_agent: true
-```
-
-Если в VM-профиле указано `false`, `validate_repo.py` выдаёт ошибку.
-
-Если поле отсутствует в VM-профиле, профиль не проходит schema validation.
-
-В индивидуальный `guest.yaml` гостя с `profile` весь раздел `vm` помещать нельзя — значение должно приходить из профиля.
-
-#### 3.7.4. `vm.bios`
-
-**Тип:** enum:
-
-```text
-ovmf
-seabios
-```
-
-Параметр позволяет явно зафиксировать тип BIOS VM.
-
-Пример в VM-профиле:
-
-```yaml
-vm:
-  bios: ovmf
-```
-
-Если значение задано в defaults или профиле, оно попадает в effective state и становится частью desired state VM.
-
-Для гостя с `profile` индивидуальный раздел `vm` запрещён, поэтому `vm.bios` также не следует задавать непосредственно в его `guest.yaml`.
-
-Если `vm.bios` отсутствует во всех источниках, effective schema это допускает: проект не фиксирует BIOS этим параметром.
-
-#### 3.7.5. `lxc.source.ostemplate`
+#### 3.7.3. `ostemplate`
 
 **Тип:** string — селектор семейства Proxmox `vztmpl`.
 
-Действующий пример:
+Параметр допустим только для профиля с:
 
 ```yaml
-lxc:
-  source:
+type: lxc
+```
+
+Он определяет семейство системного образа LXC.
+
+Пример:
+
+```yaml
+profiles:
+  debian-lxc:
+    type: lxc
     ostemplate: local:vztmpl/debian-13-standard
 ```
 
-Поле используется в LXC-профиле и определяет семейство системного образа.
+В Git хранится стабильный селектор семейства, а не конкретное имя versioned-архива.
 
-В Git хранится не конкретный versioned archive, а стабильный селектор семейства.
-
-Поэтому допустимо:
+Допустимо:
 
 ```text
 local:vztmpl/debian-13-standard
 ```
 
-а конкретное имя архива, wildcard, `latest`, `13.x`, `tbd` и подобные плавающие значения запрещены проверкой.
+Не допускаются wildcard, `latest`, `13.x`, `tbd` и конкретное имя загруженного архивного файла.
 
-Если поле отсутствует в LXC-профиле, профиль не проходит schema validation.
+Все LXC, создаваемые универсальным deploy-контуром, являются **unprivileged**.
 
-В индивидуальном `guest.yaml` гостя с `profile` раздел `lxc` задавать нельзя.
+Это фиксированная политика проекта, поэтому отдельного параметра `unprivileged` в целевом профиле нет.
 
-#### 3.7.6. `lxc.unprivileged`
+#### 3.7.4. `features`
 
-**Тип:** boolean.
+**Тип:** необязательный список высокоуровневых возможностей профиля.
 
-Пример:
+`features` используется тогда, когда конкретному классу гостя требуется дополнительная техническая подготовка на уровне Proxmox.
 
-```yaml
-lxc:
-  unprivileged: true
-```
-
-Параметр определяет, создаётся ли LXC непривилегированным.
-
-В каждом LXC-профиле поле должно присутствовать.
-
-Для Docker-LXC проект требует:
-
-```yaml
-unprivileged: true
-```
-
-Если `container_runtime: docker`, но `unprivileged` равно `false`, проверка профиля завершается ошибкой.
-
-Для LXC без `container_runtime: docker` schema допускает собственное boolean-значение, если такое решение действительно требуется.
-
-Если поле отсутствует в профиле, profile schema выдаёт ошибку.
-
-#### 3.7.7. `lxc.container_runtime`
-
-**Тип:** enum; сейчас поддерживается только:
+Первая поддерживаемая feature:
 
 ```text
-docker
+container-host
 ```
 
 Пример:
 
 ```yaml
-lxc:
-  container_runtime: docker
+profiles:
+  debian-lxc-docker:
+    type: lxc
+    ostemplate: local:vztmpl/debian-13-standard
+    features:
+      - container-host
 ```
 
-Параметр отмечает LXC-профиль как предназначенный для Docker runtime.
+`container-host` означает:
 
-Если он равен `docker`, проект автоматически требует согласованную комбинацию:
+> LXC технически подготовлен для запуска вложенного container runtime.
+
+Feature не означает, что Docker уже установлен, и не привязана к конкретному продукту Docker.
+
+В текущей реализации для LXC она разворачивается во внутренние Proxmox-настройки:
+
+```text
+unprivileged = true
+nesting = true
+keyctl = true
+```
+
+При этом `unprivileged=true` является общей политикой всех управляемых LXC, а `nesting` и `keyctl` добавляются именно для `container-host`.
+
+Низкоуровневые параметры `nesting` и `keyctl` не являются публичными полями профиля и не задаются по отдельности.
+
+Если конкретному LXC действительно нужно установить Docker, это задаётся отдельно в индивидуальном госте:
 
 ```yaml
-unprivileged: true
-features:
-  nesting: true
-  keyctl: true
+profile: debian-lxc-docker
+
+bootstrap:
+  - docker
 ```
 
-Если хотя бы одно из этих условий не выполнено, профиль не проходит проверку.
+Таким образом:
 
-Если `container_runtime` отсутствует, LXC не считается Docker-LXC по этому контракту, и Docker-специфическое правило не применяется.
+```text
+profile feature: container-host
+→ LXC способен корректно запускать container runtime
 
-#### 3.7.8. `lxc.features.nesting`
-
-**Тип:** boolean.
-
-Пример:
-
-```yaml
-lxc:
-  features:
-    nesting: true
+bootstrap: docker
+→ Docker Engine действительно должен быть установлен внутри гостя
 ```
 
-Поле управляет LXC feature `nesting`.
+Если у LXC запрошен Bootstrap `docker`, выбранный профиль должен содержать `container-host`. Иначе проверка должна завершаться ошибкой.
 
-Каждый LXC с `profile`-профиль должен явно содержать это поле.
-
-Если профиль предназначен для Docker, значение обязано быть `true`.
-
-Если Docker runtime не указан, поле всё равно должно присутствовать в LXC-профиле, но schema допускает `true` или `false`.
-
-Если поле отсутствует, профиль не проходит schema validation.
-
-#### 3.7.9. `lxc.features.keyctl`
-
-**Тип:** boolean.
-
-Пример:
-
-```yaml
-lxc:
-  features:
-    keyctl: true
-```
-
-Поле управляет LXC feature `keyctl`.
-
-Как и `nesting`, оно обязательно присутствует в LXC с `profile`-профиле.
-
-Для Docker-LXC значение обязано быть `true`.
-
-Если Docker runtime не используется, профиль может осознанно задать `false`.
-
-Если поле отсутствует, profile schema выдаёт ошибку.
+Список `features` специально является расширяемым: в будущем в него могут быть добавлены другие высокоуровневые технические возможности профиля без публикации низкоуровневых Proxmox-флагов в пользовательский контракт.
 
 ## 4. Правила и ограничения
 
@@ -1519,49 +1487,47 @@ Ansible устанавливается непосредственно в гос�
 
 Запуск гостя для Bootstrap является обязанностью deploy-контракта и не задаётся отдельным параметром в `guest.yaml`.
 
-### 4.5. Правила VM и LXC
+### 4.5. Правила профилей VM и LXC
 
+Профиль типа `vm` обязан содержать `template_vmid`.
 
-Deployable VM должна использовать профиль типа `vm`.
-
-Проектный VM-профиль определяет источник из шаблона и включает QEMU Guest Agent.
-
-Первая версия универсального развёртывания поддерживает только:
+Управляемая VM:
 
 ```text
-clone: full
+создаётся Full Clone
+использует QEMU Guest Agent
+наследует BIOS/UEFI от template
 ```
 
-VM не может клонироваться сама из себя.
+Эти правила не задаются отдельными полями профиля.
 
-Для базовой Debian VM используется проектный шаблон, но точная спецификация его сборки относится к каталогу `templates/`.
+Профиль типа `lxc` обязан содержать `ostemplate`.
 
-Deployable LXC должен использовать профиль типа `lxc`.
+Все управляемые LXC создаются непривилегированными:
 
-В Git хранится селектор семейства LXC template, а не конкретное имя versioned-архива.
+```text
+unprivileged = true
+```
 
-Например:
+Если LXC-профиль содержит:
 
 ```yaml
-lxc:
-  source:
-    ostemplate: local:vztmpl/debian-13-standard
+features:
+  - container-host
 ```
 
-Плавающие обозначения вроде `latest`, `13.x`, `tbd`, wildcard или конкретное имя архивного файла не являются допустимым источником.
+deployer дополнительно включает необходимые низкоуровневые возможности Proxmox:
 
-Если LXC предназначен для Docker, обязательна комбинация:
-
-```yaml
-lxc:
-  container_runtime: docker
-  unprivileged: true
-  features:
-    nesting: true
-    keyctl: true
+```text
+nesting = true
+keyctl = true
 ```
 
-Docker внутри LXC допускается для доверенных сервисов в этих ограничениях. Более сильная изоляция при необходимости достигается выбором VM, а не расширением прав LXC без отдельного решения.
+Эти флаги являются внутренней реализацией feature и не выставляются как самостоятельные параметры профиля.
+
+Bootstrap `docker` для LXC разрешён только при наличии `container-host` в выбранном профиле.
+
+Имя профиля не является машинным контрактом. Например суффикс `-docker` может использоваться для удобства человека, но resolver и validator должны опираться только на `type`, source-параметр и `features`.
 
 ## 5. Проверка состояния
 
