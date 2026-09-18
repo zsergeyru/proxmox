@@ -238,6 +238,23 @@ PVE Configuration устанавливает стабильные админис
 | `deploy-guest` | `/usr/local/sbin/deploy-guest` | только root | Управляемое развертывание VM/LXC по контракту проекта |
 | `sync-management-keys` | `/usr/local/sbin/sync-management-keys` | только root | Синхронизация управляющих SSH-ключей с гостевыми системами |
 
+Для `pve-configuration-status` используются два режима:
+
+```text
+pve-configuration-status
+pve-configuration-status --check
+```
+
+Без параметров команда показывает сохранённый результат последнего запуска. Параметр `--check` выполняет новую проверку фактического состояния без внесения изменений.
+
+Коды возврата `--check`:
+
+```text
+0 — все обязательные проверки пройдены
+2 — ошибок нет, но есть предупреждения
+1 — обнаружена ошибка или несоответствие
+```
+
 `deploy-guest` и `sync-management-keys` являются локальными обёртками над исходным кодом из доверенной копии `/var/lib/proxmox-deployer/repo/`.
 
 `pve-configuration-status` устанавливается PVE Configuration как отдельная локальная команда.
