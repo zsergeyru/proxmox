@@ -42,6 +42,7 @@ violation="\$(find "\$REPO_DIR" -xdev \\( -type f -o -type d \\) \\( ! -uid 0 -o
 
 status="\$(git -c "safe.directory=\$REPO_DIR" -C "\$REPO_DIR" status --porcelain=v1 --untracked-files=all --ignored)" \\
     || fail "Не удалось проверить canonical checkout"
+status="\$(printf '%s\n' "\$status" | grep -Ev '^!! .*(__pycache__/|\.py[co]$)' || true)"
 [[ -z "\$status" ]] \\
     || fail "Canonical checkout содержит local drift; первый элемент: \$(head -n1 <<<"\$status")"
 
