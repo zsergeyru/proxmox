@@ -2,7 +2,7 @@
 
 PUBLIC_KEYS_DIR="${RUNTIME_DIR}/public-keys"
 MANAGEMENT_KEYS_AGGREGATE="${PUBLIC_KEYS_DIR}/management-authorized-keys"
-DEPLOYER_REGISTRY_KEY="${PUBLIC_KEYS_DIR}/deployer.pub"
+PVE_DEPLOYER_REGISTRY_KEY="${PUBLIC_KEYS_DIR}/pve_deployer_ed25519.pub"
 
 management_key_fingerprint() {
     local file=$1 fingerprint
@@ -44,7 +44,7 @@ rebuild_management_authorized_keys() {
     local tmp base file
     tmp="$(mktemp "${PUBLIC_KEYS_DIR}/.pve-config-aggregate.XXXXXX")"
 
-    awk 'NF {print; exit}' "$DEPLOYER_REGISTRY_KEY" >"$tmp"
+    awk 'NF {print; exit}' "$PVE_DEPLOYER_REGISTRY_KEY" >"$tmp"
     while IFS= read -r base; do
         [[ -n "$base" ]] || continue
         file="${PUBLIC_KEYS_DIR}/${base}"
@@ -93,7 +93,7 @@ validate_management_registry_entries() {
                     || die "${file} должен быть обычным файлом"
                 continue
                 ;;
-            deployer.pub)
+            pve_deployer_ed25519.pub)
                 ;;
             *.pub)
                 [[ "$name" =~ ^[1-9][0-9]{2}\.pub$ ]] \
@@ -126,22 +126,22 @@ ensure_management_public_key_registry() {
 
     install -d -o "$DEPLOY_USER" -g "$DEPLOY_USER" -m 0750 "$PUBLIC_KEYS_DIR"
 
-    validate_management_public_key_file "$PVE_GUEST_PUB" "$PVE_GUEST_PUB"
+    validate_management_public_key_file "$PVE_DEPLOYER_PUB" "$PVE_DEPLOYER_PUB"
 
     local canonical_fp registry_fp
-    canonical_fp="$(management_key_fingerprint "$PVE_GUEST_PUB")"
+    canonical_fp="$(management_key_fingerprint "$PVE_DEPLOYER_PUB")"
 
-    if [[ -e "$DEPLOYER_REGISTRY_KEY" ]]; then
-        validate_management_public_key_file "$DEPLOYER_REGISTRY_KEY" "$DEPLOYER_REGISTRY_KEY"
-        registry_fp="$(management_key_fingerprint "$DEPLOYER_REGISTRY_KEY")"
+    if [[ -e "$PVE_DEPLOYER_REGISTRY_KEY" ]]; then
+        validate_management_public_key_file "$PVE_DEPLOYER_REGISTRY_KEY" "$PVE_DEPLOYER_REGISTRY_KEY"
+        registry_fp="$(management_key_fingerprint "$PVE_DEPLOYER_REGISTRY_KEY")"
         [[ "$registry_fp" == "$canonical_fp" ]] \
-            || die "${DEPLOYER_REGISTRY_KEY} (${registry_fp}) не соответствует штатной deployer identity ${PVE_GUEST_PUB} (${canonical_fp}); автоматическая ротация запрещена"
-        chown "$DEPLOY_USER:$DEPLOY_USER" "$DEPLOYER_REGISTRY_KEY"
-        chmod 0644 "$DEPLOYER_REGISTRY_KEY"
-        ok "deployer.pub уже соответствует штатной deployer identity: ${canonical_fp}"
+            || die "${PVE_DEPLOYER_REGISTRY_KEY} (${registry_fp}) не соответствует штатной PVE deployer identity ${PVE_DEPLOYER_PUB} (${canonical_fp}); автоматическая ротация запрещена"
+        chown "$DEPLOY_USER:$DEPLOY_USER" "$PVE_DEPLOYER_REGISTRY_KEY"
+        chmod 0644 "$PVE_DEPLOYER_REGISTRY_KEY"
+        ok "pve_deployer_ed25519.pub уже соответствует штатной PVE deployer identity: ${canonical_fp}"
     else
-        write_registry_public_key_atomic "$PVE_GUEST_PUB" "$DEPLOYER_REGISTRY_KEY"
-        ok "Зарегистрирован deployer.pub: ${canonical_fp}"
+        write_registry_public_key_atomic "$PVE_DEPLOYER_PUB" "$PVE_DEPLOYER_REGISTRY_KEY"
+        ok "Зарегистрирован pve_deployer_ed25519.pub: ${canonical_fp}"
     fi
 
     validate_management_registry_entries
