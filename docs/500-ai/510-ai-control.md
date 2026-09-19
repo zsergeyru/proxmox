@@ -274,7 +274,7 @@ AI Control отвечает за рабочую среду AI-агентов и 
 - [`520-ai-management.md`](520-ai-management.md) — правила выбора и использования средств управления инфраструктурой.
 - [`590-decisions.md`](590-decisions.md) — причины ключевых решений по AI-контуру.
 - [`../300-guests/300-overview.md`](../300-guests/300-overview.md) — общая модель гостевых систем.
-- [`../300-guests/320-deploy-guest.md`](../300-guests/320-deploy-guest.md) — контракт `deploy-guest`.
+- [`../300-guests/330-deploy-guest.md`](../300-guests/330-deploy-guest.md) — контракт `deploy-guest`.
 - [`../700-security/710-pve-access.md`](../700-security/710-pve-access.md) — доступ к Proxmox.
 - [`../700-security/720-ssh-access.md`](../700-security/720-ssh-access.md) — административный доступ по SSH.
 - [`../800-operations/810-deployment.md`](../800-operations/810-deployment.md) — сквозное развёртывание проекта.
