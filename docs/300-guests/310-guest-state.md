@@ -209,13 +209,13 @@ guests/<VMID>-<name>/
 Например:
 
 ```text
-guests/301-ai-control/rootfs/opt/ai-control/skills/example/SKILL.md
+guests/311-dev-services/rootfs/etc/example/config.conf
 ```
 
 соответствует файлу:
 
 ```text
-/opt/ai-control/skills/example/SKILL.md
+/etc/example/config.conf
 ```
 
 В `rootfs/` допускается хранить только воспроизводимую конфигурацию и другие файлы, которыми проект осознанно управляет.
