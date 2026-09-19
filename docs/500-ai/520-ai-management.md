@@ -263,7 +263,7 @@ AI должен прекратить автоматическое выполне
 - [`500-overview.md`](500-overview.md) — место AI в архитектуре проекта.
 - [`510-ai-control.md`](510-ai-control.md) — устройство AI Control.
 - [`../100-architecture/120-state-model.md`](../100-architecture/120-state-model.md) — модель требуемого и фактического состояния.
-- [`../300-guests/320-deploy-guest.md`](../300-guests/320-deploy-guest.md) — контракт `deploy-guest`.
+- [`../300-guests/330-deploy-guest.md`](../300-guests/330-deploy-guest.md) — контракт `deploy-guest`.
 - [`../700-security/710-pve-access.md`](../700-security/710-pve-access.md) — доступ к Proxmox.
 - [`../700-security/720-ssh-access.md`](../700-security/720-ssh-access.md) — административный доступ по SSH.
 - [`../800-operations/810-deployment.md`](../800-operations/810-deployment.md) — сквозное развёртывание проекта.
