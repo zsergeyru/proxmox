@@ -390,7 +390,7 @@ verify_effective_permissions() {
 
 verify_token_api_auth() {
     local full_token=$1 secret_file=$2
-    local stored_id secret old_umask
+    local stored_id secret old_umask api_host
 
     stored_id="$(sed -n 's/^token_id=//p' "$secret_file" | head -n1)"
     secret="$(sed -n 's/^token_secret=//p' "$secret_file" | head -n1)"
@@ -409,10 +409,17 @@ verify_token_api_auth() {
     printf 'Authorization: PVEAPIToken=%s=%s\n' "$full_token" "$secret" >"$API_HEADER_FILE"
     chmod 0600 "$API_HEADER_FILE"
 
-    if ! curl --fail --silent --show-error --insecure \
+    [[ -f "$PVE_CA_FILE" && ! -L "$PVE_CA_FILE" ]] \
+        || die "Не найден безопасный локальный PVE CA для проверки API: ${PVE_CA_FILE}"
+    api_host="$(hostname -f 2>/dev/null || hostname)"
+    [[ -n "$api_host" ]] || die "Не удалось определить имя PVE для проверки HTTPS-сертификата"
+
+    if ! curl --fail --silent --show-error \
         --connect-timeout 10 --max-time 20 \
+        --cacert "$PVE_CA_FILE" \
+        --resolve "${api_host}:8006:127.0.0.1" \
         --header "@${API_HEADER_FILE}" \
-        https://127.0.0.1:8006/api2/json/version \
+        "https://${api_host}:8006/api2/json/version" \
         | jq -e '(.data.version // .data.release // empty) != ""' >/dev/null; then
         cleanup_api_header_file
         unset secret
