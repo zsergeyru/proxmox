@@ -289,7 +289,7 @@ smoke_verify_clone_config() {
     key_body="$(awk 'NF >= 2 {print $2; exit}' "$PVE_DEPLOYER_PUB")"
     [[ -n "$key_body" ]] || die "Не удалось прочитать public key ${PVE_DEPLOYER_PUB}"
     grep -Fq "$key_body" <<<"$cloudinit_user_data" \
-        || die "Cloud-Init smoke VM не содержит PVE guest SSH public key"
+        || die "Cloud-Init smoke VM не содержит PVE deployer SSH public key"
 
     ok "Full Clone config подтверждён: VMID=${SMOKE_VMID}, disk=${disk_size}, DHCP, root SSH key"
 }
@@ -405,7 +405,7 @@ run_template_smoke_test() {
     ip_before="$(smoke_wait_for_ipv4)" \
         || die "Smoke VM не получила IPv4 за ${TEMPLATE_WAIT_SECONDS} секунд"
     smoke_wait_for_ssh accept-new "$ip_before" \
-        || die "Root SSH по PVE guest key не стал доступен на ${ip_before}"
+        || die "Root SSH по PVE deployer key не стал доступен на ${ip_before}"
 
     boot_id_before="$(smoke_guest_exec "$SMOKE_VMID" /bin/cat /proc/sys/kernel/random/boot_id)"
     [[ -n "$boot_id_before" ]] || die "Не удалось получить boot_id smoke VM перед reboot"
