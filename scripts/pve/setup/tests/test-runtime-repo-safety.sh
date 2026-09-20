@@ -54,4 +54,14 @@ if grep -Fq 'rm -rf "$REPO_DIR"' "$ROOT/scripts/pve/setup/lib/40-runtime.sh"; th
     exit 1
 fi
 
+runtime_source="$(cat "$ROOT/scripts/pve/setup/lib/40-runtime.sh")"
+checkout_block="${runtime_source#*'        checkout)'}"
+checkout_block="${checkout_block%%'        unsafe)'*}"
+trust_pos="$(grep -n 'assert_canonical_repo_trust' <<<"$checkout_block" | head -n1 | cut -d: -f1)"
+git_pos="$(grep -n 'canonical_git -C "$REPO_DIR" rev-parse --show-toplevel' <<<"$checkout_block" | head -n1 | cut -d: -f1)"
+[[ -n "$trust_pos" && -n "$git_pos" && "$trust_pos" -lt "$git_pos" ]] || {
+    printf 'Existing checkout must be file-trusted before any root Git command\n' >&2
+    exit 1
+}
+
 printf 'Canonical repo safety tests passed.\n'
