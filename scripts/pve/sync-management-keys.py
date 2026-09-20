@@ -240,16 +240,16 @@ def load_registry() -> RegistryState:
             if item.is_symlink() or not item.is_file():
                 fail(f"{item} должен быть обычным файлом")
             continue
-        if item.name == "pve_deployer_ed25519.pub" or VMID_KEY_RE.fullmatch(item.name):
+        if item.name == DEPLOYER_REGISTRY_KEY.name or VMID_KEY_RE.fullmatch(item.name):
             allowed.append(item.name)
             continue
         fail(f"неизвестный объект в management public-key registry: {item.name}")
 
-    if "pve_deployer_ed25519.pub" not in allowed:
-        fail("registry не содержит обязательный deployer.pub")
+    if DEPLOYER_REGISTRY_KEY.name not in allowed:
+        fail(f"registry не содержит обязательный {DEPLOYER_REGISTRY_KEY.name}")
 
-    ordered = ["pve_deployer_ed25519.pub"] + sorted(
-        (name for name in allowed if name != "pve_deployer_ed25519.pub"),
+    ordered = [DEPLOYER_REGISTRY_KEY.name] + sorted(
+        (name for name in allowed if name != DEPLOYER_REGISTRY_KEY.name),
         key=lambda name: int(name[:-4]),
     )
     files: dict[str, bytes] = {}
@@ -267,7 +267,7 @@ def load_registry() -> RegistryState:
         fingerprints[name] = fingerprint
 
     canonical_deployer_fp = public_key_fingerprint(DEPLOYER_PUB)
-    if fingerprints["pve_deployer_ed25519.pub"] != canonical_deployer_fp:
+    if fingerprints[DEPLOYER_REGISTRY_KEY.name] != canonical_deployer_fp:
         fail(
             "registry pve_deployer_ed25519.pub не соответствует штатной deployer identity; "
             "автоматическая ротация запрещена"
