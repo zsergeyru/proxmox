@@ -13,6 +13,7 @@ LAST_REVISION=/var/lib/proxmox-deployer/state/last-revision
 CONFIG=/etc/proxmox-deployer/config.yaml
 SSH_DIR=/etc/proxmox-deployer/ssh
 SECRETS_DIR=/etc/proxmox-deployer/secrets
+PVE_CA_FILE=/etc/proxmox-deployer/pve-root-ca.pem
 RUNTIME_DIR=/var/lib/proxmox-deployer
 REPO_DIR=/var/lib/proxmox-deployer/repo
 PUBLIC_KEYS_DIR=/var/lib/proxmox-deployer/public-keys
@@ -78,6 +79,7 @@ else
 fi
 
 check_ok() { printf '%s%s[ОК]%s %s\n' "$C_BOLD" "$C_GREEN" "$C_RESET" "$1"; }
+check_info() { printf '%s%s[ИНФО]%s %s\n' "$C_BOLD" "$C_CYAN" "$C_RESET" "$1"; }
 check_warn() { WARNINGS=$((WARNINGS + 1)); printf '%s%s[ПРЕДУПРЕЖДЕНИЕ]%s %s\n' "$C_BOLD" "$C_YELLOW" "$C_RESET" "$1"; }
 check_error() { ERRORS=$((ERRORS + 1)); printf '%s%s[ОШИБКА]%s %s\n' "$C_BOLD" "$C_RED" "$C_RESET" "$1"; }
 
@@ -108,6 +110,27 @@ check_dir_contract() {
 check_required_command() {
     local cmd=$1
     command -v "$cmd" >/dev/null 2>&1 && check_ok "команда установлена: $cmd" || check_error "не найдена обязательная команда: $cmd"
+}
+
+check_storage_contents() {
+    local storage=$1
+    shift
+    local content required missing=""
+    content="$(pvesh get "/storage/${storage}" --output-format json 2>/dev/null | jq -r '.content // empty' 2>/dev/null || true)"
+    if [[ -z "$content" ]]; then
+        check_error "не удалось определить content types хранилища $storage"
+        return
+    fi
+    for required in "$@"; do
+        if ! tr ',' '\n' <<<"$content" | grep -Fxq "$required"; then
+            missing="${missing}${missing:+, }${required}"
+        fi
+    done
+    if [[ -n "$missing" ]]; then
+        check_error "хранилище $storage не содержит обязательные content types: $missing"
+    else
+        check_ok "хранилище $storage содержит обязательные content types: $*"
+    fi
 }
 
 check_role() {
@@ -160,6 +183,21 @@ check_token_permission_extras() {
     [[ -z "$extra" ]] || check_warn "$label: на $scope есть дополнительные effective permissions: $extra"
 }
 
+check_admin_effective_boundaries() {
+    local user=$1 token=$2 label=$3 forbidden=$4 json path priv found=""
+    json="$(pveum user token permissions "$user" "$token" --output-format json 2>/dev/null || true)"
+    [[ -n "$json" ]] && jq -e . >/dev/null 2>&1 <<<"$json" || return
+
+    while IFS='|' read -r path priv; do
+        [[ -n "$path" && -n "$priv" ]] || continue
+        case " $forbidden " in
+            *" $priv "*) found="${found}${found:+, }${path}:${priv}" ;;
+        esac
+    done < <(jq -r 'to_entries[] | .key as $path | .value | keys[]? | "\($path)|\(.)"' <<<"$json" 2>/dev/null)
+
+    [[ -z "$found" ]] || check_warn "$label: административные privileges вне принятой модели: $found"
+}
+
 check_ai_effective_boundaries() {
     local user=$1 token=$2 label=$3 json path priv vm_found="" admin_found=""
     json="$(pveum user token permissions "$user" "$token" --output-format json 2>/dev/null || true)"
@@ -204,7 +242,7 @@ check_ai_acl_boundaries() {
 }
 
 check_token_auth() {
-    local token_id=$1 secret_file=$2 label=$3 stored_id secret response
+    local token_id=$1 secret_file=$2 label=$3 stored_id secret response api_host
 
     if [[ ! -f "$secret_file" || -L "$secret_file" ]]; then
         check_error "$label: файл секрета отсутствует или небезопасен"
@@ -218,7 +256,19 @@ check_token_auth() {
         return
     fi
 
-    if response="$(curl --fail --silent --show-error --insecure         --connect-timeout 10 --max-time 20         --header "Authorization: PVEAPIToken=${token_id}=${secret}"         https://127.0.0.1:8006/api2/json/version 2>/dev/null)"         && jq -e '(.data.version // .data.release // empty) != ""' <<<"$response" >/dev/null 2>&1; then
+    if [[ ! -f "$PVE_CA_FILE" || -L "$PVE_CA_FILE" ]]; then
+        check_error "$label: локальный PVE CA отсутствует или небезопасен"
+        unset secret
+        return
+    fi
+    api_host="$(hostname -f 2>/dev/null || hostname)"
+    if [[ -z "$api_host" ]]; then
+        check_error "$label: не удалось определить имя PVE для проверки сертификата"
+        unset secret
+        return
+    fi
+
+    if response="$(curl --fail --silent --show-error --connect-timeout 10 --max-time 20 --cacert "$PVE_CA_FILE" --resolve "${api_host}:8006:127.0.0.1" --header "Authorization: PVEAPIToken=${token_id}=${secret}" "https://${api_host}:8006/api2/json/version" 2>/dev/null)"         && jq -e '(.data.version // .data.release // empty) != ""' <<<"$response" >/dev/null 2>&1; then
         check_ok "$label: локальная авторизация API работает"
     else
         check_error "$label: локальная авторизация API не прошла"
@@ -232,7 +282,7 @@ run_check() {
 
     printf '%s%s=== PVE Configuration: фактическая проверка ===%s\n' "$C_BOLD" "$C_CYAN" "$C_RESET"
 
-    for cmd in jq git find stat getent id ssh-keygen curl pveversion pveum pvesm qm; do
+    for cmd in jq git find stat getent id ssh-keygen curl hostname pveversion pveum pvesm pvesh qm; do
         command -v "$cmd" >/dev/null 2>&1 || check_error "не найдена команда, необходимая для проверки: $cmd"
     done
     if (( ERRORS > 0 )); then printf '\n[ИТОГ] ERROR: errors=%d warnings=%d\n' "$ERRORS" "$WARNINGS"; return 1; fi
@@ -276,6 +326,7 @@ run_check() {
     check_file_contract "$SSH_DIR/github_proxmox_repo_ed25519.pub" root:root 644 "открытая часть ключа GitHub"
     check_file_contract "$SSH_DIR/config" root:root 600 "конфигурация SSH GitHub"
     check_file_contract "$SSH_DIR/known_hosts" root:root 644 "доверие SSH GitHub"
+    check_file_contract "$PVE_CA_FILE" root:pvedeploy 640 "локальная копия PVE CA"
     check_file_contract "$SSH_DIR/pve_deployer_ed25519" pvedeploy:pvedeploy 600 "закрытый ключ управления гостями"
     check_file_contract "$SSH_DIR/pve_deployer_ed25519.pub" pvedeploy:pvedeploy 644 "открытый ключ управления гостями"
     check_file_contract "$SECRETS_DIR/host-deploy.token" root:pvedeploy 640 "секрет host-deploy"
@@ -317,10 +368,20 @@ run_check() {
             [[ "$origin" == "$EXPECTED_REPO" ]] && check_ok "origin доверенной копии соответствует проекту" || check_error "неожиданный origin: ${origin:-не задан}"
             [[ -z "$drift" ]] && check_ok "локальные изменения в доверенной копии отсутствуют" || check_error "в доверенной копии есть локальные изменения: $(head -n1 <<<"$drift")"
 
-            if [[ "$revision" =~ ^[0-9a-f]{40}$ && "$revision" == "$recorded" && "$revision" == "$state_revision" ]]; then
-                check_ok "ревизия Git согласована со служебным состоянием"
+            if [[ "$revision" =~ ^[0-9a-f]{40}$ && "$revision" == "$recorded" ]]; then
+                check_ok "текущая Git-ревизия согласована с last-revision"
             else
-                check_error "ревизия Git не согласована: git=${revision:-?} last-revision=${recorded:-?} state=${state_revision:-?}"
+                check_error "текущая Git-ревизия не согласована: git=${revision:-?} last-revision=${recorded:-?}"
+            fi
+
+            if [[ "$state_revision" =~ ^[0-9a-f]{40}$ ]]; then
+                if [[ "$state_revision" == "$revision" ]]; then
+                    check_info "последний PVE Configuration выполнялся на текущей Git-ревизии"
+                else
+                    check_info "последний PVE Configuration выполнялся на ${state_revision}; текущая принятая Git-ревизия ${revision:-?}"
+                fi
+            else
+                check_warn "state.json не содержит корректную revision последнего запуска PVE Configuration"
             fi
         fi
     else
@@ -365,6 +426,7 @@ run_check() {
     check_token_permission_extras ai-agent@pve infra "ai-agent@pve!infra" /sdn/zones/localnetwork/vmbr0 'SDN.Use'
     AI_FORBIDDEN_VM_CHANGE_PRIVS='VM.Allocate VM.Backup VM.Clone VM.Config.CDROM VM.Config.Cloudinit VM.Config.CPU VM.Config.Disk VM.Config.HWType VM.Config.Memory VM.Config.Network VM.Config.Options VM.Console VM.PowerMgmt VM.Snapshot VM.Snapshot.Rollback'
     AI_FORBIDDEN_ROOT_PRIVS='Permissions.Modify Sys.Modify Sys.PowerMgmt User.Modify Group.Allocate Realm.Allocate SDN.Allocate Datastore.Allocate'
+    check_admin_effective_boundaries deployer@pve host-deploy "deployer@pve!host-deploy" "$AI_FORBIDDEN_ROOT_PRIVS"
     check_ai_effective_boundaries ai-agent@pve infra "ai-agent@pve!infra"
     check_ai_acl_boundaries
 
@@ -374,15 +436,25 @@ run_check() {
     for storage in local local-lvm; do
         pvesm status --storage "$storage" >/dev/null 2>&1 && check_ok "хранилище доступно: $storage" || check_error "хранилище недоступно: $storage"
     done
+    check_storage_contents local snippets vztmpl
+    check_storage_contents local-lvm images rootdir
 
     if template_cfg="$(qm config "$TEMPLATE_VMID" 2>/dev/null)"; then
         template_version_fields="$(sed -n 's/^description: //p' <<<"$template_cfg" | head -n1 | tr ';' '\n' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | grep '^template-version=' || true)"
         if grep -Fxq 'template: 1' <<<"$template_cfg" \
             && grep -Fxq "name: $TEMPLATE_NAME" <<<"$template_cfg" \
-            && [[ "$template_version_fields" == "template-version=$TEMPLATE_VERSION" ]]; then
-            check_ok "базовый шаблон VMID $TEMPLATE_VMID имеет точный Template-Version $TEMPLATE_VERSION"
+            && [[ "$template_version_fields" == "template-version=$TEMPLATE_VERSION" ]] \
+            && grep -Fxq 'protection: 1' <<<"$template_cfg" \
+            && grep -Fxq 'agent: 1' <<<"$template_cfg" \
+            && grep -Fxq 'scsihw: virtio-scsi-single' <<<"$template_cfg" \
+            && grep -Fxq 'ciuser: root' <<<"$template_cfg" \
+            && grep -Fxq 'ciupgrade: 0' <<<"$template_cfg" \
+            && grep -Fxq 'ipconfig0: ip=dhcp' <<<"$template_cfg" \
+            && grep -Eq '^net0: virtio=.*(^|,)bridge=vmbr0(,|$)' <<<"$template_cfg" \
+            && ! grep -q '^cicustom:' <<<"$template_cfg"; then
+            check_ok "базовый шаблон VMID $TEMPLATE_VMID соответствует ключевым параметрам Template-Version $TEMPLATE_VERSION"
         else
-            check_error "VMID $TEMPLATE_VMID существует, но не соответствует базовому шаблону $TEMPLATE_NAME Template-Version $TEMPLATE_VERSION"
+            check_error "VMID $TEMPLATE_VMID существует, но ключевые параметры базового шаблона $TEMPLATE_NAME Template-Version $TEMPLATE_VERSION не совпадают"
         fi
     else
         check_error "базовый шаблон VMID $TEMPLATE_VMID отсутствует"
