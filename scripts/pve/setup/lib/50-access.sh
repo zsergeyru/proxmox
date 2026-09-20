@@ -283,7 +283,7 @@ warn_unexpected_permission_set() {
 }
 
 warn_forbidden_permission_anywhere() {
-    local full_token=$1 permissions_json=$2 forbidden_raw=$3 path priv found=""
+    local full_token=$1 permissions_json=$2 forbidden_raw=$3 track_ai=${4:-1} path priv found=""
 
     while IFS='|' read -r path priv; do
         [[ -n "$path" && -n "$priv" ]] || continue
@@ -293,7 +293,9 @@ warn_forbidden_permission_anywhere() {
     done < <(jq -r 'to_entries[] | .key as $path | .value | keys[]? | "\($path)|\(.)"' <<<"$permissions_json" 2>/dev/null)
 
     if [[ -n "$found" ]]; then
-        AI_PERMISSION_BOUNDARY_WARNINGS=1
+        if [[ "$track_ai" == "1" ]]; then
+            AI_PERMISSION_BOUNDARY_WARNINGS=1
+        fi
         warn "API-токен ${full_token} имеет административные privileges вне принятой модели: ${found}. Права не отзываются автоматически."
     fi
 }
@@ -356,6 +358,7 @@ verify_effective_permissions() {
         host)
             verify_permission_set "$full_token" "$permissions_json" "/vms" "$ROLE_GUEST_PRIVS"
             verify_permission_set "$full_token" "$permissions_json" "/pool/${MANAGED_POOL}" "$ROLE_POOL_PRIVS"
+            warn_forbidden_permission_anywhere "$full_token" "$permissions_json" "$AI_FORBIDDEN_ADMIN_PRIVS" 0
             ;;
         ai)
             verify_permission_set "$full_token" "$permissions_json" "/pool/${MANAGED_POOL}" \
