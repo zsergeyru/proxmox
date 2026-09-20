@@ -319,6 +319,33 @@ warn_unexpected_vm_scope_permissions() {
     fi
 }
 
+warn_unexpected_host_acl_entries() {
+    local userid=$1 tokenid=$2 acl_json principal_type principal rows path role
+    acl_json="$(pveum acl list --output-format json)" \
+        || die "Не удалось получить ACL Proxmox для проверки границ deployer"
+
+    for principal_type in user token; do
+        if [[ "$principal_type" == "user" ]]; then principal="$userid"; else principal="$tokenid"; fi
+        rows="$(jq -r --arg type "$principal_type" --arg ugid "$principal" \
+            '.[] | select(.type == $type and .ugid == $ugid) | "\(.path)|\(.roleid)"' \
+            <<<"$acl_json" 2>/dev/null || true)"
+        while IFS='|' read -r path role; do
+            [[ -n "$path" && -n "$role" ]] || continue
+            case "${path}|${role}" in
+                "/vms|${ROLE_GUEST}"|\
+                "/pool/${MANAGED_POOL}|${ROLE_POOL}"|\
+                "/storage/local|${ROLE_STORAGE}"|\
+                "/storage/local-lvm|${ROLE_STORAGE}"|\
+                "/sdn/zones/localnetwork/${BRIDGE}|${ROLE_NETWORK}")
+                    ;;
+                *)
+                    warn "Deployer principal ${principal_type}=${principal} имеет дополнительную ACL: path=${path}, role=${role}. Она не удаляется автоматически."
+                    ;;
+            esac
+        done <<<"$rows"
+    done
+}
+
 warn_unexpected_ai_acl_entries() {
     local userid=$1 tokenid=$2 acl_json principal_type principal rows path role
     acl_json="$(pveum acl list --output-format json)" \
@@ -454,6 +481,7 @@ ensure_pve_identities() {
 
     ensure_host_identity_acls "$HOST_PVE_USER" "$HOST_PVE_TOKEN"
     ensure_ai_identity_acls "$AI_PVE_USER" "$AI_PVE_TOKEN"
+    warn_unexpected_host_acl_entries "$HOST_PVE_USER" "$HOST_PVE_TOKEN"
     warn_unexpected_ai_acl_entries "$AI_PVE_USER" "$AI_PVE_TOKEN"
 
     verify_pve_identity "$HOST_PVE_USER" "$HOST_PVE_TOKEN_NAME" "$HOST_PVE_TOKEN" "$HOST_TOKEN_FILE" host
