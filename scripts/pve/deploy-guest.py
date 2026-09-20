@@ -53,7 +53,6 @@ EFFECTIVE_SCHEMA = ROOT / "schemas/guest-effective.schema.yaml"
 EXPECTED_TOKEN_ID = "deployer@pve!host-deploy"
 EXPECTED_REPO = "zsergeyru/proxmox"
 OWNERSHIP_TAG = "proxmox-deployer"
-MANAGEMENT_TAG = "management-ssh"
 INCOMPLETE_TAG = "deploy-incomplete"
 SERVICE_BEGIN = "[proxmox-deployer]"
 SERVICE_LINES = ("managed-by=proxmox-deployer", "source-repo=zsergeyru/proxmox")
@@ -450,7 +449,7 @@ def has_ownership(config: dict[str, Any], desired: Desired) -> bool:
 
 def desired_final_tags(config: dict[str, Any] | None = None) -> set[str]:
     tags = parse_tags((config or {}).get("tags"))
-    tags.update({OWNERSHIP_TAG, MANAGEMENT_TAG})
+    tags.add(OWNERSHIP_TAG)
     tags.discard(INCOMPLETE_TAG)
     return tags
 
@@ -459,6 +458,10 @@ def desired_incomplete_tags(config: dict[str, Any] | None = None) -> set[str]:
     tags = desired_final_tags(config)
     tags.add(INCOMPLETE_TAG)
     return tags
+
+
+def management_requested(desired: Desired, capability: str) -> bool:
+    return capability in desired.effective["management"]
 
 
 def parse_size_bytes(text: object) -> int | None:
@@ -916,13 +919,13 @@ def plan_remote(desired: Desired, actual: Actual) -> list[PlanItem]:
     if not actual.exists:
         if host_key_present(desired.management_ip):
             return [PlanItem("SSH trust", "BLOCKED", "FORBIDDEN", "new guest address already exists in persistent known_hosts")]
-        if e["management"]["ssh_identity"]:
+        if management_requested(desired, "ssh_identity"):
             reg_state, _, _ = registry_key_state(desired.vmid)
             if reg_state != "ABSENT":
                 return [PlanItem("Management SSH identity", "BLOCKED", "FORBIDDEN", f"new VMID has stale registry state={reg_state}")]
         after = "APPLY AFTER START"
-        items.append(PlanItem("Management SSH identity", after if e["management"]["ssh_identity"] else "NOT REQUESTED", "ONLINE", "guest identity"))
-        items.append(PlanItem("Project repo read", after if e["management"]["project_repo_read"] else "NOT REQUESTED", "ONLINE", EXPECTED_REPO if e["management"]["project_repo_read"] else "false"))
+        items.append(PlanItem("Management SSH identity", after if management_requested(desired, "ssh_identity") else "NOT REQUESTED", "ONLINE", "guest identity"))
+        items.append(PlanItem("Project repo read", after if management_requested(desired, "project_repo_read") else "NOT REQUESTED", "ONLINE", EXPECTED_REPO if management_requested(desired, "project_repo_read") else "false"))
         for capability in desired.bootstrap_capabilities:
             items.append(PlanItem(f"Bootstrap {capability}", after, "ONLINE", capability))
         if not desired.bootstrap_capabilities:
@@ -932,8 +935,8 @@ def plan_remote(desired: Desired, actual: Actual) -> list[PlanItem]:
         return [PlanItem("SSH trust", "BLOCKED", "FORBIDDEN", "existing guest absent from persistent known_hosts")]
     if actual.status != "running":
         after = "APPLY AFTER START"
-        items.append(PlanItem("Management SSH identity", after if e["management"]["ssh_identity"] else "NOT REQUESTED", "ONLINE", "guest identity"))
-        items.append(PlanItem("Project repo read", after if e["management"]["project_repo_read"] else "NOT REQUESTED", "ONLINE", EXPECTED_REPO if e["management"]["project_repo_read"] else "false"))
+        items.append(PlanItem("Management SSH identity", after if management_requested(desired, "ssh_identity") else "NOT REQUESTED", "ONLINE", "guest identity"))
+        items.append(PlanItem("Project repo read", after if management_requested(desired, "project_repo_read") else "NOT REQUESTED", "ONLINE", EXPECTED_REPO if management_requested(desired, "project_repo_read") else "false"))
         for capability in desired.bootstrap_capabilities:
             items.append(PlanItem(f"Bootstrap {capability}", after, "ONLINE", capability))
         if not desired.bootstrap_capabilities:
@@ -944,7 +947,7 @@ def plan_remote(desired: Desired, actual: Actual) -> list[PlanItem]:
     except DeployError as exc:
         return [PlanItem("SSH root", "BLOCKED", "FORBIDDEN", safe_message(exc))]
     items.append(PlanItem("SSH root", "NO CHANGE", "ONLINE", "strict trust verified"))
-    if e["management"]["ssh_identity"]:
+    if management_requested(desired, "ssh_identity"):
         state, _, fp = management_identity_state(desired.management_ip)
         reg_state, _, reg_fp = registry_key_state(desired.vmid)
         if state == "BROKEN" or reg_state == "BROKEN":
@@ -961,7 +964,7 @@ def plan_remote(desired: Desired, actual: Actual) -> list[PlanItem]:
         items.append(PlanItem("Management SSH identity", "NOT REQUESTED", "ONLINE", "false"))
     expected_fp = project_master_fingerprint()
     pstate = project_repo_state(desired.management_ip, expected_fp)
-    if e["management"]["project_repo_read"]:
+    if management_requested(desired, "project_repo_read"):
         action = "NO CHANGE" if pstate == "VALID" else ("BLOCKED" if pstate == "FOREIGN" else "APPLY")
         items.append(PlanItem("Project repo read", action, "FORBIDDEN" if action == "BLOCKED" else "ONLINE", f"state={pstate}"))
     else:
@@ -1196,7 +1199,7 @@ def sync_management_keys(revision: str) -> int:
 
 
 def ensure_management_identity(desired: Desired, revision: str) -> None:
-    if not desired.effective["management"]["ssh_identity"]:
+    if not desired.effectivmanagement_requested(desired, "ssh_identity"):
         return
     state, line, fp = management_identity_state(desired.management_ip)
     reg_state, _, reg_fp = registry_key_state(desired.vmid)
@@ -1411,7 +1414,7 @@ def apply_bootstrap_capability(address: str, capability: str) -> None:
 
 def clear_incomplete_tag(api: PveApi, desired: Desired) -> None:
     cfg = api.get(config_path(desired))
-    tags = parse_tags(cfg.get("tags")); tags.discard(INCOMPLETE_TAG); tags.update({OWNERSHIP_TAG, MANAGEMENT_TAG})
+    tags = desired_final_tags(cfg)
     api.put(config_path(desired), {"tags": format_tags(tags)})
 
 
@@ -1423,7 +1426,7 @@ def apply_plan(api: PveApi, desired: Desired, actual: Actual, registry_module: A
     registry_module.ensure_aggregate(registry, False)
     created_now = False
     if not actual.exists:
-        if desired.effective["management"]["ssh_identity"] and (REGISTRY_DIR / f"{desired.vmid}.pub").exists():
+        if desired.effectivmanagement_requested(desired, "ssh_identity") and (REGISTRY_DIR / f"{desired.vmid}.pub").exists():
             raise BlockedError("новый VMID имеет stale registry key")
         if desired.effective["type"] == "vm":
             create_vm(api, desired, registry.aggregate)
@@ -1440,7 +1443,7 @@ def apply_plan(api: PveApi, desired: Desired, actual: Actual, registry_module: A
     start_guest_if_needed(api, desired)
     establish_ssh_trust(desired, created_now)
     ensure_management_identity(desired, revision)
-    if desired.effective["management"]["project_repo_read"]:
+    if desired.effectivmanagement_requested(desired, "project_repo_read"):
         if project_repo_state(desired.management_ip, project_master_fingerprint()) != "VALID":
             private_data = read_project_private_from_fd()
             try:
@@ -1452,12 +1455,12 @@ def apply_plan(api: PveApi, desired: Desired, actual: Actual, registry_module: A
     for capability in desired.bootstrap_capabilities:
         apply_bootstrap_capability(desired.management_ip, capability)
     verify_root_ssh(desired.management_ip)
-    if desired.effective["management"]["ssh_identity"]:
+    if desired.effectivmanagement_requested(desired, "ssh_identity"):
         state, _, fp = management_identity_state(desired.management_ip)
         rstate, _, rfp = registry_key_state(desired.vmid)
         if state != "VALID" or rstate != "VALID" or fp != rfp:
             raise DeployError("final management identity verify не пройден")
-    wanted_project = "VALID" if desired.effective["management"]["project_repo_read"] else "ABSENT"
+    wanted_project = "VALID" if desired.effectivmanagement_requested(desired, "project_repo_read") else "ABSENT"
     if project_repo_state(desired.management_ip, project_master_fingerprint()) != wanted_project:
         raise DeployError("final Project Git READ verify не пройден")
     for capability in desired.bootstrap_capabilities:
@@ -1486,7 +1489,7 @@ def preflight(vmid: int) -> tuple[str, Desired, PveApi, Actual, Any, Any, str | 
     registry_module, registry = load_registry()
     lxc_template = verify_sources(api, desired)
     actual = discover_actual(api, desired)
-    if desired.effective["management"]["project_repo_read"]:
+    if desired.effectivmanagement_requested(desired, "project_repo_read"):
         raw_fd = os.environ.get("DEPLOY_GUEST_PROJECT_REPO_KEY_FD", "")
         if not raw_fd.isdigit():
             raise DeployError("project_repo_read=true, но root-wrapper не передал dedicated FD")
