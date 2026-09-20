@@ -191,7 +191,7 @@ smoke_ssh() {
     shift 2
 
     ssh \
-        -i "$PVE_GUEST_KEY" \
+        -i "$PVE_DEPLOYER_KEY" \
         -o BatchMode=yes \
         -o ConnectTimeout=10 \
         -o ServerAliveInterval=15 \
@@ -286,8 +286,8 @@ smoke_verify_clone_config() {
         || die "Smoke VM scsi0 не увеличен до ${SMOKE_DISK_SIZE}; обнаружено ${disk_size:-неизвестно}"
 
     cloudinit_user_data="$(qm cloudinit dump "$SMOKE_VMID" user)"
-    key_body="$(awk 'NF >= 2 {print $2; exit}' "$PVE_GUEST_PUB")"
-    [[ -n "$key_body" ]] || die "Не удалось прочитать public key ${PVE_GUEST_PUB}"
+    key_body="$(awk 'NF >= 2 {print $2; exit}' "$PVE_DEPLOYER_PUB")"
+    [[ -n "$key_body" ]] || die "Не удалось прочитать public key ${PVE_DEPLOYER_PUB}"
     grep -Fq "$key_body" <<<"$cloudinit_user_data" \
         || die "Cloud-Init smoke VM не содержит PVE guest SSH public key"
 
@@ -338,8 +338,8 @@ run_template_smoke_test() {
     log "Full Clone smoke-test template ${TEMPLATE_VMID} через VM ${SMOKE_VMID}"
     require_cmd ssh
     require_cmd jq
-    [[ -r "$PVE_GUEST_KEY" && -r "$PVE_GUEST_PUB" ]] \
-        || die "Для smoke-test отсутствует PVE guest SSH identity ${PVE_GUEST_KEY}"
+    [[ -r "$PVE_DEPLOYER_KEY" && -r "$PVE_DEPLOYER_PUB" ]] \
+        || die "Для smoke-test отсутствует PVE deployer SSH identity ${PVE_DEPLOYER_KEY}"
 
     source_config="$(qm config "$TEMPLATE_VMID")"
     validate_template_contract "$source_config" 1 \
@@ -373,7 +373,7 @@ run_template_smoke_test() {
         --ciuser root \
         --ciupgrade 0 \
         --ipconfig0 ip=dhcp \
-        --sshkeys "$PVE_GUEST_PUB"
+        --sshkeys "$PVE_DEPLOYER_PUB"
     qm resize "$SMOKE_VMID" scsi0 "$SMOKE_DISK_SIZE"
     qm cloudinit update "$SMOKE_VMID"
 
