@@ -19,8 +19,8 @@ TEMPLATE_SMOKE_STATE_FILE="${STATE_DIR}/template-smoke.json"
 trap 'rm -rf "$STATE_DIR"' EXIT
 
 C_BOLD='' C_YELLOW='' C_RESET=''
-PVE_GUEST_KEY=/tmp/not-used
-PVE_GUEST_PUB=/tmp/not-used
+PVE_DEPLOYER_KEY=/tmp/not-used
+PVE_DEPLOYER_PUB=/tmp/not-used
 TEMPLATE_DISK_STORAGE=local-lvm
 
 state_revision() { printf '%s\n' '0123456789012345678901234567890123456789'; }
