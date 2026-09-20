@@ -68,6 +68,7 @@ LXC_TEMPLATE_STORAGE="local"
 UPDATE_SYSTEM=0
 SMOKE_TEST_TEMPLATE=0
 WARN_COUNT=0
+AI_PERMISSION_BOUNDARY_WARNINGS=0
 RUN_SOURCE_REVISION="${PVE_CONFIGURATION_SOURCE_REVISION:-}"
 REPO_REVISION=""
 CONFIGURATION_RUNNING=0
@@ -108,6 +109,8 @@ ROLE_GUEST_PRIVS="VM.Allocate VM.Audit VM.Backup VM.Clone VM.Config.CDROM VM.Con
 ROLE_NETWORK_PRIVS="SDN.Use"
 ROLE_STORAGE_PRIVS="Datastore.AllocateSpace Datastore.Audit"
 ROLE_POOL_PRIVS="Pool.Allocate Pool.Audit"
+AI_FORBIDDEN_VM_CHANGE_PRIVS="VM.Allocate VM.Backup VM.Clone VM.Config.CDROM VM.Config.Cloudinit VM.Config.CPU VM.Config.Disk VM.Config.HWType VM.Config.Memory VM.Config.Network VM.Config.Options VM.Console VM.PowerMgmt VM.Snapshot VM.Snapshot.Rollback"
+AI_FORBIDDEN_ROOT_PRIVS="Permissions.Modify Sys.Modify Sys.PowerMgmt User.Modify Group.Allocate Realm.Allocate SDN.Allocate Datastore.Allocate"
 
 COLOR_ENABLED=0
 if [[ -t 1 && -z "${NO_COLOR:-}" && "${TERM:-dumb}" != "dumb" ]]; then
