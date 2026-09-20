@@ -450,7 +450,7 @@ run_check() {
             && grep -Fxq 'ciuser: root' <<<"$template_cfg" \
             && grep -Fxq 'ciupgrade: 0' <<<"$template_cfg" \
             && grep -Fxq 'ipconfig0: ip=dhcp' <<<"$template_cfg" \
-            && grep -Eq '^net0: virtio=.*(^|,)bridge=vmbr0(,|$)' <<<"$template_cfg" \
+            && grep -Eq '^net0: virtio=.*bridge=vmbr0(,|$)' <<<"$template_cfg" \
             && ! grep -q '^cicustom:' <<<"$template_cfg"; then
             check_ok "базовый шаблон VMID $TEMPLATE_VMID соответствует ключевым параметрам Template-Version $TEMPLATE_VERSION"
         else
