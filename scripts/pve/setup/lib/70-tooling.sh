@@ -570,17 +570,32 @@ final_revision="\$(canonical_git -C "\$REPO_DIR" rev-parse HEAD 2>/dev/null || t
 [[ "\$final_revision" == "\$revision" ]] \\
     || fail "После обновления Git ожидалась версия \$revision, получена \$final_revision"
 
+rollback_repo_update() {
+    [[ "\$current_revision" != "\$revision" ]] || return 0
+    canonical_git -C "\$REPO_DIR" reset --hard "\$current_revision" >/dev/null \\
+        || fail "Не удалось вернуть canonical repo на предыдущую revision \$current_revision"
+    canonical_git -C "\$REPO_DIR" clean -ffd >/dev/null \\
+        || fail "Не удалось очистить canonical repo после возврата на \$current_revision"
+    chmod -R go-w "\$REPO_DIR"
+    assert_repo_trust
+    assert_clean_repo
+}
+
+if [[ ! -f "\$SOURCE" || ! -f "\$VALIDATOR" || ! -f "\$REPO_DIR/scripts/guest_config.py" ]]; then
+    rollback_repo_update
+    fail "Полученная Git revision не содержит обязательные runtime-файлы deploy-guest"
+fi
+
+if ! PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/run/proxmox-deployer-disabled-pycache /usr/bin/python3 "\$VALIDATOR"; then
+    rollback_repo_update
+    fail "Repository validation перед deploy-guest завершилась ошибкой; canonical repo возвращён на предыдущую принятую revision"
+fi
+
 revision_tmp="\$(mktemp "\$STATE_DIR/.last-revision.deploy.XXXXXX")"
 printf '%s\\n' "\$revision" >"\$revision_tmp"
 chown root:"\$DEPLOY_USER" "\$revision_tmp"
 chmod 0640 "\$revision_tmp"
 mv -f "\$revision_tmp" "\$STATE_DIR/last-revision"
-
-[[ -f "\$SOURCE" ]] || fail "После обновления Git не найден основной файл deploy-guest: \$SOURCE"
-[[ -f "\$VALIDATOR" ]] || fail "После обновления Git не найден validator: \$VALIDATOR"
-[[ -f "\$REPO_DIR/scripts/guest_config.py" ]] || fail "После обновления Git не найден общий guest resolver"
-
-PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/run/proxmox-deployer-disabled-pycache /usr/bin/python3 "\$VALIDATOR" || fail "Repository validation перед deploy-guest завершилась ошибкой"
 
 vmid="\${1:-}"
 [[ "\$vmid" =~ ^[0-9]{3}\$ ]] || fail "Первым параметром должен быть VMID 100-999"
