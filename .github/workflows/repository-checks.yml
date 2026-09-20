@@ -157,6 +157,9 @@ jobs:
       - name: Run API token rollback unit checks
         run: bash scripts/pve/setup/tests/test-token-rollback.sh
 
+      - name: Run canonical repo safety checks
+        run: bash scripts/pve/setup/tests/test-runtime-repo-safety.sh
+
       - name: Run source trust boundary checks
         run: sudo bash scripts/pve/setup/tests/test-source-trust.sh
 
