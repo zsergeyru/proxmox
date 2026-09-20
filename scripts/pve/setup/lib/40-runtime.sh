@@ -190,7 +190,7 @@ ensure_pve_deployer_key() {
     chmod 0600 "$PVE_DEPLOYER_KEY"
 
     tmp_pub="$(mktemp "${SSH_DIR}/.pve-deployer-pub.XXXXXX")"
-    printf '%s %s\n' "$derived_pub" 'pve-guest' >"$tmp_pub"
+    printf '%s %s\n' "$derived_pub" 'pve-deployer' >"$tmp_pub"
     install -o "$DEPLOY_USER" -g "$DEPLOY_USER" -m 0644 "$tmp_pub" "$PVE_DEPLOYER_PUB"
     rm -f "$tmp_pub"
 
