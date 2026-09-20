@@ -78,15 +78,15 @@ PVE Configuration устанавливает root-only wrapper `/usr/local/sbin/
 Runtime:
 
 - валидирует canonical public-key registry до первой guest mutation;
-- использует PVE API token `deployer@pve!host-deploy` только для read-only discovery объектов с tag `management-ssh`;
-- для manifest-backed гостей использует общий `guest_config.py`, для внешне созданных tagged гостей — каноническую VMID-адресацию;
+- использует PVE API token `deployer@pve!host-deploy` только для read-only discovery фактически существующих VM/LXC;
+- состав участников определяет из проектных `guest.yaml` с `profile`; перед изменением требует ownership `proxmox-deployer`, а внешние объекты без проектного manifest не включает в синхронизацию;
 - проверяет Debian и root SSH через deployer identity;
 - не принимает неизвестные SSH host keys: первичное доверие только что созданному ожидаемому объекту выполняет `deploy-guest`, а bulk sync требует уже сохранённый persistent host key;
 - синхронизирует `/etc/proxmox-guest/public-keys/` и только managed block `/root/.ssh/authorized_keys`;
 - не запускает offline-гостей ради sync;
 - после APPLY повторно проверяет фактическое состояние.
 
-Основная спецификация: [`../docs/28-management-ssh-keys.md`](../docs/28-management-ssh-keys.md).
+Основная спецификация: [`../docs/700-security/720-ssh-access.md`](../docs/700-security/720-ssh-access.md).
 
 ## `pve/setup/`
 
@@ -166,7 +166,7 @@ scripts/pve/setup/tests/
 - [`../docs/20-pve-initialization.md`](../docs/20-pve-initialization.md) — инструкция инициализации PVE.
 - [`../docs/24-reproducible-bootstrap.md`](../docs/24-reproducible-bootstrap.md) — воспроизводимость и версионирование.
 - [`../docs/25-pve-access-control.md`](../docs/25-pve-access-control.md) — роли и ACL PVE.
-- [`../docs/28-management-ssh-keys.md`](../docs/28-management-ssh-keys.md) — management SSH keys и `sync-management-keys`.
+- [`../docs/700-security/720-ssh-access.md`](../docs/700-security/720-ssh-access.md) — управляющий SSH, реестр ключей и `sync-management-keys`.
 - [`../docs/30-guest-manifest.md`](../docs/30-guest-manifest.md) — модель данных гостевых систем.
 - [`../docs/31-deploy-guest.md`](../docs/31-deploy-guest.md) — спецификация `deploy-guest`.
 - [`../docs/33-guest-bootstrap-and-provisioning.md`](../docs/33-guest-bootstrap-and-provisioning.md) — Bootstrap и Ansible handoff.
