@@ -16,7 +16,7 @@ fail() {
     exit 1
 }
 
-grep -Fqx 'PVE_CONFIGURATION_VERSION="1.0.3"' "$COMMON" || fail "PVE_CONFIGURATION_VERSION must be 1.0.3"
+grep -Fqx 'PVE_CONFIGURATION_VERSION="1.0.4"' "$COMMON" || fail "PVE_CONFIGURATION_VERSION must be 1.0.4"
 
 if grep -Eq 'BOOTSTRAP_KEY_FILE|PVE_BOOTSTRAP_KEY_FILE|BOOTSTRAP_KNOWN_HOSTS|CANONICAL_KEY_DIFFERS_FROM_BOOTSTRAP' "$COMMON" "$RUNTIME"; then
     fail "temporary GitHub Deploy Key contract must not remain in PVE Configuration"
