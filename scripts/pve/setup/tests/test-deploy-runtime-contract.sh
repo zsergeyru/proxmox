@@ -81,8 +81,8 @@ grep -Fq 'PYTHONPYCACHEPREFIX=/run/proxmox-deployer-disabled-pycache' "$TOOLING"
 grep -Fq 'runuser -u "\$DEPLOY_USER" -- env PYTHONDONTWRITEBYTECODE=1' "$TOOLING" \
     || fail "deploy runtime must disable bytecode writes for pvedeploy"
 
-validator_pos="$(grep -n 'if ! PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/run/proxmox-deployer-disabled-pycache /usr/bin/python3 "\$VALIDATOR"' "$TOOLING" | head -n1 | cut -d: -f1)"
-revision_pos="$(grep -n 'revision_tmp="\$(mktemp "\$STATE_DIR/.last-revision.deploy.XXXXXX")"' "$TOOLING" | head -n1 | cut -d: -f1)"
+validator_pos="$(grep -Fn 'if ! PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/run/proxmox-deployer-disabled-pycache /usr/bin/python3 "\$VALIDATOR"' "$TOOLING" | head -n1 | cut -d: -f1)"
+revision_pos="$(grep -Fn 'revision_tmp="\$(mktemp "\$STATE_DIR/.last-revision.deploy.XXXXXX")"' "$TOOLING" | head -n1 | cut -d: -f1)"
 [[ -n "$validator_pos" && -n "$revision_pos" && "$validator_pos" -lt "$revision_pos" ]] \
     || fail "deploy wrapper must validate a fetched revision before accepting it in last-revision"
 grep -Fq 'rollback_repo_update()' "$TOOLING" \
