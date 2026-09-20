@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Синхронизация management public keys по Debian VM/LXC с tag management-ssh."""
+"""Синхронизация management public keys по управляемым Debian VM/LXC проекта."""
 
 from __future__ import annotations
 
@@ -32,19 +32,18 @@ from guest_config import (  # noqa: E402
     GuestConfigError,
     parse_network_config,
     resolve_effective_guest,
-    vmid_address,
 )
 
 CONFIG_DIR = Path("/etc/proxmox-deployer")
 SSH_DIR = CONFIG_DIR / "ssh"
 TOKEN_FILE = CONFIG_DIR / "secrets/host-deploy.token"
-DEPLOYER_KEY = SSH_DIR / "pve_guest_ed25519"
-DEPLOYER_PUB = SSH_DIR / "pve_guest_ed25519.pub"
+DEPLOYER_KEY = SSH_DIR / "pve_deployer_ed25519"
+DEPLOYER_PUB = SSH_DIR / "pve_deployer_ed25519.pub"
 PVE_CA = CONFIG_DIR / "pve-root-ca.pem"
 RUNTIME_DIR = Path("/var/lib/proxmox-deployer")
 REGISTRY_DIR = RUNTIME_DIR / "public-keys"
 AGGREGATE_FILE = REGISTRY_DIR / "management-authorized-keys"
-DEPLOYER_REGISTRY_KEY = REGISTRY_DIR / "deployer.pub"
+DEPLOYER_REGISTRY_KEY = REGISTRY_DIR / "pve_deployer_ed25519.pub"
 KNOWN_HOSTS = Path("/var/lib/pvedeploy/.ssh/known_hosts")
 AUDIT_FILE = Path("/var/log/proxmox-deployer/audit/sync-management-keys.jsonl")
 GUEST_CATALOG = Path("/etc/proxmox-guest/public-keys")
@@ -52,6 +51,7 @@ AUTHORIZED_KEYS = Path("/root/.ssh/authorized_keys")
 BEGIN_MARKER = "# BEGIN PROXMOX-MANAGEMENT-KEYS"
 END_MARKER = "# END PROXMOX-MANAGEMENT-KEYS"
 EXPECTED_TOKEN_ID = "deployer@pve!host-deploy"
+OWNERSHIP_TAG = "proxmox-deployer"
 VMID_KEY_RE = re.compile(r"^[1-9][0-9]{2}\.pub$")
 PRIVATE_MARKERS = (
     "-----BEGIN PRIVATE KEY-----",
@@ -87,7 +87,7 @@ class Participant:
     address: str
     user: str
     port: int
-    manifest: str | None
+    manifest: str
 
 
 @dataclass(frozen=True)
@@ -240,16 +240,16 @@ def load_registry() -> RegistryState:
             if item.is_symlink() or not item.is_file():
                 fail(f"{item} должен быть обычным файлом")
             continue
-        if item.name == "deployer.pub" or VMID_KEY_RE.fullmatch(item.name):
+        if item.name == "pve_deployer_ed25519.pub" or VMID_KEY_RE.fullmatch(item.name):
             allowed.append(item.name)
             continue
         fail(f"неизвестный объект в management public-key registry: {item.name}")
 
-    if "deployer.pub" not in allowed:
+    if "pve_deployer_ed25519.pub" not in allowed:
         fail("registry не содержит обязательный deployer.pub")
 
-    ordered = ["deployer.pub"] + sorted(
-        (name for name in allowed if name != "deployer.pub"),
+    ordered = ["pve_deployer_ed25519.pub"] + sorted(
+        (name for name in allowed if name != "pve_deployer_ed25519.pub"),
         key=lambda name: int(name[:-4]),
     )
     files: dict[str, bytes] = {}
@@ -267,9 +267,9 @@ def load_registry() -> RegistryState:
         fingerprints[name] = fingerprint
 
     canonical_deployer_fp = public_key_fingerprint(DEPLOYER_PUB)
-    if fingerprints["deployer.pub"] != canonical_deployer_fp:
+    if fingerprints["pve_deployer_ed25519.pub"] != canonical_deployer_fp:
         fail(
-            "registry deployer.pub не соответствует штатной deployer identity; "
+            "registry pve_deployer_ed25519.pub не соответствует штатной deployer identity; "
             "автоматическая ротация запрещена"
         )
 
@@ -377,7 +377,7 @@ def participant_from_resource(
     except (KeyError, TypeError, ValueError) as exc:
         raise SyncError(f"PVE resource без корректного VMID: {resource!r}") from exc
     if not 100 <= vmid <= 999:
-        fail(f"management-ssh participant VMID {vmid} вне поддерживаемого диапазона 100-999")
+        fail(f"project participant VMID {vmid} вне поддерживаемого диапазона 100-999")
     kind = str(resource.get("type", ""))
     if kind not in {"qemu", "lxc"}:
         fail(f"VMID {vmid}: неподдерживаемый PVE resource type {kind!r}")
@@ -390,12 +390,10 @@ def participant_from_resource(
     network = parse_network_config(defaults)
     manifest = find_manifest(vmid)
     if manifest is None:
-        address = str(vmid_address(vmid, network))
-        return Participant(vmid, name, kind, node, status, address, "root", 22, None)
-
+        fail(f"VMID {vmid}: отсутствует проектный guest.yaml")
     source = read_yaml(manifest)
     if not source.get("profile"):
-        fail(f"VMID {vmid}: tagged object имеет manifest без profile")
+        fail(f"VMID {vmid}: guest.yaml не содержит profile и не входит в универсальный контур управления")
     try:
         resolved = resolve_effective_guest(source, defaults, network)
     except GuestConfigError as exc:
@@ -431,11 +429,26 @@ def discover_participants(defaults: dict[str, Any]) -> list[Participant]:
     for resource in resources:
         if not isinstance(resource, dict):
             continue
-        if "management-ssh" not in parse_tags(resource.get("tags")):
+        try:
+            vmid = int(resource["vmid"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise SyncError(f"PVE resource без корректного VMID: {resource!r}") from exc
+        if not 100 <= vmid <= 999:
             continue
+        manifest = find_manifest(vmid)
+        if manifest is None:
+            continue
+        source = read_yaml(manifest)
+        if not source.get("profile"):
+            continue
+        if OWNERSHIP_TAG not in parse_tags(resource.get("tags")):
+            fail(
+                f"VMID {vmid}: существует объект для проектного guest.yaml, "
+                f"но отсутствует ownership tag {OWNERSHIP_TAG}; автоматическая синхронизация запрещена"
+            )
         participant = participant_from_resource(resource, defaults)
         if participant.vmid in seen:
-            fail(f"PVE API вернул дублирующийся management-ssh VMID {participant.vmid}")
+            fail(f"PVE API вернул дублирующийся проектный VMID {participant.vmid}")
         seen.add(participant.vmid)
         found.append(participant)
     return sorted(found, key=lambda item: item.vmid)
@@ -621,14 +634,14 @@ def inspect_remote(participant: Participant, known_hosts_file: Path) -> RemoteSt
     state = parse_remote_inspection(proc.stdout, participant)
     if os_release_id(state.os_release) != "debian":
         raise UnsafeRemoteState(
-            f"VMID {participant.vmid}: management-ssh participant не является Debian"
+            f"VMID {participant.vmid}: project participant не является Debian"
         )
     return state
 
 
 def validate_remote_catalog(state: RemoteState, participant: Participant) -> None:
     for name in state.catalog_files:
-        if name == "deployer.pub" or name == "management-authorized-keys" or VMID_KEY_RE.fullmatch(name):
+        if name == "pve_deployer_ed25519.pub" or name == "management-authorized-keys" or VMID_KEY_RE.fullmatch(name):
             continue
         raise UnsafeRemoteState(
             f"VMID {participant.vmid}: неизвестный файл в guest public-key catalog: {name}"
@@ -757,7 +770,7 @@ def build_apply_script(
     ]
     for name, data in sorted(
         target_catalog.items(),
-        key=lambda item: (0 if item[0] == "deployer.pub" else 2 if item[0] == "management-authorized-keys" else 1, item[0]),
+        key=lambda item: (0 if item[0] == "pve_deployer_ed25519.pub" else 2 if item[0] == "management-authorized-keys" else 1, item[0]),
     ):
         lines.extend(
             [
@@ -826,7 +839,7 @@ def sync(check_only: bool) -> RunResult:
 
     participants = discover_participants(defaults)
     if not participants:
-        print("[OK] management-ssh participants отсутствуют")
+        print("[OK] project participants отсутствуют")
         append_audit(
             {
                 "time": now_iso(),
@@ -840,7 +853,7 @@ def sync(check_only: bool) -> RunResult:
         )
         return RunResult(0, 0, 0, 0, 0)
 
-    print(f"[INFO] management-ssh participants: {len(participants)}")
+    print(f"[INFO] project participants: {len(participants)}")
     prepared: list[PreparedParticipant] = []
     temp_paths: list[Path] = []
     try:
