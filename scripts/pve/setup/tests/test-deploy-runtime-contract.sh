@@ -95,6 +95,8 @@ grep -Fq -- '--cacert "$PVE_CA_FILE"' "$ACCESS" \
     || fail "PVE API credential check must use the provisioned PVE CA"
 grep -Fq 'check_admin_effective_boundaries deployer@pve host-deploy' "$TOOLING" \
     || fail "status check must report dangerous deployer administrative permissions"
+grep -Fq 'check_host_acl_boundaries' "$TOOLING" \
+    || fail "status check must report unexpected deployer ACLs"
 grep -Fq 'check_storage_contents local snippets vztmpl' "$TOOLING" \
     || fail "status check must verify required storage content types"
 grep -Fq 'последний PVE Configuration выполнялся на' "$TOOLING" \
