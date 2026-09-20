@@ -86,7 +86,7 @@ def test_registry() -> None:
         root = Path(td)
         registry = root / "public-keys"
         registry.mkdir()
-        deployer = root / "deployer"
+        deployer = root / "pve_deployer_ed25519"
         make_key(deployer, "deployer")
         (registry / "pve_deployer_ed25519.pub").write_bytes((root / "pve_deployer_ed25519.pub").read_bytes())
 
@@ -235,7 +235,7 @@ def test_source_contract() -> None:
         fail("legacy participation tag remains in sync runtime")
     if "pve_" + "guest_ed25519" in text:
         fail("legacy PVE guest key name remains in sync runtime")
-    if '"deployer' + '.pub"' in text:
+    if "deployer" + ".pub" in text:
         fail("legacy deployer registry filename remains in sync runtime")
     if "pve_deployer_ed25519.pub" not in text:
         fail("canonical PVE deployer registry key is not used")
