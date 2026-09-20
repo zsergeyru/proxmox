@@ -28,6 +28,9 @@ for cmd in flock runuser git find stat python3; do
     command -v "\$cmd" >/dev/null 2>&1 || fail "Не найдена обязательная команда: \$cmd"
 done
 
+exec 9>"\$LOCK_FILE"
+flock -n 9 || fail "Другой Public Bootstrap, PVE Configuration, deploy-guest или sync-management-keys уже выполняется"
+
 [[ -d "\$REPO_DIR/.git" ]] || fail "Каноническая копия Git отсутствует: \$REPO_DIR"
 [[ -f "\$SOURCE" ]] || fail "Не найден runtime source: \$SOURCE"
 
@@ -51,9 +54,6 @@ recorded_revision="\$(cat "\$STATE_DIR/last-revision" 2>/dev/null || true)"
 [[ "\$revision" =~ ^[0-9a-f]{40}\$ ]] || fail "Не удалось определить Git revision"
 [[ "\$recorded_revision" == "\$revision" ]] \\
     || fail "Canonical checkout revision отличается от PVE Configuration state; сначала выполните PVE Configuration"
-
-exec 9>"\$LOCK_FILE"
-flock -n 9 || fail "Другой Public Bootstrap, PVE Configuration, deploy-guest или sync-management-keys уже выполняется"
 
 set +e
 runuser -u "\$DEPLOY_USER" -- env \\
