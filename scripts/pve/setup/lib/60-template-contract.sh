@@ -68,7 +68,10 @@ validate_template_contract() {
     template_contract_expect '^serial0: socket$' "serial0 должен быть socket"
     template_contract_expect '^ipconfig0: ip=dhcp$' "ipconfig0 должен быть ip=dhcp"
     if ! template_description_field_equals "$config" "template-version" "$TEMPLATE_VERSION"; then
-        errors+="description должен содержать ровно одно поле template-version=${TEMPLATE_VERSION}""$(sed -n 's/^scsi0: //p' <<<"$config" | head -n1)"
+        errors+="description должен содержать ровно одно поле template-version=${TEMPLATE_VERSION}"$'\n'
+    fi
+
+    scsi0="$(sed -n 's/^scsi0: //p' <<<"$config" | head -n1)"
     if [[ -z "$scsi0" ]]; then
         errors+="scsi0 системный диск отсутствует"$'\n'
     else
