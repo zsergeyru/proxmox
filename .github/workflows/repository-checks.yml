@@ -154,6 +154,9 @@ jobs:
       - name: Run template smoke safety checks
         run: bash scripts/pve/setup/tests/test-template-smoke.sh
 
+      - name: Run AI permission boundary checks
+        run: bash scripts/pve/setup/tests/test-access-boundaries.sh
+
       - name: Run API token rollback unit checks
         run: bash scripts/pve/setup/tests/test-token-rollback.sh
 
