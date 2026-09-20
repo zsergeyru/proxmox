@@ -45,5 +45,9 @@ expect_invalid "missing cloud-init media" "${valid_config/media=cdrom/media=disk
 expect_invalid "ordinary cdrom instead of cloud-init" "${valid_config/vm-9000-cloudinit/debian-installer.iso}"
 expect_invalid "builder cicustom leaked" "${valid_config}"$'\n''cicustom: user=local:snippets/builder.yaml'
 expect_invalid "wrong scsi controller" "${valid_config/virtio-scsi-single/virtio-scsi-pci}"
+expect_invalid "version prefix 70" "${valid_config/template-version=7/template-version=70}"
+expect_invalid "version suffix 7x" "${valid_config/template-version=7/template-version=7x}"
+expect_invalid "missing template version" "${valid_config/description: template-version=7/description: ordinary-template}"
+expect_invalid "conflicting duplicate template version" "${valid_config/description: template-version=7/description: template-version=7; template-version=8}"
 
 printf 'Template contract tests passed.\n'
