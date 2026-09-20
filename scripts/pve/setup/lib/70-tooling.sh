@@ -160,16 +160,30 @@ check_token_permission_extras() {
     [[ -z "$extra" ]] || check_warn "$label: на $scope есть дополнительные effective permissions: $extra"
 }
 
-check_token_forbidden_permissions() {
-    local user=$1 token=$2 label=$3 scope=$4 forbidden=$5 json priv found=""
+check_ai_effective_boundaries() {
+    local user=$1 token=$2 label=$3 json path priv vm_found="" admin_found=""
     json="$(pveum user token permissions "$user" "$token" --output-format json 2>/dev/null || true)"
     [[ -n "$json" ]] && jq -e . >/dev/null 2>&1 <<<"$json" || return
-    for priv in $forbidden; do
-        if jq -e --arg path "$scope" --arg priv "$priv" '((.[$path] // {}) | has($priv))' <<<"$json" >/dev/null 2>&1; then
-            found="${found}${found:+ }${priv}"
+
+    while IFS='|' read -r path priv; do
+        [[ -n "$path" && -n "$priv" ]] || continue
+
+        case " $AI_FORBIDDEN_ROOT_PRIVS " in
+            *" $priv "*) admin_found="${admin_found}${admin_found:+, }${path}:${priv}" ;;
+        esac
+
+        if [[ "$path" == "/vms" || "$path" == /vms/* ]]; then
+            if [[ "$path" == "/vms/$TEMPLATE_VMID" && ( "$priv" == "VM.Audit" || "$priv" == "VM.Clone" ) ]]; then
+                continue
+            fi
+            case " $AI_FORBIDDEN_VM_CHANGE_PRIVS " in
+                *" $priv "*) vm_found="${vm_found}${vm_found:+, }${path}:${priv}" ;;
+            esac
         fi
-    done
-    [[ -z "$found" ]] || check_warn "$label: на $scope обнаружены запрещённые для модели AI effective permissions: $found"
+    done < <(jq -r 'to_entries[] | .key as $path | .value | keys[]? | "\($path)|\(.)"' <<<"$json" 2>/dev/null)
+
+    [[ -z "$vm_found" ]] || check_warn "$label: права изменения VM вне managed/template: $vm_found"
+    [[ -z "$admin_found" ]] || check_warn "$label: административные privileges вне принятой модели: $admin_found"
 }
 
 check_ai_acl_boundaries() {
@@ -342,8 +356,9 @@ run_check() {
     check_token_permission_extras ai-agent@pve infra "ai-agent@pve!infra" /storage/local 'Datastore.AllocateSpace Datastore.Audit'
     check_token_permission_extras ai-agent@pve infra "ai-agent@pve!infra" /storage/local-lvm 'Datastore.AllocateSpace Datastore.Audit'
     check_token_permission_extras ai-agent@pve infra "ai-agent@pve!infra" /sdn/zones/localnetwork/vmbr0 'SDN.Use'
-    check_token_forbidden_permissions ai-agent@pve infra "ai-agent@pve!infra" /vms 'VM.Allocate VM.Backup VM.Clone VM.Config.CDROM VM.Config.Cloudinit VM.Config.CPU VM.Config.Disk VM.Config.HWType VM.Config.Memory VM.Config.Network VM.Config.Options VM.Console VM.PowerMgmt VM.Snapshot VM.Snapshot.Rollback'
-    check_token_forbidden_permissions ai-agent@pve infra "ai-agent@pve!infra" / 'Permissions.Modify Sys.Modify Sys.PowerMgmt User.Modify Group.Allocate Realm.Allocate SDN.Allocate Datastore.Allocate'
+    AI_FORBIDDEN_VM_CHANGE_PRIVS='VM.Allocate VM.Backup VM.Clone VM.Config.CDROM VM.Config.Cloudinit VM.Config.CPU VM.Config.Disk VM.Config.HWType VM.Config.Memory VM.Config.Network VM.Config.Options VM.Console VM.PowerMgmt VM.Snapshot VM.Snapshot.Rollback'
+    AI_FORBIDDEN_ROOT_PRIVS='Permissions.Modify Sys.Modify Sys.PowerMgmt User.Modify Group.Allocate Realm.Allocate SDN.Allocate Datastore.Allocate'
+    check_ai_effective_boundaries ai-agent@pve infra "ai-agent@pve!infra"
     check_ai_acl_boundaries
 
     check_token_auth 'deployer@pve!host-deploy' "$SECRETS_DIR/host-deploy.token" "deployer@pve!host-deploy"
