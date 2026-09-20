@@ -39,7 +39,7 @@ def participant(vmid: int = 301):
         address="192.168.3.1",
         user="root",
         port=22,
-        manifest=None,
+        manifest="guests/301-test/guest.yaml",
     )
 
 
@@ -88,7 +88,7 @@ def test_registry() -> None:
         registry.mkdir()
         deployer = root / "deployer"
         make_key(deployer, "deployer")
-        (registry / "deployer.pub").write_bytes((root / "deployer.pub").read_bytes())
+        (registry / "pve_deployer_ed25519.pub").write_bytes((root / "pve_deployer_ed25519.pub").read_bytes())
 
         old_registry = mod.REGISTRY_DIR
         old_aggregate = mod.AGGREGATE_FILE
@@ -97,11 +97,11 @@ def test_registry() -> None:
         try:
             mod.REGISTRY_DIR = registry
             mod.AGGREGATE_FILE = registry / "management-authorized-keys"
-            mod.DEPLOYER_REGISTRY_KEY = registry / "deployer.pub"
-            mod.DEPLOYER_PUB = root / "deployer.pub"
+            mod.DEPLOYER_REGISTRY_KEY = registry / "pve_deployer_ed25519.pub"
+            mod.DEPLOYER_PUB = root / "pve_deployer_ed25519.pub"
 
             state = mod.load_registry()
-            if list(state.files) != ["deployer.pub"]:
+            if list(state.files) != ["pve_deployer_ed25519.pub"]:
                 fail("initial registry order is wrong")
             if not state.aggregate_changed:
                 fail("missing aggregate must be reported as changed")
@@ -110,9 +110,9 @@ def test_registry() -> None:
             make_key(guest, "301")
             (registry / "301.pub").write_bytes((root / "301.pub").read_bytes())
             state = mod.load_registry()
-            if list(state.files) != ["deployer.pub", "301.pub"]:
-                fail("VMID public key was not ordered after deployer.pub")
-            if state.aggregate != state.files["deployer.pub"] + state.files["301.pub"]:
+            if list(state.files) != ["pve_deployer_ed25519.pub", "301.pub"]:
+                fail("VMID public key was not ordered after pve_deployer_ed25519.pub")
+            if state.aggregate != state.files["pve_deployer_ed25519.pub"] + state.files["301.pub"]:
                 fail("deterministic aggregate is wrong")
 
             (registry / "311.pub").write_bytes((registry / "301.pub").read_bytes())
@@ -146,7 +146,7 @@ def test_remote_catalog_policy() -> None:
         authorized_keys=b"",
         catalog_exists=True,
         catalog_files={
-            "deployer.pub": b"key\n",
+            "pve_deployer_ed25519.pub": b"key\n",
             "301.pub": b"key2\n",
             "management-authorized-keys": b"keys\n",
         },
@@ -176,17 +176,79 @@ def test_untrusted_host_boundary() -> None:
     if "if not known_host_exists(participant):" not in block:
         fail("prepare_participant must reject missing persistent host trust")
     if "scan_host_keys(participant)" in block or "temporary_known_hosts" in block:
-        fail("bulk sync must not TOFU an unknown management-ssh participant")
+        fail("bulk sync must not TOFU an unknown project participant")
+
+
+def test_discovery_uses_project_state() -> None:
+    old_load_api_token = mod.load_api_token
+    old_api_get = mod.api_get
+    old_find_manifest = mod.find_manifest
+    old_read_yaml = mod.read_yaml
+    old_participant_from_resource = mod.participant_from_resource
+    resources = [
+        {
+            "vmid": 301,
+            "name": "managed",
+            "type": "qemu",
+            "node": "pve",
+            "status": "running",
+            "tags": "proxmox-deployer",
+        },
+        {
+            "vmid": 302,
+            "name": "external",
+            "type": "qemu",
+            "node": "pve",
+            "status": "running",
+            "tags": "unrelated",
+        },
+    ]
+    try:
+        mod.load_api_token = lambda: ("token", "secret")
+        mod.api_get = lambda *args, **kwargs: resources
+        mod.find_manifest = lambda vmid: Path("guests/301-test/guest.yaml") if vmid == 301 else None
+        mod.read_yaml = lambda path: {"profile": "vm"}
+        mod.participant_from_resource = lambda resource, defaults: participant(int(resource["vmid"]))
+
+        found = mod.discover_participants({"defaults": {"node": "pve"}})
+        if [item.vmid for item in found] != [301]:
+            fail("participant discovery must come from project manifests, not a Proxmox participation tag")
+
+        resources[0]["tags"] = ""
+        try:
+            mod.discover_participants({"defaults": {"node": "pve"}})
+        except mod.SyncError:
+            pass
+        else:
+            fail("project guest without proxmox-deployer ownership tag was accepted")
+    finally:
+        mod.load_api_token = old_load_api_token
+        mod.api_get = old_api_get
+        mod.find_manifest = old_find_manifest
+        mod.read_yaml = old_read_yaml
+        mod.participant_from_resource = old_participant_from_resource
+
+
+def test_source_contract() -> None:
+    text = SOURCE.read_text(encoding="utf-8")
+    if "management-" + "ssh" in text:
+        fail("legacy participation tag remains in sync runtime")
+    if "pve_" + "guest_ed25519" in text:
+        fail("legacy PVE guest key name remains in sync runtime")
+    if '"deployer' + '.pub"' in text:
+        fail("legacy deployer registry filename remains in sync runtime")
+    if "pve_deployer_ed25519.pub" not in text:
+        fail("canonical PVE deployer registry key is not used")
 
 
 def test_helpers() -> None:
-    if mod.parse_tags("foo;management-ssh;bar") != {"foo", "management-ssh", "bar"}:
+    if mod.parse_tags("foo;proxmox-deployer;bar") != {"foo", "proxmox-deployer", "bar"}:
         fail("PVE tag parser is wrong")
     if mod.os_release_id(b'NAME="Debian GNU/Linux"\nID=debian\n') != "debian":
         fail("Debian os-release parser is wrong")
     if mod.known_host_lookup_name(participant()) != "192.168.3.1":
         fail("default SSH known_hosts lookup name is wrong")
-    p = mod.Participant(301, "test", "qemu", "pve", "running", "192.168.3.1", "root", 2222, None)
+    p = mod.Participant(301, "test", "qemu", "pve", "running", "192.168.3.1", "root", 2222, "guests/301-test/guest.yaml")
     if mod.known_host_lookup_name(p) != "[192.168.3.1]:2222":
         fail("non-default SSH known_hosts lookup name is wrong")
 
@@ -196,6 +258,8 @@ def main() -> None:
     test_registry()
     test_remote_catalog_policy()
     test_untrusted_host_boundary()
+    test_discovery_uses_project_state()
+    test_source_contract()
     test_helpers()
     print("sync-management-keys unit tests passed.")
 
