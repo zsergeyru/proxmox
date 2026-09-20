@@ -558,7 +558,11 @@ report_status() {
     ok "Приватный репозиторий синхронизирован и origin проверен"
     ok "managed и роли Proxmox проверены"
     ok "${HOST_PVE_TOKEN}: guest-level /vms, effective permissions и API credential проверены"
-    ok "${AI_PVE_TOKEN}: managed-only effective permissions и API credential проверены"
+    if (( AI_PERMISSION_BOUNDARY_WARNINGS )); then
+        info "${AI_PVE_TOKEN}: обязательные права и API credential проверены; границы доступа имеют предупреждения"
+    else
+        ok "${AI_PVE_TOKEN}: managed-only effective permissions и API credential проверены"
+    fi
 
     if qm config "$TEMPLATE_VMID" >/dev/null 2>&1; then
         ok "Шаблон ${TEMPLATE_VMID} Template-Version ${TEMPLATE_VERSION} существует и полный contract проверен"
