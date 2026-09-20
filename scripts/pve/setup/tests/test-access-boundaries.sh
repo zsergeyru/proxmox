@@ -57,6 +57,8 @@ pveum() {
     if [[ "$1 $2 $3" == "acl list --output-format" ]]; then
         cat <<'JSON'
 [
+  {"path":"/vms","type":"user","ugid":"deployer@pve","roleid":"AIManagedGuest","propagate":1},
+  {"path":"/","type":"user","ugid":"deployer@pve","roleid":"Administrator","propagate":1},
   {"path":"/pool/managed","type":"user","ugid":"ai-agent@pve","roleid":"AIManagedGuest","propagate":1},
   {"path":"/pool/managed","type":"user","ugid":"ai-agent@pve","roleid":"AIManagedPool","propagate":1},
   {"path":"/vms/9000","type":"token","ugid":"ai-agent@pve!infra","roleid":"AICloneSource","propagate":1},
@@ -68,12 +70,20 @@ JSON
     return 1
 }
 
-warn_unexpected_ai_acl_entries "ai-agent@pve" "ai-agent@pve!infra"
+warn_unexpected_host_acl_entries "deployer@pve" "deployer@pve!host-deploy"
 [[ "$WARN_COUNT" -eq 5 ]] || {
+    printf 'Unexpected deployer ACL was not reported exactly once\n' >&2
+    exit 1
+}
+
+warn_unexpected_ai_acl_entries "ai-agent@pve" "ai-agent@pve!infra"
+[[ "$WARN_COUNT" -eq 6 ]] || {
     printf 'Unexpected AI ACL was not reported exactly once\n' >&2
     exit 1
 }
 
+grep -Fq 'warn_unexpected_host_acl_entries "$HOST_PVE_USER" "$HOST_PVE_TOKEN"' "$ROOT/scripts/pve/setup/lib/50-access.sh" \
+    || { printf 'Deployer ACL boundary check is not wired into configuration\n' >&2; exit 1; }
 grep -Fq 'warn_unexpected_ai_acl_entries "$AI_PVE_USER" "$AI_PVE_TOKEN"' "$ROOT/scripts/pve/setup/lib/50-access.sh" \
     || { printf 'AI ACL boundary check is not wired into configuration\n' >&2; exit 1; }
 
