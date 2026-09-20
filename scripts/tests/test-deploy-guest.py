@@ -116,6 +116,7 @@ def main() -> None:
     assert "start_after_deploy" in text[load_start:load_end]
     assert "deploy-incomplete" in text
     assert "management-" + "ssh" not in text
+    assert "effectivmanagement_requested" not in text
     assert "qm " not in text and "pct " not in text and "pvesh " not in text
 
     print("deploy-guest contract tests passed.")
