@@ -347,6 +347,10 @@ sync_private_repo() {
 
     case "$repo_state" in
         absent|empty)
+            # Для отсутствующего пути проверяется доверенный родитель, для пустого
+            # каталога — также его владелец и права. Чужой пустой каталог не
+            # используется и не "исправляется" автоматически.
+            assert_canonical_repo_trust
             canonical_git clone --depth 1 --branch "$PRIVATE_BRANCH" "$PRIVATE_REPO" "$REPO_DIR"
             harden_canonical_repo_permissions
             assert_canonical_repo_trust
