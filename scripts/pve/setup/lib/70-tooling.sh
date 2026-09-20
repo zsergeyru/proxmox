@@ -110,17 +110,29 @@ check_required_command() {
 }
 
 check_role() {
-    local role=$1 required=$2 roles_json actual missing priv
+    local role=$1 required=$2 roles_json actual missing extra priv actual_lines required_lines
     roles_json="$(pveum role list --output-format json 2>/dev/null || true)"
     actual="$(jq -r --arg role "$role" '.[] | select(.roleid == $role) | (.privs // "")' <<<"$roles_json" 2>/dev/null | head -n1)"
     if [[ -z "$actual" ]]; then check_error "роль Proxmox отсутствует: $role"; return; fi
+
     missing=""
     for priv in $required; do
         if ! tr ', ' '\n\n' <<<"$actual" | grep -Fxq "$priv"; then missing+="${priv} "; fi
     done
-    [[ -z "$missing" ]] && check_ok "роль Proxmox: $role" || check_error "роль $role не содержит обязательные привилегии: ${missing% }"
-}
+    if [[ -n "$missing" ]]; then
+        check_error "роль $role не содержит обязательные привилегии: ${missing% }"
+        return
+    fi
 
+    actual_lines="$(printf '%s\n' "$actual" | tr ', ' '\n\n' | sed '/^$/d' | LC_ALL=C sort -u)"
+    required_lines="$(printf '%s\n' "$required" | tr ', ' '\n\n' | sed '/^$/d' | LC_ALL=C sort -u)"
+    extra="$(comm -13 <(printf '%s\n' "$required_lines") <(printf '%s\n' "$actual_lines") || true)"
+    if [[ -n "$extra" ]]; then
+        check_warn "роль $role содержит дополнительные привилегии, которые не отзываются автоматически: $(printf '%s\n' "$extra" | paste -sd, -)"
+    else
+        check_ok "роль Proxmox: $role"
+    fi
+}
 check_token_permissions() {
     local user=$1 token=$2 label=$3 scope=$4 required=$5 json priv
     json="$(pveum user token permissions "$user" "$token" --output-format json 2>/dev/null || true)"
@@ -132,6 +144,48 @@ check_token_permissions() {
         fi
     done
     check_ok "$label: права на $scope"
+}
+
+check_token_permission_extras() {
+    local user=$1 token=$2 label=$3 scope=$4 allowed=$5 json priv extra=""
+    json="$(pveum user token permissions "$user" "$token" --output-format json 2>/dev/null || true)"
+    [[ -n "$json" ]] && jq -e . >/dev/null 2>&1 <<<"$json" || return
+    while IFS= read -r priv; do
+        [[ -n "$priv" ]] || continue
+        if ! printf '%s\n' $allowed | grep -Fxq "$priv"; then
+            extra="${extra}${extra:+ }${priv}"
+        fi
+    done < <(jq -r --arg path "$scope" '(.[$path] // {}) | keys[]?' <<<"$json" 2>/dev/null | LC_ALL=C sort -u)
+    [[ -z "$extra" ]] || check_warn "$label: на $scope есть дополнительные effective permissions: $extra"
+}
+
+check_token_forbidden_permissions() {
+    local user=$1 token=$2 label=$3 scope=$4 forbidden=$5 json priv found=""
+    json="$(pveum user token permissions "$user" "$token" --output-format json 2>/dev/null || true)"
+    [[ -n "$json" ]] && jq -e . >/dev/null 2>&1 <<<"$json" || return
+    for priv in $forbidden; do
+        if jq -e --arg path "$scope" --arg priv "$priv" '((.[$path] // {}) | has($priv))' <<<"$json" >/dev/null 2>&1; then
+            found="${found}${found:+ }${priv}"
+        fi
+    done
+    [[ -z "$found" ]] || check_warn "$label: на $scope обнаружены запрещённые для модели AI effective permissions: $found"
+}
+
+check_ai_acl_boundaries() {
+    local acl_json principal_type principal rows path role
+    acl_json="$(pveum acl list --output-format json 2>/dev/null || true)"
+    [[ -n "$acl_json" ]] && jq -e . >/dev/null 2>&1 <<<"$acl_json" || { check_error "не удалось получить ACL для проверки границ AI"; return; }
+    for principal_type in user token; do
+        if [[ "$principal_type" == user ]]; then principal='ai-agent@pve'; else principal='ai-agent@pve!infra'; fi
+        rows="$(jq -r --arg type "$principal_type" --arg ugid "$principal" '.[] | select(.type == $type and .ugid == $ugid) | "\(.path)|\(.roleid)"' <<<"$acl_json" 2>/dev/null || true)"
+        while IFS='|' read -r path role; do
+            [[ -n "$path" && -n "$role" ]] || continue
+            case "${path}|${role}" in
+                '/pool/managed|AIManagedGuest'|'/pool/managed|AIManagedPool'|'/vms/9000|AICloneSource'|'/storage/local|AIStorage'|'/storage/local-lvm|AIStorage'|'/sdn/zones/localnetwork/vmbr0|AINetworkUse') ;;
+                *) check_warn "AI principal ${principal_type}=${principal} имеет дополнительную ACL: path=${path}, role=${role}" ;;
+            esac
+        done <<<"$rows"
+    done
 }
 
 check_token_auth() {
@@ -281,6 +335,15 @@ run_check() {
     check_token_permissions ai-agent@pve infra "ai-agent@pve!infra" /storage/local 'Datastore.AllocateSpace Datastore.Audit'
     check_token_permissions ai-agent@pve infra "ai-agent@pve!infra" /storage/local-lvm 'Datastore.AllocateSpace Datastore.Audit'
     check_token_permissions ai-agent@pve infra "ai-agent@pve!infra" /sdn/zones/localnetwork/vmbr0 'SDN.Use'
+
+    check_token_permission_extras ai-agent@pve infra "ai-agent@pve!infra" /pool/managed 'VM.Allocate VM.Audit VM.Backup VM.Clone VM.Config.CDROM VM.Config.Cloudinit VM.Config.CPU VM.Config.Disk VM.Config.HWType VM.Config.Memory VM.Config.Network VM.Config.Options VM.Console VM.GuestAgent.Audit VM.PowerMgmt VM.Snapshot VM.Snapshot.Rollback Pool.Allocate Pool.Audit'
+    check_token_permission_extras ai-agent@pve infra "ai-agent@pve!infra" /vms/9000 'VM.Audit VM.Clone'
+    check_token_permission_extras ai-agent@pve infra "ai-agent@pve!infra" /storage/local 'Datastore.AllocateSpace Datastore.Audit'
+    check_token_permission_extras ai-agent@pve infra "ai-agent@pve!infra" /storage/local-lvm 'Datastore.AllocateSpace Datastore.Audit'
+    check_token_permission_extras ai-agent@pve infra "ai-agent@pve!infra" /sdn/zones/localnetwork/vmbr0 'SDN.Use'
+    check_token_forbidden_permissions ai-agent@pve infra "ai-agent@pve!infra" /vms 'VM.Allocate VM.Backup VM.Clone VM.Config.CDROM VM.Config.Cloudinit VM.Config.CPU VM.Config.Disk VM.Config.HWType VM.Config.Memory VM.Config.Network VM.Config.Options VM.Console VM.PowerMgmt VM.Snapshot VM.Snapshot.Rollback'
+    check_token_forbidden_permissions ai-agent@pve infra "ai-agent@pve!infra" / 'Permissions.Modify Sys.Modify Sys.PowerMgmt User.Modify Group.Allocate Realm.Allocate SDN.Allocate Datastore.Allocate'
+    check_ai_acl_boundaries
 
     check_token_auth 'deployer@pve!host-deploy' "$SECRETS_DIR/host-deploy.token" "deployer@pve!host-deploy"
     check_token_auth 'ai-agent@pve!infra' "$SECRETS_DIR/ai-agent-infra.token" "ai-agent@pve!infra"
