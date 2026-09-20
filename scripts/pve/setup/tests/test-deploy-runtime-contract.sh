@@ -7,6 +7,7 @@ SYSTEM="$ROOT/scripts/pve/setup/lib/20-system.sh"
 RUNTIME="$ROOT/scripts/pve/setup/lib/40-runtime.sh"
 KEYS="$ROOT/scripts/pve/setup/lib/45-management-keys.sh"
 TOOLING="$ROOT/scripts/pve/setup/lib/70-tooling.sh"
+ACCESS="$ROOT/scripts/pve/setup/lib/50-access.sh"
 DEPLOY_GUEST="$ROOT/scripts/pve/deploy-guest.py"
 CONFIGURE="$ROOT/scripts/pve/setup/configure-pve.sh"
 PREFLIGHT="$ROOT/scripts/pve/setup/lib/10-preflight.sh"
@@ -16,7 +17,7 @@ fail() {
     exit 1
 }
 
-grep -Fqx 'PVE_CONFIGURATION_VERSION="1.0.4"' "$COMMON" || fail "PVE_CONFIGURATION_VERSION must be 1.0.4"
+grep -Fqx 'PVE_CONFIGURATION_VERSION="1.0.5"' "$COMMON" || fail "PVE_CONFIGURATION_VERSION must be 1.0.5"
 
 if grep -Eq 'BOOTSTRAP_KEY_FILE|PVE_BOOTSTRAP_KEY_FILE|BOOTSTRAP_KNOWN_HOSTS|CANONICAL_KEY_DIFFERS_FROM_BOOTSTRAP' "$COMMON" "$RUNTIME"; then
     fail "temporary GitHub Deploy Key contract must not remain in PVE Configuration"
@@ -79,6 +80,25 @@ grep -Fq 'PYTHONPYCACHEPREFIX=/run/proxmox-deployer-disabled-pycache' "$TOOLING"
     || fail "deploy runtime must use a non-canonical pycache prefix"
 grep -Fq 'runuser -u "\$DEPLOY_USER" -- env PYTHONDONTWRITEBYTECODE=1' "$TOOLING" \
     || fail "deploy runtime must disable bytecode writes for pvedeploy"
+
+validator_pos="$(grep -n 'if ! PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=/run/proxmox-deployer-disabled-pycache /usr/bin/python3 "\$VALIDATOR"' "$TOOLING" | head -n1 | cut -d: -f1)"
+revision_pos="$(grep -n 'revision_tmp="\$(mktemp "\$STATE_DIR/.last-revision.deploy.XXXXXX")"' "$TOOLING" | head -n1 | cut -d: -f1)"
+[[ -n "$validator_pos" && -n "$revision_pos" && "$validator_pos" -lt "$revision_pos" ]] \
+    || fail "deploy wrapper must validate a fetched revision before accepting it in last-revision"
+grep -Fq 'rollback_repo_update()' "$TOOLING" \
+    || fail "deploy wrapper must restore the previous accepted revision when fetched code is invalid"
+
+if grep -Fq -- '--insecure' "$ACCESS" "$TOOLING"; then
+    fail "local PVE API credential checks must verify the PVE certificate"
+fi
+grep -Fq -- '--cacert "$PVE_CA_FILE"' "$ACCESS" \
+    || fail "PVE API credential check must use the provisioned PVE CA"
+grep -Fq 'check_admin_effective_boundaries deployer@pve host-deploy' "$TOOLING" \
+    || fail "status check must report dangerous deployer administrative permissions"
+grep -Fq 'check_storage_contents local snippets vztmpl' "$TOOLING" \
+    || fail "status check must verify required storage content types"
+grep -Fq 'последний PVE Configuration выполнялся на' "$TOOLING" \
+    || fail "status check must treat state.json revision as history rather than current canonical revision"
 [[ -f "$DEPLOY_GUEST" ]] \
     || fail "deploy-guest runtime source must exist"
 grep -Fq 'DEPLOY_GUEST_SOURCE_REVISION' "$DEPLOY_GUEST" \
