@@ -29,6 +29,7 @@ def desired(kind: str = "vm"):
             "ipv4": {"address": "192.168.3.1/16"},
         },
         "resources": {"disk": {"storage": "local-lvm", "size_gb": 24}},
+        "management": ["ssh_identity", "project_repo_read"],
     }
     return mod.Desired(301, Path("guests/301-test/guest.yaml"), {}, effective, "192.168.3.1", ())
 
@@ -36,9 +37,9 @@ def desired(kind: str = "vm"):
 def main() -> None:
     d = desired()
 
-    assert mod.parse_tags("management-ssh;proxmox-deployer") == {
-        "management-ssh",
+    assert mod.parse_tags("proxmox-deployer;custom") == {
         "proxmox-deployer",
+        "custom",
     }
     assert mod.format_tags({"z", "a"}) == "a;z"
 
@@ -55,9 +56,12 @@ def main() -> None:
     assert not mod.has_ownership({"tags": "foo", "description": desc}, d)
 
     final_tags = mod.desired_final_tags({"tags": "foo;deploy-incomplete"})
-    assert final_tags == {"foo", "proxmox-deployer", "management-ssh"}
+    assert final_tags == {"foo", "proxmox-deployer"}
     incomplete = mod.desired_incomplete_tags({"tags": "foo"})
     assert "deploy-incomplete" in incomplete
+    assert mod.management_requested(d, "ssh_identity")
+    assert mod.management_requested(d, "project_repo_read")
+    assert not mod.management_requested(d, "unknown")
 
     assert mod.parse_size_bytes("local-lvm:vm-301-disk-0,size=24G") == 24 * 1024**3
     assert mod.parse_size_bytes("local:301/rootfs.raw,size=1024M") == 1024 * 1024**2
@@ -111,7 +115,7 @@ def main() -> None:
     load_end = text.index("\ndef load_local_config", load_start)
     assert "start_after_deploy" in text[load_start:load_end]
     assert "deploy-incomplete" in text
-    assert "management-ssh" in text
+    assert "management-" + "ssh" not in text
     assert "qm " not in text and "pct " not in text and "pvesh " not in text
 
     print("deploy-guest contract tests passed.")
