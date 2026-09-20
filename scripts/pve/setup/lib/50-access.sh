@@ -369,7 +369,7 @@ verify_effective_permissions() {
             warn_unexpected_permission_set "$full_token" "$permissions_json" "/storage/local-lvm" "$ROLE_STORAGE_PRIVS"
             warn_unexpected_permission_set "$full_token" "$permissions_json" "/sdn/zones/localnetwork/${BRIDGE}" "$ROLE_NETWORK_PRIVS"
             warn_unexpected_vm_scope_permissions "$full_token" "$permissions_json"
-            warn_forbidden_permission_anywhere "$full_token" "$permissions_json" "$AI_FORBIDDEN_ROOT_PRIVS"
+            warn_forbidden_permission_anywhere "$full_token" "$permissions_json" "$AI_FORBIDDEN_ADMIN_PRIVS"
             ;;
         *) die "Неизвестная модель effective permissions '${scope}' для ${full_token}" ;;
     esac
