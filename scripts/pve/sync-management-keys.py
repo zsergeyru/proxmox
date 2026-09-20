@@ -641,7 +641,7 @@ def inspect_remote(participant: Participant, known_hosts_file: Path) -> RemoteSt
 
 def validate_remote_catalog(state: RemoteState, participant: Participant) -> None:
     for name in state.catalog_files:
-        if name == "pve_deployer_ed25519.pub" or name == "management-authorized-keys" or VMID_KEY_RE.fullmatch(name):
+        if name == DEPLOYER_REGISTRY_KEY.name or name == "management-authorized-keys" or VMID_KEY_RE.fullmatch(name):
             continue
         raise UnsafeRemoteState(
             f"VMID {participant.vmid}: неизвестный файл в guest public-key catalog: {name}"
@@ -770,7 +770,7 @@ def build_apply_script(
     ]
     for name, data in sorted(
         target_catalog.items(),
-        key=lambda item: (0 if item[0] == "pve_deployer_ed25519.pub" else 2 if item[0] == "management-authorized-keys" else 1, item[0]),
+        key=lambda item: (0 if item[0] == DEPLOYER_REGISTRY_KEY.name else 2 if item[0] == "management-authorized-keys" else 1, item[0]),
     ):
         lines.extend(
             [
