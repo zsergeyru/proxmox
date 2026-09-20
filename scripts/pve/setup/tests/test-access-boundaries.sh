@@ -46,6 +46,13 @@ warn_forbidden_permission_anywhere "ai-agent@pve!infra" "$extra_json" "$AI_FORBI
     exit 1
 }
 
+AI_PERMISSION_BOUNDARY_WARNINGS=0
+warn_forbidden_permission_anywhere "deployer@pve!host-deploy" "$extra_json" "$AI_FORBIDDEN_ADMIN_PRIVS" 0
+[[ "$WARN_COUNT" -eq 4 && "$AI_PERMISSION_BOUNDARY_WARNINGS" -eq 0 ]] || {
+    printf 'Deployer administrative permission must warn without setting the AI boundary flag\n' >&2
+    exit 1
+}
+
 pveum() {
     if [[ "$1 $2 $3" == "acl list --output-format" ]]; then
         cat <<'JSON'
@@ -62,7 +69,7 @@ JSON
 }
 
 warn_unexpected_ai_acl_entries "ai-agent@pve" "ai-agent@pve!infra"
-[[ "$WARN_COUNT" -eq 4 ]] || {
+[[ "$WARN_COUNT" -eq 5 ]] || {
     printf 'Unexpected AI ACL was not reported exactly once\n' >&2
     exit 1
 }
