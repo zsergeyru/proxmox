@@ -25,8 +25,17 @@ grep -Fq 'SYNC_MANAGEMENT_KEYS_SOURCE_REVISION="\$revision"' "$TOOLING" \
     || fail "wrapper must pin source revision"
 grep -Fq 'flock -n 9' "$TOOLING" \
     || fail "manual sync command must use orchestration lock"
-grep -Fq 'management-ssh' "$SOURCE" \
-    || fail "runtime must discover management-ssh participants"
+grep -Fq 'OWNERSHIP_TAG = "proxmox-deployer"' "$SOURCE" \
+    || fail "runtime must require project ownership before guest mutation"
+grep -Fq 'manifest = find_manifest(vmid)' "$SOURCE" \
+    || fail "runtime must derive participants from project manifests"
+grep -Fq 'if not source.get("profile"):' "$SOURCE" \
+    || fail "runtime must use profile as the administrative SSH participation contract"
+if grep -Fq 'management-ssh' "$SOURCE"; then
+    fail "legacy management-ssh participation tag must not remain in runtime"
+fi
+grep -Fq 'DEPLOYER_REGISTRY_KEY = REGISTRY_DIR / "pve_deployer_ed25519.pub"' "$SOURCE" \
+    || fail "sync runtime must use canonical PVE deployer registry filename"
 grep -Fq 'PVE_CA_FILE="${CONFIG_DIR}/pve-root-ca.pem"' "$COMMON" \
     || fail "runtime PVE CA destination must be defined outside /etc/pve"
 grep -Fq 'install -o root -g "$DEPLOY_USER" -m 0640 "$PVE_CA_SOURCE" "$PVE_CA_FILE"' "$RUNTIME_SETUP" \
