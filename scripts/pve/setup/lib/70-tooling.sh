@@ -295,16 +295,26 @@ check_token_auth() {
 
 run_check() {
     local saved_status user_record uid gid_name home shell guest_fp reg_fp parent_owner parent_mode violation origin drift revision recorded state_revision
-    local users_json host_token ai_token pools_json storage template_cfg smoke_status template_version_fields
+    local users_json host_token ai_token pools_json storage template_cfg smoke_status template_version_fields pve_line codename
 
     printf '%s%s=== PVE Configuration: фактическая проверка ===%s\n' "$C_BOLD" "$C_CYAN" "$C_RESET"
 
-    for cmd in jq git find stat getent id ssh-keygen curl hostname pveversion pveum pvesm pvesh qm; do
+    for cmd in jq git find stat getent id ssh-keygen curl hostname ip pveversion pveum pvesm pvesh qm; do
         command -v "$cmd" >/dev/null 2>&1 || check_error "не найдена команда, необходимая для проверки: $cmd"
     done
     if (( ERRORS > 0 )); then printf '\n[ИТОГ] ERROR: errors=%d warnings=%d\n' "$ERRORS" "$WARNINGS"; return 1; fi
 
-    pveversion >/dev/null 2>&1 && check_ok "Proxmox VE доступен" || check_error "не удалось получить версию Proxmox VE"
+    pve_line="$(pveversion 2>/dev/null | head -n1 || true)"
+    [[ "$pve_line" =~ ^pve-manager/9\. ]] \
+        && check_ok "Proxmox VE 9: $pve_line" \
+        || check_error "ожидается Proxmox VE 9.x, обнаружено: ${pve_line:-неизвестно}"
+
+    codename="$(. /etc/os-release 2>/dev/null && printf '%s' "${VERSION_CODENAME:-}")"
+    [[ "$codename" == "trixie" ]] \
+        && check_ok "Debian trixie" \
+        || check_error "ожидается Debian trixie, обнаружено: ${codename:-неизвестно}"
+    [[ -e /dev/kvm ]] && check_ok "KVM доступен" || check_error "не найден /dev/kvm"
+    ip link show vmbr0 >/dev/null 2>&1 && check_ok "сетевой мост vmbr0 найден" || check_error "сетевой мост vmbr0 отсутствует"
 
     if [[ -f "$STATE" ]] && jq -e '.component == "pve-configuration"' "$STATE" >/dev/null 2>&1; then
         check_ok "машинное состояние PVE Configuration читается"
