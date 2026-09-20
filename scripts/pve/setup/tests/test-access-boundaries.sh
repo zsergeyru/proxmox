@@ -40,7 +40,7 @@ warn_unexpected_vm_scope_permissions "ai-agent@pve!infra" "$extra_json"
     exit 1
 }
 
-warn_forbidden_permission_anywhere "ai-agent@pve!infra" "$extra_json" "$AI_FORBIDDEN_ROOT_PRIVS"
+warn_forbidden_permission_anywhere "ai-agent@pve!infra" "$extra_json" "$AI_FORBIDDEN_ADMIN_PRIVS"
 [[ "$WARN_COUNT" -eq 3 ]] || {
     printf 'Administrative permission outside root path was not reported\n' >&2
     exit 1
