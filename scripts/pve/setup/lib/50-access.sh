@@ -298,6 +298,41 @@ warn_forbidden_permission_set() {
     fi
 }
 
+warn_forbidden_permission_anywhere() {
+    local full_token=$1 permissions_json=$2 forbidden_raw=$3 path priv found=""
+
+    while IFS='|' read -r path priv; do
+        [[ -n "$path" && -n "$priv" ]] || continue
+        if priv_lines "$forbidden_raw" | grep -Fxq "$priv"; then
+            found="${found}${found:+, }${path}:${priv}"
+        fi
+    done < <(jq -r 'to_entries[] | .key as $path | .value | keys[]? | "\($path)|\(.)"' <<<"$permissions_json" 2>/dev/null)
+
+    if [[ -n "$found" ]]; then
+        AI_PERMISSION_BOUNDARY_WARNINGS=1
+        warn "API-токен ${full_token} имеет административные privileges вне принятой модели: ${found}. Права не отзываются автоматически."
+    fi
+}
+
+warn_unexpected_vm_scope_permissions() {
+    local full_token=$1 permissions_json=$2 path priv found=""
+
+    while IFS='|' read -r path priv; do
+        [[ "$path" == "/vms" || "$path" == /vms/* ]] || continue
+        if [[ "$path" == "/vms/${TEMPLATE_VMID}" ]] && priv_lines "$ROLE_CLONE_PRIVS" | grep -Fxq "$priv"; then
+            continue
+        fi
+        if priv_lines "$AI_FORBIDDEN_VM_CHANGE_PRIVS" | grep -Fxq "$priv"; then
+            found="${found}${found:+, }${path}:${priv}"
+        fi
+    done < <(jq -r 'to_entries[] | .key as $path | .value | keys[]? | "\($path)|\(.)"' <<<"$permissions_json" 2>/dev/null)
+
+    if [[ -n "$found" ]]; then
+        AI_PERMISSION_BOUNDARY_WARNINGS=1
+        warn "API-токен ${full_token} имеет права изменения VM вне разрешённой модели managed/template: ${found}. Права не отзываются автоматически."
+    fi
+}
+
 warn_unexpected_ai_acl_entries() {
     local userid=$1 tokenid=$2 acl_json principal_type principal rows path role
     acl_json="$(pveum acl list --output-format json)" \
@@ -349,8 +384,8 @@ verify_effective_permissions() {
             warn_unexpected_permission_set "$full_token" "$permissions_json" "/storage/local" "$ROLE_STORAGE_PRIVS"
             warn_unexpected_permission_set "$full_token" "$permissions_json" "/storage/local-lvm" "$ROLE_STORAGE_PRIVS"
             warn_unexpected_permission_set "$full_token" "$permissions_json" "/sdn/zones/localnetwork/${BRIDGE}" "$ROLE_NETWORK_PRIVS"
-            warn_forbidden_permission_set "$full_token" "$permissions_json" "/vms" "$AI_FORBIDDEN_VM_CHANGE_PRIVS"
-            warn_forbidden_permission_set "$full_token" "$permissions_json" "/" "$AI_FORBIDDEN_ROOT_PRIVS"
+            warn_unexpected_vm_scope_permissions "$full_token" "$permissions_json"
+            warn_forbidden_permission_anywhere "$full_token" "$permissions_json" "$AI_FORBIDDEN_ROOT_PRIVS"
             ;;
         *) die "Неизвестная модель effective permissions '${scope}' для ${full_token}" ;;
     esac
