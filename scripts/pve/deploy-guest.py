@@ -1199,7 +1199,7 @@ def sync_management_keys(revision: str) -> int:
 
 
 def ensure_management_identity(desired: Desired, revision: str) -> None:
-    if not desired.effectivmanagement_requested(desired, "ssh_identity"):
+    if not management_requested(desired, "ssh_identity"):
         return
     state, line, fp = management_identity_state(desired.management_ip)
     reg_state, _, reg_fp = registry_key_state(desired.vmid)
@@ -1426,7 +1426,7 @@ def apply_plan(api: PveApi, desired: Desired, actual: Actual, registry_module: A
     registry_module.ensure_aggregate(registry, False)
     created_now = False
     if not actual.exists:
-        if desired.effectivmanagement_requested(desired, "ssh_identity") and (REGISTRY_DIR / f"{desired.vmid}.pub").exists():
+        if management_requested(desired, "ssh_identity") and (REGISTRY_DIR / f"{desired.vmid}.pub").exists():
             raise BlockedError("новый VMID имеет stale registry key")
         if desired.effective["type"] == "vm":
             create_vm(api, desired, registry.aggregate)
@@ -1443,7 +1443,7 @@ def apply_plan(api: PveApi, desired: Desired, actual: Actual, registry_module: A
     start_guest_if_needed(api, desired)
     establish_ssh_trust(desired, created_now)
     ensure_management_identity(desired, revision)
-    if desired.effectivmanagement_requested(desired, "project_repo_read"):
+    if management_requested(desired, "project_repo_read"):
         if project_repo_state(desired.management_ip, project_master_fingerprint()) != "VALID":
             private_data = read_project_private_from_fd()
             try:
@@ -1455,12 +1455,12 @@ def apply_plan(api: PveApi, desired: Desired, actual: Actual, registry_module: A
     for capability in desired.bootstrap_capabilities:
         apply_bootstrap_capability(desired.management_ip, capability)
     verify_root_ssh(desired.management_ip)
-    if desired.effectivmanagement_requested(desired, "ssh_identity"):
+    if management_requested(desired, "ssh_identity"):
         state, _, fp = management_identity_state(desired.management_ip)
         rstate, _, rfp = registry_key_state(desired.vmid)
         if state != "VALID" or rstate != "VALID" or fp != rfp:
             raise DeployError("final management identity verify не пройден")
-    wanted_project = "VALID" if desired.effectivmanagement_requested(desired, "project_repo_read") else "ABSENT"
+    wanted_project = "VALID" if management_requested(desired, "project_repo_read") else "ABSENT"
     if project_repo_state(desired.management_ip, project_master_fingerprint()) != wanted_project:
         raise DeployError("final Project Git READ verify не пройден")
     for capability in desired.bootstrap_capabilities:
@@ -1489,7 +1489,7 @@ def preflight(vmid: int) -> tuple[str, Desired, PveApi, Actual, Any, Any, str | 
     registry_module, registry = load_registry()
     lxc_template = verify_sources(api, desired)
     actual = discover_actual(api, desired)
-    if desired.effectivmanagement_requested(desired, "project_repo_read"):
+    if management_requested(desired, "project_repo_read"):
         raw_fd = os.environ.get("DEPLOY_GUEST_PROJECT_REPO_KEY_FD", "")
         if not raw_fd.isdigit():
             raise DeployError("project_repo_read=true, но root-wrapper не передал dedicated FD")
