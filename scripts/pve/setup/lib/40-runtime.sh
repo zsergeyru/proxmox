@@ -160,7 +160,7 @@ EOF_CONFIG
     ok "${CONFIG_DIR}/config.yaml соответствует текущей PVE Configuration"
 }
 
-ensure_pve_guest_key() {
+ensure_pve_deployer_key() {
     log "Проверка постоянной PVE deployer SSH identity"
 
     if [[ ! -f "$PVE_DEPLOYER_KEY" ]]; then
@@ -172,12 +172,12 @@ ensure_pve_guest_key() {
         umask 077
         if ! ssh-keygen -q -t ed25519 -N '' -C 'pve-deployer' -f "$PVE_DEPLOYER_KEY"; then
             umask "$old_umask"
-            die "Не удалось создать PVE guest SSH keypair"
+            die "Не удалось создать PVE deployer SSH keypair"
         fi
         umask "$old_umask"
-        ok "Создан новый PVE guest SSH private key"
+        ok "Создан новый PVE deployer SSH private key"
     else
-        ok "PVE guest SSH private key уже существует и не ротируется"
+        ok "PVE deployer SSH private key уже существует и не ротируется"
     fi
 
     local derived_pub tmp_pub
@@ -189,12 +189,12 @@ ensure_pve_guest_key() {
     chown "$DEPLOY_USER:$DEPLOY_USER" "$PVE_DEPLOYER_KEY"
     chmod 0600 "$PVE_DEPLOYER_KEY"
 
-    tmp_pub="$(mktemp "${SSH_DIR}/.pve-guest-pub.XXXXXX")"
+    tmp_pub="$(mktemp "${SSH_DIR}/.pve-deployer-pub.XXXXXX")"
     printf '%s %s\n' "$derived_pub" 'pve-guest' >"$tmp_pub"
     install -o "$DEPLOY_USER" -g "$DEPLOY_USER" -m 0644 "$tmp_pub" "$PVE_DEPLOYER_PUB"
     rm -f "$tmp_pub"
 
-    [[ -s "$PVE_DEPLOYER_PUB" ]] || die "PVE guest public key не создан: ${PVE_DEPLOYER_PUB}"
+    [[ -s "$PVE_DEPLOYER_PUB" ]] || die "PVE deployer public key не создан: ${PVE_DEPLOYER_PUB}"
     ok "PVE deployer SSH identity проверена: ${PVE_DEPLOYER_KEY}"
 }
 
