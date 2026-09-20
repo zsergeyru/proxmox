@@ -24,7 +24,8 @@ warn_unexpected_permission_set "ai-agent@pve!infra" "$allowed_json" "/vms/9000" 
 
 extra_json='{
   "/vms/9000": {"VM.Audit": 1, "VM.Clone": 1, "VM.PowerMgmt": 1},
-  "/vms": {"VM.Audit": 1, "VM.PowerMgmt": 1}
+  "/vms/302": {"VM.Audit": 1, "VM.PowerMgmt": 1},
+  "/access": {"Permissions.Modify": 1}
 }'
 
 warn_unexpected_permission_set "ai-agent@pve!infra" "$extra_json" "/vms/9000" "$ROLE_CLONE_PRIVS"
@@ -33,9 +34,15 @@ warn_unexpected_permission_set "ai-agent@pve!infra" "$extra_json" "/vms/9000" "$
     exit 1
 }
 
-warn_forbidden_permission_set "ai-agent@pve!infra" "$extra_json" "/vms" "$AI_FORBIDDEN_VM_CHANGE_PRIVS"
+warn_unexpected_vm_scope_permissions "ai-agent@pve!infra" "$extra_json"
 [[ "$WARN_COUNT" -eq 2 ]] || {
-    printf 'Broad VM mutation permission was not reported\n' >&2
+    printf 'Direct mutation permission on an unmanaged VM was not reported\n' >&2
+    exit 1
+}
+
+warn_forbidden_permission_anywhere "ai-agent@pve!infra" "$extra_json" "$AI_FORBIDDEN_ROOT_PRIVS"
+[[ "$WARN_COUNT" -eq 3 ]] || {
+    printf 'Administrative permission outside root path was not reported\n' >&2
     exit 1
 }
 
@@ -55,7 +62,7 @@ JSON
 }
 
 warn_unexpected_ai_acl_entries "ai-agent@pve" "ai-agent@pve!infra"
-[[ "$WARN_COUNT" -eq 3 ]] || {
+[[ "$WARN_COUNT" -eq 4 ]] || {
     printf 'Unexpected AI ACL was not reported exactly once\n' >&2
     exit 1
 }
