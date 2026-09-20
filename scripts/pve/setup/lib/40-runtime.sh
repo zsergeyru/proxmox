@@ -356,6 +356,11 @@ sync_private_repo() {
             assert_clean_git_worktree "$REPO_DIR" "Canonical"
             ;;
         checkout)
+            # Существующую копию нельзя даже читать Git-командами от root,
+            # пока обычными файловыми проверками не подтверждена граница доверия.
+            # Автоматической миграции владельцев/прав для старой копии нет.
+            assert_canonical_repo_trust
+
             repo_top="$(canonical_git -C "$REPO_DIR" rev-parse --show-toplevel 2>/dev/null || true)"
             [[ "$repo_top" == "$REPO_DIR" ]] \
                 || die "Существующий ${REPO_DIR} не является самостоятельной корневой Git-копией проекта; автоматическое изменение запрещено."
@@ -365,9 +370,7 @@ sync_private_repo() {
                 || die "Существующий checkout ${REPO_DIR} имеет неожиданный origin '${origin_url:-не задан}'. Ожидается '${PRIVATE_REPO}'. Автоматическая подмена origin запрещена."
 
             assert_clean_git_worktree "$REPO_DIR" "Canonical"
-            harden_canonical_repo_permissions
-            assert_canonical_repo_trust
-            ok "Существующий canonical checkout проверен до изменения прав и соответствует проекту"
+            ok "Существующий canonical checkout уже находится внутри доверенной файловой границы и соответствует проекту"
 
             current_revision="$(canonical_git -C "$REPO_DIR" rev-parse HEAD)"
             if [[ "$current_revision" != "$expected_revision" ]]; then
