@@ -172,7 +172,7 @@ main() {
     ensure_lxc_template
 
     ensure_runtime_layout
-    ensure_pve_guest_key
+    ensure_pve_deployer_key
     ensure_management_public_key_registry
     prepare_canonical_github_access
     verify_private_repo_access
