@@ -26,8 +26,8 @@ grep -Fq 'SYNC_MANAGEMENT_KEYS_SOURCE_REVISION="\$revision"' "$TOOLING" \
 grep -Fq 'flock -n 9' "$TOOLING" \
     || fail "manual sync command must use orchestration lock"
 
-lock_pos="$(grep -n 'exec 9>"\$LOCK_FILE"' "$TOOLING" | head -n1 | cut -d: -f1)"
-git_status_pos="$(grep -n 'status="\$(git -c "safe.directory=\$REPO_DIR"' "$TOOLING" | head -n1 | cut -d: -f1)"
+lock_pos="$(grep -Fn 'exec 9>"\$LOCK_FILE"' "$TOOLING" | head -n1 | cut -d: -f1)"
+git_status_pos="$(grep -Fn 'status="\$(git -c "safe.directory=\$REPO_DIR"' "$TOOLING" | head -n1 | cut -d: -f1)"
 [[ -n "$lock_pos" && -n "$git_status_pos" && "$lock_pos" -lt "$git_status_pos" ]] \
     || fail "manual sync command must acquire the orchestration lock before reading canonical Git state"
 grep -Fq 'OWNERSHIP_TAG = "proxmox-deployer"' "$SOURCE" \
