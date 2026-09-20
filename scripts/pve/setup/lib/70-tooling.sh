@@ -224,6 +224,23 @@ check_ai_effective_boundaries() {
     [[ -z "$admin_found" ]] || check_warn "$label: административные privileges вне принятой модели: $admin_found"
 }
 
+check_host_acl_boundaries() {
+    local acl_json principal_type principal rows path role
+    acl_json="$(pveum acl list --output-format json 2>/dev/null || true)"
+    [[ -n "$acl_json" ]] && jq -e . >/dev/null 2>&1 <<<"$acl_json" || { check_error "не удалось получить ACL для проверки границ deployer"; return; }
+    for principal_type in user token; do
+        if [[ "$principal_type" == user ]]; then principal='deployer@pve'; else principal='deployer@pve!host-deploy'; fi
+        rows="$(jq -r --arg type "$principal_type" --arg ugid "$principal" '.[] | select(.type == $type and .ugid == $ugid) | "\(.path)|\(.roleid)"' <<<"$acl_json" 2>/dev/null || true)"
+        while IFS='|' read -r path role; do
+            [[ -n "$path" && -n "$role" ]] || continue
+            case "${path}|${role}" in
+                '/vms|AIManagedGuest'|'/pool/managed|AIManagedPool'|'/storage/local|AIStorage'|'/storage/local-lvm|AIStorage'|'/sdn/zones/localnetwork/vmbr0|AINetworkUse') ;;
+                *) check_warn "Deployer principal ${principal_type}=${principal} имеет дополнительную ACL: path=${path}, role=${role}" ;;
+            esac
+        done <<<"$rows"
+    done
+}
+
 check_ai_acl_boundaries() {
     local acl_json principal_type principal rows path role
     acl_json="$(pveum acl list --output-format json 2>/dev/null || true)"
@@ -428,6 +445,7 @@ run_check() {
     AI_FORBIDDEN_ROOT_PRIVS='Permissions.Modify Sys.Modify Sys.PowerMgmt User.Modify Group.Allocate Realm.Allocate SDN.Allocate Datastore.Allocate'
     check_admin_effective_boundaries deployer@pve host-deploy "deployer@pve!host-deploy" "$AI_FORBIDDEN_ROOT_PRIVS"
     check_ai_effective_boundaries ai-agent@pve infra "ai-agent@pve!infra"
+    check_host_acl_boundaries
     check_ai_acl_boundaries
 
     check_token_auth 'deployer@pve!host-deploy' "$SECRETS_DIR/host-deploy.token" "deployer@pve!host-deploy"
