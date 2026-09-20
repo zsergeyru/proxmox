@@ -20,6 +20,7 @@ DEPLOY_USER=pvedeploy
 EXPECTED_REPO='git@github.com:zsergeyru/proxmox.git'
 TEMPLATE_VMID=9000
 TEMPLATE_NAME=tpl-debian13
+TEMPLATE_VERSION=7
 MANAGED_POOL=managed
 
 show_saved_status() {
@@ -152,7 +153,7 @@ check_token_permission_extras() {
     [[ -n "$json" ]] && jq -e . >/dev/null 2>&1 <<<"$json" || return
     while IFS= read -r priv; do
         [[ -n "$priv" ]] || continue
-        if ! printf '%s\n' $allowed | grep -Fxq "$priv"; then
+        if ! tr ' ' '\n' <<<"$allowed" | grep -Fxq "$priv"; then
             extra="${extra}${extra:+ }${priv}"
         fi
     done < <(jq -r --arg path "$scope" '(.[$path] // {}) | keys[]?' <<<"$json" 2>/dev/null | LC_ALL=C sort -u)
@@ -213,7 +214,7 @@ check_token_auth() {
 
 run_check() {
     local saved_status user_record uid gid_name home shell guest_fp reg_fp parent_owner parent_mode violation origin drift revision recorded state_revision
-    local users_json host_token ai_token pools_json storage template_cfg smoke_status
+    local users_json host_token ai_token pools_json storage template_cfg smoke_status template_version_fields
 
     printf '%s%s=== PVE Configuration: фактическая проверка ===%s\n' "$C_BOLD" "$C_CYAN" "$C_RESET"
 
@@ -353,10 +354,13 @@ run_check() {
     done
 
     if template_cfg="$(qm config "$TEMPLATE_VMID" 2>/dev/null)"; then
-        if grep -Fxq 'template: 1' <<<"$template_cfg" && grep -Fxq "name: $TEMPLATE_NAME" <<<"$template_cfg"; then
-            check_ok "базовый шаблон VMID $TEMPLATE_VMID соответствует основным признакам"
+        template_version_fields="$(sed -n 's/^description: //p' <<<"$template_cfg" | head -n1 | tr ';' '\n' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | grep '^template-version=' || true)"
+        if grep -Fxq 'template: 1' <<<"$template_cfg" \
+            && grep -Fxq "name: $TEMPLATE_NAME" <<<"$template_cfg" \
+            && [[ "$template_version_fields" == "template-version=$TEMPLATE_VERSION" ]]; then
+            check_ok "базовый шаблон VMID $TEMPLATE_VMID имеет точный Template-Version $TEMPLATE_VERSION"
         else
-            check_error "VMID $TEMPLATE_VMID существует, но не соответствует базовому шаблону $TEMPLATE_NAME"
+            check_error "VMID $TEMPLATE_VMID существует, но не соответствует базовому шаблону $TEMPLATE_NAME Template-Version $TEMPLATE_VERSION"
         fi
     else
         check_error "базовый шаблон VMID $TEMPLATE_VMID отсутствует"
