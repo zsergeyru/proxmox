@@ -299,22 +299,29 @@ run_check() {
         parent_owner="$(stat -c '%U:%G' "$RUNTIME_DIR" 2>/dev/null || true)"
         parent_mode="$(stat -c '%a' "$RUNTIME_DIR" 2>/dev/null || true)"
         violation="$(find "$REPO_DIR" -xdev \( -type f -o -type d \) \( ! -uid 0 -o -perm /022 \) -print -quit 2>/dev/null || true)"
-        origin="$(git -c "safe.directory=$REPO_DIR" -C "$REPO_DIR" remote get-url origin 2>/dev/null || true)"
-        drift="$(git -c "safe.directory=$REPO_DIR" -C "$REPO_DIR" status --porcelain=v1 --untracked-files=all --ignored 2>/dev/null || true)"
-        drift="$(printf '%s\n' "$drift" | grep -Ev '^!! .*(__pycache__/|\.py[co]$)' || true)"
-        revision="$(git -c "safe.directory=$REPO_DIR" -C "$REPO_DIR" rev-parse HEAD 2>/dev/null || true)"
-        recorded="$(cat "$LAST_REVISION" 2>/dev/null || true)"
-        state_revision="$(jq -r '.repository_revision // empty' "$STATE" 2>/dev/null || true)"
 
-        [[ "$parent_owner" == "root:pvedeploy" && "$parent_mode" == "750" ]] && check_ok "родитель доверенной копии защищён" || check_error "родитель доверенной копии имеет неверные владельца или права"
-        [[ -z "$violation" ]] && check_ok "доверенная копия принадлежит root и защищена от записи" || check_error "нарушена граница доверия Git: ${violation:-неизвестно}"
-        [[ "$origin" == "$EXPECTED_REPO" ]] && check_ok "origin доверенной копии соответствует проекту" || check_error "неожиданный origin: ${origin:-не задан}"
-        [[ -z "$drift" ]] && check_ok "локальные изменения в доверенной копии отсутствуют" || check_error "в доверенной копии есть локальные изменения: $(head -n1 <<<"$drift")"
-
-        if [[ "$revision" =~ ^[0-9a-f]{40}$ && "$revision" == "$recorded" && "$revision" == "$state_revision" ]]; then
-            check_ok "ревизия Git согласована со служебным состоянием"
+        if [[ "$parent_owner" != "root:pvedeploy" || "$parent_mode" != "750" ]]; then
+            check_error "родитель доверенной копии имеет неверные владельца или права"
+        elif [[ -n "$violation" ]]; then
+            check_error "нарушена граница доверия Git: ${violation}"
         else
-            check_error "ревизия Git не согласована: git=${revision:-?} last-revision=${recorded:-?} state=${state_revision:-?}"
+            check_ok "файловая граница доверенной Git-копии подтверждена до Git-команд"
+
+            origin="$(git -c "safe.directory=$REPO_DIR" -C "$REPO_DIR" remote get-url origin 2>/dev/null || true)"
+            drift="$(git -c "safe.directory=$REPO_DIR" -C "$REPO_DIR" status --porcelain=v1 --untracked-files=all --ignored 2>/dev/null || true)"
+            drift="$(printf '%s\n' "$drift" | grep -Ev '^!! .*(__pycache__/|\.py[co]$)' || true)"
+            revision="$(git -c "safe.directory=$REPO_DIR" -C "$REPO_DIR" rev-parse HEAD 2>/dev/null || true)"
+            recorded="$(cat "$LAST_REVISION" 2>/dev/null || true)"
+            state_revision="$(jq -r '.repository_revision // empty' "$STATE" 2>/dev/null || true)"
+
+            [[ "$origin" == "$EXPECTED_REPO" ]] && check_ok "origin доверенной копии соответствует проекту" || check_error "неожиданный origin: ${origin:-не задан}"
+            [[ -z "$drift" ]] && check_ok "локальные изменения в доверенной копии отсутствуют" || check_error "в доверенной копии есть локальные изменения: $(head -n1 <<<"$drift")"
+
+            if [[ "$revision" =~ ^[0-9a-f]{40}$ && "$revision" == "$recorded" && "$revision" == "$state_revision" ]]; then
+                check_ok "ревизия Git согласована со служебным состоянием"
+            else
+                check_error "ревизия Git не согласована: git=${revision:-?} last-revision=${recorded:-?} state=${state_revision:-?}"
+            fi
         fi
     else
         check_error "доверенная локальная копия проекта отсутствует: $REPO_DIR"
