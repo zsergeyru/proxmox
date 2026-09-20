@@ -282,22 +282,6 @@ warn_unexpected_permission_set() {
     fi
 }
 
-warn_forbidden_permission_set() {
-    local full_token=$1 permissions_json=$2 path=$3 forbidden_raw=$4
-    local priv found=""
-
-    for priv in $forbidden_raw; do
-        if jq -e --arg path "$path" --arg priv "$priv" '((.[$path] // {}) | has($priv))' <<<"$permissions_json" >/dev/null 2>&1; then
-            found="${found}${found:+ }${priv}"
-        fi
-    done
-
-    if [[ -n "$found" ]]; then
-        AI_PERMISSION_BOUNDARY_WARNINGS=1
-        warn "API-токен ${full_token} имеет запрещённые для своей области effective permissions на ${path}: ${found}. Права не отзываются автоматически."
-    fi
-}
-
 warn_forbidden_permission_anywhere() {
     local full_token=$1 permissions_json=$2 forbidden_raw=$3 path priv found=""
 
