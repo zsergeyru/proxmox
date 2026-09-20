@@ -310,48 +310,87 @@ assert_clean_git_worktree() {
         || die "${label} Git checkout ${repo} содержит tracked/staged/untracked/ignored drift. Автоматический reset/clean запрещён, чтобы не потерять данные. Первый элемент: $(head -n1 <<<"$status")"
 }
 
+canonical_repo_state() {
+    if [[ -L "$REPO_DIR" ]]; then
+        printf '%s\n' unsafe
+        return
+    fi
+    if [[ ! -e "$REPO_DIR" ]]; then
+        printf '%s\n' absent
+        return
+    fi
+    if [[ ! -d "$REPO_DIR" ]]; then
+        printf '%s\n' unsafe
+        return
+    fi
+    if [[ -d "$REPO_DIR/.git" ]]; then
+        printf '%s\n' checkout
+        return
+    fi
+    if [[ -e "$REPO_DIR/.git" || -L "$REPO_DIR/.git" ]]; then
+        printf '%s\n' unsafe
+        return
+    fi
+    if [[ -z "$(find "$REPO_DIR" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null || true)" ]]; then
+        printf '%s\n' empty
+        return
+    fi
+    printf '%s\n' unsafe
+}
+
 sync_private_repo() {
     log "Фиксация root-trusted canonical private checkout на revision текущей PVE Configuration"
 
-    local expected_revision origin_url current_revision fetched_revision
+    local expected_revision origin_url current_revision fetched_revision repo_state repo_top
     expected_revision="$(configuration_source_revision)"
+    repo_state="$(canonical_repo_state)"
 
-    if [[ ! -d "$REPO_DIR/.git" ]]; then
-        rm -rf "$REPO_DIR"
-        canonical_git clone --depth 1 --branch "$PRIVATE_BRANCH" "$PRIVATE_REPO" "$REPO_DIR"
-        harden_canonical_repo_permissions
-        assert_canonical_repo_trust
-        current_revision="$(canonical_git -C "$REPO_DIR" rev-parse HEAD)"
-        [[ "$current_revision" == "$expected_revision" ]] \
-            || die "Во время первого canonical clone ветка ${PRIVATE_BRANCH} изменилась: PVE Configuration запущена из ${expected_revision}, а clone получил ${current_revision}. Ничего из новой revision не применяется; повторите Public Bootstrap."
-        assert_clean_git_worktree "$REPO_DIR" "Canonical"
-    else
-        # Миграция старой модели pvedeploy-owned checkout выполняется до любых
-        # Git-команд от root. Содержимое не очищается: local drift всё равно STOP.
-        harden_canonical_repo_permissions
-        assert_canonical_repo_trust
-
-        origin_url="$(canonical_git -C "$REPO_DIR" remote get-url origin 2>/dev/null || true)"
-        [[ "$origin_url" == "$PRIVATE_REPO" ]] \
-            || die "Существующий checkout ${REPO_DIR} имеет неожиданный origin '${origin_url:-не задан}'. Ожидается '${PRIVATE_REPO}'. Автоматическая подмена origin запрещена."
-        ok "Origin существующего private checkout соответствует каноническому репозиторию"
-
-        assert_clean_git_worktree "$REPO_DIR" "Canonical"
-        current_revision="$(canonical_git -C "$REPO_DIR" rev-parse HEAD)"
-        if [[ "$current_revision" != "$expected_revision" ]]; then
-            canonical_git -C "$REPO_DIR" fetch --depth 1 origin "$PRIVATE_BRANCH"
-            fetched_revision="$(canonical_git -C "$REPO_DIR" rev-parse FETCH_HEAD)"
-            [[ "$fetched_revision" == "$expected_revision" ]] \
-                || die "Ветка ${PRIVATE_BRANCH} изменилась во время PVE Configuration: ожидается ${expected_revision}, fetch получил ${fetched_revision}. Canonical checkout не переключён; повторите Public Bootstrap."
-            canonical_git -C "$REPO_DIR" reset --hard "$expected_revision"
-            canonical_git -C "$REPO_DIR" clean -ffd
+    case "$repo_state" in
+        absent|empty)
+            canonical_git clone --depth 1 --branch "$PRIVATE_BRANCH" "$PRIVATE_REPO" "$REPO_DIR"
             harden_canonical_repo_permissions
             assert_canonical_repo_trust
+            current_revision="$(canonical_git -C "$REPO_DIR" rev-parse HEAD)"
+            [[ "$current_revision" == "$expected_revision" ]] \
+                || die "Во время первого canonical clone ветка ${PRIVATE_BRANCH} изменилась: PVE Configuration запущена из ${expected_revision}, а clone получил ${current_revision}. Ничего из новой revision не применяется; повторите Public Bootstrap."
             assert_clean_git_worktree "$REPO_DIR" "Canonical"
-        else
-            ok "Canonical checkout уже находится на revision текущей PVE Configuration и не имеет локального drift"
-        fi
-    fi
+            ;;
+        checkout)
+            repo_top="$(canonical_git -C "$REPO_DIR" rev-parse --show-toplevel 2>/dev/null || true)"
+            [[ "$repo_top" == "$REPO_DIR" ]] \
+                || die "Существующий ${REPO_DIR} не является самостоятельной корневой Git-копией проекта; автоматическое изменение запрещено."
+
+            origin_url="$(canonical_git -C "$REPO_DIR" remote get-url origin 2>/dev/null || true)"
+            [[ "$origin_url" == "$PRIVATE_REPO" ]] \
+                || die "Существующий checkout ${REPO_DIR} имеет неожиданный origin '${origin_url:-не задан}'. Ожидается '${PRIVATE_REPO}'. Автоматическая подмена origin запрещена."
+
+            assert_clean_git_worktree "$REPO_DIR" "Canonical"
+            harden_canonical_repo_permissions
+            assert_canonical_repo_trust
+            ok "Существующий canonical checkout проверен до изменения прав и соответствует проекту"
+
+            current_revision="$(canonical_git -C "$REPO_DIR" rev-parse HEAD)"
+            if [[ "$current_revision" != "$expected_revision" ]]; then
+                canonical_git -C "$REPO_DIR" fetch --depth 1 origin "$PRIVATE_BRANCH"
+                fetched_revision="$(canonical_git -C "$REPO_DIR" rev-parse FETCH_HEAD)"
+                [[ "$fetched_revision" == "$expected_revision" ]] \
+                    || die "Ветка ${PRIVATE_BRANCH} изменилась во время PVE Configuration: ожидается ${expected_revision}, fetch получил ${fetched_revision}. Canonical checkout не переключён; повторите Public Bootstrap."
+                canonical_git -C "$REPO_DIR" reset --hard "$expected_revision"
+                canonical_git -C "$REPO_DIR" clean -ffd
+                harden_canonical_repo_permissions
+                assert_canonical_repo_trust
+                assert_clean_git_worktree "$REPO_DIR" "Canonical"
+            else
+                ok "Canonical checkout уже находится на revision текущей PVE Configuration и не имеет локального drift"
+            fi
+            ;;
+        unsafe)
+            die "${REPO_DIR} существует в неоднозначном или небезопасном состоянии. Допустимы только отсутствующий каталог, пустой каталог или самостоятельная Git-копия с каталогом .git. Автоматическое удаление или очистка запрещены."
+            ;;
+        *)
+            die "Неизвестное состояние canonical checkout: ${repo_state}"
+            ;;
+    esac
 
     REPO_REVISION="$(canonical_git -C "$REPO_DIR" rev-parse HEAD)"
     [[ "$REPO_REVISION" == "$expected_revision" ]] \
