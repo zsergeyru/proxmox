@@ -513,7 +513,7 @@ def update_kv_option(text: str, key: str, value: str) -> str:
 
 def expected_ipconfig(desired: Desired) -> str:
     net = desired.effective["network"]
-    return f"ip={net['ipv4']['address']},gw={net['gateway']}"
+    return f"ip={net['ipv4']},gw={net['gateway']}"
 
 
 def expected_lxc_net(desired: Desired, current: str | None = None) -> str:
@@ -1067,7 +1067,7 @@ def create_vm(api: PveApi, desired: Desired, aggregate: bytes) -> None:
     if bool(e["pve_management"]):
         clone_data["pool"] = "managed"
     upid = api.post(
-        f"/nodes/{urllib.parse.quote(str(e['node']))}/qemu/{int(e['vm']['source']['template_vmid'])}/clone",
+        f"/nodes/{urllib.parse.quote(str(e['node']))}/qemu/{int(e['template_vmid'])}/clone",
         clone_data,
     )
     api.wait_task(upid)
@@ -1084,7 +1084,7 @@ def create_lxc(api: PveApi, desired: Desired, aggregate: bytes, ostemplate: str)
         "vmid": desired.vmid,
         "hostname": e["name"],
         "ostemplate": ostemplate,
-        "rootfs": f"{e['resources']['disk']['storage']}:{e['resources']['disk_size_gb']}",
+        "rootfs": f"{e['resources']['disk_storage']}:{e['resources']['disk_size_gb']}",
         "cores": e["resources"]["cores"],
         "memory": e["resources"]["memory_mb"],
         "swap": e["resources"]["swap_mb"],
