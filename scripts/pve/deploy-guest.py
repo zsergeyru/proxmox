@@ -89,10 +89,8 @@ class BlockedError(DeployError):
 class Desired:
     vmid: int
     manifest: Path
-    source: dict[str, Any]
     effective: dict[str, Any]
     management_ip: str
-    bootstrap_capabilities: tuple[str, ...]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -240,18 +238,15 @@ def load_desired(vmid: int) -> Desired:
         raise DeployError(f"для VMID {vmid} ожидается ровно один guest.yaml, найдено {len(matches)}")
     manifest = matches[0]
     source = read_yaml(manifest)
-    if source.get("vmid") != vmid or source.get("deployable") is not True:
-        raise DeployError(f"VMID {vmid}: manifest не соответствует deployable contract")
+    if source.get("vmid") != vmid:
+        raise DeployError(f"VMID {vmid}: manifest содержит другой vmid")
+    if not isinstance(source.get("profile"), str) or not source["profile"]:
+        raise BlockedError(f"VMID {vmid}: guest без profile не управляется deploy-guest")
     defaults = read_yaml(ROOT / "guests/defaults.yaml")
     try:
         resolved = resolve_effective_guest(source, defaults)
     except GuestConfigError as exc:
         raise DeployError(f"не удалось построить effective state VMID {vmid}: {exc}") from exc
-    if resolved.effective.get("boot", {}).get("start_after_deploy") is not True:
-        raise BlockedError(
-            f"VMID {vmid}: deploy-guest v1 требует boot.start_after_deploy=true; "
-            "final acceptance без verified running SSH пока не поддерживается"
-        )
     schema = read_yaml(EFFECTIVE_SCHEMA)
     errors = sorted(
         Draft202012Validator(schema).iter_errors(resolved.effective),
@@ -266,10 +261,8 @@ def load_desired(vmid: int) -> Desired:
     return Desired(
         vmid=vmid,
         manifest=manifest.relative_to(ROOT),
-        source=source,
         effective=resolved.effective,
         management_ip=str(resolved.management_ip),
-        bootstrap_capabilities=resolved.bootstrap_capabilities,
     )
 
 
@@ -485,17 +478,6 @@ def boolish(value: object) -> bool:
     return str(value).lower() in {"1", "true", "yes", "on"}
 
 
-def option_enabled(value: object) -> bool:
-    """Parse PVE boolean option whose value may carry comma-separated suboptions."""
-    return str(value or "").split(",", 1)[0].lower() in {"1", "true", "yes", "on"}
-
-
-def preserve_boolean_suboptions(value: object, enabled: bool) -> str:
-    parts = [part for part in str(value or "").split(",") if part]
-    tail = parts[1:] if parts else []
-    return ",".join(["1" if enabled else "0", *tail])
-
-
 def expected_lxc_features(desired: Desired, current: object) -> str:
     values: dict[str, str] = {}
     extras: list[str] = []
@@ -508,8 +490,9 @@ def expected_lxc_features(desired: Desired, current: object) -> str:
                 values[key] = value
                 continue
         extras.append(part)
-    values["keyctl"] = str(int(bool(desired.effective["lxc"]["features"]["keyctl"])))
-    values["nesting"] = str(int(bool(desired.effective["lxc"]["features"]["nesting"])))
+    container_host = "container-host" in desired.effective.get("features", [])
+    values["keyctl"] = str(int(container_host))
+    values["nesting"] = str(int(container_host))
     return ",".join([*extras, f"keyctl={values['keyctl']}", f"nesting={values['nesting']}"])
 
 
@@ -539,7 +522,7 @@ def expected_lxc_net(desired: Desired, current: str | None = None) -> str:
     for key, value in (
         ("name", "eth0"),
         ("bridge", str(net["bridge"])),
-        ("ip", str(net["ipv4"]["address"])),
+        ("ip", str(net["ipv4"])),
         ("gw", str(net["gateway"])),
     ):
         text = update_kv_option(text, key, value)
@@ -589,17 +572,16 @@ def verify_sources(api: PveApi, desired: Desired) -> str | None:
     node = str(e["node"])
     if node != api.node:
         raise BlockedError("cross-node deploy v1 запрещён")
-    storage = str(e["resources"]["disk"]["storage"])
+    storage = str(e["resources"]["disk_storage"])
     status = api.get(f"/nodes/{urllib.parse.quote(node)}/storage/{urllib.parse.quote(storage)}/status")
     if not isinstance(status, dict) or not boolish(status.get("active", 1)):
         raise DeployError(f"storage {storage} недоступен")
     if str(e["network"]["bridge"]) != "vmbr0":
         raise BlockedError(f"bridge {e['network']['bridge']!r} не разрешён contract v1")
-    pool = e.get("placement", {}).get("pool")
-    if pool:
-        api.get(f"/pools/{urllib.parse.quote(str(pool))}")
+    if bool(e["pve_management"]):
+        api.get("/pools/managed")
     if e["type"] == "vm":
-        template_vmid = int(e["vm"]["source"]["template_vmid"])
+        template_vmid = int(e["template_vmid"])
         config = api.get(f"/nodes/{urllib.parse.quote(node)}/qemu/{template_vmid}/config")
         if not isinstance(config, dict) or not boolish(config.get("template")):
             raise DeployError(f"VM source {template_vmid} не является template")
@@ -608,7 +590,7 @@ def verify_sources(api: PveApi, desired: Desired) -> str | None:
         if not isinstance(config.get("scsi0"), str) or not config.get("scsi0"):
             raise DeployError(f"VM source {template_vmid} не содержит обязательный scsi0")
         return None
-    selector = str(e["lxc"]["source"]["ostemplate"])
+    selector = str(e["ostemplate"])
     selector_storage = selector.split(":", 1)[0]
     content = api.get(
         f"/nodes/{urllib.parse.quote(node)}/storage/{urllib.parse.quote(selector_storage)}/content?content=vztmpl"
@@ -627,6 +609,15 @@ def verify_sources(api: PveApi, desired: Desired) -> str | None:
     return candidates[0]
 
 
+def target_pool(desired: Desired, actual_pool: str | None = None) -> str | None:
+    """Вернуть требуемый pool, меняя только управляемое членство managed."""
+    if bool(desired.effective["pve_management"]):
+        return "managed"
+    if actual_pool == "managed":
+        return None
+    return actual_pool
+
+
 def compare_item(area: str, actual: object, desired: object, classification: str = "ONLINE") -> PlanItem:
     if str(actual) == str(desired):
         return PlanItem(area, "NO CHANGE", classification, str(desired))
@@ -643,9 +634,8 @@ def plan_pve(desired: Desired, actual: Actual) -> list[PlanItem]:
         items.extend(
             [
                 compare_item("PVE name", cfg.get("name"), e["name"]),
-                compare_item("PVE cores", cfg.get("cores"), e["resources"]["cpu"]["cores"], "REQUIRES-STOP"),
+                compare_item("PVE cores", cfg.get("cores"), e["resources"]["cores"], "REQUIRES-STOP"),
                 compare_item("PVE memory", cfg.get("memory"), e["resources"]["memory_mb"], "REQUIRES-STOP"),
-                compare_item("PVE guest agent", option_enabled(cfg.get("agent")), bool(e["vm"]["guest_agent"]), "REQUIRES-STOP"),
                 compare_item("PVE ciuser", cfg.get("ciuser"), "root", "REQUIRES-STOP"),
                 compare_item("PVE ipconfig0", cfg.get("ipconfig0"), expected_ipconfig(desired), "REQUIRES-STOP"),
             ]
@@ -659,16 +649,15 @@ def plan_pve(desired: Desired, actual: Actual) -> list[PlanItem]:
         items.extend(
             [
                 compare_item("PVE hostname", cfg.get("hostname"), e["name"]),
-                compare_item("PVE cores", cfg.get("cores"), e["resources"]["cpu"]["cores"], "REQUIRES-STOP"),
+                compare_item("PVE cores", cfg.get("cores"), e["resources"]["cores"], "REQUIRES-STOP"),
                 compare_item("PVE memory", cfg.get("memory"), e["resources"]["memory_mb"], "REQUIRES-STOP"),
                 compare_item("PVE swap", cfg.get("swap"), e["resources"]["swap_mb"], "REQUIRES-STOP"),
             ]
         )
-        unprivileged = bool(e["lxc"]["unprivileged"])
-        if boolish(cfg.get("unprivileged")) == unprivileged:
-            items.append(PlanItem("PVE unprivileged", "NO CHANGE", "ONLINE", str(unprivileged)))
+        if boolish(cfg.get("unprivileged")):
+            items.append(PlanItem("PVE unprivileged", "NO CHANGE", "ONLINE", "true"))
         else:
-            items.append(PlanItem("PVE unprivileged", "BLOCKED", "FORBIDDEN", "recreate required"))
+            items.append(PlanItem("PVE unprivileged", "BLOCKED", "FORBIDDEN", "managed LXC must be unprivileged; recreate required"))
         current_features = str(cfg.get("features") or "")
         target_features = expected_lxc_features(desired, current_features)
         items.append(
@@ -682,10 +671,10 @@ def plan_pve(desired: Desired, actual: Actual) -> list[PlanItem]:
         current_net = str(cfg.get("net0") or "")
         items.append(compare_item("PVE net0", current_net, expected_lxc_net(desired, current_net), "REQUIRES-STOP"))
         disk = cfg.get("rootfs")
-    desired_storage = str(e["resources"]["disk"]["storage"])
+    desired_storage = str(e["resources"]["disk_storage"])
     current_storage = storage_from_volume(disk)
     current_size = parse_size_bytes(disk)
-    desired_size = int(e["resources"]["disk"]["size_gb"]) * 1024**3
+    desired_size = int(e["resources"]["disk_size_gb"]) * 1024**3
     if current_storage and current_storage != desired_storage:
         items.append(PlanItem("PVE disk storage", "BLOCKED", "FORBIDDEN", f"{current_storage} -> {desired_storage}"))
     elif current_size is None:
@@ -693,9 +682,9 @@ def plan_pve(desired: Desired, actual: Actual) -> list[PlanItem]:
     elif current_size > desired_size:
         items.append(PlanItem("PVE disk", "BLOCKED", "FORBIDDEN", "disk shrink запрещён"))
     elif current_size < desired_size:
-        items.append(PlanItem("PVE disk", "UPDATE", "ONLINE", f"grow to {e['resources']['disk']['size_gb']}G"))
+        items.append(PlanItem("PVE disk", "UPDATE", "ONLINE", f"grow to {e['resources']['disk_size_gb']}G"))
     else:
-        items.append(PlanItem("PVE disk", "NO CHANGE", "ONLINE", f"{e['resources']['disk']['size_gb']}G"))
+        items.append(PlanItem("PVE disk", "NO CHANGE", "ONLINE", f"{e['resources']['disk_size_gb']}G"))
     items.append(compare_item("PVE onboot", boolish(cfg.get("onboot")), bool(e["boot"]["onboot"])))
     items.append(compare_item("PVE protection", boolish(cfg.get("protection")), bool(e.get("protection", False))))
     items.append(compare_item("PVE description", str(cfg.get("description") or ""), service_description(desired)))
@@ -709,8 +698,8 @@ def plan_pve(desired: Desired, actual: Actual) -> list[PlanItem]:
             format_tags(final_tags),
         )
     )
-    desired_pool = e.get("placement", {}).get("pool")
-    items.append(compare_item("PVE pool", actual.pool, desired_pool))
+    pool_target = target_pool(desired, actual.pool)
+    items.append(compare_item("PVE managed pool", actual.pool, pool_target))
     return items
 
 
@@ -908,7 +897,7 @@ def bootstrap_check(address: str, capability: str) -> bool:
         "base": "python3 -c 'import apt' >/dev/null 2>&1 && test -s /etc/ssl/certs/ca-certificates.crt && command -v rsync >/dev/null",
         "git": "git --version >/dev/null 2>&1",
         "docker": "docker version >/dev/null 2>&1 && docker info >/dev/null 2>&1 && docker compose version >/dev/null 2>&1",
-        "ansible_controller": "ansible --version >/dev/null 2>&1 && docker info >/dev/null 2>&1",
+        "ansible": "ansible --version >/dev/null 2>&1",
     }
     return ssh_run(address, checks[capability], timeout=30, check=False).returncode == 0
 
@@ -926,9 +915,9 @@ def plan_remote(desired: Desired, actual: Actual) -> list[PlanItem]:
         after = "APPLY AFTER START"
         items.append(PlanItem("Management SSH identity", after if management_requested(desired, "ssh_identity") else "NOT REQUESTED", "ONLINE", "guest identity"))
         items.append(PlanItem("Project repo read", after if management_requested(desired, "project_repo_read") else "NOT REQUESTED", "ONLINE", EXPECTED_REPO if management_requested(desired, "project_repo_read") else "false"))
-        for capability in desired.bootstrap_capabilities:
+        for capability in desired.effective["bootstrap"]:
             items.append(PlanItem(f"Bootstrap {capability}", after, "ONLINE", capability))
-        if not desired.bootstrap_capabilities:
+        if not desired.effective["bootstrap"]:
             items.append(PlanItem("Bootstrap", "NOT REQUESTED", "ONLINE", "none"))
         return items
     if not host_key_present(desired.management_ip):
@@ -937,9 +926,9 @@ def plan_remote(desired: Desired, actual: Actual) -> list[PlanItem]:
         after = "APPLY AFTER START"
         items.append(PlanItem("Management SSH identity", after if management_requested(desired, "ssh_identity") else "NOT REQUESTED", "ONLINE", "guest identity"))
         items.append(PlanItem("Project repo read", after if management_requested(desired, "project_repo_read") else "NOT REQUESTED", "ONLINE", EXPECTED_REPO if management_requested(desired, "project_repo_read") else "false"))
-        for capability in desired.bootstrap_capabilities:
+        for capability in desired.effective["bootstrap"]:
             items.append(PlanItem(f"Bootstrap {capability}", after, "ONLINE", capability))
-        if not desired.bootstrap_capabilities:
+        if not desired.effective["bootstrap"]:
             items.append(PlanItem("Bootstrap", "NOT REQUESTED", "ONLINE", "none"))
         return items
     try:
@@ -970,9 +959,9 @@ def plan_remote(desired: Desired, actual: Actual) -> list[PlanItem]:
     else:
         action = "NO CHANGE" if pstate == "ABSENT" else ("REMOVE" if pstate == "VALID" else "BLOCKED")
         items.append(PlanItem("Project repo read", action, "FORBIDDEN" if action == "BLOCKED" else "ONLINE", f"state={pstate}"))
-    for capability in desired.bootstrap_capabilities:
+    for capability in desired.effective["bootstrap"]:
         items.append(PlanItem(f"Bootstrap {capability}", "NO CHANGE" if bootstrap_check(desired.management_ip, capability) else "APPLY", "ONLINE", capability))
-    if not desired.bootstrap_capabilities:
+    if not desired.effective["bootstrap"]:
         items.append(PlanItem("Bootstrap", "NOT REQUESTED", "ONLINE", "none"))
     return items
 
@@ -1016,9 +1005,8 @@ def vm_update_payload(desired: Desired, cfg: dict[str, Any], incomplete: bool) -
     e = desired.effective
     payload: dict[str, Any] = {
         "name": e["name"],
-        "cores": e["resources"]["cpu"]["cores"],
+        "cores": e["resources"]["cores"],
         "memory": e["resources"]["memory_mb"],
-        "agent": preserve_boolean_suboptions(cfg.get("agent"), bool(e["vm"]["guest_agent"])),
         "ciuser": "root",
         "ipconfig0": expected_ipconfig(desired),
         "onboot": 1 if e["boot"]["onboot"] else 0,
@@ -1036,11 +1024,11 @@ def lxc_update_payload(desired: Desired, cfg: dict[str, Any], incomplete: bool) 
     e = desired.effective
     return {
         "hostname": e["name"],
-        "cores": e["resources"]["cpu"]["cores"],
+        "cores": e["resources"]["cores"],
         "memory": e["resources"]["memory_mb"],
         "swap": e["resources"]["swap_mb"],
         "net0": expected_lxc_net(desired, str(cfg.get("net0") or "")),
-        "features": f"keyctl={int(bool(e['lxc']['features']['keyctl']))},nesting={int(bool(e['lxc']['features']['nesting']))}",
+        "features": expected_lxc_features(desired, str(cfg.get("features") or "")),
         "onboot": 1 if e["boot"]["onboot"] else 0,
         "protection": 1 if e.get("protection", False) else 0,
         "tags": format_tags(desired_incomplete_tags(cfg) if incomplete else desired_final_tags(cfg)),
@@ -1052,7 +1040,7 @@ def grow_disk_if_needed(api: PveApi, desired: Desired, cfg: dict[str, Any]) -> N
     e = desired.effective
     disk_name = "scsi0" if e["type"] == "vm" else "rootfs"
     current = parse_size_bytes(cfg.get(disk_name))
-    wanted_gb = int(e["resources"]["disk"]["size_gb"])
+    wanted_gb = int(e["resources"]["disk_size_gb"])
     wanted = wanted_gb * 1024**3
     if current is None:
         raise DeployError(f"не удалось определить размер {disk_name}")
@@ -1074,10 +1062,10 @@ def create_vm(api: PveApi, desired: Desired, aggregate: bytes) -> None:
         "newid": desired.vmid,
         "name": e["name"],
         "full": 1,
-        "storage": e["resources"]["disk"]["storage"],
+        "storage": e["resources"]["disk_storage"],
     }
-    if e.get("placement", {}).get("pool"):
-        clone_data["pool"] = e["placement"]["pool"]
+    if bool(e["pve_management"]):
+        clone_data["pool"] = "managed"
     upid = api.post(
         f"/nodes/{urllib.parse.quote(str(e['node']))}/qemu/{int(e['vm']['source']['template_vmid'])}/clone",
         clone_data,
@@ -1096,21 +1084,21 @@ def create_lxc(api: PveApi, desired: Desired, aggregate: bytes, ostemplate: str)
         "vmid": desired.vmid,
         "hostname": e["name"],
         "ostemplate": ostemplate,
-        "rootfs": f"{e['resources']['disk']['storage']}:{e['resources']['disk']['size_gb']}",
-        "cores": e["resources"]["cpu"]["cores"],
+        "rootfs": f"{e['resources']['disk']['storage']}:{e['resources']['disk_size_gb']}",
+        "cores": e["resources"]["cores"],
         "memory": e["resources"]["memory_mb"],
         "swap": e["resources"]["swap_mb"],
         "net0": expected_lxc_net(desired),
-        "unprivileged": 1 if e["lxc"]["unprivileged"] else 0,
-        "features": f"keyctl={int(bool(e['lxc']['features']['keyctl']))},nesting={int(bool(e['lxc']['features']['nesting']))}",
+        "unprivileged": 1,
+        "features": expected_lxc_features(desired, ""),
         "onboot": 1 if e["boot"]["onboot"] else 0,
         "protection": 1 if e.get("protection", False) else 0,
         "tags": format_tags(desired_incomplete_tags()),
         "description": service_description(desired),
         "ssh-public-keys": aggregate.decode(),
     }
-    if e.get("placement", {}).get("pool"):
-        data["pool"] = e["placement"]["pool"]
+    if bool(e["pve_management"]):
+        data["pool"] = "managed"
     api.wait_task(api.post(f"/nodes/{urllib.parse.quote(str(e['node']))}/lxc", data))
 
 
@@ -1119,12 +1107,11 @@ def apply_existing_pve(api: PveApi, desired: Desired, actual: Actual) -> None:
     payload = vm_update_payload(desired, cfg, True) if desired.effective["type"] == "vm" else lxc_update_payload(desired, cfg, True)
     api.put(config_path(desired, actual.node), payload)
     grow_disk_if_needed(api, desired, api.get(config_path(desired, actual.node)))
-    set_pool(api, actual.pool, desired.effective.get("placement", {}).get("pool"), desired.vmid)
+    set_pool(api, actual.pool, target_pool(desired, actual.pool), desired.vmid)
 
 
-def start_guest_if_needed(api: PveApi, desired: Desired) -> None:
-    if not desired.effective["boot"]["start_after_deploy"]:
-        return
+def start_guest_for_deploy(api: PveApi, desired: Desired) -> None:
+    """Запустить гостя, когда это требуется для SSH/VERIFY текущего deploy."""
     resources = api.get("/cluster/resources?type=vm")
     resource = next((item for item in resources if int(item.get("vmid", -1)) == desired.vmid), None)
     if resource is None:
@@ -1404,7 +1391,7 @@ def apply_bootstrap_capability(address: str, capability: str) -> None:
     elif capability == "docker":
         apt_install(address, ["docker.io", "docker-compose"])
         ssh_run(address, "set -eu; systemctl enable docker >/dev/null; systemctl start docker", timeout=90)
-    elif capability == "ansible_controller":
+    elif capability == "ansible":
         apt_install(address, ["ansible-core"])
     else:
         raise DeployError(f"неизвестная Bootstrap capability: {capability}")
@@ -1440,7 +1427,7 @@ def apply_plan(api: PveApi, desired: Desired, actual: Actual, registry_module: A
         if INCOMPLETE_TAG not in parse_tags(cfg.get("tags")):
             api.put(config_path(desired, actual.node), {"tags": format_tags(desired_incomplete_tags(cfg))})
         apply_existing_pve(api, desired, discover_actual(api, desired))
-    start_guest_if_needed(api, desired)
+    start_guest_for_deploy(api, desired)
     establish_ssh_trust(desired, created_now)
     ensure_management_identity(desired, revision)
     if management_requested(desired, "project_repo_read"):
@@ -1452,7 +1439,7 @@ def apply_plan(api: PveApi, desired: Desired, actual: Actual, registry_module: A
                 private_data = b""
     else:
         remove_project_repo_read(desired)
-    for capability in desired.bootstrap_capabilities:
+    for capability in desired.effective["bootstrap"]:
         apply_bootstrap_capability(desired.management_ip, capability)
     verify_root_ssh(desired.management_ip)
     if management_requested(desired, "ssh_identity"):
@@ -1463,7 +1450,7 @@ def apply_plan(api: PveApi, desired: Desired, actual: Actual, registry_module: A
     wanted_project = "VALID" if management_requested(desired, "project_repo_read") else "ABSENT"
     if project_repo_state(desired.management_ip, project_master_fingerprint()) != wanted_project:
         raise DeployError("final Project Git READ verify не пройден")
-    for capability in desired.bootstrap_capabilities:
+    for capability in desired.effective["bootstrap"]:
         if not bootstrap_check(desired.management_ip, capability):
             raise DeployError(f"final Bootstrap verify failed: {capability}")
     final = discover_actual(api, desired)
@@ -1473,6 +1460,11 @@ def apply_plan(api: PveApi, desired: Desired, actual: Actual, registry_module: A
     final = discover_actual(api, desired)
     if INCOMPLETE_TAG in parse_tags((final.config or {}).get("tags")):
         raise DeployError("deploy-incomplete не снят")
+    final_plan = build_plan(desired, final)
+    remaining = [item for item in final_plan.items if item.changes]
+    if remaining:
+        detail = "; ".join(f"{item.area}: {item.action}" for item in remaining[:8])
+        raise DeployError(f"final VERIFY не дал NO CHANGE: {detail}")
     print(f"[SUCCESS] VMID {desired.vmid} приведён к desired state")
 
 
@@ -1504,7 +1496,7 @@ def preflight(vmid: int) -> tuple[str, Desired, PveApi, Actual, Any, Any, str | 
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="PLAN/APPLY one deployable Proxmox guest")
+    parser = argparse.ArgumentParser(description="PLAN/APPLY one managed Proxmox guest")
     parser.add_argument("vmid", type=int, help="VMID 100-999")
     parser.add_argument("--apply", action="store_true", help="применить PLAN; без флага строго read-only")
     return parser
