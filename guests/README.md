@@ -89,7 +89,7 @@ python scripts/validate_repo.py
 
 ## Связанные документы
 
-- [`../docs/11-vmid-plan.md`](../docs/11-vmid-plan.md) — план VMID/CTID.
+- [`../docs/300-guests/340-vmid-plan.md`](../docs/300-guests/340-vmid-plan.md) — план VMID/CTID.
 - [`../docs/23-security.md`](../docs/23-security.md) — SSH-ключи и безопасность.
 - [`../docs/300-guests/310-guest-state.md`](../docs/300-guests/310-guest-state.md) — модель построения требуемого состояния гостя.
 - [`../docs/300-guests/320-guest-manifest.md`](../docs/300-guests/320-guest-manifest.md) — формат и поля `guest.yaml`.
