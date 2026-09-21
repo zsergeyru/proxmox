@@ -894,7 +894,6 @@ printf 'VALID\\n'
 
 def bootstrap_check(address: str, capability: str) -> bool:
     checks = {
-        "base": "python3 -c 'import apt' >/dev/null 2>&1 && test -s /etc/ssl/certs/ca-certificates.crt && command -v rsync >/dev/null",
         "git": "git --version >/dev/null 2>&1",
         "docker": "docker version >/dev/null 2>&1 && docker info >/dev/null 2>&1 && docker compose version >/dev/null 2>&1",
         "ansible": "ansible --version >/dev/null 2>&1",
@@ -903,7 +902,6 @@ def bootstrap_check(address: str, capability: str) -> bool:
 
 
 def plan_remote(desired: Desired, actual: Actual) -> list[PlanItem]:
-    e = desired.effective
     items: list[PlanItem] = []
     if not actual.exists:
         if host_key_present(desired.management_ip):
@@ -1384,9 +1382,7 @@ apt-get install -y --no-install-recommends $missing
 def apply_bootstrap_capability(address: str, capability: str) -> None:
     if bootstrap_check(address, capability):
         return
-    if capability == "base":
-        apt_install(address, ["python3", "python3-apt", "ca-certificates", "rsync"])
-    elif capability == "git":
+    if capability == "git":
         apt_install(address, ["git"])
     elif capability == "docker":
         apt_install(address, ["docker.io", "docker-compose"])
