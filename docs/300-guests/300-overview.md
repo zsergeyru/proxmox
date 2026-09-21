@@ -306,5 +306,6 @@ Git
 - [`../100-architecture/120-state-model.md`](../100-architecture/120-state-model.md) — общая модель требуемого и фактического состояния.
 - [`../200-pve/200-overview.md`](../200-pve/200-overview.md) — роль PVE-хоста и его связь с гостевыми системами.
 - [`../../guests/README.md`](../../guests/README.md) — структура каталога `guests/` и файлов конкретных VM/LXC.
+- [`340-vmid-plan.md`](340-vmid-plan.md) — функциональная нумерация VMID/CTID и диапазоны.
 - [`../../templates/README.md`](../../templates/README.md) — повторно используемые шаблоны VM/LXC.
 - [`../../ansible/README.md`](../../ansible/README.md) — повторяемая настройка Linux-гостей после первоначального развёртывания.
