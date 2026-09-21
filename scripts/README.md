@@ -60,7 +60,7 @@ scripts/tests/test-sync-management-keys.py
 scripts/tests/test-deploy-guest.py
 ```
 
-Первый проверяет новый guest resolver и Bootstrap-список, включая правило `docker` для LXC только при profile feature `container-host`. Второй проверяет безопасную работу management-key registry, managed block `authorized_keys` и guest public catalog. Третий относится к старому `deploy-guest` и будет пересмотрен вместе с его полной переработкой.
+Первый проверяет новый guest resolver и Bootstrap-список, включая правило `docker` для LXC только при profile feature `container-host`. Второй проверяет безопасную работу management-key registry, managed block `authorized_keys` и guest public catalog. Третий проверяет текущий контракт `deploy-guest` для effective state v10, включая VM/LXC, `pve_management` и преобразование `container-host`.
 
 ## `pve/sync-management-keys.py`
 
@@ -143,13 +143,13 @@ scripts/pve/setup/tests/
 
 Рабочий PLAN/APPLY runtime одной управляемой VM/LXC с `profile`. По умолчанию команда строит read-only PLAN, а изменения разрешаются только с `--apply`. Основной источник требований:
 
-- [`../docs/31-deploy-guest.md`](../docs/31-deploy-guest.md) — полный PLAN/APPLY, Proxmox API, VM/LXC, SSH trust, Guest Bootstrap v1, ошибки и финальная проверка.
+- [`../docs/300-guests/330-deploy-guest.md`](../docs/300-guests/330-deploy-guest.md) — полный PLAN/APPLY, Proxmox API, VM/LXC, SSH trust, Guest Bootstrap v1, ошибки и финальная проверка.
 
 Связанные документы:
 
-- [`../docs/26-deploy-guest-and-agent-access.md`](../docs/26-deploy-guest-and-agent-access.md) — запуск и разделение учётных записей;
+- [`../docs/700-security/710-pve-access.md`](../docs/700-security/710-pve-access.md) — запуск и разделение учётных записей;
 - [`../docs/300-guests/310-guest-state.md`](../docs/300-guests/310-guest-state.md) — source/effective state, Management, Bootstrap и профили;
-- [`../docs/33-guest-bootstrap-and-provisioning.md`](../docs/33-guest-bootstrap-and-provisioning.md) — точный контракт Guest Bootstrap и граница с Ansible.
+- [`../docs/300-guests/330-deploy-guest.md`](../docs/300-guests/330-deploy-guest.md) — точный контракт Guest Bootstrap и граница с Ansible.
 
 ## Правила для кода
 
@@ -168,6 +168,6 @@ scripts/pve/setup/tests/
 - [`../docs/25-pve-access-control.md`](../docs/25-pve-access-control.md) — роли и ACL PVE.
 - [`../docs/700-security/720-ssh-access.md`](../docs/700-security/720-ssh-access.md) — управляющий SSH, реестр ключей и `sync-management-keys`.
 - [`../docs/30-guest-manifest.md`](../docs/30-guest-manifest.md) — модель данных гостевых систем.
-- [`../docs/31-deploy-guest.md`](../docs/31-deploy-guest.md) — спецификация `deploy-guest`.
-- [`../docs/33-guest-bootstrap-and-provisioning.md`](../docs/33-guest-bootstrap-and-provisioning.md) — Bootstrap и Ansible handoff.
+- [`../docs/300-guests/330-deploy-guest.md`](../docs/300-guests/330-deploy-guest.md) — спецификация `deploy-guest`.
+- [`../docs/300-guests/330-deploy-guest.md`](../docs/300-guests/330-deploy-guest.md) — Bootstrap и Ansible handoff.
 - [`../templates/debian13/build-policy.md`](../templates/debian13/build-policy.md) — спецификация сборки шаблона.
