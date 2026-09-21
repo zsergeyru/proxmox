@@ -440,4 +440,4 @@ PVE Configuration заранее подготавливает `pvedeploy`, уч�
 - [`../../scripts/guest_config.py`](../../scripts/guest_config.py) — общий сборщик итогового состояния.
 - [`../../scripts/validate_repo.py`](../../scripts/validate_repo.py) — проверка репозитория.
 - [`../../scripts/pve/sync-management-keys.py`](../../scripts/pve/sync-management-keys.py) — синхронизация административных SSH-ключей.
-- [`../../scripts/pve/deploy-guest.py`](../../scripts/pve/deploy-guest.py) — текущая реализация, которая должна быть приведена к этой спецификации.
+- [`../../scripts/pve/deploy-guest.py`](../../scripts/pve/deploy-guest.py) — текущая реализация этой спецификации.
