@@ -126,7 +126,7 @@ vmid_exists && die "VMID $TEST_VMID уже занят; тест ничего н�
 TEMPLATE_VOLID="$(api GET "/nodes/${NODE}/storage/${TEMPLATE_STORAGE}/content" \
     --get --data-urlencode "content=vztmpl" \
     | jq -r '.data[]?.volid | select(test("vztmpl/debian-13-standard_.*_amd64\\.tar\\.(zst|gz)$"))' \
-    | sort -V | tail -n1)
+    | sort -V | tail -n1)"
 [[ -n "$TEMPLATE_VOLID" ]] || die "Не найден Debian 13 LXC template на $TEMPLATE_STORAGE"
 
 printf "Будет создан временный LXC %s на node %s из %s\n" "$TEST_VMID" "$NODE" "$TEMPLATE_VOLID"
