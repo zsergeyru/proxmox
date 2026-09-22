@@ -1,5 +1,5 @@
 provider "proxmox" {
-  endpoint = var.pve_endpoint
+  endpoint  = var.pve_endpoint
   api_token = var.pve_api_token
-  insecure = false
+  insecure  = false
 }
