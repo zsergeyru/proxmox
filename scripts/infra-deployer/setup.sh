@@ -69,7 +69,8 @@ cleanup_obsolete_files() {
     rm -f \
         "$SECRET_DIR/ansible_ed25519" \
         "$SECRET_DIR/ansible_ed25519.pub" \
-        "$DATA_DIR/public-keys/ansible_ed25519.pub"
+        "$DATA_DIR/public-keys/ansible_ed25519.pub" \
+        "$DATA_DIR/bootstrap-complete"
     rmdir "$DATA_DIR/public-keys" 2>/dev/null || true
 }
 
