@@ -18,6 +18,7 @@ STATE_DIR="${DATA_DIR}/opentofu/state"
 PUBLIC_KEY_DIR="${DATA_DIR}/public-keys"
 COMPOSE_DIR="/opt/infra-deployer/compose"
 STATUS_COMMAND="/usr/local/sbin/infra-deployer-status"
+ACCESS_CHECK_COMMAND="/usr/local/sbin/infra-deployer-pve-access-check"
 
 SERVER_ENV="${SECRET_DIR}/semaphore-server.env"
 RUNNER_ENV="${SECRET_DIR}/semaphore-runner.env"
@@ -308,7 +309,7 @@ main() {
     wait_semaphore
     verify_runner_tools
     configure_semaphore_project
-    install_status_command
+    install_local_commands
     "$STATUS_COMMAND"
     report_result
 }
