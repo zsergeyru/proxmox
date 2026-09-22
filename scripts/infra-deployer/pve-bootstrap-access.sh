@@ -112,7 +112,7 @@ persistent_token_available() {
 }
 
 stage_api_secret() {
-    local secret=$1 node tmp
+    local secret=$1 node tmp rc=0
 
     node="$(hostname -s)"
     tmp="$(mktemp /run/infra-deployer-pve-api.XXXXXX)"
@@ -124,9 +124,20 @@ PVE_API_TOKEN_ID=$API_TOKEN_ID
 PVE_API_TOKEN_SECRET=$secret
 EOF_TOKEN
 
-    ct_exec install -d -m 0700 "$(dirname "$CT_SECRET_FILE")"
-    pct push "$CTID" "$tmp" "$CT_SECRET_FILE" --user 0 --group 0 --perms 0600
-    rm -f "$tmp"
+    ct_exec install -d -m 0700 "$(dirname "$CT_SECRET_FILE")" || rc=$?
+    if ((rc == 0)); then
+        pct push "$CTID" "$tmp" "$CT_SECRET_FILE" --user 0 --group 0 --perms 0600 || rc=$?
+    fi
+
+    rm -f -- "$tmp"
+    return "$rc"
+}
+
+rollback_new_api_token() {
+    if api_token_exists; then
+        pveum user token remove "$API_USER" "$API_TOKEN_NAME" \
+            || return 1
+    fi
 }
 
 create_api_token() {
@@ -138,10 +149,19 @@ create_api_token() {
         my $row = decode_json(<STDIN>);
         print($row->{value} // q{});
     ' <<<"$json")"
-    [[ -n "$secret" ]] \
-        || die "PVE создал token, но secret не удалось получить"
 
-    stage_api_secret "$secret"
+    if [[ -z "$secret" ]]; then
+        rollback_new_api_token \
+            || die "PVE создал token без доступного secret; token также не удалось удалить"
+        die "PVE создал token, но secret не удалось получить; созданный token удалён"
+    fi
+
+    if ! stage_api_secret "$secret"; then
+        rollback_new_api_token \
+            || die "Не удалось передать PVE API secret в 910 и удалить созданный token"
+        die "Не удалось передать PVE API secret в 910; созданный token удалён"
+    fi
+
     ok "Создан и передан PVE API token $API_TOKEN_ID"
 }
 
