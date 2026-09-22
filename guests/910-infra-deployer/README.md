@@ -47,12 +47,16 @@ PVE
 Для первой версии используются:
 
 ```text
-Semaphore Server
+Semaphore Server v2.18.30
 SQLite
-Semaphore Runner
+Semaphore Runner v2.18.30
+OpenTofu 1.12.6
+Packer 1.16.1
 ```
 
-Инфраструктурные инструменты OpenTofu, Ansible, Packer и их зависимости размещаются в среде исполнителя, а не обязаны устанавливаться как системные пакеты Debian.
+Runner собирается поверх официального образа Semaphore. В нём включена строгая проверка SSH host keys, добавлены OpenTofu и Packer, а Python-зависимости инфраструктуры устанавливаются через `requirements.txt`.
+
+После первого запуска автоматически создаётся проект Semaphore `Proxmox Infrastructure`, его Key Store и запись закрытого репозитория `zsergeyru/proxmox`.
 
 ## Постоянные данные
 
@@ -89,6 +93,8 @@ GitHub Deploy Key создаётся внутри `910` и использует�
 Ansible использует отдельную техническую SSH-идентичность для управляемых Linux-гостей.
 
 Постоянные секреты не хранятся в Git.
+
+В `/etc/infra-deployer/secrets/` находятся защищённые восстановительные копии bootstrap credentials. Рабочие Git, PVE API и Ansible SSH credentials также создаются в зашифрованном Semaphore Key Store.
 
 ## OpenTofu state
 
