@@ -17,7 +17,7 @@ API_TOKEN_ID="${API_USER}!${API_TOKEN_NAME}"
 MANAGED_POOL="managed"
 CT_STORAGE="local-lvm"
 CT_BRIDGE="vmbr0"
-TEMPLATE_VMID=9000
+LEGACY_TEMPLATE_VMID=9000
 
 LEGACY_API_USER="infra-deployer@pve"
 LEGACY_API_TOKEN_NAME="automation"
@@ -148,7 +148,6 @@ ensure_token_acls() {
     ensure_token_acl "/pool/$MANAGED_POOL" "PVEVMAdmin"
     ensure_token_acl "/storage/$CT_STORAGE" "PVEDatastoreUser"
     ensure_token_acl "/sdn/zones/localnetwork/$CT_BRIDGE" "PVESDNUser"
-    ensure_token_acl "/vms/$TEMPLATE_VMID" "PVETemplateUser"
     ok "ACL PVE API token подготовлены"
 }
 
@@ -200,7 +199,7 @@ delete_legacy_acl() {
 cleanup_legacy_access() {
     delete_legacy_acl "/" "PVEAuditor"
     delete_legacy_acl "/pool/$MANAGED_POOL" "$LEGACY_ROLE"
-    delete_legacy_acl "/vms/$TEMPLATE_VMID" "PVETemplateUser"
+    delete_legacy_acl "/vms/$LEGACY_TEMPLATE_VMID" "PVETemplateUser"
     delete_legacy_acl "/storage/$CT_STORAGE" "PVEDatastoreUser"
     delete_legacy_acl "/sdn/zones/localnetwork/$CT_BRIDGE" "PVESDNUser"
 
