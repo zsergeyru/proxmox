@@ -65,15 +65,6 @@ prepare_directories() {
     chmod 0770 "$SEMAPHORE_DIR"
 }
 
-cleanup_obsolete_files() {
-    rm -f \
-        "$SECRET_DIR/ansible_ed25519" \
-        "$SECRET_DIR/ansible_ed25519.pub" \
-        "$DATA_DIR/public-keys/ansible_ed25519.pub" \
-        "$DATA_DIR/bootstrap-complete"
-    rmdir "$DATA_DIR/public-keys" 2>/dev/null || true
-}
-
 ensure_base_packages() {
     local missing="" pkg
 
@@ -177,8 +168,6 @@ generate_ca_bundle() {
 }
 
 persist_pve_api_secret() {
-    local current_id="" staged_id=""
-
     if [[ -f "$PVE_API_ENV" ]]; then
         if [[ -n "$PVE_API_SECRET_FILE" && -s "$PVE_API_SECRET_FILE" ]]; then
             if cmp -s "$PVE_API_SECRET_FILE" "$PVE_API_ENV"; then
@@ -186,20 +175,8 @@ persist_pve_api_secret() {
                 return
             fi
 
-            current_id="$(sed -n 's/^PVE_API_TOKEN_ID=//p' "$PVE_API_ENV" | head -n1)"
-            staged_id="$(sed -n 's/^PVE_API_TOKEN_ID=//p' "$PVE_API_SECRET_FILE" | head -n1)"
-
-            # Одноразовый переход со старой отдельной PVE-учётной записи
-            # на ограниченный token root@pam!infra-deployer.
-            if [[ "$current_id" == "infra-deployer@pve!automation" \
-               && "$staged_id" == "root@pam!infra-deployer" ]]; then
-                install -o root -g root -m 0600 "$PVE_API_SECRET_FILE" "$PVE_API_ENV"
-                ok "PVE API credential переведён на root@pam!infra-deployer"
-                return
-            fi
-
             [[ "$RECOVER" == "1" ]] \
-                || die "Постоянный PVE API credential отличается от переданного. Для произвольной замены требуется recovery."
+                || die "Постоянный PVE API credential отличается от переданного. Для замены требуется recovery."
 
             install -o root -g root -m 0600 "$PVE_API_SECRET_FILE" "$PVE_API_ENV"
             ok "PVE API credential заменён в режиме recovery"
@@ -424,7 +401,6 @@ main() {
     require_root
     check_os
     prepare_directories
-    cleanup_obsolete_files
     ensure_base_packages
     install_docker
     copy_compose_assets
