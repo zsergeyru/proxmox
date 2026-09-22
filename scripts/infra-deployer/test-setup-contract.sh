@@ -9,11 +9,12 @@ LIFECYCLE="$ROOT/scripts/infra-deployer/test-pve-lifecycle.sh"
 COMPOSE="$ROOT/guests/910-infra-deployer/compose/docker-compose.yml"
 DOCKERFILE="$ROOT/guests/910-infra-deployer/compose/runner/Dockerfile"
 REQ="$ROOT/guests/910-infra-deployer/compose/runner/requirements.txt"
+PLAN="$ROOT/scripts/infra-deployer/opentofu-plan.sh"
 
 die() { printf 'ОШИБКА: %s\n' "$*" >&2; exit 1; }
 ok()  { printf '[ОК] %s\n' "$*"; }
 
-for file in "$SETUP" "$STATUS" "$ACCESS" "$LIFECYCLE" "$COMPOSE" "$DOCKERFILE" "$REQ"; do
+for file in "$SETUP" "$STATUS" "$ACCESS" "$LIFECYCLE" "$COMPOSE" "$DOCKERFILE" "$REQ" "$PLAN"; do
     [[ -s "$file" ]] || die "Отсутствует обязательный файл: $file"
 done
 
@@ -58,6 +59,13 @@ fi
 if grep -q '/etc/pve/' "$SETUP"; then
     die "setup внутри 910 не должен работать с файловой системой /etc/pve"
 fi
+
+if grep -qE 'tofu[[:space:]].*(apply|destroy)' "$PLAN"; then
+    die "OpenTofu Plan не должен содержать apply или destroy"
+fi
+
+grep -q 'tofu -chdir="$OPENTOFU_DIR" plan' "$PLAN"     || die "OpenTofu Plan должен выполнять tofu plan"
+
 
 python3 - "$COMPOSE" <<'PY'
 from pathlib import Path
