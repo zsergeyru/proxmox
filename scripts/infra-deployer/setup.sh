@@ -287,7 +287,7 @@ repair_semaphore_storage() {
         "semaphoreui/semaphore:${SEMAPHORE_VERSION}" \
         -c '
             set -eu
-            probe="/var/lib/semaphore/.write-test.$"
+            probe="/var/lib/semaphore/.write-test"
             : >"$probe"
             rm -f "$probe"
         ' \
@@ -299,7 +299,12 @@ repair_semaphore_storage() {
 deploy_semaphore() {
     log "Сборка и запуск Semaphore"
     compose pull semaphore
+
+    # Старый процесс мог открыть SQLite до исправления прав. Останавливаем
+    # контейнеры, восстанавливаем доступ и только затем открываем базу заново.
+    compose stop semaphore runner >/dev/null 2>&1 || true
     repair_semaphore_storage
+
     compose build --pull runner
     compose up -d --remove-orphans
 }
