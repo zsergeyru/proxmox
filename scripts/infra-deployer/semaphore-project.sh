@@ -285,7 +285,7 @@ ensure_opentofu_environment() {
                     operation:"create"
                 }]
             }')"
-    elif [[ "$RECOVER" == "1" ]]; then
+    else
         payload="$(jq -cn             --arg name "$OPENTOFU_ENV_NAME"             --arg env "$env_json"             --arg secret "$api_token"             --argjson id "$id"             --argjson secret_id "$secret_id"             --argjson project_id "$project_id"             '{
                 id:$id,
                 name:$name,
@@ -300,16 +300,6 @@ ensure_opentofu_environment() {
                     type:"env",
                     operation:"update"
                 }]
-            }')"
-    else
-        payload="$(jq -cn             --arg name "$OPENTOFU_ENV_NAME"             --arg env "$env_json"             --argjson id "$id"             --argjson project_id "$project_id"             '{
-                id:$id,
-                name:$name,
-                project_id:$project_id,
-                password:null,
-                json:"{}",
-                env:$env,
-                secrets:[]
             }')"
     fi
 
