@@ -13,13 +13,123 @@ PLAN="$ROOT/scripts/infra-deployer/opentofu-plan.sh"
 SEMAPHORE_PROJECT="$ROOT/scripts/infra-deployer/semaphore-project.sh"
 PVE_BOOTSTRAP_ACCESS="$ROOT/scripts/infra-deployer/pve-bootstrap-access.sh"
 OPENTOFU_LOCK="$ROOT/opentofu/.terraform.lock.hcl"
+GUEST_MANIFEST="$ROOT/guests/910-infra-deployer/guest.yaml"
+PROVISION="$ROOT/guests/910-infra-deployer/provision.yaml"
 
 die() { printf 'ОШИБКА: %s\n' "$*" >&2; exit 1; }
 ok()  { printf '[ОК] %s\n' "$*"; }
 
-for file in "$SETUP" "$STATUS" "$ACCESS" "$LIFECYCLE" "$COMPOSE" "$DOCKERFILE" "$REQ" "$PLAN" "$SEMAPHORE_PROJECT" "$PVE_BOOTSTRAP_ACCESS" "$OPENTOFU_LOCK"; do
+for file in "$SETUP" "$STATUS" "$ACCESS" "$LIFECYCLE" "$COMPOSE" "$DOCKERFILE" "$REQ" "$PLAN" "$SEMAPHORE_PROJECT" "$PVE_BOOTSTRAP_ACCESS" "$OPENTOFU_LOCK" "$GUEST_MANIFEST" "$PROVISION"; do
     [[ -s "$file" ]] || die "Отсутствует обязательный файл: $file"
 done
+
+python3 - "$GUEST_MANIFEST" "$PROVISION" "$SETUP" "$COMPOSE" "$DOCKERFILE" "$REQ" <<'PY'
+from pathlib import Path
+import re
+import sys
+import yaml
+
+guest_path, provision_path, setup_path, compose_path, dockerfile_path, req_path = map(Path, sys.argv[1:])
+
+guest = yaml.safe_load(guest_path.read_text(encoding="utf-8"))
+if guest.get("vmid") != 910 or guest.get("name") != "infra-deployer":
+    raise SystemExit("910 guest.yaml содержит неверный vmid/name")
+if "profile" in guest:
+    raise SystemExit("910 guest.yaml не должен содержать profile и попадать в OpenTofu")
+if guest.get("protection") is not True:
+    raise SystemExit("910 должен иметь protection=true")
+if guest.get("boot", {}).get("onboot") is not True:
+    raise SystemExit("910 должен иметь onboot=true")
+expected_resources = {
+    "cores": 2,
+    "memory_mb": 2048,
+    "swap_mb": 512,
+    "disk_size_gb": 32,
+    "disk_storage": "local-lvm",
+}
+if guest.get("resources") != expected_resources:
+    raise SystemExit(f"неожиданные resources 910: {guest.get('resources')!r}")
+
+provision = yaml.safe_load(provision_path.read_text(encoding="utf-8"))
+if provision.get("schema_version") != 1 or provision.get("guest_vmid") != 910:
+    raise SystemExit("provision.yaml 910 имеет неверную версию или guest_vmid")
+system = provision.get("system", {})
+if system.get("distribution") != "debian" or system.get("version") != "13" or system.get("architecture") != "amd64":
+    raise SystemExit("provision.yaml должен требовать Debian 13 amd64")
+
+setup_text = setup_path.read_text(encoding="utf-8")
+required_host_packages = set(system.get("required_packages", []))
+expected_host_packages = {
+    "ca-certificates", "curl", "git", "gnupg", "jq",
+    "openssh-client", "openssl", "python3-yaml",
+}
+if required_host_packages != expected_host_packages:
+    raise SystemExit(f"неожиданный список пакетов 910: {sorted(required_host_packages)}")
+for package in required_host_packages:
+    if package not in setup_text:
+        raise SystemExit(f"setup.sh не обеспечивает пакет из provision.yaml: {package}")
+
+docker = provision.get("docker", {})
+docker_packages = set(docker.get("required_packages", []))
+expected_docker_packages = {
+    "docker-ce", "docker-ce-cli", "containerd.io",
+    "docker-buildx-plugin", "docker-compose-plugin",
+}
+if docker_packages != expected_docker_packages:
+    raise SystemExit(f"неожиданные Docker-пакеты 910: {sorted(docker_packages)}")
+for package in docker_packages:
+    if package not in setup_text:
+        raise SystemExit(f"setup.sh не обеспечивает Docker-пакет из provision.yaml: {package}")
+
+services = docker.get("services", {})
+if set(services) != {"semaphore", "runner"}:
+    raise SystemExit(f"provision.yaml: неожиданные Docker services: {sorted(services)}")
+
+semaphore = services["semaphore"]
+runner = services["runner"]
+sem_image = semaphore.get("image", "")
+runner_image = runner.get("image", "")
+base_image = runner.get("base_image", "")
+if not sem_image.startswith("semaphoreui/semaphore:v"):
+    raise SystemExit("provision.yaml: неверный image Semaphore")
+sem_version = sem_image.rsplit(":", 1)[1]
+if runner_image != f"infra-deployer-runner:{sem_version}":
+    raise SystemExit("Runner image должен использовать ту же версию Semaphore")
+if base_image != f"semaphoreui/runner:{sem_version}":
+    raise SystemExit("Runner base image должен использовать ту же версию Semaphore")
+if f'SEMAPHORE_VERSION="{sem_version}"' not in setup_text:
+    raise SystemExit("Версия Semaphore в setup.sh расходится с provision.yaml")
+
+tools = runner.get("tools", {})
+dockerfile_text = dockerfile_path.read_text(encoding="utf-8")
+opentofu_version = str(tools.get("opentofu", ""))
+packer_version = str(tools.get("packer", ""))
+if f"ARG OPENTOFU_VERSION={opentofu_version}" not in dockerfile_text:
+    raise SystemExit("Версия OpenTofu в Dockerfile расходится с provision.yaml")
+if f"ARG PACKER_VERSION={packer_version}" not in dockerfile_text:
+    raise SystemExit("Версия Packer в Dockerfile расходится с provision.yaml")
+if f'OPENTOFU_VERSION="{opentofu_version}"' not in setup_text:
+    raise SystemExit("Версия OpenTofu в setup.sh расходится с provision.yaml")
+if f'PACKER_VERSION="{packer_version}"' not in setup_text:
+    raise SystemExit("Версия Packer в setup.sh расходится с provision.yaml")
+
+req_text = req_path.read_text(encoding="utf-8")
+for package, constraint in runner.get("python_packages", {}).items():
+    expected = f"{package}{constraint}"
+    if expected not in req_text:
+        raise SystemExit(f"requirements.txt расходится с provision.yaml: {expected}")
+
+compose = yaml.safe_load(compose_path.read_text(encoding="utf-8"))
+compose_services = compose.get("services", {})
+if set(compose_services) != {"semaphore", "runner"}:
+    raise SystemExit(f"docker-compose.yml: неожиданные services: {sorted(compose_services)}")
+if compose_services["semaphore"].get("container_name") != semaphore.get("container_name"):
+    raise SystemExit("container_name Semaphore расходится с provision.yaml")
+if compose_services["runner"].get("container_name") != runner.get("container_name"):
+    raise SystemExit("container_name Runner расходится с provision.yaml")
+if compose_services["semaphore"].get("ports") != semaphore.get("ports"):
+    raise SystemExit("порты Semaphore расходятся с provision.yaml")
+PY
 
 grep -q 'SEMAPHORE_VERSION="v2.18.30"' "$SETUP" \
     || die "Semaphore должен быть зафиксирован на v2.18.30"
