@@ -321,8 +321,42 @@ ensure_opentofu_environment() {
     printf '%s' "$id"
 }
 
+
+ensure_opentofu_plan_template() {
+    local project_id=$1 repository_id=$2 environment_id=$3
+    local name="OpenTofu Plan"
+    local templates id payload response
+
+    templates="$(api GET "/project/${project_id}/templates?sort=name&order=asc")"
+    id="$(jq -r --arg name "$name"         '.[] | select(.name == $name) | .id' <<<"$templates" | head -n1)"
+
+    payload="$(jq -cn         --arg name "$name"         --arg playbook "scripts/infra-deployer/opentofu-plan.sh"         --arg branch "$PROJECT_BRANCH"         --argjson project_id "$project_id"         --argjson repository_id "$repository_id"         --argjson environment_id "$environment_id"         '{
+            name:$name,
+            project_id:$project_id,
+            repository_id:$repository_id,
+            environment_ids:[$environment_id],
+            playbook:$playbook,
+            app:"bash",
+            type:"",
+            git_branch:$branch,
+            arguments:"[]",
+            allow_override_args_in_task:false,
+            allow_override_branch_in_task:false
+        }')"
+
+    if [[ -z "$id" ]]; then
+        response="$(api POST "/project/${project_id}/templates" -d "$payload")"
+        id="$(jq -r '.id // empty' <<<"$response")"
+    else
+        api PUT "/project/${project_id}/templates/${id}" -d "$payload" >/dev/null
+    fi
+
+    [[ -n "$id" ]] || die "Semaphore не вернул id шаблона OpenTofu Plan"
+    printf '%s' "$id"
+}
+
 main() {
-    local project_id github_key_id pve_key_id ansible_key_id repository_id opentofu_env_id
+    local project_id github_key_id pve_key_id ansible_key_id repository_id opentofu_env_id opentofu_plan_template_id
 
     command -v jq >/dev/null 2>&1 || die "Не найден jq"
     command -v curl >/dev/null 2>&1 || die "Не найден curl"
