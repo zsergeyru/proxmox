@@ -45,8 +45,6 @@ grep -q 'render-opentofu-input.py' "$SETUP" \
 
 grep -q 'Используется существующий постоянный PVE API credential' "$SETUP" \
     || die "Повторное обновление 910 должно работать без staging PVE secret"
-grep -q 'root@pam!infra-deployer' "$SETUP" \
-    || die "setup.sh должен поддерживать автоматический переход на новый PVE API token"
 
 grep -q 'API_USER="root@pam"' "$PVE_BOOTSTRAP_ACCESS" \
     || die "PVE bootstrap access должен использовать существующий root@pam"
@@ -64,14 +62,15 @@ fi
 if grep -q 'pveum role add.*InfraManagedGuest' "$PVE_BOOTSTRAP_ACCESS"; then
     die "Собственная роль InfraManagedGuest больше не должна создаваться"
 fi
-grep -q '^cleanup_legacy_access() {' "$PVE_BOOTSTRAP_ACCESS" \
-    || die "Переход должен удалять прежнюю PVE-идентичность"
-grep -q '^cleanup_obsolete_files() {' "$SETUP" \
-    || die "setup.sh должен удалять устаревшие credentials предыдущей схемы"
-grep -q '\$DATA_DIR/public-keys/ansible_ed25519.pub' "$SETUP" \
-    || die "setup.sh должен удалять старый Ansible public key"
-grep -q '\$DATA_DIR/bootstrap-complete' "$SETUP" \
-    || die "setup.sh должен удалять старый bootstrap marker"
+if grep -q 'infra-deployer@pve' "$PVE_BOOTSTRAP_ACCESS" "$SETUP" "$SEMAPHORE_PROJECT"; then
+    die "Старая PVE-идентичность не должна присутствовать в чистой схеме"
+fi
+if grep -q 'InfraManagedGuest' "$PVE_BOOTSTRAP_ACCESS" "$SETUP" "$SEMAPHORE_PROJECT"; then
+    die "Старая собственная роль PVE не должна присутствовать в чистой схеме"
+fi
+if grep -q 'PVE API automation\|Ansible managed guests' "$SEMAPHORE_PROJECT"; then
+    die "Неиспользуемые Semaphore credentials не должны создаваться"
+fi
 
 grep -q 'SEMAPHORE_DB_DIALECT=sqlite' "$SETUP" \
     || die "Semaphore должен использовать SQLite в первой версии"
@@ -144,11 +143,6 @@ fi
 if grep -q '^ensure_ansible_key() {' "$SEMAPHORE_PROJECT"; then
     die "Ansible SSH credential не должен создаваться до появления Ansible-задач"
 fi
-grep -q 'delete_key_by_name "$project_id" "PVE API automation"' "$SEMAPHORE_PROJECT" \
-    || die "Старая неиспользуемая PVE запись Key Store должна удаляться"
-grep -q 'delete_key_by_name "$project_id" "Ansible managed guests"' "$SEMAPHORE_PROJECT" \
-    || die "Старая неиспользуемая Ansible запись Key Store должна удаляться"
-
 grep -q 'allow_override_args_in_task:false' "$SEMAPHORE_PROJECT" \
     || die "OpenTofu Plan не должен разрешать переопределение аргументов"
 grep -q 'allow_override_branch_in_task:false' "$SEMAPHORE_PROJECT" \
