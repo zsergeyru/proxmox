@@ -65,7 +65,7 @@ PVE minimum
 
 Именно `910` получает закрытый Git-репозиторий, инфраструктурные секреты и ограниченный PVE API token.
 
-Точный контракт находится в [`240-infra-deployer.md`](240-infra-deployer.md).
+Описание конкретного гостя находится в [`../../guests/910-infra-deployer/README.md`](../../guests/910-infra-deployer/README.md), а его машинные параметры — в [`../../guests/910-infra-deployer/bootstrap.yaml`](../../guests/910-infra-deployer/bootstrap.yaml).
 
 ## 5. Граница с обычными гостями
 
@@ -104,6 +104,6 @@ PVE создаёт техническую идентичность для `910`,
 - [`210-host-bootstrap.md`](210-host-bootstrap.md) — первоначальная подготовка.
 - [`220-host-configuration.md`](220-host-configuration.md) — минимальное состояние PVE.
 - [`230-host-layout.md`](230-host-layout.md) — локальная структура PVE.
-- [`240-infra-deployer.md`](240-infra-deployer.md) — контракт `910`.
+- [`../../guests/910-infra-deployer/README.md`](../../guests/910-infra-deployer/README.md) — документация конкретного `910`.
 - [`../300-guests/300-overview.md`](../300-guests/300-overview.md) — обычные гостевые системы.
 - [`../700-security/710-pve-access.md`](../700-security/710-pve-access.md) — доступ к Proxmox.
