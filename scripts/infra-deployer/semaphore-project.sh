@@ -13,9 +13,6 @@ SEMAPHORE_API_TOKEN_FILE="${SECRET_DIR}/semaphore-api-token"
 PVE_API_ENV="${SECRET_DIR}/pve-api.env"
 GITHUB_KEY="/root/.ssh/github_proxmox_repo_ed25519"
 GITHUB_KEY_COPY="${SECRET_DIR}/github_project_ed25519"
-ANSIBLE_KEY="${SECRET_DIR}/ansible_ed25519"
-PUBLIC_KEY_DIR="/var/lib/infra-deployer/public-keys"
-ANSIBLE_PUBLIC_KEY="${PUBLIC_KEY_DIR}/ansible_ed25519.pub"
 
 PROJECT_REPO="git@github.com:zsergeyru/proxmox.git"
 PROJECT_BRANCH="${INFRA_PROJECT_BRANCH:-infra-iac-redesign}"
@@ -180,40 +177,10 @@ ensure_ssh_key() {
     printf '%s' "$id"
 }
 
-ensure_pve_key() {
-    local project_id=$1
-    local name="PVE API automation"
-    local id token_id token_secret payload response
-
-    token_id="$(read_env_value PVE_API_TOKEN_ID "$PVE_API_ENV")"
-    token_secret="$(read_env_value PVE_API_TOKEN_SECRET "$PVE_API_ENV")"
-    [[ -n "$token_id" && -n "$token_secret" ]] || die "PVE API credential неполон"
-
+delete_key_by_name() {
+    local project_id=$1 name=$2 id
     id="$(key_id_by_name "$project_id" "$name")"
-
-    payload="$(jq -n \
-        --arg name "$name" \
-        --arg login "$token_id" \
-        --arg password "$token_secret" \
-        --argjson project_id "$project_id" \
-        '{name:$name,type:"login_password",project_id:$project_id,override_secret:true,login_password:{login:$login,password:$password}}')"
-
-    if [[ -z "$id" ]]; then
-        response="$(api POST "/project/${project_id}/keys" -d "$payload")"
-        id="$(jq -r '.id // empty' <<<"$response")"
-        [[ -n "$id" ]] || die "Не удалось создать PVE API key в Semaphore"
-    elif [[ "$RECOVER" == "1" ]]; then
-        payload="$(jq -n \
-            --argjson id "$id" \
-            --arg name "$name" \
-            --arg login "$token_id" \
-            --arg password "$token_secret" \
-            --argjson project_id "$project_id" \
-            '{id:$id,name:$name,type:"login_password",project_id:$project_id,override_secret:true,login_password:{login:$login,password:$password}}')"
-        api PUT "/project/${project_id}/keys/${id}" -d "$payload" >/dev/null
-    fi
-
-    printf '%s' "$id"
+    [[ -z "$id" ]] || api DELETE "/project/$project_id/keys/$id" >/dev/null
 }
 
 persist_github_key() {
@@ -228,19 +195,6 @@ persist_github_key() {
     else
         install -o root -g root -m 0600 "$GITHUB_KEY" "$GITHUB_KEY_COPY"
     fi
-}
-
-ensure_ansible_key() {
-    install -d -o root -g root -m 0700 "$SECRET_DIR"
-    install -d -o root -g root -m 0755 "$PUBLIC_KEY_DIR"
-
-    if [[ ! -f "$ANSIBLE_KEY" ]]; then
-        [[ ! -e "${ANSIBLE_KEY}.pub" ]] || die "Есть Ansible public key без private key"
-        ssh-keygen -q -t ed25519 -N '' -C infra-deployer-ansible -f "$ANSIBLE_KEY"
-    fi
-
-    chmod 0600 "$ANSIBLE_KEY"
-    install -o root -g root -m 0644 "${ANSIBLE_KEY}.pub" "$ANSIBLE_PUBLIC_KEY"
 }
 
 ensure_repository() {
@@ -411,7 +365,7 @@ ensure_opentofu_plan_template() {
 }
 
 main() {
-    local project_id github_key_id pve_key_id ansible_key_id repository_id opentofu_env_id opentofu_plan_template_id
+    local project_id github_key_id repository_id opentofu_env_id opentofu_plan_template_id
 
     command -v jq >/dev/null 2>&1 || die "Не найден jq"
     command -v curl >/dev/null 2>&1 || die "Не найден curl"
@@ -419,20 +373,24 @@ main() {
     [[ -s "$PVE_API_ENV" ]] || die "Не найден постоянный PVE API credential"
 
     persist_github_key
-    ensure_ansible_key
     ensure_api_token
 
     project_id="$(ensure_project)"
+
+    # Эти credentials создавались прежней схемой, но ни один действующий
+    # шаблон Semaphore их не использует. Удаляем, чтобы не хранить лишние секреты.
+    delete_key_by_name "$project_id" "PVE API automation"
+    delete_key_by_name "$project_id" "Ansible managed guests"
+
     github_key_id="$(ensure_ssh_key "$project_id" "GitHub project read-only" git "$GITHUB_KEY_COPY")"
-    pve_key_id="$(ensure_pve_key "$project_id")"
-    ansible_key_id="$(ensure_ssh_key "$project_id" "Ansible managed guests" root "$ANSIBLE_KEY")"
     repository_id="$(ensure_repository "$project_id" "$github_key_id")"
     opentofu_env_id="$(ensure_opentofu_environment "$project_id")"
     opentofu_plan_template_id="$(ensure_opentofu_plan_template "$project_id" "$repository_id" "$opentofu_env_id")"
 
-    [[ -n "$pve_key_id" && -n "$ansible_key_id" && -n "$repository_id" && -n "$opentofu_env_id" && -n "$opentofu_plan_template_id" ]] \
+    [[ -n "$repository_id" && -n "$opentofu_env_id" && -n "$opentofu_plan_template_id" ]] \
         || die "Не все объекты Semaphore созданы"
-    ok "Проект Semaphore, Key Store, Git repository, OpenTofu Variable Group и шаблон OpenTofu Plan подготовлены"
+
+    ok "Проект Semaphore, Git repository, OpenTofu Variable Group и шаблон OpenTofu Plan подготовлены"
 }
 
 main "$@"
