@@ -6,7 +6,6 @@ CA_BUNDLE="/etc/infra-deployer/ca/ca-bundle.crt"
 
 MANAGED_POOL="managed"
 INFRA_DEPLOYER_VMID=910
-TEMPLATE_VMID=9000
 
 MANAGED_PRIVS="Pool.Audit VM.Allocate VM.Audit VM.Config.CDROM VM.Config.Cloudinit VM.Config.CPU VM.Config.Disk VM.Config.HWType VM.Config.Memory VM.Config.Network VM.Config.Options VM.GuestAgent.Audit VM.PowerMgmt"
 FORBIDDEN_VM_PRIVS="VM.Allocate VM.Backup VM.Clone VM.Config.CDROM VM.Config.Cloudinit VM.Config.CPU VM.Config.Disk VM.Config.HWType VM.Config.Memory VM.Config.Network VM.Config.Options VM.Console VM.GuestAgent.FileRead VM.GuestAgent.FileWrite VM.GuestAgent.FileSystemMgmt VM.GuestAgent.Unrestricted VM.Migrate VM.PowerMgmt VM.Replicate VM.Snapshot VM.Snapshot.Rollback"
@@ -109,7 +108,6 @@ api_get "/pools/$MANAGED_POOL" | jq -e '.data' >/dev/null \
     || die "Pool $MANAGED_POOL недоступен"
 
 require_permissions "/pool/$MANAGED_POOL" "$MANAGED_PRIVS"
-require_permissions "/vms/$TEMPLATE_VMID" "VM.Audit VM.Clone"
 require_permissions "/storage/local" "Datastore.Audit"
 require_permissions "/storage/local-lvm" "Datastore.Audit Datastore.AllocateSpace"
 require_permissions "/sdn/zones/localnetwork/vmbr0" "SDN.Audit SDN.Use"
