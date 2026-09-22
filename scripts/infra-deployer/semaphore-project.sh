@@ -177,12 +177,6 @@ ensure_ssh_key() {
     printf '%s' "$id"
 }
 
-delete_key_by_name() {
-    local project_id=$1 name=$2 id
-    id="$(key_id_by_name "$project_id" "$name")"
-    [[ -z "$id" ]] || api DELETE "/project/$project_id/keys/$id" >/dev/null
-}
-
 persist_github_key() {
     [[ -s "$GITHUB_KEY" ]] || die "GitHub Deploy Key не найден: $GITHUB_KEY"
 
@@ -366,11 +360,6 @@ main() {
     ensure_api_token
 
     project_id="$(ensure_project)"
-
-    # Эти credentials создавались прежней схемой, но ни один действующий
-    # шаблон Semaphore их не использует. Удаляем, чтобы не хранить лишние секреты.
-    delete_key_by_name "$project_id" "PVE API automation"
-    delete_key_by_name "$project_id" "Ansible managed guests"
 
     github_key_id="$(ensure_ssh_key "$project_id" "GitHub project read-only" git "$GITHUB_KEY_COPY")"
     repository_id="$(ensure_repository "$project_id" "$github_key_id")"
