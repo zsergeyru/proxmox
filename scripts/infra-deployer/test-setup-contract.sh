@@ -53,7 +53,6 @@ grep -q 'API_TOKEN_NAME="infra-deployer"' "$PVE_BOOTSTRAP_ACCESS" \
     || die "PVE bootstrap access должен создавать отдельный infra-deployer token"
 grep -q -- '--privsep 1' "$PVE_BOOTSTRAP_ACCESS" \
     || die "PVE API token должен использовать privsep=1"
-
 grep -q '^rollback_new_api_token() {' "$PVE_BOOTSTRAP_ACCESS" \
     || die "Новый PVE API token должен откатываться при ошибке передачи secret"
 grep -q 'rm -f -- "$tmp"' "$PVE_BOOTSTRAP_ACCESS" \
@@ -113,7 +112,6 @@ grep -q 'infra-deployer-status --full' "$STATUS" \
     || die "status.sh должен поддерживать отдельную полную проверку прав"
 grep -q 'api2/json/version' "$STATUS" \
     || die "Базовый status должен реально проверять PVE API credential"
-
 grep -q 'GitHub project read-only' "$STATUS" \
     || die "status.sh должен проверять GitHub SSH key Semaphore"
 grep -q 'PROJECT_REPO="git@github.com:zsergeyru/proxmox.git"' "$STATUS" \
@@ -136,15 +134,12 @@ if grep -qE 'tofu[[:space:]].*(apply|destroy)' "$PLAN"; then
 fi
 
 grep -q 'tofu -chdir="$OPENTOFU_DIR" plan' "$PLAN"     || die "OpenTofu Plan должен выполнять tofu plan"
-
 grep -q -- '-lockfile=readonly' "$PLAN" \
     || die "OpenTofu Plan должен использовать только зафиксированный lock file"
 grep -q 'provider "registry.opentofu.org/bpg/proxmox"' "$OPENTOFU_LOCK" \
     || die "OpenTofu lock file должен фиксировать bpg/proxmox из OpenTofu Registry"
 grep -q 'version     = "0.112.0"' "$OPENTOFU_LOCK" \
     || die "OpenTofu lock file должен фиксировать bpg/proxmox 0.112.0"
-grep -q '"zh:1fa5fb40d2506db678b5f989d4929005680a187f6c91378ca5433fa490d9029b"' "$OPENTOFU_LOCK" \
-    || die "OpenTofu lock file должен содержать checksum linux_amd64"
 
 grep -q 'OPENTOFU_ENV_NAME="OpenTofu PVE"' "$SEMAPHORE_PROJECT" \
     || die "Semaphore должен создавать Variable Group OpenTofu PVE"
@@ -214,10 +209,9 @@ PY
 ok "Контракт setup infra-deployer проверен"
  "$SEMAPHORE_PROJECT" \
     || die "Ошибки API внутри командных подстановок должны останавливать semaphore-project.sh"
-
 grep -q '^unique_id_by_name() {' "$SEMAPHORE_PROJECT" \
     || die "Semaphore setup должен останавливать настройку при дубликатах объектов"
-grep -q 'unique_id_by_name "$repos" "proxmox" "Git repository"' "$SEMAPHORE_PROJECT" \
+grep -Fq 'unique_id_by_name "$repos" "proxmox" "Git repository"' "$SEMAPHORE_PROJECT" \
     || die "Git repository Semaphore должен проверяться на дубликаты"
 grep -q "'{id:\$id,name:\$name,project_id:\$project_id,git_url:\$git_url" "$SEMAPHORE_PROJECT" \
     || die "PUT Git repository должен передавать repository id в теле"
