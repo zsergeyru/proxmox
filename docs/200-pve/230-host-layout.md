@@ -107,11 +107,11 @@ pool managed
 /opt/infra-deployer/
 ```
 
-Их контракт описывает [`240-infra-deployer.md`](240-infra-deployer.md).
+Их назначение описано в [`../../guests/910-infra-deployer/README.md`](../../guests/910-infra-deployer/README.md).
 
 ## 7. Связанные документы
 
 - [`210-host-bootstrap.md`](210-host-bootstrap.md) — создание и проверка локальной основы.
 - [`220-host-configuration.md`](220-host-configuration.md) — обязательное состояние PVE.
-- [`240-infra-deployer.md`](240-infra-deployer.md) — постоянная структура внутри `910`.
+- [`../../guests/910-infra-deployer/README.md`](../../guests/910-infra-deployer/README.md) — структура и назначение конкретного `910`.
 - [`../700-security/710-pve-access.md`](../700-security/710-pve-access.md) — PVE-идентичности, роли и ACL.
