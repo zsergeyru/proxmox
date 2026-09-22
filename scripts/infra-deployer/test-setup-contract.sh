@@ -42,6 +42,9 @@ grep -q 'ln -sfn "$LIFECYCLE_TEST_COMMAND" /usr/local/bin/infra-deployer-pve-lif
 grep -q 'render-opentofu-input.py' "$SETUP" \
     || die "setup.sh должен генерировать OpenTofu input"
 
+grep -q 'Используется существующий постоянный PVE API credential' "$SETUP" \
+    || die "Повторное обновление 910 должно работать без staging PVE secret"
+
 grep -q 'SEMAPHORE_DB_DIALECT=sqlite' "$SETUP" \
     || die "Semaphore должен использовать SQLite в первой версии"
 grep -q 'SEMAPHORE_DB_HOST=/var/lib/semaphore/semaphore.sqlite' "$SETUP" \
