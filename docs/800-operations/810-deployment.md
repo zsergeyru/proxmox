@@ -50,7 +50,27 @@ Bootstrap отвечает за объект LXC `910`, его ресурсы и
 
 Первая версия использует один проект `Proxmox Infrastructure`.
 
-В проекте создаются как минимум GitHub project read-only, PVE API automation, Ansible managed guests и репозиторий `git@github.com:zsergeyru/proxmox.git`.
+В проекте создаются:
+
+- GitHub project read-only;
+- PVE API automation;
+- Ansible managed guests;
+- репозиторий `git@github.com:zsergeyru/proxmox.git`;
+- Variable Group `OpenTofu PVE`;
+- шаблон `OpenTofu Plan`.
+
+Variable Group передаёт OpenTofu:
+
+```text
+TF_VAR_pve_endpoint
+TF_VAR_pve_api_token
+```
+
+API token передаётся как секретная переменная окружения и не записывается в Git или аргументы командной строки.
+
+`OpenTofu Plan` запускает отдельный `scripts/infra-deployer/opentofu-plan.sh`. Этот сценарий обновляет итоговый `guests.json` из текущей ревизии Git и выполняет только `tofu init` и `tofu plan`.
+
+До отдельного решения о применении инфраструктуры шаблон `OpenTofu Apply` не создаётся. Контрактный тест запрещает появление `tofu apply` или `tofu destroy` в сценарии `OpenTofu Plan`.
 
 Для управления самим Semaphore создаётся отдельный API token, который хранится внутри `910` и позволяет менять пароль администратора без поломки автоматической настройки.
 
