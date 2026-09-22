@@ -36,7 +36,7 @@ OpenTofu использует локальный backend:
 Провайдер получает:
 
 - `pve_endpoint` — HTTPS API PVE;
-- `pve_api_token` — отдельный токен `infra-deployer@pve!automation`;
+- `pve_api_token` — ограниченный token `root@pam!infra-deployer` с `privsep=1`;
 - доверие к PVE CA — из системного CA bundle Runner.
 
 `insecure = false` является обязательной частью контракта.
