@@ -111,6 +111,22 @@ copy_compose_assets() {
     install -m 0644 "$ASSET_DIR/runner/ssh_config" "$COMPOSE_DIR/runner/ssh_config"
 }
 
+seed_runner_known_hosts() {
+    local source="/root/.ssh/github_known_hosts"
+    local target="$RUNNER_DIR/known_hosts"
+
+    if [[ -s "$source" ]]; then
+        install -o 1001 -g 0 -m 0644 "$source" "$target"
+    elif [[ ! -s "$target" ]]; then
+        curl -fsSL --connect-timeout 10 --max-time 20 https://api.github.com/meta \
+            | jq -r '.ssh_keys[] | "github.com " + .' >"$target"
+        chown 1001:0 "$target"
+        chmod 0644 "$target"
+    fi
+
+    [[ -s "$target" ]] || die "Не удалось подготовить known_hosts Runner"
+}
+
 generate_ca_bundle() {
     local pve_ca="/usr/local/share/ca-certificates/pve-root-ca.crt"
     [[ -s /etc/ssl/certs/ca-certificates.crt ]] || die "Не найден системный CA bundle"
@@ -268,6 +284,7 @@ main() {
     prepare_directories
     install_docker
     copy_compose_assets
+    seed_runner_known_hosts
     generate_ca_bundle
     persist_pve_api_secret
     ensure_semaphore_secrets
