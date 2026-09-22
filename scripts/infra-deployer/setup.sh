@@ -58,6 +58,10 @@ prepare_directories() {
     install -d -o root -g root -m 0700 "$SECRET_DIR"
     install -d -o 1001 -g 0 -m 0750 "$SEMAPHORE_DIR" "$RUNNER_DIR" "$RUNNER_TMP_DIR" "$OPENTOFU_DIR" "$STATE_DIR"
     install -d -o root -g root -m 0755 "$PUBLIC_KEY_DIR"
+
+    # Semaphore Server в официальном образе работает от UID 1001.
+    # Исправляем владельца уже существующих файлов SQLite после повторных запусков.
+    chown -R 1001:0 "$SEMAPHORE_DIR"
 }
 
 ensure_base_packages() {
