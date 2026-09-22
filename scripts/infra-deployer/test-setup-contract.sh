@@ -78,6 +78,11 @@ grep -q 'local name="OpenTofu Plan"' "$SEMAPHORE_PROJECT" \
 grep -q 'scripts/infra-deployer/opentofu-plan.sh' "$SEMAPHORE_PROJECT" \
     || die "OpenTofu Plan должен запускать отдельный безопасный сценарий"
 
+grep -q 'allow_override_args_in_task:false' "$SEMAPHORE_PROJECT" \
+    || die "OpenTofu Plan не должен разрешать переопределение аргументов"
+grep -q 'allow_override_branch_in_task:false' "$SEMAPHORE_PROJECT" \
+    || die "OpenTofu Plan не должен разрешать переопределение Git-ветки"
+
 
 python3 - "$COMPOSE" <<'PY'
 from pathlib import Path
