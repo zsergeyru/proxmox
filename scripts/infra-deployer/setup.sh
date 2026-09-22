@@ -35,7 +35,7 @@ RECOVER="${INFRA_DEPLOYER_RECOVER:-0}"
 SEMAPHORE_VERSION="v2.18.30"
 PROJECT_BRANCH="${INFRA_PROJECT_BRANCH:-infra-iac-redesign}"
 OPENTOFU_VERSION="1.12.6"
-PACKER_VERSION="1.16.1"
+PACKER_VERSION="1.15.4"
 
 log()  { printf '\n==> %s\n' "$*"; }
 ok()   { printf '[ОК] %s\n' "$*"; }
