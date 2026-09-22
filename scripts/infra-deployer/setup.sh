@@ -14,7 +14,9 @@ DATA_DIR="/var/lib/infra-deployer"
 SEMAPHORE_DIR="${DATA_DIR}/semaphore"
 RUNNER_DIR="${DATA_DIR}/runner"
 RUNNER_TMP_DIR="${RUNNER_DIR}/tmp"
-STATE_DIR="${DATA_DIR}/opentofu/state"
+OPENTOFU_DIR="${DATA_DIR}/opentofu"
+STATE_DIR="${OPENTOFU_DIR}/state"
+OPENTOFU_INPUT="${OPENTOFU_DIR}/guests.json"
 PUBLIC_KEY_DIR="${DATA_DIR}/public-keys"
 COMPOSE_DIR="/opt/infra-deployer/compose"
 STATUS_COMMAND="/usr/local/sbin/infra-deployer-status"
@@ -54,7 +56,7 @@ check_os() {
 prepare_directories() {
     install -d -o root -g root -m 0755 "$CONFIG_DIR" "$CA_DIR" "$DATA_DIR" "$COMPOSE_DIR"
     install -d -o root -g root -m 0700 "$SECRET_DIR"
-    install -d -o 1001 -g 0 -m 0750 "$SEMAPHORE_DIR" "$RUNNER_DIR" "$RUNNER_TMP_DIR" "$STATE_DIR"
+    install -d -o 1001 -g 0 -m 0750 "$SEMAPHORE_DIR" "$RUNNER_DIR" "$RUNNER_TMP_DIR" "$OPENTOFU_DIR" "$STATE_DIR"
     install -d -o root -g root -m 0755 "$PUBLIC_KEY_DIR"
 }
 
@@ -211,6 +213,17 @@ EOF_RUNNER
     fi
 }
 
+prepare_opentofu_input() {
+    log "Подготовка итогового состояния гостей для OpenTofu"
+
+    python3 "$REPO_ROOT/scripts/infra-deployer/render-opentofu-input.py" \
+        --output "$OPENTOFU_INPUT"
+    chown 1001:0 "$OPENTOFU_INPUT"
+    chmod 0640 "$OPENTOFU_INPUT"
+
+    ok "OpenTofu input подготовлен: $OPENTOFU_INPUT"
+}
+
 write_runtime_versions() {
     cat >"$COMPOSE_DIR/.versions.env" <<EOF_VERSIONS
 SEMAPHORE_VERSION=${SEMAPHORE_VERSION}
@@ -311,6 +324,7 @@ main() {
     generate_ca_bundle
     persist_pve_api_secret
     ensure_semaphore_secrets
+    prepare_opentofu_input
     write_runtime_versions
     deploy_semaphore
     wait_semaphore
