@@ -10,11 +10,12 @@ COMPOSE="$ROOT/guests/910-infra-deployer/compose/docker-compose.yml"
 DOCKERFILE="$ROOT/guests/910-infra-deployer/compose/runner/Dockerfile"
 REQ="$ROOT/guests/910-infra-deployer/compose/runner/requirements.txt"
 PLAN="$ROOT/scripts/infra-deployer/opentofu-plan.sh"
+SEMAPHORE_PROJECT="$ROOT/scripts/infra-deployer/semaphore-project.sh"
 
 die() { printf 'ОШИБКА: %s\n' "$*" >&2; exit 1; }
 ok()  { printf '[ОК] %s\n' "$*"; }
 
-for file in "$SETUP" "$STATUS" "$ACCESS" "$LIFECYCLE" "$COMPOSE" "$DOCKERFILE" "$REQ" "$PLAN"; do
+for file in "$SETUP" "$STATUS" "$ACCESS" "$LIFECYCLE" "$COMPOSE" "$DOCKERFILE" "$REQ" "$PLAN" "$SEMAPHORE_PROJECT"; do
     [[ -s "$file" ]] || die "Отсутствует обязательный файл: $file"
 done
 
@@ -65,6 +66,17 @@ if grep -qE 'tofu[[:space:]].*(apply|destroy)' "$PLAN"; then
 fi
 
 grep -q 'tofu -chdir="$OPENTOFU_DIR" plan' "$PLAN"     || die "OpenTofu Plan должен выполнять tofu plan"
+
+grep -q 'OPENTOFU_ENV_NAME="OpenTofu PVE"' "$SEMAPHORE_PROJECT" \
+    || die "Semaphore должен создавать Variable Group OpenTofu PVE"
+grep -q 'TF_VAR_pve_endpoint' "$SEMAPHORE_PROJECT" \
+    || die "Variable Group должен передавать pve_endpoint"
+grep -q 'TF_VAR_pve_api_token' "$SEMAPHORE_PROJECT" \
+    || die "Variable Group должен передавать pve_api_token"
+grep -q 'local name="OpenTofu Plan"' "$SEMAPHORE_PROJECT" \
+    || die "Semaphore должен создавать шаблон OpenTofu Plan"
+grep -q 'scripts/infra-deployer/opentofu-plan.sh' "$SEMAPHORE_PROJECT" \
+    || die "OpenTofu Plan должен запускать отдельный безопасный сценарий"
 
 
 python3 - "$COMPOSE" <<'PY'
