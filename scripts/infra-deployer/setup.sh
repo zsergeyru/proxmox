@@ -19,6 +19,7 @@ PUBLIC_KEY_DIR="${DATA_DIR}/public-keys"
 COMPOSE_DIR="/opt/infra-deployer/compose"
 STATUS_COMMAND="/usr/local/sbin/infra-deployer-status"
 ACCESS_CHECK_COMMAND="/usr/local/sbin/infra-deployer-pve-access-check"
+LIFECYCLE_TEST_COMMAND="/usr/local/sbin/infra-deployer-pve-lifecycle-test"
 
 SERVER_ENV="${SECRET_DIR}/semaphore-server.env"
 RUNNER_ENV="${SECRET_DIR}/semaphore-runner.env"
