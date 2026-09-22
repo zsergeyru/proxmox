@@ -56,6 +56,7 @@ required_file /etc/infra-deployer/secrets/github_project_ed25519
 required_file /etc/infra-deployer/secrets/ansible_ed25519
 required_file /var/lib/infra-deployer/public-keys/ansible_ed25519.pub
 required_file /var/lib/infra-deployer/semaphore/project-id
+required_file /var/lib/infra-deployer/opentofu/guests.json
 required_file "$CA_BUNDLE"
 
 [[ -d /var/lib/infra-deployer/opentofu/state ]] \
