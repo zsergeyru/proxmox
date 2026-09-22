@@ -7,6 +7,7 @@ CA_BUNDLE="/etc/infra-deployer/ca/ca-bundle.crt"
 SEMAPHORE_URL="http://127.0.0.1:3000"
 SEMAPHORE_API_TOKEN_FILE="/etc/infra-deployer/secrets/semaphore-api-token"
 PROJECT_ID_FILE="/var/lib/infra-deployer/semaphore-project-id"
+PROJECT_REPO="git@github.com:zsergeyru/proxmox.git"
 
 C_RESET=""
 C_BOLD=""
@@ -92,6 +93,27 @@ curl -fsS --connect-timeout 2 --max-time 5 http://127.0.0.1:3000/api/ping >/dev/
 
 PROJECT_ID="$(cat "$PROJECT_ID_FILE")"
 [[ "$PROJECT_ID" =~ ^[0-9]+$ ]] || die "Некорректный project-id Semaphore"
+
+SEMAPHORE_KEYS="$(semaphore_api_get "/project/${PROJECT_ID}/keys?sort=name&order=asc")"
+GITHUB_KEY_COUNT="$(jq -r '[.[] | select(.name == "GitHub project read-only")] | length' <<<"$SEMAPHORE_KEYS")"
+[[ "$GITHUB_KEY_COUNT" == "1" ]] \
+    || die "В Semaphore должен существовать ровно один SSH key 'GitHub project read-only'"
+GITHUB_KEY_ID="$(jq -r '.[] | select(.name == "GitHub project read-only") | .id' <<<"$SEMAPHORE_KEYS")"
+jq -e '.[] | select(.name == "GitHub project read-only" and .type == "ssh")' <<<"$SEMAPHORE_KEYS" >/dev/null \
+    || die "Semaphore key 'GitHub project read-only' имеет неверный тип"
+
+SEMAPHORE_REPOSITORIES="$(semaphore_api_get "/project/${PROJECT_ID}/repositories?sort=name&order=asc")"
+PROJECT_REPO_COUNT="$(jq -r '[.[] | select(.name == "proxmox")] | length' <<<"$SEMAPHORE_REPOSITORIES")"
+[[ "$PROJECT_REPO_COUNT" == "1" ]] \
+    || die "В Semaphore должен существовать ровно один Git repository 'proxmox'"
+jq -e --arg url "$PROJECT_REPO" --arg key_id "$GITHUB_KEY_ID" '
+    .[] | select(
+        .name == "proxmox"
+        and .git_url == $url
+        and ((.ssh_key_id // "") | tostring) == $key_id
+    )
+' <<<"$SEMAPHORE_REPOSITORIES" >/dev/null \
+    || die "Git repository 'proxmox' не соответствует ожидаемому URL или SSH key"
 
 semaphore_api_get "/project/${PROJECT_ID}/environment?sort=name&order=asc"     | jq -e '.[] | select(.name == "OpenTofu PVE")' >/dev/null     || die "В Semaphore отсутствует Variable Group OpenTofu PVE"
 
