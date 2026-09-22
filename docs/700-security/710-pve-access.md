@@ -92,7 +92,7 @@ Token не получает отдельные ACL:
 
 ## 7. Создание и хранение token
 
-Token создаёт публичный `bootstrap-pve.sh` локально на PVE от `root`.
+Token создаёт `scripts/infra-deployer/pve-bootstrap-access.sh` из закрытого проекта. Public bootstrap временно копирует этот сценарий из 910 на PVE и выполняет его от `root`.
 
 Secret выдаётся Proxmox только при создании token, поэтому первоначальная передача выполняется сразу:
 
