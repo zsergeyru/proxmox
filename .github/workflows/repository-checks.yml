@@ -63,6 +63,9 @@ jobs:
           # shared globals declared in 00-common.sh are consumed across files.
           shellcheck -S warning -e SC2034 "${files[@]}"
 
+      - name: Run infra-deployer contract checks
+        run: bash scripts/infra-deployer/test-setup-contract.sh
+
       - name: Validate infra-deployer Compose
         run: |
           python - <<'PY'
