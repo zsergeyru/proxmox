@@ -125,7 +125,7 @@ prepare_directories() {
 ensure_base_packages() {
     local missing="" pkg
 
-    for pkg in ca-certificates curl gnupg python3-yaml; do
+    for pkg in ca-certificates curl git gnupg jq openssh-client openssl python3-yaml; do
         dpkg -s "$pkg" >/dev/null 2>&1 || missing="$missing $pkg"
     done
 
@@ -259,12 +259,6 @@ random_base64() {
 }
 
 ensure_semaphore_secrets() {
-    command -v openssl >/dev/null 2>&1 || {
-        run_logged apt-get update
-        run_logged env DEBIAN_FRONTEND=noninteractive \
-            apt-get install -y --no-install-recommends openssl
-    }
-
     if [[ ! -f "$SERVER_ENV" ]]; then
         local admin_password encryption_key runner_registration_token timezone
         admin_password="$(random_base64 24)"
