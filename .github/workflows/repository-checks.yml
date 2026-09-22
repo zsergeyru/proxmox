@@ -93,7 +93,7 @@ jobs:
       - name: Validate OpenTofu configuration
         run: |
           tofu -chdir=opentofu fmt -check
-          tofu -chdir=opentofu init -backend=false
+          tofu -chdir=opentofu init -backend=false -lockfile=readonly
           tofu -chdir=opentofu validate
 
 
