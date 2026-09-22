@@ -2,142 +2,177 @@
 
 **Тип:** эксплуатация  
 **Статус:** проектируется  
-**Назначение:** описать штатный путь от PVE bootstrap до выполнения инфраструктурных заданий из `910 infra-deployer`.
+**Назначение:** описать штатный путь от чистого PVE до выполнения инфраструктурных заданий из `910 infra-deployer`.
 
 ## 1. Общая схема
 
 ```text
 PVE
-→ public bootstrap
+→ минимальный public bootstrap
 → 910 infra-deployer
+→ закрытый проект внутри 910
 → Semaphore
 → Runner
 → OpenTofu / Ansible / Packer
 → обычные VM/LXC
 ```
 
-Сам PVE не содержит постоянную закрытую Git-копию проекта и не является местом выполнения обычных инфраструктурных заданий.
+PVE не содержит постоянную закрытую копию проекта и не выполняет обычные инфраструктурные задания.
 
-## 2. Создание 910
+## 2. Роль публичного bootstrap
 
-`910 infra-deployer` создаётся публичным `zsergeyru/proxmox-bootstrap`.
+Публичный сценарий отвечает только за:
 
-Bootstrap отвечает за объект LXC `910`, его ресурсы и сеть, `protection=1`, PVE API identity, PVE CA, первоначальный GitHub Deploy Key и передачу управления закрытому `scripts/infra-deployer/setup.sh`.
+- создание или проверку LXC 910;
+- запуск 910;
+- передачу PVE CA;
+- ограниченный PVE API token;
+- создание GitHub Deploy Key внутри 910;
+- получение закрытого проекта;
+- запуск внутреннего `setup.sh`;
+- проверку результата.
 
-Сам `910` не входит в собственное OpenTofu state.
+Единственное ручное действие при первом запуске — добавить показанный GitHub Deploy Key в GitHub как read-only.
+
+Публичный сценарий не содержит логики Docker, Semaphore, OpenTofu, Ansible или Packer.
 
 ## 3. Внутренняя подготовка 910
 
-`scripts/infra-deployer/setup.sh` внутри `910`:
+После получения закрытого проекта:
+
+```text
+scripts/infra-deployer/setup.sh
+```
+
+выполняет:
 
 ```text
 проверить Debian 13
-→ установить Docker Engine
-→ создать постоянные каталоги
-→ сохранить bootstrap credentials
-→ запустить Semaphore Server
-→ запустить Semaphore Runner
-→ создать проект Semaphore
-→ создать Key Store
-→ зарегистрировать private Git
-→ установить infra-deployer-status
+→ подготовить постоянные каталоги
+→ сохранить PVE API credential
+→ установить Docker
+→ запустить Semaphore Server и Runner
+→ подготовить OpenTofu input и state
+→ настроить проект Semaphore
+→ установить локальные команды проверки
 → проверить результат
 ```
 
-Повторный запуск должен повторно использовать существующие постоянные данные и секреты.
+Повторный запуск использует существующие постоянные данные и приводит 910 к текущей ревизии проекта.
 
 ## 4. Semaphore
 
-Первая версия использует один проект `Proxmox Infrastructure`.
+Первая версия использует один проект:
 
-В проекте создаются:
+```text
+Proxmox Infrastructure
+```
 
-- GitHub project read-only;
-- PVE API automation;
-- Ansible managed guests;
-- репозиторий `git@github.com:zsergeyru/proxmox.git`;
+В нём автоматически создаются только используемые сейчас объекты:
+
+- SSH credential `GitHub project read-only`;
+- Git repository `git@github.com:zsergeyru/proxmox.git`;
 - Variable Group `OpenTofu PVE`;
 - шаблон `OpenTofu Plan`.
 
-Variable Group передаёт OpenTofu:
+PVE API token не дублируется в Key Store. Он передаётся OpenTofu как секрет Variable Group:
 
 ```text
 TF_VAR_pve_endpoint
 TF_VAR_pve_api_token
 ```
 
-API token передаётся как секретная переменная окружения и не записывается в Git или аргументы командной строки.
+Ansible SSH credential не создаётся заранее. Он появится только вместе с первой реальной Ansible-задачей, которой такой доступ понадобится.
 
-`OpenTofu Plan` запускает отдельный `scripts/infra-deployer/opentofu-plan.sh`. Этот сценарий обновляет итоговый `guests.json` из текущей ревизии Git и выполняет только `tofu init` и `tofu plan`.
-
-До отдельного решения о применении инфраструктуры шаблон `OpenTofu Apply` не создаётся. Контрактный тест запрещает появление `tofu apply` или `tofu destroy` в сценарии `OpenTofu Plan`.
-
-Для управления самим Semaphore создаётся отдельный API token, который хранится внутри `910` и позволяет менять пароль администратора без поломки автоматической настройки.
+Отдельный API token Semaphore используется только внутренней автоматизацией настройки самого Semaphore.
 
 ## 5. Runner
 
-Runner является единственным штатным исполнителем инфраструктурных заданий.
+Runner содержит:
 
-Он содержит Ansible, OpenTofu, Packer, Python, `proxmoxer`, Git и OpenSSH client.
+- OpenTofu;
+- Ansible;
+- Packer;
+- Python и `proxmoxer`;
+- Git;
+- OpenSSH client.
 
-Одновременно разрешается одно инфраструктурное задание, изменяющее основное OpenTofu state.
+Он является штатным исполнителем инфраструктурных заданий.
 
-SSH host key checking включён и не отключается ради автоматизации.
+Одновременно допускается только одно задание, изменяющее основное состояние OpenTofu.
 
-## 6. OpenTofu state
+Проверка SSH host key остаётся включённой.
 
-Основной каталог:
+## 6. OpenTofu
+
+OpenTofu использует HTTPS API PVE и локальное состояние:
 
 ```text
-/var/lib/infra-deployer/opentofu/state/
+/var/lib/infra-deployer/opentofu/state/proxmox.tfstate
 ```
 
-State не хранится в Git, резервируется, не создаётся заново поверх существующей инфраструктуры после потери и не изменяется несколькими заданиями одновременно.
+Состояние:
+
+- не хранится в Git;
+- входит в резервное копирование 910;
+- не должно создаваться пустым поверх уже существующей управляемой инфраструктуры после потери;
+- не изменяется параллельно несколькими заданиями.
+
+`910` не входит в собственное состояние OpenTofu.
 
 ## 7. Проверка
 
-Внутри `910`:
+Основная команда внутри 910:
 
 ```bash
 infra-deployer-status
 ```
 
-Проверяются постоянные секреты и CA, Semaphore Server, Semaphore Runner, Semaphore API, OpenTofu, Packer, Ansible, `proxmoxer` и каталог OpenTofu state.
+Расширенная проверка PVE API:
 
-Публичный bootstrap использует эту же проверку при повторном `--check`.
+```bash
+infra-deployer-status --full
+```
 
-## 8. Граница текущего этапа
-
-Минимальный ACL-контракт для OpenTofu уже зафиксирован и применяется public bootstrap.
-
-Изменяющие права ограничены пулом `managed`; `910` и шаблон `9000` не получают обычные права изменения.
-
-До переноса архитектуры в `main` остаётся выполнить на реальном PVE явный тест полного жизненного цикла временного гостя:
+Реальный тест жизненного цикла:
 
 ```bash
 infra-deployer-pve-lifecycle-test --apply
 ```
 
-Тест использует технический CTID `9098`. Перед началом он обязан убедиться, что VMID свободен; существующий объект никогда не удаляется ради теста.
+Ранее тест уже успешно создал, изменил, запустил, остановил и удалил временный LXC 9098 на реальном PVE. После перехода на новую упрощённую схему token/ACL он выполняется повторно один раз как приёмочная проверка.
 
-Последовательность:
+## 8. Обновление 910
+
+При повторном запуске public bootstrap получает выбранную ветку закрытого проекта.
+
+Если сохранённая ревизия совпадает с текущей, тяжёлая внутренняя настройка не повторяется.
+
+Если ревизия изменилась:
 
 ```text
-создать unprivileged LXC в managed
-→ изменить RAM
-→ запустить
-→ проверить running
-→ остановить
-→ проверить stopped
-→ удалить
-→ подтвердить освобождение VMID
+обновить checkout
+→ повторно запустить setup.sh
+→ сохранить новую ревизию
+→ проверить infra-deployer-status
 ```
 
-Статическая проверка и read-only проверка прав через API не заменяют этот тест, поэтому он не включён в обычный bootstrap или CI.
+Постоянные секреты при обычном обновлении не перевыпускаются.
 
-## 9. Связанные документы
+## 9. Граница первой версии
 
-- [`../200-pve/210-host-bootstrap.md`](../200-pve/210-host-bootstrap.md) — public bootstrap.
-- [`../700-security/710-pve-access.md`](../700-security/710-pve-access.md) — права PVE API.
-- [`../../guests/910-infra-deployer/README.md`](../../guests/910-infra-deployer/README.md) — конкретный гость `910`.
+На текущем этапе автоматизируются только уже используемые возможности.
+
+Не создаются заранее:
+
+- отдельные PVE-пользователи для будущих инструментов;
+- отдельный PVE credential в Semaphore Key Store;
+- Ansible SSH credential без реальной Ansible-задачи;
+- дополнительные роли PVE без подтверждённой необходимости.
+
+## 10. Связанные документы
+
+- [`../200-pve/210-host-bootstrap.md`](../200-pve/210-host-bootstrap.md) — первоначальная подготовка.
+- [`../700-security/710-pve-access.md`](../700-security/710-pve-access.md) — доступ 910 к PVE.
+- [`../../guests/910-infra-deployer/README.md`](../../guests/910-infra-deployer/README.md) — паспорт 910.
 - [`830-recovery.md`](830-recovery.md) — восстановление.
