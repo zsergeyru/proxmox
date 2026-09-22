@@ -1,66 +1,62 @@
 # 910 infra-deployer
 
-`910 infra-deployer` — специальный постоянный LXC, из которого выполняется штатное развёртывание и настройка инфраструктуры проекта.
+`910 infra-deployer` — специальный постоянный LXC, из которого выполняется штатное развёртывание инфраструктуры проекта.
 
-Он создаётся и восстанавливается только публичным `bootstrap-pve.sh` и не входит в собственное OpenTofu state.
+Публичный `bootstrap-pve.sh` создаёт только сам виртуальный объект 910, минимальный доступ к PVE и доступ к закрытому Git. Всё внутреннее программное наполнение 910 принадлежит закрытому проекту.
 
 ## Назначение
 
-Внутри `910` работают:
+Внутри 910 работают:
 
 - Semaphore Server;
 - Semaphore Runner;
 - OpenTofu;
 - Ansible;
 - Packer;
-- Git и вспомогательные средства инфраструктурного контура.
-
-Схема:
+- Git и вспомогательные средства.
 
 ```text
 PVE
-└─ bootstrap-pve.sh
+└─ public bootstrap
    └─ 910 infra-deployer
-      ├─ Semaphore
-      ├─ OpenTofu
-      ├─ Ansible
-      ├─ Packer
-      └─ Git
+      └─ private setup
+         ├─ Semaphore
+         ├─ Runner
+         ├─ OpenTofu
+         ├─ Ansible
+         └─ Packer
 ```
 
 ## Особенность гостя
 
-`910` является исключением из обычного гостевого контура:
+`910` является исключением из обычного контура гостей:
 
-- его виртуальным объектом владеет bootstrap;
-- OpenTofu не создаёт и не изменяет `910`;
-- `910` не входит в обычный пул `managed`;
-- штатное управление PVE выполняется через HTTPS API;
-- постоянный root SSH с `910` на PVE не используется.
+- его виртуальным объектом владеет public bootstrap;
+- OpenTofu не создаёт и не изменяет 910;
+- 910 не входит в pool `managed`;
+- управление PVE выполняется через HTTPS API;
+- постоянный root SSH с 910 на PVE не используется;
+- Docker, Semaphore и инфраструктурные средства устанавливаются уже внутри 910.
 
-Точные параметры создания виртуального объекта принадлежат публичному `zsergeyru/proxmox-bootstrap`, потому что именно он создаёт `910` до появления доступа к закрытому проекту.
+## Состав первой версии
 
-## Состав системы
-
-Базовая Debian-система содержит только необходимую основу: Docker, Docker Compose, Git, SSH, `curl`, CA-сертификаты и средства диагностики.
-
-Для первой версии используются:
+Используются:
 
 ```text
-Semaphore Server v2.18.29
+Semaphore Server v2.18.30
 SQLite
-Semaphore Runner v2.18.29
+Semaphore Runner v2.18.30
 OpenTofu 1.12.6
-Packer 1.16.1
+Packer 1.15.4
+Ansible
+proxmoxer
 ```
 
-Runner собирается поверх официального образа Semaphore. В нём включена строгая проверка SSH host keys, добавлены OpenTofu и Packer, а Python-зависимости инфраструктуры устанавливаются через `requirements.txt`.
-
-После первого запуска автоматически создаётся проект Semaphore `Proxmox Infrastructure`, его Key Store и запись закрытого репозитория `zsergeyru/proxmox`.
+Runner собирается поверх официального образа Semaphore. В нём включена проверка SSH host keys.
 
 ## Постоянные данные
 
-Основные постоянные области:
+Основные области:
 
 ```text
 /etc/infra-deployer/
@@ -73,22 +69,62 @@ Runner собирается поверх официального образа S
 - база Semaphore;
 - ключ шифрования Semaphore;
 - OpenTofu state;
-- постоянные инфраструктурные секреты;
-- локальная конфигурация, которую нельзя восстановить из Git.
+- PVE API credential;
+- GitHub Deploy Key;
+- другие постоянные секреты, которые появятся у реально используемых функций.
 
-Git-копии, кэш заданий, пакеты и образы контейнеров должны быть воспроизводимыми и не считаются критичными данными.
+Git checkout, кэш заданий, пакеты и образы контейнеров считаются воспроизводимыми.
 
-## Доступы
+## PVE API
 
-Для Proxmox используется отдельная идентичность:
+Используется:
 
 ```text
-infra-deployer@pve!automation
+root@pam!infra-deployer
 ```
 
-Её права определяются общей моделью доступа Proxmox и ограничены обычными гостями в пуле `managed`.
+Это ограниченный token с `privsep=1`.
 
-Внутри `910` доступны проверки:
+Отдельный пользователь `infra-deployer@pve` и собственная роль `InfraManagedGuest` больше не используются.
+
+Изменяющие права на обычные VM/LXC ограничены pool `managed`. Сам 910 находится вне него.
+
+Постоянный credential хранится:
+
+```text
+/etc/infra-deployer/secrets/pve-api.env
+```
+
+OpenTofu получает его через секрет Variable Group `OpenTofu PVE`. Отдельная копия PVE credential в Semaphore Key Store не создаётся.
+
+## GitHub
+
+GitHub Deploy Key создаётся внутри 910 и используется только для чтения:
+
+```text
+git@github.com:zsergeyru/proxmox.git
+```
+
+Private key не хранится на PVE.
+
+При первом запуске public bootstrap показывает открытый ключ. Его добавление в GitHub — единственное обязательное ручное действие первоначальной установки.
+
+## Semaphore
+
+Автоматически создаются только объекты, которые реально используются первой версией:
+
+- `GitHub project read-only`;
+- репозиторий `proxmox`;
+- Variable Group `OpenTofu PVE`;
+- `OpenTofu Plan`.
+
+PVE API credential в Key Store и Ansible SSH credential заранее не создаются.
+
+Ansible credential будет добавлен вместе с первой реальной Ansible-задачей, когда станет понятен её точный доступ.
+
+## Локальные команды
+
+После настройки доступны:
 
 ```bash
 infra-deployer-status
@@ -97,26 +133,13 @@ infra-deployer-pve-access-check
 infra-deployer-pve-lifecycle-test --apply
 ```
 
-`infra-deployer-status` проверяет сам `910`, Semaphore, Runner, OpenTofu, Packer, Ansible и базовую авторизацию PVE API.
+`infra-deployer-status` проверяет сам 910, Semaphore, Runner, инструменты и базовую авторизацию PVE API.
 
-`infra-deployer-status --full` дополнительно требует полного соответствия окончательному контракту PVE-прав.
+`--full` дополнительно запускает проверку фактических PVE-прав.
 
-`infra-deployer-pve-access-check` проверяет фактические effective permissions через PVE API без изменения состояния.
+Тест жизненного цикла создаёт временный LXC 9098 в `managed`, изменяет его, запускает, останавливает и удаляет.
 
-`infra-deployer-pve-lifecycle-test --apply` — явный интеграционный тест. Он создаёт временный LXC `9098` в `managed`, меняет его, запускает, останавливает и удаляет. Эта команда не запускается автоматически.
-
-GitHub Deploy Key создаётся внутри `910` и используется только для чтения `zsergeyru/proxmox`.
-
-Ansible использует отдельную техническую SSH-идентичность для управляемых Linux-гостей.
-
-Постоянные секреты не хранятся в Git.
-
-В `/etc/infra-deployer/secrets/` находятся защищённые восстановительные копии bootstrap credentials. Рабочие Git, PVE API и Ansible SSH credentials также создаются в зашифрованном Semaphore Key Store.
-
-
-## Первый реальный запуск
-
-До слияния веток в `main` обе стороны запускаются из `infra-iac-redesign`.
+## Первый запуск
 
 На PVE:
 
@@ -124,55 +147,51 @@ Ansible использует отдельную техническую SSH-ид�
 curl -fsSL https://raw.githubusercontent.com/zsergeyru/proxmox-bootstrap/infra-iac-redesign/bootstrap-pve.sh | bash
 ```
 
-Во время первого запуска bootstrap покажет открытый GitHub Deploy Key. Его нужно добавить в `zsergeyru/proxmox` как read-only Deploy Key и продолжить запуск.
+Если GitHub Deploy Key ещё не зарегистрирован, bootstrap показывает public key и ждёт его добавления в GitHub.
 
-После успешного создания `910`:
-
-```bash
-pct exec 910 -- infra-deployer-status
-```
-
-Перед первым реальным использованием OpenTofu необходимо один раз выполнить явный тест жизненного цикла:
-
-```bash
-pct exec 910 -- infra-deployer-pve-lifecycle-test --apply
-```
-
-Если этот тест завершится ошибкой прав, сначала корректируется минимальная роль Proxmox. Расширять права заранее без такого теста не требуется.
+После этого весь оставшийся процесс выполняется автоматически.
 
 ## OpenTofu state
 
-Для первой версии состояние хранится локально:
+Первая версия хранит состояние локально:
 
 ```text
 /var/lib/infra-deployer/opentofu/state/proxmox.tfstate
 ```
 
-Оно считается чувствительным, резервируется и не должно одновременно изменяться несколькими заданиями.
+State не хранится в Git и обязательно резервируется.
 
-Сам `910` в этом state отсутствует.
+Потеря state не должна приводить к автоматическому `apply` с новым пустым состоянием поверх существующей инфраструктуры.
+
+## Обновление
+
+При новой ревизии закрытого проекта public bootstrap повторно запускает внутренний `setup.sh`.
+
+Настройка должна быть повторяемой:
+
+- постоянные данные сохраняются;
+- существующие секреты повторно используются;
+- устаревшие элементы прошлой схемы удаляются;
+- текущие объекты Semaphore синхронизируются;
+- результат проверяется.
 
 ## Восстановление
 
-Потерянный `910` восстанавливается через:
+Если потерян API secret, используется явный режим:
 
-```text
+```bash
 bootstrap-pve.sh --recover
 ```
 
-После создания контейнера восстанавливаются постоянные данные и проверяется OpenTofu state.
-
-Если state потерян, нельзя начинать обычный `tofu apply` с пустым состоянием поверх существующей инфраструктуры. Сначала выполняется восстановление state или осознанный импорт объектов.
+Восстановление постоянных данных 910 описывается отдельно. Пустое OpenTofu state поверх существующей инфраструктуры автоматически не применяется.
 
 ## Границы
 
-`910` не используется для пользовательских приложений, Home Assistant, MQTT, Zigbee2MQTT, ESPHome, AI-сервисов, Frigate, обычной разработки или общего файлового хранилища.
+910 не используется для Home Assistant, MQTT, Zigbee2MQTT, ESPHome, Frigate, пользовательских приложений или общего файлового хранилища.
 
 ## Связанные документы
 
-- [`../../docs/200-pve/210-host-bootstrap.md`](../../docs/200-pve/210-host-bootstrap.md) — создание и восстановление `910`.
-- [`../../docs/700-security/710-pve-access.md`](../../docs/700-security/710-pve-access.md) — права Proxmox.
-- [`../../docs/700-security/720-ssh-access.md`](../../docs/700-security/720-ssh-access.md) — SSH-доступ.
-- [`../../docs/800-operations/830-recovery.md`](../../docs/800-operations/830-recovery.md) — общие правила восстановления.
-- [`decisions.md`](decisions.md) — принятые решения по этому гостю.
-- `zsergeyru/proxmox-bootstrap/bootstrap-pve.sh` — машинный контракт создания `910`.
+- [`../../docs/200-pve/210-host-bootstrap.md`](../../docs/200-pve/210-host-bootstrap.md) — первоначальная подготовка.
+- [`../../docs/700-security/710-pve-access.md`](../../docs/700-security/710-pve-access.md) — PVE API-доступ.
+- [`../../docs/800-operations/810-deployment.md`](../../docs/800-operations/810-deployment.md) — процесс развёртывания.
+- [`decisions.md`](decisions.md) — устойчивые решения 910.
