@@ -180,7 +180,6 @@ ensure_semaphore_secrets() {
         cat >"$SERVER_ENV" <<EOF_SERVER
 SEMAPHORE_DB_DIALECT=sqlite
 SEMAPHORE_DB_HOST=/var/lib/semaphore/semaphore.sqlite
-SEMAPHORE_DB=/var/lib/semaphore/semaphore.sqlite
 SEMAPHORE_ADMIN=admin
 SEMAPHORE_ADMIN_PASSWORD=${admin_password}
 SEMAPHORE_ADMIN_NAME=Admin
