@@ -1,0 +1,30 @@
+services:
+  semaphore:
+    image: semaphoreui/semaphore:${SEMAPHORE_VERSION}
+    container_name: infra-deployer-semaphore
+    restart: unless-stopped
+    env_file:
+      - /etc/infra-deployer/secrets/semaphore-server.env
+    ports:
+      - "3000:3000"
+    volumes:
+      - /var/lib/infra-deployer/semaphore:/var/lib/semaphore
+
+  runner:
+    build:
+      context: ./runner
+      args:
+        SEMAPHORE_VERSION: ${SEMAPHORE_VERSION}
+        OPENTOFU_VERSION: ${OPENTOFU_VERSION}
+        PACKER_VERSION: ${PACKER_VERSION}
+    image: infra-deployer-runner:${SEMAPHORE_VERSION}
+    container_name: infra-deployer-runner
+    restart: unless-stopped
+    depends_on:
+      - semaphore
+    env_file:
+      - /etc/infra-deployer/secrets/semaphore-runner.env
+    volumes:
+      - /var/lib/infra-deployer/runner:/var/lib/semaphore
+      - /var/lib/infra-deployer/runner/tmp:/tmp/semaphore
+      - /etc/infra-deployer/ca:/etc/infra-deployer/ca:ro
