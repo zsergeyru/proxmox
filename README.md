@@ -6,16 +6,23 @@
 
 ## Быстрый старт
 
-Первоначальный запуск выполняется на физическом PVE от `root` напрямую из публичного репозитория:
+Обычная установка или повторное применение без параметров выполняется на физическом PVE от `root` сразу из публичного репозитория:
 
 ~~~bash
 curl -fsSL https://raw.githubusercontent.com/zsergeyru/proxmox-bootstrap/infra-iac-redesign/bootstrap-pve.sh | bash
 ~~~
 
+Если нужны параметры, сценарий сначала скачивается:
+
+~~~bash
+curl -fsSL https://raw.githubusercontent.com/zsergeyru/proxmox-bootstrap/infra-iac-redesign/bootstrap-pve.sh -o bootstrap-pve.sh
+chmod +x bootstrap-pve.sh
+~~~
+
 Справка:
 
 ~~~bash
-curl -fsSL https://raw.githubusercontent.com/zsergeyru/proxmox-bootstrap/infra-iac-redesign/bootstrap-pve.sh | bash -s -- --help
+./bootstrap-pve.sh --help
 ~~~
 
 Публичный репозиторий:
@@ -246,40 +253,55 @@ infra-deployer-pve-lifecycle-test --apply
 
 ## Команды публичного bootstrap
 
-Обычная установка или повторное применение:
+Без параметров можно запускать сразу из GitHub:
 
 ~~~bash
 curl -fsSL https://raw.githubusercontent.com/zsergeyru/proxmox-bootstrap/infra-iac-redesign/bootstrap-pve.sh | bash
 ~~~
 
+Для остальных режимов используется скачанный `bootstrap-pve.sh`.
+
+Скачать:
+
+~~~bash
+curl -fsSL https://raw.githubusercontent.com/zsergeyru/proxmox-bootstrap/infra-iac-redesign/bootstrap-pve.sh -o bootstrap-pve.sh
+chmod +x bootstrap-pve.sh
+~~~
+
+Справка:
+
+~~~bash
+./bootstrap-pve.sh --help
+~~~
+
 Только проверка:
 
 ~~~bash
-curl -fsSL https://raw.githubusercontent.com/zsergeyru/proxmox-bootstrap/infra-iac-redesign/bootstrap-pve.sh | bash -s -- --check
+./bootstrap-pve.sh --check
 ~~~
 
 Восстановление потерянного PVE API token:
 
 ~~~bash
-curl -fsSL https://raw.githubusercontent.com/zsergeyru/proxmox-bootstrap/infra-iac-redesign/bootstrap-pve.sh | bash -s -- --recover
+./bootstrap-pve.sh --recover
 ~~~
 
 Мягкое удаление:
 
 ~~~bash
-curl -fsSL https://raw.githubusercontent.com/zsergeyru/proxmox-bootstrap/infra-iac-redesign/bootstrap-pve.sh | bash -s -- --remove
+./bootstrap-pve.sh --remove
 ~~~
 
 Полное удаление:
 
 ~~~bash
-curl -fsSL https://raw.githubusercontent.com/zsergeyru/proxmox-bootstrap/infra-iac-redesign/bootstrap-pve.sh | bash -s -- --purge
+./bootstrap-pve.sh --purge
 ~~~
 
 Статический адрес 910:
 
 ~~~bash
-curl -fsSL https://raw.githubusercontent.com/zsergeyru/proxmox-bootstrap/infra-iac-redesign/bootstrap-pve.sh | bash -s -- \
+./bootstrap-pve.sh \
   --ip 192.168.1.90/24 \
   --gateway 192.168.1.1
 ~~~
@@ -287,7 +309,7 @@ curl -fsSL https://raw.githubusercontent.com/zsergeyru/proxmox-bootstrap/infra-i
 Другая ветка закрытого проекта:
 
 ~~~bash
-curl -fsSL https://raw.githubusercontent.com/zsergeyru/proxmox-bootstrap/infra-iac-redesign/bootstrap-pve.sh | bash -s -- --project-branch NAME
+./bootstrap-pve.sh --project-branch NAME
 ~~~
 
 ## Мягкое и полное удаление
