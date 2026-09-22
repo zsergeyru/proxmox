@@ -26,11 +26,11 @@ assert guests["109"]["network"]["ipv4"] == "192.168.1.9/16"
 
 # AI Control разворачивается как обычная VM, но не должен попадать
 # в собственную область управления managed.
-assert "301" in guests
-assert guests["301"]["name"] == "ai-control"
-assert guests["301"]["type"] == "vm"
-assert guests["301"]["pve_management"] is False
-assert guests["301"]["bootstrap"] == ["git"]
+assert "410" in guests
+assert guests["410"]["name"] == "ai-control"
+assert guests["410"]["type"] == "vm"
+assert guests["410"]["pve_management"] is False
+assert guests["410"]["bootstrap"] == ["git"]
 
 # Описательный объект без profile не участвует в универсальном развёртывании.
 assert "201" not in guests
