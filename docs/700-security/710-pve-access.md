@@ -145,7 +145,17 @@ AI не получает право:
 
 Secret токена `infra-deployer@pve!automation` не хранится в Git и не хранится постоянно на PVE.
 
-После первого создания bootstrap передаёт его в `910`, где он хранится в Semaphore Key Store.
+После первого создания bootstrap передаёт secret в `910` через временный root-only файл.
+
+Внутренняя настройка `910`:
+
+```text
+временный secret bootstrap
+→ /etc/infra-deployer/secrets/pve-api.env
+→ Semaphore Key Store проекта Proxmox Infrastructure
+```
+
+Файл в `/etc/infra-deployer/secrets/` остаётся защищённой восстановительной копией внутри самого `910`; рабочий проект Semaphore также хранит credential в зашифрованном Key Store. На PVE постоянной копии secret нет.
 
 ## 9. Связанные документы
 
