@@ -71,6 +71,18 @@ jobs:
       - name: Run infra-deployer contract checks
         run: bash scripts/infra-deployer/test-setup-contract.sh
 
+      - name: Set up OpenTofu
+        uses: opentofu/setup-opentofu@v1
+        with:
+          tofu_version: "1.12.6"
+
+      - name: Validate OpenTofu configuration
+        run: |
+          tofu -chdir=opentofu fmt -check
+          tofu -chdir=opentofu init -backend=false
+          tofu -chdir=opentofu validate
+
+
       - name: Validate infra-deployer Compose
         run: |
           python - <<'PY'
