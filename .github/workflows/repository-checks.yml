@@ -68,6 +68,20 @@ jobs:
           # shared globals declared in 00-common.sh are consumed across files.
           shellcheck -S warning -e SC2034 "${files[@]}"
 
+      - name: Check PVE bootstrap helper host dependencies
+        run: |
+          helper=scripts/infra-deployer/pve-bootstrap-access.sh
+          grep -q 'command -v perl' "$helper"
+          grep -q 'MJSON::PP' "$helper"
+          if grep -Eq 'command -v jq|(^|[[:space:]|;])jq([[:space:]]|$)' "$helper"; then
+            echo "PVE bootstrap helper must not depend on jq on the host"
+            exit 1
+          fi
+          if grep -Eq 'apt(-get)?[[:space:]]+install' "$helper"; then
+            echo "PVE bootstrap helper must not install packages on the host"
+            exit 1
+          fi
+
       - name: Run infra-deployer contract checks
         run: bash scripts/infra-deployer/test-setup-contract.sh
 
