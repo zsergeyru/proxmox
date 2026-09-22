@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+# Минимальный Debian в LXC может наследовать locale хоста, которого нет внутри 910.
+# C.UTF-8 доступен штатно и не требует установки пакета locales.
+export LANG=C.UTF-8
+export LC_ALL=C.UTF-8
+
 # Первоначальная и повторяемая настройка 910 infra-deployer.
 # Скрипт запускается внутри LXC 910 от root единым bootstrap через pct exec.
 
@@ -139,7 +144,7 @@ ensure_base_packages() {
 
 install_docker() {
     if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
-        systemctl enable --now docker >/dev/null
+        run_logged systemctl enable --now docker
         ok "Docker Engine и Compose уже доступны"
         return
     fi
