@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
+shopt -s inherit_errexit
 
 SEMAPHORE_URL="http://127.0.0.1:3000"
 PROJECT_NAME="Proxmox Infrastructure"
@@ -202,6 +203,13 @@ ensure_pve_key() {
         id="$(jq -r '.id // empty' <<<"$response")"
         [[ -n "$id" ]] || die "Не удалось создать PVE API key в Semaphore"
     elif [[ "$RECOVER" == "1" ]]; then
+        payload="$(jq -n \
+            --argjson id "$id" \
+            --arg name "$name" \
+            --arg login "$token_id" \
+            --arg password "$token_secret" \
+            --argjson project_id "$project_id" \
+            '{id:$id,name:$name,type:"login_password",project_id:$project_id,override_secret:true,login_password:{login:$login,password:$password}}')"
         api PUT "/project/${project_id}/keys/${id}" -d "$payload" >/dev/null
     fi
 
@@ -242,18 +250,25 @@ ensure_repository() {
     repos="$(api GET "/project/${project_id}/repositories?sort=name&order=asc")"
     id="$(jq -r '.[] | select(.name == "proxmox") | .id' <<<"$repos" | head -n1)"
 
-    payload="$(jq -n \
-        --arg name proxmox \
-        --arg git_url "$PROJECT_REPO" \
-        --arg git_branch "$PROJECT_BRANCH" \
-        --argjson project_id "$project_id" \
-        --argjson ssh_key_id "$ssh_key_id" \
-        '{name:$name,project_id:$project_id,git_url:$git_url,git_branch:$git_branch,ssh_key_id:$ssh_key_id}')"
-
     if [[ -z "$id" ]]; then
+        payload="$(jq -n \
+            --arg name proxmox \
+            --arg git_url "$PROJECT_REPO" \
+            --arg git_branch "$PROJECT_BRANCH" \
+            --argjson project_id "$project_id" \
+            --argjson ssh_key_id "$ssh_key_id" \
+            '{name:$name,project_id:$project_id,git_url:$git_url,git_branch:$git_branch,ssh_key_id:$ssh_key_id}')"
         response="$(api POST "/project/${project_id}/repositories" -d "$payload")"
         id="$(jq -r '.id // empty' <<<"$response")"
     else
+        payload="$(jq -n \
+            --argjson id "$id" \
+            --arg name proxmox \
+            --arg git_url "$PROJECT_REPO" \
+            --arg git_branch "$PROJECT_BRANCH" \
+            --argjson project_id "$project_id" \
+            --argjson ssh_key_id "$ssh_key_id" \
+            '{id:$id,name:$name,project_id:$project_id,git_url:$git_url,git_branch:$git_branch,ssh_key_id:$ssh_key_id}')"
         api PUT "/project/${project_id}/repositories/${id}" -d "$payload" >/dev/null
     fi
 
@@ -357,24 +372,37 @@ ensure_opentofu_plan_template() {
     templates="$(api GET "/project/${project_id}/templates?sort=name&order=asc")"
     id="$(jq -r --arg name "$name"         '.[] | select(.name == $name) | .id' <<<"$templates" | head -n1)"
 
-    payload="$(jq -cn         --arg name "$name"         --arg playbook "scripts/infra-deployer/opentofu-plan.sh"         --arg branch "$PROJECT_BRANCH"         --argjson project_id "$project_id"         --argjson repository_id "$repository_id"         --argjson environment_id "$environment_id"         '{
-            name:$name,
-            project_id:$project_id,
-            repository_id:$repository_id,
-            environment_ids:[$environment_id],
-            playbook:$playbook,
-            app:"bash",
-            type:"",
-            git_branch:$branch,
-            arguments:"[]",
-            allow_override_args_in_task:false,
-            allow_override_branch_in_task:false
-        }')"
-
     if [[ -z "$id" ]]; then
+        payload="$(jq -cn         --arg name "$name"         --arg playbook "scripts/infra-deployer/opentofu-plan.sh"         --arg branch "$PROJECT_BRANCH"         --argjson project_id "$project_id"         --argjson repository_id "$repository_id"         --argjson environment_id "$environment_id"         '{
+                name:$name,
+                project_id:$project_id,
+                repository_id:$repository_id,
+                environment_ids:[$environment_id],
+                playbook:$playbook,
+                app:"bash",
+                type:"",
+                git_branch:$branch,
+                arguments:"[]",
+                allow_override_args_in_task:false,
+                allow_override_branch_in_task:false
+            }')"
         response="$(api POST "/project/${project_id}/templates" -d "$payload")"
         id="$(jq -r '.id // empty' <<<"$response")"
     else
+        payload="$(jq -cn         --argjson id "$id"         --arg name "$name"         --arg playbook "scripts/infra-deployer/opentofu-plan.sh"         --arg branch "$PROJECT_BRANCH"         --argjson project_id "$project_id"         --argjson repository_id "$repository_id"         --argjson environment_id "$environment_id"         '{
+                id:$id,
+                name:$name,
+                project_id:$project_id,
+                repository_id:$repository_id,
+                environment_ids:[$environment_id],
+                playbook:$playbook,
+                app:"bash",
+                type:"",
+                git_branch:$branch,
+                arguments:"[]",
+                allow_override_args_in_task:false,
+                allow_override_branch_in_task:false
+            }')"
         api PUT "/project/${project_id}/templates/${id}" -d "$payload" >/dev/null
     fi
 
