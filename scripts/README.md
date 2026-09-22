@@ -34,6 +34,7 @@ scripts/
 scripts/infra-deployer/
 ├── setup.sh
 ├── semaphore-project.sh
+├── check-pve-access.sh
 └── status.sh
 ```
 
@@ -41,13 +42,21 @@ scripts/infra-deployer/
 
 `semaphore-project.sh` через Semaphore API создаёт проект `Proxmox Infrastructure`, Key Store и запись закрытого Git-репозитория. Повторный запуск использует отдельный Semaphore API token, поэтому не зависит от сохранения первоначального пароля администратора.
 
-`status.sh` является локальной проверкой готовности `910` и устанавливается как:
+`check-pve-access.sh` без изменения состояния проверяет фактические права `infra-deployer@pve!automation` через HTTPS API, включая запрет изменений `910`.
+
+`status.sh` является общей локальной проверкой готовности `910` и устанавливается как:
 
 ```text
 /usr/local/sbin/infra-deployer-status
 ```
 
-Публичный bootstrap использует эту команду при итоговой и повторной проверке `910`.
+Дополнительно устанавливается:
+
+```text
+/usr/local/sbin/infra-deployer-pve-access-check
+```
+
+Публичный bootstrap использует `infra-deployer-status` при итоговой и повторной проверке `910`; внутренняя status-проверка вызывает проверку PVE ACL.
 
 ## `guest_config.py`
 
