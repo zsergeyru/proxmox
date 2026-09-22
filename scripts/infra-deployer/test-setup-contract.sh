@@ -43,6 +43,13 @@ grep -q 'SEMAPHORE_DB_HOST=/var/lib/semaphore/semaphore.sqlite' "$SETUP" \
 grep -q 'install -d -o 1001 -g 0' "$SETUP" \
     || die "Постоянные каталоги Semaphore/Runner должны быть доступны uid 1001"
 
+grep -q '^repair_semaphore_storage() {' "$SETUP" \
+    || die "setup.sh обязан проверять права постоянного хранилища Semaphore через Docker"
+grep -q -- '--user 1001:0' "$SETUP" \
+    || die "Проверка хранилища Semaphore должна выполняться от штатного uid 1001"
+grep -q 'repair_semaphore_storage' "$SETUP" \
+    || die "Восстановление прав SQLite должно вызываться при запуске Semaphore"
+
 grep -q '/etc/semaphore/requirements.txt' "$DOCKERFILE" \
     || die "Runner Dockerfile должен передавать Python requirements Semaphore runner"
 grep -q '^proxmoxer' "$REQ" \
