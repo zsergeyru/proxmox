@@ -1,0 +1,21 @@
+schema_version: 10
+vmid: 410
+name: ai-control
+profile: debian-vm
+
+description: Центральная VM рабочей среды AI-агентов
+
+# AI Control не должен входить в собственную область управления managed.
+pve_management: false
+
+management:
+  - ssh_identity
+  - project_repo_read
+
+bootstrap:
+  - git
+
+resources:
+  cores: 2
+  memory_mb: 4096
+  disk_size_gb: 24
