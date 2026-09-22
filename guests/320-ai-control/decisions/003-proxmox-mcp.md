@@ -5,7 +5,7 @@
 **Актуально.**
 
 - `320-ai-control`: уже переведён на **Proximo** (`proximo-proxmox`).
-- `301-ai-control`: целевой канонический MCP — **Proximo** (`proximo-proxmox`).
+- `410-ai-control`: целевой канонический MCP — **Proximo** (`proximo-proxmox`).
 
 Таким образом, для текущего bootstrap control plane и будущего основного control plane используется один и тот же Proximo MCP.
 
@@ -25,15 +25,15 @@
 
 ## Каноническое решение
 
-Для `320-ai-control` и `301-ai-control` используется:
+Для `320-ai-control` и `410-ai-control` используется:
 
 ```text
 Proximo / proximo-proxmox
 ```
 
-Для целевого `301` установка выполняется zero-day bootstrap-скриптом из публичного `zsergeyru/proxmox-bootstrap`.
+Для целевого `410` установка выполняется zero-day bootstrap-скриптом из публичного `zsergeyru/proxmox-bootstrap`.
 
-Целевая локальная схема `301`:
+Целевая локальная схема `410`:
 
 ```text
 Hermes
@@ -45,7 +45,7 @@ Proximo
 PVE
 ```
 
-Отдельный HTTP MCP daemon для одного локального Hermes в `301` не нужен. Если позже появится реальная необходимость в общем сетевом MCP для нескольких клиентов, это оформляется отдельным решением.
+Отдельный HTTP MCP daemon для одного локального Hermes в `410` не нужен. Если позже появится реальная необходимость в общем сетевом MCP для нескольких клиентов, это оформляется отдельным решением.
 
 ## Management identity
 
@@ -62,8 +62,8 @@ Token secret:
 
 - создаётся локально на PVE;
 - показывается Proxmox только при создании;
-- напрямую передаётся в `301` через QEMU Guest Agent;
-- хранится внутри `301` в `/etc/ai-control/secrets/proximo-pve-token`;
+- напрямую передаётся в `410` через QEMU Guest Agent;
+- хранится внутри `410` в `/etc/ai-control/secrets/proximo-pve-token`;
 - не записывается в Git;
 - не хранится отдельным plaintext-файлом на PVE;
 - при утрате требует явной ротации.
@@ -96,7 +96,7 @@ AI control должен уметь:
 
 Template `9000` остаётся защищённым и не должен быть доступен на изменение/удаление.
 
-`301-ai-control` не входит в обычную self-managed write-зону: control plane не должен случайно удалить или остановить самого себя. Для `320` действует тот же принцип до его вывода из эксплуатации.
+`410-ai-control` не входит в обычную self-managed write-зону: control plane не должен случайно удалить или остановить самого себя. Для `320` действует тот же принцип до его вывода из эксплуатации.
 
 ## Запрещённая зона
 
@@ -129,7 +129,7 @@ proximo doctor
 
 Нужно убедиться, что ожидаемые guest capabilities находятся в `can`, а host/IAM опасные действия остаются в `cannot`.
 
-Для `301` результат сохраняется в `/opt/ai-control/state/proximo-doctor.json`.
+Для `410` результат сохраняется в `/opt/ai-control/state/proximo-doctor.json`.
 
 Live-test целевой цепочки:
 
@@ -140,7 +140,7 @@ Hermes + Proximo
 → Cloud-Init ops + ai_control_ed25519.pub
 → first start
 → QEMU Agent
-→ SSH ops из 301
+→ SSH ops из 410
 ```
 
 ## Разделение функций
@@ -160,4 +160,4 @@ Proximo не заменяет Ansible как штатный повторяемы
 
 ## Главный принцип
 
-> Proximo (`proximo-proxmox`) — единственный канонический Proxmox MCP для `320-ai-control` и `301-ai-control`; реальная граница его власти задаётся privilege-separated Proxmox token и ACL, а не возможностями самого MCP.
+> Proximo (`proximo-proxmox`) — единственный канонический Proxmox MCP для `320-ai-control` и `410-ai-control`; реальная граница его власти задаётся privilege-separated Proxmox token и ACL, а не возможностями самого MCP.
