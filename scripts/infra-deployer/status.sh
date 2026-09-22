@@ -1,18 +1,54 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+FULL=0
+PVE_ENV="/etc/infra-deployer/secrets/pve-api.env"
+CA_BUNDLE="/etc/infra-deployer/ca/ca-bundle.crt"
+
 die() { printf 'ОШИБКА: %s\n' "$*" >&2; exit 1; }
 ok()  { printf '[ОК] %s\n' "$*"; }
+
+usage() {
+    cat <<'USAGE'
+Использование:
+  infra-deployer-status
+  infra-deployer-status --full
+
+Без параметров проверяется готовность самого 910 и базовая авторизация PVE API.
+--full дополнительно проверяет окончательный контракт прав OpenTofu.
+USAGE
+}
+
+if (($#)); then
+    case "$1" in
+        --full)
+            [[ $# -eq 1 ]] || { usage >&2; exit 2; }
+            FULL=1
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        *)
+            usage >&2
+            exit 2
+            ;;
+    esac
+fi
 
 required_file() {
     [[ -s "$1" ]] || die "Отсутствует обязательный файл: $1"
 }
 
+read_env_value() {
+    local key=$1
+    sed -n "s/^${key}=//p" "$PVE_ENV" | head -n1
+}
+
 command -v docker >/dev/null 2>&1 || die "Docker не установлен"
 docker compose version >/dev/null 2>&1 || die "Docker Compose недоступен"
-[[ -x /usr/local/sbin/infra-deployer-pve-access-check ]]     || die "Отсутствует infra-deployer-pve-access-check"
 
-required_file /etc/infra-deployer/secrets/pve-api.env
+required_file "$PVE_ENV"
 required_file /etc/infra-deployer/secrets/semaphore-server.env
 required_file /etc/infra-deployer/secrets/semaphore-runner.env
 required_file /etc/infra-deployer/secrets/semaphore-api-token
@@ -20,20 +56,50 @@ required_file /etc/infra-deployer/secrets/github_project_ed25519
 required_file /etc/infra-deployer/secrets/ansible_ed25519
 required_file /var/lib/infra-deployer/public-keys/ansible_ed25519.pub
 required_file /var/lib/infra-deployer/semaphore/project-id
-required_file /etc/infra-deployer/ca/ca-bundle.crt
+required_file "$CA_BUNDLE"
 
-[[ -d /var/lib/infra-deployer/opentofu/state ]]     || die "Отсутствует каталог OpenTofu state"
+[[ -d /var/lib/infra-deployer/opentofu/state ]] \
+    || die "Отсутствует каталог OpenTofu state"
 
-[[ "$(docker inspect -f '{{.State.Running}}' infra-deployer-semaphore 2>/dev/null || true)" == "true" ]]     || die "Semaphore Server не запущен"
-[[ "$(docker inspect -f '{{.State.Running}}' infra-deployer-runner 2>/dev/null || true)" == "true" ]]     || die "Semaphore Runner не запущен"
+[[ "$(docker inspect -f '{{.State.Running}}' infra-deployer-semaphore 2>/dev/null || true)" == "true" ]] \
+    || die "Semaphore Server не запущен"
+[[ "$(docker inspect -f '{{.State.Running}}' infra-deployer-runner 2>/dev/null || true)" == "true" ]] \
+    || die "Semaphore Runner не запущен"
 
-curl -fsS --connect-timeout 2 --max-time 5 http://127.0.0.1:3000/api/ping >/dev/null     || die "Semaphore API не отвечает"
+curl -fsS --connect-timeout 2 --max-time 5 http://127.0.0.1:3000/api/ping >/dev/null \
+    || die "Semaphore API не отвечает"
 
-docker exec infra-deployer-runner tofu version >/dev/null     || die "OpenTofu недоступен"
-docker exec infra-deployer-runner packer version >/dev/null     || die "Packer недоступен"
-docker exec infra-deployer-runner ansible --version >/dev/null     || die "Ansible недоступен"
-docker exec infra-deployer-runner python3 -c 'import proxmoxer' >/dev/null     || die "proxmoxer недоступен"
+docker exec infra-deployer-runner tofu version >/dev/null \
+    || die "OpenTofu недоступен"
+docker exec infra-deployer-runner packer version >/dev/null \
+    || die "Packer недоступен"
+docker exec infra-deployer-runner ansible --version >/dev/null \
+    || die "Ansible недоступен"
+docker exec infra-deployer-runner python3 -c 'import proxmoxer' >/dev/null \
+    || die "proxmoxer недоступен"
 
-/usr/local/sbin/infra-deployer-pve-access-check >/dev/null     || die "PVE API access не соответствует контракту"
+PVE_API_URL="$(read_env_value PVE_API_URL)"
+PVE_API_TOKEN_ID="$(read_env_value PVE_API_TOKEN_ID)"
+PVE_API_TOKEN_SECRET="$(read_env_value PVE_API_TOKEN_SECRET)"
+[[ -n "$PVE_API_URL" && -n "$PVE_API_TOKEN_ID" && -n "$PVE_API_TOKEN_SECRET" ]] \
+    || die "PVE credential неполон"
 
-ok "infra-deployer готов"
+curl -fsS \
+    --connect-timeout 5 \
+    --max-time 20 \
+    --cacert "$CA_BUNDLE" \
+    -H "Authorization: PVEAPIToken=${PVE_API_TOKEN_ID}=${PVE_API_TOKEN_SECRET}" \
+    "${PVE_API_URL}/api2/json/version" >/dev/null \
+    || die "PVE API credential не проходит базовую авторизацию"
+
+unset PVE_API_TOKEN_SECRET
+
+if ((FULL == 1)); then
+    [[ -x /usr/local/sbin/infra-deployer-pve-access-check ]] \
+        || die "Отсутствует infra-deployer-pve-access-check"
+    /usr/local/sbin/infra-deployer-pve-access-check >/dev/null \
+        || die "PVE API access не соответствует полному контракту"
+    ok "infra-deployer готов, полный контракт PVE API подтверждён"
+else
+    ok "infra-deployer готов к следующему этапу настройки прав PVE API"
+fi
