@@ -45,6 +45,18 @@ read_env_value() {
     sed -n "s/^${key}=//p" "$file" | head -n1
 }
 
+unique_id_by_name() {
+    local json=$1 name=$2 kind=$3 count
+
+    count="$(jq -r --arg name "$name" '[.[] | select(.name == $name)] | length' <<<"$json")"
+    [[ "$count" =~ ^[0-9]+$ ]] || die "Не удалось проверить дубликаты Semaphore: $kind '$name'"
+    ((count <= 1)) || die "В Semaphore найдено несколько объектов $kind с именем '$name'"
+
+    if ((count == 1)); then
+        jq -r --arg name "$name" '.[] | select(.name == $name) | .id' <<<"$json"
+    fi
+}
+
 api_call() {
     local method=$1 path=$2
     shift 2
@@ -146,7 +158,7 @@ ensure_api_token() {
 ensure_project() {
     local projects id payload response
     projects="$(api GET /projects)"
-    id="$(jq -r --arg name "$PROJECT_NAME"         '.[] | select(.name == $name) | .id' <<<"$projects" | head -n1)"
+    id="$(unique_id_by_name "$projects" "$PROJECT_NAME" "project")"
 
     if [[ -z "$id" ]]; then
         payload="$(jq -n --arg name "$PROJECT_NAME"             '{name:$name,alert:false,max_parallel_tasks:1,demo:false}')"
@@ -161,10 +173,9 @@ ensure_project() {
 }
 
 key_id_by_name() {
-    local project_id=$1 name=$2
-    api GET "/project/${project_id}/keys?sort=name&order=asc" \
-        | jq -r --arg name "$name" '.[] | select(.name == $name) | .id' \
-        | head -n1
+    local project_id=$1 name=$2 keys
+    keys="$(api GET "/project/${project_id}/keys?sort=name&order=asc")"
+    unique_id_by_name "$keys" "$name" "SSH key"
 }
 
 ensure_ssh_key() {
@@ -214,7 +225,7 @@ ensure_repository() {
     local repos id payload response
 
     repos="$(api GET "/project/${project_id}/repositories?sort=name&order=asc")"
-    id="$(jq -r '.[] | select(.name == "proxmox") | .id' <<<"$repos" | head -n1)"
+    id="$(unique_id_by_name "$repos" "proxmox" "Git repository")"
 
     if [[ -z "$id" ]]; then
         payload="$(jq -n \
@@ -256,7 +267,7 @@ ensure_opentofu_environment() {
     env_json="$(jq -cn --arg endpoint "$endpoint" '{TF_VAR_pve_endpoint:$endpoint}')"
 
     environments="$(api GET "/project/${project_id}/environment?sort=name&order=asc")"
-    id="$(jq -r --arg name "$OPENTOFU_ENV_NAME"         '.[] | select(.name == $name) | .id' <<<"$environments" | head -n1)"
+    id="$(unique_id_by_name "$environments" "$OPENTOFU_ENV_NAME" "Variable Group")"
 
     if [[ -z "$id" ]]; then
         payload="$(jq -cn             --arg name "$OPENTOFU_ENV_NAME"             --arg env "$env_json"             --arg secret "$api_token"             --argjson project_id "$project_id"             '{
@@ -326,7 +337,7 @@ ensure_opentofu_plan_template() {
     local templates id payload response
 
     templates="$(api GET "/project/${project_id}/templates?sort=name&order=asc")"
-    id="$(jq -r --arg name "$name"         '.[] | select(.name == $name) | .id' <<<"$templates" | head -n1)"
+    id="$(unique_id_by_name "$templates" "$name" "template")"
 
     if [[ -z "$id" ]]; then
         payload="$(jq -cn         --arg name "$name"         --arg playbook "scripts/infra-deployer/opentofu-plan.sh"         --arg branch "$PROJECT_BRANCH"         --argjson project_id "$project_id"         --argjson repository_id "$repository_id"         --argjson environment_id "$environment_id"         '{
