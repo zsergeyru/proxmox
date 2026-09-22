@@ -30,7 +30,7 @@ CA_BUNDLE="${CA_DIR}/ca-bundle.crt"
 PVE_API_SECRET_FILE="${PVE_API_SECRET_FILE:-}"
 RECOVER="${INFRA_DEPLOYER_RECOVER:-0}"
 
-SEMAPHORE_VERSION="v2.18.30"
+SEMAPHORE_VERSION="v2.18.29"
 PROJECT_BRANCH="${INFRA_PROJECT_BRANCH:-infra-iac-redesign}"
 OPENTOFU_VERSION="1.12.6"
 PACKER_VERSION="1.16.1"
@@ -54,7 +54,8 @@ check_os() {
 prepare_directories() {
     install -d -o root -g root -m 0755 "$CONFIG_DIR" "$CA_DIR" "$DATA_DIR" "$COMPOSE_DIR"
     install -d -o root -g root -m 0700 "$SECRET_DIR"
-    install -d -o root -g root -m 0750         "$SEMAPHORE_DIR" "$RUNNER_DIR" "$RUNNER_TMP_DIR" "$STATE_DIR"
+    install -d -o 1001 -g 0 -m 0750 "$SEMAPHORE_DIR" "$RUNNER_DIR" "$RUNNER_TMP_DIR" "$STATE_DIR"
+    install -d -o root -g root -m 0755 "$PUBLIC_KEY_DIR"
 }
 
 install_docker() {
@@ -176,6 +177,7 @@ ensure_semaphore_secrets() {
         umask 077
         cat >"$SERVER_ENV" <<EOF_SERVER
 SEMAPHORE_DB_DIALECT=sqlite
+SEMAPHORE_DB_HOST=/var/lib/semaphore/semaphore.sqlite
 SEMAPHORE_DB=/var/lib/semaphore/semaphore.sqlite
 SEMAPHORE_ADMIN=admin
 SEMAPHORE_ADMIN_PASSWORD=${admin_password}
