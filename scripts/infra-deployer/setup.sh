@@ -65,6 +65,14 @@ prepare_directories() {
     chmod 0770 "$SEMAPHORE_DIR"
 }
 
+cleanup_obsolete_files() {
+    rm -f \
+        "$SECRET_DIR/ansible_ed25519" \
+        "$SECRET_DIR/ansible_ed25519.pub" \
+        "$DATA_DIR/public-keys/ansible_ed25519.pub"
+    rmdir "$DATA_DIR/public-keys" 2>/dev/null || true
+}
+
 ensure_base_packages() {
     local missing="" pkg
 
@@ -415,6 +423,7 @@ main() {
     require_root
     check_os
     prepare_directories
+    cleanup_obsolete_files
     ensure_base_packages
     install_docker
     copy_compose_assets
