@@ -65,7 +65,7 @@ PVE minimum
 
 Именно `910` получает закрытый Git-репозиторий, инфраструктурные секреты и ограниченный PVE API token.
 
-Описание конкретного гостя находится в [`../../guests/910-infra-deployer/README.md`](../../guests/910-infra-deployer/README.md), а его машинные параметры — в [`../../guests/910-infra-deployer/bootstrap.yaml`](../../guests/910-infra-deployer/bootstrap.yaml).
+Описание конкретного гостя находится в [`../../guests/910-infra-deployer/README.md`](../../guests/910-infra-deployer/README.md). Машинными параметрами создания `910` владеет публичный `zsergeyru/proxmox-bootstrap`.
 
 ## 5. Граница с обычными гостями
 
