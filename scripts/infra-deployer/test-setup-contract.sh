@@ -46,6 +46,10 @@ grep -q 'Используется существующий постоянный 
     || die "Повторное обновление 910 должно работать без staging PVE secret"
 grep -q 'root@pam!infra-deployer' "$SETUP" \
     || die "setup.sh должен поддерживать автоматический переход на новый PVE API token"
+grep -q '^cleanup_obsolete_files() {' "$SETUP" \
+    || die "setup.sh должен удалять устаревшие credentials предыдущей схемы"
+grep -q '\$DATA_DIR/public-keys/ansible_ed25519.pub' "$SETUP" \
+    || die "setup.sh должен удалять старый Ansible public key"
 
 grep -q 'SEMAPHORE_DB_DIALECT=sqlite' "$SETUP" \
     || die "Semaphore должен использовать SQLite в первой версии"
@@ -103,6 +107,8 @@ grep -q 'TF_VAR_pve_endpoint' "$SEMAPHORE_PROJECT" \
     || die "Variable Group должен передавать pve_endpoint"
 grep -q 'TF_VAR_pve_api_token' "$SEMAPHORE_PROJECT" \
     || die "Variable Group должен передавать pve_api_token"
+grep -q 'operation:"update"' "$SEMAPHORE_PROJECT" \
+    || die "Существующий PVE token в Variable Group должен синхронизироваться при обычном обновлении"
 grep -q 'local name="OpenTofu Plan"' "$SEMAPHORE_PROJECT" \
     || die "Semaphore должен создавать шаблон OpenTofu Plan"
 grep -q 'opentofu_plan_template_id="$(ensure_opentofu_plan_template ' "$SEMAPHORE_PROJECT" \
