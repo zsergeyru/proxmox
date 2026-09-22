@@ -111,11 +111,12 @@ persistent_token_available() {
     ct_exec grep -Fxq "PVE_API_TOKEN_ID=$API_TOKEN_ID" "$CT_PERSISTENT_SECRET"
 }
 
-stage_api_secret() {
-    local secret=$1 node tmp rc=0
+stage_api_secret() (
+    local secret=$1 node tmp
 
     node="$(hostname -s)"
     tmp="$(mktemp /run/infra-deployer-pve-api.XXXXXX)"
+    trap 'rm -f -- "$tmp"' EXIT
     chmod 0600 "$tmp"
 
     cat >"$tmp" <<EOF_TOKEN
@@ -124,14 +125,9 @@ PVE_API_TOKEN_ID=$API_TOKEN_ID
 PVE_API_TOKEN_SECRET=$secret
 EOF_TOKEN
 
-    ct_exec install -d -m 0700 "$(dirname "$CT_SECRET_FILE")" || rc=$?
-    if ((rc == 0)); then
-        pct push "$CTID" "$tmp" "$CT_SECRET_FILE" --user 0 --group 0 --perms 0600 || rc=$?
-    fi
-
-    rm -f -- "$tmp"
-    return "$rc"
-}
+    ct_exec install -d -m 0700 "$(dirname "$CT_SECRET_FILE")"
+    pct push "$CTID" "$tmp" "$CT_SECRET_FILE" --user 0 --group 0 --perms 0600
+)
 
 rollback_new_api_token() {
     if api_token_exists; then
