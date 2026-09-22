@@ -17,8 +17,20 @@ API_TOKEN_ID="${API_USER}!${API_TOKEN_NAME}"
 MANAGED_POOL="managed"
 CT_STORAGE="local-lvm"
 CT_BRIDGE="vmbr0"
-die() { printf 'ОШИБКА: %s\n' "$*" >&2; exit 1; }
-ok()  { printf '[ОК] %s\n' "$*"; }
+C_RESET=""
+C_BOLD=""
+C_GREEN=""
+C_RED=""
+
+if [[ "${INFRA_DEPLOYER_COLOR:-0}" == "1" && "${NO_COLOR:-}" == "" ]]; then
+    C_RESET="$(printf '\\033[0m')"
+    C_BOLD="$(printf '\\033[1m')"
+    C_GREEN="$(printf '\\033[32m')"
+    C_RED="$(printf '\\033[31m')"
+fi
+
+die() { printf '%s%sОШИБКА:%s %s\\n' "$C_BOLD" "$C_RED" "$C_RESET" "$*" >&2; exit 1; }
+ok()  { printf '%s%s[ОК]%s %s\\n' "$C_BOLD" "$C_GREEN" "$C_RESET" "$*"; }
 
 require_pve_root() {
     [[ $EUID -eq 0 ]] || die "Сценарий должен выполняться от root на PVE"
@@ -170,7 +182,7 @@ install_pve_ca() {
     pct push "$CTID" "$tmp" /usr/local/share/ca-certificates/pve-root-ca.crt \
         --user 0 --group 0 --perms 0644
     rm -f "$tmp"
-    ct_exec update-ca-certificates >/dev/null
+    ct_exec update-ca-certificates >/dev/null 2>&1
 
     node="$(hostname -s)"
     host_ip="$(getent ahostsv4 "$node" | awk 'NR == 1 {print $1}')"
