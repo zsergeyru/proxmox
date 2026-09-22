@@ -16,7 +16,6 @@ GITHUB_KEY_COPY="${SECRET_DIR}/github_project_ed25519"
 
 PROJECT_REPO="git@github.com:zsergeyru/proxmox.git"
 PROJECT_BRANCH="${INFRA_PROJECT_BRANCH:-infra-iac-redesign}"
-RECOVER="${INFRA_DEPLOYER_RECOVER:-0}"
 
 COOKIE=""
 AUTH_MODE="cookie"
@@ -173,33 +172,40 @@ ensure_ssh_key() {
     local id private_key payload response
 
     id="$(key_id_by_name "$project_id" "$name")"
-    [[ -z "$id" ]] || { printf '%s' "$id"; return; }
-
     private_key="$(cat "$private_key_file")"
-    payload="$(jq -n \
-        --arg name "$name" \
-        --arg login "$login_name" \
-        --arg private_key "$private_key" \
-        --argjson project_id "$project_id" \
-        '{name:$name,type:"ssh",project_id:$project_id,ssh:{login:$login,passphrase:"",private_key:$private_key}}')"
 
-    response="$(api POST "/project/${project_id}/keys" -d "$payload")"
-    id="$(jq -r '.id // empty' <<<"$response")"
-    [[ -n "$id" ]] || die "Не удалось создать SSH key '$name' в Semaphore"
+    if [[ -z "$id" ]]; then
+        payload="$(jq -n \
+            --arg name "$name" \
+            --arg login "$login_name" \
+            --arg private_key "$private_key" \
+            --argjson project_id "$project_id" \
+            '{name:$name,type:"ssh",project_id:$project_id,ssh:{login:$login,passphrase:"",private_key:$private_key}}')"
+
+        response="$(api POST "/project/${project_id}/keys" -d "$payload")"
+        id="$(jq -r '.id // empty' <<<"$response")"
+        [[ -n "$id" ]] || die "Не удалось создать SSH key '$name' в Semaphore"
+    else
+        payload="$(jq -n \
+            --argjson id "$id" \
+            --arg name "$name" \
+            --arg login "$login_name" \
+            --arg private_key "$private_key" \
+            --argjson project_id "$project_id" \
+            '{id:$id,name:$name,type:"ssh",project_id:$project_id,ssh:{login:$login,passphrase:"",private_key:$private_key}}')"
+
+        api PUT "/project/${project_id}/keys/${id}" -d "$payload" >/dev/null
+    fi
+
     printf '%s' "$id"
 }
 
 persist_github_key() {
     [[ -s "$GITHUB_KEY" ]] || die "GitHub Deploy Key не найден: $GITHUB_KEY"
 
-    if [[ -f "$GITHUB_KEY_COPY" ]]; then
-        cmp -s "$GITHUB_KEY" "$GITHUB_KEY_COPY" \
-            || {
-                [[ "$RECOVER" == "1" ]] || die "GitHub key изменился вне recovery"
-                install -o root -g root -m 0600 "$GITHUB_KEY" "$GITHUB_KEY_COPY"
-            }
-    else
+    if [[ ! -f "$GITHUB_KEY_COPY" ]] || ! cmp -s "$GITHUB_KEY" "$GITHUB_KEY_COPY"; then
         install -o root -g root -m 0600 "$GITHUB_KEY" "$GITHUB_KEY_COPY"
+        ok "GitHub Deploy Key синхронизирован с постоянным ключом PVE"
     fi
 }
 
