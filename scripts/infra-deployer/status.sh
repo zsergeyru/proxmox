@@ -62,8 +62,6 @@ required_file /etc/infra-deployer/secrets/semaphore-server.env
 required_file /etc/infra-deployer/secrets/semaphore-runner.env
 required_file "$SEMAPHORE_API_TOKEN_FILE"
 required_file /etc/infra-deployer/secrets/github_project_ed25519
-required_file /etc/infra-deployer/secrets/ansible_ed25519
-required_file /var/lib/infra-deployer/public-keys/ansible_ed25519.pub
 required_file "$PROJECT_ID_FILE"
 required_file /var/lib/infra-deployer/opentofu/guests.json
 required_file "$CA_BUNDLE"
@@ -119,5 +117,5 @@ if ((FULL == 1)); then
         || die "PVE API access не соответствует полному контракту"
     ok "infra-deployer готов, полный контракт PVE API подтверждён"
 else
-    ok "infra-deployer готов к следующему этапу настройки прав PVE API"
+    ok "infra-deployer готов"
 fi
