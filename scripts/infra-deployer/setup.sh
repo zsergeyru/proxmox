@@ -16,6 +16,7 @@ RUNNER_DIR="${DATA_DIR}/runner"
 RUNNER_TMP_DIR="${RUNNER_DIR}/tmp"
 STATE_DIR="${DATA_DIR}/opentofu/state"
 COMPOSE_DIR="/opt/infra-deployer/compose"
+STATUS_COMMAND="/usr/local/sbin/infra-deployer-status"
 
 SERVER_ENV="${SECRET_DIR}/semaphore-server.env"
 RUNNER_ENV="${SECRET_DIR}/semaphore-runner.env"
@@ -27,6 +28,7 @@ PVE_API_SECRET_FILE="${PVE_API_SECRET_FILE:-}"
 RECOVER="${INFRA_DEPLOYER_RECOVER:-0}"
 
 SEMAPHORE_VERSION="v2.18.30"
+PROJECT_BRANCH="${INFRA_PROJECT_BRANCH:-infra-iac-redesign}"
 OPENTOFU_VERSION="1.12.6"
 PACKER_VERSION="1.16.1"
 
@@ -252,6 +254,18 @@ wait_semaphore() {
     ok "Semaphore Server и Runner запущены"
 }
 
+configure_semaphore_project() {
+    log "Настройка проекта Semaphore"
+    INFRA_PROJECT_BRANCH="$PROJECT_BRANCH" \
+    INFRA_DEPLOYER_RECOVER="$RECOVER" \
+        bash "$REPO_ROOT/scripts/infra-deployer/semaphore-project.sh"
+}
+
+install_status_command() {
+    install -o root -g root -m 0755 \
+        "$REPO_ROOT/scripts/infra-deployer/status.sh" "$STATUS_COMMAND"
+}
+
 verify_runner_tools() {
     log "Проверка инструментов Runner"
 
@@ -292,6 +306,9 @@ main() {
     deploy_semaphore
     wait_semaphore
     verify_runner_tools
+    configure_semaphore_project
+    install_status_command
+    "$STATUS_COMMAND"
     report_result
 }
 
