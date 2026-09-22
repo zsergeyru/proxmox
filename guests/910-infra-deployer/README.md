@@ -47,9 +47,9 @@ PVE
 Для первой версии используются:
 
 ```text
-Semaphore Server v2.18.30
+Semaphore Server v2.18.29
 SQLite
-Semaphore Runner v2.18.30
+Semaphore Runner v2.18.29
 OpenTofu 1.12.6
 Packer 1.16.1
 ```
@@ -91,11 +91,19 @@ infra-deployer@pve!automation
 Внутри `910` доступны проверки:
 
 ```bash
-infra-deployer-pve-access-check
 infra-deployer-status
+infra-deployer-status --full
+infra-deployer-pve-access-check
+infra-deployer-pve-lifecycle-test --apply
 ```
 
-Первая проверяет фактические effective permissions через PVE API без изменения состояния; вторая проверяет готовность всего инфраструктурного контура.
+`infra-deployer-status` проверяет сам `910`, Semaphore, Runner, OpenTofu, Packer, Ansible и базовую авторизацию PVE API.
+
+`infra-deployer-status --full` дополнительно требует полного соответствия окончательному контракту PVE-прав.
+
+`infra-deployer-pve-access-check` проверяет фактические effective permissions через PVE API без изменения состояния.
+
+`infra-deployer-pve-lifecycle-test --apply` — явный интеграционный тест. Он создаёт временный LXC `9098` в `managed`, меняет его, запускает, останавливает и удаляет. Эта команда не запускается автоматически.
 
 GitHub Deploy Key создаётся внутри `910` и используется только для чтения `zsergeyru/proxmox`.
 
@@ -104,6 +112,33 @@ Ansible использует отдельную техническую SSH-ид�
 Постоянные секреты не хранятся в Git.
 
 В `/etc/infra-deployer/secrets/` находятся защищённые восстановительные копии bootstrap credentials. Рабочие Git, PVE API и Ansible SSH credentials также создаются в зашифрованном Semaphore Key Store.
+
+
+## Первый реальный запуск
+
+До слияния веток в `main` обе стороны запускаются из `infra-iac-redesign`.
+
+На PVE:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/zsergeyru/proxmox-bootstrap/infra-iac-redesign/bootstrap-pve.sh | bash
+```
+
+Во время первого запуска bootstrap покажет открытый GitHub Deploy Key. Его нужно добавить в `zsergeyru/proxmox` как read-only Deploy Key и продолжить запуск.
+
+После успешного создания `910`:
+
+```bash
+pct exec 910 -- infra-deployer-status
+```
+
+Перед первым реальным использованием OpenTofu необходимо один раз выполнить явный тест жизненного цикла:
+
+```bash
+pct exec 910 -- infra-deployer-pve-lifecycle-test --apply
+```
+
+Если этот тест завершится ошибкой прав, сначала корректируется минимальная роль Proxmox. Расширять права заранее без такого теста не требуется.
 
 ## OpenTofu state
 
