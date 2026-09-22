@@ -144,7 +144,7 @@ response="$(api POST "/nodes/${NODE}/lxc" \
     --data-urlencode "rootfs=${ROOT_STORAGE}:2" \
     --data-urlencode "features=nesting=1" \
     --data-urlencode "net0=name=eth0,bridge=${BRIDGE},ip=dhcp,type=veth" \
-    --data-urlencode "onboot=0")
+    --data-urlencode "onboot=0")"
 upid="$(jq -r '.data // empty' <<<"$response")"
 [[ -n "$upid" && "$upid" != "null" ]] || die "PVE не вернул task id создания LXC"
 CREATED=1
