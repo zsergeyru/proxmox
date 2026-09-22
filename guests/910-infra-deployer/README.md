@@ -38,7 +38,7 @@ PVE
 - штатное управление PVE выполняется через HTTPS API;
 - постоянный root SSH с `910` на PVE не используется.
 
-Точные параметры виртуального объекта находятся в [`bootstrap.yaml`](bootstrap.yaml).
+Точные параметры создания виртуального объекта принадлежат публичному `zsergeyru/proxmox-bootstrap`, потому что именно он создаёт `910` до появления доступа к закрытому проекту.
 
 ## Состав системы
 
@@ -125,3 +125,4 @@ bootstrap-pve.sh --recover
 - [`../../docs/700-security/720-ssh-access.md`](../../docs/700-security/720-ssh-access.md) — SSH-доступ.
 - [`../../docs/800-operations/830-recovery.md`](../../docs/800-operations/830-recovery.md) — общие правила восстановления.
 - [`decisions.md`](decisions.md) — принятые решения по этому гостю.
+- `zsergeyru/proxmox-bootstrap/bootstrap-pve.sh` — машинный контракт создания `910`.
