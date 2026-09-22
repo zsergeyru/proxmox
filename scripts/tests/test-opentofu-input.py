@@ -27,7 +27,7 @@ assert guests["109"]["network"]["ipv4"] == "192.168.1.9/16"
 # Описательный объект без profile не участвует в универсальном развёртывании.
 assert "201" not in guests
 
-# Специальный bootstrap-owned 910 не имеет guest.yaml и не должен попасть в OpenTofu.
+# Специальный bootstrap-owned 910 имеет guest.yaml без profile и не должен попасть в OpenTofu.
 assert "910" not in guests
 
 for vmid, guest in guests.items():
