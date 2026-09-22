@@ -76,7 +76,7 @@ install_docker() {
 
     log "Установка Docker Engine из официального репозитория"
     apt-get update
-    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends         ca-certificates curl gnupg
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends         ca-certificates curl gnupg python3-yaml
 
     install -m 0755 -d /etc/apt/keyrings
     curl -fsSL https://download.docker.com/linux/debian/gpg         -o /etc/apt/keyrings/docker.asc
