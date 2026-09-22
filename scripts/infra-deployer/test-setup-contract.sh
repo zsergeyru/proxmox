@@ -44,6 +44,8 @@ grep -q 'render-opentofu-input.py' "$SETUP" \
 
 grep -q 'Используется существующий постоянный PVE API credential' "$SETUP" \
     || die "Повторное обновление 910 должно работать без staging PVE secret"
+grep -q 'root@pam!infra-deployer' "$SETUP" \
+    || die "setup.sh должен поддерживать автоматический переход на новый PVE API token"
 
 grep -q 'SEMAPHORE_DB_DIALECT=sqlite' "$SETUP" \
     || die "Semaphore должен использовать SQLite в первой версии"
@@ -108,6 +110,17 @@ grep -q 'opentofu_plan_template_id="$(ensure_opentofu_plan_template ' "$SEMAPHOR
 grep -q 'scripts/infra-deployer/opentofu-plan.sh' "$SEMAPHORE_PROJECT" \
     || die "OpenTofu Plan должен запускать отдельный безопасный сценарий"
 
+if grep -q '^ensure_pve_key() {' "$SEMAPHORE_PROJECT"; then
+    die "Отдельный PVE credential в Semaphore Key Store больше не нужен"
+fi
+if grep -q '^ensure_ansible_key() {' "$SEMAPHORE_PROJECT"; then
+    die "Ansible SSH credential не должен создаваться до появления Ansible-задач"
+fi
+grep -q 'delete_key_by_name "$project_id" "PVE API automation"' "$SEMAPHORE_PROJECT" \
+    || die "Старая неиспользуемая PVE запись Key Store должна удаляться"
+grep -q 'delete_key_by_name "$project_id" "Ansible managed guests"' "$SEMAPHORE_PROJECT" \
+    || die "Старая неиспользуемая Ansible запись Key Store должна удаляться"
+
 grep -q 'allow_override_args_in_task:false' "$SEMAPHORE_PROJECT" \
     || die "OpenTofu Plan не должен разрешать переопределение аргументов"
 grep -q 'allow_override_branch_in_task:false' "$SEMAPHORE_PROJECT" \
@@ -144,6 +157,8 @@ if missing:
 for volume in volumes:
     if 'pve-api.env' in volume:
         raise SystemExit('PVE API secret must not be bind-mounted directly into Runner')
+    if 'public-keys' in volume:
+        raise SystemExit('Unused Ansible public-key volume must not be mounted into Runner')
 PY
 
 ok "Контракт setup infra-deployer проверен"
