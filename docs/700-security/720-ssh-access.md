@@ -91,5 +91,5 @@ Ansible private key является критичным секретом и до
 
 - [`710-pve-access.md`](710-pve-access.md) — доступ к Proxmox API.
 - [`../200-pve/210-host-bootstrap.md`](../200-pve/210-host-bootstrap.md) — первоначальная подготовка `910`.
-- [`../200-pve/240-infra-deployer.md`](../200-pve/240-infra-deployer.md) — хранение ключей и состав разворачивателя.
+- [`../../guests/910-infra-deployer/README.md`](../../guests/910-infra-deployer/README.md) — хранение ключей и состав разворачивателя.
 - [`../300-guests/320-guest-manifest.md`](../300-guests/320-guest-manifest.md) — параметры гостевых систем.
