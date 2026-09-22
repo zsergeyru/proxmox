@@ -4,6 +4,9 @@ set -Eeuo pipefail
 FULL=0
 PVE_ENV="/etc/infra-deployer/secrets/pve-api.env"
 CA_BUNDLE="/etc/infra-deployer/ca/ca-bundle.crt"
+SEMAPHORE_URL="http://127.0.0.1:3000"
+SEMAPHORE_API_TOKEN_FILE="/etc/infra-deployer/secrets/semaphore-api-token"
+PROJECT_ID_FILE="/var/lib/infra-deployer/semaphore/project-id"
 
 die() { printf 'ОШИБКА: %s\n' "$*" >&2; exit 1; }
 ok()  { printf '[ОК] %s\n' "$*"; }
@@ -45,17 +48,23 @@ read_env_value() {
     sed -n "s/^${key}=//p" "$PVE_ENV" | head -n1
 }
 
+semaphore_api_get() {
+    local path=$1 token
+    token="$(cat "$SEMAPHORE_API_TOKEN_FILE")"
+    curl -fsS         --connect-timeout 2         --max-time 10         -H "Authorization: Bearer $token"         -H 'Accept: application/json'         "${SEMAPHORE_URL}/api${path}"
+}
+
 command -v docker >/dev/null 2>&1 || die "Docker не установлен"
 docker compose version >/dev/null 2>&1 || die "Docker Compose недоступен"
 
 required_file "$PVE_ENV"
 required_file /etc/infra-deployer/secrets/semaphore-server.env
 required_file /etc/infra-deployer/secrets/semaphore-runner.env
-required_file /etc/infra-deployer/secrets/semaphore-api-token
+required_file "$SEMAPHORE_API_TOKEN_FILE"
 required_file /etc/infra-deployer/secrets/github_project_ed25519
 required_file /etc/infra-deployer/secrets/ansible_ed25519
 required_file /var/lib/infra-deployer/public-keys/ansible_ed25519.pub
-required_file /var/lib/infra-deployer/semaphore/project-id
+required_file "$PROJECT_ID_FILE"
 required_file /var/lib/infra-deployer/opentofu/guests.json
 required_file "$CA_BUNDLE"
 
@@ -69,6 +78,14 @@ required_file "$CA_BUNDLE"
 
 curl -fsS --connect-timeout 2 --max-time 5 http://127.0.0.1:3000/api/ping >/dev/null \
     || die "Semaphore API не отвечает"
+
+
+PROJECT_ID="$(cat "$PROJECT_ID_FILE")"
+[[ "$PROJECT_ID" =~ ^[0-9]+$ ]] || die "Некорректный project-id Semaphore"
+
+semaphore_api_get "/project/${PROJECT_ID}/environment?sort=name&order=asc"     | jq -e '.[] | select(.name == "OpenTofu PVE")' >/dev/null     || die "В Semaphore отсутствует Variable Group OpenTofu PVE"
+
+semaphore_api_get "/project/${PROJECT_ID}/templates?sort=name&order=asc"     | jq -e '.[] | select(.name == "OpenTofu Plan" and .app == "bash")' >/dev/null     || die "В Semaphore отсутствует шаблон OpenTofu Plan"
 
 docker exec infra-deployer-runner tofu version >/dev/null \
     || die "OpenTofu недоступен"
