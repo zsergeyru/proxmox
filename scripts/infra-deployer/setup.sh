@@ -170,14 +170,19 @@ generate_ca_bundle() {
 }
 
 persist_pve_api_secret() {
-    [[ -n "$PVE_API_SECRET_FILE" ]] || die "Не задан PVE_API_SECRET_FILE"
-    [[ -s "$PVE_API_SECRET_FILE" ]] || die "PVE API staging secret отсутствует: $PVE_API_SECRET_FILE"
-
     if [[ -f "$PVE_API_ENV" && "$RECOVER" != "1" ]]; then
-        cmp -s "$PVE_API_SECRET_FILE" "$PVE_API_ENV"             || die "Постоянный PVE API secret уже существует и отличается. Для замены требуется recovery."
-        ok "Постоянный PVE API secret уже совпадает со staging secret"
+        if [[ -n "$PVE_API_SECRET_FILE" && -s "$PVE_API_SECRET_FILE" ]]; then
+            cmp -s "$PVE_API_SECRET_FILE" "$PVE_API_ENV" \
+                || die "Постоянный PVE API secret уже существует и отличается. Для замены требуется recovery."
+            ok "Постоянный PVE API secret уже совпадает со staging secret"
+        else
+            ok "Используется существующий постоянный PVE API credential"
+        fi
         return
     fi
+
+    [[ -n "$PVE_API_SECRET_FILE" ]] || die "Не задан PVE_API_SECRET_FILE"
+    [[ -s "$PVE_API_SECRET_FILE" ]] || die "PVE API staging secret отсутствует: $PVE_API_SECRET_FILE"
 
     install -o root -g root -m 0600 "$PVE_API_SECRET_FILE" "$PVE_API_ENV"
     ok "PVE API credential сохранён в защищённом постоянном хранилище"
