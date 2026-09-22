@@ -1,91 +1,336 @@
 # Домашняя инфраструктура Proxmox
 
-Репозиторий конфигурации, кода и документации домашней инфраструктуры на Proxmox VE.
+Закрытый репозиторий конфигурации, кода и документации домашней инфраструктуры на Proxmox VE.
 
-Этот файл — только точка входа. Он не дублирует подробные параметры VM/LXC, ACL, сети, шаблона `9000` или первоначальной настройки: для каждого раздела есть отдельный основной источник.
+Здесь хранится требуемое состояние инфраструктуры, документация, сценарии развёртывания и настройка постоянного управляющего контейнера `910 infra-deployer`.
 
-## С чего начать
+## Быстрый старт
 
-- [`docs/README.md`](docs/README.md) — карта документации, типов документов и основных источников.
-- [`guests/README.md`](guests/README.md) — как организованы VM/LXC и их манифесты.
-- [`host/pve/README.md`](host/pve/README.md) — фактическое состояние работающего PVE-хоста.
-- [`scripts/README.md`](scripts/README.md) — карта исполняемого кода и проверок.
-- [`templates/README.md`](templates/README.md) — шаблоны VM/LXC.
-- [`ansible/README.md`](ansible/README.md) — повторяемая настройка Linux-гостей.
+Первоначальный запуск выполняется на физическом PVE от `root` публичным bootstrap:
+
+~~~bash
+curl -fsSL https://raw.githubusercontent.com/zsergeyru/proxmox-bootstrap/infra-iac-redesign/bootstrap-pve.sh | bash
+~~~
+
+Публичный репозиторий:
+
+~~~text
+https://github.com/zsergeyru/proxmox-bootstrap
+~~~
+
+На первом запуске bootstrap создаёт постоянный GitHub Deploy Key на PVE и показывает открытый ключ. Его нужно один раз добавить в `zsergeyru/proxmox` как read-only Deploy Key.
+
+После этого повторные установки и пересоздания 910 используют тот же ключ.
+
+## Общая архитектура
+
+~~~text
+GitHub public: zsergeyru/proxmox-bootstrap
+        │
+        │ bootstrap-pve.sh
+        ▼
+физический PVE
+        │
+        ├── постоянный GitHub Deploy Key
+        ├── LXC 910 infra-deployer
+        └── ограниченный PVE API-доступ для 910
+                         │
+                         ▼
+                 LXC 910 infra-deployer
+                         │
+                         ├── закрытый repo zsergeyru/proxmox
+                         ├── Docker
+                         ├── Semaphore Server
+                         ├── Semaphore Runner
+                         ├── OpenTofu
+                         ├── Ansible
+                         ├── Packer
+                         └── proxmoxer
+                                  │
+                                  ▼
+                              PVE API
+                                  │
+                                  └── pool managed
+~~~
+
+Физический PVE должен оставаться максимально чистым. Docker, Semaphore, OpenTofu, Ansible, Packer и прикладные сервисы на хост не устанавливаются.
+
+## Что делает публичный bootstrap
+
+`bootstrap-pve.sh` выполняется только на PVE.
+
+~~~text
+проверить root и PVE
+→ получить блокировку
+→ проверить vmbr0, local и local-lvm
+→ создать или проверить LXC 910
+→ запустить 910 и дождаться сети
+→ создать или использовать постоянный GitHub Deploy Key
+→ минимально подготовить Debian внутри 910
+→ передать GitHub Deploy Key внутрь 910
+→ проверить read-only доступ к закрытому проекту
+→ получить или обновить закрытый проект
+→ выполнить scripts/infra-deployer/pve-bootstrap-access.sh на PVE
+→ выполнить scripts/infra-deployer/setup.sh внутри 910
+→ проверить итоговое состояние
+~~~
+
+В публичном bootstrap не хранится конкретная политика PVE ACL и не описывается внутренняя настройка Semaphore/OpenTofu/Ansible/Packer.
+
+## LXC 910 infra-deployer
+
+~~~text
+CTID:        910
+hostname:    infra-deployer
+OS:          Debian 13
+unprivileged yes
+CPU:         2
+RAM:         2048 MiB
+swap:        512 MiB
+root disk:   32 GiB
+storage:     local-lvm
+bridge:      vmbr0
+onboot:      yes
+protection:  yes
+features:    nesting=1,keyctl=1
+tags:        infra-deployer;proxmox-bootstrap
+~~~
+
+910 является специальным управляющим контейнером: его создаёт публичный bootstrap, OpenTofu не управляет самим 910, 910 не входит в `managed`, постоянный root SSH с 910 на PVE не используется.
+
+Подробнее: [`guests/910-infra-deployer/README.md`](guests/910-infra-deployer/README.md).
+
+## GitHub Deploy Key
+
+Постоянный ключ хранится на PVE:
+
+~~~text
+/root/.config/proxmox-bootstrap/
+├── github_proxmox_repo_ed25519
+└── github_proxmox_repo_ed25519.pub
+~~~
+
+Права: каталог `0700`, private key `0600`, public key `0644`.
+
+При создании или повторной настройке 910 bootstrap копирует этот ключ внутрь контейнера для чтения закрытого репозитория. Удаление и повторное создание 910 не требует нового Deploy Key.
+
+## Debian template
+
+Если подходящий Debian 13 LXC template уже существует в `local:vztmpl`, bootstrap использует его и не считает своим.
+
+Если template отсутствует:
+
+~~~text
+скачать Debian 13 template
+→ отметить его как временный
+→ создать 910
+→ сразу удалить скачанный template
+~~~
+
+После успешной установки скачанный bootstrap template на PVE не остаётся. Если установка прервалась, он удаляется при `--remove` или `--purge`. Заранее существовавший template автоматически не удаляется.
+
+## Закрытый проект внутри 910
+
+Рабочая копия:
+
+~~~text
+/var/lib/infra-deployer/bootstrap-repo
+~~~
+
+Источник:
+
+~~~text
+git@github.com:zsergeyru/proxmox.git
+~~~
+
+По умолчанию используется ветка `infra-iac-redesign`. При повторном bootstrap рабочая копия обновляется до текущего состояния этой ветки.
+
+Основные сценарии:
+
+~~~text
+scripts/infra-deployer/pve-bootstrap-access.sh
+scripts/infra-deployer/setup.sh
+scripts/infra-deployer/semaphore-project.sh
+scripts/infra-deployer/opentofu-plan.sh
+scripts/infra-deployer/render-opentofu-input.py
+scripts/infra-deployer/status.sh
+scripts/infra-deployer/check-pve-access.sh
+scripts/infra-deployer/test-pve-lifecycle.sh
+~~~
+
+## Доступ 910 к PVE
+
+Используется API token:
+
+~~~text
+root@pam!infra-deployer
+privsep=1
+~~~
+
+Политика доступа хранится только в `scripts/infra-deployer/pve-bootstrap-access.sh`.
+
+| Путь | Роль | Назначение |
+|---|---|---|
+| `/` | `PVEAuditor` | чтение состояния PVE |
+| `/pool/managed` | `PVEVMAdmin` | управление обычными VM/LXC проекта |
+| `/storage/local-lvm` | `PVEDatastoreUser` | использование хранилища |
+| `/sdn/zones/localnetwork/vmbr0` | `PVESDNUser` | использование основной сети |
+
+910 находится вне `managed`.
+
+Подробнее: [`docs/700-security/710-pve-access.md`](docs/700-security/710-pve-access.md).
+
+## Что работает внутри 910
+
+~~~text
+Semaphore Server v2.18.30
+Semaphore Runner v2.18.30
+SQLite
+OpenTofu 1.12.6
+Packer 1.15.4
+Ansible
+proxmoxer
+~~~
+
+Основные постоянные области:
+
+~~~text
+/etc/infra-deployer/
+/var/lib/infra-deployer/
+/opt/infra-deployer/
+~~~
+
+OpenTofu state хранится локально:
+
+~~~text
+/var/lib/infra-deployer/opentofu/state/proxmox.tfstate
+~~~
+
+State не хранится в Git и должен резервироваться.
+
+## Semaphore
+
+Bootstrap автоматически подготавливает используемые объекты Semaphore:
+
+~~~text
+Project
+Git repository proxmox
+OpenTofu PVE Variable Group
+OpenTofu Plan
+~~~
+
+Ansible credential заранее не создаётся. Он добавляется только вместе с первой реальной Ansible-задачей.
+
+## Служебные команды 910
+
+~~~bash
+infra-deployer-status
+infra-deployer-status --full
+infra-deployer-pve-access-check
+infra-deployer-pve-lifecycle-test --apply
+~~~
+
+## Технический лог bootstrap
+
+~~~text
+/var/log/infra-deployer/bootstrap.log
+~~~
+
+На экран выводятся основные этапы, успешные проверки, предупреждения и ошибки; подробный служебный вывод хранится в этом файле.
+
+## Команды публичного bootstrap
+
+Обычная установка или повторное применение:
+
+~~~bash
+curl -fsSL https://raw.githubusercontent.com/zsergeyru/proxmox-bootstrap/infra-iac-redesign/bootstrap-pve.sh | bash
+~~~
+
+Только проверка:
+
+~~~bash
+curl -fsSL https://raw.githubusercontent.com/zsergeyru/proxmox-bootstrap/infra-iac-redesign/bootstrap-pve.sh | bash -s -- --check
+~~~
+
+Восстановление потерянного PVE API token:
+
+~~~bash
+curl -fsSL https://raw.githubusercontent.com/zsergeyru/proxmox-bootstrap/infra-iac-redesign/bootstrap-pve.sh | bash -s -- --recover
+~~~
+
+Мягкое удаление:
+
+~~~bash
+curl -fsSL https://raw.githubusercontent.com/zsergeyru/proxmox-bootstrap/infra-iac-redesign/bootstrap-pve.sh | bash -s -- --remove
+~~~
+
+Полное удаление:
+
+~~~bash
+curl -fsSL https://raw.githubusercontent.com/zsergeyru/proxmox-bootstrap/infra-iac-redesign/bootstrap-pve.sh | bash -s -- --purge
+~~~
+
+Статический адрес 910:
+
+~~~bash
+curl -fsSL https://raw.githubusercontent.com/zsergeyru/proxmox-bootstrap/infra-iac-redesign/bootstrap-pve.sh | bash -s -- \
+  --ip 192.168.1.90/24 \
+  --gateway 192.168.1.1
+~~~
+
+Другая ветка закрытого проекта:
+
+~~~bash
+curl -fsSL https://raw.githubusercontent.com/zsergeyru/proxmox-bootstrap/infra-iac-redesign/bootstrap-pve.sh | bash -s -- \
+  --project-branch NAME
+~~~
+
+## Мягкое и полное удаление
+
+`--remove` удаляет LXC 910, API token, ACL, пустой `managed` и временный Debian template, если он остался. Постоянный GitHub Deploy Key на PVE сохраняется.
+
+`--purge` делает то же самое и дополнительно удаляет `/root/.config/proxmox-bootstrap/` вместе с GitHub Deploy Key.
+
+Не удаляются автоматически VM 100 HAOS, хранилище `backup`, чужой объект с VMID 910, непустой `managed`, заранее существовавший Debian template и другие VM/LXC.
 
 ## Структура репозитория
 
-```text
+~~~text
 proxmox/
-├── docs/        # Обзор / Политика / Спецификация / Справочник / Инструкция
-├── guests/      # требуемое состояние и файлы конкретных VM/LXC
-├── host/pve/    # фактическое состояние физического PVE-хоста
-├── scripts/     # средства первоначальной настройки, конфигурации и проверки
-├── templates/   # повторно используемые шаблоны VM/LXC и файлы их сборки
-├── ansible/     # повторяемая настройка гостевых ОС
-├── schemas/     # машинные схемы guest/defaults/effective
-└── archive/     # исторические и заменённые материалы
-```
+├── docs/        документация
+├── guests/      описание VM/LXC
+├── host/pve/    состояние физического PVE
+├── scripts/     сценарии управления и проверки
+├── templates/   шаблоны
+├── ansible/     повторяемая настройка Linux-гостей
+├── schemas/     схемы guest/defaults/effective
+└── archive/     исторические материалы
+~~~
 
-Проект использует один основной репозиторий. Гостевые системы не обязаны клонировать его целиком: в конкретную VM/LXC попадают только нужные ей файлы и конфигурация.
+## Документация
 
-## Модель управления
+- [`docs/100-architecture/`](docs/100-architecture/) — архитектура;
+- [`docs/200-pve/`](docs/200-pve/) — PVE и первоначальная подготовка;
+- [`docs/300-guests/`](docs/300-guests/) — гости и их требуемое состояние;
+- [`docs/400-network/`](docs/400-network/) — сеть, DNS, маршрутизация и VPN;
+- [`docs/500-ai/`](docs/500-ai/) — AI-управление;
+- [`docs/600-storage/`](docs/600-storage/) — хранилища и резервные копии;
+- [`docs/700-security/`](docs/700-security/) — доступ и безопасность;
+- [`docs/800-operations/`](docs/800-operations/) — эксплуатация и восстановление.
 
-```text
-человек / инструменты на стороне PVE-хоста
-→ deploy-guest
-→ deployer@pve!host-deploy
-→ жизненный цикл гостевых систем Proxmox
+С bootstrap особенно связаны:
 
-AI Control
-→ Proximo
-→ ai-agent@pve!infra
-→ жизненный цикл разрешённых гостевых систем managed
-
-311-dev-services
-→ Ansible
-→ повторяемая настройка Linux-гостей по SSH
-```
-
-Обзор участников и двух путей управления: [`docs/26-deploy-guest-and-agent-access.md`](docs/26-deploy-guest-and-agent-access.md).
-
-Точные роли, привилегии и ACL PVE: [`docs/25-pve-access-control.md`](docs/25-pve-access-control.md).
-
-## Основные источники
-
-Основной источник выбирается **по предметной области**, а не по расположению файла или его номеру.
-
-| Что определяется | Основной источник |
-|---|---|
-| Требуемое состояние VM/LXC | `guests/defaults.yaml` + `guests/<guest>/guest.yaml` |
-| Формат манифестов и правила объединения настроек | [`docs/30-guest-manifest.md`](docs/30-guest-manifest.md) + `schemas/` |
-| VMID/CTID и правила адресации | [`docs/11-vmid-plan.md`](docs/11-vmid-plan.md) |
-| Процедура инициализации PVE | [`docs/20-pve-initialization.md`](docs/20-pve-initialization.md) |
-| Пути, рабочие данные и файлы состояния PVE | [`docs/21-pve-filesystem-layout.md`](docs/21-pve-filesystem-layout.md) |
-| Политика резервного копирования, сроков хранения, RPO/RTO | [`docs/22-storage-and-backup.md`](docs/22-storage-and-backup.md) |
-| Восстановление и аварийное восстановление | [`docs/27-backup-and-disaster-recovery-runbook.md`](docs/27-backup-and-disaster-recovery-runbook.md) |
-| Общая политика безопасности и границы SSH-доступа | [`docs/23-security.md`](docs/23-security.md) |
-| Management SSH identity, public-key registry, `management-ssh` и `sync-management-keys` | [`docs/28-management-ssh-keys.md`](docs/28-management-ssh-keys.md) |
-| Учётные записи API PVE, роли и ACL | [`docs/25-pve-access-control.md`](docs/25-pve-access-control.md) |
-| Первичная и повторяемая настройка гостевых систем | [`docs/33-guest-bootstrap-and-provisioning.md`](docs/33-guest-bootstrap-and-provisioning.md) |
-| Сетевая спецификация | [`docs/40-network.md`](docs/40-network.md) |
-| Спецификация DNS | [`docs/41-dns.md`](docs/41-dns.md) |
-| Шаблон Debian VM `9000` | [`templates/debian13/build-policy.md`](templates/debian13/build-policy.md) |
-| Фактическое состояние PVE | `host/pve/` |
-
-README конкретной гостевой системы описывает её назначение и эксплуатационные особенности, ADR фиксирует устойчивое локальное решение, а `STATUS.md` — временное фактическое состояние или расхождение. Эти файлы не должны подменять `guest.yaml` как источник требуемого состояния для развёртывания.
+- [`docs/200-pve/210-host-bootstrap.md`](docs/200-pve/210-host-bootstrap.md);
+- [`docs/700-security/710-pve-access.md`](docs/700-security/710-pve-access.md);
+- [`docs/800-operations/810-deployment.md`](docs/800-operations/810-deployment.md);
+- [`guests/910-infra-deployer/README.md`](guests/910-infra-deployer/README.md).
 
 ## Общие правила
 
 - Git хранит воспроизводимую конфигурацию и документацию, но не рабочие секреты.
-- Пароли, токены, закрытые ключи и другие секреты в репозиторий не добавляются.
-- Для управляемых Debian VM/LXC используется `root` с SSH-доступом только по открытому ключу; разные административные контуры имеют независимые пары SSH-ключей.
-- Все связанные с управлением гостем manifest-параметры собраны в разделе `management`: базовый `management.ssh`, собственная identity `management.ssh_identity` и Project Git READ `management.project_repo_read`.
-- `management.ssh` может приходить из общих defaults; `management.ssh_identity` и `management.project_repo_read` задаются только конкретному гостю и не наследуются.
-- Для Debian-гостя management SSH-контура используется производный технический PVE tag `management-ssh`; это не отдельное поле manifest и не lifecycle ownership marker.
-- Канонический набор инфраструктурных public keys хранится у deploy-контура на PVE и синхронизируется отдельным `sync-management-keys` по объектам с `management-ssh`; управляющие гости используют локальную копию набора при создании новых Debian VM/LXC и ставят им тот же tag.
-- Для чтения закрытого `zsergeyru/proxmox` допускается один общий GitHub Deploy Key только для чтения; это отдельный credential, не административный SSH-ключ.
-- Принятые целевые поля `management.ssh_identity` и `management.project_repo_read` до реализации соответствующей schema/resolver не добавляются в действующие `guest.yaml`.
-- ACL PVE, SSH-доступ внутрь гостевой системы, read-only доступ к проектному Git и права приложений являются разными уровнями доступа.
-- Опасные изменения должны иметь предварительные проверки, явную область воздействия и последующую проверку результата.
-- `archive/` не является источником действующей конфигурации.
+- Закрытые ключи, пароли и токены в Git не добавляются.
+- PVE остаётся максимально чистым гипервизором.
+- Обычные управляемые VM/LXC входят в `managed`.
+- 910 является управляющим исключением и находится вне `managed`.
+- Новые права PVE не выдаются заранее: они добавляются только под реально используемую операцию.
+- `archive/` и `docs/legacy/` не являются источниками действующей конфигурации.
