@@ -261,9 +261,45 @@ compose() {
     docker compose         --env-file "$COMPOSE_DIR/.versions.env"         -f "$COMPOSE_DIR/docker-compose.yml" "$@"
 }
 
+repair_semaphore_storage() {
+    log "Проверка прав хранилища Semaphore"
+
+    # Права восстанавливаются через тот же Docker runtime, который запускает
+    # Semaphore. Это важно для вложенного Docker в LXC: uid/gid, видимые
+    # процессу контейнера, должны иметь доступ к bind mount SQLite.
+    docker run --rm \
+        --user 0:0 \
+        --entrypoint /bin/sh \
+        -v "$SEMAPHORE_DIR:/var/lib/semaphore" \
+        "semaphoreui/semaphore:${SEMAPHORE_VERSION}" \
+        -c '
+            set -eu
+            chown -R 1001:0 /var/lib/semaphore
+            find /var/lib/semaphore -type d -exec chmod 0770 {} +
+            find /var/lib/semaphore -type f -exec chmod 0660 {} +
+        ' \
+        || die "Не удалось восстановить права хранилища Semaphore через Docker"
+
+    docker run --rm \
+        --user 1001:0 \
+        --entrypoint /bin/sh \
+        -v "$SEMAPHORE_DIR:/var/lib/semaphore" \
+        "semaphoreui/semaphore:${SEMAPHORE_VERSION}" \
+        -c '
+            set -eu
+            probe="/var/lib/semaphore/.write-test.$"
+            : >"$probe"
+            rm -f "$probe"
+        ' \
+        || die "UID 1001 контейнера Semaphore не может писать в постоянное хранилище"
+
+    ok "Хранилище Semaphore доступно для записи из контейнера"
+}
+
 deploy_semaphore() {
     log "Сборка и запуск Semaphore"
     compose pull semaphore
+    repair_semaphore_storage
     compose build --pull runner
     compose up -d --remove-orphans
 }
