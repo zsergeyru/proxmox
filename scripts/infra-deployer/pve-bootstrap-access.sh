@@ -17,13 +17,6 @@ API_TOKEN_ID="${API_USER}!${API_TOKEN_NAME}"
 MANAGED_POOL="managed"
 CT_STORAGE="local-lvm"
 CT_BRIDGE="vmbr0"
-LEGACY_TEMPLATE_VMID=9000
-
-LEGACY_API_USER="infra-deployer@pve"
-LEGACY_API_TOKEN_NAME="automation"
-LEGACY_API_TOKEN_ID="${LEGACY_API_USER}!${LEGACY_API_TOKEN_NAME}"
-LEGACY_ROLE="InfraManagedGuest"
-
 die() { printf 'ОШИБКА: %s\n' "$*" >&2; exit 1; }
 ok()  { printf '[ОК] %s\n' "$*"; }
 
@@ -180,40 +173,6 @@ install_pve_ca() {
     ok "PVE CA и имя PVE подготовлены внутри 910"
 }
 
-legacy_api_user_exists() {
-    pveum user list --output-format json 2>/dev/null \
-        | jq -e --arg user "$LEGACY_API_USER"             '.[] | select(.userid == $user)' >/dev/null
-}
-
-legacy_api_token_exists() {
-    pveum user token list "$LEGACY_API_USER" --output-format json 2>/dev/null \
-        | jq -e --arg token "$LEGACY_API_TOKEN_NAME"             '.[] | select(.tokenid == $token)' >/dev/null
-}
-
-delete_legacy_acl() {
-    local path=$1 role=$2
-    pveum acl delete "$path" --users "$LEGACY_API_USER" --roles "$role" >/dev/null 2>&1 || true
-    pveum acl delete "$path" --tokens "$LEGACY_API_TOKEN_ID" --roles "$role" >/dev/null 2>&1 || true
-}
-
-cleanup_legacy_access() {
-    delete_legacy_acl "/" "PVEAuditor"
-    delete_legacy_acl "/pool/$MANAGED_POOL" "$LEGACY_ROLE"
-    delete_legacy_acl "/vms/$LEGACY_TEMPLATE_VMID" "PVETemplateUser"
-    delete_legacy_acl "/storage/$CT_STORAGE" "PVEDatastoreUser"
-    delete_legacy_acl "/sdn/zones/localnetwork/$CT_BRIDGE" "PVESDNUser"
-
-    if legacy_api_token_exists; then
-        pveum user token remove "$LEGACY_API_USER" "$LEGACY_API_TOKEN_NAME"
-    fi
-    if legacy_api_user_exists; then
-        pveum user delete "$LEGACY_API_USER"
-    fi
-
-    pveum role delete "$LEGACY_ROLE" >/dev/null 2>&1 || true
-    ok "Устаревшая PVE-идентичность удалена"
-}
-
 prepare() {
     install_pve_ca
     ensure_managed_pool
@@ -223,18 +182,7 @@ prepare() {
 
 main() {
     require_pve_root
-
-    case "${1:-}" in
-        prepare)
-            prepare
-            ;;
-        cleanup)
-            cleanup_legacy_access
-            ;;
-        *)
-            die "Использование: $0 prepare|cleanup"
-            ;;
-    esac
+    prepare
 }
 
 main "$@"
