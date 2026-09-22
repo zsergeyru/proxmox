@@ -1,157 +1,127 @@
-# 301 — ai-control
+# 301 ai-control
 
-**Тип:** VM  
-**Статус:** целевой управляющий AI-узел; `320-ai-control` сохраняется до завершения приёмочной проверки.
+`301 ai-control` — центральная VM рабочей среды AI-агентов проекта.
 
-Основная архитектурная спецификация находится в [`../../docs/50-ai-control.md`](../../docs/50-ai-control.md), порядок ввода в работу — в [`../../docs/51-ai-control-bootstrap.md`](../../docs/51-ai-control-bootstrap.md), жизненный цикл administrative SSH keys — в [`../../docs/28-management-ssh-keys.md`](../../docs/28-management-ssh-keys.md), текущая степень реализации — в [`../../docs/29-implementation-status.md`](../../docs/29-implementation-status.md). Этот README фиксирует только особенности VM `301`.
+Она предназначена для анализа состояния инфраструктуры, работы с проектом в Git и обращения к разрешённым механизмам управления. AI Control не является отдельным источником требуемого состояния и не заменяет специализированные средства развёртывания и настройки.
 
-## Архитектура каталогов
+## Источники требований
+
+Требования к 301 разделены по назначению:
+
+| Источник | Что определяет |
+|---|---|
+| `guest.yaml` | параметры VM на уровне Proxmox |
+| `provision.yaml` | требуемое содержимое ОС, компоненты, интеграции, постоянные данные и границы |
+| `decisions.md` | устойчивые решения по конкретному гостю |
+| этот README | назначение, устройство, эксплуатацию и связь с остальной инфраструктурой |
+
+Общая архитектура AI-контура находится в `docs/500-ai/`.
+
+## Назначение
+
+301 обеспечивает:
+
+- запуск одного или нескольких AI-агентов;
+- рабочую копию репозитория проекта;
+- подключаемые инструкции и вспомогательные программы;
+- доступ к разрешённому Proxmox API;
+- административный SSH к разрешённым Linux-гостям;
+- обращение к специализированному инфраструктурному исполнителю 910;
+- локальное рабочее состояние AI.
+
+Основным агентом на текущем этапе является Hermes, но архитектура не должна зависеть от него.
+
+## Объект Proxmox
+
+Требуемые параметры VM:
+
+```text
+VMID:          301
+name:          ai-control
+тип:           VM
+профиль:       debian-vm
+CPU:           2
+RAM:           4096 MB
+диск:          24 GB
+onboot:        наследуется из общего профиля
+protection:    наследуется из общих настроек
+managed pool:  нет
+```
+
+VM создаётся из общего Debian-шаблона проекта.
+
+`pve_management: false` задан явно. Это принципиально: AI Control не должен попадать в собственную область изменения `managed` и управлять жизненным циклом VM, внутри которой сам работает.
+
+## Первоначальная подготовка
+
+Через общий гостевой контур для 301 запрашивается:
+
+```yaml
+bootstrap:
+  - git
+```
+
+Git нужен самой рабочей среде AI Control. Read-only credential закрытого проекта предоставляется отдельно через:
+
+```yaml
+management:
+  - project_repo_read
+```
+
+Для исходящего административного SSH 301 получает собственную identity:
+
+```yaml
+management:
+  - ssh_identity
+```
+
+Закрытый SSH-ключ остаётся только внутри 301.
+
+## Состав ОС
+
+Точный минимальный состав фиксируется в `provision.yaml`.
+
+Базово требуются:
+
+- Debian 13 amd64;
+- CA certificates;
+- curl;
+- Git;
+- jq;
+- OpenSSH client;
+- Python 3;
+- Python virtual environments.
+
+Специфические зависимости конкретного AI-агента должны добавляться вместе с его реальной установкой, а не заранее.
+
+## Структура внутри VM
+
+Целевая структура:
 
 ```text
 /opt/ai-control/
-├── agents/
-│   ├── hermes/
-│   └── <future-agent>/
-├── mcp/
-│   └── proximo/
-├── repos/
+├── agents/          AI-агенты
+├── repos/           рабочие копии репозиториев
 │   └── proxmox/
-└── state/
+├── instructions/    подключаемые инструкции
+├── tools/           вспомогательные программы
+└── state/           постоянное локальное состояние
 
 /etc/proxmox-guest/
-├── ssh/
-│   ├── management_ed25519
-│   ├── management_ed25519.pub
-│   └── github-proxmox-known_hosts
-├── public-keys/
-│   └── management-authorized-keys
-└── credentials/
-    └── github-proxmox-read
+├── ssh/             административная SSH identity
+├── public-keys/     публичный каталог management-ключей
+└── credentials/     внешние credentials гостя
 ```
 
-Ключевое правило:
-
-> Конкретный AI-агент устанавливается в `/opt/ai-control/agents/<agent>/`. Proximo, management SSH identity гостя, локальный public-key catalog и рабочая копия проекта являются общими компонентами `301`, а не собственностью Hermes.
-
-## Последовательность ввода
+Конкретный агент размещается отдельно:
 
 ```text
-1. deploy-guest → Full Clone template 9000
-   → management-authorized-keys
-   → PVE tag management-ssh
-   → verified SSH root deployer
-
-2. management: ssh_identity
-   → создать/проверить стандартную pair внутри 301
-   → private оставить только в 301
-   → зарегистрировать 301.pub на PVE
-   → sync-management-keys
-
-3. management: project_repo_read
-   → обеспечить фиксированный Project Git READ desired state
-
-4. общая AI-платформа
-   → Docker + общие инструменты + Proximo + рабочая копия проекта
-
-5. конкретный агент
-   → Hermes или другой agent
+/opt/ai-control/agents/<agent>/
 ```
 
-## Действующий desired state
+Общие средства AI Control не должны принадлежать каталогу Hermes или любого другого конкретного агента.
 
-Schema v9 использует список management-возможностей, и рабочий `guest.yaml` 301 явно содержит:
-
-```yaml
-management:
-  - ssh_identity
-  - project_repo_read
-```
-
-`ssh_identity` означает только собственную исходящую administrative SSH identity 301; элемент не содержит key path/name или роль `ai-control`.
-
-`project_repo_read` означает только фиксированный read-only доступ к `zsergeyru/proxmox`.
-
-Наличие этих полей в schema/manifest не означает, что соответствующие runtime handlers уже написаны; это отдельно показывает [`../../docs/29-implementation-status.md`](../../docs/29-implementation-status.md).
-
-## Management SSH
-
-301 участвует в management SSH-контуре и должен иметь PVE tag:
-
-```text
-management-ssh
-```
-
-Собственная pair:
-
-```text
-/etc/proxmox-guest/ssh/management_ed25519
-/etc/proxmox-guest/ssh/management_ed25519.pub
-```
-
-Private key остаётся только внутри 301 и используется AI Control для SSH `root@guest`.
-
-Public key deployer регистрирует как:
-
-```text
-/var/lib/proxmox-deployer/public-keys/301.pub
-```
-
-После этого `sync-management-keys` распространяет обновлённый public-key set по участникам `management-ssh`.
-
-301 не пишет в PVE filesystem и не получает SSH-доступ к PVE ради регистрации ключа.
-
-Локальная копия public catalog:
-
-```text
-/etc/proxmox-guest/public-keys/
-└── management-authorized-keys
-```
-
-## Создание гостевой системы самим AI
-
-Для новой Debian VM/LXC management-контура:
-
-```text
-AI agent
-→ читает локальный management-authorized-keys
-→ Proximo / PVE API
-→ создаёт или клонирует object в managed
-→ передаёт весь актуальный public-key set
-→ VM: Cloud-Init sshkeys
-→ LXC: ssh-public-keys
-→ ставит PVE tag management-ssh
-→ запускает и проверяет
-```
-
-Так новая машина сразу доступна существующим management-контуром без прямого обмена private keys между 301 и 311 и без доступа AI к PVE filesystem.
-
-Если новой машине нужна собственная identity, это задаётся её manifest:
-
-```yaml
-management:
-  - ssh_identity
-```
-
-Регистрацию такой pair выполняет PVE-side deploy-контур.
-
-## Project Git READ
-
-301 использует общий read-only GitHub Deploy Key, а не management SSH pair.
-
-Manifest:
-
-```yaml
-management:
-  - project_repo_read
-```
-
-Управляемые guest-local artifacts:
-
-```text
-/etc/proxmox-guest/credentials/github-proxmox-read
-/etc/proxmox-guest/ssh/github-proxmox-known_hosts
-/etc/ssh/ssh_config.d/90-proxmox-project-repo-read.conf
-```
+## Git
 
 Рабочая копия проекта:
 
@@ -159,40 +129,149 @@ management:
 /opt/ai-control/repos/proxmox
 ```
 
-Git READ credential не добавляется в `authorized_keys`. Git write для AI, если понадобится, является отдельным контуром.
-
-## Proximo и граница PVE
-
-Основной MCP — Proximo (`proximo-proxmox`):
+Репозиторий:
 
 ```text
-/opt/ai-control/mcp/proximo/
+git@github.com:zsergeyru/proxmox.git
 ```
 
-AI работает через:
+Базовый доступ — только чтение.
+
+Право записи в GitHub является отдельным полномочием и не появляется автоматически вместе с `project_repo_read`.
+
+## SSH
+
+301 имеет собственную исходящую административную identity:
 
 ```text
-ai-agent@pve!infra
-→ /pool/managed
+/etc/proxmox-guest/ssh/management_ed25519
 ```
 
-301 штатно не получает SSH/root на PVE, не меняет `/etc/proxmox-deployer/`, PVE users/ACL, host network, storage definitions, certificates или PVE repositories.
+Она используется только для разрешённого административного доступа к гостевым ОС.
 
-## Взаимодействие с 311
-
-301 и 311 не обмениваются management keys напрямую:
+Актуальный публичный каталог управляющих ключей доступен в:
 
 ```text
-301 pair → register 301.pub
-311 pair → register 311.pub
-          ↓
-sync-management-keys
-          ↓
-единый public-key set на management-ssh guests
+/etc/proxmox-guest/public-keys/management-authorized-keys
 ```
 
-Ansible остаётся в `311-dev-services`. Прямой SSH из AI Control допустим для диагностики и разовых действий; повторяемая конфигурация выполняется Ansible.
+Прямой SSH подходит для:
 
-## Готовность
+- диагностики;
+- проверки состояния;
+- первичных действий;
+- разовых операций;
+- аварийного восстановления.
 
-Полный перечень приёмочных проверок находится в [`../../docs/51-ai-control-bootstrap.md`](../../docs/51-ai-control-bootstrap.md). До замены `320` должны быть подтверждены как минимум Proximo, ACL `managed`, `management-ssh`, management identity, локальный public-key catalog, Project Git READ и backup.
+Постоянная повторяемая настройка не должна оставаться только набором SSH-команд.
+
+## Proxmox
+
+301 может обращаться к Proxmox через разрешённый REST API.
+
+AI-права должны быть ограничены самим Proxmox и не должны давать возможность:
+
+- изменять собственную VM 301;
+- расширять собственные ACL;
+- администрировать пользователей и токены PVE;
+- менять сеть PVE-хоста;
+- менять определения хранилищ;
+- перезагружать или выключать физический PVE без отдельного решения.
+
+Отдельный MCP-сервер не является обязательным компонентом 301. Если используется MCP или другой адаптер, он остаётся интерфейсом поверх тех же ограниченных полномочий.
+
+## Связь с 910 infra-deployer
+
+301 и 910 имеют разные роли:
+
+```text
+301 ai-control
+→ анализ
+→ принятие решения
+→ взаимодействие с человеком
+→ выбор нужного механизма
+
+910 infra-deployer
+→ Semaphore
+→ OpenTofu
+→ Ansible
+→ Packer
+→ повторяемое инфраструктурное выполнение
+```
+
+Поэтому OpenTofu, управляющий Ansible и Packer не требуется устанавливать непосредственно в 301.
+
+Для штатных повторяемых изменений AI должен использовать специализированный механизм проекта, а не создавать второй аналогичный исполнитель внутри своей VM.
+
+Прямой Proxmox API и SSH остаются доступными для тех операций, для которых они являются правильным механизмом.
+
+## Постоянные и воспроизводимые данные
+
+Обязательному резервному копированию подлежат как минимум:
+
+```text
+/opt/ai-control/state/
+/etc/proxmox-guest/ssh/
+/etc/proxmox-guest/credentials/
+```
+
+Рабочая копия Git и воспроизводимые компоненты AI Control должны восстанавливаться из внешнего источника:
+
+```text
+/opt/ai-control/repos/proxmox/
+/opt/ai-control/agents/
+/opt/ai-control/instructions/
+/opt/ai-control/tools/
+```
+
+Кэш, результаты команд, временные файлы и полученные сведения о текущем состоянии инфраструктуры не являются требуемым состоянием проекта.
+
+## Что не размещается в 301
+
+301 не используется для:
+
+- OpenTofu/Ansible/Packer как основного инфраструктурного исполнителя;
+- Home Assistant и домашней автоматизации;
+- STT/TTS и других общих голосовых сервисов;
+- мониторинга и видеонаблюдения;
+- общего файлового хранилища;
+- прикладных Docker-сервисов, не относящихся к рабочей среде AI.
+
+Общие голосовые AI-сервисы должны оставаться независимыми от перезапуска AI Control.
+
+## Развёртывание
+
+Целевая последовательность:
+
+```text
+guest.yaml
+→ создать/обновить VM 301
+→ административный SSH
+→ management ssh_identity
+→ project_repo_read
+→ bootstrap Git
+→ повторяемая настройка из provision.yaml
+→ установить AI Control
+→ установить основной AI-агент
+→ получить разрешённые внешние credentials
+→ проверить Git, SSH, Proxmox и связь с 910
+```
+
+Жизненный цикл самой VM выполняется внешним управляющим контуром. AI внутри 301 не должен самостоятельно пересоздавать или удалять собственную VM.
+
+## Нумерация
+
+Текущий объект проекта остаётся `301-ai-control`.
+
+Новый план VMID относит AI и голосовые сервисы к диапазону `400–490`, однако перенумерация уже существующих гостей выполняется отдельной задачей. Этот файл не меняет VMID самостоятельно.
+
+## Связанные документы
+
+- [`guest.yaml`](guest.yaml) — параметры VM.
+- [`provision.yaml`](provision.yaml) — требуемое содержимое ОС.
+- [`decisions.md`](decisions.md) — решения по 301.
+- [`../../docs/500-ai/500-overview.md`](../../docs/500-ai/500-overview.md) — обзор AI-контура.
+- [`../../docs/500-ai/510-ai-control.md`](../../docs/500-ai/510-ai-control.md) — устройство AI Control.
+- [`../../docs/500-ai/520-ai-management.md`](../../docs/500-ai/520-ai-management.md) — использование механизмов управления.
+- [`../../docs/700-security/720-ssh-access.md`](../../docs/700-security/720-ssh-access.md) — административный SSH.
+- [`../910-infra-deployer/README.md`](../910-infra-deployer/README.md) — инфраструктурный исполнитель проекта.
