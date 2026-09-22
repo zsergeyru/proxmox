@@ -7,6 +7,7 @@ PROJECT_ID_FILE="/var/lib/infra-deployer/semaphore/project-id"
 
 SECRET_DIR="/etc/infra-deployer/secrets"
 ADMIN_PASSWORD_FILE="${SECRET_DIR}/initial-admin-password"
+SEMAPHORE_API_TOKEN_FILE="${SECRET_DIR}/semaphore-api-token"
 PVE_API_ENV="${SECRET_DIR}/pve-api.env"
 GITHUB_KEY="/root/.ssh/github_proxmox_repo_ed25519"
 GITHUB_KEY_COPY="${SECRET_DIR}/github_project_ed25519"
@@ -19,6 +20,7 @@ PROJECT_BRANCH="${INFRA_PROJECT_BRANCH:-infra-iac-redesign}"
 RECOVER="${INFRA_DEPLOYER_RECOVER:-0}"
 
 COOKIE=""
+AUTH_MODE="cookie"
 
 die() { printf 'ОШИБКА: %s\n' "$*" >&2; exit 1; }
 ok()  { printf '[ОК] %s\n' "$*"; }
@@ -33,13 +35,32 @@ read_env_value() {
     sed -n "s/^${key}=//p" "$file" | head -n1
 }
 
-api() {
+api_cookie() {
     local method=$1 path=$2
     shift 2
     curl -fsS -b "$COOKIE" -X "$method" \
         -H 'Accept: application/json' \
         -H 'Content-Type: application/json' \
         "$@" "${SEMAPHORE_URL}/api${path}"
+}
+
+api_token() {
+    local method=$1 path=$2 token
+    shift 2
+    token="$(cat "$SEMAPHORE_API_TOKEN_FILE")"
+    curl -fsS -X "$method" \
+        -H "Authorization: Bearer $token" \
+        -H 'Accept: application/json' \
+        -H 'Content-Type: application/json' \
+        "$@" "${SEMAPHORE_URL}/api${path}"
+}
+
+api() {
+    if [[ "$AUTH_MODE" == "token" ]]; then
+        api_token "$@"
+    else
+        api_cookie "$@"
+    fi
 }
 
 login() {
@@ -57,6 +78,31 @@ login() {
         -d "$payload" \
         "${SEMAPHORE_URL}/api/auth/login" >/dev/null \
         || die "Не удалось войти в Semaphore API"
+    AUTH_MODE="cookie"
+}
+
+ensure_api_token() {
+    local payload response token
+
+    if [[ -s "$SEMAPHORE_API_TOKEN_FILE" ]]; then
+        AUTH_MODE="token"
+        if api_token GET /user/ >/dev/null 2>&1; then
+            return
+        fi
+        AUTH_MODE="cookie"
+    fi
+
+    login
+    payload='{"name":"infra-deployer setup"}'
+    response="$(api_cookie POST /user/tokens -d "$payload")"
+    token="$(jq -r '.id // empty' <<<"$response")"
+    [[ -n "$token" ]] || die "Semaphore не вернул API token"
+
+    printf '%s\n' "$token" >"$SEMAPHORE_API_TOKEN_FILE"
+    chmod 0600 "$SEMAPHORE_API_TOKEN_FILE"
+    AUTH_MODE="token"
+
+    api_token GET /user/ >/dev/null         || die "Созданный Semaphore API token не проходит проверку"
 }
 
 ensure_project() {
@@ -193,7 +239,7 @@ main() {
 
     persist_github_key
     ensure_ansible_key
-    login
+    ensure_api_token
 
     project_id="$(ensure_project)"
     github_key_id="$(ensure_ssh_key "$project_id" "GitHub project read-only" git "$GITHUB_KEY_COPY")"
