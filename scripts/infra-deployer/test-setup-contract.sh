@@ -32,6 +32,13 @@ grep -q 'infra-deployer-pve-access-check' "$SETUP" \
 grep -q 'infra-deployer-pve-lifecycle-test' "$SETUP" \
     || die "setup.sh не устанавливает lifecycle test"
 
+grep -q 'ln -sfn "$STATUS_COMMAND" /usr/local/bin/infra-deployer-status' "$SETUP" \
+    || die "status command должен быть доступен по короткому имени через pct exec"
+grep -q 'ln -sfn "$ACCESS_CHECK_COMMAND" /usr/local/bin/infra-deployer-pve-access-check' "$SETUP" \
+    || die "PVE access check должен быть доступен по короткому имени через pct exec"
+grep -q 'ln -sfn "$LIFECYCLE_TEST_COMMAND" /usr/local/bin/infra-deployer-pve-lifecycle-test' "$SETUP" \
+    || die "lifecycle test должен быть доступен по короткому имени через pct exec"
+
 grep -q 'render-opentofu-input.py' "$SETUP" \
     || die "setup.sh должен генерировать OpenTofu input"
 
