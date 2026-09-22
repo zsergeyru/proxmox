@@ -24,6 +24,31 @@ scripts/
         └── tests/
 ```
 
+## `infra-deployer/`
+
+Контур настройки специального LXC `910 infra-deployer`.
+
+Основные файлы:
+
+```text
+scripts/infra-deployer/
+├── setup.sh
+├── semaphore-project.sh
+└── status.sh
+```
+
+`setup.sh` устанавливает Docker, подготавливает постоянные каталоги и секреты, запускает Semaphore Server/Runner и передаёт настройку проекта в `semaphore-project.sh`.
+
+`semaphore-project.sh` через Semaphore API создаёт проект `Proxmox Infrastructure`, Key Store и запись закрытого Git-репозитория. Повторный запуск использует отдельный Semaphore API token, поэтому не зависит от сохранения первоначального пароля администратора.
+
+`status.sh` является локальной проверкой готовности `910` и устанавливается как:
+
+```text
+/usr/local/sbin/infra-deployer-status
+```
+
+Публичный bootstrap использует эту команду при итоговой и повторной проверке `910`.
+
 ## `guest_config.py`
 
 Общий модуль преобразования исходной конфигурации гостевой системы в итоговое требуемое состояние.
