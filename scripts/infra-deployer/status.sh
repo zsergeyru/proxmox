@@ -8,8 +8,20 @@ SEMAPHORE_URL="http://127.0.0.1:3000"
 SEMAPHORE_API_TOKEN_FILE="/etc/infra-deployer/secrets/semaphore-api-token"
 PROJECT_ID_FILE="/var/lib/infra-deployer/semaphore-project-id"
 
-die() { printf 'ОШИБКА: %s\n' "$*" >&2; exit 1; }
-ok()  { printf '[ОК] %s\n' "$*"; }
+C_RESET=""
+C_BOLD=""
+C_GREEN=""
+C_RED=""
+
+if [[ "${INFRA_DEPLOYER_COLOR:-0}" == "1" && "${NO_COLOR:-}" == "" ]]; then
+    C_RESET="$(printf '\\033[0m')"
+    C_BOLD="$(printf '\\033[1m')"
+    C_GREEN="$(printf '\\033[32m')"
+    C_RED="$(printf '\\033[31m')"
+fi
+
+die() { printf '%s%sОШИБКА:%s %s\\n' "$C_BOLD" "$C_RED" "$C_RESET" "$*" >&2; exit 1; }
+ok()  { printf '%s%s[ОК]%s %s\\n' "$C_BOLD" "$C_GREEN" "$C_RESET" "$*"; }
 
 usage() {
     cat <<'USAGE'
