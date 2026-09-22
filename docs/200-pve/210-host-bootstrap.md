@@ -105,7 +105,7 @@ owner: Public Bootstrap
 
 `910` не является обычным гостем OpenTofu и не входит в собственное OpenTofu-состояние.
 
-Точные машинные параметры `910` находятся в [`../../guests/910-infra-deployer/bootstrap.yaml`](../../guests/910-infra-deployer/bootstrap.yaml).
+Точные машинные параметры `910` определяет публичный `zsergeyru/proxmox-bootstrap`, потому что закрытый проект ещё недоступен в момент создания контейнера.
 
 Bootstrap различает состояния:
 
@@ -218,7 +218,6 @@ Semaphore работает
 - [`220-host-configuration.md`](220-host-configuration.md) — постоянное состояние PVE.
 - [`230-host-layout.md`](230-host-layout.md) — локальная структура PVE.
 - [`../../guests/910-infra-deployer/README.md`](../../guests/910-infra-deployer/README.md) — описание конкретного `910`.
-- [`../../guests/910-infra-deployer/bootstrap.yaml`](../../guests/910-infra-deployer/bootstrap.yaml) — машинные параметры `910`.
 - [`../300-guests/340-vmid-plan.md`](../300-guests/340-vmid-plan.md) — нумерация VMID/CTID.
 - [`../700-security/710-pve-access.md`](../700-security/710-pve-access.md) — модель доступа к Proxmox.
 - [`../800-operations/830-recovery.md`](../800-operations/830-recovery.md) — восстановление.
