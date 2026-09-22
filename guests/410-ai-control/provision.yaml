@@ -1,0 +1,78 @@
+schema_version: 1
+guest_vmid: 410
+
+system:
+  distribution: debian
+  version: "13"
+  architecture: amd64
+
+  required_packages:
+    - ca-certificates
+    - curl
+    - git
+    - jq
+    - openssh-client
+    - python3
+    - python3-venv
+
+components:
+  ai_control:
+    required: true
+    root: /opt/ai-control
+
+  agents:
+    primary: hermes
+    replaceable: true
+    root: /opt/ai-control/agents
+
+  project_repository:
+    repository: git@github.com:zsergeyru/proxmox.git
+    access: read-only
+    path: /opt/ai-control/repos/proxmox
+
+  instructions:
+    root: /opt/ai-control/instructions
+
+  tools:
+    root: /opt/ai-control/tools
+
+  state:
+    root: /opt/ai-control/state
+    persistent: true
+
+integrations:
+  proxmox:
+    method: rest-api
+    self_management: false
+    managed_pool: managed
+
+  ssh:
+    outbound_identity: /etc/proxmox-guest/ssh/management_ed25519
+    public_key_catalog: /etc/proxmox-guest/public-keys/management-authorized-keys
+
+  infrastructure_executor:
+    guest_vmid: 910
+    name: infra-deployer
+    purpose: Повторяемое выполнение OpenTofu, Ansible и других инфраструктурных задач
+    local_opentofu_required: false
+    local_ansible_controller_required: false
+    local_packer_required: false
+
+boundaries:
+  application_services_allowed: false
+  speech_services_allowed: false
+  general_file_storage_allowed: false
+  member_of_managed_pool: false
+  may_manage_itself_in_proxmox: false
+
+persistence:
+  backup_required:
+    - /opt/ai-control/state
+    - /etc/proxmox-guest/ssh
+    - /etc/proxmox-guest/credentials
+
+  reproducible:
+    - /opt/ai-control/repos/proxmox
+    - /opt/ai-control/agents
+    - /opt/ai-control/instructions
+    - /opt/ai-control/tools
