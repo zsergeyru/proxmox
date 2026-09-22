@@ -22,7 +22,7 @@ RUN set -eux; \
       "https://github.com/opentofu/opentofu/releases/download/v${OPENTOFU_VERSION}/tofu_${OPENTOFU_VERSION}_SHA256SUMS"; \
     grep "  ${tofu_zip}$" /tmp/tofu_SHA256SUMS > /tmp/tofu.check; \
     (cd /tmp && sha256sum -c tofu.check); \
-    unzip -q "/tmp/${tofu_zip}" -d /usr/local/bin; \
+    unzip -oq "/tmp/${tofu_zip}" -d /usr/local/bin; \
     chmod 0755 /usr/local/bin/tofu; \
     rm -f "/tmp/${tofu_zip}" /tmp/tofu_SHA256SUMS /tmp/tofu.check
 
