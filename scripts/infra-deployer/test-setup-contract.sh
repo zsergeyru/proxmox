@@ -93,6 +93,8 @@ grep -q 'TF_VAR_pve_api_token' "$SEMAPHORE_PROJECT" \
     || die "Variable Group должен передавать pve_api_token"
 grep -q 'local name="OpenTofu Plan"' "$SEMAPHORE_PROJECT" \
     || die "Semaphore должен создавать шаблон OpenTofu Plan"
+grep -q 'opentofu_plan_template_id="$(ensure_opentofu_plan_template ' "$SEMAPHORE_PROJECT" \
+    || die "main semaphore-project.sh обязан вызывать создание шаблона OpenTofu Plan"
 grep -q 'scripts/infra-deployer/opentofu-plan.sh' "$SEMAPHORE_PROJECT" \
     || die "OpenTofu Plan должен запускать отдельный безопасный сценарий"
 
