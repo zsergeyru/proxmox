@@ -30,6 +30,9 @@ grep -q 'infra-deployer-pve-access-check' "$SETUP" \
 grep -q 'infra-deployer-pve-lifecycle-test' "$SETUP" \
     || die "setup.sh не устанавливает lifecycle test"
 
+grep -q 'render-opentofu-input.py' "$SETUP" \
+    || die "setup.sh должен генерировать OpenTofu input"
+
 grep -q 'SEMAPHORE_DB_DIALECT=sqlite' "$SETUP" \
     || die "Semaphore должен использовать SQLite в первой версии"
 grep -q 'SEMAPHORE_DB_HOST=/var/lib/semaphore/semaphore.sqlite' "$SETUP" \
@@ -77,7 +80,7 @@ if runner.get('container_name') != 'infra-deployer-runner':
 
 volumes = runner.get('volumes', [])
 required = {
-    '/var/lib/infra-deployer/opentofu/state:/var/lib/infra-deployer/opentofu/state',
+    '/var/lib/infra-deployer/opentofu:/var/lib/infra-deployer/opentofu',
 }
 missing = required.difference(volumes)
 if missing:
