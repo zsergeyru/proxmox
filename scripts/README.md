@@ -35,6 +35,7 @@ scripts/infra-deployer/
 ├── setup.sh
 ├── semaphore-project.sh
 ├── check-pve-access.sh
+├── test-pve-lifecycle.sh
 └── status.sh
 ```
 
@@ -57,6 +58,14 @@ scripts/infra-deployer/
 ```
 
 Публичный bootstrap использует `infra-deployer-status` при итоговой и повторной проверке `910`; внутренняя status-проверка вызывает проверку PVE ACL.
+
+`test-pve-lifecycle.sh` устанавливается как:
+
+```text
+/usr/local/sbin/infra-deployer-pve-lifecycle-test
+```
+
+Это только явный приёмочный тест. Он запускается исключительно с `--apply`, использует временный CTID `9098`, создаёт LXC сразу в `managed`, меняет RAM, запускает, останавливает и удаляет его. Bootstrap и CI автоматически этот тест не выполняют.
 
 ## `guest_config.py`
 
