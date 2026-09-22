@@ -93,8 +93,6 @@ jobs:
       - name: Validate OpenTofu configuration
         run: |
           tofu -chdir=opentofu fmt -check
-          tofu -chdir=opentofu providers lock -platform=linux_amd64
-          cat opentofu/.terraform.lock.hcl
           tofu -chdir=opentofu init -backend=false -lockfile=readonly
           tofu -chdir=opentofu validate
 
