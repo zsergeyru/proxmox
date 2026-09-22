@@ -17,7 +17,6 @@ RUNNER_TMP_DIR="${RUNNER_DIR}/tmp"
 OPENTOFU_DIR="${DATA_DIR}/opentofu"
 STATE_DIR="${OPENTOFU_DIR}/state"
 OPENTOFU_INPUT="${OPENTOFU_DIR}/guests.json"
-PUBLIC_KEY_DIR="${DATA_DIR}/public-keys"
 COMPOSE_DIR="/opt/infra-deployer/compose"
 STATUS_COMMAND="/usr/local/sbin/infra-deployer-status"
 ACCESS_CHECK_COMMAND="/usr/local/sbin/infra-deployer-pve-access-check"
@@ -58,7 +57,6 @@ prepare_directories() {
     install -d -o root -g root -m 0700 "$SECRET_DIR"
     install -d -o 1001 -g 0 -m 0770 "$SEMAPHORE_DIR"
     install -d -o 1001 -g 0 -m 0750 "$RUNNER_DIR" "$RUNNER_TMP_DIR" "$OPENTOFU_DIR" "$STATE_DIR"
-    install -d -o root -g root -m 0755 "$PUBLIC_KEY_DIR"
 
     # Semaphore Server в официальном образе работает от UID 1001 и группы 0.
     # Для уже существующего каталога install -d недостаточно: явно восстанавливаем
@@ -170,14 +168,36 @@ generate_ca_bundle() {
 }
 
 persist_pve_api_secret() {
-    if [[ -f "$PVE_API_ENV" && "$RECOVER" != "1" ]]; then
+    local current_id="" staged_id=""
+
+    if [[ -f "$PVE_API_ENV" ]]; then
         if [[ -n "$PVE_API_SECRET_FILE" && -s "$PVE_API_SECRET_FILE" ]]; then
-            cmp -s "$PVE_API_SECRET_FILE" "$PVE_API_ENV" \
-                || die "Постоянный PVE API secret уже существует и отличается. Для замены требуется recovery."
-            ok "Постоянный PVE API secret уже совпадает со staging secret"
-        else
-            ok "Используется существующий постоянный PVE API credential"
+            if cmp -s "$PVE_API_SECRET_FILE" "$PVE_API_ENV"; then
+                ok "Постоянный PVE API credential уже актуален"
+                return
+            fi
+
+            current_id="$(sed -n 's/^PVE_API_TOKEN_ID=//p' "$PVE_API_ENV" | head -n1)"
+            staged_id="$(sed -n 's/^PVE_API_TOKEN_ID=//p' "$PVE_API_SECRET_FILE" | head -n1)"
+
+            # Одноразовый переход со старой отдельной PVE-учётной записи
+            # на ограниченный token root@pam!infra-deployer.
+            if [[ "$current_id" == "infra-deployer@pve!automation" \
+               && "$staged_id" == "root@pam!infra-deployer" ]]; then
+                install -o root -g root -m 0600 "$PVE_API_SECRET_FILE" "$PVE_API_ENV"
+                ok "PVE API credential переведён на root@pam!infra-deployer"
+                return
+            fi
+
+            [[ "$RECOVER" == "1" ]] \
+                || die "Постоянный PVE API credential отличается от переданного. Для произвольной замены требуется recovery."
+
+            install -o root -g root -m 0600 "$PVE_API_SECRET_FILE" "$PVE_API_ENV"
+            ok "PVE API credential заменён в режиме recovery"
+            return
         fi
+
+        ok "Используется существующий постоянный PVE API credential"
         return
     fi
 
