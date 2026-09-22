@@ -400,9 +400,11 @@ main() {
     ansible_key_id="$(ensure_ssh_key "$project_id" "Ansible managed guests" root "$ANSIBLE_KEY")"
     repository_id="$(ensure_repository "$project_id" "$github_key_id")"
     opentofu_env_id="$(ensure_opentofu_environment "$project_id")"
+    opentofu_plan_template_id="$(ensure_opentofu_plan_template "$project_id" "$repository_id" "$opentofu_env_id")"
 
-    [[ -n "$pve_key_id" && -n "$ansible_key_id" && -n "$repository_id" && -n "$opentofu_env_id" ]]         || die "Не все объекты Semaphore созданы"
-    ok "Проект Semaphore, Key Store, Git repository и OpenTofu Variable Group подготовлены"
+    [[ -n "$pve_key_id" && -n "$ansible_key_id" && -n "$repository_id" && -n "$opentofu_env_id" && -n "$opentofu_plan_template_id" ]] \
+        || die "Не все объекты Semaphore созданы"
+    ok "Проект Semaphore, Key Store, Git repository, OpenTofu Variable Group и шаблон OpenTofu Plan подготовлены"
 }
 
 main "$@"
