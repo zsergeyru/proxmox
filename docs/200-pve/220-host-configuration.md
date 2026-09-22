@@ -76,7 +76,7 @@ VMID 910
 name infra-deployer
 ```
 
-Его точный контракт задаёт [`240-infra-deployer.md`](240-infra-deployer.md).
+Его точные машинные параметры задаёт [`../../guests/910-infra-deployer/bootstrap.yaml`](../../guests/910-infra-deployer/bootstrap.yaml).
 
 ### 2.6. PVE API identity
 
@@ -166,5 +166,5 @@ OpenTofu внутри `910` не управляет:
 
 - [`210-host-bootstrap.md`](210-host-bootstrap.md) — применение минимального контракта.
 - [`230-host-layout.md`](230-host-layout.md) — локальная структура PVE.
-- [`240-infra-deployer.md`](240-infra-deployer.md) — точный контракт `910`.
+- [`../../guests/910-infra-deployer/README.md`](../../guests/910-infra-deployer/README.md) — описание конкретного `910`.
 - [`../700-security/710-pve-access.md`](../700-security/710-pve-access.md) — роли и ACL.
