@@ -3,6 +3,7 @@ set -Eeuo pipefail
 
 SEMAPHORE_URL="http://127.0.0.1:3000"
 PROJECT_NAME="Proxmox Infrastructure"
+OPENTOFU_ENV_NAME="OpenTofu PVE"
 PROJECT_ID_FILE="/var/lib/infra-deployer/semaphore/project-id"
 
 SECRET_DIR="/etc/infra-deployer/secrets"
@@ -233,8 +234,95 @@ ensure_repository() {
     printf '%s' "$id"
 }
 
+ensure_opentofu_environment() {
+    local project_id=$1
+    local endpoint token_id token_secret api_token
+    local environments id existing secret_id env_json payload response
+
+    endpoint="$(read_env_value PVE_API_URL "$PVE_API_ENV")"
+    token_id="$(read_env_value PVE_API_TOKEN_ID "$PVE_API_ENV")"
+    token_secret="$(read_env_value PVE_API_TOKEN_SECRET "$PVE_API_ENV")"
+    [[ -n "$endpoint" && -n "$token_id" && -n "$token_secret" ]]         || die "PVE API credential неполон для OpenTofu"
+
+    api_token="${token_id}=${token_secret}"
+    env_json="$(jq -cn --arg endpoint "$endpoint" '{TF_VAR_pve_endpoint:$endpoint}')"
+
+    environments="$(api GET "/project/${project_id}/environment?sort=name&order=asc")"
+    id="$(jq -r --arg name "$OPENTOFU_ENV_NAME"         '.[] | select(.name == $name) | .id' <<<"$environments" | head -n1)"
+
+    if [[ -z "$id" ]]; then
+        payload="$(jq -cn             --arg name "$OPENTOFU_ENV_NAME"             --arg env "$env_json"             --arg secret "$api_token"             --argjson project_id "$project_id"             '{
+                name:$name,
+                project_id:$project_id,
+                password:null,
+                json:"{}",
+                env:$env,
+                secrets:[{
+                    name:"TF_VAR_pve_api_token",
+                    secret:$secret,
+                    type:"env",
+                    operation:"create"
+                }]
+            }')"
+        response="$(api POST "/project/${project_id}/environment" -d "$payload")"
+        id="$(jq -r '.id // empty' <<<"$response")"
+        [[ -n "$id" ]] || die "Semaphore не вернул id Variable Group OpenTofu"
+        printf '%s' "$id"
+        return
+    fi
+
+    existing="$(api GET "/project/${project_id}/environment/${id}")"
+    secret_id="$(jq -r         '.secrets[]? | select(.name == "TF_VAR_pve_api_token" and .type == "env") | .id'         <<<"$existing" | head -n1)"
+
+    if [[ -z "$secret_id" ]]; then
+        payload="$(jq -cn             --arg name "$OPENTOFU_ENV_NAME"             --arg env "$env_json"             --arg secret "$api_token"             --argjson id "$id"             --argjson project_id "$project_id"             '{
+                id:$id,
+                name:$name,
+                project_id:$project_id,
+                password:null,
+                json:"{}",
+                env:$env,
+                secrets:[{
+                    name:"TF_VAR_pve_api_token",
+                    secret:$secret,
+                    type:"env",
+                    operation:"create"
+                }]
+            }')"
+    elif [[ "$RECOVER" == "1" ]]; then
+        payload="$(jq -cn             --arg name "$OPENTOFU_ENV_NAME"             --arg env "$env_json"             --arg secret "$api_token"             --argjson id "$id"             --argjson secret_id "$secret_id"             --argjson project_id "$project_id"             '{
+                id:$id,
+                name:$name,
+                project_id:$project_id,
+                password:null,
+                json:"{}",
+                env:$env,
+                secrets:[{
+                    id:$secret_id,
+                    name:"TF_VAR_pve_api_token",
+                    secret:$secret,
+                    type:"env",
+                    operation:"update"
+                }]
+            }')"
+    else
+        payload="$(jq -cn             --arg name "$OPENTOFU_ENV_NAME"             --arg env "$env_json"             --argjson id "$id"             --argjson project_id "$project_id"             '{
+                id:$id,
+                name:$name,
+                project_id:$project_id,
+                password:null,
+                json:"{}",
+                env:$env,
+                secrets:[]
+            }')"
+    fi
+
+    api PUT "/project/${project_id}/environment/${id}" -d "$payload" >/dev/null
+    printf '%s' "$id"
+}
+
 main() {
-    local project_id github_key_id pve_key_id ansible_key_id repository_id
+    local project_id github_key_id pve_key_id ansible_key_id repository_id opentofu_env_id
 
     command -v jq >/dev/null 2>&1 || die "Не найден jq"
     command -v curl >/dev/null 2>&1 || die "Не найден curl"
@@ -250,9 +338,10 @@ main() {
     pve_key_id="$(ensure_pve_key "$project_id")"
     ansible_key_id="$(ensure_ssh_key "$project_id" "Ansible managed guests" root "$ANSIBLE_KEY")"
     repository_id="$(ensure_repository "$project_id" "$github_key_id")"
+    opentofu_env_id="$(ensure_opentofu_environment "$project_id")"
 
-    [[ -n "$pve_key_id" && -n "$ansible_key_id" && -n "$repository_id" ]] || die "Не все объекты Semaphore созданы"
-    ok "Проект Semaphore, Key Store и Git repository подготовлены"
+    [[ -n "$pve_key_id" && -n "$ansible_key_id" && -n "$repository_id" && -n "$opentofu_env_id" ]]         || die "Не все объекты Semaphore созданы"
+    ok "Проект Semaphore, Key Store, Git repository и OpenTofu Variable Group подготовлены"
 }
 
 main "$@"
