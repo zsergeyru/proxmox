@@ -14,6 +14,7 @@ docker compose version >/dev/null 2>&1 || die "Docker Compose недоступе
 required_file /etc/infra-deployer/secrets/pve-api.env
 required_file /etc/infra-deployer/secrets/semaphore-server.env
 required_file /etc/infra-deployer/secrets/semaphore-runner.env
+required_file /etc/infra-deployer/secrets/semaphore-api-token
 required_file /etc/infra-deployer/secrets/github_project_ed25519
 required_file /etc/infra-deployer/secrets/ansible_ed25519
 required_file /var/lib/infra-deployer/public-keys/ansible_ed25519.pub
