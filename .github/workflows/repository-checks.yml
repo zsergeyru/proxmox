@@ -63,6 +63,23 @@ jobs:
           # shared globals declared in 00-common.sh are consumed across files.
           shellcheck -S warning -e SC2034 "${files[@]}"
 
+      - name: Validate infra-deployer Compose
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import yaml
+
+          path = Path("guests/910-infra-deployer/compose/docker-compose.yml")
+          data = yaml.safe_load(path.read_text(encoding="utf-8"))
+          services = data.get("services", {})
+          if set(services) != {"semaphore", "runner"}:
+              raise SystemExit(f"Unexpected services: {sorted(services)}")
+          if services["semaphore"].get("image") != "semaphoreui/semaphore:${SEMAPHORE_VERSION}":
+              raise SystemExit("Semaphore image must use pinned version variable")
+          if "build" not in services["runner"]:
+              raise SystemExit("Runner must use the project Dockerfile")
+          PY
+
       - name: Run deploy runtime contract checks
         run: bash scripts/pve/setup/tests/test-deploy-runtime-contract.sh
 
