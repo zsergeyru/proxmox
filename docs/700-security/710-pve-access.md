@@ -152,5 +152,5 @@ Secret токена `infra-deployer@pve!automation` не хранится в Git
 - [`700-overview.md`](700-overview.md) — общая модель безопасности.
 - [`720-ssh-access.md`](720-ssh-access.md) — SSH-доступ.
 - [`../200-pve/210-host-bootstrap.md`](../200-pve/210-host-bootstrap.md) — создание идентичности.
-- [`../200-pve/240-infra-deployer.md`](../200-pve/240-infra-deployer.md) — контракт `910`.
+- [`../../guests/910-infra-deployer/README.md`](../../guests/910-infra-deployer/README.md) — описание конкретного `910`.
 - [`../300-guests/340-vmid-plan.md`](../300-guests/340-vmid-plan.md) — специальные диапазоны VMID.
