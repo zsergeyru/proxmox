@@ -1,0 +1,133 @@
+schema_version: 1
+guest_vmid: 910
+
+system:
+  distribution: debian
+  version: "13"
+  architecture: amd64
+
+  required_packages:
+    - ca-certificates
+    - curl
+    - git
+    - gnupg
+    - jq
+    - openssh-client
+    - openssl
+    - python3-yaml
+
+docker:
+  source: docker-official-repository
+  service:
+    name: docker
+    enabled: true
+    state: running
+
+  required_packages:
+    - docker-ce
+    - docker-ce-cli
+    - containerd.io
+    - docker-buildx-plugin
+    - docker-compose-plugin
+
+  compose_file: compose/docker-compose.yml
+
+  services:
+    semaphore:
+      container_name: infra-deployer-semaphore
+      image: semaphoreui/semaphore:v2.18.30
+      restart: unless-stopped
+      ports:
+        - "3000:3000"
+      database: sqlite
+      data_path: /var/lib/infra-deployer/semaphore
+
+    runner:
+      container_name: infra-deployer-runner
+      image: infra-deployer-runner:v2.18.30
+      base_image: semaphoreui/runner:v2.18.30
+      restart: unless-stopped
+
+      system_packages:
+        - ca-certificates
+        - curl
+        - unzip
+        - git
+        - openssh-client
+        - bash
+        - python3
+        - py3-pip
+
+      tools:
+        ansible: bundled-with-semaphore-runner
+        opentofu: "1.12.6"
+        packer: "1.15.4"
+
+      python_packages:
+        proxmoxer: ">=2.2.0,<3"
+        requests: ">=2.32,<3"
+
+      mounts:
+        - /var/lib/infra-deployer/runner:/var/lib/semaphore
+        - /var/lib/infra-deployer/runner/tmp:/tmp/semaphore
+        - /etc/infra-deployer/ca:/etc/infra-deployer/ca:ro
+        - /var/lib/infra-deployer/opentofu:/var/lib/infra-deployer/opentofu
+
+paths:
+  configuration: /etc/infra-deployer
+  secrets: /etc/infra-deployer/secrets
+  ca: /etc/infra-deployer/ca
+  data: /var/lib/infra-deployer
+  semaphore_data: /var/lib/infra-deployer/semaphore
+  runner_data: /var/lib/infra-deployer/runner
+  opentofu_data: /var/lib/infra-deployer/opentofu
+  opentofu_state: /var/lib/infra-deployer/opentofu/state/proxmox.tfstate
+  compose: /opt/infra-deployer/compose
+  bootstrap_repository: /var/lib/infra-deployer/bootstrap-repo
+  log: /var/log/infra-deployer/bootstrap.log
+
+access:
+  pve:
+    method: https-api
+    identity: root@pam!infra-deployer
+    privilege_separation: true
+    verify_tls: true
+    managed_scope: managed
+
+  github:
+    repository: git@github.com:zsergeyru/proxmox.git
+    access: read-only-deploy-key
+
+semaphore:
+  project: Proxmox Infrastructure
+  repository: proxmox
+
+  objects:
+    - GitHub project read-only
+    - OpenTofu PVE
+    - OpenTofu Plan
+
+persistence:
+  backup_required:
+    - /etc/infra-deployer/secrets
+    - /var/lib/infra-deployer/semaphore
+    - /var/lib/infra-deployer/opentofu/state
+
+  reproducible:
+    - /var/lib/infra-deployer/bootstrap-repo
+    - /opt/infra-deployer/compose
+    - docker-images
+    - runner-task-cache
+
+checks:
+  commands:
+    - infra-deployer-status
+    - infra-deployer-status --full
+    - infra-deployer-pve-access-check
+    - infra-deployer-pve-lifecycle-test --apply
+
+boundaries:
+  member_of_managed_pool: false
+  opentofu_manages_guest_910: false
+  permanent_root_ssh_to_pve: false
+  application_workloads_allowed: false
