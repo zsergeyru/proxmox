@@ -22,7 +22,7 @@ umask 077
 
 python3 "$REPO_ROOT/scripts/infra-deployer/render-opentofu-input.py"     --output "$GUEST_STATE_FILE"
 
-tofu -chdir="$OPENTOFU_DIR" init     -input=false     -no-color
+tofu -chdir="$OPENTOFU_DIR" init     -input=false     -no-color     -lockfile=readonly
 
 set +e
 tofu -chdir="$OPENTOFU_DIR" plan     -input=false     -no-color     -lock-timeout=30s     -detailed-exitcode
