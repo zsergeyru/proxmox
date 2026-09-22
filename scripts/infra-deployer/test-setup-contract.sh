@@ -50,6 +50,17 @@ grep -q -- '--user 1001:0' "$SETUP" \
 grep -q 'repair_semaphore_storage' "$SETUP" \
     || die "Восстановление прав SQLite должно вызываться при запуске Semaphore"
 
+grep -q 'PROJECT_ID_FILE="/var/lib/infra-deployer/semaphore-project-id"' "$SEMAPHORE_PROJECT" \
+    || die "Semaphore project-id должен храниться вне каталога SQLite"
+grep -q 'PROJECT_ID_FILE="/var/lib/infra-deployer/semaphore-project-id"' "$STATUS" \
+    || die "status.sh должен читать Semaphore project-id из постоянного служебного пути"
+if grep -q '/var/lib/infra-deployer/semaphore/project-id' "$SEMAPHORE_PROJECT" "$STATUS"; then
+    die "project-id запрещено хранить внутри каталога SQLite Semaphore"
+fi
+if grep -qE 'install -d .*\$\(dirname "\$PROJECT_ID_FILE"\)' "$SEMAPHORE_PROJECT"; then
+    die "semaphore-project.sh не должен менять права родительского каталога project-id"
+fi
+
 grep -q '/etc/semaphore/requirements.txt' "$DOCKERFILE" \
     || die "Runner Dockerfile должен передавать Python requirements Semaphore runner"
 grep -q '^proxmoxer' "$REQ" \
