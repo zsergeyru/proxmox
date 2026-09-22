@@ -101,6 +101,27 @@ forbid_permissions() {
         || die "На $path обнаружены запрещённые privileges:$found"
 }
 
+forbid_unmanaged_guest_mutation() {
+    local pool_json resources_json vmid
+    declare -A managed_vmids=()
+
+    pool_json="$(api_get "/pools/$MANAGED_POOL")" \
+        || die "Не удалось получить состав pool $MANAGED_POOL"
+    resources_json="$(api_get "/cluster/resources?type=vm")" \
+        || die "Не удалось получить список VM/LXC"
+
+    while IFS= read -r vmid; do
+        [[ -n "$vmid" ]] || continue
+        managed_vmids["$vmid"]=1
+    done < <(jq -r '.data.members[]? | .vmid // empty' <<<"$pool_json")
+
+    while IFS= read -r vmid; do
+        [[ -n "$vmid" ]] || continue
+        [[ -z "${managed_vmids[$vmid]:-}" ]] || continue
+        forbid_permissions "/vms/$vmid" "$FORBIDDEN_VM_PRIVS"
+    done < <(jq -r '.data[]? | .vmid // empty' <<<"$resources_json")
+}
+
 api_get "/version" | jq -e '.data.version // .data.release' >/dev/null \
     || die "PVE API token не прошёл проверку авторизации"
 
@@ -114,6 +135,7 @@ require_permissions "/sdn/zones/localnetwork/vmbr0" "SDN.Audit SDN.Use"
 
 forbid_permissions "/vms/$INFRA_DEPLOYER_VMID" "$FORBIDDEN_VM_PRIVS"
 forbid_permissions "/" "$FORBIDDEN_ROOT_PRIVS"
+forbid_unmanaged_guest_mutation
 
 unset PVE_API_TOKEN_SECRET AUTH_HEADER
 ok "PVE API access infra-deployer соответствует контракту"
