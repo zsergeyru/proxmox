@@ -10,6 +10,7 @@ required_file() {
 
 command -v docker >/dev/null 2>&1 || die "Docker не установлен"
 docker compose version >/dev/null 2>&1 || die "Docker Compose недоступен"
+[[ -x /usr/local/sbin/infra-deployer-pve-access-check ]]     || die "Отсутствует infra-deployer-pve-access-check"
 
 required_file /etc/infra-deployer/secrets/pve-api.env
 required_file /etc/infra-deployer/secrets/semaphore-server.env
@@ -32,5 +33,7 @@ docker exec infra-deployer-runner tofu version >/dev/null     || die "OpenTofu �
 docker exec infra-deployer-runner packer version >/dev/null     || die "Packer недоступен"
 docker exec infra-deployer-runner ansible --version >/dev/null     || die "Ansible недоступен"
 docker exec infra-deployer-runner python3 -c 'import proxmoxer' >/dev/null     || die "proxmoxer недоступен"
+
+/usr/local/sbin/infra-deployer-pve-access-check >/dev/null     || die "PVE API access не соответствует контракту"
 
 ok "infra-deployer готов"
