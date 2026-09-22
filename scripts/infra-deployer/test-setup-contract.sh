@@ -12,11 +12,12 @@ REQ="$ROOT/guests/910-infra-deployer/compose/runner/requirements.txt"
 PLAN="$ROOT/scripts/infra-deployer/opentofu-plan.sh"
 SEMAPHORE_PROJECT="$ROOT/scripts/infra-deployer/semaphore-project.sh"
 PVE_BOOTSTRAP_ACCESS="$ROOT/scripts/infra-deployer/pve-bootstrap-access.sh"
+OPENTOFU_LOCK="$ROOT/opentofu/.terraform.lock.hcl"
 
 die() { printf 'ОШИБКА: %s\n' "$*" >&2; exit 1; }
 ok()  { printf '[ОК] %s\n' "$*"; }
 
-for file in "$SETUP" "$STATUS" "$ACCESS" "$LIFECYCLE" "$COMPOSE" "$DOCKERFILE" "$REQ" "$PLAN" "$SEMAPHORE_PROJECT" "$PVE_BOOTSTRAP_ACCESS"; do
+for file in "$SETUP" "$STATUS" "$ACCESS" "$LIFECYCLE" "$COMPOSE" "$DOCKERFILE" "$REQ" "$PLAN" "$SEMAPHORE_PROJECT" "$PVE_BOOTSTRAP_ACCESS" "$OPENTOFU_LOCK"; do
     [[ -s "$file" ]] || die "Отсутствует обязательный файл: $file"
 done
 
@@ -52,6 +53,11 @@ grep -q 'API_TOKEN_NAME="infra-deployer"' "$PVE_BOOTSTRAP_ACCESS" \
     || die "PVE bootstrap access должен создавать отдельный infra-deployer token"
 grep -q -- '--privsep 1' "$PVE_BOOTSTRAP_ACCESS" \
     || die "PVE API token должен использовать privsep=1"
+
+grep -q '^rollback_new_api_token() {' "$PVE_BOOTSTRAP_ACCESS" \
+    || die "Новый PVE API token должен откатываться при ошибке передачи secret"
+grep -q 'rm -f -- "$tmp"' "$PVE_BOOTSTRAP_ACCESS" \
+    || die "Временный PVE API secret должен удаляться и при ошибке передачи"
 for role in PVEAuditor PVEVMAdmin PVEDatastoreUser PVESDNUser; do
     grep -q "\"$role\"" "$PVE_BOOTSTRAP_ACCESS" \
         || die "В PVE bootstrap access отсутствует штатная роль $role"
@@ -108,6 +114,15 @@ grep -q 'infra-deployer-status --full' "$STATUS" \
 grep -q 'api2/json/version' "$STATUS" \
     || die "Базовый status должен реально проверять PVE API credential"
 
+grep -q 'GitHub project read-only' "$STATUS" \
+    || die "status.sh должен проверять GitHub SSH key Semaphore"
+grep -q 'PROJECT_REPO="git@github.com:zsergeyru/proxmox.git"' "$STATUS" \
+    || die "status.sh должен проверять Git repository Semaphore"
+grep -q '^forbid_unmanaged_guest_mutation() {' "$ACCESS" \
+    || die "Полная проверка PVE access должна запрещать изменения вне managed"
+grep -q '/cluster/resources?type=vm' "$ACCESS" \
+    || die "Проверка PVE access должна просматривать все существующие VM/LXC"
+
 if grep -qE '(^|[[:space:]])pct create[[:space:]]+910|(^|[[:space:]])qm create[[:space:]]+910' "$SETUP"; then
     die "Приватный setup не должен создавать виртуальный объект 910"
 fi
@@ -121,6 +136,15 @@ if grep -qE 'tofu[[:space:]].*(apply|destroy)' "$PLAN"; then
 fi
 
 grep -q 'tofu -chdir="$OPENTOFU_DIR" plan' "$PLAN"     || die "OpenTofu Plan должен выполнять tofu plan"
+
+grep -q -- '-lockfile=readonly' "$PLAN" \
+    || die "OpenTofu Plan должен использовать только зафиксированный lock file"
+grep -q 'provider "registry.opentofu.org/bpg/proxmox"' "$OPENTOFU_LOCK" \
+    || die "OpenTofu lock file должен фиксировать bpg/proxmox из OpenTofu Registry"
+grep -q 'version     = "0.112.0"' "$OPENTOFU_LOCK" \
+    || die "OpenTofu lock file должен фиксировать bpg/proxmox 0.112.0"
+grep -q '"zh:1fa5fb40d2506db678b5f989d4929005680a187f6c91378ca5433fa490d9029b"' "$OPENTOFU_LOCK" \
+    || die "OpenTofu lock file должен содержать checksum linux_amd64"
 
 grep -q 'OPENTOFU_ENV_NAME="OpenTofu PVE"' "$SEMAPHORE_PROJECT" \
     || die "Semaphore должен создавать Variable Group OpenTofu PVE"
@@ -148,8 +172,53 @@ grep -q 'allow_override_args_in_task:false' "$SEMAPHORE_PROJECT" \
 grep -q 'allow_override_branch_in_task:false' "$SEMAPHORE_PROJECT" \
     || die "OpenTofu Plan не должен разрешать переопределение Git-ветки"
 
-grep -q '^shopt -s inherit_errexit$' "$SEMAPHORE_PROJECT" \
+grep -q '^shopt -s inherit_errexitgrep -q "'{id:\$id,name:\$name,project_id:\$project_id,git_url:\$git_url" "$SEMAPHORE_PROJECT" \
+    || die "PUT Git repository должен передавать repository id в теле"
+grep -q 'id:\$id,' "$SEMAPHORE_PROJECT" \
+    || die "PUT OpenTofu Plan должен передавать template id в теле"
+
+python3 - "$COMPOSE" <<'PY'
+from pathlib import Path
+import sys, yaml
+
+path = Path(sys.argv[1])
+data = yaml.safe_load(path.read_text(encoding='utf-8'))
+services = data.get('services', {})
+if set(services) != {'semaphore', 'runner'}:
+    raise SystemExit(f'unexpected services: {sorted(services)}')
+
+server = services['semaphore']
+runner = services['runner']
+
+if server.get('image') != 'semaphoreui/semaphore:${SEMAPHORE_VERSION}':
+    raise SystemExit('Semaphore image must use pinned version variable')
+
+if runner.get('container_name') != 'infra-deployer-runner':
+    raise SystemExit('unexpected runner container name')
+
+volumes = runner.get('volumes', [])
+required = {
+    '/var/lib/infra-deployer/opentofu:/var/lib/infra-deployer/opentofu',
+}
+missing = required.difference(volumes)
+if missing:
+    raise SystemExit(f'missing runner volumes: {sorted(missing)}')
+
+for volume in volumes:
+    if 'pve-api.env' in volume:
+        raise SystemExit('PVE API secret must not be bind-mounted directly into Runner')
+    if 'public-keys' in volume:
+        raise SystemExit('Unused Ansible public-key volume must not be mounted into Runner')
+PY
+
+ok "Контракт setup infra-deployer проверен"
+ "$SEMAPHORE_PROJECT" \
     || die "Ошибки API внутри командных подстановок должны останавливать semaphore-project.sh"
+
+grep -q '^unique_id_by_name() {' "$SEMAPHORE_PROJECT" \
+    || die "Semaphore setup должен останавливать настройку при дубликатах объектов"
+grep -q 'unique_id_by_name "$repos" "proxmox" "Git repository"' "$SEMAPHORE_PROJECT" \
+    || die "Git repository Semaphore должен проверяться на дубликаты"
 grep -q "'{id:\$id,name:\$name,project_id:\$project_id,git_url:\$git_url" "$SEMAPHORE_PROJECT" \
     || die "PUT Git repository должен передавать repository id в теле"
 grep -q 'id:\$id,' "$SEMAPHORE_PROJECT" \
