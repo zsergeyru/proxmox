@@ -29,4 +29,3 @@ services:
       - /var/lib/infra-deployer/runner/tmp:/tmp/semaphore
       - /etc/infra-deployer/ca:/etc/infra-deployer/ca:ro
       - /var/lib/infra-deployer/opentofu:/var/lib/infra-deployer/opentofu
-      - /var/lib/infra-deployer/public-keys:/var/lib/infra-deployer/public-keys:ro
