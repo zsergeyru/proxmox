@@ -4,7 +4,7 @@ set -Eeuo pipefail
 SEMAPHORE_URL="http://127.0.0.1:3000"
 PROJECT_NAME="Proxmox Infrastructure"
 OPENTOFU_ENV_NAME="OpenTofu PVE"
-PROJECT_ID_FILE="/var/lib/infra-deployer/semaphore/project-id"
+PROJECT_ID_FILE="/var/lib/infra-deployer/semaphore-project-id"
 
 SECRET_DIR="/etc/infra-deployer/secrets"
 ADMIN_PASSWORD_FILE="${SECRET_DIR}/initial-admin-password"
@@ -146,7 +146,6 @@ ensure_project() {
         [[ -n "$id" ]] || die "Semaphore создал проект, но не вернул id"
     fi
 
-    install -d -o root -g root -m 0750 "$(dirname "$PROJECT_ID_FILE")"
     printf '%s\n' "$id" >"$PROJECT_ID_FILE"
     chmod 0640 "$PROJECT_ID_FILE"
     printf '%s' "$id"
