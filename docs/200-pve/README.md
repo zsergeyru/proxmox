@@ -10,16 +10,17 @@
 | [`210-host-bootstrap.md`](210-host-bootstrap.md) | Первоначальная подготовка PVE и создание/восстановление `910` |
 | [`220-host-configuration.md`](220-host-configuration.md) | Минимальное постоянное состояние самого PVE-хоста |
 | [`230-host-layout.md`](230-host-layout.md) | Постоянные локальные файлы и объекты, которые остаются на PVE |
-| [`240-infra-deployer.md`](240-infra-deployer.md) | Точный контракт постоянного LXC `910 infra-deployer` |
 | [`290-decisions.md`](290-decisions.md) | Причины ключевых решений по PVE-хосту |
 
 ## Порядок чтения
 
 Для первого знакомства:
 
-`200 → 210 → 220 → 230 → 240`
+`200 → 210 → 220 → 230`
 
 `290-decisions.md` используется для объяснения причин решений и рассмотренных альтернатив.
+
+Документация конкретного `910 infra-deployer` находится в [`../../guests/910-infra-deployer/README.md`](../../guests/910-infra-deployer/README.md).
 
 ## Основная граница
 
