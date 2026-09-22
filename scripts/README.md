@@ -43,7 +43,7 @@ scripts/infra-deployer/
 
 `semaphore-project.sh` через Semaphore API создаёт проект `Proxmox Infrastructure`, Key Store и запись закрытого Git-репозитория. Повторный запуск использует отдельный Semaphore API token, поэтому не зависит от сохранения первоначального пароля администратора.
 
-`check-pve-access.sh` без изменения состояния проверяет фактические права `infra-deployer@pve!automation` через HTTPS API, включая запрет изменений `910`.
+`check-pve-access.sh` без изменения состояния проверяет фактические права ограниченного token `root@pam!infra-deployer` с `privsep=1` через HTTPS API, включая запрет изменений `910`.
 
 `status.sh` является общей локальной проверкой готовности `910` и устанавливается как:
 
