@@ -209,7 +209,7 @@ ensure_ansible_key() {
 
 ensure_repository() {
     local project_id=$1 ssh_key_id=$2
-    local repos id payload
+    local repos id payload response
 
     repos="$(api GET "/project/${project_id}/repositories?sort=name&order=asc")"
     id="$(jq -r '.[] | select(.name == "proxmox") | .id' <<<"$repos" | head -n1)"
@@ -223,14 +223,18 @@ ensure_repository() {
         '{name:$name,project_id:$project_id,git_url:$git_url,git_branch:$git_branch,ssh_key_id:$ssh_key_id}')"
 
     if [[ -z "$id" ]]; then
-        api POST "/project/${project_id}/repositories" -d "$payload" >/dev/null
+        response="$(api POST "/project/${project_id}/repositories" -d "$payload")"
+        id="$(jq -r '.id // empty' <<<"$response")"
     else
         api PUT "/project/${project_id}/repositories/${id}" -d "$payload" >/dev/null
     fi
+
+    [[ -n "$id" ]] || die "Semaphore не вернул id Git repository"
+    printf '%s' "$id"
 }
 
 main() {
-    local project_id github_key_id pve_key_id ansible_key_id
+    local project_id github_key_id pve_key_id ansible_key_id repository_id
 
     command -v jq >/dev/null 2>&1 || die "Не найден jq"
     command -v curl >/dev/null 2>&1 || die "Не найден curl"
@@ -245,9 +249,9 @@ main() {
     github_key_id="$(ensure_ssh_key "$project_id" "GitHub project read-only" git "$GITHUB_KEY_COPY")"
     pve_key_id="$(ensure_pve_key "$project_id")"
     ansible_key_id="$(ensure_ssh_key "$project_id" "Ansible managed guests" root "$ANSIBLE_KEY")"
-    ensure_repository "$project_id" "$github_key_id"
+    repository_id="$(ensure_repository "$project_id" "$github_key_id")"
 
-    [[ -n "$pve_key_id" && -n "$ansible_key_id" ]] || die "Не все ключи Semaphore созданы"
+    [[ -n "$pve_key_id" && -n "$ansible_key_id" && -n "$repository_id" ]] || die "Не все объекты Semaphore созданы"
     ok "Проект Semaphore, Key Store и Git repository подготовлены"
 }
 
