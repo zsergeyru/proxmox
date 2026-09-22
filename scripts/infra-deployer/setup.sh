@@ -266,9 +266,13 @@ configure_semaphore_project() {
         bash "$REPO_ROOT/scripts/infra-deployer/semaphore-project.sh"
 }
 
-install_status_command() {
+install_local_commands() {
     install -o root -g root -m 0755 \
         "$REPO_ROOT/scripts/infra-deployer/status.sh" "$STATUS_COMMAND"
+    install -o root -g root -m 0755 \
+        "$REPO_ROOT/scripts/infra-deployer/check-pve-access.sh" "$ACCESS_CHECK_COMMAND"
+    install -o root -g root -m 0755 \
+        "$REPO_ROOT/scripts/infra-deployer/test-pve-lifecycle.sh" "$LIFECYCLE_TEST_COMMAND"
 }
 
 verify_runner_tools() {
