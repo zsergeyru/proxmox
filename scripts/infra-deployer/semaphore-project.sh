@@ -36,24 +36,52 @@ read_env_value() {
     sed -n "s/^${key}=//p" "$file" | head -n1
 }
 
+api_call() {
+    local method=$1 path=$2
+    shift 2
+    local body_file http_code rc
+
+    body_file="$(mktemp /tmp/semaphore-api-body.XXXXXX)"
+    rc=0
+    http_code="$(curl -sS -o "$body_file" -w '%{http_code}' \
+        -X "$method" \
+        -H 'Accept: application/json' \
+        -H 'Content-Type: application/json' \
+        "$@" "${SEMAPHORE_URL}/api${path}")" || rc=$?
+
+    if ((rc != 0)); then
+        [[ ! -s "$body_file" ]] || cat "$body_file" >&2
+        rm -f "$body_file"
+        return "$rc"
+    fi
+
+    if [[ ! "$http_code" =~ ^2[0-9][0-9]$ ]]; then
+        printf 'Semaphore API %s %s вернул HTTP %s: ' "$method" "$path" "$http_code" >&2
+        if [[ -s "$body_file" ]]; then
+            cat "$body_file" >&2
+            printf '\n' >&2
+        else
+            printf '(пустой ответ)\n' >&2
+        fi
+        rm -f "$body_file"
+        return 22
+    fi
+
+    cat "$body_file"
+    rm -f "$body_file"
+}
+
 api_cookie() {
     local method=$1 path=$2
     shift 2
-    curl -fsS -b "$COOKIE" -X "$method" \
-        -H 'Accept: application/json' \
-        -H 'Content-Type: application/json' \
-        "$@" "${SEMAPHORE_URL}/api${path}"
+    api_call "$method" "$path" -b "$COOKIE" "$@"
 }
 
 api_token() {
     local method=$1 path=$2 token
     shift 2
     token="$(cat "$SEMAPHORE_API_TOKEN_FILE")"
-    curl -fsS -X "$method" \
-        -H "Authorization: Bearer $token" \
-        -H 'Accept: application/json' \
-        -H 'Content-Type: application/json' \
-        "$@" "${SEMAPHORE_URL}/api${path}"
+    api_call "$method" "$path" -H "Authorization: Bearer $token" "$@"
 }
 
 api() {
