@@ -76,7 +76,7 @@ VMID 910
 name infra-deployer
 ```
 
-Его точные машинные параметры задаёт [`../../guests/910-infra-deployer/bootstrap.yaml`](../../guests/910-infra-deployer/bootstrap.yaml).
+Его точные машинные параметры задаёт публичный `zsergeyru/proxmox-bootstrap`; закрытый проект хранит только документацию конкретного гостя.
 
 ### 2.6. PVE API identity
 
