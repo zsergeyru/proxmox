@@ -6,7 +6,7 @@ PVE_ENV="/etc/infra-deployer/secrets/pve-api.env"
 CA_BUNDLE="/etc/infra-deployer/ca/ca-bundle.crt"
 SEMAPHORE_URL="http://127.0.0.1:3000"
 SEMAPHORE_API_TOKEN_FILE="/etc/infra-deployer/secrets/semaphore-api-token"
-PROJECT_ID_FILE="/var/lib/infra-deployer/semaphore/project-id"
+PROJECT_ID_FILE="/var/lib/infra-deployer/semaphore-project-id"
 
 die() { printf 'ОШИБКА: %s\n' "$*" >&2; exit 1; }
 ok()  { printf '[ОК] %s\n' "$*"; }
