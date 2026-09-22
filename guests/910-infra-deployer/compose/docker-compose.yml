@@ -28,6 +28,5 @@ services:
       - /var/lib/infra-deployer/runner:/var/lib/semaphore
       - /var/lib/infra-deployer/runner/tmp:/tmp/semaphore
       - /etc/infra-deployer/ca:/etc/infra-deployer/ca:ro
-      - /etc/infra-deployer/secrets/pve-api.env:/run/infra-deployer/pve-api.env:ro
       - /var/lib/infra-deployer/opentofu/state:/var/lib/infra-deployer/opentofu/state
       - /var/lib/infra-deployer/public-keys:/var/lib/infra-deployer/public-keys:ro
