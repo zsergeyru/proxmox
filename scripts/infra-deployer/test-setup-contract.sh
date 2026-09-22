@@ -11,11 +11,12 @@ DOCKERFILE="$ROOT/guests/910-infra-deployer/compose/runner/Dockerfile"
 REQ="$ROOT/guests/910-infra-deployer/compose/runner/requirements.txt"
 PLAN="$ROOT/scripts/infra-deployer/opentofu-plan.sh"
 SEMAPHORE_PROJECT="$ROOT/scripts/infra-deployer/semaphore-project.sh"
+PVE_BOOTSTRAP_ACCESS="$ROOT/scripts/infra-deployer/pve-bootstrap-access.sh"
 
 die() { printf 'ОШИБКА: %s\n' "$*" >&2; exit 1; }
 ok()  { printf '[ОК] %s\n' "$*"; }
 
-for file in "$SETUP" "$STATUS" "$ACCESS" "$LIFECYCLE" "$COMPOSE" "$DOCKERFILE" "$REQ" "$PLAN" "$SEMAPHORE_PROJECT"; do
+for file in "$SETUP" "$STATUS" "$ACCESS" "$LIFECYCLE" "$COMPOSE" "$DOCKERFILE" "$REQ" "$PLAN" "$SEMAPHORE_PROJECT" "$PVE_BOOTSTRAP_ACCESS"; do
     [[ -s "$file" ]] || die "Отсутствует обязательный файл: $file"
 done
 
@@ -46,10 +47,31 @@ grep -q 'Используется существующий постоянный 
     || die "Повторное обновление 910 должно работать без staging PVE secret"
 grep -q 'root@pam!infra-deployer' "$SETUP" \
     || die "setup.sh должен поддерживать автоматический переход на новый PVE API token"
+
+grep -q 'API_USER="root@pam"' "$PVE_BOOTSTRAP_ACCESS" \
+    || die "PVE bootstrap access должен использовать существующий root@pam"
+grep -q 'API_TOKEN_NAME="infra-deployer"' "$PVE_BOOTSTRAP_ACCESS" \
+    || die "PVE bootstrap access должен создавать отдельный infra-deployer token"
+grep -q -- '--privsep 1' "$PVE_BOOTSTRAP_ACCESS" \
+    || die "PVE API token должен использовать privsep=1"
+for role in PVEAuditor PVEVMAdmin PVEDatastoreUser PVESDNUser PVETemplateUser; do
+    grep -q "\"$role\"" "$PVE_BOOTSTRAP_ACCESS" \
+        || die "В PVE bootstrap access отсутствует штатная роль $role"
+done
+if grep -q 'pveum user add.*infra-deployer@pve' "$PVE_BOOTSTRAP_ACCESS"; then
+    die "Отдельный пользователь infra-deployer@pve больше не должен создаваться"
+fi
+if grep -q 'pveum role add.*InfraManagedGuest' "$PVE_BOOTSTRAP_ACCESS"; then
+    die "Собственная роль InfraManagedGuest больше не должна создаваться"
+fi
+grep -q '^cleanup_legacy_access() {' "$PVE_BOOTSTRAP_ACCESS" \
+    || die "Переход должен удалять прежнюю PVE-идентичность"
 grep -q '^cleanup_obsolete_files() {' "$SETUP" \
     || die "setup.sh должен удалять устаревшие credentials предыдущей схемы"
 grep -q '\$DATA_DIR/public-keys/ansible_ed25519.pub' "$SETUP" \
     || die "setup.sh должен удалять старый Ansible public key"
+grep -q '\$DATA_DIR/bootstrap-complete' "$SETUP" \
+    || die "setup.sh должен удалять старый bootstrap marker"
 
 grep -q 'SEMAPHORE_DB_DIALECT=sqlite' "$SETUP" \
     || die "Semaphore должен использовать SQLite в первой версии"
