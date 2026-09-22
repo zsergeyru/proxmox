@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 # Первоначальная и повторяемая настройка 910 infra-deployer.
-# Скрипт запускается внутри LXC 910 от root публичным bootstrap.
+# Скрипт запускается внутри LXC 910 от root гостевым bootstrap.
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 ASSET_DIR="${REPO_ROOT}/guests/910-infra-deployer/compose"
