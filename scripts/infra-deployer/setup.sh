@@ -15,6 +15,7 @@ SEMAPHORE_DIR="${DATA_DIR}/semaphore"
 RUNNER_DIR="${DATA_DIR}/runner"
 RUNNER_TMP_DIR="${RUNNER_DIR}/tmp"
 STATE_DIR="${DATA_DIR}/opentofu/state"
+PUBLIC_KEY_DIR="${DATA_DIR}/public-keys"
 COMPOSE_DIR="/opt/infra-deployer/compose"
 STATUS_COMMAND="/usr/local/sbin/infra-deployer-status"
 
