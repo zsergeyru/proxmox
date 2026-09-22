@@ -24,7 +24,7 @@ require_pve_root() {
     [[ $EUID -eq 0 ]] || die "Сценарий должен выполняться от root на PVE"
     command -v pveum >/dev/null 2>&1 || die "Не найден pveum"
     command -v pct >/dev/null 2>&1 || die "Не найден pct"
-    command -v jq >/dev/null 2>&1 || die "Не найден jq"
+    command -v perl >/dev/null 2>&1 || die "Не найден штатный Perl PVE"
     pct status "$CTID" >/dev/null 2>&1 || die "LXC $CTID отсутствует"
 }
 
@@ -44,32 +44,44 @@ ensure_managed_pool() {
 
 api_token_exists() {
     pveum user token list "$API_USER" --output-format json 2>/dev/null \
-        | jq -e --arg token "$API_TOKEN_NAME" \
-            '.[] | select(.tokenid == $token)' >/dev/null
+        | perl -MJSON::PP -0777 -e '
+            my $token = shift;
+            my $rows = decode_json(<STDIN>);
+            exit((grep { (($_->{tokenid} // q{}) eq $token) } @$rows) ? 0 : 1);
+        ' "$API_TOKEN_NAME"
 }
 
 assert_api_token_privsep() {
     local value
     value="$(pveum user token list "$API_USER" --output-format json 2>/dev/null \
-        | jq -r --arg token "$API_TOKEN_NAME" \
-            '.[] | select(.tokenid == $token) | .privsep // empty')"
+        | perl -MJSON::PP -0777 -e '
+            my $token = shift;
+            my $rows = decode_json(<STDIN>);
+            for my $row (@$rows) {
+                next unless (($row->{tokenid} // q{}) eq $token);
+                print($row->{privsep} // q{});
+                last;
+            }
+        ' "$API_TOKEN_NAME")"
     [[ "$value" == "1" ]] || die "PVE API token $API_TOKEN_ID должен иметь privsep=1"
 }
 
 token_acl_exists() {
     local path=$1 role=$2
     pveum acl list --output-format json \
-        | jq -e \
-            --arg path "$path" \
-            --arg token "$API_TOKEN_ID" \
-            --arg role "$role" \
-            '.[] | select(
-                .path == $path
-                and .type == "token"
-                and .ugid == $token
-                and .roleid == $role
-                and ((.propagate // 1) == 1)
-            )' >/dev/null
+        | perl -MJSON::PP -0777 -e '
+            my ($path, $token, $role) = @ARGV;
+            my $rows = decode_json(<STDIN>);
+            for my $row (@$rows) {
+                next unless (($row->{path} // q{}) eq $path);
+                next unless (($row->{type} // q{}) eq q{token});
+                next unless (($row->{ugid} // q{}) eq $token);
+                next unless (($row->{roleid} // q{}) eq $role);
+                next unless (($row->{propagate} // 1) == 1);
+                exit 0;
+            }
+            exit 1;
+        ' "$path" "$API_TOKEN_ID" "$role"
 }
 
 ensure_token_acl() {
@@ -110,8 +122,11 @@ create_api_token() {
 
     json="$(pveum user token add "$API_USER" "$API_TOKEN_NAME" \
         --privsep 1 --output-format json)"
-    secret="$(jq -r '.value // empty' <<<"$json")"
-    [[ -n "$secret" && "$secret" != "null" ]] \
+    secret="$(perl -MJSON::PP -0777 -e '
+        my $row = decode_json(<STDIN>);
+        print($row->{value} // q{});
+    ' <<<"$json")"
+    [[ -n "$secret" ]] \
         || die "PVE создал token, но secret не удалось получить"
 
     stage_api_secret "$secret"
