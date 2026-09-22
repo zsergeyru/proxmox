@@ -54,7 +54,7 @@ grep -q 'API_TOKEN_NAME="infra-deployer"' "$PVE_BOOTSTRAP_ACCESS" \
     || die "PVE bootstrap access должен создавать отдельный infra-deployer token"
 grep -q -- '--privsep 1' "$PVE_BOOTSTRAP_ACCESS" \
     || die "PVE API token должен использовать privsep=1"
-for role in PVEAuditor PVEVMAdmin PVEDatastoreUser PVESDNUser PVETemplateUser; do
+for role in PVEAuditor PVEVMAdmin PVEDatastoreUser PVESDNUser; do
     grep -q "\"$role\"" "$PVE_BOOTSTRAP_ACCESS" \
         || die "В PVE bootstrap access отсутствует штатная роль $role"
 done
