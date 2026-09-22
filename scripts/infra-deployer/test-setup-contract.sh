@@ -78,11 +78,14 @@ if runner.get('container_name') != 'infra-deployer-runner':
 volumes = runner.get('volumes', [])
 required = {
     '/var/lib/infra-deployer/opentofu/state:/var/lib/infra-deployer/opentofu/state',
-    '/etc/infra-deployer/secrets/pve-api.env:/run/infra-deployer/pve-api.env:ro',
 }
 missing = required.difference(volumes)
 if missing:
     raise SystemExit(f'missing runner volumes: {sorted(missing)}')
+
+for volume in volumes:
+    if 'pve-api.env' in volume:
+        raise SystemExit('PVE API secret must not be bind-mounted directly into Runner')
 PY
 
 ok "Контракт setup infra-deployer проверен"
