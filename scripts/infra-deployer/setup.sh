@@ -60,6 +60,25 @@ prepare_directories() {
     install -d -o root -g root -m 0755 "$PUBLIC_KEY_DIR"
 }
 
+ensure_base_packages() {
+    local missing="" pkg
+
+    for pkg in ca-certificates curl gnupg python3-yaml; do
+        dpkg -s "$pkg" >/dev/null 2>&1 || missing="$missing $pkg"
+    done
+
+    if [[ -z "$missing" ]]; then
+        ok "Базовые пакеты infra-deployer уже установлены"
+        return
+    fi
+
+    log "Установка базовых пакетов infra-deployer"
+    apt-get update
+    # shellcheck disable=SC2086
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends $missing
+    ok "Базовые пакеты infra-deployer установлены"
+}
+
 install_docker() {
     if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
         systemctl enable --now docker >/dev/null
@@ -76,7 +95,6 @@ install_docker() {
 
     log "Установка Docker Engine из официального репозитория"
     apt-get update
-    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends         ca-certificates curl gnupg python3-yaml
 
     install -m 0755 -d /etc/apt/keyrings
     curl -fsSL https://download.docker.com/linux/debian/gpg         -o /etc/apt/keyrings/docker.asc
@@ -317,6 +335,7 @@ main() {
     require_root
     check_os
     prepare_directories
+    ensure_base_packages
     install_docker
     copy_compose_assets
     seed_runner_known_hosts
