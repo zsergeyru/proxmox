@@ -17,8 +17,8 @@ for file in "$SETUP" "$STATUS" "$ACCESS" "$LIFECYCLE" "$COMPOSE" "$DOCKERFILE" "
     [[ -s "$file" ]] || die "Отсутствует обязательный файл: $file"
 done
 
-grep -q 'SEMAPHORE_VERSION="v2.18.29"' "$SETUP" \
-    || die "Semaphore должен быть зафиксирован на v2.18.29"
+grep -q 'SEMAPHORE_VERSION="v2.18.30"' "$SETUP" \
+    || die "Semaphore должен быть зафиксирован на v2.18.30"
 
 grep -q '^install_local_commands() {' "$SETUP" \
     || die "setup.sh обязан определять install_local_commands"
