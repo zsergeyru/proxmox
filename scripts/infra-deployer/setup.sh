@@ -351,6 +351,13 @@ install_local_commands() {
         "$REPO_ROOT/scripts/infra-deployer/check-pve-access.sh" "$ACCESS_CHECK_COMMAND"
     install -o root -g root -m 0755 \
         "$REPO_ROOT/scripts/infra-deployer/test-pve-lifecycle.sh" "$LIFECYCLE_TEST_COMMAND"
+
+    # pct exec использует PATH без /usr/local/sbin. Канонические файлы остаются
+    # в sbin, а короткие команды доступны через /usr/local/bin.
+    install -d -o root -g root -m 0755 /usr/local/bin
+    ln -sfn "$STATUS_COMMAND" /usr/local/bin/infra-deployer-status
+    ln -sfn "$ACCESS_CHECK_COMMAND" /usr/local/bin/infra-deployer-pve-access-check
+    ln -sfn "$LIFECYCLE_TEST_COMMAND" /usr/local/bin/infra-deployer-pve-lifecycle-test
 }
 
 verify_runner_tools() {
