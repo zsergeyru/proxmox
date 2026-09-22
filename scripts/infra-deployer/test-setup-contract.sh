@@ -103,6 +103,49 @@ grep -q 'allow_override_args_in_task:false' "$SEMAPHORE_PROJECT" \
 grep -q 'allow_override_branch_in_task:false' "$SEMAPHORE_PROJECT" \
     || die "OpenTofu Plan не должен разрешать переопределение Git-ветки"
 
+grep -q '^shopt -s inherit_errexit
+python3 - "$COMPOSE" <<'PY'
+from pathlib import Path
+import sys, yaml
+
+path = Path(sys.argv[1])
+data = yaml.safe_load(path.read_text(encoding='utf-8'))
+services = data.get('services', {})
+if set(services) != {'semaphore', 'runner'}:
+    raise SystemExit(f'unexpected services: {sorted(services)}')
+
+server = services['semaphore']
+runner = services['runner']
+
+if server.get('image') != 'semaphoreui/semaphore:${SEMAPHORE_VERSION}':
+    raise SystemExit('Semaphore image must use pinned version variable')
+
+if runner.get('container_name') != 'infra-deployer-runner':
+    raise SystemExit('unexpected runner container name')
+
+volumes = runner.get('volumes', [])
+required = {
+    '/var/lib/infra-deployer/opentofu:/var/lib/infra-deployer/opentofu',
+}
+missing = required.difference(volumes)
+if missing:
+    raise SystemExit(f'missing runner volumes: {sorted(missing)}')
+
+for volume in volumes:
+    if 'pve-api.env' in volume:
+        raise SystemExit('PVE API secret must not be bind-mounted directly into Runner')
+PY
+
+ok "Контракт setup infra-deployer проверен"
+ "$SEMAPHORE_PROJECT" \
+    || die "Ошибки API внутри командных подстановок должны останавливать semaphore-project.sh"
+grep -q "'{id:\$id,name:\$name,project_id:\$project_id,git_url:\$git_url" "$SEMAPHORE_PROJECT" \
+    || die "PUT Git repository должен передавать repository id в теле"
+grep -q 'id:\$id,name:\$name,type:"login_password"' "$SEMAPHORE_PROJECT" \
+    || die "PUT PVE API key должен передавать access key id в теле"
+grep -q 'id:\$id,' "$SEMAPHORE_PROJECT" \
+    || die "PUT OpenTofu Plan должен передавать template id в теле"
+
 
 python3 - "$COMPOSE" <<'PY'
 from pathlib import Path
