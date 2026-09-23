@@ -358,13 +358,20 @@ deploy_semaphore() {
 
     # Базовый образ нужен и для восстановления прав хранилища, и для сборки
     # нашего единственного контейнера с OpenTofu/Packer/Ansible.
+    info "Получение базового образа Semaphore"
     run_logged docker pull "semaphoreui/semaphore:${SEMAPHORE_VERSION}"
+    ok "Базовый образ Semaphore готов"
 
     compose stop semaphore >/dev/null 2>&1 || true
     repair_semaphore_storage
 
+    info "Сборка образа Semaphore с OpenTofu, Packer и Ansible"
     run_logged compose build --pull semaphore
+    ok "Образ Semaphore собран"
+
+    info "Запуск контейнера Semaphore"
     run_logged compose up -d --remove-orphans
+    ok "Контейнер Semaphore запущен"
 }
 
 wait_semaphore() {
