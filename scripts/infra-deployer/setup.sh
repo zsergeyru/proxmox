@@ -282,7 +282,7 @@ TZ=${timezone}
 EOF_SERVER
 
         cat >"$RUNNER_ENV" <<EOF_RUNNER
-SEMAPHORE_WEB_ROOT=http://semaphore:3000
+SEMAPHORE_WEB_ROOT=http://127.0.0.1:3000
 SEMAPHORE_RUNNER_REGISTRATION_TOKEN=${runner_registration_token}
 SEMAPHORE_RUNNER_NAME=infra-deployer
 SEMAPHORE_RUNNER_PRIVATE_KEY_FILE=/var/lib/semaphore/runner.key
