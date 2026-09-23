@@ -13,8 +13,6 @@ CT_PERSISTENT_SECRET="${INFRA_MANAGER_PERSISTENT_SECRET:-/etc/infra-manager/secr
 API_USER="root@pam"
 API_TOKEN_NAME="infra-manager"
 API_TOKEN_ID="${API_USER}!${API_TOKEN_NAME}"
-LEGACY_API_TOKEN_NAME="infra-deployer"
-LEGACY_API_TOKEN_ID="${API_USER}!${LEGACY_API_TOKEN_NAME}"
 
 MANAGED_POOL="managed"
 CT_STORAGE="local-lvm"
@@ -47,29 +45,7 @@ ct_exec() {
     pct exec "$CTID" -- "$@"
 }
 
-ensure_ct_hostname() {
-    local current
-    current="$(pct config "$CTID" | sed -n 's/^hostname:[[:space:]]*//p' | head -n1)"
-    [[ "$current" == "infra-manager" ]] && return
 
-    pct set "$CTID" --hostname infra-manager >/dev/null
-    ok "Hostname LXC $CTID изменён на infra-manager"
-}
-
-legacy_api_token_exists() {
-    pveum user token list "$API_USER" --output-format json 2>/dev/null \
-        | perl -MJSON::PP -0777 -e '
-            my $token = shift;
-            my $rows = decode_json(<STDIN>);
-            exit((grep { (($_->{tokenid} // q{}) eq $token) } @$rows) ? 0 : 1);
-        ' "$LEGACY_API_TOKEN_NAME"
-}
-
-remove_legacy_api_token() {
-    legacy_api_token_exists || return
-    pveum user token remove "$API_USER" "$LEGACY_API_TOKEN_NAME"
-    ok "Удалён старый PVE API token $LEGACY_API_TOKEN_ID"
-}
 
 managed_pool_exists() {
     pvesh get "/pools/$MANAGED_POOL" --output-format json >/dev/null 2>&1
@@ -215,12 +191,6 @@ ensure_api_token() {
     fi
 
     assert_api_token_privsep
-
-    # После того как новый secret либо передан во временный файл, либо уже
-    # сохранён постоянно, старый token больше не нужен.
-    if ct_exec test -s "$CT_SECRET_FILE" || persistent_token_available; then
-        remove_legacy_api_token
-    fi
 }
 
 ensure_token_acls() {
@@ -268,7 +238,6 @@ install_pve_ca() {
 }
 
 prepare() {
-    ensure_ct_hostname
     install_pve_ca
     ensure_managed_pool
     ensure_api_token
