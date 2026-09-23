@@ -17,7 +17,9 @@ infrastructure/guests/defaults.yaml
 → OpenTofu
 ```
 
-Таким образом, единственным владельцем правил defaults/profile/guest и вычисляемой адресации остаётся `scripts/guests/resolver.py`.
+Таким образом, единственным владельцем правил defaults/profile/guest и адресации, включая режим DHCP, остаётся `scripts/guests/resolver.py`.
+
+OpenTofu получает уже готовое значение `network.ipv4`: статический адрес с префиксом либо `dhcp`. Он не должен повторно вычислять адрес по VMID.
 
 ## Состояние
 
