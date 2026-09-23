@@ -105,8 +105,8 @@ jobs:
 
       - name: Validate Packer 9000
         run: |
-          packer fmt -check -recursive packer
-          packer init packer/9000
+          packer fmt -check -recursive automation/packer
+          packer init automation/packer/9000
           checksum="sha512:$(printf '0%.0s' {1..128})"
           packer validate \
             -var='proxmox_url=https://pve.invalid:8006/api2/json' \
@@ -115,7 +115,7 @@ jobs:
             -var='iso_url=https://example.invalid/debian-13-amd64-netinst.iso' \
             -var="iso_checksum=${checksum}" \
             -var='build_password=BuildPassword1234567890' \
-            packer/9000
+            automation/packer/9000
 
       - name: Set up OpenTofu
         uses: opentofu/setup-opentofu@v1
@@ -124,9 +124,9 @@ jobs:
 
       - name: Validate OpenTofu configuration
         run: |
-          tofu -chdir=opentofu fmt -check
-          tofu -chdir=opentofu init -backend=false -lockfile=readonly
-          tofu -chdir=opentofu validate
+          tofu -chdir=automation/opentofu fmt -check
+          tofu -chdir=automation/opentofu init -backend=false -lockfile=readonly
+          tofu -chdir=automation/opentofu validate
 
 
       - name: Validate infra-manager Compose
@@ -135,7 +135,7 @@ jobs:
           from pathlib import Path
           import yaml
 
-          path = Path("guests/910-infra-manager/compose/docker-compose.yml")
+          path = Path("infrastructure/guests/910-infra-manager/compose/docker-compose.yml")
           data = yaml.safe_load(path.read_text(encoding="utf-8"))
           services = data.get("services", {})
           if set(services) != {"runtime"}:
@@ -157,22 +157,22 @@ jobs:
             --build-arg OPENTOFU_VERSION=1.12.6 \
             --build-arg PACKER_VERSION=1.15.4 \
             -t infra-runtime:test \
-            guests/910-infra-manager/compose/runtime
+            infrastructure/guests/910-infra-manager/compose/runtime
           docker run --rm infra-runtime:test tofu version
           docker run --rm infra-runtime:test packer version
           docker run --rm --entrypoint python3 infra-runtime:test -c 'import proxmoxer'
 
       - name: Verify malformed guest directory is rejected
         run: |
-          mkdir -p guests/not-a-valid-guest-directory
-          cp guests/100-haos/guest.yaml guests/not-a-valid-guest-directory/guest.yaml
+          mkdir -p infrastructure/guests/not-a-valid-guest-directory
+          cp infrastructure/guests/100-haos/guest.yaml infrastructure/guests/not-a-valid-guest-directory/guest.yaml
           if python scripts/validate_repo.py > /tmp/invalid-layout.out 2>&1; then
             cat /tmp/invalid-layout.out
             echo "Validator unexpectedly accepted malformed guest directory" >&2
             exit 1
           fi
           grep -q 'каталог гостя должен иметь имя' /tmp/invalid-layout.out
-          rm -rf guests/not-a-valid-guest-directory
+          rm -rf infrastructure/guests/not-a-valid-guest-directory
           python scripts/validate_repo.py
 
       - name: Check whitespace errors

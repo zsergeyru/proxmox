@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "$SCRIPT_DIR/../../.." && pwd)"
-OPENTOFU_DIR="$REPO_ROOT/opentofu"
+OPENTOFU_DIR="$REPO_ROOT/automation/opentofu"
 STATE_DIR="/var/lib/infra-manager/opentofu"
 GUEST_STATE_FILE="$STATE_DIR/guests.json"
 

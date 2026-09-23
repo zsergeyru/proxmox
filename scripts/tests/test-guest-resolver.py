@@ -31,9 +31,9 @@ def expect_error(source: dict, defaults: dict, needle: str) -> None:
 
 
 def main() -> None:
-    defaults = load_yaml(ROOT / "guests/defaults.yaml")
-    source_311 = load_yaml(ROOT / "guests/311-dev-services/guest.yaml")
-    source_109 = load_yaml(ROOT / "guests/109-network-gateway/guest.yaml")
+    defaults = load_yaml(ROOT / "infrastructure/guests/defaults.yaml")
+    source_311 = load_yaml(ROOT / "infrastructure/guests/311-dev-services/guest.yaml")
+    source_109 = load_yaml(ROOT / "infrastructure/guests/109-network-gateway/guest.yaml")
 
     resolved = resolve_effective_guest(source_311, defaults)
     assert resolved.bootstrap_capabilities == ("git", "docker", "ansible")

@@ -23,7 +23,7 @@ from pathlib import Path
 from .common import InfraManagerError
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-ASSET_DIR = REPO_ROOT / "guests/910-infra-manager/compose"
+ASSET_DIR = REPO_ROOT / "infrastructure/guests/910-infra-manager/compose"
 
 CONFIG_DIR = Path("/etc/infra-manager")
 SECRET_DIR = CONFIG_DIR / "secrets"

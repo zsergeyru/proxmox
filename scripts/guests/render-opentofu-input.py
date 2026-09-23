@@ -24,7 +24,7 @@ def load_yaml(path: Path) -> dict:
 
 
 def build_payload(root: Path) -> dict:
-    guests_dir = root / "guests"
+    guests_dir = root / "infrastructure" / "guests"
     defaults = load_yaml(guests_dir / "defaults.yaml")
     result: dict[str, dict] = {}
 

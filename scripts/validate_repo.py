@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Проверка guests/defaults.yaml и существующих guests/*/guest.yaml."""
+"""Проверка infrastructure/guests/defaults.yaml и существующих описаний гостей."""
 
 from __future__ import annotations
 
@@ -26,12 +26,12 @@ from resolver import (
 )
 
 ROOT = Path(__file__).resolve().parents[1]
-GUESTS = ROOT / "guests"
+GUESTS = ROOT / "infrastructure" / "guests"
 DEFAULTS = GUESTS / "defaults.yaml"
 SCHEMAS = {
-    "source": ROOT / "schemas/guest.schema.yaml",
-    "defaults": ROOT / "schemas/guest-defaults.schema.yaml",
-    "effective": ROOT / "schemas/guest-effective.schema.yaml",
+    "source": ROOT / "infrastructure/schemas/guest.schema.yaml",
+    "defaults": ROOT / "infrastructure/schemas/guest-defaults.schema.yaml",
+    "effective": ROOT / "infrastructure/schemas/guest-effective.schema.yaml",
 }
 DIR_RE = re.compile(r"^(\d{3})-(.+)$")
 LXC_SELECTOR_RE = re.compile(
@@ -236,9 +236,9 @@ def check_effective_network(
     if iface.network.prefixlen != cfg.subnet.prefixlen:
         fail(f"{rel}: effective IP должен использовать /{cfg.subnet.prefixlen}")
     if effective_subnet != cfg.subnet:
-        fail(f"{rel}: effective subnet должен приходить из guests/defaults.yaml")
+        fail(f"{rel}: effective subnet должен приходить из infrastructure/guests/defaults.yaml")
     if effective_gateway != cfg.gateway:
-        fail(f"{rel}: effective gateway должен приходить из guests/defaults.yaml")
+        fail(f"{rel}: effective gateway должен приходить из infrastructure/guests/defaults.yaml")
 
     check_address(rel, source["vmid"], iface.ip, cfg, used)
 

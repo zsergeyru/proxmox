@@ -15,7 +15,7 @@ usage() {
 Использование:
   build-template.sh 9000
 
-Собирает шаблон Packer из каталога packer/<VMID>.
+Собирает шаблон Packer из каталога automation/packer/<VMID>.
 Сейчас поддерживается шаблон 9000 (Debian 13).
 USAGE
 }
@@ -27,7 +27,7 @@ VMID=$1
 [[ "$VMID" =~ ^[0-9]+$ ]] || die "VMID должен быть числом"
 [[ "$VMID" == "9000" ]] || die "Пока поддерживается только шаблон 9000"
 
-PACKER_DIR="$ROOT/packer/$VMID"
+PACKER_DIR="$ROOT/automation/packer/$VMID"
 [[ -d "$PACKER_DIR" ]] || die "Не найден каталог $PACKER_DIR"
 [[ -s "$CA_BUNDLE" ]] || die "Не найден CA bundle: $CA_BUNDLE"
 
