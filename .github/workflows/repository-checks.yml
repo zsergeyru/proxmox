@@ -34,7 +34,7 @@ jobs:
           python -m py_compile \
             scripts/guest_config.py \
             scripts/validate_repo.py \
-            scripts/infra-deployer/render-opentofu-input.py \
+            scripts/infra-manager/render-opentofu-input.py \
             scripts/tests/test-opentofu-input.py \
             scripts/tests/test-guest-bootstrap.py \
             scripts/tests/test-sync-management-keys.py \
@@ -70,7 +70,7 @@ jobs:
 
       - name: Check PVE bootstrap helper host dependencies
         run: |
-          helper=scripts/infra-deployer/pve-bootstrap-access.sh
+          helper=scripts/infra-manager/pve-bootstrap-access.sh
           grep -q 'command -v perl' "$helper"
           grep -q 'MJSON::PP' "$helper"
           if grep -Eq 'command -v jq|(^|[[:space:]|;])jq([[:space:]]|$)' "$helper"; then
@@ -82,8 +82,8 @@ jobs:
             exit 1
           fi
 
-      - name: Run infra-deployer contract checks
-        run: bash scripts/infra-deployer/test-setup-contract.sh
+      - name: Run infra-manager contract checks
+        run: bash scripts/infra-manager/test-setup-contract.sh
 
       - name: Set up Packer
         run: |
@@ -103,7 +103,7 @@ jobs:
           checksum="sha512:$(printf '0%.0s' {1..128})"
           packer validate \
             -var='proxmox_url=https://pve.invalid:8006/api2/json' \
-            -var='proxmox_username=root@pam!infra-deployer' \
+            -var='proxmox_username=root@pam!infra-manager' \
             -var='proxmox_token=dummy-token-secret' \
             -var='iso_url=https://example.invalid/debian-13-amd64-netinst.iso' \
             -var="iso_checksum=${checksum}" \
@@ -122,36 +122,36 @@ jobs:
           tofu -chdir=opentofu validate
 
 
-      - name: Validate infra-deployer Compose
+      - name: Validate infra-manager Compose
         run: |
           python - <<'PY'
           from pathlib import Path
           import yaml
 
-          path = Path("guests/910-infra-deployer/compose/docker-compose.yml")
+          path = Path("guests/910-infra-manager/compose/docker-compose.yml")
           data = yaml.safe_load(path.read_text(encoding="utf-8"))
           services = data.get("services", {})
-          if set(services) != {"semaphore"}:
+          if set(services) != {"runtime"}:
               raise SystemExit(f"Unexpected services: {sorted(services)}")
-          if services["semaphore"].get("image") != "infra-deployer-semaphore:${SEMAPHORE_VERSION}":
-              raise SystemExit("Semaphore image must use pinned custom version variable")
-          if "build" not in services["semaphore"]:
-              raise SystemExit("Semaphore must use the project Dockerfile")
-          if services["semaphore"].get("network_mode") != "host":
-              raise SystemExit("Semaphore must use host network")
+          if services["runtime"].get("image") != "infra-runtime:${RUNTIME_VERSION}":
+              raise SystemExit("infra-runtime image must use RUNTIME_VERSION")
+          if "build" not in services["runtime"]:
+              raise SystemExit("infra-runtime must use the project Dockerfile")
+          if services["runtime"].get("network_mode") != "host":
+              raise SystemExit("infra-runtime must use host network")
           PY
 
-      - name: Build infra-deployer Semaphore image
+      - name: Build infra-runtime image
         run: |
           docker build \
             --build-arg SEMAPHORE_VERSION=v2.18.30 \
             --build-arg OPENTOFU_VERSION=1.12.6 \
             --build-arg PACKER_VERSION=1.15.4 \
-            -t infra-deployer-semaphore:test \
-            guests/910-infra-deployer/compose/semaphore
-          docker run --rm infra-deployer-semaphore:test tofu version
-          docker run --rm infra-deployer-semaphore:test packer version
-          docker run --rm --entrypoint python3 infra-deployer-semaphore:test -c 'import proxmoxer'
+            -t infra-runtime:test \
+            guests/910-infra-manager/compose/runtime
+          docker run --rm infra-runtime:test tofu version
+          docker run --rm infra-runtime:test packer version
+          docker run --rm --entrypoint python3 infra-runtime:test -c 'import proxmoxer'
 
       - name: Run deploy runtime contract checks
         run: bash scripts/pve/setup/tests/test-deploy-runtime-contract.sh
