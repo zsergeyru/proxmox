@@ -71,7 +71,7 @@
 
 ### 1.4. Связь с `310` и `320`
 
-`310-guest-state.md` определяет построение требуемого состояния, а `320-guest-manifest.md` — поля и ограничения `guest.yaml`. `deploy-guest` использует общий `scripts/guest_config.py` и итоговую схему `schemas/guest-effective.schema.yaml`.
+`310-guest-state.md` определяет построение требуемого состояния, а `320-guest-manifest.md` — поля и ограничения `guest.yaml`. `deploy-guest` использует общий `scripts/guests/guest_config.py` и итоговую схему `schemas/guest-effective.schema.yaml`.
 
 Если итоговое состояние не может быть построено или не проходит проверку, применение не начинается.
 
@@ -102,7 +102,7 @@ VMID находится в диапазоне `100–999`.
 
 ### 2.3. Требуемое состояние
 
-Требуемое состояние строится только через `scripts/guest_config.py`.
+Требуемое состояние строится только через `scripts/guests/guest_config.py`.
 
 Для VMID должен существовать ровно один `guest.yaml`, а гость должен содержать `profile`. Объекты без `profile` универсальным контуром развёртывания не управляются.
 
@@ -437,7 +437,7 @@ PVE Configuration заранее подготавливает `pvedeploy`, уч�
 - [`../200-pve/230-host-layout.md`](../200-pve/230-host-layout.md) — локальные пути, команды и служебная структура PVE.
 - [`../../guests/README.md`](../../guests/README.md) — структура каталога гостевых систем.
 - [`../../templates/README.md`](../../templates/README.md) — шаблоны и источники создания VM/LXC.
-- [`../../scripts/guest_config.py`](../../scripts/guest_config.py) — общий сборщик итогового состояния.
+- [`../../scripts/guests/guest_config.py`](../../scripts/guests/guest_config.py) — общий сборщик итогового состояния.
 - [`../../scripts/validate_repo.py`](../../scripts/validate_repo.py) — проверка репозитория.
 - [`../../scripts/pve/sync-management-keys.py`](../../scripts/pve/sync-management-keys.py) — синхронизация административных SSH-ключей.
 - [`../../scripts/pve/deploy-guest.py`](../../scripts/pve/deploy-guest.py) — текущая реализация этой спецификации.

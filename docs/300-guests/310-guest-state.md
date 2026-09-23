@@ -242,7 +242,7 @@ guests/311-dev-services/rootfs/etc/example/config.conf
 Общий сборщик итогового состояния проекта:
 
 ```text
-scripts/guest_config.py
+scripts/guests/guest_config.py
 ```
 
 строит однозначное итоговое состояние.
@@ -287,7 +287,7 @@ schemas/guest-effective.schema.yaml
 Общий сборщик итогового состояния:
 
 ```text
-scripts/guest_config.py
+scripts/guests/guest_config.py
 ```
 
 отвечает за правила, требующие вычисления или объединения данных.
@@ -358,6 +358,6 @@ python scripts/validate_repo.py
 - [`../../schemas/guest.schema.yaml`](../../schemas/guest.schema.yaml) — машинная схема исходного `guest.yaml`.
 - [`../../schemas/guest-defaults.schema.yaml`](../../schemas/guest-defaults.schema.yaml) — машинная схема общих настроек и профилей.
 - [`../../schemas/guest-effective.schema.yaml`](../../schemas/guest-effective.schema.yaml) — машинная схема итогового состояния.
-- [`../../scripts/guest_config.py`](../../scripts/guest_config.py) — общий сборщик итогового состояния.
+- [`../../scripts/guests/guest_config.py`](../../scripts/guests/guest_config.py) — общий сборщик итогового состояния.
 - [`../../scripts/validate_repo.py`](../../scripts/validate_repo.py) — проверка исходного и итогового состояния репозитория.
 - [`../../templates/README.md`](../../templates/README.md) — шаблоны и источники для создания VM/LXC.

@@ -36,4 +36,4 @@ packer/<VMID>/
 
 Packer отвечает за жизненный цикл VM-сборщика и превращение её в template. OpenTofu не строит шаблоны.
 
-Текущий базовый шаблон `9000` имеет `Template-Version 8`. Сборка запускается через `scripts/infra-manager/build-template.sh 9000`. После успешной реальной сборки и Full Clone проверки старый PVE-side контур Template-Version 7 удалён; Packer является единственным источником сборки VM template 9000.
+Текущий базовый шаблон `9000` имеет `Template-Version 8`. Сборка запускается через `scripts/infra-manager/jobs/build-template.sh 9000`. После успешной реальной сборки и Full Clone проверки старый PVE-side контур Template-Version 7 удалён; Packer является единственным источником сборки VM template 9000.

@@ -163,11 +163,11 @@ git@github.com:zsergeyru/proxmox.git
 ~~~text
 scripts/infra-manager/pve-bootstrap-access.sh
 scripts/infra-manager/setup.sh
-scripts/infra-manager/opentofu-plan.sh
-scripts/infra-manager/render-opentofu-input.py
-scripts/infra-manager/status.sh
-scripts/infra-manager/check-pve-access.sh
-scripts/infra-manager/test-pve-lifecycle.sh
+scripts/infra-manager/jobs/opentofu-plan.sh
+scripts/guests/render-opentofu-input.py
+scripts/infra-manager/commands/status.sh
+scripts/infra-manager/commands/check-pve-access.sh
+scripts/infra-manager/commands/test-pve-lifecycle.sh
 ~~~
 
 ## Доступ 910 к PVE
