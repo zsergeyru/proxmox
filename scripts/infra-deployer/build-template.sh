@@ -82,7 +82,7 @@ check_existing() {
     description="$(jq -r '.description // empty' <<<"$config")"
 
     if [[ "$template" == "1" && "$name" == "tpl-debian13" && "$description" == *"template-version=8"* ]]; then
-        verify_template
+        finalize_template
         ok "Шаблон $VMID уже соответствует версии 8; сборка не требуется"
         return 0
     fi
@@ -176,11 +176,12 @@ main() {
         -var="build_password=$build_password" \
         "$PACKER_DIR"
 
-    unset build_password PVE_TOKEN_SECRET AUTH_HEADER
+    unset build_password
 
     finalize_template
     "$ROOT/scripts/infra-deployer/test-template.sh" "$VMID"
 
+    unset PVE_TOKEN_SECRET AUTH_HEADER
     ok "Шаблон $VMID полностью собран и проверен"
 }
 
