@@ -140,7 +140,7 @@ OpenTofu внутри 910 не управляет:
 - `privsep=1`;
 - успешную внутреннюю проверку 910.
 
-Детальная проверка Semaphore, Runner, OpenTofu и других средств выполняется внутри 910 командой `infra-manager-status`.
+Детальная проверка `infra-runtime`, Semaphore, OpenTofu, Packer и Ansible выполняется внутри 910 командой `infra-manager-status`.
 
 ## 6. Повторное применение
 
