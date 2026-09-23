@@ -325,7 +325,7 @@ grep -q 'TF_VAR_pve_endpoint' "$PY_SEMAPHORE" \
     || die "Variable Group должен передавать pve_endpoint"
 grep -q 'TF_VAR_pve_api_token' "$PY_SEMAPHORE" \
     || die "Variable Group должен передавать pve_api_token"
-grep -q '"operation": "update"' "$PY_SEMAPHORE" \
+grep -Fq 'secret_payload["operation"] = "update"' "$PY_SEMAPHORE" \
     || die "Существующий PVE token в Variable Group должен синхронизироваться"
 grep -q '"override_secret": True' "$PY_SEMAPHORE" \
     || die "Существующий GitHub SSH key должен обновлять секретную часть"
