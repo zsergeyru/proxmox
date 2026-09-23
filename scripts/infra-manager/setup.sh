@@ -388,7 +388,6 @@ wait_semaphore() {
 configure_semaphore_project() {
     log "Настройка проекта Semaphore"
     INFRA_PROJECT_BRANCH="$PROJECT_BRANCH" \
-    INFRA_MANAGER_RECOVER="$RECOVER" \
         bash "$REPO_ROOT/scripts/infra-manager/semaphore-project.sh"
 }
 
