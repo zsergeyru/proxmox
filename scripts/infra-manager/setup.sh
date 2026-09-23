@@ -221,11 +221,10 @@ seed_semaphore_known_hosts() {
 
 generate_ca_bundle() {
     local pve_ca="/usr/local/share/ca-certificates/pve-root-ca.crt"
-    [[ -s /etc/ssl/certs/ca-certificates.crt ]] || die "Не найден системный CA bundle"
     [[ -s "$pve_ca" ]] || die "Не найден PVE CA, который должен передать public bootstrap"
+    [[ -s /etc/ssl/certs/ca-certificates.crt ]] || die "Не найден системный CA bundle"
 
-    cat /etc/ssl/certs/ca-certificates.crt "$pve_ca" >"$CA_BUNDLE"
-    chmod 0644 "$CA_BUNDLE"
+    install -m 0644 /etc/ssl/certs/ca-certificates.crt "$CA_BUNDLE"
 }
 
 persist_pve_api_secret() {
