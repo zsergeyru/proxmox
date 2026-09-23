@@ -40,9 +40,6 @@ AUTH_HEADER="Authorization: PVEAPIToken=${PVE_TOKEN_ID}=${PVE_TOKEN_SECRET}"
 tmp="$(mktemp -d)"
 key="$tmp/id_ed25519"
 known_hosts="$tmp/known_hosts"
-created=0
-success=0
-
 cleanup_local() {
     rm -rf "$tmp"
     unset PVE_TOKEN_SECRET AUTH_HEADER
@@ -128,8 +125,6 @@ run_task POST "/nodes/${NODE}/qemu/9000/clone" \
     --data-urlencode "name=$TEST_NAME" \
     --data-urlencode "full=1" \
     --data-urlencode "storage=local-lvm"
-created=1
-
 api PUT "/nodes/${NODE}/qemu/${TEST_VMID}/config" \
     --data-urlencode "cores=1" \
     --data-urlencode "memory=768" \
@@ -169,9 +164,5 @@ ssh \
      compgen -G "/etc/ssh/ssh_host_*_key" >/dev/null' \
     || die "Проверка внутри клона не пройдена; VM $TEST_VMID оставлена для диагностики"
 
-success=1
 delete_test_vm
-created=0
 ok "Full Clone шаблона 9000 успешно проверен"
-
-[[ $success -eq 1 ]]
