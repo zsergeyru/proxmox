@@ -216,7 +216,8 @@ git@github.com:zsergeyru/proxmox.git
 - ключ `GitHub project read-only`;
 - репозиторий `proxmox`;
 - Variable Group `OpenTofu PVE`;
-- шаблон `OpenTofu Plan`.
+- шаблон `OpenTofu Plan`;
+- шаблон `Build Template 9000`.
 
 Отдельный Ansible SSH credential не создаётся до появления первой реальной Ansible-задачи.
 
