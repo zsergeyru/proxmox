@@ -9,8 +9,8 @@ LIFECYCLE="$ROOT/scripts/infra-deployer/test-pve-lifecycle.sh"
 BUILD_TEMPLATE="$ROOT/scripts/infra-deployer/build-template.sh"
 TEST_TEMPLATE="$ROOT/scripts/infra-deployer/test-template.sh"
 COMPOSE="$ROOT/guests/910-infra-deployer/compose/docker-compose.yml"
-DOCKERFILE="$ROOT/guests/910-infra-deployer/compose/runner/Dockerfile"
-REQ="$ROOT/guests/910-infra-deployer/compose/runner/requirements.txt"
+DOCKERFILE="$ROOT/guests/910-infra-deployer/compose/semaphore/Dockerfile"
+REQ="$ROOT/guests/910-infra-deployer/compose/semaphore/requirements.txt"
 PLAN="$ROOT/scripts/infra-deployer/opentofu-plan.sh"
 SEMAPHORE_PROJECT="$ROOT/scripts/infra-deployer/semaphore-project.sh"
 PVE_BOOTSTRAP_ACCESS="$ROOT/scripts/infra-deployer/pve-bootstrap-access.sh"
@@ -84,25 +84,23 @@ for package in docker_packages:
         raise SystemExit(f"setup.sh не обеспечивает Docker-пакет из provision.yaml: {package}")
 
 services = docker.get("services", {})
-if set(services) != {"semaphore", "runner"}:
-    raise SystemExit(f"provision.yaml: неожиданные Docker services: {sorted(services)}")
+if set(services) != {"semaphore"}:
+    raise SystemExit(f"provision.yaml: должен быть один Docker service Semaphore: {sorted(services)}")
 
 semaphore = services["semaphore"]
-runner = services["runner"]
 sem_image = semaphore.get("image", "")
-runner_image = runner.get("image", "")
-base_image = runner.get("base_image", "")
-if not sem_image.startswith("semaphoreui/semaphore:v"):
+base_image = semaphore.get("base_image", "")
+if not sem_image.startswith("infra-deployer-semaphore:v"):
     raise SystemExit("provision.yaml: неверный image Semaphore")
 sem_version = sem_image.rsplit(":", 1)[1]
-if runner_image != f"infra-deployer-runner:{sem_version}":
-    raise SystemExit("Runner image должен использовать ту же версию Semaphore")
-if base_image != f"semaphoreui/runner:{sem_version}":
-    raise SystemExit("Runner base image должен использовать ту же версию Semaphore")
+if base_image != f"semaphoreui/semaphore:{sem_version}":
+    raise SystemExit("Semaphore base image должен использовать ту же версию")
+if semaphore.get("network_mode") != "host":
+    raise SystemExit("Semaphore должен использовать network_mode=host для Packer HTTP")
 if f'SEMAPHORE_VERSION="{sem_version}"' not in setup_text:
     raise SystemExit("Версия Semaphore в setup.sh расходится с provision.yaml")
 
-tools = runner.get("tools", {})
+tools = semaphore.get("tools", {})
 dockerfile_text = dockerfile_path.read_text(encoding="utf-8")
 opentofu_version = str(tools.get("opentofu", ""))
 packer_version = str(tools.get("packer", ""))
@@ -110,34 +108,28 @@ if f"ARG OPENTOFU_VERSION={opentofu_version}" not in dockerfile_text:
     raise SystemExit("Версия OpenTofu в Dockerfile расходится с provision.yaml")
 if f"ARG PACKER_VERSION={packer_version}" not in dockerfile_text:
     raise SystemExit("Версия Packer в Dockerfile расходится с provision.yaml")
-runner_system_packages = set(runner.get("system_packages", []))
-if "xorriso" in runner_system_packages or "xorriso" in dockerfile_text:
-    raise SystemExit("xorriso больше не нужен: preseed передаётся штатным HTTP-сервером Packer")
-if runner.get("network_mode") != "host":
-    raise SystemExit("Runner должен использовать network_mode=host для Packer HTTP")
+system_packages = set(semaphore.get("system_packages", []))
+if "xorriso" in system_packages or "xorriso" in dockerfile_text:
+    raise SystemExit("xorriso не нужен: preseed передаётся штатным HTTP-сервером Packer")
 if f'OPENTOFU_VERSION="{opentofu_version}"' not in setup_text:
     raise SystemExit("Версия OpenTofu в setup.sh расходится с provision.yaml")
 if f'PACKER_VERSION="{packer_version}"' not in setup_text:
     raise SystemExit("Версия Packer в setup.sh расходится с provision.yaml")
 
 req_text = req_path.read_text(encoding="utf-8")
-for package, constraint in runner.get("python_packages", {}).items():
+for package, constraint in semaphore.get("python_packages", {}).items():
     expected = f"{package}{constraint}"
     if expected not in req_text:
         raise SystemExit(f"requirements.txt расходится с provision.yaml: {expected}")
 
 compose = yaml.safe_load(compose_path.read_text(encoding="utf-8"))
 compose_services = compose.get("services", {})
-if set(compose_services) != {"semaphore", "runner"}:
-    raise SystemExit(f"docker-compose.yml: неожиданные services: {sorted(compose_services)}")
+if set(compose_services) != {"semaphore"}:
+    raise SystemExit(f"docker-compose.yml: должен быть один service Semaphore: {sorted(compose_services)}")
 if compose_services["semaphore"].get("container_name") != semaphore.get("container_name"):
     raise SystemExit("container_name Semaphore расходится с provision.yaml")
-if compose_services["runner"].get("container_name") != runner.get("container_name"):
-    raise SystemExit("container_name Runner расходится с provision.yaml")
-if compose_services["runner"].get("network_mode") != "host":
-    raise SystemExit("Runner Compose должен использовать network_mode=host")
-if compose_services["semaphore"].get("ports") != semaphore.get("ports"):
-    raise SystemExit("порты Semaphore расходятся с provision.yaml")
+if compose_services["semaphore"].get("network_mode") != "host":
+    raise SystemExit("Semaphore Compose должен использовать network_mode=host")
 PY
 
 grep -q 'SEMAPHORE_VERSION="v2.18.30"' "$SETUP" \
@@ -152,8 +144,11 @@ grep -q 'infra-deployer-pve-access-check' "$SETUP" \
     || die "setup.sh не устанавливает PVE access check"
 grep -q 'infra-deployer-pve-lifecycle-test' "$SETUP" \
     || die "setup.sh не устанавливает lifecycle test"
-grep -q 'SEMAPHORE_WEB_ROOT=http://127.0.0.1:3000' "$SETUP" \
-    || die "Runner в host network должен обращаться к Semaphore через localhost"
+if grep -q 'SEMAPHORE_USE_REMOTE_RUNNER=True\|SEMAPHORE_RUNNER_REGISTRATION_TOKEN=' "$SETUP"; then
+    die "Для одного 910 отдельный remote Runner не должен включаться"
+fi
+grep -q 'docker exec infra-deployer-semaphore packer version' "$SETUP" \
+    || die "Packer должен проверяться внутри локального Semaphore"
 
 grep -q 'ln -sfn "$STATUS_COMMAND" /usr/local/bin/infra-deployer-status' "$SETUP" \
     || die "status command должен быть доступен по короткому имени через pct exec"
@@ -242,9 +237,9 @@ if grep -qE 'install -d .*\$\(dirname "\$PROJECT_ID_FILE"\)' "$SEMAPHORE_PROJECT
 fi
 
 grep -q '/etc/semaphore/requirements.txt' "$DOCKERFILE" \
-    || die "Runner Dockerfile должен передавать Python requirements Semaphore runner"
+    || die "Semaphore Dockerfile должен устанавливать Python requirements"
 grep -q '^proxmoxer' "$REQ" \
-    || die "Runner должен содержать proxmoxer"
+    || die "Semaphore должен содержать proxmoxer"
 
 grep -q 'infra-deployer-status --full' "$STATUS" \
     || die "status.sh должен поддерживать отдельную полную проверку прав"
@@ -343,31 +338,30 @@ import sys, yaml
 path = Path(sys.argv[1])
 data = yaml.safe_load(path.read_text(encoding='utf-8'))
 services = data.get('services', {})
-if set(services) != {'semaphore', 'runner'}:
+if set(services) != {'semaphore'}:
     raise SystemExit(f'unexpected services: {sorted(services)}')
 
 server = services['semaphore']
-runner = services['runner']
 
-if server.get('image') != 'semaphoreui/semaphore:${SEMAPHORE_VERSION}':
-    raise SystemExit('Semaphore image must use pinned version variable')
+if server.get('image') != 'infra-deployer-semaphore:${SEMAPHORE_VERSION}':
+    raise SystemExit('Semaphore image must use pinned custom version variable')
+if server.get('network_mode') != 'host':
+    raise SystemExit('Semaphore must use host network')
 
-if runner.get('container_name') != 'infra-deployer-runner':
-    raise SystemExit('unexpected runner container name')
-
-volumes = runner.get('volumes', [])
+volumes = server.get('volumes', [])
 required = {
     '/var/lib/infra-deployer/opentofu:/var/lib/infra-deployer/opentofu',
+    '/etc/infra-deployer/ca:/etc/infra-deployer/ca:ro',
 }
 missing = required.difference(volumes)
 if missing:
-    raise SystemExit(f'missing runner volumes: {sorted(missing)}')
+    raise SystemExit(f'missing Semaphore volumes: {sorted(missing)}')
 
 for volume in volumes:
     if 'pve-api.env' in volume:
-        raise SystemExit('PVE API secret must not be bind-mounted directly into Runner')
+        raise SystemExit('PVE API secret must not be bind-mounted directly into Semaphore')
     if 'public-keys' in volume:
-        raise SystemExit('Unused Ansible public-key volume must not be mounted into Runner')
+        raise SystemExit('Unused Ansible public-key volume must not be mounted into Semaphore')
 PY
 
 ok "Контракт setup infra-deployer проверен"
