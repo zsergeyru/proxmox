@@ -2,4 +2,3 @@ Host *
     StrictHostKeyChecking yes
     UserKnownHostsFile /var/lib/semaphore/known_hosts
     HashKnownHosts yes
-    IdentitiesOnly yes

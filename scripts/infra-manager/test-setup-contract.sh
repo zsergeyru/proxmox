@@ -137,6 +137,10 @@ PY
 grep -q 'SEMAPHORE_VERSION="v2.18.30"' "$SETUP" \
     || die "Semaphore должен быть зафиксирован на v2.18.30"
 
+if grep -Eq '^[[:space:]]*IdentitiesOnly[[:space:]]+yes[[:space:]]*$' "$SSH_CONFIG"; then
+    die "Semaphore Git использует временный ssh-agent; IdentitiesOnly yes блокирует Deploy Key"
+fi
+
 grep -q '^install_local_commands() {' "$SETUP" \
     || die "setup.sh обязан определять install_local_commands"
 
