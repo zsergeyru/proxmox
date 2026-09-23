@@ -144,7 +144,7 @@ grep -q 'infra-deployer-pve-access-check' "$SETUP" \
     || die "setup.sh не устанавливает PVE access check"
 grep -q 'infra-deployer-pve-lifecycle-test' "$SETUP" \
     || die "setup.sh не устанавливает lifecycle test"
-if grep -q 'SEMAPHORE_USE_REMOTE_RUNNER=True\|SEMAPHORE_RUNNER_REGISTRATION_TOKEN=' "$SETUP"; then
+if grep -q '^SEMAPHORE_USE_REMOTE_RUNNER=True$\|^SEMAPHORE_RUNNER_REGISTRATION_TOKEN=' "$SETUP"; then
     die "Для одного 910 отдельный remote Runner не должен включаться"
 fi
 grep -q 'docker exec infra-deployer-semaphore packer version' "$SETUP" \
