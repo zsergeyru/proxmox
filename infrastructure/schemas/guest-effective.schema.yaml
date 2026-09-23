@@ -81,7 +81,78 @@ properties:
         minLength: 1
       ipv4:
         type: string
-        minLength: 1
+        pattern: '^(?:dhcp|(?:[0-9]{1,3}\\.){3}[0-9]{1,3}/[0-9]{1,2})
+  boot:
+    type: object
+    additionalProperties: false
+    required: [onboot]
+    properties:
+      onboot:
+        type: boolean
+  management:
+    type: array
+    uniqueItems: true
+    items:
+      enum: [ssh_identity, project_repo_read]
+  bootstrap:
+    type: array
+    uniqueItems: true
+    items:
+      enum: [git, docker, ansible]
+  template_vmid:
+    type: integer
+    minimum: 100
+    maximum: 9999
+  ostemplate:
+    type: string
+    minLength: 1
+  features:
+    type: array
+    uniqueItems: true
+    items:
+      enum: [container-host]
+allOf:
+  - if:
+      properties:
+        type:
+          const: vm
+    then:
+      required: [template_vmid]
+      properties:
+        resources:
+          not:
+            required: [swap_mb]
+      not:
+        anyOf:
+          - required: [ostemplate]
+          - required: [features]
+  - if:
+      properties:
+        type:
+          const: lxc
+    then:
+      required: [ostemplate, features]
+      properties:
+        resources:
+          required: [swap_mb]
+          not:
+            required: [ballooning_mb]
+      not:
+        required: [template_vmid]
+  - if:
+      required: [type, bootstrap]
+      properties:
+        type:
+          const: lxc
+        bootstrap:
+          contains:
+            const: docker
+    then:
+      properties:
+        features:
+          contains:
+            const: container-host
+
   boot:
     type: object
     additionalProperties: false
