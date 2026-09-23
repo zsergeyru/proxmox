@@ -14,12 +14,17 @@ scripts/
 │   ├── test-guest-bootstrap.py
 │   ├── test-sync-management-keys.py
 │   └── test-deploy-guest.py
+├── infra-manager/
+│   ├── setup.sh
+│   ├── semaphore-project.sh
+│   ├── build-template.sh
+│   ├── opentofu-plan.sh
+│   └── status.sh
 └── pve/
     ├── deploy-guest.py
     ├── sync-management-keys.py
     └── setup/
         ├── configure-pve.sh
-        ├── render-template-cloud-init.py
         ├── lib/
         └── tests/
 ```
@@ -153,11 +158,6 @@ scripts/pve/setup/configure-pve.sh
 40-runtime.sh
 45-management-keys.sh
 50-access.sh
-60-template-contract.sh
-61-template-source.sh
-62-template-build.sh
-63-template-smoke.sh
-64-cloud-init-status.sh
 70-tooling.sh
 71-sync-management-keys-tooling.sh
 ```
@@ -166,21 +166,26 @@ scripts/pve/setup/configure-pve.sh
 
 PVE Configuration также подготавливает runtime для deploy-контура: Python/YAML/JSON Schema, API credentials, PVE guest SSH identity, canonical management public-key registry, отдельный guest `known_hosts` и стабильную команду `sync-management-keys`.
 
-## Генератор Cloud-Init шаблона
+## Шаблон 9000
+
+PVE Configuration больше не собирает базовый Debian-шаблон.
+
+Единственный действующий контур:
 
 ```text
-scripts/pve/setup/render-template-cloud-init.py
+packer/9000/
+→ scripts/infra-manager/build-template.sh 9000
+→ Packer
 ```
 
-Это основной генератор Cloud-Init для Debian-шаблона `9000`. Его требования описаны в [`../templates/debian13/build-policy.md`](../templates/debian13/build-policy.md).
-
+Полная проверка клона выполняется `scripts/infra-manager/test-template.sh`.
 ## Тесты PVE Configuration
 
 ```text
 scripts/pve/setup/tests/
 ```
 
-Здесь находятся проверки контракта и безопасности настройки PVE и сборки шаблона. При изменении поведения тесты должны меняться вместе с кодом.
+Здесь находятся проверки контракта и безопасности настройки PVE. Проверки Packer-шаблона находятся в контуре `infra-manager`.
 
 ## `pve/deploy-guest.py`
 
@@ -213,4 +218,3 @@ scripts/pve/setup/tests/
 - [`../docs/30-guest-manifest.md`](../docs/30-guest-manifest.md) — модель данных гостевых систем.
 - [`../docs/300-guests/330-deploy-guest.md`](../docs/300-guests/330-deploy-guest.md) — спецификация `deploy-guest`.
 - [`../docs/300-guests/330-deploy-guest.md`](../docs/300-guests/330-deploy-guest.md) — Bootstrap и Ansible handoff.
-- [`../templates/debian13/build-policy.md`](../templates/debian13/build-policy.md) — спецификация сборки шаблона.
