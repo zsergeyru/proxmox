@@ -253,7 +253,7 @@ ensure_repository() {
     printf '%s' "$id"
 }
 
-ensure_opentofu_environment() {
+ensure_pve_environment() {
     local project_id=$1
     local endpoint token_id token_secret api_token
     local environments id existing secret_id env_json payload response
@@ -447,7 +447,7 @@ ensure_packer_9000_template() {
 }
 
 main() {
-    local project_id github_key_id repository_id opentofu_env_id opentofu_plan_template_id packer_9000_template_id
+    local project_id github_key_id repository_id pve_env_id opentofu_plan_template_id packer_9000_template_id
 
     command -v jq >/dev/null 2>&1 || die "Не найден jq"
     command -v curl >/dev/null 2>&1 || die "Не найден curl"
@@ -461,11 +461,11 @@ main() {
 
     github_key_id="$(ensure_ssh_key "$project_id" "GitHub project read-only" git "$GITHUB_KEY_COPY")"
     repository_id="$(ensure_repository "$project_id" "$github_key_id")"
-    opentofu_env_id="$(ensure_opentofu_environment "$project_id")"
-    opentofu_plan_template_id="$(ensure_opentofu_plan_template "$project_id" "$repository_id" "$opentofu_env_id")"
-    packer_9000_template_id="$(ensure_packer_9000_template "$project_id" "$repository_id" "$opentofu_env_id")"
+    pve_env_id="$(ensure_pve_environment "$project_id")"
+    opentofu_plan_template_id="$(ensure_opentofu_plan_template "$project_id" "$repository_id" "$pve_env_id")"
+    packer_9000_template_id="$(ensure_packer_9000_template "$project_id" "$repository_id" "$pve_env_id")"
 
-    [[ -n "$repository_id" && -n "$opentofu_env_id" && -n "$opentofu_plan_template_id" && -n "$packer_9000_template_id" ]] \
+    [[ -n "$repository_id" && -n "$pve_env_id" && -n "$opentofu_plan_template_id" && -n "$packer_9000_template_id" ]] \
         || die "Не все объекты Semaphore созданы"
 
     ok "Проект Semaphore, Git repository, PVE Variable Group и инфраструктурные задания подготовлены"
