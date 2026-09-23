@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-CA_BUNDLE="/etc/infra-deployer/ca/ca-bundle.crt"
+CA_BUNDLE="/etc/infra-manager/ca/ca-bundle.crt"
 NODE="${PACKER_NODE:-pve}"
 ISO_BASE="https://cdimage.debian.org/debian-cd/current/amd64/iso-cd"
 
@@ -83,7 +83,7 @@ check_existing() {
 
     if [[ "$template" == "1" && "$name" == "tpl-debian13" && "$description" == *"template-version=8"* ]]; then
         finalize_template
-        "$ROOT/scripts/infra-deployer/test-template.sh" "$VMID"
+        "$ROOT/scripts/infra-manager/test-template.sh" "$VMID"
         ok "Шаблон $VMID уже соответствует версии 8 и успешно проверен; сборка не требуется"
         return 0
     fi
@@ -180,7 +180,7 @@ main() {
     unset build_password
 
     finalize_template
-    "$ROOT/scripts/infra-deployer/test-template.sh" "$VMID"
+    "$ROOT/scripts/infra-manager/test-template.sh" "$VMID"
 
     unset PVE_TOKEN_SECRET AUTH_HEADER
     ok "Шаблон $VMID полностью собран и проверен"

@@ -1,6 +1,6 @@
-# 910 infra-deployer
+# 910 infra-manager
 
-`910 infra-deployer` — специальный постоянный LXC, из которого выполняется штатное развёртывание и сопровождение инфраструктуры проекта.
+`910 infra-manager` — специальный постоянный LXC, из которого выполняется штатное развёртывание и сопровождение инфраструктуры проекта.
 
 ## Источники требований
 
@@ -38,7 +38,7 @@
 
 ```text
 VMID:          910
-hostname:      infra-deployer
+hostname:      infra-manager
 тип:           unprivileged LXC
 ОС:            Debian 13 amd64
 CPU:           2
@@ -50,7 +50,7 @@ bridge:        vmbr0
 onboot:        true
 protection:    true
 features:      nesting=1,keyctl=1
-tags:          infra-deployer;proxmox-bootstrap
+tags:          infra-manager;proxmox-bootstrap
 pool managed:  нет
 ```
 
@@ -74,7 +74,7 @@ PVE
    ├─ передаёт read-only GitHub Deploy Key
    ├─ получает закрытый проект
    ├─ выдаёт ограниченный PVE API-доступ
-   └─ запускает scripts/infra-deployer/setup.sh
+   └─ запускает scripts/infra-manager/setup.sh
       ├─ устанавливает Docker
       ├─ создаёт постоянные каталоги и секреты
       ├─ собирает и запускает Semaphore
@@ -133,18 +133,18 @@ OpenTofu state и другие постоянные данные не должн
 Основные области:
 
 ```text
-/etc/infra-deployer/       конфигурация, CA и секреты
-/var/lib/infra-deployer/   постоянные данные и состояние
-/opt/infra-deployer/       разворачиваемая конфигурация Compose
-/var/log/infra-deployer/   журнал настройки
+/etc/infra-manager/       конфигурация, CA и секреты
+/var/lib/infra-manager/   постоянные данные и состояние
+/opt/infra-manager/       разворачиваемая конфигурация Compose
+/var/log/infra-manager/   журнал настройки
 ```
 
 Обязательному резервному копированию подлежат как минимум:
 
 ```text
-/etc/infra-deployer/secrets/
-/var/lib/infra-deployer/semaphore/
-/var/lib/infra-deployer/opentofu/state/
+/etc/infra-manager/secrets/
+/var/lib/infra-manager/semaphore/
+/var/lib/infra-manager/opentofu/state/
 ```
 
 Критичны:
@@ -163,7 +163,7 @@ Git checkout, образы контейнеров, Compose-файлы и кэш 
 Состояние хранится локально:
 
 ```text
-/var/lib/infra-deployer/opentofu/state/proxmox.tfstate
+/var/lib/infra-manager/opentofu/state/proxmox.tfstate
 ```
 
 State не хранится в Git и должен резервироваться.
@@ -177,12 +177,12 @@ State не хранится в Git и должен резервироватьс�
 Идентичность:
 
 ```text
-root@pam!infra-deployer
+root@pam!infra-manager
 ```
 
 Token создаётся с разделением привилегий и получает отдельные ACL.
 
-Изменяющие права 910 распространяются на путь Proxmox `/vms`, то есть на все VM/LXC. На `/pool/managed` назначаются `PVEVMAdmin` и `PVEPoolUser`: первая роль нужна для гостей, вторая — только для чтения самого pool. Для сборки шаблонов Packer получает доступ к ISO-хранилищу `local`, а диски VM размещает через `local-lvm`. Сам `managed` остаётся границей для AI Control и не ограничивает infra-deployer.
+Изменяющие права 910 распространяются на путь Proxmox `/vms`, то есть на все VM/LXC. На `/pool/managed` назначаются `PVEVMAdmin` и `PVEPoolUser`: первая роль нужна для гостей, вторая — только для чтения самого pool. Для сборки шаблонов Packer получает доступ к ISO-хранилищу `local`, а диски VM размещает через `local-lvm`. Сам `managed` остаётся границей для AI Control и не ограничивает infra-manager.
 
 Сам 910 не входит в `managed`, но технически попадает в область `/vms`. Его собственный жизненный цикл по-прежнему принадлежит public bootstrap, OpenTofu 910 не управляет, а `protection=true` защищает контейнер от случайного удаления.
 
@@ -225,13 +225,13 @@ git@github.com:zsergeyru/proxmox.git
 После настройки доступны:
 
 ```bash
-infra-deployer-status
-infra-deployer-status --full
-infra-deployer-pve-access-check
-infra-deployer-pve-lifecycle-test --apply
+infra-manager-status
+infra-manager-status --full
+infra-manager-pve-access-check
+infra-manager-pve-lifecycle-test --apply
 ```
 
-`infra-deployer-status` проверяет локальное состояние 910, Docker, Semaphore, инфраструктурные инструменты и базовую авторизацию PVE API.
+`infra-manager-status` проверяет локальное состояние 910, Docker, Semaphore, инфраструктурные инструменты и базовую авторизацию PVE API.
 
 `--full` дополнительно проверяет окончательный контракт PVE-прав.
 
@@ -319,7 +319,7 @@ Semaphore: http://<адрес-910>:3000/
 Пароль одновременно сохраняется с правами `0600` в:
 
 ```text
-/etc/infra-deployer/secrets/initial-admin-password
+/etc/infra-manager/secrets/initial-admin-password
 ```
 
 В обычный журнал bootstrap пароль не записывается. После успешного однократного показа создаётся служебная отметка. При следующих запусках пароль не меняется и повторно не выводится. Это также позволяет один раз показать пароль на уже созданном 910 после обновления этой логики.

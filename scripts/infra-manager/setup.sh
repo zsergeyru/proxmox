@@ -6,24 +6,24 @@ set -Eeuo pipefail
 export LANG=C.UTF-8
 export LC_ALL=C.UTF-8
 
-# Первоначальная и повторяемая настройка 910 infra-deployer.
+# Первоначальная и повторяемая настройка 910 infra-manager.
 # Скрипт запускается внутри LXC 910 от root единым bootstrap через pct exec.
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-ASSET_DIR="${REPO_ROOT}/guests/910-infra-deployer/compose"
+ASSET_DIR="${REPO_ROOT}/guests/910-infra-manager/compose"
 
-CONFIG_DIR="/etc/infra-deployer"
+CONFIG_DIR="/etc/infra-manager"
 SECRET_DIR="${CONFIG_DIR}/secrets"
 CA_DIR="${CONFIG_DIR}/ca"
-DATA_DIR="/var/lib/infra-deployer"
+DATA_DIR="/var/lib/infra-manager"
 SEMAPHORE_DIR="${DATA_DIR}/semaphore"
 OPENTOFU_DIR="${DATA_DIR}/opentofu"
 STATE_DIR="${OPENTOFU_DIR}/state"
 OPENTOFU_INPUT="${OPENTOFU_DIR}/guests.json"
-COMPOSE_DIR="/opt/infra-deployer/compose"
-STATUS_COMMAND="/usr/local/sbin/infra-deployer-status"
-ACCESS_CHECK_COMMAND="/usr/local/sbin/infra-deployer-pve-access-check"
-LIFECYCLE_TEST_COMMAND="/usr/local/sbin/infra-deployer-pve-lifecycle-test"
+COMPOSE_DIR="/opt/infra-manager/compose"
+STATUS_COMMAND="/usr/local/sbin/infra-manager-status"
+ACCESS_CHECK_COMMAND="/usr/local/sbin/infra-manager-pve-access-check"
+LIFECYCLE_TEST_COMMAND="/usr/local/sbin/infra-manager-pve-lifecycle-test"
 
 SERVER_ENV="${SECRET_DIR}/semaphore-server.env"
 PVE_API_ENV="${SECRET_DIR}/pve-api.env"
@@ -32,13 +32,13 @@ ADMIN_PASSWORD_SHOWN_FILE="${SECRET_DIR}/.initial-admin-password-shown"
 CA_BUNDLE="${CA_DIR}/ca-bundle.crt"
 
 PVE_API_SECRET_FILE="${PVE_API_SECRET_FILE:-}"
-RECOVER="${INFRA_DEPLOYER_RECOVER:-0}"
+RECOVER="${INFRA_MANAGER_RECOVER:-0}"
 
 SEMAPHORE_VERSION="v2.18.30"
 PROJECT_BRANCH="${INFRA_PROJECT_BRANCH:-main}"
 OPENTOFU_VERSION="1.12.6"
 PACKER_VERSION="1.15.4"
-LOG_FILE="${INFRA_DEPLOYER_LOG_FILE:-/var/log/infra-deployer/bootstrap.log}"
+LOG_FILE="${INFRA_MANAGER_LOG_FILE:-/var/log/infra-manager/bootstrap.log}"
 
 C_RESET=""
 C_BOLD=""
@@ -47,7 +47,7 @@ C_BLUE=""
 C_CYAN=""
 C_RED=""
 
-if [[ "${INFRA_DEPLOYER_COLOR:-0}" == "1" && "${NO_COLOR:-}" == "" ]]; then
+if [[ "${INFRA_MANAGER_COLOR:-0}" == "1" && "${NO_COLOR:-}" == "" ]]; then
     C_RESET="$(printf '\033[0m')"
     C_BOLD="$(printf '\033[1m')"
     C_GREEN="$(printf '\033[32m')"
@@ -86,7 +86,7 @@ init_log() {
     install -d -o root -g root -m 0755 "$(dirname "$LOG_FILE")"
     touch "$LOG_FILE"
     chmod 0640 "$LOG_FILE"
-    printf '\n===== setup infra-deployer %s =====\n' "$(date '+%Y-%m-%d %H:%M:%S')" >>"$LOG_FILE"
+    printf '\n===== setup infra-manager %s =====\n' "$(date '+%Y-%m-%d %H:%M:%S')" >>"$LOG_FILE"
 }
 
 run_logged() {
@@ -111,7 +111,7 @@ check_os() {
     . /etc/os-release
     [[ "${ID:-}" == "debian" ]] || die "Ожидается Debian"
     [[ "${VERSION_ID:-}" == "13" ]] || die "Ожидается Debian 13, обнаружено ${VERSION_ID:-?}"
-    [[ "$(dpkg --print-architecture)" == "amd64" ]]         || die "Первая версия infra-deployer рассчитана на amd64"
+    [[ "$(dpkg --print-architecture)" == "amd64" ]]         || die "Первая версия infra-manager рассчитана на amd64"
 }
 
 prepare_directories() {
@@ -135,16 +135,16 @@ ensure_base_packages() {
     done
 
     if [[ -z "$missing" ]]; then
-        ok "Базовые пакеты infra-deployer уже установлены"
+        ok "Базовые пакеты infra-manager уже установлены"
         return
     fi
 
-    log "Установка базовых пакетов infra-deployer"
+    log "Установка базовых пакетов infra-manager"
     run_logged apt-get update
     # shellcheck disable=SC2086
     run_logged env DEBIAN_FRONTEND=noninteractive \
         apt-get install -y --no-install-recommends $missing
-    ok "Базовые пакеты infra-deployer установлены"
+    ok "Базовые пакеты infra-manager установлены"
 }
 
 install_docker() {
@@ -304,7 +304,7 @@ EOF_SERVER
 prepare_opentofu_input() {
     log "Подготовка итогового состояния гостей для OpenTofu"
 
-    python3 "$REPO_ROOT/scripts/infra-deployer/render-opentofu-input.py" \
+    python3 "$REPO_ROOT/scripts/infra-manager/render-opentofu-input.py" \
         --output "$OPENTOFU_INPUT"
     chown 1001:0 "$OPENTOFU_INPUT"
     chmod 0640 "$OPENTOFU_INPUT"
@@ -408,24 +408,24 @@ wait_semaphore() {
 configure_semaphore_project() {
     log "Настройка проекта Semaphore"
     INFRA_PROJECT_BRANCH="$PROJECT_BRANCH" \
-    INFRA_DEPLOYER_RECOVER="$RECOVER" \
-        bash "$REPO_ROOT/scripts/infra-deployer/semaphore-project.sh"
+    INFRA_MANAGER_RECOVER="$RECOVER" \
+        bash "$REPO_ROOT/scripts/infra-manager/semaphore-project.sh"
 }
 
 install_local_commands() {
     install -o root -g root -m 0755 \
-        "$REPO_ROOT/scripts/infra-deployer/status.sh" "$STATUS_COMMAND"
+        "$REPO_ROOT/scripts/infra-manager/status.sh" "$STATUS_COMMAND"
     install -o root -g root -m 0755 \
-        "$REPO_ROOT/scripts/infra-deployer/check-pve-access.sh" "$ACCESS_CHECK_COMMAND"
+        "$REPO_ROOT/scripts/infra-manager/check-pve-access.sh" "$ACCESS_CHECK_COMMAND"
     install -o root -g root -m 0755 \
-        "$REPO_ROOT/scripts/infra-deployer/test-pve-lifecycle.sh" "$LIFECYCLE_TEST_COMMAND"
+        "$REPO_ROOT/scripts/infra-manager/test-pve-lifecycle.sh" "$LIFECYCLE_TEST_COMMAND"
 
     # pct exec использует PATH без /usr/local/sbin. Канонические файлы остаются
     # в sbin, а короткие команды доступны через /usr/local/bin.
     install -d -o root -g root -m 0755 /usr/local/bin
-    ln -sfn "$STATUS_COMMAND" /usr/local/bin/infra-deployer-status
-    ln -sfn "$ACCESS_CHECK_COMMAND" /usr/local/bin/infra-deployer-pve-access-check
-    ln -sfn "$LIFECYCLE_TEST_COMMAND" /usr/local/bin/infra-deployer-pve-lifecycle-test
+    ln -sfn "$STATUS_COMMAND" /usr/local/bin/infra-manager-status
+    ln -sfn "$ACCESS_CHECK_COMMAND" /usr/local/bin/infra-manager-pve-access-check
+    ln -sfn "$LIFECYCLE_TEST_COMMAND" /usr/local/bin/infra-manager-pve-lifecycle-test
 }
 
 verify_semaphore_tools() {
@@ -443,7 +443,7 @@ report_result() {
     local address
     address="$(hostname -I 2>/dev/null | awk '{print $1}')"
 
-    printf '\n910 infra-deployer подготовлен.\n'
+    printf '\n910 infra-manager подготовлен.\n'
     if [[ -n "$address" ]]; then
         printf 'Semaphore: http://%s:3000/\n' "$address"
     else

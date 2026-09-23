@@ -5,9 +5,9 @@ shopt -s inherit_errexit
 SEMAPHORE_URL="http://127.0.0.1:3000"
 PROJECT_NAME="Proxmox Infrastructure"
 OPENTOFU_ENV_NAME="OpenTofu PVE"
-PROJECT_ID_FILE="/var/lib/infra-deployer/semaphore-project-id"
+PROJECT_ID_FILE="/var/lib/infra-manager/semaphore-project-id"
 
-SECRET_DIR="/etc/infra-deployer/secrets"
+SECRET_DIR="/etc/infra-manager/secrets"
 ADMIN_PASSWORD_FILE="${SECRET_DIR}/initial-admin-password"
 SEMAPHORE_API_TOKEN_FILE="${SECRET_DIR}/semaphore-api-token"
 PVE_API_ENV="${SECRET_DIR}/pve-api.env"
@@ -25,7 +25,7 @@ C_BOLD=""
 C_GREEN=""
 C_RED=""
 
-if [[ "${INFRA_DEPLOYER_COLOR:-0}" == "1" && "${NO_COLOR:-}" == "" ]]; then
+if [[ "${INFRA_MANAGER_COLOR:-0}" == "1" && "${NO_COLOR:-}" == "" ]]; then
     C_RESET="$(printf '\033[0m')"
     C_BOLD="$(printf '\033[1m')"
     C_GREEN="$(printf '\033[32m')"
@@ -143,7 +143,7 @@ ensure_api_token() {
     fi
 
     login
-    payload='{"name":"infra-deployer setup"}'
+    payload='{"name":"infra-manager setup"}'
     response="$(api_cookie POST /user/tokens -d "$payload")"
     token="$(jq -r '.id // empty' <<<"$response")"
     [[ -n "$token" ]] || die "Semaphore не вернул API token"
@@ -340,7 +340,7 @@ ensure_opentofu_plan_template() {
     id="$(unique_id_by_name "$templates" "$name" "template")"
 
     if [[ -z "$id" ]]; then
-        payload="$(jq -cn         --arg name "$name"         --arg playbook "scripts/infra-deployer/opentofu-plan.sh"         --arg branch "$PROJECT_BRANCH"         --argjson project_id "$project_id"         --argjson repository_id "$repository_id"         --argjson environment_id "$environment_id"         '{
+        payload="$(jq -cn         --arg name "$name"         --arg playbook "scripts/infra-manager/opentofu-plan.sh"         --arg branch "$PROJECT_BRANCH"         --argjson project_id "$project_id"         --argjson repository_id "$repository_id"         --argjson environment_id "$environment_id"         '{
                 name:$name,
                 project_id:$project_id,
                 repository_id:$repository_id,
@@ -356,7 +356,7 @@ ensure_opentofu_plan_template() {
         response="$(api POST "/project/${project_id}/templates" -d "$payload")"
         id="$(jq -r '.id // empty' <<<"$response")"
     else
-        payload="$(jq -cn         --argjson id "$id"         --arg name "$name"         --arg playbook "scripts/infra-deployer/opentofu-plan.sh"         --arg branch "$PROJECT_BRANCH"         --argjson project_id "$project_id"         --argjson repository_id "$repository_id"         --argjson environment_id "$environment_id"         '{
+        payload="$(jq -cn         --argjson id "$id"         --arg name "$name"         --arg playbook "scripts/infra-manager/opentofu-plan.sh"         --arg branch "$PROJECT_BRANCH"         --argjson project_id "$project_id"         --argjson repository_id "$repository_id"         --argjson environment_id "$environment_id"         '{
                 id:$id,
                 name:$name,
                 project_id:$project_id,
@@ -389,7 +389,7 @@ ensure_packer_9000_template() {
     if [[ -z "$id" ]]; then
         payload="$(jq -cn \
             --arg name "$name" \
-            --arg playbook "scripts/infra-deployer/build-template.sh" \
+            --arg playbook "scripts/infra-manager/build-template.sh" \
             --arg branch "$PROJECT_BRANCH" \
             --argjson project_id "$project_id" \
             --argjson repository_id "$repository_id" \
@@ -413,7 +413,7 @@ ensure_packer_9000_template() {
         payload="$(jq -cn \
             --argjson id "$id" \
             --arg name "$name" \
-            --arg playbook "scripts/infra-deployer/build-template.sh" \
+            --arg playbook "scripts/infra-manager/build-template.sh" \
             --arg branch "$PROJECT_BRANCH" \
             --argjson project_id "$project_id" \
             --argjson repository_id "$repository_id" \

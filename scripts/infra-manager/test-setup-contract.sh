@@ -2,21 +2,21 @@
 set -Eeuo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-SETUP="$ROOT/scripts/infra-deployer/setup.sh"
-STATUS="$ROOT/scripts/infra-deployer/status.sh"
-ACCESS="$ROOT/scripts/infra-deployer/check-pve-access.sh"
-LIFECYCLE="$ROOT/scripts/infra-deployer/test-pve-lifecycle.sh"
-BUILD_TEMPLATE="$ROOT/scripts/infra-deployer/build-template.sh"
-TEST_TEMPLATE="$ROOT/scripts/infra-deployer/test-template.sh"
-COMPOSE="$ROOT/guests/910-infra-deployer/compose/docker-compose.yml"
-DOCKERFILE="$ROOT/guests/910-infra-deployer/compose/semaphore/Dockerfile"
-REQ="$ROOT/guests/910-infra-deployer/compose/semaphore/requirements.txt"
-PLAN="$ROOT/scripts/infra-deployer/opentofu-plan.sh"
-SEMAPHORE_PROJECT="$ROOT/scripts/infra-deployer/semaphore-project.sh"
-PVE_BOOTSTRAP_ACCESS="$ROOT/scripts/infra-deployer/pve-bootstrap-access.sh"
+SETUP="$ROOT/scripts/infra-manager/setup.sh"
+STATUS="$ROOT/scripts/infra-manager/status.sh"
+ACCESS="$ROOT/scripts/infra-manager/check-pve-access.sh"
+LIFECYCLE="$ROOT/scripts/infra-manager/test-pve-lifecycle.sh"
+BUILD_TEMPLATE="$ROOT/scripts/infra-manager/build-template.sh"
+TEST_TEMPLATE="$ROOT/scripts/infra-manager/test-template.sh"
+COMPOSE="$ROOT/guests/910-infra-manager/compose/docker-compose.yml"
+DOCKERFILE="$ROOT/guests/910-infra-manager/compose/semaphore/Dockerfile"
+REQ="$ROOT/guests/910-infra-manager/compose/semaphore/requirements.txt"
+PLAN="$ROOT/scripts/infra-manager/opentofu-plan.sh"
+SEMAPHORE_PROJECT="$ROOT/scripts/infra-manager/semaphore-project.sh"
+PVE_BOOTSTRAP_ACCESS="$ROOT/scripts/infra-manager/pve-bootstrap-access.sh"
 OPENTOFU_LOCK="$ROOT/opentofu/.terraform.lock.hcl"
-GUEST_MANIFEST="$ROOT/guests/910-infra-deployer/guest.yaml"
-PROVISION="$ROOT/guests/910-infra-deployer/provision.yaml"
+GUEST_MANIFEST="$ROOT/guests/910-infra-manager/guest.yaml"
+PROVISION="$ROOT/guests/910-infra-manager/provision.yaml"
 
 die() { printf 'ОШИБКА: %s\n' "$*" >&2; exit 1; }
 ok()  { printf '[ОК] %s\n' "$*"; }
@@ -34,7 +34,7 @@ import yaml
 guest_path, provision_path, setup_path, compose_path, dockerfile_path, req_path = map(Path, sys.argv[1:])
 
 guest = yaml.safe_load(guest_path.read_text(encoding="utf-8"))
-if guest.get("vmid") != 910 or guest.get("name") != "infra-deployer":
+if guest.get("vmid") != 910 or guest.get("name") != "infra-manager":
     raise SystemExit("910 guest.yaml содержит неверный vmid/name")
 if "profile" in guest:
     raise SystemExit("910 guest.yaml не должен содержать profile и попадать в OpenTofu")
@@ -138,11 +138,11 @@ grep -q 'SEMAPHORE_VERSION="v2.18.30"' "$SETUP" \
 grep -q '^install_local_commands() {' "$SETUP" \
     || die "setup.sh обязан определять install_local_commands"
 
-grep -q 'infra-deployer-status' "$SETUP" \
+grep -q 'infra-manager-status' "$SETUP" \
     || die "setup.sh не устанавливает status command"
-grep -q 'infra-deployer-pve-access-check' "$SETUP" \
+grep -q 'infra-manager-pve-access-check' "$SETUP" \
     || die "setup.sh не устанавливает PVE access check"
-grep -q 'infra-deployer-pve-lifecycle-test' "$SETUP" \
+grep -q 'infra-manager-pve-lifecycle-test' "$SETUP" \
     || die "setup.sh не устанавливает lifecycle test"
 if grep -q '^SEMAPHORE_USE_REMOTE_RUNNER=True$\|^SEMAPHORE_RUNNER_REGISTRATION_TOKEN=' "$SETUP"; then
     die "Для одного 910 отдельный remote Runner не должен включаться"
@@ -150,11 +150,11 @@ fi
 grep -q 'docker exec infra-deployer-semaphore packer version' "$SETUP" \
     || die "Packer должен проверяться внутри локального Semaphore"
 
-grep -q 'ln -sfn "$STATUS_COMMAND" /usr/local/bin/infra-deployer-status' "$SETUP" \
+grep -q 'ln -sfn "$STATUS_COMMAND" /usr/local/bin/infra-manager-status' "$SETUP" \
     || die "status command должен быть доступен по короткому имени через pct exec"
-grep -q 'ln -sfn "$ACCESS_CHECK_COMMAND" /usr/local/bin/infra-deployer-pve-access-check' "$SETUP" \
+grep -q 'ln -sfn "$ACCESS_CHECK_COMMAND" /usr/local/bin/infra-manager-pve-access-check' "$SETUP" \
     || die "PVE access check должен быть доступен по короткому имени через pct exec"
-grep -q 'ln -sfn "$LIFECYCLE_TEST_COMMAND" /usr/local/bin/infra-deployer-pve-lifecycle-test' "$SETUP" \
+grep -q 'ln -sfn "$LIFECYCLE_TEST_COMMAND" /usr/local/bin/infra-manager-pve-lifecycle-test' "$SETUP" \
     || die "lifecycle test должен быть доступен по короткому имени через pct exec"
 
 grep -q 'render-opentofu-input.py' "$SETUP" \
@@ -165,8 +165,8 @@ grep -q 'Используется существующий постоянный 
 
 grep -q 'API_USER="root@pam"' "$PVE_BOOTSTRAP_ACCESS" \
     || die "PVE bootstrap access должен использовать существующий root@pam"
-grep -q 'API_TOKEN_NAME="infra-deployer"' "$PVE_BOOTSTRAP_ACCESS" \
-    || die "PVE bootstrap access должен создавать отдельный infra-deployer token"
+grep -q 'API_TOKEN_NAME="infra-manager"' "$PVE_BOOTSTRAP_ACCESS" \
+    || die "PVE bootstrap access должен создавать отдельный infra-manager token"
 grep -q -- '--privsep 1' "$PVE_BOOTSTRAP_ACCESS" \
     || die "PVE API token должен использовать privsep=1"
 grep -q '^rollback_new_api_token() {' "$PVE_BOOTSTRAP_ACCESS" \
@@ -184,13 +184,13 @@ grep -Fq 'ensure_token_roles "/pool/$MANAGED_POOL" "PVEVMAdmin,PVEPoolUser"' "$P
     || die "910 должен получать PVEVMAdmin и PVEPoolUser на managed"
 grep -Fq 'ensure_token_acl "/storage/$ISO_STORAGE" "PVEDatastoreAdmin"' "$PVE_BOOTSTRAP_ACCESS" \
     || die "910 должен иметь доступ к ISO storage для Packer"
-if grep -q 'pveum user add.*infra-deployer@pve' "$PVE_BOOTSTRAP_ACCESS"; then
-    die "Отдельный пользователь infra-deployer@pve больше не должен создаваться"
+if grep -q 'pveum user add.*infra-manager@pve' "$PVE_BOOTSTRAP_ACCESS"; then
+    die "Отдельный пользователь infra-manager@pve больше не должен создаваться"
 fi
 if grep -q 'pveum role add.*InfraManagedGuest' "$PVE_BOOTSTRAP_ACCESS"; then
     die "Собственная роль InfraManagedGuest больше не должна создаваться"
 fi
-if grep -q 'infra-deployer@pve' "$PVE_BOOTSTRAP_ACCESS" "$SETUP" "$SEMAPHORE_PROJECT"; then
+if grep -q 'infra-manager@pve' "$PVE_BOOTSTRAP_ACCESS" "$SETUP" "$SEMAPHORE_PROJECT"; then
     die "Старая PVE-идентичность не должна присутствовать в чистой схеме"
 fi
 if grep -q 'InfraManagedGuest' "$PVE_BOOTSTRAP_ACCESS" "$SETUP" "$SEMAPHORE_PROJECT"; then
@@ -225,11 +225,11 @@ grep -q -- '--user 1001:0' "$SETUP" \
 grep -q 'repair_semaphore_storage' "$SETUP" \
     || die "Восстановление прав SQLite должно вызываться при запуске Semaphore"
 
-grep -q 'PROJECT_ID_FILE="/var/lib/infra-deployer/semaphore-project-id"' "$SEMAPHORE_PROJECT" \
+grep -q 'PROJECT_ID_FILE="/var/lib/infra-manager/semaphore-project-id"' "$SEMAPHORE_PROJECT" \
     || die "Semaphore project-id должен храниться вне каталога SQLite"
-grep -q 'PROJECT_ID_FILE="/var/lib/infra-deployer/semaphore-project-id"' "$STATUS" \
+grep -q 'PROJECT_ID_FILE="/var/lib/infra-manager/semaphore-project-id"' "$STATUS" \
     || die "status.sh должен читать Semaphore project-id из постоянного служебного пути"
-if grep -q '/var/lib/infra-deployer/semaphore/project-id' "$SEMAPHORE_PROJECT" "$STATUS"; then
+if grep -q '/var/lib/infra-manager/semaphore/project-id' "$SEMAPHORE_PROJECT" "$STATUS"; then
     die "project-id запрещено хранить внутри каталога SQLite Semaphore"
 fi
 if grep -qE 'install -d .*\$\(dirname "\$PROJECT_ID_FILE"\)' "$SEMAPHORE_PROJECT"; then
@@ -241,7 +241,7 @@ grep -q '/etc/semaphore/requirements.txt' "$DOCKERFILE" \
 grep -q '^proxmoxer' "$REQ" \
     || die "Semaphore должен содержать proxmoxer"
 
-grep -q 'infra-deployer-status --full' "$STATUS" \
+grep -q 'infra-manager-status --full' "$STATUS" \
     || die "status.sh должен поддерживать отдельную полную проверку прав"
 grep -q 'api2/json/version' "$STATUS" \
     || die "Базовый status должен реально проверять PVE API credential"
@@ -300,11 +300,11 @@ grep -q 'local name="OpenTofu Plan"' "$SEMAPHORE_PROJECT" \
     || die "Semaphore должен создавать шаблон OpenTofu Plan"
 grep -q 'opentofu_plan_template_id="$(ensure_opentofu_plan_template ' "$SEMAPHORE_PROJECT" \
     || die "main semaphore-project.sh обязан вызывать создание шаблона OpenTofu Plan"
-grep -q 'scripts/infra-deployer/opentofu-plan.sh' "$SEMAPHORE_PROJECT" \
+grep -q 'scripts/infra-manager/opentofu-plan.sh' "$SEMAPHORE_PROJECT" \
     || die "OpenTofu Plan должен запускать отдельный безопасный сценарий"
 grep -q 'local name="Build Template 9000"' "$SEMAPHORE_PROJECT" \
     || die "Semaphore должен создавать задание Build Template 9000"
-grep -q 'scripts/infra-deployer/build-template.sh' "$SEMAPHORE_PROJECT" \
+grep -q 'scripts/infra-manager/build-template.sh' "$SEMAPHORE_PROJECT" \
     || die "Build Template 9000 должен запускать отдельный сценарий Packer"
 grep -Fq 'arguments:"[\"9000\"]"' "$SEMAPHORE_PROJECT" \
     || die "Build Template 9000 должен иметь фиксированный VMID 9000"
@@ -350,8 +350,8 @@ if server.get('network_mode') != 'host':
 
 volumes = server.get('volumes', [])
 required = {
-    '/var/lib/infra-deployer/opentofu:/var/lib/infra-deployer/opentofu',
-    '/etc/infra-deployer/ca:/etc/infra-deployer/ca:ro',
+    '/var/lib/infra-manager/opentofu:/var/lib/infra-manager/opentofu',
+    '/etc/infra-manager/ca:/etc/infra-manager/ca:ro',
 }
 missing = required.difference(volumes)
 if missing:
@@ -364,4 +364,4 @@ for volume in volumes:
         raise SystemExit('Unused Ansible public-key volume must not be mounted into Semaphore')
 PY
 
-ok "Контракт setup infra-deployer проверен"
+ok "Контракт setup infra-manager проверен"

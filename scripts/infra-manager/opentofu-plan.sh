@@ -4,7 +4,7 @@ set -Eeuo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "$SCRIPT_DIR/../.." && pwd)"
 OPENTOFU_DIR="$REPO_ROOT/opentofu"
-STATE_DIR="/var/lib/infra-deployer/opentofu"
+STATE_DIR="/var/lib/infra-manager/opentofu"
 GUEST_STATE_FILE="$STATE_DIR/guests.json"
 
 die() { printf 'ОШИБКА: %s\n' "$*" >&2; exit 1; }
@@ -20,7 +20,7 @@ command -v tofu >/dev/null 2>&1 || die "Не найден OpenTofu"
 install -d -m 0750 "$STATE_DIR"
 umask 077
 
-python3 "$REPO_ROOT/scripts/infra-deployer/render-opentofu-input.py"     --output "$GUEST_STATE_FILE"
+python3 "$REPO_ROOT/scripts/infra-manager/render-opentofu-input.py"     --output "$GUEST_STATE_FILE"
 
 tofu -chdir="$OPENTOFU_DIR" init     -input=false     -no-color     -lockfile=readonly
 

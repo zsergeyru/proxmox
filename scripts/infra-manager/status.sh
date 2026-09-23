@@ -2,11 +2,11 @@
 set -Eeuo pipefail
 
 FULL=0
-PVE_ENV="/etc/infra-deployer/secrets/pve-api.env"
-CA_BUNDLE="/etc/infra-deployer/ca/ca-bundle.crt"
+PVE_ENV="/etc/infra-manager/secrets/pve-api.env"
+CA_BUNDLE="/etc/infra-manager/ca/ca-bundle.crt"
 SEMAPHORE_URL="http://127.0.0.1:3000"
-SEMAPHORE_API_TOKEN_FILE="/etc/infra-deployer/secrets/semaphore-api-token"
-PROJECT_ID_FILE="/var/lib/infra-deployer/semaphore-project-id"
+SEMAPHORE_API_TOKEN_FILE="/etc/infra-manager/secrets/semaphore-api-token"
+PROJECT_ID_FILE="/var/lib/infra-manager/semaphore-project-id"
 PROJECT_REPO="git@github.com:zsergeyru/proxmox.git"
 
 C_RESET=""
@@ -14,7 +14,7 @@ C_BOLD=""
 C_GREEN=""
 C_RED=""
 
-if [[ "${INFRA_DEPLOYER_COLOR:-0}" == "1" && "${NO_COLOR:-}" == "" ]]; then
+if [[ "${INFRA_MANAGER_COLOR:-0}" == "1" && "${NO_COLOR:-}" == "" ]]; then
     C_RESET="$(printf '\033[0m')"
     C_BOLD="$(printf '\033[1m')"
     C_GREEN="$(printf '\033[32m')"
@@ -27,8 +27,8 @@ ok()  { printf '%s%s[ОК]%s %s\n' "$C_BOLD" "$C_GREEN" "$C_RESET" "$*"; }
 usage() {
     cat <<'USAGE'
 Использование:
-  infra-deployer-status
-  infra-deployer-status --full
+  infra-manager-status
+  infra-manager-status --full
 
 Без параметров проверяется готовность самого 910 и базовая авторизация PVE API.
 --full дополнительно проверяет окончательный контракт прав OpenTofu.
@@ -71,14 +71,14 @@ command -v docker >/dev/null 2>&1 || die "Docker не установлен"
 docker compose version >/dev/null 2>&1 || die "Docker Compose недоступен"
 
 required_file "$PVE_ENV"
-required_file /etc/infra-deployer/secrets/semaphore-server.env
+required_file /etc/infra-manager/secrets/semaphore-server.env
 required_file "$SEMAPHORE_API_TOKEN_FILE"
-required_file /etc/infra-deployer/secrets/github_project_ed25519
+required_file /etc/infra-manager/secrets/github_project_ed25519
 required_file "$PROJECT_ID_FILE"
-required_file /var/lib/infra-deployer/opentofu/guests.json
+required_file /var/lib/infra-manager/opentofu/guests.json
 required_file "$CA_BUNDLE"
 
-[[ -d /var/lib/infra-deployer/opentofu/state ]] \
+[[ -d /var/lib/infra-manager/opentofu/state ]] \
     || die "Отсутствует каталог OpenTofu state"
 
 [[ "$(docker inspect -f '{{.State.Running}}' infra-deployer-semaphore 2>/dev/null || true)" == "true" ]] \
@@ -142,11 +142,11 @@ curl -fsS \
 unset PVE_API_TOKEN_SECRET
 
 if ((FULL == 1)); then
-    [[ -x /usr/local/sbin/infra-deployer-pve-access-check ]] \
-        || die "Отсутствует infra-deployer-pve-access-check"
-    /usr/local/sbin/infra-deployer-pve-access-check >/dev/null \
+    [[ -x /usr/local/sbin/infra-manager-pve-access-check ]] \
+        || die "Отсутствует infra-manager-pve-access-check"
+    /usr/local/sbin/infra-manager-pve-access-check >/dev/null \
         || die "PVE API access не соответствует полному контракту"
-    ok "infra-deployer готов, полный контракт PVE API подтверждён"
+    ok "infra-manager готов, полный контракт PVE API подтверждён"
 else
-    ok "infra-deployer готов"
+    ok "infra-manager готов"
 fi
