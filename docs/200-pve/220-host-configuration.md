@@ -14,7 +14,7 @@ PVE должен оставаться максимально близким к �
 PVE
 ├─ штатная конфигурация Proxmox
 ├─ минимальные объекты доступа
-└─ LXC 910 infra-deployer
+└─ LXC 910 infra-manager
 ```
 
 ## 2. Обязательное состояние
@@ -43,13 +43,13 @@ local-lvm
 
 Это не VM template `9000`.
 
-### 2.3. 910 infra-deployer
+### 2.3. 910 infra-manager
 
 На PVE существует специальный LXC:
 
 ```text
 VMID 910
-hostname infra-deployer
+hostname infra-manager
 ```
 
 Его виртуальным объектом владеет public bootstrap.
@@ -77,12 +77,12 @@ pool managed
 Для 910 существует:
 
 ```text
-root@pam!infra-deployer
+root@pam!infra-manager
 ```
 
 с `privsep=1`.
 
-Отдельный пользователь `infra-deployer@pve` не создаётся.
+Отдельный пользователь `infra-manager@pve` не создаётся.
 
 Token получает только прямые ACL, описанные в разделе безопасности.
 
@@ -136,11 +136,11 @@ OpenTofu внутри 910 не управляет:
 - принадлежность VMID 910;
 - запуск 910;
 - pool `managed`;
-- наличие `root@pam!infra-deployer`;
+- наличие `root@pam!infra-manager`;
 - `privsep=1`;
 - успешную внутреннюю проверку 910.
 
-Детальная проверка Semaphore, Runner, OpenTofu и других средств выполняется внутри 910 командой `infra-deployer-status`.
+Детальная проверка Semaphore, Runner, OpenTofu и других средств выполняется внутри 910 командой `infra-manager-status`.
 
 ## 6. Повторное применение
 
@@ -158,4 +158,4 @@ OpenTofu внутри 910 не управляет:
 - [`210-host-bootstrap.md`](210-host-bootstrap.md) — первоначальная подготовка.
 - [`230-host-layout.md`](230-host-layout.md) — локальная структура PVE.
 - [`../700-security/710-pve-access.md`](../700-security/710-pve-access.md) — ACL token.
-- [`../../guests/910-infra-deployer/README.md`](../../guests/910-infra-deployer/README.md) — паспорт 910.
+- [`../../guests/910-infra-manager/README.md`](../../guests/910-infra-manager/README.md) — паспорт 910.

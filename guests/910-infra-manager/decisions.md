@@ -144,8 +144,8 @@ PVE-хост хранит private key bootstrap, но не содержит по
 
 - базовые пакеты ОС;
 - Docker и его службу;
-- контейнеры Semaphore Server и Semaphore Runner;
-- инструменты Runner и их версии;
+- единый контейнер `infra-runtime` с Semaphore;
+- OpenTofu, Packer, Ansible и их версии;
 - постоянные пути;
 - области обязательного резервного копирования;
 - используемые внешние доступы;

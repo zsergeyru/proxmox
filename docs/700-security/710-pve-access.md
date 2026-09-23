@@ -2,7 +2,7 @@
 
 **Тип:** спецификация  
 **Статус:** действующий  
-**Назначение:** определить PVE API-доступ постоянного разворачивателя `910 infra-deployer`.
+**Назначение:** определить PVE API-доступ постоянного управляющего LXC `910 infra-manager`.
 
 ## 1. Принцип
 
@@ -11,7 +11,7 @@
 Для автоматизации используется отдельный API token существующего пользователя:
 
 ```text
-root@pam!infra-deployer
+root@pam!infra-manager
 ```
 
 Token создаётся с:
@@ -20,7 +20,7 @@ Token создаётся с:
 privsep=1
 ```
 
-Права назначаются самому token. Отдельный пользователь `infra-deployer@pve`, отдельные группы и собственная роль не используются.
+Права назначаются самому token. Отдельный пользователь `infra-manager@pve`, отдельные группы и собственная роль не используются.
 
 Главная граница 910:
 
@@ -48,7 +48,7 @@ managed
 
 910 должен уметь создавать и назначать обычных гостей в `managed`, а также читать сам pool. Поэтому на этом пути token получает одновременно `PVEVMAdmin` и `PVEPoolUser`. Более специфичный ACL не должен лишать 910 права `Pool.Audit`.
 
-Сам `910 infra-deployer` в `managed` не входит.
+Сам `910 infra-manager` в `managed` не входит.
 
 ## 3. ACL token
 
@@ -114,7 +114,7 @@ Token не получает права:
 
 ## 7. Создание и хранение token
 
-Token создаёт `scripts/infra-deployer/pve-bootstrap-access.sh` из закрытого проекта. Public bootstrap временно передаёт этот сценарий на PVE и выполняет его от root.
+Token создаёт `scripts/infra-manager/pve-bootstrap-access.sh` из закрытого проекта. Public bootstrap временно передаёт этот сценарий на PVE и выполняет его от root.
 
 Secret выдаётся Proxmox только при создании token, поэтому первоначальная передача выполняется сразу:
 
@@ -122,7 +122,7 @@ Secret выдаётся Proxmox только при создании token, по
 PVE
 → временный root-only файл
 → 910
-→ /etc/infra-deployer/secrets/pve-api.env
+→ /etc/infra-manager/secrets/pve-api.env
 ```
 
 После успешной настройки временная копия удаляется.
@@ -155,13 +155,13 @@ TF_VAR_pve_api_token
 Внутри 910 доступны:
 
 ```bash
-infra-deployer-status
-infra-deployer-status --full
-infra-deployer-pve-access-check
-infra-deployer-pve-lifecycle-test --apply
+infra-manager-status
+infra-manager-status --full
+infra-manager-pve-access-check
+infra-manager-pve-lifecycle-test --apply
 ```
 
-`infra-deployer-pve-access-check` проверяет:
+`infra-manager-pve-access-check` проверяет:
 
 - авторизацию API;
 - `PVEVMAdmin` на `/vms`;
@@ -169,7 +169,7 @@ infra-deployer-pve-lifecycle-test --apply
 - доступ к требуемому storage и bridge;
 - отсутствие административных прав PVE-хоста.
 
-`infra-deployer-pve-lifecycle-test --apply` выполняет реальный проверочный цикл на временном LXC:
+`infra-manager-pve-lifecycle-test --apply` выполняет реальный проверочный цикл на временном LXC:
 
 ```text
 создать
@@ -196,4 +196,4 @@ infra-deployer-pve-lifecycle-test --apply
 - [`700-overview.md`](700-overview.md) — общая модель безопасности.
 - [`../200-pve/210-host-bootstrap.md`](../200-pve/210-host-bootstrap.md) — создание 910 и token.
 - [`../800-operations/810-deployment.md`](../800-operations/810-deployment.md) — штатный процесс развёртывания.
-- [`../../guests/910-infra-deployer/README.md`](../../guests/910-infra-deployer/README.md) — паспорт 910.
+- [`../../guests/910-infra-manager/README.md`](../../guests/910-infra-manager/README.md) — паспорт 910.

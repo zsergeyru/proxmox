@@ -2,7 +2,7 @@
 
 **Тип:** обзор  
 **Статус:** проектируется  
-**Назначение:** описать роль PVE-хоста после переноса постоянного развёртывания в `910 infra-deployer`.
+**Назначение:** описать роль PVE-хоста после переноса постоянного развёртывания в `910 infra-manager`.
 
 ## 1. Роль PVE
 
@@ -13,7 +13,7 @@ PVE остаётся платформой виртуализации и влад
 ```text
 чистый PVE
 → public bootstrap
-→ 910 infra-deployer
+→ 910 infra-manager
 → закрытый проект внутри 910
 → остальная инфраструктура
 ```
@@ -26,9 +26,9 @@ PVE остаётся платформой виртуализации и влад
 - `vmbr0`;
 - `local` и `local-lvm`;
 - Debian 13 LXC template для создания 910;
-- LXC `910 infra-deployer`;
+- LXC `910 infra-manager`;
 - pool `managed`;
-- ограниченный API token `root@pam!infra-deployer` и его ACL;
+- ограниченный API token `root@pam!infra-manager` и его ACL;
 - временная блокировка bootstrap во время запуска.
 
 На PVE не требуются:
@@ -60,7 +60,7 @@ PVE остаётся платформой виртуализации и влад
 
 ## 4. Роль 910
 
-`910 infra-deployer` — постоянный специальный LXC, который не входит в собственное состояние OpenTofu и находится вне pool `managed`.
+`910 infra-manager` — постоянный специальный LXC, который не входит в собственное состояние OpenTofu и находится вне pool `managed`.
 
 Именно внутри 910 находятся:
 
@@ -87,7 +87,7 @@ PVE остаётся платформой виртуализации и влад
 Для HTTPS API используется:
 
 ```text
-root@pam!infra-deployer
+root@pam!infra-manager
 ```
 
 с `privsep=1` и собственными ограниченными ACL.
@@ -111,5 +111,5 @@ root@pam!infra-deployer
 - [`210-host-bootstrap.md`](210-host-bootstrap.md) — первоначальная подготовка.
 - [`220-host-configuration.md`](220-host-configuration.md) — минимальное состояние PVE.
 - [`230-host-layout.md`](230-host-layout.md) — локальная структура PVE.
-- [`../../guests/910-infra-deployer/README.md`](../../guests/910-infra-deployer/README.md) — паспорт 910.
+- [`../../guests/910-infra-manager/README.md`](../../guests/910-infra-manager/README.md) — паспорт 910.
 - [`../700-security/710-pve-access.md`](../700-security/710-pve-access.md) — доступ 910 к PVE.

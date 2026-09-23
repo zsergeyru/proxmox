@@ -24,14 +24,14 @@ scripts/
         └── tests/
 ```
 
-## `infra-deployer/`
+## `infra-manager/`
 
-Контур настройки специального LXC `910 infra-deployer`.
+Контур настройки специального LXC `910 infra-manager`.
 
 Основные файлы:
 
 ```text
-scripts/infra-deployer/
+scripts/infra-manager/
 ├── setup.sh
 ├── semaphore-project.sh
 ├── check-pve-access.sh
@@ -43,26 +43,26 @@ scripts/infra-deployer/
 
 `semaphore-project.sh` через Semaphore API создаёт проект `Proxmox Infrastructure`, Key Store и запись закрытого Git-репозитория. Повторный запуск использует отдельный Semaphore API token, поэтому не зависит от сохранения первоначального пароля администратора.
 
-`check-pve-access.sh` без изменения состояния проверяет фактические права ограниченного token `root@pam!infra-deployer` с `privsep=1` через HTTPS API, включая запрет изменений `910`.
+`check-pve-access.sh` без изменения состояния проверяет фактические права ограниченного token `root@pam!infra-manager` с `privsep=1` через HTTPS API, включая запрет изменений `910`.
 
 `status.sh` является общей локальной проверкой готовности `910` и устанавливается как:
 
 ```text
-/usr/local/sbin/infra-deployer-status
+/usr/local/sbin/infra-manager-status
 ```
 
 Дополнительно устанавливается:
 
 ```text
-/usr/local/sbin/infra-deployer-pve-access-check
+/usr/local/sbin/infra-manager-pve-access-check
 ```
 
-Публичный bootstrap использует `infra-deployer-status` при итоговой и повторной проверке `910`; внутренняя status-проверка вызывает проверку PVE ACL.
+Публичный bootstrap использует `infra-manager-status` при итоговой и повторной проверке `910`; внутренняя status-проверка вызывает проверку PVE ACL.
 
 `test-pve-lifecycle.sh` устанавливается как:
 
 ```text
-/usr/local/sbin/infra-deployer-pve-lifecycle-test
+/usr/local/sbin/infra-manager-pve-lifecycle-test
 ```
 
 Это только явный приёмочный тест. Он запускается исключительно с `--apply`, использует временный CTID `9098`, создаёт LXC сразу в `managed`, меняет RAM, запускает, останавливает и удаляет его. Bootstrap и CI автоматически этот тест не выполняют.
