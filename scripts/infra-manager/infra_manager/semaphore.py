@@ -139,7 +139,22 @@ class SemaphoreClient:
         return self._request("PUT", path, payload)
 
     def ping(self) -> None:
-        self.get("/ping", auth="none")
+        request = urllib.request.Request(
+            f"{self.base_url}/api/ping",
+            headers={"Accept": "application/json"},
+            method="GET",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=10):
+                return
+        except urllib.error.HTTPError as exc:
+            raise InfraManagerError(
+                f"Semaphore API ping вернул HTTP {exc.code}"
+            ) from exc
+        except (urllib.error.URLError, OSError) as exc:
+            raise InfraManagerError(
+                f"Semaphore API ping недоступен: {exc}"
+            ) from exc
 
     def login(self) -> None:
         if not nonempty(ADMIN_PASSWORD_FILE):
