@@ -6,7 +6,7 @@ USER root
 ARG OPENTOFU_VERSION=1.12.6
 ARG PACKER_VERSION=1.15.4
 
-RUN apk add --no-cache ca-certificates curl unzip git openssh-client bash python3 py3-pip xorriso
+RUN apk add --no-cache ca-certificates curl unzip git openssh-client bash python3 py3-pip
 
 RUN set -eux; \
     arch="$(apk --print-arch)"; \
