@@ -3,6 +3,7 @@ set -Eeuo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SETUP="$ROOT/scripts/infra-manager/setup.sh"
+PY_SETUP="$ROOT/scripts/infra-manager/infra_manager/setup.py"
 STATUS="$ROOT/scripts/infra-manager/status.sh"
 ACCESS="$ROOT/scripts/infra-manager/check-pve-access.sh"
 LIFECYCLE="$ROOT/scripts/infra-manager/test-pve-lifecycle.sh"
@@ -17,21 +18,22 @@ PVE_BOOTSTRAP_ACCESS="$ROOT/scripts/infra-manager/pve-bootstrap-access.sh"
 OPENTOFU_LOCK="$ROOT/opentofu/.terraform.lock.hcl"
 GUEST_MANIFEST="$ROOT/guests/910-infra-manager/guest.yaml"
 PROVISION="$ROOT/guests/910-infra-manager/provision.yaml"
+SSH_CONFIG="$ROOT/guests/910-infra-manager/compose/runtime/ssh_config"
 
 die() { printf 'ОШИБКА: %s\n' "$*" >&2; exit 1; }
 ok()  { printf '[ОК] %s\n' "$*"; }
 
-for file in "$SETUP" "$STATUS" "$ACCESS" "$LIFECYCLE" "$BUILD_TEMPLATE" "$TEST_TEMPLATE" "$COMPOSE" "$DOCKERFILE" "$REQ" "$PLAN" "$SEMAPHORE_PROJECT" "$PVE_BOOTSTRAP_ACCESS" "$OPENTOFU_LOCK" "$GUEST_MANIFEST" "$PROVISION"; do
+for file in "$SETUP" "$PY_SETUP" "$STATUS" "$ACCESS" "$LIFECYCLE" "$BUILD_TEMPLATE" "$TEST_TEMPLATE" "$COMPOSE" "$DOCKERFILE" "$REQ" "$PLAN" "$SEMAPHORE_PROJECT" "$PVE_BOOTSTRAP_ACCESS" "$OPENTOFU_LOCK" "$GUEST_MANIFEST" "$PROVISION" "$SSH_CONFIG"; do
     [[ -s "$file" ]] || die "Отсутствует обязательный файл: $file"
 done
 
-python3 - "$GUEST_MANIFEST" "$PROVISION" "$SETUP" "$COMPOSE" "$DOCKERFILE" "$REQ" <<'PY'
+python3 - "$GUEST_MANIFEST" "$PROVISION" "$SETUP" "$PY_SETUP" "$COMPOSE" "$DOCKERFILE" "$REQ" <<'PY'
 from pathlib import Path
 import re
 import sys
 import yaml
 
-guest_path, provision_path, setup_path, compose_path, dockerfile_path, req_path = map(Path, sys.argv[1:])
+guest_path, provision_path, setup_path, py_setup_path, compose_path, dockerfile_path, req_path = map(Path, sys.argv[1:])
 
 guest = yaml.safe_load(guest_path.read_text(encoding="utf-8"))
 if guest.get("vmid") != 910 or guest.get("name") != "infra-manager":
@@ -60,15 +62,16 @@ if system.get("distribution") != "debian" or system.get("version") != "13" or sy
     raise SystemExit("provision.yaml должен требовать Debian 13 amd64")
 
 setup_text = setup_path.read_text(encoding="utf-8")
+python_setup_text = py_setup_path.read_text(encoding="utf-8")
 required_host_packages = set(system.get("required_packages", []))
 expected_host_packages = {
     "ca-certificates", "curl", "git", "gnupg", "jq",
-    "openssh-client", "openssl", "python3-yaml",
+    "openssh-client", "openssl", "python3", "python3-yaml",
 }
 if required_host_packages != expected_host_packages:
     raise SystemExit(f"неожиданный список пакетов 910: {sorted(required_host_packages)}")
 for package in required_host_packages:
-    if package not in setup_text:
+    if package not in python_setup_text:
         raise SystemExit(f"setup.sh не обеспечивает пакет из provision.yaml: {package}")
 
 docker = provision.get("docker", {})
@@ -80,7 +83,7 @@ expected_docker_packages = {
 if docker_packages != expected_docker_packages:
     raise SystemExit(f"неожиданные Docker-пакеты 910: {sorted(docker_packages)}")
 for package in docker_packages:
-    if package not in setup_text:
+    if package not in python_setup_text:
         raise SystemExit(f"setup.sh не обеспечивает Docker-пакет из provision.yaml: {package}")
 
 services = docker.get("services", {})
@@ -97,9 +100,9 @@ if base_image != "semaphoreui/semaphore:v2.18.30":
     raise SystemExit("infra-runtime должен использовать Semaphore v2.18.30 как base image")
 if runtime.get("network_mode") != "host":
     raise SystemExit("infra-runtime должен использовать network_mode=host для Packer HTTP")
-if 'SEMAPHORE_VERSION="v2.18.30"' not in setup_text:
+if 'SEMAPHORE_VERSION = "v2.18.30"' not in python_setup_text:
     raise SystemExit("Версия Semaphore в setup.sh расходится с provision.yaml")
-if 'RUNTIME_VERSION="v1"' not in setup_text:
+if 'RUNTIME_VERSION = "v1"' not in python_setup_text:
     raise SystemExit("Версия infra-runtime в setup.sh расходится с provision.yaml")
 
 tools = runtime.get("tools", {})
@@ -116,9 +119,9 @@ for package in system_packages:
         raise SystemExit(f"Dockerfile не устанавливает пакет infra-runtime из provision.yaml: {package}")
 if "xorriso" in system_packages or "xorriso" in dockerfile_text:
     raise SystemExit("xorriso не нужен: preseed передаётся штатным HTTP-сервером Packer")
-if f'OPENTOFU_VERSION="{opentofu_version}"' not in setup_text:
+if f'OPENTOFU_VERSION = "{opentofu_version}"' not in python_setup_text:
     raise SystemExit("Версия OpenTofu в setup.sh расходится с provision.yaml")
-if f'PACKER_VERSION="{packer_version}"' not in setup_text:
+if f'PACKER_VERSION = "{packer_version}"' not in python_setup_text:
     raise SystemExit("Версия Packer в setup.sh расходится с provision.yaml")
 
 req_text = req_path.read_text(encoding="utf-8")
