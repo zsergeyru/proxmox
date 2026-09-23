@@ -192,6 +192,12 @@ grep -q -- '--privsep 1' "$PVE_BOOTSTRAP_ACCESS" \
     || die "PVE API token должен использовать privsep=1"
 grep -q '^rollback_new_api_token() {' "$PVE_BOOTSTRAP_ACCESS" \
     || die "Новый PVE API token должен откатываться при ошибке передачи secret"
+grep -q '^remove_token_acls() {' "$PVE_BOOTSTRAP_ACCESS" \
+    || die "Recovery должен уметь удалить ACL старого PVE API token до ротации"
+grep -Fq 'remove_token_acls' "$PVE_BOOTSTRAP_ACCESS" \
+    || die "Recovery должен вызывать очистку ACL перед удалением token"
+grep -Fq 'pveum acl delete "$path"' "$PVE_BOOTSTRAP_ACCESS" \
+    || die "Очистка recovery должна удалять только ACL infra-manager token"
 grep -q 'rm -f -- "$tmp"' "$PVE_BOOTSTRAP_ACCESS" \
     || die "Временный PVE API secret должен удаляться и при ошибке передачи"
 for role in PVEAuditor PVEVMAdmin PVEDatastoreUser PVEDatastoreAdmin PVESDNUser; do
