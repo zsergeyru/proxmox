@@ -68,6 +68,11 @@ ok() {
     printf '%s%s[ОК]%s %s\n' "$C_BOLD" "$C_GREEN" "$C_RESET" "$*"
 }
 
+info() {
+    write_log "ИНФО: $*"
+    printf '[ИНФО] %s\n' "$*"
+}
+
 die() {
     write_log "ОШИБКА: $*"
     printf '\n%s%sОШИБКА:%s %s\n' "$C_BOLD" "$C_RED" "$C_RESET" "$*" >&2
