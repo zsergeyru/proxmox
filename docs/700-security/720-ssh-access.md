@@ -2,7 +2,7 @@
 
 **Тип:** спецификация  
 **Статус:** проектируется  
-**Назначение:** определить SSH-доступ после переноса управления Linux-гостями в `910 infra-deployer` и Ansible.
+**Назначение:** определить SSH-доступ после переноса управления Linux-гостями в `910 infra-manager` и Ansible.
 
 ## 1. Основной принцип
 
@@ -11,7 +11,7 @@
 Основной административный SSH-контур:
 
 ```text
-910 infra-deployer
+910 infra-manager
 └─ Semaphore / Ansible
    └─ управляемые Linux-гости
 ```
@@ -91,5 +91,5 @@ Ansible private key является критичным секретом и до
 
 - [`710-pve-access.md`](710-pve-access.md) — доступ к Proxmox API.
 - [`../200-pve/210-host-bootstrap.md`](../200-pve/210-host-bootstrap.md) — первоначальная подготовка `910`.
-- [`../../guests/910-infra-deployer/README.md`](../../guests/910-infra-deployer/README.md) — хранение ключей и состав разворачивателя.
+- [`../../guests/910-infra-manager/README.md`](../../guests/910-infra-manager/README.md) — хранение ключей и состав управляющего узла.
 - [`../300-guests/320-guest-manifest.md`](../300-guests/320-guest-manifest.md) — параметры гостевых систем.
