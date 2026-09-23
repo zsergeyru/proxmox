@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-# Каноническая повторяемая конфигурация Proxmox VE.
-# Public Bootstrap только получает/обновляет private repo и передаёт управление сюда.
+# Каноническая повторяемая конфигурация самого Proxmox VE.
+# Не управляет жизненным циклом 910 infra-manager и шаблона 9000.
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 LIB_DIR="${SCRIPT_DIR}/lib"
