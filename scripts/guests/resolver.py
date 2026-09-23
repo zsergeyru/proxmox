@@ -126,7 +126,7 @@ def parse_bare_ipv4(value: object, field: str = "network.ipv4") -> ipaddress.IPv
 
 def is_dhcp_ipv4(value: object) -> bool:
     """Вернуть True для явного режима DHCP."""
-    return isinstance(value, str) and value.lower() == DHCP
+    return value == DHCP
 
 
 def resolve_management_ip(
