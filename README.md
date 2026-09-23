@@ -133,7 +133,6 @@ tags:        infra-manager;proxmox-bootstrap
 
 Если подходящего template нет, bootstrap скачивает актуальный Debian 13 template и оставляет его в `local`. Он нужен не только для создания 910, но и для интеграционной проверки PVE API и будущих Debian LXC.
 
-Режимы `--remove` и `--purge` этот template не удаляют.
 
 ## Закрытый проект внутри 910
 
@@ -254,7 +253,7 @@ infra-manager-pve-lifecycle-test --apply
 curl -fsSL https://raw.githubusercontent.com/zsergeyru/proxmox-bootstrap/infra-iac-redesign/bootstrap-pve.sh | bash
 ~~~
 
-Для остальных режимов используется скачанный `bootstrap-pve.sh`.
+Для `--check`, `--recover` и сетевых параметров используется скачанный `bootstrap-pve.sh`.
 
 Скачать:
 
@@ -307,13 +306,11 @@ chmod +x bootstrap-pve.sh
 ./bootstrap-pve.sh --project-branch NAME
 ~~~
 
-## Мягкое и полное удаление
+## Удаление 910
 
-`--remove` удаляет LXC 910, API token, его ACL и пустой `managed`. Постоянный GitHub Deploy Key на PVE сохраняется.
+Bootstrap сам не удаляет 910. Если нужен полностью чистый запуск, LXC `910 infra-manager` удаляется вручную в Proxmox, после чего обычный запуск `bootstrap-pve.sh` создаёт его заново.
 
-`--purge` делает то же самое и дополнительно удаляет `/root/.config/proxmox-bootstrap/` вместе с GitHub Deploy Key.
-
-Не удаляются автоматически VM 100 HAOS, хранилище `backup`, Debian 13 LXC template, чужой объект с VMID 910, непустой `managed` и другие VM/LXC.
+Постоянный GitHub Deploy Key на PVE можно оставить: новый 910 получит тот же read-only ключ. PVE API token `root@pam!infra-manager` при создании нового 910 будет перевыпущен автоматически.
 
 ## Структура репозитория
 
