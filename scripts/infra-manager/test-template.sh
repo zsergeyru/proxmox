@@ -49,14 +49,38 @@ trap cleanup_local EXIT
 api() {
     local method=$1 endpoint=$2
     shift 2
-    curl -fsS \
+
+    local response_file http_code
+    response_file="$(mktemp)"
+    http_code="$(curl -sS \
         --connect-timeout 5 \
         --max-time 120 \
         --cacert "$CA_BUNDLE" \
         -H "$AUTH_HEADER" \
         -X "$method" \
+        -o "$response_file" \
+        -w '%{http_code}' \
         "$@" \
-        "${PVE_API}${endpoint}"
+        "${PVE_API}${endpoint}")" || {
+        rm -f "$response_file"
+        printf 'ОШИБКА: PVE API %s %s: ошибка соединения\n' "$method" "$endpoint" >&2
+        return 1
+    }
+
+    if [[ ! "$http_code" =~ ^2[0-9][0-9]$ ]]; then
+        printf 'ОШИБКА: PVE API %s %s вернул HTTP %s\n' "$method" "$endpoint" "$http_code" >&2
+        if jq -e . "$response_file" >/dev/null 2>&1; then
+            jq -c . "$response_file" >&2
+        else
+            cat "$response_file" >&2
+            printf '\n' >&2
+        fi
+        rm -f "$response_file"
+        return 1
+    fi
+
+    cat "$response_file"
+    rm -f "$response_file"
 }
 
 wait_task() {
