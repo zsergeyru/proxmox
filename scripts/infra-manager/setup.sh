@@ -221,6 +221,7 @@ copy_compose_assets() {
     [[ -f "$ASSET_DIR/runtime/ssh_config" ]] || die "Не найден строгий SSH config infra-runtime"
 
     install -m 0644 "$ASSET_DIR/docker-compose.yml" "$COMPOSE_DIR/docker-compose.yml"
+    rm -rf "$COMPOSE_DIR/semaphore" "$COMPOSE_DIR/runner"
     install -d -m 0755 "$COMPOSE_DIR/runtime"
     install -m 0644 "$ASSET_DIR/runtime/Dockerfile" "$COMPOSE_DIR/runtime/Dockerfile"
     install -m 0644 "$ASSET_DIR/runtime/requirements.txt" "$COMPOSE_DIR/runtime/requirements.txt"
@@ -396,6 +397,7 @@ deploy_semaphore() {
     run_logged docker pull "semaphoreui/semaphore:${SEMAPHORE_VERSION}"
 
     compose stop runtime >/dev/null 2>&1 || true
+    docker rm -f infra-deployer-semaphore infra-deployer-runner infra-manager-semaphore >/dev/null 2>&1 || true
     repair_semaphore_storage
 
     run_logged compose build --pull runtime
