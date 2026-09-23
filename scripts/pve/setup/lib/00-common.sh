@@ -179,8 +179,7 @@ on_error() {
         write_state "failed" "$(state_revision)" >/dev/null 2>&1 || true
     fi
     printf '\n%s%sPVE Configuration аварийно остановлена.%s Код возврата: %s.\n' "$C_BOLD" "$C_RED" "$C_RESET" "$rc" >&2
-    template_build_diagnostic_hint
-    smoke_test_diagnostic_hint
+
     exit "$rc"
 }
 
@@ -192,8 +191,7 @@ on_signal() {
         write_state "interrupted" "$(state_revision)" >/dev/null 2>&1 || true
     fi
     printf '\n%s%sPVE Configuration прервана сигналом %s.%s\n' "$C_BOLD" "$C_RED" "$signal_name" "$C_RESET" >&2
-    template_build_diagnostic_hint
-    smoke_test_diagnostic_hint
+
     exit "$rc"
 }
 
