@@ -1,0 +1,128 @@
+schema_version: 1
+guest_vmid: 910
+
+system:
+  distribution: debian
+  version: "13"
+  architecture: amd64
+
+  required_packages:
+    - ca-certificates
+    - curl
+    - git
+    - gnupg
+    - jq
+    - openssh-client
+    - openssl
+    - python3-yaml
+
+docker:
+  source: docker-official-repository
+  service:
+    name: docker
+    enabled: true
+    state: running
+
+  required_packages:
+    - docker-ce
+    - docker-ce-cli
+    - containerd.io
+    - docker-buildx-plugin
+    - docker-compose-plugin
+
+  compose_file: compose/docker-compose.yml
+
+  services:
+    semaphore:
+      container_name: infra-runtime
+      image: infra-runtime:v2.18.30
+      base_image: semaphoreui/semaphore:v2.18.30
+      restart: unless-stopped
+      network_mode: host
+      database: sqlite
+      data_path: /var/lib/infra-manager/semaphore
+
+      system_packages:
+        - ca-certificates
+        - curl
+        - unzip
+        - git
+        - openssh-client
+        - bash
+        - python3
+        - py3-pip
+
+      tools:
+        ansible: bundled-with-semaphore
+        opentofu: "1.12.6"
+        packer: "1.15.4"
+
+      python_packages:
+        proxmoxer: ">=2.2.0,<3"
+        requests: ">=2.32,<3"
+
+      mounts:
+        - /var/lib/infra-manager/semaphore:/var/lib/semaphore
+        - /etc/infra-manager/ca:/etc/infra-manager/ca:ro
+        - /var/lib/infra-manager/opentofu:/var/lib/infra-manager/opentofu
+
+paths:
+  configuration: /etc/infra-manager
+  secrets: /etc/infra-manager/secrets
+  ca: /etc/infra-manager/ca
+  data: /var/lib/infra-manager
+  semaphore_data: /var/lib/infra-manager/semaphore
+  opentofu_data: /var/lib/infra-manager/opentofu
+  opentofu_state: /var/lib/infra-manager/opentofu/state/proxmox.tfstate
+  compose: /opt/infra-manager/compose
+  bootstrap_repository: /var/lib/infra-manager/bootstrap-repo
+  log: /var/log/infra-manager/bootstrap.log
+
+access:
+  pve:
+    method: https-api
+    identity: root@pam!infra-manager
+    privilege_separation: true
+    verify_tls: true
+    guest_scope: /vms
+    managed_pool_assignment: managed
+    iso_storage: local
+
+  github:
+    repository: git@github.com:zsergeyru/proxmox.git
+    access: read-only-deploy-key
+
+semaphore:
+  project: Proxmox Infrastructure
+  repository: proxmox
+
+  objects:
+    - GitHub project read-only
+    - OpenTofu PVE
+    - OpenTofu Plan
+    - Build Template 9000
+
+persistence:
+  backup_required:
+    - /etc/infra-manager/secrets
+    - /var/lib/infra-manager/semaphore
+    - /var/lib/infra-manager/opentofu/state
+
+  reproducible:
+    - /var/lib/infra-manager/bootstrap-repo
+    - /opt/infra-manager/compose
+    - docker-images
+
+checks:
+  commands:
+    - infra-manager-status
+    - infra-manager-status --full
+    - infra-manager-pve-access-check
+    - infra-manager-pve-lifecycle-test --apply
+    - Semaphore: Build Template 9000
+
+boundaries:
+  member_of_managed_pool: false
+  opentofu_manages_guest_910: false
+  permanent_root_ssh_to_pve: false
+  application_workloads_allowed: false
