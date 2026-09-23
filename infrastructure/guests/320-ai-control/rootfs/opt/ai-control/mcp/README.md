@@ -10,17 +10,17 @@
 Proximo / proximo-proxmox
 ```
 
-`320` уже мигрирован на Proximo. Его MCP backend больше не отличается от целевого выбора для нового `301-ai-control`.
+`320` уже мигрирован на Proximo. Его MCP backend больше не отличается от целевого выбора для нового `410-ai-control`.
 
-## Целевой 301
+## Целевой 410
 
-Для `301-ai-control` используется тот же канонический MCP:
+Для `410-ai-control` используется тот же канонический MCP:
 
 ```text
 Proximo / proximo-proxmox
 ```
 
-Подробное решение: [`../../../../decisions/003-proxmox-mcp.md`](../../../../decisions/003-proxmox-mcp.md) и [`../../../../../301-ai-control/README.md`](../../../../../301-ai-control/README.md).
+Подробное решение: [`../../../../decisions/003-proxmox-mcp.md`](../../../../decisions/003-proxmox-mcp.md) и [`../../../../../410-ai-control/README.md`](../../../../../410-ai-control/README.md).
 
 Целевая схема:
 
