@@ -187,7 +187,8 @@ privsep=1
 | `/` | `PVEAuditor` | чтение состояния PVE |
 | `/vms` | `PVEVMAdmin` | управление всеми VM/LXC |
 | `/pool/managed` | `PVEVMAdmin`, `PVEPoolUser` | назначение гостей и чтение pool |
-| `/storage/local-lvm` | `PVEDatastoreUser` | использование хранилища |
+| `/storage/local-lvm` | `PVEDatastoreUser` | диски VM/LXC |
+| `/storage/local` | `PVEDatastoreAdmin` | установочные ISO для Packer |
 | `/sdn/zones/localnetwork/vmbr0` | `PVESDNUser` | использование основной сети |
 
 910 находится вне `managed`.
