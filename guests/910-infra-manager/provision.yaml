@@ -70,8 +70,7 @@ docker:
         requests: ">=2.32,<3"
 
       mounts:
-        - /etc/hosts:/etc/hosts:ro
-        - /var/lib/infra-manager/semaphore:/var/lib/semaphore
+          - /var/lib/infra-manager/semaphore:/var/lib/semaphore
         - /etc/infra-manager/ca:/etc/infra-manager/ca:ro
         - /var/lib/infra-manager/opentofu:/var/lib/infra-manager/opentofu
 
