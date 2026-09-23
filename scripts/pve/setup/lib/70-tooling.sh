@@ -8,7 +8,6 @@ install_private_tooling() {
 set -Eeuo pipefail
 
 STATE=/var/lib/proxmox-deployer/state/state.json
-SMOKE=/var/lib/proxmox-deployer/state/template-smoke.json
 LAST_REVISION=/var/lib/proxmox-deployer/state/last-revision
 CONFIG=/etc/proxmox-deployer/config.yaml
 SSH_DIR=/etc/proxmox-deployer/ssh
@@ -20,18 +19,12 @@ PUBLIC_KEYS_DIR=/var/lib/proxmox-deployer/public-keys
 DEPLOY_USER=pvedeploy
 EXPECTED_REPO='git@github.com:zsergeyru/proxmox.git'
 TEMPLATE_VMID=9000
-TEMPLATE_NAME=tpl-debian13
-TEMPLATE_VERSION=7
 MANAGED_POOL=managed
 
 show_saved_status() {
     [[ -f "$STATE" ]] || { echo "Файл состояния PVE Configuration не найден: $STATE" >&2; exit 1; }
     printf '%s\n' '=== PVE Configuration: сохранённое состояние ==='
     jq . "$STATE"
-    if [[ -f "$SMOKE" ]]; then
-        printf '\n%s\n' '=== Проверка полного клона шаблона ==='
-        jq . "$SMOKE"
-    fi
 }
 
 usage() {
@@ -295,7 +288,7 @@ check_token_auth() {
 
 run_check() {
     local saved_status user_record uid gid_name home shell guest_fp reg_fp parent_owner parent_mode violation origin drift revision recorded state_revision
-    local users_json host_token ai_token pools_json storage template_cfg smoke_status template_version_fields pve_line codename
+    local users_json host_token ai_token pools_json storage template_cfg pve_line codename
 
     printf '%s%s=== PVE Configuration: фактическая проверка ===%s\n' "$C_BOLD" "$C_CYAN" "$C_RESET"
 
@@ -468,40 +461,19 @@ run_check() {
     check_storage_contents local-lvm images rootdir
 
     if template_cfg="$(qm config "$TEMPLATE_VMID" 2>/dev/null)"; then
-        template_version_fields="$(sed -n 's/^description: //p' <<<"$template_cfg" | head -n1 | tr ';' '\n' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | grep '^template-version=' || true)"
         if grep -Fxq 'template: 1' <<<"$template_cfg" \
-            && grep -Fxq "name: $TEMPLATE_NAME" <<<"$template_cfg" \
-            && [[ "$template_version_fields" == "template-version=$TEMPLATE_VERSION" ]] \
-            && grep -Fxq 'protection: 1' <<<"$template_cfg" \
-            && grep -Fxq 'agent: 1' <<<"$template_cfg" \
-            && grep -Fxq 'scsihw: virtio-scsi-single' <<<"$template_cfg" \
-            && grep -Fxq 'ciuser: root' <<<"$template_cfg" \
-            && grep -Fxq 'ciupgrade: 0' <<<"$template_cfg" \
-            && grep -Fxq 'ipconfig0: ip=dhcp' <<<"$template_cfg" \
-            && grep -Eq '^net0: virtio=.*bridge=vmbr0(,|$)' <<<"$template_cfg" \
-            && ! grep -q '^cicustom:' <<<"$template_cfg"; then
-            check_ok "базовый шаблон VMID $TEMPLATE_VMID соответствует ключевым параметрам Template-Version $TEMPLATE_VERSION"
+            && grep -Fxq 'name: tpl-debian13' <<<"$template_cfg"; then
+            check_ok "Packer-шаблон VMID $TEMPLATE_VMID существует"
         else
-            check_error "VMID $TEMPLATE_VMID существует, но ключевые параметры базового шаблона $TEMPLATE_NAME Template-Version $TEMPLATE_VERSION не совпадают"
+            check_error "VMID $TEMPLATE_VMID занят объектом, несовместимым с Packer-шаблоном tpl-debian13"
         fi
     else
-        check_error "базовый шаблон VMID $TEMPLATE_VMID отсутствует"
+        check_warn "Packer-шаблон VMID $TEMPLATE_VMID ещё не создан; используйте Semaphore Build Template 9000"
     fi
 
     check_required_command pve-configuration-status
     check_required_command deploy-guest
     check_required_command sync-management-keys
-
-    if [[ -f "$SMOKE" ]]; then
-        smoke_status="$(jq -r '.status // .result // "unknown"' "$SMOKE" 2>/dev/null || true)"
-        case "$smoke_status" in
-            passed|success) check_ok "последняя проверка полного клона шаблона: $smoke_status" ;;
-            pending|unknown|"") check_warn "состояние проверки полного клона шаблона: ${smoke_status:-unknown}" ;;
-            *) check_error "проверка полного клона шаблона имеет состояние: $smoke_status" ;;
-        esac
-    else
-        check_warn "файл состояния проверки полного клона шаблона отсутствует"
-    fi
 
     printf '\n'
     if (( ERRORS > 0 )); then
@@ -745,7 +717,7 @@ EOF_DEPLOY
 }
 
 report_status() {
-    local ready=1 smoke_state deploy_owner deploy_mode
+    local ready=1 deploy_owner deploy_mode
     local deployer_src="${REPO_DIR}/scripts/pve/deploy-guest.py"
 
     printf '\n%s%sPVE CONFIGURATION STATUS%s\n\n' "$C_BOLD" "$C_CYAN" "$C_RESET"
@@ -769,31 +741,10 @@ report_status() {
     fi
 
     if qm config "$TEMPLATE_VMID" >/dev/null 2>&1; then
-        ok "Шаблон ${TEMPLATE_VMID} Template-Version ${TEMPLATE_VERSION} существует и полный contract проверен"
+        info "Шаблон $TEMPLATE_VMID существует; его контракт и Full Clone проверяет infra-manager/Packer"
     else
-        printf '%s%s[НЕТ]%s Шаблон %s отсутствует\n' "$C_BOLD" "$C_RED" "$C_RESET" "$TEMPLATE_VMID"
-        ready=0
+        info "Шаблон $TEMPLATE_VMID ещё не создан; его создаёт infra-manager/Packer"
     fi
-
-    smoke_state="$(template_smoke_state_status)"
-    case "$smoke_state" in
-        passed)
-            ok "Full Clone smoke-test template ${TEMPLATE_VMID} подтверждён; временный VMID ${SMOKE_VMID} освобождён"
-            ;;
-        pending)
-            printf '%s%s[ОЖИДАНИЕ]%s Full Clone smoke-test template %s имеет pending state\n' \
-                "$C_BOLD" "$C_YELLOW" "$C_RESET" "$TEMPLATE_VMID"
-            ready=0
-            ;;
-        none)
-            info "Full Clone smoke state для существующего template ещё не записан; для явной проверки используйте --smoke-test-template"
-            ;;
-        *)
-            printf '%s%s[ОШИБКА]%s Неизвестный template smoke state: %s\n' \
-                "$C_BOLD" "$C_RED" "$C_RESET" "$smoke_state"
-            ready=0
-            ;;
-    esac
 
     if [[ -e /usr/local/sbin/deploy-guest ]]; then
         deploy_owner="$(stat -c '%U:%G' /usr/local/sbin/deploy-guest 2>/dev/null || true)"
