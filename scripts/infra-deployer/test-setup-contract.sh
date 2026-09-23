@@ -210,12 +210,12 @@ grep -q 'SEMAPHORE_DB_DIALECT=sqlite' "$SETUP" \
 grep -q 'SEMAPHORE_DB_HOST=/var/lib/semaphore/semaphore.sqlite' "$SETUP" \
     || die "Не зафиксирован постоянный путь SQLite"
 
-grep -q 'SEMAPHORE_ADMIN_PASSWORD_CREATED=0' "$SETUP" \
-    || die "setup.sh должен отслеживать первое создание пароля Semaphore"
-grep -q 'SEMAPHORE_ADMIN_PASSWORD_CREATED=1' "$SETUP" \
-    || die "setup.sh должен отмечать создание нового пароля Semaphore"
+grep -q 'ADMIN_PASSWORD_SHOWN_FILE=' "$SETUP" \
+    || die "setup.sh должен хранить отметку однократного показа пароля Semaphore"
+grep -q '\[\[ ! -e "$ADMIN_PASSWORD_SHOWN_FILE" \]\]' "$SETUP" \
+    || die "Пароль Semaphore должен выводиться только до первого показа"
 grep -q "printf 'Пароль: %s" "$SETUP" \
-    || die "Первичный пароль Semaphore должен выводиться в терминал при первом создании"
+    || die "Первичный пароль Semaphore должен один раз выводиться в терминал"
 if grep -q 'write_log.*ADMIN_PASSWORD_FILE\|write_log.*Пароль:' "$SETUP"; then
     die "Пароль Semaphore не должен записываться в обычный bootstrap log"
 fi
