@@ -73,7 +73,8 @@ check_existing() {
     local resource config name description template
     resource="$(api GET "/cluster/resources" \
         --get --data-urlencode "type=vm" \
-        | jq -c --argjson vmid "$VMID" '.data[]? | select(.vmid == $vmid)' | head -n1)"
+        | jq -c --argjson vmid "$VMID" '.data[]? | select(.vmid == $vmid)' | head -n1)" \
+        || die "Не удалось проверить наличие VMID $VMID"
 
     [[ -n "$resource" ]] || return 1
 
@@ -86,9 +87,6 @@ check_existing() {
     description="$(jq -r '.description // empty' <<<"$config")"
 
     if [[ "$template" == "1" && "$name" == "tpl-debian13" && "$description" == *"template-version=8"* ]]; then
-        finalize_template
-        "$ROOT/scripts/infra-manager/test-template.sh" "$VMID"
-        ok "Шаблон $VMID уже соответствует версии 8 и успешно проверен; сборка не требуется"
         return 0
     fi
 
@@ -182,6 +180,10 @@ finalize_template() {
 
 main() {
     if check_existing; then
+        finalize_template
+        bash "$ROOT/scripts/infra-manager/test-template.sh" "$VMID" \
+            || die "Проверка шаблона $VMID не пройдена"
+        ok "Шаблон $VMID уже соответствует версии 8 и успешно проверен; сборка не требуется"
         exit 0
     fi
 
@@ -216,7 +218,8 @@ main() {
     unset build_password
 
     finalize_template
-    "$ROOT/scripts/infra-manager/test-template.sh" "$VMID"
+    bash "$ROOT/scripts/infra-manager/test-template.sh" "$VMID" \
+        || die "Проверка шаблона $VMID не пройдена"
 
     unset PVE_TOKEN_SECRET AUTH_HEADER
     ok "Шаблон $VMID полностью собран и проверен"
