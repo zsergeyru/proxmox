@@ -39,6 +39,7 @@ docker:
       base_image: semaphoreui/semaphore:v2.18.30
       restart: unless-stopped
       network_mode: host
+      pve_host_mapping: required
       database: sqlite
       data_path: /var/lib/infra-manager/semaphore
 
