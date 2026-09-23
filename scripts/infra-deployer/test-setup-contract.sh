@@ -178,15 +178,15 @@ grep -q '^rollback_new_api_token() {' "$PVE_BOOTSTRAP_ACCESS" \
     || die "Новый PVE API token должен откатываться при ошибке передачи secret"
 grep -q 'rm -f -- "$tmp"' "$PVE_BOOTSTRAP_ACCESS" \
     || die "Временный PVE API secret должен удаляться и при ошибке передачи"
-for role in PVEAuditor PVEVMAdmin PVEDatastoreUser PVEDatastoreAdmin PVESDNUser; do
+for role in PVEAuditor PVEVMAdmin PVEPoolUser PVEDatastoreUser PVEDatastoreAdmin PVESDNUser; do
     grep -q "\"$role\"" "$PVE_BOOTSTRAP_ACCESS" \
         || die "В PVE bootstrap access отсутствует штатная роль $role"
 done
 
 grep -Fq 'ensure_token_acl "/vms" "PVEVMAdmin"' "$PVE_BOOTSTRAP_ACCESS" \
     || die "910 должен получать PVEVMAdmin на /vms"
-grep -Fq 'ensure_token_acl "/pool/$MANAGED_POOL" "PVEVMAdmin"' "$PVE_BOOTSTRAP_ACCESS" \
-    || die "910 должен сохранять PVEVMAdmin на managed для назначения гостей в pool"
+grep -Fq 'ensure_token_roles "/pool/$MANAGED_POOL" "PVEVMAdmin,PVEPoolUser"' "$PVE_BOOTSTRAP_ACCESS" \
+    || die "910 должен получать PVEVMAdmin и PVEPoolUser на managed"
 grep -Fq 'ensure_token_acl "/storage/$ISO_STORAGE" "PVEDatastoreAdmin"' "$PVE_BOOTSTRAP_ACCESS" \
     || die "910 должен иметь доступ к ISO storage для Packer"
 if grep -q 'pveum user add.*infra-deployer@pve' "$PVE_BOOTSTRAP_ACCESS"; then
@@ -209,6 +209,16 @@ grep -q 'SEMAPHORE_DB_DIALECT=sqlite' "$SETUP" \
     || die "Semaphore должен использовать SQLite в первой версии"
 grep -q 'SEMAPHORE_DB_HOST=/var/lib/semaphore/semaphore.sqlite' "$SETUP" \
     || die "Не зафиксирован постоянный путь SQLite"
+
+grep -q 'SEMAPHORE_ADMIN_PASSWORD_CREATED=0' "$SETUP" \
+    || die "setup.sh должен отслеживать первое создание пароля Semaphore"
+grep -q 'SEMAPHORE_ADMIN_PASSWORD_CREATED=1' "$SETUP" \
+    || die "setup.sh должен отмечать создание нового пароля Semaphore"
+grep -q "printf 'Пароль: %s" "$SETUP" \
+    || die "Первичный пароль Semaphore должен выводиться в терминал при первом создании"
+if grep -q 'write_log.*ADMIN_PASSWORD_FILE\|write_log.*Пароль:' "$SETUP"; then
+    die "Пароль Semaphore не должен записываться в обычный bootstrap log"
+fi
 
 grep -q 'install -d -o 1001 -g 0' "$SETUP" \
     || die "Постоянные каталоги Semaphore/Runner должны быть доступны uid 1001"
