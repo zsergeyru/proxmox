@@ -82,7 +82,7 @@ required_file "$CA_BUNDLE"
     || die "Отсутствует каталог OpenTofu state"
 
 [[ "$(docker inspect -f '{{.State.Running}}' infra-runtime 2>/dev/null || true)" == "true" ]] \
-    || die "Semaphore Server не запущен"
+    || die "infra-runtime не запущен"
 
 curl -fsS --connect-timeout 2 --max-time 5 http://127.0.0.1:3000/api/ping >/dev/null \
     || die "Semaphore API не отвечает"
@@ -114,7 +114,11 @@ jq -e --arg url "$PROJECT_REPO" --arg key_id "$GITHUB_KEY_ID" '
 
 semaphore_api_get "/project/${PROJECT_ID}/environment?sort=name&order=asc"     | jq -e '.[] | select(.name == "OpenTofu PVE")' >/dev/null     || die "В Semaphore отсутствует Variable Group OpenTofu PVE"
 
-semaphore_api_get "/project/${PROJECT_ID}/templates?sort=name&order=asc"     | jq -e '.[] | select(.name == "OpenTofu Plan" and .app == "bash")' >/dev/null     || die "В Semaphore отсутствует шаблон OpenTofu Plan"
+SEMAPHORE_TEMPLATES="$(semaphore_api_get "/project/${PROJECT_ID}/templates?sort=name&order=asc")"
+jq -e '.[] | select(.name == "OpenTofu Plan" and .app == "bash")' <<<"$SEMAPHORE_TEMPLATES" >/dev/null \
+    || die "В Semaphore отсутствует шаблон OpenTofu Plan"
+jq -e '.[] | select(.name == "Build Template 9000" and .app == "bash")' <<<"$SEMAPHORE_TEMPLATES" >/dev/null \
+    || die "В Semaphore отсутствует шаблон Build Template 9000"
 
 docker exec infra-runtime tofu version >/dev/null \
     || die "OpenTofu недоступен"
