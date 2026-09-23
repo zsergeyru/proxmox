@@ -106,7 +106,7 @@ semaphore:
 
   objects:
     - GitHub project read-only
-    - OpenTofu PVE
+    - PVE API
     - OpenTofu Plan
     - Build Template 9000
 
