@@ -129,13 +129,13 @@ root@pam!infra-deployer
 
 Token создаётся с `privsep=1` и получает только собственные ACL. Полные права `root@pam` через token не передаются.
 
-Текущий набор путей и штатных ролей. `/vms` даёт 910 управление всеми VM/LXC, а отдельный ACL на `/pool/managed` нужен для создания и назначения обычных гостей в этот pool:
+Текущий набор путей и штатных ролей. `/vms` даёт 910 управление всеми VM/LXC, а на `/pool/managed` одновременно нужны права управления гостями и чтения самого pool:
 
 | Путь | Роль |
 |---|---|
 | `/` | `PVEAuditor` |
 | `/vms` | `PVEVMAdmin` |
-| `/pool/managed` | `PVEVMAdmin` |
+| `/pool/managed` | `PVEVMAdmin`, `PVEPoolUser` |
 | `/storage/local-lvm` | `PVEDatastoreUser` |
 | `/storage/local` | `PVEDatastoreAdmin` |
 | `/sdn/zones/localnetwork/vmbr0` | `PVESDNUser` |
