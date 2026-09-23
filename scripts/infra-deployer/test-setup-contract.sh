@@ -297,6 +297,12 @@ grep -q 'opentofu_plan_template_id="$(ensure_opentofu_plan_template ' "$SEMAPHOR
     || die "main semaphore-project.sh обязан вызывать создание шаблона OpenTofu Plan"
 grep -q 'scripts/infra-deployer/opentofu-plan.sh' "$SEMAPHORE_PROJECT" \
     || die "OpenTofu Plan должен запускать отдельный безопасный сценарий"
+grep -q 'local name="Build Template 9000"' "$SEMAPHORE_PROJECT" \
+    || die "Semaphore должен создавать задание Build Template 9000"
+grep -q 'scripts/infra-deployer/build-template.sh' "$SEMAPHORE_PROJECT" \
+    || die "Build Template 9000 должен запускать отдельный сценарий Packer"
+grep -Fq 'arguments:"[\"9000\"]"' "$SEMAPHORE_PROJECT" \
+    || die "Build Template 9000 должен иметь фиксированный VMID 9000"
 
 if grep -q '^ensure_pve_key() {' "$SEMAPHORE_PROJECT"; then
     die "Отдельный PVE credential в Semaphore Key Store больше не нужен"
