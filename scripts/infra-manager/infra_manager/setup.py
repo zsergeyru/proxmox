@@ -34,6 +34,7 @@ OPENTOFU_DIR = DATA_DIR / "opentofu"
 STATE_DIR = OPENTOFU_DIR / "state"
 OPENTOFU_INPUT = OPENTOFU_DIR / "guests.json"
 COMPOSE_DIR = Path("/opt/infra-manager/compose")
+PYTHON_INSTALL_ROOT = Path("/usr/local/lib/infra-manager")
 
 STATUS_COMMAND = Path("/usr/local/sbin/infra-manager-status")
 ACCESS_CHECK_COMMAND = Path("/usr/local/sbin/infra-manager-pve-access-check")
@@ -853,6 +854,33 @@ class Setup:
         )
 
     def install_local_commands(self) -> None:
+        source_package = (
+            REPO_ROOT
+            / "scripts/infra-manager/infra_manager"
+        )
+        target_package = PYTHON_INSTALL_ROOT / "infra_manager"
+        self.run_raw(
+            [
+                "install",
+                "-d",
+                "-o",
+                "root",
+                "-g",
+                "root",
+                "-m",
+                "0755",
+                str(PYTHON_INSTALL_ROOT),
+            ]
+        )
+        if target_package.exists():
+            shutil.rmtree(target_package)
+        shutil.copytree(source_package, target_package)
+        for path in target_package.rglob("*"):
+            if path.is_dir():
+                path.chmod(0o755)
+            else:
+                path.chmod(0o644)
+
         for source, target in (
             (
                 REPO_ROOT / "scripts/infra-manager/status.sh",
