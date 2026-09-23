@@ -40,7 +40,7 @@ search home.arpa
 nameserver 192.168.1.1
 ```
 
-Сейчас PVE использует Keenetic как DNS. Общая архитектура DNS: [`../../../docs/41-dns.md`](../../../docs/41-dns.md).
+Сейчас PVE использует Keenetic как DNS. Общая архитектура DNS: [`../../../../docs/400-network/420-dns.md`](../../../../docs/400-network/420-dns.md).
 
 ## Этап 1 — текущая квартира
 
@@ -62,7 +62,7 @@ PVE подключён одним `nic0` к обычной LAN Keenetic без V
 
 `109-network-gateway` отвечает за SmartDNS, VPN/PBR, VPN для удалённого доступа и дополнительные сетевые сервисы.
 
-Подробности и адресация находятся в [`../../../docs/40-network.md`](../../../docs/40-network.md).
+Подробности и адресация находятся в [`../../../../docs/400-network/410-network-layout.md`](../../../../docs/400-network/410-network-layout.md).
 
 ## Целевая миграция PVE
 

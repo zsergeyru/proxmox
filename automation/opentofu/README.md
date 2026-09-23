@@ -9,8 +9,8 @@ OpenTofu не читает `guest.yaml` напрямую и не реализу�
 Поток данных:
 
 ```text
-guests/defaults.yaml
-+ guests/<guest>/guest.yaml
+infrastructure/guests/defaults.yaml
++ infrastructure/guests/<guest>/guest.yaml
 → scripts/guests/resolver.py
 → scripts/guests/render-opentofu-input.py
 → /var/lib/infra-manager/opentofu/guests.json

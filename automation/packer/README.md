@@ -5,7 +5,7 @@
 Каждый постоянный шаблон имеет собственный каталог по VMID:
 
 ```text
-packer/
+automation/packer/
 ├── 9000/
 ├── 9100/
 └── ...
@@ -16,7 +16,7 @@ packer/
 Минимальная структура:
 
 ```text
-packer/<VMID>/
+automation/packer/<VMID>/
 ├── template.pkr.hcl
 ├── variables.pkr.hcl
 ├── http/
