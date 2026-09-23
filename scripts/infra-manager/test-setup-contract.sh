@@ -229,10 +229,12 @@ grep -q '^ADMIN_PASSWORD_SHOWN_FILE = ' "$PY_SETUP" \
     || die "Python setup должен хранить отметку однократного показа пароля Semaphore"
 grep -q 'Пароль: {password}' "$PY_SETUP" \
     || die "Первичный пароль Semaphore должен один раз выводиться в терминал"
-grep -Fq 'line.startswith("SEMAPHORE_USE_REMOTE_RUNNER=")' "$PY_SETUP" \
+grep -Fq '"SEMAPHORE_USE_REMOTE_RUNNER="' "$PY_SETUP" \
     || die "Python setup должен удалять старую настройку remote Runner"
-grep -Fq 'line.startswith("SEMAPHORE_RUNNER_REGISTRATION_TOKEN=")' "$PY_SETUP" \
+grep -Fq '"SEMAPHORE_RUNNER_REGISTRATION_TOKEN="' "$PY_SETUP" \
     || die "Python setup должен удалять старый registration token Runner"
+grep -q 'line.startswith(' "$PY_SETUP" \
+    || die "Удаление старых настроек Runner должно выполняться по началу строки"
 grep -q 'def repair_semaphore_storage' "$PY_SETUP" \
     || die "Python setup обязан проверять права постоянного хранилища Semaphore"
 grep -q '"1001:0"' "$PY_SETUP" \
