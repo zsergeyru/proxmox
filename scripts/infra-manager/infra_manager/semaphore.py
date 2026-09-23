@@ -580,7 +580,7 @@ def configure_project(branch: str | None = None) -> int:
         repository_id,
         environment_id,
         name="OpenTofu Plan",
-        playbook="scripts/infra-manager/opentofu-plan.sh",
+        playbook="scripts/infra-manager/jobs/opentofu-plan.sh",
         branch=branch,
         arguments="[]",
     )
@@ -589,7 +589,7 @@ def configure_project(branch: str | None = None) -> int:
         repository_id,
         environment_id,
         name="Build Template 9000",
-        playbook="scripts/infra-manager/build-template.sh",
+        playbook="scripts/infra-manager/jobs/build-template.sh",
         branch=branch,
         arguments='["9000"]',
     )

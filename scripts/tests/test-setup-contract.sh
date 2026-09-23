@@ -7,15 +7,15 @@ PY_SETUP="$ROOT/scripts/infra-manager/infra_manager/setup.py"
 PY_SEMAPHORE="$ROOT/scripts/infra-manager/infra_manager/semaphore.py"
 PY_STATUS="$ROOT/scripts/infra-manager/infra_manager/status.py"
 PY_PVE="$ROOT/scripts/infra-manager/infra_manager/pve.py"
-STATUS="$ROOT/scripts/infra-manager/status.sh"
-ACCESS="$ROOT/scripts/infra-manager/check-pve-access.sh"
-LIFECYCLE="$ROOT/scripts/infra-manager/test-pve-lifecycle.sh"
-BUILD_TEMPLATE="$ROOT/scripts/infra-manager/build-template.sh"
-TEST_TEMPLATE="$ROOT/scripts/infra-manager/test-template.sh"
+STATUS="$ROOT/scripts/infra-manager/commands/status.sh"
+ACCESS="$ROOT/scripts/infra-manager/commands/check-pve-access.sh"
+LIFECYCLE="$ROOT/scripts/infra-manager/commands/test-pve-lifecycle.sh"
+BUILD_TEMPLATE="$ROOT/scripts/infra-manager/jobs/build-template.sh"
+TEST_TEMPLATE="$ROOT/scripts/infra-manager/jobs/test-template.sh"
 COMPOSE="$ROOT/guests/910-infra-manager/compose/docker-compose.yml"
 DOCKERFILE="$ROOT/guests/910-infra-manager/compose/runtime/Dockerfile"
 REQ="$ROOT/guests/910-infra-manager/compose/runtime/requirements.txt"
-PLAN="$ROOT/scripts/infra-manager/opentofu-plan.sh"
+PLAN="$ROOT/scripts/infra-manager/jobs/opentofu-plan.sh"
 PVE_BOOTSTRAP_ACCESS="$ROOT/scripts/infra-manager/pve-bootstrap-access.sh"
 OPENTOFU_LOCK="$ROOT/opentofu/.terraform.lock.hcl"
 GUEST_MANIFEST="$ROOT/guests/910-infra-manager/guest.yaml"
@@ -346,11 +346,11 @@ grep -q '"override_secret": True' "$PY_SEMAPHORE" \
     || die "Существующий GitHub SSH key должен обновлять секретную часть"
 grep -q 'name="OpenTofu Plan"' "$PY_SEMAPHORE" \
     || die "Semaphore должен создавать шаблон OpenTofu Plan"
-grep -q 'scripts/infra-manager/opentofu-plan.sh' "$PY_SEMAPHORE" \
+grep -q 'scripts/infra-manager/jobs/opentofu-plan.sh' "$PY_SEMAPHORE" \
     || die "OpenTofu Plan должен запускать отдельный безопасный сценарий"
 grep -q 'name="Build Template 9000"' "$PY_SEMAPHORE" \
     || die "Semaphore должен создавать задание Build Template 9000"
-grep -q 'scripts/infra-manager/build-template.sh' "$PY_SEMAPHORE" \
+grep -q 'scripts/infra-manager/jobs/build-template.sh' "$PY_SEMAPHORE" \
     || die "Build Template 9000 должен запускать отдельный сценарий Packer"
 grep -Fq "arguments='[\"9000\"]'" "$PY_SEMAPHORE" \
     || die "Build Template 9000 должен иметь фиксированный VMID 9000"

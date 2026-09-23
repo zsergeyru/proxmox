@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 CA_BUNDLE="/etc/infra-manager/ca/ca-bundle.crt"
 NODE="${PACKER_NODE:-pve}"
 ISO_BASE="https://cdimage.debian.org/debian-cd/current/amd64/iso-cd"
@@ -181,7 +181,7 @@ finalize_template() {
 main() {
     if check_existing; then
         finalize_template
-        bash "$ROOT/scripts/infra-manager/test-template.sh" "$VMID" \
+        bash "$ROOT/scripts/infra-manager/jobs/test-template.sh" "$VMID" \
             || die "Проверка шаблона $VMID не пройдена"
         ok "Шаблон $VMID уже соответствует версии 8 и успешно проверен; сборка не требуется"
         exit 0
@@ -218,7 +218,7 @@ main() {
     unset build_password
 
     finalize_template
-    bash "$ROOT/scripts/infra-manager/test-template.sh" "$VMID" \
+    bash "$ROOT/scripts/infra-manager/jobs/test-template.sh" "$VMID" \
         || die "Проверка шаблона $VMID не пройдена"
 
     unset PVE_TOKEN_SECRET AUTH_HEADER

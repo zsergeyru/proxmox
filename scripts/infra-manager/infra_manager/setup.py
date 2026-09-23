@@ -624,7 +624,7 @@ class Setup:
                 sys.executable,
                 str(
                     REPO_ROOT
-                    / "scripts/infra-manager/render-opentofu-input.py"
+                    / "scripts/guests/render-opentofu-input.py"
                 ),
                 "--output",
                 str(OPENTOFU_INPUT),
@@ -871,17 +871,17 @@ class Setup:
 
         for source, target in (
             (
-                REPO_ROOT / "scripts/infra-manager/status.sh",
+                REPO_ROOT / "scripts/infra-manager/commands/status.sh",
                 STATUS_COMMAND,
             ),
             (
                 REPO_ROOT
-                / "scripts/infra-manager/check-pve-access.sh",
+                / "scripts/infra-manager/commands/check-pve-access.sh",
                 ACCESS_CHECK_COMMAND,
             ),
             (
                 REPO_ROOT
-                / "scripts/infra-manager/test-pve-lifecycle.sh",
+                / "scripts/infra-manager/commands/test-pve-lifecycle.sh",
                 LIFECYCLE_TEST_COMMAND,
             ),
         ):

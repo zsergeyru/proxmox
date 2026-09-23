@@ -2,8 +2,9 @@
 set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [[ -d "${SCRIPT_DIR}/infra_manager" ]]; then
-    PYTHON_ROOT="${SCRIPT_DIR}"
+LOCAL_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+if [[ -d "${LOCAL_ROOT}/infra_manager" ]]; then
+    PYTHON_ROOT="${LOCAL_ROOT}"
 elif [[ -d "/usr/local/lib/infra-manager/infra_manager" ]]; then
     PYTHON_ROOT="/usr/local/lib/infra-manager"
 else
@@ -16,4 +17,4 @@ fi
 }
 
 export PYTHONPATH="${PYTHON_ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
-exec python3 -m infra_manager status "$@"
+exec python3 -m infra_manager pve-access-check "$@"

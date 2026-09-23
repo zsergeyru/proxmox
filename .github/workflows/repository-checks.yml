@@ -32,9 +32,9 @@ jobs:
       - name: Compile Python tooling
         run: |
           python -m py_compile \
-            scripts/guest_config.py \
+            scripts/guests/guest_config.py \
             scripts/validate_repo.py \
-            scripts/infra-manager/render-opentofu-input.py \
+            scripts/guests/render-opentofu-input.py \
             scripts/infra-manager/infra_manager/__init__.py \
             scripts/infra-manager/infra_manager/__main__.py \
             scripts/infra-manager/infra_manager/cli.py \
@@ -84,7 +84,7 @@ jobs:
           fi
 
       - name: Run infra-manager contract checks
-        run: bash scripts/infra-manager/test-setup-contract.sh
+        run: bash scripts/tests/test-setup-contract.sh
 
       - name: Reject obsolete direct PVE deployment path
         run: |

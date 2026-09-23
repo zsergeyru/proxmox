@@ -11,6 +11,8 @@ from pathlib import Path
 import yaml
 from jsonschema import Draft202012Validator
 
+sys.path.insert(0, str(Path(__file__).resolve().parent / "guests"))
+
 from guest_config import (
     MISSING,
     GuestConfigError,
