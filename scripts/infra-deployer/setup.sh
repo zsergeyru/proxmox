@@ -42,6 +42,8 @@ OPENTOFU_VERSION="1.12.6"
 PACKER_VERSION="1.15.4"
 LOG_FILE="${INFRA_DEPLOYER_LOG_FILE:-/var/log/infra-deployer/bootstrap.log}"
 
+SEMAPHORE_ADMIN_PASSWORD_CREATED=0
+
 C_RESET=""
 C_BOLD=""
 C_GREEN=""
@@ -295,6 +297,7 @@ EOF_RUNNER
 
         printf '%s\n' "$admin_password" >"$ADMIN_PASSWORD_FILE"
         chmod 0600 "$SERVER_ENV" "$RUNNER_ENV" "$ADMIN_PASSWORD_FILE"
+        SEMAPHORE_ADMIN_PASSWORD_CREATED=1
         ok "Созданы первичные секреты Semaphore"
     else
         [[ -s "$RUNNER_ENV" ]] || die "Есть server env, но отсутствует runner env"
@@ -456,7 +459,12 @@ report_result() {
         printf 'Semaphore: порт 3000 LXC 910\n'
     fi
     printf 'Пользователь: admin\n'
-    printf 'Первичный пароль хранится: %s\n' "$ADMIN_PASSWORD_FILE"
+    if (( SEMAPHORE_ADMIN_PASSWORD_CREATED )); then
+        printf 'Пароль: %s\n' "$(cat "$ADMIN_PASSWORD_FILE")"
+        printf 'Пароль показан только при первом создании и сохранён: %s\n' "$ADMIN_PASSWORD_FILE"
+    else
+        printf 'Пароль сохранён: %s\n' "$ADMIN_PASSWORD_FILE"
+    fi
     printf 'PVE API credential хранится: %s\n' "$PVE_API_ENV"
 }
 
