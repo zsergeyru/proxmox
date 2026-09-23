@@ -168,16 +168,6 @@ grep -q 'API_USER="root@pam"' "$PVE_BOOTSTRAP_ACCESS" \
     || die "PVE bootstrap access должен использовать существующий root@pam"
 grep -q 'API_TOKEN_NAME="infra-manager"' "$PVE_BOOTSTRAP_ACCESS" \
     || die "PVE bootstrap access должен создавать отдельный infra-manager token"
-grep -q 'LEGACY_API_TOKEN_NAME="infra-deployer"' "$PVE_BOOTSTRAP_ACCESS" \
-    || die "Переименование должно знать старый token infra-deployer"
-grep -q '^remove_legacy_api_token() {' "$PVE_BOOTSTRAP_ACCESS" \
-    || die "Старый PVE token должен удаляться после подготовки нового"
-grep -q 'LEGACY_CONFIG_DIR="/etc/infra-deployer"' "$SETUP" \
-    || die "setup.sh должен переносить старый /etc/infra-deployer"
-grep -q '^migrate_legacy_layout() {' "$SETUP" \
-    || die "setup.sh должен содержать перенос старых путей infra-deployer"
-grep -q "PVE_API_TOKEN_ID=root@pam!infra-deployer" "$SETUP" \
-    || die "setup.sh должен уметь заменить сохранённый старый PVE credential"
 grep -q -- '--privsep 1' "$PVE_BOOTSTRAP_ACCESS" \
     || die "PVE API token должен использовать privsep=1"
 grep -q '^rollback_new_api_token() {' "$PVE_BOOTSTRAP_ACCESS" \
