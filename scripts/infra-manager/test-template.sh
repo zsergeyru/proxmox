@@ -116,7 +116,8 @@ find_test_resource() {
 prepare_test_vmid() {
     local resource type name config protection state
 
-    resource="$(find_test_resource)"
+    resource="$(find_test_resource)" \
+        || die "Не удалось проверить VMID $TEST_VMID"
     [[ -n "$resource" ]] || return 0
 
     type="$(jq -r '.type // empty' <<<"$resource")"
@@ -142,7 +143,9 @@ prepare_test_vmid() {
 
     run_task DELETE "/nodes/${NODE}/qemu/${TEST_VMID}" --get --data-urlencode "purge=1"
 
-    [[ -z "$(find_test_resource)" ]] \
+    resource="$(find_test_resource)" \
+        || die "Не удалось проверить удаление старого клона $TEST_VMID"
+    [[ -z "$resource" ]] \
         || die "Не удалось удалить старый проверочный клон $TEST_VMID"
 }
 
@@ -198,6 +201,7 @@ run_task POST "/nodes/${NODE}/qemu/${TEST_VMID}/status/start"
 ip="$(wait_ipv4)" || die "QEMU Guest Agent не сообщил IPv4; VM $TEST_VMID оставлена для диагностики"
 info "Проверочная VM получила $ip"
 
+ssh_ready=0
 for _ in $(seq 1 60); do
     if ssh \
         -i "$key" \
@@ -206,10 +210,14 @@ for _ in $(seq 1 60); do
         -o StrictHostKeyChecking=accept-new \
         -o UserKnownHostsFile="$known_hosts" \
         "root@$ip" true >/dev/null 2>&1; then
+        ssh_ready=1
         break
     fi
     sleep 2
 done
+
+((ssh_ready == 1)) \
+    || die "SSH проверочного клона $TEST_VMID не стал доступен; VM оставлена для диагностики"
 
 ssh \
     -i "$key" \
@@ -218,7 +226,7 @@ ssh \
     -o StrictHostKeyChecking=yes \
     -o UserKnownHostsFile="$known_hosts" \
     "root@$ip" \
-    'cloud-init status --wait >/dev/null &&
+    'timeout 180s cloud-init status --wait >/dev/null &&
      systemctl is-active --quiet qemu-guest-agent &&
      test -s /etc/machine-id &&
      compgen -G "/etc/ssh/ssh_host_*_key" >/dev/null' \
