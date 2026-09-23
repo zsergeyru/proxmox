@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 import yaml
+from jsonschema import Draft202012Validator
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts" / "guests"))
@@ -54,6 +55,21 @@ def main() -> None:
     invalid_dhcp = copy.deepcopy(source_109)
     invalid_dhcp["network"] = {"ipv4": "dhcp/16"}
     expect_error(invalid_dhcp, defaults, "некорректный network.ipv4")
+
+    source_schema = load_yaml(ROOT / "infrastructure/schemas/guest.schema.yaml")
+    effective_schema = load_yaml(
+        ROOT / "infrastructure/schemas/guest-effective.schema.yaml"
+    )
+    source_validator = Draft202012Validator(source_schema)
+    effective_validator = Draft202012Validator(effective_schema)
+
+    dhcp_source = copy.deepcopy(source_109)
+    dhcp_source["network"] = {"ipv4": "dhcp"}
+    assert not list(source_validator.iter_errors(dhcp_source))
+
+    assert not list(
+        effective_validator.iter_errors(resolved_dhcp.effective)
+    )
 
     local_pve_override = copy.deepcopy(source_109)
     local_pve_override["protection"] = False
