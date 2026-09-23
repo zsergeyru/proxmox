@@ -60,7 +60,7 @@ managed
 | `/vms` | `PVEVMAdmin` | жизненный цикл и конфигурация всех VM/LXC |
 | `/pool/managed` | `PVEVMAdmin` | создание и назначение обычных гостей в `managed` |
 | `/storage/local-lvm` | `PVEDatastoreUser` | размещение дисков |
-| `/storage/local` | `PVEDatastoreAdmin` | загрузка установочных ISO и временных ISO Packer |
+| `/storage/local` | `PVEDatastoreAdmin` | загрузка установочных ISO Packer |
 | `/sdn/zones/localnetwork/vmbr0` | `PVESDNUser` | использование основной сети |
 
 ACL на `/pool/managed` не ограничивает область 910: основной изменяющий доступ к гостям задаётся `/vms`.
@@ -86,7 +86,7 @@ Token должен позволять 910:
 - удалять VM/LXC;
 - создавать обычных гостей сразу в `managed`;
 - использовать `local-lvm` для дисков;
-- загружать установочные ISO и временные ISO Packer в `local`;
+- загружать установочные ISO Packer в `local`;
 - использовать `vmbr0`.
 
 В область `/vms` технически входит и VMID/CTID 910. Это принято осознанно ради простой модели домашнего сервера.
@@ -185,7 +185,7 @@ infra-deployer-pve-lifecycle-test --apply
 
 Новые host-level права не выдаются заранее.
 
-Для Packer уже добавлен доступ к `/storage/local`, потому что ISO-builder должен загрузить установочный ISO и временный CD с ответами Debian Installer. Сам ISO скачивает Runner 910, поэтому отдельное право PVE на сетевую загрузку не требуется.
+Для Packer уже добавлен доступ к `/storage/local`, потому что ISO-builder должен загрузить установочный Debian ISO. Файл ответов Debian Installer Packer отдаёт напрямую из Runner 910 по временному HTTP-серверу, поэтому отдельный ISO для него не создаётся.
 
 Если Packer, OpenTofu или другой инфраструктурный инструмент потребует дополнительное право, сначала определяется конкретная операция и только затем добавляется минимально необходимый ACL.
 
