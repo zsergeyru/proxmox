@@ -226,10 +226,40 @@ ssh \
     -o StrictHostKeyChecking=yes \
     -o UserKnownHostsFile="$known_hosts" \
     "root@$ip" \
-    'timeout 180s cloud-init status --wait >/dev/null &&
-     systemctl is-active --quiet qemu-guest-agent &&
-     test -s /etc/machine-id &&
-     compgen -G "/etc/ssh/ssh_host_*_key" >/dev/null' \
+    'failed=0
+
+     if timeout 180s cloud-init status --wait >/dev/null; then
+         printf "[ОК] Cloud-Init завершён\\n"
+     else
+         printf "ОШИБКА: Cloud-Init не завершился успешно\\n" >&2
+         cloud-init status --long >&2 || true
+         failed=1
+     fi
+
+     if systemctl is-active --quiet qemu-guest-agent; then
+         printf "[ОК] QEMU Guest Agent активен\\n"
+     else
+         printf "ОШИБКА: QEMU Guest Agent не активен\\n" >&2
+         systemctl status qemu-guest-agent --no-pager -l >&2 || true
+         failed=1
+     fi
+
+     if test -s /etc/machine-id; then
+         printf "[ОК] machine-id создан\\n"
+     else
+         printf "ОШИБКА: /etc/machine-id отсутствует или пуст\\n" >&2
+         failed=1
+     fi
+
+     if find /etc/ssh -maxdepth 1 -type f -name "ssh_host_*_key" -size +0c -print -quit | grep -q .; then
+         printf "[ОК] SSH host keys созданы\\n"
+     else
+         printf "ОШИБКА: SSH host keys не созданы\\n" >&2
+         ls -la /etc/ssh/ssh_host_* 2>/dev/null >&2 || true
+         failed=1
+     fi
+
+     exit "$failed"' \
     || die "Проверка внутри клона не пройдена; VM $TEST_VMID оставлена для диагностики"
 
 delete_test_vm
