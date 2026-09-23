@@ -77,6 +77,7 @@ paths:
   opentofu_data: /var/lib/infra-manager/opentofu
   opentofu_state: /var/lib/infra-manager/opentofu/state/proxmox.tfstate
   compose: /opt/infra-manager/compose
+  python_package: /usr/local/lib/infra-manager
   bootstrap_repository: /var/lib/infra-manager/bootstrap-repo
   log: /var/log/infra-manager/bootstrap.log
 
