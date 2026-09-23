@@ -280,18 +280,6 @@ chmod +x bootstrap-pve.sh
 ./bootstrap-pve.sh --recover
 ~~~
 
-Мягкое удаление:
-
-~~~bash
-./bootstrap-pve.sh --remove
-~~~
-
-Полное удаление:
-
-~~~bash
-./bootstrap-pve.sh --purge
-~~~
-
 Статический адрес 910:
 
 ~~~bash
