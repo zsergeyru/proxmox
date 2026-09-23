@@ -140,40 +140,46 @@ if compose_services["runtime"].get("network_mode") != "host":
     raise SystemExit("infra-runtime Compose должен использовать network_mode=host")
 PY
 
-grep -q 'SEMAPHORE_VERSION="v2.18.30"' "$SETUP" \
-    || die "Semaphore должен быть зафиксирован на v2.18.30"
+grep -Fq 'exec python3 -m infra_manager setup "$@"' "$SETUP" \
+    || die "setup.sh должен передавать настройку Python CLI"
+grep -Fq 'if ! command -v python3' "$SETUP" \
+    || die "setup.sh должен bootstrap только сам Python на минимальном Debian"
+if grep -q 'docker compose\|SEMAPHORE_DB_DIALECT\|repair_semaphore_storage' "$SETUP"; then
+    die "setup.sh должен оставаться тонким Python wrapper"
+fi
 
 if grep -Eq '^[[:space:]]*IdentitiesOnly[[:space:]]+yes[[:space:]]*$' "$SSH_CONFIG"; then
     die "Semaphore Git использует временный ssh-agent; IdentitiesOnly yes блокирует Deploy Key"
 fi
 
-grep -q '^install_local_commands() {' "$SETUP" \
-    || die "setup.sh обязан определять install_local_commands"
+grep -q '^class Setup:' "$PY_SETUP" \
+    || die "Python setup должен содержать единый Setup orchestration"
+grep -q '^SEMAPHORE_VERSION = "v2.18.30"' "$PY_SETUP" \
+    || die "Semaphore должен быть зафиксирован на v2.18.30"
+grep -q '^RUNTIME_VERSION = "v1"' "$PY_SETUP" \
+    || die "infra-runtime должен иметь фиксированную версию v1"
+grep -q '^OPENTOFU_VERSION = "1.12.6"' "$PY_SETUP" \
+    || die "OpenTofu должен оставаться на 1.12.6"
+grep -q '^PACKER_VERSION = "1.15.4"' "$PY_SETUP" \
+    || die "Packer должен оставаться на 1.15.4"
 
-grep -q 'infra-manager-status' "$SETUP" \
-    || die "setup.sh не устанавливает status command"
-grep -q 'infra-manager-pve-access-check' "$SETUP" \
-    || die "setup.sh не устанавливает PVE access check"
-grep -q 'infra-manager-pve-lifecycle-test' "$SETUP" \
-    || die "setup.sh не устанавливает lifecycle test"
-if grep -q '^SEMAPHORE_USE_REMOTE_RUNNER=True$\|^SEMAPHORE_RUNNER_REGISTRATION_TOKEN=' "$SETUP"; then
-    die "Для одного 910 отдельный remote Runner не должен включаться"
-fi
-grep -q 'docker exec infra-runtime packer version' "$SETUP" \
-    || die "Packer должен проверяться внутри infra-runtime"
+for method in prepare_directories ensure_base_packages install_docker copy_compose_assets seed_semaphore_known_hosts generate_ca_bundle persist_pve_api_secret ensure_semaphore_secrets prepare_opentofu_input write_runtime_versions deploy_semaphore wait_semaphore verify_semaphore_tools configure_semaphore_project install_local_commands; do
+    grep -q "    def ${method}(" "$PY_SETUP" \
+        || die "Python setup не содержит обязательный этап ${method}"
+done
 
-grep -q 'ln -sfn "$STATUS_COMMAND" /usr/local/bin/infra-manager-status' "$SETUP" \
-    || die "status command должен иметь короткую ссылку для интерактивной shell"
-grep -q 'ln -sfn "$ACCESS_CHECK_COMMAND" /usr/local/bin/infra-manager-pve-access-check' "$SETUP" \
-    || die "PVE access check должен иметь короткую ссылку для интерактивной shell"
-grep -q 'ln -sfn "$LIFECYCLE_TEST_COMMAND" /usr/local/bin/infra-manager-pve-lifecycle-test' "$SETUP" \
-    || die "lifecycle test должен иметь короткую ссылку для интерактивной shell"
-
-grep -q 'render-opentofu-input.py' "$SETUP" \
-    || die "setup.sh должен генерировать OpenTofu input"
-
-grep -q 'Используется существующий постоянный PVE API credential' "$SETUP" \
+grep -q 'render-opentofu-input.py' "$PY_SETUP" \
+    || die "Python setup должен генерировать OpenTofu input"
+grep -q 'Используется существующий постоянный PVE API credential' "$PY_SETUP" \
     || die "Повторное обновление 910 должно работать без staging PVE secret"
+grep -q 'semaphore-project.sh' "$PY_SETUP" \
+    || die "На этапе 2 должен использоваться существующий semaphore-project.sh"
+grep -q 'status.sh' "$PY_SETUP" \
+    || die "На этапе 2 должен использоваться существующий status.sh"
+grep -q 'check-pve-access.sh' "$PY_SETUP" \
+    || die "На этапе 2 должен использоваться существующий PVE access check"
+grep -q 'test-pve-lifecycle.sh' "$PY_SETUP" \
+    || die "На этапе 2 должен использоваться существующий lifecycle test"
 
 grep -q 'API_USER="root@pam"' "$PVE_BOOTSTRAP_ACCESS" \
     || die "PVE bootstrap access должен использовать существующий root@pam"
@@ -202,40 +208,33 @@ fi
 if grep -q 'pveum role add.*InfraManagedGuest' "$PVE_BOOTSTRAP_ACCESS"; then
     die "Собственная роль InfraManagedGuest больше не должна создаваться"
 fi
-if grep -q 'infra-manager@pve' "$PVE_BOOTSTRAP_ACCESS" "$SETUP" "$SEMAPHORE_PROJECT"; then
+if grep -q 'infra-manager@pve' "$PVE_BOOTSTRAP_ACCESS" "$SETUP" "$PY_SETUP" "$SEMAPHORE_PROJECT"; then
     die "Старая PVE-идентичность не должна присутствовать в чистой схеме"
 fi
-if grep -q 'InfraManagedGuest' "$PVE_BOOTSTRAP_ACCESS" "$SETUP" "$SEMAPHORE_PROJECT"; then
+if grep -q 'InfraManagedGuest' "$PVE_BOOTSTRAP_ACCESS" "$SETUP" "$PY_SETUP" "$SEMAPHORE_PROJECT"; then
     die "Старая собственная роль PVE не должна присутствовать в чистой схеме"
 fi
 if grep -q 'PVE API automation\|Ansible managed guests' "$SEMAPHORE_PROJECT"; then
     die "Неиспользуемые Semaphore credentials не должны создаваться"
 fi
 
-grep -q 'SEMAPHORE_DB_DIALECT=sqlite' "$SETUP" \
+grep -q 'SEMAPHORE_DB_DIALECT=sqlite' "$PY_SETUP" \
     || die "Semaphore должен использовать SQLite в первой версии"
-grep -q 'SEMAPHORE_DB_HOST=/var/lib/semaphore/semaphore.sqlite' "$SETUP" \
+grep -q 'SEMAPHORE_DB_HOST=/var/lib/semaphore/semaphore.sqlite' "$PY_SETUP" \
     || die "Не зафиксирован постоянный путь SQLite"
-
-grep -q 'ADMIN_PASSWORD_SHOWN_FILE=' "$SETUP" \
-    || die "setup.sh должен хранить отметку однократного показа пароля Semaphore"
-grep -q '\[\[ ! -e "$ADMIN_PASSWORD_SHOWN_FILE" \]\]' "$SETUP" \
-    || die "Пароль Semaphore должен выводиться только до первого показа"
-grep -q "printf 'Пароль: %s" "$SETUP" \
+grep -q '^ADMIN_PASSWORD_SHOWN_FILE = ' "$PY_SETUP" \
+    || die "Python setup должен хранить отметку однократного показа пароля Semaphore"
+grep -q 'Пароль: {password}' "$PY_SETUP" \
     || die "Первичный пароль Semaphore должен один раз выводиться в терминал"
-if grep -q 'write_log.*ADMIN_PASSWORD_FILE\|write_log.*Пароль:' "$SETUP"; then
-    die "Пароль Semaphore не должен записываться в обычный bootstrap log"
+if grep -q 'SEMAPHORE_USE_REMOTE_RUNNER=True\|SEMAPHORE_RUNNER_REGISTRATION_TOKEN=' "$PY_SETUP"; then
+    die "Для одного 910 отдельный remote Runner не должен включаться"
 fi
-
-grep -q 'install -d -o 1001 -g 0' "$SETUP" \
-    || die "Постоянные каталоги Semaphore/Runner должны быть доступны uid 1001"
-
-grep -q '^repair_semaphore_storage() {' "$SETUP" \
-    || die "setup.sh обязан проверять права постоянного хранилища Semaphore через Docker"
-grep -q -- '--user 1001:0' "$SETUP" \
-    || die "Проверка хранилища Semaphore должна выполняться от штатного uid 1001"
-grep -q 'repair_semaphore_storage' "$SETUP" \
-    || die "Восстановление прав SQLite должно вызываться при запуске Semaphore"
+grep -q 'def repair_semaphore_storage' "$PY_SETUP" \
+    || die "Python setup обязан проверять права постоянного хранилища Semaphore"
+grep -q '"1001:0"' "$PY_SETUP" \
+    || die "Проверка хранилища Semaphore должна использовать штатный uid 1001"
+grep -q '"packer", "version"' "$PY_SETUP" \
+    || die "Packer должен проверяться внутри infra-runtime"
 
 grep -q 'PROJECT_ID_FILE="/var/lib/infra-manager/semaphore-project-id"' "$SEMAPHORE_PROJECT" \
     || die "Semaphore project-id должен храниться вне каталога SQLite"
@@ -279,7 +278,7 @@ if grep -qE '(^|[[:space:]])pct create[[:space:]]+910|(^|[[:space:]])qm create[[
     die "Приватный setup не должен создавать виртуальный объект 910"
 fi
 
-if grep -q '/etc/pve/' "$SETUP"; then
+if grep -q '/etc/pve/' "$SETUP" "$PY_SETUP"; then
     die "setup внутри 910 не должен работать с файловой системой /etc/pve"
 fi
 
