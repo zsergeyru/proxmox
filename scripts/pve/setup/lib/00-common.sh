@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-PVE_CONFIGURATION_VERSION="1.0.5"
+PVE_CONFIGURATION_VERSION="1.0.6"
 
 PRIVATE_REPO="git@github.com:zsergeyru/proxmox.git"
 PRIVATE_BRANCH="main"
@@ -30,61 +30,24 @@ PVE_DEPLOYER_PUB="${PVE_DEPLOYER_KEY}.pub"
 PVE_CA_SOURCE="/etc/pve/pve-root-ca.pem"
 PVE_CA_FILE="${CONFIG_DIR}/pve-root-ca.pem"
 
+# Готовый базовый VM template создаётся только Packer-контуром в LXC 910.
+# PVE Configuration использует эти значения для deploy ACL/status, но не строит template.
 TEMPLATE_VMID=9000
 TEMPLATE_NAME="tpl-debian13"
-TEMPLATE_VERSION=7
-TEMPLATE_BUILDER_NAME="builder-debian13"
-TEMPLATE_DISK_STORAGE="local-lvm"
-TEMPLATE_SNIPPET_STORAGE="local"
-TEMPLATE_MEMORY_MB=1024
-TEMPLATE_CORES=1
-TEMPLATE_DISK_SIZE="16G"
-TEMPLATE_WAIT_SECONDS=1200
-TEMPLATE_WAIT_PROGRESS_SECONDS=15
-TEMPLATE_IMAGE_URL="https://cloud.debian.org/images/cloud/trixie/latest/debian-13-genericcloud-amd64.qcow2"
-TEMPLATE_CHECKSUM_URL="https://cloud.debian.org/images/cloud/trixie/latest/SHA512SUMS"
-TEMPLATE_IMAGE_NAME="${TEMPLATE_IMAGE_URL##*/}"
-TEMPLATE_IMAGE_DIR="/var/lib/vz/template/cache/debian13"
-TEMPLATE_IMAGE_PATH="${TEMPLATE_IMAGE_DIR}/${TEMPLATE_IMAGE_NAME}"
-TEMPLATE_CHECKSUM_PATH="${TEMPLATE_IMAGE_DIR}/SHA512SUMS"
-TEMPLATE_SNIPPET_NAME="debian13-template-builder-${TEMPLATE_VMID}.yaml"
-TEMPLATE_SNIPPET_VOL="${TEMPLATE_SNIPPET_STORAGE}:snippets/${TEMPLATE_SNIPPET_NAME}"
-TEMPLATE_ASSET_DIR="${REPO_DIR}/templates/debian13"
-TEMPLATE_RENDERER="${REPO_DIR}/scripts/pve/setup/render-template-cloud-init.py"
-TEMPLATE_MIN_LOCAL_BYTES=$((2 * 1024 * 1024 * 1024))
-TEMPLATE_MIN_DISK_STORAGE_BYTES=$((18 * 1024 * 1024 * 1024))
-
-# Штатный Full Clone smoke-test базового VM template.
-SMOKE_VMID=9099
-SMOKE_NAME="smoke-debian13-9099"
-SMOKE_DISK_SIZE="20G"
-SMOKE_MIN_ROOT_BYTES=$((18 * 1024 * 1024 * 1024))
-TEMPLATE_SMOKE_STATE_FILE="${STATE_DIR}/template-smoke.json"
+TEMPLATE_VERSION=8
 
 MANAGED_POOL="managed"
 BRIDGE="vmbr0"
 LXC_TEMPLATE_STORAGE="local"
 
 UPDATE_SYSTEM=0
-SMOKE_TEST_TEMPLATE=0
 WARN_COUNT=0
 AI_PERMISSION_BOUNDARY_WARNINGS=0
 RUN_SOURCE_REVISION="${PVE_CONFIGURATION_SOURCE_REVISION:-}"
 REPO_REVISION=""
 CONFIGURATION_RUNNING=0
 API_HEADER_FILE=""
-TEMPLATE_DOWNLOAD_TMP=""
-SMOKE_SSH_KNOWN_HOSTS=""
 LXC_TEMPLATE_VOLUME=""
-TEMPLATE_BUILD_REQUIRED=0
-TEMPLATE_NEEDS_PROTECTION=0
-TEMPLATE_BUILD_ACTIVE=0
-TEMPLATE_BUILT_THIS_RUN=0
-SMOKE_ACTIVE=0
-TEMPLATE_IMAGE_SHA512=""
-TEMPLATE_SNIPPET_PATH=""
-TEMPLATE_KERNEL_VERSION=""
-TEMPLATE_FRAMEBUFFER_SIZE=""
 PENDING_TOKEN_USER=""
 PENDING_TOKEN_NAME=""
 PENDING_TOKEN_FULL=""
@@ -146,28 +109,9 @@ state_revision() {
     fi
 }
 
-template_build_diagnostic_hint() {
-    if (( TEMPLATE_BUILD_ACTIVE )); then
-        printf '%s%s[ДИАГНОСТИКА]%s VM-сборщик %s и её диски оставлены без автоматического удаления.\n' \
-            "$C_BOLD" "$C_YELLOW" "$C_RESET" "$TEMPLATE_VMID" >&2
-        printf '             Проверьте VM %s, Cloud-Init/QGA и snippet %s перед осознанной очисткой.\n' \
-            "$TEMPLATE_VMID" "$TEMPLATE_SNIPPET_VOL" >&2
-    fi
-}
-
-smoke_test_diagnostic_hint() {
-    if (( SMOKE_ACTIVE )); then
-        printf '%s%s[ДИАГНОСТИКА]%s Full Clone smoke VM %s намеренно оставлена для разбора ошибки.\n' \
-            "$C_BOLD" "$C_YELLOW" "$C_RESET" "$SMOKE_VMID" >&2
-        printf '             Не удаляйте её автоматически: проверьте qm config/status, QGA, Cloud-Init и SSH.\n' >&2
-    fi
-}
-
 die() {
     local message=$*
     printf '\n%s%sОШИБКА:%s %s\n' "$C_BOLD" "$C_RED" "$C_RESET" "$message" >&2
-    template_build_diagnostic_hint
-    smoke_test_diagnostic_hint
     if (( CONFIGURATION_RUNNING )); then
         trap - ERR
         write_state "failed" "$(state_revision)" >/dev/null 2>&1 || true
@@ -178,16 +122,14 @@ die() {
 usage() {
     cat <<'USAGE'
 Использование:
-  configure-pve.sh [--update-system] [--smoke-test-template] [--help]
+  configure-pve.sh [--update-system] [--help]
 
 PVE Configuration — повторяемое приведение Proxmox VE к конфигурации проекта.
-Обычно запускается автоматически через публичный bootstrap-pve.sh после получения
-или обновления приватного репозитория zsergeyru/proxmox.
+Базовый VM template 9000 создаётся отдельно через Semaphore/Packer в LXC 910.
 
 Параметры:
-  --update-system        дополнительно выполнить apt full-upgrade Proxmox/Debian
-  --smoke-test-template  выполнить Full Clone smoke-test существующего template 9000 через VMID 9099
-  -h, --help             показать эту справку
+  --update-system  дополнительно выполнить apt full-upgrade Proxmox/Debian
+  -h, --help       показать эту справку
 USAGE
 }
 
@@ -195,7 +137,6 @@ parse_configuration_args() {
     while (($#)); do
         case "$1" in
             --update-system) UPDATE_SYSTEM=1 ;;
-            --smoke-test-template) SMOKE_TEST_TEMPLATE=1 ;;
             -h|--help) usage; exit 0 ;;
             *) die "Неизвестный параметр: $1" ;;
         esac
@@ -207,20 +148,6 @@ cleanup_api_header_file() {
     if [[ -n "${API_HEADER_FILE:-}" ]]; then
         rm -f -- "$API_HEADER_FILE" 2>/dev/null || true
         API_HEADER_FILE=""
-    fi
-}
-
-cleanup_template_download_tmp() {
-    if [[ -n "${TEMPLATE_DOWNLOAD_TMP:-}" ]]; then
-        rm -f -- "$TEMPLATE_DOWNLOAD_TMP" 2>/dev/null || true
-        TEMPLATE_DOWNLOAD_TMP=""
-    fi
-}
-
-cleanup_smoke_known_hosts() {
-    if [[ -n "${SMOKE_SSH_KNOWN_HOSTS:-}" ]]; then
-        rm -f -- "$SMOKE_SSH_KNOWN_HOSTS" 2>/dev/null || true
-        SMOKE_SSH_KNOWN_HOSTS=""
     fi
 }
 
@@ -243,8 +170,6 @@ cleanup_pending_token() {
 
 cleanup_ephemeral_files() {
     cleanup_api_header_file
-    cleanup_template_download_tmp
-    cleanup_smoke_known_hosts
     cleanup_pending_token
 }
 
