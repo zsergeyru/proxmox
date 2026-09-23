@@ -19,34 +19,29 @@ die() { printf 'ОШИБКА: %s\n' "$*" >&2; exit 1; }
 apt-get update
 apt-get -y full-upgrade
 apt-get install -y --no-install-recommends \
-    qemu-guest-agent openssh-server sudo locales cloud-init cloud-guest-utils systemd-timesyncd \
-    linux-image-amd64 console-setup console-setup-linux \
-    git mc nano curl wget jq ca-certificates openssl \
-    htop ncdu lsof tree tmux bash-completion \
-    tar rsync zstd unzip acl \
-    dnsutils iproute2 iputils-ping net-tools \
-    cron logrotate
+    qemu-guest-agent \
+    openssh-server \
+    cloud-init \
+    cloud-guest-utils \
+    ca-certificates \
+    curl \
+    linux-image-amd64
 
-mapfile -t cloud_kernels < <(
-    dpkg-query -W -f='${db:Status-Abbrev} ${binary:Package}\n' 'linux-image-*cloud-amd64' 2>/dev/null \
-        | awk '$1 == "ii" {print $2}'
-)
-if (( ${#cloud_kernels[@]} )); then
-    apt-get purge -y "${cloud_kernels[@]}"
-fi
-
-update-initramfs -u -k all
-update-grub
-
-cat >/etc/default/console-setup <<'EOF'
-ACTIVE_CONSOLES="/dev/tty[1-6]"
-CHARMAP="UTF-8"
-CODESET="CyrSlav"
-FONTFACE="Fixed"
-FONTSIZE="8x16"
-VIDEOMODE=
+cat >/etc/ssh/sshd_config.d/90-template.conf <<'EOF'
+PermitRootLogin prohibit-password
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PermitEmptyPasswords no
+PubkeyAuthentication yes
 EOF
-setupcon --save-only || true
+
+cat >/etc/cloud/cloud.cfg.d/90-proxmox.cfg <<'EOF'
+datasource_list: [ NoCloud ]
+disable_root: false
+ssh_pwauth: false
+manage_etc_hosts: true
+preserve_hostname: false
+EOF
 
 install -d -m 0755 /etc/systemd/system/getty@tty1.service.d
 cat >/etc/systemd/system/getty@tty1.service.d/autologin.conf <<'EOF'
@@ -62,16 +57,8 @@ ExecStart=
 ExecStart=-/sbin/agetty --autologin root --keep-baud 115200,57600,38400,9600 - $TERM
 EOF
 
-cat >/etc/cloud/cloud.cfg.d/90-template-defaults.cfg <<'EOF'
-disable_root: false
-ssh_pwauth: false
-manage_etc_hosts: true
-preserve_hostname: false
-EOF
-
 systemctl daemon-reload
 systemctl enable qemu-guest-agent
-systemctl enable systemd-timesyncd
 systemctl enable fstrim.timer
 systemctl enable getty@tty1.service
 systemctl enable serial-getty@ttyS0.service
@@ -88,5 +75,6 @@ Console-modes=tty1,ttyS0
 EOF
 chmod 0644 /etc/vm-template-info
 
+sshd -t
 systemctl is-enabled qemu-guest-agent >/dev/null
 dpkg-query -W -f='${db:Status-Abbrev}\n' linux-image-amd64 | grep -q '^ii'
