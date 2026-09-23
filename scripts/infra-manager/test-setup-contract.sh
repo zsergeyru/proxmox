@@ -226,9 +226,10 @@ grep -q '^ADMIN_PASSWORD_SHOWN_FILE = ' "$PY_SETUP" \
     || die "Python setup должен хранить отметку однократного показа пароля Semaphore"
 grep -q 'Пароль: {password}' "$PY_SETUP" \
     || die "Первичный пароль Semaphore должен один раз выводиться в терминал"
-if grep -q 'SEMAPHORE_USE_REMOTE_RUNNER=True\|SEMAPHORE_RUNNER_REGISTRATION_TOKEN=' "$PY_SETUP"; then
-    die "Для одного 910 отдельный remote Runner не должен включаться"
-fi
+grep -Fq 'line.startswith("SEMAPHORE_USE_REMOTE_RUNNER=")' "$PY_SETUP" \
+    || die "Python setup должен удалять старую настройку remote Runner"
+grep -Fq 'line.startswith("SEMAPHORE_RUNNER_REGISTRATION_TOKEN=")' "$PY_SETUP" \
+    || die "Python setup должен удалять старый registration token Runner"
 grep -q 'def repair_semaphore_storage' "$PY_SETUP" \
     || die "Python setup обязан проверять права постоянного хранилища Semaphore"
 grep -q '"1001:0"' "$PY_SETUP" \
@@ -274,7 +275,7 @@ if grep -q '^forbid_unmanaged_guest_mutation() {' "$ACCESS"; then
     die "Проверка 910 больше не должна запрещать изменения VM/LXC вне managed"
 fi
 
-if grep -qE '(^|[[:space:]])pct create[[:space:]]+910|(^|[[:space:]])qm create[[:space:]]+910' "$SETUP"; then
+if grep -qE '(^|[[:space:]])pct create[[:space:]]+910|(^|[[:space:]])qm create[[:space:]]+910' "$SETUP" "$PY_SETUP"; then
     die "Приватный setup не должен создавать виртуальный объект 910"
 fi
 
