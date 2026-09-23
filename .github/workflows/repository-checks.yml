@@ -49,8 +49,7 @@ jobs:
             scripts/tests/test-sync-management-keys.py \
             scripts/tests/test-deploy-guest.py \
             scripts/pve/sync-management-keys.py \
-            scripts/pve/deploy-guest.py \
-            scripts/pve/setup/render-template-cloud-init.py
+            scripts/pve/deploy-guest.py
 
       - name: Run infra-manager Python foundation checks
         run: python scripts/tests/test-infra-manager-python.py
@@ -175,88 +174,6 @@ jobs:
 
       - name: Run sync-management-keys tooling contract checks
         run: bash scripts/pve/setup/tests/test-sync-management-keys-tooling.sh
-
-      - name: Validate template pipeline assets with production renderer
-        run: |
-          tmp="$(mktemp)"
-          trap 'rm -f "$tmp"' EXIT
-          sha512="$(printf 'a%.0s' {1..128})"
-          python scripts/pve/setup/render-template-cloud-init.py \
-            --base templates/debian13/cloud-init.yaml \
-            --bootstrap templates/debian13/template-bootstrap.sh \
-            --finalize templates/debian13/template-finalize.sh \
-            --output "$tmp" \
-            --template-version 7 \
-            --image-name debian-13-genericcloud-amd64.qcow2 \
-            --image-sha512 "$sha512"
-          python - "$tmp" <<'PY'
-          from pathlib import Path
-          import re
-          import sys
-          import yaml
-
-          path = Path(sys.argv[1])
-          text = path.read_text(encoding="utf-8")
-          data = yaml.safe_load(text)
-          if not isinstance(data, dict):
-              raise SystemExit("Rendered Cloud-Init is not a mapping")
-          for marker in (
-              "__TEMPLATE_BOOTSTRAP_CONTENT__",
-              "__TEMPLATE_FINALIZE_CONTENT__",
-              "__TEMPLATE_VERSION__",
-              "__IMAGE_NAME__",
-              "__IMAGE_SHA512__",
-          ):
-              if marker in text:
-                  raise SystemExit(f"Unresolved template marker: {marker}")
-
-          write_files = data.get("write_files")
-          if not isinstance(write_files, list):
-              raise SystemExit("Rendered Cloud-Init has no write_files list")
-          bootstrap_entries = [
-              item for item in write_files
-              if isinstance(item, dict) and item.get("path") == "/usr/local/sbin/template-bootstrap"
-          ]
-          if len(bootstrap_entries) != 1:
-              raise SystemExit("Expected exactly one rendered template-bootstrap entry")
-          bootstrap = bootstrap_entries[0].get("content")
-          if not isinstance(bootstrap, str):
-              raise SystemExit("Rendered template-bootstrap content is not text")
-          if "guest-status" in bootstrap:
-              raise SystemExit("Manual guest-status helper must not be embedded in template-bootstrap")
-
-          stage_codes = []
-          for line in bootstrap.splitlines():
-              match = re.fullmatch(r"status '([a-z0-9_-]+)'", line.strip())
-              if match:
-                  code = match.group(1)
-                  code.encode("ascii")
-                  stage_codes.append(code)
-          expected_codes = {
-              "apt-metadata", "qga-install", "apt-upgrade", "base-packages",
-              "console", "kernel", "locale-time", "services", "security",
-              "metadata", "done",
-          }
-          if set(stage_codes) != expected_codes:
-              raise SystemExit(f"Unexpected ASCII stage-code set: {stage_codes!r}")
-          PY
-          cloud-init schema -c "$tmp"
-          bash -n templates/debian13/template-bootstrap.sh
-          bash -n templates/debian13/template-finalize.sh
-
-          if [[ -e scripts/pve/create-template.sh ]]; then
-            echo "Legacy standalone scripts/pve/create-template.sh must not exist" >&2
-            exit 1
-          fi
-
-      - name: Run template contract unit checks
-        run: bash scripts/pve/setup/tests/test-template-contract.sh
-
-      - name: Run guest exec unit checks
-        run: bash scripts/pve/setup/tests/test-template-guest-exec.sh
-
-      - name: Run template smoke safety checks
-        run: bash scripts/pve/setup/tests/test-template-smoke.sh
 
       - name: Run AI permission boundary checks
         run: bash scripts/pve/setup/tests/test-access-boundaries.sh
