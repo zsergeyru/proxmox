@@ -108,6 +108,11 @@ if f"ARG OPENTOFU_VERSION={opentofu_version}" not in dockerfile_text:
     raise SystemExit("Версия OpenTofu в Dockerfile расходится с provision.yaml")
 if f"ARG PACKER_VERSION={packer_version}" not in dockerfile_text:
     raise SystemExit("Версия Packer в Dockerfile расходится с provision.yaml")
+runner_system_packages = set(runner.get("system_packages", []))
+if "xorriso" not in runner_system_packages:
+    raise SystemExit("Runner должен содержать xorriso для временного Packer CD")
+if "xorriso" not in dockerfile_text:
+    raise SystemExit("Runner Dockerfile не устанавливает xorriso")
 if f'OPENTOFU_VERSION="{opentofu_version}"' not in setup_text:
     raise SystemExit("Версия OpenTofu в setup.sh расходится с provision.yaml")
 if f'PACKER_VERSION="{packer_version}"' not in setup_text:
@@ -167,7 +172,7 @@ grep -q '^rollback_new_api_token() {' "$PVE_BOOTSTRAP_ACCESS" \
     || die "Новый PVE API token должен откатываться при ошибке передачи secret"
 grep -q 'rm -f -- "$tmp"' "$PVE_BOOTSTRAP_ACCESS" \
     || die "Временный PVE API secret должен удаляться и при ошибке передачи"
-for role in PVEAuditor PVEVMAdmin PVEDatastoreUser PVESDNUser; do
+for role in PVEAuditor PVEVMAdmin PVEDatastoreUser PVEDatastoreAdmin PVESDNUser; do
     grep -q "\"$role\"" "$PVE_BOOTSTRAP_ACCESS" \
         || die "В PVE bootstrap access отсутствует штатная роль $role"
 done
@@ -176,6 +181,8 @@ grep -Fq 'ensure_token_acl "/vms" "PVEVMAdmin"' "$PVE_BOOTSTRAP_ACCESS" \
     || die "910 должен получать PVEVMAdmin на /vms"
 grep -Fq 'ensure_token_acl "/pool/$MANAGED_POOL" "PVEVMAdmin"' "$PVE_BOOTSTRAP_ACCESS" \
     || die "910 должен сохранять PVEVMAdmin на managed для назначения гостей в pool"
+grep -Fq 'ensure_token_acl "/storage/$ISO_STORAGE" "PVEDatastoreAdmin"' "$PVE_BOOTSTRAP_ACCESS" \
+    || die "910 должен иметь доступ к ISO storage для Packer"
 if grep -q 'pveum user add.*infra-deployer@pve' "$PVE_BOOTSTRAP_ACCESS"; then
     die "Отдельный пользователь infra-deployer@pve больше не должен создаваться"
 fi
@@ -235,6 +242,8 @@ grep -Fq 'require_permissions "/vms" "$VM_ADMIN_PRIVS"' "$ACCESS" \
     || die "Полная проверка PVE access должна требовать управление всеми VM/LXC через /vms"
 grep -Fq 'require_permissions "/pool/$MANAGED_POOL" "Pool.Audit VM.Allocate"' "$ACCESS" \
     || die "Полная проверка PVE access должна проверять назначение гостей в managed"
+grep -Fq 'require_permissions "/storage/local" "Datastore.Audit Datastore.AllocateSpace Datastore.AllocateTemplate"' "$ACCESS" \
+    || die "Полная проверка PVE access должна проверять права Packer на ISO storage"
 if grep -q '^forbid_unmanaged_guest_mutation() {' "$ACCESS"; then
     die "Проверка 910 больше не должна запрещать изменения VM/LXC вне managed"
 fi
