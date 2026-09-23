@@ -53,6 +53,8 @@ docker:
         - python3
         - py3-pip
         - ansible
+        - jq
+        - openssl
 
       tools:
         ansible: alpine-package
