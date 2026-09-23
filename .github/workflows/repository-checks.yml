@@ -40,7 +40,7 @@ jobs:
             scripts/tests/test-sync-management-keys.py \
             scripts/tests/test-deploy-guest.py \
             scripts/pve/sync-management-keys.py \
-            scripts/pve/deploy-guest.py \
+            scripts/pve/deploy-guest.py
 
       - name: Run OpenTofu input contract checks
         run: python scripts/tests/test-opentofu-input.py
@@ -148,9 +148,9 @@ jobs:
             --build-arg PACKER_VERSION=1.15.4 \
             -t infra-runtime:test \
             guests/910-infra-manager/compose/runtime
-          docker run --rm infra-runtime:test tofu version
-          docker run --rm infra-runtime:test packer version
-          docker run --rm infra-runtime:test ansible --version
+          docker run --rm --entrypoint tofu infra-runtime:test version
+          docker run --rm --entrypoint packer infra-runtime:test version
+          docker run --rm --entrypoint ansible infra-runtime:test --version
           docker run --rm --entrypoint python3 infra-runtime:test -c 'import proxmoxer'
 
       - name: Run deploy runtime contract checks
