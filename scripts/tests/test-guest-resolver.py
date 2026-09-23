@@ -44,6 +44,17 @@ def main() -> None:
     assert resolved.effective["protection"] is True
     assert resolved.effective["pve_management"] is True
 
+    dhcp = copy.deepcopy(source_109)
+    dhcp["network"] = {"ipv4": "dhcp"}
+    resolved_dhcp = resolve_effective_guest(dhcp, defaults)
+    assert resolved_dhcp.effective["network"]["ipv4"] == "dhcp"
+    assert resolved_dhcp.management_ip is None
+    assert resolved_dhcp.management_ip_source == "dhcp"
+
+    invalid_dhcp = copy.deepcopy(source_109)
+    invalid_dhcp["network"] = {"ipv4": "dhcp/16"}
+    expect_error(invalid_dhcp, defaults, "некорректный network.ipv4")
+
     local_pve_override = copy.deepcopy(source_109)
     local_pve_override["protection"] = False
     local_pve_override["pve_management"] = False
