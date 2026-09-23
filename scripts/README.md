@@ -47,7 +47,7 @@ scripts/infra-manager/
 └── status.sh
 ```
 
-`setup.sh` является минимальной оболочкой: при первом запуске обеспечивает наличие системного `python3` и передаёт управление команде `python3 -m infra_manager setup`. Основная подготовка Debian, Docker, постоянных каталогов, секретов, CA, OpenTofu input и `infra-runtime` выполняется в `infra_manager/setup.py`.
+`setup.sh` является минимальной оболочкой: при первом запуске обеспечивает наличие системного `python3` и передаёт управление команде `python3 -m infra_manager setup`. Основная подготовка Debian, Docker, постоянных каталогов, секретов, CA, OpenTofu input и `infra-runtime` выполняется в `infra_manager/setup.py`. Рабочая копия Python-пакета устанавливается в `/usr/local/lib/infra-manager`, поэтому команды из `/usr/local/sbin` не зависят от наличия bootstrap checkout.
 
 `semaphore-project.sh` — совместимая оболочка команды `python3 -m infra_manager semaphore-project`. API-логика находится в `infra_manager/semaphore.py`: она создаёт или синхронизирует проект `Proxmox Infrastructure`, GitHub SSH key, репозиторий, Variable Group и задания Semaphore.
 
