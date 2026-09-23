@@ -11,13 +11,13 @@ OpenTofu не читает `guest.yaml` напрямую и не реализу�
 ```text
 guests/defaults.yaml
 + guests/<guest>/guest.yaml
-→ scripts/guests/guest_config.py
+→ scripts/guests/resolver.py
 → scripts/guests/render-opentofu-input.py
 → /var/lib/infra-manager/opentofu/guests.json
 → OpenTofu
 ```
 
-Таким образом, единственным владельцем правил defaults/profile/guest и вычисляемой адресации остаётся `scripts/guests/guest_config.py`.
+Таким образом, единственным владельцем правил defaults/profile/guest и вычисляемой адресации остаётся `scripts/guests/resolver.py`.
 
 ## Состояние
 

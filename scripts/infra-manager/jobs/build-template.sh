@@ -181,7 +181,7 @@ finalize_template() {
 main() {
     if check_existing; then
         finalize_template
-        bash "$ROOT/scripts/infra-manager/jobs/test-template.sh" "$VMID" \
+        bash "$ROOT/scripts/infra-manager/jobs/verify-template.sh" "$VMID" \
             || die "Проверка шаблона $VMID не пройдена"
         ok "Шаблон $VMID уже соответствует версии 8 и успешно проверен; сборка не требуется"
         exit 0
@@ -218,7 +218,7 @@ main() {
     unset build_password
 
     finalize_template
-    bash "$ROOT/scripts/infra-manager/jobs/test-template.sh" "$VMID" \
+    bash "$ROOT/scripts/infra-manager/jobs/verify-template.sh" "$VMID" \
         || die "Проверка шаблона $VMID не пройдена"
 
     unset PVE_TOKEN_SECRET AUTH_HEADER

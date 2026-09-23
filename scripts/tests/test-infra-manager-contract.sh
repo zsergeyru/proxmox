@@ -8,10 +8,10 @@ PY_SEMAPHORE="$ROOT/scripts/infra-manager/infra_manager/semaphore.py"
 PY_STATUS="$ROOT/scripts/infra-manager/infra_manager/status.py"
 PY_PVE="$ROOT/scripts/infra-manager/infra_manager/pve.py"
 STATUS="$ROOT/scripts/infra-manager/commands/status.sh"
-ACCESS="$ROOT/scripts/infra-manager/commands/check-pve-access.sh"
-LIFECYCLE="$ROOT/scripts/infra-manager/commands/test-pve-lifecycle.sh"
+ACCESS="$ROOT/scripts/infra-manager/commands/pve-access-check.sh"
+LIFECYCLE="$ROOT/scripts/infra-manager/commands/pve-lifecycle-test.sh"
 BUILD_TEMPLATE="$ROOT/scripts/infra-manager/jobs/build-template.sh"
-TEST_TEMPLATE="$ROOT/scripts/infra-manager/jobs/test-template.sh"
+VERIFY_TEMPLATE="$ROOT/scripts/infra-manager/jobs/verify-template.sh"
 COMPOSE="$ROOT/guests/910-infra-manager/compose/docker-compose.yml"
 DOCKERFILE="$ROOT/guests/910-infra-manager/compose/runtime/Dockerfile"
 REQ="$ROOT/guests/910-infra-manager/compose/runtime/requirements.txt"
@@ -25,7 +25,7 @@ SSH_CONFIG="$ROOT/guests/910-infra-manager/compose/runtime/ssh_config"
 die() { printf 'ОШИБКА: %s\n' "$*" >&2; exit 1; }
 ok()  { printf '[ОК] %s\n' "$*"; }
 
-for file in "$SETUP" "$PY_SETUP" "$PY_SEMAPHORE" "$PY_STATUS" "$PY_PVE" "$STATUS" "$ACCESS" "$LIFECYCLE" "$BUILD_TEMPLATE" "$TEST_TEMPLATE" "$COMPOSE" "$DOCKERFILE" "$REQ" "$PLAN" "$PVE_BOOTSTRAP_ACCESS" "$OPENTOFU_LOCK" "$GUEST_MANIFEST" "$PROVISION" "$SSH_CONFIG"; do
+for file in "$SETUP" "$PY_SETUP" "$PY_SEMAPHORE" "$PY_STATUS" "$PY_PVE" "$STATUS" "$ACCESS" "$LIFECYCLE" "$BUILD_TEMPLATE" "$VERIFY_TEMPLATE" "$COMPOSE" "$DOCKERFILE" "$REQ" "$PLAN" "$PVE_BOOTSTRAP_ACCESS" "$OPENTOFU_LOCK" "$GUEST_MANIFEST" "$PROVISION" "$SSH_CONFIG"; do
     [[ -s "$file" ]] || die "Отсутствует обязательный файл: $file"
 done
 
@@ -182,9 +182,9 @@ grep -Fq 'configure_project(self.project_branch)' "$PY_SETUP" \
     || die "Устаревший semaphore-project.sh больше не должен существовать"
 grep -q 'status.sh' "$PY_SETUP" \
     || die "setup должен устанавливать совместимый status wrapper"
-grep -q 'check-pve-access.sh' "$PY_SETUP" \
+grep -q 'pve-access-check.sh' "$PY_SETUP" \
     || die "setup должен устанавливать совместимый PVE access wrapper"
-grep -q 'test-pve-lifecycle.sh' "$PY_SETUP" \
+grep -q 'pve-lifecycle-test.sh' "$PY_SETUP" \
     || die "На этапе 2 должен использоваться существующий lifecycle test"
 
 grep -q 'API_USER="root@pam"' "$PVE_BOOTSTRAP_ACCESS" \
@@ -254,7 +254,7 @@ grep -q '"packer", "version"' "$PY_SETUP" \
 grep -Fq 'exec python3 -m infra_manager status "$@"' "$STATUS" \
     || die "status.sh должен быть тонким Python wrapper"
 grep -Fq 'exec python3 -m infra_manager pve-access-check "$@"' "$ACCESS" \
-    || die "check-pve-access.sh должен быть тонким Python wrapper"
+    || die "pve-access-check.sh должен быть тонким Python wrapper"
 for wrapper in "$STATUS" "$ACCESS"; do
     grep -Fq '/usr/local/lib/infra-manager/infra_manager' "$wrapper" \
         || die "Установленный wrapper должен использовать постоянный Python package"
@@ -317,9 +317,9 @@ grep -q 'packer build' "$BUILD_TEMPLATE" \
     || die "build-template.sh должен выполнять packer build"
 grep -q 'template-version=8' "$BUILD_TEMPLATE" \
     || die "build-template.sh должен работать с Template-Version 8"
-grep -q 'test-template.sh' "$BUILD_TEMPLATE" \
+grep -q 'verify-template.sh' "$BUILD_TEMPLATE" \
     || die "После новой сборки должен запускаться короткий Full Clone test"
-grep -q 'TEST_VMID=9099' "$TEST_TEMPLATE" \
+grep -q 'TEST_VMID=9099' "$VERIFY_TEMPLATE" \
     || die "Проверка шаблона 9000 должна использовать VMID 9099"
 
 if grep -qE 'tofu[[:space:]].*(apply|destroy)' "$PLAN"; then

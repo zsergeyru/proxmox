@@ -8,7 +8,7 @@
 scripts/
 ├── validate_repo.py
 ├── guests/
-│   ├── guest_config.py
+│   ├── resolver.py
 │   └── render-opentofu-input.py
 ├── infra-manager/
 │   ├── setup.sh
@@ -24,17 +24,17 @@ scripts/
 │   │   └── status.py
 │   ├── commands/
 │   │   ├── status.sh
-│   │   ├── check-pve-access.sh
-│   │   └── test-pve-lifecycle.sh
+│   │   ├── pve-access-check.sh
+│   │   └── pve-lifecycle-test.sh
 │   └── jobs/
 │       ├── opentofu-plan.sh
 │       ├── build-template.sh
-│       └── test-template.sh
+│       └── verify-template.sh
 └── tests/
-    ├── test-guest-bootstrap.py
+    ├── test-guest-resolver.py
     ├── test-infra-manager-python.py
     ├── test-opentofu-input.py
-    └── test-setup-contract.sh
+    └── test-infra-manager-contract.sh
 ```
 
 Старого контура `scripts/pve/`, `deploy-guest.py`, `sync-management-keys.py` и PVE Configuration в действующем коде нет.
@@ -90,10 +90,10 @@ Semaphore: Build Template 9000
 → scripts/infra-manager/jobs/build-template.sh 9000
 → Packer
 → tpl-debian13
-→ scripts/infra-manager/jobs/test-template.sh 9000
+→ scripts/infra-manager/jobs/verify-template.sh 9000
 ```
 
-`test-template.sh` создаёт временный Full Clone 9099, проверяет Cloud-Init, QEMU Guest Agent, SSH, machine-id и SSH host keys, затем удаляет клон.
+`verify-template.sh` создаёт временный Full Clone 9099, проверяет Cloud-Init, QEMU Guest Agent, SSH, machine-id и SSH host keys, затем удаляет клон.
 
 ## `infra-manager/commands/`
 
@@ -105,13 +105,13 @@ Semaphore: Build Template 9000
 infra-manager-status
 ```
 
-`check-pve-access.sh` устанавливается как:
+`pve-access-check.sh` устанавливается как:
 
 ```text
 infra-manager-pve-access-check
 ```
 
-`test-pve-lifecycle.sh` устанавливается как:
+`pve-lifecycle-test.sh` устанавливается как:
 
 ```text
 infra-manager-pve-lifecycle-test
@@ -121,7 +121,7 @@ infra-manager-pve-lifecycle-test
 
 ## `guests/`
 
-`guest_config.py` — единый resolver конфигурации гостей. Он объединяет `defaults + profile + guest`, вычисляет management IP, нормализует `management`, `bootstrap` и features и формирует effective state.
+`resolver.py` — единый resolver конфигурации гостей. Он объединяет `defaults + profile + guest`, вычисляет management IP, нормализует `management`, `bootstrap` и features и формирует effective state.
 
 `render-opentofu-input.py` проходит по `guests/*/guest.yaml`, берёт только объекты с `profile` и формирует:
 
@@ -147,10 +147,10 @@ python scripts/validate_repo.py
 
 Все repo-level и contract-тесты собраны в одном каталоге.
 
-- `test-guest-bootstrap.py` проверяет resolver и Bootstrap-возможности гостей.
+- `test-guest-resolver.py` проверяет resolver и Bootstrap-возможности гостей.
 - `test-opentofu-input.py` проверяет состав входа OpenTofu и исключение 910.
 - `test-infra-manager-python.py` проверяет Python CLI и основные вспомогательные функции infra-manager.
-- `test-setup-contract.sh` проверяет согласованность кода 910, Compose, PVE access, Semaphore, OpenTofu и Packer.
+- `test-infra-manager-contract.sh` проверяет согласованность кода 910, Compose, PVE access, Semaphore, OpenTofu и Packer.
 
 ## Правило размещения нового кода
 

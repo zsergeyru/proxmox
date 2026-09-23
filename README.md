@@ -166,8 +166,8 @@ scripts/infra-manager/setup.sh
 scripts/infra-manager/jobs/opentofu-plan.sh
 scripts/guests/render-opentofu-input.py
 scripts/infra-manager/commands/status.sh
-scripts/infra-manager/commands/check-pve-access.sh
-scripts/infra-manager/commands/test-pve-lifecycle.sh
+scripts/infra-manager/commands/pve-access-check.sh
+scripts/infra-manager/commands/pve-lifecycle-test.sh
 ~~~
 
 ## Доступ 910 к PVE

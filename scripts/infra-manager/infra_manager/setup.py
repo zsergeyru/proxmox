@@ -876,12 +876,12 @@ class Setup:
             ),
             (
                 REPO_ROOT
-                / "scripts/infra-manager/commands/check-pve-access.sh",
+                / "scripts/infra-manager/commands/pve-access-check.sh",
                 ACCESS_CHECK_COMMAND,
             ),
             (
                 REPO_ROOT
-                / "scripts/infra-manager/commands/test-pve-lifecycle.sh",
+                / "scripts/infra-manager/commands/pve-lifecycle-test.sh",
                 LIFECYCLE_TEST_COMMAND,
             ),
         ):

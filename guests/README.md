@@ -109,7 +109,7 @@ guests/910-infra-manager/
 python scripts/validate_repo.py
 ```
 
-`validate_repo.py` и `sync-management-keys` используют общий модуль `scripts/guests/guest_config.py`. `deploy-guest` будет переведён на новый контракт при отдельной полной переработке.
+`validate_repo.py` и `sync-management-keys` используют общий модуль `scripts/guests/resolver.py`. `deploy-guest` будет переведён на новый контракт при отдельной полной переработке.
 
 ## Связанные документы
 

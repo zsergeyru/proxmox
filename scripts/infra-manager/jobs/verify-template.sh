@@ -13,7 +13,7 @@ info() { printf '==> %s\n' "$*"; }
 usage() {
     cat <<'USAGE'
 Использование:
-  test-template.sh 9000
+  verify-template.sh 9000
 
 Создаёт временный Full Clone 9099, проверяет Cloud-Init, QGA, SSH,
 machine-id и SSH host keys, затем удаляет клон.

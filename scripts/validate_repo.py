@@ -13,7 +13,7 @@ from jsonschema import Draft202012Validator
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "guests"))
 
-from guest_config import (
+from resolver import (
     MISSING,
     GuestConfigError,
     NetworkConfig,

@@ -32,7 +32,7 @@ jobs:
       - name: Compile Python tooling
         run: |
           python -m py_compile \
-            scripts/guests/guest_config.py \
+            scripts/guests/resolver.py \
             scripts/validate_repo.py \
             scripts/guests/render-opentofu-input.py \
             scripts/infra-manager/infra_manager/__init__.py \
@@ -45,7 +45,7 @@ jobs:
             scripts/infra-manager/infra_manager/status.py \
             scripts/tests/test-infra-manager-python.py \
             scripts/tests/test-opentofu-input.py \
-            scripts/tests/test-guest-bootstrap.py \
+            scripts/tests/test-guest-resolver.py \
 
       - name: Run infra-manager Python foundation checks
         run: python scripts/tests/test-infra-manager-python.py
@@ -53,8 +53,8 @@ jobs:
       - name: Run OpenTofu input contract checks
         run: python scripts/tests/test-opentofu-input.py
 
-      - name: Run Guest Bootstrap v1 contract checks
-        run: python scripts/tests/test-guest-bootstrap.py
+      - name: Run guest resolver contract checks
+        run: python scripts/tests/test-guest-resolver.py
 
       - name: Validate shell syntax
         run: |
@@ -84,7 +84,7 @@ jobs:
           fi
 
       - name: Run infra-manager contract checks
-        run: bash scripts/tests/test-setup-contract.sh
+        run: bash scripts/tests/test-infra-manager-contract.sh
 
       - name: Reject obsolete direct PVE deployment path
         run: |

@@ -13,7 +13,7 @@ import yaml
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "scripts" / "guests"))
 
-from guest_config import GuestConfigError, resolve_effective_guest  # noqa: E402
+from resolver import GuestConfigError, resolve_effective_guest  # noqa: E402
 
 
 def load_yaml(path: Path) -> dict:

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Контрактные проверки guest resolver/Bootstrap без доступа к PVE."""
+"""Контрактные проверки guest resolver без доступа к PVE."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ import yaml
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts" / "guests"))
 
-from guest_config import GuestConfigError, resolve_effective_guest  # noqa: E402
+from resolver import GuestConfigError, resolve_effective_guest  # noqa: E402
 
 
 def load_yaml(path: Path) -> dict:
@@ -89,7 +89,7 @@ def main() -> None:
         "требует feature 'container-host'",
     )
 
-    print("Guest configuration/Bootstrap contract tests passed.")
+    print("Guest resolver contract tests passed.")
 
 
 if __name__ == "__main__":
