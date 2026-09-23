@@ -174,8 +174,8 @@ done
 
 grep -Fq 'ensure_token_acl "/vms" "PVEVMAdmin"' "$PVE_BOOTSTRAP_ACCESS" \
     || die "910 должен получать PVEVMAdmin на /vms"
-grep -Fq 'remove_token_acl_if_exists "/pool/$MANAGED_POOL" "PVEVMAdmin"' "$PVE_BOOTSTRAP_ACCESS" \
-    || die "Старый PVEVMAdmin на /pool/managed должен удаляться после перехода на /vms"
+grep -Fq 'ensure_token_acl "/pool/$MANAGED_POOL" "PVEVMAdmin"' "$PVE_BOOTSTRAP_ACCESS" \
+    || die "910 должен сохранять PVEVMAdmin на managed для назначения гостей в pool"
 if grep -q 'pveum user add.*infra-deployer@pve' "$PVE_BOOTSTRAP_ACCESS"; then
     die "Отдельный пользователь infra-deployer@pve больше не должен создаваться"
 fi
@@ -233,6 +233,8 @@ grep -q 'PROJECT_REPO="git@github.com:zsergeyru/proxmox.git"' "$STATUS" \
     || die "status.sh должен проверять Git repository Semaphore"
 grep -Fq 'require_permissions "/vms" "$VM_ADMIN_PRIVS"' "$ACCESS" \
     || die "Полная проверка PVE access должна требовать управление всеми VM/LXC через /vms"
+grep -Fq 'require_permissions "/pool/$MANAGED_POOL" "Pool.Audit VM.Allocate"' "$ACCESS" \
+    || die "Полная проверка PVE access должна проверять назначение гостей в managed"
 if grep -q '^forbid_unmanaged_guest_mutation() {' "$ACCESS"; then
     die "Проверка 910 больше не должна запрещать изменения VM/LXC вне managed"
 fi
