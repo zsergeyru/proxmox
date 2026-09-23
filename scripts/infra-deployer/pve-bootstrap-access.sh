@@ -106,6 +106,16 @@ ensure_token_acl() {
         --propagate 1
 }
 
+remove_token_acl_if_exists() {
+    local path=$1 role=$2
+    token_acl_exists "$path" "$role" || return
+
+    pveum acl delete "$path" \
+        --tokens "$API_TOKEN_ID" \
+        --roles "$role" \
+        --propagate 1
+}
+
 persistent_token_available() {
     ct_exec test -s "$CT_PERSISTENT_SECRET" || return 1
     ct_exec grep -Fxq "PVE_API_TOKEN_ID=$API_TOKEN_ID" "$CT_PERSISTENT_SECRET"
@@ -181,9 +191,14 @@ ensure_api_token() {
 
 ensure_token_acls() {
     ensure_token_acl "/" "PVEAuditor"
-    ensure_token_acl "/pool/$MANAGED_POOL" "PVEVMAdmin"
+    ensure_token_acl "/vms" "PVEVMAdmin"
     ensure_token_acl "/storage/$CT_STORAGE" "PVEDatastoreUser"
     ensure_token_acl "/sdn/zones/localnetwork/$CT_BRIDGE" "PVESDNUser"
+
+    # Старое ограничение 910 только pool managed больше не используется.
+    # Сначала выдаём /vms, затем безопасно удаляем избыточный старый ACL.
+    remove_token_acl_if_exists "/pool/$MANAGED_POOL" "PVEVMAdmin"
+
     ok "ACL PVE API token подготовлены"
 }
 
