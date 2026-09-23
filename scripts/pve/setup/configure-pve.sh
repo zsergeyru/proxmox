@@ -129,7 +129,7 @@ show_configuration_banner() {
     configuration_banner_line 'Proxmox Project — PVE Configuration'
     configuration_banner_line ''
     configuration_banner_line 'Проверяет и настраивает Proxmox host, доступы, storage,'
-    configuration_banner_line 'доступы, storage и инфраструктурные настройки PVE.'
+    configuration_banner_line 'и инфраструктурные настройки PVE.'
     configuration_banner_line ''
     configuration_banner_line "PVE Configuration: v${PVE_CONFIGURATION_VERSION}"
     configuration_banner_border '└' '┘'
@@ -170,7 +170,6 @@ main() {
     ensure_managed_pool
     ensure_roles
     ensure_pve_identities
-
 
 
     install_private_tooling
