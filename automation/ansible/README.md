@@ -2,7 +2,7 @@
 
 `ansible/` предназначен для повторяемой настройки Linux VM/LXC после того, как гостевая система уже создана и доступна по административному SSH.
 
-Граница ответственности описана в [`../../docs/300-guests/330-deploy-guest.md`](../../docs/300-guests/330-deploy-guest.md): PVE и `deploy-guest` создают гостевую систему и обеспечивают готовность административного доступа, а Ansible отвечает за повторяемую настройку ОС и приложений.
+Граница ответственности описана в [`../../docs/300-guests/330-guest-lifecycle.md`](../../docs/300-guests/330-guest-lifecycle.md): OpenTofu управляет объектом VM/LXC в Proxmox, а Ansible отвечает за повторяемую настройку ОС и приложений после появления административного доступа.
 
 ## Целевая структура
 
@@ -27,11 +27,11 @@ ansible/
 - Конфигурация приложений и сервисов должна быть идемпотентной и повторяемой.
 - Секреты, пароли, токены и закрытые ключи не хранятся в Git.
 - Рабочее состояние и постоянные данные приложений не следует превращать в содержимое каталога Ansible; для них действуют отдельные правила резервного копирования и восстановления.
-- Структура файлов внутри Linux-гостей следует [`../../docs/legacy/34-linux-filesystem-layout.md`](../../docs/legacy/34-linux-filesystem-layout.md).
+- Структура файлов внутри Linux-гостей следует [`../../docs/300-guests/350-linux-filesystem.md`](../../docs/300-guests/350-linux-filesystem.md).
 
 ## Связанные документы
 
 - [`../../docs/700-security/720-ssh-access.md`](../../docs/700-security/720-ssh-access.md) — SSH-ключи и жизненный цикл секретов.
-- [`../../docs/300-guests/330-deploy-guest.md`](../../docs/300-guests/330-deploy-guest.md) — граница ответственности `deploy-guest` и Ansible.
-- [`../../docs/legacy/34-linux-filesystem-layout.md`](../../docs/legacy/34-linux-filesystem-layout.md) — правила размещения файлов и данных.
+- [`../../docs/300-guests/330-guest-lifecycle.md`](../../docs/300-guests/330-guest-lifecycle.md) — граница ответственности OpenTofu и Ansible.
+- [`../../docs/300-guests/350-linux-filesystem.md`](../../docs/300-guests/350-linux-filesystem.md) — правила `rootfs/` и размещения файлов и данных внутри Linux-гостей.
 - [`../../infrastructure/guests/README.md`](../../infrastructure/guests/README.md) — требуемое состояние и файлы конкретных гостевых систем.
