@@ -215,7 +215,7 @@ git@github.com:zsergeyru/proxmox.git
 - проект `Proxmox Infrastructure`;
 - ключ `GitHub project read-only`;
 - репозиторий `proxmox`;
-- Variable Group `OpenTofu PVE`;
+- Variable Group `PVE API`;
 - шаблон `OpenTofu Plan`;
 - шаблон `Build Template 9000`.
 
