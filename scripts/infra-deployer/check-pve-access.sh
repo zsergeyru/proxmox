@@ -6,7 +6,7 @@ CA_BUNDLE="/etc/infra-deployer/ca/ca-bundle.crt"
 
 MANAGED_POOL="managed"
 
-VM_ADMIN_PRIVS="VM.Allocate VM.Audit VM.Config.CDROM VM.Config.Cloudinit VM.Config.CPU VM.Config.Disk VM.Config.HWType VM.Config.Memory VM.Config.Network VM.Config.Options VM.GuestAgent.Audit VM.PowerMgmt"
+VM_ADMIN_PRIVS="VM.Allocate VM.Audit VM.Backup VM.Clone VM.Config.CDROM VM.Config.Cloudinit VM.Config.CPU VM.Config.Disk VM.Config.HWType VM.Config.Memory VM.Config.Network VM.Config.Options VM.GuestAgent.Audit VM.PowerMgmt VM.Snapshot VM.Snapshot.Rollback"
 FORBIDDEN_ROOT_PRIVS="Permissions.Modify Sys.Modify Sys.PowerMgmt User.Modify Group.Allocate Realm.Allocate Realm.AllocateUser Pool.Allocate Datastore.Allocate Datastore.AllocateSpace Datastore.AllocateTemplate SDN.Allocate SDN.Use Mapping.Modify"
 
 die() { printf 'ОШИБКА: %s\n' "$*" >&2; exit 1; }
@@ -107,6 +107,7 @@ api_get "/pools/$MANAGED_POOL" | jq -e '.data' >/dev/null \
     || die "Pool $MANAGED_POOL недоступен"
 
 require_permissions "/vms" "$VM_ADMIN_PRIVS"
+require_permissions "/pool/$MANAGED_POOL" "Pool.Audit VM.Allocate"
 require_permissions "/storage/local" "Datastore.Audit"
 require_permissions "/storage/local-lvm" "Datastore.Audit Datastore.AllocateSpace"
 require_permissions "/sdn/zones/localnetwork/vmbr0" "SDN.Audit SDN.Use"
