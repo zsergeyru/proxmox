@@ -107,6 +107,17 @@ ensure_token_acl() {
         --propagate 1
 }
 
+ensure_token_roles() {
+    local path=$1 roles=$2
+
+    # Один вызов задаёт полный набор ролей token на конкретном пути.
+    # Это важно для managed: более специфичный ACL не должен лишать token Pool.Audit.
+    pveum acl modify "$path" \
+        --tokens "$API_TOKEN_ID" \
+        --roles "$roles" \
+        --propagate 1
+}
+
 persistent_token_available() {
     ct_exec test -s "$CT_PERSISTENT_SECRET" || return 1
     ct_exec grep -Fxq "PVE_API_TOKEN_ID=$API_TOKEN_ID" "$CT_PERSISTENT_SECRET"
@@ -185,9 +196,9 @@ ensure_token_acls() {
     ensure_token_acl "/vms" "PVEVMAdmin"
 
     # /vms — основная область управления 910 всеми VM/LXC.
-    # ACL на managed дополнительно нужен для создания/назначения гостей в этот pool;
-    # границей прав 910 он больше не является.
-    ensure_token_acl "/pool/$MANAGED_POOL" "PVEVMAdmin"
+    # На более специфичном /pool/managed задаём обе роли сразу:
+    # PVEVMAdmin — управление гостями, PVEPoolUser — Pool.Audit для чтения pool.
+    ensure_token_roles "/pool/$MANAGED_POOL" "PVEVMAdmin,PVEPoolUser"
 
     ensure_token_acl "/storage/$CT_STORAGE" "PVEDatastoreUser"
     ensure_token_acl "/storage/$ISO_STORAGE" "PVEDatastoreAdmin"
