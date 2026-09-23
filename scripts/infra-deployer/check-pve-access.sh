@@ -108,7 +108,7 @@ api_get "/pools/$MANAGED_POOL" | jq -e '.data' >/dev/null \
 
 require_permissions "/vms" "$VM_ADMIN_PRIVS"
 require_permissions "/pool/$MANAGED_POOL" "Pool.Audit VM.Allocate"
-require_permissions "/storage/local" "Datastore.Audit"
+require_permissions "/storage/local" "Datastore.Audit Datastore.AllocateSpace Datastore.AllocateTemplate"
 require_permissions "/storage/local-lvm" "Datastore.Audit Datastore.AllocateSpace"
 require_permissions "/sdn/zones/localnetwork/vmbr0" "SDN.Audit SDN.Use"
 
