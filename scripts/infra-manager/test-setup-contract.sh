@@ -131,6 +131,8 @@ if compose_services["runtime"].get("container_name") != runtime.get("container_n
     raise SystemExit("container_name infra-runtime расходится с provision.yaml")
 if compose_services["runtime"].get("network_mode") != "host":
     raise SystemExit("infra-runtime Compose должен использовать network_mode=host")
+if compose_services["runtime"].get("extra_hosts") != ["${PVE_HOSTNAME}:${PVE_HOST_IP}"]:
+    raise SystemExit("infra-runtime Compose должен получать PVE hostname/IP через extra_hosts")
 PY
 
 grep -q 'SEMAPHORE_VERSION="v2.18.30"' "$SETUP" \
@@ -295,6 +297,10 @@ grep -q 'TF_VAR_pve_endpoint' "$SEMAPHORE_PROJECT" \
     || die "Variable Group должен передавать pve_endpoint"
 grep -q 'TF_VAR_pve_api_token' "$SEMAPHORE_PROJECT" \
     || die "Variable Group должен передавать pve_api_token"
+grep -q 'SSL_CERT_FILE' "$SEMAPHORE_PROJECT" \
+    || die "Variable Group должен передавать CA bundle OpenTofu/Packer"
+grep -q 'REQUESTS_CA_BUNDLE' "$SEMAPHORE_PROJECT" \
+    || die "Variable Group должен передавать CA bundle Python requests"
 grep -q 'operation:"update"' "$SEMAPHORE_PROJECT" \
     || die "Существующий PVE token в Variable Group должен синхронизироваться при обычном обновлении"
 grep -q 'local name="OpenTofu Plan"' "$SEMAPHORE_PROJECT" \
@@ -348,6 +354,8 @@ if runtime.get('image') != 'infra-runtime:${RUNTIME_VERSION}':
     raise SystemExit('infra-runtime image must use RUNTIME_VERSION')
 if runtime.get('network_mode') != 'host':
     raise SystemExit('infra-runtime must use host network')
+if runtime.get('extra_hosts') != ['${PVE_HOSTNAME}:${PVE_HOST_IP}']:
+    raise SystemExit('infra-runtime must map the PVE hostname')
 
 volumes = runtime.get('volumes', [])
 required = {
