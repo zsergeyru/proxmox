@@ -35,6 +35,11 @@ jobs:
             scripts/guest_config.py \
             scripts/validate_repo.py \
             scripts/infra-manager/render-opentofu-input.py \
+            scripts/infra-manager/infra_manager/__init__.py \
+            scripts/infra-manager/infra_manager/__main__.py \
+            scripts/infra-manager/infra_manager/cli.py \
+            scripts/infra-manager/infra_manager/common.py \
+            scripts/tests/test-infra-manager-python.py \
             scripts/tests/test-opentofu-input.py \
             scripts/tests/test-guest-bootstrap.py \
             scripts/tests/test-sync-management-keys.py \
@@ -42,6 +47,9 @@ jobs:
             scripts/pve/sync-management-keys.py \
             scripts/pve/deploy-guest.py \
             scripts/pve/setup/render-template-cloud-init.py
+
+      - name: Run infra-manager Python foundation checks
+        run: python scripts/tests/test-infra-manager-python.py
 
       - name: Run OpenTofu input contract checks
         run: python scripts/tests/test-opentofu-input.py
