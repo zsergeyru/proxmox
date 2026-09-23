@@ -6,35 +6,41 @@
 
 ```text
 scripts/
-├── validate_repo.py
-├── guests/
-│   ├── resolver.py
-│   └── render-opentofu-input.py
-├── infra-manager/
-│   ├── setup.sh
-│   ├── pve-bootstrap-access.sh
-│   ├── infra_manager/
-│   │   ├── __init__.py
-│   │   ├── __main__.py
-│   │   ├── cli.py
-│   │   ├── common.py
-│   │   ├── setup.py
-│   │   ├── semaphore.py
-│   │   ├── pve.py
-│   │   └── status.py
-│   ├── commands/
-│   │   ├── status.sh
-│   │   ├── pve-access-check.sh
-│   │   └── pve-lifecycle-test.sh
-│   └── jobs/
-│       ├── opentofu-plan.sh
-│       ├── build-template.sh
-│       └── verify-template.sh
-└── tests/
-    ├── test-guest-resolver.py
-    ├── test-infra-manager-python.py
-    ├── test-opentofu-input.py
-    └── test-infra-manager-contract.sh
+├── validate_repo.py                         # Проверяет структуру репозитория, guest.yaml, schemas, IP и отсутствие секретов
+│
+├── guests/                                  # Общая логика формирования итоговой конфигурации гостей
+│   ├── resolver.py                          # Собирает effective state из defaults + profile + guest
+│   └── render-opentofu-input.py             # Формирует guests.json для OpenTofu из управляемых guest.yaml
+│
+├── infra-manager/                           # Всё, что относится к LXC 910 infra-manager
+│   ├── setup.sh                             # Вход bootstrap внутри 910; передаёт управление Python setup
+│   ├── pve-bootstrap-access.sh              # Выполняется на PVE; создаёт API token, ACL и передаёт доступ в 910
+│   │
+│   ├── infra_manager/                       # Основная Python-программа управления и проверки 910
+│   │   ├── __init__.py                      # Инициализация Python-пакета infra_manager
+│   │   ├── __main__.py                      # Точка входа для python3 -m infra_manager
+│   │   ├── cli.py                           # Команды setup, status, pve-access-check и semaphore-project
+│   │   ├── common.py                        # Общие ошибки, вывод и безопасный запуск внешних команд
+│   │   ├── setup.py                         # Главный оркестратор настройки Debian, Docker, runtime и Semaphore
+│   │   ├── semaphore.py                     # Синхронизирует проект, Git, Variable Group и задания Semaphore
+│   │   ├── pve.py                           # Проверяет фактические права PVE API token
+│   │   └── status.py                        # Проверяет готовность 910 и всех его инструментов
+│   │
+│   ├── commands/                            # Исходники административных команд, устанавливаемых в /usr/local/sbin
+│   │   ├── status.sh                        # Обёртка команды infra-manager-status
+│   │   ├── pve-access-check.sh              # Обёртка команды infra-manager-pve-access-check
+│   │   └── pve-lifecycle-test.sh            # Приёмочный тест create/change/start/stop/delete временного LXC 9098
+│   │
+│   └── jobs/                                # Задания, непосредственно запускаемые Semaphore
+│       ├── opentofu-plan.sh                  # Формирует вход OpenTofu и выполняет только tofu plan
+│       ├── build-template.sh                 # Собирает Packer-шаблон VM 9000 и запускает его проверку
+│       └── verify-template.sh                # Проверяет шаблон 9000 через временный Full Clone 9099
+│
+└── tests/                                    # Локальные и CI-проверки без постоянных изменений инфраструктуры
+    ├── test-guest-resolver.py                # Проверяет resolver, management, bootstrap и profile features
+    ├── test-infra-manager-python.py          # Проверяет Python CLI и базовые функции infra-manager
+    ├── test-opentofu-input.py                # Проверяет состав guests.json и исключение специальных объектов
+    └── test-infra-manager-contract.sh        # Проверяет общий контракт 910, Semaphore, PVE, OpenTofu и Packer
 ```
 
 Старого контура `scripts/pve/`, `deploy-guest.py`, `sync-management-keys.py` и PVE Configuration в действующем коде нет.
