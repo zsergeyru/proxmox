@@ -76,7 +76,7 @@ Proxmox Infrastructure
 - шаблон `OpenTofu Plan`;
 - шаблон `Build Template 9000`.
 
-PVE API token не дублируется в Key Store. Он передаётся OpenTofu как секрет Variable Group:
+PVE API token не дублируется в Key Store. Он передаётся инфраструктурным заданиям как секрет общего Variable Group:
 
 ```text
 PVE_API_URL
