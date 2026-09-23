@@ -567,7 +567,7 @@ scripts/guests/resolver.py
 
 - [`300-overview.md`](300-overview.md) — общая картина гостевых систем и их жизненного цикла.
 - [`320-guest-manifest.md`](320-guest-manifest.md) — точное значение, допустимость и место задания каждого поля `guest.yaml`.
-- [`330-deploy-guest.md`](330-deploy-guest.md) — применение построенного состояния и жизненный цикл гостевой системы.
+- [`330-guest-lifecycle.md`](330-guest-lifecycle.md) — применение построенного состояния и жизненный цикл гостевой системы.
 - [`390-decisions.md`](390-decisions.md) — причины ключевых решений по модели состояния гостей.
 - [`../100-architecture/120-state-model.md`](../100-architecture/120-state-model.md) — общая модель требуемого и фактического состояния проекта.
 - [`../../infrastructure/guests/README.md`](../../infrastructure/guests/README.md) — структура каталога конкретной гостевой системы.
