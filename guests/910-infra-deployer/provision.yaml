@@ -35,19 +35,12 @@ docker:
   services:
     semaphore:
       container_name: infra-deployer-semaphore
-      image: semaphoreui/semaphore:v2.18.30
-      restart: unless-stopped
-      ports:
-        - "3000:3000"
-      database: sqlite
-      data_path: /var/lib/infra-deployer/semaphore
-
-    runner:
-      container_name: infra-deployer-runner
-      image: infra-deployer-runner:v2.18.30
-      base_image: semaphoreui/runner:v2.18.30
+      image: infra-deployer-semaphore:v2.18.30
+      base_image: semaphoreui/semaphore:v2.18.30
       restart: unless-stopped
       network_mode: host
+      database: sqlite
+      data_path: /var/lib/infra-deployer/semaphore
 
       system_packages:
         - ca-certificates
@@ -60,7 +53,7 @@ docker:
         - py3-pip
 
       tools:
-        ansible: bundled-with-semaphore-runner
+        ansible: bundled-with-semaphore
         opentofu: "1.12.6"
         packer: "1.15.4"
 
@@ -69,8 +62,7 @@ docker:
         requests: ">=2.32,<3"
 
       mounts:
-        - /var/lib/infra-deployer/runner:/var/lib/semaphore
-        - /var/lib/infra-deployer/runner/tmp:/tmp/semaphore
+        - /var/lib/infra-deployer/semaphore:/var/lib/semaphore
         - /etc/infra-deployer/ca:/etc/infra-deployer/ca:ro
         - /var/lib/infra-deployer/opentofu:/var/lib/infra-deployer/opentofu
 
@@ -80,7 +72,6 @@ paths:
   ca: /etc/infra-deployer/ca
   data: /var/lib/infra-deployer
   semaphore_data: /var/lib/infra-deployer/semaphore
-  runner_data: /var/lib/infra-deployer/runner
   opentofu_data: /var/lib/infra-deployer/opentofu
   opentofu_state: /var/lib/infra-deployer/opentofu/state/proxmox.tfstate
   compose: /opt/infra-deployer/compose
@@ -121,7 +112,6 @@ persistence:
     - /var/lib/infra-deployer/bootstrap-repo
     - /opt/infra-deployer/compose
     - docker-images
-    - runner-task-cache
 
 checks:
   commands:
