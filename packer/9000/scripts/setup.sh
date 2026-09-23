@@ -60,7 +60,6 @@ ExecStart=-/sbin/agetty --autologin root --keep-baud 115200,57600,38400,9600 - $
 EOF
 
 systemctl daemon-reload
-systemctl enable qemu-guest-agent
 systemctl enable fstrim.timer
 systemctl enable getty@tty1.service
 systemctl enable serial-getty@ttyS0.service
@@ -78,5 +77,4 @@ EOF
 chmod 0644 /etc/vm-template-info
 
 sshd -t
-systemctl is-enabled qemu-guest-agent >/dev/null
 dpkg-query -W -f='${db:Status-Abbrev}\n' linux-image-amd64 | grep -q '^ii'
