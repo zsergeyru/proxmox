@@ -131,12 +131,14 @@ jobs:
           path = Path("guests/910-infra-deployer/compose/docker-compose.yml")
           data = yaml.safe_load(path.read_text(encoding="utf-8"))
           services = data.get("services", {})
-          if set(services) != {"semaphore", "runner"}:
+          if set(services) != {"semaphore"}:
               raise SystemExit(f"Unexpected services: {sorted(services)}")
-          if services["semaphore"].get("image") != "semaphoreui/semaphore:${SEMAPHORE_VERSION}":
-              raise SystemExit("Semaphore image must use pinned version variable")
-          if "build" not in services["runner"]:
-              raise SystemExit("Runner must use the project Dockerfile")
+          if services["semaphore"].get("image") != "infra-deployer-semaphore:${SEMAPHORE_VERSION}":
+              raise SystemExit("Semaphore image must use pinned custom version variable")
+          if "build" not in services["semaphore"]:
+              raise SystemExit("Semaphore must use the project Dockerfile")
+          if services["semaphore"].get("network_mode") != "host":
+              raise SystemExit("Semaphore must use host network")
           PY
 
       - name: Run deploy runtime contract checks
