@@ -13,8 +13,11 @@ ok()  { printf '[ОК] %s\n' "$*"; }
 command -v python3 >/dev/null 2>&1 || die "Не найден python3"
 command -v tofu >/dev/null 2>&1 || die "Не найден OpenTofu"
 
-[[ -n "${TF_VAR_pve_endpoint:-}" ]]     || die "Не задан TF_VAR_pve_endpoint"
-[[ -n "${TF_VAR_pve_api_token:-}" ]]     || die "Не задан TF_VAR_pve_api_token"
+[[ -n "${PVE_API_URL:-}" ]]     || die "Не задан PVE_API_URL"
+[[ -n "${PVE_API_TOKEN:-}" ]]     || die "Не задан PVE_API_TOKEN"
+
+export TF_VAR_pve_endpoint="$PVE_API_URL"
+export TF_VAR_pve_api_token="$PVE_API_TOKEN"
 [[ -d "$OPENTOFU_DIR" ]]     || die "Не найден каталог OpenTofu: $OPENTOFU_DIR"
 
 install -d -m 0750 "$STATE_DIR"
