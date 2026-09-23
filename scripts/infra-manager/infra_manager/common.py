@@ -43,14 +43,31 @@ class Console:
     out: object = sys.stdout
     err: object = sys.stderr
 
+    @staticmethod
+    def _color(code: str) -> str:
+        enabled = (
+            os.environ.get("INFRA_MANAGER_COLOR", "0") == "1"
+            and not os.environ.get("NO_COLOR")
+        )
+        return code if enabled else ""
+
     def info(self, message: str) -> None:
-        print(f"[ИНФО] {message}", file=self.out)
+        cyan = self._color("\033[36m")
+        bold = self._color("\033[1m")
+        reset = self._color("\033[0m")
+        print(f"{bold}{cyan}[ИНФО]{reset} {message}", file=self.out)
 
     def ok(self, message: str) -> None:
-        print(f"[ОК] {message}", file=self.out)
+        green = self._color("\033[32m")
+        bold = self._color("\033[1m")
+        reset = self._color("\033[0m")
+        print(f"{bold}{green}[ОК]{reset} {message}", file=self.out)
 
     def error(self, message: str) -> None:
-        print(f"ОШИБКА: {message}", file=self.err)
+        red = self._color("\033[31m")
+        bold = self._color("\033[1m")
+        reset = self._color("\033[0m")
+        print(f"{bold}{red}ОШИБКА:{reset} {message}", file=self.err)
 
 
 console = Console()
