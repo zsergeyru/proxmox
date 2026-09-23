@@ -2,18 +2,17 @@
 
 **Тип:** эксплуатация  
 **Статус:** проектируется  
-**Назначение:** описать штатный путь от чистого PVE до выполнения инфраструктурных заданий из `910 infra-manager`.
+**Назначение:** описать штатный путь от чистого PVE до выполнения инфраструктурных заданий из `910 infra-deployer`.
 
 ## 1. Общая схема
 
 ```text
 PVE
 → минимальный public bootstrap
-→ 910 infra-manager
+→ 910 infra-deployer
 → закрытый проект внутри 910
-→ infra-runtime
-   ├─ Semaphore
-   └─ OpenTofu / Ansible / Packer
+→ Semaphore
+→ OpenTofu / Ansible / Packer
 → обычные VM/LXC
 ```
 
@@ -41,7 +40,7 @@ PVE не содержит постоянную закрытую копию пр�
 После получения закрытого проекта:
 
 ```text
-scripts/infra-manager/setup.sh
+scripts/infra-deployer/setup.sh
 ```
 
 выполняет:
@@ -51,7 +50,7 @@ scripts/infra-manager/setup.sh
 → подготовить постоянные каталоги
 → сохранить PVE API credential
 → установить Docker
-→ собрать и запустить infra-runtime
+→ собрать и запустить Semaphore
 → подготовить OpenTofu input и state
 → настроить проект Semaphore
 → установить локальные команды проверки
@@ -72,26 +71,26 @@ Proxmox Infrastructure
 
 - SSH credential `GitHub project read-only`;
 - Git repository `git@github.com:zsergeyru/proxmox.git`;
-- Variable Group `PVE API`;
+- Variable Group `OpenTofu PVE`;
 - шаблон `OpenTofu Plan`;
 - шаблон `Build Template 9000`.
 
-PVE API token не дублируется в Key Store. Он передаётся инфраструктурным заданиям как секрет общего Variable Group:
+PVE API token не дублируется в Key Store. Он передаётся OpenTofu как секрет Variable Group:
 
 ```text
-PVE_API_URL
-PVE_API_TOKEN
+TF_VAR_pve_endpoint
+TF_VAR_pve_api_token
 ```
 
 Ansible SSH credential не создаётся заранее. Он появится только вместе с первой реальной Ansible-задачей, которой такой доступ понадобится.
 
 Отдельный API token Semaphore используется только внутренней автоматизацией настройки самого Semaphore.
 
-Локальная аутентификация Semaphore остаётся включённой. Первичный пароль `admin` хранится в `/etc/infra-manager/secrets/initial-admin-password` и один раз показывается в терминале, пока ещё не была создана отметка о его показе. В bootstrap-журнал пароль не записывается.
+Локальная аутентификация Semaphore остаётся включённой. Первичный пароль `admin` хранится в `/etc/infra-deployer/secrets/initial-admin-password` и один раз показывается в терминале, пока ещё не была создана отметка о его показе. В bootstrap-журнал пароль не записывается.
 
 ## 5. Исполнение заданий
 
-Отдельный remote Runner не используется. Для одного домашнего `910` задания выполняются локально внутри `infra-runtime`, который содержит:
+Отдельный remote Runner не используется. Для одного домашнего `910` Semaphore выполняет задания локально и содержит:
 
 - OpenTofu;
 - Ansible;
@@ -100,19 +99,19 @@ Ansible SSH credential не создаётся заранее. Он появит
 - Git;
 - OpenSSH client.
 
-`infra-runtime` является штатной средой выполнения инфраструктурных заданий, а Semaphore управляет их запуском.
+Сам контейнер Semaphore является штатным исполнителем инфраструктурных заданий.
 
 Для сборки базового шаблона используется простой путь:
 
 ```text
 Semaphore: Build Template 9000
-→ scripts/infra-manager/build-template.sh 9000
+→ scripts/infra-deployer/build-template.sh 9000
 → Packer
 → tpl-debian13 (9000, Template-Version 8)
 → короткая проверка Full Clone через 9099
 ```
 
-Packer использует установочный Debian ISO. Файл `preseed.cfg` временно отдаётся установщику Packer по HTTP; `infra-runtime` работает в сети 910 напрямую, поэтому отдельный Runner или постоянный веб-сервис не нужен.
+Packer использует установочный Debian ISO. Файл `preseed.cfg` временно отдаётся установщику самим Semaphore по HTTP; контейнер работает в сети 910 напрямую, поэтому отдельный Runner или постоянный веб-сервис не нужен.
 
 Одновременно допускается только одно задание, изменяющее основное состояние OpenTofu.
 
@@ -123,7 +122,7 @@ Packer использует установочный Debian ISO. Файл `prese
 OpenTofu использует HTTPS API PVE и локальное состояние:
 
 ```text
-/var/lib/infra-manager/opentofu/state/proxmox.tfstate
+/var/lib/infra-deployer/opentofu/state/proxmox.tfstate
 ```
 
 Состояние:
@@ -140,19 +139,19 @@ OpenTofu использует HTTPS API PVE и локальное состоян
 Основная команда внутри 910:
 
 ```bash
-infra-manager-status
+infra-deployer-status
 ```
 
 Расширенная проверка PVE API:
 
 ```bash
-infra-manager-status --full
+infra-deployer-status --full
 ```
 
 Реальный тест жизненного цикла:
 
 ```bash
-infra-manager-pve-lifecycle-test --apply
+infra-deployer-pve-lifecycle-test --apply
 ```
 
 Ранее тест уже успешно создал, изменил, запустил, остановил и удалил временный LXC 9098 на реальном PVE. После перехода на новую упрощённую схему token/ACL он выполняется повторно один раз как приёмочная проверка.
@@ -165,7 +164,7 @@ infra-manager-pve-lifecycle-test --apply
 обновить checkout
 → подготовить PVE access
 → повторно применить setup.sh
-→ проверить infra-manager-status
+→ проверить infra-deployer-status
 ```
 
 Постоянные секреты при обычном обновлении не перевыпускаются.
@@ -185,5 +184,5 @@ infra-manager-pve-lifecycle-test --apply
 
 - [`../200-pve/210-host-bootstrap.md`](../200-pve/210-host-bootstrap.md) — первоначальная подготовка.
 - [`../700-security/710-pve-access.md`](../700-security/710-pve-access.md) — доступ 910 к PVE.
-- [`../../guests/910-infra-manager/README.md`](../../guests/910-infra-manager/README.md) — паспорт 910.
+- [`../../guests/910-infra-deployer/README.md`](../../guests/910-infra-deployer/README.md) — паспорт 910.
 - [`830-recovery.md`](830-recovery.md) — восстановление.

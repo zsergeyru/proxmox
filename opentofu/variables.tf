@@ -12,7 +12,7 @@ variable "pve_api_token" {
 variable "guest_state_file" {
   description = "Путь к JSON с итоговым состоянием гостей"
   type        = string
-  default     = "/var/lib/infra-manager/opentofu/guests.json"
+  default     = "/var/lib/infra-deployer/opentofu/guests.json"
 }
 
 locals {

@@ -5,13 +5,13 @@ set -Eeuo pipefail
 # Он содержит всю PVE-политику, необходимую 910. Единый bootstrap получает
 # его из закрытого проекта внутри 910 и один раз выполняет на PVE.
 
-CTID="${INFRA_MANAGER_CTID:-910}"
-MODE="${INFRA_MANAGER_MODE:-apply}"
-CT_SECRET_FILE="${INFRA_MANAGER_SECRET_FILE:-/root/.infra-manager-bootstrap/pve-api.env}"
-CT_PERSISTENT_SECRET="${INFRA_MANAGER_PERSISTENT_SECRET:-/etc/infra-manager/secrets/pve-api.env}"
+CTID="${INFRA_DEPLOYER_CTID:-910}"
+MODE="${INFRA_DEPLOYER_MODE:-apply}"
+CT_SECRET_FILE="${INFRA_DEPLOYER_SECRET_FILE:-/root/.infra-deployer-bootstrap/pve-api.env}"
+CT_PERSISTENT_SECRET="${INFRA_DEPLOYER_PERSISTENT_SECRET:-/etc/infra-deployer/secrets/pve-api.env}"
 
 API_USER="root@pam"
-API_TOKEN_NAME="infra-manager"
+API_TOKEN_NAME="infra-deployer"
 API_TOKEN_ID="${API_USER}!${API_TOKEN_NAME}"
 
 MANAGED_POOL="managed"
@@ -23,7 +23,7 @@ C_BOLD=""
 C_GREEN=""
 C_RED=""
 
-if [[ "${INFRA_MANAGER_COLOR:-0}" == "1" && "${NO_COLOR:-}" == "" ]]; then
+if [[ "${INFRA_DEPLOYER_COLOR:-0}" == "1" && "${NO_COLOR:-}" == "" ]]; then
     C_RESET="$(printf '\033[0m')"
     C_BOLD="$(printf '\033[1m')"
     C_GREEN="$(printf '\033[32m')"
@@ -45,15 +45,13 @@ ct_exec() {
     pct exec "$CTID" -- "$@"
 }
 
-
-
 managed_pool_exists() {
     pvesh get "/pools/$MANAGED_POOL" --output-format json >/dev/null 2>&1
 }
 
 ensure_managed_pool() {
     managed_pool_exists && return
-    pveum pool add "$MANAGED_POOL" --comment "Guests managed from 910 infra-manager"
+    pveum pool add "$MANAGED_POOL" --comment "Guests managed from 910 infra-deployer"
     ok "Создан pool $MANAGED_POOL"
 }
 
@@ -129,7 +127,7 @@ stage_api_secret() (
     local secret=$1 node tmp
 
     node="$(hostname -s)"
-    tmp="$(mktemp /run/infra-manager-pve-api.XXXXXX)"
+    tmp="$(mktemp /run/infra-deployer-pve-api.XXXXXX)"
     trap 'rm -f -- "$tmp"' EXIT
     chmod 0600 "$tmp"
 

@@ -1,0 +1,70 @@
+#cloud-config
+hostname: builder-debian13
+manage_etc_hosts: true
+timezone: Europe/Moscow
+ssh_pwauth: false
+disable_root: false
+
+bootcmd:
+  - [mkdir, -p, /etc/systemd/system-generators]
+  - [ln, -sfn, /dev/null, /etc/systemd/system-generators/systemd-ssh-generator]
+
+users:
+  - default
+
+write_files:
+  - path: /etc/ssh/sshd_config.d/00-template-security.conf
+    owner: root:root
+    permissions: '0644'
+    content: |
+      PermitRootLogin prohibit-password
+      PasswordAuthentication no
+      KbdInteractiveAuthentication no
+      PermitEmptyPasswords no
+      PubkeyAuthentication yes
+
+  - path: /etc/systemd/system/getty@tty1.service.d/autologin.conf
+    owner: root:root
+    permissions: '0644'
+    content: |
+      [Service]
+      ExecStart=
+      ExecStart=-/sbin/agetty --autologin root --noclear %I $TERM
+
+  - path: /etc/systemd/system/serial-getty@ttyS0.service.d/autologin.conf
+    owner: root:root
+    permissions: '0644'
+    content: |
+      [Service]
+      ExecStart=
+      ExecStart=-/sbin/agetty --autologin root --noclear --keep-baud 115200,57600,38400,9600 %I $TERM
+
+  - path: /etc/profile.d/99-admin-history.sh
+    owner: root:root
+    permissions: '0644'
+    content: |
+      export HISTTIMEFORMAT='%F %T '
+      export HISTSIZE=10000
+      export HISTFILESIZE=20000
+
+  - path: /etc/motd
+    owner: root:root
+    permissions: '0644'
+    content: |
+      Управляемая виртуальная машина
+      Базовый шаблон: tpl-debian13
+      Инфраструктура: zsergeyru/proxmox
+      Не храните секреты в Git.
+
+  - path: /usr/local/sbin/template-bootstrap
+    owner: root:root
+    permissions: '0755'
+    content: __TEMPLATE_BOOTSTRAP_CONTENT__
+
+  - path: /usr/local/sbin/template-finalize
+    owner: root:root
+    permissions: '0755'
+    content: __TEMPLATE_FINALIZE_CONTENT__
+
+runcmd:
+  - [bash, -lc, /usr/local/sbin/template-bootstrap]

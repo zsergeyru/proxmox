@@ -2,7 +2,7 @@
 
 **Тип:** обзор  
 **Статус:** проектируется  
-**Назначение:** описать роль PVE-хоста после переноса постоянного развёртывания в `910 infra-manager`.
+**Назначение:** описать роль PVE-хоста после переноса постоянного развёртывания в `910 infra-deployer`.
 
 ## 1. Роль PVE
 
@@ -13,7 +13,7 @@ PVE остаётся платформой виртуализации и влад
 ```text
 чистый PVE
 → public bootstrap
-→ 910 infra-manager
+→ 910 infra-deployer
 → закрытый проект внутри 910
 → остальная инфраструктура
 ```
@@ -26,9 +26,9 @@ PVE остаётся платформой виртуализации и влад
 - `vmbr0`;
 - `local` и `local-lvm`;
 - Debian 13 LXC template для создания 910;
-- LXC `910 infra-manager`;
+- LXC `910 infra-deployer`;
 - pool `managed`;
-- ограниченный API token `root@pam!infra-manager` и его ACL;
+- ограниченный API token `root@pam!infra-deployer` и его ACL;
 - временная блокировка bootstrap во время запуска.
 
 На PVE не требуются:
@@ -60,21 +60,25 @@ PVE остаётся платформой виртуализации и влад
 
 ## 4. Роль 910
 
-`910 infra-manager` — постоянный специальный LXC, который не входит в собственное состояние OpenTofu и находится вне pool `managed`.
+`910 infra-deployer` — постоянный специальный LXC, который не входит в собственное состояние OpenTofu и находится вне pool `managed`.
 
 Именно внутри 910 находятся:
 
 - закрытый Git-репозиторий;
-- `infra-runtime` с Semaphore, OpenTofu, Ansible и Packer;
+- Semaphore;
+- Runner;
+- OpenTofu;
+- Ansible;
+- Packer;
 - инфраструктурные секреты и состояние.
 
 ## 5. Обычные гости
 
 Обычные VM/LXC описываются в `guests/` и управляются из 910.
 
-910 получает `PVEVMAdmin` на `/vms` и может сопровождать все VM/LXC. Pool `managed` остаётся границей для менее привилегированного AI Control, а не для 910.
+Изменяющие PVE-права разворачивателя ограничиваются pool `managed`.
 
-Дополнительные host-level права не выдаются заранее; используются только ACL, необходимые текущим Packer/OpenTofu/Ansible-задачам.
+Права на будущие функции, включая клонирование VM template `9000`, не выдаются до появления их реализации.
 
 ## 6. Безопасность
 
@@ -83,7 +87,7 @@ PVE остаётся платформой виртуализации и влад
 Для HTTPS API используется:
 
 ```text
-root@pam!infra-manager
+root@pam!infra-deployer
 ```
 
 с `privsep=1` и собственными ограниченными ACL.
@@ -107,5 +111,5 @@ root@pam!infra-manager
 - [`210-host-bootstrap.md`](210-host-bootstrap.md) — первоначальная подготовка.
 - [`220-host-configuration.md`](220-host-configuration.md) — минимальное состояние PVE.
 - [`230-host-layout.md`](230-host-layout.md) — локальная структура PVE.
-- [`../../guests/910-infra-manager/README.md`](../../guests/910-infra-manager/README.md) — паспорт 910.
+- [`../../guests/910-infra-deployer/README.md`](../../guests/910-infra-deployer/README.md) — паспорт 910.
 - [`../700-security/710-pve-access.md`](../700-security/710-pve-access.md) — доступ 910 к PVE.

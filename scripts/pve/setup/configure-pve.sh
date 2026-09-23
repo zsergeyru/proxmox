@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-# Каноническая повторяемая конфигурация самого Proxmox VE.
-# Не управляет жизненным циклом 910 infra-manager и шаблона 9000.
+# Каноническая повторяемая конфигурация Proxmox VE.
+# Public Bootstrap только получает/обновляет private repo и передаёт управление сюда.
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 LIB_DIR="${SCRIPT_DIR}/lib"
@@ -63,7 +63,7 @@ verify_source_checkout_before_source() {
 
     trust_violation="$(find "$SOURCE_ROOT" -xdev \( -type f -o -type d \) \( ! -uid 0 -o -perm /022 \) -print -quit 2>/dev/null || true)"
     [[ -z "$trust_violation" ]] \
-        || pre_source_die "Исполняемый checkout не является root-trusted: '${trust_violation}' не root-owned или доступен на запись группе/остальным. Запустите Public Bootstrap для безопасной подготовки canonical source."
+        || pre_source_die "Исполняемый checkout не является root-trusted: '${trust_violation}' не root-owned или доступен на запись группе/остальным. Запустите Public Bootstrap для безопасной миграции canonical source."
 
     actual="$(git -C "$SOURCE_ROOT" rev-parse HEAD 2>/dev/null)"
     expected="${PVE_CONFIGURATION_SOURCE_REVISION:-$actual}"
@@ -91,6 +91,11 @@ for module in \
     40-runtime.sh \
     45-management-keys.sh \
     50-access.sh \
+    60-template-contract.sh \
+    61-template-source.sh \
+    62-template-build.sh \
+    63-template-smoke.sh \
+    64-cloud-init-status.sh \
     70-tooling.sh \
     71-sync-management-keys-tooling.sh; do
     [[ -f "${LIB_DIR}/${module}" ]] || {
@@ -129,12 +134,15 @@ show_configuration_banner() {
     configuration_banner_line 'Proxmox Project — PVE Configuration'
     configuration_banner_line ''
     configuration_banner_line 'Проверяет и настраивает Proxmox host, доступы, storage,'
-    configuration_banner_line 'и инфраструктурные настройки PVE.'
+    configuration_banner_line 'Debian template 9000 и инфраструктуру deployment.'
     configuration_banner_line ''
-    configuration_banner_line "PVE Configuration: v${PVE_CONFIGURATION_VERSION}"
+    configuration_banner_line "PVE Configuration: v${PVE_CONFIGURATION_VERSION}    Template: v${TEMPLATE_VERSION}"
     configuration_banner_border '└' '┘'
     printf '%s' "$C_RESET"
 
+    if (( SMOKE_TEST_TEMPLATE )); then
+        configuration_mode "Full Clone smoke-test template ${TEMPLATE_VMID} через временную VM ${SMOKE_VMID}"
+    fi
     if (( UPDATE_SYSTEM )); then
         configuration_mode 'Включено полное обновление Proxmox/Debian'
     fi
@@ -153,6 +161,9 @@ main() {
 
     check_root_and_pve
     snapshot_host_config
+    check_template_state
+    ensure_template_protection
+
     configure_apt
     install_packages
     check_time_dns_network
@@ -171,6 +182,19 @@ main() {
     ensure_roles
     ensure_pve_identities
 
+    if (( TEMPLATE_BUILD_REQUIRED )); then
+        prepare_template_source
+        create_template_builder
+        provision_template_builder
+        verify_template_builder
+        finalize_template_builder
+        template_smoke_mark_pending
+        seal_template
+        TEMPLATE_BUILT_THIS_RUN=1
+    fi
+
+    verify_template_contract
+    run_template_smoke_test_if_needed
 
     install_private_tooling
     install_sync_management_keys_tooling

@@ -2,7 +2,7 @@
 
 Закрытый репозиторий конфигурации, кода и документации домашней инфраструктуры на Proxmox VE.
 
-Здесь хранится требуемое состояние инфраструктуры, документация, сценарии развёртывания и настройка постоянного управляющего контейнера `910 infra-manager`.
+Здесь хранится требуемое состояние инфраструктуры, документация, сценарии развёртывания и настройка постоянного управляющего контейнера `910 infra-deployer`.
 
 ## Быстрый старт
 
@@ -45,20 +45,20 @@ GitHub public: zsergeyru/proxmox-bootstrap
 физический PVE
         │
         ├── постоянный GitHub Deploy Key
-        ├── LXC 910 infra-manager
+        ├── LXC 910 infra-deployer
         └── ограниченный PVE API-доступ для 910
                          │
                          ▼
-                 LXC 910 infra-manager
+                 LXC 910 infra-deployer
                          │
                          ├── закрытый repo zsergeyru/proxmox
                          ├── Docker
-                         └── infra-runtime
-                              ├── Semaphore
-                              ├── OpenTofu
-                              ├── Ansible
-                              ├── Packer
-                              └── proxmoxer
+                         ├── Semaphore Server
+                         ├── Semaphore Runner
+                         ├── OpenTofu
+                         ├── Ansible
+                         ├── Packer
+                         └── proxmoxer
                                   │
                                   ▼
                               PVE API
@@ -83,18 +83,18 @@ GitHub public: zsergeyru/proxmox-bootstrap
 → передать GitHub Deploy Key внутрь 910
 → проверить read-only доступ к закрытому проекту
 → получить или обновить закрытый проект
-→ выполнить scripts/infra-manager/pve-bootstrap-access.sh на PVE
-→ выполнить scripts/infra-manager/setup.sh внутри 910
+→ выполнить scripts/infra-deployer/pve-bootstrap-access.sh на PVE
+→ выполнить scripts/infra-deployer/setup.sh внутри 910
 → проверить итоговое состояние
 ~~~
 
 В публичном bootstrap не хранится конкретная политика PVE ACL и не описывается внутренняя настройка Semaphore/OpenTofu/Ansible/Packer.
 
-## LXC 910 infra-manager
+## LXC 910 infra-deployer
 
 ~~~text
 CTID:        910
-hostname:    infra-manager
+hostname:    infra-deployer
 OS:          Debian 13
 unprivileged yes
 CPU:         2
@@ -106,12 +106,12 @@ bridge:      vmbr0
 onboot:      yes
 protection:  yes
 features:    nesting=1,keyctl=1
-tags:        infra-manager;proxmox-bootstrap
+tags:        infra-deployer;proxmox-bootstrap
 ~~~
 
 910 является специальным управляющим контейнером: его создаёт публичный bootstrap, OpenTofu не управляет самим 910, 910 не входит в `managed`, постоянный root SSH с 910 на PVE не используется.
 
-Подробнее: [`guests/910-infra-manager/README.md`](guests/910-infra-manager/README.md).
+Подробнее: [`guests/910-infra-deployer/README.md`](guests/910-infra-deployer/README.md).
 
 ## GitHub Deploy Key
 
@@ -129,17 +129,25 @@ tags:        infra-manager;proxmox-bootstrap
 
 ## Debian template
 
-Публичный bootstrap проверяет наличие Debian 13 standard LXC template в `local:vztmpl`.
+Если подходящий Debian 13 LXC template уже существует в `local:vztmpl`, bootstrap использует его и не считает своим.
 
-Если подходящего template нет, bootstrap скачивает актуальный Debian 13 template и оставляет его в `local`. Он нужен не только для создания 910, но и для интеграционной проверки PVE API и будущих Debian LXC.
+Если template отсутствует:
 
+~~~text
+скачать Debian 13 template
+→ отметить его как временный
+→ создать 910
+→ сразу удалить скачанный template
+~~~
+
+После успешной установки скачанный bootstrap template на PVE не остаётся. Если установка прервалась, он удаляется при `--remove` или `--purge`. Заранее существовавший template автоматически не удаляется.
 
 ## Закрытый проект внутри 910
 
 Рабочая копия:
 
 ~~~text
-/var/lib/infra-manager/bootstrap-repo
+/var/lib/infra-deployer/bootstrap-repo
 ~~~
 
 Источник:
@@ -153,14 +161,14 @@ git@github.com:zsergeyru/proxmox.git
 Основные сценарии:
 
 ~~~text
-scripts/infra-manager/pve-bootstrap-access.sh
-scripts/infra-manager/setup.sh
-scripts/infra-manager/semaphore-project.sh
-scripts/infra-manager/opentofu-plan.sh
-scripts/infra-manager/render-opentofu-input.py
-scripts/infra-manager/status.sh
-scripts/infra-manager/check-pve-access.sh
-scripts/infra-manager/test-pve-lifecycle.sh
+scripts/infra-deployer/pve-bootstrap-access.sh
+scripts/infra-deployer/setup.sh
+scripts/infra-deployer/semaphore-project.sh
+scripts/infra-deployer/opentofu-plan.sh
+scripts/infra-deployer/render-opentofu-input.py
+scripts/infra-deployer/status.sh
+scripts/infra-deployer/check-pve-access.sh
+scripts/infra-deployer/test-pve-lifecycle.sh
 ~~~
 
 ## Доступ 910 к PVE
@@ -168,19 +176,17 @@ scripts/infra-manager/test-pve-lifecycle.sh
 Используется API token:
 
 ~~~text
-root@pam!infra-manager
+root@pam!infra-deployer
 privsep=1
 ~~~
 
-Политика доступа хранится только в `scripts/infra-manager/pve-bootstrap-access.sh`.
+Политика доступа хранится только в `scripts/infra-deployer/pve-bootstrap-access.sh`.
 
 | Путь | Роль | Назначение |
 |---|---|---|
 | `/` | `PVEAuditor` | чтение состояния PVE |
-| `/vms` | `PVEVMAdmin` | управление всеми VM/LXC |
-| `/pool/managed` | `PVEVMAdmin`, `PVEPoolUser` | назначение гостей и чтение pool |
-| `/storage/local-lvm` | `PVEDatastoreUser` | диски VM/LXC |
-| `/storage/local` | `PVEDatastoreAdmin` | установочные ISO для Packer |
+| `/pool/managed` | `PVEVMAdmin` | управление обычными VM/LXC проекта |
+| `/storage/local-lvm` | `PVEDatastoreUser` | использование хранилища |
 | `/sdn/zones/localnetwork/vmbr0` | `PVESDNUser` | использование основной сети |
 
 910 находится вне `managed`.
@@ -190,26 +196,27 @@ privsep=1
 ## Что работает внутри 910
 
 ~~~text
-infra-runtime v1
-├── Semaphore v2.18.30 + SQLite
-├── OpenTofu 1.12.6
-├── Packer 1.15.4
-├── Ansible
-└── proxmoxer
+Semaphore Server v2.18.30
+Semaphore Runner v2.18.30
+SQLite
+OpenTofu 1.12.6
+Packer 1.15.4
+Ansible
+proxmoxer
 ~~~
 
 Основные постоянные области:
 
 ~~~text
-/etc/infra-manager/
-/var/lib/infra-manager/
-/opt/infra-manager/
+/etc/infra-deployer/
+/var/lib/infra-deployer/
+/opt/infra-deployer/
 ~~~
 
 OpenTofu state хранится локально:
 
 ~~~text
-/var/lib/infra-manager/opentofu/state/proxmox.tfstate
+/var/lib/infra-deployer/opentofu/state/proxmox.tfstate
 ~~~
 
 State не хранится в Git и должен резервироваться.
@@ -221,9 +228,8 @@ Bootstrap автоматически подготавливает использ
 ~~~text
 Project
 Git repository proxmox
-PVE API Variable Group
+OpenTofu PVE Variable Group
 OpenTofu Plan
-Build Template 9000
 ~~~
 
 Ansible credential заранее не создаётся. Он добавляется только вместе с первой реальной Ansible-задачей.
@@ -231,16 +237,16 @@ Ansible credential заранее не создаётся. Он добавляе
 ## Служебные команды 910
 
 ~~~bash
-infra-manager-status
-infra-manager-status --full
-infra-manager-pve-access-check
-infra-manager-pve-lifecycle-test --apply
+infra-deployer-status
+infra-deployer-status --full
+infra-deployer-pve-access-check
+infra-deployer-pve-lifecycle-test --apply
 ~~~
 
 ## Технический лог bootstrap
 
 ~~~text
-/var/log/infra-manager/bootstrap.log
+/var/log/infra-deployer/bootstrap.log
 ~~~
 
 На экран выводятся основные этапы, успешные проверки, предупреждения и ошибки; подробный служебный вывод хранится в этом файле.
@@ -253,7 +259,7 @@ infra-manager-pve-lifecycle-test --apply
 curl -fsSL https://raw.githubusercontent.com/zsergeyru/proxmox-bootstrap/infra-iac-redesign/bootstrap-pve.sh | bash
 ~~~
 
-Для `--check`, `--recover` и сетевых параметров используется скачанный `bootstrap-pve.sh`.
+Для остальных режимов используется скачанный `bootstrap-pve.sh`.
 
 Скачать:
 
@@ -280,6 +286,18 @@ chmod +x bootstrap-pve.sh
 ./bootstrap-pve.sh --recover
 ~~~
 
+Мягкое удаление:
+
+~~~bash
+./bootstrap-pve.sh --remove
+~~~
+
+Полное удаление:
+
+~~~bash
+./bootstrap-pve.sh --purge
+~~~
+
 Статический адрес 910:
 
 ~~~bash
@@ -294,11 +312,13 @@ chmod +x bootstrap-pve.sh
 ./bootstrap-pve.sh --project-branch NAME
 ~~~
 
-## Удаление 910
+## Мягкое и полное удаление
 
-Bootstrap сам не удаляет 910. Если нужен полностью чистый запуск, LXC `910 infra-manager` удаляется вручную в Proxmox, после чего обычный запуск `bootstrap-pve.sh` создаёт его заново.
+`--remove` удаляет LXC 910, API token, ACL, пустой `managed` и временный Debian template, если он остался. Постоянный GitHub Deploy Key на PVE сохраняется.
 
-Постоянный GitHub Deploy Key на PVE можно оставить: новый 910 получит тот же read-only ключ. PVE API token `root@pam!infra-manager` при создании нового 910 будет перевыпущен автоматически.
+`--purge` делает то же самое и дополнительно удаляет `/root/.config/proxmox-bootstrap/` вместе с GitHub Deploy Key.
+
+Не удаляются автоматически VM 100 HAOS, хранилище `backup`, чужой объект с VMID 910, непустой `managed`, заранее существовавший Debian template и другие VM/LXC.
 
 ## Структура репозитория
 
@@ -308,7 +328,7 @@ proxmox/
 ├── guests/      описание VM/LXC
 ├── host/pve/    состояние физического PVE
 ├── scripts/     сценарии управления и проверки
-├── packer/      сборка шаблонов Proxmox
+├── templates/   шаблоны
 ├── ansible/     повторяемая настройка Linux-гостей
 ├── schemas/     схемы guest/defaults/effective
 └── archive/     исторические материалы
@@ -330,7 +350,7 @@ proxmox/
 - [`docs/200-pve/210-host-bootstrap.md`](docs/200-pve/210-host-bootstrap.md);
 - [`docs/700-security/710-pve-access.md`](docs/700-security/710-pve-access.md);
 - [`docs/800-operations/810-deployment.md`](docs/800-operations/810-deployment.md);
-- [`guests/910-infra-manager/README.md`](guests/910-infra-manager/README.md).
+- [`guests/910-infra-deployer/README.md`](guests/910-infra-deployer/README.md).
 
 ## Общие правила
 

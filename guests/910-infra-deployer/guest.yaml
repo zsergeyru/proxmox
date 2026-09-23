@@ -2,9 +2,9 @@
 # Отсутствие profile исключает этот объект из обычного OpenTofu-контура.
 schema_version: 10
 vmid: 910
-name: infra-manager
+name: infra-deployer
 node: pve
-description: Служебный LXC для управления и сопровождения инфраструктуры Proxmox; жизненным циклом объекта владеет proxmox-bootstrap
+description: Служебный LXC для развёртывания и сопровождения инфраструктуры Proxmox; жизненным циклом объекта владеет proxmox-bootstrap
 protection: true
 
 resources:

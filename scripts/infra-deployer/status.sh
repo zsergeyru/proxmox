@@ -2,11 +2,11 @@
 set -Eeuo pipefail
 
 FULL=0
-PVE_ENV="/etc/infra-manager/secrets/pve-api.env"
-CA_BUNDLE="/etc/infra-manager/ca/ca-bundle.crt"
+PVE_ENV="/etc/infra-deployer/secrets/pve-api.env"
+CA_BUNDLE="/etc/infra-deployer/ca/ca-bundle.crt"
 SEMAPHORE_URL="http://127.0.0.1:3000"
-SEMAPHORE_API_TOKEN_FILE="/etc/infra-manager/secrets/semaphore-api-token"
-PROJECT_ID_FILE="/var/lib/infra-manager/semaphore-project-id"
+SEMAPHORE_API_TOKEN_FILE="/etc/infra-deployer/secrets/semaphore-api-token"
+PROJECT_ID_FILE="/var/lib/infra-deployer/semaphore-project-id"
 PROJECT_REPO="git@github.com:zsergeyru/proxmox.git"
 
 C_RESET=""
@@ -14,7 +14,7 @@ C_BOLD=""
 C_GREEN=""
 C_RED=""
 
-if [[ "${INFRA_MANAGER_COLOR:-0}" == "1" && "${NO_COLOR:-}" == "" ]]; then
+if [[ "${INFRA_DEPLOYER_COLOR:-0}" == "1" && "${NO_COLOR:-}" == "" ]]; then
     C_RESET="$(printf '\033[0m')"
     C_BOLD="$(printf '\033[1m')"
     C_GREEN="$(printf '\033[32m')"
@@ -27,8 +27,8 @@ ok()  { printf '%s%s[ОК]%s %s\n' "$C_BOLD" "$C_GREEN" "$C_RESET" "$*"; }
 usage() {
     cat <<'USAGE'
 Использование:
-  infra-manager-status
-  infra-manager-status --full
+  infra-deployer-status
+  infra-deployer-status --full
 
 Без параметров проверяется готовность самого 910 и базовая авторизация PVE API.
 --full дополнительно проверяет окончательный контракт прав OpenTofu.
@@ -71,18 +71,18 @@ command -v docker >/dev/null 2>&1 || die "Docker не установлен"
 docker compose version >/dev/null 2>&1 || die "Docker Compose недоступен"
 
 required_file "$PVE_ENV"
-required_file /etc/infra-manager/secrets/semaphore-server.env
+required_file /etc/infra-deployer/secrets/semaphore-server.env
 required_file "$SEMAPHORE_API_TOKEN_FILE"
-required_file /etc/infra-manager/secrets/github_project_ed25519
+required_file /etc/infra-deployer/secrets/github_project_ed25519
 required_file "$PROJECT_ID_FILE"
-required_file /var/lib/infra-manager/opentofu/guests.json
+required_file /var/lib/infra-deployer/opentofu/guests.json
 required_file "$CA_BUNDLE"
 
-[[ -d /var/lib/infra-manager/opentofu/state ]] \
+[[ -d /var/lib/infra-deployer/opentofu/state ]] \
     || die "Отсутствует каталог OpenTofu state"
 
-[[ "$(docker inspect -f '{{.State.Running}}' infra-runtime 2>/dev/null || true)" == "true" ]] \
-    || die "infra-runtime не запущен"
+[[ "$(docker inspect -f '{{.State.Running}}' infra-deployer-semaphore 2>/dev/null || true)" == "true" ]] \
+    || die "Semaphore Server не запущен"
 
 curl -fsS --connect-timeout 2 --max-time 5 http://127.0.0.1:3000/api/ping >/dev/null \
     || die "Semaphore API не отвечает"
@@ -112,21 +112,17 @@ jq -e --arg url "$PROJECT_REPO" --arg key_id "$GITHUB_KEY_ID" '
 ' <<<"$SEMAPHORE_REPOSITORIES" >/dev/null \
     || die "Git repository 'proxmox' не соответствует ожидаемому URL или SSH key"
 
-semaphore_api_get "/project/${PROJECT_ID}/environment?sort=name&order=asc"     | jq -e '.[] | select(.name == "PVE API")' >/dev/null     || die "В Semaphore отсутствует Variable Group PVE API"
+semaphore_api_get "/project/${PROJECT_ID}/environment?sort=name&order=asc"     | jq -e '.[] | select(.name == "OpenTofu PVE")' >/dev/null     || die "В Semaphore отсутствует Variable Group OpenTofu PVE"
 
-SEMAPHORE_TEMPLATES="$(semaphore_api_get "/project/${PROJECT_ID}/templates?sort=name&order=asc")"
-jq -e '.[] | select(.name == "OpenTofu Plan" and .app == "bash")' <<<"$SEMAPHORE_TEMPLATES" >/dev/null \
-    || die "В Semaphore отсутствует шаблон OpenTofu Plan"
-jq -e '.[] | select(.name == "Build Template 9000" and .app == "bash")' <<<"$SEMAPHORE_TEMPLATES" >/dev/null \
-    || die "В Semaphore отсутствует шаблон Build Template 9000"
+semaphore_api_get "/project/${PROJECT_ID}/templates?sort=name&order=asc"     | jq -e '.[] | select(.name == "OpenTofu Plan" and .app == "bash")' >/dev/null     || die "В Semaphore отсутствует шаблон OpenTofu Plan"
 
-docker exec infra-runtime tofu version >/dev/null \
+docker exec infra-deployer-semaphore tofu version >/dev/null \
     || die "OpenTofu недоступен"
-docker exec infra-runtime packer version >/dev/null \
+docker exec infra-deployer-semaphore packer version >/dev/null \
     || die "Packer недоступен"
-docker exec infra-runtime ansible --version >/dev/null \
+docker exec infra-deployer-semaphore ansible --version >/dev/null \
     || die "Ansible недоступен"
-docker exec infra-runtime python3 -c 'import proxmoxer' >/dev/null \
+docker exec infra-deployer-semaphore python3 -c 'import proxmoxer' >/dev/null \
     || die "proxmoxer недоступен"
 
 PVE_API_URL="$(read_env_value PVE_API_URL)"
@@ -146,11 +142,11 @@ curl -fsS \
 unset PVE_API_TOKEN_SECRET
 
 if ((FULL == 1)); then
-    [[ -x /usr/local/sbin/infra-manager-pve-access-check ]] \
-        || die "Отсутствует infra-manager-pve-access-check"
-    /usr/local/sbin/infra-manager-pve-access-check >/dev/null \
+    [[ -x /usr/local/sbin/infra-deployer-pve-access-check ]] \
+        || die "Отсутствует infra-deployer-pve-access-check"
+    /usr/local/sbin/infra-deployer-pve-access-check >/dev/null \
         || die "PVE API access не соответствует полному контракту"
-    ok "infra-manager готов, полный контракт PVE API подтверждён"
+    ok "infra-deployer готов, полный контракт PVE API подтверждён"
 else
-    ok "infra-manager готов"
+    ok "infra-deployer готов"
 fi

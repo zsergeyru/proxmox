@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-CA_BUNDLE="/etc/infra-manager/ca/ca-bundle.crt"
+CA_BUNDLE="/etc/infra-deployer/ca/ca-bundle.crt"
 NODE="${PACKER_NODE:-pve}"
 ISO_BASE="https://cdimage.debian.org/debian-cd/current/amd64/iso-cd"
 
@@ -35,16 +35,16 @@ for command in curl jq openssl packer; do
     command -v "$command" >/dev/null 2>&1 || die "Не найден $command"
 done
 
-: "${PVE_API_URL:?PVE_API_URL не задан}"
-: "${PVE_API_TOKEN:?PVE_API_TOKEN не задан}"
+: "${TF_VAR_pve_endpoint:?TF_VAR_pve_endpoint не задан}"
+: "${TF_VAR_pve_api_token:?TF_VAR_pve_api_token не задан}"
 
-PVE_ENDPOINT="${PVE_API_URL%/}"
+PVE_ENDPOINT="${TF_VAR_pve_endpoint%/}"
 PVE_API="${PVE_ENDPOINT}/api2/json"
-PVE_TOKEN_ID="${PVE_API_TOKEN%%=*}"
-PVE_TOKEN_SECRET="${PVE_API_TOKEN#*=}"
+PVE_TOKEN_ID="${TF_VAR_pve_api_token%%=*}"
+PVE_TOKEN_SECRET="${TF_VAR_pve_api_token#*=}"
 
 [[ -n "$PVE_TOKEN_ID" && -n "$PVE_TOKEN_SECRET" && "$PVE_TOKEN_ID" != "$PVE_TOKEN_SECRET" ]] \
-    || die "PVE_API_TOKEN имеет неверный формат"
+    || die "TF_VAR_pve_api_token имеет неверный формат"
 
 AUTH_HEADER="Authorization: PVEAPIToken=${PVE_TOKEN_ID}=${PVE_TOKEN_SECRET}"
 
@@ -83,7 +83,7 @@ check_existing() {
 
     if [[ "$template" == "1" && "$name" == "tpl-debian13" && "$description" == *"template-version=8"* ]]; then
         finalize_template
-        "$ROOT/scripts/infra-manager/test-template.sh" "$VMID"
+        "$ROOT/scripts/infra-deployer/test-template.sh" "$VMID"
         ok "Шаблон $VMID уже соответствует версии 8 и успешно проверен; сборка не требуется"
         return 0
     fi
@@ -180,7 +180,7 @@ main() {
     unset build_password
 
     finalize_template
-    "$ROOT/scripts/infra-manager/test-template.sh" "$VMID"
+    "$ROOT/scripts/infra-deployer/test-template.sh" "$VMID"
 
     unset PVE_TOKEN_SECRET AUTH_HEADER
     ok "Шаблон $VMID полностью собран и проверен"

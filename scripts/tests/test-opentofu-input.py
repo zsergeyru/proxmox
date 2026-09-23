@@ -6,7 +6,7 @@ import importlib.util
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-MODULE_PATH = ROOT / "scripts" / "infra-manager" / "render-opentofu-input.py"
+MODULE_PATH = ROOT / "scripts" / "infra-deployer" / "render-opentofu-input.py"
 
 spec = importlib.util.spec_from_file_location("render_opentofu_input", MODULE_PATH)
 assert spec is not None and spec.loader is not None

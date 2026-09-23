@@ -6,25 +6,24 @@ set -Eeuo pipefail
 export LANG=C.UTF-8
 export LC_ALL=C.UTF-8
 
-# Первоначальная и повторяемая настройка 910 infra-manager.
+# Первоначальная и повторяемая настройка 910 infra-deployer.
 # Скрипт запускается внутри LXC 910 от root единым bootstrap через pct exec.
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-ASSET_DIR="${REPO_ROOT}/guests/910-infra-manager/compose"
+ASSET_DIR="${REPO_ROOT}/guests/910-infra-deployer/compose"
 
-CONFIG_DIR="/etc/infra-manager"
+CONFIG_DIR="/etc/infra-deployer"
 SECRET_DIR="${CONFIG_DIR}/secrets"
 CA_DIR="${CONFIG_DIR}/ca"
-DATA_DIR="/var/lib/infra-manager"
+DATA_DIR="/var/lib/infra-deployer"
 SEMAPHORE_DIR="${DATA_DIR}/semaphore"
 OPENTOFU_DIR="${DATA_DIR}/opentofu"
 STATE_DIR="${OPENTOFU_DIR}/state"
 OPENTOFU_INPUT="${OPENTOFU_DIR}/guests.json"
-COMPOSE_DIR="/opt/infra-manager/compose"
-
-STATUS_COMMAND="/usr/local/sbin/infra-manager-status"
-ACCESS_CHECK_COMMAND="/usr/local/sbin/infra-manager-pve-access-check"
-LIFECYCLE_TEST_COMMAND="/usr/local/sbin/infra-manager-pve-lifecycle-test"
+COMPOSE_DIR="/opt/infra-deployer/compose"
+STATUS_COMMAND="/usr/local/sbin/infra-deployer-status"
+ACCESS_CHECK_COMMAND="/usr/local/sbin/infra-deployer-pve-access-check"
+LIFECYCLE_TEST_COMMAND="/usr/local/sbin/infra-deployer-pve-lifecycle-test"
 
 SERVER_ENV="${SECRET_DIR}/semaphore-server.env"
 PVE_API_ENV="${SECRET_DIR}/pve-api.env"
@@ -33,14 +32,13 @@ ADMIN_PASSWORD_SHOWN_FILE="${SECRET_DIR}/.initial-admin-password-shown"
 CA_BUNDLE="${CA_DIR}/ca-bundle.crt"
 
 PVE_API_SECRET_FILE="${PVE_API_SECRET_FILE:-}"
-RECOVER="${INFRA_MANAGER_RECOVER:-0}"
+RECOVER="${INFRA_DEPLOYER_RECOVER:-0}"
 
-RUNTIME_VERSION="v1"
 SEMAPHORE_VERSION="v2.18.30"
-PROJECT_BRANCH="${INFRA_PROJECT_BRANCH:-main}"
+PROJECT_BRANCH="${INFRA_PROJECT_BRANCH:-infra-iac-redesign}"
 OPENTOFU_VERSION="1.12.6"
 PACKER_VERSION="1.15.4"
-LOG_FILE="${INFRA_MANAGER_LOG_FILE:-/var/log/infra-manager/bootstrap.log}"
+LOG_FILE="${INFRA_DEPLOYER_LOG_FILE:-/var/log/infra-deployer/bootstrap.log}"
 
 C_RESET=""
 C_BOLD=""
@@ -48,7 +46,7 @@ C_GREEN=""
 C_BLUE=""
 C_RED=""
 
-if [[ "${INFRA_MANAGER_COLOR:-0}" == "1" && "${NO_COLOR:-}" == "" ]]; then
+if [[ "${INFRA_DEPLOYER_COLOR:-0}" == "1" && "${NO_COLOR:-}" == "" ]]; then
     C_RESET="$(printf '\033[0m')"
     C_BOLD="$(printf '\033[1m')"
     C_GREEN="$(printf '\033[32m')"
@@ -81,7 +79,7 @@ init_log() {
     install -d -o root -g root -m 0755 "$(dirname "$LOG_FILE")"
     touch "$LOG_FILE"
     chmod 0640 "$LOG_FILE"
-    printf '\n===== setup infra-manager %s =====\n' "$(date '+%Y-%m-%d %H:%M:%S')" >>"$LOG_FILE"
+    printf '\n===== setup infra-deployer %s =====\n' "$(date '+%Y-%m-%d %H:%M:%S')" >>"$LOG_FILE"
 }
 
 run_logged() {
@@ -106,9 +104,8 @@ check_os() {
     . /etc/os-release
     [[ "${ID:-}" == "debian" ]] || die "Ожидается Debian"
     [[ "${VERSION_ID:-}" == "13" ]] || die "Ожидается Debian 13, обнаружено ${VERSION_ID:-?}"
-    [[ "$(dpkg --print-architecture)" == "amd64" ]]         || die "Первая версия infra-manager рассчитана на amd64"
+    [[ "$(dpkg --print-architecture)" == "amd64" ]]         || die "Первая версия infra-deployer рассчитана на amd64"
 }
-
 
 prepare_directories() {
     install -d -o root -g root -m 0755 "$CONFIG_DIR" "$CA_DIR" "$DATA_DIR" "$COMPOSE_DIR"
@@ -131,16 +128,16 @@ ensure_base_packages() {
     done
 
     if [[ -z "$missing" ]]; then
-        ok "Базовые пакеты infra-manager уже установлены"
+        ok "Базовые пакеты infra-deployer уже установлены"
         return
     fi
 
-    log "Установка базовых пакетов infra-manager"
+    log "Установка базовых пакетов infra-deployer"
     run_logged apt-get update
     # shellcheck disable=SC2086
     run_logged env DEBIAN_FRONTEND=noninteractive \
         apt-get install -y --no-install-recommends $missing
-    ok "Базовые пакеты infra-manager установлены"
+    ok "Базовые пакеты infra-deployer установлены"
 }
 
 install_docker() {
@@ -192,15 +189,15 @@ EOF_DOCKER
 
 copy_compose_assets() {
     [[ -f "$ASSET_DIR/docker-compose.yml" ]] || die "Не найден docker-compose.yml в проекте"
-    [[ -f "$ASSET_DIR/runtime/Dockerfile" ]] || die "Не найден Dockerfile infra-runtime"
-    [[ -f "$ASSET_DIR/runtime/requirements.txt" ]] || die "Не найден requirements.txt infra-runtime"
-    [[ -f "$ASSET_DIR/runtime/ssh_config" ]] || die "Не найден строгий SSH config infra-runtime"
+    [[ -f "$ASSET_DIR/semaphore/Dockerfile" ]] || die "Не найден Dockerfile Semaphore"
+    [[ -f "$ASSET_DIR/semaphore/requirements.txt" ]] || die "Не найден requirements.txt Semaphore"
+    [[ -f "$ASSET_DIR/semaphore/ssh_config" ]] || die "Не найден строгий SSH config Semaphore"
 
     install -m 0644 "$ASSET_DIR/docker-compose.yml" "$COMPOSE_DIR/docker-compose.yml"
-    install -d -m 0755 "$COMPOSE_DIR/runtime"
-    install -m 0644 "$ASSET_DIR/runtime/Dockerfile" "$COMPOSE_DIR/runtime/Dockerfile"
-    install -m 0644 "$ASSET_DIR/runtime/requirements.txt" "$COMPOSE_DIR/runtime/requirements.txt"
-    install -m 0644 "$ASSET_DIR/runtime/ssh_config" "$COMPOSE_DIR/runtime/ssh_config"
+    install -d -m 0755 "$COMPOSE_DIR/semaphore"
+    install -m 0644 "$ASSET_DIR/semaphore/Dockerfile" "$COMPOSE_DIR/semaphore/Dockerfile"
+    install -m 0644 "$ASSET_DIR/semaphore/requirements.txt" "$COMPOSE_DIR/semaphore/requirements.txt"
+    install -m 0644 "$ASSET_DIR/semaphore/ssh_config" "$COMPOSE_DIR/semaphore/ssh_config"
 }
 
 seed_semaphore_known_hosts() {
@@ -216,15 +213,16 @@ seed_semaphore_known_hosts() {
         chmod 0644 "$target"
     fi
 
-    [[ -s "$target" ]] || die "Не удалось подготовить known_hosts infra-runtime"
+    [[ -s "$target" ]] || die "Не удалось подготовить known_hosts Runner"
 }
 
 generate_ca_bundle() {
     local pve_ca="/usr/local/share/ca-certificates/pve-root-ca.crt"
-    [[ -s "$pve_ca" ]] || die "Не найден PVE CA, который должен передать public bootstrap"
     [[ -s /etc/ssl/certs/ca-certificates.crt ]] || die "Не найден системный CA bundle"
+    [[ -s "$pve_ca" ]] || die "Не найден PVE CA, который должен передать public bootstrap"
 
-    install -m 0644 /etc/ssl/certs/ca-certificates.crt "$CA_BUNDLE"
+    cat /etc/ssl/certs/ca-certificates.crt "$pve_ca" >"$CA_BUNDLE"
+    chmod 0644 "$CA_BUNDLE"
 }
 
 persist_pve_api_secret() {
@@ -283,13 +281,23 @@ EOF_SERVER
         ok "Созданы первичные секреты Semaphore"
     else
         [[ -s "$ADMIN_PASSWORD_FILE" ]] || die "Есть server env, но отсутствует initial admin password"
+
+        # Старый вариант использовал отдельный remote Runner. Для одного домашнего
+        # 910 он не нужен: сам Semaphore выполняет задания локально.
+        sed -i \
+            -e '/^SEMAPHORE_USE_REMOTE_RUNNER=/d' \
+            -e '/^SEMAPHORE_RUNNER_REGISTRATION_TOKEN=/d' \
+            "$SERVER_ENV"
+        rm -f "$SECRET_DIR/semaphore-runner.env"
+        chmod 0600 "$SERVER_ENV"
+
         ok "Используются существующие секреты Semaphore"
     fi
 }
 prepare_opentofu_input() {
     log "Подготовка итогового состояния гостей для OpenTofu"
 
-    python3 "$REPO_ROOT/scripts/infra-manager/render-opentofu-input.py" \
+    python3 "$REPO_ROOT/scripts/infra-deployer/render-opentofu-input.py" \
         --output "$OPENTOFU_INPUT"
     chown 1001:0 "$OPENTOFU_INPUT"
     chmod 0640 "$OPENTOFU_INPUT"
@@ -298,24 +306,10 @@ prepare_opentofu_input() {
 }
 
 write_runtime_versions() {
-    local pve_url pve_host pve_ip
-
-    pve_url="$(sed -n 's/^PVE_API_URL=//p' "$PVE_API_ENV" | head -n1)"
-    pve_host="${pve_url#https://}"
-    pve_host="${pve_host%%:*}"
-    [[ -n "$pve_host" && "$pve_host" != "$pve_url" ]] \
-        || die "Не удалось определить имя PVE из PVE_API_URL"
-
-    pve_ip="$(getent ahostsv4 "$pve_host" | awk 'NR == 1 {print $1}')"
-    [[ -n "$pve_ip" ]] || die "Не удалось определить IPv4 PVE: $pve_host"
-
     cat >"$COMPOSE_DIR/.versions.env" <<EOF_VERSIONS
-RUNTIME_VERSION=${RUNTIME_VERSION}
 SEMAPHORE_VERSION=${SEMAPHORE_VERSION}
 OPENTOFU_VERSION=${OPENTOFU_VERSION}
 PACKER_VERSION=${PACKER_VERSION}
-PVE_HOSTNAME=${pve_host}
-PVE_HOST_IP=${pve_ip}
 EOF_VERSIONS
     chmod 0644 "$COMPOSE_DIR/.versions.env"
 }
@@ -359,17 +353,17 @@ repair_semaphore_storage() {
     ok "Хранилище Semaphore доступно для записи из контейнера"
 }
 
-deploy_runtime() {
-    log "Сборка и запуск infra-runtime"
+deploy_semaphore() {
+    log "Сборка и запуск Semaphore"
 
     # Базовый образ нужен и для восстановления прав хранилища, и для сборки
     # нашего единственного контейнера с OpenTofu/Packer/Ansible.
     run_logged docker pull "semaphoreui/semaphore:${SEMAPHORE_VERSION}"
 
-    compose stop runtime >/dev/null 2>&1 || true
+    compose stop semaphore >/dev/null 2>&1 || true
     repair_semaphore_storage
 
-    run_logged compose build --pull runtime
+    run_logged compose build --pull semaphore
     run_logged compose up -d --remove-orphans
 }
 
@@ -386,13 +380,13 @@ wait_semaphore() {
 
     curl -fsS --connect-timeout 2 --max-time 5 http://127.0.0.1:3000/ >/dev/null         || {
             compose ps >>"$LOG_FILE" 2>&1 || true
-            compose logs --tail=100 runtime >>"$LOG_FILE" 2>&1 || true
+            compose logs --tail=100 semaphore >>"$LOG_FILE" 2>&1 || true
             die "Semaphore Server не стал доступен"
         }
 
     sleep 5
 
-    [[ "$(docker inspect -f '{{.State.Running}}' infra-runtime 2>/dev/null || true)" == "true" ]]         || die "infra-runtime не запущен"
+    [[ "$(docker inspect -f '{{.State.Running}}' infra-deployer-semaphore 2>/dev/null || true)" == "true" ]]         || die "Semaphore container не запущен"
 
     ok "Semaphore запущен"
 }
@@ -400,32 +394,33 @@ wait_semaphore() {
 configure_semaphore_project() {
     log "Настройка проекта Semaphore"
     INFRA_PROJECT_BRANCH="$PROJECT_BRANCH" \
-        bash "$REPO_ROOT/scripts/infra-manager/semaphore-project.sh"
+    INFRA_DEPLOYER_RECOVER="$RECOVER" \
+        bash "$REPO_ROOT/scripts/infra-deployer/semaphore-project.sh"
 }
 
 install_local_commands() {
     install -o root -g root -m 0755 \
-        "$REPO_ROOT/scripts/infra-manager/status.sh" "$STATUS_COMMAND"
+        "$REPO_ROOT/scripts/infra-deployer/status.sh" "$STATUS_COMMAND"
     install -o root -g root -m 0755 \
-        "$REPO_ROOT/scripts/infra-manager/check-pve-access.sh" "$ACCESS_CHECK_COMMAND"
+        "$REPO_ROOT/scripts/infra-deployer/check-pve-access.sh" "$ACCESS_CHECK_COMMAND"
     install -o root -g root -m 0755 \
-        "$REPO_ROOT/scripts/infra-manager/test-pve-lifecycle.sh" "$LIFECYCLE_TEST_COMMAND"
+        "$REPO_ROOT/scripts/infra-deployer/test-pve-lifecycle.sh" "$LIFECYCLE_TEST_COMMAND"
 
     # pct exec использует PATH без /usr/local/sbin. Канонические файлы остаются
     # в sbin, а короткие команды доступны через /usr/local/bin.
     install -d -o root -g root -m 0755 /usr/local/bin
-    ln -sfn "$STATUS_COMMAND" /usr/local/bin/infra-manager-status
-    ln -sfn "$ACCESS_CHECK_COMMAND" /usr/local/bin/infra-manager-pve-access-check
-    ln -sfn "$LIFECYCLE_TEST_COMMAND" /usr/local/bin/infra-manager-pve-lifecycle-test
+    ln -sfn "$STATUS_COMMAND" /usr/local/bin/infra-deployer-status
+    ln -sfn "$ACCESS_CHECK_COMMAND" /usr/local/bin/infra-deployer-pve-access-check
+    ln -sfn "$LIFECYCLE_TEST_COMMAND" /usr/local/bin/infra-deployer-pve-lifecycle-test
 }
 
-verify_runtime_tools() {
-    log "Проверка инструментов infra-runtime"
+verify_semaphore_tools() {
+    log "Проверка инструментов Semaphore"
 
-    docker exec infra-runtime tofu version >/dev/null         || die "OpenTofu отсутствует в infra-runtime"
-    docker exec infra-runtime packer version >/dev/null         || die "Packer отсутствует в infra-runtime"
-    docker exec infra-runtime ansible --version >/dev/null         || die "Ansible отсутствует в infra-runtime"
-    docker exec infra-runtime python3 -c 'import proxmoxer'         || die "Python-модуль proxmoxer отсутствует в infra-runtime"
+    docker exec infra-deployer-semaphore tofu version >/dev/null         || die "OpenTofu отсутствует в Semaphore"
+    docker exec infra-deployer-semaphore packer version >/dev/null         || die "Packer отсутствует в Semaphore"
+    docker exec infra-deployer-semaphore ansible --version >/dev/null         || die "Ansible отсутствует в Semaphore"
+    docker exec infra-deployer-semaphore python3 -c 'import proxmoxer'         || die "Python-модуль proxmoxer отсутствует в Semaphore"
 
     ok "OpenTofu, Packer, Ansible и proxmoxer доступны"
 }
@@ -434,7 +429,7 @@ report_result() {
     local address
     address="$(hostname -I 2>/dev/null | awk '{print $1}')"
 
-    printf '\n910 infra-manager подготовлен.\n'
+    printf '\n910 infra-deployer подготовлен.\n'
     if [[ -n "$address" ]]; then
         printf 'Semaphore: http://%s:3000/\n' "$address"
     else
@@ -454,8 +449,8 @@ report_result() {
 
 main() {
     require_root
-    check_os
     init_log
+    check_os
     prepare_directories
     ensure_base_packages
     install_docker
@@ -466,9 +461,9 @@ main() {
     ensure_semaphore_secrets
     prepare_opentofu_input
     write_runtime_versions
-    deploy_runtime
+    deploy_semaphore
     wait_semaphore
-    verify_runtime_tools
+    verify_semaphore_tools
     configure_semaphore_project
     install_local_commands
     "$STATUS_COMMAND"

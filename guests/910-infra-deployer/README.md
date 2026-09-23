@@ -1,6 +1,6 @@
-# 910 infra-manager
+# 910 infra-deployer
 
-`910 infra-manager` — специальный постоянный LXC, из которого выполняется управление и сопровождение инфраструктуры проекта.
+`910 infra-deployer` — специальный постоянный LXC, из которого выполняется штатное развёртывание и сопровождение инфраструктуры проекта.
 
 ## Источники требований
 
@@ -10,8 +10,8 @@
 |---|---|
 | `guest.yaml` | постоянные параметры объекта 910, которые выражаются общей схемой гостя |
 | `provision.yaml` | требуемые программы, службы, контейнеры, версии, постоянные пути, доступы и проверки внутри 910 |
-| `compose/docker-compose.yml` | фактическую схему контейнера `infra-runtime` |
-| `compose/runtime/` | состав образа `infra-runtime` и версии его компонентов |
+| `compose/docker-compose.yml` | фактическую схему контейнера Semaphore |
+| `compose/semaphore/` | состав образа Semaphore с инфраструктурными инструментами |
 | `decisions.md` | устойчивые решения и причины исключений |
 | этот README | особый жизненный цикл, порядок запуска, эксплуатацию и восстановление |
 
@@ -38,7 +38,7 @@
 
 ```text
 VMID:          910
-hostname:      infra-manager
+hostname:      infra-deployer
 тип:           unprivileged LXC
 ОС:            Debian 13 amd64
 CPU:           2
@@ -50,7 +50,7 @@ bridge:        vmbr0
 onboot:        true
 protection:    true
 features:      nesting=1,keyctl=1
-tags:          infra-manager;proxmox-bootstrap
+tags:          infra-deployer;proxmox-bootstrap
 pool managed:  нет
 ```
 
@@ -74,10 +74,10 @@ PVE
    ├─ передаёт read-only GitHub Deploy Key
    ├─ получает закрытый проект
    ├─ выдаёт ограниченный PVE API-доступ
-   └─ запускает scripts/infra-manager/setup.sh
+   └─ запускает scripts/infra-deployer/setup.sh
       ├─ устанавливает Docker
       ├─ создаёт постоянные каталоги и секреты
-      ├─ собирает и запускает infra-runtime
+      ├─ собирает и запускает Semaphore
       ├─ создаёт объекты Semaphore
       └─ выполняет итоговые проверки
 ```
@@ -88,18 +88,18 @@ OpenTofu не создаёт, не удаляет и не изменяет са�
 
 Точный список обязательных пакетов определён в `provision.yaml`.
 
-В самом Debian находятся только базовые средства, необходимые для получения проекта, работы Docker и обслуживания 910. OpenTofu, Ansible и Packer не устанавливаются как отдельные системные службы Debian: они входят в образ `infra-runtime`.
+В самом Debian находятся только базовые средства, необходимые для получения проекта, работы Docker и обслуживания 910. OpenTofu, Ansible и Packer не устанавливаются как отдельные системные службы Debian: они входят в образ Semaphore.
 
 Docker Engine устанавливается из официального репозитория Docker и должен быть включён и запущен через systemd.
 
 ## Контейнеры
 
-### infra-runtime
+### Semaphore
 
 Контейнер:
 
 ```text
-infra-runtime
+infra-deployer-semaphore
 ```
 
 Назначение:
@@ -126,25 +126,25 @@ infra-runtime
 - SSH-клиент;
 - необходимые служебные программы.
 
-OpenTofu state и другие постоянные данные не должны зависеть от жизненного цикла `infra-runtime`.
+OpenTofu state и другие постоянные данные не должны зависеть от жизненного цикла контейнера Semaphore.
 
 ## Постоянные данные
 
 Основные области:
 
 ```text
-/etc/infra-manager/       конфигурация, CA и секреты
-/var/lib/infra-manager/   постоянные данные и состояние
-/opt/infra-manager/       конфигурация Compose
-/var/log/infra-manager/   журнал настройки
+/etc/infra-deployer/       конфигурация, CA и секреты
+/var/lib/infra-deployer/   постоянные данные и состояние
+/opt/infra-deployer/       разворачиваемая конфигурация Compose
+/var/log/infra-deployer/   журнал настройки
 ```
 
 Обязательному резервному копированию подлежат как минимум:
 
 ```text
-/etc/infra-manager/secrets/
-/var/lib/infra-manager/semaphore/
-/var/lib/infra-manager/opentofu/state/
+/etc/infra-deployer/secrets/
+/var/lib/infra-deployer/semaphore/
+/var/lib/infra-deployer/opentofu/state/
 ```
 
 Критичны:
@@ -163,7 +163,7 @@ Git checkout, образы контейнеров, Compose-файлы и кэш 
 Состояние хранится локально:
 
 ```text
-/var/lib/infra-manager/opentofu/state/proxmox.tfstate
+/var/lib/infra-deployer/opentofu/state/proxmox.tfstate
 ```
 
 State не хранится в Git и должен резервироваться.
@@ -177,12 +177,12 @@ State не хранится в Git и должен резервироватьс�
 Идентичность:
 
 ```text
-root@pam!infra-manager
+root@pam!infra-deployer
 ```
 
 Token создаётся с разделением привилегий и получает отдельные ACL.
 
-Изменяющие права 910 распространяются на путь Proxmox `/vms`, то есть на все VM/LXC. На `/pool/managed` назначаются `PVEVMAdmin` и `PVEPoolUser`: первая роль нужна для гостей, вторая — только для чтения самого pool. Для сборки шаблонов Packer получает доступ к ISO-хранилищу `local`, а диски VM размещает через `local-lvm`. Сам `managed` остаётся границей для AI Control и не ограничивает infra-manager.
+Изменяющие права 910 распространяются на путь Proxmox `/vms`, то есть на все VM/LXC. На `/pool/managed` назначаются `PVEVMAdmin` и `PVEPoolUser`: первая роль нужна для гостей, вторая — только для чтения самого pool. Для сборки шаблонов Packer получает доступ к ISO-хранилищу `local`, а диски VM размещает через `local-lvm`. Сам `managed` остаётся границей для AI Control и не ограничивает infra-deployer.
 
 Сам 910 не входит в `managed`, но технически попадает в область `/vms`. Его собственный жизненный цикл по-прежнему принадлежит public bootstrap, OpenTofu 910 не управляет, а `protection=true` защищает контейнер от случайного удаления.
 
@@ -206,7 +206,7 @@ git@github.com:zsergeyru/proxmox.git
 
 При первом запуске открытый ключ добавляется в GitHub как Deploy Key без права записи.
 
-Ручное удаление LXC 910 не затрагивает исходный ключ на PVE, поэтому при повторном создании регистрация Deploy Key в GitHub не требуется.
+Мягкое удаление 910 сохраняет исходный ключ на PVE, поэтому повторная регистрация в GitHub не требуется.
 
 ## Semaphore
 
@@ -215,9 +215,8 @@ git@github.com:zsergeyru/proxmox.git
 - проект `Proxmox Infrastructure`;
 - ключ `GitHub project read-only`;
 - репозиторий `proxmox`;
-- Variable Group `PVE API`;
-- шаблон `OpenTofu Plan`;
-- шаблон `Build Template 9000`.
+- Variable Group `OpenTofu PVE`;
+- шаблон `OpenTofu Plan`.
 
 Отдельный Ansible SSH credential не создаётся до появления первой реальной Ansible-задачи.
 
@@ -226,13 +225,13 @@ git@github.com:zsergeyru/proxmox.git
 После настройки доступны:
 
 ```bash
-infra-manager-status
-infra-manager-status --full
-infra-manager-pve-access-check
-infra-manager-pve-lifecycle-test --apply
+infra-deployer-status
+infra-deployer-status --full
+infra-deployer-pve-access-check
+infra-deployer-pve-lifecycle-test --apply
 ```
 
-`infra-manager-status` проверяет локальное состояние 910, Docker, Semaphore, инфраструктурные инструменты и базовую авторизацию PVE API.
+`infra-deployer-status` проверяет локальное состояние 910, Docker, Semaphore, инфраструктурные инструменты и базовую авторизацию PVE API.
 
 `--full` дополнительно проверяет окончательный контракт PVE-прав.
 
@@ -245,7 +244,7 @@ infra-manager-pve-lifecycle-test --apply
 - сохраняет постоянные данные;
 - обновляет закрытый проект;
 - повторно запускает `setup.sh`;
-- пересобирает `infra-runtime` при необходимости;
+- пересобирает образ Semaphore при необходимости;
 - синхронизирует объекты Semaphore;
 - выполняет итоговую проверку.
 
@@ -290,7 +289,7 @@ Komodo в текущий состав 910 не входит.
 
 Штатная сборка запускается из Semaphore заданием `Build Template 9000`.
 
-`infra-runtime` использует сеть 910 напрямую, поэтому временный HTTP-сервер Packer доступен Debian Installer без второго контейнера или отдельного сетевого слоя.
+Semaphore использует сеть 910 напрямую, поэтому временный HTTP-сервер Packer доступен Debian Installer без отдельного proxy, второго контейнера или remote Runner.
 
 Последовательность:
 
@@ -320,7 +319,7 @@ Semaphore: http://<адрес-910>:3000/
 Пароль одновременно сохраняется с правами `0600` в:
 
 ```text
-/etc/infra-manager/secrets/initial-admin-password
+/etc/infra-deployer/secrets/initial-admin-password
 ```
 
-В обычный журнал bootstrap пароль не записывается. После успешного однократного показа создаётся служебная отметка. При следующих запусках пароль не меняется и повторно не выводится. 
+В обычный журнал bootstrap пароль не записывается. После успешного однократного показа создаётся служебная отметка. При следующих запусках пароль не меняется и повторно не выводится. Это также позволяет один раз показать пароль на уже созданном 910 после обновления этой логики.

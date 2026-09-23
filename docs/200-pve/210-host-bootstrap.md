@@ -6,7 +6,7 @@
 
 Этот документ отвечает на вопрос:
 
-> Что должен сделать `bootstrap-pve.sh` на чистом Proxmox VE, чтобы запустить постоянный управляющий узел `910 infra-manager` и передать ему дальнейшее управление?
+> Что должен сделать `bootstrap-pve.sh` на чистом Proxmox VE, чтобы запустить постоянный разворачиватель `910 infra-deployer` и передать ему дальнейшее управление?
 
 ## 1. Главный принцип
 
@@ -59,7 +59,7 @@ OpenTofu, Ansible, Packer, Docker и Semaphore на PVE заранее не тр
 12. получить закрытый проект внутри 910
 13. передать из закрытого проекта pve-bootstrap-access.sh на выполнение от root на PVE
 14. этим сценарием передать PVE CA и подготовить ограниченный API token
-15. запустить scripts/infra-manager/setup.sh
+15. запустить scripts/infra-deployer/setup.sh
 16. удалить staging-файл PVE API secret после его сохранения внутри 910
 17. выполнить внутреннюю проверку 910
 ```
@@ -71,7 +71,7 @@ OpenTofu, Ansible, Packer, Docker и Semaphore на PVE заранее не тр
 VMID `910` зарезервирован за:
 
 ```text
-hostname: infra-manager
+hostname: infra-deployer
 type: LXC
 owner: public bootstrap
 ```
@@ -79,7 +79,7 @@ owner: public bootstrap
 Дополнительно используются технические метки:
 
 ```text
-infra-manager
+infra-deployer
 proxmox-bootstrap
 ```
 
@@ -114,17 +114,17 @@ keyctl=1
 После получения закрытого проекта public bootstrap временно выполняет на PVE сценарий:
 
 ```text
-scripts/infra-manager/pve-bootstrap-access.sh
+scripts/infra-deployer/pve-bootstrap-access.sh
 ```
 
 Именно он создаёт необходимую управляемую область, token и ACL.
 
-Отдельный пользователь Proxmox для 910 не создаётся.
+Отдельный пользователь Proxmox для разворачивателя не создаётся.
 
 Используется token существующего административного пользователя:
 
 ```text
-root@pam!infra-manager
+root@pam!infra-deployer
 ```
 
 Token создаётся с `privsep=1` и получает только собственные ACL. Полные права `root@pam` через token не передаются.
@@ -161,7 +161,7 @@ Token создаётся с `privsep=1` и получает только соб�
 → получить закрытый репозиторий внутри 910
 ```
 
-Отдельный Deploy Key внутри 910 не создаётся. Если LXC 910 удалить вручную и создать заново, постоянный ключ на PVE сохраняется и используется снова. Удаление самого ключа выполняется отдельно и только вручную.
+Отдельный Deploy Key внутри 910 не создаётся. При мягком удалении и повторном создании 910 постоянный ключ на PVE сохраняется и используется снова. При полном удалении bootstrap-состояния ключ удаляется.
 
 Постоянная закрытая Git-копия проекта на PVE не хранится.
 
@@ -170,13 +170,16 @@ Token создаётся с `privsep=1` и получает только соб�
 После получения закрытого проекта выполняется:
 
 ```text
-scripts/infra-manager/setup.sh
+scripts/infra-deployer/setup.sh
 ```
 
 С этого момента именно закрытый проект отвечает за:
 
 - Docker;
-- `infra-runtime` с Semaphore, OpenTofu, Ansible и Packer;
+- Semaphore Server и Runner;
+- OpenTofu;
+- Ansible;
+- Packer;
 - внутренние секреты и постоянные данные 910;
 - обновление конфигурации 910;
 - проверку готовности 910.
@@ -227,7 +230,7 @@ scripts/infra-manager/setup.sh
 910 имеет ограниченный PVE API token
 910 имеет read-only доступ к закрытому Git через копию этого ключа
 внутренняя настройка 910 завершена
-infra-manager-status проходит
+infra-deployer-status проходит
 ```
 
 Дальнейшее управление выполняется из 910.
@@ -237,4 +240,4 @@ infra-manager-status проходит
 - [`200-overview.md`](200-overview.md) — роль PVE-хоста.
 - [`../700-security/710-pve-access.md`](../700-security/710-pve-access.md) — PVE API-доступ.
 - [`../800-operations/810-deployment.md`](../800-operations/810-deployment.md) — штатное развёртывание.
-- [`../../guests/910-infra-manager/README.md`](../../guests/910-infra-manager/README.md) — паспорт 910.
+- [`../../guests/910-infra-deployer/README.md`](../../guests/910-infra-deployer/README.md) — паспорт 910.

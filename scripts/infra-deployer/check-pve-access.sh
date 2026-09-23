@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-PVE_ENV="/etc/infra-manager/secrets/pve-api.env"
-CA_BUNDLE="/etc/infra-manager/ca/ca-bundle.crt"
+PVE_ENV="/etc/infra-deployer/secrets/pve-api.env"
+CA_BUNDLE="/etc/infra-deployer/ca/ca-bundle.crt"
 
 MANAGED_POOL="managed"
 
@@ -115,4 +115,4 @@ require_permissions "/sdn/zones/localnetwork/vmbr0" "SDN.Audit SDN.Use"
 forbid_permissions "/" "$FORBIDDEN_ROOT_PRIVS"
 
 unset PVE_API_TOKEN_SECRET AUTH_HEADER
-ok "PVE API access infra-manager соответствует контракту"
+ok "PVE API access infra-deployer соответствует контракту"

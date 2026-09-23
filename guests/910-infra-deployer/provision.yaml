@@ -33,15 +33,14 @@ docker:
   compose_file: compose/docker-compose.yml
 
   services:
-    runtime:
-      container_name: infra-runtime
-      image: infra-runtime:v1
+    semaphore:
+      container_name: infra-deployer-semaphore
+      image: infra-deployer-semaphore:v2.18.30
       base_image: semaphoreui/semaphore:v2.18.30
       restart: unless-stopped
       network_mode: host
-      pve_host_mapping: required
       database: sqlite
-      data_path: /var/lib/infra-manager/semaphore
+      data_path: /var/lib/infra-deployer/semaphore
 
       system_packages:
         - ca-certificates
@@ -50,14 +49,11 @@ docker:
         - git
         - openssh-client
         - bash
-        - jq
-        - openssl
         - python3
         - py3-pip
-        - ansible
 
       tools:
-        ansible: alpine-package
+        ansible: bundled-with-semaphore
         opentofu: "1.12.6"
         packer: "1.15.4"
 
@@ -66,26 +62,26 @@ docker:
         requests: ">=2.32,<3"
 
       mounts:
-        - /var/lib/infra-manager/semaphore:/var/lib/semaphore
-        - /etc/infra-manager/ca:/etc/infra-manager/ca:ro
-        - /var/lib/infra-manager/opentofu:/var/lib/infra-manager/opentofu
+        - /var/lib/infra-deployer/semaphore:/var/lib/semaphore
+        - /etc/infra-deployer/ca:/etc/infra-deployer/ca:ro
+        - /var/lib/infra-deployer/opentofu:/var/lib/infra-deployer/opentofu
 
 paths:
-  configuration: /etc/infra-manager
-  secrets: /etc/infra-manager/secrets
-  ca: /etc/infra-manager/ca
-  data: /var/lib/infra-manager
-  semaphore_data: /var/lib/infra-manager/semaphore
-  opentofu_data: /var/lib/infra-manager/opentofu
-  opentofu_state: /var/lib/infra-manager/opentofu/state/proxmox.tfstate
-  compose: /opt/infra-manager/compose
-  bootstrap_repository: /var/lib/infra-manager/bootstrap-repo
-  log: /var/log/infra-manager/bootstrap.log
+  configuration: /etc/infra-deployer
+  secrets: /etc/infra-deployer/secrets
+  ca: /etc/infra-deployer/ca
+  data: /var/lib/infra-deployer
+  semaphore_data: /var/lib/infra-deployer/semaphore
+  opentofu_data: /var/lib/infra-deployer/opentofu
+  opentofu_state: /var/lib/infra-deployer/opentofu/state/proxmox.tfstate
+  compose: /opt/infra-deployer/compose
+  bootstrap_repository: /var/lib/infra-deployer/bootstrap-repo
+  log: /var/log/infra-deployer/bootstrap.log
 
 access:
   pve:
     method: https-api
-    identity: root@pam!infra-manager
+    identity: root@pam!infra-deployer
     privilege_separation: true
     verify_tls: true
     guest_scope: /vms
@@ -102,27 +98,27 @@ semaphore:
 
   objects:
     - GitHub project read-only
-    - PVE API
+    - OpenTofu PVE
     - OpenTofu Plan
     - Build Template 9000
 
 persistence:
   backup_required:
-    - /etc/infra-manager/secrets
-    - /var/lib/infra-manager/semaphore
-    - /var/lib/infra-manager/opentofu/state
+    - /etc/infra-deployer/secrets
+    - /var/lib/infra-deployer/semaphore
+    - /var/lib/infra-deployer/opentofu/state
 
   reproducible:
-    - /var/lib/infra-manager/bootstrap-repo
-    - /opt/infra-manager/compose
+    - /var/lib/infra-deployer/bootstrap-repo
+    - /opt/infra-deployer/compose
     - docker-images
 
 checks:
   commands:
-    - infra-manager-status
-    - infra-manager-status --full
-    - infra-manager-pve-access-check
-    - infra-manager-pve-lifecycle-test --apply
+    - infra-deployer-status
+    - infra-deployer-status --full
+    - infra-deployer-pve-access-check
+    - infra-deployer-pve-lifecycle-test --apply
     - Semaphore: Build Template 9000
 
 boundaries:

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-CA_BUNDLE="/etc/infra-manager/ca/ca-bundle.crt"
+CA_BUNDLE="/etc/infra-deployer/ca/ca-bundle.crt"
 NODE="${PACKER_NODE:-pve}"
 TEST_VMID=9099
 TEST_NAME="smoke-template-9000"

@@ -12,8 +12,8 @@ OpenTofu не читает `guest.yaml` напрямую и не реализу�
 guests/defaults.yaml
 + guests/<guest>/guest.yaml
 → scripts/guest_config.py
-→ scripts/infra-manager/render-opentofu-input.py
-→ /var/lib/infra-manager/opentofu/guests.json
+→ scripts/infra-deployer/render-opentofu-input.py
+→ /var/lib/infra-deployer/opentofu/guests.json
 → OpenTofu
 ```
 
@@ -24,7 +24,7 @@ guests/defaults.yaml
 OpenTofu использует локальный backend:
 
 ```text
-/var/lib/infra-manager/opentofu/state/proxmox.tfstate
+/var/lib/infra-deployer/opentofu/state/proxmox.tfstate
 ```
 
 Этот файл не хранится в Git и обязательно входит в резервное копирование `910`.
@@ -36,8 +36,8 @@ OpenTofu использует локальный backend:
 Провайдер получает:
 
 - `pve_endpoint` — HTTPS API PVE;
-- `pve_api_token` — ограниченный token `root@pam!infra-manager` с `privsep=1`;
-- доверие к PVE CA — из `/etc/infra-manager/ca/ca-bundle.crt` через переменную `SSL_CERT_FILE` внутри `infra-runtime`.
+- `pve_api_token` — ограниченный token `root@pam!infra-deployer` с `privsep=1`;
+- доверие к PVE CA — из системного CA bundle Runner.
 
 `insecure = false` является обязательной частью контракта.
 
@@ -50,6 +50,6 @@ OpenTofu использует локальный backend:
 - backend state;
 - входной JSON итогового состояния.
 
-Ресурсы VM/LXC будут добавляться после успешного реального теста `infra-manager-pve-lifecycle-test --apply` на PVE.
+Ресурсы VM/LXC будут добавляться после успешного реального теста `infra-deployer-pve-lifecycle-test --apply` на PVE.
 
 До этого `tofu apply` для обычных гостей не должен использоваться.

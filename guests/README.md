@@ -83,7 +83,7 @@ guests/defaults.yaml
 Текущий пример:
 
 ```text
-guests/910-infra-manager/
+guests/910-infra-deployer/
 ├── guest.yaml
 ├── provision.yaml
 ├── README.md
@@ -91,7 +91,7 @@ guests/910-infra-manager/
 └── compose/
 ```
 
-`910 infra-manager` создаётся публичным `zsergeyru/proxmox-bootstrap`. Его `guest.yaml` намеренно не содержит `profile`, поэтому обычный генератор OpenTofu пропускает этот объект. `provision.yaml` описывает требуемое содержимое ОС, а особый жизненный цикл и параметры bootstrap объяснены в README и `decisions.md`.
+`910 infra-deployer` создаётся публичным `zsergeyru/proxmox-bootstrap`. Его `guest.yaml` намеренно не содержит `profile`, поэтому обычный генератор OpenTofu пропускает этот объект. `provision.yaml` описывает требуемое содержимое ОС, а особый жизненный цикл и параметры bootstrap объяснены в README и `decisions.md`.
 
 ## Управляемые файлы
 

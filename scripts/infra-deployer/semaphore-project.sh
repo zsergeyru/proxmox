@@ -4,10 +4,10 @@ shopt -s inherit_errexit
 
 SEMAPHORE_URL="http://127.0.0.1:3000"
 PROJECT_NAME="Proxmox Infrastructure"
-PVE_ENV_NAME="PVE API"
-PROJECT_ID_FILE="/var/lib/infra-manager/semaphore-project-id"
+OPENTOFU_ENV_NAME="OpenTofu PVE"
+PROJECT_ID_FILE="/var/lib/infra-deployer/semaphore-project-id"
 
-SECRET_DIR="/etc/infra-manager/secrets"
+SECRET_DIR="/etc/infra-deployer/secrets"
 ADMIN_PASSWORD_FILE="${SECRET_DIR}/initial-admin-password"
 SEMAPHORE_API_TOKEN_FILE="${SECRET_DIR}/semaphore-api-token"
 PVE_API_ENV="${SECRET_DIR}/pve-api.env"
@@ -15,7 +15,7 @@ GITHUB_KEY="/root/.ssh/github_proxmox_repo_ed25519"
 GITHUB_KEY_COPY="${SECRET_DIR}/github_project_ed25519"
 
 PROJECT_REPO="git@github.com:zsergeyru/proxmox.git"
-PROJECT_BRANCH="${INFRA_PROJECT_BRANCH:-main}"
+PROJECT_BRANCH="${INFRA_PROJECT_BRANCH:-infra-iac-redesign}"
 
 COOKIE=""
 AUTH_MODE="cookie"
@@ -25,7 +25,7 @@ C_BOLD=""
 C_GREEN=""
 C_RED=""
 
-if [[ "${INFRA_MANAGER_COLOR:-0}" == "1" && "${NO_COLOR:-}" == "" ]]; then
+if [[ "${INFRA_DEPLOYER_COLOR:-0}" == "1" && "${NO_COLOR:-}" == "" ]]; then
     C_RESET="$(printf '\033[0m')"
     C_BOLD="$(printf '\033[1m')"
     C_GREEN="$(printf '\033[32m')"
@@ -143,7 +143,7 @@ ensure_api_token() {
     fi
 
     login
-    payload='{"name":"infra-manager setup"}'
+    payload='{"name":"infra-deployer setup"}'
     response="$(api_cookie POST /user/tokens -d "$payload")"
     token="$(jq -r '.id // empty' <<<"$response")"
     [[ -n "$token" ]] || die "Semaphore не вернул API token"
@@ -253,7 +253,7 @@ ensure_repository() {
     printf '%s' "$id"
 }
 
-ensure_pve_environment() {
+ensure_opentofu_environment() {
     local project_id=$1
     local endpoint token_id token_secret api_token
     local environments id existing secret_id env_json payload response
@@ -261,30 +261,23 @@ ensure_pve_environment() {
     endpoint="$(read_env_value PVE_API_URL "$PVE_API_ENV")"
     token_id="$(read_env_value PVE_API_TOKEN_ID "$PVE_API_ENV")"
     token_secret="$(read_env_value PVE_API_TOKEN_SECRET "$PVE_API_ENV")"
-    [[ -n "$endpoint" && -n "$token_id" && -n "$token_secret" ]]         || die "PVE API credential неполон для инфраструктурных заданий"
+    [[ -n "$endpoint" && -n "$token_id" && -n "$token_secret" ]]         || die "PVE API credential неполон для OpenTofu"
 
     api_token="${token_id}=${token_secret}"
-    env_json="$(jq -cn \
-        --arg endpoint "$endpoint" \
-        --arg ca "/etc/infra-manager/ca/ca-bundle.crt" \
-        '{
-            PVE_API_URL:$endpoint,
-            SSL_CERT_FILE:$ca,
-            REQUESTS_CA_BUNDLE:$ca
-        }')"
+    env_json="$(jq -cn --arg endpoint "$endpoint" '{TF_VAR_pve_endpoint:$endpoint}')"
 
     environments="$(api GET "/project/${project_id}/environment?sort=name&order=asc")"
-    id="$(unique_id_by_name "$environments" "$PVE_ENV_NAME" "Variable Group")"
+    id="$(unique_id_by_name "$environments" "$OPENTOFU_ENV_NAME" "Variable Group")"
 
     if [[ -z "$id" ]]; then
-        payload="$(jq -cn             --arg name "$PVE_ENV_NAME"             --arg env "$env_json"             --arg secret "$api_token"             --argjson project_id "$project_id"             '{
+        payload="$(jq -cn             --arg name "$OPENTOFU_ENV_NAME"             --arg env "$env_json"             --arg secret "$api_token"             --argjson project_id "$project_id"             '{
                 name:$name,
                 project_id:$project_id,
                 password:null,
                 json:"{}",
                 env:$env,
                 secrets:[{
-                    name:"PVE_API_TOKEN",
+                    name:"TF_VAR_pve_api_token",
                     secret:$secret,
                     type:"env",
                     operation:"create"
@@ -292,16 +285,16 @@ ensure_pve_environment() {
             }')"
         response="$(api POST "/project/${project_id}/environment" -d "$payload")"
         id="$(jq -r '.id // empty' <<<"$response")"
-        [[ -n "$id" ]] || die "Semaphore не вернул id Variable Group PVE API"
+        [[ -n "$id" ]] || die "Semaphore не вернул id Variable Group OpenTofu"
         printf '%s' "$id"
         return
     fi
 
     existing="$(api GET "/project/${project_id}/environment/${id}")"
-    secret_id="$(jq -r         '.secrets[]? | select(.name == "PVE_API_TOKEN" and .type == "env") | .id'         <<<"$existing" | head -n1)"
+    secret_id="$(jq -r         '.secrets[]? | select(.name == "TF_VAR_pve_api_token" and .type == "env") | .id'         <<<"$existing" | head -n1)"
 
     if [[ -z "$secret_id" ]]; then
-        payload="$(jq -cn             --arg name "$PVE_ENV_NAME"             --arg env "$env_json"             --arg secret "$api_token"             --argjson id "$id"             --argjson project_id "$project_id"             '{
+        payload="$(jq -cn             --arg name "$OPENTOFU_ENV_NAME"             --arg env "$env_json"             --arg secret "$api_token"             --argjson id "$id"             --argjson project_id "$project_id"             '{
                 id:$id,
                 name:$name,
                 project_id:$project_id,
@@ -309,14 +302,14 @@ ensure_pve_environment() {
                 json:"{}",
                 env:$env,
                 secrets:[{
-                    name:"PVE_API_TOKEN",
+                    name:"TF_VAR_pve_api_token",
                     secret:$secret,
                     type:"env",
                     operation:"create"
                 }]
             }')"
     else
-        payload="$(jq -cn             --arg name "$PVE_ENV_NAME"             --arg env "$env_json"             --arg secret "$api_token"             --argjson id "$id"             --argjson secret_id "$secret_id"             --argjson project_id "$project_id"             '{
+        payload="$(jq -cn             --arg name "$OPENTOFU_ENV_NAME"             --arg env "$env_json"             --arg secret "$api_token"             --argjson id "$id"             --argjson secret_id "$secret_id"             --argjson project_id "$project_id"             '{
                 id:$id,
                 name:$name,
                 project_id:$project_id,
@@ -325,7 +318,7 @@ ensure_pve_environment() {
                 env:$env,
                 secrets:[{
                     id:$secret_id,
-                    name:"PVE_API_TOKEN",
+                    name:"TF_VAR_pve_api_token",
                     secret:$secret,
                     type:"env",
                     operation:"update"
@@ -347,7 +340,7 @@ ensure_opentofu_plan_template() {
     id="$(unique_id_by_name "$templates" "$name" "template")"
 
     if [[ -z "$id" ]]; then
-        payload="$(jq -cn         --arg name "$name"         --arg playbook "scripts/infra-manager/opentofu-plan.sh"         --arg branch "$PROJECT_BRANCH"         --argjson project_id "$project_id"         --argjson repository_id "$repository_id"         --argjson environment_id "$environment_id"         '{
+        payload="$(jq -cn         --arg name "$name"         --arg playbook "scripts/infra-deployer/opentofu-plan.sh"         --arg branch "$PROJECT_BRANCH"         --argjson project_id "$project_id"         --argjson repository_id "$repository_id"         --argjson environment_id "$environment_id"         '{
                 name:$name,
                 project_id:$project_id,
                 repository_id:$repository_id,
@@ -363,7 +356,7 @@ ensure_opentofu_plan_template() {
         response="$(api POST "/project/${project_id}/templates" -d "$payload")"
         id="$(jq -r '.id // empty' <<<"$response")"
     else
-        payload="$(jq -cn         --argjson id "$id"         --arg name "$name"         --arg playbook "scripts/infra-manager/opentofu-plan.sh"         --arg branch "$PROJECT_BRANCH"         --argjson project_id "$project_id"         --argjson repository_id "$repository_id"         --argjson environment_id "$environment_id"         '{
+        payload="$(jq -cn         --argjson id "$id"         --arg name "$name"         --arg playbook "scripts/infra-deployer/opentofu-plan.sh"         --arg branch "$PROJECT_BRANCH"         --argjson project_id "$project_id"         --argjson repository_id "$repository_id"         --argjson environment_id "$environment_id"         '{
                 id:$id,
                 name:$name,
                 project_id:$project_id,
@@ -396,7 +389,7 @@ ensure_packer_9000_template() {
     if [[ -z "$id" ]]; then
         payload="$(jq -cn \
             --arg name "$name" \
-            --arg playbook "scripts/infra-manager/build-template.sh" \
+            --arg playbook "scripts/infra-deployer/build-template.sh" \
             --arg branch "$PROJECT_BRANCH" \
             --argjson project_id "$project_id" \
             --argjson repository_id "$repository_id" \
@@ -420,7 +413,7 @@ ensure_packer_9000_template() {
         payload="$(jq -cn \
             --argjson id "$id" \
             --arg name "$name" \
-            --arg playbook "scripts/infra-manager/build-template.sh" \
+            --arg playbook "scripts/infra-deployer/build-template.sh" \
             --arg branch "$PROJECT_BRANCH" \
             --argjson project_id "$project_id" \
             --argjson repository_id "$repository_id" \
@@ -447,7 +440,7 @@ ensure_packer_9000_template() {
 }
 
 main() {
-    local project_id github_key_id repository_id pve_env_id opentofu_plan_template_id packer_9000_template_id
+    local project_id github_key_id repository_id opentofu_env_id opentofu_plan_template_id packer_9000_template_id
 
     command -v jq >/dev/null 2>&1 || die "Не найден jq"
     command -v curl >/dev/null 2>&1 || die "Не найден curl"
@@ -461,11 +454,11 @@ main() {
 
     github_key_id="$(ensure_ssh_key "$project_id" "GitHub project read-only" git "$GITHUB_KEY_COPY")"
     repository_id="$(ensure_repository "$project_id" "$github_key_id")"
-    pve_env_id="$(ensure_pve_environment "$project_id")"
-    opentofu_plan_template_id="$(ensure_opentofu_plan_template "$project_id" "$repository_id" "$pve_env_id")"
-    packer_9000_template_id="$(ensure_packer_9000_template "$project_id" "$repository_id" "$pve_env_id")"
+    opentofu_env_id="$(ensure_opentofu_environment "$project_id")"
+    opentofu_plan_template_id="$(ensure_opentofu_plan_template "$project_id" "$repository_id" "$opentofu_env_id")"
+    packer_9000_template_id="$(ensure_packer_9000_template "$project_id" "$repository_id" "$opentofu_env_id")"
 
-    [[ -n "$repository_id" && -n "$pve_env_id" && -n "$opentofu_plan_template_id" && -n "$packer_9000_template_id" ]] \
+    [[ -n "$repository_id" && -n "$opentofu_env_id" && -n "$opentofu_plan_template_id" && -n "$packer_9000_template_id" ]] \
         || die "Не все объекты Semaphore созданы"
 
     ok "Проект Semaphore, Git repository, PVE Variable Group и инфраструктурные задания подготовлены"

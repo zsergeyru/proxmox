@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-PVE_ENV="/etc/infra-manager/secrets/pve-api.env"
-CA_BUNDLE="/etc/infra-manager/ca/ca-bundle.crt"
+PVE_ENV="/etc/infra-deployer/secrets/pve-api.env"
+CA_BUNDLE="/etc/infra-deployer/ca/ca-bundle.crt"
 TEST_VMID=9098
 TEST_HOSTNAME="infra-access-test"
 MANAGED_POOL="managed"
@@ -21,7 +21,7 @@ warn() { printf '[ПРЕДУПРЕЖДЕНИЕ] %s\n' "$*" >&2; }
 usage() {
     cat <<'USAGE'
 Использование:
-  infra-manager-pve-lifecycle-test --apply
+  infra-deployer-pve-lifecycle-test --apply
 
 Явный интеграционный тест PVE API.
 Создаёт временный LXC 9098 в pool managed, изменяет его, запускает,
