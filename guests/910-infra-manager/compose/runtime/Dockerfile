@@ -6,7 +6,7 @@ USER root
 ARG OPENTOFU_VERSION=1.12.6
 ARG PACKER_VERSION=1.15.4
 
-RUN apk add --no-cache ca-certificates curl unzip git openssh-client bash python3 py3-pip
+RUN apk add --no-cache ca-certificates curl unzip git openssh-client bash python3 py3-pip ansible
 
 RUN set -eux; \
     arch="$(apk --print-arch)"; \
@@ -45,7 +45,7 @@ RUN set -eux; \
     rm -f "/tmp/${packer_zip}" /tmp/packer_SHA256SUMS /tmp/packer.check
 
 COPY requirements.txt /etc/semaphore/requirements.txt
-RUN python3 -m pip install --no-cache-dir -r /etc/semaphore/requirements.txt
+RUN python3 -m pip install --break-system-packages --no-cache-dir -r /etc/semaphore/requirements.txt
 
 COPY ssh_config /etc/ssh/ssh_config.d/99-infra-manager.conf
 RUN rm -f /etc/ssh/ssh_config.d/semaphore.conf
