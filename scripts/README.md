@@ -19,7 +19,6 @@ scripts/
     ├── sync-management-keys.py
     └── setup/
         ├── configure-pve.sh
-        ├── render-template-cloud-init.py
         ├── lib/
         └── tests/
 ```
@@ -41,7 +40,6 @@ scripts/infra-manager/
 │   ├── semaphore.py
 │   ├── pve.py
 │   └── status.py
-├── semaphore-project.sh
 ├── check-pve-access.sh
 ├── test-pve-lifecycle.sh
 └── status.sh
@@ -49,7 +47,7 @@ scripts/infra-manager/
 
 `setup.sh` является минимальной оболочкой: при первом запуске обеспечивает наличие системного `python3` и передаёт управление команде `python3 -m infra_manager setup`. Основная подготовка Debian, Docker, постоянных каталогов, секретов, CA, OpenTofu input и `infra-runtime` выполняется в `infra_manager/setup.py`. Рабочая копия Python-пакета устанавливается в `/usr/local/lib/infra-manager`, поэтому команды из `/usr/local/sbin` не зависят от наличия bootstrap checkout.
 
-`semaphore-project.sh` — совместимая оболочка команды `python3 -m infra_manager semaphore-project`. API-логика находится в `infra_manager/semaphore.py`: она создаёт или синхронизирует проект `Proxmox Infrastructure`, GitHub SSH key, репозиторий, Variable Group и задания Semaphore.
+`infra_manager/semaphore.py` напрямую вызывается из Python setup и создаёт или синхронизирует проект `Proxmox Infrastructure`, GitHub SSH key, репозиторий, Variable Group и задания Semaphore.
 
 `check-pve-access.sh` — оболочка команды `python3 -m infra_manager pve-access-check`. Проверка HTTPS API и фактических privileges token `root@pam!infra-manager` находится в `infra_manager/pve.py`.
 
@@ -161,11 +159,6 @@ scripts/pve/setup/configure-pve.sh
 40-runtime.sh
 45-management-keys.sh
 50-access.sh
-60-template-contract.sh
-61-template-source.sh
-62-template-build.sh
-63-template-smoke.sh
-64-cloud-init-status.sh
 70-tooling.sh
 71-sync-management-keys-tooling.sh
 ```
@@ -174,13 +167,9 @@ scripts/pve/setup/configure-pve.sh
 
 PVE Configuration также подготавливает runtime для deploy-контура: Python/YAML/JSON Schema, API credentials, PVE guest SSH identity, canonical management public-key registry, отдельный guest `known_hosts` и стабильную команду `sync-management-keys`.
 
-## Генератор Cloud-Init шаблона
+## Шаблон VM 9000
 
-```text
-scripts/pve/setup/render-template-cloud-init.py
-```
-
-Это основной генератор Cloud-Init для Debian-шаблона `9000`. Его требования описаны в [`../templates/debian13/build-policy.md`](../templates/debian13/build-policy.md).
+PVE Configuration больше не строит базовый VM template. Единственный штатный путь — `Semaphore → scripts/infra-manager/build-template.sh 9000 → Packer`. Исходники и контракт Packer находятся в [`../packer/9000/`](../packer/9000/) и [`../packer/README.md`](../packer/README.md).
 
 ## Тесты PVE Configuration
 
@@ -188,7 +177,7 @@ scripts/pve/setup/render-template-cloud-init.py
 scripts/pve/setup/tests/
 ```
 
-Здесь находятся проверки контракта и безопасности настройки PVE и сборки шаблона. При изменении поведения тесты должны меняться вместе с кодом.
+Здесь находятся проверки контракта и безопасности настройки PVE. Проверка Packer-шаблона выполняется отдельным infra-manager/Packer-контуром.
 
 ## `pve/deploy-guest.py`
 
@@ -221,4 +210,4 @@ scripts/pve/setup/tests/
 - [`../docs/30-guest-manifest.md`](../docs/30-guest-manifest.md) — модель данных гостевых систем.
 - [`../docs/300-guests/330-deploy-guest.md`](../docs/300-guests/330-deploy-guest.md) — спецификация `deploy-guest`.
 - [`../docs/300-guests/330-deploy-guest.md`](../docs/300-guests/330-deploy-guest.md) — Bootstrap и Ansible handoff.
-- [`../templates/debian13/build-policy.md`](../templates/debian13/build-policy.md) — спецификация сборки шаблона.
+- [`../packer/README.md`](../packer/README.md) — структура и правила Packer-шаблонов.
