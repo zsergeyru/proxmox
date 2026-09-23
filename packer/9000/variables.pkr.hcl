@@ -44,7 +44,7 @@ variable "iso_url" {
 
   validation {
     condition     = can(regex("^https://", var.iso_url))
-    error_message = "iso_url должен использовать HTTPS."
+    error_message = "Значение iso_url должно использовать HTTPS."
   }
 }
 
@@ -54,7 +54,7 @@ variable "iso_checksum" {
 
   validation {
     condition     = can(regex("^(sha256|sha512):[0-9a-fA-F]+$", var.iso_checksum))
-    error_message = "iso_checksum должен содержать sha256: или sha512: и контрольную сумму."
+    error_message = "Значение iso_checksum должно содержать sha256: или sha512: и контрольную сумму."
   }
 }
 
@@ -65,6 +65,6 @@ variable "build_password" {
 
   validation {
     condition     = length(var.build_password) >= 20 && can(regex("^[A-Za-z0-9]+$", var.build_password))
-    error_message = "build_password должен быть не короче 20 символов и состоять только из букв и цифр."
+    error_message = "Значение build_password должно быть не короче 20 символов и состоять только из букв и цифр."
   }
 }
