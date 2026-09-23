@@ -40,6 +40,9 @@ jobs:
             scripts/infra-manager/infra_manager/cli.py \
             scripts/infra-manager/infra_manager/common.py \
             scripts/infra-manager/infra_manager/setup.py \
+            scripts/infra-manager/infra_manager/semaphore.py \
+            scripts/infra-manager/infra_manager/pve.py \
+            scripts/infra-manager/infra_manager/status.py \
             scripts/tests/test-infra-manager-python.py \
             scripts/tests/test-opentofu-input.py \
             scripts/tests/test-guest-bootstrap.py \
