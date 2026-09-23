@@ -63,7 +63,7 @@ verify_source_checkout_before_source() {
 
     trust_violation="$(find "$SOURCE_ROOT" -xdev \( -type f -o -type d \) \( ! -uid 0 -o -perm /022 \) -print -quit 2>/dev/null || true)"
     [[ -z "$trust_violation" ]] \
-        || pre_source_die "Исполняемый checkout не является root-trusted: '${trust_violation}' не root-owned или доступен на запись группе/остальным. Запустите Public Bootstrap для безопасной миграции canonical source."
+        || pre_source_die "Исполняемый checkout не является root-trusted: '${trust_violation}' не root-owned или доступен на запись группе/остальным. Запустите Public Bootstrap для безопасной подготовки canonical source."
 
     actual="$(git -C "$SOURCE_ROOT" rev-parse HEAD 2>/dev/null)"
     expected="${PVE_CONFIGURATION_SOURCE_REVISION:-$actual}"
@@ -129,7 +129,7 @@ show_configuration_banner() {
     configuration_banner_line 'Proxmox Project — PVE Configuration'
     configuration_banner_line ''
     configuration_banner_line 'Проверяет и настраивает Proxmox host, доступы, storage,'
-    configuration_banner_line 'Debian template 9000 и инфраструктуру deployment.'
+    configuration_banner_line 'доступы, storage и инфраструктурные настройки PVE.'
     configuration_banner_line ''
     configuration_banner_line "PVE Configuration: v${PVE_CONFIGURATION_VERSION}"
     configuration_banner_border '└' '┘'
