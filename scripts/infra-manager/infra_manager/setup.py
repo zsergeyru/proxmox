@@ -837,21 +837,9 @@ class Setup:
 
     def configure_semaphore_project(self) -> None:
         self.stage("Настройка проекта Semaphore")
-        self.run_visible(
-            [
-                "bash",
-                str(
-                    REPO_ROOT
-                    / "scripts/infra-manager/semaphore-project.sh"
-                ),
-            ],
-            env_updates={
-                "INFRA_PROJECT_BRANCH": self.project_branch,
-                "INFRA_MANAGER_RECOVER": (
-                    "1" if self.recover else "0"
-                ),
-            },
-        )
+        from .semaphore import configure_project
+
+        configure_project(self.project_branch)
 
     def install_local_commands(self) -> None:
         source_package = (
