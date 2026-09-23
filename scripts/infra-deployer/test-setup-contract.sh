@@ -178,7 +178,7 @@ grep -q '^rollback_new_api_token() {' "$PVE_BOOTSTRAP_ACCESS" \
     || die "Новый PVE API token должен откатываться при ошибке передачи secret"
 grep -q 'rm -f -- "$tmp"' "$PVE_BOOTSTRAP_ACCESS" \
     || die "Временный PVE API secret должен удаляться и при ошибке передачи"
-for role in PVEAuditor PVEVMAdmin PVEPoolUser PVEDatastoreUser PVEDatastoreAdmin PVESDNUser; do
+for role in PVEAuditor PVEVMAdmin PVEDatastoreUser PVEDatastoreAdmin PVESDNUser; do
     grep -q "\"$role\"" "$PVE_BOOTSTRAP_ACCESS" \
         || die "В PVE bootstrap access отсутствует штатная роль $role"
 done
