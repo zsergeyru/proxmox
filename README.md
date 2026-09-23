@@ -2,7 +2,7 @@
 
 Закрытый репозиторий конфигурации, кода и документации домашней инфраструктуры на Proxmox VE.
 
-Здесь хранится требуемое состояние инфраструктуры, документация, сценарии развёртывания и настройка постоянного управляющего контейнера `910 infra-deployer`.
+Здесь хранится требуемое состояние инфраструктуры, документация, сценарии развёртывания и настройка постоянного управляющего контейнера `910 infra-manager`.
 
 ## Быстрый старт
 
@@ -45,11 +45,11 @@ GitHub public: zsergeyru/proxmox-bootstrap
 физический PVE
         │
         ├── постоянный GitHub Deploy Key
-        ├── LXC 910 infra-deployer
+        ├── LXC 910 infra-manager
         └── ограниченный PVE API-доступ для 910
                          │
                          ▼
-                 LXC 910 infra-deployer
+                 LXC 910 infra-manager
                          │
                          ├── закрытый repo zsergeyru/proxmox
                          ├── Docker
@@ -83,18 +83,18 @@ GitHub public: zsergeyru/proxmox-bootstrap
 → передать GitHub Deploy Key внутрь 910
 → проверить read-only доступ к закрытому проекту
 → получить или обновить закрытый проект
-→ выполнить scripts/infra-deployer/pve-bootstrap-access.sh на PVE
-→ выполнить scripts/infra-deployer/setup.sh внутри 910
+→ выполнить scripts/infra-manager/pve-bootstrap-access.sh на PVE
+→ выполнить scripts/infra-manager/setup.sh внутри 910
 → проверить итоговое состояние
 ~~~
 
 В публичном bootstrap не хранится конкретная политика PVE ACL и не описывается внутренняя настройка Semaphore/OpenTofu/Ansible/Packer.
 
-## LXC 910 infra-deployer
+## LXC 910 infra-manager
 
 ~~~text
 CTID:        910
-hostname:    infra-deployer
+hostname:    infra-manager
 OS:          Debian 13
 unprivileged yes
 CPU:         2
@@ -106,12 +106,12 @@ bridge:      vmbr0
 onboot:      yes
 protection:  yes
 features:    nesting=1,keyctl=1
-tags:        infra-deployer;proxmox-bootstrap
+tags:        infra-manager;proxmox-bootstrap
 ~~~
 
 910 является специальным управляющим контейнером: его создаёт публичный bootstrap, OpenTofu не управляет самим 910, 910 не входит в `managed`, постоянный root SSH с 910 на PVE не используется.
 
-Подробнее: [`guests/910-infra-deployer/README.md`](guests/910-infra-deployer/README.md).
+Подробнее: [`guests/910-infra-manager/README.md`](guests/910-infra-manager/README.md).
 
 ## GitHub Deploy Key
 
@@ -147,7 +147,7 @@ tags:        infra-deployer;proxmox-bootstrap
 Рабочая копия:
 
 ~~~text
-/var/lib/infra-deployer/bootstrap-repo
+/var/lib/infra-manager/bootstrap-repo
 ~~~
 
 Источник:
@@ -161,14 +161,14 @@ git@github.com:zsergeyru/proxmox.git
 Основные сценарии:
 
 ~~~text
-scripts/infra-deployer/pve-bootstrap-access.sh
-scripts/infra-deployer/setup.sh
-scripts/infra-deployer/semaphore-project.sh
-scripts/infra-deployer/opentofu-plan.sh
-scripts/infra-deployer/render-opentofu-input.py
-scripts/infra-deployer/status.sh
-scripts/infra-deployer/check-pve-access.sh
-scripts/infra-deployer/test-pve-lifecycle.sh
+scripts/infra-manager/pve-bootstrap-access.sh
+scripts/infra-manager/setup.sh
+scripts/infra-manager/semaphore-project.sh
+scripts/infra-manager/opentofu-plan.sh
+scripts/infra-manager/render-opentofu-input.py
+scripts/infra-manager/status.sh
+scripts/infra-manager/check-pve-access.sh
+scripts/infra-manager/test-pve-lifecycle.sh
 ~~~
 
 ## Доступ 910 к PVE
@@ -176,11 +176,11 @@ scripts/infra-deployer/test-pve-lifecycle.sh
 Используется API token:
 
 ~~~text
-root@pam!infra-deployer
+root@pam!infra-manager
 privsep=1
 ~~~
 
-Политика доступа хранится только в `scripts/infra-deployer/pve-bootstrap-access.sh`.
+Политика доступа хранится только в `scripts/infra-manager/pve-bootstrap-access.sh`.
 
 | Путь | Роль | Назначение |
 |---|---|---|
@@ -208,15 +208,15 @@ proxmoxer
 Основные постоянные области:
 
 ~~~text
-/etc/infra-deployer/
-/var/lib/infra-deployer/
-/opt/infra-deployer/
+/etc/infra-manager/
+/var/lib/infra-manager/
+/opt/infra-manager/
 ~~~
 
 OpenTofu state хранится локально:
 
 ~~~text
-/var/lib/infra-deployer/opentofu/state/proxmox.tfstate
+/var/lib/infra-manager/opentofu/state/proxmox.tfstate
 ~~~
 
 State не хранится в Git и должен резервироваться.
@@ -237,16 +237,16 @@ Ansible credential заранее не создаётся. Он добавляе
 ## Служебные команды 910
 
 ~~~bash
-infra-deployer-status
-infra-deployer-status --full
-infra-deployer-pve-access-check
-infra-deployer-pve-lifecycle-test --apply
+infra-manager-status
+infra-manager-status --full
+infra-manager-pve-access-check
+infra-manager-pve-lifecycle-test --apply
 ~~~
 
 ## Технический лог bootstrap
 
 ~~~text
-/var/log/infra-deployer/bootstrap.log
+/var/log/infra-manager/bootstrap.log
 ~~~
 
 На экран выводятся основные этапы, успешные проверки, предупреждения и ошибки; подробный служебный вывод хранится в этом файле.
@@ -350,7 +350,7 @@ proxmox/
 - [`docs/200-pve/210-host-bootstrap.md`](docs/200-pve/210-host-bootstrap.md);
 - [`docs/700-security/710-pve-access.md`](docs/700-security/710-pve-access.md);
 - [`docs/800-operations/810-deployment.md`](docs/800-operations/810-deployment.md);
-- [`guests/910-infra-deployer/README.md`](guests/910-infra-deployer/README.md).
+- [`guests/910-infra-manager/README.md`](guests/910-infra-manager/README.md).
 
 ## Общие правила
 
