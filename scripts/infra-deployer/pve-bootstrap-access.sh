@@ -16,6 +16,7 @@ API_TOKEN_ID="${API_USER}!${API_TOKEN_NAME}"
 
 MANAGED_POOL="managed"
 CT_STORAGE="local-lvm"
+ISO_STORAGE="local"
 CT_BRIDGE="vmbr0"
 C_RESET=""
 C_BOLD=""
@@ -189,6 +190,7 @@ ensure_token_acls() {
     ensure_token_acl "/pool/$MANAGED_POOL" "PVEVMAdmin"
 
     ensure_token_acl "/storage/$CT_STORAGE" "PVEDatastoreUser"
+    ensure_token_acl "/storage/$ISO_STORAGE" "PVEDatastoreAdmin"
     ensure_token_acl "/sdn/zones/localnetwork/$CT_BRIDGE" "PVESDNUser"
     ok "ACL PVE API token подготовлены"
 }
