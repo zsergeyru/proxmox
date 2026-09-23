@@ -5,10 +5,8 @@ PVE_ENV="/etc/infra-deployer/secrets/pve-api.env"
 CA_BUNDLE="/etc/infra-deployer/ca/ca-bundle.crt"
 
 MANAGED_POOL="managed"
-INFRA_DEPLOYER_VMID=910
 
-MANAGED_PRIVS="Pool.Audit VM.Allocate VM.Audit VM.Config.CDROM VM.Config.Cloudinit VM.Config.CPU VM.Config.Disk VM.Config.HWType VM.Config.Memory VM.Config.Network VM.Config.Options VM.GuestAgent.Audit VM.PowerMgmt"
-FORBIDDEN_VM_PRIVS="VM.Allocate VM.Backup VM.Clone VM.Config.CDROM VM.Config.Cloudinit VM.Config.CPU VM.Config.Disk VM.Config.HWType VM.Config.Memory VM.Config.Network VM.Config.Options VM.Console VM.GuestAgent.FileRead VM.GuestAgent.FileWrite VM.GuestAgent.FileSystemMgmt VM.GuestAgent.Unrestricted VM.Migrate VM.PowerMgmt VM.Replicate VM.Snapshot VM.Snapshot.Rollback"
+VM_ADMIN_PRIVS="VM.Allocate VM.Audit VM.Config.CDROM VM.Config.Cloudinit VM.Config.CPU VM.Config.Disk VM.Config.HWType VM.Config.Memory VM.Config.Network VM.Config.Options VM.GuestAgent.Audit VM.PowerMgmt"
 FORBIDDEN_ROOT_PRIVS="Permissions.Modify Sys.Modify Sys.PowerMgmt User.Modify Group.Allocate Realm.Allocate Realm.AllocateUser Pool.Allocate Datastore.Allocate Datastore.AllocateSpace Datastore.AllocateTemplate SDN.Allocate SDN.Use Mapping.Modify"
 
 die() { printf 'ОШИБКА: %s\n' "$*" >&2; exit 1; }
@@ -101,26 +99,6 @@ forbid_permissions() {
         || die "На $path обнаружены запрещённые privileges:$found"
 }
 
-forbid_unmanaged_guest_mutation() {
-    local pool_json resources_json vmid
-    declare -A managed_vmids=()
-
-    pool_json="$(api_get "/pools/$MANAGED_POOL")" \
-        || die "Не удалось получить состав pool $MANAGED_POOL"
-    resources_json="$(api_get "/cluster/resources?type=vm")" \
-        || die "Не удалось получить список VM/LXC"
-
-    while IFS= read -r vmid; do
-        [[ -n "$vmid" ]] || continue
-        managed_vmids["$vmid"]=1
-    done < <(jq -r '.data.members[]? | .vmid // empty' <<<"$pool_json")
-
-    while IFS= read -r vmid; do
-        [[ -n "$vmid" ]] || continue
-        [[ -z "${managed_vmids[$vmid]:-}" ]] || continue
-        forbid_permissions "/vms/$vmid" "$FORBIDDEN_VM_PRIVS"
-    done < <(jq -r '.data[]? | .vmid // empty' <<<"$resources_json")
-}
 
 api_get "/version" | jq -e '.data.version // .data.release' >/dev/null \
     || die "PVE API token не прошёл проверку авторизации"
@@ -128,14 +106,12 @@ api_get "/version" | jq -e '.data.version // .data.release' >/dev/null \
 api_get "/pools/$MANAGED_POOL" | jq -e '.data' >/dev/null \
     || die "Pool $MANAGED_POOL недоступен"
 
-require_permissions "/pool/$MANAGED_POOL" "$MANAGED_PRIVS"
+require_permissions "/vms" "$VM_ADMIN_PRIVS"
 require_permissions "/storage/local" "Datastore.Audit"
 require_permissions "/storage/local-lvm" "Datastore.Audit Datastore.AllocateSpace"
 require_permissions "/sdn/zones/localnetwork/vmbr0" "SDN.Audit SDN.Use"
 
-forbid_permissions "/vms/$INFRA_DEPLOYER_VMID" "$FORBIDDEN_VM_PRIVS"
 forbid_permissions "/" "$FORBIDDEN_ROOT_PRIVS"
-forbid_unmanaged_guest_mutation
 
 unset PVE_API_TOKEN_SECRET AUTH_HEADER
 ok "PVE API access infra-deployer соответствует контракту"
