@@ -88,7 +88,7 @@ source "proxmox-iso" "template_9000" {
     unmount          = true
 
     cd_content = {
-      "preseed.cfg" = templatefile("${path.root}/http/preseed.cfg", {
+      "preseed.cfg" = templatefile(abspath("${path.root}/http/preseed.cfg"), {
         build_password = var.build_password
       })
     }
@@ -117,8 +117,8 @@ build {
 
   provisioner "shell" {
     scripts = [
-      "${path.root}/scripts/setup.sh",
-      "${path.root}/scripts/cleanup.sh",
+      abspath("${path.root}/scripts/setup.sh"),
+      abspath("${path.root}/scripts/cleanup.sh"),
     ]
 
     environment_vars = [
