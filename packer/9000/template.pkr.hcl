@@ -81,12 +81,19 @@ source "proxmox-iso" "template_9000" {
   cloud_init_disk_type                = "ide"
   cloud_init_disable_upgrade_packages = true
 
-  cd_content = {
-    "preseed.cfg" = templatefile("${path.root}/http/preseed.cfg", {
-      build_password = var.build_password
-    })
+  additional_iso_files {
+    type             = "ide"
+    index            = "3"
+    iso_storage_pool = var.iso_storage
+    unmount          = true
+
+    cd_content = {
+      "preseed.cfg" = templatefile("${path.root}/http/preseed.cfg", {
+        build_password = var.build_password
+      })
+    }
+    cd_label = "PACKERPRESEED"
   }
-  cd_label = "PACKERPRESEED"
 
   boot_wait = "10s"
   boot_command = [
