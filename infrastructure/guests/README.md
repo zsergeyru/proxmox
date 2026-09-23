@@ -1,6 +1,6 @@
 # Гостевые системы
 
-`guests/` хранит требуемое состояние и локальную документацию VM/LXC. Этот README объясняет структуру каталога; точная спецификация манифеста находится в [`../docs/300-guests/320-guest-manifest.md`](../docs/300-guests/320-guest-manifest.md).
+`guests/` хранит требуемое состояние и локальную документацию VM/LXC. Этот README объясняет структуру каталога; точная спецификация манифеста находится в [`../../docs/300-guests/320-guest-manifest.md`](../../docs/300-guests/320-guest-manifest.md).
 
 ## Структура
 
@@ -45,7 +45,7 @@ guests/defaults.yaml
 → итоговое требуемое состояние
 ```
 
-Модель построения требуемого состояния описана в [`../docs/300-guests/310-guest-state.md`](../docs/300-guests/310-guest-state.md), формат и поля `guest.yaml` — в [`../docs/300-guests/320-guest-manifest.md`](../docs/300-guests/320-guest-manifest.md), а машинные ограничения — в `../schemas/`.
+Модель построения требуемого состояния описана в [`../../docs/300-guests/310-guest-state.md`](../../docs/300-guests/310-guest-state.md), формат и поля `guest.yaml` — в [`../../docs/300-guests/320-guest-manifest.md`](../../docs/300-guests/320-guest-manifest.md), а машинные ограничения — в `../schemas/`.
 
 Поэтому в этом README не фиксируются номера схем, конкретные подсети и шлюзы, `Template-Version` или списки обязательных полей — они быстро устаревают и принадлежат основной спецификации.
 
@@ -99,7 +99,7 @@ guests/910-infra-manager/
 
 Постоянные данные приложений, состояние текущего запуска, резервные копии и секреты не следует складывать в `rootfs/`.
 
-Общая политика файловой структуры Linux: [`../docs/34-linux-filesystem-layout.md`](../docs/34-linux-filesystem-layout.md).
+Общая политика файловой структуры Linux: [`../../docs/legacy/34-linux-filesystem-layout.md`](../../docs/legacy/34-linux-filesystem-layout.md).
 
 ## Проверка
 
@@ -113,10 +113,10 @@ python scripts/validate_repo.py
 
 ## Связанные документы
 
-- [`../docs/300-guests/340-vmid-plan.md`](../docs/300-guests/340-vmid-plan.md) — план VMID/CTID.
-- [`../docs/23-security.md`](../docs/23-security.md) — SSH-ключи и безопасность.
-- [`../docs/300-guests/310-guest-state.md`](../docs/300-guests/310-guest-state.md) — модель построения требуемого состояния гостя.
-- [`../docs/300-guests/320-guest-manifest.md`](../docs/300-guests/320-guest-manifest.md) — формат и поля `guest.yaml`.
-- [`../docs/300-guests/330-deploy-guest.md`](../docs/300-guests/330-deploy-guest.md) — развёртывание гостевой системы.
-- [`../docs/33-guest-bootstrap-and-provisioning.md`](../docs/33-guest-bootstrap-and-provisioning.md) — начальный доступ, первичная и повторяемая настройка.
+- [`../../docs/300-guests/340-vmid-plan.md`](../../docs/300-guests/340-vmid-plan.md) — план VMID/CTID.
+- [`../../docs/legacy/23-security.md`](../../docs/legacy/23-security.md) — SSH-ключи и безопасность.
+- [`../../docs/300-guests/310-guest-state.md`](../../docs/300-guests/310-guest-state.md) — модель построения требуемого состояния гостя.
+- [`../../docs/300-guests/320-guest-manifest.md`](../../docs/300-guests/320-guest-manifest.md) — формат и поля `guest.yaml`.
+- [`../../docs/300-guests/330-deploy-guest.md`](../../docs/300-guests/330-deploy-guest.md) — развёртывание гостевой системы.
+- [`../../docs/legacy/33-guest-bootstrap-and-provisioning.md`](../../docs/legacy/33-guest-bootstrap-and-provisioning.md) — начальный доступ, первичная и повторяемая настройка.
 - [`../templates/debian13/README.md`](../templates/debian13/README.md) — паспорт Debian-шаблона VM `9000`.
