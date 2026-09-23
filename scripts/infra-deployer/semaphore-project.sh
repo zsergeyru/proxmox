@@ -15,7 +15,7 @@ GITHUB_KEY="/root/.ssh/github_proxmox_repo_ed25519"
 GITHUB_KEY_COPY="${SECRET_DIR}/github_project_ed25519"
 
 PROJECT_REPO="git@github.com:zsergeyru/proxmox.git"
-PROJECT_BRANCH="${INFRA_PROJECT_BRANCH:-infra-iac-redesign}"
+PROJECT_BRANCH="${INFRA_PROJECT_BRANCH:-main}"
 
 COOKIE=""
 AUTH_MODE="cookie"

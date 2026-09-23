@@ -9,13 +9,13 @@
 Обычная установка или повторное применение без параметров выполняется на физическом PVE от `root` сразу из публичного репозитория:
 
 ~~~bash
-curl -fsSL https://raw.githubusercontent.com/zsergeyru/proxmox-bootstrap/infra-iac-redesign/bootstrap-pve.sh | bash
+curl -fsSL https://raw.githubusercontent.com/zsergeyru/proxmox-bootstrap/main/bootstrap-pve.sh | bash
 ~~~
 
 Если нужны параметры, сценарий сначала скачивается:
 
 ~~~bash
-curl -fsSL https://raw.githubusercontent.com/zsergeyru/proxmox-bootstrap/infra-iac-redesign/bootstrap-pve.sh -o bootstrap-pve.sh
+curl -fsSL https://raw.githubusercontent.com/zsergeyru/proxmox-bootstrap/main/bootstrap-pve.sh -o bootstrap-pve.sh
 chmod +x bootstrap-pve.sh
 ~~~
 
@@ -156,7 +156,7 @@ tags:        infra-deployer;proxmox-bootstrap
 git@github.com:zsergeyru/proxmox.git
 ~~~
 
-По умолчанию используется ветка `infra-iac-redesign`. При повторном bootstrap рабочая копия обновляется до текущего состояния этой ветки.
+По умолчанию используется ветка `main`. При повторном bootstrap рабочая копия обновляется до текущего состояния этой ветки.
 
 Основные сценарии:
 
@@ -256,7 +256,7 @@ infra-deployer-pve-lifecycle-test --apply
 Без параметров можно запускать сразу из GitHub:
 
 ~~~bash
-curl -fsSL https://raw.githubusercontent.com/zsergeyru/proxmox-bootstrap/infra-iac-redesign/bootstrap-pve.sh | bash
+curl -fsSL https://raw.githubusercontent.com/zsergeyru/proxmox-bootstrap/main/bootstrap-pve.sh | bash
 ~~~
 
 Для остальных режимов используется скачанный `bootstrap-pve.sh`.
@@ -264,7 +264,7 @@ curl -fsSL https://raw.githubusercontent.com/zsergeyru/proxmox-bootstrap/infra-i
 Скачать:
 
 ~~~bash
-curl -fsSL https://raw.githubusercontent.com/zsergeyru/proxmox-bootstrap/infra-iac-redesign/bootstrap-pve.sh -o bootstrap-pve.sh
+curl -fsSL https://raw.githubusercontent.com/zsergeyru/proxmox-bootstrap/main/bootstrap-pve.sh -o bootstrap-pve.sh
 chmod +x bootstrap-pve.sh
 ~~~
 
