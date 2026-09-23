@@ -652,7 +652,7 @@ features
 
 - [`300-overview.md`](300-overview.md) — общая картина гостевых систем.
 - [`310-guest-state.md`](310-guest-state.md) — правила объединения источников и построения итогового состояния.
-- [`330-deploy-guest.md`](330-deploy-guest.md) — применение построенного состояния и жизненный цикл гостевой системы.
+- [`330-guest-lifecycle.md`](330-guest-lifecycle.md) — применение построенного состояния и жизненный цикл гостевой системы.
 - [`340-vmid-plan.md`](340-vmid-plan.md) — правила функциональной нумерации VMID и CTID.
 - [`390-decisions.md`](390-decisions.md) — причины ключевых решений по гостевому контуру.
 - [`../../infrastructure/guests/README.md`](../../infrastructure/guests/README.md) — структура каталога конкретного гостя.
