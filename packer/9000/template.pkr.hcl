@@ -101,6 +101,9 @@ source "proxmox-iso" "template_9000" {
   ssh_username = "root"
   ssh_password = var.build_password
   ssh_timeout  = "30m"
+
+  shutdown_command = "shutdown -P now"
+  shutdown_timeout = "5m"
 }
 
 build {
