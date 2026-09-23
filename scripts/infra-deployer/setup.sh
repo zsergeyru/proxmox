@@ -17,8 +17,6 @@ SECRET_DIR="${CONFIG_DIR}/secrets"
 CA_DIR="${CONFIG_DIR}/ca"
 DATA_DIR="/var/lib/infra-deployer"
 SEMAPHORE_DIR="${DATA_DIR}/semaphore"
-RUNNER_DIR="${DATA_DIR}/runner"
-RUNNER_TMP_DIR="${RUNNER_DIR}/tmp"
 OPENTOFU_DIR="${DATA_DIR}/opentofu"
 STATE_DIR="${OPENTOFU_DIR}/state"
 OPENTOFU_INPUT="${OPENTOFU_DIR}/guests.json"
@@ -28,7 +26,6 @@ ACCESS_CHECK_COMMAND="/usr/local/sbin/infra-deployer-pve-access-check"
 LIFECYCLE_TEST_COMMAND="/usr/local/sbin/infra-deployer-pve-lifecycle-test"
 
 SERVER_ENV="${SECRET_DIR}/semaphore-server.env"
-RUNNER_ENV="${SECRET_DIR}/semaphore-runner.env"
 PVE_API_ENV="${SECRET_DIR}/pve-api.env"
 ADMIN_PASSWORD_FILE="${SECRET_DIR}/initial-admin-password"
 ADMIN_PASSWORD_SHOWN_FILE="${SECRET_DIR}/.initial-admin-password-shown"
@@ -114,7 +111,7 @@ prepare_directories() {
     install -d -o root -g root -m 0755 "$CONFIG_DIR" "$CA_DIR" "$DATA_DIR" "$COMPOSE_DIR"
     install -d -o root -g root -m 0700 "$SECRET_DIR"
     install -d -o 1001 -g 0 -m 0770 "$SEMAPHORE_DIR"
-    install -d -o 1001 -g 0 -m 0750 "$RUNNER_DIR" "$RUNNER_TMP_DIR" "$OPENTOFU_DIR" "$STATE_DIR"
+    install -d -o 1001 -g 0 -m 0750 "$OPENTOFU_DIR" "$STATE_DIR"
 
     # Semaphore Server в официальном образе работает от UID 1001 и группы 0.
     # Для уже существующего каталога install -d недостаточно: явно восстанавливаем
@@ -192,20 +189,20 @@ EOF_DOCKER
 
 copy_compose_assets() {
     [[ -f "$ASSET_DIR/docker-compose.yml" ]] || die "Не найден docker-compose.yml в проекте"
-    [[ -f "$ASSET_DIR/runner/Dockerfile" ]] || die "Не найден Dockerfile Runner"
-    [[ -f "$ASSET_DIR/runner/requirements.txt" ]] || die "Не найден requirements.txt Runner"
-    [[ -f "$ASSET_DIR/runner/ssh_config" ]] || die "Не найден строгий SSH config Runner"
+    [[ -f "$ASSET_DIR/semaphore/Dockerfile" ]] || die "Не найден Dockerfile Semaphore"
+    [[ -f "$ASSET_DIR/semaphore/requirements.txt" ]] || die "Не найден requirements.txt Semaphore"
+    [[ -f "$ASSET_DIR/semaphore/ssh_config" ]] || die "Не найден строгий SSH config Semaphore"
 
     install -m 0644 "$ASSET_DIR/docker-compose.yml" "$COMPOSE_DIR/docker-compose.yml"
-    install -d -m 0755 "$COMPOSE_DIR/runner"
-    install -m 0644 "$ASSET_DIR/runner/Dockerfile" "$COMPOSE_DIR/runner/Dockerfile"
-    install -m 0644 "$ASSET_DIR/runner/requirements.txt" "$COMPOSE_DIR/runner/requirements.txt"
-    install -m 0644 "$ASSET_DIR/runner/ssh_config" "$COMPOSE_DIR/runner/ssh_config"
+    install -d -m 0755 "$COMPOSE_DIR/semaphore"
+    install -m 0644 "$ASSET_DIR/semaphore/Dockerfile" "$COMPOSE_DIR/semaphore/Dockerfile"
+    install -m 0644 "$ASSET_DIR/semaphore/requirements.txt" "$COMPOSE_DIR/semaphore/requirements.txt"
+    install -m 0644 "$ASSET_DIR/semaphore/ssh_config" "$COMPOSE_DIR/semaphore/ssh_config"
 }
 
-seed_runner_known_hosts() {
+seed_semaphore_known_hosts() {
     local source="/root/.ssh/github_known_hosts"
-    local target="$RUNNER_DIR/known_hosts"
+    local target="$SEMAPHORE_DIR/known_hosts"
 
     if [[ -s "$source" ]]; then
         install -o 1001 -g 0 -m 0644 "$source" "$target"
@@ -261,10 +258,9 @@ random_base64() {
 
 ensure_semaphore_secrets() {
     if [[ ! -f "$SERVER_ENV" ]]; then
-        local admin_password encryption_key runner_registration_token timezone
+        local admin_password encryption_key timezone
         admin_password="$(random_base64 24)"
         encryption_key="$(random_base64 32)"
-        runner_registration_token="$(openssl rand -hex 32)"
         timezone="$(timedatectl show --property=Timezone --value 2>/dev/null || true)"
         [[ -n "$timezone" ]] || timezone="UTC"
 
@@ -277,41 +273,27 @@ SEMAPHORE_ADMIN_PASSWORD=${admin_password}
 SEMAPHORE_ADMIN_NAME=Admin
 SEMAPHORE_ADMIN_EMAIL=admin@localhost
 SEMAPHORE_ACCESS_KEY_ENCRYPTION=${encryption_key}
-SEMAPHORE_USE_REMOTE_RUNNER=True
-SEMAPHORE_RUNNER_REGISTRATION_TOKEN=${runner_registration_token}
 TZ=${timezone}
 EOF_SERVER
 
-        cat >"$RUNNER_ENV" <<EOF_RUNNER
-SEMAPHORE_WEB_ROOT=http://127.0.0.1:3000
-SEMAPHORE_RUNNER_REGISTRATION_TOKEN=${runner_registration_token}
-SEMAPHORE_RUNNER_NAME=infra-deployer
-SEMAPHORE_RUNNER_PRIVATE_KEY_FILE=/var/lib/semaphore/runner.key
-SEMAPHORE_RUNNER_MAX_PARALLEL_TASKS=1
-ANSIBLE_HOST_KEY_CHECKING=True
-SSL_CERT_FILE=/etc/infra-deployer/ca/ca-bundle.crt
-REQUESTS_CA_BUNDLE=/etc/infra-deployer/ca/ca-bundle.crt
-GIT_SSL_CAINFO=/etc/infra-deployer/ca/ca-bundle.crt
-EOF_RUNNER
-
         printf '%s\n' "$admin_password" >"$ADMIN_PASSWORD_FILE"
-        chmod 0600 "$SERVER_ENV" "$RUNNER_ENV" "$ADMIN_PASSWORD_FILE"
+        chmod 0600 "$SERVER_ENV" "$ADMIN_PASSWORD_FILE"
         ok "Созданы первичные секреты Semaphore"
     else
-        [[ -s "$RUNNER_ENV" ]] || die "Есть server env, но отсутствует runner env"
         [[ -s "$ADMIN_PASSWORD_FILE" ]] || die "Есть server env, но отсутствует initial admin password"
 
-        if grep -q '^SEMAPHORE_WEB_ROOT=' "$RUNNER_ENV"; then
-            sed -i 's#^SEMAPHORE_WEB_ROOT=.*#SEMAPHORE_WEB_ROOT=http://127.0.0.1:3000#' "$RUNNER_ENV"
-        else
-            printf '%s\n' 'SEMAPHORE_WEB_ROOT=http://127.0.0.1:3000' >>"$RUNNER_ENV"
-        fi
-        chmod 0600 "$RUNNER_ENV"
+        # Старый вариант использовал отдельный remote Runner. Для одного домашнего
+        # 910 он не нужен: сам Semaphore выполняет задания локально.
+        sed -i \
+            -e '/^SEMAPHORE_USE_REMOTE_RUNNER=/d' \
+            -e '/^SEMAPHORE_RUNNER_REGISTRATION_TOKEN=/d' \
+            "$SERVER_ENV"
+        rm -f "$SECRET_DIR/semaphore-runner.env"
+        chmod 0600 "$SERVER_ENV"
 
         ok "Используются существующие секреты Semaphore"
     fi
 }
-
 prepare_opentofu_input() {
     log "Подготовка итогового состояния гостей для OpenTofu"
 
@@ -373,14 +355,15 @@ repair_semaphore_storage() {
 
 deploy_semaphore() {
     log "Сборка и запуск Semaphore"
-    run_logged compose pull semaphore
 
-    # Старый процесс мог открыть SQLite до исправления прав. Останавливаем
-    # контейнеры, восстанавливаем доступ и только затем открываем базу заново.
-    compose stop semaphore runner >/dev/null 2>&1 || true
+    # Базовый образ нужен и для восстановления прав хранилища, и для сборки
+    # нашего единственного контейнера с OpenTofu/Packer/Ansible.
+    run_logged docker pull "semaphoreui/semaphore:${SEMAPHORE_VERSION}"
+
+    compose stop semaphore >/dev/null 2>&1 || true
     repair_semaphore_storage
 
-    run_logged compose build --pull runner
+    run_logged compose build --pull semaphore
     run_logged compose up -d --remove-orphans
 }
 
@@ -403,13 +386,9 @@ wait_semaphore() {
 
     sleep 5
 
-    [[ "$(docker inspect -f '{{.State.Running}}' infra-deployer-semaphore 2>/dev/null || true)" == "true" ]]         || die "Semaphore Server container не запущен"
-    [[ "$(docker inspect -f '{{.State.Running}}' infra-deployer-runner 2>/dev/null || true)" == "true" ]]         || {
-            compose logs --tail=100 runner >>"$LOG_FILE" 2>&1 || true
-            die "Semaphore Runner container не запущен"
-        }
+    [[ "$(docker inspect -f '{{.State.Running}}' infra-deployer-semaphore 2>/dev/null || true)" == "true" ]]         || die "Semaphore container не запущен"
 
-    ok "Semaphore Server и Runner запущены"
+    ok "Semaphore запущен"
 }
 
 configure_semaphore_project() {
@@ -435,13 +414,13 @@ install_local_commands() {
     ln -sfn "$LIFECYCLE_TEST_COMMAND" /usr/local/bin/infra-deployer-pve-lifecycle-test
 }
 
-verify_runner_tools() {
-    log "Проверка инструментов Runner"
+verify_semaphore_tools() {
+    log "Проверка инструментов Semaphore"
 
-    docker exec infra-deployer-runner tofu version >/dev/null         || die "OpenTofu отсутствует в Runner"
-    docker exec infra-deployer-runner packer version >/dev/null         || die "Packer отсутствует в Runner"
-    docker exec infra-deployer-runner ansible --version >/dev/null         || die "Ansible отсутствует в Runner"
-    docker exec infra-deployer-runner python3 -c 'import proxmoxer'         || die "Python-модуль proxmoxer отсутствует в Runner"
+    docker exec infra-deployer-semaphore tofu version >/dev/null         || die "OpenTofu отсутствует в Semaphore"
+    docker exec infra-deployer-semaphore packer version >/dev/null         || die "Packer отсутствует в Semaphore"
+    docker exec infra-deployer-semaphore ansible --version >/dev/null         || die "Ansible отсутствует в Semaphore"
+    docker exec infra-deployer-semaphore python3 -c 'import proxmoxer'         || die "Python-модуль proxmoxer отсутствует в Semaphore"
 
     ok "OpenTofu, Packer, Ansible и proxmoxer доступны"
 }
@@ -476,7 +455,7 @@ main() {
     ensure_base_packages
     install_docker
     copy_compose_assets
-    seed_runner_known_hosts
+    seed_semaphore_known_hosts
     generate_ca_bundle
     persist_pve_api_secret
     ensure_semaphore_secrets
@@ -484,7 +463,7 @@ main() {
     write_runtime_versions
     deploy_semaphore
     wait_semaphore
-    verify_runner_tools
+    verify_semaphore_tools
     configure_semaphore_project
     install_local_commands
     "$STATUS_COMMAND"
