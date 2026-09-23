@@ -137,6 +137,7 @@ Token создаётся с `privsep=1` и получает только соб�
 | `/vms` | `PVEVMAdmin` |
 | `/pool/managed` | `PVEVMAdmin` |
 | `/storage/local-lvm` | `PVEDatastoreUser` |
+| `/storage/local` | `PVEDatastoreAdmin` |
 | `/sdn/zones/localnetwork/vmbr0` | `PVESDNUser` |
 
 Подробный контракт доступа находится в `700-security/710-pve-access.md`.
