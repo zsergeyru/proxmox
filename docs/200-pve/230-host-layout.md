@@ -42,9 +42,9 @@ Public bootstrap читает штатное состояние Proxmox чере
 К проектной основе относятся:
 
 ```text
-LXC 910 infra-deployer
+LXC 910 infra-manager
 pool managed
-API token root@pam!infra-deployer
+API token root@pam!infra-manager
 ACL этого token
 Debian 13 LXC template в local:vztmpl
 ```
@@ -80,9 +80,9 @@ Debian 13 LXC template в local:vztmpl
 Постоянные данные разворачивателя находятся внутри 910:
 
 ```text
-/etc/infra-deployer/
-/var/lib/infra-deployer/
-/opt/infra-deployer/
+/etc/infra-manager/
+/var/lib/infra-manager/
+/opt/infra-manager/
 ```
 
 Там находятся секреты, Semaphore, OpenTofu state и рабочая конфигурация инфраструктурного контура.
@@ -94,4 +94,4 @@ Debian 13 LXC template в local:vztmpl
 - [`210-host-bootstrap.md`](210-host-bootstrap.md) — создание 910.
 - [`220-host-configuration.md`](220-host-configuration.md) — минимальный контракт PVE.
 - [`../700-security/710-pve-access.md`](../700-security/710-pve-access.md) — token и ACL.
-- [`../../guests/910-infra-deployer/README.md`](../../guests/910-infra-deployer/README.md) — постоянные данные 910.
+- [`../../guests/910-infra-manager/README.md`](../../guests/910-infra-manager/README.md) — постоянные данные 910.
