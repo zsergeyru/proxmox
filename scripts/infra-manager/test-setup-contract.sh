@@ -110,7 +110,16 @@ if f"ARG OPENTOFU_VERSION={opentofu_version}" not in dockerfile_text:
 if f"ARG PACKER_VERSION={packer_version}" not in dockerfile_text:
     raise SystemExit("Версия Packer в Dockerfile расходится с provision.yaml")
 system_packages = set(runtime.get("system_packages", []))
-if "xorriso" in system_packages or "xorriso" in dockerfile_text:
+expected_runtime_packages = {
+    "ca-certificates", "curl", "unzip", "git", "openssh-client",
+    "bash", "jq", "openssl", "python3", "py3-pip", "ansible",
+}
+if system_packages != expected_runtime_packages:
+    raise SystemExit(f"неожиданный список пакетов infra-runtime: {sorted(system_packages)}")
+for package in expected_runtime_packages:
+    if package not in dockerfile_text:
+        raise SystemExit(f"Dockerfile infra-runtime не обеспечивает пакет: {package}")
+if "xorriso" in dockerfile_text:
     raise SystemExit("xorriso не нужен: preseed передаётся штатным HTTP-сервером Packer")
 if f'OPENTOFU_VERSION="{opentofu_version}"' not in setup_text:
     raise SystemExit("Версия OpenTofu в setup.sh расходится с provision.yaml")
