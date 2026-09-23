@@ -47,6 +47,7 @@ docker:
       image: infra-deployer-runner:v2.18.30
       base_image: semaphoreui/runner:v2.18.30
       restart: unless-stopped
+      network_mode: host
 
       system_packages:
         - ca-certificates
@@ -57,7 +58,6 @@ docker:
         - bash
         - python3
         - py3-pip
-        - xorriso
 
       tools:
         ansible: bundled-with-semaphore-runner
