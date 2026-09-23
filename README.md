@@ -328,7 +328,7 @@ proxmox/
 ├── guests/      описание VM/LXC
 ├── host/pve/    состояние физического PVE
 ├── scripts/     сценарии управления и проверки
-├── templates/   шаблоны
+├── packer/      Packer-шаблоны VM
 ├── ansible/     повторяемая настройка Linux-гостей
 ├── schemas/     схемы guest/defaults/effective
 └── archive/     исторические материалы
