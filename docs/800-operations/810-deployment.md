@@ -73,7 +73,8 @@ Proxmox Infrastructure
 - SSH credential `GitHub project read-only`;
 - Git repository `git@github.com:zsergeyru/proxmox.git`;
 - Variable Group `OpenTofu PVE`;
-- шаблон `OpenTofu Plan`.
+- шаблон `OpenTofu Plan`;
+- шаблон `Build Template 9000`.
 
 PVE API token не дублируется в Key Store. Он передаётся OpenTofu как секрет Variable Group:
 
@@ -98,6 +99,18 @@ Runner содержит:
 - OpenSSH client.
 
 Он является штатным исполнителем инфраструктурных заданий.
+
+Для сборки базового шаблона используется простой путь:
+
+```text
+Semaphore: Build Template 9000
+→ scripts/infra-deployer/build-template.sh 9000
+→ Packer
+→ tpl-debian13 (9000, Template-Version 8)
+→ короткая проверка Full Clone через 9099
+```
+
+Packer использует установочный Debian ISO. Файл `preseed.cfg` временно отдаётся установщику самим Runner по HTTP; отдельный постоянный сервис для этого не создаётся.
 
 Одновременно допускается только одно задание, изменяющее основное состояние OpenTofu.
 
