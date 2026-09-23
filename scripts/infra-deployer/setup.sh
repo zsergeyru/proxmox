@@ -44,6 +44,7 @@ C_RESET=""
 C_BOLD=""
 C_GREEN=""
 C_BLUE=""
+C_CYAN=""
 C_RED=""
 
 if [[ "${INFRA_DEPLOYER_COLOR:-0}" == "1" && "${NO_COLOR:-}" == "" ]]; then
@@ -51,6 +52,7 @@ if [[ "${INFRA_DEPLOYER_COLOR:-0}" == "1" && "${NO_COLOR:-}" == "" ]]; then
     C_BOLD="$(printf '\033[1m')"
     C_GREEN="$(printf '\033[32m')"
     C_BLUE="$(printf '\033[34m')"
+    C_CYAN="$(printf '\033[36m')"
     C_RED="$(printf '\033[31m')"
 fi
 
@@ -70,7 +72,7 @@ ok() {
 
 info() {
     write_log "ИНФО: $*"
-    printf '[ИНФО] %s\n' "$*"
+    printf '%s%s[ИНФО]%s %s\n' "$C_BOLD" "$C_CYAN" "$C_RESET" "$*"
 }
 
 die() {
