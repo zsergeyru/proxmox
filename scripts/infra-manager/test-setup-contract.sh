@@ -4,6 +4,9 @@ set -Eeuo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SETUP="$ROOT/scripts/infra-manager/setup.sh"
 PY_SETUP="$ROOT/scripts/infra-manager/infra_manager/setup.py"
+PY_SEMAPHORE="$ROOT/scripts/infra-manager/infra_manager/semaphore.py"
+PY_STATUS="$ROOT/scripts/infra-manager/infra_manager/status.py"
+PY_PVE="$ROOT/scripts/infra-manager/infra_manager/pve.py"
 STATUS="$ROOT/scripts/infra-manager/status.sh"
 ACCESS="$ROOT/scripts/infra-manager/check-pve-access.sh"
 LIFECYCLE="$ROOT/scripts/infra-manager/test-pve-lifecycle.sh"
@@ -23,7 +26,7 @@ SSH_CONFIG="$ROOT/guests/910-infra-manager/compose/runtime/ssh_config"
 die() { printf 'ОШИБКА: %s\n' "$*" >&2; exit 1; }
 ok()  { printf '[ОК] %s\n' "$*"; }
 
-for file in "$SETUP" "$PY_SETUP" "$STATUS" "$ACCESS" "$LIFECYCLE" "$BUILD_TEMPLATE" "$TEST_TEMPLATE" "$COMPOSE" "$DOCKERFILE" "$REQ" "$PLAN" "$SEMAPHORE_PROJECT" "$PVE_BOOTSTRAP_ACCESS" "$OPENTOFU_LOCK" "$GUEST_MANIFEST" "$PROVISION" "$SSH_CONFIG"; do
+for file in "$SETUP" "$PY_SETUP" "$PY_SEMAPHORE" "$PY_STATUS" "$PY_PVE" "$STATUS" "$ACCESS" "$LIFECYCLE" "$BUILD_TEMPLATE" "$TEST_TEMPLATE" "$COMPOSE" "$DOCKERFILE" "$REQ" "$PLAN" "$SEMAPHORE_PROJECT" "$PVE_BOOTSTRAP_ACCESS" "$OPENTOFU_LOCK" "$GUEST_MANIFEST" "$PROVISION" "$SSH_CONFIG"; do
     [[ -s "$file" ]] || die "Отсутствует обязательный файл: $file"
 done
 
@@ -173,11 +176,11 @@ grep -q 'render-opentofu-input.py' "$PY_SETUP" \
 grep -q 'Используется существующий постоянный PVE API credential' "$PY_SETUP" \
     || die "Повторное обновление 910 должно работать без staging PVE secret"
 grep -q 'semaphore-project.sh' "$PY_SETUP" \
-    || die "На этапе 2 должен использоваться существующий semaphore-project.sh"
+    || die "setup должен вызывать совместимый semaphore-project wrapper"
 grep -q 'status.sh' "$PY_SETUP" \
-    || die "На этапе 2 должен использоваться существующий status.sh"
+    || die "setup должен устанавливать совместимый status wrapper"
 grep -q 'check-pve-access.sh' "$PY_SETUP" \
-    || die "На этапе 2 должен использоваться существующий PVE access check"
+    || die "setup должен устанавливать совместимый PVE access wrapper"
 grep -q 'test-pve-lifecycle.sh' "$PY_SETUP" \
     || die "На этапе 2 должен использоваться существующий lifecycle test"
 
@@ -214,7 +217,7 @@ fi
 if grep -q 'InfraManagedGuest' "$PVE_BOOTSTRAP_ACCESS" "$SETUP" "$PY_SETUP" "$SEMAPHORE_PROJECT"; then
     die "Старая собственная роль PVE не должна присутствовать в чистой схеме"
 fi
-if grep -q 'PVE API automation\|Ansible managed guests' "$SEMAPHORE_PROJECT"; then
+if grep -q 'PVE API automation\|Ansible managed guests' "$PY_SEMAPHORE"; then
     die "Неиспользуемые Semaphore credentials не должны создаваться"
 fi
 
@@ -237,15 +240,23 @@ grep -q '"1001:0"' "$PY_SETUP" \
 grep -q '"packer", "version"' "$PY_SETUP" \
     || die "Packer должен проверяться внутри infra-runtime"
 
-grep -q 'PROJECT_ID_FILE="/var/lib/infra-manager/semaphore-project-id"' "$SEMAPHORE_PROJECT" \
+grep -Fq 'exec python3 -m infra_manager semaphore-project "$@"' "$SEMAPHORE_PROJECT" \
+    || die "semaphore-project.sh должен быть тонким Python wrapper"
+grep -Fq 'exec python3 -m infra_manager status "$@"' "$STATUS" \
+    || die "status.sh должен быть тонким Python wrapper"
+grep -Fq 'exec python3 -m infra_manager pve-access-check "$@"' "$ACCESS" \
+    || die "check-pve-access.sh должен быть тонким Python wrapper"
+for wrapper in "$SEMAPHORE_PROJECT" "$STATUS" "$ACCESS"; do
+    grep -Fq '/var/lib/infra-manager/bootstrap-repo/scripts/infra-manager' "$wrapper" \
+        || die "Установленный wrapper должен находить Python package в canonical checkout"
+done
+
+grep -q 'PROJECT_ID_FILE = Path("/var/lib/infra-manager/semaphore-project-id")' "$PY_SEMAPHORE" \
     || die "Semaphore project-id должен храниться вне каталога SQLite"
-grep -q 'PROJECT_ID_FILE="/var/lib/infra-manager/semaphore-project-id"' "$STATUS" \
-    || die "status.sh должен читать Semaphore project-id из постоянного служебного пути"
-if grep -q '/var/lib/infra-manager/semaphore/project-id' "$SEMAPHORE_PROJECT" "$STATUS"; then
+grep -q 'PROJECT_ID_FILE = Path("/var/lib/infra-manager/semaphore-project-id")' "$PY_STATUS" \
+    || die "Python status должен читать постоянный Semaphore project-id"
+if grep -q '/var/lib/infra-manager/semaphore/project-id' "$PY_SEMAPHORE" "$PY_STATUS"; then
     die "project-id запрещено хранить внутри каталога SQLite Semaphore"
-fi
-if grep -qE 'install -d .*\$\(dirname "\$PROJECT_ID_FILE"\)' "$SEMAPHORE_PROJECT"; then
-    die "semaphore-project.sh не должен менять права родительского каталога project-id"
 fi
 
 grep -q '/etc/semaphore/requirements.txt' "$DOCKERFILE" \
@@ -253,27 +264,31 @@ grep -q '/etc/semaphore/requirements.txt' "$DOCKERFILE" \
 grep -q '^proxmoxer' "$REQ" \
     || die "Semaphore должен содержать proxmoxer"
 
-grep -q 'infra-manager-status --full' "$STATUS" \
-    || die "status.sh должен поддерживать отдельную полную проверку прав"
-grep -q 'api2/json/version' "$STATUS" \
-    || die "Базовый status должен реально проверять PVE API credential"
-grep -q 'GitHub project read-only' "$STATUS" \
-    || die "status.sh должен проверять GitHub SSH key Semaphore"
-grep -q 'PROJECT_REPO="git@github.com:zsergeyru/proxmox.git"' "$STATUS" \
-    || die "status.sh должен проверять Git repository Semaphore"
-grep -Fq 'repositories/${PROJECT_REPO_ID}/branches' "$STATUS" \
-    || die "status.sh должен реально проверять доступ Semaphore к Git repository"
-grep -Fq 'docker exec --user 1001:0 infra-runtime mkdir -p "/tmp/semaphore/project_${PROJECT_ID}"' "$STATUS" \
-    || die "status.sh должен готовить каталог ssh-agent перед проверкой веток Semaphore"
-grep -Fq 'require_permissions "/vms" "$VM_ADMIN_PRIVS"' "$ACCESS" \
+grep -q '"--full"' "$ROOT/scripts/infra-manager/infra_manager/cli.py" \
+    || die "Python status должен поддерживать --full"
+grep -q 'GitHub project read-only' "$PY_STATUS" \
+    || die "Python status должен проверять GitHub SSH key Semaphore"
+grep -q 'PROJECT_REPO' "$PY_STATUS" \
+    || die "Python status должен проверять Git repository Semaphore"
+grep -q '/branches' "$PY_STATUS" \
+    || die "Python status должен реально проверять доступ Semaphore к Git repository"
+grep -q '"1001:0"' "$PY_STATUS" \
+    || die "Python status должен готовить каталог ssh-agent от uid 1001"
+grep -q 'PveClient' "$PY_STATUS" \
+    || die "Базовый Python status должен реально проверять PVE API credential"
+grep -q 'check_access(quiet=True)' "$PY_STATUS" \
+    || die "status --full должен проверять полный контракт PVE API"
+
+grep -q 'VM_ADMIN_PRIVS = {' "$PY_PVE" \
+    || die "Python PVE access check должен содержать контракт VM privileges"
+grep -Fq 'require_permissions(client, "/vms", VM_ADMIN_PRIVS)' "$PY_PVE" \
     || die "Полная проверка PVE access должна требовать управление всеми VM/LXC через /vms"
-grep -Fq 'require_permissions "/pool/$MANAGED_POOL" "Pool.Audit VM.Allocate"' "$ACCESS" \
-    || die "Полная проверка PVE access должна проверять назначение гостей в managed"
-grep -Fq 'require_permissions "/storage/local" "Datastore.Audit Datastore.AllocateSpace Datastore.AllocateTemplate"' "$ACCESS" \
+grep -q 'f"/pool/{MANAGED_POOL}"' "$PY_PVE" \
+    || die "Полная проверка PVE access должна проверять managed pool"
+grep -q '"/storage/local"' "$PY_PVE" \
     || die "Полная проверка PVE access должна проверять права Packer на ISO storage"
-if grep -q '^forbid_unmanaged_guest_mutation() {' "$ACCESS"; then
-    die "Проверка 910 больше не должна запрещать изменения VM/LXC вне managed"
-fi
+grep -q 'forbid_permissions(client, "/", FORBIDDEN_ROOT_PRIVS)' "$PY_PVE" \
+    || die "Полная проверка PVE access должна запрещать административные root privileges"
 
 if grep -qE '(^|[[:space:]])pct create[[:space:]]+910|(^|[[:space:]])qm create[[:space:]]+910' "$SETUP" "$PY_SETUP"; then
     die "Приватный setup не должен создавать виртуальный объект 910"
@@ -304,50 +319,36 @@ grep -q 'provider "registry.opentofu.org/bpg/proxmox"' "$OPENTOFU_LOCK" \
 grep -q 'version     = "0.112.0"' "$OPENTOFU_LOCK" \
     || die "OpenTofu lock file должен фиксировать bpg/proxmox 0.112.0"
 
-grep -q 'OPENTOFU_ENV_NAME="OpenTofu PVE"' "$SEMAPHORE_PROJECT" \
+grep -q 'OPENTOFU_ENV_NAME = "OpenTofu PVE"' "$PY_SEMAPHORE" \
     || die "Semaphore должен создавать Variable Group OpenTofu PVE"
-grep -q 'TF_VAR_pve_endpoint' "$SEMAPHORE_PROJECT" \
+grep -q 'TF_VAR_pve_endpoint' "$PY_SEMAPHORE" \
     || die "Variable Group должен передавать pve_endpoint"
-grep -q 'TF_VAR_pve_api_token' "$SEMAPHORE_PROJECT" \
+grep -q 'TF_VAR_pve_api_token' "$PY_SEMAPHORE" \
     || die "Variable Group должен передавать pve_api_token"
-grep -q 'operation:"update"' "$SEMAPHORE_PROJECT" \
-    || die "Существующий PVE token в Variable Group должен синхронизироваться при обычном обновлении"
-grep -q 'override_secret:true' "$SEMAPHORE_PROJECT" \
-    || die "Существующий GitHub SSH key должен обновлять секретную часть в Semaphore"
-grep -q 'local name="OpenTofu Plan"' "$SEMAPHORE_PROJECT" \
+grep -q '"operation": "update"' "$PY_SEMAPHORE" \
+    || die "Существующий PVE token в Variable Group должен синхронизироваться"
+grep -q '"override_secret": True' "$PY_SEMAPHORE" \
+    || die "Существующий GitHub SSH key должен обновлять секретную часть"
+grep -q 'name="OpenTofu Plan"' "$PY_SEMAPHORE" \
     || die "Semaphore должен создавать шаблон OpenTofu Plan"
-grep -q 'opentofu_plan_template_id="$(ensure_opentofu_plan_template ' "$SEMAPHORE_PROJECT" \
-    || die "main semaphore-project.sh обязан вызывать создание шаблона OpenTofu Plan"
-grep -q 'scripts/infra-manager/opentofu-plan.sh' "$SEMAPHORE_PROJECT" \
+grep -q 'scripts/infra-manager/opentofu-plan.sh' "$PY_SEMAPHORE" \
     || die "OpenTofu Plan должен запускать отдельный безопасный сценарий"
-grep -q 'local name="Build Template 9000"' "$SEMAPHORE_PROJECT" \
+grep -q 'name="Build Template 9000"' "$PY_SEMAPHORE" \
     || die "Semaphore должен создавать задание Build Template 9000"
-grep -q 'scripts/infra-manager/build-template.sh' "$SEMAPHORE_PROJECT" \
+grep -q 'scripts/infra-manager/build-template.sh' "$PY_SEMAPHORE" \
     || die "Build Template 9000 должен запускать отдельный сценарий Packer"
-grep -Fq 'arguments:"[\"9000\"]"' "$SEMAPHORE_PROJECT" \
+grep -Fq "arguments='[\"9000\"]'" "$PY_SEMAPHORE" \
     || die "Build Template 9000 должен иметь фиксированный VMID 9000"
-
-if grep -q '^ensure_pve_key() {' "$SEMAPHORE_PROJECT"; then
-    die "Отдельный PVE credential в Semaphore Key Store больше не нужен"
-fi
-if grep -q '^ensure_ansible_key() {' "$SEMAPHORE_PROJECT"; then
-    die "Ansible SSH credential не должен создаваться до появления Ansible-задач"
-fi
-grep -q 'allow_override_args_in_task:false' "$SEMAPHORE_PROJECT" \
-    || die "OpenTofu Plan не должен разрешать переопределение аргументов"
-grep -q 'allow_override_branch_in_task:false' "$SEMAPHORE_PROJECT" \
-    || die "OpenTofu Plan не должен разрешать переопределение Git-ветки"
-
-grep -q '^shopt -s inherit_errexit$' "$SEMAPHORE_PROJECT" \
-    || die "Ошибки API внутри командных подстановок должны останавливать semaphore-project.sh"
-grep -q '^unique_id_by_name() {' "$SEMAPHORE_PROJECT" \
-    || die "Semaphore setup должен останавливать настройку при дубликатах объектов"
-grep -Fq 'unique_id_by_name "$repos" "proxmox" "Git repository"' "$SEMAPHORE_PROJECT" \
-    || die "Git repository Semaphore должен проверяться на дубликаты"
-grep -q "'{id:\$id,name:\$name,project_id:\$project_id,git_url:\$git_url" "$SEMAPHORE_PROJECT" \
+grep -q '"allow_override_args_in_task": False' "$PY_SEMAPHORE" \
+    || die "Semaphore tasks не должны разрешать переопределение аргументов"
+grep -q '"allow_override_branch_in_task": False' "$PY_SEMAPHORE" \
+    || die "Semaphore tasks не должны разрешать переопределение Git-ветки"
+grep -q 'def unique_by_name' "$PY_SEMAPHORE" \
+    || die "Semaphore setup должен явно останавливать настройку при дубликатах"
+grep -q '{"id": repository_id, \*\*payload}' "$PY_SEMAPHORE" \
     || die "PUT Git repository должен передавать repository id в теле"
-grep -q 'id:\$id,' "$SEMAPHORE_PROJECT" \
-    || die "PUT OpenTofu Plan должен передавать template id в теле"
+grep -q '{"id": template_id, \*\*payload}' "$PY_SEMAPHORE" \
+    || die "PUT Semaphore template должен передавать template id в теле"
 
 python3 - "$COMPOSE" <<'PY'
 from pathlib import Path
