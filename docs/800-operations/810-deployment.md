@@ -72,15 +72,15 @@ Proxmox Infrastructure
 
 - SSH credential `GitHub project read-only`;
 - Git repository `git@github.com:zsergeyru/proxmox.git`;
-- Variable Group `OpenTofu PVE`;
+- Variable Group `PVE API`;
 - шаблон `OpenTofu Plan`;
 - шаблон `Build Template 9000`.
 
 PVE API token не дублируется в Key Store. Он передаётся OpenTofu как секрет Variable Group:
 
 ```text
-TF_VAR_pve_endpoint
-TF_VAR_pve_api_token
+PVE_API_URL
+PVE_API_TOKEN
 ```
 
 Ansible SSH credential не создаётся заранее. Он появится только вместе с первой реальной Ansible-задачей, которой такой доступ понадобится.
