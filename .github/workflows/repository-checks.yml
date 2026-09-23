@@ -46,10 +46,6 @@ jobs:
             scripts/tests/test-infra-manager-python.py \
             scripts/tests/test-opentofu-input.py \
             scripts/tests/test-guest-bootstrap.py \
-            scripts/tests/test-sync-management-keys.py \
-            scripts/tests/test-deploy-guest.py \
-            scripts/pve/sync-management-keys.py \
-            scripts/pve/deploy-guest.py
 
       - name: Run infra-manager Python foundation checks
         run: python scripts/tests/test-infra-manager-python.py
@@ -59,12 +55,6 @@ jobs:
 
       - name: Run Guest Bootstrap v1 contract checks
         run: python scripts/tests/test-guest-bootstrap.py
-
-      - name: Run sync-management-keys unit checks
-        run: python scripts/tests/test-sync-management-keys.py
-
-      - name: Run deploy-guest unit checks
-        run: python scripts/tests/test-deploy-guest.py
 
       - name: Validate shell syntax
         run: |
@@ -95,6 +85,12 @@ jobs:
 
       - name: Run infra-manager contract checks
         run: bash scripts/infra-manager/test-setup-contract.sh
+
+      - name: Reject obsolete direct PVE deployment path
+        run: |
+          test ! -e scripts/pve
+          test ! -e scripts/tests/test-deploy-guest.py
+          test ! -e scripts/tests/test-sync-management-keys.py
 
       - name: Set up Packer
         run: |
@@ -165,27 +161,6 @@ jobs:
           docker run --rm infra-runtime:test tofu version
           docker run --rm infra-runtime:test packer version
           docker run --rm --entrypoint python3 infra-runtime:test -c 'import proxmoxer'
-
-      - name: Run deploy runtime contract checks
-        run: bash scripts/pve/setup/tests/test-deploy-runtime-contract.sh
-
-      - name: Run management key registry unit checks
-        run: sudo bash scripts/pve/setup/tests/test-management-key-registry.sh
-
-      - name: Run sync-management-keys tooling contract checks
-        run: bash scripts/pve/setup/tests/test-sync-management-keys-tooling.sh
-
-      - name: Run AI permission boundary checks
-        run: bash scripts/pve/setup/tests/test-access-boundaries.sh
-
-      - name: Run API token rollback unit checks
-        run: bash scripts/pve/setup/tests/test-token-rollback.sh
-
-      - name: Run canonical repo safety checks
-        run: bash scripts/pve/setup/tests/test-runtime-repo-safety.sh
-
-      - name: Run source trust boundary checks
-        run: sudo bash scripts/pve/setup/tests/test-source-trust.sh
 
       - name: Verify malformed guest directory is rejected
         run: |
