@@ -92,7 +92,7 @@ access:
     identity: root@pam!infra-deployer
     privilege_separation: true
     verify_tls: true
-    managed_scope: managed
+    guest_scope: /vms
 
   github:
     repository: git@github.com:zsergeyru/proxmox.git
