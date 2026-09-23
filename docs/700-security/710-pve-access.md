@@ -196,4 +196,4 @@ infra-manager-pve-lifecycle-test --apply
 - [`700-overview.md`](700-overview.md) — общая модель безопасности.
 - [`../200-pve/210-host-bootstrap.md`](../200-pve/210-host-bootstrap.md) — создание 910 и token.
 - [`../800-operations/810-deployment.md`](../800-operations/810-deployment.md) — штатный процесс развёртывания.
-- [`../../guests/910-infra-manager/README.md`](../../guests/910-infra-manager/README.md) — паспорт 910.
+- [`../../infrastructure/guests/910-infra-manager/README.md`](../../infrastructure/guests/910-infra-manager/README.md) — паспорт 910.
