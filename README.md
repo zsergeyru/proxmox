@@ -53,12 +53,12 @@ GitHub public: zsergeyru/proxmox-bootstrap
                          │
                          ├── закрытый repo zsergeyru/proxmox
                          ├── Docker
-                         ├── Semaphore Server
-                         ├── Semaphore Runner
-                         ├── OpenTofu
-                         ├── Ansible
-                         ├── Packer
-                         └── proxmoxer
+                         └── infra-runtime
+                             ├── Semaphore
+                             ├── OpenTofu
+                             ├── Ansible
+                             ├── Packer
+                             └── proxmoxer
                                   │
                                   ▼
                               PVE API
@@ -184,19 +184,20 @@ privsep=1
 | Путь | Роль | Назначение |
 |---|---|---|
 | `/` | `PVEAuditor` | чтение состояния PVE |
-| `/pool/managed` | `PVEVMAdmin` | управление обычными VM/LXC проекта |
-| `/storage/local-lvm` | `PVEDatastoreUser` | использование хранилища |
+| `/vms` | `PVEVMAdmin` | жизненный цикл и конфигурация всех VM/LXC |
+| `/pool/managed` | `PVEVMAdmin`, `PVEPoolUser` | управление гостями, назначение в pool и чтение pool |
+| `/storage/local-lvm` | `PVEDatastoreUser` | размещение дисков |
+| `/storage/local` | `PVEDatastoreAdmin` | загрузка установочных ISO Packer |
 | `/sdn/zones/localnetwork/vmbr0` | `PVESDNUser` | использование основной сети |
 
-910 находится вне `managed`.
+`managed` больше не является границей прав 910: основной доступ к гостям задаётся на `/vms`. Сам 910 находится вне `managed`.
 
 Подробнее: [`docs/700-security/710-pve-access.md`](docs/700-security/710-pve-access.md).
 
 ## Что работает внутри 910
 
 ~~~text
-Semaphore Server v2.18.30
-Semaphore Runner v2.18.30
+Semaphore v2.18.30 (локальное выполнение заданий в infra-runtime)
 SQLite
 OpenTofu 1.12.6
 Packer 1.15.4
@@ -229,6 +230,7 @@ Project
 Git repository proxmox
 OpenTofu PVE Variable Group
 OpenTofu Plan
+Build Template 9000
 ~~~
 
 Ansible credential заранее не создаётся. Он добавляется только вместе с первой реальной Ansible-задачей.
