@@ -33,9 +33,9 @@ docker:
   compose_file: compose/docker-compose.yml
 
   services:
-    semaphore:
+    runtime:
       container_name: infra-runtime
-      image: infra-runtime:v2.18.30
+      image: infra-runtime:v1
       base_image: semaphoreui/semaphore:v2.18.30
       restart: unless-stopped
       network_mode: host
@@ -51,9 +51,10 @@ docker:
         - bash
         - python3
         - py3-pip
+        - ansible
 
       tools:
-        ansible: bundled-with-semaphore
+        ansible: alpine-package
         opentofu: "1.12.6"
         packer: "1.15.4"
 
