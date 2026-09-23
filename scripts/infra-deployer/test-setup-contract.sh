@@ -171,6 +171,11 @@ for role in PVEAuditor PVEVMAdmin PVEDatastoreUser PVESDNUser; do
     grep -q "\"$role\"" "$PVE_BOOTSTRAP_ACCESS" \
         || die "В PVE bootstrap access отсутствует штатная роль $role"
 done
+
+grep -Fq 'ensure_token_acl "/vms" "PVEVMAdmin"' "$PVE_BOOTSTRAP_ACCESS" \
+    || die "910 должен получать PVEVMAdmin на /vms"
+grep -Fq 'remove_token_acl_if_exists "/pool/$MANAGED_POOL" "PVEVMAdmin"' "$PVE_BOOTSTRAP_ACCESS" \
+    || die "Старый PVEVMAdmin на /pool/managed должен удаляться после перехода на /vms"
 if grep -q 'pveum user add.*infra-deployer@pve' "$PVE_BOOTSTRAP_ACCESS"; then
     die "Отдельный пользователь infra-deployer@pve больше не должен создаваться"
 fi
@@ -226,10 +231,11 @@ grep -q 'GitHub project read-only' "$STATUS" \
     || die "status.sh должен проверять GitHub SSH key Semaphore"
 grep -q 'PROJECT_REPO="git@github.com:zsergeyru/proxmox.git"' "$STATUS" \
     || die "status.sh должен проверять Git repository Semaphore"
-grep -q '^forbid_unmanaged_guest_mutation() {' "$ACCESS" \
-    || die "Полная проверка PVE access должна запрещать изменения вне managed"
-grep -q '/cluster/resources?type=vm' "$ACCESS" \
-    || die "Проверка PVE access должна просматривать все существующие VM/LXC"
+grep -Fq 'require_permissions "/vms" "$VM_ADMIN_PRIVS"' "$ACCESS" \
+    || die "Полная проверка PVE access должна требовать управление всеми VM/LXC через /vms"
+if grep -q '^forbid_unmanaged_guest_mutation() {' "$ACCESS"; then
+    die "Проверка 910 больше не должна запрещать изменения VM/LXC вне managed"
+fi
 
 if grep -qE '(^|[[:space:]])pct create[[:space:]]+910|(^|[[:space:]])qm create[[:space:]]+910' "$SETUP"; then
     die "Приватный setup не должен создавать виртуальный объект 910"
