@@ -95,6 +95,7 @@ access:
     verify_tls: true
     guest_scope: /vms
     managed_pool_assignment: managed
+    iso_storage: local
 
   github:
     repository: git@github.com:zsergeyru/proxmox.git
