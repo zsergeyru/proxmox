@@ -31,6 +31,10 @@ PACKER_DIR="$ROOT/packer/$VMID"
 [[ -d "$PACKER_DIR" ]] || die "Не найден каталог $PACKER_DIR"
 [[ -s "$CA_BUNDLE" ]] || die "Не найден CA bundle: $CA_BUNDLE"
 
+# Packer и его Proxmox-плагин используют системный TLS стек Go.
+# Передаём им подготовленный bundle с PVE CA, не отключая проверку сертификата.
+export SSL_CERT_FILE="$CA_BUNDLE"
+
 for command in curl jq openssl packer; do
     command -v "$command" >/dev/null 2>&1 || die "Не найден $command"
 done
