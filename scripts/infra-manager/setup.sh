@@ -389,8 +389,8 @@ repair_semaphore_storage() {
     ok "Хранилище Semaphore доступно для записи из контейнера"
 }
 
-deploy_semaphore() {
-    log "Сборка и запуск Semaphore"
+deploy_runtime() {
+    log "Сборка и запуск infra-runtime"
 
     # Базовый образ нужен и для восстановления прав хранилища, и для сборки
     # нашего единственного контейнера с OpenTofu/Packer/Ansible.
@@ -423,7 +423,7 @@ wait_semaphore() {
 
     sleep 5
 
-    [[ "$(docker inspect -f '{{.State.Running}}' infra-runtime 2>/dev/null || true)" == "true" ]]         || die "Semaphore container не запущен"
+    [[ "$(docker inspect -f '{{.State.Running}}' infra-runtime 2>/dev/null || true)" == "true" ]]         || die "infra-runtime не запущен"
 
     ok "Semaphore запущен"
 }
@@ -458,13 +458,13 @@ install_local_commands() {
     ln -sfn "$LIFECYCLE_TEST_COMMAND" /usr/local/bin/infra-manager-pve-lifecycle-test
 }
 
-verify_semaphore_tools() {
-    log "Проверка инструментов Semaphore"
+verify_runtime_tools() {
+    log "Проверка инструментов infra-runtime"
 
-    docker exec infra-runtime tofu version >/dev/null         || die "OpenTofu отсутствует в Semaphore"
-    docker exec infra-runtime packer version >/dev/null         || die "Packer отсутствует в Semaphore"
-    docker exec infra-runtime ansible --version >/dev/null         || die "Ansible отсутствует в Semaphore"
-    docker exec infra-runtime python3 -c 'import proxmoxer'         || die "Python-модуль proxmoxer отсутствует в Semaphore"
+    docker exec infra-runtime tofu version >/dev/null         || die "OpenTofu отсутствует в infra-runtime"
+    docker exec infra-runtime packer version >/dev/null         || die "Packer отсутствует в infra-runtime"
+    docker exec infra-runtime ansible --version >/dev/null         || die "Ansible отсутствует в infra-runtime"
+    docker exec infra-runtime python3 -c 'import proxmoxer'         || die "Python-модуль proxmoxer отсутствует в infra-runtime"
 
     ok "OpenTofu, Packer, Ansible и proxmoxer доступны"
 }
@@ -506,9 +506,9 @@ main() {
     ensure_semaphore_secrets
     prepare_opentofu_input
     write_runtime_versions
-    deploy_semaphore
+    deploy_runtime
     wait_semaphore
-    verify_semaphore_tools
+    verify_runtime_tools
     configure_semaphore_project
     install_local_commands
     "$STATUS_COMMAND"
