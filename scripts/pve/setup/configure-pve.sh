@@ -91,7 +91,6 @@ for module in \
     40-runtime.sh \
     45-management-keys.sh \
     50-access.sh \
-    55-infra-manager.sh \
     70-tooling.sh \
     71-sync-management-keys-tooling.sh; do
     [[ -f "${LIB_DIR}/${module}" ]] || {
@@ -172,7 +171,6 @@ main() {
     ensure_roles
     ensure_pve_identities
 
-    ensure_infra_manager
 
 
     install_private_tooling
