@@ -93,6 +93,7 @@ access:
     privilege_separation: true
     verify_tls: true
     guest_scope: /vms
+    managed_pool_assignment: managed
 
   github:
     repository: git@github.com:zsergeyru/proxmox.git
