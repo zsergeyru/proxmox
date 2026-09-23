@@ -113,6 +113,14 @@ jq -e --arg url "$PROJECT_REPO" --arg key_id "$GITHUB_KEY_ID" '
     || die "Git repository 'proxmox' не соответствует ожидаемому URL или SSH key"
 
 PROJECT_REPO_ID="$(jq -r '.[] | select(.name == "proxmox") | .id' <<<"$SEMAPHORE_REPOSITORIES")"
+
+# Semaphore v2.18.30 создаёт socket временного ssh-agent в каталоге проекта
+# раньше, чем API /repositories/{id}/branches успевает создать этот каталог.
+# После перезапуска контейнера /tmp пустой, поэтому готовим каталог тем же UID,
+# под которым работает Semaphore, и только затем проверяем реальный Git-доступ.
+docker exec --user 1001:0 infra-runtime mkdir -p "/tmp/semaphore/project_${PROJECT_ID}" \
+    || die "Не удалось подготовить временный каталог Semaphore для проверки Git"
+
 if ! SEMAPHORE_REPO_BRANCHES="$(semaphore_api_get "/project/${PROJECT_ID}/repositories/${PROJECT_REPO_ID}/branches" 2>/dev/null)"; then
     die "Semaphore не может прочитать Git repository 'proxmox' сохранённым SSH key"
 fi

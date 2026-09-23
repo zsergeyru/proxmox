@@ -257,6 +257,8 @@ grep -q 'PROJECT_REPO="git@github.com:zsergeyru/proxmox.git"' "$STATUS" \
     || die "status.sh должен проверять Git repository Semaphore"
 grep -Fq 'repositories/${PROJECT_REPO_ID}/branches' "$STATUS" \
     || die "status.sh должен реально проверять доступ Semaphore к Git repository"
+grep -Fq 'docker exec --user 1001:0 infra-runtime mkdir -p "/tmp/semaphore/project_${PROJECT_ID}"' "$STATUS" \
+    || die "status.sh должен готовить каталог ssh-agent перед проверкой веток Semaphore"
 grep -Fq 'require_permissions "/vms" "$VM_ADMIN_PRIVS"' "$ACCESS" \
     || die "Полная проверка PVE access должна требовать управление всеми VM/LXC через /vms"
 grep -Fq 'require_permissions "/pool/$MANAGED_POOL" "Pool.Audit VM.Allocate"' "$ACCESS" \
