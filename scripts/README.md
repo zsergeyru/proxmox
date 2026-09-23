@@ -39,11 +39,11 @@ scripts/infra-manager/
 └── status.sh
 ```
 
-`setup.sh` устанавливает Docker, подготавливает постоянные каталоги и секреты, запускает Semaphore Server/Runner и передаёт настройку проекта в `semaphore-project.sh`.
+`setup.sh` устанавливает Docker, подготавливает постоянные каталоги и секреты, собирает и запускает `infra-runtime`, а затем передаёт настройку Semaphore в `semaphore-project.sh`.
 
 `semaphore-project.sh` через Semaphore API создаёт проект `Proxmox Infrastructure`, Key Store и запись закрытого Git-репозитория. Повторный запуск использует отдельный Semaphore API token, поэтому не зависит от сохранения первоначального пароля администратора.
 
-`check-pve-access.sh` без изменения состояния проверяет фактические права ограниченного token `root@pam!infra-manager` с `privsep=1` через HTTPS API, включая запрет изменений `910`.
+`check-pve-access.sh` без изменения состояния проверяет фактические права token `root@pam!infra-manager` с `privsep=1` через HTTPS API.
 
 `status.sh` является общей локальной проверкой готовности `910` и устанавливается как:
 
