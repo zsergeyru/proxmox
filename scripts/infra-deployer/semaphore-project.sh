@@ -377,8 +377,70 @@ ensure_opentofu_plan_template() {
     printf '%s' "$id"
 }
 
+
+ensure_packer_9000_template() {
+    local project_id=$1 repository_id=$2 environment_id=$3
+    local name="Build Template 9000"
+    local templates id payload response
+
+    templates="$(api GET "/project/${project_id}/templates?sort=name&order=asc")"
+    id="$(unique_id_by_name "$templates" "$name" "template")"
+
+    if [[ -z "$id" ]]; then
+        payload="$(jq -cn \
+            --arg name "$name" \
+            --arg playbook "scripts/infra-deployer/build-template.sh" \
+            --arg branch "$PROJECT_BRANCH" \
+            --argjson project_id "$project_id" \
+            --argjson repository_id "$repository_id" \
+            --argjson environment_id "$environment_id" \
+            '{
+                name:$name,
+                project_id:$project_id,
+                repository_id:$repository_id,
+                environment_ids:[$environment_id],
+                playbook:$playbook,
+                app:"bash",
+                type:"",
+                git_branch:$branch,
+                arguments:"[\"9000\"]",
+                allow_override_args_in_task:false,
+                allow_override_branch_in_task:false
+            }')"
+        response="$(api POST "/project/${project_id}/templates" -d "$payload")"
+        id="$(jq -r '.id // empty' <<<"$response")"
+    else
+        payload="$(jq -cn \
+            --argjson id "$id" \
+            --arg name "$name" \
+            --arg playbook "scripts/infra-deployer/build-template.sh" \
+            --arg branch "$PROJECT_BRANCH" \
+            --argjson project_id "$project_id" \
+            --argjson repository_id "$repository_id" \
+            --argjson environment_id "$environment_id" \
+            '{
+                id:$id,
+                name:$name,
+                project_id:$project_id,
+                repository_id:$repository_id,
+                environment_ids:[$environment_id],
+                playbook:$playbook,
+                app:"bash",
+                type:"",
+                git_branch:$branch,
+                arguments:"[\"9000\"]",
+                allow_override_args_in_task:false,
+                allow_override_branch_in_task:false
+            }')"
+        api PUT "/project/${project_id}/templates/${id}" -d "$payload" >/dev/null
+    fi
+
+    [[ -n "$id" ]] || die "Semaphore не вернул id шаблона Build Template 9000"
+    printf '%s' "$id"
+}
+
 main() {
-    local project_id github_key_id repository_id opentofu_env_id opentofu_plan_template_id
+    local project_id github_key_id repository_id opentofu_env_id opentofu_plan_template_id packer_9000_template_id
 
     command -v jq >/dev/null 2>&1 || die "Не найден jq"
     command -v curl >/dev/null 2>&1 || die "Не найден curl"
@@ -394,11 +456,12 @@ main() {
     repository_id="$(ensure_repository "$project_id" "$github_key_id")"
     opentofu_env_id="$(ensure_opentofu_environment "$project_id")"
     opentofu_plan_template_id="$(ensure_opentofu_plan_template "$project_id" "$repository_id" "$opentofu_env_id")"
+    packer_9000_template_id="$(ensure_packer_9000_template "$project_id" "$repository_id" "$opentofu_env_id")"
 
-    [[ -n "$repository_id" && -n "$opentofu_env_id" && -n "$opentofu_plan_template_id" ]] \
+    [[ -n "$repository_id" && -n "$opentofu_env_id" && -n "$opentofu_plan_template_id" && -n "$packer_9000_template_id" ]] \
         || die "Не все объекты Semaphore созданы"
 
-    ok "Проект Semaphore, Git repository, OpenTofu Variable Group и шаблон OpenTofu Plan подготовлены"
+    ok "Проект Semaphore, Git repository, PVE Variable Group и инфраструктурные задания подготовлены"
 }
 
 main "$@"
