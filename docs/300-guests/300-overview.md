@@ -202,6 +202,7 @@ Proxmox отвечает за сам объект VM/LXC: процессор, п
 - [`320-guest-manifest.md`](320-guest-manifest.md) — справочник полей `guest.yaml`.
 - [`330-guest-lifecycle.md`](330-guest-lifecycle.md) — подробный контракт применения состояния гостевой системы.
 - [`340-vmid-plan.md`](340-vmid-plan.md) — правила нумерации VMID и CTID.
+- [`350-linux-filesystem.md`](350-linux-filesystem.md) — правила `rootfs/` и размещения файлов и данных внутри Linux-гостей.
 - [`390-decisions.md`](390-decisions.md) — причины ключевых решений по гостевому контуру.
 - [`../200-pve/200-overview.md`](../200-pve/200-overview.md) — роль физического PVE-хоста.
 - [`../../infrastructure/guests/README.md`](../../infrastructure/guests/README.md) — структура описаний конкретных VM и LXC.
