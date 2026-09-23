@@ -1,10 +1,10 @@
-# 910 создаётся и сопровождается PVE Configuration, поэтому profile намеренно отсутствует.
+# 910 создаётся и сопровождается public bootstrap, поэтому profile намеренно отсутствует.
 # Отсутствие profile исключает этот объект из обычного OpenTofu-контура.
 schema_version: 10
 vmid: 910
 name: infra-manager
 node: pve
-description: Служебный LXC для управления и сопровождения инфраструктуры Proxmox; жизненным циклом объекта владеет PVE Configuration
+description: Служебный LXC для управления и сопровождения инфраструктуры Proxmox; жизненным циклом объекта владеет proxmox-bootstrap
 protection: true
 
 resources:
