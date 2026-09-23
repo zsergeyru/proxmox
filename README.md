@@ -53,12 +53,12 @@ GitHub public: zsergeyru/proxmox-bootstrap
                          │
                          ├── закрытый repo zsergeyru/proxmox
                          ├── Docker
-                         ├── Semaphore Server
-                         ├── Semaphore Runner
-                         ├── OpenTofu
-                         ├── Ansible
-                         ├── Packer
-                         └── proxmoxer
+                         └── infra-runtime
+                              ├── Semaphore
+                              ├── OpenTofu
+                              ├── Ansible
+                              ├── Packer
+                              └── proxmoxer
                                   │
                                   ▼
                               PVE API
@@ -185,7 +185,8 @@ privsep=1
 | Путь | Роль | Назначение |
 |---|---|---|
 | `/` | `PVEAuditor` | чтение состояния PVE |
-| `/pool/managed` | `PVEVMAdmin` | управление обычными VM/LXC проекта |
+| `/vms` | `PVEVMAdmin` | управление всеми VM/LXC |
+| `/pool/managed` | `PVEVMAdmin`, `PVEPoolUser` | назначение гостей и чтение pool |
 | `/storage/local-lvm` | `PVEDatastoreUser` | использование хранилища |
 | `/sdn/zones/localnetwork/vmbr0` | `PVESDNUser` | использование основной сети |
 
@@ -196,13 +197,12 @@ privsep=1
 ## Что работает внутри 910
 
 ~~~text
-Semaphore Server v2.18.30
-Semaphore Runner v2.18.30
-SQLite
-OpenTofu 1.12.6
-Packer 1.15.4
-Ansible
-proxmoxer
+infra-runtime v1
+├── Semaphore v2.18.30 + SQLite
+├── OpenTofu 1.12.6
+├── Packer 1.15.4
+├── Ansible
+└── proxmoxer
 ~~~
 
 Основные постоянные области:
