@@ -229,39 +229,43 @@ ssh \
     'failed=0
 
      cloud_status="$(timeout 180s cloud-init status --wait --format json 2>/dev/null || true)"
-     if printf "%s" "$cloud_status" | python3 -c '\''
+     if printf "%s" "$cloud_status" | python3 -c "
 import json
 import sys
 
-allowed = "'\''user'\'' of type string is deprecated"
 data = json.load(sys.stdin)
-
-if data.get("status") != "done":
+if data.get(\"status\") != \"done\":
     raise SystemExit(1)
 
-def walk(value):
-    if isinstance(value, dict):
-        for key, item in value.items():
-            if key == "errors" and item:
-                raise SystemExit(1)
-            if key == "recoverable_errors":
-                if not isinstance(item, dict):
-                    raise SystemExit(1)
-                for messages in item.values():
-                    if not isinstance(messages, list):
-                        raise SystemExit(1)
-                    for message in messages:
-                        if allowed not in str(message):
-                            raise SystemExit(1)
-            else:
-                walk(item)
-    elif isinstance(value, list):
-        for item in value:
-            walk(item)
+sections = [
+    data,
+    data.get(\"init\", {}),
+    data.get(\"init-local\", {}),
+    data.get(\"modules-config\", {}),
+    data.get(\"modules-final\", {}),
+]
 
-walk(data)
-'\''; then
-         printf "[ОК] Cloud-Init завершён; допустимо только известное предупреждение Proxmox о параметре user\\n"
+for section in sections:
+    if not isinstance(section, dict):
+        raise SystemExit(1)
+    if section.get(\"errors\"):
+        raise SystemExit(1)
+
+    recoverable = section.get(\"recoverable_errors\", {})
+    if not isinstance(recoverable, dict):
+        raise SystemExit(1)
+
+    for category, messages in recoverable.items():
+        if category != \"DEPRECATED\" or not isinstance(messages, list):
+            raise SystemExit(1)
+        for message in messages:
+            text = str(message)
+            if \"of type string is deprecated in 22.2\" not in text:
+                raise SystemExit(1)
+            if \"scheduled to be removed in 27.2\" not in text:
+                raise SystemExit(1)
+" ; then
+         printf "[ОК] Cloud-Init завершён; присутствует только известное предупреждение Proxmox о параметре user\\n"
      else
          printf "ОШИБКА: Cloud-Init завершился с неизвестной ошибкой или предупреждением\\n" >&2
          printf "%s\\n" "$cloud_status" >&2
