@@ -107,9 +107,43 @@ run_task() {
     wait_task "$upid"
 }
 
-test_vmid_free() {
-    ! api GET "/cluster/resources" --get --data-urlencode "type=vm" \
-        | jq -e --argjson vmid "$TEST_VMID" '.data[]? | select(.vmid == $vmid)' >/dev/null
+find_test_resource() {
+    api GET "/cluster/resources" --get --data-urlencode "type=vm" \
+        | jq -c --arg vmid "$TEST_VMID" '.data[]? | select((.vmid | tostring) == $vmid)' \
+        | head -n1
+}
+
+prepare_test_vmid() {
+    local resource type name config protection state
+
+    resource="$(find_test_resource)"
+    [[ -n "$resource" ]] || return 0
+
+    type="$(jq -r '.type // empty' <<<"$resource")"
+    name="$(jq -r '.name // empty' <<<"$resource")"
+
+    if [[ "$type" != "qemu" || "$name" != "$TEST_NAME" ]]; then
+        die "VMID $TEST_VMID уже занят объектом '$name'; автоматическое удаление запрещено"
+    fi
+
+    info "Удаление оставшегося проверочного клона $TEST_VMID"
+
+    state="$(api GET "/nodes/${NODE}/qemu/${TEST_VMID}/status/current" | jq -r '.data.status // empty')"
+    if [[ "$state" == "running" ]]; then
+        run_task POST "/nodes/${NODE}/qemu/${TEST_VMID}/status/stop"
+    fi
+
+    config="$(api GET "/nodes/${NODE}/qemu/${TEST_VMID}/config" | jq -c '.data')"
+    protection="$(jq -r '.protection // 0' <<<"$config")"
+    if [[ "$protection" == "1" || "$protection" == "true" ]]; then
+        api PUT "/nodes/${NODE}/qemu/${TEST_VMID}/config" \
+            --data-urlencode "protection=0" >/dev/null
+    fi
+
+    run_task DELETE "/nodes/${NODE}/qemu/${TEST_VMID}" --data-urlencode "purge=1"
+
+    [[ -z "$(find_test_resource)" ]] \
+        || die "Не удалось удалить старый проверочный клон $TEST_VMID"
 }
 
 wait_ipv4() {
@@ -140,7 +174,7 @@ delete_test_vm() {
     run_task DELETE "/nodes/${NODE}/qemu/${TEST_VMID}" --data-urlencode "purge=1"
 }
 
-test_vmid_free || die "VMID $TEST_VMID уже занят; ничего не изменено"
+prepare_test_vmid
 ssh-keygen -q -t ed25519 -N '' -f "$key"
 
 info "Создание проверочного Full Clone $TEST_VMID"
