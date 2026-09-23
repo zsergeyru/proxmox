@@ -1,13 +1,13 @@
 services:
-  semaphore:
+  runtime:
     build:
-      context: ./semaphore
+      context: ./runtime
       args:
         SEMAPHORE_VERSION: ${SEMAPHORE_VERSION}
         OPENTOFU_VERSION: ${OPENTOFU_VERSION}
         PACKER_VERSION: ${PACKER_VERSION}
-    image: infra-deployer-semaphore:${SEMAPHORE_VERSION}
-    container_name: infra-deployer-semaphore
+    image: infra-runtime:${RUNTIME_VERSION}
+    container_name: infra-runtime
     restart: unless-stopped
     network_mode: host
     env_file:

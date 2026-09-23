@@ -33,9 +33,9 @@ docker:
   compose_file: compose/docker-compose.yml
 
   services:
-    semaphore:
-      container_name: infra-deployer-semaphore
-      image: infra-deployer-semaphore:v2.18.30
+    runtime:
+      container_name: infra-runtime
+      image: infra-runtime:v1
       base_image: semaphoreui/semaphore:v2.18.30
       restart: unless-stopped
       network_mode: host

@@ -35,6 +35,7 @@ PVE_API_SECRET_FILE="${PVE_API_SECRET_FILE:-}"
 RECOVER="${INFRA_MANAGER_RECOVER:-0}"
 
 SEMAPHORE_VERSION="v2.18.30"
+RUNTIME_VERSION="v1"
 PROJECT_BRANCH="${INFRA_PROJECT_BRANCH:-main}"
 OPENTOFU_VERSION="1.12.6"
 PACKER_VERSION="1.15.4"
@@ -196,15 +197,15 @@ EOF_DOCKER
 
 copy_compose_assets() {
     [[ -f "$ASSET_DIR/docker-compose.yml" ]] || die "Не найден docker-compose.yml в проекте"
-    [[ -f "$ASSET_DIR/semaphore/Dockerfile" ]] || die "Не найден Dockerfile Semaphore"
-    [[ -f "$ASSET_DIR/semaphore/requirements.txt" ]] || die "Не найден requirements.txt Semaphore"
-    [[ -f "$ASSET_DIR/semaphore/ssh_config" ]] || die "Не найден строгий SSH config Semaphore"
+    [[ -f "$ASSET_DIR/runtime/Dockerfile" ]] || die "Не найден Dockerfile Semaphore"
+    [[ -f "$ASSET_DIR/runtime/requirements.txt" ]] || die "Не найден requirements.txt Semaphore"
+    [[ -f "$ASSET_DIR/runtime/ssh_config" ]] || die "Не найден строгий SSH config Semaphore"
 
     install -m 0644 "$ASSET_DIR/docker-compose.yml" "$COMPOSE_DIR/docker-compose.yml"
-    install -d -m 0755 "$COMPOSE_DIR/semaphore"
-    install -m 0644 "$ASSET_DIR/semaphore/Dockerfile" "$COMPOSE_DIR/semaphore/Dockerfile"
-    install -m 0644 "$ASSET_DIR/semaphore/requirements.txt" "$COMPOSE_DIR/semaphore/requirements.txt"
-    install -m 0644 "$ASSET_DIR/semaphore/ssh_config" "$COMPOSE_DIR/semaphore/ssh_config"
+    install -d -m 0755 "$COMPOSE_DIR/runtime"
+    install -m 0644 "$ASSET_DIR/runtime/Dockerfile" "$COMPOSE_DIR/runtime/Dockerfile"
+    install -m 0644 "$ASSET_DIR/runtime/requirements.txt" "$COMPOSE_DIR/runtime/requirements.txt"
+    install -m 0644 "$ASSET_DIR/runtime/ssh_config" "$COMPOSE_DIR/runtime/ssh_config"
 }
 
 seed_semaphore_known_hosts() {
@@ -315,6 +316,7 @@ prepare_opentofu_input() {
 write_runtime_versions() {
     cat >"$COMPOSE_DIR/.versions.env" <<EOF_VERSIONS
 SEMAPHORE_VERSION=${SEMAPHORE_VERSION}
+RUNTIME_VERSION=${RUNTIME_VERSION}
 OPENTOFU_VERSION=${OPENTOFU_VERSION}
 PACKER_VERSION=${PACKER_VERSION}
 EOF_VERSIONS
@@ -369,16 +371,16 @@ deploy_semaphore() {
     run_logged docker pull "semaphoreui/semaphore:${SEMAPHORE_VERSION}"
     ok "Базовый образ Semaphore готов"
 
-    compose stop semaphore >/dev/null 2>&1 || true
+    compose stop runtime >/dev/null 2>&1 || true
     repair_semaphore_storage
 
-    info "Сборка образа Semaphore с OpenTofu, Packer и Ansible"
-    run_logged compose build --pull semaphore
-    ok "Образ Semaphore собран"
+    info "Сборка infra-runtime с Semaphore, OpenTofu, Packer и Ansible"
+    run_logged compose build --pull runtime
+    ok "Образ infra-runtime собран"
 
-    info "Запуск контейнера Semaphore"
+    info "Запуск контейнера infra-runtime"
     run_logged compose up -d --remove-orphans
-    ok "Контейнер Semaphore запущен"
+    ok "Контейнер infra-runtime запущен"
 }
 
 wait_semaphore() {
@@ -394,13 +396,13 @@ wait_semaphore() {
 
     curl -fsS --connect-timeout 2 --max-time 5 http://127.0.0.1:3000/ >/dev/null         || {
             compose ps >>"$LOG_FILE" 2>&1 || true
-            compose logs --tail=100 semaphore >>"$LOG_FILE" 2>&1 || true
+            compose logs --tail=100 runtime >>"$LOG_FILE" 2>&1 || true
             die "Semaphore Server не стал доступен"
         }
 
     sleep 5
 
-    [[ "$(docker inspect -f '{{.State.Running}}' infra-deployer-semaphore 2>/dev/null || true)" == "true" ]]         || die "Semaphore container не запущен"
+    [[ "$(docker inspect -f '{{.State.Running}}' infra-runtime 2>/dev/null || true)" == "true" ]]         || die "Semaphore container не запущен"
 
     ok "Semaphore запущен"
 }
@@ -431,10 +433,10 @@ install_local_commands() {
 verify_semaphore_tools() {
     log "Проверка инструментов Semaphore"
 
-    docker exec infra-deployer-semaphore tofu version >/dev/null         || die "OpenTofu отсутствует в Semaphore"
-    docker exec infra-deployer-semaphore packer version >/dev/null         || die "Packer отсутствует в Semaphore"
-    docker exec infra-deployer-semaphore ansible --version >/dev/null         || die "Ansible отсутствует в Semaphore"
-    docker exec infra-deployer-semaphore python3 -c 'import proxmoxer'         || die "Python-модуль proxmoxer отсутствует в Semaphore"
+    docker exec infra-runtime tofu version >/dev/null         || die "OpenTofu отсутствует в Semaphore"
+    docker exec infra-runtime packer version >/dev/null         || die "Packer отсутствует в Semaphore"
+    docker exec infra-runtime ansible --version >/dev/null         || die "Ansible отсутствует в Semaphore"
+    docker exec infra-runtime python3 -c 'import proxmoxer'         || die "Python-модуль proxmoxer отсутствует в Semaphore"
 
     ok "OpenTofu, Packer, Ansible и proxmoxer доступны"
 }

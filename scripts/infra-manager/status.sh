@@ -81,7 +81,7 @@ required_file "$CA_BUNDLE"
 [[ -d /var/lib/infra-manager/opentofu/state ]] \
     || die "Отсутствует каталог OpenTofu state"
 
-[[ "$(docker inspect -f '{{.State.Running}}' infra-deployer-semaphore 2>/dev/null || true)" == "true" ]] \
+[[ "$(docker inspect -f '{{.State.Running}}' infra-runtime 2>/dev/null || true)" == "true" ]] \
     || die "Semaphore Server не запущен"
 
 curl -fsS --connect-timeout 2 --max-time 5 http://127.0.0.1:3000/api/ping >/dev/null \
@@ -116,13 +116,13 @@ semaphore_api_get "/project/${PROJECT_ID}/environment?sort=name&order=asc"     |
 
 semaphore_api_get "/project/${PROJECT_ID}/templates?sort=name&order=asc"     | jq -e '.[] | select(.name == "OpenTofu Plan" and .app == "bash")' >/dev/null     || die "В Semaphore отсутствует шаблон OpenTofu Plan"
 
-docker exec infra-deployer-semaphore tofu version >/dev/null \
+docker exec infra-runtime tofu version >/dev/null \
     || die "OpenTofu недоступен"
-docker exec infra-deployer-semaphore packer version >/dev/null \
+docker exec infra-runtime packer version >/dev/null \
     || die "Packer недоступен"
-docker exec infra-deployer-semaphore ansible --version >/dev/null \
+docker exec infra-runtime ansible --version >/dev/null \
     || die "Ansible недоступен"
-docker exec infra-deployer-semaphore python3 -c 'import proxmoxer' >/dev/null \
+docker exec infra-runtime python3 -c 'import proxmoxer' >/dev/null \
     || die "proxmoxer недоступен"
 
 PVE_API_URL="$(read_env_value PVE_API_URL)"
