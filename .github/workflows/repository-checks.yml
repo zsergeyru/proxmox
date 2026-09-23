@@ -151,6 +151,7 @@ jobs:
             guests/910-infra-manager/compose/runtime
           docker run --rm infra-runtime:test tofu version
           docker run --rm infra-runtime:test packer version
+          docker run --rm infra-runtime:test ansible --version
           docker run --rm --entrypoint python3 infra-runtime:test -c 'import proxmoxer'
 
       - name: Run deploy runtime contract checks
