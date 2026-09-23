@@ -96,6 +96,27 @@ ensure_infra_manager_lxc() {
     die "LXC $INFRA_MANAGER_VMID не стал доступен через pct exec"
 }
 
+prepare_infra_manager_base() {
+    log "Подготовка минимальной среды 910"
+
+    local _
+    for _ in $(seq 1 60); do
+        if pct exec "$INFRA_MANAGER_VMID" -- getent ahostsv4 deb.debian.org >/dev/null 2>&1; then
+            break
+        fi
+        sleep 2
+    done
+
+    pct exec "$INFRA_MANAGER_VMID" -- getent ahostsv4 deb.debian.org >/dev/null 2>&1 \
+        || die "LXC $INFRA_MANAGER_VMID не получил рабочие DNS/сеть"
+
+    pct exec "$INFRA_MANAGER_VMID" -- env DEBIAN_FRONTEND=noninteractive apt-get update
+    pct exec "$INFRA_MANAGER_VMID" -- env DEBIAN_FRONTEND=noninteractive \
+        apt-get install -y --no-install-recommends ca-certificates curl
+
+    ok "Минимальная среда 910 подготовлена"
+}
+
 push_infra_manager_file() {
     local source=$1 target=$2 mode=$3
     pct exec "$INFRA_MANAGER_VMID" -- install -d -m 0700 "$(dirname "$target")"
@@ -159,6 +180,7 @@ configure_infra_manager_runtime() {
 
 ensure_infra_manager() {
     ensure_infra_manager_lxc
+    prepare_infra_manager_base
     sync_infra_manager_source
     configure_infra_manager_access
     configure_infra_manager_runtime
