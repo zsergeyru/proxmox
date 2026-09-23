@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import os
 import ssl
@@ -160,6 +161,118 @@ class PveClient:
             "/access/permissions",
             query={"path": path},
         )
+
+    def guest_interfaces(
+        self,
+        *,
+        node: str,
+        vmid: int,
+        kind: str,
+    ) -> Any:
+        """Получить фактические сетевые интерфейсы работающего гостя."""
+        if kind == "vm":
+            return self.data(
+                f"/nodes/{node}/qemu/{vmid}/agent/network-get-interfaces"
+            )
+        if kind == "lxc":
+            return self.data(
+                f"/nodes/{node}/lxc/{vmid}/interfaces"
+            )
+        raise InfraManagerError(
+            f"Неизвестный тип гостя для чтения интерфейсов: {kind!r}"
+        )
+
+    def guest_management_ipv4(
+        self,
+        *,
+        node: str,
+        vmid: int,
+        kind: str,
+        subnet: str,
+    ) -> ipaddress.IPv4Address | None:
+        """Найти единственный IPv4 гостя в административной подсети."""
+        interfaces = self.guest_interfaces(
+            node=node,
+            vmid=vmid,
+            kind=kind,
+        )
+        return select_management_ipv4(interfaces, subnet)
+
+
+def _interface_records(data: Any) -> list[dict[str, Any]]:
+    """Нормализовать ответы PVE для VM и LXC к списку интерфейсов."""
+    value = data.get("result") if isinstance(data, dict) and "result" in data else data
+    if isinstance(value, list):
+        return [item for item in value if isinstance(item, dict)]
+    if isinstance(value, dict):
+        return [item for item in value.values() if isinstance(item, dict)]
+    return []
+
+
+def _interface_ipv4s(data: Any) -> set[ipaddress.IPv4Address]:
+    """Извлечь IPv4 из современного и совместимого старого ответа PVE."""
+    found: set[ipaddress.IPv4Address] = set()
+
+    for interface in _interface_records(data):
+        addresses = interface.get("ip-addresses")
+        if isinstance(addresses, list):
+            for item in addresses:
+                if not isinstance(item, dict):
+                    continue
+                if item.get("ip-address-type") not in {"ipv4", "inet"}:
+                    continue
+                value = item.get("ip-address")
+                try:
+                    address = ipaddress.ip_address(value)
+                except (TypeError, ValueError):
+                    continue
+                if isinstance(address, ipaddress.IPv4Address):
+                    found.add(address)
+
+        legacy = interface.get("inet")
+        if isinstance(legacy, str) and legacy:
+            try:
+                address = ipaddress.ip_interface(legacy).ip
+            except ValueError:
+                continue
+            if isinstance(address, ipaddress.IPv4Address):
+                found.add(address)
+
+    return found
+
+
+def select_management_ipv4(
+    interfaces: Any,
+    subnet: str,
+) -> ipaddress.IPv4Address | None:
+    """Выбрать единственный IPv4 из административной подсети."""
+    try:
+        network = ipaddress.ip_network(subnet, strict=True)
+    except ValueError as exc:
+        raise InfraManagerError(
+            f"Некорректная административная подсеть {subnet!r}: {exc}"
+        ) from exc
+    if not isinstance(network, ipaddress.IPv4Network):
+        raise InfraManagerError(
+            f"Административная подсеть должна быть IPv4: {subnet!r}"
+        )
+
+    candidates = sorted(
+        address
+        for address in _interface_ipv4s(interfaces)
+        if address in network
+        and address not in {network.network_address, network.broadcast_address}
+    )
+
+    if not candidates:
+        return None
+    if len(candidates) > 1:
+        values = ", ".join(str(address) for address in candidates)
+        raise InfraManagerError(
+            "Найдено несколько IPv4 гостя в административной подсети: "
+            + values
+        )
+    return candidates[0]
 
 
 def permission_present(data: Any, privilege: str) -> bool:
