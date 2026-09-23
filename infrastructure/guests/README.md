@@ -109,7 +109,7 @@ guests/910-infra-manager/
 python scripts/validate_repo.py
 ```
 
-`validate_repo.py` и `sync-management-keys` используют общий модуль `scripts/guests/resolver.py`. `deploy-guest` будет переведён на новый контракт при отдельной полной переработке.
+`validate_repo.py` и `scripts/guests/render-opentofu-input.py` используют общий модуль `scripts/guests/resolver.py`.
 
 ## Связанные документы
 
@@ -119,4 +119,4 @@ python scripts/validate_repo.py
 - [`../../docs/300-guests/320-guest-manifest.md`](../../docs/300-guests/320-guest-manifest.md) — формат и поля `guest.yaml`.
 - [`../../docs/300-guests/330-deploy-guest.md`](../../docs/300-guests/330-deploy-guest.md) — развёртывание гостевой системы.
 - [`../../docs/legacy/33-guest-bootstrap-and-provisioning.md`](../../docs/legacy/33-guest-bootstrap-and-provisioning.md) — начальный доступ, первичная и повторяемая настройка.
-- [`../templates/debian13/README.md`](../templates/debian13/README.md) — паспорт Debian-шаблона VM `9000`.
+- [`../../automation/packer/README.md`](../../automation/packer/README.md) — сборка Debian-шаблона VM `9000`.
