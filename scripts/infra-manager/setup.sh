@@ -21,6 +21,11 @@ OPENTOFU_DIR="${DATA_DIR}/opentofu"
 STATE_DIR="${OPENTOFU_DIR}/state"
 OPENTOFU_INPUT="${OPENTOFU_DIR}/guests.json"
 COMPOSE_DIR="/opt/infra-manager/compose"
+
+LEGACY_CONFIG_DIR="/etc/infra-deployer"
+LEGACY_DATA_DIR="/var/lib/infra-deployer"
+LEGACY_OPT_DIR="/opt/infra-deployer"
+LEGACY_LOG_DIR="/var/log/infra-deployer"
 STATUS_COMMAND="/usr/local/sbin/infra-manager-status"
 ACCESS_CHECK_COMMAND="/usr/local/sbin/infra-manager-pve-access-check"
 LIFECYCLE_TEST_COMMAND="/usr/local/sbin/infra-manager-pve-lifecycle-test"
@@ -34,6 +39,7 @@ CA_BUNDLE="${CA_DIR}/ca-bundle.crt"
 PVE_API_SECRET_FILE="${PVE_API_SECRET_FILE:-}"
 RECOVER="${INFRA_MANAGER_RECOVER:-0}"
 
+RUNTIME_VERSION="v1"
 SEMAPHORE_VERSION="v2.18.30"
 PROJECT_BRANCH="${INFRA_PROJECT_BRANCH:-infra-iac-redesign}"
 OPENTOFU_VERSION="1.12.6"
@@ -105,6 +111,27 @@ check_os() {
     [[ "${ID:-}" == "debian" ]] || die "Ожидается Debian"
     [[ "${VERSION_ID:-}" == "13" ]] || die "Ожидается Debian 13, обнаружено ${VERSION_ID:-?}"
     [[ "$(dpkg --print-architecture)" == "amd64" ]]         || die "Первая версия infra-manager рассчитана на amd64"
+}
+
+migrate_legacy_dir() {
+    local old=$1 new=$2
+    [[ -e "$old" ]] || return 0
+
+    if [[ -e "$new" ]]; then
+        printf 'ОШИБКА: одновременно существуют старый и новый пути: %s и %s\n' "$old" "$new" >&2
+        exit 1
+    fi
+
+    install -d -m 0755 "$(dirname "$new")"
+    mv "$old" "$new"
+    printf '[ОК] Перенесён путь %s → %s\n' "$old" "$new"
+}
+
+migrate_legacy_layout() {
+    migrate_legacy_dir "$LEGACY_CONFIG_DIR" "$CONFIG_DIR"
+    migrate_legacy_dir "$LEGACY_DATA_DIR" "$DATA_DIR"
+    migrate_legacy_dir "$LEGACY_OPT_DIR" "/opt/infra-manager"
+    migrate_legacy_dir "$LEGACY_LOG_DIR" "/var/log/infra-manager"
 }
 
 prepare_directories() {
@@ -189,15 +216,15 @@ EOF_DOCKER
 
 copy_compose_assets() {
     [[ -f "$ASSET_DIR/docker-compose.yml" ]] || die "Не найден docker-compose.yml в проекте"
-    [[ -f "$ASSET_DIR/semaphore/Dockerfile" ]] || die "Не найден Dockerfile Semaphore"
-    [[ -f "$ASSET_DIR/semaphore/requirements.txt" ]] || die "Не найден requirements.txt Semaphore"
-    [[ -f "$ASSET_DIR/semaphore/ssh_config" ]] || die "Не найден строгий SSH config Semaphore"
+    [[ -f "$ASSET_DIR/runtime/Dockerfile" ]] || die "Не найден Dockerfile infra-runtime"
+    [[ -f "$ASSET_DIR/runtime/requirements.txt" ]] || die "Не найден requirements.txt infra-runtime"
+    [[ -f "$ASSET_DIR/runtime/ssh_config" ]] || die "Не найден строгий SSH config infra-runtime"
 
     install -m 0644 "$ASSET_DIR/docker-compose.yml" "$COMPOSE_DIR/docker-compose.yml"
-    install -d -m 0755 "$COMPOSE_DIR/semaphore"
-    install -m 0644 "$ASSET_DIR/semaphore/Dockerfile" "$COMPOSE_DIR/semaphore/Dockerfile"
-    install -m 0644 "$ASSET_DIR/semaphore/requirements.txt" "$COMPOSE_DIR/semaphore/requirements.txt"
-    install -m 0644 "$ASSET_DIR/semaphore/ssh_config" "$COMPOSE_DIR/semaphore/ssh_config"
+    install -d -m 0755 "$COMPOSE_DIR/runtime"
+    install -m 0644 "$ASSET_DIR/runtime/Dockerfile" "$COMPOSE_DIR/runtime/Dockerfile"
+    install -m 0644 "$ASSET_DIR/runtime/requirements.txt" "$COMPOSE_DIR/runtime/requirements.txt"
+    install -m 0644 "$ASSET_DIR/runtime/ssh_config" "$COMPOSE_DIR/runtime/ssh_config"
 }
 
 seed_semaphore_known_hosts() {
@@ -213,7 +240,7 @@ seed_semaphore_known_hosts() {
         chmod 0644 "$target"
     fi
 
-    [[ -s "$target" ]] || die "Не удалось подготовить known_hosts Runner"
+    [[ -s "$target" ]] || die "Не удалось подготовить known_hosts infra-runtime"
 }
 
 generate_ca_bundle() {
@@ -230,6 +257,13 @@ persist_pve_api_secret() {
         if [[ -n "$PVE_API_SECRET_FILE" && -s "$PVE_API_SECRET_FILE" ]]; then
             if cmp -s "$PVE_API_SECRET_FILE" "$PVE_API_ENV"; then
                 ok "Постоянный PVE API credential уже актуален"
+                return
+            fi
+
+            if grep -Fxq 'PVE_API_TOKEN_ID=root@pam!infra-deployer' "$PVE_API_ENV" \
+                && grep -Fxq 'PVE_API_TOKEN_ID=root@pam!infra-manager' "$PVE_API_SECRET_FILE"; then
+                install -o root -g root -m 0600 "$PVE_API_SECRET_FILE" "$PVE_API_ENV"
+                ok "PVE API credential переименован с infra-deployer на infra-manager"
                 return
             fi
 
@@ -307,6 +341,7 @@ prepare_opentofu_input() {
 
 write_runtime_versions() {
     cat >"$COMPOSE_DIR/.versions.env" <<EOF_VERSIONS
+RUNTIME_VERSION=${RUNTIME_VERSION}
 SEMAPHORE_VERSION=${SEMAPHORE_VERSION}
 OPENTOFU_VERSION=${OPENTOFU_VERSION}
 PACKER_VERSION=${PACKER_VERSION}
@@ -360,10 +395,10 @@ deploy_semaphore() {
     # нашего единственного контейнера с OpenTofu/Packer/Ansible.
     run_logged docker pull "semaphoreui/semaphore:${SEMAPHORE_VERSION}"
 
-    compose stop semaphore >/dev/null 2>&1 || true
+    compose stop runtime >/dev/null 2>&1 || true
     repair_semaphore_storage
 
-    run_logged compose build --pull semaphore
+    run_logged compose build --pull runtime
     run_logged compose up -d --remove-orphans
 }
 
@@ -380,7 +415,7 @@ wait_semaphore() {
 
     curl -fsS --connect-timeout 2 --max-time 5 http://127.0.0.1:3000/ >/dev/null         || {
             compose ps >>"$LOG_FILE" 2>&1 || true
-            compose logs --tail=100 semaphore >>"$LOG_FILE" 2>&1 || true
+            compose logs --tail=100 runtime >>"$LOG_FILE" 2>&1 || true
             die "Semaphore Server не стал доступен"
         }
 
@@ -409,6 +444,13 @@ install_local_commands() {
     # pct exec использует PATH без /usr/local/sbin. Канонические файлы остаются
     # в sbin, а короткие команды доступны через /usr/local/bin.
     install -d -o root -g root -m 0755 /usr/local/bin
+    rm -f \
+        /usr/local/sbin/infra-deployer-status \
+        /usr/local/sbin/infra-deployer-pve-access-check \
+        /usr/local/sbin/infra-deployer-pve-lifecycle-test \
+        /usr/local/bin/infra-deployer-status \
+        /usr/local/bin/infra-deployer-pve-access-check \
+        /usr/local/bin/infra-deployer-pve-lifecycle-test
     ln -sfn "$STATUS_COMMAND" /usr/local/bin/infra-manager-status
     ln -sfn "$ACCESS_CHECK_COMMAND" /usr/local/bin/infra-manager-pve-access-check
     ln -sfn "$LIFECYCLE_TEST_COMMAND" /usr/local/bin/infra-manager-pve-lifecycle-test
@@ -449,8 +491,9 @@ report_result() {
 
 main() {
     require_root
-    init_log
     check_os
+    migrate_legacy_layout
+    init_log
     prepare_directories
     ensure_base_packages
     install_docker
