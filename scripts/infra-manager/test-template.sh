@@ -140,7 +140,7 @@ prepare_test_vmid() {
             --data-urlencode "protection=0" >/dev/null
     fi
 
-    run_task DELETE "/nodes/${NODE}/qemu/${TEST_VMID}" --data-urlencode "purge=1"
+    run_task DELETE "/nodes/${NODE}/qemu/${TEST_VMID}" --get --data-urlencode "purge=1"
 
     [[ -z "$(find_test_resource)" ]] \
         || die "Не удалось удалить старый проверочный клон $TEST_VMID"
@@ -171,7 +171,7 @@ delete_test_vm() {
     if [[ "$state" == "running" ]]; then
         run_task POST "/nodes/${NODE}/qemu/${TEST_VMID}/status/stop"
     fi
-    run_task DELETE "/nodes/${NODE}/qemu/${TEST_VMID}" --data-urlencode "purge=1"
+    run_task DELETE "/nodes/${NODE}/qemu/${TEST_VMID}" --get --data-urlencode "purge=1"
 }
 
 prepare_test_vmid
