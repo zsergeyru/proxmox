@@ -478,6 +478,7 @@ PVE
 - [`310-guest-state.md`](310-guest-state.md) — построение итогового требуемого состояния.
 - [`320-guest-manifest.md`](320-guest-manifest.md) — справочник полей `guest.yaml`.
 - [`340-vmid-plan.md`](340-vmid-plan.md) — правила нумерации VMID и CTID.
+- [`350-linux-filesystem.md`](350-linux-filesystem.md) — правила управляемых файлов `rootfs/` и размещения данных внутри Linux-гостей.
 - [`390-decisions.md`](390-decisions.md) — причины ключевых решений гостевого контура.
 - [`../../automation/opentofu/README.md`](../../automation/opentofu/README.md) — границы и рабочее состояние OpenTofu.
 - [`../../automation/packer/README.md`](../../automation/packer/README.md) — подготовка шаблонов VM.
