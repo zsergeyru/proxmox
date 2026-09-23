@@ -9,6 +9,6 @@ terraform {
   }
 
   backend "local" {
-    path = "/var/lib/infra-deployer/opentofu/state/proxmox.tfstate"
+    path = "/var/lib/infra-manager/opentofu/state/proxmox.tfstate"
   }
 }
