@@ -46,8 +46,6 @@ docker:
       system_packages:
         - ca-certificates
         - curl
-        - jq
-        - openssl
         - unzip
         - git
         - openssh-client
@@ -57,8 +55,6 @@ docker:
         - python3
         - py3-pip
         - ansible
-        - jq
-        - openssl
 
       tools:
         ansible: alpine-package
@@ -70,7 +66,7 @@ docker:
         requests: ">=2.32,<3"
 
       mounts:
-          - /var/lib/infra-manager/semaphore:/var/lib/semaphore
+        - /var/lib/infra-manager/semaphore:/var/lib/semaphore
         - /etc/infra-manager/ca:/etc/infra-manager/ca:ro
         - /var/lib/infra-manager/opentofu:/var/lib/infra-manager/opentofu
 
