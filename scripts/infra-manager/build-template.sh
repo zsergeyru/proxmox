@@ -118,22 +118,50 @@ resolve_debian_iso() {
 }
 
 verify_template() {
-    local config
+    local config failures
     config="$(template_config)"
 
-    jq -e '
-        (.template == 1)
-        and (.name == "tpl-debian13")
-        and ((.description // "") | contains("template-version=8"))
-        and (.protection == 1)
-        and (.scsihw == "virtio-scsi-single")
-        and ((.agent | tostring) | startswith("1"))
-        and ((.ide2 // "") | contains("cloudinit"))
-        and (.ciuser == "root")
-        and ((.ipconfig0 // "") | contains("ip=dhcp"))
-        and ((.ciupgrade // 0) == 0)
-    ' <<<"$config" >/dev/null \
-        || die "Созданный шаблон $VMID не соответствует базовому контракту"
+    failures="$(jq -r '
+        [
+            (if (((.template // 0) | tostring) == "1" or ((.template // false) | tostring) == "true")
+             then empty else "template=" + ((.template // "<отсутствует>") | tostring) end),
+            (if .name == "tpl-debian13"
+             then empty else "name=" + ((.name // "<отсутствует>") | tostring) end),
+            (if ((.description // "") | contains("template-version=8"))
+             then empty else "description=" + ((.description // "<отсутствует>") | tostring) end),
+            (if (((.protection // 0) | tostring) == "1" or ((.protection // false) | tostring) == "true")
+             then empty else "protection=" + ((.protection // "<отсутствует>") | tostring) end),
+            (if .scsihw == "virtio-scsi-single"
+             then empty else "scsihw=" + ((.scsihw // "<отсутствует>") | tostring) end),
+            (
+                ((.agent // "") | tostring) as $agent
+                | if ($agent == "1" or ($agent | startswith("1,")) or ($agent | test("(^|,)enabled=1($|,)")))
+                  then empty else "agent=" + (if $agent == "" then "<отсутствует>" else $agent end) end
+            ),
+            (if ((.ide2 // "") | contains("cloudinit"))
+             then empty else "ide2=" + ((.ide2 // "<отсутствует>") | tostring) end),
+            (if .ciuser == "root"
+             then empty else "ciuser=" + ((.ciuser // "<отсутствует>") | tostring) end),
+            (if ((.ipconfig0 // "") | contains("ip=dhcp"))
+             then empty else "ipconfig0=" + ((.ipconfig0 // "<отсутствует>") | tostring) end),
+            (
+                ((.ciupgrade // 0) | tostring) as $ciupgrade
+                | if ($ciupgrade == "0" or $ciupgrade == "false")
+                  then empty else "ciupgrade=" + $ciupgrade end
+            )
+        ]
+        | .[]
+    ' <<<"$config")"
+
+    if [[ -n "$failures" ]]; then
+        printf 'ОШИБКА: Шаблон %s не соответствует базовому контракту:\n' "$VMID" >&2
+        while IFS= read -r failure; do
+            [[ -n "$failure" ]] && printf '  - %s\n' "$failure" >&2
+        done <<<"$failures"
+        printf 'Фактическая конфигурация: %s\n' \
+            "$(jq -c '{template,name,description,protection,scsihw,agent,ide2,ciuser,ipconfig0,ciupgrade}' <<<"$config")" >&2
+        exit 1
+    fi
 
     ok "Контракт шаблона $VMID подтверждён"
 }
