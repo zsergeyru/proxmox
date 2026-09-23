@@ -43,5 +43,7 @@ for vmid, guest in guests.items():
     assert guest["type"] in {"vm", "lxc"}
     assert guest["network"]["bridge"] == "vmbr0"
     assert guest["resources"]["disk_storage"] == "local-lvm"
+    ipv4 = guest["network"]["ipv4"]
+    assert ipv4 == "dhcp" or "/" in ipv4
 
 print("[ОК] OpenTofu input contract")
