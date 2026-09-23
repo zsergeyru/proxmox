@@ -138,8 +138,12 @@ verify_template() {
                 | if ($agent == "1" or ($agent | startswith("1,")) or ($agent | test("(^|,)enabled=1($|,)")))
                   then empty else "agent=" + (if $agent == "" then "<отсутствует>" else $agent end) end
             ),
-            (if ((.ide2 // "") | contains("cloudinit"))
-             then empty else "ide2=" + ((.ide2 // "<отсутствует>") | tostring) end),
+            (if ([
+                    to_entries[]
+                    | select(.key | test("^(ide|sata|scsi|virtio)[0-9]+$"))
+                    | select((.value | tostring) | contains("cloudinit"))
+                ] | length) > 0
+             then empty else "cloudinit-disk=<отсутствует>" end),
             (if .ciuser == "root"
              then empty else "ciuser=" + ((.ciuser // "<отсутствует>") | tostring) end),
             (if ((.ipconfig0 // "") | contains("ip=dhcp"))
@@ -159,7 +163,7 @@ verify_template() {
             [[ -n "$failure" ]] && printf '  - %s\n' "$failure" >&2
         done <<<"$failures"
         printf 'Фактическая конфигурация: %s\n' \
-            "$(jq -c '{template,name,description,protection,scsihw,agent,ide2,ciuser,ipconfig0,ciupgrade}' <<<"$config")" >&2
+            "$(jq -c '{template,name,description,protection,scsihw,agent,drives:(with_entries(select(.key | test("^(ide|sata|scsi|virtio)[0-9]+$")))),ciuser,ipconfig0,ciupgrade}' <<<"$config")" >&2
         exit 1
     fi
 
