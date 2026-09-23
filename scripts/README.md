@@ -6,41 +6,41 @@
 
 ```text
 scripts/
-├── validate_repo.py                         # Проверяет структуру репозитория, guest.yaml, schemas, IP и отсутствие секретов
+├── validate_repo.py                         # Проверяет структуру репозитория, guest.yaml, схемы, IP-адреса и отсутствие закрытых данных
 │
 ├── guests/                                  # Общая логика формирования итоговой конфигурации гостей
-│   ├── resolver.py                          # Собирает effective state из defaults + profile + guest
-│   └── render-opentofu-input.py             # Формирует guests.json для OpenTofu из управляемых guest.yaml
+│   ├── resolver.py                          # Собирает итоговое состояние из общих настроек, профиля и описания гостя
+│   └── render-opentofu-input.py             # Формирует guests.json для OpenTofu из управляемых описаний guest.yaml
 │
 ├── infra-manager/                           # Всё, что относится к LXC 910 infra-manager
-│   ├── setup.sh                             # Вход bootstrap внутри 910; передаёт управление Python setup
-│   ├── pve-bootstrap-access.sh              # Выполняется на PVE; создаёт API token, ACL и передаёт доступ в 910
+│   ├── setup.sh                             # Точка начальной настройки внутри 910; передаёт управление программе настройки на Python
+│   ├── pve-bootstrap-access.sh              # Выполняется на PVE; создаёт ключ доступа к API, назначает права и передаёт доступ в 910
 │   │
 │   ├── infra_manager/                       # Основная Python-программа управления и проверки 910
-│   │   ├── __init__.py                      # Инициализация Python-пакета infra_manager
+│   │   ├── __init__.py                      # Инициализация пакета Python infra_manager
 │   │   ├── __main__.py                      # Точка входа для python3 -m infra_manager
-│   │   ├── cli.py                           # Команды setup, status, pve-access-check и semaphore-project
+│   │   ├── cli.py                           # Разбирает команды настройки, проверки состояния, доступа к PVE и настройки Semaphore
 │   │   ├── common.py                        # Общие ошибки, вывод и безопасный запуск внешних команд
-│   │   ├── setup.py                         # Главный оркестратор настройки Debian, Docker, runtime и Semaphore
-│   │   ├── semaphore.py                     # Синхронизирует проект, Git, Variable Group и задания Semaphore
-│   │   ├── pve.py                           # Проверяет фактические права PVE API token
+│   │   ├── setup.py                         # Главный управляющий модуль настройки Debian, Docker, рабочей среды и Semaphore
+│   │   ├── semaphore.py                     # Синхронизирует проект, Git, группу переменных и задания Semaphore
+│   │   ├── pve.py                           # Проверяет фактические права ключа доступа к API PVE
 │   │   └── status.py                        # Проверяет готовность 910 и всех его инструментов
 │   │
-│   ├── commands/                            # Исходники административных команд, устанавливаемых в /usr/local/sbin
+│   ├── commands/                            # Исходные файлы административных команд, устанавливаемых в /usr/local/sbin
 │   │   ├── status.sh                        # Обёртка команды infra-manager-status
 │   │   ├── pve-access-check.sh              # Обёртка команды infra-manager-pve-access-check
-│   │   └── pve-lifecycle-test.sh            # Приёмочный тест create/change/start/stop/delete временного LXC 9098
+│   │   └── pve-lifecycle-test.sh            # Приёмочная проверка создания, изменения, запуска, остановки и удаления временного LXC 9098
 │   │
 │   └── jobs/                                # Задания, непосредственно запускаемые Semaphore
-│       ├── opentofu-plan.sh                  # Формирует вход OpenTofu и выполняет только tofu plan
+│       ├── opentofu-plan.sh                  # Формирует входные данные OpenTofu и строит только план изменений
 │       ├── build-template.sh                 # Собирает Packer-шаблон VM 9000 и запускает его проверку
-│       └── verify-template.sh                # Проверяет шаблон 9000 через временный Full Clone 9099
+│       └── verify-template.sh                # Проверяет шаблон 9000 через временную полную копию 9099
 │
-└── tests/                                    # Локальные и CI-проверки без постоянных изменений инфраструктуры
-    ├── test-guest-resolver.py                # Проверяет resolver, management, bootstrap и profile features
-    ├── test-infra-manager-python.py          # Проверяет Python CLI и базовые функции infra-manager
+└── tests/                                    # Локальные и автоматические проверки без постоянных изменений инфраструктуры
+    ├── test-guest-resolver.py                # Проверяет сборщик конфигурации, управление, начальную настройку и возможности профиля
+    ├── test-infra-manager-python.py          # Проверяет командный интерфейс Python-программы и базовые функции infra-manager
     ├── test-opentofu-input.py                # Проверяет состав guests.json и исключение специальных объектов
-    └── test-infra-manager-contract.sh        # Проверяет общий контракт 910, Semaphore, PVE, OpenTofu и Packer
+    └── test-infra-manager-contract.sh        # Проверяет согласованность 910, Semaphore, PVE, OpenTofu и Packer
 ```
 
 Старого контура `scripts/pve/`, `deploy-guest.py`, `sync-management-keys.py` и PVE Configuration в действующем коде нет.
