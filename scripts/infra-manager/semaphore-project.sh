@@ -203,7 +203,7 @@ ensure_ssh_key() {
             --arg login "$login_name" \
             --arg private_key "$private_key" \
             --argjson project_id "$project_id" \
-            '{id:$id,name:$name,type:"ssh",project_id:$project_id,ssh:{login:$login,passphrase:"",private_key:$private_key}}')"
+            '{id:$id,name:$name,type:"ssh",project_id:$project_id,override_secret:true,ssh:{login:$login,passphrase:"",private_key:$private_key}}')"
 
         api PUT "/project/${project_id}/keys/${id}" -d "$payload" >/dev/null
     fi

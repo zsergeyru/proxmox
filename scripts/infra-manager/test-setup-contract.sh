@@ -251,6 +251,8 @@ grep -q 'GitHub project read-only' "$STATUS" \
     || die "status.sh должен проверять GitHub SSH key Semaphore"
 grep -q 'PROJECT_REPO="git@github.com:zsergeyru/proxmox.git"' "$STATUS" \
     || die "status.sh должен проверять Git repository Semaphore"
+grep -Fq 'repositories/${PROJECT_REPO_ID}/branches' "$STATUS" \
+    || die "status.sh должен реально проверять доступ Semaphore к Git repository"
 grep -Fq 'require_permissions "/vms" "$VM_ADMIN_PRIVS"' "$ACCESS" \
     || die "Полная проверка PVE access должна требовать управление всеми VM/LXC через /vms"
 grep -Fq 'require_permissions "/pool/$MANAGED_POOL" "Pool.Audit VM.Allocate"' "$ACCESS" \
@@ -298,6 +300,8 @@ grep -q 'TF_VAR_pve_api_token' "$SEMAPHORE_PROJECT" \
     || die "Variable Group должен передавать pve_api_token"
 grep -q 'operation:"update"' "$SEMAPHORE_PROJECT" \
     || die "Существующий PVE token в Variable Group должен синхронизироваться при обычном обновлении"
+grep -q 'override_secret:true' "$SEMAPHORE_PROJECT" \
+    || die "Существующий GitHub SSH key должен обновлять секретную часть в Semaphore"
 grep -q 'local name="OpenTofu Plan"' "$SEMAPHORE_PROJECT" \
     || die "Semaphore должен создавать шаблон OpenTofu Plan"
 grep -q 'opentofu_plan_template_id="$(ensure_opentofu_plan_template ' "$SEMAPHORE_PROJECT" \

@@ -112,6 +112,13 @@ jq -e --arg url "$PROJECT_REPO" --arg key_id "$GITHUB_KEY_ID" '
 ' <<<"$SEMAPHORE_REPOSITORIES" >/dev/null \
     || die "Git repository 'proxmox' не соответствует ожидаемому URL или SSH key"
 
+PROJECT_REPO_ID="$(jq -r '.[] | select(.name == "proxmox") | .id' <<<"$SEMAPHORE_REPOSITORIES")"
+if ! SEMAPHORE_REPO_BRANCHES="$(semaphore_api_get "/project/${PROJECT_ID}/repositories/${PROJECT_REPO_ID}/branches" 2>/dev/null)"; then
+    die "Semaphore не может прочитать Git repository 'proxmox' сохранённым SSH key"
+fi
+jq -e 'index("main") != null' <<<"$SEMAPHORE_REPO_BRANCHES" >/dev/null \
+    || die "Semaphore не видит ветку main в Git repository 'proxmox'"
+
 semaphore_api_get "/project/${PROJECT_ID}/environment?sort=name&order=asc"     | jq -e '.[] | select(.name == "OpenTofu PVE")' >/dev/null     || die "В Semaphore отсутствует Variable Group OpenTofu PVE"
 
 semaphore_api_get "/project/${PROJECT_ID}/templates?sort=name&order=asc"     | jq -e '.[] | select(.name == "OpenTofu Plan" and .app == "bash")' >/dev/null     || die "В Semaphore отсутствует шаблон OpenTofu Plan"
