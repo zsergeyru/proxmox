@@ -299,11 +299,24 @@ prepare_opentofu_input() {
 }
 
 write_runtime_versions() {
+    local pve_url pve_host pve_ip
+
+    pve_url="$(sed -n 's/^PVE_API_URL=//p' "$PVE_API_ENV" | head -n1)"
+    pve_host="${pve_url#https://}"
+    pve_host="${pve_host%%:*}"
+    [[ -n "$pve_host" && "$pve_host" != "$pve_url" ]] \
+        || die "Не удалось определить имя PVE из PVE_API_URL"
+
+    pve_ip="$(getent ahostsv4 "$pve_host" | awk 'NR == 1 {print $1}')"
+    [[ -n "$pve_ip" ]] || die "Не удалось определить IPv4 PVE: $pve_host"
+
     cat >"$COMPOSE_DIR/.versions.env" <<EOF_VERSIONS
 RUNTIME_VERSION=${RUNTIME_VERSION}
 SEMAPHORE_VERSION=${SEMAPHORE_VERSION}
 OPENTOFU_VERSION=${OPENTOFU_VERSION}
 PACKER_VERSION=${PACKER_VERSION}
+PVE_HOSTNAME=${pve_host}
+PVE_HOST_IP=${pve_ip}
 EOF_VERSIONS
     chmod 0644 "$COMPOSE_DIR/.versions.env"
 }
