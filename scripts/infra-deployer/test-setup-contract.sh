@@ -6,6 +6,8 @@ SETUP="$ROOT/scripts/infra-deployer/setup.sh"
 STATUS="$ROOT/scripts/infra-deployer/status.sh"
 ACCESS="$ROOT/scripts/infra-deployer/check-pve-access.sh"
 LIFECYCLE="$ROOT/scripts/infra-deployer/test-pve-lifecycle.sh"
+BUILD_TEMPLATE="$ROOT/scripts/infra-deployer/build-template.sh"
+TEST_TEMPLATE="$ROOT/scripts/infra-deployer/test-template.sh"
 COMPOSE="$ROOT/guests/910-infra-deployer/compose/docker-compose.yml"
 DOCKERFILE="$ROOT/guests/910-infra-deployer/compose/runner/Dockerfile"
 REQ="$ROOT/guests/910-infra-deployer/compose/runner/requirements.txt"
@@ -19,7 +21,7 @@ PROVISION="$ROOT/guests/910-infra-deployer/provision.yaml"
 die() { printf 'ОШИБКА: %s\n' "$*" >&2; exit 1; }
 ok()  { printf '[ОК] %s\n' "$*"; }
 
-for file in "$SETUP" "$STATUS" "$ACCESS" "$LIFECYCLE" "$COMPOSE" "$DOCKERFILE" "$REQ" "$PLAN" "$SEMAPHORE_PROJECT" "$PVE_BOOTSTRAP_ACCESS" "$OPENTOFU_LOCK" "$GUEST_MANIFEST" "$PROVISION"; do
+for file in "$SETUP" "$STATUS" "$ACCESS" "$LIFECYCLE" "$BUILD_TEMPLATE" "$TEST_TEMPLATE" "$COMPOSE" "$DOCKERFILE" "$REQ" "$PLAN" "$SEMAPHORE_PROJECT" "$PVE_BOOTSTRAP_ACCESS" "$OPENTOFU_LOCK" "$GUEST_MANIFEST" "$PROVISION"; do
     [[ -s "$file" ]] || die "Отсутствует обязательный файл: $file"
 done
 
@@ -109,10 +111,10 @@ if f"ARG OPENTOFU_VERSION={opentofu_version}" not in dockerfile_text:
 if f"ARG PACKER_VERSION={packer_version}" not in dockerfile_text:
     raise SystemExit("Версия Packer в Dockerfile расходится с provision.yaml")
 runner_system_packages = set(runner.get("system_packages", []))
-if "xorriso" not in runner_system_packages:
-    raise SystemExit("Runner должен содержать xorriso для временного Packer CD")
-if "xorriso" not in dockerfile_text:
-    raise SystemExit("Runner Dockerfile не устанавливает xorriso")
+if "xorriso" in runner_system_packages or "xorriso" in dockerfile_text:
+    raise SystemExit("xorriso больше не нужен: preseed передаётся штатным HTTP-сервером Packer")
+if runner.get("network_mode") != "host":
+    raise SystemExit("Runner должен использовать network_mode=host для Packer HTTP")
 if f'OPENTOFU_VERSION="{opentofu_version}"' not in setup_text:
     raise SystemExit("Версия OpenTofu в setup.sh расходится с provision.yaml")
 if f'PACKER_VERSION="{packer_version}"' not in setup_text:
@@ -132,6 +134,8 @@ if compose_services["semaphore"].get("container_name") != semaphore.get("contain
     raise SystemExit("container_name Semaphore расходится с provision.yaml")
 if compose_services["runner"].get("container_name") != runner.get("container_name"):
     raise SystemExit("container_name Runner расходится с provision.yaml")
+if compose_services["runner"].get("network_mode") != "host":
+    raise SystemExit("Runner Compose должен использовать network_mode=host")
 if compose_services["semaphore"].get("ports") != semaphore.get("ports"):
     raise SystemExit("порты Semaphore расходятся с provision.yaml")
 PY
@@ -148,6 +152,8 @@ grep -q 'infra-deployer-pve-access-check' "$SETUP" \
     || die "setup.sh не устанавливает PVE access check"
 grep -q 'infra-deployer-pve-lifecycle-test' "$SETUP" \
     || die "setup.sh не устанавливает lifecycle test"
+grep -q 'SEMAPHORE_WEB_ROOT=http://127.0.0.1:3000' "$SETUP" \
+    || die "Runner в host network должен обращаться к Semaphore через localhost"
 
 grep -q 'ln -sfn "$STATUS_COMMAND" /usr/local/bin/infra-deployer-status' "$SETUP" \
     || die "status command должен быть доступен по короткому имени через pct exec"
@@ -255,6 +261,15 @@ fi
 if grep -q '/etc/pve/' "$SETUP"; then
     die "setup внутри 910 не должен работать с файловой системой /etc/pve"
 fi
+
+grep -q 'packer build' "$BUILD_TEMPLATE" \
+    || die "build-template.sh должен выполнять packer build"
+grep -q 'template-version=8' "$BUILD_TEMPLATE" \
+    || die "build-template.sh должен работать с Template-Version 8"
+grep -q 'test-template.sh' "$BUILD_TEMPLATE" \
+    || die "После новой сборки должен запускаться короткий Full Clone test"
+grep -q 'TEST_VMID=9099' "$TEST_TEMPLATE" \
+    || die "Проверка шаблона 9000 должна использовать VMID 9099"
 
 if grep -qE 'tofu[[:space:]].*(apply|destroy)' "$PLAN"; then
     die "OpenTofu Plan не должен содержать apply или destroy"
