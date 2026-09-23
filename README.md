@@ -221,7 +221,7 @@ Bootstrap автоматически подготавливает использ
 ~~~text
 Project
 Git repository proxmox
-OpenTofu PVE Variable Group
+PVE API Variable Group
 OpenTofu Plan
 Build Template 9000
 ~~~
