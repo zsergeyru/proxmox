@@ -231,6 +231,7 @@ Project
 Git repository proxmox
 OpenTofu PVE Variable Group
 OpenTofu Plan
+Build Template 9000
 ~~~
 
 Ansible credential заранее не создаётся. Он добавляется только вместе с первой реальной Ansible-задачей.
@@ -329,7 +330,7 @@ proxmox/
 ├── guests/      описание VM/LXC
 ├── host/pve/    состояние физического PVE
 ├── scripts/     сценарии управления и проверки
-├── templates/   шаблоны
+├── packer/      сборка шаблонов Proxmox
 ├── ansible/     повторяемая настройка Linux-гостей
 ├── schemas/     схемы guest/defaults/effective
 └── archive/     исторические материалы
