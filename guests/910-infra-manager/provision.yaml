@@ -48,6 +48,7 @@ docker:
         - unzip
         - git
         - openssh-client
+        - openssl
         - bash
         - python3
         - py3-pip
