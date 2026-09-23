@@ -1,8 +1,8 @@
 """Настройка LXC 910 infra-manager на Python.
 
 Внешний контракт остаётся прежним: Public Bootstrap вызывает setup.sh, а тот
-передаёт управление этому модулю. Semaphore и status доступны через прежние
-shell-команды, но их реализация уже находится в Python-модулях.
+передаёт управление этому модулю. Настройка Semaphore выполняется напрямую
+через Python-модуль; status и PVE access сохраняют совместимые shell-команды.
 """
 
 from __future__ import annotations
@@ -978,8 +978,8 @@ class Setup:
             self.wait_semaphore()
             self.verify_semaphore_tools()
 
-            # Внешние shell-команды сохранены как совместимые Python wrappers.
             self.configure_semaphore_project()
+            # Локальные status/access команды сохраняют совместимые wrappers.
             self.install_local_commands()
             self.run_visible([str(STATUS_COMMAND)])
 
