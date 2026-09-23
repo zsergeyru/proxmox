@@ -140,8 +140,8 @@ if compose_services["runtime"].get("container_name") != runtime.get("container_n
     raise SystemExit("container_name infra-runtime расходится с provision.yaml")
 if compose_services["runtime"].get("network_mode") != "host":
     raise SystemExit("infra-runtime Compose должен использовать network_mode=host")
-if compose_services["runtime"].get("extra_hosts") != ["${PVE_HOSTNAME}:${PVE_HOST_IP}"]:
-    raise SystemExit("infra-runtime Compose должен получать PVE hostname/IP через extra_hosts")
+if "/etc/hosts:/etc/hosts:ro" not in compose_services["runtime"].get("volumes", []):
+    raise SystemExit("infra-runtime Compose должен получать PVE hostname через read-only /etc/hosts")
 PY
 
 grep -q 'SEMAPHORE_VERSION="v2.18.30"' "$SETUP" \
@@ -363,10 +363,9 @@ if runtime.get('image') != 'infra-runtime:${RUNTIME_VERSION}':
     raise SystemExit('infra-runtime image must use RUNTIME_VERSION')
 if runtime.get('network_mode') != 'host':
     raise SystemExit('infra-runtime must use host network')
-if runtime.get('extra_hosts') != ['${PVE_HOSTNAME}:${PVE_HOST_IP}']:
-    raise SystemExit('infra-runtime must map the PVE hostname')
-
 volumes = runtime.get('volumes', [])
+if '/etc/hosts:/etc/hosts:ro' not in volumes:
+    raise SystemExit('infra-runtime must use host /etc/hosts read-only')
 required = {
     '/var/lib/infra-manager/opentofu:/var/lib/infra-manager/opentofu',
     '/etc/infra-manager/ca:/etc/infra-manager/ca:ro',
