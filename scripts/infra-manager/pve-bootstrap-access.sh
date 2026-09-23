@@ -118,6 +118,32 @@ ensure_token_roles() {
         --propagate 1
 }
 
+remove_token_acls() {
+    local entry path role
+
+    while IFS= read -r entry; do
+        [[ -n "$entry" ]] || continue
+        path=${entry%%|*}
+        role=${entry#*|}
+        [[ -n "$path" && -n "$role" ]] || continue
+
+        pveum acl delete "$path" \
+            --tokens "$API_TOKEN_ID" \
+            --roles "$role"
+    done < <(
+        pveum acl list --output-format json \
+            | perl -MJSON::PP -0777 -e '
+                my $token = shift;
+                my $rows = decode_json(<STDIN>);
+                for my $row (@$rows) {
+                    next unless (($row->{type} // q{}) eq q{token});
+                    next unless (($row->{ugid} // q{}) eq $token);
+                    print(($row->{path} // q{}), q{|}, ($row->{roleid} // q{}), qq{\n});
+                }
+            ' "$API_TOKEN_ID"
+    )
+}
+
 persistent_token_available() {
     ct_exec test -s "$CT_PERSISTENT_SECRET" || return 1
     ct_exec grep -Fxq "PVE_API_TOKEN_ID=$API_TOKEN_ID" "$CT_PERSISTENT_SECRET"
@@ -175,6 +201,11 @@ create_api_token() {
 
 ensure_api_token() {
     if [[ "$MODE" == "recover" ]] && api_token_exists; then
+        # ACL ссылаются на token по имени. Если сначала удалить token, PVE
+        # временно считает эти ACL некорректными и печатает предупреждения.
+        # Поэтому recovery сначала удаляет только ACL этого token, затем token,
+        # после чего ensure_token_acls() восстановит тот же контракт прав.
+        remove_token_acls
         pveum user token remove "$API_USER" "$API_TOKEN_NAME"
     fi
 
