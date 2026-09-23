@@ -547,7 +547,7 @@ def persist_github_key() -> None:
         )
 
 
-def configure_project() -> int:
+def configure_project(branch: str | None = None) -> int:
     if os.geteuid() != 0:
         raise InfraManagerError(
             "Настройка Semaphore должна выполняться от root"
@@ -557,7 +557,7 @@ def configure_project() -> int:
             "Не найден постоянный PVE API credential"
         )
 
-    branch = os.environ.get("INFRA_PROJECT_BRANCH", "main")
+    branch = branch or os.environ.get("INFRA_PROJECT_BRANCH", "main")
     persist_github_key()
 
     client = SemaphoreClient()
