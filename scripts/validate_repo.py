@@ -19,6 +19,7 @@ from resolver import (
     NetworkConfig,
     deep_merge,
     get_nested,
+    is_dhcp_ipv4,
     parse_bare_ipv4,
     parse_network_config,
     resolve_effective_guest,
@@ -223,22 +224,31 @@ def check_effective_network(
 ) -> None:
     net = effective["network"]
     try:
-        iface = ipaddress.ip_interface(net["ipv4"])
         effective_subnet = ipaddress.ip_network(net["subnet"], strict=True)
         effective_gateway = ipaddress.ip_address(net["gateway"])
     except (TypeError, ValueError) as exc:
         fail(f"{rel}: некорректная effective network: {exc}")
         return
 
-    if not isinstance(iface, ipaddress.IPv4Interface):
-        fail(f"{rel}: effective network.ipv4 должен быть IPv4")
-        return
-    if iface.network.prefixlen != cfg.subnet.prefixlen:
-        fail(f"{rel}: effective IP должен использовать /{cfg.subnet.prefixlen}")
     if effective_subnet != cfg.subnet:
         fail(f"{rel}: effective subnet должен приходить из infrastructure/guests/defaults.yaml")
     if effective_gateway != cfg.gateway:
         fail(f"{rel}: effective gateway должен приходить из infrastructure/guests/defaults.yaml")
+
+    if is_dhcp_ipv4(net.get("ipv4")):
+        return
+
+    try:
+        iface = ipaddress.ip_interface(net["ipv4"])
+    except (TypeError, ValueError) as exc:
+        fail(f"{rel}: некорректный effective network.ipv4: {exc}")
+        return
+
+    if not isinstance(iface, ipaddress.IPv4Interface):
+        fail(f"{rel}: effective network.ipv4 должен быть IPv4 или dhcp")
+        return
+    if iface.network.prefixlen != cfg.subnet.prefixlen:
+        fail(f"{rel}: effective IP должен использовать /{cfg.subnet.prefixlen}")
 
     check_address(rel, source["vmid"], iface.ip, cfg, used)
 
@@ -416,7 +426,7 @@ def validate() -> None:
         else:
             check_resources(rel, data)
             override = get_nested(data, ("network", "ipv4"))
-            if override is not MISSING:
+            if override is not MISSING and not is_dhcp_ipv4(override):
                 try:
                     address = parse_bare_ipv4(override)
                 except GuestConfigError as exc:
