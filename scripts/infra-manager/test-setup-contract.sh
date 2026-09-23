@@ -16,7 +16,6 @@ COMPOSE="$ROOT/guests/910-infra-manager/compose/docker-compose.yml"
 DOCKERFILE="$ROOT/guests/910-infra-manager/compose/runtime/Dockerfile"
 REQ="$ROOT/guests/910-infra-manager/compose/runtime/requirements.txt"
 PLAN="$ROOT/scripts/infra-manager/opentofu-plan.sh"
-SEMAPHORE_PROJECT="$ROOT/scripts/infra-manager/semaphore-project.sh"
 PVE_BOOTSTRAP_ACCESS="$ROOT/scripts/infra-manager/pve-bootstrap-access.sh"
 OPENTOFU_LOCK="$ROOT/opentofu/.terraform.lock.hcl"
 GUEST_MANIFEST="$ROOT/guests/910-infra-manager/guest.yaml"
@@ -26,7 +25,7 @@ SSH_CONFIG="$ROOT/guests/910-infra-manager/compose/runtime/ssh_config"
 die() { printf 'ОШИБКА: %s\n' "$*" >&2; exit 1; }
 ok()  { printf '[ОК] %s\n' "$*"; }
 
-for file in "$SETUP" "$PY_SETUP" "$PY_SEMAPHORE" "$PY_STATUS" "$PY_PVE" "$STATUS" "$ACCESS" "$LIFECYCLE" "$BUILD_TEMPLATE" "$TEST_TEMPLATE" "$COMPOSE" "$DOCKERFILE" "$REQ" "$PLAN" "$SEMAPHORE_PROJECT" "$PVE_BOOTSTRAP_ACCESS" "$OPENTOFU_LOCK" "$GUEST_MANIFEST" "$PROVISION" "$SSH_CONFIG"; do
+for file in "$SETUP" "$PY_SETUP" "$PY_SEMAPHORE" "$PY_STATUS" "$PY_PVE" "$STATUS" "$ACCESS" "$LIFECYCLE" "$BUILD_TEMPLATE" "$TEST_TEMPLATE" "$COMPOSE" "$DOCKERFILE" "$REQ" "$PLAN" "$PVE_BOOTSTRAP_ACCESS" "$OPENTOFU_LOCK" "$GUEST_MANIFEST" "$PROVISION" "$SSH_CONFIG"; do
     [[ -s "$file" ]] || die "Отсутствует обязательный файл: $file"
 done
 
@@ -175,8 +174,12 @@ grep -q 'render-opentofu-input.py' "$PY_SETUP" \
     || die "Python setup должен генерировать OpenTofu input"
 grep -q 'Используется существующий постоянный PVE API credential' "$PY_SETUP" \
     || die "Повторное обновление 910 должно работать без staging PVE secret"
-grep -q 'semaphore-project.sh' "$PY_SETUP" \
-    || die "setup должен вызывать совместимый semaphore-project wrapper"
+grep -q 'from .semaphore import configure_project' "$PY_SETUP" \
+    || die "Python setup должен напрямую использовать Semaphore-модуль"
+grep -Fq 'configure_project(self.project_branch)' "$PY_SETUP" \
+    || die "Python setup должен передавать текущую Git-ветку в Semaphore"
+[[ ! -e "$ROOT/scripts/infra-manager/semaphore-project.sh" ]] \
+    || die "Устаревший semaphore-project.sh больше не должен существовать"
 grep -q 'status.sh' "$PY_SETUP" \
     || die "setup должен устанавливать совместимый status wrapper"
 grep -q 'check-pve-access.sh' "$PY_SETUP" \
@@ -248,13 +251,11 @@ grep -q '"1001:0"' "$PY_SETUP" \
 grep -q '"packer", "version"' "$PY_SETUP" \
     || die "Packer должен проверяться внутри infra-runtime"
 
-grep -Fq 'exec python3 -m infra_manager semaphore-project "$@"' "$SEMAPHORE_PROJECT" \
-    || die "semaphore-project.sh должен быть тонким Python wrapper"
 grep -Fq 'exec python3 -m infra_manager status "$@"' "$STATUS" \
     || die "status.sh должен быть тонким Python wrapper"
 grep -Fq 'exec python3 -m infra_manager pve-access-check "$@"' "$ACCESS" \
     || die "check-pve-access.sh должен быть тонким Python wrapper"
-for wrapper in "$SEMAPHORE_PROJECT" "$STATUS" "$ACCESS"; do
+for wrapper in "$STATUS" "$ACCESS"; do
     grep -Fq '/usr/local/lib/infra-manager/infra_manager' "$wrapper" \
         || die "Установленный wrapper должен использовать постоянный Python package"
     grep -Fq '/var/lib/infra-manager/bootstrap-repo/scripts/infra-manager' "$wrapper" \
