@@ -12,7 +12,7 @@ packer {
 locals {
   template_vmid    = 9000
   template_name    = "tpl-debian13"
-  template_version = 7
+  template_version = 8
 }
 
 source "proxmox-iso" "template_9000" {
@@ -81,26 +81,17 @@ source "proxmox-iso" "template_9000" {
   cloud_init_disk_type                = "ide"
   cloud_init_disable_upgrade_packages = true
 
-  additional_iso_files {
-    type             = "ide"
-    index            = "3"
-    iso_storage_pool = var.iso_storage
-    unmount          = true
-
-    cd_content = {
-      "preseed.cfg" = templatefile(abspath("${path.root}/http/preseed.cfg"), {
-        build_password = var.build_password
-      })
-    }
-    cd_label = "PACKERPRESEED"
+  http_content = {
+    "/preseed.cfg" = templatefile(abspath("${path.root}/http/preseed.cfg"), {
+      build_password = var.build_password
+    })
   }
 
   boot_wait = "10s"
   boot_command = [
     "<esc><wait>",
     "install auto=true priority=critical ",
-    "preseed/early_command=\"modprobe isofs; mkdir -p /tmp/packer-preseed; mount /dev/sr1 /tmp/packer-preseed; cp /tmp/packer-preseed/preseed.cfg /tmp/preseed.cfg; umount /tmp/packer-preseed\" ",
-    "preseed/url=file:///tmp/preseed.cfg ",
+    "preseed/url=http://{{ .HTTPIP }}:{{ .HTTPPort }}/preseed.cfg ",
     "locale=en_US.UTF-8 keyboard-configuration/xkb-keymap=us ",
     "interface=auto netcfg/get_hostname=builder-9000 netcfg/get_domain=local ",
     "<enter>"
