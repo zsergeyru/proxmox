@@ -293,6 +293,14 @@ if grep -qE 'tofu[[:space:]].*(apply|destroy)' "$PLAN"; then
 fi
 
 grep -q 'tofu -chdir="$OPENTOFU_DIR" plan' "$PLAN"     || die "OpenTofu Plan должен выполнять tofu plan"
+grep -q 'export TF_VAR_pve_endpoint="$PVE_API_URL"' "$PLAN" \
+    || die "OpenTofu Plan должен преобразовывать общий PVE_API_URL в TF_VAR_pve_endpoint"
+grep -q 'export TF_VAR_pve_api_token="$PVE_API_TOKEN"' "$PLAN" \
+    || die "OpenTofu Plan должен преобразовывать общий PVE_API_TOKEN в TF_VAR_pve_api_token"
+grep -q ': "${PVE_API_URL:?PVE_API_URL не задан}"' "$BUILD_TEMPLATE" \
+    || die "Packer build должен использовать общий PVE_API_URL"
+grep -q ': "${PVE_API_TOKEN:?PVE_API_TOKEN не задан}"' "$BUILD_TEMPLATE" \
+    || die "Packer build должен использовать общий PVE_API_TOKEN"
 grep -q -- '-lockfile=readonly' "$PLAN" \
     || die "OpenTofu Plan должен использовать только зафиксированный lock file"
 grep -q 'provider "registry.opentofu.org/bpg/proxmox"' "$OPENTOFU_LOCK" \
@@ -303,9 +311,9 @@ grep -q 'version     = "0.112.0"' "$OPENTOFU_LOCK" \
 grep -q 'PVE_ENV_NAME="PVE API"' "$SEMAPHORE_PROJECT" \
     || die "Semaphore должен создавать Variable Group PVE API"
 grep -q 'PVE_API_URL' "$SEMAPHORE_PROJECT" \
-    || die "Variable Group должен передавать pve_endpoint"
+    || die "Variable Group должен передавать PVE_API_URL"
 grep -q 'PVE_API_TOKEN' "$SEMAPHORE_PROJECT" \
-    || die "Variable Group должен передавать pve_api_token"
+    || die "Variable Group должен передавать PVE_API_TOKEN"
 grep -q 'SSL_CERT_FILE' "$SEMAPHORE_PROJECT" \
     || die "Variable Group должен передавать CA bundle OpenTofu/Packer"
 grep -q 'REQUESTS_CA_BUNDLE' "$SEMAPHORE_PROJECT" \
