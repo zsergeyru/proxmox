@@ -92,11 +92,6 @@ for module in \
     45-management-keys.sh \
     50-access.sh \
     55-infra-manager.sh \
-    60-template-contract.sh \
-    61-template-source.sh \
-    62-template-build.sh \
-    63-template-smoke.sh \
-    64-cloud-init-status.sh \
     70-tooling.sh \
     71-sync-management-keys-tooling.sh; do
     [[ -f "${LIB_DIR}/${module}" ]] || {
