@@ -264,7 +264,14 @@ ensure_opentofu_environment() {
     [[ -n "$endpoint" && -n "$token_id" && -n "$token_secret" ]]         || die "PVE API credential неполон для OpenTofu"
 
     api_token="${token_id}=${token_secret}"
-    env_json="$(jq -cn --arg endpoint "$endpoint" '{TF_VAR_pve_endpoint:$endpoint}')"
+    env_json="$(jq -cn \
+        --arg endpoint "$endpoint" \
+        --arg ca "/etc/infra-manager/ca/ca-bundle.crt" \
+        '{
+            TF_VAR_pve_endpoint:$endpoint,
+            SSL_CERT_FILE:$ca,
+            REQUESTS_CA_BUNDLE:$ca
+        }')"
 
     environments="$(api GET "/project/${project_id}/environment?sort=name&order=asc")"
     id="$(unique_id_by_name "$environments" "$OPENTOFU_ENV_NAME" "Variable Group")"
