@@ -109,6 +109,7 @@ semaphore:
     - GitHub project read-only
     - OpenTofu PVE
     - OpenTofu Plan
+    - Build Template 9000
 
 persistence:
   backup_required:
