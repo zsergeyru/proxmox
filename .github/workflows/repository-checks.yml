@@ -23,7 +23,7 @@ jobs:
       - name: Install validation dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y shellcheck cloud-init jq
+          sudo apt-get install -y shellcheck cloud-init jq unzip
           python -m pip install --disable-pip-version-check PyYAML==6.0.2 jsonschema==4.25.1
 
       - name: Validate repository
@@ -84,6 +84,31 @@ jobs:
 
       - name: Run infra-deployer contract checks
         run: bash scripts/infra-deployer/test-setup-contract.sh
+
+      - name: Set up Packer
+        run: |
+          version=1.15.4
+          archive="packer_${version}_linux_amd64.zip"
+          curl -fsSLo "/tmp/${archive}" "https://releases.hashicorp.com/packer/${version}/${archive}"
+          curl -fsSLo /tmp/packer_SHA256SUMS "https://releases.hashicorp.com/packer/${version}/packer_${version}_SHA256SUMS"
+          grep "  ${archive}$" /tmp/packer_SHA256SUMS > /tmp/packer.check
+          (cd /tmp && sha256sum -c packer.check)
+          sudo unzip -oq "/tmp/${archive}" -d /usr/local/bin
+          packer version
+
+      - name: Validate Packer 9000
+        run: |
+          packer fmt -check -recursive packer
+          packer init packer/9000
+          checksum="sha512:$(printf '0%.0s' {1..128})"
+          packer validate \
+            -var='proxmox_url=https://pve.invalid:8006/api2/json' \
+            -var='proxmox_username=root@pam!infra-deployer' \
+            -var='proxmox_token=dummy-token-secret' \
+            -var='iso_url=https://example.invalid/debian-13-amd64-netinst.iso' \
+            -var="iso_checksum=${checksum}" \
+            -var='build_password=BuildPassword1234567890' \
+            packer/9000
 
       - name: Set up OpenTofu
         uses: opentofu/setup-opentofu@v1
