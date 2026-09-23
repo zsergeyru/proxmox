@@ -45,5 +45,3 @@ sync
 if compgen -G '/etc/ssh/ssh_host_*' >/dev/null; then
     die "SSH host keys не удалены"
 fi
-
-sshd -t
