@@ -200,7 +200,7 @@ Proxmox отвечает за сам объект VM/LXC: процессор, п
 
 - [`310-guest-state.md`](310-guest-state.md) — как строится требуемое состояние гостевой системы.
 - [`320-guest-manifest.md`](320-guest-manifest.md) — справочник полей `guest.yaml`.
-- [`330-deploy-guest.md`](330-deploy-guest.md) — подробный контракт применения состояния гостевой системы.
+- [`330-guest-lifecycle.md`](330-guest-lifecycle.md) — подробный контракт применения состояния гостевой системы.
 - [`340-vmid-plan.md`](340-vmid-plan.md) — правила нумерации VMID и CTID.
 - [`390-decisions.md`](390-decisions.md) — причины ключевых решений по гостевому контуру.
 - [`../200-pve/200-overview.md`](../200-pve/200-overview.md) — роль физического PVE-хоста.
