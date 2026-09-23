@@ -2,7 +2,7 @@
 
 `320-ai-control` — текущий временный узел AI-управления инфраструктурой. Целевой узел — `410-ai-control`.
 
-Этот README описывает только роль существующего `320`. Действующая целевая архитектура определяется [`../../docs/50-ai-control.md`](../../docs/50-ai-control.md), а порядок перехода на `410` — [`../../docs/51-ai-control-bootstrap.md`](../../docs/51-ai-control-bootstrap.md).
+Этот README описывает только роль существующего `320`. Действующая целевая архитектура определяется [`../../../docs/500-ai/510-ai-control.md`](../../../docs/500-ai/510-ai-control.md), а порядок перехода на `410` — [`../410-ai-control/README.md`](../410-ai-control/README.md).
 
 ## Роль
 
@@ -39,7 +39,7 @@ rootfs/opt/ai-control/interfaces/
 
 Прямой SSH из AI Control сохраняется для первичной настройки, диагностики, разовых операций и аварийного восстановления.
 
-Полная политика SSH-ключей: [`../../docs/23-security.md`](../../docs/23-security.md).
+Полная политика SSH-ключей: [`../../../docs/700-security/720-ssh-access.md`](../../../docs/700-security/720-ssh-access.md).
 
 ## Переход на 410
 
@@ -64,4 +64,4 @@ rootfs/opt/ai-control/interfaces/
 - после изменений проверяются состояние, журналы и работа сервисов;
 - секреты и закрытые ключи в Git не хранятся.
 
-Подробная целевая модель AI: [`../../docs/50-ai-control.md`](../../docs/50-ai-control.md). Решение по повторяемой настройке: [`../311-dev-services/decisions/001-deployment-tooling.md`](../311-dev-services/decisions/001-deployment-tooling.md).
+Подробная целевая модель AI: [`../../../docs/500-ai/510-ai-control.md`](../../../docs/500-ai/510-ai-control.md). Решение по повторяемой настройке: [`../311-dev-services/decisions/001-deployment-tooling.md`](../311-dev-services/decisions/001-deployment-tooling.md).

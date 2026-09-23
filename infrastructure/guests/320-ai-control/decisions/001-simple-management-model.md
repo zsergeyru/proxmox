@@ -6,10 +6,10 @@
 
 ADR сохраняется как история решения временного узла `320`. Действующая модель повторяемой настройки уточнена в [`../../311-dev-services/decisions/001-deployment-tooling.md`](../../311-dev-services/decisions/001-deployment-tooling.md), а текущие общепроектные правила SSH, PVE ACL и AI Control находятся в:
 
-- [`../../../docs/23-security.md`](../../../docs/23-security.md);
-- [`../../../docs/25-pve-access-control.md`](../../../docs/25-pve-access-control.md);
-- [`../../../docs/33-guest-bootstrap-and-provisioning.md`](../../../docs/33-guest-bootstrap-and-provisioning.md);
-- [`../../../docs/50-ai-control.md`](../../../docs/50-ai-control.md).
+- [`../../../../docs/legacy/23-security.md`](../../../../docs/legacy/23-security.md);
+- [`../../../../docs/legacy/25-pve-access-control.md`](../../../../docs/legacy/25-pve-access-control.md);
+- [`../../../../docs/legacy/33-guest-bootstrap-and-provisioning.md`](../../../../docs/legacy/33-guest-bootstrap-and-provisioning.md);
+- [`../../../../docs/legacy/50-ai-control.md`](../../../../docs/legacy/50-ai-control.md).
 
 В частности, старое решение использовать универсального пользователя `ops` **больше не действует**: текущий административный пользователь управляемых Debian-гостей — `root` с доступом только по независимым SSH-ключам.
 
@@ -122,14 +122,14 @@ Semaphore в `311-dev-services` даёт пользователю веб-инт�
 Например:
 
 ```text
-guests/202-ha-test/rootfs/opt/home-assistant/compose.yaml
+infrastructure/guests/202-ha-test/rootfs/opt/home-assistant/compose.yaml
 → /opt/home-assistant/compose.yaml
 ```
 
 Для текущего временного узла:
 
 ```text
-guests/320-ai-control/rootfs/opt/ai-control/agents/hermes/
+infrastructure/guests/320-ai-control/rootfs/opt/ai-control/agents/hermes/
 → /opt/ai-control/agents/hermes/
 ```
 

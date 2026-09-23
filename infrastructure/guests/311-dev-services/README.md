@@ -3,7 +3,7 @@
 **Тип:** LXC  
 **Назначение:** DevOps, Ansible, CI/CD и сервисы разработки, отделённые от AI Control и обычных прикладных сервисов.
 
-Основной контракт management SSH keys находится в [`../../docs/28-management-ssh-keys.md`](../../docs/28-management-ssh-keys.md), Guest Bootstrap — в [`../../docs/33-guest-bootstrap-and-provisioning.md`](../../docs/33-guest-bootstrap-and-provisioning.md), текущая степень реализации — в [`../../docs/29-implementation-status.md`](../../docs/29-implementation-status.md).
+Правила административного SSH находятся в [`../../../docs/700-security/720-ssh-access.md`](../../../docs/700-security/720-ssh-access.md), а порядок создания и первоначальной подготовки гостя — в [`../../../docs/300-guests/330-deploy-guest.md`](../../../docs/300-guests/330-deploy-guest.md).
 
 ## Действующий desired state schema v9
 
