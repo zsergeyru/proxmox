@@ -46,6 +46,8 @@ docker:
       system_packages:
         - ca-certificates
         - curl
+        - jq
+        - openssl
         - unzip
         - git
         - openssh-client
