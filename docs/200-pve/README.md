@@ -20,7 +20,7 @@
 
 `290-decisions.md` используется для объяснения причин решений и рассмотренных альтернатив.
 
-Документация конкретного `910 infra-manager` находится в [`../../guests/910-infra-manager/README.md`](../../guests/910-infra-manager/README.md).
+Документация конкретного `910 infra-manager` находится в [`../../infrastructure/guests/910-infra-manager/README.md`](../../infrastructure/guests/910-infra-manager/README.md).
 
 ## Основная граница
 

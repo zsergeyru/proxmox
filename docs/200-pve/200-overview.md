@@ -74,7 +74,7 @@ PVE остаётся платформой виртуализации и влад
 
 ## 5. Обычные гости
 
-Обычные VM/LXC описываются в `guests/` и управляются из 910.
+Обычные VM/LXC описываются в `infrastructure/guests/` и управляются из 910.
 
 Изменяющие PVE-права разворачивателя ограничиваются pool `managed`.
 
@@ -111,5 +111,5 @@ root@pam!infra-manager
 - [`210-host-bootstrap.md`](210-host-bootstrap.md) — первоначальная подготовка.
 - [`220-host-configuration.md`](220-host-configuration.md) — минимальное состояние PVE.
 - [`230-host-layout.md`](230-host-layout.md) — локальная структура PVE.
-- [`../../guests/910-infra-manager/README.md`](../../guests/910-infra-manager/README.md) — паспорт 910.
+- [`../../infrastructure/guests/910-infra-manager/README.md`](../../infrastructure/guests/910-infra-manager/README.md) — паспорт 910.
 - [`../700-security/710-pve-access.md`](../700-security/710-pve-access.md) — доступ 910 к PVE.

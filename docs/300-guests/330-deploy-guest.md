@@ -71,7 +71,7 @@
 
 ### 1.4. Связь с `310` и `320`
 
-`310-guest-state.md` определяет построение требуемого состояния, а `320-guest-manifest.md` — поля и ограничения `guest.yaml`. `deploy-guest` использует общий `scripts/guests/resolver.py` и итоговую схему `schemas/guest-effective.schema.yaml`.
+`310-guest-state.md` определяет построение требуемого состояния, а `320-guest-manifest.md` — поля и ограничения `guest.yaml`. `deploy-guest` использует общий `scripts/guests/resolver.py` и итоговую схему `infrastructure/schemas/guest-effective.schema.yaml`.
 
 Если итоговое состояние не может быть построено или не проходит проверку, применение не начинается.
 
@@ -302,7 +302,7 @@ pve_management: false → объект не должен находиться в
 Каталог:
 
 ```text
-guests/<VMID>-<name>/rootfs/
+infrastructure/guests/<VMID>-<name>/rootfs/
 ```
 
 не применяется самим `deploy-guest`.
@@ -435,7 +435,7 @@ PVE Configuration заранее подготавливает `pvedeploy`, уч�
 - [`../200-pve/200-overview.md`](../200-pve/200-overview.md) — роль PVE-хоста.
 - [`../200-pve/220-host-configuration.md`](../200-pve/220-host-configuration.md) — обязательная конфигурация PVE-хоста.
 - [`../200-pve/230-host-layout.md`](../200-pve/230-host-layout.md) — локальные пути, команды и служебная структура PVE.
-- [`../../guests/README.md`](../../guests/README.md) — структура каталога гостевых систем.
+- [`../../infrastructure/guests/README.md`](../../infrastructure/guests/README.md) — структура каталога гостевых систем.
 - [`../../templates/README.md`](../../templates/README.md) — шаблоны и источники создания VM/LXC.
 - [`../../scripts/guests/resolver.py`](../../scripts/guests/resolver.py) — общий сборщик итогового состояния.
 - [`../../scripts/validate_repo.py`](../../scripts/validate_repo.py) — проверка репозитория.

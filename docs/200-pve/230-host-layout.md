@@ -94,4 +94,4 @@ Debian 13 LXC template в local:vztmpl
 - [`210-host-bootstrap.md`](210-host-bootstrap.md) — создание 910.
 - [`220-host-configuration.md`](220-host-configuration.md) — минимальный контракт PVE.
 - [`../700-security/710-pve-access.md`](../700-security/710-pve-access.md) — token и ACL.
-- [`../../guests/910-infra-manager/README.md`](../../guests/910-infra-manager/README.md) — постоянные данные 910.
+- [`../../infrastructure/guests/910-infra-manager/README.md`](../../infrastructure/guests/910-infra-manager/README.md) — постоянные данные 910.

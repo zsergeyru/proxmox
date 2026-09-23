@@ -240,4 +240,4 @@ infra-manager-status проходит
 - [`200-overview.md`](200-overview.md) — роль PVE-хоста.
 - [`../700-security/710-pve-access.md`](../700-security/710-pve-access.md) — PVE API-доступ.
 - [`../800-operations/810-deployment.md`](../800-operations/810-deployment.md) — штатное развёртывание.
-- [`../../guests/910-infra-manager/README.md`](../../guests/910-infra-manager/README.md) — паспорт 910.
+- [`../../infrastructure/guests/910-infra-manager/README.md`](../../infrastructure/guests/910-infra-manager/README.md) — паспорт 910.

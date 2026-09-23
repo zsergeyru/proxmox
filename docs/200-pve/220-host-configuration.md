@@ -158,4 +158,4 @@ OpenTofu внутри 910 не управляет:
 - [`210-host-bootstrap.md`](210-host-bootstrap.md) — первоначальная подготовка.
 - [`230-host-layout.md`](230-host-layout.md) — локальная структура PVE.
 - [`../700-security/710-pve-access.md`](../700-security/710-pve-access.md) — ACL token.
-- [`../../guests/910-infra-manager/README.md`](../../guests/910-infra-manager/README.md) — паспорт 910.
+- [`../../infrastructure/guests/910-infra-manager/README.md`](../../infrastructure/guests/910-infra-manager/README.md) — паспорт 910.

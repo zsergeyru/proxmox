@@ -34,16 +34,16 @@
 Основной индивидуальный файл гостя:
 
 ```text
-guests/<VMID>-<name>/guest.yaml
+infrastructure/guests/<VMID>-<name>/guest.yaml
 ```
 
 Общие значения и профили находятся в:
 
 ```text
-guests/defaults.yaml
+infrastructure/guests/defaults.yaml
 ```
 
-Машинные ограничения формата задаются схемами в `schemas/`.
+Машинные ограничения формата задаются схемами в `infrastructure/schemas/`.
 
 ### 1.2. Что считается требуемым состоянием
 
@@ -72,11 +72,11 @@ guests/defaults.yaml
 **Исходное состояние** — компактные данные, которые человек редактирует в Git:
 
 ```text
-guests/defaults.yaml
+infrastructure/guests/defaults.yaml
 +
 профиль
 +
-guests/<VMID>-<name>/guest.yaml
+infrastructure/guests/<VMID>-<name>/guest.yaml
 ```
 
 **Итоговое состояние** — полное состояние после наследования, объединения, нормализации и вычисления производных значений.
@@ -99,7 +99,7 @@ guests/<VMID>-<name>/guest.yaml
 
 Требуемое состояние строится из трёх основных источников.
 
-`guests/defaults.yaml` содержит:
+`infrastructure/guests/defaults.yaml` содержит:
 
 - общие значения проекта;
 - параметры, одинаковые для большинства гостей;
@@ -170,7 +170,7 @@ profiles:
 Для конкретной VM/LXC используется каталог:
 
 ```text
-guests/<VMID>-<name>/
+infrastructure/guests/<VMID>-<name>/
 ├── guest.yaml
 ├── provision.yaml
 ├── README.md
@@ -194,13 +194,13 @@ guests/<VMID>-<name>/
 
 `README.md`, `docs/`, `decisions/` и `STATUS.md` не заменяют `guest.yaml` как источник требуемого состояния объекта Proxmox.
 
-Документация, которая описывает только одну конкретную VM/LXC, должна храниться рядом с этой гостевой системой в `guests/<VMID>-<name>/`, а не в общем разделе `docs/300-guests/`.
+Документация, которая описывает только одну конкретную VM/LXC, должна храниться рядом с этой гостевой системой в `infrastructure/guests/<VMID>-<name>/`, а не в общем разделе `docs/300-guests/`.
 
 Если краткого `README.md` достаточно, каталог `docs/` не создаётся. Для сложного гостя в `docs/` могут находиться отдельные документы по его внутренней файловой структуре, сервисам, агентам, прикладным компонентам и другим особенностям, которые не являются общими правилами гостевого контура.
 
 Общая документация `docs/300-guests/` описывает только правила и контракты, применимые к нескольким или всем гостевым системам.
 
-Решения, общие для всего гостевого контура, должны находиться в `390-decisions.md`, а не в `guests/<guest>/decisions/`.
+Решения, общие для всего гостевого контура, должны находиться в `390-decisions.md`, а не в `infrastructure/guests/<guest>/decisions/`.
 
 Постоянное правило не должно храниться только в `STATUS.md`. После устранения временного расхождения запись должна быть удалена либо перенесена в соответствующий постоянный источник.
 
@@ -211,7 +211,7 @@ guests/<VMID>-<name>/
 Например:
 
 ```text
-guests/311-dev-services/rootfs/etc/example/config.conf
+infrastructure/guests/311-dev-services/rootfs/etc/example/config.conf
 ```
 
 соответствует файлу:
@@ -276,7 +276,7 @@ schemas/guest.schema.yaml
 → исходный `guest.yaml`
 
 schemas/guest-defaults.schema.yaml
-→ `guests/defaults.yaml` и профили
+→ `infrastructure/guests/defaults.yaml` и профили
 
 schemas/guest-effective.schema.yaml
 → итоговое состояние
@@ -300,7 +300,7 @@ scripts/guests/resolver.py
 
 Сначала проверяются исходные файлы:
 
-- формат `guests/defaults.yaml`;
+- формат `infrastructure/guests/defaults.yaml`;
 - формат конкретного `guest.yaml`;
 - допустимые поля и значения;
 - отсутствие запрещённых неизвестных полей.
@@ -354,10 +354,10 @@ python scripts/validate_repo.py
 - [`330-deploy-guest.md`](330-deploy-guest.md) — применение требуемого состояния через `deploy-guest`.
 - [`../100-architecture/120-state-model.md`](../100-architecture/120-state-model.md) — общая модель требуемого и фактического состояния проекта.
 - [`../200-pve/200-overview.md`](../200-pve/200-overview.md) — роль PVE-хоста и граница между хостом и гостевым контуром.
-- [`../../guests/README.md`](../../guests/README.md) — структура каталога конкретных VM/LXC.
-- [`../../schemas/guest.schema.yaml`](../../schemas/guest.schema.yaml) — машинная схема исходного `guest.yaml`.
-- [`../../schemas/guest-defaults.schema.yaml`](../../schemas/guest-defaults.schema.yaml) — машинная схема общих настроек и профилей.
-- [`../../schemas/guest-effective.schema.yaml`](../../schemas/guest-effective.schema.yaml) — машинная схема итогового состояния.
+- [`../../infrastructure/guests/README.md`](../../infrastructure/guests/README.md) — структура каталога конкретных VM/LXC.
+- [`../../infrastructure/schemas/guest.schema.yaml`](../../infrastructure/schemas/guest.schema.yaml) — машинная схема исходного `guest.yaml`.
+- [`../../infrastructure/schemas/guest-defaults.schema.yaml`](../../infrastructure/schemas/guest-defaults.schema.yaml) — машинная схема общих настроек и профилей.
+- [`../../infrastructure/schemas/guest-effective.schema.yaml`](../../infrastructure/schemas/guest-effective.schema.yaml) — машинная схема итогового состояния.
 - [`../../scripts/guests/resolver.py`](../../scripts/guests/resolver.py) — общий сборщик итогового состояния.
 - [`../../scripts/validate_repo.py`](../../scripts/validate_repo.py) — проверка исходного и итогового состояния репозитория.
 - [`../../templates/README.md`](../../templates/README.md) — шаблоны и источники для создания VM/LXC.

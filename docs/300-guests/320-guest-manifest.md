@@ -36,7 +36,7 @@
 schema_version: 10
 ```
 
-Один номер версии используется для `guest.yaml`, `guests/defaults.yaml` и итогового состояния.
+Один номер версии используется для `guest.yaml`, `infrastructure/guests/defaults.yaml` и итогового состояния.
 
 #### 3.1.2. `vmid`
 
@@ -82,7 +82,7 @@ description: Сервисы разработки и автоматизации
 
 **Тип:** строка.
 
-Имя профиля из `guests/defaults.yaml`.
+Имя профиля из `infrastructure/guests/defaults.yaml`.
 
 Пример:
 
@@ -326,7 +326,7 @@ ansible
 
 ### 1.7. Параметры профилей VM и LXC
 
-Профили находятся в `guests/defaults.yaml` и описывают типовую техническую основу класса гостей.
+Профили находятся в `infrastructure/guests/defaults.yaml` и описывают типовую техническую основу класса гостей.
 
 Пример:
 
@@ -643,7 +643,7 @@ defaults:
 
 - [`310-guest-state.md`](310-guest-state.md) — источники и построение требуемого состояния.
 - [`330-deploy-guest.md`](330-deploy-guest.md) — применение состояния и жизненный цикл `deploy-guest`.
-- [`../../guests/README.md`](../../guests/README.md) — структура каталогов конкретных VM/LXC.
-- [`../../schemas/guest.schema.yaml`](../../schemas/guest.schema.yaml) — машинная схема `guest.yaml`.
-- [`../../schemas/guest-defaults.schema.yaml`](../../schemas/guest-defaults.schema.yaml) — машинная схема общих настроек и профилей.
-- [`../../schemas/guest-effective.schema.yaml`](../../schemas/guest-effective.schema.yaml) — машинная схема итогового состояния.
+- [`../../infrastructure/guests/README.md`](../../infrastructure/guests/README.md) — структура каталогов конкретных VM/LXC.
+- [`../../infrastructure/schemas/guest.schema.yaml`](../../infrastructure/schemas/guest.schema.yaml) — машинная схема `guest.yaml`.
+- [`../../infrastructure/schemas/guest-defaults.schema.yaml`](../../infrastructure/schemas/guest-defaults.schema.yaml) — машинная схема общих настроек и профилей.
+- [`../../infrastructure/schemas/guest-effective.schema.yaml`](../../infrastructure/schemas/guest-effective.schema.yaml) — машинная схема итогового состояния.

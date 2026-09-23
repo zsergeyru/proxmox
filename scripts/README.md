@@ -129,7 +129,7 @@ infra-manager-pve-lifecycle-test
 
 `resolver.py` — единый resolver конфигурации гостей. Он объединяет `defaults + profile + guest`, вычисляет management IP, нормализует `management`, `bootstrap` и features и формирует effective state.
 
-`render-opentofu-input.py` проходит по `guests/*/guest.yaml`, берёт только объекты с `profile` и формирует:
+`render-opentofu-input.py` проходит по `infrastructure/guests/*/guest.yaml`, берёт только объекты с `profile` и формирует:
 
 ```text
 /var/lib/infra-manager/opentofu/guests.json

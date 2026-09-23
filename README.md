@@ -111,7 +111,7 @@ tags:        infra-manager;proxmox-bootstrap
 
 910 является специальным управляющим контейнером: его создаёт публичный bootstrap, OpenTofu не управляет самим 910, 910 не входит в `managed`, постоянный root SSH с 910 на PVE не используется.
 
-Подробнее: [`guests/910-infra-manager/README.md`](guests/910-infra-manager/README.md).
+Подробнее: [`infrastructure/guests/910-infra-manager/README.md`](infrastructure/guests/910-infra-manager/README.md).
 
 ## GitHub Deploy Key
 
@@ -326,12 +326,15 @@ chmod +x bootstrap-pve.sh
 ~~~text
 proxmox/
 ├── docs/        документация
-├── guests/      описание VM/LXC
-├── host/pve/    состояние физического PVE
-├── scripts/     сценарии управления и проверки
-├── packer/      Packer-шаблоны VM
-├── ansible/     повторяемая настройка Linux-гостей
-├── schemas/     схемы guest/defaults/effective
+├── infrastructure/   описание состояния инфраструктуры
+│   ├── guests/        требуемое состояние VM/LXC
+│   ├── host/          состояние физического PVE
+│   └── schemas/       схемы проверки описаний и итогового состояния
+├── automation/       средства автоматизированного управления инфраструктурой
+│   ├── opentofu/      создание, изменение и удаление VM/LXC
+│   ├── packer/        сборка базовых шаблонов VM
+│   └── ansible/       повторяемая настройка Linux-гостей
+├── scripts/          управление 910, задания Semaphore и проверки
 └── archive/     исторические материалы
 ~~~
 
@@ -351,7 +354,7 @@ proxmox/
 - [`docs/200-pve/210-host-bootstrap.md`](docs/200-pve/210-host-bootstrap.md);
 - [`docs/700-security/710-pve-access.md`](docs/700-security/710-pve-access.md);
 - [`docs/800-operations/810-deployment.md`](docs/800-operations/810-deployment.md);
-- [`guests/910-infra-manager/README.md`](guests/910-infra-manager/README.md).
+- [`infrastructure/guests/910-infra-manager/README.md`](infrastructure/guests/910-infra-manager/README.md).
 
 ## Общие правила
 
