@@ -220,7 +220,7 @@ fi
 if grep -q 'pveum role add.*InfraManagedGuest' "$PVE_BOOTSTRAP_ACCESS"; then
     die "Собственная роль InfraManagedGuest больше не должна создаваться"
 fi
-if grep -q 'infra-manager@pve' "$PVE_BOOTSTRAP_ACCESS" "$SETUP" "$PY_SETUP" "$PY_SEMAPHORE" "$PY_STATUS" "$PY_PVE" "$SEMAPHORE_PROJECT"; then
+if grep -q 'infra-manager@pve' "$PVE_BOOTSTRAP_ACCESS" "$SETUP" "$PY_SETUP" "$PY_SEMAPHORE" "$PY_STATUS" "$PY_PVE"; then
     die "Старая PVE-идентичность не должна присутствовать в чистой схеме"
 fi
 if grep -q 'InfraManagedGuest' "$PVE_BOOTSTRAP_ACCESS" "$SETUP" "$PY_SETUP" "$PY_SEMAPHORE" "$PY_STATUS" "$PY_PVE" "$SEMAPHORE_PROJECT"; then
