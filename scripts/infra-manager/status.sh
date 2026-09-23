@@ -112,7 +112,7 @@ jq -e --arg url "$PROJECT_REPO" --arg key_id "$GITHUB_KEY_ID" '
 ' <<<"$SEMAPHORE_REPOSITORIES" >/dev/null \
     || die "Git repository 'proxmox' не соответствует ожидаемому URL или SSH key"
 
-semaphore_api_get "/project/${PROJECT_ID}/environment?sort=name&order=asc"     | jq -e '.[] | select(.name == "OpenTofu PVE")' >/dev/null     || die "В Semaphore отсутствует Variable Group OpenTofu PVE"
+semaphore_api_get "/project/${PROJECT_ID}/environment?sort=name&order=asc"     | jq -e '.[] | select(.name == "PVE API")' >/dev/null     || die "В Semaphore отсутствует Variable Group PVE API"
 
 SEMAPHORE_TEMPLATES="$(semaphore_api_get "/project/${PROJECT_ID}/templates?sort=name&order=asc")"
 jq -e '.[] | select(.name == "OpenTofu Plan" and .app == "bash")' <<<"$SEMAPHORE_TEMPLATES" >/dev/null \
