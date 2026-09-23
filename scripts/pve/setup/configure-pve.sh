@@ -91,6 +91,7 @@ for module in \
     40-runtime.sh \
     45-management-keys.sh \
     50-access.sh \
+    55-infra-manager.sh \
     60-template-contract.sh \
     61-template-source.sh \
     62-template-build.sh \
@@ -181,6 +182,8 @@ main() {
     ensure_managed_pool
     ensure_roles
     ensure_pve_identities
+
+    ensure_infra_manager
 
     if (( TEMPLATE_BUILD_REQUIRED )); then
         prepare_template_source
