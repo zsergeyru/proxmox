@@ -131,27 +131,29 @@ jobs:
           path = Path("guests/910-infra-manager/compose/docker-compose.yml")
           data = yaml.safe_load(path.read_text(encoding="utf-8"))
           services = data.get("services", {})
-          if set(services) != {"semaphore"}:
+          if set(services) != {"runtime"}:
               raise SystemExit(f"Unexpected services: {sorted(services)}")
-          if services["semaphore"].get("image") != "infra-deployer-semaphore:${SEMAPHORE_VERSION}":
-              raise SystemExit("Semaphore image must use pinned custom version variable")
-          if "build" not in services["semaphore"]:
-              raise SystemExit("Semaphore must use the project Dockerfile")
-          if services["semaphore"].get("network_mode") != "host":
-              raise SystemExit("Semaphore must use host network")
+          if services["runtime"].get("image") != "infra-runtime:${RUNTIME_VERSION}":
+              raise SystemExit("infra-runtime image must use pinned runtime version variable")
+          if services["runtime"].get("container_name") != "infra-runtime":
+              raise SystemExit("infra-runtime must use the canonical container name")
+          if "build" not in services["runtime"]:
+              raise SystemExit("infra-runtime must use the project Dockerfile")
+          if services["runtime"].get("network_mode") != "host":
+              raise SystemExit("infra-runtime must use host network")
           PY
 
-      - name: Build infra-manager Semaphore image
+      - name: Build infra-runtime image
         run: |
           docker build \
             --build-arg SEMAPHORE_VERSION=v2.18.30 \
             --build-arg OPENTOFU_VERSION=1.12.6 \
             --build-arg PACKER_VERSION=1.15.4 \
-            -t infra-deployer-semaphore:test \
-            guests/910-infra-manager/compose/semaphore
-          docker run --rm infra-deployer-semaphore:test tofu version
-          docker run --rm infra-deployer-semaphore:test packer version
-          docker run --rm --entrypoint python3 infra-deployer-semaphore:test -c 'import proxmoxer'
+            -t infra-runtime:test \
+            guests/910-infra-manager/compose/runtime
+          docker run --rm infra-runtime:test tofu version
+          docker run --rm infra-runtime:test packer version
+          docker run --rm --entrypoint python3 infra-runtime:test -c 'import proxmoxer'
 
       - name: Run deploy runtime contract checks
         run: bash scripts/pve/setup/tests/test-deploy-runtime-contract.sh

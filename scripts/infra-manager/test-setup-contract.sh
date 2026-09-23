@@ -9,8 +9,8 @@ LIFECYCLE="$ROOT/scripts/infra-manager/test-pve-lifecycle.sh"
 BUILD_TEMPLATE="$ROOT/scripts/infra-manager/build-template.sh"
 TEST_TEMPLATE="$ROOT/scripts/infra-manager/test-template.sh"
 COMPOSE="$ROOT/guests/910-infra-manager/compose/docker-compose.yml"
-DOCKERFILE="$ROOT/guests/910-infra-manager/compose/semaphore/Dockerfile"
-REQ="$ROOT/guests/910-infra-manager/compose/semaphore/requirements.txt"
+DOCKERFILE="$ROOT/guests/910-infra-manager/compose/runtime/Dockerfile"
+REQ="$ROOT/guests/910-infra-manager/compose/runtime/requirements.txt"
 PLAN="$ROOT/scripts/infra-manager/opentofu-plan.sh"
 SEMAPHORE_PROJECT="$ROOT/scripts/infra-manager/semaphore-project.sh"
 PVE_BOOTSTRAP_ACCESS="$ROOT/scripts/infra-manager/pve-bootstrap-access.sh"
@@ -84,23 +84,25 @@ for package in docker_packages:
         raise SystemExit(f"setup.sh не обеспечивает Docker-пакет из provision.yaml: {package}")
 
 services = docker.get("services", {})
-if set(services) != {"semaphore"}:
-    raise SystemExit(f"provision.yaml: должен быть один Docker service Semaphore: {sorted(services)}")
+if set(services) != {"runtime"}:
+    raise SystemExit(f"provision.yaml: должен быть один Docker service runtime: {sorted(services)}")
 
-semaphore = services["semaphore"]
-sem_image = semaphore.get("image", "")
-base_image = semaphore.get("base_image", "")
-if not sem_image.startswith("infra-deployer-semaphore:v"):
-    raise SystemExit("provision.yaml: неверный image Semaphore")
-sem_version = sem_image.rsplit(":", 1)[1]
-if base_image != f"semaphoreui/semaphore:{sem_version}":
-    raise SystemExit("Semaphore base image должен использовать ту же версию")
-if semaphore.get("network_mode") != "host":
-    raise SystemExit("Semaphore должен использовать network_mode=host для Packer HTTP")
-if f'SEMAPHORE_VERSION="{sem_version}"' not in setup_text:
+runtime = services["runtime"]
+if runtime.get("container_name") != "infra-runtime":
+    raise SystemExit("provision.yaml: container_name должен быть infra-runtime")
+if runtime.get("image") != "infra-runtime:v1":
+    raise SystemExit("provision.yaml: image должен быть infra-runtime:v1")
+base_image = runtime.get("base_image", "")
+if base_image != "semaphoreui/semaphore:v2.18.30":
+    raise SystemExit("infra-runtime должен использовать Semaphore v2.18.30 как base image")
+if runtime.get("network_mode") != "host":
+    raise SystemExit("infra-runtime должен использовать network_mode=host для Packer HTTP")
+if 'SEMAPHORE_VERSION="v2.18.30"' not in setup_text:
     raise SystemExit("Версия Semaphore в setup.sh расходится с provision.yaml")
+if 'RUNTIME_VERSION="v1"' not in setup_text:
+    raise SystemExit("Версия infra-runtime в setup.sh расходится с provision.yaml")
 
-tools = semaphore.get("tools", {})
+tools = runtime.get("tools", {})
 dockerfile_text = dockerfile_path.read_text(encoding="utf-8")
 opentofu_version = str(tools.get("opentofu", ""))
 packer_version = str(tools.get("packer", ""))
@@ -108,7 +110,7 @@ if f"ARG OPENTOFU_VERSION={opentofu_version}" not in dockerfile_text:
     raise SystemExit("Версия OpenTofu в Dockerfile расходится с provision.yaml")
 if f"ARG PACKER_VERSION={packer_version}" not in dockerfile_text:
     raise SystemExit("Версия Packer в Dockerfile расходится с provision.yaml")
-system_packages = set(semaphore.get("system_packages", []))
+system_packages = set(runtime.get("system_packages", []))
 if "xorriso" in system_packages or "xorriso" in dockerfile_text:
     raise SystemExit("xorriso не нужен: preseed передаётся штатным HTTP-сервером Packer")
 if f'OPENTOFU_VERSION="{opentofu_version}"' not in setup_text:
@@ -117,19 +119,19 @@ if f'PACKER_VERSION="{packer_version}"' not in setup_text:
     raise SystemExit("Версия Packer в setup.sh расходится с provision.yaml")
 
 req_text = req_path.read_text(encoding="utf-8")
-for package, constraint in semaphore.get("python_packages", {}).items():
+for package, constraint in runtime.get("python_packages", {}).items():
     expected = f"{package}{constraint}"
     if expected not in req_text:
         raise SystemExit(f"requirements.txt расходится с provision.yaml: {expected}")
 
 compose = yaml.safe_load(compose_path.read_text(encoding="utf-8"))
 compose_services = compose.get("services", {})
-if set(compose_services) != {"semaphore"}:
-    raise SystemExit(f"docker-compose.yml: должен быть один service Semaphore: {sorted(compose_services)}")
-if compose_services["semaphore"].get("container_name") != semaphore.get("container_name"):
-    raise SystemExit("container_name Semaphore расходится с provision.yaml")
-if compose_services["semaphore"].get("network_mode") != "host":
-    raise SystemExit("Semaphore Compose должен использовать network_mode=host")
+if set(compose_services) != {"runtime"}:
+    raise SystemExit(f"docker-compose.yml: должен быть один service runtime: {sorted(compose_services)}")
+if compose_services["runtime"].get("container_name") != runtime.get("container_name"):
+    raise SystemExit("container_name infra-runtime расходится с provision.yaml")
+if compose_services["runtime"].get("network_mode") != "host":
+    raise SystemExit("infra-runtime Compose должен использовать network_mode=host")
 PY
 
 grep -q 'SEMAPHORE_VERSION="v2.18.30"' "$SETUP" \
@@ -147,8 +149,8 @@ grep -q 'infra-manager-pve-lifecycle-test' "$SETUP" \
 if grep -q '^SEMAPHORE_USE_REMOTE_RUNNER=True$\|^SEMAPHORE_RUNNER_REGISTRATION_TOKEN=' "$SETUP"; then
     die "Для одного 910 отдельный remote Runner не должен включаться"
 fi
-grep -q 'docker exec infra-deployer-semaphore packer version' "$SETUP" \
-    || die "Packer должен проверяться внутри локального Semaphore"
+grep -q 'docker exec infra-runtime packer version' "$SETUP" \
+    || die "Packer должен проверяться внутри infra-runtime"
 
 grep -q 'ln -sfn "$STATUS_COMMAND" /usr/local/bin/infra-manager-status' "$SETUP" \
     || die "status command должен быть доступен по короткому имени через pct exec"
@@ -338,17 +340,19 @@ import sys, yaml
 path = Path(sys.argv[1])
 data = yaml.safe_load(path.read_text(encoding='utf-8'))
 services = data.get('services', {})
-if set(services) != {'semaphore'}:
+if set(services) != {'runtime'}:
     raise SystemExit(f'unexpected services: {sorted(services)}')
 
-server = services['semaphore']
+runtime = services['runtime']
 
-if server.get('image') != 'infra-deployer-semaphore:${SEMAPHORE_VERSION}':
-    raise SystemExit('Semaphore image must use pinned custom version variable')
-if server.get('network_mode') != 'host':
-    raise SystemExit('Semaphore must use host network')
+if runtime.get('image') != 'infra-runtime:${RUNTIME_VERSION}':
+    raise SystemExit('infra-runtime image must use pinned runtime version variable')
+if runtime.get('container_name') != 'infra-runtime':
+    raise SystemExit('infra-runtime must use the canonical container name')
+if runtime.get('network_mode') != 'host':
+    raise SystemExit('infra-runtime must use host network')
 
-volumes = server.get('volumes', [])
+volumes = runtime.get('volumes', [])
 required = {
     '/var/lib/infra-manager/opentofu:/var/lib/infra-manager/opentofu',
     '/etc/infra-manager/ca:/etc/infra-manager/ca:ro',
