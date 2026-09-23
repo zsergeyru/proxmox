@@ -23,6 +23,8 @@ apt-get install -y --no-install-recommends \
     openssh-server \
     cloud-init \
     cloud-guest-utils \
+    ifupdown \
+    dhcpcd-base \
     ca-certificates \
     curl \
     linux-image-amd64
