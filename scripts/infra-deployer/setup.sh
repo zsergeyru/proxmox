@@ -299,6 +299,14 @@ EOF_RUNNER
     else
         [[ -s "$RUNNER_ENV" ]] || die "Есть server env, но отсутствует runner env"
         [[ -s "$ADMIN_PASSWORD_FILE" ]] || die "Есть server env, но отсутствует initial admin password"
+
+        if grep -q '^SEMAPHORE_WEB_ROOT=' "$RUNNER_ENV"; then
+            sed -i 's#^SEMAPHORE_WEB_ROOT=.*#SEMAPHORE_WEB_ROOT=http://127.0.0.1:3000#' "$RUNNER_ENV"
+        else
+            printf '%s\n' 'SEMAPHORE_WEB_ROOT=http://127.0.0.1:3000' >>"$RUNNER_ENV"
+        fi
+        chmod 0600 "$RUNNER_ENV"
+
         ok "Используются существующие секреты Semaphore"
     fi
 }
