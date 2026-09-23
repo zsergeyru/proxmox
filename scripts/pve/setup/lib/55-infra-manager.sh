@@ -103,12 +103,12 @@ push_infra_manager_file() {
         --user 0 --group 0 --perms "$mode"
 }
 
-sync_infra_manager_source() {
+sync_infra_manager_source() (
     log "Передача текущей revision в 910"
 
     local archive
     archive="$(mktemp /run/infra-manager-source.XXXXXX.tar)"
-    trap 'rm -f -- "$archive"' RETURN
+    trap 'rm -f -- "$archive"' EXIT
 
     git -C "$SOURCE_ROOT" archive --format=tar "$RUN_SOURCE_REVISION" >"$archive" \
         || die "Не удалось сформировать Git archive текущей revision"
@@ -127,7 +127,7 @@ sync_infra_manager_source() {
     push_infra_manager_file "$KNOWN_HOSTS" /root/.ssh/github_known_hosts 0644
 
     ok "Код и read-only GitHub credential переданы в 910"
-}
+)
 
 configure_infra_manager_access() {
     log "Настройка PVE API-доступа 910"
@@ -150,7 +150,6 @@ configure_infra_manager_runtime() {
 
     pct exec "$INFRA_MANAGER_VMID" -- env \
         PVE_API_SECRET_FILE="$INFRA_MANAGER_STAGING_SECRET" \
-        INFRA_PROJECT_BRANCH="$PRIVATE_BRANCH" \
         bash "$INFRA_MANAGER_REPO/scripts/infra-manager/setup.sh"
 
     pct exec "$INFRA_MANAGER_VMID" -- rm -rf /root/.infra-manager-bootstrap
