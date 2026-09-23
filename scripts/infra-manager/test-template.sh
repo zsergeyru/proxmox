@@ -228,10 +228,43 @@ ssh \
     "root@$ip" \
     'failed=0
 
-     if timeout 180s cloud-init status --wait >/dev/null; then
-         printf "[ОК] Cloud-Init завершён\\n"
+     cloud_status="$(timeout 180s cloud-init status --wait --format json 2>/dev/null || true)"
+     if printf "%s" "$cloud_status" | python3 -c '\''
+import json
+import sys
+
+allowed = "'\''user'\'' of type string is deprecated"
+data = json.load(sys.stdin)
+
+if data.get("status") != "done":
+    raise SystemExit(1)
+
+def walk(value):
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if key == "errors" and item:
+                raise SystemExit(1)
+            if key == "recoverable_errors":
+                if not isinstance(item, dict):
+                    raise SystemExit(1)
+                for messages in item.values():
+                    if not isinstance(messages, list):
+                        raise SystemExit(1)
+                    for message in messages:
+                        if allowed not in str(message):
+                            raise SystemExit(1)
+            else:
+                walk(item)
+    elif isinstance(value, list):
+        for item in value:
+            walk(item)
+
+walk(data)
+'\''; then
+         printf "[ОК] Cloud-Init завершён; допустимо только известное предупреждение Proxmox о параметре user\\n"
      else
-         printf "ОШИБКА: Cloud-Init не завершился успешно\\n" >&2
+         printf "ОШИБКА: Cloud-Init завершился с неизвестной ошибкой или предупреждением\\n" >&2
+         printf "%s\\n" "$cloud_status" >&2
          cloud-init status --long >&2 || true
          failed=1
      fi
