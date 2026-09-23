@@ -22,6 +22,7 @@ services:
     restart: unless-stopped
     depends_on:
       - semaphore
+    network_mode: host
     env_file:
       - /etc/infra-deployer/secrets/semaphore-runner.env
     volumes:
