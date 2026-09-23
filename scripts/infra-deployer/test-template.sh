@@ -133,6 +133,7 @@ created=1
 api PUT "/nodes/${NODE}/qemu/${TEST_VMID}/config" \
     --data-urlencode "cores=1" \
     --data-urlencode "memory=768" \
+    --data-urlencode "protection=0" \
     --data-urlencode "ciuser=root" \
     --data-urlencode "ipconfig0=ip=dhcp" \
     --data-urlencode "sshkeys=$(cat "$key.pub")" >/dev/null
