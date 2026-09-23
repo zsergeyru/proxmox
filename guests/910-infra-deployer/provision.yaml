@@ -129,6 +129,7 @@ checks:
     - infra-deployer-status --full
     - infra-deployer-pve-access-check
     - infra-deployer-pve-lifecycle-test --apply
+    - Semaphore: Build Template 9000
 
 boundaries:
   member_of_managed_pool: false
