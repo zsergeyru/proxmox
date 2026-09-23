@@ -51,13 +51,6 @@ def main() -> None:
     assert resolved_dhcp.management_ip_source == "dhcp"
     assert resolved_dhcp.effective["network"]["ipv4"] == "dhcp"
 
-    dhcp = copy.deepcopy(source_109)
-    dhcp["network"] = {"ipv4": "dhcp"}
-    resolved_dhcp = resolve_effective_guest(dhcp, defaults)
-    assert resolved_dhcp.effective["network"]["ipv4"] == "dhcp"
-    assert resolved_dhcp.management_ip is None
-    assert resolved_dhcp.management_ip_source == "dhcp"
-
     invalid_dhcp = copy.deepcopy(source_109)
     invalid_dhcp["network"] = {"ipv4": "dhcp/16"}
     expect_error(invalid_dhcp, defaults, "некорректный network.ipv4")
