@@ -211,10 +211,10 @@ fi
 if grep -q 'pveum role add.*InfraManagedGuest' "$PVE_BOOTSTRAP_ACCESS"; then
     die "Собственная роль InfraManagedGuest больше не должна создаваться"
 fi
-if grep -q 'infra-manager@pve' "$PVE_BOOTSTRAP_ACCESS" "$SETUP" "$PY_SETUP" "$SEMAPHORE_PROJECT"; then
+if grep -q 'infra-manager@pve' "$PVE_BOOTSTRAP_ACCESS" "$SETUP" "$PY_SETUP" "$PY_SEMAPHORE" "$PY_STATUS" "$PY_PVE" "$SEMAPHORE_PROJECT"; then
     die "Старая PVE-идентичность не должна присутствовать в чистой схеме"
 fi
-if grep -q 'InfraManagedGuest' "$PVE_BOOTSTRAP_ACCESS" "$SETUP" "$PY_SETUP" "$SEMAPHORE_PROJECT"; then
+if grep -q 'InfraManagedGuest' "$PVE_BOOTSTRAP_ACCESS" "$SETUP" "$PY_SETUP" "$PY_SEMAPHORE" "$PY_STATUS" "$PY_PVE" "$SEMAPHORE_PROJECT"; then
     die "Старая собственная роль PVE не должна присутствовать в чистой схеме"
 fi
 if grep -q 'PVE API automation\|Ansible managed guests' "$PY_SEMAPHORE"; then
@@ -294,7 +294,7 @@ if grep -qE '(^|[[:space:]])pct create[[:space:]]+910|(^|[[:space:]])qm create[[
     die "Приватный setup не должен создавать виртуальный объект 910"
 fi
 
-if grep -q '/etc/pve/' "$SETUP" "$PY_SETUP"; then
+if grep -q '/etc/pve/' "$SETUP" "$PY_SETUP" "$PY_SEMAPHORE" "$PY_STATUS" "$PY_PVE"; then
     die "setup внутри 910 не должен работать с файловой системой /etc/pve"
 fi
 
