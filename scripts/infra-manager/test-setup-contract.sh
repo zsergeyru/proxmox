@@ -247,9 +247,15 @@ grep -Fq 'exec python3 -m infra_manager status "$@"' "$STATUS" \
 grep -Fq 'exec python3 -m infra_manager pve-access-check "$@"' "$ACCESS" \
     || die "check-pve-access.sh должен быть тонким Python wrapper"
 for wrapper in "$SEMAPHORE_PROJECT" "$STATUS" "$ACCESS"; do
+    grep -Fq '/usr/local/lib/infra-manager/infra_manager' "$wrapper" \
+        || die "Установленный wrapper должен использовать постоянный Python package"
     grep -Fq '/var/lib/infra-manager/bootstrap-repo/scripts/infra-manager' "$wrapper" \
-        || die "Установленный wrapper должен находить Python package в canonical checkout"
+        || die "Wrapper должен сохранять canonical checkout как аварийный fallback"
 done
+grep -q 'PYTHON_INSTALL_ROOT = Path("/usr/local/lib/infra-manager")' "$PY_SETUP" \
+    || die "Python setup должен устанавливать package в постоянный системный путь"
+grep -q 'shutil.copytree(source_package, target_package)' "$PY_SETUP" \
+    || die "Python setup должен синхронизировать установленный infra_manager package"
 
 grep -q 'PROJECT_ID_FILE = Path("/var/lib/infra-manager/semaphore-project-id")' "$PY_SEMAPHORE" \
     || die "Semaphore project-id должен храниться вне каталога SQLite"
