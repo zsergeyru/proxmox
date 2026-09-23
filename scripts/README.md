@@ -33,13 +33,18 @@ scripts/
 ```text
 scripts/infra-manager/
 ├── setup.sh
+├── infra_manager/
+│   ├── __main__.py
+│   ├── cli.py
+│   ├── common.py
+│   └── setup.py
 ├── semaphore-project.sh
 ├── check-pve-access.sh
 ├── test-pve-lifecycle.sh
 └── status.sh
 ```
 
-`setup.sh` устанавливает Docker, подготавливает постоянные каталоги и секреты, запускает Semaphore Server/Runner и передаёт настройку проекта в `semaphore-project.sh`.
+`setup.sh` является минимальной оболочкой: при первом запуске обеспечивает наличие системного `python3` и передаёт управление команде `python3 -m infra_manager setup`. Основная подготовка Debian, Docker, постоянных каталогов, секретов, CA, OpenTofu input и `infra-runtime` выполняется в `infra_manager/setup.py`. Настройка проекта Semaphore пока по-прежнему передаётся в `semaphore-project.sh`.
 
 `semaphore-project.sh` через Semaphore API создаёт проект `Proxmox Infrastructure`, Key Store и запись закрытого Git-репозитория. Повторный запуск использует отдельный Semaphore API token, поэтому не зависит от сохранения первоначального пароля администратора.
 
