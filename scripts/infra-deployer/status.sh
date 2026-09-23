@@ -72,7 +72,6 @@ docker compose version >/dev/null 2>&1 || die "Docker Compose недоступе
 
 required_file "$PVE_ENV"
 required_file /etc/infra-deployer/secrets/semaphore-server.env
-required_file /etc/infra-deployer/secrets/semaphore-runner.env
 required_file "$SEMAPHORE_API_TOKEN_FILE"
 required_file /etc/infra-deployer/secrets/github_project_ed25519
 required_file "$PROJECT_ID_FILE"
@@ -84,8 +83,6 @@ required_file "$CA_BUNDLE"
 
 [[ "$(docker inspect -f '{{.State.Running}}' infra-deployer-semaphore 2>/dev/null || true)" == "true" ]] \
     || die "Semaphore Server не запущен"
-[[ "$(docker inspect -f '{{.State.Running}}' infra-deployer-runner 2>/dev/null || true)" == "true" ]] \
-    || die "Semaphore Runner не запущен"
 
 curl -fsS --connect-timeout 2 --max-time 5 http://127.0.0.1:3000/api/ping >/dev/null \
     || die "Semaphore API не отвечает"
@@ -119,13 +116,13 @@ semaphore_api_get "/project/${PROJECT_ID}/environment?sort=name&order=asc"     |
 
 semaphore_api_get "/project/${PROJECT_ID}/templates?sort=name&order=asc"     | jq -e '.[] | select(.name == "OpenTofu Plan" and .app == "bash")' >/dev/null     || die "В Semaphore отсутствует шаблон OpenTofu Plan"
 
-docker exec infra-deployer-runner tofu version >/dev/null \
+docker exec infra-deployer-semaphore tofu version >/dev/null \
     || die "OpenTofu недоступен"
-docker exec infra-deployer-runner packer version >/dev/null \
+docker exec infra-deployer-semaphore packer version >/dev/null \
     || die "Packer недоступен"
-docker exec infra-deployer-runner ansible --version >/dev/null \
+docker exec infra-deployer-semaphore ansible --version >/dev/null \
     || die "Ansible недоступен"
-docker exec infra-deployer-runner python3 -c 'import proxmoxer' >/dev/null \
+docker exec infra-deployer-semaphore python3 -c 'import proxmoxer' >/dev/null \
     || die "proxmoxer недоступен"
 
 PVE_API_URL="$(read_env_value PVE_API_URL)"
