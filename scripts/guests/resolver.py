@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import Any
 
 MISSING = object()
+DHCP = "dhcp"
 
 MANAGEMENT_ORDER = (
     "ssh_identity",
@@ -38,7 +39,7 @@ class NetworkConfig:
 class ResolvedGuest:
     effective: dict[str, Any]
     network: NetworkConfig
-    management_ip: ipaddress.IPv4Address
+    management_ip: ipaddress.IPv4Address | None
     management_ip_source: str
     bootstrap_capabilities: tuple[str, ...]
 
@@ -123,14 +124,21 @@ def parse_bare_ipv4(value: object, field: str = "network.ipv4") -> ipaddress.IPv
     return address
 
 
+def is_dhcp_ipv4(value: object) -> bool:
+    """Вернуть True для явного режима DHCP."""
+    return isinstance(value, str) and value.lower() == DHCP
+
+
 def resolve_management_ip(
     source: dict,
     network: NetworkConfig,
-) -> tuple[ipaddress.IPv4Address, str]:
-    """Вернуть management IP и provenance: 'vmid' либо 'guest'."""
+) -> tuple[ipaddress.IPv4Address | None, str]:
+    """Вернуть management IP и источник: vmid, guest либо dhcp."""
     override = get_nested(source, ("network", "ipv4"))
     if override is MISSING:
         return vmid_address(source.get("vmid"), network), "vmid"
+    if is_dhcp_ipv4(override):
+        return None, DHCP
     return parse_bare_ipv4(override), "guest"
 
 
@@ -268,7 +276,11 @@ def resolve_effective_guest(
     effective_network = effective.get("network")
     if not isinstance(effective_network, dict):
         raise GuestConfigError("effective network должен быть mapping/object")
-    effective_network["ipv4"] = f"{management_ip}/{network.subnet.prefixlen}"
+    effective_network["ipv4"] = (
+        DHCP
+        if management_ip is None
+        else f"{management_ip}/{network.subnet.prefixlen}"
+    )
 
     return ResolvedGuest(
         effective=effective,
