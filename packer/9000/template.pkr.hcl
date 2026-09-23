@@ -71,7 +71,7 @@ source "proxmox-iso" "template_9000" {
     iso_url           = var.iso_url
     iso_checksum      = var.iso_checksum
     iso_storage_pool  = var.iso_storage
-    iso_download_pve  = true
+    iso_download_pve  = false
     unmount           = true
     keep_cdrom_device = false
   }
