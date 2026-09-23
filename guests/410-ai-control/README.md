@@ -180,7 +180,7 @@ AI-права должны быть ограничены самим Proxmox и �
 
 Отдельный MCP-сервер не является обязательным компонентом 410. Если используется MCP или другой адаптер, он остаётся интерфейсом поверх тех же ограниченных полномочий.
 
-## Связь с 910 infra-deployer
+## Связь с 910 infra-manager
 
 410 и 910 имеют разные роли:
 
@@ -191,7 +191,7 @@ AI-права должны быть ограничены самим Proxmox и �
 → взаимодействие с человеком
 → выбор нужного механизма
 
-910 infra-deployer
+910 infra-manager
 → Semaphore
 → OpenTofu
 → Ansible
@@ -274,4 +274,4 @@ guest.yaml
 - [`../../docs/500-ai/510-ai-control.md`](../../docs/500-ai/510-ai-control.md) — устройство AI Control.
 - [`../../docs/500-ai/520-ai-management.md`](../../docs/500-ai/520-ai-management.md) — использование механизмов управления.
 - [`../../docs/700-security/720-ssh-access.md`](../../docs/700-security/720-ssh-access.md) — административный SSH.
-- [`../910-infra-deployer/README.md`](../910-infra-deployer/README.md) — инфраструктурный исполнитель проекта.
+- [`../910-infra-manager/README.md`](../910-infra-manager/README.md) — инфраструктурный исполнитель проекта.
