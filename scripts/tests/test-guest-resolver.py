@@ -44,6 +44,13 @@ def main() -> None:
     assert resolved.effective["protection"] is True
     assert resolved.effective["pve_management"] is True
 
+    dhcp_guest = copy.deepcopy(source_311)
+    dhcp_guest["network"] = {"ipv4": "dhcp"}
+    resolved_dhcp = resolve_effective_guest(dhcp_guest, defaults)
+    assert resolved_dhcp.management_ip is None
+    assert resolved_dhcp.management_ip_source == "dhcp"
+    assert resolved_dhcp.effective["network"]["ipv4"] == "dhcp"
+
     dhcp = copy.deepcopy(source_109)
     dhcp["network"] = {"ipv4": "dhcp"}
     resolved_dhcp = resolve_effective_guest(dhcp, defaults)
