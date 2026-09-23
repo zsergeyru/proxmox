@@ -15,7 +15,6 @@ services:
     env_file:
       - /etc/infra-manager/secrets/semaphore-server.env
     volumes:
-      - /etc/hosts:/etc/hosts:ro
       - /var/lib/infra-manager/semaphore:/var/lib/semaphore
       - /etc/infra-manager/ca:/etc/infra-manager/ca:ro
       - /var/lib/infra-manager/opentofu:/var/lib/infra-manager/opentofu
