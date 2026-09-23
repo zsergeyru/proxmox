@@ -15,7 +15,11 @@ sys.path.insert(0, str(MODULE_ROOT))
 
 from infra_manager.cli import main  # noqa: E402
 from infra_manager.common import CommandError, InfraManagerError, run  # noqa: E402
-from infra_manager.pve import permission_present  # noqa: E402
+from infra_manager.pve import (  # noqa: E402
+    PveClient,
+    permission_present,
+    select_management_ipv4,
+)
 from infra_manager.semaphore import SemaphoreClient  # noqa: E402
 from infra_manager.setup import BASE_PACKAGES, Setup  # noqa: E402
 
@@ -129,6 +133,75 @@ def main_test() -> None:
         fail("PVE permission_present не увидел boolean privilege")
     if permission_present(permissions, "Permissions.Modify"):
         fail("PVE permission_present нашёл отсутствующее privilege")
+
+    vm_interfaces = {
+        "result": [
+            {
+                "name": "lo",
+                "ip-addresses": [
+                    {"ip-address-type": "ipv4", "ip-address": "127.0.0.1"},
+                ],
+            },
+            {
+                "name": "eth0",
+                "ip-addresses": [
+                    {"ip-address-type": "ipv4", "ip-address": "192.168.1.77"},
+                    {"ip-address-type": "ipv6", "ip-address": "fe80::1"},
+                ],
+            },
+            {
+                "name": "docker0",
+                "ip-addresses": [
+                    {"ip-address-type": "ipv4", "ip-address": "172.17.0.1"},
+                ],
+            },
+        ],
+    }
+    selected = select_management_ipv4(vm_interfaces, "192.168.0.0/16")
+    if str(selected) != "192.168.1.77":
+        fail(f"Неверно выбран IPv4 VM: {selected}")
+
+    lxc_interfaces = [
+        {
+            "name": "eth0",
+            "ip-addresses": [
+                {"ip-address-type": "inet", "ip-address": "192.168.2.40"},
+            ],
+        },
+    ]
+    selected = select_management_ipv4(lxc_interfaces, "192.168.0.0/16")
+    if str(selected) != "192.168.2.40":
+        fail(f"Неверно выбран IPv4 LXC: {selected}")
+
+    if select_management_ipv4(vm_interfaces, "10.0.0.0/8") is not None:
+        fail("Поиск DHCP-адреса нашёл IPv4 вне административной подсети")
+
+    ambiguous = {
+        "result": [
+            {
+                "ip-addresses": [
+                    {"ip-address-type": "ipv4", "ip-address": "192.168.1.10"},
+                    {"ip-address-type": "ipv4", "ip-address": "192.168.1.11"},
+                ],
+            },
+        ],
+    }
+    try:
+        select_management_ipv4(ambiguous, "192.168.0.0/16")
+    except InfraManagerError:
+        pass
+    else:
+        fail("Неоднозначный административный IPv4 не вызвал ошибку")
+
+    calls: list[str] = []
+    client = object.__new__(PveClient)
+    client.data = lambda endpoint, **kwargs: calls.append(endpoint) or []
+    client.guest_interfaces(node="pve", vmid=410, kind="vm")
+    if calls[-1] != "/nodes/pve/qemu/410/agent/network-get-interfaces":
+        fail(f"Неверный PVE endpoint VM: {calls[-1]}")
+    client.guest_interfaces(node="pve", vmid=311, kind="lxc")
+    if calls[-1] != "/nodes/pve/lxc/311/interfaces":
+        fail(f"Неверный PVE endpoint LXC: {calls[-1]}")
 
     print("infra-manager Python checks passed.")
 
