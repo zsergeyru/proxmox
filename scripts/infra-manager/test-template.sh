@@ -183,13 +183,15 @@ run_task POST "/nodes/${NODE}/qemu/9000/clone" \
     --data-urlencode "name=$TEST_NAME" \
     --data-urlencode "full=1" \
     --data-urlencode "storage=local-lvm"
+sshkeys_encoded="$(jq -sRr @uri <"$key.pub")"
+
 api PUT "/nodes/${NODE}/qemu/${TEST_VMID}/config" \
     --data-urlencode "cores=1" \
     --data-urlencode "memory=768" \
     --data-urlencode "protection=0" \
     --data-urlencode "ciuser=root" \
     --data-urlencode "ipconfig0=ip=dhcp" \
-    --data-urlencode "sshkeys=$(cat "$key.pub")" >/dev/null
+    --data-urlencode "sshkeys=$sshkeys_encoded" >/dev/null
 
 run_task POST "/nodes/${NODE}/qemu/${TEST_VMID}/status/start"
 
