@@ -37,20 +37,23 @@ scripts/infra-manager/
 │   ├── __main__.py
 │   ├── cli.py
 │   ├── common.py
-│   └── setup.py
+│   ├── setup.py
+│   ├── semaphore.py
+│   ├── pve.py
+│   └── status.py
 ├── semaphore-project.sh
 ├── check-pve-access.sh
 ├── test-pve-lifecycle.sh
 └── status.sh
 ```
 
-`setup.sh` является минимальной оболочкой: при первом запуске обеспечивает наличие системного `python3` и передаёт управление команде `python3 -m infra_manager setup`. Основная подготовка Debian, Docker, постоянных каталогов, секретов, CA, OpenTofu input и `infra-runtime` выполняется в `infra_manager/setup.py`. Настройка проекта Semaphore пока по-прежнему передаётся в `semaphore-project.sh`.
+`setup.sh` является минимальной оболочкой: при первом запуске обеспечивает наличие системного `python3` и передаёт управление команде `python3 -m infra_manager setup`. Основная подготовка Debian, Docker, постоянных каталогов, секретов, CA, OpenTofu input и `infra-runtime` выполняется в `infra_manager/setup.py`.
 
-`semaphore-project.sh` через Semaphore API создаёт проект `Proxmox Infrastructure`, Key Store и запись закрытого Git-репозитория. Повторный запуск использует отдельный Semaphore API token, поэтому не зависит от сохранения первоначального пароля администратора.
+`semaphore-project.sh` — совместимая оболочка команды `python3 -m infra_manager semaphore-project`. API-логика находится в `infra_manager/semaphore.py`: она создаёт или синхронизирует проект `Proxmox Infrastructure`, GitHub SSH key, репозиторий, Variable Group и задания Semaphore.
 
-`check-pve-access.sh` без изменения состояния проверяет фактические права ограниченного token `root@pam!infra-manager` с `privsep=1` через HTTPS API, включая запрет изменений `910`.
+`check-pve-access.sh` — оболочка команды `python3 -m infra_manager pve-access-check`. Проверка HTTPS API и фактических privileges token `root@pam!infra-manager` находится в `infra_manager/pve.py`.
 
-`status.sh` является общей локальной проверкой готовности `910` и устанавливается как:
+`status.sh` — оболочка Python status-проверки из `infra_manager/status.py` и устанавливается как:
 
 ```text
 /usr/local/sbin/infra-manager-status
