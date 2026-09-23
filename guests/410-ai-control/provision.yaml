@@ -52,7 +52,7 @@ integrations:
 
   infrastructure_executor:
     guest_vmid: 910
-    name: infra-deployer
+    name: infra-manager
     purpose: Повторяемое выполнение OpenTofu, Ansible и других инфраструктурных задач
     local_opentofu_required: false
     local_ansible_controller_required: false

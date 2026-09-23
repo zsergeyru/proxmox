@@ -23,7 +23,7 @@ Template-Version: 8
 ```text
 Semaphore
 → Build Template 9000
-→ scripts/infra-deployer/build-template.sh 9000
+→ scripts/infra-manager/build-template.sh 9000
 → Packer
 ```
 
