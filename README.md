@@ -163,7 +163,6 @@ git@github.com:zsergeyru/proxmox.git
 ~~~text
 scripts/infra-manager/pve-bootstrap-access.sh
 scripts/infra-manager/setup.sh
-scripts/infra-manager/semaphore-project.sh
 scripts/infra-manager/opentofu-plan.sh
 scripts/infra-manager/render-opentofu-input.py
 scripts/infra-manager/status.sh
