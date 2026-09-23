@@ -300,7 +300,7 @@ grep -q 'provider "registry.opentofu.org/bpg/proxmox"' "$OPENTOFU_LOCK" \
 grep -q 'version     = "0.112.0"' "$OPENTOFU_LOCK" \
     || die "OpenTofu lock file должен фиксировать bpg/proxmox 0.112.0"
 
-grep -q 'OPENTOFU_ENV_NAME="PVE API"' "$SEMAPHORE_PROJECT" \
+grep -q 'PVE_ENV_NAME="PVE API"' "$SEMAPHORE_PROJECT" \
     || die "Semaphore должен создавать Variable Group PVE API"
 grep -q 'PVE_API_URL' "$SEMAPHORE_PROJECT" \
     || die "Variable Group должен передавать pve_endpoint"
