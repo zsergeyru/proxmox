@@ -270,8 +270,8 @@ guest.yaml
 - [`guest.yaml`](guest.yaml) — параметры VM.
 - [`provision.yaml`](provision.yaml) — требуемое содержимое ОС.
 - [`decisions.md`](decisions.md) — решения по 410.
-- [`../../docs/500-ai/500-overview.md`](../../docs/500-ai/500-overview.md) — обзор AI-контура.
-- [`../../docs/500-ai/510-ai-control.md`](../../docs/500-ai/510-ai-control.md) — устройство AI Control.
-- [`../../docs/500-ai/520-ai-management.md`](../../docs/500-ai/520-ai-management.md) — использование механизмов управления.
-- [`../../docs/700-security/720-ssh-access.md`](../../docs/700-security/720-ssh-access.md) — административный SSH.
+- [`../../../docs/500-ai/500-overview.md`](../../../docs/500-ai/500-overview.md) — обзор AI-контура.
+- [`../../../docs/500-ai/510-ai-control.md`](../../../docs/500-ai/510-ai-control.md) — устройство AI Control.
+- [`../../../docs/500-ai/520-ai-management.md`](../../../docs/500-ai/520-ai-management.md) — использование механизмов управления.
+- [`../../../docs/700-security/720-ssh-access.md`](../../../docs/700-security/720-ssh-access.md) — административный SSH.
 - [`../910-infra-manager/README.md`](../910-infra-manager/README.md) — инфраструктурный исполнитель проекта.
