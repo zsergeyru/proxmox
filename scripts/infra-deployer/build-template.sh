@@ -83,7 +83,8 @@ check_existing() {
 
     if [[ "$template" == "1" && "$name" == "tpl-debian13" && "$description" == *"template-version=8"* ]]; then
         finalize_template
-        ok "Шаблон $VMID уже соответствует версии 8; сборка не требуется"
+        "$ROOT/scripts/infra-deployer/test-template.sh" "$VMID"
+        ok "Шаблон $VMID уже соответствует версии 8 и успешно проверен; сборка не требуется"
         return 0
     fi
 
