@@ -31,6 +31,7 @@ SERVER_ENV="${SECRET_DIR}/semaphore-server.env"
 RUNNER_ENV="${SECRET_DIR}/semaphore-runner.env"
 PVE_API_ENV="${SECRET_DIR}/pve-api.env"
 ADMIN_PASSWORD_FILE="${SECRET_DIR}/initial-admin-password"
+ADMIN_PASSWORD_SHOWN_FILE="${SECRET_DIR}/.initial-admin-password-shown"
 CA_BUNDLE="${CA_DIR}/ca-bundle.crt"
 
 PVE_API_SECRET_FILE="${PVE_API_SECRET_FILE:-}"
@@ -41,8 +42,6 @@ PROJECT_BRANCH="${INFRA_PROJECT_BRANCH:-infra-iac-redesign}"
 OPENTOFU_VERSION="1.12.6"
 PACKER_VERSION="1.15.4"
 LOG_FILE="${INFRA_DEPLOYER_LOG_FILE:-/var/log/infra-deployer/bootstrap.log}"
-
-SEMAPHORE_ADMIN_PASSWORD_CREATED=0
 
 C_RESET=""
 C_BOLD=""
@@ -297,7 +296,6 @@ EOF_RUNNER
 
         printf '%s\n' "$admin_password" >"$ADMIN_PASSWORD_FILE"
         chmod 0600 "$SERVER_ENV" "$RUNNER_ENV" "$ADMIN_PASSWORD_FILE"
-        SEMAPHORE_ADMIN_PASSWORD_CREATED=1
         ok "Созданы первичные секреты Semaphore"
     else
         [[ -s "$RUNNER_ENV" ]] || die "Есть server env, но отсутствует runner env"
@@ -459,9 +457,11 @@ report_result() {
         printf 'Semaphore: порт 3000 LXC 910\n'
     fi
     printf 'Пользователь: admin\n'
-    if (( SEMAPHORE_ADMIN_PASSWORD_CREATED )); then
+    if [[ ! -e "$ADMIN_PASSWORD_SHOWN_FILE" ]]; then
         printf 'Пароль: %s\n' "$(cat "$ADMIN_PASSWORD_FILE")"
-        printf 'Пароль показан только при первом создании и сохранён: %s\n' "$ADMIN_PASSWORD_FILE"
+        printf 'Пароль показан один раз и сохранён: %s\n' "$ADMIN_PASSWORD_FILE"
+        : >"$ADMIN_PASSWORD_SHOWN_FILE"
+        chmod 0600 "$ADMIN_PASSWORD_SHOWN_FILE"
     else
         printf 'Пароль сохранён: %s\n' "$ADMIN_PASSWORD_FILE"
     fi
