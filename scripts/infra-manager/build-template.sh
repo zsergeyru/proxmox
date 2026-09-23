@@ -35,16 +35,16 @@ for command in curl jq openssl packer; do
     command -v "$command" >/dev/null 2>&1 || die "Не найден $command"
 done
 
-: "${TF_VAR_pve_endpoint:?TF_VAR_pve_endpoint не задан}"
-: "${TF_VAR_pve_api_token:?TF_VAR_pve_api_token не задан}"
+: "${PVE_API_URL:?PVE_API_URL не задан}"
+: "${PVE_API_TOKEN:?PVE_API_TOKEN не задан}"
 
-PVE_ENDPOINT="${TF_VAR_pve_endpoint%/}"
+PVE_ENDPOINT="${PVE_API_URL%/}"
 PVE_API="${PVE_ENDPOINT}/api2/json"
-PVE_TOKEN_ID="${TF_VAR_pve_api_token%%=*}"
-PVE_TOKEN_SECRET="${TF_VAR_pve_api_token#*=}"
+PVE_TOKEN_ID="${PVE_API_TOKEN%%=*}"
+PVE_TOKEN_SECRET="${PVE_API_TOKEN#*=}"
 
 [[ -n "$PVE_TOKEN_ID" && -n "$PVE_TOKEN_SECRET" && "$PVE_TOKEN_ID" != "$PVE_TOKEN_SECRET" ]] \
-    || die "TF_VAR_pve_api_token имеет неверный формат"
+    || die "PVE_API_TOKEN имеет неверный формат"
 
 AUTH_HEADER="Authorization: PVEAPIToken=${PVE_TOKEN_ID}=${PVE_TOKEN_SECRET}"
 
