@@ -228,7 +228,7 @@ git@github.com:zsergeyru/proxmox.git
 infra-manager-status
 infra-manager-status --full
 infra-manager-pve-access-check
-infra-manager-pve-lifecycle-test --apply
+/usr/local/sbin/infra-manager-pve-lifecycle-test --apply
 ```
 
 `infra-manager-status` проверяет локальное состояние 910, Docker, Semaphore, инфраструктурные инструменты и базовую авторизацию PVE API.

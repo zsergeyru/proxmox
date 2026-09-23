@@ -240,7 +240,7 @@ Ansible credential заранее не создаётся. Он добавляе
 infra-manager-status
 infra-manager-status --full
 infra-manager-pve-access-check
-infra-manager-pve-lifecycle-test --apply
+/usr/local/sbin/infra-manager-pve-lifecycle-test --apply
 ~~~
 
 ## Технический лог bootstrap

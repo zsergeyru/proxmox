@@ -153,11 +153,11 @@ grep -q 'docker exec infra-runtime packer version' "$SETUP" \
     || die "Packer должен проверяться внутри infra-runtime"
 
 grep -q 'ln -sfn "$STATUS_COMMAND" /usr/local/bin/infra-manager-status' "$SETUP" \
-    || die "status command должен быть доступен по короткому имени через pct exec"
+    || die "status command должен иметь короткую ссылку для интерактивной shell"
 grep -q 'ln -sfn "$ACCESS_CHECK_COMMAND" /usr/local/bin/infra-manager-pve-access-check' "$SETUP" \
-    || die "PVE access check должен быть доступен по короткому имени через pct exec"
+    || die "PVE access check должен иметь короткую ссылку для интерактивной shell"
 grep -q 'ln -sfn "$LIFECYCLE_TEST_COMMAND" /usr/local/bin/infra-manager-pve-lifecycle-test' "$SETUP" \
-    || die "lifecycle test должен быть доступен по короткому имени через pct exec"
+    || die "lifecycle test должен иметь короткую ссылку для интерактивной shell"
 
 grep -q 'render-opentofu-input.py' "$SETUP" \
     || die "setup.sh должен генерировать OpenTofu input"

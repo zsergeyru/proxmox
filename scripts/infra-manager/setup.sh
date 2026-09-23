@@ -422,8 +422,9 @@ install_local_commands() {
     install -o root -g root -m 0755 \
         "$REPO_ROOT/scripts/infra-manager/test-pve-lifecycle.sh" "$LIFECYCLE_TEST_COMMAND"
 
-    # pct exec использует PATH без /usr/local/sbin. Канонические файлы остаются
-    # в sbin, а короткие команды доступны через /usr/local/bin.
+    # Канонические команды устанавливаются в /usr/local/sbin.
+    # Ссылки в /usr/local/bin оставляем только для удобства интерактивной shell;
+    # вызовы через pct exec должны использовать полный путь.
     install -d -o root -g root -m 0755 /usr/local/bin
     ln -sfn "$STATUS_COMMAND" /usr/local/bin/infra-manager-status
     ln -sfn "$ACCESS_CHECK_COMMAND" /usr/local/bin/infra-manager-pve-access-check

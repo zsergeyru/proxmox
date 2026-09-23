@@ -118,7 +118,7 @@ checks:
     - infra-manager-status
     - infra-manager-status --full
     - infra-manager-pve-access-check
-    - infra-manager-pve-lifecycle-test --apply
+    - /usr/local/sbin/infra-manager-pve-lifecycle-test --apply
     - Semaphore: Build Template 9000
 
 boundaries:

@@ -151,7 +151,7 @@ infra-manager-status --full
 Реальный тест жизненного цикла:
 
 ```bash
-infra-manager-pve-lifecycle-test --apply
+/usr/local/sbin/infra-manager-pve-lifecycle-test --apply
 ```
 
 Ранее тест уже успешно создал, изменил, запустил, остановил и удалил временный LXC 9098 на реальном PVE. После перехода на новую упрощённую схему token/ACL он выполняется повторно один раз как приёмочная проверка.
