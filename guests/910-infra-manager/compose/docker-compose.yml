@@ -10,6 +10,8 @@ services:
     container_name: infra-runtime
     restart: unless-stopped
     network_mode: host
+    extra_hosts:
+      - "${PVE_HOSTNAME}:${PVE_HOST_IP}"
     env_file:
       - /etc/infra-manager/secrets/semaphore-server.env
     volumes:
