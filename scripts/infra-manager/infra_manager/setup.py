@@ -45,6 +45,9 @@ PVE_API_ENV = SECRET_DIR / "pve-api.env"
 ADMIN_PASSWORD_FILE = SECRET_DIR / "initial-admin-password"
 ADMIN_PASSWORD_SHOWN_FILE = SECRET_DIR / ".initial-admin-password-shown"
 CA_BUNDLE = CA_DIR / "ca-bundle.crt"
+ANSIBLE_DIR = CONFIG_DIR / "ansible"
+ANSIBLE_PRIVATE_KEY = ANSIBLE_DIR / "guest_ed25519"
+ANSIBLE_PUBLIC_KEY = ANSIBLE_DIR / "guest_ed25519.pub"
 
 SEMAPHORE_VERSION = "v2.18.30"
 RUNTIME_VERSION = "v1"
@@ -332,6 +335,62 @@ class Setup:
             )
         self.run_raw(["chown", "-R", "1001:0", str(SEMAPHORE_DIR)])
         self.run_raw(["chmod", "0770", str(SEMAPHORE_DIR)])
+
+    def ensure_ansible_identity(self) -> None:
+        """Создать или проверить постоянную SSH-идентичность Ansible."""
+        self.stage("Проверка SSH-идентичности Ansible")
+        self.run_raw(
+            [
+                "install", "-d", "-o", "1001", "-g", "0",
+                "-m", "0700", str(ANSIBLE_DIR),
+            ]
+        )
+
+        if ANSIBLE_PUBLIC_KEY.exists() and not ANSIBLE_PRIVATE_KEY.exists():
+            raise InfraManagerError(
+                "Есть открытый ключ Ansible без закрытого ключа"
+            )
+
+        if not ANSIBLE_PRIVATE_KEY.exists():
+            self.run_logged(
+                [
+                    "ssh-keygen",
+                    "-q",
+                    "-t", "ed25519",
+                    "-N", "",
+                    "-C", "infra-manager ansible guest",
+                    "-f", str(ANSIBLE_PRIVATE_KEY),
+                ]
+            )
+
+        derived = self.run_raw(
+            ["ssh-keygen", "-y", "-f", str(ANSIBLE_PRIVATE_KEY)],
+            capture=True,
+        ).stdout.strip()
+        if not derived:
+            raise InfraManagerError(
+                "Не удалось получить открытый ключ из Ansible private key"
+            )
+
+        current = ""
+        if ANSIBLE_PUBLIC_KEY.is_file():
+            parts = ANSIBLE_PUBLIC_KEY.read_text(
+                encoding="utf-8"
+            ).strip().split()
+            if len(parts) >= 2:
+                current = " ".join(parts[:2])
+
+        if current != derived:
+            ANSIBLE_PUBLIC_KEY.write_text(
+                f"{derived} infra-manager ansible guest\n",
+                encoding="utf-8",
+            )
+
+        os.chown(ANSIBLE_PRIVATE_KEY, 1001, 0)
+        os.chown(ANSIBLE_PUBLIC_KEY, 1001, 0)
+        ANSIBLE_PRIVATE_KEY.chmod(0o600)
+        ANSIBLE_PUBLIC_KEY.chmod(0o644)
+        self.ok("SSH-идентичность Ansible готова")
 
     def ensure_base_packages(self) -> None:
         missing = [
@@ -966,6 +1025,7 @@ class Setup:
             self.check_os()
             self.prepare_directories()
             self.ensure_base_packages()
+            self.ensure_ansible_identity()
             self.install_docker()
             self.copy_compose_assets()
             self.seed_semaphore_known_hosts()
