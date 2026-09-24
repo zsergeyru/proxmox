@@ -268,31 +268,48 @@ tofu -chdir="$OPENTOFU_DIR" plan \
     -target="$TARGET_RESOURCE" \
     -out="$PLAN_FILE"
 
+plan_json="$(tofu -chdir="$OPENTOFU_DIR" show -json "$PLAN_FILE")"
+
 unexpected_resources="$(
-    tofu -chdir="$OPENTOFU_DIR" show -json "$PLAN_FILE" \
-      | jq -r --arg target "$TARGET_RESOURCE" '
-          .resource_changes[]?.address
-          | select(. != $target)
-        '
+    jq -r --arg target "$TARGET_RESOURCE" '
+        .resource_changes[]?.address
+        | select(. != $target)
+    ' <<<"$plan_json"
 )"
 [[ -z "$unexpected_resources" ]] || {
     printf '%s\n' "$unexpected_resources" >&2
     die "План 410 содержит изменения других ресурсов"
 }
 
+target_actions="$(
+    jq -r --arg target "$TARGET_RESOURCE" '
+        .resource_changes[]?
+        | select(.address == $target)
+        | .change.actions[]
+    ' <<<"$plan_json"
+)"
+
 tofu -chdir="$OPENTOFU_DIR" show -no-color "$PLAN_FILE"
 
-prepare_template_for_clone
+if grep -qx "create" <<<"$target_actions"; then
+    prepare_template_for_clone
+fi
 
-info "Применение состояния VM 410"
-tofu -chdir="$OPENTOFU_DIR" apply \
-    -input=false \
-    -no-color \
-    -lock-timeout=30s \
-    "$PLAN_FILE"
+if [[ -z "$target_actions" ]] || {
+    [[ "$target_actions" == "no-op" ]]
+}; then
+    ok "OpenTofu: состояние VM 410 уже соответствует конфигурации"
+else
+    info "Применение состояния VM 410"
+    tofu -chdir="$OPENTOFU_DIR" apply \
+        -input=false \
+        -no-color \
+        -lock-timeout=30s \
+        "$PLAN_FILE"
 
-restore_template_protection
-ok "Состояние VM 410 применено"
+    restore_template_protection
+    ok "Состояние VM 410 применено"
+fi
 
 if ! ssh-keygen -F "$guest_ip" -f "$KNOWN_HOSTS" >/dev/null 2>&1; then
     info "Первичное получение SSH host key 410"
