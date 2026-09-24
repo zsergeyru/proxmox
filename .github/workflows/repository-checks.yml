@@ -33,29 +33,7 @@ jobs:
         run: ruff check --select F821 scripts
 
       - name: Compile Python tooling
-        run: |
-          python -m py_compile \
-            scripts/guests/resolver.py \
-            scripts/validate_repo.py \
-            scripts/guests/render-opentofu-input.py \
-            scripts/infra-manager/infra_manager/__init__.py \
-            scripts/infra-manager/infra_manager/__main__.py \
-            scripts/infra-manager/infra_manager/cli.py \
-            scripts/infra-manager/infra_manager/common.py \
-            scripts/infra-manager/infra_manager/settings.py \
-            scripts/infra-manager/infra_manager/setup.py \
-            scripts/infra-manager/infra_manager/semaphore.py \
-            scripts/infra-manager/infra_manager/pve.py \
-            scripts/infra-manager/infra_manager/opentofu.py \
-            scripts/infra-manager/infra_manager/template.py \
-            scripts/infra-manager/infra_manager/status.py \
-            scripts/infra-manager/jobs/opentofu-plan.py \
-            scripts/infra-manager/jobs/deploy-guest.py \
-            scripts/infra-manager/jobs/build-template.py \
-            scripts/infra-manager/jobs/verify-template.py \
-            scripts/tests/test-infra-manager-python.py \
-            scripts/tests/test-opentofu-input.py \
-            scripts/tests/test-guest-resolver.py \
+        run: python -m compileall -q scripts
 
       - name: Run infra-manager Python foundation checks
         run: python scripts/tests/test-infra-manager-python.py
