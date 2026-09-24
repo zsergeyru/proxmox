@@ -143,6 +143,7 @@ OpenTofu state и другие постоянные данные не должн
 
 ```text
 /etc/infra-manager/secrets/
+/etc/infra-manager/ansible/
 /var/lib/infra-manager/semaphore/
 /var/lib/infra-manager/opentofu/state/
 ```
@@ -230,6 +231,11 @@ infra-manager-status
 infra-manager-status --full
 infra-manager-pve-access-check
 /usr/local/sbin/infra-manager-pve-lifecycle-test --apply
+
+Semaphore:
+- OpenTofu Plan
+- Build Template 9000
+- Deploy Guest 410
 ```
 
 `infra-manager-status` проверяет локальное состояние 910, Docker, Semaphore, инфраструктурные инструменты и базовую авторизацию PVE API.
