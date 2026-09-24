@@ -5,17 +5,20 @@ from __future__ import annotations
 
 import contextlib
 import io
+import json
 import os
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
 MODULE_ROOT = ROOT / "scripts" / "infra-manager"
 sys.path.insert(0, str(MODULE_ROOT))
 
+from infra_manager import guest_deploy as guest_deploy_module  # noqa: E402
 from infra_manager.cli import main  # noqa: E402
 from infra_manager.common import (  # noqa: E402
     CommandError,
@@ -27,35 +30,39 @@ from infra_manager.common import (  # noqa: E402
 from infra_manager.guest_deploy import (  # noqa: E402
     DeploymentContext,
     DeploymentPaths,
+    _apply_plan,
+    _build_guest_plan,
     _find_guest_directory,
+    _reconcile_guest_infrastructure,
     _validate_pve_and_state,
 )
+from infra_manager.opentofu import OpenTofuWorkspace  # noqa: E402
 from infra_manager.pve import (  # noqa: E402
     PveClient,
     permission_present,
     select_management_ipv4,
-)
-from infra_manager.template import (  # noqa: E402
-    _packer_inputs,
-    _template_failures,
-    _validate_cloud_status,
 )
 from infra_manager.semaphore import (  # noqa: E402
     PROJECT_REPO,
     SEMAPHORE_TEMPLATES,
     SemaphoreClient,
 )
-from infra_manager.status import (  # noqa: E402
-    _check_git_branch_contract,
-    _project_branch,
-)
+from infra_manager.settings import PATHS, SETTINGS  # noqa: E402
 from infra_manager.setup import (  # noqa: E402
     BASE_PACKAGES,
     PACKER_VERSION,
     PVE_API_ENV,
     Setup,
 )
-from infra_manager.settings import PATHS, SETTINGS  # noqa: E402
+from infra_manager.status import (  # noqa: E402
+    _check_git_branch_contract,
+    _project_branch,
+)
+from infra_manager.template import (  # noqa: E402
+    _packer_inputs,
+    _template_failures,
+    _validate_cloud_status,
+)
 
 
 def fail(message: str) -> None:
@@ -181,38 +188,197 @@ def main_test() -> None:
     ):
         fail("Секретные переменные Packer всё ещё передаются через -var")
 
-    deployment_client = SimpleNamespace(
-        find_vm=lambda vmid: {
-            "type": "qemu",
-            "name": "test-vm",
-        }
+    workspace = OpenTofuWorkspace(
+        directory=Path("/tmp/opentofu"),
+        state_dir=Path("/tmp/state"),
+        env={"SSL_CERT_FILE": "/tmp/ca.crt"},
+        payload={"guests": {}},
     )
     deployment_paths = DeploymentPaths(
-        opentofu_dir=Path("/tmp/opentofu"),
         guest_dir=Path("/tmp/guest"),
         private_key=Path("/tmp/key"),
         playbook=Path("/tmp/playbook.yml"),
         known_hosts=Path("/tmp/known_hosts"),
         plan_file=Path("/tmp/410.tfplan"),
     )
-    deployment = DeploymentContext(
-        client=deployment_client,
-        vmid=410,
-        name="test-vm",
-        node="pve",
-        template_vmid=9000,
-        address="192.0.2.10",
-        target='proxmox_virtual_environment_vm.guest["410"]',
-        env={"SSL_CERT_FILE": "/tmp/ca.crt"},
-        paths=deployment_paths,
+
+    def deployment_for(client: object, *, paths: DeploymentPaths = deployment_paths):
+        return DeploymentContext(
+            client=client,
+            vmid=410,
+            name="test-vm",
+            node="pve",
+            template_vmid=9000,
+            address="192.0.2.10",
+            target='proxmox_virtual_environment_vm.guest["410"]',
+            workspace=workspace,
+            paths=paths,
+        )
+
+    deployment_client = SimpleNamespace(
+        find_vm=lambda vmid: {"type": "qemu", "name": "test-vm"}
     )
-    state_present, state_status = _validate_pve_and_state(
-        deployment,
-        state_present=True,
-        state_status="ready",
+    deployment = deployment_for(deployment_client)
+    if (
+        _validate_pve_and_state(
+            deployment,
+            state_present=True,
+            state_status="ready",
+        )
+        is not None
+    ):
+        fail("Проверка состояния VM должна возвращать None")
+
+    invalid_state_cases = (
+        (
+            SimpleNamespace(
+                find_vm=lambda vmid: {"type": "lxc", "name": "test-vm"}
+            ),
+            True,
+            "ready",
+            "VMID, занятый LXC",
+        ),
+        (deployment_client, False, "", "VM без OpenTofu state"),
+        (SimpleNamespace(find_vm=lambda vmid: None), True, "ready", "state без VM"),
     )
-    if not state_present or state_status != "ready":
-        fail("DeploymentContext не проходит проверку состояния VM")
+    for client, state_present, state_status, description in invalid_state_cases:
+        try:
+            _validate_pve_and_state(
+                deployment_for(client),
+                state_present=state_present,
+                state_status=state_status,
+            )
+        except InfraManagerError:
+            pass
+        else:
+            fail(f"Проверка состояния приняла опасный случай: {description}")
+
+    class TaintedClient:
+        def __init__(self) -> None:
+            self.resource = {"type": "qemu", "name": "test-vm"}
+            self.tasks: list[tuple[str, str]] = []
+
+        def find_vm(self, vmid: int):
+            return self.resource
+
+        def vm_status(self, *, node: str, vmid: int) -> str:
+            return "stopped"
+
+        def put(self, path: str, *, form: dict[str, int]) -> None:
+            self.tasks.append(("PUT", path))
+
+        def run_task(self, method: str, path: str, **kwargs: object) -> None:
+            self.tasks.append((method, path))
+            if method == "DELETE":
+                self.resource = None
+
+    tainted_client = TaintedClient()
+    tainted_commands: list[list[str]] = []
+
+    def record_tainted_run(argv: list[str], **kwargs: object):
+        tainted_commands.append(argv)
+        return SimpleNamespace(returncode=0, stdout="")
+
+    with patch.object(guest_deploy_module, "run", record_tainted_run):
+        _validate_pve_and_state(
+            deployment_for(tainted_client),
+            state_present=True,
+            state_status="tainted",
+        )
+    if not any(method == "DELETE" for method, _ in tainted_client.tasks):
+        fail("Tainted VM не удалена после проверки типа и имени")
+    if not any(command[2:4] == ["state", "rm"] for command in tainted_commands):
+        fail("Tainted VM не удалена из OpenTofu state")
+
+    def unexpected_plan_run(argv: list[str], **kwargs: object):
+        if "-json" in argv:
+            payload = {
+                "resource_changes": [
+                    {
+                        "address": "proxmox_virtual_environment_vm.guest[\"999\"]",
+                        "change": {"actions": ["create"]},
+                    }
+                ]
+            }
+            return SimpleNamespace(returncode=0, stdout=json.dumps(payload))
+        return SimpleNamespace(returncode=0, stdout="")
+
+    with patch.object(guest_deploy_module, "run", unexpected_plan_run):
+        try:
+            _build_guest_plan(deployment)
+        except InfraManagerError:
+            pass
+        else:
+            fail("Target plan разрешил изменение постороннего ресурса")
+
+    def target_plan_run(argv: list[str], **kwargs: object):
+        if "-json" in argv:
+            payload = {
+                "resource_changes": [
+                    {
+                        "address": deployment.target,
+                        "change": {"actions": ["update"]},
+                    }
+                ]
+            }
+            return SimpleNamespace(returncode=0, stdout=json.dumps(payload))
+        return SimpleNamespace(returncode=0, stdout="")
+
+    with patch.object(guest_deploy_module, "run", target_plan_run):
+        guest_plan = _build_guest_plan(deployment)
+    if guest_plan.actions != ("update",):
+        fail("Target plan неверно разобрал действия выбранной VM")
+
+    class ProtectedTemplateClient:
+        def __init__(self) -> None:
+            self.protection_values: list[int] = []
+
+        def vm_config(self, *, node: str, vmid: int) -> dict[str, int]:
+            return {"template": 1, "protection": 1}
+
+        def put(self, path: str, *, form: dict[str, int]) -> None:
+            self.protection_values.append(form["protection"])
+
+    protected_client = ProtectedTemplateClient()
+
+    def failed_apply(argv: list[str], **kwargs: object):
+        raise InfraManagerError("expected apply failure")
+
+    with patch.object(guest_deploy_module, "run", failed_apply):
+        try:
+            _apply_plan(deployment_for(protected_client), ["create"])
+        except InfraManagerError:
+            pass
+        else:
+            fail("Тест ожидал ошибку tofu apply")
+    if protected_client.protection_values != [0, 1]:
+        fail("Защита шаблона не восстановлена после ошибки tofu apply")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        plan_file = Path(tmp) / "410.tfplan"
+        plan_file.touch()
+        temporary_paths = DeploymentPaths(
+            guest_dir=deployment_paths.guest_dir,
+            private_key=deployment_paths.private_key,
+            playbook=deployment_paths.playbook,
+            known_hosts=deployment_paths.known_hosts,
+            plan_file=plan_file,
+        )
+        with patch.object(
+            guest_deploy_module,
+            "_build_guest_plan",
+            side_effect=InfraManagerError("expected plan failure"),
+        ):
+            try:
+                _reconcile_guest_infrastructure(
+                    deployment_for(deployment_client, paths=temporary_paths)
+                )
+            except InfraManagerError:
+                pass
+            else:
+                fail("Тест ожидал ошибку построения OpenTofu plan")
+        if plan_file.exists():
+            fail("Временный OpenTofu plan не удалён после ошибки")
 
     previous_branch = os.environ.get("INFRA_PROJECT_BRANCH")
     try:

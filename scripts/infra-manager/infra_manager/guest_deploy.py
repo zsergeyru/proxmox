@@ -8,16 +8,9 @@ import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 from .common import InfraManagerError, console, require_command, run
-from .opentofu import (
-    STATE_DIR,
-    _init,
-    _opentofu_env,
-    _prepare_input,
-    _state_status,
-)
+from .opentofu import OpenTofuWorkspace, prepare_workspace
 from .pve import PveClient
 from .settings import PATHS
 
@@ -26,7 +19,6 @@ from .settings import PATHS
 class DeploymentPaths:
     """Пути, используемые на нескольких этапах развёртывания VM."""
 
-    opentofu_dir: Path
     guest_dir: Path
     private_key: Path
     playbook: Path
@@ -45,8 +37,15 @@ class DeploymentContext:
     template_vmid: int
     address: str
     target: str
-    env: dict[str, str]
+    workspace: OpenTofuWorkspace
     paths: DeploymentPaths
+
+
+@dataclass(frozen=True)
+class GuestPlan:
+    """Проверенный OpenTofu plan для одной гостевой VM."""
+
+    actions: tuple[str, ...]
 
 
 def _find_guest_directory(repo_root: Path, vmid: int) -> Path:
@@ -129,12 +128,12 @@ def _recover_tainted_vm(context: DeploymentContext) -> None:
     run(
         [
             "tofu",
-            f"-chdir={context.paths.opentofu_dir}",
+            f"-chdir={context.workspace.directory}",
             "state",
             "rm",
             context.target,
         ],
-        env=context.env,
+        env=context.workspace.env,
     )
     _remove_known_host(context.paths.known_hosts, context.address)
     console.ok(
@@ -147,7 +146,7 @@ def _validate_pve_and_state(
     *,
     state_present: bool,
     state_status: str,
-) -> tuple[bool, str]:
+) -> None:
     resource = context.client.find_vm(context.vmid)
 
     if resource is not None:
@@ -166,14 +165,12 @@ def _validate_pve_and_state(
             )
         if state_status == "tainted":
             _recover_tainted_vm(context)
-            return False, ""
-        return state_present, state_status
+        return
 
     if state_present:
         raise InfraManagerError(
             f"VM {context.vmid} есть в OpenTofu state, но отсутствует в PVE"
         )
-    return state_present, state_status
 
 
 def _set_template_protection(
@@ -221,14 +218,14 @@ def _apply_plan(
         run(
             [
                 "tofu",
-                f"-chdir={context.paths.opentofu_dir}",
+                f"-chdir={context.workspace.directory}",
                 "apply",
                 "-input=false",
                 "-no-color",
                 "-lock-timeout=30s",
                 str(context.paths.plan_file),
             ],
-            env=context.env,
+            env=context.workspace.env,
         )
     finally:
         if changed_template_protection:
@@ -296,12 +293,10 @@ def _ensure_ssh_host_key(
 def _build_deployment_context(
     repo_root: Path,
     vmid: int,
-    opentofu_dir: Path,
-    env: dict[str, str],
-    payload: dict[str, Any],
+    workspace: OpenTofuWorkspace,
 ) -> DeploymentContext:
     """Проверить описание VM и собрать общий контекст развёртывания."""
-    guests = payload["guests"]
+    guests = workspace.payload["guests"]
     guest = guests.get(str(vmid))
     if not isinstance(guest, dict):
         raise InfraManagerError(
@@ -353,12 +348,11 @@ def _build_deployment_context(
         raise InfraManagerError(f"Не найден playbook: {playbook}")
 
     paths = DeploymentPaths(
-        opentofu_dir=opentofu_dir,
         guest_dir=guest_dir,
         private_key=private_key,
         playbook=playbook,
         known_hosts=Path("/var/lib/semaphore/guest-known-hosts"),
-        plan_file=STATE_DIR / f"{vmid}.tfplan",
+        plan_file=workspace.state_dir / f"{vmid}.tfplan",
     )
     return DeploymentContext(
         client=PveClient.from_opentofu_env(),
@@ -368,138 +362,88 @@ def _build_deployment_context(
         template_vmid=template_vmid,
         address=address,
         target=f'proxmox_virtual_environment_vm.guest["{vmid}"]',
-        env=env,
+        workspace=workspace,
         paths=paths,
     )
 
 
-def run_deploy_guest(repo_root: Path, vmid: int) -> int:
-    """Привести одну VM к состоянию guest.yaml + provision.yaml."""
+def _build_guest_plan(context: DeploymentContext) -> GuestPlan:
+    """Построить plan и разрешить изменения только выбранной VM."""
 
-    if vmid <= 0:
-        raise InfraManagerError("VMID должен быть положительным числом")
-
-    for command in (
-        "tofu",
-        "ansible-playbook",
-        "ssh-keygen",
-        "ssh-keyscan",
-    ):
-        require_command(command)
-
-    console.info("Проверка проекта")
-    run([sys.executable, str(repo_root / "scripts" / "validate_repo.py")])
-
-    opentofu_dir, payload = _prepare_input(repo_root)
-    env = _opentofu_env()
-    context = _build_deployment_context(
-        repo_root,
-        vmid,
-        opentofu_dir,
-        env,
-        payload,
+    run(
+        [
+            "tofu",
+            f"-chdir={context.workspace.directory}",
+            "plan",
+            "-input=false",
+            "-no-color",
+            "-lock-timeout=30s",
+            f"-target={context.target}",
+            f"-out={context.paths.plan_file}",
+        ],
+        env=context.workspace.env,
     )
 
-    console.info("Инициализация OpenTofu")
-    _init(context.paths.opentofu_dir, context.env)
-
-    state_present, state_status = _state_status(
-        context.paths.opentofu_dir,
-        context.target,
-        context.env,
+    shown = run(
+        [
+            "tofu",
+            f"-chdir={context.workspace.directory}",
+            "show",
+            "-json",
+            str(context.paths.plan_file),
+        ],
+        capture_output=True,
+        env=context.workspace.env,
     )
-    state_present, state_status = _validate_pve_and_state(
-        context,
-        state_present=state_present,
-        state_status=state_status,
-    )
-
-    console.info(f"План OpenTofu для {context.vmid}")
     try:
-        run(
-            [
-                "tofu",
-                f"-chdir={context.paths.opentofu_dir}",
-                "plan",
-                "-input=false",
-                "-no-color",
-                "-lock-timeout=30s",
-                f"-target={context.target}",
-                f"-out={context.paths.plan_file}",
-            ],
-            env=context.env,
+        plan = json.loads(shown.stdout)
+    except json.JSONDecodeError as exc:
+        raise InfraManagerError(
+            "OpenTofu plan содержит некорректный JSON"
+        ) from exc
+
+    changes = plan.get("resource_changes", [])
+    if not isinstance(changes, list):
+        raise InfraManagerError(
+            "OpenTofu plan содержит некорректный resource_changes"
         )
 
-        shown = run(
-            [
-                "tofu",
-                f"-chdir={context.paths.opentofu_dir}",
-                "show",
-                "-json",
-                str(context.paths.plan_file),
-            ],
-            capture_output=True,
-            env=context.env,
-        )
-        try:
-            plan = json.loads(shown.stdout)
-        except json.JSONDecodeError as exc:
-            raise InfraManagerError(
-                "OpenTofu plan содержит некорректный JSON"
-            ) from exc
-
-        changes = plan.get("resource_changes", [])
-        if not isinstance(changes, list):
-            raise InfraManagerError(
-                "OpenTofu plan содержит некорректный resource_changes"
-            )
-
-        unexpected = [
-            str(change.get("address"))
-            for change in changes
-            if isinstance(change, dict)
-            and change.get("address") != context.target
-        ]
-        if unexpected:
-            raise InfraManagerError(
-                f"План VM {context.vmid} содержит изменения других ресурсов: "
-                + ", ".join(unexpected)
-            )
-
-        actions: list[str] = []
-        for change in changes:
-            if (
-                not isinstance(change, dict)
-                or change.get("address") != context.target
-            ):
-                continue
-            change_data = change.get("change")
-            if isinstance(change_data, dict):
-                raw_actions = change_data.get("actions")
-                if isinstance(raw_actions, list):
-                    actions = [str(action) for action in raw_actions]
-
-        run(
-            [
-                "tofu",
-                f"-chdir={context.paths.opentofu_dir}",
-                "show",
-                "-no-color",
-                str(context.paths.plan_file),
-            ],
-            env=context.env,
+    unexpected = [
+        str(change.get("address"))
+        for change in changes
+        if isinstance(change, dict) and change.get("address") != context.target
+    ]
+    if unexpected:
+        raise InfraManagerError(
+            f"План VM {context.vmid} содержит изменения других ресурсов: "
+            + ", ".join(unexpected)
         )
 
-        if not actions or actions == ["no-op"]:
-            console.ok(
-                f"OpenTofu: состояние VM {context.vmid} "
-                "уже соответствует конфигурации"
-            )
-        else:
-            _apply_plan(context, actions)
-            console.ok(f"Состояние VM {context.vmid} применено")
-    finally:
-        context.paths.plan_file.unlink(missing_ok=True)
+    actions: tuple[str, ...] = ()
+    for change in changes:
+        if not isinstance(change, dict) or change.get("address") != context.target:
+            continue
+        change_data = change.get("change")
+        if isinstance(change_data, dict):
+            raw_actions = change_data.get("actions")
+            if isinstance(raw_actions, list):
+                actions = tuple(str(action) for action in raw_actions)
+
+    run(
+        [
+            "tofu",
+            f"-chdir={context.workspace.directory}",
+            "show",
+            "-no-color",
+            str(context.paths.plan_file),
+        ],
+        env=context.workspace.env,
+    )
+    return GuestPlan(actions=actions)
+
+
+def _configure_guest_os(context: DeploymentContext) -> None:
+    """Принять SSH host key и применить конфигурацию Ansible."""
 
     _ensure_ssh_host_key(context.paths.known_hosts, context.address)
 
@@ -525,6 +469,61 @@ def run_deploy_guest(repo_root: Path, vmid: int) -> int:
         ],
         env=ansible_env,
     )
+
+
+def _reconcile_guest_infrastructure(context: DeploymentContext) -> None:
+    """Применить состояние одной VM и всегда удалить временный plan."""
+
+    console.info(f"План OpenTofu для {context.vmid}")
+    try:
+        plan = _build_guest_plan(context)
+        if not plan.actions or plan.actions == ("no-op",):
+            console.ok(
+                f"OpenTofu: состояние VM {context.vmid} "
+                "уже соответствует конфигурации"
+            )
+        else:
+            _apply_plan(context, list(plan.actions))
+            console.ok(f"Состояние VM {context.vmid} применено")
+    finally:
+        context.paths.plan_file.unlink(missing_ok=True)
+
+
+def run_deploy_guest(repo_root: Path, vmid: int) -> int:
+    """Привести одну VM к состоянию guest.yaml + provision.yaml."""
+
+    if vmid <= 0:
+        raise InfraManagerError("VMID должен быть положительным числом")
+
+    for command in (
+        "tofu",
+        "ansible-playbook",
+        "ssh-keygen",
+        "ssh-keyscan",
+    ):
+        require_command(command)
+
+    console.info("Проверка проекта")
+    run([sys.executable, str(repo_root / "scripts" / "validate_repo.py")])
+
+    workspace = prepare_workspace(repo_root)
+    context = _build_deployment_context(repo_root, vmid, workspace)
+
+    console.info("Инициализация OpenTofu")
+    context.workspace.initialize()
+
+    state_present, state_status = context.workspace.get_resource_state(
+        context.target
+    )
+    _validate_pve_and_state(
+        context,
+        state_present=state_present,
+        state_status=state_status,
+    )
+
+    _reconcile_guest_infrastructure(context)
+
+    _configure_guest_os(context)
 
     console.ok(
         f"{context.vmid} {context.name} создан и базово настроен"

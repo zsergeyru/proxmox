@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +15,26 @@ from .settings import PATHS
 CA_BUNDLE = PATHS.ca_bundle
 STATE_DIR = PATHS.opentofu_dir
 GUEST_STATE_FILE = PATHS.opentofu_input
+
+
+@dataclass(frozen=True)
+class OpenTofuWorkspace:
+    """Подготовленная рабочая область OpenTofu и требуемое состояние."""
+
+    directory: Path
+    state_dir: Path
+    env: dict[str, str]
+    payload: dict[str, Any]
+
+    def initialize(self) -> None:
+        """Инициализировать провайдеры без изменения инфраструктуры."""
+
+        _init(self.directory, self.env)
+
+    def get_resource_state(self, target: str) -> tuple[bool, str]:
+        """Вернуть наличие ресурса в state и его статус."""
+
+        return _state_status(self.directory, target, self.env)
 
 
 def _require_env(name: str) -> str:
@@ -77,6 +98,18 @@ def _prepare_input(repo_root: Path) -> tuple[Path, dict[str, Any]]:
     return opentofu_dir, payload
 
 
+def prepare_workspace(repo_root: Path) -> OpenTofuWorkspace:
+    """Собрать input и вернуть публичный интерфейс рабочей области."""
+
+    opentofu_dir, payload = _prepare_input(repo_root)
+    return OpenTofuWorkspace(
+        directory=opentofu_dir,
+        state_dir=STATE_DIR,
+        env=_opentofu_env(),
+        payload=payload,
+    )
+
+
 def _init(opentofu_dir: Path, env: dict[str, str]) -> None:
     run(
         [
@@ -94,17 +127,16 @@ def _init(opentofu_dir: Path, env: dict[str, str]) -> None:
 def run_plan(repo_root: Path) -> int:
     """Построить общий план OpenTofu без применения изменений."""
 
-    opentofu_dir, _ = _prepare_input(repo_root)
-    env = _opentofu_env()
+    workspace = prepare_workspace(repo_root)
 
     console.info("Инициализация OpenTofu")
-    _init(opentofu_dir, env)
+    workspace.initialize()
 
     console.info("Построение общего плана OpenTofu")
     result = run(
         [
             "tofu",
-            f"-chdir={opentofu_dir}",
+            f"-chdir={workspace.directory}",
             "plan",
             "-input=false",
             "-no-color",
@@ -112,7 +144,7 @@ def run_plan(repo_root: Path) -> int:
             "-detailed-exitcode",
         ],
         check=False,
-        env=env,
+        env=workspace.env,
     )
     if result.returncode == 0:
         console.ok("OpenTofu: изменений нет")
@@ -184,5 +216,3 @@ def _state_status(
             if target.endswith(f'["{address_key}"]'):
                 return True, str(instance.get("status") or "ready")
     return True, ""
-
-
