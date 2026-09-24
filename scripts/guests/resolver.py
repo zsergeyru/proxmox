@@ -15,11 +15,6 @@ MANAGEMENT_ORDER = (
     "ssh_identity",
     "project_repo_read",
 )
-BOOTSTRAP_ORDER = (
-    "git",
-    "docker",
-    "ansible",
-)
 PROFILE_FEATURE_ORDER = (
     "container-host",
 )
@@ -41,7 +36,6 @@ class ResolvedGuest:
     network: NetworkConfig
     management_ip: ipaddress.IPv4Address | None
     management_ip_source: str
-    bootstrap_capabilities: tuple[str, ...]
 
 
 def deep_merge(base: dict, overlay: dict) -> dict:
@@ -179,19 +173,6 @@ def resolve_management(
     return _canonical_source_list(source, "management", MANAGEMENT_ORDER)
 
 
-def resolve_bootstrap(
-    source: dict,
-    defaults: dict,
-    profile: dict,
-) -> tuple[str, ...]:
-    """Вернуть канонический список Bootstrap-инструментов."""
-    if "bootstrap" in defaults.get("defaults", {}):
-        raise GuestConfigError("defaults не должны задавать bootstrap")
-    if "bootstrap" in profile:
-        raise GuestConfigError("profile не должен задавать bootstrap")
-    return _canonical_source_list(source, "bootstrap", BOOTSTRAP_ORDER)
-
-
 def resolve_profile_features(profile: dict) -> tuple[str, ...]:
     """Нормализовать список высокоуровневых features профиля."""
     value = profile.get("features")
@@ -260,17 +241,10 @@ def resolve_effective_guest(
     effective = deep_merge(effective, source)
 
     management = resolve_management(source, defaults, profile)
-    bootstrap = resolve_bootstrap(source, defaults, profile)
     effective["management"] = list(management)
-    effective["bootstrap"] = list(bootstrap)
 
     if kind == "lxc":
         effective["features"] = list(features)
-        if "docker" in bootstrap and "container-host" not in features:
-            raise GuestConfigError(
-                "bootstrap 'docker' для LXC требует feature 'container-host' "
-                "в выбранном профиле"
-            )
 
     management_ip, ip_source = resolve_management_ip(source, network)
     effective_network = effective.get("network")
@@ -287,5 +261,4 @@ def resolve_effective_guest(
         network=network,
         management_ip=management_ip,
         management_ip_source=ip_source,
-        bootstrap_capabilities=bootstrap,
     )
