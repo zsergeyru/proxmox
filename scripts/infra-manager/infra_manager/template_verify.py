@@ -91,54 +91,62 @@ def _wait_test_ipv4(
     )
 
 
-def _validate_cloud_status(raw: str) -> None:
+def _parse_cloud_status(raw: str) -> dict[str, Any]:
     try:
         data = json.loads(raw)
     except json.JSONDecodeError as exc:
         raise InfraManagerError(
             "cloud-init status вернул некорректный JSON"
         ) from exc
-
     if not isinstance(data, dict) or data.get("status") != "done":
         raise InfraManagerError(
             "Cloud-Init завершился с неизвестной ошибкой или предупреждением"
         )
+    return data
 
-    sections = [
+
+def _validate_recoverable_errors(recoverable: Any) -> None:
+    if not isinstance(recoverable, dict):
+        raise InfraManagerError(
+            "Cloud-Init вернул неожиданный recoverable_errors"
+        )
+    for category, messages in recoverable.items():
+        if category != "DEPRECATED" or not isinstance(messages, list):
+            raise InfraManagerError(
+                "Cloud-Init сообщил неизвестное предупреждение"
+            )
+        for message in messages:
+            text = str(message)
+            if (
+                "of type string is deprecated in 22.2" not in text
+                or "scheduled to be removed in 27.2" not in text
+            ):
+                raise InfraManagerError(
+                    "Cloud-Init сообщил неизвестное предупреждение"
+                )
+
+
+def _validate_cloud_section(section: Any) -> None:
+    if not isinstance(section, dict):
+        raise InfraManagerError(
+            "Cloud-Init вернул неожиданный формат состояния"
+        )
+    if section.get("errors"):
+        raise InfraManagerError("Cloud-Init сообщил ошибку")
+    _validate_recoverable_errors(section.get("recoverable_errors", {}))
+
+
+def _validate_cloud_status(raw: str) -> None:
+    data = _parse_cloud_status(raw)
+    sections = (
         data,
         data.get("init", {}),
         data.get("init-local", {}),
         data.get("modules-config", {}),
         data.get("modules-final", {}),
-    ]
+    )
     for section in sections:
-        if not isinstance(section, dict):
-            raise InfraManagerError(
-                "Cloud-Init вернул неожиданный формат состояния"
-            )
-        if section.get("errors"):
-            raise InfraManagerError(
-                "Cloud-Init сообщил ошибку"
-            )
-        recoverable = section.get("recoverable_errors", {})
-        if not isinstance(recoverable, dict):
-            raise InfraManagerError(
-                "Cloud-Init вернул неожиданный recoverable_errors"
-            )
-        for category, messages in recoverable.items():
-            if category != "DEPRECATED" or not isinstance(messages, list):
-                raise InfraManagerError(
-                    "Cloud-Init сообщил неизвестное предупреждение"
-                )
-            for message in messages:
-                text = str(message)
-                if (
-                    "of type string is deprecated in 22.2" not in text
-                    or "scheduled to be removed in 27.2" not in text
-                ):
-                    raise InfraManagerError(
-                        "Cloud-Init сообщил неизвестное предупреждение"
-                    )
+        _validate_cloud_section(section)
 
     console.ok(
         "Cloud-Init завершён; присутствует только известное "
