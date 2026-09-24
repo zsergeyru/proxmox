@@ -1,5 +1,5 @@
 schema_version: 1
-guest_vmid: 311
+guest_vmid: 310
 
 system:
   distribution: debian
