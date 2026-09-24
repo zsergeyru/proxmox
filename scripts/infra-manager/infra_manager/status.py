@@ -245,12 +245,6 @@ def check_status(*, full: bool = False) -> int:
             "Semaphore не может прочитать Git repository 'proxmox' "
             "сохранённым SSH key"
         ) from exc
-    if not isinstance(branches, list) or project_branch not in branches:
-        raise InfraManagerError(
-            "Semaphore не видит ветку "
-            f"'{project_branch}' в Git repository 'proxmox'"
-        )
-
     environments = semaphore.get(
         f"/project/{project_id}/environment?sort=name&order=asc"
     )
