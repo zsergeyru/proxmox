@@ -10,7 +10,7 @@ from typing import Any
 
 from .common import InfraManagerError, console
 from .pve import PveClient, check_access
-from .semaphore import SemaphoreClient
+from .semaphore import SEMAPHORE_TEMPLATES, SemaphoreClient
 from .settings import PATHS, SETTINGS
 
 PVE_ENV = PATHS.pve_api_env
@@ -114,9 +114,7 @@ def _check_git_branch_contract(
         if (
             isinstance(template, dict)
             and template.get("name") in {
-                "OpenTofu Plan",
-                "Build Template 9000",
-                "Deploy Guest 410",
+                spec.name for spec in SEMAPHORE_TEMPLATES
             }
             and template.get("git_branch") != project_branch
         ):
@@ -275,33 +273,19 @@ def check_status(*, full: bool = False) -> int:
         github_key_id=github_key_id,
         project_branch=project_branch,
     )
-    expected_templates = {
-        "OpenTofu Plan": (
-            "scripts/infra-manager/jobs/opentofu-plan.py",
-            "[]",
-        ),
-        "Build Template 9000": (
-            "scripts/infra-manager/jobs/build-template.py",
-            '["9000"]',
-        ),
-        "Deploy Guest 410": (
-            "scripts/infra-manager/jobs/deploy-guest.py",
-            '["410"]',
-        ),
-    }
-    for template_name, (playbook, arguments) in expected_templates.items():
+    for spec in SEMAPHORE_TEMPLATES:
         template = unique_named(
             templates,
-            template_name,
+            spec.name,
             "шаблон Semaphore",
         )
         if (
-            template.get("app") != "python"
-            or template.get("playbook") != playbook
-            or str(template.get("arguments") or "[]") != arguments
+            template.get("app") != spec.app
+            or template.get("playbook") != spec.playbook
+            or str(template.get("arguments") or "[]") != spec.arguments
         ):
             raise InfraManagerError(
-                f"Шаблон Semaphore '{template_name}' "
+                f"Шаблон Semaphore '{spec.name}' "
                 "не соответствует Python-контракту"
             )
 
