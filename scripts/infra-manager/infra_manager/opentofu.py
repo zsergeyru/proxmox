@@ -242,124 +242,100 @@ def _remove_known_host(known_hosts: Path, address: str) -> None:
     )
 
 
-def _recover_tainted_vm(
-    *,
-    client: PveClient,
-    opentofu_dir: Path,
-    env: dict[str, str],
-    target: str,
-    node: str,
-    vmid: int,
-    expected_name: str,
-    known_hosts: Path,
-    address: str,
-) -> None:
-    resource = client.find_vm(vmid)
+def _recover_tainted_vm(context: DeploymentContext) -> None:
+    resource = context.client.find_vm(context.vmid)
     if resource is None:
         raise InfraManagerError(
-            f"VM {vmid} есть в OpenTofu state, но отсутствует в PVE"
+            f"VM {context.vmid} есть в OpenTofu state, но отсутствует в PVE"
         )
 
     actual_type = str(resource.get("type") or "")
     actual_name = str(resource.get("name") or "")
-    if actual_type != "qemu" or actual_name != expected_name:
+    if actual_type != "qemu" or actual_name != context.name:
         raise InfraManagerError(
-            f"VMID {vmid} занят объектом '{actual_name}' "
+            f"VMID {context.vmid} занят объектом '{actual_name}' "
             f"типа '{actual_type}'; автоматическое удаление запрещено"
         )
 
     console.info(
-        f"Удаление незавершённой VM {vmid} после неудачного применения"
+        f"Удаление незавершённой VM {context.vmid} после неудачного применения"
     )
-    if client.vm_status(node=node, vmid=vmid) == "running":
-        client.run_task(
+    if (
+        context.client.vm_status(
+            node=context.node,
+            vmid=context.vmid,
+        )
+        == "running"
+    ):
+        context.client.run_task(
             "POST",
-            f"/nodes/{node}/qemu/{vmid}/status/stop",
-            node=node,
+            f"/nodes/{context.node}/qemu/{context.vmid}/status/stop",
+            node=context.node,
         )
 
-    client.put(
-        f"/nodes/{node}/qemu/{vmid}/config",
+    context.client.put(
+        f"/nodes/{context.node}/qemu/{context.vmid}/config",
         form={"protection": 0},
     )
-    client.run_task(
+    context.client.run_task(
         "DELETE",
-        f"/nodes/{node}/qemu/{vmid}",
-        node=node,
+        f"/nodes/{context.node}/qemu/{context.vmid}",
+        node=context.node,
         query={"purge": 1},
     )
-    if client.find_vm(vmid) is not None:
+    if context.client.find_vm(context.vmid) is not None:
         raise InfraManagerError(
-            f"Незавершённую VM {vmid} не удалось удалить"
+            f"Незавершённую VM {context.vmid} не удалось удалить"
         )
 
     run(
         [
             "tofu",
-            f"-chdir={opentofu_dir}",
+            f"-chdir={context.opentofu_dir}",
             "state",
             "rm",
-            target,
+            context.target,
         ],
-        env=env,
+        env=context.env,
     )
-    _remove_known_host(known_hosts, address)
+    _remove_known_host(context.known_hosts, context.address)
     console.ok(
-        f"Незавершённая VM {vmid} удалена; OpenTofu state очищен"
+        f"Незавершённая VM {context.vmid} удалена; "
+        "OpenTofu state очищен"
     )
-
 
 def _validate_pve_and_state(
+    context: DeploymentContext,
     *,
-    client: PveClient,
-    opentofu_dir: Path,
-    env: dict[str, str],
-    target: str,
-    node: str,
-    vmid: int,
-    expected_name: str,
     state_present: bool,
     state_status: str,
-    known_hosts: Path,
-    address: str,
 ) -> tuple[bool, str]:
-    resource = client.find_vm(vmid)
+    resource = context.client.find_vm(context.vmid)
 
     if resource is not None:
         actual_type = str(resource.get("type") or "")
         actual_name = str(resource.get("name") or "")
-        if actual_type != "qemu" or actual_name != expected_name:
+        if actual_type != "qemu" or actual_name != context.name:
             raise InfraManagerError(
-                f"VMID {vmid} уже занят объектом '{actual_name}' "
+                f"VMID {context.vmid} уже занят объектом '{actual_name}' "
                 f"типа '{actual_type}'; автоматическое управление запрещено"
             )
         if not state_present:
             raise InfraManagerError(
-                f"VM {vmid} существует в PVE, но отсутствует "
+                f"VM {context.vmid} существует в PVE, но отсутствует "
                 "в OpenTofu state; автоматический импорт клонированной "
                 "VM запрещён"
             )
         if state_status == "tainted":
-            _recover_tainted_vm(
-                client=client,
-                opentofu_dir=opentofu_dir,
-                env=env,
-                target=target,
-                node=node,
-                vmid=vmid,
-                expected_name=expected_name,
-                known_hosts=known_hosts,
-                address=address,
-            )
+            _recover_tainted_vm(context)
             return False, ""
         return state_present, state_status
 
     if state_present:
         raise InfraManagerError(
-            f"VM {vmid} есть в OpenTofu state, но отсутствует в PVE"
+            f"VM {context.vmid} есть в OpenTofu state, но отсутствует в PVE"
         )
     return state_present, state_status
-
 
 def _set_template_protection(
     client: PveClient,
@@ -375,62 +351,57 @@ def _set_template_protection(
 
 
 def _apply_plan(
-    *,
-    client: PveClient,
-    opentofu_dir: Path,
-    env: dict[str, str],
-    plan_file: Path,
+    context: DeploymentContext,
     actions: list[str],
-    node: str,
-    template_vmid: int,
-    vmid: int,
 ) -> None:
     changed_template_protection = False
     try:
         if "create" in actions:
-            config = client.vm_config(node=node, vmid=template_vmid)
+            config = context.client.vm_config(
+                node=context.node,
+                vmid=context.template_vmid,
+            )
             if config.get("template") not in (1, True, "1", "true"):
                 raise InfraManagerError(
-                    f"VMID {template_vmid} не является шаблоном"
+                    f"VMID {context.template_vmid} не является шаблоном"
                 )
             if config.get("protection") in (1, True, "1", "true"):
                 console.info(
-                    f"Временное снятие защиты шаблона "
-                    f"{template_vmid} для клонирования"
+                    "Временное снятие защиты шаблона "
+                    f"{context.template_vmid} для клонирования"
                 )
                 _set_template_protection(
-                    client,
-                    node=node,
-                    template_vmid=template_vmid,
+                    context.client,
+                    node=context.node,
+                    template_vmid=context.template_vmid,
                     enabled=False,
                 )
                 changed_template_protection = True
 
-        console.info(f"Применение состояния VM {vmid}")
+        console.info(f"Применение состояния VM {context.vmid}")
         run(
             [
                 "tofu",
-                f"-chdir={opentofu_dir}",
+                f"-chdir={context.opentofu_dir}",
                 "apply",
                 "-input=false",
                 "-no-color",
                 "-lock-timeout=30s",
-                str(plan_file),
+                str(context.plan_file),
             ],
-            env=env,
+            env=context.env,
         )
     finally:
         if changed_template_protection:
             _set_template_protection(
-                client,
-                node=node,
-                template_vmid=template_vmid,
+                context.client,
+                node=context.node,
+                template_vmid=context.template_vmid,
                 enabled=True,
             )
             console.ok(
-                f"Защита шаблона {template_vmid} восстановлена"
+                f"Защита шаблона {context.template_vmid} восстановлена"
             )
-
 
 def _ensure_ssh_host_key(
     known_hosts: Path,
