@@ -215,25 +215,35 @@ def check_status(*, full: bool = False) -> int:
     templates = semaphore.get(
         f"/project/{project_id}/templates?sort=name&order=asc"
     )
-    if not any(
-        isinstance(item, dict)
-        and item.get("name") == "OpenTofu Plan"
-        and item.get("app") == "python"
-        for item in templates
-    ):
-        raise InfraManagerError(
-            "В Semaphore отсутствует шаблон OpenTofu Plan"
+    expected_templates = {
+        "OpenTofu Plan": (
+            "scripts/infra-manager/jobs/opentofu-plan.py",
+            "[]",
+        ),
+        "Build Template 9000": (
+            "scripts/infra-manager/jobs/build-template.py",
+            '["9000"]',
+        ),
+        "Deploy Guest 410": (
+            "scripts/infra-manager/jobs/deploy-guest.py",
+            '["410"]',
+        ),
+    }
+    for template_name, (playbook, arguments) in expected_templates.items():
+        template = unique_named(
+            templates,
+            template_name,
+            "шаблон Semaphore",
         )
-
-    if not any(
-        isinstance(item, dict)
-        and item.get("name") == "Deploy Guest 410"
-        and item.get("app") == "python"
-        for item in templates
-    ):
-        raise InfraManagerError(
-            "В Semaphore отсутствует шаблон Deploy Guest 410"
-        )
+        if (
+            template.get("app") != "python"
+            or template.get("playbook") != playbook
+            or str(template.get("arguments") or "[]") != arguments
+        ):
+            raise InfraManagerError(
+                f"Шаблон Semaphore '{template_name}' "
+                "не соответствует Python-контракту"
+            )
 
     if run_quiet(
         [
