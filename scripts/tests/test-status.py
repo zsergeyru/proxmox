@@ -24,6 +24,7 @@ from infra_manager.settings import SETTINGS
 from infra_manager.status import (
     SemaphoreSnapshot,
     _check_git_branch_contract,
+    _dict_items,
     _project_branch,
     load_semaphore_snapshot,
     validate_semaphore_snapshot,
@@ -139,6 +140,16 @@ def main_test() -> None:
         pass
     else:
         fail("require_unique_by_name принял отсутствующий объект")
+
+    try:
+        _dict_items(
+            [{"id": 1}, "некорректный элемент"],
+            "тестовые объекты",
+        )
+    except InfraManagerError:
+        pass
+    else:
+        fail("status молча отбросил некорректный элемент списка Semaphore")
 
     semaphore_snapshot = SemaphoreSnapshot(
         project_id=1,
