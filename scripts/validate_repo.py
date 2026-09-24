@@ -325,13 +325,6 @@ def check_profiled_guest(rel: Path, source: dict, effective: dict) -> None:
                 f"{rel}: ostemplate должен быть селектором семейства "
                 "Proxmox vztmpl без версии и имени архива"
             )
-        bootstrap = effective.get("bootstrap", [])
-        features = effective.get("features", [])
-        if "docker" in bootstrap and "container-host" not in features:
-            fail(
-                f"{rel}: bootstrap 'docker' для LXC требует "
-                "profile feature 'container-host'"
-            )
 
 
 def manifests() -> list[Path]:
