@@ -5,7 +5,7 @@
   gather_facts: true
 
   vars:
-    project_root: "{{ playbook_dir }}/../.."
+    project_root: "{{ playbook_dir }}/../../.."
     guest_root: "{{ project_root }}/infrastructure/guests/{{ guest }}"
     provision_file: "{{ guest_root }}/provision.yaml"
 
