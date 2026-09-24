@@ -14,6 +14,7 @@ from .settings import PATHS
 
 CA_BUNDLE = PATHS.ca_bundle
 STATE_DIR = PATHS.opentofu_dir
+STATE_FILE = PATHS.opentofu_state_dir / "proxmox.tfstate"
 GUEST_STATE_FILE = PATHS.opentofu_input
 
 
@@ -162,19 +163,7 @@ def _state_status(
     target: str,
     env: dict[str, str],
 ) -> tuple[bool, str]:
-    show = run(
-        [
-            "tofu",
-            f"-chdir={opentofu_dir}",
-            "state",
-            "show",
-            target,
-        ],
-        check=False,
-        capture_output=True,
-        env=env,
-    )
-    if show.returncode != 0:
+    if not STATE_FILE.is_file():
         return False, ""
 
     pulled = run(
@@ -196,7 +185,9 @@ def _state_status(
 
     resources = state.get("resources", [])
     if not isinstance(resources, list):
-        return True, ""
+        raise InfraManagerError(
+            "OpenTofu state содержит некорректный resources"
+        )
 
     for resource in resources:
         if not isinstance(resource, dict):
@@ -215,4 +206,4 @@ def _state_status(
             address_key = str(instance.get("index_key", ""))
             if target.endswith(f'["{address_key}"]'):
                 return True, str(instance.get("status") or "ready")
-    return True, ""
+    return False, ""
