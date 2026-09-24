@@ -9,9 +9,7 @@ from __future__ import annotations
 
 import json
 import os
-import shlex
 import shutil
-import subprocess
 import sys
 import time
 import urllib.error
@@ -20,7 +18,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from .common import InfraManagerError
+from .common import CommandRunner, InfraManagerError, command_runner
 from .settings import PATHS, SETTINGS
 
 REPO_ROOT = PATHS.repo_root
@@ -109,8 +107,13 @@ class Setup:
     def c(self, code: str) -> str:
         return code if self.color else ""
 
+    @property
+    def runner(self) -> CommandRunner:
+        """Исполнитель команд setup с записью вывода в технический лог."""
+        return CommandRunner(default_log_file=self.log_file)
+
     def init_log(self) -> None:
-        self.run_raw(
+        command_runner.run(
             [
                 "install",
                 "-d",
@@ -168,82 +171,11 @@ class Setup:
         print(f"Полный технический лог: {self.log_file}", file=sys.stderr)
 
     @staticmethod
-    def run_raw(
-        argv: list[str],
-        *,
-        capture: bool = False,
-        quiet: bool = False,
-        check: bool = True,
-        env: dict[str, str] | None = None,
-    ) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(
-            argv,
-            check=check,
-            text=True,
-            stdout=subprocess.PIPE
-            if capture
-            else (subprocess.DEVNULL if quiet else None),
-            stderr=subprocess.DEVNULL if quiet else None,
-            env=env,
-        )
-
-    def run_logged(
-        self,
-        argv: list[str],
-        *,
-        env_updates: dict[str, str] | None = None,
-    ) -> None:
-        self.write_log(f"КОМАНДА: {shlex.join(argv)}")
-        env = os.environ.copy()
-        if env_updates:
-            env.update(env_updates)
-
-        with self.log_file.open("a", encoding="utf-8") as stream:
-            result = subprocess.run(
-                argv,
-                check=False,
-                stdout=stream,
-                stderr=subprocess.STDOUT,
-                text=True,
-                env=env,
-            )
-
-        if result.returncode != 0:
-            tail = self.log_file.read_text(
-                encoding="utf-8",
-                errors="replace",
-            ).splitlines()[-25:]
-            detail = "\n".join(tail)
-            raise InfraManagerError(
-                f"команда завершилась с кодом {result.returncode}: "
-                f"{shlex.join(argv)}"
-                + (f"\nПоследние строки лога:\n{detail}" if detail else "")
-            )
-
-    def run_visible(
-        self,
-        argv: list[str],
-        *,
-        env_updates: dict[str, str] | None = None,
-    ) -> None:
-        self.write_log(f"КОМАНДА: {shlex.join(argv)}")
-        env = os.environ.copy()
-        if env_updates:
-            env.update(env_updates)
-        result = subprocess.run(argv, check=False, env=env)
-        if result.returncode:
-            raise InfraManagerError(
-                f"команда завершилась с кодом {result.returncode}: "
-                f"{shlex.join(argv)}"
-            )
-
-    @staticmethod
     def installed(package: str) -> bool:
         return (
-            subprocess.run(
+            command_runner.run(
                 ["dpkg", "-s", package],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                quiet=True,
                 check=False,
             ).returncode
             == 0
@@ -272,7 +204,7 @@ class Setup:
         owner: str = "root",
         group: str = "root",
     ) -> None:
-        Setup.run_raw(
+        command_runner.run(
             [
                 "install",
                 "-o",
@@ -295,7 +227,7 @@ class Setup:
                 f"Ожидается Debian 13, обнаружено "
                 f"{release.get('VERSION_ID', '?')}"
             )
-        architecture = self.run_raw(
+        architecture = command_runner.run(
             ["dpkg", "--print-architecture"],
             capture=True,
         ).stdout.strip()
@@ -306,38 +238,38 @@ class Setup:
 
     def prepare_directories(self) -> None:
         for path in (CONFIG_DIR, CA_DIR, DATA_DIR, COMPOSE_DIR):
-            self.run_raw(
+            command_runner.run(
                 [
                     "install", "-d", "-o", "root", "-g", "root",
                     "-m", "0755", str(path),
                 ]
             )
-        self.run_raw(
+        command_runner.run(
             [
                 "install", "-d", "-o", "root", "-g", "root",
                 "-m", "0700", str(SECRET_DIR),
             ]
         )
-        self.run_raw(
+        command_runner.run(
             [
                 "install", "-d", "-o", "1001", "-g", "0",
                 "-m", "0770", str(SEMAPHORE_DIR),
             ]
         )
         for path in (OPENTOFU_DIR, STATE_DIR):
-            self.run_raw(
+            command_runner.run(
                 [
                     "install", "-d", "-o", "1001", "-g", "0",
                     "-m", "0750", str(path),
                 ]
             )
-        self.run_raw(["chown", "-R", "1001:0", str(SEMAPHORE_DIR)])
-        self.run_raw(["chmod", "0770", str(SEMAPHORE_DIR)])
+        command_runner.run(["chown", "-R", "1001:0", str(SEMAPHORE_DIR)])
+        command_runner.run(["chmod", "0770", str(SEMAPHORE_DIR)])
 
     def ensure_ansible_identity(self) -> None:
         """Создать или проверить постоянную SSH-идентичность Ansible."""
         self.stage("Проверка SSH-идентичности Ansible")
-        self.run_raw(
+        command_runner.run(
             [
                 "install", "-d", "-o", "1001", "-g", "0",
                 "-m", "0700", str(ANSIBLE_DIR),
@@ -350,7 +282,7 @@ class Setup:
             )
 
         if not ANSIBLE_PRIVATE_KEY.exists():
-            self.run_logged(
+            self.runner.run(
                 [
                     "ssh-keygen",
                     "-q",
@@ -361,7 +293,7 @@ class Setup:
                 ]
             )
 
-        derived = self.run_raw(
+        derived = command_runner.run(
             ["ssh-keygen", "-y", "-f", str(ANSIBLE_PRIVATE_KEY)],
             capture=True,
         ).stdout.strip()
@@ -403,8 +335,8 @@ class Setup:
             return
 
         self.stage("Установка базовых пакетов infra-manager")
-        self.run_logged(["apt-get", "update"])
-        self.run_logged(
+        self.runner.run(["apt-get", "update"])
+        self.runner.run(
             [
                 "apt-get",
                 "install",
@@ -412,16 +344,15 @@ class Setup:
                 "--no-install-recommends",
                 *missing,
             ],
-            env_updates={"DEBIAN_FRONTEND": "noninteractive"},
+            env={**os.environ, "DEBIAN_FRONTEND": "noninteractive"},
         )
         self.ok("Базовые пакеты infra-manager установлены")
 
     def install_docker(self) -> None:
         docker_ready = (
-            subprocess.run(
+            command_runner.run(
                 ["docker", "compose", "version"],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                quiet=True,
                 check=False,
             ).returncode
             == 0
@@ -429,7 +360,7 @@ class Setup:
             else False
         )
         if docker_ready:
-            self.run_logged(["systemctl", "enable", "--now", "docker"])
+            self.runner.run(["systemctl", "enable", "--now", "docker"])
             self.ok("Docker Engine и Compose уже доступны")
             return
 
@@ -441,9 +372,9 @@ class Setup:
                 )
 
         self.stage("Установка Docker Engine из официального репозитория")
-        self.run_logged(["apt-get", "update"])
-        self.run_raw(["install", "-m", "0755", "-d", "/etc/apt/keyrings"])
-        self.run_logged(
+        self.runner.run(["apt-get", "update"])
+        command_runner.run(["install", "-m", "0755", "-d", "/etc/apt/keyrings"])
+        self.runner.run(
             [
                 "curl",
                 "-fsSL",
@@ -452,10 +383,10 @@ class Setup:
                 "/etc/apt/keyrings/docker.asc",
             ]
         )
-        self.run_raw(["chmod", "a+r", "/etc/apt/keyrings/docker.asc"])
+        command_runner.run(["chmod", "a+r", "/etc/apt/keyrings/docker.asc"])
 
         release = self.os_release()
-        architecture = self.run_raw(
+        architecture = command_runner.run(
             ["dpkg", "--print-architecture"],
             capture=True,
         ).stdout.strip()
@@ -472,8 +403,8 @@ class Setup:
         )
         docker_sources.chmod(0o644)
 
-        self.run_logged(["apt-get", "update"])
-        self.run_logged(
+        self.runner.run(["apt-get", "update"])
+        self.runner.run(
             [
                 "apt-get",
                 "install",
@@ -481,11 +412,11 @@ class Setup:
                 "--no-install-recommends",
                 *DOCKER_PACKAGES,
             ],
-            env_updates={"DEBIAN_FRONTEND": "noninteractive"},
+            env={**os.environ, "DEBIAN_FRONTEND": "noninteractive"},
         )
-        self.run_logged(["systemctl", "enable", "--now", "docker"])
-        self.run_logged(["docker", "version"])
-        self.run_logged(["docker", "compose", "version"])
+        self.runner.run(["systemctl", "enable", "--now", "docker"])
+        self.runner.run(["docker", "version"])
+        self.runner.run(["docker", "compose", "version"])
         self.ok("Docker Engine и Compose установлены")
 
     def copy_compose_assets(self) -> None:
@@ -540,8 +471,8 @@ class Setup:
                 "".join(f"github.com {key}\n" for key in keys),
                 encoding="utf-8",
             )
-            self.run_raw(["chown", "1001:0", str(target)])
-            self.run_raw(["chmod", "0644", str(target)])
+            command_runner.run(["chown", "1001:0", str(target)])
+            command_runner.run(["chmod", "0644", str(target)])
 
         if not self.nonempty(target):
             raise InfraManagerError(
@@ -570,8 +501,9 @@ class Setup:
         if PVE_API_ENV.is_file():
             if staging is not None and self.nonempty(staging):
                 same = (
-                    subprocess.run(
+                    command_runner.run(
                         ["cmp", "-s", str(staging), str(PVE_API_ENV)],
+                        quiet=True,
                         check=False,
                     ).returncode
                     == 0
@@ -610,7 +542,7 @@ class Setup:
         )
 
     def random_base64(self, size: int) -> str:
-        return self.run_raw(
+        return command_runner.run(
             ["openssl", "rand", "-base64", str(size)],
             capture=True,
         ).stdout.strip()
@@ -619,7 +551,7 @@ class Setup:
         if not SERVER_ENV.exists():
             admin_password = self.random_base64(24)
             encryption_key = self.random_base64(32)
-            timezone = self.run_raw(
+            timezone = command_runner.run(
                 [
                     "timedatectl",
                     "show",
@@ -680,7 +612,7 @@ class Setup:
         self.stage(
             "Подготовка итогового состояния гостей для OpenTofu"
         )
-        self.run_logged(
+        self.runner.run(
             [
                 sys.executable,
                 str(
@@ -691,8 +623,8 @@ class Setup:
                 str(OPENTOFU_INPUT),
             ]
         )
-        self.run_raw(["chown", "1001:0", str(OPENTOFU_INPUT)])
-        self.run_raw(["chmod", "0640", str(OPENTOFU_INPUT)])
+        command_runner.run(["chown", "1001:0", str(OPENTOFU_INPUT)])
+        command_runner.run(["chmod", "0640", str(OPENTOFU_INPUT)])
         self.ok(f"OpenTofu input подготовлен: {OPENTOFU_INPUT}")
 
     def write_runtime_versions(self) -> None:
@@ -723,7 +655,7 @@ class Setup:
         volume = f"{SEMAPHORE_DIR}:/var/lib/semaphore"
         image = f"semaphoreui/semaphore:{SEMAPHORE_VERSION}"
 
-        self.run_logged(
+        self.runner.run(
             [
                 "docker",
                 "run",
@@ -744,7 +676,7 @@ class Setup:
                 "-exec chmod 0660 {} +",
             ]
         )
-        self.run_logged(
+        self.runner.run(
             [
                 "docker",
                 "run",
@@ -769,7 +701,7 @@ class Setup:
     def deploy_semaphore(self) -> None:
         self.stage("Сборка и запуск Semaphore")
         self.info("Получение базового образа Semaphore")
-        self.run_logged(
+        self.runner.run(
             [
                 "docker",
                 "pull",
@@ -778,7 +710,7 @@ class Setup:
         )
         self.ok("Базовый образ Semaphore готов")
 
-        self.run_raw(
+        command_runner.run(
             self.compose("stop", "runtime"),
             quiet=True,
             check=False,
@@ -789,11 +721,11 @@ class Setup:
             "Сборка infra-runtime с Semaphore, OpenTofu, "
             "Packer и Ansible"
         )
-        self.run_logged(self.compose("build", "--pull", "runtime"))
+        self.runner.run(self.compose("build", "--pull", "runtime"))
         self.ok("Образ infra-runtime собран")
 
         self.info("Запуск контейнера infra-runtime")
-        self.run_logged(
+        self.runner.run(
             self.compose("up", "-d", "--remove-orphans")
         )
         self.ok("Контейнер infra-runtime запущен")
@@ -808,16 +740,6 @@ class Setup:
         except (OSError, urllib.error.URLError):
             return False
 
-    def append_to_log(self, argv: list[str]) -> None:
-        with self.log_file.open("a", encoding="utf-8") as stream:
-            subprocess.run(
-                argv,
-                stdout=stream,
-                stderr=subprocess.STDOUT,
-                text=True,
-                check=False,
-            )
-
     def wait_semaphore(self) -> None:
         self.stage("Проверка Semaphore")
         for _ in range(60):
@@ -826,16 +748,17 @@ class Setup:
             time.sleep(2)
 
         if not self.semaphore_ready():
-            self.append_to_log(self.compose("ps"))
-            self.append_to_log(
-                self.compose("logs", "--tail=100", "runtime")
+            self.runner.run(self.compose("ps"), check=False)
+            self.runner.run(
+                self.compose("logs", "--tail=100", "runtime"),
+                check=False,
             )
             raise InfraManagerError(
                 "Semaphore Server не стал доступен"
             )
 
         time.sleep(5)
-        running = self.run_raw(
+        running = command_runner.run(
             [
                 "docker",
                 "inspect",
@@ -898,7 +821,7 @@ class Setup:
         )
         for argv, label in checks:
             try:
-                self.run_logged(argv)
+                self.runner.run(argv)
             except InfraManagerError as exc:
                 raise InfraManagerError(
                     f"{label} отсутствует в Semaphore"
@@ -919,7 +842,7 @@ class Setup:
             / "scripts/infra-manager/infra_manager"
         )
         target_package = PYTHON_INSTALL_ROOT / "infra_manager"
-        self.run_raw(
+        command_runner.run(
             [
                 "install",
                 "-d",
@@ -959,7 +882,7 @@ class Setup:
         ):
             self.install_file(source, target, "0755")
 
-        self.run_raw(
+        command_runner.run(
             [
                 "install",
                 "-d",
@@ -983,7 +906,7 @@ class Setup:
                 LIFECYCLE_TEST_COMMAND,
             ),
         ):
-            self.run_raw(
+            command_runner.run(
                 [
                     "ln",
                     "-sfn",
@@ -993,7 +916,7 @@ class Setup:
             )
 
     def report_result(self) -> None:
-        address = self.run_raw(
+        address = command_runner.run(
             ["hostname", "-I"],
             capture=True,
             check=False,
@@ -1054,15 +977,11 @@ class Setup:
             self.configure_semaphore_project()
             # Локальные status/access команды сохраняют совместимые wrappers.
             self.install_local_commands()
-            self.run_visible([str(STATUS_COMMAND)])
+            command_runner.run([str(STATUS_COMMAND)])
 
             self.report_result()
             return 0
-        except (
-            InfraManagerError,
-            OSError,
-            subprocess.SubprocessError,
-        ) as exc:
+        except (InfraManagerError, OSError) as exc:
             self.error(str(exc))
             return 1
 
