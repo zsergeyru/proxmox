@@ -72,6 +72,7 @@ paths:
   configuration: /etc/infra-manager
   secrets: /etc/infra-manager/secrets
   ca: /etc/infra-manager/ca
+  ansible_identity: /etc/infra-manager/ansible
   data: /var/lib/infra-manager
   semaphore_data: /var/lib/infra-manager/semaphore
   opentofu_data: /var/lib/infra-manager/opentofu
@@ -104,10 +105,12 @@ semaphore:
     - OpenTofu PVE
     - OpenTofu Plan
     - Build Template 9000
+    - Deploy Guest 410
 
 persistence:
   backup_required:
     - /etc/infra-manager/secrets
+    - /etc/infra-manager/ansible
     - /var/lib/infra-manager/semaphore
     - /var/lib/infra-manager/opentofu/state
 
