@@ -37,7 +37,7 @@ def main() -> None:
     source_109 = load_yaml(ROOT / "infrastructure/guests/109-network-gateway/guest.yaml")
 
     resolved = resolve_effective_guest(source_311, defaults)
-    assert resolved.effective["management"] == ["ssh_identity", "project_repo_read"]
+    assert resolved.effective["management"] == []
     assert resolved.effective["features"] == ["container-host"]
     assert resolved.effective["resources"]["cores"] == 2
     assert resolved.effective["network"]["ipv4"] == "192.168.3.11/16"
