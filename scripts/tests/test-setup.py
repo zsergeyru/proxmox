@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Unit and contract checks for infra-manager setup."""
+"""Модульные и контрактные проверки настройки infra-manager."""
 
 from __future__ import annotations
 
@@ -29,30 +29,30 @@ def fail(message: str) -> None:
 
 def main_test() -> None:
     if "python3" not in BASE_PACKAGES:
-        fail("python3 is missing from the setup contract")
+        fail("python3 отсутствует в контракте настройки")
     if "python3-yaml" not in BASE_PACKAGES:
-        fail("python3-yaml is missing from the setup contract")
+        fail("python3-yaml отсутствует в контракте настройки")
 
     if PATHS.pve_api_env != Path("/etc/infra-manager/secrets/pve-api.env"):
-        fail("The canonical PVE credential path has an unexpected value")
+        fail("Канонический путь к учётным данным PVE имеет неожиданное значение")
     if PATHS.ca_bundle != Path("/etc/infra-manager/ca/ca-bundle.crt"):
-        fail("The canonical CA bundle path has an unexpected value")
+        fail("Канонический путь к набору сертификатов CA имеет неожиданное значение")
     if PATHS.opentofu_input != Path("/var/lib/infra-manager/opentofu/guests.json"):
-        fail("The canonical OpenTofu input path has an unexpected value")
+        fail("Канонический путь к входным данным OpenTofu имеет неожиданное значение")
     if SETTINGS.default_project_branch != "main":
-        fail("The default project branch must be main")
+        fail("Веткой проекта по умолчанию должна быть main")
     if PACKER_VERSION != SETTINGS.packer_version:
-        fail("setup does not use the Packer version from shared settings")
+        fail("setup не использует версию Packer из общих настроек")
     if PVE_API_ENV != PATHS.pve_api_env:
-        fail("setup does not use the PVE credential path from shared settings")
+        fail("setup не использует путь к учётным данным PVE из общих настроек")
 
     compose = Setup.compose("ps")
     if compose[:2] != ["docker", "compose"] or compose[-1] != "ps":
-        fail(f"Unexpected Docker Compose command: {compose!r}")
+        fail(f"Неожиданная команда Docker Compose: {compose!r}")
     if not issubclass(Setup, HostSetup) or not issubclass(Setup, RuntimeSetup):
-        fail("Setup does not combine the host and runtime setup stages")
+        fail("Setup не объединяет этапы подготовки хоста и среды выполнения")
 
-    print("infra-manager setup checks passed.")
+    print("Проверки настройки infra-manager пройдены.")
 
 
 if __name__ == "__main__":
