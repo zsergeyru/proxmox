@@ -100,18 +100,11 @@ if [[ -n "$pve_guest" ]]; then
     pve_name="$(jq -r '.name // empty' <<<"$pve_guest")"
 
     [[ "$pve_type" == "qemu" && "$pve_name" == "ai-control" ]] || {
-        die "VMID 410 уже занят объектом '$pve_name' типа '$pve_type'; автоматический импорт запрещён"
+        die "VMID 410 уже занят объектом '$pve_name' типа '$pve_type'; автоматическое управление запрещено"
     }
 
     if ((state_present == 0)); then
-        info "Восстановление OpenTofu state для существующей VM 410"
-        tofu -chdir="$OPENTOFU_DIR" import \
-            -input=false \
-            -no-color \
-            "$TARGET_RESOURCE" \
-            "pve/410"
-        state_present=1
-        ok "Существующая VM 410 принята в OpenTofu state"
+        die "VM 410 существует в PVE, но отсутствует в OpenTofu state; автоматический импорт клонированной VM запрещён"
     fi
 elif ((state_present == 1)); then
     die "VM 410 есть в OpenTofu state, но отсутствует в PVE"
