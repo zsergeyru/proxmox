@@ -69,6 +69,67 @@ AUTH_HEADER="Authorization: PVEAPIToken=${PVE_TOKEN_ID}=${PVE_TOKEN_SECRET}"
 [[ -n "$PVE_TOKEN_ID" && -n "$PVE_TOKEN_SECRET" && "$PVE_TOKEN_ID" != "$PVE_TOKEN_SECRET" ]] \
     || die "TF_VAR_pve_api_token имеет неверный формат"
 
+api() {
+    local method=$1 endpoint=$2
+    shift 2
+
+    local response_file http_code
+    response_file="$(mktemp)"
+    http_code="$(curl -sS \
+        --connect-timeout 5 \
+        --max-time 120 \
+        --cacert "$CA_BUNDLE" \
+        -H "$AUTH_HEADER" \
+        -X "$method" \
+        -o "$response_file" \
+        -w '%{http_code}' \
+        "$@" \
+        "${PVE_API}${endpoint}")" || {
+        rm -f "$response_file"
+        printf 'ОШИБКА: PVE API %s %s: ошибка соединения\n' "$method" "$endpoint" >&2
+        return 1
+    }
+
+    if [[ ! "$http_code" =~ ^2[0-9][0-9]$ ]]; then
+        printf 'ОШИБКА: PVE API %s %s вернул HTTP %s\n' "$method" "$endpoint" "$http_code" >&2
+        if jq -e . "$response_file" >/dev/null 2>&1; then
+            jq -c . "$response_file" >&2
+        else
+            cat "$response_file" >&2
+            printf '\n' >&2
+        fi
+        rm -f "$response_file"
+        return 1
+    fi
+
+    cat "$response_file"
+    rm -f "$response_file"
+}
+
+wait_task() {
+    local upid=$1 status exitstatus response
+    for _ in $(seq 1 180); do
+        response="$(api GET "/nodes/pve/tasks/${upid}/status")"
+        status="$(jq -r '.data.status // empty' <<<"$response")"
+        if [[ "$status" == "stopped" ]]; then
+            exitstatus="$(jq -r '.data.exitstatus // empty' <<<"$response")"
+            [[ "$exitstatus" == "OK" ]] || die "Задача PVE завершилась: ${exitstatus:-неизвестно}"
+            return
+        fi
+        sleep 1
+    done
+    die "Задача PVE не завершилась: $upid"
+}
+
+run_task() {
+    local method=$1 endpoint=$2 response upid
+    shift 2
+    response="$(api "$method" "$endpoint" "$@")"
+    upid="$(jq -r '.data // empty' <<<"$response")"
+    [[ -n "$upid" && "$upid" != "null" ]] || die "PVE не вернул task id"
+    wait_task "$upid"
+}
+
 pve_guest_410() {
     curl -fsS \
         --connect-timeout 5 \
@@ -89,8 +150,20 @@ tofu -chdir="$OPENTOFU_DIR" init \
     -lockfile=readonly
 
 state_present=0
+state_status=""
 if tofu -chdir="$OPENTOFU_DIR" state show "$TARGET_RESOURCE" >/dev/null 2>&1; then
     state_present=1
+    state_status="$(
+        tofu -chdir="$OPENTOFU_DIR" state pull \
+          | jq -r '
+              .resources[]
+              | select(.type == "proxmox_virtual_environment_vm" and .name == "guest")
+              | .instances[]
+              | select((.index_key | tostring) == "410")
+              | .status // "ready"
+            ' \
+          | head -n1
+    )"
 fi
 
 pve_guest="$(pve_guest_410)" || die "Не удалось проверить VMID 410 через PVE API"
@@ -105,6 +178,32 @@ if [[ -n "$pve_guest" ]]; then
 
     if ((state_present == 0)); then
         die "VM 410 существует в PVE, но отсутствует в OpenTofu state; автоматический импорт клонированной VM запрещён"
+    fi
+
+    if [[ "$state_status" == "tainted" ]]; then
+        info "Удаление незавершённой VM 410 после неудачного первого применения"
+
+        pve_state="$(api GET "/nodes/pve/qemu/410/status/current" | jq -r '.data.status // empty')"
+        if [[ "$pve_state" == "running" ]]; then
+            run_task POST "/nodes/pve/qemu/410/status/stop"
+        fi
+
+        api PUT "/nodes/pve/qemu/410/config" \
+            --data-urlencode "protection=0" >/dev/null
+
+        run_task DELETE "/nodes/pve/qemu/410" \
+            --get \
+            --data-urlencode "purge=1"
+
+        pve_guest="$(pve_guest_410)" || die "Не удалось проверить удаление VMID 410"
+        [[ -z "$pve_guest" ]] || die "Незавершённую VM 410 не удалось удалить"
+
+        tofu -chdir="$OPENTOFU_DIR" state rm "$TARGET_RESOURCE"
+        ssh-keygen -R "$guest_ip" -f "$KNOWN_HOSTS" >/dev/null 2>&1 || true
+
+        state_present=0
+        state_status=""
+        ok "Незавершённая VM 410 удалена; OpenTofu state очищен"
     fi
 elif ((state_present == 1)); then
     die "VM 410 есть в OpenTofu state, но отсутствует в PVE"
