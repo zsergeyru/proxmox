@@ -15,46 +15,59 @@ class InfraManagerError(RuntimeError):
     """Ожидаемая ошибка infra-manager с сообщением для пользователя."""
 
 
-_SENSITIVE_ARG_MARKERS = ("password", "token", "secret")
+_SENSITIVE_OPTIONS = {"--token", "--password", "--secret"}
+_SENSITIVE_PACKER_VARS = {"proxmox_token", "build_password"}
 
 
-def _redact_argv(argv: Sequence[str]) -> tuple[str, ...]:
-    """Скрыть чувствительные значения в представлении командной строки."""
-    redacted: list[str] = []
-    hide_next = False
+def _redact_argv(
+    argv: Sequence[str],
+    sensitive_indices: Sequence[int] = (),
+) -> tuple[str, ...]:
+    """Скрыть только явно известные чувствительные аргументы."""
+    redacted = list(argv)
+    explicit = set(sensitive_indices)
 
-    for arg in argv:
-        if hide_next:
-            redacted.append("[СКРЫТО]")
-            hide_next = False
+    for index, arg in enumerate(argv):
+        if index in explicit:
+            redacted[index] = "[СКРЫТО]"
             continue
 
-        if "=" in arg:
-            name, _value = arg.split("=", 1)
-            if any(marker in name.lower() for marker in _SENSITIVE_ARG_MARKERS):
-                redacted.append(f"{name}=[СКРЫТО]")
-                continue
-
-        if any(marker in arg.lower() for marker in _SENSITIVE_ARG_MARKERS):
-            redacted.append(arg)
-            hide_next = True
+        if arg in _SENSITIVE_OPTIONS:
+            if index + 1 < len(redacted):
+                redacted[index + 1] = "[СКРЫТО]"
             continue
 
-        redacted.append(arg)
+        for option in _SENSITIVE_OPTIONS:
+            prefix = f"{option}="
+            if arg.startswith(prefix):
+                redacted[index] = f"{option}=[СКРЫТО]"
+                break
+        else:
+            if arg.startswith("-var="):
+                assignment = arg[len("-var="):]
+                if "=" in assignment:
+                    name, _value = assignment.split("=", 1)
+                    if name in _SENSITIVE_PACKER_VARS:
+                        redacted[index] = f"-var={name}=[СКРЫТО]"
 
     return tuple(redacted)
 
 
 class CommandError(InfraManagerError):
-    """Внешняя команда завершилась с ошибкой."""
+    """Внешняя команда завершилась с ошибкой.
+
+    Аргументы команды редактируются по известным правилам. stderr сохраняется
+    как диагностический вывод и не считается автоматически очищенным от секретов.
+    """
 
     def __init__(
         self,
         argv: Sequence[str],
         returncode: int,
         stderr: str | None = None,
+        sensitive_indices: Sequence[int] = (),
     ) -> None:
-        self.argv = _redact_argv(argv)
+        self.argv = _redact_argv(argv, sensitive_indices)
         self.returncode = returncode
         self.stderr = stderr
 
@@ -138,6 +151,7 @@ def run(
     capture_output: bool = False,
     cwd: Path | None = None,
     env: Mapping[str, str] | None = None,
+    sensitive_indices: Sequence[int] = (),
 ) -> subprocess.CompletedProcess[str]:
     """Запустить внешнюю команду без shell-интерпретации аргументов."""
 
@@ -154,6 +168,11 @@ def run(
     )
 
     if check and result.returncode != 0:
-        raise CommandError(argv, result.returncode, result.stderr)
+        raise CommandError(
+            argv,
+            result.returncode,
+            result.stderr,
+            sensitive_indices,
+        )
 
     return result
