@@ -6,6 +6,7 @@ REPO_ROOT="$(cd -- "$SCRIPT_DIR/../../.." && pwd)"
 OPENTOFU_DIR="$REPO_ROOT/automation/opentofu"
 STATE_DIR="/var/lib/infra-manager/opentofu"
 GUEST_STATE_FILE="$STATE_DIR/guests.json"
+CA_BUNDLE="/etc/infra-manager/ca/ca-bundle.crt"
 PLAN_FILE="$STATE_DIR/410.tfplan"
 ANSIBLE_PRIVATE_KEY="/etc/infra-manager/ansible/guest_ed25519"
 KNOWN_HOSTS="/var/lib/semaphore/guest-known-hosts"
@@ -31,11 +32,16 @@ done
 [[ -n "${TF_VAR_ansible_ssh_public_key:-}" ]] || die "Не задан TF_VAR_ansible_ssh_public_key"
 [[ -r "$ANSIBLE_PRIVATE_KEY" ]] || die "Не найден закрытый ключ Ansible"
 [[ -f "$PLAYBOOK" ]] || die "Не найден playbook $PLAYBOOK"
+[[ -s "$CA_BUNDLE" ]] || die "Не найден CA bundle: $CA_BUNDLE"
 
 install -d -m 0750 "$STATE_DIR"
 touch "$KNOWN_HOSTS"
 chmod 0600 "$KNOWN_HOSTS"
 umask 077
+
+# OpenTofu provider использует системный TLS стек Go.
+# Передаём ему подготовленный bundle с PVE CA, не отключая проверку сертификата.
+export SSL_CERT_FILE="$CA_BUNDLE"
 
 info "Проверка проекта"
 python3 "$REPO_ROOT/scripts/validate_repo.py"
