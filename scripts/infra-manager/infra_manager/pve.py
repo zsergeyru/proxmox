@@ -299,7 +299,8 @@ class PveClient:
         matches = [
             item
             for item in resources
-            if isinstance(item, dict) and item.get("vmid") == vmid
+            if isinstance(item, dict)
+            and str(item.get("vmid", "")) == str(vmid)
         ]
         if len(matches) > 1:
             raise InfraManagerError(
