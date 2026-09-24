@@ -5,9 +5,11 @@ from __future__ import annotations
 
 import contextlib
 import io
+import os
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parents[2]
 MODULE_ROOT = ROOT / "scripts" / "infra-manager"
@@ -27,10 +29,15 @@ from infra_manager.pve import (  # noqa: E402
     select_management_ipv4,
 )
 from infra_manager.template import (  # noqa: E402
+    _packer_inputs,
     _template_failures,
     _validate_cloud_status,
 )
-from infra_manager.semaphore import SemaphoreClient  # noqa: E402
+from infra_manager.semaphore import PROJECT_REPO, SemaphoreClient  # noqa: E402
+from infra_manager.status import (  # noqa: E402
+    _check_git_branch_contract,
+    _project_branch,
+)
 from infra_manager.setup import BASE_PACKAGES, Setup  # noqa: E402
 
 
@@ -102,6 +109,93 @@ def main_test() -> None:
     )
     if explicit != ("tool", "--api-key", "[СКРЫТО]", "next"):
         fail(f"sensitive_indices обработан неверно: {explicit!r}")
+
+    packer_client = SimpleNamespace(
+        url="https://pve.example:8006",
+        token_id="root@pam!infra-manager",
+        token_secret="pve-secret",
+    )
+    packer_env, packer_args = _packer_inputs(
+        {"BASE": "1"},
+        client=packer_client,
+        node="pve",
+        iso_url="https://example.invalid/debian.iso",
+        iso_checksum="sha512:deadbeef",
+        build_password="build-secret",
+    )
+    if packer_env.get("PKR_VAR_proxmox_token") != "pve-secret":
+        fail("Packer API token не передан через PKR_VAR_proxmox_token")
+    if packer_env.get("PKR_VAR_build_password") != "build-secret":
+        fail("Packer build password не передан через PKR_VAR_build_password")
+    joined_packer_args = " ".join(packer_args)
+    if "pve-secret" in joined_packer_args or "build-secret" in joined_packer_args:
+        fail("Секрет Packer попал в аргументы командной строки")
+    if any(
+        arg.startswith("-var=proxmox_token=")
+        or arg.startswith("-var=build_password=")
+        for arg in packer_args
+    ):
+        fail("Секретные переменные Packer всё ещё передаются через -var")
+
+    previous_branch = os.environ.get("INFRA_PROJECT_BRANCH")
+    try:
+        os.environ["INFRA_PROJECT_BRANCH"] = "feature/test-branch"
+        if _project_branch() != "feature/test-branch":
+            fail("status не учитывает INFRA_PROJECT_BRANCH")
+    finally:
+        if previous_branch is None:
+            os.environ.pop("INFRA_PROJECT_BRANCH", None)
+        else:
+            os.environ["INFRA_PROJECT_BRANCH"] = previous_branch
+
+    branch = "feature/test-branch"
+    repository = {
+        "git_url": PROJECT_REPO,
+        "ssh_key_id": 7,
+        "git_branch": branch,
+    }
+    templates = [
+        {"name": "OpenTofu Plan", "git_branch": branch},
+        {"name": "Build Template 9000", "git_branch": branch},
+        {"name": "Deploy Guest 410", "git_branch": branch},
+    ]
+    _check_git_branch_contract(
+        repository,
+        ["main", branch],
+        templates,
+        github_key_id=7,
+        project_branch=branch,
+    )
+
+    wrong_repository = dict(repository)
+    wrong_repository["git_branch"] = "main"
+    try:
+        _check_git_branch_contract(
+            wrong_repository,
+            ["main", branch],
+            templates,
+            github_key_id=7,
+            project_branch=branch,
+        )
+    except InfraManagerError:
+        pass
+    else:
+        fail("status принял repository.git_branch другой ветки")
+
+    wrong_templates = [dict(item) for item in templates]
+    wrong_templates[1]["git_branch"] = "main"
+    try:
+        _check_git_branch_contract(
+            repository,
+            ["main", branch],
+            wrong_templates,
+            github_key_id=7,
+            project_branch=branch,
+        )
+    except InfraManagerError:
+        pass
+    else:
+        fail("status принял template.git_branch другой ветки")
 
     cli_help_cases = (
         ["--help"],
