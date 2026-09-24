@@ -111,13 +111,13 @@ def _init(opentofu_dir: Path, env: dict[str, str]) -> None:
     run(
         [
             "tofu",
-            f"-chdir={context.paths.opentofu_dir}",
+            f"-chdir={opentofu_dir}",
             "init",
             "-input=false",
             "-no-color",
             "-lockfile=readonly",
         ],
-        env=context.env,
+        env=env,
     )
 
 
@@ -134,7 +134,7 @@ def run_plan(repo_root: Path) -> int:
     result = run(
         [
             "tofu",
-            f"-chdir={context.paths.opentofu_dir}",
+            f"-chdir={opentofu_dir}",
             "plan",
             "-input=false",
             "-no-color",
@@ -142,7 +142,7 @@ def run_plan(repo_root: Path) -> int:
             "-detailed-exitcode",
         ],
         check=False,
-        env=context.env,
+        env=env,
     )
     if result.returncode == 0:
         console.ok("OpenTofu: изменений нет")
@@ -163,14 +163,14 @@ def _state_status(
     show = run(
         [
             "tofu",
-            f"-chdir={context.paths.opentofu_dir}",
+            f"-chdir={opentofu_dir}",
             "state",
             "show",
             target,
         ],
         check=False,
         capture_output=True,
-        env=context.env,
+        env=env,
     )
     if show.returncode != 0:
         return False, ""
@@ -178,12 +178,12 @@ def _state_status(
     pulled = run(
         [
             "tofu",
-            f"-chdir={context.paths.opentofu_dir}",
+            f"-chdir={opentofu_dir}",
             "state",
             "pull",
         ],
         capture_output=True,
-        env=context.env,
+        env=env,
     )
     try:
         state = json.loads(pulled.stdout)
@@ -301,7 +301,7 @@ def _recover_tainted_vm(context: DeploymentContext) -> None:
             "rm",
             context.target,
         ],
-        env=context.env,
+        env=env,
     )
     _remove_known_host(context.paths.known_hosts, context.address)
     console.ok(
@@ -394,7 +394,7 @@ def _apply_plan(
                 "-lock-timeout=30s",
                 str(context.paths.plan_file),
             ],
-            env=context.env,
+            env=env,
         )
     finally:
         if changed_template_protection:
@@ -533,7 +533,7 @@ def _build_deployment_context(
         template_vmid=template_vmid,
         address=address,
         target=f'proxmox_virtual_environment_vm.guest["{vmid}"]',
-        env=context.env,
+        env=env,
         paths=paths,
     )
 
@@ -592,7 +592,7 @@ def run_deploy_guest(repo_root: Path, vmid: int) -> int:
                 f"-target={context.target}",
                 f"-out={context.paths.plan_file}",
             ],
-            env=context.env,
+            env=env,
         )
 
         shown = run(
@@ -604,7 +604,7 @@ def run_deploy_guest(repo_root: Path, vmid: int) -> int:
                 str(context.paths.plan_file),
             ],
             capture_output=True,
-            env=context.env,
+            env=env,
         )
         try:
             plan = json.loads(shown.stdout)
@@ -649,7 +649,7 @@ def run_deploy_guest(repo_root: Path, vmid: int) -> int:
                 "-no-color",
                 str(context.paths.plan_file),
             ],
-            env=context.env,
+            env=env,
         )
 
         if not actions or actions == ["no-op"]:
