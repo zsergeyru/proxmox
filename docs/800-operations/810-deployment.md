@@ -105,7 +105,8 @@ Ansible SSH credential не создаётся заранее. Он появит
 
 ```text
 Semaphore: Build Template 9000
-→ scripts/infra-manager/jobs/build-template.sh 9000
+→ Python: scripts/infra-manager/jobs/build-template.py 9000
+→ infra_manager.template
 → Packer
 → tpl-debian13 (9000, Template-Version 8)
 → короткая проверка Full Clone через 9099
