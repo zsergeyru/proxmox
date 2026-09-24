@@ -14,10 +14,11 @@ from pathlib import Path
 from typing import Any
 
 from .common import InfraManagerError, console
+from .settings import PATHS, SETTINGS
 
-PVE_ENV = Path("/etc/infra-manager/secrets/pve-api.env")
-CA_BUNDLE = Path("/etc/infra-manager/ca/ca-bundle.crt")
-MANAGED_POOL = "managed"
+PVE_ENV = PATHS.pve_api_env
+CA_BUNDLE = PATHS.ca_bundle
+MANAGED_POOL = SETTINGS.managed_pool
 
 VM_ADMIN_PRIVS = {
     "VM.Allocate",
