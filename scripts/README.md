@@ -73,7 +73,7 @@ python3 -m infra_manager setup
 
 Основная настройка 910 запускается через `infra_manager/setup.py`.
 
-`pve-bootstrap-access.sh` выполняется публичным bootstrap на физическом PVE. Он подготавливает PVE CA, ключ доступа API `root@pam!infra-manager`, ACL и безопасную передачу учётных данных в 910.
+`pve-bootstrap-access.sh` выполняется публичным начальным скриптом на физическом PVE. Он подготавливает PVE CA, ключ доступа API `root@pam!infra-manager`, ACL и безопасную передачу учётных данных в 910.
 
 ### Python-пакет `infra_manager/`
 
