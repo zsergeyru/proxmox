@@ -18,6 +18,8 @@ from .semaphore import (
 
 PVE_ENV = Path("/etc/infra-manager/secrets/pve-api.env")
 CA_BUNDLE = Path("/etc/infra-manager/ca/ca-bundle.crt")
+ANSIBLE_PRIVATE_KEY = Path("/etc/infra-manager/ansible/guest_ed25519")
+ANSIBLE_PUBLIC_KEY = Path("/etc/infra-manager/ansible/guest_ed25519.pub")
 SERVER_ENV = Path("/etc/infra-manager/secrets/semaphore-server.env")
 GITHUB_KEY_COPY = Path(
     "/etc/infra-manager/secrets/github_project_ed25519"
@@ -90,6 +92,8 @@ def check_status(*, full: bool = False) -> int:
         PROJECT_ID_FILE,
         OPENTOFU_INPUT,
         CA_BUNDLE,
+        ANSIBLE_PRIVATE_KEY,
+        ANSIBLE_PUBLIC_KEY,
     ):
         required_file(path)
 
@@ -219,6 +223,30 @@ def check_status(*, full: bool = False) -> int:
     ):
         raise InfraManagerError(
             "В Semaphore отсутствует шаблон OpenTofu Plan"
+        )
+
+    if not any(
+        isinstance(item, dict)
+        and item.get("name") == "Deploy Guest 410"
+        and item.get("app") == "bash"
+        for item in templates
+    ):
+        raise InfraManagerError(
+            "В Semaphore отсутствует шаблон Deploy Guest 410"
+        )
+
+    if run_quiet(
+        [
+            "docker",
+            "exec",
+            "infra-runtime",
+            "test",
+            "-r",
+            str(ANSIBLE_PRIVATE_KEY),
+        ]
+    ).returncode:
+        raise InfraManagerError(
+            "Закрытый ключ Ansible недоступен внутри infra-runtime"
         )
 
     checks = (
