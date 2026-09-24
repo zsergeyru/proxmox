@@ -17,52 +17,62 @@ def is_truthy(value: Any) -> bool:
     return value in (1, True, "1", "true")
 
 
-def _template_failures(config: dict[str, Any]) -> list[str]:
-    """Вернуть нарушения базового контракта шаблона."""
-
-    failures: list[str] = []
-
-    if not is_truthy(config.get("template", 0)):
-        failures.append(f"template={config.get('template', '<отсутствует>')}")
-    if config.get("name") != "tpl-debian13":
-        failures.append(f"name={config.get('name', '<отсутствует>')}")
-    if f"template-version={TEMPLATE_VERSION}" not in str(
-        config.get("description") or ""
-    ):
-        failures.append(
-            f"description={config.get('description', '<отсутствует>')}"
-        )
-    if not is_truthy(config.get("protection", 0)):
-        failures.append(
-            f"protection={config.get('protection', '<отсутствует>')}"
-        )
-    if config.get("scsihw") != "virtio-scsi-single":
-        failures.append(
-            f"scsihw={config.get('scsihw', '<отсутствует>')}"
-        )
-
+def _agent_enabled(config: dict[str, Any]) -> bool:
     agent = str(config.get("agent") or "")
-    if not (
+    return (
         agent == "1"
         or agent.startswith("1,")
-        or re.search(r"(^|,)enabled=1($|,)", agent)
-    ):
-        failures.append(f"agent={agent or '<отсутствует>'}")
+        or re.search(r"(^|,)enabled=1($|,)", agent) is not None
+    )
 
-    if "cloudinit" not in str(config.get("ide0") or ""):
-        failures.append("ide0=<cloudinit отсутствует>")
-    if config.get("ciuser") != "root":
-        failures.append(
-            f"ciuser={config.get('ciuser', '<отсутствует>')}"
-        )
-    if "ip=dhcp" not in str(config.get("ipconfig0") or ""):
-        failures.append(
-            f"ipconfig0={config.get('ipconfig0', '<отсутствует>')}"
-        )
-    if str(config.get("ciupgrade", 0)).lower() not in {"0", "false"}:
-        failures.append(f"ciupgrade={config.get('ciupgrade')}")
 
-    return failures
+def _template_failures(config: dict[str, Any]) -> list[str]:
+    """Вернуть нарушения базового контракта шаблона."""
+    description = str(config.get("description") or "")
+    agent = str(config.get("agent") or "")
+    checks = (
+        (
+            is_truthy(config.get("template", 0)),
+            f"template={config.get('template', '<отсутствует>')}",
+        ),
+        (
+            config.get("name") == "tpl-debian13",
+            f"name={config.get('name', '<отсутствует>')}",
+        ),
+        (
+            f"template-version={TEMPLATE_VERSION}" in description,
+            f"description={config.get('description', '<отсутствует>')}",
+        ),
+        (
+            is_truthy(config.get("protection", 0)),
+            f"protection={config.get('protection', '<отсутствует>')}",
+        ),
+        (
+            config.get("scsihw") == "virtio-scsi-single",
+            f"scsihw={config.get('scsihw', '<отсутствует>')}",
+        ),
+        (
+            _agent_enabled(config),
+            f"agent={agent or '<отсутствует>'}",
+        ),
+        (
+            "cloudinit" in str(config.get("ide0") or ""),
+            "ide0=<cloudinit отсутствует>",
+        ),
+        (
+            config.get("ciuser") == "root",
+            f"ciuser={config.get('ciuser', '<отсутствует>')}",
+        ),
+        (
+            "ip=dhcp" in str(config.get("ipconfig0") or ""),
+            f"ipconfig0={config.get('ipconfig0', '<отсутствует>')}",
+        ),
+        (
+            str(config.get("ciupgrade", 0)).lower() in {"0", "false"},
+            f"ciupgrade={config.get('ciupgrade')}",
+        ),
+    )
+    return [message for passed, message in checks if not passed]
 
 
 def verify_template_contract(
