@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Unit and contract checks for infra-manager template operations."""
+"""Модульные и контрактные проверки операций с шаблонами infra-manager."""
 
 from __future__ import annotations
 
@@ -35,18 +35,18 @@ def main_test() -> None:
         build_password="build-secret",
     )
     if packer_env.get("PKR_VAR_proxmox_token") != "pve-secret":
-        fail("Packer API token was not passed through PKR_VAR_proxmox_token")
+        fail("Токен API Packer не передан через PKR_VAR_proxmox_token")
     if packer_env.get("PKR_VAR_build_password") != "build-secret":
-        fail("Packer build password was not passed through PKR_VAR_build_password")
+        fail("Пароль сборки Packer не передан через PKR_VAR_build_password")
     joined_packer_args = " ".join(packer_args)
     if "pve-secret" in joined_packer_args or "build-secret" in joined_packer_args:
-        fail("A Packer secret leaked into command-line arguments")
+        fail("Секрет Packer попал в аргументы командной строки")
     if any(
         arg.startswith("-var=proxmox_token=")
         or arg.startswith("-var=build_password=")
         for arg in packer_args
     ):
-        fail("Secret Packer variables are still passed via -var")
+        fail("Секретные переменные Packer всё ещё передаются через -var")
 
     valid_template = {
         "template": 1,
@@ -61,19 +61,19 @@ def main_test() -> None:
         "ciupgrade": 0,
     }
     if _template_failures(valid_template):
-        fail("A valid template 9000 did not pass Python validation")
+        fail("Корректный шаблон 9000 не прошёл проверку Python")
 
     invalid_template = dict(valid_template)
     invalid_template["ide0"] = ""
     if "ide0=<cloudinit отсутствует>" not in _template_failures(invalid_template):
-        fail("Template validation did not detect missing Cloud-Init")
+        fail("Проверка шаблона не обнаружила отсутствие Cloud-Init")
 
     _validate_cloud_status(
         '{"status":"done","init":{},"init-local":{},'
         '"modules-config":{},"modules-final":{}}'
     )
 
-    print("infra-manager template checks passed.")
+    print("Проверки шаблона infra-manager пройдены.")
 
 
 if __name__ == "__main__":
