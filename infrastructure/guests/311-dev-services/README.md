@@ -193,6 +193,6 @@ user
 
 Homarr и пользовательские приложения относятся к `321-app-services`.
 
-Hermes, другие AI agents и MCP — к `301-ai-control`. Общие STT/TTS — к `331-ai-services`.
+Hermes, другие AI agents и MCP — к `301-ai-control`. Общие STT/TTS — к `420-ai-services`.
 
 Compose files, config и локальный code `311-dev-services` после появления реальной установки хранятся под его `rootfs/`; фиктивные Compose-файлы заранее не создаются.
