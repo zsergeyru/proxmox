@@ -46,9 +46,13 @@ scripts/
 │       └── verify-template.py                # Проверяет шаблон 9000 через временную полную копию 9099
 │
 └── tests/                                    # Локальные и автоматические проверки без постоянных изменений инфраструктуры
+    ├── test-guest-deploy.py                  # Проверяет планирование и безопасное применение изменений гостевой системы
     ├── test-guest-resolver.py                # Проверяет сборщик конфигурации, управление, начальную настройку и возможности профиля
-    ├── test-infra-manager-python.py          # Проверяет командный интерфейс Python-программы и базовые функции infra-manager
+    ├── test-infra-manager-python.py          # Проверяет общий фундамент Python-пакета, CLI и PVE-вспомогательные функции
     ├── test-opentofu-input.py                # Проверяет состав guests.json и исключение специальных объектов
+    ├── test-setup.py                         # Проверяет единые настройки и композицию этапов установки
+    ├── test-status.py                        # Проверяет снимок и контракты состояния Semaphore
+    ├── test-template.py                      # Проверяет параметры и валидацию шаблона Packer
     └── test-infra-manager-contract.sh        # Проверяет согласованность 910, Semaphore, PVE, OpenTofu и Packer
 ```
 
@@ -174,8 +178,12 @@ python scripts/validate_repo.py
 Все repo-level и contract-тесты собраны в одном каталоге.
 
 - `test-guest-resolver.py` проверяет resolver и Bootstrap-возможности гостей.
+- `test-guest-deploy.py` проверяет планирование, сверку состояния и безопасное применение изменений гостя.
 - `test-opentofu-input.py` проверяет состав входа OpenTofu и исключение 910.
-- `test-infra-manager-python.py` проверяет Python CLI и основные вспомогательные функции infra-manager.
+- `test-infra-manager-python.py` проверяет общий фундамент Python-пакета, CLI и PVE-вспомогательные функции.
+- `test-setup.py` проверяет общие пути, версии и композицию этапов установки.
+- `test-status.py` проверяет чтение и валидацию состояния Semaphore.
+- `test-template.py` проверяет безопасную передачу параметров Packer и валидацию шаблона.
 - `test-infra-manager-contract.sh` проверяет согласованность кода 910, Compose, PVE access, Semaphore, OpenTofu и Packer.
 
 ## Правило размещения нового кода
