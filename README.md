@@ -163,7 +163,10 @@ git@github.com:zsergeyru/proxmox.git
 ~~~text
 scripts/infra-manager/pve-bootstrap-access.sh
 scripts/infra-manager/setup.sh
-scripts/infra-manager/jobs/opentofu-plan.sh
+scripts/infra-manager/jobs/opentofu-plan.py
+scripts/infra-manager/jobs/deploy-guest.py
+scripts/infra-manager/jobs/build-template.py
+scripts/infra-manager/jobs/verify-template.py
 scripts/guests/render-opentofu-input.py
 scripts/infra-manager/commands/status.sh
 scripts/infra-manager/commands/pve-access-check.sh
@@ -231,9 +234,10 @@ Git repository proxmox
 OpenTofu PVE Variable Group
 OpenTofu Plan
 Build Template 9000
+Deploy Guest 410
 ~~~
 
-Ansible credential заранее не создаётся. Он добавляется только вместе с первой реальной Ansible-задачей.
+Инфраструктурные задания Semaphore выполняются как Python-сценарии. Постоянная SSH-идентичность Ansible создаётся внутри 910 и используется для настройки управляемых Linux-гостей.
 
 ## Служебные команды 910
 
