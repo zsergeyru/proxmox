@@ -39,6 +39,7 @@ from infra_manager.status import (  # noqa: E402
     _project_branch,
 )
 from infra_manager.setup import BASE_PACKAGES, Setup  # noqa: E402
+from infra_manager.settings import PATHS, SETTINGS  # noqa: E402
 
 
 def fail(message: str) -> None:
@@ -227,6 +228,17 @@ def main_test() -> None:
         fail("python3 отсутствует в контракте setup")
     if "python3-yaml" not in BASE_PACKAGES:
         fail("python3-yaml отсутствует в контракте setup")
+
+    if PATHS.pve_api_env != Path("/etc/infra-manager/secrets/pve-api.env"):
+        fail("Единый путь PVE credential имеет неожиданное значение")
+    if PATHS.ca_bundle != Path("/etc/infra-manager/ca/ca-bundle.crt"):
+        fail("Единый путь CA bundle имеет неожиданное значение")
+    if PATHS.opentofu_input != Path("/var/lib/infra-manager/opentofu/guests.json"):
+        fail("Единый путь OpenTofu input имеет неожиданное значение")
+    if SETTINGS.default_project_branch != "main":
+        fail("Ветка проекта по умолчанию должна быть main")
+    if SETTINGS.packer_version != "1.15.4":
+        fail("Версия Packer в единых настройках изменилась неожиданно")
 
     compose = Setup.compose("ps")
     if compose[:2] != ["docker", "compose"] or compose[-1] != "ps":
