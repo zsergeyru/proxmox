@@ -472,6 +472,9 @@ def run_deploy_guest(repo_root: Path, vmid: int) -> int:
     ):
         require_command(command)
 
+    console.info("Проверка проекта")
+    run([sys.executable, str(repo_root / "scripts" / "validate_repo.py")])
+
     opentofu_dir, payload = _prepare_input(repo_root)
     env = _opentofu_env()
     guests = payload["guests"]
@@ -531,9 +534,6 @@ def run_deploy_guest(repo_root: Path, vmid: int) -> int:
     known_hosts = Path("/var/lib/semaphore/guest-known-hosts")
     plan_file = STATE_DIR / f"{vmid}.tfplan"
     target = f'proxmox_virtual_environment_vm.guest["{vmid}"]'
-
-    console.info("Проверка проекта")
-    run([sys.executable, str(repo_root / "scripts" / "validate_repo.py")])
 
     console.info("Инициализация OpenTofu")
     _init(opentofu_dir, env)
