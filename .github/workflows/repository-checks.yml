@@ -31,8 +31,8 @@ jobs:
       - name: Validate repository
         run: python scripts/validate_repo.py
 
-      - name: Check undefined Python names
-        run: ruff check --select F821 scripts
+      - name: Check Python with Ruff
+        run: ruff check scripts
 
       - name: Compile Python tooling
         run: python -m compileall -q scripts
