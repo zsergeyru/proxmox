@@ -3,15 +3,10 @@ vmid: 311
 name: dev-services
 profile: debian-lxc-docker
 
-description: Ansible, Semaphore, Git, CI and development services
-
-management:
-  - ssh_identity
-  - project_repo_read
+description: Службы хранения исходного кода, сборки и разработки
 
 resources:
   cores: 2
   memory_mb: 4096
   swap_mb: 1024
   disk_size_gb: 32
-

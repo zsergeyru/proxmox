@@ -8,7 +8,6 @@ system:
 
   required_packages:
     - git
-    - ansible-core
 
 docker:
   required: true
