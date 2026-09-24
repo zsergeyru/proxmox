@@ -9,6 +9,7 @@ import shutil
 import ssl
 import urllib.error
 import urllib.request
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +28,35 @@ GITHUB_KEY = PATHS.github_key
 GITHUB_KEY_COPY = PATHS.github_key_copy
 ANSIBLE_PUBLIC_KEY = PATHS.ansible_public_key
 PROJECT_REPO = SETTINGS.project_repo
+
+
+@dataclass(frozen=True)
+class TemplateSpec:
+    """Декларативное описание задания Semaphore."""
+
+    name: str
+    playbook: str
+    arguments: str
+    app: str = "python"
+
+
+SEMAPHORE_TEMPLATES = (
+    TemplateSpec(
+        name="OpenTofu Plan",
+        playbook="scripts/infra-manager/jobs/opentofu-plan.py",
+        arguments="[]",
+    ),
+    TemplateSpec(
+        name="Build Template 9000",
+        playbook="scripts/infra-manager/jobs/build-template.py",
+        arguments='["9000"]',
+    ),
+    TemplateSpec(
+        name="Deploy Guest 410",
+        playbook="scripts/infra-manager/jobs/deploy-guest.py",
+        arguments='["410"]',
+    ),
+)
 
 
 def nonempty(path: Path) -> bool:
@@ -587,37 +617,17 @@ def configure_project(branch: str | None = None) -> int:
         branch,
     )
     environment_id = client.ensure_opentofu_environment(project_id)
-    client.ensure_template(
-        project_id,
-        repository_id,
-        environment_id,
-        name="OpenTofu Plan",
-        playbook="scripts/infra-manager/jobs/opentofu-plan.py",
-        branch=branch,
-        arguments="[]",
-        app="python",
-    )
-    client.ensure_template(
-        project_id,
-        repository_id,
-        environment_id,
-        name="Build Template 9000",
-        playbook="scripts/infra-manager/jobs/build-template.py",
-        branch=branch,
-        arguments='["9000"]',
-        app="python",
-    )
-
-    client.ensure_template(
-        project_id,
-        repository_id,
-        environment_id,
-        name="Deploy Guest 410",
-        playbook="scripts/infra-manager/jobs/deploy-guest.py",
-        branch=branch,
-        arguments='["410"]',
-        app="python",
-    )
+    for template in SEMAPHORE_TEMPLATES:
+        client.ensure_template(
+            project_id,
+            repository_id,
+            environment_id,
+            name=template.name,
+            playbook=template.playbook,
+            branch=branch,
+            arguments=template.arguments,
+            app=template.app,
+        )
 
     console.ok(
         "Проект Semaphore, Git repository, PVE Variable Group "
