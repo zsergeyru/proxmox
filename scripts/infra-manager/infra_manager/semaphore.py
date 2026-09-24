@@ -6,7 +6,6 @@ import http.cookiejar
 import json
 import os
 import shutil
-import ssl
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -71,6 +70,45 @@ def read_env_file(path: Path) -> dict[str, str]:
         key, value = line.split("=", 1)
         result[key] = value
     return result
+
+
+def find_unique_by_name(
+    items: Any,
+    name: str,
+    kind: str,
+) -> dict[str, Any] | None:
+    """Найти единственный именованный объект или вернуть None."""
+
+    if not isinstance(items, list):
+        raise InfraManagerError(
+            f"Не удалось проверить объекты Semaphore: {kind}"
+        )
+    matches = [
+        item
+        for item in items
+        if isinstance(item, dict) and item.get("name") == name
+    ]
+    if len(matches) > 1:
+        raise InfraManagerError(
+            f"В Semaphore найдено несколько объектов {kind} "
+            f"с именем '{name}'"
+        )
+    return matches[0] if matches else None
+
+
+def require_unique_by_name(
+    items: Any,
+    name: str,
+    kind: str,
+) -> dict[str, Any]:
+    """Вернуть единственный именованный объект или сообщить об отсутствии."""
+
+    item = find_unique_by_name(items, name, kind)
+    if item is None:
+        raise InfraManagerError(
+            f"В Semaphore отсутствует {kind} '{name}'"
+        )
+    return item
 
 
 class SemaphoreClient:
@@ -231,30 +269,8 @@ class SemaphoreClient:
         self.auth_mode = "token"
         self.get("/user/", auth="token")
 
-    @staticmethod
-    def unique_by_name(
-        items: Any,
-        name: str,
-        kind: str,
-    ) -> dict[str, Any] | None:
-        if not isinstance(items, list):
-            raise InfraManagerError(
-                f"Не удалось проверить объекты Semaphore: {kind}"
-            )
-        matches = [
-            item
-            for item in items
-            if isinstance(item, dict) and item.get("name") == name
-        ]
-        if len(matches) > 1:
-            raise InfraManagerError(
-                f"В Semaphore найдено несколько объектов {kind} "
-                f"с именем '{name}'"
-            )
-        return matches[0] if matches else None
-
     def ensure_project(self) -> int:
-        existing = self.unique_by_name(
+        existing = find_unique_by_name(
             self.get("/projects"),
             PROJECT_NAME,
             "project",
@@ -293,7 +309,7 @@ class SemaphoreClient:
         keys = self.get(
             f"/project/{project_id}/keys?sort=name&order=asc"
         )
-        existing = self.unique_by_name(keys, name, "SSH key")
+        existing = find_unique_by_name(keys, name, "SSH key")
         private_key = private_key_file.read_text(encoding="utf-8")
 
         if existing is None:
@@ -352,7 +368,7 @@ class SemaphoreClient:
         repositories = self.get(
             f"/project/{project_id}/repositories?sort=name&order=asc"
         )
-        existing = self.unique_by_name(
+        existing = find_unique_by_name(
             repositories,
             "proxmox",
             "Git repository",
@@ -409,7 +425,7 @@ class SemaphoreClient:
         environments = self.get(
             f"/project/{project_id}/environment?sort=name&order=asc"
         )
-        existing = self.unique_by_name(
+        existing = find_unique_by_name(
             environments,
             OPENTOFU_ENV_NAME,
             "Variable Group",
@@ -530,7 +546,7 @@ class SemaphoreClient:
         templates = self.get(
             f"/project/{project_id}/templates?sort=name&order=asc"
         )
-        existing = self.unique_by_name(templates, name, "template")
+        existing = find_unique_by_name(templates, name, "template")
         payload = {
             "name": name,
             "project_id": project_id,

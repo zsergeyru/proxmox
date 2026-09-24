@@ -19,6 +19,7 @@ MODULE_ROOT = ROOT / "scripts" / "infra-manager"
 sys.path.insert(0, str(MODULE_ROOT))
 
 from infra_manager import guest_deploy as guest_deploy_module  # noqa: E402
+from infra_manager import status as status_module  # noqa: E402
 from infra_manager.cli import main  # noqa: E402
 from infra_manager.common import (  # noqa: E402
     CommandError,
@@ -46,6 +47,8 @@ from infra_manager.semaphore import (  # noqa: E402
     PROJECT_REPO,
     SEMAPHORE_TEMPLATES,
     SemaphoreClient,
+    find_unique_by_name,
+    require_unique_by_name,
 )
 from infra_manager.settings import PATHS, SETTINGS  # noqa: E402
 from infra_manager.setup import (  # noqa: E402
@@ -55,8 +58,11 @@ from infra_manager.setup import (  # noqa: E402
     Setup,
 )
 from infra_manager.status import (  # noqa: E402
+    SemaphoreSnapshot,
     _check_git_branch_contract,
     _project_branch,
+    load_semaphore_snapshot,
+    validate_semaphore_snapshot,
 )
 from infra_manager.template import (  # noqa: E402
     _packer_inputs,
@@ -507,24 +513,24 @@ def main_test() -> None:
     if compose[:2] != ["docker", "compose"] or compose[-1] != "ps":
         fail(f"Некорректная команда Docker Compose: {compose!r}")
 
-    one = SemaphoreClient.unique_by_name(
+    one = find_unique_by_name(
         [{"id": 1, "name": "proxmox"}],
         "proxmox",
         "Git repository",
     )
     if one is None or one.get("id") != 1:
-        fail("Semaphore unique_by_name не вернул единственный объект")
+        fail("find_unique_by_name не вернул единственный объект")
 
-    none = SemaphoreClient.unique_by_name(
+    none = find_unique_by_name(
         [{"id": 1, "name": "other"}],
         "proxmox",
         "Git repository",
     )
     if none is not None:
-        fail("Semaphore unique_by_name не вернул None для отсутствующего объекта")
+        fail("find_unique_by_name не вернул None для отсутствующего объекта")
 
     try:
-        SemaphoreClient.unique_by_name(
+        find_unique_by_name(
             [
                 {"id": 1, "name": "proxmox"},
                 {"id": 2, "name": "proxmox"},
@@ -535,7 +541,77 @@ def main_test() -> None:
     except InfraManagerError:
         pass
     else:
-        fail("Semaphore unique_by_name разрешил дубликаты")
+        fail("find_unique_by_name разрешил дубликаты")
+
+    try:
+        require_unique_by_name([], "proxmox", "Git repository")
+    except InfraManagerError:
+        pass
+    else:
+        fail("require_unique_by_name принял отсутствующий объект")
+
+    semaphore_snapshot = SemaphoreSnapshot(
+        project_id=1,
+        github_key={
+            "id": 7,
+            "name": "GitHub project read-only",
+            "type": "ssh",
+        },
+        repository=repository,
+        branches=("main", branch),
+        environments=(
+            {"id": 8, "name": SETTINGS.opentofu_env_name},
+        ),
+        templates=tuple(
+            {
+                "name": spec.name,
+                "git_branch": branch,
+                "app": spec.app,
+                "playbook": spec.playbook,
+                "arguments": spec.arguments,
+            }
+            for spec in SEMAPHORE_TEMPLATES
+        ),
+    )
+    validate_semaphore_snapshot(
+        semaphore_snapshot,
+        project_branch=branch,
+    )
+
+    class SnapshotClient:
+        def __init__(self) -> None:
+            self.paths: list[str] = []
+
+        def get(self, path: str):
+            self.paths.append(path)
+            if "/keys?" in path:
+                return [semaphore_snapshot.github_key]
+            if "/repositories?" in path:
+                return [{"id": 9, "name": "proxmox", **repository}]
+            if "/environment?" in path:
+                return list(semaphore_snapshot.environments)
+            if "/templates?" in path:
+                return list(semaphore_snapshot.templates)
+            raise AssertionError(f"Неожиданный Semaphore endpoint: {path}")
+
+    snapshot_client = SnapshotClient()
+    with patch.object(
+        status_module,
+        "_load_repository_branches",
+        return_value=["main", branch],
+    ):
+        loaded_snapshot = load_semaphore_snapshot(snapshot_client, 1)
+    if loaded_snapshot != SemaphoreSnapshot(
+        project_id=1,
+        github_key=semaphore_snapshot.github_key,
+        repository={"id": 9, "name": "proxmox", **repository},
+        branches=("main", branch),
+        environments=semaphore_snapshot.environments,
+        templates=semaphore_snapshot.templates,
+    ):
+        fail("load_semaphore_snapshot неверно собрал состояние проекта")
+    if len(snapshot_client.paths) != 4:
+        fail("Semaphore snapshot должен читать каждый список ровно один раз")
 
     permissions = {
         "/vms": {

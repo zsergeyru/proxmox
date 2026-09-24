@@ -377,8 +377,10 @@ grep -q '"allow_override_args_in_task": False' "$PY_SEMAPHORE" \
     || die "Semaphore tasks не должны разрешать переопределение аргументов"
 grep -q '"allow_override_branch_in_task": False' "$PY_SEMAPHORE" \
     || die "Semaphore tasks не должны разрешать переопределение Git-ветки"
-grep -q 'def unique_by_name' "$PY_SEMAPHORE" \
-    || die "Semaphore setup должен явно останавливать настройку при дубликатах"
+grep -q '^def find_unique_by_name' "$PY_SEMAPHORE" \
+    || die "Semaphore должен иметь общий поиск именованных объектов"
+grep -q '^def require_unique_by_name' "$PY_SEMAPHORE" \
+    || die "Semaphore status должен требовать единственный именованный объект"
 grep -q '{"id": repository_id, \*\*payload}' "$PY_SEMAPHORE" \
     || die "PUT Git repository должен передавать repository id в теле"
 grep -q '{"id": template_id, \*\*payload}' "$PY_SEMAPHORE" \
