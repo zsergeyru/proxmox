@@ -14,15 +14,15 @@ ROOT = Path(__file__).resolve().parents[2]
 MODULE_ROOT = ROOT / "scripts" / "infra-manager"
 sys.path.insert(0, str(MODULE_ROOT))
 
-from infra_manager.cli import main  # noqa: E402
-from infra_manager.common import (  # noqa: E402
+from infra_manager.cli import main
+from infra_manager.common import (
     CommandError,
     CommandRunner,
     InfraManagerError,
     _redact_argv,
     run,
 )
-from infra_manager.pve import (  # noqa: E402
+from infra_manager.pve import (
     PveClient,
     permission_present,
     select_management_ipv4,

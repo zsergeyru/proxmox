@@ -110,7 +110,7 @@ class PveClient:
     def from_opentofu_env(
         cls,
         ca_path: Path = CA_BUNDLE,
-    ) -> "PveClient":
+    ) -> PveClient:
         endpoint = os.environ.get("TF_VAR_pve_endpoint", "").strip()
         token = os.environ.get("TF_VAR_pve_api_token", "").strip()
         token_id, separator, token_secret = token.partition("=")

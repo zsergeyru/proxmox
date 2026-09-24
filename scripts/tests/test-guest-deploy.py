@@ -14,9 +14,9 @@ ROOT = Path(__file__).resolve().parents[2]
 MODULE_ROOT = ROOT / "scripts" / "infra-manager"
 sys.path.insert(0, str(MODULE_ROOT))
 
-from infra_manager import guest_deploy as guest_deploy_module  # noqa: E402
-from infra_manager.common import InfraManagerError  # noqa: E402
-from infra_manager.guest_deploy import (  # noqa: E402
+from infra_manager import guest_deploy as guest_deploy_module
+from infra_manager.common import InfraManagerError
+from infra_manager.guest_deploy import (
     DeploymentContext,
     DeploymentPaths,
     _apply_plan,
@@ -25,7 +25,7 @@ from infra_manager.guest_deploy import (  # noqa: E402
     _reconcile_guest_infrastructure,
     _validate_pve_and_state,
 )
-from infra_manager.opentofu import OpenTofuWorkspace  # noqa: E402
+from infra_manager.opentofu import OpenTofuWorkspace
 
 
 def fail(message: str) -> None:

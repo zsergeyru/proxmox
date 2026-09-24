@@ -11,9 +11,9 @@ ROOT = Path(__file__).resolve().parents[2]
 MODULE_ROOT = ROOT / "scripts" / "infra-manager"
 sys.path.insert(0, str(MODULE_ROOT))
 
-from infra_manager.template import _template_failures  # noqa: E402
-from infra_manager.template_build import _packer_inputs  # noqa: E402
-from infra_manager.template_verify import _validate_cloud_status  # noqa: E402
+from infra_manager.template import _template_failures
+from infra_manager.template_build import _packer_inputs
+from infra_manager.template_verify import _validate_cloud_status
 
 
 def fail(message: str) -> None:
@@ -42,8 +42,7 @@ def main_test() -> None:
     if "pve-secret" in joined_packer_args or "build-secret" in joined_packer_args:
         fail("Секрет Packer попал в аргументы командной строки")
     if any(
-        arg.startswith("-var=proxmox_token=")
-        or arg.startswith("-var=build_password=")
+        arg.startswith(("-var=proxmox_token=", "-var=build_password="))
         for arg in packer_args
     ):
         fail("Секретные переменные Packer всё ещё передаются через -var")

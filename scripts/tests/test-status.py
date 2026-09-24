@@ -12,16 +12,16 @@ ROOT = Path(__file__).resolve().parents[2]
 MODULE_ROOT = ROOT / "scripts" / "infra-manager"
 sys.path.insert(0, str(MODULE_ROOT))
 
-from infra_manager import status as status_module  # noqa: E402
-from infra_manager.common import InfraManagerError  # noqa: E402
-from infra_manager.semaphore import (  # noqa: E402
+from infra_manager import status as status_module
+from infra_manager.common import InfraManagerError
+from infra_manager.semaphore import (
     PROJECT_REPO,
     SEMAPHORE_TEMPLATES,
     find_unique_by_name,
     require_unique_by_name,
 )
-from infra_manager.settings import SETTINGS  # noqa: E402
-from infra_manager.status import (  # noqa: E402
+from infra_manager.settings import SETTINGS
+from infra_manager.status import (
     SemaphoreSnapshot,
     _check_git_branch_contract,
     _project_branch,
