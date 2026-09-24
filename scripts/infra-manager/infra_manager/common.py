@@ -55,19 +55,31 @@ class Console:
         cyan = self._color("\033[36m")
         bold = self._color("\033[1m")
         reset = self._color("\033[0m")
-        print(f"{bold}{cyan}[ИНФО]{reset} {message}", file=self.out)
+        print(
+            f"{bold}{cyan}[ИНФО]{reset} {message}",
+            file=self.out,
+            flush=True,
+        )
 
     def ok(self, message: str) -> None:
         green = self._color("\033[32m")
         bold = self._color("\033[1m")
         reset = self._color("\033[0m")
-        print(f"{bold}{green}[ОК]{reset} {message}", file=self.out)
+        print(
+            f"{bold}{green}[ОК]{reset} {message}",
+            file=self.out,
+            flush=True,
+        )
 
     def error(self, message: str) -> None:
         red = self._color("\033[31m")
         bold = self._color("\033[1m")
         reset = self._color("\033[0m")
-        print(f"{bold}{red}ОШИБКА:{reset} {message}", file=self.err)
+        print(
+            f"{bold}{red}ОШИБКА:{reset} {message}",
+            file=self.err,
+            flush=True,
+        )
 
 
 console = Console()
