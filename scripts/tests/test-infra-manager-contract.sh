@@ -10,12 +10,15 @@ PY_PVE="$ROOT/scripts/infra-manager/infra_manager/pve.py"
 STATUS="$ROOT/scripts/infra-manager/commands/status.sh"
 ACCESS="$ROOT/scripts/infra-manager/commands/pve-access-check.sh"
 LIFECYCLE="$ROOT/scripts/infra-manager/commands/pve-lifecycle-test.sh"
-BUILD_TEMPLATE="$ROOT/scripts/infra-manager/jobs/build-template.sh"
-VERIFY_TEMPLATE="$ROOT/scripts/infra-manager/jobs/verify-template.sh"
+BUILD_TEMPLATE="$ROOT/scripts/infra-manager/jobs/build-template.py"
+VERIFY_TEMPLATE="$ROOT/scripts/infra-manager/jobs/verify-template.py"
+DEPLOY_GUEST="$ROOT/scripts/infra-manager/jobs/deploy-guest.py"
+PY_OPENTOFU="$ROOT/scripts/infra-manager/infra_manager/opentofu.py"
+PY_TEMPLATE="$ROOT/scripts/infra-manager/infra_manager/template.py"
 COMPOSE="$ROOT/infrastructure/guests/910-infra-manager/compose/docker-compose.yml"
 DOCKERFILE="$ROOT/infrastructure/guests/910-infra-manager/compose/runtime/Dockerfile"
 REQ="$ROOT/infrastructure/guests/910-infra-manager/compose/runtime/requirements.txt"
-PLAN="$ROOT/scripts/infra-manager/jobs/opentofu-plan.sh"
+PLAN="$ROOT/scripts/infra-manager/jobs/opentofu-plan.py"
 PVE_BOOTSTRAP_ACCESS="$ROOT/scripts/infra-manager/pve-bootstrap-access.sh"
 OPENTOFU_LOCK="$ROOT/automation/opentofu/.terraform.lock.hcl"
 GUEST_MANIFEST="$ROOT/infrastructure/guests/910-infra-manager/guest.yaml"
@@ -25,7 +28,7 @@ SSH_CONFIG="$ROOT/infrastructure/guests/910-infra-manager/compose/runtime/ssh_co
 die() { printf 'ОШИБКА: %s\n' "$*" >&2; exit 1; }
 ok()  { printf '[ОК] %s\n' "$*"; }
 
-for file in "$SETUP" "$PY_SETUP" "$PY_SEMAPHORE" "$PY_STATUS" "$PY_PVE" "$STATUS" "$ACCESS" "$LIFECYCLE" "$BUILD_TEMPLATE" "$VERIFY_TEMPLATE" "$COMPOSE" "$DOCKERFILE" "$REQ" "$PLAN" "$PVE_BOOTSTRAP_ACCESS" "$OPENTOFU_LOCK" "$GUEST_MANIFEST" "$PROVISION" "$SSH_CONFIG"; do
+for file in "$SETUP" "$PY_SETUP" "$PY_SEMAPHORE" "$PY_STATUS" "$PY_PVE" "$STATUS" "$ACCESS" "$LIFECYCLE" "$BUILD_TEMPLATE" "$VERIFY_TEMPLATE" "$DEPLOY_GUEST" "$PY_OPENTOFU" "$PY_TEMPLATE" "$COMPOSE" "$DOCKERFILE" "$REQ" "$PLAN" "$PVE_BOOTSTRAP_ACCESS" "$OPENTOFU_LOCK" "$GUEST_MANIFEST" "$PROVISION" "$SSH_CONFIG"; do
     [[ -s "$file" ]] || die "Отсутствует обязательный файл: $file"
 done
 
@@ -313,22 +316,23 @@ if grep -q '/etc/pve/' "$SETUP" "$PY_SETUP" "$PY_SEMAPHORE" "$PY_STATUS" "$PY_PV
     die "setup внутри 910 не должен работать с файловой системой /etc/pve"
 fi
 
-grep -q 'packer build' "$BUILD_TEMPLATE" \
-    || die "build-template.sh должен выполнять packer build"
-grep -q 'template-version=8' "$BUILD_TEMPLATE" \
-    || die "build-template.sh должен работать с Template-Version 8"
-grep -q 'verify-template.sh' "$BUILD_TEMPLATE" \
-    || die "После новой сборки должен запускаться короткий Full Clone test"
-grep -q 'TEST_VMID=9099' "$VERIFY_TEMPLATE" \
+grep -q 'run_build_template' "$BUILD_TEMPLATE" \
+    || die "Build Template должен передавать выполнение Python-модулю"
+grep -q '^TEMPLATE_VERSION = 8' "$PY_TEMPLATE" \
+    || die "Python-сборка должна работать с Template-Version 8"
+grep -q 'run_verify_template(vmid)' "$PY_TEMPLATE" \
+    || die "После сборки должен запускаться короткий Full Clone test"
+grep -q '^TEST_VMID = 9099' "$PY_TEMPLATE" \
     || die "Проверка шаблона 9000 должна использовать VMID 9099"
+grep -q 'run_deploy_guest' "$DEPLOY_GUEST" \
+    || die "Deploy Guest должен передавать выполнение Python-модулю"
 
-if grep -qE 'tofu[[:space:]].*(apply|destroy)' "$PLAN"; then
-    die "OpenTofu Plan не должен содержать apply или destroy"
-fi
-
-grep -q 'tofu -chdir="$OPENTOFU_DIR" plan' "$PLAN"     || die "OpenTofu Plan должен выполнять tofu plan"
-grep -q -- '-lockfile=readonly' "$PLAN" \
-    || die "OpenTofu Plan должен использовать только зафиксированный lock file"
+grep -q 'run_plan' "$PLAN" \
+    || die "OpenTofu Plan должен передавать выполнение Python-модулю"
+grep -q '"-detailed-exitcode"' "$PY_OPENTOFU" \
+    || die "OpenTofu Plan должен различать наличие изменений"
+grep -q '"-lockfile=readonly"' "$PY_OPENTOFU" \
+    || die "OpenTofu должен использовать только зафиксированный lock file"
 grep -q 'provider "registry.opentofu.org/bpg/proxmox"' "$OPENTOFU_LOCK" \
     || die "OpenTofu lock file должен фиксировать bpg/proxmox из OpenTofu Registry"
 grep -q 'version     = "0.112.0"' "$OPENTOFU_LOCK" \
@@ -346,14 +350,20 @@ grep -q '"override_secret": True' "$PY_SEMAPHORE" \
     || die "Существующий GitHub SSH key должен обновлять секретную часть"
 grep -q 'name="OpenTofu Plan"' "$PY_SEMAPHORE" \
     || die "Semaphore должен создавать шаблон OpenTofu Plan"
-grep -q 'scripts/infra-manager/jobs/opentofu-plan.sh' "$PY_SEMAPHORE" \
-    || die "OpenTofu Plan должен запускать отдельный безопасный сценарий"
+grep -q 'scripts/infra-manager/jobs/opentofu-plan.py' "$PY_SEMAPHORE" \
+    || die "OpenTofu Plan должен запускать отдельный Python-сценарий"
 grep -q 'name="Build Template 9000"' "$PY_SEMAPHORE" \
     || die "Semaphore должен создавать задание Build Template 9000"
-grep -q 'scripts/infra-manager/jobs/build-template.sh' "$PY_SEMAPHORE" \
-    || die "Build Template 9000 должен запускать отдельный сценарий Packer"
+grep -q 'scripts/infra-manager/jobs/build-template.py' "$PY_SEMAPHORE" \
+    || die "Build Template 9000 должен запускать отдельный Python-сценарий"
 grep -Fq "arguments='[\"9000\"]'" "$PY_SEMAPHORE" \
     || die "Build Template 9000 должен иметь фиксированный VMID 9000"
+grep -q 'scripts/infra-manager/jobs/deploy-guest.py' "$PY_SEMAPHORE" \
+    || die "Deploy Guest 410 должен запускать универсальный Python-сценарий"
+grep -Fq "arguments='[\"410\"]'" "$PY_SEMAPHORE" \
+    || die "Deploy Guest 410 должен иметь фиксированный VMID 410"
+grep -q 'app="python"' "$PY_SEMAPHORE" \
+    || die "Semaphore infrastructure tasks должны выполняться как Python"
 grep -q '"allow_override_args_in_task": False' "$PY_SEMAPHORE" \
     || die "Semaphore tasks не должны разрешать переопределение аргументов"
 grep -q '"allow_override_branch_in_task": False' "$PY_SEMAPHORE" \
