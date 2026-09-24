@@ -10,23 +10,20 @@ from typing import Any
 
 from .common import InfraManagerError, console
 from .pve import PveClient, check_access
-from .semaphore import (
-    PROJECT_REPO,
-    SEMAPHORE_API_TOKEN_FILE,
-    SemaphoreClient,
-)
+from .semaphore import SemaphoreClient
+from .settings import PATHS, SETTINGS
 
-PVE_ENV = Path("/etc/infra-manager/secrets/pve-api.env")
-CA_BUNDLE = Path("/etc/infra-manager/ca/ca-bundle.crt")
-ANSIBLE_PRIVATE_KEY = Path("/etc/infra-manager/ansible/guest_ed25519")
-ANSIBLE_PUBLIC_KEY = Path("/etc/infra-manager/ansible/guest_ed25519.pub")
-SERVER_ENV = Path("/etc/infra-manager/secrets/semaphore-server.env")
-GITHUB_KEY_COPY = Path(
-    "/etc/infra-manager/secrets/github_project_ed25519"
-)
-PROJECT_ID_FILE = Path("/var/lib/infra-manager/semaphore-project-id")
-OPENTOFU_INPUT = Path("/var/lib/infra-manager/opentofu/guests.json")
-OPENTOFU_STATE_DIR = Path("/var/lib/infra-manager/opentofu/state")
+PVE_ENV = PATHS.pve_api_env
+CA_BUNDLE = PATHS.ca_bundle
+ANSIBLE_PRIVATE_KEY = PATHS.ansible_private_key
+ANSIBLE_PUBLIC_KEY = PATHS.ansible_public_key
+SERVER_ENV = PATHS.server_env
+GITHUB_KEY_COPY = PATHS.github_key_copy
+PROJECT_ID_FILE = PATHS.semaphore_project_id_file
+OPENTOFU_INPUT = PATHS.opentofu_input
+OPENTOFU_STATE_DIR = PATHS.opentofu_state_dir
+SEMAPHORE_API_TOKEN_FILE = PATHS.semaphore_api_token_file
+PROJECT_REPO = SETTINGS.project_repo
 
 
 def required_file(path: Path) -> None:
@@ -79,7 +76,7 @@ def unique_named(
 
 
 def _project_branch() -> str:
-    return os.environ.get("INFRA_PROJECT_BRANCH", "main")
+    return os.environ.get("INFRA_PROJECT_BRANCH", SETTINGS.default_project_branch)
 
 
 def _check_git_branch_contract(
