@@ -886,6 +886,17 @@ class Setup:
                 ],
                 "Python-модуль proxmoxer",
             ),
+            (
+                [
+                    "docker",
+                    "exec",
+                    "infra-runtime",
+                    "python3",
+                    "-c",
+                    "import yaml, jsonschema",
+                ],
+                "Python-модули проверки проекта",
+            ),
         )
         for argv, label in checks:
             try:
