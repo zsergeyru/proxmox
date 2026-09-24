@@ -103,12 +103,15 @@ def _check_git_branch_contract(
             )
 
 
-def check_status(*, full: bool = False) -> int:
-    project_branch = _project_branch()
-
+def _check_local_prerequisites() -> None:
+    """Проверить Docker, обязательные файлы и каталог состояния OpenTofu."""
     if shutil.which("docker") is None:
         raise InfraManagerError("Docker не установлен")
-    if command_runner.run(["docker", "compose", "version"], quiet=True, check=False).returncode:
+    if command_runner.run(
+        ["docker", "compose", "version"],
+        quiet=True,
+        check=False,
+    ).returncode:
         raise InfraManagerError("Docker Compose недоступен")
 
     for path in (
@@ -127,6 +130,9 @@ def check_status(*, full: bool = False) -> int:
     if not OPENTOFU_STATE_DIR.is_dir():
         raise InfraManagerError("Отсутствует каталог OpenTofu state")
 
+
+def _check_runtime() -> None:
+    """Проверить, что контейнер infra-runtime запущен."""
     running = command_runner.run(
         [
             "docker",
@@ -141,6 +147,9 @@ def check_status(*, full: bool = False) -> int:
     if running.returncode or running.stdout.strip() != "true":
         raise InfraManagerError("Semaphore Server не запущен")
 
+
+def _connect_semaphore() -> tuple[SemaphoreClient, int]:
+    """Подключиться к Semaphore и вернуть client и project id."""
     semaphore = SemaphoreClient()
     semaphore.ping()
     semaphore.auth_mode = "token"
@@ -150,8 +159,14 @@ def check_status(*, full: bool = False) -> int:
     ).strip()
     if not raw_project_id.isdigit():
         raise InfraManagerError("Некорректный project-id Semaphore")
-    project_id = int(raw_project_id)
+    return semaphore, int(raw_project_id)
 
+
+def _check_github_key(
+    semaphore: SemaphoreClient,
+    project_id: int,
+) -> int:
+    """Проверить GitHub SSH key Semaphore и вернуть его id."""
     keys = semaphore.get(
         f"/project/{project_id}/keys?sort=name&order=asc"
     )
@@ -170,7 +185,14 @@ def check_status(*, full: bool = False) -> int:
             "Semaphore key 'GitHub project read-only' "
             "имеет некорректный id"
         )
+    return github_key_id
 
+
+def _get_repository(
+    semaphore: SemaphoreClient,
+    project_id: int,
+) -> tuple[dict[str, Any], int]:
+    """Получить единственный Git repository proxmox и его id."""
     repositories = semaphore.get(
         f"/project/{project_id}/repositories?sort=name&order=asc"
     )
@@ -179,23 +201,20 @@ def check_status(*, full: bool = False) -> int:
         "proxmox",
         "Git repository",
     )
-    stored_key_id = repository.get("ssh_key_id")
-    if (
-        repository.get("git_url") != PROJECT_REPO
-        or str(stored_key_id or "") != str(github_key_id)
-        or repository.get("git_branch") != project_branch
-    ):
-        raise InfraManagerError(
-            "Git repository 'proxmox' не соответствует "
-            "ожидаемому URL, SSH key или ветке "
-            f"'{project_branch}'"
-        )
     repository_id = repository.get("id")
     if not isinstance(repository_id, int):
         raise InfraManagerError(
             "Git repository 'proxmox' имеет некорректный id"
         )
+    return repository, repository_id
 
+
+def _get_repository_branches(
+    semaphore: SemaphoreClient,
+    project_id: int,
+    repository_id: int,
+) -> Any:
+    """Получить доступные Git-ветки через сохранённый SSH key."""
     # Semaphore v2.18.30 создаёт socket временного ssh-agent в каталоге
     # проекта раньше, чем branches API успевает создать этот каталог.
     prepare_tmp = command_runner.run(
@@ -219,7 +238,7 @@ def check_status(*, full: bool = False) -> int:
         )
 
     try:
-        branches = semaphore.get(
+        return semaphore.get(
             f"/project/{project_id}/repositories/"
             f"{repository_id}/branches"
         )
@@ -228,6 +247,13 @@ def check_status(*, full: bool = False) -> int:
             "Semaphore не может прочитать Git repository 'proxmox' "
             "сохранённым SSH key"
         ) from exc
+
+
+def _check_opentofu_environment(
+    semaphore: SemaphoreClient,
+    project_id: int,
+) -> None:
+    """Проверить Variable Group OpenTofu PVE."""
     environments = semaphore.get(
         f"/project/{project_id}/environment?sort=name&order=asc"
     )
@@ -240,6 +266,17 @@ def check_status(*, full: bool = False) -> int:
             "В Semaphore отсутствует Variable Group OpenTofu PVE"
         )
 
+
+def _check_templates(
+    semaphore: SemaphoreClient,
+    project_id: int,
+    repository: dict[str, Any],
+    branches: Any,
+    *,
+    github_key_id: int,
+    project_branch: str,
+) -> None:
+    """Проверить ветку и контракт заданий Semaphore."""
     templates = semaphore.get(
         f"/project/{project_id}/templates?sort=name&order=asc"
     )
@@ -266,6 +303,9 @@ def check_status(*, full: bool = False) -> int:
                 "не соответствует Python-контракту"
             )
 
+
+def _check_runtime_tools() -> None:
+    """Проверить ключ Ansible и обязательные инструменты infra-runtime."""
     if command_runner.run(
         [
             "docker",
@@ -321,6 +361,9 @@ def check_status(*, full: bool = False) -> int:
         ).returncode:
             raise InfraManagerError(message)
 
+
+def _check_pve(*, full: bool) -> None:
+    """Проверить базовую авторизацию PVE и при необходимости полный контракт."""
     pve = PveClient(PVE_ENV, CA_BUNDLE)
     version = pve.data("/version")
     if not isinstance(version, dict) or not (
@@ -332,6 +375,36 @@ def check_status(*, full: bool = False) -> int:
 
     if full:
         check_access(quiet=True)
+
+
+def check_status(*, full: bool = False) -> int:
+    """Проверить готовность infra-manager по последовательным этапам."""
+    project_branch = _project_branch()
+
+    _check_local_prerequisites()
+    _check_runtime()
+
+    semaphore, project_id = _connect_semaphore()
+    github_key_id = _check_github_key(semaphore, project_id)
+    repository, repository_id = _get_repository(semaphore, project_id)
+    branches = _get_repository_branches(
+        semaphore,
+        project_id,
+        repository_id,
+    )
+    _check_opentofu_environment(semaphore, project_id)
+    _check_templates(
+        semaphore,
+        project_id,
+        repository,
+        branches,
+        github_key_id=github_key_id,
+        project_branch=project_branch,
+    )
+    _check_runtime_tools()
+    _check_pve(full=full)
+
+    if full:
         console.ok(
             "infra-manager готов, полный контракт PVE API подтверждён"
         )
