@@ -37,13 +37,13 @@ def main() -> None:
     source_109 = load_yaml(ROOT / "infrastructure/guests/109-network-gateway/guest.yaml")
 
     resolved = resolve_effective_guest(source_311, defaults)
-    assert resolved.bootstrap_capabilities == ("git", "docker", "ansible")
     assert resolved.effective["management"] == ["ssh_identity", "project_repo_read"]
     assert resolved.effective["features"] == ["container-host"]
     assert resolved.effective["resources"]["cores"] == 2
     assert resolved.effective["network"]["ipv4"] == "192.168.3.11/16"
     assert resolved.effective["protection"] is True
     assert resolved.effective["pve_management"] is True
+    assert "bootstrap" not in resolved.effective
 
     dhcp_guest = copy.deepcopy(source_311)
     dhcp_guest["network"] = {"ipv4": "dhcp"}
@@ -71,50 +71,16 @@ def main() -> None:
         effective_validator.iter_errors(resolved_dhcp.effective)
     )
 
+    obsolete_bootstrap = copy.deepcopy(source_311)
+    obsolete_bootstrap["bootstrap"] = ["git"]
+    assert list(source_validator.iter_errors(obsolete_bootstrap))
+
     local_pve_override = copy.deepcopy(source_109)
     local_pve_override["protection"] = False
     local_pve_override["pve_management"] = False
     resolved_override = resolve_effective_guest(local_pve_override, defaults)
     assert resolved_override.effective["protection"] is False
     assert resolved_override.effective["pve_management"] is False
-
-    no_bootstrap = copy.deepcopy(source_311)
-    no_bootstrap.pop("bootstrap")
-    resolved_no_bootstrap = resolve_effective_guest(no_bootstrap, defaults)
-    assert resolved_no_bootstrap.bootstrap_capabilities == ()
-    assert resolved_no_bootstrap.effective["bootstrap"] == []
-
-    ansible_only = copy.deepcopy(source_109)
-    ansible_only["bootstrap"] = ["ansible"]
-    assert resolve_effective_guest(ansible_only, defaults).bootstrap_capabilities == (
-        "ansible",
-    )
-
-    duplicate = copy.deepcopy(source_311)
-    duplicate["bootstrap"] = ["git", "git"]
-    expect_error(duplicate, defaults, "не должен содержать дубликаты")
-
-    unknown = copy.deepcopy(source_311)
-    unknown["bootstrap"] = ["git", "unknown"]
-    expect_error(unknown, defaults, "неизвестные элементы bootstrap")
-
-    empty = copy.deepcopy(source_311)
-    empty["bootstrap"] = []
-    expect_error(empty, defaults, "должен быть непустым list")
-
-    plain_lxc_defaults = copy.deepcopy(defaults)
-    plain_lxc_defaults["profiles"]["debian-lxc"] = {
-        "type": "lxc",
-        "ostemplate": "local:vztmpl/debian-13-standard",
-    }
-    docker_without_feature = copy.deepcopy(source_311)
-    docker_without_feature["profile"] = "debian-lxc"
-    docker_without_feature["bootstrap"] = ["docker"]
-    expect_error(
-        docker_without_feature,
-        plain_lxc_defaults,
-        "требует feature 'container-host'",
-    )
 
     print("Guest resolver contract tests passed.")
 
