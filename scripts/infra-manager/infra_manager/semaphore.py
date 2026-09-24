@@ -569,7 +569,7 @@ def configure_project(branch: str | None = None) -> int:
             "Не найден постоянный PVE API credential"
         )
 
-    branch = branch or os.environ.get("INFRA_PROJECT_BRANCH", SETTINGS.default_project_branch)
+    branch = branch or SETTINGS.project_branch()
     persist_github_key()
 
     client = SemaphoreClient()
