@@ -365,12 +365,14 @@ def check_wait_semaphore() -> None:
             patch.object(
                 RuntimeSetup,
                 "semaphore_ready",
-                side_effect=[False, True, True],
-            ),
+                side_effect=[False, True],
+            ) as ready_mock,
             patch.object(runtime_setup_module.time, "sleep"),
         ):
             runtime.wait_semaphore()
 
+        if ready_mock.call_count != 2:
+            fail("Готовность Semaphore была проверена повторно после успеха")
         if logged_runner.calls:
             fail("Успешное ожидание Semaphore не должно печатать диагностику")
         if not any(
