@@ -54,7 +54,7 @@ def main() -> None:
 
     invalid_dhcp = copy.deepcopy(source_109)
     invalid_dhcp["network"] = {"ipv4": "dhcp/16"}
-    expect_error(invalid_dhcp, defaults, "некорректный network.ipv4")
+    expect_error(invalid_dhcp, defaults, "network.ipv4 должен быть без /prefix")
 
     source_schema = load_yaml(ROOT / "infrastructure/schemas/guest.schema.yaml")
     effective_schema = load_yaml(
