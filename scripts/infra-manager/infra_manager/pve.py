@@ -6,6 +6,7 @@ import ipaddress
 import json
 import os
 import ssl
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -74,51 +75,91 @@ class PveClient:
         self,
         env_path: Path = PVE_ENV,
         ca_path: Path = CA_BUNDLE,
+        *,
+        url: str | None = None,
+        token_id: str | None = None,
+        token_secret: str | None = None,
     ) -> None:
-        if not nonempty(env_path):
-            raise InfraManagerError(
-                f"Не найден PVE credential: {env_path}"
-            )
         if not nonempty(ca_path):
             raise InfraManagerError(f"Не найден CA bundle: {ca_path}")
 
-        values = read_env_file(env_path)
-        self.url = values.get("PVE_API_URL", "").rstrip("/")
-        self.token_id = values.get("PVE_API_TOKEN_ID", "")
-        self.token_secret = values.get("PVE_API_TOKEN_SECRET", "")
+        if url is None and token_id is None and token_secret is None:
+            if not nonempty(env_path):
+                raise InfraManagerError(
+                    f"Не найден PVE credential: {env_path}"
+                )
+            values = read_env_file(env_path)
+            url = values.get("PVE_API_URL", "")
+            token_id = values.get("PVE_API_TOKEN_ID", "")
+            token_secret = values.get("PVE_API_TOKEN_SECRET", "")
+
+        self.url = (url or "").rstrip("/")
+        self.token_id = token_id or ""
+        self.token_secret = token_secret or ""
         if not self.url:
-            raise InfraManagerError("PVE_API_URL пуст")
+            raise InfraManagerError("PVE API URL пуст")
         if not self.token_id:
-            raise InfraManagerError("PVE_API_TOKEN_ID пуст")
+            raise InfraManagerError("PVE API token id пуст")
         if not self.token_secret:
-            raise InfraManagerError("PVE_API_TOKEN_SECRET пуст")
+            raise InfraManagerError("PVE API token secret пуст")
 
         self.context = ssl.create_default_context(cafile=str(ca_path))
 
-    def get(
+    @classmethod
+    def from_opentofu_env(
+        cls,
+        ca_path: Path = CA_BUNDLE,
+    ) -> "PveClient":
+        endpoint = os.environ.get("TF_VAR_pve_endpoint", "").strip()
+        token = os.environ.get("TF_VAR_pve_api_token", "").strip()
+        token_id, separator, token_secret = token.partition("=")
+        if not endpoint:
+            raise InfraManagerError("Не задан TF_VAR_pve_endpoint")
+        if not separator or not token_id or not token_secret:
+            raise InfraManagerError(
+                "TF_VAR_pve_api_token имеет неверный формат"
+            )
+        return cls(
+            ca_path=ca_path,
+            url=endpoint,
+            token_id=token_id,
+            token_secret=token_secret,
+        )
+
+    def _request(
         self,
+        method: str,
         endpoint: str,
         *,
-        query: dict[str, str] | None = None,
+        query: dict[str, str | int] | None = None,
+        form: dict[str, str | int] | None = None,
+        timeout: int = 120,
     ) -> Any:
         url = f"{self.url}/api2/json{endpoint}"
         if query:
             url += "?" + urllib.parse.urlencode(query)
 
+        body = None
+        headers = {
+            "Accept": "application/json",
+            "Authorization": (
+                f"PVEAPIToken={self.token_id}={self.token_secret}"
+            ),
+        }
+        if form is not None:
+            body = urllib.parse.urlencode(form).encode("utf-8")
+            headers["Content-Type"] = "application/x-www-form-urlencoded"
+
         request = urllib.request.Request(
             url,
-            headers={
-                "Accept": "application/json",
-                "Authorization": (
-                    f"PVEAPIToken={self.token_id}={self.token_secret}"
-                ),
-            },
-            method="GET",
+            data=body,
+            headers=headers,
+            method=method,
         )
         try:
             with urllib.request.urlopen(
                 request,
-                timeout=20,
+                timeout=timeout,
                 context=self.context,
             ) as response:
                 raw = response.read()
@@ -128,33 +169,159 @@ class PveClient:
                 errors="replace",
             ).strip()
             raise InfraManagerError(
-                f"PVE API GET {endpoint} вернул HTTP {exc.code}: "
+                f"PVE API {method} {endpoint} вернул HTTP {exc.code}: "
                 f"{detail or '(пустой ответ)'}"
             ) from exc
         except (urllib.error.URLError, OSError) as exc:
             raise InfraManagerError(
-                f"PVE API GET {endpoint} недоступен: {exc}"
+                f"PVE API {method} {endpoint} недоступен: {exc}"
             ) from exc
 
         try:
             return json.loads(raw.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise InfraManagerError(
-                f"PVE API GET {endpoint} вернул некорректный JSON"
+                f"PVE API {method} {endpoint} вернул некорректный JSON"
             ) from exc
+
+    def get(
+        self,
+        endpoint: str,
+        *,
+        query: dict[str, str | int] | None = None,
+    ) -> Any:
+        return self._request("GET", endpoint, query=query)
+
+    def post(
+        self,
+        endpoint: str,
+        *,
+        form: dict[str, str | int] | None = None,
+    ) -> Any:
+        return self._request("POST", endpoint, form=form)
+
+    def put(
+        self,
+        endpoint: str,
+        *,
+        form: dict[str, str | int] | None = None,
+    ) -> Any:
+        return self._request("PUT", endpoint, form=form)
+
+    def delete(
+        self,
+        endpoint: str,
+        *,
+        query: dict[str, str | int] | None = None,
+    ) -> Any:
+        return self._request("DELETE", endpoint, query=query)
+
+    @staticmethod
+    def _data_from_payload(payload: Any, context: str) -> Any:
+        if not isinstance(payload, dict) or "data" not in payload:
+            raise InfraManagerError(f"{context} не содержит data")
+        return payload["data"]
 
     def data(
         self,
         endpoint: str,
         *,
-        query: dict[str, str] | None = None,
+        query: dict[str, str | int] | None = None,
     ) -> Any:
-        payload = self.get(endpoint, query=query)
-        if not isinstance(payload, dict) or "data" not in payload:
+        return self._data_from_payload(
+            self.get(endpoint, query=query),
+            f"PVE API GET {endpoint}",
+        )
+
+    def request_data(
+        self,
+        method: str,
+        endpoint: str,
+        *,
+        query: dict[str, str | int] | None = None,
+        form: dict[str, str | int] | None = None,
+    ) -> Any:
+        return self._data_from_payload(
+            self._request(method, endpoint, query=query, form=form),
+            f"PVE API {method} {endpoint}",
+        )
+
+    def wait_task(
+        self,
+        *,
+        node: str,
+        upid: str,
+        timeout: int = 180,
+    ) -> None:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            payload = self.data(f"/nodes/{node}/tasks/{upid}/status")
+            if isinstance(payload, dict) and payload.get("status") == "stopped":
+                exit_status = payload.get("exitstatus")
+                if exit_status != "OK":
+                    raise InfraManagerError(
+                        f"Задача PVE завершилась: "
+                        f"{exit_status or 'неизвестно'}"
+                    )
+                return
+            time.sleep(1)
+        raise InfraManagerError(f"Задача PVE не завершилась: {upid}")
+
+    def run_task(
+        self,
+        method: str,
+        endpoint: str,
+        *,
+        node: str,
+        query: dict[str, str | int] | None = None,
+        form: dict[str, str | int] | None = None,
+        timeout: int = 180,
+    ) -> None:
+        upid = self.request_data(
+            method,
+            endpoint,
+            query=query,
+            form=form,
+        )
+        if not isinstance(upid, str) or not upid:
+            raise InfraManagerError("PVE не вернул task id")
+        self.wait_task(node=node, upid=upid, timeout=timeout)
+
+    def find_vm(self, vmid: int) -> dict[str, Any] | None:
+        resources = self.data(
+            "/cluster/resources",
+            query={"type": "vm"},
+        )
+        if not isinstance(resources, list):
             raise InfraManagerError(
-                f"PVE API GET {endpoint} не содержит data"
+                "PVE API /cluster/resources вернул неожиданный формат"
             )
-        return payload["data"]
+        matches = [
+            item
+            for item in resources
+            if isinstance(item, dict) and item.get("vmid") == vmid
+        ]
+        if len(matches) > 1:
+            raise InfraManagerError(
+                f"PVE вернул несколько объектов с VMID {vmid}"
+            )
+        return matches[0] if matches else None
+
+    def vm_config(self, *, node: str, vmid: int) -> dict[str, Any]:
+        config = self.data(f"/nodes/{node}/qemu/{vmid}/config")
+        if not isinstance(config, dict):
+            raise InfraManagerError(
+                f"PVE config VMID {vmid} имеет неожиданный формат"
+            )
+        return config
+
+    def vm_status(self, *, node: str, vmid: int) -> str:
+        status = self.data(f"/nodes/{node}/qemu/{vmid}/status/current")
+        if not isinstance(status, dict):
+            raise InfraManagerError(
+                f"PVE status VMID {vmid} имеет неожиданный формат"
+            )
+        return str(status.get("status") or "")
 
     def permissions_at(self, path: str) -> Any:
         return self.data(
