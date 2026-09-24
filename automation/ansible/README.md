@@ -26,14 +26,27 @@ infrastructure/guests/<guest>/ansible/
 
 ## Целевая структура
 
-По мере появления реального содержимого используются:
+Текущая общая точка входа:
 
 ```text
-ansible/
+automation/ansible/
+├── playbooks/
+│   └── configure-guest.yml
 ├── inventory/    # узлы, группы и переменные инвентаря
-├── playbooks/    # основные playbook для настройки и обслуживания
 └── roles/        # переиспользуемые роли
 ```
+
+`configure-guest.yml` читает `provision.yaml` выбранного гостя и применяет его требования к операционной системе.
+
+Для 410 используется:
+
+```text
+guest=410-ai-control
+→ infrastructure/guests/410-ai-control/provision.yaml
+→ playbooks/configure-guest.yml
+```
+
+По мере появления повторяемой специализированной логики она должна выноситься из playbook в общие roles, а не копироваться в отдельные playbook каждого гостя.
 
 Термины `inventory`, `playbook` и `role` оставлены без перевода там, где они обозначают конкретные сущности Ansible.
 
