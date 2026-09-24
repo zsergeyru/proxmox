@@ -314,7 +314,11 @@ def check_status(*, full: bool = False) -> int:
         ),
     )
     for argv, message in checks:
-        if command_runner.run(argv).returncode:
+        if command_runner.run(
+            argv,
+            quiet=True,
+            check=False,
+        ).returncode:
             raise InfraManagerError(message)
 
     pve = PveClient(PVE_ENV, CA_BUNDLE)
