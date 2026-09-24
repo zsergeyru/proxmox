@@ -30,12 +30,12 @@ assert "410" in guests
 assert guests["410"]["name"] == "ai-control"
 assert guests["410"]["type"] == "vm"
 assert guests["410"]["pve_management"] is False
-assert guests["410"]["bootstrap"] == ["git"]
+assert "bootstrap" not in guests["410"]
 
 # Описательный объект без profile не участвует в универсальном развёртывании.
 assert "201" not in guests
 
-# Специальный bootstrap-owned 910 имеет guest.yaml без profile и не должен попасть в OpenTofu.
+# Специальный 910 имеет guest.yaml без profile и не должен попасть в OpenTofu.
 assert "910" not in guests
 
 for vmid, guest in guests.items():
