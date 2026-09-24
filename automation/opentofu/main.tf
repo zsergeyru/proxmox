@@ -1,24 +1,30 @@
 locals {
-  guest_410 = local.guests["410"]
+  vm_guests = {
+    for vmid, guest in local.guests :
+    vmid => guest
+    if guest.type == "vm"
+  }
 }
 
-resource "proxmox_virtual_environment_vm" "guest_410" {
-  name        = local.guest_410.name
-  description = local.guest_410.description
-  node_name   = local.guest_410.node
-  vm_id       = local.guest_410.vmid
+resource "proxmox_virtual_environment_vm" "guest" {
+  for_each = local.vm_guests
+
+  name        = each.value.name
+  description = each.value.description
+  node_name   = each.value.node
+  vm_id       = each.value.vmid
 
   started    = true
-  on_boot    = local.guest_410.boot.onboot
-  protection = local.guest_410.protection
+  on_boot    = each.value.boot.onboot
+  protection = each.value.protection
 
-  # Обычное применение не должно автоматически останавливать 410
+  # Обычное применение не должно автоматически останавливать гостя
   # ради параметра, который требует перезапуска.
   reboot_after_update = false
 
   clone {
-    vm_id        = local.guest_410.template_vmid
-    datastore_id = local.guest_410.resources.disk_storage
+    vm_id        = each.value.template_vmid
+    datastore_id = each.value.resources.disk_storage
     full         = true
   }
 
@@ -27,21 +33,21 @@ resource "proxmox_virtual_environment_vm" "guest_410" {
   }
 
   cpu {
-    cores = local.guest_410.resources.cores
+    cores = each.value.resources.cores
     type  = "host"
   }
 
   memory {
-    dedicated = local.guest_410.resources.memory_mb
-    floating  = try(local.guest_410.resources.ballooning_mb, 0)
+    dedicated = each.value.resources.memory_mb
+    floating  = try(each.value.resources.ballooning_mb, 0)
   }
 
   scsi_hardware = "virtio-scsi-single"
 
   disk {
-    datastore_id = local.guest_410.resources.disk_storage
+    datastore_id = each.value.resources.disk_storage
     interface    = "scsi0"
-    size         = local.guest_410.resources.disk_size_gb
+    size         = each.value.resources.disk_size_gb
     aio          = "io_uring"
     cache        = "none"
     discard      = "on"
@@ -50,12 +56,12 @@ resource "proxmox_virtual_environment_vm" "guest_410" {
   }
 
   initialization {
-    datastore_id = local.guest_410.resources.disk_storage
+    datastore_id = each.value.resources.disk_storage
 
     ip_config {
       ipv4 {
-        address = local.guest_410.network.ipv4
-        gateway = local.guest_410.network.ipv4 == "dhcp" ? null : local.guest_410.network.gateway
+        address = each.value.network.ipv4
+        gateway = each.value.network.ipv4 == "dhcp" ? null : each.value.network.gateway
       }
     }
 
@@ -66,7 +72,7 @@ resource "proxmox_virtual_environment_vm" "guest_410" {
   }
 
   network_device {
-    bridge = local.guest_410.network.bridge
+    bridge = each.value.network.bridge
     model  = "virtio"
   }
 
