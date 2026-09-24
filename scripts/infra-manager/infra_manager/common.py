@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -144,6 +145,86 @@ def require_command(name: str) -> Path:
     return Path(path)
 
 
+@dataclass(frozen=True)
+class CommandRunner:
+    """Единый исполнитель внешних команд infra-manager."""
+
+    default_log_file: Path | None = None
+
+    def run(
+        self,
+        argv: Sequence[str],
+        *,
+        capture: bool = false,
+        quiet: bool = false,
+        log_file: Path | None = None,
+        check: bool = true,
+        cwd: Path | None = None,
+        env: Mapping[str, str] | None = None,
+        sensitive_args: Sequence[int] = (),
+    ) -> subprocess.CompletedProcess[str]:
+        """Запустить внешнюю команду с едиными правилами вывода и ошибок."""
+        if not argv:
+            raise ValueError("argv не должен быть пустым")
+        if capture and quiet:
+            raise ValueError("capture и quiet нельзя включать одновременно")
+
+        actual_log = log_file if log_file is not None else self.default_log_file
+        redacted = _redact_argv(argv, sensitive_args)
+
+        stdout: object | None = None
+        stderr: object | None = None
+        stream = None
+
+        if actual_log is not None:
+            actual_log.parent.mkdir(parents=True, exist_ok=True)
+            stream = actual_log.open("a", encoding="utf-8")
+            stream.write(f"КОМАНДА: {shlex.join(redacted)}\n")
+            stream.flush()
+            stdout = stream
+            stderr = subprocess.STDOUT
+        elif quiet:
+            stdout = subprocess.DEVNULL
+            stderr = subprocess.DEVNULL
+        elif capture:
+            stdout = subprocess.PIPE
+            stderr = subprocess.PIPE
+
+        try:
+            result = subprocess.run(
+                list(argv),
+                check=False,
+                cwd=cwd,
+                env=dict(env) if env is not None else None,
+                text=True,
+                stdout=stdout,
+                stderr=stderr,
+            )
+        finally:
+            if stream is not None:
+                stream.close()
+
+        if check and result.returncode != 0:
+            detail = result.stderr
+            if actual_log is not None and actual_log.is_file():
+                tail = actual_log.read_text(
+                    encoding="utf-8",
+                    errors="replace",
+                ).splitlines()[-25:]
+                detail = "\n".join(tail)
+            raise CommandError(
+                argv,
+                result.returncode,
+                detail,
+                sensitive_args,
+            )
+
+        return result
+
+
+command_runner = CommandRunner()
+
+
 def run(
     argv: Sequence[str],
     *,
@@ -153,26 +234,12 @@ def run(
     env: Mapping[str, str] | None = None,
     sensitive_indices: Sequence[int] = (),
 ) -> subprocess.CompletedProcess[str]:
-    """Запустить внешнюю команду без shell-интерпретации аргументов."""
-
-    if not argv:
-        raise ValueError("argv не должен быть пустым")
-
-    result = subprocess.run(
-        list(argv),
-        check=False,
+    """Совместимая оболочка над единым CommandRunner."""
+    return command_runner.run(
+        argv,
+        check=check,
+        capture=capture_output,
         cwd=cwd,
-        env=dict(env) if env is not None else None,
-        text=True,
-        capture_output=capture_output,
+        env=env,
+        sensitive_args=sensitive_indices,
     )
-
-    if check and result.returncode != 0:
-        raise CommandError(
-            argv,
-            result.returncode,
-            result.stderr,
-            sensitive_indices,
-        )
-
-    return result
