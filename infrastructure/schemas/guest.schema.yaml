@@ -5,7 +5,7 @@ additionalProperties: false
 required: [schema_version, vmid, name, description]
 properties:
   schema_version:
-    const: 10
+    const: 11
   vmid:
     type: integer
     minimum: 100
