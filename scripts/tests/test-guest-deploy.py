@@ -107,6 +107,24 @@ def check_opentofu_state_status() -> None:
             patch.object(
                 opentofu_module,
                 "run",
+                return_value=SimpleNamespace(
+                    returncode=0,
+                    stdout="[]",
+                ),
+            ),
+        ):
+            try:
+                opentofu_module._state_status(directory, target, env)
+            except InfraManagerError:
+                pass
+            else:
+                fail("OpenTofu state с неверным типом корня был принят")
+
+        with (
+            patch.object(opentofu_module, "STATE_FILE", state_file),
+            patch.object(
+                opentofu_module,
+                "run",
                 side_effect=InfraManagerError("ошибка чтения состояния"),
             ),
         ):
