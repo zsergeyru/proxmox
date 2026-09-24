@@ -76,7 +76,7 @@ def unique_named(
 
 
 def _project_branch() -> str:
-    return os.environ.get("INFRA_PROJECT_BRANCH", SETTINGS.default_project_branch)
+    return SETTINGS.project_branch()
 
 
 def _check_git_branch_contract(
