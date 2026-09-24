@@ -42,6 +42,7 @@ jobs:
             scripts/infra-manager/infra_manager/__main__.py \
             scripts/infra-manager/infra_manager/cli.py \
             scripts/infra-manager/infra_manager/common.py \
+            scripts/infra-manager/infra_manager/settings.py \
             scripts/infra-manager/infra_manager/setup.py \
             scripts/infra-manager/infra_manager/semaphore.py \
             scripts/infra-manager/infra_manager/pve.py \
