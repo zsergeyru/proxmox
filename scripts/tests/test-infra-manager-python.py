@@ -24,7 +24,7 @@ from infra_manager.common import (  # noqa: E402
     _redact_argv,
     run,
 )
-from infra_manager.opentofu import (  # noqa: E402
+from infra_manager.guest_deploy import (  # noqa: E402
     DeploymentContext,
     DeploymentPaths,
     _find_guest_directory,
