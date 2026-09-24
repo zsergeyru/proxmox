@@ -547,6 +547,29 @@ def run_verify_template(vmid: int) -> int:
     return 0
 
 
+def _packer_inputs(
+    env: dict[str, str],
+    *,
+    client: PveClient,
+    node: str,
+    iso_url: str,
+    iso_checksum: str,
+    build_password: str,
+) -> tuple[dict[str, str], list[str]]:
+    """Подготовить окружение и несекретные аргументы Packer."""
+    packer_env = dict(env)
+    packer_env["PKR_VAR_proxmox_token"] = client.token_secret
+    packer_env["PKR_VAR_build_password"] = build_password
+    common_vars = [
+        f"-var=proxmox_url={client.url}/api2/json",
+        f"-var=proxmox_username={client.token_id}",
+        f"-var=node={node}",
+        f"-var=iso_url={iso_url}",
+        f"-var=iso_checksum={iso_checksum}",
+    ]
+    return packer_env, common_vars
+
+
 def run_build_template(repo_root: Path, vmid: int) -> int:
     """Собрать и проверить Packer-шаблон."""
 
@@ -580,16 +603,14 @@ def run_build_template(repo_root: Path, vmid: int) -> int:
     iso_url, iso_checksum = _resolve_debian_iso()
     build_password = secrets.token_hex(24)
 
-    env["PKR_VAR_proxmox_token"] = client.token_secret
-    env["PKR_VAR_build_password"] = build_password
-
-    common_vars = [
-        f"-var=proxmox_url={client.url}/api2/json",
-        f"-var=proxmox_username={client.token_id}",
-        f"-var=node={node}",
-        f"-var=iso_url={iso_url}",
-        f"-var=iso_checksum={iso_checksum}",
-    ]
+    env, common_vars = _packer_inputs(
+        env,
+        client=client,
+        node=node,
+        iso_url=iso_url,
+        iso_checksum=iso_checksum,
+        build_password=build_password,
+    )
 
     console.info("Проверка Packer")
     run(["packer", "init", str(packer_dir)], env=env)
