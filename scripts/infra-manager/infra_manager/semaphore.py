@@ -13,21 +13,20 @@ from pathlib import Path
 from typing import Any
 
 from .common import InfraManagerError, console
+from .settings import PATHS, SETTINGS
 
-SEMAPHORE_URL = "http://127.0.0.1:3000"
-PROJECT_NAME = "Proxmox Infrastructure"
-OPENTOFU_ENV_NAME = "OpenTofu PVE"
-PROJECT_ID_FILE = Path("/var/lib/infra-manager/semaphore-project-id")
-
-SECRET_DIR = Path("/etc/infra-manager/secrets")
-ADMIN_PASSWORD_FILE = SECRET_DIR / "initial-admin-password"
-SEMAPHORE_API_TOKEN_FILE = SECRET_DIR / "semaphore-api-token"
-PVE_API_ENV = SECRET_DIR / "pve-api.env"
-GITHUB_KEY = Path("/root/.ssh/github_proxmox_repo_ed25519")
-GITHUB_KEY_COPY = SECRET_DIR / "github_project_ed25519"
-ANSIBLE_PUBLIC_KEY = Path("/etc/infra-manager/ansible/guest_ed25519.pub")
-
-PROJECT_REPO = "git@github.com:zsergeyru/proxmox.git"
+SEMAPHORE_URL = SETTINGS.semaphore_url
+PROJECT_NAME = SETTINGS.project_name
+OPENTOFU_ENV_NAME = SETTINGS.opentofu_env_name
+PROJECT_ID_FILE = PATHS.semaphore_project_id_file
+SECRET_DIR = PATHS.secret_dir
+ADMIN_PASSWORD_FILE = PATHS.admin_password_file
+SEMAPHORE_API_TOKEN_FILE = PATHS.semaphore_api_token_file
+PVE_API_ENV = PATHS.pve_api_env
+GITHUB_KEY = PATHS.github_key
+GITHUB_KEY_COPY = PATHS.github_key_copy
+ANSIBLE_PUBLIC_KEY = PATHS.ansible_public_key
+PROJECT_REPO = SETTINGS.project_repo
 
 
 def nonempty(path: Path) -> bool:
@@ -570,7 +569,7 @@ def configure_project(branch: str | None = None) -> int:
             "Не найден постоянный PVE API credential"
         )
 
-    branch = branch or os.environ.get("INFRA_PROJECT_BRANCH", "main")
+    branch = branch or os.environ.get("INFRA_PROJECT_BRANCH", SETTINGS.default_project_branch)
     persist_github_key()
 
     client = SemaphoreClient()
