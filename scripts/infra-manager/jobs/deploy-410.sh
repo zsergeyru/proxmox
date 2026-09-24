@@ -20,10 +20,11 @@ info() { printf '==> %s\n' "$*"; }
 
 cleanup() {
     rm -f "$PLAN_FILE"
+    unset PVE_TOKEN_SECRET AUTH_HEADER
 }
 trap cleanup EXIT
 
-for command in python3 jq tofu ansible-playbook ssh-keygen ssh-keyscan; do
+for command in python3 jq curl tofu ansible-playbook ssh-keygen ssh-keyscan; do
     command -v "$command" >/dev/null 2>&1 || die "Не найден $command"
 done
 
@@ -59,11 +60,62 @@ guest_ip="$(jq -r '.guests["410"].network.ipv4 // empty' "$GUEST_STATE_FILE")"
 
 guest_ip="${guest_ip%%/*}"
 
+PVE_ENDPOINT="${TF_VAR_pve_endpoint%/}"
+PVE_API="${PVE_ENDPOINT}/api2/json"
+PVE_TOKEN_ID="${TF_VAR_pve_api_token%%=*}"
+PVE_TOKEN_SECRET="${TF_VAR_pve_api_token#*=}"
+AUTH_HEADER="Authorization: PVEAPIToken=${PVE_TOKEN_ID}=${PVE_TOKEN_SECRET}"
+
+[[ -n "$PVE_TOKEN_ID" && -n "$PVE_TOKEN_SECRET" && "$PVE_TOKEN_ID" != "$PVE_TOKEN_SECRET" ]] \
+    || die "TF_VAR_pve_api_token имеет неверный формат"
+
+pve_guest_410() {
+    curl -fsS \
+        --connect-timeout 5 \
+        --max-time 30 \
+        --cacert "$CA_BUNDLE" \
+        -H "$AUTH_HEADER" \
+        --get \
+        --data-urlencode "type=vm" \
+        "${PVE_API}/cluster/resources" \
+      | jq -c '.data[]? | select((.vmid | tostring) == "410")' \
+      | head -n1
+}
+
 info "Инициализация OpenTofu"
 tofu -chdir="$OPENTOFU_DIR" init \
     -input=false \
     -no-color \
     -lockfile=readonly
+
+state_present=0
+if tofu -chdir="$OPENTOFU_DIR" state show "$TARGET_RESOURCE" >/dev/null 2>&1; then
+    state_present=1
+fi
+
+pve_guest="$(pve_guest_410)" || die "Не удалось проверить VMID 410 через PVE API"
+
+if [[ -n "$pve_guest" ]]; then
+    pve_type="$(jq -r '.type // empty' <<<"$pve_guest")"
+    pve_name="$(jq -r '.name // empty' <<<"$pve_guest")"
+
+    [[ "$pve_type" == "qemu" && "$pve_name" == "ai-control" ]] || {
+        die "VMID 410 уже занят объектом '$pve_name' типа '$pve_type'; автоматический импорт запрещён"
+    }
+
+    if ((state_present == 0)); then
+        info "Восстановление OpenTofu state для существующей VM 410"
+        tofu -chdir="$OPENTOFU_DIR" import \
+            -input=false \
+            -no-color \
+            "$TARGET_RESOURCE" \
+            "pve/410"
+        state_present=1
+        ok "Существующая VM 410 принята в OpenTofu state"
+    fi
+elif ((state_present == 1)); then
+    die "VM 410 есть в OpenTofu state, но отсутствует в PVE"
+fi
 
 info "План OpenTofu для 410"
 tofu -chdir="$OPENTOFU_DIR" plan \
