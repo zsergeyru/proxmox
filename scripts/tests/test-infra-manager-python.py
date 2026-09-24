@@ -33,7 +33,11 @@ from infra_manager.template import (  # noqa: E402
     _template_failures,
     _validate_cloud_status,
 )
-from infra_manager.semaphore import PROJECT_REPO, SemaphoreClient  # noqa: E402
+from infra_manager.semaphore import (  # noqa: E402
+    PROJECT_REPO,
+    SEMAPHORE_TEMPLATES,
+    SemaphoreClient,
+)
 from infra_manager.status import (  # noqa: E402
     _check_git_branch_contract,
     _project_branch,
@@ -160,10 +164,18 @@ def main_test() -> None:
         "ssh_key_id": 7,
         "git_branch": branch,
     }
+    template_names = [spec.name for spec in SEMAPHORE_TEMPLATES]
+    if len(template_names) != len(set(template_names)):
+        fail("SEMAPHORE_TEMPLATES содержит повторяющиеся имена")
+    for spec in SEMAPHORE_TEMPLATES:
+        if spec.app != "python":
+            fail(f"Шаблон Semaphore '{spec.name}' использует неожиданный app")
+        if not (ROOT / spec.playbook).is_file():
+            fail(f"Не найден сценарий Semaphore: {spec.playbook}")
+
     templates = [
-        {"name": "OpenTofu Plan", "git_branch": branch},
-        {"name": "Build Template 9000", "git_branch": branch},
-        {"name": "Deploy Guest 410", "git_branch": branch},
+        {"name": spec.name, "git_branch": branch}
+        for spec in SEMAPHORE_TEMPLATES
     ]
     _check_git_branch_contract(
         repository,
