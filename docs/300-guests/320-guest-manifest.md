@@ -116,7 +116,7 @@ schema_version: 11
 Пример:
 
 ~~~yaml
-vmid: 311
+vmid: 310
 ~~~
 
 Это VMID для виртуальной машины или CTID для LXC.
@@ -124,7 +124,7 @@ vmid: 311
 Значение должно совпадать с числовой частью имени каталога:
 
 ~~~text
-311-dev-services/
+310-dev-services/
 ^^^
 ~~~
 
@@ -157,7 +157,7 @@ name: dev-services
 Значение должно совпадать с частью имени каталога после VMID:
 
 ~~~text
-311-dev-services/
+310-dev-services/
     ^^^^^^^^^^^^
 ~~~
 
@@ -170,7 +170,7 @@ name: dev-services
 Пример:
 
 ~~~yaml
-description: Сервисы разработки и автоматизации
+description: Службы разработки
 ~~~
 
 Поле предназначено для человека и кратко объясняет назначение гостя.
@@ -509,7 +509,7 @@ resources:
 
 ~~~yaml
 schema_version: 11
-vmid: 321
+vmid: 320
 name: app-services
 description: Прикладные сервисы
 profile: debian-lxc-docker
@@ -529,7 +529,7 @@ resources:
 
 ~~~yaml
 schema_version: 11
-vmid: 501
+vmid: 510
 name: frigate
 description: Видеонаблюдение
 profile: debian-vm
@@ -549,7 +549,7 @@ network:
 
 ~~~yaml
 schema_version: 11
-vmid: 321
+vmid: 320
 name: app-services
 description: Прикладные сервисы
 profile: debian-lxc-docker

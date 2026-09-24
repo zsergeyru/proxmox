@@ -19,10 +19,10 @@ assert payload["format_version"] == 1
 guests = payload["guests"]
 
 # Управляемый гость с profile обязан попасть во вход OpenTofu.
-assert "109" in guests
-assert guests["109"]["name"] == "network-gateway"
-assert guests["109"]["type"] == "vm"
-assert guests["109"]["network"]["ipv4"] == "192.168.1.9/16"
+assert "110" in guests
+assert guests["110"]["name"] == "network-gateway"
+assert guests["110"]["type"] == "vm"
+assert guests["110"]["network"]["ipv4"] == "192.168.1.10/16"
 
 # AI Control разворачивается как обычная VM, но не должен попадать
 # в собственную область управления managed.
@@ -33,7 +33,7 @@ assert guests["410"]["pve_management"] is False
 assert "bootstrap" not in guests["410"]
 
 # Описательный объект без profile не участвует в универсальном развёртывании.
-assert "201" not in guests
+assert "210" not in guests
 
 # Специальный 910 имеет guest.yaml без profile и не должен попасть в OpenTofu.
 assert "910" not in guests

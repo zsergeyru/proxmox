@@ -218,8 +218,8 @@ def check_pve_helpers() -> None:
     client.guest_interfaces(node="pve", vmid=410, kind="vm")
     if calls[-1] != "/nodes/pve/qemu/410/agent/network-get-interfaces":
         fail(f"Выбран неверный конечный адрес PVE API для VM: {calls[-1]}")
-    client.guest_interfaces(node="pve", vmid=311, kind="lxc")
-    if calls[-1] != "/nodes/pve/lxc/311/interfaces":
+    client.guest_interfaces(node="pve", vmid=310, kind="lxc")
+    if calls[-1] != "/nodes/pve/lxc/310/interfaces":
         fail(f"Выбран неверный конечный адрес PVE API для LXC: {calls[-1]}")
 
 

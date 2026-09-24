@@ -70,7 +70,7 @@ rootfs/<путь>
 Например:
 
 ~~~text
-infrastructure/guests/311-dev-services/rootfs/etc/my-service/config.yaml
+infrastructure/guests/310-dev-services/rootfs/etc/my-service/config.yaml
 ↓
 /etc/my-service/config.yaml
 ~~~
