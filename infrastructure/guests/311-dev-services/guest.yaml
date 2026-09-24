@@ -15,7 +15,3 @@ resources:
   swap_mb: 1024
   disk_size_gb: 32
 
-bootstrap:
-  - git
-  - docker
-  - ansible
