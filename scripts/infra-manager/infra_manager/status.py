@@ -185,11 +185,13 @@ def _load_repository_branches(
 def _dict_items(value: Any, kind: str) -> tuple[dict[str, Any], ...]:
     """Нормализовать список объектов Semaphore для снимка."""
 
-    if not isinstance(value, list):
+    if not isinstance(value, list) or not all(
+        isinstance(item, dict) for item in value
+    ):
         raise InfraManagerError(
             f"Semaphore вернул некорректный список: {kind}"
         )
-    return tuple(item for item in value if isinstance(item, dict))
+    return tuple(value)
 
 
 def load_semaphore_snapshot(
