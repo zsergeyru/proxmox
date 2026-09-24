@@ -14,6 +14,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -29,14 +31,26 @@ jobs:
       - name: Validate repository
         run: python scripts/validate_repo.py
 
-      - name: Check undefined Python names
-        run: ruff check --select F821 scripts
+      - name: Check Python with Ruff
+        run: ruff check scripts
 
       - name: Compile Python tooling
         run: python -m compileall -q scripts
 
       - name: Run infra-manager Python foundation checks
         run: python scripts/tests/test-infra-manager-python.py
+
+      - name: Run guest deployment checks
+        run: python scripts/tests/test-guest-deploy.py
+
+      - name: Run status checks
+        run: python scripts/tests/test-status.py
+
+      - name: Run setup checks
+        run: python scripts/tests/test-setup.py
+
+      - name: Run template checks
+        run: python scripts/tests/test-template.py
 
       - name: Run OpenTofu input contract checks
         run: python scripts/tests/test-opentofu-input.py
@@ -165,4 +179,17 @@ jobs:
           python scripts/validate_repo.py
 
       - name: Check whitespace errors
-        run: git diff --check
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BEFORE_SHA: ${{ github.event.before }}
+          CURRENT_SHA: ${{ github.sha }}
+        run: |
+          if [[ "$EVENT_NAME" == "pull_request" ]]; then
+            git diff --check "$BASE_SHA...$HEAD_SHA"
+          elif [[ "$BEFORE_SHA" =~ ^0+$ ]]; then
+            git show --check --format= "$CURRENT_SHA"
+          else
+            git diff --check "$BEFORE_SHA..$CURRENT_SHA"
+          fi

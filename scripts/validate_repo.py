@@ -6,10 +6,12 @@ from __future__ import annotations
 import ipaddress
 import re
 import sys
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import yaml
 from jsonschema import Draft202012Validator
+from jsonschema.exceptions import SchemaError
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "guests"))
 
@@ -87,7 +89,7 @@ def warn(msg: str) -> None:
 def load_yaml(path: Path) -> dict | None:
     try:
         data = yaml.safe_load(path.read_text(encoding="utf-8"))
-    except Exception as exc:
+    except (OSError, UnicodeError, yaml.YAMLError) as exc:
         fail(f"{path.relative_to(ROOT)}: не удалось прочитать YAML: {exc}")
         return None
     if not isinstance(data, dict):
@@ -101,7 +103,7 @@ def load_validator(path: Path) -> Draft202012Validator:
         schema = yaml.safe_load(path.read_text(encoding="utf-8"))
         Draft202012Validator.check_schema(schema)
         return Draft202012Validator(schema)
-    except Exception as exc:
+    except (OSError, UnicodeError, yaml.YAMLError, SchemaError) as exc:
         fail(f"{path.relative_to(ROOT)}: некорректная schema валидатора: {exc}")
         return Draft202012Validator({})
 
@@ -340,11 +342,22 @@ def manifests() -> list[Path]:
     return found
 
 
-def validate() -> None:
+@dataclass
+class ValidationState:
+    defaults: dict
+    cfg: NetworkConfig
+    validators: dict[str, Draft202012Validator]
+    profiles: dict
+    seen: dict[int, Path] = field(default_factory=dict)
+    used_ips: dict[ipaddress.IPv4Address, Path] = field(default_factory=dict)
+    used_profiles: set[str] = field(default_factory=set)
+
+
+def _load_validation_state() -> ValidationState | None:
     validators = {key: load_validator(path) for key, path in SCHEMAS.items()}
     defaults = load_yaml(DEFAULTS)
     if defaults is None:
-        return
+        return None
 
     rel_defaults = DEFAULTS.relative_to(ROOT)
     check_secrets(rel_defaults, defaults)
@@ -357,82 +370,141 @@ def validate() -> None:
     cfg = network_defaults(defaults)
     check_profiles(defaults)
     if not defaults_ok or cfg is None:
+        return None
+
+    profiles = defaults.get("profiles", {})
+    if not isinstance(profiles, dict):
+        profiles = {}
+    return ValidationState(
+        defaults=defaults,
+        cfg=cfg,
+        validators=validators,
+        profiles=profiles,
+    )
+
+
+def _check_manifest_identity(
+    rel: Path,
+    data: dict,
+    match: re.Match[str],
+    state: ValidationState,
+) -> None:
+    vmid = data["vmid"]
+    expected_vmid = int(match.group(1))
+    expected_name = match.group(2)
+    if vmid != expected_vmid:
+        fail(
+            f"{rel}: vmid {vmid} не соответствует имени каталога "
+            f"{expected_vmid}"
+        )
+    if data["name"] != expected_name:
+        fail(
+            f"{rel}: name {data['name']!r} не соответствует "
+            f"имени каталога {expected_name!r}"
+        )
+    if vmid in state.seen:
+        fail(f"дублирующийся VMID {vmid}: {state.seen[vmid]} и {rel}")
+    else:
+        state.seen[vmid] = rel
+
+
+def _validate_profiled_manifest(
+    rel: Path,
+    data: dict,
+    state: ValidationState,
+) -> None:
+    profile_name = data.get("profile")
+    if profile_name in state.profiles:
+        state.used_profiles.add(profile_name)
+    check_source_overrides(rel, data, state.defaults)
+
+    try:
+        resolved = resolve_effective_guest(data, state.defaults, state.cfg)
+    except GuestConfigError as exc:
+        fail(f"{rel}: {exc}")
         return
 
-    seen: dict[int, Path] = {}
-    used_ips: dict[ipaddress.IPv4Address, Path] = {}
-    used_profiles: set[str] = set()
-    profiles = defaults.get("profiles", {})
+    effective = resolved.effective
+    check_resources(rel, effective, str(effective.get("type")))
+    if not validate_schema(
+        rel,
+        effective,
+        state.validators["effective"],
+        "effective schema",
+    ):
+        return
+    check_effective_network(
+        rel,
+        data,
+        effective,
+        state.cfg,
+        state.used_ips,
+    )
+    check_profiled_guest(rel, data, effective)
+    check_description(rel, data)
 
-    for path in manifests():
-        rel = path.relative_to(ROOT)
-        match = DIR_RE.fullmatch(path.parent.name)
-        assert match is not None
 
-        data = load_yaml(path)
-        if data is None or not validate_schema(
-            rel,
-            data,
-            validators["source"],
-            "source schema",
-        ):
-            continue
-
-        vmid = data["vmid"]
-        expected_vmid = int(match.group(1))
-        expected_name = match.group(2)
-        if vmid != expected_vmid:
-            fail(f"{rel}: vmid {vmid} не соответствует имени каталога {expected_vmid}")
-        if data["name"] != expected_name:
-            fail(
-                f"{rel}: name {data['name']!r} не соответствует "
-                f"имени каталога {expected_name!r}"
-            )
-        if vmid in seen:
-            fail(f"дублирующийся VMID {vmid}: {seen[vmid]} и {rel}")
+def _validate_standalone_manifest(
+    rel: Path,
+    data: dict,
+    state: ValidationState,
+) -> None:
+    check_resources(rel, data)
+    override = get_nested(data, ("network", "ipv4"))
+    if override is not MISSING and not is_dhcp_ipv4(override):
+        try:
+            address = parse_bare_ipv4(override)
+        except GuestConfigError as exc:
+            fail(f"{rel}: {exc}")
         else:
-            seen[vmid] = rel
-        check_secrets(rel, data)
-
-        if data.get("profile"):
-            if data.get("profile") in profiles:
-                used_profiles.add(data["profile"])
-            check_source_overrides(rel, data, defaults)
-            try:
-                resolved = resolve_effective_guest(data, defaults, cfg)
-            except GuestConfigError as exc:
-                fail(f"{rel}: {exc}")
-                continue
-
-            effective = resolved.effective
-            check_resources(rel, effective, str(effective.get("type")))
-            if not validate_schema(
+            check_address(
                 rel,
-                effective,
-                validators["effective"],
-                "effective schema",
-            ):
-                continue
-            check_effective_network(rel, data, effective, cfg, used_ips)
-            check_profiled_guest(rel, data, effective)
-            check_description(rel, data)
-        else:
-            check_resources(rel, data)
-            override = get_nested(data, ("network", "ipv4"))
-            if override is not MISSING and not is_dhcp_ipv4(override):
-                try:
-                    address = parse_bare_ipv4(override)
-                except GuestConfigError as exc:
-                    fail(f"{rel}: {exc}")
-                else:
-                    check_address(rel, vmid, address, cfg, used_ips)
-            check_description(rel, data)
+                data["vmid"],
+                address,
+                state.cfg,
+                state.used_ips,
+            )
+    check_description(rel, data)
 
-    for profile in sorted(set(profiles) - used_profiles):
+
+def _validate_manifest(path: Path, state: ValidationState) -> None:
+    rel = path.relative_to(ROOT)
+    match = DIR_RE.fullmatch(path.parent.name)
+    assert match is not None
+
+    data = load_yaml(path)
+    if data is None or not validate_schema(
+        rel,
+        data,
+        state.validators["source"],
+        "source schema",
+    ):
+        return
+
+    _check_manifest_identity(rel, data, match, state)
+    check_secrets(rel, data)
+    if data.get("profile"):
+        _validate_profiled_manifest(rel, data, state)
+    else:
+        _validate_standalone_manifest(rel, data, state)
+
+
+def _warn_unused_profiles(state: ValidationState) -> None:
+    rel_defaults = DEFAULTS.relative_to(ROOT)
+    for profile in sorted(set(state.profiles) - state.used_profiles):
         warn(
             f"{rel_defaults}: профиль {profile!r} не используется "
             "ни одним гостем с profile"
         )
+
+
+def validate() -> None:
+    state = _load_validation_state()
+    if state is None:
+        return
+    for path in manifests():
+        _validate_manifest(path, state)
+    _warn_unused_profiles(state)
 
 
 def main() -> int:

@@ -10,8 +10,8 @@ MODULE_ROOT = Path(__file__).resolve().parents[1]
 REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(MODULE_ROOT))
 
-from infra_manager.common import InfraManagerError, console  # noqa: E402
-from infra_manager.opentofu import run_plan  # noqa: E402
+from infra_manager.common import InfraManagerError, console
+from infra_manager.opentofu import run_plan
 
 
 def main() -> int:
