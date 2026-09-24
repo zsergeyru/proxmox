@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -119,6 +120,13 @@ class Settings:
     runtime_version: str = "v1"
     opentofu_version: str = "1.12.6"
     packer_version: str = "1.15.4"
+
+    def project_branch(self) -> str:
+        """Вернуть выбранную Git-ветку проекта."""
+        return os.environ.get(
+            "INFRA_PROJECT_BRANCH",
+            self.default_project_branch,
+        )
 
 
 PATHS = Paths()
