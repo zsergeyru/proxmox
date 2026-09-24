@@ -101,10 +101,10 @@ def main_test() -> None:
                 sys.executable,
                 "-c",
                 "print('LOGGED')",
-                "--token",
+                "--api-key",
                 "secret-value",
             ],
-            sensitive_args=(5,),
+            sensitive_args=(4,),
         )
         log_text = command_log.read_text(encoding="utf-8")
         if "LOGGED" not in log_text:
@@ -274,6 +274,17 @@ def main_test() -> None:
         fail("python3 отсутствует в контракте setup")
     if "python3-yaml" not in BASE_PACKAGES:
         fail("python3-yaml отсутствует в контракте setup")
+
+    package_dir = MODULE_ROOT / "infra_manager"
+    for module_path in package_dir.glob("*.py"):
+        if module_path.name == "common.py":
+            continue
+        source = module_path.read_text(encoding="utf-8")
+        if "subprocess.run(" in source:
+            fail(
+                "Внешние команды должны выполняться только через "
+                f"CommandRunner: {module_path.name}"
+            )
 
     if PATHS.pve_api_env != Path("/etc/infra-manager/secrets/pve-api.env"):
         fail("Единый путь PVE credential имеет неожиданное значение")
