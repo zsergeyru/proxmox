@@ -12,8 +12,6 @@ management:
   - ssh_identity
   - project_repo_read
 
-bootstrap:
-  - git
 
 resources:
   cores: 2
