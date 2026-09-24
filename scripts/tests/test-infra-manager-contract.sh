@@ -18,6 +18,8 @@ VERIFY_TEMPLATE="$ROOT/scripts/infra-manager/jobs/verify-template.py"
 DEPLOY_GUEST="$ROOT/scripts/infra-manager/jobs/deploy-guest.py"
 PY_OPENTOFU="$ROOT/scripts/infra-manager/infra_manager/opentofu.py"
 PY_TEMPLATE="$ROOT/scripts/infra-manager/infra_manager/template.py"
+PY_TEMPLATE_BUILD="$ROOT/scripts/infra-manager/infra_manager/template_build.py"
+PY_TEMPLATE_VERIFY="$ROOT/scripts/infra-manager/infra_manager/template_verify.py"
 COMPOSE="$ROOT/infrastructure/guests/910-infra-manager/compose/docker-compose.yml"
 DOCKERFILE="$ROOT/infrastructure/guests/910-infra-manager/compose/runtime/Dockerfile"
 REQ="$ROOT/infrastructure/guests/910-infra-manager/compose/runtime/requirements.txt"
@@ -31,7 +33,7 @@ SSH_CONFIG="$ROOT/infrastructure/guests/910-infra-manager/compose/runtime/ssh_co
 die() { printf 'ОШИБКА: %s\n' "$*" >&2; exit 1; }
 ok()  { printf '[ОК] %s\n' "$*"; }
 
-for file in "$SETUP" "$PY_SETUP" "$PY_HOST_SETUP" "$PY_RUNTIME_SETUP" "$PY_SETTINGS" "$PY_SEMAPHORE" "$PY_STATUS" "$PY_PVE" "$STATUS" "$ACCESS" "$LIFECYCLE" "$BUILD_TEMPLATE" "$VERIFY_TEMPLATE" "$DEPLOY_GUEST" "$PY_OPENTOFU" "$PY_TEMPLATE" "$COMPOSE" "$DOCKERFILE" "$REQ" "$PLAN" "$PVE_BOOTSTRAP_ACCESS" "$OPENTOFU_LOCK" "$GUEST_MANIFEST" "$PROVISION" "$SSH_CONFIG"; do
+for file in "$SETUP" "$PY_SETUP" "$PY_HOST_SETUP" "$PY_RUNTIME_SETUP" "$PY_SETTINGS" "$PY_SEMAPHORE" "$PY_STATUS" "$PY_PVE" "$STATUS" "$ACCESS" "$LIFECYCLE" "$BUILD_TEMPLATE" "$VERIFY_TEMPLATE" "$DEPLOY_GUEST" "$PY_OPENTOFU" "$PY_TEMPLATE" "$PY_TEMPLATE_BUILD" "$PY_TEMPLATE_VERIFY" "$COMPOSE" "$DOCKERFILE" "$REQ" "$PLAN" "$PVE_BOOTSTRAP_ACCESS" "$OPENTOFU_LOCK" "$GUEST_MANIFEST" "$PROVISION" "$SSH_CONFIG"; do
     [[ -s "$file" ]] || die "Отсутствует обязательный файл: $file"
 done
 
@@ -338,11 +340,15 @@ fi
 
 grep -q 'run_build_template' "$BUILD_TEMPLATE" \
     || die "Build Template должен передавать выполнение Python-модулю"
+grep -q 'infra_manager.template_build import run_build_template' "$BUILD_TEMPLATE" \
+    || die "Build Template должен использовать отдельный модуль сборки"
+grep -q 'infra_manager.template_verify import run_verify_template' "$VERIFY_TEMPLATE" \
+    || die "Verify Template должен использовать отдельный модуль проверки"
 grep -q '^TEMPLATE_VERSION = 8' "$PY_TEMPLATE" \
     || die "Python-сборка должна работать с Template-Version 8"
-grep -q 'run_verify_template(vmid)' "$PY_TEMPLATE" \
+grep -q 'run_verify_template(vmid)' "$PY_TEMPLATE_BUILD" \
     || die "После сборки должен запускаться короткий Full Clone test"
-grep -q '^TEST_VMID = 9099' "$PY_TEMPLATE" \
+grep -q '^TEST_VMID = 9099' "$PY_TEMPLATE_VERIFY" \
     || die "Проверка шаблона 9000 должна использовать VMID 9099"
 grep -q 'run_deploy_guest' "$DEPLOY_GUEST" \
     || die "Deploy Guest должен передавать выполнение Python-модулю"

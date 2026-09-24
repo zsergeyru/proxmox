@@ -67,11 +67,9 @@ from infra_manager.status import (  # noqa: E402
     load_semaphore_snapshot,
     validate_semaphore_snapshot,
 )
-from infra_manager.template import (  # noqa: E402
-    _packer_inputs,
-    _template_failures,
-    _validate_cloud_status,
-)
+from infra_manager.template import _template_failures  # noqa: E402
+from infra_manager.template_build import _packer_inputs  # noqa: E402
+from infra_manager.template_verify import _validate_cloud_status  # noqa: E402
 
 
 def fail(message: str) -> None:
