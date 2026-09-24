@@ -398,6 +398,7 @@ volumes = runtime.get('volumes', [])
 required = {
     '/var/lib/infra-manager/opentofu:/var/lib/infra-manager/opentofu',
     '/etc/infra-manager/ca:/etc/infra-manager/ca:ro',
+    '/etc/infra-manager/ansible:/etc/infra-manager/ansible:ro',
 }
 missing = required.difference(volumes)
 if missing:
