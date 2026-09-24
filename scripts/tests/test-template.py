@@ -13,7 +13,10 @@ sys.path.insert(0, str(MODULE_ROOT))
 
 from infra_manager.template import _template_failures
 from infra_manager.template_build import _packer_inputs
-from infra_manager.template_verify import _validate_cloud_status
+from infra_manager.template_verify import (
+    _validate_cloud_command,
+    _validate_cloud_status,
+)
 
 
 def fail(message: str) -> None:
@@ -71,6 +74,29 @@ def main_test() -> None:
         '{"status":"done","init":{},"init-local":{},'
         '"modules-config":{},"modules-final":{}}'
     )
+
+    warning = (
+        "Deprecated user value of type string is deprecated in 22.2 "
+        "and scheduled to be removed in 27.2"
+    )
+    _validate_cloud_command(
+        2,
+        '{"status":"done","errors":[],"recoverable_errors":'
+        '{"DEPRECATED":["'
+        + warning
+        + '"]},"init":{},"init-local":{},'
+        '"modules-config":{},"modules-final":{}}',
+    )
+    try:
+        _validate_cloud_command(
+            1,
+            '{"status":"error","init":{},"init-local":{},'
+            '"modules-config":{},"modules-final":{}}',
+        )
+    except Exception:
+        pass
+    else:
+        fail("Код 1 cloud-init status был принят как успешный")
 
     print("Проверки шаблона infra-manager пройдены.")
 
