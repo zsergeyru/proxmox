@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Unit and contract checks for infra-manager status."""
+"""Модульные и контрактные проверки состояния infra-manager."""
 
 from __future__ import annotations
 
@@ -39,7 +39,7 @@ def main_test() -> None:
     try:
         os.environ["INFRA_PROJECT_BRANCH"] = "feature/test-branch"
         if _project_branch() != "feature/test-branch":
-            fail("status does not honor INFRA_PROJECT_BRANCH")
+            fail("status не учитывает INFRA_PROJECT_BRANCH")
     finally:
         if previous_branch is None:
             os.environ.pop("INFRA_PROJECT_BRANCH", None)
@@ -54,12 +54,12 @@ def main_test() -> None:
     }
     template_names = [spec.name for spec in SEMAPHORE_TEMPLATES]
     if len(template_names) != len(set(template_names)):
-        fail("SEMAPHORE_TEMPLATES contains duplicate names")
+        fail("SEMAPHORE_TEMPLATES содержит повторяющиеся имена")
     for spec in SEMAPHORE_TEMPLATES:
         if spec.app != "python":
-            fail(f"Semaphore template '{spec.name}' has an unexpected app")
+            fail(f"Шаблон Semaphore '{spec.name}' имеет неожиданный тип приложения")
         if not (ROOT / spec.playbook).is_file():
-            fail(f"Semaphore playbook does not exist: {spec.playbook}")
+            fail(f"Playbook Semaphore не существует: {spec.playbook}")
 
     templates = [
         {"name": spec.name, "git_branch": branch}
@@ -86,7 +86,7 @@ def main_test() -> None:
     except InfraManagerError:
         pass
     else:
-        fail("status accepted an incorrect repository branch")
+        fail("status принял неверную ветку репозитория")
 
     wrong_templates = [dict(item) for item in templates]
     wrong_templates[1]["git_branch"] = "main"
@@ -101,7 +101,7 @@ def main_test() -> None:
     except InfraManagerError:
         pass
     else:
-        fail("status accepted an incorrect template branch")
+        fail("status принял неверную ветку шаблона")
 
     one = find_unique_by_name(
         [{"id": 1, "name": "proxmox"}],
@@ -109,7 +109,7 @@ def main_test() -> None:
         "Git repository",
     )
     if one is None or one.get("id") != 1:
-        fail("find_unique_by_name did not return the only matching object")
+        fail("find_unique_by_name не вернул единственный подходящий объект")
 
     none = find_unique_by_name(
         [{"id": 1, "name": "other"}],
@@ -117,7 +117,7 @@ def main_test() -> None:
         "Git repository",
     )
     if none is not None:
-        fail("find_unique_by_name did not return None for a missing object")
+        fail("find_unique_by_name не вернул None для отсутствующего объекта")
 
     try:
         find_unique_by_name(
@@ -131,14 +131,14 @@ def main_test() -> None:
     except InfraManagerError:
         pass
     else:
-        fail("find_unique_by_name accepted duplicates")
+        fail("find_unique_by_name разрешил дубликаты")
 
     try:
         require_unique_by_name([], "proxmox", "Git repository")
     except InfraManagerError:
         pass
     else:
-        fail("require_unique_by_name accepted a missing object")
+        fail("require_unique_by_name принял отсутствующий объект")
 
     semaphore_snapshot = SemaphoreSnapshot(
         project_id=1,
@@ -182,7 +182,7 @@ def main_test() -> None:
                 return list(semaphore_snapshot.environments)
             if "/templates?" in path:
                 return list(semaphore_snapshot.templates)
-            raise AssertionError(f"Unexpected Semaphore endpoint: {path}")
+            raise AssertionError(f"Неожиданный конечный адрес Semaphore API: {path}")
 
     snapshot_client = SnapshotClient()
     with patch.object(
@@ -199,11 +199,11 @@ def main_test() -> None:
         environments=semaphore_snapshot.environments,
         templates=semaphore_snapshot.templates,
     ):
-        fail("load_semaphore_snapshot assembled the project state incorrectly")
+        fail("load_semaphore_snapshot неверно собрал состояние проекта")
     if len(snapshot_client.paths) != 4:
-        fail("Semaphore snapshot must read each collection exactly once")
+        fail("Снимок Semaphore должен читать каждую коллекцию ровно один раз")
 
-    print("infra-manager status checks passed.")
+    print("Проверки состояния infra-manager пройдены.")
 
 
 if __name__ == "__main__":
