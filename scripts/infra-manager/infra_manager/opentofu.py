@@ -6,6 +6,7 @@ import json
 import os
 import sys
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +17,28 @@ from .settings import PATHS
 CA_BUNDLE = PATHS.ca_bundle
 STATE_DIR = PATHS.opentofu_dir
 GUEST_STATE_FILE = PATHS.opentofu_input
+
+
+@dataclass(frozen=True)
+class DeploymentContext:
+    """Общие неизменяемые данные одного развёртывания VM."""
+
+    repo_root: Path
+    opentofu_dir: Path
+    env: dict[str, str]
+    client: PveClient
+    vmid: int
+    name: str
+    node: str
+    template_vmid: int
+    address: str
+    guest_dir: Path
+    provision_file: Path
+    private_key: Path
+    playbook: Path
+    known_hosts: Path
+    plan_file: Path
+    target: str
 
 
 def _require_env(name: str) -> str:
