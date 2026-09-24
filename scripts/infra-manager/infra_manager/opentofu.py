@@ -16,33 +16,6 @@ STATE_DIR = PATHS.opentofu_dir
 GUEST_STATE_FILE = PATHS.opentofu_input
 
 
-@dataclass(frozen=True)
-class DeploymentPaths:
-    """Пути, используемые на нескольких этапах развёртывания VM."""
-
-    opentofu_dir: Path
-    guest_dir: Path
-    private_key: Path
-    playbook: Path
-    known_hosts: Path
-    plan_file: Path
-
-
-@dataclass(frozen=True)
-class DeploymentContext:
-    """Общие неизменяемые данные одного развёртывания VM."""
-
-    client: PveClient
-    vmid: int
-    name: str
-    node: str
-    template_vmid: int
-    address: str
-    target: str
-    env: dict[str, str]
-    paths: DeploymentPaths
-
-
 def _require_env(name: str) -> str:
     value = os.environ.get(name, "").strip()
     if not value:
