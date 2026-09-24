@@ -25,6 +25,7 @@ SEMAPHORE_API_TOKEN_FILE = SECRET_DIR / "semaphore-api-token"
 PVE_API_ENV = SECRET_DIR / "pve-api.env"
 GITHUB_KEY = Path("/root/.ssh/github_proxmox_repo_ed25519")
 GITHUB_KEY_COPY = SECRET_DIR / "github_project_ed25519"
+ANSIBLE_PUBLIC_KEY = Path("/etc/infra-manager/ansible/guest_ed25519.pub")
 
 PROJECT_REPO = "git@github.com:zsergeyru/proxmox.git"
 
@@ -385,8 +386,19 @@ class SemaphoreClient:
             "Variable Group",
         )
 
+        if not nonempty(ANSIBLE_PUBLIC_KEY):
+            raise InfraManagerError(
+                f"Не найден открытый ключ Ansible: {ANSIBLE_PUBLIC_KEY}"
+            )
+        ansible_public_key = ANSIBLE_PUBLIC_KEY.read_text(
+            encoding="utf-8"
+        ).strip()
+
         env_json = json.dumps(
-            {"TF_VAR_pve_endpoint": endpoint},
+            {
+                "TF_VAR_pve_endpoint": endpoint,
+                "TF_VAR_ansible_ssh_public_key": ansible_public_key,
+            },
             ensure_ascii=False,
             separators=(",", ":"),
         )
