@@ -1,6 +1,6 @@
 # 910 создаётся и сопровождается public bootstrap, поэтому profile намеренно отсутствует.
 # Отсутствие profile исключает этот объект из обычного OpenTofu-контура.
-schema_version: 10
+schema_version: 11
 vmid: 910
 name: infra-manager
 node: pve
