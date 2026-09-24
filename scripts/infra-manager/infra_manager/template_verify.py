@@ -154,6 +154,16 @@ def _validate_cloud_status(raw: str) -> None:
     )
 
 
+def _validate_cloud_command(returncode: int, stdout: str) -> None:
+    """Проверить код завершения и содержимое cloud-init status."""
+
+    if returncode not in (0, 2):
+        raise InfraManagerError(
+            f"cloud-init status завершился с кодом {returncode}"
+        )
+    _validate_cloud_status(stdout)
+
+
 def _prepare_test_vmid(
     client: PveClient,
     *,
@@ -338,9 +348,10 @@ def run_verify_template(vmid: int) -> int:
                 *ssh,
                 "cloud-init status --wait --format json",
             ],
+            check=False,
             capture_output=True,
         )
-        _validate_cloud_status(cloud.stdout)
+        _validate_cloud_command(cloud.returncode, cloud.stdout)
 
         agent = run(
             [*ssh, "systemctl is-active --quiet qemu-guest-agent"],
