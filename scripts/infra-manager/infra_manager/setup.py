@@ -99,7 +99,7 @@ class Setup:
             ),
             staging_secret=os.environ.get("PVE_API_SECRET_FILE", ""),
             recover=os.environ.get("INFRA_MANAGER_RECOVER", "0") == "1",
-            project_branch=os.environ.get("INFRA_PROJECT_BRANCH", SETTINGS.default_project_branch),
+            project_branch=SETTINGS.project_branch(),
             color=(
                 os.environ.get("INFRA_MANAGER_COLOR", "0") == "1"
                 and not os.environ.get("NO_COLOR")
