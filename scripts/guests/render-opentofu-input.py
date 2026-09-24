@@ -13,13 +13,13 @@ import yaml
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "scripts" / "guests"))
 
-from resolver import GuestConfigError, resolve_effective_guest  # noqa: E402
+from resolver import GuestConfigError, resolve_effective_guest
 
 
 def load_yaml(path: Path) -> dict:
     data = yaml.safe_load(path.read_text(encoding="utf-8"))
     if not isinstance(data, dict):
-        raise ValueError(f"{path}: ожидается YAML mapping")
+        raise TypeError(f"{path}: ожидается YAML mapping")
     return data
 
 
@@ -45,7 +45,7 @@ def build_payload(root: Path) -> dict:
         vmid = effective.get("vmid")
 
         if not isinstance(vmid, int):
-            raise ValueError(f"{manifest}: итоговый vmid должен быть integer")
+            raise TypeError(f"{manifest}: итоговый vmid должен быть integer")
 
         key = str(vmid)
         if key in result:
@@ -72,7 +72,13 @@ def main() -> int:
 
     try:
         payload = build_payload(REPO_ROOT)
-    except (OSError, ValueError, GuestConfigError, yaml.YAMLError) as exc:
+    except (
+        OSError,
+        TypeError,
+        ValueError,
+        GuestConfigError,
+        yaml.YAMLError,
+    ) as exc:
         print(f"ОШИБКА: {exc}", file=sys.stderr)
         return 1
 
