@@ -8,6 +8,7 @@ import io
 import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -18,6 +19,7 @@ sys.path.insert(0, str(MODULE_ROOT))
 from infra_manager.cli import main  # noqa: E402
 from infra_manager.common import (  # noqa: E402
     CommandError,
+    CommandRunner,
     InfraManagerError,
     _redact_argv,
     run,
@@ -82,6 +84,33 @@ def main_test() -> None:
             )
     else:
         fail("common.run не сообщил об ошибке внешней команды")
+
+    runner = CommandRunner()
+    captured = runner.run(
+        [sys.executable, "-c", "print('CAPTURED')"],
+        capture=True,
+    )
+    if captured.stdout.strip() != "CAPTURED":
+        fail("CommandRunner capture не вернул stdout")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        command_log = Path(tmp) / "command.log"
+        logged_runner = CommandRunner(default_log_file=command_log)
+        logged_runner.run(
+            [
+                sys.executable,
+                "-c",
+                "print('LOGGED')",
+                "--token",
+                "secret-value",
+            ],
+            sensitive_args=(5,),
+        )
+        log_text = command_log.read_text(encoding="utf-8")
+        if "LOGGED" not in log_text:
+            fail("CommandRunner не записал вывод команды в лог")
+        if "secret-value" in log_text:
+            fail("CommandRunner записал чувствительный аргумент в лог")
 
     redacted = _redact_argv(
         [
