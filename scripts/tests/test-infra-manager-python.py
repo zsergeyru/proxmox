@@ -15,10 +15,15 @@ sys.path.insert(0, str(MODULE_ROOT))
 
 from infra_manager.cli import main  # noqa: E402
 from infra_manager.common import CommandError, InfraManagerError, run  # noqa: E402
+from infra_manager.opentofu import _find_guest_directory  # noqa: E402
 from infra_manager.pve import (  # noqa: E402
     PveClient,
     permission_present,
     select_management_ipv4,
+)
+from infra_manager.template import (  # noqa: E402
+    _template_failures,
+    _validate_cloud_status,
 )
 from infra_manager.semaphore import SemaphoreClient  # noqa: E402
 from infra_manager.setup import BASE_PACKAGES, Setup  # noqa: E402
@@ -202,6 +207,37 @@ def main_test() -> None:
     client.guest_interfaces(node="pve", vmid=311, kind="lxc")
     if calls[-1] != "/nodes/pve/lxc/311/interfaces":
         fail(f"Неверный PVE endpoint LXC: {calls[-1]}")
+
+    guest_dir = _find_guest_directory(ROOT, 410)
+    if guest_dir.name != "410-ai-control":
+        fail(f"Неверно найден каталог VM 410: {guest_dir}")
+
+    valid_template = {
+        "template": 1,
+        "name": "tpl-debian13",
+        "description": "template-version=8",
+        "protection": 1,
+        "scsihw": "virtio-scsi-single",
+        "agent": "1",
+        "ide0": "local-lvm:cloudinit",
+        "ciuser": "root",
+        "ipconfig0": "ip=dhcp",
+        "ciupgrade": 0,
+    }
+    if _template_failures(valid_template):
+        fail("Корректный шаблон 9000 не прошёл Python-проверку")
+
+    invalid_template = dict(valid_template)
+    invalid_template["ide0"] = ""
+    if "ide0=<cloudinit отсутствует>" not in _template_failures(
+        invalid_template
+    ):
+        fail("Python-проверка шаблона не обнаружила отсутствие Cloud-Init")
+
+    _validate_cloud_status(
+        '{"status":"done","init":{},"init-local":{},'
+        '"modules-config":{},"modules-final":{}}'
+    )
 
     print("infra-manager Python checks passed.")
 
