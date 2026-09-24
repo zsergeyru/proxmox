@@ -218,9 +218,12 @@ git@github.com:zsergeyru/proxmox.git
 - репозиторий `proxmox`;
 - Variable Group `OpenTofu PVE`;
 - шаблон `OpenTofu Plan`;
-- шаблон `Build Template 9000`.
+- шаблон `Build Template 9000`;
+- шаблон `Deploy Guest 410`.
 
-Отдельный Ansible SSH credential не создаётся до появления первой реальной Ansible-задачи.
+Все инфраструктурные задания Semaphore выполняются как Python-сценарии из `scripts/infra-manager/jobs/`. Основная логика находится в Python-пакете `infra_manager`, а не в командных оболочках.
+
+Постоянная SSH-идентичность Ansible хранится в `/etc/infra-manager/ansible/` и передаётся в `infra-runtime` только для чтения.
 
 ## Проверка
 
