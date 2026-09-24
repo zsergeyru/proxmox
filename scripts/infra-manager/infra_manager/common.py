@@ -15,6 +15,36 @@ class InfraManagerError(RuntimeError):
     """Ожидаемая ошибка infra-manager с сообщением для пользователя."""
 
 
+_SENSITIVE_ARG_MARKERS = ("password", "token", "secret")
+
+
+def _redact_argv(argv: Sequence[str]) -> tuple[str, ...]:
+    """Скрыть чувствительные значения в представлении командной строки."""
+    redacted: list[str] = []
+    hide_next = False
+
+    for arg in argv:
+        if hide_next:
+            redacted.append("[СКРЫТО]")
+            hide_next = False
+            continue
+
+        if "=" in arg:
+            name, _value = arg.split("=", 1)
+            if any(marker in name.lower() for marker in _SENSITIVE_ARG_MARKERS):
+                redacted.append(f"{name}=[СКРЫТО]")
+                continue
+
+        if any(marker in arg.lower() for marker in _SENSITIVE_ARG_MARKERS):
+            redacted.append(arg)
+            hide_next = True
+            continue
+
+        redacted.append(arg)
+
+    return tuple(redacted)
+
+
 class CommandError(InfraManagerError):
     """Внешняя команда завершилась с ошибкой."""
 
@@ -24,7 +54,7 @@ class CommandError(InfraManagerError):
         returncode: int,
         stderr: str | None = None,
     ) -> None:
-        self.argv = tuple(argv)
+        self.argv = _redact_argv(argv)
         self.returncode = returncode
         self.stderr = stderr
 
