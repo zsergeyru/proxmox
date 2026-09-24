@@ -10,10 +10,12 @@ from pathlib import Path
 from typing import Any
 
 from .common import InfraManagerError, console, require_command, run
-from .pve import CA_BUNDLE, PveClient
+from .pve import PveClient
+from .settings import PATHS
 
-STATE_DIR = Path("/var/lib/infra-manager/opentofu")
-GUEST_STATE_FILE = STATE_DIR / "guests.json"
+CA_BUNDLE = PATHS.ca_bundle
+STATE_DIR = PATHS.opentofu_dir
+GUEST_STATE_FILE = PATHS.opentofu_input
 
 
 def _require_env(name: str) -> str:
