@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
 MODULE_ROOT = ROOT / "scripts" / "infra-manager"
@@ -21,13 +23,58 @@ from infra_manager.runtime_setup import (  # noqa: E402
 )
 from infra_manager.settings import PATHS, SETTINGS  # noqa: E402
 from infra_manager.setup import Setup  # noqa: E402
+from infra_manager.setup_context import (  # noqa: E402
+    SetupContext,
+    SetupReporter,
+)
 
 
 def fail(message: str) -> None:
     raise SystemExit(message)
 
 
-def main_test() -> None:
+class RecordingRunner:
+    def __init__(self, calls: list[str]) -> None:
+        self.calls = calls
+
+    def run(self, argv: list[str], **kwargs: object) -> SimpleNamespace:
+        self.calls.append(f"runner:{' '.join(argv)}")
+        return SimpleNamespace(returncode=0, stdout="")
+
+
+class RecordingReporter:
+    def __init__(self, calls: list[str]) -> None:
+        self.calls = calls
+        self.errors: list[str] = []
+
+    def initialize(self) -> None:
+        self.calls.append("reporter.initialize")
+
+    def error(self, message: str) -> None:
+        self.errors.append(message)
+
+
+class RecordingHost:
+    def __init__(self, calls: list[str]) -> None:
+        self.calls = calls
+
+    def __getattr__(self, name: str):
+        def record() -> None:
+            self.calls.append(f"host.{name}")
+        return record
+
+
+class RecordingRuntime:
+    def __init__(self, calls: list[str]) -> None:
+        self.calls = calls
+
+    def __getattr__(self, name: str):
+        def record() -> None:
+            self.calls.append(f"runtime.{name}")
+        return record
+
+
+def check_setup_contract() -> None:
     if "python3" not in BASE_PACKAGES:
         fail("python3 отсутствует в контракте настройки")
     if "python3-yaml" not in BASE_PACKAGES:
@@ -46,12 +93,86 @@ def main_test() -> None:
     if PVE_API_ENV != PATHS.pve_api_env:
         fail("setup не использует путь к учётным данным PVE из общих настроек")
 
-    compose = Setup.compose("ps")
+    compose = RuntimeSetup.compose("ps")
     if compose[:2] != ["docker", "compose"] or compose[-1] != "ps":
         fail(f"Неожиданная команда Docker Compose: {compose!r}")
-    if not issubclass(Setup, HostSetup) or not issubclass(Setup, RuntimeSetup):
-        fail("Setup не объединяет этапы подготовки хоста и среды выполнения")
 
+    setup = Setup.from_environment()
+    if not isinstance(setup.context, SetupContext):
+        fail("Setup не содержит явный SetupContext")
+    if not isinstance(setup.reporter, SetupReporter):
+        fail("Setup не содержит отдельный SetupReporter")
+    if not isinstance(setup.host, HostSetup):
+        fail("Setup не содержит HostSetup через композицию")
+    if not isinstance(setup.runtime, RuntimeSetup):
+        fail("Setup не содержит RuntimeSetup через композицию")
+    if setup.host.context is not setup.context or setup.runtime.context is not setup.context:
+        fail("HostSetup и RuntimeSetup должны использовать общий SetupContext")
+    if setup.host.reporter is not setup.reporter or setup.runtime.reporter is not setup.reporter:
+        fail("HostSetup и RuntimeSetup должны использовать общий SetupReporter")
+
+
+def check_setup_order() -> None:
+    calls: list[str] = []
+    context = SetupContext(
+        log_file=Path("/tmp/infra-manager-test.log"),
+        staging_secret="",
+        recover=False,
+        project_branch="main",
+        color=False,
+        runner=RecordingRunner(calls),
+        logged_runner=RecordingRunner(calls),
+    )
+    reporter = RecordingReporter(calls)
+    host = RecordingHost(calls)
+    runtime = RecordingRuntime(calls)
+    setup = Setup(
+        context=context,
+        reporter=reporter,
+        host=host,
+        runtime=runtime,
+    )
+    setup.report_result = lambda: calls.append("setup.report_result")
+
+    with patch("infra_manager.setup.os.geteuid", return_value=0):
+        if setup.run() != 0:
+            fail("Setup.run завершился ошибкой на фиктивных зависимостях")
+
+    expected = [
+        "reporter.initialize",
+        "host.check_os",
+        "host.prepare_directories",
+        "host.ensure_base_packages",
+        "host.ensure_ansible_identity",
+        "host.install_docker",
+        "runtime.copy_compose_assets",
+        "runtime.seed_semaphore_known_hosts",
+        "host.generate_ca_bundle",
+        "host.persist_pve_api_secret",
+        "runtime.ensure_semaphore_secrets",
+        "runtime.prepare_opentofu_input",
+        "runtime.write_runtime_versions",
+        "runtime.deploy_semaphore",
+        "runtime.wait_semaphore",
+        "runtime.verify_semaphore_tools",
+        "runtime.configure_semaphore_project",
+        "host.install_local_commands",
+        f"runner:{PATHS.status_command}",
+        "setup.report_result",
+    ]
+    if calls != expected:
+        fail(
+            "Setup.run нарушил установленный порядок этапов:\n"
+            f"ожидалось: {expected!r}\n"
+            f"получено: {calls!r}"
+        )
+    if reporter.errors:
+        fail(f"SetupReporter неожиданно получил ошибки: {reporter.errors!r}")
+
+
+def main_test() -> None:
+    check_setup_contract()
+    check_setup_order()
     print("Проверки настройки infra-manager пройдены.")
 
 

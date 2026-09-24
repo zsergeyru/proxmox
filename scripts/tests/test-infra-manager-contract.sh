@@ -4,6 +4,7 @@ set -Eeuo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SETUP="$ROOT/scripts/infra-manager/setup.sh"
 PY_SETUP="$ROOT/scripts/infra-manager/infra_manager/setup.py"
+PY_SETUP_CONTEXT="$ROOT/scripts/infra-manager/infra_manager/setup_context.py"
 PY_HOST_SETUP="$ROOT/scripts/infra-manager/infra_manager/host_setup.py"
 PY_RUNTIME_SETUP="$ROOT/scripts/infra-manager/infra_manager/runtime_setup.py"
 PY_SETTINGS="$ROOT/scripts/infra-manager/infra_manager/settings.py"
@@ -33,7 +34,7 @@ SSH_CONFIG="$ROOT/infrastructure/guests/910-infra-manager/compose/runtime/ssh_co
 die() { printf 'ОШИБКА: %s\n' "$*" >&2; exit 1; }
 ok()  { printf '[ОК] %s\n' "$*"; }
 
-for file in "$SETUP" "$PY_SETUP" "$PY_HOST_SETUP" "$PY_RUNTIME_SETUP" "$PY_SETTINGS" "$PY_SEMAPHORE" "$PY_STATUS" "$PY_PVE" "$STATUS" "$ACCESS" "$LIFECYCLE" "$BUILD_TEMPLATE" "$VERIFY_TEMPLATE" "$DEPLOY_GUEST" "$PY_OPENTOFU" "$PY_TEMPLATE" "$PY_TEMPLATE_BUILD" "$PY_TEMPLATE_VERIFY" "$COMPOSE" "$DOCKERFILE" "$REQ" "$PLAN" "$PVE_BOOTSTRAP_ACCESS" "$OPENTOFU_LOCK" "$GUEST_MANIFEST" "$PROVISION" "$SSH_CONFIG"; do
+for file in "$SETUP" "$PY_SETUP" "$PY_SETUP_CONTEXT" "$PY_HOST_SETUP" "$PY_RUNTIME_SETUP" "$PY_SETTINGS" "$PY_SEMAPHORE" "$PY_STATUS" "$PY_PVE" "$STATUS" "$ACCESS" "$LIFECYCLE" "$BUILD_TEMPLATE" "$VERIFY_TEMPLATE" "$DEPLOY_GUEST" "$PY_OPENTOFU" "$PY_TEMPLATE" "$PY_TEMPLATE_BUILD" "$PY_TEMPLATE_VERIFY" "$COMPOSE" "$DOCKERFILE" "$REQ" "$PLAN" "$PVE_BOOTSTRAP_ACCESS" "$OPENTOFU_LOCK" "$GUEST_MANIFEST" "$PROVISION" "$SSH_CONFIG"; do
     [[ -s "$file" ]] || die "Отсутствует обязательный файл: $file"
 done
 
@@ -166,8 +167,19 @@ if grep -Eq '^[[:space:]]*IdentitiesOnly[[:space:]]+yes[[:space:]]*$' "$SSH_CONF
     die "Semaphore Git использует временный ssh-agent; IdentitiesOnly yes блокирует Deploy Key"
 fi
 
-grep -q '^class Setup(HostSetup, RuntimeSetup):' "$PY_SETUP" \
-    || die "Python setup должен содержать единый Setup orchestration"
+grep -q '^class Setup:$' "$PY_SETUP" \
+    || die "Python setup должен содержать отдельный оркестратор Setup"
+if grep -q '^class Setup(HostSetup, RuntimeSetup):' "$PY_SETUP"; then
+    die "Setup не должен использовать множественное наследование HostSetup/RuntimeSetup"
+fi
+grep -q '^class SetupContext:' "$PY_SETUP_CONTEXT" \
+    || die "Общие зависимости setup должны быть собраны в SetupContext"
+grep -q '^class SetupReporter:' "$PY_SETUP_CONTEXT" \
+    || die "Вывод и журнал setup должны быть выделены в SetupReporter"
+grep -Fq 'host=HostSetup(context, reporter)' "$PY_SETUP" \
+    || die "Setup должен подключать HostSetup через композицию"
+grep -Fq 'runtime=RuntimeSetup(context, reporter)' "$PY_SETUP" \
+    || die "Setup должен подключать RuntimeSetup через композицию"
 grep -q '^class HostSetup:' "$PY_HOST_SETUP" \
     || die "Подготовка хоста должна быть выделена в HostSetup"
 grep -q '^class RuntimeSetup:' "$PY_RUNTIME_SETUP" \
@@ -197,7 +209,7 @@ grep -q 'Используется существующий постоянный 
     || die "Повторное обновление 910 должно работать без staging PVE secret"
 grep -q 'from .semaphore import configure_project' "$PY_RUNTIME_SETUP" \
     || die "Python setup должен напрямую использовать Semaphore-модуль"
-grep -Fq 'configure_project(self.project_branch)' "$PY_RUNTIME_SETUP" \
+grep -Fq 'configure_project(self.context.project_branch)' "$PY_RUNTIME_SETUP" \
     || die "Python setup должен передавать текущую Git-ветку в Semaphore"
 [[ ! -e "$ROOT/scripts/infra-manager/semaphore-project.sh" ]] \
     || die "Устаревший semaphore-project.sh больше не должен существовать"
@@ -241,10 +253,10 @@ fi
 if grep -q 'pveum role add.*InfraManagedGuest' "$PVE_BOOTSTRAP_ACCESS"; then
     die "Собственная роль InfraManagedGuest больше не должна создаваться"
 fi
-if grep -q 'infra-manager@pve' "$PVE_BOOTSTRAP_ACCESS" "$SETUP" "$PY_SETUP" "$PY_HOST_SETUP" "$PY_RUNTIME_SETUP" "$PY_SEMAPHORE" "$PY_STATUS" "$PY_PVE"; then
+if grep -q 'infra-manager@pve' "$PVE_BOOTSTRAP_ACCESS" "$SETUP" "$PY_SETUP" "$PY_SETUP_CONTEXT" "$PY_HOST_SETUP" "$PY_RUNTIME_SETUP" "$PY_SEMAPHORE" "$PY_STATUS" "$PY_PVE"; then
     die "Старая PVE-идентичность не должна присутствовать в чистой схеме"
 fi
-if grep -q 'InfraManagedGuest' "$PVE_BOOTSTRAP_ACCESS" "$SETUP" "$PY_SETUP" "$PY_HOST_SETUP" "$PY_RUNTIME_SETUP" "$PY_SEMAPHORE" "$PY_STATUS" "$PY_PVE"; then
+if grep -q 'InfraManagedGuest' "$PVE_BOOTSTRAP_ACCESS" "$SETUP" "$PY_SETUP" "$PY_SETUP_CONTEXT" "$PY_HOST_SETUP" "$PY_RUNTIME_SETUP" "$PY_SEMAPHORE" "$PY_STATUS" "$PY_PVE"; then
     die "Старая собственная роль PVE не должна присутствовать в чистой схеме"
 fi
 if grep -q 'PVE API automation\|Ansible managed guests' "$PY_SEMAPHORE"; then
@@ -334,7 +346,7 @@ if grep -qE '(^|[[:space:]])pct create[[:space:]]+910|(^|[[:space:]])qm create[[
     die "Приватный setup не должен создавать виртуальный объект 910"
 fi
 
-if grep -q '/etc/pve/' "$SETUP" "$PY_SETUP" "$PY_HOST_SETUP" "$PY_RUNTIME_SETUP" "$PY_SEMAPHORE" "$PY_STATUS" "$PY_PVE"; then
+if grep -q '/etc/pve/' "$SETUP" "$PY_SETUP" "$PY_SETUP_CONTEXT" "$PY_HOST_SETUP" "$PY_RUNTIME_SETUP" "$PY_SEMAPHORE" "$PY_STATUS" "$PY_PVE"; then
     die "setup внутри 910 не должен работать с файловой системой /etc/pve"
 fi
 

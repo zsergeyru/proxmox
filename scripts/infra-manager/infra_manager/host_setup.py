@@ -6,8 +6,14 @@ import os
 import shutil
 from pathlib import Path
 
-from .common import InfraManagerError, command_runner
+from .common import InfraManagerError
 from .settings import PATHS
+from .setup_context import (
+    SetupContext,
+    SetupReporter,
+    file_is_nonempty,
+    install_file,
+)
 
 REPO_ROOT = PATHS.repo_root
 CONFIG_DIR = PATHS.config_dir
@@ -59,10 +65,17 @@ DOCKER_CONFLICT_PACKAGES = (
 class HostSetup:
     """Шаги подготовки ОС, Docker, постоянных путей и ключей."""
 
-    @staticmethod
-    def installed(package: str) -> bool:
+    def __init__(
+        self,
+        context: SetupContext,
+        reporter: SetupReporter,
+    ) -> None:
+        self.context = context
+        self.reporter = reporter
+
+    def installed(self, package: str) -> bool:
         return (
-            command_runner.run(
+            self.context.runner.run(
                 ["dpkg", "-s", package],
                 quiet=True,
                 check=False,
@@ -90,7 +103,7 @@ class HostSetup:
                 f"Ожидается Debian 13, обнаружено "
                 f"{release.get('VERSION_ID', '?')}"
             )
-        architecture = command_runner.run(
+        architecture = self.context.runner.run(
             ["dpkg", "--print-architecture"],
             capture=True,
         ).stdout.strip()
@@ -101,38 +114,38 @@ class HostSetup:
 
     def prepare_directories(self) -> None:
         for path in (CONFIG_DIR, CA_DIR, DATA_DIR, COMPOSE_DIR):
-            command_runner.run(
+            self.context.runner.run(
                 [
                     "install", "-d", "-o", "root", "-g", "root",
                     "-m", "0755", str(path),
                 ]
             )
-        command_runner.run(
+        self.context.runner.run(
             [
                 "install", "-d", "-o", "root", "-g", "root",
                 "-m", "0700", str(SECRET_DIR),
             ]
         )
-        command_runner.run(
+        self.context.runner.run(
             [
                 "install", "-d", "-o", "1001", "-g", "0",
                 "-m", "0770", str(SEMAPHORE_DIR),
             ]
         )
         for path in (OPENTOFU_DIR, STATE_DIR):
-            command_runner.run(
+            self.context.runner.run(
                 [
                     "install", "-d", "-o", "1001", "-g", "0",
                     "-m", "0750", str(path),
                 ]
             )
-        command_runner.run(["chown", "-R", "1001:0", str(SEMAPHORE_DIR)])
-        command_runner.run(["chmod", "0770", str(SEMAPHORE_DIR)])
+        self.context.runner.run(["chown", "-R", "1001:0", str(SEMAPHORE_DIR)])
+        self.context.runner.run(["chmod", "0770", str(SEMAPHORE_DIR)])
 
     def ensure_ansible_identity(self) -> None:
         """Создать или проверить постоянную SSH-идентичность Ansible."""
-        self.stage("Проверка SSH-идентичности Ansible")
-        command_runner.run(
+        self.reporter.stage("Проверка SSH-идентичности Ansible")
+        self.context.runner.run(
             [
                 "install", "-d", "-o", "1001", "-g", "0",
                 "-m", "0700", str(ANSIBLE_DIR),
@@ -145,7 +158,7 @@ class HostSetup:
             )
 
         if not ANSIBLE_PRIVATE_KEY.exists():
-            self.runner.run(
+            self.context.logged_runner.run(
                 [
                     "ssh-keygen",
                     "-q",
@@ -156,7 +169,7 @@ class HostSetup:
                 ]
             )
 
-        derived = command_runner.run(
+        derived = self.context.runner.run(
             ["ssh-keygen", "-y", "-f", str(ANSIBLE_PRIVATE_KEY)],
             capture=True,
         ).stdout.strip()
@@ -187,19 +200,19 @@ class HostSetup:
         os.chown(ANSIBLE_PUBLIC_KEY, 1001, 0)
         ANSIBLE_PRIVATE_KEY.chmod(0o600)
         ANSIBLE_PUBLIC_KEY.chmod(0o644)
-        self.ok("SSH-идентичность Ansible готова")
+        self.reporter.ok("SSH-идентичность Ansible готова")
 
     def ensure_base_packages(self) -> None:
         missing = [
             package for package in BASE_PACKAGES if not self.installed(package)
         ]
         if not missing:
-            self.ok("Базовые пакеты infra-manager уже установлены")
+            self.reporter.ok("Базовые пакеты infra-manager уже установлены")
             return
 
-        self.stage("Установка базовых пакетов infra-manager")
-        self.runner.run(["apt-get", "update"])
-        self.runner.run(
+        self.reporter.stage("Установка базовых пакетов infra-manager")
+        self.context.logged_runner.run(["apt-get", "update"])
+        self.context.logged_runner.run(
             [
                 "apt-get",
                 "install",
@@ -209,11 +222,11 @@ class HostSetup:
             ],
             env={**os.environ, "DEBIAN_FRONTEND": "noninteractive"},
         )
-        self.ok("Базовые пакеты infra-manager установлены")
+        self.reporter.ok("Базовые пакеты infra-manager установлены")
 
     def install_docker(self) -> None:
         docker_ready = (
-            command_runner.run(
+            self.context.runner.run(
                 ["docker", "compose", "version"],
                 quiet=True,
                 check=False,
@@ -223,8 +236,8 @@ class HostSetup:
             else False
         )
         if docker_ready:
-            self.runner.run(["systemctl", "enable", "--now", "docker"])
-            self.ok("Docker Engine и Compose уже доступны")
+            self.context.logged_runner.run(["systemctl", "enable", "--now", "docker"])
+            self.reporter.ok("Docker Engine и Compose уже доступны")
             return
 
         for package in DOCKER_CONFLICT_PACKAGES:
@@ -234,10 +247,10 @@ class HostSetup:
                     "Удалите его осознанно перед установкой Docker CE."
                 )
 
-        self.stage("Установка Docker Engine из официального репозитория")
-        self.runner.run(["apt-get", "update"])
-        command_runner.run(["install", "-m", "0755", "-d", "/etc/apt/keyrings"])
-        self.runner.run(
+        self.reporter.stage("Установка Docker Engine из официального репозитория")
+        self.context.logged_runner.run(["apt-get", "update"])
+        self.context.runner.run(["install", "-m", "0755", "-d", "/etc/apt/keyrings"])
+        self.context.logged_runner.run(
             [
                 "curl",
                 "-fsSL",
@@ -246,10 +259,10 @@ class HostSetup:
                 "/etc/apt/keyrings/docker.asc",
             ]
         )
-        command_runner.run(["chmod", "a+r", "/etc/apt/keyrings/docker.asc"])
+        self.context.runner.run(["chmod", "a+r", "/etc/apt/keyrings/docker.asc"])
 
         release = self.os_release()
-        architecture = command_runner.run(
+        architecture = self.context.runner.run(
             ["dpkg", "--print-architecture"],
             capture=True,
         ).stdout.strip()
@@ -266,8 +279,8 @@ class HostSetup:
         )
         docker_sources.chmod(0o644)
 
-        self.runner.run(["apt-get", "update"])
-        self.runner.run(
+        self.context.logged_runner.run(["apt-get", "update"])
+        self.context.logged_runner.run(
             [
                 "apt-get",
                 "install",
@@ -277,19 +290,19 @@ class HostSetup:
             ],
             env={**os.environ, "DEBIAN_FRONTEND": "noninteractive"},
         )
-        self.runner.run(["systemctl", "enable", "--now", "docker"])
-        self.runner.run(["docker", "version"])
-        self.runner.run(["docker", "compose", "version"])
-        self.ok("Docker Engine и Compose установлены")
+        self.context.logged_runner.run(["systemctl", "enable", "--now", "docker"])
+        self.context.logged_runner.run(["docker", "version"])
+        self.context.logged_runner.run(["docker", "compose", "version"])
+        self.reporter.ok("Docker Engine и Compose установлены")
 
     def generate_ca_bundle(self) -> None:
         system_ca = Path("/etc/ssl/certs/ca-certificates.crt")
         pve_ca = Path(
             "/usr/local/share/ca-certificates/pve-root-ca.crt"
         )
-        if not self.nonempty(system_ca):
+        if not file_is_nonempty(system_ca):
             raise InfraManagerError("Не найден системный CA bundle")
-        if not self.nonempty(pve_ca):
+        if not file_is_nonempty(pve_ca):
             raise InfraManagerError(
                 "Не найден PVE CA, который должен передать public bootstrap"
             )
@@ -299,12 +312,12 @@ class HostSetup:
         CA_BUNDLE.chmod(0o644)
 
     def persist_pve_api_secret(self) -> None:
-        staging = Path(self.staging_secret) if self.staging_secret else None
+        staging = Path(self.context.staging_secret) if self.context.staging_secret else None
 
         if PVE_API_ENV.is_file():
-            if staging is not None and self.nonempty(staging):
+            if staging is not None and file_is_nonempty(staging):
                 same = (
-                    command_runner.run(
+                    self.context.runner.run(
                         ["cmp", "-s", str(staging), str(PVE_API_ENV)],
                         quiet=True,
                         check=False,
@@ -312,34 +325,34 @@ class HostSetup:
                     == 0
                 )
                 if same:
-                    self.ok(
+                    self.reporter.ok(
                         "Постоянный PVE API credential уже актуален"
                     )
                     return
-                if not self.recover:
+                if not self.context.recover:
                     raise InfraManagerError(
                         "Постоянный PVE API credential отличается "
                         "от переданного. Для замены требуется recovery."
                     )
-                self.install_file(staging, PVE_API_ENV, "0600")
-                self.ok(
+                install_file(self.context, staging, PVE_API_ENV, "0600")
+                self.reporter.ok(
                     "PVE API credential заменён в режиме recovery"
                 )
                 return
 
-            self.ok(
+            self.reporter.ok(
                 "Используется существующий постоянный PVE API credential"
             )
             return
 
         if staging is None:
             raise InfraManagerError("Не задан PVE_API_SECRET_FILE")
-        if not self.nonempty(staging):
+        if not file_is_nonempty(staging):
             raise InfraManagerError(
                 f"PVE API staging secret отсутствует: {staging}"
             )
-        self.install_file(staging, PVE_API_ENV, "0600")
-        self.ok(
+        install_file(self.context, staging, PVE_API_ENV, "0600")
+        self.reporter.ok(
             "PVE API credential сохранён в защищённом "
             "постоянном хранилище"
         )
@@ -347,7 +360,7 @@ class HostSetup:
     def install_local_commands(self) -> None:
         source_package = REPO_ROOT / "scripts/infra-manager/infra_manager"
         target_package = PYTHON_INSTALL_ROOT / "infra_manager"
-        command_runner.run(
+        self.context.runner.run(
             [
                 "install",
                 "-d",
@@ -385,9 +398,9 @@ class HostSetup:
                 LIFECYCLE_TEST_COMMAND,
             ),
         ):
-            self.install_file(source, target, "0755")
+            install_file(self.context, source, target, "0755")
 
-        command_runner.run(
+        self.context.runner.run(
             [
                 "install",
                 "-d",
@@ -405,7 +418,7 @@ class HostSetup:
             ("infra-manager-pve-access-check", ACCESS_CHECK_COMMAND),
             ("infra-manager-pve-lifecycle-test", LIFECYCLE_TEST_COMMAND),
         ):
-            command_runner.run(
+            self.context.runner.run(
                 [
                     "ln",
                     "-sfn",

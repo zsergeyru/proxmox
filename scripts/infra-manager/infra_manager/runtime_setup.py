@@ -9,8 +9,14 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from .common import InfraManagerError, command_runner
+from .common import InfraManagerError
 from .settings import PATHS, SETTINGS
+from .setup_context import (
+    SetupContext,
+    SetupReporter,
+    file_is_nonempty,
+    install_file,
+)
 
 REPO_ROOT = PATHS.repo_root
 ASSET_DIR = PATHS.asset_dir
@@ -30,6 +36,14 @@ PACKER_VERSION = SETTINGS.packer_version
 class RuntimeSetup:
     """Шаги подготовки Compose, Semaphore и инструментов runtime."""
 
+    def __init__(
+        self,
+        context: SetupContext,
+        reporter: SetupReporter,
+    ) -> None:
+        self.context = context
+        self.reporter = reporter
+
     def copy_compose_assets(self) -> None:
         assets = (
             ("docker-compose.yml", "docker-compose.yml"),
@@ -45,15 +59,15 @@ class RuntimeSetup:
                 )
             target = COMPOSE_DIR / target_name
             target.parent.mkdir(parents=True, exist_ok=True)
-            self.install_file(source, target, "0644")
+            install_file(self.context, source, target, "0644")
 
     def seed_semaphore_known_hosts(self) -> None:
         source = Path("/root/.ssh/github_known_hosts")
         target = SEMAPHORE_DIR / "known_hosts"
 
-        if self.nonempty(source):
-            self.install_file(source, target, "0644", "1001", "0")
-        elif not self.nonempty(target):
+        if file_is_nonempty(source):
+            install_file(self.context, source, target, "0644", "1001", "0")
+        elif not file_is_nonempty(target):
             request = urllib.request.Request(
                 "https://api.github.com/meta",
                 headers={"User-Agent": "infra-manager/1"},
@@ -82,17 +96,16 @@ class RuntimeSetup:
                 "".join(f"github.com {key}\n" for key in keys),
                 encoding="utf-8",
             )
-            command_runner.run(["chown", "1001:0", str(target)])
-            command_runner.run(["chmod", "0644", str(target)])
+            self.context.runner.run(["chown", "1001:0", str(target)])
+            self.context.runner.run(["chmod", "0644", str(target)])
 
-        if not self.nonempty(target):
+        if not file_is_nonempty(target):
             raise InfraManagerError(
                 "Не удалось подготовить known_hosts Runner"
             )
 
-    @staticmethod
-    def random_base64(size: int) -> str:
-        return command_runner.run(
+    def random_base64(self, size: int) -> str:
+        return self.context.runner.run(
             ["openssl", "rand", "-base64", str(size)],
             capture=True,
         ).stdout.strip()
@@ -101,7 +114,7 @@ class RuntimeSetup:
         if not SERVER_ENV.exists():
             admin_password = self.random_base64(24)
             encryption_key = self.random_base64(32)
-            timezone = command_runner.run(
+            timezone = self.context.runner.run(
                 [
                     "timedatectl",
                     "show",
@@ -128,10 +141,10 @@ class RuntimeSetup:
             )
             SERVER_ENV.chmod(0o600)
             ADMIN_PASSWORD_FILE.chmod(0o600)
-            self.ok("Созданы первичные секреты Semaphore")
+            self.reporter.ok("Созданы первичные секреты Semaphore")
             return
 
-        if not self.nonempty(ADMIN_PASSWORD_FILE):
+        if not file_is_nonempty(ADMIN_PASSWORD_FILE):
             raise InfraManagerError(
                 "Есть server env, но отсутствует initial admin password"
             )
@@ -156,13 +169,13 @@ class RuntimeSetup:
             (SECRET_DIR / "semaphore-runner.env").unlink()
         except FileNotFoundError:
             pass
-        self.ok("Используются существующие секреты Semaphore")
+        self.reporter.ok("Используются существующие секреты Semaphore")
 
     def prepare_opentofu_input(self) -> None:
-        self.stage(
+        self.reporter.stage(
             "Подготовка итогового состояния гостей для OpenTofu"
         )
-        self.runner.run(
+        self.context.logged_runner.run(
             [
                 sys.executable,
                 str(
@@ -173,9 +186,9 @@ class RuntimeSetup:
                 str(OPENTOFU_INPUT),
             ]
         )
-        command_runner.run(["chown", "1001:0", str(OPENTOFU_INPUT)])
-        command_runner.run(["chmod", "0640", str(OPENTOFU_INPUT)])
-        self.ok(f"OpenTofu input подготовлен: {OPENTOFU_INPUT}")
+        self.context.runner.run(["chown", "1001:0", str(OPENTOFU_INPUT)])
+        self.context.runner.run(["chmod", "0640", str(OPENTOFU_INPUT)])
+        self.reporter.ok(f"OpenTofu input подготовлен: {OPENTOFU_INPUT}")
 
     def write_runtime_versions(self) -> None:
         versions = COMPOSE_DIR / ".versions.env"
@@ -201,11 +214,11 @@ class RuntimeSetup:
         ]
 
     def repair_semaphore_storage(self) -> None:
-        self.stage("Проверка прав хранилища Semaphore")
+        self.reporter.stage("Проверка прав хранилища Semaphore")
         volume = f"{SEMAPHORE_DIR}:/var/lib/semaphore"
         image = f"semaphoreui/semaphore:{SEMAPHORE_VERSION}"
 
-        self.runner.run(
+        self.context.logged_runner.run(
             [
                 "docker",
                 "run",
@@ -228,7 +241,7 @@ class RuntimeSetup:
                 ),
             ]
         )
-        self.runner.run(
+        self.context.logged_runner.run(
             [
                 "docker",
                 "run",
@@ -248,41 +261,41 @@ class RuntimeSetup:
                 ),
             ]
         )
-        self.ok(
+        self.reporter.ok(
             "Хранилище Semaphore доступно для записи из контейнера"
         )
 
     def deploy_semaphore(self) -> None:
-        self.stage("Сборка и запуск Semaphore")
-        self.info("Получение базового образа Semaphore")
-        self.runner.run(
+        self.reporter.stage("Сборка и запуск Semaphore")
+        self.reporter.info("Получение базового образа Semaphore")
+        self.context.logged_runner.run(
             [
                 "docker",
                 "pull",
                 f"semaphoreui/semaphore:{SEMAPHORE_VERSION}",
             ]
         )
-        self.ok("Базовый образ Semaphore готов")
+        self.reporter.ok("Базовый образ Semaphore готов")
 
-        command_runner.run(
+        self.context.runner.run(
             self.compose("stop", "runtime"),
             quiet=True,
             check=False,
         )
         self.repair_semaphore_storage()
 
-        self.info(
+        self.reporter.info(
             "Сборка infra-runtime с Semaphore, OpenTofu, "
             "Packer и Ansible"
         )
-        self.runner.run(self.compose("build", "--pull", "runtime"))
-        self.ok("Образ infra-runtime собран")
+        self.context.logged_runner.run(self.compose("build", "--pull", "runtime"))
+        self.reporter.ok("Образ infra-runtime собран")
 
-        self.info("Запуск контейнера infra-runtime")
-        self.runner.run(
+        self.reporter.info("Запуск контейнера infra-runtime")
+        self.context.logged_runner.run(
             self.compose("up", "-d", "--remove-orphans")
         )
-        self.ok("Контейнер infra-runtime запущен")
+        self.reporter.ok("Контейнер infra-runtime запущен")
 
     @staticmethod
     def semaphore_ready() -> bool:
@@ -296,15 +309,15 @@ class RuntimeSetup:
             return False
 
     def wait_semaphore(self) -> None:
-        self.stage("Проверка Semaphore")
+        self.reporter.stage("Проверка Semaphore")
         for _ in range(60):
             if self.semaphore_ready():
                 break
             time.sleep(2)
 
         if not self.semaphore_ready():
-            self.runner.run(self.compose("ps"), check=False)
-            self.runner.run(
+            self.context.logged_runner.run(self.compose("ps"), check=False)
+            self.context.logged_runner.run(
                 self.compose("logs", "--tail=100", "runtime"),
                 check=False,
             )
@@ -313,7 +326,7 @@ class RuntimeSetup:
             )
 
         time.sleep(5)
-        running = command_runner.run(
+        running = self.context.runner.run(
             [
                 "docker",
                 "inspect",
@@ -328,10 +341,10 @@ class RuntimeSetup:
             raise InfraManagerError(
                 "Semaphore container не запущен"
             )
-        self.ok("Semaphore запущен")
+        self.reporter.ok("Semaphore запущен")
 
     def verify_semaphore_tools(self) -> None:
-        self.stage("Проверка инструментов Semaphore")
+        self.reporter.stage("Проверка инструментов Semaphore")
         checks = (
             (
                 ["docker", "exec", "infra-runtime", "tofu", "version"],
@@ -376,17 +389,17 @@ class RuntimeSetup:
         )
         for argv, label in checks:
             try:
-                self.runner.run(argv)
+                self.context.logged_runner.run(argv)
             except InfraManagerError as exc:
                 raise InfraManagerError(
                     f"{label} отсутствует в Semaphore"
                 ) from exc
-        self.ok(
+        self.reporter.ok(
             "OpenTofu, Packer, Ansible и proxmoxer доступны"
         )
 
     def configure_semaphore_project(self) -> None:
-        self.stage("Настройка проекта Semaphore")
+        self.reporter.stage("Настройка проекта Semaphore")
         from .semaphore import configure_project
 
-        configure_project(self.project_branch)
+        configure_project(self.context.project_branch)
