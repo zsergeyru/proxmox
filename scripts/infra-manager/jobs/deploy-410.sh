@@ -54,13 +54,22 @@ guest_ip="$(jq -r '.guests["410"].network.ipv4 // empty' "$GUEST_STATE_FILE")"
 guest_ip="${guest_ip%%/*}"
 
 info "Инициализация OpenTofu"
-tofu -chdir="$OPENTOFU_DIR" init     -input=false     -no-color     -lockfile=readonly
+tofu -chdir="$OPENTOFU_DIR" init \
+    -input=false \
+    -no-color \
+    -lockfile=readonly
 
 info "План OpenTofu для 410"
-tofu -chdir="$OPENTOFU_DIR" plan     -input=false     -no-color     -lock-timeout=30s     -target="$TARGET_RESOURCE"     -out="$PLAN_FILE"
+tofu -chdir="$OPENTOFU_DIR" plan \
+    -input=false \
+    -no-color \
+    -lock-timeout=30s \
+    -target="$TARGET_RESOURCE" \
+    -out="$PLAN_FILE"
 
 unexpected_resources="$(
-    tofu -chdir="$OPENTOFU_DIR" show -json "$PLAN_FILE"       | jq -r --arg target "$TARGET_RESOURCE" '
+    tofu -chdir="$OPENTOFU_DIR" show -json "$PLAN_FILE" \
+      | jq -r --arg target "$TARGET_RESOURCE" '
           .resource_changes[]?.address
           | select(. != $target)
         '
@@ -73,7 +82,11 @@ unexpected_resources="$(
 tofu -chdir="$OPENTOFU_DIR" show -no-color "$PLAN_FILE"
 
 info "Применение состояния VM 410"
-tofu -chdir="$OPENTOFU_DIR" apply     -input=false     -no-color     -lock-timeout=30s     "$PLAN_FILE"
+tofu -chdir="$OPENTOFU_DIR" apply \
+    -input=false \
+    -no-color \
+    -lock-timeout=30s \
+    "$PLAN_FILE"
 
 ok "Состояние VM 410 применено"
 
@@ -95,6 +108,13 @@ if ! ssh-keygen -F "$guest_ip" -f "$KNOWN_HOSTS" >/dev/null 2>&1; then
 fi
 
 info "Настройка ОС 410 через Ansible"
-ANSIBLE_HOST_KEY_CHECKING=True ANSIBLE_SSH_ARGS="-o UserKnownHostsFile=$KNOWN_HOSTS -o StrictHostKeyChecking=yes" ansible-playbook     -i "$guest_ip,"     -u root     --private-key "$ANSIBLE_PRIVATE_KEY"     -e "guest=$GUEST_DIR"     "$PLAYBOOK"
+ANSIBLE_HOST_KEY_CHECKING=True \
+ANSIBLE_SSH_ARGS="-o UserKnownHostsFile=$KNOWN_HOSTS -o StrictHostKeyChecking=yes" \
+ansible-playbook \
+    -i "$guest_ip," \
+    -u root \
+    --private-key "$ANSIBLE_PRIVATE_KEY" \
+    -e "guest=$GUEST_DIR" \
+    "$PLAYBOOK"
 
 ok "410 ai-control создан и базово настроен"
