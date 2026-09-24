@@ -10,6 +10,7 @@ from pathlib import Path
 
 import yaml
 from jsonschema import Draft202012Validator
+from jsonschema.exceptions import SchemaError
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "guests"))
 
@@ -87,7 +88,7 @@ def warn(msg: str) -> None:
 def load_yaml(path: Path) -> dict | None:
     try:
         data = yaml.safe_load(path.read_text(encoding="utf-8"))
-    except Exception as exc:
+    except (OSError, UnicodeError, yaml.YAMLError) as exc:
         fail(f"{path.relative_to(ROOT)}: не удалось прочитать YAML: {exc}")
         return None
     if not isinstance(data, dict):
@@ -101,7 +102,7 @@ def load_validator(path: Path) -> Draft202012Validator:
         schema = yaml.safe_load(path.read_text(encoding="utf-8"))
         Draft202012Validator.check_schema(schema)
         return Draft202012Validator(schema)
-    except Exception as exc:
+    except (OSError, UnicodeError, yaml.YAMLError, SchemaError) as exc:
         fail(f"{path.relative_to(ROOT)}: некорректная schema валидатора: {exc}")
         return Draft202012Validator({})
 
