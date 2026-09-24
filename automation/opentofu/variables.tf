@@ -19,3 +19,14 @@ locals {
   guest_state = jsondecode(file(var.guest_state_file))
   guests      = local.guest_state.guests
 }
+
+
+variable "ansible_ssh_public_key" {
+  description = "Открытый SSH-ключ Ansible для Cloud-Init управляемых Linux-гостей"
+  type        = string
+
+  validation {
+    condition     = length(trimspace(var.ansible_ssh_public_key)) > 0
+    error_message = "ansible_ssh_public_key не должен быть пустым"
+  }
+}
