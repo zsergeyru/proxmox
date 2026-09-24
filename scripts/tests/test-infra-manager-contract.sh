@@ -32,6 +32,20 @@ for file in "$SETUP" "$PY_SETUP" "$PY_SEMAPHORE" "$PY_STATUS" "$PY_PVE" "$STATUS
     [[ -s "$file" ]] || die "Отсутствует обязательный файл: $file"
 done
 
+for wrapper in \
+    "$ROOT/scripts/infra-manager/jobs/opentofu-plan.sh" \
+    "$ROOT/scripts/infra-manager/jobs/build-template.sh" \
+    "$ROOT/scripts/infra-manager/jobs/verify-template.sh" \
+    "$ROOT/scripts/infra-manager/jobs/deploy-410.sh"
+do
+    [[ -s "$wrapper" ]] || die "Отсутствует переходная Python-обёртка: $wrapper"
+    grep -q 'exec python3' "$wrapper" \
+        || die "Переходная обёртка не передаёт выполнение Python: $wrapper"
+    if (( $(wc -l <"$wrapper") > 6 )); then
+        die "В переходной shell-обёртке появилась собственная логика: $wrapper"
+    fi
+done
+
 python3 - "$GUEST_MANIFEST" "$PROVISION" "$SETUP" "$PY_SETUP" "$COMPOSE" "$DOCKERFILE" "$REQ" <<'PY'
 from pathlib import Path
 import re
