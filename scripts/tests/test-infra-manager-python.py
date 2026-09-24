@@ -24,7 +24,12 @@ from infra_manager.common import (  # noqa: E402
     _redact_argv,
     run,
 )
-from infra_manager.opentofu import _find_guest_directory  # noqa: E402
+from infra_manager.opentofu import (  # noqa: E402
+    DeploymentContext,
+    DeploymentPaths,
+    _find_guest_directory,
+    _validate_pve_and_state,
+)
 from infra_manager.pve import (  # noqa: E402
     PveClient,
     permission_present,
@@ -175,6 +180,39 @@ def main_test() -> None:
         for arg in packer_args
     ):
         fail("Секретные переменные Packer всё ещё передаются через -var")
+
+    deployment_client = SimpleNamespace(
+        find_vm=lambda vmid: {
+            "type": "qemu",
+            "name": "test-vm",
+        }
+    )
+    deployment_paths = DeploymentPaths(
+        opentofu_dir=Path("/tmp/opentofu"),
+        guest_dir=Path("/tmp/guest"),
+        private_key=Path("/tmp/key"),
+        playbook=Path("/tmp/playbook.yml"),
+        known_hosts=Path("/tmp/known_hosts"),
+        plan_file=Path("/tmp/410.tfplan"),
+    )
+    deployment = DeploymentContext(
+        client=deployment_client,
+        vmid=410,
+        name="test-vm",
+        node="pve",
+        template_vmid=9000,
+        address="192.0.2.10",
+        target='proxmox_virtual_environment_vm.guest["410"]',
+        env={"SSL_CERT_FILE": "/tmp/ca.crt"},
+        paths=deployment_paths,
+    )
+    state_present, state_status = _validate_pve_and_state(
+        deployment,
+        state_present=True,
+        state_status="ready",
+    )
+    if not state_present or state_status != "ready":
+        fail("DeploymentContext не проходит проверку состояния VM")
 
     previous_branch = os.environ.get("INFRA_PROJECT_BRANCH")
     try:
