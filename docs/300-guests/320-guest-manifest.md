@@ -93,13 +93,13 @@ disk_size_gb
 
 **Тип:** целое число.  
 **Обязательно:** да.  
-**Допустимое значение:** `10`.  
+**Допустимое значение:** `11`.  
 **Наследование:** нет.
 
 Пример:
 
 ~~~yaml
-schema_version: 10
+schema_version: 11
 ~~~
 
 Поле определяет версию контракта данных.
@@ -491,7 +491,7 @@ management:
 ### 8.1. Обычная VM
 
 ~~~yaml
-schema_version: 10
+schema_version: 11
 vmid: 410
 name: ai-control
 description: Управляющая среда AI
@@ -508,7 +508,7 @@ resources:
 ### 8.2. LXC
 
 ~~~yaml
-schema_version: 10
+schema_version: 11
 vmid: 321
 name: app-services
 description: Прикладные сервисы
@@ -528,7 +528,7 @@ resources:
 ### 8.3. Явное отклонение от общего адреса
 
 ~~~yaml
-schema_version: 10
+schema_version: 11
 vmid: 501
 name: frigate
 description: Видеонаблюдение
@@ -548,7 +548,7 @@ network:
 ### 8.4. DHCP
 
 ~~~yaml
-schema_version: 10
+schema_version: 11
 vmid: 321
 name: app-services
 description: Прикладные сервисы
