@@ -1,4 +1,4 @@
-schema_version: 10
+schema_version: 11
 vmid: 211
 name: automation-services
 profile: debian-lxc-docker
