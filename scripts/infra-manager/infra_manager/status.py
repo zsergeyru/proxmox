@@ -78,8 +78,41 @@ def unique_named(
     return matches[0]
 
 
+def _project_branch() -> str:
+    return os.environ.get("INFRA_PROJECT_BRANCH", "main")
+
+
+def _check_git_branch_contract(
+    repository: dict[str, Any],
+    branches: Any,
+    templates: Any,
+    *,
+    github_key_id: int,
+    project_branch: str,
+) -> None:
+
+    if not isinstance(templates, list):
+        raise InfraManagerError(
+            "Semaphore вернул некорректный список шаблонов"
+        )
+    for template in templates:
+        if (
+            isinstance(template, dict)
+            and template.get("name") in {
+                "OpenTofu Plan",
+                "Build Template 9000",
+                "Deploy Guest 410",
+            }
+            and template.get("git_branch") != project_branch
+        ):
+            raise InfraManagerError(
+                f"Шаблон Semaphore '{template.get('name')}' "
+                f"настроен не на ветку '{project_branch}'"
+            )
+
+
 def check_status(*, full: bool = False) -> int:
-    project_branch = os.environ.get("INFRA_PROJECT_BRANCH", "main")
+    project_branch = _project_branch()
 
     if shutil.which("docker") is None:
         raise InfraManagerError("Docker не установлен")
@@ -220,6 +253,13 @@ def check_status(*, full: bool = False) -> int:
     templates = semaphore.get(
         f"/project/{project_id}/templates?sort=name&order=asc"
     )
+    _check_git_branch_contract(
+        repository,
+        branches,
+        templates,
+        github_key_id=github_key_id,
+        project_branch=project_branch,
+    )
     expected_templates = {
         "OpenTofu Plan": (
             "scripts/infra-manager/jobs/opentofu-plan.py",
@@ -244,7 +284,6 @@ def check_status(*, full: bool = False) -> int:
             template.get("app") != "python"
             or template.get("playbook") != playbook
             or str(template.get("arguments") or "[]") != arguments
-            or template.get("git_branch") != project_branch
         ):
             raise InfraManagerError(
                 f"Шаблон Semaphore '{template_name}' "
