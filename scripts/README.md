@@ -32,9 +32,10 @@ scripts/
 │   │   └── pve-lifecycle-test.sh            # Приёмочная проверка создания, изменения, запуска, остановки и удаления временного LXC 9098
 │   │
 │   └── jobs/                                # Задания, непосредственно запускаемые Semaphore
-│       ├── opentofu-plan.sh                  # Формирует входные данные OpenTofu и строит только план изменений
-│       ├── build-template.sh                 # Собирает Packer-шаблон VM 9000 и запускает его проверку
-│       └── verify-template.sh                # Проверяет шаблон 9000 через временную полную копию 9099
+│       ├── opentofu-plan.py                  # Формирует входные данные OpenTofu и строит только план изменений
+│       ├── deploy-guest.py                   # Разворачивает или приводит выбранную гостевую систему к описанному состоянию
+│       ├── build-template.py                 # Собирает Packer-шаблон VM 9000 и запускает его проверку
+│       └── verify-template.py                # Проверяет шаблон 9000 через временную полную копию 9099
 │
 └── tests/                                    # Локальные и автоматические проверки без постоянных изменений инфраструктуры
     ├── test-guest-resolver.py                # Проверяет сборщик конфигурации, управление, начальную настройку и возможности профиля
@@ -43,7 +44,7 @@ scripts/
     └── test-infra-manager-contract.sh        # Проверяет согласованность 910, Semaphore, PVE, OpenTofu и Packer
 ```
 
-Старого контура `scripts/pve/`, `deploy-guest.py`, `sync-management-keys.py` и PVE Configuration в действующем коде нет.
+Старого контура `scripts/pve/`, `sync-management-keys.py` и PVE Configuration в действующем коде нет.
 
 ## `infra-manager/`
 
@@ -77,11 +78,11 @@ python3 -m infra_manager setup
 
 Здесь находятся сценарии, которые запускает Semaphore.
 
-`opentofu-plan.sh`:
+`opentofu-plan.py`:
 
 ```text
 Semaphore: OpenTofu Plan
-→ scripts/infra-manager/jobs/opentofu-plan.sh
+→ scripts/infra-manager/jobs/opentofu-plan.py
 → scripts/guests/render-opentofu-input.py
 → tofu init
 → tofu plan
@@ -89,17 +90,28 @@ Semaphore: OpenTofu Plan
 
 Задание строит только план и не выполняет `apply` или `destroy`.
 
-`build-template.sh`:
+`deploy-guest.py`:
+
+```text
+Semaphore: Deploy Guest 410
+→ scripts/infra-manager/jobs/deploy-guest.py
+→ OpenTofu apply для выбранной гостевой системы
+→ Ansible-настройка гостевой системы
+```
+
+Задание создаёт или обновляет выбранную управляемую гостевую систему по её описанию и затем выполняет настройку через Ansible.
+
+`build-template.py`:
 
 ```text
 Semaphore: Build Template 9000
-→ scripts/infra-manager/jobs/build-template.sh 9000
+→ scripts/infra-manager/jobs/build-template.py 9000
 → Packer
 → tpl-debian13
-→ scripts/infra-manager/jobs/verify-template.sh 9000
+→ scripts/infra-manager/jobs/verify-template.py 9000
 ```
 
-`verify-template.sh` создаёт временный Full Clone 9099, проверяет Cloud-Init, QEMU Guest Agent, SSH, machine-id и SSH host keys, затем удаляет клон.
+`verify-template.py` создаёт временный Full Clone 9099, проверяет Cloud-Init, QEMU Guest Agent, SSH, machine-id и SSH host keys, затем удаляет клон.
 
 ## `infra-manager/commands/`
 
