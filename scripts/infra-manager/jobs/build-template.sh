@@ -136,12 +136,8 @@ verify_template() {
                 | if ($agent == "1" or ($agent | startswith("1,")) or ($agent | test("(^|,)enabled=1($|,)")))
                   then empty else "agent=" + (if $agent == "" then "<отсутствует>" else $agent end) end
             ),
-            (if ([
-                    to_entries[]
-                    | select(.key | test("^(ide|sata|scsi|virtio)[0-9]+$"))
-                    | select((.value | tostring) | contains("cloudinit"))
-                ] | length) > 0
-             then empty else "cloudinit-disk=<отсутствует>" end),
+            (if ((.ide0 // "") | tostring | contains("cloudinit"))
+             then empty else "ide0=<cloudinit отсутствует>" end),
             (if .ciuser == "root"
              then empty else "ciuser=" + ((.ciuser // "<отсутствует>") | tostring) end),
             (if ((.ipconfig0 // "") | contains("ip=dhcp"))
