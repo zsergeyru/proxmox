@@ -449,8 +449,6 @@ def _ensure_ssh_host_key(
             known_hosts.chmod(0o600)
             console.ok(f"SSH host key {address} принят")
             return
-        import time
-
         time.sleep(2)
 
     raise InfraManagerError(
