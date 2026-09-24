@@ -4,11 +4,10 @@ from __future__ import annotations
 
 import os
 import shutil
-import subprocess
 from pathlib import Path
 from typing import Any
 
-from .common import InfraManagerError, console
+from .common import InfraManagerError, command_runner, console
 from .pve import PveClient, check_access
 from .semaphore import SEMAPHORE_TEMPLATES, SemaphoreClient
 from .settings import PATHS, SETTINGS
@@ -31,26 +30,6 @@ def required_file(path: Path) -> None:
         raise InfraManagerError(
             f"Отсутствует обязательный файл: {path}"
         )
-
-
-def run_quiet(argv: list[str]) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        argv,
-        check=False,
-        text=True,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-
-
-def run_capture(argv: list[str]) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        argv,
-        check=False,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-    )
 
 
 def unique_named(
@@ -129,7 +108,7 @@ def check_status(*, full: bool = False) -> int:
 
     if shutil.which("docker") is None:
         raise InfraManagerError("Docker не установлен")
-    if run_quiet(["docker", "compose", "version"]).returncode:
+    if command_runner.run(["docker", "compose", "version"], quiet=True, check=False).returncode:
         raise InfraManagerError("Docker Compose недоступен")
 
     for path in (
@@ -148,14 +127,16 @@ def check_status(*, full: bool = False) -> int:
     if not OPENTOFU_STATE_DIR.is_dir():
         raise InfraManagerError("Отсутствует каталог OpenTofu state")
 
-    running = run_capture(
+    running = command_runner.run(
         [
             "docker",
             "inspect",
             "-f",
             "{{.State.Running}}",
             "infra-runtime",
-        ]
+        ],
+        capture=True,
+        check=False,
     )
     if running.returncode or running.stdout.strip() != "true":
         raise InfraManagerError("Semaphore Server не запущен")
@@ -217,7 +198,7 @@ def check_status(*, full: bool = False) -> int:
 
     # Semaphore v2.18.30 создаёт socket временного ssh-agent в каталоге
     # проекта раньше, чем branches API успевает создать этот каталог.
-    prepare_tmp = run_quiet(
+    prepare_tmp = command_runner.run(
         [
             "docker",
             "exec",
@@ -227,7 +208,9 @@ def check_status(*, full: bool = False) -> int:
             "mkdir",
             "-p",
             f"/tmp/semaphore/project_{project_id}",
-        ]
+        ],
+        quiet=True,
+        check=False,
     )
     if prepare_tmp.returncode:
         raise InfraManagerError(
@@ -283,7 +266,7 @@ def check_status(*, full: bool = False) -> int:
                 "не соответствует Python-контракту"
             )
 
-    if run_quiet(
+    if command_runner.run(
         [
             "docker",
             "exec",
@@ -291,7 +274,9 @@ def check_status(*, full: bool = False) -> int:
             "test",
             "-r",
             str(ANSIBLE_PRIVATE_KEY),
-        ]
+        ],
+        quiet=True,
+        check=False,
     ).returncode:
         raise InfraManagerError(
             "Закрытый ключ Ansible недоступен внутри infra-runtime"
@@ -329,7 +314,7 @@ def check_status(*, full: bool = False) -> int:
         ),
     )
     for argv, message in checks:
-        if run_quiet(argv).returncode:
+        if command_runner.run(argv).returncode:
             raise InfraManagerError(message)
 
     pve = PveClient(PVE_ENV, CA_BUNDLE)
