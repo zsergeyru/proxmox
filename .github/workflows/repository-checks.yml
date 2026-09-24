@@ -24,7 +24,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y shellcheck cloud-init jq unzip
-          python -m pip install --disable-pip-version-check PyYAML==6.0.2 jsonschema==4.25.1 ruff
+          python -m pip install --disable-pip-version-check PyYAML==6.0.2 jsonschema==4.25.1 ruff==0.16.8
 
       - name: Validate repository
         run: python scripts/validate_repo.py
