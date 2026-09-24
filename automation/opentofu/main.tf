@@ -57,6 +57,7 @@ resource "proxmox_virtual_environment_vm" "guest" {
 
   initialization {
     datastore_id = each.value.resources.disk_storage
+    interface    = "ide0"
 
     ip_config {
       ipv4 {
