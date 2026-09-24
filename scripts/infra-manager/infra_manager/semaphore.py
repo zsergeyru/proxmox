@@ -606,6 +606,16 @@ def configure_project(branch: str | None = None) -> int:
         arguments='["9000"]',
     )
 
+    client.ensure_template(
+        project_id,
+        repository_id,
+        environment_id,
+        name="Deploy Guest 410",
+        playbook="scripts/infra-manager/jobs/deploy-410.sh",
+        branch=branch,
+        arguments="[]",
+    )
+
     console.ok(
         "Проект Semaphore, Git repository, PVE Variable Group "
         "и инфраструктурные задания подготовлены"
