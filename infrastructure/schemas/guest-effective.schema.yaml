@@ -16,7 +16,6 @@ required:
   - network
   - boot
   - management
-  - bootstrap
 properties:
   schema_version:
     const: 10
@@ -96,11 +95,6 @@ properties:
     uniqueItems: true
     items:
       enum: [ssh_identity, project_repo_read]
-  bootstrap:
-    type: array
-    uniqueItems: true
-    items:
-      enum: [git, docker, ansible]
   template_vmid:
     type: integer
     minimum: 100
@@ -141,16 +135,3 @@ allOf:
             required: [ballooning_mb]
       not:
         required: [template_vmid]
-  - if:
-      required: [type, bootstrap]
-      properties:
-        type:
-          const: lxc
-        bootstrap:
-          contains:
-            const: docker
-    then:
-      properties:
-        features:
-          contains:
-            const: container-host
