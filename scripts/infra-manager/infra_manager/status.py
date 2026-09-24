@@ -218,7 +218,7 @@ def check_status(*, full: bool = False) -> int:
     if not any(
         isinstance(item, dict)
         and item.get("name") == "OpenTofu Plan"
-        and item.get("app") == "bash"
+        and item.get("app") == "python"
         for item in templates
     ):
         raise InfraManagerError(
@@ -228,7 +228,7 @@ def check_status(*, full: bool = False) -> int:
     if not any(
         isinstance(item, dict)
         and item.get("name") == "Deploy Guest 410"
-        and item.get("app") == "bash"
+        and item.get("app") == "python"
         for item in templates
     ):
         raise InfraManagerError(
