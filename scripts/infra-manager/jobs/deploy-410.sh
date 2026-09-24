@@ -11,6 +11,7 @@ ANSIBLE_PRIVATE_KEY="/etc/infra-manager/ansible/guest_ed25519"
 KNOWN_HOSTS="/var/lib/infra-manager/semaphore/guest-known-hosts"
 PLAYBOOK="$REPO_ROOT/automation/ansible/playbooks/configure-guest.yml"
 GUEST_DIR="410-ai-control"
+TARGET_RESOURCE='proxmox_virtual_environment_vm.guest["410"]'
 
 die() { printf 'ОШИБКА: %s\n' "$*" >&2; exit 1; }
 ok()  { printf '[ОК] %s\n' "$*"; }
@@ -56,7 +57,18 @@ info "Инициализация OpenTofu"
 tofu -chdir="$OPENTOFU_DIR" init     -input=false     -no-color     -lockfile=readonly
 
 info "План OpenTofu для 410"
-tofu -chdir="$OPENTOFU_DIR" plan     -input=false     -no-color     -lock-timeout=30s     -out="$PLAN_FILE"
+tofu -chdir="$OPENTOFU_DIR" plan     -input=false     -no-color     -lock-timeout=30s     -target="$TARGET_RESOURCE"     -out="$PLAN_FILE"
+
+unexpected_resources="$(
+    tofu -chdir="$OPENTOFU_DIR" show -json "$PLAN_FILE"       | jq -r --arg target "$TARGET_RESOURCE" '
+          .resource_changes[]?.address
+          | select(. != $target)
+        '
+)"
+[[ -z "$unexpected_resources" ]] || {
+    printf '%s\n' "$unexpected_resources" >&2
+    die "План 410 содержит изменения других ресурсов"
+}
 
 tofu -chdir="$OPENTOFU_DIR" show -no-color "$PLAN_FILE"
 
