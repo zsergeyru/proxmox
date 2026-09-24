@@ -1,2 +1,4 @@
 proxmoxer>=2.2.0,<3
 requests>=2.32,<3
+PyYAML==6.0.2
+jsonschema==4.25.1
