@@ -21,38 +21,36 @@ from datetime import datetime
 from pathlib import Path
 
 from .common import InfraManagerError
+from .settings import PATHS, SETTINGS
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
-ASSET_DIR = REPO_ROOT / "infrastructure/guests/910-infra-manager/compose"
+REPO_ROOT = PATHS.repo_root
+ASSET_DIR = PATHS.asset_dir
+CONFIG_DIR = PATHS.config_dir
+SECRET_DIR = PATHS.secret_dir
+CA_DIR = PATHS.ca_dir
+DATA_DIR = PATHS.data_dir
+SEMAPHORE_DIR = PATHS.semaphore_dir
+OPENTOFU_DIR = PATHS.opentofu_dir
+STATE_DIR = PATHS.opentofu_state_dir
+OPENTOFU_INPUT = PATHS.opentofu_input
+COMPOSE_DIR = PATHS.compose_dir
+PYTHON_INSTALL_ROOT = PATHS.python_install_root
+STATUS_COMMAND = PATHS.status_command
+ACCESS_CHECK_COMMAND = PATHS.access_check_command
+LIFECYCLE_TEST_COMMAND = PATHS.lifecycle_test_command
+SERVER_ENV = PATHS.server_env
+PVE_API_ENV = PATHS.pve_api_env
+ADMIN_PASSWORD_FILE = PATHS.admin_password_file
+ADMIN_PASSWORD_SHOWN_FILE = PATHS.admin_password_shown_file
+CA_BUNDLE = PATHS.ca_bundle
+ANSIBLE_DIR = PATHS.ansible_dir
+ANSIBLE_PRIVATE_KEY = PATHS.ansible_private_key
+ANSIBLE_PUBLIC_KEY = PATHS.ansible_public_key
 
-CONFIG_DIR = Path("/etc/infra-manager")
-SECRET_DIR = CONFIG_DIR / "secrets"
-CA_DIR = CONFIG_DIR / "ca"
-DATA_DIR = Path("/var/lib/infra-manager")
-SEMAPHORE_DIR = DATA_DIR / "semaphore"
-OPENTOFU_DIR = DATA_DIR / "opentofu"
-STATE_DIR = OPENTOFU_DIR / "state"
-OPENTOFU_INPUT = OPENTOFU_DIR / "guests.json"
-COMPOSE_DIR = Path("/opt/infra-manager/compose")
-PYTHON_INSTALL_ROOT = Path("/usr/local/lib/infra-manager")
-
-STATUS_COMMAND = Path("/usr/local/sbin/infra-manager-status")
-ACCESS_CHECK_COMMAND = Path("/usr/local/sbin/infra-manager-pve-access-check")
-LIFECYCLE_TEST_COMMAND = Path("/usr/local/sbin/infra-manager-pve-lifecycle-test")
-
-SERVER_ENV = SECRET_DIR / "semaphore-server.env"
-PVE_API_ENV = SECRET_DIR / "pve-api.env"
-ADMIN_PASSWORD_FILE = SECRET_DIR / "initial-admin-password"
-ADMIN_PASSWORD_SHOWN_FILE = SECRET_DIR / ".initial-admin-password-shown"
-CA_BUNDLE = CA_DIR / "ca-bundle.crt"
-ANSIBLE_DIR = CONFIG_DIR / "ansible"
-ANSIBLE_PRIVATE_KEY = ANSIBLE_DIR / "guest_ed25519"
-ANSIBLE_PUBLIC_KEY = ANSIBLE_DIR / "guest_ed25519.pub"
-
-SEMAPHORE_VERSION = "v2.18.30"
-RUNTIME_VERSION = "v1"
-OPENTOFU_VERSION = "1.12.6"
-PACKER_VERSION = "1.15.4"
+SEMAPHORE_VERSION = SETTINGS.semaphore_version
+RUNTIME_VERSION = SETTINGS.runtime_version
+OPENTOFU_VERSION = SETTINGS.opentofu_version
+PACKER_VERSION = SETTINGS.packer_version
 
 BASE_PACKAGES = (
     "ca-certificates",
@@ -101,7 +99,7 @@ class Setup:
             ),
             staging_secret=os.environ.get("PVE_API_SECRET_FILE", ""),
             recover=os.environ.get("INFRA_MANAGER_RECOVER", "0") == "1",
-            project_branch=os.environ.get("INFRA_PROJECT_BRANCH", "main"),
+            project_branch=os.environ.get("INFRA_PROJECT_BRANCH", SETTINGS.default_project_branch),
             color=(
                 os.environ.get("INFRA_MANAGER_COLOR", "0") == "1"
                 and not os.environ.get("NO_COLOR")
