@@ -182,6 +182,10 @@ def _state_status(
         raise InfraManagerError(
             "OpenTofu state содержит некорректный JSON"
         ) from exc
+    if not isinstance(state, dict):
+        raise InfraManagerError(
+            "OpenTofu state должен быть JSON-объектом"
+        )
 
     resources = state.get("resources", [])
     if not isinstance(resources, list):
