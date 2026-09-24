@@ -161,6 +161,7 @@ jobs:
           docker run --rm infra-runtime:test tofu version
           docker run --rm infra-runtime:test packer version
           docker run --rm --entrypoint python3 infra-runtime:test -c 'import proxmoxer'
+          docker run --rm --entrypoint python3 infra-runtime:test -c 'import yaml, jsonschema'
 
       - name: Verify malformed guest directory is rejected
         run: |
