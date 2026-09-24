@@ -20,25 +20,30 @@ GUEST_STATE_FILE = PATHS.opentofu_input
 
 
 @dataclass(frozen=True)
+class DeploymentPaths:
+    """Пути, используемые на нескольких этапах развёртывания VM."""
+
+    opentofu_dir: Path
+    guest_dir: Path
+    private_key: Path
+    playbook: Path
+    known_hosts: Path
+    plan_file: Path
+
+
+@dataclass(frozen=True)
 class DeploymentContext:
     """Общие неизменяемые данные одного развёртывания VM."""
 
-    repo_root: Path
-    opentofu_dir: Path
-    env: dict[str, str]
     client: PveClient
     vmid: int
     name: str
     node: str
     template_vmid: int
     address: str
-    guest_dir: Path
-    provision_file: Path
-    private_key: Path
-    playbook: Path
-    known_hosts: Path
-    plan_file: Path
     target: str
+    env: dict[str, str]
+    paths: DeploymentPaths
 
 
 def _require_env(name: str) -> str:
@@ -291,14 +296,14 @@ def _recover_tainted_vm(context: DeploymentContext) -> None:
     run(
         [
             "tofu",
-            f"-chdir={context.opentofu_dir}",
+            f"-chdir={context.paths.opentofu_dir}",
             "state",
             "rm",
             context.target,
         ],
         env=context.env,
     )
-    _remove_known_host(context.known_hosts, context.address)
+    _remove_known_host(context.paths.known_hosts, context.address)
     console.ok(
         f"Незавершённая VM {context.vmid} удалена; "
         "OpenTofu state очищен"
@@ -382,12 +387,12 @@ def _apply_plan(
         run(
             [
                 "tofu",
-                f"-chdir={context.opentofu_dir}",
+                f"-chdir={context.paths.opentofu_dir}",
                 "apply",
                 "-input=false",
                 "-no-color",
                 "-lock-timeout=30s",
-                str(context.plan_file),
+                str(context.paths.plan_file),
             ],
             env=context.env,
         )
