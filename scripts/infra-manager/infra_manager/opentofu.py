@@ -111,13 +111,13 @@ def _init(opentofu_dir: Path, env: dict[str, str]) -> None:
     run(
         [
             "tofu",
-            f"-chdir={opentofu_dir}",
+            f"-chdir={context.paths.opentofu_dir}",
             "init",
             "-input=false",
             "-no-color",
             "-lockfile=readonly",
         ],
-        env=env,
+        env=context.env,
     )
 
 
@@ -134,7 +134,7 @@ def run_plan(repo_root: Path) -> int:
     result = run(
         [
             "tofu",
-            f"-chdir={opentofu_dir}",
+            f"-chdir={context.paths.opentofu_dir}",
             "plan",
             "-input=false",
             "-no-color",
@@ -142,7 +142,7 @@ def run_plan(repo_root: Path) -> int:
             "-detailed-exitcode",
         ],
         check=False,
-        env=env,
+        env=context.env,
     )
     if result.returncode == 0:
         console.ok("OpenTofu: изменений нет")
@@ -163,14 +163,14 @@ def _state_status(
     show = run(
         [
             "tofu",
-            f"-chdir={opentofu_dir}",
+            f"-chdir={context.paths.opentofu_dir}",
             "state",
             "show",
             target,
         ],
         check=False,
         capture_output=True,
-        env=env,
+        env=context.env,
     )
     if show.returncode != 0:
         return False, ""
@@ -178,12 +178,12 @@ def _state_status(
     pulled = run(
         [
             "tofu",
-            f"-chdir={opentofu_dir}",
+            f"-chdir={context.paths.opentofu_dir}",
             "state",
             "pull",
         ],
         capture_output=True,
-        env=env,
+        env=context.env,
     )
     try:
         state = json.loads(pulled.stdout)
@@ -458,6 +458,86 @@ def _ensure_ssh_host_key(
     )
 
 
+def _build_deployment_context(
+    repo_root: Path,
+    vmid: int,
+    opentofu_dir: Path,
+    env: dict[str, str],
+    payload: dict[str, Any],
+) -> DeploymentContext:
+    """Проверить описание VM и собрать общий контекст развёртывания."""
+    guests = payload["guests"]
+    guest = guests.get(str(vmid))
+    if not isinstance(guest, dict):
+        raise InfraManagerError(
+            f"VMID {vmid} отсутствует в итоговом состоянии OpenTofu"
+        )
+    if guest.get("type") != "vm":
+        raise InfraManagerError(f"VMID {vmid} должен иметь type=vm")
+
+    name = str(guest.get("name") or "")
+    node = str(guest.get("node") or "")
+    template_vmid = guest.get("template_vmid")
+    network = guest.get("network")
+    if not name or not node or not isinstance(template_vmid, int):
+        raise InfraManagerError(
+            f"VMID {vmid}: неполное итоговое описание VM"
+        )
+    if not isinstance(network, dict):
+        raise InfraManagerError(f"VMID {vmid}: отсутствует network")
+
+    ipv4 = str(network.get("ipv4") or "")
+    if not ipv4 or ipv4 == "dhcp":
+        raise InfraManagerError(
+            f"VMID {vmid}: для текущего deploy-guest требуется "
+            "статический IPv4"
+        )
+    address = ipv4.split("/", 1)[0]
+
+    guest_dir = _find_guest_directory(repo_root, vmid)
+    provision_file = guest_dir / "provision.yaml"
+    if not provision_file.is_file():
+        raise InfraManagerError(
+            f"Не найден provision.yaml: {provision_file}"
+        )
+
+    private_key = PATHS.ansible_private_key
+    if not private_key.is_file():
+        raise InfraManagerError(
+            f"Не найден закрытый ключ Ansible: {private_key}"
+        )
+
+    playbook = (
+        repo_root
+        / "automation"
+        / "ansible"
+        / "playbooks"
+        / "configure-guest.yml"
+    )
+    if not playbook.is_file():
+        raise InfraManagerError(f"Не найден playbook: {playbook}")
+
+    paths = DeploymentPaths(
+        opentofu_dir=opentofu_dir,
+        guest_dir=guest_dir,
+        private_key=private_key,
+        playbook=playbook,
+        known_hosts=Path("/var/lib/semaphore/guest-known-hosts"),
+        plan_file=STATE_DIR / f"{vmid}.tfplan",
+    )
+    return DeploymentContext(
+        client=PveClient.from_opentofu_env(),
+        vmid=vmid,
+        name=name,
+        node=node,
+        template_vmid=template_vmid,
+        address=address,
+        target=f'proxmox_virtual_environment_vm.guest["{vmid}"]',
+        env=context.env,
+        paths=paths,
+    )
+
+
 def run_deploy_guest(repo_root: Path, vmid: int) -> int:
     """Привести одну VM к состоянию guest.yaml + provision.yaml."""
 
@@ -477,113 +557,54 @@ def run_deploy_guest(repo_root: Path, vmid: int) -> int:
 
     opentofu_dir, payload = _prepare_input(repo_root)
     env = _opentofu_env()
-    guests = payload["guests"]
-    guest = guests.get(str(vmid))
-    if not isinstance(guest, dict):
-        raise InfraManagerError(
-            f"VMID {vmid} отсутствует в итоговом состоянии OpenTofu"
-        )
-    if guest.get("type") != "vm":
-        raise InfraManagerError(
-            f"VMID {vmid} должен иметь type=vm"
-        )
-
-    name = str(guest.get("name") or "")
-    node = str(guest.get("node") or "")
-    template_vmid = guest.get("template_vmid")
-    network = guest.get("network")
-    if not name or not node or not isinstance(template_vmid, int):
-        raise InfraManagerError(
-            f"VMID {vmid}: неполное итоговое описание VM"
-        )
-    if not isinstance(network, dict):
-        raise InfraManagerError(
-            f"VMID {vmid}: отсутствует network"
-        )
-
-    ipv4 = str(network.get("ipv4") or "")
-    if not ipv4 or ipv4 == "dhcp":
-        raise InfraManagerError(
-            f"VMID {vmid}: для текущего deploy-guest требуется "
-            "статический IPv4"
-        )
-    address = ipv4.split("/", 1)[0]
-
-    guest_dir = _find_guest_directory(repo_root, vmid)
-    provision_file = guest_dir / "provision.yaml"
-    if not provision_file.is_file():
-        raise InfraManagerError(
-            f"Не найден provision.yaml: {provision_file}"
-        )
-
-    private_key = Path("/etc/infra-manager/ansible/guest_ed25519")
-    if not private_key.is_file():
-        raise InfraManagerError(
-            f"Не найден закрытый ключ Ansible: {private_key}"
-        )
-    playbook = (
-        repo_root
-        / "automation"
-        / "ansible"
-        / "playbooks"
-        / "configure-guest.yml"
+    context = _build_deployment_context(
+        repo_root,
+        vmid,
+        opentofu_dir,
+        env,
+        payload,
     )
-    if not playbook.is_file():
-        raise InfraManagerError(f"Не найден playbook: {playbook}")
-
-    known_hosts = Path("/var/lib/semaphore/guest-known-hosts")
-    plan_file = STATE_DIR / f"{vmid}.tfplan"
-    target = f'proxmox_virtual_environment_vm.guest["{vmid}"]'
 
     console.info("Инициализация OpenTofu")
-    _init(opentofu_dir, env)
+    _init(context.paths.opentofu_dir, context.env)
 
     state_present, state_status = _state_status(
-        opentofu_dir,
-        target,
-        env,
+        context.paths.opentofu_dir,
+        context.target,
+        context.env,
     )
-    client = PveClient.from_opentofu_env()
     state_present, state_status = _validate_pve_and_state(
-        client=client,
-        opentofu_dir=opentofu_dir,
-        env=env,
-        target=target,
-        node=node,
-        vmid=vmid,
-        expected_name=name,
+        context,
         state_present=state_present,
         state_status=state_status,
-        known_hosts=known_hosts,
-        address=address,
     )
 
-    console.info(f"План OpenTofu для {vmid}")
+    console.info(f"План OpenTofu для {context.vmid}")
     try:
         run(
             [
                 "tofu",
-                f"-chdir={opentofu_dir}",
+                f"-chdir={context.paths.opentofu_dir}",
                 "plan",
                 "-input=false",
                 "-no-color",
                 "-lock-timeout=30s",
-                f"-target={target}",
-                f"-out={plan_file}",
+                f"-target={context.target}",
+                f"-out={context.paths.plan_file}",
             ],
-            env=env,
+            env=context.env,
         )
 
         shown = run(
             [
                 "tofu",
-                f"-chdir={opentofu_dir}",
+                f"-chdir={context.paths.opentofu_dir}",
                 "show",
                 "-json",
-                str(plan_file),
+                str(context.paths.plan_file),
             ],
             capture_output=True,
-            env=env,
+            env=context.env,
         )
         try:
             plan = json.loads(shown.stdout)
@@ -602,17 +623,17 @@ def run_deploy_guest(repo_root: Path, vmid: int) -> int:
             str(change.get("address"))
             for change in changes
             if isinstance(change, dict)
-            and change.get("address") != target
+            and change.get("address") != context.target
         ]
         if unexpected:
             raise InfraManagerError(
-                f"План VM {vmid} содержит изменения других ресурсов: "
+                f"План VM {context.vmid} содержит изменения других ресурсов: "
                 + ", ".join(unexpected)
             )
 
         actions: list[str] = []
         for change in changes:
-            if not isinstance(change, dict) or change.get("address") != target:
+            if not isinstance(change, dict) or change.get("address") != context.target:
                 continue
             change_data = change.get("change")
             if isinstance(change_data, dict):
@@ -623,57 +644,48 @@ def run_deploy_guest(repo_root: Path, vmid: int) -> int:
         run(
             [
                 "tofu",
-                f"-chdir={opentofu_dir}",
+                f"-chdir={context.paths.opentofu_dir}",
                 "show",
                 "-no-color",
-                str(plan_file),
+                str(context.paths.plan_file),
             ],
-            env=env,
+            env=context.env,
         )
 
         if not actions or actions == ["no-op"]:
             console.ok(
-                f"OpenTofu: состояние VM {vmid} уже соответствует конфигурации"
+                f"OpenTofu: состояние VM {context.vmid} уже соответствует конфигурации"
             )
         else:
-            _apply_plan(
-                client=client,
-                opentofu_dir=opentofu_dir,
-                env=env,
-                plan_file=plan_file,
-                actions=actions,
-                node=node,
-                template_vmid=template_vmid,
-                vmid=vmid,
-            )
-            console.ok(f"Состояние VM {vmid} применено")
+            _apply_plan(context, actions)
+            console.ok(f"Состояние VM {context.vmid} применено")
     finally:
-        plan_file.unlink(missing_ok=True)
+        context.paths.plan_file.unlink(missing_ok=True)
 
-    _ensure_ssh_host_key(known_hosts, address)
+    _ensure_ssh_host_key(context.paths.known_hosts, context.address)
 
-    console.info(f"Настройка ОС {vmid} через Ansible")
+    console.info(f"Настройка ОС {context.vmid} через Ansible")
     ansible_env = os.environ.copy()
     ansible_env["ANSIBLE_HOST_KEY_CHECKING"] = "True"
     ansible_env["ANSIBLE_SSH_ARGS"] = (
-        f"-o UserKnownHostsFile={known_hosts} "
+        f"-o UserKnownHostsFile={context.paths.known_hosts} "
         "-o StrictHostKeyChecking=yes"
     )
     run(
         [
             "ansible-playbook",
             "-i",
-            f"{address},",
+            f"{context.address},",
             "-u",
             "root",
             "--private-key",
-            str(private_key),
+            str(context.paths.private_key),
             "-e",
-            f"guest={guest_dir.name}",
-            str(playbook),
+            f"guest={context.paths.guest_dir.name}",
+            str(context.paths.playbook),
         ],
         env=ansible_env,
     )
 
-    console.ok(f"{vmid} {name} создан и базово настроен")
+    console.ok(f"{context.vmid} {context.name} создан и базово настроен")
     return 0
