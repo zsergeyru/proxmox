@@ -13,14 +13,32 @@ KNOWN_HOSTS="/var/lib/semaphore/guest-known-hosts"
 PLAYBOOK="$REPO_ROOT/automation/ansible/playbooks/configure-guest.yml"
 GUEST_DIR="410-ai-control"
 TARGET_RESOURCE='proxmox_virtual_environment_vm.guest["410"]'
+TEMPLATE_VMID=9000
+TEMPLATE_PROTECTION_CHANGED=0
 
 die() { printf 'ОШИБКА: %s\n' "$*" >&2; exit 1; }
 ok()  { printf '[ОК] %s\n' "$*"; }
 info() { printf '==> %s\n' "$*"; }
 
 cleanup() {
+    local rc=$?
+
     rm -f "$PLAN_FILE"
+
+    if ((TEMPLATE_PROTECTION_CHANGED == 1)) && declare -F api >/dev/null 2>&1; then
+        if api PUT "/nodes/pve/qemu/${TEMPLATE_VMID}/config" \
+            --data-urlencode "protection=1" >/dev/null; then
+            printf '[ОК] Защита шаблона %s восстановлена\n' "$TEMPLATE_VMID"
+        else
+            printf 'ОШИБКА: не удалось восстановить protection шаблона %s\n' "$TEMPLATE_VMID" >&2
+            rc=1
+        fi
+        TEMPLATE_PROTECTION_CHANGED=0
+    fi
+
     unset PVE_TOKEN_SECRET AUTH_HEADER
+    trap - EXIT
+    exit "$rc"
 }
 trap cleanup EXIT
 
@@ -130,6 +148,39 @@ run_task() {
     wait_task "$upid"
 }
 
+prepare_template_for_clone() {
+    local response template name protection
+
+    response="$(api GET "/nodes/pve/qemu/${TEMPLATE_VMID}/config")" \
+        || die "Не удалось прочитать шаблон $TEMPLATE_VMID"
+
+    template="$(jq -r '.data.template // 0' <<<"$response")"
+    name="$(jq -r '.data.name // empty' <<<"$response")"
+    protection="$(jq -r '.data.protection // 0' <<<"$response")"
+
+    [[ "$template" == "1" || "$template" == "true" ]] \
+        || die "VMID $TEMPLATE_VMID не является шаблоном"
+    [[ "$name" == "tpl-debian13" ]] \
+        || die "VMID $TEMPLATE_VMID имеет неожиданное имя '$name'"
+
+    if [[ "$protection" == "1" || "$protection" == "true" ]]; then
+        info "Временное снятие защиты шаблона $TEMPLATE_VMID для клонирования"
+        api PUT "/nodes/pve/qemu/${TEMPLATE_VMID}/config" \
+            --data-urlencode "protection=0" >/dev/null
+        TEMPLATE_PROTECTION_CHANGED=1
+    fi
+}
+
+restore_template_protection() {
+    if ((TEMPLATE_PROTECTION_CHANGED == 1)); then
+        api PUT "/nodes/pve/qemu/${TEMPLATE_VMID}/config" \
+            --data-urlencode "protection=1" >/dev/null \
+            || die "Не удалось восстановить protection шаблона $TEMPLATE_VMID"
+        TEMPLATE_PROTECTION_CHANGED=0
+        ok "Защита шаблона $TEMPLATE_VMID восстановлена"
+    fi
+}
+
 pve_guest_410() {
     curl -fsS \
         --connect-timeout 5 \
@@ -231,6 +282,8 @@ unexpected_resources="$(
 
 tofu -chdir="$OPENTOFU_DIR" show -no-color "$PLAN_FILE"
 
+prepare_template_for_clone
+
 info "Применение состояния VM 410"
 tofu -chdir="$OPENTOFU_DIR" apply \
     -input=false \
@@ -238,6 +291,7 @@ tofu -chdir="$OPENTOFU_DIR" apply \
     -lock-timeout=30s \
     "$PLAN_FILE"
 
+restore_template_protection
 ok "Состояние VM 410 применено"
 
 if ! ssh-keygen -F "$guest_ip" -f "$KNOWN_HOSTS" >/dev/null 2>&1; then
