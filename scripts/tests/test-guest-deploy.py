@@ -15,6 +15,7 @@ MODULE_ROOT = ROOT / "scripts" / "infra-manager"
 sys.path.insert(0, str(MODULE_ROOT))
 
 from infra_manager import guest_deploy as guest_deploy_module
+from infra_manager import opentofu as opentofu_module
 from infra_manager.common import InfraManagerError
 from infra_manager.guest_deploy import (
     DeploymentContext,
@@ -32,7 +33,93 @@ def fail(message: str) -> None:
     raise SystemExit(message)
 
 
+def check_opentofu_state_status() -> None:
+    target = 'proxmox_virtual_environment_vm.guest["410"]'
+    directory = Path("/tmp/opentofu")
+    env = {"SSL_CERT_FILE": "/tmp/ca.crt"}
+
+    with tempfile.TemporaryDirectory() as tmp:
+        state_file = Path(tmp) / "proxmox.tfstate"
+
+        with (
+            patch.object(opentofu_module, "STATE_FILE", state_file),
+            patch.object(opentofu_module, "run") as mocked_run,
+        ):
+            if opentofu_module._state_status(directory, target, env) != (
+                False,
+                "",
+            ):
+                fail("Отсутствующий файл состояния должен означать отсутствие ресурса")
+            mocked_run.assert_not_called()
+
+        state_file.write_text("{}\n", encoding="utf-8")
+        state_payload = {
+            "resources": [
+                {
+                    "type": "proxmox_virtual_environment_vm",
+                    "name": "guest",
+                    "instances": [
+                        {
+                            "index_key": "410",
+                            "status": "tainted",
+                        }
+                    ],
+                }
+            ]
+        }
+        with (
+            patch.object(opentofu_module, "STATE_FILE", state_file),
+            patch.object(
+                opentofu_module,
+                "run",
+                return_value=SimpleNamespace(
+                    returncode=0,
+                    stdout=json.dumps(state_payload),
+                ),
+            ),
+        ):
+            if opentofu_module._state_status(directory, target, env) != (
+                True,
+                "tainted",
+            ):
+                fail("Состояние OpenTofu неверно определило найденный ресурс")
+
+        missing_payload = {"resources": []}
+        with (
+            patch.object(opentofu_module, "STATE_FILE", state_file),
+            patch.object(
+                opentofu_module,
+                "run",
+                return_value=SimpleNamespace(
+                    returncode=0,
+                    stdout=json.dumps(missing_payload),
+                ),
+            ),
+        ):
+            if opentofu_module._state_status(directory, target, env) != (
+                False,
+                "",
+            ):
+                fail("Отсутствующий в состоянии ресурс ошибочно считается найденным")
+
+        with (
+            patch.object(opentofu_module, "STATE_FILE", state_file),
+            patch.object(
+                opentofu_module,
+                "run",
+                side_effect=InfraManagerError("ошибка чтения состояния"),
+            ),
+        ):
+            try:
+                opentofu_module._state_status(directory, target, env)
+            except InfraManagerError:
+                pass
+            else:
+                fail("Ошибка чтения существующего состояния была скрыта")
+
+
 def main_test() -> None:
+    check_opentofu_state_status()
     workspace = OpenTofuWorkspace(
         directory=Path("/tmp/opentofu"),
         state_dir=Path("/tmp/state"),
