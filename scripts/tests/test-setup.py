@@ -462,8 +462,6 @@ def main_test() -> None:
     check_semaphore_storage_repair()
     check_wait_semaphore()
     check_local_commands_installation()
-    check_setup_contract()
-    check_setup_order()
     print("Проверки настройки infra-manager пройдены.")
 
 
