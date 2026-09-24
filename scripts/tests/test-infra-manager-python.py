@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Foundation checks shared by the infra-manager Python package."""
+"""Базовые проверки общего фундамента Python-пакета infra-manager."""
 
 from __future__ import annotations
 
@@ -38,11 +38,11 @@ def check_cli_and_commands() -> None:
     with contextlib.redirect_stdout(stdout):
         rc = main([])
     if rc != 0 or "infra-manager" not in stdout.getvalue():
-        fail("infra-manager CLI did not print help without arguments")
+        fail("CLI infra-manager не вывел справку при запуске без аргументов")
 
     result = run([sys.executable, "-c", "print('OK')"], capture_output=True)
     if result.stdout.strip() != "OK":
-        fail("common.run did not return command stdout")
+        fail("common.run не вернул stdout внешней команды")
 
     try:
         run(
@@ -51,9 +51,9 @@ def check_cli_and_commands() -> None:
         )
     except CommandError as exc:
         if exc.returncode != 7:
-            fail(f"CommandError contains an incorrect return code: {exc.returncode}")
+            fail(f"CommandError содержит неверный код возврата: {exc.returncode}")
     else:
-        fail("common.run did not report an external command failure")
+        fail("common.run не сообщил об ошибке внешней команды")
 
     runner = CommandRunner()
     captured = runner.run(
@@ -61,7 +61,7 @@ def check_cli_and_commands() -> None:
         capture=True,
     )
     if captured.stdout.strip() != "CAPTURED":
-        fail("CommandRunner capture did not return stdout")
+        fail("CommandRunner в режиме capture не вернул stdout")
 
     with tempfile.TemporaryDirectory() as tmp:
         command_log = Path(tmp) / "command.log"
@@ -72,9 +72,9 @@ def check_cli_and_commands() -> None:
         )
         log_text = command_log.read_text(encoding="utf-8")
         if "LOGGED" not in log_text:
-            fail("CommandRunner did not write command output to the log")
+            fail("CommandRunner не записал вывод команды в журнал")
         if "secret-value" in log_text:
-            fail("CommandRunner wrote a sensitive argument to the log")
+            fail("CommandRunner записал чувствительный аргумент в журнал")
 
     redacted = _redact_argv(
         [
@@ -94,18 +94,18 @@ def check_cli_and_commands() -> None:
         "-var=proxmox_token=[СКРЫТО]",
         "-var=other=value",
     ):
-        fail(f"Sensitive argument redaction is incorrect: {redacted!r}")
+        fail(f"Чувствительные аргументы скрыты некорректно: {redacted!r}")
 
     nested = _redact_argv(["tool", "-var=proxmox_token=abc=def", "next"])
     if nested != ("tool", "-var=proxmox_token=[СКРЫТО]", "next"):
-        fail(f"A nested '=' was handled incorrectly: {nested!r}")
+        fail(f"Вложенный знак '=' обработан некорректно: {nested!r}")
 
     explicit = _redact_argv(
         ["tool", "--api-key", "secret-value", "next"],
         sensitive_indices=(2,),
     )
     if explicit != ("tool", "--api-key", "[СКРЫТО]", "next"):
-        fail(f"sensitive_indices was handled incorrectly: {explicit!r}")
+        fail(f"sensitive_indices обработан некорректно: {explicit!r}")
 
     cli_help_cases = (
         ["--help"],
@@ -125,10 +125,10 @@ def check_cli_and_commands() -> None:
         if direct.returncode != 0:
             fail(
                 f"python -m infra_manager {' '.join(args)} "
-                f"returned {direct.returncode}"
+                f"завершился с кодом {direct.returncode}"
             )
         if "usage: infra-manager" not in direct.stdout:
-            fail(f"python -m infra_manager {' '.join(args)} did not print usage")
+            fail(f"python -m infra_manager {' '.join(args)} не вывел строку использования")
 
 
 def check_command_runner_contract() -> None:
@@ -139,7 +139,7 @@ def check_command_runner_contract() -> None:
         source = module_path.read_text(encoding="utf-8")
         if "subprocess.run(" in source:
             fail(
-                "External commands must be executed only through CommandRunner: "
+                "Внешние команды должны выполняться только через CommandRunner: "
                 f"{module_path.name}"
             )
 
@@ -147,11 +147,11 @@ def check_command_runner_contract() -> None:
 def check_pve_helpers() -> None:
     permissions = {"/vms": {"VM.Audit": 1, "VM.Allocate": True}}
     if not permission_present(permissions, "VM.Audit"):
-        fail("permission_present did not find a numeric privilege")
+        fail("permission_present не обнаружил числовую привилегию")
     if not permission_present(permissions, "VM.Allocate"):
-        fail("permission_present did not find a boolean privilege")
+        fail("permission_present не обнаружил логическую привилегию")
     if permission_present(permissions, "Permissions.Modify"):
-        fail("permission_present found a missing privilege")
+        fail("permission_present обнаружил отсутствующую привилегию")
 
     vm_interfaces = {
         "result": [
@@ -178,7 +178,7 @@ def check_pve_helpers() -> None:
     }
     selected = select_management_ipv4(vm_interfaces, "192.168.0.0/16")
     if str(selected) != "192.168.1.77":
-        fail(f"Incorrect VM IPv4 selected: {selected}")
+        fail(f"Для VM выбран неверный IPv4: {selected}")
 
     lxc_interfaces = [
         {
@@ -190,10 +190,10 @@ def check_pve_helpers() -> None:
     ]
     selected = select_management_ipv4(lxc_interfaces, "192.168.0.0/16")
     if str(selected) != "192.168.2.40":
-        fail(f"Incorrect LXC IPv4 selected: {selected}")
+        fail(f"Для LXC выбран неверный IPv4: {selected}")
 
     if select_management_ipv4(vm_interfaces, "10.0.0.0/8") is not None:
-        fail("DHCP address lookup found IPv4 outside the management subnet")
+        fail("Поиск DHCP-адреса обнаружил IPv4 вне административной подсети")
 
     ambiguous = {
         "result": [
@@ -210,24 +210,24 @@ def check_pve_helpers() -> None:
     except InfraManagerError:
         pass
     else:
-        fail("Ambiguous management IPv4 did not raise an error")
+        fail("Неоднозначный административный IPv4 не вызвал ошибку")
 
     calls: list[str] = []
     client = object.__new__(PveClient)
     client.data = lambda endpoint, **kwargs: calls.append(endpoint) or []
     client.guest_interfaces(node="pve", vmid=410, kind="vm")
     if calls[-1] != "/nodes/pve/qemu/410/agent/network-get-interfaces":
-        fail(f"Incorrect PVE VM endpoint: {calls[-1]}")
+        fail(f"Выбран неверный конечный адрес PVE API для VM: {calls[-1]}")
     client.guest_interfaces(node="pve", vmid=311, kind="lxc")
     if calls[-1] != "/nodes/pve/lxc/311/interfaces":
-        fail(f"Incorrect PVE LXC endpoint: {calls[-1]}")
+        fail(f"Выбран неверный конечный адрес PVE API для LXC: {calls[-1]}")
 
 
 def main_test() -> None:
     check_cli_and_commands()
     check_command_runner_contract()
     check_pve_helpers()
-    print("infra-manager Python foundation checks passed.")
+    print("Базовые проверки Python-пакета infra-manager пройдены.")
 
 
 if __name__ == "__main__":
