@@ -90,6 +90,24 @@ def _check_git_branch_contract(
     github_key_id: int,
     project_branch: str,
 ) -> None:
+    stored_key_id = repository.get("ssh_key_id")
+    repository_matches = (
+        repository.get("git_url") == PROJECT_REPO
+        and str(stored_key_id or "") == str(github_key_id)
+        and repository.get("git_branch") == project_branch
+    )
+    if not repository_matches:
+        raise InfraManagerError(
+            "Git repository 'proxmox' не соответствует "
+            "ожидаемому URL, SSH key или ветке "
+            f"'{project_branch}'"
+        )
+
+    if not isinstance(branches, list) or project_branch not in branches:
+        raise InfraManagerError(
+            "Semaphore не видит ветку "
+            f"'{project_branch}' в Git repository 'proxmox'"
+        )
 
     if not isinstance(templates, list):
         raise InfraManagerError(
