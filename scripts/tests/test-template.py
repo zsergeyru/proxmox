@@ -11,6 +11,7 @@ ROOT = Path(__file__).resolve().parents[2]
 MODULE_ROOT = ROOT / "scripts" / "infra-manager"
 sys.path.insert(0, str(MODULE_ROOT))
 
+from infra_manager.common import InfraManagerError
 from infra_manager.template import _template_failures
 from infra_manager.template_build import _packer_inputs
 from infra_manager.template_verify import (
@@ -93,7 +94,7 @@ def main_test() -> None:
             '{"status":"error","init":{},"init-local":{},'
             '"modules-config":{},"modules-final":{}}',
         )
-    except Exception:
+    except InfraManagerError:
         pass
     else:
         fail("Код 1 cloud-init status был принят как успешный")
