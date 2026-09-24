@@ -378,35 +378,51 @@ def _interface_records(data: Any) -> list[dict[str, Any]]:
     return []
 
 
+def _modern_interface_ipv4s(
+    interface: dict[str, Any],
+) -> set[ipaddress.IPv4Address]:
+    """Извлечь IPv4 из современного списка ip-addresses."""
+    found: set[ipaddress.IPv4Address] = set()
+    addresses = interface.get("ip-addresses")
+    if not isinstance(addresses, list):
+        return found
+
+    for item in addresses:
+        if not isinstance(item, dict):
+            continue
+        if item.get("ip-address-type") not in {"ipv4", "inet"}:
+            continue
+        try:
+            address = ipaddress.ip_address(item.get("ip-address"))
+        except (TypeError, ValueError):
+            continue
+        if isinstance(address, ipaddress.IPv4Address):
+            found.add(address)
+    return found
+
+
+def _legacy_interface_ipv4(
+    interface: dict[str, Any],
+) -> ipaddress.IPv4Address | None:
+    """Извлечь IPv4 из старого поля inet."""
+    legacy = interface.get("inet")
+    if not isinstance(legacy, str) or not legacy:
+        return None
+    try:
+        address = ipaddress.ip_interface(legacy).ip
+    except ValueError:
+        return None
+    return address if isinstance(address, ipaddress.IPv4Address) else None
+
+
 def _interface_ipv4s(data: Any) -> set[ipaddress.IPv4Address]:
     """Извлечь IPv4 из современного и совместимого старого ответа PVE."""
     found: set[ipaddress.IPv4Address] = set()
-
     for interface in _interface_records(data):
-        addresses = interface.get("ip-addresses")
-        if isinstance(addresses, list):
-            for item in addresses:
-                if not isinstance(item, dict):
-                    continue
-                if item.get("ip-address-type") not in {"ipv4", "inet"}:
-                    continue
-                value = item.get("ip-address")
-                try:
-                    address = ipaddress.ip_address(value)
-                except (TypeError, ValueError):
-                    continue
-                if isinstance(address, ipaddress.IPv4Address):
-                    found.add(address)
-
-        legacy = interface.get("inet")
-        if isinstance(legacy, str) and legacy:
-            try:
-                address = ipaddress.ip_interface(legacy).ip
-            except ValueError:
-                continue
-            if isinstance(address, ipaddress.IPv4Address):
-                found.add(address)
-
+        found.update(_modern_interface_ipv4s(interface))
+        legacy = _legacy_interface_ipv4(interface)
+        if legacy is not None:
+            found.add(legacy)
     return found
 
 
