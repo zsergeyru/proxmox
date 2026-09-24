@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Unit and contract checks for infra-manager guest deployment."""
+"""Модульные и контрактные проверки развёртывания гостевых систем infra-manager."""
 
 from __future__ import annotations
 
@@ -73,7 +73,7 @@ def main_test() -> None:
         state_present=True,
         state_status="ready",
     ) is not None:
-        fail("VM state validation must return None on success")
+        fail("Проверка состояния VM при успехе должна возвращать None")
 
     invalid_state_cases = (
         (
@@ -82,10 +82,10 @@ def main_test() -> None:
             ),
             True,
             "ready",
-            "VMID occupied by an LXC",
+            "VMID занят LXC",
         ),
-        (deployment_client, False, "", "VM without OpenTofu state"),
-        (SimpleNamespace(find_vm=lambda vmid: None), True, "ready", "state without VM"),
+        (deployment_client, False, "", "VM отсутствует в состоянии OpenTofu"),
+        (SimpleNamespace(find_vm=lambda vmid: None), True, "ready", "состояние OpenTofu есть без VM"),
     )
     for client, state_present, state_status, description in invalid_state_cases:
         try:
@@ -97,7 +97,7 @@ def main_test() -> None:
         except InfraManagerError:
             pass
         else:
-            fail(f"VM state validation accepted an unsafe case: {description}")
+            fail(f"Проверка состояния VM приняла небезопасный случай: {description}")
 
     class TaintedClient:
         def __init__(self) -> None:
@@ -132,9 +132,9 @@ def main_test() -> None:
             state_status="tainted",
         )
     if not any(method == "DELETE" for method, _ in tainted_client.tasks):
-        fail("Tainted VM was not removed after type and name validation")
+        fail("Повреждённая VM не была удалена после проверки типа и имени")
     if not any(command[2:4] == ["state", "rm"] for command in tainted_commands):
-        fail("Tainted VM was not removed from OpenTofu state")
+        fail("Повреждённая VM не была удалена из состояния OpenTofu")
 
     def unexpected_plan_run(argv: list[str], **kwargs: object):
         if "-json" in argv:
@@ -155,7 +155,7 @@ def main_test() -> None:
         except InfraManagerError:
             pass
         else:
-            fail("Target plan allowed an unrelated resource change")
+            fail("Целевой план разрешил изменение постороннего ресурса")
 
     def target_plan_run(argv: list[str], **kwargs: object):
         if "-json" in argv:
@@ -173,7 +173,7 @@ def main_test() -> None:
     with patch.object(guest_deploy_module, "run", target_plan_run):
         guest_plan = _build_guest_plan(deployment)
     if guest_plan.actions != ("update",):
-        fail("Target plan parsed the selected VM actions incorrectly")
+        fail("Целевой план неверно разобрал действия выбранной VM")
 
     class ProtectedTemplateClient:
         def __init__(self) -> None:
@@ -188,7 +188,7 @@ def main_test() -> None:
     protected_client = ProtectedTemplateClient()
 
     def failed_apply(argv: list[str], **kwargs: object):
-        raise InfraManagerError("expected apply failure")
+        raise InfraManagerError("ожидаемая ошибка применения")
 
     with patch.object(guest_deploy_module, "run", failed_apply):
         try:
@@ -196,9 +196,9 @@ def main_test() -> None:
         except InfraManagerError:
             pass
         else:
-            fail("Expected tofu apply to fail")
+            fail("Ожидалась ошибка tofu apply")
     if protected_client.protection_values != [0, 1]:
-        fail("Template protection was not restored after tofu apply failure")
+        fail("Защита шаблона не была восстановлена после ошибки tofu apply")
 
     with tempfile.TemporaryDirectory() as tmp:
         plan_file = Path(tmp) / "410.tfplan"
@@ -213,7 +213,7 @@ def main_test() -> None:
         with patch.object(
             guest_deploy_module,
             "_build_guest_plan",
-            side_effect=InfraManagerError("expected plan failure"),
+            side_effect=InfraManagerError("ожидаемая ошибка построения плана"),
         ):
             try:
                 _reconcile_guest_infrastructure(
@@ -222,15 +222,15 @@ def main_test() -> None:
             except InfraManagerError:
                 pass
             else:
-                fail("Expected OpenTofu plan construction to fail")
+                fail("Ожидалась ошибка построения плана OpenTofu")
         if plan_file.exists():
-            fail("Temporary OpenTofu plan was not removed after failure")
+            fail("Временный план OpenTofu не был удалён после ошибки")
 
     guest_dir = _find_guest_directory(ROOT, 410)
     if guest_dir.name != "410-ai-control":
-        fail(f"Unexpected directory found for VM 410: {guest_dir}")
+        fail(f"Для VM 410 найден неожиданный каталог: {guest_dir}")
 
-    print("infra-manager guest deployment checks passed.")
+    print("Проверки развёртывания гостевых систем infra-manager пройдены.")
 
 
 if __name__ == "__main__":
