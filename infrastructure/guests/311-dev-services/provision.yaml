@@ -1,0 +1,18 @@
+schema_version: 1
+guest_vmid: 311
+
+system:
+  distribution: debian
+  version: "13"
+  architecture: amd64
+
+  required_packages:
+    - git
+    - ansible-core
+
+docker:
+  required: true
+  source: docker-official-repository
+  service:
+    enabled: true
+    state: running
