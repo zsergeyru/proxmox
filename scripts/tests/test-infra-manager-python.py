@@ -14,7 +14,12 @@ MODULE_ROOT = ROOT / "scripts" / "infra-manager"
 sys.path.insert(0, str(MODULE_ROOT))
 
 from infra_manager.cli import main  # noqa: E402
-from infra_manager.common import CommandError, InfraManagerError, run  # noqa: E402
+from infra_manager.common import (  # noqa: E402
+    CommandError,
+    InfraManagerError,
+    _redact_argv,
+    run,
+)
 from infra_manager.opentofu import _find_guest_directory  # noqa: E402
 from infra_manager.pve import (  # noqa: E402
     PveClient,
@@ -60,6 +65,43 @@ def main_test() -> None:
             )
     else:
         fail("common.run не сообщил об ошибке внешней команды")
+
+    redacted = _redact_argv(
+        [
+            "tool",
+            "--token",
+            "abc",
+            "--password=def",
+            "-var=proxmox_token=ghi",
+            "-var=other=value",
+        ]
+    )
+    if redacted != (
+        "tool",
+        "--token",
+        "[СКРЫТО]",
+        "--password=[СКРЫТО]",
+        "-var=proxmox_token=[СКРЫТО]",
+        "-var=other=value",
+    ):
+        fail(f"Некорректное редактирование чувствительных аргументов: {redacted!r}")
+
+    nested = _redact_argv(
+        ["tool", "-var=proxmox_token=abc=def", "next"]
+    )
+    if nested != (
+        "tool",
+        "-var=proxmox_token=[СКРЫТО]",
+        "next",
+    ):
+        fail(f"Вложенный '=' обработан неверно: {nested!r}")
+
+    explicit = _redact_argv(
+        ["tool", "--api-key", "secret-value", "next"],
+        sensitive_indices=(2,),
+    )
+    if explicit != ("tool", "--api-key", "[СКРЫТО]", "next"):
+        fail(f"sensitive_indices обработан неверно: {explicit!r}")
 
     cli_help_cases = (
         ["--help"],
