@@ -301,13 +301,14 @@ def _recover_tainted_vm(context: DeploymentContext) -> None:
             "rm",
             context.target,
         ],
-        env=env,
+        env=context.env,
     )
     _remove_known_host(context.paths.known_hosts, context.address)
     console.ok(
         f"Незавершённая VM {context.vmid} удалена; "
         "OpenTofu state очищен"
     )
+
 
 def _validate_pve_and_state(
     context: DeploymentContext,
@@ -341,6 +342,7 @@ def _validate_pve_and_state(
             f"VM {context.vmid} есть в OpenTofu state, но отсутствует в PVE"
         )
     return state_present, state_status
+
 
 def _set_template_protection(
     client: PveClient,
@@ -394,7 +396,7 @@ def _apply_plan(
                 "-lock-timeout=30s",
                 str(context.paths.plan_file),
             ],
-            env=env,
+            env=context.env,
         )
     finally:
         if changed_template_protection:
@@ -407,6 +409,7 @@ def _apply_plan(
             console.ok(
                 f"Защита шаблона {context.template_vmid} восстановлена"
             )
+
 
 def _ensure_ssh_host_key(
     known_hosts: Path,
@@ -592,7 +595,7 @@ def run_deploy_guest(repo_root: Path, vmid: int) -> int:
                 f"-target={context.target}",
                 f"-out={context.paths.plan_file}",
             ],
-            env=env,
+            env=context.env,
         )
 
         shown = run(
@@ -604,7 +607,7 @@ def run_deploy_guest(repo_root: Path, vmid: int) -> int:
                 str(context.paths.plan_file),
             ],
             capture_output=True,
-            env=env,
+            env=context.env,
         )
         try:
             plan = json.loads(shown.stdout)
@@ -649,7 +652,7 @@ def run_deploy_guest(repo_root: Path, vmid: int) -> int:
                 "-no-color",
                 str(context.paths.plan_file),
             ],
-            env=env,
+            env=context.env,
         )
 
         if not actions or actions == ["no-op"]:
