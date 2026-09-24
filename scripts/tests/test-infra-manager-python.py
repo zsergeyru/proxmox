@@ -38,7 +38,12 @@ from infra_manager.status import (  # noqa: E402
     _check_git_branch_contract,
     _project_branch,
 )
-from infra_manager.setup import BASE_PACKAGES, Setup  # noqa: E402
+from infra_manager.setup import (  # noqa: E402
+    BASE_PACKAGES,
+    PACKER_VERSION,
+    PVE_API_ENV,
+    Setup,
+)
 from infra_manager.settings import PATHS, SETTINGS  # noqa: E402
 
 
@@ -237,8 +242,10 @@ def main_test() -> None:
         fail("Единый путь OpenTofu input имеет неожиданное значение")
     if SETTINGS.default_project_branch != "main":
         fail("Ветка проекта по умолчанию должна быть main")
-    if SETTINGS.packer_version != "1.15.4":
-        fail("Версия Packer в единых настройках изменилась неожиданно")
+    if PACKER_VERSION != SETTINGS.packer_version:
+        fail("setup использует версию Packer не из единых настроек")
+    if PVE_API_ENV != PATHS.pve_api_env:
+        fail("setup использует путь PVE credential не из единых настроек")
 
     compose = Setup.compose("ps")
     if compose[:2] != ["docker", "compose"] or compose[-1] != "ps":
