@@ -580,14 +580,15 @@ def run_build_template(repo_root: Path, vmid: int) -> int:
     iso_url, iso_checksum = _resolve_debian_iso()
     build_password = secrets.token_hex(24)
 
+    env["PKR_VAR_proxmox_token"] = client.token_secret
+    env["PKR_VAR_build_password"] = build_password
+
     common_vars = [
         f"-var=proxmox_url={client.url}/api2/json",
         f"-var=proxmox_username={client.token_id}",
-        f"-var=proxmox_token={client.token_secret}",
         f"-var=node={node}",
         f"-var=iso_url={iso_url}",
         f"-var=iso_checksum={iso_checksum}",
-        f"-var=build_password={build_password}",
     ]
 
     console.info("Проверка Packer")
