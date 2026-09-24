@@ -79,6 +79,8 @@ def unique_named(
 
 
 def check_status(*, full: bool = False) -> int:
+    project_branch = os.environ.get("INFRA_PROJECT_BRANCH", "main")
+
     if shutil.which("docker") is None:
         raise InfraManagerError("Docker не установлен")
     if run_quiet(["docker", "compose", "version"]).returncode:
@@ -154,10 +156,12 @@ def check_status(*, full: bool = False) -> int:
     if (
         repository.get("git_url") != PROJECT_REPO
         or str(stored_key_id or "") != str(github_key_id)
+        or repository.get("git_branch") != project_branch
     ):
         raise InfraManagerError(
             "Git repository 'proxmox' не соответствует "
-            "ожидаемому URL или SSH key"
+            "ожидаемому URL, SSH key или ветке "
+            f"'{project_branch}'"
         )
     repository_id = repository.get("id")
     if not isinstance(repository_id, int):
@@ -195,9 +199,10 @@ def check_status(*, full: bool = False) -> int:
             "Semaphore не может прочитать Git repository 'proxmox' "
             "сохранённым SSH key"
         ) from exc
-    if not isinstance(branches, list) or "main" not in branches:
+    if not isinstance(branches, list) or project_branch not in branches:
         raise InfraManagerError(
-            "Semaphore не видит ветку main в Git repository 'proxmox'"
+            "Semaphore не видит ветку "
+            f"'{project_branch}' в Git repository 'proxmox'"
         )
 
     environments = semaphore.get(
@@ -239,6 +244,7 @@ def check_status(*, full: bool = False) -> int:
             template.get("app") != "python"
             or template.get("playbook") != playbook
             or str(template.get("arguments") or "[]") != arguments
+            or template.get("git_branch") != project_branch
         ):
             raise InfraManagerError(
                 f"Шаблон Semaphore '{template_name}' "
