@@ -1,0 +1,93 @@
+---
+- name: Привести Linux-гостя к состоянию provision.yaml
+  hosts: all
+  become: true
+  gather_facts: true
+
+  vars:
+    project_root: "{{ playbook_dir }}/../.."
+    guest_root: "{{ project_root }}/infrastructure/guests/{{ guest }}"
+    provision_file: "{{ guest_root }}/provision.yaml"
+
+  pre_tasks:
+    - name: Проверить параметр guest
+      ansible.builtin.assert:
+        that:
+          - guest is defined
+          - guest is string
+          - guest | length > 0
+        fail_msg: >-
+          Нужно передать каталог гостя, например:
+          -e guest=410-ai-control
+
+    - name: Прочитать provision.yaml
+      ansible.builtin.include_vars:
+        file: "{{ provision_file }}"
+        name: provision
+
+    - name: Проверить базовый контракт provision.yaml
+      ansible.builtin.assert:
+        that:
+          - provision.schema_version == 1
+          - provision.guest_vmid | int == (guest.split('-')[0] | int)
+          - provision.system.distribution == "debian"
+          - provision.system.version | string == "13"
+          - provision.system.architecture == "amd64"
+        fail_msg: "provision.yaml не соответствует поддерживаемому контракту Linux-гостя"
+
+    - name: Проверить фактическую операционную систему
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.distribution == "Debian"
+          - ansible_facts.distribution_major_version == "13"
+          - ansible_facts.architecture in ["x86_64", "amd64"]
+        fail_msg: "Гость должен работать на Debian 13 amd64"
+
+  tasks:
+    - name: Установить требуемые системные пакеты
+      ansible.builtin.apt:
+        name: "{{ provision.system.required_packages }}"
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+      when:
+        - provision.system.required_packages is defined
+        - provision.system.required_packages | length > 0
+
+    - name: Создать каталоги компонентов
+      ansible.builtin.file:
+        path: "{{ item.value.root }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+      loop: "{{ provision.components | default({}) | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+      when:
+        - item.value is mapping
+        - item.value.root is defined
+
+    - name: Создать каталог рабочего репозитория
+      ansible.builtin.file:
+        path: "{{ provision.components.project_repository.path | dirname }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+      when:
+        - provision.components.project_repository is defined
+        - provision.components.project_repository.path is defined
+
+    - name: Создать каталог основного AI-агента
+      ansible.builtin.file:
+        path: >-
+          {{ provision.components.agents.root }}/{{ provision.components.agents.primary }}
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+      when:
+        - provision.components.agents is defined
+        - provision.components.agents.root is defined
+        - provision.components.agents.primary is defined
