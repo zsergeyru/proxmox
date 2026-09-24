@@ -310,12 +310,14 @@ class RuntimeSetup:
 
     def wait_semaphore(self) -> None:
         self.reporter.stage("Проверка Semaphore")
+        ready = False
         for _ in range(60):
             if self.semaphore_ready():
+                ready = True
                 break
             time.sleep(2)
 
-        if not self.semaphore_ready():
+        if not ready:
             self.context.logged_runner.run(self.compose("ps"), check=False)
             self.context.logged_runner.run(
                 self.compose("logs", "--tail=100", "runtime"),
