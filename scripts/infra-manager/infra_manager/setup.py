@@ -372,17 +372,21 @@ class Setup:
                 "Не удалось получить открытый ключ из Ansible private key"
             )
 
-        current = ""
-        if ANSIBLE_PUBLIC_KEY.is_file():
-            parts = ANSIBLE_PUBLIC_KEY.read_text(
-                encoding="utf-8"
-            ).strip().split()
-            if len(parts) >= 2:
-                current = " ".join(parts[:2])
-
-        if current != derived:
+        parts = derived.split()
+        if len(parts) < 2:
+            raise InfraManagerError(
+                "Открытый ключ Ansible имеет некорректный формат"
+            )
+        normalized_public_key = (
+            f"{parts[0]} {parts[1]} infra-manager ansible guest\n"
+        )
+        if (
+            not ANSIBLE_PUBLIC_KEY.is_file()
+            or ANSIBLE_PUBLIC_KEY.read_text(encoding="utf-8")
+            != normalized_public_key
+        ):
             ANSIBLE_PUBLIC_KEY.write_text(
-                f"{derived} infra-manager ansible guest\n",
+                normalized_public_key,
                 encoding="utf-8",
             )
 
