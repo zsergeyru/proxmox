@@ -37,26 +37,29 @@ from infra_manager.guest_deploy import (  # noqa: E402
     _reconcile_guest_infrastructure,
     _validate_pve_and_state,
 )
+from infra_manager.host_setup import (  # noqa: E402
+    BASE_PACKAGES,
+    PVE_API_ENV,
+    HostSetup,
+)
 from infra_manager.opentofu import OpenTofuWorkspace  # noqa: E402
 from infra_manager.pve import (  # noqa: E402
     PveClient,
     permission_present,
     select_management_ipv4,
 )
+from infra_manager.runtime_setup import (  # noqa: E402
+    PACKER_VERSION,
+    RuntimeSetup,
+)
 from infra_manager.semaphore import (  # noqa: E402
     PROJECT_REPO,
     SEMAPHORE_TEMPLATES,
-    SemaphoreClient,
     find_unique_by_name,
     require_unique_by_name,
 )
 from infra_manager.settings import PATHS, SETTINGS  # noqa: E402
-from infra_manager.setup import (  # noqa: E402
-    BASE_PACKAGES,
-    PACKER_VERSION,
-    PVE_API_ENV,
-    Setup,
-)
+from infra_manager.setup import Setup  # noqa: E402
 from infra_manager.status import (  # noqa: E402
     SemaphoreSnapshot,
     _check_git_branch_contract,
@@ -512,6 +515,8 @@ def main_test() -> None:
     compose = Setup.compose("ps")
     if compose[:2] != ["docker", "compose"] or compose[-1] != "ps":
         fail(f"Некорректная команда Docker Compose: {compose!r}")
+    if not issubclass(Setup, HostSetup) or not issubclass(Setup, RuntimeSetup):
+        fail("Setup не объединяет этапы подготовки хоста и runtime")
 
     one = find_unique_by_name(
         [{"id": 1, "name": "proxmox"}],

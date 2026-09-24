@@ -22,7 +22,9 @@ scripts/
 │   │   ├── cli.py                           # Разбирает команды настройки, проверки состояния, доступа к PVE и настройки Semaphore
 │   │   ├── common.py                        # Общие ошибки, вывод и безопасный запуск внешних команд
 │   │   ├── settings.py                      # Хранит единые неизменяемые пути, имена, версии и значения по умолчанию
-│   │   ├── setup.py                         # Главный управляющий модуль настройки Debian, Docker, рабочей среды и Semaphore
+│   │   ├── setup.py                         # Оркестрирует последовательность полной настройки 910
+│   │   ├── host_setup.py                    # Готовит Debian, Docker, каталоги, ключи, CA и локальные команды
+│   │   ├── runtime_setup.py                 # Разворачивает Compose, Semaphore и инструменты infra-runtime
 │   │   ├── semaphore.py                     # Синхронизирует проект, Git, группу переменных и задания Semaphore
 │   │   ├── pve.py                           # Проверяет фактические права ключа доступа к API PVE
 │   │   ├── opentofu.py                      # Выполняет общие операции OpenTofu: подготовку входных данных, инициализацию, план и чтение состояния
@@ -62,13 +64,13 @@ scripts/
 python3 -m infra_manager setup
 ```
 
-Основная настройка 910 выполняется в `infra_manager/setup.py`.
+Основная настройка 910 запускается через `infra_manager/setup.py`.
 
 `pve-bootstrap-access.sh` выполняется публичным bootstrap на физическом PVE. Он подготавливает PVE CA, API token `root@pam!infra-manager`, ACL и безопасную передачу credential в 910.
 
 ### Python-пакет `infra_manager/`
 
-`setup.py` — основной оркестратор настройки 910: Debian, Docker, постоянные каталоги, секреты, CA, OpenTofu input, `infra-runtime`, Semaphore и итоговые проверки.
+`setup.py` задаёт последовательность полной настройки 910 и общий контекст выполнения. Подготовка Debian, Docker, каталогов, ключей и CA находится в `host_setup.py`; Compose, OpenTofu input, `infra-runtime` и Semaphore — в `runtime_setup.py`.
 
 `semaphore.py` — создаёт и синхронизирует проект `Proxmox Infrastructure`, GitHub Deploy Key, репозиторий, Variable Group `OpenTofu PVE` и задания Semaphore.
 
