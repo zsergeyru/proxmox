@@ -192,21 +192,17 @@ def resolve_profile_features(profile: dict) -> tuple[str, ...]:
     return tuple(item for item in PROFILE_FEATURE_ORDER if item in value)
 
 
-def resolve_effective_guest(
+def _validated_profile(
     source: dict,
     defaults: dict,
-    network: NetworkConfig | None = None,
-) -> ResolvedGuest:
-    """Собрать deterministic effective desired state гостя с profile."""
+) -> tuple[dict, str, tuple[str, ...]]:
+    """Вернуть профиль, его тип и нормализованные LXC-возможности."""
     profile_name = source.get("profile")
     profile = defaults.get("profiles", {}).get(profile_name)
     if not isinstance(profile, dict):
         raise GuestConfigError(f"неизвестный профиль {profile_name!r}")
 
     kind = profile.get("type")
-    if kind not in {"vm", "lxc"}:
-        raise GuestConfigError(f"профиль {profile_name!r} имеет неверный type {kind!r}")
-
     if kind == "vm":
         template_vmid = profile.get("template_vmid")
         if not isinstance(template_vmid, int):
@@ -217,8 +213,9 @@ def resolve_effective_guest(
             raise GuestConfigError(
                 f"VM-профиль {profile_name!r} не должен задавать LXC-параметры"
             )
-        features: tuple[str, ...] = ()
-    else:
+        return profile, kind, ()
+
+    if kind == "lxc":
         ostemplate = profile.get("ostemplate")
         if not isinstance(ostemplate, str) or not ostemplate:
             raise GuestConfigError(
@@ -228,21 +225,29 @@ def resolve_effective_guest(
             raise GuestConfigError(
                 f"LXC-профиль {profile_name!r} не должен задавать template_vmid"
             )
-        features = resolve_profile_features(profile)
+        return profile, kind, resolve_profile_features(profile)
 
-    if network is None:
-        network = parse_network_config(defaults)
+    raise GuestConfigError(
+        f"профиль {profile_name!r} имеет неверный type {kind!r}"
+    )
 
+
+def _build_effective_guest(
+    source: dict,
+    defaults: dict,
+    profile: dict,
+    kind: str,
+    features: tuple[str, ...],
+    network: NetworkConfig,
+) -> tuple[dict, ipaddress.IPv4Address | None, str]:
+    """Собрать effective state и вычислить административный адрес."""
     defaults_fragment = defaults.get("defaults")
     if not isinstance(defaults_fragment, dict):
         raise GuestConfigError("defaults.defaults должен быть mapping/object")
 
     effective = deep_merge(defaults_fragment, profile)
     effective = deep_merge(effective, source)
-
-    management = resolve_management(source, defaults, profile)
-    effective["management"] = list(management)
-
+    effective["management"] = list(resolve_management(source, defaults, profile))
     if kind == "lxc":
         effective["features"] = list(features)
 
@@ -255,10 +260,28 @@ def resolve_effective_guest(
         if management_ip is None
         else f"{management_ip}/{network.subnet.prefixlen}"
     )
+    return effective, management_ip, ip_source
 
+
+def resolve_effective_guest(
+    source: dict,
+    defaults: dict,
+    network: NetworkConfig | None = None,
+) -> ResolvedGuest:
+    """Собрать deterministic effective desired state гостя с profile."""
+    profile, kind, features = _validated_profile(source, defaults)
+    actual_network = network or parse_network_config(defaults)
+    effective, management_ip, ip_source = _build_effective_guest(
+        source,
+        defaults,
+        profile,
+        kind,
+        features,
+        actual_network,
+    )
     return ResolvedGuest(
         effective=effective,
-        network=network,
+        network=actual_network,
         management_ip=management_ip,
         management_ip_source=ip_source,
     )
