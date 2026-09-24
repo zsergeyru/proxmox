@@ -496,6 +496,7 @@ class SemaphoreClient:
         playbook: str,
         branch: str,
         arguments: str,
+        app: str = "python",
     ) -> int:
         templates = self.get(
             f"/project/{project_id}/templates?sort=name&order=asc"
@@ -507,7 +508,7 @@ class SemaphoreClient:
             "repository_id": repository_id,
             "environment_ids": [environment_id],
             "playbook": playbook,
-            "app": "bash",
+            "app": app,
             "type": "",
             "git_branch": branch,
             "arguments": arguments,
@@ -592,18 +593,20 @@ def configure_project(branch: str | None = None) -> int:
         repository_id,
         environment_id,
         name="OpenTofu Plan",
-        playbook="scripts/infra-manager/jobs/opentofu-plan.sh",
+        playbook="scripts/infra-manager/jobs/opentofu-plan.py",
         branch=branch,
         arguments="[]",
+        app="python",
     )
     client.ensure_template(
         project_id,
         repository_id,
         environment_id,
         name="Build Template 9000",
-        playbook="scripts/infra-manager/jobs/build-template.sh",
+        playbook="scripts/infra-manager/jobs/build-template.py",
         branch=branch,
         arguments='["9000"]',
+        app="python",
     )
 
     client.ensure_template(
@@ -611,9 +614,10 @@ def configure_project(branch: str | None = None) -> int:
         repository_id,
         environment_id,
         name="Deploy Guest 410",
-        playbook="scripts/infra-manager/jobs/deploy-410.sh",
+        playbook="scripts/infra-manager/jobs/deploy-guest.py",
         branch=branch,
-        arguments="[]",
+        arguments='["410"]',
+        app="python",
     )
 
     console.ok(
