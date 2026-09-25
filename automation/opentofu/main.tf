@@ -24,6 +24,11 @@ resource "proxmox_virtual_environment_vm" "guest" {
   on_boot    = each.value.boot.onboot
   protection = each.value.protection
 
+  startup {
+    order    = try(tostring(each.value.boot.order), null)
+    up_delay = try(each.value.boot.startup_delay_seconds, null)
+  }
+
   # Обычное применение не должно автоматически останавливать гостя
   # ради параметра, который требует перезапуска.
   reboot_after_update = false
@@ -103,6 +108,11 @@ resource "proxmox_virtual_environment_container" "guest" {
   started       = true
   start_on_boot = each.value.boot.onboot
   protection    = each.value.protection
+
+  startup {
+    order    = try(tostring(each.value.boot.order), null)
+    up_delay = try(each.value.boot.startup_delay_seconds, null)
+  }
 
   cpu {
     cores = each.value.resources.cores
