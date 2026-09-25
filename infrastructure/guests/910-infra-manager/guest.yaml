@@ -1,18 +1,20 @@
-# 910 создаётся и сопровождается public bootstrap, поэтому profile намеренно отсутствует.
-# Отсутствие profile исключает этот объект из обычного OpenTofu-контура.
 schema_version: 11
 vmid: 910
 name: infra-manager
-node: pve
-description: Служебный LXC для развёртывания и сопровождения инфраструктуры Proxmox; жизненным циклом объекта владеет proxmox-bootstrap
-protection: true
+description: Управляющий LXC для развёртывания и сопровождения инфраструктуры Proxmox
+profile: debian-lxc-docker
+pve_management: false
 
 resources:
   cores: 2
   memory_mb: 2048
   swap_mb: 512
   disk_size_gb: 32
-  disk_storage: local-lvm
 
 boot:
-  onboot: true
+  order: 10
+  startup_delay_seconds: 30
+
+management:
+  - ssh_identity
+  - project_repo_read
