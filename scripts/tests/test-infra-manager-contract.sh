@@ -30,11 +30,14 @@ OPENTOFU_LOCK="$ROOT/automation/opentofu/.terraform.lock.hcl"
 GUEST_MANIFEST="$ROOT/infrastructure/guests/910-infra-manager/guest.yaml"
 PROVISION="$ROOT/infrastructure/guests/910-infra-manager/provision.yaml"
 SSH_CONFIG="$ROOT/infrastructure/guests/910-infra-manager/compose/runtime/ssh_config"
+BOOTSTRAP_RUNNER="$ROOT/scripts/bootstrap-runner/run.sh"
+BOOTSTRAP_DEPLOY="$ROOT/scripts/bootstrap-runner/deploy-910.py"
+BOOTSTRAP_PVE_ACCESS="$ROOT/scripts/bootstrap-runner/pve-access.sh"
 
 die() { printf 'ОШИБКА: %s\n' "$*" >&2; exit 1; }
 ok()  { printf '[ОК] %s\n' "$*"; }
 
-for file in "$SETUP" "$PY_SETUP" "$PY_SETUP_CONTEXT" "$PY_HOST_SETUP" "$PY_RUNTIME_SETUP" "$PY_SETTINGS" "$PY_SEMAPHORE" "$PY_STATUS" "$PY_PVE" "$STATUS" "$ACCESS" "$LIFECYCLE" "$BUILD_TEMPLATE" "$VERIFY_TEMPLATE" "$DEPLOY_GUEST" "$PY_OPENTOFU" "$PY_TEMPLATE" "$PY_TEMPLATE_BUILD" "$PY_TEMPLATE_VERIFY" "$COMPOSE" "$DOCKERFILE" "$REQ" "$PLAN" "$PVE_BOOTSTRAP_ACCESS" "$OPENTOFU_LOCK" "$GUEST_MANIFEST" "$PROVISION" "$SSH_CONFIG"; do
+for file in "$SETUP" "$PY_SETUP" "$PY_SETUP_CONTEXT" "$PY_HOST_SETUP" "$PY_RUNTIME_SETUP" "$PY_SETTINGS" "$PY_SEMAPHORE" "$PY_STATUS" "$PY_PVE" "$STATUS" "$ACCESS" "$LIFECYCLE" "$BUILD_TEMPLATE" "$VERIFY_TEMPLATE" "$DEPLOY_GUEST" "$PY_OPENTOFU" "$PY_TEMPLATE" "$PY_TEMPLATE_BUILD" "$PY_TEMPLATE_VERIFY" "$COMPOSE" "$DOCKERFILE" "$REQ" "$PLAN" "$PVE_BOOTSTRAP_ACCESS" "$OPENTOFU_LOCK" "$GUEST_MANIFEST" "$PROVISION" "$SSH_CONFIG" "$BOOTSTRAP_RUNNER" "$BOOTSTRAP_DEPLOY" "$BOOTSTRAP_PVE_ACCESS"; do
     [[ -s "$file" ]] || die "Отсутствует обязательный файл: $file"
 done
 
@@ -349,6 +352,24 @@ fi
 if grep -q '/etc/pve/' "$SETUP" "$PY_SETUP" "$PY_SETUP_CONTEXT" "$PY_HOST_SETUP" "$PY_RUNTIME_SETUP" "$PY_SEMAPHORE" "$PY_STATUS" "$PY_PVE"; then
     die "setup внутри 910 не должен работать с файловой системой /etc/pve"
 fi
+
+grep -q 'API_TOKEN_NAME="bootstrap-runner"' "$BOOTSTRAP_PVE_ACCESS" \
+    || die "990 должен использовать отдельный временный PVE token bootstrap-runner"
+grep -q 'HOST_STATE_FILE=.*910.tfstate' "$BOOTSTRAP_PVE_ACCESS" \
+    || die "Bootstrap-state 910 должен сохраняться на PVE"
+grep -q 'HOST_SSH_KEY=.*910-bootstrap-ed25519' "$BOOTSTRAP_PVE_ACCESS" \
+    || die "Bootstrap SSH key 910 должен иметь отдельный постоянный путь на PVE"
+grep -q 'save-state)' "$BOOTSTRAP_PVE_ACCESS" \
+    || die "PVE helper 990 должен уметь сохранить bootstrap-state"
+if grep -Eq 'apt(-get)?[[:space:]]+install' "$BOOTSTRAP_PVE_ACCESS"; then
+    die "PVE helper 990 не должен устанавливать пакеты на физический PVE"
+fi
+grep -q 'run_deploy_guest(REPO_ROOT, 910, exclusive=True)' "$BOOTSTRAP_DEPLOY" \
+    || die "990 должен вызывать общий deploy-guest только для VMID 910"
+grep -q 'deploy) deploy_910' "$BOOTSTRAP_RUNNER" \
+    || die "bootstrap-runner должен иметь фазу deploy"
+grep -q 'configure) configure_910' "$BOOTSTRAP_RUNNER" \
+    || die "bootstrap-runner должен иметь фазу configure"
 
 grep -q 'run_build_template' "$BUILD_TEMPLATE" \
     || die "Build Template должен передавать выполнение Python-модулю"
