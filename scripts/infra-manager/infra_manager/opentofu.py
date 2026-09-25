@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from .common import InfraManagerError, console, require_command, run
-from .settings import PATHS
+from .settings import PATHS, SETTINGS
 
 CA_BUNDLE = PATHS.ca_bundle
 STATE_DIR = PATHS.opentofu_dir
@@ -67,7 +67,12 @@ def _paths(repo_root: Path) -> tuple[Path, Path]:
     return opentofu_dir, renderer
 
 
-def _prepare_input(repo_root: Path) -> tuple[Path, dict[str, Any]]:
+def _prepare_input(
+    repo_root: Path,
+    *,
+    only_vmids: set[int] | None = None,
+    exclude_vmids: set[int] | None = None,
+) -> tuple[Path, dict[str, Any]]:
     require_command("tofu")
     _require_env("TF_VAR_pve_endpoint")
     _require_env("TF_VAR_pve_api_token")
@@ -75,14 +80,17 @@ def _prepare_input(repo_root: Path) -> tuple[Path, dict[str, Any]]:
     opentofu_dir, renderer = _paths(repo_root)
 
     STATE_DIR.mkdir(parents=True, exist_ok=True)
-    run(
-        [
-            sys.executable,
-            str(renderer),
-            "--output",
-            str(GUEST_STATE_FILE),
-        ]
-    )
+    command = [
+        sys.executable,
+        str(renderer),
+        "--output",
+        str(GUEST_STATE_FILE),
+    ]
+    for vmid in sorted(only_vmids or set()):
+        command.extend(["--only-vmid", str(vmid)])
+    for vmid in sorted(exclude_vmids or set()):
+        command.extend(["--exclude-vmid", str(vmid)])
+    run(command)
     try:
         payload = json.loads(GUEST_STATE_FILE.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
@@ -99,10 +107,22 @@ def _prepare_input(repo_root: Path) -> tuple[Path, dict[str, Any]]:
     return opentofu_dir, payload
 
 
-def prepare_workspace(repo_root: Path) -> OpenTofuWorkspace:
+def prepare_workspace(
+    repo_root: Path,
+    *,
+    only_vmids: set[int] | None = None,
+    exclude_vmids: set[int] | None = None,
+) -> OpenTofuWorkspace:
     """Собрать input и вернуть публичный интерфейс рабочей области."""
 
-    opentofu_dir, payload = _prepare_input(repo_root)
+    if only_vmids is None and exclude_vmids is None:
+        exclude_vmids = set(SETTINGS.bootstrap_managed_vmids)
+
+    opentofu_dir, payload = _prepare_input(
+        repo_root,
+        only_vmids=only_vmids,
+        exclude_vmids=exclude_vmids,
+    )
     return OpenTofuWorkspace(
         directory=opentofu_dir,
         state_dir=STATE_DIR,
