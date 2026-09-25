@@ -20,10 +20,19 @@ def main() -> int:
         description="Привести одну VM к состоянию guest.yaml + provision.yaml"
     )
     parser.add_argument("vmid", type=int, help="VMID гостя")
+    parser.add_argument(
+        "--bootstrap-scope",
+        action="store_true",
+        help="Использовать отдельную область первоначального развёртывания",
+    )
     args = parser.parse_args()
 
     try:
-        return run_deploy_guest(REPO_ROOT, args.vmid)
+        return run_deploy_guest(
+            REPO_ROOT,
+            args.vmid,
+            bootstrap_scope=args.bootstrap_scope,
+        )
     except (InfraManagerError, OSError) as exc:
         console.error(str(exc))
         return 1
