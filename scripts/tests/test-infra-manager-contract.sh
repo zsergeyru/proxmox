@@ -208,6 +208,8 @@ done
 
 grep -q 'render-opentofu-input.py' "$PY_RUNTIME_SETUP" \
     || die "Python setup должен генерировать OpenTofu input"
+grep -q '"--exclude-vmid"' "$PY_RUNTIME_SETUP" \
+    || die "Основной OpenTofu input должен исключать 910"
 grep -q 'Используется существующий постоянный PVE API credential' "$PY_HOST_SETUP" \
     || die "Повторное обновление 910 должно работать без staging PVE secret"
 grep -q 'from .semaphore import configure_project' "$PY_RUNTIME_SETUP" \

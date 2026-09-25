@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Точка входа Semaphore: развёртывание одной VM."""
+"""Точка входа Semaphore: развёртывание одной гостевой системы."""
 
 from __future__ import annotations
 
@@ -17,9 +17,9 @@ from infra_manager.guest_deploy import run_deploy_guest
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Привести одну VM к состоянию guest.yaml + provision.yaml"
+        description="Привести один гость к состоянию guest.yaml + provision.yaml"
     )
-    parser.add_argument("vmid", type=int, help="VMID гостя")
+    parser.add_argument("vmid", type=int, help="VMID/CTID гостя")
     args = parser.parse_args()
 
     try:
