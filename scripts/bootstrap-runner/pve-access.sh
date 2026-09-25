@@ -91,8 +91,11 @@ ensure_bootstrap_key() {
             -C "bootstrap-runner to 910" \
             -f "$HOST_SSH_KEY"
     fi
-    ssh-keygen -y -f "$HOST_SSH_KEY" >/dev/null \
+    local public_key
+    public_key="$(ssh-keygen -y -f "$HOST_SSH_KEY" 2>/dev/null)" \
         || die "Повреждён bootstrap SSH key 910"
+    [[ -n "$public_key" ]] || die "Пустой public key bootstrap SSH 910"
+    printf '%s %s\n' "$public_key" "bootstrap-runner to 910" >"$HOST_SSH_PUB"
     chmod 0600 "$HOST_SSH_KEY"
     chmod 0644 "$HOST_SSH_PUB"
 }
