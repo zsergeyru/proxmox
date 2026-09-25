@@ -43,8 +43,16 @@ assert "109" in without_410
 # Описательный объект без profile не участвует в универсальном развёртывании.
 assert "201" not in guests
 
-# Специальный 910 имеет guest.yaml без profile и не должен попасть в OpenTofu.
-assert "910" not in guests
+# 910 имеет обычный LXC-профиль, но принадлежит отдельному начальному контуру.
+assert "910" in guests
+assert guests["910"]["type"] == "lxc"
+assert guests["910"]["pve_management"] is False
+
+main_scope = module.build_payload(ROOT, exclude_vmids={910})["guests"]
+assert "910" not in main_scope
+
+bootstrap_scope = module.build_payload(ROOT, only_vmids={910})["guests"]
+assert set(bootstrap_scope) == {"910"}
 
 for vmid, guest in guests.items():
     assert str(guest["vmid"]) == vmid
