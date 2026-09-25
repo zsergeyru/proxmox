@@ -62,11 +62,13 @@ OpenTofu, Ansible, Packer и Docker на PVE не устанавливаются
 11. выполнить из закрытого проекта helper выдачи временного PVE-доступа
 12. передать в 990 PVE CA и временный API credential
 13. передать сохранённый bootstrap-state 910, если он существует
-14. запустить scripts/bootstrap-runner/run.sh
-15. получить итоговый bootstrap-state 910 обратно на PVE
-16. проверить готовность 910
-17. отозвать временный API token 990
-18. остановить и удалить 990
+14. запустить scripts/bootstrap-runner/run.sh deploy
+15. выполнить закрытый helper постоянного PVE-доступа 910
+16. запустить scripts/bootstrap-runner/run.sh configure
+17. сохранить итоговый bootstrap-state 910 обратно на PVE
+18. проверить готовность 910
+19. отозвать временный API token 990
+20. остановить и удалить 990
 ~~~
 
 Public bootstrap не содержит:
@@ -185,15 +187,12 @@ root@pam!infra-manager
 scripts/bootstrap-runner/run.sh
 ~~~
 
-Он:
+Он работает в двух закрытых фазах:
 
-- подготавливает Docker внутри 990;
-- собирает тот же infra-runtime, что используется в 910;
-- подготавливает окружение OpenTofu/Ansible;
-- использует отдельный bootstrap-state;
-- строит итоговое состояние только для VMID 910;
-- запускает стандартное развёртывание 910;
-- выполняет проверки результата.
+- `deploy` подготавливает Docker/infra-runtime, отдельный bootstrap-state и запускает общий deploy-guest 910;
+- после выдачи постоянного PVE credential для 910 фаза `configure` передаёт проект и Git-доступ в 910, запускает существующий setup и выполняет полную проверку.
+
+Public bootstrap знает только порядок вызова закрытых этапов, но не их внутреннюю реализацию.
 
 Public bootstrap не задаёт версии OpenTofu, Ansible или Python-зависимостей.
 
