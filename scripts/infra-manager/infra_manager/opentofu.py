@@ -10,12 +10,14 @@ from pathlib import Path
 from typing import Any
 
 from .common import InfraManagerError, console, require_command, run
+from .pve import PveClient
 from .settings import PATHS
 
 CA_BUNDLE = PATHS.ca_bundle
 STATE_DIR = PATHS.opentofu_dir
 STATE_FILE = PATHS.opentofu_state_dir / "proxmox.tfstate"
 GUEST_STATE_FILE = PATHS.opentofu_input
+CONTROL_VMIDS = {910}
 
 
 @dataclass(frozen=True)
@@ -67,7 +69,38 @@ def _paths(repo_root: Path) -> tuple[Path, Path]:
     return opentofu_dir, renderer
 
 
-def _prepare_input(repo_root: Path) -> tuple[Path, dict[str, Any]]:
+def _resolve_lxc_templates(payload: dict[str, Any]) -> None:
+    """Дополнить LXC точным локальным template_file_id из PVE."""
+    guests = payload.get("guests")
+    if not isinstance(guests, dict):
+        raise InfraManagerError("OpenTofu input не содержит guests")
+
+    lxc_guests = [
+        guest
+        for guest in guests.values()
+        if isinstance(guest, dict) and guest.get("type") == "lxc"
+    ]
+    if not lxc_guests:
+        return
+
+    client = PveClient.from_opentofu_env()
+    for guest in lxc_guests:
+        selector = guest.get("ostemplate")
+        node = guest.get("node")
+        if not isinstance(selector, str) or not isinstance(node, str):
+            raise InfraManagerError("LXC имеет неполное описание template/node")
+        guest["ostemplate_file_id"] = client.latest_lxc_template(
+            node=node,
+            selector=selector,
+        )
+
+
+def _prepare_input(
+    repo_root: Path,
+    *,
+    include_vmids: set[int] | None = None,
+    exclude_vmids: set[int] | None = None,
+) -> tuple[Path, dict[str, Any]]:
     require_command("tofu")
     _require_env("TF_VAR_pve_endpoint")
     _require_env("TF_VAR_pve_api_token")
@@ -75,14 +108,18 @@ def _prepare_input(repo_root: Path) -> tuple[Path, dict[str, Any]]:
     opentofu_dir, renderer = _paths(repo_root)
 
     STATE_DIR.mkdir(parents=True, exist_ok=True)
-    run(
-        [
-            sys.executable,
-            str(renderer),
-            "--output",
-            str(GUEST_STATE_FILE),
-        ]
-    )
+    command = [
+        sys.executable,
+        str(renderer),
+        "--output",
+        str(GUEST_STATE_FILE),
+    ]
+    for vmid in sorted(include_vmids or ()):
+        command.extend(["--include-vmid", str(vmid)])
+    for vmid in sorted(exclude_vmids or ()):
+        command.extend(["--exclude-vmid", str(vmid)])
+    run(command)
+
     try:
         payload = json.loads(GUEST_STATE_FILE.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
@@ -96,13 +133,31 @@ def _prepare_input(repo_root: Path) -> tuple[Path, dict[str, Any]]:
         raise InfraManagerError(
             f"{GUEST_STATE_FILE} имеет некорректный формат"
         )
+
+    _resolve_lxc_templates(payload)
+    GUEST_STATE_FILE.write_text(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
+        encoding="utf-8",
+    )
     return opentofu_dir, payload
 
 
-def prepare_workspace(repo_root: Path) -> OpenTofuWorkspace:
+def prepare_workspace(
+    repo_root: Path,
+    *,
+    include_vmids: set[int] | None = None,
+    exclude_vmids: set[int] | None = None,
+) -> OpenTofuWorkspace:
     """Собрать input и вернуть публичный интерфейс рабочей области."""
+    actual_exclude = exclude_vmids
+    if include_vmids is None and exclude_vmids is None:
+        actual_exclude = CONTROL_VMIDS
 
-    opentofu_dir, payload = _prepare_input(repo_root)
+    opentofu_dir, payload = _prepare_input(
+        repo_root,
+        include_vmids=include_vmids,
+        exclude_vmids=actual_exclude,
+    )
     return OpenTofuWorkspace(
         directory=opentofu_dir,
         state_dir=STATE_DIR,
@@ -166,6 +221,12 @@ def _state_status(
     if not STATE_FILE.is_file():
         return False, ""
 
+    target_prefix = target.split("[", 1)[0]
+    parts = target_prefix.split(".", 1)
+    if len(parts) != 2:
+        raise InfraManagerError(f"Некорректный адрес OpenTofu: {target}")
+    expected_type, expected_name = parts
+
     pulled = run(
         [
             "tofu",
@@ -197,8 +258,8 @@ def _state_status(
         if not isinstance(resource, dict):
             continue
         if (
-            resource.get("type") != "proxmox_virtual_environment_vm"
-            or resource.get("name") != "guest"
+            resource.get("type") != expected_type
+            or resource.get("name") != expected_name
         ):
             continue
         instances = resource.get("instances", [])
