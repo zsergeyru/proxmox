@@ -162,6 +162,7 @@ def main_test() -> None:
             vmid=410,
             name="test-vm",
             node="pve",
+            kind="vm",
             template_vmid=9000,
             address="192.0.2.10",
             target='proxmox_virtual_environment_vm.guest["410"]',
@@ -173,6 +174,30 @@ def main_test() -> None:
         find_vm=lambda vmid: {"type": "qemu", "name": "test-vm"}
     )
     deployment = deployment_for(deployment_client)
+
+    lxc_deployment = DeploymentContext(
+        client=SimpleNamespace(
+            find_vm=lambda vmid: {"type": "lxc", "name": "test-lxc"}
+        ),
+        vmid=910,
+        name="test-lxc",
+        node="pve",
+        kind="lxc",
+        template_vmid=None,
+        address="192.0.2.20",
+        target='proxmox_virtual_environment_container.guest["910"]',
+        workspace=workspace,
+        paths=deployment_paths,
+    )
+    if _validate_pve_and_state(
+        lxc_deployment,
+        state_present=True,
+        state_status="ready",
+    ) is not None:
+        fail("Проверка состояния LXC при успехе должна возвращать None")
+    if "proxmox_virtual_environment_container" not in lxc_deployment.target:
+        fail("LXC использует неверный адрес ресурса OpenTofu")
+
     if _validate_pve_and_state(
         deployment,
         state_present=True,
@@ -212,8 +237,8 @@ def main_test() -> None:
         def find_vm(self, vmid: int):
             return self.resource
 
-        def vm_status(self, *, node: str, vmid: int) -> str:
-            return "stopped"
+        def data(self, path: str):
+            return {"status": "stopped"}
 
         def put(self, path: str, *, form: dict[str, int]) -> None:
             self.tasks.append(("PUT", path))
