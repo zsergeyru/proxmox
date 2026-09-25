@@ -50,21 +50,21 @@ guest_path, provision_path, setup_path, py_setup_path, host_setup_path, runtime_
 guest = yaml.safe_load(guest_path.read_text(encoding="utf-8"))
 if guest.get("vmid") != 910 or guest.get("name") != "infra-manager":
     raise SystemExit("910 guest.yaml содержит неверный vmid/name")
-if "profile" in guest:
-    raise SystemExit("910 guest.yaml не должен содержать profile и попадать в OpenTofu")
-if guest.get("protection") is not True:
-    raise SystemExit("910 должен иметь protection=true")
-if guest.get("boot", {}).get("onboot") is not True:
-    raise SystemExit("910 должен иметь onboot=true")
+if guest.get("profile") != "debian-lxc-docker":
+    raise SystemExit("910 должен использовать общий профиль debian-lxc-docker")
+if guest.get("pve_management") is not False:
+    raise SystemExit("910 не должен входить в managed")
+boot = guest.get("boot", {})
+if boot.get("order") != 10 or boot.get("startup_delay_seconds") != 30:
+    raise SystemExit("910 должен иметь order=10 и startup_delay_seconds=30")
 expected_resources = {
     "cores": 2,
     "memory_mb": 2048,
     "swap_mb": 512,
     "disk_size_gb": 32,
-    "disk_storage": "local-lvm",
 }
 if guest.get("resources") != expected_resources:
-    raise SystemExit(f"неожиданные resources 910: {guest.get('resources')!r}")
+    raise SystemExit(f"неожиданные индивидуальные resources 910: {guest.get('resources')!r}")
 
 provision = yaml.safe_load(provision_path.read_text(encoding="utf-8"))
 if provision.get("schema_version") != 1 or provision.get("guest_vmid") != 910:
