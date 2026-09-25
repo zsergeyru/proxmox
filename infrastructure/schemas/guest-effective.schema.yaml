@@ -90,6 +90,12 @@ properties:
     properties:
       onboot:
         type: boolean
+      order:
+        type: integer
+        minimum: 0
+      startup_delay_seconds:
+        type: integer
+        minimum: 0
   management:
     type: array
     uniqueItems: true
