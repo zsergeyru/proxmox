@@ -34,7 +34,8 @@ class DeploymentContext:
     vmid: int
     name: str
     node: str
-    template_vmid: int
+    kind: str
+    template_vmid: int | None
     address: str
     target: str
     workspace: OpenTofuWorkspace
@@ -79,50 +80,49 @@ def _remove_known_host(known_hosts: Path, address: str) -> None:
     )
 
 
-def _recover_tainted_vm(context: DeploymentContext) -> None:
+def _recover_tainted_guest(context: DeploymentContext) -> None:
     resource = context.client.find_vm(context.vmid)
     if resource is None:
         raise InfraManagerError(
-            f"VM {context.vmid} есть в OpenTofu state, но отсутствует в PVE"
+            f"Гость {context.vmid} есть в OpenTofu state, но отсутствует в PVE"
         )
 
     actual_type = str(resource.get("type") or "")
     actual_name = str(resource.get("name") or "")
-    if actual_type != "qemu" or actual_name != context.name:
+    expected_type = "qemu" if context.kind == "vm" else "lxc"
+    if actual_type != expected_type or actual_name != context.name:
         raise InfraManagerError(
             f"VMID {context.vmid} занят объектом '{actual_name}' "
             f"типа '{actual_type}'; автоматическое удаление запрещено"
         )
 
     console.info(
-        f"Удаление незавершённой VM {context.vmid} после неудачного применения"
+        f"Удаление незавершённого гостя {context.vmid} после неудачного применения"
     )
-    if (
-        context.client.vm_status(
-            node=context.node,
-            vmid=context.vmid,
-        )
-        == "running"
-    ):
+    api_kind = "qemu" if context.kind == "vm" else "lxc"
+    status = context.client.data(
+        f"/nodes/{context.node}/{api_kind}/{context.vmid}/status/current"
+    )
+    if isinstance(status, dict) and status.get("status") == "running":
         context.client.run_task(
             "POST",
-            f"/nodes/{context.node}/qemu/{context.vmid}/status/stop",
+            f"/nodes/{context.node}/{api_kind}/{context.vmid}/status/stop",
             node=context.node,
         )
 
     context.client.put(
-        f"/nodes/{context.node}/qemu/{context.vmid}/config",
+        f"/nodes/{context.node}/{api_kind}/{context.vmid}/config",
         form={"protection": 0},
     )
     context.client.run_task(
         "DELETE",
-        f"/nodes/{context.node}/qemu/{context.vmid}",
+        f"/nodes/{context.node}/{api_kind}/{context.vmid}",
         node=context.node,
         query={"purge": 1},
     )
     if context.client.find_vm(context.vmid) is not None:
         raise InfraManagerError(
-            f"Незавершённую VM {context.vmid} не удалось удалить"
+            f"Незавершённого гостя {context.vmid} не удалось удалить"
         )
 
     run(
@@ -137,7 +137,7 @@ def _recover_tainted_vm(context: DeploymentContext) -> None:
     )
     _remove_known_host(context.paths.known_hosts, context.address)
     console.ok(
-        f"Незавершённая VM {context.vmid} удалена; OpenTofu state очищен"
+        f"Незавершённый гость {context.vmid} удалён; OpenTofu state очищен"
     )
 
 
@@ -152,24 +152,25 @@ def _validate_pve_and_state(
     if resource is not None:
         actual_type = str(resource.get("type") or "")
         actual_name = str(resource.get("name") or "")
-        if actual_type != "qemu" or actual_name != context.name:
+        expected_type = "qemu" if context.kind == "vm" else "lxc"
+        if actual_type != expected_type or actual_name != context.name:
             raise InfraManagerError(
                 f"VMID {context.vmid} уже занят объектом '{actual_name}' "
                 f"типа '{actual_type}'; автоматическое управление запрещено"
             )
         if not state_present:
             raise InfraManagerError(
-                f"VM {context.vmid} существует в PVE, но отсутствует "
+                f"Гость {context.vmid} существует в PVE, но отсутствует "
                 "в OpenTofu state; автоматический импорт клонированной "
                 "VM запрещён"
             )
         if state_status == "tainted":
-            _recover_tainted_vm(context)
+            _recover_tainted_guest(context)
         return
 
     if state_present:
         raise InfraManagerError(
-            f"VM {context.vmid} есть в OpenTofu state, но отсутствует в PVE"
+            f"Гость {context.vmid} есть в OpenTofu state, но отсутствует в PVE"
         )
 
 
@@ -192,7 +193,9 @@ def _apply_plan(
 ) -> None:
     changed_template_protection = False
     try:
-        if "create" in actions:
+        if "create" in actions and context.kind == "vm":
+            if context.template_vmid is None:
+                raise InfraManagerError("Для VM не задан template_vmid")
             config = context.client.vm_config(
                 node=context.node,
                 vmid=context.template_vmid,
@@ -214,7 +217,7 @@ def _apply_plan(
                 )
                 changed_template_protection = True
 
-        console.info(f"Применение состояния VM {context.vmid}")
+        console.info(f"Применение состояния гостя {context.vmid}")
         run(
             [
                 "tofu",
@@ -302,16 +305,23 @@ def _build_deployment_context(
         raise InfraManagerError(
             f"VMID {vmid} отсутствует в итоговом состоянии OpenTofu"
         )
-    if guest.get("type") != "vm":
-        raise InfraManagerError(f"VMID {vmid} должен иметь type=vm")
+    kind = str(guest.get("type") or "")
+    if kind not in {"vm", "lxc"}:
+        raise InfraManagerError(
+            f"VMID {vmid}: неподдерживаемый type={kind!r}"
+        )
 
     name = str(guest.get("name") or "")
     node = str(guest.get("node") or "")
-    template_vmid = guest.get("template_vmid")
+    template_vmid = guest.get("template_vmid") if kind == "vm" else None
     network = guest.get("network")
-    if not name or not node or not isinstance(template_vmid, int):
+    if not name or not node:
         raise InfraManagerError(
-            f"VMID {vmid}: неполное итоговое описание VM"
+            f"VMID {vmid}: неполное итоговое описание гостя"
+        )
+    if kind == "vm" and not isinstance(template_vmid, int):
+        raise InfraManagerError(
+            f"VMID {vmid}: для VM отсутствует template_vmid"
         )
     if not isinstance(network, dict):
         raise InfraManagerError(f"VMID {vmid}: отсутствует network")
@@ -359,16 +369,21 @@ def _build_deployment_context(
         vmid=vmid,
         name=name,
         node=node,
-        template_vmid=template_vmid,
+        kind=kind,
+        template_vmid=template_vmid if isinstance(template_vmid, int) else None,
         address=address,
-        target=f'proxmox_virtual_environment_vm.guest["{vmid}"]',
+        target=(
+            f'proxmox_virtual_environment_vm.guest["{vmid}"]'
+            if kind == "vm"
+            else f'proxmox_virtual_environment_container.guest["{vmid}"]'
+        ),
         workspace=workspace,
         paths=paths,
     )
 
 
 def _build_guest_plan(context: DeploymentContext) -> GuestPlan:
-    """Построить plan и разрешить изменения только выбранной VM."""
+    """Построить plan и разрешить изменения только выбранного гостя."""
 
     run(
         [
@@ -415,7 +430,7 @@ def _build_guest_plan(context: DeploymentContext) -> GuestPlan:
     ]
     if unexpected:
         raise InfraManagerError(
-            f"План VM {context.vmid} содержит изменения других ресурсов: "
+            f"План гостя {context.vmid} содержит изменения других ресурсов: "
             + ", ".join(unexpected)
         )
 
@@ -479,18 +494,18 @@ def _reconcile_guest_infrastructure(context: DeploymentContext) -> None:
         plan = _build_guest_plan(context)
         if not plan.actions or plan.actions == ("no-op",):
             console.ok(
-                f"OpenTofu: состояние VM {context.vmid} "
+                f"OpenTofu: состояние гостя {context.vmid} "
                 "уже соответствует конфигурации"
             )
         else:
             _apply_plan(context, list(plan.actions))
-            console.ok(f"Состояние VM {context.vmid} применено")
+            console.ok(f"Состояние гостя {context.vmid} применено")
     finally:
         context.paths.plan_file.unlink(missing_ok=True)
 
 
 def run_deploy_guest(repo_root: Path, vmid: int) -> int:
-    """Привести одну VM к состоянию guest.yaml + provision.yaml."""
+    """Привести одного гостя к состоянию guest.yaml + provision.yaml."""
 
     if vmid <= 0:
         raise InfraManagerError("VMID должен быть положительным числом")
