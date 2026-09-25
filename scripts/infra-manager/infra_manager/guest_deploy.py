@@ -169,6 +169,11 @@ def _validate_pve_and_state(
                 "в OpenTofu state; автоматический импорт запрещён"
             )
         if state_status == "tainted":
+            if context.vmid == 910:
+                raise InfraManagerError(
+                    "OpenTofu state 910 имеет статус tainted; "
+                    "автоматическое удаление управляющего LXC запрещено"
+                )
             _recover_tainted_guest(context)
         return
 

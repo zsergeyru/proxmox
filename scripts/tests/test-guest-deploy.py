@@ -259,6 +259,32 @@ def main_test() -> None:
         else:
             fail(f"Проверка состояния VM приняла небезопасный случай: {description}")
 
+    tainted_910_client = SimpleNamespace(
+        find_vm=lambda vmid: {"type": "lxc", "name": "test-lxc"}
+    )
+    try:
+        _validate_pve_and_state(
+            DeploymentContext(
+                client=tainted_910_client,
+                vmid=910,
+                name="test-lxc",
+                node="pve",
+                kind="lxc",
+                template_vmid=None,
+                address="192.0.2.11",
+                target='proxmox_virtual_environment_container.guest["910"]',
+                workspace=workspace,
+                paths=deployment_paths,
+            ),
+            state_present=True,
+            state_status="tainted",
+        )
+    except InfraManagerError as exc:
+        if "автоматическое удаление" not in str(exc):
+            fail("Tainted 910 отклонён с неожиданной ошибкой")
+    else:
+        fail("Tainted 910 не должен автоматически восстанавливаться удалением")
+
     class TaintedClient:
         def __init__(self) -> None:
             self.resource = {"type": "qemu", "name": "test-vm"}
