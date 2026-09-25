@@ -32,6 +32,14 @@ assert guests["410"]["type"] == "vm"
 assert guests["410"]["pve_management"] is False
 assert "bootstrap" not in guests["410"]
 
+# Область состояния можно ограничить конкретным VMID/CTID.
+only_410 = module.build_payload(ROOT, only_vmids={410})["guests"]
+assert set(only_410) == {"410"}
+
+without_410 = module.build_payload(ROOT, exclude_vmids={410})["guests"]
+assert "410" not in without_410
+assert "109" in without_410
+
 # Описательный объект без profile не участвует в универсальном развёртывании.
 assert "201" not in guests
 
