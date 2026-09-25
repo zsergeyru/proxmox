@@ -12,7 +12,7 @@ from pathlib import Path
 from .common import InfraManagerError, console, require_command, run
 from .opentofu import OpenTofuWorkspace, prepare_workspace
 from .pve import PveClient
-from .settings import PATHS
+from .settings import PATHS, SETTINGS
 
 
 @dataclass(frozen=True)
@@ -504,11 +504,20 @@ def _reconcile_guest_infrastructure(context: DeploymentContext) -> None:
         context.paths.plan_file.unlink(missing_ok=True)
 
 
-def run_deploy_guest(repo_root: Path, vmid: int) -> int:
+def run_deploy_guest(
+    repo_root: Path,
+    vmid: int,
+    *,
+    bootstrap_scope: bool = False,
+) -> int:
     """Привести одного гостя к состоянию guest.yaml + provision.yaml."""
 
     if vmid <= 0:
         raise InfraManagerError("VMID должен быть положительным числом")
+    if bootstrap_scope and vmid not in SETTINGS.bootstrap_managed_vmids:
+        raise InfraManagerError(
+            f"VMID {vmid} не принадлежит начальному контуру"
+        )
 
     for command in (
         "tofu",
@@ -521,7 +530,11 @@ def run_deploy_guest(repo_root: Path, vmid: int) -> int:
     console.info("Проверка проекта")
     run([sys.executable, str(repo_root / "scripts" / "validate_repo.py")])
 
-    workspace = prepare_workspace(repo_root)
+    workspace = prepare_workspace(
+        repo_root,
+        only_vmids={vmid} if bootstrap_scope else None,
+        exclude_vmids=set() if bootstrap_scope else None,
+    )
     context = _build_deployment_context(repo_root, vmid, workspace)
 
     console.info("Инициализация OpenTofu")
