@@ -23,7 +23,19 @@ def load_yaml(path: Path) -> dict:
     return data
 
 
-def build_payload(root: Path) -> dict:
+def build_payload(
+    root: Path,
+    *,
+    include_vmids: set[int] | None = None,
+    exclude_vmids: set[int] | None = None,
+) -> dict:
+    """Собрать итоговое состояние с явным фильтром владельца state."""
+    include = set(include_vmids) if include_vmids is not None else None
+    exclude = set(exclude_vmids or ())
+    if include is not None and include & exclude:
+        overlap = ", ".join(str(value) for value in sorted(include & exclude))
+        raise ValueError(f"VMID одновременно включены и исключены: {overlap}")
+
     guests_dir = root / "infrastructure" / "guests"
     defaults = load_yaml(guests_dir / "defaults.yaml")
     result: dict[str, dict] = {}
@@ -46,12 +58,24 @@ def build_payload(root: Path) -> dict:
 
         if not isinstance(vmid, int):
             raise TypeError(f"{manifest}: итоговый vmid должен быть integer")
+        if include is not None and vmid not in include:
+            continue
+        if vmid in exclude:
+            continue
 
         key = str(vmid)
         if key in result:
             raise ValueError(f"дублирующий vmid в итоговом состоянии: {vmid}")
 
         result[key] = effective
+
+    if include is not None:
+        missing = sorted(include - {int(value) for value in result})
+        if missing:
+            values = ", ".join(str(value) for value in missing)
+            raise ValueError(
+                f"Запрошенные VMID отсутствуют в управляемом состоянии: {values}"
+            )
 
     return {
         "format_version": 1,
@@ -68,10 +92,28 @@ def main() -> int:
         type=Path,
         help="Файл результата. Без параметра JSON выводится в stdout.",
     )
+    parser.add_argument(
+        "--include-vmid",
+        type=int,
+        action="append",
+        default=[],
+        help="Включить только указанный VMID. Параметр можно повторять.",
+    )
+    parser.add_argument(
+        "--exclude-vmid",
+        type=int,
+        action="append",
+        default=[],
+        help="Исключить VMID из результата. Параметр можно повторять.",
+    )
     args = parser.parse_args()
 
     try:
-        payload = build_payload(REPO_ROOT)
+        payload = build_payload(
+            REPO_ROOT,
+            include_vmids=set(args.include_vmid) if args.include_vmid else None,
+            exclude_vmids=set(args.exclude_vmid),
+        )
     except (
         OSError,
         TypeError,
