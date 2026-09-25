@@ -84,6 +84,38 @@ def check_opentofu_state_status() -> None:
             ):
                 fail("Состояние OpenTofu неверно определило найденный ресурс")
 
+        lxc_target = 'proxmox_virtual_environment_container.guest["910"]'
+        lxc_payload = {
+            "resources": [
+                {
+                    "type": "proxmox_virtual_environment_container",
+                    "name": "guest",
+                    "instances": [
+                        {
+                            "index_key": "910",
+                            "status": "ready",
+                        }
+                    ],
+                }
+            ]
+        }
+        with (
+            patch.object(opentofu_module, "STATE_FILE", state_file),
+            patch.object(
+                opentofu_module,
+                "run",
+                return_value=SimpleNamespace(
+                    returncode=0,
+                    stdout=json.dumps(lxc_payload),
+                ),
+            ),
+        ):
+            if opentofu_module._state_status(directory, lxc_target, env) != (
+                True,
+                "ready",
+            ):
+                fail("Состояние OpenTofu не нашло LXC-ресурс")
+
         missing_payload = {"resources": []}
         with (
             patch.object(opentofu_module, "STATE_FILE", state_file),
@@ -162,6 +194,7 @@ def main_test() -> None:
             vmid=410,
             name="test-vm",
             node="pve",
+            kind="vm",
             template_vmid=9000,
             address="192.0.2.10",
             target='proxmox_virtual_environment_vm.guest["410"]',
@@ -179,6 +212,28 @@ def main_test() -> None:
         state_status="ready",
     ) is not None:
         fail("Проверка состояния VM при успехе должна возвращать None")
+
+    lxc_client = SimpleNamespace(
+        find_vm=lambda vmid: {"type": "lxc", "name": "test-lxc"}
+    )
+    lxc_deployment = DeploymentContext(
+        client=lxc_client,
+        vmid=910,
+        name="test-lxc",
+        node="pve",
+        kind="lxc",
+        template_vmid=None,
+        address="192.0.2.11",
+        target='proxmox_virtual_environment_container.guest["910"]',
+        workspace=workspace,
+        paths=deployment_paths,
+    )
+    if _validate_pve_and_state(
+        lxc_deployment,
+        state_present=True,
+        state_status="ready",
+    ) is not None:
+        fail("Проверка состояния LXC при успехе должна возвращать None")
 
     invalid_state_cases = (
         (
@@ -212,7 +267,8 @@ def main_test() -> None:
         def find_vm(self, vmid: int):
             return self.resource
 
-        def vm_status(self, *, node: str, vmid: int) -> str:
+        def guest_status(self, *, node: str, vmid: int, kind: str) -> str:
+            assert kind == "vm"
             return "stopped"
 
         def put(self, path: str, *, form: dict[str, int]) -> None:
@@ -237,9 +293,9 @@ def main_test() -> None:
             state_status="tainted",
         )
     if not any(method == "DELETE" for method, _ in tainted_client.tasks):
-        fail("Повреждённая VM не была удалена после проверки типа и имени")
+        fail("Повреждённый гость не был удалён после проверки типа и имени")
     if not any(command[2:4] == ["state", "rm"] for command in tainted_commands):
-        fail("Повреждённая VM не была удалена из состояния OpenTofu")
+        fail("Повреждённый гость не был удалён из состояния OpenTofu")
 
     def unexpected_plan_run(argv: list[str], **kwargs: object):
         if "-json" in argv:
@@ -278,7 +334,7 @@ def main_test() -> None:
     with patch.object(guest_deploy_module, "run", target_plan_run):
         guest_plan = _build_guest_plan(deployment)
     if guest_plan.actions != ("update",):
-        fail("Целевой план неверно разобрал действия выбранной VM")
+        fail("Целевой план неверно разобрал действия выбранного гостя")
 
     class ProtectedTemplateClient:
         def __init__(self) -> None:
