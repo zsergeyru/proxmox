@@ -5,6 +5,7 @@ from __future__ import annotations
 import ipaddress
 import json
 import os
+import re
 import ssl
 import time
 import urllib.error
@@ -355,18 +356,26 @@ class PveClient:
             )
 
         prefix = f"{selector}_"
-        candidates = sorted(
+        candidates = [
             str(item.get("volid"))
             for item in content
             if isinstance(item, dict)
             and isinstance(item.get("volid"), str)
             and str(item.get("volid")).startswith(prefix)
-        )
+        ]
         if not candidates:
             raise InfraManagerError(
                 f"На PVE не найден LXC template семейства {selector}"
             )
-        return candidates[-1]
+
+        def version_key(value: str) -> tuple[object, ...]:
+            parts = re.split(r"([0-9]+)", value)
+            return tuple(
+                int(part) if part.isdigit() else part
+                for part in parts
+            )
+
+        return max(candidates, key=version_key)
 
     def permissions_at(self, path: str) -> Any:
         return self.data(
