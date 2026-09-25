@@ -138,7 +138,7 @@ pve-configuration-status
 
 - закрытая Git-копия проекта;
 - GitHub Deploy Key проекта;
-- OpenTofu state;
+- основной OpenTofu state управляемой инфраструктуры; отдельный bootstrap-state 910 является намеренным исключением;
 - Semaphore;
 - Docker;
 - Ansible;

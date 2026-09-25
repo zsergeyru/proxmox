@@ -50,18 +50,15 @@ swap:          512 MB
 bridge:        vmbr0
 onboot:        true
 protection:    true
-features:      nesting=1,keyctl=1
-tags:          infra-manager;proxmox-bootstrap
+features:      container-host → nesting=1,keyctl=1
+IPv4:          192.168.9.10/16
+gateway:       192.168.1.1
 pool managed:  нет
 ```
 
-Сетевой адрес является параметром публичного bootstrap:
+Адрес `192.168.9.10/16` вычисляется общим resolver из VMID 910. Мост, шлюз, хранилище, защита и `onboot` приходят из общих настроек проекта.
 
-- без параметров используется DHCP;
-- при явном запуске можно задать статический IPv4 и шлюз;
-- мост остаётся `vmbr0`.
-
-Текущая общая схема `guest.yaml` не выражает bootstrap-владение, DHCP и низкоуровневые параметры LXC, поэтому эти особенности дополнительно закреплены здесь и проверяются самим публичным bootstrap.
+`unprivileged=true` является общим правилом OpenTofu для управляемых LXC, а низкоуровневые возможности Docker выводятся из высокоуровневого `container-host`. Public bootstrap эти параметры 910 больше не дублирует.
 
 ## Жизненный цикл
 
@@ -120,7 +117,7 @@ startup: order=10,up=30
 
 При выключении PVE порядок гостевых систем разворачивается, поэтому инфраструктурный 910 должен завершаться после зависимых сервисов.
 
-Текущая схема `guest.yaml` ещё не содержит полей `boot.order` и `boot.startup_delay_seconds`. Их добавление в схему, resolver и OpenTofu выполняется вместе с реализацией LXC в общем гостевом контуре.
+Поля `boot.order` и `boot.startup_delay_seconds` уже входят в схему гостя и преобразуются OpenTofu в штатный блок `startup` Proxmox.
 
 ## Состав ОС
 
