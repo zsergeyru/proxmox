@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from .common import InfraManagerError, console, require_command, run
+from .pve import PveClient
 from .settings import PATHS, SETTINGS
 
 CA_BUNDLE = PATHS.ca_bundle
@@ -51,6 +52,74 @@ def _opentofu_env() -> dict[str, str]:
     env = os.environ.copy()
     env["SSL_CERT_FILE"] = str(CA_BUNDLE)
     return env
+
+
+def _resolve_lxc_templates(payload: dict[str, Any]) -> None:
+    """Заменить логические имена LXC-шаблонов на фактические volume ID."""
+
+    guests = payload.get("guests")
+    if not isinstance(guests, dict):
+        raise InfraManagerError("OpenTofu input не содержит guests")
+
+    unresolved = [
+        guest
+        for guest in guests.values()
+        if isinstance(guest, dict)
+        and guest.get("type") == "lxc"
+        and isinstance(guest.get("ostemplate"), str)
+        and not str(guest["ostemplate"]).endswith((".tar.zst", ".tar.gz"))
+    ]
+    if not unresolved:
+        return
+
+    client = PveClient.from_opentofu_env()
+    cache: dict[tuple[str, str], str] = {}
+
+    for guest in unresolved:
+        logical = str(guest["ostemplate"])
+        storage_prefix, separator, template_prefix = logical.partition(":vztmpl/")
+        if not separator or not storage_prefix or not template_prefix:
+            raise InfraManagerError(
+                f"Некорректное логическое имя LXC-шаблона: {logical}"
+            )
+
+        node = str(guest.get("node") or "")
+        if not node:
+            raise InfraManagerError(
+                f"Для LXC {guest.get('vmid')} не задан PVE-узел"
+            )
+
+        cache_key = (node, logical)
+        resolved = cache.get(cache_key)
+        if resolved is None:
+            data = client.data(
+                f"/nodes/{node}/storage/{storage_prefix}/content",
+                query={"content": "vztmpl"},
+            )
+            if not isinstance(data, list):
+                raise InfraManagerError(
+                    f"PVE вернул неожиданный список LXC-шаблонов для {storage_prefix}"
+                )
+
+            prefix = f"{storage_prefix}:vztmpl/{template_prefix}_"
+            candidates = sorted(
+                str(item.get("volid"))
+                for item in data
+                if isinstance(item, dict)
+                and isinstance(item.get("volid"), str)
+                and str(item["volid"]).startswith(prefix)
+                and str(item["volid"]).endswith(
+                    ("_amd64.tar.zst", "_amd64.tar.gz")
+                )
+            )
+            if not candidates:
+                raise InfraManagerError(
+                    f"Не найден LXC-шаблон для {logical}"
+                )
+            resolved = candidates[-1]
+            cache[cache_key] = resolved
+
+        guest["ostemplate"] = resolved
 
 
 def _paths(repo_root: Path) -> tuple[Path, Path]:
@@ -104,6 +173,12 @@ def _prepare_input(
         raise InfraManagerError(
             f"{GUEST_STATE_FILE} имеет некорректный формат"
         )
+
+    _resolve_lxc_templates(payload)
+    GUEST_STATE_FILE.write_text(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
+        encoding="utf-8",
+    )
     return opentofu_dir, payload
 
 
