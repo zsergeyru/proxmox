@@ -193,11 +193,20 @@ def _state_status(
             "OpenTofu state содержит некорректный resources"
         )
 
+    target_type = target.split(".", 1)[0]
+    if target_type not in {
+        "proxmox_virtual_environment_vm",
+        "proxmox_virtual_environment_container",
+    }:
+        raise InfraManagerError(
+            f"Неподдерживаемый адрес ресурса OpenTofu: {target}"
+        )
+
     for resource in resources:
         if not isinstance(resource, dict):
             continue
         if (
-            resource.get("type") != "proxmox_virtual_environment_vm"
+            resource.get("type") != target_type
             or resource.get("name") != "guest"
         ):
             continue
