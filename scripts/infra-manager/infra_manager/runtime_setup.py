@@ -184,6 +184,8 @@ class RuntimeSetup:
                 ),
                 "--output",
                 str(OPENTOFU_INPUT),
+                "--exclude-vmid",
+                "910",
             ]
         )
         self.context.runner.run(["chown", "1001:0", str(OPENTOFU_INPUT)])
