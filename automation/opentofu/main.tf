@@ -4,6 +4,12 @@ locals {
     vmid => guest
     if guest.type == "vm"
   }
+
+  lxc_guests = {
+    for vmid, guest in local.guests :
+    vmid => guest
+    if guest.type == "lxc"
+  }
 }
 
 resource "proxmox_virtual_environment_vm" "guest" {
@@ -79,6 +85,67 @@ resource "proxmox_virtual_environment_vm" "guest" {
 
   operating_system {
     type = "l26"
+  }
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+resource "proxmox_virtual_environment_container" "guest" {
+  for_each = local.lxc_guests
+
+  description  = each.value.description
+  node_name    = each.value.node
+  vm_id        = each.value.vmid
+  unprivileged = true
+
+  started       = true
+  start_on_boot = each.value.boot.onboot
+  protection    = each.value.protection
+
+  cpu {
+    cores = each.value.resources.cores
+  }
+
+  memory {
+    dedicated = each.value.resources.memory_mb
+    swap      = each.value.resources.swap_mb
+  }
+
+  disk {
+    datastore_id = each.value.resources.disk_storage
+    size         = each.value.resources.disk_size_gb
+  }
+
+  features {
+    nesting = contains(try(each.value.features, []), "container-host")
+    keyctl  = contains(try(each.value.features, []), "container-host")
+  }
+
+  initialization {
+    hostname = each.value.name
+
+    ip_config {
+      ipv4 {
+        address = each.value.network.ipv4
+        gateway = each.value.network.ipv4 == "dhcp" ? null : each.value.network.gateway
+      }
+    }
+
+    user_account {
+      keys = [trimspace(var.ansible_ssh_public_key)]
+    }
+  }
+
+  network_interface {
+    name   = "eth0"
+    bridge = each.value.network.bridge
+  }
+
+  operating_system {
+    template_file_id = each.value.ostemplate
+    type             = "debian"
   }
 
   lifecycle {
