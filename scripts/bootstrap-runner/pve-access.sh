@@ -8,6 +8,7 @@ API_TOKEN_NAME="bootstrap-runner"
 API_TOKEN_ID="${API_USER}!${API_TOKEN_NAME}"
 
 CT_CA_DIR="/etc/bootstrap-runner/ca"
+CT_PVE_CA_FILE="${CT_CA_DIR}/pve-root-ca.crt"
 CT_CA_FILE="${CT_CA_DIR}/ca-bundle.crt"
 CT_SECRET_DIR="/etc/bootstrap-runner/secrets"
 CT_SECRET_FILE="${CT_SECRET_DIR}/pve-api.env"
@@ -144,8 +145,10 @@ stage_ca() {
     local source="/etc/pve/pve-root-ca.pem"
     [[ -s "$source" ]] || die "Не найден PVE CA: $source"
     pct exec "$CTID" -- install -d -m 0755 "$CT_CA_DIR"
-    pct push "$CTID" "$source" "$CT_CA_FILE" \
+    pct push "$CTID" "$source" "$CT_PVE_CA_FILE" \
         --user 0 --group 0 --perms 0644
+    pct exec "$CTID" -- sh -c \
+        "cat /etc/ssl/certs/ca-certificates.crt '$CT_PVE_CA_FILE' > '$CT_CA_FILE' && chmod 0644 '$CT_CA_FILE'"
 }
 
 stage_secret() {
@@ -220,7 +223,7 @@ apply() {
 cleanup() {
     remove_token
     if ct_exists; then
-        pct exec "$CTID" -- rm -f "$CT_SECRET_FILE" "$CT_CA_FILE" || true
+        pct exec "$CTID" -- rm -f "$CT_SECRET_FILE" "$CT_CA_FILE" "$CT_PVE_CA_FILE" || true
     fi
     ok "Временный PVE API-доступ bootstrap-runner удалён"
 }
