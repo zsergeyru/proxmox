@@ -175,17 +175,15 @@ class RuntimeSetup:
         self.reporter.stage(
             "Подготовка итогового состояния гостей для OpenTofu"
         )
-        self.context.logged_runner.run(
-            [
-                sys.executable,
-                str(
-                    REPO_ROOT
-                    / "scripts/guests/render-opentofu-input.py"
-                ),
-                "--output",
-                str(OPENTOFU_INPUT),
-            ]
-        )
+        command = [
+            sys.executable,
+            str(REPO_ROOT / "scripts/guests/render-opentofu-input.py"),
+            "--output",
+            str(OPENTOFU_INPUT),
+        ]
+        for vmid in sorted(SETTINGS.bootstrap_managed_vmids):
+            command.extend(["--exclude-vmid", str(vmid)])
+        self.context.logged_runner.run(command)
         self.context.runner.run(["chown", "1001:0", str(OPENTOFU_INPUT)])
         self.context.runner.run(["chmod", "0640", str(OPENTOFU_INPUT)])
         self.reporter.ok(f"OpenTofu input подготовлен: {OPENTOFU_INPUT}")
