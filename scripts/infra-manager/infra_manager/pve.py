@@ -317,13 +317,56 @@ class PveClient:
             )
         return config
 
-    def vm_status(self, *, node: str, vmid: int) -> str:
-        status = self.data(f"/nodes/{node}/qemu/{vmid}/status/current")
+    def guest_status(self, *, node: str, vmid: int, kind: str) -> str:
+        """Вернуть состояние VM или LXC."""
+        endpoint_kind = {"vm": "qemu", "lxc": "lxc"}.get(kind)
+        if endpoint_kind is None:
+            raise InfraManagerError(
+                f"Неизвестный тип гостя для чтения состояния: {kind!r}"
+            )
+        status = self.data(
+            f"/nodes/{node}/{endpoint_kind}/{vmid}/status/current"
+        )
         if not isinstance(status, dict):
             raise InfraManagerError(
                 f"PVE status VMID {vmid} имеет неожиданный формат"
             )
         return str(status.get("status") or "")
+
+    def vm_status(self, *, node: str, vmid: int) -> str:
+        """Совместимая оболочка для существующего VM-кода."""
+        return self.guest_status(node=node, vmid=vmid, kind="vm")
+
+    def latest_lxc_template(self, *, node: str, selector: str) -> str:
+        """Разрешить селектор семейства vztmpl в актуальный локальный volid."""
+        storage, separator, family = selector.partition(":vztmpl/")
+        if not separator or not storage or not family:
+            raise InfraManagerError(
+                f"Некорректный LXC template selector: {selector!r}"
+            )
+
+        content = self.data(
+            f"/nodes/{node}/storage/{storage}/content",
+            query={"content": "vztmpl"},
+        )
+        if not isinstance(content, list):
+            raise InfraManagerError(
+                f"PVE storage {storage} вернул неожиданный список templates"
+            )
+
+        prefix = f"{selector}_"
+        candidates = sorted(
+            str(item.get("volid"))
+            for item in content
+            if isinstance(item, dict)
+            and isinstance(item.get("volid"), str)
+            and str(item.get("volid")).startswith(prefix)
+        )
+        if not candidates:
+            raise InfraManagerError(
+                f"На PVE не найден LXC template семейства {selector}"
+            )
+        return candidates[-1]
 
     def permissions_at(self, path: str) -> Any:
         return self.data(
