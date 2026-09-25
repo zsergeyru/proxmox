@@ -50,16 +50,24 @@ guest_path, provision_path, setup_path, py_setup_path, host_setup_path, runtime_
 guest = yaml.safe_load(guest_path.read_text(encoding="utf-8"))
 if guest.get("vmid") != 910 or guest.get("name") != "infra-manager":
     raise SystemExit("910 guest.yaml содержит неверный vmid/name")
-if "profile" in guest:
-    raise SystemExit("910 guest.yaml не должен содержать profile и попадать в OpenTofu")
+if guest.get("profile") != "debian-lxc-docker":
+    raise SystemExit("910 должен использовать общий профиль debian-lxc-docker")
+if guest.get("pve_management") is not False:
+    raise SystemExit("910 не должен входить в собственный постоянный PVE-контур")
 if guest.get("protection") is not True:
     raise SystemExit("910 должен иметь protection=true")
 if guest.get("boot", {}).get("onboot") is not True:
     raise SystemExit("910 должен иметь onboot=true")
+if guest.get("network", {}).get("ipv4") != "192.168.9.10":
+    raise SystemExit("910 должен иметь адрес 192.168.9.10")
+if guest.get("boot", {}).get("order") != 10:
+    raise SystemExit("910 должен иметь порядок запуска 10")
+if guest.get("boot", {}).get("startup_delay_seconds") != 30:
+    raise SystemExit("910 должен иметь задержку запуска 30 секунд")
 expected_resources = {
     "cores": 2,
-    "memory_mb": 2048,
-    "swap_mb": 512,
+    "memory_mb": 4096,
+    "swap_mb": 1024,
     "disk_size_gb": 32,
     "disk_storage": "local-lvm",
 }
