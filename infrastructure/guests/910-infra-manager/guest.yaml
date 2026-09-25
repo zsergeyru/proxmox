@@ -21,3 +21,5 @@ network:
 
 boot:
   onboot: true
+  order: 10
+  startup_delay_seconds: 30
