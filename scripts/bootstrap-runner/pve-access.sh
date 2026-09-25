@@ -15,6 +15,19 @@ CT_SECRET_FILE="${CT_SECRET_DIR}/pve-api.env"
 CT_STORAGE="local-lvm"
 CT_BRIDGE="vmbr0"
 
+HOST_DIR="/var/lib/proxmox-bootstrap"
+HOST_STATE_DIR="${HOST_DIR}/state"
+HOST_STATE_FILE="${HOST_STATE_DIR}/910.tfstate"
+HOST_SSH_DIR="${HOST_DIR}/ssh"
+HOST_SSH_KEY="${HOST_SSH_DIR}/910-bootstrap-ed25519"
+HOST_SSH_PUB="${HOST_SSH_KEY}.pub"
+
+CT_STATE_DIR="/var/lib/bootstrap-runner/opentofu/state"
+CT_STATE_FILE="${CT_STATE_DIR}/proxmox.tfstate"
+CT_SSH_DIR="/var/lib/bootstrap-runner/ssh"
+CT_SSH_KEY="${CT_SSH_DIR}/guest_ed25519"
+CT_SSH_PUB="${CT_SSH_KEY}.pub"
+
 die() { printf 'ОШИБКА: %s\n' "$*" >&2; exit 1; }
 ok() { printf '[ОК] %s\n' "$*"; }
 
@@ -23,6 +36,7 @@ require_pve_root() {
     command -v pveum >/dev/null 2>&1 || die "Не найден pveum"
     command -v pct >/dev/null 2>&1 || die "Не найден pct"
     command -v perl >/dev/null 2>&1 || die "Не найден штатный Perl PVE"
+    command -v ssh-keygen >/dev/null 2>&1 || die "Не найден ssh-keygen"
 }
 
 ct_exists() {
@@ -67,6 +81,60 @@ remove_token() {
     if api_token_exists; then
         pveum user token remove "$API_USER" "$API_TOKEN_NAME"
     fi
+}
+
+ensure_bootstrap_key() {
+    install -d -o root -g root -m 0700 "$HOST_SSH_DIR"
+    if [[ ! -s "$HOST_SSH_KEY" ]]; then
+        rm -f "$HOST_SSH_KEY" "$HOST_SSH_PUB"
+        ssh-keygen -q -t ed25519 -N '' \
+            -C "bootstrap-runner to 910" \
+            -f "$HOST_SSH_KEY"
+    fi
+    ssh-keygen -y -f "$HOST_SSH_KEY" >/dev/null \
+        || die "Повреждён bootstrap SSH key 910"
+    chmod 0600 "$HOST_SSH_KEY"
+    chmod 0644 "$HOST_SSH_PUB"
+}
+
+stage_bootstrap_key() {
+    ensure_bootstrap_key
+    pct exec "$CTID" -- install -d -m 0700 "$CT_SSH_DIR"
+    pct push "$CTID" "$HOST_SSH_KEY" "$CT_SSH_KEY" \
+        --user 0 --group 0 --perms 0600
+    pct push "$CTID" "$HOST_SSH_PUB" "$CT_SSH_PUB" \
+        --user 0 --group 0 --perms 0644
+}
+
+stage_existing_state() {
+    install -d -o root -g root -m 0700 "$HOST_STATE_DIR"
+    pct exec "$CTID" -- install -d -m 0700 "$CT_STATE_DIR"
+
+    if pct exec "$CTID" -- test -s "$CT_STATE_FILE"; then
+        ok "Используется существующий рабочий bootstrap-state внутри 990"
+        return
+    fi
+    if [[ -s "$HOST_STATE_FILE" ]]; then
+        pct push "$CTID" "$HOST_STATE_FILE" "$CT_STATE_FILE" \
+            --user 0 --group 0 --perms 0600
+        ok "Bootstrap-state 910 передан в новый 990"
+    fi
+}
+
+save_state() {
+    local tmp
+    ct_exists || die "LXC $CTID отсутствует"
+    pct exec "$CTID" -- test -s "$CT_STATE_FILE" \
+        || die "В 990 отсутствует bootstrap-state 910"
+
+    install -d -o root -g root -m 0700 "$HOST_STATE_DIR"
+    tmp="$(mktemp "${HOST_STATE_DIR}/910.tfstate.XXXXXX")"
+    trap 'rm -f -- "$tmp"' RETURN
+    pct pull "$CTID" "$CT_STATE_FILE" "$tmp"
+    chmod 0600 "$tmp"
+    mv -f "$tmp" "$HOST_STATE_FILE"
+    trap - RETURN
+    ok "Bootstrap-state 910 сохранён на PVE"
 }
 
 stage_ca() {
@@ -141,7 +209,9 @@ apply() {
     create_token
     set_acls
     stage_ca
-    ok "Временный PVE API-доступ bootstrap-runner подготовлен"
+    stage_bootstrap_key
+    stage_existing_state
+    ok "Временное окружение bootstrap-runner подготовлено"
 }
 
 cleanup() {
@@ -156,6 +226,7 @@ main() {
     require_pve_root
     case "$MODE" in
         apply) apply ;;
+        save-state) save_state ;;
         cleanup) cleanup ;;
         *) die "Неизвестный режим: $MODE" ;;
     esac
