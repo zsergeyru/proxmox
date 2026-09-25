@@ -35,6 +35,7 @@ def main() -> None:
     defaults = load_yaml(ROOT / "infrastructure/guests/defaults.yaml")
     source_310 = load_yaml(ROOT / "infrastructure/guests/310-dev-services/guest.yaml")
     source_110 = load_yaml(ROOT / "infrastructure/guests/110-network-gateway/guest.yaml")
+    source_910 = load_yaml(ROOT / "infrastructure/guests/910-infra-manager/guest.yaml")
 
     resolved = resolve_effective_guest(source_310, defaults)
     assert resolved.effective["management"] == []
@@ -44,6 +45,15 @@ def main() -> None:
     assert resolved.effective["protection"] is True
     assert resolved.effective["pve_management"] is True
     assert "bootstrap" not in resolved.effective
+
+    resolved_910 = resolve_effective_guest(source_910, defaults)
+    assert resolved_910.effective["type"] == "lxc"
+    assert resolved_910.effective["features"] == ["container-host"]
+    assert resolved_910.effective["pve_management"] is False
+    assert resolved_910.effective["boot"]["onboot"] is True
+    assert resolved_910.effective["boot"]["order"] == 10
+    assert resolved_910.effective["boot"]["startup_delay_seconds"] == 30
+    assert resolved_910.effective["network"]["ipv4"] == "192.168.9.10/16"
 
     dhcp_guest = copy.deepcopy(source_310)
     dhcp_guest["network"] = {"ipv4": "dhcp"}
