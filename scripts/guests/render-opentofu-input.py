@@ -23,7 +23,12 @@ def load_yaml(path: Path) -> dict:
     return data
 
 
-def build_payload(root: Path) -> dict:
+def build_payload(
+    root: Path,
+    *,
+    only_vmids: set[int] | None = None,
+    exclude_vmids: set[int] | None = None,
+) -> dict:
     guests_dir = root / "infrastructure" / "guests"
     defaults = load_yaml(guests_dir / "defaults.yaml")
     result: dict[str, dict] = {}
@@ -47,6 +52,11 @@ def build_payload(root: Path) -> dict:
         if not isinstance(vmid, int):
             raise TypeError(f"{manifest}: итоговый vmid должен быть integer")
 
+        if only_vmids is not None and vmid not in only_vmids:
+            continue
+        if exclude_vmids is not None and vmid in exclude_vmids:
+            continue
+
         key = str(vmid)
         if key in result:
             raise ValueError(f"дублирующий vmid в итоговом состоянии: {vmid}")
@@ -68,10 +78,31 @@ def main() -> int:
         type=Path,
         help="Файл результата. Без параметра JSON выводится в stdout.",
     )
+    parser.add_argument(
+        "--only-vmid",
+        type=int,
+        action="append",
+        default=None,
+        help="Включить только указанный VMID/CTID. Можно повторять.",
+    )
+    parser.add_argument(
+        "--exclude-vmid",
+        type=int,
+        action="append",
+        default=None,
+        help="Исключить указанный VMID/CTID. Можно повторять.",
+    )
     args = parser.parse_args()
 
+    only_vmids = set(args.only_vmid) if args.only_vmid else None
+    exclude_vmids = set(args.exclude_vmid) if args.exclude_vmid else None
+
     try:
-        payload = build_payload(REPO_ROOT)
+        payload = build_payload(
+            REPO_ROOT,
+            only_vmids=only_vmids,
+            exclude_vmids=exclude_vmids,
+        )
     except (
         OSError,
         TypeError,
