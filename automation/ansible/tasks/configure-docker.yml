@@ -67,4 +67,4 @@
   ansible.builtin.systemd_service:
     name: "{{ provision.docker.service.name }}"
     enabled: "{{ provision.docker.service.enabled | bool }}"
-    state: "{{ provision.docker.service.state }}"
+    state: "{{ 'started' if provision.docker.service.state == 'running' else provision.docker.service.state }}"
