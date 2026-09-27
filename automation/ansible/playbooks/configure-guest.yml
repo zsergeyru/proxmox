@@ -54,6 +54,22 @@
         - provision.system.required_packages is defined
         - provision.system.required_packages | length > 0
 
+
+    - name: Настроить Docker по общему контракту
+      ansible.builtin.include_tasks: ../tasks/configure-docker.yml
+      when:
+        - provision.docker is defined
+        - provision.docker.required_packages is defined
+
+    - name: Развернуть постоянный инфраструктурный runtime
+      ansible.builtin.include_tasks: ../tasks/configure-infra-runtime.yml
+      when:
+        - provision.docker is defined
+        - provision.docker.services is defined
+        - provision.docker.services.runtime is defined
+        - provision.semaphore is defined
+        - provision.paths is defined
+
     - name: Создать каталоги компонентов
       ansible.builtin.file:
         path: "{{ item.value.root }}"
