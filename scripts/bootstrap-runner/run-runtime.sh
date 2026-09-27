@@ -19,6 +19,7 @@ source "$PVE_ENV"
 set +a
 
 TF_VAR_ansible_ssh_public_key="$(cat "$CONFIG_DIR/ansible/guest_ed25519.pub")"
-export TF_VAR_ansible_ssh_public_key
+TF_VAR_guest_state_file="$DATA_DIR/opentofu/guests.json"
+export TF_VAR_ansible_ssh_public_key TF_VAR_guest_state_file
 
-exec docker run --rm     --network host     -e INFRA_MANAGER_CONFIG_DIR=/etc/bootstrap-runner     -e INFRA_MANAGER_DATA_DIR=/var/lib/bootstrap-runner     -e INFRA_PROJECT_BRANCH="${INFRA_PROJECT_BRANCH:-main}"     -e TF_VAR_pve_endpoint     -e TF_VAR_pve_api_token     -e TF_VAR_ansible_ssh_public_key     -v "$REPO_ROOT:/workspace"     -v "$CONFIG_DIR:/etc/bootstrap-runner:ro"     -v "$DATA_DIR:/var/lib/bootstrap-runner"     -w /workspace     "$IMAGE" "$@"
+exec docker run --rm     --network host     -e INFRA_MANAGER_CONFIG_DIR=/etc/bootstrap-runner     -e INFRA_MANAGER_DATA_DIR=/var/lib/bootstrap-runner     -e INFRA_PROJECT_BRANCH="${INFRA_PROJECT_BRANCH:-main}"     -e TF_VAR_pve_endpoint     -e TF_VAR_pve_api_token     -e TF_VAR_ansible_ssh_public_key     -e TF_VAR_guest_state_file     -v "$REPO_ROOT:/workspace"     -v "$CONFIG_DIR:/etc/bootstrap-runner:ro"     -v "$DATA_DIR:/var/lib/bootstrap-runner"     -w /workspace     "$IMAGE" "$@"
