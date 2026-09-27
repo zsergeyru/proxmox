@@ -165,6 +165,16 @@ jobs:
           docker run --rm --entrypoint python3 infra-runtime:test -c 'import proxmoxer'
           docker run --rm --entrypoint python3 infra-runtime:test -c 'import yaml, jsonschema'
 
+      - name: Build bootstrap-runner image
+        run: |
+          docker build \
+            --build-arg OPENTOFU_VERSION=1.12.6 \
+            -t bootstrap-runtime:test \
+            infrastructure/bootstrap-runner/runtime
+          docker run --rm bootstrap-runtime:test tofu version
+          docker run --rm bootstrap-runtime:test ansible --version
+          docker run --rm bootstrap-runtime:test python3 -c 'import yaml, jsonschema, requests'
+
       - name: Verify malformed guest directory is rejected
         run: |
           mkdir -p infrastructure/guests/not-a-valid-guest-directory
