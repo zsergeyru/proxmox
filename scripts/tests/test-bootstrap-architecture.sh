@@ -44,9 +44,10 @@ if grep -R -n -E     'scripts/infra-manager/setup\.sh|python3[[:space:]]+-m[[:sp
     die "990 не должен вызывать отдельный setup для 910"
 fi
 
-grep -q '910 --bootstrap-scope --infrastructure-only'     "$BOOTSTRAP_DIR/deploy-910.sh"     || die "990 должен создавать 910 через общую инфраструктурную фазу deploy-guest"
-grep -q '910 --bootstrap-scope --provision-base-only'     "$BOOTSTRAP_DIR/deploy-910.sh"     || die "990 должен готовить базовый Debian через общий Ansible"
-grep -q '910 --bootstrap-scope --provision-only'     "$BOOTSTRAP_DIR/deploy-910.sh"     || die "990 должен полностью применять provision.yaml через общий Ansible"
+grep -q -- '--infrastructure-only' "$BOOTSTRAP_DIR/deploy-910.sh"     || die "990 должен создавать 910 через общую инфраструктурную фазу deploy-guest"
+grep -q -- '--provision-base-only' "$BOOTSTRAP_DIR/deploy-910.sh"     || die "990 должен готовить базовый Debian через общий Ansible"
+grep -q -- '--provision-only' "$BOOTSTRAP_DIR/deploy-910.sh"     || die "990 должен полностью применять provision.yaml через общий Ansible"
+grep -q -- '--bootstrap-scope' "$BOOTSTRAP_DIR/deploy-910.sh"     || die "910 должен оставаться в отдельной bootstrap-области состояния"
 
 grep -q 'configure-docker.yml' "$PLAYBOOK"     || die "Общий playbook должен подключать общий модуль Docker"
 grep -q 'configure-infra-runtime.yml' "$PLAYBOOK"     || die "Общий playbook должен подключать модуль infra-runtime по provision.yaml"
