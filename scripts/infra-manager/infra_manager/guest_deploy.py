@@ -457,7 +457,11 @@ def _build_guest_plan(context: DeploymentContext) -> GuestPlan:
     return GuestPlan(actions=actions)
 
 
-def _configure_guest_os(context: DeploymentContext) -> None:
+def _configure_guest_os(
+    context: DeploymentContext,
+    *,
+    provision_phase: str = "full",
+) -> None:
     """Принять SSH host key и применить конфигурацию Ansible."""
 
     _ensure_ssh_host_key(context.paths.known_hosts, context.address)
@@ -480,6 +484,8 @@ def _configure_guest_os(context: DeploymentContext) -> None:
             str(context.paths.private_key),
             "-e",
             f"guest={context.paths.guest_dir.name}",
+            "-e",
+            f"provision_phase={provision_phase}",
             str(context.paths.playbook),
         ],
         env=ansible_env,
@@ -515,7 +521,7 @@ def run_deploy_guest(
 
     if vmid <= 0:
         raise InfraManagerError("VMID должен быть положительным числом")
-    if phase not in {"all", "infrastructure", "provision"}:
+    if phase not in {"all", "infrastructure", "provision-base", "provision"}:
         raise InfraManagerError(f"Неизвестная фаза deploy-guest: {phase}")
     if bootstrap_scope and vmid not in SETTINGS.bootstrap_managed_vmids:
         raise InfraManagerError(
@@ -555,7 +561,7 @@ def run_deploy_guest(
     if phase in {"all", "infrastructure"}:
         _reconcile_guest_infrastructure(context)
 
-    if phase == "provision":
+    if phase in {"provision-base", "provision"}:
         state_present, state_status = context.workspace.get_resource_state(
             context.target
         )
@@ -570,12 +576,20 @@ def run_deploy_guest(
                 "сначала выполните фазу infrastructure"
             )
 
-    if phase in {"all", "provision"}:
+    if phase == "all":
         _configure_guest_os(context)
+    elif phase == "provision-base":
+        _configure_guest_os(context, provision_phase="base")
+    elif phase == "provision":
+        _configure_guest_os(context, provision_phase="full")
 
     if phase == "infrastructure":
         console.ok(
             f"{context.vmid} {context.name}: инфраструктура создана"
+        )
+    elif phase == "provision-base":
+        console.ok(
+            f"{context.vmid} {context.name}: базовая часть provision.yaml применена"
         )
     elif phase == "provision":
         console.ok(
