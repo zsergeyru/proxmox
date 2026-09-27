@@ -215,6 +215,7 @@ def _init(opentofu_dir: Path, env: dict[str, str]) -> None:
             "-input=false",
             "-no-color",
             "-lockfile=readonly",
+            f"-backend-config=path={STATE_FILE}",
         ],
         env=env,
     )
