@@ -94,10 +94,15 @@ access:
     guest_scope: /vms
     managed_pool_assignment: managed
     iso_storage: local
+    staging_credential: /root/.infra-manager-bootstrap/pve-api.env
+    persistent_credential: /etc/infra-manager/secrets/pve-api.env
+    ca_source: /usr/local/share/ca-certificates/pve-root-ca.crt
 
   github:
     repository: git@github.com:zsergeyru/proxmox.git
     access: read-only-deploy-key
+    private_key: /root/.ssh/github_proxmox_repo_ed25519
+    known_hosts: /root/.ssh/github_known_hosts
 
 semaphore:
   project: Proxmox Infrastructure
