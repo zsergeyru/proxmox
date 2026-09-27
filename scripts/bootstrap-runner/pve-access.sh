@@ -123,6 +123,7 @@ create_access() {
     ensure_acl "/" "PVEAuditor"
     ensure_acl "/vms" "PVEVMAdmin"
     ensure_acl "/storage/$CT_STORAGE" "PVEDatastoreUser"
+    ensure_acl "/storage/local" "PVEDatastoreUser"
     ensure_acl "/sdn/zones/localnetwork/$CT_BRIDGE" "PVESDNUser"
 
     if ! stage_access "$secret"; then
