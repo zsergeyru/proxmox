@@ -20,7 +20,7 @@
 
 - name: Проверить переданный PVE CA
   ansible.builtin.stat:
-    path: {{ provision.access.pve.ca_source }}
+    path: "{{ provision.access.pve.ca_source }}"
   register: pve_ca
 
 - name: Требовать PVE CA
@@ -47,14 +47,14 @@
 
 - name: Проверить временный PVE API credential
   ansible.builtin.stat:
-    path: {{ provision.access.pve.staging_credential }}
+    path: "{{ provision.access.pve.staging_credential }}"
   register: staging_pve_credential
 
 - name: Сохранить PVE API credential
   ansible.builtin.copy:
     remote_src: true
-    src: {{ provision.access.pve.staging_credential }}
-    dest: {{ provision.access.pve.persistent_credential }}
+    src: "{{ provision.access.pve.staging_credential }}"
+    dest: "{{ provision.access.pve.persistent_credential }}"
     owner: root
     group: root
     mode: "0600"
@@ -62,7 +62,7 @@
 
 - name: Проверить постоянный PVE API credential
   ansible.builtin.stat:
-    path: "{{ provision.paths.secrets }}/pve-api.env"
+    path: "{{ provision.access.pve.persistent_credential }}"
   register: permanent_pve_credential
 
 - name: Требовать постоянный PVE API credential
@@ -133,7 +133,7 @@
 - name: Подготовить known_hosts Semaphore
   ansible.builtin.copy:
     remote_src: true
-    src: {{ provision.access.github.known_hosts }}
+    src: "{{ provision.access.github.known_hosts }}"
     dest: "{{ provision.paths.semaphore_data }}/known_hosts"
     owner: "1001"
     group: "0"
