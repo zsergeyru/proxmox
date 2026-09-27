@@ -20,7 +20,7 @@
 
 - name: Проверить переданный PVE CA
   ansible.builtin.stat:
-    path: /usr/local/share/ca-certificates/pve-root-ca.crt
+    path: {{ provision.access.pve.ca_source }}
   register: pve_ca
 
 - name: Требовать PVE CA
@@ -39,7 +39,7 @@
 - name: Собрать CA bundle для инфраструктурных средств
   ansible.builtin.shell: |
     set -eu
-    cat /etc/ssl/certs/ca-certificates.crt         /usr/local/share/ca-certificates/pve-root-ca.crt         > "{{ provision.paths.ca }}/ca-bundle.crt.tmp"
+    cat /etc/ssl/certs/ca-certificates.crt         {{ provision.access.pve.ca_source }}         > "{{ provision.paths.ca }}/ca-bundle.crt.tmp"
     chmod 0644 "{{ provision.paths.ca }}/ca-bundle.crt.tmp"
     mv "{{ provision.paths.ca }}/ca-bundle.crt.tmp" "{{ provision.paths.ca }}/ca-bundle.crt"
   args:
@@ -47,14 +47,14 @@
 
 - name: Проверить временный PVE API credential
   ansible.builtin.stat:
-    path: /root/.infra-manager-bootstrap/pve-api.env
+    path: {{ provision.access.pve.staging_credential }}
   register: staging_pve_credential
 
 - name: Сохранить PVE API credential
   ansible.builtin.copy:
     remote_src: true
-    src: /root/.infra-manager-bootstrap/pve-api.env
-    dest: "{{ provision.paths.secrets }}/pve-api.env"
+    src: {{ provision.access.pve.staging_credential }}
+    dest: {{ provision.access.pve.persistent_credential }}
     owner: root
     group: root
     mode: "0600"
@@ -74,7 +74,7 @@
 
 - name: Удалить временную копию PVE API credential
   ansible.builtin.file:
-    path: /root/.infra-manager-bootstrap/pve-api.env
+    path: {{ provision.access.pve.staging_credential }}
     state: absent
 
 - name: Проверить постоянный закрытый ключ Ansible
@@ -133,7 +133,7 @@
 - name: Подготовить known_hosts Semaphore
   ansible.builtin.copy:
     remote_src: true
-    src: /root/.ssh/github_known_hosts
+    src: {{ provision.access.github.known_hosts }}
     dest: "{{ provision.paths.semaphore_data }}/known_hosts"
     owner: "1001"
     group: "0"
