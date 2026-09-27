@@ -509,11 +509,14 @@ def run_deploy_guest(
     vmid: int,
     *,
     bootstrap_scope: bool = False,
+    phase: str = "all",
 ) -> int:
     """Привести одного гостя к состоянию guest.yaml + provision.yaml."""
 
     if vmid <= 0:
         raise InfraManagerError("VMID должен быть положительным числом")
+    if phase not in {"all", "infrastructure", "provision"}:
+        raise InfraManagerError(f"Неизвестная фаза deploy-guest: {phase}")
     if bootstrap_scope and vmid not in SETTINGS.bootstrap_managed_vmids:
         raise InfraManagerError(
             f"VMID {vmid} не принадлежит начальному контуру"
@@ -549,11 +552,37 @@ def run_deploy_guest(
         state_status=state_status,
     )
 
-    _reconcile_guest_infrastructure(context)
+    if phase in {"all", "infrastructure"}:
+        _reconcile_guest_infrastructure(context)
 
-    _configure_guest_os(context)
+    if phase == "provision":
+        state_present, state_status = context.workspace.get_resource_state(
+            context.target
+        )
+        _validate_pve_and_state(
+            context,
+            state_present=state_present,
+            state_status=state_status,
+        )
+        if not state_present:
+            raise InfraManagerError(
+                f"Гость {context.vmid} отсутствует в OpenTofu state; "
+                "сначала выполните фазу infrastructure"
+            )
 
-    console.ok(
-        f"{context.vmid} {context.name} создан и базово настроен"
-    )
+    if phase in {"all", "provision"}:
+        _configure_guest_os(context)
+
+    if phase == "infrastructure":
+        console.ok(
+            f"{context.vmid} {context.name}: инфраструктура создана"
+        )
+    elif phase == "provision":
+        console.ok(
+            f"{context.vmid} {context.name}: provision.yaml применён"
+        )
+    else:
+        console.ok(
+            f"{context.vmid} {context.name} создан и настроен"
+        )
     return 0
