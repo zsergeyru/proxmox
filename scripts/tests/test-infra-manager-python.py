@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import os
 import subprocess
 import sys
 import tempfile
@@ -27,6 +28,7 @@ from infra_manager.pve import (
     permission_present,
     select_management_ipv4,
 )
+from infra_manager.settings import Paths
 
 
 def fail(message: str) -> None:
@@ -131,6 +133,30 @@ def check_cli_and_commands() -> None:
             fail(f"python -m infra_manager {' '.join(args)} не вывел строку использования")
 
 
+def check_path_overrides() -> None:
+    old_config = os.environ.get("INFRA_MANAGER_CONFIG_DIR")
+    old_data = os.environ.get("INFRA_MANAGER_DATA_DIR")
+    try:
+        os.environ["INFRA_MANAGER_CONFIG_DIR"] = "/etc/bootstrap-runner"
+        os.environ["INFRA_MANAGER_DATA_DIR"] = "/var/lib/bootstrap-runner"
+        paths = Paths()
+        if paths.config_dir != Path("/etc/bootstrap-runner"):
+            fail(f"Переопределение config_dir не применилось: {paths.config_dir}")
+        if paths.data_dir != Path("/var/lib/bootstrap-runner"):
+            fail(f"Переопределение data_dir не применилось: {paths.data_dir}")
+        if paths.opentofu_state_dir != Path("/var/lib/bootstrap-runner/opentofu/state"):
+            fail("Начальный контур получил неверный каталог состояния OpenTofu")
+    finally:
+        if old_config is None:
+            os.environ.pop("INFRA_MANAGER_CONFIG_DIR", None)
+        else:
+            os.environ["INFRA_MANAGER_CONFIG_DIR"] = old_config
+        if old_data is None:
+            os.environ.pop("INFRA_MANAGER_DATA_DIR", None)
+        else:
+            os.environ["INFRA_MANAGER_DATA_DIR"] = old_data
+
+
 def check_command_runner_contract() -> None:
     package_dir = MODULE_ROOT / "infra_manager"
     for module_path in package_dir.glob("*.py"):
@@ -225,6 +251,7 @@ def check_pve_helpers() -> None:
 
 def main_test() -> None:
     check_cli_and_commands()
+    check_path_overrides()
     check_command_runner_contract()
     check_pve_helpers()
     print("Базовые проверки Python-пакета infra-manager пройдены.")
