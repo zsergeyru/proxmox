@@ -3,7 +3,8 @@ set -Eeuo pipefail
 
 [[ $EUID -eq 0 ]] || { echo "ОШИБКА: сценарий должен выполняться от root внутри LXC 990" >&2; exit 1; }
 
-REPO_ROOT="${1:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+PHASE="${1:-}"
+REPO_ROOT="${2:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 RUN_RUNTIME="$REPO_ROOT/scripts/bootstrap-runner/run-runtime.sh"
 STATE_FILE="/var/lib/bootstrap-runner/opentofu/state/proxmox.tfstate"
 EXPECTED_TARGET='proxmox_virtual_environment_container.guest["910"]'
@@ -13,15 +14,26 @@ EXPECTED_TARGET='proxmox_virtual_environment_container.guest["910"]'
     exit 1
 }
 
-bash "$RUN_RUNTIME"     python3 scripts/infra-manager/jobs/deploy-guest.py 910 --bootstrap-scope
+case "$PHASE" in
+    infrastructure)
+        bash "$RUN_RUNTIME"             python3 scripts/infra-manager/jobs/deploy-guest.py             910 --bootstrap-scope --infrastructure-only
+        ;;
+    provision)
+        bash "$RUN_RUNTIME"             python3 scripts/infra-manager/jobs/deploy-guest.py             910 --bootstrap-scope --provision-only
+        ;;
+    *)
+        echo "Использование: deploy-910.sh infrastructure|provision [REPO_ROOT]" >&2
+        exit 2
+        ;;
+esac
 
 [[ -s "$STATE_FILE" ]] || {
-    echo "ОШИБКА: после deploy-guest отсутствует состояние 990: $STATE_FILE" >&2
+    echo "ОШИБКА: отсутствует состояние 990: $STATE_FILE" >&2
     exit 1
 }
 
 mapfile -t resources < <(
-    bash "$RUN_RUNTIME"         tofu -chdir=automation/opentofu state list
+    bash "$RUN_RUNTIME" tofu -chdir=automation/opentofu state list
 )
 
 if [[ "${#resources[@]}" -ne 1 || "${resources[0]}" != "$EXPECTED_TARGET" ]]; then
@@ -31,4 +43,8 @@ if [[ "${#resources[@]}" -ne 1 || "${resources[0]}" != "$EXPECTED_TARGET" ]]; th
     exit 1
 fi
 
-printf '[ОК] 910 создан через отдельное состояние bootstrap-runner\n'
+if [[ "$PHASE" == "infrastructure" ]]; then
+    printf '[ОК] Инфраструктура 910 создана через отдельное состояние bootstrap-runner\n'
+else
+    printf '[ОК] provision.yaml 910 применён общим Ansible-механизмом\n'
+fi
