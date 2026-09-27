@@ -96,6 +96,7 @@
         mode: "0755"
       when:
         - (provision_phase | default('full')) == "full"
+        - provision.components is defined
         - provision.components.project_repository is defined
         - provision.components.project_repository.path is defined
 
@@ -109,6 +110,7 @@
         mode: "0755"
       when:
         - (provision_phase | default('full')) == "full"
+        - provision.components is defined
         - provision.components.agents is defined
         - provision.components.agents.root is defined
         - provision.components.agents.primary is defined
