@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+[[ $EUID -eq 0 ]] || { echo "ОШИБКА: сценарий должен выполняться от root внутри LXC 990" >&2; exit 1; }
+
+REPO_ROOT="${1:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+CONFIG_DIR="/etc/bootstrap-runner"
+DATA_DIR="/var/lib/bootstrap-runner"
+IMAGE="bootstrap-runtime:v1"
+
+command -v apt-get >/dev/null 2>&1 || { echo "ОШИБКА: не найден apt-get" >&2; exit 1; }
+
+install -d -m 0700 "$CONFIG_DIR/secrets" "$CONFIG_DIR/ansible"
+install -d -m 0755 "$CONFIG_DIR/ca" "$DATA_DIR/opentofu/state"
+
+if ! command -v docker >/dev/null 2>&1; then
+    apt-get update
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends         ca-certificates docker.io openssh-client
+fi
+
+systemctl enable --now docker >/dev/null
+
+if [[ ! -s "$CONFIG_DIR/ansible/guest_ed25519" ]]; then
+    ssh-keygen -q -t ed25519 -N ''         -C bootstrap-runner-990         -f "$CONFIG_DIR/ansible/guest_ed25519"
+fi
+chmod 0600 "$CONFIG_DIR/ansible/guest_ed25519"
+chmod 0644 "$CONFIG_DIR/ansible/guest_ed25519.pub"
+
+docker build     --build-arg OPENTOFU_VERSION=1.12.6     -t "$IMAGE"     "$REPO_ROOT/infrastructure/bootstrap-runner/runtime"
+
+docker run --rm "$IMAGE" tofu version >/dev/null
+docker run --rm "$IMAGE" ansible --version >/dev/null
+docker run --rm "$IMAGE" python3 -c 'import yaml, jsonschema, requests' >/dev/null
+
+printf '[ОК] Среда bootstrap-runner 990 подготовлена\n'
