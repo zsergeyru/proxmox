@@ -6,6 +6,7 @@
 
   vars:
     project_root: "{{ playbook_dir }}/../../.."
+    provision_phase: "{{ provision_phase | default('full') }}"
     guest_root: "{{ project_root }}/infrastructure/guests/{{ guest }}"
     provision_file: "{{ guest_root }}/provision.yaml"
 
@@ -58,12 +59,14 @@
     - name: Настроить Docker по общему контракту
       ansible.builtin.include_tasks: ../tasks/configure-docker.yml
       when:
+        - provision_phase == "full"
         - provision.docker is defined
         - provision.docker.required_packages is defined
 
     - name: Развернуть постоянный инфраструктурный runtime
       ansible.builtin.include_tasks: ../tasks/configure-infra-runtime.yml
       when:
+        - provision_phase == "full"
         - provision.docker is defined
         - provision.docker.services is defined
         - provision.docker.services.runtime is defined
@@ -81,6 +84,7 @@
       loop_control:
         label: "{{ item.key }}"
       when:
+        - provision_phase == "full"
         - item.value is mapping
         - item.value.root is defined
 
@@ -92,6 +96,7 @@
         group: root
         mode: "0755"
       when:
+        - provision_phase == "full"
         - provision.components.project_repository is defined
         - provision.components.project_repository.path is defined
 
@@ -104,6 +109,7 @@
         group: root
         mode: "0755"
       when:
+        - provision_phase == "full"
         - provision.components.agents is defined
         - provision.components.agents.root is defined
         - provision.components.agents.primary is defined
