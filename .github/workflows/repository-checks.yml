@@ -177,6 +177,14 @@ jobs:
           docker run --rm bootstrap-runtime:test tofu version
           docker run --rm bootstrap-runtime:test ansible --version
           docker run --rm bootstrap-runtime:test python3 -c 'import yaml, jsonschema, requests'
+          docker run --rm \
+            -v "$PWD:/workspace" \
+            -w /workspace \
+            bootstrap-runtime:test \
+            ansible-playbook --syntax-check \
+            -i localhost, \
+            -e guest=910-infra-manager \
+            automation/ansible/playbooks/configure-guest.yml
 
       - name: Verify malformed guest directory is rejected
         run: |
