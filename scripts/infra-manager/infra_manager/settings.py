@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 
@@ -12,8 +12,16 @@ class Paths:
     """Пути файлов и каталогов infra-manager."""
 
     repo_root: Path = Path(__file__).resolve().parents[3]
-    config_dir: Path = Path("/etc/infra-manager")
-    data_dir: Path = Path("/var/lib/infra-manager")
+    config_dir: Path = field(
+        default_factory=lambda: Path(
+            os.environ.get("INFRA_MANAGER_CONFIG_DIR", "/etc/infra-manager")
+        )
+    )
+    data_dir: Path = field(
+        default_factory=lambda: Path(
+            os.environ.get("INFRA_MANAGER_DATA_DIR", "/var/lib/infra-manager")
+        )
+    )
     compose_dir: Path = Path("/opt/infra-manager/compose")
     python_install_root: Path = Path("/usr/local/lib/infra-manager")
 
