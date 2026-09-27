@@ -32,9 +32,14 @@ def main() -> int:
         help="Только создать/сверить объект Proxmox без Ansible",
     )
     phase.add_argument(
+        "--provision-base-only",
+        action="store_true",
+        help="Применить только базовую часть provision.yaml",
+    )
+    phase.add_argument(
         "--provision-only",
         action="store_true",
-        help="Только применить provision.yaml к уже созданному гостю",
+        help="Полностью применить provision.yaml к уже созданному гостю",
     )
     args = parser.parse_args()
 
@@ -42,6 +47,8 @@ def main() -> int:
         selected_phase = (
             "infrastructure"
             if args.infrastructure_only
+            else "provision-base"
+            if args.provision_base_only
             else "provision"
             if args.provision_only
             else "all"
