@@ -16,6 +16,7 @@
     - { path: "{{ provision.paths.opentofu_data }}", owner: "1001", group: "0", mode: "0750" }
     - { path: "{{ provision.paths.opentofu_state | dirname }}", owner: "1001", group: "0", mode: "0750" }
     - { path: "{{ provision.paths.compose }}", owner: root, group: root, mode: "0755" }
+    - { path: "{{ provision.paths.python_package }}", owner: root, group: root, mode: "0755" }
 
 - name: Проверить переданный PVE CA
   ansible.builtin.stat:
