@@ -25,13 +25,32 @@ def main() -> int:
         action="store_true",
         help="Использовать отдельную область первоначального развёртывания",
     )
+    phase = parser.add_mutually_exclusive_group()
+    phase.add_argument(
+        "--infrastructure-only",
+        action="store_true",
+        help="Только создать/сверить объект Proxmox без Ansible",
+    )
+    phase.add_argument(
+        "--provision-only",
+        action="store_true",
+        help="Только применить provision.yaml к уже созданному гостю",
+    )
     args = parser.parse_args()
 
     try:
+        selected_phase = (
+            "infrastructure"
+            if args.infrastructure_only
+            else "provision"
+            if args.provision_only
+            else "all"
+        )
         return run_deploy_guest(
             REPO_ROOT,
             args.vmid,
             bootstrap_scope=args.bootstrap_scope,
+            phase=selected_phase,
         )
     except (InfraManagerError, OSError) as exc:
         console.error(str(exc))
