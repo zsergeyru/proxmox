@@ -18,11 +18,14 @@ case "$PHASE" in
     infrastructure)
         bash "$RUN_RUNTIME"             python3 scripts/infra-manager/jobs/deploy-guest.py             910 --bootstrap-scope --infrastructure-only
         ;;
+    base)
+        bash "$RUN_RUNTIME"             python3 scripts/infra-manager/jobs/deploy-guest.py             910 --bootstrap-scope --provision-base-only
+        ;;
     provision)
         bash "$RUN_RUNTIME"             python3 scripts/infra-manager/jobs/deploy-guest.py             910 --bootstrap-scope --provision-only
         ;;
     *)
-        echo "Использование: deploy-910.sh infrastructure|provision [REPO_ROOT]" >&2
+        echo "Использование: deploy-910.sh infrastructure|base|provision [REPO_ROOT]" >&2
         exit 2
         ;;
 esac
@@ -43,8 +46,14 @@ if [[ "${#resources[@]}" -ne 1 || "${resources[0]}" != "$EXPECTED_TARGET" ]]; th
     exit 1
 fi
 
-if [[ "$PHASE" == "infrastructure" ]]; then
-    printf '[ОК] Инфраструктура 910 создана через отдельное состояние bootstrap-runner\n'
-else
-    printf '[ОК] provision.yaml 910 применён общим Ansible-механизмом\n'
-fi
+case "$PHASE" in
+    infrastructure)
+        printf '[ОК] Инфраструктура 910 создана через отдельное состояние bootstrap-runner\n'
+        ;;
+    base)
+        printf '[ОК] Базовая часть provision.yaml 910 применена общим Ansible-механизмом\n'
+        ;;
+    provision)
+        printf '[ОК] provision.yaml 910 применён общим Ansible-механизмом\n'
+        ;;
+esac
