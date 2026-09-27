@@ -1,0 +1,322 @@
+---
+- name: Создать постоянные каталоги infra-runtime
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner }}"
+    group: "{{ item.group }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - { path: "{{ provision.paths.configuration }}", owner: root, group: root, mode: "0755" }
+    - { path: "{{ provision.paths.secrets }}", owner: root, group: root, mode: "0700" }
+    - { path: "{{ provision.paths.ca }}", owner: root, group: root, mode: "0755" }
+    - { path: "{{ provision.paths.ansible_identity }}", owner: "1001", group: "0", mode: "0700" }
+    - { path: "{{ provision.paths.data }}", owner: root, group: root, mode: "0755" }
+    - { path: "{{ provision.paths.semaphore_data }}", owner: "1001", group: "0", mode: "0770" }
+    - { path: "{{ provision.paths.opentofu_data }}", owner: "1001", group: "0", mode: "0750" }
+    - { path: "{{ provision.paths.opentofu_state | dirname }}", owner: "1001", group: "0", mode: "0750" }
+    - { path: "{{ provision.paths.compose }}", owner: root, group: root, mode: "0755" }
+
+- name: Проверить переданный PVE CA
+  ansible.builtin.stat:
+    path: /usr/local/share/ca-certificates/pve-root-ca.crt
+  register: pve_ca
+
+- name: Требовать PVE CA
+  ansible.builtin.assert:
+    that:
+      - pve_ca.stat.exists
+      - pve_ca.stat.size | int > 0
+    fail_msg: "Первоначальный контур должен передать PVE CA до общей настройки"
+
+- name: Обновить системное хранилище сертификатов
+  ansible.builtin.command:
+    argv:
+      - update-ca-certificates
+  changed_when: false
+
+- name: Собрать CA bundle для инфраструктурных средств
+  ansible.builtin.shell: |
+    set -eu
+    cat /etc/ssl/certs/ca-certificates.crt         /usr/local/share/ca-certificates/pve-root-ca.crt         > "{{ provision.paths.ca }}/ca-bundle.crt.tmp"
+    chmod 0644 "{{ provision.paths.ca }}/ca-bundle.crt.tmp"
+    mv "{{ provision.paths.ca }}/ca-bundle.crt.tmp" "{{ provision.paths.ca }}/ca-bundle.crt"
+  args:
+    executable: /bin/bash
+
+- name: Проверить временный PVE API credential
+  ansible.builtin.stat:
+    path: /root/.infra-manager-bootstrap/pve-api.env
+  register: staging_pve_credential
+
+- name: Сохранить PVE API credential
+  ansible.builtin.copy:
+    remote_src: true
+    src: /root/.infra-manager-bootstrap/pve-api.env
+    dest: "{{ provision.paths.secrets }}/pve-api.env"
+    owner: root
+    group: root
+    mode: "0600"
+  when: staging_pve_credential.stat.exists
+
+- name: Проверить постоянный PVE API credential
+  ansible.builtin.stat:
+    path: "{{ provision.paths.secrets }}/pve-api.env"
+  register: permanent_pve_credential
+
+- name: Требовать постоянный PVE API credential
+  ansible.builtin.assert:
+    that:
+      - permanent_pve_credential.stat.exists
+      - permanent_pve_credential.stat.size | int > 0
+    fail_msg: "Не удалось подготовить постоянный PVE API credential"
+
+- name: Удалить временную копию PVE API credential
+  ansible.builtin.file:
+    path: /root/.infra-manager-bootstrap/pve-api.env
+    state: absent
+
+- name: Проверить постоянный закрытый ключ Ansible
+  ansible.builtin.stat:
+    path: "{{ provision.paths.ansible_identity }}/guest_ed25519"
+  register: ansible_private_key
+
+- name: Создать постоянный закрытый ключ Ansible
+  ansible.builtin.command:
+    argv:
+      - ssh-keygen
+      - -q
+      - -t
+      - ed25519
+      - -N
+      - ""
+      - -C
+      - infra-manager ansible guest
+      - -f
+      - "{{ provision.paths.ansible_identity }}/guest_ed25519"
+  when: not ansible_private_key.stat.exists
+
+- name: Получить открытый ключ Ansible
+  ansible.builtin.command:
+    argv:
+      - ssh-keygen
+      - -y
+      - -f
+      - "{{ provision.paths.ansible_identity }}/guest_ed25519"
+  register: ansible_public_key
+  changed_when: false
+
+- name: Сохранить открытый ключ Ansible
+  ansible.builtin.copy:
+    dest: "{{ provision.paths.ansible_identity }}/guest_ed25519.pub"
+    owner: "1001"
+    group: "0"
+    mode: "0644"
+    content: "{{ ansible_public_key.stdout }} infra-manager ansible guest\n"
+
+- name: Защитить закрытый ключ Ansible
+  ansible.builtin.file:
+    path: "{{ provision.paths.ansible_identity }}/guest_ed25519"
+    owner: "1001"
+    group: "0"
+    mode: "0600"
+
+- name: Скопировать Compose и образ infra-runtime
+  ansible.builtin.copy:
+    src: "{{ guest_root }}/compose/"
+    dest: "{{ provision.paths.compose }}/"
+    owner: root
+    group: root
+    mode: preserve
+
+- name: Подготовить known_hosts Semaphore
+  ansible.builtin.copy:
+    remote_src: true
+    src: /root/.ssh/github_known_hosts
+    dest: "{{ provision.paths.semaphore_data }}/known_hosts"
+    owner: "1001"
+    group: "0"
+    mode: "0644"
+
+- name: Проверить секреты Semaphore
+  ansible.builtin.stat:
+    path: "{{ provision.paths.secrets }}/semaphore-server.env"
+  register: semaphore_env
+
+- name: Создать первичный пароль Semaphore
+  ansible.builtin.command:
+    argv: [openssl, rand, -base64, "24"]
+  register: semaphore_admin_password
+  no_log: true
+  changed_when: true
+  when: not semaphore_env.stat.exists
+
+- name: Создать ключ шифрования Semaphore
+  ansible.builtin.command:
+    argv: [openssl, rand, -base64, "32"]
+  register: semaphore_encryption_key
+  no_log: true
+  changed_when: true
+  when: not semaphore_env.stat.exists
+
+- name: Создать секреты Semaphore
+  ansible.builtin.copy:
+    dest: "{{ provision.paths.secrets }}/semaphore-server.env"
+    owner: root
+    group: root
+    mode: "0600"
+    content: |
+      SEMAPHORE_DB_DIALECT=sqlite
+      SEMAPHORE_DB_HOST=/var/lib/semaphore/semaphore.sqlite
+      SEMAPHORE_ADMIN=admin
+      SEMAPHORE_ADMIN_PASSWORD={{ semaphore_admin_password.stdout }}
+      SEMAPHORE_ADMIN_NAME=Admin
+      SEMAPHORE_ADMIN_EMAIL=admin@localhost
+      SEMAPHORE_ACCESS_KEY_ENCRYPTION={{ semaphore_encryption_key.stdout }}
+      TZ={{ ansible_facts.date_time.tz | default('UTC') }}
+  no_log: true
+  when: not semaphore_env.stat.exists
+
+- name: Сохранить первичный пароль Semaphore
+  ansible.builtin.copy:
+    dest: "{{ provision.paths.secrets }}/initial-admin-password"
+    owner: root
+    group: root
+    mode: "0600"
+    content: "{{ semaphore_admin_password.stdout }}\n"
+  no_log: true
+  when: not semaphore_env.stat.exists
+
+- name: Подготовить постоянный OpenTofu input без VMID начального контура
+  ansible.builtin.command:
+    argv:
+      - python3
+      - "{{ provision.paths.bootstrap_repository }}/scripts/guests/render-opentofu-input.py"
+      - --output
+      - "{{ provision.paths.opentofu_data }}/guests.json"
+      - --exclude-vmid
+      - "910"
+  changed_when: true
+
+- name: Установить владельца OpenTofu input
+  ansible.builtin.file:
+    path: "{{ provision.paths.opentofu_data }}/guests.json"
+    owner: "1001"
+    group: "0"
+    mode: "0640"
+
+- name: Записать версии infra-runtime
+  ansible.builtin.copy:
+    dest: "{{ provision.paths.compose }}/.versions.env"
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      SEMAPHORE_VERSION={{ provision.docker.services.runtime.base_image.split(':')[-1] }}
+      RUNTIME_VERSION={{ provision.docker.services.runtime.image.split(':')[-1] }}
+      OPENTOFU_VERSION={{ provision.docker.services.runtime.tools.opentofu }}
+      PACKER_VERSION={{ provision.docker.services.runtime.tools.packer }}
+
+- name: Установить Python-пакет infra_manager
+  ansible.builtin.copy:
+    remote_src: true
+    src: "{{ provision.paths.bootstrap_repository }}/scripts/infra-manager/infra_manager/"
+    dest: "{{ provision.paths.python_package }}/infra_manager/"
+    owner: root
+    group: root
+    mode: preserve
+
+- name: Установить служебные команды infra-manager
+  ansible.builtin.copy:
+    remote_src: true
+    src: "{{ provision.paths.bootstrap_repository }}/scripts/infra-manager/commands/{{ item.source }}"
+    dest: "/usr/local/sbin/{{ item.target }}"
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - { source: status.sh, target: infra-manager-status }
+    - { source: pve-access-check.sh, target: infra-manager-pve-access-check }
+    - { source: pve-lifecycle-test.sh, target: infra-manager-pve-lifecycle-test }
+
+- name: Создать короткие ссылки на служебные команды
+  ansible.builtin.file:
+    src: "/usr/local/sbin/{{ item }}"
+    dest: "/usr/local/bin/{{ item }}"
+    state: link
+    force: true
+  loop:
+    - infra-manager-status
+    - infra-manager-pve-access-check
+    - infra-manager-pve-lifecycle-test
+
+- name: Исправить владельца хранилища Semaphore
+  ansible.builtin.file:
+    path: "{{ provision.paths.semaphore_data }}"
+    owner: "1001"
+    group: "0"
+    mode: "0770"
+    recurse: true
+
+- name: Собрать infra-runtime
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - --env-file
+      - "{{ provision.paths.compose }}/.versions.env"
+      - -f
+      - "{{ provision.paths.compose }}/docker-compose.yml"
+      - build
+      - --pull
+      - runtime
+  changed_when: true
+
+- name: Запустить infra-runtime
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - --env-file
+      - "{{ provision.paths.compose }}/.versions.env"
+      - -f
+      - "{{ provision.paths.compose }}/docker-compose.yml"
+      - up
+      - -d
+      - --remove-orphans
+  changed_when: true
+
+- name: Дождаться Semaphore
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: 3000
+    timeout: 120
+
+- name: Проверить инструменты infra-runtime
+  ansible.builtin.command:
+    argv: "{{ item }}"
+  loop:
+    - [docker, exec, infra-runtime, tofu, version]
+    - [docker, exec, infra-runtime, packer, version]
+    - [docker, exec, infra-runtime, ansible, --version]
+    - [docker, exec, infra-runtime, python3, -c, "import proxmoxer, yaml, jsonschema"]
+  changed_when: false
+
+- name: Синхронизировать проект Semaphore узкой Python-командой
+  ansible.builtin.command:
+    argv:
+      - python3
+      - -m
+      - infra_manager
+      - semaphore-project
+  environment:
+    PYTHONPATH: "{{ provision.paths.python_package }}"
+    INFRA_PROJECT_BRANCH: "{{ lookup('env', 'INFRA_PROJECT_BRANCH') | default('main', true) }}"
+  changed_when: true
+
+- name: Проверить infra-manager
+  ansible.builtin.command:
+    argv:
+      - /usr/local/sbin/infra-manager-status
+      - --full
+  changed_when: false
