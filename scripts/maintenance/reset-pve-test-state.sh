@@ -132,11 +132,6 @@ config_value() {
     awk -F ': ' -v key="$key" '$1 == key {print $2; exit}' <<<"$config"
 }
 
-tag_present() {
-    local tags=$1 expected=$2
-    tr ';,' '\n' <<<"$tags" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | grep -Fxq "$expected"
-}
-
 remove_known_ct() {
     local vmid=$1 expected_hostname=$2 require_project_marker=$3
     local config hostname description status lock protection
