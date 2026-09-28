@@ -13,7 +13,7 @@ PVE
 → временный LXC 990 bootstrap-runner
 → read-only Deploy Key
 → clone закрытого zsergeyru/proxmox
-→ scripts/bootstrap-runner/bootstrap-host.sh
+→ scripts/bootstrap-runner/bootstrap-host.py
 ```
 
 После передачи управления вся логика PVE API, OpenTofu, 910, Ansible, повторного запуска и очистки выполняется закрытым проектом. Публичный репозиторий не содержит политики PVE-доступа и не знает устройство 910.
@@ -45,7 +45,7 @@ GitHub public: zsergeyru/proxmox-bootstrap
         └── временный LXC 990
                 │
                 ├── clone закрытого проекта
-                └── private bootstrap-host.sh
+                └── private bootstrap-host.py
                         │
                         ├── временный PVE API token
                         ├── bootstrap-runtime
