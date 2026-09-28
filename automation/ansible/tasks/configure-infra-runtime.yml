@@ -19,6 +19,12 @@
     - { path: "{{ provision.paths.compose }}", owner: root, group: root, mode: "0755" }
     - { path: "{{ provision.paths.python_package }}", owner: root, group: root, mode: "0755" }
 
+- name: Создать постоянное хранилище OpenBao
+  ansible.builtin.file:
+    path: "{{ provision.paths.openbao_data }}"
+    state: directory
+    mode: "0700"
+
 - name: Проверить сертификат PVE
   ansible.builtin.stat:
     path: "{{ provision.access.pve.ca_source }}"
@@ -329,6 +335,7 @@
       RUNTIME_VERSION={{ provision.docker.services.runtime.image.split(':')[-1] }}
       OPENTOFU_VERSION={{ provision.docker.services.runtime.tools.opentofu }}
       PACKER_VERSION={{ provision.docker.services.runtime.tools.packer }}
+      OPENBAO_VERSION={{ provision.docker.services.openbao.image.split(':')[-1] }}
 
 - name: Установить описание состояния 910
   ansible.builtin.copy:
@@ -422,6 +429,20 @@
       - runtime
   changed_when: true
 
+- name: Запустить OpenBao
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - --env-file
+      - "{{ provision.paths.compose }}/.versions.env"
+      - -f
+      - "{{ provision.paths.compose }}/docker-compose.yml"
+      - up
+      - -d
+      - openbao
+  changed_when: true
+
 - name: Запустить управляющую среду
   ansible.builtin.command:
     argv:
@@ -436,6 +457,28 @@
       - --remove-orphans
   changed_when: true
   when: not (infra_self_update | default(false) | bool)
+
+- name: Дождаться запуска OpenBao
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: 8200
+    timeout: 120
+
+- name: Прочитать состояние OpenBao
+  ansible.builtin.uri:
+    url: "{{ provision.docker.services.openbao.api_address }}/v1/sys/seal-status"
+    method: GET
+    return_content: true
+    status_code: 200
+  register: openbao_seal_status
+  changed_when: false
+
+- name: Подтвердить состояние OpenBao
+  ansible.builtin.assert:
+    that:
+      - openbao_seal_status.json.initialized is defined
+      - openbao_seal_status.json.sealed is defined
+    fail_msg: "OpenBao запущен, но не возвращает корректное состояние"
 
 - name: Дождаться запуска Semaphore
   ansible.builtin.wait_for:
