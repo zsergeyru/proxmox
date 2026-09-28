@@ -58,6 +58,27 @@ jobs:
       - name: Run guest resolver contract checks
         run: python scripts/tests/test-guest-resolver.py
 
+      - name: Validate all Ansible YAML files
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import yaml
+
+          root = Path("automation/ansible")
+          files = sorted([
+              *root.rglob("*.yml"),
+              *root.rglob("*.yaml"),
+          ])
+          if not files:
+              raise SystemExit("Ansible YAML files not found")
+          for path in files:
+              try:
+                  yaml.safe_load(path.read_text(encoding="utf-8"))
+              except yaml.YAMLError as exc:
+                  raise SystemExit(f"{path}: invalid YAML: {exc}") from exc
+          print(f"Validated {len(files)} Ansible YAML files")
+          PY
+
       - name: Validate shell syntax
         run: |
           while IFS= read -r -d '' file; do
