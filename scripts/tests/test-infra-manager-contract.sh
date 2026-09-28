@@ -320,6 +320,12 @@ grep -q '"-detailed-exitcode"' "$PY_OPENTOFU" \
     || die "OpenTofu Plan должен различать наличие изменений"
 grep -q '"-lockfile=readonly"' "$PY_OPENTOFU" \
     || die "OpenTofu должен использовать только зафиксированный lock file"
+if grep -Eq '^[[:space:]]+keyctl[[:space:]]*=' "$ROOT/automation/opentofu/main.tf"; then
+    die "OpenTofu не должен передавать keyctl через PVE API token"
+fi
+grep -Fq 'ignore_changes = [features[0].keyctl]' "$ROOT/automation/opentofu/main.tf" \
+    || die "OpenTofu должен игнорировать keyctl, которым управляет host-only слой"
+
 grep -q 'provider "registry.opentofu.org/bpg/proxmox"' "$OPENTOFU_LOCK" \
     || die "OpenTofu lock file должен фиксировать bpg/proxmox из OpenTofu Registry"
 grep -q 'version     = "0.112.0"' "$OPENTOFU_LOCK" \
