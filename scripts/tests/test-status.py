@@ -233,6 +233,7 @@ def main_test() -> None:
         fail("status.yaml должен описывать 910")
     if [item["type"] for item in definition.checks] != [
         "runtime",
+        "openbao",
         "semaphore",
         "runtime_tools",
         "pve_access",
@@ -262,6 +263,7 @@ def main_test() -> None:
     for expected in (
         "Состояние 910 infra-manager",
         "[ОК] Docker и infra-runtime работают",
+        "[ОК] OpenBao запущен",
         "[ОК] Semaphore работает",
         "[ОК] OpenTofu, Ansible и Packer готовы",
         "[ОК] Доступ к PVE подтверждён",
