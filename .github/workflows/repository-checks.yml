@@ -46,6 +46,9 @@ jobs:
       - name: Run guest deployment checks
         run: python scripts/tests/test-guest-deploy.py
 
+      - name: Run PVE host access checks
+        run: python scripts/tests/test-pve-host.py
+
       - name: Run status checks
         run: python scripts/tests/test-status.py
 
@@ -91,20 +94,6 @@ jobs:
           # SC2034 is intentionally excluded: lib/*.sh are sourced modules and
           # shared globals declared in 00-common.sh are consumed across files.
           shellcheck -S warning -e SC2034 "${files[@]}"
-
-      - name: Check PVE bootstrap helper host dependencies
-        run: |
-          helper=scripts/infra-manager/pve-bootstrap-access.sh
-          grep -q 'command -v perl' "$helper"
-          grep -q 'MJSON::PP' "$helper"
-          if grep -Eq 'command -v jq|(^|[[:space:]|;])jq([[:space:]]|$)' "$helper"; then
-            echo "PVE bootstrap helper must not depend on jq on the host"
-            exit 1
-          fi
-          if grep -Eq 'apt(-get)?[[:space:]]+install' "$helper"; then
-            echo "PVE bootstrap helper must not install packages on the host"
-            exit 1
-          fi
 
       - name: Run infra-manager contract checks
         run: bash scripts/tests/test-infra-manager-contract.sh
