@@ -1,6 +1,6 @@
 # Скрипты
 
-`scripts/` содержит исполняемый код и проверки проекта. Публичный сценарий только создаёт временный 990, получает закрытый проект и передаёт управление `scripts/bootstrap-runner/bootstrap-host.py`. Вся оркестрация 910 находится в этом закрытом репозитории.
+`scripts/` содержит исполняемый код и проверки проекта. Публичный `bootstrap-pve.py` создаёт временный 990, получает закрытый проект и передаёт управление `scripts/bootstrap-runner/bootstrap-host.py`. Вся оркестрация 910 находится в этом закрытом репозитории.
 
 ## Структура
 
@@ -69,7 +69,7 @@ scripts/
 
 `scripts/bootstrap-runner/bootstrap-host.py` выполняется на физическом PVE после того, как публичный сценарий получил закрытый проект через 990. `bootstrap-host.sh` оставлен только как минимальная оболочка для ручного запуска Python-оркестратора. Он управляет временным PVE API-доступом 990, фазами OpenTofu/Ansible для 910, повторным запуском, восстановлением и очисткой временного контура.
 
-`pve-bootstrap-access.sh` вызывается закрытым `bootstrap-host.sh` на физическом PVE. Он подготавливает PVE CA, ключ доступа API `root@pam!infra-manager`, ACL и безопасную передачу учётных данных в 910.
+`pve-bootstrap-access.sh` вызывается закрытым `bootstrap-host.py` на физическом PVE. Он подготавливает PVE CA, ключ доступа API `root@pam!infra-manager`, ACL и безопасную передачу учётных данных в 910.
 
 Настройка ОС и служб 910 выполняется только через общий `provision.yaml` и общий Ansible playbook. Отдельного `setup.sh` и `infra_manager/setup.py` больше нет.
 
@@ -124,7 +124,7 @@ Semaphore: Build Template 9000
 
 ## `infra-manager/commands/`
 
-Это стабильные административные команды, которые `setup.py` устанавливает в `/usr/local/sbin`.
+Это стабильные административные команды, которые общий Ansible-механизм устанавливает в `/usr/local/sbin`.
 
 `status.sh` устанавливается как:
 
@@ -156,7 +156,7 @@ infra-manager-pve-lifecycle-test
 /var/lib/infra-manager/opentofu/guests.json
 ```
 
-Поэтому специальный 910 без `profile` не попадает в OpenTofu.
+910 имеет общий профиль, но исключается из постоянного OpenTofu-входа по `pve_management: false`; временный bootstrap-контур формирует для него отдельное состояние.
 
 ## `validate_repo.py`
 
@@ -178,7 +178,7 @@ python scripts/validate_repo.py
 - `test-guest-deploy.py` проверяет планирование, сверку состояния и безопасное применение изменений гостя.
 - `test-opentofu-input.py` проверяет состав входа OpenTofu и исключение 910.
 - `test-infra-manager-python.py` проверяет основу Python-пакета, командную оболочку и PVE-вспомогательные функции.
-- `test-setup.py` проверяет общие пути, версии и композицию этапов установки.
+- `test-bootstrap-host.py` проверяет состояния первоначального контура, восстановление, строгую метку владения 910 и безопасное удаление.
 - `test-status.py` проверяет чтение и валидацию состояния Semaphore.
 - `test-template.py` проверяет безопасную передачу параметров Packer и валидацию шаблона.
 - `test-infra-manager-contract.sh` проверяет согласованность кода 910, Compose, доступ PVE, Semaphore, OpenTofu и Packer.
