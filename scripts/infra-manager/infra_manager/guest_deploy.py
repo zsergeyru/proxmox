@@ -295,6 +295,49 @@ def _ensure_ssh_host_key(
     )
 
 
+def _prepare_self_update_workspace(
+    repo_root: Path,
+    vmid: int,
+) -> OpenTofuWorkspace:
+    """Собрать описание специального гостя без доступа к OpenTofu state."""
+    renderer = (
+        repo_root
+        / "scripts"
+        / "guests"
+        / "render-opentofu-input.py"
+    )
+    if not renderer.is_file():
+        raise InfraManagerError(f"Не найден генератор состояния: {renderer}")
+
+    result = run(
+        [
+            sys.executable,
+            str(renderer),
+            "--only-vmid",
+            str(vmid),
+        ],
+        capture_output=True,
+    )
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise InfraManagerError(
+            f"Не удалось собрать описание гостя {vmid}"
+        ) from exc
+    guests = payload.get("guests") if isinstance(payload, dict) else None
+    if not isinstance(guests, dict) or str(vmid) not in guests:
+        raise InfraManagerError(
+            f"VMID {vmid} отсутствует в описании для самообновления"
+        )
+
+    return OpenTofuWorkspace(
+        directory=repo_root / "automation" / "opentofu",
+        state_dir=PATHS.opentofu_state_dir,
+        env=os.environ.copy(),
+        payload=payload,
+    )
+
+
 def _build_deployment_context(
     repo_root: Path,
     vmid: int,
@@ -472,6 +515,7 @@ def _configure_guest_os(
     context: DeploymentContext,
     *,
     provision_phase: str = "full",
+    self_update: bool = False,
 ) -> None:
     """Принять SSH host key и применить конфигурацию Ansible."""
 
@@ -497,6 +541,10 @@ def _configure_guest_os(
             f"guest={context.paths.guest_dir.name}",
             "-e",
             f"provision_phase={provision_phase}",
+            "-e",
+            f"infra_self_update={'true' if self_update else 'false'}",
+            "-e",
+            f"infra_project_branch={SETTINGS.project_branch()}",
             str(context.paths.playbook),
         ],
         env=ansible_env,
@@ -625,24 +673,56 @@ def run_deploy_guest(
             "provision-existing разрешён только начальному контуру"
         )
 
-    for command in (
-        "tofu",
+    self_update = (
+        not bootstrap_scope
+        and vmid in SETTINGS.bootstrap_managed_vmids
+    )
+    if self_update and phase != "all":
+        raise InfraManagerError(
+            "Для 910 из постоянного контура разрешено только полное обновление"
+        )
+
+    commands = [
         "ansible-playbook",
         "ssh-keygen",
         "ssh-keyscan",
         "ssh",
-    ):
+    ]
+    if not self_update:
+        commands.insert(0, "tofu")
+    for command in commands:
         require_command(command)
 
     console.info("Проверка проекта")
     run([sys.executable, str(repo_root / "scripts" / "validate_repo.py")])
 
-    workspace = prepare_workspace(
-        repo_root,
-        only_vmids={vmid} if bootstrap_scope else None,
-        exclude_vmids=set() if bootstrap_scope else None,
+    workspace = (
+        _prepare_self_update_workspace(repo_root, vmid)
+        if self_update
+        else prepare_workspace(
+            repo_root,
+            only_vmids={vmid} if bootstrap_scope else None,
+            exclude_vmids=set() if bootstrap_scope else None,
+        )
     )
     context = _build_deployment_context(repo_root, vmid, workspace)
+
+    if self_update:
+        console.info(
+            "Проверка существующего 910 без собственного OpenTofu state"
+        )
+        _validate_existing_guest_object(context)
+        _configure_guest_os(
+            context,
+            provision_phase="full",
+            self_update=True,
+        )
+        console.ok(
+            "910 infra-manager обновлён через Ansible; "
+            "активация новой управляющей среды назначена "
+            "после завершения задания Semaphore"
+        )
+        return 0
 
     console.info("Инициализация OpenTofu")
     context.workspace.initialize()
