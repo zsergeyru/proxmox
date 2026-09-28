@@ -158,7 +158,7 @@ boot:
 3.  подготавливается Debian 13 LXC template
 4.  создаётся и запускается временный 990
 5.  в 990 передаётся read-only Deploy Key и клонируется закрытый проект
-6.  публичный сценарий передаёт управление `scripts/bootstrap-runner/bootstrap-host.sh`
+6.  публичный сценарий передаёт управление `scripts/bootstrap-runner/bootstrap-host.py`
 7.  закрытый сценарий создаёт временный PVE API-доступ 990
 8.  внутри 990 подготавливается bootstrap-runtime
 9.  строится OpenTofu input только для 910
@@ -281,7 +281,7 @@ OpenBao после снятия блокировки имеет sealed=false
 - подготовку read-only Deploy Key;
 - установку Git внутри 990;
 - получение закрытого проекта;
-- запуск закрытой точки входа `scripts/bootstrap-runner/bootstrap-host.sh`.
+- запуск закрытой точки входа `scripts/bootstrap-runner/bootstrap-host.py`.
 
 Вся остальная оркестрация находится в закрытом репозитории: временный PVE API-доступ, bootstrap-runtime, OpenTofu, создание или обновление 910, общий Ansible, проверки, восстановление и очистка временного контура.
 
