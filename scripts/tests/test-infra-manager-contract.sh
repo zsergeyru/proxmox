@@ -253,8 +253,8 @@ for wrapper in "$STATUS" "$ACCESS"; do
     grep -Fq '/var/lib/infra-manager/bootstrap-repo/scripts/infra-manager' "$wrapper" \
         || die "Wrapper должен сохранять canonical checkout как аварийный fallback"
 done
-grep -q 'infra-manager-activate-runtime' "$ACTIVATE_RUNTIME" \
-    || die "Команда активации должна проверять собственное имя"
+grep -q 'runtime-activation.log' "$ACTIVATE_RUNTIME" \
+    || die "Команда активации должна вести отдельный журнал"
 grep -q 'infra-manager-status --full --quiet' "$ACTIVATE_RUNTIME" \
     || die "Отложенная активация должна завершаться полной проверкой 910"
 
