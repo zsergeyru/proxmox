@@ -67,8 +67,8 @@ GitHub public: zsergeyru/proxmox-bootstrap
                             ├── Packer
                             └── proxmoxer
                                  │
-                                 ▼
-                              PVE API
+                                 ├── PVE API
+                                 └── root SSH для host-only операций
 ```
 
 После подтверждения готовности 910 временный 990 и его права должны быть удалены.
@@ -102,7 +102,7 @@ PVE
 → подготовить bootstrap-runtime
 → deploy-guest 910 --infrastructure-only
 → общий Ansible: базовая часть provision.yaml
-→ передать в 910 PVE CA, постоянный PVE token и GitHub-доступ
+→ передать в 910 PVE CA, постоянный PVE token, root SSH и GitHub-доступ
 → общий Ansible: полностью применить provision.yaml
 → infra-manager-status --full
 ```
@@ -202,20 +202,24 @@ infrastructure/guests/910-infra-manager/provision.yaml
 
 ## Доступ 910 к PVE
 
-Постоянная идентичность:
+Постоянная идентичность API:
 
 ```text
 root@pam!infra-manager
-privsep=1
+privsep=0
 ```
 
-Политика прав находится только в:
+910 считается доверенным управляющим узлом домашнего PVE. API token используется OpenTofu и обычными API-операциями, а отдельный root SSH-ключ — только для действий, которые Proxmox запрещает выполнять API token.
+
+Например профиль `container-host` остаётся единым логическим свойством:
 
 ```text
-scripts/infra-manager/pve-bootstrap-access.sh
+container-host
+├── nesting=1  → OpenTofu / PVE API
+└── keyctl=1   → общий host-only шаг через root SSH
 ```
 
-Постоянный root SSH с 910 на PVE не используется.
+Эта логика находится в общем `deploy-guest`, а не в специальном коде 910.
 
 ## GitHub Deploy Key
 
@@ -315,5 +319,6 @@ proxmox/
 - PVE остаётся минимальным гипервизором;
 - 910 не управляет собственным объектом через постоянный OpenTofu state;
 - настройка Linux-гостей выполняется общим Ansible-механизмом;
-- новые права выдаются только под реально используемую функцию;
+- 910 считается доверенным административным контуром физического PVE;
+- AI и прикладные гости не получают root-доступ к PVE напрямую;
 - `archive/` и устаревшая документация не являются источниками действующей конфигурации.
