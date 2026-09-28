@@ -614,6 +614,7 @@ class BootstrapHost:
         )
         self.infra_exec("sh", "-c", script, "sh", marker)
         self.ok("Временный SSH-доступ 990 к 910 удалён")
+
     def deploy_910_phase(self, phase: str, title: str, success: str) -> None:
         self.log(title)
 
