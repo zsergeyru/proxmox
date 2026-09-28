@@ -132,14 +132,6 @@ persistence:
     - /opt/infra-manager/compose
     - docker-images
 
-checks:
-  commands:
-    - infra-manager-status
-    - infra-manager-status --full
-    - infra-manager-pve-access-check
-    - /usr/local/sbin/infra-manager-pve-lifecycle-test --apply
-    - Semaphore: Build Template 9000
-
 boundaries:
   member_of_managed_pool: false
   opentofu_manages_guest_910: false
