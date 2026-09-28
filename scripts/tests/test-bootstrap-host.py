@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
+from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parents[2]
 MODULE_PATH = ROOT / "scripts/bootstrap-runner/bootstrap-host.py"
@@ -55,6 +56,119 @@ description: Постоянный LXC [owner=proxmox-project;role=infra-manager]
             raise AssertionError(
                 "Неполный контракт владения не должен приниматься за infra-manager"
             )
+
+
+class PveHelperHarness(BootstrapHost):
+    def __init__(
+        self,
+        *,
+        token_payload: str = '{"value":"test-secret"}',
+        addresses: str = "192.168.1.152 STREAM pve\n",
+    ) -> None:
+        super().__init__("apply")
+        self.token_payload = token_payload
+        self.addresses = addresses
+        self.events: list[tuple[str, ...] | str] = []
+
+    def run(self, *args: str, **kwargs):
+        del kwargs
+        command = tuple(args)
+        self.events.append(command)
+
+        if command[:5] == (
+            "pveum",
+            "user",
+            "token",
+            "add",
+            "root@pam",
+        ):
+            return SimpleNamespace(
+                returncode=0,
+                stdout=self.token_payload,
+                stderr="",
+            )
+        if command == ("hostname", "-s"):
+            return SimpleNamespace(returncode=0, stdout="pve\n", stderr="")
+        if command == ("getent", "ahostsv4", "pve"):
+            return SimpleNamespace(
+                returncode=0,
+                stdout=self.addresses,
+                stderr="",
+            )
+        raise AssertionError(f"Неожиданная команда: {command!r}")
+
+    def remove_named_token(self, user: str, token_name: str) -> None:
+        self.events.append(f"remove:{user}!{token_name}")
+
+
+def test_full_pve_token_contract() -> None:
+    host = PveHelperHarness()
+    token_id, secret = host.create_full_pve_token("infra-manager")
+
+    assert_equal(
+        (token_id, secret),
+        ("root@pam!infra-manager", "test-secret"),
+        "Должны возвращаться полный token ID и secret",
+    )
+    expected = (
+        "pveum",
+        "user",
+        "token",
+        "add",
+        "root@pam",
+        "infra-manager",
+        "--privsep",
+        "0",
+        "--output-format",
+        "json",
+    )
+    if expected not in host.events:
+        raise AssertionError(
+            "Полный PVE token должен создаваться явно с --privsep 0"
+        )
+
+
+def test_full_pve_token_missing_secret_is_removed() -> None:
+    host = PveHelperHarness(token_payload="{}")
+    try:
+        host.create_full_pve_token("infra-manager")
+    except BootstrapError:
+        pass
+    else:
+        raise AssertionError("Token без secret должен считаться ошибкой")
+
+    if "remove:root@pam!infra-manager" not in host.events:
+        raise AssertionError("Token без secret должен быть сразу удалён")
+
+
+def test_full_pve_token_invalid_json_is_removed() -> None:
+    host = PveHelperHarness(token_payload="{invalid")
+    try:
+        host.create_full_pve_token("bootstrap-runner")
+    except BootstrapError:
+        pass
+    else:
+        raise AssertionError("Некорректный JSON PVE должен считаться ошибкой")
+
+    if "remove:root@pam!bootstrap-runner" not in host.events:
+        raise AssertionError("Token после некорректного ответа PVE должен быть удалён")
+
+
+def test_pve_node_address() -> None:
+    host = PveHelperHarness()
+    assert_equal(
+        host.pve_node_address(),
+        ("pve", "192.168.1.152"),
+        "Должны определяться имя и первый IPv4 PVE-узла",
+    )
+
+    missing = PveHelperHarness(addresses="")
+    try:
+        missing.pve_node_address()
+    except BootstrapError:
+        pass
+    else:
+        raise AssertionError("Отсутствие IPv4 PVE должно считаться ошибкой")
 
 
 class ApplyHarness(BootstrapHost):
@@ -280,6 +394,10 @@ def test_remove_rejects_foreign_910() -> None:
 def main() -> None:
     tests = [
         test_strict_ownership_marker,
+        test_full_pve_token_contract,
+        test_full_pve_token_missing_secret_is_removed,
+        test_full_pve_token_invalid_json_is_removed,
+        test_pve_node_address,
         test_new_install_flow,
         test_existing_without_bootstrap_state,
         test_resume_unfinished_initial_state,
