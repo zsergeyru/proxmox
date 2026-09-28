@@ -12,7 +12,10 @@ from pathlib import Path
 from .common import InfraManagerError, console, require_command, run
 from .opentofu import OpenTofuWorkspace, prepare_workspace
 from .pve import PveClient
-from .pve_host import apply_host_requirements
+from .pve_host import (
+    apply_host_requirements,
+    ensure_infra_self_access,
+)
 from .settings import PATHS, SETTINGS
 
 
@@ -712,6 +715,18 @@ def run_deploy_guest(
             "Проверка существующего 910 без собственного OpenTofu state"
         )
         _validate_existing_guest_object(context)
+        if not PATHS.ansible_public_key.is_file():
+            raise InfraManagerError(
+                f"Не найден открытый ключ Ansible: {PATHS.ansible_public_key}"
+            )
+        ensure_infra_self_access(
+            context.node,
+            context.vmid,
+            hostname=context.name,
+            public_key=PATHS.ansible_public_key.read_text(
+                encoding="utf-8"
+            ).strip(),
+        )
         _configure_guest_os(
             context,
             provision_phase="full",
