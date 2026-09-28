@@ -33,28 +33,37 @@ OpenTofu использует локальный backend:
 
 ## Провайдер
 
-Используется `bpg/proxmox` без SSH-доступа к PVE.
+Используется `bpg/proxmox`. Основной канал OpenTofu к PVE — HTTPS API.
 
 Провайдер получает:
 
 - `pve_endpoint` — HTTPS API PVE;
-- `pve_api_token` — ограниченный token `root@pam!infra-manager` с `privsep=1`;
+- `pve_api_token` — token `root@pam!infra-manager` с `privsep=0`;
 - доверие к PVE CA — из системного CA bundle Runner.
 
 `insecure = false` является обязательной частью контракта.
 
+Отдельный root SSH-ключ 910 не заменяет API и не является обычным каналом OpenTofu. Он используется общим слоем `infra_manager.pve_host` для тех свойств PVE, которые API token изменить не может.
+
+Для `container-host` контракт разделяется только технически:
+
+```text
+nesting=1 → OpenTofu / PVE API
+keyctl=1  → deploy-guest / root SSH / pct
+```
+
+Для пользователя это по-прежнему одна возможность `container-host`.
+
 ## Текущий этап
 
-`main.tf` содержит один универсальный ресурс VM.
+`main.tf` содержит универсальные ресурсы VM и LXC.
 
-Он строит набор VM из полного итогового состояния:
+Они строятся из полного итогового состояния:
 
 ~~~text
 guests.json
-↓
-гости с type = vm
-↓
-proxmox_virtual_environment_vm.guest[VMID]
+├─ type = vm  → proxmox_virtual_environment_vm.guest[VMID]
+└─ type = lxc → proxmox_virtual_environment_container.guest[VMID]
 ~~~
 
 Для каждой VM из данных используются её собственные:
@@ -70,7 +79,7 @@ proxmox_virtual_environment_vm.guest[VMID]
 
 Открытый ключ Ansible передаётся через Cloud-Init. QEMU Guest Agent включён. Автоматическое уничтожение или замена управляемой VM запрещены через `prevent_destroy`.
 
-LXC пока не управляются OpenTofu.
+Для LXC OpenTofu управляет обычными параметрами PVE. Свойство `keyctl` намеренно не передаётся через API и поддерживается общим host-only шагом после применения инфраструктуры.
 
 ### Первый запуск 410
 
