@@ -24,8 +24,11 @@ case "$PHASE" in
     provision)
         bash "$RUN_RUNTIME"             python3 scripts/infra-manager/jobs/deploy-guest.py             910 --bootstrap-scope --provision-only
         ;;
+    existing)
+        bash "$RUN_RUNTIME"             python3 scripts/infra-manager/jobs/deploy-guest.py             910 --bootstrap-scope --provision-existing-only
+        ;;
     *)
-        echo "Использование: deploy-910.sh infrastructure|base|provision [REPO_ROOT]" >&2
+        echo "Использование: deploy-910.sh infrastructure|base|provision|existing [REPO_ROOT]" >&2
         exit 2
         ;;
 esac
