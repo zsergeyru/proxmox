@@ -220,6 +220,7 @@ def check_910_self_update_path() -> None:
     )
     configured: list[dict[str, object]] = []
     validated: list[int] = []
+    access_calls: list[tuple[str, int, str, str]] = []
 
     def record_configure(
         deployment: DeploymentContext,
@@ -232,53 +233,80 @@ def check_910_self_update_path() -> None:
     def record_validate(deployment: DeploymentContext) -> None:
         validated.append(deployment.vmid)
 
-    with (
-        patch.object(guest_deploy_module, "require_command"),
-        patch.object(
-            guest_deploy_module,
-            "run",
-            return_value=SimpleNamespace(returncode=0, stdout=""),
-        ),
-        patch.object(
-            guest_deploy_module,
-            "_prepare_self_update_workspace",
-            return_value=SimpleNamespace(),
-        ),
-        patch.object(
-            guest_deploy_module,
-            "_build_deployment_context",
-            return_value=context,
-        ),
-        patch.object(
-            guest_deploy_module,
-            "_validate_existing_guest_object",
-            side_effect=record_validate,
-        ),
-        patch.object(
-            guest_deploy_module,
-            "_configure_guest_os",
-            side_effect=record_configure,
-        ),
-        patch.object(
-            guest_deploy_module,
-            "prepare_workspace",
-            side_effect=AssertionError(
-                "Самообновление 910 не должно готовить OpenTofu workspace"
+    def record_access(
+        node: str,
+        vmid: int,
+        *,
+        hostname: str,
+        public_key: str,
+    ) -> None:
+        access_calls.append((node, vmid, hostname, public_key))
+
+    with tempfile.TemporaryDirectory() as tmp:
+        public_key = Path(tmp) / "guest_ed25519.pub"
+        public_key.write_text("ssh-ed25519 AAAATEST", encoding="utf-8")
+
+        with (
+            patch.object(guest_deploy_module, "require_command"),
+            patch.object(
+                guest_deploy_module,
+                "run",
+                return_value=SimpleNamespace(returncode=0, stdout=""),
             ),
-        ),
-        patch.object(
-            guest_deploy_module,
-            "apply_host_requirements",
-            side_effect=AssertionError(
-                "Самообновление 910 не должно менять объект Proxmox"
+            patch.object(
+                guest_deploy_module,
+                "_prepare_self_update_workspace",
+                return_value=SimpleNamespace(),
             ),
-        ),
-    ):
-        if guest_deploy_module.run_deploy_guest(ROOT, 910) != 0:
-            fail("Самообновление 910 должно завершаться успешно")
+            patch.object(
+                guest_deploy_module,
+                "_build_deployment_context",
+                return_value=context,
+            ),
+            patch.object(
+                guest_deploy_module,
+                "_validate_existing_guest_object",
+                side_effect=record_validate,
+            ),
+            patch.object(
+                guest_deploy_module,
+                "ensure_infra_self_access",
+                side_effect=record_access,
+            ),
+            patch.object(
+                guest_deploy_module,
+                "_configure_guest_os",
+                side_effect=record_configure,
+            ),
+            patch.object(
+                guest_deploy_module,
+                "prepare_workspace",
+                side_effect=AssertionError(
+                    "Самообновление 910 не должно готовить OpenTofu workspace"
+                ),
+            ),
+            patch.object(
+                guest_deploy_module,
+                "apply_host_requirements",
+                side_effect=AssertionError(
+                    "Самообновление 910 не должно менять объект Proxmox"
+                ),
+            ),
+            patch.object(
+                guest_deploy_module,
+                "PATHS",
+                SimpleNamespace(ansible_public_key=public_key),
+            ),
+        ):
+            if guest_deploy_module.run_deploy_guest(ROOT, 910) != 0:
+                fail("Самообновление 910 должно завершаться успешно")
 
     if validated != [910]:
         fail("Самообновление должно проверить существующий объект 910")
+    if access_calls != [
+        ("pve", 910, "infra-manager", "ssh-ed25519 AAAATEST")
+    ]:
+        fail("Самообновление должно подготовить постоянный SSH-доступ 910")
     if configured != [
         {"provision_phase": "full", "self_update": True}
     ]:
