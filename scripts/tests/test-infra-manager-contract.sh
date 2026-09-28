@@ -254,14 +254,17 @@ for wrapper in "$STATUS" "$ACCESS"; do
 done
 grep -q 'python_install_root: Path = Path("/usr/local/lib/infra-manager")' "$PY_SETTINGS" \
     || die "Постоянный путь установки Python package должен быть зафиксирован"
-grep -q 'Установить Python-пакет infra_manager' "$ANSIBLE_RUNTIME" \
-    || die "Ansible должен устанавливать infra_manager package"
+grep -Fq 'dest: "{{ provision.paths.python_package }}/infra_manager/"' "$ANSIBLE_RUNTIME" \
+    || die "Ansible должен устанавливать служебный код infra_manager"
 grep -q 'status.sh' "$ANSIBLE_RUNTIME" \
     || die "Ansible должен устанавливать status wrapper"
 grep -q 'pve-access-check.sh' "$ANSIBLE_RUNTIME" \
     || die "Ansible должен устанавливать PVE access wrapper"
 grep -q 'pve-lifecycle-test.sh' "$ANSIBLE_RUNTIME" \
     || die "Ansible должен устанавливать lifecycle test"
+branch_env_count="$(grep -Fc 'INFRA_PROJECT_BRANCH: "{{ lookup('\''env'\'', '\''INFRA_PROJECT_BRANCH'\'') | default('\''main'\'', true) }}"' "$ANSIBLE_RUNTIME")"
+[[ "$branch_env_count" -ge 2 ]] \
+    || die "Выбранная ветка должна передаваться и настройке Semaphore, и финальной проверке 910"
 
 grep -q '^PROJECT_ID_FILE = PATHS.semaphore_project_id_file' "$PY_SEMAPHORE" \
     || die "Semaphore должен читать путь project-id из единых путей"
