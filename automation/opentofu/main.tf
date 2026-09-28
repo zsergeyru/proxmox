@@ -94,6 +94,10 @@ resource "proxmox_virtual_environment_vm" "guest" {
 
   lifecycle {
     prevent_destroy = true
+
+    # keyctl управляется хостовым bootstrap от root@pam, потому что PVE
+    # запрещает менять этот флаг через API token даже root@pam!token.
+    ignore_changes = [features[0].keyctl]
   }
 }
 
@@ -129,8 +133,10 @@ resource "proxmox_virtual_environment_container" "guest" {
   }
 
   features {
+    # nesting разрешено через ограниченный PVE API token.
+    # keyctl для непривилегированного Docker-LXC требует root@pam и поэтому
+    # выставляется bootstrap-host.py непосредственно на PVE после создания.
     nesting = contains(try(each.value.features, []), "container-host")
-    keyctl  = contains(try(each.value.features, []), "container-host")
   }
 
   initialization {
