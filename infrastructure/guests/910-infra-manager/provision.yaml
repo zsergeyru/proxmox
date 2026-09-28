@@ -118,6 +118,7 @@ semaphore:
     - OpenTofu Plan
     - Build Template 9000
     - Deploy Guest 410
+    - Deploy Guest 910
 
 persistence:
   backup_required:
