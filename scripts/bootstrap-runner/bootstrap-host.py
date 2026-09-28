@@ -280,7 +280,16 @@ class BootstrapHost:
         if not self.infra_exists():
             return False
         config = self.pct_config(self.infra_ctid)
-        return f"hostname: {self.infra_hostname}\n" in f"{config}\n"
+        lines = config.splitlines()
+        hostname_ok = f"hostname: {self.infra_hostname}" in lines
+        unprivileged_ok = "unprivileged: 1" in lines
+        description = next(
+            (line for line in lines if line.startswith("description: ")),
+            "",
+        )
+        owner_ok = "owner=proxmox-project" in description
+        role_ok = "role=infra-manager" in description
+        return hostname_ok and unprivileged_ok and owner_ok and role_ok
 
     def ensure_existing_infra_running(self) -> None:
         if not self.infra_exists():
@@ -294,7 +303,9 @@ class BootstrapHost:
         if not self.infra_exists():
             self.fail(f"LXC {self.infra_ctid} отсутствует")
         if not self.infra_config_is_expected():
-            self.fail(f"VMID {self.infra_ctid} не является infra-manager")
+            self.fail(
+                f"VMID {self.infra_ctid} не имеет строгой метки владения infra-manager"
+            )
         if self.pct_status(self.infra_ctid) != "running":
             self.fail(f"LXC {self.infra_ctid} должен быть запущен")
 
