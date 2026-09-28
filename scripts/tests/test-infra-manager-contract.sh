@@ -23,7 +23,7 @@ COMPOSE="$ROOT/infrastructure/guests/910-infra-manager/compose/docker-compose.ym
 DOCKERFILE="$ROOT/infrastructure/guests/910-infra-manager/compose/runtime/Dockerfile"
 REQ="$ROOT/infrastructure/guests/910-infra-manager/compose/runtime/requirements.txt"
 PLAN="$ROOT/scripts/infra-manager/jobs/opentofu-plan.py"
-PVE_BOOTSTRAP_ACCESS="$ROOT/scripts/infra-manager/pve-bootstrap-access.sh"
+PY_PVE_HOST="$ROOT/scripts/infra-manager/infra_manager/pve_host.py"
 OPENTOFU_LOCK="$ROOT/automation/opentofu/.terraform.lock.hcl"
 GUEST_MANIFEST="$ROOT/infrastructure/guests/910-infra-manager/guest.yaml"
 PROVISION="$ROOT/infrastructure/guests/910-infra-manager/provision.yaml"
@@ -32,7 +32,7 @@ SSH_CONFIG="$ROOT/infrastructure/guests/910-infra-manager/compose/runtime/ssh_co
 die() { printf 'ОШИБКА: %s\n' "$*" >&2; exit 1; }
 ok()  { printf '[ОК] %s\n' "$*"; }
 
-for file in "$ANSIBLE_PLAYBOOK" "$ANSIBLE_DOCKER" "$ANSIBLE_RUNTIME" "$PY_SETTINGS" "$PY_SEMAPHORE" "$PY_STATUS" "$PY_PVE" "$STATUS" "$ACCESS" "$LIFECYCLE" "$BUILD_TEMPLATE" "$VERIFY_TEMPLATE" "$DEPLOY_GUEST" "$PY_OPENTOFU" "$PY_TEMPLATE" "$PY_TEMPLATE_BUILD" "$PY_TEMPLATE_VERIFY" "$COMPOSE" "$DOCKERFILE" "$REQ" "$PLAN" "$PVE_BOOTSTRAP_ACCESS" "$OPENTOFU_LOCK" "$GUEST_MANIFEST" "$PROVISION" "$SSH_CONFIG"; do
+for file in "$ANSIBLE_PLAYBOOK" "$ANSIBLE_DOCKER" "$ANSIBLE_RUNTIME" "$PY_SETTINGS" "$PY_SEMAPHORE" "$PY_STATUS" "$PY_PVE" "$STATUS" "$ACCESS" "$LIFECYCLE" "$BUILD_TEMPLATE" "$VERIFY_TEMPLATE" "$DEPLOY_GUEST" "$PY_OPENTOFU" "$PY_TEMPLATE" "$PY_TEMPLATE_BUILD" "$PY_TEMPLATE_VERIFY" "$COMPOSE" "$DOCKERFILE" "$REQ" "$PLAN" "$PY_PVE_HOST" "$OPENTOFU_LOCK" "$GUEST_MANIFEST" "$PROVISION" "$SSH_CONFIG"; do
     [[ -s "$file" ]] || die "Отсутствует обязательный файл: $file"
 done
 
@@ -190,43 +190,28 @@ grep -q 'configure-infra-runtime.yml' "$ANSIBLE_PLAYBOOK" \
 grep -q 'provision.system.required_packages' "$ANSIBLE_PLAYBOOK" \
     || die "Общий Ansible playbook должен устанавливать системные пакеты из provision.yaml"
 
-grep -q 'API_USER="root@pam"' "$PVE_BOOTSTRAP_ACCESS" \
-    || die "PVE bootstrap access должен использовать существующий root@pam"
-grep -q 'API_TOKEN_NAME="infra-manager"' "$PVE_BOOTSTRAP_ACCESS" \
-    || die "PVE bootstrap access должен создавать отдельный infra-manager token"
-grep -q -- '--privsep 1' "$PVE_BOOTSTRAP_ACCESS" \
-    || die "PVE API token должен использовать privsep=1"
-grep -q '^rollback_new_api_token() {' "$PVE_BOOTSTRAP_ACCESS" \
-    || die "Новый PVE API token должен откатываться при ошибке передачи secret"
-grep -q '^remove_token_acls() {' "$PVE_BOOTSTRAP_ACCESS" \
-    || die "Recovery должен уметь удалить ACL старого PVE API token до ротации"
-grep -Fq 'remove_token_acls' "$PVE_BOOTSTRAP_ACCESS" \
-    || die "Recovery должен вызывать очистку ACL перед удалением token"
-grep -Fq 'pveum acl delete "$path"' "$PVE_BOOTSTRAP_ACCESS" \
-    || die "Очистка recovery должна удалять только ACL infra-manager token"
-grep -q 'rm -f -- "$tmp"' "$PVE_BOOTSTRAP_ACCESS" \
-    || die "Временный PVE API secret должен удаляться и при ошибке передачи"
-for role in PVEAuditor PVEVMAdmin PVEDatastoreUser PVEDatastoreAdmin PVESDNUser; do
-    grep -q "\"$role\"" "$PVE_BOOTSTRAP_ACCESS" \
-        || die "В PVE bootstrap access отсутствует штатная роль $role"
-done
-
-grep -Fq 'ensure_token_acl "/vms" "PVEVMAdmin"' "$PVE_BOOTSTRAP_ACCESS" \
-    || die "910 должен получать PVEVMAdmin на /vms"
-grep -Fq 'ensure_token_roles "/pool/$MANAGED_POOL" "PVEVMAdmin,PVEPoolUser"' "$PVE_BOOTSTRAP_ACCESS" \
-    || die "910 должен получать PVEVMAdmin и PVEPoolUser на managed"
-grep -Fq 'ensure_token_acl "/storage/$ISO_STORAGE" "PVEDatastoreAdmin"' "$PVE_BOOTSTRAP_ACCESS" \
-    || die "910 должен иметь доступ к ISO storage для Packer"
-if grep -q 'pveum user add.*infra-manager@pve' "$PVE_BOOTSTRAP_ACCESS"; then
-    die "Отдельный пользователь infra-manager@pve больше не должен создаваться"
-fi
-if grep -q 'pveum role add.*InfraManagedGuest' "$PVE_BOOTSTRAP_ACCESS"; then
-    die "Собственная роль InfraManagedGuest больше не должна создаваться"
-fi
-if grep -q 'infra-manager@pve' "$PVE_BOOTSTRAP_ACCESS" "$ANSIBLE_PLAYBOOK" "$ANSIBLE_DOCKER" "$ANSIBLE_RUNTIME" "$PY_SEMAPHORE" "$PY_STATUS" "$PY_PVE"; then
+grep -q 'pve_host_private_key' "$PY_SETTINGS" \
+    || die "Путь root SSH-ключа PVE должен находиться в единых настройках"
+grep -q 'ensure_container_host' "$PY_PVE_HOST" \
+    || die "Общий PVE host слой должен поддерживать container-host"
+grep -q 'desired["keyctl"] = "1"' "$PY_PVE_HOST" \
+    || die "container-host должен обеспечивать keyctl=1"
+grep -q 'desired["nesting"] = "1"' "$PY_PVE_HOST" \
+    || die "container-host должен обеспечивать nesting=1"
+grep -q 'check_root_access' "$PY_PVE" \
+    || die "Полная проверка PVE должна проверять root SSH"
+grep -q 'ROOT_ADMIN_PRIVS = {' "$PY_PVE" \
+    || die "PVE API token 910 должен проверяться как полный административный token"
+grep -Fq '/etc/infra-manager/pve-host:/etc/infra-manager/pve-host:ro' "$COMPOSE" \
+    || die "infra-runtime должен получать root SSH-доступ PVE только для чтения"
+grep -q 'privilege_separation: false' "$PROVISION" \
+    || die "Постоянный PVE API token должен использовать privsep=0"
+grep -q 'permanent_root_ssh_to_pve: true' "$PROVISION" \
+    || die "910 должен иметь зафиксированный root SSH-доступ к PVE"
+if grep -q 'infra-manager@pve' "$ANSIBLE_PLAYBOOK" "$ANSIBLE_DOCKER" "$ANSIBLE_RUNTIME" "$PY_SEMAPHORE" "$PY_STATUS" "$PY_PVE"; then
     die "Старая PVE-идентичность не должна присутствовать в чистой схеме"
 fi
-if grep -q 'InfraManagedGuest' "$PVE_BOOTSTRAP_ACCESS" "$ANSIBLE_PLAYBOOK" "$ANSIBLE_DOCKER" "$ANSIBLE_RUNTIME" "$PY_SEMAPHORE" "$PY_STATUS" "$PY_PVE"; then
+if grep -q 'InfraManagedGuest' "$ANSIBLE_PLAYBOOK" "$ANSIBLE_DOCKER" "$ANSIBLE_RUNTIME" "$PY_SEMAPHORE" "$PY_STATUS" "$PY_PVE"; then
     die "Старая собственная роль PVE не должна присутствовать в чистой схеме"
 fi
 if grep -q 'PVE API automation\|Ansible managed guests' "$PY_SEMAPHORE"; then
@@ -299,16 +284,12 @@ grep -q 'PveClient' "$PY_STATUS" \
 grep -q 'check_access(quiet=True)' "$PY_STATUS" \
     || die "status --full должен проверять полный контракт PVE API"
 
-grep -q 'VM_ADMIN_PRIVS = {' "$PY_PVE" \
-    || die "Python PVE access check должен содержать контракт VM privileges"
-grep -Fq 'require_permissions(client, "/vms", VM_ADMIN_PRIVS)' "$PY_PVE" \
-    || die "Полная проверка PVE access должна требовать управление всеми VM/LXC через /vms"
-grep -q 'f"/pool/{MANAGED_POOL}"' "$PY_PVE" \
-    || die "Полная проверка PVE access должна проверять managed pool"
-grep -q '"/storage/local"' "$PY_PVE" \
-    || die "Полная проверка PVE access должна проверять права Packer на ISO storage"
-grep -q 'forbid_permissions(client, "/", FORBIDDEN_ROOT_PRIVS)' "$PY_PVE" \
-    || die "Полная проверка PVE access должна запрещать административные root privileges"
+grep -q 'ROOT_ADMIN_PRIVS = {' "$PY_PVE" \
+    || die "Python PVE access check должен содержать административный контракт"
+grep -Fq 'require_permissions(client, "/", ROOT_ADMIN_PRIVS)' "$PY_PVE" \
+    || die "Полная проверка PVE access должна требовать права root@pam"
+grep -q 'check_root_access(node)' "$PY_PVE" \
+    || die "Полная проверка PVE access должна проверять root SSH"
 
 if grep -q '/etc/pve/' "$ANSIBLE_PLAYBOOK" "$ANSIBLE_DOCKER" "$ANSIBLE_RUNTIME" "$PY_SEMAPHORE" "$PY_STATUS" "$PY_PVE"; then
     die "Настройка внутри 910 не должна работать с файловой системой /etc/pve"
@@ -405,6 +386,7 @@ required = {
     '/var/lib/infra-manager/opentofu:/var/lib/infra-manager/opentofu',
     '/etc/infra-manager/ca:/etc/infra-manager/ca:ro',
     '/etc/infra-manager/ansible:/etc/infra-manager/ansible:ro',
+    '/etc/infra-manager/pve-host:/etc/infra-manager/pve-host:ro',
 }
 missing = required.difference(volumes)
 if missing:
