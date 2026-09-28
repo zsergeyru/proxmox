@@ -66,8 +66,11 @@ ensure_acl() {
     pveum acl modify "$path"         --tokens "$API_TOKEN_ID"         --roles "$role"         --propagate 1
 }
 
-stage_access() {
+stage_access() (
+    # Подоболочка нужна намеренно: EXIT trap видит локальные пути до самого
+    # завершения блока и удаляет временные файлы как при успехе, так и при ошибке.
     local secret=$1 node host_ip tmp ca_tmp
+
     node="$(hostname -s)"
     host_ip="$(getent ahostsv4 "$node" | awk 'NR == 1 {print $1}')"
     [[ -n "$host_ip" ]] || die "не удалось определить IPv4 PVE-узла"
@@ -77,7 +80,8 @@ stage_access() {
 
     tmp="$(mktemp /run/bootstrap-runner-pve-api.XXXXXX)"
     ca_tmp="$(mktemp /run/bootstrap-runner-pve-ca.XXXXXX)"
-    trap 'rm -f -- "$tmp" "$ca_tmp"' RETURN
+    trap 'rm -f -- "$tmp" "$ca_tmp"' EXIT
+
     chmod 0600 "$tmp"
     install -m 0644 /etc/pve/pve-root-ca.pem "$ca_tmp"
 
@@ -100,7 +104,7 @@ EOF
         cat /etc/hosts.bootstrap > /etc/hosts
         rm -f /etc/hosts.bootstrap
     ' sh "$node" "$host_ip"
-}
+)
 
 create_access() {
     local json secret
