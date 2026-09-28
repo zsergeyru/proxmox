@@ -15,8 +15,17 @@ install -d -m 0755 "$CONFIG_DIR/ca" "$DATA_DIR/opentofu/state"
 
 if ! command -v docker >/dev/null 2>&1; then
     apt-get update
-    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends         ca-certificates docker.io openssh-client
+    # В Debian 13 docker.io содержит демон, а клиентская команда docker
+    # поставляется отдельным пакетом docker-cli. При --no-install-recommends
+    # его нужно устанавливать явно.
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        ca-certificates docker.io docker-cli openssh-client
 fi
+
+command -v docker >/dev/null 2>&1 || {
+    echo "ОШИБКА: после установки не найдена команда docker" >&2
+    exit 1
+}
 
 systemctl enable --now docker >/dev/null
 
