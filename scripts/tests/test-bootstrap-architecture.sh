@@ -47,6 +47,7 @@ fi
 grep -q -- '--infrastructure-only' "$BOOTSTRAP_DIR/deploy-910.sh"     || die "990 должен создавать 910 через общую инфраструктурную фазу deploy-guest"
 grep -q -- '--provision-base-only' "$BOOTSTRAP_DIR/deploy-910.sh"     || die "990 должен готовить базовый Debian через общий Ansible"
 grep -q -- '--provision-only' "$BOOTSTRAP_DIR/deploy-910.sh"     || die "990 должен полностью применять provision.yaml через общий Ansible"
+grep -q -- '--provision-existing-only' "$BOOTSTRAP_DIR/deploy-910.sh"     || die "990 должен уметь обновлять существующий 910 без собственного state"
 grep -q -- '--bootstrap-scope' "$BOOTSTRAP_DIR/deploy-910.sh"     || die "910 должен оставаться в отдельной bootstrap-области состояния"
 
 grep -q 'configure-docker.yml' "$PLAYBOOK"     || die "Общий playbook должен подключать общий модуль Docker"
