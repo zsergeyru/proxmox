@@ -140,8 +140,17 @@ class BootstrapHost:
                         self.info(f"Ansible: {task}")
                     elif stripped.startswith("PLAY RECAP"):
                         self.info("Ansible: формирование итогов")
-                    elif stripped.startswith(("[ИНФО]", "[ОК]", "ОШИБКА:")):
-                        print(stripped, flush=True)
+                    elif stripped.startswith("[ИНФО] "):
+                        self.info(stripped.removeprefix("[ИНФО] "))
+                    elif stripped.startswith("[ОК] "):
+                        self.ok(stripped.removeprefix("[ОК] "))
+                    elif stripped.startswith("ОШИБКА: "):
+                        print(
+                            f"{self.c_bold}{self.c_red}ОШИБКА:{self.c_reset} "
+                            f"{stripped.removeprefix('ОШИБКА: ')}",
+                            file=sys.stderr,
+                            flush=True,
+                        )
                 returncode = process.wait()
 
             result = subprocess.CompletedProcess(args, returncode)
