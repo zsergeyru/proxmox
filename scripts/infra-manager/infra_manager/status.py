@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import yaml
+
 from .common import InfraManagerError, command_runner, console
 from .pve import PveClient, check_access
 from .semaphore import (
@@ -26,9 +28,15 @@ PROJECT_ID_FILE = PATHS.semaphore_project_id_file
 OPENTOFU_INPUT = PATHS.opentofu_input
 OPENTOFU_STATE_DIR = PATHS.opentofu_state_dir
 SEMAPHORE_API_TOKEN_FILE = PATHS.semaphore_api_token_file
-ADMIN_PASSWORD_FILE = PATHS.admin_password_file
-BOOTSTRAP_REPOSITORY = PATHS.data_dir / "bootstrap-repo"
+STATUS_FILE = PATHS.status_file
 PROJECT_REPO = SETTINGS.project_repo
+
+STATUS_CHECK_TYPES = frozenset(
+    {"runtime", "semaphore", "runtime_tools", "pve_access"}
+)
+STATUS_DATA_SOURCE_TYPES = frozenset(
+    {"primary_ipv4", "project_branch", "git_revision", "file"}
+)
 
 
 @dataclass(frozen=True)
@@ -44,13 +52,18 @@ class SemaphoreSnapshot:
 
 
 @dataclass(frozen=True)
-class FullStatusSnapshot:
-    """Данные для полного итогового экрана 910."""
+class StatusDefinition:
+    """Проверки, данные и вид полного состояния гостя."""
 
-    address: str
-    project_branch: str
-    project_revision: str
-    semaphore_password: str
+    guest_vmid: int
+    title: str
+    short_ready_message: str
+    ready_message: str
+    separator: str
+    separator_width: int
+    checks: tuple[dict[str, Any], ...]
+    data: dict[str, dict[str, Any]]
+    sections: tuple[dict[str, Any], ...]
 
 
 def required_file(path: Path) -> None:
@@ -58,6 +71,175 @@ def required_file(path: Path) -> None:
         raise InfraManagerError(
             f"Отсутствует обязательный файл: {path}"
         )
+
+
+def _required_text(value: Any, label: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise InfraManagerError(
+            f"status.yaml: {label} должен быть непустой строкой"
+        )
+    return value
+
+
+def load_status_definition(path: Path | None = None) -> StatusDefinition:
+    """Прочитать и проверить установленное описание состояния 910."""
+    target = path or STATUS_FILE
+    required_file(target)
+    try:
+        raw = yaml.safe_load(target.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, yaml.YAMLError) as exc:
+        raise InfraManagerError(
+            f"Не удалось прочитать описание состояния: {target}"
+        ) from exc
+
+    if not isinstance(raw, dict):
+        raise InfraManagerError("status.yaml должен содержать mapping/object")
+    if raw.get("schema_version") != 1:
+        raise InfraManagerError("status.yaml имеет неподдерживаемую версию")
+    if raw.get("guest_vmid") != 910:
+        raise InfraManagerError("status.yaml должен описывать VMID 910")
+
+    layout = raw.get("layout")
+    if not isinstance(layout, dict):
+        raise InfraManagerError("status.yaml: отсутствует layout")
+    separator = _required_text(layout.get("separator"), "layout.separator")
+    width = layout.get("width")
+    if not isinstance(width, int) or not 20 <= width <= 120:
+        raise InfraManagerError(
+            "status.yaml: layout.width должен быть числом от 20 до 120"
+        )
+
+    checks = raw.get("checks")
+    if not isinstance(checks, list) or not checks:
+        raise InfraManagerError("status.yaml: checks должен быть непустым списком")
+    normalized_checks: list[dict[str, Any]] = []
+    for index, check in enumerate(checks):
+        if not isinstance(check, dict):
+            raise InfraManagerError(
+                f"status.yaml: checks[{index}] должен быть объектом"
+            )
+        check_type = check.get("type")
+        if check_type not in STATUS_CHECK_TYPES:
+            raise InfraManagerError(
+                f"status.yaml: неизвестный тип проверки {check_type!r}"
+            )
+        message = _required_text(
+            check.get("message"),
+            f"checks[{index}].message",
+        )
+        normalized_checks.append(
+            {"type": str(check_type), "message": message}
+        )
+
+    data = raw.get("data")
+    if not isinstance(data, dict) or not data:
+        raise InfraManagerError("status.yaml: data должен быть непустым объектом")
+    normalized_data: dict[str, dict[str, Any]] = {}
+    for name, source in data.items():
+        if not isinstance(name, str) or not name:
+            raise InfraManagerError(
+                "status.yaml: имя источника данных должно быть строкой"
+            )
+        if not isinstance(source, dict):
+            raise InfraManagerError(
+                f"status.yaml: источник {name!r} должен быть объектом"
+            )
+        source_type = source.get("type")
+        if source_type not in STATUS_DATA_SOURCE_TYPES:
+            raise InfraManagerError(
+                f"status.yaml: неизвестный источник данных {source_type!r}"
+            )
+        if source_type == "git_revision":
+            repository = source.get("repository")
+            if not isinstance(repository, str) or not repository.startswith("/"):
+                raise InfraManagerError(
+                    f"status.yaml: {name}.repository должен быть абсолютным путём"
+                )
+        if source_type == "file":
+            file_path = source.get("path")
+            if not isinstance(file_path, str) or not file_path.startswith("/"):
+                raise InfraManagerError(
+                    f"status.yaml: {name}.path должен быть абсолютным путём"
+                )
+        normalized_data[name] = dict(source)
+
+    sections = raw.get("sections")
+    if not isinstance(sections, list) or not sections:
+        raise InfraManagerError(
+            "status.yaml: sections должен быть непустым списком"
+        )
+    normalized_sections: list[dict[str, Any]] = []
+    for section_index, section in enumerate(sections):
+        if not isinstance(section, dict):
+            raise InfraManagerError(
+                f"status.yaml: sections[{section_index}] должен быть объектом"
+            )
+        section_title = _required_text(
+            section.get("title"),
+            f"sections[{section_index}].title",
+        )
+        fields = section.get("fields")
+        if not isinstance(fields, list) or not fields:
+            raise InfraManagerError(
+                f"status.yaml: sections[{section_index}].fields пуст"
+            )
+        normalized_fields: list[dict[str, str]] = []
+        for field_index, field in enumerate(fields):
+            if not isinstance(field, dict):
+                raise InfraManagerError(
+                    "status.yaml: поле секции должно быть объектом"
+                )
+            label = _required_text(
+                field.get("label"),
+                (
+                    f"sections[{section_index}]."
+                    f"fields[{field_index}].label"
+                ),
+            )
+            value_keys = [
+                key
+                for key in ("source", "value", "template")
+                if key in field
+            ]
+            if len(value_keys) != 1:
+                raise InfraManagerError(
+                    "status.yaml: поле должно иметь ровно один "
+                    "source, value или template"
+                )
+            key = value_keys[0]
+            value = _required_text(
+                field.get(key),
+                (
+                    f"sections[{section_index}]."
+                    f"fields[{field_index}].{key}"
+                ),
+            )
+            if key == "source" and value not in normalized_data:
+                raise InfraManagerError(
+                    f"status.yaml: неизвестный источник {value!r}"
+                )
+            normalized_fields.append({"label": label, key: value})
+        normalized_sections.append(
+            {"title": section_title, "fields": normalized_fields}
+        )
+
+    return StatusDefinition(
+        guest_vmid=910,
+        title=_required_text(raw.get("title"), "title"),
+        short_ready_message=_required_text(
+            raw.get("short_ready_message"),
+            "short_ready_message",
+        ),
+        ready_message=_required_text(
+            raw.get("ready_message"),
+            "ready_message",
+        ),
+        separator=separator,
+        separator_width=width,
+        checks=tuple(normalized_checks),
+        data=normalized_data,
+        sections=tuple(normalized_sections),
+    )
 
 
 def _project_branch() -> str:
@@ -387,12 +569,11 @@ def _check_runtime_tools() -> None:
             raise InfraManagerError(message)
 
 
-def _check_local_runtime() -> None:
-    """Проверить локальные файлы, контейнер и его инструменты."""
+def _check_runtime_bundle() -> None:
+    """Проверить Docker, обязательные файлы и infra-runtime."""
 
     _check_local_prerequisites()
     _check_runtime()
-    _check_runtime_tools()
 
 
 def _check_pve(*, full: bool) -> None:
@@ -408,6 +589,30 @@ def _check_pve(*, full: bool) -> None:
 
     if full:
         check_access(quiet=True)
+
+
+def _run_status_checks(
+    definition: StatusDefinition,
+    *,
+    project_branch: str,
+    full: bool,
+) -> None:
+    """Выполнить разрешённые проверки в порядке из status.yaml."""
+
+    for check in definition.checks:
+        check_type = check["type"]
+        if check_type == "runtime":
+            _check_runtime_bundle()
+        elif check_type == "semaphore":
+            _check_semaphore(project_branch=project_branch)
+        elif check_type == "runtime_tools":
+            _check_runtime_tools()
+        elif check_type == "pve_access":
+            _check_pve(full=full)
+        else:
+            raise InfraManagerError(
+                f"Неизвестный тип проверки состояния: {check_type}"
+            )
 
 
 def _primary_ipv4() -> str:
@@ -430,17 +635,17 @@ def _primary_ipv4() -> str:
     return addresses[0]
 
 
-def _project_revision() -> str:
-    """Вернуть короткий хэш рабочей копии проекта внутри 910."""
-    if not BOOTSTRAP_REPOSITORY.is_dir():
+def _git_revision(repository: Path) -> str:
+    """Вернуть короткий хэш указанной рабочей копии Git."""
+    if not repository.is_dir():
         raise InfraManagerError(
-            f"Отсутствует рабочая копия проекта: {BOOTSTRAP_REPOSITORY}"
+            f"Отсутствует рабочая копия проекта: {repository}"
         )
     result = command_runner.run(
         [
             "git",
             "-C",
-            str(BOOTSTRAP_REPOSITORY),
+            str(repository),
             "rev-parse",
             "--short",
             "HEAD",
@@ -450,82 +655,138 @@ def _project_revision() -> str:
     )
     revision = result.stdout.strip() if not result.returncode else ""
     if not revision:
-        raise InfraManagerError("Не удалось определить версию проекта")
+        raise InfraManagerError(
+            f"Не удалось определить версию проекта: {repository}"
+        )
     return revision
 
 
-def _load_full_status_snapshot(project_branch: str) -> FullStatusSnapshot:
-    """Собрать данные итогового экрана после успешных проверок."""
-    required_file(ADMIN_PASSWORD_FILE)
-    password = ADMIN_PASSWORD_FILE.read_text(encoding="utf-8").strip()
-    if not password:
-        raise InfraManagerError("Первичный пароль Semaphore пуст")
+def _read_required_text(path: Path) -> str:
+    """Прочитать обязательный непустой текстовый файл."""
+    required_file(path)
+    try:
+        value = path.read_text(encoding="utf-8").strip()
+    except (OSError, UnicodeError) as exc:
+        raise InfraManagerError(
+            f"Не удалось прочитать обязательный файл: {path}"
+        ) from exc
+    if not value:
+        raise InfraManagerError(f"Обязательный файл пуст: {path}")
+    return value
 
-    return FullStatusSnapshot(
-        address=_primary_ipv4(),
-        project_branch=project_branch,
-        project_revision=_project_revision(),
-        semaphore_password=password,
+
+def _resolve_data_source(
+    source: dict[str, Any],
+    *,
+    project_branch: str,
+) -> str:
+    """Получить одно фактическое значение разрешённого типа."""
+    source_type = source["type"]
+
+    if source_type == "primary_ipv4":
+        return _primary_ipv4()
+    if source_type == "project_branch":
+        return project_branch
+    if source_type == "git_revision":
+        return _git_revision(Path(str(source["repository"])))
+    if source_type == "file":
+        return _read_required_text(Path(str(source["path"])))
+
+    raise InfraManagerError(
+        f"Неизвестный источник данных состояния: {source_type}"
     )
 
 
-def _show_full_status(snapshot: FullStatusSnapshot) -> None:
-    """Показать единый полный экран состояния 910."""
-    separator = "=" * 60
+def _resolve_status_data(
+    definition: StatusDefinition,
+    *,
+    project_branch: str,
+) -> dict[str, str]:
+    """Собрать все фактические данные, объявленные в status.yaml."""
+    return {
+        name: _resolve_data_source(
+            source,
+            project_branch=project_branch,
+        )
+        for name, source in definition.data.items()
+    }
+
+
+def _render_template(template: str, values: dict[str, str]) -> str:
+    """Подставить только уже собранные значения состояния."""
+    try:
+        return template.format_map(values)
+    except KeyError as exc:
+        raise InfraManagerError(
+            f"status.yaml: неизвестное значение в шаблоне: {exc.args[0]}"
+        ) from exc
+
+
+def _field_value(field: dict[str, str], values: dict[str, str]) -> str:
+    if "source" in field:
+        return values[field["source"]]
+    if "value" in field:
+        return field["value"]
+    return _render_template(field["template"], values)
+
+
+def _show_full_status(
+    definition: StatusDefinition,
+    values: dict[str, str],
+) -> None:
+    """Показать полный экран строго по status.yaml."""
+    separator = definition.separator * definition.separator_width
 
     print()
     print(separator)
-    print("  Состояние 910 infra-manager")
+    print(f"  {definition.title}")
     print(separator)
     print()
 
-    console.ok("Docker и infra-runtime работают")
-    console.ok("Semaphore работает")
-    console.ok("OpenTofu, Ansible и Packer готовы")
-    console.ok("Доступ к PVE подтверждён")
+    for check in definition.checks:
+        console.ok(check["message"])
 
-    print("\nСистема")
-    print(f"  Адрес:   {snapshot.address}")
-
-    print("\nSemaphore")
-    print(f"  Адрес:   http://{snapshot.address}:3000")
-    print("  Логин:   admin")
-    print(f"  Пароль:  {snapshot.semaphore_password}")
-
-    print("\nПроект")
-    print(f"  Ветка:   {snapshot.project_branch}")
-    print(f"  Версия:  {snapshot.project_revision}")
-
-    print("\nПроверка")
-    print("  Внутри 910: infra-manager-status --full")
-    print("  С PVE:      pct exec 910 -- infra-manager-status --full")
+    for section in definition.sections:
+        print(f"\n{section['title']}")
+        fields = section["fields"]
+        label_width = max(len(field["label"]) for field in fields) + 3
+        for field in fields:
+            label = f"{field['label']}:"
+            value = _field_value(field, values)
+            print(f"  {label:<{label_width}}{value}")
 
     print()
     print(separator)
-    print("  910 infra-manager полностью готов")
+    print(f"  {definition.ready_message}")
     print(separator)
 
 
 def check_status(*, full: bool = False, quiet: bool = False) -> int:
-    """Проверить готовность infra-manager по последовательным этапам."""
+    """Проверить готовность infra-manager по установленному status.yaml."""
+    definition = load_status_definition()
     project_branch = _project_branch()
 
-    _check_local_runtime()
-    _check_semaphore(project_branch=project_branch)
-    _check_pve(full=full)
+    _run_status_checks(
+        definition,
+        project_branch=project_branch,
+        full=full,
+    )
 
-    snapshot = (
-        _load_full_status_snapshot(project_branch)
+    values = (
+        _resolve_status_data(
+            definition,
+            project_branch=project_branch,
+        )
         if full
-        else None
+        else {}
     )
 
     if quiet:
         return 0
 
-    if snapshot is not None:
-        _show_full_status(snapshot)
+    if full:
+        _show_full_status(definition, values)
     else:
-        console.ok("infra-manager готов")
+        console.ok(definition.short_ready_message)
 
     return 0
