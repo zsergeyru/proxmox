@@ -958,9 +958,8 @@ class BootstrapHost:
         self.ok("Root SSH-доступ infra-manager к PVE удалён")
 
     def show_semaphore_access(self) -> None:
-        """Показать адрес Semaphore и однократно первичный пароль."""
+        """Показать адрес Semaphore, логин и первичный пароль."""
         password_file = "/etc/infra-manager/secrets/initial-admin-password"
-        shown_file = "/etc/infra-manager/secrets/.initial-admin-password-shown"
 
         address_result = self.infra_exec(
             "hostname",
@@ -979,8 +978,6 @@ class BootstrapHost:
         print(f"Адрес:  http://{addresses[0]}:3000")
         print("Логин:  admin")
 
-        if self.infra_test("-e", shown_file):
-            return
         if not self.infra_test("-s", password_file):
             self.fail("не найден первичный пароль Semaphore")
 
@@ -992,13 +989,6 @@ class BootstrapHost:
         if not password:
             self.fail("первичный пароль Semaphore пуст")
         print(f"Пароль: {password}")
-        self.infra_exec(
-            "install",
-            "-m",
-            "0600",
-            "/dev/null",
-            shown_file,
-        )
 
     def check_ready(self) -> None:
         if not self.infra_exists():
