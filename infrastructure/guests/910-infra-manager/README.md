@@ -359,4 +359,3 @@ Semaphore использует сеть 910 напрямую, поэтому в�
 ```bash
 cat /etc/infra-manager/secrets/initial-admin-password
 ```
-
