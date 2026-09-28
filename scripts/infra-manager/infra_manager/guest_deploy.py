@@ -492,6 +492,24 @@ def _configure_guest_os(
     )
 
 
+def _validate_existing_guest_object(context: DeploymentContext) -> None:
+    """Проверить существующий объект без требования OpenTofu state."""
+    resource = context.client.find_vm(context.vmid)
+    if resource is None:
+        raise InfraManagerError(
+            f"Гость {context.vmid} отсутствует в PVE; "
+            "режим provision-existing не может его создать"
+        )
+    actual_type = str(resource.get("type") or "")
+    actual_name = str(resource.get("name") or "")
+    expected_type = "qemu" if context.kind == "vm" else "lxc"
+    if actual_type != expected_type or actual_name != context.name:
+        raise InfraManagerError(
+            f"VMID {context.vmid} занят объектом '{actual_name}' "
+            f"типа '{actual_type}'; настройка запрещена"
+        )
+
+
 def _reconcile_guest_infrastructure(context: DeploymentContext) -> None:
     """Применить состояние одной VM и всегда удалить временный plan."""
 
@@ -521,11 +539,21 @@ def run_deploy_guest(
 
     if vmid <= 0:
         raise InfraManagerError("VMID должен быть положительным числом")
-    if phase not in {"all", "infrastructure", "provision-base", "provision"}:
+    if phase not in {
+        "all",
+        "infrastructure",
+        "provision-base",
+        "provision",
+        "provision-existing",
+    }:
         raise InfraManagerError(f"Неизвестная фаза deploy-guest: {phase}")
     if bootstrap_scope and vmid not in SETTINGS.bootstrap_managed_vmids:
         raise InfraManagerError(
             f"VMID {vmid} не принадлежит начальному контуру"
+        )
+    if phase == "provision-existing" and not bootstrap_scope:
+        raise InfraManagerError(
+            "provision-existing разрешён только начальному контуру"
         )
 
     for command in (
@@ -552,11 +580,14 @@ def run_deploy_guest(
     state_present, state_status = context.workspace.get_resource_state(
         context.target
     )
-    _validate_pve_and_state(
-        context,
-        state_present=state_present,
-        state_status=state_status,
-    )
+    if phase == "provision-existing":
+        _validate_existing_guest_object(context)
+    else:
+        _validate_pve_and_state(
+            context,
+            state_present=state_present,
+            state_status=state_status,
+        )
 
     if phase in {"all", "infrastructure"}:
         _reconcile_guest_infrastructure(context)
@@ -580,7 +611,7 @@ def run_deploy_guest(
         _configure_guest_os(context)
     elif phase == "provision-base":
         _configure_guest_os(context, provision_phase="base")
-    elif phase == "provision":
+    elif phase in {"provision", "provision-existing"}:
         _configure_guest_os(context, provision_phase="full")
 
     if phase == "infrastructure":
@@ -594,6 +625,11 @@ def run_deploy_guest(
     elif phase == "provision":
         console.ok(
             f"{context.vmid} {context.name}: provision.yaml применён"
+        )
+    elif phase == "provision-existing":
+        console.ok(
+            f"{context.vmid} {context.name}: существующий гость "
+            "настроен через provision.yaml без владения OpenTofu state"
         )
     else:
         console.ok(
