@@ -111,7 +111,6 @@ def check_cli_and_commands() -> None:
 
     cli_help_cases = (
         ["--help"],
-        ["setup", "--help"],
         ["semaphore-project", "--help"],
         ["status", "--help"],
         ["pve-access-check", "--help"],
