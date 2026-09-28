@@ -267,7 +267,7 @@ def _ensure_ssh_host_key(
     if found.returncode == 0:
         return
 
-    console.info(f"Первичное получение SSH host key {address}")
+    console.info(f"Проверка ключа SSH-сервера {address}")
     for _ in range(30):
         scan = run(
             [
@@ -286,7 +286,7 @@ def _ensure_ssh_host_key(
                 if not scan.stdout.endswith("\n"):
                     stream.write("\n")
             known_hosts.chmod(0o600)
-            console.ok(f"SSH host key {address} принят")
+            console.ok(f"Ключ SSH-сервера {address} сохранён")
             return
         time.sleep(2)
 
@@ -477,7 +477,7 @@ def _configure_guest_os(
 
     _ensure_ssh_host_key(context.paths.known_hosts, context.address)
 
-    console.info(f"Настройка ОС {context.vmid} через Ansible")
+    console.info(f"Настройка ОС {context.vmid}")
     ansible_env = os.environ.copy()
     ansible_env["ANSIBLE_HOST_KEY_CHECKING"] = "True"
     ansible_env["ANSIBLE_SSH_ARGS"] = (
@@ -524,7 +524,7 @@ def _validate_existing_guest_object(context: DeploymentContext) -> None:
 def _reconcile_guest_infrastructure(context: DeploymentContext) -> None:
     """Применить состояние одной VM и всегда удалить временный plan."""
 
-    console.info(f"План OpenTofu для {context.vmid}")
+    console.info(f"Проверка состояния гостя {context.vmid}")
     try:
         plan = _build_guest_plan(context)
         if not plan.actions or plan.actions == ("no-op",):
@@ -638,15 +638,15 @@ def run_deploy_guest(
 
     if phase == "infrastructure":
         console.ok(
-            f"{context.vmid} {context.name}: инфраструктура создана"
+            f"{context.vmid} {context.name}: основа создана"
         )
     elif phase == "provision-base":
         console.ok(
-            f"{context.vmid} {context.name}: базовая часть provision.yaml применена"
+            f"{context.vmid} {context.name}: базовая настройка завершена"
         )
     elif phase == "provision":
         console.ok(
-            f"{context.vmid} {context.name}: provision.yaml применён"
+            f"{context.vmid} {context.name}: полная настройка завершена"
         )
     elif phase == "provision-existing":
         console.ok(
