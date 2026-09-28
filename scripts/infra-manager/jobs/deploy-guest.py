@@ -41,6 +41,14 @@ def main() -> int:
         action="store_true",
         help="Полностью применить provision.yaml к уже созданному гостю",
     )
+    phase.add_argument(
+        "--provision-existing-only",
+        action="store_true",
+        help=(
+            "Настроить существующий bootstrap-гость через Ansible "
+            "без требования OpenTofu state"
+        ),
+    )
     args = parser.parse_args()
 
     try:
@@ -51,6 +59,8 @@ def main() -> int:
             if args.provision_base_only
             else "provision"
             if args.provision_only
+            else "provision-existing"
+            if args.provision_existing_only
             else "all"
         )
         return run_deploy_guest(
