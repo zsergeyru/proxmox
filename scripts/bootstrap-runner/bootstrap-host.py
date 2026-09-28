@@ -377,12 +377,22 @@ class BootstrapHost:
             if result.returncode:
                 self.fail(f"в LXC {self.ctid} отсутствует {label}")
 
-    def prepare_runner_pve_access(self) -> None:
-        """Создать полный временный API token и передать его в 990."""
-        token_name = "bootstrap-runner"
-        token_id = f"root@pam!{token_name}"
-        self.remove_named_token("root@pam", token_name)
+    def pve_node_address(self) -> tuple[str, str]:
+        """Вернуть имя PVE-узла и его IPv4 для управляющих контейнеров."""
+        node = self.run("hostname", "-s", capture=True).stdout.strip()
+        addresses = self.run(
+            "getent",
+            "ahostsv4",
+            node,
+            capture=True,
+        ).stdout.splitlines()
+        if not node or not addresses:
+            self.fail("не удалось определить имя или IPv4 PVE-узла")
+        return node, addresses[0].split()[0]
 
+    def create_full_pve_token(self, token_name: str) -> tuple[str, str]:
+        """Создать token root@pam без разделения привилегий и вернуть secret."""
+        token_id = f"root@pam!{token_name}"
         created = self.run(
             "pveum",
             "user",
@@ -401,25 +411,21 @@ class BootstrapHost:
         except json.JSONDecodeError as exc:
             self.remove_named_token("root@pam", token_name)
             raise BootstrapError(
-                "PVE вернул некорректный JSON при создании bootstrap-runner token"
+                f"PVE вернул некорректный JSON при создании {token_id}"
             ) from exc
 
         secret = str(payload.get("value") or "")
         if not secret:
             self.remove_named_token("root@pam", token_name)
-            self.fail("PVE создал bootstrap-runner token без доступного secret")
+            self.fail(f"PVE создал {token_id} без доступного secret")
+        return token_id, secret
 
-        node = self.run("hostname", "-s", capture=True).stdout.strip()
-        addresses = self.run(
-            "getent",
-            "ahostsv4",
-            node,
-            capture=True,
-        ).stdout.splitlines()
-        if not addresses:
-            self.remove_named_token("root@pam", token_name)
-            self.fail("не удалось определить IPv4 PVE-узла")
-        host_ip = addresses[0].split()[0]
+    def prepare_runner_pve_access(self) -> None:
+        """Создать полный временный API token и передать его в 990."""
+        token_name = "bootstrap-runner"
+        self.remove_named_token("root@pam", token_name)
+        token_id, secret = self.create_full_pve_token(token_name)
+        node, host_ip = self.pve_node_address()
 
         secret_dir = Path("/etc/bootstrap-runner/secrets")
         ca_dir = Path("/etc/bootstrap-runner/ca")
@@ -489,6 +495,7 @@ class BootstrapHost:
             host_ip,
         )
         self.ok("Временный полный PVE API-доступ 990 подготовлен")
+
     def prepare_runtime(self) -> None:
         self.log("Подготовка среды bootstrap-runner")
         self.ct_exec(
@@ -554,7 +561,6 @@ class BootstrapHost:
         self.verify_infra_object()
         persistent = Path("/etc/infra-manager/secrets/pve-api.env")
         token_name = "infra-manager"
-        token_id = f"root@pam!{token_name}"
 
         rows = self.pveum_json("user", "token", "list", "root@pam")
         token_row = next(
@@ -572,33 +578,8 @@ class BootstrapHost:
             token_row = None
 
         if token_row is None:
-            created = self.run(
-                "pveum",
-                "user",
-                "token",
-                "add",
-                "root@pam",
-                token_name,
-                "--privsep",
-                "0",
-                "--output-format",
-                "json",
-                capture=True,
-            )
-            try:
-                payload = json.loads(created.stdout or "{}")
-            except json.JSONDecodeError as exc:
-                self.remove_named_token("root@pam", token_name)
-                raise BootstrapError(
-                    "PVE вернул некорректный JSON при создании infra-manager token"
-                ) from exc
-
-            secret = str(payload.get("value") or "")
-            if not secret:
-                self.remove_named_token("root@pam", token_name)
-                self.fail("PVE создал infra-manager token без доступного secret")
-
-            node = self.run("hostname", "-s", capture=True).stdout.strip()
+            token_id, secret = self.create_full_pve_token(token_name)
+            node, _ = self.pve_node_address()
             fd, tmp_name = tempfile.mkstemp(
                 prefix="infra-manager-pve-api.",
                 dir="/run",
@@ -650,16 +631,7 @@ class BootstrapHost:
         self.push_to_infra(ca_source, ca_target, "0644")
         self.infra_exec("update-ca-certificates", quiet=True)
 
-        node = self.run("hostname", "-s", capture=True).stdout.strip()
-        addresses = self.run(
-            "getent",
-            "ahostsv4",
-            node,
-            capture=True,
-        ).stdout.splitlines()
-        if not addresses:
-            self.fail("не удалось определить IPv4 PVE-узла")
-        host_ip = addresses[0].split()[0]
+        node, host_ip = self.pve_node_address()
         hosts_script = (
             'node=$1; ip=$2; '
             'grep -vE "[[:space:]]${node}([[:space:]]|$)" /etc/hosts '
@@ -678,6 +650,7 @@ class BootstrapHost:
         )
 
         self.ok("Постоянный PVE API-доступ 910 подготовлен")
+
     def push_to_infra(self, source: Path, target: Path, mode: str) -> None:
         """Передать файл в 910 от root с явно заданными правами."""
         push_args = [
