@@ -21,6 +21,7 @@ PY_TEMPLATE="$ROOT/scripts/infra-manager/infra_manager/template.py"
 PY_TEMPLATE_BUILD="$ROOT/scripts/infra-manager/infra_manager/template_build.py"
 PY_TEMPLATE_VERIFY="$ROOT/scripts/infra-manager/infra_manager/template_verify.py"
 COMPOSE="$ROOT/infrastructure/guests/910-infra-manager/compose/docker-compose.yml"
+OPENBAO_CONFIG="$ROOT/infrastructure/guests/910-infra-manager/compose/openbao/openbao.hcl"
 DOCKERFILE="$ROOT/infrastructure/guests/910-infra-manager/compose/runtime/Dockerfile"
 REQ="$ROOT/infrastructure/guests/910-infra-manager/compose/runtime/requirements.txt"
 PLAN="$ROOT/scripts/infra-manager/jobs/opentofu-plan.py"
@@ -33,7 +34,7 @@ SSH_CONFIG="$ROOT/infrastructure/guests/910-infra-manager/compose/runtime/ssh_co
 die() { printf 'ОШИБКА: %s\n' "$*" >&2; exit 1; }
 ok()  { printf '[ОК] %s\n' "$*"; }
 
-for file in "$ANSIBLE_PLAYBOOK" "$ANSIBLE_DOCKER" "$ANSIBLE_RUNTIME" "$PY_SETTINGS" "$PY_SEMAPHORE" "$PY_STATUS" "$PY_PVE" "$STATUS" "$ACCESS" "$LIFECYCLE" "$ACTIVATE_RUNTIME" "$BUILD_TEMPLATE" "$VERIFY_TEMPLATE" "$DEPLOY_GUEST" "$PY_OPENTOFU" "$PY_TEMPLATE" "$PY_TEMPLATE_BUILD" "$PY_TEMPLATE_VERIFY" "$COMPOSE" "$DOCKERFILE" "$REQ" "$PLAN" "$PY_PVE_HOST" "$OPENTOFU_LOCK" "$GUEST_MANIFEST" "$PROVISION" "$SSH_CONFIG"; do
+for file in "$ANSIBLE_PLAYBOOK" "$ANSIBLE_DOCKER" "$ANSIBLE_RUNTIME" "$PY_SETTINGS" "$PY_SEMAPHORE" "$PY_STATUS" "$PY_PVE" "$STATUS" "$ACCESS" "$LIFECYCLE" "$ACTIVATE_RUNTIME" "$BUILD_TEMPLATE" "$VERIFY_TEMPLATE" "$DEPLOY_GUEST" "$PY_OPENTOFU" "$PY_TEMPLATE" "$PY_TEMPLATE_BUILD" "$PY_TEMPLATE_VERIFY" "$COMPOSE" "$OPENBAO_CONFIG" "$DOCKERFILE" "$REQ" "$PLAN" "$PY_PVE_HOST" "$OPENTOFU_LOCK" "$GUEST_MANIFEST" "$PROVISION" "$SSH_CONFIG"; do
     [[ -s "$file" ]] || die "Отсутствует обязательный файл: $file"
 done
 
@@ -106,9 +107,13 @@ if 'provision.docker.required_packages' not in docker_tasks_text:
     raise SystemExit("общий Ansible-модуль Docker не использует required_packages")
 
 services = docker.get("services", {})
-if set(services) != {"runtime"}:
-    raise SystemExit(f"provision.yaml: должен быть один Docker service runtime: {sorted(services)}")
+if set(services) != {"runtime", "openbao"}:
+    raise SystemExit(
+        "provision.yaml: ожидаются Docker services runtime и openbao: "
+        f"{sorted(services)}"
+    )
 runtime = services["runtime"]
+openbao = services["openbao"]
 if runtime.get("container_name") != "infra-runtime":
     raise SystemExit("provision.yaml: container_name должен быть infra-runtime")
 if runtime.get("image") != "infra-runtime:v1":
@@ -117,6 +122,24 @@ if runtime.get("base_image") != "semaphoreui/semaphore:v2.18.30":
     raise SystemExit("infra-runtime должен использовать Semaphore v2.18.30 как base image")
 if runtime.get("network_mode") != "host":
     raise SystemExit("infra-runtime должен использовать network_mode=host для Packer HTTP")
+if openbao.get("container_name") != "openbao":
+    raise SystemExit("OpenBao должен использовать container_name=openbao")
+if openbao.get("image") != "ghcr.io/openbao/openbao:2.7.0":
+    raise SystemExit("OpenBao должен использовать закреплённую версию 2.7.0")
+if openbao.get("network_mode") != "host":
+    raise SystemExit("OpenBao должен использовать network_mode=host")
+if openbao.get("api_address") != "http://127.0.0.1:8200":
+    raise SystemExit("OpenBao API должен быть доступен только через loopback 910")
+if openbao.get("data_path") != "/var/lib/persistent/openbao":
+    raise SystemExit("OpenBao должен хранить данные в постоянном каталоге")
+if openbao.get("storage") != "raft":
+    raise SystemExit("OpenBao должен использовать Raft")
+if openbao.get("auto_initialize") is not False:
+    raise SystemExit("OpenBao не должен инициализироваться автоматически")
+if provision.get("paths", {}).get("openbao_data") != "/var/lib/persistent/openbao":
+    raise SystemExit("Путь постоянных данных OpenBao не зафиксирован")
+if "/var/lib/persistent/openbao" not in provision.get("persistence", {}).get("backup_required", []):
+    raise SystemExit("Данные OpenBao должны входить в обязательное резервное копирование")
 if 'semaphore_version: str = "v2.18.30"' not in settings_text:
     raise SystemExit("Версия Semaphore в settings.py расходится с provision.yaml")
 if 'runtime_version: str = "v1"' not in settings_text:
@@ -148,12 +171,33 @@ for package, constraint in runtime.get("python_packages", {}).items():
 
 compose = yaml.safe_load(compose_path.read_text(encoding="utf-8"))
 compose_services = compose.get("services", {})
-if set(compose_services) != {"runtime"}:
-    raise SystemExit(f"docker-compose.yml: должен быть один service runtime: {sorted(compose_services)}")
+if set(compose_services) != {"runtime", "openbao"}:
+    raise SystemExit(
+        "docker-compose.yml: ожидаются services runtime и openbao: "
+        f"{sorted(compose_services)}"
+    )
 if compose_services["runtime"].get("container_name") != runtime.get("container_name"):
     raise SystemExit("container_name infra-runtime расходится с provision.yaml")
 if compose_services["runtime"].get("network_mode") != "host":
     raise SystemExit("infra-runtime Compose должен использовать network_mode=host")
+
+compose_openbao = compose_services["openbao"]
+if compose_openbao.get("container_name") != openbao.get("container_name"):
+    raise SystemExit("container_name OpenBao расходится с provision.yaml")
+if compose_openbao.get("image") != "ghcr.io/openbao/openbao:${OPENBAO_VERSION}":
+    raise SystemExit("Compose должен получать закреплённую версию OpenBao из .versions.env")
+if compose_openbao.get("network_mode") != "host":
+    raise SystemExit("OpenBao Compose должен использовать network_mode=host")
+if compose_openbao.get("command") != ["server"]:
+    raise SystemExit("OpenBao должен запускаться в обычном server-режиме, не dev")
+if any("dev" in str(arg) for arg in compose_openbao.get("command", [])):
+    raise SystemExit("OpenBao dev-режим запрещён")
+required_openbao_volumes = {
+    "/var/lib/persistent/openbao:/openbao/file",
+    "./openbao/openbao.hcl:/openbao/config/openbao.hcl:ro",
+}
+if not required_openbao_volumes.issubset(set(compose_openbao.get("volumes", []))):
+    raise SystemExit("Compose не содержит обязательные тома OpenBao")
 
 required_runtime_fragments = (
     "provision.access.pve.ca_source",
@@ -161,6 +205,9 @@ required_runtime_fragments = (
     "provision.access.pve.persistent_credential",
     "provision.paths.ansible_identity",
     "provision.paths.semaphore_data",
+    "provision.paths.openbao_data",
+    "OPENBAO_VERSION",
+    "openbao_seal_status",
     "render-opentofu-input.py",
     "--exclude-vmid",
     "docker-compose.yml",
@@ -215,6 +262,15 @@ grep -q 'privilege_separation: false' "$PROVISION" \
     || die "Постоянный PVE API token должен использовать privsep=0"
 grep -q 'permanent_root_ssh_to_pve: true' "$PROVISION" \
     || die "910 должен иметь зафиксированный root SSH-доступ к PVE"
+grep -Fq 'path    = "/openbao/file/raft"' "$OPENBAO_CONFIG" \
+    || die "OpenBao должен использовать постоянное Raft-хранилище"
+grep -Fq 'address         = "127.0.0.1:8200"' "$OPENBAO_CONFIG" \
+    || die "OpenBao API должен слушать только loopback 910"
+grep -Fq 'tls_disable     = true' "$OPENBAO_CONFIG" \
+    || die "Первая локальная версия OpenBao должна явно фиксировать локальный HTTP"
+if grep -Eq '(^|[^a-z])dev([^a-z]|$)' "$OPENBAO_CONFIG"; then
+    die "OpenBao config не должен содержать dev-режим"
+fi
 if grep -q 'infra-manager@pve' "$ANSIBLE_PLAYBOOK" "$ANSIBLE_DOCKER" "$ANSIBLE_RUNTIME" "$PY_SEMAPHORE" "$PY_STATUS" "$PY_PVE"; then
     die "Старая PVE-идентичность не должна присутствовать в чистой схеме"
 fi
