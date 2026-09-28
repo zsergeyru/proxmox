@@ -12,6 +12,7 @@ from pathlib import Path
 from .common import InfraManagerError, console, require_command, run
 from .opentofu import OpenTofuWorkspace, prepare_workspace
 from .pve import PveClient
+from .pve_host import apply_host_requirements
 from .settings import PATHS, SETTINGS
 
 
@@ -35,6 +36,7 @@ class DeploymentContext:
     name: str
     node: str
     kind: str
+    features: tuple[str, ...]
     template_vmid: int | None
     address: str
     target: str
@@ -314,6 +316,14 @@ def _build_deployment_context(
     name = str(guest.get("name") or "")
     node = str(guest.get("node") or "")
     template_vmid = guest.get("template_vmid") if kind == "vm" else None
+    raw_features = guest.get("features", [])
+    if not isinstance(raw_features, list) or any(
+        not isinstance(item, str) for item in raw_features
+    ):
+        raise InfraManagerError(
+            f"VMID {vmid}: features имеет некорректный формат"
+        )
+    features = tuple(raw_features)
     network = guest.get("network")
     if not name or not node:
         raise InfraManagerError(
@@ -370,6 +380,7 @@ def _build_deployment_context(
         name=name,
         node=node,
         kind=kind,
+        features=features,
         template_vmid=template_vmid if isinstance(template_vmid, int) else None,
         address=address,
         target=(
@@ -561,6 +572,7 @@ def run_deploy_guest(
         "ansible-playbook",
         "ssh-keygen",
         "ssh-keyscan",
+        "ssh",
     ):
         require_command(command)
 
@@ -606,6 +618,16 @@ def run_deploy_guest(
                 f"Гость {context.vmid} отсутствует в OpenTofu state; "
                 "сначала выполните фазу infrastructure"
             )
+
+    # Некоторые свойства LXC Proxmox разрешает менять только самому root@pam,
+    # а не API token. Они остаются частью общего guest/profile-контракта и
+    # применяются здесь одинаково для bootstrap 910 и обычных гостей.
+    apply_host_requirements(
+        node=context.node,
+        vmid=context.vmid,
+        kind=context.kind,
+        features=context.features,
+    )
 
     if phase == "all":
         _configure_guest_os(context)
