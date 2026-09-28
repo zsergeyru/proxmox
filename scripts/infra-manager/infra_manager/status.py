@@ -26,6 +26,8 @@ PROJECT_ID_FILE = PATHS.semaphore_project_id_file
 OPENTOFU_INPUT = PATHS.opentofu_input
 OPENTOFU_STATE_DIR = PATHS.opentofu_state_dir
 SEMAPHORE_API_TOKEN_FILE = PATHS.semaphore_api_token_file
+ADMIN_PASSWORD_FILE = PATHS.admin_password_file
+BOOTSTRAP_REPOSITORY = PATHS.data_dir / "bootstrap-repo"
 PROJECT_REPO = SETTINGS.project_repo
 
 
@@ -39,6 +41,16 @@ class SemaphoreSnapshot:
     branches: tuple[str, ...]
     environments: tuple[dict[str, Any], ...]
     templates: tuple[dict[str, Any], ...]
+
+
+@dataclass(frozen=True)
+class FullStatusSnapshot:
+    """Данные для полного итогового экрана 910."""
+
+    address: str
+    project_branch: str
+    project_revision: str
+    semaphore_password: str
 
 
 def required_file(path: Path) -> None:
@@ -398,7 +410,103 @@ def _check_pve(*, full: bool) -> None:
         check_access(quiet=True)
 
 
-def check_status(*, full: bool = False) -> int:
+def _primary_ipv4() -> str:
+    """Вернуть основной IPv4 текущего 910."""
+    result = command_runner.run(
+        ["hostname", "-I"],
+        capture=True,
+        check=False,
+    )
+    if result.returncode:
+        raise InfraManagerError("Не удалось определить адрес 910")
+
+    addresses = [
+        item
+        for item in result.stdout.split()
+        if "." in item and item != "127.0.0.1"
+    ]
+    if not addresses:
+        raise InfraManagerError("Не удалось определить адрес 910")
+    return addresses[0]
+
+
+def _project_revision() -> str:
+    """Вернуть короткий хэш рабочей копии проекта внутри 910."""
+    if not BOOTSTRAP_REPOSITORY.is_dir():
+        raise InfraManagerError(
+            f"Отсутствует рабочая копия проекта: {BOOTSTRAP_REPOSITORY}"
+        )
+    result = command_runner.run(
+        [
+            "git",
+            "-C",
+            str(BOOTSTRAP_REPOSITORY),
+            "rev-parse",
+            "--short",
+            "HEAD",
+        ],
+        capture=True,
+        check=False,
+    )
+    revision = result.stdout.strip() if not result.returncode else ""
+    if not revision:
+        raise InfraManagerError("Не удалось определить версию проекта")
+    return revision
+
+
+def _load_full_status_snapshot(project_branch: str) -> FullStatusSnapshot:
+    """Собрать данные итогового экрана после успешных проверок."""
+    required_file(ADMIN_PASSWORD_FILE)
+    password = ADMIN_PASSWORD_FILE.read_text(encoding="utf-8").strip()
+    if not password:
+        raise InfraManagerError("Первичный пароль Semaphore пуст")
+
+    return FullStatusSnapshot(
+        address=_primary_ipv4(),
+        project_branch=project_branch,
+        project_revision=_project_revision(),
+        semaphore_password=password,
+    )
+
+
+def _show_full_status(snapshot: FullStatusSnapshot) -> None:
+    """Показать единый полный экран состояния 910."""
+    separator = "=" * 60
+
+    print()
+    print(separator)
+    print("  Состояние 910 infra-manager")
+    print(separator)
+    print()
+
+    console.ok("Docker и infra-runtime работают")
+    console.ok("Semaphore работает")
+    console.ok("OpenTofu, Ansible и Packer готовы")
+    console.ok("Доступ к PVE подтверждён")
+
+    print("\nСистема")
+    print(f"  Адрес:   {snapshot.address}")
+
+    print("\nSemaphore")
+    print(f"  Адрес:   http://{snapshot.address}:3000")
+    print("  Логин:   admin")
+    print(f"  Пароль:  {snapshot.semaphore_password}")
+
+    print("\nПроект")
+    print(f"  Ветка:   {snapshot.project_branch}")
+    print(f"  Версия:  {snapshot.project_revision}")
+
+    print("\nПроверка")
+    print("  Внутри 910: infra-manager-status --full")
+    print("  С PVE:      pct exec 910 -- infra-manager-status --full")
+
+    print()
+    print(separator)
+    print("  910 infra-manager полностью готов")
+    print(separator)
+
+
+def check_status(*, full: bool = False, quiet: bool = False) -> int:
     """Проверить готовность infra-manager по последовательным этапам."""
     project_branch = _project_branch()
 
@@ -406,10 +514,17 @@ def check_status(*, full: bool = False) -> int:
     _check_semaphore(project_branch=project_branch)
     _check_pve(full=full)
 
-    if full:
-        console.ok(
-            "infra-manager готов, полный контракт PVE API подтверждён"
-        )
+    snapshot = (
+        _load_full_status_snapshot(project_branch)
+        if full
+        else None
+    )
+
+    if quiet:
+        return 0
+
+    if snapshot is not None:
+        _show_full_status(snapshot)
     else:
         console.ok("infra-manager готов")
 
