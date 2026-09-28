@@ -98,7 +98,7 @@ guest.yaml
 infra-manager-status --full
 ```
 
-Его формирует `scripts/infra-manager/infra_manager/status.py`. Поэтому тот же экран доступен в любой момент без запуска временного 990:
+Состав проверок, источники данных, подписи и секции экрана задаёт `infrastructure/guests/910-infra-manager/status.yaml`. `scripts/infra-manager/infra_manager/status.py` только выполняет разрешённые проверки, получает фактические значения и печатает описанный экран. Поэтому тот же экран доступен в любой момент без запуска временного 990:
 
 ```bash
 pct exec 910 -- infra-manager-status --full
