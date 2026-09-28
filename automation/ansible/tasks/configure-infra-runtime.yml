@@ -273,6 +273,15 @@
       OPENTOFU_VERSION={{ provision.docker.services.runtime.tools.opentofu }}
       PACKER_VERSION={{ provision.docker.services.runtime.tools.packer }}
 
+- name: Установить описание состояния 910
+  ansible.builtin.copy:
+    remote_src: true
+    src: "{{ provision.paths.bootstrap_repository }}/infrastructure/guests/{{ guest }}/status.yaml"
+    dest: "{{ provision.paths.configuration }}/status.yaml"
+    owner: root
+    group: root
+    mode: "0644"
+
 - name: Установить служебный код 910
   ansible.builtin.copy:
     remote_src: true
