@@ -40,6 +40,9 @@ jobs:
       - name: Run infra-manager Python foundation checks
         run: python scripts/tests/test-infra-manager-python.py
 
+      - name: Run bootstrap host Python checks
+        run: python scripts/tests/test-bootstrap-host.py
+
       - name: Run guest deployment checks
         run: python scripts/tests/test-guest-deploy.py
 
