@@ -54,6 +54,18 @@ class Paths:
         return self.ansible_dir / "guest_ed25519.pub"
 
     @property
+    def pve_host_dir(self) -> Path:
+        return self.config_dir / "pve-host"
+
+    @property
+    def pve_host_private_key(self) -> Path:
+        return self.pve_host_dir / "root_ed25519"
+
+    @property
+    def pve_host_known_hosts(self) -> Path:
+        return self.pve_host_dir / "known_hosts"
+
+    @property
     def semaphore_dir(self) -> Path:
         return self.data_dir / "semaphore"
 
