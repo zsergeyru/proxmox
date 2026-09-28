@@ -551,6 +551,18 @@ def _project_revision(repo_root: Path) -> str:
     return result.stdout.strip() or "не определена"
 
 
+def _project_branch(repo_root: Path) -> str:
+    """Вернуть фактическую ветку рабочей копии проекта."""
+    result = run(
+        ["git", "-C", str(repo_root), "branch", "--show-current"],
+        check=False,
+        capture_output=True,
+    )
+    if not result.returncode and result.stdout.strip():
+        return result.stdout.strip()
+    return SETTINGS.project_branch()
+
+
 def _show_guest_summary(
     repo_root: Path,
     context: DeploymentContext,
@@ -558,6 +570,7 @@ def _show_guest_summary(
     """Показать итог полного развёртывания обычного гостя."""
     separator = "=" * 60
     kind = "VM" if context.kind == "vm" else "LXC"
+    branch = _project_branch(repo_root)
     revision = _project_revision(repo_root)
 
     print()
@@ -575,7 +588,7 @@ def _show_guest_summary(
     print(f"  Узел:    {context.node}")
 
     print("\nПроект")
-    print(f"  Ветка:   {SETTINGS.project_branch()}")
+    print(f"  Ветка:   {branch}")
     print(f"  Версия:  {revision}")
 
     print()
