@@ -11,6 +11,7 @@
     - { path: "{{ provision.paths.secrets }}", owner: root, group: root, mode: "0700" }
     - { path: "{{ provision.paths.ca }}", owner: root, group: root, mode: "0755" }
     - { path: "{{ provision.paths.ansible_identity }}", owner: "1001", group: "0", mode: "0700" }
+    - { path: "{{ provision.paths.pve_host_identity }}", owner: "1001", group: "0", mode: "0700" }
     - { path: "{{ provision.paths.data }}", owner: root, group: root, mode: "0755" }
     - { path: "{{ provision.paths.semaphore_data }}", owner: "1001", group: "0", mode: "0770" }
     - { path: "{{ provision.paths.opentofu_data }}", owner: "1001", group: "0", mode: "0750" }
@@ -121,6 +122,32 @@
     owner: "1001"
     group: "0"
     mode: "0600"
+
+- name: Проверить root SSH-ключ PVE
+  ansible.builtin.stat:
+    path: "{{ provision.access.pve.root_ssh_private_key }}"
+  register: pve_root_ssh_key
+
+- name: Требовать root SSH-доступ к PVE
+  ansible.builtin.assert:
+    that:
+      - pve_root_ssh_key.stat.exists
+      - pve_root_ssh_key.stat.size | int > 0
+    fail_msg: "Первоначальный контур должен передать root SSH-ключ PVE"
+
+- name: Защитить root SSH-ключ PVE
+  ansible.builtin.file:
+    path: "{{ provision.access.pve.root_ssh_private_key }}"
+    owner: "1001"
+    group: "0"
+    mode: "0600"
+
+- name: Защитить known_hosts PVE
+  ansible.builtin.file:
+    path: "{{ provision.access.pve.root_ssh_known_hosts }}"
+    owner: "1001"
+    group: "0"
+    mode: "0644"
 
 - name: Скопировать Compose и образ infra-runtime
   ansible.builtin.copy:
