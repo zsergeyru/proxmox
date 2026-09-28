@@ -6,19 +6,17 @@
 
 ## Штатный первоначальный путь
 
-Основной публичный `bootstrap-pve.sh` использует новую схему:
+Публичный `bootstrap-pve.sh` выполняет только минимальный переход к закрытому проекту:
 
 ```text
 PVE
 → временный LXC 990 bootstrap-runner
-→ отдельное состояние OpenTofu только для 910
-→ LXC 910 infra-manager
-→ общий provision.yaml + Ansible
-→ проверка infra-manager-status --full
-→ удаление временного 990, его state, секретов и PVE API-доступа
+→ read-only Deploy Key
+→ clone закрытого zsergeyru/proxmox
+→ scripts/bootstrap-runner/bootstrap-host.sh
 ```
 
-Если 910 уже существует, новый запуск создаёт временный 990 только как среду выполнения Ansible и не создаёт новый OpenTofu state для 910.
+После передачи управления вся логика PVE API, OpenTofu, 910, Ansible, повторного запуска и очистки выполняется закрытым проектом. Публичный репозиторий не содержит политики PVE-доступа и не знает устройство 910.
 
 ## Главный принцип
 
@@ -46,11 +44,14 @@ GitHub public: zsergeyru/proxmox-bootstrap
         ├── read-only Deploy Key проекта
         └── временный LXC 990
                 │
-                ├── временный PVE API token
-                ├── bootstrap-runtime
-                ├── OpenTofu
-                ├── Ansible
-                └── отдельное состояние только для 910
+                ├── clone закрытого проекта
+                └── private bootstrap-host.sh
+                        │
+                        ├── временный PVE API token
+                        ├── bootstrap-runtime
+                        ├── OpenTofu
+                        ├── Ansible
+                        └── отдельное состояние только для 910
                         │
                         ▼
                 LXC 910 infra-manager
