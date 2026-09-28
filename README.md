@@ -1,371 +1,320 @@
 # Домашняя инфраструктура Proxmox
 
-Закрытый репозиторий конфигурации, кода и документации домашней инфраструктуры на Proxmox VE.
+Репозиторий хранит требуемое состояние домашней инфраструктуры Proxmox VE, средства её развёртывания и документацию.
 
-Здесь хранится требуемое состояние инфраструктуры, документация, сценарии развёртывания и настройка постоянного управляющего контейнера `910 infra-manager`.
+Постоянным управляющим гостем является `910 infra-manager`. Он создаётся временным первоначальным контуром `990 bootstrap-runner`, после чего управляет остальными гостями.
 
-## Быстрый старт
+## Текущее состояние перехода
 
-Обычная установка или повторное применение без параметров выполняется на физическом PVE от `root` сразу из публичного репозитория:
+В ветке `feature/bootstrap-990` уже реализована новая схема:
 
-~~~bash
-curl -fsSL https://raw.githubusercontent.com/zsergeyru/proxmox-bootstrap/main/bootstrap-pve.sh | bash
-~~~
+```text
+PVE
+→ временный LXC 990 bootstrap-runner
+→ отдельное состояние OpenTofu только для 910
+→ LXC 910 infra-manager
+→ общий provision.yaml + Ansible
+→ постоянный infra-runtime
+```
 
-Если нужны параметры, сценарий сначала скачивается:
+В публичном репозитории `zsergeyru/proxmox-bootstrap` для этой схемы существует отдельный сценарий:
 
-~~~bash
-curl -fsSL https://raw.githubusercontent.com/zsergeyru/proxmox-bootstrap/main/bootstrap-pve.sh -o bootstrap-pve.sh
-chmod +x bootstrap-pve.sh
-~~~
+```text
+bootstrap-runner-990.sh
+```
 
-Справка:
+Основной публичный `bootstrap-pve.sh` пока не переведён на новую схему. Его переключение выполняется отдельным этапом после завершения текущей доработки и сквозной проверки на реальном PVE.
 
-~~~bash
-./bootstrap-pve.sh --help
-~~~
+## Главный принцип
 
-Публичный репозиторий:
+Физический PVE остаётся максимально чистым.
 
-~~~text
-https://github.com/zsergeyru/proxmox-bootstrap
-~~~
+На PVE постоянно не устанавливаются:
 
-На первом запуске bootstrap создаёт постоянный GitHub Deploy Key на PVE и показывает открытый ключ. Его нужно один раз добавить в `zsergeyru/proxmox` как read-only Deploy Key.
+- Docker;
+- Semaphore;
+- OpenTofu;
+- Ansible;
+- Packer;
+- прикладные службы проекта.
 
-После этого повторные установки и пересоздания 910 используют тот же ключ.
+Постоянные средства управления работают внутри 910.
 
 ## Общая архитектура
 
-~~~text
+```text
 GitHub public: zsergeyru/proxmox-bootstrap
         │
-        │ bootstrap-pve.sh
         ▼
 физический PVE
         │
-        ├── постоянный GitHub Deploy Key
-        ├── LXC 910 infra-manager
-        └── ограниченный PVE API-доступ для 910
-                         │
-                         ▼
-                 LXC 910 infra-manager
-                         │
-                         ├── закрытый repo zsergeyru/proxmox
-                         ├── Docker
-                         └── infra-runtime
-                             ├── Semaphore
-                             ├── OpenTofu
-                             ├── Ansible
-                             ├── Packer
-                             └── proxmoxer
-                                  │
-                                  ▼
+        ├── read-only Deploy Key проекта
+        └── временный LXC 990
+                │
+                ├── временный PVE API token
+                ├── bootstrap-runtime
+                ├── OpenTofu
+                ├── Ansible
+                └── отдельное состояние только для 910
+                        │
+                        ▼
+                LXC 910 infra-manager
+                        │
+                        ├── Docker
+                        └── infra-runtime
+                            ├── Semaphore
+                            ├── OpenTofu
+                            ├── Ansible
+                            ├── Packer
+                            └── proxmoxer
+                                 │
+                                 ▼
                               PVE API
-                                  │
-                                  └── pool managed
-~~~
+```
 
-Физический PVE должен оставаться максимально чистым. Docker, Semaphore, OpenTofu, Ansible, Packer и прикладные сервисы на хост не устанавливаются.
+После подтверждения готовности 910 временный 990 и его права должны быть удалены.
 
-## Что делает публичный bootstrap
+## Единый путь настройки гостей
 
-`bootstrap-pve.sh` выполняется только на PVE.
+Для Linux-гостей используется один механизм:
 
-~~~text
-проверить root и PVE
-→ получить блокировку
-→ проверить vmbr0, local и local-lvm
-→ создать или проверить LXC 910
-→ запустить 910 и дождаться сети
-→ создать или использовать постоянный GitHub Deploy Key
-→ минимально подготовить Debian внутри 910
-→ передать GitHub Deploy Key внутрь 910
-→ проверить read-only доступ к закрытому проекту
-→ получить или обновить закрытый проект
-→ выполнить scripts/infra-manager/pve-bootstrap-access.sh на PVE
-→ выполнить scripts/infra-manager/setup.sh внутри 910
-→ проверить итоговое состояние
-~~~
+```text
+guest.yaml
+→ OpenTofu
+→ provision.yaml
+→ общий Ansible playbook
+```
 
-В публичном bootstrap не хранится конкретная политика PVE ACL и не описывается внутренняя настройка Semaphore/OpenTofu/Ansible/Packer.
+910 не имеет отдельного механизма настройки ОС.
+
+Его единственное архитектурное отличие — объект Proxmox 910 принадлежит отдельному состоянию временного 990. Постоянное состояние OpenTofu внутри 910 никогда не содержит ресурс 910.
+
+Старый отдельный `setup.sh` удалён.
+
+## Первоначальное создание 910
+
+Текущая последовательность новой схемы:
+
+```text
+PVE
+→ создать 990
+→ подготовить временный PVE API-доступ 990
+→ получить закрытый проект
+→ подготовить bootstrap-runtime
+→ deploy-guest 910 --infrastructure-only
+→ общий Ansible: базовая часть provision.yaml
+→ передать в 910 PVE CA, постоянный PVE token и GitHub-доступ
+→ общий Ansible: полностью применить provision.yaml
+→ infra-manager-status --full
+```
+
+Временный OpenTofu state 990 обязан содержать ровно один ресурс:
+
+```text
+proxmox_virtual_environment_container.guest["910"]
+```
 
 ## LXC 910 infra-manager
 
-~~~text
-CTID:        910
-hostname:    infra-manager
-OS:          Debian 13
-unprivileged yes
-CPU:         2
-RAM:         2048 MiB
-swap:        512 MiB
-root disk:   32 GiB
-storage:     local-lvm
-bridge:      vmbr0
-onboot:      yes
-protection:  yes
-features:    nesting=1,keyctl=1
-tags:        infra-manager;proxmox-bootstrap
-~~~
+Основной контракт хранится в:
 
-910 является специальным управляющим контейнером: его создаёт публичный bootstrap, OpenTofu не управляет самим 910, 910 не входит в `managed`, постоянный root SSH с 910 на PVE не используется.
+```text
+infrastructure/guests/910-infra-manager/guest.yaml
+```
 
-Подробнее: [`infrastructure/guests/910-infra-manager/README.md`](infrastructure/guests/910-infra-manager/README.md).
+Текущие параметры:
 
-## GitHub Deploy Key
+```text
+VMID:          910
+hostname:      infra-manager
+тип:           unprivileged LXC
+ОС:            Debian 13 amd64
+CPU:           2
+RAM:           4096 MiB
+swap:          1024 MiB
+диск:          32 GiB
+хранилище:     local-lvm
+IPv4:          192.168.9.10/16
+bridge:        vmbr0
+onboot:        yes
+order:         10
+startup delay: 30 s
+protection:    yes
+```
 
-Постоянный ключ хранится на PVE:
+910 использует общий профиль `debian-lxc-docker` и имеет:
 
-~~~text
-/root/.config/proxmox-bootstrap/
-├── github_proxmox_repo_ed25519
-└── github_proxmox_repo_ed25519.pub
-~~~
+```yaml
+pve_management: false
+```
 
-Права: каталог `0700`, private key `0600`, public key `0644`.
+Это исключает 910 из собственного постоянного состояния OpenTofu.
 
-При создании или повторной настройке 910 bootstrap копирует этот ключ внутрь контейнера для чтения закрытого репозитория. Удаление и повторное создание 910 не требует нового Deploy Key.
+Подробнее: `infrastructure/guests/910-infra-manager/README.md`.
 
-## Debian template
+## provision.yaml 910
 
-Если подходящий Debian 13 LXC template уже существует в `local:vztmpl`, bootstrap использует его и не считает своим.
+Требуемое содержимое гостя задаёт:
 
-Если template отсутствует:
+```text
+infrastructure/guests/910-infra-manager/provision.yaml
+```
 
-~~~text
-скачать Debian 13 template
-→ отметить его как временный
-→ создать 910
-→ сразу удалить скачанный template
-~~~
+Он описывает:
 
-После успешной установки скачанный bootstrap template на PVE не остаётся. Если установка прервалась, он удаляется при `--remove` или `--purge`. Заранее существовавший template автоматически не удаляется.
+- системные пакеты;
+- Docker;
+- постоянные каталоги;
+- `infra-runtime`;
+- Semaphore;
+- версии OpenTofu и Packer;
+- постоянные данные;
+- пути PVE/GitHub-доступов;
+- обязательные проверки.
 
-## Закрытый проект внутри 910
+Общий Ansible применяет этот контракт. Сложные изолированные операции могут выполняться узкими Python-командами, например синхронизацией объектов Semaphore.
 
-Рабочая копия:
+## Постоянные данные 910
 
-~~~text
-/var/lib/infra-manager/bootstrap-repo
-~~~
+Основные области:
 
-Источник:
-
-~~~text
-git@github.com:zsergeyru/proxmox.git
-~~~
-
-По умолчанию используется ветка `main`. При повторном bootstrap рабочая копия обновляется до текущего состояния этой ветки.
-
-Основные сценарии:
-
-~~~text
-scripts/infra-manager/pve-bootstrap-access.sh
-scripts/infra-manager/setup.sh
-scripts/infra-manager/jobs/opentofu-plan.py
-scripts/infra-manager/jobs/deploy-guest.py
-scripts/infra-manager/jobs/build-template.py
-scripts/infra-manager/jobs/verify-template.py
-scripts/guests/render-opentofu-input.py
-scripts/infra-manager/commands/status.sh
-scripts/infra-manager/commands/pve-access-check.sh
-scripts/infra-manager/commands/pve-lifecycle-test.sh
-~~~
-
-## Доступ 910 к PVE
-
-Используется API token:
-
-~~~text
-root@pam!infra-manager
-privsep=1
-~~~
-
-Политика доступа хранится только в `scripts/infra-manager/pve-bootstrap-access.sh`.
-
-| Путь | Роль | Назначение |
-|---|---|---|
-| `/` | `PVEAuditor` | чтение состояния PVE |
-| `/vms` | `PVEVMAdmin` | жизненный цикл и конфигурация всех VM/LXC |
-| `/pool/managed` | `PVEVMAdmin`, `PVEPoolUser` | управление гостями, назначение в pool и чтение pool |
-| `/storage/local-lvm` | `PVEDatastoreUser` | размещение дисков |
-| `/storage/local` | `PVEDatastoreAdmin` | загрузка установочных ISO Packer |
-| `/sdn/zones/localnetwork/vmbr0` | `PVESDNUser` | использование основной сети |
-
-`managed` больше не является границей прав 910: основной доступ к гостям задаётся на `/vms`. Сам 910 находится вне `managed`.
-
-Подробнее: [`docs/700-security/710-pve-access.md`](docs/700-security/710-pve-access.md).
-
-## Что работает внутри 910
-
-~~~text
-Semaphore v2.18.30 (локальное выполнение заданий в infra-runtime)
-SQLite
-OpenTofu 1.12.6
-Packer 1.15.4
-Ansible
-proxmoxer
-~~~
-
-Основные постоянные области:
-
-~~~text
+```text
 /etc/infra-manager/
 /var/lib/infra-manager/
 /opt/infra-manager/
-~~~
+```
 
-OpenTofu state хранится локально:
+Критичные данные:
 
-~~~text
+```text
+/etc/infra-manager/secrets/
+/etc/infra-manager/ansible/
+/var/lib/infra-manager/semaphore/
+/var/lib/infra-manager/opentofu/state/
+```
+
+Постоянный OpenTofu state:
+
+```text
 /var/lib/infra-manager/opentofu/state/proxmox.tfstate
-~~~
+```
 
-State не хранится в Git и должен резервироваться.
+Он не хранится в Git и должен резервироваться.
 
-## Semaphore
+## Доступ 910 к PVE
 
-Bootstrap автоматически подготавливает используемые объекты Semaphore:
+Постоянная идентичность:
 
-~~~text
-Project
-Git repository proxmox
-OpenTofu PVE Variable Group
-OpenTofu Plan
-Build Template 9000
-Deploy Guest 410
-~~~
+```text
+root@pam!infra-manager
+privsep=1
+```
 
-Инфраструктурные задания Semaphore выполняются как Python-сценарии. Постоянная SSH-идентичность Ansible создаётся внутри 910 и используется для настройки управляемых Linux-гостей.
+Политика прав находится только в:
+
+```text
+scripts/infra-manager/pve-bootstrap-access.sh
+```
+
+Постоянный root SSH с 910 на PVE не используется.
+
+## GitHub Deploy Key
+
+Первоначальный read-only ключ проекта хранится на PVE:
+
+```text
+/root/.config/proxmox-bootstrap/github_proxmox_repo_ed25519
+```
+
+Он необходим для восстановления 910 из закрытого репозитория ещё до появления постоянного хранилища секретов внутри 910.
+
+Копия ключа передаётся в 910 для Semaphore.
+
+## Semaphore и infra-runtime
+
+Постоянный контейнер:
+
+```text
+infra-runtime
+```
+
+содержит:
+
+- Semaphore;
+- OpenTofu;
+- Ansible;
+- Packer;
+- Python;
+- proxmoxer;
+- Git;
+- SSH-клиент.
+
+Первая версия использует SQLite и локальное выполнение заданий Semaphore.
+
+Автоматически поддерживаются:
+
+- проект `Proxmox Infrastructure`;
+- Git-репозиторий `proxmox`;
+- ключ `GitHub project read-only`;
+- набор переменных `OpenTofu PVE`;
+- `OpenTofu Plan`;
+- `Build Template 9000`;
+- `Deploy Guest 410`.
+
+## Первичный пароль Semaphore
+
+Пароль создаётся один раз и хранится с правами `0600`:
+
+```text
+/etc/infra-manager/secrets/initial-admin-password
+```
+
+Он не выводится автоматически общим Ansible-процессом и не должен попадать в журнал.
+
+Получить его от root внутри 910 можно явно:
+
+```bash
+cat /etc/infra-manager/secrets/initial-admin-password
+```
 
 ## Служебные команды 910
 
-~~~bash
+```bash
 infra-manager-status
 infra-manager-status --full
 infra-manager-pve-access-check
 /usr/local/sbin/infra-manager-pve-lifecycle-test --apply
-~~~
+```
 
-## Технический лог bootstrap
+## Основные каталоги проекта
 
-~~~text
-/var/log/infra-manager/bootstrap.log
-~~~
-
-На экран выводятся основные этапы, успешные проверки, предупреждения и ошибки; подробный служебный вывод хранится в этом файле.
-
-## Команды публичного bootstrap
-
-Без параметров можно запускать сразу из GitHub:
-
-~~~bash
-curl -fsSL https://raw.githubusercontent.com/zsergeyru/proxmox-bootstrap/main/bootstrap-pve.sh | bash
-~~~
-
-Для остальных режимов используется скачанный `bootstrap-pve.sh`.
-
-Скачать:
-
-~~~bash
-curl -fsSL https://raw.githubusercontent.com/zsergeyru/proxmox-bootstrap/main/bootstrap-pve.sh -o bootstrap-pve.sh
-chmod +x bootstrap-pve.sh
-~~~
-
-Справка:
-
-~~~bash
-./bootstrap-pve.sh --help
-~~~
-
-Только проверка:
-
-~~~bash
-./bootstrap-pve.sh --check
-~~~
-
-Восстановление потерянного PVE API token:
-
-~~~bash
-./bootstrap-pve.sh --recover
-~~~
-
-Мягкое удаление:
-
-~~~bash
-./bootstrap-pve.sh --remove
-~~~
-
-Полное удаление:
-
-~~~bash
-./bootstrap-pve.sh --purge
-~~~
-
-Статический адрес 910:
-
-~~~bash
-./bootstrap-pve.sh \
-  --ip 192.168.1.90/24 \
-  --gateway 192.168.1.1
-~~~
-
-Другая ветка закрытого проекта:
-
-~~~bash
-./bootstrap-pve.sh --project-branch NAME
-~~~
-
-## Мягкое и полное удаление
-
-`--remove` удаляет LXC 910, API token, ACL, пустой `managed` и временный Debian template, если он остался. Постоянный GitHub Deploy Key на PVE сохраняется.
-
-`--purge` делает то же самое и дополнительно удаляет `/root/.config/proxmox-bootstrap/` вместе с GitHub Deploy Key.
-
-Не удаляются автоматически VM 100 HAOS, хранилище `backup`, чужой объект с VMID 910, непустой `managed`, заранее существовавший Debian template и другие VM/LXC.
-
-## Структура репозитория
-
-~~~text
+```text
 proxmox/
-├── docs/        документация
-├── infrastructure/   описание состояния инфраструктуры
-│   ├── guests/        требуемое состояние VM/LXC
-│   ├── host/          состояние физического PVE
-│   └── schemas/       схемы проверки описаний и итогового состояния
-├── automation/       средства автоматизированного управления инфраструктурой
-│   ├── opentofu/      создание, изменение и удаление VM/LXC
-│   ├── packer/        сборка базовых шаблонов VM
-│   └── ansible/       повторяемая настройка Linux-гостей
-├── scripts/          управление 910, задания Semaphore и проверки
-└── archive/     исторические материалы
-~~~
+├── docs/               документация
+├── infrastructure/     требуемое состояние
+│   ├── guests/         описания VM/LXC
+│   ├── host/           состояние PVE-хоста
+│   └── schemas/        схемы проверки
+├── automation/
+│   ├── opentofu/       виртуальные объекты PVE
+│   ├── packer/         базовые шаблоны VM
+│   └── ansible/        настройка Linux-гостей
+└── scripts/            задания, проверки и служебная логика
+```
 
-## Документация
+## Связанные документы
 
-- [`docs/100-architecture/`](docs/100-architecture/) — архитектура;
-- [`docs/200-pve/`](docs/200-pve/) — PVE и первоначальная подготовка;
-- [`docs/300-guests/`](docs/300-guests/) — гости и их требуемое состояние;
-- [`docs/400-network/`](docs/400-network/) — сеть, DNS, маршрутизация и VPN;
-- [`docs/500-ai/`](docs/500-ai/) — AI-управление;
-- [`docs/600-storage/`](docs/600-storage/) — хранилища и резервные копии;
-- [`docs/700-security/`](docs/700-security/) — доступ и безопасность;
-- [`docs/800-operations/`](docs/800-operations/) — эксплуатация и восстановление.
-
-С bootstrap особенно связаны:
-
-- [`docs/200-pve/210-host-bootstrap.md`](docs/200-pve/210-host-bootstrap.md);
-- [`docs/700-security/710-pve-access.md`](docs/700-security/710-pve-access.md);
-- [`docs/800-operations/810-deployment.md`](docs/800-operations/810-deployment.md);
-- [`infrastructure/guests/910-infra-manager/README.md`](infrastructure/guests/910-infra-manager/README.md).
+- `docs/200-pve/210-host-bootstrap.md` — первоначальный контур 990;
+- `docs/300-guests/320-guest-manifest.md` — контракт `guest.yaml`;
+- `docs/700-security/710-pve-access.md` — права 910;
+- `docs/800-operations/810-deployment.md` — порядок развёртывания;
+- `infrastructure/guests/910-infra-manager/README.md` — паспорт 910.
 
 ## Общие правила
 
-- Git хранит воспроизводимую конфигурацию и документацию, но не рабочие секреты.
-- Закрытые ключи, пароли и токены в Git не добавляются.
-- PVE остаётся максимально чистым гипервизором.
-- Обычные управляемые VM/LXC входят в `managed`.
-- 910 является управляющим исключением и находится вне `managed`.
-- Новые права PVE не выдаются заранее: они добавляются только под реально используемую операцию.
-- `archive/` и `docs/legacy/` не являются источниками действующей конфигурации.
+- секреты не хранятся в Git;
+- PVE остаётся минимальным гипервизором;
+- 910 не управляет собственным объектом через постоянный OpenTofu state;
+- настройка Linux-гостей выполняется общим Ansible-механизмом;
+- новые права выдаются только под реально используемую функцию;
+- `archive/` и устаревшая документация не являются источниками действующей конфигурации.
