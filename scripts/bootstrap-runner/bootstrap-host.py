@@ -317,6 +317,38 @@ class BootstrapHost:
         role_ok = "role=infra-manager" in description
         return hostname_ok and unprivileged_ok and owner_ok and role_ok
 
+    def ensure_infra_container_features(self) -> None:
+        """Выставить host-only LXC-флаги, недоступные временному API token."""
+        if not self.infra_config_is_expected():
+            self.fail(f"LXC {self.infra_ctid} не соответствует контракту infra-manager")
+
+        config = self.pct_config(self.infra_ctid)
+        features = next(
+            (line.partition(": ")[2] for line in config.splitlines() if line.startswith("features: ")),
+            "",
+        )
+        current = {item.strip() for item in features.split(",") if item.strip()}
+        required = {"nesting=1", "keyctl=1"}
+
+        if not required.issubset(current):
+            self.pct(
+                "set",
+                str(self.infra_ctid),
+                "--features",
+                "nesting=1,keyctl=1",
+                quiet=True,
+            )
+
+        verified = self.pct_config(self.infra_ctid)
+        feature_line = next(
+            (line for line in verified.splitlines() if line.startswith("features: ")),
+            "",
+        )
+        if "nesting=1" not in feature_line or "keyctl=1" not in feature_line:
+            self.fail(f"не удалось настроить LXC features для {self.infra_ctid}")
+
+        self.ok("LXC 910 получил необходимые nesting и keyctl")
+
     def ensure_existing_infra_running(self) -> None:
         if not self.infra_exists():
             return
@@ -675,6 +707,7 @@ class BootstrapHost:
                 "Продолжение создания LXC 910 через OpenTofu",
                 "LXC 910 приведён к состоянию bootstrap-runner",
             )
+            self.ensure_infra_container_features()
             self.deploy_910_phase(
                 "base",
                 "Базовая настройка LXC 910 через Ansible",
@@ -702,6 +735,7 @@ class BootstrapHost:
                 "Создание LXC 910 через OpenTofu",
                 "LXC 910 создан через состояние bootstrap-runner",
             )
+            self.ensure_infra_container_features()
             self.deploy_910_phase(
                 "base",
                 "Базовая настройка LXC 910 через Ansible",
