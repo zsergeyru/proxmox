@@ -74,7 +74,7 @@
 
 - name: Удалить временную копию PVE API credential
   ansible.builtin.file:
-    path: {{ provision.access.pve.staging_credential }}
+    path: "{{ provision.access.pve.staging_credential }}"
     state: absent
 
 - name: Проверить постоянный закрытый ключ Ansible
