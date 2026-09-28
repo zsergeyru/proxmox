@@ -246,6 +246,80 @@ def test_ansible_phases_enable_progress() -> None:
         raise AssertionError("Подробный вывод должен продолжать сохраняться в журнале")
 
 
+class SemaphoreAccessHarness(BootstrapHost):
+    def __init__(self, *, shown: bool) -> None:
+        super().__init__("apply")
+        self.shown = shown
+        self.commands: list[tuple[str, ...]] = []
+
+    def log(self, message: str) -> None:
+        self.commands.append(("log", message))
+
+    def infra_test(self, flag: str, path: str) -> bool:
+        if path.endswith(".initial-admin-password-shown"):
+            return self.shown
+        if path.endswith("initial-admin-password"):
+            return True
+        raise AssertionError(f"Неожиданная проверка: {flag} {path}")
+
+    def infra_exec(self, *args: str, **kwargs):
+        del kwargs
+        command = tuple(args)
+        self.commands.append(command)
+        if command == ("hostname", "-I"):
+            return SimpleNamespace(returncode=0, stdout="192.168.9.10 \n", stderr="")
+        if command == (
+            "cat",
+            "/etc/infra-manager/secrets/initial-admin-password",
+        ):
+            return SimpleNamespace(returncode=0, stdout="secret-pass\n", stderr="")
+        if command[:3] == ("install", "-m", "0600"):
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+        raise AssertionError(f"Неожиданная команда: {command!r}")
+
+
+def test_semaphore_access_password_is_shown_once() -> None:
+    import contextlib
+    import io
+
+    host = SemaphoreAccessHarness(shown=False)
+    output = io.StringIO()
+    with contextlib.redirect_stdout(output):
+        host.show_semaphore_access()
+
+    text_output = output.getvalue()
+    if "http://192.168.9.10:3000" not in text_output:
+        raise AssertionError("Должен выводиться адрес Semaphore")
+    if "Логин:  admin" not in text_output:
+        raise AssertionError("Должен выводиться логин Semaphore")
+    if "Пароль: secret-pass" not in text_output:
+        raise AssertionError("Первичный пароль должен выводиться при первом запуске")
+    if not any(
+        command[:3] == ("install", "-m", "0600")
+        for command in host.commands
+        if isinstance(command, tuple)
+    ):
+        raise AssertionError("После показа пароля должен создаваться маркер")
+
+
+def test_semaphore_access_password_is_not_repeated() -> None:
+    import contextlib
+    import io
+
+    host = SemaphoreAccessHarness(shown=True)
+    output = io.StringIO()
+    with contextlib.redirect_stdout(output):
+        host.show_semaphore_access()
+
+    text_output = output.getvalue()
+    if "http://192.168.9.10:3000" not in text_output:
+        raise AssertionError("Адрес Semaphore должен показываться всегда")
+    if "Пароль:" in text_output:
+        raise AssertionError("Первичный пароль не должен показываться повторно")
+    if any(command[0] == "cat" for command in host.commands if command):
+        raise AssertionError("После первого показа пароль даже не должен читаться")
+
+
 class ApplyHarness(BootstrapHost):
     def __init__(self, mode: str, *, infra_exists: bool, owns_state: bool) -> None:
         super().__init__(mode)
@@ -475,6 +549,8 @@ def main() -> None:
         test_pve_node_address,
         test_progress_streaming,
         test_ansible_phases_enable_progress,
+        test_semaphore_access_password_is_shown_once,
+        test_semaphore_access_password_is_not_repeated,
         test_new_install_flow,
         test_existing_without_bootstrap_state,
         test_resume_unfinished_initial_state,
