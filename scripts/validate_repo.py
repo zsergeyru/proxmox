@@ -35,6 +35,7 @@ SCHEMAS = {
     "source": ROOT / "infrastructure/schemas/guest.schema.yaml",
     "defaults": ROOT / "infrastructure/schemas/guest-defaults.schema.yaml",
     "effective": ROOT / "infrastructure/schemas/guest-effective.schema.yaml",
+    "status": ROOT / "infrastructure/schemas/guest-status.schema.yaml",
 }
 DIR_RE = re.compile(r"^(\d{3})-(.+)$")
 LXC_SELECTOR_RE = re.compile(
@@ -342,6 +343,11 @@ def manifests() -> list[Path]:
     return found
 
 
+def status_manifests() -> list[Path]:
+    """Вернуть машинные описания проверки и вывода состояния гостей."""
+    return sorted(GUESTS.glob("*/status.yaml"))
+
+
 @dataclass
 class ValidationState:
     defaults: dict
@@ -489,6 +495,43 @@ def _validate_manifest(path: Path, state: ValidationState) -> None:
         _validate_standalone_manifest(rel, data, state)
 
 
+def _validate_status_manifest(path: Path, state: ValidationState) -> None:
+    rel = path.relative_to(ROOT)
+    match = DIR_RE.fullmatch(path.parent.name)
+    if match is None:
+        fail(
+            f"{rel}: каталог состояния должен иметь имя "
+            "NNN-name (ровно три цифры VMID, дефис и непустое имя)"
+        )
+        return
+
+    data = load_yaml(path)
+    if data is None or not validate_schema(
+        rel,
+        data,
+        state.validators["status"],
+        "status schema",
+    ):
+        return
+
+    expected_vmid = int(match.group(1))
+    if data["guest_vmid"] != expected_vmid:
+        fail(
+            f"{rel}: guest_vmid {data['guest_vmid']} не соответствует "
+            f"имени каталога {expected_vmid}"
+        )
+
+    sources = set(data["data"])
+    for section in data["sections"]:
+        for field in section["fields"]:
+            source = field.get("source")
+            if source is not None and source not in sources:
+                fail(
+                    f"{rel}: поле {field['label']!r} ссылается "
+                    f"на неизвестный источник {source!r}"
+                )
+
+
 def _warn_unused_profiles(state: ValidationState) -> None:
     rel_defaults = DEFAULTS.relative_to(ROOT)
     for profile in sorted(set(state.profiles) - state.used_profiles):
@@ -504,6 +547,8 @@ def validate() -> None:
         return
     for path in manifests():
         _validate_manifest(path, state)
+    for path in status_manifests():
+        _validate_status_manifest(path, state)
     _warn_unused_profiles(state)
 
 
