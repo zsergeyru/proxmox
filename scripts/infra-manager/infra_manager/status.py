@@ -702,14 +702,20 @@ def _resolve_status_data(
     *,
     project_branch: str,
 ) -> dict[str, str]:
-    """Собрать все фактические данные, объявленные в status.yaml."""
-    return {
+    """Собрать и проверить все данные, объявленные в status.yaml."""
+    values = {
         name: _resolve_data_source(
             source,
             project_branch=project_branch,
         )
         for name, source in definition.data.items()
     }
+
+    for section in definition.sections:
+        for field in section["fields"]:
+            _field_value(field, values)
+
+    return values
 
 
 def _render_template(template: str, values: dict[str, str]) -> str:
