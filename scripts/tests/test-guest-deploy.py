@@ -162,9 +162,11 @@ def check_guest_summary() -> None:
             ),
         ),
         patch.object(
-            guest_deploy_module.SETTINGS,
-            "project_branch",
-            return_value="feature/bootstrap-990",
+            guest_deploy_module,
+            "SETTINGS",
+            SimpleNamespace(
+                project_branch=lambda: "feature/bootstrap-990",
+            ),
         ),
         patch("builtins.print") as mocked_print,
         patch.object(guest_deploy_module.console, "ok") as mocked_ok,
@@ -190,6 +192,8 @@ def check_guest_summary() -> None:
     ok_messages = [call.args[0] for call in mocked_ok.call_args_list]
     if "Настройка ОС через Ansible завершена" not in ok_messages:
         fail("Итог развёртывания не подтверждает настройку Ansible")
+    if "Semaphore" in output:
+        fail("Обычный итог гостя не должен содержать сведения о Semaphore")
 
 
 def main_test() -> None:
