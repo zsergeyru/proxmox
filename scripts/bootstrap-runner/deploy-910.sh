@@ -58,12 +58,12 @@ fi
 
 case "$PHASE" in
     infrastructure)
-        printf '[ОК] Инфраструктура 910 создана через отдельное состояние bootstrap-runner\n'
+        printf '[ОК] Основа LXC 910 готова\n'
         ;;
     base)
-        printf '[ОК] Базовая часть provision.yaml 910 применена общим Ansible-механизмом\n'
+        printf '[ОК] Базовая настройка 910 завершена\n'
         ;;
     provision)
-        printf '[ОК] provision.yaml 910 применён общим Ansible-механизмом\n'
+        printf '[ОК] Полная настройка 910 завершена\n'
         ;;
 esac
