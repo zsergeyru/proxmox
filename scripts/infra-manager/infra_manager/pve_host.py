@@ -126,8 +126,10 @@ def ensure_infra_self_access(
     public_key: str,
 ) -> None:
     """Разрешить Ansible-ключу 910 вход в сам 910 через доверенный PVE."""
-    if not public_key.strip():
-        raise InfraManagerError("Открытый Ansible-ключ 910 пуст")
+    key_parts = public_key.split()
+    if len(key_parts) < 2 or not key_parts[0].startswith("ssh-"):
+        raise InfraManagerError("Открытый Ansible-ключ 910 некорректен")
+    normalized_key = " ".join(key_parts[:2])
 
     config = _ssh(node, "pct", "config", str(vmid), capture=True).stdout
     expected_hostname = f"hostname: {hostname}"
@@ -187,7 +189,7 @@ os.chmod(target, 0o600)
         "python3",
         "-c",
         script,
-        public_key.strip(),
+        normalized_key,
     )
     console.ok(f"LXC {vmid}: постоянный Ansible-доступ к самому себе готов")
 
