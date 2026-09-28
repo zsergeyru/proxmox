@@ -69,6 +69,7 @@ docker:
         - /var/lib/infra-manager/semaphore:/var/lib/semaphore
         - /etc/infra-manager/ca:/etc/infra-manager/ca:ro
         - /etc/infra-manager/ansible:/etc/infra-manager/ansible:ro
+        - /etc/infra-manager/pve-host:/etc/infra-manager/pve-host:ro
         - /var/lib/infra-manager/opentofu:/var/lib/infra-manager/opentofu
 
 paths:
@@ -122,6 +123,7 @@ persistence:
   backup_required:
     - /etc/infra-manager/secrets
     - /etc/infra-manager/ansible
+    - /etc/infra-manager/pve-host
     - /var/lib/infra-manager/semaphore
     - /var/lib/infra-manager/opentofu/state
 
