@@ -1,0 +1,136 @@
+$schema: https://json-schema.org/draft/2020-12/schema
+$title: Guest status definition
+type: object
+additionalProperties: false
+required:
+  - schema_version
+  - guest_vmid
+  - title
+  - short_ready_message
+  - ready_message
+  - layout
+  - checks
+  - data
+  - sections
+properties:
+  schema_version:
+    const: 1
+  guest_vmid:
+    type: integer
+    minimum: 100
+    maximum: 999
+  title:
+    type: string
+    minLength: 1
+  short_ready_message:
+    type: string
+    minLength: 1
+  ready_message:
+    type: string
+    minLength: 1
+  layout:
+    type: object
+    additionalProperties: false
+    required: [separator, width]
+    properties:
+      separator:
+        type: string
+        minLength: 1
+        maxLength: 4
+      width:
+        type: integer
+        minimum: 20
+        maximum: 120
+  checks:
+    type: array
+    minItems: 1
+    items:
+      type: object
+      additionalProperties: false
+      required: [type, message]
+      properties:
+        type:
+          enum:
+            - runtime
+            - semaphore
+            - runtime_tools
+            - pve_access
+        message:
+          type: string
+          minLength: 1
+  data:
+    type: object
+    minProperties: 1
+    additionalProperties:
+      $ref: '#/$defs/dataSource'
+  sections:
+    type: array
+    minItems: 1
+    items:
+      type: object
+      additionalProperties: false
+      required: [title, fields]
+      properties:
+        title:
+          type: string
+          minLength: 1
+        fields:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/$defs/field'
+$defs:
+  dataSource:
+    oneOf:
+      - type: object
+        additionalProperties: false
+        required: [type]
+        properties:
+          type:
+            const: primary_ipv4
+      - type: object
+        additionalProperties: false
+        required: [type]
+        properties:
+          type:
+            const: project_branch
+      - type: object
+        additionalProperties: false
+        required: [type, repository]
+        properties:
+          type:
+            const: git_revision
+          repository:
+            type: string
+            pattern: '^/'
+      - type: object
+        additionalProperties: false
+        required: [type, path]
+        properties:
+          type:
+            const: file
+          path:
+            type: string
+            pattern: '^/'
+          sensitive:
+            type: boolean
+  field:
+    type: object
+    additionalProperties: false
+    required: [label]
+    properties:
+      label:
+        type: string
+        minLength: 1
+      source:
+        type: string
+        minLength: 1
+      value:
+        type: string
+      template:
+        type: string
+        minLength: 1
+    oneOf:
+      - required: [source]
+      - required: [value]
+      - required: [template]
