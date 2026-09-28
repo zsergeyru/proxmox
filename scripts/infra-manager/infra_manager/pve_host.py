@@ -31,6 +31,8 @@ def _ssh(node: str, *command: str, capture: bool = False):
             "-o",
             "BatchMode=yes",
             "-o",
+            "IdentitiesOnly=yes",
+            "-o",
             "ConnectTimeout=10",
             f"root@{node}",
             *command,
