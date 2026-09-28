@@ -157,7 +157,7 @@ class BootstrapHost:
     def require_host(self) -> None:
         if os.geteuid() != 0:
             self.fail("сценарий должен выполняться от root на PVE")
-        for command in ("pct", "pveum", "pvesm", "python3"):
+        for command in ("pct", "pveum", "pvesm", "python3", "ssh-keygen"):
             if not self.command_exists(command):
                 self.fail(f"не найден {command}")
         if not self.host_github_key.is_file() or self.host_github_key.stat().st_size == 0:
@@ -933,8 +933,9 @@ class BootstrapHost:
             )
         elif existed:
             self.ensure_existing_infra_running()
-            if self.mode == "recover":
-                self.prepare_infra_pve_access("recover")
+            self.prepare_infra_pve_access(
+                "recover" if self.mode == "recover" else "apply"
+            )
             self.handoff_existing_infra()
             self.deploy_910_phase(
                 "existing",
