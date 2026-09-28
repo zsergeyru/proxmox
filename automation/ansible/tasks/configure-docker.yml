@@ -1,5 +1,5 @@
 ---
-- name: Проверить отсутствие конфликтующих пакетов Docker
+- name: Проверить старые пакеты Docker
   ansible.builtin.command:
     argv:
       - dpkg-query
@@ -17,7 +17,7 @@
   changed_when: false
   failed_when: false
 
-- name: Запретить неявную замену конфликтующего Docker
+- name: Проверить совместимость пакетов
   ansible.builtin.assert:
     that:
       - item.rc != 0 or "install ok installed" not in item.stdout
@@ -26,7 +26,7 @@
   loop_control:
     label: "{{ item.item }}"
 
-- name: Создать каталог ключей APT
+- name: Подготовить доверенные ключи пакетов
   ansible.builtin.file:
     path: /etc/apt/keyrings
     state: directory
@@ -34,7 +34,7 @@
     group: root
     mode: "0755"
 
-- name: Получить ключ официального репозитория Docker
+- name: Получить ключ Docker
   ansible.builtin.get_url:
     url: https://download.docker.com/linux/debian/gpg
     dest: /etc/apt/keyrings/docker.asc
@@ -42,7 +42,7 @@
     group: root
     mode: "0644"
 
-- name: Настроить официальный репозиторий Docker
+- name: Подключить источник Docker
   ansible.builtin.copy:
     dest: /etc/apt/sources.list.d/docker.sources
     owner: root
@@ -56,14 +56,14 @@
       Architectures: amd64
       Signed-By: /etc/apt/keyrings/docker.asc
 
-- name: Установить Docker Engine и Compose
+- name: Установить Docker
   ansible.builtin.apt:
     name: "{{ provision.docker.required_packages }}"
     state: present
     update_cache: true
     cache_valid_time: 0
 
-- name: Включить и запустить Docker
+- name: Запустить Docker
   ansible.builtin.systemd_service:
     name: "{{ provision.docker.service.name }}"
     enabled: "{{ provision.docker.service.enabled | bool }}"
