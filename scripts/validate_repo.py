@@ -8,6 +8,7 @@ import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
+from string import Formatter
 
 import yaml
 from jsonschema import Draft202012Validator
@@ -521,6 +522,10 @@ def _validate_status_manifest(path: Path, state: ValidationState) -> None:
             f"имени каталога {expected_vmid}"
         )
 
+    guest_manifest = path.parent / "guest.yaml"
+    if not guest_manifest.is_file():
+        fail(f"{rel}: status.yaml не имеет соответствующего guest.yaml")
+
     sources = set(data["data"])
     for section in data["sections"]:
         for field in section["fields"]:
@@ -530,6 +535,25 @@ def _validate_status_manifest(path: Path, state: ValidationState) -> None:
                     f"{rel}: поле {field['label']!r} ссылается "
                     f"на неизвестный источник {source!r}"
                 )
+
+            template = field.get("template")
+            if template is None:
+                continue
+            for _, field_name, format_spec, conversion in Formatter().parse(
+                template
+            ):
+                if field_name is None:
+                    continue
+                if field_name not in sources:
+                    fail(
+                        f"{rel}: шаблон поля {field['label']!r} "
+                        f"ссылается на неизвестное значение {field_name!r}"
+                    )
+                if format_spec or conversion:
+                    fail(
+                        f"{rel}: шаблон поля {field['label']!r} "
+                        "не должен содержать форматирование или преобразование"
+                    )
 
 
 def _warn_unused_profiles(state: ValidationState) -> None:
