@@ -175,6 +175,36 @@ jobs:
               raise SystemExit("OpenBao must not use the default dev mode")
           PY
 
+      - name: Validate empty OpenBao server
+        run: |
+          set -Eeuo pipefail
+          data_dir="$(mktemp -d)"
+          cleanup() {
+            docker rm -f openbao-test >/dev/null 2>&1 || true
+            rm -rf "$data_dir"
+          }
+          trap cleanup EXIT
+
+          docker run -d             --name openbao-test             --network host             --user 0             -v "$PWD/infrastructure/guests/910-infra-manager/compose/openbao/openbao.hcl:/openbao/config/openbao.hcl:ro"             -v "$data_dir:/openbao/file"             ghcr.io/openbao/openbao:2.7.0             server
+
+          for _ in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8200/v1/sys/seal-status >/tmp/openbao-status.json; then
+              break
+            fi
+            sleep 1
+          done
+
+          if [[ ! -s /tmp/openbao-status.json ]]; then
+            docker logs openbao-test
+            exit 1
+          fi
+
+          jq -e '
+            .initialized == false
+            and .sealed == true
+            and .storage_type == "raft"
+          ' /tmp/openbao-status.json
+
       - name: Build infra-runtime image
         run: |
           docker build \
