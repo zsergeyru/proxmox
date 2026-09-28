@@ -259,8 +259,8 @@ class BootstrapHost:
         return target
 
     def run_private_host_access(self, mode: str = "apply") -> None:
-        # Политика временного PVE API-доступа хранится в закрытом проекте,
-        # поэтому helper копируется на PVE только на время выполнения.
+        # Политика временного доступа к PVE API хранится в закрытом проекте,
+        # поэтому вспомогательный сценарий копируется на PVE только на время выполнения.
         helper = self.pull_helper(
             self.project_dir / "scripts/bootstrap-runner/pve-access.sh",
             "bootstrap-runner-pve-access.",
@@ -339,8 +339,8 @@ class BootstrapHost:
         return self.infra_exec("test", flag, str(path), check=False).returncode == 0
 
     def prepare_infra_pve_access(self, access_mode: str = "apply") -> None:
-        # Постоянный credential создаётся на PVE и передаётся в 910.
-        # Сам secret никогда не передаётся через argv Python-процесса.
+        # Постоянные учётные данные создаются на PVE и передаются в 910.
+        # Сам секрет никогда не передаётся через аргументы Python-процесса.
         self.verify_infra_object()
         helper = self.pull_helper(
             self.project_dir / "scripts/infra-manager/pve-bootstrap-access.sh",
@@ -382,8 +382,8 @@ class BootstrapHost:
         self.verify_infra_object()
         self.infra_exec("install", "-d", "-m", "0700", "/root/.ssh")
 
-        # В 910 передаётся тот же read-only Deploy Key, которым public bootstrap
-        # получил закрытый проект через временный 990.
+        # В 910 передаётся тот же Deploy Key только для чтения, которым публичная
+        # часть получила закрытый проект через временный 990.
         self.push_to_infra(self.host_github_key, self.infra_github_key, "0600")
 
         fd, tmp_name = tempfile.mkstemp(prefix="infra-manager-known-hosts.", dir="/run")
@@ -460,8 +460,8 @@ class BootstrapHost:
         self.ok("Закрытый проект передан в 910")
 
     def verify_infra_handoff(self) -> None:
-        # Перед полным Ansible требуем весь минимальный набор доверия:
-        # PVE credential, CA, Deploy Key и рабочую копию проекта.
+        # Перед полной настройкой Ansible требуем весь минимальный набор доверия:
+        # учётные данные PVE, CA, Deploy Key и рабочую копию проекта.
         self.verify_infra_object()
         persistent = Path("/etc/infra-manager/secrets/pve-api.env")
         if not self.infra_test("-s", self.infra_staging_secret) and not self.infra_test(
@@ -542,8 +542,8 @@ class BootstrapHost:
         return self.token_exists("root@pam", "bootstrap-runner")
 
     def remove_private_access(self) -> None:
-        # Если 990 сохранился, предпочтительно удалить token тем же закрытым
-        # helper, который его создавал. При отсутствии 990 используется fallback.
+        # Если 990 сохранился, временный token удаляется тем же закрытым сценарием,
+        # который его создавал. При отсутствии 990 используется прямое удаление.
         source = self.project_dir / "scripts/bootstrap-runner/pve-access.sh"
         if self.ct_exists():
             try:
@@ -574,7 +574,7 @@ class BootstrapHost:
         self.host_template_marker.unlink(missing_ok=True)
 
     def finalize_runner(self) -> None:
-        # Успешный bootstrap не должен оставлять state, secret, token или 990.
+        # Успешный bootstrap не должен оставлять состояние, секреты, token или 990.
         self.assert_owned_runner()
         self.ct_exec(
             "rm",
@@ -639,7 +639,7 @@ class BootstrapHost:
         self.ok("Постоянный 910 готов, временный контур отсутствует")
 
     def runner_owns_910(self) -> bool:
-        # Наличие state означает незавершённую первоначальную установку:
+        # Наличие состояния OpenTofu означает незавершённую первоначальную установку:
         # новый 990 не должен импортировать или заново присваивать себе 910.
         return (
             self.ct_exec(
@@ -663,7 +663,7 @@ class BootstrapHost:
 
         # Три пути намеренно разделены:
         # 1) продолжение оборванной первоначальной установки;
-        # 2) обновление уже постоянного 910 без временного state;
+        # 2) обновление уже постоянного 910 без временного состояния;
         # 3) чистое создание нового 910.
         if existed and owns_910:
             self.info(
