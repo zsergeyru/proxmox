@@ -166,6 +166,7 @@ def check_guest_summary() -> None:
         fail(f"Неожиданная Git-команда итогового вывода: {argv}")
         raise AssertionError
 
+    ok_messages: list[str] = []
     with (
         patch.object(
             guest_deploy_module,
@@ -173,7 +174,11 @@ def check_guest_summary() -> None:
             side_effect=git_result,
         ),
         patch("builtins.print") as mocked_print,
-        patch.object(guest_deploy_module.console, "ok") as mocked_ok,
+        patch.object(
+            guest_deploy_module,
+            "console",
+            SimpleNamespace(ok=ok_messages.append),
+        ),
     ):
         _show_guest_summary(ROOT, context)
 
@@ -193,7 +198,6 @@ def check_guest_summary() -> None:
         if expected not in output:
             fail(f"Итог развёртывания не содержит: {expected}")
 
-    ok_messages = [call.args[0] for call in mocked_ok.call_args_list]
     if "Настройка ОС через Ansible завершена" not in ok_messages:
         fail("Итог развёртывания не подтверждает настройку Ansible")
     if "Semaphore" in output:
