@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import shlex
 
 from .common import InfraManagerError, console, require_command, run
 from .settings import PATHS
@@ -18,6 +19,8 @@ def _ssh(node: str, *command: str, capture: bool = False):
     require_command("ssh")
     _required_file(PATHS.pve_host_private_key, "закрытый ключ root-доступа к PVE")
     _required_file(PATHS.pve_host_known_hosts, "known_hosts PVE")
+
+    remote_command = shlex.join(command)
 
     return run(
         [
@@ -35,7 +38,7 @@ def _ssh(node: str, *command: str, capture: bool = False):
             "-o",
             "ConnectTimeout=10",
             f"root@{node}",
-            *command,
+            remote_command,
         ],
         capture_output=capture,
     )
