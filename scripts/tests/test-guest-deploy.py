@@ -204,9 +204,94 @@ def check_guest_summary() -> None:
         fail("Обычный итог гостя не должен содержать сведения о Semaphore")
 
 
+def check_910_self_update_path() -> None:
+    context = DeploymentContext(
+        client=SimpleNamespace(),
+        vmid=910,
+        name="infra-manager",
+        node="pve",
+        kind="lxc",
+        features=("container-host",),
+        template_vmid=None,
+        address="192.168.9.10",
+        target='proxmox_virtual_environment_container.guest["910"]',
+        workspace=SimpleNamespace(),
+        paths=SimpleNamespace(),
+    )
+    configured: list[dict[str, object]] = []
+    validated: list[int] = []
+
+    def record_configure(
+        deployment: DeploymentContext,
+        **kwargs: object,
+    ) -> None:
+        if deployment is not context:
+            fail("Самообновление передало неожиданный контекст в Ansible")
+        configured.append(kwargs)
+
+    def record_validate(deployment: DeploymentContext) -> None:
+        validated.append(deployment.vmid)
+
+    with (
+        patch.object(guest_deploy_module, "require_command"),
+        patch.object(
+            guest_deploy_module,
+            "run",
+            return_value=SimpleNamespace(returncode=0, stdout=""),
+        ),
+        patch.object(
+            guest_deploy_module,
+            "_prepare_self_update_workspace",
+            return_value=SimpleNamespace(),
+        ),
+        patch.object(
+            guest_deploy_module,
+            "_build_deployment_context",
+            return_value=context,
+        ),
+        patch.object(
+            guest_deploy_module,
+            "_validate_existing_guest_object",
+            side_effect=record_validate,
+        ),
+        patch.object(
+            guest_deploy_module,
+            "_configure_guest_os",
+            side_effect=record_configure,
+        ),
+        patch.object(
+            guest_deploy_module,
+            "prepare_workspace",
+            side_effect=AssertionError(
+                "Самообновление 910 не должно готовить OpenTofu workspace"
+            ),
+        ),
+        patch.object(
+            guest_deploy_module,
+            "apply_host_requirements",
+            side_effect=AssertionError(
+                "Самообновление 910 не должно менять объект Proxmox"
+            ),
+        ),
+    ):
+        if guest_deploy_module.run_deploy_guest(ROOT, 910) != 0:
+            fail("Самообновление 910 должно завершаться успешно")
+
+    if validated != [910]:
+        fail("Самообновление должно проверить существующий объект 910")
+    if configured != [
+        {"provision_phase": "full", "self_update": True}
+    ]:
+        fail(
+            "Самообновление 910 должно применять полный provision "
+            "в безопасном режиме"
+        )
+
+
 def main_test() -> None:
     check_opentofu_state_status()
     check_guest_summary()
+    check_910_self_update_path()
     workspace = OpenTofuWorkspace(
         directory=Path("/tmp/opentofu"),
         state_dir=Path("/tmp/state"),
