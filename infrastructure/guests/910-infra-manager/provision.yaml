@@ -72,6 +72,17 @@ docker:
         - /etc/infra-manager/pve-host:/etc/infra-manager/pve-host:ro
         - /var/lib/infra-manager/opentofu:/var/lib/infra-manager/opentofu
 
+    openbao:
+      container_name: openbao
+      image: ghcr.io/openbao/openbao:2.7.0
+      restart: unless-stopped
+      network_mode: host
+      api_address: http://127.0.0.1:8200
+      data_path: /var/lib/persistent/openbao
+      config_file: compose/openbao/openbao.hcl
+      storage: raft
+      auto_initialize: false
+
 paths:
   configuration: /etc/infra-manager
   secrets: /etc/infra-manager/secrets
@@ -81,6 +92,7 @@ paths:
   data: /var/lib/infra-manager
   semaphore_data: /var/lib/infra-manager/semaphore
   opentofu_data: /var/lib/infra-manager/opentofu
+  openbao_data: /var/lib/persistent/openbao
   opentofu_state: /var/lib/infra-manager/opentofu/state/proxmox.tfstate
   compose: /opt/infra-manager/compose
   python_package: /usr/local/lib/infra-manager
@@ -127,6 +139,7 @@ persistence:
     - /etc/infra-manager/pve-host
     - /var/lib/infra-manager/semaphore
     - /var/lib/infra-manager/opentofu/state
+    - /var/lib/persistent/openbao
 
   reproducible:
     - /var/lib/infra-manager/bootstrap-repo
@@ -138,3 +151,4 @@ boundaries:
   opentofu_manages_guest_910: false
   permanent_root_ssh_to_pve: true
   application_workloads_allowed: false
+  openbao_auto_initialize: false
