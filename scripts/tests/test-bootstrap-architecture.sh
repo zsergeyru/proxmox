@@ -33,6 +33,9 @@ if guest.get("profile") != "debian-lxc-docker":
     raise SystemExit("910 должен использовать общий профиль debian-lxc-docker")
 if guest.get("pve_management") is not False:
     raise SystemExit("910 должен быть исключён только из постоянного PVE-state")
+description = str(guest.get("description", ""))
+if "owner=proxmox-project" not in description or "role=infra-manager" not in description:
+    raise SystemExit("guest.yaml 910 должен содержать строгую метку владения")
 if provision.get("guest_vmid") != 910:
     raise SystemExit("provision.yaml должен принадлежать VMID 910")
 PY
