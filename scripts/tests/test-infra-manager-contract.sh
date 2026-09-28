@@ -170,6 +170,10 @@ for fragment in required_runtime_fragments:
     if fragment not in runtime_tasks_text:
         raise SystemExit(f"Ansible infra-runtime не покрывает обязательный этап: {fragment}")
 PY
+[[ ! -e "$ROOT/scripts/bootstrap-runner/pve-access.sh" ]] \
+    || die "Отдельный pve-access.sh 990 больше не должен существовать"
+[[ ! -e "$ROOT/scripts/infra-manager/pve-bootstrap-access.sh" ]] \
+    || die "Отдельный pve-bootstrap-access.sh 910 больше не должен существовать"
 [[ ! -e "$ROOT/scripts/infra-manager/setup.sh" ]] \
     || die "Старый setup.sh не должен существовать"
 [[ ! -e "$ROOT/scripts/infra-manager/infra_manager/setup.py" ]] \
