@@ -3,9 +3,12 @@
 
 from __future__ import annotations
 
+import contextlib
+import io
 import os
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -22,10 +25,13 @@ from infra_manager.semaphore import (
 )
 from infra_manager.settings import SETTINGS
 from infra_manager.status import (
+    FullStatusSnapshot,
     SemaphoreSnapshot,
     _check_git_branch_contract,
     _dict_items,
     _project_branch,
+    _show_full_status,
+    check_status,
     load_semaphore_snapshot,
     validate_semaphore_snapshot,
 )
@@ -213,6 +219,56 @@ def main_test() -> None:
         fail("load_semaphore_snapshot неверно собрал состояние проекта")
     if len(snapshot_client.paths) != 4:
         fail("Снимок Semaphore должен читать каждую коллекцию ровно один раз")
+
+    summary = FullStatusSnapshot(
+        address="192.168.9.10",
+        project_branch="main",
+        project_revision="abc1234",
+        semaphore_password="secret-pass",
+    )
+    output = io.StringIO()
+    with (
+        contextlib.redirect_stdout(output),
+        patch.object(
+            status_module,
+            "console",
+            SimpleNamespace(
+                ok=lambda message: print(f"[ОК] {message}"),
+            ),
+        ),
+    ):
+        _show_full_status(summary)
+
+    summary_text = output.getvalue()
+    for expected in (
+        "Состояние 910 infra-manager",
+        "[ОК] Docker и infra-runtime работают",
+        "http://192.168.9.10:3000",
+        "Логин:   admin",
+        "Пароль:  secret-pass",
+        "Ветка:   main",
+        "Версия:  abc1234",
+        "pct exec 910 -- infra-manager-status --full",
+        "910 infra-manager полностью готов",
+    ):
+        if expected not in summary_text:
+            fail(f"Полный экран состояния не содержит: {expected}")
+
+    with (
+        patch.object(status_module, "_check_local_runtime"),
+        patch.object(status_module, "_check_semaphore"),
+        patch.object(status_module, "_check_pve"),
+        patch.object(
+            status_module,
+            "_load_full_status_snapshot",
+            return_value=summary,
+        ) as load_summary,
+        patch.object(status_module, "_show_full_status") as show_summary,
+    ):
+        if check_status(full=True, quiet=True) != 0:
+            fail("Скрытая полная проверка должна завершаться успешно")
+        load_summary.assert_called_once_with(_project_branch())
+        show_summary.assert_not_called()
 
     print("Проверки состояния infra-manager пройдены.")
 
