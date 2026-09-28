@@ -132,14 +132,14 @@
     mode: "0700"
 
 - name: Разрешить постоянному Ansible-ключу управлять 910
-  ansible.builtin.lineinfile:
+  ansible.builtin.blockinfile:
     path: /root/.ssh/authorized_keys
-    line: "{{ infra_ansible_public_key_result.stdout }} infra-manager ansible guest"
+    marker: "# {mark} infra-manager ansible self"
+    block: "{{ infra_ansible_public_key_result.stdout }} infra-manager ansible guest"
     create: true
     owner: root
     group: root
     mode: "0600"
-    state: present
 
 - name: Проверить полный доступ к PVE
   ansible.builtin.stat:
