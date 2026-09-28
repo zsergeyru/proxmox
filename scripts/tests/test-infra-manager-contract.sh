@@ -194,9 +194,9 @@ grep -q 'pve_host_private_key' "$PY_SETTINGS" \
     || die "Путь root SSH-ключа PVE должен находиться в единых настройках"
 grep -q 'ensure_container_host' "$PY_PVE_HOST" \
     || die "Общий PVE host слой должен поддерживать container-host"
-grep -q 'desired["keyctl"] = "1"' "$PY_PVE_HOST" \
+grep -Fq 'desired["keyctl"] = "1"' "$PY_PVE_HOST" \
     || die "container-host должен обеспечивать keyctl=1"
-grep -q 'desired["nesting"] = "1"' "$PY_PVE_HOST" \
+grep -Fq 'desired["nesting"] = "1"' "$PY_PVE_HOST" \
     || die "container-host должен обеспечивать nesting=1"
 grep -q 'check_root_access' "$PY_PVE" \
     || die "Полная проверка PVE должна проверять root SSH"
