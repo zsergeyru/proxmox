@@ -318,6 +318,7 @@ Komodo в текущий состав 910 не входит.
 
 - [`guest.yaml`](guest.yaml) — параметры объекта 910.
 - [`provision.yaml`](provision.yaml) — программы, службы и постоянное состояние.
+- [`status.yaml`](status.yaml) — проверки готовности, фактические данные и полный вывод состояния.
 - [`decisions.md`](decisions.md) — решения по 910.
 - [`../../../docs/200-pve/210-host-bootstrap.md`](../../../docs/200-pve/210-host-bootstrap.md) — первоначальная подготовка.
 - [`../../../docs/700-security/710-pve-access.md`](../../../docs/700-security/710-pve-access.md) — PVE API-доступ.
