@@ -138,8 +138,8 @@ tag_present() {
 }
 
 remove_known_ct() {
-    local vmid=$1 expected_hostname=$2 require_bootstrap_tags=$3
-    local config hostname tags status lock protection
+    local vmid=$1 expected_hostname=$2 require_project_marker=$3
+    local config hostname description status lock protection
 
     if qm_exists "$vmid"; then
         block "VMID $vmid занят VM. Скрипт ожидал известный LXC и не будет его трогать."
@@ -149,7 +149,7 @@ remove_known_ct() {
 
     config="$(pct config "$vmid")"
     hostname="$(config_value "$config" hostname)"
-    tags="$(config_value "$config" tags)"
+    description="$(config_value "$config" description)"
     lock="$(config_value "$config" lock)"
 
     if [[ "$hostname" != "$expected_hostname" ]]; then
@@ -157,9 +157,9 @@ remove_known_ct() {
         return
     fi
 
-    if (( require_bootstrap_tags )); then
-        if ! tag_present "$tags" "infra-manager" || ! tag_present "$tags" "proxmox-bootstrap"; then
-            block "LXC $vmid похож на infra-manager, но не имеет обеих bootstrap-меток. Объект оставлен."
+    if (( require_project_marker )); then
+        if [[ "$description" != *"owner=proxmox-project"* || "$description" != *"role=infra-manager"* ]]; then
+            block "LXC $vmid похож на infra-manager, но не имеет строгой метки владения. Объект оставлен."
             return
         fi
     fi
@@ -381,7 +381,6 @@ remove_project_files() {
     remove_path /var/lib/vz/snippets/debian13-template-builder-9000.yaml "удалить старый snippet VM template"
 
     remove_path /run/proxmox-bootstrap "удалить временный каталог bootstrap"
-    remove_path /run/lock/proxmox-bootstrap.lock "удалить lock-файл bootstrap"
     remove_path /run/lock/proxmox-orchestration.lock "удалить старый orchestration lock"
 
     if (( PURGE_BACKUPS )); then
