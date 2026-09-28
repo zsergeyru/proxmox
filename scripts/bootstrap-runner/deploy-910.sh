@@ -33,20 +33,27 @@ case "$PHASE" in
         ;;
 esac
 
-[[ -s "$STATE_FILE" ]] || {
-    echo "ОШИБКА: отсутствует состояние 990: $STATE_FILE" >&2
-    exit 1
-}
+if [[ "$PHASE" != "existing" ]]; then
+    [[ -s "$STATE_FILE" ]] || {
+        echo "ОШИБКА: отсутствует состояние 990: $STATE_FILE" >&2
+        exit 1
+    }
 
-mapfile -t resources < <(
-    bash "$RUN_RUNTIME" tofu -chdir=automation/opentofu state list
-)
+    mapfile -t resources < <(
+        bash "$RUN_RUNTIME" tofu -chdir=automation/opentofu state list
+    )
 
-if [[ "${#resources[@]}" -ne 1 || "${resources[0]}" != "$EXPECTED_TARGET" ]]; then
-    printf 'ОШИБКА: состояние 990 должно содержать только %s\n' "$EXPECTED_TARGET" >&2
-    printf 'Фактические ресурсы:\n' >&2
-    printf '  %s\n' "${resources[@]:-(пусто)}" >&2
-    exit 1
+    if [[ "${#resources[@]}" -ne 1 || "${resources[0]}" != "$EXPECTED_TARGET" ]]; then
+        printf 'ОШИБКА: состояние 990 должно содержать только %s\n' "$EXPECTED_TARGET" >&2
+        printf 'Фактические ресурсы:\n' >&2
+        printf '  %s\n' "${resources[@]:-(пусто)}" >&2
+        exit 1
+    fi
+else
+    if [[ -s "$STATE_FILE" ]]; then
+        echo "ОШИБКА: при обновлении существующего 910 временный OpenTofu state не должен существовать" >&2
+        exit 1
+    fi
 fi
 
 case "$PHASE" in
