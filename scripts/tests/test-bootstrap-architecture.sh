@@ -38,13 +38,7 @@ if provision.get("guest_vmid") != 910:
 PY
 
 [[ -s "$BOOTSTRAP_DIR/bootstrap-host.py" ]] || die "Отсутствует Python-оркестратор bootstrap-host.py"
-[[ -s "$BOOTSTRAP_DIR/bootstrap-host.sh" ]] || die "Отсутствует минимальная shell-оболочка bootstrap-host.sh"
-
-grep -q 'exec python3 .*bootstrap-host.py' "$BOOTSTRAP_DIR/bootstrap-host.sh"     || die "bootstrap-host.sh должен только передавать управление Python"
-
-if grep -Eq 'pveum|pct[[:space:]]+(config|exec|destroy|set|stop|start)|deploy-910|pve-access|infra-manager-status' "$BOOTSTRAP_DIR/bootstrap-host.sh"; then
-    die "bootstrap-host.sh не должен содержать оркестрацию"
-fi
+[[ ! -e "$BOOTSTRAP_DIR/bootstrap-host.sh" ]] || die "Лишняя shell-оболочка bootstrap-host.sh не должна возвращаться"
 
 grep -q 'run_deploy_guest' "$DEPLOY"     || die "910 должен разворачиваться через общий deploy-guest"
 grep -q 'provision.yaml' "$PLAYBOOK"     || die "Общий Ansible playbook должен применять provision.yaml"
