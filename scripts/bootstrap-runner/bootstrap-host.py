@@ -382,14 +382,7 @@ class BootstrapHost:
     BatchMode yes
     ConnectTimeout 10
 """
-        self.infra_exec(
-            "sh",
-            "-c",
-            'cat >"$1"; chmod 0600 "$1"',
-            "sh",
-            str(self.infra_github_config),
-            input_text=config,
-        ) if False else self._write_infra_file(self.infra_github_config, config, "0600")
+        self._write_infra_file(self.infra_github_config, config, "0600")
         self.ok("GitHub-доступ передан в 910")
 
     def _write_infra_file(self, path: Path, content: str, mode: str) -> None:
@@ -756,7 +749,9 @@ def main() -> int:
     try:
         BootstrapHost(args.mode).execute()
     except BootstrapError as exc:
-        print(f"\n\033[1;31mОШИБКА:\033[0m {exc}", file=sys.stderr)
+        color = not os.environ.get("NO_COLOR") and os.environ.get("TERM") != "dumb"
+        prefix = "\033[1;31mОШИБКА:\033[0m" if color else "ОШИБКА:"
+        print(f"\n{prefix} {exc}", file=sys.stderr)
         return 1
     return 0
 
