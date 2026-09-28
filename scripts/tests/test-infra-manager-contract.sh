@@ -461,10 +461,11 @@ import sys, yaml
 path = Path(sys.argv[1])
 data = yaml.safe_load(path.read_text(encoding='utf-8'))
 services = data.get('services', {})
-if set(services) != {'runtime'}:
+if set(services) != {'runtime', 'openbao'}:
     raise SystemExit(f'unexpected services: {sorted(services)}')
 
 runtime = services['runtime']
+openbao = services['openbao']
 
 if runtime.get('image') != 'infra-runtime:${RUNTIME_VERSION}':
     raise SystemExit('infra-runtime image must use pinned runtime version variable')
@@ -472,6 +473,12 @@ if runtime.get('container_name') != 'infra-runtime':
     raise SystemExit('infra-runtime must use the canonical container name')
 if runtime.get('network_mode') != 'host':
     raise SystemExit('infra-runtime must use host network')
+if openbao.get('image') != 'ghcr.io/openbao/openbao:${OPENBAO_VERSION}':
+    raise SystemExit('OpenBao image must use pinned version variable')
+if openbao.get('container_name') != 'openbao':
+    raise SystemExit('OpenBao must use the canonical container name')
+if openbao.get('command') != ['server']:
+    raise SystemExit('OpenBao must run in normal server mode')
 
 volumes = runtime.get('volumes', [])
 required = {
