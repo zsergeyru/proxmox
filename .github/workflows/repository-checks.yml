@@ -181,7 +181,7 @@ jobs:
           data_dir="$(mktemp -d)"
           cleanup() {
             docker rm -f openbao-test >/dev/null 2>&1 || true
-            rm -rf "$data_dir"
+            sudo rm -rf "$data_dir"
           }
           trap cleanup EXIT
 
