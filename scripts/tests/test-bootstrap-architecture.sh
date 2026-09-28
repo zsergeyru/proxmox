@@ -4,6 +4,7 @@ set -Eeuo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 GUEST="$ROOT/infrastructure/guests/910-infra-manager/guest.yaml"
 PROVISION="$ROOT/infrastructure/guests/910-infra-manager/provision.yaml"
+STATUS="$ROOT/infrastructure/guests/910-infra-manager/status.yaml"
 DEPLOY="$ROOT/scripts/infra-manager/jobs/deploy-guest.py"
 PLAYBOOK="$ROOT/automation/ansible/playbooks/configure-guest.yml"
 BOOTSTRAP_DIR="$ROOT/scripts/bootstrap-runner"
@@ -15,6 +16,7 @@ die() {
 
 [[ -s "$GUEST" ]] || die "У 910 отсутствует guest.yaml"
 [[ -s "$PROVISION" ]] || die "У 910 отсутствует provision.yaml"
+[[ -s "$STATUS" ]] || die "У 910 отсутствует status.yaml"
 [[ -s "$PLAYBOOK" ]] || die "Отсутствует общий Ansible playbook"
 [[ -s "$DEPLOY" ]] || die "Отсутствует общая команда deploy-guest"
 
