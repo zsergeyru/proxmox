@@ -475,35 +475,123 @@ class BootstrapHost:
         return self.infra_exec("test", flag, str(path), check=False).returncode == 0
 
     def prepare_infra_pve_access(self, access_mode: str = "apply") -> None:
-        # Постоянные учётные данные создаются на PVE и передаются в 910.
-        # Сам секрет никогда не передаётся через аргументы Python-процесса.
+        """Подготовить полный API token root@pam и PVE CA для 910."""
         self.verify_infra_object()
-        helper = self.pull_helper(
-            self.project_dir / "scripts/infra-manager/pve-bootstrap-access.sh",
-            "infra-manager-pve-access.",
-        )
-        try:
-            self.run(
-                "bash",
-                str(helper),
-                env={
-                    "INFRA_MANAGER_CTID": str(self.infra_ctid),
-                    "INFRA_MANAGER_MODE": access_mode,
-                    "INFRA_MANAGER_COLOR": "1" if self.color else "0",
-                    "INFRA_MANAGER_SECRET_FILE": str(self.infra_staging_secret),
-                },
-                quiet=True,
-            )
-        finally:
-            helper.unlink(missing_ok=True)
-
         persistent = Path("/etc/infra-manager/secrets/pve-api.env")
-        if not self.infra_test("-s", self.infra_staging_secret) and not self.infra_test(
+        token_name = "infra-manager"
+        token_id = f"root@pam!{token_name}"
+
+        rows = self.pveum_json("user", "token", "list", "root@pam")
+        token_row = next(
+            (row for row in rows if row.get("tokenid") == token_name),
+            None,
+        )
+        old_privsep = (
+            token_row is not None
+            and token_row.get("privsep") not in (0, False, "0")
+        )
+
+        if token_row is not None and (access_mode == "recover" or old_privsep):
+            # Заодно удаляются ACL старой схемы privsep=1.
+            self.remove_named_token("root@pam", token_name)
+            token_row = None
+
+        if token_row is None:
+            created = self.run(
+                "pveum",
+                "user",
+                "token",
+                "add",
+                "root@pam",
+                token_name,
+                "--privsep",
+                "0",
+                "--output-format",
+                "json",
+                capture=True,
+            )
+            try:
+                payload = json.loads(created.stdout or "{}")
+            except json.JSONDecodeError as exc:
+                self.remove_named_token("root@pam", token_name)
+                raise BootstrapError(
+                    "PVE вернул некорректный JSON при создании infra-manager token"
+                ) from exc
+
+            secret = str(payload.get("value") or "")
+            if not secret:
+                self.remove_named_token("root@pam", token_name)
+                self.fail("PVE создал infra-manager token без доступного secret")
+
+            node = self.run("hostname", "-s", capture=True).stdout.strip()
+            fd, tmp_name = tempfile.mkstemp(
+                prefix="infra-manager-pve-api.",
+                dir="/run",
+            )
+            os.close(fd)
+            tmp = Path(tmp_name)
+            try:
+                tmp.write_text(
+                    f"PVE_API_URL=https://{node}:8006\n"
+                    f"PVE_API_TOKEN_ID={token_id}\n"
+                    f"PVE_API_TOKEN_SECRET={secret}\n",
+                    encoding="utf-8",
+                )
+                tmp.chmod(0o600)
+                self.infra_exec(
+                    "install",
+                    "-d",
+                    "-m",
+                    "0700",
+                    str(self.infra_staging_secret.parent),
+                )
+                self.push_to_infra(tmp, self.infra_staging_secret, "0600")
+            finally:
+                tmp.unlink(missing_ok=True)
+        elif not self.infra_test("-s", self.infra_staging_secret) and not self.infra_test(
             "-s", persistent
         ):
-            self.fail("PVE API credential не передан в 910")
-        self.ok("Постоянный PVE API-доступ 910 подготовлен")
+            self.fail(
+                "Token root@pam!infra-manager существует, но secret недоступен в 910; "
+                "используйте --recover"
+            )
 
+        ca_source = Path("/etc/pve/pve-root-ca.pem")
+        if not ca_source.is_file() or ca_source.stat().st_size == 0:
+            self.fail("не найден PVE CA")
+        ca_target = Path("/usr/local/share/ca-certificates/pve-root-ca.crt")
+        self.infra_exec("install", "-d", "-m", "0755", str(ca_target.parent))
+        self.push_to_infra(ca_source, ca_target, "0644")
+        self.infra_exec("update-ca-certificates", quiet=True)
+
+        node = self.run("hostname", "-s", capture=True).stdout.strip()
+        addresses = self.run(
+            "getent",
+            "ahostsv4",
+            node,
+            capture=True,
+        ).stdout.splitlines()
+        if not addresses:
+            self.fail("не удалось определить IPv4 PVE-узла")
+        host_ip = addresses[0].split()[0]
+        hosts_script = (
+            'node=$1; ip=$2; '
+            'grep -vE "[[:space:]]${node}([[:space:]]|$)" /etc/hosts '
+            '> /etc/hosts.bootstrap || true; '
+            'printf "%s %s\\n" "$ip" "$node" >> /etc/hosts.bootstrap; '
+            'cat /etc/hosts.bootstrap > /etc/hosts; '
+            'rm -f /etc/hosts.bootstrap'
+        )
+        self.infra_exec(
+            "sh",
+            "-c",
+            hosts_script,
+            "sh",
+            node,
+            host_ip,
+        )
+
+        self.ok("Постоянный PVE API-доступ 910 подготовлен")
     def push_to_infra(self, source: Path, target: Path, mode: str) -> None:
         """Передать файл в 910 от root с явно заданными правами."""
         push_args = [
