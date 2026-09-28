@@ -328,6 +328,16 @@ remove_linux_deployer() {
     fi
 }
 
+remove_project_root_ssh_authorization() {
+    local authorized_keys="/root/.ssh/authorized_keys"
+
+    [[ -f "$authorized_keys" ]] || return 0
+    grep -Fq " infra-manager-pve-root" "$authorized_keys" || return 0
+
+    run "удалить root SSH-доступ infra-manager к PVE" \
+        sed -i '/ infra-manager-pve-root$/d' "$authorized_keys"
+}
+
 remove_path() {
     local path=$1 description=$2
     [[ -e "$path" || -L "$path" ]] || return 0
@@ -764,6 +774,7 @@ main() {
 
     remove_other_guests
     remove_project_access
+    remove_project_root_ssh_authorization
     remove_empty_pools
     remove_linux_deployer
     remove_project_files
