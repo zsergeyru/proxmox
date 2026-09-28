@@ -1,5 +1,5 @@
 ---
-- name: Привести Linux-гостя к состоянию provision.yaml
+- name: Настроить гостевую систему
   hosts: all
   become: true
   gather_facts: true
@@ -10,7 +10,7 @@
     provision_file: "{{ guest_root }}/provision.yaml"
 
   pre_tasks:
-    - name: Проверить параметр guest
+    - name: Проверить выбранного гостя
       ansible.builtin.assert:
         that:
           - guest is defined
@@ -20,12 +20,12 @@
           Нужно передать каталог гостя, например:
           -e guest=410-ai-control
 
-    - name: Прочитать provision.yaml
+    - name: Прочитать настройки гостя
       ansible.builtin.include_vars:
         file: "{{ provision_file }}"
         name: provision
 
-    - name: Проверить базовый контракт provision.yaml
+    - name: Проверить описание гостя
       ansible.builtin.assert:
         that:
           - provision.schema_version == 1
@@ -35,7 +35,7 @@
           - provision.system.architecture == "amd64"
         fail_msg: "provision.yaml не соответствует поддерживаемому контракту Linux-гостя"
 
-    - name: Проверить фактическую операционную систему
+    - name: Проверить Debian 13
       ansible.builtin.assert:
         that:
           - ansible_facts.distribution == "Debian"
@@ -44,7 +44,7 @@
         fail_msg: "Гость должен работать на Debian 13 amd64"
 
   tasks:
-    - name: Установить требуемые системные пакеты
+    - name: Установить основные пакеты
       ansible.builtin.apt:
         name: "{{ provision.system.required_packages }}"
         state: present
@@ -55,14 +55,14 @@
         - provision.system.required_packages | length > 0
 
 
-    - name: Настроить Docker по общему контракту
+    - name: Настроить Docker
       ansible.builtin.include_tasks: ../tasks/configure-docker.yml
       when:
         - (provision_phase | default('full')) == "full"
         - provision.docker is defined
         - provision.docker.required_packages is defined
 
-    - name: Развернуть постоянный инфраструктурный runtime
+    - name: Настроить управляющую среду
       ansible.builtin.include_tasks: ../tasks/configure-infra-runtime.yml
       when:
         - (provision_phase | default('full')) == "full"
@@ -72,7 +72,7 @@
         - provision.semaphore is defined
         - provision.paths is defined
 
-    - name: Создать каталоги компонентов
+    - name: Создать рабочие каталоги
       ansible.builtin.file:
         path: "{{ item.value.root }}"
         state: directory
@@ -87,7 +87,7 @@
         - item.value is mapping
         - item.value.root is defined
 
-    - name: Создать каталог рабочего репозитория
+    - name: Подготовить каталог проекта
       ansible.builtin.file:
         path: "{{ provision.components.project_repository.path | dirname }}"
         state: directory
@@ -100,7 +100,7 @@
         - provision.components.project_repository is defined
         - provision.components.project_repository.path is defined
 
-    - name: Создать каталог основного AI-агента
+    - name: Подготовить каталог AI-агента
       ansible.builtin.file:
         path: >-
           {{ provision.components.agents.root }}/{{ provision.components.agents.primary }}
