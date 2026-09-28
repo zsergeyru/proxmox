@@ -11,6 +11,7 @@ guests/
 └── <VMID>-<name>/
     ├── guest.yaml
     ├── provision.yaml
+    ├── status.yaml
     ├── README.md
     ├── decisions.md
     ├── STATUS.md
@@ -26,6 +27,7 @@ guests/
 | `defaults.yaml` | Общие параметры развёртывания и профили для управляемых гостевых систем |
 | `<guest>/guest.yaml` | Индивидуальное требуемое состояние конкретной VM/LXC |
 | `<guest>/provision.yaml` | Требуемые пакеты, службы, приложения и другие параметры повторяемой настройки внутри гостевой ОС |
+| `<guest>/status.yaml` | Машинное описание проверок готовности, фактических данных и итогового вывода, если гостю оно требуется |
 | `<guest>/README.md` | Назначение и эксплуатационные особенности гостевой системы |
 | `<guest>/decisions.md` | Устойчивые решения, относящиеся только к этой гостевой системе |
 | `<guest>/STATUS.md` | Временное фактическое состояние или расхождение, если оно действительно нужно |
@@ -86,12 +88,13 @@ guests/defaults.yaml
 guests/910-infra-manager/
 ├── guest.yaml
 ├── provision.yaml
+├── status.yaml
 ├── README.md
 ├── decisions.md
 └── compose/
 ```
 
-`910 infra-manager` создаётся публичным `zsergeyru/proxmox-bootstrap`. Его `guest.yaml` намеренно не содержит `profile`, поэтому обычный генератор OpenTofu пропускает этот объект. `provision.yaml` описывает требуемое содержимое ОС, а особый начальный жизненный цикл объяснён в README и `decisions.md`.
+`910 infra-manager` создаётся публичным `zsergeyru/proxmox-bootstrap`. Его объект Proxmox остаётся вне собственного постоянного состояния 910. `provision.yaml` описывает требуемое содержимое ОС, `status.yaml` — проверку готовности и итоговый вывод, а особый начальный жизненный цикл объяснён в README и `decisions.md`.
 
 ## Управляемые файлы
 
