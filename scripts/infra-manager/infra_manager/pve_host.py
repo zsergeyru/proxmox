@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 import shlex
+from pathlib import Path
 
 from .common import InfraManagerError, console, require_command, run
 from .settings import PATHS
