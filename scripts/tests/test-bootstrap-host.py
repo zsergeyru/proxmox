@@ -135,6 +135,7 @@ def test_existing_without_bootstrap_state() -> None:
             "prepare_runner",
             "runner_owns_910",
             "ensure_existing",
+            "pve_access:apply",
             "handoff_existing",
             "deploy:existing",
             "verify_ready",
