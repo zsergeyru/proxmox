@@ -152,21 +152,25 @@ def check_guest_summary() -> None:
         paths=SimpleNamespace(),
     )
 
+    def git_result(argv: list[str], **_kwargs: object) -> SimpleNamespace:
+        if argv[-2:] == ["branch", "--show-current"]:
+            return SimpleNamespace(
+                returncode=0,
+                stdout="feature/bootstrap-990\n",
+            )
+        if argv[-3:] == ["rev-parse", "--short", "HEAD"]:
+            return SimpleNamespace(
+                returncode=0,
+                stdout="abc1234\n",
+            )
+        fail(f"Неожиданная Git-команда итогового вывода: {argv}")
+        raise AssertionError
+
     with (
         patch.object(
             guest_deploy_module,
             "run",
-            return_value=SimpleNamespace(
-                returncode=0,
-                stdout="abc1234\n",
-            ),
-        ),
-        patch.object(
-            guest_deploy_module,
-            "SETTINGS",
-            SimpleNamespace(
-                project_branch=lambda: "feature/bootstrap-990",
-            ),
+            side_effect=git_result,
         ),
         patch("builtins.print") as mocked_print,
         patch.object(guest_deploy_module.console, "ok") as mocked_ok,
