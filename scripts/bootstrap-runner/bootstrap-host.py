@@ -12,7 +12,11 @@ from pathlib import Path
 
 VERSION = "2.0.0-dev1"
 
-# Official github.com Ed25519 host key published by GitHub.
+# Этот файл выполняется на физическом PVE после того, как публичный bootstrap
+# уже создал 990 и получил закрытый проект. Здесь находится вся оркестрация 910.
+
+# Закреплённый официальный Ed25519 host key GitHub защищает первое подключение
+# к github.com от подмены ключа через сеть.
 GITHUB_ED25519_KNOWN_HOST = "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl"
 
 
@@ -47,6 +51,8 @@ class BootstrapHost:
             os.environ.get("HOST_LOG_FILE", "/var/log/proxmox-bootstrap.log")
         )
 
+        # 910 — постоянный управляющий контейнер. В отличие от временного 990
+        # он сохраняется между запусками и не входит в постоянный OpenTofu-state.
         self.infra_ctid = 910
         self.infra_hostname = "infra-manager"
         self.infra_project_dir = Path("/var/lib/infra-manager/bootstrap-repo")
@@ -102,6 +108,8 @@ class BootstrapHost:
             command_env.update(env)
 
         if quiet:
+            # Подробности команд сохраняются в журнале. В консоли остаются
+            # только понятные этапы и итоговые статусы.
             self.log_file.parent.mkdir(parents=True, exist_ok=True)
             with self.log_file.open("a", encoding="utf-8") as log:
                 result = subprocess.run(
@@ -149,7 +157,12 @@ class BootstrapHost:
     def pct(self, *args: str, **kwargs) -> subprocess.CompletedProcess[str]:
         return self.run("pct", *args, **kwargs)
 
-    def ct_exec(self, *args: str, quiet: bool = False, check: bool = True) -> subprocess.CompletedProcess[str]:
+    def ct_exec(
+        self,
+        *args: str,
+        quiet: bool = False,
+        check: bool = True,
+    ) -> subprocess.CompletedProcess[str]:
         return self.run(
             "pct",
             "exec",
@@ -160,7 +173,12 @@ class BootstrapHost:
             check=check,
         )
 
-    def infra_exec(self, *args: str, quiet: bool = False, check: bool = True) -> subprocess.CompletedProcess[str]:
+    def infra_exec(
+        self,
+        *args: str,
+        quiet: bool = False,
+        check: bool = True,
+    ) -> subprocess.CompletedProcess[str]:
         return self.run(
             "pct",
             "exec",
@@ -185,6 +203,8 @@ class BootstrapHost:
         return output.split()[-1] if output else ""
 
     def assert_owned_runner(self) -> None:
+        # VMID недостаточно для доказательства владения: проверяем также
+        # hostname, tags и description, чтобы не затронуть чужой LXC 990.
         if not self.ct_exists():
             self.fail(f"LXC {self.ctid} отсутствует")
         config = self.pct_config(self.ctid)
@@ -239,6 +259,8 @@ class BootstrapHost:
         return target
 
     def run_private_host_access(self, mode: str = "apply") -> None:
+        # Политика временного PVE API-доступа хранится в закрытом проекте,
+        # поэтому helper копируется на PVE только на время выполнения.
         helper = self.pull_helper(
             self.project_dir / "scripts/bootstrap-runner/pve-access.sh",
             "bootstrap-runner-pve-access.",
@@ -268,18 +290,19 @@ class BootstrapHost:
 
     def deploy_910_phase(self, phase: str, title: str, success: str) -> None:
         self.log(title)
-        self.ct_exec(
-            "env",
-            f"INFRA_PROJECT_BRANCH={self.project_branch}",
-            "bash",
-            str(self.project_dir / "scripts/bootstrap-runner/deploy-910.sh"),
-            phase,
-            str(self.project_dir),
-            quiet=True,
-        )
+
+        # Shell здесь остаётся тонкой оболочкой над общим deploy-guest.
+        deploy_args = [
+            "env", f"INFRA_PROJECT_BRANCH={self.project_branch}",
+            "bash", str(self.project_dir / "scripts/bootstrap-runner/deploy-910.sh"),
+            phase, str(self.project_dir),
+        ]
+        self.ct_exec(*deploy_args, quiet=True)
         self.ok(success)
 
     def infra_config_is_expected(self) -> bool:
+        # Для любых разрушительных действий одного hostname недостаточно.
+        # Строгая метка в description подтверждает, что 910 создан этим проектом.
         if not self.infra_exists():
             return False
         config = self.pct_config(self.infra_ctid)
@@ -316,6 +339,8 @@ class BootstrapHost:
         return self.infra_exec("test", flag, str(path), check=False).returncode == 0
 
     def prepare_infra_pve_access(self, access_mode: str = "apply") -> None:
+        # Постоянный credential создаётся на PVE и передаётся в 910.
+        # Сам secret никогда не передаётся через argv Python-процесса.
         self.verify_infra_object()
         helper = self.pull_helper(
             self.project_dir / "scripts/infra-manager/pve-bootstrap-access.sh",
@@ -343,39 +368,30 @@ class BootstrapHost:
             self.fail("PVE API credential не передан в 910")
         self.ok("Постоянный PVE API-доступ 910 подготовлен")
 
+    def push_to_infra(self, source: Path, target: Path, mode: str) -> None:
+        """Передать файл в 910 от root с явно заданными правами."""
+        push_args = [
+            "push", str(self.infra_ctid), str(source), str(target),
+            "--user", "0",
+            "--group", "0",
+            "--perms", mode,
+        ]
+        self.pct(*push_args)
+
     def prepare_infra_project_access(self) -> None:
         self.verify_infra_object()
         self.infra_exec("install", "-d", "-m", "0700", "/root/.ssh")
-        self.pct(
-            "push",
-            str(self.infra_ctid),
-            str(self.host_github_key),
-            str(self.infra_github_key),
-            "--user",
-            "0",
-            "--group",
-            "0",
-            "--perms",
-            "0600",
-        )
+
+        # В 910 передаётся тот же read-only Deploy Key, которым public bootstrap
+        # получил закрытый проект через временный 990.
+        self.push_to_infra(self.host_github_key, self.infra_github_key, "0600")
 
         fd, tmp_name = tempfile.mkstemp(prefix="infra-manager-known-hosts.", dir="/run")
         os.close(fd)
         tmp = Path(tmp_name)
         try:
             tmp.write_text(f"{GITHUB_ED25519_KNOWN_HOST}\n")
-            self.pct(
-                "push",
-                str(self.infra_ctid),
-                str(tmp),
-                str(self.infra_github_known_hosts),
-                "--user",
-                "0",
-                "--group",
-                "0",
-                "--perms",
-                "0644",
-            )
+            self.push_to_infra(tmp, self.infra_github_known_hosts, "0644")
         finally:
             tmp.unlink(missing_ok=True)
 
@@ -393,80 +409,59 @@ class BootstrapHost:
         self.ok("GitHub-доступ передан в 910")
 
     def _write_infra_file(self, path: Path, content: str, mode: str) -> None:
+        # pct push работает с локальным файлом, поэтому текст сначала
+        # записывается во временный файл на PVE.
         fd, tmp_name = tempfile.mkstemp(prefix="infra-manager-file.", dir="/run")
         os.close(fd)
         tmp = Path(tmp_name)
         try:
             tmp.write_text(content)
-            self.pct(
-                "push",
-                str(self.infra_ctid),
-                str(tmp),
-                str(path),
-                "--user",
-                "0",
-                "--group",
-                "0",
-                "--perms",
-                mode,
-            )
+            self.push_to_infra(tmp, path, mode)
         finally:
             tmp.unlink(missing_ok=True)
 
     def checkout_infra_project(self) -> None:
         git_ssh = f"ssh -F {self.infra_github_config}"
+
         if self.infra_test("-d", self.infra_project_dir / ".git"):
+            # Существующую рабочую копию приводим точно к выбранной ветке.
+            fetch_args = [
+                "env", f"GIT_SSH_COMMAND={git_ssh}",
+                "git", "-C", str(self.infra_project_dir),
+                "fetch", "--depth", "1", "origin", self.project_branch,
+            ]
+            self.infra_exec(*fetch_args, quiet=True)
             self.infra_exec(
-                "env",
-                f"GIT_SSH_COMMAND={git_ssh}",
-                "git",
-                "-C",
-                str(self.infra_project_dir),
-                "fetch",
-                "--depth",
-                "1",
-                "origin",
-                self.project_branch,
+                "git", "-C", str(self.infra_project_dir),
+                "reset", "--hard", "FETCH_HEAD",
                 quiet=True,
             )
             self.infra_exec(
-                "git",
-                "-C",
-                str(self.infra_project_dir),
-                "reset",
-                "--hard",
-                "FETCH_HEAD",
-                quiet=True,
-            )
-            self.infra_exec(
-                "git",
-                "-C",
-                str(self.infra_project_dir),
-                "clean",
-                "-ffdx",
+                "git", "-C", str(self.infra_project_dir),
+                "clean", "-ffdx",
                 quiet=True,
             )
         else:
+            # На чистом 910 создаём рабочую копию сразу нужной ветки.
             self.infra_exec("rm", "-rf", str(self.infra_project_dir))
             self.infra_exec(
                 "install", "-d", "-m", "0755", str(self.infra_project_dir.parent)
             )
-            self.infra_exec(
-                "env",
-                f"GIT_SSH_COMMAND={git_ssh}",
-                "git",
-                "clone",
-                "--depth",
-                "1",
-                "--branch",
-                self.project_branch,
+            clone_args = [
+                "env", f"GIT_SSH_COMMAND={git_ssh}",
+                "git", "clone",
+                "--depth", "1",
+                "--branch", self.project_branch,
                 "git@github.com:zsergeyru/proxmox.git",
                 str(self.infra_project_dir),
-                quiet=True,
-            )
+            ]
+            self.infra_exec(*clone_args, quiet=True)
+
         self.ok("Закрытый проект передан в 910")
 
     def verify_infra_handoff(self) -> None:
+        # Перед полным Ansible требуем весь минимальный набор доверия:
+        # PVE credential, CA, Deploy Key и рабочую копию проекта.
         self.verify_infra_object()
         persistent = Path("/etc/infra-manager/secrets/pve-api.env")
         if not self.infra_test("-s", self.infra_staging_secret) and not self.infra_test(
@@ -530,17 +525,12 @@ class BootstrapHost:
             path = str(row.get("path", ""))
             role = str(row.get("roleid", ""))
             if path and role:
-                self.run(
-                    "pveum",
-                    "acl",
-                    "delete",
-                    path,
-                    "--tokens",
-                    token_id,
-                    "--roles",
-                    role,
-                    check=False,
-                )
+                delete_args = [
+                    "pveum", "acl", "delete", path,
+                    "--tokens", token_id,
+                    "--roles", role,
+                ]
+                self.run(*delete_args, check=False)
 
     def remove_named_token(self, user: str, token_name: str) -> None:
         token_id = f"{user}!{token_name}"
@@ -552,6 +542,8 @@ class BootstrapHost:
         return self.token_exists("root@pam", "bootstrap-runner")
 
     def remove_private_access(self) -> None:
+        # Если 990 сохранился, предпочтительно удалить token тем же закрытым
+        # helper, который его создавал. При отсутствии 990 используется fallback.
         source = self.project_dir / "scripts/bootstrap-runner/pve-access.sh"
         if self.ct_exists():
             try:
@@ -582,6 +574,7 @@ class BootstrapHost:
         self.host_template_marker.unlink(missing_ok=True)
 
     def finalize_runner(self) -> None:
+        # Успешный bootstrap не должен оставлять state, secret, token или 990.
         self.assert_owned_runner()
         self.ct_exec(
             "rm",
@@ -617,6 +610,8 @@ class BootstrapHost:
         self.remove_downloaded_template()
 
     def remove_infra(self) -> None:
+        # Сначала убираем временный контур. Сам 910 удаляем только после
+        # строгой проверки метки владения.
         self.remove_runner_if_present()
         if self.infra_exists():
             if not self.infra_config_is_expected():
@@ -644,6 +639,8 @@ class BootstrapHost:
         self.ok("Постоянный 910 готов, временный контур отсутствует")
 
     def runner_owns_910(self) -> bool:
+        # Наличие state означает незавершённую первоначальную установку:
+        # новый 990 не должен импортировать или заново присваивать себе 910.
         return (
             self.ct_exec(
                 "test",
@@ -664,6 +661,10 @@ class BootstrapHost:
         self.prepare_runner()
         owns_910 = self.runner_owns_910()
 
+        # Три пути намеренно разделены:
+        # 1) продолжение оборванной первоначальной установки;
+        # 2) обновление уже постоянного 910 без временного state;
+        # 3) чистое создание нового 910.
         if existed and owns_910:
             self.info(
                 "Найден незавершённый первоначальный контур; продолжается его состояние"
@@ -718,6 +719,8 @@ class BootstrapHost:
         self.check_ready()
 
     def execute(self) -> None:
+        # Любой режим приходит сюда уже после подготовки временного 990
+        # публичным bootstrap-pve.py.
         self.require_host()
         self.verify_runner_contract()
         self.info(f"Закрытый bootstrap {VERSION}, режим: {self.mode}")
