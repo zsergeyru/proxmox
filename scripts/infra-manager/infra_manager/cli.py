@@ -15,16 +15,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     subparsers = parser.add_subparsers(dest="command")
 
-    setup_parser = subparsers.add_parser(
-        "setup",
-        help="подготовить и обновить LXC 910",
-        description=(
-            "Подготовить Debian, Docker, infra-runtime и привести "
-            "infra-manager к заданному состоянию."
-        ),
-    )
-    setup_parser.set_defaults(handler="setup")
-
     semaphore_parser = subparsers.add_parser(
         "semaphore-project",
         help="синхронизировать проект Semaphore",
@@ -58,11 +48,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.command is None:
             parser.print_help()
             return 0
-
-        if args.handler == "setup":
-            from .setup import run_setup
-
-            return run_setup()
 
         if args.handler == "semaphore-project":
             from .semaphore import configure_project
