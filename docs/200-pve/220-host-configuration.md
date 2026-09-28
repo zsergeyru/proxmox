@@ -70,21 +70,22 @@ hostname infra-manager
 pool managed
 ```
 
-Это граница изменяющих прав инфраструктурной автоматизации.
+Это организационная область проекта. Она не является границей прав самого 910, но может использоваться как такая граница для менее доверенных контуров.
 
-### 2.5. PVE API token
+### 2.5. PVE API и root SSH
 
 Для 910 существует:
 
 ```text
 root@pam!infra-manager
+privsep=0
 ```
 
-с `privsep=1`.
+Отдельный пользователь `infra-manager@pve` не создаётся, отдельная матрица ACL для 910 не поддерживается.
 
-Отдельный пользователь `infra-manager@pve` не создаётся.
+Кроме API token, bootstrap создаёт отдельный root SSH-ключ. Он нужен для операций PVE, которые запрещены API token, например для применения `keyctl=1` к непривилегированному Docker-LXC.
 
-Token получает только прямые ACL, описанные в разделе безопасности.
+Открытая часть ключа добавляется в `/root/.ssh/authorized_keys` PVE с проектной меткой. Закрытая исходная копия хранится в постоянном каталоге bootstrap и передаётся в 910.
 
 ## 3. Чего на PVE не должно требоваться
 
@@ -118,13 +119,13 @@ pve-configuration-status
 
 OpenTofu внутри 910 не управляет:
 
-- физическим PVE;
-- объектом 910;
+- физическим PVE как отдельным ресурсом;
+- объектом 910 в постоянном состоянии;
 - своим PVE API token;
-- ACL самого token;
+- root SSH-ключом PVE;
 - базовыми хранилищами и мостом PVE.
 
-Эта минимальная основа принадлежит public bootstrap и штатной конфигурации Proxmox.
+Эта минимальная основа принадлежит bootstrap и штатной конфигурации Proxmox.
 
 ## 5. Проверка
 
@@ -137,7 +138,8 @@ OpenTofu внутри 910 не управляет:
 - запуск 910;
 - pool `managed`;
 - наличие `root@pam!infra-manager`;
-- `privsep=1`;
+- `privsep=0`;
+- рабочий root SSH из 910 к PVE;
 - успешную внутреннюю проверку 910.
 
 Детальная проверка Semaphore, Runner, OpenTofu и других средств выполняется внутри 910 командой `infra-manager-status`.
@@ -157,5 +159,5 @@ OpenTofu внутри 910 не управляет:
 
 - [`210-host-bootstrap.md`](210-host-bootstrap.md) — первоначальная подготовка.
 - [`230-host-layout.md`](230-host-layout.md) — локальная структура PVE.
-- [`../700-security/710-pve-access.md`](../700-security/710-pve-access.md) — ACL token.
+- [`../700-security/710-pve-access.md`](../700-security/710-pve-access.md) — административный доступ 910 к PVE.
 - [`../../infrastructure/guests/910-infra-manager/README.md`](../../infrastructure/guests/910-infra-manager/README.md) — паспорт 910.
