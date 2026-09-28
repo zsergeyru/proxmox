@@ -5,7 +5,7 @@ vmid: 910
 name: infra-manager
 profile: debian-lxc-docker
 
-description: Постоянный управляющий LXC инфраструктуры Proxmox, создаваемый временным начальным контуром 990
+description: Постоянный управляющий LXC инфраструктуры Proxmox, создаваемый временным начальным контуром 990 [owner=proxmox-project;role=infra-manager]
 protection: true
 pve_management: false
 
