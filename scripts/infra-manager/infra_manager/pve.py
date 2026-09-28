@@ -14,47 +14,19 @@ from pathlib import Path
 from typing import Any
 
 from .common import InfraManagerError, console
+from .pve_host import check_root_access
 from .settings import PATHS, SETTINGS
 
 PVE_ENV = PATHS.pve_api_env
 CA_BUNDLE = PATHS.ca_bundle
 MANAGED_POOL = SETTINGS.managed_pool
 
-VM_ADMIN_PRIVS = {
-    "VM.Allocate",
-    "VM.Audit",
-    "VM.Backup",
-    "VM.Clone",
-    "VM.Config.CDROM",
-    "VM.Config.Cloudinit",
-    "VM.Config.CPU",
-    "VM.Config.Disk",
-    "VM.Config.HWType",
-    "VM.Config.Memory",
-    "VM.Config.Network",
-    "VM.Config.Options",
-    "VM.GuestAgent.Audit",
-    "VM.PowerMgmt",
-    "VM.Snapshot",
-    "VM.Snapshot.Rollback",
-}
-
-FORBIDDEN_ROOT_PRIVS = {
+ROOT_ADMIN_PRIVS = {
     "Permissions.Modify",
     "Sys.Modify",
-    "Sys.PowerMgmt",
-    "User.Modify",
-    "Group.Allocate",
-    "Realm.Allocate",
-    "Realm.AllocateUser",
-    "Pool.Allocate",
-    "Datastore.Allocate",
-    "Datastore.AllocateSpace",
-    "Datastore.AllocateTemplate",
-    "SDN.Allocate",
-    "SDN.Use",
-    "Mapping.Modify",
+    "VM.Allocate",
 }
+
 
 
 def nonempty(path: Path) -> bool:
@@ -518,6 +490,7 @@ def forbid_permissions(
 
 
 def check_access(*, quiet: bool = False) -> int:
+    """Проверить полный административный контракт 910 с PVE."""
     if os.geteuid() != 0:
         raise InfraManagerError(
             "Проверка PVE access должна выполняться от root"
@@ -532,37 +505,20 @@ def check_access(*, quiet: bool = False) -> int:
             "PVE API token не прошёл проверку авторизации"
         )
 
+    # privsep=0 означает, что token наследует права root@pam. Проверяем
+    # несколько host-level privileges, чтобы случайно не вернуться к старой
+    # ограниченной ACL-схеме.
+    require_permissions(client, "/", ROOT_ADMIN_PRIVS)
+
     pool = client.data(f"/pools/{MANAGED_POOL}")
     if pool is None:
         raise InfraManagerError(f"Pool {MANAGED_POOL} недоступен")
 
-    require_permissions(client, "/vms", VM_ADMIN_PRIVS)
-    require_permissions(
-        client,
-        f"/pool/{MANAGED_POOL}",
-        {"Pool.Audit", "VM.Allocate"},
-    )
-    require_permissions(
-        client,
-        "/storage/local",
-        {
-            "Datastore.Audit",
-            "Datastore.AllocateSpace",
-            "Datastore.AllocateTemplate",
-        },
-    )
-    require_permissions(
-        client,
-        "/storage/local-lvm",
-        {"Datastore.Audit", "Datastore.AllocateSpace"},
-    )
-    require_permissions(
-        client,
-        "/sdn/zones/localnetwork/vmbr0",
-        {"SDN.Audit", "SDN.Use"},
-    )
-    forbid_permissions(client, "/", FORBIDDEN_ROOT_PRIVS)
+    node = urllib.parse.urlparse(client.url).hostname
+    if not node:
+        raise InfraManagerError("Не удалось определить имя PVE из API URL")
+    check_root_access(node)
 
     if not quiet:
-        console.ok("PVE API access infra-manager соответствует контракту")
+        console.ok("PVE API и root SSH access infra-manager соответствуют контракту")
     return 0
