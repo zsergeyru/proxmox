@@ -29,7 +29,7 @@ class BootstrapHost:
         self.mode = mode
         self.ctid = int(os.environ.get("BOOTSTRAP_RUNNER_CTID", "990"))
         self.ct_hostname = "bootstrap-runner"
-        self.project_branch = os.environ.get("PROJECT_BRANCH", "feature/bootstrap-990")
+        self.project_branch = os.environ.get("PROJECT_BRANCH", "main")
         self.project_dir = Path(os.environ.get("PROJECT_DIR", "/var/lib/bootstrap-runner/project"))
 
         self.host_bootstrap_dir = Path(
