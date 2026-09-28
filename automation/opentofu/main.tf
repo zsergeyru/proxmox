@@ -94,10 +94,6 @@ resource "proxmox_virtual_environment_vm" "guest" {
 
   lifecycle {
     prevent_destroy = true
-
-    # keyctl поддерживается общим host-only шагом deploy-guest и не должен
-    # откатываться провайдером при следующем плане.
-    ignore_changes = [features[0].keyctl]
   }
 }
 
@@ -166,5 +162,9 @@ resource "proxmox_virtual_environment_container" "guest" {
 
   lifecycle {
     prevent_destroy = true
+
+    # keyctl поддерживается общим host-only шагом deploy-guest и не должен
+    # откатываться провайдером при следующем плане.
+    ignore_changes = [features[0].keyctl]
   }
 }
