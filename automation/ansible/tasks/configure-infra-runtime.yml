@@ -123,6 +123,24 @@
     group: "0"
     mode: "0600"
 
+- name: Подготовить SSH-каталог root
+  ansible.builtin.file:
+    path: /root/.ssh
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Разрешить постоянному Ansible-ключу управлять 910
+  ansible.builtin.lineinfile:
+    path: /root/.ssh/authorized_keys
+    line: "{{ infra_ansible_public_key_result.stdout }} infra-manager ansible guest"
+    create: true
+    owner: root
+    group: root
+    mode: "0600"
+    state: present
+
 - name: Проверить полный доступ к PVE
   ansible.builtin.stat:
     path: "{{ provision.access.pve.root_ssh_private_key }}"
@@ -148,6 +166,45 @@
     owner: "1001"
     group: "0"
     mode: "0644"
+
+- name: Получить выбранную ветку проекта для самообновления
+  ansible.builtin.command:
+    argv:
+      - git
+      - -C
+      - "{{ provision.paths.bootstrap_repository }}"
+      - fetch
+      - --depth
+      - "1"
+      - origin
+      - "{{ infra_project_branch | default('main') }}"
+  environment:
+    GIT_SSH_COMMAND: "ssh -F /root/.ssh/github_config"
+  changed_when: true
+  when: infra_self_update | default(false) | bool
+
+- name: Переключить рабочую копию 910 на полученную версию
+  ansible.builtin.command:
+    argv:
+      - git
+      - -C
+      - "{{ provision.paths.bootstrap_repository }}"
+      - reset
+      - --hard
+      - FETCH_HEAD
+  changed_when: true
+  when: infra_self_update | default(false) | bool
+
+- name: Удалить лишние файлы из рабочей копии 910
+  ansible.builtin.command:
+    argv:
+      - git
+      - -C
+      - "{{ provision.paths.bootstrap_repository }}"
+      - clean
+      - -ffdx
+  changed_when: true
+  when: infra_self_update | default(false) | bool
 
 - name: Подготовить файлы управляющей среды
   ansible.builtin.copy:
@@ -303,6 +360,7 @@
     - { source: status.sh, target: infra-manager-status }
     - { source: pve-access-check.sh, target: infra-manager-pve-access-check }
     - { source: pve-lifecycle-test.sh, target: infra-manager-pve-lifecycle-test }
+    - { source: activate-runtime.sh, target: infra-manager-activate-runtime }
 
 - name: Создать короткие команды управления
   ansible.builtin.file:
@@ -377,6 +435,7 @@
       - -d
       - --remove-orphans
   changed_when: true
+  when: not (infra_self_update | default(false) | bool)
 
 - name: Дождаться запуска Semaphore
   ansible.builtin.wait_for:
@@ -403,7 +462,7 @@
       - semaphore-project
   environment:
     PYTHONPATH: "{{ provision.paths.python_package }}"
-    INFRA_PROJECT_BRANCH: "{{ lookup('env', 'INFRA_PROJECT_BRANCH') | default('main', true) }}"
+    INFRA_PROJECT_BRANCH: "{{ infra_project_branch | default(lookup('env', 'INFRA_PROJECT_BRANCH') | default('main', true), true) }}"
   changed_when: true
 
 - name: Проверить готовность 910
@@ -413,5 +472,18 @@
       - --full
       - --quiet
   environment:
-    INFRA_PROJECT_BRANCH: "{{ lookup('env', 'INFRA_PROJECT_BRANCH') | default('main', true) }}"
+    INFRA_PROJECT_BRANCH: "{{ infra_project_branch | default(lookup('env', 'INFRA_PROJECT_BRANCH') | default('main', true), true) }}"
   changed_when: false
+
+- name: Назначить активацию новой управляющей среды после задания Semaphore
+  ansible.builtin.command:
+    argv:
+      - systemd-run
+      - "--unit=infra-manager-runtime-activate-{{ ansible_date_time.epoch }}"
+      - --on-active=30s
+      - --collect
+      - env
+      - "INFRA_PROJECT_BRANCH={{ infra_project_branch | default('main') }}"
+      - /usr/local/sbin/infra-manager-activate-runtime
+  changed_when: true
+  when: infra_self_update | default(false) | bool
