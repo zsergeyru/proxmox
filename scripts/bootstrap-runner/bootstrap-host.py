@@ -1018,10 +1018,8 @@ class BootstrapHost:
         self.remove_host_root_ssh_authorization()
         self.ok("Root SSH-доступ infra-manager к PVE удалён")
 
-    def show_semaphore_access(self) -> None:
-        """Показать адрес Semaphore, логин и первичный пароль."""
-        password_file = "/etc/infra-manager/secrets/initial-admin-password"
-
+    def _infra_address(self) -> str:
+        """Вернуть основной IPv4 постоянного 910."""
         address_result = self.infra_exec(
             "hostname",
             "-I",
@@ -1033,15 +1031,33 @@ class BootstrapHost:
             if "." in item and item != "127.0.0.1"
         ]
         if not addresses:
-            self.fail("не удалось определить адрес 910 для Semaphore")
+            self.fail("не удалось определить адрес 910")
+        return addresses[0]
 
-        self.log("Доступ к Semaphore")
-        print(f"Адрес:  http://{addresses[0]}:3000")
-        print("Логин:  admin")
+    def _infra_project_revision(self) -> str:
+        """Вернуть короткий хэш проекта, фактически установленного в 910."""
+        result = self.infra_exec(
+            "git",
+            "-C",
+            str(self.infra_project_dir),
+            "rev-parse",
+            "--short",
+            "HEAD",
+            capture=True,
+        )
+        revision = result.stdout.strip()
+        if not revision:
+            self.fail("не удалось определить версию проекта в 910")
+        return revision
+
+    def show_installation_summary(self) -> None:
+        """Показать итог успешной установки или проверки 910."""
+        password_file = "/etc/infra-manager/secrets/initial-admin-password"
+        address = self._infra_address()
+        revision = self._infra_project_revision()
 
         if not self.infra_test("-s", password_file):
             self.fail("не найден первичный пароль Semaphore")
-
         password = self.infra_exec(
             "cat",
             password_file,
@@ -1049,7 +1065,49 @@ class BootstrapHost:
         ).stdout.strip()
         if not password:
             self.fail("первичный пароль Semaphore пуст")
-        print(f"Пароль: {password}")
+
+        action = {
+            "check": "Проверка",
+            "recover": "Восстановление",
+        }.get(self.mode, "Установка")
+        separator = "=" * 60
+
+        print()
+        print(f"{self.c_bold}{self.c_green}{separator}{self.c_reset}")
+        print(f"{self.c_bold}  {action} 910 infra-manager завершена{self.c_reset}")
+        print(f"{self.c_bold}{self.c_green}{separator}{self.c_reset}")
+        print()
+        self.ok("LXC 910 запущен")
+        self.ok("Полная проверка 910 пройдена")
+        self.ok("Docker и infra-runtime работают")
+        self.ok("Semaphore работает")
+        self.ok("OpenTofu, Ansible и Packer готовы")
+        self.ok("Доступ к PVE подтверждён")
+        self.ok("Временный LXC 990 и его права удалены")
+
+        print("\n910 infra-manager")
+        print(f"  Адрес:   {address}")
+
+        print("\nSemaphore")
+        print(f"  Адрес:   http://{address}:3000")
+        print("  Логин:   admin")
+        print(f"  Пароль:  {password}")
+
+        print("\nПроект")
+        print(f"  Ветка:   {self.project_branch}")
+        print(f"  Версия:  {revision}")
+
+        print("\nУправление с PVE")
+        print("  Проверка:        pct exec 910 -- infra-manager-status")
+        print("  Полная проверка: pct exec 910 -- infra-manager-status --full")
+
+        print("\nЖурнал")
+        print(f"  {self.log_file}")
+
+        print()
+        print(f"{self.c_bold}{self.c_green}{separator}{self.c_reset}")
+        print(f"{self.c_bold}  910 infra-manager полностью готов{self.c_reset}")
+        print(f"{self.c_bold}{self.c_green}{separator}{self.c_reset}")
 
     def check_ready(self) -> None:
         if not self.infra_exists():
@@ -1059,8 +1117,7 @@ class BootstrapHost:
             self.fail("после успешного bootstrap временный LXC 990 не должен существовать")
         if self.temporary_token_exists():
             self.fail("после успешного bootstrap временный token 990 не должен существовать")
-        self.show_semaphore_access()
-        self.ok("Постоянный 910 готов, временный контур отсутствует")
+        self.show_installation_summary()
 
     def runner_owns_910(self) -> bool:
         # Наличие состояния OpenTofu означает незавершённую первоначальную установку:

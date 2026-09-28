@@ -266,6 +266,15 @@ class SemaphoreAccessHarness(BootstrapHost):
         if command == ("hostname", "-I"):
             return SimpleNamespace(returncode=0, stdout="192.168.9.10 \n", stderr="")
         if command == (
+            "git",
+            "-C",
+            "/var/lib/infra-manager/bootstrap-repo",
+            "rev-parse",
+            "--short",
+            "HEAD",
+        ):
+            return SimpleNamespace(returncode=0, stdout="abc1234\n", stderr="")
+        if command == (
             "cat",
             "/etc/infra-manager/secrets/initial-admin-password",
         ):
@@ -273,23 +282,29 @@ class SemaphoreAccessHarness(BootstrapHost):
         raise AssertionError(f"Неожиданная команда: {command!r}")
 
 
-def test_semaphore_access_password_is_shown_every_time() -> None:
+def test_installation_summary_is_shown_every_time() -> None:
     import contextlib
     import io
 
     host = SemaphoreAccessHarness()
     output = io.StringIO()
     with contextlib.redirect_stdout(output):
-        host.show_semaphore_access()
-        host.show_semaphore_access()
+        host.show_installation_summary()
+        host.show_installation_summary()
 
     text_output = output.getvalue()
+    if text_output.count("910 infra-manager полностью готов") != 2:
+        raise AssertionError("Итоговый блок должен выводиться при каждом запуске")
     if text_output.count("http://192.168.9.10:3000") != 2:
         raise AssertionError("Адрес Semaphore должен выводиться при каждом запуске")
-    if text_output.count("Логин:  admin") != 2:
+    if text_output.count("Логин:   admin") != 2:
         raise AssertionError("Логин Semaphore должен выводиться при каждом запуске")
-    if text_output.count("Пароль: secret-pass") != 2:
+    if text_output.count("Пароль:  secret-pass") != 2:
         raise AssertionError("Первичный пароль должен выводиться при каждом запуске")
+    if text_output.count("Ветка:   feature/bootstrap-990") != 2:
+        raise AssertionError("В итоговом блоке должна выводиться ветка проекта")
+    if text_output.count("Версия:  abc1234") != 2:
+        raise AssertionError("В итоговом блоке должна выводиться версия проекта")
     password_reads = [
         command
         for command in host.commands
@@ -541,7 +556,7 @@ def main() -> None:
         test_pve_node_address,
         test_progress_streaming,
         test_ansible_phases_enable_progress,
-        test_semaphore_access_password_is_shown_every_time,
+        test_installation_summary_is_shown_every_time,
         test_new_install_flow,
         test_existing_without_bootstrap_state,
         test_resume_unfinished_initial_state,

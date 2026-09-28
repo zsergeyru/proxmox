@@ -539,6 +539,51 @@ def _reconcile_guest_infrastructure(context: DeploymentContext) -> None:
         context.paths.plan_file.unlink(missing_ok=True)
 
 
+def _project_revision(repo_root: Path) -> str:
+    """Вернуть короткий хэш выполняемой рабочей копии проекта."""
+    result = run(
+        ["git", "-C", str(repo_root), "rev-parse", "--short", "HEAD"],
+        check=False,
+        capture_output=True,
+    )
+    if result.returncode:
+        return "не определена"
+    return result.stdout.strip() or "не определена"
+
+
+def _show_guest_summary(
+    repo_root: Path,
+    context: DeploymentContext,
+) -> None:
+    """Показать итог полного развёртывания обычного гостя."""
+    separator = "=" * 60
+    kind = "VM" if context.kind == "vm" else "LXC"
+    revision = _project_revision(repo_root)
+
+    print()
+    print(separator)
+    print(f"  Гость {context.vmid} {context.name} готов")
+    print(separator)
+    print()
+    console.ok(f"Гость {context.vmid} запущен")
+    console.ok("Состояние Proxmox приведено к описанию гостя")
+    console.ok("Настройка ОС через Ansible завершена")
+
+    print("\nСистема")
+    print(f"  Тип:     {kind}")
+    print(f"  Адрес:   {context.address}")
+    print(f"  Узел:    {context.node}")
+
+    print("\nПроект")
+    print(f"  Ветка:   {SETTINGS.project_branch()}")
+    print(f"  Версия:  {revision}")
+
+    print()
+    print(separator)
+    print("  Развёртывание завершено без ошибок")
+    print(separator)
+
+
 def run_deploy_guest(
     repo_root: Path,
     vmid: int,
@@ -654,7 +699,5 @@ def run_deploy_guest(
             "настроен через provision.yaml без владения OpenTofu state"
         )
     else:
-        console.ok(
-            f"{context.vmid} {context.name} создан и настроен"
-        )
+        _show_guest_summary(repo_root, context)
     return 0

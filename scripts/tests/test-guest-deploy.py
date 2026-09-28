@@ -24,6 +24,7 @@ from infra_manager.guest_deploy import (
     _build_guest_plan,
     _find_guest_directory,
     _reconcile_guest_infrastructure,
+    _show_guest_summary,
     _validate_pve_and_state,
 )
 from infra_manager.opentofu import OpenTofuWorkspace
@@ -136,8 +137,64 @@ def check_opentofu_state_status() -> None:
                 fail("Ошибка чтения существующего состояния была скрыта")
 
 
+def check_guest_summary() -> None:
+    context = DeploymentContext(
+        client=SimpleNamespace(),
+        vmid=410,
+        name="ai-control",
+        node="pve",
+        kind="vm",
+        features=(),
+        template_vmid=9000,
+        address="192.168.9.41",
+        target='proxmox_virtual_environment_vm.guest["410"]',
+        workspace=SimpleNamespace(),
+        paths=SimpleNamespace(),
+    )
+
+    with (
+        patch.object(
+            guest_deploy_module,
+            "run",
+            return_value=SimpleNamespace(
+                returncode=0,
+                stdout="abc1234\n",
+            ),
+        ),
+        patch.object(
+            guest_deploy_module.SETTINGS,
+            "project_branch",
+            return_value="feature/bootstrap-990",
+        ),
+        patch("builtins.print") as mocked_print,
+        patch.object(guest_deploy_module.console, "ok") as mocked_ok,
+    ):
+        _show_guest_summary(ROOT, context)
+
+    output = "\n".join(
+        str(call.args[0]) if call.args else ""
+        for call in mocked_print.call_args_list
+    )
+    for expected in (
+        "Гость 410 ai-control готов",
+        "Тип:     VM",
+        "Адрес:   192.168.9.41",
+        "Узел:    pve",
+        "Ветка:   feature/bootstrap-990",
+        "Версия:  abc1234",
+        "Развёртывание завершено без ошибок",
+    ):
+        if expected not in output:
+            fail(f"Итог развёртывания не содержит: {expected}")
+
+    ok_messages = [call.args[0] for call in mocked_ok.call_args_list]
+    if "Настройка ОС через Ansible завершена" not in ok_messages:
+        fail("Итог развёртывания не подтверждает настройку Ansible")
+
+
 def main_test() -> None:
     check_opentofu_state_status()
+    check_guest_summary()
     workspace = OpenTofuWorkspace(
         directory=Path("/tmp/opentofu"),
         state_dir=Path("/tmp/state"),
