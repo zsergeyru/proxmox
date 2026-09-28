@@ -10,7 +10,7 @@
 PVE
 → публичный минимальный bootstrap
 → временный LXC 990 bootstrap-runner
-→ закрытый bootstrap-host.sh
+→ закрытый bootstrap-host.py
 → отдельное состояние OpenTofu только для 910
 → LXC 910 infra-manager
 → общий provision.yaml + Ansible
