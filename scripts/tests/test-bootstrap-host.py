@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import importlib.util
+import sys
+import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -169,6 +171,79 @@ def test_pve_node_address() -> None:
         pass
     else:
         raise AssertionError("Отсутствие IPv4 PVE должно считаться ошибкой")
+
+
+class ProgressHarness(BootstrapHost):
+    def __init__(self, log_file: Path) -> None:
+        super().__init__("apply")
+        self.log_file = log_file
+        self.events: list[str] = []
+
+    def info(self, message: str) -> None:
+        self.events.append(message)
+
+
+def test_progress_streaming() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        log_file = Path(tmp) / "bootstrap.log"
+        host = ProgressHarness(log_file)
+        result = host.run(
+            sys.executable,
+            "-c",
+            (
+                'print("TASK [Собрать infra-runtime] ************************")\n'
+                'print("PLAY RECAP ****************************************")'
+            ),
+            quiet=True,
+            progress=True,
+        )
+
+        assert_equal(result.returncode, 0, "Потоковый запуск должен завершаться успешно")
+        assert_equal(
+            host.events,
+            [
+                "Ansible: Собрать infra-runtime",
+                "Ansible: формирование итогов",
+            ],
+            "В основной консоли должны появляться названия долгих Ansible-задач",
+        )
+        log_text = log_file.read_text(encoding="utf-8")
+        if "TASK [Собрать infra-runtime]" not in log_text or "PLAY RECAP" not in log_text:
+            raise AssertionError("Полный вывод должен одновременно сохраняться в журнале")
+
+
+class PhaseProgressHarness(BootstrapHost):
+    def __init__(self) -> None:
+        super().__init__("apply")
+        self.calls: list[dict[str, object]] = []
+
+    def log(self, message: str) -> None:
+        del message
+
+    def ok(self, message: str) -> None:
+        del message
+
+    def ct_exec(self, *args: str, **kwargs):
+        del args
+        self.calls.append(kwargs)
+        return SimpleNamespace(returncode=0)
+
+
+def test_ansible_phases_enable_progress() -> None:
+    host = PhaseProgressHarness()
+
+    host.deploy_910_phase("infrastructure", "infra", "ok")
+    host.deploy_910_phase("base", "base", "ok")
+    host.deploy_910_phase("provision", "full", "ok")
+    host.deploy_910_phase("existing", "existing", "ok")
+
+    assert_equal(
+        [call.get("progress") for call in host.calls],
+        [False, True, True, True],
+        "Ansible-фазы должны показывать потоковый прогресс",
+    )
+    if not all(call.get("quiet") is True for call in host.calls):
+        raise AssertionError("Подробный вывод должен продолжать сохраняться в журнале")
 
 
 class ApplyHarness(BootstrapHost):
@@ -398,6 +473,8 @@ def main() -> None:
         test_full_pve_token_missing_secret_is_removed,
         test_full_pve_token_invalid_json_is_removed,
         test_pve_node_address,
+        test_progress_streaming,
+        test_ansible_phases_enable_progress,
         test_new_install_flow,
         test_existing_without_bootstrap_state,
         test_resume_unfinished_initial_state,
