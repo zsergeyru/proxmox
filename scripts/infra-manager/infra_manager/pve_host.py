@@ -81,7 +81,7 @@ def ensure_container_host(node: str, vmid: int) -> None:
     current = _features_from_config(current_result.stdout)
 
     if current.get("nesting") == "1" and current.get("keyctl") == "1":
-        console.ok(f"LXC {vmid}: container-host features уже настроены")
+        console.ok(f"LXC {vmid}: параметры контейнера уже настроены")
         return
 
     desired = dict(current)
@@ -91,7 +91,7 @@ def ensure_container_host(node: str, vmid: int) -> None:
     was_running = _container_running(node, vmid)
     if was_running:
         console.info(
-            f"Остановка LXC {vmid} для применения root-only feature keyctl"
+            f"Остановка LXC {vmid} для изменения параметров контейнера"
         )
         _ssh(node, "pct", "stop", str(vmid))
 
@@ -115,7 +115,7 @@ def ensure_container_host(node: str, vmid: int) -> None:
             f"LXC {vmid}: не удалось применить container-host features"
         )
 
-    console.ok(f"LXC {vmid}: применены nesting=1,keyctl=1")
+    console.ok(f"LXC {vmid}: параметры контейнера настроены")
 
 
 def apply_host_requirements(
