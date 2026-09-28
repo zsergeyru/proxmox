@@ -301,7 +301,7 @@ def test_installation_summary_is_shown_every_time() -> None:
         raise AssertionError("Логин Semaphore должен выводиться при каждом запуске")
     if text_output.count("Пароль:  secret-pass") != 2:
         raise AssertionError("Первичный пароль должен выводиться при каждом запуске")
-    if text_output.count("Ветка:   feature/bootstrap-990") != 2:
+    if text_output.count("Ветка:   main") != 2:
         raise AssertionError("В итоговом блоке должна выводиться ветка проекта")
     if text_output.count("Версия:  abc1234") != 2:
         raise AssertionError("В итоговом блоке должна выводиться версия проекта")
