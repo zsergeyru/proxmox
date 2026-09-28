@@ -82,9 +82,6 @@ class ApplyHarness(BootstrapHost):
         del title, success
         self.events.append(f"deploy:{phase}")
 
-    def ensure_infra_container_features(self) -> None:
-        self.events.append("ensure_features")
-
     def handoff_infra(self, access_mode: str = "apply") -> None:
         self.events.append(f"handoff:{access_mode}")
 
@@ -117,7 +114,6 @@ def test_new_install_flow() -> None:
             "prepare_runner",
             "runner_owns_910",
             "deploy:infrastructure",
-            "ensure_features",
             "deploy:base",
             "handoff:apply",
             "deploy:provision",
@@ -164,10 +160,6 @@ def test_resume_unfinished_initial_state() -> None:
     )
     if "deploy:infrastructure" not in host.events:
         raise AssertionError("Незавершённая установка должна продолжить OpenTofu state")
-    if "ensure_features" not in host.events:
-        raise AssertionError(
-            "Незавершённая установка должна восстановить host-only LXC features"
-        )
     if "deploy:existing" in host.events:
         raise AssertionError(
             "Незавершённая установка не должна переходить на existing-путь"
