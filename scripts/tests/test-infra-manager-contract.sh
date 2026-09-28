@@ -236,7 +236,12 @@ grep -q '"1001"' "$ANSIBLE_RUNTIME" \
     || die "Хранилище Semaphore должно использовать uid 1001"
 grep -q 'packer, version' "$ANSIBLE_RUNTIME" \
     || die "Packer должен проверяться внутри infra-runtime"
-if grep -Eq '^[[:space:]]*register:[[:space:]]+ansible_private_key[[:space:]]*grep -Fq 'exec python3 -m infra_manager status "$@"' "$STATUS" \
+if grep -Eq '^[[:space:]]*register:[[:space:]]+ansible_private_key[[:space:]]*$' "$ANSIBLE_RUNTIME"; then
+    die "register ansible_private_key запрещён: это служебная переменная SSH connection plugin"
+fi
+grep -q 'register: infra_ansible_private_key_stat' "$ANSIBLE_RUNTIME" \
+    || die "Проверка постоянного Ansible-ключа должна использовать безопасное имя переменной"
+grep -Fq 'exec python3 -m infra_manager status "$@"' "$STATUS" \
     || die "status.sh должен быть тонким Python wrapper"
 grep -Fq 'exec python3 -m infra_manager pve-access-check "$@"' "$ACCESS" \
     || die "pve-access-check.sh должен быть тонким Python wrapper"
