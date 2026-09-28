@@ -556,6 +556,17 @@ class BootstrapHost:
                 "используйте --recover"
             )
 
+        pools = self.pveum_json("pool", "list")
+        if not any(row.get("poolid") == "managed" for row in pools):
+            self.run(
+                "pveum",
+                "pool",
+                "add",
+                "managed",
+                "--comment",
+                "Guests managed from 910 infra-manager",
+            )
+
         ca_source = Path("/etc/pve/pve-root-ca.pem")
         if not ca_source.is_file() or ca_source.stat().st_size == 0:
             self.fail("не найден PVE CA")
