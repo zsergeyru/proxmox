@@ -100,7 +100,7 @@ def test_infra_self_access() -> None:
             "pve",
             910,
             hostname="infra-manager",
-            public_key="ssh-ed25519 AAAATEST",
+            public_key="ssh-ed25519 AAAATEST old-comment",
         )
 
     assert calls[0] == ("pct", "config", "910")
