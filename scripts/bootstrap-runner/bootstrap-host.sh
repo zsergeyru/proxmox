@@ -466,8 +466,9 @@ main() {
             apply
             ;;
         check)
-            check_ready
+            verify_infra_manager_ready
             finalize_bootstrap_runner
+            check_ready
             ;;
         remove)
             remove_infra_manager
