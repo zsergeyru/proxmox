@@ -41,6 +41,13 @@ class BootstrapHost:
                 str(self.host_bootstrap_dir / "github_proxmox_repo_ed25519"),
             )
         )
+        self.host_pve_root_key = self.host_bootstrap_dir / "pve_root_ed25519"
+        self.host_pve_root_known_hosts = (
+            self.host_bootstrap_dir / "pve_root_known_hosts"
+        )
+        self.host_root_authorized_keys = Path("/root/.ssh/authorized_keys")
+        self.host_ssh_public_key = Path("/etc/ssh/ssh_host_ed25519_key.pub")
+        self.host_pve_root_key_comment = "infra-manager-pve-root"
         self.host_template_marker = Path(
             os.environ.get(
                 "HOST_TEMPLATE_MARKER",
@@ -60,6 +67,8 @@ class BootstrapHost:
         self.infra_github_config = Path("/root/.ssh/github_config")
         self.infra_github_known_hosts = Path("/root/.ssh/github_known_hosts")
         self.infra_staging_secret = Path("/root/.infra-manager-bootstrap/pve-api.env")
+        self.runner_pve_host_dir = Path("/etc/bootstrap-runner/pve-host")
+        self.infra_pve_host_dir = Path("/etc/infra-manager/pve-host")
 
         self.color = not os.environ.get("NO_COLOR") and os.environ.get("TERM") != "dumb"
         self.c_reset = "\033[0m" if self.color else ""
@@ -202,6 +211,133 @@ class BootstrapHost:
         output = self.pct("status", str(ctid), capture=True).stdout.strip()
         return output.split()[-1] if output else ""
 
+    def ensure_host_root_ssh_access(self) -> None:
+        """Подготовить отдельный root SSH-ключ для управляющего контура."""
+        self.host_bootstrap_dir.mkdir(parents=True, exist_ok=True)
+        if not self.host_pve_root_key.is_file():
+            self.run(
+                "ssh-keygen",
+                "-q",
+                "-t",
+                "ed25519",
+                "-N",
+                "",
+                "-C",
+                self.host_pve_root_key_comment,
+                "-f",
+                str(self.host_pve_root_key),
+            )
+
+        public_key = Path(f"{self.host_pve_root_key}.pub")
+        if not public_key.is_file() or public_key.stat().st_size == 0:
+            self.fail("не удалось подготовить открытый root SSH-ключ PVE")
+
+        root_ssh_dir = self.host_root_authorized_keys.parent
+        root_ssh_dir.mkdir(parents=True, exist_ok=True)
+        root_ssh_dir.chmod(0o700)
+
+        existing = (
+            self.host_root_authorized_keys.read_text(encoding="utf-8").splitlines()
+            if self.host_root_authorized_keys.is_file()
+            else []
+        )
+        marker = f" {self.host_pve_root_key_comment}"
+        lines = [line for line in existing if not line.rstrip().endswith(marker)]
+        lines.append(public_key.read_text(encoding="utf-8").strip())
+        self.host_root_authorized_keys.write_text(
+            "\n".join(lines) + "\n",
+            encoding="utf-8",
+        )
+        self.host_root_authorized_keys.chmod(0o600)
+
+        if not self.host_ssh_public_key.is_file():
+            self.fail(f"не найден SSH host key PVE: {self.host_ssh_public_key}")
+        host_key_parts = self.host_ssh_public_key.read_text(
+            encoding="utf-8"
+        ).strip().split()
+        if len(host_key_parts) < 2:
+            self.fail("SSH host key PVE имеет некорректный формат")
+        node = self.run("hostname", "-s", capture=True).stdout.strip()
+        self.host_pve_root_known_hosts.write_text(
+            f"{node} {host_key_parts[0]} {host_key_parts[1]}\n",
+            encoding="utf-8",
+        )
+        self.host_pve_root_known_hosts.chmod(0o644)
+        self.ok("Root SSH-доступ управляющего контура к PVE подготовлен")
+
+    def remove_host_root_ssh_authorization(self) -> None:
+        """Удалить из root authorized_keys только ключ infra-manager."""
+        if not self.host_root_authorized_keys.is_file():
+            return
+        marker = f" {self.host_pve_root_key_comment}"
+        lines = [
+            line
+            for line in self.host_root_authorized_keys.read_text(
+                encoding="utf-8"
+            ).splitlines()
+            if not line.rstrip().endswith(marker)
+        ]
+        text = "\n".join(lines)
+        self.host_root_authorized_keys.write_text(
+            f"{text}\n" if text else "",
+            encoding="utf-8",
+        )
+        self.host_root_authorized_keys.chmod(0o600)
+
+    def stage_runner_pve_root_access(self) -> None:
+        """Передать временному 990 тот же root SSH-доступ, что использует deploy-guest."""
+        self.ct_exec("install", "-d", "-m", "0700", str(self.runner_pve_host_dir))
+        self.pct(
+            "push",
+            str(self.ctid),
+            str(self.host_pve_root_key),
+            str(self.runner_pve_host_dir / "root_ed25519"),
+            "--user",
+            "0",
+            "--group",
+            "0",
+            "--perms",
+            "0600",
+        )
+        self.pct(
+            "push",
+            str(self.ctid),
+            str(self.host_pve_root_known_hosts),
+            str(self.runner_pve_host_dir / "known_hosts"),
+            "--user",
+            "0",
+            "--group",
+            "0",
+            "--perms",
+            "0644",
+        )
+
+    def prepare_infra_pve_root_access(self) -> None:
+        """Передать постоянный root SSH-доступ внутрь 910 для infra-runtime."""
+        self.verify_infra_object()
+        self.infra_exec("install", "-d", "-m", "0700", str(self.infra_pve_host_dir))
+        self.push_to_infra(
+            self.host_pve_root_key,
+            self.infra_pve_host_dir / "root_ed25519",
+            "0600",
+        )
+        self.push_to_infra(
+            self.host_pve_root_known_hosts,
+            self.infra_pve_host_dir / "known_hosts",
+            "0644",
+        )
+        self.infra_exec(
+            "chown",
+            "1001:0",
+            str(self.infra_pve_host_dir),
+            str(self.infra_pve_host_dir / "root_ed25519"),
+            str(self.infra_pve_host_dir / "known_hosts"),
+        )
+        self.infra_exec("chmod", "0700", str(self.infra_pve_host_dir))
+        self.infra_exec("chmod", "0600", str(self.infra_pve_host_dir / "root_ed25519"))
+        self.infra_exec("chmod", "0644", str(self.infra_pve_host_dir / "known_hosts"))
+        self.ok("Root SSH-доступ PVE передан в 910")
+
     def assert_owned_runner(self) -> None:
         # VMID недостаточно для доказательства владения: проверяем также
         # hostname, tags и description, чтобы не затронуть чужой LXC 990.
@@ -316,38 +452,6 @@ class BootstrapHost:
         owner_ok = "owner=proxmox-project" in description
         role_ok = "role=infra-manager" in description
         return hostname_ok and unprivileged_ok and owner_ok and role_ok
-
-    def ensure_infra_container_features(self) -> None:
-        """Выставить host-only LXC-флаги, недоступные временному API token."""
-        if not self.infra_config_is_expected():
-            self.fail(f"LXC {self.infra_ctid} не соответствует контракту infra-manager")
-
-        config = self.pct_config(self.infra_ctid)
-        features = next(
-            (line.partition(": ")[2] for line in config.splitlines() if line.startswith("features: ")),
-            "",
-        )
-        current = {item.strip() for item in features.split(",") if item.strip()}
-        required = {"nesting=1", "keyctl=1"}
-
-        if not required.issubset(current):
-            self.pct(
-                "set",
-                str(self.infra_ctid),
-                "--features",
-                "nesting=1,keyctl=1",
-                quiet=True,
-            )
-
-        verified = self.pct_config(self.infra_ctid)
-        feature_line = next(
-            (line for line in verified.splitlines() if line.startswith("features: ")),
-            "",
-        )
-        if "nesting=1" not in feature_line or "keyctl=1" not in feature_line:
-            self.fail(f"не удалось настроить LXC features для {self.infra_ctid}")
-
-        self.ok("LXC 910 получил необходимые nesting и keyctl")
 
     def ensure_existing_infra_running(self) -> None:
         if not self.infra_exists():
@@ -502,6 +606,8 @@ class BootstrapHost:
             self.fail("в 910 отсутствует PVE API credential")
         required = (
             (Path("/usr/local/share/ca-certificates/pve-root-ca.crt"), "PVE CA"),
+            (self.infra_pve_host_dir / "root_ed25519", "PVE root SSH key"),
+            (self.infra_pve_host_dir / "known_hosts", "PVE SSH known_hosts"),
             (self.infra_github_key, "GitHub Deploy Key"),
         )
         for path, label in required:
@@ -513,11 +619,14 @@ class BootstrapHost:
 
     def handoff_infra(self, access_mode: str = "apply") -> None:
         self.prepare_infra_pve_access(access_mode)
+        self.prepare_infra_pve_root_access()
         self.prepare_infra_project_access()
         self.checkout_infra_project()
         self.verify_infra_handoff()
 
     def handoff_existing_infra(self) -> None:
+        self.ensure_host_root_ssh_access()
+        self.prepare_infra_pve_root_access()
         self.prepare_infra_project_access()
         self.checkout_infra_project()
         if not self.infra_test("-s", "/etc/infra-manager/secrets/pve-api.env"):
@@ -660,6 +769,9 @@ class BootstrapHost:
             self.remove_named_token("root@pam", "infra-manager")
             self.ok("LXC 910 уже отсутствует")
 
+        self.remove_host_root_ssh_authorization()
+        self.ok("Root SSH-доступ infra-manager к PVE удалён")
+
     def check_ready(self) -> None:
         if not self.infra_exists():
             self.fail("LXC 910 отсутствует")
@@ -685,6 +797,8 @@ class BootstrapHost:
 
     def prepare_runner(self) -> None:
         self.verify_runner_contract()
+        self.ensure_host_root_ssh_access()
+        self.stage_runner_pve_root_access()
         self.run_private_host_access()
         self.prepare_runtime()
 
@@ -707,7 +821,6 @@ class BootstrapHost:
                 "Продолжение создания LXC 910 через OpenTofu",
                 "LXC 910 приведён к состоянию bootstrap-runner",
             )
-            self.ensure_infra_container_features()
             self.deploy_910_phase(
                 "base",
                 "Базовая настройка LXC 910 через Ansible",
@@ -735,7 +848,6 @@ class BootstrapHost:
                 "Создание LXC 910 через OpenTofu",
                 "LXC 910 создан через состояние bootstrap-runner",
             )
-            self.ensure_infra_container_features()
             self.deploy_910_phase(
                 "base",
                 "Базовая настройка LXC 910 через Ansible",
