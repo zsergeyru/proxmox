@@ -28,7 +28,6 @@ ROOT_ADMIN_PRIVS = {
 }
 
 
-
 def nonempty(path: Path) -> bool:
     return path.is_file() and path.stat().st_size > 0
 
@@ -468,24 +467,6 @@ def require_permissions(
         raise InfraManagerError(
             f"На {path} отсутствуют обязательные privileges: "
             + " ".join(missing)
-        )
-
-
-def forbid_permissions(
-    client: PveClient,
-    path: str,
-    forbidden: set[str],
-) -> None:
-    data = client.permissions_at(path)
-    found = sorted(
-        privilege
-        for privilege in forbidden
-        if permission_present(data, privilege)
-    )
-    if found:
-        raise InfraManagerError(
-            f"На {path} обнаружены запрещённые privileges: "
-            + " ".join(found)
         )
 
 
