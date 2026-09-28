@@ -160,19 +160,19 @@ boot:
 5.  создаётся и запускается временный 990
 6.  в 990 передаётся read-only Deploy Key и клонируется закрытый проект
 7.  публичный Python передаёт управление `scripts/bootstrap-runner/bootstrap-host.py`
-8.  закрытый сценарий создаёт временный PVE API-доступ 990
+8.  закрытый сценарий создаёт временный PVE API-доступ 990 и передаёт 990 root SSH-ключ PVE
 9.  внутри 990 подготавливается bootstrap-runtime
 10. строится OpenTofu input только для 910
-11. deploy-guest --infrastructure-only создаёт LXC 910
+11. deploy-guest --infrastructure-only создаёт LXC 910 и применяет общие host-only требования
 12. deploy-guest --provision-base-only применяет базовую часть provision.yaml
-13. закрытый сценарий передаёт в 910 PVE CA, постоянный PVE credential, GitHub-доступ и проект
+13. закрытый сценарий передаёт в 910 PVE CA, постоянный PVE token с privsep=0, root SSH, GitHub-доступ и проект
 14. deploy-guest --provision-only полностью применяет provision.yaml 910
 15. устанавливаются Docker и постоянный infra-runtime
 16. настраиваются Semaphore, OpenTofu, Ansible и Packer
 17. после реализации соответствующего контракта разворачивается OpenBao
-18. выполняются проверки готовности 910
+18. выполняются проверки PVE API, root SSH и готовности 910
 19. закрытый сценарий удаляет временное состояние и секреты 990
-20. PVE отзывает временные права 990
+20. PVE отзывает временный API token 990
 21. LXC 990 удаляется
 ~~~
 
