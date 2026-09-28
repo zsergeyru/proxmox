@@ -1,0 +1,62 @@
+schema_version: 1
+guest_vmid: 910
+
+title: "Состояние 910 infra-manager"
+short_ready_message: "infra-manager готов"
+ready_message: "910 infra-manager полностью готов"
+
+layout:
+  separator: "="
+  width: 60
+
+checks:
+  - type: runtime
+    message: "Docker и infra-runtime работают"
+  - type: semaphore
+    message: "Semaphore работает"
+  - type: runtime_tools
+    message: "OpenTofu, Ansible и Packer готовы"
+  - type: pve_access
+    message: "Доступ к PVE подтверждён"
+
+data:
+  address:
+    type: primary_ipv4
+  semaphore_password:
+    type: file
+    path: /etc/infra-manager/secrets/initial-admin-password
+    sensitive: true
+  project_branch:
+    type: project_branch
+  project_revision:
+    type: git_revision
+    repository: /var/lib/infra-manager/bootstrap-repo
+
+sections:
+  - title: "Система"
+    fields:
+      - label: "Адрес"
+        source: address
+
+  - title: "Semaphore"
+    fields:
+      - label: "Адрес"
+        template: "http://{address}:3000"
+      - label: "Логин"
+        value: "admin"
+      - label: "Пароль"
+        source: semaphore_password
+
+  - title: "Проект"
+    fields:
+      - label: "Ветка"
+        source: project_branch
+      - label: "Версия"
+        source: project_revision
+
+  - title: "Проверка"
+    fields:
+      - label: "Внутри 910"
+        value: "infra-manager-status --full"
+      - label: "С PVE"
+        value: "pct exec 910 -- infra-manager-status --full"
