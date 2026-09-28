@@ -12,6 +12,7 @@ PY_PVE="$ROOT/scripts/infra-manager/infra_manager/pve.py"
 STATUS="$ROOT/scripts/infra-manager/commands/status.sh"
 ACCESS="$ROOT/scripts/infra-manager/commands/pve-access-check.sh"
 LIFECYCLE="$ROOT/scripts/infra-manager/commands/pve-lifecycle-test.sh"
+ACTIVATE_RUNTIME="$ROOT/scripts/infra-manager/commands/activate-runtime.sh"
 BUILD_TEMPLATE="$ROOT/scripts/infra-manager/jobs/build-template.py"
 VERIFY_TEMPLATE="$ROOT/scripts/infra-manager/jobs/verify-template.py"
 DEPLOY_GUEST="$ROOT/scripts/infra-manager/jobs/deploy-guest.py"
@@ -32,7 +33,7 @@ SSH_CONFIG="$ROOT/infrastructure/guests/910-infra-manager/compose/runtime/ssh_co
 die() { printf 'ОШИБКА: %s\n' "$*" >&2; exit 1; }
 ok()  { printf '[ОК] %s\n' "$*"; }
 
-for file in "$ANSIBLE_PLAYBOOK" "$ANSIBLE_DOCKER" "$ANSIBLE_RUNTIME" "$PY_SETTINGS" "$PY_SEMAPHORE" "$PY_STATUS" "$PY_PVE" "$STATUS" "$ACCESS" "$LIFECYCLE" "$BUILD_TEMPLATE" "$VERIFY_TEMPLATE" "$DEPLOY_GUEST" "$PY_OPENTOFU" "$PY_TEMPLATE" "$PY_TEMPLATE_BUILD" "$PY_TEMPLATE_VERIFY" "$COMPOSE" "$DOCKERFILE" "$REQ" "$PLAN" "$PY_PVE_HOST" "$OPENTOFU_LOCK" "$GUEST_MANIFEST" "$PROVISION" "$SSH_CONFIG"; do
+for file in "$ANSIBLE_PLAYBOOK" "$ANSIBLE_DOCKER" "$ANSIBLE_RUNTIME" "$PY_SETTINGS" "$PY_SEMAPHORE" "$PY_STATUS" "$PY_PVE" "$STATUS" "$ACCESS" "$LIFECYCLE" "$ACTIVATE_RUNTIME" "$BUILD_TEMPLATE" "$VERIFY_TEMPLATE" "$DEPLOY_GUEST" "$PY_OPENTOFU" "$PY_TEMPLATE" "$PY_TEMPLATE_BUILD" "$PY_TEMPLATE_VERIFY" "$COMPOSE" "$DOCKERFILE" "$REQ" "$PLAN" "$PY_PVE_HOST" "$OPENTOFU_LOCK" "$GUEST_MANIFEST" "$PROVISION" "$SSH_CONFIG"; do
     [[ -s "$file" ]] || die "Отсутствует обязательный файл: $file"
 done
 
@@ -252,6 +253,11 @@ for wrapper in "$STATUS" "$ACCESS"; do
     grep -Fq '/var/lib/infra-manager/bootstrap-repo/scripts/infra-manager' "$wrapper" \
         || die "Wrapper должен сохранять canonical checkout как аварийный fallback"
 done
+grep -q 'infra-manager-activate-runtime' "$ACTIVATE_RUNTIME" \
+    || die "Команда активации должна проверять собственное имя"
+grep -q 'infra-manager-status --full --quiet' "$ACTIVATE_RUNTIME" \
+    || die "Отложенная активация должна завершаться полной проверкой 910"
+
 grep -q 'python_install_root: Path = Path("/usr/local/lib/infra-manager")' "$PY_SETTINGS" \
     || die "Постоянный путь установки Python package должен быть зафиксирован"
 grep -Fq 'dest: "{{ provision.paths.python_package }}/infra_manager/"' "$ANSIBLE_RUNTIME" \
@@ -262,7 +268,13 @@ grep -q 'pve-access-check.sh' "$ANSIBLE_RUNTIME" \
     || die "Ansible должен устанавливать PVE access wrapper"
 grep -q 'pve-lifecycle-test.sh' "$ANSIBLE_RUNTIME" \
     || die "Ansible должен устанавливать lifecycle test"
-branch_env_count="$(grep -Fc 'INFRA_PROJECT_BRANCH: "{{ lookup('\''env'\'', '\''INFRA_PROJECT_BRANCH'\'') | default('\''main'\'', true) }}"' "$ANSIBLE_RUNTIME")"
+grep -q 'activate-runtime.sh' "$ANSIBLE_RUNTIME" \
+    || die "Ansible должен устанавливать команду активации infra-runtime"
+grep -q 'infra-manager ansible self' "$ANSIBLE_RUNTIME" \
+    || die "910 должен сохранять управляемый блок собственного Ansible-ключа"
+grep -q 'systemd-run' "$ANSIBLE_RUNTIME" \
+    || die "Самообновление 910 должно откладывать перезапуск infra-runtime"
+branch_env_count="$(grep -Fc 'INFRA_PROJECT_BRANCH: "{{ infra_project_branch' "$ANSIBLE_RUNTIME" || true)"
 [[ "$branch_env_count" -ge 2 ]] \
     || die "Выбранная ветка должна передаваться и настройке Semaphore, и финальной проверке 910"
 
@@ -365,6 +377,10 @@ grep -q 'scripts/infra-manager/jobs/deploy-guest.py' "$PY_SEMAPHORE" \
     || die "Deploy Guest 410 должен запускать универсальный Python-сценарий"
 grep -Fq "arguments='[\"410\"]'" "$PY_SEMAPHORE" \
     || die "Deploy Guest 410 должен иметь фиксированный VMID 410"
+grep -Fq 'name="Deploy Guest 910"' "$PY_SEMAPHORE" \
+    || die "Semaphore должен создавать задание Deploy Guest 910"
+grep -Fq "arguments='[\"910\"]'" "$PY_SEMAPHORE" \
+    || die "Deploy Guest 910 должен иметь фиксированный VMID 910"
 grep -q 'app: str = "python"' "$PY_SEMAPHORE" \
     || die "Semaphore infrastructure tasks должны по умолчанию выполняться как Python"
 grep -q '"allow_override_args_in_task": False' "$PY_SEMAPHORE" \
