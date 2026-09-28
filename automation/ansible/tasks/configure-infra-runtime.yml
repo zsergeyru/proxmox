@@ -402,6 +402,7 @@
     argv:
       - /usr/local/sbin/infra-manager-status
       - --full
+      - --quiet
   environment:
     INFRA_PROJECT_BRANCH: "{{ lookup('env', 'INFRA_PROJECT_BRANCH') | default('main', true) }}"
   changed_when: false
