@@ -234,6 +234,7 @@ class BootstrapHost:
         *args: str,
         quiet: bool = False,
         check: bool = True,
+        capture: bool = False,
     ) -> subprocess.CompletedProcess[str]:
         return self.run(
             "pct",
@@ -243,6 +244,7 @@ class BootstrapHost:
             *args,
             quiet=quiet,
             check=check,
+            capture=capture,
         )
 
     def ct_exists(self) -> bool:
@@ -955,6 +957,49 @@ class BootstrapHost:
         self.remove_host_root_ssh_authorization()
         self.ok("Root SSH-доступ infra-manager к PVE удалён")
 
+    def show_semaphore_access(self) -> None:
+        """Показать адрес Semaphore и однократно первичный пароль."""
+        password_file = "/etc/infra-manager/secrets/initial-admin-password"
+        shown_file = "/etc/infra-manager/secrets/.initial-admin-password-shown"
+
+        address_result = self.infra_exec(
+            "hostname",
+            "-I",
+            capture=True,
+        )
+        addresses = [
+            item
+            for item in address_result.stdout.split()
+            if "." in item and item != "127.0.0.1"
+        ]
+        if not addresses:
+            self.fail("не удалось определить адрес 910 для Semaphore")
+
+        self.log("Доступ к Semaphore")
+        print(f"Адрес:  http://{addresses[0]}:3000")
+        print("Логин:  admin")
+
+        if self.infra_test("-e", shown_file):
+            return
+        if not self.infra_test("-s", password_file):
+            self.fail("не найден первичный пароль Semaphore")
+
+        password = self.infra_exec(
+            "cat",
+            password_file,
+            capture=True,
+        ).stdout.strip()
+        if not password:
+            self.fail("первичный пароль Semaphore пуст")
+        print(f"Пароль: {password}")
+        self.infra_exec(
+            "install",
+            "-m",
+            "0600",
+            "/dev/null",
+            shown_file,
+        )
+
     def check_ready(self) -> None:
         if not self.infra_exists():
             self.fail("LXC 910 отсутствует")
@@ -963,6 +1008,7 @@ class BootstrapHost:
             self.fail("после успешного bootstrap временный LXC 990 не должен существовать")
         if self.temporary_token_exists():
             self.fail("после успешного bootstrap временный token 990 не должен существовать")
+        self.show_semaphore_access()
         self.ok("Постоянный 910 готов, временный контур отсутствует")
 
     def runner_owns_910(self) -> bool:
