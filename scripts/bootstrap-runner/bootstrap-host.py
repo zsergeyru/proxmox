@@ -12,6 +12,9 @@ from pathlib import Path
 
 VERSION = "2.0.0-dev1"
 
+# Official github.com Ed25519 host key published by GitHub.
+GITHUB_ED25519_KNOWN_HOST = "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl"
+
 
 class BootstrapError(RuntimeError):
     pass
@@ -137,7 +140,7 @@ class BootstrapHost:
     def require_host(self) -> None:
         if os.geteuid() != 0:
             self.fail("сценарий должен выполняться от root на PVE")
-        for command in ("pct", "pveum", "pvesm", "ssh-keyscan", "python3"):
+        for command in ("pct", "pveum", "pvesm", "python3"):
             if not self.command_exists(command):
                 self.fail(f"не найден {command}")
         if not self.host_github_key.is_file() or self.host_github_key.stat().st_size == 0:
@@ -360,14 +363,7 @@ class BootstrapHost:
         os.close(fd)
         tmp = Path(tmp_name)
         try:
-            scan = self.run(
-                "ssh-keyscan",
-                "-t",
-                "ed25519",
-                "github.com",
-                capture=True,
-            )
-            tmp.write_text(scan.stdout)
+            tmp.write_text(f"{GITHUB_ED25519_KNOWN_HOST}\n")
             self.pct(
                 "push",
                 str(self.infra_ctid),
