@@ -119,6 +119,8 @@ jobs:
           packer version
 
       - name: Validate Packer 9000
+        env:
+          PACKER_GITHUB_API_TOKEN: ${{ github.token }}
         run: |
           packer fmt -check -recursive automation/packer
           packer init automation/packer/9000
