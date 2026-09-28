@@ -362,11 +362,6 @@ class BootstrapHost:
         checks = (
             (self.project_dir / ".git", "-d", "закрытый репозиторий"),
             (
-                self.project_dir / "scripts/bootstrap-runner/pve-access.sh",
-                "-s",
-                "pve-access.sh",
-            ),
-            (
                 self.project_dir / "scripts/bootstrap-runner/prepare-runtime.sh",
                 "-s",
                 "prepare-runtime.sh",
@@ -382,38 +377,118 @@ class BootstrapHost:
             if result.returncode:
                 self.fail(f"в LXC {self.ctid} отсутствует {label}")
 
-    def pull_helper(self, source: Path, prefix: str) -> Path:
-        fd, name = tempfile.mkstemp(prefix=prefix, dir="/run")
-        os.close(fd)
-        target = Path(name)
-        try:
-            self.pct("pull", str(self.ctid), str(source), str(target))
-            target.chmod(0o700)
-        except Exception:
-            target.unlink(missing_ok=True)
-            raise
-        return target
+    def prepare_runner_pve_access(self) -> None:
+        """Создать полный временный API token и передать его в 990."""
+        token_name = "bootstrap-runner"
+        token_id = f"root@pam!{token_name}"
+        self.remove_named_token("root@pam", token_name)
 
-    def run_private_host_access(self, mode: str = "apply") -> None:
-        # Политика временного доступа к PVE API хранится в закрытом проекте,
-        # поэтому вспомогательный сценарий копируется на PVE только на время выполнения.
-        helper = self.pull_helper(
-            self.project_dir / "scripts/bootstrap-runner/pve-access.sh",
-            "bootstrap-runner-pve-access.",
+        created = self.run(
+            "pveum",
+            "user",
+            "token",
+            "add",
+            "root@pam",
+            token_name,
+            "--privsep",
+            "0",
+            "--output-format",
+            "json",
+            capture=True,
         )
         try:
-            self.run(
-                "bash",
-                str(helper),
-                env={
-                    "BOOTSTRAP_RUNNER_MODE": mode,
-                    "BOOTSTRAP_RUNNER_CTID": str(self.ctid),
-                },
-                quiet=True,
-            )
-        finally:
-            helper.unlink(missing_ok=True)
+            payload = json.loads(created.stdout or "{}")
+        except json.JSONDecodeError as exc:
+            self.remove_named_token("root@pam", token_name)
+            raise BootstrapError(
+                "PVE вернул некорректный JSON при создании bootstrap-runner token"
+            ) from exc
 
+        secret = str(payload.get("value") or "")
+        if not secret:
+            self.remove_named_token("root@pam", token_name)
+            self.fail("PVE создал bootstrap-runner token без доступного secret")
+
+        node = self.run("hostname", "-s", capture=True).stdout.strip()
+        addresses = self.run(
+            "getent",
+            "ahostsv4",
+            node,
+            capture=True,
+        ).stdout.splitlines()
+        if not addresses:
+            self.remove_named_token("root@pam", token_name)
+            self.fail("не удалось определить IPv4 PVE-узла")
+        host_ip = addresses[0].split()[0]
+
+        secret_dir = Path("/etc/bootstrap-runner/secrets")
+        ca_dir = Path("/etc/bootstrap-runner/ca")
+        self.ct_exec("install", "-d", "-m", "0700", str(secret_dir))
+        self.ct_exec("install", "-d", "-m", "0755", str(ca_dir))
+
+        fd, tmp_name = tempfile.mkstemp(
+            prefix="bootstrap-runner-pve-api.",
+            dir="/run",
+        )
+        os.close(fd)
+        tmp = Path(tmp_name)
+        try:
+            tmp.write_text(
+                f"PVE_API_URL=https://{node}:8006\n"
+                f"PVE_API_TOKEN_ID={token_id}\n"
+                f"PVE_API_TOKEN_SECRET={secret}\n"
+                f"TF_VAR_pve_endpoint=https://{node}:8006\n"
+                f"TF_VAR_pve_api_token={token_id}={secret}\n",
+                encoding="utf-8",
+            )
+            tmp.chmod(0o600)
+            self.pct(
+                "push",
+                str(self.ctid),
+                str(tmp),
+                str(secret_dir / "pve-api.env"),
+                "--user",
+                "0",
+                "--group",
+                "0",
+                "--perms",
+                "0600",
+            )
+            self.pct(
+                "push",
+                str(self.ctid),
+                "/etc/pve/pve-root-ca.pem",
+                str(ca_dir / "ca-bundle.crt"),
+                "--user",
+                "0",
+                "--group",
+                "0",
+                "--perms",
+                "0644",
+            )
+        except Exception:
+            self.remove_named_token("root@pam", token_name)
+            raise
+        finally:
+            tmp.unlink(missing_ok=True)
+
+        hosts_script = (
+            'node=$1; ip=$2; '
+            'grep -vE "[[:space:]]${node}([[:space:]]|$)" /etc/hosts '
+            '> /etc/hosts.bootstrap || true; '
+            'printf "%s %s\\n" "$ip" "$node" >> /etc/hosts.bootstrap; '
+            'cat /etc/hosts.bootstrap > /etc/hosts; '
+            'rm -f /etc/hosts.bootstrap'
+        )
+        self.ct_exec(
+            "sh",
+            "-c",
+            hosts_script,
+            "sh",
+            node,
+            host_ip,
+        )
+        self.ok("Временный полный PVE API-доступ 990 подготовлен")
     def prepare_runtime(self) -> None:
         self.log("Подготовка среды bootstrap-runner")
         self.ct_exec(
@@ -782,25 +857,10 @@ class BootstrapHost:
         return self.token_exists("root@pam", "bootstrap-runner")
 
     def remove_private_access(self) -> None:
-        # Если 990 сохранился, временный token удаляется тем же закрытым сценарием,
-        # который его создавал. При отсутствии 990 используется прямое удаление.
-        source = self.project_dir / "scripts/bootstrap-runner/pve-access.sh"
-        if self.ct_exists():
-            try:
-                self.assert_owned_runner()
-            except BootstrapError:
-                self.remove_named_token("root@pam", "bootstrap-runner")
-            else:
-                if self.ct_exec("test", "-f", str(source), check=False).returncode == 0:
-                    self.run_private_host_access("remove")
-                else:
-                    self.remove_named_token("root@pam", "bootstrap-runner")
-        else:
-            self.remove_named_token("root@pam", "bootstrap-runner")
-
+        """Удалить временный API token 990."""
+        self.remove_named_token("root@pam", "bootstrap-runner")
         if self.temporary_token_exists():
             self.fail("временный PVE API token 990 не удалён")
-
     def remove_downloaded_template(self) -> None:
         if not self.host_template_marker.is_file():
             return
@@ -898,7 +958,7 @@ class BootstrapHost:
         self.verify_runner_contract()
         self.ensure_host_root_ssh_access()
         self.stage_runner_pve_root_access()
-        self.run_private_host_access()
+        self.prepare_runner_pve_access()
         self.prepare_runtime()
 
     def apply(self) -> None:
