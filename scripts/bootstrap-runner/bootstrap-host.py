@@ -109,12 +109,48 @@ class BootstrapHost:
         *args: str,
         env: dict[str, str] | None = None,
         quiet: bool = False,
+        progress: bool = False,
         check: bool = True,
         capture: bool = False,
     ) -> subprocess.CompletedProcess[str]:
         command_env = os.environ.copy()
         if env:
             command_env.update(env)
+
+        if quiet and progress:
+            # Полный вывод остаётся в журнале, но названия долгих Ansible-задач
+            # показываются в основной консоли, чтобы bootstrap не выглядел зависшим.
+            self.log_file.parent.mkdir(parents=True, exist_ok=True)
+            with self.log_file.open("a", encoding="utf-8") as log:
+                process = subprocess.Popen(
+                    args,
+                    text=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    env=command_env,
+                )
+                assert process.stdout is not None
+                for line in process.stdout:
+                    log.write(line)
+                    log.flush()
+                    stripped = line.strip()
+                    if stripped.startswith("TASK ["):
+                        end = stripped.find("]")
+                        task = stripped[6:end] if end > 6 else stripped
+                        self.info(f"Ansible: {task}")
+                    elif stripped.startswith("PLAY RECAP"):
+                        self.info("Ansible: формирование итогов")
+                    elif stripped.startswith(("[ИНФО]", "[ОК]", "ОШИБКА:")):
+                        print(stripped, flush=True)
+                returncode = process.wait()
+
+            result = subprocess.CompletedProcess(args, returncode)
+            if check and returncode:
+                self.show_log_tail()
+                raise BootstrapError(
+                    f"команда завершилась с кодом {returncode}: {' '.join(args)}"
+                )
+            return result
 
         if quiet:
             # Подробности команд сохраняются в журнале. В консоли остаются
@@ -170,6 +206,7 @@ class BootstrapHost:
         self,
         *args: str,
         quiet: bool = False,
+        progress: bool = False,
         check: bool = True,
     ) -> subprocess.CompletedProcess[str]:
         return self.run(
@@ -179,6 +216,7 @@ class BootstrapHost:
             "--",
             *args,
             quiet=quiet,
+            progress=progress,
             check=check,
         )
 
@@ -515,7 +553,11 @@ class BootstrapHost:
             "bash", str(self.project_dir / "scripts/bootstrap-runner/deploy-910.sh"),
             phase, str(self.project_dir),
         ]
-        self.ct_exec(*deploy_args, quiet=True)
+        self.ct_exec(
+            *deploy_args,
+            quiet=True,
+            progress=phase in {"base", "provision", "existing"},
+        )
         self.ok(success)
 
     def infra_config_is_expected(self) -> bool:
