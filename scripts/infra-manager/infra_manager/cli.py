@@ -28,7 +28,12 @@ def build_parser() -> argparse.ArgumentParser:
     status_parser.add_argument(
         "--full",
         action="store_true",
-        help="дополнительно проверить полный контракт PVE API",
+        help="проверить полный контракт и показать подробное состояние",
+    )
+    status_parser.add_argument(
+        "--quiet",
+        action="store_true",
+        help=argparse.SUPPRESS,
     )
     status_parser.set_defaults(handler="status")
 
@@ -57,7 +62,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.handler == "status":
             from .status import check_status
 
-            return check_status(full=args.full)
+            return check_status(full=args.full, quiet=args.quiet)
 
         if args.handler == "pve-access-check":
             from .pve import check_access
