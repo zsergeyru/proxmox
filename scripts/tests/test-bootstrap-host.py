@@ -246,75 +246,40 @@ def test_ansible_phases_enable_progress() -> None:
         raise AssertionError("Подробный вывод должен продолжать сохраняться в журнале")
 
 
-class SemaphoreAccessHarness(BootstrapHost):
+class InfraReadyHarness(BootstrapHost):
     def __init__(self) -> None:
         super().__init__("apply")
-        self.commands: list[tuple[str, ...]] = []
+        self.calls: list[tuple[tuple[str, ...], dict[str, object]]] = []
 
-    def log(self, message: str) -> None:
-        self.commands.append(("log", message))
+    def verify_infra_object(self) -> None:
+        return
 
     def infra_test(self, flag: str, path: str) -> bool:
-        if path.endswith("initial-admin-password"):
-            return True
-        raise AssertionError(f"Неожиданная проверка: {flag} {path}")
+        return flag == "-x" and path == "/usr/local/sbin/infra-manager-status"
 
     def infra_exec(self, *args: str, **kwargs):
-        del kwargs
-        command = tuple(args)
-        self.commands.append(command)
-        if command == ("hostname", "-I"):
-            return SimpleNamespace(returncode=0, stdout="192.168.9.10 \n", stderr="")
-        if command == (
-            "git",
-            "-C",
-            "/var/lib/infra-manager/bootstrap-repo",
-            "rev-parse",
-            "--short",
-            "HEAD",
-        ):
-            return SimpleNamespace(returncode=0, stdout="abc1234\n", stderr="")
-        if command == (
-            "cat",
-            "/etc/infra-manager/secrets/initial-admin-password",
-        ):
-            return SimpleNamespace(returncode=0, stdout="secret-pass\n", stderr="")
-        raise AssertionError(f"Неожиданная команда: {command!r}")
+        self.calls.append((tuple(args), dict(kwargs)))
+        return SimpleNamespace(returncode=0)
 
 
-def test_installation_summary_is_shown_every_time() -> None:
-    import contextlib
-    import io
+def test_infra_ready_uses_status_as_final_screen() -> None:
+    host = InfraReadyHarness()
 
-    host = SemaphoreAccessHarness()
-    output = io.StringIO()
-    with contextlib.redirect_stdout(output):
-        host.show_installation_summary()
-        host.show_installation_summary()
+    host.verify_infra_ready(quiet=True)
+    host.verify_infra_ready()
 
-    text_output = output.getvalue()
-    if text_output.count("910 infra-manager полностью готов") != 2:
-        raise AssertionError("Итоговый блок должен выводиться при каждом запуске")
-    if text_output.count("http://192.168.9.10:3000") != 2:
-        raise AssertionError("Адрес Semaphore должен выводиться при каждом запуске")
-    if text_output.count("Логин:   admin") != 2:
-        raise AssertionError("Логин Semaphore должен выводиться при каждом запуске")
-    if text_output.count("Пароль:  secret-pass") != 2:
-        raise AssertionError("Первичный пароль должен выводиться при каждом запуске")
-    if text_output.count("Ветка:   main") != 2:
-        raise AssertionError("В итоговом блоке должна выводиться ветка проекта")
-    if text_output.count("Версия:  abc1234") != 2:
-        raise AssertionError("В итоговом блоке должна выводиться версия проекта")
-    password_reads = [
-        command
-        for command in host.commands
-        if command == (
-            "cat",
-            "/etc/infra-manager/secrets/initial-admin-password",
-        )
-    ]
-    if len(password_reads) != 2:
-        raise AssertionError("Пароль должен читаться при каждом выводе доступа")
+    quiet_args, quiet_kwargs = host.calls[0]
+    visible_args, visible_kwargs = host.calls[1]
+
+    if quiet_args[-2:] != ("--full", "--quiet"):
+        raise AssertionError("Предварительная проверка должна скрывать итоговый экран")
+    if quiet_kwargs.get("quiet") is not True:
+        raise AssertionError("Предварительная проверка не должна попадать в консоль")
+
+    if visible_args[-1:] != ("--full",) or "--quiet" in visible_args:
+        raise AssertionError("Финальная проверка должна показывать полный экран состояния")
+    if visible_kwargs.get("quiet") is not False:
+        raise AssertionError("Финальный экран состояния должен выводиться в консоль")
 
 
 class ApplyHarness(BootstrapHost):
@@ -354,8 +319,8 @@ class ApplyHarness(BootstrapHost):
     def handoff_existing_infra(self) -> None:
         self.events.append("handoff_existing")
 
-    def verify_infra_ready(self) -> None:
-        self.events.append("verify_ready")
+    def verify_infra_ready(self, *, quiet: bool = False) -> None:
+        self.events.append("verify_ready:quiet" if quiet else "verify_ready")
 
     def finalize_runner(self) -> None:
         self.events.append("finalize_runner")
@@ -381,7 +346,7 @@ def test_new_install_flow() -> None:
             "deploy:base",
             "handoff:apply",
             "deploy:provision",
-            "verify_ready",
+            "verify_ready:quiet",
             "finalize_runner",
             "check_ready",
         ],
@@ -403,7 +368,7 @@ def test_existing_without_bootstrap_state() -> None:
             "handoff_existing",
             "ensure_runner_ssh",
             "deploy:existing",
-            "verify_ready",
+            "verify_ready:quiet",
             "finalize_runner",
             "check_ready",
         ],
@@ -450,7 +415,7 @@ def test_recover_existing_without_state() -> None:
             "handoff_existing",
             "ensure_runner_ssh",
             "deploy:existing",
-            "verify_ready",
+            "verify_ready:quiet",
             "finalize_runner",
             "check_ready",
         ],
@@ -485,8 +450,8 @@ class ExecuteHarness(BootstrapHost):
     def info(self, message: str) -> None:
         self.events.append("info")
 
-    def verify_infra_ready(self) -> None:
-        self.events.append("verify_ready")
+    def verify_infra_ready(self, *, quiet: bool = False) -> None:
+        self.events.append("verify_ready:quiet" if quiet else "verify_ready")
 
     def finalize_runner(self) -> None:
         self.events.append("finalize_runner")
@@ -504,7 +469,7 @@ def test_check_mode_finishes_temporary_runner() -> None:
             "require_host",
             "verify_runner",
             "info",
-            "verify_ready",
+            "verify_ready:quiet",
             "finalize_runner",
             "check_ready",
         ],
@@ -556,7 +521,7 @@ def main() -> None:
         test_pve_node_address,
         test_progress_streaming,
         test_ansible_phases_enable_progress,
-        test_installation_summary_is_shown_every_time,
+        test_infra_ready_uses_status_as_final_screen,
         test_new_install_flow,
         test_existing_without_bootstrap_state,
         test_resume_unfinished_initial_state,
