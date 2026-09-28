@@ -62,6 +62,7 @@ guest.yaml
 ```text
 1. --infrastructure-only
    OpenTofu создаёт или сверяет LXC 910
+   общий host-only шаг применяет root-only требования профиля
 
 2. --provision-base-only
    Ansible применяет базовую часть provision.yaml
@@ -72,14 +73,15 @@ guest.yaml
    Ansible полностью применяет provision.yaml
 ```
 
-Такое разделение нужно только потому, что PVE CA и постоянный PVE API credential можно передать лишь после появления самого LXC 910.
+Такое разделение нужно только потому, что постоянные данные доступа 910 можно передать лишь после появления самого LXC 910. Само применение host-only требований остаётся частью общего deploy-guest.
 
 ## 5. Передача первоначальных данных
 
 После создания 910 PVE передаёт:
 
 - PVE CA;
-- постоянный PVE API credential 910;
+- постоянный PVE API credential 910 с `privsep=0`;
+- отдельный root SSH-ключ PVE;
 - read-only GitHub Deploy Key;
 - рабочую копию проекта.
 
