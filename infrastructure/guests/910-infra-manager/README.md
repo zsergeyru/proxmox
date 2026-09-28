@@ -156,6 +156,7 @@ OpenTofu state и другие постоянные данные не должн
 - база Semaphore;
 - ключ шифрования Semaphore;
 - PVE API credential;
+- root SSH-ключ PVE;
 - Semaphore API token;
 - GitHub Deploy Key, используемый Semaphore;
 - OpenTofu state.
@@ -176,21 +177,42 @@ State не хранится в Git и должен резервироватьс�
 
 ## Доступ к PVE
 
-Используется HTTPS API Proxmox.
+910 является доверенным административным контуром домашнего PVE.
 
-Идентичность:
+Используются два канала:
 
 ```text
-root@pam!infra-manager
+HTTPS API
+→ root@pam!infra-manager
+→ privsep=0
+→ OpenTofu и обычные операции PVE
+
+root SSH
+→ отдельный ключ infra-manager
+→ операции PVE, которые запрещены API token
 ```
 
-Token создаётся с разделением привилегий и получает отдельные ACL.
+Отдельная матрица ACL для 910 больше не поддерживается.
 
-Изменяющие права 910 распространяются на путь Proxmox `/vms`, то есть на все VM/LXC. На `/pool/managed` назначаются `PVEVMAdmin` и `PVEPoolUser`: первая роль нужна для гостей, вторая — только для чтения самого pool. Для сборки шаблонов Packer получает доступ к ISO-хранилищу `local`, а диски VM размещает через `local-lvm`. Сам `managed` остаётся границей для AI Control и не ограничивает infra-manager.
+Pool `managed` сохраняется как организационный объект и будущая граница для менее доверенных контуров, например AI Control. Он не ограничивает права infra-manager.
 
-Сам 910 не входит в `managed`, но технически попадает в область `/vms`. Его объект Proxmox принадлежит отдельному первоначальному состоянию 990; постоянный OpenTofu 910 исключает VMID 910 из входных данных, а `protection=true` дополнительно защищает контейнер от случайного удаления.
+Для профиля `debian-lxc-docker` высокоуровневая возможность `container-host` по-прежнему означает:
 
-Постоянный root SSH из 910 на PVE не используется.
+```text
+nesting=1
+keyctl=1
+```
+
+`nesting` применяет OpenTofu через API. `keyctl` применяет общий host-only слой `infra_manager.pve_host` через root SSH. Специального кода только для VMID 910 нет.
+
+Root SSH-идентичность хранится отдельно:
+
+```text
+/etc/infra-manager/pve-host/root_ed25519
+/etc/infra-manager/pve-host/known_hosts
+```
+
+Она передаётся в `infra-runtime` только для чтения.
 
 PVE CA устанавливается в доверенное хранилище 910; отключение проверки TLS не допускается.
 
