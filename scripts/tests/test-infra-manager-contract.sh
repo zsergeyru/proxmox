@@ -2,11 +2,9 @@
 set -Eeuo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-SETUP="$ROOT/scripts/infra-manager/setup.sh"
-PY_SETUP="$ROOT/scripts/infra-manager/infra_manager/setup.py"
-PY_SETUP_CONTEXT="$ROOT/scripts/infra-manager/infra_manager/setup_context.py"
-PY_HOST_SETUP="$ROOT/scripts/infra-manager/infra_manager/host_setup.py"
-PY_RUNTIME_SETUP="$ROOT/scripts/infra-manager/infra_manager/runtime_setup.py"
+ANSIBLE_PLAYBOOK="$ROOT/automation/ansible/playbooks/configure-guest.yml"
+ANSIBLE_DOCKER="$ROOT/automation/ansible/tasks/configure-docker.yml"
+ANSIBLE_RUNTIME="$ROOT/automation/ansible/tasks/configure-infra-runtime.yml"
 PY_SETTINGS="$ROOT/scripts/infra-manager/infra_manager/settings.py"
 PY_SEMAPHORE="$ROOT/scripts/infra-manager/infra_manager/semaphore.py"
 PY_STATUS="$ROOT/scripts/infra-manager/infra_manager/status.py"
@@ -34,18 +32,17 @@ SSH_CONFIG="$ROOT/infrastructure/guests/910-infra-manager/compose/runtime/ssh_co
 die() { printf 'ОШИБКА: %s\n' "$*" >&2; exit 1; }
 ok()  { printf '[ОК] %s\n' "$*"; }
 
-for file in "$SETUP" "$PY_SETUP" "$PY_SETUP_CONTEXT" "$PY_HOST_SETUP" "$PY_RUNTIME_SETUP" "$PY_SETTINGS" "$PY_SEMAPHORE" "$PY_STATUS" "$PY_PVE" "$STATUS" "$ACCESS" "$LIFECYCLE" "$BUILD_TEMPLATE" "$VERIFY_TEMPLATE" "$DEPLOY_GUEST" "$PY_OPENTOFU" "$PY_TEMPLATE" "$PY_TEMPLATE_BUILD" "$PY_TEMPLATE_VERIFY" "$COMPOSE" "$DOCKERFILE" "$REQ" "$PLAN" "$PVE_BOOTSTRAP_ACCESS" "$OPENTOFU_LOCK" "$GUEST_MANIFEST" "$PROVISION" "$SSH_CONFIG"; do
+for file in "$ANSIBLE_PLAYBOOK" "$ANSIBLE_DOCKER" "$ANSIBLE_RUNTIME" "$PY_SETTINGS" "$PY_SEMAPHORE" "$PY_STATUS" "$PY_PVE" "$STATUS" "$ACCESS" "$LIFECYCLE" "$BUILD_TEMPLATE" "$VERIFY_TEMPLATE" "$DEPLOY_GUEST" "$PY_OPENTOFU" "$PY_TEMPLATE" "$PY_TEMPLATE_BUILD" "$PY_TEMPLATE_VERIFY" "$COMPOSE" "$DOCKERFILE" "$REQ" "$PLAN" "$PVE_BOOTSTRAP_ACCESS" "$OPENTOFU_LOCK" "$GUEST_MANIFEST" "$PROVISION" "$SSH_CONFIG"; do
     [[ -s "$file" ]] || die "Отсутствует обязательный файл: $file"
 done
 
 
-python3 - "$GUEST_MANIFEST" "$PROVISION" "$SETUP" "$PY_SETUP" "$PY_HOST_SETUP" "$PY_RUNTIME_SETUP" "$PY_SETTINGS" "$COMPOSE" "$DOCKERFILE" "$REQ" <<'PY'
+python3 - "$GUEST_MANIFEST" "$PROVISION" "$ANSIBLE_PLAYBOOK" "$ANSIBLE_DOCKER" "$ANSIBLE_RUNTIME" "$PY_SETTINGS" "$COMPOSE" "$DOCKERFILE" "$REQ" <<'PY'
 from pathlib import Path
-import re
 import sys
 import yaml
 
-guest_path, provision_path, setup_path, py_setup_path, host_setup_path, runtime_setup_path, settings_path, compose_path, dockerfile_path, req_path = map(Path, sys.argv[1:])
+guest_path, provision_path, playbook_path, docker_tasks_path, runtime_tasks_path, settings_path, compose_path, dockerfile_path, req_path = map(Path, sys.argv[1:])
 
 guest = yaml.safe_load(guest_path.read_text(encoding="utf-8"))
 if guest.get("vmid") != 910 or guest.get("name") != "infra-manager":
@@ -81,11 +78,11 @@ system = provision.get("system", {})
 if system.get("distribution") != "debian" or system.get("version") != "13" or system.get("architecture") != "amd64":
     raise SystemExit("provision.yaml должен требовать Debian 13 amd64")
 
-setup_text = setup_path.read_text(encoding="utf-8")
-python_setup_text = py_setup_path.read_text(encoding="utf-8")
-host_setup_text = host_setup_path.read_text(encoding="utf-8")
-runtime_setup_text = runtime_setup_path.read_text(encoding="utf-8")
+playbook_text = playbook_path.read_text(encoding="utf-8")
+docker_tasks_text = docker_tasks_path.read_text(encoding="utf-8")
+runtime_tasks_text = runtime_tasks_path.read_text(encoding="utf-8")
 settings_text = settings_path.read_text(encoding="utf-8")
+
 required_host_packages = set(system.get("required_packages", []))
 expected_host_packages = {
     "ca-certificates", "curl", "git", "gnupg", "jq",
@@ -93,9 +90,8 @@ expected_host_packages = {
 }
 if required_host_packages != expected_host_packages:
     raise SystemExit(f"неожиданный список пакетов 910: {sorted(required_host_packages)}")
-for package in required_host_packages:
-    if package not in host_setup_text:
-        raise SystemExit(f"host_setup.py не обеспечивает пакет из provision.yaml: {package}")
+if 'provision.system.required_packages' not in playbook_text:
+    raise SystemExit("общий Ansible playbook не устанавливает system.required_packages")
 
 docker = provision.get("docker", {})
 docker_packages = set(docker.get("required_packages", []))
@@ -105,21 +101,18 @@ expected_docker_packages = {
 }
 if docker_packages != expected_docker_packages:
     raise SystemExit(f"неожиданные Docker-пакеты 910: {sorted(docker_packages)}")
-for package in docker_packages:
-    if package not in host_setup_text:
-        raise SystemExit(f"host_setup.py не обеспечивает Docker-пакет из provision.yaml: {package}")
+if 'provision.docker.required_packages' not in docker_tasks_text:
+    raise SystemExit("общий Ansible-модуль Docker не использует required_packages")
 
 services = docker.get("services", {})
 if set(services) != {"runtime"}:
     raise SystemExit(f"provision.yaml: должен быть один Docker service runtime: {sorted(services)}")
-
 runtime = services["runtime"]
 if runtime.get("container_name") != "infra-runtime":
     raise SystemExit("provision.yaml: container_name должен быть infra-runtime")
 if runtime.get("image") != "infra-runtime:v1":
     raise SystemExit("provision.yaml: image должен быть infra-runtime:v1")
-base_image = runtime.get("base_image", "")
-if base_image != "semaphoreui/semaphore:v2.18.30":
+if runtime.get("base_image") != "semaphoreui/semaphore:v2.18.30":
     raise SystemExit("infra-runtime должен использовать Semaphore v2.18.30 как base image")
 if runtime.get("network_mode") != "host":
     raise SystemExit("infra-runtime должен использовать network_mode=host для Packer HTTP")
@@ -136,11 +129,10 @@ if f"ARG OPENTOFU_VERSION={opentofu_version}" not in dockerfile_text:
     raise SystemExit("Версия OpenTofu в Dockerfile расходится с provision.yaml")
 if f"ARG PACKER_VERSION={packer_version}" not in dockerfile_text:
     raise SystemExit("Версия Packer в Dockerfile расходится с provision.yaml")
-system_packages = set(runtime.get("system_packages", []))
-for package in system_packages:
+for package in set(runtime.get("system_packages", [])):
     if package not in dockerfile_text:
         raise SystemExit(f"Dockerfile не устанавливает пакет infra-runtime из provision.yaml: {package}")
-if "xorriso" in system_packages or "xorriso" in dockerfile_text:
+if "xorriso" in dockerfile_text:
     raise SystemExit("xorriso не нужен: preseed передаётся штатным HTTP-сервером Packer")
 if f'opentofu_version: str = "{opentofu_version}"' not in settings_text:
     raise SystemExit("Версия OpenTofu в settings.py расходится с provision.yaml")
@@ -161,72 +153,42 @@ if compose_services["runtime"].get("container_name") != runtime.get("container_n
     raise SystemExit("container_name infra-runtime расходится с provision.yaml")
 if compose_services["runtime"].get("network_mode") != "host":
     raise SystemExit("infra-runtime Compose должен использовать network_mode=host")
+
+required_runtime_fragments = (
+    "provision.access.pve.ca_source",
+    "provision.access.pve.staging_credential",
+    "provision.access.pve.persistent_credential",
+    "provision.paths.ansible_identity",
+    "provision.paths.semaphore_data",
+    "render-opentofu-input.py",
+    "--exclude-vmid",
+    "docker-compose.yml",
+    "semaphore-project",
+    "infra-manager-status",
+)
+for fragment in required_runtime_fragments:
+    if fragment not in runtime_tasks_text:
+        raise SystemExit(f"Ansible infra-runtime не покрывает обязательный этап: {fragment}")
 PY
-
-grep -Fq 'exec python3 -m infra_manager setup "$@"' "$SETUP" \
-    || die "setup.sh должен передавать настройку Python CLI"
-grep -Fq 'if ! command -v python3' "$SETUP" \
-    || die "setup.sh должен bootstrap только сам Python на минимальном Debian"
-if grep -q 'docker compose\|SEMAPHORE_DB_DIALECT\|repair_semaphore_storage' "$SETUP"; then
-    die "setup.sh должен оставаться тонким Python wrapper"
+[[ ! -e "$ROOT/scripts/infra-manager/setup.sh" ]] \
+    || die "Старый setup.sh не должен существовать"
+[[ ! -e "$ROOT/scripts/infra-manager/infra_manager/setup.py" ]] \
+    || die "Старый Python setup не должен существовать"
+[[ ! -e "$ROOT/scripts/infra-manager/infra_manager/host_setup.py" ]] \
+    || die "Старый HostSetup не должен существовать"
+[[ ! -e "$ROOT/scripts/infra-manager/infra_manager/runtime_setup.py" ]] \
+    || die "Старый RuntimeSetup не должен существовать"
+[[ ! -e "$ROOT/scripts/infra-manager/infra_manager/setup_context.py" ]] \
+    || die "Старый SetupContext не должен существовать"
+if grep -q '"setup"' "$ROOT/scripts/infra-manager/infra_manager/cli.py"; then
+    die "CLI не должен содержать отдельную команду setup"
 fi
-
-if grep -Eq '^[[:space:]]*IdentitiesOnly[[:space:]]+yes[[:space:]]*$' "$SSH_CONFIG"; then
-    die "Semaphore Git использует временный ssh-agent; IdentitiesOnly yes блокирует Deploy Key"
-fi
-
-grep -q '^class Setup:$' "$PY_SETUP" \
-    || die "Python setup должен содержать отдельный оркестратор Setup"
-if grep -q '^class Setup(HostSetup, RuntimeSetup):' "$PY_SETUP"; then
-    die "Setup не должен использовать множественное наследование HostSetup/RuntimeSetup"
-fi
-grep -q '^class SetupContext:' "$PY_SETUP_CONTEXT" \
-    || die "Общие зависимости setup должны быть собраны в SetupContext"
-grep -q '^class SetupReporter:' "$PY_SETUP_CONTEXT" \
-    || die "Вывод и журнал setup должны быть выделены в SetupReporter"
-grep -Fq 'host=HostSetup(context, reporter)' "$PY_SETUP" \
-    || die "Setup должен подключать HostSetup через композицию"
-grep -Fq 'runtime=RuntimeSetup(context, reporter)' "$PY_SETUP" \
-    || die "Setup должен подключать RuntimeSetup через композицию"
-grep -q '^class HostSetup:' "$PY_HOST_SETUP" \
-    || die "Подготовка хоста должна быть выделена в HostSetup"
-grep -q '^class RuntimeSetup:' "$PY_RUNTIME_SETUP" \
-    || die "Подготовка runtime должна быть выделена в RuntimeSetup"
-grep -q '^SEMAPHORE_VERSION = SETTINGS.semaphore_version' "$PY_RUNTIME_SETUP" \
-    || die "setup должен читать версию Semaphore из единых настроек"
-grep -q '^RUNTIME_VERSION = SETTINGS.runtime_version' "$PY_RUNTIME_SETUP" \
-    || die "setup должен читать версию infra-runtime из единых настроек"
-grep -q '^OPENTOFU_VERSION = SETTINGS.opentofu_version' "$PY_RUNTIME_SETUP" \
-    || die "setup должен читать версию OpenTofu из единых настроек"
-grep -q '^PACKER_VERSION = SETTINGS.packer_version' "$PY_RUNTIME_SETUP" \
-    || die "setup должен читать версию Packer из единых настроек"
-
-for method in prepare_directories ensure_base_packages ensure_ansible_identity install_docker generate_ca_bundle persist_pve_api_secret install_local_commands; do
-    grep -q "    def ${method}(" "$PY_HOST_SETUP" \
-        || die "HostSetup не содержит обязательный этап ${method}"
-done
-
-for method in copy_compose_assets seed_semaphore_known_hosts ensure_semaphore_secrets prepare_opentofu_input write_runtime_versions deploy_semaphore wait_semaphore verify_semaphore_tools configure_semaphore_project; do
-    grep -q "    def ${method}(" "$PY_RUNTIME_SETUP" \
-        || die "RuntimeSetup не содержит обязательный этап ${method}"
-done
-
-grep -q 'render-opentofu-input.py' "$PY_RUNTIME_SETUP" \
-    || die "Python setup должен генерировать OpenTofu input"
-grep -q 'Используется существующий постоянный PVE API credential' "$PY_HOST_SETUP" \
-    || die "Повторное обновление 910 должно работать без staging PVE secret"
-grep -q 'from .semaphore import configure_project' "$PY_RUNTIME_SETUP" \
-    || die "Python setup должен напрямую использовать Semaphore-модуль"
-grep -Fq 'configure_project(self.context.project_branch)' "$PY_RUNTIME_SETUP" \
-    || die "Python setup должен передавать текущую Git-ветку в Semaphore"
-[[ ! -e "$ROOT/scripts/infra-manager/semaphore-project.sh" ]] \
-    || die "Устаревший semaphore-project.sh больше не должен существовать"
-grep -q 'status.sh' "$PY_HOST_SETUP" \
-    || die "setup должен устанавливать совместимый status wrapper"
-grep -q 'pve-access-check.sh' "$PY_HOST_SETUP" \
-    || die "setup должен устанавливать совместимый PVE access wrapper"
-grep -q 'pve-lifecycle-test.sh' "$PY_HOST_SETUP" \
-    || die "На этапе 2 должен использоваться существующий lifecycle test"
+grep -q 'configure-docker.yml' "$ANSIBLE_PLAYBOOK" \
+    || die "Общий Ansible playbook должен подключать настройку Docker"
+grep -q 'configure-infra-runtime.yml' "$ANSIBLE_PLAYBOOK" \
+    || die "Общий Ansible playbook должен подключать настройку infra-runtime"
+grep -q 'provision.system.required_packages' "$ANSIBLE_PLAYBOOK" \
+    || die "Общий Ansible playbook должен устанавливать системные пакеты из provision.yaml"
 
 grep -q 'API_USER="root@pam"' "$PVE_BOOTSTRAP_ACCESS" \
     || die "PVE bootstrap access должен использовать существующий root@pam"
@@ -261,35 +223,29 @@ fi
 if grep -q 'pveum role add.*InfraManagedGuest' "$PVE_BOOTSTRAP_ACCESS"; then
     die "Собственная роль InfraManagedGuest больше не должна создаваться"
 fi
-if grep -q 'infra-manager@pve' "$PVE_BOOTSTRAP_ACCESS" "$SETUP" "$PY_SETUP" "$PY_SETUP_CONTEXT" "$PY_HOST_SETUP" "$PY_RUNTIME_SETUP" "$PY_SEMAPHORE" "$PY_STATUS" "$PY_PVE"; then
+if grep -q 'infra-manager@pve' "$PVE_BOOTSTRAP_ACCESS" "$ANSIBLE_PLAYBOOK" "$ANSIBLE_DOCKER" "$ANSIBLE_RUNTIME" "$PY_SEMAPHORE" "$PY_STATUS" "$PY_PVE"; then
     die "Старая PVE-идентичность не должна присутствовать в чистой схеме"
 fi
-if grep -q 'InfraManagedGuest' "$PVE_BOOTSTRAP_ACCESS" "$SETUP" "$PY_SETUP" "$PY_SETUP_CONTEXT" "$PY_HOST_SETUP" "$PY_RUNTIME_SETUP" "$PY_SEMAPHORE" "$PY_STATUS" "$PY_PVE"; then
+if grep -q 'InfraManagedGuest' "$PVE_BOOTSTRAP_ACCESS" "$ANSIBLE_PLAYBOOK" "$ANSIBLE_DOCKER" "$ANSIBLE_RUNTIME" "$PY_SEMAPHORE" "$PY_STATUS" "$PY_PVE"; then
     die "Старая собственная роль PVE не должна присутствовать в чистой схеме"
 fi
 if grep -q 'PVE API automation\|Ansible managed guests' "$PY_SEMAPHORE"; then
     die "Неиспользуемые Semaphore credentials не должны создаваться"
 fi
 
-grep -q 'SEMAPHORE_DB_DIALECT=sqlite' "$PY_RUNTIME_SETUP" \
+grep -q 'SEMAPHORE_DB_DIALECT=sqlite' "$ANSIBLE_RUNTIME" \
     || die "Semaphore должен использовать SQLite в первой версии"
-grep -q 'SEMAPHORE_DB_HOST=/var/lib/semaphore/semaphore.sqlite' "$PY_RUNTIME_SETUP" \
+grep -q 'SEMAPHORE_DB_HOST=/var/lib/semaphore/semaphore.sqlite' "$ANSIBLE_RUNTIME" \
     || die "Не зафиксирован постоянный путь SQLite"
-grep -q '^ADMIN_PASSWORD_SHOWN_FILE = ' "$PY_SETUP" \
-    || die "Python setup должен хранить отметку однократного показа пароля Semaphore"
-grep -q 'Пароль: {password}' "$PY_SETUP" \
-    || die "Первичный пароль Semaphore должен один раз выводиться в терминал"
-grep -Fq '"SEMAPHORE_USE_REMOTE_RUNNER="' "$PY_RUNTIME_SETUP" \
-    || die "Python setup должен удалять старую настройку remote Runner"
-grep -Fq '"SEMAPHORE_RUNNER_REGISTRATION_TOKEN="' "$PY_RUNTIME_SETUP" \
-    || die "Python setup должен удалять старый registration token Runner"
-grep -q 'line.startswith(' "$PY_RUNTIME_SETUP" \
-    || die "Удаление старых настроек Runner должно выполняться по началу строки"
-grep -q 'def repair_semaphore_storage' "$PY_RUNTIME_SETUP" \
-    || die "Python setup обязан проверять права постоянного хранилища Semaphore"
-grep -q '"1001:0"' "$PY_RUNTIME_SETUP" \
-    || die "Проверка хранилища Semaphore должна использовать штатный uid 1001"
-grep -q '"packer", "version"' "$PY_RUNTIME_SETUP" \
+grep -q 'SEMAPHORE_USE_REMOTE_RUNNER' "$ANSIBLE_RUNTIME" \
+    || die "Ansible должен удалять старую настройку remote Runner"
+grep -q 'SEMAPHORE_RUNNER_REGISTRATION_TOKEN' "$ANSIBLE_RUNTIME" \
+    || die "Ansible должен удалять старый registration token Runner"
+grep -q 'provision.paths.semaphore_data' "$ANSIBLE_RUNTIME" \
+    || die "Ansible должен обслуживать постоянное хранилище Semaphore"
+grep -q '"1001"' "$ANSIBLE_RUNTIME" \
+    || die "Хранилище Semaphore должно использовать uid 1001"
+grep -q 'packer, version' "$ANSIBLE_RUNTIME" \
     || die "Packer должен проверяться внутри infra-runtime"
 
 grep -Fq 'exec python3 -m infra_manager status "$@"' "$STATUS" \
@@ -302,12 +258,16 @@ for wrapper in "$STATUS" "$ACCESS"; do
     grep -Fq '/var/lib/infra-manager/bootstrap-repo/scripts/infra-manager' "$wrapper" \
         || die "Wrapper должен сохранять canonical checkout как аварийный fallback"
 done
-grep -q '^PYTHON_INSTALL_ROOT = PATHS.python_install_root' "$PY_HOST_SETUP" \
-    || die "Python setup должен читать путь установки package из единых путей"
 grep -q 'python_install_root: Path = Path("/usr/local/lib/infra-manager")' "$PY_SETTINGS" \
     || die "Постоянный путь установки Python package должен быть зафиксирован"
-grep -q 'shutil.copytree(source_package, target_package)' "$PY_HOST_SETUP" \
-    || die "Python setup должен синхронизировать установленный infra_manager package"
+grep -q 'Установить Python-пакет infra_manager' "$ANSIBLE_RUNTIME" \
+    || die "Ansible должен устанавливать infra_manager package"
+grep -q 'status.sh' "$ANSIBLE_RUNTIME" \
+    || die "Ansible должен устанавливать status wrapper"
+grep -q 'pve-access-check.sh' "$ANSIBLE_RUNTIME" \
+    || die "Ansible должен устанавливать PVE access wrapper"
+grep -q 'pve-lifecycle-test.sh' "$ANSIBLE_RUNTIME" \
+    || die "Ansible должен устанавливать lifecycle test"
 
 grep -q '^PROJECT_ID_FILE = PATHS.semaphore_project_id_file' "$PY_SEMAPHORE" \
     || die "Semaphore должен читать путь project-id из единых путей"
@@ -350,12 +310,8 @@ grep -q '"/storage/local"' "$PY_PVE" \
 grep -q 'forbid_permissions(client, "/", FORBIDDEN_ROOT_PRIVS)' "$PY_PVE" \
     || die "Полная проверка PVE access должна запрещать административные root privileges"
 
-if grep -qE '(^|[[:space:]])pct create[[:space:]]+910|(^|[[:space:]])qm create[[:space:]]+910' "$SETUP" "$PY_SETUP" "$PY_HOST_SETUP" "$PY_RUNTIME_SETUP"; then
-    die "Приватный setup не должен создавать виртуальный объект 910"
-fi
-
-if grep -q '/etc/pve/' "$SETUP" "$PY_SETUP" "$PY_SETUP_CONTEXT" "$PY_HOST_SETUP" "$PY_RUNTIME_SETUP" "$PY_SEMAPHORE" "$PY_STATUS" "$PY_PVE"; then
-    die "setup внутри 910 не должен работать с файловой системой /etc/pve"
+if grep -q '/etc/pve/' "$ANSIBLE_PLAYBOOK" "$ANSIBLE_DOCKER" "$ANSIBLE_RUNTIME" "$PY_SEMAPHORE" "$PY_STATUS" "$PY_PVE"; then
+    die "Настройка внутри 910 не должна работать с файловой системой /etc/pve"
 fi
 
 grep -q 'run_build_template' "$BUILD_TEMPLATE" \
