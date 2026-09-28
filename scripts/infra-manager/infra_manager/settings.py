@@ -82,6 +82,10 @@ class Paths:
         return self.opentofu_dir / "guests.json"
 
     @property
+    def status_file(self) -> Path:
+        return self.config_dir / "status.yaml"
+
+    @property
     def server_env(self) -> Path:
         return self.secret_dir / "semaphore-server.env"
 
