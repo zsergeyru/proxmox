@@ -55,6 +55,11 @@ SEMAPHORE_TEMPLATES = (
         playbook="scripts/infra-manager/jobs/deploy-guest.py",
         arguments='["410"]',
     ),
+    TemplateSpec(
+        name="Deploy Guest 910",
+        playbook="scripts/infra-manager/jobs/deploy-guest.py",
+        arguments='["910"]',
+    ),
 )
 
 
