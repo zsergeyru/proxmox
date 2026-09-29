@@ -49,6 +49,9 @@ jobs:
       - name: Run PVE host access checks
         run: python scripts/tests/test-pve-host.py
 
+      - name: Run OpenBao checks
+        run: python scripts/tests/test-openbao.py
+
       - name: Run status checks
         run: python scripts/tests/test-status.py
 
