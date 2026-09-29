@@ -1070,7 +1070,7 @@ class BootstrapHost:
         # Перед полной настройкой Ansible требуем весь минимальный набор доверия:
         # учётные данные PVE, CA, Deploy Key и рабочую копию проекта.
         self.verify_infra_object()
-        persistent = Path("/etc/infra-manager/secrets/pve-api.env")
+        persistent = self.infra_pve_api_env
         if not self.infra_test("-s", persistent):
             self.fail("в 910 отсутствует PVE API credential")
         required = (
