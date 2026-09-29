@@ -210,8 +210,12 @@ def test_ssh_access_credentials_are_pve_only() -> None:
         "ssh-signer": {"role_id": "role-b", "secret_id": "secret-b"},
     }
     with tempfile.TemporaryDirectory() as tmp:
-        target = Path(tmp) / "ssh-access.json"
-        with patch.object(host, "SSH_ACCESS_PATH", target):
+        key_dir = Path(tmp)
+        target = key_dir / "ssh-access.json"
+        with (
+            patch.object(host, "KEY_DIR", key_dir),
+            patch.object(host, "SSH_ACCESS_PATH", target),
+        ):
             host.write_ssh_access_credentials(credentials)
         if json.loads(target.read_text(encoding="utf-8")) != credentials:
             fail("Служебные данные OpenBao записаны с искажением")
