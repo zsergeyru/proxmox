@@ -159,6 +159,8 @@ if "openbao-unseal-key" not in pve_only.get("contains", []):
 access = target_layout.get("access", {})
 if access.get("mode") != "ro" or access.get("guest_path") != "/mnt/pve-access":
     raise SystemExit("Данные доступа PVE должны подключаться в 910 только для чтения")
+if "pve-api-credential" not in access.get("contains", []):
+    raise SystemExit("Постоянный PVE API credential должен принадлежать access/ на PVE")
 state = target_layout.get("state", {})
 if state.get("mode") != "rw" or state.get("guest_path") != "/mnt/persistent-state":
     raise SystemExit("Постоянное состояние 910 должно иметь отдельный rw mount")
