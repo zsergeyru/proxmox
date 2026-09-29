@@ -175,7 +175,7 @@ def test_ssh_ca_reconcile_requires_initial_admin_token() -> None:
     configure.assert_not_called()
 
 
-def test_temporary_root_token_uses_unseal_key_via_stdin() -> None:
+def test_raw_root_generation_uses_unseal_key_via_stdin() -> None:
     host = load_host_module()
     with tempfile.TemporaryDirectory() as tmp:
         key = Path(tmp) / "unseal.key"
@@ -201,7 +201,7 @@ def test_temporary_root_token_uses_unseal_key_via_stdin() -> None:
             patch.object(host, "KEY_PATH", key),
             patch.object(host, "pct_exec", side_effect=fake_pct_exec),
         ):
-            token = host.generate_temporary_root_token()
+            token = host._generate_root_from_running_server()
 
     if token != "TEMP-ROOT-TOKEN":
         fail("Временный корневой токен искажён")
@@ -214,6 +214,79 @@ def test_temporary_root_token_uses_unseal_key_via_stdin() -> None:
         fail(f"Ключ разблокировки передан небезопасно: {calls!r}")
     if "UNSEAL-KEY-TEST" in " ".join(calls[0][0]):
         fail("Ключ разблокировки попал в argv")
+
+
+def test_temporary_root_window_restores_protected_container() -> None:
+    host = load_host_module()
+    calls: list[tuple[tuple[str, ...], bool]] = []
+
+    def fake_pct_exec(
+        *args: str,
+        capture: bool = False,
+        check: bool = True,
+        input_text: str | None = None,
+    ):
+        del capture, input_text
+        calls.append((tuple(args), check))
+        if args[:5] == (
+            "docker",
+            "inspect",
+            "-f",
+            "{{.Config.Image}}",
+            "openbao",
+        ):
+            return SimpleNamespace(
+                returncode=0,
+                stdout="ghcr.io/openbao/openbao:2.7.0\n",
+                stderr="",
+            )
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    with (
+        patch.object(host, "pct_exec", side_effect=fake_pct_exec),
+        patch.object(host, "unseal") as unseal,
+        patch.object(
+            host,
+            "_generate_root_from_running_server",
+            return_value="TEMP-ROOT-TOKEN",
+        ) as generate,
+    ):
+        token = host.generate_temporary_root_token()
+
+    if token != "TEMP-ROOT-TOKEN":
+        fail("Временный root-токен потерян при возврате защищённого OpenBao")
+    generate.assert_called_once_with()
+    if unseal.call_count != 2:
+        fail("OpenBao должен разблокироваться во временном и штатном режимах")
+
+    argv = [args for args, _ in calls]
+    required = [
+        ("docker", "stop", "openbao"),
+        (
+            "docker",
+            "run",
+            "-d",
+            "--name",
+            host.TEMP_OPENBAO_CONTAINER,
+            "--network",
+            "host",
+            "--user",
+            "0",
+            "-v",
+            f"{host.CT_OPENBAO_DATA_PATH}:/openbao/file",
+            "-v",
+            f"{host.CT_COMPAT_CONFIG_PATH}:/openbao/config/openbao.hcl:ro",
+            "ghcr.io/openbao/openbao:2.7.0",
+            "server",
+        ),
+        ("docker", "start", "openbao"),
+    ]
+    for expected in required:
+        if expected not in argv:
+            fail(f"Не выполнен обязательный шаг временного OpenBao: {expected!r}")
+
+    if ("rm", "-f", str(host.CT_COMPAT_CONFIG_PATH)) not in argv:
+        fail("Временная конфигурация generate-root не удаляется")
 
 
 def test_ssh_ca_mounts_are_separate() -> None:
@@ -290,7 +363,8 @@ def main() -> None:
     test_host_initialization_does_not_print_secrets()
     test_existing_openbao_ensures_ssh_cas()
     test_ssh_ca_reconcile_requires_initial_admin_token()
-    test_temporary_root_token_uses_unseal_key_via_stdin()
+    test_raw_root_generation_uses_unseal_key_via_stdin()
+    test_temporary_root_window_restores_protected_container()
     test_ssh_ca_mounts_are_separate()
     test_ssh_access_contract_is_narrow()
     test_ssh_access_credentials_are_pve_only()

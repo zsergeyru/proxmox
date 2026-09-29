@@ -20,6 +20,10 @@ SSH_ACCESS_PATH = KEY_DIR / "ssh-access.json"
 LOCK_PATH = Path("/run/lock/infra-manager-openbao-unseal.lock")
 CT_RUNTIME_DIR = Path("/run/infra-manager")
 CT_KEY_PATH = CT_RUNTIME_DIR / "openbao-unseal.key"
+CT_COMPAT_CONFIG_PATH = CT_RUNTIME_DIR / "openbao-generate-root.hcl"
+CT_OPENBAO_CONFIG_PATH = Path("/opt/infra-manager/compose/openbao/openbao.hcl")
+CT_OPENBAO_DATA_PATH = Path("/mnt/persistent-state/openbao")
+TEMP_OPENBAO_CONTAINER = "infra-manager-openbao-generate-root"
 
 STATUS_CODE = r"""
 import urllib.request
@@ -64,6 +68,35 @@ request = urllib.request.Request(
 with urllib.request.urlopen(request, timeout=30) as response:
     print(response.read().decode("utf-8"))
 """
+
+PREPARE_GENERATE_ROOT_CONFIG_CODE = r"""
+from pathlib import Path
+
+source = Path("/opt/infra-manager/compose/openbao/openbao.hcl")
+target = Path("/run/infra-manager/openbao-generate-root.hcl")
+
+text = source.read_text(encoding="utf-8")
+if 'address         = "127.0.0.1:8200"' not in text:
+    raise SystemExit("generate-root compatibility mode requires loopback listener")
+if "disable_unauthed_generate_root_endpoints" in text:
+    raise SystemExit("permanent OpenBao config already changes generate-root protection")
+
+needle = "  tls_disable     = true\n"
+if text.count(needle) != 1:
+    raise SystemExit("OpenBao listener is not uniquely defined")
+
+target.parent.mkdir(parents=True, exist_ok=True)
+target.write_text(
+    text.replace(
+        needle,
+        "  disable_unauthed_generate_root_endpoints = false\n" + needle,
+        1,
+    ),
+    encoding="utf-8",
+)
+target.chmod(0o644)
+"""
+
 
 REVOKE_ROOT_CODE = r"""
 import sys
@@ -796,7 +829,7 @@ def revoke_initial_root_token(token: str) -> None:
     print("[ОК] Initial root token отозван")
 
 
-def generate_temporary_root_token() -> str:
+def _generate_root_from_running_server() -> str:
     if not KEY_PATH.is_file() or KEY_PATH.stat().st_size == 0:
         raise OpenBaoHostError(
             f"Не найден ключ разблокировки OpenBao: {KEY_PATH}"
@@ -815,6 +848,83 @@ def generate_temporary_root_token() -> str:
         raise OpenBaoHostError(
             "OpenBao не вернул корректный временный корневой токен"
         )
+    return token
+
+
+def generate_temporary_root_token() -> str:
+    image_result = pct_exec(
+        "docker",
+        "inspect",
+        "-f",
+        "{{.Config.Image}}",
+        "openbao",
+        capture=True,
+    )
+    image = image_result.stdout.strip()
+    if not image:
+        raise OpenBaoHostError("Не удалось определить образ OpenBao")
+
+    pct_exec(
+        "python3",
+        "-c",
+        PREPARE_GENERATE_ROOT_CONFIG_CODE,
+        capture=True,
+    )
+
+    token: str | None = None
+    original_stopped = False
+    try:
+        pct_exec("docker", "stop", "openbao", capture=True)
+        original_stopped = True
+
+        pct_exec(
+            "docker",
+            "rm",
+            "-f",
+            TEMP_OPENBAO_CONTAINER,
+            capture=True,
+            check=False,
+        )
+        pct_exec(
+            "docker",
+            "run",
+            "-d",
+            "--name",
+            TEMP_OPENBAO_CONTAINER,
+            "--network",
+            "host",
+            "--user",
+            "0",
+            "-v",
+            f"{CT_OPENBAO_DATA_PATH}:/openbao/file",
+            "-v",
+            f"{CT_COMPAT_CONFIG_PATH}:/openbao/config/openbao.hcl:ro",
+            image,
+            "server",
+            capture=True,
+        )
+
+        unseal()
+        token = _generate_root_from_running_server()
+    finally:
+        pct_exec(
+            "docker",
+            "rm",
+            "-f",
+            TEMP_OPENBAO_CONTAINER,
+            capture=True,
+            check=False,
+        )
+        pct_exec("rm", "-f", str(CT_COMPAT_CONFIG_PATH), check=False)
+
+        if original_stopped:
+            pct_exec("docker", "start", "openbao", capture=True)
+            unseal()
+
+    if token is None:
+        raise OpenBaoHostError("Временный корневой токен OpenBao не выпущен")
+
+    print("[ОК] Временный корневой токен выпущен в защищённом локальном окне")
     return token
 
 
