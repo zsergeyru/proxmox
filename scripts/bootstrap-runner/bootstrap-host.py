@@ -1279,13 +1279,38 @@ class BootstrapHost:
 
     def apply(self) -> None:
         existed = self.infra_exists()
-        if existed:
-            self.verify_persistent_layout()
-        else:
+        if not existed:
             self.prepare_new_persistent_layout()
 
         self.prepare_runner()
         owns_910 = self.runner_owns_910()
+
+        if existed and owns_910:
+            # Это не миграция старого 910, а продолжение оборванного
+            # первоначального создания. Если сбой произошёл между OpenTofu
+            # create и attach, подключаем уже подготовленные пустые области.
+            config = self.pct_config(self.infra_ctid)
+            access_ok = self._infra_mount_matches(
+                config,
+                "mp0",
+                self.host_access_dir,
+                self.infra_access_dir,
+                read_only=True,
+            )
+            state_ok = self._infra_mount_matches(
+                config,
+                "mp1",
+                self.host_state_dir,
+                self.infra_state_dir,
+                read_only=False,
+            )
+            if access_ok and state_ok:
+                self.verify_persistent_layout()
+            else:
+                self.attach_persistent_layout()
+        elif existed:
+            # Готовый 910 без новой схемы автоматически не мигрируется.
+            self.verify_persistent_layout()
 
         # Три пути намеренно разделены:
         # 1) продолжение оборванной первоначальной установки;
