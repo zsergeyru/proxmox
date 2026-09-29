@@ -126,6 +126,21 @@ Semaphore: Deploy Guest 910
 
 Таким образом, отдельного оркестратора обновления 910 нет. Отличается только владение объектом Proxmox и безопасный момент перезапуска контейнера, внутри которого выполняется Semaphore.
 
+`initialize-openbao.py`:
+
+```text
+Semaphore: Initialize OpenBao 910
+→ scripts/infra-manager/jobs/initialize-openbao.py
+→ infra_manager.openbao
+→ root SSH к PVE
+→ установка хостового сценария и systemd-служб
+→ первичная инициализация OpenBao
+→ сохранение ключа снятия блокировки только на PVE
+→ проверка sealed=false
+```
+
+Задание не является частью обычного обновления 910 и предназначено для однократной первичной инициализации пустого хранилища.
+
 `build-template.py`:
 
 ```text
