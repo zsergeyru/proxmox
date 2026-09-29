@@ -267,47 +267,57 @@ def request(method, path, payload=None):
     return json.loads(raw.decode("utf-8")) if raw else {}
 
 
-config_policy = """
-path "ssh-client-signer/roles" {
-  capabilities = ["list"]
-}
-path "ssh-client-signer/roles/*" {
-  capabilities = ["create", "read", "update", "delete"]
-}
-path "ssh-host-signer/roles" {
-  capabilities = ["list"]
-}
-path "ssh-host-signer/roles/*" {
-  capabilities = ["create", "read", "update", "delete"]
-}
-path "auth/token/lookup-self" {
-  capabilities = ["read"]
-}
-path "auth/token/revoke-self" {
-  capabilities = ["update"]
-}
-path "sys/capabilities-self" {
-  capabilities = ["update"]
-}
-""".strip()
+config_policy = json.dumps(
+    {
+        "path": {
+            "ssh-client-signer/roles": {
+                "capabilities": ["list"],
+            },
+            "ssh-client-signer/roles/*": {
+                "capabilities": ["create", "read", "update", "delete"],
+            },
+            "ssh-host-signer/roles": {
+                "capabilities": ["list"],
+            },
+            "ssh-host-signer/roles/*": {
+                "capabilities": ["create", "read", "update", "delete"],
+            },
+            "auth/token/lookup-self": {
+                "capabilities": ["read"],
+            },
+            "auth/token/revoke-self": {
+                "capabilities": ["update"],
+            },
+            "sys/capabilities-self": {
+                "capabilities": ["update"],
+            },
+        }
+    },
+    separators=(",", ":"),
+)
 
-signer_policy = """
-path "ssh-client-signer/sign/infra-manager" {
-  capabilities = ["create", "update"]
-}
-path "ssh-host-signer/sign/managed-host" {
-  capabilities = ["create", "update"]
-}
-path "auth/token/lookup-self" {
-  capabilities = ["read"]
-}
-path "auth/token/revoke-self" {
-  capabilities = ["update"]
-}
-path "sys/capabilities-self" {
-  capabilities = ["update"]
-}
-""".strip()
+signer_policy = json.dumps(
+    {
+        "path": {
+            "ssh-client-signer/sign/infra-manager": {
+                "capabilities": ["create", "update"],
+            },
+            "ssh-host-signer/sign/managed-host": {
+                "capabilities": ["create", "update"],
+            },
+            "auth/token/lookup-self": {
+                "capabilities": ["read"],
+            },
+            "auth/token/revoke-self": {
+                "capabilities": ["update"],
+            },
+            "sys/capabilities-self": {
+                "capabilities": ["update"],
+            },
+        }
+    },
+    separators=(",", ":"),
+)
 
 request(
     "POST",
