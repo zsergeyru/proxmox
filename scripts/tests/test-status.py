@@ -272,7 +272,7 @@ def main_test() -> None:
         "Пароль:  secret-pass",
         "Ветка:   main",
         "Версия:  abc1234",
-        "pct exec 910 -- infra-manager-status --full",
+        "pct exec 910 -- /usr/local/sbin/infra-manager-status --full",
         "910 infra-manager полностью готов",
     ):
         if expected not in summary_text:
