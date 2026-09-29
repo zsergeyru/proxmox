@@ -58,6 +58,8 @@ grep -q -- '--provision-only' "$BOOTSTRAP_DIR/deploy-910.sh"     || die "990 д�
 grep -q -- '--provision-existing-only' "$BOOTSTRAP_DIR/deploy-910.sh"     || die "990 должен уметь обновлять существующий 910 без собственного state"
 grep -q -- '--bootstrap-scope' "$BOOTSTRAP_DIR/deploy-910.sh"     || die "910 должен оставаться в отдельной bootstrap-области состояния"
 
+grep -q 'name: linux_base' "$PLAYBOOK"     || die "Общий playbook должен подключать общую роль linux_base"
+grep -q 'name: guest_layout' "$PLAYBOOK"     || die "Общий playbook должен подключать общую роль guest_layout"
 grep -q 'name: docker' "$PLAYBOOK"     || die "Общий playbook должен подключать общую роль Docker"
 grep -q 'name: infra_manager' "$PLAYBOOK"     || die "Общий playbook должен подключать роль infra_manager по provision.yaml"
 

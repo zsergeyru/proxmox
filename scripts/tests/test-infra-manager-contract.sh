@@ -3,6 +3,8 @@ set -Eeuo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 ANSIBLE_PLAYBOOK="$ROOT/automation/ansible/playbooks/configure-guest.yml"
+ANSIBLE_LINUX_BASE="$ROOT/automation/ansible/roles/linux_base/tasks/main.yml"
+ANSIBLE_GUEST_LAYOUT="$ROOT/automation/ansible/roles/guest_layout/tasks/main.yml"
 ANSIBLE_DOCKER="$ROOT/automation/ansible/roles/docker/tasks/main.yml"
 ANSIBLE_RUNTIME_DIR="$ROOT/automation/ansible/roles/infra_manager/tasks"
 ANSIBLE_RUNTIME_MAIN="$ANSIBLE_RUNTIME_DIR/main.yml"
@@ -66,17 +68,17 @@ for task_file in "${ANSIBLE_RUNTIME_PARTS[@]}"; do
     cat "$ANSIBLE_RUNTIME_DIR/$task_file" >> "$ANSIBLE_RUNTIME"
 done
 
-for file in "$ANSIBLE_PLAYBOOK" "$ANSIBLE_DOCKER" "$ANSIBLE_RUNTIME" "$PY_SETTINGS" "$PY_SEMAPHORE" "$PY_STATUS" "$PY_PVE" "$STATUS" "$ACCESS" "$LIFECYCLE" "$ACTIVATE_RUNTIME" "$BUILD_TEMPLATE" "$VERIFY_TEMPLATE" "$DEPLOY_GUEST" "$PY_OPENTOFU" "$PY_TEMPLATE" "$PY_TEMPLATE_BUILD" "$PY_TEMPLATE_VERIFY" "$COMPOSE" "$OPENBAO_CONFIG" "$OPENBAO_HOST" "$OPENBAO_STARTUP_COMMAND" "$OPENBAO_STARTUP_SERVICE" "$OPENBAO_JOB" "$PY_OPENBAO" "$DOCKERFILE" "$REQ" "$PLAN" "$PY_PVE_HOST" "$OPENTOFU_LOCK" "$GUEST_MANIFEST" "$PROVISION" "$SSH_CONFIG"; do
+for file in "$ANSIBLE_PLAYBOOK" "$ANSIBLE_LINUX_BASE" "$ANSIBLE_GUEST_LAYOUT" "$ANSIBLE_DOCKER" "$ANSIBLE_RUNTIME" "$PY_SETTINGS" "$PY_SEMAPHORE" "$PY_STATUS" "$PY_PVE" "$STATUS" "$ACCESS" "$LIFECYCLE" "$ACTIVATE_RUNTIME" "$BUILD_TEMPLATE" "$VERIFY_TEMPLATE" "$DEPLOY_GUEST" "$PY_OPENTOFU" "$PY_TEMPLATE" "$PY_TEMPLATE_BUILD" "$PY_TEMPLATE_VERIFY" "$COMPOSE" "$OPENBAO_CONFIG" "$OPENBAO_HOST" "$OPENBAO_STARTUP_COMMAND" "$OPENBAO_STARTUP_SERVICE" "$OPENBAO_JOB" "$PY_OPENBAO" "$DOCKERFILE" "$REQ" "$PLAN" "$PY_PVE_HOST" "$OPENTOFU_LOCK" "$GUEST_MANIFEST" "$PROVISION" "$SSH_CONFIG"; do
     [[ -s "$file" ]] || die "Отсутствует обязательный файл: $file"
 done
 
 
-python3 - "$GUEST_MANIFEST" "$PROVISION" "$ANSIBLE_PLAYBOOK" "$ANSIBLE_DOCKER" "$ANSIBLE_RUNTIME" "$PY_SETTINGS" "$COMPOSE" "$DOCKERFILE" "$REQ" <<'PY'
+python3 - "$GUEST_MANIFEST" "$PROVISION" "$ANSIBLE_PLAYBOOK" "$ANSIBLE_LINUX_BASE" "$ANSIBLE_GUEST_LAYOUT" "$ANSIBLE_DOCKER" "$ANSIBLE_RUNTIME" "$PY_SETTINGS" "$COMPOSE" "$DOCKERFILE" "$REQ" <<'PY'
 from pathlib import Path
 import sys
 import yaml
 
-guest_path, provision_path, playbook_path, docker_tasks_path, runtime_tasks_path, settings_path, compose_path, dockerfile_path, req_path = map(Path, sys.argv[1:])
+guest_path, provision_path, playbook_path, linux_base_tasks_path, guest_layout_tasks_path, docker_tasks_path, runtime_tasks_path, settings_path, compose_path, dockerfile_path, req_path = map(Path, sys.argv[1:])
 
 guest = yaml.safe_load(guest_path.read_text(encoding="utf-8"))
 if guest.get("vmid") != 910 or guest.get("name") != "infra-manager":
@@ -113,6 +115,8 @@ if system.get("distribution") != "debian" or system.get("version") != "13" or sy
     raise SystemExit("provision.yaml должен требовать Debian 13 amd64")
 
 playbook_text = playbook_path.read_text(encoding="utf-8")
+linux_base_tasks_text = linux_base_tasks_path.read_text(encoding="utf-8")
+guest_layout_tasks_text = guest_layout_tasks_path.read_text(encoding="utf-8")
 docker_tasks_text = docker_tasks_path.read_text(encoding="utf-8")
 runtime_tasks_text = runtime_tasks_path.read_text(encoding="utf-8")
 settings_text = settings_path.read_text(encoding="utf-8")
@@ -124,8 +128,14 @@ expected_host_packages = {
 }
 if required_host_packages != expected_host_packages:
     raise SystemExit(f"неожиданный список пакетов 910: {sorted(required_host_packages)}")
-if 'provision.system.required_packages' not in playbook_text:
-    raise SystemExit("общий Ansible playbook не устанавливает system.required_packages")
+if 'name: linux_base' not in playbook_text:
+    raise SystemExit("общий Ansible playbook не подключает роль linux_base")
+if 'provision.system.required_packages' not in linux_base_tasks_text:
+    raise SystemExit("роль linux_base не устанавливает system.required_packages")
+if 'name: guest_layout' not in playbook_text:
+    raise SystemExit("общий Ansible playbook не подключает роль guest_layout")
+if 'provision.components' not in guest_layout_tasks_text:
+    raise SystemExit("роль guest_layout не использует components из provision.yaml")
 
 docker = provision.get("docker", {})
 docker_packages = set(docker.get("required_packages", []))
@@ -320,8 +330,14 @@ grep -q 'name: docker' "$ANSIBLE_PLAYBOOK" \
     || die "Общий Ansible playbook должен подключать роль Docker"
 grep -q 'name: infra_manager' "$ANSIBLE_PLAYBOOK" \
     || die "Общий Ansible playbook должен подключать роль infra_manager"
-grep -q 'provision.system.required_packages' "$ANSIBLE_PLAYBOOK" \
-    || die "Общий Ansible playbook должен устанавливать системные пакеты из provision.yaml"
+grep -q 'name: linux_base' "$ANSIBLE_PLAYBOOK" \
+    || die "Общий Ansible playbook должен подключать роль linux_base"
+grep -q 'provision.system.required_packages' "$ANSIBLE_LINUX_BASE" \
+    || die "Роль linux_base должна устанавливать системные пакеты из provision.yaml"
+grep -q 'name: guest_layout' "$ANSIBLE_PLAYBOOK" \
+    || die "Общий Ansible playbook должен подключать роль guest_layout"
+grep -q 'provision.components' "$ANSIBLE_GUEST_LAYOUT" \
+    || die "Роль guest_layout должна создавать каталоги по provision.yaml"
 
 grep -q 'pve_host_private_key' "$PY_SETTINGS" \
     || die "Путь root SSH-ключа PVE должен находиться в единых настройках"
@@ -384,10 +400,10 @@ grep -q 'install_openbao_host_support' "$PY_OPENBAO" \
     || die "Задание OpenBao должно устанавливать хостовый сценарий"
 grep -q 'initialize_openbao_on_host' "$PY_OPENBAO" \
     || die "Задание OpenBao должно выполнять первичную инициализацию через PVE"
-if grep -q 'infra-manager@pve' "$ANSIBLE_PLAYBOOK" "$ANSIBLE_DOCKER" "$ANSIBLE_RUNTIME" "$PY_SEMAPHORE" "$PY_STATUS" "$PY_PVE"; then
+if grep -q 'infra-manager@pve' "$ANSIBLE_PLAYBOOK" "$ANSIBLE_LINUX_BASE" "$ANSIBLE_GUEST_LAYOUT" "$ANSIBLE_DOCKER" "$ANSIBLE_RUNTIME" "$PY_SEMAPHORE" "$PY_STATUS" "$PY_PVE"; then
     die "Старая PVE-идентичность не должна присутствовать в чистой схеме"
 fi
-if grep -q 'InfraManagedGuest' "$ANSIBLE_PLAYBOOK" "$ANSIBLE_DOCKER" "$ANSIBLE_RUNTIME" "$PY_SEMAPHORE" "$PY_STATUS" "$PY_PVE"; then
+if grep -q 'InfraManagedGuest' "$ANSIBLE_PLAYBOOK" "$ANSIBLE_LINUX_BASE" "$ANSIBLE_GUEST_LAYOUT" "$ANSIBLE_DOCKER" "$ANSIBLE_RUNTIME" "$PY_SEMAPHORE" "$PY_STATUS" "$PY_PVE"; then
     die "Старая собственная роль PVE не должна присутствовать в чистой схеме"
 fi
 if grep -q 'PVE API automation\|Ansible managed guests' "$PY_SEMAPHORE"; then
@@ -497,7 +513,7 @@ grep -Fq 'require_permissions(client, "/", ROOT_ADMIN_PRIVS)' "$PY_PVE" \
 grep -q 'check_root_access(node)' "$PY_PVE" \
     || die "Полная проверка PVE access должна проверять root SSH"
 
-if grep -q '/etc/pve/' "$ANSIBLE_PLAYBOOK" "$ANSIBLE_DOCKER" "$ANSIBLE_RUNTIME" "$PY_SEMAPHORE" "$PY_STATUS" "$PY_PVE"; then
+if grep -q '/etc/pve/' "$ANSIBLE_PLAYBOOK" "$ANSIBLE_LINUX_BASE" "$ANSIBLE_GUEST_LAYOUT" "$ANSIBLE_DOCKER" "$ANSIBLE_RUNTIME" "$PY_SEMAPHORE" "$PY_STATUS" "$PY_PVE"; then
     die "Настройка внутри 910 не должна работать с файловой системой /etc/pve"
 fi
 

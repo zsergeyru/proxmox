@@ -1,0 +1,43 @@
+---
+- name: Создать рабочие каталоги
+  ansible.builtin.file:
+    path: "{{ item.value.root }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop: "{{ provision.components | default({}) | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+  when:
+    - (provision_phase | default('full')) == "full"
+    - item.value is mapping
+    - item.value.root is defined
+
+- name: Подготовить каталог проекта
+  ansible.builtin.file:
+    path: "{{ provision.components.project_repository.path | dirname }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when:
+    - (provision_phase | default('full')) == "full"
+    - provision.components is defined
+    - provision.components.project_repository is defined
+    - provision.components.project_repository.path is defined
+
+- name: Подготовить каталог AI-агента
+  ansible.builtin.file:
+    path: >-
+      {{ provision.components.agents.root }}/{{ provision.components.agents.primary }}
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when:
+    - (provision_phase | default('full')) == "full"
+    - provision.components is defined
+    - provision.components.agents is defined
+    - provision.components.agents.root is defined
+    - provision.components.agents.primary is defined
