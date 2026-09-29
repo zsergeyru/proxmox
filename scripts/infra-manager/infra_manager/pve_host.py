@@ -177,9 +177,11 @@ def sign_ssh_host_key(
     node: str,
     public_key: str,
     *,
-    principals: list[str],
+    vmid: int,
+    hostname: str,
+    address: str,
 ) -> str:
-    """Подписать открытый host key через PVE-only доступ OpenBao."""
+    """Подписать host key после проверки VMID, имени и IP на PVE."""
     normalized = public_key.strip()
     if not normalized.startswith("ssh-ed25519 "):
         raise InfraManagerError(
@@ -188,7 +190,9 @@ def sign_ssh_host_key(
     payload = json.dumps(
         {
             "public_key": normalized,
-            "principals": principals,
+            "vmid": vmid,
+            "hostname": hostname,
+            "address": address,
         },
         separators=(",", ":"),
     )

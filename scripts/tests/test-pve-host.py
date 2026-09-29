@@ -255,7 +255,9 @@ def test_sign_ssh_host_key() -> None:
         certificate = module.sign_ssh_host_key(
             "pve",
             "ssh-ed25519 AAAAPUBLIC host",
-            principals=["test-host", "192.0.2.10"],
+            vmid=410,
+            hostname="ai-control",
+            address="192.168.4.10",
         )
 
     assert certificate == "ssh-ed25519-cert-v01@openssh.com AAAAHOST"
@@ -264,7 +266,12 @@ def test_sign_ssh_host_key() -> None:
         "--sign-host-key",
     )
     payload = json.loads(calls[0][1])
-    assert payload["principals"] == ["test-host", "192.0.2.10"]
+    assert payload == {
+        "public_key": "ssh-ed25519 AAAAPUBLIC host",
+        "vmid": 410,
+        "hostname": "ai-control",
+        "address": "192.168.4.10",
+    }
 
 
 def main() -> None:

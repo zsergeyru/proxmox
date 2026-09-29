@@ -412,6 +412,8 @@ def test_host_signing_role_is_host_only() -> None:
         '"allow_user_certificates": False',
         '"allow_host_certificates": True',
         '"allow_bare_domains": True',
+        '"allow_subdomains": True',
+        '"allowed_domains": "*"',
         '"key_id_format": "infra-manager-host-{{public_key_hash}}"',
         '"ttl": "720h"',
     )
@@ -420,6 +422,44 @@ def test_host_signing_role_is_host_only() -> None:
             fail(f"Роль подписи SSH-сервера не содержит ограничение: {item}")
     if "/v1/ssh-host-signer/roles/managed-host" not in code:
         fail("Не настроена отдельная роль managed-host")
+
+
+def test_host_signing_target_is_verified_on_pve() -> None:
+    host = load_host_module()
+
+    def fake_run(argv: list[str], **kwargs: object):
+        del kwargs
+        if argv[:2] == ["pct", "config"]:
+            return SimpleNamespace(
+                returncode=0,
+                stdout=(
+                    "hostname: infra-manager\n"
+                    "net0: name=eth0,bridge=vmbr0,ip=192.168.9.10/24\n"
+                ),
+                stderr="",
+            )
+        raise AssertionError(f"Неожиданная команда: {argv!r}")
+
+    with patch.object(host, "run", side_effect=fake_run):
+        principals = host.validate_managed_host_target(
+            910,
+            "infra-manager",
+            "192.168.9.10",
+        )
+    if principals != ["infra-manager", "192.168.9.10"]:
+        fail("PVE-проверка исказила principals host-сертификата")
+
+    with patch.object(host, "run", side_effect=fake_run):
+        try:
+            host.validate_managed_host_target(
+                910,
+                "infra-manager",
+                "192.168.9.11",
+            )
+        except host.OpenBaoHostError:
+            pass
+        else:
+            fail("PVE-проверка разрешила чужой IP для VMID 910")
 
 
 def test_host_signing_uses_only_signer_approle() -> None:
@@ -590,6 +630,7 @@ def main() -> None:
     test_ssh_ca_mounts_are_separate()
     test_ssh_access_contract_is_narrow()
     test_host_signing_role_is_host_only()
+    test_host_signing_target_is_verified_on_pve()
     test_host_signing_uses_only_signer_approle()
     test_client_signing_role_is_restricted_to_root()
     test_client_signing_keeps_approle_credentials_on_pve()

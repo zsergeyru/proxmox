@@ -760,6 +760,8 @@ try:
             "allow_user_certificates": False,
             "allow_host_certificates": True,
             "allow_bare_domains": True,
+            "allow_subdomains": True,
+            "allowed_domains": "*",
             "key_id_format": "infra-manager-host-{{public_key_hash}}",
             "ttl": "720h",
         },
@@ -780,6 +782,10 @@ try:
         raise SystemExit("host signing role unexpectedly allows user certificates")
     if role.get("allow_bare_domains") is not True:
         raise SystemExit("host signing role does not allow explicit bare principals")
+    if role.get("allowed_domains") != "*":
+        raise SystemExit("host signing role has unexpected allowed_domains")
+    if role.get("allow_subdomains") is not True:
+        raise SystemExit("host signing role has unexpected allow_subdomains")
     if role.get("key_id_format") != "infra-manager-host-{{public_key_hash}}":
         raise SystemExit("host signing role has unexpected key_id_format")
     print(json.dumps({"ready": True}, separators=(",", ":")))
@@ -1487,6 +1493,78 @@ def ensure_host_signing_role() -> None:
     print("[ОК] Роль подписи SSH-серверов managed-host настроена")
 
 
+def validate_managed_host_target(
+    vmid: int,
+    hostname: str,
+    address: str,
+) -> list[str]:
+    import ipaddress
+
+    if not isinstance(vmid, int) or vmid <= 0:
+        raise OpenBaoHostError("Некорректный VMID для host-сертификата")
+    clean_hostname = hostname.strip()
+    if (
+        not clean_hostname
+        or "," in clean_hostname
+        or any(character.isspace() for character in clean_hostname)
+    ):
+        raise OpenBaoHostError("Некорректное имя SSH-сервера")
+    try:
+        ip = ipaddress.ip_address(address.strip())
+    except ValueError as exc:
+        raise OpenBaoHostError("Некорректный IP SSH-сервера") from exc
+    if ip.version != 4 or not ip.is_private:
+        raise OpenBaoHostError(
+            "Host-сертификаты разрешены только для частных IPv4-адресов"
+        )
+    clean_address = str(ip)
+
+    pct = run(
+        ["pct", "config", str(vmid)],
+        capture=True,
+        check=False,
+    )
+    if pct.returncode == 0:
+        config = pct.stdout
+        if f"hostname: {clean_hostname}" not in config:
+            raise OpenBaoHostError(
+                f"LXC {vmid} не подтверждает hostname {clean_hostname}"
+            )
+        network_line = next(
+            (line for line in config.splitlines() if line.startswith("net0: ")),
+            "",
+        )
+        if f"ip={clean_address}/" not in network_line:
+            raise OpenBaoHostError(
+                f"LXC {vmid} не подтверждает IP {clean_address}"
+            )
+        return [clean_hostname, clean_address]
+
+    qemu = run(
+        ["qm", "config", str(vmid)],
+        capture=True,
+        check=False,
+    )
+    if qemu.returncode != 0:
+        raise OpenBaoHostError(
+            f"VMID {vmid} не найден как управляемый LXC или VM"
+        )
+    config = qemu.stdout
+    if f"name: {clean_hostname}" not in config:
+        raise OpenBaoHostError(
+            f"VM {vmid} не подтверждает name {clean_hostname}"
+        )
+    ip_line = next(
+        (line for line in config.splitlines() if line.startswith("ipconfig0: ")),
+        "",
+    )
+    if f"ip={clean_address}/" not in ip_line:
+        raise OpenBaoHostError(
+            f"VM {vmid} не подтверждает IP {clean_address}"
+        )
+    return [clean_hostname, clean_address]
+
+
 def sign_host_public_key(public_key: str, principals: list[str]) -> str:
     normalized = public_key.strip()
     if not normalized.startswith("ssh-ed25519 "):
@@ -1793,9 +1871,21 @@ def main() -> int:
             if not isinstance(request_payload, dict):
                 raise OpenBaoHostError("Некорректный запрос подписи SSH-сервера")
             public_key = request_payload.get("public_key")
-            principals = request_payload.get("principals")
-            if not isinstance(public_key, str) or not isinstance(principals, list):
+            vmid = request_payload.get("vmid")
+            hostname = request_payload.get("hostname")
+            address = request_payload.get("address")
+            if (
+                not isinstance(public_key, str)
+                or not isinstance(vmid, int)
+                or not isinstance(hostname, str)
+                or not isinstance(address, str)
+            ):
                 raise OpenBaoHostError("Неполный запрос подписи SSH-сервера")
+            principals = validate_managed_host_target(
+                vmid,
+                hostname,
+                address,
+            )
             print(sign_host_public_key(public_key, principals))
         else:
             unseal()
