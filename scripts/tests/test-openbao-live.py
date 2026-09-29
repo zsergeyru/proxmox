@@ -203,8 +203,6 @@ def main() -> None:
         )
         if inspected.returncode:
             fail("OpenSSH не принял сертификат OpenBao: " + inspected.stderr.strip())
-        if "Key ID: \"infra-manager-ansible\"" not in inspected.stdout:
-            fail("SSH-сертификат получил неожиданный Key ID")
         if "Principals:" not in inspected.stdout or "root" not in inspected.stdout:
             fail("SSH-сертификат не ограничен principal root")
 

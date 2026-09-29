@@ -675,7 +675,6 @@ try:
             "public_key": public_key,
             "valid_principals": "root",
             "ttl": "15m",
-            "key_id": "infra-manager-ansible",
         },
         token=token,
     )
