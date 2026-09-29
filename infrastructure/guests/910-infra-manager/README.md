@@ -287,7 +287,10 @@ Initialize OpenBao 910
 ```text
 /usr/local/sbin/infra-manager-openbao-unseal
 /etc/systemd/system/infra-manager-openbao-unseal.service
+/etc/systemd/system/infra-manager-openbao-unseal.timer
 ```
+
+Таймер раз в минуту выполняет идемпотентную проверку, поэтому отдельный перезапуск контейнера OpenBao также приводит к автоматическому снятию блокировки.
 
 Затем OpenBao инициализируется с одним ключом снятия блокировки и порогом один. Ключ атомарно сохраняется только на PVE:
 
