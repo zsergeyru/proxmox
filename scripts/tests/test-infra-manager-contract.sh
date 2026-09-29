@@ -241,7 +241,7 @@ if compose_openbao.get("command") != ["server"]:
 if any("dev" in str(arg) for arg in compose_openbao.get("command", [])):
     raise SystemExit("OpenBao dev-режим запрещён")
 required_openbao_volumes = {
-    "/var/lib/persistent/openbao:/openbao/file",
+    "/mnt/persistent-state/openbao:/openbao/file",
     "./openbao/openbao.hcl:/openbao/config/openbao.hcl:ro",
 }
 if not required_openbao_volumes.issubset(set(compose_openbao.get("volumes", []))):
@@ -249,7 +249,6 @@ if not required_openbao_volumes.issubset(set(compose_openbao.get("volumes", []))
 
 required_runtime_fragments = (
     "provision.access.pve.ca_source",
-    "provision.access.pve.staging_credential",
     "provision.access.pve.persistent_credential",
     "provision.paths.ansible_identity",
     "provision.paths.semaphore_data",
