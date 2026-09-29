@@ -60,6 +60,11 @@ SEMAPHORE_TEMPLATES = (
         playbook="scripts/infra-manager/jobs/deploy-guest.py",
         arguments='["910"]',
     ),
+    TemplateSpec(
+        name="Initialize OpenBao 910",
+        playbook="scripts/infra-manager/jobs/initialize-openbao.py",
+        arguments="[]",
+    ),
 )
 
 
