@@ -406,10 +406,9 @@ grep -Fq '"ssh-client-signer"' "$OPENBAO_HOST" \
     || die "OpenBao должен иметь отдельный SSH-центр доступа"
 grep -Fq '"ssh-host-signer"' "$OPENBAO_HOST" \
     || die "OpenBao должен иметь отдельный SSH-центр серверов"
-grep -Fq '/v1/sys/generate-root/attempt' "$OPENBAO_HOST" \
-    || die "Существующий OpenBao должен уметь получить временный root token для настройки"
-grep -Fq 'revoke_temporary_root_token' "$OPENBAO_HOST" \
-    || die "Временный root token OpenBao должен явно отзываться"
+if grep -Fq '/v1/sys/generate-root/attempt' "$OPENBAO_HOST"; then
+    die "Небезопасный unauthenticated generate-root OpenBao не должен использоваться"
+fi
 grep -Fq '"push",' "$OPENBAO_HOST" \
     || die "Unseal-ключ должен передаваться в 910 временным файлом, не аргументом"
 grep -Fq 'CT_KEY_PATH' "$OPENBAO_HOST" \

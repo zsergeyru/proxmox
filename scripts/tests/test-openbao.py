@@ -147,45 +147,28 @@ def test_existing_openbao_ensures_ssh_cas() -> None:
     ensure_cas.assert_called_once_with()
 
 
-def test_ssh_ca_reconcile_uses_temporary_root_only_when_needed() -> None:
+def test_ssh_ca_reconcile_requires_initial_admin_token() -> None:
     host = load_host_module()
 
     with (
         patch.object(host, "ssh_cas_ready", return_value=True),
-        patch.object(host, "generate_temporary_root_token") as generate,
         patch.object(host, "configure_ssh_cas") as configure,
     ):
         host.ensure_ssh_cas()
-    generate.assert_not_called()
     configure.assert_not_called()
 
-    events: list[tuple[str, str]] = []
-    readiness = iter([False, True])
     with (
-        patch.object(host, "ssh_cas_ready", side_effect=lambda: next(readiness)),
-        patch.object(
-            host,
-            "generate_temporary_root_token",
-            side_effect=lambda: "TEMP-ROOT-TOKEN",
-        ),
-        patch.object(
-            host,
-            "configure_ssh_cas",
-            side_effect=lambda token: events.append(("configure", token)),
-        ),
-        patch.object(
-            host,
-            "revoke_temporary_root_token",
-            side_effect=lambda token: events.append(("revoke", token)),
-        ),
+        patch.object(host, "ssh_cas_ready", return_value=False),
+        patch.object(host, "configure_ssh_cas") as configure,
     ):
-        host.ensure_ssh_cas()
-
-    if events != [
-        ("configure", "TEMP-ROOT-TOKEN"),
-        ("revoke", "TEMP-ROOT-TOKEN"),
-    ]:
-        fail(f"Неожиданный цикл настройки SSH CA: {events!r}")
+        try:
+            host.ensure_ssh_cas()
+        except host.OpenBaoHostError as exc:
+            if "явная миграция" not in str(exc):
+                fail(f"Неожиданная ошибка старого OpenBao: {exc}")
+        else:
+            fail("Старый OpenBao без SSH CA принят без административного доступа")
+    configure.assert_not_called()
 
 
 def test_ssh_ca_mounts_are_separate() -> None:
@@ -226,7 +209,7 @@ def main() -> None:
     test_orchestration()
     test_host_initialization_does_not_print_secrets()
     test_existing_openbao_ensures_ssh_cas()
-    test_ssh_ca_reconcile_uses_temporary_root_only_when_needed()
+    test_ssh_ca_reconcile_requires_initial_admin_token()
     test_ssh_ca_mounts_are_separate()
     test_stale_key_is_not_overwritten()
     print("[ОК] Проверки OpenBao пройдены")

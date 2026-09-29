@@ -119,75 +119,6 @@ print(
 )
 """
 
-GENERATE_ROOT_CODE = r"""
-import base64
-import json
-import sys
-import urllib.request
-
-BASE = "http://127.0.0.1:8200"
-key = sys.stdin.read().strip()
-if not key:
-    raise SystemExit("empty unseal key")
-
-
-def request(method, path, payload=None):
-    data = None
-    headers = {"Content-Type": "application/json"}
-    if payload is not None:
-        data = json.dumps(payload, separators=(",", ":")).encode("utf-8")
-    req = urllib.request.Request(
-        f"{BASE}{path}",
-        data=data,
-        headers=headers,
-        method=method,
-    )
-    with urllib.request.urlopen(req, timeout=30) as response:
-        raw = response.read()
-    return json.loads(raw.decode("utf-8")) if raw else {}
-
-
-attempt = request("GET", "/v1/sys/generate-root/attempt")
-if attempt.get("started"):
-    request("DELETE", "/v1/sys/generate-root/attempt")
-
-started = request("POST", "/v1/sys/generate-root/attempt", {})
-otp = started.get("otp")
-nonce = started.get("nonce")
-if not isinstance(otp, str) or not otp or not isinstance(nonce, str) or not nonce:
-    raise SystemExit("OpenBao did not return OTP/nonce")
-
-try:
-    completed = request(
-        "POST",
-        "/v1/sys/generate-root/update",
-        {"key": key, "nonce": nonce},
-    )
-    if completed.get("complete") is not True:
-        raise SystemExit("root token generation is incomplete")
-    encoded = completed.get("encoded_token")
-    if not isinstance(encoded, str) or not encoded:
-        raise SystemExit("OpenBao did not return encoded root token")
-
-    encrypted = base64.b64decode(encoded)
-    otp_bytes = otp.encode("utf-8")
-    if len(encrypted) != len(otp_bytes):
-        raise SystemExit("root token and OTP lengths differ")
-    token = bytes(
-        left ^ right
-        for left, right in zip(encrypted, otp_bytes, strict=True)
-    ).decode("utf-8")
-    if not token or any(char.isspace() for char in token):
-        raise SystemExit("decoded root token is invalid")
-    print(token)
-except Exception:
-    try:
-        request("DELETE", "/v1/sys/generate-root/attempt")
-    except Exception:
-        pass
-    raise
-"""
-
 CONFIGURE_SSH_CA_CODE = r"""
 import json
 import sys
@@ -487,11 +418,6 @@ def revoke_initial_root_token(token: str) -> None:
     print("[ОК] Initial root token отозван")
 
 
-def revoke_temporary_root_token(token: str) -> None:
-    _revoke_root_token(token)
-    print("[ОК] Временный корневой токен OpenBao отозван")
-
-
 def ssh_cas_ready() -> bool:
     result = pct_exec(
         "python3",
@@ -514,27 +440,6 @@ def ssh_cas_ready() -> bool:
         and payload.get("host") is True
         and payload.get("distinct") is True
     )
-
-
-def generate_temporary_root_token() -> str:
-    if not KEY_PATH.is_file() or KEY_PATH.stat().st_size == 0:
-        raise OpenBaoHostError(
-            "Нельзя выпустить временный корневой токен без ключа разблокировки"
-        )
-    key = KEY_PATH.read_text(encoding="utf-8").strip()
-    result = pct_exec(
-        "python3",
-        "-c",
-        GENERATE_ROOT_CODE,
-        capture=True,
-        input_text=key,
-    )
-    token = result.stdout.strip()
-    if not token or any(char.isspace() for char in token):
-        raise OpenBaoHostError(
-            "OpenBao не вернул корректный временный корневой токен"
-        )
-    return token
 
 
 def configure_ssh_cas(token: str) -> None:
@@ -570,18 +475,20 @@ def ensure_ssh_cas(root_token: str | None = None) -> None:
         print("[ОК] Два SSH-центра доверия OpenBao уже готовы")
         return
 
-    temporary_token = root_token is None
-    token = root_token or generate_temporary_root_token()
-    try:
-        configure_ssh_cas(token)
-        if not ssh_cas_ready():
-            raise OpenBaoHostError(
-                "SSH-центры доверия OpenBao не прошли итоговую проверку"
-            )
-        print("[ОК] Два SSH-центра доверия OpenBao созданы")
-    finally:
-        if temporary_token:
-            revoke_temporary_root_token(token)
+    if root_token is None:
+        raise OpenBaoHostError(
+            "OpenBao уже инициализирован без SSH-центров доверия. "
+            "OpenBao 2.7 не разрешает безопасно выпустить новый root token "
+            "только по unseal-ключу; требуется явная миграция или "
+            "переинициализация пустого хранилища"
+        )
+
+    configure_ssh_cas(root_token)
+    if not ssh_cas_ready():
+        raise OpenBaoHostError(
+            "SSH-центры доверия OpenBao не прошли итоговую проверку"
+        )
+    print("[ОК] Два SSH-центра доверия OpenBao созданы")
 
 
 def initialize() -> None:

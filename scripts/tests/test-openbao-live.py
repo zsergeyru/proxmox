@@ -132,30 +132,9 @@ def main() -> None:
     if status != {"client": True, "host": True, "distinct": True}:
         fail(f"Некорректное состояние SSH-центров: {status!r}")
 
+    revoked_token = initial_root
     run_code(host.REVOKE_ROOT_CODE, input_text=initial_root)
     initial_root = ""
-
-    temporary_root = run_code(
-        host.GENERATE_ROOT_CODE,
-        input_text=unseal_key,
-    )
-    if not temporary_root:
-        fail("Не выпущен временный корневой токен")
-
-    lookup = http_json(
-        "GET",
-        "/v1/auth/token/lookup-self",
-        token=temporary_root,
-    )
-    policies = lookup.get("data", {}).get("policies") if isinstance(
-        lookup.get("data"), dict
-    ) else None
-    if not isinstance(policies, list) or "root" not in policies:
-        fail("Временный токен не имеет корневых прав")
-
-    revoked_token = temporary_root
-    run_code(host.REVOKE_ROOT_CODE, input_text=temporary_root)
-    temporary_root = ""
 
     try:
         http_json(
@@ -167,7 +146,7 @@ def main() -> None:
         if exc.code not in {400, 403}:
             raise
     else:
-        fail("Отозванный временный корневой токен остался действующим")
+        fail("Отозванный initial root token остался действующим")
 
     print("[ОК] Два SSH-центра OpenBao проверены на настоящем сервере")
 
