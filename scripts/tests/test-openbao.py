@@ -79,19 +79,26 @@ def test_host_initialization_does_not_print_secrets() -> None:
         ]
     )
     written: list[str] = []
+    revoked: list[str] = []
 
     def fake_pct_exec(
         *args: str,
         capture: bool = False,
         check: bool = True,
+        input_text: str | None = None,
     ):
         del capture, check
         if args[:2] == ("python3", "-c") and args[2] == host.INIT_CODE:
+            if input_text is not None:
+                fail("Инициализация OpenBao не должна получать секрет через stdin")
             return SimpleNamespace(
                 returncode=0,
                 stdout=json.dumps(init_payload),
                 stderr="",
             )
+        if args[:2] == ("python3", "-c") and args[2] == host.REVOKE_ROOT_CODE:
+            revoked.append(input_text or "")
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
         fail(f"Неожиданный pct exec при инициализации: {args!r}")
         raise AssertionError
 
@@ -107,6 +114,8 @@ def test_host_initialization_does_not_print_secrets() -> None:
 
     if written != [secret_key]:
         fail("Хостовый сценарий не сохранил ожидаемый unseal-ключ")
+    if revoked != [root_token]:
+        fail("Initial root token не был передан на self-revoke через stdin")
     text = output.getvalue()
     if secret_key in text or root_token in text:
         fail("Хостовый сценарий вывел секрет OpenBao в журнал")
