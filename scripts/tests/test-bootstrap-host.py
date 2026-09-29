@@ -283,10 +283,18 @@ def test_infra_ready_uses_status_as_final_screen() -> None:
 
 
 class ApplyHarness(BootstrapHost):
-    def __init__(self, mode: str, *, infra_exists: bool, owns_state: bool) -> None:
+    def __init__(
+        self,
+        mode: str,
+        *,
+        infra_exists: bool,
+        owns_state: bool,
+        layout_attached: bool = False,
+    ) -> None:
         super().__init__(mode)
         self._infra_exists = infra_exists
         self._owns_state = owns_state
+        self._layout_attached = layout_attached
         self.events: list[str] = []
 
     def infra_exists(self) -> bool:
@@ -295,6 +303,10 @@ class ApplyHarness(BootstrapHost):
 
     def prepare_new_persistent_layout(self) -> None:
         self.events.append("prepare_new_layout")
+
+    def persistent_layout_attached(self) -> bool:
+        self.events.append("layout_attached")
+        return self._layout_attached
 
     def verify_persistent_layout(self) -> None:
         self.events.append("verify_layout")
@@ -372,9 +384,9 @@ def test_existing_without_bootstrap_state() -> None:
         host.events,
         [
             "infra_exists",
+            "runner_owns_910",
             "verify_layout",
             "prepare_runner",
-            "runner_owns_910",
             "ensure_existing",
             "pve_access:apply",
             "handoff_existing",
@@ -393,12 +405,13 @@ def test_resume_unfinished_initial_state() -> None:
     host.apply()
     expected_prefix = [
         "infra_exists",
-        "verify_layout",
-        "prepare_runner",
         "runner_owns_910",
+        "layout_attached",
+        "attach_layout",
+        "prepare_runner",
     ]
     assert_equal(
-        host.events[:4],
+        host.events[:5],
         expected_prefix,
         "Незавершённая установка должна сначала обнаружить state 990",
     )
@@ -414,6 +427,31 @@ def test_resume_unfinished_initial_state() -> None:
         )
 
 
+def test_resume_unfinished_with_layout_already_attached() -> None:
+    host = ApplyHarness(
+        "apply",
+        infra_exists=True,
+        owns_state=True,
+        layout_attached=True,
+    )
+    host.apply()
+    assert_equal(
+        host.events[:5],
+        [
+            "infra_exists",
+            "runner_owns_910",
+            "layout_attached",
+            "verify_layout",
+            "prepare_runner",
+        ],
+        "Повторный запуск не должен заново подключать уже готовые mount point",
+    )
+    if "attach_layout" in host.events:
+        raise AssertionError(
+            "Уже подключённая новая схема не должна подключаться повторно"
+        )
+
+
 def test_recover_existing_without_state() -> None:
     host = ApplyHarness("recover", infra_exists=True, owns_state=False)
     host.apply()
@@ -421,9 +459,9 @@ def test_recover_existing_without_state() -> None:
         host.events,
         [
             "infra_exists",
+            "runner_owns_910",
             "verify_layout",
             "prepare_runner",
-            "runner_owns_910",
             "ensure_existing",
             "pve_access:recover",
             "handoff_existing",
@@ -476,7 +514,7 @@ def test_existing_layout_requires_manual_migration() -> None:
 
     assert_equal(
         host.events,
-        ["infra_exists", "verify_layout"],
+        ["infra_exists", "runner_owns_910", "verify_layout"],
         "До ручной миграции стандартный bootstrap не должен изменять 910",
     )
 
@@ -570,6 +608,7 @@ def main() -> None:
         test_new_install_flow,
         test_existing_without_bootstrap_state,
         test_resume_unfinished_initial_state,
+        test_resume_unfinished_with_layout_already_attached,
         test_recover_existing_without_state,
         test_recover_unfinished_initial_state,
         test_existing_layout_requires_manual_migration,
