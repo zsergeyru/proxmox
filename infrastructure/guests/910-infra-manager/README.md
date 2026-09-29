@@ -175,6 +175,7 @@ state/  → /mnt/persistent-state чтение и запись
 - root SSH-ключ доступа 910 к PVE;
 - `known_hosts` PVE;
 - PVE CA;
+- постоянный PVE API credential;
 - другие данные доступа, владельцем которых действительно является PVE.
 
 В `state/` должны находиться:
