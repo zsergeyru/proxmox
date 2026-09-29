@@ -247,6 +247,12 @@ jobs:
             sleep 1
           done
 
+          if ! docker inspect -f '{{.State.Running}}' openbao-test | grep -qx true; then
+            echo "===== OpenBao compatibility startup logs ====="
+            docker logs openbao-test || true
+            exit 1
+          fi
+
           python3 scripts/tests/test-openbao-live.py
           rm -f "$compat_config"
 
