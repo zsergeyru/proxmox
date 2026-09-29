@@ -508,8 +508,8 @@ grep -q 'activate-runtime.sh' "$ANSIBLE_RUNTIME" \
     || die "Ansible должен устанавливать команду активации infra-runtime"
 grep -q 'infra-manager ansible self' "$ANSIBLE_RUNTIME" \
     || die "910 должен сохранять управляемый блок собственного Ansible-ключа"
-grep -q 'systemd-run' "$ANSIBLE_RUNTIME" \
-    || die "Самообновление 910 должно откладывать перезапуск infra-runtime"
+grep -q 'systemd-run' "$ANSIBLE_PLAYBOOK" \
+    || die "Общий playbook должен откладывать перезапуск infra-runtime до завершения ролей"
 branch_env_count="$(grep -Fc 'INFRA_PROJECT_BRANCH: "{{ infra_project_branch' "$ANSIBLE_RUNTIME" || true)"
 [[ "$branch_env_count" -ge 2 ]] \
     || die "Выбранная ветка должна передаваться и настройке Semaphore, и финальной проверке 910"
