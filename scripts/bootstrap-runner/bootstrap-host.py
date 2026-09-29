@@ -478,18 +478,46 @@ class BootstrapHost:
         if not self.infra_config_is_expected():
             self.fail(f"VMID {self.infra_ctid} занят чужим объектом")
 
+        config = self.pct_config(self.infra_ctid)
+        protection_enabled = any(
+            line.strip() == "protection: 1"
+            for line in config.splitlines()
+        )
+
         was_running = self.pct_status(self.infra_ctid) == "running"
         if was_running:
             self.pct("stop", str(self.infra_ctid))
 
-        self.pct(
-            "set",
-            str(self.infra_ctid),
-            "--mp0",
-            f"{self.host_access_dir},mp={self.infra_access_dir},ro=1",
-            "--mp1",
-            f"{self.host_state_dir},mp={self.infra_state_dir}",
-        )
+        try:
+            if protection_enabled:
+                self.pct(
+                    "set",
+                    str(self.infra_ctid),
+                    "--protection",
+                    "0",
+                )
+
+            try:
+                self.pct(
+                    "set",
+                    str(self.infra_ctid),
+                    "--mp0",
+                    f"{self.host_access_dir},mp={self.infra_access_dir},ro=1",
+                    "--mp1",
+                    f"{self.host_state_dir},mp={self.infra_state_dir}",
+                )
+            finally:
+                if protection_enabled:
+                    self.pct(
+                        "set",
+                        str(self.infra_ctid),
+                        "--protection",
+                        "1",
+                    )
+        except BootstrapError:
+            if was_running and self.pct_status(self.infra_ctid) != "running":
+                self.pct("start", str(self.infra_ctid), check=False)
+            raise
 
         self.pct("start", str(self.infra_ctid))
         self.verify_persistent_layout()
