@@ -322,6 +322,8 @@ grep -Fq 'dest: "{{ provision.paths.python_package }}/infra_manager/"' "$ANSIBLE
     || die "Ansible должен устанавливать служебный код infra_manager"
 grep -q 'status.sh' "$ANSIBLE_RUNTIME" \
     || die "Ansible должен устанавливать status wrapper"
+grep -Fq 'dest: /usr/bin/infra-manager-status' "$ANSIBLE_RUNTIME" \
+    || die "Команда infra-manager-status должна быть доступна через pct exec"
 grep -q 'pve-access-check.sh' "$ANSIBLE_RUNTIME" \
     || die "Ansible должен устанавливать PVE access wrapper"
 grep -q 'pve-lifecycle-test.sh' "$ANSIBLE_RUNTIME" \
