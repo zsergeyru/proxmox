@@ -114,6 +114,7 @@ def test_host_initialization_does_not_print_secrets() -> None:
             patch.object(host, "ensure_ssh_cas") as ensure_cas,
             patch.object(host, "configure_ssh_access") as configure_access,
             patch.object(host, "publish_client_ca") as publish_ca,
+            patch.object(host, "publish_host_ca") as publish_host_ca,
             patch.object(host, "ensure_client_signing_role") as ensure_client_role,
             patch.object(host, "ensure_host_signing_role") as ensure_host_role,
             contextlib.redirect_stdout(output),
@@ -125,6 +126,7 @@ def test_host_initialization_does_not_print_secrets() -> None:
     ensure_cas.assert_called_once_with(root_token)
     configure_access.assert_called_once_with(root_token)
     publish_ca.assert_called_once_with(root_token)
+    publish_host_ca.assert_called_once_with()
     ensure_client_role.assert_called_once_with()
     ensure_host_role.assert_called_once_with()
     if revoked != [root_token]:
@@ -153,6 +155,7 @@ def test_existing_openbao_skips_root_when_ready() -> None:
             patch.object(host, "ssh_cas_ready", return_value=True),
             patch.object(host, "client_ca_published", return_value=True),
             patch.object(host, "check_ssh_access") as check_access,
+            patch.object(host, "publish_host_ca") as publish_host_ca,
             patch.object(host, "ensure_client_signing_role") as ensure_client_role,
             patch.object(host, "ensure_host_signing_role") as ensure_host_role,
             patch.object(host, "generate_temporary_root_token") as generate_root,
@@ -161,6 +164,7 @@ def test_existing_openbao_skips_root_when_ready() -> None:
 
     unseal.assert_called_once_with()
     check_access.assert_called_once_with()
+    publish_host_ca.assert_called_once_with()
     ensure_client_role.assert_called_once_with()
     ensure_host_role.assert_called_once_with()
     generate_root.assert_not_called()
@@ -191,6 +195,7 @@ def test_existing_openbao_bootstraps_missing_ssh_security() -> None:
             patch.object(host, "ensure_ssh_cas") as ensure_cas,
             patch.object(host, "configure_ssh_access") as configure_access,
             patch.object(host, "publish_client_ca") as publish_ca,
+            patch.object(host, "publish_host_ca") as publish_host_ca,
             patch.object(host, "ensure_client_signing_role") as ensure_client_role,
             patch.object(host, "ensure_host_signing_role") as ensure_host_role,
             patch.object(host, "revoke_temporary_root_token") as revoke_root,
@@ -202,6 +207,7 @@ def test_existing_openbao_bootstraps_missing_ssh_security() -> None:
     ensure_cas.assert_called_once_with("TEMP-ROOT-TOKEN")
     configure_access.assert_called_once_with("TEMP-ROOT-TOKEN")
     publish_ca.assert_called_once_with("TEMP-ROOT-TOKEN")
+    publish_host_ca.assert_called_once_with()
     ensure_client_role.assert_called_once_with()
     ensure_host_role.assert_called_once_with()
     revoke_root.assert_called_once_with("TEMP-ROOT-TOKEN")
@@ -375,6 +381,36 @@ def test_client_ca_publication_uses_only_public_key() -> None:
         fail("Открытый SSH CA ключ не передан в 910")
     if any("ROOT-TOKEN-TEST" in " ".join(item[0]) for item in calls):
         fail("Root token попал в argv при публикации открытого CA")
+
+
+def test_host_ca_publication_uses_public_endpoint() -> None:
+    host = load_host_module()
+    key = "ssh-rsa AAAATESTHOSTCA"
+
+    calls: list[tuple[tuple[str, ...], str | None]] = []
+
+    def fake_pct_exec(
+        *args: str,
+        capture: bool = False,
+        check: bool = True,
+        input_text: str | None = None,
+    ):
+        del capture, check
+        calls.append((tuple(args), input_text))
+        if args[:2] == ("python3", "-c") and args[2] == host.READ_HOST_CA_CODE:
+            return SimpleNamespace(returncode=0, stdout=key + "\n", stderr="")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    with (
+        patch.object(host, "pct_exec", side_effect=fake_pct_exec),
+        patch.object(host, "host_ca_published", return_value=True),
+    ):
+        host.publish_host_ca()
+
+    if calls[0][1] is not None:
+        fail("Открытый host CA не должен требовать root token")
+    if key not in [item[1] for item in calls]:
+        fail("Открытый host CA ключ не передан в 910")
 
 
 def test_ssh_ca_mounts_are_separate() -> None:
@@ -627,6 +663,7 @@ def main() -> None:
     test_raw_root_generation_uses_unseal_key_via_stdin()
     test_temporary_root_window_restores_protected_container()
     test_client_ca_publication_uses_only_public_key()
+    test_host_ca_publication_uses_public_endpoint()
     test_ssh_ca_mounts_are_separate()
     test_ssh_access_contract_is_narrow()
     test_host_signing_role_is_host_only()
