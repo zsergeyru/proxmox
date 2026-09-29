@@ -42,6 +42,10 @@ class Paths:
         return self.ca_dir / "ca-bundle.crt"
 
     @property
+    def ssh_client_ca_public_key(self) -> Path:
+        return self.ca_dir / "ssh-client-ca.pub"
+
+    @property
     def ansible_dir(self) -> Path:
         return self.config_dir / "ansible"
 

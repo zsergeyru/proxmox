@@ -645,6 +645,157 @@ def _run_ansible_guest(
     )
 
 
+def _ssh_identity_args(
+    context: DeploymentContext,
+    private_key: Path,
+    *,
+    certificate: Path | None = None,
+) -> list[str]:
+    args = [
+        "ssh",
+        "-i",
+        str(private_key),
+        "-o",
+        f"UserKnownHostsFile={context.paths.known_hosts}",
+        "-o",
+        "StrictHostKeyChecking=yes",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "IdentitiesOnly=yes",
+        "-o",
+        "ConnectTimeout=10",
+    ]
+    if certificate is not None:
+        args.extend(["-o", f"CertificateFile={certificate}"])
+    args.append(f"root@{context.address}")
+    return args
+
+
+def _guest_trusts_client_ca(context: DeploymentContext) -> bool:
+    ca_path = PATHS.ssh_client_ca_public_key
+    if not ca_path.is_file():
+        return False
+    expected = ca_path.read_text(encoding="utf-8").strip()
+    if not expected:
+        return False
+
+    result = run(
+        [
+            *_ssh_identity_args(context, context.paths.private_key),
+            "cat /etc/ssh/trusted-user-ca-keys.pem 2>/dev/null || true",
+        ],
+        check=False,
+        capture_output=True,
+    )
+    return result.returncode == 0 and result.stdout.strip() == expected
+
+
+def _create_temporary_ssh_identity(
+    context: DeploymentContext,
+    directory: Path,
+) -> tuple[Path, Path]:
+    private_key = directory / "ansible_ed25519"
+    run(
+        [
+            "ssh-keygen",
+            "-q",
+            "-t",
+            "ed25519",
+            "-N",
+            "",
+            "-C",
+            f"infra-manager-ansible-{context.vmid}",
+            "-f",
+            str(private_key),
+        ]
+    )
+    public_key = private_key.with_suffix(".pub").read_text(
+        encoding="utf-8"
+    ).strip()
+    certificate = sign_ssh_client_key(context.node, public_key)
+    certificate_path = Path(str(private_key) + "-cert.pub")
+    certificate_path.write_text(certificate + "\n", encoding="utf-8")
+    certificate_path.chmod(0o600)
+
+    run(["ssh-keygen", "-L", "-f", str(certificate_path)])
+    return private_key, certificate_path
+
+
+def _verify_temporary_ssh_identity(
+    context: DeploymentContext,
+    private_key: Path,
+    certificate: Path,
+) -> None:
+    result = run(
+        [
+            *_ssh_identity_args(
+                context,
+                private_key,
+                certificate=certificate,
+            ),
+            "true",
+        ],
+        check=False,
+        capture_output=True,
+    )
+    if result.returncode:
+        detail = (result.stderr or "").strip()
+        raise InfraManagerError(
+            f"Гость {context.vmid} доверяет SSH CA, но вход по "
+            "временному сертификату не прошёл"
+            + (f": {detail}" if detail else "")
+        )
+    console.ok(
+        f"Гость {context.vmid}: вход по временному SSH-сертификату подтверждён"
+    )
+
+
+def _run_guest_ansible(
+    context: DeploymentContext,
+    *,
+    private_key: Path,
+    certificate: Path | None,
+    provision_phase: str,
+    self_update: bool,
+    project_branch: str | None,
+) -> None:
+    ansible_env = os.environ.copy()
+    ansible_env["ANSIBLE_HOST_KEY_CHECKING"] = "True"
+    ssh_args = (
+        f"-o UserKnownHostsFile={context.paths.known_hosts} "
+        "-o StrictHostKeyChecking=yes "
+        "-o IdentitiesOnly=yes"
+    )
+    if certificate is not None:
+        ssh_args += f" -o CertificateFile={certificate}"
+    ansible_env["ANSIBLE_SSH_ARGS"] = ssh_args
+
+    run(
+        [
+            "ansible-playbook",
+            "-i",
+            f"{context.address},",
+            "-u",
+            "root",
+            "--private-key",
+            str(private_key),
+            "-e",
+            f"guest={context.paths.guest_dir.name}",
+            "-e",
+            f"provision_phase={provision_phase}",
+            "-e",
+            f"infra_self_update={'true' if self_update else 'false'}",
+            "-e",
+            f"infra_project_branch={project_branch or SETTINGS.project_branch()}",
+            "-e",
+            f"infra_pve_node={context.node}",
+            str(context.paths.playbook),
+        ],
+        env=ansible_env,
+    )
+
+
 def _configure_guest_os(
     context: DeploymentContext,
     *,
@@ -652,13 +803,18 @@ def _configure_guest_os(
     self_update: bool = False,
     project_branch: str | None = None,
 ) -> None:
-    """Применить Ansible, предпочитая временный SSH-сертификат OpenBao."""
+    """Проверить SSH и применить конфигурацию Ansible."""
 
     _ensure_ssh_host_key(context.paths.known_hosts, context.address)
-    console.info(f"Настройка ОС {context.vmid}")
+    trusts_client_ca = _guest_trusts_client_ca(context)
 
-    if provision_phase != "full":
-        _run_ansible_guest(
+    console.info(f"Настройка ОС {context.vmid}")
+    if not trusts_client_ca:
+        console.info(
+            f"Гость {context.vmid}: доверие к SSH CA ещё не установлено; "
+            "используется переходный постоянный ключ Ansible"
+        )
+        _run_guest_ansible(
             context,
             private_key=context.paths.private_key,
             certificate=None,
@@ -668,35 +824,22 @@ def _configure_guest_os(
         )
         return
 
-    console.info(
-        f"Получение временного SSH-сертификата OpenBao для гостя {context.vmid}"
-    )
     with tempfile.TemporaryDirectory(
         prefix=f"infra-manager-ssh-{context.vmid}-"
     ) as temporary_dir:
-        private_key, certificate = _create_temporary_client_certificate(
+        private_key, certificate = _create_temporary_ssh_identity(
             context,
             Path(temporary_dir),
         )
-        if _certificate_auth_ready(context, private_key, certificate):
-            console.ok(
-                f"Гость {context.vmid}: Ansible использует "
-                "временный SSH-сертификат OpenBao"
-            )
-            selected_private_key = private_key
-            selected_certificate: Path | None = certificate
-        else:
-            console.info(
-                f"Гость {context.vmid}: доверие к SSH-сертификату ещё "
-                "не действует; используется переходный постоянный ключ"
-            )
-            selected_private_key = context.paths.private_key
-            selected_certificate = None
-
-        _run_ansible_guest(
+        _verify_temporary_ssh_identity(
             context,
-            private_key=selected_private_key,
-            certificate=selected_certificate,
+            private_key,
+            certificate,
+        )
+        _run_guest_ansible(
+            context,
+            private_key=private_key,
+            certificate=certificate,
             provision_phase=provision_phase,
             self_update=self_update,
             project_branch=project_branch,

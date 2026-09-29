@@ -702,6 +702,12 @@ status_self_update_guards="$(grep -Fc 'when: not (infra_self_update | default(fa
 grep -Fq 'project_branch=project_branch' "$ROOT/scripts/infra-manager/infra_manager/guest_deploy.py" \
     || die "deploy-guest должен передавать фактическую Git-ветку в Ansible"
 grep -Fq 'sign_ssh_client_key' "$ROOT/scripts/infra-manager/infra_manager/guest_deploy.py" \
+    || die "deploy-guest должен получать временный SSH-сертификат через PVE"
+grep -Fq 'CertificateFile=' "$ROOT/scripts/infra-manager/infra_manager/guest_deploy.py" \
+    || die "Ansible должен явно использовать временный SSH-сертификат"
+grep -Fq 'TemporaryDirectory' "$ROOT/scripts/infra-manager/infra_manager/guest_deploy.py" \
+    || die "Временный SSH-ключ должен жить только в временном каталоге задания"
+grep -Fq 'sign_ssh_client_key' "$ROOT/scripts/infra-manager/infra_manager/guest_deploy.py" \
     || die "deploy-guest должен получать временный SSH-сертификат OpenBao"
 grep -Fq 'CertificateFile=' "$ROOT/scripts/infra-manager/infra_manager/guest_deploy.py" \
     || die "Ansible должен уметь использовать SSH-сертификат OpenBao"

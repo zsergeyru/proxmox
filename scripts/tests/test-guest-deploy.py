@@ -459,10 +459,207 @@ def check_certificate_bootstrap_fallback() -> None:
             fail("Отклонённый сертификат не должен передаваться Ansible")
 
 
+def check_ssh_ca_transition() -> None:
+    context = DeploymentContext(
+        client=SimpleNamespace(),
+        vmid=410,
+        name="test-vm",
+        node="pve",
+        kind="vm",
+        features=(),
+        template_vmid=9000,
+        address="192.0.2.10",
+        target='proxmox_virtual_environment_vm.guest["410"]',
+        workspace=SimpleNamespace(),
+        paths=SimpleNamespace(
+            private_key=Path("/tmp/permanent-key"),
+            known_hosts=Path("/tmp/known-hosts"),
+            guest_dir=Path("/tmp/410-test"),
+            playbook=Path("/tmp/configure-guest.yml"),
+        ),
+    )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        ca = Path(tmp) / "ssh-client-ca.pub"
+        ca.write_text("ssh-rsa AAAACA\n", encoding="utf-8")
+        with (
+            patch.object(
+                guest_deploy_module,
+                "PATHS",
+                SimpleNamespace(ssh_client_ca_public_key=ca),
+            ),
+            patch.object(
+                guest_deploy_module,
+                "run",
+                return_value=SimpleNamespace(
+                    returncode=0,
+                    stdout="ssh-rsa AAAACA\n",
+                    stderr="",
+                ),
+            ) as mocked_run,
+        ):
+            if not guest_deploy_module._guest_trusts_client_ca(context):
+                fail("Установленный SSH CA не распознан гостем")
+        argv = mocked_run.call_args.args[0]
+        if str(context.paths.private_key) not in argv:
+            fail("Переходная проверка CA должна использовать старый Ansible-ключ")
+
+        with (
+            patch.object(
+                guest_deploy_module,
+                "PATHS",
+                SimpleNamespace(ssh_client_ca_public_key=ca),
+            ),
+            patch.object(
+                guest_deploy_module,
+                "run",
+                return_value=SimpleNamespace(
+                    returncode=0,
+                    stdout="ssh-rsa OTHER\n",
+                    stderr="",
+                ),
+            ),
+        ):
+            if guest_deploy_module._guest_trusts_client_ca(context):
+                fail("Чужой SSH CA ошибочно принят как доверенный")
+
+
+def check_temporary_certificate_is_mandatory_after_trust() -> None:
+    context = DeploymentContext(
+        client=SimpleNamespace(),
+        vmid=910,
+        name="infra-manager",
+        node="pve",
+        kind="lxc",
+        features=("container-host",),
+        template_vmid=None,
+        address="192.0.2.20",
+        target='proxmox_virtual_environment_container.guest["910"]',
+        workspace=SimpleNamespace(),
+        paths=SimpleNamespace(
+            private_key=Path("/tmp/permanent-key"),
+            known_hosts=Path("/tmp/known-hosts"),
+            guest_dir=Path("/tmp/910-infra-manager"),
+            playbook=Path("/tmp/configure-guest.yml"),
+        ),
+    )
+    calls: list[dict[str, object]] = []
+
+    def record_ansible(
+        deployment: DeploymentContext,
+        **kwargs: object,
+    ) -> None:
+        if deployment is not context:
+            fail("Временный SSH-сертификат применён к другому гостю")
+        calls.append(kwargs)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        temporary_key = Path(tmp) / "ansible_ed25519"
+        temporary_cert = Path(str(temporary_key) + "-cert.pub")
+        with (
+            patch.object(guest_deploy_module, "_ensure_ssh_host_key"),
+            patch.object(
+                guest_deploy_module,
+                "_guest_trusts_client_ca",
+                return_value=True,
+            ),
+            patch.object(
+                guest_deploy_module,
+                "_create_temporary_ssh_identity",
+                return_value=(temporary_key, temporary_cert),
+            ) as create_identity,
+            patch.object(
+                guest_deploy_module,
+                "_verify_temporary_ssh_identity",
+            ) as verify_identity,
+            patch.object(
+                guest_deploy_module,
+                "_run_guest_ansible",
+                side_effect=record_ansible,
+            ),
+        ):
+            guest_deploy_module._configure_guest_os(context)
+
+    create_identity.assert_called_once()
+    verify_identity.assert_called_once_with(
+        context,
+        temporary_key,
+        temporary_cert,
+    )
+    if calls != [
+        {
+            "private_key": temporary_key,
+            "certificate": temporary_cert,
+            "provision_phase": "full",
+            "self_update": False,
+            "project_branch": None,
+        }
+    ]:
+        fail("Ansible не переключился на временный SSH-сертификат")
+
+
+def check_permanent_key_is_only_transition_fallback() -> None:
+    context = DeploymentContext(
+        client=SimpleNamespace(),
+        vmid=410,
+        name="test-vm",
+        node="pve",
+        kind="vm",
+        features=(),
+        template_vmid=9000,
+        address="192.0.2.10",
+        target='proxmox_virtual_environment_vm.guest["410"]',
+        workspace=SimpleNamespace(),
+        paths=SimpleNamespace(
+            private_key=Path("/tmp/permanent-key"),
+            known_hosts=Path("/tmp/known-hosts"),
+            guest_dir=Path("/tmp/410-test"),
+            playbook=Path("/tmp/configure-guest.yml"),
+        ),
+    )
+    calls: list[dict[str, object]] = []
+
+    with (
+        patch.object(guest_deploy_module, "_ensure_ssh_host_key"),
+        patch.object(
+            guest_deploy_module,
+            "_guest_trusts_client_ca",
+            return_value=False,
+        ),
+        patch.object(
+            guest_deploy_module,
+            "_create_temporary_ssh_identity",
+            side_effect=AssertionError(
+                "Новый гость без CA не должен запрашивать сертификат"
+            ),
+        ),
+        patch.object(
+            guest_deploy_module,
+            "_run_guest_ansible",
+            side_effect=lambda _context, **kwargs: calls.append(kwargs),
+        ),
+    ):
+        guest_deploy_module._configure_guest_os(context)
+
+    if calls != [
+        {
+            "private_key": context.paths.private_key,
+            "certificate": None,
+            "provision_phase": "full",
+            "self_update": False,
+            "project_branch": None,
+        }
+    ]:
+        fail("Постоянный ключ не ограничен переходным первым запуском")
+
+
 def main_test() -> None:
     check_opentofu_state_status()
     check_guest_summary()
     check_910_self_update_path()
+    check_ssh_ca_transition()
+    check_temporary_certificate_is_mandatory_after_trust()
+    check_permanent_key_is_only_transition_fallback()
     check_temporary_certificate_path()
     check_certificate_bootstrap_fallback()
     workspace = OpenTofuWorkspace(
