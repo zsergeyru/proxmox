@@ -1,0 +1,48 @@
+---
+- name: Проверить сертификат PVE
+  ansible.builtin.stat:
+    path: "{{ provision.access.pve.ca_source }}"
+  register: pve_ca
+
+- name: Подтвердить сертификат PVE
+  ansible.builtin.assert:
+    that:
+      - pve_ca.stat.exists
+      - pve_ca.stat.size | int > 0
+    fail_msg: "PVE CA отсутствует в постоянном каталоге доступа"
+
+- name: Установить сертификат PVE в систему
+  ansible.builtin.copy:
+    remote_src: true
+    src: "{{ provision.access.pve.ca_source }}"
+    dest: /usr/local/share/ca-certificates/pve-root-ca.crt
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Обновить системные сертификаты
+  ansible.builtin.command:
+    argv:
+      - update-ca-certificates
+  changed_when: false
+
+- name: Подготовить общий набор сертификатов
+  ansible.builtin.shell: |
+    set -eu
+    cat /etc/ssl/certs/ca-certificates.crt         "{{ provision.access.pve.ca_source }}"         > "{{ provision.paths.ca }}/ca-bundle.crt.tmp"
+    chmod 0644 "{{ provision.paths.ca }}/ca-bundle.crt.tmp"
+    mv "{{ provision.paths.ca }}/ca-bundle.crt.tmp" "{{ provision.paths.ca }}/ca-bundle.crt"
+  args:
+    executable: /bin/bash
+
+- name: Проверить постоянный доступ к PVE
+  ansible.builtin.stat:
+    path: "{{ provision.access.pve.persistent_credential }}"
+  register: permanent_pve_credential
+
+- name: Подтвердить постоянный доступ к PVE
+  ansible.builtin.assert:
+    that:
+      - permanent_pve_credential.stat.exists
+      - permanent_pve_credential.stat.size | int > 0
+    fail_msg: "PVE API credential отсутствует в постоянном каталоге доступа"

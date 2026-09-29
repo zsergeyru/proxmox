@@ -4,7 +4,8 @@ set -Eeuo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 ANSIBLE_PLAYBOOK="$ROOT/automation/ansible/playbooks/configure-guest.yml"
 ANSIBLE_DOCKER="$ROOT/automation/ansible/roles/docker/tasks/main.yml"
-ANSIBLE_RUNTIME="$ROOT/automation/ansible/roles/infra_manager/tasks/main.yml"
+ANSIBLE_RUNTIME_DIR="$ROOT/automation/ansible/roles/infra_manager/tasks"
+ANSIBLE_RUNTIME_MAIN="$ANSIBLE_RUNTIME_DIR/main.yml"
 PY_SETTINGS="$ROOT/scripts/infra-manager/infra_manager/settings.py"
 PY_SEMAPHORE="$ROOT/scripts/infra-manager/infra_manager/semaphore.py"
 PY_STATUS="$ROOT/scripts/infra-manager/infra_manager/status.py"
@@ -38,6 +39,32 @@ SSH_CONFIG="$ROOT/infrastructure/guests/910-infra-manager/compose/runtime/ssh_co
 
 die() { printf 'ОШИБКА: %s\n' "$*" >&2; exit 1; }
 ok()  { printf '[ОК] %s\n' "$*"; }
+
+ANSIBLE_RUNTIME_PARTS=(
+    persistence.yml
+    pve_access.yml
+    ansible_access.yml
+    repository.yml
+    semaphore.yml
+    runtime.yml
+    openbao.yml
+    verify.yml
+)
+
+[[ -s "$ANSIBLE_RUNTIME_MAIN" ]] || die "Отсутствует основной файл роли infra_manager"
+for task_file in "${ANSIBLE_RUNTIME_PARTS[@]}"; do
+    [[ -s "$ANSIBLE_RUNTIME_DIR/$task_file" ]] \
+        || die "Отсутствует часть роли infra_manager: $task_file"
+    grep -Fq "ansible.builtin.import_tasks: $task_file" "$ANSIBLE_RUNTIME_MAIN" \
+        || die "main.yml роли infra_manager не подключает $task_file"
+done
+
+ANSIBLE_RUNTIME="$(mktemp)"
+trap 'rm -f "$ANSIBLE_RUNTIME"' EXIT
+cat "$ANSIBLE_RUNTIME_MAIN" > "$ANSIBLE_RUNTIME"
+for task_file in "${ANSIBLE_RUNTIME_PARTS[@]}"; do
+    cat "$ANSIBLE_RUNTIME_DIR/$task_file" >> "$ANSIBLE_RUNTIME"
+done
 
 for file in "$ANSIBLE_PLAYBOOK" "$ANSIBLE_DOCKER" "$ANSIBLE_RUNTIME" "$PY_SETTINGS" "$PY_SEMAPHORE" "$PY_STATUS" "$PY_PVE" "$STATUS" "$ACCESS" "$LIFECYCLE" "$ACTIVATE_RUNTIME" "$BUILD_TEMPLATE" "$VERIFY_TEMPLATE" "$DEPLOY_GUEST" "$PY_OPENTOFU" "$PY_TEMPLATE" "$PY_TEMPLATE_BUILD" "$PY_TEMPLATE_VERIFY" "$COMPOSE" "$OPENBAO_CONFIG" "$OPENBAO_HOST" "$OPENBAO_STARTUP_COMMAND" "$OPENBAO_STARTUP_SERVICE" "$OPENBAO_JOB" "$PY_OPENBAO" "$DOCKERFILE" "$REQ" "$PLAN" "$PY_PVE_HOST" "$OPENTOFU_LOCK" "$GUEST_MANIFEST" "$PROVISION" "$SSH_CONFIG"; do
     [[ -s "$file" ]] || die "Отсутствует обязательный файл: $file"

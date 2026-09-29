@@ -1,0 +1,89 @@
+---
+- name: Проверить ключ управления гостями
+  ansible.builtin.stat:
+    path: "{{ provision.paths.ansible_identity }}/guest_ed25519"
+  register: infra_ansible_private_key_stat
+
+- name: Создать ключ управления гостями
+  ansible.builtin.command:
+    argv:
+      - ssh-keygen
+      - -q
+      - -t
+      - ed25519
+      - -N
+      - ""
+      - -C
+      - infra-manager ansible guest
+      - -f
+      - "{{ provision.paths.ansible_identity }}/guest_ed25519"
+  when: not infra_ansible_private_key_stat.stat.exists
+
+- name: Получить открытый ключ управления
+  ansible.builtin.command:
+    argv:
+      - ssh-keygen
+      - -y
+      - -f
+      - "{{ provision.paths.ansible_identity }}/guest_ed25519"
+  register: infra_ansible_public_key_result
+  changed_when: false
+
+- name: Сохранить открытый ключ управления
+  ansible.builtin.copy:
+    dest: "{{ provision.paths.ansible_identity }}/guest_ed25519.pub"
+    owner: "1001"
+    group: "0"
+    mode: "0644"
+    content: "{{ infra_ansible_public_key_result.stdout }} infra-manager ansible guest\n"
+
+- name: Защитить ключ управления
+  ansible.builtin.file:
+    path: "{{ provision.paths.ansible_identity }}/guest_ed25519"
+    owner: "1001"
+    group: "0"
+    mode: "0600"
+
+- name: Подготовить SSH-каталог root
+  ansible.builtin.file:
+    path: /root/.ssh
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Разрешить постоянному Ansible-ключу управлять 910
+  ansible.builtin.blockinfile:
+    path: /root/.ssh/authorized_keys
+    marker: "# {mark} infra-manager ansible self"
+    block: "{{ infra_ansible_public_key_result.stdout }} infra-manager ansible guest"
+    create: true
+    owner: root
+    group: root
+    mode: "0600"
+
+- name: Проверить полный доступ к PVE
+  ansible.builtin.stat:
+    path: "{{ provision.access.pve.root_ssh_private_key }}"
+  register: pve_root_ssh_key
+
+- name: Подтвердить полный доступ к PVE
+  ansible.builtin.assert:
+    that:
+      - pve_root_ssh_key.stat.exists
+      - pve_root_ssh_key.stat.size | int > 0
+    fail_msg: "Первоначальный контур должен передать root SSH-ключ PVE"
+
+- name: Защитить ключ доступа к PVE
+  ansible.builtin.file:
+    path: "{{ provision.access.pve.root_ssh_private_key }}"
+    owner: "1001"
+    group: "0"
+    mode: "0600"
+
+- name: Зафиксировать ключ сервера PVE
+  ansible.builtin.file:
+    path: "{{ provision.access.pve.root_ssh_known_hosts }}"
+    owner: "1001"
+    group: "0"
+    mode: "0644"

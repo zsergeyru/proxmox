@@ -1,0 +1,95 @@
+---
+- name: Проверить настройки Semaphore
+  ansible.builtin.stat:
+    path: "{{ provision.paths.secrets }}/semaphore-server.env"
+  register: semaphore_env
+
+- name: Создать пароль Semaphore
+  ansible.builtin.command:
+    argv: [openssl, rand, -base64, "24"]
+  register: semaphore_admin_password
+  no_log: true
+  changed_when: true
+  when: not semaphore_env.stat.exists
+
+- name: Создать ключ защиты Semaphore
+  ansible.builtin.command:
+    argv: [openssl, rand, -base64, "32"]
+  register: semaphore_encryption_key
+  no_log: true
+  changed_when: true
+  when: not semaphore_env.stat.exists
+
+- name: Сохранить настройки Semaphore
+  ansible.builtin.copy:
+    dest: "{{ provision.paths.secrets }}/semaphore-server.env"
+    owner: root
+    group: root
+    mode: "0600"
+    content: |
+      SEMAPHORE_DB_DIALECT=sqlite
+      SEMAPHORE_DB_HOST=/var/lib/semaphore/semaphore.sqlite
+      SEMAPHORE_ADMIN=admin
+      SEMAPHORE_ADMIN_PASSWORD={{ semaphore_admin_password.stdout | default('') }}
+      SEMAPHORE_ADMIN_NAME=Admin
+      SEMAPHORE_ADMIN_EMAIL=admin@localhost
+      SEMAPHORE_ACCESS_KEY_ENCRYPTION={{ semaphore_encryption_key.stdout | default('') }}
+      TZ={{ ansible_facts.date_time.tz | default('UTC') }}
+  no_log: true
+  when: not semaphore_env.stat.exists
+
+- name: Сохранить пароль Semaphore
+  ansible.builtin.copy:
+    dest: "{{ provision.paths.secrets }}/initial-admin-password"
+    owner: root
+    group: root
+    mode: "0600"
+    content: "{{ semaphore_admin_password.stdout | default('') }}\n"
+  no_log: true
+  when: not semaphore_env.stat.exists
+
+- name: Проверить пароль Semaphore
+  ansible.builtin.stat:
+    path: "{{ provision.paths.secrets }}/initial-admin-password"
+  register: semaphore_admin_password_file
+
+- name: Проверить сохранённые настройки Semaphore
+  ansible.builtin.assert:
+    that:
+      - semaphore_admin_password_file.stat.exists
+      - semaphore_admin_password_file.stat.size | int > 0
+    fail_msg: "Есть semaphore-server.env, но отсутствует initial-admin-password"
+  when: semaphore_env.stat.exists
+
+- name: Удалить старую настройку исполнителя Semaphore
+  ansible.builtin.lineinfile:
+    path: "{{ provision.paths.secrets }}/semaphore-server.env"
+    regexp: "{{ item }}"
+    state: absent
+  loop:
+    - "^SEMAPHORE_USE_REMOTE_RUNNER="
+    - "^SEMAPHORE_RUNNER_REGISTRATION_TOKEN="
+  no_log: true
+
+- name: Удалить старый файл исполнителя Semaphore
+  ansible.builtin.file:
+    path: "{{ provision.paths.secrets }}/semaphore-runner.env"
+    state: absent
+
+- name: Подготовить список гостей для OpenTofu
+  ansible.builtin.command:
+    argv:
+      - python3
+      - "{{ provision.paths.bootstrap_repository }}/scripts/guests/render-opentofu-input.py"
+      - --output
+      - "{{ provision.paths.opentofu_data }}/guests.json"
+      - --exclude-vmid
+      - "910"
+  changed_when: true
+
+- name: Защитить список гостей OpenTofu
+  ansible.builtin.file:
+    path: "{{ provision.paths.opentofu_data }}/guests.json"
+    owner: "1001"
+    group: "0"
+    mode: "0640"

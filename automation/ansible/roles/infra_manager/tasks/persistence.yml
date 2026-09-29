@@ -1,0 +1,92 @@
+---
+- name: Проверить подключение данных доступа PVE
+  ansible.builtin.command:
+    argv:
+      - mountpoint
+      - -q
+      - "{{ provision.persistence.target_layout.access.guest_path }}"
+  changed_when: false
+
+- name: Проверить подключение постоянного состояния
+  ansible.builtin.command:
+    argv:
+      - mountpoint
+      - -q
+      - "{{ provision.persistence.target_layout.state.guest_path }}"
+  changed_when: false
+
+- name: Проверить старые пути перед подключением состояния
+  ansible.builtin.shell: |
+    set -eu
+    target="{{ item.target }}"
+    source="{{ item.source }}"
+    if [ -L "$target" ]; then
+      [ "$(readlink -f "$target")" = "$source" ] || {
+        echo "ОШИБКА: $target указывает не на $source" >&2
+        exit 42
+      }
+      exit 0
+    fi
+    if [ -e "$target" ]; then
+      if [ -d "$target" ] && [ -z "$(find "$target" -mindepth 1 -print -quit)" ]; then
+        exit 0
+      fi
+      echo "ОШИБКА: $target содержит данные старой схемы; требуется ручная миграция" >&2
+      exit 43
+    fi
+  args:
+    executable: /bin/bash
+  loop: "{{ provision.persistence.target_layout.state.bindings }}"
+  changed_when: false
+
+- name: Создать основные каталоги 910
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner }}"
+    group: "{{ item.group }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - { path: "{{ provision.paths.configuration }}", owner: root, group: root, mode: "0755" }
+    - { path: "{{ provision.paths.ca }}", owner: root, group: root, mode: "0755" }
+    - { path: "{{ provision.paths.data }}", owner: root, group: root, mode: "0755" }
+    - { path: /var/lib/persistent, owner: root, group: root, mode: "0755" }
+    - { path: "{{ provision.paths.compose }}", owner: root, group: root, mode: "0755" }
+    - { path: "{{ provision.paths.python_package }}", owner: root, group: root, mode: "0755" }
+
+- name: Создать каталоги постоянного состояния
+  ansible.builtin.file:
+    path: "{{ item.source }}"
+    state: directory
+    owner: "{{ item.owner }}"
+    group: "{{ item.group }}"
+    mode: "{{ item.mode }}"
+  loop: "{{ provision.persistence.target_layout.state.bindings }}"
+
+- name: Создать каталог OpenTofu state
+  ansible.builtin.file:
+    path: "{{ provision.paths.opentofu_persistent_state_dir }}"
+    state: directory
+    owner: "1001"
+    group: "0"
+    mode: "0750"
+
+- name: Подключить постоянное состояние к привычным путям 910
+  ansible.builtin.shell: |
+    set -eu
+    target="{{ item.target }}"
+    source="{{ item.source }}"
+    if [ -L "$target" ]; then
+      [ "$(readlink -f "$target")" = "$source" ]
+      exit 0
+    fi
+    if [ -d "$target" ]; then
+      rmdir "$target"
+    fi
+    ln -s "$source" "$target"
+    echo "created:$target"
+  args:
+    executable: /bin/bash
+  loop: "{{ provision.persistence.target_layout.state.bindings }}"
+  register: persistent_state_links
+  changed_when: "'created:' in persistent_state_links.stdout"

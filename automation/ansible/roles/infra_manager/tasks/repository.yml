@@ -1,0 +1,56 @@
+---
+- name: Получить выбранную ветку проекта для самообновления
+  ansible.builtin.command:
+    argv:
+      - git
+      - -C
+      - "{{ provision.paths.bootstrap_repository }}"
+      - fetch
+      - --depth
+      - "1"
+      - origin
+      - "{{ infra_project_branch | default('main') }}"
+  environment:
+    GIT_SSH_COMMAND: "ssh -F /root/.ssh/github_config"
+  changed_when: true
+  when: infra_self_update | default(false) | bool
+
+- name: Переключить рабочую копию 910 на полученную версию
+  ansible.builtin.command:
+    argv:
+      - git
+      - -C
+      - "{{ provision.paths.bootstrap_repository }}"
+      - reset
+      - --hard
+      - FETCH_HEAD
+  changed_when: true
+  when: infra_self_update | default(false) | bool
+
+- name: Удалить лишние файлы из рабочей копии 910
+  ansible.builtin.command:
+    argv:
+      - git
+      - -C
+      - "{{ provision.paths.bootstrap_repository }}"
+      - clean
+      - -ffdx
+  changed_when: true
+  when: infra_self_update | default(false) | bool
+
+- name: Подготовить файлы управляющей среды
+  ansible.builtin.copy:
+    src: "{{ guest_root }}/compose/"
+    dest: "{{ provision.paths.compose }}/"
+    owner: root
+    group: root
+    mode: preserve
+
+- name: Зафиксировать ключ GitHub для Semaphore
+  ansible.builtin.copy:
+    remote_src: true
+    src: "{{ provision.access.github.known_hosts }}"
+    dest: "{{ provision.paths.semaphore_persistent_data }}/known_hosts"
+    owner: "1001"
+    group: "0"
+    mode: "0644"
