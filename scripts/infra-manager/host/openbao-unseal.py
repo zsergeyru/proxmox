@@ -1543,7 +1543,15 @@ def validate_managed_host_target(
     )
     if pct.returncode == 0:
         config = pct.stdout
-        if f"hostname: {clean_hostname}" not in config:
+        actual_hostname = next(
+            (
+                line.removeprefix("hostname: ").strip()
+                for line in config.splitlines()
+                if line.startswith("hostname: ")
+            ),
+            "",
+        )
+        if actual_hostname != clean_hostname:
             raise OpenBaoHostError(
                 f"LXC {vmid} не подтверждает hostname {clean_hostname}"
             )
@@ -1567,7 +1575,15 @@ def validate_managed_host_target(
             f"VMID {vmid} не найден как управляемый LXC или VM"
         )
     config = qemu.stdout
-    if f"name: {clean_hostname}" not in config:
+    actual_name = next(
+        (
+            line.removeprefix("name: ").strip()
+            for line in config.splitlines()
+            if line.startswith("name: ")
+        ),
+        "",
+    )
+    if actual_name != clean_hostname:
         raise OpenBaoHostError(
             f"VM {vmid} не подтверждает name {clean_hostname}"
         )

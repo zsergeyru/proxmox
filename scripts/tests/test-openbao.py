@@ -500,6 +500,54 @@ def test_host_signing_target_is_verified_on_pve() -> None:
         else:
             fail("PVE-проверка разрешила чужой IP для VMID 910")
 
+    with patch.object(host, "run", side_effect=fake_run):
+        try:
+            host.validate_managed_host_target(
+                910,
+                "infra",
+                "192.168.9.10",
+            )
+        except host.OpenBaoHostError:
+            pass
+        else:
+            fail("PVE-проверка приняла префикс hostname LXC за полное имя")
+
+    def fake_qemu_run(argv: list[str], **kwargs: object):
+        del kwargs
+        if argv[:2] == ["pct", "config"]:
+            return SimpleNamespace(returncode=1, stdout="", stderr="")
+        if argv[:2] == ["qm", "config"]:
+            return SimpleNamespace(
+                returncode=0,
+                stdout=(
+                    "name: infra-manager\n"
+                    "ipconfig0: ip=192.168.9.10/24,gw=192.168.9.1\n"
+                ),
+                stderr="",
+            )
+        raise AssertionError(f"Неожиданная команда: {argv!r}")
+
+    with patch.object(host, "run", side_effect=fake_qemu_run):
+        principals = host.validate_managed_host_target(
+            910,
+            "infra-manager",
+            "192.168.9.10",
+        )
+    if principals != ["infra-manager", "192.168.9.10"]:
+        fail("PVE-проверка исказила principals host-сертификата VM")
+
+    with patch.object(host, "run", side_effect=fake_qemu_run):
+        try:
+            host.validate_managed_host_target(
+                910,
+                "infra",
+                "192.168.9.10",
+            )
+        except host.OpenBaoHostError:
+            pass
+        else:
+            fail("PVE-проверка приняла префикс name VM за полное имя")
+
 
 def test_host_signing_uses_only_signer_approle() -> None:
     host = load_host_module()
