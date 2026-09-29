@@ -61,4 +61,4 @@ sections:
       - label: "Внутри 910"
         value: "infra-manager-status --full"
       - label: "С PVE"
-        value: "pct exec 910 -- infra-manager-status --full"
+        value: "pct exec 910 -- /usr/local/sbin/infra-manager-status --full"
