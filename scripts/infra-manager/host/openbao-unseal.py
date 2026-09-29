@@ -64,6 +64,21 @@ with urllib.request.urlopen(request, timeout=30) as response:
     print(response.read().decode("utf-8"))
 """
 
+REVOKE_ROOT_CODE = r"""
+import sys
+import urllib.request
+token = sys.stdin.read().strip()
+if not token:
+    raise SystemExit("empty token")
+request = urllib.request.Request(
+    "http://127.0.0.1:8200/v1/auth/token/revoke-self",
+    headers={"X-Vault-Token": token},
+    method="POST",
+)
+with urllib.request.urlopen(request, timeout=30) as response:
+    response.read()
+"""
+
 
 class OpenBaoHostError(RuntimeError):
     pass
@@ -74,9 +89,11 @@ def run(
     *,
     capture: bool = False,
     check: bool = True,
+    input_text: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
     result = subprocess.run(
         argv,
+        input=input_text,
         text=True,
         stdout=subprocess.PIPE if capture else None,
         stderr=subprocess.PIPE if capture else None,
@@ -96,11 +113,13 @@ def pct_exec(
     *args: str,
     capture: bool = False,
     check: bool = True,
+    input_text: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
     return run(
         ["pct", "exec", str(VMID), "--", *args],
         capture=capture,
         check=check,
+        input_text=input_text,
     )
 
 
@@ -226,6 +245,19 @@ def unseal() -> None:
     print("[ОК] OpenBao разблокирован")
 
 
+def revoke_initial_root_token(token: str) -> None:
+    if not token:
+        raise OpenBaoHostError("OpenBao вернул пустой initial root token")
+    pct_exec(
+        "python3",
+        "-c",
+        REVOKE_ROOT_CODE,
+        capture=True,
+        input_text=token,
+    )
+    print("[ОК] Initial root token отозван")
+
+
 def initialize() -> None:
     status = read_status(wait=True)
     if bool(status["initialized"]):
@@ -268,11 +300,14 @@ def initialize() -> None:
     root_token = payload.pop("root_token", None)
     if not isinstance(root_token, str) or not root_token:
         raise OpenBaoHostError("OpenBao не вернул initial root token")
-    del root_token
 
     write_unseal_key(keys[0])
     del keys
+    payload.clear()
+
     unseal()
+    revoke_initial_root_token(root_token)
+    del root_token
 
     verified = read_status(wait=False)
     if verified.get("initialized") is not True or verified.get("sealed") is not False:
@@ -282,7 +317,7 @@ def initialize() -> None:
 
     print("[ОК] OpenBao инициализирован: 1 ключ, порог 1")
     print(f"[ОК] Unseal-ключ сохранён только на PVE: {KEY_PATH}")
-    print("[ОК] Initial root token не сохранён")
+    print("[ОК] Initial root token не сохранён и отозван")
 
 
 def main() -> int:
