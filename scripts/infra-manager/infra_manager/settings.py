@@ -55,7 +55,7 @@ class Paths:
 
     @property
     def pve_host_dir(self) -> Path:
-        return self.config_dir / "pve-host"
+        return Path("/mnt/pve-access/pve-host")
 
     @property
     def pve_host_private_key(self) -> Path:
@@ -91,7 +91,7 @@ class Paths:
 
     @property
     def pve_api_env(self) -> Path:
-        return self.secret_dir / "pve-api.env"
+        return Path("/mnt/pve-access/pve-api/pve-api.env")
 
     @property
     def admin_password_file(self) -> Path:
@@ -107,7 +107,7 @@ class Paths:
 
     @property
     def github_key(self) -> Path:
-        return Path("/root/.ssh/github_proxmox_repo_ed25519")
+        return Path("/mnt/pve-access/github/github_proxmox_repo_ed25519")
 
     @property
     def github_key_copy(self) -> Path:
