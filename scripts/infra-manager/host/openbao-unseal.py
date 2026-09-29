@@ -789,6 +789,8 @@ try:
         raise SystemExit("OpenBao did not return host signing role")
     if role.get("key_type") != "ca":
         raise SystemExit("host signing role has unexpected key_type")
+    if role.get("algorithm_signer") != "rsa-sha2-256":
+        raise SystemExit("host signing role has unexpected algorithm_signer")
     if role.get("allow_host_certificates") is not True:
         raise SystemExit("host signing role does not allow host certificates")
     if role.get("allow_user_certificates") is True:
@@ -801,6 +803,8 @@ try:
         raise SystemExit("host signing role has unexpected allow_subdomains")
     if role.get("key_id_format") != "infra-manager-host-{{public_key_hash}}":
         raise SystemExit("host signing role has unexpected key_id_format")
+    if role.get("ttl") != 2592000:
+        raise SystemExit("host signing role has unexpected ttl")
     print(json.dumps({"ready": True}, separators=(",", ":")))
 finally:
     request(
