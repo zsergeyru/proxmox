@@ -112,6 +112,7 @@ def test_host_initialization_does_not_print_secrets() -> None:
             patch.object(host, "write_unseal_key", side_effect=written.append),
             patch.object(host, "unseal"),
             patch.object(host, "ensure_ssh_cas") as ensure_cas,
+            patch.object(host, "configure_ssh_access") as configure_access,
             contextlib.redirect_stdout(output),
         ):
             host.initialize()
@@ -119,6 +120,7 @@ def test_host_initialization_does_not_print_secrets() -> None:
     if written != [secret_key]:
         fail("Хостовый сценарий не сохранил ожидаемый unseal-ключ")
     ensure_cas.assert_called_once_with(root_token)
+    configure_access.assert_called_once_with(root_token)
     if revoked != [root_token]:
         fail("Initial root token не был передан на self-revoke через stdin")
     text = output.getvalue()
@@ -140,11 +142,13 @@ def test_existing_openbao_ensures_ssh_cas() -> None:
             ),
             patch.object(host, "unseal") as unseal,
             patch.object(host, "ensure_ssh_cas") as ensure_cas,
+            patch.object(host, "check_ssh_access") as check_access,
         ):
             host.initialize()
 
     unseal.assert_called_once_with()
     ensure_cas.assert_called_once_with()
+    check_access.assert_called_once_with()
 
 
 def test_ssh_ca_reconcile_requires_initial_admin_token() -> None:
@@ -184,6 +188,37 @@ def test_ssh_ca_mounts_are_separate() -> None:
         fail("Два SSH-центра должны проверяться как независимые")
 
 
+def test_ssh_access_contract_is_narrow() -> None:
+    host = load_host_module()
+    code = host.CONFIGURE_SSH_ACCESS_CODE
+    if "infra-manager-ssh-ca-config" not in code:
+        fail("Не создана отдельная политика настройки SSH CA")
+    if "infra-manager-ssh-signer" not in code:
+        fail("Не создана отдельная политика подписи SSH")
+    if 'path "ssh-client-signer/config/ca"' in code:
+        fail("Служебная политика не должна давать доступ к закрытому CA")
+    if 'path "sys/policies' in code:
+        fail("Служебная политика не должна позволять менять политики")
+    if '"token_bound_cidrs": ["127.0.0.1/32"]' not in code:
+        fail("Служебные токены OpenBao должны работать только локально")
+
+
+def test_ssh_access_credentials_are_pve_only() -> None:
+    host = load_host_module()
+    credentials = {
+        "ssh-ca-config": {"role_id": "role-a", "secret_id": "secret-a"},
+        "ssh-signer": {"role_id": "role-b", "secret_id": "secret-b"},
+    }
+    with tempfile.TemporaryDirectory() as tmp:
+        target = Path(tmp) / "ssh-access.json"
+        with patch.object(host, "SSH_ACCESS_PATH", target):
+            host.write_ssh_access_credentials(credentials)
+        if json.loads(target.read_text(encoding="utf-8")) != credentials:
+            fail("Служебные данные OpenBao записаны с искажением")
+        if target.stat().st_mode & 0o777 != 0o600:
+            fail("Служебные данные OpenBao должны иметь права 0600")
+
+
 def test_stale_key_is_not_overwritten() -> None:
     host = load_host_module()
     with tempfile.TemporaryDirectory() as tmp:
@@ -211,6 +246,8 @@ def main() -> None:
     test_existing_openbao_ensures_ssh_cas()
     test_ssh_ca_reconcile_requires_initial_admin_token()
     test_ssh_ca_mounts_are_separate()
+    test_ssh_access_contract_is_narrow()
+    test_ssh_access_credentials_are_pve_only()
     test_stale_key_is_not_overwritten()
     print("[ОК] Проверки OpenBao пройдены")
 

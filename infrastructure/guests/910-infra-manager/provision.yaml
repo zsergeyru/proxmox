@@ -145,6 +145,7 @@ persistence:
       mounted_into_guest: false
       contains:
         - openbao-unseal-key
+        - openbao-ssh-access-credentials
 
     access:
       host_path: /mnt/bindmounts/infra-manager/access

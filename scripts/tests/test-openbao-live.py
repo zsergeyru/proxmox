@@ -132,6 +132,18 @@ def main() -> None:
     if status != {"client": True, "host": True, "distinct": True}:
         fail(f"Некорректное состояние SSH-центров: {status!r}")
 
+    access = json.loads(
+        run_code(host.CONFIGURE_SSH_ACCESS_CODE, input_text=initial_root)
+    )
+    access_status = json.loads(
+        run_code(
+            host.CHECK_SSH_ACCESS_CODE,
+            input_text=json.dumps(access, separators=(",", ":")),
+        )
+    )
+    if access_status != {"ssh-ca-config": True, "ssh-signer": True}:
+        fail(f"Некорректный служебный доступ OpenBao: {access_status!r}")
+
     revoked_token = initial_root
     run_code(host.REVOKE_ROOT_CODE, input_text=initial_root)
     initial_root = ""

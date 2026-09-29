@@ -16,6 +16,7 @@ VMID = 910
 OPENBAO_URL = "http://127.0.0.1:8200"
 KEY_DIR = Path("/mnt/bindmounts/infra-manager/pve-only/openbao")
 KEY_PATH = KEY_DIR / "unseal.key"
+SSH_ACCESS_PATH = KEY_DIR / "ssh-access.json"
 LOCK_PATH = Path("/run/lock/infra-manager-openbao-unseal.lock")
 CT_RUNTIME_DIR = Path("/run/infra-manager")
 CT_KEY_PATH = CT_RUNTIME_DIR / "openbao-unseal.key"
@@ -236,6 +237,274 @@ print(
 """
 
 
+CONFIGURE_SSH_ACCESS_CODE = r"""
+import json
+import sys
+import urllib.request
+
+BASE = "http://127.0.0.1:8200"
+token = sys.stdin.read().strip()
+if not token:
+    raise SystemExit("empty root token")
+
+
+def request(method, path, payload=None):
+    data = None
+    headers = {
+        "Content-Type": "application/json",
+        "X-Vault-Token": token,
+    }
+    if payload is not None:
+        data = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+    req = urllib.request.Request(
+        f"{BASE}{path}",
+        data=data,
+        headers=headers,
+        method=method,
+    )
+    with urllib.request.urlopen(req, timeout=30) as response:
+        raw = response.read()
+    return json.loads(raw.decode("utf-8")) if raw else {}
+
+
+config_policy = """
+path "ssh-client-signer/roles" {
+  capabilities = ["list"]
+}
+path "ssh-client-signer/roles/*" {
+  capabilities = ["create", "read", "update", "delete"]
+}
+path "ssh-host-signer/roles" {
+  capabilities = ["list"]
+}
+path "ssh-host-signer/roles/*" {
+  capabilities = ["create", "read", "update", "delete"]
+}
+path "auth/token/lookup-self" {
+  capabilities = ["read"]
+}
+path "auth/token/revoke-self" {
+  capabilities = ["update"]
+}
+path "sys/capabilities-self" {
+  capabilities = ["update"]
+}
+""".strip()
+
+signer_policy = """
+path "ssh-client-signer/sign/infra-manager" {
+  capabilities = ["create", "update"]
+}
+path "ssh-host-signer/sign/managed-host" {
+  capabilities = ["create", "update"]
+}
+path "auth/token/lookup-self" {
+  capabilities = ["read"]
+}
+path "auth/token/revoke-self" {
+  capabilities = ["update"]
+}
+path "sys/capabilities-self" {
+  capabilities = ["update"]
+}
+""".strip()
+
+request(
+    "POST",
+    "/v1/sys/policies/acl/infra-manager-ssh-ca-config",
+    {"policy": config_policy},
+)
+request(
+    "POST",
+    "/v1/sys/policies/acl/infra-manager-ssh-signer",
+    {"policy": signer_policy},
+)
+
+auth_payload = request("GET", "/v1/sys/auth")
+auth_methods = auth_payload.get("data", auth_payload)
+if not isinstance(auth_methods, dict):
+    raise SystemExit("OpenBao returned invalid auth methods list")
+existing = auth_methods.get("infra-manager/")
+if existing is None:
+    request(
+        "POST",
+        "/v1/sys/auth/infra-manager",
+        {
+            "type": "approle",
+            "description": "Служебный доступ infra-manager к SSH-сертификатам",
+        },
+    )
+elif not isinstance(existing, dict) or existing.get("type") != "approle":
+    raise SystemExit("auth/infra-manager exists with unexpected type")
+
+roles = (
+    (
+        "ssh-ca-config",
+        "infra-manager-ssh-ca-config",
+        "10m",
+        "15m",
+    ),
+    (
+        "ssh-signer",
+        "infra-manager-ssh-signer",
+        "5m",
+        "10m",
+    ),
+)
+
+credentials = {}
+for role_name, policy_name, token_ttl, token_max_ttl in roles:
+    request(
+        "POST",
+        f"/v1/auth/infra-manager/role/{role_name}",
+        {
+            "bind_secret_id": True,
+            "secret_id_bound_cidrs": ["127.0.0.1/32"],
+            "secret_id_num_uses": 0,
+            "secret_id_ttl": "0s",
+            "token_bound_cidrs": ["127.0.0.1/32"],
+            "token_num_uses": 0,
+            "token_policies": [policy_name],
+            "token_ttl": token_ttl,
+            "token_max_ttl": token_max_ttl,
+        },
+    )
+    role_payload = request(
+        "GET",
+        f"/v1/auth/infra-manager/role/{role_name}/role-id",
+    )
+    role_id = role_payload.get("data", {}).get("role_id")
+    secret_payload = request(
+        "POST",
+        f"/v1/auth/infra-manager/role/{role_name}/secret-id",
+        {},
+    )
+    secret_id = secret_payload.get("data", {}).get("secret_id")
+    if not isinstance(role_id, str) or not role_id:
+        raise SystemExit(f"OpenBao did not return RoleID for {role_name}")
+    if not isinstance(secret_id, str) or not secret_id:
+        raise SystemExit(f"OpenBao did not return SecretID for {role_name}")
+    credentials[role_name] = {
+        "role_id": role_id,
+        "secret_id": secret_id,
+    }
+
+print(json.dumps(credentials, separators=(",", ":")))
+"""
+
+CHECK_SSH_ACCESS_CODE = r"""
+import json
+import sys
+import urllib.error
+import urllib.request
+
+BASE = "http://127.0.0.1:8200"
+credentials = json.loads(sys.stdin.read())
+if not isinstance(credentials, dict):
+    raise SystemExit("invalid credentials payload")
+
+
+def request(method, path, payload=None, *, token=None):
+    data = None
+    headers = {"Content-Type": "application/json"}
+    if token:
+        headers["X-Vault-Token"] = token
+    if payload is not None:
+        data = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+    req = urllib.request.Request(
+        f"{BASE}{path}",
+        data=data,
+        headers=headers,
+        method=method,
+    )
+    with urllib.request.urlopen(req, timeout=30) as response:
+        raw = response.read()
+    return json.loads(raw.decode("utf-8")) if raw else {}
+
+
+checks = (
+    (
+        "ssh-ca-config",
+        "infra-manager-ssh-ca-config",
+        {
+            "ssh-client-signer/roles/infra-manager": {
+                "create", "read", "update", "delete"
+            },
+            "ssh-client-signer/sign/infra-manager": {"deny"},
+        },
+    ),
+    (
+        "ssh-signer",
+        "infra-manager-ssh-signer",
+        {
+            "ssh-client-signer/sign/infra-manager": {"create", "update"},
+            "ssh-client-signer/roles/infra-manager": {"deny"},
+        },
+    ),
+)
+
+result = {}
+for role_name, expected_policy, expected_paths in checks:
+    item = credentials.get(role_name)
+    if not isinstance(item, dict):
+        raise SystemExit(f"missing credentials for {role_name}")
+    role_id = item.get("role_id")
+    secret_id = item.get("secret_id")
+    if not isinstance(role_id, str) or not isinstance(secret_id, str):
+        raise SystemExit(f"invalid credentials for {role_name}")
+
+    login = request(
+        "POST",
+        "/v1/auth/infra-manager/login",
+        {"role_id": role_id, "secret_id": secret_id},
+    )
+    auth = login.get("auth")
+    if not isinstance(auth, dict):
+        raise SystemExit(f"OpenBao did not authenticate {role_name}")
+    client_token = auth.get("client_token")
+    policies = auth.get("policies", auth.get("token_policies", []))
+    if not isinstance(client_token, str) or not client_token:
+        raise SystemExit(f"OpenBao did not return token for {role_name}")
+    if not isinstance(policies, list) or expected_policy not in policies:
+        raise SystemExit(f"unexpected policies for {role_name}: {policies!r}")
+    if "root" in policies:
+        raise SystemExit(f"{role_name} unexpectedly has root policy")
+
+    paths = list(expected_paths)
+    capabilities = request(
+        "POST",
+        "/v1/sys/capabilities-self",
+        {"paths": paths},
+        token=client_token,
+    )
+    for path, required in expected_paths.items():
+        actual = capabilities.get(path)
+        if not isinstance(actual, list):
+            raise SystemExit(f"missing capabilities for {role_name}: {path}")
+        actual_set = set(actual)
+        if required == {"deny"}:
+            if actual_set != {"deny"}:
+                raise SystemExit(
+                    f"{role_name} unexpectedly allowed on {path}: {actual!r}"
+                )
+        elif not required.issubset(actual_set):
+            raise SystemExit(
+                f"{role_name} lacks capabilities on {path}: {actual!r}"
+            )
+
+    request(
+        "POST",
+        "/v1/auth/token/revoke-self",
+        {},
+        token=client_token,
+    )
+    result[role_name] = True
+
+print(json.dumps(result, separators=(",", ":")))
+"""
+
+
+
 class OpenBaoHostError(RuntimeError):
     pass
 
@@ -347,6 +616,40 @@ def write_unseal_key(key: str) -> None:
             os.fsync(stream.fileno())
         os.replace(temporary, KEY_PATH)
         os.chmod(KEY_PATH, 0o600)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def write_ssh_access_credentials(credentials: dict[str, object]) -> None:
+    required = {"ssh-ca-config", "ssh-signer"}
+    if set(credentials) != required:
+        raise OpenBaoHostError(
+            "OpenBao вернул неполный набор служебных SSH-доступов"
+        )
+
+    KEY_DIR.mkdir(parents=True, exist_ok=True)
+    os.chmod(KEY_DIR, 0o700)
+    fd, temporary_name = tempfile.mkstemp(
+        prefix=".ssh-access.",
+        dir=KEY_DIR,
+        text=True,
+    )
+    temporary = Path(temporary_name)
+    try:
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            json.dump(
+                credentials,
+                stream,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, SSH_ACCESS_PATH)
+        os.chmod(SSH_ACCESS_PATH, 0o600)
     finally:
         temporary.unlink(missing_ok=True)
 
@@ -491,6 +794,59 @@ def ensure_ssh_cas(root_token: str | None = None) -> None:
     print("[ОК] Два SSH-центра доверия OpenBao созданы")
 
 
+def check_ssh_access() -> None:
+    if not SSH_ACCESS_PATH.is_file() or SSH_ACCESS_PATH.stat().st_size == 0:
+        raise OpenBaoHostError(
+            f"Не найдены служебные данные доступа OpenBao: {SSH_ACCESS_PATH}"
+        )
+    credentials = SSH_ACCESS_PATH.read_text(encoding="utf-8")
+    result = pct_exec(
+        "python3",
+        "-c",
+        CHECK_SSH_ACCESS_CODE,
+        capture=True,
+        input_text=credentials,
+    )
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise OpenBaoHostError(
+            "OpenBao вернул некорректный результат проверки служебного доступа"
+        ) from exc
+    if payload != {"ssh-ca-config": True, "ssh-signer": True}:
+        raise OpenBaoHostError(
+            "Служебные доступы OpenBao не прошли проверку"
+        )
+
+
+def configure_ssh_access(root_token: str) -> None:
+    if SSH_ACCESS_PATH.exists():
+        raise OpenBaoHostError(
+            f"Найден старый файл служебного доступа {SSH_ACCESS_PATH}; "
+            "автоматическая перезапись запрещена"
+        )
+    result = pct_exec(
+        "python3",
+        "-c",
+        CONFIGURE_SSH_ACCESS_CODE,
+        capture=True,
+        input_text=root_token,
+    )
+    try:
+        credentials = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise OpenBaoHostError(
+            "OpenBao вернул некорректные служебные данные доступа"
+        ) from exc
+    if not isinstance(credentials, dict):
+        raise OpenBaoHostError(
+            "OpenBao вернул некорректные служебные данные доступа"
+        )
+    write_ssh_access_credentials(credentials)
+    check_ssh_access()
+    print("[ОК] Ограниченный служебный доступ к SSH-центрам настроен")
+
+
 def initialize() -> None:
     status = read_status(wait=True)
     if bool(status["initialized"]):
@@ -501,13 +857,16 @@ def initialize() -> None:
             )
         unseal()
         ensure_ssh_cas()
+        check_ssh_access()
         print("[ОК] Инициализация OpenBao уже выполнена")
         return
 
-    if KEY_PATH.exists():
+    stale = [path for path in (KEY_PATH, SSH_ACCESS_PATH) if path.exists()]
+    if stale:
         raise OpenBaoHostError(
-            f"OpenBao не инициализирован, но найден старый ключ {KEY_PATH}; "
-            "автоматическая перезапись запрещена"
+            "OpenBao не инициализирован, но найдены старые PVE-only данные: "
+            + ", ".join(str(path) for path in stale)
+            + "; автоматическая перезапись запрещена"
         )
 
     result = pct_exec(
@@ -542,6 +901,7 @@ def initialize() -> None:
     unseal()
     try:
         ensure_ssh_cas(root_token)
+        configure_ssh_access(root_token)
     finally:
         revoke_initial_root_token(root_token)
         del root_token
@@ -555,6 +915,7 @@ def initialize() -> None:
     print("[ОК] OpenBao инициализирован: 1 ключ, порог 1")
     print(f"[ОК] Unseal-ключ сохранён только на PVE: {KEY_PATH}")
     print("[ОК] SSH-центры доверия: ssh-client-signer и ssh-host-signer")
+    print("[ОК] Служебные SSH-доступы хранятся только на PVE")
     print("[ОК] Initial root token не сохранён и отозван")
 
 

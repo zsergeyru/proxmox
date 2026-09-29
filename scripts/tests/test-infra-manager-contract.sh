@@ -406,6 +406,14 @@ grep -Fq '"ssh-client-signer"' "$OPENBAO_HOST" \
     || die "OpenBao должен иметь отдельный SSH-центр доступа"
 grep -Fq '"ssh-host-signer"' "$OPENBAO_HOST" \
     || die "OpenBao должен иметь отдельный SSH-центр серверов"
+grep -Fq 'SSH_ACCESS_PATH = KEY_DIR / "ssh-access.json"' "$OPENBAO_HOST" \
+    || die "Служебные доступы OpenBao должны храниться только в pve-only"
+grep -Fq 'infra-manager-ssh-ca-config' "$OPENBAO_HOST" \
+    || die "OpenBao должен иметь отдельную политику настройки SSH CA"
+grep -Fq 'infra-manager-ssh-signer' "$OPENBAO_HOST" \
+    || die "OpenBao должен иметь отдельную политику подписи SSH"
+grep -Fq '"token_bound_cidrs": ["127.0.0.1/32"]' "$OPENBAO_HOST" \
+    || die "Служебные OpenBao token должны быть ограничены loopback"
 if grep -Fq '/v1/sys/generate-root/attempt' "$OPENBAO_HOST"; then
     die "Небезопасный unauthenticated generate-root OpenBao не должен использоваться"
 fi
