@@ -354,7 +354,7 @@ remove_project_files() {
         remove_path "$path" "удалить проектный каталог"
     done
 
-    for path in         /usr/local/sbin/pve-configuration-status         /usr/local/sbin/deploy-guest         /usr/local/sbin/sync-management-keys         /root/.ssh/github_proxmox_repo_ed25519         /root/.ssh/github_proxmox_repo_ed25519.pub         /root/.ssh/github_known_hosts         /root/.ssh/github_config         /var/lib/vz/snippets/debian13-template-builder-9000.yaml         /run/lock/proxmox-bootstrap.lock         /run/lock/proxmox-orchestration.lock
+    for path in         /usr/local/sbin/pve-configuration-status         /usr/local/sbin/infra-manager-openbao-unseal         /etc/systemd/system/infra-manager-openbao-unseal.service         /etc/systemd/system/infra-manager-openbao-unseal.timer         /etc/systemd/system/multi-user.target.wants/infra-manager-openbao-unseal.service         /etc/systemd/system/timers.target.wants/infra-manager-openbao-unseal.timer         /usr/local/sbin/deploy-guest         /usr/local/sbin/sync-management-keys         /root/.ssh/github_proxmox_repo_ed25519         /root/.ssh/github_proxmox_repo_ed25519.pub         /root/.ssh/github_known_hosts         /root/.ssh/github_config         /var/lib/vz/snippets/debian13-template-builder-9000.yaml         /run/lock/proxmox-bootstrap.lock         /run/lock/proxmox-orchestration.lock
     do
         remove_path "$path" "удалить проектный файл"
     done

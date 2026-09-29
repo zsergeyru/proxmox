@@ -44,6 +44,133 @@ def _ssh(node: str, *command: str, capture: bool = False):
     )
 
 
+def _ssh_with_input(
+    node: str,
+    *command: str,
+    input_text: str,
+):
+    """Передать данные на PVE через stdin, не помещая их в argv."""
+    require_command("ssh")
+    _required_file(PATHS.pve_host_private_key, "закрытый ключ root-доступа к PVE")
+    _required_file(PATHS.pve_host_known_hosts, "known_hosts PVE")
+
+    remote_command = shlex.join(command)
+    return run(
+        [
+            "ssh",
+            "-i",
+            str(PATHS.pve_host_private_key),
+            "-o",
+            f"UserKnownHostsFile={PATHS.pve_host_known_hosts}",
+            "-o",
+            "StrictHostKeyChecking=yes",
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            "IdentitiesOnly=yes",
+            "-o",
+            "ConnectTimeout=10",
+            f"root@{node}",
+            remote_command,
+        ],
+        capture_output=True,
+        input_text=input_text,
+    )
+
+
+OPENBAO_HOST_COMMAND = Path("/usr/local/sbin/infra-manager-openbao-unseal")
+OPENBAO_HOST_SERVICE = "infra-manager-openbao-unseal.service"
+OPENBAO_HOST_TIMER = "infra-manager-openbao-unseal.timer"
+
+
+def _install_remote_file(
+    node: str,
+    source: Path,
+    target: Path,
+    mode: str,
+) -> None:
+    """Атомарно установить обычный файл на PVE через доверенный SSH."""
+    _required_file(source, f"исходный файл {source}")
+    script = r"""
+set -eu
+target="$1"
+mode="$2"
+install -d -m 0755 "$(dirname "$target")"
+tmp="$(mktemp "$target.tmp.XXXXXX")"
+trap 'rm -f "$tmp"' EXIT
+cat > "$tmp"
+chown root:root "$tmp"
+chmod "$mode" "$tmp"
+mv -f "$tmp" "$target"
+trap - EXIT
+"""
+    _ssh_with_input(
+        node,
+        "sh",
+        "-c",
+        script,
+        "sh",
+        str(target),
+        mode,
+        input_text=source.read_text(encoding="utf-8"),
+    )
+
+
+def install_openbao_host_support(node: str, repo_root: Path) -> None:
+    """Установить на PVE сценарий и systemd-службу разблокировки OpenBao."""
+    command_source = (
+        repo_root / "scripts" / "infra-manager" / "host" / "openbao-unseal.py"
+    )
+    service_source = (
+        repo_root
+        / "infrastructure"
+        / "pve"
+        / "systemd"
+        / OPENBAO_HOST_SERVICE
+    )
+    timer_source = (
+        repo_root
+        / "infrastructure"
+        / "pve"
+        / "systemd"
+        / OPENBAO_HOST_TIMER
+    )
+    _install_remote_file(
+        node,
+        command_source,
+        OPENBAO_HOST_COMMAND,
+        "0755",
+    )
+    _install_remote_file(
+        node,
+        service_source,
+        Path("/etc/systemd/system") / OPENBAO_HOST_SERVICE,
+        "0644",
+    )
+    _install_remote_file(
+        node,
+        timer_source,
+        Path("/etc/systemd/system") / OPENBAO_HOST_TIMER,
+        "0644",
+    )
+    _ssh(node, "systemctl", "daemon-reload")
+    _ssh(node, "systemctl", "enable", OPENBAO_HOST_SERVICE)
+    _ssh(node, "systemctl", "enable", "--now", OPENBAO_HOST_TIMER)
+    console.ok(
+        "Служба и периодическая проверка разблокировки OpenBao "
+        "установлены на PVE"
+    )
+
+
+def initialize_openbao_on_host(node: str) -> None:
+    """Выполнить первичную инициализацию OpenBao на стороне PVE."""
+    _ssh(node, str(OPENBAO_HOST_COMMAND), "--initialize")
+
+
+def trigger_openbao_unseal(node: str) -> None:
+    """Запустить идемпотентную разблокировку OpenBao через PVE."""
+    _ssh(node, "systemctl", "start", OPENBAO_HOST_SERVICE)
+
 def _features_from_config(config: str) -> dict[str, str]:
     """Разобрать строку features из pct config."""
     line = next(

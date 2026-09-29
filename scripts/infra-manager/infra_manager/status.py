@@ -379,6 +379,11 @@ def _check_openbao() -> None:
             "OpenBao вернул неполное состояние"
         )
 
+    if payload["initialized"] and payload["sealed"]:
+        raise InfraManagerError(
+            "OpenBao инициализирован, но остаётся запечатан"
+        )
+
 
 def _load_repository_branches(
     semaphore: SemaphoreClient,

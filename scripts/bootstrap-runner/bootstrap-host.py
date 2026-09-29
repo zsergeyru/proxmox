@@ -57,6 +57,15 @@ class BootstrapHost:
         self.log_file = Path(
             os.environ.get("HOST_LOG_FILE", "/var/log/proxmox-bootstrap.log")
         )
+        self.host_openbao_unseal_command = Path(
+            "/usr/local/sbin/infra-manager-openbao-unseal"
+        )
+        self.host_openbao_unseal_service = Path(
+            "/etc/systemd/system/infra-manager-openbao-unseal.service"
+        )
+        self.host_openbao_unseal_timer = Path(
+            "/etc/systemd/system/infra-manager-openbao-unseal.timer"
+        )
 
         # 910 — постоянный управляющий контейнер. В отличие от временного 990
         # он сохраняется между запусками и не входит в постоянный OpenTofu-state.
@@ -999,6 +1008,23 @@ class BootstrapHost:
             self.remove_named_token("root@pam", "bootstrap-runner")
         self.remove_downloaded_template()
 
+    def remove_openbao_host_support(self) -> None:
+        """Убрать службу OpenBao с PVE, не удаляя сохранённый unseal-ключ."""
+        self.run(
+            "systemctl",
+            "disable",
+            "--now",
+            "infra-manager-openbao-unseal.timer",
+            "infra-manager-openbao-unseal.service",
+            check=False,
+            quiet=True,
+        )
+        self.host_openbao_unseal_timer.unlink(missing_ok=True)
+        self.host_openbao_unseal_service.unlink(missing_ok=True)
+        self.host_openbao_unseal_command.unlink(missing_ok=True)
+        self.run("systemctl", "daemon-reload", check=False, quiet=True)
+        self.ok("Служба разблокировки OpenBao удалена; ключ на PVE сохранён")
+
     def remove_infra(self) -> None:
         # Сначала убираем временный контур. Сам 910 удаляем только после
         # строгой проверки метки владения.
@@ -1018,6 +1044,7 @@ class BootstrapHost:
             self.remove_named_token("root@pam", "infra-manager")
             self.ok("LXC 910 уже отсутствует")
 
+        self.remove_openbao_host_support()
         self.remove_host_root_ssh_authorization()
         self.ok("Root SSH-доступ infra-manager к PVE удалён")
 

@@ -1,0 +1,11 @@
+[Unit]
+Description=Периодическая проверка разблокировки OpenBao
+
+[Timer]
+OnBootSec=45s
+OnUnitActiveSec=60s
+AccuracySec=10s
+Unit=infra-manager-openbao-unseal.service
+
+[Install]
+WantedBy=timers.target

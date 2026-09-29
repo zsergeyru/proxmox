@@ -161,6 +161,7 @@ class CommandRunner:
         check: bool = True,
         cwd: Path | None = None,
         env: Mapping[str, str] | None = None,
+        input_text: str | None = None,
         sensitive_args: Sequence[int] = (),
     ) -> subprocess.CompletedProcess[str]:
         """Запустить внешнюю команду с едиными правилами вывода и ошибок."""
@@ -196,6 +197,7 @@ class CommandRunner:
                 check=False,
                 cwd=cwd,
                 env=dict(env) if env is not None else None,
+                input=input_text,
                 text=True,
                 stdout=stdout,
                 stderr=stderr,
@@ -232,6 +234,7 @@ def run(
     capture_output: bool = False,
     cwd: Path | None = None,
     env: Mapping[str, str] | None = None,
+    input_text: str | None = None,
     sensitive_indices: Sequence[int] = (),
 ) -> subprocess.CompletedProcess[str]:
     """Совместимая оболочка над единым CommandRunner."""
@@ -241,5 +244,6 @@ def run(
         capture=capture_output,
         cwd=cwd,
         env=env,
+        input_text=input_text,
         sensitive_args=sensitive_indices,
     )
