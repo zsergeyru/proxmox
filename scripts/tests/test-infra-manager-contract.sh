@@ -4,7 +4,7 @@ set -Eeuo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 ANSIBLE_PLAYBOOK="$ROOT/automation/ansible/playbooks/configure-guest.yml"
 ANSIBLE_DOCKER="$ROOT/automation/ansible/roles/docker/tasks/main.yml"
-ANSIBLE_RUNTIME="$ROOT/automation/ansible/tasks/configure-infra-runtime.yml"
+ANSIBLE_RUNTIME="$ROOT/automation/ansible/roles/infra_manager/tasks/main.yml"
 PY_SETTINGS="$ROOT/scripts/infra-manager/infra_manager/settings.py"
 PY_SEMAPHORE="$ROOT/scripts/infra-manager/infra_manager/semaphore.py"
 PY_STATUS="$ROOT/scripts/infra-manager/infra_manager/status.py"
@@ -291,8 +291,8 @@ grep -q 'ansible.builtin.include_role:' "$ANSIBLE_PLAYBOOK" \
     || die "Общий Ansible playbook должен использовать роли"
 grep -q 'name: docker' "$ANSIBLE_PLAYBOOK" \
     || die "Общий Ansible playbook должен подключать роль Docker"
-grep -q 'configure-infra-runtime.yml' "$ANSIBLE_PLAYBOOK" \
-    || die "Общий Ansible playbook должен подключать настройку infra-runtime"
+grep -q 'name: infra_manager' "$ANSIBLE_PLAYBOOK" \
+    || die "Общий Ansible playbook должен подключать роль infra_manager"
 grep -q 'provision.system.required_packages' "$ANSIBLE_PLAYBOOK" \
     || die "Общий Ansible playbook должен устанавливать системные пакеты из provision.yaml"
 

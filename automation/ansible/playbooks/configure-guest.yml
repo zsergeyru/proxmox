@@ -64,7 +64,8 @@
         - provision.docker.required_packages is defined
 
     - name: Настроить управляющую среду
-      ansible.builtin.include_tasks: ../tasks/configure-infra-runtime.yml
+      ansible.builtin.include_role:
+        name: infra_manager
       when:
         - (provision_phase | default('full')) == "full"
         - provision.docker is defined

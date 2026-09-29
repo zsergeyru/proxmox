@@ -59,6 +59,6 @@ grep -q -- '--provision-existing-only' "$BOOTSTRAP_DIR/deploy-910.sh"     || die
 grep -q -- '--bootstrap-scope' "$BOOTSTRAP_DIR/deploy-910.sh"     || die "910 должен оставаться в отдельной bootstrap-области состояния"
 
 grep -q 'name: docker' "$PLAYBOOK"     || die "Общий playbook должен подключать общую роль Docker"
-grep -q 'configure-infra-runtime.yml' "$PLAYBOOK"     || die "Общий playbook должен подключать модуль infra-runtime по provision.yaml"
+grep -q 'name: infra_manager' "$PLAYBOOK"     || die "Общий playbook должен подключать роль infra_manager по provision.yaml"
 
 printf '[ОК] Единый Ansible-путь 910 зафиксирован\n'
