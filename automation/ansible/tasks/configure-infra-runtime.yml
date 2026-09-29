@@ -271,7 +271,7 @@
   ansible.builtin.copy:
     remote_src: true
     src: "{{ provision.access.github.known_hosts }}"
-    dest: "{{ provision.paths.semaphore_data }}/known_hosts"
+    dest: "{{ provision.paths.semaphore_persistent_data }}/known_hosts"
     owner: "1001"
     group: "0"
     mode: "0644"
@@ -479,7 +479,7 @@
 
 - name: Настроить владельца данных Semaphore
   ansible.builtin.file:
-    path: "{{ provision.paths.semaphore_data }}"
+    path: "{{ provision.paths.semaphore_persistent_data }}"
     owner: "1001"
     group: "0"
     recurse: true
@@ -488,7 +488,7 @@
   ansible.builtin.command:
     argv:
       - find
-      - "{{ provision.paths.semaphore_data }}"
+      - "{{ provision.paths.semaphore_persistent_data }}"
       - -type
       - d
       - -exec
@@ -502,7 +502,7 @@
   ansible.builtin.command:
     argv:
       - find
-      - "{{ provision.paths.semaphore_data }}"
+      - "{{ provision.paths.semaphore_persistent_data }}"
       - -type
       - f
       - -exec
