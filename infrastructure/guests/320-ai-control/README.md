@@ -21,15 +21,15 @@ Ansible и Semaphore не размещаются здесь как постоя�
 
 ## Файлы
 
-Внутри `rootfs/` хранятся только файлы самого AI-контура:
+Файлы самого AI-контура размещаются по обычным Linux-путям, например:
 
 ```text
-rootfs/opt/ai-control/agents/
-rootfs/opt/ai-control/mcp/
-rootfs/opt/ai-control/interfaces/
+/opt/ai-control/agents/
+/opt/ai-control/mcp/
+/opt/ai-control/interfaces/
 ```
 
-Конфигурации других VM/LXC остаются в каталогах соответствующих гостевых систем и применяются Ansible из `311-dev-services`.
+Воспроизводимые файлы должны создаваться явной Ansible-автоматизацией. Конфигурации других VM/LXC остаются в каталогах соответствующих гостевых систем.
 
 ## SSH
 
