@@ -50,7 +50,7 @@ infrastructure/guests/defaults.yaml
 
 | Поле | Тип | Назначение |
 |---|---|---|
-| `schema_version` | целое число | версия контракта |
+| `schema_version` | `11` | версия контракта |
 | `defaults` | объект | общие значения |
 | `profiles` | объект | технические профили |
 
@@ -124,7 +124,7 @@ infrastructure/guests/<VMID>-<name>/guest.yaml
 
 | Поле | Тип | Назначение |
 |---|---|---|
-| `schema_version` | целое число | версия контракта |
+| `schema_version` | `11` | версия контракта |
 | `vmid` | целое число | VMID/CTID |
 | `name` | строка | машинное имя |
 | `description` | строка | понятное описание |
@@ -317,7 +317,7 @@ system:
 
 | Поле | Назначение |
 |---|---|
-| `schema_version` | версия контракта `provision.yaml` |
+| `schema_version` | текущая версия `1` |
 | `guest_vmid` | связь с каталогом и `guest.yaml` |
 | `system.distribution` | требуемое семейство ОС |
 | `system.version` | основная версия ОС |
@@ -465,7 +465,7 @@ infrastructure/schemas/guest-status.schema.yaml
 
 | Поле | Назначение |
 |---|---|
-| `schema_version` | версия контракта |
+| `schema_version` | текущая версия `1` |
 | `guest_vmid` | связь с гостем |
 | `title` | заголовок полного состояния |
 | `short_ready_message` | краткий успешный результат |
