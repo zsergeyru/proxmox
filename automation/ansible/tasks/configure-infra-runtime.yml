@@ -417,8 +417,6 @@
       - -o
       - IdentitiesOnly=yes
       - "root@{{ infra_pve_node }}"
-      - sh
-      - -c
       - >-
         systemctl disable --now
         infra-manager-openbao-unseal.timer
