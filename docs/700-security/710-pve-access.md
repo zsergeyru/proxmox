@@ -50,8 +50,8 @@ PVE CA устанавливается в доверенное хранилище
 Внутри 910:
 
 ```text
-/etc/infra-manager/pve-host/root_ed25519
-/etc/infra-manager/pve-host/known_hosts
+/mnt/pve-access/pve-host/root_ed25519
+/mnt/pve-access/pve-host/known_hosts
 ```
 
 Ключ передаётся в `infra-runtime` только для чтения.

@@ -83,8 +83,8 @@ Git-ключ не используется для административно
 Пути внутри 910:
 
 ```text
-/etc/infra-manager/pve-host/root_ed25519
-/etc/infra-manager/pve-host/known_hosts
+/mnt/pve-access/pve-host/root_ed25519
+/mnt/pve-access/pve-host/known_hosts
 ```
 
 Root SSH используется общим кодом только для операций PVE, которые нельзя выполнить API token. Основным путём OpenTofu остаётся HTTPS API.

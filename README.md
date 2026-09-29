@@ -218,7 +218,7 @@ infrastructure/guests/910-infra-manager/provision.yaml
 ```text
 /etc/infra-manager/secrets/
 /etc/infra-manager/ansible/
-/etc/infra-manager/pve-host/
+/mnt/pve-access/pve-host/
 /var/lib/infra-manager/semaphore/
 /var/lib/infra-manager/opentofu/state/
 ```

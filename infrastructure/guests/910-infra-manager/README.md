@@ -250,8 +250,8 @@ keyctl=1
 Root SSH-идентичность хранится отдельно:
 
 ```text
-/etc/infra-manager/pve-host/root_ed25519
-/etc/infra-manager/pve-host/known_hosts
+/mnt/pve-access/pve-host/root_ed25519
+/mnt/pve-access/pve-host/known_hosts
 ```
 
 Она передаётся в `infra-runtime` только для чтения.
