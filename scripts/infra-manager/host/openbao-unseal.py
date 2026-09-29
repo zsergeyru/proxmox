@@ -14,7 +14,7 @@ from pathlib import Path
 
 VMID = 910
 OPENBAO_URL = "http://127.0.0.1:8200"
-KEY_DIR = Path("/root/.config/proxmox-bootstrap/openbao")
+KEY_DIR = Path("/mnt/bindmounts/infra-manager/pve-only/openbao")
 KEY_PATH = KEY_DIR / "unseal.key"
 LOCK_PATH = Path("/run/lock/infra-manager-openbao-unseal.lock")
 CT_RUNTIME_DIR = Path("/run/infra-manager")
