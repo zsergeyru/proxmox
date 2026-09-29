@@ -414,9 +414,10 @@ grep -Fq 'infra-manager-ssh-signer' "$OPENBAO_HOST" \
     || die "OpenBao должен иметь отдельную политику подписи SSH"
 grep -Fq '"token_bound_cidrs": ["127.0.0.1/32"]' "$OPENBAO_HOST" \
     || die "Служебные OpenBao token должны быть ограничены loopback"
-if grep -Fq '/v1/sys/generate-root/attempt' "$OPENBAO_HOST"; then
-    die "Небезопасный unauthenticated generate-root OpenBao не должен использоваться"
-fi
+grep -Fq '/v1/sys/generate-root/attempt' "$OPENBAO_HOST" \
+    || die "OpenBao должен поддерживать штатный выпуск временного root token"
+grep -Fq 'input_text=unseal_key' "$OPENBAO_HOST" \
+    || die "Unseal-ключ для generate-root должен передаваться только через stdin"
 grep -Fq '"push",' "$OPENBAO_HOST" \
     || die "Unseal-ключ должен передаваться в 910 временным файлом, не аргументом"
 grep -Fq 'CT_KEY_PATH' "$OPENBAO_HOST" \
