@@ -208,6 +208,8 @@ jobs:
             and .storage_type == "raft"
           ' /tmp/openbao-status.json
 
+          python3 scripts/tests/test-openbao-live.py
+
       - name: Build infra-runtime image
         run: |
           docker build \
