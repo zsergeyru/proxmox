@@ -148,6 +148,7 @@ def main() -> None:
     if not isinstance(policies, list) or "root" not in policies:
         fail("Временный токен не имеет корневых прав")
 
+    revoked_token = temporary_root
     run_code(host.REVOKE_ROOT_CODE, input_text=temporary_root)
     temporary_root = ""
 
@@ -155,10 +156,13 @@ def main() -> None:
         http_json(
             "GET",
             "/v1/auth/token/lookup-self",
-            token=temporary_root,
+            token=revoked_token,
         )
-    except urllib.error.HTTPError:
-        pass
+    except urllib.error.HTTPError as exc:
+        if exc.code not in {400, 403}:
+            raise
+    else:
+        fail("Отозванный временный корневой токен остался действующим")
 
     print("[ОК] Два SSH-центра OpenBao проверены на настоящем сервере")
 
