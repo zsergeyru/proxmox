@@ -1,5 +1,45 @@
 ---
-- name: Создать рабочие каталоги 910
+- name: Проверить подключение данных доступа PVE
+  ansible.builtin.command:
+    argv:
+      - mountpoint
+      - -q
+      - "{{ provision.persistence.target_layout.access.guest_path }}"
+  changed_when: false
+
+- name: Проверить подключение постоянного состояния
+  ansible.builtin.command:
+    argv:
+      - mountpoint
+      - -q
+      - "{{ provision.persistence.target_layout.state.guest_path }}"
+  changed_when: false
+
+- name: Проверить старые пути перед подключением состояния
+  ansible.builtin.shell: |
+    set -eu
+    target="{{ item.target }}"
+    source="{{ item.source }}"
+    if [ -L "$target" ]; then
+      [ "$(readlink -f "$target")" = "$source" ] || {
+        echo "ОШИБКА: $target указывает не на $source" >&2
+        exit 42
+      }
+      exit 0
+    fi
+    if [ -e "$target" ]; then
+      if [ -d "$target" ] && [ -z "$(find "$target" -mindepth 1 -print -quit)" ]; then
+        exit 0
+      fi
+      echo "ОШИБКА: $target содержит данные старой схемы; требуется ручная миграция" >&2
+      exit 43
+    fi
+  args:
+    executable: /bin/bash
+  loop: "{{ provision.persistence.target_layout.state.bindings }}"
+  changed_when: false
+
+- name: Создать основные каталоги 910
   ansible.builtin.file:
     path: "{{ item.path }}"
     state: directory
@@ -8,22 +48,40 @@
     mode: "{{ item.mode }}"
   loop:
     - { path: "{{ provision.paths.configuration }}", owner: root, group: root, mode: "0755" }
-    - { path: "{{ provision.paths.secrets }}", owner: root, group: root, mode: "0700" }
     - { path: "{{ provision.paths.ca }}", owner: root, group: root, mode: "0755" }
-    - { path: "{{ provision.paths.ansible_identity }}", owner: "1001", group: "0", mode: "0700" }
-    - { path: "{{ provision.paths.pve_host_identity }}", owner: "1001", group: "0", mode: "0700" }
     - { path: "{{ provision.paths.data }}", owner: root, group: root, mode: "0755" }
-    - { path: "{{ provision.paths.semaphore_data }}", owner: "1001", group: "0", mode: "0770" }
-    - { path: "{{ provision.paths.opentofu_data }}", owner: "1001", group: "0", mode: "0750" }
-    - { path: "{{ provision.paths.opentofu_state | dirname }}", owner: "1001", group: "0", mode: "0750" }
+    - { path: /var/lib/persistent, owner: root, group: root, mode: "0755" }
     - { path: "{{ provision.paths.compose }}", owner: root, group: root, mode: "0755" }
     - { path: "{{ provision.paths.python_package }}", owner: root, group: root, mode: "0755" }
 
-- name: Создать постоянное хранилище OpenBao
+- name: Создать каталоги постоянного состояния
   ansible.builtin.file:
-    path: "{{ provision.paths.openbao_data }}"
+    path: "{{ item.source }}"
     state: directory
-    mode: "0700"
+    owner: "{{ item.owner }}"
+    group: "{{ item.group }}"
+    mode: "{{ item.mode }}"
+  loop: "{{ provision.persistence.target_layout.state.bindings }}"
+
+- name: Подключить постоянное состояние к привычным путям 910
+  ansible.builtin.shell: |
+    set -eu
+    target="{{ item.target }}"
+    source="{{ item.source }}"
+    if [ -L "$target" ]; then
+      [ "$(readlink -f "$target")" = "$source" ]
+      exit 0
+    fi
+    if [ -d "$target" ]; then
+      rmdir "$target"
+    fi
+    ln -s "$source" "$target"
+    echo "created:$target"
+  args:
+    executable: /bin/bash
+  loop: "{{ provision.persistence.target_layout.state.bindings }}"
+  register: persistent_state_links
+  changed_when: "'created:' in persistent_state_links.stdout"
 
 - name: Проверить сертификат PVE
   ansible.builtin.stat:
@@ -35,9 +93,18 @@
     that:
       - pve_ca.stat.exists
       - pve_ca.stat.size | int > 0
-    fail_msg: "Первоначальный контур должен передать PVE CA до общей настройки"
+    fail_msg: "PVE CA отсутствует в постоянном каталоге доступа"
 
-- name: Добавить сертификат PVE в систему
+- name: Установить сертификат PVE в систему
+  ansible.builtin.copy:
+    remote_src: true
+    src: "{{ provision.access.pve.ca_source }}"
+    dest: /usr/local/share/ca-certificates/pve-root-ca.crt
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Обновить системные сертификаты
   ansible.builtin.command:
     argv:
       - update-ca-certificates
@@ -46,28 +113,13 @@
 - name: Подготовить общий набор сертификатов
   ansible.builtin.shell: |
     set -eu
-    cat /etc/ssl/certs/ca-certificates.crt         {{ provision.access.pve.ca_source }}         > "{{ provision.paths.ca }}/ca-bundle.crt.tmp"
+    cat /etc/ssl/certs/ca-certificates.crt         "{{ provision.access.pve.ca_source }}"         > "{{ provision.paths.ca }}/ca-bundle.crt.tmp"
     chmod 0644 "{{ provision.paths.ca }}/ca-bundle.crt.tmp"
     mv "{{ provision.paths.ca }}/ca-bundle.crt.tmp" "{{ provision.paths.ca }}/ca-bundle.crt"
   args:
     executable: /bin/bash
 
-- name: Проверить временный доступ к PVE
-  ansible.builtin.stat:
-    path: "{{ provision.access.pve.staging_credential }}"
-  register: staging_pve_credential
-
-- name: Сохранить постоянный доступ к PVE
-  ansible.builtin.copy:
-    remote_src: true
-    src: "{{ provision.access.pve.staging_credential }}"
-    dest: "{{ provision.access.pve.persistent_credential }}"
-    owner: root
-    group: root
-    mode: "0600"
-  when: staging_pve_credential.stat.exists
-
-- name: Проверить сохранённый доступ к PVE
+- name: Проверить постоянный доступ к PVE
   ansible.builtin.stat:
     path: "{{ provision.access.pve.persistent_credential }}"
   register: permanent_pve_credential
@@ -77,12 +129,7 @@
     that:
       - permanent_pve_credential.stat.exists
       - permanent_pve_credential.stat.size | int > 0
-    fail_msg: "Не удалось подготовить постоянный PVE API credential"
-
-- name: Удалить временные данные доступа
-  ansible.builtin.file:
-    path: "{{ provision.access.pve.staging_credential }}"
-    state: absent
+    fail_msg: "PVE API credential отсутствует в постоянном каталоге доступа"
 
 - name: Проверить ключ управления гостями
   ansible.builtin.stat:
