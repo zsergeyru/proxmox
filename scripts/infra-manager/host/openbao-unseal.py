@@ -82,7 +82,6 @@ with urllib.request.urlopen(request, timeout=30) as response:
 
 
 GENERATE_ROOT_CODE = r"""
-import base64
 import json
 import sys
 import urllib.request
@@ -133,18 +132,15 @@ encoded = completed.get("encoded_token")
 if not isinstance(encoded, str) or not encoded:
     raise SystemExit("OpenBao did not return encoded root token")
 
-encrypted = base64.b64decode(encoded, validate=True)
-otp_bytes = otp.encode("utf-8")
-if len(encrypted) != len(otp_bytes):
-    raise SystemExit("encoded root token length does not match OTP")
-
-token_bytes = bytes(
-    left ^ right
-    for left, right in zip(encrypted, otp_bytes, strict=True)
+decoded = request(
+    "POST",
+    "/v1/sys/decode-token",
+    {"encoded_token": encoded, "otp": otp},
 )
-token = token_bytes.decode("utf-8")
-if not token or any(char.isspace() for char in token):
-    raise SystemExit("decoded root token is invalid")
+data = decoded.get("data")
+token = data.get("token") if isinstance(data, dict) else None
+if not isinstance(token, str) or not token or any(char.isspace() for char in token):
+    raise SystemExit("OpenBao did not decode a valid root token")
 
 print(token)
 """
