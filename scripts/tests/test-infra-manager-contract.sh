@@ -278,6 +278,22 @@ grep -Fq 'tls_disable     = true' "$OPENBAO_CONFIG" \
 if grep -Eq '(^|[^a-z])dev([^a-z]|$)' "$OPENBAO_CONFIG"; then
     die "OpenBao config не должен содержать dev-режим"
 fi
+grep -Fq '"secret_shares": 1' "$OPENBAO_HOST" \
+    || die "Первичная инициализация OpenBao должна создавать один unseal-ключ"
+grep -Fq '"secret_threshold": 1' "$OPENBAO_HOST" \
+    || die "Порог разблокировки OpenBao должен быть равен одному ключу"
+grep -Fq '/root/.config/proxmox-bootstrap/openbao' "$OPENBAO_HOST" \
+    || die "Unseal-ключ OpenBao должен храниться только в постоянном каталоге PVE"
+grep -Fq 'payload.pop("root_token", None)' "$OPENBAO_HOST" \
+    || die "Initial root token OpenBao должен удаляться из ответа без сохранения"
+grep -Fq 'pct", "push"' "$OPENBAO_HOST" \
+    || die "Unseal-ключ должен передаваться в 910 временным файлом, не аргументом"
+grep -Fq 'ExecStart=/usr/local/sbin/infra-manager-openbao-unseal' "$OPENBAO_SERVICE" \
+    || die "systemd-служба должна запускать хостовый сценарий OpenBao"
+grep -q 'install_openbao_host_support' "$PY_OPENBAO" \
+    || die "Задание OpenBao должно устанавливать хостовую службу"
+grep -q 'initialize_openbao_on_host' "$PY_OPENBAO" \
+    || die "Задание OpenBao должно выполнять первичную инициализацию через PVE"
 if grep -q 'infra-manager@pve' "$ANSIBLE_PLAYBOOK" "$ANSIBLE_DOCKER" "$ANSIBLE_RUNTIME" "$PY_SEMAPHORE" "$PY_STATUS" "$PY_PVE"; then
     die "Старая PVE-идентичность не должна присутствовать в чистой схеме"
 fi
@@ -448,6 +464,10 @@ grep -Fq 'name="Deploy Guest 910"' "$PY_SEMAPHORE" \
     || die "Semaphore должен создавать задание Deploy Guest 910"
 grep -Fq "arguments='[\"910\"]'" "$PY_SEMAPHORE" \
     || die "Deploy Guest 910 должен иметь фиксированный VMID 910"
+grep -Fq 'name="Initialize OpenBao 910"' "$PY_SEMAPHORE" \
+    || die "Semaphore должен создавать отдельное задание Initialize OpenBao 910"
+grep -Fq 'scripts/infra-manager/jobs/initialize-openbao.py' "$PY_SEMAPHORE" \
+    || die "Initialize OpenBao 910 должен запускать отдельный Python-сценарий"
 grep -q 'app: str = "python"' "$PY_SEMAPHORE" \
     || die "Semaphore infrastructure tasks должны по умолчанию выполняться как Python"
 grep -q '"allow_override_args_in_task": False' "$PY_SEMAPHORE" \
