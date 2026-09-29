@@ -76,6 +76,8 @@ def main() -> None:
         [
             "docker",
             "exec",
+            "-e",
+            "BAO_ADDR=http://127.0.0.1:8200",
             "openbao-test",
             "bao",
             "operator",
@@ -90,7 +92,10 @@ def main() -> None:
         check=False,
     )
     if initialized.returncode:
-        fail("Не удалось инициализировать тестовый OpenBao")
+        fail(
+            "Не удалось инициализировать тестовый OpenBao: "
+            + initialized.stderr.strip()
+        )
 
     payload = json.loads(initialized.stdout)
     keys = payload.get("unseal_keys_b64")
