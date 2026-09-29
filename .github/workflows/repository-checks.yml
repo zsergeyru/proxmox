@@ -212,6 +212,7 @@ jobs:
 
           compat_config="$(mktemp)"
           cp infrastructure/guests/910-infra-manager/compose/openbao/openbao.hcl "$compat_config"
+          chmod 0644 "$compat_config"
           python3 - "$compat_config" <<'PY'
           from pathlib import Path
           import sys
