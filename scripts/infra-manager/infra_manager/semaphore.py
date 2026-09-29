@@ -5,7 +5,6 @@ from __future__ import annotations
 import http.cookiejar
 import json
 import os
-import shutil
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
