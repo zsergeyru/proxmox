@@ -145,21 +145,8 @@ def test_openbao_host_support() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         command = root / "scripts/infra-manager/host/openbao-unseal.py"
-        service = (
-            root
-            / "infrastructure/pve/systemd"
-            / module.OPENBAO_HOST_SERVICE
-        )
-        timer = (
-            root
-            / "infrastructure/pve/systemd"
-            / module.OPENBAO_HOST_TIMER
-        )
         command.parent.mkdir(parents=True)
-        service.parent.mkdir(parents=True)
         command.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
-        service.write_text("[Service]\n", encoding="utf-8")
-        timer.write_text("[Timer]\n", encoding="utf-8")
 
         def record_install(
             node: str,
@@ -192,22 +179,12 @@ def test_openbao_host_support() -> None:
             "/usr/local/sbin/infra-manager-openbao-unseal",
             "0755",
         ),
-        (
-            str(service),
-            "/etc/systemd/system/infra-manager-openbao-unseal.service",
-            "0644",
-        ),
-        (
-            str(timer),
-            "/etc/systemd/system/infra-manager-openbao-unseal.timer",
-            "0644",
-        ),
     ]
-    assert ssh_calls == [
-        ("systemctl", "daemon-reload"),
-        ("systemctl", "enable", module.OPENBAO_HOST_SERVICE),
-        ("systemctl", "enable", "--now", module.OPENBAO_HOST_TIMER),
-    ]
+    assert len(ssh_calls) == 1
+    assert ssh_calls[0][:2] == ("sh", "-c")
+    cleanup = ssh_calls[0][2]
+    assert "infra-manager-openbao-unseal.timer" in cleanup
+    assert "infra-manager-openbao-unseal.service" in cleanup
 
     with patch.object(module, "_ssh") as mocked:
         module.initialize_openbao_on_host("pve")
@@ -215,6 +192,13 @@ def test_openbao_host_support() -> None:
             "pve",
             "/usr/local/sbin/infra-manager-openbao-unseal",
             "--initialize",
+        )
+
+    with patch.object(module, "_ssh") as mocked:
+        module.trigger_openbao_unseal("pve")
+        mocked.assert_called_once_with(
+            "pve",
+            "/usr/local/sbin/infra-manager-openbao-unseal",
         )
 
 
