@@ -24,6 +24,7 @@ COMPOSE="$ROOT/infrastructure/guests/910-infra-manager/compose/docker-compose.ym
 OPENBAO_CONFIG="$ROOT/infrastructure/guests/910-infra-manager/compose/openbao/openbao.hcl"
 OPENBAO_HOST="$ROOT/scripts/infra-manager/host/openbao-unseal.py"
 OPENBAO_SERVICE="$ROOT/infrastructure/pve/systemd/infra-manager-openbao-unseal.service"
+OPENBAO_TIMER="$ROOT/infrastructure/pve/systemd/infra-manager-openbao-unseal.timer"
 OPENBAO_JOB="$ROOT/scripts/infra-manager/jobs/initialize-openbao.py"
 PY_OPENBAO="$ROOT/scripts/infra-manager/infra_manager/openbao.py"
 DOCKERFILE="$ROOT/infrastructure/guests/910-infra-manager/compose/runtime/Dockerfile"
@@ -38,7 +39,7 @@ SSH_CONFIG="$ROOT/infrastructure/guests/910-infra-manager/compose/runtime/ssh_co
 die() { printf 'ОШИБКА: %s\n' "$*" >&2; exit 1; }
 ok()  { printf '[ОК] %s\n' "$*"; }
 
-for file in "$ANSIBLE_PLAYBOOK" "$ANSIBLE_DOCKER" "$ANSIBLE_RUNTIME" "$PY_SETTINGS" "$PY_SEMAPHORE" "$PY_STATUS" "$PY_PVE" "$STATUS" "$ACCESS" "$LIFECYCLE" "$ACTIVATE_RUNTIME" "$BUILD_TEMPLATE" "$VERIFY_TEMPLATE" "$DEPLOY_GUEST" "$PY_OPENTOFU" "$PY_TEMPLATE" "$PY_TEMPLATE_BUILD" "$PY_TEMPLATE_VERIFY" "$COMPOSE" "$OPENBAO_CONFIG" "$OPENBAO_HOST" "$OPENBAO_SERVICE" "$OPENBAO_JOB" "$PY_OPENBAO" "$DOCKERFILE" "$REQ" "$PLAN" "$PY_PVE_HOST" "$OPENTOFU_LOCK" "$GUEST_MANIFEST" "$PROVISION" "$SSH_CONFIG"; do
+for file in "$ANSIBLE_PLAYBOOK" "$ANSIBLE_DOCKER" "$ANSIBLE_RUNTIME" "$PY_SETTINGS" "$PY_SEMAPHORE" "$PY_STATUS" "$PY_PVE" "$STATUS" "$ACCESS" "$LIFECYCLE" "$ACTIVATE_RUNTIME" "$BUILD_TEMPLATE" "$VERIFY_TEMPLATE" "$DEPLOY_GUEST" "$PY_OPENTOFU" "$PY_TEMPLATE" "$PY_TEMPLATE_BUILD" "$PY_TEMPLATE_VERIFY" "$COMPOSE" "$OPENBAO_CONFIG" "$OPENBAO_HOST" "$OPENBAO_SERVICE" "$OPENBAO_TIMER" "$OPENBAO_JOB" "$PY_OPENBAO" "$DOCKERFILE" "$REQ" "$PLAN" "$PY_PVE_HOST" "$OPENTOFU_LOCK" "$GUEST_MANIFEST" "$PROVISION" "$SSH_CONFIG"; do
     [[ -s "$file" ]] || die "Отсутствует обязательный файл: $file"
 done
 
@@ -290,6 +291,8 @@ grep -Fq 'pct", "push"' "$OPENBAO_HOST" \
     || die "Unseal-ключ должен передаваться в 910 временным файлом, не аргументом"
 grep -Fq 'ExecStart=/usr/local/sbin/infra-manager-openbao-unseal' "$OPENBAO_SERVICE" \
     || die "systemd-служба должна запускать хостовый сценарий OpenBao"
+grep -Fq 'OnUnitActiveSec=60s' "$OPENBAO_TIMER" \
+    || die "PVE должен регулярно проверять состояние блокировки OpenBao"
 grep -q 'install_openbao_host_support' "$PY_OPENBAO" \
     || die "Задание OpenBao должно устанавливать хостовую службу"
 grep -q 'initialize_openbao_on_host' "$PY_OPENBAO" \
