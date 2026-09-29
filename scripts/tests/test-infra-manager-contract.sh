@@ -682,3 +682,11 @@ for volume in volumes:
 PY
 
 ok "Контракт setup infra-manager проверен"
+
+LINUX_BASE_SSH_TRUST="$ROOT/automation/ansible/roles/linux_base/tasks/ssh_trust.yml"
+[[ -f "$LINUX_BASE_SSH_TRUST" ]] \
+    || die "Роль linux_base должна настраивать доверие SSH к OpenBao"
+grep -Fq 'TrustedUserCAKeys /etc/ssh/trusted-user-ca-keys.pem' "$LINUX_BASE_SSH_TRUST" \
+    || die "Гости должны доверять пользовательскому SSH CA OpenBao"
+grep -Fq '/etc/infra-manager/ca/ssh-client-ca.pub' "$LINUX_BASE_SSH_TRUST" \
+    || die "Ansible должен брать открытый SSH CA из каталога 910"

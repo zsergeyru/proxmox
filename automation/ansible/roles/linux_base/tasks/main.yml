@@ -8,3 +8,6 @@
   when:
     - provision.system.required_packages is defined
     - provision.system.required_packages | length > 0
+
+- name: Настроить доверие к SSH-центру доступа
+  ansible.builtin.include_tasks: ssh_trust.yml
