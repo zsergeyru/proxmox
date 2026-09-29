@@ -150,10 +150,16 @@ def test_openbao_host_support() -> None:
             / "infrastructure/pve/systemd"
             / module.OPENBAO_HOST_SERVICE
         )
+        timer = (
+            root
+            / "infrastructure/pve/systemd"
+            / module.OPENBAO_HOST_TIMER
+        )
         command.parent.mkdir(parents=True)
         service.parent.mkdir(parents=True)
         command.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
         service.write_text("[Service]\n", encoding="utf-8")
+        timer.write_text("[Timer]\n", encoding="utf-8")
 
         def record_install(
             node: str,
@@ -191,10 +197,16 @@ def test_openbao_host_support() -> None:
             "/etc/systemd/system/infra-manager-openbao-unseal.service",
             "0644",
         ),
+        (
+            str(timer),
+            "/etc/systemd/system/infra-manager-openbao-unseal.timer",
+            "0644",
+        ),
     ]
     assert ssh_calls == [
         ("systemctl", "daemon-reload"),
         ("systemctl", "enable", module.OPENBAO_HOST_SERVICE),
+        ("systemctl", "enable", "--now", module.OPENBAO_HOST_TIMER),
     ]
 
     with patch.object(module, "_ssh") as mocked:
