@@ -205,6 +205,8 @@ def main() -> None:
             fail("OpenSSH не принял сертификат OpenBao: " + inspected.stderr.strip())
         if "Principals:" not in inspected.stdout or "root" not in inspected.stdout:
             fail("SSH-сертификат не ограничен principal root")
+        if "permit-pty" not in inspected.stdout:
+            fail("SSH-сертификат не разрешает PTY для Ansible")
 
     revoked_token = initial_root
     run_code(host.REVOKE_ROOT_CODE, input_text=initial_root)

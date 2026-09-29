@@ -407,6 +407,8 @@ def test_client_signing_role_is_restricted_to_root() -> None:
         '"allow_host_certificates": False',
         '"allowed_users": "root"',
         '"default_user": "root"',
+        '"default_extensions": {',
+        '"permit-pty": ""',
         '"ttl": "15m"',
         '"algorithm_signer": "rsa-sha2-256"',
     )

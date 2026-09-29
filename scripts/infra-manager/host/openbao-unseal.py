@@ -580,6 +580,9 @@ try:
             "allow_host_certificates": False,
             "allowed_users": "root",
             "default_user": "root",
+            "default_extensions": {
+                "permit-pty": "",
+            },
             "ttl": "15m",
         },
         token=token,
@@ -599,6 +602,8 @@ try:
         raise SystemExit("client signing role unexpectedly allows host certificates")
     if role.get("default_user") != "root":
         raise SystemExit("client signing role has unexpected default_user")
+    if role.get("default_extensions") != {"permit-pty": ""}:
+        raise SystemExit("client signing role has unexpected default_extensions")
     print(json.dumps({"ready": True}, separators=(",", ":")))
 finally:
     request(
