@@ -256,7 +256,7 @@ unseal.key                                0600 root:root
 /usr/local/sbin/infra-manager-openbao-unseal
 ~~~
 
-Постоянной systemd-службы и периодического таймера на PVE нет.
+Постоянной systemd-службы и периодического задания на PVE нет.
 
 Внутри 910 устанавливается одноразовая служба:
 
