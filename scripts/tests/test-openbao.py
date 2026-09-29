@@ -103,14 +103,17 @@ def test_host_initialization_does_not_print_secrets() -> None:
         raise AssertionError
 
     output = io.StringIO()
-    with (
-        patch.object(host, "read_status", side_effect=lambda wait: next(statuses)),
-        patch.object(host, "pct_exec", side_effect=fake_pct_exec),
-        patch.object(host, "write_unseal_key", side_effect=written.append),
-        patch.object(host, "unseal"),
-        contextlib.redirect_stdout(output),
-    ):
-        host.initialize()
+    with tempfile.TemporaryDirectory() as tmp:
+        test_key = Path(tmp) / "unseal.key"
+        with (
+            patch.object(host, "KEY_PATH", test_key),
+            patch.object(host, "read_status", side_effect=lambda wait: next(statuses)),
+            patch.object(host, "pct_exec", side_effect=fake_pct_exec),
+            patch.object(host, "write_unseal_key", side_effect=written.append),
+            patch.object(host, "unseal"),
+            contextlib.redirect_stdout(output),
+        ):
+            host.initialize()
 
     if written != [secret_key]:
         fail("Хостовый сценарий не сохранил ожидаемый unseal-ключ")
