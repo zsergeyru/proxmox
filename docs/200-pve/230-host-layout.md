@@ -73,6 +73,7 @@
 |---|---|---|
 | `/mnt/bindmounts/infra-manager/access/github/github_proxmox_repo_ed25519` | `/mnt/pve-access/github/github_proxmox_repo_ed25519` | Deploy Key репозитория проекта без права записи |
 | `/mnt/bindmounts/infra-manager/access/pve-host/root_ed25519` | `/mnt/pve-access/pve-host/root_ed25519` | закрытый root SSH-ключ 910 для PVE |
+| `/mnt/bindmounts/infra-manager/access/pve-host/root_ed25519.pub` | `/mnt/pve-access/pve-host/root_ed25519.pub` | производный открытый ключ той же SSH-идентичности |
 | `/mnt/bindmounts/infra-manager/access/pve-host/known_hosts` | `/mnt/pve-access/pve-host/known_hosts` | доверенный ключ SSH-сервера PVE |
 | `/mnt/bindmounts/infra-manager/access/pve-api/pve-api.env` | `/mnt/pve-access/pve-api/pve-api.env` | данные постоянного API-доступа 910 |
 | `/mnt/bindmounts/infra-manager/access/ca/pve-root-ca.crt` | `/mnt/pve-access/ca/pve-root-ca.crt` | копия корневого сертификата PVE |
@@ -97,6 +98,15 @@
 
 ## 5. Связи каталогов внутри 910
 
+В конфигурации LXC 910 области подключаются как два bind mount:
+
+```text
+mp0: /mnt/bindmounts/infra-manager/access,mp=/mnt/pve-access,ro=1
+mp1: /mnt/bindmounts/infra-manager/state,mp=/mnt/persistent-state
+```
+
+`mp0` обязательно доступен только для чтения. `mp1` доступен 910 для чтения и записи. `pve-only/` не имеет mount point внутри 910.
+
 Постоянные каталоги из `state/` доступны внутри 910 через следующие рабочие пути:
 
 | Источник внутри 910 | Рабочий путь |
@@ -115,12 +125,49 @@
 
 Эти пути являются рабочими путями 910. Физические данные при этом находятся в `state/` на PVE.
 
+### 5.1. Права верхнего уровня на PVE
+
+910 является непривилегированным LXC, поэтому числовые владельцы на PVE учитывают отображение UID/GID контейнера.
+
+| Путь на PVE | Режим | Владелец на PVE |
+|---|---:|---:|
+| `/mnt/bindmounts/infra-manager/` | `0755` | `0:0` |
+| `pve-only/` | `0700` | `0:0` |
+| `pve-only/openbao/` | `0700` | `0:0` |
+| `access/` | `0755` | `0:0` |
+| `access/github/` | `0700` | `100000:100000` |
+| `access/pve-host/` | `0700` | `101001:100000` |
+| `access/pve-api/` | `0700` | `100000:100000` |
+| `access/ca/` | `0755` | `100000:100000` |
+| `state/` | `0700` | `100000:100000` |
+
+Основные файлы доступа имеют следующие режимы:
+
+| Файл | Режим | Владелец на PVE |
+|---|---:|---:|
+| `pve-only/openbao/unseal.key` | `0600` | `0:0` |
+| `pve-only/openbao/ssh-access.json` | `0600` | `0:0` |
+| `access/github/github_proxmox_repo_ed25519` | `0600` | `100000:100000` |
+| `access/pve-host/root_ed25519` | `0600` | `101001:100000` |
+| `access/pve-host/root_ed25519.pub` | `0644` | `101001:100000` |
+| `access/pve-host/known_hosts` | `0644` | `101001:100000` |
+| `access/pve-api/pve-api.env` | `0600` | `100000:100000` |
+| `access/ca/pve-root-ca.crt` | `0644` | `100000:100000` |
+
+Права внутренних каталогов `state/`, которые привязываются к рабочим путям 910, задаются машинным контрактом `provision.yaml` и здесь повторно не описываются.
+
 ## 6. Другие файлы на PVE
 
 Штатный корневой сертификат Proxmox:
 
 ```text
 /etc/pve/pve-root-ca.pem
+```
+
+Открытый ключ SSH-сервера PVE, из которого формируется доверенная запись для 910:
+
+```text
+/etc/ssh/ssh_host_ed25519_key.pub
 ```
 
 Открытый root SSH-ключ управляющего контура добавляется с проектной меткой в:
@@ -136,6 +183,14 @@
 ```
 
 `infra-manager-openbao-unseal` выполняет только узкие операции, которым нужны полномочия PVE или доступ к `pve-only/`: работу с блокировкой OpenBao, настройку ограниченных SSH-доступов и запросы SSH-подписи. Подробный контракт этих операций относится к разделу безопасности.
+
+Технический журнал первоначального контура:
+
+```text
+/var/log/proxmox-bootstrap.log
+```
+
+Он содержит диагностический вывод первоначальной подготовки и не является источником требуемого состояния.
 
 Эти объекты не заменяют каноническое постоянное хранилище `/mnt/bindmounts/infra-manager/`.
 
