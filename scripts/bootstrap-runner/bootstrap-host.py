@@ -1353,14 +1353,15 @@ class BootstrapHost:
         # 3) чистое создание нового 910.
         if existed and owns_910:
             self.info(
-                "Найден незавершённый первоначальный контур; продолжается его состояние"
+                "Найден созданный 910 в состоянии первоначального контура; "
+                "продолжается настройка без повторного OpenTofu apply"
             )
             self.ensure_existing_infra_running()
-            self.deploy_910_phase(
-                "infrastructure",
-                "Продолжение создания LXC 910 через OpenTofu",
-                "LXC 910 приведён к состоянию bootstrap-runner",
-            )
+            # 910 уже создан и принадлежит state 990. После добавления
+            # host bind mount повторный OpenTofu plan может воспринимать
+            # внешнее изменение как замену ресурса. Инфраструктурная фаза
+            # считается завершённой; дальше проверку state выполняет каждая
+            # provision-фаза без повторного plan/apply.
             self.ensure_runner_ssh_access_to_infra()
             self.deploy_910_phase(
                 "base",
