@@ -286,7 +286,11 @@ grep -Fq '"secret_threshold": 1' "$OPENBAO_HOST" \
 grep -Fq '/root/.config/proxmox-bootstrap/openbao' "$OPENBAO_HOST" \
     || die "Unseal-ключ OpenBao должен храниться только в постоянном каталоге PVE"
 grep -Fq 'payload.pop("root_token", None)' "$OPENBAO_HOST" \
-    || die "Initial root token OpenBao должен удаляться из ответа без сохранения"
+    || die "Initial root token OpenBao должен извлекаться без постоянного сохранения"
+grep -Fq '/v1/auth/token/revoke-self' "$OPENBAO_HOST" \
+    || die "Initial root token OpenBao должен отзываться после инициализации"
+grep -Fq 'input_text=root_token' "$OPENBAO_HOST" \
+    || die "Initial root token должен передаваться на отзыв только через stdin"
 grep -Fq '"push",' "$OPENBAO_HOST" \
     || die "Unseal-ключ должен передаваться в 910 временным файлом, не аргументом"
 grep -Fq 'CT_KEY_PATH' "$OPENBAO_HOST" \
