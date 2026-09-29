@@ -114,7 +114,9 @@ def test_host_initialization_does_not_print_secrets() -> None:
             patch.object(host, "ensure_ssh_cas") as ensure_cas,
             patch.object(host, "configure_ssh_access") as configure_access,
             patch.object(host, "publish_client_ca") as publish_ca,
+            patch.object(host, "publish_host_ca") as publish_host_ca,
             patch.object(host, "ensure_client_signing_role") as ensure_client_role,
+            patch.object(host, "ensure_host_signing_role") as ensure_host_role,
             contextlib.redirect_stdout(output),
         ):
             host.initialize()
@@ -124,7 +126,9 @@ def test_host_initialization_does_not_print_secrets() -> None:
     ensure_cas.assert_called_once_with(root_token)
     configure_access.assert_called_once_with(root_token)
     publish_ca.assert_called_once_with(root_token)
+    publish_host_ca.assert_called_once_with()
     ensure_client_role.assert_called_once_with()
+    ensure_host_role.assert_called_once_with()
     if revoked != [root_token]:
         fail("Initial root token не был передан на self-revoke через stdin")
     text = output.getvalue()
@@ -151,14 +155,18 @@ def test_existing_openbao_skips_root_when_ready() -> None:
             patch.object(host, "ssh_cas_ready", return_value=True),
             patch.object(host, "client_ca_published", return_value=True),
             patch.object(host, "check_ssh_access") as check_access,
+            patch.object(host, "publish_host_ca") as publish_host_ca,
             patch.object(host, "ensure_client_signing_role") as ensure_client_role,
+            patch.object(host, "ensure_host_signing_role") as ensure_host_role,
             patch.object(host, "generate_temporary_root_token") as generate_root,
         ):
             host.initialize()
 
     unseal.assert_called_once_with()
     check_access.assert_called_once_with()
+    publish_host_ca.assert_called_once_with()
     ensure_client_role.assert_called_once_with()
+    ensure_host_role.assert_called_once_with()
     generate_root.assert_not_called()
 
 
@@ -187,7 +195,9 @@ def test_existing_openbao_bootstraps_missing_ssh_security() -> None:
             patch.object(host, "ensure_ssh_cas") as ensure_cas,
             patch.object(host, "configure_ssh_access") as configure_access,
             patch.object(host, "publish_client_ca") as publish_ca,
+            patch.object(host, "publish_host_ca") as publish_host_ca,
             patch.object(host, "ensure_client_signing_role") as ensure_client_role,
+            patch.object(host, "ensure_host_signing_role") as ensure_host_role,
             patch.object(host, "revoke_temporary_root_token") as revoke_root,
         ):
             host.initialize()
@@ -197,7 +207,9 @@ def test_existing_openbao_bootstraps_missing_ssh_security() -> None:
     ensure_cas.assert_called_once_with("TEMP-ROOT-TOKEN")
     configure_access.assert_called_once_with("TEMP-ROOT-TOKEN")
     publish_ca.assert_called_once_with("TEMP-ROOT-TOKEN")
+    publish_host_ca.assert_called_once_with()
     ensure_client_role.assert_called_once_with()
+    ensure_host_role.assert_called_once_with()
     revoke_root.assert_called_once_with("TEMP-ROOT-TOKEN")
 
 
@@ -371,6 +383,36 @@ def test_client_ca_publication_uses_only_public_key() -> None:
         fail("Root token попал в argv при публикации открытого CA")
 
 
+def test_host_ca_publication_uses_public_endpoint() -> None:
+    host = load_host_module()
+    key = "ssh-rsa AAAATESTHOSTCA"
+
+    calls: list[tuple[tuple[str, ...], str | None]] = []
+
+    def fake_pct_exec(
+        *args: str,
+        capture: bool = False,
+        check: bool = True,
+        input_text: str | None = None,
+    ):
+        del capture, check
+        calls.append((tuple(args), input_text))
+        if args[:2] == ("python3", "-c") and args[2] == host.READ_HOST_CA_CODE:
+            return SimpleNamespace(returncode=0, stdout=key + "\n", stderr="")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    with (
+        patch.object(host, "pct_exec", side_effect=fake_pct_exec),
+        patch.object(host, "host_ca_published", return_value=True),
+    ):
+        host.publish_host_ca()
+
+    if calls[0][1] is not None:
+        fail("Открытый host CA не должен требовать root token")
+    if key not in [item[1] for item in calls]:
+        fail("Открытый host CA ключ не передан в 910")
+
+
 def test_ssh_ca_mounts_are_separate() -> None:
     host = load_host_module()
     code = host.CONFIGURE_SSH_CA_CODE
@@ -397,6 +439,109 @@ def test_ssh_access_contract_is_narrow() -> None:
         fail("Служебная политика не должна позволять менять политики")
     if '"token_bound_cidrs": ["127.0.0.1/32"]' not in code:
         fail("Служебные токены OpenBao должны работать только локально")
+
+
+def test_host_signing_role_is_host_only() -> None:
+    host = load_host_module()
+    code = host.CONFIGURE_HOST_SIGNING_ROLE_CODE
+    required = (
+        '"algorithm_signer": "rsa-sha2-256"',
+        '"allow_user_certificates": False',
+        '"allow_host_certificates": True',
+        '"allow_bare_domains": True',
+        '"allow_subdomains": True',
+        '"allowed_domains": "*"',
+        '"key_id_format": "infra-manager-host-{{public_key_hash}}"',
+        '"ttl": "720h"',
+        'role.get("algorithm_signer") != "rsa-sha2-256"',
+        'role.get("ttl") != 2592000',
+    )
+    for item in required:
+        if item not in code:
+            fail(f"Роль подписи SSH-сервера не содержит ограничение: {item}")
+    if "/v1/ssh-host-signer/roles/managed-host" not in code:
+        fail("Не настроена отдельная роль managed-host")
+
+
+def test_host_signing_target_is_verified_on_pve() -> None:
+    host = load_host_module()
+
+    def fake_run(argv: list[str], **kwargs: object):
+        del kwargs
+        if argv[:2] == ["pct", "config"]:
+            return SimpleNamespace(
+                returncode=0,
+                stdout=(
+                    "hostname: infra-manager\n"
+                    "net0: name=eth0,bridge=vmbr0,ip=192.168.9.10/24\n"
+                ),
+                stderr="",
+            )
+        raise AssertionError(f"Неожиданная команда: {argv!r}")
+
+    with patch.object(host, "run", side_effect=fake_run):
+        principals = host.validate_managed_host_target(
+            910,
+            "infra-manager",
+            "192.168.9.10",
+        )
+    if principals != ["infra-manager", "192.168.9.10"]:
+        fail("PVE-проверка исказила principals host-сертификата")
+
+    with patch.object(host, "run", side_effect=fake_run):
+        try:
+            host.validate_managed_host_target(
+                910,
+                "infra-manager",
+                "192.168.9.11",
+            )
+        except host.OpenBaoHostError:
+            pass
+        else:
+            fail("PVE-проверка разрешила чужой IP для VMID 910")
+
+
+def test_host_signing_uses_only_signer_approle() -> None:
+    host = load_host_module()
+    credentials = {
+        "ssh-ca-config": {"role_id": "role-a", "secret_id": "secret-a"},
+        "ssh-signer": {"role_id": "role-b", "secret_id": "secret-b"},
+    }
+    calls: list[tuple[tuple[str, ...], str | None]] = []
+
+    def fake_pct_exec(
+        *args: str,
+        capture: bool = False,
+        check: bool = True,
+        input_text: str | None = None,
+    ):
+        del capture, check
+        calls.append((tuple(args), input_text))
+        return SimpleNamespace(
+            returncode=0,
+            stdout="ssh-ed25519-cert-v01@openssh.com AAAAHOST\n",
+            stderr="",
+        )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        access = Path(tmp) / "ssh-access.json"
+        access.write_text(json.dumps(credentials), encoding="utf-8")
+        with (
+            patch.object(host, "SSH_ACCESS_PATH", access),
+            patch.object(host, "pct_exec", side_effect=fake_pct_exec),
+        ):
+            certificate = host.sign_host_public_key(
+                "ssh-ed25519 AAAAPUBLIC host",
+                ["test-host", "192.0.2.10"],
+            )
+
+    if not certificate.startswith("ssh-ed25519-cert-v01@openssh.com "):
+        fail("Подписанный host-сертификат потерян")
+    payload = json.loads(calls[0][1] or "{}")
+    if payload.get("credentials") != credentials["ssh-signer"]:
+        fail("Host-подпись использует неверный AppRole")
+    if payload.get("principals") != ["test-host", "192.0.2.10"]:
+        fail("Host-подпись исказила principals")
 
 
 def test_client_signing_role_is_restricted_to_root() -> None:
@@ -521,8 +666,12 @@ def main() -> None:
     test_raw_root_generation_uses_unseal_key_via_stdin()
     test_temporary_root_window_restores_protected_container()
     test_client_ca_publication_uses_only_public_key()
+    test_host_ca_publication_uses_public_endpoint()
     test_ssh_ca_mounts_are_separate()
     test_ssh_access_contract_is_narrow()
+    test_host_signing_role_is_host_only()
+    test_host_signing_target_is_verified_on_pve()
+    test_host_signing_uses_only_signer_approle()
     test_client_signing_role_is_restricted_to_root()
     test_client_signing_keeps_approle_credentials_on_pve()
     test_ssh_access_credentials_are_pve_only()

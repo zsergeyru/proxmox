@@ -404,6 +404,115 @@ def check_temporary_certificate_path() -> None:
             fail("Временный закрытый ключ не удалён после Ansible")
 
 
+def check_host_certificate_is_passed_to_ansible() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        client_ca = root / "ssh-client-ca.pub"
+        host_ca = root / "ssh-host-ca.pub"
+        client_ca.write_text("ssh-rsa AAAACLIENTCA\n", encoding="utf-8")
+        host_ca.write_text("ssh-rsa AAAAHOSTCA\n", encoding="utf-8")
+        permanent_key = root / "guest_ed25519"
+        permanent_key.write_text("permanent", encoding="utf-8")
+        context = DeploymentContext(
+            client=SimpleNamespace(),
+            vmid=410,
+            name="ai-control",
+            node="pve",
+            kind="vm",
+            features=(),
+            template_vmid=9000,
+            address="192.168.4.10",
+            target='proxmox_virtual_environment_vm.guest["410"]',
+            workspace=SimpleNamespace(),
+            paths=DeploymentPaths(
+                guest_dir=ROOT / "infrastructure/guests/410-ai-control",
+                private_key=permanent_key,
+                playbook=ROOT / "automation/ansible/playbooks/configure-guest.yml",
+                known_hosts=root / "known_hosts",
+                plan_file=root / "plan",
+            ),
+        )
+        ansible_calls: list[list[str]] = []
+
+        def fake_run(argv: list[str], **kwargs: object) -> SimpleNamespace:
+            if argv[0] == "ssh-keygen" and "-t" in argv:
+                key = Path(argv[argv.index("-f") + 1])
+                key.write_text("PRIVATE", encoding="utf-8")
+                Path(str(key) + ".pub").write_text(
+                    "ssh-ed25519 AAAAPUBLIC temporary\n",
+                    encoding="utf-8",
+                )
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+            if argv[:2] == ["ssh-keygen", "-L"]:
+                return SimpleNamespace(
+                    returncode=0,
+                    stdout=(
+                        "Type: ssh-ed25519-cert-v01@openssh.com host certificate\n"
+                        "Principals:\n"
+                        "        ai-control\n"
+                        "        192.168.4.10\n"
+                    ),
+                    stderr="",
+                )
+            if argv[0] == "ssh":
+                if argv[-1] == "cat /etc/ssh/ssh_host_ed25519_key.pub":
+                    return SimpleNamespace(
+                        returncode=0,
+                        stdout="ssh-ed25519 AAAAHOST root@ai-control\n",
+                        stderr="",
+                    )
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+            if argv[0] == "ansible-playbook":
+                ansible_calls.append(argv)
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+            raise AssertionError(f"Неожиданная команда: {argv!r}")
+
+        with (
+            patch.object(
+                guest_deploy_module,
+                "PATHS",
+                SimpleNamespace(
+                    ssh_client_ca_public_key=client_ca,
+                    ssh_host_ca_public_key=host_ca,
+                ),
+            ),
+            patch.object(guest_deploy_module, "run", side_effect=fake_run),
+            patch.object(guest_deploy_module, "_ensure_ssh_host_key"),
+            patch.object(
+                guest_deploy_module,
+                "sign_ssh_client_key",
+                return_value="ssh-ed25519-cert-v01@openssh.com AAAACLIENTCERT",
+            ),
+            patch.object(
+                guest_deploy_module,
+                "sign_ssh_host_key",
+                return_value="ssh-ed25519-cert-v01@openssh.com AAAAHOSTCERT",
+            ) as sign_host,
+        ):
+            guest_deploy_module._configure_guest_os(context)
+
+        sign_host.assert_called_once_with(
+            "pve",
+            "ssh-ed25519 AAAAHOST root@ai-control",
+            vmid=410,
+            hostname="ai-control",
+            address="192.168.4.10",
+        )
+        if len(ansible_calls) != 1:
+            fail("Ansible должен запускаться ровно один раз")
+        argv = ansible_calls[0]
+        host_vars = [
+            item
+            for item in argv
+            if item.startswith("infra_ssh_host_certificate_file=")
+        ]
+        if len(host_vars) != 1:
+            fail("Ansible не получил путь к host-сертификату")
+        certificate_path = Path(host_vars[0].split("=", 1)[1])
+        if certificate_path.exists():
+            fail("Временный host-сертификат не удалён после задания")
+
+
 def check_certificate_bootstrap_fallback() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
@@ -560,6 +669,7 @@ def main_test() -> None:
     check_guest_summary()
     check_910_self_update_path()
     check_temporary_certificate_path()
+    check_host_certificate_is_passed_to_ansible()
     check_certificate_bootstrap_fallback()
     check_certificate_failure_is_fatal_after_trust()
     workspace = OpenTofuWorkspace(

@@ -210,6 +210,81 @@ def main() -> None:
         if "permit-pty" not in inspected.stdout:
             fail("SSH-сертификат не разрешает PTY для Ansible")
 
+    host_role_result = json.loads(
+        run_code(
+            host.CONFIGURE_HOST_SIGNING_ROLE_CODE,
+            input_text=json.dumps(
+                access["ssh-ca-config"],
+                separators=(",", ":"),
+            ),
+        )
+    )
+    if host_role_result != {"ready": True}:
+        fail(f"Роль подписи SSH-сервера не готова: {host_role_result!r}")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        host_identity = Path(tmp) / "ssh_host_ed25519_key"
+        generated = subprocess.run(
+            [
+                "ssh-keygen",
+                "-q",
+                "-t",
+                "ed25519",
+                "-N",
+                "",
+                "-f",
+                str(host_identity),
+                "-C",
+                "managed-host-live-test",
+            ],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+        if generated.returncode:
+            fail(
+                "Не удалось создать тестовый host key: "
+                + generated.stderr.strip()
+            )
+        host_public_key = host_identity.with_suffix(".pub").read_text(
+            encoding="utf-8"
+        ).strip()
+        host_certificate = run_code(
+            host.SIGN_HOST_KEY_CODE,
+            input_text=json.dumps(
+                {
+                    "credentials": access["ssh-signer"],
+                    "public_key": host_public_key,
+                    "principals": ["test-host", "192.0.2.10"],
+                },
+                separators=(",", ":"),
+            ),
+        )
+        host_certificate_path = Path(str(host_identity) + "-cert.pub")
+        host_certificate_path.write_text(
+            host_certificate + "\n",
+            encoding="utf-8",
+        )
+        inspected_host = subprocess.run(
+            ["ssh-keygen", "-L", "-f", str(host_certificate_path)],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+        if inspected_host.returncode:
+            fail(
+                "OpenSSH не принял host-сертификат OpenBao: "
+                + inspected_host.stderr.strip()
+            )
+        if "host certificate" not in inspected_host.stdout:
+            fail("OpenBao выдал не host-сертификат")
+        if "test-host" not in inspected_host.stdout:
+            fail("Host-сертификат не содержит имя гостя")
+        if "192.0.2.10" not in inspected_host.stdout:
+            fail("Host-сертификат не содержит IP гостя")
+
     revoked_token = initial_root
     run_code(host.REVOKE_ROOT_CODE, input_text=initial_root)
     initial_root = ""
@@ -259,6 +334,7 @@ def main() -> None:
     print("[ОК] Временный root-токен OpenBao выпущен и отозван")
     print("[ОК] Два SSH-центра OpenBao проверены на настоящем сервере")
     print("[ОК] Временный SSH-сертификат OpenBao реально подписан и проверен")
+    print("[ОК] SSH host-сертификат OpenBao реально подписан и проверен")
 
 
 if __name__ == "__main__":
