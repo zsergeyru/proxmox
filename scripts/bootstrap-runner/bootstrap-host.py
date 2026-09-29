@@ -514,7 +514,7 @@ class BootstrapHost:
                         "--protection",
                         "1",
                     )
-        except Exception:
+        except BootstrapError:
             if was_running and self.pct_status(self.infra_ctid) != "running":
                 self.pct("start", str(self.infra_ctid), check=False)
             raise
