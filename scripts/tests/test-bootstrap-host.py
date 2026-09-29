@@ -398,7 +398,7 @@ def test_resume_unfinished_initial_state() -> None:
         "runner_owns_910",
     ]
     assert_equal(
-        host.events[:3],
+        host.events[:4],
         expected_prefix,
         "Незавершённая установка должна сначала обнаружить state 990",
     )
@@ -421,6 +421,7 @@ def test_recover_existing_without_state() -> None:
         host.events,
         [
             "infra_exists",
+            "verify_layout",
             "prepare_runner",
             "runner_owns_910",
             "ensure_existing",
