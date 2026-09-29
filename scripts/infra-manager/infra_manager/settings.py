@@ -111,7 +111,7 @@ class Paths:
 
     @property
     def github_key_copy(self) -> Path:
-        return self.secret_dir / "github_project_ed25519"
+        return self.github_key
 
     @property
     def semaphore_project_id_file(self) -> Path:
