@@ -640,14 +640,6 @@ def _run_ansible_guest(
             f"infra_project_branch={project_branch or SETTINGS.project_branch()}",
             "-e",
             f"infra_pve_node={context.node}",
-            *(
-                [
-                    "-e",
-                    f"infra_ssh_host_certificate_file={host_certificate}",
-                ]
-                if host_certificate is not None
-                else []
-            ),
             str(context.paths.playbook),
         ],
         env=ansible_env,
@@ -872,6 +864,14 @@ def _run_guest_ansible(
             f"infra_project_branch={project_branch or SETTINGS.project_branch()}",
             "-e",
             f"infra_pve_node={context.node}",
+            *(
+                [
+                    "-e",
+                    f"infra_ssh_host_certificate_file={host_certificate}",
+                ]
+                if host_certificate is not None
+                else []
+            ),
             str(context.paths.playbook),
         ],
         env=ansible_env,
