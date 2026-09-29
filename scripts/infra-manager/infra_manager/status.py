@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -32,7 +33,7 @@ STATUS_FILE = PATHS.status_file
 PROJECT_REPO = SETTINGS.project_repo
 
 STATUS_CHECK_TYPES = frozenset(
-    {"runtime", "semaphore", "runtime_tools", "pve_access"}
+    {"runtime", "openbao", "semaphore", "runtime_tools", "pve_access"}
 )
 STATUS_DATA_SOURCE_TYPES = frozenset(
     {"primary_ipv4", "project_branch", "git_revision", "file"}
@@ -336,6 +337,49 @@ def _check_runtime() -> None:
         raise InfraManagerError("Semaphore Server не запущен")
 
 
+def _check_openbao() -> None:
+    """Проверить контейнер OpenBao и доступность его служебного состояния."""
+    running = command_runner.run(
+        [
+            "docker",
+            "inspect",
+            "-f",
+            "{{.State.Running}}",
+            "openbao",
+        ],
+        capture=True,
+        check=False,
+    )
+    if running.returncode or running.stdout.strip() != "true":
+        raise InfraManagerError("OpenBao не запущен")
+
+    response = command_runner.run(
+        [
+            "curl",
+            "-fsS",
+            "http://127.0.0.1:8200/v1/sys/seal-status",
+        ],
+        capture=True,
+        check=False,
+    )
+    if response.returncode:
+        raise InfraManagerError("OpenBao не возвращает состояние")
+
+    try:
+        payload = json.loads(response.stdout)
+    except json.JSONDecodeError as exc:
+        raise InfraManagerError(
+            "OpenBao вернул некорректное состояние"
+        ) from exc
+
+    if not isinstance(payload, dict) or not isinstance(
+        payload.get("initialized"), bool
+    ) or not isinstance(payload.get("sealed"), bool):
+        raise InfraManagerError(
+            "OpenBao вернул неполное состояние"
+        )
+
+
 def _load_repository_branches(
     semaphore: SemaphoreClient,
     project_id: int,
@@ -603,6 +647,8 @@ def _run_status_checks(
         check_type = check["type"]
         if check_type == "runtime":
             _check_runtime_bundle()
+        elif check_type == "openbao":
+            _check_openbao()
         elif check_type == "semaphore":
             _check_semaphore(project_branch=project_branch)
         elif check_type == "runtime_tools":

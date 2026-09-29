@@ -52,6 +52,7 @@ properties:
         type:
           enum:
             - runtime
+            - openbao
             - semaphore
             - runtime_tools
             - pve_access

@@ -12,6 +12,8 @@ layout:
 checks:
   - type: runtime
     message: "Docker и infra-runtime работают"
+  - type: openbao
+    message: "OpenBao запущен"
   - type: semaphore
     message: "Semaphore работает"
   - type: runtime_tools
