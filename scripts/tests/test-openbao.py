@@ -407,6 +407,8 @@ def test_client_signing_role_is_restricted_to_root() -> None:
         '"allow_host_certificates": False',
         '"allowed_users": "root"',
         '"default_user": "root"',
+        '"allowed_user_key_lengths": {"ed25519": 0}',
+        '"key_id_format": "infra-manager-ansible-{{public_key_hash}}"',
         '"default_extensions": {',
         '"permit-pty": ""',
         '"ttl": "15m"',

@@ -580,6 +580,8 @@ try:
             "allow_host_certificates": False,
             "allowed_users": "root",
             "default_user": "root",
+            "allowed_user_key_lengths": {"ed25519": 0},
+            "key_id_format": "infra-manager-ansible-{{public_key_hash}}",
             "default_extensions": {
                 "permit-pty": "",
             },
@@ -604,6 +606,11 @@ try:
         raise SystemExit("client signing role has unexpected default_user")
     if role.get("default_extensions") != {"permit-pty": ""}:
         raise SystemExit("client signing role has unexpected default_extensions")
+    key_lengths = role.get("allowed_user_key_lengths")
+    if not isinstance(key_lengths, dict) or "ed25519" not in key_lengths:
+        raise SystemExit("client signing role does not restrict keys to Ed25519")
+    if role.get("key_id_format") != "infra-manager-ansible-{{public_key_hash}}":
+        raise SystemExit("client signing role has unexpected key_id_format")
     print(json.dumps({"ready": True}, separators=(",", ":")))
 finally:
     request(
