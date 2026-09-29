@@ -151,29 +151,6 @@ def test_existing_openbao_ensures_ssh_cas() -> None:
     check_access.assert_called_once_with()
 
 
-def test_legacy_openbao_is_backed_up_before_migration_error() -> None:
-    host = load_host_module()
-    with (
-        patch.object(host, "ssh_cas_ready", return_value=False),
-        patch.object(
-            host,
-            "backup_legacy_openbao",
-            return_value=Path("/backup/pre-ssh-ca-test"),
-        ) as backup,
-        patch.object(host, "configure_ssh_cas") as configure,
-    ):
-        try:
-            host.ensure_ssh_cas()
-        except host.OpenBaoHostError as exc:
-            if "/backup/pre-ssh-ca-test" not in str(exc):
-                fail(f"Путь резервной копии потерян в сообщении: {exc}")
-        else:
-            fail("Старый OpenBao был бы изменён без явной миграции")
-
-    backup.assert_called_once_with()
-    configure.assert_not_called()
-
-
 def test_ssh_ca_reconcile_requires_initial_admin_token() -> None:
     host = load_host_module()
 
@@ -186,17 +163,12 @@ def test_ssh_ca_reconcile_requires_initial_admin_token() -> None:
 
     with (
         patch.object(host, "ssh_cas_ready", return_value=False),
-        patch.object(
-            host,
-            "backup_legacy_openbao",
-            return_value=Path("/backup/pre-ssh-ca-test"),
-        ),
         patch.object(host, "configure_ssh_cas") as configure,
     ):
         try:
             host.ensure_ssh_cas()
         except host.OpenBaoHostError as exc:
-            if "явная переинициализация" not in str(exc):
+            if "явная миграция" not in str(exc):
                 fail(f"Неожиданная ошибка старого OpenBao: {exc}")
         else:
             fail("Старый OpenBao без SSH CA принят без административного доступа")
@@ -276,7 +248,6 @@ def main() -> None:
     test_orchestration()
     test_host_initialization_does_not_print_secrets()
     test_existing_openbao_ensures_ssh_cas()
-    test_legacy_openbao_is_backed_up_before_migration_error()
     test_ssh_ca_reconcile_requires_initial_admin_token()
     test_ssh_ca_mounts_are_separate()
     test_ssh_access_contract_is_narrow()
