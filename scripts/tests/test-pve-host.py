@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import importlib
+import json
 import sys
 import tempfile
 from pathlib import Path
@@ -235,6 +236,37 @@ def test_sign_ssh_client_key() -> None:
     ]
 
 
+def test_sign_ssh_host_key() -> None:
+    calls: list[tuple[tuple[str, ...], str]] = []
+
+    def fake_input(
+        node: str,
+        *command: str,
+        input_text: str,
+    ):
+        assert node == "pve"
+        calls.append((tuple(command), input_text))
+        return SimpleNamespace(
+            returncode=0,
+            stdout="ssh-ed25519-cert-v01@openssh.com AAAAHOST\n",
+        )
+
+    with patch.object(module, "_ssh_with_input", side_effect=fake_input):
+        certificate = module.sign_ssh_host_key(
+            "pve",
+            "ssh-ed25519 AAAAPUBLIC host",
+            principals=["test-host", "192.0.2.10"],
+        )
+
+    assert certificate == "ssh-ed25519-cert-v01@openssh.com AAAAHOST"
+    assert calls[0][0] == (
+        "/usr/local/sbin/infra-manager-openbao-unseal",
+        "--sign-host-key",
+    )
+    payload = json.loads(calls[0][1])
+    assert payload["principals"] == ["test-host", "192.0.2.10"]
+
+
 def main() -> None:
     test_feature_parser()
     test_container_host_reconcile()
@@ -242,6 +274,7 @@ def main() -> None:
     test_infra_self_access()
     test_openbao_host_support()
     test_sign_ssh_client_key()
+    test_sign_ssh_host_key()
     print("[ОК] Проверки pve_host.py пройдены")
 
 

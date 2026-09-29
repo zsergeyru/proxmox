@@ -399,6 +399,66 @@ def test_ssh_access_contract_is_narrow() -> None:
         fail("Служебные токены OpenBao должны работать только локально")
 
 
+def test_host_signing_role_is_host_only() -> None:
+    host = load_host_module()
+    code = host.CONFIGURE_HOST_SIGNING_ROLE_CODE
+    required = (
+        '"allow_user_certificates": False',
+        '"allow_host_certificates": True',
+        '"allow_bare_domains": True',
+        '"key_id_format": "infra-manager-host-{{public_key_hash}}"',
+        '"ttl": "720h"',
+    )
+    for item in required:
+        if item not in code:
+            fail(f"Роль подписи SSH-сервера не содержит ограничение: {item}")
+    if "/v1/ssh-host-signer/roles/managed-host" not in code:
+        fail("Не настроена отдельная роль managed-host")
+
+
+def test_host_signing_uses_only_signer_approle() -> None:
+    host = load_host_module()
+    credentials = {
+        "ssh-ca-config": {"role_id": "role-a", "secret_id": "secret-a"},
+        "ssh-signer": {"role_id": "role-b", "secret_id": "secret-b"},
+    }
+    calls: list[tuple[tuple[str, ...], str | None]] = []
+
+    def fake_pct_exec(
+        *args: str,
+        capture: bool = False,
+        check: bool = True,
+        input_text: str | None = None,
+    ):
+        del capture, check
+        calls.append((tuple(args), input_text))
+        return SimpleNamespace(
+            returncode=0,
+            stdout="ssh-ed25519-cert-v01@openssh.com AAAAHOST\n",
+            stderr="",
+        )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        access = Path(tmp) / "ssh-access.json"
+        access.write_text(json.dumps(credentials), encoding="utf-8")
+        with (
+            patch.object(host, "SSH_ACCESS_PATH", access),
+            patch.object(host, "pct_exec", side_effect=fake_pct_exec),
+        ):
+            certificate = host.sign_host_public_key(
+                "ssh-ed25519 AAAAPUBLIC host",
+                ["test-host", "192.0.2.10"],
+            )
+
+    if not certificate.startswith("ssh-ed25519-cert-v01@openssh.com "):
+        fail("Подписанный host-сертификат потерян")
+    payload = json.loads(calls[0][1] or "{}")
+    if payload.get("credentials") != credentials["ssh-signer"]:
+        fail("Host-подпись использует неверный AppRole")
+    if payload.get("principals") != ["test-host", "192.0.2.10"]:
+        fail("Host-подпись исказила principals")
+
+
 def test_client_signing_role_is_restricted_to_root() -> None:
     host = load_host_module()
     code = host.CONFIGURE_CLIENT_SIGNING_ROLE_CODE
@@ -523,6 +583,8 @@ def main() -> None:
     test_client_ca_publication_uses_only_public_key()
     test_ssh_ca_mounts_are_separate()
     test_ssh_access_contract_is_narrow()
+    test_host_signing_role_is_host_only()
+    test_host_signing_uses_only_signer_approle()
     test_client_signing_role_is_restricted_to_root()
     test_client_signing_keeps_approle_credentials_on_pve()
     test_ssh_access_credentials_are_pve_only()

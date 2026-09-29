@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import shlex
 from pathlib import Path
 
@@ -170,6 +172,39 @@ def sign_ssh_client_key(node: str, public_key: str) -> str:
             "PVE/OpenBao не вернул корректный SSH-сертификат клиента"
         )
     return certificate
+
+def sign_ssh_host_key(
+    node: str,
+    public_key: str,
+    *,
+    principals: list[str],
+) -> str:
+    """Подписать открытый host key через PVE-only доступ OpenBao."""
+    normalized = public_key.strip()
+    if not normalized.startswith("ssh-ed25519 "):
+        raise InfraManagerError(
+            "Для подписи SSH-сервера ожидается открытый ключ Ed25519"
+        )
+    payload = json.dumps(
+        {
+            "public_key": normalized,
+            "principals": principals,
+        },
+        separators=(",", ":"),
+    )
+    result = _ssh_with_input(
+        node,
+        str(OPENBAO_HOST_COMMAND),
+        "--sign-host-key",
+        input_text=payload + "\n",
+    )
+    certificate = result.stdout.strip()
+    if not certificate.startswith("ssh-ed25519-cert-v01@openssh.com "):
+        raise InfraManagerError(
+            "PVE/OpenBao не вернул корректный SSH-сертификат сервера"
+        )
+    return certificate
+
 
 def _features_from_config(config: str) -> dict[str, str]:
     """Разобрать строку features из pct config."""

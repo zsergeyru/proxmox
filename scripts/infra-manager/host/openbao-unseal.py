@@ -707,6 +707,185 @@ finally:
 """
 
 
+CONFIGURE_HOST_SIGNING_ROLE_CODE = r"""
+import json
+import sys
+import urllib.request
+
+BASE = "http://127.0.0.1:8200"
+credentials = json.loads(sys.stdin.read())
+role_id = credentials.get("role_id") if isinstance(credentials, dict) else None
+secret_id = credentials.get("secret_id") if isinstance(credentials, dict) else None
+if not isinstance(role_id, str) or not role_id:
+    raise SystemExit("missing RoleID")
+if not isinstance(secret_id, str) or not secret_id:
+    raise SystemExit("missing SecretID")
+
+
+def request(method, path, payload=None, *, token=None):
+    data = None
+    headers = {"Content-Type": "application/json"}
+    if token:
+        headers["X-Vault-Token"] = token
+    if payload is not None:
+        data = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+    req = urllib.request.Request(
+        f"{BASE}{path}",
+        data=data,
+        headers=headers,
+        method=method,
+    )
+    with urllib.request.urlopen(req, timeout=30) as response:
+        raw = response.read()
+    return json.loads(raw.decode("utf-8")) if raw else {}
+
+
+login = request(
+    "POST",
+    "/v1/auth/infra-manager/login",
+    {"role_id": role_id, "secret_id": secret_id},
+)
+auth = login.get("auth")
+token = auth.get("client_token") if isinstance(auth, dict) else None
+if not isinstance(token, str) or not token:
+    raise SystemExit("OpenBao did not return config token")
+
+try:
+    request(
+        "POST",
+        "/v1/ssh-host-signer/roles/managed-host",
+        {
+            "key_type": "ca",
+            "algorithm_signer": "rsa-sha2-256",
+            "allow_user_certificates": False,
+            "allow_host_certificates": True,
+            "allow_bare_domains": True,
+            "key_id_format": "infra-manager-host-{{public_key_hash}}",
+            "ttl": "720h",
+        },
+        token=token,
+    )
+    role = request(
+        "GET",
+        "/v1/ssh-host-signer/roles/managed-host",
+        token=token,
+    ).get("data")
+    if not isinstance(role, dict):
+        raise SystemExit("OpenBao did not return host signing role")
+    if role.get("key_type") != "ca":
+        raise SystemExit("host signing role has unexpected key_type")
+    if role.get("allow_host_certificates") is not True:
+        raise SystemExit("host signing role does not allow host certificates")
+    if role.get("allow_user_certificates") is True:
+        raise SystemExit("host signing role unexpectedly allows user certificates")
+    if role.get("allow_bare_domains") is not True:
+        raise SystemExit("host signing role does not allow explicit bare principals")
+    if role.get("key_id_format") != "infra-manager-host-{{public_key_hash}}":
+        raise SystemExit("host signing role has unexpected key_id_format")
+    print(json.dumps({"ready": True}, separators=(",", ":")))
+finally:
+    request(
+        "POST",
+        "/v1/auth/token/revoke-self",
+        token=token,
+    )
+"""
+
+
+SIGN_HOST_KEY_CODE = r"""
+import json
+import sys
+import urllib.error
+import urllib.request
+
+BASE = "http://127.0.0.1:8200"
+payload = json.loads(sys.stdin.read())
+if not isinstance(payload, dict):
+    raise SystemExit("invalid host signing payload")
+credentials = payload.get("credentials")
+public_key = payload.get("public_key")
+principals = payload.get("principals")
+if not isinstance(credentials, dict):
+    raise SystemExit("missing signer credentials")
+if not isinstance(public_key, str) or not public_key.startswith("ssh-ed25519 "):
+    raise SystemExit("invalid SSH host public key")
+if (
+    not isinstance(principals, list)
+    or not principals
+    or any(not isinstance(item, str) or not item for item in principals)
+):
+    raise SystemExit("invalid SSH host principals")
+role_id = credentials.get("role_id")
+secret_id = credentials.get("secret_id")
+if not isinstance(role_id, str) or not role_id:
+    raise SystemExit("missing RoleID")
+if not isinstance(secret_id, str) or not secret_id:
+    raise SystemExit("missing SecretID")
+
+
+def request(method, path, body=None, *, token=None):
+    data = None
+    headers = {"Content-Type": "application/json"}
+    if token:
+        headers["X-Vault-Token"] = token
+    if body is not None:
+        data = json.dumps(body, separators=(",", ":")).encode("utf-8")
+    req = urllib.request.Request(
+        f"{BASE}{path}",
+        data=data,
+        headers=headers,
+        method=method,
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as response:
+            raw = response.read()
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace").strip()
+        raise RuntimeError(
+            f"{method} {path} returned HTTP {exc.code}: {detail}"
+        ) from exc
+    return json.loads(raw.decode("utf-8")) if raw else {}
+
+
+login = request(
+    "POST",
+    "/v1/auth/infra-manager/login",
+    {"role_id": role_id, "secret_id": secret_id},
+)
+auth = login.get("auth")
+token = auth.get("client_token") if isinstance(auth, dict) else None
+if not isinstance(token, str) or not token:
+    raise SystemExit("OpenBao did not return signer token")
+
+try:
+    signed = request(
+        "POST",
+        "/v1/ssh-host-signer/sign/managed-host",
+        {
+            "cert_type": "host",
+            "public_key": public_key,
+            "valid_principals": ",".join(principals),
+            "ttl": "720h",
+        },
+        token=token,
+    )
+    data = signed.get("data")
+    certificate = data.get("signed_key") if isinstance(data, dict) else None
+    if (
+        not isinstance(certificate, str)
+        or not certificate.startswith("ssh-ed25519-cert-v01@openssh.com ")
+    ):
+        raise SystemExit("OpenBao did not return an Ed25519 SSH host certificate")
+    print(certificate.strip())
+finally:
+    request(
+        "POST",
+        "/v1/auth/token/revoke-self",
+        token=token,
+    )
+"""
+
+
 CHECK_SSH_ACCESS_CODE = r"""
 import json
 import sys
@@ -1284,6 +1463,73 @@ def sign_client_public_key(public_key: str) -> str:
     return certificate
 
 
+
+def ensure_host_signing_role() -> None:
+    credentials = read_ssh_access_credentials()
+    config_access = credentials.get("ssh-ca-config")
+    result = pct_exec(
+        "python3",
+        "-c",
+        CONFIGURE_HOST_SIGNING_ROLE_CODE,
+        capture=True,
+        input_text=json.dumps(config_access, separators=(",", ":")),
+    )
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise OpenBaoHostError(
+            "OpenBao вернул некорректный результат настройки роли host-подписи"
+        ) from exc
+    if payload != {"ready": True}:
+        raise OpenBaoHostError(
+            "Роль подписи SSH-серверов managed-host не прошла проверку"
+        )
+    print("[ОК] Роль подписи SSH-серверов managed-host настроена")
+
+
+def sign_host_public_key(public_key: str, principals: list[str]) -> str:
+    normalized = public_key.strip()
+    if not normalized.startswith("ssh-ed25519 "):
+        raise OpenBaoHostError(
+            "Для подписи SSH-сервера ожидается открытый ключ Ed25519"
+        )
+    cleaned = []
+    for principal in principals:
+        value = principal.strip()
+        if (
+            not value
+            or "," in value
+            or any(character.isspace() for character in value)
+        ):
+            raise OpenBaoHostError("Некорректный principal SSH-сервера")
+        cleaned.append(value)
+    if not cleaned:
+        raise OpenBaoHostError("Не заданы principals SSH-сервера")
+
+    credentials = read_ssh_access_credentials()
+    signer_access = credentials.get("ssh-signer")
+    request_payload = json.dumps(
+        {
+            "credentials": signer_access,
+            "public_key": normalized,
+            "principals": cleaned,
+        },
+        separators=(",", ":"),
+    )
+    result = pct_exec(
+        "python3",
+        "-c",
+        SIGN_HOST_KEY_CODE,
+        capture=True,
+        input_text=request_payload,
+    )
+    certificate = result.stdout.strip()
+    if not certificate.startswith("ssh-ed25519-cert-v01@openssh.com "):
+        raise OpenBaoHostError(
+            "OpenBao вернул некорректный SSH-сертификат сервера"
+        )
+    return certificate
+
 def check_ssh_access() -> None:
     if not SSH_ACCESS_PATH.is_file() or SSH_ACCESS_PATH.stat().st_size == 0:
         raise OpenBaoHostError(
@@ -1410,6 +1656,7 @@ def ensure_existing_openbao_ssh() -> None:
     if ssh_cas_ready() and SSH_ACCESS_PATH.is_file() and client_ca_published():
         check_ssh_access()
         ensure_client_signing_role()
+        ensure_host_signing_role()
         print("[ОК] SSH-центры, служебный доступ и открытый ключ OpenBao уже готовы")
         return
 
@@ -1422,6 +1669,7 @@ def ensure_existing_openbao_ssh() -> None:
             configure_ssh_access(root_token)
         publish_client_ca(root_token)
         ensure_client_signing_role()
+        ensure_host_signing_role()
     finally:
         revoke_temporary_root_token(root_token)
         del root_token
@@ -1483,6 +1731,7 @@ def initialize() -> None:
         configure_ssh_access(root_token)
         publish_client_ca(root_token)
         ensure_client_signing_role()
+        ensure_host_signing_role()
     finally:
         revoke_initial_root_token(root_token)
         del root_token
@@ -1515,6 +1764,11 @@ def main() -> int:
         action="store_true",
         help="Подписать переданный через stdin открытый ключ SSH-клиента",
     )
+    mode.add_argument(
+        "--sign-host-key",
+        action="store_true",
+        help="Подписать переданный через stdin открытый ключ SSH-сервера",
+    )
     args = parser.parse_args()
 
     if os.geteuid() != 0:
@@ -1531,6 +1785,18 @@ def main() -> int:
                 raise OpenBaoHostError("OpenBao запечатан; подпись SSH невозможна")
             public_key = __import__("sys").stdin.read()
             print(sign_client_public_key(public_key))
+        elif args.sign_host_key:
+            status = read_status(wait=False)
+            if status.get("sealed") is not False:
+                raise OpenBaoHostError("OpenBao запечатан; подпись SSH невозможна")
+            request_payload = json.loads(__import__("sys").stdin.read())
+            if not isinstance(request_payload, dict):
+                raise OpenBaoHostError("Некорректный запрос подписи SSH-сервера")
+            public_key = request_payload.get("public_key")
+            principals = request_payload.get("principals")
+            if not isinstance(public_key, str) or not isinstance(principals, list):
+                raise OpenBaoHostError("Неполный запрос подписи SSH-сервера")
+            print(sign_host_public_key(public_key, principals))
         else:
             unseal()
     return 0
