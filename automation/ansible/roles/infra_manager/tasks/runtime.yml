@@ -182,4 +182,3 @@
       - --remove-orphans
   changed_when: true
   when: not (infra_self_update | default(false) | bool)
-

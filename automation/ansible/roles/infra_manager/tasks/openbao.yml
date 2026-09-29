@@ -51,4 +51,3 @@
   failed_when:
     - openbao_unsealed_status.json.initialized | bool
     - openbao_unsealed_status.json.sealed | bool
-
