@@ -6,7 +6,9 @@ from __future__ import annotations
 import argparse
 import fcntl
 import json
+import hashlib
 import os
+import shutil
 import subprocess
 import tempfile
 import time
@@ -17,6 +19,8 @@ OPENBAO_URL = "http://127.0.0.1:8200"
 KEY_DIR = Path("/mnt/bindmounts/infra-manager/pve-only/openbao")
 KEY_PATH = KEY_DIR / "unseal.key"
 SSH_ACCESS_PATH = KEY_DIR / "ssh-access.json"
+OPENBAO_STATE_DIR = Path("/mnt/bindmounts/infra-manager/state/openbao")
+OPENBAO_BACKUP_DIR = KEY_DIR / "backups"
 LOCK_PATH = Path("/run/lock/infra-manager-openbao-unseal.lock")
 CT_RUNTIME_DIR = Path("/run/infra-manager")
 CT_KEY_PATH = CT_RUNTIME_DIR / "openbao-unseal.key"
@@ -783,17 +787,100 @@ def configure_ssh_cas(token: str) -> None:
         )
 
 
+def _tree_digest(root: Path) -> str:
+    digest = hashlib.sha256()
+    for path in sorted(item for item in root.rglob("*") if item.is_file()):
+        digest.update(str(path.relative_to(root)).encode("utf-8"))
+        digest.update(b"\0")
+        with path.open("rb") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(chunk)
+    return digest.hexdigest()
+
+
+def backup_legacy_openbao() -> Path:
+    if not OPENBAO_STATE_DIR.is_dir():
+        raise OpenBaoHostError(
+            f"Не найден каталог состояния OpenBao: {OPENBAO_STATE_DIR}"
+        )
+    if not KEY_PATH.is_file() or KEY_PATH.stat().st_size == 0:
+        raise OpenBaoHostError(
+            f"Не найден ключ разблокировки OpenBao: {KEY_PATH}"
+        )
+
+    OPENBAO_BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+    os.chmod(OPENBAO_BACKUP_DIR, 0o700)
+
+    existing = sorted(
+        path
+        for path in OPENBAO_BACKUP_DIR.glob("pre-ssh-ca-*")
+        if path.is_dir() and (path / "verified").is_file()
+    )
+    if existing:
+        print(f"[ОК] Резервная копия старого OpenBao уже есть: {existing[-1]}")
+        return existing[-1]
+
+    stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+    target = OPENBAO_BACKUP_DIR / f"pre-ssh-ca-{stamp}"
+    if target.exists():
+        raise OpenBaoHostError(f"Каталог резервной копии уже существует: {target}")
+
+    running = pct_exec(
+        "docker",
+        "inspect",
+        "-f",
+        "{{.State.Running}}",
+        "openbao",
+        capture=True,
+        check=False,
+    )
+    was_running = running.returncode == 0 and running.stdout.strip() == "true"
+
+    try:
+        if was_running:
+            pct_exec("docker", "stop", "openbao", capture=True)
+
+        source_digest = _tree_digest(OPENBAO_STATE_DIR)
+        target.mkdir(mode=0o700)
+        state_target = target / "state"
+        shutil.copytree(OPENBAO_STATE_DIR, state_target, copy_function=shutil.copy2)
+        shutil.copy2(KEY_PATH, target / "unseal.key")
+        os.chmod(target / "unseal.key", 0o600)
+        if SSH_ACCESS_PATH.is_file():
+            shutil.copy2(SSH_ACCESS_PATH, target / "ssh-access.json")
+            os.chmod(target / "ssh-access.json", 0o600)
+
+        if _tree_digest(state_target) != source_digest:
+            raise OpenBaoHostError("Резервная копия OpenBao не прошла проверку")
+
+        (target / "verified").write_text(
+            f"sha256={source_digest}\n",
+            encoding="utf-8",
+        )
+        os.chmod(target / "verified", 0o600)
+    except Exception:
+        shutil.rmtree(target, ignore_errors=True)
+        raise
+    finally:
+        if was_running:
+            pct_exec("docker", "start", "openbao", capture=True)
+            unseal()
+
+    print(f"[ОК] Старый OpenBao сохранён перед миграцией: {target}")
+    return target
+
+
 def ensure_ssh_cas(root_token: str | None = None) -> None:
     if ssh_cas_ready():
         print("[ОК] Два SSH-центра доверия OpenBao уже готовы")
         return
 
     if root_token is None:
+        backup = backup_legacy_openbao()
         raise OpenBaoHostError(
-            "OpenBao уже инициализирован без SSH-центров доверия. "
-            "OpenBao 2.7 не разрешает безопасно выпустить новый root token "
-            "только по unseal-ключу; требуется явная миграция или "
-            "переинициализация пустого хранилища"
+            "OpenBao инициализирован старой схемой без SSH-центров доверия. "
+            f"Проверенная резервная копия сохранена: {backup}. "
+            "Следующий шаг — явная переинициализация этого старого хранилища."
         )
 
     configure_ssh_cas(root_token)
