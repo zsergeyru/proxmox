@@ -503,8 +503,14 @@ def test_resume_unfinished_initial_state() -> None:
         expected_prefix,
         "Незавершённая установка должна сначала обнаружить state 990",
     )
-    if "deploy:infrastructure" not in host.events:
-        raise AssertionError("Незавершённая установка должна продолжить OpenTofu state")
+    if "deploy:infrastructure" in host.events:
+        raise AssertionError(
+            "Уже созданный 910 не должен повторно проходить OpenTofu plan/apply"
+        )
+    if "deploy:base" not in host.events or "deploy:provision" not in host.events:
+        raise AssertionError(
+            "После восстановления mount point настройка должна продолжиться с Ansible"
+        )
     if "ensure_runner_ssh" not in host.events:
         raise AssertionError(
             "Перед Ansible незавершённая установка должна восстановить SSH-доступ 990"
@@ -537,6 +543,10 @@ def test_resume_unfinished_with_layout_already_attached() -> None:
     if "attach_layout" in host.events:
         raise AssertionError(
             "Уже подключённая новая схема не должна подключаться повторно"
+        )
+    if "deploy:infrastructure" in host.events:
+        raise AssertionError(
+            "Повторный запуск с готовыми mount point не должен делать OpenTofu apply"
         )
 
 
