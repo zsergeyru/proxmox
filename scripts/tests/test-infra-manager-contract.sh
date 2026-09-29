@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 ANSIBLE_PLAYBOOK="$ROOT/automation/ansible/playbooks/configure-guest.yml"
-ANSIBLE_DOCKER="$ROOT/automation/ansible/tasks/configure-docker.yml"
+ANSIBLE_DOCKER="$ROOT/automation/ansible/roles/docker/tasks/main.yml"
 ANSIBLE_RUNTIME="$ROOT/automation/ansible/tasks/configure-infra-runtime.yml"
 PY_SETTINGS="$ROOT/scripts/infra-manager/infra_manager/settings.py"
 PY_SEMAPHORE="$ROOT/scripts/infra-manager/infra_manager/semaphore.py"
@@ -287,8 +287,10 @@ PY
 if grep -q '"setup"' "$ROOT/scripts/infra-manager/infra_manager/cli.py"; then
     die "CLI не должен содержать отдельную команду setup"
 fi
-grep -q 'configure-docker.yml' "$ANSIBLE_PLAYBOOK" \
-    || die "Общий Ansible playbook должен подключать настройку Docker"
+grep -q 'ansible.builtin.include_role:' "$ANSIBLE_PLAYBOOK" \
+    || die "Общий Ansible playbook должен использовать роли"
+grep -q 'name: docker' "$ANSIBLE_PLAYBOOK" \
+    || die "Общий Ansible playbook должен подключать роль Docker"
 grep -q 'configure-infra-runtime.yml' "$ANSIBLE_PLAYBOOK" \
     || die "Общий Ansible playbook должен подключать настройку infra-runtime"
 grep -q 'provision.system.required_packages' "$ANSIBLE_PLAYBOOK" \

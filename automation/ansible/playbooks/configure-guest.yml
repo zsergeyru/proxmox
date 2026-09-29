@@ -56,7 +56,8 @@
 
 
     - name: Настроить Docker
-      ansible.builtin.include_tasks: ../tasks/configure-docker.yml
+      ansible.builtin.include_role:
+        name: docker
       when:
         - (provision_phase | default('full')) == "full"
         - provision.docker is defined

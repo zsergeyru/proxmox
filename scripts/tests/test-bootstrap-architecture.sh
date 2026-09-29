@@ -58,7 +58,7 @@ grep -q -- '--provision-only' "$BOOTSTRAP_DIR/deploy-910.sh"     || die "990 д�
 grep -q -- '--provision-existing-only' "$BOOTSTRAP_DIR/deploy-910.sh"     || die "990 должен уметь обновлять существующий 910 без собственного state"
 grep -q -- '--bootstrap-scope' "$BOOTSTRAP_DIR/deploy-910.sh"     || die "910 должен оставаться в отдельной bootstrap-области состояния"
 
-grep -q 'configure-docker.yml' "$PLAYBOOK"     || die "Общий playbook должен подключать общий модуль Docker"
+grep -q 'name: docker' "$PLAYBOOK"     || die "Общий playbook должен подключать общую роль Docker"
 grep -q 'configure-infra-runtime.yml' "$PLAYBOOK"     || die "Общий playbook должен подключать модуль infra-runtime по provision.yaml"
 
 printf '[ОК] Единый Ansible-путь 910 зафиксирован\n'
