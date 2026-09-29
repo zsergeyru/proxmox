@@ -393,6 +393,74 @@ def test_ssh_access_contract_is_narrow() -> None:
         fail("Служебные токены OpenBao должны работать только локально")
 
 
+def test_client_signing_role_is_restricted_to_root() -> None:
+    host = load_host_module()
+    code = host.CONFIGURE_CLIENT_SIGNING_ROLE_CODE
+    required = (
+        '"allow_user_certificates": True',
+        '"allow_host_certificates": False',
+        '"allowed_users": "root"',
+        '"default_user": "root"',
+        '"ttl": "15m"',
+        '"algorithm_signer": "rsa-sha2-256"',
+    )
+    for item in required:
+        if item not in code:
+            fail(f"Роль клиентской подписи не содержит ограничение: {item}")
+    if "/v1/ssh-client-signer/roles/infra-manager" not in code:
+        fail("Не настроена отдельная роль SSH-подписи infra-manager")
+
+
+def test_client_signing_keeps_approle_credentials_on_pve() -> None:
+    host = load_host_module()
+    credentials = {
+        "ssh-ca-config": {"role_id": "role-a", "secret_id": "secret-a"},
+        "ssh-signer": {"role_id": "role-b", "secret_id": "secret-b"},
+    }
+    calls: list[tuple[tuple[str, ...], str | None]] = []
+
+    def fake_pct_exec(
+        *args: str,
+        capture: bool = False,
+        check: bool = True,
+        input_text: str | None = None,
+    ):
+        del capture, check
+        calls.append((tuple(args), input_text))
+        if args[:2] == ("python3", "-c") and args[2] == host.SIGN_CLIENT_KEY_CODE:
+            return SimpleNamespace(
+                returncode=0,
+                stdout="ssh-ed25519-cert-v01@openssh.com AAAATEST\n",
+                stderr="",
+            )
+        return SimpleNamespace(
+            returncode=0,
+            stdout='{"ready":true}\n',
+            stderr="",
+        )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        access = Path(tmp) / "ssh-access.json"
+        access.write_text(json.dumps(credentials), encoding="utf-8")
+        with (
+            patch.object(host, "SSH_ACCESS_PATH", access),
+            patch.object(host, "pct_exec", side_effect=fake_pct_exec),
+        ):
+            host.ensure_client_signing_role()
+            certificate = host.sign_client_public_key(
+                "ssh-ed25519 AAAAPUBLIC temp"
+            )
+
+    if not certificate.startswith("ssh-ed25519-cert-v01@openssh.com "):
+        fail("Подписанный SSH-сертификат потерян")
+    for argv, input_text in calls:
+        command = " ".join(argv)
+        if "secret-a" in command or "secret-b" in command:
+            fail("SecretID попал в argv при работе с OpenBao")
+        if input_text is None:
+            fail("AppRole данные должны передаваться в LXC только через stdin")
+
+
 def test_ssh_access_credentials_are_pve_only() -> None:
     host = load_host_module()
     credentials = {
@@ -445,6 +513,8 @@ def main() -> None:
     test_client_ca_publication_uses_only_public_key()
     test_ssh_ca_mounts_are_separate()
     test_ssh_access_contract_is_narrow()
+    test_client_signing_role_is_restricted_to_root()
+    test_client_signing_keeps_approle_credentials_on_pve()
     test_ssh_access_credentials_are_pve_only()
     test_stale_key_is_not_overwritten()
     print("[ОК] Проверки OpenBao пройдены")

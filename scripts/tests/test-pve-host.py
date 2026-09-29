@@ -202,12 +202,46 @@ def test_openbao_host_support() -> None:
         )
 
 
+def test_sign_ssh_client_key() -> None:
+    calls: list[tuple[tuple[str, ...], str]] = []
+
+    def fake_input(
+        node: str,
+        *command: str,
+        input_text: str,
+    ):
+        assert node == "pve"
+        calls.append((tuple(command), input_text))
+        return SimpleNamespace(
+            returncode=0,
+            stdout="ssh-ed25519-cert-v01@openssh.com AAAATEST\n",
+        )
+
+    with patch.object(module, "_ssh_with_input", side_effect=fake_input):
+        certificate = module.sign_ssh_client_key(
+            "pve",
+            "ssh-ed25519 AAAAPUBLIC temporary",
+        )
+
+    assert certificate == "ssh-ed25519-cert-v01@openssh.com AAAATEST"
+    assert calls == [
+        (
+            (
+                "/usr/local/sbin/infra-manager-openbao-unseal",
+                "--sign-client-key",
+            ),
+            "ssh-ed25519 AAAAPUBLIC temporary\n",
+        )
+    ]
+
+
 def main() -> None:
     test_feature_parser()
     test_container_host_reconcile()
     test_container_host_noop()
     test_infra_self_access()
     test_openbao_host_support()
+    test_sign_ssh_client_key()
     print("[ОК] Проверки pve_host.py пройдены")
 
 

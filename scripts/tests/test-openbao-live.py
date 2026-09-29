@@ -7,6 +7,7 @@ import importlib.util
 import json
 import subprocess
 import sys
+import tempfile
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -144,6 +145,69 @@ def main() -> None:
     if access_status != {"ssh-ca-config": True, "ssh-signer": True}:
         fail(f"Некорректный служебный доступ OpenBao: {access_status!r}")
 
+    config_result = json.loads(
+        run_code(
+            host.CONFIGURE_CLIENT_SIGNING_ROLE_CODE,
+            input_text=json.dumps(
+                access["ssh-ca-config"],
+                separators=(",", ":"),
+            ),
+        )
+    )
+    if config_result != {"ready": True}:
+        fail(f"Роль клиентской SSH-подписи не готова: {config_result!r}")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        identity = Path(tmp) / "ansible_ed25519"
+        generated = subprocess.run(
+            [
+                "ssh-keygen",
+                "-q",
+                "-t",
+                "ed25519",
+                "-N",
+                "",
+                "-f",
+                str(identity),
+                "-C",
+                "infra-manager-live-test",
+            ],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+        if generated.returncode:
+            fail("Не удалось создать временный SSH-ключ: " + generated.stderr.strip())
+        public_key = identity.with_suffix(".pub").read_text(
+            encoding="utf-8"
+        ).strip()
+        certificate = run_code(
+            host.SIGN_CLIENT_KEY_CODE,
+            input_text=json.dumps(
+                {
+                    "credentials": access["ssh-signer"],
+                    "public_key": public_key,
+                },
+                separators=(",", ":"),
+            ),
+        )
+        certificate_path = Path(str(identity) + "-cert.pub")
+        certificate_path.write_text(certificate + "\n", encoding="utf-8")
+        inspected = subprocess.run(
+            ["ssh-keygen", "-L", "-f", str(certificate_path)],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+        if inspected.returncode:
+            fail("OpenSSH не принял сертификат OpenBao: " + inspected.stderr.strip())
+        if "Key ID: \"infra-manager-ansible\"" not in inspected.stdout:
+            fail("SSH-сертификат получил неожиданный Key ID")
+        if "Principals:" not in inspected.stdout or "root" not in inspected.stdout:
+            fail("SSH-сертификат не ограничен principal root")
+
     revoked_token = initial_root
     run_code(host.REVOKE_ROOT_CODE, input_text=initial_root)
     initial_root = ""
@@ -192,6 +256,7 @@ def main() -> None:
 
     print("[ОК] Временный root-токен OpenBao выпущен и отозван")
     print("[ОК] Два SSH-центра OpenBao проверены на настоящем сервере")
+    print("[ОК] Временный SSH-сертификат OpenBao реально подписан и проверен")
 
 
 if __name__ == "__main__":

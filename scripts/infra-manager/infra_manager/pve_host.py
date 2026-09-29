@@ -152,6 +152,25 @@ def trigger_openbao_unseal(node: str) -> None:
     """Запустить идемпотентную разблокировку OpenBao через PVE."""
     _ssh(node, str(OPENBAO_HOST_COMMAND))
 
+
+def sign_ssh_client_key(node: str, public_key: str) -> str:
+    """Подписать временный открытый SSH-ключ через PVE-only доступ OpenBao."""
+    normalized = public_key.strip()
+    if not normalized.startswith("ssh-ed25519 "):
+        raise InfraManagerError("Для подписи ожидается открытый ключ Ed25519")
+    result = _ssh_with_input(
+        node,
+        str(OPENBAO_HOST_COMMAND),
+        "--sign-client-key",
+        input_text=normalized + "\n",
+    )
+    certificate = result.stdout.strip()
+    if not certificate.startswith("ssh-ed25519-cert-v01@openssh.com "):
+        raise InfraManagerError(
+            "PVE/OpenBao не вернул корректный SSH-сертификат клиента"
+        )
+    return certificate
+
 def _features_from_config(config: str) -> dict[str, str]:
     """Разобрать строку features из pct config."""
     line = next(

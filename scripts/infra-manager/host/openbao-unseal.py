@@ -519,6 +519,169 @@ for role_name, policy_name, token_ttl, token_max_ttl in roles:
 print(json.dumps(credentials, separators=(",", ":")))
 """
 
+CONFIGURE_CLIENT_SIGNING_ROLE_CODE = r"""
+import json
+import sys
+import urllib.request
+
+BASE = "http://127.0.0.1:8200"
+credentials = json.loads(sys.stdin.read())
+role_id = credentials.get("role_id") if isinstance(credentials, dict) else None
+secret_id = credentials.get("secret_id") if isinstance(credentials, dict) else None
+if not isinstance(role_id, str) or not role_id:
+    raise SystemExit("missing RoleID")
+if not isinstance(secret_id, str) or not secret_id:
+    raise SystemExit("missing SecretID")
+
+
+def request(method, path, payload=None, *, token=None):
+    data = None
+    headers = {"Content-Type": "application/json"}
+    if token:
+        headers["X-Vault-Token"] = token
+    if payload is not None:
+        data = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+    req = urllib.request.Request(
+        f"{BASE}{path}",
+        data=data,
+        headers=headers,
+        method=method,
+    )
+    with urllib.request.urlopen(req, timeout=30) as response:
+        raw = response.read()
+    return json.loads(raw.decode("utf-8")) if raw else {}
+
+
+login = request(
+    "POST",
+    "/v1/auth/infra-manager/login",
+    {"role_id": role_id, "secret_id": secret_id},
+)
+auth = login.get("auth")
+token = auth.get("client_token") if isinstance(auth, dict) else None
+if not isinstance(token, str) or not token:
+    raise SystemExit("OpenBao did not return config token")
+
+try:
+    request(
+        "POST",
+        "/v1/ssh-client-signer/roles/infra-manager",
+        {
+            "key_type": "ca",
+            "algorithm_signer": "rsa-sha2-256",
+            "allow_user_certificates": True,
+            "allow_host_certificates": False,
+            "allowed_users": "root",
+            "default_user": "root",
+            "ttl": "15m",
+        },
+        token=token,
+    )
+    role = request(
+        "GET",
+        "/v1/ssh-client-signer/roles/infra-manager",
+        token=token,
+    ).get("data")
+    if not isinstance(role, dict):
+        raise SystemExit("OpenBao did not return client signing role")
+    if role.get("key_type") != "ca":
+        raise SystemExit("client signing role has unexpected key_type")
+    if role.get("allow_user_certificates") is not True:
+        raise SystemExit("client signing role does not allow user certificates")
+    if role.get("allow_host_certificates") is True:
+        raise SystemExit("client signing role unexpectedly allows host certificates")
+    if role.get("default_user") != "root":
+        raise SystemExit("client signing role has unexpected default_user")
+    print(json.dumps({"ready": True}, separators=(",", ":")))
+finally:
+    request(
+        "POST",
+        "/v1/auth/token/revoke-self",
+        token=token,
+    )
+"""
+
+
+SIGN_CLIENT_KEY_CODE = r"""
+import json
+import sys
+import urllib.request
+
+BASE = "http://127.0.0.1:8200"
+payload = json.loads(sys.stdin.read())
+if not isinstance(payload, dict):
+    raise SystemExit("invalid signing payload")
+credentials = payload.get("credentials")
+public_key = payload.get("public_key")
+if not isinstance(credentials, dict):
+    raise SystemExit("missing signer credentials")
+if not isinstance(public_key, str) or not public_key.startswith("ssh-ed25519 "):
+    raise SystemExit("invalid SSH public key")
+role_id = credentials.get("role_id")
+secret_id = credentials.get("secret_id")
+if not isinstance(role_id, str) or not role_id:
+    raise SystemExit("missing RoleID")
+if not isinstance(secret_id, str) or not secret_id:
+    raise SystemExit("missing SecretID")
+
+
+def request(method, path, body=None, *, token=None):
+    data = None
+    headers = {"Content-Type": "application/json"}
+    if token:
+        headers["X-Vault-Token"] = token
+    if body is not None:
+        data = json.dumps(body, separators=(",", ":")).encode("utf-8")
+    req = urllib.request.Request(
+        f"{BASE}{path}",
+        data=data,
+        headers=headers,
+        method=method,
+    )
+    with urllib.request.urlopen(req, timeout=30) as response:
+        raw = response.read()
+    return json.loads(raw.decode("utf-8")) if raw else {}
+
+
+login = request(
+    "POST",
+    "/v1/auth/infra-manager/login",
+    {"role_id": role_id, "secret_id": secret_id},
+)
+auth = login.get("auth")
+token = auth.get("client_token") if isinstance(auth, dict) else None
+if not isinstance(token, str) or not token:
+    raise SystemExit("OpenBao did not return signer token")
+
+try:
+    signed = request(
+        "POST",
+        "/v1/ssh-client-signer/sign/infra-manager",
+        {
+            "public_key": public_key,
+            "valid_principals": "root",
+            "ttl": "15m",
+            "key_id": "infra-manager-ansible",
+        },
+        token=token,
+    )
+    data = signed.get("data")
+    certificate = data.get("signed_key") if isinstance(data, dict) else None
+    if (
+        not isinstance(certificate, str)
+        or not certificate.startswith("ssh-ed25519-cert-v01@openssh.com ")
+    ):
+        raise SystemExit("OpenBao did not return an Ed25519 SSH certificate")
+    print(certificate.strip())
+finally:
+    request(
+        "POST",
+        "/v1/auth/token/revoke-self",
+        token=token,
+    )
+"""
+
+
 CHECK_SSH_ACCESS_CODE = r"""
 import json
 import sys
@@ -1025,6 +1188,77 @@ def ensure_ssh_cas(root_token: str | None = None) -> None:
     print("[ОК] Два SSH-центра доверия OpenBao созданы")
 
 
+def read_ssh_access_credentials() -> dict[str, object]:
+    if not SSH_ACCESS_PATH.is_file() or SSH_ACCESS_PATH.stat().st_size == 0:
+        raise OpenBaoHostError(
+            f"Не найдены служебные данные доступа OpenBao: {SSH_ACCESS_PATH}"
+        )
+    try:
+        payload = json.loads(SSH_ACCESS_PATH.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise OpenBaoHostError(
+            "Служебные данные доступа OpenBao содержат некорректный JSON"
+        ) from exc
+    required = {"ssh-ca-config", "ssh-signer"}
+    if not isinstance(payload, dict) or set(payload) != required:
+        raise OpenBaoHostError(
+            "Служебные данные доступа OpenBao имеют некорректный состав"
+        )
+    return payload
+
+
+def ensure_client_signing_role() -> None:
+    credentials = read_ssh_access_credentials()
+    config_access = credentials.get("ssh-ca-config")
+    result = pct_exec(
+        "python3",
+        "-c",
+        CONFIGURE_CLIENT_SIGNING_ROLE_CODE,
+        capture=True,
+        input_text=json.dumps(config_access, separators=(",", ":")),
+    )
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise OpenBaoHostError(
+            "OpenBao вернул некорректный результат настройки роли подписи"
+        ) from exc
+    if payload != {"ready": True}:
+        raise OpenBaoHostError(
+            "Роль подписи клиентских SSH-сертификатов не прошла проверку"
+        )
+    print("[ОК] Роль подписи SSH-клиента infra-manager настроена")
+
+
+def sign_client_public_key(public_key: str) -> str:
+    normalized = public_key.strip()
+    if not normalized.startswith("ssh-ed25519 "):
+        raise OpenBaoHostError("Для подписи ожидается открытый ключ Ed25519")
+
+    credentials = read_ssh_access_credentials()
+    signer_access = credentials.get("ssh-signer")
+    request_payload = json.dumps(
+        {
+            "credentials": signer_access,
+            "public_key": normalized,
+        },
+        separators=(",", ":"),
+    )
+    result = pct_exec(
+        "python3",
+        "-c",
+        SIGN_CLIENT_KEY_CODE,
+        capture=True,
+        input_text=request_payload,
+    )
+    certificate = result.stdout.strip()
+    if not certificate.startswith("ssh-ed25519-cert-v01@openssh.com "):
+        raise OpenBaoHostError(
+            "OpenBao вернул некорректный SSH-сертификат клиента"
+        )
+    return certificate
+
+
 def check_ssh_access() -> None:
     if not SSH_ACCESS_PATH.is_file() or SSH_ACCESS_PATH.stat().st_size == 0:
         raise OpenBaoHostError(
@@ -1150,6 +1384,7 @@ finally:
 def ensure_existing_openbao_ssh() -> None:
     if ssh_cas_ready() and SSH_ACCESS_PATH.is_file() and client_ca_published():
         check_ssh_access()
+        ensure_client_signing_role()
         print("[ОК] SSH-центры, служебный доступ и открытый ключ OpenBao уже готовы")
         return
 
@@ -1161,6 +1396,7 @@ def ensure_existing_openbao_ssh() -> None:
         else:
             configure_ssh_access(root_token)
         publish_client_ca(root_token)
+        ensure_client_signing_role()
     finally:
         revoke_temporary_root_token(root_token)
         del root_token
@@ -1221,6 +1457,7 @@ def initialize() -> None:
         ensure_ssh_cas(root_token)
         configure_ssh_access(root_token)
         publish_client_ca(root_token)
+        ensure_client_signing_role()
     finally:
         revoke_initial_root_token(root_token)
         del root_token
@@ -1242,10 +1479,16 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description="Инициализация и разблокировка OpenBao для LXC 910"
     )
-    parser.add_argument(
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument(
         "--initialize",
         action="store_true",
         help="Однократно инициализировать пустой OpenBao перед разблокировкой",
+    )
+    mode.add_argument(
+        "--sign-client-key",
+        action="store_true",
+        help="Подписать переданный через stdin открытый ключ SSH-клиента",
     )
     args = parser.parse_args()
 
@@ -1257,6 +1500,12 @@ def main() -> int:
         fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
         if args.initialize:
             initialize()
+        elif args.sign_client_key:
+            status = read_status(wait=False)
+            if status.get("sealed") is not False:
+                raise OpenBaoHostError("OpenBao запечатан; подпись SSH невозможна")
+            public_key = __import__("sys").stdin.read()
+            print(sign_client_public_key(public_key))
         else:
             unseal()
     return 0
