@@ -63,6 +63,9 @@ class BootstrapHost:
         self.host_openbao_unseal_service = Path(
             "/etc/systemd/system/infra-manager-openbao-unseal.service"
         )
+        self.host_openbao_unseal_timer = Path(
+            "/etc/systemd/system/infra-manager-openbao-unseal.timer"
+        )
 
         # 910 — постоянный управляющий контейнер. В отличие от временного 990
         # он сохраняется между запусками и не входит в постоянный OpenTofu-state.
@@ -1011,10 +1014,12 @@ class BootstrapHost:
             "systemctl",
             "disable",
             "--now",
+            "infra-manager-openbao-unseal.timer",
             "infra-manager-openbao-unseal.service",
             check=False,
             quiet=True,
         )
+        self.host_openbao_unseal_timer.unlink(missing_ok=True)
         self.host_openbao_unseal_service.unlink(missing_ok=True)
         self.host_openbao_unseal_command.unlink(missing_ok=True)
         self.run("systemctl", "daemon-reload", check=False, quiet=True)
