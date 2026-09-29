@@ -252,6 +252,7 @@ required_runtime_fragments = (
     "provision.access.pve.persistent_credential",
     "provision.paths.ansible_identity",
     "provision.paths.semaphore_persistent_data",
+    "provision.paths.opentofu_persistent_state_dir",
     "provision.persistence.target_layout.state.bindings",
     "OPENBAO_VERSION",
     "openbao_seal_status",
@@ -374,6 +375,8 @@ grep -q 'SEMAPHORE_RUNNER_REGISTRATION_TOKEN' "$ANSIBLE_RUNTIME" \
     || die "Ansible должен удалять старый registration token Runner"
 grep -q 'provision.paths.semaphore_persistent_data' "$ANSIBLE_RUNTIME" \
     || die "Ansible должен обслуживать физический каталог постоянного хранилища Semaphore"
+grep -q 'provision.paths.opentofu_persistent_state_dir' "$ANSIBLE_RUNTIME" \
+    || die "Ansible должен заранее создавать физический каталог OpenTofu state"
 if grep -q 'recurse: true' "$ANSIBLE_RUNTIME" && grep -q 'provision.paths.semaphore_data' "$ANSIBLE_RUNTIME"; then
     die "Ansible не должен применять recurse к символической ссылке Semaphore"
 fi

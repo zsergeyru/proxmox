@@ -63,6 +63,14 @@
     mode: "{{ item.mode }}"
   loop: "{{ provision.persistence.target_layout.state.bindings }}"
 
+- name: Создать каталог OpenTofu state
+  ansible.builtin.file:
+    path: "{{ provision.paths.opentofu_persistent_state_dir }}"
+    state: directory
+    owner: "1001"
+    group: "0"
+    mode: "0750"
+
 - name: Подключить постоянное состояние к привычным путям 910
   ansible.builtin.shell: |
     set -eu
