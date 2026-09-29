@@ -153,6 +153,7 @@ persistence:
         - pve-root-ssh-key
         - pve-known-hosts
         - pve-ca
+        - pve-api-credential
 
     state:
       host_path: /mnt/bindmounts/infra-manager/state
