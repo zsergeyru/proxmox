@@ -114,6 +114,7 @@ def test_host_initialization_does_not_print_secrets() -> None:
             patch.object(host, "ensure_ssh_cas") as ensure_cas,
             patch.object(host, "configure_ssh_access") as configure_access,
             patch.object(host, "publish_client_ca") as publish_ca,
+            patch.object(host, "ensure_client_signing_role") as ensure_client_role,
             contextlib.redirect_stdout(output),
         ):
             host.initialize()
@@ -123,6 +124,7 @@ def test_host_initialization_does_not_print_secrets() -> None:
     ensure_cas.assert_called_once_with(root_token)
     configure_access.assert_called_once_with(root_token)
     publish_ca.assert_called_once_with(root_token)
+    ensure_client_role.assert_called_once_with()
     if revoked != [root_token]:
         fail("Initial root token не был передан на self-revoke через stdin")
     text = output.getvalue()
@@ -149,12 +151,14 @@ def test_existing_openbao_skips_root_when_ready() -> None:
             patch.object(host, "ssh_cas_ready", return_value=True),
             patch.object(host, "client_ca_published", return_value=True),
             patch.object(host, "check_ssh_access") as check_access,
+            patch.object(host, "ensure_client_signing_role") as ensure_client_role,
             patch.object(host, "generate_temporary_root_token") as generate_root,
         ):
             host.initialize()
 
     unseal.assert_called_once_with()
     check_access.assert_called_once_with()
+    ensure_client_role.assert_called_once_with()
     generate_root.assert_not_called()
 
 
@@ -183,6 +187,7 @@ def test_existing_openbao_bootstraps_missing_ssh_security() -> None:
             patch.object(host, "ensure_ssh_cas") as ensure_cas,
             patch.object(host, "configure_ssh_access") as configure_access,
             patch.object(host, "publish_client_ca") as publish_ca,
+            patch.object(host, "ensure_client_signing_role") as ensure_client_role,
             patch.object(host, "revoke_temporary_root_token") as revoke_root,
         ):
             host.initialize()
@@ -192,6 +197,7 @@ def test_existing_openbao_bootstraps_missing_ssh_security() -> None:
     ensure_cas.assert_called_once_with("TEMP-ROOT-TOKEN")
     configure_access.assert_called_once_with("TEMP-ROOT-TOKEN")
     publish_ca.assert_called_once_with("TEMP-ROOT-TOKEN")
+    ensure_client_role.assert_called_once_with()
     revoke_root.assert_called_once_with("TEMP-ROOT-TOKEN")
 
 
