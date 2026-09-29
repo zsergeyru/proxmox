@@ -282,6 +282,94 @@ def test_infra_ready_uses_status_as_final_screen() -> None:
         raise AssertionError("Финальный экран состояния должен выводиться в консоль")
 
 
+class PersistentAttachHarness(BootstrapHost):
+    def __init__(self, *, fail_mount: bool = False) -> None:
+        super().__init__("apply")
+        self.fail_mount = fail_mount
+        self.running = True
+        self.events: list[str] = []
+
+    def infra_exists(self) -> bool:
+        self.events.append("infra_exists")
+        return True
+
+    def infra_config_is_expected(self) -> bool:
+        self.events.append("infra_expected")
+        return True
+
+    def pct_config(self, ctid: int) -> str:
+        if ctid != self.infra_ctid:
+            raise AssertionError(f"Неожиданный VMID: {ctid}")
+        self.events.append("pct_config")
+        return "protection: 1\n"
+
+    def pct_status(self, ctid: int) -> str:
+        if ctid != self.infra_ctid:
+            raise AssertionError(f"Неожиданный VMID: {ctid}")
+        self.events.append("status")
+        return "running" if self.running else "stopped"
+
+    def pct(self, *args: str, **kwargs):
+        check = kwargs.get("check", True)
+        command = " ".join(args)
+        self.events.append(
+            f"pct:{command}" + (":nocheck" if check is False else "")
+        )
+        if args[:2] == ("stop", str(self.infra_ctid)):
+            self.running = False
+        elif args[:2] == ("start", str(self.infra_ctid)):
+            self.running = True
+        elif "--mp0" in args and self.fail_mount:
+            raise BootstrapError("тестовая ошибка подключения mount point")
+        return SimpleNamespace(returncode=0)
+
+    def verify_persistent_layout(self) -> None:
+        self.events.append("verify_layout")
+
+    def ok(self, message: str) -> None:
+        del message
+        self.events.append("ok")
+
+
+def test_attach_persistent_layout_temporarily_disables_protection() -> None:
+    host = PersistentAttachHarness()
+    host.attach_persistent_layout()
+
+    protection_off = "pct:set 910 --protection 0"
+    mount_event = next(event for event in host.events if "--mp0" in event)
+    protection_on = "pct:set 910 --protection 1"
+
+    if protection_off not in host.events:
+        raise AssertionError("Перед добавлением mount point защита 910 должна сниматься")
+    if protection_on not in host.events:
+        raise AssertionError("После добавления mount point защита 910 должна возвращаться")
+    if host.events.index(protection_off) > host.events.index(mount_event):
+        raise AssertionError("Защита должна сниматься до изменения mount point")
+    if host.events.index(protection_on) < host.events.index(mount_event):
+        raise AssertionError("Защита должна возвращаться после изменения mount point")
+    if not host.running:
+        raise AssertionError("После успешного подключения 910 должен быть запущен")
+    if "verify_layout" not in host.events:
+        raise AssertionError("Новая схема должна проверяться после подключения")
+
+
+def test_attach_persistent_layout_restores_protection_on_failure() -> None:
+    host = PersistentAttachHarness(fail_mount=True)
+    try:
+        host.attach_persistent_layout()
+    except BootstrapError:
+        pass
+    else:
+        raise AssertionError("Ошибка подключения mount point должна передаваться выше")
+
+    if "pct:set 910 --protection 1" not in host.events:
+        raise AssertionError("При ошибке protection=1 должен быть восстановлен")
+    if not host.running:
+        raise AssertionError("При ошибке ранее запущенный 910 должен быть возвращён в работу")
+    if "verify_layout" in host.events:
+        raise AssertionError("Неуспешное подключение не должно считаться проверенным")
+
+
 class ApplyHarness(BootstrapHost):
     def __init__(
         self,
@@ -605,6 +693,8 @@ def main() -> None:
         test_progress_streaming,
         test_ansible_phases_enable_progress,
         test_infra_ready_uses_status_as_final_screen,
+        test_attach_persistent_layout_temporarily_disables_protection,
+        test_attach_persistent_layout_restores_protection_on_failure,
         test_new_install_flow,
         test_existing_without_bootstrap_state,
         test_resume_unfinished_initial_state,
