@@ -208,7 +208,47 @@ jobs:
             and .storage_type == "raft"
           ' /tmp/openbao-status.json
 
+          docker rm -f openbao-test >/dev/null
+
+          compat_config="$(mktemp)"
+          cp infrastructure/guests/910-infra-manager/compose/openbao/openbao.hcl "$compat_config"
+          python3 - "$compat_config" <<'PY'
+          from pathlib import Path
+          import sys
+
+          path = Path(sys.argv[1])
+          text = path.read_text(encoding="utf-8")
+          needle = "  tls_disable     = true\n"
+          if text.count(needle) != 1:
+              raise SystemExit("Не найден однозначный listener OpenBao")
+          if 'address         = "127.0.0.1:8200"' not in text:
+              raise SystemExit("Совместимый generate-root разрешён только на loopback")
+          text = text.replace(
+              needle,
+              "  disable_unauthed_generate_root_endpoints = false\n" + needle,
+              1,
+          )
+          path.write_text(text, encoding="utf-8")
+          PY
+
+          docker run -d \
+            --name openbao-test \
+            --network host \
+            --user 0 \
+            -v "$compat_config:/openbao/config/openbao.hcl:ro" \
+            -v "$data_dir:/openbao/file" \
+            ghcr.io/openbao/openbao:2.7.0 \
+            server
+
+          for _ in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8200/v1/sys/seal-status >/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+
           python3 scripts/tests/test-openbao-live.py
+          rm -f "$compat_config"
 
       - name: Build infra-runtime image
         run: |
