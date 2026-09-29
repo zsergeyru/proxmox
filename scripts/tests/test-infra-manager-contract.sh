@@ -399,6 +399,10 @@ grep -q 'runtime-activation.log' "$ACTIVATE_RUNTIME" \
 grep -q 'infra-manager-status --full --quiet' "$ACTIVATE_RUNTIME" \
     || die "Отложенная активация должна завершаться полной проверкой 910"
 
+grep -q 'INFRA_PVE_HOST_DIR' "$PY_SETTINGS" \
+    || die "Путь PVE SSH должен поддерживать отдельный bootstrap-runtime"
+grep -Fq 'INFRA_PVE_HOST_DIR=/etc/bootstrap-runner/pve-host' "$ROOT/scripts/bootstrap-runner/run-runtime.sh" \
+    || die "bootstrap-runtime должен использовать временный PVE SSH-каталог 990"
 grep -q 'python_install_root: Path = Path("/usr/local/lib/infra-manager")' "$PY_SETTINGS" \
     || die "Постоянный путь установки Python package должен быть зафиксирован"
 grep -Fq 'dest: "{{ provision.paths.python_package }}/infra_manager/"' "$ANSIBLE_RUNTIME" \

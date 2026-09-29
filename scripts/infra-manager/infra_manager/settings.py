@@ -55,7 +55,12 @@ class Paths:
 
     @property
     def pve_host_dir(self) -> Path:
-        return Path("/mnt/pve-access/pve-host")
+        return Path(
+            os.environ.get(
+                "INFRA_PVE_HOST_DIR",
+                "/mnt/pve-access/pve-host",
+            )
+        )
 
     @property
     def pve_host_private_key(self) -> Path:

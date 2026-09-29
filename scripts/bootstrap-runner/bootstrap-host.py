@@ -396,6 +396,23 @@ class BootstrapHost:
             return False
         return (options.get("ro") == "1") if read_only else ("ro" not in options)
 
+    def persistent_layout_attached(self) -> bool:
+        """Проверить наличие обоих mount point новой схемы 910."""
+        config = self.pct_config(self.infra_ctid)
+        return self._infra_mount_matches(
+            config,
+            "mp0",
+            self.host_access_dir,
+            self.infra_access_dir,
+            read_only=True,
+        ) and self._infra_mount_matches(
+            config,
+            "mp1",
+            self.host_state_dir,
+            self.infra_state_dir,
+            read_only=False,
+        )
+
     def verify_persistent_layout(self) -> None:
         """Проверить уже подготовленную схему, ничего не копируя."""
         required_dirs = (
@@ -1279,13 +1296,28 @@ class BootstrapHost:
 
     def apply(self) -> None:
         existed = self.infra_exists()
+
         if existed:
-            self.verify_persistent_layout()
+            owns_910 = self.runner_owns_910()
+            if owns_910:
+                # Это не миграция старого 910, а продолжение оборванного
+                # первоначального создания. Если сбой произошёл между OpenTofu
+                # create и attach, подключаем уже подготовленные области.
+                if self.persistent_layout_attached():
+                    self.verify_persistent_layout()
+                else:
+                    self.attach_persistent_layout()
+            else:
+                # Готовый 910 без новой схемы автоматически не мигрируется.
+                # Проверка выполняется до подготовки runner и иных изменений.
+                self.verify_persistent_layout()
         else:
             self.prepare_new_persistent_layout()
+            owns_910 = False
 
         self.prepare_runner()
-        owns_910 = self.runner_owns_910()
+        if not existed:
+            owns_910 = self.runner_owns_910()
 
         # Три пути намеренно разделены:
         # 1) продолжение оборванной первоначальной установки;
