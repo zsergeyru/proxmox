@@ -47,6 +47,31 @@
   register: ssh_client_ca_config
   when: ssh_client_ca_source.stat.exists
 
+- name: Установить сертификат ключа SSH-сервера
+  ansible.builtin.copy:
+    src: "{{ infra_ssh_host_certificate_file }}"
+    dest: /etc/ssh/ssh_host_ed25519_key-cert.pub
+    owner: root
+    group: root
+    mode: "0644"
+  register: ssh_host_certificate_file
+  when:
+    - infra_ssh_host_certificate_file is defined
+    - infra_ssh_host_certificate_file | length > 0
+
+- name: Подключить сертификат SSH-сервера
+  ansible.builtin.copy:
+    dest: /etc/ssh/sshd_config.d/41-infra-manager-host-cert.conf
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      HostCertificate /etc/ssh/ssh_host_ed25519_key-cert.pub
+  register: ssh_host_certificate_config
+  when:
+    - infra_ssh_host_certificate_file is defined
+    - infra_ssh_host_certificate_file | length > 0
+
 - name: Проверить синтаксис конфигурации SSH
   ansible.builtin.command:
     argv:
@@ -73,6 +98,17 @@
     fail_msg: SSH не использует настроенный центр доступа OpenBao
   when: ssh_client_ca_source.stat.exists
 
+- name: Подтвердить использование сертификата SSH-сервера
+  ansible.builtin.assert:
+    that:
+      - >-
+        'hostcertificate /etc/ssh/ssh_host_ed25519_key-cert.pub'
+        in sshd_effective_config.stdout
+    fail_msg: SSH не использует сертификат сервера OpenBao
+  when:
+    - infra_ssh_host_certificate_file is defined
+    - infra_ssh_host_certificate_file | length > 0
+
 - name: Отключить socket-активацию SSH
   ansible.builtin.systemd_service:
     name: ssh.socket
@@ -91,6 +127,8 @@
         if (
           ssh_client_ca_file.changed
           or ssh_client_ca_config.changed
+          or (ssh_host_certificate_file.changed | default(false))
+          or (ssh_host_certificate_config.changed | default(false))
           or ssh_socket_service.changed
         )
         else 'started'
