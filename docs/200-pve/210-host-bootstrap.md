@@ -152,7 +152,7 @@ Git checkout проекта, Docker-образы, Compose-файлы, устан
 → продолжить работу с прежним состоянием
 ~~~
 
-Сейчас это целевая архитектура, а не уже выполненная миграция. До отдельного переноса живых данных продолжают действовать текущие пути. Машинная фиксация цели находится в `provision.yaml:persistence.target_layout` с `implemented: false`.
+Эта схема является штатной для новых установок и зафиксирована в `provision.yaml:persistence.target_layout` с `implemented: true`. Bootstrap не переносит данные существующего 910. Если bind mount отсутствуют, существующая установка останавливается с требованием ручной миграции.
 
 Так как 910 непривилегированный LXC, при реализации bind mount необходимо отдельно проверить отображение UID/GID и владельцев файлов на PVE.
 
@@ -276,14 +276,14 @@ Initialize OpenBao 910
 Ключ сохраняется атомарно:
 
 ~~~text
-/root/.config/proxmox-bootstrap/openbao/unseal.key
+/mnt/bindmounts/infra-manager/pve-only/openbao/unseal.key
 ~~~
 
 Права:
 
 ~~~text
-/root/.config/proxmox-bootstrap/openbao/  0700
-unseal.key                                0600 root:root
+/mnt/bindmounts/infra-manager/pve-only/openbao/  0700
+unseal.key                                           0600 root:root
 ~~~
 
 Первоначальный корневой токен намеренно не сохраняется, не выводится и сразу отзывается после успешного снятия блокировки. Для будущих административных настроек должен создаваться отдельный временный корневой токен штатным механизмом OpenBao.
