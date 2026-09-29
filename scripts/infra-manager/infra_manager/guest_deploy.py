@@ -726,7 +726,7 @@ def _verify_temporary_ssh_identity(
     context: DeploymentContext,
     private_key: Path,
     certificate: Path,
-) -> None:
+) -> bool:
     result = run(
         [
             *_ssh_identity_args(
@@ -740,15 +740,11 @@ def _verify_temporary_ssh_identity(
         capture_output=True,
     )
     if result.returncode:
-        detail = (result.stderr or "").strip()
-        raise InfraManagerError(
-            f"Гость {context.vmid} доверяет SSH CA, но вход по "
-            "временному сертификату не прошёл"
-            + (f": {detail}" if detail else "")
-        )
+        return False
     console.ok(
         f"Гость {context.vmid}: вход по временному SSH-сертификату подтверждён"
     )
+    return True
 
 
 def _run_guest_ansible(
@@ -806,12 +802,11 @@ def _configure_guest_os(
     """Проверить SSH и применить конфигурацию Ansible."""
 
     _ensure_ssh_host_key(context.paths.known_hosts, context.address)
-    trusts_client_ca = _guest_trusts_client_ca(context)
-
     console.info(f"Настройка ОС {context.vmid}")
-    if not trusts_client_ca:
+
+    if not PATHS.ssh_client_ca_public_key.is_file():
         console.info(
-            f"Гость {context.vmid}: доверие к SSH CA ещё не установлено; "
+            f"Гость {context.vmid}: SSH CA ещё не опубликован; "
             "используется переходный постоянный ключ Ansible"
         )
         _run_guest_ansible(
@@ -831,15 +826,35 @@ def _configure_guest_os(
             context,
             Path(temporary_dir),
         )
-        _verify_temporary_ssh_identity(
+        if _verify_temporary_ssh_identity(
             context,
             private_key,
             certificate,
+        ):
+            _run_guest_ansible(
+                context,
+                private_key=private_key,
+                certificate=certificate,
+                provision_phase=provision_phase,
+                self_update=self_update,
+                project_branch=project_branch,
+            )
+            return
+
+        if _guest_trusts_client_ca(context):
+            raise InfraManagerError(
+                f"Гость {context.vmid} уже доверяет SSH CA, "
+                "но вход по временному сертификату не прошёл"
+            )
+
+        console.info(
+            f"Гость {context.vmid}: доверие к SSH CA ещё не установлено; "
+            "используется переходный постоянный ключ Ansible"
         )
         _run_guest_ansible(
             context,
-            private_key=private_key,
-            certificate=certificate,
+            private_key=context.paths.private_key,
+            certificate=None,
             provision_phase=provision_phase,
             self_update=self_update,
             project_branch=project_branch,
