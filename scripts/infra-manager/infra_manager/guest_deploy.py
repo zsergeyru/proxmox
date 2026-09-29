@@ -548,6 +548,8 @@ def _configure_guest_os(
             f"infra_self_update={'true' if self_update else 'false'}",
             "-e",
             f"infra_project_branch={SETTINGS.project_branch()}",
+            "-e",
+            f"infra_pve_node={context.node}",
             str(context.paths.playbook),
         ],
         env=ansible_env,
