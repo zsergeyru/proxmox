@@ -522,6 +522,7 @@ print(json.dumps(credentials, separators=(",", ":")))
 CONFIGURE_CLIENT_SIGNING_ROLE_CODE = r"""
 import json
 import sys
+import urllib.error
 import urllib.request
 
 BASE = "http://127.0.0.1:8200"
@@ -547,8 +548,14 @@ def request(method, path, payload=None, *, token=None):
         headers=headers,
         method=method,
     )
-    with urllib.request.urlopen(req, timeout=30) as response:
-        raw = response.read()
+    try:
+        with urllib.request.urlopen(req, timeout=30) as response:
+            raw = response.read()
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace").strip()
+        raise RuntimeError(
+            f"{method} {path} returned HTTP {exc.code}: {detail}"
+        ) from exc
     return json.loads(raw.decode("utf-8")) if raw else {}
 
 
@@ -605,6 +612,7 @@ finally:
 SIGN_CLIENT_KEY_CODE = r"""
 import json
 import sys
+import urllib.error
 import urllib.request
 
 BASE = "http://127.0.0.1:8200"
@@ -638,8 +646,14 @@ def request(method, path, body=None, *, token=None):
         headers=headers,
         method=method,
     )
-    with urllib.request.urlopen(req, timeout=30) as response:
-        raw = response.read()
+    try:
+        with urllib.request.urlopen(req, timeout=30) as response:
+            raw = response.read()
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace").strip()
+        raise RuntimeError(
+            f"{method} {path} returned HTTP {exc.code}: {detail}"
+        ) from exc
     return json.loads(raw.decode("utf-8")) if raw else {}
 
 
