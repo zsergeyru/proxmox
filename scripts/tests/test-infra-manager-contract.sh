@@ -252,7 +252,7 @@ required_runtime_fragments = (
     "provision.access.pve.persistent_credential",
     "provision.paths.ansible_identity",
     "provision.paths.semaphore_data",
-    "provision.paths.openbao_data",
+    "provision.persistence.target_layout.state.bindings",
     "OPENBAO_VERSION",
     "openbao_seal_status",
     "openbao_unsealed_status",
