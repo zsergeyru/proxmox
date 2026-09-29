@@ -145,6 +145,36 @@ if provision.get("paths", {}).get("openbao_data") != "/var/lib/persistent/openba
     raise SystemExit("Путь постоянных данных OpenBao не зафиксирован")
 if "/var/lib/persistent/openbao" not in provision.get("persistence", {}).get("backup_required", []):
     raise SystemExit("Данные OpenBao должны входить в обязательное резервное копирование")
+
+target_layout = provision.get("persistence", {}).get("target_layout", {})
+if target_layout.get("implemented") is not False:
+    raise SystemExit("Целевая схема постоянного состояния должна быть помечена как ещё не перенесённая")
+if target_layout.get("host_root") != "/mnt/bindmounts/infra-manager":
+    raise SystemExit("Не зафиксирован единый корень постоянных данных на PVE")
+pve_only = target_layout.get("pve_only", {})
+if pve_only.get("mounted_into_guest") is not False:
+    raise SystemExit("PVE-only данные не должны монтироваться в 910")
+if "openbao-unseal-key" not in pve_only.get("contains", []):
+    raise SystemExit("Unseal-ключ OpenBao должен оставаться только на PVE")
+access = target_layout.get("access", {})
+if access.get("mode") != "ro" or access.get("guest_path") != "/mnt/pve-access":
+    raise SystemExit("Данные доступа PVE должны подключаться в 910 только для чтения")
+state = target_layout.get("state", {})
+if state.get("mode") != "rw" or state.get("guest_path") != "/mnt/persistent-state":
+    raise SystemExit("Постоянное состояние 910 должно иметь отдельный rw mount")
+required_state = {
+    "openbao-raft",
+    "opentofu-state",
+    "semaphore-data",
+    "ansible-identity",
+    "infra-manager-secrets",
+}
+if not required_state.issubset(set(state.get("contains", []))):
+    raise SystemExit("Целевая схема не содержит весь обязательный набор состояния 910")
+guest_local = set(target_layout.get("guest_local", {}).get("contains", []))
+if "git-checkout" not in guest_local:
+    raise SystemExit("Git checkout должен оставаться локальным и воспроизводимым внутри 910")
+
 if 'semaphore_version: str = "v2.18.30"' not in settings_text:
     raise SystemExit("Версия Semaphore в settings.py расходится с provision.yaml")
 if 'runtime_version: str = "v1"' not in settings_text:
