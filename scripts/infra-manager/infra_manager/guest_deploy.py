@@ -17,6 +17,7 @@ from .pve_host import (
     apply_host_requirements,
     ensure_infra_self_access,
     sign_ssh_client_key,
+    sign_ssh_host_key,
 )
 from .settings import PATHS, SETTINGS
 
@@ -639,6 +640,14 @@ def _run_ansible_guest(
             f"infra_project_branch={project_branch or SETTINGS.project_branch()}",
             "-e",
             f"infra_pve_node={context.node}",
+            *(
+                [
+                    "-e",
+                    f"infra_ssh_host_certificate_file={host_certificate}",
+                ]
+                if host_certificate is not None
+                else []
+            ),
             str(context.paths.playbook),
         ],
         env=ansible_env,
@@ -722,6 +731,82 @@ def _create_temporary_ssh_identity(
     return private_key, certificate_path
 
 
+def _create_temporary_host_certificate(
+    context: DeploymentContext,
+    private_key: Path,
+    *,
+    client_certificate: Path | None,
+    directory: Path,
+) -> Path:
+    """Подписать реальный Ed25519 host key гостя через OpenBao."""
+
+    result = run(
+        [
+            *_ssh_identity_args(
+                context,
+                private_key,
+                certificate=client_certificate,
+            ),
+            "cat /etc/ssh/ssh_host_ed25519_key.pub",
+        ],
+        capture_output=True,
+    )
+    public_key = result.stdout.strip()
+    if not public_key.startswith("ssh-ed25519 "):
+        raise InfraManagerError(
+            f"Гость {context.vmid} не вернул корректный Ed25519 host key"
+        )
+
+    certificate = sign_ssh_host_key(
+        context.node,
+        public_key,
+        vmid=context.vmid,
+        hostname=context.name,
+        address=context.address,
+    )
+    certificate_path = directory / "ssh_host_ed25519_key-cert.pub"
+    certificate_path.write_text(certificate + "\n", encoding="utf-8")
+    certificate_path.chmod(0o600)
+
+    inspected = run(
+        ["ssh-keygen", "-L", "-f", str(certificate_path)],
+        capture_output=True,
+    )
+    if (
+        "host certificate" not in inspected.stdout
+        or context.name not in inspected.stdout
+        or context.address not in inspected.stdout
+    ):
+        raise InfraManagerError(
+            f"Host-сертификат гостя {context.vmid} не прошёл проверку"
+        )
+    console.ok(
+        f"Гость {context.vmid}: SSH host key подписан OpenBao"
+    )
+    return certificate_path
+
+
+def _host_certificate_if_available(
+    context: DeploymentContext,
+    private_key: Path,
+    *,
+    client_certificate: Path | None,
+    directory: Path,
+    provision_phase: str,
+) -> Path | None:
+    if provision_phase == "base":
+        return None
+    host_ca = getattr(PATHS, "ssh_host_ca_public_key", None)
+    if not isinstance(host_ca, Path) or not host_ca.is_file():
+        return None
+    return _create_temporary_host_certificate(
+        context,
+        private_key,
+        client_certificate=client_certificate,
+        directory=directory,
+    )
+
+
 def _verify_temporary_ssh_identity(
     context: DeploymentContext,
     private_key: Path,
@@ -755,6 +840,7 @@ def _run_guest_ansible(
     provision_phase: str,
     self_update: bool,
     project_branch: str | None,
+    host_certificate: Path | None = None,
 ) -> None:
     ansible_env = os.environ.copy()
     ansible_env["ANSIBLE_HOST_KEY_CHECKING"] = "True"
@@ -831,6 +917,13 @@ def _configure_guest_os(
             private_key,
             certificate,
         ):
+            host_certificate = _host_certificate_if_available(
+                context,
+                private_key,
+                client_certificate=certificate,
+                directory=Path(temporary_dir),
+                provision_phase=provision_phase,
+            )
             _run_guest_ansible(
                 context,
                 private_key=private_key,
@@ -838,6 +931,7 @@ def _configure_guest_os(
                 provision_phase=provision_phase,
                 self_update=self_update,
                 project_branch=project_branch,
+                host_certificate=host_certificate,
             )
             return
 
@@ -851,6 +945,13 @@ def _configure_guest_os(
             f"Гость {context.vmid}: доверие к SSH CA ещё не установлено; "
             "используется переходный постоянный ключ Ansible"
         )
+        host_certificate = _host_certificate_if_available(
+            context,
+            context.paths.private_key,
+            client_certificate=None,
+            directory=Path(temporary_dir),
+            provision_phase=provision_phase,
+        )
         _run_guest_ansible(
             context,
             private_key=context.paths.private_key,
@@ -858,6 +959,7 @@ def _configure_guest_os(
             provision_phase=provision_phase,
             self_update=self_update,
             project_branch=project_branch,
+            host_certificate=host_certificate,
         )
 
 def _validate_existing_guest_object(context: DeploymentContext) -> None:
