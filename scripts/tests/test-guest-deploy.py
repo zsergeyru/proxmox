@@ -255,6 +255,11 @@ def check_910_self_update_path() -> None:
             ),
             patch.object(
                 guest_deploy_module,
+                "_project_branch",
+                return_value="feature/openbao-ssh-client-trust",
+            ),
+            patch.object(
+                guest_deploy_module,
                 "_prepare_self_update_workspace",
                 return_value=SimpleNamespace(),
             ),
@@ -308,7 +313,11 @@ def check_910_self_update_path() -> None:
     ]:
         fail("Самообновление должно подготовить постоянный SSH-доступ 910")
     if configured != [
-        {"provision_phase": "full", "self_update": True}
+        {
+            "provision_phase": "full",
+            "self_update": True,
+            "project_branch": "feature/openbao-ssh-client-trust",
+        }
     ]:
         fail(
             "Самообновление 910 должно применять полный provision "

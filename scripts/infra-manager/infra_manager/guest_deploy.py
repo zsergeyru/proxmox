@@ -519,6 +519,7 @@ def _configure_guest_os(
     *,
     provision_phase: str = "full",
     self_update: bool = False,
+    project_branch: str | None = None,
 ) -> None:
     """Принять SSH host key и применить конфигурацию Ansible."""
 
@@ -547,7 +548,7 @@ def _configure_guest_os(
             "-e",
             f"infra_self_update={'true' if self_update else 'false'}",
             "-e",
-            f"infra_project_branch={SETTINGS.project_branch()}",
+            f"infra_project_branch={project_branch or SETTINGS.project_branch()}",
             "-e",
             f"infra_pve_node={context.node}",
             str(context.paths.playbook),
@@ -700,6 +701,7 @@ def run_deploy_guest(
 
     console.info("Проверка проекта")
     run([sys.executable, str(repo_root / "scripts" / "validate_repo.py")])
+    project_branch = _project_branch(repo_root)
 
     workspace = (
         _prepare_self_update_workspace(repo_root, vmid)
@@ -733,6 +735,7 @@ def run_deploy_guest(
             context,
             provision_phase="full",
             self_update=True,
+            project_branch=project_branch,
         )
         console.ok(
             "910 infra-manager обновлён через Ansible; "
@@ -785,11 +788,19 @@ def run_deploy_guest(
     )
 
     if phase == "all":
-        _configure_guest_os(context)
+        _configure_guest_os(context, project_branch=project_branch)
     elif phase == "provision-base":
-        _configure_guest_os(context, provision_phase="base")
+        _configure_guest_os(
+            context,
+            provision_phase="base",
+            project_branch=project_branch,
+        )
     elif phase in {"provision", "provision-existing"}:
-        _configure_guest_os(context, provision_phase="full")
+        _configure_guest_os(
+            context,
+            provision_phase="full",
+            project_branch=project_branch,
+        )
 
     if phase == "infrastructure":
         console.ok(
