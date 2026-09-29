@@ -380,6 +380,13 @@
     - infra-manager-pve-access-check
     - infra-manager-pve-lifecycle-test
 
+- name: Сделать команду состояния доступной через pct exec
+  ansible.builtin.file:
+    src: /usr/local/sbin/infra-manager-status
+    dest: /usr/bin/infra-manager-status
+    state: link
+    force: true
+
 - name: Настроить владельца данных Semaphore
   ansible.builtin.file:
     path: "{{ provision.paths.semaphore_data }}"
