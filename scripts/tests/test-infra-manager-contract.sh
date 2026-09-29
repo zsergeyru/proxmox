@@ -251,7 +251,6 @@ required_runtime_fragments = (
     "provision.access.pve.ca_source",
     "provision.access.pve.persistent_credential",
     "provision.paths.ansible_identity",
-    "provision.paths.semaphore_data",
     "provision.paths.semaphore_persistent_data",
     "provision.persistence.target_layout.state.bindings",
     "OPENBAO_VERSION",
