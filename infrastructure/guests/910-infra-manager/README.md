@@ -165,6 +165,7 @@ OpenTofu state и другие постоянные данные не должн
 /etc/infra-manager/ansible/
 /var/lib/infra-manager/semaphore/
 /var/lib/infra-manager/opentofu/state/
+/var/lib/persistent/openbao/
 ```
 
 Критичны:
@@ -175,7 +176,10 @@ OpenTofu state и другие постоянные данные не должн
 - root SSH-ключ PVE;
 - Semaphore API token;
 - GitHub Deploy Key, используемый Semaphore;
-- OpenTofu state.
+- OpenTofu state;
+- данные Raft OpenBao.
+
+Ключ снятия блокировки OpenBao хранится отдельно на PVE и не копируется в постоянные каталоги 910.
 
 Git checkout, образы контейнеров, Compose-файлы и кэш заданий считаются воспроизводимыми.
 
@@ -261,11 +265,41 @@ git@github.com:zsergeyru/proxmox.git
 - шаблон `OpenTofu Plan`;
 - шаблон `Build Template 9000`;
 - шаблон `Deploy Guest 410`;
-- шаблон `Deploy Guest 910`.
+- шаблон `Deploy Guest 910`;
+- шаблон `Initialize OpenBao 910`.
 
 Все инфраструктурные задания Semaphore выполняются как Python-сценарии из `scripts/infra-manager/jobs/`. Основная логика находится в Python-пакете `infra_manager`, а не в командных оболочках.
 
 Постоянная SSH-идентичность Ansible хранится в `/etc/infra-manager/ansible/` и передаётся в `infra-runtime` только для чтения.
+
+## OpenBao
+
+OpenBao работает отдельным контейнером Docker и слушает только локальный адрес 910.
+
+Первичная инициализация не входит в обычный `Deploy Guest 910`. Для нового пустого хранилища один раз запускается отдельное задание Semaphore:
+
+```text
+Initialize OpenBao 910
+```
+
+Оно устанавливает на PVE хостовый сценарий и службу:
+
+```text
+/usr/local/sbin/infra-manager-openbao-unseal
+/etc/systemd/system/infra-manager-openbao-unseal.service
+```
+
+Затем OpenBao инициализируется с одним ключом снятия блокировки и порогом один. Ключ атомарно сохраняется только на PVE:
+
+```text
+/root/.config/proxmox-bootstrap/openbao/unseal.key
+```
+
+Каталог имеет права `0700`, файл — `0600`. Первоначальный корневой токен из ответа инициализации намеренно не сохраняется и не выводится в журнал.
+
+При загрузке PVE служба ждёт доступности 910 и снимает блокировку OpenBao. После штатного перезапуска OpenBao во время `Deploy Guest 910` Ansible запускает ту же службу через доверенный root SSH-доступ к PVE.
+
+До первичной инициализации состояние `initialized=false, sealed=true` допустимо. После инициализации полная проверка 910 требует `sealed=false`.
 
 ## Проверка
 
@@ -281,6 +315,8 @@ Semaphore:
 - OpenTofu Plan
 - Build Template 9000
 - Deploy Guest 410
+- Deploy Guest 910
+- Initialize OpenBao 910
 ```
 
 `infra-manager-status` проверяет локальное состояние 910, Docker, Semaphore, инфраструктурные инструменты и базовую авторизацию PVE API.
