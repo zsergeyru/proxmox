@@ -80,9 +80,9 @@
 
 | Путь | Назначение |
 |---|---|
-| `access/github/github_proxmox_repo_ed25519` | read-only Deploy Key репозитория проекта |
+| `access/github/github_proxmox_repo_ed25519` | Deploy Key репозитория проекта без права записи |
 | `access/pve-host/root_ed25519` | закрытый root SSH-ключ 910 для PVE |
-| `access/pve-host/known_hosts` | доверенный SSH host key PVE |
+| `access/pve-host/known_hosts` | доверенный ключ SSH-сервера PVE |
 | `access/pve-api/pve-api.env` | данные постоянного API-доступа 910 |
 | `access/ca/pve-root-ca.crt` | копия корневого сертификата PVE |
 
@@ -203,8 +203,6 @@ debian13-template.ref
 ```
 
 Они не являются постоянным состоянием и должны удаляться после завершения операции.
-
-Старые пути `/run/proxmox-bootstrap/`, `/run/lock/proxmox-bootstrap.lock` и `/run/lock/proxmox-orchestration.lock` не входят в действующий контракт.
 
 ## 9. Связанные документы
 
