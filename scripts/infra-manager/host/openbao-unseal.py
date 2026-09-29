@@ -829,6 +829,11 @@ def revoke_initial_root_token(token: str) -> None:
     print("[ОК] Initial root token отозван")
 
 
+def revoke_temporary_root_token(token: str) -> None:
+    _revoke_root_token(token)
+    print("[ОК] Временный корневой токен OpenBao отозван")
+
+
 def _generate_root_from_running_server() -> str:
     if not KEY_PATH.is_file() or KEY_PATH.stat().st_size == 0:
         raise OpenBaoHostError(
@@ -1054,6 +1059,24 @@ def configure_ssh_access(root_token: str) -> None:
     print("[ОК] Ограниченный служебный доступ к SSH-центрам настроен")
 
 
+def ensure_existing_openbao_ssh() -> None:
+    if ssh_cas_ready() and SSH_ACCESS_PATH.is_file():
+        check_ssh_access()
+        print("[ОК] SSH-центры и служебный доступ OpenBao уже готовы")
+        return
+
+    root_token = generate_temporary_root_token()
+    try:
+        ensure_ssh_cas(root_token)
+        if SSH_ACCESS_PATH.is_file():
+            check_ssh_access()
+        else:
+            configure_ssh_access(root_token)
+    finally:
+        revoke_temporary_root_token(root_token)
+        del root_token
+
+
 def initialize() -> None:
     status = read_status(wait=True)
     if bool(status["initialized"]):
@@ -1063,8 +1086,7 @@ def initialize() -> None:
                 "на PVE отсутствует"
             )
         unseal()
-        ensure_ssh_cas()
-        check_ssh_access()
+        ensure_existing_openbao_ssh()
         print("[ОК] Инициализация OpenBao уже выполнена")
         return
 

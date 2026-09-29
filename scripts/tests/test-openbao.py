@@ -128,27 +128,65 @@ def test_host_initialization_does_not_print_secrets() -> None:
         fail("Хостовый сценарий вывел секрет OpenBao в журнал")
 
 
-def test_existing_openbao_ensures_ssh_cas() -> None:
+def test_existing_openbao_skips_root_when_ready() -> None:
     host = load_host_module()
     with tempfile.TemporaryDirectory() as tmp:
         key_path = Path(tmp) / "unseal.key"
+        access_path = Path(tmp) / "ssh-access.json"
         key_path.write_text("existing-key\n", encoding="utf-8")
+        access_path.write_text("{}\n", encoding="utf-8")
         with (
             patch.object(host, "KEY_PATH", key_path),
+            patch.object(host, "SSH_ACCESS_PATH", access_path),
             patch.object(
                 host,
                 "read_status",
                 return_value={"initialized": True, "sealed": False},
             ),
             patch.object(host, "unseal") as unseal,
-            patch.object(host, "ensure_ssh_cas") as ensure_cas,
+            patch.object(host, "ssh_cas_ready", return_value=True),
             patch.object(host, "check_ssh_access") as check_access,
+            patch.object(host, "generate_temporary_root_token") as generate_root,
         ):
             host.initialize()
 
     unseal.assert_called_once_with()
-    ensure_cas.assert_called_once_with()
     check_access.assert_called_once_with()
+    generate_root.assert_not_called()
+
+
+def test_existing_openbao_bootstraps_missing_ssh_security() -> None:
+    host = load_host_module()
+    with tempfile.TemporaryDirectory() as tmp:
+        key_path = Path(tmp) / "unseal.key"
+        access_path = Path(tmp) / "ssh-access.json"
+        key_path.write_text("existing-key\n", encoding="utf-8")
+        with (
+            patch.object(host, "KEY_PATH", key_path),
+            patch.object(host, "SSH_ACCESS_PATH", access_path),
+            patch.object(
+                host,
+                "read_status",
+                return_value={"initialized": True, "sealed": False},
+            ),
+            patch.object(host, "unseal") as unseal,
+            patch.object(host, "ssh_cas_ready", return_value=False),
+            patch.object(
+                host,
+                "generate_temporary_root_token",
+                return_value="TEMP-ROOT-TOKEN",
+            ) as generate_root,
+            patch.object(host, "ensure_ssh_cas") as ensure_cas,
+            patch.object(host, "configure_ssh_access") as configure_access,
+            patch.object(host, "revoke_temporary_root_token") as revoke_root,
+        ):
+            host.initialize()
+
+    unseal.assert_called_once_with()
+    generate_root.assert_called_once_with()
+    ensure_cas.assert_called_once_with("TEMP-ROOT-TOKEN")
+    configure_access.assert_called_once_with("TEMP-ROOT-TOKEN")
+    revoke_root.assert_called_once_with("TEMP-ROOT-TOKEN")
 
 
 def test_ssh_ca_reconcile_requires_initial_admin_token() -> None:
@@ -361,7 +399,8 @@ def test_stale_key_is_not_overwritten() -> None:
 def main() -> None:
     test_orchestration()
     test_host_initialization_does_not_print_secrets()
-    test_existing_openbao_ensures_ssh_cas()
+    test_existing_openbao_skips_root_when_ready()
+    test_existing_openbao_bootstraps_missing_ssh_security()
     test_ssh_ca_reconcile_requires_initial_admin_token()
     test_raw_root_generation_uses_unseal_key_via_stdin()
     test_temporary_root_window_restores_protected_container()
