@@ -130,7 +130,7 @@ trap - EXIT
 def install_openbao_host_support(node: str, repo_root: Path) -> None:
     """Установить на PVE сценарий и systemd-службу разблокировки OpenBao."""
     command_source = (
-        repo_root / "scripts" / "pve" / "infra-manager-openbao-unseal.py"
+        repo_root / "scripts" / "infra-manager" / "host" / "openbao-unseal.py"
     )
     service_source = (
         repo_root
