@@ -13,11 +13,11 @@ services:
     env_file:
       - /etc/infra-manager/secrets/semaphore-server.env
     volumes:
-      - /var/lib/infra-manager/semaphore:/var/lib/semaphore
+      - /mnt/persistent-state/semaphore:/var/lib/semaphore
       - /etc/infra-manager/ca:/etc/infra-manager/ca:ro
-      - /etc/infra-manager/ansible:/etc/infra-manager/ansible:ro
-      - /etc/infra-manager/pve-host:/etc/infra-manager/pve-host:ro
-      - /var/lib/infra-manager/opentofu:/var/lib/infra-manager/opentofu
+      - /mnt/persistent-state/ansible:/etc/infra-manager/ansible:ro
+      - /mnt/pve-access/pve-host:/mnt/pve-access/pve-host:ro
+      - /mnt/persistent-state/opentofu:/var/lib/infra-manager/opentofu
 
   openbao:
     image: ghcr.io/openbao/openbao:${OPENBAO_VERSION}
@@ -31,5 +31,5 @@ services:
       BAO_ADDR: http://127.0.0.1:8200
       BAO_LOG_LEVEL: info
     volumes:
-      - /var/lib/persistent/openbao:/openbao/file
+      - /mnt/persistent-state/openbao:/openbao/file
       - ./openbao/openbao.hcl:/openbao/config/openbao.hcl:ro

@@ -5,7 +5,6 @@ from __future__ import annotations
 import http.cookiejar
 import json
 import os
-import shutil
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -603,15 +602,9 @@ def persist_github_key() -> None:
         raise InfraManagerError(
             f"GitHub Deploy Key не найден: {GITHUB_KEY}"
         )
-    if (
-        not GITHUB_KEY_COPY.is_file()
-        or GITHUB_KEY.read_bytes() != GITHUB_KEY_COPY.read_bytes()
-    ):
-        shutil.copyfile(GITHUB_KEY, GITHUB_KEY_COPY)
-        os.chown(GITHUB_KEY_COPY, 0, 0)
-        GITHUB_KEY_COPY.chmod(0o600)
-        console.ok(
-            "GitHub Deploy Key синхронизирован с постоянным ключом PVE"
+    if GITHUB_KEY_COPY != GITHUB_KEY:
+        raise InfraManagerError(
+            "GitHub Deploy Key не должен иметь постоянную копию внутри 910"
         )
 
 

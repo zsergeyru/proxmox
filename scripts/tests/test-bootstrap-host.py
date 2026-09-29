@@ -293,6 +293,15 @@ class ApplyHarness(BootstrapHost):
         self.events.append("infra_exists")
         return self._infra_exists
 
+    def prepare_new_persistent_layout(self) -> None:
+        self.events.append("prepare_new_layout")
+
+    def verify_persistent_layout(self) -> None:
+        self.events.append("verify_layout")
+
+    def attach_persistent_layout(self) -> None:
+        self.events.append("attach_layout")
+
     def prepare_runner(self) -> None:
         self.events.append("prepare_runner")
 
@@ -339,9 +348,11 @@ def test_new_install_flow() -> None:
         host.events,
         [
             "infra_exists",
+            "prepare_new_layout",
             "prepare_runner",
             "runner_owns_910",
             "deploy:infrastructure",
+            "attach_layout",
             "ensure_runner_ssh",
             "deploy:base",
             "handoff:apply",
@@ -361,6 +372,7 @@ def test_existing_without_bootstrap_state() -> None:
         host.events,
         [
             "infra_exists",
+            "verify_layout",
             "prepare_runner",
             "runner_owns_910",
             "ensure_existing",
@@ -381,11 +393,12 @@ def test_resume_unfinished_initial_state() -> None:
     host.apply()
     expected_prefix = [
         "infra_exists",
+        "verify_layout",
         "prepare_runner",
         "runner_owns_910",
     ]
     assert_equal(
-        host.events[:3],
+        host.events[:4],
         expected_prefix,
         "Незавершённая установка должна сначала обнаружить state 990",
     )
@@ -408,6 +421,7 @@ def test_recover_existing_without_state() -> None:
         host.events,
         [
             "infra_exists",
+            "verify_layout",
             "prepare_runner",
             "runner_owns_910",
             "ensure_existing",
@@ -434,6 +448,37 @@ def test_recover_unfinished_initial_state() -> None:
         raise AssertionError(
             "Незавершённый первоначальный state должен использовать общий handoff recover"
         )
+
+
+class MigrationGuardHarness(ApplyHarness):
+    def verify_persistent_layout(self) -> None:
+        self.events.append("verify_layout")
+        raise BootstrapError(
+            "автоматическая миграция существующих данных запрещена"
+        )
+
+
+def test_existing_layout_requires_manual_migration() -> None:
+    host = MigrationGuardHarness(
+        "apply",
+        infra_exists=True,
+        owns_state=False,
+    )
+    try:
+        host.apply()
+    except BootstrapError as exc:
+        if "автоматическая миграция" not in str(exc):
+            raise
+    else:
+        raise AssertionError(
+            "Существующий 910 без новой схемы должен требовать ручную миграцию"
+        )
+
+    assert_equal(
+        host.events,
+        ["infra_exists", "verify_layout"],
+        "До ручной миграции стандартный bootstrap не должен изменять 910",
+    )
 
 
 class ExecuteHarness(BootstrapHost):
@@ -527,6 +572,7 @@ def main() -> None:
         test_resume_unfinished_initial_state,
         test_recover_existing_without_state,
         test_recover_unfinished_initial_state,
+        test_existing_layout_requires_manual_migration,
         test_check_mode_finishes_temporary_runner,
         test_remove_rejects_foreign_910,
     ]
