@@ -149,51 +149,75 @@ OpenTofu state и другие постоянные данные не должн
 
 ## Постоянные данные
 
-Основные области:
+Целевая архитектура отделяет состояние от rootfs 910.
+
+На PVE выделяется единый корень:
 
 ```text
-/etc/infra-manager/       конфигурация, CA и секреты
-/var/lib/infra-manager/   постоянные данные и состояние
-/opt/infra-manager/       разворачиваемая конфигурация Compose
-/var/log/infra-manager/   журнал настройки
+/mnt/bindmounts/infra-manager/
+├── pve-only/   данные только для PVE
+├── access/     данные PVE, доступные 910 только для чтения
+└── state/      состояние сервисов 910, доступное 910 на запись
 ```
 
-Обязательному резервному копированию подлежат как минимум:
+Планируется подключать в 910 только два подкаталога:
 
 ```text
-/etc/infra-manager/secrets/
-/etc/infra-manager/ansible/
-/var/lib/infra-manager/semaphore/
-/var/lib/infra-manager/opentofu/state/
-/var/lib/persistent/openbao/
+access/ → /mnt/pve-access       только чтение
+state/  → /mnt/persistent-state чтение и запись
 ```
 
-Критичны:
+`pve-only/` внутрь 910 не монтируется.
 
-- база Semaphore;
-- ключ шифрования Semaphore;
-- PVE API credential;
-- root SSH-ключ PVE;
-- Semaphore API token;
-- GitHub Deploy Key, используемый Semaphore;
-- OpenTofu state;
-- данные Raft OpenBao.
+В `access/` должны находиться:
 
-Ключ снятия блокировки OpenBao хранится отдельно на PVE и не копируется в постоянные каталоги 910.
+- read-only GitHub Deploy Key;
+- root SSH-ключ доступа 910 к PVE;
+- `known_hosts` PVE;
+- PVE CA;
+- постоянный PVE API credential;
+- другие данные доступа, владельцем которых действительно является PVE.
 
-Git checkout, образы контейнеров, Compose-файлы и кэш заданий считаются воспроизводимыми.
+В `state/` должны находиться:
+
+- Raft-данные OpenBao;
+- постоянный OpenTofu state;
+- SQLite и служебные данные Semaphore;
+- постоянная Ansible-идентичность;
+- постоянные секреты и ключи шифрования 910.
+
+В `pve-only/` остаются секреты, которые 910 не должен видеть, прежде всего ключ снятия блокировки OpenBao.
+
+После реализации этой схемы уничтожение rootfs 910 не должно уничтожать перечисленное состояние. Новый 910 подключает прежние каталоги и заново получает только воспроизводимую часть.
+
+Локально внутри 910 остаются и при необходимости создаются заново:
+
+```text
+/var/lib/infra-manager/bootstrap-repo/
+/opt/infra-manager/compose/
+Docker images
+установленный Python-код
+кэши
+временные файлы
+```
+
+Git checkout проекта специально не хранится на PVE. На PVE остаётся только Deploy Key, потому что он нужен ещё до полного восстановления 910.
+
+Текущая живая система пока использует старые пути внутри 910. Перенос в bind mount выполняется отдельным изменением; `provision.yaml:persistence.target_layout` фиксирует целевую раскладку и имеет `implemented: false` до завершения миграции.
+
+Вынос состояния на PVE не является резервной копией. Для каталога `/mnt/bindmounts/infra-manager/` нужен отдельный механизм резервного копирования.
 
 ## OpenTofu state
 
-Состояние хранится локально:
+OpenTofu state является частью постоянного состояния и после миграции должен физически находиться в `state/`.
+
+До миграции используется текущий путь:
 
 ```text
 /var/lib/infra-manager/opentofu/state/proxmox.tfstate
 ```
 
-State не хранится в Git и должен резервироваться.
-
-Потеря state не должна приводить к автоматическому `apply` с пустым состоянием поверх существующей инфраструктуры.
+State не хранится в Git. Его потеря не должна приводить к автоматическому `apply` с новым пустым состоянием поверх существующей инфраструктуры.
 
 ## Доступ к PVE
 
@@ -238,13 +262,17 @@ PVE CA устанавливается в доверенное хранилище
 
 ## GitHub
 
-Постоянный read-only Deploy Key создаётся публичным bootstrap на PVE:
+Постоянный read-only Deploy Key создаётся публичным bootstrap на PVE.
+
+Сейчас исходный ключ хранится по прежнему пути:
 
 ```text
 /root/.config/proxmox-bootstrap/github_proxmox_repo_ed25519
 ```
 
-Копия передаётся внутрь 910 для чтения:
+Целевая схема переносит его в `/mnt/bindmounts/infra-manager/access/` и показывает 910 только для чтения. Постоянная копия ключа внутри rootfs 910 после миграции не нужна.
+
+Сам Git checkout проекта остаётся локальным в 910 и всегда может быть получен заново:
 
 ```text
 git@github.com:zsergeyru/proxmox.git

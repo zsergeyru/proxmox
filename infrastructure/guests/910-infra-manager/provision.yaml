@@ -134,6 +134,46 @@ semaphore:
     - Initialize OpenBao 910
 
 persistence:
+  target_layout:
+    implemented: false
+    host_root: /mnt/bindmounts/infra-manager
+
+    pve_only:
+      host_path: /mnt/bindmounts/infra-manager/pve-only
+      mounted_into_guest: false
+      contains:
+        - openbao-unseal-key
+
+    access:
+      host_path: /mnt/bindmounts/infra-manager/access
+      guest_path: /mnt/pve-access
+      mode: ro
+      contains:
+        - github-deploy-key
+        - pve-root-ssh-key
+        - pve-known-hosts
+        - pve-ca
+        - pve-api-credential
+
+    state:
+      host_path: /mnt/bindmounts/infra-manager/state
+      guest_path: /mnt/persistent-state
+      mode: rw
+      contains:
+        - openbao-raft
+        - opentofu-state
+        - semaphore-data
+        - ansible-identity
+        - infra-manager-secrets
+
+    guest_local:
+      contains:
+        - git-checkout
+        - docker-images
+        - compose-files
+        - installed-python-code
+        - caches
+
   backup_required:
     - /etc/infra-manager/secrets
     - /etc/infra-manager/ansible
