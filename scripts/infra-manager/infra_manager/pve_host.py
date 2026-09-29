@@ -92,6 +92,7 @@ def _ssh_with_input(
 
 OPENBAO_HOST_COMMAND = Path("/usr/local/sbin/infra-manager-openbao-unseal")
 OPENBAO_HOST_SERVICE = "infra-manager-openbao-unseal.service"
+OPENBAO_HOST_TIMER = "infra-manager-openbao-unseal.timer"
 
 
 def _install_remote_file(
@@ -139,6 +140,13 @@ def install_openbao_host_support(node: str, repo_root: Path) -> None:
         / "systemd"
         / OPENBAO_HOST_SERVICE
     )
+    timer_source = (
+        repo_root
+        / "infrastructure"
+        / "pve"
+        / "systemd"
+        / OPENBAO_HOST_TIMER
+    )
     _install_remote_file(
         node,
         command_source,
@@ -151,9 +159,19 @@ def install_openbao_host_support(node: str, repo_root: Path) -> None:
         Path("/etc/systemd/system") / OPENBAO_HOST_SERVICE,
         "0644",
     )
+    _install_remote_file(
+        node,
+        timer_source,
+        Path("/etc/systemd/system") / OPENBAO_HOST_TIMER,
+        "0644",
+    )
     _ssh(node, "systemctl", "daemon-reload")
     _ssh(node, "systemctl", "enable", OPENBAO_HOST_SERVICE)
-    console.ok("Служба автоматической разблокировки OpenBao установлена на PVE")
+    _ssh(node, "systemctl", "enable", "--now", OPENBAO_HOST_TIMER)
+    console.ok(
+        "Служба и периодическая проверка разблокировки OpenBao "
+        "установлены на PVE"
+    )
 
 
 def initialize_openbao_on_host(node: str) -> None:
