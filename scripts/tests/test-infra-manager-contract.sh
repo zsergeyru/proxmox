@@ -147,8 +147,8 @@ if "/var/lib/persistent/openbao" not in provision.get("persistence", {}).get("ba
     raise SystemExit("Данные OpenBao должны входить в обязательное резервное копирование")
 
 target_layout = provision.get("persistence", {}).get("target_layout", {})
-if target_layout.get("implemented") is not False:
-    raise SystemExit("Целевая схема постоянного состояния должна быть помечена как ещё не перенесённая")
+if target_layout.get("implemented") is not True:
+    raise SystemExit("Штатная схема постоянного состояния должна быть включена")
 if target_layout.get("host_root") != "/mnt/bindmounts/infra-manager":
     raise SystemExit("Не зафиксирован единый корень постоянных данных на PVE")
 pve_only = target_layout.get("pve_only", {})
@@ -176,6 +176,17 @@ if not required_state.issubset(set(state.get("contains", []))):
 guest_local = set(target_layout.get("guest_local", {}).get("contains", []))
 if "git-checkout" not in guest_local:
     raise SystemExit("Git checkout должен оставаться локальным и воспроизводимым внутри 910")
+bindings = state.get("bindings", [])
+binding_pairs = {(item.get("source"), item.get("target")) for item in bindings}
+required_bindings = {
+    ("/mnt/persistent-state/secrets", "/etc/infra-manager/secrets"),
+    ("/mnt/persistent-state/ansible", "/etc/infra-manager/ansible"),
+    ("/mnt/persistent-state/semaphore", "/var/lib/infra-manager/semaphore"),
+    ("/mnt/persistent-state/opentofu", "/var/lib/infra-manager/opentofu"),
+    ("/mnt/persistent-state/openbao", "/var/lib/persistent/openbao"),
+}
+if not required_bindings.issubset(binding_pairs):
+    raise SystemExit("Не зафиксированы все привязки постоянного состояния")
 
 if 'semaphore_version: str = "v2.18.30"' not in settings_text:
     raise SystemExit("Версия Semaphore в settings.py расходится с provision.yaml")
@@ -297,8 +308,8 @@ grep -q 'check_root_access' "$PY_PVE" \
     || die "Полная проверка PVE должна проверять root SSH"
 grep -q 'ROOT_ADMIN_PRIVS = {' "$PY_PVE" \
     || die "PVE API token 910 должен проверяться как полный административный token"
-grep -Fq '/etc/infra-manager/pve-host:/etc/infra-manager/pve-host:ro' "$COMPOSE" \
-    || die "infra-runtime должен получать root SSH-доступ PVE только для чтения"
+grep -Fq '/mnt/pve-access/pve-host:/mnt/pve-access/pve-host:ro' "$COMPOSE" \
+    || die "infra-runtime должен получать root SSH-доступ PVE из read-only каталога"
 grep -q 'privilege_separation: false' "$PROVISION" \
     || die "Постоянный PVE API token должен использовать privsep=0"
 grep -q 'permanent_root_ssh_to_pve: true' "$PROVISION" \
@@ -316,8 +327,8 @@ grep -Fq '"secret_shares": 1' "$OPENBAO_HOST" \
     || die "Первичная инициализация OpenBao должна создавать один unseal-ключ"
 grep -Fq '"secret_threshold": 1' "$OPENBAO_HOST" \
     || die "Порог разблокировки OpenBao должен быть равен одному ключу"
-grep -Fq '/root/.config/proxmox-bootstrap/openbao' "$OPENBAO_HOST" \
-    || die "Unseal-ключ OpenBao должен храниться только в постоянном каталоге PVE"
+grep -Fq '/mnt/bindmounts/infra-manager/pve-only/openbao' "$OPENBAO_HOST" \
+    || die "Unseal-ключ OpenBao должен храниться только в pve-only каталоге"
 grep -Fq 'payload.pop("root_token", None)' "$OPENBAO_HOST" \
     || die "Initial root token OpenBao должен извлекаться без постоянного сохранения"
 grep -Fq '/v1/auth/token/revoke-self' "$OPENBAO_HOST" \
@@ -561,10 +572,11 @@ if openbao.get('command') != ['server']:
 
 volumes = runtime.get('volumes', [])
 required = {
-    '/var/lib/infra-manager/opentofu:/var/lib/infra-manager/opentofu',
+    '/mnt/persistent-state/semaphore:/var/lib/semaphore',
+    '/mnt/persistent-state/opentofu:/var/lib/infra-manager/opentofu',
     '/etc/infra-manager/ca:/etc/infra-manager/ca:ro',
-    '/etc/infra-manager/ansible:/etc/infra-manager/ansible:ro',
-    '/etc/infra-manager/pve-host:/etc/infra-manager/pve-host:ro',
+    '/mnt/persistent-state/ansible:/etc/infra-manager/ansible:ro',
+    '/mnt/pve-access/pve-host:/mnt/pve-access/pve-host:ro',
 }
 missing = required.difference(volumes)
 if missing:
