@@ -47,8 +47,8 @@ if [[ "$sealed" != "true" ]]; then
 fi
 
 ssh \
-    -i /etc/infra-manager/pve-host/root_ed25519 \
-    -o UserKnownHostsFile=/etc/infra-manager/pve-host/known_hosts \
+    -i /mnt/pve-access/pve-host/root_ed25519 \
+    -o UserKnownHostsFile=/mnt/pve-access/pve-host/known_hosts \
     -o StrictHostKeyChecking=yes \
     -o BatchMode=yes \
     -o IdentitiesOnly=yes \
