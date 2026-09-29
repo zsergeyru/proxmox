@@ -41,9 +41,26 @@ class BootstrapHost:
                 str(self.host_bootstrap_dir / "github_proxmox_repo_ed25519"),
             )
         )
-        self.host_pve_root_key = self.host_bootstrap_dir / "pve_root_ed25519"
+
+        self.host_persistent_root = Path("/mnt/bindmounts/infra-manager")
+        self.host_pve_only_dir = self.host_persistent_root / "pve-only"
+        self.host_access_dir = self.host_persistent_root / "access"
+        self.host_state_dir = self.host_persistent_root / "state"
+        self.host_access_github_dir = self.host_access_dir / "github"
+        self.host_access_pve_host_dir = self.host_access_dir / "pve-host"
+        self.host_access_pve_api_dir = self.host_access_dir / "pve-api"
+        self.host_access_ca_dir = self.host_access_dir / "ca"
+        self.host_access_github_key = (
+            self.host_access_github_dir / "github_proxmox_repo_ed25519"
+        )
+        self.host_pve_root_key = self.host_access_pve_host_dir / "root_ed25519"
         self.host_pve_root_known_hosts = (
-            self.host_bootstrap_dir / "pve_root_known_hosts"
+            self.host_access_pve_host_dir / "known_hosts"
+        )
+        self.host_pve_api_env = self.host_access_pve_api_dir / "pve-api.env"
+        self.host_pve_ca = self.host_access_ca_dir / "pve-root-ca.crt"
+        self.host_openbao_unseal_key = (
+            self.host_pve_only_dir / "openbao" / "unseal.key"
         )
         self.host_root_authorized_keys = Path("/root/.ssh/authorized_keys")
         self.host_ssh_public_key = Path("/etc/ssh/ssh_host_ed25519_key.pub")
@@ -72,16 +89,23 @@ class BootstrapHost:
         self.infra_ctid = 910
         self.infra_hostname = "infra-manager"
         self.infra_project_dir = Path("/var/lib/infra-manager/bootstrap-repo")
-        self.infra_github_key = Path("/root/.ssh/github_proxmox_repo_ed25519")
+        self.infra_access_dir = Path("/mnt/pve-access")
+        self.infra_state_dir = Path("/mnt/persistent-state")
+        self.infra_github_key = (
+            self.infra_access_dir / "github" / "github_proxmox_repo_ed25519"
+        )
         self.infra_github_config = Path("/root/.ssh/github_config")
         self.infra_github_known_hosts = Path("/root/.ssh/github_known_hosts")
-        self.infra_staging_secret = Path("/root/.infra-manager-bootstrap/pve-api.env")
+        self.infra_pve_api_env = (
+            self.infra_access_dir / "pve-api" / "pve-api.env"
+        )
+        self.infra_pve_ca = self.infra_access_dir / "ca" / "pve-root-ca.crt"
         self.runner_pve_host_dir = Path("/etc/bootstrap-runner/pve-host")
         self.runner_ansible_public_key = Path(
             "/etc/bootstrap-runner/ansible/guest_ed25519.pub"
         )
         self.runner_ssh_key_comment = "bootstrap-runner-990"
-        self.infra_pve_host_dir = Path("/etc/infra-manager/pve-host")
+        self.infra_pve_host_dir = self.infra_access_dir / "pve-host"
 
         self.color = not os.environ.get("NO_COLOR") and os.environ.get("TERM") != "dumb"
         self.c_reset = "\033[0m" if self.color else ""
@@ -275,9 +299,195 @@ class BootstrapHost:
         output = self.pct("status", str(ctid), capture=True).stdout.strip()
         return output.split()[-1] if output else ""
 
+    def _set_mode_owner(
+        self,
+        path: Path,
+        mode: int,
+        uid: int,
+        gid: int,
+    ) -> None:
+        path.chmod(mode)
+        os.chown(path, uid, gid)
+
+    def _copy_access_file(
+        self,
+        source: Path,
+        target: Path,
+        *,
+        mode: int,
+        uid: int,
+        gid: int,
+    ) -> None:
+        if not source.is_file() or source.stat().st_size == 0:
+            self.fail(f"отсутствует исходный файл доступа: {source}")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source, target)
+        self._set_mode_owner(target, mode, uid, gid)
+
+    def prepare_new_persistent_layout(self) -> None:
+        """Подготовить пустую постоянную область для нового 910 без миграции."""
+        self.host_persistent_root.mkdir(parents=True, exist_ok=True)
+        self.host_pve_only_dir.mkdir(parents=True, exist_ok=True)
+        self.host_access_dir.mkdir(parents=True, exist_ok=True)
+        self.host_state_dir.mkdir(parents=True, exist_ok=True)
+
+        # 910 — непривилегированный LXC с обычным отображением uid:
+        # root -> 100000, uid 1001 -> 101001.
+        self._set_mode_owner(self.host_persistent_root, 0o755, 0, 0)
+        self._set_mode_owner(self.host_pve_only_dir, 0o700, 0, 0)
+        self._set_mode_owner(self.host_access_dir, 0o755, 0, 0)
+        self._set_mode_owner(self.host_state_dir, 0o700, 100000, 100000)
+
+        for path, mode, uid, gid in (
+            (self.host_access_github_dir, 0o700, 100000, 100000),
+            (self.host_access_pve_host_dir, 0o700, 101001, 100000),
+            (self.host_access_pve_api_dir, 0o700, 100000, 100000),
+            (self.host_access_ca_dir, 0o755, 100000, 100000),
+            (self.host_openbao_unseal_key.parent, 0o700, 0, 0),
+        ):
+            path.mkdir(parents=True, exist_ok=True)
+            self._set_mode_owner(path, mode, uid, gid)
+
+        if not self.host_access_github_key.exists():
+            self._copy_access_file(
+                self.host_github_key,
+                self.host_access_github_key,
+                mode=0o600,
+                uid=100000,
+                gid=100000,
+            )
+
+        ca_source = Path("/etc/pve/pve-root-ca.pem")
+        self._copy_access_file(
+            ca_source,
+            self.host_pve_ca,
+            mode=0o644,
+            uid=100000,
+            gid=100000,
+        )
+        self.ok("Постоянные каталоги нового 910 подготовлены на PVE")
+
+    def _infra_mount_matches(
+        self,
+        config: str,
+        name: str,
+        source: Path,
+        target: Path,
+        *,
+        read_only: bool,
+    ) -> bool:
+        line = next(
+            (row for row in config.splitlines() if row.startswith(f"{name}: ")),
+            "",
+        )
+        if not line:
+            return False
+        value = line.split(": ", 1)[1]
+        parts = value.split(",")
+        if not parts or parts[0] != str(source):
+            return False
+        options = {
+            key: val
+            for item in parts[1:]
+            if "=" in item
+            for key, val in [item.split("=", 1)]
+        }
+        if options.get("mp") != str(target):
+            return False
+        return (options.get("ro") == "1") if read_only else ("ro" not in options)
+
+    def verify_persistent_layout(self) -> None:
+        """Проверить уже подготовленную схему, ничего не копируя."""
+        required_dirs = (
+            self.host_pve_only_dir,
+            self.host_access_dir,
+            self.host_state_dir,
+            self.host_access_github_dir,
+            self.host_access_pve_host_dir,
+            self.host_access_pve_api_dir,
+            self.host_access_ca_dir,
+        )
+        missing = [str(path) for path in required_dirs if not path.is_dir()]
+        if missing:
+            self.fail(
+                "910 ещё использует старую схему постоянных данных; "
+                "автоматическая миграция запрещена. Выполните ручную миграцию. "
+                f"Отсутствуют: {', '.join(missing)}"
+            )
+
+        config = self.pct_config(self.infra_ctid)
+        access_ok = self._infra_mount_matches(
+            config,
+            "mp0",
+            self.host_access_dir,
+            self.infra_access_dir,
+            read_only=True,
+        )
+        state_ok = self._infra_mount_matches(
+            config,
+            "mp1",
+            self.host_state_dir,
+            self.infra_state_dir,
+            read_only=False,
+        )
+        if not access_ok or not state_ok:
+            self.fail(
+                "LXC 910 не подключён к постоянным каталогам PVE. "
+                "Автоматическая миграция существующих данных запрещена; "
+                "выполните её вручную."
+            )
+
+        required_files = (
+            self.host_access_github_key,
+            self.host_pve_root_key,
+            self.host_pve_root_known_hosts,
+            self.host_pve_ca,
+        )
+        missing_files = [
+            str(path)
+            for path in required_files
+            if not path.is_file() or path.stat().st_size == 0
+        ]
+        if missing_files:
+            self.fail(
+                "В постоянном каталоге PVE отсутствуют данные доступа: "
+                + ", ".join(missing_files)
+            )
+
+    def attach_persistent_layout(self) -> None:
+        """Подключить подготовленные каталоги к новому LXC 910."""
+        if not self.infra_exists():
+            self.fail("нельзя подключить постоянные каталоги: LXC 910 отсутствует")
+        if not self.infra_config_is_expected():
+            self.fail(f"VMID {self.infra_ctid} занят чужим объектом")
+
+        was_running = self.pct_status(self.infra_ctid) == "running"
+        if was_running:
+            self.pct("stop", str(self.infra_ctid))
+
+        self.pct(
+            "set",
+            str(self.infra_ctid),
+            "--mp0",
+            f"{self.host_access_dir},mp={self.infra_access_dir},ro=1",
+            "--mp1",
+            f"{self.host_state_dir},mp={self.infra_state_dir}",
+        )
+
+        self.pct("start", str(self.infra_ctid))
+        self.verify_persistent_layout()
+        self.ok("Постоянные каталоги PVE подключены к новому 910")
+
     def ensure_host_root_ssh_access(self) -> None:
         """Подготовить отдельный root SSH-ключ для управляющего контура."""
         self.host_bootstrap_dir.mkdir(parents=True, exist_ok=True)
+        self.host_access_pve_host_dir.mkdir(parents=True, exist_ok=True)
+        self._set_mode_owner(
+            self.host_access_pve_host_dir,
+            0o700,
+            101001,
+            100000,
+        )
         if not self.host_pve_root_key.is_file():
             self.run(
                 "ssh-keygen",
@@ -326,7 +536,14 @@ class BootstrapHost:
             f"{node} {host_key_parts[0]} {host_key_parts[1]}\n",
             encoding="utf-8",
         )
-        self.host_pve_root_known_hosts.chmod(0o644)
+        self._set_mode_owner(self.host_pve_root_key, 0o600, 101001, 100000)
+        self._set_mode_owner(public_key, 0o644, 101001, 100000)
+        self._set_mode_owner(
+            self.host_pve_root_known_hosts,
+            0o644,
+            101001,
+            100000,
+        )
         self.ok("Root SSH-доступ управляющего контура к PVE подготовлен")
 
     def remove_host_root_ssh_authorization(self) -> None:
@@ -377,30 +594,21 @@ class BootstrapHost:
         )
 
     def prepare_infra_pve_root_access(self) -> None:
-        """Передать постоянный root SSH-доступ внутрь 910 для infra-runtime."""
+        """Проверить постоянный root SSH-доступ из read-only каталога PVE."""
         self.verify_infra_object()
-        self.infra_exec("install", "-d", "-m", "0700", str(self.infra_pve_host_dir))
-        self.push_to_infra(
-            self.host_pve_root_key,
-            self.infra_pve_host_dir / "root_ed25519",
-            "0600",
+        required = (
+            (self.host_pve_root_key, self.infra_pve_host_dir / "root_ed25519"),
+            (
+                self.host_pve_root_known_hosts,
+                self.infra_pve_host_dir / "known_hosts",
+            ),
         )
-        self.push_to_infra(
-            self.host_pve_root_known_hosts,
-            self.infra_pve_host_dir / "known_hosts",
-            "0644",
-        )
-        self.infra_exec(
-            "chown",
-            "1001:0",
-            str(self.infra_pve_host_dir),
-            str(self.infra_pve_host_dir / "root_ed25519"),
-            str(self.infra_pve_host_dir / "known_hosts"),
-        )
-        self.infra_exec("chmod", "0700", str(self.infra_pve_host_dir))
-        self.infra_exec("chmod", "0600", str(self.infra_pve_host_dir / "root_ed25519"))
-        self.infra_exec("chmod", "0644", str(self.infra_pve_host_dir / "known_hosts"))
-        self.ok("Root SSH-доступ PVE передан в 910")
+        for host_path, guest_path in required:
+            if not host_path.is_file() or host_path.stat().st_size == 0:
+                self.fail(f"на PVE отсутствует постоянный файл доступа: {host_path}")
+            if not self.infra_test("-s", guest_path):
+                self.fail(f"910 не видит постоянный файл доступа: {guest_path}")
+        self.ok("Root SSH-доступ PVE доступен в 910 только для чтения")
 
     def assert_owned_runner(self) -> None:
         # VMID недостаточно для доказательства владения: проверяем также
@@ -681,7 +889,7 @@ class BootstrapHost:
     def prepare_infra_pve_access(self, access_mode: str = "apply") -> None:
         """Подготовить полный API token root@pam и PVE CA для 910."""
         self.verify_infra_object()
-        persistent = Path("/etc/infra-manager/secrets/pve-api.env")
+        persistent = self.infra_pve_api_env
         token_name = "infra-manager"
 
         rows = self.pveum_json("user", "token", "list", "root@pam")
@@ -702,33 +910,20 @@ class BootstrapHost:
         if token_row is None:
             token_id, secret = self.create_full_pve_token(token_name)
             node, _ = self.pve_node_address()
-            fd, tmp_name = tempfile.mkstemp(
-                prefix="infra-manager-pve-api.",
-                dir="/run",
+            self.host_access_pve_api_dir.mkdir(parents=True, exist_ok=True)
+            self.host_pve_api_env.write_text(
+                f"PVE_API_URL=https://{node}:8006\n"
+                f"PVE_API_TOKEN_ID={token_id}\n"
+                f"PVE_API_TOKEN_SECRET={secret}\n",
+                encoding="utf-8",
             )
-            os.close(fd)
-            tmp = Path(tmp_name)
-            try:
-                tmp.write_text(
-                    f"PVE_API_URL=https://{node}:8006\n"
-                    f"PVE_API_TOKEN_ID={token_id}\n"
-                    f"PVE_API_TOKEN_SECRET={secret}\n",
-                    encoding="utf-8",
-                )
-                tmp.chmod(0o600)
-                self.infra_exec(
-                    "install",
-                    "-d",
-                    "-m",
-                    "0700",
-                    str(self.infra_staging_secret.parent),
-                )
-                self.push_to_infra(tmp, self.infra_staging_secret, "0600")
-            finally:
-                tmp.unlink(missing_ok=True)
-        elif not self.infra_test("-s", self.infra_staging_secret) and not self.infra_test(
-            "-s", persistent
-        ):
+            self._set_mode_owner(
+                self.host_pve_api_env,
+                0o600,
+                100000,
+                100000,
+            )
+        elif not self.infra_test("-s", persistent):
             self.fail(
                 "Token root@pam!infra-manager существует, но secret недоступен в 910; "
                 "используйте --recover"
@@ -746,12 +941,15 @@ class BootstrapHost:
             )
 
         ca_source = Path("/etc/pve/pve-root-ca.pem")
-        if not ca_source.is_file() or ca_source.stat().st_size == 0:
-            self.fail("не найден PVE CA")
-        ca_target = Path("/usr/local/share/ca-certificates/pve-root-ca.crt")
-        self.infra_exec("install", "-d", "-m", "0755", str(ca_target.parent))
-        self.push_to_infra(ca_source, ca_target, "0644")
-        self.infra_exec("update-ca-certificates", quiet=True)
+        self._copy_access_file(
+            ca_source,
+            self.host_pve_ca,
+            mode=0o644,
+            uid=100000,
+            gid=100000,
+        )
+        if not self.infra_test("-s", self.infra_pve_ca):
+            self.fail("910 не видит PVE CA из постоянного каталога PVE")
 
         node, host_ip = self.pve_node_address()
         hosts_script = (
@@ -785,13 +983,17 @@ class BootstrapHost:
 
     def prepare_infra_project_access(self) -> None:
         self.verify_infra_object()
+        if not self.infra_test("-s", self.infra_github_key):
+            self.fail(
+                "910 не видит GitHub Deploy Key из постоянного каталога PVE"
+            )
+
         self.infra_exec("install", "-d", "-m", "0700", "/root/.ssh")
 
-        # В 910 передаётся тот же Deploy Key только для чтения, которым публичная
-        # часть получила закрытый проект через временный 990.
-        self.push_to_infra(self.host_github_key, self.infra_github_key, "0600")
-
-        fd, tmp_name = tempfile.mkstemp(prefix="infra-manager-known-hosts.", dir="/run")
+        fd, tmp_name = tempfile.mkstemp(
+            prefix="infra-manager-known-hosts.",
+            dir="/run",
+        )
         os.close(fd)
         tmp = Path(tmp_name)
         try:
@@ -800,18 +1002,18 @@ class BootstrapHost:
         finally:
             tmp.unlink(missing_ok=True)
 
-        config = """Host github.com
+        config = f"""Host github.com
     HostName github.com
     User git
-    IdentityFile /root/.ssh/github_proxmox_repo_ed25519
+    IdentityFile {self.infra_github_key}
     IdentitiesOnly yes
-    UserKnownHostsFile /root/.ssh/github_known_hosts
+    UserKnownHostsFile {self.infra_github_known_hosts}
     StrictHostKeyChecking yes
     BatchMode yes
     ConnectTimeout 10
 """
         self._write_infra_file(self.infra_github_config, config, "0600")
-        self.ok("GitHub-доступ передан в 910")
+        self.ok("GitHub-доступ подключён из постоянного каталога PVE")
 
     def _write_infra_file(self, path: Path, content: str, mode: str) -> None:
         # pct push работает с локальным файлом, поэтому текст сначала
@@ -869,12 +1071,10 @@ class BootstrapHost:
         # учётные данные PVE, CA, Deploy Key и рабочую копию проекта.
         self.verify_infra_object()
         persistent = Path("/etc/infra-manager/secrets/pve-api.env")
-        if not self.infra_test("-s", self.infra_staging_secret) and not self.infra_test(
-            "-s", persistent
-        ):
+        if not self.infra_test("-s", persistent):
             self.fail("в 910 отсутствует PVE API credential")
         required = (
-            (Path("/usr/local/share/ca-certificates/pve-root-ca.crt"), "PVE CA"),
+            (self.infra_pve_ca, "PVE CA"),
             (self.infra_pve_host_dir / "root_ed25519", "PVE root SSH key"),
             (self.infra_pve_host_dir / "known_hosts", "PVE SSH known_hosts"),
             (self.infra_github_key, "GitHub Deploy Key"),
@@ -898,7 +1098,7 @@ class BootstrapHost:
         self.prepare_infra_pve_root_access()
         self.prepare_infra_project_access()
         self.checkout_infra_project()
-        if not self.infra_test("-s", "/etc/infra-manager/secrets/pve-api.env"):
+        if not self.infra_test("-s", self.infra_pve_api_env):
             self.fail("в существующем 910 отсутствует постоянный PVE API credential")
 
     def verify_infra_ready(self, *, quiet: bool = False) -> None:
@@ -1079,6 +1279,11 @@ class BootstrapHost:
 
     def apply(self) -> None:
         existed = self.infra_exists()
+        if existed:
+            self.verify_persistent_layout()
+        else:
+            self.prepare_new_persistent_layout()
+
         self.prepare_runner()
         owns_910 = self.runner_owns_910()
 
@@ -1126,6 +1331,7 @@ class BootstrapHost:
                 "Создание LXC 910 через OpenTofu",
                 "LXC 910 создан через состояние bootstrap-runner",
             )
+            self.attach_persistent_layout()
             self.ensure_runner_ssh_access_to_infra()
             self.deploy_910_phase(
                 "base",
@@ -1161,7 +1367,10 @@ class BootstrapHost:
         elif self.mode == "purge":
             self.remove_infra()
             shutil.rmtree(self.host_bootstrap_dir, ignore_errors=True)
-            self.ok("Постоянный GitHub Deploy Key удалён")
+            self.ok(
+                "Старый bootstrap-каталог удалён; "
+                "постоянное состояние /mnt/bindmounts/infra-manager сохранено"
+            )
         else:
             self.fail(f"неизвестный режим: {self.mode}")
 
