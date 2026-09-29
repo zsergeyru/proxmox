@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import shlex
-import subprocess
 from pathlib import Path
 
 from .common import InfraManagerError, console, require_command, run
@@ -49,45 +48,34 @@ def _ssh_with_input(
     node: str,
     *command: str,
     input_text: str,
-) -> subprocess.CompletedProcess[str]:
+):
     """Передать данные на PVE через stdin, не помещая их в argv."""
     require_command("ssh")
     _required_file(PATHS.pve_host_private_key, "закрытый ключ root-доступа к PVE")
     _required_file(PATHS.pve_host_known_hosts, "known_hosts PVE")
 
     remote_command = shlex.join(command)
-    argv = [
-        "ssh",
-        "-i",
-        str(PATHS.pve_host_private_key),
-        "-o",
-        f"UserKnownHostsFile={PATHS.pve_host_known_hosts}",
-        "-o",
-        "StrictHostKeyChecking=yes",
-        "-o",
-        "BatchMode=yes",
-        "-o",
-        "IdentitiesOnly=yes",
-        "-o",
-        "ConnectTimeout=10",
-        f"root@{node}",
-        remote_command,
-    ]
-    result = subprocess.run(
-        argv,
-        input=input_text,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        check=False,
+    return run(
+        [
+            "ssh",
+            "-i",
+            str(PATHS.pve_host_private_key),
+            "-o",
+            f"UserKnownHostsFile={PATHS.pve_host_known_hosts}",
+            "-o",
+            "StrictHostKeyChecking=yes",
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            "IdentitiesOnly=yes",
+            "-o",
+            "ConnectTimeout=10",
+            f"root@{node}",
+            remote_command,
+        ],
+        capture_output=True,
+        input_text=input_text,
     )
-    if result.returncode:
-        detail = result.stderr.strip()
-        raise InfraManagerError(
-            f"Команда на PVE завершилась с кодом {result.returncode}"
-            + (f": {detail}" if detail else "")
-        )
-    return result
 
 
 OPENBAO_HOST_COMMAND = Path("/usr/local/sbin/infra-manager-openbao-unseal")
@@ -182,7 +170,6 @@ def initialize_openbao_on_host(node: str) -> None:
 def trigger_openbao_unseal(node: str) -> None:
     """Запустить идемпотентную разблокировку OpenBao через PVE."""
     _ssh(node, "systemctl", "start", OPENBAO_HOST_SERVICE)
-
 
 def _features_from_config(config: str) -> dict[str, str]:
     """Разобрать строку features из pct config."""
