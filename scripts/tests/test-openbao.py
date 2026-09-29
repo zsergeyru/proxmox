@@ -113,6 +113,7 @@ def test_host_initialization_does_not_print_secrets() -> None:
             patch.object(host, "unseal"),
             patch.object(host, "ensure_ssh_cas") as ensure_cas,
             patch.object(host, "configure_ssh_access") as configure_access,
+            patch.object(host, "publish_client_ca") as publish_ca,
             contextlib.redirect_stdout(output),
         ):
             host.initialize()
@@ -121,6 +122,7 @@ def test_host_initialization_does_not_print_secrets() -> None:
         fail("Хостовый сценарий не сохранил ожидаемый unseal-ключ")
     ensure_cas.assert_called_once_with(root_token)
     configure_access.assert_called_once_with(root_token)
+    publish_ca.assert_called_once_with(root_token)
     if revoked != [root_token]:
         fail("Initial root token не был передан на self-revoke через stdin")
     text = output.getvalue()
@@ -145,6 +147,7 @@ def test_existing_openbao_skips_root_when_ready() -> None:
             ),
             patch.object(host, "unseal") as unseal,
             patch.object(host, "ssh_cas_ready", return_value=True),
+            patch.object(host, "client_ca_published", return_value=True),
             patch.object(host, "check_ssh_access") as check_access,
             patch.object(host, "generate_temporary_root_token") as generate_root,
         ):
@@ -171,6 +174,7 @@ def test_existing_openbao_bootstraps_missing_ssh_security() -> None:
             ),
             patch.object(host, "unseal") as unseal,
             patch.object(host, "ssh_cas_ready", return_value=False),
+            patch.object(host, "client_ca_published", return_value=False),
             patch.object(
                 host,
                 "generate_temporary_root_token",
@@ -178,6 +182,7 @@ def test_existing_openbao_bootstraps_missing_ssh_security() -> None:
             ) as generate_root,
             patch.object(host, "ensure_ssh_cas") as ensure_cas,
             patch.object(host, "configure_ssh_access") as configure_access,
+            patch.object(host, "publish_client_ca") as publish_ca,
             patch.object(host, "revoke_temporary_root_token") as revoke_root,
         ):
             host.initialize()
@@ -186,6 +191,7 @@ def test_existing_openbao_bootstraps_missing_ssh_security() -> None:
     generate_root.assert_called_once_with()
     ensure_cas.assert_called_once_with("TEMP-ROOT-TOKEN")
     configure_access.assert_called_once_with("TEMP-ROOT-TOKEN")
+    publish_ca.assert_called_once_with("TEMP-ROOT-TOKEN")
     revoke_root.assert_called_once_with("TEMP-ROOT-TOKEN")
 
 
@@ -327,6 +333,38 @@ def test_temporary_root_window_restores_protected_container() -> None:
         fail("Временная конфигурация generate-root не удаляется")
 
 
+def test_client_ca_publication_uses_only_public_key() -> None:
+    host = load_host_module()
+    key = "ssh-rsa AAAATESTCLIENTCA"
+
+    calls: list[tuple[tuple[str, ...], str | None]] = []
+
+    def fake_pct_exec(
+        *args: str,
+        capture: bool = False,
+        check: bool = True,
+        input_text: str | None = None,
+    ):
+        del capture, check
+        calls.append((tuple(args), input_text))
+        if args[:2] == ("python3", "-c") and args[2] == host.READ_CLIENT_CA_CODE:
+            return SimpleNamespace(returncode=0, stdout=key + "\n", stderr="")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    with (
+        patch.object(host, "pct_exec", side_effect=fake_pct_exec),
+        patch.object(host, "client_ca_published", return_value=True),
+    ):
+        host.publish_client_ca("ROOT-TOKEN-TEST")
+
+    if calls[0][1] != "ROOT-TOKEN-TEST":
+        fail("Root token для чтения CA должен передаваться только через stdin")
+    if key not in [item[1] for item in calls]:
+        fail("Открытый SSH CA ключ не передан в 910")
+    if any("ROOT-TOKEN-TEST" in " ".join(item[0]) for item in calls):
+        fail("Root token попал в argv при публикации открытого CA")
+
+
 def test_ssh_ca_mounts_are_separate() -> None:
     host = load_host_module()
     code = host.CONFIGURE_SSH_CA_CODE
@@ -404,6 +442,7 @@ def main() -> None:
     test_ssh_ca_reconcile_requires_initial_admin_token()
     test_raw_root_generation_uses_unseal_key_via_stdin()
     test_temporary_root_window_restores_protected_container()
+    test_client_ca_publication_uses_only_public_key()
     test_ssh_ca_mounts_are_separate()
     test_ssh_access_contract_is_narrow()
     test_ssh_access_credentials_are_pve_only()

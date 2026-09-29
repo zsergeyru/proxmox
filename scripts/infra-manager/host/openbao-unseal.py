@@ -23,6 +23,7 @@ CT_KEY_PATH = CT_RUNTIME_DIR / "openbao-unseal.key"
 CT_COMPAT_CONFIG_PATH = CT_RUNTIME_DIR / "openbao-generate-root.hcl"
 CT_OPENBAO_CONFIG_PATH = Path("/opt/infra-manager/compose/openbao/openbao.hcl")
 CT_OPENBAO_DATA_PATH = Path("/mnt/persistent-state/openbao")
+CT_CLIENT_CA_PATH = Path("/etc/infra-manager/ca/ssh-client-ca.pub")
 TEMP_OPENBAO_CONTAINER = "infra-manager-openbao-generate-root"
 
 STATUS_CODE = r"""
@@ -217,6 +218,24 @@ print(
     )
 )
 """
+
+READ_CLIENT_CA_CODE = r"""
+import sys
+import urllib.request
+
+token = sys.stdin.read().strip()
+if not token:
+    raise SystemExit("empty root token")
+
+request = urllib.request.Request(
+    "http://127.0.0.1:8200/v1/ssh-client-signer/public_key",
+    headers={"X-Vault-Token": token},
+    method="GET",
+)
+with urllib.request.urlopen(request, timeout=30) as response:
+    print(response.read().decode("utf-8").strip())
+"""
+
 
 CONFIGURE_SSH_CA_CODE = r"""
 import json
@@ -1059,10 +1078,79 @@ def configure_ssh_access(root_token: str) -> None:
     print("[ОК] Ограниченный служебный доступ к SSH-центрам настроен")
 
 
+def client_ca_published() -> bool:
+    result = pct_exec(
+        "cat",
+        str(CT_CLIENT_CA_PATH),
+        capture=True,
+        check=False,
+    )
+    key = result.stdout.strip() if result.returncode == 0 else ""
+    return key.startswith(("ssh-", "ecdsa-", "sk-"))
+
+
+def publish_client_ca(root_token: str) -> None:
+    result = pct_exec(
+        "python3",
+        "-c",
+        READ_CLIENT_CA_CODE,
+        capture=True,
+        input_text=root_token,
+    )
+    key = result.stdout.strip()
+    if not key.startswith(("ssh-", "ecdsa-", "sk-")):
+        raise OpenBaoHostError(
+            "OpenBao не вернул корректный открытый ключ центра доступа"
+        )
+
+    install_code = r"""
+import os
+import pathlib
+import sys
+import tempfile
+
+target = pathlib.Path("/etc/infra-manager/ca/ssh-client-ca.pub")
+key = sys.stdin.read().strip()
+if not key.startswith(("ssh-", "ecdsa-", "sk-")):
+    raise SystemExit("invalid SSH CA public key")
+
+target.parent.mkdir(parents=True, exist_ok=True)
+fd, temporary_name = tempfile.mkstemp(
+    prefix=".ssh-client-ca.",
+    dir=target.parent,
+    text=True,
+)
+temporary = pathlib.Path(temporary_name)
+try:
+    os.fchmod(fd, 0o644)
+    with os.fdopen(fd, "w", encoding="utf-8") as stream:
+        stream.write(key)
+        stream.write("\n")
+        stream.flush()
+        os.fsync(stream.fileno())
+    os.replace(temporary, target)
+    os.chmod(target, 0o644)
+finally:
+    temporary.unlink(missing_ok=True)
+"""
+    pct_exec(
+        "python3",
+        "-c",
+        install_code,
+        capture=True,
+        input_text=key,
+    )
+    if not client_ca_published():
+        raise OpenBaoHostError(
+            "Открытый ключ центра доступа не прошёл проверку после публикации"
+        )
+    print(f"[ОК] Открытый ключ центра доступа опубликован: {CT_CLIENT_CA_PATH}")
+
+
 def ensure_existing_openbao_ssh() -> None:
-    if ssh_cas_ready() and SSH_ACCESS_PATH.is_file():
+    if ssh_cas_ready() and SSH_ACCESS_PATH.is_file() and client_ca_published():
         check_ssh_access()
-        print("[ОК] SSH-центры и служебный доступ OpenBao уже готовы")
+        print("[ОК] SSH-центры, служебный доступ и открытый ключ OpenBao уже готовы")
         return
 
     root_token = generate_temporary_root_token()
@@ -1072,6 +1160,7 @@ def ensure_existing_openbao_ssh() -> None:
             check_ssh_access()
         else:
             configure_ssh_access(root_token)
+        publish_client_ca(root_token)
     finally:
         revoke_temporary_root_token(root_token)
         del root_token
@@ -1131,6 +1220,7 @@ def initialize() -> None:
     try:
         ensure_ssh_cas(root_token)
         configure_ssh_access(root_token)
+        publish_client_ca(root_token)
     finally:
         revoke_initial_root_token(root_token)
         del root_token
