@@ -109,5 +109,5 @@ linux_base
 
 - [`../../docs/700-security/720-ssh-access.md`](../../docs/700-security/720-ssh-access.md) — SSH-ключи и жизненный цикл секретов.
 - [`../../docs/300-guests/330-guest-lifecycle.md`](../../docs/300-guests/330-guest-lifecycle.md) — граница ответственности OpenTofu и Ansible.
-- [`../../docs/300-guests/350-linux-filesystem.md`](../../docs/300-guests/350-linux-filesystem.md) — правила `rootfs/` и размещения файлов и данных внутри Linux-гостей.
+- [`../../docs/300-guests/350-linux-filesystem.md`](../../docs/300-guests/350-linux-filesystem.md) — правила размещения файлов и данных внутри Linux-гостей.
 - [`../../infrastructure/guests/README.md`](../../infrastructure/guests/README.md) — требуемое состояние и файлы конкретных гостевых систем.
