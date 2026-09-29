@@ -445,6 +445,7 @@ def test_host_signing_role_is_host_only() -> None:
     host = load_host_module()
     code = host.CONFIGURE_HOST_SIGNING_ROLE_CODE
     required = (
+        '"algorithm_signer": "rsa-sha2-256"',
         '"allow_user_certificates": False',
         '"allow_host_certificates": True',
         '"allow_bare_domains": True',
@@ -452,6 +453,8 @@ def test_host_signing_role_is_host_only() -> None:
         '"allowed_domains": "*"',
         '"key_id_format": "infra-manager-host-{{public_key_hash}}"',
         '"ttl": "720h"',
+        'role.get("algorithm_signer") != "rsa-sha2-256"',
+        'role.get("ttl") != 2592000',
     )
     for item in required:
         if item not in code:
