@@ -287,8 +287,10 @@ grep -Fq '/root/.config/proxmox-bootstrap/openbao' "$OPENBAO_HOST" \
     || die "Unseal-ключ OpenBao должен храниться только в постоянном каталоге PVE"
 grep -Fq 'payload.pop("root_token", None)' "$OPENBAO_HOST" \
     || die "Initial root token OpenBao должен удаляться из ответа без сохранения"
-grep -Fq 'pct", "push"' "$OPENBAO_HOST" \
+grep -Fq '"push",' "$OPENBAO_HOST" \
     || die "Unseal-ключ должен передаваться в 910 временным файлом, не аргументом"
+grep -Fq 'CT_KEY_PATH' "$OPENBAO_HOST" \
+    || die "Временная копия unseal-ключа должна использовать каталог /run внутри 910"
 grep -Fq 'ExecStart=/usr/local/sbin/infra-manager-openbao-unseal' "$OPENBAO_SERVICE" \
     || die "systemd-служба должна запускать хостовый сценарий OpenBao"
 grep -Fq 'OnUnitActiveSec=60s' "$OPENBAO_TIMER" \
