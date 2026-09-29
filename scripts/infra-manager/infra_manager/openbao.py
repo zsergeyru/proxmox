@@ -27,14 +27,14 @@ def _pve_node_from_environment() -> str:
 
 
 def run_initialize_openbao(repo_root: Path) -> int:
-    """Установить хостовую службу и один раз инициализировать OpenBao."""
+    """Установить хостовый сценарий и один раз инициализировать OpenBao."""
     node = _pve_node_from_environment()
 
-    console.info("Установка службы разблокировки OpenBao на PVE")
+    console.info("Установка сценария разблокировки OpenBao на PVE")
     install_openbao_host_support(node, repo_root)
 
     console.info("Первичная инициализация OpenBao")
     initialize_openbao_on_host(node)
 
-    console.ok("OpenBao инициализирован и автоматическая разблокировка настроена")
+    console.ok("OpenBao инициализирован; разблокировка при запуске 910 настроена")
     return 0

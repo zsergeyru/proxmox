@@ -133,13 +133,15 @@ Semaphore: Initialize OpenBao 910
 → scripts/infra-manager/jobs/initialize-openbao.py
 → infra_manager.openbao
 → root SSH к PVE
-→ установка хостового сценария и systemd-служб
+→ установка хостового сценария разблокировки
 → первичная инициализация OpenBao
 → сохранение ключа снятия блокировки только на PVE
 → проверка sealed=false
 ```
 
 Задание не является частью обычного обновления 910 и предназначено для однократной первичной инициализации пустого хранилища.
+
+При запуске самого 910 используется отдельная одноразовая команда `openbao-startup-unseal.sh`. Она ждёт доступности OpenBao и через root SSH вызывает хостовый сценарий на PVE только при состоянии `initialized=true, sealed=true`. Периодического запуска на PVE нет.
 
 `build-template.py`:
 

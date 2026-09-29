@@ -368,6 +368,7 @@
     - { source: pve-access-check.sh, target: infra-manager-pve-access-check }
     - { source: pve-lifecycle-test.sh, target: infra-manager-pve-lifecycle-test }
     - { source: activate-runtime.sh, target: infra-manager-activate-runtime }
+    - { source: openbao-startup-unseal.sh, target: infra-manager-openbao-startup-unseal }
 
 - name: Создать короткие команды управления
   ansible.builtin.file:
@@ -386,6 +387,48 @@
     dest: /usr/bin/infra-manager-status
     state: link
     force: true
+
+- name: Установить запуск разблокировки OpenBao вместе с 910
+  ansible.builtin.template:
+    src: "{{ guest_root }}/systemd/infra-manager-openbao-startup-unseal.service.j2"
+    dest: /etc/systemd/system/infra-manager-openbao-startup-unseal.service
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Включить разблокировку OpenBao при запуске 910
+  ansible.builtin.systemd_service:
+    name: infra-manager-openbao-startup-unseal.service
+    enabled: true
+    daemon_reload: true
+
+- name: Убрать старую периодическую разблокировку OpenBao с PVE
+  ansible.builtin.command:
+    argv:
+      - ssh
+      - -i
+      - "{{ provision.access.pve.root_ssh_private_key }}"
+      - -o
+      - "UserKnownHostsFile={{ provision.access.pve.root_ssh_known_hosts }}"
+      - -o
+      - StrictHostKeyChecking=yes
+      - -o
+      - BatchMode=yes
+      - -o
+      - IdentitiesOnly=yes
+      - "root@{{ infra_pve_node }}"
+      - >-
+        systemctl disable --now
+        infra-manager-openbao-unseal.timer
+        infra-manager-openbao-unseal.service
+        >/dev/null 2>&1 || true;
+        rm -f
+        /etc/systemd/system/infra-manager-openbao-unseal.timer
+        /etc/systemd/system/infra-manager-openbao-unseal.service
+        /etc/systemd/system/timers.target.wants/infra-manager-openbao-unseal.timer
+        /etc/systemd/system/multi-user.target.wants/infra-manager-openbao-unseal.service;
+        systemctl daemon-reload
+  changed_when: true
 
 - name: Настроить владельца данных Semaphore
   ansible.builtin.file:
@@ -502,9 +545,7 @@
       - -o
       - IdentitiesOnly=yes
       - "root@{{ infra_pve_node }}"
-      - systemctl
-      - start
-      - infra-manager-openbao-unseal.service
+      - /usr/local/sbin/infra-manager-openbao-unseal
   changed_when: false
   when: openbao_seal_status.json.initialized | bool
 

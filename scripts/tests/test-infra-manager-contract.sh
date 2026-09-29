@@ -23,8 +23,8 @@ PY_TEMPLATE_VERIFY="$ROOT/scripts/infra-manager/infra_manager/template_verify.py
 COMPOSE="$ROOT/infrastructure/guests/910-infra-manager/compose/docker-compose.yml"
 OPENBAO_CONFIG="$ROOT/infrastructure/guests/910-infra-manager/compose/openbao/openbao.hcl"
 OPENBAO_HOST="$ROOT/scripts/infra-manager/host/openbao-unseal.py"
-OPENBAO_SERVICE="$ROOT/infrastructure/pve/systemd/infra-manager-openbao-unseal.service"
-OPENBAO_TIMER="$ROOT/infrastructure/pve/systemd/infra-manager-openbao-unseal.timer"
+OPENBAO_STARTUP_COMMAND="$ROOT/scripts/infra-manager/commands/openbao-startup-unseal.sh"
+OPENBAO_STARTUP_SERVICE="$ROOT/infrastructure/guests/910-infra-manager/systemd/infra-manager-openbao-startup-unseal.service.j2"
 OPENBAO_JOB="$ROOT/scripts/infra-manager/jobs/initialize-openbao.py"
 PY_OPENBAO="$ROOT/scripts/infra-manager/infra_manager/openbao.py"
 DOCKERFILE="$ROOT/infrastructure/guests/910-infra-manager/compose/runtime/Dockerfile"
@@ -39,7 +39,7 @@ SSH_CONFIG="$ROOT/infrastructure/guests/910-infra-manager/compose/runtime/ssh_co
 die() { printf 'ОШИБКА: %s\n' "$*" >&2; exit 1; }
 ok()  { printf '[ОК] %s\n' "$*"; }
 
-for file in "$ANSIBLE_PLAYBOOK" "$ANSIBLE_DOCKER" "$ANSIBLE_RUNTIME" "$PY_SETTINGS" "$PY_SEMAPHORE" "$PY_STATUS" "$PY_PVE" "$STATUS" "$ACCESS" "$LIFECYCLE" "$ACTIVATE_RUNTIME" "$BUILD_TEMPLATE" "$VERIFY_TEMPLATE" "$DEPLOY_GUEST" "$PY_OPENTOFU" "$PY_TEMPLATE" "$PY_TEMPLATE_BUILD" "$PY_TEMPLATE_VERIFY" "$COMPOSE" "$OPENBAO_CONFIG" "$OPENBAO_HOST" "$OPENBAO_SERVICE" "$OPENBAO_TIMER" "$OPENBAO_JOB" "$PY_OPENBAO" "$DOCKERFILE" "$REQ" "$PLAN" "$PY_PVE_HOST" "$OPENTOFU_LOCK" "$GUEST_MANIFEST" "$PROVISION" "$SSH_CONFIG"; do
+for file in "$ANSIBLE_PLAYBOOK" "$ANSIBLE_DOCKER" "$ANSIBLE_RUNTIME" "$PY_SETTINGS" "$PY_SEMAPHORE" "$PY_STATUS" "$PY_PVE" "$STATUS" "$ACCESS" "$LIFECYCLE" "$ACTIVATE_RUNTIME" "$BUILD_TEMPLATE" "$VERIFY_TEMPLATE" "$DEPLOY_GUEST" "$PY_OPENTOFU" "$PY_TEMPLATE" "$PY_TEMPLATE_BUILD" "$PY_TEMPLATE_VERIFY" "$COMPOSE" "$OPENBAO_CONFIG" "$OPENBAO_HOST" "$OPENBAO_STARTUP_COMMAND" "$OPENBAO_STARTUP_SERVICE" "$OPENBAO_JOB" "$PY_OPENBAO" "$DOCKERFILE" "$REQ" "$PLAN" "$PY_PVE_HOST" "$OPENTOFU_LOCK" "$GUEST_MANIFEST" "$PROVISION" "$SSH_CONFIG"; do
     [[ -s "$file" ]] || die "Отсутствует обязательный файл: $file"
 done
 
@@ -215,7 +215,8 @@ required_runtime_fragments = (
     "openbao_seal_status",
     "openbao_unsealed_status",
     "infra_pve_node",
-    "infra-manager-openbao-unseal.service",
+    "infra-manager-openbao-startup-unseal.service",
+    "/usr/local/sbin/infra-manager-openbao-unseal",
     "render-opentofu-input.py",
     "--exclude-vmid",
     "docker-compose.yml",
@@ -295,12 +296,20 @@ grep -Fq '"push",' "$OPENBAO_HOST" \
     || die "Unseal-ключ должен передаваться в 910 временным файлом, не аргументом"
 grep -Fq 'CT_KEY_PATH' "$OPENBAO_HOST" \
     || die "Временная копия unseal-ключа должна использовать каталог /run внутри 910"
-grep -Fq 'ExecStart=/usr/local/sbin/infra-manager-openbao-unseal' "$OPENBAO_SERVICE" \
-    || die "systemd-служба должна запускать хостовый сценарий OpenBao"
-grep -Fq 'OnUnitActiveSec=60s' "$OPENBAO_TIMER" \
-    || die "PVE должен регулярно проверять состояние блокировки OpenBao"
+grep -Fq '/usr/local/sbin/infra-manager-openbao-unseal' "$OPENBAO_STARTUP_COMMAND" \
+    || die "910 должен вызывать хостовый сценарий OpenBao напрямую"
+grep -Fq 'http://127.0.0.1:8200/v1/sys/seal-status' "$OPENBAO_STARTUP_COMMAND" \
+    || die "Разблокировка при старте 910 должна ждать OpenBao"
+grep -Fq 'ExecStart=/usr/local/sbin/infra-manager-openbao-startup-unseal {{ infra_pve_node }}' "$OPENBAO_STARTUP_SERVICE" \
+    || die "Служба 910 должна запускать одноразовую разблокировку после старта"
+grep -Fq 'WantedBy=multi-user.target' "$OPENBAO_STARTUP_SERVICE" \
+    || die "Служба разблокировки должна запускаться вместе с 910"
+[[ ! -e "$ROOT/infrastructure/pve/systemd/infra-manager-openbao-unseal.service" ]] \
+    || die "PVE не должен содержать постоянную systemd-службу OpenBao"
+[[ ! -e "$ROOT/infrastructure/pve/systemd/infra-manager-openbao-unseal.timer" ]] \
+    || die "PVE не должен содержать периодический timer OpenBao"
 grep -q 'install_openbao_host_support' "$PY_OPENBAO" \
-    || die "Задание OpenBao должно устанавливать хостовую службу"
+    || die "Задание OpenBao должно устанавливать хостовый сценарий"
 grep -q 'initialize_openbao_on_host' "$PY_OPENBAO" \
     || die "Задание OpenBao должно выполнять первичную инициализацию через PVE"
 if grep -q 'infra-manager@pve' "$ANSIBLE_PLAYBOOK" "$ANSIBLE_DOCKER" "$ANSIBLE_RUNTIME" "$PY_SEMAPHORE" "$PY_STATUS" "$PY_PVE"; then

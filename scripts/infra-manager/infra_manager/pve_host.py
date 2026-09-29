@@ -79,8 +79,8 @@ def _ssh_with_input(
 
 
 OPENBAO_HOST_COMMAND = Path("/usr/local/sbin/infra-manager-openbao-unseal")
-OPENBAO_HOST_SERVICE = "infra-manager-openbao-unseal.service"
-OPENBAO_HOST_TIMER = "infra-manager-openbao-unseal.timer"
+OPENBAO_LEGACY_SERVICE = "infra-manager-openbao-unseal.service"
+OPENBAO_LEGACY_TIMER = "infra-manager-openbao-unseal.timer"
 
 
 def _install_remote_file(
@@ -117,49 +117,30 @@ trap - EXIT
 
 
 def install_openbao_host_support(node: str, repo_root: Path) -> None:
-    """Установить на PVE сценарий и systemd-службу разблокировки OpenBao."""
+    """Установить на PVE только сценарий разблокировки OpenBao."""
     command_source = (
         repo_root / "scripts" / "infra-manager" / "host" / "openbao-unseal.py"
     )
-    service_source = (
-        repo_root
-        / "infrastructure"
-        / "pve"
-        / "systemd"
-        / OPENBAO_HOST_SERVICE
-    )
-    timer_source = (
-        repo_root
-        / "infrastructure"
-        / "pve"
-        / "systemd"
-        / OPENBAO_HOST_TIMER
-    )
+
+    cleanup = f"""
+systemctl disable --now {OPENBAO_LEGACY_TIMER} {OPENBAO_LEGACY_SERVICE} \
+    >/dev/null 2>&1 || true
+rm -f \
+    /etc/systemd/system/{OPENBAO_LEGACY_TIMER} \
+    /etc/systemd/system/{OPENBAO_LEGACY_SERVICE} \
+    /etc/systemd/system/timers.target.wants/{OPENBAO_LEGACY_TIMER} \
+    /etc/systemd/system/multi-user.target.wants/{OPENBAO_LEGACY_SERVICE}
+systemctl daemon-reload
+"""
+    _ssh(node, "sh", "-c", cleanup)
+
     _install_remote_file(
         node,
         command_source,
         OPENBAO_HOST_COMMAND,
         "0755",
     )
-    _install_remote_file(
-        node,
-        service_source,
-        Path("/etc/systemd/system") / OPENBAO_HOST_SERVICE,
-        "0644",
-    )
-    _install_remote_file(
-        node,
-        timer_source,
-        Path("/etc/systemd/system") / OPENBAO_HOST_TIMER,
-        "0644",
-    )
-    _ssh(node, "systemctl", "daemon-reload")
-    _ssh(node, "systemctl", "enable", OPENBAO_HOST_SERVICE)
-    _ssh(node, "systemctl", "enable", "--now", OPENBAO_HOST_TIMER)
-    console.ok(
-        "Служба и периодическая проверка разблокировки OpenBao "
-        "установлены на PVE"
-    )
+    console.ok("Сценарий разблокировки OpenBao установлен на PVE")
 
 
 def initialize_openbao_on_host(node: str) -> None:
@@ -169,7 +150,7 @@ def initialize_openbao_on_host(node: str) -> None:
 
 def trigger_openbao_unseal(node: str) -> None:
     """Запустить идемпотентную разблокировку OpenBao через PVE."""
-    _ssh(node, "systemctl", "start", OPENBAO_HOST_SERVICE)
+    _ssh(node, str(OPENBAO_HOST_COMMAND))
 
 def _features_from_config(config: str) -> dict[str, str]:
     """Разобрать строку features из pct config."""

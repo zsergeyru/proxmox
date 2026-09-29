@@ -1009,7 +1009,7 @@ class BootstrapHost:
         self.remove_downloaded_template()
 
     def remove_openbao_host_support(self) -> None:
-        """Убрать службу OpenBao с PVE, не удаляя сохранённый unseal-ключ."""
+        """Убрать хостовый сценарий OpenBao, сохранив unseal-ключ."""
         self.run(
             "systemctl",
             "disable",
@@ -1023,7 +1023,7 @@ class BootstrapHost:
         self.host_openbao_unseal_service.unlink(missing_ok=True)
         self.host_openbao_unseal_command.unlink(missing_ok=True)
         self.run("systemctl", "daemon-reload", check=False, quiet=True)
-        self.ok("Служба разблокировки OpenBao удалена; ключ на PVE сохранён")
+        self.ok("Сценарий разблокировки OpenBao удалён; ключ на PVE сохранён")
 
     def remove_infra(self) -> None:
         # Сначала убираем временный контур. Сам 910 удаляем только после
