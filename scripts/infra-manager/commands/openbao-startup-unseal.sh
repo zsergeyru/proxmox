@@ -46,7 +46,14 @@ if [[ "$sealed" != "true" ]]; then
     exit 0
 fi
 
-ssh     -i /etc/infra-manager/pve-host/root_ed25519     -o UserKnownHostsFile=/etc/infra-manager/pve-host/known_hosts     -o StrictHostKeyChecking=yes     -o BatchMode=yes     -o IdentitiesOnly=yes     "root@${pve_node}"     /usr/local/sbin/infra-manager-openbao-unseal
+ssh \
+    -i /etc/infra-manager/pve-host/root_ed25519 \
+    -o UserKnownHostsFile=/etc/infra-manager/pve-host/known_hosts \
+    -o StrictHostKeyChecking=yes \
+    -o BatchMode=yes \
+    -o IdentitiesOnly=yes \
+    "root@${pve_node}" \
+    /usr/local/sbin/infra-manager-openbao-unseal
 
 status_json="$(curl -fsS "$status_url")"
 read -r initialized sealed < <(
