@@ -175,6 +175,47 @@ def test_ssh_ca_reconcile_requires_initial_admin_token() -> None:
     configure.assert_not_called()
 
 
+def test_temporary_root_token_uses_unseal_key_via_stdin() -> None:
+    host = load_host_module()
+    with tempfile.TemporaryDirectory() as tmp:
+        key = Path(tmp) / "unseal.key"
+        key.write_text("UNSEAL-KEY-TEST\n", encoding="utf-8")
+
+        calls: list[tuple[tuple[str, ...], str | None]] = []
+
+        def fake_pct_exec(
+            *args: str,
+            capture: bool = False,
+            check: bool = True,
+            input_text: str | None = None,
+        ):
+            del capture, check
+            calls.append((tuple(args), input_text))
+            return SimpleNamespace(
+                returncode=0,
+                stdout="TEMP-ROOT-TOKEN\n",
+                stderr="",
+            )
+
+        with (
+            patch.object(host, "KEY_PATH", key),
+            patch.object(host, "pct_exec", side_effect=fake_pct_exec),
+        ):
+            token = host.generate_temporary_root_token()
+
+    if token != "TEMP-ROOT-TOKEN":
+        fail("Временный корневой токен искажён")
+    if calls != [
+        (
+            ("python3", "-c", host.GENERATE_ROOT_CODE),
+            "UNSEAL-KEY-TEST",
+        )
+    ]:
+        fail(f"Ключ разблокировки передан небезопасно: {calls!r}")
+    if "UNSEAL-KEY-TEST" in " ".join(calls[0][0]):
+        fail("Ключ разблокировки попал в argv")
+
+
 def test_ssh_ca_mounts_are_separate() -> None:
     host = load_host_module()
     code = host.CONFIGURE_SSH_CA_CODE
@@ -249,6 +290,7 @@ def main() -> None:
     test_host_initialization_does_not_print_secrets()
     test_existing_openbao_ensures_ssh_cas()
     test_ssh_ca_reconcile_requires_initial_admin_token()
+    test_temporary_root_token_uses_unseal_key_via_stdin()
     test_ssh_ca_mounts_are_separate()
     test_ssh_access_contract_is_narrow()
     test_ssh_access_credentials_are_pve_only()

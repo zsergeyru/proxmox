@@ -81,6 +81,75 @@ with urllib.request.urlopen(request, timeout=30) as response:
 """
 
 
+GENERATE_ROOT_CODE = r"""
+import base64
+import json
+import sys
+import urllib.request
+
+BASE = "http://127.0.0.1:8200"
+unseal_key = sys.stdin.read().strip()
+if not unseal_key:
+    raise SystemExit("empty unseal key")
+
+
+def request(method, path, payload=None):
+    data = None
+    headers = {"Content-Type": "application/json"}
+    if payload is not None:
+        data = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+    req = urllib.request.Request(
+        f"{BASE}{path}",
+        data=data,
+        headers=headers,
+        method=method,
+    )
+    with urllib.request.urlopen(req, timeout=30) as response:
+        raw = response.read()
+    return json.loads(raw.decode("utf-8")) if raw else {}
+
+
+attempt = request("GET", "/v1/sys/generate-root/attempt")
+if attempt.get("started") is True:
+    raise SystemExit("root token generation is already in progress")
+
+started = request("POST", "/v1/sys/generate-root/attempt", {})
+otp = started.get("otp")
+nonce = started.get("nonce")
+if not isinstance(otp, str) or not otp:
+    raise SystemExit("OpenBao did not return OTP")
+if not isinstance(nonce, str) or not nonce:
+    raise SystemExit("OpenBao did not return nonce")
+
+completed = request(
+    "POST",
+    "/v1/sys/generate-root/update",
+    {"key": unseal_key, "nonce": nonce},
+)
+if completed.get("complete") is not True:
+    raise SystemExit("root token generation did not reach threshold")
+
+encoded = completed.get("encoded_token")
+if not isinstance(encoded, str) or not encoded:
+    raise SystemExit("OpenBao did not return encoded root token")
+
+encrypted = base64.b64decode(encoded, validate=True)
+otp_bytes = otp.encode("utf-8")
+if len(encrypted) != len(otp_bytes):
+    raise SystemExit("encoded root token length does not match OTP")
+
+token_bytes = bytes(
+    left ^ right
+    for left, right in zip(encrypted, otp_bytes, strict=True)
+)
+token = token_bytes.decode("utf-8")
+if not token or any(char.isspace() for char in token):
+    raise SystemExit("decoded root token is invalid")
+
+print(token)
+"""
+
+
 SSH_CA_STATUS_CODE = r"""
 import json
 import urllib.error
@@ -729,6 +798,28 @@ def _revoke_root_token(token: str) -> None:
 def revoke_initial_root_token(token: str) -> None:
     _revoke_root_token(token)
     print("[ОК] Initial root token отозван")
+
+
+def generate_temporary_root_token() -> str:
+    if not KEY_PATH.is_file() or KEY_PATH.stat().st_size == 0:
+        raise OpenBaoHostError(
+            f"Не найден ключ разблокировки OpenBao: {KEY_PATH}"
+        )
+
+    unseal_key = KEY_PATH.read_text(encoding="utf-8").strip()
+    result = pct_exec(
+        "python3",
+        "-c",
+        GENERATE_ROOT_CODE,
+        capture=True,
+        input_text=unseal_key,
+    )
+    token = result.stdout.strip()
+    if not token or any(char.isspace() for char in token):
+        raise OpenBaoHostError(
+            "OpenBao не вернул корректный временный корневой токен"
+        )
+    return token
 
 
 def ssh_cas_ready() -> bool:

@@ -160,6 +160,37 @@ def main() -> None:
     else:
         fail("Отозванный initial root token остался действующим")
 
+    temporary_root = run_code(
+        host.GENERATE_ROOT_CODE,
+        input_text=unseal_key,
+    )
+    lookup = http_json(
+        "GET",
+        "/v1/auth/token/lookup-self",
+        token=temporary_root,
+    )
+    data = lookup.get("data")
+    policies = data.get("policies") if isinstance(data, dict) else None
+    if not isinstance(policies, list) or "root" not in policies:
+        fail("Временный токен не получил root-политику")
+
+    revoked_temporary_root = temporary_root
+    run_code(host.REVOKE_ROOT_CODE, input_text=temporary_root)
+    temporary_root = ""
+
+    try:
+        http_json(
+            "GET",
+            "/v1/auth/token/lookup-self",
+            token=revoked_temporary_root,
+        )
+    except urllib.error.HTTPError as exc:
+        if exc.code not in {400, 403}:
+            raise
+    else:
+        fail("Отозванный временный root-токен остался действующим")
+
+    print("[ОК] Временный root-токен OpenBao выпущен и отозван")
     print("[ОК] Два SSH-центра OpenBao проверены на настоящем сервере")
 
 
