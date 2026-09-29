@@ -694,6 +694,12 @@ grep -Fq 'name: ssh.socket' "$LINUX_BASE_SSH_TRUST" \
     || die "Debian 13 должен отключать socket-активацию SSH"
 grep -Fq 'name: ssh.service' "$LINUX_BASE_SSH_TRUST" \
     || die "Debian 13 должен использовать обычную службу SSH"
+grep -Fq 'when: not (infra_self_update | default(false) | bool)' "$ROOT/automation/ansible/roles/infra_manager/tasks/verify.yml" \
+    || die "Самообновление 910 не должно менять Semaphore внутри текущего задания"
+grep -Fq 'semaphore-project' "$ACTIVATE_RUNTIME" \
+    || die "Отложенная активация должна синхронизировать Semaphore после запуска новой среды"
+grep -Fq 'Назначить активацию новой управляющей среды после настройки 910' "$ANSIBLE_PLAYBOOK" \
+    || die "Активация новой среды должна назначаться в конце общего playbook"
 if grep -Fq 'state: reloaded' "$LINUX_BASE_SSH_TRUST"; then
     die "Reload ssh.service запрещён из-за Debian 13 LXC + ssh.socket"
 fi
