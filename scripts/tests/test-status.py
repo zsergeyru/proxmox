@@ -9,7 +9,7 @@ import os
 import sys
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 ROOT = Path(__file__).resolve().parents[2]
 MODULE_ROOT = ROOT / "scripts" / "infra-manager"
@@ -241,15 +241,15 @@ def main_test() -> None:
         fail("Порядок проверок должен задаваться status.yaml")
 
     with patch.object(
-        status_module.command_runner,
-        "run",
-        side_effect=[
+        status_module,
+        "command_runner",
+        SimpleNamespace(run=Mock(side_effect=[
             SimpleNamespace(returncode=0, stdout="true\n"),
             SimpleNamespace(
                 returncode=0,
                 stdout='{"initialized": true, "sealed": true}',
             ),
-        ],
+        ])),
     ):
         try:
             status_module._check_openbao()
@@ -259,15 +259,15 @@ def main_test() -> None:
             fail("status принял инициализированный, но запечатанный OpenBao")
 
     with patch.object(
-        status_module.command_runner,
-        "run",
-        side_effect=[
+        status_module,
+        "command_runner",
+        SimpleNamespace(run=Mock(side_effect=[
             SimpleNamespace(returncode=0, stdout="true\n"),
             SimpleNamespace(
                 returncode=0,
                 stdout='{"initialized": false, "sealed": true}',
             ),
-        ],
+        ])),
     ):
         status_module._check_openbao()
 
