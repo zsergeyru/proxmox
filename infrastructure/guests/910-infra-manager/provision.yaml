@@ -131,6 +131,7 @@ semaphore:
     - Build Template 9000
     - Deploy Guest 410
     - Deploy Guest 910
+    - Initialize OpenBao 910
 
 persistence:
   backup_required:
