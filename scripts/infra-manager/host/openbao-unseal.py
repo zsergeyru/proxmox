@@ -98,7 +98,7 @@ def public_key(mount):
             return response.read().decode("utf-8").strip()
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")
-        if exc.code == 404:
+        if exc.code in {403, 404}:
             return ""
         if exc.code == 400 and "no default issuer currently configured" in detail:
             return ""
