@@ -52,80 +52,48 @@
     └── ssh-access.json
 ```
 
-| Путь | Назначение |
+| Полный путь на PVE | Назначение |
 |---|---|
-| `pve-only/openbao/unseal.key` | ключ снятия блокировки OpenBao |
-| `pve-only/openbao/ssh-access.json` | служебные данные ограниченного доступа к операциям SSH-подписи OpenBao |
+| `/mnt/bindmounts/infra-manager/pve-only/openbao/unseal.key` | ключ снятия блокировки OpenBao |
+| `/mnt/bindmounts/infra-manager/pve-only/openbao/ssh-access.json` | служебные данные ограниченного доступа к операциям SSH-подписи OpenBao |
 
 Весь каталог `pve-only/` остаётся только на PVE и в 910 не монтируется.
 
 ## 3. Данные PVE для чтения из 910
 
-Текущая структура:
+Физически данные находятся на PVE под:
 
 ```text
 /mnt/bindmounts/infra-manager/access/
-├── github/
-│   └── github_proxmox_repo_ed25519
-├── pve-host/
-│   ├── root_ed25519
-│   └── known_hosts
-├── pve-api/
-│   └── pve-api.env
-└── ca/
-    └── pve-root-ca.crt
 ```
 
-Назначение:
+Весь каталог подключается в 910 как `/mnt/pve-access/` только для чтения.
 
-| Путь | Назначение |
-|---|---|
-| `access/github/github_proxmox_repo_ed25519` | Deploy Key репозитория проекта без права записи |
-| `access/pve-host/root_ed25519` | закрытый root SSH-ключ 910 для PVE |
-| `access/pve-host/known_hosts` | доверенный ключ SSH-сервера PVE |
-| `access/pve-api/pve-api.env` | данные постоянного API-доступа 910 |
-| `access/ca/pve-root-ca.crt` | копия корневого сертификата PVE |
-
-Весь каталог подключается в 910 как:
-
-```text
-/mnt/bindmounts/infra-manager/access/
-→ /mnt/pve-access/
-```
-
-Режим — только чтение.
+| Полный путь на PVE | Полный путь внутри 910 | Назначение |
+|---|---|---|
+| `/mnt/bindmounts/infra-manager/access/github/github_proxmox_repo_ed25519` | `/mnt/pve-access/github/github_proxmox_repo_ed25519` | Deploy Key репозитория проекта без права записи |
+| `/mnt/bindmounts/infra-manager/access/pve-host/root_ed25519` | `/mnt/pve-access/pve-host/root_ed25519` | закрытый root SSH-ключ 910 для PVE |
+| `/mnt/bindmounts/infra-manager/access/pve-host/known_hosts` | `/mnt/pve-access/pve-host/known_hosts` | доверенный ключ SSH-сервера PVE |
+| `/mnt/bindmounts/infra-manager/access/pve-api/pve-api.env` | `/mnt/pve-access/pve-api/pve-api.env` | данные постоянного API-доступа 910 |
+| `/mnt/bindmounts/infra-manager/access/ca/pve-root-ca.crt` | `/mnt/pve-access/ca/pve-root-ca.crt` | копия корневого сертификата PVE |
 
 ## 4. Изменяемое состояние 910
 
-Текущая структура верхнего уровня:
+Физически состояние находится на PVE под:
 
 ```text
 /mnt/bindmounts/infra-manager/state/
-├── secrets/
-├── ansible/
-├── semaphore/
-├── opentofu/
-└── openbao/
 ```
 
-Назначение:
+Весь каталог подключается в 910 как `/mnt/persistent-state/` с правом чтения и записи.
 
-| Каталог | Назначение |
-|---|---|
-| `state/secrets/` | постоянные секреты 910 |
-| `state/ansible/` | постоянная Ansible-идентичность |
-| `state/semaphore/` | база и служебные данные Semaphore |
-| `state/opentofu/` | постоянные данные и состояние OpenTofu |
-| `state/openbao/` | постоянные Raft-данные OpenBao |
-
-Весь каталог подключается в 910 как:
-
-```text
-/mnt/bindmounts/infra-manager/state/
-→ /mnt/persistent-state/
-```
-
-Режим — чтение и запись.
+| Полный путь на PVE | Путь после подключения в 910 | Назначение |
+|---|---|---|
+| `/mnt/bindmounts/infra-manager/state/secrets/` | `/mnt/persistent-state/secrets/` | постоянные секреты 910 |
+| `/mnt/bindmounts/infra-manager/state/ansible/` | `/mnt/persistent-state/ansible/` | постоянная Ansible-идентичность |
+| `/mnt/bindmounts/infra-manager/state/semaphore/` | `/mnt/persistent-state/semaphore/` | база и служебные данные Semaphore |
+| `/mnt/bindmounts/infra-manager/state/opentofu/` | `/mnt/persistent-state/opentofu/` | постоянные данные и состояние OpenTofu |
+| `/mnt/bindmounts/infra-manager/state/openbao/` | `/mnt/persistent-state/openbao/` | постоянные Raft-данные OpenBao |
 
 ## 5. Связи каталогов внутри 910
 
