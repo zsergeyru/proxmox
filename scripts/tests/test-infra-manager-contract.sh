@@ -690,3 +690,10 @@ grep -Fq 'TrustedUserCAKeys /etc/ssh/trusted-user-ca-keys.pem' "$LINUX_BASE_SSH_
     || die "Гости должны доверять пользовательскому SSH CA OpenBao"
 grep -Fq '/etc/infra-manager/ca/ssh-client-ca.pub' "$LINUX_BASE_SSH_TRUST" \
     || die "Ansible должен брать открытый SSH CA из каталога 910"
+grep -Fq 'name: ssh.socket' "$LINUX_BASE_SSH_TRUST" \
+    || die "Debian 13 должен отключать socket-активацию SSH"
+grep -Fq 'name: ssh.service' "$LINUX_BASE_SSH_TRUST" \
+    || die "Debian 13 должен использовать обычную службу SSH"
+if grep -Fq 'state: reloaded' "$LINUX_BASE_SSH_TRUST"; then
+    die "Reload ssh.service запрещён из-за Debian 13 LXC + ssh.socket"
+fi

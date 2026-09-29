@@ -47,6 +47,14 @@
   register: ssh_client_ca_config
   when: ssh_client_ca_source.stat.exists
 
+- name: Проверить синтаксис конфигурации SSH
+  ansible.builtin.command:
+    argv:
+      - /usr/sbin/sshd
+      - -t
+  changed_when: false
+  when: ssh_client_ca_source.stat.exists
+
 - name: Проверить итоговую конфигурацию SSH
   ansible.builtin.command:
     argv:
@@ -65,10 +73,26 @@
     fail_msg: SSH не использует настроенный центр доступа OpenBao
   when: ssh_client_ca_source.stat.exists
 
-- name: Перезагрузить SSH после изменения доверия
-  ansible.builtin.service:
-    name: ssh
-    state: reloaded
-  when:
-    - ssh_client_ca_source.stat.exists
-    - ssh_client_ca_file.changed or ssh_client_ca_config.changed
+- name: Отключить socket-активацию SSH
+  ansible.builtin.systemd_service:
+    name: ssh.socket
+    enabled: false
+    state: stopped
+  register: ssh_socket_service
+  when: ssh_client_ca_source.stat.exists
+
+- name: Запустить обычную службу SSH
+  ansible.builtin.systemd_service:
+    name: ssh.service
+    enabled: true
+    state: >-
+      {{
+        'restarted'
+        if (
+          ssh_client_ca_file.changed
+          or ssh_client_ca_config.changed
+          or ssh_socket_service.changed
+        )
+        else 'started'
+      }}
+  when: ssh_client_ca_source.stat.exists
