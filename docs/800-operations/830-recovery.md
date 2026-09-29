@@ -36,7 +36,8 @@
 - GitHub Deploy Key;
 - root SSH-ключ доступа 910 к PVE;
 - `known_hosts` PVE;
-- PVE CA.
+- PVE CA;
+- постоянный PVE API credential.
 
 Ключ снятия блокировки OpenBao относится к `pve-only/` и внутрь 910 не передаётся.
 
