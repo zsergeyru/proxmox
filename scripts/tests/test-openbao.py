@@ -111,17 +111,94 @@ def test_host_initialization_does_not_print_secrets() -> None:
             patch.object(host, "pct_exec", side_effect=fake_pct_exec),
             patch.object(host, "write_unseal_key", side_effect=written.append),
             patch.object(host, "unseal"),
+            patch.object(host, "ensure_ssh_cas") as ensure_cas,
             contextlib.redirect_stdout(output),
         ):
             host.initialize()
 
     if written != [secret_key]:
         fail("Хостовый сценарий не сохранил ожидаемый unseal-ключ")
+    ensure_cas.assert_called_once_with(root_token)
     if revoked != [root_token]:
         fail("Initial root token не был передан на self-revoke через stdin")
     text = output.getvalue()
     if secret_key in text or root_token in text:
         fail("Хостовый сценарий вывел секрет OpenBao в журнал")
+
+
+def test_existing_openbao_ensures_ssh_cas() -> None:
+    host = load_host_module()
+    with tempfile.TemporaryDirectory() as tmp:
+        key_path = Path(tmp) / "unseal.key"
+        key_path.write_text("existing-key\n", encoding="utf-8")
+        with (
+            patch.object(host, "KEY_PATH", key_path),
+            patch.object(
+                host,
+                "read_status",
+                return_value={"initialized": True, "sealed": False},
+            ),
+            patch.object(host, "unseal") as unseal,
+            patch.object(host, "ensure_ssh_cas") as ensure_cas,
+        ):
+            host.initialize()
+
+    unseal.assert_called_once_with()
+    ensure_cas.assert_called_once_with()
+
+
+def test_ssh_ca_reconcile_uses_temporary_root_only_when_needed() -> None:
+    host = load_host_module()
+
+    with (
+        patch.object(host, "ssh_cas_ready", return_value=True),
+        patch.object(host, "generate_temporary_root_token") as generate,
+        patch.object(host, "configure_ssh_cas") as configure,
+    ):
+        host.ensure_ssh_cas()
+    generate.assert_not_called()
+    configure.assert_not_called()
+
+    events: list[tuple[str, str]] = []
+    readiness = iter([False, True])
+    with (
+        patch.object(host, "ssh_cas_ready", side_effect=lambda: next(readiness)),
+        patch.object(
+            host,
+            "generate_temporary_root_token",
+            side_effect=lambda: "TEMP-ROOT-TOKEN",
+        ),
+        patch.object(
+            host,
+            "configure_ssh_cas",
+            side_effect=lambda token: events.append(("configure", token)),
+        ),
+        patch.object(
+            host,
+            "revoke_temporary_root_token",
+            side_effect=lambda token: events.append(("revoke", token)),
+        ),
+    ):
+        host.ensure_ssh_cas()
+
+    if events != [
+        ("configure", "TEMP-ROOT-TOKEN"),
+        ("revoke", "TEMP-ROOT-TOKEN"),
+    ]:
+        fail(f"Неожиданный цикл настройки SSH CA: {events!r}")
+
+
+def test_ssh_ca_mounts_are_separate() -> None:
+    host = load_host_module()
+    code = host.CONFIGURE_SSH_CA_CODE
+    if '"ssh-client-signer"' not in code:
+        fail("Не зафиксирован отдельный центр подписи клиентов")
+    if '"ssh-host-signer"' not in code:
+        fail("Не зафиксирован отдельный центр подписи серверов")
+    if code.count('"generate_signing_key": True') != 1:
+        fail("SSH CA должны создаваться единым идемпотентным механизмом")
+    if "client == host" not in code:
+        fail("Два SSH-центра должны проверяться как независимые")
 
 
 def test_stale_key_is_not_overwritten() -> None:
@@ -148,6 +225,9 @@ def test_stale_key_is_not_overwritten() -> None:
 def main() -> None:
     test_orchestration()
     test_host_initialization_does_not_print_secrets()
+    test_existing_openbao_ensures_ssh_cas()
+    test_ssh_ca_reconcile_uses_temporary_root_only_when_needed()
+    test_ssh_ca_mounts_are_separate()
     test_stale_key_is_not_overwritten()
     print("[ОК] Проверки OpenBao пройдены")
 

@@ -80,6 +80,215 @@ with urllib.request.urlopen(request, timeout=30) as response:
 """
 
 
+SSH_CA_STATUS_CODE = r"""
+import json
+import urllib.error
+import urllib.request
+
+BASE = "http://127.0.0.1:8200"
+
+
+def public_key(mount):
+    try:
+        with urllib.request.urlopen(
+            f"{BASE}/v1/{mount}/public_key",
+            timeout=10,
+        ) as response:
+            return response.read().decode("utf-8").strip()
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            return ""
+        raise
+
+
+client = public_key("ssh-client-signer")
+host = public_key("ssh-host-signer")
+valid = lambda value: value.startswith(("ssh-", "ecdsa-", "sk-"))
+print(
+    json.dumps(
+        {
+            "client": valid(client),
+            "host": valid(host),
+            "distinct": bool(client and host and client != host),
+        },
+        separators=(",", ":"),
+    )
+)
+"""
+
+GENERATE_ROOT_CODE = r"""
+import base64
+import json
+import sys
+import urllib.request
+
+BASE = "http://127.0.0.1:8200"
+key = sys.stdin.read().strip()
+if not key:
+    raise SystemExit("empty unseal key")
+
+
+def request(method, path, payload=None):
+    data = None
+    headers = {"Content-Type": "application/json"}
+    if payload is not None:
+        data = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+    req = urllib.request.Request(
+        f"{BASE}{path}",
+        data=data,
+        headers=headers,
+        method=method,
+    )
+    with urllib.request.urlopen(req, timeout=30) as response:
+        raw = response.read()
+    return json.loads(raw.decode("utf-8")) if raw else {}
+
+
+attempt = request("GET", "/v1/sys/generate-root/attempt")
+if attempt.get("started"):
+    request("DELETE", "/v1/sys/generate-root/attempt")
+
+started = request("POST", "/v1/sys/generate-root/attempt", {})
+otp = started.get("otp")
+nonce = started.get("nonce")
+if not isinstance(otp, str) or not otp or not isinstance(nonce, str) or not nonce:
+    raise SystemExit("OpenBao did not return OTP/nonce")
+
+try:
+    completed = request(
+        "POST",
+        "/v1/sys/generate-root/update",
+        {"key": key, "nonce": nonce},
+    )
+    if completed.get("complete") is not True:
+        raise SystemExit("root token generation is incomplete")
+    encoded = completed.get("encoded_token")
+    if not isinstance(encoded, str) or not encoded:
+        raise SystemExit("OpenBao did not return encoded root token")
+
+    encrypted = base64.b64decode(encoded)
+    otp_bytes = otp.encode("utf-8")
+    if len(encrypted) != len(otp_bytes):
+        raise SystemExit("root token and OTP lengths differ")
+    token = bytes(
+        left ^ right
+        for left, right in zip(encrypted, otp_bytes, strict=True)
+    ).decode("utf-8")
+    if not token or any(char.isspace() for char in token):
+        raise SystemExit("decoded root token is invalid")
+    print(token)
+except Exception:
+    try:
+        request("DELETE", "/v1/sys/generate-root/attempt")
+    except Exception:
+        pass
+    raise
+"""
+
+CONFIGURE_SSH_CA_CODE = r"""
+import json
+import sys
+import urllib.error
+import urllib.request
+
+BASE = "http://127.0.0.1:8200"
+token = sys.stdin.read().strip()
+if not token:
+    raise SystemExit("empty root token")
+
+
+def request(method, path, payload=None, *, authenticated=True, allow_404=False):
+    data = None
+    headers = {"Content-Type": "application/json"}
+    if authenticated:
+        headers["X-Vault-Token"] = token
+    if payload is not None:
+        data = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+    req = urllib.request.Request(
+        f"{BASE}{path}",
+        data=data,
+        headers=headers,
+        method=method,
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as response:
+            return response.status, response.read()
+    except urllib.error.HTTPError as exc:
+        if allow_404 and exc.code == 404:
+            return exc.code, b""
+        detail = exc.read().decode("utf-8", errors="replace").strip()
+        raise RuntimeError(
+            f"{method} {path} returned HTTP {exc.code}: {detail}"
+        ) from exc
+
+
+def public_key(mount):
+    status, raw = request(
+        "GET",
+        f"/v1/{mount}/public_key",
+        authenticated=False,
+        allow_404=True,
+    )
+    if status == 404:
+        return ""
+    return raw.decode("utf-8").strip()
+
+
+_, raw_mounts = request("GET", "/v1/sys/mounts")
+payload = json.loads(raw_mounts.decode("utf-8"))
+mounts = payload.get("data", payload)
+if not isinstance(mounts, dict):
+    raise SystemExit("OpenBao returned invalid mounts list")
+
+definitions = (
+    (
+        "ssh-client-signer",
+        "Подпись временных SSH-сертификатов для входа в управляемые гости",
+    ),
+    (
+        "ssh-host-signer",
+        "Подпись SSH-сертификатов управляемых серверов",
+    ),
+)
+
+for mount, description in definitions:
+    existing = mounts.get(f"{mount}/")
+    if existing is None:
+        request(
+            "POST",
+            f"/v1/sys/mounts/{mount}",
+            {"type": "ssh", "description": description},
+        )
+    elif not isinstance(existing, dict) or existing.get("type") != "ssh":
+        raise SystemExit(f"{mount} exists with unexpected type")
+
+    if not public_key(mount):
+        request(
+            "POST",
+            f"/v1/{mount}/config/ca",
+            {"generate_signing_key": True},
+        )
+
+client = public_key("ssh-client-signer")
+host = public_key("ssh-host-signer")
+valid = lambda value: value.startswith(("ssh-", "ecdsa-", "sk-"))
+if not valid(client) or not valid(host):
+    raise SystemExit("OpenBao SSH CA public keys are missing")
+if client == host:
+    raise SystemExit("OpenBao SSH CA public keys must be different")
+
+print(
+    json.dumps(
+        {
+            "client_public_key": client,
+            "host_public_key": host,
+        },
+        separators=(",", ":"),
+    )
+)
+"""
+
+
 class OpenBaoHostError(RuntimeError):
     pass
 
@@ -245,9 +454,9 @@ def unseal() -> None:
     print("[ОК] OpenBao разблокирован")
 
 
-def revoke_initial_root_token(token: str) -> None:
+def _revoke_root_token(token: str) -> None:
     if not token:
-        raise OpenBaoHostError("OpenBao вернул пустой initial root token")
+        raise OpenBaoHostError("OpenBao вернул пустой корневой токен")
     pct_exec(
         "python3",
         "-c",
@@ -255,7 +464,108 @@ def revoke_initial_root_token(token: str) -> None:
         capture=True,
         input_text=token,
     )
+
+
+def revoke_initial_root_token(token: str) -> None:
+    _revoke_root_token(token)
     print("[ОК] Initial root token отозван")
+
+
+def revoke_temporary_root_token(token: str) -> None:
+    _revoke_root_token(token)
+    print("[ОК] Временный корневой токен OpenBao отозван")
+
+
+def ssh_cas_ready() -> bool:
+    result = pct_exec(
+        "python3",
+        "-c",
+        SSH_CA_STATUS_CODE,
+        capture=True,
+    )
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise OpenBaoHostError(
+            "OpenBao вернул некорректное состояние SSH-центров доверия"
+        ) from exc
+    if not isinstance(payload, dict):
+        raise OpenBaoHostError(
+            "OpenBao вернул некорректное состояние SSH-центров доверия"
+        )
+    return (
+        payload.get("client") is True
+        and payload.get("host") is True
+        and payload.get("distinct") is True
+    )
+
+
+def generate_temporary_root_token() -> str:
+    if not KEY_PATH.is_file() or KEY_PATH.stat().st_size == 0:
+        raise OpenBaoHostError(
+            "Нельзя выпустить временный корневой токен без ключа разблокировки"
+        )
+    key = KEY_PATH.read_text(encoding="utf-8").strip()
+    result = pct_exec(
+        "python3",
+        "-c",
+        GENERATE_ROOT_CODE,
+        capture=True,
+        input_text=key,
+    )
+    token = result.stdout.strip()
+    if not token or any(char.isspace() for char in token):
+        raise OpenBaoHostError(
+            "OpenBao не вернул корректный временный корневой токен"
+        )
+    return token
+
+
+def configure_ssh_cas(token: str) -> None:
+    result = pct_exec(
+        "python3",
+        "-c",
+        CONFIGURE_SSH_CA_CODE,
+        capture=True,
+        input_text=token,
+    )
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise OpenBaoHostError(
+            "OpenBao вернул некорректный ответ настройки SSH-центров доверия"
+        ) from exc
+    client = payload.get("client_public_key") if isinstance(payload, dict) else None
+    host = payload.get("host_public_key") if isinstance(payload, dict) else None
+    if (
+        not isinstance(client, str)
+        or not isinstance(host, str)
+        or not client
+        or not host
+        or client == host
+    ):
+        raise OpenBaoHostError(
+            "OpenBao не подтвердил два независимых SSH-центра доверия"
+        )
+
+
+def ensure_ssh_cas(root_token: str | None = None) -> None:
+    if ssh_cas_ready():
+        print("[ОК] Два SSH-центра доверия OpenBao уже готовы")
+        return
+
+    temporary_token = root_token is None
+    token = root_token or generate_temporary_root_token()
+    try:
+        configure_ssh_cas(token)
+        if not ssh_cas_ready():
+            raise OpenBaoHostError(
+                "SSH-центры доверия OpenBao не прошли итоговую проверку"
+            )
+        print("[ОК] Два SSH-центра доверия OpenBao созданы")
+    finally:
+        if temporary_token:
+            revoke_temporary_root_token(token)
 
 
 def initialize() -> None:
@@ -267,6 +577,7 @@ def initialize() -> None:
                 "на PVE отсутствует"
             )
         unseal()
+        ensure_ssh_cas()
         print("[ОК] Инициализация OpenBao уже выполнена")
         return
 
@@ -306,8 +617,11 @@ def initialize() -> None:
     payload.clear()
 
     unseal()
-    revoke_initial_root_token(root_token)
-    del root_token
+    try:
+        ensure_ssh_cas(root_token)
+    finally:
+        revoke_initial_root_token(root_token)
+        del root_token
 
     verified = read_status(wait=False)
     if verified.get("initialized") is not True or verified.get("sealed") is not False:
@@ -317,6 +631,7 @@ def initialize() -> None:
 
     print("[ОК] OpenBao инициализирован: 1 ключ, порог 1")
     print(f"[ОК] Unseal-ключ сохранён только на PVE: {KEY_PATH}")
+    print("[ОК] SSH-центры доверия: ssh-client-signer и ssh-host-signer")
     print("[ОК] Initial root token не сохранён и отозван")
 
 
