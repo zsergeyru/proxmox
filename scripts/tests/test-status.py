@@ -240,6 +240,37 @@ def main_test() -> None:
     ]:
         fail("Порядок проверок должен задаваться status.yaml")
 
+    with patch.object(
+        status_module.command_runner,
+        "run",
+        side_effect=[
+            SimpleNamespace(returncode=0, stdout="true\n"),
+            SimpleNamespace(
+                returncode=0,
+                stdout='{"initialized": true, "sealed": true}',
+            ),
+        ],
+    ):
+        try:
+            status_module._check_openbao()
+        except InfraManagerError:
+            pass
+        else:
+            fail("status принял инициализированный, но запечатанный OpenBao")
+
+    with patch.object(
+        status_module.command_runner,
+        "run",
+        side_effect=[
+            SimpleNamespace(returncode=0, stdout="true\n"),
+            SimpleNamespace(
+                returncode=0,
+                stdout='{"initialized": false, "sealed": true}',
+            ),
+        ],
+    ):
+        status_module._check_openbao()
+
     values = {
         "address": "192.168.9.10",
         "semaphore_password": "secret-pass",
