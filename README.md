@@ -118,6 +118,8 @@ Deploy Guest 910
 
 Оно применяет общий `deploy-guest → Ansible`, но не включает собственный объект 910 в постоянное состояние OpenTofu. Перезапуск `infra-runtime` откладывается до завершения задания, чтобы Semaphore не остановил сам себя.
 
+После первого развёртывания OpenBao инициализируется отдельным заданием `Initialize OpenBao 910`. Ключ снятия блокировки хранится только на PVE в `/root/.config/proxmox-bootstrap/openbao/unseal.key`; первоначальный корневой токен не сохраняется.
+
 ## Первоначальное создание 910
 
 Текущая последовательность новой схемы:
@@ -291,7 +293,9 @@ infra-runtime
 - набор переменных `OpenTofu PVE`;
 - `OpenTofu Plan`;
 - `Build Template 9000`;
-- `Deploy Guest 410`.
+- `Deploy Guest 410`;
+- `Deploy Guest 910`;
+- `Initialize OpenBao 910`.
 
 ## Первичный пароль Semaphore
 
