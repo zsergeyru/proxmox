@@ -46,3 +46,4 @@
       - permanent_pve_credential.stat.exists
       - permanent_pve_credential.stat.size | int > 0
     fail_msg: "PVE API credential отсутствует в постоянном каталоге доступа"
+
