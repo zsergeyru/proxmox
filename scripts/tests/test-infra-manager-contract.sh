@@ -2,6 +2,7 @@
 set -Eeuo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+ANSIBLE_CONFIG="$ROOT/ansible.cfg"
 ANSIBLE_PLAYBOOK="$ROOT/automation/ansible/playbooks/configure-guest.yml"
 ANSIBLE_LINUX_BASE="$ROOT/automation/ansible/roles/linux_base/tasks/main.yml"
 ANSIBLE_GUEST_LAYOUT="$ROOT/automation/ansible/roles/guest_layout/tasks/main.yml"
@@ -68,10 +69,14 @@ for task_file in "${ANSIBLE_RUNTIME_PARTS[@]}"; do
     cat "$ANSIBLE_RUNTIME_DIR/$task_file" >> "$ANSIBLE_RUNTIME"
 done
 
-for file in "$ANSIBLE_PLAYBOOK" "$ANSIBLE_LINUX_BASE" "$ANSIBLE_GUEST_LAYOUT" "$ANSIBLE_DOCKER" "$ANSIBLE_RUNTIME" "$PY_SETTINGS" "$PY_SEMAPHORE" "$PY_STATUS" "$PY_PVE" "$STATUS" "$ACCESS" "$LIFECYCLE" "$ACTIVATE_RUNTIME" "$BUILD_TEMPLATE" "$VERIFY_TEMPLATE" "$DEPLOY_GUEST" "$PY_OPENTOFU" "$PY_TEMPLATE" "$PY_TEMPLATE_BUILD" "$PY_TEMPLATE_VERIFY" "$COMPOSE" "$OPENBAO_CONFIG" "$OPENBAO_HOST" "$OPENBAO_STARTUP_COMMAND" "$OPENBAO_STARTUP_SERVICE" "$OPENBAO_JOB" "$PY_OPENBAO" "$DOCKERFILE" "$REQ" "$PLAN" "$PY_PVE_HOST" "$OPENTOFU_LOCK" "$GUEST_MANIFEST" "$PROVISION" "$SSH_CONFIG"; do
+for file in "$ANSIBLE_CONFIG" "$ANSIBLE_PLAYBOOK" "$ANSIBLE_LINUX_BASE" "$ANSIBLE_GUEST_LAYOUT" "$ANSIBLE_DOCKER" "$ANSIBLE_RUNTIME" "$PY_SETTINGS" "$PY_SEMAPHORE" "$PY_STATUS" "$PY_PVE" "$STATUS" "$ACCESS" "$LIFECYCLE" "$ACTIVATE_RUNTIME" "$BUILD_TEMPLATE" "$VERIFY_TEMPLATE" "$DEPLOY_GUEST" "$PY_OPENTOFU" "$PY_TEMPLATE" "$PY_TEMPLATE_BUILD" "$PY_TEMPLATE_VERIFY" "$COMPOSE" "$OPENBAO_CONFIG" "$OPENBAO_HOST" "$OPENBAO_STARTUP_COMMAND" "$OPENBAO_STARTUP_SERVICE" "$OPENBAO_JOB" "$PY_OPENBAO" "$DOCKERFILE" "$REQ" "$PLAN" "$PY_PVE_HOST" "$OPENTOFU_LOCK" "$GUEST_MANIFEST" "$PROVISION" "$SSH_CONFIG"; do
     [[ -s "$file" ]] || die "Отсутствует обязательный файл: $file"
 done
 
+grep -Fq 'roles_path = automation/ansible/roles' "$ANSIBLE_CONFIG" \
+    || die "ansible.cfg должен задавать единый путь к roles"
+[[ ! -e "$ROOT/automation/ansible/tasks" ]] \
+    || die "Старый каталог automation/ansible/tasks не должен возвращаться"
 
 python3 - "$GUEST_MANIFEST" "$PROVISION" "$ANSIBLE_PLAYBOOK" "$ANSIBLE_LINUX_BASE" "$ANSIBLE_GUEST_LAYOUT" "$ANSIBLE_DOCKER" "$ANSIBLE_RUNTIME" "$PY_SETTINGS" "$COMPOSE" "$DOCKERFILE" "$REQ" <<'PY'
 from pathlib import Path
@@ -115,6 +120,23 @@ if system.get("distribution") != "debian" or system.get("version") != "13" or sy
     raise SystemExit("provision.yaml должен требовать Debian 13 amd64")
 
 playbook_text = playbook_path.read_text(encoding="utf-8")
+playbook_data = yaml.safe_load(playbook_text)
+if not isinstance(playbook_data, list) or len(playbook_data) != 1:
+    raise SystemExit("общий Ansible playbook должен содержать один сценарий")
+play_tasks = playbook_data[0].get("tasks", [])
+role_order = [
+    task["ansible.builtin.include_role"].get("name")
+    for task in play_tasks
+    if isinstance(task, dict)
+    and isinstance(task.get("ansible.builtin.include_role"), dict)
+]
+expected_role_order = ["linux_base", "docker", "infra_manager", "guest_layout"]
+if role_order != expected_role_order:
+    raise SystemExit(
+        f"неожиданный порядок Ansible roles: {role_order!r}; "
+        f"ожидается {expected_role_order!r}"
+    )
+
 linux_base_tasks_text = linux_base_tasks_path.read_text(encoding="utf-8")
 guest_layout_tasks_text = guest_layout_tasks_path.read_text(encoding="utf-8")
 docker_tasks_text = docker_tasks_path.read_text(encoding="utf-8")

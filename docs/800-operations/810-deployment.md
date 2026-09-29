@@ -47,11 +47,36 @@ guest.yaml
 → OpenTofu
 → provision.yaml
 → automation/ansible/playbooks/configure-guest.yml
+→ общие Ansible roles
 ```
+
+Playbook не содержит подробной настройки гостя. Он проверяет входные данные и последовательно подключает:
+
+```text
+linux_base
+→ docker, если требуется
+→ infra_manager, только для 910
+→ guest_layout
+```
+
+Для `infra_manager` внутренняя последовательность дополнительно разделена на части:
+
+```text
+persistence
+→ pve_access
+→ ansible_access
+→ repository
+→ semaphore
+→ runtime
+→ openbao
+→ verify
+```
+
+Постоянный Ansible inventory не хранится. Общий `deploy-guest` использует адрес выбранного гостя и передаёт его Ansible как одноузловый inventory.
 
 Отдельного `setup.sh` для 910 больше нет.
 
-Если для 910 требуется новая возможность, она добавляется в общий Ansible-механизм или реализуется узкой служебной Python-командой, которую вызывает Ansible.
+Если для 910 требуется новая возможность, она добавляется в соответствующую общую role или реализуется узкой служебной Python-командой, которую вызывает Ansible.
 
 ## 4. Фазы deploy-guest для 910
 
@@ -114,7 +139,7 @@ guest.yaml
 - OpenTofu input;
 - служебные команды.
 
-Общий Ansible применяет эти требования.
+Общий Ansible применяет эти требования через roles `linux_base`, `docker`, `infra_manager` и `guest_layout`. Специализированная логика 910 находится только внутри `infra_manager`; данные конкретного гостя остаются в `provision.yaml`.
 
 Порядок проверок готовности, источники фактических данных и состав итогового экрана вынесены отдельно в:
 

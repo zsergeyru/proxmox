@@ -24,33 +24,68 @@ infrastructure/guests/<guest>/ansible/
 
 Общая логика Ansible находится только в `automation/ansible/`.
 
-## Целевая структура
+## Текущая структура
 
-Текущая общая точка входа:
-
-```text
-automation/ansible/
-├── playbooks/
-│   └── configure-guest.yml
-├── inventory/    # узлы, группы и переменные инвентаря
-└── roles/        # переиспользуемые роли
-```
-
-`configure-guest.yml` читает `provision.yaml` выбранного гостя и применяет его требования к операционной системе.
-
-Для 410 используется:
+Общая логика Ansible организована через один playbook и набор roles:
 
 ```text
-guest=410-ai-control
-→ infrastructure/guests/410-ai-control/provision.yaml
-→ playbooks/configure-guest.yml
+ansible.cfg
+automation/
+└── ansible/
+    ├── playbooks/
+    │   └── configure-guest.yml
+    └── roles/
+        ├── linux_base/
+        │   └── tasks/main.yml
+        ├── guest_layout/
+        │   └── tasks/main.yml
+        ├── docker/
+        │   └── tasks/main.yml
+        └── infra_manager/
+            └── tasks/
+                ├── main.yml
+                ├── persistence.yml
+                ├── pve_access.yml
+                ├── ansible_access.yml
+                ├── repository.yml
+                ├── semaphore.yml
+                ├── runtime.yml
+                ├── openbao.yml
+                └── verify.yml
 ```
 
-По мере появления повторяемой специализированной логики она должна выноситься из playbook в общие roles, а не копироваться в отдельные playbook каждого гостя.
+Корневой `ansible.cfg` задаёт путь к общим roles:
+
+```ini
+[defaults]
+roles_path = automation/ansible/roles
+```
+
+`configure-guest.yml` отвечает только за общий порядок: проверяет выбранного гостя и `provision.yaml`, проверяет Debian 13 и подключает нужные roles.
+
+Порядок roles:
+
+```text
+linux_base
+→ docker, если Docker требуется гостю
+→ infra_manager, только для 910
+→ guest_layout
+```
+
+Назначение:
+
+- `linux_base` — устанавливает системные пакеты из `provision.system.required_packages`;
+- `docker` — устанавливает и запускает Docker;
+- `infra_manager` — настраивает постоянное состояние, доступы, Semaphore, OpenBao и управляющую среду 910;
+- `guest_layout` — создаёт каталоги компонентов конкретного гостя.
+
+Для 410 фактически применяются `linux_base` и `guest_layout`. Для 910 применяются все четыре roles.
+
+Постоянный файл `inventory` сейчас не хранится. `deploy-guest` определяет адрес выбранного гостя и запускает Ansible с одноузловым inventory через `-i <адрес>,`. Поэтому отдельный каталог `inventory/` не создаётся.
 
 Термины `inventory`, `playbook` и `role` оставлены без перевода там, где они обозначают конкретные сущности Ansible.
 
-Пустые каталоги и README-заглушки только ради сохранения структуры в Git не нужны. Каталог создаётся тогда, когда в нём появляется реальный inventory, playbook или role.
+Пустые каталоги и README-заглушки только ради сохранения структуры в Git не нужны.
 
 ## Основные правила
 
