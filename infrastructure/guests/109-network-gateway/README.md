@@ -98,13 +98,15 @@ Ballooning: пока не использовать
 
 ## Размещение конфигурации
 
-Все файлы гостевой ОС хранятся только под `rootfs/` по реальному пути назначения:
+Управляемые файлы гостевой ОС должны создаваться явными Ansible-ролями по фактическим путям назначения, например:
 
 ```text
-rootfs/etc/nftables.conf
-rootfs/etc/systemd/system/...
-rootfs/etc/wireguard/...
-rootfs/opt/network-gateway/smartdns/...
+/etc/nftables.conf
+/etc/systemd/system/...
+/etc/wireguard/...
+/opt/network-gateway/smartdns/...
 ```
+
+Статические файлы роли, шаблоны и данные `provision.yaml` используются явно; общего зеркала файловой системы из Git нет.
 
 Секреты VPN, закрытые ключи, предварительно согласованные ключи и пароли в Git не добавляются.
