@@ -96,7 +96,10 @@ def public_key(mount):
         ) as response:
             return response.read().decode("utf-8").strip()
     except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
         if exc.code == 404:
+            return ""
+        if exc.code == 400 and "no default issuer currently configured" in detail:
             return ""
         raise
 
@@ -197,7 +200,14 @@ if not token:
     raise SystemExit("empty root token")
 
 
-def request(method, path, payload=None, *, authenticated=True, allow_404=False):
+def request(
+    method,
+    path,
+    payload=None,
+    *,
+    authenticated=True,
+    allow_missing_ca=False,
+):
     data = None
     headers = {"Content-Type": "application/json"}
     if authenticated:
@@ -214,9 +224,15 @@ def request(method, path, payload=None, *, authenticated=True, allow_404=False):
         with urllib.request.urlopen(req, timeout=30) as response:
             return response.status, response.read()
     except urllib.error.HTTPError as exc:
-        if allow_404 and exc.code == 404:
-            return exc.code, b""
         detail = exc.read().decode("utf-8", errors="replace").strip()
+        if allow_missing_ca and exc.code == 404:
+            return exc.code, b""
+        if (
+            allow_missing_ca
+            and exc.code == 400
+            and "no default issuer currently configured" in detail
+        ):
+            return exc.code, b""
         raise RuntimeError(
             f"{method} {path} returned HTTP {exc.code}: {detail}"
         ) from exc
@@ -227,9 +243,9 @@ def public_key(mount):
         "GET",
         f"/v1/{mount}/public_key",
         authenticated=False,
-        allow_404=True,
+        allow_missing_ca=True,
     )
-    if status == 404:
+    if status in {400, 404}:
         return ""
     return raw.decode("utf-8").strip()
 
