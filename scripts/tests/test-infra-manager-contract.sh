@@ -252,6 +252,7 @@ required_runtime_fragments = (
     "provision.access.pve.persistent_credential",
     "provision.paths.ansible_identity",
     "provision.paths.semaphore_data",
+    "provision.paths.semaphore_persistent_data",
     "provision.persistence.target_layout.state.bindings",
     "OPENBAO_VERSION",
     "openbao_seal_status",
@@ -372,8 +373,11 @@ grep -q 'SEMAPHORE_USE_REMOTE_RUNNER' "$ANSIBLE_RUNTIME" \
     || die "Ansible должен удалять старую настройку remote Runner"
 grep -q 'SEMAPHORE_RUNNER_REGISTRATION_TOKEN' "$ANSIBLE_RUNTIME" \
     || die "Ansible должен удалять старый registration token Runner"
-grep -q 'provision.paths.semaphore_data' "$ANSIBLE_RUNTIME" \
-    || die "Ansible должен обслуживать постоянное хранилище Semaphore"
+grep -q 'provision.paths.semaphore_persistent_data' "$ANSIBLE_RUNTIME" \
+    || die "Ansible должен обслуживать физический каталог постоянного хранилища Semaphore"
+if grep -q 'recurse: true' "$ANSIBLE_RUNTIME" && grep -q 'provision.paths.semaphore_data' "$ANSIBLE_RUNTIME"; then
+    die "Ansible не должен применять recurse к символической ссылке Semaphore"
+fi
 grep -q '"1001"' "$ANSIBLE_RUNTIME" \
     || die "Хранилище Semaphore должно использовать uid 1001"
 grep -q 'packer, version' "$ANSIBLE_RUNTIME" \
