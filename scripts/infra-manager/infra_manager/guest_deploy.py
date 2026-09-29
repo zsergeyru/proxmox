@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -15,6 +16,7 @@ from .pve import PveClient
 from .pve_host import (
     apply_host_requirements,
     ensure_infra_self_access,
+    sign_ssh_client_key,
 )
 from .settings import PATHS, SETTINGS
 
@@ -514,24 +516,110 @@ def _build_guest_plan(context: DeploymentContext) -> GuestPlan:
     return GuestPlan(actions=actions)
 
 
-def _configure_guest_os(
+def _create_temporary_client_certificate(
+    context: DeploymentContext,
+    directory: Path,
+) -> tuple[Path, Path]:
+    """Создать одноразовый SSH-ключ и получить сертификат OpenBao."""
+
+    private_key = directory / "ansible_ed25519"
+    public_key = directory / "ansible_ed25519.pub"
+    certificate = directory / "ansible_ed25519-cert.pub"
+
+    run(
+        [
+            "ssh-keygen",
+            "-q",
+            "-t",
+            "ed25519",
+            "-N",
+            "",
+            "-C",
+            f"infra-manager-ansible-{context.vmid}",
+            "-f",
+            str(private_key),
+        ]
+    )
+    if not private_key.is_file() or not public_key.is_file():
+        raise InfraManagerError(
+            "ssh-keygen не создал временную пару ключей Ansible"
+        )
+    private_key.chmod(0o600)
+
+    signed = sign_ssh_client_key(
+        context.node,
+        public_key.read_text(encoding="utf-8").strip(),
+    )
+    certificate.write_text(signed + "\n", encoding="utf-8")
+    certificate.chmod(0o644)
+
+    inspected = run(
+        ["ssh-keygen", "-L", "-f", str(certificate)],
+        check=False,
+        capture_output=True,
+    )
+    if inspected.returncode:
+        raise InfraManagerError(
+            "OpenSSH не принял временный сертификат OpenBao"
+        )
+    return private_key, certificate
+
+
+def _certificate_auth_ready(
+    context: DeploymentContext,
+    private_key: Path,
+    certificate: Path,
+) -> bool:
+    """Проверить реальный вход root по временному SSH-сертификату."""
+
+    result = run(
+        [
+            "ssh",
+            "-i",
+            str(private_key),
+            "-o",
+            f"CertificateFile={certificate}",
+            "-o",
+            f"UserKnownHostsFile={context.paths.known_hosts}",
+            "-o",
+            "StrictHostKeyChecking=yes",
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            "IdentitiesOnly=yes",
+            "-o",
+            "ConnectTimeout=10",
+            f"root@{context.address}",
+            "true",
+        ],
+        check=False,
+        capture_output=True,
+    )
+    return result.returncode == 0
+
+
+def _run_ansible_guest(
     context: DeploymentContext,
     *,
-    provision_phase: str = "full",
-    self_update: bool = False,
-    project_branch: str | None = None,
+    private_key: Path,
+    certificate: Path | None,
+    provision_phase: str,
+    self_update: bool,
+    project_branch: str | None,
 ) -> None:
-    """Принять SSH host key и применить конфигурацию Ansible."""
+    """Запустить общий Ansible playbook выбранным SSH-доступом."""
 
-    _ensure_ssh_host_key(context.paths.known_hosts, context.address)
-
-    console.info(f"Настройка ОС {context.vmid}")
     ansible_env = os.environ.copy()
     ansible_env["ANSIBLE_HOST_KEY_CHECKING"] = "True"
-    ansible_env["ANSIBLE_SSH_ARGS"] = (
-        f"-o UserKnownHostsFile={context.paths.known_hosts} "
-        "-o StrictHostKeyChecking=yes"
-    )
+    ssh_args = [
+        f"-o UserKnownHostsFile={context.paths.known_hosts}",
+        "-o StrictHostKeyChecking=yes",
+        "-o IdentitiesOnly=yes",
+    ]
+    if certificate is not None:
+        ssh_args.append(f"-o CertificateFile={certificate}")
+    ansible_env["ANSIBLE_SSH_ARGS"] = " ".join(ssh_args)
+
     run(
         [
             "ansible-playbook",
@@ -540,7 +628,7 @@ def _configure_guest_os(
             "-u",
             "root",
             "--private-key",
-            str(context.paths.private_key),
+            str(private_key),
             "-e",
             f"guest={context.paths.guest_dir.name}",
             "-e",
@@ -556,6 +644,63 @@ def _configure_guest_os(
         env=ansible_env,
     )
 
+
+def _configure_guest_os(
+    context: DeploymentContext,
+    *,
+    provision_phase: str = "full",
+    self_update: bool = False,
+    project_branch: str | None = None,
+) -> None:
+    """Применить Ansible, предпочитая временный SSH-сертификат OpenBao."""
+
+    _ensure_ssh_host_key(context.paths.known_hosts, context.address)
+    console.info(f"Настройка ОС {context.vmid}")
+
+    if provision_phase != "full":
+        _run_ansible_guest(
+            context,
+            private_key=context.paths.private_key,
+            certificate=None,
+            provision_phase=provision_phase,
+            self_update=self_update,
+            project_branch=project_branch,
+        )
+        return
+
+    console.info(
+        f"Получение временного SSH-сертификата OpenBao для гостя {context.vmid}"
+    )
+    with tempfile.TemporaryDirectory(
+        prefix=f"infra-manager-ssh-{context.vmid}-"
+    ) as temporary_dir:
+        private_key, certificate = _create_temporary_client_certificate(
+            context,
+            Path(temporary_dir),
+        )
+        if _certificate_auth_ready(context, private_key, certificate):
+            console.ok(
+                f"Гость {context.vmid}: Ansible использует "
+                "временный SSH-сертификат OpenBao"
+            )
+            selected_private_key = private_key
+            selected_certificate: Path | None = certificate
+        else:
+            console.info(
+                f"Гость {context.vmid}: доверие к SSH-сертификату ещё "
+                "не действует; используется переходный постоянный ключ"
+            )
+            selected_private_key = context.paths.private_key
+            selected_certificate = None
+
+        _run_ansible_guest(
+            context,
+            private_key=selected_private_key,
+            certificate=selected_certificate,
+            provision_phase=provision_phase,
+            self_update=self_update,
+            project_branch=project_branch,
+        )
 
 def _validate_existing_guest_object(context: DeploymentContext) -> None:
     """Проверить существующий объект без требования OpenTofu state."""

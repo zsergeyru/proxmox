@@ -701,6 +701,12 @@ status_self_update_guards="$(grep -Fc 'when: not (infra_self_update | default(fa
     || die "Самообновление 910 должно откладывать и синхронизацию Semaphore, и полную status-проверку"
 grep -Fq 'project_branch=project_branch' "$ROOT/scripts/infra-manager/infra_manager/guest_deploy.py" \
     || die "deploy-guest должен передавать фактическую Git-ветку в Ansible"
+grep -Fq 'sign_ssh_client_key' "$ROOT/scripts/infra-manager/infra_manager/guest_deploy.py" \
+    || die "deploy-guest должен получать временный SSH-сертификат OpenBao"
+grep -Fq 'CertificateFile=' "$ROOT/scripts/infra-manager/infra_manager/guest_deploy.py" \
+    || die "Ansible должен уметь использовать SSH-сертификат OpenBao"
+grep -Fq 'TemporaryDirectory' "$ROOT/scripts/infra-manager/infra_manager/guest_deploy.py" \
+    || die "Временный SSH-ключ Ansible должен удаляться после задания"
 grep -Fq 'semaphore-project' "$ACTIVATE_RUNTIME" \
     || die "Отложенная активация должна синхронизировать Semaphore после запуска новой среды"
 grep -Fq 'Назначить активацию новой управляющей среды после настройки 910' "$ANSIBLE_PLAYBOOK" \

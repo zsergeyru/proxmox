@@ -325,10 +325,146 @@ def check_910_self_update_path() -> None:
         )
 
 
+def check_temporary_certificate_path() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        known_hosts = root / "known_hosts"
+        permanent_key = root / "guest_ed25519"
+        permanent_key.write_text("permanent", encoding="utf-8")
+        context = DeploymentContext(
+            client=SimpleNamespace(),
+            vmid=910,
+            name="infra-manager",
+            node="pve",
+            kind="lxc",
+            features=("container-host",),
+            template_vmid=None,
+            address="192.168.9.10",
+            target='proxmox_virtual_environment_container.guest["910"]',
+            workspace=SimpleNamespace(),
+            paths=DeploymentPaths(
+                guest_dir=ROOT / "infrastructure/guests/910-infra-manager",
+                private_key=permanent_key,
+                playbook=ROOT / "automation/ansible/playbooks/configure-guest.yml",
+                known_hosts=known_hosts,
+                plan_file=root / "plan",
+            ),
+        )
+        ansible_calls: list[tuple[list[str], dict[str, str]]] = []
+
+        def fake_run(argv: list[str], **kwargs: object) -> SimpleNamespace:
+            if argv[0] == "ssh-keygen" and "-t" in argv:
+                key = Path(argv[argv.index("-f") + 1])
+                key.write_text("PRIVATE", encoding="utf-8")
+                Path(str(key) + ".pub").write_text(
+                    "ssh-ed25519 AAAAPUBLIC temporary\n",
+                    encoding="utf-8",
+                )
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+            if argv[:2] == ["ssh-keygen", "-L"]:
+                return SimpleNamespace(returncode=0, stdout="valid", stderr="")
+            if argv[0] == "ssh":
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+            if argv[0] == "ansible-playbook":
+                ansible_calls.append((argv, kwargs["env"]))
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+            raise AssertionError(f"Неожиданная команда: {argv!r}")
+
+        with (
+            patch.object(guest_deploy_module, "run", side_effect=fake_run),
+            patch.object(guest_deploy_module, "_ensure_ssh_host_key"),
+            patch.object(
+                guest_deploy_module,
+                "sign_ssh_client_key",
+                return_value="ssh-ed25519-cert-v01@openssh.com AAAACERT",
+            ),
+        ):
+            guest_deploy_module._configure_guest_os(
+                context,
+                provision_phase="full",
+                project_branch="feature/test",
+            )
+
+        if len(ansible_calls) != 1:
+            fail("Ansible должен запускаться ровно один раз")
+        argv, env = ansible_calls[0]
+        selected = Path(argv[argv.index("--private-key") + 1])
+        if selected == permanent_key:
+            fail("При рабочем CA Ansible не перешёл на временный ключ")
+        if "CertificateFile=" not in env["ANSIBLE_SSH_ARGS"]:
+            fail("Ansible не получил временный SSH-сертификат")
+        if selected.exists():
+            fail("Временный закрытый ключ не удалён после Ansible")
+
+
+def check_certificate_bootstrap_fallback() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        permanent_key = root / "guest_ed25519"
+        permanent_key.write_text("permanent", encoding="utf-8")
+        context = DeploymentContext(
+            client=SimpleNamespace(),
+            vmid=410,
+            name="ai-control",
+            node="pve",
+            kind="vm",
+            features=(),
+            template_vmid=9000,
+            address="192.168.4.10",
+            target='proxmox_virtual_environment_vm.guest["410"]',
+            workspace=SimpleNamespace(),
+            paths=DeploymentPaths(
+                guest_dir=ROOT / "infrastructure/guests/410-ai-control",
+                private_key=permanent_key,
+                playbook=ROOT / "automation/ansible/playbooks/configure-guest.yml",
+                known_hosts=root / "known_hosts",
+                plan_file=root / "plan",
+            ),
+        )
+        ansible_calls: list[tuple[list[str], dict[str, str]]] = []
+
+        def fake_run(argv: list[str], **kwargs: object) -> SimpleNamespace:
+            if argv[0] == "ssh-keygen" and "-t" in argv:
+                key = Path(argv[argv.index("-f") + 1])
+                key.write_text("PRIVATE", encoding="utf-8")
+                Path(str(key) + ".pub").write_text(
+                    "ssh-ed25519 AAAAPUBLIC temporary\n",
+                    encoding="utf-8",
+                )
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+            if argv[:2] == ["ssh-keygen", "-L"]:
+                return SimpleNamespace(returncode=0, stdout="valid", stderr="")
+            if argv[0] == "ssh":
+                return SimpleNamespace(returncode=255, stdout="", stderr="denied")
+            if argv[0] == "ansible-playbook":
+                ansible_calls.append((argv, kwargs["env"]))
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+            raise AssertionError(f"Неожиданная команда: {argv!r}")
+
+        with (
+            patch.object(guest_deploy_module, "run", side_effect=fake_run),
+            patch.object(guest_deploy_module, "_ensure_ssh_host_key"),
+            patch.object(
+                guest_deploy_module,
+                "sign_ssh_client_key",
+                return_value="ssh-ed25519-cert-v01@openssh.com AAAACERT",
+            ),
+        ):
+            guest_deploy_module._configure_guest_os(context)
+
+        argv, env = ansible_calls[0]
+        if Path(argv[argv.index("--private-key") + 1]) != permanent_key:
+            fail("Первичный гость должен сохранить переходный постоянный ключ")
+        if "CertificateFile=" in env["ANSIBLE_SSH_ARGS"]:
+            fail("Отклонённый сертификат не должен передаваться Ansible")
+
+
 def main_test() -> None:
     check_opentofu_state_status()
     check_guest_summary()
     check_910_self_update_path()
+    check_temporary_certificate_path()
+    check_certificate_bootstrap_fallback()
     workspace = OpenTofuWorkspace(
         directory=Path("/tmp/opentofu"),
         state_dir=Path("/tmp/state"),
