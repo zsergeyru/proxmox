@@ -298,7 +298,7 @@ access:
 
 - [`700-overview.md`](700-overview.md) — общая модель безопасности.
 - [`710-pve-access.md`](710-pve-access.md) — root SSH к PVE.
-- [`730-git-access.md`](730-git-access.md) — Git SSH и `management.project_repo_read`.
+- [`730-git-access.md`](730-git-access.md) — отдельный Git SSH и чтение проектного репозитория.
 - [`740-openbao.md`](740-openbao.md) — SSH CA, роли подписи и служебные доступы.
 - [`750-access-contract.md`](750-access-contract.md) — единый источник требований SSH-доступа.
 - [`780-implementation-status.md`](780-implementation-status.md) — фактическое состояние перехода.
