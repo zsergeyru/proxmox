@@ -714,7 +714,8 @@ def test_kv_contract_is_narrow_and_versioned() -> None:
         '"git/github/proxmox-read"',
         '"services/semaphore"',
         '"infra-manager-kv-read"',
-        '"/v1/auth/infra-manager/role/kv-reader"',
+        '"kv-reader", "infra-manager-kv-read"',
+        '"kv-semaphore-writer", "infra-manager-kv-semaphore-write"',
         '"token_bound_cidrs": ["127.0.0.1/32"]',
     )
     for item in required:
@@ -742,6 +743,10 @@ def test_kv_access_credentials_are_pve_only() -> None:
     host = load_host_module()
     credentials = {
         "kv-reader": {"role_id": "role-kv", "secret_id": "secret-kv"},
+        "kv-semaphore-writer": {
+            "role_id": "role-writer",
+            "secret_id": "secret-writer",
+        },
     }
     with tempfile.TemporaryDirectory() as tmp:
         key_dir = Path(tmp)
@@ -755,6 +760,25 @@ def test_kv_access_credentials_are_pve_only() -> None:
             fail("Служебные данные KV записаны с искажением")
         if target.stat().st_mode & 0o777 != 0o600:
             fail("Служебные данные KV должны иметь права 0600")
+
+
+def test_semaphore_token_update_is_narrow() -> None:
+    host = load_host_module()
+    code = host.UPDATE_SEMAPHORE_API_TOKEN_CODE
+    required = (
+        'payload.get("credentials")',
+        'payload.get("api_token")',
+        '"/data/services/semaphore"',
+        'updated["api_token"] = api_token',
+        '"/v1/auth/token/revoke-self"',
+    )
+    for item in required:
+        if item not in code:
+            fail(f"Обновление Semaphore token нарушает контракт: {item}")
+    if "/data/pve/api/infra-manager" in code:
+        fail("Writer Semaphore не должен изменять PVE API credential")
+    if "/data/git/github/proxmox-read" in code:
+        fail("Writer Semaphore не должен изменять Git credential")
 
 
 def test_stale_key_is_not_overwritten() -> None:
@@ -798,6 +822,7 @@ def main() -> None:
     test_ssh_access_credentials_are_pve_only()
     test_kv_contract_is_narrow_and_versioned()
     test_kv_access_credentials_are_pve_only()
+    test_semaphore_token_update_is_narrow()
     test_stale_key_is_not_overwritten()
     print("[ОК] Проверки OpenBao пройдены")
 
