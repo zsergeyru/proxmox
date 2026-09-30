@@ -2547,6 +2547,11 @@ def main() -> int:
         action="store_true",
         help="Подписать переданный через stdin открытый ключ SSH-сервера",
     )
+    mode.add_argument(
+        "--check-kv",
+        action="store_true",
+        help="Проверить KV v2 и ограниченный доступ к рабочим секретам",
+    )
     args = parser.parse_args()
 
     if os.geteuid() != 0:
@@ -2587,6 +2592,12 @@ def main() -> int:
                 address,
             )
             print(sign_host_public_key(public_key, principals))
+        elif args.check_kv:
+            status = read_status(wait=False)
+            if status.get("sealed") is not False:
+                raise OpenBaoHostError("OpenBao запечатан; проверка KV невозможна")
+            check_kv_access()
+            print("[ОК] KV v2 и доступ kv-reader подтверждены")
         else:
             unseal()
             status = read_status(wait=False)
