@@ -779,6 +779,20 @@ grep -Fq 'name="Deploy Guest 910"' "$PY_SEMAPHORE" \
     || die "Semaphore должен создавать задание Deploy Guest 910"
 grep -Fq "arguments='[\"910\"]'" "$PY_SEMAPHORE" \
     || die "Deploy Guest 910 должен иметь фиксированный VMID 910"
+grep -Fq 'name="Sync Machine SSH"' "$PY_SEMAPHORE" \
+    || die "Semaphore должен создавать отдельное задание Sync Machine SSH"
+grep -Fq 'scripts/infra-manager/jobs/sync-machine-ssh.py' "$PY_SEMAPHORE" \
+    || die "Sync Machine SSH должен запускать отдельный Python-сценарий"
+grep -Fq 'infra-manager-openbao-startup-unseal.service' "$MACHINE_SSH_SERVICE" \
+    || die "Фоновое обновление машинного SSH должно зависеть от разблокировки OpenBao"
+grep -Fq 'OnUnitActiveSec=30min' "$MACHINE_SSH_TIMER" \
+    || die "Машинные SSH-сертификаты должны обновляться каждые 30 минут"
+if grep -Fq -- '--verify' "$MACHINE_SSH_COMMAND"; then
+    die "Периодическое обновление не должно запускать полную матрицу SSH-проверок"
+fi
+grep -Fq 'verify_connections=True' "$MACHINE_SSH_JOB" \
+    || die "Ручное задание Sync Machine SSH должно проверять разрешённые и запрещённые связи"
+
 grep -Fq 'name="Initialize OpenBao 910"' "$PY_SEMAPHORE" \
     || die "Semaphore должен создавать отдельное задание Initialize OpenBao 910"
 grep -Fq 'scripts/infra-manager/jobs/initialize-openbao.py' "$PY_SEMAPHORE" \
