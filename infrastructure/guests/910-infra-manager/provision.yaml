@@ -187,12 +187,16 @@ persistence:
         - caches
 
   backup_required:
-    - /etc/infra-manager/secrets
     - /etc/infra-manager/ansible
     - /mnt/pve-access/pve-host
     - /var/lib/infra-manager/semaphore
     - /var/lib/infra-manager/opentofu/state
     - /var/lib/persistent/openbao
+
+  transition_sources:
+    - /etc/infra-manager/secrets
+    - /mnt/pve-access/github
+    - /mnt/pve-access/pve-api
 
   reproducible:
     - /var/lib/infra-manager/bootstrap-repo
