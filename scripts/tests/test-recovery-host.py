@@ -119,15 +119,39 @@ def test_verify_recovery_state() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         configure_paths(module, Path(tmp))
         prepare_complete_state(module)
-        module.verify_recovery_state()
-
-        module.OPENBAO_UNSEAL_KEY.unlink()
-        try:
+        with patch.object(module, "managed_guests_exist", return_value=False):
             module.verify_recovery_state()
-        except module.RecoveryError as exc:
-            assert "unseal.key" in str(exc)
-        else:
-            raise AssertionError("Отсутствующий unseal key должен блокировать recovery")
+
+            module.OPENBAO_UNSEAL_KEY.unlink()
+            try:
+                module.verify_recovery_state()
+            except module.RecoveryError as exc:
+                assert "unseal.key" in str(exc)
+            else:
+                raise AssertionError(
+                    "Отсутствующий unseal key должен блокировать recovery"
+                )
+
+
+def test_opentofu_state_required_only_for_managed_guests() -> None:
+    module = load_module()
+    with tempfile.TemporaryDirectory() as tmp:
+        configure_paths(module, Path(tmp))
+        prepare_complete_state(module)
+        module.OPENTOFU_STATE.unlink()
+
+        with patch.object(module, "managed_guests_exist", return_value=False):
+            module.verify_recovery_state()
+
+        with patch.object(module, "managed_guests_exist", return_value=True):
+            try:
+                module.verify_recovery_state()
+            except module.RecoveryError as exc:
+                assert "OpenTofu state" in str(exc)
+            else:
+                raise AssertionError(
+                    "Managed-гости без OpenTofu state должны блокировать recovery"
+                )
 
 
 def main() -> None:
@@ -136,6 +160,7 @@ def main() -> None:
         test_prepare_rejects_divergent_keys,
         test_restore_git_access_from_recovery,
         test_verify_recovery_state,
+        test_opentofu_state_required_only_for_managed_guests,
     )
     for test in tests:
         test()
