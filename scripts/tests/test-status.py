@@ -70,7 +70,11 @@ def main_test() -> None:
             fail(f"Playbook Semaphore не существует: {spec.playbook}")
 
     templates = [
-        {"name": spec.name, "git_branch": branch}
+        {
+            "name": spec.name,
+            "git_branch": branch,
+            "environment_ids": [8, 10],
+        }
         for spec in SEMAPHORE_TEMPLATES
     ]
     _check_git_branch_contract(
@@ -247,6 +251,7 @@ def main_test() -> None:
                 "app": spec.app,
                 "playbook": spec.playbook,
                 "arguments": spec.arguments,
+                "environment_ids": [8, 10],
             }
             for spec in SEMAPHORE_TEMPLATES
         ),
