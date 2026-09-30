@@ -392,8 +392,6 @@ class BootstrapHost:
 
         required_files = (
             self.host_openbao_unseal_key,
-            self.host_openbao_ssh_access,
-            self.host_openbao_kv_access,
             self.host_access_github_key,
         )
         missing_files = [
