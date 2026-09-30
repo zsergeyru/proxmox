@@ -20,5 +20,8 @@
 - name: Проверить и разблокировать OpenBao
   ansible.builtin.import_tasks: openbao.yml
 
+- name: Подготовить аварийный контур
+  ansible.builtin.import_tasks: recovery.yml
+
 - name: Завершить настройку и проверить готовность
   ansible.builtin.import_tasks: verify.yml
