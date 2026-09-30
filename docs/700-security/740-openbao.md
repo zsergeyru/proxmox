@@ -58,17 +58,20 @@ http://127.0.0.1:8200
 
 ### 2.2. Данные только для PVE
 
-На PVE вне OpenBao остаются только данные, необходимые до получения штатного доступа к самому OpenBao:
+На PVE вне OpenBao остаются данные, необходимые до получения штатного доступа к самому OpenBao, и аварийная Git-копия проекта:
 
 ```text
-unseal.key
-ssh-access.json
-kv-access.json
+openbao/unseal.key
+openbao/ssh-access.json
+openbao/kv-access.json
+recovery/github_proxmox_repo_ed25519
 ```
 
 Они находятся в PVE-only области и не монтируются в 910.
 
 `kv-access.json` содержит только служебные RoleID/SecretID ограниченных ролей OpenBao. Он не содержит PVE API secret, Git Deploy Key или секреты Semaphore.
+
+`recovery/github_proxmox_repo_ed25519` является отдельной PVE-only аварийной копией read-only Deploy Key. Она нужна для получения проекта до запуска 910 и OpenBao и не используется как штатный рабочий secret после восстановления.
 
 Канонические пути определены в [`../200-pve/230-host-layout.md`](../200-pve/230-host-layout.md).
 
@@ -374,9 +377,11 @@ Initial root token используется только для первонач
 - закрытых SSH CA;
 - политик и ролей OpenBao.
 
-PVE-only unseal/AppRole-данные и Raft state должны резервироваться как разные части одного защищённого контура.
+PVE-only unseal/AppRole-данные, аварийный Git key и Raft state должны резервироваться как разные части одного защищённого комплекта.
 
-Отдельный аварийный SSH/Git-контур и полная процедура восстановления после потери OpenBao относятся к отдельному этапу архитектуры и здесь не считаются реализованными.
+Штатное восстановление 910 не создаёт новый OpenBao поверх потерянного состояния. Перед восстановлением PVE-only helper проверяет наличие обязательных данных и останавливает процесс при потере Raft state, unseal key или других критичных частей.
+
+Отдельный аварийный SSH-ключ для входа в PVE не используется: точкой аварийного восстановления является локальный root PVE. Это не расширяет удалённый административный доступ ради recovery.
 
 ## 11. Проверка контракта
 
@@ -396,7 +401,8 @@ PVE-only unseal/AppRole-данные и Raft state должны резервир
 - набор `machine-*` совпадает с субъектами `identity/issue` из `access.yaml`;
 - машинная роль ограничена principal своего VMID и сроком 2 часа;
 - удалённая из проекта машинная роль исчезает из OpenBao;
-- root token не хранится постоянно.
+- root token не хранится постоянно;
+- PVE-only recovery helper подтверждает наличие совместимого OpenBao/recovery-состояния.
 
 `infra-manager-status --full` должен считать инициализированный OpenBao готовым только после успешной PVE-only проверки KV.
 
@@ -410,3 +416,4 @@ PVE-only unseal/AppRole-данные и Raft state должны резервир
 - [`780-implementation-status.md`](780-implementation-status.md) — текущее состояние реализации.
 - [`790-decisions.md`](790-decisions.md) — принятые решения безопасности.
 - [`../200-pve/230-host-layout.md`](../200-pve/230-host-layout.md) — постоянные и временные пути.
+- [`../800-operations/830-recovery.md`](../800-operations/830-recovery.md) — пошаговое аварийное восстановление 910.
