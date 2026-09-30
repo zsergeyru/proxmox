@@ -1,4 +1,4 @@
-schema_version: 11
+schema_version: 12
 vmid: 321
 name: app-services
 profile: debian-lxc-docker
