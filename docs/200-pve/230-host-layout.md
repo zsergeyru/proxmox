@@ -47,10 +47,12 @@
 
 ```text
 /mnt/bindmounts/infra-manager/pve-only/
-└── openbao/
-    ├── unseal.key
-    ├── ssh-access.json
-    └── kv-access.json
+├── openbao/
+│   ├── unseal.key
+│   ├── ssh-access.json
+│   └── kv-access.json
+└── recovery/
+    └── github_proxmox_repo_ed25519
 ```
 
 | Полный путь на PVE | Назначение |
@@ -58,6 +60,7 @@
 | `/mnt/bindmounts/infra-manager/pve-only/openbao/unseal.key` | ключ снятия блокировки OpenBao |
 | `/mnt/bindmounts/infra-manager/pve-only/openbao/ssh-access.json` | служебные RoleID/SecretID для операций SSH-подписи OpenBao |
 | `/mnt/bindmounts/infra-manager/pve-only/openbao/kv-access.json` | служебные RoleID/SecretID для чтения KV и узкого обновления Semaphore token |
+| `/mnt/bindmounts/infra-manager/pve-only/recovery/github_proxmox_repo_ed25519` | аварийная PVE-only копия read-only GitHub Deploy Key для восстановления проекта до запуска 910/OpenBao |
 
 Весь каталог `pve-only/` остаётся только на PVE и в 910 не монтируется.
 
@@ -136,6 +139,7 @@ mp1: /mnt/bindmounts/infra-manager/state,mp=/mnt/persistent-state
 | `/mnt/bindmounts/infra-manager/` | `0755` | `0:0` |
 | `pve-only/` | `0700` | `0:0` |
 | `pve-only/openbao/` | `0700` | `0:0` |
+| `pve-only/recovery/` | `0700` | `0:0` |
 | `access/` | `0755` | `0:0` |
 | `access/github/` | `0700` | `100000:100000` |
 | `access/pve-host/` | `0700` | `101001:100000` |
@@ -150,6 +154,7 @@ mp1: /mnt/bindmounts/infra-manager/state,mp=/mnt/persistent-state
 | `pve-only/openbao/unseal.key` | `0600` | `0:0` |
 | `pve-only/openbao/ssh-access.json` | `0600` | `0:0` |
 | `pve-only/openbao/kv-access.json` | `0600` | `0:0` |
+| `pve-only/recovery/github_proxmox_repo_ed25519` | `0600` | `0:0` |
 | `access/github/github_proxmox_repo_ed25519` | `0600` | `100000:100000` |
 | `access/pve-host/root_ed25519` | `0600` | `101001:100000` |
 | `access/pve-host/root_ed25519.pub` | `0644` | `101001:100000` |
@@ -179,13 +184,16 @@ mp1: /mnt/bindmounts/infra-manager/state,mp=/mnt/persistent-state
 /root/.ssh/authorized_keys
 ```
 
-Хостовый служебный сценарий OpenBao и SSH-доверия:
+Хостовые служебные команды:
 
 ```text
 /usr/local/sbin/infra-manager-openbao-unseal
+/usr/local/sbin/infra-manager-recovery
 ```
 
-`infra-manager-openbao-unseal` выполняет только узкие операции, которым нужны полномочия PVE или доступ к `pve-only/`: работу с блокировкой OpenBao, настройку ограниченных SSH-доступов и запросы SSH-подписи. Подробный контракт этих операций относится к разделу безопасности.
+`infra-manager-openbao-unseal` выполняет только узкие операции, которым нужны полномочия PVE или доступ к `pve-only/`: работу с блокировкой OpenBao, настройку ограниченных SSH-доступов и запросы SSH-подписи.
+
+`infra-manager-recovery` является локальной root-командой PVE для проверки аварийного состояния и восстановления bootstrap Git-доступа. Она не требует работающего 910 и не выводит закрытый Deploy Key в журнал.
 
 Технический журнал первоначального контура:
 
@@ -212,16 +220,17 @@ github_proxmox_repo_ed25519
 debian13-template.ref
 ```
 
-Исходный GitHub Deploy Key создаётся первоначальным контуром в этом каталоге, а рабочая копия для штатного 910 помещается в `access/github/`.
+Исходный GitHub Deploy Key создаётся первоначальным контуром в этом каталоге, рабочая копия для штатного 910 помещается в `access/github/`, а независимая аварийная копия — в `pve-only/recovery/`.
 
-Этот каталог не является хранилищем состояния сервисов 910 и может очищаться отдельным режимом полной очистки первоначального контура без удаления канонического корня постоянных данных.
+Каталог `/root/.config/proxmox-bootstrap/` не является каноническим хранилищем recovery-данных. Его Git key может быть восстановлен командой `infra-manager-recovery --restore-git-access`.
 
 ## 8. Временные файлы
 
-Блокировка хостового сценария OpenBao:
+Блокировки PVE-only сценариев:
 
 ```text
 /run/lock/infra-manager-openbao-unseal.lock
+/run/lock/infra-manager-recovery.lock
 ```
 
 Сам хостовый сценарий может создавать краткоживущие временные файлы на PVE под `/run/`; их имена не являются частью постоянного контракта.
