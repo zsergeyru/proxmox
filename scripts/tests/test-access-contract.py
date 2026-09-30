@@ -93,6 +93,14 @@ def main() -> None:
         data,
         subject="guest:910",
         service="ssh",
+        resource="identity",
+        target="self",
+        permission="issue",
+    )
+    require_rule(
+        data,
+        subject="guest:910",
+        service="ssh",
         resource="guest",
         target="project:linux-guests",
         permission="connect-root",
