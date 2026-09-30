@@ -6,12 +6,14 @@ import http.cookiejar
 import json
 import os
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from .common import InfraManagerError, console
+from .pve_host import update_openbao_semaphore_api_token
 from .settings import PATHS, SETTINGS
 
 SEMAPHORE_URL = SETTINGS.semaphore_url
@@ -21,6 +23,7 @@ PROJECT_ID_FILE = PATHS.semaphore_project_id_file
 SECRET_DIR = PATHS.secret_dir
 ADMIN_PASSWORD_FILE = PATHS.admin_password_file
 SEMAPHORE_API_TOKEN_FILE = PATHS.semaphore_api_token_file
+OPENBAO_MATERIALIZED_MARKER = PATHS.openbao_materialized_marker
 PVE_API_ENV = PATHS.pve_api_env
 GITHUB_KEY = PATHS.github_key
 GITHUB_KEY_COPY = PATHS.github_key_copy
@@ -255,9 +258,27 @@ class SemaphoreClient:
             return False
         return True
 
+    def _sync_api_token_to_openbao(self) -> None:
+        if not OPENBAO_MATERIALIZED_MARKER.is_file():
+            return
+        if not nonempty(SEMAPHORE_API_TOKEN_FILE):
+            raise InfraManagerError("Отсутствует API token Semaphore для OpenBao")
+        values = read_env_file(PVE_API_ENV)
+        endpoint = values.get("PVE_API_URL", "")
+        node = urllib.parse.urlparse(endpoint).hostname if endpoint else None
+        if not node:
+            raise InfraManagerError(
+                "Не удалось определить узел PVE для обновления OpenBao"
+            )
+        token = SEMAPHORE_API_TOKEN_FILE.read_text(
+            encoding="utf-8"
+        ).strip()
+        update_openbao_semaphore_api_token(node, token)
+
     def ensure_api_token(self) -> None:
         if self.token_valid():
             self.auth_mode = "token"
+            self._sync_api_token_to_openbao()
             return
 
         self.login()
@@ -277,6 +298,7 @@ class SemaphoreClient:
         SEMAPHORE_API_TOKEN_FILE.chmod(0o600)
         self.auth_mode = "token"
         self.get("/user/", auth="token")
+        self._sync_api_token_to_openbao()
 
     def ensure_project(self) -> int:
         existing = find_unique_by_name(
