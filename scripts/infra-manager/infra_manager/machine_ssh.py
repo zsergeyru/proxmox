@@ -6,6 +6,7 @@ import argparse
 import ipaddress
 import json
 import shlex
+import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -502,6 +503,13 @@ def sync_machine_ssh(
     verify_connections: bool = False,
 ) -> int:
     """Синхронизировать роли OpenBao, principals и короткие сертификаты."""
+
+    validator = repo_root / "scripts/validate_repo.py"
+    if not validator.is_file():
+        raise InfraManagerError(
+            f"Не найден общий валидатор проекта: {validator}"
+        )
+    run([sys.executable, str(validator)])
 
     policy = load_access_policy(repo_root)
     if not policy.machine_identity_vmids:
