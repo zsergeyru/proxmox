@@ -165,7 +165,7 @@ def run_build_template(repo_root: Path, vmid: int) -> int:
         _finalize_template(client, node=node, vmid=vmid)
         run_verify_template(vmid)
         console.result(
-            f"Шаблон {vmid} уже соответствует версии 
+            f"Шаблон {vmid} уже соответствует версии "
             f"{TEMPLATE_VERSION} и успешно проверен; сборка не требуется"
         )
         return 0
