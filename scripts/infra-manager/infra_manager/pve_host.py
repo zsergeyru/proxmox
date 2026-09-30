@@ -155,6 +155,11 @@ def trigger_openbao_unseal(node: str) -> None:
     _ssh(node, str(OPENBAO_HOST_COMMAND))
 
 
+def check_openbao_kv(node: str) -> None:
+    """Проверить KV v2 через PVE-only AppRole без выдачи секретов."""
+    _ssh(node, str(OPENBAO_HOST_COMMAND), "--check-kv")
+
+
 def sign_ssh_client_key(node: str, public_key: str) -> str:
     """Подписать временный открытый SSH-ключ через PVE-only доступ OpenBao."""
     normalized = public_key.strip()
