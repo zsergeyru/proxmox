@@ -86,7 +86,6 @@ docker:
 
 paths:
   configuration: /etc/infra-manager
-  secrets: /etc/infra-manager/secrets
   ca: /etc/infra-manager/ca
   ssh_client_ca: /etc/infra-manager/ca/ssh-client-ca.pub
   ansible_identity: /etc/infra-manager/ansible
@@ -105,13 +104,14 @@ paths:
 
 access_materialization:
   pve:
-    staging_credential: /mnt/pve-access/pve-api/pve-api.env
-    persistent_credential: /run/infra-manager/secrets/pve-api.env
+    staging_credential: /run/infra-manager/bootstrap-secrets/pve-api.env
+    runtime_credential: /run/infra-manager/secrets/pve-api.env
     ca_source: /mnt/pve-access/ca/pve-root-ca.crt
     root_ssh_private_key: /mnt/pve-access/pve-host/root_ed25519
     root_ssh_known_hosts: /mnt/pve-access/pve-host/known_hosts
 
   github:
+    staging_credential: /run/infra-manager/bootstrap-secrets/github_proxmox_repo_ed25519
     private_key: /run/infra-manager/secrets/github_proxmox_repo_ed25519
     known_hosts: /root/.ssh/github_known_hosts
 
@@ -142,17 +142,16 @@ persistence:
         - openbao-unseal-key
         - openbao-ssh-access-credentials
         - openbao-kv-access-credentials
+        - recovery-github-deploy-key
 
     access:
       host_path: /mnt/bindmounts/infra-manager/access
       guest_path: /mnt/pve-access
       mode: ro
       contains:
-        - github-deploy-key
         - pve-root-ssh-key
         - pve-known-hosts
         - pve-ca
-        - pve-api-credential
 
     state:
       host_path: /mnt/bindmounts/infra-manager/state
@@ -163,9 +162,7 @@ persistence:
         - opentofu-state
         - semaphore-data
         - ansible-identity
-        - infra-manager-secrets
       bindings:
-        - { source: /mnt/persistent-state/secrets, target: /etc/infra-manager/secrets, owner: root, group: root, mode: "0700" }
         - { source: /mnt/persistent-state/ansible, target: /etc/infra-manager/ansible, owner: "1001", group: "0", mode: "0700" }
         - { source: /mnt/persistent-state/semaphore, target: /var/lib/infra-manager/semaphore, owner: "1001", group: "0", mode: "0770" }
         - { source: /mnt/persistent-state/opentofu, target: /var/lib/infra-manager/opentofu, owner: "1001", group: "0", mode: "0750" }
@@ -185,11 +182,6 @@ persistence:
     - /var/lib/infra-manager/semaphore
     - /var/lib/infra-manager/opentofu/state
     - /var/lib/persistent/openbao
-
-  transition_sources:
-    - /etc/infra-manager/secrets
-    - /mnt/pve-access/github
-    - /mnt/pve-access/pve-api
 
   reproducible:
     - /var/lib/infra-manager/bootstrap-repo
