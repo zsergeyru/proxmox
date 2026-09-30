@@ -12,13 +12,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .common import InfraManagerError, console
+from .common import LOG_LEVEL_ENV, LOG_LEVELS, InfraManagerError, console
 from .pve_host import update_openbao_semaphore_api_token
 from .settings import PATHS, SETTINGS
 
 SEMAPHORE_URL = SETTINGS.semaphore_url
 PROJECT_NAME = SETTINGS.project_name
 OPENTOFU_ENV_NAME = SETTINGS.opentofu_env_name
+INFRA_MANAGER_ENV_NAME = SETTINGS.infra_manager_env_name
 PROJECT_ID_FILE = PATHS.semaphore_project_id_file
 SECRET_DIR = PATHS.secret_dir
 ADMIN_PASSWORD_FILE = PATHS.admin_password_file
@@ -562,11 +563,100 @@ class SemaphoreClient:
         )
         return environment_id
 
+    def ensure_infra_manager_environment(self, project_id: int) -> int:
+        """Создать общие настройки заданий и сохранить ручной выбор уровня вывода."""
+        environments = self.get(
+            f"/project/{project_id}/environment?sort=name&order=asc"
+        )
+        existing = find_unique_by_name(
+            environments,
+            INFRA_MANAGER_ENV_NAME,
+            "Variable Group",
+        )
+
+        if existing is None:
+            response = self.post(
+                f"/project/{project_id}/environment",
+                {
+                    "name": INFRA_MANAGER_ENV_NAME,
+                    "project_id": project_id,
+                    "password": None,
+                    "json": "{}",
+                    "env": json.dumps(
+                        {LOG_LEVEL_ENV: "normal"},
+                        separators=(",", ":"),
+                    ),
+                    "secrets": [],
+                },
+            )
+            environment_id = (
+                response.get("id")
+                if isinstance(response, dict)
+                else None
+            )
+            if not isinstance(environment_id, int):
+                raise InfraManagerError(
+                    "Semaphore не вернул id Variable Group Infra Manager"
+                )
+            return environment_id
+
+        environment_id = existing.get("id")
+        if not isinstance(environment_id, int):
+            raise InfraManagerError(
+                "Variable Group Infra Manager имеет некорректный id"
+            )
+
+        full = self.get(
+            f"/project/{project_id}/environment/{environment_id}"
+        )
+        raw_env = full.get("env", "{}") if isinstance(full, dict) else "{}"
+        if isinstance(raw_env, str):
+            try:
+                values = json.loads(raw_env or "{}")
+            except json.JSONDecodeError as exc:
+                raise InfraManagerError(
+                    "Variable Group Infra Manager содержит некорректный JSON"
+                ) from exc
+        elif isinstance(raw_env, dict):
+            values = dict(raw_env)
+        else:
+            raise InfraManagerError(
+                "Variable Group Infra Manager имеет некорректный env"
+            )
+        if not isinstance(values, dict):
+            raise InfraManagerError(
+                "Variable Group Infra Manager должен содержать объект env"
+            )
+
+        level = values.get(LOG_LEVEL_ENV)
+        if level is None:
+            values[LOG_LEVEL_ENV] = "normal"
+            self.put(
+                f"/project/{project_id}/environment/{environment_id}",
+                {
+                    "id": environment_id,
+                    "name": INFRA_MANAGER_ENV_NAME,
+                    "project_id": project_id,
+                    "password": None,
+                    "json": "{}",
+                    "env": json.dumps(values, separators=(",", ":")),
+                    "secrets": [],
+                },
+            )
+        elif level not in LOG_LEVELS:
+            allowed = ", ".join(sorted(LOG_LEVELS))
+            raise InfraManagerError(
+                f"{INFRA_MANAGER_ENV_NAME}: {LOG_LEVEL_ENV} "
+                f"должен быть одним из значений: {allowed}"
+            )
+
+        return environment_id
+
     def ensure_template(
         self,
         project_id: int,
         repository_id: int,
-        environment_id: int,
+        environment_ids: list[int],
         *,
         name: str,
         playbook: str,
@@ -582,7 +672,7 @@ class SemaphoreClient:
             "name": name,
             "project_id": project_id,
             "repository_id": repository_id,
-            "environment_ids": [environment_id],
+            "environment_ids": environment_ids,
             "playbook": playbook,
             "app": app,
             "type": "",
@@ -657,12 +747,17 @@ def configure_project(branch: str | None = None) -> int:
         github_key_id,
         branch,
     )
-    environment_id = client.ensure_opentofu_environment(project_id)
+    opentofu_environment_id = client.ensure_opentofu_environment(project_id)
+    infra_manager_environment_id = client.ensure_infra_manager_environment(project_id)
+    environment_ids = [
+        opentofu_environment_id,
+        infra_manager_environment_id,
+    ]
     for template in SEMAPHORE_TEMPLATES:
         client.ensure_template(
             project_id,
             repository_id,
-            environment_id,
+            environment_ids,
             name=template.name,
             playbook=template.playbook,
             branch=branch,
@@ -671,7 +766,6 @@ def configure_project(branch: str | None = None) -> int:
         )
 
     console.ok(
-        "Проект Semaphore, Git repository, PVE Variable Group "
-        "и инфраструктурные задания подготовлены"
+        "Проект Semaphore, общие настройки и инфраструктурные задания подготовлены"
     )
     return 0
