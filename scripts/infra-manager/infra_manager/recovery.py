@@ -15,9 +15,17 @@ from .pve_host import (
 
 
 def pve_node_from_environment() -> str:
+    explicit = os.environ.get("INFRA_PVE_NODE", "").strip()
+    if explicit:
+        if any(character.isspace() for character in explicit) or "/" in explicit:
+            raise InfraManagerError("INFRA_PVE_NODE имеет некорректный формат")
+        return explicit
+
     endpoint = os.environ.get("TF_VAR_pve_endpoint", "").strip()
     if not endpoint:
-        raise InfraManagerError("Не задан TF_VAR_pve_endpoint")
+        raise InfraManagerError(
+            "Не задан INFRA_PVE_NODE или TF_VAR_pve_endpoint"
+        )
 
     parsed = urlparse(endpoint)
     if parsed.scheme != "https" or not parsed.hostname:
