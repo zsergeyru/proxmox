@@ -21,7 +21,6 @@ PROJECT_NAME = SETTINGS.project_name
 OPENTOFU_ENV_NAME = SETTINGS.opentofu_env_name
 INFRA_MANAGER_ENV_NAME = SETTINGS.infra_manager_env_name
 PROJECT_ID_FILE = PATHS.semaphore_project_id_file
-SECRET_DIR = PATHS.secret_dir
 ADMIN_PASSWORD_FILE = PATHS.admin_password_file
 SEMAPHORE_API_TOKEN_FILE = PATHS.semaphore_api_token_file
 OPENBAO_MATERIALIZED_MARKER = PATHS.openbao_materialized_marker
