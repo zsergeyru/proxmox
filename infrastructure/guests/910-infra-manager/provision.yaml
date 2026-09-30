@@ -71,6 +71,7 @@ docker:
         - /mnt/persistent-state/ansible:/etc/infra-manager/ansible:ro
         - /mnt/pve-access/pve-host:/mnt/pve-access/pve-host:ro
         - /mnt/persistent-state/opentofu:/var/lib/infra-manager/opentofu
+        - /run/infra-manager/secrets:/run/infra-manager/secrets:ro
 
     openbao:
       container_name: openbao
@@ -112,7 +113,7 @@ access:
     managed_pool_assignment: managed
     iso_storage: local
     staging_credential: /mnt/pve-access/pve-api/pve-api.env
-    persistent_credential: /mnt/pve-access/pve-api/pve-api.env
+    persistent_credential: /run/infra-manager/secrets/pve-api.env
     ca_source: /mnt/pve-access/ca/pve-root-ca.crt
     root_ssh_private_key: /mnt/pve-access/pve-host/root_ed25519
     root_ssh_known_hosts: /mnt/pve-access/pve-host/known_hosts
@@ -120,7 +121,7 @@ access:
   github:
     repository: git@github.com:zsergeyru/proxmox.git
     access: read-only-deploy-key
-    private_key: /mnt/pve-access/github/github_proxmox_repo_ed25519
+    private_key: /run/infra-manager/secrets/github_proxmox_repo_ed25519
     known_hosts: /root/.ssh/github_known_hosts
 
 semaphore:
@@ -147,6 +148,7 @@ persistence:
       contains:
         - openbao-unseal-key
         - openbao-ssh-access-credentials
+        - openbao-kv-access-credentials
 
     access:
       host_path: /mnt/bindmounts/infra-manager/access
@@ -185,12 +187,16 @@ persistence:
         - caches
 
   backup_required:
-    - /etc/infra-manager/secrets
     - /etc/infra-manager/ansible
     - /mnt/pve-access/pve-host
     - /var/lib/infra-manager/semaphore
     - /var/lib/infra-manager/opentofu/state
     - /var/lib/persistent/openbao
+
+  transition_sources:
+    - /etc/infra-manager/secrets
+    - /mnt/pve-access/github
+    - /mnt/pve-access/pve-api
 
   reproducible:
     - /var/lib/infra-manager/bootstrap-repo

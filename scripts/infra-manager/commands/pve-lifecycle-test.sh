@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-PVE_ENV="/etc/infra-manager/secrets/pve-api.env"
+PVE_ENV="/run/infra-manager/secrets/pve-api.env"
 CA_BUNDLE="/etc/infra-manager/ca/ca-bundle.crt"
 TEST_VMID=9098
 TEST_HOSTNAME="infra-access-test"

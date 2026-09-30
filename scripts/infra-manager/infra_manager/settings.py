@@ -34,6 +34,14 @@ class Paths:
         return self.config_dir / "secrets"
 
     @property
+    def runtime_secret_dir(self) -> Path:
+        return Path("/run/infra-manager/secrets")
+
+    @property
+    def openbao_materialized_marker(self) -> Path:
+        return self.runtime_secret_dir / ".openbao-materialized"
+
+    @property
     def ca_dir(self) -> Path:
         return self.config_dir / "ca"
 
@@ -100,15 +108,15 @@ class Paths:
 
     @property
     def server_env(self) -> Path:
-        return self.secret_dir / "semaphore-server.env"
+        return self.runtime_secret_dir / "semaphore-server.env"
 
     @property
     def pve_api_env(self) -> Path:
-        return Path("/mnt/pve-access/pve-api/pve-api.env")
+        return self.runtime_secret_dir / "pve-api.env"
 
     @property
     def admin_password_file(self) -> Path:
-        return self.secret_dir / "initial-admin-password"
+        return self.runtime_secret_dir / "initial-admin-password"
 
     @property
     def admin_password_shown_file(self) -> Path:
@@ -116,11 +124,11 @@ class Paths:
 
     @property
     def semaphore_api_token_file(self) -> Path:
-        return self.secret_dir / "semaphore-api-token"
+        return self.runtime_secret_dir / "semaphore-api-token"
 
     @property
     def github_key(self) -> Path:
-        return Path("/mnt/pve-access/github/github_proxmox_repo_ed25519")
+        return self.runtime_secret_dir / "github_proxmox_repo_ed25519"
 
     @property
     def github_key_copy(self) -> Path:

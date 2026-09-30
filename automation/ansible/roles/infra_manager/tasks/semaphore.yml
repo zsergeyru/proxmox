@@ -76,6 +76,95 @@
     path: "{{ provision.paths.secrets }}/semaphore-runner.env"
     state: absent
 
+- name: Подготовить временную область рабочих секретов
+  ansible.builtin.file:
+    path: /run/infra-manager/secrets
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"
+
+- name: Восстановить рабочие секреты из OpenBao при повторной настройке
+  ansible.builtin.command:
+    argv:
+      - ssh
+      - -i
+      - "{{ provision.access.pve.root_ssh_private_key }}"
+      - -o
+      - "UserKnownHostsFile={{ provision.access.pve.root_ssh_known_hosts }}"
+      - -o
+      - StrictHostKeyChecking=yes
+      - -o
+      - BatchMode=yes
+      - -o
+      - IdentitiesOnly=yes
+      - "root@{{ infra_pve_node }}"
+      - /usr/local/sbin/infra-manager-openbao-unseal
+  register: openbao_secret_restore
+  changed_when: false
+  failed_when: false
+
+- name: Подготовить PVE API credential до первой миграции в OpenBao
+  ansible.builtin.copy:
+    remote_src: true
+    src: "{{ provision.access.pve.staging_credential }}"
+    dest: /run/infra-manager/secrets/pve-api.env
+    owner: "1001"
+    group: "0"
+    mode: "0600"
+    force: false
+  no_log: true
+
+- name: Подготовить Git credential до первой миграции в OpenBao
+  ansible.builtin.copy:
+    remote_src: true
+    src: /mnt/pve-access/github/github_proxmox_repo_ed25519
+    dest: /run/infra-manager/secrets/github_proxmox_repo_ed25519
+    owner: "1001"
+    group: "0"
+    mode: "0600"
+    force: false
+  no_log: true
+
+- name: Подготовить настройки Semaphore до первой миграции в OpenBao
+  ansible.builtin.copy:
+    remote_src: true
+    src: "{{ provision.paths.secrets }}/semaphore-server.env"
+    dest: /run/infra-manager/secrets/semaphore-server.env
+    owner: "1001"
+    group: "0"
+    mode: "0600"
+    force: false
+  no_log: true
+
+- name: Подготовить пароль Semaphore до первой миграции в OpenBao
+  ansible.builtin.copy:
+    remote_src: true
+    src: "{{ provision.paths.secrets }}/initial-admin-password"
+    dest: /run/infra-manager/secrets/initial-admin-password
+    owner: "1001"
+    group: "0"
+    mode: "0600"
+    force: false
+  no_log: true
+
+- name: Проверить старый API token Semaphore
+  ansible.builtin.stat:
+    path: "{{ provision.paths.secrets }}/semaphore-api-token"
+  register: legacy_semaphore_api_token
+
+- name: Переиспользовать старый API token Semaphore до миграции
+  ansible.builtin.copy:
+    remote_src: true
+    src: "{{ provision.paths.secrets }}/semaphore-api-token"
+    dest: /run/infra-manager/secrets/semaphore-api-token
+    owner: "1001"
+    group: "0"
+    mode: "0600"
+    force: false
+  no_log: true
+  when: legacy_semaphore_api_token.stat.exists
+
 - name: Подготовить список гостей для OpenTofu
   ansible.builtin.command:
     argv:

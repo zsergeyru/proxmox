@@ -271,6 +271,28 @@ def main_test() -> None:
     ):
         status_module._check_openbao()
 
+    with (
+        patch.object(
+            status_module,
+            "command_runner",
+            SimpleNamespace(run=Mock(side_effect=[
+                SimpleNamespace(returncode=0, stdout="true\n"),
+                SimpleNamespace(
+                    returncode=0,
+                    stdout='{"initialized": true, "sealed": false}',
+                ),
+            ])),
+        ),
+        patch.object(
+            status_module,
+            "read_env_file",
+            return_value={"PVE_API_URL": "https://pve:8006"},
+        ),
+        patch.object(status_module, "check_openbao_kv") as check_kv,
+    ):
+        status_module._check_openbao()
+    check_kv.assert_called_once_with("pve")
+
     values = {
         "address": "192.168.9.10",
         "semaphore_password": "secret-pass",

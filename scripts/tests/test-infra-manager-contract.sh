@@ -251,6 +251,12 @@ if 'semaphore_version: str = "v2.18.30"' not in settings_text:
     raise SystemExit("Версия Semaphore в settings.py расходится с provision.yaml")
 if 'runtime_version: str = "v1"' not in settings_text:
     raise SystemExit("Версия infra-runtime в settings.py расходится с provision.yaml")
+if 'Path("/run/infra-manager/secrets")' not in settings_text:
+    raise SystemExit("Рабочие секреты infra-manager должны находиться в /run")
+if 'return self.runtime_secret_dir / "pve-api.env"' not in settings_text:
+    raise SystemExit("PVE API consumer должен читать материализованный секрет OpenBao")
+if 'return self.runtime_secret_dir / "github_proxmox_repo_ed25519"' not in settings_text:
+    raise SystemExit("Git consumer должен читать материализованный секрет OpenBao")
 
 tools = runtime.get("tools", {})
 dockerfile_text = dockerfile_path.read_text(encoding="utf-8")
@@ -287,6 +293,13 @@ if compose_services["runtime"].get("container_name") != runtime.get("container_n
     raise SystemExit("container_name infra-runtime расходится с provision.yaml")
 if compose_services["runtime"].get("network_mode") != "host":
     raise SystemExit("infra-runtime Compose должен использовать network_mode=host")
+if compose_services["runtime"].get("env_file") != [
+    "/run/infra-manager/secrets/semaphore-server.env"
+]:
+    raise SystemExit("Semaphore должен получать рабочие секреты из временной области")
+runtime_volumes = set(compose_services["runtime"].get("volumes", []))
+if "/run/infra-manager/secrets:/run/infra-manager/secrets:ro" not in runtime_volumes:
+    raise SystemExit("infra-runtime должен видеть материализованные секреты только для чтения")
 
 compose_openbao = compose_services["openbao"]
 if compose_openbao.get("container_name") != openbao.get("container_name"):
@@ -407,7 +420,23 @@ grep -Fq '"ssh-client-signer"' "$OPENBAO_HOST" \
 grep -Fq '"ssh-host-signer"' "$OPENBAO_HOST" \
     || die "OpenBao должен иметь отдельный SSH-центр серверов"
 grep -Fq 'SSH_ACCESS_PATH = KEY_DIR / "ssh-access.json"' "$OPENBAO_HOST" \
-    || die "Служебные доступы OpenBao должны храниться только в pve-only"
+    || die "Служебные SSH-доступы OpenBao должны храниться только в pve-only"
+grep -Fq 'KV_ACCESS_PATH = KEY_DIR / "kv-access.json"' "$OPENBAO_HOST" \
+    || die "Служебный доступ к KV должен храниться только в pve-only"
+grep -Fq 'KV_MOUNT = "infra-secrets"' "$OPENBAO_HOST" \
+    || die "OpenBao должен использовать отдельный mount рабочих секретов"
+grep -Fq '"options": {"version": "2"}' "$OPENBAO_HOST" \
+    || die "Хранилище рабочих секретов должно быть KV v2"
+grep -Fq '"pve/api/infra-manager"' "$OPENBAO_HOST" \
+    || die "KV должен содержать отдельный PVE API credential"
+grep -Fq '"git/github/proxmox-read"' "$OPENBAO_HOST" \
+    || die "KV должен содержать отдельный Git credential"
+grep -Fq '"services/semaphore"' "$OPENBAO_HOST" \
+    || die "KV должен содержать сервисные credentials Semaphore"
+grep -Fq 'infra-manager-kv-read' "$OPENBAO_HOST" \
+    || die "KV должен иметь отдельную ограниченную read-policy"
+grep -Fq '/run/infra-manager/secrets' "$OPENBAO_HOST" \
+    || die "Секреты OpenBao должны материализоваться только во временную область"
 grep -Fq 'infra-manager-ssh-ca-config' "$OPENBAO_HOST" \
     || die "OpenBao должен иметь отдельную политику настройки SSH CA"
 grep -Fq 'infra-manager-ssh-signer' "$OPENBAO_HOST" \
@@ -487,6 +516,8 @@ grep -q 'runtime-activation.log' "$ACTIVATE_RUNTIME" \
     || die "Команда активации должна вести отдельный журнал"
 grep -q 'infra-manager-status --full --quiet' "$ACTIVATE_RUNTIME" \
     || die "Отложенная активация должна завершаться полной проверкой 910"
+grep -Fq 'PVE_ENV="/run/infra-manager/secrets/pve-api.env"' "$LIFECYCLE" \
+    || die "Lifecycle test должен использовать PVE API credential из OpenBao"
 
 grep -q 'INFRA_PVE_HOST_DIR' "$PY_SETTINGS" \
     || die "Путь PVE SSH должен поддерживать отдельный bootstrap-runtime"
@@ -506,6 +537,42 @@ grep -q 'pve-lifecycle-test.sh' "$ANSIBLE_RUNTIME" \
     || die "Ansible должен устанавливать lifecycle test"
 grep -q 'activate-runtime.sh' "$ANSIBLE_RUNTIME" \
     || die "Ansible должен устанавливать команду активации infra-runtime"
+grep -Fq '/run/infra-manager/secrets' "$ANSIBLE_RUNTIME" \
+    || die "Ansible должен готовить временную область рабочих секретов"
+python3 - "$ANSIBLE_RUNTIME" <<'PY'
+from pathlib import Path
+import sys
+
+text = Path(sys.argv[1]).read_text(encoding="utf-8")
+directory_block = '''path: /run/infra-manager/secrets
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"'''
+if directory_block not in text:
+    raise SystemExit("runtime secret directory must be root:root 0750")
+
+for target in (
+    "/run/infra-manager/secrets/pve-api.env",
+    "/run/infra-manager/secrets/github_proxmox_repo_ed25519",
+    "/run/infra-manager/secrets/semaphore-server.env",
+    "/run/infra-manager/secrets/initial-admin-password",
+    "/run/infra-manager/secrets/semaphore-api-token",
+):
+    marker = f"dest: {target}"
+    start = text.find(marker)
+    if start < 0:
+        raise SystemExit(f"missing runtime secret target: {target}")
+    block = text[start : start + 220]
+    if 'owner: "1001"' not in block:
+        raise SystemExit(f"{target} must belong to uid 1001")
+    if 'group: "0"' not in block:
+        raise SystemExit(f"{target} must use gid 0")
+    if 'mode: "0600"' not in block:
+        raise SystemExit(f"{target} must use mode 0600")
+PY
+grep -Fq '/usr/local/sbin/infra-manager-openbao-unseal' "$ANSIBLE_RUNTIME" \
+    || die "Повторная настройка должна сначала восстанавливать секреты из OpenBao"
 grep -q 'infra-manager ansible self' "$ANSIBLE_RUNTIME" \
     || die "910 должен сохранять управляемый блок собственного Ansible-ключа"
 grep -q 'systemd-run' "$ANSIBLE_PLAYBOOK" \

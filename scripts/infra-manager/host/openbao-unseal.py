@@ -17,6 +17,7 @@ OPENBAO_URL = "http://127.0.0.1:8200"
 KEY_DIR = Path("/mnt/bindmounts/infra-manager/pve-only/openbao")
 KEY_PATH = KEY_DIR / "unseal.key"
 SSH_ACCESS_PATH = KEY_DIR / "ssh-access.json"
+KV_ACCESS_PATH = KEY_DIR / "kv-access.json"
 LOCK_PATH = Path("/run/lock/infra-manager-openbao-unseal.lock")
 CT_RUNTIME_DIR = Path("/run/infra-manager")
 CT_KEY_PATH = CT_RUNTIME_DIR / "openbao-unseal.key"
@@ -26,6 +27,8 @@ CT_OPENBAO_DATA_PATH = Path("/mnt/persistent-state/openbao")
 CT_CLIENT_CA_PATH = Path("/etc/infra-manager/ca/ssh-client-ca.pub")
 CT_HOST_CA_PATH = Path("/etc/infra-manager/ca/ssh-host-ca.pub")
 TEMP_OPENBAO_CONTAINER = "infra-manager-openbao-generate-root"
+KV_MOUNT = "infra-secrets"
+RUNTIME_SECRET_DIR = Path("/run/infra-manager/secrets")
 
 STATUS_CODE = r"""
 import urllib.request
@@ -1022,6 +1025,653 @@ print(json.dumps(result, separators=(",", ":")))
 
 
 
+CONFIGURE_KV_CODE = r"""
+import json
+import pathlib
+import sys
+import urllib.request
+
+BASE = "http://127.0.0.1:8200"
+MOUNT = "infra-secrets"
+token = sys.stdin.read().strip()
+if not token:
+    raise SystemExit("empty root token")
+
+
+def request(method, path, payload=None, *, auth_token=token):
+    data = None
+    headers = {"Content-Type": "application/json"}
+    if auth_token:
+        headers["X-Vault-Token"] = auth_token
+    if payload is not None:
+        data = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+    req = urllib.request.Request(
+        f"{BASE}{path}",
+        data=data,
+        headers=headers,
+        method=method,
+    )
+    with urllib.request.urlopen(req, timeout=30) as response:
+        raw = response.read()
+    return json.loads(raw.decode("utf-8")) if raw else {}
+
+
+def read_env(path):
+    result = {}
+    for line in pathlib.Path(path).read_text(encoding="utf-8").splitlines():
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        result[key] = value
+    return result
+
+
+mounts_payload = request("GET", "/v1/sys/mounts")
+mounts = mounts_payload.get("data", mounts_payload)
+if not isinstance(mounts, dict):
+    raise SystemExit("OpenBao returned invalid mounts list")
+existing = mounts.get(f"{MOUNT}/")
+if existing is None:
+    request(
+        "POST",
+        f"/v1/sys/mounts/{MOUNT}",
+        {
+            "type": "kv",
+            "description": "Рабочие секреты инфраструктуры",
+            "options": {"version": "2"},
+        },
+    )
+elif (
+    not isinstance(existing, dict)
+    or existing.get("type") != "kv"
+    or existing.get("options", {}).get("version") != "2"
+):
+    raise SystemExit(f"{MOUNT} exists with unexpected type or version")
+
+pve = read_env("/run/infra-manager/secrets/pve-api.env")
+endpoint = pve.get("PVE_API_URL", "")
+token_id = pve.get("PVE_API_TOKEN_ID", "")
+token_secret = pve.get("PVE_API_TOKEN_SECRET", "")
+if not endpoint or not token_id or not token_secret:
+    raise SystemExit("staged PVE API credential is incomplete")
+
+github_key = pathlib.Path(
+    "/run/infra-manager/secrets/github_proxmox_repo_ed25519"
+).read_text(encoding="utf-8").strip()
+if "PRIVATE KEY" not in github_key:
+    raise SystemExit("staged Git credential is invalid")
+
+semaphore = read_env("/run/infra-manager/secrets/semaphore-server.env")
+admin_password = semaphore.get("SEMAPHORE_ADMIN_PASSWORD", "")
+encryption_key = semaphore.get("SEMAPHORE_ACCESS_KEY_ENCRYPTION", "")
+timezone = semaphore.get("TZ", "UTC") or "UTC"
+api_token = pathlib.Path(
+    "/run/infra-manager/secrets/semaphore-api-token"
+).read_text(encoding="utf-8").strip()
+if not admin_password or not encryption_key or not api_token:
+    raise SystemExit("staged Semaphore credentials are incomplete")
+
+secrets = {
+    "pve/api/infra-manager": {
+        "endpoint": endpoint,
+        "token_id": token_id,
+        "token_secret": token_secret,
+    },
+    "git/github/proxmox-read": {
+        "private_key": github_key,
+    },
+    "services/semaphore": {
+        "admin_password": admin_password,
+        "access_key_encryption": encryption_key,
+        "api_token": api_token,
+        "timezone": timezone,
+    },
+}
+for secret_path, data in secrets.items():
+    request(
+        "POST",
+        f"/v1/{MOUNT}/data/{secret_path}",
+        {"data": data},
+    )
+
+policy = json.dumps(
+    {
+        "path": {
+            f"{MOUNT}/data/pve/api/infra-manager": {
+                "capabilities": ["read"],
+            },
+            f"{MOUNT}/data/git/github/proxmox-read": {
+                "capabilities": ["read"],
+            },
+            f"{MOUNT}/data/services/semaphore": {
+                "capabilities": ["read"],
+            },
+            "auth/token/lookup-self": {
+                "capabilities": ["read"],
+            },
+            "auth/token/revoke-self": {
+                "capabilities": ["update"],
+            },
+            "sys/capabilities-self": {
+                "capabilities": ["update"],
+            },
+        }
+    },
+    separators=(",", ":"),
+)
+request(
+    "POST",
+    "/v1/sys/policies/acl/infra-manager-kv-read",
+    {"policy": policy},
+)
+
+writer_policy = json.dumps(
+    {
+        "path": {
+            f"{MOUNT}/data/services/semaphore": {
+                "capabilities": ["read", "update"],
+            },
+            "auth/token/lookup-self": {
+                "capabilities": ["read"],
+            },
+            "auth/token/revoke-self": {
+                "capabilities": ["update"],
+            },
+            "sys/capabilities-self": {
+                "capabilities": ["update"],
+            },
+        }
+    },
+    separators=(",", ":"),
+)
+request(
+    "POST",
+    "/v1/sys/policies/acl/infra-manager-kv-semaphore-write",
+    {"policy": writer_policy},
+)
+
+auth_payload = request("GET", "/v1/sys/auth")
+auth_methods = auth_payload.get("data", auth_payload)
+if not isinstance(auth_methods, dict):
+    raise SystemExit("OpenBao returned invalid auth methods list")
+existing_auth = auth_methods.get("infra-manager/")
+if existing_auth is None:
+    request(
+        "POST",
+        "/v1/sys/auth/infra-manager",
+        {
+            "type": "approle",
+            "description": "Служебный доступ infra-manager",
+        },
+    )
+elif not isinstance(existing_auth, dict) or existing_auth.get("type") != "approle":
+    raise SystemExit("auth/infra-manager exists with unexpected type")
+
+role_definitions = (
+    ("kv-reader", "infra-manager-kv-read"),
+    ("kv-semaphore-writer", "infra-manager-kv-semaphore-write"),
+)
+credentials = {}
+for role_name, policy_name in role_definitions:
+    request(
+        "POST",
+        f"/v1/auth/infra-manager/role/{role_name}",
+        {
+            "bind_secret_id": True,
+            "secret_id_bound_cidrs": ["127.0.0.1/32"],
+            "secret_id_num_uses": 0,
+            "secret_id_ttl": "0s",
+            "token_bound_cidrs": ["127.0.0.1/32"],
+            "token_num_uses": 0,
+            "token_policies": [policy_name],
+            "token_ttl": "5m",
+            "token_max_ttl": "10m",
+        },
+    )
+    role_payload = request(
+        "GET",
+        f"/v1/auth/infra-manager/role/{role_name}/role-id",
+    )
+    secret_payload = request(
+        "POST",
+        f"/v1/auth/infra-manager/role/{role_name}/secret-id",
+        {},
+    )
+    role_id = role_payload.get("data", {}).get("role_id")
+    secret_id = secret_payload.get("data", {}).get("secret_id")
+    if not isinstance(role_id, str) or not role_id:
+        raise SystemExit(f"OpenBao did not return RoleID for {role_name}")
+    if not isinstance(secret_id, str) or not secret_id:
+        raise SystemExit(f"OpenBao did not return SecretID for {role_name}")
+    credentials[role_name] = {
+        "role_id": role_id,
+        "secret_id": secret_id,
+    }
+
+print(json.dumps(credentials, separators=(",", ":")))
+"""
+
+
+CHECK_KV_ACCESS_CODE = r"""
+import json
+import sys
+import urllib.request
+
+BASE = "http://127.0.0.1:8200"
+MOUNT = "infra-secrets"
+payload = json.loads(sys.stdin.read())
+item = payload.get("kv-reader") if isinstance(payload, dict) else None
+if not isinstance(item, dict):
+    raise SystemExit("missing kv-reader credentials")
+role_id = item.get("role_id")
+secret_id = item.get("secret_id")
+if not isinstance(role_id, str) or not isinstance(secret_id, str):
+    raise SystemExit("invalid kv-reader credentials")
+
+
+def request(method, path, body=None, *, token=None):
+    data = None
+    headers = {"Content-Type": "application/json"}
+    if token:
+        headers["X-Vault-Token"] = token
+    if body is not None:
+        data = json.dumps(body, separators=(",", ":")).encode("utf-8")
+    req = urllib.request.Request(
+        f"{BASE}{path}",
+        data=data,
+        headers=headers,
+        method=method,
+    )
+    with urllib.request.urlopen(req, timeout=30) as response:
+        raw = response.read()
+    return json.loads(raw.decode("utf-8")) if raw else {}
+
+
+login = request(
+    "POST",
+    "/v1/auth/infra-manager/login",
+    {"role_id": role_id, "secret_id": secret_id},
+)
+auth = login.get("auth")
+client_token = auth.get("client_token") if isinstance(auth, dict) else None
+policies = auth.get("policies", []) if isinstance(auth, dict) else []
+if not isinstance(client_token, str) or not client_token:
+    raise SystemExit("OpenBao did not authenticate kv-reader")
+if "infra-manager-kv-read" not in policies or "root" in policies:
+    raise SystemExit("kv-reader has unexpected policies")
+
+expected = {
+    "pve/api/infra-manager": {"endpoint", "token_id", "token_secret"},
+    "git/github/proxmox-read": {"private_key"},
+    "services/semaphore": {
+        "admin_password",
+        "access_key_encryption",
+        "api_token",
+        "timezone",
+    },
+}
+try:
+    for secret_path, fields in expected.items():
+        response = request(
+            "GET",
+            f"/v1/{MOUNT}/data/{secret_path}",
+            token=client_token,
+        )
+        data = response.get("data", {}).get("data")
+        if not isinstance(data, dict) or not fields.issubset(data):
+            raise SystemExit(f"incomplete KV secret: {secret_path}")
+
+    capabilities = request(
+        "POST",
+        "/v1/sys/capabilities-self",
+        {
+            "paths": [
+                f"{MOUNT}/data/pve/api/infra-manager",
+                f"{MOUNT}/data/git/github/proxmox-read",
+                f"{MOUNT}/data/services/semaphore",
+                f"{MOUNT}/data/services/forbidden",
+            ]
+        },
+        token=client_token,
+    )
+    for allowed in (
+        f"{MOUNT}/data/pve/api/infra-manager",
+        f"{MOUNT}/data/git/github/proxmox-read",
+        f"{MOUNT}/data/services/semaphore",
+    ):
+        if "read" not in capabilities.get(allowed, []):
+            raise SystemExit(f"kv-reader lacks read on {allowed}")
+    if capabilities.get(f"{MOUNT}/data/services/forbidden") != ["deny"]:
+        raise SystemExit("kv-reader is broader than the allowed KV paths")
+finally:
+    request(
+        "POST",
+        "/v1/auth/token/revoke-self",
+        {},
+        token=client_token,
+    )
+
+writer = payload.get("kv-semaphore-writer")
+if not isinstance(writer, dict):
+    raise SystemExit("missing kv-semaphore-writer credentials")
+writer_role_id = writer.get("role_id")
+writer_secret_id = writer.get("secret_id")
+if not isinstance(writer_role_id, str) or not isinstance(writer_secret_id, str):
+    raise SystemExit("invalid kv-semaphore-writer credentials")
+
+writer_login = request(
+    "POST",
+    "/v1/auth/infra-manager/login",
+    {"role_id": writer_role_id, "secret_id": writer_secret_id},
+)
+writer_auth = writer_login.get("auth")
+writer_token = (
+    writer_auth.get("client_token")
+    if isinstance(writer_auth, dict)
+    else None
+)
+writer_policies = (
+    writer_auth.get("policies", [])
+    if isinstance(writer_auth, dict)
+    else []
+)
+if not isinstance(writer_token, str) or not writer_token:
+    raise SystemExit("OpenBao did not authenticate kv-semaphore-writer")
+if (
+    "infra-manager-kv-semaphore-write" not in writer_policies
+    or "root" in writer_policies
+):
+    raise SystemExit("kv-semaphore-writer has unexpected policies")
+
+try:
+    writer_capabilities = request(
+        "POST",
+        "/v1/sys/capabilities-self",
+        {
+            "paths": [
+                f"{MOUNT}/data/services/semaphore",
+                f"{MOUNT}/data/pve/api/infra-manager",
+                f"{MOUNT}/data/git/github/proxmox-read",
+            ]
+        },
+        token=writer_token,
+    )
+    service_caps = set(
+        writer_capabilities.get(f"{MOUNT}/data/services/semaphore", [])
+    )
+    if not {"read", "update"}.issubset(service_caps):
+        raise SystemExit("kv-semaphore-writer lacks service update access")
+    for forbidden in (
+        f"{MOUNT}/data/pve/api/infra-manager",
+        f"{MOUNT}/data/git/github/proxmox-read",
+    ):
+        if writer_capabilities.get(forbidden) != ["deny"]:
+            raise SystemExit(
+                f"kv-semaphore-writer unexpectedly allowed on {forbidden}"
+            )
+finally:
+    request(
+        "POST",
+        "/v1/auth/token/revoke-self",
+        {},
+        token=writer_token,
+    )
+
+print(json.dumps({"ready": True}, separators=(",", ":")))
+"""
+
+
+MATERIALIZE_RUNTIME_SECRETS_CODE = r"""
+import json
+import os
+import pathlib
+import sys
+import tempfile
+import urllib.request
+
+BASE = "http://127.0.0.1:8200"
+MOUNT = "infra-secrets"
+TARGET = pathlib.Path("/run/infra-manager/secrets")
+RUNTIME_UID = 1001
+RUNTIME_GID = 0
+payload = json.loads(sys.stdin.read())
+item = payload.get("kv-reader") if isinstance(payload, dict) else None
+if not isinstance(item, dict):
+    raise SystemExit("missing kv-reader credentials")
+role_id = item.get("role_id")
+secret_id = item.get("secret_id")
+if not isinstance(role_id, str) or not isinstance(secret_id, str):
+    raise SystemExit("invalid kv-reader credentials")
+
+
+def request(method, path, body=None, *, token=None):
+    data = None
+    headers = {"Content-Type": "application/json"}
+    if token:
+        headers["X-Vault-Token"] = token
+    if body is not None:
+        data = json.dumps(body, separators=(",", ":")).encode("utf-8")
+    req = urllib.request.Request(
+        f"{BASE}{path}",
+        data=data,
+        headers=headers,
+        method=method,
+    )
+    with urllib.request.urlopen(req, timeout=30) as response:
+        raw = response.read()
+    return json.loads(raw.decode("utf-8")) if raw else {}
+
+
+def read_secret(path, token):
+    response = request(
+        "GET",
+        f"/v1/{MOUNT}/data/{path}",
+        token=token,
+    )
+    data = response.get("data", {}).get("data")
+    if not isinstance(data, dict):
+        raise SystemExit(f"OpenBao returned invalid secret: {path}")
+    return data
+
+
+def atomic_write(name, value):
+    TARGET.mkdir(parents=True, exist_ok=True)
+    os.chown(TARGET.parent, 0, 0)
+    os.chmod(TARGET.parent, 0o750)
+    os.chown(TARGET, 0, 0)
+    os.chmod(TARGET, 0o750)
+    fd, temporary_name = tempfile.mkstemp(
+        prefix=f".{name}.",
+        dir=TARGET,
+        text=True,
+    )
+    temporary = pathlib.Path(temporary_name)
+    try:
+        os.fchown(fd, RUNTIME_UID, RUNTIME_GID)
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            stream.write(value)
+            if not value.endswith("\n"):
+                stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, TARGET / name)
+        os.chown(TARGET / name, RUNTIME_UID, RUNTIME_GID)
+        os.chmod(TARGET / name, 0o600)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+login = request(
+    "POST",
+    "/v1/auth/infra-manager/login",
+    {"role_id": role_id, "secret_id": secret_id},
+)
+auth = login.get("auth")
+client_token = auth.get("client_token") if isinstance(auth, dict) else None
+if not isinstance(client_token, str) or not client_token:
+    raise SystemExit("OpenBao did not authenticate kv-reader")
+
+try:
+    pve = read_secret("pve/api/infra-manager", client_token)
+    git = read_secret("git/github/proxmox-read", client_token)
+    semaphore = read_secret("services/semaphore", client_token)
+
+    endpoint = pve.get("endpoint")
+    token_id = pve.get("token_id")
+    token_secret = pve.get("token_secret")
+    private_key = git.get("private_key")
+    admin_password = semaphore.get("admin_password")
+    encryption_key = semaphore.get("access_key_encryption")
+    api_token = semaphore.get("api_token")
+    timezone = semaphore.get("timezone", "UTC")
+
+    values = (
+        endpoint,
+        token_id,
+        token_secret,
+        private_key,
+        admin_password,
+        encryption_key,
+        api_token,
+        timezone,
+    )
+    if any(not isinstance(value, str) or not value for value in values):
+        raise SystemExit("OpenBao returned incomplete runtime secrets")
+
+    atomic_write(
+        "pve-api.env",
+        "\n".join(
+            [
+                f"PVE_API_URL={endpoint}",
+                f"PVE_API_TOKEN_ID={token_id}",
+                f"PVE_API_TOKEN_SECRET={token_secret}",
+            ]
+        ),
+    )
+    atomic_write("github_proxmox_repo_ed25519", private_key)
+    atomic_write(
+        "semaphore-server.env",
+        "\n".join(
+            [
+                "SEMAPHORE_DB_DIALECT=sqlite",
+                "SEMAPHORE_DB_HOST=/var/lib/semaphore/semaphore.sqlite",
+                "SEMAPHORE_ADMIN=admin",
+                f"SEMAPHORE_ADMIN_PASSWORD={admin_password}",
+                "SEMAPHORE_ADMIN_NAME=Admin",
+                "SEMAPHORE_ADMIN_EMAIL=admin@localhost",
+                f"SEMAPHORE_ACCESS_KEY_ENCRYPTION={encryption_key}",
+                f"TZ={timezone}",
+            ]
+        ),
+    )
+    atomic_write("initial-admin-password", admin_password)
+    atomic_write("semaphore-api-token", api_token)
+    atomic_write(".openbao-materialized", "kv-v2")
+finally:
+    request(
+        "POST",
+        "/v1/auth/token/revoke-self",
+        {},
+        token=client_token,
+    )
+
+print(json.dumps({"ready": True}, separators=(",", ":")))
+"""
+
+
+UPDATE_SEMAPHORE_API_TOKEN_CODE = r"""
+import json
+import sys
+import urllib.request
+
+BASE = "http://127.0.0.1:8200"
+MOUNT = "infra-secrets"
+payload = json.loads(sys.stdin.read())
+credentials = payload.get("credentials") if isinstance(payload, dict) else None
+api_token = payload.get("api_token") if isinstance(payload, dict) else None
+if not isinstance(credentials, dict):
+    raise SystemExit("missing writer credentials")
+if (
+    not isinstance(api_token, str)
+    or not api_token
+    or any(char.isspace() for char in api_token)
+):
+    raise SystemExit("invalid Semaphore API token")
+
+role_id = credentials.get("role_id")
+secret_id = credentials.get("secret_id")
+if not isinstance(role_id, str) or not role_id:
+    raise SystemExit("missing RoleID")
+if not isinstance(secret_id, str) or not secret_id:
+    raise SystemExit("missing SecretID")
+
+
+def request(method, path, body=None, *, token=None):
+    data = None
+    headers = {"Content-Type": "application/json"}
+    if token:
+        headers["X-Vault-Token"] = token
+    if body is not None:
+        data = json.dumps(body, separators=(",", ":")).encode("utf-8")
+    req = urllib.request.Request(
+        f"{BASE}{path}",
+        data=data,
+        headers=headers,
+        method=method,
+    )
+    with urllib.request.urlopen(req, timeout=30) as response:
+        raw = response.read()
+    return json.loads(raw.decode("utf-8")) if raw else {}
+
+
+login = request(
+    "POST",
+    "/v1/auth/infra-manager/login",
+    {"role_id": role_id, "secret_id": secret_id},
+)
+auth = login.get("auth")
+client_token = auth.get("client_token") if isinstance(auth, dict) else None
+if not isinstance(client_token, str) or not client_token:
+    raise SystemExit("OpenBao did not authenticate kv-semaphore-writer")
+
+try:
+    response = request(
+        "GET",
+        f"/v1/{MOUNT}/data/services/semaphore",
+        token=client_token,
+    )
+    current = response.get("data", {}).get("data")
+    if not isinstance(current, dict):
+        raise SystemExit("OpenBao returned invalid Semaphore secret")
+    required = {
+        "admin_password",
+        "access_key_encryption",
+        "timezone",
+    }
+    if not required.issubset(current):
+        raise SystemExit("OpenBao Semaphore secret is incomplete")
+    if current.get("api_token") != api_token:
+        updated = dict(current)
+        updated["api_token"] = api_token
+        request(
+            "POST",
+            f"/v1/{MOUNT}/data/services/semaphore",
+            {"data": updated},
+            token=client_token,
+        )
+finally:
+    request(
+        "POST",
+        "/v1/auth/token/revoke-self",
+        {},
+        token=client_token,
+    )
+
+print(json.dumps({"ready": True}, separators=(",", ":")))
+"""
+
+
 class OpenBaoHostError(RuntimeError):
     pass
 
@@ -1169,6 +1819,160 @@ def write_ssh_access_credentials(credentials: dict[str, object]) -> None:
         os.chmod(SSH_ACCESS_PATH, 0o600)
     finally:
         temporary.unlink(missing_ok=True)
+
+
+def write_kv_access_credentials(credentials: dict[str, object]) -> None:
+    required = {"kv-reader", "kv-semaphore-writer"}
+    if set(credentials) != required:
+        raise OpenBaoHostError(
+            "OpenBao вернул неполный набор доступа к KV"
+        )
+
+    KEY_DIR.mkdir(parents=True, exist_ok=True)
+    os.chmod(KEY_DIR, 0o700)
+    fd, temporary_name = tempfile.mkstemp(
+        prefix=".kv-access.",
+        dir=KEY_DIR,
+        text=True,
+    )
+    temporary = Path(temporary_name)
+    try:
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            json.dump(
+                credentials,
+                stream,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, KV_ACCESS_PATH)
+        os.chmod(KV_ACCESS_PATH, 0o600)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def read_kv_access_credentials() -> dict[str, object]:
+    if not KV_ACCESS_PATH.is_file() or KV_ACCESS_PATH.stat().st_size == 0:
+        raise OpenBaoHostError(
+            f"Не найдены служебные данные доступа к KV: {KV_ACCESS_PATH}"
+        )
+    try:
+        payload = json.loads(KV_ACCESS_PATH.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise OpenBaoHostError(
+            "Служебные данные доступа к KV содержат некорректный JSON"
+        ) from exc
+    required = {"kv-reader", "kv-semaphore-writer"}
+    if not isinstance(payload, dict) or set(payload) != required:
+        raise OpenBaoHostError(
+            "Служебные данные доступа к KV имеют некорректный состав"
+        )
+    return payload
+
+
+def check_kv_access() -> None:
+    credentials = read_kv_access_credentials()
+    result = pct_exec(
+        "python3",
+        "-c",
+        CHECK_KV_ACCESS_CODE,
+        capture=True,
+        input_text=json.dumps(credentials, separators=(",", ":")),
+    )
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise OpenBaoHostError(
+            "OpenBao вернул некорректный результат проверки KV"
+        ) from exc
+    if payload != {"ready": True}:
+        raise OpenBaoHostError("KV v2 не прошёл проверку")
+
+
+def configure_kv_access(root_token: str) -> None:
+    if KV_ACCESS_PATH.exists():
+        raise OpenBaoHostError(
+            f"Найден старый файл доступа к KV {KV_ACCESS_PATH}; "
+            "автоматическая перезапись запрещена"
+        )
+    result = pct_exec(
+        "python3",
+        "-c",
+        CONFIGURE_KV_CODE,
+        capture=True,
+        input_text=root_token,
+    )
+    try:
+        credentials = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise OpenBaoHostError(
+            "OpenBao вернул некорректные служебные данные доступа к KV"
+        ) from exc
+    if not isinstance(credentials, dict):
+        raise OpenBaoHostError(
+            "OpenBao вернул некорректные служебные данные доступа к KV"
+        )
+    write_kv_access_credentials(credentials)
+    check_kv_access()
+    print("[ОК] KV v2 и ограниченный доступ к рабочим секретам настроены")
+
+
+def materialize_runtime_secrets() -> None:
+    credentials = read_kv_access_credentials()
+    result = pct_exec(
+        "python3",
+        "-c",
+        MATERIALIZE_RUNTIME_SECRETS_CODE,
+        capture=True,
+        input_text=json.dumps(credentials, separators=(",", ":")),
+    )
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise OpenBaoHostError(
+            "OpenBao вернул некорректный результат материализации секретов"
+        ) from exc
+    if payload != {"ready": True}:
+        raise OpenBaoHostError(
+            "Рабочие секреты не были материализованы из OpenBao"
+        )
+    print(f"[ОК] Рабочие секреты материализованы во временную область {RUNTIME_SECRET_DIR}")
+
+
+def update_semaphore_api_token(api_token: str) -> None:
+    clean = api_token.strip()
+    if not clean or any(char.isspace() for char in clean):
+        raise OpenBaoHostError("Некорректный API token Semaphore")
+    credentials = read_kv_access_credentials()
+    writer = credentials.get("kv-semaphore-writer")
+    result = pct_exec(
+        "python3",
+        "-c",
+        UPDATE_SEMAPHORE_API_TOKEN_CODE,
+        capture=True,
+        input_text=json.dumps(
+            {
+                "credentials": writer,
+                "api_token": clean,
+            },
+            separators=(",", ":"),
+        ),
+    )
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise OpenBaoHostError(
+            "OpenBao вернул некорректный результат обновления Semaphore token"
+        ) from exc
+    if payload != {"ready": True}:
+        raise OpenBaoHostError(
+            "API token Semaphore не был обновлён в OpenBao"
+        )
+    print("[ОК] API token Semaphore обновлён в OpenBao")
 
 
 def unseal() -> None:
@@ -1834,12 +2638,19 @@ finally:
 
 
 def ensure_existing_openbao_ssh() -> None:
-    if ssh_cas_ready() and SSH_ACCESS_PATH.is_file() and client_ca_published():
+    if (
+        ssh_cas_ready()
+        and SSH_ACCESS_PATH.is_file()
+        and KV_ACCESS_PATH.is_file()
+        and client_ca_published()
+    ):
         check_ssh_access()
+        check_kv_access()
+        materialize_runtime_secrets()
         publish_host_ca()
         ensure_client_signing_role()
         ensure_host_signing_role()
-        print("[ОК] SSH-центры, служебный доступ и открытые ключи OpenBao уже готовы")
+        print("[ОК] SSH-центры, KV v2 и служебные доступы OpenBao уже готовы")
         return
 
     root_token = generate_temporary_root_token()
@@ -1849,6 +2660,11 @@ def ensure_existing_openbao_ssh() -> None:
             check_ssh_access()
         else:
             configure_ssh_access(root_token)
+        if KV_ACCESS_PATH.is_file():
+            check_kv_access()
+        else:
+            configure_kv_access(root_token)
+        materialize_runtime_secrets()
         publish_client_ca(root_token)
         publish_host_ca()
         ensure_client_signing_role()
@@ -1871,7 +2687,11 @@ def initialize() -> None:
         print("[ОК] Инициализация OpenBao уже выполнена")
         return
 
-    stale = [path for path in (KEY_PATH, SSH_ACCESS_PATH) if path.exists()]
+    stale = [
+        path
+        for path in (KEY_PATH, SSH_ACCESS_PATH, KV_ACCESS_PATH)
+        if path.exists()
+    ]
     if stale:
         raise OpenBaoHostError(
             "OpenBao не инициализирован, но найдены старые PVE-only данные: "
@@ -1912,6 +2732,8 @@ def initialize() -> None:
     try:
         ensure_ssh_cas(root_token)
         configure_ssh_access(root_token)
+        configure_kv_access(root_token)
+        materialize_runtime_secrets()
         publish_client_ca(root_token)
         publish_host_ca()
         ensure_client_signing_role()
@@ -1929,7 +2751,8 @@ def initialize() -> None:
     print("[ОК] OpenBao инициализирован: 1 ключ, порог 1")
     print(f"[ОК] Unseal-ключ сохранён только на PVE: {KEY_PATH}")
     print("[ОК] SSH-центры доверия: ssh-client-signer и ssh-host-signer")
-    print("[ОК] Служебные SSH-доступы хранятся только на PVE")
+    print("[ОК] Служебные AppRole-данные хранятся только на PVE")
+    print("[ОК] Рабочие PVE, Git и Semaphore credentials сохранены в KV v2")
     print("[ОК] Initial root token не сохранён и отозван")
 
 
@@ -1952,6 +2775,16 @@ def main() -> int:
         "--sign-host-key",
         action="store_true",
         help="Подписать переданный через stdin открытый ключ SSH-сервера",
+    )
+    mode.add_argument(
+        "--check-kv",
+        action="store_true",
+        help="Проверить KV v2 и ограниченный доступ к рабочим секретам",
+    )
+    mode.add_argument(
+        "--update-semaphore-api-token",
+        action="store_true",
+        help="Обновить API token Semaphore в KV v2 из stdin",
     )
     args = parser.parse_args()
 
@@ -1993,8 +2826,28 @@ def main() -> int:
                 address,
             )
             print(sign_host_public_key(public_key, principals))
+        elif args.check_kv:
+            status = read_status(wait=False)
+            if status.get("sealed") is not False:
+                raise OpenBaoHostError("OpenBao запечатан; проверка KV невозможна")
+            check_kv_access()
+            print("[ОК] KV v2 и ограниченные AppRole подтверждены")
+        elif args.update_semaphore_api_token:
+            status = read_status(wait=False)
+            if status.get("sealed") is not False:
+                raise OpenBaoHostError(
+                    "OpenBao запечатан; обновление Semaphore token невозможно"
+                )
+            update_semaphore_api_token(__import__("sys").stdin.read())
         else:
             unseal()
+            status = read_status(wait=False)
+            if (
+                status.get("initialized") is True
+                and status.get("sealed") is False
+                and KV_ACCESS_PATH.is_file()
+            ):
+                materialize_runtime_secrets()
     return 0
 
 

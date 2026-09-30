@@ -213,15 +213,17 @@ infrastructure/guests/910-infra-manager/provision.yaml
 /opt/infra-manager/
 ```
 
-Критичные данные:
+Критичные постоянные данные:
 
 ```text
-/etc/infra-manager/secrets/
+/var/lib/persistent/openbao/
 /etc/infra-manager/ansible/
 /mnt/pve-access/pve-host/
 /var/lib/infra-manager/semaphore/
 /var/lib/infra-manager/opentofu/state/
 ```
+
+Рабочие PVE, Git и Semaphore secrets берутся из OpenBao и материализуются только во временный каталог `/run/infra-manager/secrets/`.
 
 Постоянный OpenTofu state:
 
@@ -260,9 +262,9 @@ container-host
 /root/.config/proxmox-bootstrap/github_proxmox_repo_ed25519
 ```
 
-Он необходим для восстановления 910 из закрытого репозитория ещё до появления постоянного хранилища секретов внутри 910.
+Он пока используется как bootstrap-источник до появления OpenBao.
 
-Копия ключа передаётся в 910 для Semaphore.
+После инициализации рабочий закрытый ключ хранится в OpenBao KV v2 и материализуется для Semaphore в `/run/infra-manager/secrets/github_proxmox_repo_ed25519`.
 
 ## Semaphore и infra-runtime
 
@@ -299,10 +301,10 @@ infra-runtime
 
 ## Первичный пароль Semaphore
 
-Пароль создаётся один раз и хранится с правами `0600`:
+Пароль создаётся один раз, сохраняется в OpenBao KV v2 и материализуется с правами `0600`:
 
 ```text
-/etc/infra-manager/secrets/initial-admin-password
+/run/infra-manager/secrets/initial-admin-password
 ```
 
 После каждой успешной установки, в том числе повторной, установочный сценарий показывает адрес Semaphore, логин `admin` и сохранённый пароль. Общий процесс Ansible пароль не печатает, и в технический журнал он не записывается.
@@ -310,7 +312,7 @@ infra-runtime
 Получить его от root внутри 910 можно также явно:
 
 ```bash
-cat /etc/infra-manager/secrets/initial-admin-password
+cat /run/infra-manager/secrets/initial-admin-password
 ```
 
 ## Служебные команды 910

@@ -26,7 +26,7 @@ data:
     type: primary_ipv4
   semaphore_password:
     type: file
-    path: /etc/infra-manager/secrets/initial-admin-password
+    path: /run/infra-manager/secrets/initial-admin-password
     sensitive: true
   project_branch:
     type: project_branch

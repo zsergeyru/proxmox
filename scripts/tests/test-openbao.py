@@ -113,6 +113,8 @@ def test_host_initialization_does_not_print_secrets() -> None:
             patch.object(host, "unseal"),
             patch.object(host, "ensure_ssh_cas") as ensure_cas,
             patch.object(host, "configure_ssh_access") as configure_access,
+            patch.object(host, "configure_kv_access") as configure_kv,
+            patch.object(host, "materialize_runtime_secrets") as materialize,
             patch.object(host, "publish_client_ca") as publish_ca,
             patch.object(host, "publish_host_ca") as publish_host_ca,
             patch.object(host, "ensure_client_signing_role") as ensure_client_role,
@@ -125,6 +127,8 @@ def test_host_initialization_does_not_print_secrets() -> None:
         fail("Хостовый сценарий не сохранил ожидаемый unseal-ключ")
     ensure_cas.assert_called_once_with(root_token)
     configure_access.assert_called_once_with(root_token)
+    configure_kv.assert_called_once_with(root_token)
+    materialize.assert_called_once_with()
     publish_ca.assert_called_once_with(root_token)
     publish_host_ca.assert_called_once_with()
     ensure_client_role.assert_called_once_with()
@@ -141,11 +145,14 @@ def test_existing_openbao_skips_root_when_ready() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         key_path = Path(tmp) / "unseal.key"
         access_path = Path(tmp) / "ssh-access.json"
+        kv_access_path = Path(tmp) / "kv-access.json"
         key_path.write_text("existing-key\n", encoding="utf-8")
         access_path.write_text("{}\n", encoding="utf-8")
+        kv_access_path.write_text("{}\n", encoding="utf-8")
         with (
             patch.object(host, "KEY_PATH", key_path),
             patch.object(host, "SSH_ACCESS_PATH", access_path),
+            patch.object(host, "KV_ACCESS_PATH", kv_access_path),
             patch.object(
                 host,
                 "read_status",
@@ -155,6 +162,8 @@ def test_existing_openbao_skips_root_when_ready() -> None:
             patch.object(host, "ssh_cas_ready", return_value=True),
             patch.object(host, "client_ca_published", return_value=True),
             patch.object(host, "check_ssh_access") as check_access,
+            patch.object(host, "check_kv_access") as check_kv,
+            patch.object(host, "materialize_runtime_secrets") as materialize,
             patch.object(host, "publish_host_ca") as publish_host_ca,
             patch.object(host, "ensure_client_signing_role") as ensure_client_role,
             patch.object(host, "ensure_host_signing_role") as ensure_host_role,
@@ -164,6 +173,8 @@ def test_existing_openbao_skips_root_when_ready() -> None:
 
     unseal.assert_called_once_with()
     check_access.assert_called_once_with()
+    check_kv.assert_called_once_with()
+    materialize.assert_called_once_with()
     publish_host_ca.assert_called_once_with()
     ensure_client_role.assert_called_once_with()
     ensure_host_role.assert_called_once_with()
@@ -175,10 +186,12 @@ def test_existing_openbao_bootstraps_missing_ssh_security() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         key_path = Path(tmp) / "unseal.key"
         access_path = Path(tmp) / "ssh-access.json"
+        kv_access_path = Path(tmp) / "kv-access.json"
         key_path.write_text("existing-key\n", encoding="utf-8")
         with (
             patch.object(host, "KEY_PATH", key_path),
             patch.object(host, "SSH_ACCESS_PATH", access_path),
+            patch.object(host, "KV_ACCESS_PATH", kv_access_path),
             patch.object(
                 host,
                 "read_status",
@@ -194,6 +207,8 @@ def test_existing_openbao_bootstraps_missing_ssh_security() -> None:
             ) as generate_root,
             patch.object(host, "ensure_ssh_cas") as ensure_cas,
             patch.object(host, "configure_ssh_access") as configure_access,
+            patch.object(host, "configure_kv_access") as configure_kv,
+            patch.object(host, "materialize_runtime_secrets") as materialize,
             patch.object(host, "publish_client_ca") as publish_ca,
             patch.object(host, "publish_host_ca") as publish_host_ca,
             patch.object(host, "ensure_client_signing_role") as ensure_client_role,
@@ -206,6 +221,8 @@ def test_existing_openbao_bootstraps_missing_ssh_security() -> None:
     generate_root.assert_called_once_with()
     ensure_cas.assert_called_once_with("TEMP-ROOT-TOKEN")
     configure_access.assert_called_once_with("TEMP-ROOT-TOKEN")
+    configure_kv.assert_called_once_with("TEMP-ROOT-TOKEN")
+    materialize.assert_called_once_with()
     publish_ca.assert_called_once_with("TEMP-ROOT-TOKEN")
     publish_host_ca.assert_called_once_with()
     ensure_client_role.assert_called_once_with()
@@ -684,6 +701,97 @@ def test_ssh_access_credentials_are_pve_only() -> None:
             fail("Служебные данные OpenBao должны иметь права 0600")
 
 
+def test_kv_contract_is_narrow_and_versioned() -> None:
+    host = load_host_module()
+    configure = host.CONFIGURE_KV_CODE
+    check = host.CHECK_KV_ACCESS_CODE
+    materialize = host.MATERIALIZE_RUNTIME_SECRETS_CODE
+
+    required = (
+        '"type": "kv"',
+        '"options": {"version": "2"}',
+        '"pve/api/infra-manager"',
+        '"git/github/proxmox-read"',
+        '"services/semaphore"',
+        '"infra-manager-kv-read"',
+        '"kv-reader", "infra-manager-kv-read"',
+        '"kv-semaphore-writer", "infra-manager-kv-semaphore-write"',
+        '"token_bound_cidrs": ["127.0.0.1/32"]',
+    )
+    for item in required:
+        if item not in configure:
+            fail(f"KV v2 не содержит обязательный контракт: {item}")
+
+    if f'{host.KV_MOUNT}/data/*' in configure:
+        fail("KV policy не должна выдавать wildcard-доступ ко всем секретам")
+    if 'services/forbidden' not in check:
+        fail("Проверка KV должна подтверждать запрет постороннего пути")
+    for filename in (
+        "pve-api.env",
+        "github_proxmox_repo_ed25519",
+        "semaphore-server.env",
+        "initial-admin-password",
+        "semaphore-api-token",
+    ):
+        if filename not in materialize:
+            fail(f"Материализация KV не создаёт {filename}")
+    if "/run/infra-manager/secrets" not in materialize:
+        fail("Рабочие секреты должны материализоваться только в /run")
+    for item in (
+        "RUNTIME_UID = 1001",
+        "RUNTIME_GID = 0",
+        "os.fchown(fd, RUNTIME_UID, RUNTIME_GID)",
+        "os.chmod(TARGET.parent, 0o750)",
+        "os.chmod(TARGET, 0o750)",
+        "os.chmod(TARGET / name, 0o600)",
+    ):
+        if item not in materialize:
+            fail(f"Права runtime-секретов нарушают контракт: {item}")
+
+
+def test_kv_access_credentials_are_pve_only() -> None:
+    host = load_host_module()
+    credentials = {
+        "kv-reader": {"role_id": "role-kv", "secret_id": "secret-kv"},
+        "kv-semaphore-writer": {
+            "role_id": "role-writer",
+            "secret_id": "secret-writer",
+        },
+    }
+    with tempfile.TemporaryDirectory() as tmp:
+        key_dir = Path(tmp)
+        target = key_dir / "kv-access.json"
+        with (
+            patch.object(host, "KEY_DIR", key_dir),
+            patch.object(host, "KV_ACCESS_PATH", target),
+        ):
+            host.write_kv_access_credentials(credentials)
+        if json.loads(target.read_text(encoding="utf-8")) != credentials:
+            fail("Служебные данные KV записаны с искажением")
+        if target.stat().st_mode & 0o777 != 0o600:
+            fail("Служебные данные KV должны иметь права 0600")
+
+
+def test_semaphore_token_update_is_narrow() -> None:
+    host = load_host_module()
+    code = host.UPDATE_SEMAPHORE_API_TOKEN_CODE
+    required = (
+        'payload.get("credentials")',
+        'payload.get("api_token")',
+        'data/services/semaphore',
+        'if current.get("api_token") != api_token:',
+        'updated["api_token"] = api_token',
+        '"/v1/auth/token/revoke-self"',
+    )
+    for item in required:
+        if item not in code:
+            fail(f"Обновление Semaphore token нарушает контракт: {item}")
+    if "data/pve/api/infra-manager" in code:
+        fail("Writer Semaphore не должен изменять PVE API credential")
+    if "data/git/github/proxmox-read" in code:
+        fail("Writer Semaphore не должен изменять Git credential")
+
+
 def test_stale_key_is_not_overwritten() -> None:
     host = load_host_module()
     with tempfile.TemporaryDirectory() as tmp:
@@ -723,6 +831,9 @@ def main() -> None:
     test_client_signing_role_is_restricted_to_root()
     test_client_signing_keeps_approle_credentials_on_pve()
     test_ssh_access_credentials_are_pve_only()
+    test_kv_contract_is_narrow_and_versioned()
+    test_kv_access_credentials_are_pve_only()
+    test_semaphore_token_update_is_narrow()
     test_stale_key_is_not_overwritten()
     print("[ОК] Проверки OpenBao пройдены")
 
