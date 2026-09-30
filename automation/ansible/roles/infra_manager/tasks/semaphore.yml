@@ -84,6 +84,26 @@
     group: root
     mode: "0700"
 
+- name: Восстановить рабочие секреты из OpenBao при повторной настройке
+  ansible.builtin.command:
+    argv:
+      - ssh
+      - -i
+      - "{{ provision.access.pve.root_ssh_private_key }}"
+      - -o
+      - "UserKnownHostsFile={{ provision.access.pve.root_ssh_known_hosts }}"
+      - -o
+      - StrictHostKeyChecking=yes
+      - -o
+      - BatchMode=yes
+      - -o
+      - IdentitiesOnly=yes
+      - "root@{{ infra_pve_node }}"
+      - /usr/local/sbin/infra-manager-openbao-unseal
+  register: openbao_secret_restore
+  changed_when: false
+  failed_when: false
+
 - name: Подготовить PVE API credential до первой миграции в OpenBao
   ansible.builtin.copy:
     remote_src: true
@@ -92,6 +112,7 @@
     owner: root
     group: root
     mode: "0600"
+    force: false
   no_log: true
 
 - name: Подготовить Git credential до первой миграции в OpenBao
@@ -102,6 +123,7 @@
     owner: root
     group: root
     mode: "0600"
+    force: false
   no_log: true
 
 - name: Подготовить настройки Semaphore до первой миграции в OpenBao
@@ -112,6 +134,7 @@
     owner: root
     group: root
     mode: "0600"
+    force: false
   no_log: true
 
 - name: Подготовить пароль Semaphore до первой миграции в OpenBao
@@ -122,6 +145,7 @@
     owner: root
     group: root
     mode: "0600"
+    force: false
   no_log: true
 
 - name: Проверить старый API token Semaphore
@@ -137,6 +161,7 @@
     owner: root
     group: root
     mode: "0600"
+    force: false
   no_log: true
   when: legacy_semaphore_api_token.stat.exists
 
