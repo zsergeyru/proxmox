@@ -163,7 +163,7 @@ def reserve_runtime_activation() -> None:
             stream.write(f"{os.getpid()}\n")
             stream.flush()
             os.fsync(stream.fileno())
-    except Exception:
+    except OSError:
         RUNTIME_ACTIVATION_MARKER.unlink(missing_ok=True)
         raise
 
