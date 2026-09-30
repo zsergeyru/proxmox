@@ -400,6 +400,8 @@ def check_temporary_certificate_path() -> None:
             fail("При рабочем CA Ansible не перешёл на временный ключ")
         if "CertificateFile=" not in env["ANSIBLE_SSH_ARGS"]:
             fail("Ansible не получил временный SSH-сертификат")
+        if "infra_project_git_read=false" not in argv:
+            fail("910 не должен получать постоянную гостевую копию Git credential")
         if selected.exists():
             fail("Временный закрытый ключ не удалён после Ansible")
 
@@ -413,6 +415,8 @@ def check_host_certificate_is_passed_to_ansible() -> None:
         host_ca.write_text("ssh-rsa AAAAHOSTCA\n", encoding="utf-8")
         permanent_key = root / "guest_ed25519"
         permanent_key.write_text("permanent", encoding="utf-8")
+        github_key = root / "github_proxmox_repo_ed25519"
+        github_key.write_text("PRIVATE-GIT-KEY", encoding="utf-8")
         context = DeploymentContext(
             client=SimpleNamespace(),
             vmid=410,
@@ -474,6 +478,7 @@ def check_host_certificate_is_passed_to_ansible() -> None:
                 SimpleNamespace(
                     ssh_client_ca_public_key=client_ca,
                     ssh_host_ca_public_key=host_ca,
+                    github_key=github_key,
                 ),
             ),
             patch.object(guest_deploy_module, "run", side_effect=fake_run),
@@ -501,6 +506,11 @@ def check_host_certificate_is_passed_to_ansible() -> None:
         if len(ansible_calls) != 1:
             fail("Ansible должен запускаться ровно один раз")
         argv = ansible_calls[0]
+        if "infra_project_git_read=true" not in argv:
+            fail("410 должен получить Git read-доступ из access.yaml")
+        expected_git_var = f"infra_project_git_private_key_file={github_key}"
+        if expected_git_var not in argv:
+            fail("Ansible не получил путь к материализованному Git credential")
         host_vars = [
             item
             for item in argv
