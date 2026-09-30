@@ -529,6 +529,11 @@ def validate_semaphore_snapshot(
         SETTINGS.opentofu_env_name,
         "Variable Group",
     )
+    require_unique_by_name(
+        list(snapshot.environments),
+        SETTINGS.infra_manager_env_name,
+        "Variable Group",
+    )
     _check_git_branch_contract(
         snapshot.repository,
         snapshot.branches,
