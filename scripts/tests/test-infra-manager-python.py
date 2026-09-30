@@ -20,8 +20,10 @@ import infra_manager.common as common
 from infra_manager.common import (
     CommandError,
     CommandRunner,
+    Console,
     InfraManagerError,
     _redact_argv,
+    log_level,
     run,
 )
 from infra_manager.pve import (
@@ -131,6 +133,82 @@ def check_cli_and_commands() -> None:
             )
         if "usage: infra-manager" not in direct.stdout:
             fail(f"python -m infra_manager {' '.join(args)} не вывел строку использования")
+
+
+def check_log_levels() -> None:
+    old_level = os.environ.get("INFRA_LOG_LEVEL")
+    try:
+        os.environ.pop("INFRA_LOG_LEVEL", None)
+        if log_level() != "normal":
+            fail("Уровень вывода по умолчанию должен быть normal")
+
+        normal_out = io.StringIO()
+        normal_console = Console(out=normal_out, err=io.StringIO())
+        normal_console.info("этап")
+        normal_console.detail("подробность")
+        normal_console.ok("готово")
+        normal_console.result("итог")
+        normal_text = normal_out.getvalue()
+        if "этап" not in normal_text or "готово" not in normal_text:
+            fail("normal должен показывать основные сообщения")
+        if "подробность" in normal_text:
+            fail("normal не должен показывать диагностические подробности")
+        if "итог" not in normal_text:
+            fail("normal должен показывать итог")
+
+        os.environ["INFRA_LOG_LEVEL"] = "verbose"
+        verbose_out = io.StringIO()
+        verbose_console = Console(out=verbose_out, err=io.StringIO())
+        verbose_console.detail("подробность")
+        if "подробность" not in verbose_out.getvalue():
+            fail("verbose должен показывать диагностические подробности")
+
+        os.environ["INFRA_LOG_LEVEL"] = "quiet"
+        quiet_out = io.StringIO()
+        quiet_console = Console(out=quiet_out, err=io.StringIO())
+        quiet_console.info("этап")
+        quiet_console.ok("готово")
+        quiet_console.result("итог")
+        quiet_text = quiet_out.getvalue()
+        if "этап" in quiet_text or "готово" in quiet_text:
+            fail("quiet не должен показывать промежуточные сообщения")
+        if "итог" not in quiet_text:
+            fail("quiet должен показывать итог")
+
+        os.environ["INFRA_LOG_LEVEL"] = "invalid"
+        try:
+            log_level()
+        except InfraManagerError:
+            pass
+        else:
+            fail("Некорректный INFRA_LOG_LEVEL должен вызывать ошибку")
+
+        os.environ["INFRA_LOG_LEVEL"] = "normal"
+        runner = CommandRunner()
+        hidden = runner.run(
+            [sys.executable, "-c", "print('HIDDEN-SUCCESS')"]
+        )
+        if hidden.stdout.strip() != "HIDDEN-SUCCESS":
+            fail("normal должен перехватывать подробный stdout успешной команды")
+
+        try:
+            runner.run(
+                [
+                    sys.executable,
+                    "-c",
+                    "print('FAIL-DETAIL'); raise SystemExit(9)",
+                ]
+            )
+        except CommandError as exc:
+            if "FAIL-DETAIL" not in str(exc):
+                fail("normal должен сохранять диагностический вывод ошибки")
+        else:
+            fail("Ошибка внешней команды не была обнаружена")
+    finally:
+        if old_level is None:
+            os.environ.pop("INFRA_LOG_LEVEL", None)
+        else:
+            os.environ["INFRA_LOG_LEVEL"] = old_level
 
 
 def check_runtime_activation_guard() -> None:
@@ -283,6 +361,7 @@ def check_pve_helpers() -> None:
 
 def main_test() -> None:
     check_cli_and_commands()
+    check_log_levels()
     check_runtime_activation_guard()
     check_path_overrides()
     check_command_runner_contract()
