@@ -419,7 +419,7 @@ Semaphore использует сеть 910 напрямую, поэтому в�
 Первичный пароль создаётся один раз и сохраняется с правами `0600`:
 
 ```text
-/etc/infra-manager/secrets/initial-admin-password
+/run/infra-manager/secrets/initial-admin-password
 ```
 
 Полная команда состояния показывает адрес Semaphore, логин `admin` и сохранённый пароль:
@@ -433,5 +433,5 @@ infra-manager-status --full
 Получить пароль от root внутри 910 можно также явно:
 
 ```bash
-cat /etc/infra-manager/secrets/initial-admin-password
+cat /run/infra-manager/secrets/initial-admin-password
 ```
