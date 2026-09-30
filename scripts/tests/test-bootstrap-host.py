@@ -674,9 +674,11 @@ def test_recovery_preflight_allows_missing_access_directory() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         host = RecoveryStateHarness(Path(tmp))
         _prepare_complete_recovery_state(host)
-        import shutil
 
-        shutil.rmtree(host.host_access_dir)
+        if host.host_access_dir.exists():
+            raise AssertionError(
+                "Recovery-state больше не должен требовать каталог access/"
+            )
         host.verify_recovery_state()
 
 
