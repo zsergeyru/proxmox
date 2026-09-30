@@ -85,7 +85,7 @@ pve_check_line="$(grep -nF -- '- name: Проверить постоянный �
     || die "pve_access.yml должен готовить рабочие секреты до проверки PVE API"
 (( runtime_secret_dir_line < openbao_restore_line && openbao_restore_line < pve_stage_line && pve_stage_line < pve_check_line )) \
     || die "Нарушен порядок восстановления PVE API credential перед его проверкой"
-grep -Fq 'dest: "{{ provision.access.pve.persistent_credential }}"' "$PVE_ACCESS_TASKS" \
+grep -Fq 'dest: "{{ provision.access_materialization.pve.persistent_credential }}"' "$PVE_ACCESS_TASKS" \
     || die "Переходный PVE API credential должен попадать в рабочий путь из provision.yaml"
 if grep -Fq -- '- name: Подготовить PVE API credential до первой миграции в OpenBao' "$SEMAPHORE_TASKS"; then
     die "Подготовка PVE API credential не должна откладываться до semaphore.yml"
@@ -338,8 +338,8 @@ if not required_openbao_volumes.issubset(set(compose_openbao.get("volumes", []))
     raise SystemExit("Compose не содержит обязательные тома OpenBao")
 
 required_runtime_fragments = (
-    "provision.access.pve.ca_source",
-    "provision.access.pve.persistent_credential",
+    "provision.access_materialization.pve.ca_source",
+    "provision.access_materialization.pve.persistent_credential",
     "provision.paths.ansible_identity",
     "provision.paths.semaphore_persistent_data",
     "provision.paths.opentofu_persistent_state_dir",
@@ -408,10 +408,11 @@ grep -q 'ROOT_ADMIN_PRIVS = {' "$PY_PVE" \
     || die "PVE API token 910 должен проверяться как полный административный token"
 grep -Fq '/mnt/pve-access/pve-host:/mnt/pve-access/pve-host:ro' "$COMPOSE" \
     || die "infra-runtime должен получать root SSH-доступ PVE из read-only каталога"
-grep -q 'privilege_separation: false' "$PROVISION" \
-    || die "Постоянный PVE API token должен использовать privsep=0"
-grep -q 'permanent_root_ssh_to_pve: true' "$PROVISION" \
-    || die "910 должен иметь зафиксированный root SSH-доступ к PVE"
+grep -q '^access_materialization:' "$PROVISION" \
+    || die "provision 910 должен хранить только техническую материализацию доступов"
+if grep -Eq '^[[:space:]]+(guest_scope|managed_pool_assignment|privilege_separation):' "$PROVISION"; then
+    die "Политика доступа не должна дублироваться в provision.yaml"
+fi
 grep -Fq 'path    = "/openbao/file/raft"' "$OPENBAO_CONFIG" \
     || die "OpenBao должен использовать постоянное Raft-хранилище"
 grep -Fq 'address         = "127.0.0.1:8200"' "$OPENBAO_CONFIG" \
@@ -578,7 +579,7 @@ if directory_block not in text:
 
 targets = {
     "/run/infra-manager/secrets/pve-api.env": (
-        'dest: "{{ provision.access.pve.persistent_credential }}"',
+        'dest: "{{ provision.access_materialization.pve.persistent_credential }}"',
         "dest: /run/infra-manager/secrets/pve-api.env",
     ),
     "/run/infra-manager/secrets/github_proxmox_repo_ed25519": (
