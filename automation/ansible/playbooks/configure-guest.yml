@@ -76,10 +76,10 @@
         argv:
           - systemd-run
           - "--unit=infra-manager-runtime-activate-{{ ansible_facts.date_time.epoch }}"
-          - --on-active=30s
           - --collect
           - env
           - "INFRA_PROJECT_BRANCH={{ infra_project_branch | default('main') }}"
+          - "INFRA_PVE_NODE={{ infra_pve_node }}"
           - /usr/local/sbin/infra-manager-activate-runtime
       changed_when: true
       when: infra_self_update | default(false) | bool

@@ -10,7 +10,11 @@ from pathlib import Path
 MODULE_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(MODULE_ROOT))
 
-from infra_manager.common import InfraManagerError, console
+from infra_manager.common import (
+    InfraManagerError,
+    console,
+    require_runtime_activation_idle,
+)
 from infra_manager.template_verify import run_verify_template
 
 
@@ -22,6 +26,7 @@ def main() -> int:
     args = parser.parse_args()
 
     try:
+        require_runtime_activation_idle()
         return run_verify_template(args.vmid)
     except (InfraManagerError, OSError) as exc:
         console.error(str(exc))

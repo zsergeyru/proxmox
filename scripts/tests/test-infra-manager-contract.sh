@@ -13,6 +13,7 @@ PY_SETTINGS="$ROOT/scripts/infra-manager/infra_manager/settings.py"
 PY_SEMAPHORE="$ROOT/scripts/infra-manager/infra_manager/semaphore.py"
 PY_STATUS="$ROOT/scripts/infra-manager/infra_manager/status.py"
 PY_PVE="$ROOT/scripts/infra-manager/infra_manager/pve.py"
+PY_COMMON="$ROOT/scripts/infra-manager/infra_manager/common.py"
 STATUS="$ROOT/scripts/infra-manager/commands/status.sh"
 ACCESS="$ROOT/scripts/infra-manager/commands/pve-access-check.sh"
 LIFECYCLE="$ROOT/scripts/infra-manager/commands/pve-lifecycle-test.sh"
@@ -69,7 +70,7 @@ for task_file in "${ANSIBLE_RUNTIME_PARTS[@]}"; do
     cat "$ANSIBLE_RUNTIME_DIR/$task_file" >> "$ANSIBLE_RUNTIME"
 done
 
-for file in "$ANSIBLE_CONFIG" "$ANSIBLE_PLAYBOOK" "$ANSIBLE_LINUX_BASE" "$ANSIBLE_GUEST_LAYOUT" "$ANSIBLE_DOCKER" "$ANSIBLE_RUNTIME" "$PY_SETTINGS" "$PY_SEMAPHORE" "$PY_STATUS" "$PY_PVE" "$STATUS" "$ACCESS" "$LIFECYCLE" "$ACTIVATE_RUNTIME" "$BUILD_TEMPLATE" "$VERIFY_TEMPLATE" "$DEPLOY_GUEST" "$PY_OPENTOFU" "$PY_TEMPLATE" "$PY_TEMPLATE_BUILD" "$PY_TEMPLATE_VERIFY" "$COMPOSE" "$OPENBAO_CONFIG" "$OPENBAO_HOST" "$OPENBAO_STARTUP_COMMAND" "$OPENBAO_STARTUP_SERVICE" "$OPENBAO_JOB" "$PY_OPENBAO" "$DOCKERFILE" "$REQ" "$PLAN" "$PY_PVE_HOST" "$OPENTOFU_LOCK" "$GUEST_MANIFEST" "$PROVISION" "$SSH_CONFIG"; do
+for file in "$PY_COMMON" "$ANSIBLE_CONFIG" "$ANSIBLE_PLAYBOOK" "$ANSIBLE_LINUX_BASE" "$ANSIBLE_GUEST_LAYOUT" "$ANSIBLE_DOCKER" "$ANSIBLE_RUNTIME" "$PY_SETTINGS" "$PY_SEMAPHORE" "$PY_STATUS" "$PY_PVE" "$STATUS" "$ACCESS" "$LIFECYCLE" "$ACTIVATE_RUNTIME" "$BUILD_TEMPLATE" "$VERIFY_TEMPLATE" "$DEPLOY_GUEST" "$PY_OPENTOFU" "$PY_TEMPLATE" "$PY_TEMPLATE_BUILD" "$PY_TEMPLATE_VERIFY" "$COMPOSE" "$OPENBAO_CONFIG" "$OPENBAO_HOST" "$OPENBAO_STARTUP_COMMAND" "$OPENBAO_STARTUP_SERVICE" "$OPENBAO_JOB" "$PY_OPENBAO" "$DOCKERFILE" "$REQ" "$PLAN" "$PY_PVE_HOST" "$OPENTOFU_LOCK" "$GUEST_MANIFEST" "$PROVISION" "$SSH_CONFIG"; do
     [[ -s "$file" ]] || die "Отсутствует обязательный файл: $file"
 done
 
@@ -531,6 +532,12 @@ for wrapper in "$STATUS" "$ACCESS"; do
 done
 grep -q 'runtime-activation.log' "$ACTIVATE_RUNTIME" \
     || die "Команда активации должна вести отдельный журнал"
+grep -Fq '.infra-manager-runtime-activation-pending' "$PY_COMMON" "$ACTIVATE_RUNTIME" \
+    || die "Задания и активация runtime должны использовать общий маркер"
+grep -Fq 'docker exec --user 0 infra-runtime' "$ACTIVATE_RUNTIME" \
+    || die "Активация должна ждать завершения текущего Deploy Guest 910"
+grep -Fq 'infra-manager-openbao-startup-unseal "$PVE_NODE"' "$ACTIVATE_RUNTIME" \
+    || die "После перезапуска runtime OpenBao должен разблокироваться до проверки"
 grep -q 'infra-manager-status --full --quiet' "$ACTIVATE_RUNTIME" \
     || die "Отложенная активация должна завершаться полной проверкой 910"
 grep -Fq 'PVE_ENV="/run/infra-manager/secrets/pve-api.env"' "$LIFECYCLE" \
@@ -606,7 +613,12 @@ grep -Fq '/usr/local/sbin/infra-manager-openbao-unseal' "$ANSIBLE_RUNTIME" \
 grep -q 'infra-manager ansible self' "$ANSIBLE_RUNTIME" \
     || die "910 должен сохранять управляемый блок собственного Ansible-ключа"
 grep -q 'systemd-run' "$ANSIBLE_PLAYBOOK" \
-    || die "Общий playbook должен откладывать перезапуск infra-runtime до завершения ролей"
+    || die "Общий playbook должен передавать активацию внешней systemd-службе"
+grep -Fq '"INFRA_PVE_NODE={{ infra_pve_node }}"' "$ANSIBLE_PLAYBOOK" \
+    || die "Активация runtime должна знать узел PVE для разблокировки OpenBao"
+if grep -Fq -- '--on-active=30s' "$ANSIBLE_PLAYBOOK"; then
+    die "Фиксированная задержка 30 секунд не должна управлять активацией runtime"
+fi
 branch_env_count="$(grep -Fc 'INFRA_PROJECT_BRANCH: "{{ infra_project_branch' "$ANSIBLE_RUNTIME" || true)"
 [[ "$branch_env_count" -ge 2 ]] \
     || die "Выбранная ветка должна передаваться и настройке Semaphore, и финальной проверке 910"
@@ -666,6 +678,14 @@ grep -q '^TEST_VMID = 9099' "$PY_TEMPLATE_VERIFY" \
     || die "Проверка шаблона 9000 должна использовать VMID 9099"
 grep -q 'run_deploy_guest' "$DEPLOY_GUEST" \
     || die "Deploy Guest должен передавать выполнение Python-модулю"
+grep -Fq 'reserve_runtime_activation()' "$DEPLOY_GUEST" \
+    || die "Deploy Guest 910 должен резервировать окно активации runtime"
+grep -Fq 'cancel_runtime_activation()' "$DEPLOY_GUEST" \
+    || die "Неуспешный Deploy Guest 910 должен снимать резерв активации"
+for job in "$DEPLOY_GUEST" "$OPENBAO_JOB" "$PLAN" "$BUILD_TEMPLATE" "$VERIFY_TEMPLATE"; do
+    grep -Fq 'require_runtime_activation_idle()' "$job" \
+        || die "Infrastructure job должен блокироваться во время активации runtime: $job"
+done
 
 grep -q 'run_plan' "$PLAN" \
     || die "OpenTofu Plan должен передавать выполнение Python-модулю"
