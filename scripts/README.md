@@ -183,7 +183,7 @@ infra-manager-pve-lifecycle-test
 
 ## `guests/`
 
-`resolver.py` — единый сборщик конфигурации гостей. Он объединяет `defaults + profile + guest`, вычисляет административный IP-адрес, нормализует параметры `management`, `bootstrap` и `features` и формирует итоговое состояние.
+`resolver.py` — единый сборщик конфигурации гостей. Он объединяет `defaults + profile + guest`, вычисляет административный IP-адрес, нормализует переходное поле `management` и `features` и формирует итоговое состояние объекта Proxmox. Права доступа находятся отдельно в `infrastructure/security/access.yaml` и проверяются `validate_repo.py`.
 
 `render-opentofu-input.py` проходит по `infrastructure/guests/*/guest.yaml`, берёт только объекты с `profile` и формирует:
 
