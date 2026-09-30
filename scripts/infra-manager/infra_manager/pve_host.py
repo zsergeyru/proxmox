@@ -7,7 +7,7 @@ import json
 import shlex
 from pathlib import Path
 
-from .common import InfraManagerError, console, require_command, run
+from .common import InfraManagerError, console, log_level, require_command, run
 from .settings import PATHS
 
 
@@ -142,12 +142,18 @@ systemctl daemon-reload
         OPENBAO_HOST_COMMAND,
         "0755",
     )
-    console.ok("Сценарий разблокировки OpenBao установлен на PVE")
+    console.detail("Сценарий разблокировки OpenBao установлен на PVE")
 
 
 def initialize_openbao_on_host(node: str) -> None:
     """Выполнить первичную инициализацию OpenBao на стороне PVE."""
-    _ssh(node, str(OPENBAO_HOST_COMMAND), "--initialize")
+    _ssh(
+        node,
+        str(OPENBAO_HOST_COMMAND),
+        "--initialize",
+        "--log-level",
+        log_level(),
+    )
 
 
 def trigger_openbao_unseal(node: str) -> None:
@@ -157,7 +163,13 @@ def trigger_openbao_unseal(node: str) -> None:
 
 def check_openbao_kv(node: str) -> None:
     """Проверить KV v2 через PVE-only AppRole без выдачи секретов."""
-    _ssh(node, str(OPENBAO_HOST_COMMAND), "--check-kv")
+    _ssh(
+        node,
+        str(OPENBAO_HOST_COMMAND),
+        "--check-kv",
+        "--log-level",
+        "quiet",
+    )
 
 
 def update_openbao_semaphore_api_token(node: str, api_token: str) -> None:
