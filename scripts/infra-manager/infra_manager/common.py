@@ -129,6 +129,50 @@ class Console:
 console = Console()
 
 
+RUNTIME_ACTIVATION_MARKER = Path(
+    "/var/lib/semaphore/.infra-manager-runtime-activation-pending"
+)
+
+
+def require_runtime_activation_idle() -> None:
+    """Не запускать новое задание во время замены infra-runtime."""
+    if RUNTIME_ACTIVATION_MARKER.exists():
+        raise InfraManagerError(
+            "Идёт активация новой управляющей среды 910; "
+            "дождитесь её завершения и повторите задание"
+        )
+
+
+def reserve_runtime_activation() -> None:
+    """Зарезервировать окно активации и записать PID текущего задания."""
+    RUNTIME_ACTIVATION_MARKER.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        descriptor = os.open(
+            RUNTIME_ACTIVATION_MARKER,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+            0o600,
+        )
+    except FileExistsError as exc:
+        raise InfraManagerError(
+            "Активация управляющей среды 910 уже ожидается; "
+            "повторный Deploy Guest 910 запрещён"
+        ) from exc
+
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            stream.write(f"{os.getpid()}\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+    except Exception:
+        RUNTIME_ACTIVATION_MARKER.unlink(missing_ok=True)
+        raise
+
+
+def cancel_runtime_activation() -> None:
+    """Снять резерв активации после неуспешного Deploy Guest 910."""
+    RUNTIME_ACTIVATION_MARKER.unlink(missing_ok=True)
+
+
 def require_root() -> None:
     """Остановиться, если команда запущена не от root."""
 
