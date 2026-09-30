@@ -475,7 +475,6 @@ def test_existing_without_bootstrap_state() -> None:
         host.events,
         [
             "infra_exists",
-            "verify_recovery_state",
             "runner_owns_910",
             "verify_layout",
             "prepare_runner",
@@ -561,6 +560,7 @@ def test_recover_existing_without_state() -> None:
         host.events,
         [
             "infra_exists",
+            "verify_recovery_state",
             "runner_owns_910",
             "verify_layout",
             "prepare_runner",
