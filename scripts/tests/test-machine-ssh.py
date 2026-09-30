@@ -3,8 +3,12 @@
 
 from __future__ import annotations
 
+import shutil
 import sys
+import tempfile
 from pathlib import Path
+
+import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 MODULE_ROOT = ROOT / "scripts" / "infra-manager"
@@ -48,6 +52,39 @@ def main() -> None:
     # На 910 machine-principal 410 не должен разрешаться.
     assert "guest-410" not in policy.authorized_principals(910)
 
+    # Удаление правила из access.yaml должно отзывать principal на цели.
+    with tempfile.TemporaryDirectory() as temporary:
+        temp_root = Path(temporary)
+        shutil.copytree(
+            ROOT / "infrastructure/guests",
+            temp_root / "infrastructure/guests",
+        )
+        security_dir = temp_root / "infrastructure/security"
+        security_dir.mkdir(parents=True)
+        access_data = yaml.safe_load(
+            (ROOT / "infrastructure/security/access.yaml").read_text(
+                encoding="utf-8"
+            )
+        )
+        access_data["rules"] = [
+            rule
+            for rule in access_data["rules"]
+            if rule.get("id") != "ai-control-managed-guests"
+        ]
+        (security_dir / "access.yaml").write_text(
+            yaml.safe_dump(
+                access_data,
+                allow_unicode=True,
+                sort_keys=False,
+            ),
+            encoding="utf-8",
+        )
+
+        revoked = load_access_policy(temp_root)
+        assert 311 not in revoked.targets_for(410)
+        assert "guest-410" not in revoked.authorized_principals(311)
+        assert "guest-910" in revoked.authorized_principals(311)
+
     assert _host_pattern("192.168.0.0/16") == "192.168.*"
 
     assert str(MACHINE_KEY) == "/etc/proxmox-guest/ssh/machine_ed25519"
@@ -69,6 +106,9 @@ def main() -> None:
     assert "/etc/ssh/authorized_principals" in PREPARE_TARGET_CODE
     assert 'principal_dir / "root"' in PREPARE_TARGET_CODE
     assert "authorized_keys" not in PREPARE_TARGET_CODE
+    assert 'content = "\\n".join(["root", *sorted(set(principals))])' in PREPARE_TARGET_CODE
+    assert "old == text" in PREPARE_TARGET_CODE
+    assert "os.replace(temporary, path)" in PREPARE_TARGET_CODE
 
     print("Machine SSH contract tests passed.")
 
