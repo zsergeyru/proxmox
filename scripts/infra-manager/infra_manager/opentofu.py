@@ -244,10 +244,10 @@ def run_plan(repo_root: Path) -> int:
         env=workspace.env,
     )
     if result.returncode == 0:
-        console.ok("OpenTofu: изменений нет")
+        console.result("OpenTofu: изменений нет")
         return 0
     if result.returncode == 2:
-        console.ok("OpenTofu: план содержит изменения")
+        console.result("OpenTofu: план содержит изменения")
         return 0
     raise InfraManagerError(
         f"OpenTofu plan завершился с кодом {result.returncode}"
