@@ -11,7 +11,13 @@ MODULE_ROOT = Path(__file__).resolve().parents[1]
 REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(MODULE_ROOT))
 
-from infra_manager.common import InfraManagerError, console
+from infra_manager.common import (
+    InfraManagerError,
+    cancel_runtime_activation,
+    console,
+    require_runtime_activation_idle,
+    reserve_runtime_activation,
+)
 from infra_manager.guest_deploy import run_deploy_guest
 
 
@@ -51,6 +57,7 @@ def main() -> int:
     )
     args = parser.parse_args()
 
+    activation_reserved = False
     try:
         selected_phase = (
             "infrastructure"
@@ -63,13 +70,28 @@ def main() -> int:
             if args.provision_existing_only
             else "all"
         )
-        return run_deploy_guest(
+        require_runtime_activation_idle()
+        self_update = (
+            args.vmid == 910
+            and not args.bootstrap_scope
+            and selected_phase == "all"
+        )
+        if self_update:
+            reserve_runtime_activation()
+            activation_reserved = True
+
+        result = run_deploy_guest(
             REPO_ROOT,
             args.vmid,
             bootstrap_scope=args.bootstrap_scope,
             phase=selected_phase,
         )
+        if result != 0 and activation_reserved:
+            cancel_runtime_activation()
+        return result
     except (InfraManagerError, OSError) as exc:
+        if activation_reserved:
+            cancel_runtime_activation()
         console.error(str(exc))
         return 1
 
