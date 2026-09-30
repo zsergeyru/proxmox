@@ -131,6 +131,7 @@ semaphore:
   objects:
     - GitHub project read-only
     - OpenTofu PVE
+    - Infra Manager
     - OpenTofu Plan
     - Build Template 9000
     - Deploy Guest 410
