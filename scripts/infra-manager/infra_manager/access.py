@@ -35,6 +35,7 @@ class AccessPolicy:
     guests: dict[int, GuestRecord]
     machine_identity_vmids: frozenset[int]
     machine_ssh_edges: frozenset[MachineSshEdge]
+    project_repository_read_vmids: frozenset[int]
 
     def machine_principal(self, vmid: int) -> str:
         if vmid not in self.machine_identity_vmids:
@@ -59,6 +60,9 @@ class AccessPolicy:
                 if edge.source_vmid == source_vmid
             )
         )
+
+    def project_repository_read_allowed(self, vmid: int) -> bool:
+        return vmid in self.project_repository_read_vmids
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:
@@ -235,6 +239,30 @@ def load_access_policy(repo_root: Path) -> AccessPolicy:
                         )
                     identity_vmids.add(vmid)
 
+    project_repository_read_vmids: set[int] = set()
+    for rule in rules:
+        if not isinstance(rule, dict):
+            continue
+        if (
+            rule.get("service") != "github"
+            or rule.get("resource") != "repository"
+            or "read" not in rule.get("access", [])
+            or "zsergeyru/proxmox" not in rule.get("targets", [])
+        ):
+            continue
+        subject = rule.get("subject")
+        if not isinstance(subject, str) or not subject.startswith("guest:"):
+            continue
+        vmid_text = subject.partition(":")[2]
+        if not vmid_text.isdigit():
+            continue
+        vmid = int(vmid_text)
+        if vmid not in guests:
+            raise InfraManagerError(
+                f"access.yaml ссылается на неизвестный guest:{vmid}"
+            )
+        project_repository_read_vmids.add(vmid)
+
     edges: set[MachineSshEdge] = set()
     for rule in rules:
         if not isinstance(rule, dict):
@@ -280,4 +308,7 @@ def load_access_policy(repo_root: Path) -> AccessPolicy:
         guests=guests,
         machine_identity_vmids=frozenset(identity_vmids),
         machine_ssh_edges=frozenset(edges),
+        project_repository_read_vmids=frozenset(
+            project_repository_read_vmids
+        ),
     )
