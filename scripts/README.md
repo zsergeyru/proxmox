@@ -81,7 +81,7 @@ scripts/
 
 ### Python-пакет `infra_manager/`
 
-`semaphore.py` — создаёт и синхронизирует проект `Proxmox Infrastructure`, ключ доступа GitHub, репозиторий, группу переменных `OpenTofu PVE` и задания Semaphore.
+`semaphore.py` — создаёт и синхронизирует проект `Proxmox Infrastructure`, ключ доступа GitHub, репозиторий, группы `OpenTofu PVE` и `Infra Manager`, а также задания Semaphore. Группа `Infra Manager` хранит общий переключатель `INFRA_LOG_LEVEL` для краткого, подробного или минимального вывода.
 
 `pve.py` — проверяет фактические права ключа доступа PVE API и отсутствие запрещённых административных полномочий.
 
