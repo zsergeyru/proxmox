@@ -183,13 +183,14 @@ def managed_guests_exist() -> bool:
 
 
 def verify_recovery_state(*, require_approle: bool = True) -> None:
-    required_dirs = (
+    required_dirs = [
         PVE_ONLY_DIR,
-        ACCESS_DIR,
         STATE_DIR,
         OPENBAO_RAFT_DIR,
         RECOVERY_DIR,
-    )
+    ]
+    if require_approle:
+        required_dirs.append(ACCESS_DIR)
     missing_dirs = [str(path) for path in required_dirs if not path.is_dir()]
     if missing_dirs:
         raise RecoveryError(
@@ -207,6 +208,7 @@ def verify_recovery_state(*, require_approle: bool = True) -> None:
             (
                 OPENBAO_SSH_ACCESS,
                 OPENBAO_KV_ACCESS,
+                ACCESS_GITHUB_KEY,
             )
         )
     missing_files = [
