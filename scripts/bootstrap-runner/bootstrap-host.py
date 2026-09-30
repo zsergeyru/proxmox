@@ -59,8 +59,23 @@ class BootstrapHost:
         )
         self.host_pve_api_env = self.host_access_pve_api_dir / "pve-api.env"
         self.host_pve_ca = self.host_access_ca_dir / "pve-root-ca.crt"
-        self.host_openbao_unseal_key = (
-            self.host_pve_only_dir / "openbao" / "unseal.key"
+        self.host_openbao_dir = self.host_pve_only_dir / "openbao"
+        self.host_recovery_dir = self.host_pve_only_dir / "recovery"
+        self.host_recovery_github_key = (
+            self.host_recovery_dir / "github_proxmox_repo_ed25519"
+        )
+        self.host_openbao_unseal_key = self.host_openbao_dir / "unseal.key"
+        self.host_openbao_ssh_access = self.host_openbao_dir / "ssh-access.json"
+        self.host_openbao_kv_access = self.host_openbao_dir / "kv-access.json"
+        self.host_state_openbao_dir = self.host_state_dir / "openbao"
+        self.host_state_openbao_raft_dir = (
+            self.host_state_openbao_dir / "raft"
+        )
+        self.host_state_opentofu_file = (
+            self.host_state_dir / "opentofu" / "state" / "proxmox.tfstate"
+        )
+        self.host_state_semaphore_db = (
+            self.host_state_dir / "semaphore" / "semaphore.sqlite"
         )
         self.host_root_authorized_keys = Path("/root/.ssh/authorized_keys")
         self.host_ssh_public_key = Path("/etc/ssh/ssh_host_ed25519_key.pub")
@@ -239,7 +254,7 @@ class BootstrapHost:
     def require_host(self) -> None:
         if os.geteuid() != 0:
             self.fail("сценарий должен выполняться от root на PVE")
-        for command in ("pct", "pveum", "pvesm", "python3", "ssh-keygen"):
+        for command in ("pct", "pveum", "pvesh", "pvesm", "python3", "ssh-keygen"):
             if not self.command_exists(command):
                 self.fail(f"не найден {command}")
         if not self.host_github_key.is_file() or self.host_github_key.stat().st_size == 0:
@@ -323,6 +338,99 @@ class BootstrapHost:
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source, target)
         self._set_mode_owner(target, mode, uid, gid)
+
+    def managed_guests_exist(self) -> bool:
+        result = self.run(
+            "pvesh",
+            "get",
+            "/pools/managed",
+            "--output-format",
+            "json",
+            check=False,
+            capture=True,
+        )
+        if result.returncode != 0:
+            pools = self.pveum_json("pool", "list")
+            if not any(row.get("poolid") == "managed" for row in pools):
+                return False
+            self.fail(
+                "Не удалось проверить состав PVE pool managed перед recovery"
+            )
+        try:
+            payload = json.loads(result.stdout or "{}")
+        except json.JSONDecodeError as exc:
+            raise BootstrapError(
+                "PVE вернул некорректный JSON для pool managed"
+            ) from exc
+        members = payload.get("members") if isinstance(payload, dict) else None
+        if members is None:
+            return False
+        if not isinstance(members, list):
+            self.fail("PVE pool managed имеет некорректный members")
+        return bool(members)
+
+    @staticmethod
+    def _directory_has_files(path: Path) -> bool:
+        if not path.is_dir():
+            return False
+        try:
+            return any(item.is_file() and item.stat().st_size > 0 for item in path.rglob("*"))
+        except OSError:
+            return False
+
+    def verify_recovery_state(self) -> None:
+        """Проверить аварийное состояние до любых изменений 910."""
+        required_dirs = (
+            self.host_pve_only_dir,
+            self.host_recovery_dir,
+            self.host_state_dir,
+            self.host_state_openbao_dir,
+            self.host_state_openbao_raft_dir,
+        )
+        missing_dirs = [str(path) for path in required_dirs if not path.is_dir()]
+        if missing_dirs:
+            self.fail(
+                "Recovery запрещён: отсутствуют обязательные постоянные каталоги: "
+                + ", ".join(missing_dirs)
+            )
+
+        required_files = (
+            self.host_openbao_unseal_key,
+            self.host_recovery_github_key,
+        )
+        missing_files = [
+            str(path)
+            for path in required_files
+            if not path.is_file() or path.stat().st_size == 0
+        ]
+        if missing_files:
+            self.fail(
+                "Recovery запрещён: отсутствуют обязательные данные доступа: "
+                + ", ".join(missing_files)
+            )
+
+        if not self._directory_has_files(self.host_state_openbao_raft_dir):
+            self.fail(
+                "Recovery запрещён: Raft-состояние OpenBao отсутствует или пусто"
+            )
+
+        if self.managed_guests_exist() and (
+            not self.host_state_opentofu_file.is_file()
+            or self.host_state_opentofu_file.stat().st_size == 0
+        ):
+            self.fail(
+                "Recovery запрещён: в pool managed есть объекты, "
+                "но постоянный OpenTofu state отсутствует"
+            )
+
+        if not self.host_state_semaphore_db.is_file() or (
+            self.host_state_semaphore_db.stat().st_size == 0
+        ):
+            self.fail(
+                "Recovery запрещён: отсутствует постоянная база Semaphore"
+            )
+
+        self.ok("Аварийное состояние 910 проверено до начала восстановления")
 
     def prepare_new_persistent_layout(self) -> None:
         """Подготовить пустую постоянную область для нового 910 без миграции."""
@@ -1324,6 +1432,9 @@ class BootstrapHost:
 
     def apply(self) -> None:
         existed = self.infra_exists()
+
+        if self.mode == "recover":
+            self.verify_recovery_state()
 
         if existed:
             owns_910 = self.runner_owns_910()

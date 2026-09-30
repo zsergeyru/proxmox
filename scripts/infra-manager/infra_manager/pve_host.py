@@ -81,6 +81,7 @@ def _ssh_with_input(
 
 
 OPENBAO_HOST_COMMAND = Path("/usr/local/sbin/infra-manager-openbao-unseal")
+RECOVERY_HOST_COMMAND = Path("/usr/local/sbin/infra-manager-recovery")
 OPENBAO_LEGACY_SERVICE = "infra-manager-openbao-unseal.service"
 OPENBAO_LEGACY_TIMER = "infra-manager-openbao-unseal.timer"
 
@@ -143,6 +144,38 @@ systemctl daemon-reload
         "0755",
     )
     console.detail("Сценарий разблокировки OpenBao установлен на PVE")
+
+
+def install_recovery_host_support(node: str, repo_root: Path) -> None:
+    """Установить на PVE независимый helper аварийного восстановления."""
+    source = (
+        repo_root / "scripts" / "infra-manager" / "host" / "recovery.py"
+    )
+    _install_remote_file(
+        node,
+        source,
+        RECOVERY_HOST_COMMAND,
+        "0755",
+    )
+    console.detail("Recovery helper установлен на PVE")
+
+
+def prepare_recovery_git(node: str) -> None:
+    """Подготовить PVE-only аварийную копию Git Deploy Key."""
+    _ssh(
+        node,
+        str(RECOVERY_HOST_COMMAND),
+        "--prepare",
+    )
+
+
+def check_recovery_contour(node: str) -> None:
+    """Проверить готовность полного аварийного контура на PVE."""
+    _ssh(
+        node,
+        str(RECOVERY_HOST_COMMAND),
+        "--check",
+    )
 
 
 def initialize_openbao_on_host(node: str) -> None:

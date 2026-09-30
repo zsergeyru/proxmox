@@ -8,8 +8,11 @@ from urllib.parse import urlparse
 
 from .common import InfraManagerError, console
 from .pve_host import (
+    check_recovery_contour,
     initialize_openbao_on_host,
     install_openbao_host_support,
+    install_recovery_host_support,
+    prepare_recovery_git,
 )
 
 
@@ -31,13 +34,18 @@ def run_initialize_openbao(repo_root: Path) -> int:
     node = _pve_node_from_environment()
 
     console.info("Проверка OpenBao 910")
-    console.detail("Установка сценария разблокировки OpenBao на PVE")
+    console.detail("Установка служебных PVE-only сценариев")
     install_openbao_host_support(node, repo_root)
+    install_recovery_host_support(node, repo_root)
+    prepare_recovery_git(node)
 
     console.detail("Инициализация OpenBao, KV v2 и проверка SSH-центров доверия")
     initialize_openbao_on_host(node)
 
+    console.detail("Проверка аварийного контура")
+    check_recovery_contour(node)
+
     console.result(
-        "OpenBao готов; KV v2, рабочие секреты и SSH-центры доверия настроены"
+        "OpenBao и аварийный контур полностью готовы"
     )
     return 0

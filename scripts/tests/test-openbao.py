@@ -50,8 +50,25 @@ def test_orchestration() -> None:
         ),
         patch.object(
             openbao_module,
+            "install_recovery_host_support",
+            side_effect=lambda node, repo: calls.append(
+                ("install-recovery", f"{node}:{repo}")
+            ),
+        ),
+        patch.object(
+            openbao_module,
+            "prepare_recovery_git",
+            side_effect=lambda node: calls.append(("prepare-recovery", node)),
+        ),
+        patch.object(
+            openbao_module,
             "initialize_openbao_on_host",
             side_effect=lambda node: calls.append(("initialize", node)),
+        ),
+        patch.object(
+            openbao_module,
+            "check_recovery_contour",
+            side_effect=lambda node: calls.append(("check-recovery", node)),
         ),
     ):
         if openbao_module.run_initialize_openbao(ROOT) != 0:
@@ -59,7 +76,10 @@ def test_orchestration() -> None:
 
     if calls != [
         ("install", f"pve:{ROOT}"),
+        ("install-recovery", f"pve:{ROOT}"),
+        ("prepare-recovery", "pve"),
         ("initialize", "pve"),
+        ("check-recovery", "pve"),
     ]:
         fail(f"Неожиданный порядок инициализации OpenBao: {calls!r}")
 

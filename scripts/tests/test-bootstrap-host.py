@@ -385,6 +385,9 @@ class ApplyHarness(BootstrapHost):
         self._layout_attached = layout_attached
         self.events: list[str] = []
 
+    def verify_recovery_state(self) -> None:
+        self.events.append("verify_recovery_state")
+
     def infra_exists(self) -> bool:
         self.events.append("infra_exists")
         return self._infra_exists
@@ -557,6 +560,7 @@ def test_recover_existing_without_state() -> None:
         host.events,
         [
             "infra_exists",
+            "verify_recovery_state",
             "runner_owns_910",
             "verify_layout",
             "prepare_runner",
@@ -576,6 +580,8 @@ def test_recover_existing_without_state() -> None:
 def test_recover_unfinished_initial_state() -> None:
     host = ApplyHarness("recover", infra_exists=True, owns_state=True)
     host.apply()
+    if host.events[:2] != ["infra_exists", "verify_recovery_state"]:
+        raise AssertionError("Recovery должен начинаться со строгой проверки состояния")
     if "handoff:recover" not in host.events:
         raise AssertionError(
             "Recovery незавершённой первоначальной установки должен передать режим recover"
@@ -584,6 +590,128 @@ def test_recover_unfinished_initial_state() -> None:
         raise AssertionError(
             "Незавершённый первоначальный state должен использовать общий handoff recover"
         )
+
+
+class RecoveryStateHarness(BootstrapHost):
+    def __init__(self, root: Path) -> None:
+        super().__init__("recover")
+        self.host_persistent_root = root
+        self.host_pve_only_dir = root / "pve-only"
+        self.host_access_dir = root / "access"
+        self.host_state_dir = root / "state"
+        self.host_openbao_dir = self.host_pve_only_dir / "openbao"
+        self.host_recovery_dir = self.host_pve_only_dir / "recovery"
+        self.host_recovery_github_key = (
+            self.host_recovery_dir / "github_proxmox_repo_ed25519"
+        )
+        self.host_openbao_unseal_key = self.host_openbao_dir / "unseal.key"
+        self.host_openbao_ssh_access = self.host_openbao_dir / "ssh-access.json"
+        self.host_openbao_kv_access = self.host_openbao_dir / "kv-access.json"
+        self.host_access_github_key = (
+            self.host_access_dir / "github" / "github_proxmox_repo_ed25519"
+        )
+        self.host_state_openbao_dir = self.host_state_dir / "openbao"
+        self.host_state_openbao_raft_dir = self.host_state_openbao_dir / "raft"
+        self.host_state_opentofu_file = (
+            self.host_state_dir / "opentofu" / "state" / "proxmox.tfstate"
+        )
+        self.host_state_semaphore_db = (
+            self.host_state_dir / "semaphore" / "semaphore.sqlite"
+        )
+        self.messages: list[str] = []
+
+    def ok(self, message: str) -> None:
+        self.messages.append(message)
+
+    def managed_guests_exist(self) -> bool:
+        return False
+
+
+def _prepare_complete_recovery_state(host: RecoveryStateHarness) -> None:
+    for directory in (
+        host.host_openbao_dir,
+        host.host_recovery_dir,
+        host.host_access_github_key.parent,
+        host.host_state_openbao_raft_dir,
+        host.host_state_opentofu_file.parent,
+        host.host_state_semaphore_db.parent,
+    ):
+        directory.mkdir(parents=True, exist_ok=True)
+    for path in (
+        host.host_openbao_unseal_key,
+        host.host_recovery_github_key,
+        host.host_openbao_ssh_access,
+        host.host_openbao_kv_access,
+        host.host_access_github_key,
+        host.host_state_openbao_raft_dir / "raft.db",
+        host.host_state_opentofu_file,
+        host.host_state_semaphore_db,
+    ):
+        path.write_text("test\n", encoding="utf-8")
+
+
+def test_recovery_preflight_accepts_complete_state() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        host = RecoveryStateHarness(Path(tmp))
+        _prepare_complete_recovery_state(host)
+        host.verify_recovery_state()
+        if not host.messages:
+            raise AssertionError("Полное recovery-состояние должно подтверждаться")
+
+
+def test_recovery_preflight_allows_missing_approle_files() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        host = RecoveryStateHarness(Path(tmp))
+        _prepare_complete_recovery_state(host)
+        host.host_openbao_ssh_access.unlink()
+        host.host_openbao_kv_access.unlink()
+
+        host.verify_recovery_state()
+
+
+def test_recovery_preflight_allows_missing_access_directory() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        host = RecoveryStateHarness(Path(tmp))
+        _prepare_complete_recovery_state(host)
+        import shutil
+
+        shutil.rmtree(host.host_access_dir)
+        host.verify_recovery_state()
+
+
+def test_recovery_preflight_rejects_partial_state() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        host = RecoveryStateHarness(Path(tmp))
+        _prepare_complete_recovery_state(host)
+        host.host_openbao_unseal_key.unlink()
+        try:
+            host.verify_recovery_state()
+        except BootstrapError as exc:
+            if "unseal.key" not in str(exc):
+                raise
+        else:
+            raise AssertionError("Recovery без unseal key должен быть запрещён")
+
+
+class ManagedRecoveryStateHarness(RecoveryStateHarness):
+    def managed_guests_exist(self) -> bool:
+        return True
+
+
+def test_recovery_preflight_requires_opentofu_state_for_managed_pool() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        host = ManagedRecoveryStateHarness(Path(tmp))
+        _prepare_complete_recovery_state(host)
+        host.host_state_opentofu_file.unlink()
+        try:
+            host.verify_recovery_state()
+        except BootstrapError as exc:
+            if "OpenTofu state" not in str(exc):
+                raise
+        else:
+            raise AssertionError(
+                "Recovery managed-гостей без OpenTofu state должен быть запрещён"
+            )
 
 
 class MigrationGuardHarness(ApplyHarness):
@@ -711,6 +839,11 @@ def main() -> None:
         test_resume_unfinished_with_layout_already_attached,
         test_recover_existing_without_state,
         test_recover_unfinished_initial_state,
+        test_recovery_preflight_accepts_complete_state,
+        test_recovery_preflight_allows_missing_approle_files,
+        test_recovery_preflight_allows_missing_access_directory,
+        test_recovery_preflight_rejects_partial_state,
+        test_recovery_preflight_requires_opentofu_state_for_managed_pool,
         test_existing_layout_requires_manual_migration,
         test_check_mode_finishes_temporary_runner,
         test_remove_rejects_foreign_910,

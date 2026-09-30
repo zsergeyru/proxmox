@@ -328,7 +328,7 @@ def main_test() -> None:
         ])),
     ):
         try:
-            status_module._check_openbao()
+            status_module._check_openbao(full=False)
         except InfraManagerError:
             pass
         else:
@@ -345,7 +345,7 @@ def main_test() -> None:
             ),
         ])),
     ):
-        status_module._check_openbao()
+        status_module._check_openbao(full=False)
 
     with (
         patch.object(
@@ -365,9 +365,41 @@ def main_test() -> None:
             return_value={"PVE_API_URL": "https://pve:8006"},
         ),
         patch.object(status_module, "check_openbao_kv") as check_kv,
+        patch.object(
+            status_module,
+            "check_recovery_contour",
+        ) as check_recovery,
     ):
-        status_module._check_openbao()
+        status_module._check_openbao(full=False)
     check_kv.assert_called_once_with("pve")
+    check_recovery.assert_not_called()
+
+    with (
+        patch.object(
+            status_module,
+            "command_runner",
+            SimpleNamespace(run=Mock(side_effect=[
+                SimpleNamespace(returncode=0, stdout="true\n"),
+                SimpleNamespace(
+                    returncode=0,
+                    stdout='{"initialized": true, "sealed": false}',
+                ),
+            ])),
+        ),
+        patch.object(
+            status_module,
+            "read_env_file",
+            return_value={"PVE_API_URL": "https://pve:8006"},
+        ),
+        patch.object(status_module, "check_openbao_kv") as check_kv_full,
+        patch.object(
+            status_module,
+            "check_recovery_contour",
+        ) as check_recovery_full,
+    ):
+        status_module._check_openbao(full=True)
+    check_kv_full.assert_called_once_with("pve")
+    check_recovery_full.assert_called_once_with("pve")
 
     values = {
         "address": "192.168.9.10",

@@ -1,0 +1,14 @@
+---
+- name: Подготовить аварийный PVE-only контур
+  ansible.builtin.command:
+    argv:
+      - python3
+      - -m
+      - infra_manager
+      - recovery-prepare
+      - --repo-root
+      - "{{ provision.paths.bootstrap_repository }}"
+  environment:
+    PYTHONPATH: "{{ provision.paths.python_package }}"
+    INFRA_PVE_NODE: "{{ infra_pve_node }}"
+  changed_when: true

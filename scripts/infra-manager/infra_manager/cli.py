@@ -42,6 +42,24 @@ def build_parser() -> argparse.ArgumentParser:
         help="проверить права PVE API token infra-manager",
     )
     access_parser.set_defaults(handler="pve-access-check")
+
+    recovery_prepare = subparsers.add_parser(
+        "recovery-prepare",
+        help="подготовить PVE-only аварийный контур 910",
+    )
+    recovery_prepare.add_argument(
+        "--repo-root",
+        type=str,
+        required=True,
+        help="корень рабочей копии проекта",
+    )
+    recovery_prepare.set_defaults(handler="recovery-prepare")
+
+    recovery_check = subparsers.add_parser(
+        "recovery-check",
+        help="проверить полный аварийный контур 910",
+    )
+    recovery_check.set_defaults(handler="recovery-check")
     return parser
 
 
@@ -68,6 +86,18 @@ def main(argv: Sequence[str] | None = None) -> int:
             from .pve import check_access
 
             return check_access()
+
+        if args.handler == "recovery-prepare":
+            from pathlib import Path
+
+            from .recovery import prepare_recovery
+
+            return prepare_recovery(Path(args.repo_root).resolve())
+
+        if args.handler == "recovery-check":
+            from .recovery import check_recovery
+
+            return check_recovery()
 
         raise InfraManagerError(f"Неизвестная команда: {args.command}")
     except (InfraManagerError, OSError) as exc:

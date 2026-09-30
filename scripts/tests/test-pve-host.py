@@ -205,6 +205,56 @@ def test_openbao_host_support() -> None:
         )
 
 
+def test_recovery_host_support() -> None:
+    installs: list[tuple[str, str, str]] = []
+    calls: list[tuple[str, ...]] = []
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        command = root / "scripts/infra-manager/host/recovery.py"
+        command.parent.mkdir(parents=True)
+        command.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
+
+        def record_install(
+            node: str,
+            source: Path,
+            target: Path,
+            mode: str,
+        ) -> None:
+            assert node == "pve"
+            installs.append((str(source), str(target), mode))
+
+        def record_ssh(
+            node: str,
+            *command_args: str,
+            capture: bool = False,
+        ):
+            del capture
+            assert node == "pve"
+            calls.append(tuple(command_args))
+            return SimpleNamespace(returncode=0, stdout="")
+
+        with (
+            patch.object(module, "_install_remote_file", side_effect=record_install),
+            patch.object(module, "_ssh", side_effect=record_ssh),
+        ):
+            module.install_recovery_host_support("pve", root)
+            module.prepare_recovery_git("pve")
+            module.check_recovery_contour("pve")
+
+    assert installs == [
+        (
+            str(command),
+            "/usr/local/sbin/infra-manager-recovery",
+            "0755",
+        )
+    ]
+    assert calls == [
+        ("/usr/local/sbin/infra-manager-recovery", "--prepare"),
+        ("/usr/local/sbin/infra-manager-recovery", "--check"),
+    ]
+
+
 def test_sign_ssh_client_key() -> None:
     calls: list[tuple[tuple[str, ...], str]] = []
 
@@ -325,6 +375,7 @@ def main() -> None:
     test_container_host_noop()
     test_infra_self_access()
     test_openbao_host_support()
+    test_recovery_host_support()
     test_sign_ssh_client_key()
     test_machine_ssh_openbao_calls()
     test_sign_ssh_host_key()
