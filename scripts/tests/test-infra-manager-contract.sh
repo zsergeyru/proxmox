@@ -539,6 +539,38 @@ grep -q 'activate-runtime.sh' "$ANSIBLE_RUNTIME" \
     || die "Ansible должен устанавливать команду активации infra-runtime"
 grep -Fq '/run/infra-manager/secrets' "$ANSIBLE_RUNTIME" \
     || die "Ansible должен готовить временную область рабочих секретов"
+python3 - "$ANSIBLE_RUNTIME" <<'PY'
+from pathlib import Path
+import sys
+
+text = Path(sys.argv[1]).read_text(encoding="utf-8")
+directory_block = """path: /run/infra-manager/secrets
+    state: directory
+    owner: root
+    group: root
+    mode: "0750""""
+if directory_block not in text:
+    raise SystemExit("runtime secret directory must be root:root 0750")
+
+for target in (
+    "/run/infra-manager/secrets/pve-api.env",
+    "/run/infra-manager/secrets/github_proxmox_repo_ed25519",
+    "/run/infra-manager/secrets/semaphore-server.env",
+    "/run/infra-manager/secrets/initial-admin-password",
+    "/run/infra-manager/secrets/semaphore-api-token",
+):
+    marker = f"dest: {target}"
+    start = text.find(marker)
+    if start < 0:
+        raise SystemExit(f"missing runtime secret target: {target}")
+    block = text[start : start + 220]
+    if 'owner: "1001"' not in block:
+        raise SystemExit(f"{target} must belong to uid 1001")
+    if 'group: "0"' not in block:
+        raise SystemExit(f"{target} must use gid 0")
+    if 'mode: "0600"' not in block:
+        raise SystemExit(f"{target} must use mode 0600")
+PY
 grep -Fq '/usr/local/sbin/infra-manager-openbao-unseal' "$ANSIBLE_RUNTIME" \
     || die "Повторная настройка должна сначала восстанавливать секреты из OpenBao"
 grep -q 'infra-manager ansible self' "$ANSIBLE_RUNTIME" \
