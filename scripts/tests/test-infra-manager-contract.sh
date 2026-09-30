@@ -38,6 +38,8 @@ MACHINE_SSH_TIMER="$ROOT/infrastructure/guests/910-infra-manager/systemd/infra-m
 PY_MACHINE_SSH="$ROOT/scripts/infra-manager/infra_manager/machine_ssh.py"
 PY_ACCESS_POLICY="$ROOT/scripts/infra-manager/infra_manager/access.py"
 PY_OPENBAO="$ROOT/scripts/infra-manager/infra_manager/openbao.py"
+PY_RECOVERY="$ROOT/scripts/infra-manager/infra_manager/recovery.py"
+RECOVERY_HOST="$ROOT/scripts/infra-manager/host/recovery.py"
 DOCKERFILE="$ROOT/infrastructure/guests/910-infra-manager/compose/runtime/Dockerfile"
 REQ="$ROOT/infrastructure/guests/910-infra-manager/compose/runtime/requirements.txt"
 PLAN="$ROOT/scripts/infra-manager/jobs/opentofu-plan.py"
@@ -58,6 +60,7 @@ ANSIBLE_RUNTIME_PARTS=(
     semaphore.yml
     runtime.yml
     openbao.yml
+    recovery.yml
     verify.yml
 )
 
@@ -76,7 +79,7 @@ for task_file in "${ANSIBLE_RUNTIME_PARTS[@]}"; do
     cat "$ANSIBLE_RUNTIME_DIR/$task_file" >> "$ANSIBLE_RUNTIME"
 done
 
-for file in "$PY_COMMON" "$ANSIBLE_CONFIG" "$ANSIBLE_PLAYBOOK" "$ANSIBLE_LINUX_BASE" "$ANSIBLE_GUEST_LAYOUT" "$ANSIBLE_DOCKER" "$ANSIBLE_RUNTIME" "$PY_SETTINGS" "$PY_SEMAPHORE" "$PY_STATUS" "$PY_PVE" "$STATUS" "$ACCESS" "$LIFECYCLE" "$ACTIVATE_RUNTIME" "$BUILD_TEMPLATE" "$VERIFY_TEMPLATE" "$DEPLOY_GUEST" "$PY_OPENTOFU" "$PY_TEMPLATE" "$PY_TEMPLATE_BUILD" "$PY_TEMPLATE_VERIFY" "$COMPOSE" "$OPENBAO_CONFIG" "$OPENBAO_HOST" "$OPENBAO_STARTUP_COMMAND" "$OPENBAO_STARTUP_SERVICE" "$OPENBAO_JOB" "$MACHINE_SSH_JOB" "$MACHINE_SSH_COMMAND" "$MACHINE_SSH_SERVICE" "$MACHINE_SSH_TIMER" "$PY_MACHINE_SSH" "$PY_ACCESS_POLICY" "$PY_OPENBAO" "$DOCKERFILE" "$REQ" "$PLAN" "$PY_PVE_HOST" "$OPENTOFU_LOCK" "$GUEST_MANIFEST" "$PROVISION" "$SSH_CONFIG"; do
+for file in "$PY_COMMON" "$ANSIBLE_CONFIG" "$ANSIBLE_PLAYBOOK" "$ANSIBLE_LINUX_BASE" "$ANSIBLE_GUEST_LAYOUT" "$ANSIBLE_DOCKER" "$ANSIBLE_RUNTIME" "$PY_SETTINGS" "$PY_SEMAPHORE" "$PY_STATUS" "$PY_PVE" "$STATUS" "$ACCESS" "$LIFECYCLE" "$ACTIVATE_RUNTIME" "$BUILD_TEMPLATE" "$VERIFY_TEMPLATE" "$DEPLOY_GUEST" "$PY_OPENTOFU" "$PY_TEMPLATE" "$PY_TEMPLATE_BUILD" "$PY_TEMPLATE_VERIFY" "$COMPOSE" "$OPENBAO_CONFIG" "$OPENBAO_HOST" "$OPENBAO_STARTUP_COMMAND" "$OPENBAO_STARTUP_SERVICE" "$OPENBAO_JOB" "$MACHINE_SSH_JOB" "$MACHINE_SSH_COMMAND" "$MACHINE_SSH_SERVICE" "$MACHINE_SSH_TIMER" "$PY_MACHINE_SSH" "$PY_ACCESS_POLICY" "$PY_OPENBAO" "$PY_RECOVERY" "$RECOVERY_HOST" "$DOCKERFILE" "$REQ" "$PLAN" "$PY_PVE_HOST" "$OPENTOFU_LOCK" "$GUEST_MANIFEST" "$PROVISION" "$SSH_CONFIG"; do
     [[ -s "$file" ]] || die "Отсутствует обязательный файл: $file"
 done
 
@@ -96,6 +99,18 @@ grep -Fq 'dest: "{{ provision.access_materialization.pve.persistent_credential }
 if grep -Fq -- '- name: Подготовить PVE API credential до первой миграции в OpenBao' "$SEMAPHORE_TASKS"; then
     die "Подготовка PVE API credential не должна откладываться до semaphore.yml"
 fi
+
+RECOVERY_TASKS="$ANSIBLE_RUNTIME_DIR/recovery.yml"
+grep -Fq 'recovery-prepare' "$RECOVERY_TASKS" \
+    || die "Роль infra_manager должна готовить PVE-only recovery-контур"
+grep -Fq 'INFRA_PVE_NODE: "{{ infra_pve_node }}"' "$RECOVERY_TASKS" \
+    || die "Recovery должен использовать явный PVE node из Ansible"
+grep -Fq 'RECOVERY_GITHUB_KEY = RECOVERY_DIR / "github_proxmox_repo_ed25519"' "$RECOVERY_HOST" \
+    || die "PVE recovery helper должен иметь аварийную Git-копию"
+grep -Fq -- '--restore-git-access' "$RECOVERY_HOST" \
+    || die "PVE recovery helper должен уметь восстанавливать bootstrap Git-доступ"
+grep -Fq 'check_recovery_contour(node)' "$PY_OPENBAO" \
+    || die "Initialize OpenBao должен завершаться полной recovery-проверкой"
 
 grep -Fq 'roles_path = automation/ansible/roles' "$ANSIBLE_CONFIG" \
     || die "ansible.cfg должен задавать единый путь к roles"
