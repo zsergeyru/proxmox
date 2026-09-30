@@ -101,7 +101,7 @@ rules:
     access:
       - connect-root
 
-  # 311 пока сохраняет старые management-поля; access.yaml уже содержит их эквивалент.
+  # 311 получает доступы только через единый контракт access.yaml.
   - id: dev-services-ssh-identity
     subject: guest:311
     service: ssh
