@@ -15,10 +15,9 @@ required:
   - resources
   - network
   - boot
-  - management
 properties:
   schema_version:
-    const: 11
+    const: 12
   vmid:
     type: integer
     minimum: 100
@@ -96,11 +95,6 @@ properties:
       startup_delay_seconds:
         type: integer
         minimum: 0
-  management:
-    type: array
-    uniqueItems: true
-    items:
-      enum: [ssh_identity, project_repo_read]
   template_vmid:
     type: integer
     minimum: 100
