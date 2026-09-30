@@ -60,6 +60,10 @@ class BootstrapHost:
         self.host_pve_api_env = self.host_access_pve_api_dir / "pve-api.env"
         self.host_pve_ca = self.host_access_ca_dir / "pve-root-ca.crt"
         self.host_openbao_dir = self.host_pve_only_dir / "openbao"
+        self.host_recovery_dir = self.host_pve_only_dir / "recovery"
+        self.host_recovery_github_key = (
+            self.host_recovery_dir / "github_proxmox_repo_ed25519"
+        )
         self.host_openbao_unseal_key = self.host_openbao_dir / "unseal.key"
         self.host_openbao_ssh_access = self.host_openbao_dir / "ssh-access.json"
         self.host_openbao_kv_access = self.host_openbao_dir / "kv-access.json"
@@ -378,7 +382,7 @@ class BootstrapHost:
         """Проверить аварийное состояние до любых изменений 910."""
         required_dirs = (
             self.host_pve_only_dir,
-            self.host_access_dir,
+            self.host_recovery_dir,
             self.host_state_dir,
             self.host_state_openbao_dir,
             self.host_state_openbao_raft_dir,
@@ -392,7 +396,7 @@ class BootstrapHost:
 
         required_files = (
             self.host_openbao_unseal_key,
-            self.host_access_github_key,
+            self.host_recovery_github_key,
         )
         missing_files = [
             str(path)
