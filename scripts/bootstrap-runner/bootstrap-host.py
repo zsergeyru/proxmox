@@ -447,22 +447,21 @@ class BootstrapHost:
         self._set_mode_owner(self.host_state_dir, 0o700, 100000, 100000)
 
         for path, mode, uid, gid in (
-            (self.host_access_github_dir, 0o700, 100000, 100000),
             (self.host_access_pve_host_dir, 0o700, 101001, 100000),
-            (self.host_access_pve_api_dir, 0o700, 100000, 100000),
             (self.host_access_ca_dir, 0o755, 100000, 100000),
             (self.host_openbao_unseal_key.parent, 0o700, 0, 0),
+            (self.host_recovery_dir, 0o700, 0, 0),
         ):
             path.mkdir(parents=True, exist_ok=True)
             self._set_mode_owner(path, mode, uid, gid)
 
-        if not self.host_access_github_key.exists():
+        if not self.host_recovery_github_key.exists():
             self._copy_access_file(
                 self.host_github_key,
-                self.host_access_github_key,
+                self.host_recovery_github_key,
                 mode=0o600,
-                uid=100000,
-                gid=100000,
+                uid=0,
+                gid=0,
             )
 
         ca_source = Path("/etc/pve/pve-root-ca.pem")
@@ -525,11 +524,10 @@ class BootstrapHost:
         """Проверить уже подготовленную схему, ничего не копируя."""
         required_dirs = (
             self.host_pve_only_dir,
+            self.host_recovery_dir,
             self.host_access_dir,
             self.host_state_dir,
-            self.host_access_github_dir,
             self.host_access_pve_host_dir,
-            self.host_access_pve_api_dir,
             self.host_access_ca_dir,
         )
         missing = [str(path) for path in required_dirs if not path.is_dir()]
@@ -563,7 +561,7 @@ class BootstrapHost:
             )
 
         required_files = (
-            self.host_access_github_key,
+            self.host_recovery_github_key,
             self.host_pve_root_key,
             self.host_pve_root_known_hosts,
             self.host_pve_ca,
