@@ -569,18 +569,31 @@ directory_block = '''path: /run/infra-manager/secrets
 if directory_block not in text:
     raise SystemExit("runtime secret directory must be root:root 0750")
 
-for target in (
-    "/run/infra-manager/secrets/pve-api.env",
-    "/run/infra-manager/secrets/github_proxmox_repo_ed25519",
-    "/run/infra-manager/secrets/semaphore-server.env",
-    "/run/infra-manager/secrets/initial-admin-password",
-    "/run/infra-manager/secrets/semaphore-api-token",
-):
-    marker = f"dest: {target}"
-    start = text.find(marker)
-    if start < 0:
+targets = {
+    "/run/infra-manager/secrets/pve-api.env": (
+        'dest: "{{ provision.access.pve.persistent_credential }}"',
+        "dest: /run/infra-manager/secrets/pve-api.env",
+    ),
+    "/run/infra-manager/secrets/github_proxmox_repo_ed25519": (
+        "dest: /run/infra-manager/secrets/github_proxmox_repo_ed25519",
+    ),
+    "/run/infra-manager/secrets/semaphore-server.env": (
+        "dest: /run/infra-manager/secrets/semaphore-server.env",
+    ),
+    "/run/infra-manager/secrets/initial-admin-password": (
+        "dest: /run/infra-manager/secrets/initial-admin-password",
+    ),
+    "/run/infra-manager/secrets/semaphore-api-token": (
+        "dest: /run/infra-manager/secrets/semaphore-api-token",
+    ),
+}
+for target, markers in targets.items():
+    starts = [text.find(marker) for marker in markers]
+    starts = [start for start in starts if start >= 0]
+    if not starts:
         raise SystemExit(f"missing runtime secret target: {target}")
-    block = text[start : start + 220]
+    start = min(starts)
+    block = text[start : start + 260]
     if 'owner: "1001"' not in block:
         raise SystemExit(f"{target} must belong to uid 1001")
     if 'group: "0"' not in block:
