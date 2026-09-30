@@ -2,241 +2,226 @@
 
 **Тип:** справочник  
 **Статус:** действующий  
-**Назначение:** зафиксировать точные пути постоянных и служебных данных проекта на физическом PVE.
-
-Этот документ отвечает на вопрос:
-
-> Где именно находится конкретный файл или каталог управляющего контура?
-
-Правила, зачем эти области существуют и какие гарантии от них требуются, находятся в спецификации постоянного состояния PVE.
+**Назначение:** зафиксировать точные пути постоянных данных, корня восстановления и подключений управляющего контура на физическом PVE.
 
 ## Содержание
 
-- [1. Канонический корень постоянных данных](#1-канонический-корень-постоянных-данных)
+- [1. Канонический корень](#1-канонический-корень)
 - [2. Область только для PVE](#2-область-только-для-pve)
-- [3. Данные PVE для чтения из 910](#3-данные-pve-для-чтения-из-910)
-- [4. Изменяемое состояние 910](#4-изменяемое-состояние-910)
-- [5. Связи каталогов внутри 910](#5-связи-каталогов-внутри-910)
-- [6. Другие файлы на PVE](#6-другие-файлы-на-pve)
-- [7. Каталог первоначальной подготовки](#7-каталог-первоначальной-подготовки)
-- [8. Временные файлы](#8-временные-файлы)
-- [9. Связанные документы](#9-связанные-документы)
+- [3. Recovery-область](#3-recovery-область)
+- [4. Данные PVE для чтения из 910](#4-данные-pve-для-чтения-из-910)
+- [5. Изменяемое состояние 910](#5-изменяемое-состояние-910)
+- [6. Подключения в 910 и OpenBao](#6-подключения-в-910-и-openbao)
+- [7. Права доступа](#7-права-доступа)
+- [8. Другие файлы PVE](#8-другие-файлы-pve)
+- [9. Временные данные](#9-временные-данные)
+- [10. Связанные документы](#10-связанные-документы)
 
-## 1. Канонический корень постоянных данных
+## 1. Канонический корень
 
-Основной корень проекта на PVE:
+Постоянные данные проекта на PVE находятся под:
 
-```text
+~~~text
 /mnt/bindmounts/infra-manager/
 ├── pve-only/
+│   ├── openbao/
+│   └── recovery/
+│       ├── ssh/
+│       └── github/
 ├── access/
+│   ├── pve-host/
+│   └── ca/
 └── state/
-```
+    ├── openbao/
+    ├── opentofu/
+    └── semaphore/
+~~~
 
-Назначение верхнего уровня:
-
-| Каталог | Доступ из 910 | Назначение |
+| Область | Доступ из 910 | Назначение |
 |---|---|---|
-| `pve-only/` | нет | секреты и служебные данные только PVE |
-| `access/` | только чтение | данные PVE, необходимые 910 |
+| `pve-only/` | нет | корень управления OpenBao и независимое аварийное восстановление |
+| `access/` | только чтение | PVE-owned данные, которые штатно нужны 910 |
 | `state/` | чтение и запись | постоянное состояние сервисов 910 |
+
+Рабочие PVE API, Git и сервисные secrets в целевой модели не хранятся отдельными файлами в `access/`; их рабочее представление находится в OpenBao KV внутри `state/openbao/`.
 
 ## 2. Область только для PVE
 
-Текущая структура:
+~~~text
+/mnt/bindmounts/infra-manager/pve-only/openbao/
+├── unseal.key
+└── control-access.json
+~~~
 
-```text
-/mnt/bindmounts/infra-manager/pve-only/
-└── openbao/
-    ├── unseal.key
-    └── ssh-access.json
-```
-
-| Полный путь на PVE | Назначение |
+| Путь | Назначение |
 |---|---|
-| `/mnt/bindmounts/infra-manager/pve-only/openbao/unseal.key` | ключ снятия блокировки OpenBao |
-| `/mnt/bindmounts/infra-manager/pve-only/openbao/ssh-access.json` | служебные данные ограниченного доступа к операциям SSH-подписи OpenBao |
+| `pve-only/openbao/unseal.key` | ключ снятия блокировки соответствующего OpenBao state |
+| `pve-only/openbao/control-access.json` | ограниченные служебные данные, позволяющие PVE настраивать или восстанавливать OpenBao |
 
-Весь каталог `pve-only/` остаётся только на PVE и в 910 не монтируется.
+Эти файлы никогда не монтируются в 910 постоянно.
 
-## 3. Данные PVE для чтения из 910
+`control-access.json` заменяет узкое представление, ориентированное только на SSH-подпись: OpenBao теперь обслуживает KV, SSH и централизованные policies.
 
-Физически данные находятся на PVE под:
+## 3. Recovery-область
 
-```text
+~~~text
+/mnt/bindmounts/infra-manager/pve-only/recovery/
+├── ssh/
+│   ├── linux-admin-ed25519
+│   └── linux-admin-ed25519.pub
+└── github/
+    ├── project-read-ed25519
+    └── project-read-ed25519.pub
+~~~
+
+### 3.1. `recovery/ssh/`
+
+`linux-admin-ed25519` — аварийный административный SSH private key для управляемых Linux-систем.
+
+Его public key устанавливается на управляемые Linux-гости как отдельная проектная recovery-запись.
+
+Private key:
+
+- не монтируется в 910;
+- не хранится в OpenBao;
+- не используется штатным Ansible;
+- применяется только явной процедурой восстановления.
+
+### 3.2. `recovery/github/`
+
+`project-read-ed25519` — защищённая восстановительная копия read-only GitHub Deploy Key.
+
+Она нужна, чтобы получить проект до запуска или после полной потери OpenBao.
+
+Рабочее представление этой же пары хранится в OpenBao KV. Recovery-копия не выдаётся обычным гостям.
+
+## 4. Данные PVE для чтения из 910
+
+~~~text
 /mnt/bindmounts/infra-manager/access/
-```
+├── pve-host/
+│   ├── root_ed25519
+│   ├── root_ed25519.pub
+│   └── known_hosts
+└── ca/
+    └── pve-root-ca.crt
+~~~
 
-Весь каталог подключается в 910 как `/mnt/pve-access/` только для чтения.
-
-| Полный путь на PVE | Полный путь внутри 910 | Назначение |
+| Путь на PVE | Путь внутри 910 | Назначение |
 |---|---|---|
-| `/mnt/bindmounts/infra-manager/access/github/github_proxmox_repo_ed25519` | `/mnt/pve-access/github/github_proxmox_repo_ed25519` | Deploy Key репозитория проекта без права записи |
-| `/mnt/bindmounts/infra-manager/access/pve-host/root_ed25519` | `/mnt/pve-access/pve-host/root_ed25519` | закрытый root SSH-ключ 910 для PVE |
-| `/mnt/bindmounts/infra-manager/access/pve-host/root_ed25519.pub` | `/mnt/pve-access/pve-host/root_ed25519.pub` | производный открытый ключ той же SSH-идентичности |
-| `/mnt/bindmounts/infra-manager/access/pve-host/known_hosts` | `/mnt/pve-access/pve-host/known_hosts` | доверенный ключ SSH-сервера PVE |
-| `/mnt/bindmounts/infra-manager/access/pve-api/pve-api.env` | `/mnt/pve-access/pve-api/pve-api.env` | данные постоянного API-доступа 910 |
-| `/mnt/bindmounts/infra-manager/access/ca/pve-root-ca.crt` | `/mnt/pve-access/ca/pve-root-ca.crt` | копия корневого сертификата PVE |
+| `access/pve-host/root_ed25519` | `/mnt/pve-access/pve-host/root_ed25519` | отдельный root SSH private key `infra-manager → PVE` |
+| `access/pve-host/root_ed25519.pub` | `/mnt/pve-access/pve-host/root_ed25519.pub` | public key той же пары |
+| `access/pve-host/known_hosts` | `/mnt/pve-access/pve-host/known_hosts` | строгая проверка SSH-сервера PVE |
+| `access/ca/pve-root-ca.crt` | `/mnt/pve-access/ca/pve-root-ca.crt` | доверенный корневой сертификат PVE API |
 
-## 4. Изменяемое состояние 910
+Root SSH identity остаётся вне OpenBao, потому что она участвует в PVE-only операциях и восстановлении самого OpenBao.
 
-Физически состояние находится на PVE под:
+## 5. Изменяемое состояние 910
 
-```text
+~~~text
 /mnt/bindmounts/infra-manager/state/
-```
+├── openbao/
+├── opentofu/
+└── semaphore/
+~~~
 
-Весь каталог подключается в 910 как `/mnt/persistent-state/` с правом чтения и записи.
-
-| Полный путь на PVE | Путь после подключения в 910 | Назначение |
+| Путь на PVE | Рабочий путь внутри 910 | Назначение |
 |---|---|---|
-| `/mnt/bindmounts/infra-manager/state/secrets/` | `/mnt/persistent-state/secrets/` | постоянные секреты 910 |
-| `/mnt/bindmounts/infra-manager/state/ansible/` | `/mnt/persistent-state/ansible/` | постоянная Ansible-идентичность |
-| `/mnt/bindmounts/infra-manager/state/semaphore/` | `/mnt/persistent-state/semaphore/` | база и служебные данные Semaphore |
-| `/mnt/bindmounts/infra-manager/state/opentofu/` | `/mnt/persistent-state/opentofu/` | постоянные данные и состояние OpenTofu |
-| `/mnt/bindmounts/infra-manager/state/openbao/` | `/mnt/persistent-state/openbao/` | постоянные Raft-данные OpenBao |
+| `state/openbao/` | `/var/lib/persistent/openbao/` | вся постоянная Raft-база OpenBao: KV, SSH CA, policies, auth methods |
+| `state/opentofu/` | `/var/lib/infra-manager/opentofu/` | постоянное состояние OpenTofu |
+| `state/semaphore/` | `/var/lib/infra-manager/semaphore/` | база и служебное состояние Semaphore |
 
-## 5. Связи каталогов внутри 910
+Основной OpenTofu state доступен как:
 
-В конфигурации LXC 910 области подключаются как две точки монтирования каталогов:
+~~~text
+/var/lib/infra-manager/opentofu/state/proxmox.tfstate
+~~~
 
-```text
+Секреты OpenBao не выделяются в отдельный PVE-каталог: KV физически является частью `state/openbao/`.
+
+## 6. Подключения в 910 и OpenBao
+
+В LXC 910 подключаются только `access/` и `state/`:
+
+~~~text
 mp0: /mnt/bindmounts/infra-manager/access,mp=/mnt/pve-access,ro=1
 mp1: /mnt/bindmounts/infra-manager/state,mp=/mnt/persistent-state
-```
+~~~
 
-`mp0` обязательно доступен только для чтения. `mp1` доступен 910 для чтения и записи. `pve-only/` не имеет mount point внутри 910.
+`pve-only/` не имеет mount point внутри 910.
 
-Постоянные каталоги из `state/` доступны внутри 910 через следующие рабочие пути:
+Путь OpenBao проходит через несколько уровней без копирования базы:
 
-| Источник внутри 910 | Рабочий путь |
-|---|---|
-| `/mnt/persistent-state/secrets` | `/etc/infra-manager/secrets` |
-| `/mnt/persistent-state/ansible` | `/etc/infra-manager/ansible` |
-| `/mnt/persistent-state/semaphore` | `/var/lib/infra-manager/semaphore` |
-| `/mnt/persistent-state/opentofu` | `/var/lib/infra-manager/opentofu` |
-| `/mnt/persistent-state/openbao` | `/var/lib/persistent/openbao` |
+~~~text
+PVE
+/mnt/bindmounts/infra-manager/state/openbao/
+        ↓ bind mount
 
-Основной файл состояния OpenTofu доступен внутри 910 по пути:
+LXC 910
+/mnt/persistent-state/openbao/
+        ↓ рабочая привязка
 
-```text
-/var/lib/infra-manager/opentofu/state/proxmox.tfstate
-```
+/var/lib/persistent/openbao/
+        ↓ Docker volume
 
-Эти пути являются рабочими путями 910. Физические данные при этом находятся в `state/` на PVE.
+OpenBao
+~~~
 
-### 5.1. Права верхнего уровня на PVE
+Удаление или пересоздание rootfs 910 или контейнера OpenBao не должно удалять `state/openbao/`.
 
-910 является непривилегированным LXC, поэтому числовые владельцы на PVE учитывают отображение UID/GID контейнера.
+## 7. Права доступа
 
-| Путь на PVE | Режим | Владелец на PVE |
+Верхний уровень:
+
+| Путь | Режим | Владелец на PVE |
 |---|---:|---:|
 | `/mnt/bindmounts/infra-manager/` | `0755` | `0:0` |
 | `pve-only/` | `0700` | `0:0` |
 | `pve-only/openbao/` | `0700` | `0:0` |
+| `pve-only/recovery/` | `0700` | `0:0` |
+| `pve-only/recovery/ssh/` | `0700` | `0:0` |
+| `pve-only/recovery/github/` | `0700` | `0:0` |
 | `access/` | `0755` | `0:0` |
-| `access/github/` | `0700` | `100000:100000` |
 | `access/pve-host/` | `0700` | `101001:100000` |
-| `access/pve-api/` | `0700` | `100000:100000` |
 | `access/ca/` | `0755` | `100000:100000` |
 | `state/` | `0700` | `100000:100000` |
 
-Основные файлы доступа имеют следующие режимы:
+Закрытые PVE-only и recovery keys имеют режим `0600`; их public keys — `0644`.
 
-| Файл | Режим | Владелец на PVE |
-|---|---:|---:|
-| `pve-only/openbao/unseal.key` | `0600` | `0:0` |
-| `pve-only/openbao/ssh-access.json` | `0600` | `0:0` |
-| `access/github/github_proxmox_repo_ed25519` | `0600` | `100000:100000` |
-| `access/pve-host/root_ed25519` | `0600` | `101001:100000` |
-| `access/pve-host/root_ed25519.pub` | `0644` | `101001:100000` |
-| `access/pve-host/known_hosts` | `0644` | `101001:100000` |
-| `access/pve-api/pve-api.env` | `0600` | `100000:100000` |
-| `access/ca/pve-root-ca.crt` | `0644` | `100000:100000` |
+Точные владельцы внутренних каталогов `state/`, отображаемых в непривилегированный LXC, задаются машинным контрактом 910.
 
-Права внутренних каталогов `state/`, которые привязываются к рабочим путям 910, задаются машинным контрактом `provision.yaml` и здесь повторно не описываются.
+## 8. Другие файлы PVE
 
-## 6. Другие файлы на PVE
+Штатный PVE CA:
 
-Штатный корневой сертификат Proxmox:
-
-```text
+~~~text
 /etc/pve/pve-root-ca.pem
-```
+~~~
 
-Открытый ключ SSH-сервера PVE, из которого формируется доверенная запись для 910:
+Открытый host key PVE:
 
-```text
+~~~text
 /etc/ssh/ssh_host_ed25519_key.pub
-```
+~~~
 
-Открытый root SSH-ключ управляющего контура добавляется с проектной меткой в:
+Public key `access/pve-host/root_ed25519.pub` регистрируется в:
 
-```text
+~~~text
 /root/.ssh/authorized_keys
-```
+~~~
 
-Хостовый служебный сценарий OpenBao и SSH-доверия:
+Хостовый служебный механизм OpenBao выполняет только операции, которым нужны полномочия PVE или `pve-only/`. Он не становится вторым общим средством развёртывания.
 
-```text
-/usr/local/sbin/infra-manager-openbao-unseal
-```
+## 9. Временные данные
 
-`infra-manager-openbao-unseal` выполняет только узкие операции, которым нужны полномочия PVE или доступ к `pve-only/`: работу с блокировкой OpenBao, настройку ограниченных SSH-доступов и запросы SSH-подписи. Подробный контракт этих операций относится к разделу безопасности.
+Временные private keys Ansible, сертификаты, OpenBao tokens, SSH OTP и служебные файлы под `/run/` не относятся к постоянному состоянию и не резервируются.
 
-Технический журнал первоначального контура:
+Git checkout, Docker images, кэши и воспроизводимый установленный код также не входят в канонический корень постоянных данных.
 
-```text
-/var/log/proxmox-bootstrap.log
-```
+## 10. Связанные документы
 
-Он содержит диагностический вывод первоначальной подготовки и не является источником требуемого состояния.
-
-Эти объекты не заменяют каноническое постоянное хранилище `/mnt/bindmounts/infra-manager/`.
-
-## 7. Каталог первоначальной подготовки
-
-Текущая реализация первоначального контура также использует:
-
-```text
-/root/.config/proxmox-bootstrap/
-```
-
-В нём могут находиться:
-
-```text
-github_proxmox_repo_ed25519
-debian13-template.ref
-```
-
-Исходный GitHub Deploy Key создаётся первоначальным контуром в этом каталоге, а рабочая копия для штатного 910 помещается в `access/github/`.
-
-Этот каталог не является хранилищем состояния сервисов 910 и может очищаться отдельным режимом полной очистки первоначального контура без удаления канонического корня постоянных данных.
-
-## 8. Временные файлы
-
-Блокировка хостового сценария OpenBao:
-
-```text
-/run/lock/infra-manager-openbao-unseal.lock
-```
-
-Сам хостовый сценарий может создавать краткоживущие временные файлы на PVE под `/run/`; их имена не являются частью постоянного контракта.
-
-Для передачи данных в OpenBao временный каталог создаётся **внутри LXC 910**:
-
-```text
-/run/infra-manager/
-```
-
-Он не является путём PVE и не содержит постоянного состояния. Временные файлы должны удаляться после завершения операции.
-
-## 9. Связанные документы
-
-- [`200-overview.md`](200-overview.md) — общая роль PVE-хоста.
-- [`210-host-bootstrap.md`](210-host-bootstrap.md) — первоначальный контур.
 - [`220-host-configuration.md`](220-host-configuration.md) — обязательные свойства постоянного состояния.
-- [`290-decisions.md`](290-decisions.md) — причины разделения областей состояния.
-- [`../700-security/710-pve-access.md`](../700-security/710-pve-access.md) — назначение данных административного доступа.
-- [`../800-operations/830-recovery.md`](../800-operations/830-recovery.md) — восстановление и резервное копирование.
-- [`../../infrastructure/guests/910-infra-manager/README.md`](../../infrastructure/guests/910-infra-manager/README.md) — рабочие пути и внутреннее устройство 910.
+- [`../600-storage/610-backup.md`](../600-storage/610-backup.md) — что из этой структуры резервируется.
+- [`../700-security/720-ssh-access.md`](../700-security/720-ssh-access.md) — назначение SSH keys.
+- [`../700-security/740-openbao.md`](../700-security/740-openbao.md) — содержимое OpenBao state.
+- [`../800-operations/830-recovery.md`](../800-operations/830-recovery.md) — использование recovery-данных.
