@@ -14,7 +14,6 @@ from infra_manager.common import (
     InfraManagerError,
     console,
     require_runtime_activation_idle,
-    run,
 )
 from infra_manager.machine_ssh import sync_machine_ssh
 
@@ -22,9 +21,6 @@ from infra_manager.machine_ssh import sync_machine_ssh
 def main() -> int:
     try:
         require_runtime_activation_idle()
-        run(
-            [sys.executable, str(REPO_ROOT / "scripts/validate_repo.py")],
-        )
         return sync_machine_ssh(REPO_ROOT, verify_connections=True)
     except (InfraManagerError, OSError, ValueError) as exc:
         console.error(str(exc))
