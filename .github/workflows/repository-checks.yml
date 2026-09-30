@@ -67,6 +67,9 @@ jobs:
       - name: Run access contract checks
         run: python scripts/tests/test-access-contract.py
 
+      - name: Run machine SSH contract checks
+        run: python scripts/tests/test-machine-ssh.py
+
       - name: Validate all Ansible YAML files
         run: |
           python - <<'PY'

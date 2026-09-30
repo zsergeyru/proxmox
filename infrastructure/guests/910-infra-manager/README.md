@@ -296,11 +296,14 @@ git@github.com:zsergeyru/proxmox.git
 - шаблон `Build Template 9000`;
 - шаблон `Deploy Guest 410`;
 - шаблон `Deploy Guest 910`;
+- шаблон `Sync Machine SSH`;
 - шаблон `Initialize OpenBao 910`.
 
 Все инфраструктурные задания Semaphore выполняются как Python-сценарии из `scripts/infra-manager/jobs/`. Основная логика находится в Python-пакете `infra_manager`, а не в командных оболочках.
 
-Постоянная SSH-идентичность Ansible хранится в `/etc/infra-manager/ansible/` и передаётся в `infra-runtime` только для чтения.
+Постоянная переходная SSH-идентичность Ansible хранится в `/etc/infra-manager/ansible/` и передаётся в `infra-runtime` только для чтения.
+
+Межмашинный SSH синхронизируется отдельным механизмом из `access.yaml`. Для каждого субъекта OpenBao поддерживает роль `machine-<VMID>`, а сертификаты автоматически обновляются таймером 910. Полная проверка разрешённых и запрещённых связей доступна заданием `Sync Machine SSH`.
 
 ## OpenBao
 
@@ -338,6 +341,7 @@ Semaphore:
 - Build Template 9000
 - Deploy Guest 410
 - Deploy Guest 910
+- Sync Machine SSH
 - Initialize OpenBao 910
 ```
 

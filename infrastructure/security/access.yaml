@@ -44,6 +44,15 @@ rules:
     access:
       - read
 
+  - id: infra-manager-ssh-identity
+    subject: guest:910
+    service: ssh
+    resource: identity
+    targets:
+      - self
+    access:
+      - issue
+
   - id: infra-manager-linux-guests
     subject: guest:910
     service: ssh

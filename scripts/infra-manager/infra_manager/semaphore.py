@@ -64,6 +64,11 @@ SEMAPHORE_TEMPLATES = (
         arguments='["910"]',
     ),
     TemplateSpec(
+        name="Sync Machine SSH",
+        playbook="scripts/infra-manager/jobs/sync-machine-ssh.py",
+        arguments="[]",
+    ),
+    TemplateSpec(
         name="Initialize OpenBao 910",
         playbook="scripts/infra-manager/jobs/initialize-openbao.py",
         arguments="[]",

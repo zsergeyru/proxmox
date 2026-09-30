@@ -203,6 +203,48 @@ def sign_ssh_client_key(node: str, public_key: str) -> str:
         )
     return certificate
 
+def sync_machine_ssh_roles(node: str, vmids: list[int]) -> None:
+    """Синхронизировать отдельные OpenBao-роли машинных SSH-идентичностей."""
+    clean = sorted(set(vmids))
+    if any(not isinstance(vmid, int) or vmid <= 0 for vmid in clean):
+        raise InfraManagerError("Некорректный список VMID машинных SSH-ролей")
+    _ssh_with_input(
+        node,
+        str(OPENBAO_HOST_COMMAND),
+        "--sync-machine-roles",
+        "--log-level",
+        log_level(),
+        input_text=json.dumps({"vmids": clean}, separators=(",", ":")) + "\n",
+    )
+
+
+def sign_machine_ssh_key(node: str, vmid: int, public_key: str) -> str:
+    """Подписать машинную SSH-идентичность guest:<VMID> через OpenBao."""
+    normalized = public_key.strip()
+    if not isinstance(vmid, int) or vmid <= 0:
+        raise InfraManagerError("Некорректный VMID машинной SSH-идентичности")
+    if not normalized.startswith("ssh-ed25519 "):
+        raise InfraManagerError(
+            "Для машинной подписи ожидается открытый ключ Ed25519"
+        )
+    result = _ssh_with_input(
+        node,
+        str(OPENBAO_HOST_COMMAND),
+        "--sign-machine-key",
+        input_text=json.dumps(
+            {"vmid": vmid, "public_key": normalized},
+            separators=(",", ":"),
+        )
+        + "\n",
+    )
+    certificate = result.stdout.strip()
+    if not certificate.startswith("ssh-ed25519-cert-v01@openssh.com "):
+        raise InfraManagerError(
+            "PVE/OpenBao не вернул корректный машинный SSH-сертификат"
+        )
+    return certificate
+
+
 def sign_ssh_host_key(
     node: str,
     public_key: str,

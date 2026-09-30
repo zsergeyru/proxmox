@@ -217,18 +217,23 @@ auth/infra-manager
 
 ### 6.1. `ssh-ca-config`
 
-Разрешает настройку заранее определённых ролей client CA и host CA.
+Разрешает настройку ролей client CA и host CA, которыми управляет проект.
 
-Не разрешает использовать роль `infra-manager` для подписи клиентского ключа.
+Для межмашинного SSH эта роль синхронизирует только имена `machine-<VMID>`, выведенные из `access.yaml`, и удаляет лишние `machine-*`.
+
+Не разрешает использовать роли подписи для выпуска сертификата.
 
 ### 6.2. `ssh-signer`
 
-Разрешает только:
+Разрешает только подпись через:
 
 ```text
 ssh-client-signer/sign/infra-manager
+ssh-client-signer/sign/machine-*
 ssh-host-signer/sign/managed-host
 ```
+
+Имена `machine-*` не выбираются гостем: PVE-only механизм принимает VMID только после разбора проектного `access.yaml`.
 
 Не разрешает менять роли подписи.
 
@@ -318,7 +323,24 @@ ssh-client-signer/roles/infra-manager
 - срок 15 минут;
 - `permit-pty`.
 
-### 8.2. Сертификат SSH-сервера
+### 8.2. Машинный клиентский сертификат
+
+Для каждого гостя с `ssh/identity/issue` существует отдельная роль:
+
+```text
+ssh-client-signer/roles/machine-<VMID>
+```
+
+Она разрешает:
+
+- только user certificate;
+- только Ed25519 public key;
+- единственный principal `guest-<VMID>`;
+- срок 2 часа.
+
+Закрытый машинный ключ находится в исходном госте. OpenBao получает только public key. Гостю не передаются AppRole-данные подписи.
+
+### 8.3. Сертификат SSH-сервера
 
 Роль:
 
@@ -371,6 +393,9 @@ PVE-only unseal/AppRole-данные и Raft state должны резервир
 - `ssh-ca-config` не имеет права подписи;
 - `ssh-signer` не имеет права менять роли;
 - роли подписи имеют ожидаемые ограничения;
+- набор `machine-*` совпадает с субъектами `identity/issue` из `access.yaml`;
+- машинная роль ограничена principal своего VMID и сроком 2 часа;
+- удалённая из проекта машинная роль исчезает из OpenBao;
 - root token не хранится постоянно.
 
 `infra-manager-status --full` должен считать инициализированный OpenBao готовым только после успешной PVE-only проверки KV.

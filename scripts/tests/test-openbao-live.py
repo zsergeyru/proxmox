@@ -210,6 +210,99 @@ def main() -> None:
         if "permit-pty" not in inspected.stdout:
             fail("SSH-сертификат не разрешает PTY для Ansible")
 
+    machine_roles = json.loads(
+        run_code(
+            host.CONFIGURE_MACHINE_SIGNING_ROLES_CODE,
+            input_text=json.dumps(
+                {
+                    "credentials": access["ssh-ca-config"],
+                    "vmids": [410, 910],
+                },
+                separators=(",", ":"),
+            ),
+        )
+    )
+    if machine_roles != {"roles": ["machine-410", "machine-910"]}:
+        fail(f"Машинные SSH-роли OpenBao не готовы: {machine_roles!r}")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        machine_identity = Path(tmp) / "machine_ed25519"
+        generated = subprocess.run(
+            [
+                "ssh-keygen",
+                "-q",
+                "-t",
+                "ed25519",
+                "-N",
+                "",
+                "-f",
+                str(machine_identity),
+                "-C",
+                "machine-410-live-test",
+            ],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+        if generated.returncode:
+            fail(
+                "Не удалось создать тестовый машинный SSH-ключ: "
+                + generated.stderr.strip()
+            )
+        machine_public_key = machine_identity.with_suffix(".pub").read_text(
+            encoding="utf-8"
+        ).strip()
+        machine_certificate = run_code(
+            host.SIGN_MACHINE_KEY_CODE,
+            input_text=json.dumps(
+                {
+                    "credentials": access["ssh-signer"],
+                    "public_key": machine_public_key,
+                    "vmid": 410,
+                },
+                separators=(",", ":"),
+            ),
+        )
+        machine_certificate_path = Path(
+            str(machine_identity) + "-cert.pub"
+        )
+        machine_certificate_path.write_text(
+            machine_certificate + "\n",
+            encoding="utf-8",
+        )
+        inspected_machine = subprocess.run(
+            ["ssh-keygen", "-L", "-f", str(machine_certificate_path)],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+        if inspected_machine.returncode:
+            fail(
+                "OpenSSH не принял машинный сертификат OpenBao: "
+                + inspected_machine.stderr.strip()
+            )
+        if "guest-410" not in inspected_machine.stdout:
+            fail("Машинный сертификат не ограничен principal guest-410")
+        if 'Key ID: "project-machine-410-' not in inspected_machine.stdout:
+            fail("Машинный сертификат получил неожиданный Key ID")
+
+    reduced_roles = json.loads(
+        run_code(
+            host.CONFIGURE_MACHINE_SIGNING_ROLES_CODE,
+            input_text=json.dumps(
+                {
+                    "credentials": access["ssh-ca-config"],
+                    "vmids": [910],
+                },
+                separators=(",", ":"),
+            ),
+        )
+    )
+    if reduced_roles != {"roles": ["machine-910"]}:
+        fail("Удаление машинной SSH-роли не подтверждено")
+
     host_role_result = json.loads(
         run_code(
             host.CONFIGURE_HOST_SIGNING_ROLE_CODE,
@@ -335,6 +428,7 @@ def main() -> None:
     print("[ОК] Два SSH-центра OpenBao проверены на настоящем сервере")
     print("[ОК] Временный SSH-сертификат OpenBao реально подписан и проверен")
     print("[ОК] SSH host-сертификат OpenBao реально подписан и проверен")
+    print("[ОК] Машинный SSH-сертификат и отзыв роли OpenBao проверены")
 
 
 if __name__ == "__main__":

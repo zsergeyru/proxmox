@@ -179,6 +179,7 @@ infra-runtime
 - `Build Template 9000`;
 - `Deploy Guest 410`;
 - `Deploy Guest 910`;
+- `Sync Machine SSH`;
 - `Initialize OpenBao 910`.
 
 Синхронизация этих объектов выполняется узкой Python-командой:
@@ -300,6 +301,16 @@ Initialize OpenBao 910
 - не передавать закрытые CA-ключи гостю или `infra-runtime`.
 
 Переходный постоянный Ansible-ключ допускается только в случаях, определённых SSH-спецификацией.
+
+После появления нужных Linux-гостей межмашинные SSH-права применяются отдельным заданием Semaphore:
+
+```text
+Sync Machine SSH
+```
+
+Оно читает `infrastructure/security/access.yaml`, синхронизирует OpenBao-роли машинных сертификатов, обновляет разрешённые principals на работающих целевых гостях, перевыпускает сертификаты исходных гостей и проверяет разрешённые и запрещённые связи.
+
+Повторный запуск безопасен. После изменения SSH-прав в `access.yaml` это задание нужно выполнить сразу, не ожидая периодического обновления.
 
 Полный контракт находится в [`../700-security/720-ssh-access.md`](../700-security/720-ssh-access.md), а текущее состояние перехода — в [`../700-security/780-implementation-status.md`](../700-security/780-implementation-status.md).
 
