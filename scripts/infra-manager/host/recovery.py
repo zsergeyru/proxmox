@@ -182,7 +182,7 @@ def managed_guests_exist() -> bool:
     return bool(members)
 
 
-def verify_recovery_state() -> None:
+def verify_recovery_state(*, require_approle: bool = True) -> None:
     required_dirs = (
         PVE_ONLY_DIR,
         ACCESS_DIR,
@@ -197,13 +197,18 @@ def verify_recovery_state() -> None:
             + ", ".join(missing_dirs)
         )
 
-    required_files = (
+    required_files = [
         RECOVERY_GITHUB_KEY,
         OPENBAO_UNSEAL_KEY,
-        OPENBAO_SSH_ACCESS,
-        OPENBAO_KV_ACCESS,
         SEMAPHORE_DB,
-    )
+    ]
+    if require_approle:
+        required_files.extend(
+            (
+                OPENBAO_SSH_ACCESS,
+                OPENBAO_KV_ACCESS,
+            )
+        )
     missing_files = [
         str(path)
         for path in required_files
@@ -255,9 +260,14 @@ def main() -> int:
         help="Восстановить bootstrap/access Git key из pve-only",
     )
     mode.add_argument(
+        "--preflight",
+        action="store_true",
+        help="Проверить минимальное состояние перед восстановлением",
+    )
+    mode.add_argument(
         "--check",
         action="store_true",
-        help="Только проверить готовность recovery-контура",
+        help="Проверить полную готовность recovery-контура",
     )
     args = parser.parse_args()
 
@@ -273,8 +283,11 @@ def main() -> int:
             elif args.restore_git_access:
                 restore_git_access()
                 print("[ОК] Bootstrap Git-доступ восстановлен из PVE-only recovery")
+            elif args.preflight:
+                verify_recovery_state(require_approle=False)
+                print("[ОК] Минимальное recovery-состояние 910 сохранно")
             else:
-                verify_recovery_state()
+                verify_recovery_state(require_approle=True)
                 print("[ОК] Аварийный контур 910 готов")
     except (OSError, RecoveryError) as exc:
         print(f"ОШИБКА: {exc}", file=sys.stderr)
