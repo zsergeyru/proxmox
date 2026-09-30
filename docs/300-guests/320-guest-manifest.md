@@ -11,13 +11,14 @@
 - [3. `guest.yaml`](#3-guestyaml)
 - [4. `provision.yaml`](#4-provisionyaml)
 - [5. `status.yaml`](#5-statusyaml)
-- [6. Что не хранится в этих YAML](#6-что-не-хранится-в-этих-yaml)
-- [7. Проверка](#7-проверка)
-- [8. Связанные документы](#8-связанные-документы)
+- [6. `access.yaml`](#6-accessyaml)
+- [7. Что не хранится в этих YAML](#7-что-не-хранится-в-этих-yaml)
+- [8. Проверка](#8-проверка)
+- [9. Связанные документы](#9-связанные-документы)
 
 ## 1. Какие YAML используются
 
-В гостевом контуре есть четыре разных машинных описания.
+В проекте используются пять разных машинных описаний, четыре из них относятся к конкретному гостю.
 
 | Файл | Область ответственности |
 |---|---|
@@ -25,6 +26,7 @@
 | `<guest>/guest.yaml` | объект VM/LXC в Proxmox |
 | `<guest>/provision.yaml` | требуемое состояние поддерживаемой Linux-системы внутри гостя |
 | `<guest>/status.yaml` | необязательные проверки готовности и итоговое представление состояния |
+| `infrastructure/security/access.yaml` | единые требования доступа между субъектами и ресурсами |
 
 Один файл не должен подменять другой.
 
@@ -33,6 +35,8 @@
 `provision.yaml` не задаёт процессор, память или диск Proxmox.
 
 `status.yaml` не является источником требуемой конфигурации.
+
+`access.yaml` не описывает устройство VM/LXC или состав ОС.
 
 ## 2. `defaults.yaml`
 
@@ -246,9 +250,11 @@ network:
 
 ### 3.9. `management`
 
-Необязательный непустой список.
+Переходный необязательный список совместимости.
 
-Он задаётся только конкретному гостю и не наследуется.
+Он пока читается действующим resolver, но нормативный источник требований доступа уже находится в `infrastructure/security/access.yaml`. Пока поле существует, проверка проекта требует эквивалентного правила в новом контракте.
+
+Поле задаётся только конкретному гостю и не наследуется.
 
 Поддерживаются:
 
@@ -556,8 +562,7 @@ sensitive: true
 - `value`;
 - `template`.
 
-## 6. Что не хранится в этих YAML
-
+## 6. `access.yaml`\n\nФайл:\n\n```text\ninfrastructure/security/access.yaml\n```\n\nявляется единым машинным источником требований доступа проекта.\n\nОн описывает:\n\n- субъект;\n- подсистему доступа;\n- класс ресурса;\n- разрешённые цели;\n- разрешённые действия.\n\nСекреты и пути их хранения в этот файл не помещаются.\n\nМашинная схема:\n\n```text\ninfrastructure/schemas/access.schema.yaml\n```\n\nПодробная спецификация находится в `docs/700-security/750-access-contract.md`.\n\n## 7. Что не хранится в этих YAML\n
 В машинных описаниях Git запрещено хранить:
 
 - пароли;
@@ -576,7 +581,7 @@ sensitive: true
 
 Требуемые пути для таких данных можно описывать в `provision.yaml`, но сами данные должны иметь отдельный жизненный цикл.
 
-## 7. Проверка
+## 8. Проверка
 
 Основная проверка:
 
@@ -584,13 +589,13 @@ sensitive: true
 python scripts/validate_repo.py
 ```
 
-Для `defaults.yaml`, `guest.yaml`, итогового состояния и `status.yaml` используются машинные схемы проекта.
+Для `defaults.yaml`, `guest.yaml`, итогового состояния, `status.yaml` и `access.yaml` используются машинные схемы проекта.
 
 Общий Ansible дополнительно проверяет базовый контракт `provision.yaml` перед настройкой Linux-гостя.
 
 Правила построения итогового состояния из `defaults.yaml + profile + guest.yaml` находятся в [`310-guest-state.md`](310-guest-state.md).
 
-## 8. Связанные документы
+## 9. Связанные документы
 
 - [`300-overview.md`](300-overview.md) — общая модель гостя.
 - [`310-guest-state.md`](310-guest-state.md) — построение итогового состояния объекта Proxmox.
@@ -598,8 +603,10 @@ python scripts/validate_repo.py
 - [`340-vmid-plan.md`](340-vmid-plan.md) — правила VMID/CTID.
 - [`350-linux-filesystem.md`](350-linux-filesystem.md) — назначение каталогов и данных внутри Linux.
 - [`390-decisions.md`](390-decisions.md) — причины решений.
+- [`../700-security/750-access-contract.md`](../700-security/750-access-contract.md) — нормативный контракт доступа.
 - [`../../infrastructure/guests/README.md`](../../infrastructure/guests/README.md) — структура каталога конкретного гостя.
 - [`../../infrastructure/schemas/guest.schema.yaml`](../../infrastructure/schemas/guest.schema.yaml) — схема `guest.yaml`.
 - [`../../infrastructure/schemas/guest-defaults.schema.yaml`](../../infrastructure/schemas/guest-defaults.schema.yaml) — схема `defaults.yaml`.
 - [`../../infrastructure/schemas/guest-effective.schema.yaml`](../../infrastructure/schemas/guest-effective.schema.yaml) — схема итогового состояния.
 - [`../../infrastructure/schemas/guest-status.schema.yaml`](../../infrastructure/schemas/guest-status.schema.yaml) — схема `status.yaml`.
+- [`../../infrastructure/schemas/access.schema.yaml`](../../infrastructure/schemas/access.schema.yaml) — схема `access.yaml`.
