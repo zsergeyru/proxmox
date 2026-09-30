@@ -600,6 +600,10 @@ class RecoveryStateHarness(BootstrapHost):
         self.host_access_dir = root / "access"
         self.host_state_dir = root / "state"
         self.host_openbao_dir = self.host_pve_only_dir / "openbao"
+        self.host_recovery_dir = self.host_pve_only_dir / "recovery"
+        self.host_recovery_github_key = (
+            self.host_recovery_dir / "github_proxmox_repo_ed25519"
+        )
         self.host_openbao_unseal_key = self.host_openbao_dir / "unseal.key"
         self.host_openbao_ssh_access = self.host_openbao_dir / "ssh-access.json"
         self.host_openbao_kv_access = self.host_openbao_dir / "kv-access.json"
@@ -626,6 +630,7 @@ class RecoveryStateHarness(BootstrapHost):
 def _prepare_complete_recovery_state(host: RecoveryStateHarness) -> None:
     for directory in (
         host.host_openbao_dir,
+        host.host_recovery_dir,
         host.host_access_github_key.parent,
         host.host_state_openbao_raft_dir,
         host.host_state_opentofu_file.parent,
@@ -634,6 +639,7 @@ def _prepare_complete_recovery_state(host: RecoveryStateHarness) -> None:
         directory.mkdir(parents=True, exist_ok=True)
     for path in (
         host.host_openbao_unseal_key,
+        host.host_recovery_github_key,
         host.host_openbao_ssh_access,
         host.host_openbao_kv_access,
         host.host_access_github_key,
@@ -660,6 +666,16 @@ def test_recovery_preflight_allows_missing_approle_files() -> None:
         host.host_openbao_ssh_access.unlink()
         host.host_openbao_kv_access.unlink()
 
+        host.verify_recovery_state()
+
+
+def test_recovery_preflight_allows_missing_access_directory() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        host = RecoveryStateHarness(Path(tmp))
+        _prepare_complete_recovery_state(host)
+        import shutil
+
+        shutil.rmtree(host.host_access_dir)
         host.verify_recovery_state()
 
 
@@ -825,6 +841,7 @@ def main() -> None:
         test_recover_unfinished_initial_state,
         test_recovery_preflight_accepts_complete_state,
         test_recovery_preflight_allows_missing_approle_files,
+        test_recovery_preflight_allows_missing_access_directory,
         test_recovery_preflight_rejects_partial_state,
         test_recovery_preflight_requires_opentofu_state_for_managed_pool,
         test_existing_layout_requires_manual_migration,
