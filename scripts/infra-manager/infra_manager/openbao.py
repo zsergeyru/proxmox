@@ -9,6 +9,7 @@ from urllib.parse import urlparse
 from .common import InfraManagerError, console
 from .pve_host import (
     check_recovery_contour,
+    cleanup_transition_state,
     initialize_openbao_on_host,
     install_openbao_host_support,
     install_recovery_host_support,
@@ -45,7 +46,11 @@ def run_initialize_openbao(repo_root: Path) -> int:
     console.detail("Проверка аварийного контура")
     check_recovery_contour(node)
 
+    console.detail("Удаление переходных файловых secret-источников")
+    cleanup_transition_state(node)
+    check_recovery_contour(node)
+
     console.result(
-        "OpenBao и аварийный контур полностью готовы"
+        "OpenBao, аварийный контур и миграция старой схемы готовы"
     )
     return 0
