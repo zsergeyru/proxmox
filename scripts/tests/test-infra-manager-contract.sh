@@ -73,6 +73,23 @@ for file in "$ANSIBLE_CONFIG" "$ANSIBLE_PLAYBOOK" "$ANSIBLE_LINUX_BASE" "$ANSIBL
     [[ -s "$file" ]] || die "Отсутствует обязательный файл: $file"
 done
 
+PVE_ACCESS_TASKS="$ANSIBLE_RUNTIME_DIR/pve_access.yml"
+SEMAPHORE_TASKS="$ANSIBLE_RUNTIME_DIR/semaphore.yml"
+
+runtime_secret_dir_line="$(grep -nF -- '- name: Подготовить временную область рабочих секретов' "$PVE_ACCESS_TASKS" | head -n1 | cut -d: -f1 || true)"
+openbao_restore_line="$(grep -nF -- '- name: Восстановить рабочие секреты из OpenBao при повторной настройке' "$PVE_ACCESS_TASKS" | head -n1 | cut -d: -f1 || true)"
+pve_stage_line="$(grep -nF -- '- name: Подготовить PVE API credential до первой миграции в OpenBao' "$PVE_ACCESS_TASKS" | head -n1 | cut -d: -f1 || true)"
+pve_check_line="$(grep -nF -- '- name: Проверить постоянный доступ к PVE' "$PVE_ACCESS_TASKS" | head -n1 | cut -d: -f1 || true)"
+[[ -n "$runtime_secret_dir_line" && -n "$openbao_restore_line" && -n "$pve_stage_line" && -n "$pve_check_line" ]] \
+    || die "pve_access.yml должен готовить рабочие секреты до проверки PVE API"
+(( runtime_secret_dir_line < openbao_restore_line && openbao_restore_line < pve_stage_line && pve_stage_line < pve_check_line )) \
+    || die "Нарушен порядок восстановления PVE API credential перед его проверкой"
+grep -Fq 'dest: "{{ provision.access.pve.persistent_credential }}"' "$PVE_ACCESS_TASKS" \
+    || die "Переходный PVE API credential должен попадать в рабочий путь из provision.yaml"
+if grep -Fq -- '- name: Подготовить PVE API credential до первой миграции в OpenBao' "$SEMAPHORE_TASKS"; then
+    die "Подготовка PVE API credential не должна откладываться до semaphore.yml"
+fi
+
 grep -Fq 'roles_path = automation/ansible/roles' "$ANSIBLE_CONFIG" \
     || die "ansible.cfg должен задавать единый путь к roles"
 [[ ! -e "$ROOT/automation/ansible/tasks" ]] \
