@@ -1,6 +1,6 @@
 # 910 создаётся временным начальным контуром 990.
 # Постоянный infra-manager не управляет собственным жизненным циклом.
-schema_version: 11
+schema_version: 12
 vmid: 910
 name: infra-manager
 profile: debian-lxc-docker
