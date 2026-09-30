@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import shutil
+from urllib.parse import urlparse
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -11,12 +12,13 @@ from typing import Any
 import yaml
 
 from .common import InfraManagerError, command_runner, console
-from .pve import PveClient, check_access
+from .pve import PveClient, check_access, read_env_file
 from .semaphore import (
     SEMAPHORE_TEMPLATES,
     SemaphoreClient,
     require_unique_by_name,
 )
+from .pve_host import check_openbao_kv
 from .settings import PATHS, SETTINGS
 
 PVE_ENV = PATHS.pve_api_env
@@ -383,6 +385,15 @@ def _check_openbao() -> None:
         raise InfraManagerError(
             "OpenBao инициализирован, но остаётся запечатан"
         )
+
+    if payload["initialized"]:
+        endpoint = read_env_file(PVE_ENV).get("PVE_API_URL", "")
+        node = urlparse(endpoint).hostname if endpoint else None
+        if not node:
+            raise InfraManagerError(
+                "Не удалось определить узел PVE для проверки OpenBao KV"
+            )
+        check_openbao_kv(node)
 
 
 def _load_repository_branches(
