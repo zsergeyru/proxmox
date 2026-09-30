@@ -250,7 +250,7 @@ class BootstrapHost:
     def require_host(self) -> None:
         if os.geteuid() != 0:
             self.fail("сценарий должен выполняться от root на PVE")
-        for command in ("pct", "pveum", "pvesm", "python3", "ssh-keygen"):
+        for command in ("pct", "pveum", "pvesh", "pvesm", "python3", "ssh-keygen"):
             if not self.command_exists(command):
                 self.fail(f"не найден {command}")
         if not self.host_github_key.is_file() or self.host_github_key.stat().st_size == 0:
@@ -335,6 +335,36 @@ class BootstrapHost:
         shutil.copyfile(source, target)
         self._set_mode_owner(target, mode, uid, gid)
 
+    def managed_guests_exist(self) -> bool:
+        result = self.run(
+            "pvesh",
+            "get",
+            "/pools/managed",
+            "--output-format",
+            "json",
+            check=False,
+            capture=True,
+        )
+        if result.returncode != 0:
+            pools = self.pveum_json("pool", "list")
+            if not any(row.get("poolid") == "managed" for row in pools):
+                return False
+            self.fail(
+                "Не удалось проверить состав PVE pool managed перед recovery"
+            )
+        try:
+            payload = json.loads(result.stdout or "{}")
+        except json.JSONDecodeError as exc:
+            raise BootstrapError(
+                "PVE вернул некорректный JSON для pool managed"
+            ) from exc
+        members = payload.get("members") if isinstance(payload, dict) else None
+        if members is None:
+            return False
+        if not isinstance(members, list):
+            self.fail("PVE pool managed имеет некорректный members")
+        return bool(members)
+
     @staticmethod
     def _directory_has_files(path: Path) -> bool:
         if not path.is_dir():
@@ -382,11 +412,13 @@ class BootstrapHost:
                 "Recovery запрещён: Raft-состояние OpenBao отсутствует или пусто"
             )
 
-        if not self.host_state_opentofu_file.is_file() or (
-            self.host_state_opentofu_file.stat().st_size == 0
+        if self.managed_guests_exist() and (
+            not self.host_state_opentofu_file.is_file()
+            or self.host_state_opentofu_file.stat().st_size == 0
         ):
             self.fail(
-                "Recovery запрещён: отсутствует постоянный OpenTofu state"
+                "Recovery запрещён: в pool managed есть объекты, "
+                "но постоянный OpenTofu state отсутствует"
             )
 
         if not self.host_state_semaphore_db.is_file() or (
