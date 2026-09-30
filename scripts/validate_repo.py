@@ -32,11 +32,13 @@ from resolver import (
 ROOT = Path(__file__).resolve().parents[1]
 GUESTS = ROOT / "infrastructure" / "guests"
 DEFAULTS = GUESTS / "defaults.yaml"
+ACCESS = ROOT / "infrastructure/security/access.yaml"
 SCHEMAS = {
     "source": ROOT / "infrastructure/schemas/guest.schema.yaml",
     "defaults": ROOT / "infrastructure/schemas/guest-defaults.schema.yaml",
     "effective": ROOT / "infrastructure/schemas/guest-effective.schema.yaml",
     "status": ROOT / "infrastructure/schemas/guest-status.schema.yaml",
+    "access": ROOT / "infrastructure/schemas/access.schema.yaml",
 }
 DIR_RE = re.compile(r"^(\d{3})-(.+)$")
 LXC_SELECTOR_RE = re.compile(
@@ -70,6 +72,29 @@ PRIVATE_KEY_MARKERS = (
     "-----BEGIN RSA PRIVATE KEY-----",
     "-----BEGIN EC PRIVATE KEY-----",
 )
+SECRET_LOCATION_MARKERS = (
+    "/run/",
+    "/mnt/",
+    "/etc/",
+    "infra-secrets/",
+    ".env",
+    ".key",
+    "unseal.key",
+    "kv-access.json",
+    "ssh-access.json",
+)
+ACCESS_MATRIX = {
+    ("pve-api", "guests"): {"read", "create", "clone", "configure", "power", "delete"},
+    ("pve-api", "storage"): {"read"},
+    ("ssh", "host"): {"connect-root"},
+    ("ssh", "guest"): {"connect-root"},
+    ("ssh", "identity"): {"issue"},
+    ("github", "repository"): {"read"},
+    ("semaphore", "infrastructure-task"): {"execute"},
+    ("openbao", "credential"): {"materialize", "update"},
+    ("openbao", "ssh-ca"): {"configure", "sign"},
+    ("openbao", "instance"): {"unseal"},
+}
 OVERRIDE_PATHS = {
     ("node",),
     ("protection",),
@@ -556,6 +581,150 @@ def _validate_status_manifest(path: Path, state: ValidationState) -> None:
                     )
 
 
+def _rule_matches(
+    rule: dict,
+    *,
+    subject: str,
+    service: str,
+    resource: str,
+    target: str,
+    permission: str,
+) -> bool:
+    return (
+        rule.get("subject") == subject
+        and rule.get("service") == service
+        and rule.get("resource") == resource
+        and target in rule.get("targets", [])
+        and permission in rule.get("access", [])
+    )
+
+
+def _check_legacy_management_access(
+    data: dict,
+    state: ValidationState,
+) -> None:
+    rules = data.get("rules", [])
+    if not isinstance(rules, list):
+        return
+
+    for vmid, rel in state.seen.items():
+        source = load_yaml(ROOT / rel)
+        if source is None:
+            continue
+        management = source.get("management", [])
+        if not isinstance(management, list):
+            continue
+        subject = f"guest:{vmid}"
+
+        if "ssh_identity" in management and not any(
+            _rule_matches(
+                rule,
+                subject=subject,
+                service="ssh",
+                resource="identity",
+                target="self",
+                permission="issue",
+            )
+            for rule in rules
+            if isinstance(rule, dict)
+        ):
+            fail(
+                f"{ACCESS.relative_to(ROOT)}: {subject} должен иметь "
+                "эквивалент legacy management.ssh_identity"
+            )
+
+        if "project_repo_read" in management and not any(
+            _rule_matches(
+                rule,
+                subject=subject,
+                service="github",
+                resource="repository",
+                target="zsergeyru/proxmox",
+                permission="read",
+            )
+            for rule in rules
+            if isinstance(rule, dict)
+        ):
+            fail(
+                f"{ACCESS.relative_to(ROOT)}: {subject} должен иметь "
+                "эквивалент legacy management.project_repo_read"
+            )
+
+
+def _validate_access_contract(state: ValidationState) -> None:
+    rel = ACCESS.relative_to(ROOT)
+    data = load_yaml(ACCESS)
+    if data is None or not validate_schema(
+        rel,
+        data,
+        state.validators["access"],
+        "access schema",
+    ):
+        return
+
+    check_secrets(rel, data)
+    rules = data["rules"]
+    ids: set[str] = set()
+    known_vmids = set(state.seen)
+
+    for rule in rules:
+        rule_id = rule["id"]
+        if rule_id in ids:
+            fail(f"{rel}: повторяющийся id правила доступа {rule_id!r}")
+        ids.add(rule_id)
+
+        subject = rule["subject"]
+        if subject.startswith("guest:"):
+            vmid = int(subject.partition(":")[2])
+            if vmid not in known_vmids:
+                fail(f"{rel}: правило {rule_id!r} ссылается на неизвестный {subject}")
+
+        pair = (rule["service"], rule["resource"])
+        allowed = ACCESS_MATRIX.get(pair)
+        actual = set(rule["access"])
+        if allowed is None:
+            fail(
+                f"{rel}: правило {rule_id!r} содержит недопустимое сочетание "
+                f"{pair[0]}/{pair[1]}"
+            )
+        elif not actual.issubset(allowed):
+            extra = ", ".join(sorted(actual - allowed))
+            fail(
+                f"{rel}: правило {rule_id!r} содержит недопустимые права: {extra}"
+            )
+
+        for target in rule["targets"]:
+            lower = target.lower()
+            if any(marker in lower for marker in SECRET_LOCATION_MARKERS):
+                fail(
+                    f"{rel}: правило {rule_id!r} не должно содержать "
+                    f"путь хранения секрета {target!r}"
+                )
+            if target.startswith("guest:"):
+                target_vmid = int(target.partition(":")[2])
+                if target_vmid not in known_vmids:
+                    fail(
+                        f"{rel}: правило {rule_id!r} ссылается "
+                        f"на неизвестный {target}"
+                    )
+
+        if rule["resource"] == "identity" and rule["targets"] != ["self"]:
+            fail(
+                f"{rel}: правило {rule_id!r} для SSH identity "
+                "должно использовать только target self"
+            )
+
+    for rule in rules:
+        if rule["subject"] != "guest:410":
+            continue
+        if rule["service"] == "pve-api":
+            fail(f"{rel}: guest:410 не должен иметь прямой PVE API-доступ")
+        if rule["service"] == "ssh" and "host:pve" in rule["targets"]:
+            fail(f"{rel}: guest:410 не должен иметь root SSH-доступ к PVE")
+
+    _check_legacy_management_access(data, state)
+
+
 def _warn_unused_profiles(state: ValidationState) -> None:
     rel_defaults = DEFAULTS.relative_to(ROOT)
     for profile in sorted(set(state.profiles) - state.used_profiles):
@@ -573,6 +742,7 @@ def validate() -> None:
         _validate_manifest(path, state)
     for path in status_manifests():
         _validate_status_manifest(path, state)
+    _validate_access_contract(state)
     _warn_unused_profiles(state)
 
 
