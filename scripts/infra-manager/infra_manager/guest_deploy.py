@@ -10,6 +10,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+from .access import load_access_policy
 from .common import InfraManagerError, console, require_command, run
 from .opentofu import OpenTofuWorkspace, prepare_workspace
 from .pve import PveClient
@@ -824,6 +825,39 @@ def _verify_temporary_ssh_identity(
     return True
 
 
+def _project_git_ansible_vars(
+    context: DeploymentContext,
+) -> list[str]:
+    """Собрать Ansible vars для Git read-доступа из access.yaml."""
+
+    repo_root = context.paths.guest_dir.parents[2]
+    policy = load_access_policy(repo_root)
+    allowed = (
+        context.vmid != 910
+        and policy.project_repository_read_allowed(context.vmid)
+    )
+    args = [
+        "-e",
+        f"infra_project_git_read={'true' if allowed else 'false'}",
+    ]
+    if not allowed:
+        return args
+
+    private_key = PATHS.github_key
+    if not private_key.is_file() or private_key.stat().st_size == 0:
+        raise InfraManagerError(
+            "Для Git read-доступа гостя не материализован "
+            f"OpenBao credential: {private_key}"
+        )
+    args.extend(
+        [
+            "-e",
+            f"infra_project_git_private_key_file={private_key}",
+        ]
+    )
+    return args
+
+
 def _run_guest_ansible(
     context: DeploymentContext,
     *,
@@ -864,6 +898,7 @@ def _run_guest_ansible(
             f"infra_project_branch={project_branch or SETTINGS.project_branch()}",
             "-e",
             f"infra_pve_node={context.node}",
+            *_project_git_ansible_vars(context),
             *(
                 [
                     "-e",
