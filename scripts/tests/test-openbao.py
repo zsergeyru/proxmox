@@ -458,6 +458,101 @@ def test_ssh_access_contract_is_narrow() -> None:
         fail("Служебные токены OpenBao должны работать только локально")
 
 
+def test_machine_signing_roles_are_separate_and_short_lived() -> None:
+    host = load_host_module()
+    access_code = host.CONFIGURE_SSH_ACCESS_CODE
+    if '"ssh-client-signer/sign/machine-*"' not in access_code:
+        fail("PVE-only signer не имеет ограниченного доступа к machine-*")
+    if '"ssh-client-signer/roles/*"' not in access_code:
+        fail("PVE-only config role не может синхронизировать machine-роли")
+
+    code = host.CONFIGURE_MACHINE_SIGNING_ROLES_CODE
+    required = (
+        'role_name = f"machine-{vmid}"',
+        'principal = f"guest-{vmid}"',
+        '"allow_user_certificates": True',
+        '"allow_host_certificates": False',
+        '"allowed_users": principal',
+        '"default_user": principal',
+        '"allowed_user_key_lengths": {"ed25519": 0}',
+        '"ttl": "2h"',
+        'role_name.startswith("machine-")',
+        '"DELETE"',
+    )
+    for item in required:
+        if item not in code:
+            fail(f"Машинная SSH-роль не содержит ограничение: {item}")
+
+    sign_code = host.SIGN_MACHINE_KEY_CODE
+    required_sign = (
+        'f"/v1/ssh-client-signer/sign/machine-{vmid}"',
+        'principal = f"guest-{vmid}"',
+        '"valid_principals": principal',
+        '"ttl": "2h"',
+        '"/v1/auth/token/revoke-self"',
+    )
+    for item in required_sign:
+        if item not in sign_code:
+            fail(f"Машинная SSH-подпись нарушает контракт: {item}")
+
+
+def test_machine_signing_uses_only_pve_signer_approle() -> None:
+    host = load_host_module()
+    credentials = {
+        "ssh-ca-config": {"role_id": "role-a", "secret_id": "secret-a"},
+        "ssh-signer": {"role_id": "role-b", "secret_id": "secret-b"},
+    }
+    calls: list[tuple[tuple[str, ...], str | None]] = []
+
+    def fake_pct_exec(
+        *args: str,
+        capture: bool = False,
+        check: bool = True,
+        input_text: str | None = None,
+    ):
+        del capture, check
+        calls.append((tuple(args), input_text))
+        if args[:2] == ("python3", "-c") and args[2] == host.SIGN_MACHINE_KEY_CODE:
+            return SimpleNamespace(
+                returncode=0,
+                stdout="ssh-ed25519-cert-v01@openssh.com AAAAMACHINE\n",
+                stderr="",
+            )
+        return SimpleNamespace(
+            returncode=0,
+            stdout='{"roles":["machine-410","machine-910"]}\n',
+            stderr="",
+        )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        access = Path(tmp) / "ssh-access.json"
+        access.write_text(json.dumps(credentials), encoding="utf-8")
+        with (
+            patch.object(host, "SSH_ACCESS_PATH", access),
+            patch.object(host, "pct_exec", side_effect=fake_pct_exec),
+        ):
+            host.sync_machine_signing_roles([910, 410])
+            certificate = host.sign_machine_public_key(
+                410,
+                "ssh-ed25519 AAAAPUBLIC machine",
+            )
+
+    if not certificate.startswith("ssh-ed25519-cert-v01@openssh.com "):
+        fail("Подписанный машинный SSH-сертификат потерян")
+
+    config_payload = json.loads(calls[0][1] or "{}")
+    if config_payload.get("credentials") != credentials["ssh-ca-config"]:
+        fail("Синхронизация machine-ролей использует неверный AppRole")
+    if config_payload.get("vmids") != [410, 910]:
+        fail("Синхронизация machine-ролей исказила VMID")
+
+    sign_payload = json.loads(calls[1][1] or "{}")
+    if sign_payload.get("credentials") != credentials["ssh-signer"]:
+        fail("Машинная подпись использует неверный AppRole")
+    if sign_payload.get("vmid") != 410:
+        fail("Машинная подпись исказила VMID")
+
+
 def test_host_signing_role_is_host_only() -> None:
     host = load_host_module()
     code = host.CONFIGURE_HOST_SIGNING_ROLE_CODE
@@ -825,6 +920,8 @@ def main() -> None:
     test_host_ca_publication_uses_public_endpoint()
     test_ssh_ca_mounts_are_separate()
     test_ssh_access_contract_is_narrow()
+    test_machine_signing_roles_are_separate_and_short_lived()
+    test_machine_signing_uses_only_pve_signer_approle()
     test_host_signing_role_is_host_only()
     test_host_signing_target_is_verified_on_pve()
     test_host_signing_uses_only_signer_approle()
