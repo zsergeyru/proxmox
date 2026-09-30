@@ -823,7 +823,6 @@ try:
                     "permit-pty": "",
                 },
                 "ttl": "2h",
-                "max_ttl": "2h",
             },
             token=token,
         )
