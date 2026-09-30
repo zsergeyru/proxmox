@@ -51,6 +51,30 @@ def directory_has_files(path: Path) -> bool:
     return any(item.is_file() and item.stat().st_size > 0 for item in path.rglob("*"))
 
 
+def ensure_directory(
+    path: Path,
+    *,
+    mode: int,
+    uid: int,
+    gid: int,
+) -> None:
+    path.mkdir(parents=True, exist_ok=True)
+    os.chown(path, uid, gid)
+    os.chmod(path, mode)
+
+
+def prepare_git_directories() -> None:
+    """Зафиксировать владельцев и права каталогов recovery Git."""
+    ensure_directory(RECOVERY_DIR, mode=0o700, uid=0, gid=0)
+    ensure_directory(BOOTSTRAP_DIR, mode=0o700, uid=0, gid=0)
+    ensure_directory(
+        ACCESS_GITHUB_KEY.parent,
+        mode=0o700,
+        uid=100000,
+        gid=100000,
+    )
+
+
 def atomic_copy(
     source: Path,
     target: Path,
@@ -101,6 +125,7 @@ def _select_git_source() -> Path:
 def prepare_git_recovery() -> None:
     """Синхронизировать аварийную, bootstrap- и access-копии Git key."""
     source = _select_git_source()
+    prepare_git_directories()
 
     for candidate in (
         RECOVERY_GITHUB_KEY,
@@ -130,6 +155,7 @@ def restore_git_access() -> None:
         raise RecoveryError(
             f"Отсутствует аварийная копия GitHub Deploy Key: {RECOVERY_GITHUB_KEY}"
         )
+    prepare_git_directories()
     atomic_copy(
         RECOVERY_GITHUB_KEY,
         BOOTSTRAP_GITHUB_KEY,
