@@ -20,6 +20,7 @@ from infra_manager.common import InfraManagerError
 from infra_manager.semaphore import (
     PROJECT_REPO,
     SEMAPHORE_TEMPLATES,
+    SemaphoreClient,
     find_unique_by_name,
     require_unique_by_name,
 )
@@ -110,6 +111,75 @@ def main_test() -> None:
     else:
         fail("status принял неверную ветку шаблона")
 
+    class InfraManagerEnvironmentClient(SemaphoreClient):
+        def __init__(
+            self,
+            *,
+            existing: dict | None,
+            full: dict | None = None,
+        ) -> None:
+            self.existing = existing
+            self.full = full or {}
+            self.created: list[dict] = []
+            self.updated: list[dict] = []
+
+        def get(self, path: str, *, auth: str | None = None):
+            del auth
+            if path.endswith("/environment?sort=name&order=asc"):
+                return [self.existing] if self.existing is not None else []
+            if "/environment/" in path:
+                return self.full
+            raise AssertionError(f"Неожиданный GET: {path}")
+
+        def post(self, path: str, payload, *, auth: str | None = None):
+            del path, auth
+            self.created.append(payload)
+            return {"id": 10}
+
+        def put(self, path: str, payload):
+            del path
+            self.updated.append(payload)
+            return None
+
+    created_env = InfraManagerEnvironmentClient(existing=None)
+    if created_env.ensure_infra_manager_environment(1) != 10:
+        fail("Новая Variable Group Infra Manager получила неверный id")
+    created_payload = created_env.created[0]
+    if created_payload.get("name") != SETTINGS.infra_manager_env_name:
+        fail("Variable Group Infra Manager получила неверное имя")
+    if created_payload.get("env") != '{"INFRA_LOG_LEVEL":"normal"}':
+        fail("Новая Variable Group должна начинаться с INFRA_LOG_LEVEL=normal")
+
+    existing_env = InfraManagerEnvironmentClient(
+        existing={"id": 10, "name": SETTINGS.infra_manager_env_name},
+        full={"env": '{"INFRA_LOG_LEVEL":"verbose"}'},
+    )
+    existing_env.ensure_infra_manager_environment(1)
+    if existing_env.updated:
+        fail("Ручной INFRA_LOG_LEVEL=verbose не должен перезаписываться")
+
+    missing_level = InfraManagerEnvironmentClient(
+        existing={"id": 10, "name": SETTINGS.infra_manager_env_name},
+        full={"env": '{"OTHER":"value"}'},
+    )
+    missing_level.ensure_infra_manager_environment(1)
+    if len(missing_level.updated) != 1:
+        fail("Отсутствующий INFRA_LOG_LEVEL должен быть добавлен")
+    updated_values = __import__("json").loads(missing_level.updated[0]["env"])
+    if updated_values != {"OTHER": "value", "INFRA_LOG_LEVEL": "normal"}:
+        fail("Добавление INFRA_LOG_LEVEL не должно удалять другие настройки")
+
+    invalid_level = InfraManagerEnvironmentClient(
+        existing={"id": 10, "name": SETTINGS.infra_manager_env_name},
+        full={"env": '{"INFRA_LOG_LEVEL":"debug"}'},
+    )
+    try:
+        invalid_level.ensure_infra_manager_environment(1)
+    except InfraManagerError:
+        pass
+    else:
+        fail("Некорректный INFRA_LOG_LEVEL должен отклоняться")
+
     one = find_unique_by_name(
         [{"id": 1, "name": "proxmox"}],
         "proxmox",
@@ -168,6 +238,7 @@ def main_test() -> None:
         branches=("main", branch),
         environments=(
             {"id": 8, "name": SETTINGS.opentofu_env_name},
+            {"id": 10, "name": SETTINGS.infra_manager_env_name},
         ),
         templates=tuple(
             {
