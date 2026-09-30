@@ -125,7 +125,6 @@ def _select_git_source() -> Path:
 def prepare_git_recovery() -> None:
     """Синхронизировать аварийную, bootstrap- и access-копии Git key."""
     source = _select_git_source()
-    prepare_git_directories()
 
     for candidate in (
         RECOVERY_GITHUB_KEY,
@@ -138,6 +137,7 @@ def prepare_git_recovery() -> None:
                 f"{candidate}"
             )
 
+    prepare_git_directories()
     atomic_copy(source, RECOVERY_GITHUB_KEY, mode=0o600, uid=0, gid=0)
     atomic_copy(source, BOOTSTRAP_GITHUB_KEY, mode=0o600, uid=0, gid=0)
     atomic_copy(
