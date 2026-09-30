@@ -44,6 +44,7 @@ import subprocess
 import sys
 import tempfile
 
+execute = subprocess.run
 payload = json.loads(sys.stdin.read())
 principals = payload.get("principals")
 if not isinstance(principals, list) or any(
@@ -89,8 +90,8 @@ def atomic_write(path, text, mode):
 changed = atomic_write(principal_file, content, 0o600)
 changed = atomic_write(config_file, config, 0o644) or changed
 
-subprocess.run(["/usr/sbin/sshd", "-t"], check=True)
-effective = subprocess.run(
+execute(["/usr/sbin/sshd", "-t"], check=True)
+effective = execute(
     ["/usr/sbin/sshd", "-T"],
     check=True,
     text=True,
@@ -103,7 +104,7 @@ if (
     raise SystemExit("sshd does not use AuthorizedPrincipalsFile")
 
 if changed:
-    subprocess.run(["systemctl", "restart", "ssh.service"], check=True)
+    execute(["systemctl", "restart", "ssh.service"], check=True)
 
 print(json.dumps({"changed": changed}, separators=(",", ":")))
 """
@@ -117,6 +118,7 @@ import subprocess
 import sys
 import tempfile
 
+execute = subprocess.run
 payload = json.loads(sys.stdin.read())
 vmid = payload.get("vmid")
 host_ca = payload.get("host_ca")
@@ -139,7 +141,7 @@ os.chown(key_dir, 0, 0)
 os.chmod(key_dir, 0o700)
 
 if not private_key.is_file():
-    subprocess.run(
+    execute(
         [
             "ssh-keygen",
             "-q",
@@ -208,6 +210,7 @@ import subprocess
 import sys
 import tempfile
 
+execute = subprocess.run
 payload = json.loads(sys.stdin.read())
 certificate = payload.get("certificate") if isinstance(payload, dict) else None
 principal = payload.get("principal") if isinstance(payload, dict) else None
@@ -236,7 +239,7 @@ try:
 finally:
     temporary.unlink(missing_ok=True)
 
-inspection = subprocess.run(
+inspection = execute(
     ["ssh-keygen", "-L", "-f", str(target)],
     check=True,
     text=True,
