@@ -160,6 +160,19 @@ def check_openbao_kv(node: str) -> None:
     _ssh(node, str(OPENBAO_HOST_COMMAND), "--check-kv")
 
 
+def update_openbao_semaphore_api_token(node: str, api_token: str) -> None:
+    """Сохранить перевыпущенный Semaphore token через узкую PVE-only роль."""
+    clean = api_token.strip()
+    if not clean or any(character.isspace() for character in clean):
+        raise InfraManagerError("Некорректный API token Semaphore")
+    _ssh_with_input(
+        node,
+        str(OPENBAO_HOST_COMMAND),
+        "--update-semaphore-api-token",
+        input_text=clean + "\n",
+    )
+
+
 def sign_ssh_client_key(node: str, public_key: str) -> str:
     """Подписать временный открытый SSH-ключ через PVE-only доступ OpenBao."""
     normalized = public_key.strip()
