@@ -78,16 +78,17 @@ infra-manager-recovery --check
 infra-manager-recovery --restore-git-access
 ```
 
-Команда восстанавливает:
+Команда восстанавливает bootstrap-копию:
 
 ```text
 /root/.config/proxmox-bootstrap/github_proxmox_repo_ed25519
-/mnt/bindmounts/infra-manager/access/github/github_proxmox_repo_ed25519
 ```
+
+Постоянная рабочая копия Deploy Key в `access/` не создаётся.
 
 Содержимое ключа не выводится в журнал.
 
-Если обнаружены разные постоянные экземпляры одного Deploy Key, автоматическая замена запрещена.
+Если перед завершением миграции обнаружен старый экземпляр Deploy Key с другим содержимым, автоматическая очистка запрещена.
 
 ## 4. Восстановление существующего 910
 

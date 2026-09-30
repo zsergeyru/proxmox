@@ -5,7 +5,7 @@ additionalProperties: false
 required: [schema_version, defaults, profiles]
 properties:
   schema_version:
-    const: 11
+    const: 12
   defaults:
     $ref: '#/$defs/defaults'
   profiles:

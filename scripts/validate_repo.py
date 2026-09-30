@@ -581,76 +581,6 @@ def _validate_status_manifest(path: Path, state: ValidationState) -> None:
                     )
 
 
-def _rule_matches(
-    rule: dict,
-    *,
-    subject: str,
-    service: str,
-    resource: str,
-    target: str,
-    permission: str,
-) -> bool:
-    return (
-        rule.get("subject") == subject
-        and rule.get("service") == service
-        and rule.get("resource") == resource
-        and target in rule.get("targets", [])
-        and permission in rule.get("access", [])
-    )
-
-
-def _check_legacy_management_access(
-    data: dict,
-    state: ValidationState,
-) -> None:
-    rules = data.get("rules", [])
-    if not isinstance(rules, list):
-        return
-
-    for vmid, rel in state.seen.items():
-        source = load_yaml(ROOT / rel)
-        if source is None:
-            continue
-        management = source.get("management", [])
-        if not isinstance(management, list):
-            continue
-        subject = f"guest:{vmid}"
-
-        if "ssh_identity" in management and not any(
-            _rule_matches(
-                rule,
-                subject=subject,
-                service="ssh",
-                resource="identity",
-                target="self",
-                permission="issue",
-            )
-            for rule in rules
-            if isinstance(rule, dict)
-        ):
-            fail(
-                f"{ACCESS.relative_to(ROOT)}: {subject} должен иметь "
-                "эквивалент legacy management.ssh_identity"
-            )
-
-        if "project_repo_read" in management and not any(
-            _rule_matches(
-                rule,
-                subject=subject,
-                service="github",
-                resource="repository",
-                target="zsergeyru/proxmox",
-                permission="read",
-            )
-            for rule in rules
-            if isinstance(rule, dict)
-        ):
-            fail(
-                f"{ACCESS.relative_to(ROOT)}: {subject} должен иметь "
-                "эквивалент legacy management.project_repo_read"
-            )
-
-
 def _validate_access_contract(state: ValidationState) -> None:
     rel = ACCESS.relative_to(ROOT)
     data = load_yaml(ACCESS)
@@ -741,8 +671,6 @@ def _validate_access_contract(state: ValidationState) -> None:
             fail(f"{rel}: guest:410 не должен иметь прямой PVE API-доступ")
         if rule["service"] == "ssh" and "host:pve" in rule["targets"]:
             fail(f"{rel}: guest:410 не должен иметь root SSH-доступ к PVE")
-
-    _check_legacy_management_access(data, state)
 
 
 def _warn_unused_profiles(state: ValidationState) -> None:

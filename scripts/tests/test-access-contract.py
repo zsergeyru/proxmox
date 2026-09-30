@@ -11,7 +11,6 @@ from jsonschema import Draft202012Validator
 ROOT = Path(__file__).resolve().parents[2]
 ACCESS = ROOT / "infrastructure/security/access.yaml"
 SCHEMA = ROOT / "infrastructure/schemas/access.schema.yaml"
-GUESTS = ROOT / "infrastructure/guests"
 
 
 def load_yaml(path: Path) -> dict:
@@ -138,31 +137,25 @@ def main() -> None:
         permission="connect-root",
     )
 
-    # Старые management-флаги пока остаются, но их смысл уже описан access.yaml.
-    for manifest in sorted(GUESTS.glob("*/guest.yaml")):
-        guest = load_yaml(manifest)
-        management = guest.get("management", [])
-        if not isinstance(management, list):
-            continue
-        subject = f"guest:{guest['vmid']}"
-        if "ssh_identity" in management:
-            require_rule(
-                data,
-                subject=subject,
-                service="ssh",
-                resource="identity",
-                target="self",
-                permission="issue",
-            )
-        if "project_repo_read" in management:
-            require_rule(
-                data,
-                subject=subject,
-                service="github",
-                resource="repository",
-                target="zsergeyru/proxmox",
-                permission="read",
-            )
+    # SSH identity и Git read определяются только access.yaml.
+    for vmid in (410, 311):
+        subject = f"guest:{vmid}"
+        require_rule(
+            data,
+            subject=subject,
+            service="ssh",
+            resource="identity",
+            target="self",
+            permission="issue",
+        )
+        require_rule(
+            data,
+            subject=subject,
+            service="github",
+            resource="repository",
+            target="zsergeyru/proxmox",
+            permission="read",
+        )
 
     # PVE-only часть OpenBao описана логически, без путей хранения секретов.
     require_rule(

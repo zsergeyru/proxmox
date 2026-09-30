@@ -143,7 +143,7 @@ Semaphore: Initialize OpenBao 910
 → проверка sealed=false
 ```
 
-Задание не является частью обычного обновления 910 и предназначено для однократной первичной инициализации пустого хранилища.
+Задание идемпотентно. Первоначальный bootstrap вызывает ту же инициализацию автоматически до удаления временных credentials; отдельный запуск Semaphore остаётся штатным способом повторной проверки и восстановления конфигурации OpenBao.
 
 При запуске самого 910 используется отдельная одноразовая команда `openbao-startup-unseal.sh`. Она ждёт доступности OpenBao и через root SSH вызывает хостовый сценарий на PVE только при состоянии `initialized=true, sealed=true`. Периодического запуска на PVE нет.
 
@@ -187,7 +187,7 @@ infra-manager-pve-lifecycle-test
 
 ## `guests/`
 
-`resolver.py` — единый сборщик конфигурации гостей. Он объединяет `defaults + profile + guest`, вычисляет административный IP-адрес, нормализует переходное поле `management` и `features` и формирует итоговое состояние объекта Proxmox. Права доступа находятся отдельно в `infrastructure/security/access.yaml` и проверяются `validate_repo.py`.
+`resolver.py` — единый сборщик конфигурации гостей. Он объединяет `defaults + profile + guest`, вычисляет административный IP-адрес, нормализует `features` и формирует итоговое состояние объекта Proxmox. Права доступа не входят в resolver: они находятся только в `infrastructure/security/access.yaml` и проверяются `validate_repo.py`.
 
 `render-opentofu-input.py` проходит по `infrastructure/guests/*/guest.yaml`, берёт только объекты с `profile` и формирует:
 

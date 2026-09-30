@@ -23,7 +23,10 @@ RECOVERY_GITHUB_KEY = RECOVERY_DIR / "github_proxmox_repo_ed25519"
 
 BOOTSTRAP_DIR = Path("/root/.config/proxmox-bootstrap")
 BOOTSTRAP_GITHUB_KEY = BOOTSTRAP_DIR / "github_proxmox_repo_ed25519"
-ACCESS_GITHUB_KEY = ACCESS_DIR / "github" / "github_proxmox_repo_ed25519"
+LEGACY_ACCESS_GITHUB_DIR = ACCESS_DIR / "github"
+LEGACY_ACCESS_GITHUB_KEY = LEGACY_ACCESS_GITHUB_DIR / "github_proxmox_repo_ed25519"
+LEGACY_ACCESS_PVE_API_DIR = ACCESS_DIR / "pve-api"
+LEGACY_STATE_SECRETS_DIR = STATE_DIR / "secrets"
 
 OPENBAO_DIR = PVE_ONLY_DIR / "openbao"
 OPENBAO_UNSEAL_KEY = OPENBAO_DIR / "unseal.key"
@@ -67,12 +70,6 @@ def prepare_git_directories() -> None:
     """Зафиксировать владельцев и права каталогов recovery Git."""
     ensure_directory(RECOVERY_DIR, mode=0o700, uid=0, gid=0)
     ensure_directory(BOOTSTRAP_DIR, mode=0o700, uid=0, gid=0)
-    ensure_directory(
-        ACCESS_GITHUB_KEY.parent,
-        mode=0o700,
-        uid=100000,
-        gid=100000,
-    )
 
 
 def atomic_copy(
@@ -112,8 +109,8 @@ def same_content(first: Path, second: Path) -> bool:
 def _select_git_source() -> Path:
     for candidate in (
         RECOVERY_GITHUB_KEY,
-        ACCESS_GITHUB_KEY,
         BOOTSTRAP_GITHUB_KEY,
+        LEGACY_ACCESS_GITHUB_KEY,
     ):
         if nonempty(candidate):
             return candidate
@@ -123,13 +120,13 @@ def _select_git_source() -> Path:
 
 
 def prepare_git_recovery() -> None:
-    """Синхронизировать аварийную, bootstrap- и access-копии Git key."""
+    """Синхронизировать каноническую recovery- и bootstrap-копии Git key."""
     source = _select_git_source()
 
     for candidate in (
         RECOVERY_GITHUB_KEY,
-        ACCESS_GITHUB_KEY,
         BOOTSTRAP_GITHUB_KEY,
+        LEGACY_ACCESS_GITHUB_KEY,
     ):
         if nonempty(candidate) and not same_content(source, candidate):
             raise RecoveryError(
@@ -140,17 +137,10 @@ def prepare_git_recovery() -> None:
     prepare_git_directories()
     atomic_copy(source, RECOVERY_GITHUB_KEY, mode=0o600, uid=0, gid=0)
     atomic_copy(source, BOOTSTRAP_GITHUB_KEY, mode=0o600, uid=0, gid=0)
-    atomic_copy(
-        source,
-        ACCESS_GITHUB_KEY,
-        mode=0o600,
-        uid=100000,
-        gid=100000,
-    )
 
 
 def restore_git_access() -> None:
-    """Восстановить bootstrap/access-копии только из PVE-only recovery."""
+    """Восстановить bootstrap Git key только из PVE-only recovery."""
     if not nonempty(RECOVERY_GITHUB_KEY):
         raise RecoveryError(
             f"Отсутствует аварийная копия GitHub Deploy Key: {RECOVERY_GITHUB_KEY}"
@@ -162,13 +152,6 @@ def restore_git_access() -> None:
         mode=0o600,
         uid=0,
         gid=0,
-    )
-    atomic_copy(
-        RECOVERY_GITHUB_KEY,
-        ACCESS_GITHUB_KEY,
-        mode=0o600,
-        uid=100000,
-        gid=100000,
     )
 
 
@@ -215,8 +198,6 @@ def verify_recovery_state(*, require_approle: bool = True) -> None:
         OPENBAO_RAFT_DIR,
         RECOVERY_DIR,
     ]
-    if require_approle:
-        required_dirs.append(ACCESS_DIR)
     missing_dirs = [str(path) for path in required_dirs if not path.is_dir()]
     if missing_dirs:
         raise RecoveryError(
@@ -234,7 +215,6 @@ def verify_recovery_state(*, require_approle: bool = True) -> None:
             (
                 OPENBAO_SSH_ACCESS,
                 OPENBAO_KV_ACCESS,
-                ACCESS_GITHUB_KEY,
             )
         )
     missing_files = [
@@ -257,6 +237,30 @@ def verify_recovery_state(*, require_approle: bool = True) -> None:
         raise RecoveryError(
             "В pool managed есть объекты, но постоянный OpenTofu state отсутствует"
         )
+
+
+def cleanup_transition_state() -> None:
+    """Удалить старые файловые secret-источники после полной проверки."""
+
+    verify_recovery_state(require_approle=True)
+    if nonempty(LEGACY_ACCESS_GITHUB_KEY) and not same_content(
+        RECOVERY_GITHUB_KEY,
+        LEGACY_ACCESS_GITHUB_KEY,
+    ):
+        raise RecoveryError(
+            "Старый access Git key отличается от recovery-копии; "
+            "автоматическое удаление запрещено"
+        )
+
+    for path in (
+        LEGACY_ACCESS_GITHUB_DIR,
+        LEGACY_ACCESS_PVE_API_DIR,
+        LEGACY_STATE_SECRETS_DIR,
+    ):
+        if path.is_symlink() or path.is_file():
+            path.unlink(missing_ok=True)
+        elif path.is_dir():
+            shutil.rmtree(path)
 
 
 def acquire_lock():
@@ -285,7 +289,7 @@ def main() -> int:
     mode.add_argument(
         "--restore-git-access",
         action="store_true",
-        help="Восстановить bootstrap/access Git key из pve-only",
+        help="Восстановить bootstrap Git key из pve-only",
     )
     mode.add_argument(
         "--preflight",
@@ -296,6 +300,11 @@ def main() -> int:
         "--check",
         action="store_true",
         help="Проверить полную готовность recovery-контура",
+    )
+    mode.add_argument(
+        "--cleanup-transition",
+        action="store_true",
+        help="Удалить проверенные переходные файловые secret-источники",
     )
     args = parser.parse_args()
 
@@ -314,6 +323,9 @@ def main() -> int:
             elif args.preflight:
                 verify_recovery_state(require_approle=False)
                 print("[ОК] Минимальное recovery-состояние 910 сохранно")
+            elif args.cleanup_transition:
+                cleanup_transition_state()
+                print("[ОК] Переходные файловые secret-источники удалены")
             else:
                 verify_recovery_state(require_approle=True)
                 print("[ОК] Аварийный контур 910 готов")

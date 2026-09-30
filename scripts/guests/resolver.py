@@ -11,10 +11,6 @@ from typing import Any
 MISSING = object()
 DHCP = "dhcp"
 
-MANAGEMENT_ORDER = (
-    "ssh_identity",
-    "project_repo_read",
-)
 PROFILE_FEATURE_ORDER = (
     "container-host",
 )
@@ -136,43 +132,6 @@ def resolve_management_ip(
     return parse_bare_ipv4(override), "guest"
 
 
-def _canonical_source_list(
-    source: dict,
-    key: str,
-    allowed: tuple[str, ...],
-) -> tuple[str, ...]:
-    value = source.get(key)
-    if value is None:
-        return ()
-    if not isinstance(value, list) or not value:
-        raise GuestConfigError(f"{key} должен быть непустым list")
-    if not source.get("profile"):
-        raise GuestConfigError(f"{key} разрешён только гостю с profile")
-    if any(not isinstance(item, str) for item in value):
-        raise GuestConfigError(f"{key} должен содержать только строки")
-    unknown = sorted(set(value) - set(allowed))
-    if unknown:
-        raise GuestConfigError(
-            f"неизвестные элементы {key}: " + ", ".join(unknown)
-        )
-    if len(value) != len(set(value)):
-        raise GuestConfigError(f"{key} не должен содержать дубликаты")
-    return tuple(item for item in allowed if item in value)
-
-
-def resolve_management(
-    source: dict,
-    defaults: dict,
-    profile: dict,
-) -> tuple[str, ...]:
-    """Вернуть канонический список individual-only management-возможностей."""
-    if "management" in defaults.get("defaults", {}):
-        raise GuestConfigError("defaults не должны задавать management")
-    if "management" in profile:
-        raise GuestConfigError("profile не должен задавать management")
-    return _canonical_source_list(source, "management", MANAGEMENT_ORDER)
-
-
 def resolve_profile_features(profile: dict) -> tuple[str, ...]:
     """Нормализовать список высокоуровневых features профиля."""
     value = profile.get("features")
@@ -247,7 +206,6 @@ def _build_effective_guest(
 
     effective = deep_merge(defaults_fragment, profile)
     effective = deep_merge(effective, source)
-    effective["management"] = list(resolve_management(source, defaults, profile))
     if kind == "lxc":
         effective["features"] = list(features)
 

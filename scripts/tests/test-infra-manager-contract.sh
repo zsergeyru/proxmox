@@ -5,6 +5,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 ANSIBLE_CONFIG="$ROOT/ansible.cfg"
 ANSIBLE_PLAYBOOK="$ROOT/automation/ansible/playbooks/configure-guest.yml"
 ANSIBLE_LINUX_BASE="$ROOT/automation/ansible/roles/linux_base/tasks/main.yml"
+PROJECT_GIT_TASKS="$ROOT/automation/ansible/roles/linux_base/tasks/project_git.yml"
 ANSIBLE_GUEST_LAYOUT="$ROOT/automation/ansible/roles/guest_layout/tasks/main.yml"
 ANSIBLE_DOCKER="$ROOT/automation/ansible/roles/docker/tasks/main.yml"
 ANSIBLE_RUNTIME_DIR="$ROOT/automation/ansible/roles/infra_manager/tasks"
@@ -79,7 +80,7 @@ for task_file in "${ANSIBLE_RUNTIME_PARTS[@]}"; do
     cat "$ANSIBLE_RUNTIME_DIR/$task_file" >> "$ANSIBLE_RUNTIME"
 done
 
-for file in "$PY_COMMON" "$ANSIBLE_CONFIG" "$ANSIBLE_PLAYBOOK" "$ANSIBLE_LINUX_BASE" "$ANSIBLE_GUEST_LAYOUT" "$ANSIBLE_DOCKER" "$ANSIBLE_RUNTIME" "$PY_SETTINGS" "$PY_SEMAPHORE" "$PY_STATUS" "$PY_PVE" "$STATUS" "$ACCESS" "$LIFECYCLE" "$ACTIVATE_RUNTIME" "$BUILD_TEMPLATE" "$VERIFY_TEMPLATE" "$DEPLOY_GUEST" "$PY_OPENTOFU" "$PY_TEMPLATE" "$PY_TEMPLATE_BUILD" "$PY_TEMPLATE_VERIFY" "$COMPOSE" "$OPENBAO_CONFIG" "$OPENBAO_HOST" "$OPENBAO_STARTUP_COMMAND" "$OPENBAO_STARTUP_SERVICE" "$OPENBAO_JOB" "$MACHINE_SSH_JOB" "$MACHINE_SSH_COMMAND" "$MACHINE_SSH_SERVICE" "$MACHINE_SSH_TIMER" "$PY_MACHINE_SSH" "$PY_ACCESS_POLICY" "$PY_OPENBAO" "$PY_RECOVERY" "$RECOVERY_HOST" "$DOCKERFILE" "$REQ" "$PLAN" "$PY_PVE_HOST" "$OPENTOFU_LOCK" "$GUEST_MANIFEST" "$PROVISION" "$SSH_CONFIG"; do
+for file in "$PY_COMMON" "$ANSIBLE_CONFIG" "$ANSIBLE_PLAYBOOK" "$ANSIBLE_LINUX_BASE" "$PROJECT_GIT_TASKS" "$ANSIBLE_GUEST_LAYOUT" "$ANSIBLE_DOCKER" "$ANSIBLE_RUNTIME" "$PY_SETTINGS" "$PY_SEMAPHORE" "$PY_STATUS" "$PY_PVE" "$STATUS" "$ACCESS" "$LIFECYCLE" "$ACTIVATE_RUNTIME" "$BUILD_TEMPLATE" "$VERIFY_TEMPLATE" "$DEPLOY_GUEST" "$PY_OPENTOFU" "$PY_TEMPLATE" "$PY_TEMPLATE_BUILD" "$PY_TEMPLATE_VERIFY" "$COMPOSE" "$OPENBAO_CONFIG" "$OPENBAO_HOST" "$OPENBAO_STARTUP_COMMAND" "$OPENBAO_STARTUP_SERVICE" "$OPENBAO_JOB" "$MACHINE_SSH_JOB" "$MACHINE_SSH_COMMAND" "$MACHINE_SSH_SERVICE" "$MACHINE_SSH_TIMER" "$PY_MACHINE_SSH" "$PY_ACCESS_POLICY" "$PY_OPENBAO" "$PY_RECOVERY" "$RECOVERY_HOST" "$DOCKERFILE" "$REQ" "$PLAN" "$PY_PVE_HOST" "$OPENTOFU_LOCK" "$GUEST_MANIFEST" "$PROVISION" "$SSH_CONFIG"; do
     [[ -s "$file" ]] || die "Отсутствует обязательный файл: $file"
 done
 
@@ -88,16 +89,18 @@ SEMAPHORE_TASKS="$ANSIBLE_RUNTIME_DIR/semaphore.yml"
 
 runtime_secret_dir_line="$(grep -nF -- '- name: Подготовить временную область рабочих секретов' "$PVE_ACCESS_TASKS" | head -n1 | cut -d: -f1 || true)"
 openbao_restore_line="$(grep -nF -- '- name: Восстановить рабочие секреты из OpenBao при повторной настройке' "$PVE_ACCESS_TASKS" | head -n1 | cut -d: -f1 || true)"
-pve_stage_line="$(grep -nF -- '- name: Подготовить PVE API credential до первой миграции в OpenBao' "$PVE_ACCESS_TASKS" | head -n1 | cut -d: -f1 || true)"
-pve_check_line="$(grep -nF -- '- name: Проверить постоянный доступ к PVE' "$PVE_ACCESS_TASKS" | head -n1 | cut -d: -f1 || true)"
-[[ -n "$runtime_secret_dir_line" && -n "$openbao_restore_line" && -n "$pve_stage_line" && -n "$pve_check_line" ]] \
-    || die "pve_access.yml должен готовить рабочие секреты до проверки PVE API"
-(( runtime_secret_dir_line < openbao_restore_line && openbao_restore_line < pve_stage_line && pve_stage_line < pve_check_line )) \
-    || die "Нарушен порядок восстановления PVE API credential перед его проверкой"
-grep -Fq 'dest: "{{ provision.access_materialization.pve.persistent_credential }}"' "$PVE_ACCESS_TASKS" \
-    || die "Переходный PVE API credential должен попадать в рабочий путь из provision.yaml"
-if grep -Fq -- '- name: Подготовить PVE API credential до первой миграции в OpenBao' "$SEMAPHORE_TASKS"; then
-    die "Подготовка PVE API credential не должна откладываться до semaphore.yml"
+pve_runtime_check_line="$(grep -nF -- '- name: Проверить рабочий PVE API credential после OpenBao' "$PVE_ACCESS_TASKS" | head -n1 | cut -d: -f1 || true)"
+pve_bootstrap_check_line="$(grep -nF -- '- name: Проверить временный bootstrap PVE API credential' "$PVE_ACCESS_TASKS" | head -n1 | cut -d: -f1 || true)"
+pve_stage_line="$(grep -nF -- '- name: Подготовить PVE API credential первого запуска' "$PVE_ACCESS_TASKS" | head -n1 | cut -d: -f1 || true)"
+pve_check_line="$(grep -nF -- '- name: Проверить рабочий доступ к PVE' "$PVE_ACCESS_TASKS" | head -n1 | cut -d: -f1 || true)"
+[[ -n "$runtime_secret_dir_line" && -n "$openbao_restore_line" && -n "$pve_runtime_check_line" && -n "$pve_bootstrap_check_line" && -n "$pve_stage_line" && -n "$pve_check_line" ]] \
+    || die "pve_access.yml должен сначала использовать OpenBao и только затем bootstrap fallback"
+(( runtime_secret_dir_line < openbao_restore_line && openbao_restore_line < pve_runtime_check_line && pve_runtime_check_line < pve_bootstrap_check_line && pve_bootstrap_check_line < pve_stage_line && pve_stage_line < pve_check_line )) \
+    || die "Нарушен порядок OpenBao -> bootstrap fallback -> итоговая проверка PVE API"
+grep -Fq 'dest: "{{ provision.access_materialization.pve.runtime_credential }}"' "$PVE_ACCESS_TASKS" \
+    || die "Bootstrap PVE API credential должен попадать только во временный runtime path"
+if grep -Fq '/mnt/pve-access/pve-api' "$ANSIBLE_RUNTIME"; then
+    die "Переходный access/pve-api не должен использоваться Ansible"
 fi
 
 RECOVERY_TASKS="$ANSIBLE_RUNTIME_DIR/recovery.yml"
@@ -111,9 +114,23 @@ grep -Fq -- '--restore-git-access' "$RECOVERY_HOST" \
     || die "PVE recovery helper должен уметь восстанавливать bootstrap Git-доступ"
 grep -Fq 'check_recovery_contour(node)' "$PY_OPENBAO" \
     || die "Initialize OpenBao должен завершаться полной recovery-проверкой"
+grep -Fq 'cleanup_transition_state(node)' "$PY_OPENBAO" \
+    || die "Initialize OpenBao должен удалять проверенные остатки старой схемы"
+grep -Fq -- '--cleanup-transition' "$RECOVERY_HOST" \
+    || die "PVE recovery helper должен иметь безопасную очистку старой схемы"
 
 grep -Fq 'roles_path = automation/ansible/roles' "$ANSIBLE_CONFIG" \
     || die "ansible.cfg должен задавать единый путь к roles"
+grep -Fq 'ansible.builtin.include_tasks: project_git.yml' "$ANSIBLE_LINUX_BASE" \
+    || die "linux_base должна подключать централизованную Git read-настройку"
+grep -Fq 'path: /etc/proxmox-guest/credentials' "$PROJECT_GIT_TASKS" \
+    || die "Git migration должна удалять старый credentials-каталог"
+grep -Fq 'dest: /etc/proxmox-guest/git/github-proxmox-read' "$PROJECT_GIT_TASKS" \
+    || die "Git read credential должен устанавливаться в новый каталог"
+grep -Fq 'git@github-proxmox-read:zsergeyru/proxmox.git' "$PROJECT_GIT_TASKS" \
+    || die "Git read-настройка должна быть ограничена проектным репозиторием"
+grep -Fq 'git' "$PROJECT_GIT_TASKS" \
+    || die "Git read-настройка должна проверять реальный доступ"
 [[ ! -e "$ROOT/automation/ansible/tasks" ]] \
     || die "Старый каталог automation/ansible/tasks не должен возвращаться"
 
@@ -257,8 +274,16 @@ if "openbao-unseal-key" not in pve_only.get("contains", []):
 access = target_layout.get("access", {})
 if access.get("mode") != "ro" or access.get("guest_path") != "/mnt/pve-access":
     raise SystemExit("Данные доступа PVE должны подключаться в 910 только для чтения")
-if "pve-api-credential" not in access.get("contains", []):
-    raise SystemExit("Постоянный PVE API credential должен принадлежать access/ на PVE")
+access_contains = set(access.get("contains", []))
+for legacy in ("github-deploy-key", "pve-api-credential"):
+    if legacy in access_contains:
+        raise SystemExit(f"Переходный {legacy} не должен оставаться в access/")
+required_access = {"pve-root-ssh-key", "pve-known-hosts", "pve-ca"}
+if not required_access.issubset(access_contains):
+    raise SystemExit("В access/ отсутствует постоянный несекретный/SSH набор 910")
+pve_only = target_layout.get("pve_only", {})
+if "recovery-github-deploy-key" not in set(pve_only.get("contains", [])):
+    raise SystemExit("PVE-only должен содержать канонический recovery Git key")
 state = target_layout.get("state", {})
 if state.get("mode") != "rw" or state.get("guest_path") != "/mnt/persistent-state":
     raise SystemExit("Постоянное состояние 910 должно иметь отдельный rw mount")
@@ -267,17 +292,18 @@ required_state = {
     "opentofu-state",
     "semaphore-data",
     "ansible-identity",
-    "infra-manager-secrets",
 }
-if not required_state.issubset(set(state.get("contains", []))):
+state_contains = set(state.get("contains", []))
+if not required_state.issubset(state_contains):
     raise SystemExit("Целевая схема не содержит весь обязательный набор состояния 910")
+if "infra-manager-secrets" in state_contains:
+    raise SystemExit("Постоянный state/secrets не должен возвращаться")
 guest_local = set(target_layout.get("guest_local", {}).get("contains", []))
 if "git-checkout" not in guest_local:
     raise SystemExit("Git checkout должен оставаться локальным и воспроизводимым внутри 910")
 bindings = state.get("bindings", [])
 binding_pairs = {(item.get("source"), item.get("target")) for item in bindings}
 required_bindings = {
-    ("/mnt/persistent-state/secrets", "/etc/infra-manager/secrets"),
     ("/mnt/persistent-state/ansible", "/etc/infra-manager/ansible"),
     ("/mnt/persistent-state/semaphore", "/var/lib/infra-manager/semaphore"),
     ("/mnt/persistent-state/opentofu", "/var/lib/infra-manager/opentofu"),
@@ -285,6 +311,18 @@ required_bindings = {
 }
 if not required_bindings.issubset(binding_pairs):
     raise SystemExit("Не зафиксированы все привязки постоянного состояния")
+if any(
+    "/mnt/persistent-state/secrets" in str(item)
+    or "/etc/infra-manager/secrets" in str(item)
+    for item in bindings
+):
+    raise SystemExit("Старое постоянное хранилище secrets не должно подключаться")
+if "transition_sources" in provision:
+    raise SystemExit("provision.yaml не должен содержать transition_sources")
+if provision["access_materialization"]["pve"]["staging_credential"] != "/run/infra-manager/bootstrap-secrets/pve-api.env":
+    raise SystemExit("Bootstrap PVE credential должен быть только временным")
+if provision["access_materialization"]["github"]["staging_credential"] != "/run/infra-manager/bootstrap-secrets/github_proxmox_repo_ed25519":
+    raise SystemExit("Bootstrap Git credential должен быть только временным")
 
 if 'semaphore_version: str = "v2.18.30"' not in settings_text:
     raise SystemExit("Версия Semaphore в settings.py расходится с provision.yaml")
@@ -360,7 +398,7 @@ if not required_openbao_volumes.issubset(set(compose_openbao.get("volumes", []))
 
 required_runtime_fragments = (
     "provision.access_materialization.pve.ca_source",
-    "provision.access_materialization.pve.persistent_credential",
+    "provision.access_materialization.pve.runtime_credential",
     "provision.paths.ansible_identity",
     "provision.paths.semaphore_persistent_data",
     "provision.paths.opentofu_persistent_state_dir",
@@ -622,10 +660,11 @@ if directory_block not in text:
 
 targets = {
     "/run/infra-manager/secrets/pve-api.env": (
-        'dest: "{{ provision.access_materialization.pve.persistent_credential }}"',
+        'dest: "{{ provision.access_materialization.pve.runtime_credential }}"',
         "dest: /run/infra-manager/secrets/pve-api.env",
     ),
     "/run/infra-manager/secrets/github_proxmox_repo_ed25519": (
+        'dest: "{{ provision.access_materialization.github.private_key }}"',
         "dest: /run/infra-manager/secrets/github_proxmox_repo_ed25519",
     ),
     "/run/infra-manager/secrets/semaphore-server.env": (
@@ -633,9 +672,6 @@ targets = {
     ),
     "/run/infra-manager/secrets/initial-admin-password": (
         "dest: /run/infra-manager/secrets/initial-admin-password",
-    ),
-    "/run/infra-manager/secrets/semaphore-api-token": (
-        "dest: /run/infra-manager/secrets/semaphore-api-token",
     ),
 }
 for target, markers in targets.items():

@@ -30,10 +30,6 @@ class Paths:
         return self.repo_root / "infrastructure/guests/910-infra-manager/compose"
 
     @property
-    def secret_dir(self) -> Path:
-        return self.config_dir / "secrets"
-
-    @property
     def runtime_secret_dir(self) -> Path:
         return Path("/run/infra-manager/secrets")
 
@@ -117,10 +113,6 @@ class Paths:
     @property
     def admin_password_file(self) -> Path:
         return self.runtime_secret_dir / "initial-admin-password"
-
-    @property
-    def admin_password_shown_file(self) -> Path:
-        return self.secret_dir / ".initial-admin-password-shown"
 
     @property
     def semaphore_api_token_file(self) -> Path:

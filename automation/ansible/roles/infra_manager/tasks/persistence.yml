@@ -15,6 +15,36 @@
       - "{{ provision.persistence.target_layout.state.guest_path }}"
   changed_when: false
 
+- name: Убрать переходное подключение старых secret-файлов
+  ansible.builtin.shell: |
+    set -eu
+    target=/etc/infra-manager/secrets
+    legacy=/mnt/persistent-state/secrets
+    if [ -L "$target" ]; then
+      [ "$(readlink -f "$target")" = "$legacy" ] || {
+        echo "ОШИБКА: $target указывает не на старый каталог проекта" >&2
+        exit 42
+      }
+      rm -f "$target"
+      echo "removed:$target"
+      exit 0
+    fi
+    if [ -d "$target" ]; then
+      [ -z "$(find "$target" -mindepth 1 -print -quit)" ] || {
+        echo "ОШИБКА: $target содержит неизвестные данные" >&2
+        exit 43
+      }
+      rmdir "$target"
+      echo "removed:$target"
+    elif [ -e "$target" ]; then
+      echo "ОШИБКА: $target имеет неожиданный тип" >&2
+      exit 44
+    fi
+  args:
+    executable: /bin/bash
+  register: legacy_secret_link
+  changed_when: "'removed:' in legacy_secret_link.stdout"
+
 - name: Проверить старые пути перед подключением состояния
   ansible.builtin.shell: |
     set -eu

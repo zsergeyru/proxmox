@@ -431,6 +431,9 @@ class ApplyHarness(BootstrapHost):
     def handoff_existing_infra(self) -> None:
         self.events.append("handoff_existing")
 
+    def initialize_infra_openbao(self) -> None:
+        self.events.append("initialize_openbao")
+
     def verify_infra_ready(self, *, quiet: bool = False) -> None:
         self.events.append("verify_ready:quiet" if quiet else "verify_ready")
 
@@ -460,6 +463,7 @@ def test_new_install_flow() -> None:
             "deploy:base",
             "handoff:apply",
             "deploy:provision",
+            "initialize_openbao",
             "verify_ready:quiet",
             "finalize_runner",
             "check_ready",
@@ -483,6 +487,7 @@ def test_existing_without_bootstrap_state() -> None:
             "handoff_existing",
             "ensure_runner_ssh",
             "deploy:existing",
+            "initialize_openbao",
             "verify_ready:quiet",
             "finalize_runner",
             "check_ready",
@@ -569,6 +574,7 @@ def test_recover_existing_without_state() -> None:
             "handoff_existing",
             "ensure_runner_ssh",
             "deploy:existing",
+            "initialize_openbao",
             "verify_ready:quiet",
             "finalize_runner",
             "check_ready",
@@ -607,9 +613,6 @@ class RecoveryStateHarness(BootstrapHost):
         self.host_openbao_unseal_key = self.host_openbao_dir / "unseal.key"
         self.host_openbao_ssh_access = self.host_openbao_dir / "ssh-access.json"
         self.host_openbao_kv_access = self.host_openbao_dir / "kv-access.json"
-        self.host_access_github_key = (
-            self.host_access_dir / "github" / "github_proxmox_repo_ed25519"
-        )
         self.host_state_openbao_dir = self.host_state_dir / "openbao"
         self.host_state_openbao_raft_dir = self.host_state_openbao_dir / "raft"
         self.host_state_opentofu_file = (
@@ -631,7 +634,6 @@ def _prepare_complete_recovery_state(host: RecoveryStateHarness) -> None:
     for directory in (
         host.host_openbao_dir,
         host.host_recovery_dir,
-        host.host_access_github_key.parent,
         host.host_state_openbao_raft_dir,
         host.host_state_opentofu_file.parent,
         host.host_state_semaphore_db.parent,
@@ -642,7 +644,6 @@ def _prepare_complete_recovery_state(host: RecoveryStateHarness) -> None:
         host.host_recovery_github_key,
         host.host_openbao_ssh_access,
         host.host_openbao_kv_access,
-        host.host_access_github_key,
         host.host_state_openbao_raft_dir / "raft.db",
         host.host_state_opentofu_file,
         host.host_state_semaphore_db,
@@ -673,9 +674,11 @@ def test_recovery_preflight_allows_missing_access_directory() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         host = RecoveryStateHarness(Path(tmp))
         _prepare_complete_recovery_state(host)
-        import shutil
 
-        shutil.rmtree(host.host_access_dir)
+        if host.host_access_dir.exists():
+            raise AssertionError(
+                "Recovery-state больше не должен требовать каталог access/"
+            )
         host.verify_recovery_state()
 
 

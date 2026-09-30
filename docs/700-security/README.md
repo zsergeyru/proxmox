@@ -12,7 +12,7 @@
 | [`730-git-access.md`](730-git-access.md) | Git-доступ проекта и правила чтения репозитория |
 | [`740-openbao.md`](740-openbao.md) | OpenBao, SSH-центры доверия и служебные данные подписи |
 | [`750-access-contract.md`](750-access-contract.md) | единый машинный контракт «кто → к чему → с каким правом» |
-| [`780-implementation-status.md`](780-implementation-status.md) | текущее состояние реализации и переходные ограничения |
+| [`780-implementation-status.md`](780-implementation-status.md) | текущее состояние реализации и известные ограничения |
 | [`790-decisions.md`](790-decisions.md) | причины ключевых решений по безопасности |
 
 ## Порядок чтения

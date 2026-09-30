@@ -5,7 +5,7 @@ additionalProperties: false
 required: [schema_version, vmid, name, description]
 properties:
   schema_version:
-    const: 11
+    const: 12
   vmid:
     type: integer
     minimum: 100
@@ -32,8 +32,6 @@ properties:
     $ref: '#/$defs/sourceNetwork'
   boot:
     $ref: '#/$defs/boot'
-  management:
-    $ref: '#/$defs/management'
 $defs:
   resources:
     type: object
@@ -80,12 +78,6 @@ $defs:
       startup_delay_seconds:
         type: integer
         minimum: 0
-  management:
-    type: array
-    minItems: 1
-    uniqueItems: true
-    items:
-      enum: [ssh_identity, project_repo_read]
 allOf:
   - if:
       required: [profile]
@@ -94,10 +86,6 @@ allOf:
       properties:
         resources:
           required: [cores, memory_mb, disk_size_gb]
-  - if:
-      required: [management]
-    then:
-      required: [profile]
   - if:
       required: [pve_management]
     then:

@@ -11,3 +11,7 @@
 
 - name: Настроить доверие к SSH-центру доступа
   ansible.builtin.include_tasks: ssh_trust.yml
+
+- name: Настроить доступ чтения к проектному Git
+  ansible.builtin.include_tasks: project_git.yml
+  when: (provision_phase | default('full')) == 'full'

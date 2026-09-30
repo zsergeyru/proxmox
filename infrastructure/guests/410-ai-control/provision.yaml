@@ -58,7 +58,6 @@ persistence:
   backup_required:
     - /opt/ai-control/state
     - /etc/proxmox-guest/ssh
-    - /etc/proxmox-guest/credentials
 
   reproducible:
     - /opt/ai-control/repos/proxmox
