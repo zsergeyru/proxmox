@@ -165,14 +165,14 @@ known_hosts.parent.mkdir(parents=True, exist_ok=True)
 client_config.parent.mkdir(parents=True, exist_ok=True)
 known_content = f"@cert-authority {host_pattern} {host_ca}\n"
 config_content = (
-    f"Host {host_pattern}\\n"
-    "    User root\\n"
-    "    IdentityFile /etc/proxmox-guest/ssh/machine_ed25519\\n"
-    "    CertificateFile /etc/proxmox-guest/ssh/machine_ed25519-cert.pub\\n"
-    "    IdentitiesOnly yes\\n"
-    "    UserKnownHostsFile /etc/ssh/project-machine-known-hosts\\n"
-    "    GlobalKnownHostsFile /dev/null\\n"
-    "    StrictHostKeyChecking yes\\n"
+    f"Host {host_pattern}\n"
+    "    User root\n"
+    "    IdentityFile /etc/proxmox-guest/ssh/machine_ed25519\n"
+    "    CertificateFile /etc/proxmox-guest/ssh/machine_ed25519-cert.pub\n"
+    "    IdentitiesOnly yes\n"
+    "    UserKnownHostsFile /etc/ssh/project-machine-known-hosts\n"
+    "    GlobalKnownHostsFile /dev/null\n"
+    "    StrictHostKeyChecking yes\n"
 )
 
 
@@ -351,7 +351,15 @@ def _running_guests(
         resource = client.find_vm(vmid)
         if resource is None or str(resource.get("status") or "") != "running":
             continue
-        actual_kind = "vm" if resource.get("type") == "qemu" else "lxc"
+        resource_type = resource.get("type")
+        if resource_type == "qemu":
+            actual_kind = "vm"
+        elif resource_type == "lxc":
+            actual_kind = "lxc"
+        else:
+            raise InfraManagerError(
+                f"guest:{vmid} имеет неизвестный тип PVE: {resource_type!r}"
+            )
         if actual_kind != record.kind:
             raise InfraManagerError(
                 f"guest:{vmid} имеет неожиданный тип в PVE: {resource.get('type')}"
