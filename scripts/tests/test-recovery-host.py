@@ -85,6 +85,9 @@ def test_prepare_git_recovery() -> None:
         assert module.BOOTSTRAP_GITHUB_KEY.read_bytes() == expected
         assert module.ACCESS_GITHUB_KEY.read_bytes() == expected
         assert module.RECOVERY_GITHUB_KEY.stat().st_mode & 0o777 == 0o600
+        assert module.RECOVERY_DIR.stat().st_mode & 0o777 == 0o700
+        assert module.BOOTSTRAP_DIR.stat().st_mode & 0o777 == 0o700
+        assert module.ACCESS_GITHUB_KEY.parent.stat().st_mode & 0o777 == 0o700
 
 
 def test_prepare_rejects_divergent_keys() -> None:
@@ -113,6 +116,8 @@ def test_restore_git_access_from_recovery() -> None:
 
         assert module.BOOTSTRAP_GITHUB_KEY.read_text() == "git-key\n"
         assert module.ACCESS_GITHUB_KEY.read_text() == "git-key\n"
+        assert module.BOOTSTRAP_DIR.stat().st_mode & 0o777 == 0o700
+        assert module.ACCESS_GITHUB_KEY.parent.stat().st_mode & 0o777 == 0o700
 
 
 def test_verify_recovery_state() -> None:
