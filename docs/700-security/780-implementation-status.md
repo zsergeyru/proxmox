@@ -128,7 +128,9 @@ Root SSH-ключ намеренно не перенесён в KV: он нуж�
 - аварийная PVE-only копия read-only GitHub Deploy Key;
 - восстановление bootstrap/access Git-копий без работающего 910;
 - строгий recovery-preflight до изменения существующего или пересоздания 910;
-- проверка `unseal.key`, OpenBao AppRole-данных, Raft state и Semaphore DB;
+- preflight-проверка аварийного Git key, `unseal.key`, Raft state и Semaphore DB;
+- полный check восстановленных OpenBao AppRole-данных после инициализации;
+- восстановление потерянных `ssh-access.json` и `kv-access.json` из сохранного OpenBao через временный root token;
 - обязательность OpenTofu state при наличии объектов в `pool managed`;
 - допустимость отсутствия OpenTofu state на действительно пустой новой установке;
 - запрет автоматической подмены recovery пустой установкой;
