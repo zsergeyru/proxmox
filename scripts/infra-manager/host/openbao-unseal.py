@@ -1432,6 +1432,8 @@ import urllib.request
 BASE = "http://127.0.0.1:8200"
 MOUNT = "infra-secrets"
 TARGET = pathlib.Path("/run/infra-manager/secrets")
+RUNTIME_UID = 1001
+RUNTIME_GID = 0
 payload = json.loads(sys.stdin.read())
 item = payload.get("kv-reader") if isinstance(payload, dict) else None
 if not isinstance(item, dict):
@@ -1474,8 +1476,10 @@ def read_secret(path, token):
 
 def atomic_write(name, value):
     TARGET.mkdir(parents=True, exist_ok=True)
-    os.chmod(TARGET.parent, 0o700)
-    os.chmod(TARGET, 0o700)
+    os.chown(TARGET.parent, 0, 0)
+    os.chmod(TARGET.parent, 0o750)
+    os.chown(TARGET, 0, 0)
+    os.chmod(TARGET, 0o750)
     fd, temporary_name = tempfile.mkstemp(
         prefix=f".{name}.",
         dir=TARGET,
@@ -1483,6 +1487,7 @@ def atomic_write(name, value):
     )
     temporary = pathlib.Path(temporary_name)
     try:
+        os.fchown(fd, RUNTIME_UID, RUNTIME_GID)
         os.fchmod(fd, 0o600)
         with os.fdopen(fd, "w", encoding="utf-8") as stream:
             stream.write(value)
@@ -1491,6 +1496,7 @@ def atomic_write(name, value):
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(temporary, TARGET / name)
+        os.chown(TARGET / name, RUNTIME_UID, RUNTIME_GID)
         os.chmod(TARGET / name, 0o600)
     finally:
         temporary.unlink(missing_ok=True)
@@ -1645,14 +1651,15 @@ try:
     }
     if not required.issubset(current):
         raise SystemExit("OpenBao Semaphore secret is incomplete")
-    updated = dict(current)
-    updated["api_token"] = api_token
-    request(
-        "POST",
-        f"/v1/{MOUNT}/data/services/semaphore",
-        {"data": updated},
-        token=client_token,
-    )
+    if current.get("api_token") != api_token:
+        updated = dict(current)
+        updated["api_token"] = api_token
+        request(
+            "POST",
+            f"/v1/{MOUNT}/data/services/semaphore",
+            {"data": updated},
+            token=client_token,
+        )
 finally:
     request(
         "POST",
