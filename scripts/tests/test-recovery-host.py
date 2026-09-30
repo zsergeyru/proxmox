@@ -133,6 +133,27 @@ def test_verify_recovery_state() -> None:
                 )
 
 
+def test_preflight_allows_missing_approle_files() -> None:
+    module = load_module()
+    with tempfile.TemporaryDirectory() as tmp:
+        configure_paths(module, Path(tmp))
+        prepare_complete_state(module)
+        module.OPENBAO_SSH_ACCESS.unlink()
+        module.OPENBAO_KV_ACCESS.unlink()
+
+        with patch.object(module, "managed_guests_exist", return_value=False):
+            module.verify_recovery_state(require_approle=False)
+
+            try:
+                module.verify_recovery_state(require_approle=True)
+            except module.RecoveryError as exc:
+                assert "ssh-access.json" in str(exc) or "kv-access.json" in str(exc)
+            else:
+                raise AssertionError(
+                    "Полный recovery-check должен требовать восстановленные AppRole-файлы"
+                )
+
+
 def test_opentofu_state_required_only_for_managed_guests() -> None:
     module = load_module()
     with tempfile.TemporaryDirectory() as tmp:
@@ -160,6 +181,7 @@ def main() -> None:
         test_prepare_rejects_divergent_keys,
         test_restore_git_access_from_recovery,
         test_verify_recovery_state,
+        test_preflight_allows_missing_approle_files,
         test_opentofu_state_required_only_for_managed_guests,
     )
     for test in tests:
