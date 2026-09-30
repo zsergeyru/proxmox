@@ -619,6 +619,9 @@ class RecoveryStateHarness(BootstrapHost):
     def ok(self, message: str) -> None:
         self.messages.append(message)
 
+    def managed_guests_exist(self) -> bool:
+        return False
+
 
 def _prepare_complete_recovery_state(host: RecoveryStateHarness) -> None:
     for directory in (
@@ -662,6 +665,27 @@ def test_recovery_preflight_rejects_partial_state() -> None:
                 raise
         else:
             raise AssertionError("Recovery без unseal key должен быть запрещён")
+
+
+class ManagedRecoveryStateHarness(RecoveryStateHarness):
+    def managed_guests_exist(self) -> bool:
+        return True
+
+
+def test_recovery_preflight_requires_opentofu_state_for_managed_pool() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        host = ManagedRecoveryStateHarness(Path(tmp))
+        _prepare_complete_recovery_state(host)
+        host.host_state_opentofu_file.unlink()
+        try:
+            host.verify_recovery_state()
+        except BootstrapError as exc:
+            if "OpenTofu state" not in str(exc):
+                raise
+        else:
+            raise AssertionError(
+                "Recovery managed-гостей без OpenTofu state должен быть запрещён"
+            )
 
 
 class MigrationGuardHarness(ApplyHarness):
@@ -791,6 +815,7 @@ def main() -> None:
         test_recover_unfinished_initial_state,
         test_recovery_preflight_accepts_complete_state,
         test_recovery_preflight_rejects_partial_state,
+        test_recovery_preflight_requires_opentofu_state_for_managed_pool,
         test_existing_layout_requires_manual_migration,
         test_check_mode_finishes_temporary_runner,
         test_remove_rejects_foreign_910,
