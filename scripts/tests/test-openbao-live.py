@@ -303,12 +303,6 @@ def main() -> None:
     if reduced_roles != {"roles": ["machine-910"]}:
         fail("Удаление машинной SSH-роли не подтверждено")
 
-    stale = http_json(
-        "GET",
-        "/v1/ssh-client-signer/roles/machine-410",
-        token=revoked_token if False else None,
-    ) if False else None
-
     host_role_result = json.loads(
         run_code(
             host.CONFIGURE_HOST_SIGNING_ROLE_CODE,
