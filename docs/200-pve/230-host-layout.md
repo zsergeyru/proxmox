@@ -76,11 +76,9 @@
 
 | Полный путь на PVE | Полный путь внутри 910 | Назначение |
 |---|---|---|
-| `/mnt/bindmounts/infra-manager/access/github/github_proxmox_repo_ed25519` | `/mnt/pve-access/github/github_proxmox_repo_ed25519` | переходная/bootstrap-копия Deploy Key; рабочий secret после миграции находится в OpenBao |
 | `/mnt/bindmounts/infra-manager/access/pve-host/root_ed25519` | `/mnt/pve-access/pve-host/root_ed25519` | закрытый root SSH-ключ 910 для PVE |
 | `/mnt/bindmounts/infra-manager/access/pve-host/root_ed25519.pub` | `/mnt/pve-access/pve-host/root_ed25519.pub` | производный открытый ключ той же SSH-идентичности |
 | `/mnt/bindmounts/infra-manager/access/pve-host/known_hosts` | `/mnt/pve-access/pve-host/known_hosts` | доверенный ключ SSH-сервера PVE |
-| `/mnt/bindmounts/infra-manager/access/pve-api/pve-api.env` | `/mnt/pve-access/pve-api/pve-api.env` | переходный источник первой миграции PVE API secret; рабочий secret находится в OpenBao |
 | `/mnt/bindmounts/infra-manager/access/ca/pve-root-ca.crt` | `/mnt/pve-access/ca/pve-root-ca.crt` | копия корневого сертификата PVE |
 
 ## 4. Изменяемое состояние 910
@@ -95,7 +93,6 @@
 
 | Полный путь на PVE | Путь после подключения в 910 | Назначение |
 |---|---|---|
-| `/mnt/bindmounts/infra-manager/state/secrets/` | `/mnt/persistent-state/secrets/` | переходные старые файлы секретов Semaphore до общей миграции старой схемы |
 | `/mnt/bindmounts/infra-manager/state/ansible/` | `/mnt/persistent-state/ansible/` | постоянная Ansible-идентичность |
 | `/mnt/bindmounts/infra-manager/state/semaphore/` | `/mnt/persistent-state/semaphore/` | база и служебные данные Semaphore |
 | `/mnt/bindmounts/infra-manager/state/opentofu/` | `/mnt/persistent-state/opentofu/` | постоянные данные и состояние OpenTofu |
@@ -116,7 +113,6 @@ mp1: /mnt/bindmounts/infra-manager/state,mp=/mnt/persistent-state
 
 | Источник внутри 910 | Рабочий путь |
 |---|---|
-| `/mnt/persistent-state/secrets` | `/etc/infra-manager/secrets` |
 | `/mnt/persistent-state/ansible` | `/etc/infra-manager/ansible` |
 | `/mnt/persistent-state/semaphore` | `/var/lib/infra-manager/semaphore` |
 | `/mnt/persistent-state/opentofu` | `/var/lib/infra-manager/opentofu` |
@@ -141,9 +137,7 @@ mp1: /mnt/bindmounts/infra-manager/state,mp=/mnt/persistent-state
 | `pve-only/openbao/` | `0700` | `0:0` |
 | `pve-only/recovery/` | `0700` | `0:0` |
 | `access/` | `0755` | `0:0` |
-| `access/github/` | `0700` | `100000:100000` |
 | `access/pve-host/` | `0700` | `101001:100000` |
-| `access/pve-api/` | `0700` | `100000:100000` |
 | `access/ca/` | `0755` | `100000:100000` |
 | `state/` | `0700` | `100000:100000` |
 
@@ -155,11 +149,9 @@ mp1: /mnt/bindmounts/infra-manager/state,mp=/mnt/persistent-state
 | `pve-only/openbao/ssh-access.json` | `0600` | `0:0` |
 | `pve-only/openbao/kv-access.json` | `0600` | `0:0` |
 | `pve-only/recovery/github_proxmox_repo_ed25519` | `0600` | `0:0` |
-| `access/github/github_proxmox_repo_ed25519` | `0600` | `100000:100000` |
 | `access/pve-host/root_ed25519` | `0600` | `101001:100000` |
 | `access/pve-host/root_ed25519.pub` | `0644` | `101001:100000` |
 | `access/pve-host/known_hosts` | `0644` | `101001:100000` |
-| `access/pve-api/pve-api.env` | `0600` | `100000:100000` |
 | `access/ca/pve-root-ca.crt` | `0644` | `100000:100000` |
 
 Права внутренних каталогов `state/`, которые привязываются к рабочим путям 910, задаются машинным контрактом `provision.yaml` и здесь повторно не описываются.
@@ -220,7 +212,7 @@ github_proxmox_repo_ed25519
 debian13-template.ref
 ```
 
-Исходный GitHub Deploy Key создаётся первоначальным контуром в этом каталоге, рабочая копия для штатного 910 помещается в `access/github/`, а независимая аварийная копия — в `pve-only/recovery/`.
+Исходный GitHub Deploy Key создаётся первоначальным контуром в этом каталоге. Каноническая аварийная копия сохраняется в `pve-only/recovery/`. Постоянная копия ключа в `access/` не создаётся.
 
 Каталог `/root/.config/proxmox-bootstrap/` не является каноническим хранилищем recovery-данных. Его Git key может быть восстановлен командой `infra-manager-recovery --restore-git-access`.
 
@@ -249,7 +241,17 @@ debian13-template.ref
 
 Каталог находится под `/run`, не является постоянным состоянием и после перезапуска создаётся заново из OpenBao.
 
-`infra-runtime` получает этот каталог только для чтения.
+Во время первоначального создания или восстановления 910 bootstrap может временно использовать:
+
+```text
+/run/infra-manager/bootstrap-secrets/
+├── pve-api.env
+└── github_proxmox_repo_ed25519
+```
+
+Эта область существует только до успешной инициализации OpenBao. После переноса секретов в OpenBao bootstrap удаляет её полностью.
+
+`infra-runtime` получает только `/run/infra-manager/secrets/` и только для чтения.
 
 Маркер `.openbao-materialized` не содержит секретных данных.
 
