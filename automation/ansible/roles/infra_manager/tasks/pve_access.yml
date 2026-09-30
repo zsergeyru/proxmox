@@ -1,7 +1,7 @@
 ---
 - name: Проверить сертификат PVE
   ansible.builtin.stat:
-    path: "{{ provision.access.pve.ca_source }}"
+    path: "{{ provision.access_materialization.pve.ca_source }}"
   register: pve_ca
 
 - name: Подтвердить сертификат PVE
@@ -14,7 +14,7 @@
 - name: Установить сертификат PVE в систему
   ansible.builtin.copy:
     remote_src: true
-    src: "{{ provision.access.pve.ca_source }}"
+    src: "{{ provision.access_materialization.pve.ca_source }}"
     dest: /usr/local/share/ca-certificates/pve-root-ca.crt
     owner: root
     group: root
@@ -29,7 +29,7 @@
 - name: Подготовить общий набор сертификатов
   ansible.builtin.shell: |
     set -eu
-    cat /etc/ssl/certs/ca-certificates.crt         "{{ provision.access.pve.ca_source }}"         > "{{ provision.paths.ca }}/ca-bundle.crt.tmp"
+    cat /etc/ssl/certs/ca-certificates.crt         "{{ provision.access_materialization.pve.ca_source }}"         > "{{ provision.paths.ca }}/ca-bundle.crt.tmp"
     chmod 0644 "{{ provision.paths.ca }}/ca-bundle.crt.tmp"
     mv "{{ provision.paths.ca }}/ca-bundle.crt.tmp" "{{ provision.paths.ca }}/ca-bundle.crt"
   args:
@@ -48,9 +48,9 @@
     argv:
       - ssh
       - -i
-      - "{{ provision.access.pve.root_ssh_private_key }}"
+      - "{{ provision.access_materialization.pve.root_ssh_private_key }}"
       - -o
-      - "UserKnownHostsFile={{ provision.access.pve.root_ssh_known_hosts }}"
+      - "UserKnownHostsFile={{ provision.access_materialization.pve.root_ssh_known_hosts }}"
       - -o
       - StrictHostKeyChecking=yes
       - -o
@@ -66,8 +66,8 @@
 - name: Подготовить PVE API credential до первой миграции в OpenBao
   ansible.builtin.copy:
     remote_src: true
-    src: "{{ provision.access.pve.staging_credential }}"
-    dest: "{{ provision.access.pve.persistent_credential }}"
+    src: "{{ provision.access_materialization.pve.staging_credential }}"
+    dest: "{{ provision.access_materialization.pve.persistent_credential }}"
     owner: "1001"
     group: "0"
     mode: "0600"
@@ -76,7 +76,7 @@
 
 - name: Проверить постоянный доступ к PVE
   ansible.builtin.stat:
-    path: "{{ provision.access.pve.persistent_credential }}"
+    path: "{{ provision.access_materialization.pve.persistent_credential }}"
   register: permanent_pve_credential
 
 - name: Подтвердить постоянный доступ к PVE
