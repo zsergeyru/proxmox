@@ -398,7 +398,7 @@ if not required_openbao_volumes.issubset(set(compose_openbao.get("volumes", []))
 
 required_runtime_fragments = (
     "provision.access_materialization.pve.ca_source",
-    "provision.access_materialization.pve.persistent_credential",
+    "provision.access_materialization.pve.runtime_credential",
     "provision.paths.ansible_identity",
     "provision.paths.semaphore_persistent_data",
     "provision.paths.opentofu_persistent_state_dir",
