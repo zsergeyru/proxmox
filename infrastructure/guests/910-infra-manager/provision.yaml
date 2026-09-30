@@ -198,6 +198,5 @@ persistence:
 boundaries:
   member_of_managed_pool: false
   opentofu_manages_guest_910: false
-  permanent_root_ssh_to_pve: true
   application_workloads_allowed: false
   openbao_auto_initialize: false
