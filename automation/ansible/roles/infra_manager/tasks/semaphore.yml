@@ -82,7 +82,7 @@
     state: directory
     owner: root
     group: root
-    mode: "0700"
+    mode: "0750"
 
 - name: Восстановить рабочие секреты из OpenBao при повторной настройке
   ansible.builtin.command:
@@ -109,8 +109,8 @@
     remote_src: true
     src: "{{ provision.access.pve.staging_credential }}"
     dest: /run/infra-manager/secrets/pve-api.env
-    owner: root
-    group: root
+    owner: "1001"
+    group: "0"
     mode: "0600"
     force: false
   no_log: true
@@ -120,8 +120,8 @@
     remote_src: true
     src: /mnt/pve-access/github/github_proxmox_repo_ed25519
     dest: /run/infra-manager/secrets/github_proxmox_repo_ed25519
-    owner: root
-    group: root
+    owner: "1001"
+    group: "0"
     mode: "0600"
     force: false
   no_log: true
@@ -131,8 +131,8 @@
     remote_src: true
     src: "{{ provision.paths.secrets }}/semaphore-server.env"
     dest: /run/infra-manager/secrets/semaphore-server.env
-    owner: root
-    group: root
+    owner: "1001"
+    group: "0"
     mode: "0600"
     force: false
   no_log: true
@@ -142,8 +142,8 @@
     remote_src: true
     src: "{{ provision.paths.secrets }}/initial-admin-password"
     dest: /run/infra-manager/secrets/initial-admin-password
-    owner: root
-    group: root
+    owner: "1001"
+    group: "0"
     mode: "0600"
     force: false
   no_log: true
@@ -158,8 +158,8 @@
     remote_src: true
     src: "{{ provision.paths.secrets }}/semaphore-api-token"
     dest: /run/infra-manager/secrets/semaphore-api-token
-    owner: root
-    group: root
+    owner: "1001"
+    group: "0"
     mode: "0600"
     force: false
   no_log: true
