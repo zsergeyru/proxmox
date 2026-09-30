@@ -26,9 +26,9 @@
     argv:
       - ssh
       - -i
-      - "{{ provision.access.pve.root_ssh_private_key }}"
+      - "{{ provision.access_materialization.pve.root_ssh_private_key }}"
       - -o
-      - "UserKnownHostsFile={{ provision.access.pve.root_ssh_known_hosts }}"
+      - "UserKnownHostsFile={{ provision.access_materialization.pve.root_ssh_known_hosts }}"
       - -o
       - StrictHostKeyChecking=yes
       - -o
