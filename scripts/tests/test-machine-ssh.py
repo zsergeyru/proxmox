@@ -30,6 +30,10 @@ def main() -> None:
     policy = load_access_policy(ROOT)
 
     assert policy.machine_identity_vmids == frozenset({311, 410, 910})
+    assert policy.project_repository_read_vmids == frozenset({311, 410, 910})
+    assert policy.project_repository_read_allowed(311)
+    assert policy.project_repository_read_allowed(410)
+    assert not policy.project_repository_read_allowed(109)
     assert policy.machine_principal(410) == "guest-410"
     assert policy.machine_principal(910) == "guest-910"
 
@@ -82,6 +86,7 @@ def main() -> None:
 
         revoked = load_access_policy(temp_root)
         assert 311 not in revoked.targets_for(410)
+        assert revoked.project_repository_read_allowed(410)
         assert "guest-410" not in revoked.authorized_principals(311)
         assert "guest-910" in revoked.authorized_principals(311)
 
