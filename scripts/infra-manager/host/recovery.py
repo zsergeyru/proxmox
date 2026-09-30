@@ -5,8 +5,10 @@ from __future__ import annotations
 
 import argparse
 import fcntl
+import json
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -144,6 +146,42 @@ def restore_git_access() -> None:
     )
 
 
+def managed_guests_exist() -> bool:
+    """Вернуть True, если PVE pool managed содержит объекты."""
+    result = subprocess.run(
+        [
+            "pvesh",
+            "get",
+            "/pools/managed",
+            "--output-format",
+            "json",
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        detail = (result.stderr or "").strip().lower()
+        if "does not exist" in detail or "not found" in detail:
+            return False
+        raise RecoveryError(
+            "Не удалось проверить состав PVE pool managed: "
+            + ((result.stderr or "").strip() or f"код {result.returncode}")
+        )
+    try:
+        payload = json.loads(result.stdout or "{}")
+    except json.JSONDecodeError as exc:
+        raise RecoveryError(
+            "PVE вернул некорректный JSON для pool managed"
+        ) from exc
+    members = payload.get("members") if isinstance(payload, dict) else None
+    if members is None:
+        return False
+    if not isinstance(members, list):
+        raise RecoveryError("PVE pool managed имеет некорректный members")
+    return bool(members)
+
+
 def verify_recovery_state() -> None:
     required_dirs = (
         PVE_ONLY_DIR,
@@ -164,7 +202,6 @@ def verify_recovery_state() -> None:
         OPENBAO_UNSEAL_KEY,
         OPENBAO_SSH_ACCESS,
         OPENBAO_KV_ACCESS,
-        OPENTOFU_STATE,
         SEMAPHORE_DB,
     )
     missing_files = [
@@ -181,6 +218,11 @@ def verify_recovery_state() -> None:
     if not directory_has_files(OPENBAO_RAFT_DIR):
         raise RecoveryError(
             "Raft-состояние OpenBao отсутствует или пусто"
+        )
+
+    if managed_guests_exist() and not nonempty(OPENTOFU_STATE):
+        raise RecoveryError(
+            "В pool managed есть объекты, но постоянный OpenTofu state отсутствует"
         )
 
 
