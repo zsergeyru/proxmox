@@ -66,7 +66,8 @@ def main() -> None:
 
     # Целевая сторона использует AuthorizedPrincipalsFile, а не authorized_keys.
     assert "AuthorizedPrincipalsFile" in PREPARE_TARGET_CODE
-    assert "/etc/ssh/authorized_principals/root" in PREPARE_TARGET_CODE
+    assert "/etc/ssh/authorized_principals" in PREPARE_TARGET_CODE
+    assert 'principal_dir / "root"' in PREPARE_TARGET_CODE
     assert "authorized_keys" not in PREPARE_TARGET_CODE
 
     print("Machine SSH contract tests passed.")
