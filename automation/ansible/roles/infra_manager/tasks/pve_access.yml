@@ -63,25 +63,40 @@
   changed_when: false
   failed_when: false
 
-- name: Подготовить PVE API credential до первой миграции в OpenBao
+- name: Проверить рабочий PVE API credential после OpenBao
+  ansible.builtin.stat:
+    path: "{{ provision.access_materialization.pve.runtime_credential }}"
+  register: runtime_pve_credential
+
+- name: Проверить временный bootstrap PVE API credential
+  ansible.builtin.stat:
+    path: "{{ provision.access_materialization.pve.staging_credential }}"
+  register: staged_pve_credential
+  when: not runtime_pve_credential.stat.exists
+
+- name: Подготовить PVE API credential первого запуска
   ansible.builtin.copy:
     remote_src: true
     src: "{{ provision.access_materialization.pve.staging_credential }}"
-    dest: "{{ provision.access_materialization.pve.persistent_credential }}"
+    dest: "{{ provision.access_materialization.pve.runtime_credential }}"
     owner: "1001"
     group: "0"
     mode: "0600"
-    force: false
   no_log: true
+  when:
+    - not runtime_pve_credential.stat.exists
+    - staged_pve_credential.stat.exists | default(false)
 
-- name: Проверить постоянный доступ к PVE
+- name: Проверить рабочий доступ к PVE
   ansible.builtin.stat:
-    path: "{{ provision.access_materialization.pve.persistent_credential }}"
-  register: permanent_pve_credential
+    path: "{{ provision.access_materialization.pve.runtime_credential }}"
+  register: final_pve_credential
 
-- name: Подтвердить постоянный доступ к PVE
+- name: Подтвердить рабочий доступ к PVE
   ansible.builtin.assert:
     that:
-      - permanent_pve_credential.stat.exists
-      - permanent_pve_credential.stat.size | int > 0
-    fail_msg: "PVE API credential отсутствует в постоянном каталоге доступа"
+      - final_pve_credential.stat.exists
+      - final_pve_credential.stat.size | int > 0
+    fail_msg: >-
+      PVE API credential не восстановлен из OpenBao и не передан
+      временным bootstrap-контуром
