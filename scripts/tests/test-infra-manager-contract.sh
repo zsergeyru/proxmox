@@ -544,11 +544,11 @@ from pathlib import Path
 import sys
 
 text = Path(sys.argv[1]).read_text(encoding="utf-8")
-directory_block = """path: /run/infra-manager/secrets
+directory_block = '''path: /run/infra-manager/secrets
     state: directory
     owner: root
     group: root
-    mode: "0750""""
+    mode: "0750"'''
 if directory_block not in text:
     raise SystemExit("runtime secret directory must be root:root 0750")
 
