@@ -289,7 +289,7 @@ def main() -> int:
     mode.add_argument(
         "--restore-git-access",
         action="store_true",
-        help="Восстановить bootstrap/access Git key из pve-only",
+        help="Восстановить bootstrap Git key из pve-only",
     )
     mode.add_argument(
         "--preflight",
