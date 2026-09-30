@@ -16,6 +16,7 @@ MODULE_ROOT = ROOT / "scripts" / "infra-manager"
 sys.path.insert(0, str(MODULE_ROOT))
 
 from infra_manager.cli import main
+import infra_manager.common as common
 from infra_manager.common import (
     CommandError,
     CommandRunner,
@@ -130,6 +131,38 @@ def check_cli_and_commands() -> None:
             )
         if "usage: infra-manager" not in direct.stdout:
             fail(f"python -m infra_manager {' '.join(args)} не вывел строку использования")
+
+
+def check_runtime_activation_guard() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        marker = Path(tmp) / "runtime-activation-pending"
+        original = common.RUNTIME_ACTIVATION_MARKER
+        common.RUNTIME_ACTIVATION_MARKER = marker
+        try:
+            common.require_runtime_activation_idle()
+            common.reserve_runtime_activation()
+            if marker.read_text(encoding="utf-8").strip() != str(os.getpid()):
+                fail("Маркер активации должен содержать PID текущего задания")
+            if marker.stat().st_mode & 0o777 != 0o600:
+                fail("Маркер активации должен иметь права 0600")
+            try:
+                common.require_runtime_activation_idle()
+            except InfraManagerError:
+                pass
+            else:
+                fail("Новое задание не заблокировано во время активации runtime")
+            try:
+                common.reserve_runtime_activation()
+            except InfraManagerError:
+                pass
+            else:
+                fail("Повторное резервирование активации не вызвало ошибку")
+            common.cancel_runtime_activation()
+            if marker.exists():
+                fail("Отмена активации не удалила маркер")
+        finally:
+            common.RUNTIME_ACTIVATION_MARKER = original
+            marker.unlink(missing_ok=True)
 
 
 def check_path_overrides() -> None:
@@ -250,6 +283,7 @@ def check_pve_helpers() -> None:
 
 def main_test() -> None:
     check_cli_and_commands()
+    check_runtime_activation_guard()
     check_path_overrides()
     check_command_runner_contract()
     check_pve_helpers()
