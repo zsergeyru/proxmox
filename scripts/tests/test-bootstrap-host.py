@@ -653,6 +653,16 @@ def test_recovery_preflight_accepts_complete_state() -> None:
             raise AssertionError("Полное recovery-состояние должно подтверждаться")
 
 
+def test_recovery_preflight_allows_missing_approle_files() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        host = RecoveryStateHarness(Path(tmp))
+        _prepare_complete_recovery_state(host)
+        host.host_openbao_ssh_access.unlink()
+        host.host_openbao_kv_access.unlink()
+
+        host.verify_recovery_state()
+
+
 def test_recovery_preflight_rejects_partial_state() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         host = RecoveryStateHarness(Path(tmp))
@@ -814,6 +824,7 @@ def main() -> None:
         test_recover_existing_without_state,
         test_recover_unfinished_initial_state,
         test_recovery_preflight_accepts_complete_state,
+        test_recovery_preflight_allows_missing_approle_files,
         test_recovery_preflight_rejects_partial_state,
         test_recovery_preflight_requires_opentofu_state_for_managed_pool,
         test_existing_layout_requires_manual_migration,
