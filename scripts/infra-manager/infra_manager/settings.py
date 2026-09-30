@@ -38,6 +38,10 @@ class Paths:
         return Path("/run/infra-manager/secrets")
 
     @property
+    def openbao_materialized_marker(self) -> Path:
+        return self.runtime_secret_dir / ".openbao-materialized"
+
+    @property
     def ca_dir(self) -> Path:
         return self.config_dir / "ca"
 
