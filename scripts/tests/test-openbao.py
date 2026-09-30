@@ -737,6 +737,16 @@ def test_kv_contract_is_narrow_and_versioned() -> None:
             fail(f"Материализация KV не создаёт {filename}")
     if "/run/infra-manager/secrets" not in materialize:
         fail("Рабочие секреты должны материализоваться только в /run")
+    for item in (
+        "RUNTIME_UID = 1001",
+        "RUNTIME_GID = 0",
+        "os.fchown(fd, RUNTIME_UID, RUNTIME_GID)",
+        "os.chmod(TARGET.parent, 0o750)",
+        "os.chmod(TARGET, 0o750)",
+        "os.chmod(TARGET / name, 0o600)",
+    ):
+        if item not in materialize:
+            fail(f"Права runtime-секретов нарушают контракт: {item}")
 
 
 def test_kv_access_credentials_are_pve_only() -> None:
@@ -769,6 +779,7 @@ def test_semaphore_token_update_is_narrow() -> None:
         'payload.get("credentials")',
         'payload.get("api_token")',
         'data/services/semaphore',
+        'if current.get("api_token") != api_token:',
         'updated["api_token"] = api_token',
         '"/v1/auth/token/revoke-self"',
     )
