@@ -841,6 +841,21 @@ try:
             raise SystemExit(f"{role_name} has unexpected principal")
         if role.get("ttl") != 7200:
             raise SystemExit(f"{role_name} has unexpected ttl")
+
+    verified = request(
+        "LIST",
+        "/v1/ssh-client-signer/roles",
+        token=token,
+    ).get("data", {}).get("keys", [])
+    actual_machine_roles = {
+        item
+        for item in verified
+        if isinstance(item, str) and item.startswith("machine-")
+    }
+    if actual_machine_roles != expected:
+        raise SystemExit(
+            "machine roles do not match requested access contract"
+        )
     print(json.dumps({"roles": sorted(expected)}, separators=(",", ":")))
 finally:
     request("POST", "/v1/auth/token/revoke-self", {}, token=token)
