@@ -1143,7 +1143,7 @@ def run_deploy_guest(
             project_branch=project_branch,
         )
         console.result(
-            "910 infra-manager обновлён через Ansible; 
+            "910 infra-manager обновлён через Ansible; "
             "активация новой управляющей среды назначена "
             "после завершения задания Semaphore"
         )
