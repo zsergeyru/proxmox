@@ -73,6 +73,23 @@ for file in "$ANSIBLE_CONFIG" "$ANSIBLE_PLAYBOOK" "$ANSIBLE_LINUX_BASE" "$ANSIBL
     [[ -s "$file" ]] || die "Отсутствует обязательный файл: $file"
 done
 
+PVE_ACCESS_TASKS="$ANSIBLE_RUNTIME_DIR/pve_access.yml"
+SEMAPHORE_TASKS="$ANSIBLE_RUNTIME_DIR/semaphore.yml"
+
+runtime_secret_dir_line="$(grep -nF -- '- name: Подготовить временную область рабочих секретов' "$PVE_ACCESS_TASKS" | head -n1 | cut -d: -f1 || true)"
+openbao_restore_line="$(grep -nF -- '- name: Восстановить рабочие секреты из OpenBao при повторной настройке' "$PVE_ACCESS_TASKS" | head -n1 | cut -d: -f1 || true)"
+pve_stage_line="$(grep -nF -- '- name: Подготовить PVE API credential до первой миграции в OpenBao' "$PVE_ACCESS_TASKS" | head -n1 | cut -d: -f1 || true)"
+pve_check_line="$(grep -nF -- '- name: Проверить постоянный доступ к PVE' "$PVE_ACCESS_TASKS" | head -n1 | cut -d: -f1 || true)"
+[[ -n "$runtime_secret_dir_line" && -n "$openbao_restore_line" && -n "$pve_stage_line" && -n "$pve_check_line" ]] \
+    || die "pve_access.yml должен готовить рабочие секреты до проверки PVE API"
+(( runtime_secret_dir_line < openbao_restore_line && openbao_restore_line < pve_stage_line && pve_stage_line < pve_check_line )) \
+    || die "Нарушен порядок восстановления PVE API credential перед его проверкой"
+grep -Fq 'dest: "{{ provision.access.pve.persistent_credential }}"' "$PVE_ACCESS_TASKS" \
+    || die "Переходный PVE API credential должен попадать в рабочий путь из provision.yaml"
+if grep -Fq -- '- name: Подготовить PVE API credential до первой миграции в OpenBao' "$SEMAPHORE_TASKS"; then
+    die "Подготовка PVE API credential не должна откладываться до semaphore.yml"
+fi
+
 grep -Fq 'roles_path = automation/ansible/roles' "$ANSIBLE_CONFIG" \
     || die "ansible.cfg должен задавать единый путь к roles"
 [[ ! -e "$ROOT/automation/ansible/tasks" ]] \
@@ -552,18 +569,31 @@ directory_block = '''path: /run/infra-manager/secrets
 if directory_block not in text:
     raise SystemExit("runtime secret directory must be root:root 0750")
 
-for target in (
-    "/run/infra-manager/secrets/pve-api.env",
-    "/run/infra-manager/secrets/github_proxmox_repo_ed25519",
-    "/run/infra-manager/secrets/semaphore-server.env",
-    "/run/infra-manager/secrets/initial-admin-password",
-    "/run/infra-manager/secrets/semaphore-api-token",
-):
-    marker = f"dest: {target}"
-    start = text.find(marker)
-    if start < 0:
+targets = {
+    "/run/infra-manager/secrets/pve-api.env": (
+        'dest: "{{ provision.access.pve.persistent_credential }}"',
+        "dest: /run/infra-manager/secrets/pve-api.env",
+    ),
+    "/run/infra-manager/secrets/github_proxmox_repo_ed25519": (
+        "dest: /run/infra-manager/secrets/github_proxmox_repo_ed25519",
+    ),
+    "/run/infra-manager/secrets/semaphore-server.env": (
+        "dest: /run/infra-manager/secrets/semaphore-server.env",
+    ),
+    "/run/infra-manager/secrets/initial-admin-password": (
+        "dest: /run/infra-manager/secrets/initial-admin-password",
+    ),
+    "/run/infra-manager/secrets/semaphore-api-token": (
+        "dest: /run/infra-manager/secrets/semaphore-api-token",
+    ),
+}
+for target, markers in targets.items():
+    starts = [text.find(marker) for marker in markers]
+    starts = [start for start in starts if start >= 0]
+    if not starts:
         raise SystemExit(f"missing runtime secret target: {target}")
-    block = text[start : start + 220]
+    start = min(starts)
+    block = text[start : start + 260]
     if 'owner: "1001"' not in block:
         raise SystemExit(f"{target} must belong to uid 1001")
     if 'group: "0"' not in block:
