@@ -524,16 +524,28 @@ def validate_semaphore_snapshot(
             "имеет некорректный id"
         )
 
-    require_unique_by_name(
+    opentofu_environment = require_unique_by_name(
         list(snapshot.environments),
         SETTINGS.opentofu_env_name,
         "Variable Group",
     )
-    require_unique_by_name(
+    infra_manager_environment = require_unique_by_name(
         list(snapshot.environments),
         SETTINGS.infra_manager_env_name,
         "Variable Group",
     )
+    environment_ids = {
+        item.get("id")
+        for item in (opentofu_environment, infra_manager_environment)
+    }
+    if (
+        len(environment_ids) != 2
+        or any(not isinstance(item, int) for item in environment_ids)
+    ):
+        raise InfraManagerError(
+            "Variable Group Semaphore имеют некорректные id"
+        )
+
     _check_git_branch_contract(
         snapshot.repository,
         snapshot.branches,
@@ -555,6 +567,15 @@ def validate_semaphore_snapshot(
             raise InfraManagerError(
                 f"Шаблон Semaphore '{spec.name}' "
                 "не соответствует Python-контракту"
+            )
+        template_environment_ids = template.get("environment_ids")
+        if (
+            not isinstance(template_environment_ids, list)
+            or set(template_environment_ids) != environment_ids
+        ):
+            raise InfraManagerError(
+                f"Шаблон Semaphore '{spec.name}' "
+                "не подключён к обеим Variable Group"
             )
 
 
