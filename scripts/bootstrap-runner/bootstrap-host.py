@@ -46,18 +46,12 @@ class BootstrapHost:
         self.host_pve_only_dir = self.host_persistent_root / "pve-only"
         self.host_access_dir = self.host_persistent_root / "access"
         self.host_state_dir = self.host_persistent_root / "state"
-        self.host_access_github_dir = self.host_access_dir / "github"
         self.host_access_pve_host_dir = self.host_access_dir / "pve-host"
-        self.host_access_pve_api_dir = self.host_access_dir / "pve-api"
         self.host_access_ca_dir = self.host_access_dir / "ca"
-        self.host_access_github_key = (
-            self.host_access_github_dir / "github_proxmox_repo_ed25519"
-        )
         self.host_pve_root_key = self.host_access_pve_host_dir / "root_ed25519"
         self.host_pve_root_known_hosts = (
             self.host_access_pve_host_dir / "known_hosts"
         )
-        self.host_pve_api_env = self.host_access_pve_api_dir / "pve-api.env"
         self.host_pve_ca = self.host_access_ca_dir / "pve-root-ca.crt"
         self.host_openbao_dir = self.host_pve_only_dir / "openbao"
         self.host_recovery_dir = self.host_pve_only_dir / "recovery"
@@ -106,13 +100,19 @@ class BootstrapHost:
         self.infra_project_dir = Path("/var/lib/infra-manager/bootstrap-repo")
         self.infra_access_dir = Path("/mnt/pve-access")
         self.infra_state_dir = Path("/mnt/persistent-state")
+        self.infra_bootstrap_secret_dir = Path(
+            "/run/infra-manager/bootstrap-secrets"
+        )
         self.infra_github_key = (
-            self.infra_access_dir / "github" / "github_proxmox_repo_ed25519"
+            self.infra_bootstrap_secret_dir / "github_proxmox_repo_ed25519"
         )
         self.infra_github_config = Path("/root/.ssh/github_config")
         self.infra_github_known_hosts = Path("/root/.ssh/github_known_hosts")
         self.infra_pve_api_env = (
-            self.infra_access_dir / "pve-api" / "pve-api.env"
+            self.infra_bootstrap_secret_dir / "pve-api.env"
+        )
+        self.infra_runtime_pve_api_env = Path(
+            "/run/infra-manager/secrets/pve-api.env"
         )
         self.infra_pve_ca = self.infra_access_dir / "ca" / "pve-root-ca.crt"
         self.runner_pve_host_dir = Path("/etc/bootstrap-runner/pve-host")
