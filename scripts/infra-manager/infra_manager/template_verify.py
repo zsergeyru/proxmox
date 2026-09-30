@@ -388,5 +388,5 @@ def run_verify_template(vmid: int) -> int:
 
         _delete_test_vm(client, node=node)
 
-    console.ok(f"Full Clone шаблона {vmid} успешно проверен")
+    console.result(f"Full Clone шаблона {vmid} успешно проверен")
     return 0

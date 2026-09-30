@@ -118,6 +118,8 @@ Deploy Guest 910
 
 Оно применяет общий `deploy-guest → Ansible`, но не включает собственный объект 910 в постоянное состояние OpenTofu. Перезапуск `infra-runtime` откладывается до завершения задания, чтобы Semaphore не остановил сам себя.
 
+Обычный журнал заданий работает в сокращённом режиме. Для диагностики уровень меняется централизованно в Semaphore: `Variable Groups → Infra Manager → INFRA_LOG_LEVEL` со значениями `normal`, `verbose` или `quiet`.
+
 После первого развёртывания OpenBao инициализируется отдельным заданием `Initialize OpenBao 910`. Ключ снятия блокировки хранится только на PVE в `/root/.config/proxmox-bootstrap/openbao/unseal.key`; первоначальный корневой токен не сохраняется и сразу отзывается.
 
 ## Первоначальное создание 910
@@ -293,6 +295,7 @@ infra-runtime
 - Git-репозиторий `proxmox`;
 - ключ `GitHub project read-only`;
 - набор переменных `OpenTofu PVE`;
+- общие настройки `Infra Manager`;
 - `OpenTofu Plan`;
 - `Build Template 9000`;
 - `Deploy Guest 410`;

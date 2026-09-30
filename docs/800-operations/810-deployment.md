@@ -174,6 +174,7 @@ infra-runtime
 - ключ `GitHub project read-only`;
 - Git-репозиторий `proxmox`;
 - набор переменных `OpenTofu PVE`;
+- общие настройки `Infra Manager`;
 - `OpenTofu Plan`;
 - `Build Template 9000`;
 - `Deploy Guest 410`;
@@ -187,6 +188,14 @@ python3 -m infra_manager semaphore-project
 ```
 
 Она вызывается из общего Ansible и не является отдельным механизмом настройки 910.
+
+Группа `Infra Manager` содержит общую несекретную настройку уровня вывода:
+
+```text
+INFRA_LOG_LEVEL=normal
+```
+
+Её можно изменить в веб-интерфейсе Semaphore без правки шаблонов. `normal` используется для штатной работы, `verbose` — для разработки и диагностики, `quiet` — когда нужен только итог и ошибки. Синхронизация проекта сохраняет вручную выбранное допустимое значение.
 
 ## 9. OpenTofu
 

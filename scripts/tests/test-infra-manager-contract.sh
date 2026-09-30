@@ -652,6 +652,8 @@ grep -q 'PveClient' "$PY_STATUS" \
     || die "Базовый Python status должен реально проверять PVE API credential"
 grep -q 'check_access(quiet=True)' "$PY_STATUS" \
     || die "status --full должен проверять полный контракт PVE API"
+grep -Fq 'SETTINGS.infra_manager_env_name' "$PY_STATUS" \
+    || die "status должен проверять Variable Group Infra Manager"
 
 grep -q 'ROOT_ADMIN_PRIVS = {' "$PY_PVE" \
     || die "Python PVE access check должен содержать административный контракт"
@@ -706,8 +708,22 @@ grep -q 'version     = "0.112.0"' "$OPENTOFU_LOCK" \
 
 grep -q '^OPENTOFU_ENV_NAME = SETTINGS.opentofu_env_name' "$PY_SEMAPHORE" \
     || die "Semaphore должен читать имя Variable Group из единых настроек"
+grep -q '^INFRA_MANAGER_ENV_NAME = SETTINGS.infra_manager_env_name' "$PY_SEMAPHORE" \
+    || die "Semaphore должен читать имя общих настроек Infra Manager"
 grep -q 'opentofu_env_name: str = "OpenTofu PVE"' "$PY_SETTINGS" \
     || die "Имя Variable Group OpenTofu PVE должно быть зафиксировано"
+grep -q 'infra_manager_env_name: str = "Infra Manager"' "$PY_SETTINGS" \
+    || die "Имя Variable Group Infra Manager должно быть зафиксировано"
+grep -Fq 'LOG_LEVEL_ENV = "INFRA_LOG_LEVEL"' "$PY_COMMON" \
+    || die "Общий уровень вывода должен использовать INFRA_LOG_LEVEL"
+grep -Fq '{"normal", "verbose", "quiet"}' "$PY_COMMON" \
+    || die "Уровни вывода должны быть normal, verbose и quiet"
+grep -q '^    def ensure_infra_manager_environment' "$PY_SEMAPHORE" \
+    || die "Semaphore должен создавать общие настройки Infra Manager"
+grep -Fq '{LOG_LEVEL_ENV: "normal"}' "$PY_SEMAPHORE" \
+    || die "Начальный уровень вывода должен быть normal"
+grep -Fq '"environment_ids": environment_ids' "$PY_SEMAPHORE" \
+    || die "Все шаблоны должны получать обе Variable Group"
 grep -q 'TF_VAR_pve_endpoint' "$PY_SEMAPHORE" \
     || die "Variable Group должен передавать pve_endpoint"
 grep -q 'TF_VAR_pve_api_token' "$PY_SEMAPHORE" \

@@ -160,6 +160,7 @@ class Settings:
     project_name: str = "Proxmox Infrastructure"
     project_repo: str = "git@github.com:zsergeyru/proxmox.git"
     opentofu_env_name: str = "OpenTofu PVE"
+    infra_manager_env_name: str = "Infra Manager"
     managed_pool: str = "managed"
     semaphore_version: str = "v2.18.30"
     runtime_version: str = "v1"

@@ -18,6 +18,19 @@ class InfraManagerError(RuntimeError):
 
 _SENSITIVE_OPTIONS = {"--token", "--password", "--secret"}
 _SENSITIVE_PACKER_VARS = {"proxmox_token", "build_password"}
+LOG_LEVEL_ENV = "INFRA_LOG_LEVEL"
+LOG_LEVELS = frozenset({"normal", "verbose", "quiet"})
+
+
+def log_level() -> str:
+    """Вернуть выбранный уровень вывода инфраструктурных заданий."""
+    value = os.environ.get(LOG_LEVEL_ENV, "normal").strip().lower()
+    if value not in LOG_LEVELS:
+        allowed = ", ".join(sorted(LOG_LEVELS))
+        raise InfraManagerError(
+            f"{LOG_LEVEL_ENV} должен быть одним из значений: {allowed}"
+        )
+    return value
 
 
 def _redact_argv(
@@ -96,6 +109,8 @@ class Console:
         return code if enabled else ""
 
     def info(self, message: str) -> None:
+        if log_level() == "quiet":
+            return
         cyan = self._color("\033[36m")
         bold = self._color("\033[1m")
         reset = self._color("\033[0m")
@@ -105,7 +120,26 @@ class Console:
             flush=True,
         )
 
+    def detail(self, message: str) -> None:
+        """Показать диагностическое сообщение только в verbose."""
+        if log_level() != "verbose":
+            return
+        self.info(message)
+
     def ok(self, message: str) -> None:
+        if log_level() == "quiet":
+            return
+        green = self._color("\033[32m")
+        bold = self._color("\033[1m")
+        reset = self._color("\033[0m")
+        print(
+            f"{bold}{green}[ОК]{reset} {message}",
+            file=self.out,
+            flush=True,
+        )
+
+    def result(self, message: str) -> None:
+        """Показать итог задания независимо от уровня вывода."""
         green = self._color("\033[32m")
         bold = self._color("\033[1m")
         reset = self._color("\033[0m")
@@ -221,6 +255,7 @@ class CommandRunner:
         stderr: object | None = None
         stream = None
 
+        auto_capture = False
         if actual_log is not None:
             actual_log.parent.mkdir(parents=True, exist_ok=True)
             stream = actual_log.open("a", encoding="utf-8")
@@ -234,6 +269,12 @@ class CommandRunner:
         elif capture:
             stdout = subprocess.PIPE
             stderr = subprocess.PIPE
+        elif log_level() != "verbose":
+            # В обычном режиме внешние инструменты не засоряют журнал
+            # успешными подробностями. При ошибке их хвост попадёт в исключение.
+            stdout = subprocess.PIPE
+            stderr = subprocess.PIPE
+            auto_capture = True
 
         try:
             result = subprocess.run(
@@ -252,6 +293,13 @@ class CommandRunner:
 
         if check and result.returncode != 0:
             detail = result.stderr
+            if auto_capture:
+                combined = "\n".join(
+                    part.rstrip()
+                    for part in (result.stdout, result.stderr)
+                    if part and part.strip()
+                )
+                detail = "\n".join(combined.splitlines()[-25:]) or None
             if actual_log is not None and actual_log.is_file():
                 tail = actual_log.read_text(
                     encoding="utf-8",

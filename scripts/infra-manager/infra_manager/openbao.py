@@ -30,11 +30,14 @@ def run_initialize_openbao(repo_root: Path) -> int:
     """Инициализировать OpenBao, KV v2 и два SSH-центра доверия."""
     node = _pve_node_from_environment()
 
-    console.info("Установка сценария разблокировки OpenBao на PVE")
+    console.info("Проверка OpenBao 910")
+    console.detail("Установка сценария разблокировки OpenBao на PVE")
     install_openbao_host_support(node, repo_root)
 
-    console.info("Инициализация OpenBao, KV v2 и проверка SSH-центров доверия")
+    console.detail("Инициализация OpenBao, KV v2 и проверка SSH-центров доверия")
     initialize_openbao_on_host(node)
 
-    console.ok("OpenBao готов; KV v2, рабочие секреты и SSH-центры доверия настроены")
+    console.result(
+        "OpenBao готов; KV v2, рабочие секреты и SSH-центры доверия настроены"
+    )
     return 0

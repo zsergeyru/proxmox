@@ -132,6 +132,14 @@ infra-runtime
 
 Отдельный remote Runner для одного домашнего LXC не используется. Когда внешние runners не настроены, Semaphore выполняет задания локально.
 
+Уровень вывода инфраструктурных заданий меняется одной общей настройкой в веб-интерфейсе Semaphore:
+
+```text
+Project → Variable Groups → Infra Manager → INFRA_LOG_LEVEL
+```
+
+Допустимые значения: `normal` — штатный сокращённый журнал, `verbose` — подробный диагностический журнал, `quiet` — только ошибки и итог. Значение `normal` создаётся по умолчанию. Повторная синхронизация проекта не перезаписывает вручную выбранный допустимый уровень.
+
 В первой версии используется SQLite. Контейнер работает в сети 910 напрямую, чтобы временный HTTP-сервер Packer был доступен устанавливаемой VM.
 
 В `infra-runtime` находятся:
@@ -281,6 +289,7 @@ git@github.com:zsergeyru/proxmox.git
 - ключ `GitHub project read-only`;
 - репозиторий `proxmox`;
 - Variable Group `OpenTofu PVE`;
+- Variable Group `Infra Manager` с общей настройкой `INFRA_LOG_LEVEL`;
 - шаблон `OpenTofu Plan`;
 - шаблон `Build Template 9000`;
 - шаблон `Deploy Guest 410`;

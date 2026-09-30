@@ -193,6 +193,8 @@ def test_openbao_host_support() -> None:
             "pve",
             "/usr/local/sbin/infra-manager-openbao-unseal",
             "--initialize",
+            "--log-level",
+            "normal",
         )
 
     with patch.object(module, "_ssh") as mocked:
