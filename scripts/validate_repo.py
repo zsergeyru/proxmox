@@ -714,6 +714,26 @@ def _validate_access_contract(state: ValidationState) -> None:
                 "должно использовать только target self"
             )
 
+    identity_subjects = {
+        rule["subject"]
+        for rule in rules
+        if rule["service"] == "ssh"
+        and rule["resource"] == "identity"
+        and "issue" in rule["access"]
+        and rule["targets"] == ["self"]
+    }
+    for rule in rules:
+        if (
+            rule["service"] == "ssh"
+            and rule["resource"] == "guest"
+            and "connect-root" in rule["access"]
+            and rule["subject"] not in identity_subjects
+        ):
+            fail(
+                f"{rel}: {rule['subject']} имеет SSH-цели без "
+                "отдельного identity/issue"
+            )
+
     for rule in rules:
         if rule["subject"] != "guest:410":
             continue
