@@ -43,6 +43,9 @@ jobs:
       - name: Run bootstrap host Python checks
         run: python scripts/tests/test-bootstrap-host.py
 
+      - name: Run recovery host checks
+        run: python scripts/tests/test-recovery-host.py
+
       - name: Run guest deployment checks
         run: python scripts/tests/test-guest-deploy.py
 
