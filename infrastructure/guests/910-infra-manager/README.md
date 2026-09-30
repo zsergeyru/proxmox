@@ -222,6 +222,8 @@ State не хранится в Git. Его потеря не должна при
 
 910 является доверенным административным контуром домашнего PVE.
 
+Нормативное право 910 на PVE API и отдельный host-only root SSH задаётся в `infrastructure/security/access.yaml`. `provision.yaml` хранит только технические пути, нужные для материализации уже разрешённого доступа.
+
 Используются два канала:
 
 ```text
@@ -319,7 +321,7 @@ OpenBao работает отдельным контейнером Docker и с�
 
 При запуске 910 служебный механизм при необходимости вызывает PVE-only разблокировку через отдельный root SSH-доступ к PVE.
 
-Полный нормативный контракт OpenBao находится в [`../../../docs/700-security/740-openbao.md`](../../../docs/700-security/740-openbao.md), а использование пользовательских и серверных SSH-сертификатов — в [`../../../docs/700-security/720-ssh-access.md`](../../../docs/700-security/720-ssh-access.md).
+Полный нормативный контракт OpenBao находится в [`../../../docs/700-security/740-openbao.md`](../../../docs/700-security/740-openbao.md), использование пользовательских и серверных SSH-сертификатов — в [`../../../docs/700-security/720-ssh-access.md`](../../../docs/700-security/720-ssh-access.md), а логические права 910 — в [`../../../docs/700-security/750-access-contract.md`](../../../docs/700-security/750-access-contract.md).
 
 ## Проверка
 
@@ -393,7 +395,8 @@ Komodo в текущий состав 910 не входит.
 - [`status.yaml`](status.yaml) — проверки готовности, фактические данные и полный вывод состояния.
 - [`decisions.md`](decisions.md) — решения по 910.
 - [`../../../docs/200-pve/210-host-bootstrap.md`](../../../docs/200-pve/210-host-bootstrap.md) — первоначальная подготовка.
-- [`../../../docs/700-security/710-pve-access.md`](../../../docs/700-security/710-pve-access.md) — PVE API-доступ.
+- [`../../../docs/700-security/710-pve-access.md`](../../../docs/700-security/710-pve-access.md) — реализация PVE API-доступа.
+- [`../../../docs/700-security/750-access-contract.md`](../../../docs/700-security/750-access-contract.md) — машинный источник прав 910.
 - [`../../../docs/800-operations/810-deployment.md`](../../../docs/800-operations/810-deployment.md) — процесс развёртывания.
 
 

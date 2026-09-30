@@ -103,15 +103,8 @@ paths:
   bootstrap_repository: /var/lib/infra-manager/bootstrap-repo
   log: /var/log/infra-manager/bootstrap.log
 
-access:
+access_materialization:
   pve:
-    method: https-api-and-root-ssh
-    identity: root@pam!infra-manager
-    privilege_separation: false
-    verify_tls: true
-    guest_scope: /vms
-    managed_pool_assignment: managed
-    iso_storage: local
     staging_credential: /mnt/pve-access/pve-api/pve-api.env
     persistent_credential: /run/infra-manager/secrets/pve-api.env
     ca_source: /mnt/pve-access/ca/pve-root-ca.crt
@@ -119,8 +112,6 @@ access:
     root_ssh_known_hosts: /mnt/pve-access/pve-host/known_hosts
 
   github:
-    repository: git@github.com:zsergeyru/proxmox.git
-    access: read-only-deploy-key
     private_key: /run/infra-manager/secrets/github_proxmox_repo_ed25519
     known_hosts: /root/.ssh/github_known_hosts
 
@@ -207,6 +198,5 @@ persistence:
 boundaries:
   member_of_managed_pool: false
   opentofu_manages_guest_910: false
-  permanent_root_ssh_to_pve: true
   application_workloads_allowed: false
   openbao_auto_initialize: false

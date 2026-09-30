@@ -64,6 +64,9 @@ jobs:
       - name: Run guest resolver contract checks
         run: python scripts/tests/test-guest-resolver.py
 
+      - name: Run access contract checks
+        run: python scripts/tests/test-access-contract.py
+
       - name: Validate all Ansible YAML files
         run: |
           python - <<'PY'

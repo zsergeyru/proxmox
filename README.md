@@ -200,10 +200,12 @@ infrastructure/guests/910-infra-manager/provision.yaml
 - Semaphore;
 - версии OpenTofu и Packer;
 - постоянные данные;
-- пути PVE/GitHub-доступов;
+- технические пути материализации PVE/GitHub-доступов;
 - обязательные проверки.
 
 Общий Ansible применяет этот контракт. Сложные изолированные операции могут выполняться узкими Python-командами, например синхронизацией объектов Semaphore.
+
+Сами права доступа не задаются в `provision.yaml`. Их единый машинный источник — `infrastructure/security/access.yaml`.
 
 ## Постоянные данные 910
 

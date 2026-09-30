@@ -26,8 +26,6 @@ components:
     root: /opt/ai-control/agents
 
   project_repository:
-    repository: git@github.com:zsergeyru/proxmox.git
-    access: read-only
     path: /opt/ai-control/repos/proxmox
 
   instructions:
@@ -41,15 +39,6 @@ components:
     persistent: true
 
 integrations:
-  proxmox:
-    method: rest-api
-    self_management: false
-    managed_pool: managed
-
-  ssh:
-    outbound_identity: /etc/proxmox-guest/ssh/management_ed25519
-    public_key_catalog: /etc/proxmox-guest/public-keys/management-authorized-keys
-
   infrastructure_executor:
     guest_vmid: 910
     name: infra-manager

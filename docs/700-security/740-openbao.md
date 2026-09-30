@@ -91,6 +91,8 @@ kv-access.json
 infra-secrets/
 ```
 
+Логическое право на использование этих ресурсов задаётся в `access.yaml`; здесь определено их защищённое физическое хранение и служебная реализация.
+
 Каноническая структура первой версии:
 
 ```text
@@ -379,6 +381,7 @@ PVE-only unseal/AppRole-данные и Raft state должны резервир
 - [`710-pve-access.md`](710-pve-access.md) — административный доступ к PVE.
 - [`720-ssh-access.md`](720-ssh-access.md) — использование SSH-сертификатов.
 - [`730-git-access.md`](730-git-access.md) — назначение Git-доступа.
+- [`750-access-contract.md`](750-access-contract.md) — логические субъекты и права, из которых выводятся служебные доступы.
 - [`780-implementation-status.md`](780-implementation-status.md) — текущее состояние реализации.
 - [`790-decisions.md`](790-decisions.md) — принятые решения безопасности.
 - [`../200-pve/230-host-layout.md`](../200-pve/230-host-layout.md) — постоянные и временные пути.

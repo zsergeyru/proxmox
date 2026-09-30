@@ -9,8 +9,9 @@
 | [`700-overview.md`](700-overview.md) | общая модель безопасности и границы доверия |
 | [`710-pve-access.md`](710-pve-access.md) | административный API- и SSH-доступ к Proxmox VE |
 | [`720-ssh-access.md`](720-ssh-access.md) | SSH-доступ к Linux-гостям, пользовательские и серверные сертификаты, дополнительные SSH-идентичности |
-| [`730-git-access.md`](730-git-access.md) | Git-доступ проекта и `management.project_repo_read` |
+| [`730-git-access.md`](730-git-access.md) | Git-доступ проекта и правила чтения репозитория |
 | [`740-openbao.md`](740-openbao.md) | OpenBao, SSH-центры доверия и служебные данные подписи |
+| [`750-access-contract.md`](750-access-contract.md) | единый машинный контракт «кто → к чему → с каким правом» |
 | [`780-implementation-status.md`](780-implementation-status.md) | текущее состояние реализации и переходные ограничения |
 | [`790-decisions.md`](790-decisions.md) | причины ключевых решений по безопасности |
 
@@ -25,6 +26,7 @@
 SSH                 → 720
 Git                 → 730
 OpenBao             → 740
+правила доступа      → 750
 что уже реализовано → 780
 почему так сделано  → 790
 ```

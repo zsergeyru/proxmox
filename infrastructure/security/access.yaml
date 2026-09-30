@@ -1,0 +1,153 @@
+schema_version: 1
+
+rules:
+  # 910 — доверенный исполнитель инфраструктуры.
+  - id: infra-manager-pve-guests
+    subject: guest:910
+    service: pve-api
+    resource: guests
+    targets:
+      - /vms
+    access:
+      - read
+      - create
+      - clone
+      - configure
+      - power
+      - delete
+
+  - id: infra-manager-pve-storage
+    subject: guest:910
+    service: pve-api
+    resource: storage
+    targets:
+      - local
+      - local-lvm
+    access:
+      - read
+
+  - id: infra-manager-pve-host
+    subject: guest:910
+    service: ssh
+    resource: host
+    targets:
+      - host:pve
+    access:
+      - connect-root
+
+  - id: infra-manager-project-repository
+    subject: guest:910
+    service: github
+    resource: repository
+    targets:
+      - zsergeyru/proxmox
+    access:
+      - read
+
+  - id: infra-manager-linux-guests
+    subject: guest:910
+    service: ssh
+    resource: guest
+    targets:
+      - project:linux-guests
+    access:
+      - connect-root
+
+  # 410 — управляющий AI-контур без прямого административного доступа к PVE.
+  - id: ai-control-ssh-identity
+    subject: guest:410
+    service: ssh
+    resource: identity
+    targets:
+      - self
+    access:
+      - issue
+
+  - id: ai-control-project-repository
+    subject: guest:410
+    service: github
+    resource: repository
+    targets:
+      - zsergeyru/proxmox
+    access:
+      - read
+
+  - id: ai-control-infrastructure-tasks
+    subject: guest:410
+    service: semaphore
+    resource: infrastructure-task
+    targets:
+      - opentofu-plan
+      - deploy-managed-guest
+      - verify-managed-guest
+    access:
+      - execute
+
+  - id: ai-control-managed-guests
+    subject: guest:410
+    service: ssh
+    resource: guest
+    targets:
+      - pool:managed
+    access:
+      - connect-root
+
+  # 311 пока сохраняет старые management-поля; access.yaml уже содержит их эквивалент.
+  - id: dev-services-ssh-identity
+    subject: guest:311
+    service: ssh
+    resource: identity
+    targets:
+      - self
+    access:
+      - issue
+
+  - id: dev-services-project-repository
+    subject: guest:311
+    service: github
+    resource: repository
+    targets:
+      - zsergeyru/proxmox
+    access:
+      - read
+
+  # PVE-only механизм обслуживает OpenBao до появления штатных рабочих доступов.
+  - id: pve-openbao-unseal
+    subject: host:pve
+    service: openbao
+    resource: instance
+    targets:
+      - openbao
+    access:
+      - unseal
+
+  - id: pve-openbao-runtime-credentials
+    subject: host:pve
+    service: openbao
+    resource: credential
+    targets:
+      - pve-api-infra-manager
+      - github-proxmox-read
+      - semaphore-runtime
+    access:
+      - materialize
+
+  - id: pve-openbao-semaphore-update
+    subject: host:pve
+    service: openbao
+    resource: credential
+    targets:
+      - semaphore-runtime
+    access:
+      - update
+
+  - id: pve-openbao-ssh-ca
+    subject: host:pve
+    service: openbao
+    resource: ssh-ca
+    targets:
+      - managed-user
+      - managed-host
+    access:
+      - configure
+      - sign
