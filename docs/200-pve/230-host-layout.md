@@ -49,13 +49,15 @@
 /mnt/bindmounts/infra-manager/pve-only/
 └── openbao/
     ├── unseal.key
-    └── ssh-access.json
+    ├── ssh-access.json
+    └── kv-access.json
 ```
 
 | Полный путь на PVE | Назначение |
 |---|---|
 | `/mnt/bindmounts/infra-manager/pve-only/openbao/unseal.key` | ключ снятия блокировки OpenBao |
-| `/mnt/bindmounts/infra-manager/pve-only/openbao/ssh-access.json` | служебные данные ограниченного доступа к операциям SSH-подписи OpenBao |
+| `/mnt/bindmounts/infra-manager/pve-only/openbao/ssh-access.json` | служебные RoleID/SecretID для операций SSH-подписи OpenBao |
+| `/mnt/bindmounts/infra-manager/pve-only/openbao/kv-access.json` | служебные RoleID/SecretID для чтения KV и узкого обновления Semaphore token |
 
 Весь каталог `pve-only/` остаётся только на PVE и в 910 не монтируется.
 
@@ -71,11 +73,11 @@
 
 | Полный путь на PVE | Полный путь внутри 910 | Назначение |
 |---|---|---|
-| `/mnt/bindmounts/infra-manager/access/github/github_proxmox_repo_ed25519` | `/mnt/pve-access/github/github_proxmox_repo_ed25519` | Deploy Key репозитория проекта без права записи |
+| `/mnt/bindmounts/infra-manager/access/github/github_proxmox_repo_ed25519` | `/mnt/pve-access/github/github_proxmox_repo_ed25519` | переходная/bootstrap-копия Deploy Key; рабочий secret после миграции находится в OpenBao |
 | `/mnt/bindmounts/infra-manager/access/pve-host/root_ed25519` | `/mnt/pve-access/pve-host/root_ed25519` | закрытый root SSH-ключ 910 для PVE |
 | `/mnt/bindmounts/infra-manager/access/pve-host/root_ed25519.pub` | `/mnt/pve-access/pve-host/root_ed25519.pub` | производный открытый ключ той же SSH-идентичности |
 | `/mnt/bindmounts/infra-manager/access/pve-host/known_hosts` | `/mnt/pve-access/pve-host/known_hosts` | доверенный ключ SSH-сервера PVE |
-| `/mnt/bindmounts/infra-manager/access/pve-api/pve-api.env` | `/mnt/pve-access/pve-api/pve-api.env` | данные постоянного API-доступа 910 |
+| `/mnt/bindmounts/infra-manager/access/pve-api/pve-api.env` | `/mnt/pve-access/pve-api/pve-api.env` | переходный источник первой миграции PVE API secret; рабочий secret находится в OpenBao |
 | `/mnt/bindmounts/infra-manager/access/ca/pve-root-ca.crt` | `/mnt/pve-access/ca/pve-root-ca.crt` | копия корневого сертификата PVE |
 
 ## 4. Изменяемое состояние 910
@@ -90,7 +92,7 @@
 
 | Полный путь на PVE | Путь после подключения в 910 | Назначение |
 |---|---|---|
-| `/mnt/bindmounts/infra-manager/state/secrets/` | `/mnt/persistent-state/secrets/` | постоянные секреты 910 |
+| `/mnt/bindmounts/infra-manager/state/secrets/` | `/mnt/persistent-state/secrets/` | переходные старые файлы секретов Semaphore до общей миграции старой схемы |
 | `/mnt/bindmounts/infra-manager/state/ansible/` | `/mnt/persistent-state/ansible/` | постоянная Ansible-идентичность |
 | `/mnt/bindmounts/infra-manager/state/semaphore/` | `/mnt/persistent-state/semaphore/` | база и служебные данные Semaphore |
 | `/mnt/bindmounts/infra-manager/state/opentofu/` | `/mnt/persistent-state/opentofu/` | постоянные данные и состояние OpenTofu |
@@ -147,6 +149,7 @@ mp1: /mnt/bindmounts/infra-manager/state,mp=/mnt/persistent-state
 |---|---:|---:|
 | `pve-only/openbao/unseal.key` | `0600` | `0:0` |
 | `pve-only/openbao/ssh-access.json` | `0600` | `0:0` |
+| `pve-only/openbao/kv-access.json` | `0600` | `0:0` |
 | `access/github/github_proxmox_repo_ed25519` | `0600` | `100000:100000` |
 | `access/pve-host/root_ed25519` | `0600` | `101001:100000` |
 | `access/pve-host/root_ed25519.pub` | `0644` | `101001:100000` |
@@ -223,13 +226,25 @@ debian13-template.ref
 
 Сам хостовый сценарий может создавать краткоживущие временные файлы на PVE под `/run/`; их имена не являются частью постоянного контракта.
 
-Для передачи данных в OpenBao временный каталог создаётся **внутри LXC 910**:
+Внутри LXC 910 рабочие секреты OpenBao материализуются в:
 
 ```text
-/run/infra-manager/
+/run/infra-manager/secrets/
+├── pve-api.env
+├── github_proxmox_repo_ed25519
+├── semaphore-server.env
+├── initial-admin-password
+├── semaphore-api-token
+└── .openbao-materialized
 ```
 
-Он не является путём PVE и не содержит постоянного состояния. Временные файлы должны удаляться после завершения операции.
+Каталог находится под `/run`, не является постоянным состоянием и после перезапуска создаётся заново из OpenBao.
+
+`infra-runtime` получает этот каталог только для чтения.
+
+Маркер `.openbao-materialized` не содержит секретных данных.
+
+Другие временные файлы PVE-only механизма также могут создаваться под `/run/infra-manager/` и удаляются после операции.
 
 ## 9. Связанные документы
 
