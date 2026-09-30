@@ -121,6 +121,16 @@ grep -Fq -- '--cleanup-transition' "$RECOVERY_HOST" \
 
 grep -Fq 'roles_path = automation/ansible/roles' "$ANSIBLE_CONFIG" \
     || die "ansible.cfg должен задавать единый путь к roles"
+grep -Fq 'ansible.builtin.include_tasks: project_git.yml' "$ANSIBLE_LINUX_BASE" \
+    || die "linux_base должна подключать централизованную Git read-настройку"
+grep -Fq 'path: /etc/proxmox-guest/credentials' "$PROJECT_GIT_TASKS" \
+    || die "Git migration должна удалять старый credentials-каталог"
+grep -Fq 'dest: /etc/proxmox-guest/git/github-proxmox-read' "$PROJECT_GIT_TASKS" \
+    || die "Git read credential должен устанавливаться в новый каталог"
+grep -Fq 'git@github-proxmox-read:zsergeyru/proxmox.git' "$PROJECT_GIT_TASKS" \
+    || die "Git read-настройка должна быть ограничена проектным репозиторием"
+grep -Fq 'git' "$PROJECT_GIT_TASKS" \
+    || die "Git read-настройка должна проверять реальный доступ"
 [[ ! -e "$ROOT/automation/ansible/tasks" ]] \
     || die "Старый каталог automation/ansible/tasks не должен возвращаться"
 
