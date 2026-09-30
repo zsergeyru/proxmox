@@ -530,6 +530,8 @@ def check_certificate_bootstrap_fallback() -> None:
         ca.write_text("ssh-rsa AAAACA\n", encoding="utf-8")
         permanent_key = root / "guest_ed25519"
         permanent_key.write_text("permanent", encoding="utf-8")
+        github_key = root / "github_proxmox_repo_ed25519"
+        github_key.write_text("PRIVATE-GIT-KEY", encoding="utf-8")
         context = DeploymentContext(
             client=SimpleNamespace(),
             vmid=410,
@@ -573,7 +575,10 @@ def check_certificate_bootstrap_fallback() -> None:
             patch.object(
                 guest_deploy_module,
                 "PATHS",
-                SimpleNamespace(ssh_client_ca_public_key=ca),
+                SimpleNamespace(
+                    ssh_client_ca_public_key=ca,
+                    github_key=github_key,
+                ),
             ),
             patch.object(guest_deploy_module, "run", side_effect=fake_run),
             patch.object(guest_deploy_module, "_ensure_ssh_host_key"),
