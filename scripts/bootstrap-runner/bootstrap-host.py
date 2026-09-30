@@ -1037,10 +1037,37 @@ class BootstrapHost:
     def infra_test(self, flag: str, path: Path | str) -> bool:
         return self.infra_exec("test", flag, str(path), check=False).returncode == 0
 
+    def stage_infra_bootstrap_file(
+        self,
+        source: Path,
+        target: Path,
+    ) -> None:
+        """Передать secret в tmpfs 910 только на время bootstrap."""
+        if not source.is_file() or source.stat().st_size == 0:
+            self.fail(f"отсутствует bootstrap secret: {source}")
+        self.infra_exec(
+            "install",
+            "-d",
+            "-m",
+            "0700",
+            str(self.infra_bootstrap_secret_dir),
+        )
+        self.pct(
+            "push",
+            str(self.infra_ctid),
+            str(source),
+            str(target),
+            "--user",
+            "0",
+            "--group",
+            "0",
+            "--perms",
+            "0600",
+        )
+
     def prepare_infra_pve_access(self, access_mode: str = "apply") -> None:
-        """Подготовить полный API token root@pam и PVE CA для 910."""
+        """Проверить PVE token и при необходимости временно передать его 910."""
         self.verify_infra_object()
-        persistent = self.infra_pve_api_env
         token_name = "infra-manager"
 
         rows = self.pveum_json("user", "token", "list", "root@pam")
@@ -1054,31 +1081,32 @@ class BootstrapHost:
         )
 
         if token_row is not None and (access_mode == "recover" or old_privsep):
-            # Заодно удаляются ACL старой схемы privsep=1.
             self.remove_named_token("root@pam", token_name)
             token_row = None
 
         if token_row is None:
             token_id, secret = self.create_full_pve_token(token_name)
             node, _ = self.pve_node_address()
-            self.host_access_pve_api_dir.mkdir(parents=True, exist_ok=True)
-            self.host_pve_api_env.write_text(
-                f"PVE_API_URL=https://{node}:8006\n"
-                f"PVE_API_TOKEN_ID={token_id}\n"
-                f"PVE_API_TOKEN_SECRET={secret}\n",
-                encoding="utf-8",
+            fd, tmp_name = tempfile.mkstemp(
+                prefix="infra-manager-pve-api.",
+                dir="/run",
             )
-            self._set_mode_owner(
-                self.host_pve_api_env,
-                0o600,
-                100000,
-                100000,
-            )
-        elif not self.infra_test("-s", persistent):
-            self.fail(
-                "Token root@pam!infra-manager существует, но secret недоступен в 910; "
-                "используйте --recover"
-            )
+            os.close(fd)
+            tmp = Path(tmp_name)
+            try:
+                tmp.write_text(
+                    f"PVE_API_URL=https://{node}:8006\n"
+                    f"PVE_API_TOKEN_ID={token_id}\n"
+                    f"PVE_API_TOKEN_SECRET={secret}\n",
+                    encoding="utf-8",
+                )
+                tmp.chmod(0o600)
+                self.stage_infra_bootstrap_file(
+                    tmp,
+                    self.infra_pve_api_env,
+                )
+            finally:
+                tmp.unlink(missing_ok=True)
 
         pools = self.pveum_json("pool", "list")
         if not any(row.get("poolid") == "managed" for row in pools):
@@ -1120,7 +1148,7 @@ class BootstrapHost:
             host_ip,
         )
 
-        self.ok("Постоянный PVE API-доступ 910 подготовлен")
+        self.ok("PVE API-доступ 910 подготовлен без постоянной файловой копии")
 
     def push_to_infra(self, source: Path, target: Path, mode: str) -> None:
         """Передать файл в 910 от root с явно заданными правами."""
@@ -1133,11 +1161,12 @@ class BootstrapHost:
         self.pct(*push_args)
 
     def prepare_infra_project_access(self) -> None:
+        """Временно передать recovery Git key для checkout проекта."""
         self.verify_infra_object()
-        if not self.infra_test("-s", self.infra_github_key):
-            self.fail(
-                "910 не видит GitHub Deploy Key из постоянного каталога PVE"
-            )
+        self.stage_infra_bootstrap_file(
+            self.host_recovery_github_key,
+            self.infra_github_key,
+        )
 
         self.infra_exec("install", "-d", "-m", "0700", "/root/.ssh")
 
@@ -1164,7 +1193,7 @@ class BootstrapHost:
     ConnectTimeout 10
 """
         self._write_infra_file(self.infra_github_config, config, "0600")
-        self.ok("GitHub-доступ подключён из постоянного каталога PVE")
+        self.ok("Временный GitHub-доступ 910 подготовлен из PVE-only recovery")
 
     def _write_infra_file(self, path: Path, content: str, mode: str) -> None:
         # pct push работает с локальным файлом, поэтому текст сначала
