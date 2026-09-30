@@ -768,16 +768,16 @@ def test_semaphore_token_update_is_narrow() -> None:
     required = (
         'payload.get("credentials")',
         'payload.get("api_token")',
-        '"/data/services/semaphore"',
+        'data/services/semaphore',
         'updated["api_token"] = api_token',
         '"/v1/auth/token/revoke-self"',
     )
     for item in required:
         if item not in code:
             fail(f"Обновление Semaphore token нарушает контракт: {item}")
-    if "/data/pve/api/infra-manager" in code:
+    if "data/pve/api/infra-manager" in code:
         fail("Writer Semaphore не должен изменять PVE API credential")
-    if "/data/git/github/proxmox-read" in code:
+    if "data/git/github/proxmox-read" in code:
         fail("Writer Semaphore не должен изменять Git credential")
 
 
