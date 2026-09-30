@@ -1,0 +1,142 @@
+---
+- name: Определить требование Git read-доступа
+  ansible.builtin.set_fact:
+    project_git_read_enabled: >-
+      {{ infra_project_git_read | default(false) | bool }}
+
+- name: Удалить старый каталог Git credentials
+  ansible.builtin.file:
+    path: /etc/proxmox-guest/credentials
+    state: absent
+
+- name: Удалить старый Git known_hosts
+  ansible.builtin.file:
+    path: /etc/proxmox-guest/ssh/github-proxmox-known_hosts
+    state: absent
+
+- name: Удалить старую настройку Git SSH
+  ansible.builtin.file:
+    path: /etc/ssh/ssh_config.d/90-proxmox-project-repo-read.conf
+    state: absent
+
+- name: Проверить материализованный Git credential на управляющей системе
+  ansible.builtin.stat:
+    path: "{{ infra_project_git_private_key_file }}"
+  delegate_to: localhost
+  become: false
+  register: project_git_private_key_source
+  when: project_git_read_enabled
+
+- name: Требовать Git credential при разрешённом чтении проекта
+  ansible.builtin.assert:
+    that:
+      - project_git_private_key_source.stat.exists
+      - project_git_private_key_source.stat.isreg
+      - project_git_private_key_source.stat.size | int > 0
+    fail_msg: >-
+      access.yaml разрешает чтение проекта, но рабочий Git credential
+      из OpenBao не материализован.
+  when: project_git_read_enabled
+
+- name: Проверить наличие Git-клиента
+  ansible.builtin.command:
+    argv:
+      - git
+      - --version
+  changed_when: false
+  when: project_git_read_enabled
+
+- name: Подготовить каталог Git-доступа
+  ansible.builtin.file:
+    path: /etc/proxmox-guest/git
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+  when: project_git_read_enabled
+
+- name: Установить read-only Git credential
+  ansible.builtin.copy:
+    src: "{{ infra_project_git_private_key_file }}"
+    dest: /etc/proxmox-guest/git/github-proxmox-read
+    owner: root
+    group: root
+    mode: "0600"
+  when: project_git_read_enabled
+
+- name: Установить доверенный ключ GitHub
+  ansible.builtin.copy:
+    src: "{{ project_root }}/infrastructure/security/github-known-hosts"
+    dest: /etc/proxmox-guest/git/github-known-hosts
+    owner: root
+    group: root
+    mode: "0644"
+  when: project_git_read_enabled
+
+- name: Настроить отдельный SSH alias проекта
+  ansible.builtin.copy:
+    dest: /etc/ssh/ssh_config.d/45-project-git-read.conf
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      Host github-proxmox-read
+          HostName github.com
+          User git
+          IdentityFile /etc/proxmox-guest/git/github-proxmox-read
+          UserKnownHostsFile /etc/proxmox-guest/git/github-known-hosts
+          StrictHostKeyChecking yes
+          IdentitiesOnly yes
+  when: project_git_read_enabled
+
+- name: Проверить root Git config
+  ansible.builtin.stat:
+    path: /root/.gitconfig
+  register: root_git_config
+
+- name: Настроить точный Git URL проекта
+  ansible.builtin.blockinfile:
+    path: /root/.gitconfig
+    create: true
+    owner: root
+    group: root
+    mode: "0600"
+    marker: "# {mark} INFRA-MANAGER PROJECT GIT READ"
+    block: |
+      [url "git@github-proxmox-read:zsergeyru/proxmox.git"]
+          insteadOf = git@github.com:zsergeyru/proxmox.git
+          insteadOf = https://github.com/zsergeyru/proxmox.git
+  when: project_git_read_enabled
+
+- name: Удалить управляемую Git URL-настройку при отзыве доступа
+  ansible.builtin.blockinfile:
+    path: /root/.gitconfig
+    marker: "# {mark} INFRA-MANAGER PROJECT GIT READ"
+    state: absent
+  when:
+    - not project_git_read_enabled
+    - root_git_config.stat.exists
+
+- name: Удалить SSH-настройку проекта при отзыве доступа
+  ansible.builtin.file:
+    path: /etc/ssh/ssh_config.d/45-project-git-read.conf
+    state: absent
+  when: not project_git_read_enabled
+
+- name: Удалить Git credential при отзыве доступа
+  ansible.builtin.file:
+    path: /etc/proxmox-guest/git
+    state: absent
+  when: not project_git_read_enabled
+
+- name: Проверить реальное чтение проекта
+  ansible.builtin.command:
+    argv:
+      - git
+      - ls-remote
+      - git@github-proxmox-read:zsergeyru/proxmox.git
+      - HEAD
+  environment:
+    HOME: /root
+  changed_when: false
+  when: project_git_read_enabled
