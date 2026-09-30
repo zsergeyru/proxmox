@@ -64,7 +64,7 @@
 
 - name: Проверить полный доступ к PVE
   ansible.builtin.stat:
-    path: "{{ provision.access.pve.root_ssh_private_key }}"
+    path: "{{ provision.access_materialization.pve.root_ssh_private_key }}"
   register: pve_root_ssh_key
 
 - name: Подтвердить полный доступ к PVE
@@ -76,14 +76,14 @@
 
 - name: Защитить ключ доступа к PVE
   ansible.builtin.file:
-    path: "{{ provision.access.pve.root_ssh_private_key }}"
+    path: "{{ provision.access_materialization.pve.root_ssh_private_key }}"
     owner: "1001"
     group: "0"
     mode: "0600"
 
 - name: Зафиксировать ключ сервера PVE
   ansible.builtin.file:
-    path: "{{ provision.access.pve.root_ssh_known_hosts }}"
+    path: "{{ provision.access_materialization.pve.root_ssh_known_hosts }}"
     owner: "1001"
     group: "0"
     mode: "0644"
