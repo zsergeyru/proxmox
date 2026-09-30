@@ -1250,9 +1250,15 @@ class BootstrapHost:
         # Перед полной настройкой Ansible требуем весь минимальный набор доверия:
         # учётные данные PVE, CA, Deploy Key и рабочую копию проекта.
         self.verify_infra_object()
-        persistent = self.infra_pve_api_env
-        if not self.infra_test("-s", persistent):
-            self.fail("в 910 отсутствует PVE API credential")
+        pve_credential_ready = (
+            self.infra_test("-s", self.infra_runtime_pve_api_env)
+            or self.infra_test("-s", self.infra_pve_api_env)
+        )
+        if not pve_credential_ready:
+            self.fail(
+                "в 910 отсутствует PVE API credential из OpenBao "
+                "или временного bootstrap"
+            )
         required = (
             (self.infra_pve_ca, "PVE CA"),
             (self.infra_pve_host_dir / "root_ed25519", "PVE root SSH key"),
@@ -1278,8 +1284,44 @@ class BootstrapHost:
         self.prepare_infra_pve_root_access()
         self.prepare_infra_project_access()
         self.checkout_infra_project()
-        if not self.infra_test("-s", self.infra_pve_api_env):
-            self.fail("в существующем 910 отсутствует постоянный PVE API credential")
+        if not (
+            self.infra_test("-s", self.infra_runtime_pve_api_env)
+            or self.infra_test("-s", self.infra_pve_api_env)
+        ):
+            self.fail(
+                "в существующем 910 отсутствует рабочий или bootstrap "
+                "PVE API credential"
+            )
+
+    def initialize_infra_openbao(self) -> None:
+        """Завершить bootstrap переносом runtime secrets в OpenBao."""
+        node, _ = self.pve_node_address()
+        job = (
+            self.infra_project_dir
+            / "scripts"
+            / "infra-manager"
+            / "jobs"
+            / "initialize-openbao.py"
+        )
+        if not self.infra_test("-s", job):
+            self.fail(f"в 910 отсутствует задача инициализации OpenBao: {job}")
+
+        self.infra_exec(
+            "env",
+            f"TF_VAR_pve_endpoint=https://{node}:8006",
+            f"INFRA_PROJECT_BRANCH={self.project_branch}",
+            "python3",
+            str(job),
+            quiet=True,
+        )
+        self.infra_exec(
+            "rm",
+            "-rf",
+            str(self.infra_bootstrap_secret_dir),
+        )
+        if self.infra_test("-e", self.infra_bootstrap_secret_dir):
+            self.fail("временные bootstrap secrets 910 не удалены")
+        self.ok("Рабочие secrets перенесены в OpenBao; bootstrap-копии удалены")
 
     def verify_infra_ready(self, *, quiet: bool = False) -> None:
         self.verify_infra_object()
@@ -1544,6 +1586,7 @@ class BootstrapHost:
                 "Полная настройка 910 завершена",
             )
 
+        self.initialize_infra_openbao()
         self.verify_infra_ready(quiet=True)
         self.finalize_runner()
         self.check_ready()
