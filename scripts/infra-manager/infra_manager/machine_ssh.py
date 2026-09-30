@@ -162,15 +162,16 @@ os.chmod(public_key, 0o644)
 known_hosts.parent.mkdir(parents=True, exist_ok=True)
 client_config.parent.mkdir(parents=True, exist_ok=True)
 known_content = f"@cert-authority {host_pattern} {host_ca}\n"
-config_content = f"""Host {host_pattern}
-    User root
-    IdentityFile /etc/proxmox-guest/ssh/machine_ed25519
-    CertificateFile /etc/proxmox-guest/ssh/machine_ed25519-cert.pub
-    IdentitiesOnly yes
-    UserKnownHostsFile /etc/ssh/project-machine-known-hosts
-    GlobalKnownHostsFile /dev/null
-    StrictHostKeyChecking yes
-"""
+config_content = (
+    f"Host {host_pattern}\\n"
+    "    User root\\n"
+    "    IdentityFile /etc/proxmox-guest/ssh/machine_ed25519\\n"
+    "    CertificateFile /etc/proxmox-guest/ssh/machine_ed25519-cert.pub\\n"
+    "    IdentitiesOnly yes\\n"
+    "    UserKnownHostsFile /etc/ssh/project-machine-known-hosts\\n"
+    "    GlobalKnownHostsFile /dev/null\\n"
+    "    StrictHostKeyChecking yes\\n"
+)
 
 
 def atomic_write(path, text, mode):
@@ -200,15 +201,23 @@ print(public_key.read_text(encoding="utf-8").strip())
 
 
 INSTALL_CERT_CODE = r"""
+import json
 import os
 import pathlib
 import subprocess
 import sys
 import tempfile
 
-certificate = sys.stdin.read().strip()
-if not certificate.startswith("ssh-ed25519-cert-v01@openssh.com "):
+payload = json.loads(sys.stdin.read())
+certificate = payload.get("certificate") if isinstance(payload, dict) else None
+principal = payload.get("principal") if isinstance(payload, dict) else None
+if (
+    not isinstance(certificate, str)
+    or not certificate.startswith("ssh-ed25519-cert-v01@openssh.com ")
+):
     raise SystemExit("invalid machine certificate")
+if not isinstance(principal, str) or not principal:
+    raise SystemExit("invalid machine principal")
 
 target = pathlib.Path("/etc/proxmox-guest/ssh/machine_ed25519-cert.pub")
 target.parent.mkdir(parents=True, exist_ok=True)
@@ -227,7 +236,14 @@ try:
 finally:
     temporary.unlink(missing_ok=True)
 
-subprocess.run(["ssh-keygen", "-L", "-f", str(target)], check=True)
+inspection = subprocess.run(
+    ["ssh-keygen", "-L", "-f", str(target)],
+    check=True,
+    text=True,
+    capture_output=True,
+).stdout
+if principal not in inspection:
+    raise SystemExit("machine certificate has unexpected principal")
 """
 
 
@@ -419,24 +435,19 @@ def _install_machine_certificate(
     certificate: Path,
     known_hosts: Path,
 ) -> None:
-    inspected = run(
-        ["ssh-keygen", "-L", "-f", "/dev/stdin"],
-        input_text=certificate_text + "\n",
-        capture_output=True,
-        check=False,
-    )
-    if inspected.returncode == 0 and expected_principal not in inspected.stdout:
-        raise InfraManagerError(
-            f"Машинный сертификат guest:{guest.record.vmid} "
-            "не содержит ожидаемый principal"
-        )
     _ssh(
         guest,
         private_key=private_key,
         certificate=certificate,
         known_hosts=known_hosts,
         command=["python3", "-c", INSTALL_CERT_CODE],
-        input_text=certificate_text + "\n",
+        input_text=json.dumps(
+            {
+                "certificate": certificate_text,
+                "principal": expected_principal,
+            },
+            separators=(",", ":"),
+        ),
     )
 
 
