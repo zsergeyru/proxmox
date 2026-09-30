@@ -18,7 +18,7 @@ from .semaphore import (
     SemaphoreClient,
     require_unique_by_name,
 )
-from .pve_host import check_openbao_kv
+from .pve_host import check_openbao_kv, check_recovery_contour
 from .settings import PATHS, SETTINGS
 
 PVE_ENV = PATHS.pve_api_env
@@ -339,8 +339,8 @@ def _check_runtime() -> None:
         raise InfraManagerError("Semaphore Server не запущен")
 
 
-def _check_openbao() -> None:
-    """Проверить контейнер OpenBao и доступность его служебного состояния."""
+def _check_openbao(*, full: bool) -> None:
+    """Проверить OpenBao и при full также аварийный PVE-only контур."""
     running = command_runner.run(
         [
             "docker",
@@ -394,6 +394,8 @@ def _check_openbao() -> None:
                 "Не удалось определить узел PVE для проверки OpenBao KV"
             )
         check_openbao_kv(node)
+        if full:
+            check_recovery_contour(node)
 
 
 def _load_repository_branches(
@@ -690,7 +692,7 @@ def _run_status_checks(
         if check_type == "runtime":
             _check_runtime_bundle()
         elif check_type == "openbao":
-            _check_openbao()
+            _check_openbao(full=full)
         elif check_type == "semaphore":
             _check_semaphore(project_branch=project_branch)
         elif check_type == "runtime_tools":
