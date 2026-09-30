@@ -60,6 +60,7 @@ def write(path: Path, value: str = "test\n") -> None:
 
 
 def prepare_complete_state(module) -> None:
+    module.ACCESS_DIR.mkdir(parents=True, exist_ok=True)
     write(module.RECOVERY_GITHUB_KEY, "git-key\n")
     write(module.OPENBAO_UNSEAL_KEY)
     write(module.OPENBAO_SSH_ACCESS, "{}\n")
