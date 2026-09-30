@@ -97,12 +97,14 @@ def test_prepare_rejects_divergent_keys() -> None:
         write(module.RECOVERY_GITHUB_KEY, "recovery-key\n")
         write(module.ACCESS_GITHUB_KEY, "different-key\n")
 
-        try:
-            module.prepare_git_recovery()
-        except module.RecoveryError as exc:
-            assert "разные GitHub Deploy Key" in str(exc)
-        else:
-            raise AssertionError("Разные Git key должны блокировать prepare")
+        with patch.object(module, "prepare_git_directories") as prepare_dirs:
+            try:
+                module.prepare_git_recovery()
+            except module.RecoveryError as exc:
+                assert "разные GitHub Deploy Key" in str(exc)
+            else:
+                raise AssertionError("Разные Git key должны блокировать prepare")
+        prepare_dirs.assert_not_called()
 
 
 def test_restore_git_access_from_recovery() -> None:
