@@ -49,7 +49,7 @@
 
 Примеры:
 
-`Proxmox`, `SSH`, `API`, `guest.yaml`, `deploy-guest`, `management.ssh_identity` сохраняются без перевода.
+`Proxmox`, `SSH`, `API`, `guest.yaml`, `access.yaml`, `deploy-guest` сохраняются без перевода.
 
 ### 1.3. Простота формулировок
 
