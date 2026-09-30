@@ -205,7 +205,7 @@ def main() -> int:
     mode.add_argument(
         "--prepare",
         action="store_true",
-        help="Подготовить аварийную Git-копию и проверить состояние",
+        help="Подготовить аварийную Git-копию",
     )
     mode.add_argument(
         "--restore-git-access",
@@ -227,8 +227,7 @@ def main() -> int:
         with acquire_lock():
             if args.prepare:
                 prepare_git_recovery()
-                verify_recovery_state()
-                print("[ОК] Аварийный контур 910 подготовлен и проверен")
+                print("[ОК] Аварийная Git-копия 910 подготовлена")
             elif args.restore_git_access:
                 restore_git_access()
                 print("[ОК] Bootstrap Git-доступ восстановлен из PVE-only recovery")
