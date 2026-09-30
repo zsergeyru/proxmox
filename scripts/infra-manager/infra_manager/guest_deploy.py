@@ -1142,8 +1142,8 @@ def run_deploy_guest(
             self_update=True,
             project_branch=project_branch,
         )
-        console.ok(
-            "910 infra-manager обновлён через Ansible; "
+        console.result(
+            "910 infra-manager обновлён через Ansible; 
             "активация новой управляющей среды назначена "
             "после завершения задания Semaphore"
         )
@@ -1208,19 +1208,19 @@ def run_deploy_guest(
         )
 
     if phase == "infrastructure":
-        console.ok(
+        console.result(
             f"{context.vmid} {context.name}: основа создана"
         )
     elif phase == "provision-base":
-        console.ok(
+        console.result(
             f"{context.vmid} {context.name}: базовая настройка завершена"
         )
     elif phase == "provision":
-        console.ok(
+        console.result(
             f"{context.vmid} {context.name}: полная настройка завершена"
         )
     elif phase == "provision-existing":
-        console.ok(
+        console.result(
             f"{context.vmid} {context.name}: существующий гость "
             "настроен через provision.yaml без владения OpenTofu state"
         )
