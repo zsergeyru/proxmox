@@ -436,6 +436,9 @@ signer_policy = json.dumps(
             "ssh-client-signer/sign/infra-manager": {
                 "capabilities": ["create", "update"],
             },
+            "ssh-client-signer/sign/machine-*": {
+                "capabilities": ["create", "update"],
+            },
             "ssh-host-signer/sign/managed-host": {
                 "capabilities": ["create", "update"],
             },
@@ -724,6 +727,211 @@ finally:
 """
 
 
+CONFIGURE_MACHINE_SIGNING_ROLES_CODE = r"""
+import json
+import sys
+import urllib.request
+
+BASE = "http://127.0.0.1:8200"
+payload = json.loads(sys.stdin.read())
+credentials = payload.get("credentials") if isinstance(payload, dict) else None
+vmids = payload.get("vmids") if isinstance(payload, dict) else None
+if not isinstance(credentials, dict):
+    raise SystemExit("missing config credentials")
+if (
+    not isinstance(vmids, list)
+    or any(not isinstance(vmid, int) or vmid <= 0 for vmid in vmids)
+):
+    raise SystemExit("invalid machine VMIDs")
+vmids = sorted(set(vmids))
+role_id = credentials.get("role_id")
+secret_id = credentials.get("secret_id")
+if not isinstance(role_id, str) or not role_id:
+    raise SystemExit("missing RoleID")
+if not isinstance(secret_id, str) or not secret_id:
+    raise SystemExit("missing SecretID")
+
+
+def request(method, path, body=None, *, token=None):
+    data = None
+    headers = {"Content-Type": "application/json"}
+    if token:
+        headers["X-Vault-Token"] = token
+    if body is not None:
+        data = json.dumps(body, separators=(",", ":")).encode("utf-8")
+    req = urllib.request.Request(
+        f"{BASE}{path}",
+        data=data,
+        headers=headers,
+        method=method,
+    )
+    with urllib.request.urlopen(req, timeout=30) as response:
+        raw = response.read()
+    return json.loads(raw.decode("utf-8")) if raw else {}
+
+
+login = request(
+    "POST",
+    "/v1/auth/infra-manager/login",
+    {"role_id": role_id, "secret_id": secret_id},
+)
+auth = login.get("auth")
+token = auth.get("client_token") if isinstance(auth, dict) else None
+if not isinstance(token, str) or not token:
+    raise SystemExit("OpenBao did not return config token")
+
+try:
+    expected = {f"machine-{vmid}" for vmid in vmids}
+    listed = request(
+        "LIST",
+        "/v1/ssh-client-signer/roles",
+        token=token,
+    ).get("data", {}).get("keys", [])
+    if not isinstance(listed, list):
+        listed = []
+    for role_name in listed:
+        if (
+            isinstance(role_name, str)
+            and role_name.startswith("machine-")
+            and role_name not in expected
+        ):
+            request(
+                "DELETE",
+                f"/v1/ssh-client-signer/roles/{role_name}",
+                token=token,
+            )
+
+    for vmid in vmids:
+        role_name = f"machine-{vmid}"
+        principal = f"guest-{vmid}"
+        request(
+            "POST",
+            f"/v1/ssh-client-signer/roles/{role_name}",
+            {
+                "key_type": "ca",
+                "algorithm_signer": "rsa-sha2-256",
+                "allow_user_certificates": True,
+                "allow_host_certificates": False,
+                "allowed_users": principal,
+                "default_user": principal,
+                "allowed_user_key_lengths": {"ed25519": 0},
+                "key_id_format": (
+                    f"project-machine-{vmid}-"
+                    "{{public_key_hash}}"
+                ),
+                "default_extensions": {
+                    "permit-pty": "",
+                },
+                "ttl": "2h",
+                "max_ttl": "2h",
+            },
+            token=token,
+        )
+        role = request(
+            "GET",
+            f"/v1/ssh-client-signer/roles/{role_name}",
+            token=token,
+        ).get("data")
+        if not isinstance(role, dict):
+            raise SystemExit(f"missing machine role {role_name}")
+        if role.get("allow_user_certificates") is not True:
+            raise SystemExit(f"{role_name} does not allow user certificates")
+        if role.get("allow_host_certificates") is True:
+            raise SystemExit(f"{role_name} unexpectedly allows host certificates")
+        if role.get("default_user") != principal:
+            raise SystemExit(f"{role_name} has unexpected principal")
+        if role.get("ttl") != 7200:
+            raise SystemExit(f"{role_name} has unexpected ttl")
+    print(json.dumps({"roles": sorted(expected)}, separators=(",", ":")))
+finally:
+    request("POST", "/v1/auth/token/revoke-self", {}, token=token)
+"""
+
+
+SIGN_MACHINE_KEY_CODE = r"""
+import json
+import sys
+import urllib.error
+import urllib.request
+
+BASE = "http://127.0.0.1:8200"
+payload = json.loads(sys.stdin.read())
+credentials = payload.get("credentials") if isinstance(payload, dict) else None
+public_key = payload.get("public_key") if isinstance(payload, dict) else None
+vmid = payload.get("vmid") if isinstance(payload, dict) else None
+if not isinstance(credentials, dict):
+    raise SystemExit("missing signer credentials")
+if not isinstance(public_key, str) or not public_key.startswith("ssh-ed25519 "):
+    raise SystemExit("invalid SSH public key")
+if not isinstance(vmid, int) or vmid <= 0:
+    raise SystemExit("invalid machine VMID")
+role_id = credentials.get("role_id")
+secret_id = credentials.get("secret_id")
+if not isinstance(role_id, str) or not role_id:
+    raise SystemExit("missing RoleID")
+if not isinstance(secret_id, str) or not secret_id:
+    raise SystemExit("missing SecretID")
+
+
+def request(method, path, body=None, *, token=None):
+    data = None
+    headers = {"Content-Type": "application/json"}
+    if token:
+        headers["X-Vault-Token"] = token
+    if body is not None:
+        data = json.dumps(body, separators=(",", ":")).encode("utf-8")
+    req = urllib.request.Request(
+        f"{BASE}{path}",
+        data=data,
+        headers=headers,
+        method=method,
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as response:
+            raw = response.read()
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace").strip()
+        raise RuntimeError(
+            f"{method} {path} returned HTTP {exc.code}: {detail}"
+        ) from exc
+    return json.loads(raw.decode("utf-8")) if raw else {}
+
+
+login = request(
+    "POST",
+    "/v1/auth/infra-manager/login",
+    {"role_id": role_id, "secret_id": secret_id},
+)
+auth = login.get("auth")
+token = auth.get("client_token") if isinstance(auth, dict) else None
+if not isinstance(token, str) or not token:
+    raise SystemExit("OpenBao did not return signer token")
+
+try:
+    principal = f"guest-{vmid}"
+    signed = request(
+        "POST",
+        f"/v1/ssh-client-signer/sign/machine-{vmid}",
+        {
+            "public_key": public_key,
+            "valid_principals": principal,
+            "ttl": "2h",
+        },
+        token=token,
+    )
+    data = signed.get("data")
+    certificate = data.get("signed_key") if isinstance(data, dict) else None
+    if (
+        not isinstance(certificate, str)
+        or not certificate.startswith("ssh-ed25519-cert-v01@openssh.com ")
+    ):
+        raise SystemExit("OpenBao did not return machine SSH certificate")
+    print(certificate.strip())
+finally:
+    request("POST", "/v1/auth/token/revoke-self", {}, token=token)
+"""
+
+
 CONFIGURE_HOST_SIGNING_ROLE_CODE = r"""
 import json
 import sys
@@ -959,6 +1167,7 @@ checks = (
         "infra-manager-ssh-signer",
         {
             "ssh-client-signer/sign/infra-manager": {"create", "update"},
+            "ssh-client-signer/sign/machine-410": {"create", "update"},
             "ssh-client-signer/roles/infra-manager": {"deny"},
         },
     ),
@@ -2306,6 +2515,70 @@ def sign_client_public_key(public_key: str) -> str:
 
 
 
+def sync_machine_signing_roles(vmids: list[int]) -> None:
+    """Синхронизировать OpenBao-роли машинных SSH-идентичностей."""
+    clean = sorted(set(vmids))
+    if any(not isinstance(vmid, int) or vmid <= 0 for vmid in clean):
+        raise OpenBaoHostError("Некорректный список VMID машинных SSH-ролей")
+    credentials = read_ssh_access_credentials()
+    config_access = credentials.get("ssh-ca-config")
+    result = pct_exec(
+        "python3",
+        "-c",
+        CONFIGURE_MACHINE_SIGNING_ROLES_CODE,
+        capture=True,
+        input_text=json.dumps(
+            {"credentials": config_access, "vmids": clean},
+            separators=(",", ":"),
+        ),
+    )
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise OpenBaoHostError(
+            "OpenBao вернул некорректный результат настройки машинных SSH-ролей"
+        ) from exc
+    expected = [f"machine-{vmid}" for vmid in clean]
+    if payload != {"roles": expected}:
+        raise OpenBaoHostError(
+            "Машинные SSH-роли OpenBao не прошли итоговую проверку"
+        )
+
+
+def sign_machine_public_key(vmid: int, public_key: str) -> str:
+    """Подписать отдельную исходящую машинную SSH-идентичность."""
+    normalized = public_key.strip()
+    if not isinstance(vmid, int) or vmid <= 0:
+        raise OpenBaoHostError("Некорректный VMID машинной SSH-идентичности")
+    if not normalized.startswith("ssh-ed25519 "):
+        raise OpenBaoHostError(
+            "Для машинной подписи ожидается открытый ключ Ed25519"
+        )
+
+    credentials = read_ssh_access_credentials()
+    signer_access = credentials.get("ssh-signer")
+    result = pct_exec(
+        "python3",
+        "-c",
+        SIGN_MACHINE_KEY_CODE,
+        capture=True,
+        input_text=json.dumps(
+            {
+                "credentials": signer_access,
+                "public_key": normalized,
+                "vmid": vmid,
+            },
+            separators=(",", ":"),
+        ),
+    )
+    certificate = result.stdout.strip()
+    if not certificate.startswith("ssh-ed25519-cert-v01@openssh.com "):
+        raise OpenBaoHostError(
+            "OpenBao вернул некорректный машинный SSH-сертификат"
+        )
+    return certificate
+
+
 def ensure_host_signing_role() -> None:
     credentials = read_ssh_access_credentials()
     config_access = credentials.get("ssh-ca-config")
@@ -2800,6 +3073,16 @@ def main() -> int:
         help="Подписать переданный через stdin открытый ключ SSH-сервера",
     )
     mode.add_argument(
+        "--sync-machine-roles",
+        action="store_true",
+        help="Синхронизировать машинные SSH-роли OpenBao из stdin",
+    )
+    mode.add_argument(
+        "--sign-machine-key",
+        action="store_true",
+        help="Подписать машинный SSH-ключ из stdin",
+    )
+    mode.add_argument(
         "--check-kv",
         action="store_true",
         help="Проверить KV v2 и ограниченный доступ к рабочим секретам",
@@ -2852,6 +3135,32 @@ def main() -> int:
                 address,
             )
             print(sign_host_public_key(public_key, principals))
+        elif args.sync_machine_roles:
+            status = read_status(wait=False)
+            if status.get("sealed") is not False:
+                raise OpenBaoHostError(
+                    "OpenBao запечатан; настройка машинных SSH-ролей невозможна"
+                )
+            payload = json.loads(__import__("sys").stdin.read())
+            vmids = payload.get("vmids") if isinstance(payload, dict) else None
+            if not isinstance(vmids, list):
+                raise OpenBaoHostError("Не передан список VMID машинных SSH-ролей")
+            sync_machine_signing_roles(vmids)
+            log_status("[ОК] Машинные SSH-роли OpenBao синхронизированы")
+        elif args.sign_machine_key:
+            status = read_status(wait=False)
+            if status.get("sealed") is not False:
+                raise OpenBaoHostError(
+                    "OpenBao запечатан; машинная SSH-подпись невозможна"
+                )
+            payload = json.loads(__import__("sys").stdin.read())
+            if not isinstance(payload, dict):
+                raise OpenBaoHostError("Некорректный запрос машинной SSH-подписи")
+            public_key = payload.get("public_key")
+            vmid = payload.get("vmid")
+            if not isinstance(public_key, str) or not isinstance(vmid, int):
+                raise OpenBaoHostError("Неполный запрос машинной SSH-подписи")
+            print(sign_machine_public_key(vmid, public_key))
         elif args.check_kv:
             status = read_status(wait=False)
             if status.get("sealed") is not False:
