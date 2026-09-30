@@ -29,6 +29,7 @@ CT_HOST_CA_PATH = Path("/etc/infra-manager/ca/ssh-host-ca.pub")
 TEMP_OPENBAO_CONTAINER = "infra-manager-openbao-generate-root"
 KV_MOUNT = "infra-secrets"
 RUNTIME_SECRET_DIR = Path("/run/infra-manager/secrets")
+LOG_LEVEL = "normal"
 
 STATUS_CODE = r"""
 import urllib.request
@@ -1676,6 +1677,18 @@ class OpenBaoHostError(RuntimeError):
     pass
 
 
+def log_detail(message: str) -> None:
+    """Показать техническую подробность только в verbose-режиме."""
+    if LOG_LEVEL == "verbose":
+        print(message)
+
+
+def log_status(message: str) -> None:
+    """Показать рабочее состояние, кроме quiet-режима."""
+    if LOG_LEVEL != "quiet":
+        print(message)
+
+
 def run(
     argv: list[str],
     *,
@@ -1918,7 +1931,7 @@ def configure_kv_access(root_token: str) -> None:
         )
     write_kv_access_credentials(credentials)
     check_kv_access()
-    print("[ОК] KV v2 и ограниченный доступ к рабочим секретам настроены")
+    log_detail("[ОК] KV v2 и ограниченный доступ к рабочим секретам настроены")
 
 
 def materialize_runtime_secrets() -> None:
@@ -1940,7 +1953,9 @@ def materialize_runtime_secrets() -> None:
         raise OpenBaoHostError(
             "Рабочие секреты не были материализованы из OpenBao"
         )
-    print(f"[ОК] Рабочие секреты материализованы во временную область {RUNTIME_SECRET_DIR}")
+    log_detail(
+        f"[ОК] Рабочие секреты материализованы во временную область {RUNTIME_SECRET_DIR}"
+    )
 
 
 def update_semaphore_api_token(api_token: str) -> None:
@@ -1972,16 +1987,16 @@ def update_semaphore_api_token(api_token: str) -> None:
         raise OpenBaoHostError(
             "API token Semaphore не был обновлён в OpenBao"
         )
-    print("[ОК] API token Semaphore обновлён в OpenBao")
+    log_detail("[ОК] API token Semaphore обновлён в OpenBao")
 
 
 def unseal() -> None:
     status = read_status(wait=True)
     if not bool(status["initialized"]):
-        print("[ИНФО] OpenBao ещё не инициализирован")
+        log_detail("[ИНФО] OpenBao ещё не инициализирован")
         return
     if not bool(status["sealed"]):
-        print("[ОК] OpenBao уже разблокирован")
+        log_status("[ОК] OpenBao уже разблокирован")
         return
     if not KEY_PATH.is_file() or KEY_PATH.stat().st_size == 0:
         raise OpenBaoHostError(
@@ -2022,7 +2037,7 @@ def unseal() -> None:
     finally:
         pct_exec("rm", "-f", str(CT_KEY_PATH), check=False)
 
-    print("[ОК] OpenBao разблокирован")
+    log_status("[ОК] OpenBao разблокирован")
 
 
 def _revoke_root_token(token: str) -> None:
@@ -2039,12 +2054,12 @@ def _revoke_root_token(token: str) -> None:
 
 def revoke_initial_root_token(token: str) -> None:
     _revoke_root_token(token)
-    print("[ОК] Initial root token отозван")
+    log_detail("[ОК] Initial root token отозван")
 
 
 def revoke_temporary_root_token(token: str) -> None:
     _revoke_root_token(token)
-    print("[ОК] Временный корневой токен OpenBao отозван")
+    log_detail("[ОК] Временный корневой токен OpenBao отозван")
 
 
 def _generate_root_from_running_server() -> str:
@@ -2142,7 +2157,7 @@ def generate_temporary_root_token() -> str:
     if token is None:
         raise OpenBaoHostError("Временный корневой токен OpenBao не выпущен")
 
-    print("[ОК] Временный корневой токен выпущен в защищённом локальном окне")
+    log_detail("[ОК] Временный корневой токен выпущен в защищённом локальном окне")
     return token
 
 
@@ -2200,7 +2215,7 @@ def configure_ssh_cas(token: str) -> None:
 
 def ensure_ssh_cas(root_token: str | None = None) -> None:
     if ssh_cas_ready():
-        print("[ОК] Два SSH-центра доверия OpenBao уже готовы")
+        log_detail("[ОК] Два SSH-центра доверия OpenBao уже готовы")
         return
 
     if root_token is None:
@@ -2216,7 +2231,7 @@ def ensure_ssh_cas(root_token: str | None = None) -> None:
         raise OpenBaoHostError(
             "SSH-центры доверия OpenBao не прошли итоговую проверку"
         )
-    print("[ОК] Два SSH-центра доверия OpenBao созданы")
+    log_detail("[ОК] Два SSH-центра доверия OpenBao созданы")
 
 
 def read_ssh_access_credentials() -> dict[str, object]:
@@ -2258,7 +2273,7 @@ def ensure_client_signing_role() -> None:
         raise OpenBaoHostError(
             "Роль подписи клиентских SSH-сертификатов не прошла проверку"
         )
-    print("[ОК] Роль подписи SSH-клиента infra-manager настроена")
+    log_detail("[ОК] Роль подписи SSH-клиента infra-manager настроена")
 
 
 def sign_client_public_key(public_key: str) -> str:
@@ -2311,7 +2326,7 @@ def ensure_host_signing_role() -> None:
         raise OpenBaoHostError(
             "Роль подписи SSH-серверов managed-host не прошла проверку"
         )
-    print("[ОК] Роль подписи SSH-серверов managed-host настроена")
+    log_detail("[ОК] Роль подписи SSH-серверов managed-host настроена")
 
 
 def validate_managed_host_target(
@@ -2495,7 +2510,7 @@ def configure_ssh_access(root_token: str) -> None:
         )
     write_ssh_access_credentials(credentials)
     check_ssh_access()
-    print("[ОК] Ограниченный служебный доступ к SSH-центрам настроен")
+    log_detail("[ОК] Ограниченный служебный доступ к SSH-центрам настроен")
 
 
 def client_ca_published() -> bool:
@@ -2564,7 +2579,9 @@ finally:
         raise OpenBaoHostError(
             "Открытый ключ центра доступа не прошёл проверку после публикации"
         )
-    print(f"[ОК] Открытый ключ центра доступа опубликован: {CT_CLIENT_CA_PATH}")
+    log_detail(
+        f"[ОК] Открытый ключ центра доступа опубликован: {CT_CLIENT_CA_PATH}"
+    )
 
 
 def host_ca_published() -> bool:
@@ -2632,7 +2649,7 @@ finally:
         raise OpenBaoHostError(
             "Открытый ключ центра SSH-серверов не прошёл проверку после публикации"
         )
-    print(
+    log_detail(
         f"[ОК] Открытый ключ центра SSH-серверов опубликован: {CT_HOST_CA_PATH}"
     )
 
@@ -2650,7 +2667,7 @@ def ensure_existing_openbao_ssh() -> None:
         publish_host_ca()
         ensure_client_signing_role()
         ensure_host_signing_role()
-        print("[ОК] SSH-центры, KV v2 и служебные доступы OpenBao уже готовы")
+        log_detail("[ОК] SSH-центры, KV v2 и служебные доступы OpenBao уже готовы")
         return
 
     root_token = generate_temporary_root_token()
@@ -2684,7 +2701,7 @@ def initialize() -> None:
             )
         unseal()
         ensure_existing_openbao_ssh()
-        print("[ОК] Инициализация OpenBao уже выполнена")
+        log_detail("[ОК] Инициализация OpenBao уже выполнена")
         return
 
     stale = [
@@ -2748,17 +2765,23 @@ def initialize() -> None:
             "Состояние OpenBao после инициализации не подтверждено"
         )
 
-    print("[ОК] OpenBao инициализирован: 1 ключ, порог 1")
-    print(f"[ОК] Unseal-ключ сохранён только на PVE: {KEY_PATH}")
-    print("[ОК] SSH-центры доверия: ssh-client-signer и ssh-host-signer")
-    print("[ОК] Служебные AppRole-данные хранятся только на PVE")
-    print("[ОК] Рабочие PVE, Git и Semaphore credentials сохранены в KV v2")
-    print("[ОК] Initial root token не сохранён и отозван")
+    log_detail("[ОК] OpenBao инициализирован: 1 ключ, порог 1")
+    log_detail(f"[ОК] Unseal-ключ сохранён только на PVE: {KEY_PATH}")
+    log_detail("[ОК] SSH-центры доверия: ssh-client-signer и ssh-host-signer")
+    log_detail("[ОК] Служебные AppRole-данные хранятся только на PVE")
+    log_detail("[ОК] Рабочие PVE, Git и Semaphore credentials сохранены в KV v2")
+    log_detail("[ОК] Initial root token не сохранён и отозван")
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Инициализация и разблокировка OpenBao для LXC 910"
+    )
+    parser.add_argument(
+        "--log-level",
+        choices=("normal", "verbose", "quiet"),
+        default="normal",
+        help="Уровень вывода: normal, verbose или quiet",
     )
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument(
@@ -2787,6 +2810,9 @@ def main() -> int:
         help="Обновить API token Semaphore в KV v2 из stdin",
     )
     args = parser.parse_args()
+
+    global LOG_LEVEL
+    LOG_LEVEL = args.log_level
 
     if os.geteuid() != 0:
         raise OpenBaoHostError("Команда должна выполняться от root на PVE")
@@ -2831,7 +2857,7 @@ def main() -> int:
             if status.get("sealed") is not False:
                 raise OpenBaoHostError("OpenBao запечатан; проверка KV невозможна")
             check_kv_access()
-            print("[ОК] KV v2 и ограниченные AppRole подтверждены")
+            log_status("[ОК] KV v2 и ограниченные AppRole подтверждены")
         elif args.update_semaphore_api_token:
             status = read_status(wait=False)
             if status.get("sealed") is not False:
