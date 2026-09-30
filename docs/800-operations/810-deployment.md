@@ -233,7 +233,7 @@ infra-manager-status --full --quiet
 Пароль создаётся один раз и хранится:
 
 ```text
-/etc/infra-manager/secrets/initial-admin-password
+/run/infra-manager/secrets/initial-admin-password
 ```
 
 Права файла — `0600`.
@@ -243,7 +243,7 @@ infra-manager-status --full --quiet
 Получить пароль от root внутри 910 можно также явно:
 
 ```bash
-cat /etc/infra-manager/secrets/initial-admin-password
+cat /run/infra-manager/secrets/initial-admin-password
 ```
 
 ## 11.1. Первичная инициализация OpenBao
