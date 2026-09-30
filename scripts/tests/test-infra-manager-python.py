@@ -117,6 +117,8 @@ def check_cli_and_commands() -> None:
         ["semaphore-project", "--help"],
         ["status", "--help"],
         ["pve-access-check", "--help"],
+        ["recovery-prepare", "--help"],
+        ["recovery-check", "--help"],
     )
     for args in cli_help_cases:
         direct = subprocess.run(
