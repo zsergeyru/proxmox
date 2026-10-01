@@ -493,6 +493,7 @@ otp_config_policy = json.dumps(
                     "token_no_default_policy",
                 ],
                 "allowed_parameters": {
+                    "role_name": [],
                     "secret_id_bound_cidrs": [],
                     "token_bound_cidrs": [],
                     "token_policies": ["machine-ssh-otp"],
