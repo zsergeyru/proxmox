@@ -476,13 +476,7 @@ otp_config_policy = json.dumps(
     {
         "path": {
             "sys/mounts": {"capabilities": ["read"]},
-            "sys/mounts/ssh-otp": {
-                "capabilities": ["create", "read", "update", "delete", "sudo"],
-            },
             "sys/auth": {"capabilities": ["read"]},
-            "sys/auth/machine": {
-                "capabilities": ["create", "read", "update", "delete", "sudo"],
-            },
             "ssh-otp/roles": {"capabilities": ["list"]},
             "ssh-otp/roles/guest-*": {
                 "capabilities": ["create", "read", "update", "delete"],
@@ -521,6 +515,23 @@ request(
     "/v1/sys/policies/acl/infra-manager-ssh-otp-config",
     {"policy": otp_config_policy},
 )
+
+mounts_payload = request("GET", "/v1/sys/mounts")
+mounts = mounts_payload.get("data", mounts_payload)
+if not isinstance(mounts, dict):
+    raise SystemExit("OpenBao returned invalid mounts list")
+otp_mount = mounts.get("ssh-otp/")
+if otp_mount is None:
+    request(
+        "POST",
+        "/v1/sys/mounts/ssh-otp",
+        {
+            "type": "ssh",
+            "description": "Одноразовый SSH-доступ между управляемыми гостями",
+        },
+    )
+elif not isinstance(otp_mount, dict) or otp_mount.get("type") != "ssh":
+    raise SystemExit("ssh-otp exists with unexpected type")
 
 auth_payload = request("GET", "/v1/sys/auth")
 auth_methods = auth_payload.get("data", auth_payload)
@@ -1443,16 +1454,8 @@ try:
         raise SystemExit("invalid mounts list")
     existing_mount = mounts.get("ssh-otp/")
     if existing_mount is None:
-        request(
-            "POST",
-            "/v1/sys/mounts/ssh-otp",
-            {
-                "type": "ssh",
-                "description": "Одноразовый SSH-доступ между управляемыми гостями",
-            },
-            token=token,
-        )
-    elif not isinstance(existing_mount, dict) or existing_mount.get("type") != "ssh":
+        raise SystemExit("ssh-otp is not initialized by administrative setup")
+    if not isinstance(existing_mount, dict) or existing_mount.get("type") != "ssh":
         raise SystemExit("ssh-otp exists with unexpected type")
 
     auth_payload = request("GET", "/v1/sys/auth", token=token)
@@ -1461,16 +1464,8 @@ try:
         raise SystemExit("invalid auth methods list")
     existing_auth = auth_methods.get("machine/")
     if existing_auth is None:
-        request(
-            "POST",
-            "/v1/sys/auth/machine",
-            {
-                "type": "approle",
-                "description": "Машинная идентичность для SSH OTP",
-            },
-            token=token,
-        )
-    elif not isinstance(existing_auth, dict) or existing_auth.get("type") != "approle":
+        raise SystemExit("auth/machine is not initialized by administrative setup")
+    if not isinstance(existing_auth, dict) or existing_auth.get("type") != "approle":
         raise SystemExit("auth/machine exists with unexpected type")
 
     expected_roles = {f"guest-{item['vmid']}" for item in normalized}
