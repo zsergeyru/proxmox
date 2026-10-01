@@ -35,6 +35,8 @@
 - общего файлового хранилища;
 - сервисов разработки, не относящихся к управлению инфраструктурой.
 
+Komodo в текущий состав 910 не входит.
+
 Такое разделение не даёт прикладным службам смешиваться с административным контуром PVE.
 
 ## 2. Объект Proxmox
@@ -61,6 +63,15 @@
 | входит в `managed` | нет |
 
 Профиль `debian-lxc-docker` задаёт общие свойства Linux-контейнера с Docker.
+
+Для возможности `container-host` нужны два свойства:
+
+```text
+nesting=1
+keyctl=1
+```
+
+`nesting=1` применяет OpenTofu через PVE API. `keyctl=1` применяет общий слой `infra_manager.pve_host` через SSH пользователя `root`, потому что обычного API-токена для этой операции недостаточно.
 
 910 не входит в собственное постоянное состояние OpenTofu.
 
@@ -387,6 +398,7 @@ pct exec 910 -- infra-manager-status --full
 - [`provision.yaml`](provision.yaml) — машинное описание ОС, служб и состояния.
 - [`status.yaml`](status.yaml) — итоговая проверка.
 - [`decisions.md`](decisions.md) — решения по 910.
+- [`../../../docs/200-pve/210-host-bootstrap.md`](../../../docs/200-pve/210-host-bootstrap.md) — первоначальная подготовка PVE и создание 910.
 - [`../../../docs/300-guests/330-guest-lifecycle.md`](../../../docs/300-guests/330-guest-lifecycle.md) — общий жизненный цикл гостей.
 - [`../../../docs/600-storage/610-backup.md`](../../../docs/600-storage/610-backup.md) — резервное копирование.
 - [`../../../docs/700-security/710-pve-access.md`](../../../docs/700-security/710-pve-access.md) — доступ к PVE.
