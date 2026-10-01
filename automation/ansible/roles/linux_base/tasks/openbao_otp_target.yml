@@ -88,6 +88,7 @@
     content: |
       #%PAM-1.0
       auth requisite pam_exec.so quiet expose_authtok /usr/local/sbin/infra-openbao-otp-verify
+      auth required pam_permit.so
       account include sshd
       session include sshd
       password include sshd

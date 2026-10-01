@@ -261,6 +261,7 @@ def test_pam_contract_is_otp_only() -> None:
     text = TARGET_TASK_PATH.read_text(encoding="utf-8")
     required = (
         "pam_exec.so quiet expose_authtok /usr/local/sbin/infra-openbao-otp-verify",
+        "auth required pam_permit.so",
         "PasswordAuthentication no",
         "KbdInteractiveAuthentication yes",
         "PAMServiceName infra-openbao-otp",
