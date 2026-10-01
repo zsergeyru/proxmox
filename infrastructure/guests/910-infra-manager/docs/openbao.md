@@ -963,15 +963,17 @@ rootfs/etc/systemd/system/infra-manager-openbao-startup-unseal.service.j2
 
 1. дождаться локального API `127.0.0.1:8200`;
 2. прочитать `sys/seal-status`;
-3. если OpenBao не инициализирован — не выполнять автоматический init;
-4. если `sealed=false` — завершить успешно;
-5. если `sealed=true` — вызвать PVE-only helper;
-6. PVE использует `unseal.key`;
-7. подтвердить `sealed=false`;
+3. если OpenBao не инициализирован — не выполнять автоматический init и завершить службу ошибкой;
+4. для любого `initialized=true` вызвать PVE-only helper;
+5. если `sealed=true`, PVE использует `unseal.key` и разблокирует OpenBao;
+6. если `sealed=false`, повторная разблокировка не нужна, но запуск всё равно продолжается;
+7. подтвердить целевое состояние `initialized=true, sealed=false`;
 8. материализовать рабочие KV secrets;
 9. проверить доступность обоих SSH CA;
-10. после полной реализации OTP проверить наличие `ssh-otp` и `auth/machine`;
+10. проверить наличие `ssh-otp` и `auth/machine`;
 11. подтвердить TLS listener `192.168.9.10:8202`.
+
+`sealed=false` означает, что OpenBao уже разблокирован, но само по себе не подтверждает готовность всего контура 910. Рабочие секреты и обязательные функции OpenBao всё равно должны быть восстановлены и проверены.
 
 Unseal key внутрь 910 не передаётся.
 
