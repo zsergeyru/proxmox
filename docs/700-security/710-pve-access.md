@@ -52,15 +52,14 @@ privsep=0
 Рабочий API secret:
 
 - не хранится в Git;
-- после инициализации OpenBao хранится в KV v2 по пути `infra-secrets/data/pve/api/infra-manager`;
-- материализуется только во временный файл `/run/infra-manager/secrets/pve-api.env`;
-- используется OpenTofu и служебным кодом из этой временной области;
-- не должен без необходимости передаваться в другие контейнеры;
+- после инициализации OpenBao хранится в защищённом KV управляющего контура;
+- выдаётся рабочим программам только через временное представление;
+- не должен без необходимости передаваться другим службам;
 - всегда используется с проверкой TLS.
 
-При первоначальном создании или аварийном восстановлении bootstrap может кратковременно передать новый API secret в `/run/infra-manager/bootstrap-secrets/pve-api.env`. После успешной инициализации OpenBao эта временная копия удаляется.
+При первоначальном создании или аварийном восстановлении допускается кратковременная передача первоначального API secret до готовности OpenBao. После успешной инициализации это представление удаляется.
 
-Точный контракт KV определён в [`740-openbao.md`](740-openbao.md), а физические постоянные и временные пути — в [`../200-pve/230-host-layout.md`](../200-pve/230-host-layout.md).
+Логический контракт хранения определён в [`740-openbao.md`](740-openbao.md). Конкретное размещение на 910 описано в [`data-and-access.md`](../../infrastructure/guests/910-infra-manager/docs/data-and-access.md).
 
 Отключение проверки TLS для штатного API-доступа запрещено.
 
@@ -175,5 +174,6 @@ Root SSH-идентичность должна восстанавливатьс�
 - [`740-openbao.md`](740-openbao.md) — PVE-only служебные операции OpenBao.
 - [`780-implementation-status.md`](780-implementation-status.md) — фактическое состояние реализации.
 - [`../200-pve/210-host-bootstrap.md`](../200-pve/210-host-bootstrap.md) — первоначальный управляющий контур.
-- [`../200-pve/230-host-layout.md`](../200-pve/230-host-layout.md) — точные пути постоянных данных.
+- [`../200-pve/230-host-layout.md`](../200-pve/230-host-layout.md) — канонические каталоги PVE.
+- [`../../infrastructure/guests/910-infra-manager/docs/data-and-access.md`](../../infrastructure/guests/910-infra-manager/docs/data-and-access.md) — фактическое размещение данных доступа внутри 910.
 - [`../800-operations/810-deployment.md`](../800-operations/810-deployment.md) — порядок развёртывания.
