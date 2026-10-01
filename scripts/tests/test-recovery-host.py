@@ -46,6 +46,9 @@ def configure_paths(module, root: Path) -> None:
     module.OPENBAO_UNSEAL_KEY = module.OPENBAO_DIR / "unseal.key"
     module.OPENBAO_SSH_ACCESS = module.OPENBAO_DIR / "ssh-access.json"
     module.OPENBAO_KV_ACCESS = module.OPENBAO_DIR / "kv-access.json"
+    module.OPENBAO_TLS_DIR = module.PVE_ONLY_DIR / "openbao-tls"
+    module.OPENBAO_TLS_CA_KEY = module.OPENBAO_TLS_DIR / "ca.key"
+    module.OPENBAO_TLS_CA_CERT = module.OPENBAO_TLS_DIR / "ca.crt"
 
     module.OPENBAO_RAFT_DIR = module.STATE_DIR / "openbao" / "raft"
     module.OPENTOFU_STATE = (
@@ -172,6 +175,31 @@ def test_preflight_allows_missing_approle_files() -> None:
                 )
 
 
+def test_tls_ca_required_after_otp_migration() -> None:
+    module = load_module()
+    with tempfile.TemporaryDirectory() as tmp:
+        configure_paths(module, Path(tmp))
+        prepare_complete_state(module)
+        write(
+            module.OPENBAO_SSH_ACCESS,
+            '{"ssh-ca-config":{},"ssh-signer":{},"ssh-otp-config":{}}\n',
+        )
+
+        with patch.object(module, "managed_guests_exist", return_value=False):
+            try:
+                module.verify_recovery_state()
+            except module.RecoveryError as exc:
+                assert "openbao-tls" in str(exc)
+            else:
+                raise AssertionError(
+                    "После OTP-миграции потеря TLS CA должна блокировать recovery"
+                )
+
+            write(module.OPENBAO_TLS_CA_KEY)
+            write(module.OPENBAO_TLS_CA_CERT)
+            module.verify_recovery_state()
+
+
 def test_opentofu_state_required_only_for_managed_guests() -> None:
     module = load_module()
     with tempfile.TemporaryDirectory() as tmp:
@@ -238,6 +266,7 @@ def main() -> None:
         test_verify_recovery_state,
         test_full_check_does_not_require_access_directory,
         test_preflight_allows_missing_approle_files,
+        test_tls_ca_required_after_otp_migration,
         test_opentofu_state_required_only_for_managed_guests,
         test_cleanup_transition_state,
         test_cleanup_rejects_divergent_legacy_git_key,
