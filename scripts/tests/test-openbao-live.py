@@ -262,19 +262,24 @@ def main() -> None:
     else:
         fail("ssh-otp-config смог назначить машинному AppRole root policy")
 
-    role_id = http_json(
-        "GET",
-        "/v1/auth/machine/role/guest-410/role-id",
-        token=initial_root,
-    ).get("data", {}).get("role_id")
-    secret_id = http_json(
-        "POST",
-        "/v1/auth/machine/role/guest-410/secret-id",
-        {},
-        token=initial_root,
-    ).get("data", {}).get("secret_id")
+    machine_credentials = json.loads(
+        run_code(
+            host.ISSUE_MACHINE_CREDENTIALS_CODE,
+            input_text=json.dumps(
+                {
+                    "credentials": access["ssh-otp-config"],
+                    "vmid": 410,
+                },
+                separators=(",", ":"),
+            ),
+        )
+    )
+    if machine_credentials.get("vmid") != 410:
+        fail(f"Выданы credentials другого гостя: {machine_credentials!r}")
+    role_id = machine_credentials.get("role_id")
+    secret_id = machine_credentials.get("secret_id")
     if not isinstance(role_id, str) or not isinstance(secret_id, str):
-        fail("Тестовый AppRole guest-410 не выдал RoleID/SecretID")
+        fail("Ограниченный контур не выдал RoleID/SecretID guest-410")
 
     machine_login = http_json(
         "POST",
