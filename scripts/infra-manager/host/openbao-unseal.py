@@ -1715,14 +1715,14 @@ try:
             )
         ) != {item["source_cidr"]}:
             raise SystemExit(f"SecretID CIDR mismatch for {role_name}")
-        if set(
-            str(value)
-            for value in (
-                read_role_value("token-bound-cidrs", "token_bound_cidrs")
-                or []
+        token_cidrs = (
+            read_role_value("token-bound-cidrs", "token_bound_cidrs")
+            or []
+        )
+        if set(str(value) for value in token_cidrs) != {item["source_cidr"]}:
+            raise SystemExit(
+                f"token CIDR mismatch for {role_name}: {token_cidrs!r}"
             )
-        ) != {item["source_cidr"]}:
-            raise SystemExit(f"token CIDR mismatch for {role_name}")
 
         role_id_payload = request(
             "GET",
