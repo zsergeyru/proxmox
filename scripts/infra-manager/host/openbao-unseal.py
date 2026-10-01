@@ -2684,7 +2684,9 @@ def _repair_legacy_tls_ca_certificate() -> None:
     """Перевыпустить только сертификат старого CA с тем же закрытым ключом."""
     details = _openssl("x509", "-in", str(TLS_CA_CERT), "-noout", "-text").stdout
     subject = _openssl("x509", "-in", str(TLS_CA_CERT), "-noout", "-subject").stdout
-    if "CA:TRUE" not in details or "CN = infra-manager OpenBao TLS CA" not in subject:
+    if "CA:TRUE" not in details or not subject.replace(" = ", "=").strip().endswith(
+        "CN=infra-manager OpenBao TLS CA"
+    ):
         raise OpenBaoHostError(
             "Существующий TLS CA не соответствует проектному центру доверия"
         )
