@@ -466,6 +466,40 @@ def check_openbao_machine_identity_preparation() -> None:
         ):
             fail("Существующая machine identity не должна перевыпускаться")
 
+        ca.unlink()
+        with (
+            patch.object(
+                guest_deploy_module,
+                "PATHS",
+                SimpleNamespace(
+                    openbao_tls_ca=ca,
+                    ssh_host_ca_public_key=host_ca,
+                ),
+            ),
+            patch.object(
+                guest_deploy_module,
+                "read_openbao_tls_ca",
+                return_value="-----BEGIN CERTIFICATE-----\nTEST\n-----END CERTIFICATE-----\n",
+            ) as read_ca,
+            patch.object(
+                guest_deploy_module,
+                "run",
+                return_value=SimpleNamespace(returncode=0, stdout="", stderr=""),
+            ),
+        ):
+            fallback_args = guest_deploy_module._prepare_openbao_machine_ansible_vars(
+                context,
+                private_key=private_key,
+                certificate=None,
+                directory=root,
+            )
+        read_ca.assert_called_once_with("pve")
+        staged_ca = root / "openbao-ca.crt"
+        if f"infra_openbao_ca_file={staged_ca}" not in fallback_args:
+            fail("TLS CA с PVE не передан в Ansible")
+        if staged_ca.stat().st_mode & 0o777 != 0o600:
+            fail("Временный TLS CA должен иметь права 0600")
+
 
 
 def check_openbao_target_only_preparation() -> None:

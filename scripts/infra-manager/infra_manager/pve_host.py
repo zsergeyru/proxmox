@@ -299,6 +299,22 @@ def issue_openbao_machine_credentials(
     return {"role_id": role_id, "secret_id": secret_id}
 
 
+def read_openbao_tls_ca(node: str) -> str:
+    """Прочитать публичный TLS CA OpenBao из управляемого PVE bind mount."""
+    result = _ssh(
+        node,
+        "cat",
+        "/mnt/bindmounts/infra-manager/access/openbao-tls/ca.crt",
+        capture=True,
+    )
+    certificate = result.stdout.strip()
+    if not certificate.startswith("-----BEGIN CERTIFICATE-----") or not certificate.endswith(
+        "-----END CERTIFICATE-----"
+    ):
+        raise InfraManagerError("PVE не вернул TLS CA OpenBao")
+    return certificate + "\n"
+
+
 def sync_machine_ssh_roles(node: str, vmids: list[int]) -> None:
     """Синхронизировать отдельные OpenBao-роли машинных SSH-идентичностей."""
     clean = sorted(set(vmids))

@@ -18,6 +18,7 @@ from .pve_host import (
     apply_host_requirements,
     ensure_infra_self_access,
     issue_openbao_machine_credentials,
+    read_openbao_tls_ca,
     sign_ssh_client_key,
     sign_ssh_host_key,
 )
@@ -915,9 +916,9 @@ def _prepare_openbao_machine_ansible_vars(
 
     ca_file = PATHS.openbao_tls_ca
     if not ca_file.is_file() or ca_file.stat().st_size == 0:
-        raise InfraManagerError(
-            f"Не найден TLS CA машинного OpenBao: {ca_file}"
-        )
+        ca_file = directory / "openbao-ca.crt"
+        ca_file.write_text(read_openbao_tls_ca(context.node), encoding="utf-8")
+        ca_file.chmod(0o600)
     args.extend(["-e", f"infra_openbao_ca_file={ca_file}"])
 
     manager = policy.guests.get(910)
