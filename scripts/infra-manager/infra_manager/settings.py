@@ -27,7 +27,7 @@ class Paths:
 
     @property
     def asset_dir(self) -> Path:
-        return self.repo_root / "infrastructure/guests/910-infra-manager/compose"
+        return self.repo_root / "infrastructure/guests/910-infra-manager/rootfs/opt/infra-manager/compose"
 
     @property
     def runtime_secret_dir(self) -> Path:
