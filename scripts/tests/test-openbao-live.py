@@ -134,7 +134,16 @@ def main() -> None:
         fail(f"Некорректное состояние SSH-центров: {status!r}")
 
     access = json.loads(
-        run_code(host.CONFIGURE_SSH_ACCESS_CODE, input_text=initial_root)
+        run_code(
+            host.CONFIGURE_SSH_ACCESS_CODE,
+            input_text=json.dumps(
+                {
+                    "root_token": initial_root,
+                    "existing_credentials": {},
+                },
+                separators=(",", ":"),
+            ),
+        )
     )
     access_status = json.loads(
         run_code(
@@ -142,8 +151,47 @@ def main() -> None:
             input_text=json.dumps(access, separators=(",", ":")),
         )
     )
-    if access_status != {"ssh-ca-config": True, "ssh-signer": True}:
+    if access_status != {
+        "ssh-ca-config": True,
+        "ssh-signer": True,
+        "ssh-otp-config": True,
+    }:
         fail(f"Некорректный служебный доступ OpenBao: {access_status!r}")
+
+    otp_contract = json.loads(
+        run_code(
+            host.CONFIGURE_OTP_CONTRACT_CODE,
+            input_text=json.dumps(
+                {
+                    "credentials": access["ssh-otp-config"],
+                    "sources": [
+                        {
+                            "vmid": 410,
+                            "source_cidr": "192.168.4.10/32",
+                            "target_cidrs": [
+                                "192.168.9.10/32",
+                                "192.168.3.11/32",
+                            ],
+                        },
+                        {
+                            "vmid": 910,
+                            "source_cidr": "192.168.9.10/32",
+                            "target_cidrs": ["192.168.4.10/32"],
+                        },
+                    ],
+                },
+                separators=(",", ":"),
+            ),
+        )
+    )
+    if otp_contract != {
+        "roles": ["guest-410", "guest-910"],
+        "policies": [
+            "machine-guest-410-ssh-otp",
+            "machine-guest-910-ssh-otp",
+        ],
+    }:
+        fail(f"SSH OTP/AppRole не готовы: {otp_contract!r}")
 
     config_result = json.loads(
         run_code(
@@ -426,6 +474,7 @@ def main() -> None:
 
     print("[ОК] Временный root-токен OpenBao выпущен и отозван")
     print("[ОК] Два SSH-центра OpenBao проверены на настоящем сервере")
+    print("[ОК] SSH OTP и auth/machine проверены на настоящем OpenBao")
     print("[ОК] Временный SSH-сертификат OpenBao реально подписан и проверен")
     print("[ОК] SSH host-сертификат OpenBao реально подписан и проверен")
     print("[ОК] Машинный SSH-сертификат и отзыв роли OpenBao проверены")
