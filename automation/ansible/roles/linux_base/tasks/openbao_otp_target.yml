@@ -1,0 +1,159 @@
+---
+- name: Определить требование OTP helper OpenBao
+  ansible.builtin.set_fact:
+    openbao_otp_target_enabled: >-
+      {{ infra_openbao_otp_target_enabled | default(false) | bool }}
+
+- name: Проверить параметры OTP-цели
+  ansible.builtin.assert:
+    that:
+      - infra_openbao_addr is defined
+      - infra_openbao_addr | length > 0
+      - infra_openbao_ca_file is defined
+      - infra_openbao_ca_file | length > 0
+      - infra_openbao_otp_target_ip is defined
+      - infra_openbao_otp_target_ip | length > 0
+    fail_msg: "Для OTP-цели не переданы адрес OpenBao, TLS CA или адрес гостя"
+  when: openbao_otp_target_enabled
+
+- name: Проверить TLS CA OpenBao на управляющей системе для OTP-цели
+  ansible.builtin.stat:
+    path: "{{ infra_openbao_ca_file }}"
+  delegate_to: localhost
+  become: false
+  register: openbao_otp_target_ca_source
+  when: openbao_otp_target_enabled
+
+- name: Требовать TLS CA OpenBao для OTP-цели
+  ansible.builtin.assert:
+    that:
+      - openbao_otp_target_ca_source.stat.exists
+      - openbao_otp_target_ca_source.stat.isreg
+      - openbao_otp_target_ca_source.stat.size | int > 0
+    fail_msg: "Для OTP helper не найден TLS CA OpenBao"
+  when: openbao_otp_target_enabled
+
+- name: Подготовить каталог OpenBao для OTP-цели
+  ansible.builtin.file:
+    path: /etc/infra-manager/openbao
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+  when: openbao_otp_target_enabled
+
+- name: Установить TLS CA OpenBao для OTP helper
+  ansible.builtin.copy:
+    src: "{{ infra_openbao_ca_file }}"
+    dest: /etc/infra-manager/openbao/ca.crt
+    owner: root
+    group: root
+    mode: "0644"
+  register: openbao_otp_target_ca
+  when: openbao_otp_target_enabled
+
+- name: Установить OTP verifier
+  ansible.builtin.copy:
+    src: openbao-otp-verify.py
+    dest: /usr/local/sbin/infra-openbao-otp-verify
+    owner: root
+    group: root
+    mode: "0755"
+  register: openbao_otp_verifier
+  when: openbao_otp_target_enabled
+
+- name: Записать конфигурацию OTP verifier
+  ansible.builtin.copy:
+    dest: /etc/infra-manager/openbao/otp-verify.env
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      OPENBAO_ADDR={{ infra_openbao_addr }}
+      OPENBAO_CA=/etc/infra-manager/openbao/ca.crt
+      OPENBAO_SSH_MOUNT=ssh-otp
+      OPENBAO_TARGET_IP={{ infra_openbao_otp_target_ip }}
+  register: openbao_otp_verify_config
+  when: openbao_otp_target_enabled
+
+- name: Настроить отдельный PAM-контур SSH OTP
+  ansible.builtin.copy:
+    dest: /etc/pam.d/infra-openbao-otp
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      #%PAM-1.0
+      auth requisite pam_exec.so quiet expose_authtok /usr/local/sbin/infra-openbao-otp-verify
+      auth optional pam_unix.so not_set_pass use_first_pass nodelay
+      account include sshd
+      session include sshd
+      password include sshd
+  register: openbao_otp_pam
+  when: openbao_otp_target_enabled
+
+- name: Разрешить keyboard-interactive OTP без обычного SSH-пароля
+  ansible.builtin.copy:
+    dest: /etc/ssh/sshd_config.d/43-infra-openbao-otp.conf
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      UsePAM yes
+      PasswordAuthentication no
+      KbdInteractiveAuthentication yes
+      PermitRootLogin yes
+      PAMServiceName infra-openbao-otp
+  register: openbao_otp_sshd
+  when: openbao_otp_target_enabled
+
+- name: Удалить конфигурацию SSH OTP при отзыве цели
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/ssh/sshd_config.d/43-infra-openbao-otp.conf
+    - /etc/pam.d/infra-openbao-otp
+    - /etc/infra-manager/openbao/otp-verify.env
+    - /usr/local/sbin/infra-openbao-otp-verify
+  register: openbao_otp_target_removed
+  when: not openbao_otp_target_enabled
+
+- name: Проверить синтаксис SSH после настройки OTP
+  ansible.builtin.command:
+    argv:
+      - /usr/sbin/sshd
+      - -t
+  changed_when: false
+
+- name: Прочитать итоговую конфигурацию SSH OTP
+  ansible.builtin.command:
+    argv:
+      - /usr/sbin/sshd
+      - -T
+  changed_when: false
+  register: openbao_otp_sshd_effective
+  when: openbao_otp_target_enabled
+
+- name: Подтвердить SSH OTP без постоянной парольной аутентификации
+  ansible.builtin.assert:
+    that:
+      - "'usepam yes' in openbao_otp_sshd_effective.stdout"
+      - "'passwordauthentication no' in openbao_otp_sshd_effective.stdout"
+      - "'kbdinteractiveauthentication yes' in openbao_otp_sshd_effective.stdout"
+      - "'permitrootlogin yes' in openbao_otp_sshd_effective.stdout"
+      - "'pamservicename infra-openbao-otp' in openbao_otp_sshd_effective.stdout"
+    fail_msg: "Итоговая конфигурация sshd не включает безопасный OTP-контур"
+  when: openbao_otp_target_enabled
+
+- name: Перезапустить SSH после изменения OTP-контура
+  ansible.builtin.systemd_service:
+    name: ssh.service
+    state: restarted
+  when: >-
+    (openbao_otp_target_ca.changed | default(false))
+    or (openbao_otp_verifier.changed | default(false))
+    or (openbao_otp_verify_config.changed | default(false))
+    or (openbao_otp_pam.changed | default(false))
+    or (openbao_otp_sshd.changed | default(false))
+    or (openbao_otp_target_removed.changed | default(false))
