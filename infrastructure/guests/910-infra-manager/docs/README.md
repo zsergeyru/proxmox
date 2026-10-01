@@ -25,7 +25,7 @@
 пароль и задания Semaphore     → semaphore.md
 разблокировка OpenBao          → openbao.md
 что находится в infra-runtime  → infra-runtime.md
-где OpenTofu state             → automation-tools.md
+где состояние OpenTofu         → automation-tools.md
 что запускается вместе с 910   → system-services.md
 что хранится на PVE            → data-and-access.md
 ```
