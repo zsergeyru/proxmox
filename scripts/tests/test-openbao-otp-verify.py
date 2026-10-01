@@ -16,6 +16,10 @@ HELPER_PATH = (
     ROOT
     / "automation/ansible/roles/linux_base/files/openbao-otp-verify.py"
 )
+TARGET_TASK_PATH = (
+    ROOT
+    / "automation/ansible/roles/linux_base/tasks/openbao_otp_target.yml"
+)
 
 
 def fail(message: str) -> None:
@@ -253,12 +257,28 @@ def test_http_error_does_not_echo_otp() -> None:
                 fail("Helper скрыл отказ OpenBao")
 
 
+def test_pam_contract_is_otp_only() -> None:
+    text = TARGET_TASK_PATH.read_text(encoding="utf-8")
+    required = (
+        "pam_exec.so quiet expose_authtok /usr/local/sbin/infra-openbao-otp-verify",
+        "PasswordAuthentication no",
+        "KbdInteractiveAuthentication yes",
+        "PAMServiceName infra-openbao-otp",
+    )
+    for item in required:
+        if item not in text:
+            fail(f"OTP PAM-контур не содержит обязательную настройку: {item}")
+    if "pam_unix.so" in text:
+        fail("OTP PAM-контур не должен проверять локальный Unix-пароль")
+
+
 def main() -> None:
     test_verify_otp()
     test_rejects_wrong_target_or_user()
     test_rejects_forbidden_source_role()
     test_rejects_insecure_address()
     test_http_error_does_not_echo_otp()
+    test_pam_contract_is_otp_only()
     print("OpenBao OTP verifier tests passed.")
 
 
