@@ -218,7 +218,7 @@ jobs:
           }
           trap cleanup EXIT
 
-          docker run -d             --name openbao-test             --network host             --user 0             -v "$PWD/infrastructure/guests/910-infra-manager/rootfs/opt/infra-manager/compose/openbao/openbao.hcl:/openbao/config/openbao.hcl:ro"             -v "$data_dir:/openbao/file"             -v "$tls_dir:/openbao/tls:ro"             ghcr.io/openbao/openbao:2.7.0             server
+          docker run -d             --name openbao-test             --network host             --user 0             -e BAO_SKIP_DROP_ROOT=1             -e SKIP_CHOWN=1             -v "$PWD/infrastructure/guests/910-infra-manager/rootfs/opt/infra-manager/compose/openbao/openbao.hcl:/openbao/config/openbao.hcl:ro"             -v "$data_dir:/openbao/file"             -v "$tls_dir:/openbao/tls:ro"             ghcr.io/openbao/openbao:2.7.0             server
 
           for _ in $(seq 1 30); do
             if curl -fsS http://127.0.0.1:8200/v1/sys/seal-status >/tmp/openbao-status.json; then
@@ -270,6 +270,8 @@ jobs:
             --name openbao-test \
             --network host \
             --user 0 \
+            -e BAO_SKIP_DROP_ROOT=1 \
+            -e SKIP_CHOWN=1 \
             -v "$compat_config:/openbao/config/openbao.hcl:ro" \
             -v "$data_dir:/openbao/file" \
             -v "$tls_dir:/openbao/tls:ro" \
