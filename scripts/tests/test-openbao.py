@@ -527,7 +527,7 @@ def test_otp_contract_is_narrow_and_derived() -> None:
         '"/v1/sys/mounts/ssh-otp"',
         '"/v1/sys/auth/machine"',
         '"ssh-otp/roles/guest-*"',
-        '"auth/machine/role/guest-*"',
+        '"auth/machine/role/+"',
     ):
         if item not in access_code:
             fail(f"Служебный OTP-контур не содержит ограничение: {item}")
@@ -544,12 +544,13 @@ def test_otp_contract_is_narrow_and_derived() -> None:
     if "machine-ssh-otp" not in access_code or "metadata.role_name" not in access_code:
         fail("Машинный OTP должен использовать одну шаблонную ACL-политику")
 
-    role_policy = access_code.split('"auth/machine/role/guest-*": {', 1)[1].split(
-        '"auth/machine/role/guest-*/bind-secret-id"', 1
+    role_policy = access_code.split('"auth/machine/role/+": {', 1)[1].split(
+        '"auth/machine/role/+/bind-secret-id"', 1
     )[0]
     for item in (
         '"required_parameters"',
         '"allowed_parameters"',
+        '"role_name": ["guest-*"]',
         '"token_policies": ["machine-ssh-otp"]',
         '"token_ttl": ["5m"]',
         '"token_max_ttl": ["10m"]',
@@ -580,6 +581,25 @@ def test_otp_contract_is_narrow_and_derived() -> None:
 
     if '"auth/machine/role/guest-*/role-id"' in access_code:
         fail("Подресурсы AppRole не должны использовать '*' внутри пути")
+
+    for suffix in (
+        "bind-secret-id",
+        "secret-id-bound-cidrs",
+        "secret-id-num-uses",
+        "secret-id-ttl",
+        "token-bound-cidrs",
+        "token-num-uses",
+        "token-ttl",
+        "token-max-ttl",
+        "policies",
+        "role-id",
+        "secret-id",
+    ):
+        nested = access_code.split(
+            f'"auth/machine/role/+/{suffix}": {{', 1
+        )[1].split("            },", 1)[0]
+        if '"role_name": ["guest-*"]' not in nested:
+            fail(f"Подресурс AppRole не ограничен guest-*: {suffix}")
 
     if 'request("LIST", "/v1/sys/policies/acl")' not in access_code:
         fail("Список ACL-политик OpenBao должен читаться методом LIST")
