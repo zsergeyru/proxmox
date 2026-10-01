@@ -214,6 +214,17 @@ def check_openbao_kv(node: str) -> None:
     )
 
 
+def check_openbao_ssh_access(node: str) -> None:
+    """Проверить служебный SSH-доступ, ssh-otp и auth/machine через PVE."""
+    _ssh(
+        node,
+        str(OPENBAO_HOST_COMMAND),
+        "--check-ssh-access",
+        "--log-level",
+        "quiet",
+    )
+
+
 def update_openbao_semaphore_api_token(node: str, api_token: str) -> None:
     """Сохранить перевыпущенный Semaphore token через узкую PVE-only роль."""
     clean = api_token.strip()
