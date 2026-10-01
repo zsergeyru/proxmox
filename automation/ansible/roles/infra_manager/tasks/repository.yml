@@ -40,7 +40,7 @@
 
 - name: Подготовить файлы управляющей среды
   ansible.builtin.copy:
-    src: "{{ guest_root }}/compose/"
+    src: "{{ guest_root }}/rootfs/opt/infra-manager/compose/"
     dest: "{{ provision.paths.compose }}/"
     owner: root
     group: root
