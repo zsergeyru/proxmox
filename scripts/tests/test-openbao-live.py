@@ -206,6 +206,13 @@ def main() -> None:
     if machine_role.get("token_bound_cidrs") != ["127.0.0.1/32"]:
         fail(f"guest-410 имеет неверный token CIDR: {machine_role!r}")
 
+    if machine_role.get("bind_secret_id") is not True:
+        fail("guest-410 не требует SecretID")
+    if machine_role.get("token_ttl") != 300:
+        fail(f"guest-410 имеет неверный token_ttl: {machine_role!r}")
+    if machine_role.get("token_max_ttl") != 600:
+        fail(f"guest-410 имеет неверный token_max_ttl: {machine_role!r}")
+
     otp_config_login = http_json(
         "POST",
         "/v1/auth/infra-manager/login",
