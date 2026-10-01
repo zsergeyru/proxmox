@@ -34,10 +34,12 @@ OpenBao работает в отдельном контейнере.
 
 ## 2. Сборка образа
 
+Исходные файлы образа находятся в `rootfs/` по тому же пути, по которому каталог устанавливается в 910.
+
 Образ собирается локально на 910 из:
 
 ```text
-infrastructure/guests/910-infra-manager/compose/runtime/
+infrastructure/guests/910-infra-manager/rootfs/opt/infra-manager/compose/runtime/
 ```
 
 ### 2.1. Основа
@@ -358,8 +360,8 @@ infra-manager-status --full
 
 ## 12. Связанные документы
 
-- [`../compose/docker-compose.yml`](../compose/docker-compose.yml) — фактический состав контейнеров.
-- [`../compose/runtime/Dockerfile`](../compose/runtime/Dockerfile) — сборка `infra-runtime`.
+- [`../rootfs/opt/infra-manager/compose/docker-compose.yml`](../rootfs/opt/infra-manager/compose/docker-compose.yml) — фактический состав контейнеров.
+- [`../rootfs/opt/infra-manager/compose/runtime/Dockerfile`](../rootfs/opt/infra-manager/compose/runtime/Dockerfile) — сборка `infra-runtime`.
 - [`../provision.yaml`](../provision.yaml) — версии и подключения каталогов.
 - [`semaphore.md`](semaphore.md) — Semaphore внутри рабочей среды.
 - [`automation-tools.md`](automation-tools.md) — OpenTofu, Ansible, Packer и Python.
