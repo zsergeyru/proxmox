@@ -60,6 +60,7 @@ def write_config(root: Path, *, address: str = "https://192.168.9.10:8202") -> P
                 f"OPENBAO_CA={ca}",
                 "OPENBAO_SSH_MOUNT=ssh-otp",
                 "OPENBAO_TARGET_IP=192.168.3.11",
+                "OPENBAO_ALLOWED_ROLES=guest-410,guest-920",
                 "",
             )
         ),
@@ -94,6 +95,7 @@ def test_verify_otp() -> None:
                     "data": {
                         "ip": "192.168.3.11",
                         "username": "root",
+                        "role_name": "guest-410",
                     }
                 }
             )
@@ -138,7 +140,13 @@ def test_rejects_wrong_target_or_user() -> None:
         def fake_wrong_target(request, *, context, timeout):
             del request, context, timeout
             return FakeResponse(
-                {"data": {"ip": "192.168.4.10", "username": "root"}}
+                {
+                    "data": {
+                        "ip": "192.168.4.10",
+                        "username": "root",
+                        "role_name": "guest-410",
+                    }
+                }
             )
 
         with (
@@ -162,6 +170,41 @@ def test_rejects_wrong_target_or_user() -> None:
             pass
         else:
             fail("Helper разрешил OTP не для root")
+
+
+def test_rejects_forbidden_source_role() -> None:
+    helper = load_helper()
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary)
+        config = write_config(root)
+        context = SimpleNamespace(check_hostname=False, verify_mode=None)
+
+        def fake_forbidden_role(request, *, context, timeout):
+            del request, context, timeout
+            return FakeResponse(
+                {
+                    "data": {
+                        "ip": "192.168.3.11",
+                        "username": "root",
+                        "role_name": "guest-999",
+                    }
+                }
+            )
+
+        with (
+            patch.object(helper.ssl, "create_default_context", return_value=context),
+            patch.object(
+                helper.urllib.request,
+                "urlopen",
+                side_effect=fake_forbidden_role,
+            ),
+        ):
+            try:
+                helper.verify_otp(config, "OTP-SECRET", username="root")
+            except helper.OtpVerifyError:
+                pass
+            else:
+                fail("Helper принял OTP от запрещённой машинной роли")
 
 
 def test_rejects_insecure_address() -> None:
@@ -213,6 +256,7 @@ def test_http_error_does_not_echo_otp() -> None:
 def main() -> None:
     test_verify_otp()
     test_rejects_wrong_target_or_user()
+    test_rejects_forbidden_source_role()
     test_rejects_insecure_address()
     test_http_error_does_not_echo_otp()
     print("OpenBao OTP verifier tests passed.")
