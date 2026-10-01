@@ -386,6 +386,12 @@ def check_openbao_machine_identity_preparation() -> None:
         issue_credentials.assert_called_once_with("pve", 410)
         if "infra_openbao_machine_enabled=true" not in args:
             fail("OTP-источник 410 не получил признак машинной identity")
+        if "infra_openbao_otp_target_enabled=true" not in args:
+            fail("OTP-цель 410 не получила признак проверки OTP")
+        if "infra_openbao_otp_target_ip=192.168.4.10" not in args:
+            fail("OTP-цель 410 получила неверный собственный адрес")
+        if "infra_openbao_otp_allowed_roles=guest-910" not in args:
+            fail("OTP-цель 410 получила неверный список разрешённых источников")
         if f"infra_openbao_ca_file={ca}" not in args:
             fail("OTP-источник не получил TLS CA OpenBao")
         env_args = [
