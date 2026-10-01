@@ -385,6 +385,10 @@ def test_temporary_root_window_restores_protected_container() -> None:
             "host",
             "--user",
             "0",
+            "-e",
+            "BAO_SKIP_DROP_ROOT=1",
+            "-e",
+            "SKIP_CHOWN=1",
             "-v",
             f"{host.CT_OPENBAO_DATA_PATH}:/openbao/file",
             "-v",
@@ -477,6 +481,27 @@ def test_ssh_ca_mounts_are_separate() -> None:
         fail("SSH CA должны создаваться единым идемпотентным механизмом")
     if "client == host" not in code:
         fail("Два SSH-центра должны проверяться как независимые")
+
+
+def test_openbao_container_keeps_protected_files_root_only() -> None:
+    compose = (
+        ROOT
+        / "infrastructure"
+        / "guests"
+        / "910-infra-manager"
+        / "rootfs"
+        / "opt"
+        / "infra-manager"
+        / "compose"
+        / "docker-compose.yml"
+    ).read_text(encoding="utf-8")
+    for item in (
+        'BAO_SKIP_DROP_ROOT: "1"',
+        'SKIP_CHOWN: "1"',
+        '/etc/infra-manager/openbao/tls:/openbao/tls:ro',
+    ):
+        if item not in compose:
+            fail(f"OpenBao Compose не защищает root-only данные: {item}")
 
 
 def test_ssh_access_contract_is_narrow() -> None:
@@ -999,6 +1024,7 @@ def main() -> None:
     test_client_ca_publication_uses_only_public_key()
     test_host_ca_publication_uses_public_endpoint()
     test_ssh_ca_mounts_are_separate()
+    test_openbao_container_keeps_protected_files_root_only()
     test_ssh_access_contract_is_narrow()
     test_otp_contract_is_narrow_and_derived()
     test_machine_signing_roles_are_separate_and_short_lived()
