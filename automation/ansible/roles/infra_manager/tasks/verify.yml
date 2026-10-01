@@ -28,13 +28,3 @@
   changed_when: true
   when: not (infra_self_update | default(false) | bool)
 
-- name: Проверить готовность 910
-  ansible.builtin.command:
-    argv:
-      - /usr/local/sbin/infra-manager-status
-      - --full
-      - --quiet
-  environment:
-    INFRA_PROJECT_BRANCH: "{{ infra_project_branch | default(lookup('env', 'INFRA_PROJECT_BRANCH') | default('main', true), true) }}"
-  changed_when: false
-  when: not (infra_self_update | default(false) | bool)

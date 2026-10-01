@@ -9,7 +9,9 @@ PROJECT_GIT_TASKS="$ROOT/automation/ansible/roles/linux_base/tasks/project_git.y
 ANSIBLE_GUEST_LAYOUT="$ROOT/automation/ansible/roles/guest_layout/tasks/main.yml"
 ANSIBLE_DOCKER="$ROOT/automation/ansible/roles/docker/tasks/main.yml"
 ANSIBLE_RUNTIME_DIR="$ROOT/automation/ansible/roles/infra_manager/tasks"
+ANSIBLE_VERIFY="$ANSIBLE_RUNTIME_DIR/verify.yml"
 ANSIBLE_RUNTIME_MAIN="$ANSIBLE_RUNTIME_DIR/main.yml"
+BOOTSTRAP_HOST="$ROOT/scripts/bootstrap-runner/bootstrap-host.py"
 PY_SETTINGS="$ROOT/scripts/infra-manager/infra_manager/settings.py"
 PY_SEMAPHORE="$ROOT/scripts/infra-manager/infra_manager/semaphore.py"
 PY_STATUS="$ROOT/scripts/infra-manager/infra_manager/status.py"
@@ -618,8 +620,13 @@ grep -Fq ':8202/v1/sys/health' "$OPENBAO_STARTUP_COMMAND" \
 if grep -Fq 'echo "[ОК] OpenBao уже разблокирован"' "$OPENBAO_STARTUP_COMMAND"; then
     die "Startup unseal не должен завершаться до восстановления секретов и проверок"
 fi
+grep -Fq 'OpenBao не инициализирован; сначала выполните Initialize OpenBao 910' "$OPENBAO_STARTUP_COMMAND" \
+    || die "Startup unseal должен завершаться ошибкой для неинициализированного OpenBao"
 grep -q 'infra-manager-status --full --quiet' "$ACTIVATE_RUNTIME" \
     || die "Отложенная активация должна завершаться полной проверкой 910"
+if grep -Fq 'infra-manager-status' "$ANSIBLE_VERIFY"; then
+    die "Ansible verify не должен выполнять финальный status 910 до Initialize OpenBao"
+fi
 grep -Fq 'PVE_ENV="/run/infra-manager/secrets/pve-api.env"' "$LIFECYCLE" \
     || die "Lifecycle test должен использовать PVE API credential из OpenBao"
 
@@ -698,8 +705,14 @@ if grep -Fq -- '--on-active=30s' "$ANSIBLE_PLAYBOOK"; then
     die "Фиксированная задержка 30 секунд не должна управлять активацией runtime"
 fi
 branch_env_count="$(grep -Fc 'INFRA_PROJECT_BRANCH: "{{ infra_project_branch' "$ANSIBLE_RUNTIME" || true)"
-[[ "$branch_env_count" -ge 2 ]] \
-    || die "Выбранная ветка должна передаваться и настройке Semaphore, и финальной проверке 910"
+[[ "$branch_env_count" -ge 1 ]] \
+    || die "Выбранная ветка должна передаваться настройке Semaphore"
+grep -Fq 'f"INFRA_PROJECT_BRANCH={self.project_branch}"' "$BOOTSTRAP_HOST" \
+    || die "Финальная bootstrap-проверка 910 должна использовать выбранную ветку"
+grep -Fq 'self.initialize_infra_openbao()' "$BOOTSTRAP_HOST" \
+    || die "Bootstrap должен инициализировать OpenBao перед финальной проверкой 910"
+grep -Fq 'self.verify_infra_ready(quiet=True)' "$BOOTSTRAP_HOST" \
+    || die "Bootstrap должен завершаться финальным status --full после Initialize OpenBao"
 
 grep -q '^PROJECT_ID_FILE = PATHS.semaphore_project_id_file' "$PY_SEMAPHORE" \
     || die "Semaphore должен читать путь project-id из единых путей"
@@ -910,9 +923,10 @@ grep -Fq 'name: ssh.service' "$LINUX_BASE_SSH_TRUST" \
     || die "Debian 13 должен использовать обычную службу SSH"
 grep -Fq 'when: not (infra_self_update | default(false) | bool)' "$ROOT/automation/ansible/roles/infra_manager/tasks/verify.yml" \
     || die "Самообновление 910 не должно менять Semaphore внутри текущего задания"
-status_self_update_guards="$(grep -Fc 'when: not (infra_self_update | default(false) | bool)' "$ROOT/automation/ansible/roles/infra_manager/tasks/verify.yml" || true)"
-[[ "$status_self_update_guards" -ge 2 ]] \
-    || die "Самообновление 910 должно откладывать и синхронизацию Semaphore, и полную status-проверку"
+grep -Fq 'semaphore-project' "$ACTIVATE_RUNTIME" \
+    || die "Самообновление 910 должно откладывать синхронизацию Semaphore до активации новой среды"
+grep -Fq 'infra-manager-status --full --quiet' "$ACTIVATE_RUNTIME" \
+    || die "Самообновление 910 должно выполнять полную status-проверку после активации новой среды"
 grep -Fq 'project_branch=project_branch' "$ROOT/scripts/infra-manager/infra_manager/guest_deploy.py" \
     || die "deploy-guest должен передавать фактическую Git-ветку в Ansible"
 grep -Fq 'sign_ssh_client_key' "$ROOT/scripts/infra-manager/infra_manager/guest_deploy.py" \

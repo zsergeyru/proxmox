@@ -427,6 +427,11 @@ def _check_openbao(*, full: bool) -> None:
             "OpenBao вернул неполное состояние"
         )
 
+    if full and not payload["initialized"]:
+        raise InfraManagerError(
+            "OpenBao не инициализирован; полный статус 910 не может быть готов"
+        )
+
     if payload["initialized"] and payload["sealed"]:
         raise InfraManagerError(
             "OpenBao инициализирован, но остаётся запечатан"

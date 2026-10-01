@@ -53,8 +53,8 @@ fi
 read -r initialized sealed < <(read_status_flags <<<"$status_json")
 
 if [[ "$initialized" != "true" ]]; then
-    echo "[ИНФО] OpenBao ещё не инициализирован"
-    exit 0
+    echo "ОШИБКА: OpenBao не инициализирован; сначала выполните Initialize OpenBao 910" >&2
+    exit 1
 fi
 
 # Helper вызывается всегда: если OpenBao уже разблокирован, он всё равно

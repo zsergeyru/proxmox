@@ -347,6 +347,24 @@ def main_test() -> None:
     ):
         status_module._check_openbao(full=False)
 
+    with patch.object(
+        status_module,
+        "command_runner",
+        SimpleNamespace(run=Mock(side_effect=[
+            SimpleNamespace(returncode=0, stdout="true\n"),
+            SimpleNamespace(
+                returncode=0,
+                stdout='{"initialized": false, "sealed": true}',
+            ),
+        ])),
+    ):
+        try:
+            status_module._check_openbao(full=True)
+        except InfraManagerError:
+            pass
+        else:
+            fail("Полный status принял неинициализированный OpenBao")
+
     with (
         patch.object(
             status_module,
