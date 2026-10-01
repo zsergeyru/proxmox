@@ -545,7 +545,7 @@ def test_otp_contract_is_narrow_and_derived() -> None:
         fail("Машинный OTP должен использовать одну шаблонную ACL-политику")
 
     role_policy = access_code.split('"auth/machine/role/guest-*": {', 1)[1].split(
-        '"auth/machine/role/guest-*/role-id"', 1
+        '"auth/machine/role/guest-*/bind-secret-id"', 1
     )[0]
     for item in (
         '"required_parameters"',
@@ -559,6 +559,24 @@ def test_otp_contract_is_narrow_and_derived() -> None:
             fail(f"Параметры машинного AppRole не ограничены: {item}")
     if '"*": []' in role_policy:
         fail("Машинному AppRole запрещены произвольные параметры")
+
+    if '"capabilities": ["create", "read", "update", "delete"]' in role_policy:
+        fail("Путь записи машинного AppRole не должен иметь read")
+    for suffix in (
+        "bind-secret-id",
+        "secret-id-bound-cidrs",
+        "secret-id-num-uses",
+        "secret-id-ttl",
+        "token-bound-cidrs",
+        "token-num-uses",
+        "token-ttl",
+        "token-max-ttl",
+        "policies",
+        "role-id",
+    ):
+        needle = f'"auth/machine/role/guest-*/{suffix}"'
+        if needle not in access_code:
+            fail(f"Не разрешена узкая проверка AppRole: {suffix}")
 
     if 'request("LIST", "/v1/sys/policies/acl")' not in access_code:
         fail("Список ACL-политик OpenBao должен читаться методом LIST")
