@@ -13,6 +13,7 @@ sys.path.insert(0, str(ROOT / "scripts" / "infra-manager"))
 
 from infra_manager.access import load_access_policy
 from infra_manager.common import InfraManagerError
+from infra_manager.semaphore import retire_machine_ssh_template
 from infra_manager.ssh_access import verify_ssh_access
 
 
@@ -55,6 +56,31 @@ def test_failed_otp_keeps_legacy_access() -> None:
     assert not any("systemctl disable" in str(command) for command in commands)
 
 
+def test_retire_template_without_host_project_id_file() -> None:
+    deleted: list[tuple[str, str]] = []
+
+    class Client:
+        auth_mode = "cookie"
+
+        def ensure_api_token(self) -> None:
+            return None
+
+        def get(self, path: str):
+            if path == "/projects":
+                return [{"id": 1, "name": "Proxmox Infrastructure"}]
+            if path.startswith("/project/1/templates"):
+                return [{"id": 6, "name": "Sync Machine SSH"}]
+            raise AssertionError(path)
+
+        def _request(self, method: str, path: str) -> None:
+            deleted.append((method, path))
+
+    with patch("infra_manager.semaphore.SemaphoreClient", return_value=Client()):
+        retire_machine_ssh_template()
+    assert deleted == [("DELETE", "/project/1/templates/6")]
+
+
 if __name__ == "__main__":
     test_failed_otp_keeps_legacy_access()
+    test_retire_template_without_host_project_id_file()
     print("SSH OTP cutover safety test passed.")

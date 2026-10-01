@@ -726,12 +726,13 @@ def persist_github_key() -> None:
 
 def retire_machine_ssh_template() -> None:
     """Удалить переходное задание после успешной проверки SSH OTP."""
-    if not nonempty(PROJECT_ID_FILE):
-        raise InfraManagerError("Не найден ID проекта Semaphore")
-    project_id = int(PROJECT_ID_FILE.read_text(encoding="utf-8").strip())
     client = SemaphoreClient()
     client.ensure_api_token()
     client.auth_mode = "token"
+    project = find_unique_by_name(client.get("/projects"), PROJECT_NAME, "project")
+    project_id = project.get("id") if project is not None else None
+    if not isinstance(project_id, int):
+        raise InfraManagerError("Не найден проект Semaphore для удаления старого задания")
     templates = client.get(
         f"/project/{project_id}/templates?sort=name&order=asc"
     )
