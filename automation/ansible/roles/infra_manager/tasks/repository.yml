@@ -11,7 +11,12 @@
       - origin
       - "{{ infra_project_branch | default('main') }}"
   environment:
-    GIT_SSH_COMMAND: "ssh -F /root/.ssh/github_config"
+    GIT_SSH_COMMAND: >-
+      ssh -i {{ provision.access_materialization.github.private_key }}
+      -o UserKnownHostsFile={{ provision.access_materialization.github.known_hosts }}
+      -o StrictHostKeyChecking=yes
+      -o IdentitiesOnly=yes
+      -o BatchMode=yes
   changed_when: true
   when: infra_self_update | default(false) | bool
 
