@@ -482,7 +482,7 @@ otp_config_policy = json.dumps(
                 "capabilities": ["create", "read", "update", "delete"],
             },
             "auth/machine/role": {"capabilities": ["list"]},
-            "auth/machine/role/guest-*": {
+            "auth/machine/role/+": {
                 "capabilities": ["create", "update", "delete"],
                 "required_parameters": [
                     "secret_id_bound_cidrs",
@@ -493,7 +493,7 @@ otp_config_policy = json.dumps(
                     "token_no_default_policy",
                 ],
                 "allowed_parameters": {
-                    "role_name": [],
+                    "role_name": ["guest-*"],
                     "secret_id_bound_cidrs": [],
                     "token_bound_cidrs": [],
                     "token_policies": ["machine-ssh-otp"],
@@ -504,36 +504,69 @@ otp_config_policy = json.dumps(
             },
             "auth/machine/role/+/bind-secret-id": {
                 "capabilities": ["read"],
+                "allowed_parameters": {
+                    "role_name": ["guest-*"],
+                },
             },
             "auth/machine/role/+/secret-id-bound-cidrs": {
                 "capabilities": ["read"],
+                "allowed_parameters": {
+                    "role_name": ["guest-*"],
+                },
             },
             "auth/machine/role/+/secret-id-num-uses": {
                 "capabilities": ["read"],
+                "allowed_parameters": {
+                    "role_name": ["guest-*"],
+                },
             },
             "auth/machine/role/+/secret-id-ttl": {
                 "capabilities": ["read"],
+                "allowed_parameters": {
+                    "role_name": ["guest-*"],
+                },
             },
             "auth/machine/role/+/token-bound-cidrs": {
                 "capabilities": ["read"],
+                "allowed_parameters": {
+                    "role_name": ["guest-*"],
+                },
             },
             "auth/machine/role/+/token-num-uses": {
                 "capabilities": ["read"],
+                "allowed_parameters": {
+                    "role_name": ["guest-*"],
+                },
             },
             "auth/machine/role/+/token-ttl": {
                 "capabilities": ["read"],
+                "allowed_parameters": {
+                    "role_name": ["guest-*"],
+                },
             },
             "auth/machine/role/+/token-max-ttl": {
                 "capabilities": ["read"],
+                "allowed_parameters": {
+                    "role_name": ["guest-*"],
+                },
             },
             "auth/machine/role/+/policies": {
                 "capabilities": ["read"],
+                "allowed_parameters": {
+                    "role_name": ["guest-*"],
+                },
             },
             "auth/machine/role/+/role-id": {
                 "capabilities": ["read"],
+                "allowed_parameters": {
+                    "role_name": ["guest-*"],
+                },
             },
             "auth/machine/role/+/secret-id": {
                 "capabilities": ["create", "update"],
+                "allowed_parameters": {
+                    "role_name": ["guest-*"],
+                },
             },
             "auth/token/lookup-self": {"capabilities": ["read"]},
             "auth/token/revoke-self": {"capabilities": ["update"]},
