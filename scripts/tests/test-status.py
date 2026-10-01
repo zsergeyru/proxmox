@@ -392,6 +392,11 @@ def main_test() -> None:
             return_value={"PVE_API_URL": "https://pve:8006"},
         ),
         patch.object(status_module, "check_openbao_kv") as check_kv_full,
+        patch.object(status_module, "_check_openbao_tls") as check_tls_full,
+        patch.object(
+            status_module,
+            "check_openbao_ssh_access",
+        ) as check_ssh_access_full,
         patch.object(
             status_module,
             "check_recovery_contour",
@@ -399,7 +404,36 @@ def main_test() -> None:
     ):
         status_module._check_openbao(full=True)
     check_kv_full.assert_called_once_with("pve")
+    check_tls_full.assert_called_once_with()
+    check_ssh_access_full.assert_called_once_with("pve")
     check_recovery_full.assert_called_once_with("pve")
+
+    tls_run = Mock(
+        return_value=SimpleNamespace(
+            returncode=0,
+            stdout='{"initialized": true, "sealed": false}',
+        )
+    )
+    with (
+        patch.object(status_module, "required_file") as require_tls_ca,
+        patch.object(
+            status_module,
+            "_primary_ipv4",
+            return_value="192.168.9.10",
+        ),
+        patch.object(
+            status_module,
+            "command_runner",
+            SimpleNamespace(run=tls_run),
+        ),
+    ):
+        status_module._check_openbao_tls()
+    require_tls_ca.assert_called_once_with(status_module.OPENBAO_TLS_CA)
+    tls_argv = tls_run.call_args.args[0]
+    if str(status_module.OPENBAO_TLS_CA) not in tls_argv:
+        fail("TLS-проверка OpenBao не использует доверенный CA")
+    if "https://192.168.9.10:8202/v1/sys/health" not in tls_argv:
+        fail("TLS-проверка OpenBao не обращается к машинному входу :8202")
 
     values = {
         "address": "192.168.9.10",
