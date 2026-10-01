@@ -31,6 +31,8 @@ services:
     environment:
       BAO_ADDR: http://127.0.0.1:8200
       BAO_LOG_LEVEL: info
+      BAO_SKIP_DROP_ROOT: "1"
+      SKIP_CHOWN: "1"
     volumes:
       - /mnt/persistent-state/openbao:/openbao/file
       - /etc/infra-manager/openbao/tls:/openbao/tls:ro
