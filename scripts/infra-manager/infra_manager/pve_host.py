@@ -245,6 +245,27 @@ def sign_ssh_client_key(node: str, public_key: str) -> str:
         )
     return certificate
 
+def sync_openbao_otp_contract(
+    node: str,
+    sources: list[dict[str, object]],
+) -> None:
+    """Синхронизировать OpenBao SSH OTP и машинные AppRole."""
+    if not isinstance(sources, list):
+        raise InfraManagerError("Некорректный OTP-контракт")
+    _ssh_with_input(
+        node,
+        str(OPENBAO_HOST_COMMAND),
+        "--sync-otp-contract",
+        "--log-level",
+        log_level(),
+        input_text=json.dumps(
+            {"sources": sources},
+            separators=(",", ":"),
+        )
+        + "\n",
+    )
+
+
 def sync_machine_ssh_roles(node: str, vmids: list[int]) -> None:
     """Синхронизировать отдельные OpenBao-роли машинных SSH-идентичностей."""
     clean = sorted(set(vmids))
