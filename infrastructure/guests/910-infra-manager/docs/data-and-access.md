@@ -1,12 +1,14 @@
 # Данные и доступы 910 infra-manager
 
-**Назначение:** практическое описание каталогов, подключений, прав и временных файлов, без которых службы 910 не смогут развернуться.
+**Тип:** локальная спецификация данных
+**Статус:** целевое состояние
+**Назначение:** определить, какие данные 910 находятся на PVE, что подключается внутрь LXC, какие права и жизненный цикл имеют эти данные и что необходимо сохранить для полного восстановления управляющего контура.
 
-Этот файл отвечает на вопрос: **что должно быть подключено к 910, где это видно внутри гостя и как проверить, что службы работают с правильными данными**.
+## 1. Общая модель хранения
 
-## 1. Общая схема
+### Три области PVE
 
-На PVE используется единый корень:
+Канонический корень:
 
 ```text
 /mnt/bindmounts/infra-manager/
@@ -15,266 +17,209 @@
 └── state/
 ```
 
-Внутрь 910 подключаются только две области:
+Назначение:
+
+| Область | Доступ из 910 | Назначение |
+|---|---|---|
+| `pve-only/` | нет | данные, которыми владеет только физический PVE и аварийный контур |
+| `access/` | только чтение | доверенные идентичности и сертификаты, которые разрешено показать 910 |
+| `state/` | чтение/запись | постоянное изменяемое состояние служб 910 |
+
+Внутри LXC:
 
 ```text
-access/  → /mnt/pve-access       RO
-state/   → /mnt/persistent-state RW
+access/ → /mnt/pve-access        RO
+state/  → /mnt/persistent-state RW
 ```
 
-`pve-only/` внутрь LXC не подключается.
+Если bind mount отсутствует, Ansible должен завершиться ошибкой. Создавать обычный локальный каталог вместо ожидаемого подключения запрещено.
 
-Это значение задаётся в `provision.yaml:persistence.target_layout`.
+### Что не хранится в rootfs LXC
 
-## 2. Область pve-only
+Корневая файловая система 910 не является единственным местом хранения:
 
-Физический путь:
+- OpenBao Raft;
+- Semaphore;
+- OpenTofu state;
+- PVE-only secrets;
+- TLS CA OpenBao.
+
+Пересоздание LXC не должно уничтожать эти данные.
+
+## 2. PVE-only и область access
+
+### PVE-only OpenBao
+
+Обязательная структура:
 
 ```text
-/mnt/bindmounts/infra-manager/pve-only/
+/mnt/bindmounts/infra-manager/pve-only/openbao/
+├── unseal.key
+├── ssh-access.json
+└── kv-access.json
 ```
 
-Эта область нужна PVE для операций, которые нельзя доверять обычной файловой системе 910.
+Эти файлы:
 
-В частности, OpenBao использует:
+- не подключаются внутрь 910;
+- не хранят root token;
+- резервируются как критичные данные восстановления;
+- используются только доверенными PVE-only операциями.
+
+### TLS CA OpenBao
+
+Закрытый TLS CA для сетевого OTP-входа OpenBao также принадлежит PVE:
 
 ```text
-/mnt/bindmounts/infra-manager/pve-only/openbao/unseal.key
-/mnt/bindmounts/infra-manager/pve-only/openbao/ssh-access.json
-/mnt/bindmounts/infra-manager/pve-only/openbao/kv-access.json
+/mnt/bindmounts/infra-manager/pve-only/openbao-tls/
+├── ca.key
+└── ca.crt
 ```
 
-Также PVE-only область содержит аварийную read-only копию Git credential.
+`ca.key` никогда не подключается в 910.
 
-Эти файлы не должны появляться как постоянные файлы внутри 910.
-
-Проверять их нужно с PVE, а не из LXC.
-
-## 3. Область access
-
-Физический путь PVE:
+Серверный комплект, который можно показать 910:
 
 ```text
-/mnt/bindmounts/infra-manager/access
+/mnt/bindmounts/infra-manager/access/openbao-tls/
+├── ca.crt
+├── server.crt
+└── server.key
 ```
 
-В 910:
+Внутри LXC:
 
 ```text
-/mnt/pve-access
+/mnt/pve-access/openbao-tls/
 ```
 
-Режим подключения:
+Целевая установка для OpenBao:
 
 ```text
-read-only
+/etc/infra-manager/openbao/tls/
+├── ca.crt
+├── server.crt
+└── server.key
 ```
 
-### 3.1. Доступ root SSH к PVE
-
-910 ожидает:
+Требуемые права:
 
 ```text
-/mnt/pve-access/pve-host/root_ed25519
-/mnt/pve-access/pve-host/known_hosts
+ca.crt      root:root 0644
+server.crt  root:root 0644
+server.key  root:root 0600
 ```
 
-Ansible проверяет закрытый ключ и устанавливает для него владельца `1001:0` и режим `0600` в доступном bind mount.
+Каталог TLS доступен контейнеру OpenBao только для чтения.
 
-`known_hosts` получает `1001:0`, режим `0644`.
+### Root SSH 910 → PVE
 
-Эта идентичность используется служебными командами 910, которым требуется действие непосредственно на PVE.
+В `access/` должны находиться:
 
-### 3.2. CA PVE
+```text
+pve-host/root_ed25519
+pve-host/known_hosts
+```
 
-Ожидаемый исходный файл:
+Закрытый ключ доступен только тому процессу 910, которому нужен PVE root SSH.
+
+Целевые права внутри доступного 910 представления:
+
+```text
+root_ed25519  1001:0 0600
+known_hosts   1001:0 0644
+```
+
+Этот ключ не используется для Git или Linux-гостей.
+
+### CA PVE
+
+Ожидаемый файл:
 
 ```text
 /mnt/pve-access/ca/pve-root-ca.crt
 ```
 
-Ansible:
-
-1. проверяет, что файл существует и не пуст;
-2. копирует его в `/usr/local/share/ca-certificates/pve-root-ca.crt`;
-3. выполняет `update-ca-certificates`;
-4. собирает общий набор:
+Он должен устанавливаться в системное доверие 910 и входить в:
 
 ```text
 /etc/infra-manager/ca/ca-bundle.crt
 ```
 
-Проверить:
+## 3. Постоянное состояние служб
 
-```bash
-test -s /mnt/pve-access/ca/pve-root-ca.crt
-test -s /usr/local/share/ca-certificates/pve-root-ca.crt
-test -s /etc/infra-manager/ca/ca-bundle.crt
-```
+### Основные каталоги
 
-## 4. Область state
-
-Физический путь PVE:
+Целевая структура:
 
 ```text
-/mnt/bindmounts/infra-manager/state
+/mnt/persistent-state/
+├── semaphore/
+├── opentofu/
+└── openbao/
 ```
 
-В 910:
+Постоянная `state/ansible/guest_ed25519` **не является частью целевой схемы**. Она относится к переходному состоянию и должна исчезнуть после полного перехода административного SSH на короткоживущие client certificates.
 
-```text
-/mnt/persistent-state
-```
-
-Режим:
-
-```text
-read-write
-```
-
-Основные каталоги:
+Требуемые каталоги:
 
 | Путь | Владелец | Режим | Назначение |
 |---|---:|---:|---|
-| `/mnt/persistent-state/ansible` | `1001:0` | `0700` | переходная SSH-идентичность Ansible |
 | `/mnt/persistent-state/semaphore` | `1001:0` | `0770` | SQLite, история и данные Semaphore |
-| `/mnt/persistent-state/opentofu` | `1001:0` | `0750` | входы и состояние OpenTofu |
+| `/mnt/persistent-state/opentofu` | `1001:0` | `0750` | рабочие данные и state OpenTofu |
 | `/mnt/persistent-state/openbao` | `root:root` | `0700` | Raft OpenBao |
 
-Точные значения находятся в `provision.yaml:persistence.target_layout.state.bindings`.
-
-## 5. Как Ansible готовит постоянные каталоги
-
-Реализация:
+OpenTofu state:
 
 ```text
-automation/ansible/roles/infra_manager/tasks/persistence.yml
+/mnt/persistent-state/opentofu/state/proxmox.tfstate
 ```
 
-### 5.1. Сначала проверяются bind mount
-
-Настройка начинается с:
-
-```bash
-mountpoint -q /mnt/pve-access
-mountpoint -q /mnt/persistent-state
-```
-
-Если подключение отсутствует, роль не создаёт локальный каталог вместо него.
-
-### 5.2. Проверяются старые пути
-
-Перед созданием ссылок Ansible проверяет старые локальные пути.
-
-Если ожидаемый путь:
-
-- уже является правильной ссылкой — он остаётся;
-- является пустым каталогом — его можно заменить ссылкой;
-- содержит неизвестные данные — настройка останавливается и требует ручной миграции;
-- является ссылкой на неожиданный источник — настройка останавливается.
-
-Это защищает от тихой потери старого состояния.
-
-### 5.3. Создаются рабочие ссылки
-
-После проверки создаются:
+Рабочая ссылка:
 
 ```text
-/etc/infra-manager/ansible
-    → /mnt/persistent-state/ansible
-
-/var/lib/infra-manager/semaphore
-    → /mnt/persistent-state/semaphore
-
 /var/lib/infra-manager/opentofu
-    → /mnt/persistent-state/opentofu
+→ /mnt/persistent-state/opentofu
+```
 
+Semaphore:
+
+```text
+/var/lib/infra-manager/semaphore
+→ /mnt/persistent-state/semaphore
+```
+
+OpenBao:
+
+```text
 /var/lib/persistent/openbao
-    → /mnt/persistent-state/openbao
+→ /mnt/persistent-state/openbao
 ```
 
-Проверить:
+### Подготовка Ansible
 
-```bash
-readlink -f /etc/infra-manager/ansible
-readlink -f /var/lib/infra-manager/semaphore
-readlink -f /var/lib/infra-manager/opentofu
-readlink -f /var/lib/persistent/openbao
-```
+Роль `infra_manager` должна:
 
-## 6. OpenTofu state
+1. проверить, что `/mnt/pve-access` и `/mnt/persistent-state` являются mount;
+2. проверить старые пути перед созданием ссылок;
+3. не удалять неизвестные данные;
+4. создать необходимые каталоги с точными владельцами;
+5. создать только ожидаемые ссылки;
+6. завершиться ошибкой при неожиданном источнике ссылки или неизвестном непустом каталоге.
 
-Внутри постоянного каталога создаётся:
+Это защищает от тихой потери состояния при миграции.
+
+## 4. Временные и воспроизводимые данные
+
+### Рабочие секреты
+
+Временная область:
 
 ```text
-/mnt/persistent-state/opentofu/state/
+/run/infra-manager/secrets/
 ```
 
-Владелец:
-
-```text
-1001:0
-```
-
-Режим:
-
-```text
-0750
-```
-
-Основной state:
-
-```text
-/var/lib/infra-manager/opentofu/state/proxmox.tfstate
-```
-
-Он физически находится в `state/opentofu/state/` на PVE.
-
-## 7. Постоянная идентичность Ansible
-
-Текущая переходная пара хранится в:
-
-```text
-/mnt/persistent-state/ansible/guest_ed25519
-/mnt/persistent-state/ansible/guest_ed25519.pub
-```
-
-Если закрытого ключа нет, `ansible_access.yml` создаёт Ed25519-пару.
-
-Закрытый ключ:
-
-```text
-owner 1001:0
-mode 0600
-```
-
-Открытый:
-
-```text
-owner 1001:0
-mode 0644
-```
-
-Открытая часть также добавляется в `/root/.ssh/authorized_keys` самого 910, чтобы общий Ansible-механизм мог управлять 910.
-
-Эта пара является переходной и не должна автоматически считаться целевой схемой SSH.
-
-## 8. Временная область рабочих секретов
-
-Ansible создаёт:
-
-```text
-/run/infra-manager/secrets
-```
-
-с:
-
-```text
-owner root:root
-mode 0750
-```
-
-После создания OpenBao там появляются рабочие файлы:
+Целевой набор:
 
 ```text
 pve-api.env
@@ -285,46 +230,33 @@ semaphore-api-token
 .openbao-materialized
 ```
 
-Часть файлов появляется только после соответствующей операции, например API-токен Semaphore — после настройки проекта.
+Требования:
 
-`infra-runtime` получает весь этот каталог только для чтения.
+- каталог `root:root 0750`;
+- secret-файлы с минимальными правами;
+- `infra-runtime` получает каталог только для чтения;
+- после перезапуска данные восстанавливаются из OpenBao;
+- содержимое `/run` не резервируется как постоянное состояние.
 
-## 9. Первый запуск до готовности OpenBao
+### Bootstrap secrets
 
-При самом первом создании 910 bootstrap может передать:
-
-```text
-/run/infra-manager/bootstrap-secrets/pve-api.env
-/run/infra-manager/bootstrap-secrets/github_proxmox_repo_ed25519
-```
-
-Если OpenBao ещё не может восстановить рабочие значения, Ansible копирует эти staging-файлы в рабочую `/run/infra-manager/secrets/` с владельцем `1001:0` и режимом `0600`.
-
-После инициализации OpenBao постоянным источником становятся его KV-секреты, а bootstrap-файлы больше не используются как штатный источник.
-
-## 10. Как восстанавливаются рабочие секреты
-
-Во время повторной настройки `pve_access.yml` сначала пытается вызвать на PVE:
+Только до первичной инициализации OpenBao допускается:
 
 ```text
-/usr/local/sbin/infra-manager-openbao-unseal
+/run/infra-manager/bootstrap-secrets/
 ```
 
-через отдельный root SSH канал.
+После переноса данных в OpenBao этот каталог не является штатным источником.
 
-Если существующий OpenBao доступен, PVE:
+### Машинный AppRole гостя
 
-- разблокирует его при необходимости;
-- читает ограниченные KV через PVE-only AppRole;
-- создаёт рабочие файлы в `/run/infra-manager/secrets/`.
+RoleID/SecretID для OTP-источников не входят в общий каталог 910 и не должны храниться как центральный файл со всеми гостями.
 
-После этого Ansible проверяет наличие `pve-api.env` и Git credential.
+Они доставляются только соответствующей машине по спецификации [`openbao.md`](openbao.md).
 
-Если рабочие значения не восстановлены и bootstrap-значений тоже нет, настройка останавливается.
+### Воспроизводимые данные 910
 
-## 11. Воспроизводимые локальные данные
-
-Следующие данные находятся в корневой файловой системе 910, но могут быть созданы заново:
+Из Git и машинных описаний должны восстанавливаться:
 
 ```text
 /var/lib/infra-manager/bootstrap-repo/
@@ -332,25 +264,58 @@ semaphore-api-token
 /usr/local/lib/infra-manager/
 /usr/local/sbin/infra-manager-*
 /etc/infra-manager/status.yaml
+/etc/systemd/system/infra-manager-*.service
 Docker images
 кэши
 ```
 
-Их потеря не должна требовать восстановления резервной копии, если сохранены Git и постоянное состояние.
+Их потеря сама по себе не требует восстановления резервной копии.
 
-## 12. Что проверять после развёртывания
+## 5. Резервирование и восстановление
 
-Проверить mount:
+### Что обязательно сохранять
+
+| Данные | Область | Можно создать заново без потери доверия |
+|---|---|---|
+| OpenBao Raft | `state/openbao` | нет |
+| OpenBao unseal/AppRole PVE | `pve-only/openbao` | не как обычное восстановление |
+| TLS CA OpenBao | `pve-only/openbao-tls` | нет без смены доверия |
+| TLS server material | `access/openbao-tls` | да, если сохранён тот же TLS CA |
+| Semaphore | `state/semaphore` | прежнее состояние — нет |
+| OpenTofu state | `state/opentofu/state` | нет поверх существующей инфраструктуры |
+| PVE root SSH / CA | `access/` | только через отдельную ротацию/выдачу |
+| Compose/Python/commands | Git / rootfs | да |
+| `/run/infra-manager/secrets` | временно | да, из OpenBao |
+
+Общая политика резервного копирования определяется разделом `600`.
+
+### Восстановление после пересоздания LXC
+
+Порядок:
+
+1. на PVE проверить сохранность `pve-only`, `access` и `state`;
+2. подключить `access` к `/mnt/pve-access` как RO;
+3. подключить `state` к `/mnt/persistent-state` как RW;
+4. не создавать локальные замены mount;
+5. установить базовую систему и Docker;
+6. применить Ansible 910;
+7. установить TLS material OpenBao;
+8. запустить и разблокировать OpenBao;
+9. восстановить рабочие секреты;
+10. восстановить Semaphore и `infra-runtime`;
+11. проверить OpenTofu state;
+12. синхронизировать OTP-контракт;
+13. выполнить `infra-manager-status --full`.
+
+Если ожидаемый старый каталог содержит неизвестные данные, автоматизация должна остановиться до ручного решения.
+
+## 6. Проверка и типичные ошибки
+
+### Проверка mount и состояния
 
 ```bash
 mountpoint /mnt/pve-access
 mountpoint /mnt/persistent-state
-```
-
-Проверить постоянные каталоги:
-
-```bash
-stat /mnt/persistent-state/ansible
 stat /mnt/persistent-state/semaphore
 stat /mnt/persistent-state/opentofu
 stat /mnt/persistent-state/openbao
@@ -359,24 +324,28 @@ stat /mnt/persistent-state/openbao
 Проверить ссылки:
 
 ```bash
-readlink -f /etc/infra-manager/ansible
 readlink -f /var/lib/infra-manager/semaphore
 readlink -f /var/lib/infra-manager/opentofu
 readlink -f /var/lib/persistent/openbao
 ```
 
-Проверить PVE-доступ:
+Проверить access:
 
 ```bash
 test -s /mnt/pve-access/pve-host/root_ed25519
 test -s /mnt/pve-access/pve-host/known_hosts
 test -s /mnt/pve-access/ca/pve-root-ca.crt
+test -s /mnt/pve-access/openbao-tls/ca.crt
+test -s /mnt/pve-access/openbao-tls/server.crt
+test -s /mnt/pve-access/openbao-tls/server.key
 ```
 
 Проверить рабочие секреты:
 
 ```bash
-ls -la /run/infra-manager/secrets/
+test -s /run/infra-manager/secrets/pve-api.env
+test -s /run/infra-manager/secrets/github_proxmox_repo_ed25519
+test -s /run/infra-manager/secrets/semaphore-server.env
 ```
 
 Полная проверка:
@@ -385,90 +354,32 @@ ls -la /run/infra-manager/secrets/
 infra-manager-status --full
 ```
 
-## 13. Что нужно сохранить для восстановления 910
+### Ошибки
 
-Локальная карта данных:
+Если `mountpoint` сообщает ошибку — исправить bind mount на PVE, а не создавать локальный каталог.
 
-| Данные | Где находятся | Можно создать заново |
-|---|---|---|
-| OpenBao Raft | `state/openbao` | нет |
-| unseal key и PVE-only AppRole | `pve-only/openbao` | не как обычное восстановление |
-| Semaphore | `state/semaphore` | пустую базу — да, прежнее состояние — нет |
-| OpenTofu state | `state/opentofu/state` | не поверх существующей инфраструктуры |
-| переходный Ansible key | `state/ansible` | технически можно перевыпустить, но требуется согласованная ротация |
-| PVE root SSH / CA | `access/` | только через отдельную процедуру выдачи |
-| Compose, Python, команды | Git / rootfs | да |
-| Docker images | локальный Docker | да |
-| `/run/infra-manager/secrets` | временно | да, из OpenBao |
+Если Ansible отказывается заменить старый путь ссылкой — сначала проверить данные и выполнить осознанную миграцию.
 
-Общая политика резервирования остаётся в [`610-backup.md`](../../../../docs/600-storage/610-backup.md).
+Если нет `pve-api.env` — проверить OpenBao startup-unseal и материализацию KV.
 
-## 14. Восстановление каталогов после пересоздания LXC
+Если `infra-runtime` не может писать SQLite или OpenTofu state — проверить числовых владельцев `1001:0` и режимы каталогов.
 
-Правильный порядок:
+Если TLS listener OpenBao не запускается — проверить наличие `server.key/server.crt`, SAN сертификата, права файлов и read-only mount в контейнер.
 
-1. на PVE убедиться, что сохранены `pve-only`, `access`, `state`;
-2. подключить `access` к `/mnt/pve-access` как RO;
-3. подключить `state` к `/mnt/persistent-state` как RW;
-4. не создавать пустые локальные замены ожидаемых bind mount;
-5. запустить общую Ansible-настройку 910;
-6. дать `persistence.yml` проверить старые пути и создать рабочие ссылки;
-7. восстановить рабочие секреты через существующий OpenBao;
-8. собрать контейнеры и выполнить проверки сервисов;
-9. завершить `infra-manager-status --full`.
+## 7. Источники и связанные документы
 
-Если Ansible сообщает, что старый путь содержит неизвестные данные, сначала нужно разобраться с этими данными вручную. Удалять их только ради прохождения роли нельзя.
+Машинные источники после полной реализации:
 
-## 15. Типичные неисправности
+- [`../provision.yaml`](../provision.yaml) — bindings, владельцы и режимы;
+- `rootfs/` — воспроизводимые файлы 910;
+- Ansible-роль `infra_manager` — создание каталогов, ссылок и установка TLS material.
 
-### 15.1. `mountpoint` сообщает ошибку
+Связанные документы:
 
-Причина находится вне служб 910: ожидаемый bind mount не подключён PVE.
-
-Не нужно создавать `/mnt/persistent-state` или `/mnt/pve-access` как обычный локальный каталог и продолжать установку.
-
-### 15.2. Ansible отказывается заменить старый каталог ссылкой
-
-Проверить:
-
-```bash
-ls -la <путь>
-readlink -f <путь>
-```
-
-Если там сохранилось старое состояние, его нужно осознанно мигрировать в соответствующий каталог `/mnt/persistent-state`.
-
-### 15.3. Нет `pve-api.env`
-
-Проверить:
-
-```bash
-systemctl status infra-manager-openbao-startup-unseal.service
-ls -la /run/infra-manager/secrets/
-```
-
-На первом запуске дополнительно проверить staging-файл `/run/infra-manager/bootstrap-secrets/pve-api.env`.
-
-### 15.4. `infra-runtime` не может писать SQLite или OpenTofu state
-
-Проверить числовых владельцев:
-
-```bash
-stat -c '%u:%g %a %n' /mnt/persistent-state/semaphore
-stat -c '%u:%g %a %n' /mnt/persistent-state/opentofu
-```
-
-Ожидаемый рабочий пользователь контейнера — `1001:0`.
-
-## 16. Связанные документы
-
-- [`../provision.yaml`](../provision.yaml) — машинное описание всех путей и bindings.
-- [`openbao.md`](openbao.md) — Raft, PVE-only данные и материализация секретов.
-- [`semaphore.md`](semaphore.md) — постоянная база Semaphore.
-- [`infra-runtime.md`](infra-runtime.md) — подключения контейнера.
-- [`automation-tools.md`](automation-tools.md) — OpenTofu state и Ansible.
-- [`../../../../automation/ansible/roles/infra_manager/tasks/persistence.yml`](../../../../automation/ansible/roles/infra_manager/tasks/persistence.yml) — создание каталогов и ссылок.
-- [`../../../../automation/ansible/roles/infra_manager/tasks/pve_access.yml`](../../../../automation/ansible/roles/infra_manager/tasks/pve_access.yml) — CA PVE и восстановление рабочих секретов.
-- [`../../../../automation/ansible/roles/infra_manager/tasks/ansible_access.yml`](../../../../automation/ansible/roles/infra_manager/tasks/ansible_access.yml) — переходная SSH-идентичность Ansible.
-- [`../../../../docs/200-pve/230-host-layout.md`](../../../../docs/200-pve/230-host-layout.md) — общая структура PVE.
-- [`../../../../docs/600-storage/610-backup.md`](../../../../docs/600-storage/610-backup.md) — политика резервирования.
+- [`openbao.md`](openbao.md) — Raft, TLS, PVE-only данные, KV и OTP;
+- [`semaphore.md`](semaphore.md) — постоянная база Semaphore;
+- [`infra-runtime.md`](infra-runtime.md) — подключения контейнеров;
+- [`automation-tools.md`](automation-tools.md) — OpenTofu state;
+- [`../../../../docs/200-pve/230-host-layout.md`](../../../../docs/200-pve/230-host-layout.md) — общая структура PVE;
+- [`../../../../docs/600-storage/610-backup.md`](../../../../docs/600-storage/610-backup.md) — общая политика резервирования;
+- [`../../../../docs/700-security/780-implementation-status.md`](../../../../docs/700-security/780-implementation-status.md) — переходные отличия текущего кода.
