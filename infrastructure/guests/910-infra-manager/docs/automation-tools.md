@@ -1,17 +1,21 @@
 # Инструменты управления на 910 infra-manager
 
-**Назначение:** практическое руководство по OpenTofu, Ansible, Packer, Git и Python внутри `infra-runtime`: где они находятся, какие данные используют, как запускаются и как их проверять.
+**Тип:** локальная спецификация набора инструментов
+**Статус:** целевое состояние
+**Назначение:** описать OpenTofu, Ansible, Packer, Git и Python внутри `infra-runtime`: какие задачи они выполняют, какие данные используют, как должны взаимодействовать и как восстановить рабочий набор.
 
-Эти инструменты не являются отдельными постоянно работающими службами. Они используются заданиями Semaphore и служебным кодом 910.
+Эти инструменты не являются самостоятельными постоянно работающими службами, поэтому описываются в одном документе.
 
 ## 1. Общая рабочая цепочка
 
-Для обычного Linux-гостя схема такая:
+### Основной поток
+
+Для управляемого Linux-гостя:
 
 ```text
 Git
  ↓
-guest.yaml + provision.yaml
+guest.yaml + provision.yaml + access.yaml
  ↓
 OpenTofu
  ↓
@@ -19,22 +23,22 @@ VM/LXC в Proxmox
  ↓
 Ansible
  ↓
-ОС и службы внутри гостя
+ОС, службы и доступы гостя
 ```
 
-Packer используется отдельно для сборки базового шаблона VM.
+Packer отдельно собирает базовый VM-шаблон.
 
-Python связывает эти части и проверяет условия, которые неудобно или опасно выражать только shell-командами.
+Python связывает эти инструменты, выполняет проверки и операции через API, но не является вторым самостоятельным источником требуемого состояния.
 
-## 2. Где находятся инструменты
+### Размещение
 
-Все основные инструменты запускаются внутри контейнера:
+Инструменты запускаются внутри:
 
 ```text
 infra-runtime
 ```
 
-Проверить версии:
+Проверка:
 
 ```bash
 docker exec infra-runtime tofu version
@@ -44,15 +48,13 @@ docker exec infra-runtime python3 --version
 docker exec infra-runtime git --version
 ```
 
-Текущие версии OpenTofu и Packer задаются в [`../provision.yaml`](../provision.yaml).
+Версии задаются в [`../provision.yaml`](../provision.yaml).
 
-## 3. OpenTofu
+## 2. OpenTofu
 
-OpenTofu управляет объектами Proxmox, которые принадлежат постоянному управляющему контуру.
+### Исходники и входные данные
 
-### 3.1. Конфигурация проекта
-
-Исходники:
+Конфигурация:
 
 ```text
 automation/opentofu/
@@ -63,160 +65,109 @@ automation/opentofu/
 └── .terraform.lock.hcl
 ```
 
-Рабочий код 910 не копирует эти файлы в отдельный постоянный каталог: задания используют версию из клонированного репозитория Semaphore.
-
-### 3.2. Входной файл гостей
-
-Перед работой OpenTofu Python создаёт:
+Перед планированием должен создаваться:
 
 ```text
 /var/lib/infra-manager/opentofu/guests.json
 ```
 
-Генератор:
+из проектных YAML.
 
-```text
-scripts/guests/render-opentofu-input.py
-```
+`guests.json` является воспроизводимым входом, а не самостоятельным источником требований.
 
-Для постоянного контура 910 файл создаётся с исключением VMID `910`.
+### State
 
-Это воспроизводимый файл. Источник требований — проектные YAML, а не `guests.json`.
-
-Проверить:
-
-```bash
-test -s /var/lib/infra-manager/opentofu/guests.json
-jq . /var/lib/infra-manager/opentofu/guests.json
-```
-
-### 3.3. Состояние
-
-Основной state:
+Постоянный state:
 
 ```text
 /var/lib/infra-manager/opentofu/state/proxmox.tfstate
 ```
 
-Физически:
+физически:
 
 ```text
 /mnt/persistent-state/opentofu/state/proxmox.tfstate
 ```
 
-Backend инициализируется локальным путём к этому файлу.
+Потерянный state нельзя заменять пустым поверх существующей инфраструктуры.
 
-Проверить наличие:
+### Plan
 
-```bash
-ls -lh /var/lib/infra-manager/opentofu/state/
-```
+Задание `OpenTofu Plan` должно:
 
-Потерянный state нельзя молча заменять новым пустым state поверх существующей инфраструктуры.
+1. убедиться, что не идёт активация нового `infra-runtime`;
+2. построить `guests.json`;
+3. выполнить `tofu init` с постоянным backend;
+4. выполнить общий `tofu plan`;
+5. различить отсутствие изменений, наличие изменений и ошибку.
 
-### 3.4. Задание OpenTofu Plan
+Наличие изменений само по себе не является ошибкой.
 
-Semaphore запускает:
+### Применение одного гостя
 
-```text
-scripts/infra-manager/jobs/opentofu-plan.py
-```
+`Deploy Guest <VMID>` должен:
 
-Он:
+1. сформировать план только выбранного ресурса;
+2. проверить JSON plan;
+3. убедиться, что посторонние ресурсы не меняются;
+4. применить именно проверенный plan;
+5. удалить временный plan после завершения.
 
-1. проверяет, что не идёт активация нового `infra-runtime`;
-2. строит `guests.json`;
-3. выполняет `tofu init` с постоянным backend;
-4. выполняет общий `tofu plan`;
-5. различает `нет изменений`, `есть изменения` и ошибку.
+910 не должен входить в постоянный OpenTofu state, которым он сам управляет.
 
-Наличие изменений не считается ошибкой.
+## 3. Ansible
 
-### 3.5. Применение одного гостя
+### Основной playbook
 
-`Deploy Guest <VMID>` не выполняет безусловный общий `tofu apply`.
-
-Код:
-
-1. создаёт план только для выбранного гостя;
-2. показывает план в JSON;
-3. убеждается, что изменения не затрагивают посторонние ресурсы;
-4. применяет проверенный plan;
-5. удаляет временный `.tfplan` после завершения.
-
-Для VMID `910` действует особый путь: объект Proxmox сверяется как существующий, но не включается в постоянный state самого 910.
-
-## 4. Ansible
-
-Ansible настраивает Linux после создания или проверки объекта Proxmox.
-
-### 4.1. Основной playbook
+Общий playbook:
 
 ```text
 automation/ansible/playbooks/configure-guest.yml
 ```
 
-Он используется и для обычных Linux-гостей, и для 910.
-
-Для 910 включается роль:
+Для 910 он подключает роль:
 
 ```text
 automation/ansible/roles/infra_manager/
 ```
 
-Порядок её частей:
+Ansible должен оставаться владельцем настройки Linux:
+
+- пакеты;
+- каталоги;
+- файлы;
+- Compose;
+- systemd;
+- SSH trust;
+- локальные параметры служб.
+
+### Инвентарь
+
+Постоянный inventory для отдельного запуска не требуется.
+
+`deploy-guest` должен определить адрес гостя и сформировать временный inventory.
+
+### Административный SSH
+
+Целевая схема:
 
 ```text
-persistence
-→ pve_access
-→ ansible_access
-→ repository
-→ semaphore
-→ runtime
-→ openbao
-→ recovery
-→ verify
+временная Ed25519-пара задания
+        ↓
+OpenBao ssh-client-signer
+        ↓
+короткоживущий client certificate
+        ↓
+root SSH в управляемый Linux-гость
 ```
 
-### 4.2. Инвентарь
+Постоянный `guest_ed25519` не является частью конечной схемы и после завершения перехода должен быть удалён из постоянного состояния 910.
 
-Постоянный inventory не хранится.
+Проверка сервера должна выполняться через host CA. Автоматическое отключение `StrictHostKeyChecking` запрещено.
 
-`deploy-guest` определяет адрес выбранного гостя и формирует временный inventory на время одного запуска.
+## 4. Packer
 
-### 4.3. SSH-доступ
-
-Текущая реализация может использовать переходный постоянный ключ:
-
-```text
-/etc/infra-manager/ansible/guest_ed25519
-```
-
-При штатном административном доступе код умеет получать короткоживущий сертификат Ansible через OpenBao.
-
-Host key checking всегда включён.
-
-### 4.4. Ручная проверка Ansible
-
-Проверить сам инструмент:
-
-```bash
-docker exec infra-runtime ansible --version
-```
-
-Проверить ключ внутри контейнера:
-
-```bash
-docker exec infra-runtime test -s /etc/infra-manager/ansible/guest_ed25519
-```
-
-Не следует вручную запускать `configure-guest.yml` без тех переменных, которые готовит `deploy-guest.py`, если цель — штатное развёртывание. Основной пользовательский путь — задание `Deploy Guest <VMID>`.
-
-## 5. Packer
-
-Packer собирает базовый Debian-шаблон.
-
-### 5.1. Исходники
+### Исходники
 
 ```text
 automation/packer/9000/
@@ -226,77 +177,48 @@ automation/packer/9000/
 └── scripts/
 ```
 
-### 5.2. Задание
-
-Semaphore:
-
-```text
-Build Template 9000
-```
-
-Точка входа:
-
-```text
-scripts/infra-manager/jobs/build-template.py 9000
-```
-
-Основная логика находится в:
-
-```text
-scripts/infra-manager/infra_manager/template_build.py
-```
-
-### 5.3. Порядок сборки
-
-Код:
-
-1. принимает только VMID `9000`;
-2. получает PVE-доступ из тех же рабочих переменных, что OpenTofu;
-3. передаёт секреты Packer через переменные окружения `PKR_VAR_*`, а не через аргументы командной строки;
-4. выполняет `packer init`;
-5. выполняет `packer validate`;
-6. выполняет `packer build`;
-7. приводит шаблон к финальным требованиям проекта;
-8. проверяет результат.
-
-Текущий целевой шаблон:
+Целевой шаблон:
 
 ```text
 VMID 9000
 tpl-debian13
 ```
 
-### 5.4. Проверочная VM
+### Сборка
 
-Для полной проверки используется временная копия:
+Задание `Build Template 9000` должно:
+
+1. принимать только VMID 9000;
+2. получать PVE credential из рабочего защищённого контура;
+3. передавать secrets через `PKR_VAR_*`, а не аргументы процесса;
+4. выполнять `packer init`;
+5. выполнять `packer validate`;
+6. выполнять `packer build`;
+7. выполнять пост-проверку шаблона.
+
+Для полной проверки допускается временная VM:
 
 ```text
 VMID 9099
 ```
 
-Она создаётся только как проверочный объект и после проверки удаляется.
+Она должна быть удалена после проверки только если автоматизация уверена, что объект принадлежит текущему тесту.
 
-Неизвестный объект с VMID 9000 или 9099 не должен удаляться автоматически только ради продолжения сборки.
+### Установочный HTTP
 
-### 5.5. HTTP во время установки
+Так как `infra-runtime` использует host network, временный HTTP-сервер Packer доступен по адресу 910 без отдельного Docker port mapping.
 
-Так как `infra-runtime` использует `network_mode: host`, временный HTTP-сервер Packer работает на сетевом адресе 910 и доступен устанавливаемой VM без отдельного Docker port mapping.
+## 5. Git и Python
 
-## 6. Git
+### Git
 
-Git нужен для двух разных задач.
-
-### 6.1. Рабочая копия самого 910
-
-На уровне Debian 910 находится:
+На уровне 910 должна существовать воспроизводимая рабочая копия:
 
 ```text
 /var/lib/infra-manager/bootstrap-repo/
 ```
 
-Она используется для установки локальных файлов и Python-кода.
-
-При самообновлении `repository.yml`:
+Она может обновляться через:
 
 ```text
 git fetch --depth 1 origin <branch>
@@ -304,23 +226,11 @@ git reset --hard FETCH_HEAD
 git clean -ffdx
 ```
 
-с использованием строгой SSH-конфигурации.
+с отдельным read-only Git credential и строгой проверкой сервера.
 
-Эта рабочая копия воспроизводима из Git.
+Semaphore также клонирует проект для заданий, используя тот же логический read-only доступ, но собственный рабочий каталог.
 
-### 6.2. Репозиторий внутри Semaphore
-
-Semaphore отдельно клонирует:
-
-```text
-git@github.com:zsergeyru/proxmox.git
-```
-
-для каждого задания.
-
-Он использует read-only Deploy Key из `/run/infra-manager/secrets/` и постоянный `known_hosts` в каталоге Semaphore.
-
-## 7. Python-код 910
+### Python
 
 Исходник:
 
@@ -328,87 +238,78 @@ git@github.com:zsergeyru/proxmox.git
 scripts/infra-manager/infra_manager/
 ```
 
-Ansible устанавливает его в:
+Установленный пакет:
 
 ```text
 /usr/local/lib/infra-manager/infra_manager/
 ```
 
-Команды 910 запускают этот пакет через `PYTHONPATH=/usr/local/lib/infra-manager` или через shell-обёртки.
+Python должен выполнять только программно сложные операции:
 
-### 7.1. Основные задачи Python
-
-Python выполняет:
-
-- разбор `guest.yaml` и `provision.yaml`;
-- формирование `guests.json`;
-- работу с PVE API;
-- планирование и применение OpenTofu;
+- разбор машинных описаний;
+- PVE API;
+- OpenTofu orchestration;
 - запуск Ansible;
-- сборку и проверку Packer-шаблона;
-- синхронизацию Semaphore;
-- работу с OpenBao через PVE-only helper;
-- выдачу и проверку SSH-сертификатов;
-- итоговую проверку 910.
+- Packer lifecycle;
+- Semaphore API;
+- OpenBao API через доверенные роли;
+- SSH certificate/OTP orchestration;
+- проверки состояния.
 
-Машинные требования при этом остаются в YAML и других проектных файлах.
+Python не должен содержать независимую вторую копию полного требуемого состояния 910.
 
-## 8. Задания Semaphore и соответствующие инструменты
+## 6. Задания, проверка и жизненный цикл
 
-| Задание | Основной инструмент | Точка входа |
-|---|---|---|
-| `OpenTofu Plan` | OpenTofu | `jobs/opentofu-plan.py` |
-| `Build Template 9000` | Packer | `jobs/build-template.py 9000` |
-| `Deploy Guest 410` | OpenTofu + Ansible | `jobs/deploy-guest.py 410` |
-| `Deploy Guest 910` | Ansible + специальное самообновление | `jobs/deploy-guest.py 910` |
-| `Sync Machine SSH` | Python + OpenBao | `jobs/sync-machine-ssh.py` |
-| `Initialize OpenBao 910` | Python + PVE helper + OpenBao | `jobs/initialize-openbao.py` |
+### Целевые задания
 
-Все точки входа сначала проверяют, что не идёт конфликтующая активация нового `infra-runtime`.
+Набор инструментов должен поддерживать задания Semaphore:
 
-## 9. Режимы deploy-guest.py
+| Задание | Основные инструменты |
+|---|---|
+| `OpenTofu Plan` | OpenTofu + Python |
+| `Build Template 9000` | Packer + Python |
+| `Deploy Guest <VMID>` | OpenTofu + Ansible + Python |
+| `Deploy Guest 910` | Ansible + безопасная активация runtime |
+| `Sync SSH Access` | OpenBao + Ansible + `access.yaml` |
+| `Initialize OpenBao 910` | OpenBao + PVE-only helper + Python |
 
-Скрипт поддерживает несколько служебных режимов:
+Старое `Sync Machine SSH` не входит в целевой набор.
+
+### Режимы deploy-guest
+
+Служебные режимы могут разделять:
 
 ```text
---bootstrap-scope
---infrastructure-only
---provision-base-only
---provision-only
---provision-existing-only
+создание инфраструктуры
+базовую настройку
+полную настройку
+настройку уже существующего объекта
 ```
 
-Обычные задания Semaphore `Deploy Guest 410/910` вызывают стандартный путь без этих флагов.
+Обычный пользовательский путь должен оставаться единым заданием `Deploy Guest <VMID>`.
 
-Флаги используются первоначальным контуром и восстановительными сценариями, когда нужно разделить создание объекта Proxmox и настройку ОС.
+Для 910 обычное обновление должно определяться как самообновление и использовать отложенную активацию `infra-runtime`.
 
-Для VMID `910` обычный полный запуск без `--bootstrap-scope` определяется как самообновление и резервирует отложенную активацию `infra-runtime`.
-
-## 10. Проверка рабочего набора инструментов
-
-Штатная проверка из `verify.yml`:
+### Проверка
 
 ```bash
 docker exec infra-runtime tofu version
 docker exec infra-runtime packer version
 docker exec infra-runtime ansible --version
 docker exec infra-runtime python3 -c 'import proxmoxer, yaml, jsonschema'
-```
-
-Дополнительно:
-
-```bash
 docker exec infra-runtime git --version
-docker exec infra-runtime test -s /etc/infra-manager/ansible/guest_ed25519
-```
-
-Полный итог:
-
-```bash
 infra-manager-status --full
 ```
 
-## 11. Обновление инструментов
+Дополнительно нужно подтверждать:
+
+- доступность OpenTofu state;
+- отсутствие постоянного Ansible private key в целевом состоянии;
+- выпуск короткоживущего client certificate;
+- проверку host CA;
+- успешную OTP-синхронизацию из `access.yaml`.
+
+### Обновление
 
 Версии OpenTofu и Packer меняются в `provision.yaml`.
 
@@ -419,102 +320,48 @@ provision.yaml
 rootfs/opt/infra-manager/compose/runtime/requirements.txt
 ```
 
-Системные пакеты образа меняются в:
+Системные пакеты образа — в:
 
 ```text
 rootfs/opt/infra-manager/compose/runtime/Dockerfile
 ```
 
-После изменения выполняется `Deploy Guest 910`: новый образ собирается и безопасно активируется после завершения текущего задания.
+После изменения выполняется `Deploy Guest 910`. Ручная установка новых бинарников внутрь текущего контейнера не считается обновлением.
 
-Не следует вручную заменять `tofu`, `packer` или Python-пакеты внутри работающего контейнера.
+### Восстановление
 
-## 12. Что является постоянным
+После потери `infra-runtime` нужно:
 
-Постоянно сохраняются:
-
-```text
-/mnt/persistent-state/opentofu/state/
-/mnt/persistent-state/ansible/
-```
-
-Воспроизводятся из Git и образа:
-
-```text
-OpenTofu binary
-Packer binary
-Ansible
-Python libraries
-automation/opentofu/
-automation/packer/
-/var/lib/infra-manager/bootstrap-repo/
-/var/lib/infra-manager/opentofu/guests.json
-infra-runtime image
-```
-
-## 13. Восстановление инструментов после потери контейнера
-
-Если `infra-runtime` потерян:
-
-1. восстановить постоянные `state/opentofu` и `state/ansible`;
-2. получить проект в `/var/lib/infra-manager/bootstrap-repo`;
-3. установить Compose-файлы из `rootfs`;
+1. восстановить `state/opentofu`;
+2. восстановить доступы и OpenBao;
+3. получить проект;
 4. собрать `infra-runtime`;
-5. проверить версии инструментов;
-6. проверить наличие OpenTofu state;
-7. не выполнять `apply`, если ожидаемый старый state отсутствует;
-8. синхронизировать Semaphore;
+5. проверить версии;
+6. проверить OpenTofu state;
+7. синхронизировать Semaphore;
+8. синхронизировать SSH OTP-контракт;
 9. выполнить `OpenTofu Plan`;
-10. выполнить `infra-manager-status --full`.
+10. выполнить полный status.
 
-## 14. Типичные неисправности
+Если инфраструктура существует, а ожидаемый прежний OpenTofu state отсутствует, `apply` запрещён до выяснения причины.
 
-### 14.1. OpenTofu сообщает о пустом state
+## 7. Источники и связанные документы
 
-Сначала проверить:
+Машинные источники:
 
-```bash
-ls -lh /mnt/persistent-state/opentofu/state/
-readlink -f /var/lib/infra-manager/opentofu
-```
+- [`../provision.yaml`](../provision.yaml);
+- [`../rootfs/opt/infra-manager/compose/runtime/Dockerfile`](../rootfs/opt/infra-manager/compose/runtime/Dockerfile);
+- [`../rootfs/opt/infra-manager/compose/runtime/requirements.txt`](../rootfs/opt/infra-manager/compose/runtime/requirements.txt);
+- `automation/opentofu/`;
+- `automation/ansible/`;
+- `automation/packer/`;
+- `scripts/infra-manager/`.
 
-Если инфраструктура существует, а прежний state ожидался, не продолжать автоматическое применение до выяснения причины.
+Связанные документы:
 
-### 14.2. Ansible не может войти в гость
-
-Проверить:
-
-- наличие `/etc/infra-manager/ansible/guest_ed25519`;
-- права файла;
-- SSH host certificate или `known_hosts` для цели;
-- состояние OpenBao, если используется краткоживущий сертификат.
-
-### 14.3. Packer не видит установочный HTTP
-
-Проверить, что `infra-runtime` действительно работает в `network_mode: host` и что устанавливаемая VM может достичь IP 910.
-
-### 14.4. Python-модуль не импортируется на самом 910
-
-Проверить:
-
-```bash
-test -d /usr/local/lib/infra-manager/infra_manager
-PYTHONPATH=/usr/local/lib/infra-manager python3 -c 'import infra_manager'
-```
-
-Если каталог отсутствует, повторно применить роль `infra_manager`.
-
-## 15. Связанные документы
-
-- [`../provision.yaml`](../provision.yaml) — версии и постоянные пути.
-- [`infra-runtime.md`](infra-runtime.md) — образ и подключённые каталоги.
-- [`semaphore.md`](semaphore.md) — задания, которые запускают инструменты.
-- [`data-and-access.md`](data-and-access.md) — OpenTofu state и Ansible identity.
-- [`system-services.md`](system-services.md) — установка Python-кода и команд.
-- [`../../../../automation/opentofu/`](../../../../automation/opentofu/) — конфигурация OpenTofu.
-- [`../../../../automation/ansible/playbooks/configure-guest.yml`](../../../../automation/ansible/playbooks/configure-guest.yml) — общий playbook.
-- [`../../../../automation/packer/9000/`](../../../../automation/packer/9000/) — шаблон Packer 9000.
-- [`../../../../scripts/infra-manager/jobs/`](../../../../scripts/infra-manager/jobs/) — точки входа Semaphore.
-- [`../../../../scripts/infra-manager/infra_manager/opentofu.py`](../../../../scripts/infra-manager/infra_manager/opentofu.py) — рабочая область OpenTofu.
-- [`../../../../scripts/infra-manager/infra_manager/guest_deploy.py`](../../../../scripts/infra-manager/infra_manager/guest_deploy.py) — развёртывание гостя.
-- [`../../../../scripts/infra-manager/infra_manager/template_build.py`](../../../../scripts/infra-manager/infra_manager/template_build.py) — сборка шаблона.
+- [`infra-runtime.md`](infra-runtime.md) — среда выполнения;
+- [`semaphore.md`](semaphore.md) — задания;
+- [`openbao.md`](openbao.md) — SSH CA и OTP;
+- [`data-and-access.md`](data-and-access.md) — OpenTofu state и доступы;
+- [`system-services.md`](system-services.md) — установка команд;
+- [`../../../../docs/700-security/780-implementation-status.md`](../../../../docs/700-security/780-implementation-status.md) — переходные расхождения текущей реализации.
