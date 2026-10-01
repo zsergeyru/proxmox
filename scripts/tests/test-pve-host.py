@@ -290,6 +290,46 @@ def test_sign_ssh_client_key() -> None:
     ]
 
 
+def test_issue_openbao_machine_credentials() -> None:
+    calls: list[tuple[tuple[str, ...], str]] = []
+
+    def fake_input(
+        node: str,
+        *command: str,
+        input_text: str,
+    ):
+        assert node == "pve"
+        calls.append((tuple(command), input_text))
+        return SimpleNamespace(
+            returncode=0,
+            stdout=json.dumps(
+                {
+                    "vmid": 410,
+                    "role_id": "role-410",
+                    "secret_id": "secret-410",
+                }
+            ),
+        )
+
+    with patch.object(module, "_ssh_with_input", side_effect=fake_input):
+        credentials = module.issue_openbao_machine_credentials("pve", 410)
+
+    assert credentials == {
+        "role_id": "role-410",
+        "secret_id": "secret-410",
+    }
+    assert calls == [
+        (
+            (
+                "/usr/local/sbin/infra-manager-openbao-unseal",
+                "--issue-machine-credentials",
+            ),
+            '{"vmid":410}\n',
+        )
+    ]
+    assert "secret-410" not in " ".join(calls[0][0])
+
+
 def test_machine_ssh_openbao_calls() -> None:
     calls: list[tuple[tuple[str, ...], str]] = []
 
@@ -379,6 +419,7 @@ def main() -> None:
     test_openbao_host_support()
     test_recovery_host_support()
     test_sign_ssh_client_key()
+    test_issue_openbao_machine_credentials()
     test_machine_ssh_openbao_calls()
     test_sign_ssh_host_key()
     print("[ОК] Проверки pve_host.py пройдены")
