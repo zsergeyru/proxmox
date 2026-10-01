@@ -60,8 +60,6 @@
       - -o
       - IdentitiesOnly=yes
       - "root@{{ infra_pve_node }}"
-      - sh
-      - -c
       - >-
         install -o root -g root -m 0755
         /tmp/infra-manager-openbao-unseal.new
