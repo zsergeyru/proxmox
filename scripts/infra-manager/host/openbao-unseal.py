@@ -592,7 +592,7 @@ request(
     {"policy": machine_policy},
 )
 
-policies_payload = request("GET", "/v1/sys/policies/acl")
+policies_payload = request("LIST", "/v1/sys/policies/acl")
 policy_names = policies_payload.get("data", {}).get("keys", [])
 if isinstance(policy_names, list):
     for policy_name in policy_names:
