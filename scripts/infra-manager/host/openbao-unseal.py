@@ -1463,6 +1463,8 @@ def request(method, path, body=None, *, token=None):
         with urllib.request.urlopen(req, timeout=30) as response:
             raw = response.read()
     except urllib.error.HTTPError as exc:
+        if method == "LIST" and exc.code == 404:
+            return {}
         detail = exc.read().decode("utf-8", errors="replace").strip()
         raise SystemExit(
             f"OpenBao HTTP {exc.code} for {method} {path}: {detail}"
