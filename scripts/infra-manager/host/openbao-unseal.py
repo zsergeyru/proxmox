@@ -271,9 +271,15 @@ import urllib.error
 import urllib.request
 
 BASE = "http://127.0.0.1:8200"
-token = sys.stdin.read().strip()
-if not token:
+payload = json.loads(sys.stdin.read())
+if not isinstance(payload, dict):
+    raise SystemExit("invalid configuration payload")
+token = payload.get("root_token")
+existing_credentials = payload.get("existing_credentials", {})
+if not isinstance(token, str) or not token:
     raise SystemExit("empty root token")
+if not isinstance(existing_credentials, dict):
+    raise SystemExit("invalid existing credentials")
 
 
 def request(
@@ -466,6 +472,40 @@ signer_policy = json.dumps(
     separators=(",", ":"),
 )
 
+otp_config_policy = json.dumps(
+    {
+        "path": {
+            "sys/mounts": {"capabilities": ["read"]},
+            "sys/mounts/ssh-otp": {
+                "capabilities": ["create", "read", "update", "delete", "sudo"],
+            },
+            "sys/auth": {"capabilities": ["read"]},
+            "sys/auth/machine": {
+                "capabilities": ["create", "read", "update", "delete", "sudo"],
+            },
+            "ssh-otp/roles": {"capabilities": ["list"]},
+            "ssh-otp/roles/guest-*": {
+                "capabilities": ["create", "read", "update", "delete"],
+            },
+            "auth/machine/role": {"capabilities": ["list"]},
+            "auth/machine/role/guest-*": {
+                "capabilities": ["create", "read", "update", "delete"],
+            },
+            "auth/machine/role/guest-*/role-id": {
+                "capabilities": ["read"],
+            },
+            "sys/policies/acl": {"capabilities": ["list"]},
+            "sys/policies/acl/machine-guest-*": {
+                "capabilities": ["create", "read", "update", "delete"],
+            },
+            "auth/token/lookup-self": {"capabilities": ["read"]},
+            "auth/token/revoke-self": {"capabilities": ["update"]},
+            "sys/capabilities-self": {"capabilities": ["update"]},
+        }
+    },
+    separators=(",", ":"),
+)
+
 request(
     "POST",
     "/v1/sys/policies/acl/infra-manager-ssh-ca-config",
@@ -475,6 +515,11 @@ request(
     "POST",
     "/v1/sys/policies/acl/infra-manager-ssh-signer",
     {"policy": signer_policy},
+)
+request(
+    "POST",
+    "/v1/sys/policies/acl/infra-manager-ssh-otp-config",
+    {"policy": otp_config_policy},
 )
 
 auth_payload = request("GET", "/v1/sys/auth")
@@ -507,6 +552,12 @@ roles = (
         "5m",
         "10m",
     ),
+    (
+        "ssh-otp-config",
+        "infra-manager-ssh-otp-config",
+        "5m",
+        "10m",
+    ),
 )
 
 credentials = {}
@@ -531,14 +582,26 @@ for role_name, policy_name, token_ttl, token_max_ttl in roles:
         f"/v1/auth/infra-manager/role/{role_name}/role-id",
     )
     role_id = role_payload.get("data", {}).get("role_id")
-    secret_payload = request(
-        "POST",
-        f"/v1/auth/infra-manager/role/{role_name}/secret-id",
-        {},
-    )
-    secret_id = secret_payload.get("data", {}).get("secret_id")
     if not isinstance(role_id, str) or not role_id:
         raise SystemExit(f"OpenBao did not return RoleID for {role_name}")
+    existing_item = existing_credentials.get(role_name)
+    secret_id = None
+    if isinstance(existing_item, dict):
+        existing_role_id = existing_item.get("role_id")
+        existing_secret_id = existing_item.get("secret_id")
+        if (
+            existing_role_id == role_id
+            and isinstance(existing_secret_id, str)
+            and existing_secret_id
+        ):
+            secret_id = existing_secret_id
+    if secret_id is None:
+        secret_payload = request(
+            "POST",
+            f"/v1/auth/infra-manager/role/{role_name}/secret-id",
+            {},
+        )
+        secret_id = secret_payload.get("data", {}).get("secret_id")
     if not isinstance(secret_id, str) or not secret_id:
         raise SystemExit(f"OpenBao did not return SecretID for {role_name}")
     credentials[role_name] = {
@@ -1195,6 +1258,17 @@ checks = (
             "ssh-client-signer/roles/infra-manager": {"deny"},
         },
     ),
+    (
+        "ssh-otp-config",
+        "infra-manager-ssh-otp-config",
+        {
+            "sys/mounts/ssh-otp": {"create", "read", "update", "delete", "sudo"},
+            "sys/auth/machine": {"create", "read", "update", "delete", "sudo"},
+            "ssh-otp/roles/guest-410": {"create", "read", "update", "delete"},
+            "auth/machine/role/guest-410": {"create", "read", "update", "delete"},
+            "ssh-otp/creds/guest-410": {"deny"},
+        },
+    ),
 )
 
 result = {}
@@ -1257,6 +1331,276 @@ for role_name, expected_policy, expected_paths in checks:
 print(json.dumps(result, separators=(",", ":")))
 """
 
+
+
+CONFIGURE_OTP_CONTRACT_CODE = r"""
+import ipaddress
+import json
+import sys
+import urllib.request
+
+BASE = "http://127.0.0.1:8200"
+payload = json.loads(sys.stdin.read())
+if not isinstance(payload, dict):
+    raise SystemExit("invalid OTP payload")
+credentials = payload.get("credentials")
+sources = payload.get("sources")
+if not isinstance(credentials, dict):
+    raise SystemExit("missing OTP config credentials")
+if not isinstance(sources, list):
+    raise SystemExit("missing OTP sources")
+role_id = credentials.get("role_id")
+secret_id = credentials.get("secret_id")
+if not isinstance(role_id, str) or not role_id:
+    raise SystemExit("missing RoleID")
+if not isinstance(secret_id, str) or not secret_id:
+    raise SystemExit("missing SecretID")
+
+
+def request(method, path, body=None, *, token=None):
+    data = None
+    headers = {"Content-Type": "application/json"}
+    if token:
+        headers["X-Vault-Token"] = token
+    if body is not None:
+        data = json.dumps(body, separators=(",", ":")).encode("utf-8")
+    req = urllib.request.Request(
+        f"{BASE}{path}",
+        data=data,
+        headers=headers,
+        method=method,
+    )
+    with urllib.request.urlopen(req, timeout=30) as response:
+        raw = response.read()
+    return json.loads(raw.decode("utf-8")) if raw else {}
+
+
+def private_host_cidr(value):
+    try:
+        network = ipaddress.ip_network(value, strict=True)
+    except ValueError as exc:
+        raise SystemExit(f"invalid CIDR: {value!r}") from exc
+    if network.version != 4 or network.prefixlen != 32 or not network.is_private:
+        raise SystemExit(f"OTP CIDR must be private IPv4 /32: {value!r}")
+    return str(network)
+
+
+normalized = []
+seen_vmids = set()
+for source in sources:
+    if not isinstance(source, dict):
+        raise SystemExit("invalid OTP source")
+    vmid = source.get("vmid")
+    source_cidr = source.get("source_cidr")
+    target_cidrs = source.get("target_cidrs")
+    if not isinstance(vmid, int) or vmid <= 0 or vmid in seen_vmids:
+        raise SystemExit("invalid or duplicate OTP VMID")
+    if not isinstance(source_cidr, str):
+        raise SystemExit("missing source CIDR")
+    if not isinstance(target_cidrs, list) or not target_cidrs:
+        raise SystemExit("OTP source must have at least one target")
+    normalized_targets = sorted(
+        {private_host_cidr(item) for item in target_cidrs if isinstance(item, str)}
+    )
+    if len(normalized_targets) != len(set(target_cidrs)):
+        raise SystemExit("invalid or duplicate OTP target CIDR")
+    normalized.append(
+        {
+            "vmid": vmid,
+            "source_cidr": private_host_cidr(source_cidr),
+            "target_cidrs": normalized_targets,
+        }
+    )
+    seen_vmids.add(vmid)
+
+login = request(
+    "POST",
+    "/v1/auth/infra-manager/login",
+    {"role_id": role_id, "secret_id": secret_id},
+)
+auth = login.get("auth")
+token = auth.get("client_token") if isinstance(auth, dict) else None
+if not isinstance(token, str) or not token:
+    raise SystemExit("OpenBao did not return OTP config token")
+
+try:
+    mounts_payload = request("GET", "/v1/sys/mounts", token=token)
+    mounts = mounts_payload.get("data", mounts_payload)
+    if not isinstance(mounts, dict):
+        raise SystemExit("invalid mounts list")
+    existing_mount = mounts.get("ssh-otp/")
+    if existing_mount is None:
+        request(
+            "POST",
+            "/v1/sys/mounts/ssh-otp",
+            {
+                "type": "ssh",
+                "description": "Одноразовый SSH-доступ между управляемыми гостями",
+            },
+            token=token,
+        )
+    elif not isinstance(existing_mount, dict) or existing_mount.get("type") != "ssh":
+        raise SystemExit("ssh-otp exists with unexpected type")
+
+    auth_payload = request("GET", "/v1/sys/auth", token=token)
+    auth_methods = auth_payload.get("data", auth_payload)
+    if not isinstance(auth_methods, dict):
+        raise SystemExit("invalid auth methods list")
+    existing_auth = auth_methods.get("machine/")
+    if existing_auth is None:
+        request(
+            "POST",
+            "/v1/sys/auth/machine",
+            {
+                "type": "approle",
+                "description": "Машинная идентичность для SSH OTP",
+            },
+            token=token,
+        )
+    elif not isinstance(existing_auth, dict) or existing_auth.get("type") != "approle":
+        raise SystemExit("auth/machine exists with unexpected type")
+
+    expected_roles = {f"guest-{item['vmid']}" for item in normalized}
+    existing_otp_roles = request(
+        "LIST",
+        "/v1/ssh-otp/roles",
+        token=token,
+    ).get("data", {}).get("keys", [])
+    if not isinstance(existing_otp_roles, list):
+        existing_otp_roles = []
+    for role_name in existing_otp_roles:
+        if (
+            isinstance(role_name, str)
+            and role_name.startswith("guest-")
+            and role_name not in expected_roles
+        ):
+            request("DELETE", f"/v1/ssh-otp/roles/{role_name}", token=token)
+
+    existing_machine_roles = request(
+        "LIST",
+        "/v1/auth/machine/role",
+        token=token,
+    ).get("data", {}).get("keys", [])
+    if not isinstance(existing_machine_roles, list):
+        existing_machine_roles = []
+    for role_name in existing_machine_roles:
+        if (
+            isinstance(role_name, str)
+            and role_name.startswith("guest-")
+            and role_name not in expected_roles
+        ):
+            request("DELETE", f"/v1/auth/machine/role/{role_name}", token=token)
+
+    policies_payload = request("GET", "/v1/sys/policies/acl", token=token)
+    policy_names = policies_payload.get("data", {}).get("keys", [])
+    if not isinstance(policy_names, list):
+        policy_names = []
+    expected_policies = {
+        f"machine-{role_name}-ssh-otp" for role_name in expected_roles
+    }
+    for policy_name in policy_names:
+        if (
+            isinstance(policy_name, str)
+            and policy_name.startswith("machine-guest-")
+            and policy_name.endswith("-ssh-otp")
+            and policy_name not in expected_policies
+        ):
+            request(
+                "DELETE",
+                f"/v1/sys/policies/acl/{policy_name}",
+                token=token,
+            )
+
+    for item in normalized:
+        vmid = item["vmid"]
+        role_name = f"guest-{vmid}"
+        policy_name = f"machine-{role_name}-ssh-otp"
+        policy = json.dumps(
+            {
+                "path": {
+                    f"ssh-otp/creds/{role_name}": {
+                        "capabilities": ["create", "update"],
+                    },
+                    "auth/token/lookup-self": {"capabilities": ["read"]},
+                    "auth/token/revoke-self": {"capabilities": ["update"]},
+                }
+            },
+            separators=(",", ":"),
+        )
+        request(
+            "POST",
+            f"/v1/sys/policies/acl/{policy_name}",
+            {"policy": policy},
+            token=token,
+        )
+        request(
+            "POST",
+            f"/v1/ssh-otp/roles/{role_name}",
+            {
+                "key_type": "otp",
+                "default_user": "root",
+                "allowed_users": "root",
+                "cidr_list": ",".join(item["target_cidrs"]),
+                "port": 22,
+            },
+            token=token,
+        )
+        request(
+            "POST",
+            f"/v1/auth/machine/role/{role_name}",
+            {
+                "bind_secret_id": True,
+                "secret_id_bound_cidrs": [item["source_cidr"]],
+                "secret_id_num_uses": 0,
+                "secret_id_ttl": "0s",
+                "token_bound_cidrs": [item["source_cidr"]],
+                "token_num_uses": 0,
+                "token_policies": [policy_name],
+                "token_ttl": "5m",
+                "token_max_ttl": "10m",
+            },
+            token=token,
+        )
+        role_id_payload = request(
+            "GET",
+            f"/v1/auth/machine/role/{role_name}/role-id",
+            token=token,
+        )
+        actual_role_id = role_id_payload.get("data", {}).get("role_id")
+        if not isinstance(actual_role_id, str) or not actual_role_id:
+            raise SystemExit(f"missing RoleID for {role_name}")
+
+        otp_role = request(
+            "GET",
+            f"/v1/ssh-otp/roles/{role_name}",
+            token=token,
+        ).get("data")
+        if not isinstance(otp_role, dict) or otp_role.get("key_type") != "otp":
+            raise SystemExit(f"invalid OTP role {role_name}")
+        if otp_role.get("default_user") != "root":
+            raise SystemExit(f"invalid default_user for {role_name}")
+        cidr_value = otp_role.get("cidr_list", "")
+        if isinstance(cidr_value, str):
+            actual_cidrs = {item.strip() for item in cidr_value.split(",") if item.strip()}
+        elif isinstance(cidr_value, list):
+            actual_cidrs = {str(item) for item in cidr_value}
+        else:
+            actual_cidrs = set()
+        if actual_cidrs != set(item["target_cidrs"]):
+            raise SystemExit(f"OTP targets do not match for {role_name}")
+
+    print(
+        json.dumps(
+            {
+                "roles": sorted(expected_roles),
+                "policies": sorted(expected_policies),
+            },
+            separators=(",", ":"),
+        )
+    )
+finally:
+    request("POST", "/v1/auth/token/revoke-self", {}, token=token)
+"""
 
 
 CONFIGURE_KV_CODE = r"""
@@ -2253,7 +2597,7 @@ def write_unseal_key(key: str) -> None:
 
 
 def write_ssh_access_credentials(credentials: dict[str, object]) -> None:
-    required = {"ssh-ca-config", "ssh-signer"}
+    required = {"ssh-ca-config", "ssh-signer", "ssh-otp-config"}
     if set(credentials) != required:
         raise OpenBaoHostError(
             "OpenBao вернул неполный набор служебных SSH-доступов"
@@ -2583,6 +2927,8 @@ def generate_temporary_root_token() -> str:
             "-v",
             f"{CT_OPENBAO_DATA_PATH}:/openbao/file",
             "-v",
+            "/etc/infra-manager/openbao/tls:/openbao/tls:ro",
+            "-v",
             f"{CT_COMPAT_CONFIG_PATH}:/openbao/config/openbao.hcl:ro",
             image,
             "server",
@@ -2686,7 +3032,7 @@ def ensure_ssh_cas(root_token: str | None = None) -> None:
     log_detail("[ОК] Два SSH-центра доверия OpenBao созданы")
 
 
-def read_ssh_access_credentials() -> dict[str, object]:
+def read_ssh_access_credentials(*, allow_legacy: bool = False) -> dict[str, object]:
     if not SSH_ACCESS_PATH.is_file() or SSH_ACCESS_PATH.stat().st_size == 0:
         raise OpenBaoHostError(
             f"Не найдены служебные данные доступа OpenBao: {SSH_ACCESS_PATH}"
@@ -2697,8 +3043,11 @@ def read_ssh_access_credentials() -> dict[str, object]:
         raise OpenBaoHostError(
             "Служебные данные доступа OpenBao содержат некорректный JSON"
         ) from exc
-    required = {"ssh-ca-config", "ssh-signer"}
-    if not isinstance(payload, dict) or set(payload) != required:
+    required = {"ssh-ca-config", "ssh-signer", "ssh-otp-config"}
+    legacy = {"ssh-ca-config", "ssh-signer"}
+    if not isinstance(payload, dict) or (
+        set(payload) != required and not (allow_legacy and set(payload) == legacy)
+    ):
         raise OpenBaoHostError(
             "Служебные данные доступа OpenBao имеют некорректный состав"
         )
@@ -2756,6 +3105,44 @@ def sign_client_public_key(public_key: str) -> str:
         )
     return certificate
 
+
+
+def sync_otp_contract(sources: list[dict[str, object]]) -> None:
+    """Синхронизировать ssh-otp и auth/machine по подготовленному контракту."""
+    credentials = read_ssh_access_credentials()
+    config_access = credentials.get("ssh-otp-config")
+    result = pct_exec(
+        "python3",
+        "-c",
+        CONFIGURE_OTP_CONTRACT_CODE,
+        capture=True,
+        input_text=json.dumps(
+            {"credentials": config_access, "sources": sources},
+            separators=(",", ":"),
+        ),
+    )
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise OpenBaoHostError(
+            "OpenBao вернул некорректный результат синхронизации SSH OTP"
+        ) from exc
+    expected_roles = sorted(
+        f"guest-{item['vmid']}"
+        for item in sources
+        if isinstance(item, dict) and isinstance(item.get("vmid"), int)
+    )
+    expected_policies = sorted(
+        f"machine-{role_name}-ssh-otp" for role_name in expected_roles
+    )
+    if payload != {
+        "roles": expected_roles,
+        "policies": expected_policies,
+    }:
+        raise OpenBaoHostError(
+            "SSH OTP/AppRole не соответствуют переданному access-контракту"
+        )
+    log_status("[ОК] OpenBao SSH OTP и машинные AppRole синхронизированы")
 
 
 def sync_machine_signing_roles(vmids: list[int]) -> None:
@@ -2976,6 +3363,16 @@ def sign_host_public_key(public_key: str, principals: list[str]) -> str:
         )
     return certificate
 
+def ssh_access_credentials_complete() -> bool:
+    if not SSH_ACCESS_PATH.is_file() or SSH_ACCESS_PATH.stat().st_size == 0:
+        return False
+    try:
+        read_ssh_access_credentials()
+    except OpenBaoHostError:
+        return False
+    return True
+
+
 def check_ssh_access() -> None:
     if not SSH_ACCESS_PATH.is_file() or SSH_ACCESS_PATH.stat().st_size == 0:
         raise OpenBaoHostError(
@@ -2995,24 +3392,32 @@ def check_ssh_access() -> None:
         raise OpenBaoHostError(
             "OpenBao вернул некорректный результат проверки служебного доступа"
         ) from exc
-    if payload != {"ssh-ca-config": True, "ssh-signer": True}:
+    if payload != {
+        "ssh-ca-config": True,
+        "ssh-signer": True,
+        "ssh-otp-config": True,
+    }:
         raise OpenBaoHostError(
             "Служебные доступы OpenBao не прошли проверку"
         )
 
 
 def configure_ssh_access(root_token: str) -> None:
+    existing_credentials: dict[str, object] = {}
     if SSH_ACCESS_PATH.exists():
-        raise OpenBaoHostError(
-            f"Найден старый файл служебного доступа {SSH_ACCESS_PATH}; "
-            "автоматическая перезапись запрещена"
-        )
+        existing_credentials = read_ssh_access_credentials(allow_legacy=True)
     result = pct_exec(
         "python3",
         "-c",
         CONFIGURE_SSH_ACCESS_CODE,
         capture=True,
-        input_text=root_token,
+        input_text=json.dumps(
+            {
+                "root_token": root_token,
+                "existing_credentials": existing_credentials,
+            },
+            separators=(",", ":"),
+        ),
     )
     try:
         credentials = json.loads(result.stdout)
@@ -3173,7 +3578,7 @@ finally:
 def ensure_existing_openbao_ssh() -> None:
     if (
         ssh_cas_ready()
-        and SSH_ACCESS_PATH.is_file()
+        and ssh_access_credentials_complete()
         and KV_ACCESS_PATH.is_file()
         and client_ca_published()
     ):
@@ -3189,7 +3594,7 @@ def ensure_existing_openbao_ssh() -> None:
     root_token = generate_temporary_root_token()
     try:
         ensure_ssh_cas(root_token)
-        if SSH_ACCESS_PATH.is_file():
+        if ssh_access_credentials_complete():
             check_ssh_access()
         else:
             configure_ssh_access(root_token)
@@ -3321,6 +3726,11 @@ def main() -> int:
         help="Подписать переданный через stdin открытый ключ SSH-сервера",
     )
     mode.add_argument(
+        "--sync-otp-contract",
+        action="store_true",
+        help="Синхронизировать ssh-otp и auth/machine из stdin",
+    )
+    mode.add_argument(
         "--sync-machine-roles",
         action="store_true",
         help="Синхронизировать машинные SSH-роли OpenBao из stdin",
@@ -3386,6 +3796,17 @@ def main() -> int:
                 address,
             )
             print(sign_host_public_key(public_key, principals))
+        elif args.sync_otp_contract:
+            status = read_status(wait=False)
+            if status.get("sealed") is not False:
+                raise OpenBaoHostError(
+                    "OpenBao запечатан; синхронизация SSH OTP невозможна"
+                )
+            payload = json.loads(__import__("sys").stdin.read())
+            sources = payload.get("sources") if isinstance(payload, dict) else None
+            if not isinstance(sources, list):
+                raise OpenBaoHostError("Не передан OTP-контракт")
+            sync_otp_contract(sources)
         elif args.sync_machine_roles:
             status = read_status(wait=False)
             if status.get("sealed") is not False:
