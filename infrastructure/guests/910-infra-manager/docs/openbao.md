@@ -927,7 +927,7 @@ infra-manager-machine-ssh-refresh
 старое задание Sync Machine SSH
 ```
 
-Вместо старого задания должна существовать синхронизация OTP-контракта из `access.yaml`.
+Вместо старого задания должно существовать задание Semaphore `Sync SSH Access`, которое синхронизирует OTP-контракт из `access.yaml`.
 
 Административные сертификаты Ansible через `ssh-client-signer` и host certificates через `ssh-host-signer` при этом сохраняются.
 
