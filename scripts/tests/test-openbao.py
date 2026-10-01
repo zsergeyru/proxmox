@@ -617,8 +617,10 @@ def test_otp_contract_is_narrow_and_derived() -> None:
 def test_machine_credentials_are_issued_narrowly() -> None:
     host = load_host_module()
     access_code = host.CONFIGURE_SSH_ACCESS_CODE
-    if '"auth/machine/role/guest-*/secret-id"' not in access_code:
+    if '"auth/machine/role/+/secret-id"' not in access_code:
         fail("Служебная OTP-роль не может выпустить SecretID гостя")
+    if '"auth/machine/role/guest-*/secret-id"' in access_code:
+        fail("SecretID subpath не должен использовать '*' внутри пути")
     issue_code = host.ISSUE_MACHINE_CREDENTIALS_CODE
     required = (
         'f"guest-{vmid}"',
