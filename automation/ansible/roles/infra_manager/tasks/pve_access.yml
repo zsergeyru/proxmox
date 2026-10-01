@@ -21,7 +21,7 @@
 
 - name: Подготовить актуальный PVE-only сценарий OpenBao
   ansible.builtin.copy:
-    src: "{{ guest_root }}/scripts/infra-manager/host/openbao-unseal.py"
+    src: "{{ project_root }}/scripts/infra-manager/host/openbao-unseal.py"
     dest: /run/infra-manager/host-support/openbao-unseal.py
     owner: root
     group: root
