@@ -539,6 +539,19 @@ if existing is None:
 elif not isinstance(existing, dict) or existing.get("type") != "approle":
     raise SystemExit("auth/infra-manager exists with unexpected type")
 
+machine_auth = auth_methods.get("machine/")
+if machine_auth is None:
+    request(
+        "POST",
+        "/v1/sys/auth/machine",
+        {
+            "type": "approle",
+            "description": "Машинная идентичность для SSH OTP",
+        },
+    )
+elif not isinstance(machine_auth, dict) or machine_auth.get("type") != "approle":
+    raise SystemExit("auth/machine exists with unexpected type")
+
 roles = (
     (
         "ssh-ca-config",
