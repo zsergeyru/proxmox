@@ -1,249 +1,289 @@
 # Рабочая среда infra-runtime
 
-**Назначение:** объяснить, что находится в контейнере `infra-runtime`, какие данные он получает с 910 и как безопасно обновляется без остановки выполняющегося задания.
+**Назначение:** практическое руководство по сборке, запуску, проверке и безопасной замене контейнера `infra-runtime` на 910.
 
-`infra-runtime` — не отдельный сервер. Это рабочий контейнер внутри 910, в котором находятся Semaphore и основные инструменты управления инфраструктурой.
+`infra-runtime` — основной рабочий контейнер 910. В нём работают Semaphore и инструменты управления инфраструктурой.
 
-## 1. Назначение
+## 1. Что входит в контейнер
 
-Контейнер `infra-runtime` объединяет средства, которым нужен общий доступ к проекту, PVE и постоянному состоянию.
+Образ строится на основе:
 
-### 1.1. Что находится внутри
+```text
+semaphoreui/semaphore:v2.18.30
+```
 
-В образ входят:
+и дополнительно содержит:
 
-- Semaphore;
-- Ansible;
-- OpenTofu;
-- Packer;
-- Python;
-- `proxmoxer`;
+- Ansible из базового образа Semaphore;
+- OpenTofu `1.12.6`;
+- Packer `1.15.4`;
+- Python 3;
+- `proxmoxer`, `requests`, `PyYAML`, `jsonschema`;
 - Git;
 - OpenSSH client;
-- `curl`, `openssl`, `unzip` и другие небольшие служебные программы.
+- `curl`, `openssl`, `unzip`, `bash` и служебные пакеты.
 
-Такой состав позволяет выполнять задания без установки OpenTofu, Packer и служебных Python-библиотек непосредственно в Debian 910.
+Точные версии задаются в [`../provision.yaml`](../provision.yaml).
 
-### 1.2. Что не находится внутри
+OpenBao в `infra-runtime` не находится — он работает отдельным контейнером.
 
-OpenBao работает в отдельном контейнере.
+## 2. Исходные файлы
 
-Постоянное состояние OpenTofu, Semaphore и Ansible не хранится внутри слоя Docker-образа.
-
-Закрытые ключи SSH CA OpenBao также не передаются в `infra-runtime`.
-
-## 2. Сборка образа
-
-Исходные файлы образа находятся в `rootfs/` по тому же пути, по которому каталог устанавливается в 910.
-
-Образ собирается локально на 910 из:
+Все файлы образа находятся в:
 
 ```text
-infrastructure/guests/910-infra-manager/rootfs/opt/infra-manager/compose/runtime/
+infrastructure/guests/910-infra-manager/rootfs/opt/infra-manager/compose/
 ```
 
-### 2.1. Основа
-
-Базовый образ:
+Основные файлы:
 
 ```text
-semaphoreui/semaphore:<версия>
+docker-compose.yml
+runtime/Dockerfile
+runtime/requirements.txt
+runtime/ssh_config
+openbao/openbao.hcl
 ```
 
-Точная версия задаётся в `provision.yaml`.
-
-Сейчас:
+Ansible копирует этот каталог в 910:
 
 ```text
-Semaphore  v2.18.30
-OpenTofu   1.12.6
-Packer     1.15.4
+/opt/infra-manager/compose/
 ```
 
-Ansible берётся из базового образа Semaphore.
+Это делает задача `repository.yml` роли `infra_manager`.
 
-### 2.2. Установка OpenTofu и Packer
+## 3. Как собирается образ
 
-OpenTofu и Packer загружаются при сборке образа.
+### 3.1. Базовый образ
 
-Для каждого архива:
-
-1. определяется архитектура контейнера;
-2. загружается архив нужной версии;
-3. загружается файл контрольных сумм;
-4. проверяется SHA256;
-5. двоичный файл устанавливается в `/usr/local/bin`.
-
-Архив не используется, если контрольная сумма не совпала.
-
-### 2.3. Python-библиотеки
-
-Отдельно устанавливаются:
+`Dockerfile` получает версию Semaphore через build argument:
 
 ```text
-proxmoxer >=2.2.0,<3
-requests  >=2.32,<3
-PyYAML     6.0.2
-jsonschema 4.25.1
+SEMAPHORE_VERSION
 ```
 
-Точные ограничения находятся в `compose/runtime/requirements.txt` и `provision.yaml`.
-
-## 3. Пользователь контейнера
-
-Во время сборки часть операций выполняется от пользователя `root`.
-
-После установки инструментов рабочий пользователь меняется на:
+Сборка временно переключается на `root`, устанавливает пакеты и инструменты, а в конце возвращается к:
 
 ```text
-1001:0
+USER 1001:0
 ```
 
-Это тот же числовой пользователь, которому принадлежат данные Semaphore и рабочие каталоги OpenTofu.
+### 3.2. OpenTofu и Packer
 
-### 3.1. Зачем используются числовые идентификаторы
+OpenTofu и Packer скачиваются во время сборки.
 
-Постоянные каталоги находятся за пределами контейнера.
+Для каждого архива выполняются:
 
-Поэтому важны не имена пользователей внутри образа, а совпадение числовых идентификаторов пользователя и группы (`uid:gid`).
+1. определение архитектуры `x86_64 → amd64` или `aarch64 → arm64`;
+2. загрузка архива;
+3. загрузка официального файла SHA256;
+4. проверка контрольной суммы;
+5. установка двоичного файла в `/usr/local/bin`;
+6. удаление временных файлов.
 
-Если образ изменит внутреннее имя пользователя, но сохранит `1001:0`, доступ к существующим файлам останется предсказуемым.
+Сборка завершается ошибкой, если архитектура не поддерживается или SHA256 не совпадает.
 
-## 4. Сеть
+### 3.3. Python
 
-Контейнер использует:
+`runtime/requirements.txt` устанавливает:
 
 ```text
-network_mode: host
+proxmoxer>=2.2.0,<3
+requests>=2.32,<3
+PyYAML==6.0.2
+jsonschema==4.25.1
 ```
 
-Он работает в сетевом пространстве самого 910.
+### 3.4. SSH
 
-### 4.1. Почему это сделано
+В образ копируется:
 
-Так Semaphore доступен на порту `3000` самого 910, а временный HTTP-сервер Packer может быть доступен устанавливаемой виртуальной машине без дополнительной Docker-сети и перенаправления портов.
+```text
+/etc/ssh/ssh_config.d/99-infra-manager.conf
+```
 
-### 4.2. Последствие
-
-Контейнер не получает отдельный Docker-IP.
-
-При проверке сетевого доступа нужно учитывать адрес 910, а не искать отдельный адрес `infra-runtime`.
-
-## 5. Подключённые каталоги
-
-Контейнер получает только те каталоги, которые нужны для работы.
-
-### 5.1. Постоянные данные
-
-| Путь на 910 | Путь в контейнере | Режим |
-|---|---|---|
-| `/mnt/persistent-state/semaphore` | `/var/lib/semaphore` | чтение и запись |
-| `/mnt/persistent-state/opentofu` | `/var/lib/infra-manager/opentofu` | чтение и запись |
-| `/mnt/persistent-state/ansible` | `/etc/infra-manager/ansible` | только чтение |
-
-Semaphore и OpenTofu могут изменять свои постоянные данные.
-
-Идентичность Ansible внутри контейнера только читается.
-
-### 5.2. Данные доверия и PVE
-
-Также подключаются:
-
-| Путь | Назначение |
-|---|---|
-| `/etc/infra-manager/ca` | открытые CA и сертификаты доверия |
-| `/mnt/pve-access/pve-host` | отдельный SSH-доступ пользователя `root` к PVE |
-| `/run/infra-manager/secrets` | временно материализованные рабочие секреты |
-
-Эти области подключаются только для чтения.
-
-Контейнер не должен менять SSH-ключ пользователя `root` на PVE или подменять рабочие секреты в `/run`.
-
-## 6. SSH-клиент
-
-В образ устанавливается отдельная системная настройка OpenSSH.
-
-### 6.1. Строгая проверка
-
-Для всех соединений используется:
+Он задаёт:
 
 ```text
 StrictHostKeyChecking yes
+UserKnownHostsFile /var/lib/semaphore/known_hosts
+HashKnownHosts yes
 ```
 
-Файл известных серверов Semaphore:
+Штатный файл Semaphore `semaphore.conf` удаляется, чтобы он не ослабил эту настройку.
 
-```text
-/var/lib/semaphore/known_hosts
-```
+## 4. Файл версий
 
-Также включено хеширование записей `known_hosts`.
-
-Из образа удаляется штатный файл Semaphore, который мог бы задавать другой режим SSH.
-
-Это не позволяет незаметно перейти к `StrictHostKeyChecking=no`.
-
-## 7. Запуск
-
-Контейнер описан в Docker Compose.
-
-### 7.1. Обычная настройка
-
-Ansible:
-
-1. записывает файл версий `.versions.env`;
-2. собирает `infra-runtime` с `--pull`;
-3. запускает OpenBao;
-4. запускает весь Docker Compose;
-5. проверяет готовность.
-
-Для контейнера задано:
-
-```text
-restart: unless-stopped
-```
-
-### 7.2. Файл версий
-
-В:
+Перед сборкой Ansible создаёт:
 
 ```text
 /opt/infra-manager/compose/.versions.env
 ```
 
-записываются версии:
-
-- Semaphore;
-- самого `infra-runtime`;
-- OpenTofu;
-- Packer;
-- OpenBao.
-
-Этот файл воспроизводим из `provision.yaml`.
-
-## 8. Самообновление 910
-
-Особая сложность возникает, когда `Deploy Guest 910` выполняется внутри того же `infra-runtime`, который нужно заменить.
-
-Нельзя удалить контейнер до завершения собственного задания.
-
-### 8.1. Признак отложенной активации
-
-Перед заменой среды создаётся файл:
+Содержимое формируется из `provision.yaml`:
 
 ```text
-/var/lib/semaphore/.infra-manager-runtime-activation-pending
+SEMAPHORE_VERSION=<version>
+RUNTIME_VERSION=<version>
+OPENTOFU_VERSION=<version>
+PACKER_VERSION=<version>
+OPENBAO_VERSION=<version>
 ```
 
-Фактически он находится в постоянном каталоге Semaphore и поэтому виден и старому контейнеру, и внешней команде активации.
+Этот файл воспроизводим и не является постоянным состоянием.
 
-В файл записывается PID текущего задания.
+Проверить его:
 
-Пока признак существует, новые инфраструктурные задания не должны начинать изменения.
+```bash
+cat /opt/infra-manager/compose/.versions.env
+```
 
-### 8.2. Отложенный запуск
+## 5. Подключения контейнера
 
-После применения Ansible создаёт временную systemd-службу через:
+`infra-runtime` использует `network_mode: host`.
+
+Подключения:
+
+| Путь на 910 | Путь в контейнере | Режим |
+|---|---|---|
+| `/mnt/persistent-state/semaphore` | `/var/lib/semaphore` | RW |
+| `/etc/infra-manager/ca` | `/etc/infra-manager/ca` | RO |
+| `/mnt/persistent-state/ansible` | `/etc/infra-manager/ansible` | RO |
+| `/mnt/pve-access/pve-host` | `/mnt/pve-access/pve-host` | RO |
+| `/mnt/persistent-state/opentofu` | `/var/lib/infra-manager/opentofu` | RW |
+| `/run/infra-manager/secrets` | `/run/infra-manager/secrets` | RO |
+
+Контейнер может менять только свои рабочие данные Semaphore и OpenTofu. Идентичности Ansible, PVE-доступ и материализованные секреты он получает только для чтения.
+
+## 6. Подготовка пустого 910
+
+До сборки `infra-runtime` должны существовать:
+
+```text
+/opt/infra-manager/compose/
+/mnt/persistent-state/semaphore/
+/mnt/persistent-state/opentofu/
+/mnt/persistent-state/ansible/
+/etc/infra-manager/ca/
+/mnt/pve-access/pve-host/
+/run/infra-manager/secrets/
+```
+
+Штатно каталоги и подключения создаёт Ansible.
+
+Проверить внешние подключения:
+
+```bash
+mountpoint /mnt/persistent-state
+mountpoint /mnt/pve-access
+```
+
+Проверить исходники:
+
+```bash
+test -f /opt/infra-manager/compose/docker-compose.yml
+test -f /opt/infra-manager/compose/runtime/Dockerfile
+test -f /opt/infra-manager/compose/.versions.env
+```
+
+## 7. Сборка
+
+Штатная команда из `runtime.yml`:
+
+```bash
+docker compose \
+  --env-file /opt/infra-manager/compose/.versions.env \
+  -f /opt/infra-manager/compose/docker-compose.yml \
+  build --pull runtime
+```
+
+`--pull` заставляет проверить более новый базовый образ указанной версии.
+
+После сборки ожидается локальный образ:
+
+```text
+infra-runtime:v1
+```
+
+Точный тег берётся из `provision.yaml`.
+
+Проверить:
+
+```bash
+docker image inspect infra-runtime:v1 >/dev/null
+```
+
+## 8. Обычный запуск
+
+При обычной настройке 910 Ansible сначала запускает OpenBao, затем весь Compose:
+
+```bash
+docker compose \
+  --env-file /opt/infra-manager/compose/.versions.env \
+  -f /opt/infra-manager/compose/docker-compose.yml \
+  up -d --remove-orphans
+```
+
+Контейнер имеет:
+
+```text
+restart: unless-stopped
+```
+
+Проверить:
+
+```bash
+docker ps --filter name=infra-runtime
+docker logs --tail 100 infra-runtime
+curl -fsS http://127.0.0.1:3000/api/ping
+```
+
+## 9. Проверка инструментов внутри контейнера
+
+Те же проверки выполняет Ansible в `verify.yml`:
+
+```bash
+docker exec infra-runtime tofu version
+docker exec infra-runtime packer version
+docker exec infra-runtime ansible --version
+docker exec infra-runtime python3 -c 'import proxmoxer, yaml, jsonschema'
+```
+
+Проверить подключённые каталоги:
+
+```bash
+docker exec infra-runtime test -d /var/lib/semaphore
+docker exec infra-runtime test -d /var/lib/infra-manager/opentofu
+docker exec infra-runtime test -d /etc/infra-manager/ansible
+docker exec infra-runtime test -d /run/infra-manager/secrets
+```
+
+Полная проверка:
+
+```bash
+infra-manager-status --full
+```
+
+## 10. Почему самообновление отличается
+
+`Deploy Guest 910` выполняется **внутри того же `infra-runtime`**, который это задание может изменить.
+
+Если Ansible сразу выполнит обычный `docker compose up`, текущий контейнер может быть уничтожен до завершения собственного задания.
+
+Поэтому при `infra_self_update=true` задача `runtime.yml`:
+
+- собирает новый образ;
+- запускает/обновляет OpenBao;
+- **не запускает новый `infra-runtime` сразу**.
+
+После завершения настройки playbook создаёт внешнюю временную systemd-службу:
+
+```text
+infra-manager-runtime-activate-<epoch>
+```
+
+через:
 
 ```text
 systemd-run
@@ -255,116 +295,189 @@ systemd-run
 /usr/local/sbin/infra-manager-activate-runtime
 ```
 
-уже вне заменяемого контейнера.
+и передаёт:
 
-### 8.3. Ожидание завершения задания
+```text
+INFRA_PROJECT_BRANCH
+INFRA_PVE_NODE
+```
 
-Команда активации:
+## 11. Признак отложенной активации
 
-1. читает PID из файла-признака;
-2. проверяет процесс внутри текущего `infra-runtime`;
-3. ждёт его завершения;
-4. ограничивает ожидание 15 минутами;
-5. только после этого выполняет `docker compose up -d --remove-orphans`.
+Во время самообновления используется:
 
-Если PID некорректен или задание не завершилось за отведённое время, замена среды останавливается.
+```text
+/var/lib/semaphore/.infra-manager-runtime-activation-pending
+```
 
-### 8.4. Действия после замены
+Так как `/var/lib/semaphore` является постоянным подключённым каталогом, файл одновременно видят:
 
-После запуска новой среды команда:
+- текущее задание внутри старого контейнера;
+- система 910 снаружи контейнера.
 
-1. разблокирует OpenBao через доверенный PVE-контур;
-2. ждёт ответа Semaphore на `/api/ping`;
-3. синхронизирует проект Semaphore;
-4. выполняет `infra-manager-status --full --quiet`;
-5. удаляет файл-признак даже при ошибке благодаря обработчику завершения.
+В файл записывается PID текущего задания.
 
-Журнал активации:
+Новые инфраструктурные задания проверяют этот признак и не должны начинать изменение инфраструктуры во время замены среды.
+
+## 12. Как работает активация
+
+`infra-manager-activate-runtime` пишет журнал:
 
 ```text
 /var/log/infra-manager/runtime-activation.log
 ```
 
-## 9. Ограничение новых заданий во время активации
+Порядок:
 
-Python-код инфраструктурных заданий проверяет общий файл-признак активации.
+1. читает PID из файла-признака;
+2. проверяет, что PID имеет числовой формат;
+3. через `docker exec` ждёт завершения этого процесса в старом `infra-runtime`;
+4. максимальное ожидание — 15 минут;
+5. выполняет `docker compose up -d --remove-orphans` уже с новым образом;
+6. выполняет `infra-manager-openbao-startup-unseal`;
+7. до 120 секунд ждёт `http://127.0.0.1:3000/api/ping`;
+8. выполняет `python3 -m infra_manager semaphore-project`;
+9. выполняет `infra-manager-status --full --quiet`;
+10. удаляет файл-признак при завершении, включая ошибку.
 
-### 9.1. Назначение защиты
+Если `INFRA_PVE_NODE` не задан, PID некорректен, задание не завершилось или Semaphore не поднялся, активация завершается ошибкой.
 
-Без этой проверки возможна гонка:
+## 13. Как наблюдать самообновление
 
-```text
-Deploy Guest 910 завершился
-→ старая среда ещё работает
-→ запускается новое задание
-→ внешняя служба в этот момент заменяет контейнер
-```
-
-Поэтому новое задание должно завершиться до изменений, если идёт активация новой среды.
-
-## 10. Проверка состояния
-
-`infra-manager-status` проверяет контейнер и обязательные инструменты.
-
-### 10.1. Проверка рабочей среды
-
-Проверяется, что:
-
-- Docker доступен;
-- обязательные файлы и каталоги присутствуют;
-- `infra-runtime` запущен.
-
-### 10.2. Проверка инструментов
-
-Внутри контейнера отдельно проверяются:
-
-```text
-tofu version
-packer version
-ansible --version
-python3 -c "import proxmoxer"
-```
-
-Также проверяется, что закрытый ключ Ansible читается внутри контейнера.
-
-Общая команда:
+На 910:
 
 ```bash
+tail -f /var/log/infra-manager/runtime-activation.log
+```
+
+Проверить временную systemd-службу:
+
+```bash
+systemctl list-units 'infra-manager-runtime-activate-*'
+```
+
+Проверить признак:
+
+```bash
+ls -l /var/lib/semaphore/.infra-manager-runtime-activation-pending
+```
+
+После успешной активации признак должен исчезнуть.
+
+## 14. Ручная остановка и запуск
+
+Остановить `infra-runtime`:
+
+```bash
+docker compose \
+  --env-file /opt/infra-manager/compose/.versions.env \
+  -f /opt/infra-manager/compose/docker-compose.yml \
+  stop runtime
+```
+
+Запустить:
+
+```bash
+docker compose \
+  --env-file /opt/infra-manager/compose/.versions.env \
+  -f /opt/infra-manager/compose/docker-compose.yml \
+  up -d runtime
+```
+
+После ручного запуска проверить:
+
+```bash
+curl -fsS http://127.0.0.1:3000/api/ping
 infra-manager-status --full
 ```
 
-## 11. Резервирование
+Если одновременно менялись OpenBao или рабочие секреты, безопаснее запускать весь Compose через штатный механизм активации.
 
-Сам Docker-образ `infra-runtime` не является критичным постоянным состоянием.
+## 15. Обновление состава образа
 
-### 11.1. Что не нужно резервировать отдельно
+Изменения делаются только через Git.
 
-Образ можно пересобрать из проекта.
+Типичные источники:
 
-То же относится к:
+- версия Semaphore — `provision.yaml`;
+- версия OpenTofu — `provision.yaml`;
+- версия Packer — `provision.yaml`;
+- Python-библиотеки — `rootfs/.../runtime/requirements.txt` и согласованное описание в `provision.yaml`;
+- системные пакеты — `rootfs/.../runtime/Dockerfile` и `provision.yaml`;
+- SSH-настройка — `rootfs/.../runtime/ssh_config`.
 
-- `Dockerfile`;
-- `requirements.txt`;
-- SSH-настройке образа;
-- `.versions.env`.
+После изменения выполняется `Deploy Guest 910`.
 
-Они должны находиться в Git или воспроизводиться из машинного описания.
+Не следует устанавливать пакеты вручную в уже работающий контейнер: после следующей сборки такие изменения исчезнут.
 
-### 11.2. Что нельзя потерять вместе с контейнером
+## 16. Восстановление infra-runtime
 
-Внешние постоянные каталоги Semaphore, OpenTofu и Ansible имеют другой жизненный цикл и резервируются отдельно.
+`infra-runtime` сам по себе не содержит уникального постоянного состояния.
 
-Их нельзя считать частью Docker-образа.
+Если контейнер или Docker-образ потерян:
 
-Подробности находятся в [`data-and-access.md`](data-and-access.md).
+1. восстановить подключения `state` и `access`;
+2. установить Compose-файлы из `rootfs`;
+3. создать `.versions.env` из `provision.yaml`;
+4. убедиться, что OpenBao можно запустить и разблокировать;
+5. убедиться, что рабочие секреты материализованы;
+6. выполнить `docker compose ... build --pull runtime`;
+7. выполнить `docker compose ... up -d --remove-orphans`;
+8. проверить `/api/ping` Semaphore;
+9. синхронизировать проект Semaphore;
+10. выполнить `infra-manager-status --full`.
 
-## 12. Связанные документы
+Нельзя считать восстановлением создание новых пустых каталогов Semaphore/OpenTofu вместо утраченного постоянного состояния.
 
-- [`../rootfs/opt/infra-manager/compose/docker-compose.yml`](../rootfs/opt/infra-manager/compose/docker-compose.yml) — фактический состав контейнеров.
-- [`../rootfs/opt/infra-manager/compose/runtime/Dockerfile`](../rootfs/opt/infra-manager/compose/runtime/Dockerfile) — сборка `infra-runtime`.
-- [`../provision.yaml`](../provision.yaml) — версии и подключения каталогов.
-- [`semaphore.md`](semaphore.md) — Semaphore внутри рабочей среды.
-- [`automation-tools.md`](automation-tools.md) — OpenTofu, Ansible, Packer и Python.
-- [`system-services.md`](system-services.md) — внешние службы запуска и активации.
-- [`data-and-access.md`](data-and-access.md) — постоянные данные и секреты.
-- [`../../../../docs/800-operations/810-deployment.md`](../../../../docs/800-operations/810-deployment.md) — общий порядок обновления 910.
+## 17. Типичные неисправности
+
+### 17.1. Сборка образа не проходит
+
+Проверить:
+
+```bash
+cat /opt/infra-manager/compose/.versions.env
+docker compose --env-file /opt/infra-manager/compose/.versions.env \
+  -f /opt/infra-manager/compose/docker-compose.yml build runtime
+```
+
+Если ошибка связана с SHA256 OpenTofu или Packer, не обходить проверку контрольной суммы.
+
+### 17.2. Контейнер постоянно перезапускается
+
+Проверить:
+
+```bash
+docker ps -a --filter name=infra-runtime
+docker logs --tail 200 infra-runtime
+test -s /run/infra-manager/secrets/semaphore-server.env
+```
+
+Также проверить владельца `/mnt/persistent-state/semaphore`.
+
+### 17.3. Самообновление зависло
+
+Проверить:
+
+```bash
+cat /var/lib/semaphore/.infra-manager-runtime-activation-pending
+tail -n 200 /var/log/infra-manager/runtime-activation.log
+systemctl list-units 'infra-manager-runtime-activate-*'
+```
+
+Не удалять старый контейнер вручную, пока не понятно, завершилось ли выполняющееся внутри него задание.
+
+## 18. Связанные документы
+
+- [`../provision.yaml`](../provision.yaml) — версии, образ и подключения.
+- [`../rootfs/opt/infra-manager/compose/docker-compose.yml`](../rootfs/opt/infra-manager/compose/docker-compose.yml) — Compose.
+- [`../rootfs/opt/infra-manager/compose/runtime/Dockerfile`](../rootfs/opt/infra-manager/compose/runtime/Dockerfile) — сборка образа.
+- [`../rootfs/opt/infra-manager/compose/runtime/requirements.txt`](../rootfs/opt/infra-manager/compose/runtime/requirements.txt) — Python-библиотеки.
+- [`../rootfs/opt/infra-manager/compose/runtime/ssh_config`](../rootfs/opt/infra-manager/compose/runtime/ssh_config) — SSH-настройка.
+- [`semaphore.md`](semaphore.md) — Semaphore внутри контейнера.
+- [`openbao.md`](openbao.md) — отдельный контейнер OpenBao.
+- [`data-and-access.md`](data-and-access.md) — подключаемые данные.
+- [`system-services.md`](system-services.md) — внешняя активация и systemd.
+- [`../../../../automation/ansible/roles/infra_manager/tasks/runtime.yml`](../../../../automation/ansible/roles/infra_manager/tasks/runtime.yml) — фактическая сборка и запуск.
+- [`../../../../automation/ansible/playbooks/configure-guest.yml`](../../../../automation/ansible/playbooks/configure-guest.yml) — назначение отложенной активации.
+- [`../../../../scripts/infra-manager/commands/activate-runtime.sh`](../../../../scripts/infra-manager/commands/activate-runtime.sh) — фактическая логика активации.
