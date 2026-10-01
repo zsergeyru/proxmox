@@ -3791,6 +3791,10 @@ def ssh_access_credentials_current() -> bool:
 
 
 def check_ssh_access() -> None:
+    if not ssh_cas_ready():
+        raise OpenBaoHostError(
+            "Два независимых SSH-центра доверия OpenBao не готовы"
+        )
     if not SSH_ACCESS_PATH.is_file() or SSH_ACCESS_PATH.stat().st_size == 0:
         raise OpenBaoHostError(
             f"Не найдены служебные данные доступа OpenBao: {SSH_ACCESS_PATH}"
