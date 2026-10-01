@@ -544,6 +544,11 @@ def test_otp_contract_is_narrow_and_derived() -> None:
     if "machine-ssh-otp" not in access_code or "metadata.role_name" not in access_code:
         fail("Машинный OTP должен использовать одну шаблонную ACL-политику")
 
+    if 'request("LIST", "/v1/sys/policies/acl")' not in access_code:
+        fail("Список ACL-политик OpenBao должен читаться методом LIST")
+    if 'request("GET", "/v1/sys/policies/acl")' in access_code:
+        fail("GET для списка ACL-политик OpenBao запрещён")
+
     code = host.CONFIGURE_OTP_CONTRACT_CODE
     required = (
         'f"guest-{item[\'vmid\']}"',
