@@ -1,59 +1,77 @@
 # Документация 910 infra-manager
 
-Этот каталог описывает, как службы и служебные механизмы устроены именно внутри `910 infra-manager`.
+Этот каталог является практической документацией конкретного гостя `910 infra-manager`.
 
-Общие правила проекта здесь не повторяются. Безопасность, развёртывание, резервное копирование и восстановление подробно описаны в основной документации проекта; локальные файлы дают ссылки на неё.
+Его задача — не повторять архитектуру проекта, а дать достаточно сведений, чтобы по репозиторию понять, **как именно развернуть, проверить, обновить и восстановить службы 910**.
+
+Общие документы проекта отвечают на вопросы «зачем нужен компонент» и «как он взаимодействует с другими частями системы». Файлы здесь отвечают на вопрос «как этот компонент реально работает на 910».
 
 ## Документы
 
-| Файл | Что описывает |
+| Файл | Для чего открывать |
 |---|---|
-| [`semaphore.md`](semaphore.md) | Semaphore: база, проект, задания, учётные данные, уровень вывода и проверка |
-| [`openbao.md`](openbao.md) | OpenBao: Raft, разблокировка, рабочие секреты, SSH CA и переход к OTP |
-| [`infra-runtime.md`](infra-runtime.md) | контейнер `infra-runtime`, его состав, подключения каталогов и безопасное самообновление |
-| [`automation-tools.md`](automation-tools.md) | OpenTofu, Ansible, Packer, Git и Python как инструменты управления |
-| [`system-services.md`](system-services.md) | службы systemd, порядок запуска 910, активация рабочей среды и служебные команды |
-| [`data-and-access.md`](data-and-access.md) | постоянные данные 910, временные секреты, доступ к PVE и Git, границы резервирования |
-| [`decisions.md`](decisions.md) | причины решений, относящихся именно к 910 |
+| [`openbao.md`](openbao.md) | создать и обслуживать OpenBao: контейнер, Raft, init, unseal, KV, AppRole, SSH CA, проверка и восстановление |
+| [`semaphore.md`](semaphore.md) | развернуть Semaphore: база, первый запуск, admin, проект, репозиторий, переменные, задания, API и восстановление |
+| [`infra-runtime.md`](infra-runtime.md) | собрать и запустить контейнер `infra-runtime`, понять его содержимое, подключения и безопасное самообновление |
+| [`automation-tools.md`](automation-tools.md) | понять и проверить OpenTofu, Ansible, Packer, Git и Python внутри рабочей среды |
+| [`system-services.md`](system-services.md) | установить и проверить systemd-службы и служебные команды 910 |
+| [`data-and-access.md`](data-and-access.md) | создать и проверить каталоги состояния, подключения PVE, временные секреты и права файлов |
+| [`decisions.md`](decisions.md) | понять причины решений, относящихся именно к реализации 910 |
 
-## Как читать
+## Как восстанавливать 910 по этой документации
 
-Для общего понимания сначала откройте [`../README.md`](../README.md). Он является паспортом 910.
+Практический порядок чтения после создания пустого LXC 910:
 
-Если нужен конкретный вопрос, переходите сразу к нужной службе. Например:
+1. [`data-and-access.md`](data-and-access.md) — убедиться, что PVE подключил `access/` и `state/`, а нужные каталоги существуют.
+2. [`infra-runtime.md`](infra-runtime.md) — установить Docker-файлы из `rootfs`, записать версии, собрать `infra-runtime` и запустить контейнеры.
+3. [`openbao.md`](openbao.md) — проверить OpenBao, выполнить первичную инициализацию либо разблокировать существующий Raft.
+4. [`semaphore.md`](semaphore.md) — подготовить серверные переменные Semaphore, запустить его и синхронизировать проект.
+5. [`system-services.md`](system-services.md) — установить постоянные службы запуска и переходный таймер межмашинного SSH.
+6. [`automation-tools.md`](automation-tools.md) — проверить OpenTofu, Ansible, Packer, Git и Python.
+7. Выполнить `infra-manager-status --full` и устранить все ошибки до передачи 910 в эксплуатацию.
 
-```text
-пароль и задания Semaphore     → semaphore.md
-разблокировка OpenBao          → openbao.md
-что находится в infra-runtime  → infra-runtime.md
-где состояние OpenTofu         → automation-tools.md
-что запускается вместе с 910   → system-services.md
-что хранится на PVE            → data-and-access.md
-```
+Штатно эти шаги выполняет роль Ansible `infra_manager`. Документация нужна для понимания того, что она делает, проверки результата и ручного восстановления при неисправности.
 
-## Источники точных значений
+## Где находится фактическая реализация
 
-Документация объясняет устройство 910 человеку, но не заменяет машинные файлы.
+Главные источники реализации 910:
 
-Точные значения берутся из:
+| Источник | Что в нём находится |
+|---|---|
+| [`../guest.yaml`](../guest.yaml) | параметры LXC 910 в Proxmox |
+| [`../provision.yaml`](../provision.yaml) | версии, пакеты, пути, контейнеры, постоянные данные и перечень объектов Semaphore |
+| [`../status.yaml`](../status.yaml) | проверки итогового состояния 910 |
+| [`../rootfs/`](../rootfs/) | воспроизводимые файлы, которые должны оказаться по соответствующим путям внутри 910 |
+| [`../../../../automation/ansible/roles/infra_manager/`](../../../../automation/ansible/roles/infra_manager/) | фактический порядок настройки 910 |
+| [`../../../../scripts/infra-manager/`](../../../../scripts/infra-manager/) | служебные команды, задания Semaphore и Python-логика |
 
-- [`../guest.yaml`](../guest.yaml) — параметры объекта Proxmox;
-- [`../provision.yaml`](../provision.yaml) — требуемые пакеты, службы, версии, пути и постоянные данные;
-- [`../status.yaml`](../status.yaml) — состав проверки и итогового экрана состояния;
-- [`../rootfs/opt/infra-manager/compose/docker-compose.yml`](../rootfs/opt/infra-manager/compose/docker-compose.yml) — состав контейнеров и их подключения;
-- [`../rootfs/etc/systemd/system/`](../rootfs/etc/systemd/system/) — службы и таймеры systemd;
-- [`decisions.md`](decisions.md) — причины решений, относящихся именно к 910.
+`rootfs/` не копируется целиком поверх `/`. Ansible явно устанавливает нужные файлы в нужные места.
 
-## Основная документация проекта
+## Как читать точные значения
 
-Особенности 910 опираются на общие документы:
+Локальная документация может приводить версии, пути, режимы файлов и команды, чтобы ей можно было пользоваться при развёртывании.
+
+Если значение одновременно есть в машинном файле, источником истины остаётся машинный файл. Основные примеры:
+
+- версия OpenBao — `provision.yaml:docker.services.openbao.image`;
+- версии Semaphore, OpenTofu и Packer — `provision.yaml:docker.services.runtime`;
+- состав контейнеров и подключения — `rootfs/opt/infra-manager/compose/docker-compose.yml`;
+- конфигурация OpenBao — `rootfs/opt/infra-manager/compose/openbao/openbao.hcl`;
+- systemd-службы — `rootfs/etc/systemd/system/`;
+- порядок установки — `automation/ansible/roles/infra_manager/tasks/`.
+
+Если код и локальный документ расходятся, нужно исправлять их вместе.
+
+## Общая документация проекта
+
+Локальные инструкции опираются на общие правила проекта, но не заменяют их:
 
 - [`../../../../docs/300-guests/330-guest-lifecycle.md`](../../../../docs/300-guests/330-guest-lifecycle.md) — общий жизненный цикл гостей;
-- [`../../../../docs/600-storage/610-backup.md`](../../../../docs/600-storage/610-backup.md) — резервное копирование;
-- [`../../../../docs/700-security/710-pve-access.md`](../../../../docs/700-security/710-pve-access.md) — доступ 910 к PVE;
-- [`../../../../docs/700-security/720-ssh-access.md`](../../../../docs/700-security/720-ssh-access.md) — SSH и доверие;
-- [`../../../../docs/700-security/740-openbao.md`](../../../../docs/700-security/740-openbao.md) — нормативный контракт OpenBao;
-- [`../../../../docs/700-security/750-access-contract.md`](../../../../docs/700-security/750-access-contract.md) — единый источник прав;
-- [`../../../../docs/700-security/780-implementation-status.md`](../../../../docs/700-security/780-implementation-status.md) — текущее состояние реализации безопасности;
-- [`../../../../docs/800-operations/810-deployment.md`](../../../../docs/800-operations/810-deployment.md) — развёртывание;
-- [`../../../../docs/800-operations/830-recovery.md`](../../../../docs/800-operations/830-recovery.md) — восстановление.
+- [`../../../../docs/600-storage/610-backup.md`](../../../../docs/600-storage/610-backup.md) — общая политика резервирования;
+- [`../../../../docs/700-security/710-pve-access.md`](../../../../docs/700-security/710-pve-access.md) — назначение доступа к PVE;
+- [`../../../../docs/700-security/720-ssh-access.md`](../../../../docs/700-security/720-ssh-access.md) — SSH-доверие;
+- [`../../../../docs/700-security/740-openbao.md`](../../../../docs/700-security/740-openbao.md) — роль OpenBao и используемые проектом механизмы;
+- [`../../../../docs/700-security/750-access-contract.md`](../../../../docs/700-security/750-access-contract.md) — машинный контракт прав;
+- [`../../../../docs/700-security/780-implementation-status.md`](../../../../docs/700-security/780-implementation-status.md) — переходные части безопасности;
+- [`../../../../docs/800-operations/810-deployment.md`](../../../../docs/800-operations/810-deployment.md) — общий процесс развёртывания;
+- [`../../../../docs/800-operations/830-recovery.md`](../../../../docs/800-operations/830-recovery.md) — общий аварийный процесс.
