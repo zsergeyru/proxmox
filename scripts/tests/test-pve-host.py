@@ -205,6 +205,39 @@ def test_openbao_host_support() -> None:
         )
 
 
+def test_openbao_status_checks() -> None:
+    calls: list[tuple[str, ...]] = []
+
+    def record_ssh(
+        node: str,
+        *command_args: str,
+        capture: bool = False,
+    ):
+        del capture
+        assert node == "pve"
+        calls.append(tuple(command_args))
+        return SimpleNamespace(returncode=0, stdout="")
+
+    with patch.object(module, "_ssh", side_effect=record_ssh):
+        module.check_openbao_kv("pve")
+        module.check_openbao_ssh_access("pve")
+
+    assert calls == [
+        (
+            "/usr/local/sbin/infra-manager-openbao-unseal",
+            "--check-kv",
+            "--log-level",
+            "quiet",
+        ),
+        (
+            "/usr/local/sbin/infra-manager-openbao-unseal",
+            "--check-ssh-access",
+            "--log-level",
+            "quiet",
+        ),
+    ]
+
+
 def test_recovery_host_support() -> None:
     installs: list[tuple[str, str, str]] = []
     calls: list[tuple[str, ...]] = []
@@ -417,6 +450,7 @@ def main() -> None:
     test_container_host_noop()
     test_infra_self_access()
     test_openbao_host_support()
+    test_openbao_status_checks()
     test_recovery_host_support()
     test_sign_ssh_client_key()
     test_issue_openbao_machine_credentials()
