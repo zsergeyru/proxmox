@@ -574,9 +574,12 @@ def test_otp_contract_is_narrow_and_derived() -> None:
         "policies",
         "role-id",
     ):
-        needle = f'"auth/machine/role/guest-*/{suffix}"'
+        needle = f'"auth/machine/role/+/{suffix}"'
         if needle not in access_code:
             fail(f"Не разрешена узкая проверка AppRole: {suffix}")
+
+    if '"auth/machine/role/guest-*/role-id"' in access_code:
+        fail("Подресурсы AppRole не должны использовать '*' внутри пути")
 
     if 'request("LIST", "/v1/sys/policies/acl")' not in access_code:
         fail("Список ACL-политик OpenBao должен читаться методом LIST")
