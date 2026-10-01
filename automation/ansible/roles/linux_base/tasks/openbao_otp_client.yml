@@ -4,6 +4,39 @@
     openbao_otp_client_enabled: >-
       {{ infra_openbao_machine_enabled | default(false) | bool }}
 
+- name: Проверить параметры OTP-клиента
+  ansible.builtin.assert:
+    that:
+      - infra_openbao_ssh_host_ca_file is defined
+      - infra_openbao_ssh_host_ca_file | length > 0
+      - infra_openbao_otp_target_ips is defined
+      - infra_openbao_otp_target_ips | length > 0
+    fail_msg: "Для OTP-клиента не переданы SSH host CA или разрешённые цели"
+  when: openbao_otp_client_enabled
+
+- name: Проверить SSH host CA на управляющей системе
+  ansible.builtin.stat:
+    path: "{{ infra_openbao_ssh_host_ca_file }}"
+  delegate_to: localhost
+  become: false
+  register: openbao_ssh_host_ca_source
+  when: openbao_otp_client_enabled
+
+- name: Требовать SSH host CA для OTP-клиента
+  ansible.builtin.assert:
+    that:
+      - openbao_ssh_host_ca_source.stat.exists
+      - openbao_ssh_host_ca_source.stat.isreg
+      - openbao_ssh_host_ca_source.stat.size | int > 0
+    fail_msg: "Для OTP-клиента не найден публичный SSH host CA"
+  when: openbao_otp_client_enabled
+
+- name: Установить sshpass для одноразового SSH-пароля
+  ansible.builtin.apt:
+    name: sshpass
+    state: present
+  when: openbao_otp_client_enabled
+
 - name: Установить клиент получения SSH OTP
   ansible.builtin.copy:
     src: openbao-otp-client.py
@@ -13,16 +46,60 @@
     mode: "0755"
   when: openbao_otp_client_enabled
 
+- name: Установить SSH-клиент с OpenBao OTP
+  ansible.builtin.copy:
+    src: openbao-ssh.py
+    dest: /usr/local/sbin/infra-openbao-ssh
+    owner: root
+    group: root
+    mode: "0755"
+  when: openbao_otp_client_enabled
+
+- name: Установить публичный SSH host CA
+  ansible.builtin.copy:
+    src: "{{ infra_openbao_ssh_host_ca_file }}"
+    dest: /etc/infra-manager/openbao/ssh-host-ca.pub
+    owner: root
+    group: root
+    mode: "0644"
+  when: openbao_otp_client_enabled
+
+- name: Ограничить доверие host CA разрешёнными OTP-целями
+  ansible.builtin.copy:
+    dest: /etc/ssh/openbao-otp-known-hosts
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      {% set host_ca = lookup('file', infra_openbao_ssh_host_ca_file) | trim %}
+      {% for target in infra_openbao_otp_target_ips.split(',') | sort %}
+      @cert-authority {{ target }} {{ host_ca }}
+      {% endfor %}
+  when: openbao_otp_client_enabled
+
 - name: Удалить OTP-клиент при отзыве машинной идентичности
   ansible.builtin.file:
-    path: /usr/local/sbin/infra-openbao-otp
+    path: "{{ item }}"
     state: absent
+  loop:
+    - /usr/local/sbin/infra-openbao-otp
+    - /usr/local/sbin/infra-openbao-ssh
+    - /etc/ssh/openbao-otp-known-hosts
+    - /etc/infra-manager/openbao/ssh-host-ca.pub
   when: not openbao_otp_client_enabled
 
 - name: Проверить установленный OTP-клиент
   ansible.builtin.command:
     argv:
       - /usr/local/sbin/infra-openbao-otp
+      - --help
+  changed_when: false
+  when: openbao_otp_client_enabled
+
+- name: Проверить установленный SSH-клиент OTP
+  ansible.builtin.command:
+    argv:
+      - /usr/local/sbin/infra-openbao-ssh
       - --help
   changed_when: false
   when: openbao_otp_client_enabled
