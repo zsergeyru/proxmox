@@ -923,9 +923,10 @@ grep -Fq 'name: ssh.service' "$LINUX_BASE_SSH_TRUST" \
     || die "Debian 13 должен использовать обычную службу SSH"
 grep -Fq 'when: not (infra_self_update | default(false) | bool)' "$ROOT/automation/ansible/roles/infra_manager/tasks/verify.yml" \
     || die "Самообновление 910 не должно менять Semaphore внутри текущего задания"
-status_self_update_guards="$(grep -Fc 'when: not (infra_self_update | default(false) | bool)' "$ROOT/automation/ansible/roles/infra_manager/tasks/verify.yml" || true)"
-[[ "$status_self_update_guards" -ge 2 ]] \
-    || die "Самообновление 910 должно откладывать и синхронизацию Semaphore, и полную status-проверку"
+grep -Fq 'semaphore-project' "$ACTIVATE_RUNTIME" \
+    || die "Самообновление 910 должно откладывать синхронизацию Semaphore до активации новой среды"
+grep -Fq 'infra-manager-status --full --quiet' "$ACTIVATE_RUNTIME" \
+    || die "Самообновление 910 должно выполнять полную status-проверку после активации новой среды"
 grep -Fq 'project_branch=project_branch' "$ROOT/scripts/infra-manager/infra_manager/guest_deploy.py" \
     || die "deploy-guest должен передавать фактическую Git-ветку в Ansible"
 grep -Fq 'sign_ssh_client_key' "$ROOT/scripts/infra-manager/infra_manager/guest_deploy.py" \
