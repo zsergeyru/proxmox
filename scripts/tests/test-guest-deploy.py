@@ -505,6 +505,11 @@ def check_temporary_certificate_path() -> None:
             patch.object(guest_deploy_module, "_ensure_ssh_host_key"),
             patch.object(
                 guest_deploy_module,
+                "_prepare_openbao_machine_ansible_vars",
+                return_value=["-e", "infra_openbao_machine_enabled=false"],
+            ),
+            patch.object(
+                guest_deploy_module,
                 "sign_ssh_client_key",
                 return_value="ssh-ed25519-cert-v01@openssh.com AAAACERT",
             ),
@@ -608,6 +613,11 @@ def check_host_certificate_is_passed_to_ansible() -> None:
             patch.object(guest_deploy_module, "_ensure_ssh_host_key"),
             patch.object(
                 guest_deploy_module,
+                "_prepare_openbao_machine_ansible_vars",
+                return_value=["-e", "infra_openbao_machine_enabled=false"],
+            ),
+            patch.object(
+                guest_deploy_module,
                 "sign_ssh_client_key",
                 return_value="ssh-ed25519-cert-v01@openssh.com AAAACLIENTCERT",
             ),
@@ -707,6 +717,11 @@ def check_certificate_bootstrap_fallback() -> None:
             patch.object(guest_deploy_module, "_ensure_ssh_host_key"),
             patch.object(
                 guest_deploy_module,
+                "_prepare_openbao_machine_ansible_vars",
+                return_value=["-e", "infra_openbao_machine_enabled=false"],
+            ),
+            patch.object(
+                guest_deploy_module,
                 "sign_ssh_client_key",
                 return_value="ssh-ed25519-cert-v01@openssh.com AAAACERT",
             ),
@@ -785,6 +800,11 @@ def check_certificate_failure_is_fatal_after_trust() -> None:
             ),
             patch.object(guest_deploy_module, "run", side_effect=fake_run),
             patch.object(guest_deploy_module, "_ensure_ssh_host_key"),
+            patch.object(
+                guest_deploy_module,
+                "_prepare_openbao_machine_ansible_vars",
+                return_value=["-e", "infra_openbao_machine_enabled=false"],
+            ),
             patch.object(
                 guest_deploy_module,
                 "sign_ssh_client_key",
