@@ -190,6 +190,42 @@ def main() -> None:
     }:
         fail(f"SSH OTP/AppRole не готовы: {otp_contract!r}")
 
+    otp_config_login = http_json(
+        "POST",
+        "/v1/auth/infra-manager/login",
+        {
+            "role_id": access["ssh-otp-config"]["role_id"],
+            "secret_id": access["ssh-otp-config"]["secret_id"],
+        },
+    )
+    otp_config_token = otp_config_login.get("auth", {}).get("client_token")
+    if not isinstance(otp_config_token, str) or not otp_config_token:
+        fail("Служебный ssh-otp-config AppRole не проходит login")
+
+    try:
+        http_json(
+            "POST",
+            "/v1/auth/machine/role/guest-410",
+            {
+                "bind_secret_id": True,
+                "secret_id_bound_cidrs": ["127.0.0.1/32"],
+                "secret_id_num_uses": 0,
+                "secret_id_ttl": "0s",
+                "token_bound_cidrs": ["127.0.0.1/32"],
+                "token_num_uses": 0,
+                "token_policies": ["root"],
+                "token_ttl": "5m",
+                "token_max_ttl": "10m",
+                "token_no_default_policy": True,
+            },
+            token=otp_config_token,
+        )
+    except urllib.error.HTTPError as exc:
+        if exc.code != 403:
+            fail(f"Неверный код запрета опасного AppRole: HTTP {exc.code}")
+    else:
+        fail("ssh-otp-config смог назначить машинному AppRole root policy")
+
     role_id = http_json(
         "GET",
         "/v1/auth/machine/role/guest-410/role-id",
@@ -212,6 +248,10 @@ def main() -> None:
     machine_token = machine_login.get("auth", {}).get("client_token")
     if not isinstance(machine_token, str) or not machine_token:
         fail("Машинный AppRole guest-410 не проходит login")
+
+    machine_policies = machine_login.get("auth", {}).get("policies", [])
+    if set(machine_policies) != {"machine-ssh-otp"}:
+        fail(f"Машинный token получил лишние policy: {machine_policies!r}")
 
     capabilities = http_json(
         "POST",
