@@ -895,11 +895,18 @@ def _prepare_openbao_machine_ansible_vars(
         context.vmid in policy.machine_identity_vmids
         and bool(policy.targets_for(context.vmid))
     )
+    target_enabled = bool(policy.authorized_principals(context.vmid))
     args = [
         "-e",
         f"infra_openbao_machine_enabled={'true' if enabled else 'false'}",
+        "-e",
+        (
+            "infra_openbao_otp_target_enabled="
+            f"{'true' if target_enabled else 'false'}"
+        ),
     ]
-    if not enabled:
+
+    if not enabled and not target_enabled:
         return args
 
     ca_file = PATHS.openbao_tls_ca
@@ -908,6 +915,34 @@ def _prepare_openbao_machine_ansible_vars(
             f"Не найден TLS CA машинного OpenBao: {ca_file}"
         )
     args.extend(["-e", f"infra_openbao_ca_file={ca_file}"])
+
+    manager = policy.guests.get(910)
+    if manager is None or manager.address is None:
+        raise InfraManagerError(
+            "Не определён доверенный адрес 910 для машинного OpenBao"
+        )
+    args.extend(
+        [
+            "-e",
+            f"infra_openbao_addr=https://{manager.address}:8202",
+        ]
+    )
+
+    if target_enabled:
+        target = policy.guests.get(context.vmid)
+        if target is None or target.address is None:
+            raise InfraManagerError(
+                f"guest:{context.vmid}: OTP-цель не имеет доверенного статического адреса"
+            )
+        args.extend(
+            [
+                "-e",
+                f"infra_openbao_otp_target_ip={target.address}",
+            ]
+        )
+
+    if not enabled:
+        return args
 
     if _guest_has_openbao_machine_identity(
         context,
@@ -925,12 +960,6 @@ def _prepare_openbao_machine_ansible_vars(
     if any(character.isspace() for character in role_id + secret_id):
         raise InfraManagerError(
             "OpenBao вернул машинную identity с недопустимыми пробелами"
-        )
-
-    manager = policy.guests.get(910)
-    if manager is None or manager.address is None:
-        raise InfraManagerError(
-            "Не определён доверенный адрес 910 для машинного OpenBao"
         )
 
     env_file = directory / "openbao-machine.env"
