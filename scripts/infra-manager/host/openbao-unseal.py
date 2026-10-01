@@ -1587,6 +1587,20 @@ try:
             },
             token=token,
         )
+        role_path = f"auth/machine/role/{role_name}"
+        capability_payload = request(
+            "POST",
+            "/v1/sys/capabilities-self",
+            {"path": role_path},
+            token=token,
+        )
+        role_capabilities = set(capability_payload.get("capabilities") or [])
+        if not {"create", "update"}.issubset(role_capabilities):
+            raise SystemExit(
+                f"missing AppRole capabilities for {role_path}: "
+                f"{sorted(role_capabilities)!r}"
+            )
+
         request(
             "POST",
             f"/v1/auth/machine/role/{role_name}",
