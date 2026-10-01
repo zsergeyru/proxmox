@@ -88,7 +88,6 @@
     content: |
       #%PAM-1.0
       auth requisite pam_exec.so quiet expose_authtok /usr/local/sbin/infra-openbao-otp-verify
-      auth optional pam_unix.so not_set_pass use_first_pass nodelay
       account include sshd
       session include sshd
       password include sshd
