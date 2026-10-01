@@ -190,6 +190,22 @@ def main() -> None:
     }:
         fail(f"SSH OTP/AppRole не готовы: {otp_contract!r}")
 
+    machine_role = http_json(
+        "GET",
+        "/v1/auth/machine/role/guest-410",
+        token=initial_root,
+    ).get("data")
+    if not isinstance(machine_role, dict):
+        fail("Тестовый AppRole guest-410 не читается")
+    if machine_role.get("token_policies") != ["machine-ssh-otp"]:
+        fail(f"guest-410 получил неверные token_policies: {machine_role!r}")
+    if machine_role.get("token_no_default_policy") is not True:
+        fail("guest-410 получил default policy")
+    if machine_role.get("secret_id_bound_cidrs") != ["127.0.0.1/32"]:
+        fail(f"guest-410 имеет неверный SecretID CIDR: {machine_role!r}")
+    if machine_role.get("token_bound_cidrs") != ["127.0.0.1/32"]:
+        fail(f"guest-410 имеет неверный token CIDR: {machine_role!r}")
+
     otp_config_login = http_json(
         "POST",
         "/v1/auth/infra-manager/login",
