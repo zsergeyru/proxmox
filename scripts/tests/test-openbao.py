@@ -67,6 +67,11 @@ def test_orchestration() -> None:
         ),
         patch.object(
             openbao_module,
+            "sync_openbao_otp_contract",
+            side_effect=lambda node, sources: calls.append(("sync-otp", node)),
+        ),
+        patch.object(
+            openbao_module,
             "check_recovery_contour",
             side_effect=lambda node: calls.append(("check-recovery", node)),
         ),
@@ -84,6 +89,7 @@ def test_orchestration() -> None:
         ("install-recovery", f"pve:{ROOT}"),
         ("prepare-recovery", "pve"),
         ("initialize", "pve"),
+        ("sync-otp", "pve"),
         ("check-recovery", "pve"),
         ("cleanup-transition", "pve"),
         ("check-recovery", "pve"),
@@ -187,6 +193,7 @@ def test_existing_openbao_skips_root_when_ready() -> None:
             ),
             patch.object(host, "unseal") as unseal,
             patch.object(host, "ssh_cas_ready", return_value=True),
+            patch.object(host, "ssh_access_credentials_complete", return_value=True),
             patch.object(host, "client_ca_published", return_value=True),
             patch.object(host, "check_ssh_access") as check_access,
             patch.object(host, "check_kv_access") as check_kv,
@@ -381,6 +388,8 @@ def test_temporary_root_window_restores_protected_container() -> None:
             "-v",
             f"{host.CT_OPENBAO_DATA_PATH}:/openbao/file",
             "-v",
+            "/etc/infra-manager/openbao/tls:/openbao/tls:ro",
+            "-v",
             f"{host.CT_COMPAT_CONFIG_PATH}:/openbao/config/openbao.hcl:ro",
             "ghcr.io/openbao/openbao:2.7.0",
             "server",
@@ -485,6 +494,41 @@ def test_ssh_access_contract_is_narrow() -> None:
         fail("Служебные токены OpenBao должны работать только локально")
 
 
+def test_otp_contract_is_narrow_and_derived() -> None:
+    host = load_host_module()
+    access_code = host.CONFIGURE_SSH_ACCESS_CODE
+    for item in (
+        "infra-manager-ssh-otp-config",
+        '"sys/mounts/ssh-otp"',
+        '"sys/auth/machine"',
+        '"ssh-otp/roles/guest-*"',
+        '"auth/machine/role/guest-*"',
+    ):
+        if item not in access_code:
+            fail(f"Служебный OTP-контур не содержит ограничение: {item}")
+
+    code = host.CONFIGURE_OTP_CONTRACT_CODE
+    required = (
+        'f"guest-{item[\'vmid\']}"',
+        '"key_type": "otp"',
+        '"default_user": "root"',
+        '"allowed_users": "root"',
+        '"cidr_list": ",".join(item["target_cidrs"])',
+        '"bind_secret_id": True',
+        '"secret_id_bound_cidrs": [item["source_cidr"]]',
+        '"token_bound_cidrs": [item["source_cidr"]]',
+        '"token_ttl": "5m"',
+        '"token_max_ttl": "10m"',
+        'f"ssh-otp/creds/{role_name}"',
+        '"DELETE"',
+    )
+    for item in required:
+        if item not in code:
+            fail(f"OTP/AppRole-контракт не содержит ограничение: {item}")
+    if "0.0.0.0/0" in code:
+        fail("OTP-контракт не должен разрешать произвольную сеть")
+
+
 def test_machine_signing_roles_are_separate_and_short_lived() -> None:
     host = load_host_module()
     access_code = host.CONFIGURE_SSH_ACCESS_CODE
@@ -528,6 +572,7 @@ def test_machine_signing_uses_only_pve_signer_approle() -> None:
     credentials = {
         "ssh-ca-config": {"role_id": "role-a", "secret_id": "secret-a"},
         "ssh-signer": {"role_id": "role-b", "secret_id": "secret-b"},
+        "ssh-otp-config": {"role_id": "role-c", "secret_id": "secret-c"},
     }
     calls: list[tuple[tuple[str, ...], str | None]] = []
 
@@ -693,6 +738,7 @@ def test_host_signing_uses_only_signer_approle() -> None:
     credentials = {
         "ssh-ca-config": {"role_id": "role-a", "secret_id": "secret-a"},
         "ssh-signer": {"role_id": "role-b", "secret_id": "secret-b"},
+        "ssh-otp-config": {"role_id": "role-c", "secret_id": "secret-c"},
     }
     calls: list[tuple[tuple[str, ...], str | None]] = []
 
@@ -758,6 +804,7 @@ def test_client_signing_keeps_approle_credentials_on_pve() -> None:
     credentials = {
         "ssh-ca-config": {"role_id": "role-a", "secret_id": "secret-a"},
         "ssh-signer": {"role_id": "role-b", "secret_id": "secret-b"},
+        "ssh-otp-config": {"role_id": "role-c", "secret_id": "secret-c"},
     }
     calls: list[tuple[tuple[str, ...], str | None]] = []
 
@@ -808,6 +855,7 @@ def test_ssh_access_credentials_are_pve_only() -> None:
     credentials = {
         "ssh-ca-config": {"role_id": "role-a", "secret_id": "secret-a"},
         "ssh-signer": {"role_id": "role-b", "secret_id": "secret-b"},
+        "ssh-otp-config": {"role_id": "role-c", "secret_id": "secret-c"},
     }
     with tempfile.TemporaryDirectory() as tmp:
         key_dir = Path(tmp)
@@ -947,6 +995,7 @@ def main() -> None:
     test_host_ca_publication_uses_public_endpoint()
     test_ssh_ca_mounts_are_separate()
     test_ssh_access_contract_is_narrow()
+    test_otp_contract_is_narrow_and_derived()
     test_machine_signing_roles_are_separate_and_short_lived()
     test_machine_signing_uses_only_pve_signer_approle()
     test_host_signing_role_is_host_only()
