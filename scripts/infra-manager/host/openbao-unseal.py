@@ -502,37 +502,37 @@ otp_config_policy = json.dumps(
                     "token_no_default_policy": ["true"],
                 },
             },
-            "auth/machine/role/guest-*/bind-secret-id": {
+            "auth/machine/role/+/bind-secret-id": {
                 "capabilities": ["read"],
             },
-            "auth/machine/role/guest-*/secret-id-bound-cidrs": {
+            "auth/machine/role/+/secret-id-bound-cidrs": {
                 "capabilities": ["read"],
             },
-            "auth/machine/role/guest-*/secret-id-num-uses": {
+            "auth/machine/role/+/secret-id-num-uses": {
                 "capabilities": ["read"],
             },
-            "auth/machine/role/guest-*/secret-id-ttl": {
+            "auth/machine/role/+/secret-id-ttl": {
                 "capabilities": ["read"],
             },
-            "auth/machine/role/guest-*/token-bound-cidrs": {
+            "auth/machine/role/+/token-bound-cidrs": {
                 "capabilities": ["read"],
             },
-            "auth/machine/role/guest-*/token-num-uses": {
+            "auth/machine/role/+/token-num-uses": {
                 "capabilities": ["read"],
             },
-            "auth/machine/role/guest-*/token-ttl": {
+            "auth/machine/role/+/token-ttl": {
                 "capabilities": ["read"],
             },
-            "auth/machine/role/guest-*/token-max-ttl": {
+            "auth/machine/role/+/token-max-ttl": {
                 "capabilities": ["read"],
             },
-            "auth/machine/role/guest-*/policies": {
+            "auth/machine/role/+/policies": {
                 "capabilities": ["read"],
             },
-            "auth/machine/role/guest-*/role-id": {
+            "auth/machine/role/+/role-id": {
                 "capabilities": ["read"],
             },
-            "auth/machine/role/guest-*/secret-id": {
+            "auth/machine/role/+/secret-id": {
                 "capabilities": ["create", "update"],
             },
             "auth/token/lookup-self": {"capabilities": ["read"]},
