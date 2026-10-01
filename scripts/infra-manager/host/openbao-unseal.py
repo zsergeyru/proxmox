@@ -1286,8 +1286,8 @@ checks = (
         "ssh-otp-config",
         "infra-manager-ssh-otp-config",
         {
-            "sys/mounts/ssh-otp": {"create", "read", "update", "delete", "sudo"},
-            "sys/auth/machine": {"create", "read", "update", "delete", "sudo"},
+            "sys/mounts": {"read"},
+            "sys/auth": {"read"},
             "ssh-otp/roles/guest-410": {"create", "read", "update", "delete"},
             "auth/machine/role/guest-410": {"create", "read", "update", "delete"},
             "ssh-otp/creds/guest-410": {"deny"},
