@@ -1361,6 +1361,7 @@ CONFIGURE_OTP_CONTRACT_CODE = r"""
 import ipaddress
 import json
 import sys
+import urllib.error
 import urllib.request
 
 BASE = "http://127.0.0.1:8200"
@@ -1397,6 +1398,17 @@ def request(method, path, body=None, *, token=None):
     with urllib.request.urlopen(req, timeout=30) as response:
         raw = response.read()
     return json.loads(raw.decode("utf-8")) if raw else {}
+
+
+def list_keys(path, *, token):
+    try:
+        payload = request("LIST", path, token=token)
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            return []
+        raise
+    keys = payload.get("data", {}).get("keys", [])
+    return keys if isinstance(keys, list) else []
 
 
 def private_host_cidr(value):
@@ -1469,13 +1481,10 @@ try:
         raise SystemExit("auth/machine exists with unexpected type")
 
     expected_roles = {f"guest-{item['vmid']}" for item in normalized}
-    existing_otp_roles = request(
-        "LIST",
+    existing_otp_roles = list_keys(
         "/v1/ssh-otp/roles",
         token=token,
-    ).get("data", {}).get("keys", [])
-    if not isinstance(existing_otp_roles, list):
-        existing_otp_roles = []
+    )
     for role_name in existing_otp_roles:
         if (
             isinstance(role_name, str)
@@ -1484,13 +1493,10 @@ try:
         ):
             request("DELETE", f"/v1/ssh-otp/roles/{role_name}", token=token)
 
-    existing_machine_roles = request(
-        "LIST",
+    existing_machine_roles = list_keys(
         "/v1/auth/machine/role",
         token=token,
-    ).get("data", {}).get("keys", [])
-    if not isinstance(existing_machine_roles, list):
-        existing_machine_roles = []
+    )
     for role_name in existing_machine_roles:
         if (
             isinstance(role_name, str)
