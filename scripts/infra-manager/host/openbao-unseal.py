@@ -2673,6 +2673,46 @@ def _tls_ca_ready() -> bool:
         return False
 
 
+def _tls_ca_has_signing_usage() -> bool:
+    usage = _openssl(
+        "x509", "-in", str(TLS_CA_CERT), "-noout", "-ext", "keyUsage"
+    ).stdout
+    return "Certificate Sign" in usage and "CRL Sign" in usage
+
+
+def _repair_legacy_tls_ca_certificate() -> None:
+    """Перевыпустить только сертификат старого CA с тем же закрытым ключом."""
+    details = _openssl("x509", "-in", str(TLS_CA_CERT), "-noout", "-text").stdout
+    subject = _openssl("x509", "-in", str(TLS_CA_CERT), "-noout", "-subject").stdout
+    if "CA:TRUE" not in details or "CN = infra-manager OpenBao TLS CA" not in subject:
+        raise OpenBaoHostError(
+            "Существующий TLS CA не соответствует проектному центру доверия"
+        )
+    _openssl("verify", "-CAfile", str(TLS_CA_CERT), str(TLS_CA_CERT))
+    with tempfile.TemporaryDirectory(
+        prefix=".openbao-ca-repair.", dir=TLS_PVE_ONLY_DIR
+    ) as temporary_dir:
+        repaired = Path(temporary_dir) / "ca.crt"
+        _openssl(
+            "req", "-x509", "-new", "-key", str(TLS_CA_KEY),
+            "-sha256", "-days", "3650",
+            "-subj", "/CN=infra-manager OpenBao TLS CA",
+            "-addext", "basicConstraints=critical,CA:TRUE",
+            "-addext", "keyUsage=critical,keyCertSign,cRLSign",
+            "-out", str(repaired),
+        )
+        _openssl("verify", "-CAfile", str(repaired), str(repaired))
+        if TLS_SERVER_CERT.is_file():
+            _openssl("verify", "-CAfile", str(repaired), str(TLS_SERVER_CERT))
+        _atomic_copy(
+            TLS_CA_CERT,
+            TLS_PVE_ONLY_DIR / "ca.pre-key-usage.crt",
+            mode=0o644, uid=0, gid=0,
+        )
+        _atomic_copy(repaired, TLS_CA_CERT, mode=0o644, uid=0, gid=0)
+    log_detail("[ОК] TLS CA перевыпущен с keyCertSign без смены ключа")
+
+
 def _tls_server_ready() -> bool:
     if not TLS_SERVER_KEY.is_file() or not TLS_SERVER_CERT.is_file():
         return False
@@ -2766,6 +2806,10 @@ def prepare_tls_material() -> None:
                 "3650",
                 "-subj",
                 "/CN=infra-manager OpenBao TLS CA",
+                "-addext",
+                "basicConstraints=critical,CA:TRUE",
+                "-addext",
+                "keyUsage=critical,keyCertSign,cRLSign",
                 "-keyout",
                 str(key),
                 "-out",
@@ -2778,6 +2822,8 @@ def prepare_tls_material() -> None:
         raise OpenBaoHostError(
             "Существующий TLS CA OpenBao повреждён или ключ не соответствует сертификату"
         )
+    if not _tls_ca_has_signing_usage():
+        _repair_legacy_tls_ca_certificate()
 
     _atomic_copy(
         TLS_CA_CERT,
