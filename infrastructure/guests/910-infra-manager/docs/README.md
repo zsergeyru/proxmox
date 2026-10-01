@@ -14,6 +14,7 @@
 | [`automation-tools.md`](automation-tools.md) | OpenTofu, Ansible, Packer, Git и Python как инструменты управления |
 | [`system-services.md`](system-services.md) | службы systemd, порядок запуска 910, активация рабочей среды и служебные команды |
 | [`data-and-access.md`](data-and-access.md) | постоянные данные 910, временные секреты, доступ к PVE и Git, границы резервирования |
+| [`decisions.md`](decisions.md) | причины решений, относящихся именно к 910 |
 
 ## Как читать
 
@@ -39,9 +40,9 @@
 - [`../guest.yaml`](../guest.yaml) — параметры объекта Proxmox;
 - [`../provision.yaml`](../provision.yaml) — требуемые пакеты, службы, версии, пути и постоянные данные;
 - [`../status.yaml`](../status.yaml) — состав проверки и итогового экрана состояния;
-- [`../compose/docker-compose.yml`](../compose/docker-compose.yml) — состав контейнеров и их подключения;
-- [`../systemd/`](../systemd/) — службы и таймеры systemd;
-- [`../decisions.md`](../decisions.md) — причины решений, относящихся именно к 910.
+- [`../rootfs/opt/infra-manager/compose/docker-compose.yml`](../rootfs/opt/infra-manager/compose/docker-compose.yml) — состав контейнеров и их подключения;
+- [`../rootfs/etc/systemd/system/`](../rootfs/etc/systemd/system/) — службы и таймеры systemd;
+- [`decisions.md`](decisions.md) — причины решений, относящихся именно к 910.
 
 ## Основная документация проекта
 
