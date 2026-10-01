@@ -161,7 +161,7 @@ Persistent:          true
 
 Фактический статус перехода находится в [`780-implementation-status.md`](../../../../docs/700-security/780-implementation-status.md).
 
-## 5. Активация новой infra-runtime
+## 5. Активация новой рабочей среды infra-runtime
 
 Для самообновления 910 используется команда:
 
@@ -345,7 +345,7 @@ pct exec 910 -- infra-manager-status --full
 - состояние имеет неверный формат;
 - инициализированный OpenBao не удалось разблокировать.
 
-### 10.2. Активация infra-runtime
+### 10.2. Активация рабочей среды infra-runtime
 
 Ошибка возникает, если:
 
