@@ -604,8 +604,9 @@ def test_machine_credentials_are_issued_narrowly() -> None:
     for item in required:
         if item not in issue_code:
             fail(f"Выдача машинной идентичности нарушает контракт: {item}")
-    if "open(" in issue_code or "write_text" in issue_code:
-        fail("Машинные RoleID/SecretID не должны записываться на диск")
+    for forbidden in ("pathlib", "Path(", "write_text", "write_bytes"):
+        if forbidden in issue_code:
+            fail("Машинные RoleID/SecretID не должны записываться на диск")
 
 
 def test_machine_signing_roles_are_separate_and_short_lived() -> None:
