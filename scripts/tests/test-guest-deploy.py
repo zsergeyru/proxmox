@@ -330,6 +330,8 @@ def check_openbao_machine_identity_preparation() -> None:
         root = Path(tmp)
         ca = root / "ca.crt"
         ca.write_text("TEST-CA\n", encoding="utf-8")
+        host_ca = root / "ssh-host-ca.pub"
+        host_ca.write_text("ssh-ed25519 AAAAHOSTCA\n", encoding="utf-8")
         private_key = root / "guest_ed25519"
         private_key.write_text("PRIVATE", encoding="utf-8")
         context = DeploymentContext(
@@ -356,7 +358,10 @@ def check_openbao_machine_identity_preparation() -> None:
             patch.object(
                 guest_deploy_module,
                 "PATHS",
-                SimpleNamespace(openbao_tls_ca=ca),
+                SimpleNamespace(
+                    openbao_tls_ca=ca,
+                    ssh_host_ca_public_key=host_ca,
+                ),
             ),
             patch.object(
                 guest_deploy_module,
@@ -394,6 +399,15 @@ def check_openbao_machine_identity_preparation() -> None:
             fail("OTP-цель 410 получила неверный список разрешённых источников")
         if f"infra_openbao_ca_file={ca}" not in args:
             fail("OTP-источник не получил TLS CA OpenBao")
+        if f"infra_openbao_ssh_host_ca_file={host_ca}" not in args:
+            fail("OTP-источник не получил публичный SSH host CA")
+        target_args = [
+            item
+            for item in args
+            if item.startswith("infra_openbao_otp_target_ips=")
+        ]
+        if target_args != ["infra_openbao_otp_target_ips=192.168.3.11"]:
+            fail(f"OTP-источник получил неверные SSH-цели: {target_args!r}")
         env_args = [
             item
             for item in args
@@ -421,7 +435,10 @@ def check_openbao_machine_identity_preparation() -> None:
             patch.object(
                 guest_deploy_module,
                 "PATHS",
-                SimpleNamespace(openbao_tls_ca=ca),
+                SimpleNamespace(
+                    openbao_tls_ca=ca,
+                    ssh_host_ca_public_key=host_ca,
+                ),
             ),
             patch.object(
                 guest_deploy_module,
