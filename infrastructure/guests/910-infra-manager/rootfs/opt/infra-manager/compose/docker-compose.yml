@@ -1,0 +1,36 @@
+services:
+  runtime:
+    build:
+      context: ./runtime
+      args:
+        SEMAPHORE_VERSION: ${SEMAPHORE_VERSION}
+        OPENTOFU_VERSION: ${OPENTOFU_VERSION}
+        PACKER_VERSION: ${PACKER_VERSION}
+    image: infra-runtime:${RUNTIME_VERSION}
+    container_name: infra-runtime
+    restart: unless-stopped
+    network_mode: host
+    env_file:
+      - /run/infra-manager/secrets/semaphore-server.env
+    volumes:
+      - /mnt/persistent-state/semaphore:/var/lib/semaphore
+      - /etc/infra-manager/ca:/etc/infra-manager/ca:ro
+      - /mnt/persistent-state/ansible:/etc/infra-manager/ansible:ro
+      - /mnt/pve-access/pve-host:/mnt/pve-access/pve-host:ro
+      - /mnt/persistent-state/opentofu:/var/lib/infra-manager/opentofu
+      - /run/infra-manager/secrets:/run/infra-manager/secrets:ro
+
+  openbao:
+    image: ghcr.io/openbao/openbao:${OPENBAO_VERSION}
+    container_name: openbao
+    restart: unless-stopped
+    network_mode: host
+    user: "0"
+    command:
+      - server
+    environment:
+      BAO_ADDR: http://127.0.0.1:8200
+      BAO_LOG_LEVEL: info
+    volumes:
+      - /mnt/persistent-state/openbao:/openbao/file
+      - ./openbao/openbao.hcl:/openbao/config/openbao.hcl:ro
