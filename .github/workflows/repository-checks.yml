@@ -164,7 +164,7 @@ jobs:
           from pathlib import Path
           import yaml
 
-          path = Path("infrastructure/guests/910-infra-manager/compose/docker-compose.yml")
+          path = Path("infrastructure/guests/910-infra-manager/rootfs/opt/infra-manager/compose/docker-compose.yml")
           data = yaml.safe_load(path.read_text(encoding="utf-8"))
           services = data.get("services", {})
           if set(services) != {"runtime", "openbao"}:
@@ -197,7 +197,7 @@ jobs:
           }
           trap cleanup EXIT
 
-          docker run -d             --name openbao-test             --network host             --user 0             -v "$PWD/infrastructure/guests/910-infra-manager/compose/openbao/openbao.hcl:/openbao/config/openbao.hcl:ro"             -v "$data_dir:/openbao/file"             ghcr.io/openbao/openbao:2.7.0             server
+          docker run -d             --name openbao-test             --network host             --user 0             -v "$PWD/infrastructure/guests/910-infra-manager/rootfs/opt/infra-manager/compose/openbao/openbao.hcl:/openbao/config/openbao.hcl:ro"             -v "$data_dir:/openbao/file"             ghcr.io/openbao/openbao:2.7.0             server
 
           for _ in $(seq 1 30); do
             if curl -fsS http://127.0.0.1:8200/v1/sys/seal-status >/tmp/openbao-status.json; then
@@ -220,7 +220,7 @@ jobs:
           docker rm -f openbao-test >/dev/null
 
           compat_config="$(mktemp)"
-          cp infrastructure/guests/910-infra-manager/compose/openbao/openbao.hcl "$compat_config"
+          cp infrastructure/guests/910-infra-manager/rootfs/opt/infra-manager/compose/openbao/openbao.hcl "$compat_config"
           chmod 0644 "$compat_config"
           python3 - "$compat_config" <<'PY'
           from pathlib import Path
@@ -273,7 +273,7 @@ jobs:
             --build-arg OPENTOFU_VERSION=1.12.6 \
             --build-arg PACKER_VERSION=1.15.4 \
             -t infra-runtime:test \
-            infrastructure/guests/910-infra-manager/compose/runtime
+            infrastructure/guests/910-infra-manager/rootfs/opt/infra-manager/compose/runtime
           docker run --rm infra-runtime:test tofu version
           docker run --rm infra-runtime:test packer version
           docker run --rm --entrypoint python3 infra-runtime:test -c 'import proxmoxer'
