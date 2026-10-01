@@ -13,6 +13,8 @@
       - infra_openbao_ca_file | length > 0
       - infra_openbao_otp_target_ip is defined
       - infra_openbao_otp_target_ip | length > 0
+      - infra_openbao_otp_allowed_roles is defined
+      - infra_openbao_otp_allowed_roles | length > 0
     fail_msg: "Для OTP-цели не переданы адрес OpenBao, TLS CA или адрес гостя"
   when: openbao_otp_target_enabled
 
@@ -73,6 +75,7 @@
       OPENBAO_CA=/etc/infra-manager/openbao/ca.crt
       OPENBAO_SSH_MOUNT=ssh-otp
       OPENBAO_TARGET_IP={{ infra_openbao_otp_target_ip }}
+      OPENBAO_ALLOWED_ROLES={{ infra_openbao_otp_allowed_roles }}
   register: openbao_otp_verify_config
   when: openbao_otp_target_enabled
 
