@@ -521,6 +521,15 @@ def test_ssh_access_contract_is_narrow() -> None:
 
 def test_otp_contract_is_narrow_and_derived() -> None:
     host = load_host_module()
+
+    with patch.object(host, "ssh_cas_ready", return_value=False):
+        try:
+            host.check_ssh_access()
+        except host.OpenBaoHostError:
+            pass
+        else:
+            fail("Проверка SSH-доступов должна отклонять неготовые SSH CA")
+
     access_code = host.CONFIGURE_SSH_ACCESS_CODE
     for item in (
         "infra-manager-ssh-otp-config",
