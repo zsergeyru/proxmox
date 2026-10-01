@@ -950,6 +950,29 @@ def _prepare_openbao_machine_ansible_vars(
     if not enabled:
         return args
 
+    target_ips: list[str] = []
+    for target_vmid in policy.targets_for(context.vmid):
+        target = policy.guests.get(target_vmid)
+        if target is None or target.address is None:
+            raise InfraManagerError(
+                f"guest:{target_vmid}: SSH OTP-цель не имеет доверенного статического адреса"
+            )
+        target_ips.append(target.address)
+
+    host_ca_file = PATHS.ssh_host_ca_public_key
+    if not host_ca_file.is_file() or host_ca_file.stat().st_size == 0:
+        raise InfraManagerError(
+            f"Не найден SSH host CA для OTP-клиента: {host_ca_file}"
+        )
+    args.extend(
+        [
+            "-e",
+            f"infra_openbao_ssh_host_ca_file={host_ca_file}",
+            "-e",
+            "infra_openbao_otp_target_ips=" + ",".join(sorted(set(target_ips))),
+        ]
+    )
+
     if _guest_has_openbao_machine_identity(
         context,
         private_key,
