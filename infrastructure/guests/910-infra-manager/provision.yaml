@@ -31,7 +31,7 @@ docker:
     - docker-buildx-plugin
     - docker-compose-plugin
 
-  compose_file: compose/docker-compose.yml
+  compose_file: rootfs/opt/infra-manager/compose/docker-compose.yml
 
   services:
     runtime:
@@ -80,7 +80,7 @@ docker:
       network_mode: host
       api_address: http://127.0.0.1:8200
       data_path: /var/lib/persistent/openbao
-      config_file: compose/openbao/openbao.hcl
+      config_file: rootfs/opt/infra-manager/compose/openbao/openbao.hcl
       storage: raft
       auto_initialize: false
 
