@@ -33,4 +33,5 @@ services:
       BAO_LOG_LEVEL: info
     volumes:
       - /mnt/persistent-state/openbao:/openbao/file
+      - /etc/infra-manager/openbao/tls:/openbao/tls:ro
       - ./openbao/openbao.hcl:/openbao/config/openbao.hcl:ro
