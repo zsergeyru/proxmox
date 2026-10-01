@@ -2458,6 +2458,16 @@ def _tls_server_ready() -> bool:
         return False
 
 
+def _otp_tls_was_initialized() -> bool:
+    if not SSH_ACCESS_PATH.is_file() or SSH_ACCESS_PATH.stat().st_size == 0:
+        return False
+    try:
+        payload = json.loads(SSH_ACCESS_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    return isinstance(payload, dict) and "ssh-otp-config" in payload
+
+
 def prepare_tls_material() -> None:
     """Подготовить TLS CA на PVE и серверный комплект, доступный LXC 910."""
     TLS_PVE_ONLY_DIR.mkdir(parents=True, exist_ok=True)
@@ -2475,6 +2485,11 @@ def prepare_tls_material() -> None:
         )
 
     if not any(ca_parts):
+        if _otp_tls_was_initialized():
+            raise OpenBaoHostError(
+                "TLS CA OpenBao потерян после ввода OTP/TLS-схемы; "
+                "автоматическая ротация центра доверия запрещена"
+            )
         with tempfile.TemporaryDirectory(
             prefix=".openbao-ca.",
             dir=TLS_PVE_ONLY_DIR,
