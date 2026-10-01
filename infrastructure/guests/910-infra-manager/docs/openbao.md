@@ -1,98 +1,124 @@
 # OpenBao на 910 infra-manager
 
-**Назначение:** практическое руководство по развёртыванию и сопровождению OpenBao внутри 910.
+**Тип:** локальная спецификация службы  
+**Статус:** целевое состояние  
+**Назначение:** полностью описать, каким должен быть OpenBao на госте 910, чтобы по этому документу можно было реализовать, проверить, обновить и восстановить службу.
 
-Общий документ проекта [`740-openbao.md`](../../../../docs/700-security/740-openbao.md) объясняет, зачем проекту нужны KV, AppRole, SSH CA и SSH OTP. Этот файл показывает, **как OpenBao реально создаётся и работает на 910**.
+Этот документ описывает **не только то, что уже реализовано сейчас, а требуемое конечное состояние OpenBao на 910**.
 
-## 1. Что разворачивается на 910
+Если код, `provision.yaml`, `rootfs/`, Ansible или текущий контейнер расходятся с этим документом, реализацию нужно привести к этой спецификации. Фактическое переходное состояние отдельно фиксируется в [`780-implementation-status.md`](../../../../docs/700-security/780-implementation-status.md).
 
-OpenBao работает отдельным Docker-контейнером:
+Общий архитектурный смысл OpenBao, его права и взаимодействие с другими компонентами определены в [`740-openbao.md`](../../../../docs/700-security/740-openbao.md). Этот файл определяет **как именно всё это должно быть реализовано на 910**.
 
-```text
-container: openbao
-image:     ghcr.io/openbao/openbao:2.7.0
-network:   host
-restart:   unless-stopped
-```
+## 1. Итоговая схема службы
 
-Точная версия берётся из [`../provision.yaml`](../provision.yaml).
-
-Контейнер описан в:
+На 910 должен работать один отдельный контейнер:
 
 ```text
-rootfs/opt/infra-manager/compose/docker-compose.yml
+openbao
 ```
 
-Конфигурация OpenBao:
+Он должен предоставлять пять функций:
 
 ```text
-rootfs/opt/infra-manager/compose/openbao/openbao.hcl
+OpenBao 910
+├── KV v2
+│   ├── PVE API secret
+│   ├── Git read-only credential
+│   └── Semaphore runtime secrets
+│
+├── SSH client CA
+│   └── временные user certificates для Ansible
+│
+├── SSH host CA
+│   └── host certificates управляемых Linux-гостей
+│
+├── AppRole
+│   ├── служебные роли infra-manager
+│   └── отдельная машинная роль каждого OTP-источника
+│
+└── SSH OTP
+    └── одноразовый guest → guest доступ
 ```
 
-При настройке 910 Ansible копирует каталог `rootfs/opt/infra-manager/compose/` в:
+OpenBao не должен выполнять функции Semaphore, Ansible, OpenTofu или PVE. Он предоставляет им защищённые секреты и операции доверия.
+
+## 2. Контейнер и исходные файлы
+
+OpenBao должен быть описан в локальных файлах гостя 910.
+
+Исходный Compose:
 
 ```text
-/opt/infra-manager/compose/
+infrastructure/guests/910-infra-manager/
+└── rootfs/
+    └── opt/
+        └── infra-manager/
+            └── compose/
+                ├── docker-compose.yml
+                └── openbao/
+                    └── openbao.hcl
 ```
 
-Поэтому рабочая конфигурация внутри 910 находится в:
+После Ansible эти файлы должны находиться внутри 910:
 
 ```text
 /opt/infra-manager/compose/docker-compose.yml
 /opt/infra-manager/compose/openbao/openbao.hcl
 ```
 
-## 2. Сеть и конфигурация
-
-OpenBao использует сеть самого 910.
-
-Текущий listener:
+Контейнер должен использовать:
 
 ```text
-API:     127.0.0.1:8200
-cluster: 127.0.0.1:8201
-TLS:     выключен только для локального loopback
-UI:      выключен
+name:     openbao
+image:    ghcr.io/openbao/openbao:<version>
+network:  host
+restart:  unless-stopped
 ```
 
-Эти значения находятся в `rootfs/opt/infra-manager/compose/openbao/openbao.hcl`.
+Точная версия задаётся в [`../provision.yaml`](../provision.yaml).
 
-Внутри контейнера задаётся:
+OpenBao должен запускаться обычным серверным режимом:
 
 ```text
-BAO_ADDR=http://127.0.0.1:8200
-BAO_LOG_LEVEL=info
+server
+-config=/openbao/config/openbao.hcl
 ```
 
-С текущей конфигурацией API OpenBao не слушает внешний адрес 910. Поэтому обычная проверка выполняется локально из 910.
+UI в штатной конфигурации не нужен:
+
+```text
+ui = false
+```
 
 ## 3. Постоянное состояние
 
-OpenBao использует Raft.
+OpenBao должен использовать Raft.
 
-Путь внутри контейнера:
+Логический путь внутри контейнера:
 
 ```text
 /openbao/file/raft
 ```
 
-Compose подключает к `/openbao/file` постоянный каталог 910:
+Постоянный каталог внутри 910:
 
 ```text
 /mnt/persistent-state/openbao
 ```
 
-Физически он приходит с PVE из области:
+Физический источник на PVE:
 
 ```text
 /mnt/bindmounts/infra-manager/state/openbao
 ```
 
-На уровне 910 дополнительно существует привычная ссылка:
+Compose должен подключать:
 
 ```text
-/var/lib/persistent/openbao
-    → /mnt/persistent-state/openbao
+/mnt/persistent-state/openbao
+        ↓
+/openbao/file
 ```
 
 Идентификатор Raft-узла:
@@ -101,139 +127,184 @@ Compose подключает к `/openbao/file` постоянный катал�
 infra-manager-910
 ```
 
-Именно этот каталог содержит состояние, которое нельзя заменить новым пустым OpenBao при восстановлении.
-
-## 4. Что должно существовать до запуска
-
-Перед развёртыванием OpenBao должны быть готовы:
-
-1. Docker на 910.
-2. Подключение постоянного состояния `/mnt/persistent-state`.
-3. Подключение доступа `/mnt/pve-access` только для чтения.
-4. Каталог `/mnt/persistent-state/openbao`.
-5. Рабочая копия проекта `/var/lib/infra-manager/bootstrap-repo`.
-6. Compose-файлы в `/opt/infra-manager/compose`.
-7. SSH-доступ 910 → PVE root через `/mnt/pve-access/pve-host/`.
-
-Эти предварительные условия готовят задачи роли:
+Допустимая локальная ссылка для человека и служебного кода:
 
 ```text
-automation/ansible/roles/infra_manager/tasks/persistence.yml
-automation/ansible/roles/infra_manager/tasks/pve_access.yml
-automation/ansible/roles/infra_manager/tasks/repository.yml
+/var/lib/persistent/openbao
+    → /mnt/persistent-state/openbao
 ```
 
-Если подключения `access` или `state` отсутствуют, настройка 910 должна завершиться ошибкой до создания локальных замен.
+Raft должен содержать:
 
-## 5. Установка файлов и запуск контейнера
+- KV v2;
+- auth methods;
+- AppRole;
+- политики;
+- SSH client CA;
+- SSH host CA;
+- роли подписи;
+- SSH OTP engine;
+- OTP-роли;
+- прочую конфигурацию OpenBao.
 
-Ansible выполняет следующие действия.
+Каталог Raft нельзя автоматически очищать, заменять новым пустым состоянием или повторно инициализировать при обычном обновлении 910.
 
-### 5.1. Устанавливает Compose-файлы
+## 4. Сетевые входы
 
-Исходник:
+OpenBao должен иметь **два разных API-входа**.
+
+### 4.1. Локальный административный вход
+
+Для 910 и PVE-only операций должен оставаться loopback listener:
 
 ```text
-infrastructure/guests/910-infra-manager/rootfs/opt/infra-manager/compose/
+127.0.0.1:8200
 ```
 
-Рабочее место:
+Он используется:
+
+- локальным кодом 910;
+- PVE-only helper через `pct exec`;
+- инициализацией;
+- unseal;
+- настройкой KV;
+- настройкой SSH CA;
+- синхронизацией AppRole и OTP.
+
+Этот listener не должен публиковаться в сеть гостей.
+
+Для него допустим локальный HTTP без TLS, поскольку он слушает только loopback:
+
+```hcl
+listener "tcp" {
+  address         = "127.0.0.1:8200"
+  cluster_address = "127.0.0.1:8201"
+  tls_disable     = true
+}
+```
+
+### 4.2. Защищённый вход для машинного OTP
+
+Для управляемых Linux-гостей должен существовать отдельный listener:
 
 ```text
-/opt/infra-manager/compose/
+192.168.9.10:8202
 ```
 
-### 5.2. Создаёт файл версий
+Он нужен только для:
 
-Ansible записывает:
+- AppRole login исходного гостя;
+- получения OTP;
+- проверки OTP целевым гостем.
+
+Он **обязан использовать TLS**.
+
+Целевая конфигурация:
+
+```hcl
+listener "tcp" {
+  address       = "192.168.9.10:8202"
+  tls_disable   = false
+  tls_cert_file = "/openbao/tls/server.crt"
+  tls_key_file  = "/openbao/tls/server.key"
+}
+```
+
+Открывать `0.0.0.0:8200` или другой общий HTTP listener для гостей запрещено.
+
+Сетевые правила должны разрешать порт `8202/tcp` только тем управляемым Linux-гостям, которым нужен OpenBao для OTP.
+
+## 5. TLS для машинного входа
+
+Для сетевого OTP-интерфейса должен использоваться отдельный TLS-сертификат OpenBao.
+
+Целевой каталог внутри 910:
 
 ```text
-/opt/infra-manager/compose/.versions.env
+/etc/infra-manager/openbao/tls/
+├── ca.crt
+├── server.crt
+└── server.key
 ```
 
-В нём находятся:
+В контейнер он должен подключаться только для чтения:
 
 ```text
-SEMAPHORE_VERSION
-RUNTIME_VERSION
-OPENTOFU_VERSION
-PACKER_VERSION
-OPENBAO_VERSION
+/etc/infra-manager/openbao/tls
+        ↓
+/openbao/tls
 ```
 
-Файл воспроизводится из `provision.yaml` и отдельно резервировать его не требуется.
+Требования:
 
-### 5.3. Запускает OpenBao
+- `server.key` доступен только root и процессу OpenBao;
+- `server.crt` содержит SAN для `192.168.9.10`;
+- сертификат также может содержать стабильное имя `infra-manager`;
+- клиенты обязаны проверять цепочку через `ca.crt`;
+- `tls_skip_verify` и эквивалентные отключения проверки запрещены.
 
-Штатная команда, которую выполняет роль:
+### 5.1. Центр TLS
 
-```bash
-docker compose \
-  --env-file /opt/infra-manager/compose/.versions.env \
-  -f /opt/infra-manager/compose/docker-compose.yml \
-  up -d openbao
-```
+Закрытый ключ центра, подписывающего TLS-сертификат OpenBao, должен оставаться вне обычного 910 в PVE-only области.
 
-После этого Ansible ждёт появления `127.0.0.1:8200` до 120 секунд.
-
-Проверить контейнер вручную можно так:
-
-```bash
-docker ps --filter name=openbao
-curl -fsS http://127.0.0.1:8200/v1/sys/seal-status | jq
-```
-
-## 6. Первичная инициализация
-
-Контейнер OpenBao специально **не инициализируется автоматически** при обычном запуске.
-
-В `provision.yaml` это зафиксировано как:
+Целевая структура на PVE:
 
 ```text
-auto_initialize: false
+/mnt/bindmounts/infra-manager/pve-only/openbao-tls/
+├── ca.key
+└── ca.crt
 ```
 
-Первичная инициализация выполняется отдельным заданием Semaphore:
+Рабочий серверный комплект, доступный 910 только для чтения:
 
 ```text
-Initialize OpenBao 910
+/mnt/bindmounts/infra-manager/access/openbao-tls/
+├── ca.crt
+├── server.crt
+└── server.key
 ```
 
-Точка входа задания:
+Он должен быть доступен внутри 910 как:
 
 ```text
-scripts/infra-manager/jobs/initialize-openbao.py
+/mnt/pve-access/openbao-tls/
 ```
 
-Основная логика:
+Ansible должен устанавливать или связывать эти файлы с:
 
 ```text
-scripts/infra-manager/infra_manager/openbao.py
-scripts/infra-manager/host/openbao-unseal.py
+/etc/infra-manager/openbao/tls/
 ```
 
-### 6.1. Что делает задание
+Закрытый ключ TLS CA внутрь 910 не передаётся.
 
-В текущей реализации порядок такой:
+Ротация `server.crt` не должна менять TLS CA без отдельного решения.
 
-1. определяет PVE-узел из `TF_VAR_pve_endpoint`;
-2. устанавливает или обновляет на PVE служебные сценарии OpenBao;
-3. подготавливает аварийный Git-контур;
-4. проверяет, был ли OpenBao уже инициализирован;
-5. если OpenBao пустой — выполняет `/v1/sys/init` со схемой `1 ключ / порог 1`;
-6. сохраняет unseal key только в PVE-only области;
-7. разблокирует OpenBao;
-8. создаёт два SSH CA;
-9. создаёт ограниченные служебные AppRole;
-10. создаёт KV v2 и переносит туда рабочие секреты;
-11. материализует временные рабочие файлы для 910;
-12. публикует открытые ключи SSH CA;
-13. создаёт и проверяет роли подписи SSH;
-14. отзывает initial root token;
-15. проверяет аварийный контур;
-16. удаляет переходные постоянные файловые источники секретов.
+## 6. Инициализация OpenBao
 
-### 6.2. Что появляется только на PVE
+OpenBao не должен автоматически выполнять `sys/init` при каждом старте контейнера.
+
+Первичная инициализация выполняется отдельной повторяемой операцией.
+
+Целевая схема:
+
+```text
+secret_shares    = 1
+secret_threshold = 1
+```
+
+После `sys/init`:
+
+1. единственный unseal key сохраняется только в PVE-only области;
+2. initial root token используется только для первоначальной настройки;
+3. настраиваются все обязательные engines, auth methods, policies и roles;
+4. рабочие bootstrap-секреты переносятся в KV v2;
+5. initial root token отзывается;
+6. постоянный root token нигде не сохраняется.
+
+Если OpenBao уже инициализирован, повторная операция должна проверять существующее состояние и приводить конфигурацию к требованиям без создания нового Raft или нового CA.
+
+## 7. PVE-only данные OpenBao
 
 Канонический каталог:
 
@@ -241,7 +312,9 @@ scripts/infra-manager/host/openbao-unseal.py
 /mnt/bindmounts/infra-manager/pve-only/openbao/
 ```
 
-Текущие служебные файлы:
+Он должен содержать только данные, необходимые PVE для доверенных операций до получения обычного доступа OpenBao.
+
+Обязательные файлы:
 
 ```text
 unseal.key
@@ -249,109 +322,122 @@ ssh-access.json
 kv-access.json
 ```
 
-`unseal.key` нужен для разблокировки.
+### 7.1. unseal.key
 
-`ssh-access.json` и `kv-access.json` содержат ограниченные служебные данные доступа PVE к OpenBao.
+`unseal.key`:
 
-Эти файлы **не подключаются внутрь 910 как постоянные файлы**.
+- никогда не хранится в Git;
+- не подключается внутрь 910 как постоянный файл;
+- используется только PVE-only helper;
+- входит в обязательный резервный комплект.
 
-### 6.3. Защита от опасной повторной инициализации
+### 7.2. ssh-access.json
 
-Код специально останавливается, если:
+Файл должен содержать ограниченные AppRole credentials для PVE-only операций:
 
-- OpenBao уже инициализирован, но PVE не имеет ожидаемого unseal key;
-- OpenBao ещё пустой, но в PVE-only каталоге уже лежат старые `unseal.key`, `ssh-access.json` или `kv-access.json`;
-- существующие SSH CA имеют неожиданное состояние;
-- ограниченные AppRole не проходят проверку.
+```text
+ssh-ca-config
+ssh-signer
+ssh-otp-config
+```
 
-То есть повторный запуск задания должен продолжать существующий OpenBao, а не молча создавать новый центр доверия.
+Он не должен содержать root token.
 
-## 7. Какие функции OpenBao реально создаются
+### 7.3. kv-access.json
 
-На 910 сейчас настраиваются следующие механизмы.
+Файл должен содержать ограниченные AppRole credentials:
 
-### 7.1. KV v2
+```text
+kv-reader
+kv-semaphore-writer
+```
 
-Mount:
+Он не должен давать административное управление OpenBao.
+
+Машинные SecretID обычных гостей не должны накапливаться в этих PVE-only файлах как общий реестр.
+
+## 8. KV v2
+
+Должен быть включён KV v2 mount:
 
 ```text
 infra-secrets/
 ```
 
-В нём хранятся рабочие значения управляющего контура, в том числе:
+Обязательная логическая структура:
 
 ```text
-PVE API
-GitHub read-only Deploy Key
-Semaphore
+infra-secrets/
+├── pve/
+│   └── api/
+│       └── infra-manager
+├── git/
+│   └── github/
+│       └── proxmox-read
+└── services/
+    └── semaphore
 ```
 
-Рабочие программы не читают Raft напрямую. Нужные значения материализуются во временные файлы.
+### 8.1. PVE API
 
-### 7.2. SSH client CA
-
-Mount:
+Secret:
 
 ```text
-ssh-client-signer
+infra-secrets/data/pve/api/infra-manager
 ```
 
-Открытый ключ публикуется в:
+Поля:
 
 ```text
-/etc/infra-manager/ca/ssh-client-ca.pub
+endpoint
+token_id
+token_secret
 ```
 
-Он используется для административных SSH-сертификатов.
+### 8.2. Git
 
-### 7.3. SSH host CA
-
-Mount:
+Secret:
 
 ```text
-ssh-host-signer
+infra-secrets/data/git/github/proxmox-read
 ```
 
-Открытый ключ публикуется в:
+Поле:
 
 ```text
-/etc/infra-manager/ca/ssh-host-ca.pub
+private_key
 ```
 
-Он используется для подписания реальных SSH host key управляемых Linux-гостей.
+### 8.3. Semaphore
 
-### 7.4. Служебные AppRole
-
-Для операций 910/PVE создаётся отдельное пространство:
+Secret:
 
 ```text
-auth/infra-manager
+infra-secrets/data/services/semaphore
 ```
 
-Среди используемых ролей есть отдельные роли для:
+Поля:
 
-- настройки SSH CA;
-- подписи SSH-ключей;
-- чтения рабочих KV-секретов;
-- обновления API-токена Semaphore.
+```text
+admin_password
+access_key_encryption
+api_token
+timezone
+```
 
-Рабочие токены этих ролей создаются на время операции и не заменяют root token.
+Если Semaphore перевыпускает API token, новое значение должно быть записано обратно в этот secret до следующего восстановления рабочих файлов.
 
-### 7.5. Переходный межмашинный SSH
+## 9. Материализация рабочих секретов
 
-Код пока содержит старые роли `machine-<VMID>` и механизм периодической подписи машинных SSH-ключей.
+Рабочие программы 910 не должны читать Raft напрямую.
 
-Он остаётся фактической переходной реализацией до завершения перехода на OpenBao SSH OTP. Текущее состояние описано в [`780-implementation-status.md`](../../../../docs/700-security/780-implementation-status.md).
-
-## 8. Рабочие секреты внутри 910
-
-После готовности OpenBao рабочие файлы создаются в:
+После разблокировки OpenBao PVE-only механизм должен материализовать нужные значения во временную область:
 
 ```text
 /run/infra-manager/secrets/
 ```
 
-Текущий набор включает, в частности:
+Обязательные рабочие файлы:
 
 ```text
 pve-api.env
@@ -359,220 +445,769 @@ github_proxmox_repo_ed25519
 semaphore-server.env
 initial-admin-password
 semaphore-api-token
+.openbao-materialized
 ```
 
-Эта директория временная. После перезапуска 910 она должна быть восстановлена из OpenBao через PVE-only механизм.
+Требования:
 
-До первой инициализации временные bootstrap-значения могут находиться в:
+- каталог временный;
+- после перезагрузки он восстанавливается из OpenBao;
+- файлы создаются атомарно;
+- права минимальны;
+- secrets не передаются через аргументы командной строки;
+- secrets не выводятся в обычный журнал;
+- `infra-runtime` получает каталог только для чтения.
+
+До первоначальной миграции допускается:
 
 ```text
 /run/infra-manager/bootstrap-secrets/
 ```
 
-После успешного переноса в OpenBao они больше не являются штатным источником.
+После успешной инициализации OpenBao этот каталог не должен оставаться постоянным рабочим источником.
 
-## 9. Разблокировка после перезапуска
+## 10. SSH client CA
 
-OpenBao после запуска контейнера может быть запечатан.
+Должен существовать отдельный SSH secrets engine:
 
-На 910 устанавливается systemd-служба:
+```text
+ssh-client-signer/
+```
+
+Его CA создаётся внутри OpenBao и не экспортируется.
+
+Открытая часть публикуется в 910:
+
+```text
+/etc/infra-manager/ca/ssh-client-ca.pub
+```
+
+Целевая роль административного входа:
+
+```text
+ssh-client-signer/roles/infra-manager
+```
+
+Она должна:
+
+- выпускать только user certificate;
+- запрещать host certificate;
+- разрешать principal `root`;
+- подписывать только поддерживаемые проектом SSH public keys;
+- иметь TTL по умолчанию `15m`;
+- не использоваться для `guest → guest`.
+
+Ansible должен создавать временную пару ключей для каждого штатного административного запуска и получать для неё сертификат через эту роль.
+
+Закрытый client CA key не должен покидать OpenBao.
+
+## 11. SSH host CA
+
+Должен существовать отдельный SSH secrets engine:
+
+```text
+ssh-host-signer/
+```
+
+Он использует другой CA key, не совпадающий с client CA.
+
+Открытая часть публикуется в 910:
+
+```text
+/etc/infra-manager/ca/ssh-host-ca.pub
+```
+
+Роль:
+
+```text
+ssh-host-signer/roles/managed-host
+```
+
+должна:
+
+- выпускать только host certificate;
+- запрещать user certificate;
+- подписывать реальный Ed25519 host public key управляемого Linux-гостя;
+- включать только principals, подтверждённые PVE;
+- использовать TTL `720h`.
+
+Перед подписью PVE обязан проверить:
+
+```text
+VMID
+имя VM/LXC
+административный IP
+существование объекта
+соответствие фактической конфигурации заявленной цели
+```
+
+Для DHCP адрес нельзя доверять только со слов гостя. Нужен отдельный доверенный механизм определения фактического адреса.
+
+## 12. Служебный AppRole infra-manager
+
+Должен быть включён отдельный auth method:
+
+```text
+auth/infra-manager/
+```
+
+Он предназначен только для PVE/infra-manager служебных операций.
+
+Обязательные роли:
+
+```text
+ssh-ca-config
+ssh-signer
+ssh-otp-config
+kv-reader
+kv-semaphore-writer
+```
+
+### 12.1. ssh-ca-config
+
+Разрешает:
+
+- читать список проектных SSH CA roles;
+- создавать, обновлять и удалять только проектные роли client CA и host CA;
+- проверять собственные capabilities.
+
+Не разрешает:
+
+- подписывать SSH keys;
+- читать KV;
+- управлять OTP;
+- создавать произвольные auth methods.
+
+### 12.2. ssh-signer
+
+Разрешает только:
+
+```text
+ssh-client-signer/sign/infra-manager
+ssh-host-signer/sign/managed-host
+```
+
+Не разрешает менять роли CA.
+
+### 12.3. ssh-otp-config
+
+Разрешает управлять только:
+
+```text
+ssh-otp/roles/guest-*
+auth/machine/role/guest-*
+```
+
+и связанными узкими policies машинных источников.
+
+Эта роль не должна:
+
+- читать рабочий KV;
+- подписывать client/host certificates;
+- менять unrelated auth methods;
+- получать root capabilities.
+
+### 12.4. kv-reader
+
+Разрешает читать только:
+
+```text
+pve/api/infra-manager
+git/github/proxmox-read
+services/semaphore
+```
+
+Широкий доступ ко всему `infra-secrets/*` запрещён.
+
+### 12.5. kv-semaphore-writer
+
+Разрешает читать и обновлять только:
+
+```text
+services/semaphore
+```
+
+Он не должен видеть PVE API secret или Git private key.
+
+### 12.6. Token TTL
+
+Служебные token должны быть короткоживущими.
+
+Целевые значения для служебных ролей:
+
+```text
+token_ttl:     5m
+token_max_ttl: 10m
+```
+
+Для роли настройки CA допустимо увеличить TTL до `10m/15m`, если операция действительно этого требует.
+
+После операции token должен отзываться.
+
+## 13. SSH OTP engine
+
+Должен быть включён отдельный SSH secrets engine:
+
+```text
+ssh-otp/
+```
+
+Он не является SSH CA.
+
+Он предназначен только для одноразовых паролей `guest → guest`.
+
+Для каждого субъекта, имеющего одновременно:
+
+```text
+ssh / identity / self / issue
+```
+
+и хотя бы одну цель:
+
+```text
+ssh / guest / <targets> / connect-root
+```
+
+должна существовать отдельная роль:
+
+```text
+ssh-otp/roles/guest-<VMID>
+```
+
+### 13.1. Параметры OTP-роли
+
+Роль должна использовать:
+
+```text
+key_type     = otp
+default_user = root
+port         = 22
+cidr_list    = только разрешённые адреса целей
+```
+
+`cidr_list` строится из фактических административных IP после раскрытия селекторов `access.yaml`.
+
+Каждая цель должна быть представлена минимально необходимой сетью, обычно:
+
+```text
+<IPv4>/32
+```
+
+Запрещены:
+
+```text
+0.0.0.0/0
+произвольная management-сеть целиком
+адреса, которых нет в access.yaml
+```
+
+## 14. Машинный AppRole для OTP
+
+Должен быть включён отдельный auth method:
+
+```text
+auth/machine/
+```
+
+Для каждого OTP-источника создаётся:
+
+```text
+auth/machine/role/guest-<VMID>
+```
+
+Его policy должна разрешать только:
+
+```text
+ssh-otp/creds/guest-<VMID>
+```
+
+с действиями, необходимыми для получения OTP.
+
+Машинный token не должен иметь доступа к:
+
+- `infra-secrets/*`;
+- `ssh-client-signer/*`;
+- `ssh-host-signer/*`;
+- `ssh-otp/roles/*`;
+- чужой `ssh-otp/creds/guest-*`;
+- `auth/infra-manager/*`;
+- настройке собственного AppRole;
+- системным административным API OpenBao.
+
+### 14.1. Ограничения AppRole
+
+Для каждой машинной роли должны применяться:
+
+```text
+bind_secret_id = true
+token_ttl      = 5m
+token_max_ttl  = 10m
+```
+
+Если адрес источника статический, должны также применяться ограничения:
+
+```text
+secret_id_bound_cidrs = <source-ip>/32
+token_bound_cidrs     = <source-ip>/32
+```
+
+Если источник использует DHCP, сначала должен быть определён доверенный способ получить его фактический адрес; ослаблять роль до произвольной сети только ради удобства запрещено.
+
+## 15. Выдача машинной идентичности гостю
+
+Для каждого OTP-источника нужно получить:
+
+```text
+RoleID
+SecretID
+```
+
+SecretID является секретом конкретной машины.
+
+Он должен доставляться только соответствующему гостю через доверенный Ansible-контур.
+
+Целевой файл на исходном госте:
+
+```text
+/etc/infra-manager/openbao/machine.env
+```
+
+Содержимое:
+
+```text
+OPENBAO_ADDR=https://192.168.9.10:8202
+OPENBAO_ROLE_ID=<role-id>
+OPENBAO_SECRET_ID=<secret-id>
+OPENBAO_CA=/etc/infra-manager/openbao/ca.crt
+OPENBAO_SSH_OTP_ROLE=guest-<VMID>
+```
+
+Требования:
+
+```text
+owner: root
+group: root
+mode: 0600
+```
+
+Публичный TLS CA должен находиться на госте:
+
+```text
+/etc/infra-manager/openbao/ca.crt
+```
+
+SecretID разных гостей не должен совпадать или копироваться между машинами.
+
+PVE/910 не должны использовать общий машинный SecretID для нескольких источников.
+
+## 16. Получение OTP исходным гостем
+
+Клиентский механизм гостя должен:
+
+1. прочитать свой RoleID/SecretID;
+2. выполнить AppRole login через:
+   ```text
+   https://192.168.9.10:8202/v1/auth/machine/login
+   ```
+3. проверить TLS через `ca.crt`;
+4. получить короткоживущий OpenBao token;
+5. запросить:
+   ```text
+   /v1/ssh-otp/creds/guest-<VMID>
+   ```
+6. передать точный адрес разрешённой цели и пользователя `root`;
+7. получить одноразовый пароль;
+8. использовать его только для одного SSH-подключения;
+9. не сохранять OTP на диск;
+10. удалить token и OTP из памяти после завершения операции.
+
+Запрос OTP к адресу, отсутствующему в `cidr_list`, должен завершаться отказом OpenBao.
+
+## 17. Проверка OTP целевым гостем
+
+Любой Linux-гость, являющийся допустимой целью OTP, должен иметь совместимый OpenBao SSH OTP helper.
+
+Целевая логика:
+
+```text
+sshd
+ ↓ keyboard-interactive
+PAM
+ ↓
+OpenBao SSH helper
+ ↓ TLS
+https://192.168.9.10:8202
+ ↓
+ssh-otp/verify
+```
+
+Целевому гостю не выдаётся машинный AppRole только для проверки OTP.
+
+Для helper должны быть заданы:
+
+```text
+OpenBao address: https://192.168.9.10:8202
+SSH mount:       ssh-otp
+CA certificate:  /etc/infra-manager/openbao/ca.crt
+TLS verify:       enabled
+```
+
+SSH на цели должен:
+
+- использовать PAM;
+- разрешать keyboard-interactive только для OTP-механизма;
+- не включать обычный постоянный пароль root;
+- одновременно сохранять административный вход по client CA;
+- использовать host certificate для проверки сервера клиентом.
+
+## 18. Синхронизация OTP из access.yaml
+
+Должна существовать повторяемая операция:
+
+```text
+access.yaml
+    ↓
+разрешённые OTP-источники
+    ↓
+разрешённые цели каждого источника
+    ↓
+OpenBao auth/machine AppRole
+    +
+OpenBao ssh-otp role
+    +
+доставка machine credentials
+    +
+настройка OTP helper на целях
+```
+
+Алгоритм обязан:
+
+1. прочитать `access.yaml`;
+2. найти всех субъектов с `ssh/identity/issue`;
+3. определить их правила `ssh/guest/connect-root`;
+4. раскрыть групповые селекторы в конкретные Linux-гости;
+5. получить доверенные административные IP целей;
+6. создать или обновить `auth/machine/role/guest-<VMID>`;
+7. создать или обновить узкую policy источника;
+8. создать или обновить `ssh-otp/roles/guest-<VMID>`;
+9. сделать `cidr_list` точным набором разрешённых целей;
+10. доставить или ротировать RoleID/SecretID соответствующего источника;
+11. настроить TLS CA и OTP client на источнике;
+12. настроить OTP helper/PAM на каждой допустимой цели;
+13. удалить лишние OTP-роли и AppRole, которых больше нет в `access.yaml`;
+14. отозвать доступные token удалённой машинной роли;
+15. проверить запрещённые и разрешённые сценарии.
+
+Синхронизация должна быть идемпотентной.
+
+Она не должна оставлять старые цели в OTP-роли после удаления права.
+
+## 19. Отказ от старых машинных SSH-сертификатов
+
+После успешного внедрения OTP из проекта должны быть удалены:
+
+```text
+machine-<VMID> SSH signing roles
+машинные client certificates
+AuthorizedPrincipalsFile для машинных principals
+периодическое перевыпускание машинных сертификатов
+infra-manager-machine-ssh-refresh.service
+infra-manager-machine-ssh-refresh.timer
+infra-manager-machine-ssh-refresh
+старое задание Sync Machine SSH
+```
+
+Вместо старого задания должна существовать синхронизация OTP-контракта из `access.yaml`.
+
+Административные сертификаты Ansible через `ssh-client-signer` и host certificates через `ssh-host-signer` при этом сохраняются.
+
+## 20. Разблокировка после запуска 910
+
+На 910 должна существовать systemd-служба:
 
 ```text
 infra-manager-openbao-startup-unseal.service
 ```
 
-Её шаблон находится в:
+Исходник:
 
 ```text
 rootfs/etc/systemd/system/infra-manager-openbao-startup-unseal.service.j2
 ```
 
-Ansible устанавливает его как:
+Установленный файл:
 
 ```text
 /etc/systemd/system/infra-manager-openbao-startup-unseal.service
 ```
 
-Служба запускает:
+Служба должна запускать:
 
 ```text
-/usr/local/sbin/infra-manager-openbao-startup-unseal <PVE-узел>
+/usr/local/sbin/infra-manager-openbao-startup-unseal <PVE-node>
 ```
 
-### 9.1. Логика запуска
+Порядок:
 
-Команда:
+1. дождаться локального API `127.0.0.1:8200`;
+2. прочитать `sys/seal-status`;
+3. если OpenBao не инициализирован — не выполнять автоматический init;
+4. если `sealed=false` — завершить успешно;
+5. если `sealed=true` — вызвать PVE-only helper;
+6. PVE использует `unseal.key`;
+7. подтвердить `sealed=false`;
+8. материализовать рабочие KV secrets;
+9. проверить доступность обоих SSH CA;
+10. после полной реализации OTP проверить наличие `ssh-otp` и `auth/machine`;
+11. подтвердить TLS listener `192.168.9.10:8202`.
 
-1. до 120 секунд ждёт `/v1/sys/seal-status`;
-2. если OpenBao не инициализирован — завершает работу без создания нового состояния;
-3. если он уже разблокирован — ничего не меняет;
-4. если он запечатан — по отдельному root SSH каналу вызывает на PVE:
+Unseal key внутрь 910 не передаётся.
 
-```text
-/usr/local/sbin/infra-manager-openbao-unseal
-```
+## 21. Обычный запуск
 
-5. PVE использует свой PVE-only unseal key;
-6. после unseal PVE материализует рабочие секреты;
-7. 910 повторно проверяет `initialized=true` и `sealed=false`.
-
-Проверить службу:
-
-```bash
-systemctl status infra-manager-openbao-startup-unseal.service
-journalctl -u infra-manager-openbao-startup-unseal.service
-```
-
-Запустить проверку вручную:
-
-```bash
-systemctl start infra-manager-openbao-startup-unseal.service
-```
-
-## 10. Остановка, запуск и обновление
-
-Остановить только OpenBao:
-
-```bash
-docker compose \
-  --env-file /opt/infra-manager/compose/.versions.env \
-  -f /opt/infra-manager/compose/docker-compose.yml \
-  stop openbao
-```
-
-Запустить снова:
+Compose должен запускать OpenBao:
 
 ```bash
 docker compose \
   --env-file /opt/infra-manager/compose/.versions.env \
   -f /opt/infra-manager/compose/docker-compose.yml \
   up -d openbao
-systemctl start infra-manager-openbao-startup-unseal.service
 ```
 
-После запуска обязательно подтвердить, что OpenBao не остался запечатанным.
-
-Версия меняется в `provision.yaml`, после чего штатное обновление 910:
-
-1. обновляет `.versions.env`;
-2. получает новый образ OpenBao;
-3. запускает Compose;
-4. выполняет штатную разблокировку;
-5. проверяет весь 910.
-
-Ручное удаление `/mnt/persistent-state/openbao` при обновлении запрещено.
-
-## 11. Проверка исправности
-
-Быстрая проверка самого OpenBao:
-
-```bash
-curl -fsS http://127.0.0.1:8200/v1/sys/seal-status | jq
-```
-
-Ожидаемое рабочее состояние:
+После запуска обязательны:
 
 ```text
-initialized: true
-sealed:      false
+container running
+127.0.0.1:8200 отвечает
+initialized=true
+sealed=false
+192.168.9.10:8202 принимает TLS
+сертификат TLS валиден
+рабочие secrets материализованы
 ```
 
-Проверить контейнер:
+Полный `infra-runtime` нельзя считать готовым до подтверждения этих условий.
 
-```bash
-docker ps --filter name=openbao
-docker logs --tail 100 openbao
+## 22. Обновление OpenBao
+
+Версия меняется только через:
+
+```text
+provision.yaml
 ```
 
-Проверить опубликованные CA:
+Штатное обновление должно:
 
-```bash
-test -s /etc/infra-manager/ca/ssh-client-ca.pub
-test -s /etc/infra-manager/ca/ssh-host-ca.pub
-ssh-keygen -lf /etc/infra-manager/ca/ssh-client-ca.pub
-ssh-keygen -lf /etc/infra-manager/ca/ssh-host-ca.pub
+1. сохранить существующий Raft;
+2. обновить образ;
+3. не выполнять повторный `sys/init`;
+4. запустить новый контейнер с тем же постоянным состоянием;
+5. выполнить unseal;
+6. проверить KV;
+7. проверить client CA;
+8. проверить host CA;
+9. проверить `auth/infra-manager`;
+10. проверить `auth/machine`;
+11. проверить `ssh-otp`;
+12. проверить TLS listener;
+13. выполнить тест разрешённого и запрещённого OTP;
+14. выполнить `infra-manager-status --full`.
+
+Ручное изменение конфигурации только внутри контейнера запрещено: после пересоздания контейнера оно исчезнет.
+
+## 23. Восстановление OpenBao
+
+При потере LXC 910, но сохранном состоянии, OpenBao должен восстанавливаться без создания нового центра доверия.
+
+Обязательный набор:
+
+```text
+state/openbao
++
+pve-only/openbao/unseal.key
++
+pve-only/openbao/ssh-access.json
++
+pve-only/openbao/kv-access.json
++
+PVE-only TLS CA
++
+server TLS material или возможность безопасно перевыпустить его тем же CA
 ```
 
-Полная проектная проверка:
+Порядок:
 
-```bash
-infra-manager-status --full
+1. восстановить PVE bind mount;
+2. создать новый LXC 910;
+3. подключить `state` и `access`;
+4. установить Compose/HCL из `rootfs`;
+5. установить TLS server material;
+6. запустить OpenBao на старом Raft;
+7. выполнить PVE-only unseal;
+8. проверить KV;
+9. проверить оба SSH CA;
+10. проверить `auth/infra-manager`;
+11. проверить `auth/machine`;
+12. проверить `ssh-otp`;
+13. материализовать рабочие secrets;
+14. проверить TLS listener;
+15. синхронизировать OTP из актуального `access.yaml`;
+16. выполнить полный статус.
+
+Если существует прежний Raft, но OpenBao сообщает `initialized=false`, нельзя выполнять новый init до выяснения причины.
+
+Если потерян Raft, нельзя считать новый пустой OpenBao обычным восстановлением: будут потеряны KV secrets и SSH CA.
+
+Если потерян только машинный SecretID отдельного гостя, он должен быть отозван и выпущен заново без пересоздания OpenBao.
+
+## 24. Обязательные проверки
+
+Готовая реализация должна автоматически подтверждать всё перечисленное ниже.
+
+### 24.1. Базовое состояние
+
+```text
+OpenBao container running
+initialized = true
+sealed = false
+Raft state persistent
+root token not stored
 ```
 
-Она должна подтвердить контейнер, состояние seal, рабочие секреты и PVE-контур.
-
-## 12. Восстановление OpenBao на пересозданном 910
-
-Если LXC 910 потерян, но сохранены постоянные данные, новый OpenBao **не инициализируется заново**.
-
-Практический порядок:
-
-1. создать LXC 910 и подключить прежние `access/` и `state/`;
-2. убедиться, что `/mnt/persistent-state/openbao/raft` содержит прежние данные;
-3. убедиться, что на PVE сохранён `/mnt/bindmounts/infra-manager/pve-only/openbao/unseal.key`;
-4. установить Compose-файлы из `rootfs`;
-5. записать `.versions.env` из `provision.yaml`;
-6. запустить контейнер `openbao`;
-7. выполнить `infra-manager-openbao-startup-unseal` либо запустить соответствующую systemd-службу;
-8. проверить `initialized=true`, `sealed=false`;
-9. проверить, что рабочие секреты появились в `/run/infra-manager/secrets/`;
-10. проверить оба открытых SSH CA;
-11. только после этого запускать полную синхронизацию Semaphore и остальные задания;
-12. завершить `infra-manager-status --full`.
-
-Если Raft существует, но unseal key утрачен, обычный путь восстановления использовать нельзя.
-
-Если unseal key существует, но Raft утрачен, это также не является основанием автоматически инициализировать пустой OpenBao поверх старой инфраструктуры.
-
-## 13. Типичные неисправности
-
-### 13.1. Контейнер запущен, но `sealed=true`
+### 24.2. KV
 
 Проверить:
 
-```bash
-systemctl status infra-manager-openbao-startup-unseal.service
-journalctl -u infra-manager-openbao-startup-unseal.service
-ls -l /mnt/pve-access/pve-host/
-```
+- mount `infra-secrets` существует как KV v2;
+- все три обязательных logical secrets существуют;
+- `kv-reader` читает только разрешённые secrets;
+- `kv-semaphore-writer` не читает PVE/Git secrets;
+- рабочие файлы материализуются после перезапуска.
 
-Затем проверить PVE-only helper и наличие unseal key на PVE.
-
-### 13.2. `initialized=false` после восстановления
-
-Не запускать автоматическую инициализацию. Сначала проверить, действительно ли подключён прежний каталог:
-
-```bash
-mountpoint /mnt/persistent-state
-find /mnt/persistent-state/openbao -maxdepth 3 -type f -ls
-```
-
-Если старый Raft должен существовать, `initialized=false` означает проблему подключения или восстановления состояния.
-
-### 13.3. Нет временных секретов
+### 24.3. SSH CA
 
 Проверить:
 
-```bash
-ls -la /run/infra-manager/secrets/
-infra-manager-status --full
+- `ssh-client-signer` существует;
+- `ssh-host-signer` существует;
+- их public keys различаются;
+- client CA выпускает user certificate;
+- client CA не выпускает host certificate;
+- host CA выпускает host certificate;
+- host CA не выпускает user certificate;
+- PVE проверяет цель до host signing;
+- срок сертификатов соответствует политике.
+
+### 24.4. OTP и AppRole
+
+Проверить:
+
+- `ssh-otp` существует;
+- `auth/machine` существует;
+- на каждый разрешённый источник существует ровно один AppRole;
+- на каждый разрешённый источник существует ровно одна OTP-role;
+- OTP targets точно совпадают с `access.yaml`;
+- нет `0.0.0.0/0`;
+- источник не может использовать чужую OTP-role;
+- источник не может читать KV;
+- источник не может подписывать SSH certificate;
+- разрешённая цель выдаёт OTP;
+- запрещённая цель не выдаёт OTP;
+- один OTP нельзя использовать дважды;
+- удалённое право перестаёт выдавать новый OTP.
+
+### 24.5. TLS
+
+Проверить:
+
+- `192.168.9.10:8202` доступен по TLS;
+- сертификат проверяется через проектный OpenBao TLS CA;
+- неправильный CA приводит к отказу;
+- просроченный сертификат приводит к отказу;
+- HTTP на сетевом OTP-интерфейсе не принимается;
+- административный loopback listener не публикуется в гостевую сеть.
+
+### 24.6. Восстановление
+
+Проверить повторяемым тестом:
+
+- контейнер можно пересоздать без потери Raft;
+- после unseal восстанавливаются рабочие secrets;
+- CA fingerprints остаются прежними;
+- OTP/AppRole сохраняются или корректно синхронизируются из `access.yaml`;
+- новый root token после обычного восстановления не остаётся сохранённым.
+
+## 25. Что ИИ должен изменить при реализации этого документа
+
+Команда «настрой OpenBao по этому документу» означает, что нужно привести к описанному состоянию **весь технический контур**, а не только изменить HCL.
+
+Как минимум нужно проверить и при необходимости изменить:
+
+```text
+infrastructure/guests/910-infra-manager/provision.yaml
+
+infrastructure/guests/910-infra-manager/rootfs/
+├── opt/infra-manager/compose/docker-compose.yml
+├── opt/infra-manager/compose/openbao/openbao.hcl
+└── etc/systemd/system/...
+
+automation/ansible/roles/infra_manager/
+automation/ansible/roles/linux_base/
+
+scripts/infra-manager/infra_manager/openbao.py
+scripts/infra-manager/host/openbao-unseal.py
+scripts/infra-manager/jobs/
+
+infrastructure/security/access.yaml
+infrastructure/security/access.schema.yaml
+
+scripts/validate_repo.py
+scripts/tests/
 ```
 
-Если OpenBao уже разблокирован, повторная PVE-only операция unseal также выполняет материализацию рабочих секретов.
+Реализация должна включить:
 
-### 13.4. Не опубликован SSH CA
+- TLS listener OpenBao для гостей;
+- генерацию и доставку TLS material;
+- `ssh-otp`;
+- `auth/machine`;
+- `ssh-otp-config`;
+- машинные policies/AppRole;
+- синхронизацию ролей из `access.yaml`;
+- доставку RoleID/SecretID источникам;
+- OTP client на источниках;
+- OTP helper/PAM на целях;
+- проверку host CA при OTP SSH;
+- удаление старой схемы машинных сертификатов;
+- обновление итогового status;
+- автоматические тесты положительных и отрицательных сценариев.
 
-Проверить файлы `/etc/infra-manager/ca/`. Повторный `Initialize OpenBao 910` должен проверять существующие CA и восстанавливать недостающие открытые публикации, не создавая новый CA без необходимости.
+Реализация не считается законченной, пока все критерии раздела 24 не выполняются.
 
-## 14. Связанные документы
+## 26. Источники точных значений после реализации
 
-- [`../provision.yaml`](../provision.yaml) — версия OpenBao, пути и постоянное состояние.
-- [`../rootfs/opt/infra-manager/compose/docker-compose.yml`](../rootfs/opt/infra-manager/compose/docker-compose.yml) — контейнер и подключения.
-- [`../rootfs/opt/infra-manager/compose/openbao/openbao.hcl`](../rootfs/opt/infra-manager/compose/openbao/openbao.hcl) — listener и Raft.
-- [`../rootfs/etc/systemd/system/infra-manager-openbao-startup-unseal.service.j2`](../rootfs/etc/systemd/system/infra-manager-openbao-startup-unseal.service.j2) — запуск разблокировки.
-- [`data-and-access.md`](data-and-access.md) — физические каталоги и доступы 910.
+Когда эта спецификация полностью реализована, машинные файлы должны совпадать с ней.
+
+Точные исполняемые значения находятся в:
+
+- [`../provision.yaml`](../provision.yaml);
+- [`../rootfs/opt/infra-manager/compose/docker-compose.yml`](../rootfs/opt/infra-manager/compose/docker-compose.yml);
+- [`../rootfs/opt/infra-manager/compose/openbao/openbao.hcl`](../rootfs/opt/infra-manager/compose/openbao/openbao.hcl);
+- [`../rootfs/etc/systemd/system/`](../rootfs/etc/systemd/system/);
+- Ansible-ролях;
+- Python-коде OpenBao;
+- `access.yaml`.
+
+До завершения перехода различия между этой спецификацией и кодом должны быть явно перечислены в [`780-implementation-status.md`](../../../../docs/700-security/780-implementation-status.md), а не удаляться из этой спецификации.
+
+## 27. Связанные документы
+
+- [`../provision.yaml`](../provision.yaml) — машинное описание 910.
+- [`data-and-access.md`](data-and-access.md) — постоянные области и доступы 910.
 - [`system-services.md`](system-services.md) — systemd и служебные команды.
-- [`../../../../scripts/infra-manager/jobs/initialize-openbao.py`](../../../../scripts/infra-manager/jobs/initialize-openbao.py) — точка входа задания инициализации.
-- [`../../../../scripts/infra-manager/host/openbao-unseal.py`](../../../../scripts/infra-manager/host/openbao-unseal.py) — фактическая PVE-only реализация инициализации и unseal.
-- [`../../../../docs/700-security/740-openbao.md`](../../../../docs/700-security/740-openbao.md) — роль и контракты OpenBao в проекте.
+- [`infra-runtime.md`](infra-runtime.md) — Compose и рабочий контейнер.
+- [`../../../../docs/700-security/720-ssh-access.md`](../../../../docs/700-security/720-ssh-access.md) — целевая схема SSH client CA, host CA и OTP.
+- [`../../../../docs/700-security/740-openbao.md`](../../../../docs/700-security/740-openbao.md) — архитектурная роль OpenBao.
+- [`../../../../docs/700-security/750-access-contract.md`](../../../../docs/700-security/750-access-contract.md) — правила `access.yaml`.
+- [`../../../../docs/700-security/780-implementation-status.md`](../../../../docs/700-security/780-implementation-status.md) — текущие расхождения реализации с целевой схемой.
 - [`../../../../docs/800-operations/830-recovery.md`](../../../../docs/800-operations/830-recovery.md) — общий аварийный процесс.
