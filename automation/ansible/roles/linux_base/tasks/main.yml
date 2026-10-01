@@ -20,6 +20,10 @@
   ansible.builtin.include_tasks: openbao_otp_client.yml
   when: (provision_phase | default('full')) == 'full'
 
+- name: Настроить проверку SSH OTP на цели
+  ansible.builtin.include_tasks: openbao_otp_target.yml
+  when: (provision_phase | default('full')) == 'full'
+
 - name: Настроить доступ чтения к проектному Git
   ansible.builtin.include_tasks: project_git.yml
   when: (provision_phase | default('full')) == 'full'
