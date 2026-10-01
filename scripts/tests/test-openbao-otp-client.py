@@ -217,10 +217,48 @@ def test_token_revoked_on_invalid_credential() -> None:
             fail("Token не отозван после ошибки проверки OTP")
 
 
+def test_rejects_invalid_target_and_user() -> None:
+    client = load_client()
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary)
+        ca = root / "ca.crt"
+        ca.write_text("TEST CA\n", encoding="utf-8")
+        config = root / "machine.env"
+        config.write_text(
+            "\n".join(
+                (
+                    "OPENBAO_ADDR=https://192.168.9.10:8202",
+                    "OPENBAO_ROLE_ID=ROLE",
+                    "OPENBAO_SECRET_ID=SECRET",
+                    f"OPENBAO_CA={ca}",
+                    "OPENBAO_SSH_OTP_ROLE=guest-410",
+                    "",
+                )
+            ),
+            encoding="utf-8",
+        )
+
+        for target in ("example.org", "2001:db8::1"):
+            try:
+                client.request_otp(config, target)
+            except client.OtpClientError:
+                pass
+            else:
+                fail(f"OTP-клиент принял недопустимую цель: {target}")
+
+        try:
+            client.request_otp(config, "192.168.9.10", username="admin")
+        except client.OtpClientError:
+            pass
+        else:
+            fail("OTP-клиент разрешил SSH-пользователя не root")
+
+
 def main() -> None:
     test_request_otp()
     test_rejects_insecure_openbao_address()
     test_token_revoked_on_invalid_credential()
+    test_rejects_invalid_target_and_user()
     print("OpenBao OTP client tests passed.")
 
 
