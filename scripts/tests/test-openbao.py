@@ -596,12 +596,12 @@ def test_otp_contract_is_narrow_and_derived() -> None:
         '"token_max_ttl": "10m"',
         '"token_policies": "machine-ssh-otp"',
         '"token_no_default_policy": "true"',
-        'machine_role.get("bind_secret_id") is not True',
-        'machine_role.get("secret_id_num_uses") != 0',
-        'machine_role.get("secret_id_ttl") != 0',
-        'machine_role.get("token_num_uses") != 0',
-        'machine_role.get("token_ttl") != 300',
-        'machine_role.get("token_max_ttl") != 600',
+        'read_role_value("bind-secret-id", "bind_secret_id") is not True',
+        'read_role_value("secret-id-num-uses", "secret_id_num_uses") != 0',
+        'read_role_value("secret-id-ttl", "secret_id_ttl") != 0',
+        'read_role_value("token-num-uses", "token_num_uses") != 0',
+        'read_role_value("token-ttl", "token_ttl") != 300',
+        'read_role_value("token-max-ttl", "token_max_ttl") != 600',
         '"DELETE"',
     )
     for item in required:
