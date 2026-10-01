@@ -544,6 +544,22 @@ def test_otp_contract_is_narrow_and_derived() -> None:
     if "machine-ssh-otp" not in access_code or "metadata.role_name" not in access_code:
         fail("Машинный OTP должен использовать одну шаблонную ACL-политику")
 
+    role_policy = access_code.split('"auth/machine/role/guest-*": {', 1)[1].split(
+        '"auth/machine/role/guest-*/role-id"', 1
+    )[0]
+    for item in (
+        '"required_parameters"',
+        '"allowed_parameters"',
+        '"token_policies": ["machine-ssh-otp"]',
+        '"token_ttl": ["5m"]',
+        '"token_max_ttl": ["10m"]',
+        '"token_no_default_policy": [True]',
+    ):
+        if item not in role_policy:
+            fail(f"Параметры машинного AppRole не ограничены: {item}")
+    if '"*": []' in role_policy:
+        fail("Машинному AppRole запрещены произвольные параметры")
+
     if 'request("LIST", "/v1/sys/policies/acl")' not in access_code:
         fail("Список ACL-политик OpenBao должен читаться методом LIST")
     if 'request("GET", "/v1/sys/policies/acl")' in access_code:
@@ -562,6 +578,7 @@ def test_otp_contract_is_narrow_and_derived() -> None:
         '"token_ttl": "5m"',
         '"token_max_ttl": "10m"',
         '"token_policies": ["machine-ssh-otp"]',
+        '"token_no_default_policy": True',
         '"DELETE"',
     )
     for item in required:
