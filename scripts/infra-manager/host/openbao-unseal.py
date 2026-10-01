@@ -488,10 +488,6 @@ otp_config_policy = json.dumps(
             "auth/machine/role/guest-*/role-id": {
                 "capabilities": ["read"],
             },
-            "sys/policies/acl": {"capabilities": ["list"]},
-            "sys/policies/acl/machine-guest-*": {
-                "capabilities": ["create", "read", "update", "delete"],
-            },
             "auth/token/lookup-self": {"capabilities": ["read"]},
             "auth/token/revoke-self": {"capabilities": ["update"]},
             "sys/capabilities-self": {"capabilities": ["update"]},
@@ -562,6 +558,50 @@ if machine_auth is None:
     )
 elif not isinstance(machine_auth, dict) or machine_auth.get("type") != "approle":
     raise SystemExit("auth/machine exists with unexpected type")
+
+auth_payload = request("GET", "/v1/sys/auth")
+auth_methods = auth_payload.get("data", auth_payload)
+machine_auth = auth_methods.get("machine/") if isinstance(auth_methods, dict) else None
+machine_accessor = (
+    machine_auth.get("accessor") if isinstance(machine_auth, dict) else None
+)
+if not isinstance(machine_accessor, str) or not machine_accessor:
+    raise SystemExit("auth/machine does not expose an accessor")
+
+machine_policy_path = (
+    "ssh-otp/creds/"
+    "{{identity.entity.aliases."
+    + machine_accessor
+    + ".metadata.role_name}}"
+)
+machine_policy = json.dumps(
+    {
+        "path": {
+            machine_policy_path: {
+                "capabilities": ["create", "update"],
+            },
+            "auth/token/lookup-self": {"capabilities": ["read"]},
+            "auth/token/revoke-self": {"capabilities": ["update"]},
+        }
+    },
+    separators=(",", ":"),
+)
+request(
+    "POST",
+    "/v1/sys/policies/acl/machine-ssh-otp",
+    {"policy": machine_policy},
+)
+
+policies_payload = request("GET", "/v1/sys/policies/acl")
+policy_names = policies_payload.get("data", {}).get("keys", [])
+if isinstance(policy_names, list):
+    for policy_name in policy_names:
+        if (
+            isinstance(policy_name, str)
+            and policy_name.startswith("machine-guest-")
+            and policy_name.endswith("-ssh-otp")
+        ):
+            request("DELETE", f"/v1/sys/policies/acl/{policy_name}")
 
 roles = (
     (
@@ -1505,48 +1545,9 @@ try:
         ):
             request("DELETE", f"/v1/auth/machine/role/{role_name}", token=token)
 
-    policies_payload = request("GET", "/v1/sys/policies/acl", token=token)
-    policy_names = policies_payload.get("data", {}).get("keys", [])
-    if not isinstance(policy_names, list):
-        policy_names = []
-    expected_policies = {
-        f"machine-{role_name}-ssh-otp" for role_name in expected_roles
-    }
-    for policy_name in policy_names:
-        if (
-            isinstance(policy_name, str)
-            and policy_name.startswith("machine-guest-")
-            and policy_name.endswith("-ssh-otp")
-            and policy_name not in expected_policies
-        ):
-            request(
-                "DELETE",
-                f"/v1/sys/policies/acl/{policy_name}",
-                token=token,
-            )
-
     for item in normalized:
         vmid = item["vmid"]
         role_name = f"guest-{vmid}"
-        policy_name = f"machine-{role_name}-ssh-otp"
-        policy = json.dumps(
-            {
-                "path": {
-                    f"ssh-otp/creds/{role_name}": {
-                        "capabilities": ["create", "update"],
-                    },
-                    "auth/token/lookup-self": {"capabilities": ["read"]},
-                    "auth/token/revoke-self": {"capabilities": ["update"]},
-                }
-            },
-            separators=(",", ":"),
-        )
-        request(
-            "POST",
-            f"/v1/sys/policies/acl/{policy_name}",
-            {"policy": policy},
-            token=token,
-        )
         request(
             "POST",
             f"/v1/ssh-otp/roles/{role_name}",
@@ -1569,7 +1570,7 @@ try:
                 "secret_id_ttl": "0s",
                 "token_bound_cidrs": [item["source_cidr"]],
                 "token_num_uses": 0,
-                "token_policies": [policy_name],
+                "token_policies": ["machine-ssh-otp"],
                 "token_ttl": "5m",
                 "token_max_ttl": "10m",
             },
@@ -1607,7 +1608,7 @@ try:
         json.dumps(
             {
                 "roles": sorted(expected_roles),
-                "policies": sorted(expected_policies),
+                "policy": "machine-ssh-otp",
             },
             separators=(",", ":"),
         )
@@ -3165,12 +3166,9 @@ def sync_otp_contract(sources: list[dict[str, object]]) -> None:
         for item in sources
         if isinstance(item, dict) and isinstance(item.get("vmid"), int)
     )
-    expected_policies = sorted(
-        f"machine-{role_name}-ssh-otp" for role_name in expected_roles
-    )
     if payload != {
         "roles": expected_roles,
-        "policies": expected_policies,
+        "policy": "machine-ssh-otp",
     }:
         raise OpenBaoHostError(
             "SSH OTP/AppRole не соответствуют переданному access-контракту"
