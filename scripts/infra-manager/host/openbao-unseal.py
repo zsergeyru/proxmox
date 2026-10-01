@@ -1459,8 +1459,14 @@ def request(method, path, body=None, *, token=None):
         headers=headers,
         method=method,
     )
-    with urllib.request.urlopen(req, timeout=30) as response:
-        raw = response.read()
+    try:
+        with urllib.request.urlopen(req, timeout=30) as response:
+            raw = response.read()
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace").strip()
+        raise SystemExit(
+            f"OpenBao HTTP {exc.code} for {method} {path}: {detail}"
+        ) from exc
     return json.loads(raw.decode("utf-8")) if raw else {}
 
 
