@@ -509,6 +509,9 @@ otp_config_policy = json.dumps(
             "auth/machine/role/guest-*/role-id": {
                 "capabilities": ["read"],
             },
+            "auth/machine/role/guest-*/secret-id": {
+                "capabilities": ["create", "update"],
+            },
             "auth/token/lookup-self": {"capabilities": ["read"]},
             "auth/token/revoke-self": {"capabilities": ["update"]},
             "sys/capabilities-self": {"capabilities": ["update"]},
@@ -1631,6 +1634,93 @@ try:
             {
                 "roles": sorted(expected_roles),
                 "policy": "machine-ssh-otp",
+            },
+            separators=(",", ":"),
+        )
+    )
+finally:
+    request("POST", "/v1/auth/token/revoke-self", {}, token=token)
+"""
+
+
+ISSUE_MACHINE_CREDENTIALS_CODE = r"""
+import json
+import sys
+import urllib.request
+
+BASE = "http://127.0.0.1:8200"
+payload = json.loads(sys.stdin.read())
+if not isinstance(payload, dict):
+    raise SystemExit("invalid machine credential payload")
+
+credentials = payload.get("credentials")
+vmid = payload.get("vmid")
+if not isinstance(credentials, dict):
+    raise SystemExit("missing OTP config credentials")
+if not isinstance(vmid, int) or vmid <= 0:
+    raise SystemExit("invalid VMID")
+
+role_id = credentials.get("role_id")
+secret_id = credentials.get("secret_id")
+if not isinstance(role_id, str) or not role_id:
+    raise SystemExit("missing service RoleID")
+if not isinstance(secret_id, str) or not secret_id:
+    raise SystemExit("missing service SecretID")
+
+
+def request(method, path, body=None, *, token=None):
+    data = None
+    headers = {"Content-Type": "application/json"}
+    if token:
+        headers["X-Vault-Token"] = token
+    if body is not None:
+        data = json.dumps(body, separators=(",", ":")).encode("utf-8")
+    req = urllib.request.Request(
+        f"{BASE}{path}",
+        data=data,
+        headers=headers,
+        method=method,
+    )
+    with urllib.request.urlopen(req, timeout=30) as response:
+        raw = response.read()
+    return json.loads(raw.decode("utf-8")) if raw else {}
+
+
+login = request(
+    "POST",
+    "/v1/auth/infra-manager/login",
+    {"role_id": role_id, "secret_id": secret_id},
+)
+auth = login.get("auth")
+token = auth.get("client_token") if isinstance(auth, dict) else None
+if not isinstance(token, str) or not token:
+    raise SystemExit("OpenBao did not return OTP config token")
+
+try:
+    role_name = f"guest-{vmid}"
+    role_payload = request(
+        "GET",
+        f"/v1/auth/machine/role/{role_name}/role-id",
+        token=token,
+    )
+    machine_role_id = role_payload.get("data", {}).get("role_id")
+    secret_payload = request(
+        "POST",
+        f"/v1/auth/machine/role/{role_name}/secret-id",
+        {},
+        token=token,
+    )
+    machine_secret_id = secret_payload.get("data", {}).get("secret_id")
+    if not isinstance(machine_role_id, str) or not machine_role_id:
+        raise SystemExit(f"missing RoleID for {role_name}")
+    if not isinstance(machine_secret_id, str) or not machine_secret_id:
+        raise SystemExit(f"missing SecretID for {role_name}")
+    print(
+        json.dumps(
+            {
+                "vmid": vmid,
+                "role_id": machine_role_id,
+                "secret_id": machine_secret_id,
             },
             separators=(",", ":"),
         )
@@ -3198,6 +3288,44 @@ def sync_otp_contract(sources: list[dict[str, object]]) -> None:
     log_status("[ОК] OpenBao SSH OTP и машинные AppRole синхронизированы")
 
 
+def issue_machine_credentials(vmid: int) -> dict[str, str]:
+    """Выпустить новый SecretID только для одной существующей машинной роли."""
+    if not isinstance(vmid, int) or vmid <= 0:
+        raise OpenBaoHostError("Некорректный VMID машинной идентичности")
+    credentials = read_ssh_access_credentials()
+    config_access = credentials.get("ssh-otp-config")
+    result = pct_exec(
+        "python3",
+        "-c",
+        ISSUE_MACHINE_CREDENTIALS_CODE,
+        capture=True,
+        input_text=json.dumps(
+            {"credentials": config_access, "vmid": vmid},
+            separators=(",", ":"),
+        ),
+    )
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise OpenBaoHostError(
+            "OpenBao вернул некорректные данные машинной идентичности"
+        ) from exc
+    role_id = payload.get("role_id") if isinstance(payload, dict) else None
+    secret_id = payload.get("secret_id") if isinstance(payload, dict) else None
+    returned_vmid = payload.get("vmid") if isinstance(payload, dict) else None
+    if (
+        returned_vmid != vmid
+        or not isinstance(role_id, str)
+        or not role_id
+        or not isinstance(secret_id, str)
+        or not secret_id
+    ):
+        raise OpenBaoHostError(
+            "OpenBao не выдал полную машинную идентичность"
+        )
+    return {"role_id": role_id, "secret_id": secret_id}
+
+
 def sync_machine_signing_roles(vmids: list[int]) -> None:
     """Синхронизировать OpenBao-роли машинных SSH-идентичностей."""
     clean = sorted(set(vmids))
@@ -3798,6 +3926,11 @@ def main() -> int:
         help="Синхронизировать ssh-otp и auth/machine из stdin",
     )
     mode.add_argument(
+        "--issue-machine-credentials",
+        action="store_true",
+        help="Выпустить RoleID/SecretID одной машинной AppRole из stdin",
+    )
+    mode.add_argument(
         "--sync-machine-roles",
         action="store_true",
         help="Синхронизировать машинные SSH-роли OpenBao из stdin",
@@ -3874,6 +4007,22 @@ def main() -> int:
             if not isinstance(sources, list):
                 raise OpenBaoHostError("Не передан OTP-контракт")
             sync_otp_contract(sources)
+        elif args.issue_machine_credentials:
+            status = read_status(wait=False)
+            if status.get("sealed") is not False:
+                raise OpenBaoHostError(
+                    "OpenBao запечатан; выдача машинной идентичности невозможна"
+                )
+            payload = json.loads(__import__("sys").stdin.read())
+            vmid = payload.get("vmid") if isinstance(payload, dict) else None
+            if not isinstance(vmid, int) or vmid <= 0:
+                raise OpenBaoHostError("Не передан корректный VMID")
+            print(
+                json.dumps(
+                    issue_machine_credentials(vmid),
+                    separators=(",", ":"),
+                )
+            )
         elif args.sync_machine_roles:
             status = read_status(wait=False)
             if status.get("sealed") is not False:
