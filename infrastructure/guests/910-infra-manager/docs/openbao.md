@@ -1,202 +1,578 @@
 # OpenBao на 910 infra-manager
 
-**Назначение:** объяснить, как OpenBao размещён и обслуживается именно на 910.
+**Назначение:** практическое руководство по развёртыванию и сопровождению OpenBao внутри 910.
 
-Нормативные правила безопасности, SSH CA, OTP, AppRole и хранения секретов задаёт [`740-openbao.md`](../../../../docs/700-security/740-openbao.md). Здесь описаны только конкретное размещение, запуск, данные и обслуживание OpenBao на 910.
+Общий документ проекта [`740-openbao.md`](../../../../docs/700-security/740-openbao.md) объясняет, зачем проекту нужны KV, AppRole, SSH CA и SSH OTP. Этот файл показывает, **как OpenBao реально создаётся и работает на 910**.
 
-## 1. Размещение
+## 1. Что разворачивается на 910
 
-OpenBao работает в отдельном Docker-контейнере `openbao`.
+OpenBao работает отдельным Docker-контейнером:
 
-Точный образ задаётся в [`../provision.yaml`](../provision.yaml). Контейнер использует сеть 910 напрямую (`network_mode: host`).
+```text
+container: openbao
+image:     ghcr.io/openbao/openbao:2.7.0
+network:   host
+restart:   unless-stopped
+```
 
-Текущая конфигурация находится в [`../rootfs/opt/infra-manager/compose/openbao/openbao.hcl`](../rootfs/opt/infra-manager/compose/openbao/openbao.hcl).
+Точная версия берётся из [`../provision.yaml`](../provision.yaml).
 
-Сейчас API доступен только локально:
+Контейнер описан в:
 
-~~~text
-127.0.0.1:8200
-~~~
+```text
+rootfs/opt/infra-manager/compose/docker-compose.yml
+```
 
-Кластерный адрес:
+Конфигурация OpenBao:
 
-~~~text
-127.0.0.1:8201
-~~~
+```text
+rootfs/opt/infra-manager/compose/openbao/openbao.hcl
+```
 
-Веб-интерфейс отключён. Управление выполняется через API и служебные команды проекта.
+При настройке 910 Ansible копирует каталог `rootfs/opt/infra-manager/compose/` в:
 
-## 2. Постоянное состояние
+```text
+/opt/infra-manager/compose/
+```
+
+Поэтому рабочая конфигурация внутри 910 находится в:
+
+```text
+/opt/infra-manager/compose/docker-compose.yml
+/opt/infra-manager/compose/openbao/openbao.hcl
+```
+
+## 2. Сеть и конфигурация
+
+OpenBao использует сеть самого 910.
+
+Текущий listener:
+
+```text
+API:     127.0.0.1:8200
+cluster: 127.0.0.1:8201
+TLS:     выключен только для локального loopback
+UI:      выключен
+```
+
+Эти значения находятся в `rootfs/opt/infra-manager/compose/openbao/openbao.hcl`.
+
+Внутри контейнера задаётся:
+
+```text
+BAO_ADDR=http://127.0.0.1:8200
+BAO_LOG_LEVEL=info
+```
+
+С текущей конфигурацией API OpenBao не слушает внешний адрес 910. Поэтому обычная проверка выполняется локально из 910.
+
+## 3. Постоянное состояние
 
 OpenBao использует Raft.
 
-В контейнере данные находятся под:
+Путь внутри контейнера:
 
-~~~text
+```text
 /openbao/file/raft
-~~~
+```
 
-На уровне 910 используется постоянная область:
+Compose подключает к `/openbao/file` постоянный каталог 910:
 
-~~~text
+```text
 /mnt/persistent-state/openbao
-~~~
+```
 
-Внутри системы тот же каталог доступен через:
+Физически он приходит с PVE из области:
 
-~~~text
+```text
+/mnt/bindmounts/infra-manager/state/openbao
+```
+
+На уровне 910 дополнительно существует привычная ссылка:
+
+```text
 /var/lib/persistent/openbao
-~~~
+    → /mnt/persistent-state/openbao
+```
 
 Идентификатор Raft-узла:
 
-~~~text
+```text
 infra-manager-910
-~~~
+```
 
-В Raft находятся рабочие данные OpenBao, включая KV, роли, политики и закрытые ключи SSH-центров доверия. Их нормативный состав описан в [`740-openbao.md`](../../../../docs/700-security/740-openbao.md).
+Именно этот каталог содержит состояние, которое нельзя заменить новым пустым OpenBao при восстановлении.
 
-## 3. Инициализация
+## 4. Что должно существовать до запуска
 
-В [`../provision.yaml`](../provision.yaml) установлено:
+Перед развёртыванием OpenBao должны быть готовы:
 
-~~~text
+1. Docker на 910.
+2. Подключение постоянного состояния `/mnt/persistent-state`.
+3. Подключение доступа `/mnt/pve-access` только для чтения.
+4. Каталог `/mnt/persistent-state/openbao`.
+5. Рабочая копия проекта `/var/lib/infra-manager/bootstrap-repo`.
+6. Compose-файлы в `/opt/infra-manager/compose`.
+7. SSH-доступ 910 → PVE root через `/mnt/pve-access/pve-host/`.
+
+Эти предварительные условия готовят задачи роли:
+
+```text
+automation/ansible/roles/infra_manager/tasks/persistence.yml
+automation/ansible/roles/infra_manager/tasks/pve_access.yml
+automation/ansible/roles/infra_manager/tasks/repository.yml
+```
+
+Если подключения `access` или `state` отсутствуют, настройка 910 должна завершиться ошибкой до создания локальных замен.
+
+## 5. Установка файлов и запуск контейнера
+
+Ansible выполняет следующие действия.
+
+### 5.1. Устанавливает Compose-файлы
+
+Исходник:
+
+```text
+infrastructure/guests/910-infra-manager/rootfs/opt/infra-manager/compose/
+```
+
+Рабочее место:
+
+```text
+/opt/infra-manager/compose/
+```
+
+### 5.2. Создаёт файл версий
+
+Ansible записывает:
+
+```text
+/opt/infra-manager/compose/.versions.env
+```
+
+В нём находятся:
+
+```text
+SEMAPHORE_VERSION
+RUNTIME_VERSION
+OPENTOFU_VERSION
+PACKER_VERSION
+OPENBAO_VERSION
+```
+
+Файл воспроизводится из `provision.yaml` и отдельно резервировать его не требуется.
+
+### 5.3. Запускает OpenBao
+
+Штатная команда, которую выполняет роль:
+
+```bash
+docker compose \
+  --env-file /opt/infra-manager/compose/.versions.env \
+  -f /opt/infra-manager/compose/docker-compose.yml \
+  up -d openbao
+```
+
+После этого Ansible ждёт появления `127.0.0.1:8200` до 120 секунд.
+
+Проверить контейнер вручную можно так:
+
+```bash
+docker ps --filter name=openbao
+curl -fsS http://127.0.0.1:8200/v1/sys/seal-status | jq
+```
+
+## 6. Первичная инициализация
+
+Контейнер OpenBao специально **не инициализируется автоматически** при обычном запуске.
+
+В `provision.yaml` это зафиксировано как:
+
+```text
 auto_initialize: false
-~~~
+```
 
-Поэтому простой запуск контейнера не создаёт новый OpenBao.
+Первичная инициализация выполняется отдельным заданием Semaphore:
 
-Первичная настройка выполняется повторяемой операцией, доступной в Semaphore как:
-
-~~~text
+```text
 Initialize OpenBao 910
-~~~
+```
 
-Она создаёт недостающую конфигурацию, подготавливает рабочие секреты и SSH-механизмы, после чего проверяет итоговое состояние. Уже существующее корректное состояние не должно заменяться пустым.
+Точка входа задания:
 
-Ключ снятия блокировки хранится только на PVE и не является постоянным файлом внутри 910.
+```text
+scripts/infra-manager/jobs/initialize-openbao.py
+```
 
-## 4. Запуск и разблокировка
+Основная логика:
 
-В 910 установлена служба:
+```text
+scripts/infra-manager/infra_manager/openbao.py
+scripts/infra-manager/host/openbao-unseal.py
+```
 
-~~~text
-infra-manager-openbao-startup-unseal.service
-~~~
+### 6.1. Что делает задание
 
-Она запускается после сети и Docker.
+В текущей реализации порядок такой:
 
-Служба:
+1. определяет PVE-узел из `TF_VAR_pve_endpoint`;
+2. устанавливает или обновляет на PVE служебные сценарии OpenBao;
+3. подготавливает аварийный Git-контур;
+4. проверяет, был ли OpenBao уже инициализирован;
+5. если OpenBao пустой — выполняет `/v1/sys/init` со схемой `1 ключ / порог 1`;
+6. сохраняет unseal key только в PVE-only области;
+7. разблокирует OpenBao;
+8. создаёт два SSH CA;
+9. создаёт ограниченные служебные AppRole;
+10. создаёт KV v2 и переносит туда рабочие секреты;
+11. материализует временные рабочие файлы для 910;
+12. публикует открытые ключи SSH CA;
+13. создаёт и проверяет роли подписи SSH;
+14. отзывает initial root token;
+15. проверяет аварийный контур;
+16. удаляет переходные постоянные файловые источники секретов.
 
-1. ждёт появления API OpenBao;
-2. проверяет состояние;
-3. если OpenBao ещё не инициализирован — завершает работу без ошибки;
-4. если OpenBao уже разблокирован — ничего не меняет;
-5. если он запечатан — вызывает предусмотренную PVE-only операцию;
-6. повторно проверяет состояние.
+### 6.2. Что появляется только на PVE
 
-Периодический таймер разблокировки на PVE больше не является штатной схемой. Разблокировка выполняется при запуске 910 и при штатной активации рабочей среды.
+Канонический каталог:
 
-Если вручную перезапустить только контейнер OpenBao вне этих путей, он может остаться запечатан. Это должно быть видно в общей проверке состояния.
+```text
+/mnt/bindmounts/infra-manager/pve-only/openbao/
+```
 
-## 5. Рабочие секреты
+Текущие служебные файлы:
 
-Постоянным источником рабочих секретов управляющего контура после инициализации является OpenBao.
+```text
+unseal.key
+ssh-access.json
+kv-access.json
+```
 
-Для работы 910 нужные значения временно материализуются в:
+`unseal.key` нужен для разблокировки.
 
-~~~text
-/run/infra-manager/secrets/
-~~~
+`ssh-access.json` и `kv-access.json` содержат ограниченные служебные данные доступа PVE к OpenBao.
 
-Эта область создаётся заново после перезапуска и не заменяет постоянное состояние OpenBao.
+Эти файлы **не подключаются внутрь 910 как постоянные файлы**.
 
-До первой инициализации используется отдельная временная область:
+### 6.3. Защита от опасной повторной инициализации
 
-~~~text
-/run/infra-manager/bootstrap-secrets/
-~~~
+Код специально останавливается, если:
 
-После успешной инициализации первоначальные значения больше не должны использоваться как штатный постоянный источник.
+- OpenBao уже инициализирован, но PVE не имеет ожидаемого unseal key;
+- OpenBao ещё пустой, но в PVE-only каталоге уже лежат старые `unseal.key`, `ssh-access.json` или `kv-access.json`;
+- существующие SSH CA имеют неожиданное состояние;
+- ограниченные AppRole не проходят проверку.
 
-Точная структура KV, права ролей и правила материализации задаются в [`740-openbao.md`](../../../../docs/700-security/740-openbao.md).
+То есть повторный запуск задания должен продолжать существующий OpenBao, а не молча создавать новый центр доверия.
 
-## 6. SSH-механизмы на 910
+## 7. Какие функции OpenBao реально создаются
 
-OpenBao на 910 обслуживает два SSH-центра доверия:
+На 910 сейчас настраиваются следующие механизмы.
 
-~~~text
+### 7.1. KV v2
+
+Mount:
+
+```text
+infra-secrets/
+```
+
+В нём хранятся рабочие значения управляющего контура, в том числе:
+
+```text
+PVE API
+GitHub read-only Deploy Key
+Semaphore
+```
+
+Рабочие программы не читают Raft напрямую. Нужные значения материализуются во временные файлы.
+
+### 7.2. SSH client CA
+
+Mount:
+
+```text
 ssh-client-signer
-ssh-host-signer
-~~~
+```
 
-Открытые ключи публикуются в 910 по путям:
+Открытый ключ публикуется в:
 
-~~~text
+```text
 /etc/infra-manager/ca/ssh-client-ca.pub
+```
+
+Он используется для административных SSH-сертификатов.
+
+### 7.3. SSH host CA
+
+Mount:
+
+```text
+ssh-host-signer
+```
+
+Открытый ключ публикуется в:
+
+```text
 /etc/infra-manager/ca/ssh-host-ca.pub
-~~~
+```
 
-Назначение этих центров, допустимые роли и ограничения описаны в [`720-ssh-access.md`](../../../../docs/700-security/720-ssh-access.md) и [`740-openbao.md`](../../../../docs/700-security/740-openbao.md).
+Он используется для подписания реальных SSH host key управляемых Linux-гостей.
 
-### 6.1. Переходное состояние межмашинного SSH
+### 7.4. Служебные AppRole
 
-На текущем этапе код ещё содержит прежний механизм машинных SSH-сертификатов и периодического обновления.
+Для операций 910/PVE создаётся отдельное пространство:
 
-Целевая схема проекта — OpenBao SSH OTP. Состояние перехода и перечень ещё не выполненных частей находятся в [`780-implementation-status.md`](../../../../docs/700-security/780-implementation-status.md).
+```text
+auth/infra-manager
+```
 
-До завершения перехода локальная документация не должна считать старый механизм целевой архитектурой.
+Среди используемых ролей есть отдельные роли для:
 
-## 7. Перезапуск и обновление
+- настройки SSH CA;
+- подписи SSH-ключей;
+- чтения рабочих KV-секретов;
+- обновления API-токена Semaphore.
 
-Для контейнера задано:
+Рабочие токены этих ролей создаются на время операции и не заменяют root token.
 
-~~~text
-restart: unless-stopped
-~~~
+### 7.5. Переходный межмашинный SSH
 
-Docker возвращает контейнер после обычного сбоя или перезапуска службы, но после нового запуска OpenBao всё равно требуется штатная проверка разблокировки.
+Код пока содержит старые роли `machine-<VMID>` и механизм периодической подписи машинных SSH-ключей.
 
-Версия образа меняется через [`../provision.yaml`](../provision.yaml) и применяется общим механизмом обновления 910. Ручная замена образа вне этого пути не считается штатным обновлением.
+Он остаётся фактической переходной реализацией до завершения перехода на OpenBao SSH OTP. Текущее состояние описано в [`780-implementation-status.md`](../../../../docs/700-security/780-implementation-status.md).
 
-При самообновлении 910 особенности порядка запуска описаны в [`infra-runtime.md`](infra-runtime.md) и [`system-services.md`](system-services.md).
+## 8. Рабочие секреты внутри 910
 
-## 8. Проверка состояния
+После готовности OpenBao рабочие файлы создаются в:
 
-Основная команда:
+```text
+/run/infra-manager/secrets/
+```
 
-~~~bash
+Текущий набор включает, в частности:
+
+```text
+pve-api.env
+github_proxmox_repo_ed25519
+semaphore-server.env
+initial-admin-password
+semaphore-api-token
+```
+
+Эта директория временная. После перезапуска 910 она должна быть восстановлена из OpenBao через PVE-only механизм.
+
+До первой инициализации временные bootstrap-значения могут находиться в:
+
+```text
+/run/infra-manager/bootstrap-secrets/
+```
+
+После успешного переноса в OpenBao они больше не являются штатным источником.
+
+## 9. Разблокировка после перезапуска
+
+OpenBao после запуска контейнера может быть запечатан.
+
+На 910 устанавливается systemd-служба:
+
+```text
+infra-manager-openbao-startup-unseal.service
+```
+
+Её шаблон находится в:
+
+```text
+rootfs/etc/systemd/system/infra-manager-openbao-startup-unseal.service.j2
+```
+
+Ansible устанавливает его как:
+
+```text
+/etc/systemd/system/infra-manager-openbao-startup-unseal.service
+```
+
+Служба запускает:
+
+```text
+/usr/local/sbin/infra-manager-openbao-startup-unseal <PVE-узел>
+```
+
+### 9.1. Логика запуска
+
+Команда:
+
+1. до 120 секунд ждёт `/v1/sys/seal-status`;
+2. если OpenBao не инициализирован — завершает работу без создания нового состояния;
+3. если он уже разблокирован — ничего не меняет;
+4. если он запечатан — по отдельному root SSH каналу вызывает на PVE:
+
+```text
+/usr/local/sbin/infra-manager-openbao-unseal
+```
+
+5. PVE использует свой PVE-only unseal key;
+6. после unseal PVE материализует рабочие секреты;
+7. 910 повторно проверяет `initialized=true` и `sealed=false`.
+
+Проверить службу:
+
+```bash
+systemctl status infra-manager-openbao-startup-unseal.service
+journalctl -u infra-manager-openbao-startup-unseal.service
+```
+
+Запустить проверку вручную:
+
+```bash
+systemctl start infra-manager-openbao-startup-unseal.service
+```
+
+## 10. Остановка, запуск и обновление
+
+Остановить только OpenBao:
+
+```bash
+docker compose \
+  --env-file /opt/infra-manager/compose/.versions.env \
+  -f /opt/infra-manager/compose/docker-compose.yml \
+  stop openbao
+```
+
+Запустить снова:
+
+```bash
+docker compose \
+  --env-file /opt/infra-manager/compose/.versions.env \
+  -f /opt/infra-manager/compose/docker-compose.yml \
+  up -d openbao
+systemctl start infra-manager-openbao-startup-unseal.service
+```
+
+После запуска обязательно подтвердить, что OpenBao не остался запечатанным.
+
+Версия меняется в `provision.yaml`, после чего штатное обновление 910:
+
+1. обновляет `.versions.env`;
+2. получает новый образ OpenBao;
+3. запускает Compose;
+4. выполняет штатную разблокировку;
+5. проверяет весь 910.
+
+Ручное удаление `/mnt/persistent-state/openbao` при обновлении запрещено.
+
+## 11. Проверка исправности
+
+Быстрая проверка самого OpenBao:
+
+```bash
+curl -fsS http://127.0.0.1:8200/v1/sys/seal-status | jq
+```
+
+Ожидаемое рабочее состояние:
+
+```text
+initialized: true
+sealed:      false
+```
+
+Проверить контейнер:
+
+```bash
+docker ps --filter name=openbao
+docker logs --tail 100 openbao
+```
+
+Проверить опубликованные CA:
+
+```bash
+test -s /etc/infra-manager/ca/ssh-client-ca.pub
+test -s /etc/infra-manager/ca/ssh-host-ca.pub
+ssh-keygen -lf /etc/infra-manager/ca/ssh-client-ca.pub
+ssh-keygen -lf /etc/infra-manager/ca/ssh-host-ca.pub
+```
+
+Полная проектная проверка:
+
+```bash
 infra-manager-status --full
-~~~
+```
 
-Для OpenBao проверяются как минимум:
+Она должна подтвердить контейнер, состояние seal, рабочие секреты и PVE-контур.
 
-- контейнер запущен;
-- API отвечает на локальном адресе;
-- состояние `initialized` и `sealed` читается корректно;
-- инициализированный OpenBao не остаётся запечатанным;
-- обязательные рабочие данные доступны через предусмотренный служебный контур;
-- при полной проверке исправен аварийный путь PVE.
+## 12. Восстановление OpenBao на пересозданном 910
 
-Во время самого первого создания `initialized=false` допустим до выполнения `Initialize OpenBao 910`.
+Если LXC 910 потерян, но сохранены постоянные данные, новый OpenBao **не инициализируется заново**.
 
-## 9. Резервирование и восстановление
+Практический порядок:
 
-На 910 уникальным постоянным состоянием OpenBao является его Raft-каталог. Связанные PVE-only данные находятся вне гостя.
+1. создать LXC 910 и подключить прежние `access/` и `state/`;
+2. убедиться, что `/mnt/persistent-state/openbao/raft` содержит прежние данные;
+3. убедиться, что на PVE сохранён `/mnt/bindmounts/infra-manager/pve-only/openbao/unseal.key`;
+4. установить Compose-файлы из `rootfs`;
+5. записать `.versions.env` из `provision.yaml`;
+6. запустить контейнер `openbao`;
+7. выполнить `infra-manager-openbao-startup-unseal` либо запустить соответствующую systemd-службу;
+8. проверить `initialized=true`, `sealed=false`;
+9. проверить, что рабочие секреты появились в `/run/infra-manager/secrets/`;
+10. проверить оба открытых SSH CA;
+11. только после этого запускать полную синхронизацию Semaphore и остальные задания;
+12. завершить `infra-manager-status --full`.
 
-Какие части должны сохраняться согласованно, определяет [`610-backup.md`](../../../../docs/600-storage/610-backup.md). Порядок аварийного восстановления задаёт [`830-recovery.md`](../../../../docs/800-operations/830-recovery.md).
+Если Raft существует, но unseal key утрачен, обычный путь восстановления использовать нельзя.
 
-Локальная реализация 910 не должна подменять потерянное состояние автоматическим созданием нового пустого OpenBao.
+Если unseal key существует, но Raft утрачен, это также не является основанием автоматически инициализировать пустой OpenBao поверх старой инфраструктуры.
 
-## 10. Связанные документы
+## 13. Типичные неисправности
 
-- [`../provision.yaml`](../provision.yaml) — версия образа, пути и параметры службы.
-- [`../rootfs/opt/infra-manager/compose/openbao/openbao.hcl`](../rootfs/opt/infra-manager/compose/openbao/openbao.hcl) — фактическая конфигурация контейнера.
-- [`system-services.md`](system-services.md) — служба запуска и разблокировки.
-- [`data-and-access.md`](data-and-access.md) — размещение постоянных и PVE-only данных.
-- [`infra-runtime.md`](infra-runtime.md) — порядок активации рабочей среды.
-- [`../../../../docs/600-storage/610-backup.md`](../../../../docs/600-storage/610-backup.md) — правила резервирования.
-- [`../../../../docs/700-security/720-ssh-access.md`](../../../../docs/700-security/720-ssh-access.md) — SSH-доверие.
-- [`../../../../docs/700-security/740-openbao.md`](../../../../docs/700-security/740-openbao.md) — нормативная спецификация OpenBao.
-- [`../../../../docs/700-security/780-implementation-status.md`](../../../../docs/700-security/780-implementation-status.md) — текущее состояние реализации.
-- [`../../../../docs/800-operations/830-recovery.md`](../../../../docs/800-operations/830-recovery.md) — аварийное восстановление.
+### 13.1. Контейнер запущен, но `sealed=true`
+
+Проверить:
+
+```bash
+systemctl status infra-manager-openbao-startup-unseal.service
+journalctl -u infra-manager-openbao-startup-unseal.service
+ls -l /mnt/pve-access/pve-host/
+```
+
+Затем проверить PVE-only helper и наличие unseal key на PVE.
+
+### 13.2. `initialized=false` после восстановления
+
+Не запускать автоматическую инициализацию. Сначала проверить, действительно ли подключён прежний каталог:
+
+```bash
+mountpoint /mnt/persistent-state
+find /mnt/persistent-state/openbao -maxdepth 3 -type f -ls
+```
+
+Если старый Raft должен существовать, `initialized=false` означает проблему подключения или восстановления состояния.
+
+### 13.3. Нет временных секретов
+
+Проверить:
+
+```bash
+ls -la /run/infra-manager/secrets/
+infra-manager-status --full
+```
+
+Если OpenBao уже разблокирован, повторная PVE-only операция unseal также выполняет материализацию рабочих секретов.
+
+### 13.4. Не опубликован SSH CA
+
+Проверить файлы `/etc/infra-manager/ca/`. Повторный `Initialize OpenBao 910` должен проверять существующие CA и восстанавливать недостающие открытые публикации, не создавая новый CA без необходимости.
+
+## 14. Связанные документы
+
+- [`../provision.yaml`](../provision.yaml) — версия OpenBao, пути и постоянное состояние.
+- [`../rootfs/opt/infra-manager/compose/docker-compose.yml`](../rootfs/opt/infra-manager/compose/docker-compose.yml) — контейнер и подключения.
+- [`../rootfs/opt/infra-manager/compose/openbao/openbao.hcl`](../rootfs/opt/infra-manager/compose/openbao/openbao.hcl) — listener и Raft.
+- [`../rootfs/etc/systemd/system/infra-manager-openbao-startup-unseal.service.j2`](../rootfs/etc/systemd/system/infra-manager-openbao-startup-unseal.service.j2) — запуск разблокировки.
+- [`data-and-access.md`](data-and-access.md) — физические каталоги и доступы 910.
+- [`system-services.md`](system-services.md) — systemd и служебные команды.
+- [`../../../../scripts/infra-manager/jobs/initialize-openbao.py`](../../../../scripts/infra-manager/jobs/initialize-openbao.py) — точка входа задания инициализации.
+- [`../../../../scripts/infra-manager/host/openbao-unseal.py`](../../../../scripts/infra-manager/host/openbao-unseal.py) — фактическая PVE-only реализация инициализации и unseal.
+- [`../../../../docs/700-security/740-openbao.md`](../../../../docs/700-security/740-openbao.md) — роль и контракты OpenBao в проекте.
+- [`../../../../docs/800-operations/830-recovery.md`](../../../../docs/800-operations/830-recovery.md) — общий аварийный процесс.
