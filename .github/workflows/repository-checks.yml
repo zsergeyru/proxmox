@@ -191,13 +191,33 @@ jobs:
         run: |
           set -Eeuo pipefail
           data_dir="$(mktemp -d)"
+          tls_dir="$(mktemp -d)"
+          sudo ip addr add 192.168.9.10/32 dev lo
+          openssl req -x509 -newkey rsa:2048 -nodes -sha256 -days 1 \
+            -subj "/CN=OpenBao test CA" \
+            -keyout "$tls_dir/ca.key" -out "$tls_dir/ca.crt"
+          openssl req -new -newkey rsa:2048 -nodes -sha256 \
+            -subj "/CN=infra-manager" \
+            -keyout "$tls_dir/server.key" -out "$tls_dir/server.csr"
+          cat > "$tls_dir/server.ext" <<'EOF'
+          subjectAltName=IP:192.168.9.10,DNS:infra-manager
+          extendedKeyUsage=serverAuth
+          keyUsage=digitalSignature,keyEncipherment
+          EOF
+          openssl x509 -req -in "$tls_dir/server.csr" \
+            -CA "$tls_dir/ca.crt" -CAkey "$tls_dir/ca.key" -CAcreateserial \
+            -days 1 -sha256 -extfile "$tls_dir/server.ext" \
+            -out "$tls_dir/server.crt"
+          chmod 0600 "$tls_dir/server.key"
+
           cleanup() {
             docker rm -f openbao-test >/dev/null 2>&1 || true
-            sudo rm -rf "$data_dir"
+            sudo ip addr del 192.168.9.10/32 dev lo >/dev/null 2>&1 || true
+            sudo rm -rf "$data_dir" "$tls_dir"
           }
           trap cleanup EXIT
 
-          docker run -d             --name openbao-test             --network host             --user 0             -v "$PWD/infrastructure/guests/910-infra-manager/rootfs/opt/infra-manager/compose/openbao/openbao.hcl:/openbao/config/openbao.hcl:ro"             -v "$data_dir:/openbao/file"             ghcr.io/openbao/openbao:2.7.0             server
+          docker run -d             --name openbao-test             --network host             --user 0             -v "$PWD/infrastructure/guests/910-infra-manager/rootfs/opt/infra-manager/compose/openbao/openbao.hcl:/openbao/config/openbao.hcl:ro"             -v "$data_dir:/openbao/file"             -v "$tls_dir:/openbao/tls:ro"             ghcr.io/openbao/openbao:2.7.0             server
 
           for _ in $(seq 1 30); do
             if curl -fsS http://127.0.0.1:8200/v1/sys/seal-status >/tmp/openbao-status.json; then
@@ -216,6 +236,10 @@ jobs:
             and .sealed == true
             and .storage_type == "raft"
           ' /tmp/openbao-status.json
+
+          curl --noproxy '*' --cacert "$tls_dir/ca.crt" -fsS \
+            https://192.168.9.10:8202/v1/sys/seal-status \
+            | jq -e '.initialized == false and .sealed == true'
 
           docker rm -f openbao-test >/dev/null
 
@@ -247,6 +271,7 @@ jobs:
             --user 0 \
             -v "$compat_config:/openbao/config/openbao.hcl:ro" \
             -v "$data_dir:/openbao/file" \
+            -v "$tls_dir:/openbao/tls:ro" \
             ghcr.io/openbao/openbao:2.7.0 \
             server
 
