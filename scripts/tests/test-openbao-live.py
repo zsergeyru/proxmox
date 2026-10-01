@@ -308,6 +308,30 @@ def main() -> None:
     ):
         fail(f"guest-410 не получил собственный OTP: {own_otp!r}")
 
+    otp_value = own_otp["key"]
+    verified_otp = http_json(
+        "POST",
+        "/v1/ssh-otp/verify",
+        {"otp": otp_value},
+    ).get("data")
+    if verified_otp != {
+        "username": "root",
+        "ip": "192.168.9.10",
+        "role_name": "guest-410",
+    }:
+        fail(f"OpenBao неверно подтвердил SSH OTP: {verified_otp!r}")
+
+    try:
+        http_json(
+            "POST",
+            "/v1/ssh-otp/verify",
+            {"otp": otp_value},
+        )
+    except urllib.error.HTTPError:
+        pass
+    else:
+        fail("OpenBao позволил повторно использовать SSH OTP")
+
     try:
         http_json(
             "POST",
