@@ -7,6 +7,7 @@ import argparse
 import fcntl
 import json
 import os
+import shutil
 import subprocess
 import tempfile
 import time
@@ -18,6 +19,15 @@ KEY_DIR = Path("/mnt/bindmounts/infra-manager/pve-only/openbao")
 KEY_PATH = KEY_DIR / "unseal.key"
 SSH_ACCESS_PATH = KEY_DIR / "ssh-access.json"
 KV_ACCESS_PATH = KEY_DIR / "kv-access.json"
+TLS_PVE_ONLY_DIR = Path("/mnt/bindmounts/infra-manager/pve-only/openbao-tls")
+TLS_ACCESS_DIR = Path("/mnt/bindmounts/infra-manager/access/openbao-tls")
+TLS_CA_KEY = TLS_PVE_ONLY_DIR / "ca.key"
+TLS_CA_CERT = TLS_PVE_ONLY_DIR / "ca.crt"
+TLS_ACCESS_CA_CERT = TLS_ACCESS_DIR / "ca.crt"
+TLS_SERVER_KEY = TLS_ACCESS_DIR / "server.key"
+TLS_SERVER_CERT = TLS_ACCESS_DIR / "server.crt"
+TLS_ADDRESS = "192.168.9.10"
+TLS_DNS_NAME = "infra-manager"
 LOCK_PATH = Path("/run/lock/infra-manager-openbao-unseal.lock")
 CT_RUNTIME_DIR = Path("/run/infra-manager")
 CT_KEY_PATH = CT_RUNTIME_DIR / "openbao-unseal.key"
@@ -1997,6 +2007,225 @@ def read_status(*, wait: bool) -> dict[str, object]:
     )
 
 
+def _openssl(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
+    result = subprocess.run(
+        ["openssl", *args],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if check and result.returncode:
+        detail = (result.stderr or result.stdout).strip()
+        raise OpenBaoHostError(
+            "OpenSSL завершился ошибкой"
+            + (f": {detail}" if detail else "")
+        )
+    return result
+
+
+def _public_key_from_certificate(path: Path) -> str:
+    return _openssl("x509", "-in", str(path), "-noout", "-pubkey").stdout.strip()
+
+
+def _public_key_from_private_key(path: Path) -> str:
+    return _openssl("pkey", "-in", str(path), "-pubout").stdout.strip()
+
+
+def _atomic_copy(source: Path, target: Path, *, mode: int, uid: int, gid: int) -> None:
+    target.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary_name = tempfile.mkstemp(
+        prefix=f".{target.name}.",
+        dir=target.parent,
+    )
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(fd, "wb") as stream:
+            with source.open("rb") as input_stream:
+                shutil.copyfileobj(input_stream, stream)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.chmod(temporary, mode)
+        os.chown(temporary, uid, gid)
+        os.replace(temporary, target)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _tls_ca_ready() -> bool:
+    if not TLS_CA_KEY.is_file() or not TLS_CA_CERT.is_file():
+        return False
+    try:
+        return (
+            _public_key_from_certificate(TLS_CA_CERT)
+            == _public_key_from_private_key(TLS_CA_KEY)
+        )
+    except OpenBaoHostError:
+        return False
+
+
+def _tls_server_ready() -> bool:
+    if not TLS_SERVER_KEY.is_file() or not TLS_SERVER_CERT.is_file():
+        return False
+    verify = _openssl(
+        "verify",
+        "-CAfile",
+        str(TLS_CA_CERT),
+        str(TLS_SERVER_CERT),
+        check=False,
+    )
+    if verify.returncode:
+        return False
+    checkend = _openssl(
+        "x509",
+        "-in",
+        str(TLS_SERVER_CERT),
+        "-checkend",
+        "86400",
+        "-noout",
+        check=False,
+    )
+    if checkend.returncode:
+        return False
+    details = _openssl(
+        "x509",
+        "-in",
+        str(TLS_SERVER_CERT),
+        "-noout",
+        "-text",
+    ).stdout
+    if f"IP Address:{TLS_ADDRESS}" not in details:
+        return False
+    if f"DNS:{TLS_DNS_NAME}" not in details:
+        return False
+    try:
+        return (
+            _public_key_from_certificate(TLS_SERVER_CERT)
+            == _public_key_from_private_key(TLS_SERVER_KEY)
+        )
+    except OpenBaoHostError:
+        return False
+
+
+def prepare_tls_material() -> None:
+    """Подготовить TLS CA на PVE и серверный комплект, доступный LXC 910."""
+    TLS_PVE_ONLY_DIR.mkdir(parents=True, exist_ok=True)
+    os.chmod(TLS_PVE_ONLY_DIR, 0o700)
+    os.chown(TLS_PVE_ONLY_DIR, 0, 0)
+
+    TLS_ACCESS_DIR.mkdir(parents=True, exist_ok=True)
+    os.chmod(TLS_ACCESS_DIR, 0o755)
+    os.chown(TLS_ACCESS_DIR, 100000, 100000)
+
+    ca_parts = [TLS_CA_KEY.exists(), TLS_CA_CERT.exists()]
+    if any(ca_parts) and not all(ca_parts):
+        raise OpenBaoHostError(
+            "TLS CA OpenBao найден частично; автоматическая замена запрещена"
+        )
+
+    if not any(ca_parts):
+        with tempfile.TemporaryDirectory(
+            prefix=".openbao-ca.",
+            dir=TLS_PVE_ONLY_DIR,
+        ) as temporary_dir:
+            temporary = Path(temporary_dir)
+            key = temporary / "ca.key"
+            cert = temporary / "ca.crt"
+            _openssl(
+                "req",
+                "-x509",
+                "-newkey",
+                "rsa:4096",
+                "-nodes",
+                "-sha256",
+                "-days",
+                "3650",
+                "-subj",
+                "/CN=infra-manager OpenBao TLS CA",
+                "-keyout",
+                str(key),
+                "-out",
+                str(cert),
+            )
+            _atomic_copy(key, TLS_CA_KEY, mode=0o600, uid=0, gid=0)
+            _atomic_copy(cert, TLS_CA_CERT, mode=0o644, uid=0, gid=0)
+
+    if not _tls_ca_ready():
+        raise OpenBaoHostError(
+            "Существующий TLS CA OpenBao повреждён или ключ не соответствует сертификату"
+        )
+
+    _atomic_copy(
+        TLS_CA_CERT,
+        TLS_ACCESS_CA_CERT,
+        mode=0o644,
+        uid=100000,
+        gid=100000,
+    )
+
+    if not _tls_server_ready():
+        with tempfile.TemporaryDirectory(
+            prefix=".openbao-server.",
+            dir=TLS_PVE_ONLY_DIR,
+        ) as temporary_dir:
+            temporary = Path(temporary_dir)
+            key = temporary / "server.key"
+            csr = temporary / "server.csr"
+            cert = temporary / "server.crt"
+            extensions = temporary / "server.ext"
+            extensions.write_text(
+                "[v3_req]\n"
+                f"subjectAltName=IP:{TLS_ADDRESS},DNS:{TLS_DNS_NAME}\n"
+                "extendedKeyUsage=serverAuth\n"
+                "keyUsage=digitalSignature,keyEncipherment\n",
+                encoding="utf-8",
+            )
+            _openssl(
+                "req",
+                "-new",
+                "-newkey",
+                "rsa:3072",
+                "-nodes",
+                "-sha256",
+                "-subj",
+                f"/CN={TLS_DNS_NAME}",
+                "-keyout",
+                str(key),
+                "-out",
+                str(csr),
+            )
+            serial = "0x" + os.urandom(16).hex()
+            _openssl(
+                "x509",
+                "-req",
+                "-in",
+                str(csr),
+                "-CA",
+                str(TLS_CA_CERT),
+                "-CAkey",
+                str(TLS_CA_KEY),
+                "-set_serial",
+                serial,
+                "-days",
+                "825",
+                "-sha256",
+                "-extfile",
+                str(extensions),
+                "-extensions",
+                "v3_req",
+                "-out",
+                str(cert),
+            )
+            _atomic_copy(key, TLS_SERVER_KEY, mode=0o600, uid=100000, gid=100000)
+            _atomic_copy(cert, TLS_SERVER_CERT, mode=0o644, uid=100000, gid=100000)
+
+    if not _tls_server_ready():
+        raise OpenBaoHostError("TLS server material OpenBao не прошёл проверку")
+
+    log_detail(
+        "[ОК] TLS OpenBao подготовлен: CA остаётся на PVE, серверный комплект доступен 910"
+    )
+
+
 def write_unseal_key(key: str) -> None:
     if not key:
         raise OpenBaoHostError("OpenBao вернул пустой unseal-ключ")
@@ -3077,6 +3306,11 @@ def main() -> int:
         help="Однократно инициализировать пустой OpenBao перед разблокировкой",
     )
     mode.add_argument(
+        "--prepare-tls",
+        action="store_true",
+        help="Подготовить TLS CA и серверный сертификат OpenBao на PVE",
+    )
+    mode.add_argument(
         "--sign-client-key",
         action="store_true",
         help="Подписать переданный через stdin открытый ключ SSH-клиента",
@@ -3117,7 +3351,10 @@ def main() -> int:
     LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
     with LOCK_PATH.open("a+", encoding="utf-8") as lock:
         fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
-        if args.initialize:
+        if args.prepare_tls:
+            prepare_tls_material()
+        elif args.initialize:
+            prepare_tls_material()
             initialize()
         elif args.sign_client_key:
             status = read_status(wait=False)
