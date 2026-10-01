@@ -153,9 +153,9 @@ persistence
 
 ### 3.4. Инвентарь
 
-Постоянный файл inventory не хранится.
+Постоянный файл списка узлов Ansible не хранится.
 
-`deploy-guest` определяет адрес выбранного гостя и передаёт Ansible одноузловый inventory на время запуска.
+`deploy-guest` определяет адрес выбранного гостя и передаёт Ansible временный список из одного узла на время запуска.
 
 Это уменьшает количество вторичных файлов, которые могли бы расходиться с `guest.yaml`.
 
@@ -232,7 +232,7 @@ Git нужен 910 для получения самого проекта.
 
 Она считается воспроизводимой.
 
-Git checkout не переносится в постоянное состояние на PVE.
+Рабочая копия Git не переносится в постоянное состояние на PVE.
 
 ### 5.2. Доступ
 
@@ -346,7 +346,7 @@ import proxmoxer
 
 Нужно сохранять:
 
-- OpenTofu state;
+- состояние OpenTofu;
 - постоянную идентичность Ansible, пока она нужна проекту.
 
 ### 10.2. Воспроизводимое
@@ -356,7 +356,7 @@ import proxmoxer
 - двоичные файлы OpenTofu и Packer;
 - сам Ansible;
 - Python-библиотеки;
-- Git checkout;
+- рабочая копия Git;
 - `guests.json`;
 - Docker-образ `infra-runtime`.
 
@@ -366,7 +366,7 @@ import proxmoxer
 
 - [`../provision.yaml`](../provision.yaml) — версии инструментов и постоянные пути.
 - [`infra-runtime.md`](infra-runtime.md) — контейнер, в котором работают инструменты.
-- [`data-and-access.md`](data-and-access.md) — OpenTofu state и идентичность Ansible.
+- [`data-and-access.md`](data-and-access.md) — состояние OpenTofu и идентичность Ansible.
 - [`semaphore.md`](semaphore.md) — задания, из которых запускаются инструменты.
 - [`../../../../docs/300-guests/330-guest-lifecycle.md`](../../../../docs/300-guests/330-guest-lifecycle.md) — общий жизненный цикл гостя.
 - [`../../../../docs/700-security/720-ssh-access.md`](../../../../docs/700-security/720-ssh-access.md) — SSH-доступ Ansible.
