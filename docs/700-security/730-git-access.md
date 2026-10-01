@@ -40,14 +40,14 @@ SSH-ключ для Git не должен использоваться для:
 
 - создаётся доверенным первоначальным контуром;
 - не хранится в Git;
-- после инициализации OpenBao хранится как рабочий secret `infra-secrets/data/git/github/proxmox-read`;
-- материализуется для 910 только во временный файл `/run/infra-manager/secrets/github_proxmox_repo_ed25519`;
+- после инициализации OpenBao хранится в защищённом KV управляющего контура;
+- выдаётся 910 только через временное рабочее представление;
 - передаётся `infra-runtime` только для чтения;
 - не должна копироваться в обычные гости только потому, что им нужен Git.
 
-Каноническая аварийная копия хранится в `pve-only/recovery/`. Bootstrap-копия в `/root/.config/proxmox-bootstrap/` может быть восстановлена из неё. Постоянная копия Deploy Key в `access/` не используется.
+Отдельная аварийная копия хранится в PVE-only области и используется только для восстановления управляющего контура до запуска OpenBao.
 
-Точный контракт хранения определён в [`740-openbao.md`](740-openbao.md), физические пути — в [`../200-pve/230-host-layout.md`](../200-pve/230-host-layout.md).
+Логический контракт хранения определён в [`740-openbao.md`](740-openbao.md). Конкретные пути на PVE и в 910 описаны в [`../200-pve/230-host-layout.md`](../200-pve/230-host-layout.md) и локальном документе [`data-and-access.md`](../../infrastructure/guests/910-infra-manager/docs/data-and-access.md).
 
 ## 3. Проверка Git-сервера
 
@@ -176,5 +176,6 @@ Deploy Key управляющего контура создаётся перво
 - [`720-ssh-access.md`](720-ssh-access.md) — разделение SSH-идентичностей.
 - [`780-implementation-status.md`](780-implementation-status.md) — состояние реализации.
 - [`790-decisions.md`](790-decisions.md) — причины разделения доступов.
-- [`../200-pve/230-host-layout.md`](../200-pve/230-host-layout.md) — точные пути Deploy Key управляющего контура.
+- [`../200-pve/230-host-layout.md`](../200-pve/230-host-layout.md) — канонические каталоги PVE.
+- [`../../infrastructure/guests/910-infra-manager/docs/data-and-access.md`](../../infrastructure/guests/910-infra-manager/docs/data-and-access.md) — фактическое размещение Git-доступа на 910.
 - [`750-access-contract.md`](750-access-contract.md) — единый машинный контракт прав доступа.
