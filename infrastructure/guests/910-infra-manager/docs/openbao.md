@@ -432,7 +432,7 @@ Raft OpenBao является критичным постоянным состо
 ## 12. Связанные документы
 
 - [`../provision.yaml`](../provision.yaml) — версия образа, путь данных и адрес API.
-- [`../compose/openbao/openbao.hcl`](../compose/openbao/openbao.hcl) — фактическая конфигурация текущего контейнера.
+- [`../rootfs/opt/infra-manager/compose/openbao/openbao.hcl`](../rootfs/opt/infra-manager/compose/openbao/openbao.hcl) — фактическая конфигурация текущего контейнера.
 - [`system-services.md`](system-services.md) — служба автоматической разблокировки.
 - [`data-and-access.md`](data-and-access.md) — границы постоянных и PVE-only данных.
 - [`../../../../docs/600-storage/610-backup.md`](../../../../docs/600-storage/610-backup.md) — резервное копирование.
