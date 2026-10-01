@@ -1,0 +1,80 @@
+---
+- name: Определить требование машинной OpenBao identity
+  ansible.builtin.set_fact:
+    openbao_machine_identity_enabled: >-
+      {{ infra_openbao_machine_enabled | default(false) | bool }}
+
+- name: Подготовить каталог OpenBao на исходном госте
+  ansible.builtin.file:
+    path: /etc/infra-manager/openbao
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+  when: openbao_machine_identity_enabled
+
+- name: Проверить TLS CA OpenBao на управляющей системе
+  ansible.builtin.stat:
+    path: "{{ infra_openbao_ca_file }}"
+  delegate_to: localhost
+  become: false
+  register: openbao_ca_source
+  when: openbao_machine_identity_enabled
+
+- name: Требовать TLS CA OpenBao для машинной identity
+  ansible.builtin.assert:
+    that:
+      - openbao_ca_source.stat.exists
+      - openbao_ca_source.stat.isreg
+      - openbao_ca_source.stat.size | int > 0
+    fail_msg: >-
+      Для машинной OpenBao identity не найден TLS CA:
+      {{ infra_openbao_ca_file | default('не задан') }}
+  when: openbao_machine_identity_enabled
+
+- name: Установить TLS CA OpenBao
+  ansible.builtin.copy:
+    src: "{{ infra_openbao_ca_file }}"
+    dest: /etc/infra-manager/openbao/ca.crt
+    owner: root
+    group: root
+    mode: "0644"
+  when: openbao_machine_identity_enabled
+
+- name: Установить новые RoleID и SecretID гостя
+  ansible.builtin.copy:
+    src: "{{ infra_openbao_machine_env_file }}"
+    dest: /etc/infra-manager/openbao/machine.env
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  when:
+    - openbao_machine_identity_enabled
+    - infra_openbao_machine_env_file is defined
+    - infra_openbao_machine_env_file | length > 0
+
+- name: Проверить machine.env
+  ansible.builtin.stat:
+    path: /etc/infra-manager/openbao/machine.env
+  register: openbao_machine_env
+  when: openbao_machine_identity_enabled
+
+- name: Подтвердить машинную OpenBao identity
+  ansible.builtin.assert:
+    that:
+      - openbao_machine_env.stat.exists
+      - openbao_machine_env.stat.isreg
+      - openbao_machine_env.stat.pw_name == "root"
+      - openbao_machine_env.stat.gr_name == "root"
+      - openbao_machine_env.stat.mode == "0600"
+    fail_msg: >-
+      Машинная OpenBao identity должна существовать только как
+      root:root 0600 /etc/infra-manager/openbao/machine.env
+  when: openbao_machine_identity_enabled
+
+- name: Удалить машинную identity при отзыве права
+  ansible.builtin.file:
+    path: /etc/infra-manager/openbao/machine.env
+    state: absent
+  when: not openbao_machine_identity_enabled
