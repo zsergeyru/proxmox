@@ -266,6 +266,39 @@ def sync_openbao_otp_contract(
     )
 
 
+def issue_openbao_machine_credentials(
+    node: str,
+    vmid: int,
+) -> dict[str, str]:
+    """Выпустить RoleID/SecretID одной машинной AppRole без хранения на 910."""
+    if not isinstance(vmid, int) or vmid <= 0:
+        raise InfraManagerError("Некорректный VMID машинной идентичности")
+    result = _ssh_with_input(
+        node,
+        str(OPENBAO_HOST_COMMAND),
+        "--issue-machine-credentials",
+        input_text=json.dumps({"vmid": vmid}, separators=(",", ":")) + "\n",
+    )
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise InfraManagerError(
+            "PVE/OpenBao вернул некорректные данные машинной идентичности"
+        ) from exc
+    role_id = payload.get("role_id") if isinstance(payload, dict) else None
+    secret_id = payload.get("secret_id") if isinstance(payload, dict) else None
+    if (
+        not isinstance(role_id, str)
+        or not role_id
+        or not isinstance(secret_id, str)
+        or not secret_id
+    ):
+        raise InfraManagerError(
+            "PVE/OpenBao не вернул полную машинную идентичность"
+        )
+    return {"role_id": role_id, "secret_id": secret_id}
+
+
 def sync_machine_ssh_roles(node: str, vmids: list[int]) -> None:
     """Синхронизировать отдельные OpenBao-роли машинных SSH-идентичностей."""
     clean = sorted(set(vmids))
