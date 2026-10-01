@@ -61,6 +61,9 @@ jobs:
       - name: Run OpenBao OTP verifier checks
         run: python scripts/tests/test-openbao-otp-verify.py
 
+      - name: Run OpenBao OTP SSH client checks
+        run: python scripts/tests/test-openbao-ssh.py
+
       - name: Run status checks
         run: python scripts/tests/test-status.py
 
