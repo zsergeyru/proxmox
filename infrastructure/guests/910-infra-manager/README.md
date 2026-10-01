@@ -86,11 +86,20 @@ keyctl=1
 | [`guest.yaml`](guest.yaml) | параметры объекта Proxmox |
 | [`provision.yaml`](provision.yaml) | ОС, пакеты, Docker, версии, пути, службы и постоянное состояние |
 | [`status.yaml`](status.yaml) | порядок проверок и полный экран состояния |
-| [`compose/docker-compose.yml`](compose/docker-compose.yml) | контейнеры и подключения каталогов |
-| [`systemd/`](systemd/) | постоянные службы и переходный таймер |
-| [`decisions.md`](decisions.md) | причины решений, относящихся именно к 910 |
+| [`rootfs/opt/infra-manager/compose/docker-compose.yml`](rootfs/opt/infra-manager/compose/docker-compose.yml) | контейнеры и подключения каталогов |
+| [`rootfs/etc/systemd/system/`](rootfs/etc/systemd/system/) | постоянные службы и переходный таймер |
+| [`docs/decisions.md`](docs/decisions.md) | причины решений, относящихся именно к 910 |
 
 README не заменяет эти файлы и не является вторым машинным источником параметров.
+
+Каталог `rootfs/` хранит только воспроизводимые файлы, предназначенные для установки внутрь 910. Его дерево повторяет конечные пути Linux:
+
+```text
+rootfs/etc/systemd/system/...
+rootfs/opt/infra-manager/compose/...
+```
+
+Это не образ диска и не автоматическое зеркало файловой системы. Каждый файл или каталог из `rootfs/` устанавливается явной задачей Ansible с заданными конечным путём, владельцем и правами.
 
 ### 3.2. Основная документация
 
@@ -397,7 +406,7 @@ pct exec 910 -- infra-manager-status --full
 - [`guest.yaml`](guest.yaml) — объект Proxmox.
 - [`provision.yaml`](provision.yaml) — машинное описание ОС, служб и состояния.
 - [`status.yaml`](status.yaml) — итоговая проверка.
-- [`decisions.md`](decisions.md) — решения по 910.
+- [`docs/decisions.md`](docs/decisions.md) — решения по 910.
 - [`../../../docs/200-pve/210-host-bootstrap.md`](../../../docs/200-pve/210-host-bootstrap.md) — первоначальная подготовка PVE и создание 910.
 - [`../../../docs/300-guests/330-guest-lifecycle.md`](../../../docs/300-guests/330-guest-lifecycle.md) — общий жизненный цикл гостей.
 - [`../../../docs/600-storage/610-backup.md`](../../../docs/600-storage/610-backup.md) — резервное копирование.
