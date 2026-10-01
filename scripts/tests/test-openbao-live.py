@@ -289,27 +289,44 @@ def main() -> None:
     if set(machine_policies) != {"machine-ssh-otp"}:
         fail(f"Машинный token получил лишние policy: {machine_policies!r}")
 
-    capabilities = http_json(
+    own_otp = http_json(
         "POST",
-        "/v1/sys/capabilities-self",
-        {
-            "paths": [
-                "ssh-otp/creds/guest-410",
-                "ssh-otp/creds/guest-910",
-                "sys/policies/acl/machine-ssh-otp",
-            ]
-        },
+        "/v1/ssh-otp/creds/guest-410",
+        {"ip": "192.168.9.10", "username": "root"},
         token=machine_token,
-    )
-    own = set(capabilities.get("ssh-otp/creds/guest-410", []))
-    other = set(capabilities.get("ssh-otp/creds/guest-910", []))
-    policy_access = set(capabilities.get("sys/policies/acl/machine-ssh-otp", []))
-    if not {"create", "update"}.issubset(own):
-        fail(f"guest-410 не получил свой OTP path: {sorted(own)!r}")
-    if other != {"deny"}:
-        fail(f"guest-410 получил чужой OTP path: {sorted(other)!r}")
-    if policy_access != {"deny"}:
-        fail(f"машинный token получил доступ к ACL policy: {sorted(policy_access)!r}")
+    ).get("data")
+    if (
+        not isinstance(own_otp, dict)
+        or own_otp.get("key_type") != "otp"
+        or not isinstance(own_otp.get("key"), str)
+        or not own_otp.get("key")
+    ):
+        fail(f"guest-410 не получил собственный OTP: {own_otp!r}")
+
+    try:
+        http_json(
+            "POST",
+            "/v1/ssh-otp/creds/guest-910",
+            {"ip": "192.168.4.10", "username": "root"},
+            token=machine_token,
+        )
+    except urllib.error.HTTPError as exc:
+        if exc.code != 403:
+            fail(f"Неверный код запрета чужой OTP-роли: HTTP {exc.code}")
+    else:
+        fail("guest-410 смог использовать чужую OTP-роль guest-910")
+
+    try:
+        http_json(
+            "GET",
+            "/v1/sys/policies/acl/machine-ssh-otp",
+            token=machine_token,
+        )
+    except urllib.error.HTTPError as exc:
+        if exc.code != 403:
+            fail(f"Неверный код запрета чтения ACL policy: HTTP {exc.code}")
+    else:
+        fail("Машинный token смог прочитать ACL policy")
 
     config_result = json.loads(
         run_code(
