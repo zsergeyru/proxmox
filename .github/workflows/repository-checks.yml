@@ -55,6 +55,9 @@ jobs:
       - name: Run OpenBao checks
         run: python scripts/tests/test-openbao.py
 
+      - name: Run OpenBao OTP client checks
+        run: python scripts/tests/test-openbao-otp-client.py
+
       - name: Run status checks
         run: python scripts/tests/test-status.py
 
