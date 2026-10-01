@@ -100,7 +100,7 @@ Ansible перед созданием ссылок проверяет стары
 Внутри корневой файловой системы 910 остаются данные, которые можно создать заново:
 
 - рабочая копия проекта в `/var/lib/infra-manager/bootstrap-repo/`;
-- файлы Docker Compose в `/opt/infra-manager/compose/`;
+- файлы Docker Compose в `/opt/infra-manager/compose/`, которые устанавливаются из `rootfs/opt/infra-manager/compose/`;
 - установленный код `infra_manager`;
 - Docker-образы;
 - кэши и временные файлы.
