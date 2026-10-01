@@ -615,7 +615,7 @@ grep -Fq -- '--cacert "$tls_ca"' "$OPENBAO_STARTUP_COMMAND" \
     || die "Startup unseal должен проверять TLS-вход OpenBao доверенным CA"
 grep -Fq ':8202/v1/sys/health' "$OPENBAO_STARTUP_COMMAND" \
     || die "Startup unseal должен проверять внешний TLS listener :8202"
-if grep -Fq 'OpenBao уже разблокирован' "$OPENBAO_STARTUP_COMMAND"; then
+if grep -Fq 'echo "[ОК] OpenBao уже разблокирован"' "$OPENBAO_STARTUP_COMMAND"; then
     die "Startup unseal не должен завершаться до восстановления секретов и проверок"
 fi
 grep -q 'infra-manager-status --full --quiet' "$ACTIVATE_RUNTIME" \
