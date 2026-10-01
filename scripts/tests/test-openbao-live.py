@@ -167,7 +167,7 @@ def main() -> None:
                     "sources": [
                         {
                             "vmid": 410,
-                            "source_cidr": "192.168.4.10/32",
+                            "source_cidr": "127.0.0.1/32",
                             "target_cidrs": [
                                 "192.168.9.10/32",
                                 "192.168.3.11/32",
@@ -175,7 +175,7 @@ def main() -> None:
                         },
                         {
                             "vmid": 910,
-                            "source_cidr": "192.168.9.10/32",
+                            "source_cidr": "127.0.0.1/32",
                             "target_cidrs": ["192.168.4.10/32"],
                         },
                     ],
@@ -186,12 +186,54 @@ def main() -> None:
     )
     if otp_contract != {
         "roles": ["guest-410", "guest-910"],
-        "policies": [
-            "machine-guest-410-ssh-otp",
-            "machine-guest-910-ssh-otp",
-        ],
+        "policy": "machine-ssh-otp",
     }:
         fail(f"SSH OTP/AppRole не готовы: {otp_contract!r}")
+
+    role_id = http_json(
+        "GET",
+        "/v1/auth/machine/role/guest-410/role-id",
+        token=initial_root,
+    ).get("data", {}).get("role_id")
+    secret_id = http_json(
+        "POST",
+        "/v1/auth/machine/role/guest-410/secret-id",
+        {},
+        token=initial_root,
+    ).get("data", {}).get("secret_id")
+    if not isinstance(role_id, str) or not isinstance(secret_id, str):
+        fail("Тестовый AppRole guest-410 не выдал RoleID/SecretID")
+
+    machine_login = http_json(
+        "POST",
+        "/v1/auth/machine/login",
+        {"role_id": role_id, "secret_id": secret_id},
+    )
+    machine_token = machine_login.get("auth", {}).get("client_token")
+    if not isinstance(machine_token, str) or not machine_token:
+        fail("Машинный AppRole guest-410 не проходит login")
+
+    capabilities = http_json(
+        "POST",
+        "/v1/sys/capabilities-self",
+        {
+            "paths": [
+                "ssh-otp/creds/guest-410",
+                "ssh-otp/creds/guest-910",
+                "sys/policies/acl/machine-ssh-otp",
+            ]
+        },
+        token=machine_token,
+    )
+    own = set(capabilities.get("ssh-otp/creds/guest-410", []))
+    other = set(capabilities.get("ssh-otp/creds/guest-910", []))
+    policy_access = set(capabilities.get("sys/policies/acl/machine-ssh-otp", []))
+    if not {"create", "update"}.issubset(own):
+        fail(f"guest-410 не получил свой OTP path: {sorted(own)!r}")
+    if other != {"deny"}:
+        fail(f"guest-410 получил чужой OTP path: {sorted(other)!r}")
+    if policy_access != {"deny"}:
+        fail(f"машинный token получил доступ к ACL policy: {sorted(policy_access)!r}")
 
     config_result = json.loads(
         run_code(
