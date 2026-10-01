@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import importlib.util
+import ipaddress
 import json
 import subprocess
 import sys
@@ -203,7 +204,19 @@ def main() -> None:
         fail("guest-410 получил default policy")
     if machine_role.get("secret_id_bound_cidrs") != ["127.0.0.1/32"]:
         fail(f"guest-410 имеет неверный SecretID CIDR: {machine_role!r}")
-    if machine_role.get("token_bound_cidrs") != ["127.0.0.1/32"]:
+    token_cidrs = machine_role.get("token_bound_cidrs")
+    if not isinstance(token_cidrs, list):
+        fail(f"guest-410 имеет неверный token CIDR: {machine_role!r}")
+    normalized_token_cidrs = {
+        str(
+            ipaddress.ip_network(
+                value if "/" in str(value) else f"{value}/32",
+                strict=False,
+            )
+        )
+        for value in token_cidrs
+    }
+    if normalized_token_cidrs != {"127.0.0.1/32"}:
         fail(f"guest-410 имеет неверный token CIDR: {machine_role!r}")
 
     if machine_role.get("bind_secret_id") is not True:
