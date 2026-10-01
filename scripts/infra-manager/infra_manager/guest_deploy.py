@@ -17,6 +17,7 @@ from .pve import PveClient
 from .pve_host import (
     apply_host_requirements,
     ensure_infra_self_access,
+    issue_openbao_machine_credentials,
     sign_ssh_client_key,
     sign_ssh_host_key,
 )
@@ -853,6 +854,104 @@ def _project_git_ansible_vars(
         [
             "-e",
             f"infra_project_git_private_key_file={private_key}",
+        ]
+    )
+    return args
+
+
+def _guest_has_openbao_machine_identity(
+    context: DeploymentContext,
+    private_key: Path,
+    *,
+    certificate: Path | None,
+) -> bool:
+    """Проверить наличие уже установленной машинной identity, не читая secret."""
+    result = run(
+        [
+            *_ssh_identity_args(
+                context,
+                private_key,
+                certificate=certificate,
+            ),
+            "test -s /etc/infra-manager/openbao/machine.env",
+        ],
+        check=False,
+        capture_output=True,
+    )
+    return result.returncode == 0
+
+
+def _prepare_openbao_machine_ansible_vars(
+    context: DeploymentContext,
+    *,
+    private_key: Path,
+    certificate: Path | None,
+    directory: Path,
+) -> list[str]:
+    """Подготовить только собственную машинную OpenBao identity гостя."""
+    repo_root = context.paths.guest_dir.parents[2]
+    policy = load_access_policy(repo_root)
+    enabled = (
+        context.vmid in policy.machine_identity_vmids
+        and bool(policy.targets_for(context.vmid))
+    )
+    args = [
+        "-e",
+        f"infra_openbao_machine_enabled={'true' if enabled else 'false'}",
+    ]
+    if not enabled:
+        return args
+
+    ca_file = PATHS.openbao_tls_ca
+    if not ca_file.is_file() or ca_file.stat().st_size == 0:
+        raise InfraManagerError(
+            f"Не найден TLS CA машинного OpenBao: {ca_file}"
+        )
+    args.extend(["-e", f"infra_openbao_ca_file={ca_file}"])
+
+    if _guest_has_openbao_machine_identity(
+        context,
+        private_key,
+        certificate=certificate,
+    ):
+        return args
+
+    credentials = issue_openbao_machine_credentials(
+        context.node,
+        context.vmid,
+    )
+    role_id = credentials["role_id"]
+    secret_id = credentials["secret_id"]
+    if any(character.isspace() for character in role_id + secret_id):
+        raise InfraManagerError(
+            "OpenBao вернул машинную identity с недопустимыми пробелами"
+        )
+
+    manager = policy.guests.get(910)
+    if manager is None or manager.address is None:
+        raise InfraManagerError(
+            "Не определён доверенный адрес 910 для машинного OpenBao"
+        )
+
+    env_file = directory / "openbao-machine.env"
+    env_file.write_text(
+        "\n".join(
+            (
+                f"OPENBAO_ADDR=https://{manager.address}:8202",
+                f"OPENBAO_ROLE_ID={role_id}",
+                f"OPENBAO_SECRET_ID={secret_id}",
+                "OPENBAO_CA=/etc/infra-manager/openbao/ca.crt",
+                f"OPENBAO_SSH_OTP_ROLE=guest-{context.vmid}",
+                "",
+            )
+        ),
+        encoding="utf-8",
+    )
+    env_file.chmod(0o600)
+    args.extend(
+        [
+            "-e",
+            f"infra_openbao_machine_env_file={env_file}",
         ]
     )
     return args
