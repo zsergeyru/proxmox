@@ -1,0 +1,28 @@
+---
+- name: Определить требование OTP-клиента OpenBao
+  ansible.builtin.set_fact:
+    openbao_otp_client_enabled: >-
+      {{ infra_openbao_machine_enabled | default(false) | bool }}
+
+- name: Установить клиент получения SSH OTP
+  ansible.builtin.copy:
+    src: openbao-otp-client.py
+    dest: /usr/local/sbin/infra-openbao-otp
+    owner: root
+    group: root
+    mode: "0755"
+  when: openbao_otp_client_enabled
+
+- name: Удалить OTP-клиент при отзыве машинной идентичности
+  ansible.builtin.file:
+    path: /usr/local/sbin/infra-openbao-otp
+    state: absent
+  when: not openbao_otp_client_enabled
+
+- name: Проверить установленный OTP-клиент
+  ansible.builtin.command:
+    argv:
+      - /usr/local/sbin/infra-openbao-otp
+      - --help
+  changed_when: false
+  when: openbao_otp_client_enabled
