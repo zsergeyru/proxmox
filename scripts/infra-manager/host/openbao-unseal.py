@@ -484,6 +484,27 @@ otp_config_policy = json.dumps(
             "auth/machine/role": {"capabilities": ["list"]},
             "auth/machine/role/guest-*": {
                 "capabilities": ["create", "read", "update", "delete"],
+                "required_parameters": [
+                    "bind_secret_id",
+                    "secret_id_bound_cidrs",
+                    "token_bound_cidrs",
+                    "token_policies",
+                    "token_ttl",
+                    "token_max_ttl",
+                    "token_no_default_policy",
+                ],
+                "allowed_parameters": {
+                    "bind_secret_id": [True],
+                    "secret_id_bound_cidrs": [],
+                    "secret_id_num_uses": [0],
+                    "secret_id_ttl": ["0s"],
+                    "token_bound_cidrs": [],
+                    "token_num_uses": [0],
+                    "token_policies": ["machine-ssh-otp"],
+                    "token_ttl": ["5m"],
+                    "token_max_ttl": ["10m"],
+                    "token_no_default_policy": [True],
+                },
             },
             "auth/machine/role/guest-*/role-id": {
                 "capabilities": ["read"],
@@ -1573,6 +1594,7 @@ try:
                 "token_policies": ["machine-ssh-otp"],
                 "token_ttl": "5m",
                 "token_max_ttl": "10m",
+                "token_no_default_policy": True,
             },
             token=token,
         )
