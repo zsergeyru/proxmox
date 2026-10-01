@@ -966,6 +966,7 @@ def _run_guest_ansible(
     self_update: bool,
     project_branch: str | None,
     host_certificate: Path | None = None,
+    openbao_machine_args: list[str] | None = None,
 ) -> None:
     ansible_env = os.environ.copy()
     ansible_env["ANSIBLE_HOST_KEY_CHECKING"] = "True"
@@ -998,6 +999,14 @@ def _run_guest_ansible(
             "-e",
             f"infra_pve_node={context.node}",
             *_project_git_ansible_vars(context),
+            *(
+                openbao_machine_args
+                if openbao_machine_args is not None
+                else [
+                    "-e",
+                    "infra_openbao_machine_enabled=false",
+                ]
+            ),
             *(
                 [
                     "-e",
@@ -1058,6 +1067,16 @@ def _configure_guest_os(
                 directory=Path(temporary_dir),
                 provision_phase=provision_phase,
             )
+            openbao_machine_args = (
+                _prepare_openbao_machine_ansible_vars(
+                    context,
+                    private_key=private_key,
+                    certificate=certificate,
+                    directory=Path(temporary_dir),
+                )
+                if provision_phase == "full"
+                else ["-e", "infra_openbao_machine_enabled=false"]
+            )
             _run_guest_ansible(
                 context,
                 private_key=private_key,
@@ -1066,6 +1085,7 @@ def _configure_guest_os(
                 self_update=self_update,
                 project_branch=project_branch,
                 host_certificate=host_certificate,
+                openbao_machine_args=openbao_machine_args,
             )
             return
 
@@ -1086,6 +1106,16 @@ def _configure_guest_os(
             directory=Path(temporary_dir),
             provision_phase=provision_phase,
         )
+        openbao_machine_args = (
+            _prepare_openbao_machine_ansible_vars(
+                context,
+                private_key=context.paths.private_key,
+                certificate=None,
+                directory=Path(temporary_dir),
+            )
+            if provision_phase == "full"
+            else ["-e", "infra_openbao_machine_enabled=false"]
+        )
         _run_guest_ansible(
             context,
             private_key=context.paths.private_key,
@@ -1094,6 +1124,7 @@ def _configure_guest_os(
             self_update=self_update,
             project_branch=project_branch,
             host_certificate=host_certificate,
+            openbao_machine_args=openbao_machine_args,
         )
 
 def _validate_existing_guest_object(context: DeploymentContext) -> None:
