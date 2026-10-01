@@ -192,6 +192,7 @@ jobs:
           set -Eeuo pipefail
           data_dir="$(mktemp -d)"
           tls_dir="$(mktemp -d)"
+          chmod 0755 "$tls_dir"
           sudo ip addr add 192.168.9.10/32 dev lo
           openssl req -x509 -newkey rsa:2048 -nodes -sha256 -days 1 \
             -subj "/CN=OpenBao test CA" \
