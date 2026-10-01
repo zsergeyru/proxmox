@@ -79,6 +79,8 @@ docker:
       restart: unless-stopped
       network_mode: host
       api_address: http://127.0.0.1:8200
+      machine_api_address: https://192.168.9.10:8202
+      tls_path: /etc/infra-manager/openbao/tls
       data_path: /var/lib/persistent/openbao
       config_file: rootfs/opt/infra-manager/compose/openbao/openbao.hcl
       storage: raft
@@ -88,6 +90,7 @@ paths:
   configuration: /etc/infra-manager
   ca: /etc/infra-manager/ca
   ssh_client_ca: /etc/infra-manager/ca/ssh-client-ca.pub
+  openbao_tls: /etc/infra-manager/openbao/tls
   ansible_identity: /etc/infra-manager/ansible
   pve_host_identity: /mnt/pve-access/pve-host
   data: /var/lib/infra-manager
@@ -114,6 +117,10 @@ access_materialization:
     staging_credential: /run/infra-manager/bootstrap-secrets/github_proxmox_repo_ed25519
     private_key: /run/infra-manager/secrets/github_proxmox_repo_ed25519
     known_hosts: /root/.ssh/github_known_hosts
+
+  openbao_tls:
+    source: /mnt/pve-access/openbao-tls
+    target: /etc/infra-manager/openbao/tls
 
 semaphore:
   project: Proxmox Infrastructure
@@ -142,6 +149,7 @@ persistence:
         - openbao-unseal-key
         - openbao-ssh-access-credentials
         - openbao-kv-access-credentials
+        - openbao-tls-ca
         - recovery-github-deploy-key
 
     access:
@@ -152,6 +160,7 @@ persistence:
         - pve-root-ssh-key
         - pve-known-hosts
         - pve-ca
+        - openbao-tls-server
 
     state:
       host_path: /mnt/bindmounts/infra-manager/state
