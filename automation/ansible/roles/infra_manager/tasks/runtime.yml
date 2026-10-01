@@ -66,7 +66,7 @@
 
 - name: Установить запуск разблокировки OpenBao вместе с 910
   ansible.builtin.template:
-    src: "{{ guest_root }}/systemd/infra-manager-openbao-startup-unseal.service.j2"
+    src: "{{ guest_root }}/rootfs/etc/systemd/system/infra-manager-openbao-startup-unseal.service.j2"
     dest: /etc/systemd/system/infra-manager-openbao-startup-unseal.service
     owner: root
     group: root
@@ -80,7 +80,7 @@
 
 - name: Установить службу обновления межмашинного SSH
   ansible.builtin.template:
-    src: "{{ guest_root }}/systemd/infra-manager-machine-ssh-refresh.service.j2"
+    src: "{{ guest_root }}/rootfs/etc/systemd/system/infra-manager-machine-ssh-refresh.service.j2"
     dest: /etc/systemd/system/infra-manager-machine-ssh-refresh.service
     owner: root
     group: root
@@ -88,7 +88,7 @@
 
 - name: Установить таймер обновления межмашинного SSH
   ansible.builtin.template:
-    src: "{{ guest_root }}/systemd/infra-manager-machine-ssh-refresh.timer.j2"
+    src: "{{ guest_root }}/rootfs/etc/systemd/system/infra-manager-machine-ssh-refresh.timer.j2"
     dest: /etc/systemd/system/infra-manager-machine-ssh-refresh.timer
     owner: root
     group: root
