@@ -11,6 +11,116 @@
       - pve_ca.stat.size | int > 0
     fail_msg: "PVE CA отсутствует в постоянном каталоге доступа"
 
+- name: Подготовить временный каталог хостовых сценариев
+  ansible.builtin.file:
+    path: /run/infra-manager/host-support
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Подготовить актуальный PVE-only сценарий OpenBao
+  ansible.builtin.copy:
+    src: "{{ guest_root }}/scripts/infra-manager/host/openbao-unseal.py"
+    dest: /run/infra-manager/host-support/openbao-unseal.py
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Передать актуальный сценарий OpenBao на PVE
+  ansible.builtin.command:
+    argv:
+      - scp
+      - -i
+      - "{{ provision.access_materialization.pve.root_ssh_private_key }}"
+      - -o
+      - "UserKnownHostsFile={{ provision.access_materialization.pve.root_ssh_known_hosts }}"
+      - -o
+      - StrictHostKeyChecking=yes
+      - -o
+      - BatchMode=yes
+      - -o
+      - IdentitiesOnly=yes
+      - /run/infra-manager/host-support/openbao-unseal.py
+      - "root@{{ infra_pve_node }}:/tmp/infra-manager-openbao-unseal.new"
+  changed_when: true
+
+- name: Установить актуальный PVE-only сценарий OpenBao
+  ansible.builtin.command:
+    argv:
+      - ssh
+      - -i
+      - "{{ provision.access_materialization.pve.root_ssh_private_key }}"
+      - -o
+      - "UserKnownHostsFile={{ provision.access_materialization.pve.root_ssh_known_hosts }}"
+      - -o
+      - StrictHostKeyChecking=yes
+      - -o
+      - BatchMode=yes
+      - -o
+      - IdentitiesOnly=yes
+      - "root@{{ infra_pve_node }}"
+      - sh
+      - -c
+      - >-
+        install -o root -g root -m 0755
+        /tmp/infra-manager-openbao-unseal.new
+        /usr/local/sbin/infra-manager-openbao-unseal
+        && rm -f /tmp/infra-manager-openbao-unseal.new
+  changed_when: true
+
+- name: Подготовить TLS OpenBao на PVE
+  ansible.builtin.command:
+    argv:
+      - ssh
+      - -i
+      - "{{ provision.access_materialization.pve.root_ssh_private_key }}"
+      - -o
+      - "UserKnownHostsFile={{ provision.access_materialization.pve.root_ssh_known_hosts }}"
+      - -o
+      - StrictHostKeyChecking=yes
+      - -o
+      - BatchMode=yes
+      - -o
+      - IdentitiesOnly=yes
+      - "root@{{ infra_pve_node }}"
+      - /usr/local/sbin/infra-manager-openbao-unseal
+      - --prepare-tls
+      - --log-level
+      - quiet
+  changed_when: false
+
+- name: Подготовить каталог TLS OpenBao внутри 910
+  ansible.builtin.file:
+    path: "{{ provision.access_materialization.openbao_tls.target }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Установить TLS material OpenBao
+  ansible.builtin.copy:
+    remote_src: true
+    src: "{{ provision.access_materialization.openbao_tls.source }}/{{ item.name }}"
+    dest: "{{ provision.access_materialization.openbao_tls.target }}/{{ item.name }}"
+    owner: root
+    group: root
+    mode: "{{ item.mode }}"
+  loop:
+    - { name: ca.crt, mode: "0644" }
+    - { name: server.crt, mode: "0644" }
+    - { name: server.key, mode: "0600" }
+
+- name: Проверить TLS certificate OpenBao
+  ansible.builtin.command:
+    argv:
+      - openssl
+      - verify
+      - -CAfile
+      - "{{ provision.access_materialization.openbao_tls.target }}/ca.crt"
+      - "{{ provision.access_materialization.openbao_tls.target }}/server.crt"
+  changed_when: false
+
 - name: Установить сертификат PVE в систему
   ansible.builtin.copy:
     remote_src: true
