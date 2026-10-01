@@ -325,6 +325,129 @@ def check_910_self_update_path() -> None:
         )
 
 
+def check_openbao_machine_identity_preparation() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        ca = root / "ca.crt"
+        ca.write_text("TEST-CA\n", encoding="utf-8")
+        private_key = root / "guest_ed25519"
+        private_key.write_text("PRIVATE", encoding="utf-8")
+        context = DeploymentContext(
+            client=SimpleNamespace(),
+            vmid=410,
+            name="ai-control",
+            node="pve",
+            kind="vm",
+            features=(),
+            template_vmid=9000,
+            address="192.168.4.10",
+            target='proxmox_virtual_environment_vm.guest["410"]',
+            workspace=SimpleNamespace(),
+            paths=DeploymentPaths(
+                guest_dir=ROOT / "infrastructure/guests/410-ai-control",
+                private_key=private_key,
+                playbook=ROOT / "automation/ansible/playbooks/configure-guest.yml",
+                known_hosts=root / "known_hosts",
+                plan_file=root / "plan",
+            ),
+        )
+
+        with (
+            patch.object(
+                guest_deploy_module,
+                "PATHS",
+                SimpleNamespace(openbao_tls_ca=ca),
+            ),
+            patch.object(
+                guest_deploy_module,
+                "run",
+                return_value=SimpleNamespace(
+                    returncode=1,
+                    stdout="",
+                    stderr="",
+                ),
+            ),
+            patch.object(
+                guest_deploy_module,
+                "issue_openbao_machine_credentials",
+                return_value={
+                    "role_id": "role-410",
+                    "secret_id": "secret-410",
+                },
+            ) as issue_credentials,
+        ):
+            args = guest_deploy_module._prepare_openbao_machine_ansible_vars(
+                context,
+                private_key=private_key,
+                certificate=None,
+                directory=root,
+            )
+
+        issue_credentials.assert_called_once_with("pve", 410)
+        if "infra_openbao_machine_enabled=true" not in args:
+            fail("OTP-источник 410 не получил признак машинной identity")
+        if f"infra_openbao_ca_file={ca}" not in args:
+            fail("OTP-источник не получил TLS CA OpenBao")
+        env_args = [
+            item
+            for item in args
+            if item.startswith("infra_openbao_machine_env_file=")
+        ]
+        if len(env_args) != 1:
+            fail("Не подготовлен временный machine.env")
+        env_file = Path(env_args[0].split("=", 1)[1])
+        content = env_file.read_text(encoding="utf-8")
+        for expected in (
+            "OPENBAO_ADDR=https://192.168.9.10:8202",
+            "OPENBAO_ROLE_ID=role-410",
+            "OPENBAO_SECRET_ID=secret-410",
+            "OPENBAO_CA=/etc/infra-manager/openbao/ca.crt",
+            "OPENBAO_SSH_OTP_ROLE=guest-410",
+        ):
+            if expected not in content:
+                fail(f"machine.env не содержит {expected}")
+        if env_file.stat().st_mode & 0o777 != 0o600:
+            fail("Временный machine.env должен иметь права 0600")
+        if any("secret-410" in item for item in args):
+            fail("SecretID не должен попадать в argv Ansible")
+
+        with (
+            patch.object(
+                guest_deploy_module,
+                "PATHS",
+                SimpleNamespace(openbao_tls_ca=ca),
+            ),
+            patch.object(
+                guest_deploy_module,
+                "run",
+                return_value=SimpleNamespace(
+                    returncode=0,
+                    stdout="",
+                    stderr="",
+                ),
+            ),
+            patch.object(
+                guest_deploy_module,
+                "issue_openbao_machine_credentials",
+            ) as issue_existing,
+        ):
+            existing_args = (
+                guest_deploy_module._prepare_openbao_machine_ansible_vars(
+                    context,
+                    private_key=private_key,
+                    certificate=None,
+                    directory=root,
+                )
+            )
+
+        issue_existing.assert_not_called()
+        if any(
+            item.startswith("infra_openbao_machine_env_file=")
+            for item in existing_args
+        ):
+            fail("Существующая machine identity не должна перевыпускаться")
+
+
 def check_temporary_certificate_path() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
@@ -683,6 +806,7 @@ def main_test() -> None:
     check_opentofu_state_status()
     check_guest_summary()
     check_910_self_update_path()
+    check_openbao_machine_identity_preparation()
     check_temporary_certificate_path()
     check_host_certificate_is_passed_to_ansible()
     check_certificate_bootstrap_fallback()
