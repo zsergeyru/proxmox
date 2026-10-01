@@ -485,7 +485,6 @@ otp_config_policy = json.dumps(
             "auth/machine/role/guest-*": {
                 "capabilities": ["create", "read", "update", "delete"],
                 "required_parameters": [
-                    "bind_secret_id",
                     "secret_id_bound_cidrs",
                     "token_bound_cidrs",
                     "token_policies",
@@ -494,16 +493,12 @@ otp_config_policy = json.dumps(
                     "token_no_default_policy",
                 ],
                 "allowed_parameters": {
-                    "bind_secret_id": [True, "true"],
                     "secret_id_bound_cidrs": [],
-                    "secret_id_num_uses": [0, "0"],
-                    "secret_id_ttl": ["0s"],
                     "token_bound_cidrs": [],
-                    "token_num_uses": [0, "0"],
                     "token_policies": ["machine-ssh-otp"],
                     "token_ttl": ["5m"],
                     "token_max_ttl": ["10m"],
-                    "token_no_default_policy": [True, "true"],
+                    "token_no_default_policy": ["true"],
                 },
             },
             "auth/machine/role/guest-*/role-id": {
@@ -1596,19 +1591,47 @@ try:
             "POST",
             f"/v1/auth/machine/role/{role_name}",
             {
-                "bind_secret_id": True,
                 "secret_id_bound_cidrs": [item["source_cidr"]],
-                "secret_id_num_uses": 0,
-                "secret_id_ttl": "0s",
                 "token_bound_cidrs": [item["source_cidr"]],
-                "token_num_uses": 0,
                 "token_policies": "machine-ssh-otp",
                 "token_ttl": "5m",
                 "token_max_ttl": "10m",
-                "token_no_default_policy": True,
+                "token_no_default_policy": "true",
             },
             token=token,
         )
+        machine_role = request(
+            "GET",
+            f"/v1/auth/machine/role/{role_name}",
+            token=token,
+        ).get("data")
+        if not isinstance(machine_role, dict):
+            raise SystemExit(f"missing machine AppRole {role_name}")
+        if machine_role.get("bind_secret_id") is not True:
+            raise SystemExit(f"bind_secret_id is not enabled for {role_name}")
+        if machine_role.get("secret_id_num_uses") != 0:
+            raise SystemExit(f"secret_id_num_uses is not unlimited for {role_name}")
+        if machine_role.get("secret_id_ttl") != 0:
+            raise SystemExit(f"secret_id_ttl is not unlimited for {role_name}")
+        if machine_role.get("token_num_uses") != 0:
+            raise SystemExit(f"token_num_uses is not unlimited for {role_name}")
+        if machine_role.get("token_ttl") != 300:
+            raise SystemExit(f"token_ttl is not 5m for {role_name}")
+        if machine_role.get("token_max_ttl") != 600:
+            raise SystemExit(f"token_max_ttl is not 10m for {role_name}")
+        if machine_role.get("token_no_default_policy") is not True:
+            raise SystemExit(f"default token policy is enabled for {role_name}")
+        if set(machine_role.get("token_policies") or []) != {"machine-ssh-otp"}:
+            raise SystemExit(f"token policy mismatch for {role_name}")
+        if set(str(value) for value in (machine_role.get("secret_id_bound_cidrs") or [])) != {
+            item["source_cidr"]
+        }:
+            raise SystemExit(f"SecretID CIDR mismatch for {role_name}")
+        if set(str(value) for value in (machine_role.get("token_bound_cidrs") or [])) != {
+            item["source_cidr"]
+        }:
+            raise SystemExit(f"token CIDR mismatch for {role_name}")
+
         role_id_payload = request(
             "GET",
             f"/v1/auth/machine/role/{role_name}/role-id",
