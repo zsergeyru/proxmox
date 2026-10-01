@@ -359,7 +359,7 @@ pct exec 910 -- infra-manager-status --full
 
 ## 11. Связанные документы
 
-- [`../systemd/`](../systemd/) — шаблоны постоянных systemd-служб.
+- [`../rootfs/etc/systemd/system/`](../rootfs/etc/systemd/system/) — шаблоны постоянных systemd-служб.
 - [`../status.yaml`](../status.yaml) — машинное описание итоговой проверки.
 - [`infra-runtime.md`](infra-runtime.md) — безопасная замена рабочей среды.
 - [`openbao.md`](openbao.md) — инициализация и разблокировка OpenBao.
