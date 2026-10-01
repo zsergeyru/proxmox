@@ -588,6 +588,26 @@ def test_otp_contract_is_narrow_and_derived() -> None:
         fail("OTP-контракт не должен разрешать произвольную сеть")
 
 
+def test_machine_credentials_are_issued_narrowly() -> None:
+    host = load_host_module()
+    access_code = host.CONFIGURE_SSH_ACCESS_CODE
+    if '"auth/machine/role/guest-*/secret-id"' not in access_code:
+        fail("Служебная OTP-роль не может выпустить SecretID гостя")
+    issue_code = host.ISSUE_MACHINE_CREDENTIALS_CODE
+    required = (
+        'f"guest-{vmid}"',
+        'f"/v1/auth/machine/role/{role_name}/role-id"',
+        'f"/v1/auth/machine/role/{role_name}/secret-id"',
+        '"POST"',
+        '"/v1/auth/token/revoke-self"',
+    )
+    for item in required:
+        if item not in issue_code:
+            fail(f"Выдача машинной идентичности нарушает контракт: {item}")
+    if "open(" in issue_code or "write_text" in issue_code:
+        fail("Машинные RoleID/SecretID не должны записываться на диск")
+
+
 def test_machine_signing_roles_are_separate_and_short_lived() -> None:
     host = load_host_module()
     access_code = host.CONFIGURE_SSH_ACCESS_CODE
@@ -1056,6 +1076,7 @@ def main() -> None:
     test_openbao_container_keeps_protected_files_root_only()
     test_ssh_access_contract_is_narrow()
     test_otp_contract_is_narrow_and_derived()
+    test_machine_credentials_are_issued_narrowly()
     test_machine_signing_roles_are_separate_and_short_lived()
     test_machine_signing_uses_only_pve_signer_approle()
     test_host_signing_role_is_host_only()
