@@ -1704,22 +1704,38 @@ try:
             "machine-ssh-otp"
         }:
             raise SystemExit(f"token policy mismatch for {role_name}")
-        if set(
-            str(value)
-            for value in (
-                read_role_value(
-                    "secret-id-bound-cidrs",
-                    "secret_id_bound_cidrs",
-                )
-                or []
+        def normalized_cidrs(value):
+            if isinstance(value, str):
+                values = [value]
+            elif isinstance(value, list):
+                values = value
+            else:
+                values = []
+            result = set()
+            for raw in values:
+                text = str(raw).strip()
+                if not text:
+                    continue
+                if "/" not in text:
+                    text = f"{text}/32"
+                result.add(str(ipaddress.ip_network(text, strict=False)))
+            return result
+
+        expected_source = {
+            str(ipaddress.ip_network(item["source_cidr"], strict=False))
+        }
+        if normalized_cidrs(
+            read_role_value(
+                "secret-id-bound-cidrs",
+                "secret_id_bound_cidrs",
             )
-        ) != {item["source_cidr"]}:
+        ) != expected_source:
             raise SystemExit(f"SecretID CIDR mismatch for {role_name}")
-        token_cidrs = (
-            read_role_value("token-bound-cidrs", "token_bound_cidrs")
-            or []
+        token_cidrs = read_role_value(
+            "token-bound-cidrs",
+            "token_bound_cidrs",
         )
-        if set(str(value) for value in token_cidrs) != {item["source_cidr"]}:
+        if normalized_cidrs(token_cidrs) != expected_source:
             raise SystemExit(
                 f"token CIDR mismatch for {role_name}: {token_cidrs!r}"
             )
