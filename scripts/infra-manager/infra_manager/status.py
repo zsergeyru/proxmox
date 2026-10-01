@@ -18,11 +18,16 @@ from .semaphore import (
     SemaphoreClient,
     require_unique_by_name,
 )
-from .pve_host import check_openbao_kv, check_recovery_contour
+from .pve_host import (
+    check_openbao_kv,
+    check_openbao_ssh_access,
+    check_recovery_contour,
+)
 from .settings import PATHS, SETTINGS
 
 PVE_ENV = PATHS.pve_api_env
 CA_BUNDLE = PATHS.ca_bundle
+OPENBAO_TLS_CA = PATHS.openbao_tls_ca
 ANSIBLE_PRIVATE_KEY = PATHS.ansible_private_key
 ANSIBLE_PUBLIC_KEY = PATHS.ansible_public_key
 SERVER_ENV = PATHS.server_env
@@ -339,8 +344,49 @@ def _check_runtime() -> None:
         raise InfraManagerError("Semaphore Server не запущен")
 
 
+def _check_openbao_tls() -> None:
+    """Проверить внешний TLS-вход OpenBao по доверенному CA."""
+    required_file(OPENBAO_TLS_CA)
+    address = _primary_ipv4()
+    response = command_runner.run(
+        [
+            "curl",
+            "-fsS",
+            "--connect-timeout",
+            "5",
+            "--max-time",
+            "10",
+            "--cacert",
+            str(OPENBAO_TLS_CA),
+            f"https://{address}:8202/v1/sys/health",
+        ],
+        capture=True,
+        check=False,
+    )
+    if response.returncode:
+        raise InfraManagerError(
+            "TLS-вход OpenBao :8202 недоступен или сертификат не подтверждён"
+        )
+
+    try:
+        payload = json.loads(response.stdout)
+    except json.JSONDecodeError as exc:
+        raise InfraManagerError(
+            "TLS-вход OpenBao вернул некорректное состояние"
+        ) from exc
+
+    if (
+        not isinstance(payload, dict)
+        or payload.get("initialized") is not True
+        or payload.get("sealed") is not False
+    ):
+        raise InfraManagerError(
+            "TLS-вход OpenBao не подтверждает готовое разблокированное состояние"
+        )
+
+
 def _check_openbao(*, full: bool) -> None:
-    """Проверить OpenBao и при full также аварийный PVE-only контур."""
+    """Проверить OpenBao и при full также TLS/OTP и аварийный PVE-only контур."""
     running = command_runner.run(
         [
             "docker",
@@ -395,6 +441,8 @@ def _check_openbao(*, full: bool) -> None:
             )
         check_openbao_kv(node)
         if full:
+            _check_openbao_tls()
+            check_openbao_ssh_access(node)
             check_recovery_contour(node)
 
 
