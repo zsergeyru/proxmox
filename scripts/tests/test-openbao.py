@@ -553,7 +553,10 @@ def test_otp_contract_is_narrow_and_derived() -> None:
         '"token_policies": ["machine-ssh-otp"]',
         '"token_ttl": ["5m"]',
         '"token_max_ttl": ["10m"]',
-        '"token_no_default_policy": [True]',
+        '"bind_secret_id": [True, "true"]',
+        '"secret_id_num_uses": [0, "0"]',
+        '"token_num_uses": [0, "0"]',
+        '"token_no_default_policy": [True, "true"]',
     ):
         if item not in role_policy:
             fail(f"Параметры машинного AppRole не ограничены: {item}")
@@ -577,7 +580,7 @@ def test_otp_contract_is_narrow_and_derived() -> None:
         '"token_bound_cidrs": [item["source_cidr"]]',
         '"token_ttl": "5m"',
         '"token_max_ttl": "10m"',
-        '"token_policies": ["machine-ssh-otp"]',
+        '"token_policies": "machine-ssh-otp"',
         '"token_no_default_policy": True',
         '"DELETE"',
     )
