@@ -21,6 +21,7 @@ REQUIRED_KEYS = {
     "OPENBAO_CA",
     "OPENBAO_SSH_MOUNT",
     "OPENBAO_TARGET_IP",
+    "OPENBAO_ALLOWED_ROLES",
 }
 
 
@@ -54,7 +55,9 @@ def read_env(path: Path) -> dict[str, str]:
     return values
 
 
-def validate_config(values: dict[str, str]) -> tuple[str, Path, str, str]:
+def validate_config(
+    values: dict[str, str],
+) -> tuple[str, Path, str, str, frozenset[str]]:
     address = values["OPENBAO_ADDR"].rstrip("/")
     parsed = urllib.parse.urlparse(address)
     if (
@@ -84,7 +87,21 @@ def validate_config(values: dict[str, str]) -> tuple[str, Path, str, str]:
     if target.version != 4:
         raise OtpVerifyError("OPENBAO_TARGET_IP должен быть IPv4-адресом")
 
-    return address, ca_path, mount, str(target)
+    roles = frozenset(
+        role.strip()
+        for role in values["OPENBAO_ALLOWED_ROLES"].split(",")
+        if role.strip()
+    )
+    if not roles:
+        raise OtpVerifyError("OPENBAO_ALLOWED_ROLES не должен быть пустым")
+    for role in roles:
+        if not role.startswith("guest-"):
+            raise OtpVerifyError("OPENBAO_ALLOWED_ROLES имеет неверный формат")
+        suffix = role.removeprefix("guest-")
+        if not suffix.isdigit() or suffix.startswith("0"):
+            raise OtpVerifyError("OPENBAO_ALLOWED_ROLES имеет неверный формат")
+
+    return address, ca_path, mount, str(target), roles
 
 
 def read_otp(stream: Any) -> str:
@@ -107,7 +124,7 @@ def verify_otp(
         raise OtpVerifyError("Проектный OTP-доступ разрешён только root")
 
     values = read_env(config_path)
-    base_url, ca_path, mount, expected_target = validate_config(values)
+    base_url, ca_path, mount, expected_target, allowed_roles = validate_config(values)
 
     context = ssl.create_default_context(cafile=str(ca_path))
     context.check_hostname = True
@@ -146,8 +163,11 @@ def verify_otp(
 
     returned_ip = data.get("ip")
     returned_user = data.get("username")
+    role_name = data.get("role_name")
     if returned_user != username or returned_ip != expected_target:
         raise OtpVerifyError("SSH OTP выдан для другой цели или пользователя")
+    if not isinstance(role_name, str) or role_name not in allowed_roles:
+        raise OtpVerifyError("SSH OTP выдан запрещённой машинной ролью")
 
 
 def parse_args() -> argparse.Namespace:
