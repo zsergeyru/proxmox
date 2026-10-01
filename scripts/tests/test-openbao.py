@@ -536,6 +536,13 @@ def test_otp_contract_is_narrow_and_derived() -> None:
         fail("ssh-otp-config не должен управлять самим secrets engine")
     if '"sys/auth/machine": {' in access_code:
         fail("ssh-otp-config не должен управлять самим auth method")
+    otp_policy = access_code.split("otp_config_policy = json.dumps(", 1)[1].split(
+        "request(", 1
+    )[0]
+    if "sys/policies" in otp_policy:
+        fail("ssh-otp-config не должен иметь права изменения ACL-политик")
+    if "machine-ssh-otp" not in access_code or "metadata.role_name" not in access_code:
+        fail("Машинный OTP должен использовать одну шаблонную ACL-политику")
 
     code = host.CONFIGURE_OTP_CONTRACT_CODE
     required = (
@@ -549,7 +556,7 @@ def test_otp_contract_is_narrow_and_derived() -> None:
         '"token_bound_cidrs": [item["source_cidr"]]',
         '"token_ttl": "5m"',
         '"token_max_ttl": "10m"',
-        'f"ssh-otp/creds/{role_name}"',
+        '"token_policies": ["machine-ssh-otp"]',
         '"DELETE"',
     )
     for item in required:
