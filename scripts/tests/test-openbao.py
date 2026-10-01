@@ -499,13 +499,18 @@ def test_otp_contract_is_narrow_and_derived() -> None:
     access_code = host.CONFIGURE_SSH_ACCESS_CODE
     for item in (
         "infra-manager-ssh-otp-config",
-        '"sys/mounts/ssh-otp"',
-        '"sys/auth/machine"',
+        '"/v1/sys/mounts/ssh-otp"',
+        '"/v1/sys/auth/machine"',
         '"ssh-otp/roles/guest-*"',
         '"auth/machine/role/guest-*"',
     ):
         if item not in access_code:
             fail(f"Служебный OTP-контур не содержит ограничение: {item}")
+
+    if '"sys/mounts/ssh-otp": {' in access_code:
+        fail("ssh-otp-config не должен управлять самим secrets engine")
+    if '"sys/auth/machine": {' in access_code:
+        fail("ssh-otp-config не должен управлять самим auth method")
 
     code = host.CONFIGURE_OTP_CONTRACT_CODE
     required = (
