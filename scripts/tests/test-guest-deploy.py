@@ -471,6 +471,72 @@ def check_openbao_machine_identity_preparation() -> None:
             fail("Существующая machine identity не должна перевыпускаться")
 
 
+
+def check_openbao_target_only_preparation() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        ca = root / "ca.crt"
+        ca.write_text("TEST-CA\n", encoding="utf-8")
+        private_key = root / "guest_ed25519"
+        private_key.write_text("PRIVATE", encoding="utf-8")
+        context = DeploymentContext(
+            client=SimpleNamespace(),
+            vmid=311,
+            name="dev-services",
+            node="pve",
+            kind="lxc",
+            features=(),
+            template_vmid=None,
+            address="192.168.3.11",
+            target='proxmox_virtual_environment_container.guest["311"]',
+            workspace=SimpleNamespace(),
+            paths=DeploymentPaths(
+                guest_dir=ROOT / "infrastructure/guests/311-dev-services",
+                private_key=private_key,
+                playbook=ROOT / "automation/ansible/playbooks/configure-guest.yml",
+                known_hosts=root / "known_hosts",
+                plan_file=root / "plan",
+            ),
+        )
+
+        with (
+            patch.object(
+                guest_deploy_module,
+                "PATHS",
+                SimpleNamespace(openbao_tls_ca=ca),
+            ),
+            patch.object(
+                guest_deploy_module,
+                "issue_openbao_machine_credentials",
+            ) as issue_credentials,
+        ):
+            args = guest_deploy_module._prepare_openbao_machine_ansible_vars(
+                context,
+                private_key=private_key,
+                certificate=None,
+                directory=root,
+            )
+
+        issue_credentials.assert_not_called()
+        if "infra_openbao_machine_enabled=false" not in args:
+            fail("OTP target-only гость неожиданно получил машинную identity")
+        if "infra_openbao_otp_target_enabled=true" not in args:
+            fail("OTP target-only гость не получил verifier")
+        if "infra_openbao_otp_target_ip=192.168.3.11" not in args:
+            fail("OTP target-only гость получил неверный собственный адрес")
+        if "infra_openbao_otp_allowed_roles=guest-410,guest-910" not in args:
+            fail("OTP target-only гость получил неверные разрешённые роли")
+        if any(
+            item.startswith("infra_openbao_machine_env_file=")
+            for item in args
+        ):
+            fail("OTP target-only гость не должен получать machine.env")
+        if any(
+            item.startswith("infra_openbao_otp_target_ips=")
+            for item in args
+        ):
+            fail("OTP target-only гость не должен получать source SSH-цели")
+
 def check_temporary_certificate_path() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
@@ -850,6 +916,7 @@ def main_test() -> None:
     check_guest_summary()
     check_910_self_update_path()
     check_openbao_machine_identity_preparation()
+    check_openbao_target_only_preparation()
     check_temporary_certificate_path()
     check_host_certificate_is_passed_to_ansible()
     check_certificate_bootstrap_fallback()
