@@ -1,339 +1,79 @@
 # Semaphore на 910 infra-manager
 
-**Назначение:** объяснить, как Semaphore размещён и обслуживается на 910, где лежат его данные, как создаются задания и как он связан с OpenBao и проектом.
+**Назначение:** практическое руководство по созданию, настройке, проверке, обновлению и восстановлению Semaphore на 910.
 
-Общие правила развёртывания и безопасности здесь не повторяются. Этот файл описывает только устройство Semaphore на 910.
+Общие документы проекта объясняют, зачем Semaphore используется как исполнитель инфраструктурных заданий. Этот файл описывает его конкретную реализацию внутри 910.
 
 ## 1. Где работает Semaphore
 
-Semaphore не выделен в отдельный контейнер. Он является основой контейнера `infra-runtime`.
-
-### 1.1. Контейнер
-
-Контейнер:
+Semaphore не имеет отдельного Docker-контейнера. Он является базой контейнера:
 
 ```text
 infra-runtime
 ```
 
-собирается на основе образа:
+который собирается из:
+
+```text
+rootfs/opt/infra-manager/compose/runtime/Dockerfile
+```
+
+Базовый образ:
 
 ```text
 semaphoreui/semaphore:v2.18.30
 ```
 
-Точная версия задаётся в [`../provision.yaml`](../provision.yaml).
+Точная версия находится в [`../provision.yaml`](../provision.yaml).
 
-Контейнер использует сеть 910 напрямую:
+Контейнер использует:
 
 ```text
 network_mode: host
 ```
 
-Поэтому веб-интерфейс Semaphore доступен на адресе самого 910, порт `3000`.
+поэтому Semaphore слушает порт `3000` самого 910.
 
-### 1.2. База данных
+Рабочий адрес:
+
+```text
+http://<IP-910>:3000
+```
+
+Локальная API-точка внутри 910:
+
+```text
+http://127.0.0.1:3000
+```
+
+## 2. Постоянные данные
 
 Используется SQLite.
 
-Внутри контейнера база находится по пути:
+Путь внутри контейнера:
 
 ```text
 /var/lib/semaphore/semaphore.sqlite
 ```
 
-Каталог `/var/lib/semaphore` подключён к постоянным данным:
+Compose подключает:
 
 ```text
 /mnt/persistent-state/semaphore
+        ↓
+/var/lib/semaphore
 ```
 
-Поэтому пересоздание `infra-runtime` не должно уничтожать проекты, историю заданий и другие данные Semaphore.
-
-## 2. Первый запуск
-
-При первом запуске рабочие настройки Semaphore ещё отсутствуют в OpenBao.
-
-### 2.1. Создание первоначальных данных
-
-Ansible создаёт:
-
-- пароль пользователя `admin`;
-- ключ защиты секретов Semaphore;
-- файл рабочих переменных Semaphore;
-- файл с первоначальным паролем для вывода человеку.
-
-Рабочие файлы создаются только во временной области:
+На уровне 910 тот же постоянный каталог также доступен как:
 
 ```text
-/run/infra-manager/secrets/
+/var/lib/infra-manager/semaphore
+    → /mnt/persistent-state/semaphore
 ```
 
-Основные файлы:
+В каталоге Semaphore сохраняются база, история заданий, настройки проекта и `known_hosts` Git.
 
-```text
-semaphore-server.env
-initial-admin-password
-```
-
-Они имеют режим `0600` и принадлежат служебному пользователю `1001:0`.
-
-После инициализации OpenBao постоянным источником этих значений становится OpenBao.
-
-### 2.2. Учётная запись
-
-Первоначальный пользователь:
-
-```text
-логин: admin
-```
-
-Пароль не записывается в Git и не должен попадать в обычный журнал.
-
-Его можно увидеть в полном экране состояния:
-
-```bash
-infra-manager-status --full
-```
-
-или прочитать от root:
-
-```bash
-cat /run/infra-manager/secrets/initial-admin-password
-```
-
-## 3. Проект Semaphore
-
-910 автоматически поддерживает один проект:
-
-```text
-Proxmox Infrastructure
-```
-
-### 3.1. Основные объекты
-
-Штатная синхронизация создаёт и проверяет:
-
-- проект `Proxmox Infrastructure`;
-- SSH-ключ `GitHub project read-only`;
-- репозиторий `proxmox`;
-- группу переменных `OpenTofu PVE`;
-- группу переменных `Infra Manager`;
-- набор инфраструктурных заданий.
-
-Проект создаётся с ограничением:
-
-```text
-max_parallel_tasks = 1
-```
-
-Это не даёт двум инфраструктурным заданиям одновременно менять один и тот же контур.
-
-### 3.2. Репозиторий
-
-Semaphore получает проект из:
-
-```text
-git@github.com:zsergeyru/proxmox.git
-```
-
-Используется отдельный read-only Deploy Key.
-
-Рабочий ключ во время работы берётся из OpenBao и материализуется в `/run/infra-manager/secrets/`.
-
-Ветка репозитория в Semaphore должна совпадать с веткой, которой управляет текущий запуск. По умолчанию это `main`.
-
-## 4. Группы переменных
-
-Semaphore использует две проектные группы переменных с разным назначением.
-
-### 4.1. `OpenTofu PVE`
-
-Эта группа содержит данные, необходимые OpenTofu:
-
-- адрес PVE API;
-- открытый ключ Ansible;
-- PVE API-токен как секретную переменную.
-
-Секрет PVE API не записывается в обычное поле группы.
-
-Рабочее значение берётся из временно материализованного секрета OpenBao.
-
-### 4.2. `Infra Manager`
-
-Эта группа содержит общие несекретные настройки заданий.
-
-Сейчас основной параметр:
-
-```text
-INFRA_LOG_LEVEL
-```
-
-Допустимые значения:
-
-| Значение | Назначение |
-|---|---|
-| `normal` | обычный сокращённый вывод |
-| `verbose` | подробный вывод для разработки и диагностики |
-| `quiet` | только ошибки и итог |
-
-При первом создании используется `normal`.
-
-Если пользователь вручную выбрал допустимое значение в веб-интерфейсе, повторная синхронизация проекта его не заменяет.
-
-Недопустимое значение считается ошибкой настройки.
-
-## 5. Задания
-
-Набор заданий задаётся кодом `infra_manager.semaphore` и синхронизируется повторяемо.
-
-### 5.1. Текущий набор
-
-Сейчас создаются:
-
-```text
-OpenTofu Plan
-Build Template 9000
-Deploy Guest 410
-Deploy Guest 910
-Sync Machine SSH
-Initialize OpenBao 910
-```
-
-Каждое задание запускает Python-сценарий из:
-
-```text
-scripts/infra-manager/jobs/
-```
-
-Основная логика находится в пакете:
-
-```text
-scripts/infra-manager/infra_manager/
-```
-
-Semaphore не должен содержать отдельную копию логики инфраструктуры только в настройках веб-интерфейса.
-
-### 5.2. Переходное задание межмашинного SSH
-
-`Sync Machine SSH` сейчас обслуживает старую сертификатную реализацию межмашинного SSH.
-
-Нормативная схема уже переведена на OpenBao SSH OTP. Поэтому это задание должно быть переработано вместе с кодом межмашинного доступа.
-
-Текущее состояние перехода находится в [`780-implementation-status.md`](../../../../docs/700-security/780-implementation-status.md).
-
-## 6. API Semaphore
-
-Для автоматической синхронизации 910 использует API Semaphore.
-
-### 6.1. Токен
-
-Если сохранённый API-токен работает, он используется повторно.
-
-Если токен отсутствует или перестал работать:
-
-1. код входит в Semaphore как `admin`;
-2. создаёт новый API-токен с именем `infra-manager setup`;
-3. сохраняет его во временный файл;
-4. проверяет токен;
-5. записывает новое значение обратно в OpenBao.
-
-Рабочий файл:
-
-```text
-/run/infra-manager/secrets/semaphore-api-token
-```
-
-Он не является постоянным источником.
-
-### 6.2. Идентификатор проекта
-
-Числовой идентификатор проекта сохраняется в служебном файле 910, чтобы проверки могли обращаться к правильному проекту.
-
-Если объект Semaphore с ожидаемым именем найден более одного раза, настройка останавливается. Автоматический выбор одного из нескольких одинаковых объектов запрещён.
-
-## 7. Синхронизация проекта
-
-Штатная команда:
-
-```bash
-python3 -m infra_manager semaphore-project
-```
-
-### 7.1. Что делает синхронизация
-
-Она:
-
-1. проверяет рабочие PVE и Git данные;
-2. проверяет или создаёт API-токен Semaphore;
-3. проверяет или создаёт проект;
-4. синхронизирует Git-ключ;
-5. синхронизирует репозиторий и ветку;
-6. синхронизирует группы переменных;
-7. синхронизирует задания.
-
-Операция рассчитана на повторный запуск.
-
-### 7.2. Когда запускается
-
-Синхронизация выполняется при настройке 910 и после активации новой версии `infra-runtime`.
-
-После самообновления 910 сначала запускаются контейнеры, затем разблокируется OpenBao, после чего синхронизируется Semaphore и выполняется полная проверка 910.
-
-## 8. Запуск, остановка и обновление
-
-Semaphore запускается и останавливается вместе с контейнером `infra-runtime`; отдельной системной службы Semaphore на уровне Debian 910 нет.
-
-Штатное изменение версии основы контейнера и состава инструментов выполняется через [`../provision.yaml`](../provision.yaml) и общий механизм обновления 910. Ручная замена контейнера или файлов внутри него не считается штатным обновлением.
-
-После активации новой версии `infra-runtime` выполняются:
-
-1. запуск контейнеров;
-2. проверка и при необходимости разблокировка OpenBao;
-3. материализация рабочих секретов;
-4. синхронизация проекта Semaphore;
-5. полная проверка 910.
-
-Особенность самообновления описана в [`infra-runtime.md`](infra-runtime.md), порядок системных служб — в [`system-services.md`](system-services.md).
-
-## 9. Проверка состояния
-
-Общая команда:
-
-```bash
-infra-manager-status --full
-```
-
-### 9.1. Что проверяется
-
-Проверка Semaphore подтверждает:
-
-- доступность `/api/ping`;
-- работоспособность API-токена;
-- наличие ожидаемого проекта;
-- корректность репозитория и выбранной ветки;
-- возможность получить список веток Git через сохранённый SSH-ключ;
-- наличие ожидаемых групп переменных;
-- наличие ожидаемых заданий;
-- отсутствие неоднозначных дубликатов основных объектов.
-
-Итоговый экран также показывает:
-
-- адрес Semaphore;
-- логин;
-- сохранённый первоначальный пароль.
-
-## 10. Права и файлы
-
-Контейнер работает от пользователя:
-
-```text
-1001:0
-```
-
-### 10.1. Постоянный каталог
-
-Для каталога Semaphore Ansible устанавливает:
+Перед запуском Ansible приводит владельца и права к:
 
 ```text
 владелец: 1001:0
@@ -341,76 +81,465 @@ infra-manager-status --full
 файлы:   0660
 ```
 
-Это нужно для записи SQLite и служебных данных.
+## 3. Что должно быть готово до запуска
 
-### 10.2. Временные секреты
+Semaphore зависит от нескольких частей 910:
 
-Файлы `semaphore-server.env`, `initial-admin-password` и `semaphore-api-token` находятся под `/run`.
+1. Docker установлен и запущен.
+2. `/mnt/persistent-state/semaphore` подключён с PVE.
+3. `/run/infra-manager/secrets/` создан.
+4. существует `semaphore-server.env`.
+5. существует `initial-admin-password`.
+6. доступен рабочий Git credential.
+7. после инициализации OpenBao рабочие PVE/Git/Semaphore значения материализованы из него.
+8. контейнер `infra-runtime` собран.
 
-Они не должны переноситься в постоянный каталог Semaphore как источник истины.
+Штатно это готовят задачи:
 
-## 11. Резервирование и восстановление
+```text
+automation/ansible/roles/infra_manager/tasks/persistence.yml
+automation/ansible/roles/infra_manager/tasks/semaphore.yml
+automation/ansible/roles/infra_manager/tasks/runtime.yml
+```
 
-Для сохранения Semaphore нужны две связанные части:
+## 4. Первый запуск Semaphore
 
-- согласованная копия каталога `/mnt/persistent-state/semaphore`;
-- связанные постоянные секреты Semaphore из OpenBao.
+До первой инициализации OpenBao Ansible может создать первоначальные данные Semaphore.
 
-### 11.1. Почему одной SQLite недостаточно
+### 4.1. Первоначальный пароль
 
-База хранит проект, историю и служебные объекты, но для нормального запуска также нужны пароль, ключ защиты и API-токен.
+Если файл:
 
-Эти значения должны восстанавливаться в согласованном состоянии с базой.
+```text
+/run/infra-manager/secrets/semaphore-server.env
+```
 
-### 11.2. После восстановления
+ещё отсутствует, Ansible генерирует:
 
-После возврата постоянных данных нужно:
+- пароль `admin` через `openssl rand -base64 24`;
+- ключ `SEMAPHORE_ACCESS_KEY_ENCRYPTION` через `openssl rand -base64 32`.
 
-1. разблокировать OpenBao;
-2. материализовать рабочие секреты;
-3. запустить `infra-runtime`;
-4. выполнить синхронизацию проекта;
-5. выполнить `infra-manager-status --full`.
+Затем создаются два файла:
 
-Пустая новая база Semaphore не считается восстановлением прежней истории и состояния, если сохранение этих данных требовалось.
+```text
+/run/infra-manager/secrets/semaphore-server.env
+/run/infra-manager/secrets/initial-admin-password
+```
 
-Общие правила копирования находятся в [`610-backup.md`](../../../../docs/600-storage/610-backup.md), порядок восстановления 910 — в [`830-recovery.md`](../../../../docs/800-operations/830-recovery.md).
+Оба принадлежат:
 
-## 12. Границы
+```text
+1001:0
+mode 0600
+```
 
-Semaphore на 910 не является отдельным владельцем архитектурных требований.
+### 4.2. Содержимое semaphore-server.env
 
-### 12.1. Что является источником требований
+Текущий набор переменных:
 
-Источник кода и состава заданий — Git.
+```text
+SEMAPHORE_DB_DIALECT=sqlite
+SEMAPHORE_DB_HOST=/var/lib/semaphore/semaphore.sqlite
+SEMAPHORE_ADMIN=admin
+SEMAPHORE_ADMIN_PASSWORD=<secret>
+SEMAPHORE_ADMIN_NAME=Admin
+SEMAPHORE_ADMIN_EMAIL=admin@localhost
+SEMAPHORE_ACCESS_KEY_ENCRYPTION=<secret>
+TZ=<timezone>
+```
 
-Источник прав — `infrastructure/security/access.yaml`.
+Compose передаёт этот файл контейнеру через:
 
-Источник рабочих секретов — OpenBao.
+```text
+env_file:
+  /run/infra-manager/secrets/semaphore-server.env
+```
 
-Semaphore хранит исполнение, состояние своего интерфейса, историю и ссылки на проектные объекты, но не должен становиться вторым независимым источником инфраструктурных правил.
+### 4.3. После инициализации OpenBao
 
-### 12.2. Текущие ограничения
+После готовности OpenBao постоянным источником пароля и ключа шифрования становится KV OpenBao.
 
-В текущей схеме:
+Файлы под `/run/infra-manager/secrets/` остаются только временным рабочим представлением.
 
-- используется SQLite;
-- отдельный удалённый исполнитель Semaphore не используется;
-- задания выполняются внутри `infra-runtime`;
-- параллельное выполнение инфраструктурных задач ограничено одним заданием.
+Если `semaphore-server.env` существует, но `initial-admin-password` восстановить не удалось, Ansible считает состояние некорректным и останавливается.
 
-При настройке 910 старые параметры удалённого исполнителя и старый файл его переменных явно удаляются. Это не даёт прежней схеме незаметно продолжить работать после обновления.
+## 5. Запуск контейнера
 
-Если эти ограничения изменятся, сначала нужно обновить машинную конфигурацию и локальное описание 910.
+Semaphore запускается вместе с `infra-runtime`.
 
-## 13. Связанные документы
+Штатная команда:
 
-- [`../provision.yaml`](../provision.yaml) — точные версии, пути и список объектов Semaphore.
-- [`../status.yaml`](../status.yaml) — состав итоговой проверки.
-- [`infra-runtime.md`](infra-runtime.md) — контейнер, внутри которого работает Semaphore.
-- [`data-and-access.md`](data-and-access.md) — постоянные каталоги и рабочие секреты.
-- [`../../../../docs/600-storage/610-backup.md`](../../../../docs/600-storage/610-backup.md) — резервное копирование.
-- [`../../../../docs/700-security/730-git-access.md`](../../../../docs/700-security/730-git-access.md) — Git Deploy Key.
-- [`../../../../docs/700-security/740-openbao.md`](../../../../docs/700-security/740-openbao.md) — хранение секретов в OpenBao.
-- [`../../../../docs/800-operations/810-deployment.md`](../../../../docs/800-operations/810-deployment.md) — развёртывание 910.
-- [`../../../../docs/800-operations/830-recovery.md`](../../../../docs/800-operations/830-recovery.md) — восстановление.
+```bash
+docker compose \
+  --env-file /opt/infra-manager/compose/.versions.env \
+  -f /opt/infra-manager/compose/docker-compose.yml \
+  up -d --remove-orphans
+```
+
+Проверить контейнер:
+
+```bash
+docker ps --filter name=infra-runtime
+docker logs --tail 100 infra-runtime
+```
+
+Проверить сам Semaphore:
+
+```bash
+curl -fsS http://127.0.0.1:3000/api/ping
+```
+
+Ansible ждёт порт `3000` до 120 секунд.
+
+## 6. Учётная запись администратора
+
+Первоначальный пользователь:
+
+```text
+login: admin
+```
+
+Пароль хранится в рабочем файле:
+
+```text
+/run/infra-manager/secrets/initial-admin-password
+```
+
+Его можно увидеть через:
+
+```bash
+infra-manager-status --full
+```
+
+или от `root`:
+
+```bash
+cat /run/infra-manager/secrets/initial-admin-password
+```
+
+Пароль не должен попадать в обычный журнал.
+
+## 7. Автоматическое создание проекта
+
+После запуска Semaphore 910 выполняет:
+
+```bash
+PYTHONPATH=/usr/local/lib/infra-manager \
+python3 -m infra_manager semaphore-project
+```
+
+Основная реализация:
+
+```text
+scripts/infra-manager/infra_manager/semaphore.py
+```
+
+Команда должна выполняться от `root` на 910.
+
+### 7.1. Что синхронизируется
+
+Команда создаёт или приводит к ожидаемому виду:
+
+```text
+Project:       Proxmox Infrastructure
+SSH key:       GitHub project read-only
+Repository:    proxmox
+VariableGroup: OpenTofu PVE
+VariableGroup: Infra Manager
+Templates:     инфраструктурные задания
+```
+
+Проект создаётся с:
+
+```text
+max_parallel_tasks = 1
+```
+
+Это не даёт двум инфраструктурным заданиям одновременно менять один контур.
+
+Числовой ID проекта сохраняется в:
+
+```text
+/var/lib/infra-manager/semaphore-project-id
+```
+
+Если Semaphore содержит несколько объектов с одинаковым ожидаемым именем, синхронизация завершается ошибкой вместо случайного выбора.
+
+## 8. Git-репозиторий Semaphore
+
+Репозиторий:
+
+```text
+git@github.com:zsergeyru/proxmox.git
+```
+
+Имя объекта Semaphore:
+
+```text
+proxmox
+```
+
+SSH-ключ:
+
+```text
+GitHub project read-only
+```
+
+Рабочая закрытая часть ключа:
+
+```text
+/run/infra-manager/secrets/github_proxmox_repo_ed25519
+```
+
+Внутри `infra-runtime` OpenSSH использует:
+
+```text
+StrictHostKeyChecking yes
+UserKnownHostsFile /var/lib/semaphore/known_hosts
+```
+
+Файл `known_hosts` готовится Ansible в постоянном каталоге Semaphore.
+
+Ветка синхронизируется с `INFRA_PROJECT_BRANCH`; если переменная не задана, используется `main`.
+
+## 9. Группы переменных
+
+### 9.1. OpenTofu PVE
+
+Группа создаётся из рабочего файла:
+
+```text
+/run/infra-manager/secrets/pve-api.env
+```
+
+и открытого ключа Ansible.
+
+В обычные переменные Semaphore записываются:
+
+```text
+TF_VAR_pve_endpoint
+TF_VAR_ansible_ssh_public_key
+```
+
+Секретной переменной хранится:
+
+```text
+TF_VAR_pve_api_token
+```
+
+При повторной синхронизации существующий secret обновляется, а не добавляется вторым.
+
+### 9.2. Infra Manager
+
+Группа содержит общие настройки выполнения заданий.
+
+Сейчас главный параметр:
+
+```text
+INFRA_LOG_LEVEL
+```
+
+Допустимые значения:
+
+| Значение | Когда использовать |
+|---|---|
+| `normal` | обычная работа |
+| `verbose` | разработка и диагностика |
+| `quiet` | минимальный вывод |
+
+При первом создании записывается `normal`.
+
+Если оператор вручную выбрал допустимое значение в интерфейсе Semaphore, синхронизация его сохраняет.
+
+Некорректное значение блокирует синхронизацию.
+
+## 10. Задания Semaphore
+
+Точный набор задаётся `SEMAPHORE_TEMPLATES` в `scripts/infra-manager/infra_manager/semaphore.py`.
+
+Текущий состав:
+
+| Задание | Точка входа | Аргументы |
+|---|---|---|
+| `OpenTofu Plan` | `scripts/infra-manager/jobs/opentofu-plan.py` | нет |
+| `Build Template 9000` | `scripts/infra-manager/jobs/build-template.py` | `9000` |
+| `Deploy Guest 410` | `scripts/infra-manager/jobs/deploy-guest.py` | `410` |
+| `Deploy Guest 910` | `scripts/infra-manager/jobs/deploy-guest.py` | `910` |
+| `Sync Machine SSH` | `scripts/infra-manager/jobs/sync-machine-ssh.py` | нет |
+| `Initialize OpenBao 910` | `scripts/infra-manager/jobs/initialize-openbao.py` | нет |
+
+Каждое задание привязано к репозиторию проекта и двум группам переменных.
+
+`Sync Machine SSH` относится к переходной реализации и будет изменён вместе с переходом на OpenBao SSH OTP.
+
+## 11. API-токен Semaphore
+
+Для синхронизации используется API Semaphore.
+
+Рабочий файл:
+
+```text
+/run/infra-manager/secrets/semaphore-api-token
+```
+
+Алгоритм:
+
+1. если файл существует и `/user/` принимает токен — он переиспользуется;
+2. если токен отсутствует или не работает — код входит как `admin`;
+3. создаёт токен с именем `infra-manager setup`;
+4. записывает его с режимом `0600`;
+5. проверяет новый токен;
+6. если OpenBao уже материализован — сохраняет новое значение обратно в OpenBao.
+
+Таким образом, перевыпуск токена не должен приводить к расхождению между Semaphore и OpenBao.
+
+## 12. Когда выполняется синхронизация
+
+Синхронизация проекта запускается в двух основных случаях.
+
+### 12.1. Обычная настройка 910
+
+В конце роли `infra_manager` задача `verify.yml`:
+
+1. ждёт Semaphore;
+2. проверяет OpenTofu, Packer, Ansible и Python-библиотеки;
+3. выполняет `python3 -m infra_manager semaphore-project`;
+4. выполняет `infra-manager-status --full --quiet`.
+
+### 12.2. Самообновление 910
+
+Когда `Deploy Guest 910` меняет сам `infra-runtime`, старый контейнер нельзя уничтожать до завершения задания.
+
+После его завершения внешняя команда `infra-manager-activate-runtime`:
+
+1. запускает новый Compose;
+2. разблокирует OpenBao;
+3. ждёт `/api/ping` Semaphore;
+4. синхронизирует проект;
+5. выполняет полную тихую проверку.
+
+Подробности находятся в [`infra-runtime.md`](infra-runtime.md).
+
+## 13. Ручная проверка
+
+Проверить порт:
+
+```bash
+curl -fsS http://127.0.0.1:3000/api/ping
+```
+
+Проверить постоянную базу:
+
+```bash
+test -s /mnt/persistent-state/semaphore/semaphore.sqlite
+ls -lh /mnt/persistent-state/semaphore/semaphore.sqlite
+```
+
+Проверить рабочие файлы:
+
+```bash
+ls -l /run/infra-manager/secrets/semaphore-server.env
+ls -l /run/infra-manager/secrets/initial-admin-password
+ls -l /run/infra-manager/secrets/semaphore-api-token
+```
+
+Повторно синхронизировать проект:
+
+```bash
+PYTHONPATH=/usr/local/lib/infra-manager \
+INFRA_PROJECT_BRANCH=main \
+python3 -m infra_manager semaphore-project
+```
+
+Полная проверка:
+
+```bash
+infra-manager-status --full
+```
+
+## 14. Обновление Semaphore
+
+Версия Semaphore является версией базового образа `infra-runtime`.
+
+Для штатного обновления:
+
+1. изменить `docker.services.runtime.base_image` в `provision.yaml`;
+2. выполнить `Deploy Guest 910`;
+3. Ansible перепишет `.versions.env`;
+4. пересоберёт `infra-runtime` с `--pull`;
+5. отложенная активация дождётся окончания текущего задания;
+6. новый контейнер подключит прежний `/mnt/persistent-state/semaphore`;
+7. проект Semaphore будет повторно синхронизирован;
+8. `infra-manager-status --full` подтвердит результат.
+
+Ручное изменение файлов внутри контейнера не является штатным обновлением.
+
+Перед сменой версии нужно учитывать совместимость SQLite и `SEMAPHORE_ACCESS_KEY_ENCRYPTION`: постоянную базу и её ключ защиты следует рассматривать как связанные данные.
+
+## 15. Восстановление Semaphore
+
+Если `infra-runtime` потерян, но постоянные данные сохранились:
+
+1. подключить прежний `/mnt/persistent-state/semaphore`;
+2. восстановить или разблокировать OpenBao;
+3. убедиться, что `semaphore-server.env` и `initial-admin-password` материализованы;
+4. восстановить Git credential и PVE API рабочие файлы;
+5. собрать `infra-runtime` из `rootfs/opt/infra-manager/compose/runtime/`;
+6. запустить Compose;
+7. дождаться `http://127.0.0.1:3000/api/ping`;
+8. выполнить `python3 -m infra_manager semaphore-project`;
+9. проверить задания, репозиторий и группы переменных;
+10. выполнить `infra-manager-status --full`.
+
+Если сохранена только пустая новая SQLite, прежняя история Semaphore не восстановлена.
+
+Если база сохранена, но потерян соответствующий `SEMAPHORE_ACCESS_KEY_ENCRYPTION`, зашифрованные значения Semaphore могут оказаться непригодны. Поэтому база и секреты OpenBao должны восстанавливаться согласованно.
+
+## 16. Типичные неисправности
+
+### 16.1. Порт 3000 не отвечает
+
+Проверить:
+
+```bash
+docker ps --filter name=infra-runtime
+docker logs --tail 200 infra-runtime
+test -s /run/infra-manager/secrets/semaphore-server.env
+```
+
+### 16.2. Semaphore запускается, но синхронизация не работает
+
+Проверить:
+
+```bash
+test -s /run/infra-manager/secrets/pve-api.env
+test -s /run/infra-manager/secrets/github_proxmox_repo_ed25519
+test -s /run/infra-manager/secrets/initial-admin-password
+```
+
+Затем выполнить синхронизацию вручную в `verbose`-режиме через группу `Infra Manager` или с соответствующей переменной окружения задания.
+
+### 16.3. Появились дубликаты объектов
+
+Код специально останавливается при нескольких проектах, ключах, репозиториях или группах с одним ожидаемым именем.
+
+Такие дубликаты нужно сначала разобрать вручную; синхронизация не должна угадывать, какой объект считать правильным.
+
+### 16.4. API-токен перестал работать
+
+Повторная синхронизация должна войти через `admin`, создать новый `infra-manager setup`, проверить его и записать новое значение в OpenBao.
+
+## 17. Связанные документы
+
+- [`../provision.yaml`](../provision.yaml) — версия Semaphore, пути и перечень объектов.
+- [`../status.yaml`](../status.yaml) — итоговые проверки и вывод пароля.
+- [`../rootfs/opt/infra-manager/compose/docker-compose.yml`](../rootfs/opt/infra-manager/compose/docker-compose.yml) — запуск `infra-runtime`.
+- [`../rootfs/opt/infra-manager/compose/runtime/Dockerfile`](../rootfs/opt/infra-manager/compose/runtime/Dockerfile) — образ с Semaphore.
+- [`infra-runtime.md`](infra-runtime.md) — сборка и безопасная активация контейнера.
+- [`openbao.md`](openbao.md) — источник постоянных рабочих секретов.
+- [`data-and-access.md`](data-and-access.md) — постоянная база и временные секреты.
+- [`../../../../automation/ansible/roles/infra_manager/tasks/semaphore.yml`](../../../../automation/ansible/roles/infra_manager/tasks/semaphore.yml) — первый запуск и рабочие файлы.
+- [`../../../../scripts/infra-manager/infra_manager/semaphore.py`](../../../../scripts/infra-manager/infra_manager/semaphore.py) — синхронизация проекта через API.
+- [`../../../../docs/700-security/730-git-access.md`](../../../../docs/700-security/730-git-access.md) — роль Git-доступа в проекте.
+- [`../../../../docs/700-security/740-openbao.md`](../../../../docs/700-security/740-openbao.md) — роль OpenBao и секретов.
+- [`../../../../docs/800-operations/830-recovery.md`](../../../../docs/800-operations/830-recovery.md) — общий аварийный процесс.
