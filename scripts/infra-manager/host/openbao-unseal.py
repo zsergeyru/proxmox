@@ -3386,6 +3386,20 @@ def ssh_access_credentials_complete() -> bool:
     return True
 
 
+def ssh_access_credentials_current() -> bool:
+    if not SSH_ACCESS_PATH.is_file() or SSH_ACCESS_PATH.stat().st_size == 0:
+        return False
+    try:
+        payload = json.loads(SSH_ACCESS_PATH.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return False
+    return isinstance(payload, dict) and set(payload) == {
+        "ssh-ca-config",
+        "ssh-signer",
+        "ssh-otp-config",
+    }
+
+
 def check_ssh_access() -> None:
     if not SSH_ACCESS_PATH.is_file() or SSH_ACCESS_PATH.stat().st_size == 0:
         raise OpenBaoHostError(
