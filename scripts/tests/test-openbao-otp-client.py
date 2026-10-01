@@ -81,7 +81,6 @@ def test_request_otp() -> None:
                         "username": "root",
                     }
                 },
-                {},
             )
         )
         calls: list[dict[str, object]] = []
@@ -122,15 +121,12 @@ def test_request_otp() -> None:
         if [call["url"] for call in calls] != [
             "https://192.168.9.10:8202/v1/auth/machine/login",
             "https://192.168.9.10:8202/v1/ssh-otp/creds/guest-410",
-            "https://192.168.9.10:8202/v1/auth/token/revoke-self",
         ]:
             fail(f"Неожиданная последовательность OpenBao API: {calls!r}")
         if calls[0]["token"] is not None:
             fail("AppRole login не должен использовать существующий token")
         if calls[1]["token"] != "MACHINE-TOKEN-SECRET":
             fail("OTP-запрос не использовал машинный token")
-        if calls[2]["token"] != "MACHINE-TOKEN-SECRET":
-            fail("Машинный token не был отозван после OTP-запроса")
         if calls[1]["body"] != {
             "ip": "192.168.3.11",
             "username": "root",

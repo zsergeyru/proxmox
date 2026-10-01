@@ -196,14 +196,21 @@ def request_otp(
             or port != 22
         ):
             raise OtpClientError("OpenBao вернул SSH OTP с неверными параметрами")
-    finally:
-        request_json(
-            base_url,
-            "/v1/auth/token/revoke-self",
-            {},
-            context=context,
-            token=token,
-        )
+    except OtpClientError:
+        try:
+            request_json(
+                base_url,
+                "/v1/auth/token/revoke-self",
+                {},
+                context=context,
+                token=token,
+            )
+        except OtpClientError:
+            pass
+        raise
+
+    # Отзыв машинного token здесь также отзывает lease выпущенного OTP.
+    # Ограниченный source/target token истекает через пять минут в OpenBao.
 
     return key
 
