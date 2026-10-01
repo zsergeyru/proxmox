@@ -1466,6 +1466,41 @@ for role_name, expected_policy, expected_paths in checks:
                 f"{role_name} lacks capabilities on {path}: {actual!r}"
             )
 
+    if role_name == "ssh-otp-config":
+        mounts_payload = request(
+            "GET",
+            "/v1/sys/mounts",
+            token=client_token,
+        )
+        mounts = mounts_payload.get("data", mounts_payload)
+        otp_mount = (
+            mounts.get("ssh-otp/")
+            if isinstance(mounts, dict)
+            else None
+        )
+        if (
+            not isinstance(otp_mount, dict)
+            or otp_mount.get("type") != "ssh"
+        ):
+            raise SystemExit("ssh-otp mount is missing or invalid")
+
+        auth_payload = request(
+            "GET",
+            "/v1/sys/auth",
+            token=client_token,
+        )
+        auth_methods = auth_payload.get("data", auth_payload)
+        machine_auth = (
+            auth_methods.get("machine/")
+            if isinstance(auth_methods, dict)
+            else None
+        )
+        if (
+            not isinstance(machine_auth, dict)
+            or machine_auth.get("type") != "approle"
+        ):
+            raise SystemExit("auth/machine is missing or invalid")
+
     request(
         "POST",
         "/v1/auth/token/revoke-self",
@@ -3756,6 +3791,10 @@ def ssh_access_credentials_current() -> bool:
 
 
 def check_ssh_access() -> None:
+    if not ssh_cas_ready():
+        raise OpenBaoHostError(
+            "Два независимых SSH-центра доверия OpenBao не готовы"
+        )
     if not SSH_ACCESS_PATH.is_file() or SSH_ACCESS_PATH.stat().st_size == 0:
         raise OpenBaoHostError(
             f"Не найдены служебные данные доступа OpenBao: {SSH_ACCESS_PATH}"
@@ -4113,6 +4152,11 @@ def main() -> int:
         help="Синхронизировать ssh-otp и auth/machine из stdin",
     )
     mode.add_argument(
+        "--check-ssh-access",
+        action="store_true",
+        help="Проверить служебные SSH-доступы, ssh-otp и auth/machine",
+    )
+    mode.add_argument(
         "--issue-machine-credentials",
         action="store_true",
         help="Выпустить RoleID/SecretID одной машинной AppRole из stdin",
@@ -4194,6 +4238,16 @@ def main() -> int:
             if not isinstance(sources, list):
                 raise OpenBaoHostError("Не передан OTP-контракт")
             sync_otp_contract(sources)
+        elif args.check_ssh_access:
+            status = read_status(wait=False)
+            if status.get("sealed") is not False:
+                raise OpenBaoHostError(
+                    "OpenBao запечатан; проверка SSH-доступов невозможна"
+                )
+            check_ssh_access()
+            log_status(
+                "[ОК] Служебные SSH-доступы, ssh-otp и auth/machine подтверждены"
+            )
         elif args.issue_machine_credentials:
             status = read_status(wait=False)
             if status.get("sealed") is not False:

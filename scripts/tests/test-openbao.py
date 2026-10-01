@@ -521,6 +521,15 @@ def test_ssh_access_contract_is_narrow() -> None:
 
 def test_otp_contract_is_narrow_and_derived() -> None:
     host = load_host_module()
+
+    with patch.object(host, "ssh_cas_ready", return_value=False):
+        try:
+            host.check_ssh_access()
+        except host.OpenBaoHostError:
+            pass
+        else:
+            fail("Проверка SSH-доступов должна отклонять неготовые SSH CA")
+
     access_code = host.CONFIGURE_SSH_ACCESS_CODE
     for item in (
         "infra-manager-ssh-otp-config",
@@ -536,6 +545,18 @@ def test_otp_contract_is_narrow_and_derived() -> None:
         fail("ssh-otp-config не должен управлять самим secrets engine")
     if '"sys/auth/machine": {' in access_code:
         fail("ssh-otp-config не должен управлять самим auth method")
+
+    check_code = host.CHECK_SSH_ACCESS_CODE
+    for item in (
+        '"/v1/sys/mounts"',
+        '"ssh-otp/"',
+        '"/v1/sys/auth"',
+        '"machine/"',
+        '"approle"',
+    ):
+        if item not in check_code:
+            fail(f"Проверка служебного доступа не подтверждает OTP-контур: {item}")
+
     otp_policy = access_code.split("otp_config_policy = json.dumps(", 1)[1].split(
         "request(", 1
     )[0]

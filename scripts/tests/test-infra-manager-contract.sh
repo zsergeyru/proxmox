@@ -607,6 +607,17 @@ grep -Fq 'docker exec --user 0 infra-runtime' "$ACTIVATE_RUNTIME" \
     || die "Активация должна ждать завершения текущего Deploy Guest 910"
 grep -Fq 'infra-manager-openbao-startup-unseal "$PVE_NODE"' "$ACTIVATE_RUNTIME" \
     || die "После перезапуска runtime OpenBao должен разблокироваться до проверки"
+grep -Fq 'run_pve_openbao --check-kv --log-level quiet' "$OPENBAO_STARTUP_COMMAND" \
+    || die "Startup unseal должен проверять KV после восстановления секретов"
+grep -Fq 'run_pve_openbao --check-ssh-access --log-level quiet' "$OPENBAO_STARTUP_COMMAND" \
+    || die "Startup unseal должен проверять SSH CA, ssh-otp и auth/machine"
+grep -Fq -- '--cacert "$tls_ca"' "$OPENBAO_STARTUP_COMMAND" \
+    || die "Startup unseal должен проверять TLS-вход OpenBao доверенным CA"
+grep -Fq ':8202/v1/sys/health' "$OPENBAO_STARTUP_COMMAND" \
+    || die "Startup unseal должен проверять внешний TLS listener :8202"
+if grep -Fq 'echo "[ОК] OpenBao уже разблокирован"' "$OPENBAO_STARTUP_COMMAND"; then
+    die "Startup unseal не должен завершаться до восстановления секретов и проверок"
+fi
 grep -q 'infra-manager-status --full --quiet' "$ACTIVATE_RUNTIME" \
     || die "Отложенная активация должна завершаться полной проверкой 910"
 grep -Fq 'PVE_ENV="/run/infra-manager/secrets/pve-api.env"' "$LIFECYCLE" \
