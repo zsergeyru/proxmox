@@ -63,8 +63,8 @@ SEMAPHORE_TEMPLATES = (
         arguments='["910"]',
     ),
     TemplateSpec(
-        name="Sync Machine SSH",
-        playbook="scripts/infra-manager/jobs/sync-machine-ssh.py",
+        name="Sync SSH Access",
+        playbook="scripts/infra-manager/jobs/sync-ssh-access.py",
         arguments="[]",
     ),
     TemplateSpec(
@@ -722,6 +722,26 @@ def persist_github_key() -> None:
         raise InfraManagerError(
             "GitHub Deploy Key не должен иметь постоянную копию внутри 910"
         )
+
+
+def retire_machine_ssh_template() -> None:
+    """Удалить переходное задание после успешной проверки SSH OTP."""
+    if not nonempty(PROJECT_ID_FILE):
+        raise InfraManagerError("Не найден ID проекта Semaphore")
+    project_id = int(PROJECT_ID_FILE.read_text(encoding="utf-8").strip())
+    client = SemaphoreClient()
+    client.ensure_api_token()
+    client.auth_mode = "token"
+    templates = client.get(
+        f"/project/{project_id}/templates?sort=name&order=asc"
+    )
+    legacy = find_unique_by_name(templates, "Sync Machine SSH", "template")
+    if legacy is None:
+        return
+    template_id = legacy.get("id")
+    if not isinstance(template_id, int):
+        raise InfraManagerError("У Sync Machine SSH некорректный ID")
+    client._request("DELETE", f"/project/{project_id}/templates/{template_id}")
 
 
 def configure_project(branch: str | None = None) -> int:

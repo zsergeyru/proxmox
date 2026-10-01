@@ -336,17 +336,17 @@ def check_openbao_machine_identity_preparation() -> None:
         private_key.write_text("PRIVATE", encoding="utf-8")
         context = DeploymentContext(
             client=SimpleNamespace(),
-            vmid=410,
-            name="ai-control",
+            vmid=910,
+            name="infra-manager",
             node="pve",
-            kind="vm",
+            kind="lxc",
             features=(),
-            template_vmid=9000,
-            address="192.168.4.10",
-            target='proxmox_virtual_environment_vm.guest["410"]',
+            template_vmid=None,
+            address="192.168.9.10",
+            target='proxmox_virtual_environment_container.guest["910"]',
             workspace=SimpleNamespace(),
             paths=DeploymentPaths(
-                guest_dir=ROOT / "infrastructure/guests/410-ai-control",
+                guest_dir=ROOT / "infrastructure/guests/910-infra-manager",
                 private_key=private_key,
                 playbook=ROOT / "automation/ansible/playbooks/configure-guest.yml",
                 known_hosts=root / "known_hosts",
@@ -376,8 +376,8 @@ def check_openbao_machine_identity_preparation() -> None:
                 guest_deploy_module,
                 "issue_openbao_machine_credentials",
                 return_value={
-                    "role_id": "role-410",
-                    "secret_id": "secret-410",
+                    "role_id": "role-910",
+                    "secret_id": "secret-910",
                 },
             ) as issue_credentials,
         ):
@@ -388,15 +388,11 @@ def check_openbao_machine_identity_preparation() -> None:
                 directory=root,
             )
 
-        issue_credentials.assert_called_once_with("pve", 410)
+        issue_credentials.assert_called_once_with("pve", 910)
         if "infra_openbao_machine_enabled=true" not in args:
-            fail("OTP-источник 410 не получил признак машинной identity")
-        if "infra_openbao_otp_target_enabled=true" not in args:
-            fail("OTP-цель 410 не получила признак проверки OTP")
-        if "infra_openbao_otp_target_ip=192.168.4.10" not in args:
-            fail("OTP-цель 410 получила неверный собственный адрес")
-        if "infra_openbao_otp_allowed_roles=guest-910" not in args:
-            fail("OTP-цель 410 получила неверный список разрешённых источников")
+            fail("OTP-источник 910 не получил признак машинной identity")
+        if "infra_openbao_otp_target_enabled=false" not in args:
+            fail("OTP-источник 910 неожиданно стал целью")
         if f"infra_openbao_ca_file={ca}" not in args:
             fail("OTP-источник не получил TLS CA OpenBao")
         if f"infra_openbao_ssh_host_ca_file={host_ca}" not in args:
@@ -406,7 +402,7 @@ def check_openbao_machine_identity_preparation() -> None:
             for item in args
             if item.startswith("infra_openbao_otp_target_ips=")
         ]
-        if target_args != ["infra_openbao_otp_target_ips=192.168.3.11"]:
+        if target_args != ["infra_openbao_otp_target_ips=192.168.4.10"]:
             fail(f"OTP-источник получил неверные SSH-цели: {target_args!r}")
         env_args = [
             item
@@ -419,16 +415,16 @@ def check_openbao_machine_identity_preparation() -> None:
         content = env_file.read_text(encoding="utf-8")
         for expected in (
             "OPENBAO_ADDR=https://192.168.9.10:8202",
-            "OPENBAO_ROLE_ID=role-410",
-            "OPENBAO_SECRET_ID=secret-410",
+            "OPENBAO_ROLE_ID=role-910",
+            "OPENBAO_SECRET_ID=secret-910",
             "OPENBAO_CA=/etc/infra-manager/openbao/ca.crt",
-            "OPENBAO_SSH_OTP_ROLE=guest-410",
+            "OPENBAO_SSH_OTP_ROLE=guest-910",
         ):
             if expected not in content:
                 fail(f"machine.env не содержит {expected}")
         if env_file.stat().st_mode & 0o777 != 0o600:
             fail("Временный machine.env должен иметь права 0600")
-        if any("secret-410" in item for item in args):
+        if any("secret-910" in item for item in args):
             fail("SecretID не должен попадать в argv Ansible")
 
         with (
@@ -481,17 +477,17 @@ def check_openbao_target_only_preparation() -> None:
         private_key.write_text("PRIVATE", encoding="utf-8")
         context = DeploymentContext(
             client=SimpleNamespace(),
-            vmid=311,
-            name="dev-services",
+            vmid=410,
+            name="ai-control",
             node="pve",
-            kind="lxc",
+            kind="vm",
             features=(),
-            template_vmid=None,
-            address="192.168.3.11",
-            target='proxmox_virtual_environment_container.guest["311"]',
+            template_vmid=9000,
+            address="192.168.4.10",
+            target='proxmox_virtual_environment_vm.guest["410"]',
             workspace=SimpleNamespace(),
             paths=DeploymentPaths(
-                guest_dir=ROOT / "infrastructure/guests/311-dev-services",
+                guest_dir=ROOT / "infrastructure/guests/410-ai-control",
                 private_key=private_key,
                 playbook=ROOT / "automation/ansible/playbooks/configure-guest.yml",
                 known_hosts=root / "known_hosts",
@@ -522,9 +518,9 @@ def check_openbao_target_only_preparation() -> None:
             fail("OTP target-only гость неожиданно получил машинную identity")
         if "infra_openbao_otp_target_enabled=true" not in args:
             fail("OTP target-only гость не получил verifier")
-        if "infra_openbao_otp_target_ip=192.168.3.11" not in args:
+        if "infra_openbao_otp_target_ip=192.168.4.10" not in args:
             fail("OTP target-only гость получил неверный собственный адрес")
-        if "infra_openbao_otp_allowed_roles=guest-410,guest-910" not in args:
+        if "infra_openbao_otp_allowed_roles=guest-910" not in args:
             fail("OTP target-only гость получил неверные разрешённые роли")
         if any(
             item.startswith("infra_openbao_machine_env_file=")

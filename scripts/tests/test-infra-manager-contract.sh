@@ -32,10 +32,8 @@ OPENBAO_HOST="$ROOT/scripts/infra-manager/host/openbao-unseal.py"
 OPENBAO_STARTUP_COMMAND="$ROOT/scripts/infra-manager/commands/openbao-startup-unseal.sh"
 OPENBAO_STARTUP_SERVICE="$ROOT/infrastructure/guests/910-infra-manager/rootfs/etc/systemd/system/infra-manager-openbao-startup-unseal.service.j2"
 OPENBAO_JOB="$ROOT/scripts/infra-manager/jobs/initialize-openbao.py"
-MACHINE_SSH_JOB="$ROOT/scripts/infra-manager/jobs/sync-machine-ssh.py"
-MACHINE_SSH_COMMAND="$ROOT/scripts/infra-manager/commands/machine-ssh-refresh.sh"
-MACHINE_SSH_SERVICE="$ROOT/infrastructure/guests/910-infra-manager/rootfs/etc/systemd/system/infra-manager-machine-ssh-refresh.service.j2"
-MACHINE_SSH_TIMER="$ROOT/infrastructure/guests/910-infra-manager/rootfs/etc/systemd/system/infra-manager-machine-ssh-refresh.timer.j2"
+SSH_ACCESS_JOB="$ROOT/scripts/infra-manager/jobs/sync-ssh-access.py"
+PY_SSH_ACCESS="$ROOT/scripts/infra-manager/infra_manager/ssh_access.py"
 PY_MACHINE_SSH="$ROOT/scripts/infra-manager/infra_manager/machine_ssh.py"
 PY_ACCESS_POLICY="$ROOT/scripts/infra-manager/infra_manager/access.py"
 PY_OPENBAO="$ROOT/scripts/infra-manager/infra_manager/openbao.py"
@@ -80,7 +78,7 @@ for task_file in "${ANSIBLE_RUNTIME_PARTS[@]}"; do
     cat "$ANSIBLE_RUNTIME_DIR/$task_file" >> "$ANSIBLE_RUNTIME"
 done
 
-for file in "$PY_COMMON" "$ANSIBLE_CONFIG" "$ANSIBLE_PLAYBOOK" "$ANSIBLE_LINUX_BASE" "$PROJECT_GIT_TASKS" "$ANSIBLE_GUEST_LAYOUT" "$ANSIBLE_DOCKER" "$ANSIBLE_RUNTIME" "$PY_SETTINGS" "$PY_SEMAPHORE" "$PY_STATUS" "$PY_PVE" "$STATUS" "$ACCESS" "$LIFECYCLE" "$ACTIVATE_RUNTIME" "$BUILD_TEMPLATE" "$VERIFY_TEMPLATE" "$DEPLOY_GUEST" "$PY_OPENTOFU" "$PY_TEMPLATE" "$PY_TEMPLATE_BUILD" "$PY_TEMPLATE_VERIFY" "$COMPOSE" "$OPENBAO_CONFIG" "$OPENBAO_HOST" "$OPENBAO_STARTUP_COMMAND" "$OPENBAO_STARTUP_SERVICE" "$OPENBAO_JOB" "$MACHINE_SSH_JOB" "$MACHINE_SSH_COMMAND" "$MACHINE_SSH_SERVICE" "$MACHINE_SSH_TIMER" "$PY_MACHINE_SSH" "$PY_ACCESS_POLICY" "$PY_OPENBAO" "$PY_RECOVERY" "$RECOVERY_HOST" "$DOCKERFILE" "$REQ" "$PLAN" "$PY_PVE_HOST" "$OPENTOFU_LOCK" "$GUEST_MANIFEST" "$PROVISION" "$SSH_CONFIG"; do
+for file in "$PY_COMMON" "$ANSIBLE_CONFIG" "$ANSIBLE_PLAYBOOK" "$ANSIBLE_LINUX_BASE" "$PROJECT_GIT_TASKS" "$ANSIBLE_GUEST_LAYOUT" "$ANSIBLE_DOCKER" "$ANSIBLE_RUNTIME" "$PY_SETTINGS" "$PY_SEMAPHORE" "$PY_STATUS" "$PY_PVE" "$STATUS" "$ACCESS" "$LIFECYCLE" "$ACTIVATE_RUNTIME" "$BUILD_TEMPLATE" "$VERIFY_TEMPLATE" "$DEPLOY_GUEST" "$PY_OPENTOFU" "$PY_TEMPLATE" "$PY_TEMPLATE_BUILD" "$PY_TEMPLATE_VERIFY" "$COMPOSE" "$OPENBAO_CONFIG" "$OPENBAO_HOST" "$OPENBAO_STARTUP_COMMAND" "$OPENBAO_STARTUP_SERVICE" "$OPENBAO_JOB" "$SSH_ACCESS_JOB" "$PY_SSH_ACCESS" "$PY_MACHINE_SSH" "$PY_ACCESS_POLICY" "$PY_OPENBAO" "$PY_RECOVERY" "$RECOVERY_HOST" "$DOCKERFILE" "$REQ" "$PLAN" "$PY_PVE_HOST" "$OPENTOFU_LOCK" "$GUEST_MANIFEST" "$PROVISION" "$SSH_CONFIG"; do
     [[ -s "$file" ]] || die "Отсутствует обязательный файл: $file"
 done
 
@@ -537,28 +535,17 @@ grep -Fq 'ExecStart=/usr/local/sbin/infra-manager-openbao-startup-unseal {{ infr
     || die "Служба 910 должна запускать одноразовую разблокировку после старта"
 grep -Fq 'WantedBy=multi-user.target' "$OPENBAO_STARTUP_SERVICE" \
     || die "Служба разблокировки должна запускаться вместе с 910"
-grep -Fq 'Sync Machine SSH' "$PY_SEMAPHORE" \
-    || die "Semaphore должен иметь отдельное задание Sync Machine SSH"
-grep -Fq 'sync_machine_ssh(REPO_ROOT, verify_connections=True)' "$MACHINE_SSH_JOB" \
-    || die "Задание Sync Machine SSH должно проверять разрешённые и запрещённые связи"
-grep -Fq 'exec python3 -m infra_manager.machine_ssh' "$MACHINE_SSH_COMMAND" \
-    || die "Команда обновления машинного SSH должна быть тонким Python wrapper"
-grep -Fq 'OnUnitActiveSec=30min' "$MACHINE_SSH_TIMER" \
-    || die "Машинные SSH-сертификаты должны обновляться не реже чем каждые 30 минут"
-grep -Fq 'infra-manager-openbao-startup-unseal.service' "$MACHINE_SSH_SERVICE" \
-    || die "Машинный SSH должен запускаться после разблокировки OpenBao"
-grep -Fq 'machine-ssh-refresh.sh' "$ANSIBLE_RUNTIME" \
-    || die "Ansible должен устанавливать команду обновления машинного SSH"
-grep -Fq 'infra-manager-machine-ssh-refresh.timer' "$ANSIBLE_RUNTIME" \
-    || die "Ansible должен включать таймер обновления машинного SSH"
-grep -Fq 'AuthorizedPrincipalsFile /etc/ssh/authorized_principals/%u' "$PY_MACHINE_SSH" \
-    || die "Межмашинный SSH должен ограничивать вход через AuthorizedPrincipalsFile"
-grep -Fq 'machine_ed25519' "$PY_MACHINE_SSH" \
-    || die "Межмашинный SSH должен использовать отдельную машинную identity"
-grep -Fq 'load_access_policy' "$PY_MACHINE_SSH" \
-    || die "Межмашинный SSH должен строиться из access.yaml"
-grep -Fq 'ssh-client-signer/sign/machine-*' "$OPENBAO_HOST" \
-    || die "OpenBao signer должен ограниченно подписывать machine-* роли"
+grep -Fq 'name="Sync SSH Access"' "$PY_SEMAPHORE" \
+    || die "Semaphore должен иметь задание Sync SSH Access"
+grep -Fq 'sync_ssh_access(REPO_ROOT)' "$SSH_ACCESS_JOB" \
+    || die "Задание должно синхронизировать OpenBao OTP"
+grep -Fq 'verify_ssh_access(repo_root, node)' "$PY_OPENBAO" \
+    || die "Задание должно проверять реальный SSH OTP"
+grep -Fq 'infra-openbao-ssh' "$PY_SSH_ACCESS" \
+    || die "Задание должно проверять вход через OTP-клиент"
+if grep -Fq 'machine-ssh-refresh.sh' "$ANSIBLE_RUNTIME"; then
+    die "Ansible не должен устанавливать обновление машинных сертификатов"
+fi
 [[ ! -e "$ROOT/infrastructure/pve/systemd/infra-manager-openbao-unseal.service" ]] \
     || die "PVE не должен содержать постоянную systemd-службу OpenBao"
 [[ ! -e "$ROOT/infrastructure/pve/systemd/infra-manager-openbao-unseal.timer" ]] \
@@ -830,19 +817,8 @@ grep -Fq 'name="Deploy Guest 910"' "$PY_SEMAPHORE" \
     || die "Semaphore должен создавать задание Deploy Guest 910"
 grep -Fq "arguments='[\"910\"]'" "$PY_SEMAPHORE" \
     || die "Deploy Guest 910 должен иметь фиксированный VMID 910"
-grep -Fq 'name="Sync Machine SSH"' "$PY_SEMAPHORE" \
-    || die "Semaphore должен создавать отдельное задание Sync Machine SSH"
-grep -Fq 'scripts/infra-manager/jobs/sync-machine-ssh.py' "$PY_SEMAPHORE" \
-    || die "Sync Machine SSH должен запускать отдельный Python-сценарий"
-grep -Fq 'infra-manager-openbao-startup-unseal.service' "$MACHINE_SSH_SERVICE" \
-    || die "Фоновое обновление машинного SSH должно зависеть от разблокировки OpenBao"
-grep -Fq 'OnUnitActiveSec=30min' "$MACHINE_SSH_TIMER" \
-    || die "Машинные SSH-сертификаты должны обновляться каждые 30 минут"
-if grep -Fq -- '--verify' "$MACHINE_SSH_COMMAND"; then
-    die "Периодическое обновление не должно запускать полную матрицу SSH-проверок"
-fi
-grep -Fq 'verify_connections=True' "$MACHINE_SSH_JOB" \
-    || die "Ручное задание Sync Machine SSH должно проверять разрешённые и запрещённые связи"
+grep -Fq 'scripts/infra-manager/jobs/sync-ssh-access.py' "$PY_SEMAPHORE" \
+    || die "Sync SSH Access должен запускать отдельный Python-сценарий"
 
 grep -Fq 'name="Initialize OpenBao 910"' "$PY_SEMAPHORE" \
     || die "Semaphore должен создавать отдельное задание Initialize OpenBao 910"

@@ -29,28 +29,21 @@ from infra_manager.machine_ssh import (
 def main() -> None:
     policy = load_access_policy(ROOT)
 
-    assert policy.machine_identity_vmids == frozenset({311, 410, 910})
-    assert policy.project_repository_read_vmids == frozenset({311, 410, 910})
-    assert policy.project_repository_read_allowed(311)
+    assert policy.machine_identity_vmids == frozenset({410, 910})
+    assert policy.project_repository_read_vmids == frozenset({410, 910})
+    assert not policy.project_repository_read_allowed(311)
     assert policy.project_repository_read_allowed(410)
     assert not policy.project_repository_read_allowed(109)
     assert policy.machine_principal(410) == "guest-410"
     assert policy.machine_principal(910) == "guest-910"
 
-    # 410 имеет доступ только к управляемой области, но не к самому 910.
-    assert 910 not in policy.targets_for(410)
+    # Пока управляемые гости отсутствуют, 410 не получает исходящих SSH-целей.
+    assert policy.targets_for(410) == ()
     assert MachineSshEdge(410, 910) not in policy.machine_ssh_edges
 
-    # 311 наследует pve_management=true и имеет provision.yaml.
-    assert 311 in policy.targets_for(410)
-    assert policy.authorized_principals(311) == (
-        "guest-410",
-        "guest-910",
-    )
-
-    # 910 управляет Linux-гостями проекта отдельной машинной identity.
-    assert 410 in policy.targets_for(910)
-    assert 311 in policy.targets_for(910)
+    # 910 имеет доступ только к фактически развёрнутому 410.
+    assert policy.targets_for(910) == (410,)
+    assert policy.authorized_principals(410) == ("guest-910",)
     assert 910 not in policy.targets_for(910)
 
     # На 910 machine-principal 410 не должен разрешаться.
@@ -73,7 +66,7 @@ def main() -> None:
         access_data["rules"] = [
             rule
             for rule in access_data["rules"]
-            if rule.get("id") != "ai-control-managed-guests"
+            if rule.get("id") != "infra-manager-linux-guests"
         ]
         (security_dir / "access.yaml").write_text(
             yaml.safe_dump(
@@ -85,10 +78,9 @@ def main() -> None:
         )
 
         revoked = load_access_policy(temp_root)
-        assert 311 not in revoked.targets_for(410)
+        assert 410 not in revoked.targets_for(910)
         assert revoked.project_repository_read_allowed(410)
-        assert "guest-410" not in revoked.authorized_principals(311)
-        assert "guest-910" in revoked.authorized_principals(311)
+        assert "guest-910" not in revoked.authorized_principals(410)
 
     assert _host_pattern("192.168.0.0/16") == "192.168.*"
 

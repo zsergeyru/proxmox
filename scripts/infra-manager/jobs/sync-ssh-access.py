@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Точка входа Semaphore: синхронизация межмашинного SSH."""
+"""Точка входа Semaphore: синхронизация SSH OTP из access.yaml."""
 
 from __future__ import annotations
 
@@ -15,13 +15,13 @@ from infra_manager.common import (
     console,
     require_runtime_activation_idle,
 )
-from infra_manager.machine_ssh import sync_machine_ssh
+from infra_manager.openbao import sync_ssh_access
 
 
 def main() -> int:
     try:
         require_runtime_activation_idle()
-        return sync_machine_ssh(REPO_ROOT, verify_connections=True)
+        return sync_ssh_access(REPO_ROOT)
     except (InfraManagerError, OSError, ValueError) as exc:
         console.error(str(exc))
         return 1

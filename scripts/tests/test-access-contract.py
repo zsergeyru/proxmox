@@ -101,7 +101,7 @@ def main() -> None:
         subject="guest:910",
         service="ssh",
         resource="guest",
-        target="project:linux-guests",
+        target="guest:410",
         permission="connect-root",
     )
 
@@ -128,17 +128,15 @@ def main() -> None:
             target=target,
             permission="execute",
         )
-    require_rule(
-        data,
-        subject="guest:410",
-        service="ssh",
-        resource="guest",
-        target="pool:managed",
-        permission="connect-root",
+    assert not any(
+        rule.get("service") == "ssh"
+        and rule.get("resource") == "guest"
+        for rule in rules_for(data, "guest:410")
     )
+    assert not rules_for(data, "guest:311")
 
     # SSH identity и Git read определяются только access.yaml.
-    for vmid in (410, 311):
+    for vmid in (410,):
         subject = f"guest:{vmid}"
         require_rule(
             data,

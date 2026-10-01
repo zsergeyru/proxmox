@@ -864,8 +864,9 @@ def _guest_has_openbao_machine_identity(
     private_key: Path,
     *,
     certificate: Path | None,
+    target: str,
 ) -> bool:
-    """Проверить наличие уже установленной машинной identity, не читая secret."""
+    """Проверить действующую машинную identity, не читая secret."""
     result = run(
         [
             *_ssh_identity_args(
@@ -873,7 +874,9 @@ def _guest_has_openbao_machine_identity(
                 private_key,
                 certificate=certificate,
             ),
-            "test -s /etc/infra-manager/openbao/machine.env",
+            "test -s /etc/infra-manager/openbao/machine.env "
+            "&& test -x /usr/local/sbin/infra-openbao-otp "
+            f"&& /usr/local/sbin/infra-openbao-otp {target} >/dev/null",
         ],
         check=False,
         capture_output=True,
@@ -977,6 +980,7 @@ def _prepare_openbao_machine_ansible_vars(
         context,
         private_key,
         certificate=certificate,
+        target=sorted(set(target_ips))[0],
     ):
         return args
 

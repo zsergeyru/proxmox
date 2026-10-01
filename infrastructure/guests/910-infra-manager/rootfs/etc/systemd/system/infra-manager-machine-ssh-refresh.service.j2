@@ -1,9 +1,0 @@
-[Unit]
-Description=Обновление межмашинных SSH-сертификатов проекта
-Wants=network-online.target docker.service infra-manager-openbao-startup-unseal.service
-After=network-online.target docker.service infra-manager-openbao-startup-unseal.service
-
-[Service]
-Type=oneshot
-ExecStart=/usr/local/sbin/infra-manager-machine-ssh-refresh {{ provision.paths.bootstrap_repository }}
-TimeoutStartSec=300

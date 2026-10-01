@@ -15,6 +15,7 @@ from .pve_host import (
     install_openbao_host_support,
     install_recovery_host_support,
     prepare_recovery_git,
+    sync_machine_ssh_roles,
     sync_openbao_otp_contract,
 )
 
@@ -98,4 +99,29 @@ def run_initialize_openbao(repo_root: Path) -> int:
     console.result(
         "OpenBao, аварийный контур и миграция старой схемы готовы"
     )
+    return 0
+
+
+def sync_ssh_access(repo_root: Path) -> int:
+    """Привести OTP-роли к access.yaml и проверить вход между гостями."""
+    node = _pve_node_from_environment()
+    policy = load_access_policy(repo_root)
+    sources = _otp_sources(repo_root)
+    sync_openbao_otp_contract(node, sources)
+    from .guest_deploy import run_deploy_guest
+    from .ssh_access import verify_ssh_access
+    from .semaphore import retire_machine_ssh_template
+
+    affected_guests = {
+        vmid
+        for edge in policy.machine_ssh_edges
+        for vmid in (edge.source_vmid, edge.target_vmid)
+    }
+    for vmid in sorted(affected_guests - {910}):
+        run_deploy_guest(repo_root, vmid, phase="provision")
+
+    verify_ssh_access(repo_root, node)
+    sync_machine_ssh_roles(node, [])
+    retire_machine_ssh_template()
+    console.result("SSH OTP синхронизирован и проверен между гостями")
     return 0

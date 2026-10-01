@@ -58,7 +58,8 @@ rules:
     service: ssh
     resource: guest
     targets:
-      - project:linux-guests
+      # Сейчас развёрнут только 410; 311 будет добавлен после его создания.
+      - guest:410
     access:
       - connect-root
 
@@ -91,34 +92,6 @@ rules:
       - verify-managed-guest
     access:
       - execute
-
-  - id: ai-control-managed-guests
-    subject: guest:410
-    service: ssh
-    resource: guest
-    targets:
-      - pool:managed
-    access:
-      - connect-root
-
-  # 311 получает доступы только через единый контракт access.yaml.
-  - id: dev-services-ssh-identity
-    subject: guest:311
-    service: ssh
-    resource: identity
-    targets:
-      - self
-    access:
-      - issue
-
-  - id: dev-services-project-repository
-    subject: guest:311
-    service: github
-    resource: repository
-    targets:
-      - zsergeyru/proxmox
-    access:
-      - read
 
   # PVE-only механизм обслуживает OpenBao до появления штатных рабочих доступов.
   - id: pve-openbao-unseal

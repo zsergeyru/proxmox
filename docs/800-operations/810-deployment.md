@@ -198,7 +198,7 @@ infra-runtime
 - `Build Template 9000`;
 - `Deploy Guest 410`;
 - `Deploy Guest 910`;
-- `Sync Machine SSH`;
+- `Sync SSH Access`;
 - `Initialize OpenBao 910`.
 
 Синхронизация этих объектов выполняется узкой Python-командой:
@@ -337,13 +337,13 @@ Initialize OpenBao 910
 
 Изменение `access.yaml` должно синхронизировать OTP-роли и машинные AppRole сразу. Периодическое перевыпускание машинных SSH-сертификатов в целевой схеме отсутствует.
 
-Фактический код пока использует переходную сертификатную схему и задание Semaphore:
+После обновления 910 выполняется задание Semaphore:
 
 ```text
-Sync Machine SSH
+Sync SSH Access
 ```
 
-До завершения миграции это задание продолжает синхронизировать `machine-<VMID>`, principals и двухчасовые сертификаты. Оно не считается целевой архитектурой и должно быть переработано вместе с удалением `infra-manager-machine-ssh-refresh.timer`.
+Оно синхронизирует роли OpenBao, применяет Ansible к затронутым гостям и проверяет TLS-доступ OpenBao и реальный SSH OTP до удаления старой сертификатной схемы. Если проверка не проходит до очистки, старый таймер и сертификаты остаются на работающих гостях. Состояние перехода описано в `780-implementation-status.md`.
 
 Полный нормативный контракт находится в [`../700-security/720-ssh-access.md`](../700-security/720-ssh-access.md), OpenBao-контракт — в [`../700-security/740-openbao.md`](../700-security/740-openbao.md), фактическое состояние перехода — в [`../700-security/780-implementation-status.md`](../700-security/780-implementation-status.md).
 
