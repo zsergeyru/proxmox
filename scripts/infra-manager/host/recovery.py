@@ -32,6 +32,9 @@ OPENBAO_DIR = PVE_ONLY_DIR / "openbao"
 OPENBAO_UNSEAL_KEY = OPENBAO_DIR / "unseal.key"
 OPENBAO_SSH_ACCESS = OPENBAO_DIR / "ssh-access.json"
 OPENBAO_KV_ACCESS = OPENBAO_DIR / "kv-access.json"
+OPENBAO_TLS_DIR = PVE_ONLY_DIR / "openbao-tls"
+OPENBAO_TLS_CA_KEY = OPENBAO_TLS_DIR / "ca.key"
+OPENBAO_TLS_CA_CERT = OPENBAO_TLS_DIR / "ca.crt"
 
 OPENBAO_RAFT_DIR = STATE_DIR / "openbao" / "raft"
 OPENTOFU_STATE = STATE_DIR / "opentofu" / "state" / "proxmox.tfstate"
@@ -191,6 +194,16 @@ def managed_guests_exist() -> bool:
     return bool(members)
 
 
+def otp_tls_initialized() -> bool:
+    if not nonempty(OPENBAO_SSH_ACCESS):
+        return False
+    try:
+        payload = json.loads(OPENBAO_SSH_ACCESS.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    return isinstance(payload, dict) and "ssh-otp-config" in payload
+
+
 def verify_recovery_state(*, require_approle: bool = True) -> None:
     required_dirs = [
         PVE_ONLY_DIR,
@@ -217,6 +230,13 @@ def verify_recovery_state(*, require_approle: bool = True) -> None:
                 OPENBAO_KV_ACCESS,
             )
         )
+        if otp_tls_initialized():
+            required_files.extend(
+                (
+                    OPENBAO_TLS_CA_KEY,
+                    OPENBAO_TLS_CA_CERT,
+                )
+            )
     missing_files = [
         str(path)
         for path in required_files
