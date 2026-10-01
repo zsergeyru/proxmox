@@ -9,6 +9,7 @@ PROJECT_GIT_TASKS="$ROOT/automation/ansible/roles/linux_base/tasks/project_git.y
 ANSIBLE_GUEST_LAYOUT="$ROOT/automation/ansible/roles/guest_layout/tasks/main.yml"
 ANSIBLE_DOCKER="$ROOT/automation/ansible/roles/docker/tasks/main.yml"
 ANSIBLE_RUNTIME_DIR="$ROOT/automation/ansible/roles/infra_manager/tasks"
+ANSIBLE_VERIFY="$ANSIBLE_RUNTIME_DIR/verify.yml"
 ANSIBLE_RUNTIME_MAIN="$ANSIBLE_RUNTIME_DIR/main.yml"
 PY_SETTINGS="$ROOT/scripts/infra-manager/infra_manager/settings.py"
 PY_SEMAPHORE="$ROOT/scripts/infra-manager/infra_manager/semaphore.py"
@@ -622,6 +623,9 @@ grep -Fq 'OpenBao не инициализирован; сначала выпол
     || die "Startup unseal должен завершаться ошибкой для неинициализированного OpenBao"
 grep -q 'infra-manager-status --full --quiet' "$ACTIVATE_RUNTIME" \
     || die "Отложенная активация должна завершаться полной проверкой 910"
+if grep -Fq 'infra-manager-status' "$ANSIBLE_VERIFY"; then
+    die "Ansible verify не должен выполнять финальный status 910 до Initialize OpenBao"
+fi
 grep -Fq 'PVE_ENV="/run/infra-manager/secrets/pve-api.env"' "$LIFECYCLE" \
     || die "Lifecycle test должен использовать PVE API credential из OpenBao"
 
