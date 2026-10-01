@@ -13,3 +13,10 @@ listener "tcp" {
   cluster_address = "127.0.0.1:8201"
   tls_disable     = true
 }
+
+listener "tcp" {
+  address       = "192.168.9.10:8202"
+  tls_disable   = false
+  tls_cert_file = "/openbao/tls/server.crt"
+  tls_key_file  = "/openbao/tls/server.key"
+}
