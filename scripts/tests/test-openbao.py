@@ -553,10 +553,7 @@ def test_otp_contract_is_narrow_and_derived() -> None:
         '"token_policies": ["machine-ssh-otp"]',
         '"token_ttl": ["5m"]',
         '"token_max_ttl": ["10m"]',
-        '"bind_secret_id": [True, "true"]',
-        '"secret_id_num_uses": [0, "0"]',
-        '"token_num_uses": [0, "0"]',
-        '"token_no_default_policy": [True, "true"]',
+        '"token_no_default_policy": ["true"]',
     ):
         if item not in role_policy:
             fail(f"Параметры машинного AppRole не ограничены: {item}")
@@ -575,13 +572,18 @@ def test_otp_contract_is_narrow_and_derived() -> None:
         '"default_user": "root"',
         '"allowed_users": "root"',
         '"cidr_list": ",".join(item["target_cidrs"])',
-        '"bind_secret_id": True',
         '"secret_id_bound_cidrs": [item["source_cidr"]]',
         '"token_bound_cidrs": [item["source_cidr"]]',
         '"token_ttl": "5m"',
         '"token_max_ttl": "10m"',
         '"token_policies": "machine-ssh-otp"',
-        '"token_no_default_policy": True',
+        '"token_no_default_policy": "true"',
+        'machine_role.get("bind_secret_id") is not True',
+        'machine_role.get("secret_id_num_uses") != 0',
+        'machine_role.get("secret_id_ttl") != 0',
+        'machine_role.get("token_num_uses") != 0',
+        'machine_role.get("token_ttl") != 300',
+        'machine_role.get("token_max_ttl") != 600',
         '"DELETE"',
     )
     for item in required:
