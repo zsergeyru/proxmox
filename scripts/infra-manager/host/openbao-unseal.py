@@ -271,15 +271,9 @@ import urllib.error
 import urllib.request
 
 BASE = "http://127.0.0.1:8200"
-payload = json.loads(sys.stdin.read())
-if not isinstance(payload, dict):
-    raise SystemExit("invalid configuration payload")
-token = payload.get("root_token")
-existing_credentials = payload.get("existing_credentials", {})
-if not isinstance(token, str) or not token:
+token = sys.stdin.read().strip()
+if not token:
     raise SystemExit("empty root token")
-if not isinstance(existing_credentials, dict):
-    raise SystemExit("invalid existing credentials")
 
 
 def request(
@@ -393,9 +387,15 @@ import sys
 import urllib.request
 
 BASE = "http://127.0.0.1:8200"
-token = sys.stdin.read().strip()
-if not token:
+payload = json.loads(sys.stdin.read())
+if not isinstance(payload, dict):
+    raise SystemExit("invalid configuration payload")
+token = payload.get("root_token")
+existing_credentials = payload.get("existing_credentials", {})
+if not isinstance(token, str) or not token:
     raise SystemExit("empty root token")
+if not isinstance(existing_credentials, dict):
+    raise SystemExit("invalid existing credentials")
 
 
 def request(method, path, payload=None):
