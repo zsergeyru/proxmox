@@ -536,6 +536,18 @@ def test_otp_contract_is_narrow_and_derived() -> None:
         fail("ssh-otp-config не должен управлять самим secrets engine")
     if '"sys/auth/machine": {' in access_code:
         fail("ssh-otp-config не должен управлять самим auth method")
+
+    check_code = host.CHECK_SSH_ACCESS_CODE
+    for item in (
+        '"/v1/sys/mounts"',
+        '"ssh-otp/"',
+        '"/v1/sys/auth"',
+        '"machine/"',
+        '"approle"',
+    ):
+        if item not in check_code:
+            fail(f"Проверка служебного доступа не подтверждает OTP-контур: {item}")
+
     otp_policy = access_code.split("otp_config_policy = json.dumps(", 1)[1].split(
         "request(", 1
     )[0]
