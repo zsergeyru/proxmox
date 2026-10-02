@@ -12,11 +12,20 @@ from .guest_catalog import find_guest_by_role
 INFRA_MANAGER_ROLE = "infra-manager"
 
 
+def _default_repo_root() -> Path:
+    """Найти рабочую копию проекта для исходного и установленного кода."""
+
+    source_root = Path(__file__).resolve().parents[3]
+    if (source_root / "infrastructure" / "guests").is_dir():
+        return source_root
+    return Path("/var/lib/infra-manager/bootstrap-repo")
+
+
 @dataclass(frozen=True)
 class Paths:
     """Пути файлов и каталогов infra-manager."""
 
-    repo_root: Path = Path(__file__).resolve().parents[3]
+    repo_root: Path = field(default_factory=_default_repo_root)
     config_dir: Path = field(
         default_factory=lambda: Path(
             os.environ.get("INFRA_MANAGER_CONFIG_DIR", "/etc/infra-manager")
