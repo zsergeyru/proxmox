@@ -172,7 +172,7 @@ def require_runtime_activation_idle() -> None:
     """Не запускать новое задание во время замены infra-runtime."""
     if RUNTIME_ACTIVATION_MARKER.exists():
         raise InfraManagerError(
-            "Идёт активация новой управляющей среды 910; "
+            "Идёт активация новой управляющей среды infra-manager; "
             "дождитесь её завершения и повторите задание"
         )
 
@@ -188,8 +188,8 @@ def reserve_runtime_activation() -> None:
         )
     except FileExistsError as exc:
         raise InfraManagerError(
-            "Активация управляющей среды 910 уже ожидается; "
-            "повторный Deploy Guest 910 запрещён"
+            "Активация управляющей среды infra-manager уже ожидается; "
+            "повторное самообновление infra-manager запрещено"
         ) from exc
 
     try:
