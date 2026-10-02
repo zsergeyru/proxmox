@@ -260,11 +260,18 @@ systemctl daemon-reload
 """
     _ssh(node, "sh", "-c", cleanup)
 
-    _install_remote_text_tree(
-        node,
-        library_source,
-        OPENBAO_HOST_LIBRARY,
-    )
+    command_text = command_source.read_text(encoding="utf-8")
+    if "from openbao_host." in command_text:
+        if not library_source.is_dir():
+            raise InfraManagerError(
+                f"Не найден пакет поддержки OpenBao: {library_source}"
+            )
+        _install_remote_text_tree(
+            node,
+            library_source,
+            OPENBAO_HOST_LIBRARY,
+        )
+
     _install_remote_file(
         node,
         command_source,
