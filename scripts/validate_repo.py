@@ -383,6 +383,7 @@ class ValidationState:
     seen: dict[int, Path] = field(default_factory=dict)
     used_ips: dict[ipaddress.IPv4Address, Path] = field(default_factory=dict)
     used_profiles: set[str] = field(default_factory=set)
+    seen_roles: dict[str, Path] = field(default_factory=dict)
 
 
 def _load_validation_state() -> ValidationState | None:
@@ -438,6 +439,25 @@ def _check_manifest_identity(
         fail(f"дублирующийся VMID {vmid}: {state.seen[vmid]} и {rel}")
     else:
         state.seen[vmid] = rel
+
+    role = data.get("role")
+    if isinstance(role, str):
+        if role in state.seen_roles:
+            fail(
+                f"дублирующаяся роль {role!r}: "
+                f"{state.seen_roles[role]} и {rel}"
+            )
+        else:
+            state.seen_roles[role] = rel
+
+        if role == "infra-manager":
+            if data.get("pve_management") is not False:
+                fail(
+                    f"{rel}: роль infra-manager должна иметь "
+                    "pve_management: false"
+                )
+            if data.get("profile") is None:
+                fail(f"{rel}: роль infra-manager должна иметь profile")
 
 
 def _validate_profiled_manifest(
