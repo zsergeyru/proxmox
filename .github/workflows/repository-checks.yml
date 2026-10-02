@@ -87,6 +87,9 @@ jobs:
       - name: Run PVE lifecycle checks
         run: python scripts/tests/test-pve-lifecycle.py
 
+      - name: Run administrative command wrapper checks
+        run: python scripts/tests/test-python-command.py
+
       - name: Run OpenBao checks
         run: python scripts/tests/test-openbao.py
 
