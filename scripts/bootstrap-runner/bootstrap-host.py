@@ -459,7 +459,7 @@ class BootstrapHost:
             return False
 
     def verify_recovery_state(self) -> None:
-        """Проверить аварийное состояние до любых изменений 910."""
+        """Проверить аварийное состояние до изменений infra-manager."""
         required_dirs = (
             self.host_pve_only_dir,
             self.host_recovery_dir,
@@ -510,16 +510,16 @@ class BootstrapHost:
                 "Recovery запрещён: отсутствует постоянная база Semaphore"
             )
 
-        self.ok("Аварийное состояние 910 проверено до начала восстановления")
+        self.ok(f"Аварийное состояние {self.infra_ctid} проверено до восстановления")
 
     def prepare_new_persistent_layout(self) -> None:
-        """Подготовить пустую постоянную область для нового 910 без миграции."""
+        """Подготовить постоянную область для нового infra-manager без миграции."""
         self.host_persistent_root.mkdir(parents=True, exist_ok=True)
         self.host_pve_only_dir.mkdir(parents=True, exist_ok=True)
         self.host_access_dir.mkdir(parents=True, exist_ok=True)
         self.host_state_dir.mkdir(parents=True, exist_ok=True)
 
-        # 910 — непривилегированный LXC с обычным отображением uid:
+        # infra-manager — непривилегированный LXC с обычным отображением uid:
         # root -> 100000, uid 1001 -> 101001.
         self._set_mode_owner(self.host_persistent_root, 0o755, 0, 0)
         self._set_mode_owner(self.host_pve_only_dir, 0o700, 0, 0)
@@ -552,7 +552,7 @@ class BootstrapHost:
             uid=100000,
             gid=100000,
         )
-        self.ok("Постоянные каталоги нового 910 подготовлены на PVE")
+        self.ok(f"Постоянные каталоги нового {self.infra_ctid} подготовлены на PVE")
 
     def _infra_mount_matches(
         self,
@@ -584,7 +584,7 @@ class BootstrapHost:
         return (options.get("ro") == "1") if read_only else ("ro" not in options)
 
     def persistent_layout_attached(self) -> bool:
-        """Проверить наличие обоих mount point новой схемы 910."""
+        """Проверить mount point постоянной схемы infra-manager."""
         config = self.pct_config(self.infra_ctid)
         return self._infra_mount_matches(
             config,
@@ -613,7 +613,7 @@ class BootstrapHost:
         missing = [str(path) for path in required_dirs if not path.is_dir()]
         if missing:
             self.fail(
-                "910 ещё использует старую схему постоянных данных; "
+                f"{self.infra_ctid} ещё использует старую схему постоянных данных; "
                 "автоматическая миграция запрещена. Выполните ручную миграцию. "
                 f"Отсутствуют: {', '.join(missing)}"
             )
@@ -635,7 +635,7 @@ class BootstrapHost:
         )
         if not access_ok or not state_ok:
             self.fail(
-                "LXC 910 не подключён к постоянным каталогам PVE. "
+                f"LXC {self.infra_ctid} не подключён к постоянным каталогам PVE. "
                 "Автоматическая миграция существующих данных запрещена; "
                 "выполните её вручную."
             )
@@ -658,9 +658,9 @@ class BootstrapHost:
             )
 
     def attach_persistent_layout(self) -> None:
-        """Подключить подготовленные каталоги к новому LXC 910."""
+        """Подключить подготовленные каталоги к новому infra-manager."""
         if not self.infra_exists():
-            self.fail("нельзя подключить постоянные каталоги: LXC 910 отсутствует")
+            self.fail(f"нельзя подключить постоянные каталоги: LXC {self.infra_ctid} отсутствует")
         if not self.infra_config_is_expected():
             self.fail(f"VMID {self.infra_ctid} занят чужим объектом")
 
@@ -707,7 +707,7 @@ class BootstrapHost:
 
         self.pct("start", str(self.infra_ctid))
         self.verify_persistent_layout()
-        self.ok("Постоянные каталоги PVE подключены к новому 910")
+        self.ok(f"Постоянные каталоги PVE подключены к {self.infra_ctid}")
 
     def ensure_host_root_ssh_access(self) -> None:
         """Подготовить отдельный root SSH-ключ для управляющего контура."""
@@ -838,8 +838,8 @@ class BootstrapHost:
             if not host_path.is_file() or host_path.stat().st_size == 0:
                 self.fail(f"на PVE отсутствует постоянный файл доступа: {host_path}")
             if not self.infra_test("-s", guest_path):
-                self.fail(f"910 не видит постоянный файл доступа: {guest_path}")
-        self.ok("Root SSH-доступ PVE доступен в 910 только для чтения")
+                self.fail(f"{self.infra_ctid} не видит постоянный файл доступа: {guest_path}")
+        self.ok(f"Root SSH-доступ PVE доступен в {self.infra_ctid} только для чтения")
 
     def assert_owned_runner(self) -> None:
         # VMID недостаточно для доказательства владения: проверяем также
@@ -872,7 +872,7 @@ class BootstrapHost:
             (
                 self.project_dir / "scripts/bootstrap-runner/deploy-infra-manager.sh",
                 "-s",
-                "deploy-910.sh",
+                "deploy-infra-manager.sh",
             ),
         )
         for path, test_flag, label in checks:
@@ -1122,7 +1122,7 @@ class BootstrapHost:
         source: Path,
         target: Path,
     ) -> None:
-        """Передать secret в tmpfs 910 только на время bootstrap."""
+        """Передать secret в tmpfs infra-manager только на время bootstrap."""
         if not source.is_file() or source.stat().st_size == 0:
             self.fail(f"отсутствует bootstrap secret: {source}")
         self.infra_exec(
@@ -1146,7 +1146,7 @@ class BootstrapHost:
         )
 
     def prepare_infra_pve_access(self, access_mode: str = "apply") -> None:
-        """Проверить PVE token и при необходимости временно передать его 910."""
+        """Проверить PVE token и временно передать его infra-manager при необходимости."""
         self.verify_infra_object()
         token_name = "infra-manager"
 
@@ -1196,7 +1196,7 @@ class BootstrapHost:
                 "add",
                 "managed",
                 "--comment",
-                "Guests managed from 910 infra-manager",
+                f"Guests managed from {self.infra_ctid} infra-manager",
             )
 
         ca_source = Path("/etc/pve/pve-root-ca.pem")
@@ -1208,7 +1208,7 @@ class BootstrapHost:
             gid=100000,
         )
         if not self.infra_test("-s", self.infra_pve_ca):
-            self.fail("910 не видит PVE CA из постоянного каталога PVE")
+            self.fail(f"{self.infra_ctid} не видит PVE CA из постоянного каталога PVE")
 
         node, host_ip = self.pve_node_address()
         hosts_script = (
@@ -1228,10 +1228,10 @@ class BootstrapHost:
             host_ip,
         )
 
-        self.ok("PVE API-доступ 910 подготовлен без постоянной файловой копии")
+        self.ok(f"PVE API-доступ {self.infra_ctid} подготовлен без постоянной файловой копии")
 
     def push_to_infra(self, source: Path, target: Path, mode: str) -> None:
-        """Передать файл в 910 от root с явно заданными правами."""
+        """Передать файл в infra-manager от root с явно заданными правами."""
         push_args = [
             "push", str(self.infra_ctid), str(source), str(target),
             "--user", "0",
@@ -1273,7 +1273,7 @@ class BootstrapHost:
     ConnectTimeout 10
 """
         self._write_infra_file(self.infra_github_config, config, "0600")
-        self.ok("Временный GitHub-доступ 910 подготовлен из PVE-only recovery")
+        self.ok(f"Временный GitHub-доступ {self.infra_ctid} подготовлен из PVE-only recovery")
 
     def _write_infra_file(self, path: Path, content: str, mode: str) -> None:
         # pct push работает с локальным файлом, поэтому текст сначала
@@ -1309,7 +1309,7 @@ class BootstrapHost:
                 quiet=True,
             )
         else:
-            # На чистом 910 создаём рабочую копию сразу нужной ветки.
+            # На чистом infra-manager создаём рабочую копию сразу нужной ветки.
             self.infra_exec("rm", "-rf", str(self.infra_project_dir))
             self.infra_exec(
                 "install", "-d", "-m", "0755", str(self.infra_project_dir.parent)
@@ -1324,7 +1324,7 @@ class BootstrapHost:
             ]
             self.infra_exec(*clone_args, quiet=True)
 
-        self.ok("Закрытый проект передан в 910")
+        self.ok(f"Закрытый проект передан в {self.infra_ctid}")
 
     def verify_infra_handoff(self) -> None:
         # Перед полной настройкой Ansible требуем весь минимальный набор доверия:
@@ -1336,7 +1336,7 @@ class BootstrapHost:
         )
         if not pve_credential_ready:
             self.fail(
-                "в 910 отсутствует PVE API credential из OpenBao "
+                f"в {self.infra_ctid} отсутствует PVE API credential из OpenBao "
                 "или временного bootstrap"
             )
         required = (
@@ -1347,10 +1347,10 @@ class BootstrapHost:
         )
         for path, label in required:
             if not self.infra_test("-s", path):
-                self.fail(f"в 910 отсутствует {label}")
+                self.fail(f"в {self.infra_ctid} отсутствует {label}")
         if not self.infra_test("-d", self.infra_project_dir / ".git"):
-            self.fail("в 910 отсутствует рабочая копия проекта")
-        self.ok("Данные для настройки 910 переданы")
+            self.fail(f"в {self.infra_ctid} отсутствует рабочая копия проекта")
+        self.ok(f"Данные для настройки {self.infra_ctid} переданы")
 
     def handoff_infra(self, access_mode: str = "apply") -> None:
         self.prepare_infra_pve_access(access_mode)
@@ -1369,7 +1369,7 @@ class BootstrapHost:
             or self.infra_test("-s", self.infra_pve_api_env)
         ):
             self.fail(
-                "в существующем 910 отсутствует рабочий или bootstrap "
+                f"в существующем {self.infra_ctid} отсутствует рабочий или bootstrap "
                 "PVE API credential"
             )
 
@@ -1384,7 +1384,7 @@ class BootstrapHost:
             / "initialize-openbao.py"
         )
         if not self.infra_test("-s", job):
-            self.fail(f"в 910 отсутствует задача инициализации OpenBao: {job}")
+            self.fail(f"в {self.infra_ctid} отсутствует задача инициализации OpenBao: {job}")
 
         self.infra_exec(
             "env",
@@ -1400,13 +1400,13 @@ class BootstrapHost:
             str(self.infra_bootstrap_secret_dir),
         )
         if self.infra_test("-e", self.infra_bootstrap_secret_dir):
-            self.fail("временные bootstrap secrets 910 не удалены")
+            self.fail(f"временные bootstrap secrets {self.infra_ctid} не удалены")
         self.ok("Рабочие secrets перенесены в OpenBao; bootstrap-копии удалены")
 
     def verify_infra_ready(self, *, quiet: bool = False) -> None:
         self.verify_infra_object()
         if not self.infra_test("-x", "/usr/local/sbin/infra-manager-status"):
-            self.fail("в 910 отсутствует infra-manager-status")
+            self.fail(f"в {self.infra_ctid} отсутствует infra-manager-status")
 
         args = [
             "env",
@@ -1528,7 +1528,7 @@ class BootstrapHost:
         self.ok("Сценарий разблокировки OpenBao удалён; ключ на PVE сохранён")
 
     def remove_infra(self) -> None:
-        # Сначала убираем временный контур. Сам 910 удаляем только после
+        # Сначала убираем временный контур. Сам infra-manager удаляем только после
         # строгой проверки метки владения.
         self.remove_runner_if_present()
         if self.infra_exists():
