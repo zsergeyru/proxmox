@@ -73,9 +73,6 @@ def main() -> None:
                     f"{actual!r}; ожидалось {expected!r}"
                 )
 
-            pythonpath = env.get("PYTHONPATH", "")
-            del pythonpath
-
         unknown = commands / "infra-manager-unknown"
         shutil.copy2(WRAPPER, unknown)
         unknown.chmod(0o755)
