@@ -117,6 +117,9 @@ jobs:
       - name: Run access contract checks
         run: python scripts/tests/test-access-contract.py
 
+      - name: Run AI Control contract checks
+        run: python scripts/tests/test-ai-control-contract.py
+
       - name: Validate all Ansible YAML files
         run: |
           python - <<'PY'
