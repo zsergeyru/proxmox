@@ -498,7 +498,7 @@ grep -RFq '"secret_threshold": 1' "$OPENBAO_HOST_PACKAGE" \
     || die "Порог разблокировки OpenBao должен быть равен одному ключу"
 grep -Fq '/mnt/bindmounts/infra-manager/pve-only/openbao' "$OPENBAO_HOST" \
     || die "Unseal-ключ OpenBao должен храниться только в pve-only каталоге"
-grep -RFq 'payload.pop("root_token", None)' "$OPENBAO_HOST_PACKAGE" \
+grep -Fq 'payload.pop("root_token", None)' "$OPENBAO_HOST" \
     || die "Initial root token OpenBao должен извлекаться без постоянного сохранения"
 grep -RFq '/v1/auth/token/revoke-self' "$OPENBAO_HOST_PACKAGE" \
     || die "Initial root token OpenBao должен отзываться после инициализации"
