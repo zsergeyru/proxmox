@@ -228,7 +228,7 @@ trap - EXIT
 
 
 def install_openbao_host_support(node: str, repo_root: Path) -> None:
-    """Установить на PVE только сценарий разблокировки OpenBao."""
+    """Установить на PVE команду OpenBao, её пакет и описание infra-manager."""
     host_source = repo_root / "scripts" / "infra-manager" / "host"
     command_source = host_source / "openbao-unseal.py"
     library_source = host_source / "openbao_host"
