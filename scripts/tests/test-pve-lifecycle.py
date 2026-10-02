@@ -176,11 +176,32 @@ def test_cleanup_after_create_failure() -> None:
         )
 
 
+def test_cleanup_refuses_foreign_object() -> None:
+    client = FakePveClient(occupied=True)
+
+    def foreign_find_vm(vmid: int):
+        assert vmid == lifecycle.TEST_VMID
+        return {
+            "vmid": vmid,
+            "type": "lxc",
+            "name": "foreign-object",
+        }
+
+    client.find_vm = foreign_find_vm  # type: ignore[method-assign]
+    expect_error(
+        lambda: lifecycle._cleanup_created_lxc(client, "pve"),
+        "Аварийная очистка разрешила удалить чужой объект",
+    )
+    if client.actions:
+        raise SystemExit("Чужой объект не должен изменяться при аварийной очистке")
+
+
 def main() -> None:
     test_success()
     test_requires_apply()
     test_rejects_occupied_vmid()
     test_cleanup_after_create_failure()
+    test_cleanup_refuses_foreign_object()
     print("[ОК] Проверки PVE lifecycle test пройдены")
 
 
