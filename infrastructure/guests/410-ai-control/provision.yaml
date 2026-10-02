@@ -36,6 +36,7 @@ ai_control:
     core: /opt/ai-control/core
     agents: /opt/ai-control/agents
     primary_agent: /opt/ai-control/agents/hermes
+    repositories: /opt/ai-control/repos
     project_repository: /opt/ai-control/repos/proxmox
     instructions: /opt/ai-control/instructions
     tools: /opt/ai-control/tools
