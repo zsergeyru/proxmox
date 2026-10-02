@@ -17,6 +17,7 @@ PY_SETTINGS="$ROOT/scripts/infra-manager/infra_manager/settings.py"
 PY_SEMAPHORE="$ROOT/scripts/infra-manager/infra_manager/semaphore.py"
 PY_STATUS="$ROOT/scripts/infra-manager/infra_manager/status.py"
 PY_PVE="$ROOT/scripts/infra-manager/infra_manager/pve.py"
+PY_LIFECYCLE="$ROOT/scripts/infra-manager/infra_manager/pve_lifecycle.py"
 PY_COMMON="$ROOT/scripts/infra-manager/infra_manager/common.py"
 STATUS="$ROOT/scripts/infra-manager/commands/status.sh"
 ACCESS="$ROOT/scripts/infra-manager/commands/pve-access-check.sh"
@@ -80,7 +81,7 @@ for task_file in "${ANSIBLE_RUNTIME_PARTS[@]}"; do
     cat "$ANSIBLE_RUNTIME_DIR/$task_file" >> "$ANSIBLE_RUNTIME"
 done
 
-for file in "$PY_COMMON" "$ANSIBLE_CONFIG" "$ANSIBLE_PLAYBOOK" "$ANSIBLE_LINUX_BASE" "$PROJECT_GIT_TASKS" "$ANSIBLE_GUEST_LAYOUT" "$ANSIBLE_DOCKER" "$ANSIBLE_RUNTIME" "$PY_SETTINGS" "$PY_SEMAPHORE" "$PY_STATUS" "$PY_PVE" "$STATUS" "$ACCESS" "$LIFECYCLE" "$ACTIVATE_RUNTIME" "$BUILD_TEMPLATE" "$DEPLOY_GUEST" "$PY_OPENTOFU" "$PY_TEMPLATE" "$PY_TEMPLATE_BUILD" "$PY_TEMPLATE_VERIFY" "$COMPOSE" "$OPENBAO_CONFIG" "$OPENBAO_HOST" "$OPENBAO_STARTUP_COMMAND" "$OPENBAO_STARTUP_SERVICE" "$OPENBAO_JOB" "$SSH_ACCESS_JOB" "$SSH_ACCESS_ACCEPTANCE" "$PY_ACCESS_POLICY" "$PY_OPENBAO" "$PY_RECOVERY" "$RECOVERY_HOST" "$DOCKERFILE" "$REQ" "$PLAN" "$PY_PVE_HOST" "$OPENTOFU_LOCK" "$GUEST_MANIFEST" "$PROVISION" "$SSH_CONFIG"; do
+for file in "$PY_COMMON" "$ANSIBLE_CONFIG" "$ANSIBLE_PLAYBOOK" "$ANSIBLE_LINUX_BASE" "$PROJECT_GIT_TASKS" "$ANSIBLE_GUEST_LAYOUT" "$ANSIBLE_DOCKER" "$ANSIBLE_RUNTIME" "$PY_SETTINGS" "$PY_SEMAPHORE" "$PY_STATUS" "$PY_PVE" "$PY_LIFECYCLE" "$STATUS" "$ACCESS" "$LIFECYCLE" "$ACTIVATE_RUNTIME" "$BUILD_TEMPLATE" "$DEPLOY_GUEST" "$PY_OPENTOFU" "$PY_TEMPLATE" "$PY_TEMPLATE_BUILD" "$PY_TEMPLATE_VERIFY" "$COMPOSE" "$OPENBAO_CONFIG" "$OPENBAO_HOST" "$OPENBAO_STARTUP_COMMAND" "$OPENBAO_STARTUP_SERVICE" "$OPENBAO_JOB" "$SSH_ACCESS_JOB" "$SSH_ACCESS_ACCEPTANCE" "$PY_ACCESS_POLICY" "$PY_OPENBAO" "$PY_RECOVERY" "$RECOVERY_HOST" "$DOCKERFILE" "$REQ" "$PLAN" "$PY_PVE_HOST" "$OPENTOFU_LOCK" "$GUEST_MANIFEST" "$PROVISION" "$SSH_CONFIG"; do
     [[ -s "$file" ]] || die "Отсутствует обязательный файл: $file"
 done
 
@@ -646,8 +647,16 @@ grep -q 'infra-manager-status --full --quiet' "$ACTIVATE_RUNTIME" \
 if grep -Fq 'infra-manager-status' "$ANSIBLE_VERIFY"; then
     die "Ansible verify не должен выполнять финальный status infra-manager до Initialize OpenBao"
 fi
-grep -Fq 'PVE_ENV="/run/infra-manager/secrets/pve-api.env"' "$LIFECYCLE" \
-    || die "Lifecycle test должен использовать PVE API credential из OpenBao"
+grep -Fq 'exec python3 -m infra_manager pve-lifecycle-test "$@"' "$LIFECYCLE" \
+    || die "Lifecycle wrapper должен передавать выполнение Python CLI"
+grep -Fq 'client = PveClient()' "$PY_LIFECYCLE" \
+    || die "Lifecycle test должен использовать общий PveClient"
+grep -Fq 'TEST_VMID = 9098' "$PY_LIFECYCLE" \
+    || die "Lifecycle test должен использовать временный VMID 9098"
+grep -Fq 'if not apply:' "$PY_LIFECYCLE" \
+    || die "Lifecycle test должен требовать явный --apply"
+grep -Fq 'actual_type != "lxc" or actual_name != TEST_HOSTNAME' "$PY_LIFECYCLE" \
+    || die "Аварийная очистка lifecycle test должна проверять владельца VMID"
 
 grep -q 'INFRA_PVE_HOST_DIR' "$PY_SETTINGS" \
     || die "Путь PVE SSH должен поддерживать отдельный bootstrap-runtime"
