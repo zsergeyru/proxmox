@@ -50,9 +50,9 @@ scripts/
 │   │   └── status.py                        # Исполняет проверки и вывод из status.yaml infra-manager
 │   │
 │   ├── commands/                            # Исходные файлы административных команд, устанавливаемых в /usr/local/sbin
-│   │   ├── status.sh                        # Обёртка команды infra-manager-status
-│   │   ├── pve-access-check.sh              # Обёртка команды infra-manager-pve-access-check
-│   │   └── pve-lifecycle-test.sh            # Тонкая оболочка команды Python lifecycle test
+│   │   ├── python-command.sh                # Общая оболочка status, PVE access check и lifecycle test
+│   │   ├── activate-runtime.sh              # Отложенно активирует обновлённую управляющую среду
+│   │   └── openbao-startup-unseal.sh        # Восстанавливает OpenBao при запуске infra-manager
 │   │
 │   └── jobs/                                # Задания, непосредственно запускаемые Semaphore
 │       ├── opentofu-plan.py                  # Формирует входные данные OpenTofu и строит только план изменений
@@ -173,25 +173,17 @@ Semaphore: Build Template 9000
 
 Это стабильные административные команды, которые общий Ansible-механизм устанавливает в `/usr/local/sbin`.
 
-`status.sh` устанавливается как:
+Один файл `python-command.sh` устанавливается под тремя именами:
 
 ```text
 infra-manager-status
-```
-
-`pve-access-check.sh` устанавливается как:
-
-```text
 infra-manager-pve-access-check
-```
-
-`pve-lifecycle-test.sh` устанавливается как:
-
-```text
 infra-manager-pve-lifecycle-test
 ```
 
-Это только стабильная оболочка. Реальная логика находится в `infra_manager/pve_lifecycle.py` и использует общий `PveClient`. Команда только с `--apply` создаёт временный LXC 9098 в pool `managed`, изменяет его, запускает, останавливает и удаляет; аварийная очистка удаляет объект только после проверки ожидаемых типа и имени.
+Оболочка определяет нужную Python-подкоманду по своему установленному имени и запускает `python3 -m infra_manager`. Поэтому поиск установленного Python-пакета, настройка `PYTHONPATH` и аварийный переход к рабочей копии проекта описаны только один раз.
+
+Реальная логика lifecycle test находится в `infra_manager/pve_lifecycle.py` и использует общий `PveClient`. Команда только с `--apply` создаёт временный LXC 9098 в pool `managed`, изменяет его, запускает, останавливает и удаляет; аварийная очистка удаляет объект только после проверки ожидаемых типа и имени.
 
 `activate-runtime.sh` устанавливается как `infra-manager-activate-runtime` и используется только для отложенной активации новой управляющей среды после самообновления 910.
 
