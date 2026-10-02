@@ -348,7 +348,7 @@ def main() -> int:
                 print("[ОК] Переходные файловые secret-источники удалены")
             else:
                 verify_recovery_state(require_approle=True)
-                print("[ОК] Аварийный контур 910 готов")
+                print("[ОК] Аварийный контур infra-manager готов")
     except (OSError, RecoveryError) as exc:
         print(f"ОШИБКА: {exc}", file=sys.stderr)
         return 1
