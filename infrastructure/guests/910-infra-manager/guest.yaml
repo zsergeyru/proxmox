@@ -3,6 +3,7 @@
 schema_version: 12
 vmid: 910
 name: infra-manager
+role: infra-manager
 profile: debian-lxc-docker
 
 description: Постоянный управляющий LXC инфраструктуры Proxmox, создаваемый временным начальным контуром 990 [owner=proxmox-project;role=infra-manager]
