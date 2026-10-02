@@ -1,0 +1,24 @@
+[Unit]
+Description=AI Control
+After=network-online.target
+Wants=network-online.target
+ConditionPathIsExecutable=/opt/ai-control/core/bin/ai-control
+
+[Service]
+Type=simple
+User=ai-control
+Group=ai-control
+WorkingDirectory=/opt/ai-control
+EnvironmentFile=/etc/ai-control/ai-control.env
+ExecStart=/opt/ai-control/core/bin/ai-control
+Restart=on-failure
+RestartSec=5
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/opt/ai-control/state /run/ai-control /var/cache/ai-control
+
+[Install]
+WantedBy=multi-user.target
