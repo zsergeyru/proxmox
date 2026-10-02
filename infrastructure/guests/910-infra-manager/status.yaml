@@ -1,9 +1,9 @@
 schema_version: 1
 guest_vmid: 910
 
-title: "Состояние 910 infra-manager"
+title: "Состояние infra-manager"
 short_ready_message: "infra-manager готов"
-ready_message: "910 infra-manager полностью готов"
+ready_message: "infra-manager полностью готов"
 
 layout:
   separator: "="
@@ -58,7 +58,7 @@ sections:
 
   - title: "Проверка"
     fields:
-      - label: "Внутри 910"
+      - label: "Внутри infra-manager"
         value: "infra-manager-status --full"
       - label: "С PVE"
-        value: "pct exec 910 -- infra-manager-status --full"
+        template: "pct exec {guest_vmid} -- infra-manager-status --full"
