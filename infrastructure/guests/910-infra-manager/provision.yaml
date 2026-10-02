@@ -79,7 +79,7 @@ docker:
       restart: unless-stopped
       network_mode: host
       api_address: http://127.0.0.1:8200
-      machine_api_address: https://192.168.9.10:8202
+      machine_api_port: 8202
       tls_path: /etc/infra-manager/openbao/tls
       data_path: /var/lib/persistent/openbao
       config_file: rootfs/opt/infra-manager/compose/openbao/openbao.hcl
