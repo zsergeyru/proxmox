@@ -340,7 +340,7 @@ def issue_openbao_machine_credentials(
     node: str,
     vmid: int,
 ) -> dict[str, str]:
-    """Выпустить RoleID/SecretID одной машинной AppRole без хранения на 910."""
+    """Выпустить RoleID/SecretID AppRole без хранения на infra-manager."""
     if not isinstance(vmid, int) or vmid <= 0:
         raise InfraManagerError("Некорректный VMID машинной идентичности")
     result = _ssh_with_input(
@@ -503,7 +503,7 @@ def ensure_infra_self_access(
     hostname: str,
     public_key: str,
 ) -> None:
-    """Разрешить Ansible-ключу 910 вход в сам 910 через доверенный PVE."""
+    """Разрешить Ansible-ключу infra-manager вход в себя через доверенный PVE."""
     key_parts = public_key.split()
     if len(key_parts) < 2 or not key_parts[0].startswith("ssh-"):
         raise InfraManagerError("Открытый Ansible-ключ 910 некорректен")
