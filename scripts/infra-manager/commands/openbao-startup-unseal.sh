@@ -65,12 +65,12 @@ run_pve_openbao
 status_json="$(curl -fsS "$status_url")"
 read -r initialized sealed < <(read_status_flags <<<"$status_json")
 if [[ "$initialized" != "true" || "$sealed" != "false" ]]; then
-    echo "ОШИБКА: OpenBao не достиг разблокированного состояния после запуска 910" >&2
+    echo "ОШИБКА: OpenBao не достиг разблокированного состояния после запуска infra-manager" >&2
     exit 1
 fi
 
 # Проверки выполняются через PVE-only AppRole; служебные данные OpenBao
-# не передаются в 910 и не попадают в журналы.
+# не передаются в infra-manager и не попадают в журналы.
 run_pve_openbao --check-kv --log-level quiet
 run_pve_openbao --check-ssh-access --log-level quiet
 
