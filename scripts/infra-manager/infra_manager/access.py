@@ -25,7 +25,7 @@ class GuestRecord:
 
 
 @dataclass(frozen=True)
-class MachineSshEdge:
+class SshOtpEdge:
     source_vmid: int
     target_vmid: int
 
@@ -34,29 +34,23 @@ class MachineSshEdge:
 class AccessPolicy:
     guests: dict[int, GuestRecord]
     machine_identity_vmids: frozenset[int]
-    machine_ssh_edges: frozenset[MachineSshEdge]
+    ssh_otp_edges: frozenset[SshOtpEdge]
     project_repository_read_vmids: frozenset[int]
 
-    def machine_principal(self, vmid: int) -> str:
-        if vmid not in self.machine_identity_vmids:
-            raise InfraManagerError(
-                f"Для guest:{vmid} не разрешена машинная SSH-идентичность"
+    def sources_for(self, target_vmid: int) -> tuple[int, ...]:
+        return tuple(
+            sorted(
+                edge.source_vmid
+                for edge in self.ssh_otp_edges
+                if edge.target_vmid == target_vmid
             )
-        return f"guest-{vmid}"
-
-    def authorized_principals(self, target_vmid: int) -> tuple[str, ...]:
-        principals = {
-            self.machine_principal(edge.source_vmid)
-            for edge in self.machine_ssh_edges
-            if edge.target_vmid == target_vmid
-        }
-        return tuple(sorted(principals))
+        )
 
     def targets_for(self, source_vmid: int) -> tuple[int, ...]:
         return tuple(
             sorted(
                 edge.target_vmid
-                for edge in self.machine_ssh_edges
+                for edge in self.ssh_otp_edges
                 if edge.source_vmid == source_vmid
             )
         )
@@ -210,7 +204,7 @@ def _expand_target(
 
 
 def load_access_policy(repo_root: Path) -> AccessPolicy:
-    """Построить эффективную машинную SSH-политику проекта."""
+    """Построить эффективную политику SSH OTP проекта."""
 
     access = _load_yaml(repo_root / "infrastructure/security/access.yaml")
     rules = access.get("rules")
@@ -263,7 +257,7 @@ def load_access_policy(repo_root: Path) -> AccessPolicy:
             )
         project_repository_read_vmids.add(vmid)
 
-    edges: set[MachineSshEdge] = set()
+    edges: set[SshOtpEdge] = set()
     for rule in rules:
         if not isinstance(rule, dict):
             continue
@@ -298,7 +292,7 @@ def load_access_policy(repo_root: Path) -> AccessPolicy:
                 guests=guests,
             ):
                 edges.add(
-                    MachineSshEdge(
+                    SshOtpEdge(
                         source_vmid=source_vmid,
                         target_vmid=target_vmid,
                     )
@@ -307,7 +301,7 @@ def load_access_policy(repo_root: Path) -> AccessPolicy:
     return AccessPolicy(
         guests=guests,
         machine_identity_vmids=frozenset(identity_vmids),
-        machine_ssh_edges=frozenset(edges),
+        ssh_otp_edges=frozenset(edges),
         project_repository_read_vmids=frozenset(
             project_repository_read_vmids
         ),
