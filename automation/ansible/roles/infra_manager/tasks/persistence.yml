@@ -69,7 +69,7 @@
   loop: "{{ provision.persistence.target_layout.state.bindings }}"
   changed_when: false
 
-- name: Создать основные каталоги 910
+- name: Создать основные каталоги infra-manager
   ansible.builtin.file:
     path: "{{ item.path }}"
     state: directory
@@ -101,7 +101,7 @@
     group: "0"
     mode: "0750"
 
-- name: Подключить постоянное состояние к привычным путям 910
+- name: Подключить постоянное состояние к привычным путям infra-manager
   ansible.builtin.shell: |
     set -eu
     target="{{ item.target }}"
