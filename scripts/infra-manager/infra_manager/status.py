@@ -433,7 +433,7 @@ def _check_openbao(*, full: bool) -> None:
 
     if full and not payload["initialized"]:
         raise InfraManagerError(
-            "OpenBao не инициализирован; полный статус 910 не может быть готов"
+            "OpenBao не инициализирован; полный статус infra-manager не может быть готов"
         )
 
     if payload["initialized"] and payload["sealed"]:
@@ -778,7 +778,7 @@ def _primary_ipv4() -> str:
         if "." in item and item != "127.0.0.1"
     ]
     if not addresses:
-        raise InfraManagerError("Не удалось определить адрес 910")
+        raise InfraManagerError("Не удалось определить адрес infra-manager")
     return addresses[0]
 
 
