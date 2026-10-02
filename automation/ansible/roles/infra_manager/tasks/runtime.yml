@@ -39,9 +39,9 @@
     group: root
     mode: "0755"
   loop:
-    - { source: status.sh, target: infra-manager-status }
-    - { source: pve-access-check.sh, target: infra-manager-pve-access-check }
-    - { source: pve-lifecycle-test.sh, target: infra-manager-pve-lifecycle-test }
+    - { source: python-command.sh, target: infra-manager-status }
+    - { source: python-command.sh, target: infra-manager-pve-access-check }
+    - { source: python-command.sh, target: infra-manager-pve-lifecycle-test }
     - { source: activate-runtime.sh, target: infra-manager-activate-runtime }
     - { source: openbao-startup-unseal.sh, target: infra-manager-openbao-startup-unseal }
 
