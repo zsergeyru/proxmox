@@ -40,10 +40,9 @@
 |---|---|
 | [`../guest.yaml`](../guest.yaml) | параметры VM 410 на уровне Proxmox |
 | [`../provision.yaml`](../provision.yaml) | состав ОС, компоненты, каталоги, постоянные данные и границы |
-| [`../rootfs/`](../rootfs/) | воспроизводимые файлы 410 после появления соответствующей реализации |
 | [`../../../../automation/ansible/playbooks/configure-guest.yml`](../../../../automation/ansible/playbooks/configure-guest.yml) | общий порядок настройки Linux-гостей |
 | [`../../../../automation/ansible/roles/`](../../../../automation/ansible/roles/) | роли повторяемой настройки |
-| [`../../security/access.yaml`](../../security/access.yaml) | машинный контракт внешних прав 410 |
+| [`../../../security/access.yaml`](../../../security/access.yaml) | машинный контракт внешних прав 410 |
 
 После полной реализации машинные файлы, Ansible и локальная спецификация должны описывать одно и то же требуемое состояние.
 
