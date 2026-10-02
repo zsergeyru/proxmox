@@ -151,8 +151,17 @@ jobs:
           # shared globals declared in 00-common.sh are consumed across files.
           shellcheck -S warning -e SC2034 "${files[@]}"
 
-      - name: Run infra-manager contract checks
-        run: bash scripts/tests/test-infra-manager-contract.sh
+      - name: Run infra-manager guest contract
+        run: bash scripts/tests/test-infra-manager-guest-contract.sh
+
+      - name: Run infra-manager OpenBao contract
+        run: bash scripts/tests/test-infra-manager-openbao-contract.sh
+
+      - name: Run infra-manager tooling contract
+        run: bash scripts/tests/test-infra-manager-tooling-contract.sh
+
+      - name: Run infra-manager SSH contract
+        run: bash scripts/tests/test-infra-manager-ssh-contract.sh
 
       - name: Enforce common Ansible path for infra-manager
         run: bash scripts/tests/test-bootstrap-architecture.sh
