@@ -199,6 +199,6 @@ persistence:
 
 boundaries:
   member_of_managed_pool: false
-  opentofu_manages_guest_910: false
+  opentofu_manages_self: false
   application_workloads_allowed: false
   openbao_auto_initialize: false
