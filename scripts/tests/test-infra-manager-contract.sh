@@ -35,8 +35,7 @@ OPENBAO_STARTUP_COMMAND="$ROOT/scripts/infra-manager/commands/openbao-startup-un
 OPENBAO_STARTUP_SERVICE="$ROOT/infrastructure/guests/910-infra-manager/rootfs/etc/systemd/system/infra-manager-openbao-startup-unseal.service.j2"
 OPENBAO_JOB="$ROOT/scripts/infra-manager/jobs/initialize-openbao.py"
 SSH_ACCESS_JOB="$ROOT/scripts/infra-manager/jobs/sync-ssh-access.py"
-PY_SSH_ACCESS="$ROOT/scripts/infra-manager/infra_manager/ssh_access.py"
-PY_MACHINE_SSH="$ROOT/scripts/infra-manager/infra_manager/machine_ssh.py"
+SSH_ACCESS_ACCEPTANCE="$ROOT/scripts/acceptance/verify-ssh-access.py"
 PY_ACCESS_POLICY="$ROOT/scripts/infra-manager/infra_manager/access.py"
 PY_OPENBAO="$ROOT/scripts/infra-manager/infra_manager/openbao.py"
 PY_RECOVERY="$ROOT/scripts/infra-manager/infra_manager/recovery.py"
@@ -80,7 +79,7 @@ for task_file in "${ANSIBLE_RUNTIME_PARTS[@]}"; do
     cat "$ANSIBLE_RUNTIME_DIR/$task_file" >> "$ANSIBLE_RUNTIME"
 done
 
-for file in "$PY_COMMON" "$ANSIBLE_CONFIG" "$ANSIBLE_PLAYBOOK" "$ANSIBLE_LINUX_BASE" "$PROJECT_GIT_TASKS" "$ANSIBLE_GUEST_LAYOUT" "$ANSIBLE_DOCKER" "$ANSIBLE_RUNTIME" "$PY_SETTINGS" "$PY_SEMAPHORE" "$PY_STATUS" "$PY_PVE" "$STATUS" "$ACCESS" "$LIFECYCLE" "$ACTIVATE_RUNTIME" "$BUILD_TEMPLATE" "$VERIFY_TEMPLATE" "$DEPLOY_GUEST" "$PY_OPENTOFU" "$PY_TEMPLATE" "$PY_TEMPLATE_BUILD" "$PY_TEMPLATE_VERIFY" "$COMPOSE" "$OPENBAO_CONFIG" "$OPENBAO_HOST" "$OPENBAO_STARTUP_COMMAND" "$OPENBAO_STARTUP_SERVICE" "$OPENBAO_JOB" "$SSH_ACCESS_JOB" "$PY_SSH_ACCESS" "$PY_MACHINE_SSH" "$PY_ACCESS_POLICY" "$PY_OPENBAO" "$PY_RECOVERY" "$RECOVERY_HOST" "$DOCKERFILE" "$REQ" "$PLAN" "$PY_PVE_HOST" "$OPENTOFU_LOCK" "$GUEST_MANIFEST" "$PROVISION" "$SSH_CONFIG"; do
+for file in "$PY_COMMON" "$ANSIBLE_CONFIG" "$ANSIBLE_PLAYBOOK" "$ANSIBLE_LINUX_BASE" "$PROJECT_GIT_TASKS" "$ANSIBLE_GUEST_LAYOUT" "$ANSIBLE_DOCKER" "$ANSIBLE_RUNTIME" "$PY_SETTINGS" "$PY_SEMAPHORE" "$PY_STATUS" "$PY_PVE" "$STATUS" "$ACCESS" "$LIFECYCLE" "$ACTIVATE_RUNTIME" "$BUILD_TEMPLATE" "$VERIFY_TEMPLATE" "$DEPLOY_GUEST" "$PY_OPENTOFU" "$PY_TEMPLATE" "$PY_TEMPLATE_BUILD" "$PY_TEMPLATE_VERIFY" "$COMPOSE" "$OPENBAO_CONFIG" "$OPENBAO_HOST" "$OPENBAO_STARTUP_COMMAND" "$OPENBAO_STARTUP_SERVICE" "$OPENBAO_JOB" "$SSH_ACCESS_JOB" "$SSH_ACCESS_ACCEPTANCE" "$PY_ACCESS_POLICY" "$PY_OPENBAO" "$PY_RECOVERY" "$RECOVERY_HOST" "$DOCKERFILE" "$REQ" "$PLAN" "$PY_PVE_HOST" "$OPENTOFU_LOCK" "$GUEST_MANIFEST" "$PROVISION" "$SSH_CONFIG"; do
     [[ -s "$file" ]] || die "Отсутствует обязательный файл: $file"
 done
 
@@ -541,10 +540,20 @@ grep -Fq 'name="Sync SSH Access"' "$PY_SEMAPHORE" \
     || die "Semaphore должен иметь задание Sync SSH Access"
 grep -Fq 'sync_ssh_access(REPO_ROOT)' "$SSH_ACCESS_JOB" \
     || die "Задание должно синхронизировать OpenBao OTP"
-grep -Fq 'verify_ssh_access(repo_root, node)' "$PY_OPENBAO" \
-    || die "Задание должно проверять реальный SSH OTP"
-grep -Fq 'infra-openbao-ssh' "$PY_SSH_ACCESS" \
-    || die "Задание должно проверять вход через OTP-клиент"
+grep -Fq 'sync_openbao_otp_contract(node, _otp_sources(repo_root))' "$PY_OPENBAO" \
+    || die "Sync SSH Access должен только синхронизировать OTP-контракт OpenBao"
+if grep -Fq 'run_deploy_guest' "$PY_OPENBAO"; then
+    die "Sync SSH Access не должен развёртывать или перенастраивать гостей"
+fi
+if grep -Fq 'verify_ssh_access' "$PY_OPENBAO"; then
+    die "Sync SSH Access не должен запускать приёмочную проверку"
+fi
+grep -Fq 'infra-openbao-ssh' "$SSH_ACCESS_ACCEPTANCE" \
+    || die "Приёмочная проверка должна отдельно проверять реальный SSH OTP"
+[[ ! -e "$ROOT/scripts/infra-manager/infra_manager/machine_ssh.py" ]] \
+    || die "Старая реализация машинных SSH-сертификатов должна быть удалена"
+[[ ! -e "$ROOT/scripts/infra-manager/infra_manager/ssh_access.py" ]] \
+    || die "Приёмочная проверка не должна находиться в рабочем модуле infra_manager"
 if grep -Fq 'machine-ssh-refresh.sh' "$ANSIBLE_RUNTIME"; then
     die "Ansible не должен устанавливать обновление машинных сертификатов"
 fi
