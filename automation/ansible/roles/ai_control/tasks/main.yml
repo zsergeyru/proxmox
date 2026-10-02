@@ -1,0 +1,124 @@
+---
+- name: Проверить контракт AI Control
+  ansible.builtin.assert:
+    that:
+      - (guest_manifest.role | default('')) == "ai-control"
+      - provision.ai_control is defined
+      - provision.ai_control.user is defined
+      - provision.ai_control.group is defined
+      - provision.ai_control.paths is defined
+      - provision.ai_control.service is defined
+      - provision.ai_control.agent is defined
+    fail_msg: "Для роли ai_control требуется guest role=ai-control и раздел provision.ai_control"
+
+- name: Создать системную группу AI Control
+  ansible.builtin.group:
+    name: "{{ provision.ai_control.group }}"
+    system: true
+    state: present
+
+- name: Создать системного пользователя AI Control
+  ansible.builtin.user:
+    name: "{{ provision.ai_control.user }}"
+    group: "{{ provision.ai_control.group }}"
+    system: true
+    shell: /usr/sbin/nologin
+    home: "{{ provision.ai_control.paths.state }}"
+    create_home: false
+    state: present
+
+- name: Создать воспроизводимые каталоги AI Control
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: "{{ provision.ai_control.group }}"
+    mode: "0755"
+  loop:
+    - "{{ provision.ai_control.paths.root }}"
+    - "{{ provision.ai_control.paths.core }}"
+    - "{{ provision.ai_control.paths.agents }}"
+    - "{{ provision.ai_control.paths.primary_agent }}"
+    - "{{ provision.ai_control.paths.instructions }}"
+    - "{{ provision.ai_control.paths.tools }}"
+
+- name: Создать рабочий каталог репозитория
+  ansible.builtin.file:
+    path: "{{ provision.ai_control.paths.project_repository }}"
+    state: directory
+    owner: "{{ provision.ai_control.user }}"
+    group: "{{ provision.ai_control.group }}"
+    mode: "0750"
+
+- name: Создать каталоги состояния AI Control
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner }}"
+    group: "{{ provision.ai_control.group }}"
+    mode: "0750"
+  loop:
+    - { path: "{{ provision.ai_control.paths.state }}", owner: "{{ provision.ai_control.user }}" }
+    - { path: "{{ provision.ai_control.paths.configuration }}", owner: root }
+    - { path: "{{ provision.ai_control.paths.runtime }}", owner: "{{ provision.ai_control.user }}" }
+    - { path: "{{ provision.ai_control.paths.cache }}", owner: "{{ provision.ai_control.user }}" }
+
+- name: Создать внутренние каталоги постоянного состояния
+  ansible.builtin.file:
+    path: "{{ provision.ai_control.paths.state }}/{{ item }}"
+    state: directory
+    owner: "{{ provision.ai_control.user }}"
+    group: "{{ provision.ai_control.group }}"
+    mode: "0750"
+  loop: "{{ provision.ai_control.state_directories }}"
+
+- name: Записать несекретную конфигурацию путей AI Control
+  ansible.builtin.copy:
+    dest: "{{ provision.ai_control.paths.configuration }}/ai-control.env"
+    owner: root
+    group: "{{ provision.ai_control.group }}"
+    mode: "0640"
+    content: |
+      AI_CONTROL_ROOT={{ provision.ai_control.paths.root }}
+      AI_CONTROL_STATE={{ provision.ai_control.paths.state }}
+      AI_CONTROL_RUNTIME={{ provision.ai_control.paths.runtime }}
+      AI_CONTROL_CACHE={{ provision.ai_control.paths.cache }}
+      AI_CONTROL_PROJECT_REPOSITORY={{ provision.ai_control.paths.project_repository }}
+      AI_CONTROL_PRIMARY_AGENT={{ provision.ai_control.agent.primary }}
+  register: ai_control_environment
+
+- name: Установить systemd-службу AI Control
+  ansible.builtin.copy:
+    src: "{{ guest_root }}/rootfs/etc/systemd/system/ai-control.service"
+    dest: /etc/systemd/system/ai-control.service
+    owner: root
+    group: root
+    mode: "0644"
+  register: ai_control_service_unit
+
+- name: Проверить наличие ядра AI Control
+  ansible.builtin.stat:
+    path: "{{ provision.ai_control.service.executable }}"
+  register: ai_control_executable
+
+- name: Включить AI Control в автозапуск
+  ansible.builtin.systemd_service:
+    name: "{{ provision.ai_control.service.unit }}"
+    enabled: true
+    daemon_reload: true
+
+- name: Запустить AI Control после установки ядра
+  ansible.builtin.systemd_service:
+    name: "{{ provision.ai_control.service.unit }}"
+    state: started
+    daemon_reload: >-
+      {{ ai_control_service_unit.changed or ai_control_environment.changed }}
+  when:
+    - ai_control_executable.stat.exists
+    - ai_control_executable.stat.executable | default(false)
+
+- name: Остановить AI Control до установки ядра
+  ansible.builtin.systemd_service:
+    name: "{{ provision.ai_control.service.unit }}"
+    state: stopped
+  when: not ai_control_executable.stat.exists
