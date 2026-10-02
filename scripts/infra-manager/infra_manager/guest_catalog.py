@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import ipaddress
 from pathlib import Path
 from typing import Any
 
@@ -77,6 +78,53 @@ def guest_identity(repo_root: Path, vmid: int) -> GuestIdentity:
         manifest=manifest,
         source=source,
     )
+
+
+def guest_management_address(
+    repo_root: Path,
+    identity: GuestIdentity,
+) -> str | None:
+    """Вернуть административный IPv4 гостя из его машинного описания."""
+
+    network = identity.source.get("network")
+    if isinstance(network, dict):
+        value = network.get("ipv4")
+        if value == "dhcp":
+            return None
+        if isinstance(value, str) and value:
+            try:
+                address = ipaddress.ip_address(value)
+            except ValueError as exc:
+                raise InfraManagerError(
+                    f"{identity.manifest}: некорректный network.ipv4"
+                ) from exc
+            if not isinstance(address, ipaddress.IPv4Address):
+                raise InfraManagerError(
+                    f"{identity.manifest}: network.ipv4 должен быть IPv4"
+                )
+            return str(address)
+
+    defaults = _load_manifest(
+        repo_root / "infrastructure" / "guests" / "defaults.yaml"
+    )
+    default_network = defaults.get("defaults", {}).get("network", {})
+    if not isinstance(default_network, dict):
+        raise InfraManagerError("defaults.yaml не содержит defaults.network")
+    subnet_value = default_network.get("subnet")
+    try:
+        subnet = ipaddress.ip_network(subnet_value, strict=True)
+    except (TypeError, ValueError) as exc:
+        raise InfraManagerError(
+            "defaults.network.subnet имеет некорректное значение"
+        ) from exc
+    if not isinstance(subnet, ipaddress.IPv4Network) or subnet.prefixlen != 16:
+        raise InfraManagerError(
+            "Автоматический адрес infra-manager требует административную IPv4 /16"
+        )
+
+    text = f"{identity.vmid:03d}"
+    first, second, _, _ = str(subnet.network_address).split(".")
+    return f"{first}.{second}.{int(text[0])}.{int(text[1:])}"
 
 
 def find_guest_by_role(repo_root: Path, role: str) -> GuestIdentity:
