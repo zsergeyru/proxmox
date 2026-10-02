@@ -43,6 +43,8 @@ automation/
         │   └── tasks/main.yml
         ├── docker/
         │   └── tasks/main.yml
+        ├── ai_control/
+        │   └── tasks/main.yml
         └── infra_manager/
             └── tasks/
                 ├── main.yml
@@ -70,7 +72,8 @@ roles_path = automation/ansible/roles
 ```text
 linux_base
 → docker, если Docker требуется гостю
-→ infra_manager, только для 910
+→ infra_manager, если guest.yaml содержит role: infra-manager
+→ ai_control, если guest.yaml содержит role: ai-control
 → guest_layout
 ```
 
@@ -78,10 +81,11 @@ linux_base
 
 - `linux_base` — устанавливает системные пакеты и настраивает доверие SSH к центру доступа OpenBao;
 - `docker` — устанавливает и запускает Docker;
-- `infra_manager` — настраивает постоянное состояние, доступы, Semaphore, OpenBao и управляющую среду 910;
-- `guest_layout` — создаёт каталоги компонентов конкретного гостя.
+- `infra_manager` — настраивает постоянное состояние, доступы, Semaphore, OpenBao и управляющую среду гостя с ролью `infra-manager`;
+- `ai_control` — подготавливает пользователя, каталоги, конфигурацию и systemd-службу гостя с ролью `ai-control`;
+- `guest_layout` — создаёт только общие каталоги из `provision.components`, если они определены.
 
-Для 410 фактически применяются `linux_base` и `guest_layout`. Для 910 применяются все четыре roles.
+Для 410 применяются `linux_base`, `ai_control` и общий `guest_layout`. Для 910 применяются `linux_base`, `docker`, `infra_manager` и общий `guest_layout`.
 
 Постоянный файл `inventory` сейчас не хранится. `deploy-guest` определяет адрес выбранного гостя и запускает Ansible с одноузловым inventory через `-i <адрес>,`. Поэтому отдельный каталог `inventory/` не создаётся.
 
