@@ -7,6 +7,7 @@
   vars:
     project_root: "{{ playbook_dir }}/../../.."
     guest_root: "{{ project_root }}/infrastructure/guests/{{ guest }}"
+    guest_manifest_file: "{{ guest_root }}/guest.yaml"
     provision_file: "{{ guest_root }}/provision.yaml"
 
   pre_tasks:
@@ -20,6 +21,11 @@
           Нужно передать каталог гостя, например:
           -e guest=410-ai-control
 
+    - name: Прочитать описание гостя
+      ansible.builtin.include_vars:
+        file: "{{ guest_manifest_file }}"
+        name: guest_manifest
+
     - name: Прочитать настройки гостя
       ansible.builtin.include_vars:
         file: "{{ provision_file }}"
@@ -29,7 +35,9 @@
       ansible.builtin.assert:
         that:
           - provision.schema_version == 1
-          - provision.guest_vmid | int == (guest.split('-')[0] | int)
+          - guest_manifest.vmid | int == (guest.split('-')[0] | int)
+          - guest_manifest.name == (guest.split('-', 1)[1])
+          - provision.guest_vmid | int == guest_manifest.vmid | int
           - provision.system.distribution == "debian"
           - provision.system.version | string == "13"
           - provision.system.architecture == "amd64"
@@ -61,17 +69,13 @@
         name: infra_manager
       when:
         - (provision_phase | default('full')) == "full"
-        - provision.docker is defined
-        - provision.docker.services is defined
-        - provision.docker.services.runtime is defined
-        - provision.semaphore is defined
-        - provision.paths is defined
+        - (guest_manifest.role | default('')) == "infra-manager"
 
     - name: Подготовить структуру каталогов гостя
       ansible.builtin.include_role:
         name: guest_layout
 
-    - name: Назначить активацию новой управляющей среды после настройки 910
+    - name: Назначить активацию новой управляющей среды после настройки infra-manager
       ansible.builtin.command:
         argv:
           - systemd-run
