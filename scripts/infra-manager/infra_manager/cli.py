@@ -11,7 +11,7 @@ from .common import InfraManagerError, console
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="infra-manager",
-        description="Управление служебным LXC 910 infra-manager.",
+        description="Управление служебным LXC infra-manager.",
     )
     subparsers = parser.add_subparsers(dest="command")
 
@@ -45,7 +45,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     recovery_prepare = subparsers.add_parser(
         "recovery-prepare",
-        help="подготовить PVE-only аварийный контур 910",
+        help="подготовить PVE-only аварийный контур infra-manager",
     )
     recovery_prepare.add_argument(
         "--repo-root",
