@@ -899,8 +899,8 @@ def _prepare_openbao_machine_ansible_vars(
         context.vmid in policy.machine_identity_vmids
         and bool(policy.targets_for(context.vmid))
     )
-    allowed_roles = policy.authorized_principals(context.vmid)
-    target_enabled = bool(allowed_roles)
+    allowed_sources = policy.sources_for(context.vmid)
+    target_enabled = bool(allowed_sources)
     args = [
         "-e",
         f"infra_openbao_machine_enabled={'true' if enabled else 'false'}",
@@ -946,7 +946,7 @@ def _prepare_openbao_machine_ansible_vars(
                 "-e",
                 (
                     "infra_openbao_otp_allowed_roles="
-                    + ",".join(allowed_roles)
+                    + ",".join(f"guest-{vmid}" for vmid in allowed_sources)
                 ),
             ]
         )
