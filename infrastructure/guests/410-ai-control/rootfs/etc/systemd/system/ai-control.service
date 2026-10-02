@@ -18,7 +18,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectHome=true
 ProtectSystem=strict
-ReadWritePaths=/opt/ai-control/state /run/ai-control /var/cache/ai-control
+ReadWritePaths=/opt/ai-control/state /opt/ai-control/repos/proxmox /run/ai-control /var/cache/ai-control
 
 [Install]
 WantedBy=multi-user.target
