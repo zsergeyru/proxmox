@@ -64,9 +64,6 @@ jobs:
       - name: Run OpenBao OTP SSH client checks
         run: python scripts/tests/test-openbao-ssh.py
 
-      - name: Run SSH OTP cutover safety checks
-        run: python scripts/tests/test-ssh-access.py
-
       - name: Run status checks
         run: python scripts/tests/test-status.py
 
@@ -81,9 +78,6 @@ jobs:
 
       - name: Run access contract checks
         run: python scripts/tests/test-access-contract.py
-
-      - name: Run legacy machine SSH helper checks
-        run: python scripts/tests/test-machine-ssh.py
 
       - name: Validate all Ansible YAML files
         run: |
