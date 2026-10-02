@@ -17,7 +17,6 @@ BLOCKED=0
 CHANGES=0
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-
 CT_INFRA=""
 CT_TEST=9098
 VM_TEMPLATE=9000
