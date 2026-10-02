@@ -25,6 +25,11 @@ ai_control:
 
   web:
     required: true
+    listen: 0.0.0.0
+    port: 4100
+    username: admin
+    authentication: basic
+    index: /opt/ai-control/core/web/index.html
 
   service:
     name: ai-control
@@ -44,6 +49,9 @@ ai_control:
     configuration: /etc/ai-control
     runtime: /run/ai-control
     cache: /var/cache/ai-control
+    models_config: /etc/ai-control/models.json
+    tools_config: /etc/ai-control/tools.json
+    web_credentials: /etc/ai-control/web.env
 
   state_directories:
     - memory
@@ -79,7 +87,9 @@ persistence:
     - /opt/ai-control/repos/proxmox
     - /opt/ai-control/instructions
     - /opt/ai-control/tools
-    - /etc/ai-control
+    - /etc/ai-control/ai-control.env
+    - /etc/ai-control/models.json
+    - /etc/ai-control/tools.json
     - /etc/systemd/system/ai-control.service
 
   ephemeral:
