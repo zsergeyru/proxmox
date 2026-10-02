@@ -1176,7 +1176,6 @@ checks = (
         "infra-manager-ssh-signer",
         {
             "ssh-client-signer/sign/infra-manager": {"create", "update"},
-            "ssh-client-signer/sign/machine-410": {"create", "update"},
             "ssh-client-signer/roles/infra-manager": {"deny"},
         },
     ),
