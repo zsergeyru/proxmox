@@ -46,14 +46,14 @@ for _ in $(seq 1 60); do
 done
 
 if [[ -z "$status_json" ]]; then
-    echo "ОШИБКА: OpenBao не стал доступен после запуска 910" >&2
+    echo "ОШИБКА: OpenBao не стал доступен после запуска infra-manager" >&2
     exit 1
 fi
 
 read -r initialized sealed < <(read_status_flags <<<"$status_json")
 
 if [[ "$initialized" != "true" ]]; then
-    echo "ОШИБКА: OpenBao не инициализирован; сначала выполните Initialize OpenBao 910" >&2
+    echo "ОШИБКА: OpenBao не инициализирован; сначала выполните Initialize OpenBao для infra-manager" >&2
     exit 1
 fi
 
