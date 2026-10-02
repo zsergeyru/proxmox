@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "tools": [
+    {"id":"tasks","name":"Задачи","kind":"internal","status":"available","risk_level":0},
+    {"id":"memory","name":"Память","kind":"internal","status":"available","risk_level":0},
+    {"id":"git","name":"Git","kind":"external","status":"prepared","risk_level":1},
+    {"id":"infrastructure","name":"Инфраструктура через infra-manager","kind":"external","status":"planned","risk_level":3},
+    {"id":"home_assistant","name":"Home Assistant","kind":"external","status":"planned","risk_level":2},
+    {"id":"network","name":"Сеть","kind":"external","status":"planned","risk_level":3},
+    {"id":"monitoring","name":"Мониторинг","kind":"external","status":"planned","risk_level":0}
+  ]
+}
