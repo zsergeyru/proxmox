@@ -76,7 +76,7 @@ def run_initialize_openbao(repo_root: Path) -> int:
     """Инициализировать OpenBao, KV v2 и два SSH-центра доверия."""
     node = _pve_node_from_environment()
 
-    console.info("Проверка OpenBao 910")
+    console.info("Проверка OpenBao infra-manager")
     console.detail("Установка служебных PVE-only сценариев")
     install_openbao_host_support(node, repo_root)
     install_recovery_host_support(node, repo_root)
