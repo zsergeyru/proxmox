@@ -18,7 +18,9 @@ from infra_manager.common import (
     require_runtime_activation_idle,
     reserve_runtime_activation,
 )
+from infra_manager.guest_catalog import guest_identity
 from infra_manager.guest_deploy import run_deploy_guest
+from infra_manager.settings import SETTINGS
 
 
 def main() -> int:
@@ -71,8 +73,9 @@ def main() -> int:
             else "all"
         )
         require_runtime_activation_idle()
+        identity = guest_identity(REPO_ROOT, args.vmid)
         self_update = (
-            args.vmid == 910
+            identity.role == SETTINGS.infra_manager_role
             and not args.bootstrap_scope
             and selected_phase == "all"
         )
