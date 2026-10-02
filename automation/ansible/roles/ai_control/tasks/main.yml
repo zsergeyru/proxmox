@@ -41,6 +41,8 @@
   loop:
     - "{{ provision.ai_control.paths.root }}"
     - "{{ provision.ai_control.paths.core }}"
+    - "{{ provision.ai_control.paths.core_bin }}"
+    - "{{ provision.ai_control.paths.web_root }}"
     - "{{ provision.ai_control.paths.agents }}"
     - "{{ provision.ai_control.paths.primary_agent }}"
     - "{{ provision.ai_control.paths.repositories }}"
@@ -142,7 +144,7 @@
       AI_CONTROL_CACHE={{ provision.ai_control.paths.cache }}
       AI_CONTROL_PROJECT_REPOSITORY={{ provision.ai_control.paths.project_repository }}
       AI_CONTROL_PRIMARY_AGENT={{ provision.ai_control.agent.primary }}
-      AI_CONTROL_WEB_ROOT={{ provision.ai_control.paths.core }}/web
+      AI_CONTROL_WEB_ROOT={{ provision.ai_control.paths.web_root }}
       AI_CONTROL_WEB_LISTEN={{ provision.ai_control.web.listen }}
       AI_CONTROL_WEB_PORT={{ provision.ai_control.web.port }}
       AI_CONTROL_MODELS_FILE={{ provision.ai_control.paths.models_config }}
