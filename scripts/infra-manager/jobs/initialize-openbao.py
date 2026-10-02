@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Точка входа Semaphore: первичная инициализация OpenBao в 910."""
+"""Точка входа Semaphore: первичная инициализация OpenBao infra-manager."""
 
 from __future__ import annotations
 
