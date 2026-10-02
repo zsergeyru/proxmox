@@ -72,6 +72,53 @@ def main_test() -> None:
         if not (ROOT / spec.playbook).is_file():
             fail(f"Playbook Semaphore не существует: {spec.playbook}")
 
+    expected_templates = {
+        "OpenTofu Plan": ("scripts/infra-manager/jobs/opentofu-plan.py", "[]"),
+        "Build Template 9000": (
+            "scripts/infra-manager/jobs/build-template.py",
+            '["9000"]',
+        ),
+        "Deploy Guest 410": (
+            "scripts/infra-manager/jobs/deploy-guest.py",
+            '["410"]',
+        ),
+        "Deploy Guest 910": (
+            "scripts/infra-manager/jobs/deploy-guest.py",
+            '["910"]',
+        ),
+        "Sync SSH Access": (
+            "scripts/infra-manager/jobs/sync-ssh-access.py",
+            "[]",
+        ),
+        "Initialize OpenBao 910": (
+            "scripts/infra-manager/jobs/initialize-openbao.py",
+            "[]",
+        ),
+    }
+    actual_templates = {
+        spec.name: (spec.playbook, spec.arguments)
+        for spec in SEMAPHORE_TEMPLATES
+    }
+    if actual_templates != expected_templates:
+        fail(f"Неожиданный состав шаблонов Semaphore: {actual_templates!r}")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        fake = Path(tmp)
+        guest = fake / "infrastructure/guests/920-infra-manager/guest.yaml"
+        guest.parent.mkdir(parents=True)
+        guest.write_text(
+            "vmid: 920\n"
+            "name: infra-manager\n"
+            "role: infra-manager\n",
+            encoding="utf-8",
+        )
+        moved = {item.name: item for item in semaphore_templates(fake)}
+    moved_deploy = moved.get("Deploy Guest 920")
+    if moved_deploy is None or moved_deploy.arguments != '["920"]':
+        fail("Deploy Guest infra-manager не следует VMID из guest.yaml")
+    if "Initialize OpenBao 920" not in moved:
+        fail("Initialize OpenBao не следует VMID из guest.yaml")
+
     templates = [
         {
             "name": spec.name,
@@ -175,6 +222,66 @@ def main_test() -> None:
     updated_values = __import__("json").loads(missing_level.updated[0]["env"])
     if updated_values != {"OTHER": "value", "INFRA_LOG_LEVEL": "normal"}:
         fail("Добавление INFRA_LOG_LEVEL не должно удалять другие настройки")
+
+    if SETTINGS.opentofu_env_name != "OpenTofu PVE":
+        fail("Имя Variable Group OpenTofu PVE изменилось")
+    if SETTINGS.infra_manager_env_name != "Infra Manager":
+        fail("Имя Variable Group Infra Manager изменилось")
+
+    class TemplateClient(SemaphoreClient):
+        def __init__(self, existing):
+            self.existing = existing
+            self.posts = []
+            self.puts = []
+
+        def get(self, path: str, *, auth: str | None = None):
+            del path, auth
+            return [] if self.existing is None else [self.existing]
+
+        def post(self, path: str, payload, *, auth: str | None = None):
+            del path, auth
+            self.posts.append(payload)
+            return {"id": 22}
+
+        def put(self, path: str, payload):
+            del path
+            self.puts.append(payload)
+            return None
+
+    create_template = TemplateClient(existing=None)
+    if create_template.ensure_template(
+        1,
+        2,
+        [8, 10],
+        name="Test",
+        playbook="job.py",
+        branch="feature/test",
+        arguments="[]",
+    ) != 22:
+        fail("Создание шаблона Semaphore вернуло неверный id")
+    created = create_template.posts[0]
+    if created.get("app") != "python":
+        fail("Шаблон Semaphore должен выполняться как Python")
+    if created.get("environment_ids") != [8, 10]:
+        fail("Шаблон Semaphore должен получать обе Variable Group")
+    if created.get("allow_override_args_in_task") is not False:
+        fail("Шаблон Semaphore не должен разрешать замену аргументов")
+    if created.get("allow_override_branch_in_task") is not False:
+        fail("Шаблон Semaphore не должен разрешать замену Git-ветки")
+
+    update_template = TemplateClient(existing={"id": 23, "name": "Test"})
+    if update_template.ensure_template(
+        1,
+        2,
+        [8, 10],
+        name="Test",
+        playbook="job.py",
+        branch="feature/test",
+        arguments="[]",
+    ) != 23:
+        fail("Обновление шаблона Semaphore вернуло неверный id")
+    if update_template.puts[0].get("id") != 23:
+        fail("PUT шаблона Semaphore должен содержать id обновляемого объекта")
 
     invalid_level = InfraManagerEnvironmentClient(
         existing={"id": 10, "name": SETTINGS.infra_manager_env_name},
