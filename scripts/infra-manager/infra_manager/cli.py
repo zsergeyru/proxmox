@@ -57,7 +57,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     recovery_check = subparsers.add_parser(
         "recovery-check",
-        help="проверить полный аварийный контур 910",
+        help="проверить полный аварийный контур infra-manager",
     )
     recovery_check.set_defaults(handler="recovery-check")
     return parser
