@@ -6,6 +6,11 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .guest_catalog import find_guest_by_role
+
+
+INFRA_MANAGER_ROLE = "infra-manager"
+
 
 @dataclass(frozen=True)
 class Paths:
@@ -27,7 +32,11 @@ class Paths:
 
     @property
     def asset_dir(self) -> Path:
-        return self.repo_root / "infrastructure/guests/910-infra-manager/rootfs/opt/infra-manager/compose"
+        identity = find_guest_by_role(
+            self.repo_root,
+            INFRA_MANAGER_ROLE,
+        )
+        return identity.directory / "rootfs/opt/infra-manager/compose"
 
     @property
     def runtime_secret_dir(self) -> Path:
@@ -166,7 +175,7 @@ class Settings:
     runtime_version: str = "v1"
     opentofu_version: str = "1.12.6"
     packer_version: str = "1.15.4"
-    infra_manager_role: str = "infra-manager"
+    infra_manager_role: str = INFRA_MANAGER_ROLE
 
     def project_branch(self) -> str:
         """Вернуть выбранную Git-ветку проекта."""
