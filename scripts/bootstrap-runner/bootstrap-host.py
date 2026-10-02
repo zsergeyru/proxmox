@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -11,9 +12,11 @@ import tempfile
 from pathlib import Path
 
 VERSION = "2.0.0-dev1"
+INFRA_MANAGER_ROLE = "infra-manager"
 
 # Этот файл выполняется на физическом PVE после того, как публичный bootstrap
-# уже создал 990 и получил закрытый проект. Здесь находится вся оркестрация 910.
+# уже создал 990 и получил закрытый проект. Здесь находится вся оркестрация
+# постоянного infra-manager.
 
 # Закреплённый официальный Ed25519 host key GitHub защищает первое подключение
 # к github.com от подмены ключа через сеть.
@@ -24,13 +27,89 @@ class BootstrapError(RuntimeError):
     pass
 
 
+
+def _plain_top_level_scalars(path: Path) -> dict[str, str]:
+    """Прочитать простые верхнеуровневые scalar-поля guest.yaml без PyYAML."""
+
+    values: dict[str, str] = {}
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeError) as exc:
+        raise BootstrapError(f"Не удалось прочитать {path}: {exc}") from exc
+
+    for raw in lines:
+        if not raw or raw[0].isspace() or raw.lstrip().startswith("#"):
+            continue
+        key, separator, value = raw.partition(":")
+        if not separator:
+            continue
+        key = key.strip()
+        value = value.strip()
+        if (
+            len(value) >= 2
+            and value[0] == value[-1]
+            and value[0] in {"'", '"'}
+        ):
+            value = value[1:-1]
+        values[key] = value
+    return values
+
+
+def _find_role_guest(project_dir: Path, role: str) -> tuple[int, str]:
+    """Найти VMID и имя единственного гостя с указанной ролью."""
+
+    guests_dir = project_dir / "infrastructure" / "guests"
+    matches: list[tuple[int, str, Path]] = []
+    for manifest in sorted(guests_dir.glob("*/guest.yaml")):
+        values = _plain_top_level_scalars(manifest)
+        if values.get("role") != role:
+            continue
+
+        directory_match = re.fullmatch(r"(\d{3})-(.+)", manifest.parent.name)
+        if directory_match is None:
+            raise BootstrapError(
+                f"Каталог гостя с ролью {role!r} имеет неверное имя: "
+                f"{manifest.parent.name}"
+            )
+        directory_vmid = int(directory_match.group(1))
+        directory_name = directory_match.group(2)
+        try:
+            manifest_vmid = int(values.get("vmid", ""))
+        except ValueError as exc:
+            raise BootstrapError(
+                f"{manifest}: роль {role!r} имеет некорректный vmid"
+            ) from exc
+        manifest_name = values.get("name", "")
+
+        if manifest_vmid != directory_vmid or manifest_name != directory_name:
+            raise BootstrapError(
+                f"{manifest}: vmid/name не соответствуют имени каталога"
+            )
+        matches.append((manifest_vmid, manifest_name, manifest))
+
+    if not matches:
+        raise BootstrapError(f"Не найден гость с ролью {role!r}")
+    if len(matches) != 1:
+        locations = ", ".join(str(item[2]) for item in matches)
+        raise BootstrapError(
+            f"Роль {role!r} должна принадлежать одному гостю: {locations}"
+        )
+    vmid, name, _ = matches[0]
+    return vmid, name
+
+
 class BootstrapHost:
     def __init__(self, mode: str) -> None:
         self.mode = mode
         self.ctid = int(os.environ.get("BOOTSTRAP_RUNNER_CTID", "990"))
         self.ct_hostname = "bootstrap-runner"
         self.project_branch = os.environ.get("PROJECT_BRANCH", "main")
-        self.project_dir = Path(os.environ.get("PROJECT_DIR", "/var/lib/bootstrap-runner/project"))
+        default_project_dir = Path("/var/lib/bootstrap-runner/project")
+        if not default_project_dir.is_dir():
+            default_project_dir = Path(__file__).resolve().parents[2]
+        self.project_dir = Path(
+            os.environ.get("PROJECT_DIR", str(default_project_dir))
+        )
 
         self.host_bootstrap_dir = Path(
             os.environ.get("HOST_BOOTSTRAP_DIR", "/root/.config/proxmox-bootstrap")
@@ -93,10 +172,11 @@ class BootstrapHost:
             "/etc/systemd/system/infra-manager-openbao-unseal.timer"
         )
 
-        # 910 — постоянный управляющий контейнер. В отличие от временного 990
-        # он сохраняется между запусками и не входит в постоянный OpenTofu-state.
-        self.infra_ctid = 910
-        self.infra_hostname = "infra-manager"
+        self.infra_role = INFRA_MANAGER_ROLE
+        self.infra_ctid, self.infra_hostname = _find_role_guest(
+            self.project_dir,
+            self.infra_role,
+        )
         self.infra_project_dir = Path("/var/lib/infra-manager/bootstrap-repo")
         self.infra_access_dir = Path("/mnt/pve-access")
         self.infra_state_dir = Path("/mnt/persistent-state")
@@ -790,7 +870,7 @@ class BootstrapHost:
                 "prepare-runtime.sh",
             ),
             (
-                self.project_dir / "scripts/bootstrap-runner/deploy-910.sh",
+                self.project_dir / "scripts/bootstrap-runner/deploy-infra-manager.sh",
                 "-s",
                 "deploy-910.sh",
             ),
@@ -941,7 +1021,7 @@ class BootstrapHost:
         return f"{parts[0]} {parts[1]} {self.runner_ssh_key_comment}"
 
     def ensure_runner_ssh_access_to_infra(self) -> None:
-        """Временно разрешить текущему 990 SSH-вход в принадлежащий проекту 910."""
+        """Временно разрешить 990 SSH-вход в принадлежащий проекту infra-manager."""
         self.verify_infra_object()
         public_key = self._runner_ansible_public_key_text()
         marker = f" {self.runner_ssh_key_comment}"
@@ -959,10 +1039,10 @@ class BootstrapHost:
             "mv \"$tmp\" \"$file\""
         )
         self.infra_exec("sh", "-c", script, "sh", public_key, marker)
-        self.ok("Временный SSH-доступ 990 к 910 подготовлен")
+        self.ok(f"Временный SSH-доступ 990 к {self.infra_ctid} подготовлен")
 
     def remove_runner_ssh_access_from_infra(self) -> None:
-        """Удалить из 910 только временный SSH-ключ первоначального контура."""
+        """Удалить из infra-manager временный SSH-ключ первоначального контура."""
         if not self.infra_exists():
             return
         if not self.infra_config_is_expected():
@@ -981,16 +1061,16 @@ class BootstrapHost:
             "mv \"$tmp\" \"$file\""
         )
         self.infra_exec("sh", "-c", script, "sh", marker)
-        self.ok("Временный SSH-доступ 990 к 910 удалён")
+        self.ok(f"Временный SSH-доступ 990 к {self.infra_ctid} удалён")
 
-    def deploy_910_phase(self, phase: str, title: str, success: str) -> None:
+    def deploy_infra_phase(self, phase: str, title: str, success: str) -> None:
         self.log(title)
 
         # Shell здесь остаётся тонкой оболочкой над общим deploy-guest.
         deploy_args = [
             "env", f"INFRA_PROJECT_BRANCH={self.project_branch}",
-            "bash", str(self.project_dir / "scripts/bootstrap-runner/deploy-910.sh"),
-            phase, str(self.project_dir),
+            "bash", str(self.project_dir / "scripts/bootstrap-runner/deploy-infra-manager.sh"),
+            phase, str(self.infra_ctid), str(self.project_dir),
         ]
         self.ct_exec(
             *deploy_args,
@@ -1001,7 +1081,7 @@ class BootstrapHost:
 
     def infra_config_is_expected(self) -> bool:
         # Для любых разрушительных действий одного hostname недостаточно.
-        # Строгая метка в description подтверждает, что 910 создан этим проектом.
+        # Строгая метка в description подтверждает владение infra-manager проектом.
         if not self.infra_exists():
             return False
         config = self.pct_config(self.infra_ctid)
@@ -1461,10 +1541,10 @@ class BootstrapHost:
             self.run(
                 "pct", "destroy", str(self.infra_ctid), "--purge", "1", quiet=True
             )
-            self.ok("LXC 910 удалён")
+            self.ok(f"LXC {self.infra_ctid} удалён")
         else:
             self.remove_named_token("root@pam", "infra-manager")
-            self.ok("LXC 910 уже отсутствует")
+            self.ok(f"LXC {self.infra_ctid} уже отсутствует")
 
         self.remove_openbao_host_support()
         self.remove_host_root_ssh_authorization()
@@ -1472,16 +1552,16 @@ class BootstrapHost:
 
     def check_ready(self) -> None:
         if not self.infra_exists():
-            self.fail("LXC 910 отсутствует")
+            self.fail(f"LXC {self.infra_ctid} отсутствует")
         if self.ct_exists():
             self.fail("после успешного bootstrap временный LXC 990 не должен существовать")
         if self.temporary_token_exists():
             self.fail("после успешного bootstrap временный token 990 не должен существовать")
         self.verify_infra_ready()
 
-    def runner_owns_910(self) -> bool:
+    def runner_owns_infra(self) -> bool:
         # Наличие состояния OpenTofu означает незавершённую первоначальную установку:
-        # новый 990 не должен импортировать или заново присваивать себе 910.
+        # новый 990 не должен импортировать или заново присваивать себе infra-manager.
         return (
             self.ct_exec(
                 "test",
@@ -1506,9 +1586,9 @@ class BootstrapHost:
             self.verify_recovery_state()
 
         if existed:
-            owns_910 = self.runner_owns_910()
-            if owns_910:
-                # Это не миграция старого 910, а продолжение оборванного
+            owns_infra = self.runner_owns_infra()
+            if owns_infra:
+                # Это не миграция старого infra-manager, а продолжение оборванного
                 # первоначального создания. Если сбой произошёл между OpenTofu
                 # create и attach, подключаем уже подготовленные области.
                 if self.persistent_layout_attached():
@@ -1516,43 +1596,44 @@ class BootstrapHost:
                 else:
                     self.attach_persistent_layout()
             else:
-                # Готовый 910 без новой схемы автоматически не мигрируется.
+                # Готовый infra-manager без новой схемы автоматически не мигрируется.
                 # Проверка выполняется до подготовки runner и иных изменений.
                 self.verify_persistent_layout()
         else:
             self.prepare_new_persistent_layout()
-            owns_910 = False
+            owns_infra = False
 
         self.prepare_runner()
         if not existed:
-            owns_910 = self.runner_owns_910()
+            owns_infra = self.runner_owns_infra()
 
         # Три пути намеренно разделены:
         # 1) продолжение оборванной первоначальной установки;
-        # 2) обновление уже постоянного 910 без временного состояния;
-        # 3) чистое создание нового 910.
-        if existed and owns_910:
+        # 2) обновление уже постоянного infra-manager без временного состояния;
+        # 3) чистое создание нового infra-manager.
+        if existed and owns_infra:
             self.info(
-                "Найден созданный 910 в состоянии первоначального контура; "
+                f"Найден созданный {self.infra_ctid} {self.infra_hostname} "
+                "в состоянии первоначального контура; "
                 "продолжается настройка без повторного OpenTofu apply"
             )
             self.ensure_existing_infra_running()
-            # 910 уже создан и принадлежит state 990. После добавления
+            # infra-manager уже создан и принадлежит state 990. После добавления
             # host bind mount повторный OpenTofu plan может воспринимать
             # внешнее изменение как замену ресурса. Инфраструктурная фаза
             # считается завершённой; дальше проверку state выполняет каждая
             # provision-фаза без повторного plan/apply.
             self.ensure_runner_ssh_access_to_infra()
-            self.deploy_910_phase(
+            self.deploy_infra_phase(
                 "base",
-                "Базовая настройка LXC 910 через Ansible",
-                "Базовая настройка 910 завершена",
+                f"Базовая настройка LXC {self.infra_ctid} через Ansible",
+                f"Базовая настройка {self.infra_ctid} завершена",
             )
             self.handoff_infra("recover" if self.mode == "recover" else "apply")
-            self.deploy_910_phase(
+            self.deploy_infra_phase(
                 "provision",
-                "Полная настройка LXC 910 через Ansible",
-                "Полная настройка 910 завершена",
+                f"Полная настройка LXC {self.infra_ctid} через Ansible",
+                f"Полная настройка {self.infra_ctid} завершена",
             )
         elif existed:
             self.ensure_existing_infra_running()
@@ -1561,29 +1642,29 @@ class BootstrapHost:
             )
             self.handoff_existing_infra()
             self.ensure_runner_ssh_access_to_infra()
-            self.deploy_910_phase(
+            self.deploy_infra_phase(
                 "existing",
-                "Обновление существующего LXC 910",
-                "Существующий 910 обновлён",
+                f"Обновление существующего LXC {self.infra_ctid}",
+                f"Существующий {self.infra_ctid} обновлён",
             )
         else:
-            self.deploy_910_phase(
+            self.deploy_infra_phase(
                 "infrastructure",
-                "Создание LXC 910 через OpenTofu",
-                "LXC 910 создан через состояние bootstrap-runner",
+                f"Создание LXC {self.infra_ctid} через OpenTofu",
+                f"LXC {self.infra_ctid} создан через состояние bootstrap-runner",
             )
             self.attach_persistent_layout()
             self.ensure_runner_ssh_access_to_infra()
-            self.deploy_910_phase(
+            self.deploy_infra_phase(
                 "base",
-                "Базовая настройка LXC 910 через Ansible",
-                "Базовая настройка 910 завершена",
+                f"Базовая настройка LXC {self.infra_ctid} через Ansible",
+                f"Базовая настройка {self.infra_ctid} завершена",
             )
             self.handoff_infra("recover" if self.mode == "recover" else "apply")
-            self.deploy_910_phase(
+            self.deploy_infra_phase(
                 "provision",
-                "Полная настройка LXC 910 через Ansible",
-                "Полная настройка 910 завершена",
+                f"Полная настройка LXC {self.infra_ctid} через Ansible",
+                f"Полная настройка {self.infra_ctid} завершена",
             )
 
         self.initialize_infra_openbao()
