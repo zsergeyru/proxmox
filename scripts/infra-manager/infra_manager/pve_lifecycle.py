@@ -203,17 +203,12 @@ def run_lifecycle_test(*, apply: bool) -> int:
             raise InfraManagerError("LXC не остановился")
         console.ok("LXC остановлен")
 
-        client.run_task(
-            "DELETE",
-            f"/nodes/{node}/lxc/{TEST_VMID}",
-            node=node,
-        )
-        owns_test_vmid = False
-
+        _cleanup_created_lxc(client, node)
         if client.find_vm(TEST_VMID) is not None:
             raise InfraManagerError(
                 f"После удаления VMID {TEST_VMID} всё ещё существует"
             )
+        owns_test_vmid = False
         console.ok("Временный LXC удалён")
     finally:
         if owns_test_vmid:
