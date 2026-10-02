@@ -12,6 +12,7 @@ from pathlib import Path
 
 from .access import load_access_policy
 from .common import InfraManagerError, console, require_command, run
+from .guest_catalog import guest_identity
 from .opentofu import OpenTofuWorkspace, prepare_workspace
 from .pve import PveClient
 from .pve_host import (
@@ -1303,22 +1304,24 @@ def run_deploy_guest(
         "provision-existing",
     }:
         raise InfraManagerError(f"Неизвестная фаза deploy-guest: {phase}")
-    if bootstrap_scope and vmid not in SETTINGS.bootstrap_managed_vmids:
+    identity = guest_identity(repo_root, vmid)
+    is_infra_manager = identity.role == SETTINGS.infra_manager_role
+
+    if bootstrap_scope and not is_infra_manager:
         raise InfraManagerError(
-            f"VMID {vmid} не принадлежит начальному контуру"
+            f"Гость {vmid} не имеет роль {SETTINGS.infra_manager_role!r} "
+            "и не принадлежит начальному контуру"
         )
     if phase == "provision-existing" and not bootstrap_scope:
         raise InfraManagerError(
             "provision-existing разрешён только начальному контуру"
         )
 
-    self_update = (
-        not bootstrap_scope
-        and vmid in SETTINGS.bootstrap_managed_vmids
-    )
+    self_update = not bootstrap_scope and is_infra_manager
     if self_update and phase != "all":
         raise InfraManagerError(
-            "Для 910 из постоянного контура разрешено только полное обновление"
+            f"Для {identity.name} из постоянного контура "
+            "разрешено только полное обновление"
         )
 
     commands = [
@@ -1349,7 +1352,8 @@ def run_deploy_guest(
 
     if self_update:
         console.info(
-            "Проверка существующего 910 без собственного OpenTofu state"
+            f"Проверка существующего {context.vmid} {context.name} "
+            "без собственного OpenTofu state"
         )
         _validate_existing_guest_object(context)
         if not PATHS.ansible_public_key.is_file():
@@ -1371,7 +1375,7 @@ def run_deploy_guest(
             project_branch=project_branch,
         )
         console.result(
-            "910 infra-manager обновлён через Ansible; "
+            f"{context.vmid} {context.name} обновлён через Ansible; "
             "активация новой управляющей среды назначена "
             "после завершения задания Semaphore"
         )
@@ -1412,7 +1416,8 @@ def run_deploy_guest(
 
     # Некоторые свойства LXC Proxmox разрешает менять только самому root@pam,
     # а не API token. Они остаются частью общего guest/profile-контракта и
-    # применяются здесь одинаково для bootstrap 910 и обычных гостей.
+    # применяются здесь одинаково для первоначального infra-manager
+    # и обычных гостей.
     apply_host_requirements(
         node=context.node,
         vmid=context.vmid,
