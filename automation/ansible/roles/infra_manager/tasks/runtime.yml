@@ -12,7 +12,7 @@
       PACKER_VERSION={{ provision.docker.services.runtime.tools.packer }}
       OPENBAO_VERSION={{ provision.docker.services.openbao.image.split(':')[-1] }}
 
-- name: Установить описание состояния 910
+- name: Установить описание состояния infra-manager
   ansible.builtin.copy:
     remote_src: true
     src: "{{ provision.paths.bootstrap_repository }}/infrastructure/guests/{{ guest }}/status.yaml"
@@ -21,7 +21,7 @@
     group: root
     mode: "0644"
 
-- name: Установить служебный код 910
+- name: Установить служебный код infra-manager
   ansible.builtin.copy:
     remote_src: true
     src: "{{ provision.paths.bootstrap_repository }}/scripts/infra-manager/infra_manager/"
@@ -63,7 +63,7 @@
     state: link
     force: true
 
-- name: Установить запуск разблокировки OpenBao вместе с 910
+- name: Установить запуск разблокировки OpenBao вместе с infra-manager
   ansible.builtin.template:
     src: "{{ guest_root }}/rootfs/etc/systemd/system/infra-manager-openbao-startup-unseal.service.j2"
     dest: /etc/systemd/system/infra-manager-openbao-startup-unseal.service
@@ -71,7 +71,7 @@
     group: root
     mode: "0644"
 
-- name: Включить разблокировку OpenBao при запуске 910
+- name: Включить разблокировку OpenBao при запуске infra-manager
   ansible.builtin.systemd_service:
     name: infra-manager-openbao-startup-unseal.service
     enabled: true
