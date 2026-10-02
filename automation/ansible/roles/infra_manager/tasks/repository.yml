@@ -20,7 +20,7 @@
   changed_when: true
   when: infra_self_update | default(false) | bool
 
-- name: Переключить рабочую копию 910 на полученную версию
+- name: Переключить рабочую копию infra-manager на полученную версию
   ansible.builtin.command:
     argv:
       - git
