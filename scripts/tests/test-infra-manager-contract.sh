@@ -19,9 +19,7 @@ PY_STATUS="$ROOT/scripts/infra-manager/infra_manager/status.py"
 PY_PVE="$ROOT/scripts/infra-manager/infra_manager/pve.py"
 PY_LIFECYCLE="$ROOT/scripts/infra-manager/infra_manager/pve_lifecycle.py"
 PY_COMMON="$ROOT/scripts/infra-manager/infra_manager/common.py"
-STATUS="$ROOT/scripts/infra-manager/commands/status.sh"
-ACCESS="$ROOT/scripts/infra-manager/commands/pve-access-check.sh"
-LIFECYCLE="$ROOT/scripts/infra-manager/commands/pve-lifecycle-test.sh"
+PYTHON_COMMAND="$ROOT/scripts/infra-manager/commands/python-command.sh"
 ACTIVATE_RUNTIME="$ROOT/scripts/infra-manager/commands/activate-runtime.sh"
 BUILD_TEMPLATE="$ROOT/scripts/infra-manager/jobs/build-template.py"
 DEPLOY_GUEST="$ROOT/scripts/infra-manager/jobs/deploy-guest.py"
@@ -81,7 +79,7 @@ for task_file in "${ANSIBLE_RUNTIME_PARTS[@]}"; do
     cat "$ANSIBLE_RUNTIME_DIR/$task_file" >> "$ANSIBLE_RUNTIME"
 done
 
-for file in "$PY_COMMON" "$ANSIBLE_CONFIG" "$ANSIBLE_PLAYBOOK" "$ANSIBLE_LINUX_BASE" "$PROJECT_GIT_TASKS" "$ANSIBLE_GUEST_LAYOUT" "$ANSIBLE_DOCKER" "$ANSIBLE_RUNTIME" "$PY_SETTINGS" "$PY_SEMAPHORE" "$PY_STATUS" "$PY_PVE" "$PY_LIFECYCLE" "$STATUS" "$ACCESS" "$LIFECYCLE" "$ACTIVATE_RUNTIME" "$BUILD_TEMPLATE" "$DEPLOY_GUEST" "$PY_OPENTOFU" "$PY_TEMPLATE" "$PY_TEMPLATE_BUILD" "$PY_TEMPLATE_VERIFY" "$COMPOSE" "$OPENBAO_CONFIG" "$OPENBAO_HOST" "$OPENBAO_STARTUP_COMMAND" "$OPENBAO_STARTUP_SERVICE" "$OPENBAO_JOB" "$SSH_ACCESS_JOB" "$SSH_ACCESS_ACCEPTANCE" "$PY_ACCESS_POLICY" "$PY_OPENBAO" "$PY_RECOVERY" "$RECOVERY_HOST" "$DOCKERFILE" "$REQ" "$PLAN" "$PY_PVE_HOST" "$OPENTOFU_LOCK" "$GUEST_MANIFEST" "$PROVISION" "$SSH_CONFIG"; do
+for file in "$PY_COMMON" "$ANSIBLE_CONFIG" "$ANSIBLE_PLAYBOOK" "$ANSIBLE_LINUX_BASE" "$PROJECT_GIT_TASKS" "$ANSIBLE_GUEST_LAYOUT" "$ANSIBLE_DOCKER" "$ANSIBLE_RUNTIME" "$PY_SETTINGS" "$PY_SEMAPHORE" "$PY_STATUS" "$PY_PVE" "$PY_LIFECYCLE" "$PYTHON_COMMAND" "$ACTIVATE_RUNTIME" "$BUILD_TEMPLATE" "$DEPLOY_GUEST" "$PY_OPENTOFU" "$PY_TEMPLATE" "$PY_TEMPLATE_BUILD" "$PY_TEMPLATE_VERIFY" "$COMPOSE" "$OPENBAO_CONFIG" "$OPENBAO_HOST" "$OPENBAO_STARTUP_COMMAND" "$OPENBAO_STARTUP_SERVICE" "$OPENBAO_JOB" "$SSH_ACCESS_JOB" "$SSH_ACCESS_ACCEPTANCE" "$PY_ACCESS_POLICY" "$PY_OPENBAO" "$PY_RECOVERY" "$RECOVERY_HOST" "$DOCKERFILE" "$REQ" "$PLAN" "$PY_PVE_HOST" "$OPENTOFU_LOCK" "$GUEST_MANIFEST" "$PROVISION" "$SSH_CONFIG"; do
     [[ -s "$file" ]] || die "Отсутствует обязательный файл: $file"
 done
 
@@ -611,16 +609,24 @@ fi
 grep -Fq 'register: infra_ansible_private_key_stat' "$ANSIBLE_RUNTIME" \
     || die "Проверка постоянного Ansible-ключа должна использовать безопасное имя переменной"
 
-grep -Fq 'exec python3 -m infra_manager status "$@"' "$STATUS" \
-    || die "status.sh должен быть тонким Python wrapper"
-grep -Fq 'exec python3 -m infra_manager pve-access-check "$@"' "$ACCESS" \
-    || die "pve-access-check.sh должен быть тонким Python wrapper"
-for wrapper in "$STATUS" "$ACCESS" "$LIFECYCLE"; do
-    grep -Fq '/usr/local/lib/infra-manager/infra_manager' "$wrapper" \
-        || die "Установленный wrapper должен использовать постоянный Python package"
-    grep -Fq '/var/lib/infra-manager/bootstrap-repo/scripts/infra-manager' "$wrapper" \
-        || die "Wrapper должен сохранять canonical checkout как аварийный fallback"
-done
+grep -Fq 'infra-manager-status)' "$PYTHON_COMMAND" \
+    || die "Общая оболочка должна распознавать infra-manager-status"
+grep -Fq 'COMMAND="status"' "$PYTHON_COMMAND" \
+    || die "Общая оболочка должна направлять status в Python CLI"
+grep -Fq 'infra-manager-pve-access-check)' "$PYTHON_COMMAND" \
+    || die "Общая оболочка должна распознавать infra-manager-pve-access-check"
+grep -Fq 'COMMAND="pve-access-check"' "$PYTHON_COMMAND" \
+    || die "Общая оболочка должна направлять PVE access check в Python CLI"
+grep -Fq 'infra-manager-pve-lifecycle-test)' "$PYTHON_COMMAND" \
+    || die "Общая оболочка должна распознавать infra-manager-pve-lifecycle-test"
+grep -Fq 'COMMAND="pve-lifecycle-test"' "$PYTHON_COMMAND" \
+    || die "Общая оболочка должна направлять lifecycle test в Python CLI"
+grep -Fq 'exec python3 -m infra_manager "${COMMAND}" "$@"' "$PYTHON_COMMAND" \
+    || die "Общая оболочка должна передавать выбранную команду Python CLI"
+grep -Fq '/usr/local/lib/infra-manager/infra_manager' "$PYTHON_COMMAND" \
+    || die "Общая оболочка должна использовать постоянный Python package"
+grep -Fq '/var/lib/infra-manager/bootstrap-repo/scripts/infra-manager' "$PYTHON_COMMAND" \
+    || die "Общая оболочка должна сохранять canonical checkout как аварийный fallback"
 grep -q 'runtime-activation.log' "$ACTIVATE_RUNTIME" \
     || die "Команда активации должна вести отдельный журнал"
 grep -Fq '.infra-manager-runtime-activation-pending' "$PY_COMMON" "$ACTIVATE_RUNTIME" \
@@ -647,8 +653,6 @@ grep -q 'infra-manager-status --full --quiet' "$ACTIVATE_RUNTIME" \
 if grep -Fq 'infra-manager-status' "$ANSIBLE_VERIFY"; then
     die "Ansible verify не должен выполнять финальный status infra-manager до Initialize OpenBao"
 fi
-grep -Fq 'exec python3 -m infra_manager pve-lifecycle-test "$@"' "$LIFECYCLE" \
-    || die "Lifecycle wrapper должен передавать выполнение Python CLI"
 grep -Fq 'client = PveClient()' "$PY_LIFECYCLE" \
     || die "Lifecycle test должен использовать общий PveClient"
 grep -Fq 'TEST_VMID = 9098' "$PY_LIFECYCLE" \
@@ -666,14 +670,15 @@ grep -q 'python_install_root: Path = Path("/usr/local/lib/infra-manager")' "$PY_
     || die "Постоянный путь установки Python package должен быть зафиксирован"
 grep -Fq 'dest: "{{ provision.paths.python_package }}/infra_manager/"' "$ANSIBLE_RUNTIME" \
     || die "Ansible должен устанавливать служебный код infra_manager"
-grep -q 'status.sh' "$ANSIBLE_RUNTIME" \
-    || die "Ansible должен устанавливать status wrapper"
+python_wrapper_count="$(grep -Fc 'source: python-command.sh' "$ANSIBLE_RUNTIME" || true)"
+[[ "$python_wrapper_count" -eq 3 ]] \
+    || die "Ansible должен установить общую Python-оболочку под тремя административными именами"
+for command in infra-manager-status infra-manager-pve-access-check infra-manager-pve-lifecycle-test; do
+    grep -Fq "target: $command" "$ANSIBLE_RUNTIME" \
+        || die "Ansible не устанавливает административную команду $command"
+done
 grep -Fq 'dest: /usr/bin/infra-manager-status' "$ANSIBLE_RUNTIME" \
     || die "Команда infra-manager-status должна быть доступна через pct exec"
-grep -q 'pve-access-check.sh' "$ANSIBLE_RUNTIME" \
-    || die "Ansible должен устанавливать PVE access wrapper"
-grep -q 'pve-lifecycle-test.sh' "$ANSIBLE_RUNTIME" \
-    || die "Ansible должен устанавливать lifecycle test"
 grep -q 'activate-runtime.sh' "$ANSIBLE_RUNTIME" \
     || die "Ansible должен устанавливать команду активации infra-runtime"
 grep -Fq '/run/infra-manager/secrets' "$ANSIBLE_RUNTIME" \
