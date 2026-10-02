@@ -9,6 +9,10 @@
       - provision.ai_control.paths is defined
       - provision.ai_control.service is defined
       - provision.ai_control.agent is defined
+      - provision.ai_control.web is defined
+      - provision.ai_control.web.port | int > 0
+      - provision.ai_control.web.port | int < 65536
+      - provision.ai_control.web.username | length > 0
     fail_msg: "Для роли ai_control требуется guest role=ai-control и раздел provision.ai_control"
 
 - name: Создать системную группу AI Control
@@ -73,6 +77,58 @@
     mode: "0750"
   loop: "{{ provision.ai_control.state_directories }}"
 
+- name: Установить минимальное ядро AI Control
+  ansible.builtin.copy:
+    src: "{{ guest_root }}/rootfs/{{ item.source }}"
+    dest: "{{ item.dest }}"
+    owner: root
+    group: "{{ provision.ai_control.group }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - source: opt/ai-control/core/bin/ai-control
+      dest: /opt/ai-control/core/bin/ai-control
+      mode: "0755"
+    - source: opt/ai-control/core/web/index.html
+      dest: /opt/ai-control/core/web/index.html
+      mode: "0644"
+    - source: etc/ai-control/models.json
+      dest: "{{ provision.ai_control.paths.models_config }}"
+      mode: "0640"
+    - source: etc/ai-control/tools.json
+      dest: "{{ provision.ai_control.paths.tools_config }}"
+      mode: "0640"
+  register: ai_control_core_files
+
+- name: Проверить наличие локальных данных входа веб-интерфейса
+  ansible.builtin.stat:
+    path: "{{ provision.ai_control.paths.web_credentials }}"
+  register: ai_control_web_credentials_file
+
+- name: Сформировать начальный пароль веб-интерфейса
+  ansible.builtin.command:
+    argv:
+      - python3
+      - -c
+      - "import secrets; print(secrets.token_urlsafe(24))"
+  changed_when: false
+  no_log: true
+  register: ai_control_generated_web_password
+  when: not ai_control_web_credentials_file.stat.exists
+
+- name: Сохранить локальные данные входа веб-интерфейса
+  ansible.builtin.copy:
+    dest: "{{ provision.ai_control.paths.web_credentials }}"
+    owner: root
+    group: "{{ provision.ai_control.group }}"
+    mode: "0640"
+    force: false
+    content: |
+      AI_CONTROL_WEB_USER={{ provision.ai_control.web.username }}
+      AI_CONTROL_WEB_PASSWORD={{ ai_control_generated_web_password.stdout }}
+  no_log: true
+  register: ai_control_web_credentials
+  when: not ai_control_web_credentials_file.stat.exists
+
 - name: Записать несекретную конфигурацию путей AI Control
   ansible.builtin.copy:
     dest: "{{ provision.ai_control.paths.configuration }}/ai-control.env"
@@ -86,6 +142,11 @@
       AI_CONTROL_CACHE={{ provision.ai_control.paths.cache }}
       AI_CONTROL_PROJECT_REPOSITORY={{ provision.ai_control.paths.project_repository }}
       AI_CONTROL_PRIMARY_AGENT={{ provision.ai_control.agent.primary }}
+      AI_CONTROL_WEB_ROOT={{ provision.ai_control.paths.core }}/web
+      AI_CONTROL_WEB_LISTEN={{ provision.ai_control.web.listen }}
+      AI_CONTROL_WEB_PORT={{ provision.ai_control.web.port }}
+      AI_CONTROL_MODELS_FILE={{ provision.ai_control.paths.models_config }}
+      AI_CONTROL_TOOLS_FILE={{ provision.ai_control.paths.tools_config }}
   register: ai_control_environment
 
 - name: Установить systemd-службу AI Control
@@ -111,7 +172,17 @@
 - name: Запустить AI Control после установки ядра
   ansible.builtin.systemd_service:
     name: "{{ provision.ai_control.service.unit }}"
-    state: started
+    state: >-
+      {{
+        'restarted'
+        if (
+          ai_control_service_unit.changed
+          or ai_control_environment.changed
+          or ai_control_core_files.changed
+          or (ai_control_web_credentials.changed | default(false))
+        )
+        else 'started'
+      }}
     daemon_reload: >-
       {{ ai_control_service_unit.changed or ai_control_environment.changed }}
   when:
