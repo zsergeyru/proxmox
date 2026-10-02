@@ -39,6 +39,7 @@
     - "{{ provision.ai_control.paths.core }}"
     - "{{ provision.ai_control.paths.agents }}"
     - "{{ provision.ai_control.paths.primary_agent }}"
+    - "{{ provision.ai_control.paths.repositories }}"
     - "{{ provision.ai_control.paths.instructions }}"
     - "{{ provision.ai_control.paths.tools }}"
 
@@ -117,8 +118,12 @@
     - ai_control_executable.stat.exists
     - ai_control_executable.stat.executable | default(false)
 
-- name: Остановить AI Control до установки ядра
+- name: Остановить AI Control до установки рабочего ядра
   ansible.builtin.systemd_service:
     name: "{{ provision.ai_control.service.unit }}"
     state: stopped
-  when: not ai_control_executable.stat.exists
+  when: >-
+    not (
+      ai_control_executable.stat.exists
+      and (ai_control_executable.stat.executable | default(false))
+    )
