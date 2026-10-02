@@ -44,6 +44,8 @@ PY
 
 [[ -s "$BOOTSTRAP_DIR/bootstrap-host.py" ]] || die "Отсутствует Python-оркестратор bootstrap-host.py"
 [[ ! -e "$BOOTSTRAP_DIR/bootstrap-host.sh" ]] || die "Лишняя shell-оболочка bootstrap-host.sh не должна возвращаться"
+[[ -s "$BOOTSTRAP_DIR/deploy-infra-manager.sh" ]] || die "Отсутствует сценарий deploy-infra-manager.sh"
+[[ ! -e "$BOOTSTRAP_DIR/deploy-910.sh" ]] || die "Сценарий с VMID в имени не должен возвращаться"
 
 grep -q 'run_deploy_guest' "$DEPLOY"     || die "910 должен разворачиваться через общий deploy-guest"
 grep -q 'provision.yaml' "$PLAYBOOK"     || die "Общий Ansible playbook должен применять provision.yaml"
@@ -52,11 +54,11 @@ if grep -R -n -E     'scripts/infra-manager/setup\.sh|python3[[:space:]]+-m[[:sp
     die "990 не должен вызывать отдельный setup для 910"
 fi
 
-grep -q -- '--infrastructure-only' "$BOOTSTRAP_DIR/deploy-910.sh"     || die "990 должен создавать 910 через общую инфраструктурную фазу deploy-guest"
-grep -q -- '--provision-base-only' "$BOOTSTRAP_DIR/deploy-910.sh"     || die "990 должен готовить базовый Debian через общий Ansible"
-grep -q -- '--provision-only' "$BOOTSTRAP_DIR/deploy-910.sh"     || die "990 должен полностью применять provision.yaml через общий Ansible"
-grep -q -- '--provision-existing-only' "$BOOTSTRAP_DIR/deploy-910.sh"     || die "990 должен уметь обновлять существующий 910 без собственного state"
-grep -q -- '--bootstrap-scope' "$BOOTSTRAP_DIR/deploy-910.sh"     || die "910 должен оставаться в отдельной bootstrap-области состояния"
+grep -q -- '--infrastructure-only' "$BOOTSTRAP_DIR/deploy-infra-manager.sh"     || die "990 должен создавать 910 через общую инфраструктурную фазу deploy-guest"
+grep -q -- '--provision-base-only' "$BOOTSTRAP_DIR/deploy-infra-manager.sh"     || die "990 должен готовить базовый Debian через общий Ansible"
+grep -q -- '--provision-only' "$BOOTSTRAP_DIR/deploy-infra-manager.sh"     || die "990 должен полностью применять provision.yaml через общий Ansible"
+grep -q -- '--provision-existing-only' "$BOOTSTRAP_DIR/deploy-infra-manager.sh"     || die "990 должен уметь обновлять существующий 910 без собственного state"
+grep -q -- '--bootstrap-scope' "$BOOTSTRAP_DIR/deploy-infra-manager.sh"     || die "910 должен оставаться в отдельной bootstrap-области состояния"
 
 grep -q 'name: linux_base' "$PLAYBOOK"     || die "Общий playbook должен подключать общую роль linux_base"
 grep -q 'name: guest_layout' "$PLAYBOOK"     || die "Общий playbook должен подключать общую роль guest_layout"
