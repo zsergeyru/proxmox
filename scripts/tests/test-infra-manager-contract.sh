@@ -627,6 +627,10 @@ grep -Fq '/usr/local/lib/infra-manager/infra_manager' "$PYTHON_COMMAND" \
     || die "Общая оболочка должна использовать постоянный Python package"
 grep -Fq '/var/lib/infra-manager/bootstrap-repo/scripts/infra-manager' "$PYTHON_COMMAND" \
     || die "Общая оболочка должна сохранять canonical checkout как аварийный fallback"
+for obsolete_wrapper in status.sh pve-access-check.sh pve-lifecycle-test.sh; do
+    [[ ! -e "$ROOT/scripts/infra-manager/commands/$obsolete_wrapper" ]] \
+        || die "Дублирующая оболочка $obsolete_wrapper не должна возвращаться"
+done
 grep -q 'runtime-activation.log' "$ACTIVATE_RUNTIME" \
     || die "Команда активации должна вести отдельный журнал"
 grep -Fq '.infra-manager-runtime-activation-pending' "$PY_COMMON" "$ACTIVATE_RUNTIME" \
