@@ -28,6 +28,38 @@ jobs:
           sudo apt-get install -y shellcheck cloud-init jq unzip
           python -m pip install --disable-pip-version-check PyYAML==6.0.2 jsonschema==4.25.1 ruff==0.16.8
 
+      - name: Resolve infra-manager guest
+        run: |
+          python - <<'PY'
+          import ipaddress
+          import os
+          from pathlib import Path
+          import yaml
+
+          matches = []
+          for manifest in sorted(Path("infrastructure/guests").glob("*/guest.yaml")):
+              data = yaml.safe_load(manifest.read_text(encoding="utf-8"))
+              if isinstance(data, dict) and data.get("role") == "infra-manager":
+                  matches.append((manifest, data))
+          if len(matches) != 1:
+              raise SystemExit("Expected exactly one guest with role: infra-manager")
+
+          manifest, guest = matches[0]
+          vmid = guest.get("vmid")
+          address = guest.get("network", {}).get("ipv4")
+          if not isinstance(vmid, int) or vmid <= 0:
+              raise SystemExit("infra-manager has invalid vmid")
+          try:
+              address = str(ipaddress.ip_address(address))
+          except ValueError as exc:
+              raise SystemExit("infra-manager requires a static IPv4 for CI") from exc
+
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env:
+              env.write(f"INFRA_MANAGER_DIR={manifest.parent.as_posix()}\n")
+              env.write(f"INFRA_MANAGER_VMID={vmid}\n")
+              env.write(f"INFRA_MANAGER_ADDRESS={address}\n")
+          PY
+
       - name: Validate repository
         run: python scripts/validate_repo.py
 
@@ -167,10 +199,11 @@ jobs:
       - name: Validate infra-manager Compose
         run: |
           python - <<'PY'
+          import os
           from pathlib import Path
           import yaml
 
-          path = Path("infrastructure/guests/910-infra-manager/rootfs/opt/infra-manager/compose/docker-compose.yml")
+          path = Path(os.environ["INFRA_MANAGER_DIR"]) / "rootfs/opt/infra-manager/compose/docker-compose.yml"
           data = yaml.safe_load(path.read_text(encoding="utf-8"))
           services = data.get("services", {})
           if set(services) != {"runtime", "openbao"}:
@@ -199,18 +232,15 @@ jobs:
           data_dir="$(mktemp -d)"
           tls_dir="$(mktemp -d)"
           chmod 0755 "$tls_dir"
-          sudo ip addr add 192.168.9.10/32 dev lo
+          sudo ip addr add "$INFRA_MANAGER_ADDRESS/32" dev lo
           openssl req -x509 -newkey rsa:2048 -nodes -sha256 -days 1 \
             -subj "/CN=OpenBao test CA" \
             -keyout "$tls_dir/ca.key" -out "$tls_dir/ca.crt"
           openssl req -new -newkey rsa:2048 -nodes -sha256 \
             -subj "/CN=infra-manager" \
             -keyout "$tls_dir/server.key" -out "$tls_dir/server.csr"
-          cat > "$tls_dir/server.ext" <<'EOF'
-          subjectAltName=IP:192.168.9.10,DNS:infra-manager
-          extendedKeyUsage=serverAuth
-          keyUsage=digitalSignature,keyEncipherment
-          EOF
+          printf 'subjectAltName=IP:%s,DNS:infra-manager\nextendedKeyUsage=serverAuth\nkeyUsage=digitalSignature,keyEncipherment\n' \
+            "$INFRA_MANAGER_ADDRESS" > "$tls_dir/server.ext"
           openssl x509 -req -in "$tls_dir/server.csr" \
             -CA "$tls_dir/ca.crt" -CAkey "$tls_dir/ca.key" -CAcreateserial \
             -days 1 -sha256 -extfile "$tls_dir/server.ext" \
@@ -219,12 +249,12 @@ jobs:
 
           cleanup() {
             docker rm -f openbao-test >/dev/null 2>&1 || true
-            sudo ip addr del 192.168.9.10/32 dev lo >/dev/null 2>&1 || true
+            sudo ip addr del "$INFRA_MANAGER_ADDRESS/32" dev lo >/dev/null 2>&1 || true
             sudo rm -rf "$data_dir" "$tls_dir"
           }
           trap cleanup EXIT
 
-          docker run -d             --name openbao-test             --network host             --user 0             -e BAO_SKIP_DROP_ROOT=1             -e SKIP_CHOWN=1             -v "$PWD/infrastructure/guests/910-infra-manager/rootfs/opt/infra-manager/compose/openbao/openbao.hcl:/openbao/config/openbao.hcl:ro"             -v "$data_dir:/openbao/file"             -v "$tls_dir:/openbao/tls:ro"             ghcr.io/openbao/openbao:2.7.0             server
+          docker run -d             --name openbao-test             --network host             --user 0             -e BAO_SKIP_DROP_ROOT=1             -e SKIP_CHOWN=1             -v "$PWD/$INFRA_MANAGER_DIR/rootfs/opt/infra-manager/compose/openbao/openbao.hcl:/openbao/config/openbao.hcl:ro"             -v "$data_dir:/openbao/file"             -v "$tls_dir:/openbao/tls:ro"             ghcr.io/openbao/openbao:2.7.0             server
 
           for _ in $(seq 1 30); do
             if curl -fsS http://127.0.0.1:8200/v1/sys/seal-status >/tmp/openbao-status.json; then
@@ -245,13 +275,13 @@ jobs:
           ' /tmp/openbao-status.json
 
           curl --noproxy '*' --cacert "$tls_dir/ca.crt" -fsS \
-            https://192.168.9.10:8202/v1/sys/seal-status \
+            https://$INFRA_MANAGER_ADDRESS:8202/v1/sys/seal-status \
             | jq -e '.initialized == false and .sealed == true'
 
           docker rm -f openbao-test >/dev/null
 
           compat_config="$(mktemp)"
-          cp infrastructure/guests/910-infra-manager/rootfs/opt/infra-manager/compose/openbao/openbao.hcl "$compat_config"
+          cp "$INFRA_MANAGER_DIR/rootfs/opt/infra-manager/compose/openbao/openbao.hcl" "$compat_config"
           chmod 0644 "$compat_config"
           python3 - "$compat_config" <<'PY'
           from pathlib import Path
@@ -307,7 +337,7 @@ jobs:
             --build-arg OPENTOFU_VERSION=1.12.6 \
             --build-arg PACKER_VERSION=1.15.4 \
             -t infra-runtime:test \
-            infrastructure/guests/910-infra-manager/rootfs/opt/infra-manager/compose/runtime
+            "$INFRA_MANAGER_DIR/rootfs/opt/infra-manager/compose/runtime"
           docker run --rm infra-runtime:test tofu version
           docker run --rm infra-runtime:test packer version
           docker run --rm --entrypoint python3 infra-runtime:test -c 'import proxmoxer'
@@ -322,13 +352,14 @@ jobs:
           docker run --rm bootstrap-runtime:test tofu version
           docker run --rm bootstrap-runtime:test ansible --version
           docker run --rm bootstrap-runtime:test python3 -c 'import yaml, jsonschema, requests'
+          guest_dir="${INFRA_MANAGER_DIR##*/}"
           docker run --rm \
             -v "$PWD:/workspace" \
             -w /workspace \
             bootstrap-runtime:test \
             ansible-playbook --syntax-check \
             -i localhost, \
-            -e guest=910-infra-manager \
+            -e "guest=$guest_dir" \
             automation/ansible/playbooks/configure-guest.yml
 
       - name: Verify malformed guest directory is rejected
