@@ -39,7 +39,7 @@ if [[ -f "$ACTIVATION_MARKER" ]]; then
         printf 'ОШИБКА: Самообновление infra-manager не завершилось за 15 минут\n' >&2
         exit 1
     fi
-    printf '[ОК] Задание Deploy Guest 910 завершено; начинаю активацию\n'
+    printf '[ОК] Задание обновления infra-manager завершено; начинаю активацию\n'
 fi
 
 if [[ -z "$PVE_NODE" ]]; then
