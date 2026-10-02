@@ -612,7 +612,7 @@ grep -q 'runtime-activation.log' "$ACTIVATE_RUNTIME" \
 grep -Fq '.infra-manager-runtime-activation-pending' "$PY_COMMON" "$ACTIVATE_RUNTIME" \
     || die "Задания и активация runtime должны использовать общий маркер"
 grep -Fq 'docker exec --user 0 infra-runtime' "$ACTIVATE_RUNTIME" \
-    || die "Активация должна ждать завершения текущего Deploy Guest 910"
+    || die "Активация должна ждать завершения текущего самообновления infra-manager"
 grep -Fq 'infra-manager-openbao-startup-unseal "$PVE_NODE"' "$ACTIVATE_RUNTIME" \
     || die "После перезапуска runtime OpenBao должен разблокироваться до проверки"
 grep -Fq 'run_pve_openbao --check-kv --log-level quiet' "$OPENBAO_STARTUP_COMMAND" \
@@ -626,12 +626,12 @@ grep -Fq ':8202/v1/sys/health' "$OPENBAO_STARTUP_COMMAND" \
 if grep -Fq 'echo "[ОК] OpenBao уже разблокирован"' "$OPENBAO_STARTUP_COMMAND"; then
     die "Startup unseal не должен завершаться до восстановления секретов и проверок"
 fi
-grep -Fq 'OpenBao не инициализирован; сначала выполните Initialize OpenBao 910' "$OPENBAO_STARTUP_COMMAND" \
+grep -Fq 'OpenBao не инициализирован; сначала выполните Initialize OpenBao для infra-manager' "$OPENBAO_STARTUP_COMMAND" \
     || die "Startup unseal должен завершаться ошибкой для неинициализированного OpenBao"
 grep -q 'infra-manager-status --full --quiet' "$ACTIVATE_RUNTIME" \
-    || die "Отложенная активация должна завершаться полной проверкой 910"
+    || die "Отложенная активация должна завершаться полной проверкой infra-manager"
 if grep -Fq 'infra-manager-status' "$ANSIBLE_VERIFY"; then
-    die "Ansible verify не должен выполнять финальный status 910 до Initialize OpenBao"
+    die "Ansible verify не должен выполнять финальный status infra-manager до Initialize OpenBao"
 fi
 grep -Fq 'PVE_ENV="/run/infra-manager/secrets/pve-api.env"' "$LIFECYCLE" \
     || die "Lifecycle test должен использовать PVE API credential из OpenBao"
@@ -760,7 +760,7 @@ grep -q 'check_root_access(node)' "$PY_PVE" \
     || die "Полная проверка PVE access должна проверять root SSH"
 
 if grep -q '/etc/pve/' "$ANSIBLE_PLAYBOOK" "$ANSIBLE_LINUX_BASE" "$ANSIBLE_GUEST_LAYOUT" "$ANSIBLE_DOCKER" "$ANSIBLE_RUNTIME" "$PY_SEMAPHORE" "$PY_STATUS" "$PY_PVE"; then
-    die "Настройка внутри 910 не должна работать с файловой системой /etc/pve"
+    die "Настройка внутри infra-manager не должна работать с файловой системой /etc/pve"
 fi
 
 grep -q 'run_build_template' "$BUILD_TEMPLATE" \
@@ -778,9 +778,9 @@ grep -q '^TEST_VMID = 9099' "$PY_TEMPLATE_VERIFY" \
 grep -q 'run_deploy_guest' "$DEPLOY_GUEST" \
     || die "Deploy Guest должен передавать выполнение Python-модулю"
 grep -Fq 'reserve_runtime_activation()' "$DEPLOY_GUEST" \
-    || die "Deploy Guest 910 должен резервировать окно активации runtime"
+    || die "Самообновление infra-manager должно резервировать окно активации runtime"
 grep -Fq 'cancel_runtime_activation()' "$DEPLOY_GUEST" \
-    || die "Неуспешный Deploy Guest 910 должен снимать резерв активации"
+    || die "Неуспешное самообновление infra-manager должно снимать резерв активации"
 for job in "$DEPLOY_GUEST" "$OPENBAO_JOB" "$PLAN" "$BUILD_TEMPLATE" "$VERIFY_TEMPLATE"; do
     grep -Fq 'require_runtime_activation_idle()' "$job" \
         || die "Infrastructure job должен блокироваться во время активации runtime: $job"
@@ -843,17 +843,45 @@ grep -q 'scripts/infra-manager/jobs/deploy-guest.py' "$PY_SEMAPHORE" \
     || die "Deploy Guest 410 должен запускать универсальный Python-сценарий"
 grep -Fq "arguments='[\"410\"]'" "$PY_SEMAPHORE" \
     || die "Deploy Guest 410 должен иметь фиксированный VMID 410"
-grep -Fq 'name="Deploy Guest 910"' "$PY_SEMAPHORE" \
-    || die "Semaphore должен создавать задание Deploy Guest 910"
-grep -Fq "arguments='[\"910\"]'" "$PY_SEMAPHORE" \
-    || die "Deploy Guest 910 должен иметь фиксированный VMID 910"
 grep -Fq 'scripts/infra-manager/jobs/sync-ssh-access.py' "$PY_SEMAPHORE" \
     || die "Sync SSH Access должен запускать отдельный Python-сценарий"
-
-grep -Fq 'name="Initialize OpenBao 910"' "$PY_SEMAPHORE" \
-    || die "Semaphore должен создавать отдельное задание Initialize OpenBao 910"
 grep -Fq 'scripts/infra-manager/jobs/initialize-openbao.py' "$PY_SEMAPHORE" \
-    || die "Initialize OpenBao 910 должен запускать отдельный Python-сценарий"
+    || die "Initialize OpenBao должен запускать отдельный Python-сценарий"
+
+python3 - "$ROOT" <<'PY'
+from pathlib import Path
+import sys
+import tempfile
+
+root = Path(sys.argv[1])
+sys.path.insert(0, str(root / "scripts/infra-manager"))
+
+from infra_manager.semaphore import semaphore_templates
+
+current = semaphore_templates(root)
+names = {item.name for item in current}
+if "Deploy Guest 910" not in names or "Initialize OpenBao 910" not in names:
+    raise SystemExit("Текущий VMID infra-manager должен отражаться в заданиях Semaphore")
+
+with tempfile.TemporaryDirectory() as tmp:
+    fake = Path(tmp)
+    guest = fake / "infrastructure/guests/920-infra-manager/guest.yaml"
+    guest.parent.mkdir(parents=True)
+    guest.write_text(
+        "vmid: 920\n"
+        "name: infra-manager\n"
+        "role: infra-manager\n",
+        encoding="utf-8",
+    )
+    moved = semaphore_templates(fake)
+
+moved_by_name = {item.name: item for item in moved}
+deploy = moved_by_name.get("Deploy Guest 920")
+if deploy is None or deploy.arguments != '["920"]':
+    raise SystemExit("Deploy Guest infra-manager должен следовать VMID из guest.yaml")
+if "Initialize OpenBao 920" not in moved_by_name:
+    raise SystemExit("Initialize OpenBao должен следовать VMID из guest.yaml")
+PY
 grep -q 'app: str = "python"' "$PY_SEMAPHORE" \
     || die "Semaphore infrastructure tasks должны по умолчанию выполняться как Python"
 grep -q '"allow_override_args_in_task": False' "$PY_SEMAPHORE" \
