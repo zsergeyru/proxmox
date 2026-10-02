@@ -49,5 +49,5 @@ def check_recovery() -> int:
     """Проверить полный recovery-контракт после инициализации OpenBao."""
     node = pve_node_from_environment()
     check_recovery_contour(node)
-    console.result("Аварийный контур 910 полностью готов")
+    console.result("Аварийный контур infra-manager полностью готов")
     return 0
