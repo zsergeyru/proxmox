@@ -486,6 +486,12 @@ grep -Fq 'tls_disable     = true' "$OPENBAO_CONFIG" \
 if grep -Eq '(^|[^a-z])dev([^a-z]|$)' "$OPENBAO_CONFIG"; then
     die "OpenBao config не должен содержать dev-режим"
 fi
+[[ -s "$OPENBAO_HOST_PACKAGE/snippets.py" ]] \
+    || die "Пакет OpenBao должен содержать встроенные программы"
+[[ -s "$OPENBAO_HOST_PACKAGE/tls.py" ]] \
+    || die "Пакет OpenBao должен содержать отдельную TLS-логику"
+[[ -s "$OPENBAO_HOST_PACKAGE/errors.py" ]] \
+    || die "Пакет OpenBao должен содержать общую ошибку host-слоя"
 grep -RFq '"secret_shares": 1' "$OPENBAO_HOST_PACKAGE" \
     || die "Первичная инициализация OpenBao должна создавать один unseal-ключ"
 grep -RFq '"secret_threshold": 1' "$OPENBAO_HOST_PACKAGE" \
