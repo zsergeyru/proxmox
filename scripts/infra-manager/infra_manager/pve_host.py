@@ -8,7 +8,8 @@ import shlex
 from pathlib import Path
 
 from .common import InfraManagerError, console, log_level, require_command, run
-from .settings import PATHS
+from .guest_catalog import find_guest_by_role, guest_management_address
+from .settings import PATHS, SETTINGS
 
 
 def _required_file(path: Path, label: str) -> None:
@@ -81,6 +82,7 @@ def _ssh_with_input(
 
 
 OPENBAO_HOST_COMMAND = Path("/usr/local/sbin/infra-manager-openbao-unseal")
+OPENBAO_HOST_CONFIG = Path("/etc/infra-manager/openbao-host.json")
 RECOVERY_HOST_COMMAND = Path("/usr/local/sbin/infra-manager-recovery")
 OPENBAO_LEGACY_SERVICE = "infra-manager-openbao-unseal.service"
 OPENBAO_LEGACY_TIMER = "infra-manager-openbao-unseal.timer"
@@ -119,11 +121,59 @@ trap - EXIT
     )
 
 
+def _install_remote_text(
+    node: str,
+    content: str,
+    target: Path,
+    mode: str,
+) -> None:
+    """Атомарно установить сформированный текстовый файл на PVE."""
+
+    script = r"""
+set -eu
+target="$1"
+mode="$2"
+install -d -m 0755 "$(dirname "$target")"
+tmp="$(mktemp "$target.tmp.XXXXXX")"
+trap 'rm -f "$tmp"' EXIT
+cat > "$tmp"
+chown root:root "$tmp"
+chmod "$mode" "$tmp"
+mv -f "$tmp" "$target"
+trap - EXIT
+"""
+    _ssh_with_input(
+        node,
+        "sh",
+        "-c",
+        script,
+        "sh",
+        str(target),
+        mode,
+        input_text=content,
+    )
+
+
 def install_openbao_host_support(node: str, repo_root: Path) -> None:
     """Установить на PVE только сценарий разблокировки OpenBao."""
     command_source = (
         repo_root / "scripts" / "infra-manager" / "host" / "openbao-unseal.py"
     )
+    identity = find_guest_by_role(repo_root, SETTINGS.infra_manager_role)
+    address = guest_management_address(repo_root, identity)
+    if address is None:
+        raise InfraManagerError(
+            "Для OpenBao infra-manager должен иметь статический административный IPv4"
+        )
+    host_config = json.dumps(
+        {
+            "vmid": identity.vmid,
+            "name": identity.name,
+            "address": address,
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+    ) + "\n"
 
     cleanup = f"""
 systemctl disable --now {OPENBAO_LEGACY_TIMER} {OPENBAO_LEGACY_SERVICE} \
@@ -143,7 +193,16 @@ systemctl daemon-reload
         OPENBAO_HOST_COMMAND,
         "0755",
     )
-    console.detail("Сценарий разблокировки OpenBao установлен на PVE")
+    _install_remote_text(
+        node,
+        host_config,
+        OPENBAO_HOST_CONFIG,
+        "0644",
+    )
+    console.detail(
+        f"Сценарий OpenBao установлен на PVE для "
+        f"{identity.vmid} {identity.name} ({address})"
+    )
 
 
 def install_recovery_host_support(node: str, repo_root: Path) -> None:
