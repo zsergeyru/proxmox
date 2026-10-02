@@ -204,17 +204,17 @@ def check_guest_summary() -> None:
         fail("Обычный итог гостя не должен содержать сведения о Semaphore")
 
 
-def check_910_self_update_path() -> None:
+def check_infra_manager_self_update_path_after_vmid_change() -> None:
     context = DeploymentContext(
         client=SimpleNamespace(),
-        vmid=910,
+        vmid=920,
         name="infra-manager",
         node="pve",
         kind="lxc",
         features=("container-host",),
         template_vmid=None,
-        address="192.168.9.10",
-        target='proxmox_virtual_environment_container.guest["910"]',
+        address="192.168.9.20",
+        target='proxmox_virtual_environment_container.guest["920"]',
         workspace=SimpleNamespace(),
         paths=SimpleNamespace(),
     )
@@ -243,7 +243,19 @@ def check_910_self_update_path() -> None:
         access_calls.append((node, vmid, hostname, public_key))
 
     with tempfile.TemporaryDirectory() as tmp:
-        public_key = Path(tmp) / "guest_ed25519.pub"
+        root = Path(tmp)
+        guest_dir = root / "infrastructure/guests/920-infra-manager"
+        guest_dir.mkdir(parents=True)
+        (guest_dir / "guest.yaml").write_text(
+            "schema_version: 12\n"
+            "vmid: 920\n"
+            "name: infra-manager\n"
+            "role: infra-manager\n"
+            "profile: debian-lxc-docker\n"
+            "pve_management: false\n",
+            encoding="utf-8",
+        )
+        public_key = root / "guest_ed25519.pub"
         public_key.write_text("ssh-ed25519 AAAATEST", encoding="utf-8")
 
         with (
@@ -256,7 +268,7 @@ def check_910_self_update_path() -> None:
             patch.object(
                 guest_deploy_module,
                 "_project_branch",
-                return_value="feature/openbao-ssh-client-trust",
+                return_value="feature/infra-manager-role",
             ),
             patch.object(
                 guest_deploy_module,
@@ -287,14 +299,14 @@ def check_910_self_update_path() -> None:
                 guest_deploy_module,
                 "prepare_workspace",
                 side_effect=AssertionError(
-                    "Самообновление 910 не должно готовить OpenTofu workspace"
+                    "Самообновление infra-manager не должно готовить OpenTofu workspace"
                 ),
             ),
             patch.object(
                 guest_deploy_module,
                 "apply_host_requirements",
                 side_effect=AssertionError(
-                    "Самообновление 910 не должно менять объект Proxmox"
+                    "Самообновление infra-manager не должно менять объект Proxmox"
                 ),
             ),
             patch.object(
@@ -303,27 +315,26 @@ def check_910_self_update_path() -> None:
                 SimpleNamespace(ansible_public_key=public_key),
             ),
         ):
-            if guest_deploy_module.run_deploy_guest(ROOT, 910) != 0:
-                fail("Самообновление 910 должно завершаться успешно")
+            if guest_deploy_module.run_deploy_guest(root, 920) != 0:
+                fail("Самообновление infra-manager с VMID 920 должно завершаться успешно")
 
-    if validated != [910]:
-        fail("Самообновление должно проверить существующий объект 910")
+    if validated != [920]:
+        fail("Самообновление должно проверить существующий объект infra-manager")
     if access_calls != [
-        ("pve", 910, "infra-manager", "ssh-ed25519 AAAATEST")
+        ("pve", 920, "infra-manager", "ssh-ed25519 AAAATEST")
     ]:
-        fail("Самообновление должно подготовить постоянный SSH-доступ 910")
+        fail("Самообновление должно использовать фактический VMID infra-manager")
     if configured != [
         {
             "provision_phase": "full",
             "self_update": True,
-            "project_branch": "feature/openbao-ssh-client-trust",
+            "project_branch": "feature/infra-manager-role",
         }
     ]:
         fail(
-            "Самообновление 910 должно применять полный provision "
+            "Самообновление infra-manager должно применять полный provision "
             "в безопасном режиме"
         )
-
 
 def check_openbao_machine_identity_preparation() -> None:
     with tempfile.TemporaryDirectory() as tmp:
@@ -944,7 +955,7 @@ def check_certificate_failure_is_fatal_after_trust() -> None:
 def main_test() -> None:
     check_opentofu_state_status()
     check_guest_summary()
-    check_910_self_update_path()
+    check_infra_manager_self_update_path_after_vmid_change()
     check_openbao_machine_identity_preparation()
     check_openbao_target_only_preparation()
     check_temporary_certificate_path()
