@@ -203,7 +203,7 @@ def reserve_runtime_activation() -> None:
 
 
 def cancel_runtime_activation() -> None:
-    """Снять резерв активации после неуспешного Deploy Guest 910."""
+    """Снять резерв активации после неуспешного самообновления infra-manager."""
     RUNTIME_ACTIVATION_MARKER.unlink(missing_ok=True)
 
 
