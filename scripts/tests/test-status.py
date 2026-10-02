@@ -19,10 +19,10 @@ from infra_manager import status as status_module
 from infra_manager.common import InfraManagerError
 from infra_manager.semaphore import (
     PROJECT_REPO,
-    SEMAPHORE_TEMPLATES,
     SemaphoreClient,
     find_unique_by_name,
     require_unique_by_name,
+    semaphore_templates,
 )
 from infra_manager.settings import SETTINGS
 from infra_manager.status import (
@@ -36,6 +36,8 @@ from infra_manager.status import (
     load_status_definition,
     validate_semaphore_snapshot,
 )
+
+SEMAPHORE_TEMPLATES = semaphore_templates(ROOT)
 
 
 def fail(message: str) -> None:
