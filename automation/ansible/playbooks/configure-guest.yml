@@ -71,6 +71,13 @@
         - (provision_phase | default('full')) == "full"
         - (guest_manifest.role | default('')) == "infra-manager"
 
+    - name: Настроить AI Control
+      ansible.builtin.include_role:
+        name: ai_control
+      when:
+        - (provision_phase | default('full')) == "full"
+        - (guest_manifest.role | default('')) == "ai-control"
+
     - name: Подготовить структуру каталогов гостя
       ansible.builtin.include_role:
         name: guest_layout
