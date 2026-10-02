@@ -15,6 +15,7 @@ MODULE_ROOT = ROOT / "scripts" / "infra-manager"
 sys.path.insert(0, str(MODULE_ROOT))
 
 from infra_manager import guest_deploy as guest_deploy_module
+from infra_manager import guest_deploy_infrastructure as guest_infra_module
 from infra_manager import opentofu as opentofu_module
 from infra_manager.common import InfraManagerError
 from infra_manager.guest_deploy import (
@@ -1081,7 +1082,7 @@ def main_test() -> None:
         tainted_commands.append(argv)
         return SimpleNamespace(returncode=0, stdout="")
 
-    with patch.object(guest_deploy_module, "run", record_tainted_run):
+    with patch.object(guest_infra_module, "run", record_tainted_run):
         _validate_pve_and_state(
             deployment_for(tainted_client),
             state_present=True,
@@ -1105,7 +1106,7 @@ def main_test() -> None:
             return SimpleNamespace(returncode=0, stdout=json.dumps(payload))
         return SimpleNamespace(returncode=0, stdout="")
 
-    with patch.object(guest_deploy_module, "run", unexpected_plan_run):
+    with patch.object(guest_infra_module, "run", unexpected_plan_run):
         try:
             _build_guest_plan(deployment)
         except InfraManagerError:
@@ -1126,7 +1127,7 @@ def main_test() -> None:
             return SimpleNamespace(returncode=0, stdout=json.dumps(payload))
         return SimpleNamespace(returncode=0, stdout="")
 
-    with patch.object(guest_deploy_module, "run", target_plan_run):
+    with patch.object(guest_infra_module, "run", target_plan_run):
         guest_plan = _build_guest_plan(deployment)
     if guest_plan.actions != ("update",):
         fail("Целевой план неверно разобрал действия выбранной VM")
@@ -1146,7 +1147,7 @@ def main_test() -> None:
     def failed_apply(argv: list[str], **kwargs: object):
         raise InfraManagerError("ожидаемая ошибка применения")
 
-    with patch.object(guest_deploy_module, "run", failed_apply):
+    with patch.object(guest_infra_module, "run", failed_apply):
         try:
             _apply_plan(deployment_for(protected_client), ["create"])
         except InfraManagerError:
