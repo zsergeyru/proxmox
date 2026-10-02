@@ -18,15 +18,8 @@ CHANGES=0
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
-resolve_infra_manager_vmid() {
-    local manifest
-    local vmid
-    local -a matches=()
-
-    while IFS= read -r manifest; do
-        [[ -n "$manifest" ]] && matches+=("$manifest")
-    done < <(
-        grep -lE '^[[:space:]]*role:[[:space:]]*infra-manager[[:space:]]*
+CT_INFRA=""
+CT_TEST=9098
 VM_TEMPLATE=9000
 VM_SMOKE=9099
 
@@ -57,6 +50,29 @@ block() {
 die() {
     printf '\n%s%sОШИБКА:%s %s\n' "$C_BOLD" "$C_RED" "$C_RESET" "$*" >&2
     exit 1
+}
+
+resolve_infra_manager_vmid() {
+    local manifest
+    local vmid
+    local -a matches=()
+
+    while IFS= read -r manifest; do
+        [[ -n "$manifest" ]] && matches+=("$manifest")
+    done < <(
+        grep -lE '^[[:space:]]*role:[[:space:]]*infra-manager[[:space:]]*$' \
+            "$PROJECT_ROOT"/infrastructure/guests/*/guest.yaml 2>/dev/null || true
+    )
+
+    (( ${#matches[@]} == 1 )) \
+        || die "Ожидается ровно один guest.yaml с role: infra-manager"
+
+    vmid="$(
+        awk '$1 == "vmid:" { print $2; exit }' "${matches[0]}"
+    )"
+    [[ "$vmid" =~ ^[0-9]+$ ]] \
+        || die "Не удалось определить VMID infra-manager из ${matches[0]}"
+    printf '%s\n' "$vmid"
 }
 
 usage() {
