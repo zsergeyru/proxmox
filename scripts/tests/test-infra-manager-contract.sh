@@ -12,6 +12,7 @@ ANSIBLE_RUNTIME_DIR="$ROOT/automation/ansible/roles/infra_manager/tasks"
 ANSIBLE_VERIFY="$ANSIBLE_RUNTIME_DIR/verify.yml"
 ANSIBLE_RUNTIME_MAIN="$ANSIBLE_RUNTIME_DIR/main.yml"
 BOOTSTRAP_HOST="$ROOT/scripts/bootstrap-runner/bootstrap-host.py"
+BOOTSTRAP_INFRA="$ROOT/scripts/bootstrap-runner/bootstrap_runner/infra.py"
 PY_SETTINGS="$ROOT/scripts/infra-manager/infra_manager/settings.py"
 PY_SEMAPHORE="$ROOT/scripts/infra-manager/infra_manager/semaphore.py"
 PY_STATUS="$ROOT/scripts/infra-manager/infra_manager/status.py"
@@ -725,7 +726,7 @@ fi
 branch_env_count="$(grep -Fc 'INFRA_PROJECT_BRANCH: "{{ infra_project_branch' "$ANSIBLE_RUNTIME" || true)"
 [[ "$branch_env_count" -ge 1 ]] \
     || die "Выбранная ветка должна передаваться настройке Semaphore"
-grep -Fq 'f"INFRA_PROJECT_BRANCH={self.project_branch}"' "$BOOTSTRAP_HOST" \
+grep -Fq 'f"INFRA_PROJECT_BRANCH={self.project_branch}"' "$BOOTSTRAP_INFRA" \
     || die "Финальная bootstrap-проверка 910 должна использовать выбранную ветку"
 grep -Fq 'self.initialize_infra_openbao()' "$BOOTSTRAP_HOST" \
     || die "Bootstrap должен инициализировать OpenBao перед финальной проверкой 910"
