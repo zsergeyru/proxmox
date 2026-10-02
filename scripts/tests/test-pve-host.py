@@ -141,6 +141,7 @@ def test_infra_self_access() -> None:
 
 def test_openbao_host_support() -> None:
     installs: list[tuple[str, str, str]] = []
+    tree_installs: list[tuple[str, str]] = []
     installed_texts: list[tuple[str, str, str]] = []
     ssh_calls: list[tuple[str, ...]] = []
 
@@ -148,7 +149,18 @@ def test_openbao_host_support() -> None:
         root = Path(tmp)
         command = root / "scripts/infra-manager/host/openbao-unseal.py"
         command.parent.mkdir(parents=True)
-        command.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
+        command.write_text(\
+            "#!/usr/bin/env python3\n"\
+            "from openbao_host.errors import OpenBaoHostError\n",\
+            encoding="utf-8",\
+        )
+        library = command.parent / "openbao_host"
+        library.mkdir()
+        (library / "__init__.py").write_text("", encoding="utf-8")
+        (library / "errors.py").write_text(\
+            "class OpenBaoHostError(RuntimeError):\n    pass\n",\
+            encoding="utf-8",\
+        )
 
         guest = root / "infrastructure/guests/920-infra-manager/guest.yaml"
         guest.parent.mkdir(parents=True)
@@ -169,6 +181,14 @@ def test_openbao_host_support() -> None:
         ) -> None:
             assert node == "pve"
             installs.append((str(source), str(target), mode))
+
+        def record_tree(
+            node: str,
+            source: Path,
+            target: Path,
+        ) -> None:
+            assert node == "pve"
+            tree_installs.append((str(source), str(target)))
 
         def record_text(
             node: str,
@@ -191,11 +211,18 @@ def test_openbao_host_support() -> None:
 
         with (
             patch.object(module, "_install_remote_file", side_effect=record_install),
+            patch.object(module, "_install_remote_text_tree", side_effect=record_tree),
             patch.object(module, "_install_remote_text", side_effect=record_text),
             patch.object(module, "_ssh", side_effect=record_ssh),
         ):
             module.install_openbao_host_support("pve", root)
 
+    assert tree_installs == [
+        (
+            str(library),
+            "/usr/local/lib/infra-manager/openbao_host",
+        ),
+    ]
     assert installs == [
         (
             str(command),
