@@ -471,7 +471,7 @@ def require_permissions(
 
 
 def check_access(*, quiet: bool = False) -> int:
-    """Проверить полный административный контракт 910 с PVE."""
+    """Проверить полный административный контракт infra-manager с PVE."""
     if os.geteuid() != 0:
         raise InfraManagerError(
             "Проверка PVE access должна выполняться от root"
