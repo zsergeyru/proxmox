@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import fcntl
+import ipaddress
 import json
 import os
 import shutil
@@ -13,7 +14,10 @@ import tempfile
 import time
 from pathlib import Path
 
-VMID = 910
+HOST_CONFIG_PATH = Path("/etc/infra-manager/openbao-host.json")
+VMID = 0
+TLS_ADDRESS = ""
+TLS_DNS_NAME = ""
 OPENBAO_URL = "http://127.0.0.1:8200"
 KEY_DIR = Path("/mnt/bindmounts/infra-manager/pve-only/openbao")
 KEY_PATH = KEY_DIR / "unseal.key"
@@ -26,8 +30,6 @@ TLS_CA_CERT = TLS_PVE_ONLY_DIR / "ca.crt"
 TLS_ACCESS_CA_CERT = TLS_ACCESS_DIR / "ca.crt"
 TLS_SERVER_KEY = TLS_ACCESS_DIR / "server.key"
 TLS_SERVER_CERT = TLS_ACCESS_DIR / "server.crt"
-TLS_ADDRESS = "192.168.9.10"
-TLS_DNS_NAME = "infra-manager"
 LOCK_PATH = Path("/run/lock/infra-manager-openbao-unseal.lock")
 CT_RUNTIME_DIR = Path("/run/infra-manager")
 CT_KEY_PATH = CT_RUNTIME_DIR / "openbao-unseal.key"
@@ -40,6 +42,43 @@ TEMP_OPENBAO_CONTAINER = "infra-manager-openbao-generate-root"
 KV_MOUNT = "infra-secrets"
 RUNTIME_SECRET_DIR = Path("/run/infra-manager/secrets")
 LOG_LEVEL = "normal"
+
+def load_host_identity() -> None:
+    """Загрузить VMID, имя и адрес infra-manager из установленного PVE-конфига."""
+
+    global VMID, TLS_ADDRESS, TLS_DNS_NAME
+
+    try:
+        payload = json.loads(HOST_CONFIG_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise OpenBaoHostError(
+            f"Не удалось прочитать конфигурацию infra-manager: {HOST_CONFIG_PATH}"
+        ) from exc
+    if not isinstance(payload, dict):
+        raise OpenBaoHostError("Конфигурация infra-manager должна быть JSON object")
+
+    vmid = payload.get("vmid")
+    name = payload.get("name")
+    address = payload.get("address")
+    if not isinstance(vmid, int) or vmid <= 0:
+        raise OpenBaoHostError("Конфигурация infra-manager содержит неверный vmid")
+    if not isinstance(name, str) or not name:
+        raise OpenBaoHostError("Конфигурация infra-manager содержит неверное name")
+    if not isinstance(address, str) or not address:
+        raise OpenBaoHostError("Конфигурация infra-manager содержит неверный address")
+    try:
+        parsed = ipaddress.ip_address(address)
+    except ValueError as exc:
+        raise OpenBaoHostError(
+            "Конфигурация infra-manager содержит некорректный IPv4"
+        ) from exc
+    if not isinstance(parsed, ipaddress.IPv4Address):
+        raise OpenBaoHostError("OpenBao infra-manager поддерживает только IPv4")
+
+    VMID = vmid
+    TLS_ADDRESS = str(parsed)
+    TLS_DNS_NAME = name
+
 
 STATUS_CODE = r"""
 import urllib.request
@@ -2424,7 +2463,7 @@ def read_status(*, wait: bool) -> dict[str, object]:
             time.sleep(2)
 
     raise OpenBaoHostError(
-        "OpenBao в LXC 910 не стал доступен"
+        "OpenBao в infra-manager не стал доступен"
         + (f": {last_error}" if last_error else "")
     )
 
@@ -2581,7 +2620,7 @@ def _otp_tls_was_initialized() -> bool:
 
 
 def prepare_tls_material() -> None:
-    """Подготовить TLS CA на PVE и серверный комплект, доступный LXC 910."""
+    """Подготовить TLS CA на PVE и серверный комплект infra-manager."""
     TLS_PVE_ONLY_DIR.mkdir(parents=True, exist_ok=True)
     os.chmod(TLS_PVE_ONLY_DIR, 0o700)
     os.chown(TLS_PVE_ONLY_DIR, 0, 0)
@@ -2707,7 +2746,7 @@ def prepare_tls_material() -> None:
         raise OpenBaoHostError("TLS server material OpenBao не прошёл проверку")
 
     log_detail(
-        "[ОК] TLS OpenBao подготовлен: CA остаётся на PVE, серверный комплект доступен 910"
+        "[ОК] TLS OpenBao подготовлен: CA остаётся на PVE, серверный комплект доступен infra-manager"
     )
 
 
@@ -3830,7 +3869,7 @@ def initialize() -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Инициализация и разблокировка OpenBao для LXC 910"
+        description="Инициализация и разблокировка OpenBao для infra-manager"
     )
     parser.add_argument(
         "--log-level",
@@ -3891,6 +3930,8 @@ def main() -> int:
 
     if os.geteuid() != 0:
         raise OpenBaoHostError("Команда должна выполняться от root на PVE")
+
+    load_host_identity()
 
     LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
     with LOCK_PATH.open("a+", encoding="utf-8") as lock:
