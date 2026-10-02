@@ -141,6 +141,7 @@ def test_infra_self_access() -> None:
 
 def test_openbao_host_support() -> None:
     installs: list[tuple[str, str, str]] = []
+    installed_texts: list[tuple[str, str, str]] = []
     ssh_calls: list[tuple[str, ...]] = []
 
     with tempfile.TemporaryDirectory() as tmp:
@@ -148,6 +149,17 @@ def test_openbao_host_support() -> None:
         command = root / "scripts/infra-manager/host/openbao-unseal.py"
         command.parent.mkdir(parents=True)
         command.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
+
+        guest = root / "infrastructure/guests/920-infra-manager/guest.yaml"
+        guest.parent.mkdir(parents=True)
+        guest.write_text(
+            "vmid: 920\n"
+            "name: infra-manager\n"
+            "role: infra-manager\n"
+            "network:\n"
+            "  ipv4: 192.168.9.20\n",
+            encoding="utf-8",
+        )
 
         def record_install(
             node: str,
@@ -157,6 +169,15 @@ def test_openbao_host_support() -> None:
         ) -> None:
             assert node == "pve"
             installs.append((str(source), str(target), mode))
+
+        def record_text(
+            node: str,
+            content: str,
+            target: Path,
+            mode: str,
+        ) -> None:
+            assert node == "pve"
+            installed_texts.append((content, str(target), mode))
 
         def record_ssh(
             node: str,
@@ -170,6 +191,7 @@ def test_openbao_host_support() -> None:
 
         with (
             patch.object(module, "_install_remote_file", side_effect=record_install),
+            patch.object(module, "_install_remote_text", side_effect=record_text),
             patch.object(module, "_ssh", side_effect=record_ssh),
         ):
             module.install_openbao_host_support("pve", root)
@@ -181,6 +203,15 @@ def test_openbao_host_support() -> None:
             "0755",
         ),
     ]
+    assert len(installed_texts) == 1
+    config_text, config_target, config_mode = installed_texts[0]
+    assert json.loads(config_text) == {
+        "vmid": 920,
+        "name": "infra-manager",
+        "address": "192.168.9.20",
+    }
+    assert config_target == "/etc/infra-manager/openbao-host.json"
+    assert config_mode == "0644"
     assert len(ssh_calls) == 1
     assert ssh_calls[0][:2] == ("sh", "-c")
     cleanup = ssh_calls[0][2]
