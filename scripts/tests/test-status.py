@@ -18,6 +18,7 @@ sys.path.insert(0, str(MODULE_ROOT))
 
 from infra_manager import status as status_module
 from infra_manager.common import InfraManagerError
+from infra_manager.guest_catalog import find_guest_by_role
 from infra_manager.semaphore import (
     PROJECT_REPO,
     SemaphoreClient,
@@ -72,6 +73,8 @@ def main_test() -> None:
         if not (ROOT / spec.playbook).is_file():
             fail(f"Playbook Semaphore не существует: {spec.playbook}")
 
+    infra_identity = find_guest_by_role(ROOT, SETTINGS.infra_manager_role)
+    infra_vmid = str(infra_identity.vmid)
     expected_templates = {
         "OpenTofu Plan": ("scripts/infra-manager/jobs/opentofu-plan.py", "[]"),
         "Build Template 9000": (
@@ -82,15 +85,15 @@ def main_test() -> None:
             "scripts/infra-manager/jobs/deploy-guest.py",
             '["410"]',
         ),
-        "Deploy Guest 910": (
+        f"Deploy Guest {infra_vmid}": (
             "scripts/infra-manager/jobs/deploy-guest.py",
-            '["910"]',
+            f'["{infra_vmid}"]',
         ),
         "Sync SSH Access": (
             "scripts/infra-manager/jobs/sync-ssh-access.py",
             "[]",
         ),
-        "Initialize OpenBao 910": (
+        f"Initialize OpenBao {infra_vmid}": (
             "scripts/infra-manager/jobs/initialize-openbao.py",
             "[]",
         ),
