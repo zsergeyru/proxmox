@@ -169,7 +169,6 @@ grep -q '"override_secret": True' "$PY_SEMAPHORE" \
     || die "Существующий GitHub SSH key должен обновлять секретную часть"
 grep -q '{"id": repository_id, \*\*payload}' "$PY_SEMAPHORE" \
     || die "PUT Git repository должен передавать repository id в теле"
-    || die "PUT Semaphore template должен передавать template id в теле"
 
 python3 - "$COMPOSE" <<'PY'
 from pathlib import Path
