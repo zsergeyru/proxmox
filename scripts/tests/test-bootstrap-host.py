@@ -25,6 +25,24 @@ def assert_equal(actual, expected, message: str) -> None:
         raise AssertionError(f"{message}\nОжидалось: {expected!r}\nПолучено: {actual!r}")
 
 
+def test_infra_manager_role_can_move_to_another_vmid() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        guest_dir = root / "infrastructure/guests/920-infra-manager"
+        guest_dir.mkdir(parents=True)
+        (guest_dir / "guest.yaml").write_text(
+            "schema_version: 12\n"
+            "vmid: 920\n"
+            "name: infra-manager\n"
+            "role: infra-manager\n",
+            encoding="utf-8",
+        )
+
+        vmid, name = module._find_role_guest(root, "infra-manager")
+        assert_equal(vmid, 920, "Роль infra-manager не должна зависеть от VMID 910")
+        assert_equal(name, "infra-manager", "Имя должно читаться из guest.yaml")
+
+
 class OwnershipHarness(BootstrapHost):
     def __init__(self, config: str) -> None:
         super().__init__("apply")
@@ -232,10 +250,10 @@ class PhaseProgressHarness(BootstrapHost):
 def test_ansible_phases_enable_progress() -> None:
     host = PhaseProgressHarness()
 
-    host.deploy_910_phase("infrastructure", "infra", "ok")
-    host.deploy_910_phase("base", "base", "ok")
-    host.deploy_910_phase("provision", "full", "ok")
-    host.deploy_910_phase("existing", "existing", "ok")
+    host.deploy_infra_phase("infrastructure", "infra", "ok")
+    host.deploy_infra_phase("base", "base", "ok")
+    host.deploy_infra_phase("provision", "full", "ok")
+    host.deploy_infra_phase("existing", "existing", "ok")
 
     assert_equal(
         [call.get("progress") for call in host.calls],
@@ -408,8 +426,8 @@ class ApplyHarness(BootstrapHost):
     def prepare_runner(self) -> None:
         self.events.append("prepare_runner")
 
-    def runner_owns_910(self) -> bool:
-        self.events.append("runner_owns_910")
+    def runner_owns_infra(self) -> bool:
+        self.events.append("runner_owns_infra")
         return self._owns_state
 
     def ensure_existing_infra_running(self) -> None:
@@ -418,7 +436,7 @@ class ApplyHarness(BootstrapHost):
     def ensure_runner_ssh_access_to_infra(self) -> None:
         self.events.append("ensure_runner_ssh")
 
-    def deploy_910_phase(self, phase: str, title: str, success: str) -> None:
+    def deploy_infra_phase(self, phase: str, title: str, success: str) -> None:
         del title, success
         self.events.append(f"deploy:{phase}")
 
@@ -456,7 +474,7 @@ def test_new_install_flow() -> None:
             "infra_exists",
             "prepare_new_layout",
             "prepare_runner",
-            "runner_owns_910",
+            "runner_owns_infra",
             "deploy:infrastructure",
             "attach_layout",
             "ensure_runner_ssh",
@@ -479,7 +497,7 @@ def test_existing_without_bootstrap_state() -> None:
         host.events,
         [
             "infra_exists",
-            "runner_owns_910",
+            "runner_owns_infra",
             "verify_layout",
             "prepare_runner",
             "ensure_existing",
@@ -501,7 +519,7 @@ def test_resume_unfinished_initial_state() -> None:
     host.apply()
     expected_prefix = [
         "infra_exists",
-        "runner_owns_910",
+        "runner_owns_infra",
         "layout_attached",
         "attach_layout",
         "prepare_runner",
@@ -541,7 +559,7 @@ def test_resume_unfinished_with_layout_already_attached() -> None:
         host.events[:5],
         [
             "infra_exists",
-            "runner_owns_910",
+            "runner_owns_infra",
             "layout_attached",
             "verify_layout",
             "prepare_runner",
@@ -566,7 +584,7 @@ def test_recover_existing_without_state() -> None:
         [
             "infra_exists",
             "verify_recovery_state",
-            "runner_owns_910",
+            "runner_owns_infra",
             "verify_layout",
             "prepare_runner",
             "ensure_existing",
@@ -743,7 +761,7 @@ def test_existing_layout_requires_manual_migration() -> None:
 
     assert_equal(
         host.events,
-        ["infra_exists", "runner_owns_910", "verify_layout"],
+        ["infra_exists", "runner_owns_infra", "verify_layout"],
         "До ручной миграции стандартный bootstrap не должен изменять 910",
     )
 
@@ -826,6 +844,7 @@ def test_remove_rejects_foreign_910() -> None:
 
 def main() -> None:
     tests = [
+        test_infra_manager_role_can_move_to_another_vmid,
         test_strict_ownership_marker,
         test_full_pve_token_contract,
         test_full_pve_token_missing_secret_is_removed,
