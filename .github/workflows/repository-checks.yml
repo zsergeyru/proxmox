@@ -116,7 +116,7 @@ jobs:
       - name: Run infra-manager contract checks
         run: bash scripts/tests/test-infra-manager-contract.sh
 
-      - name: Enforce common Ansible path for 910
+      - name: Enforce common Ansible path for infra-manager
         run: bash scripts/tests/test-bootstrap-architecture.sh
 
       - name: Reject obsolete direct PVE deployment path
