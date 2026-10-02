@@ -1,4 +1,4 @@
-"""Проверка готовности LXC 910 infra-manager."""
+"""Проверка готовности LXC infra-manager."""
 
 from __future__ import annotations
 
@@ -12,12 +12,9 @@ from typing import Any
 import yaml
 
 from .common import InfraManagerError, command_runner, console
+from .guest_catalog import find_guest_by_role
 from .pve import PveClient, check_access, read_env_file
-from .semaphore import (
-    SEMAPHORE_TEMPLATES,
-    SemaphoreClient,
-    require_unique_by_name,
-)
+from .semaphore import SemaphoreClient, require_unique_by_name, semaphore_templates
 from .pve_host import (
     check_openbao_kv,
     check_openbao_ssh_access,
@@ -90,7 +87,7 @@ def _required_text(value: Any, label: str) -> str:
 
 
 def load_status_definition(path: Path | None = None) -> StatusDefinition:
-    """Прочитать и проверить установленное описание состояния 910."""
+    """Прочитать и проверить описание состояния infra-manager."""
     target = path or STATUS_FILE
     required_file(target)
     try:
@@ -104,8 +101,15 @@ def load_status_definition(path: Path | None = None) -> StatusDefinition:
         raise InfraManagerError("status.yaml должен содержать mapping/object")
     if raw.get("schema_version") != 1:
         raise InfraManagerError("status.yaml имеет неподдерживаемую версию")
-    if raw.get("guest_vmid") != 910:
-        raise InfraManagerError("status.yaml должен описывать VMID 910")
+    identity = find_guest_by_role(
+        PATHS.repo_root,
+        SETTINGS.infra_manager_role,
+    )
+    if raw.get("guest_vmid") != identity.vmid:
+        raise InfraManagerError(
+            "status.yaml должен описывать текущий VMID infra-manager "
+            f"{identity.vmid}"
+        )
 
     layout = raw.get("layout")
     if not isinstance(layout, dict):
@@ -232,7 +236,7 @@ def load_status_definition(path: Path | None = None) -> StatusDefinition:
         )
 
     return StatusDefinition(
-        guest_vmid=910,
+        guest_vmid=int(raw["guest_vmid"]),
         title=_required_text(raw.get("title"), "title"),
         short_ready_message=_required_text(
             raw.get("short_ready_message"),
@@ -608,7 +612,7 @@ def validate_semaphore_snapshot(
         github_key_id=github_key_id,
         project_branch=project_branch,
     )
-    for spec in SEMAPHORE_TEMPLATES:
+    for spec in semaphore_templates():
         template = require_unique_by_name(
             list(snapshot.templates),
             spec.name,
@@ -759,14 +763,14 @@ def _run_status_checks(
 
 
 def _primary_ipv4() -> str:
-    """Вернуть основной IPv4 текущего 910."""
+    """Вернуть основной IPv4 текущего infra-manager."""
     result = command_runner.run(
         ["hostname", "-I"],
         capture=True,
         check=False,
     )
     if result.returncode:
-        raise InfraManagerError("Не удалось определить адрес 910")
+        raise InfraManagerError("Не удалось определить адрес infra-manager")
 
     addresses = [
         item
