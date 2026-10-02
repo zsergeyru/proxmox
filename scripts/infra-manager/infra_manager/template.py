@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import re
-from pathlib import Path
 from typing import Any
 
 from .common import InfraManagerError, console
@@ -95,18 +94,3 @@ def verify_template_contract(
         )
     console.ok(f"Контракт шаблона {vmid} подтверждён")
 
-
-def run_build_template(repo_root: Path, vmid: int) -> int:
-    """Совместимый вход в отдельный сценарий сборки шаблона."""
-
-    from .template_build import run_build_template as run_build
-
-    return run_build(repo_root, vmid)
-
-
-def run_verify_template(vmid: int) -> int:
-    """Совместимый вход в отдельный сценарий проверки шаблона."""
-
-    from .template_verify import run_verify_template as run_verify
-
-    return run_verify(vmid)
