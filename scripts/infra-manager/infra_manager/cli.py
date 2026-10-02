@@ -43,6 +43,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     access_parser.set_defaults(handler="pve-access-check")
 
+    lifecycle_parser = subparsers.add_parser(
+        "pve-lifecycle-test",
+        help="выполнить интеграционный тест жизненного цикла LXC через PVE API",
+    )
+    lifecycle_parser.add_argument(
+        "--apply",
+        action="store_true",
+        help="разрешить создание и удаление временного LXC 9098",
+    )
+    lifecycle_parser.set_defaults(handler="pve-lifecycle-test")
+
     recovery_prepare = subparsers.add_parser(
         "recovery-prepare",
         help="подготовить PVE-only аварийный контур infra-manager",
@@ -86,6 +97,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             from .pve import check_access
 
             return check_access()
+
+        if args.handler == "pve-lifecycle-test":
+            from .pve_lifecycle import run_lifecycle_test
+
+            return run_lifecycle_test(apply=args.apply)
 
         if args.handler == "recovery-prepare":
             from pathlib import Path
