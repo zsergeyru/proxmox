@@ -110,7 +110,7 @@ role_text = ROLE.read_text(encoding="utf-8")
 assert "provision.ai_control.paths" in role_text
 assert "provision.ai_control.service.executable" in role_text
 assert "secrets.token_urlsafe(24)" in role_text
-assert "web.env" in role_text
+assert "provision.ai_control.paths.web_credentials" in role_text
 assert "guest_manifest.vmid" not in role_text
 assert "guest_vmid" not in role_text
 assert "910" not in role_text
