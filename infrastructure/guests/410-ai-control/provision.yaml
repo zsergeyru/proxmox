@@ -39,6 +39,8 @@ ai_control:
   paths:
     root: /opt/ai-control
     core: /opt/ai-control/core
+    core_bin: /opt/ai-control/core/bin
+    web_root: /opt/ai-control/core/web
     agents: /opt/ai-control/agents
     primary_agent: /opt/ai-control/agents/hermes
     repositories: /opt/ai-control/repos
