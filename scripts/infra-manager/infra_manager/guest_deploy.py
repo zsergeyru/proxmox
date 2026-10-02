@@ -12,7 +12,7 @@ from pathlib import Path
 
 from .access import load_access_policy
 from .common import InfraManagerError, console, require_command, run
-from .guest_catalog import guest_identity
+from .guest_catalog import find_guest_by_role, guest_identity
 from .opentofu import OpenTofuWorkspace, prepare_workspace
 from .pve import PveClient
 from .pve_host import (
@@ -835,8 +835,9 @@ def _project_git_ansible_vars(
 
     repo_root = context.paths.guest_dir.parents[2]
     policy = load_access_policy(repo_root)
+    identity = guest_identity(repo_root, context.vmid)
     allowed = (
-        context.vmid != 910
+        identity.role != SETTINGS.infra_manager_role
         and policy.project_repository_read_allowed(context.vmid)
     )
     args = [
@@ -922,10 +923,14 @@ def _prepare_openbao_machine_ansible_vars(
         ca_file.chmod(0o600)
     args.extend(["-e", f"infra_openbao_ca_file={ca_file}"])
 
-    manager = policy.guests.get(910)
+    infra_manager = find_guest_by_role(
+        repo_root,
+        SETTINGS.infra_manager_role,
+    )
+    manager = policy.guests.get(infra_manager.vmid)
     if manager is None or manager.address is None:
         raise InfraManagerError(
-            "Не определён доверенный адрес 910 для машинного OpenBao"
+            "Не определён доверенный адрес infra-manager для машинного OpenBao"
         )
     args.extend(
         [
