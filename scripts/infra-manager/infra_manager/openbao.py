@@ -39,7 +39,7 @@ def _otp_sources(repo_root: Path) -> list[dict[str, object]]:
     source_vmids = sorted(
         {
             edge.source_vmid
-            for edge in policy.machine_ssh_edges
+            for edge in policy.ssh_otp_edges
         }
     )
     for source_vmid in source_vmids:
@@ -149,7 +149,7 @@ def _otp_sources(repo_root: Path) -> list[dict[str, object]]:
     source_vmids = sorted(
         {
             edge.source_vmid
-            for edge in policy.machine_ssh_edges
+            for edge in policy.ssh_otp_edges
         }
     )
     for source_vmid in source_vmids:
@@ -223,7 +223,7 @@ def sync_ssh_access(repo_root: Path) -> int:
 
     affected_guests = {
         vmid
-        for edge in policy.machine_ssh_edges
+        for edge in policy.ssh_otp_edges
         for vmid in (edge.source_vmid, edge.target_vmid)
     }
     for vmid in sorted(affected_guests - {910}):
