@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""PVE-only аварийный helper управляющего контура 910."""
+"""PVE-only аварийный helper управляющего контура infra-manager."""
 
 from __future__ import annotations
 
@@ -336,13 +336,13 @@ def main() -> int:
         with acquire_lock():
             if args.prepare:
                 prepare_git_recovery()
-                print("[ОК] Аварийная Git-копия 910 подготовлена")
+                print("[ОК] Аварийная Git-копия infra-manager подготовлена")
             elif args.restore_git_access:
                 restore_git_access()
                 print("[ОК] Bootstrap Git-доступ восстановлен из PVE-only recovery")
             elif args.preflight:
                 verify_recovery_state(require_approle=False)
-                print("[ОК] Минимальное recovery-состояние 910 сохранно")
+                print("[ОК] Минимальное recovery-состояние infra-manager сохранно")
             elif args.cleanup_transition:
                 cleanup_transition_state()
                 print("[ОК] Переходные файловые secret-источники удалены")
