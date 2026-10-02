@@ -166,7 +166,7 @@ class Settings:
     runtime_version: str = "v1"
     opentofu_version: str = "1.12.6"
     packer_version: str = "1.15.4"
-    bootstrap_managed_vmids: frozenset[int] = frozenset({910})
+    infra_manager_role: str = "infra-manager"
 
     def project_branch(self) -> str:
         """Вернуть выбранную Git-ветку проекта."""
