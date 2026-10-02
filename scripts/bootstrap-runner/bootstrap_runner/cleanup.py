@@ -118,6 +118,7 @@ class BootstrapCleanupMixin:
         self.host_openbao_unseal_timer.unlink(missing_ok=True)
         self.host_openbao_unseal_service.unlink(missing_ok=True)
         self.host_openbao_unseal_command.unlink(missing_ok=True)
+        shutil.rmtree(self.host_openbao_library, ignore_errors=True)
         self.host_openbao_config.unlink(missing_ok=True)
         self.run("systemctl", "daemon-reload", check=False, quiet=True)
         self.ok("Сценарий разблокировки OpenBao удалён; ключ на PVE сохранён")
