@@ -52,7 +52,7 @@
     group: root
     mode: "0700"
 
-- name: Разрешить постоянному Ansible-ключу управлять 910
+- name: Разрешить постоянному Ansible-ключу управлять infra-manager
   ansible.builtin.blockinfile:
     path: /root/.ssh/authorized_keys
     marker: "# {mark} infra-manager ansible self"
