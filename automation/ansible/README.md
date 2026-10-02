@@ -82,7 +82,7 @@ linux_base
 - `linux_base` — устанавливает системные пакеты и настраивает доверие SSH к центру доступа OpenBao;
 - `docker` — устанавливает и запускает Docker;
 - `infra_manager` — настраивает постоянное состояние, доступы, Semaphore, OpenBao и управляющую среду гостя с ролью `infra-manager`;
-- `ai_control` — подготавливает пользователя, каталоги, конфигурацию и systemd-службу гостя с ролью `ai-control`;
+- `ai_control` — устанавливает минимальное ядро AI Control, веб-интерфейс, локальную аутентификацию, каталоги, конфигурацию и systemd-службу гостя с ролью `ai-control`;
 - `guest_layout` — создаёт только общие каталоги из `provision.components`, если они определены.
 
 Для 410 применяются `linux_base`, `ai_control` и общий `guest_layout`. Для 910 применяются `linux_base`, `docker`, `infra_manager` и общий `guest_layout`.
