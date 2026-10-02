@@ -977,7 +977,7 @@ grep -Fq 'TemporaryDirectory' "$ROOT/scripts/infra-manager/infra_manager/guest_d
     || die "Временный SSH-ключ Ansible должен удаляться после задания"
 grep -Fq 'semaphore-project' "$ACTIVATE_RUNTIME" \
     || die "Отложенная активация должна синхронизировать Semaphore после запуска новой среды"
-grep -Fq 'Назначить активацию новой управляющей среды после настройки 910' "$ANSIBLE_PLAYBOOK" \
+grep -Fq 'Назначить активацию новой управляющей среды после настройки infra-manager' "$ANSIBLE_PLAYBOOK" \
     || die "Активация новой среды должна назначаться в конце общего playbook"
 if grep -Fq 'state: reloaded' "$LINUX_BASE_SSH_TRUST"; then
     die "Reload ssh.service запрещён из-за Debian 13 LXC + ssh.socket"
