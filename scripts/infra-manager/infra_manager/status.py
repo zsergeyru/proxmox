@@ -857,6 +857,7 @@ def _resolve_status_data(
         )
         for name, source in definition.data.items()
     }
+    values["guest_vmid"] = str(definition.guest_vmid)
 
     for section in definition.sections:
         for field in section["fields"]:
