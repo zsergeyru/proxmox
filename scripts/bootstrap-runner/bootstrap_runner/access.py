@@ -10,6 +10,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+from .errors import BootstrapError
+
 
 class BootstrapAccessMixin:
     def ensure_host_root_ssh_access(self) -> None:
