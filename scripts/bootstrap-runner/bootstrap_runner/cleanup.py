@@ -3,14 +3,11 @@
 from __future__ import annotations
 
 import json
-import os
 import shutil
-import subprocess
-import sys
-import tempfile
 from pathlib import Path
 
 from .errors import BootstrapError
+
 
 class BootstrapCleanupMixin:
     def pveum_json(self, *args: str) -> list[dict]:
