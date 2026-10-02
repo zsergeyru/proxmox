@@ -85,7 +85,7 @@ scripts/
 
 `access.py` — строит эффективные межмашинные SSH-связи из `infrastructure/security/access.yaml` и гостевых описаний.
 
-`jobs/sync-ssh-access.py` синхронизирует OpenBao SSH OTP из `access.yaml`, проверяет соединения гостей и после успеха удаляет прежние машинные сертификаты, principals и таймер. `machine_ssh.py` пока сохраняет общие вспомогательные функции для административного SSH во время перехода.
+`jobs/sync-ssh-access.py` синхронизирует только OpenBao SSH OTP/AppRole из `access.yaml`. Настройка конкретного гостя выполняется `deploy-guest.py`, а сквозная проверка разрешённых и запрещённых SSH OTP-связей вынесена в `scripts/acceptance/verify-ssh-access.py`.
 
 `pve.py` — проверяет фактические права ключа доступа PVE API и отсутствие запрещённых административных полномочий.
 
