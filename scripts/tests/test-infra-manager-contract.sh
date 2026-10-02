@@ -143,6 +143,8 @@ guest_path, provision_path, playbook_path, linux_base_tasks_path, guest_layout_t
 guest = yaml.safe_load(guest_path.read_text(encoding="utf-8"))
 if guest.get("vmid") != 910 or guest.get("name") != "infra-manager":
     raise SystemExit("910 guest.yaml содержит неверный vmid/name")
+if guest.get("role") != "infra-manager":
+    raise SystemExit("Управляющий гость должен иметь role: infra-manager")
 if guest.get("profile") != "debian-lxc-docker":
     raise SystemExit("910 должен использовать общий профиль debian-lxc-docker")
 if guest.get("pve_management") is not False:
@@ -170,6 +172,10 @@ if guest.get("resources") != expected_resources:
 provision = yaml.safe_load(provision_path.read_text(encoding="utf-8"))
 if provision.get("schema_version") != 1 or provision.get("guest_vmid") != 910:
     raise SystemExit("provision.yaml 910 имеет неверную версию или guest_vmid")
+if provision.get("boundaries", {}).get("opentofu_manages_self") is not False:
+    raise SystemExit("infra-manager должен явно запрещать управление собственным объектом OpenTofu")
+if "opentofu_manages_guest_910" in provision.get("boundaries", {}):
+    raise SystemExit("Граница OpenTofu не должна содержать VMID в имени поля")
 system = provision.get("system", {})
 if system.get("distribution") != "debian" or system.get("version") != "13" or system.get("architecture") != "amd64":
     raise SystemExit("provision.yaml должен требовать Debian 13 amd64")
@@ -941,6 +947,17 @@ for volume in volumes:
     if 'public-keys' in volume:
         raise SystemExit('Unused Ansible public-key volume must not be mounted into Semaphore')
 PY
+
+if grep -RInE '(^|[^0-9])910([^0-9]|$)|192\.168\.9\.10|910-infra-manager' \
+    --include='*.py' --include='*.sh' --include='*.yml' --include='*.yaml' --include='*.j2' \
+    "$ROOT/scripts/bootstrap-runner" \
+    "$ROOT/scripts/infra-manager" \
+    "$ROOT/scripts/acceptance" \
+    "$ROOT/scripts/maintenance" \
+    "$ROOT/automation/ansible"
+then
+    die "Общая исполняемая логика не должна зависеть от VMID 910 или адреса 192.168.9.10"
+fi
 
 ok "Контракт setup infra-manager проверен"
 
