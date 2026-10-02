@@ -615,7 +615,7 @@ grep -Fq 'exec python3 -m infra_manager status "$@"' "$STATUS" \
     || die "status.sh должен быть тонким Python wrapper"
 grep -Fq 'exec python3 -m infra_manager pve-access-check "$@"' "$ACCESS" \
     || die "pve-access-check.sh должен быть тонким Python wrapper"
-for wrapper in "$STATUS" "$ACCESS"; do
+for wrapper in "$STATUS" "$ACCESS" "$LIFECYCLE"; do
     grep -Fq '/usr/local/lib/infra-manager/infra_manager' "$wrapper" \
         || die "Установленный wrapper должен использовать постоянный Python package"
     grep -Fq '/var/lib/infra-manager/bootstrap-repo/scripts/infra-manager' "$wrapper" \
