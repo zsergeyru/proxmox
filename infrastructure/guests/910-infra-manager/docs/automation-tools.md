@@ -270,10 +270,8 @@ Python не должен содержать независимую вторую 
 | `Build Template 9000` | Packer + Python |
 | `Deploy Guest <VMID>` | OpenTofu + Ansible + Python |
 | `Deploy Guest 910` | Ansible + безопасная активация runtime |
-| `Sync SSH Access` | OpenBao + Ansible + `access.yaml` |
+| `Sync SSH Access` | OpenBao + Python + `access.yaml` |
 | `Initialize OpenBao 910` | OpenBao + PVE-only helper + Python |
-
-Старое `Sync Machine SSH` не входит в целевой набор.
 
 ### Режимы deploy-guest
 
