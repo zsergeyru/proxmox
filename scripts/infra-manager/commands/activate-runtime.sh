@@ -25,7 +25,7 @@ if [[ -f "$ACTIVATION_MARKER" ]]; then
         exit 1
     fi
 
-    printf '[ИНФО] Ожидание завершения Deploy Guest 910, PID %s\n' "$deploy_pid"
+    printf '[ИНФО] Ожидание завершения самообновления infra-manager, PID %s\n' "$deploy_pid"
     deploy_finished=0
     for _ in $(seq 1 900); do
         if ! docker exec --user 0 infra-runtime             sh -c "kill -0 $deploy_pid 2>/dev/null"; then
@@ -36,7 +36,7 @@ if [[ -f "$ACTIVATION_MARKER" ]]; then
     done
 
     if [[ "$deploy_finished" != "1" ]]; then
-        printf 'ОШИБКА: Deploy Guest 910 не завершился за 15 минут\n' >&2
+        printf 'ОШИБКА: Самообновление infra-manager не завершилось за 15 минут\n' >&2
         exit 1
     fi
     printf '[ОК] Задание Deploy Guest 910 завершено; начинаю активацию\n'
