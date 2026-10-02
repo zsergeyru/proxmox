@@ -117,6 +117,7 @@ def check_cli_and_commands() -> None:
         ["semaphore-project", "--help"],
         ["status", "--help"],
         ["pve-access-check", "--help"],
+        ["pve-lifecycle-test", "--help"],
         ["recovery-prepare", "--help"],
         ["recovery-check", "--help"],
     )
