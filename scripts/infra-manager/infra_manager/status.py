@@ -293,7 +293,7 @@ def _check_git_branch_contract(
         if (
             isinstance(template, dict)
             and template.get("name") in {
-                spec.name for spec in SEMAPHORE_TEMPLATES
+                spec.name for spec in semaphore_templates()
             }
             and template.get("git_branch") != project_branch
         ):
