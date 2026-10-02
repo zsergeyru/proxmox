@@ -4,7 +4,7 @@
 **Статус:** целевое состояние
 **Назначение:** описать, какие системные службы и команды должны существовать на 910, как они запускают и проверяют управляющий контур и как восстановить системный слой после пересоздания LXC.
 
-Этот документ описывает требуемое состояние. Переходные механизмы, которые ещё остаются в коде, фиксируются в [`780-implementation-status.md`](../../../../docs/700-security/780-implementation-status.md), но не считаются частью целевого состава 910.
+Этот документ описывает требуемое состояние системного слоя 910.
 
 ## 1. Состав системного уровня
 
@@ -24,15 +24,6 @@ infra-manager-runtime-activate-<epoch>
 ```
 
 Она создаётся через `systemd-run` только на время активации новой версии и не хранится как постоянный unit.
-
-Постоянные:
-
-```text
-infra-manager-machine-ssh-refresh.service
-infra-manager-machine-ssh-refresh.timer
-```
-
-в целевом состоянии **отсутствуют**. Межмашинный SSH должен синхронизироваться через OpenBao SSH OTP по спецификации [`openbao.md`](openbao.md).
 
 ### Исходные файлы
 
@@ -54,8 +45,6 @@ infrastructure/guests/910-infra-manager/rootfs/etc/systemd/system/
 rootfs/etc/systemd/system/
 └── infra-manager-openbao-startup-unseal.service.j2
 ```
-
-Если в `rootfs` остаются unit-файлы старого машинного SSH, реализация ещё не приведена к этой спецификации.
 
 ## 2. Порядок запуска
 
@@ -199,8 +188,6 @@ scripts/infra-manager/commands/
 | `infra-manager-activate-runtime` | безопасная отложенная активация нового `infra-runtime` |
 | `infra-manager-openbao-startup-unseal` | проверка и разблокировка OpenBao после запуска |
 
-Команды старой схемы машинных SSH-сертификатов в целевой состав не входят.
-
 Для операторских команд должны существовать ссылки:
 
 ```text
@@ -289,7 +276,6 @@ pct exec 910 -- infra-manager-status --full
 - Semaphore;
 - OpenTofu, Ansible и Packer;
 - PVE-доступ;
-- отсутствие обязательных компонентов старой машинной SSH-схемы.
 
 ### Журналы
 
@@ -320,8 +306,6 @@ pct exec 910 -- infra-manager-status --full
 11. разблокировать и проверить OpenBao;
 12. проверить Semaphore;
 13. выполнить полный status.
-
-Старые `machine-ssh-refresh.service/timer` при восстановлении не устанавливаются.
 
 ### Типичные неисправности
 
