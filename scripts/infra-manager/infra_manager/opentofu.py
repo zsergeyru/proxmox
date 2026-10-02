@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from .common import InfraManagerError, console, require_command, run
+from .guest_catalog import find_guest_by_role
 from .pve import PveClient
 from .settings import PATHS, SETTINGS
 
@@ -191,7 +192,11 @@ def prepare_workspace(
     """Собрать input и вернуть публичный интерфейс рабочей области."""
 
     if only_vmids is None and exclude_vmids is None:
-        exclude_vmids = set(SETTINGS.bootstrap_managed_vmids)
+        infra_manager = find_guest_by_role(
+            repo_root,
+            SETTINGS.infra_manager_role,
+        )
+        exclude_vmids = {infra_manager.vmid}
 
     opentofu_dir, payload = _prepare_input(
         repo_root,
