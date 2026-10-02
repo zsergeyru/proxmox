@@ -63,6 +63,10 @@ if provision.get("guest_vmid") != vmid:
 PY
 
 [[ -s "$BOOTSTRAP_DIR/bootstrap-host.py" ]] || die "Отсутствует Python-оркестратор bootstrap-host.py"
+for module in persistence access infra cleanup constants errors; do
+    [[ -s "$BOOTSTRAP_DIR/bootstrap_runner/$module.py" ]] \
+        || die "Отсутствует модуль bootstrap_runner/$module.py"
+done
 [[ ! -e "$BOOTSTRAP_DIR/bootstrap-host.sh" ]] || die "Лишняя shell-оболочка bootstrap-host.sh не должна возвращаться"
 [[ -s "$BOOTSTRAP_DIR/deploy-infra-manager.sh" ]] || die "Отсутствует сценарий deploy-infra-manager.sh"
 [[ ! -e "$BOOTSTRAP_DIR/deploy-910.sh" ]] || die "Сценарий с VMID в имени не должен возвращаться"
