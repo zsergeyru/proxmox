@@ -40,7 +40,7 @@ else
 fi
 
 ((APPLY == 1)) || die "Тест не подтверждён"
-[[ $EUID -eq 0 ]] || die "Запустите тест от root внутри 910"
+[[ $EUID -eq 0 ]] || die "Запустите тест от root внутри infra-manager"
 [[ -s "$PVE_ENV" ]] || die "Не найден $PVE_ENV"
 [[ -s "$CA_BUNDLE" ]] || die "Не найден $CA_BUNDLE"
 
