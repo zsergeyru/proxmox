@@ -32,7 +32,7 @@
   changed_when: true
   when: infra_self_update | default(false) | bool
 
-- name: Удалить лишние файлы из рабочей копии 910
+- name: Удалить лишние файлы из рабочей копии infra-manager
   ansible.builtin.command:
     argv:
       - git
