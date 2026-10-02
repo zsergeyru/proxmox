@@ -22,7 +22,6 @@ ACCESS="$ROOT/scripts/infra-manager/commands/pve-access-check.sh"
 LIFECYCLE="$ROOT/scripts/infra-manager/commands/pve-lifecycle-test.sh"
 ACTIVATE_RUNTIME="$ROOT/scripts/infra-manager/commands/activate-runtime.sh"
 BUILD_TEMPLATE="$ROOT/scripts/infra-manager/jobs/build-template.py"
-VERIFY_TEMPLATE="$ROOT/scripts/infra-manager/jobs/verify-template.py"
 DEPLOY_GUEST="$ROOT/scripts/infra-manager/jobs/deploy-guest.py"
 PY_OPENTOFU="$ROOT/scripts/infra-manager/infra_manager/opentofu.py"
 PY_TEMPLATE="$ROOT/scripts/infra-manager/infra_manager/template.py"
@@ -773,8 +772,6 @@ grep -q 'run_build_template' "$BUILD_TEMPLATE" \
     || die "Build Template должен передавать выполнение Python-модулю"
 grep -q 'infra_manager.template_build import run_build_template' "$BUILD_TEMPLATE" \
     || die "Build Template должен использовать отдельный модуль сборки"
-grep -q 'infra_manager.template_verify import run_verify_template' "$VERIFY_TEMPLATE" \
-    || die "Verify Template должен использовать отдельный модуль проверки"
 grep -q '^TEMPLATE_VERSION = 8' "$PY_TEMPLATE" \
     || die "Python-сборка должна работать с Template-Version 8"
 grep -q 'run_verify_template(vmid)' "$PY_TEMPLATE_BUILD" \
@@ -787,7 +784,7 @@ grep -Fq 'reserve_runtime_activation()' "$DEPLOY_GUEST" \
     || die "Самообновление infra-manager должно резервировать окно активации runtime"
 grep -Fq 'cancel_runtime_activation()' "$DEPLOY_GUEST" \
     || die "Неуспешное самообновление infra-manager должно снимать резерв активации"
-for job in "$DEPLOY_GUEST" "$OPENBAO_JOB" "$PLAN" "$BUILD_TEMPLATE" "$VERIFY_TEMPLATE"; do
+for job in "$DEPLOY_GUEST" "$OPENBAO_JOB" "$PLAN" "$BUILD_TEMPLATE"; do
     grep -Fq 'require_runtime_activation_idle()' "$job" \
         || die "Infrastructure job должен блокироваться во время активации runtime: $job"
 done
