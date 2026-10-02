@@ -69,7 +69,6 @@ grep -Fq 'semaphore-project' "$ACTIVATE_RUNTIME" \
     || die "Самообновление 910 должно откладывать синхронизацию Semaphore до активации новой среды"
 grep -Fq 'infra-manager-status --full --quiet' "$ACTIVATE_RUNTIME" \
     || die "Самообновление 910 должно выполнять полную status-проверку после активации новой среды"
-    || die "Отложенная активация должна синхронизировать Semaphore после запуска новой среды"
 grep -Fq 'Назначить активацию новой управляющей среды после настройки infra-manager' "$ANSIBLE_PLAYBOOK" \
     || die "Активация новой среды должна назначаться в конце общего playbook"
 if grep -Fq 'state: reloaded' "$LINUX_BASE_SSH_TRUST"; then
