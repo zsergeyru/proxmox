@@ -724,27 +724,6 @@ def persist_github_key() -> None:
         )
 
 
-def retire_machine_ssh_template() -> None:
-    """Удалить переходное задание после успешной проверки SSH OTP."""
-    client = SemaphoreClient()
-    client.ensure_api_token()
-    client.auth_mode = "token"
-    project = find_unique_by_name(client.get("/projects"), PROJECT_NAME, "project")
-    project_id = project.get("id") if project is not None else None
-    if not isinstance(project_id, int):
-        raise InfraManagerError("Не найден проект Semaphore для удаления старого задания")
-    templates = client.get(
-        f"/project/{project_id}/templates?sort=name&order=asc"
-    )
-    legacy = find_unique_by_name(templates, "Sync Machine SSH", "template")
-    if legacy is None:
-        return
-    template_id = legacy.get("id")
-    if not isinstance(template_id, int):
-        raise InfraManagerError("У Sync Machine SSH некорректный ID")
-    client._request("DELETE", f"/project/{project_id}/templates/{template_id}")
-
-
 def configure_project(branch: str | None = None) -> int:
     if os.geteuid() != 0:
         raise InfraManagerError(
