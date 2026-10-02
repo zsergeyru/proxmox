@@ -506,7 +506,7 @@ def ensure_infra_self_access(
     """Разрешить Ansible-ключу infra-manager вход в себя через доверенный PVE."""
     key_parts = public_key.split()
     if len(key_parts) < 2 or not key_parts[0].startswith("ssh-"):
-        raise InfraManagerError("Открытый Ansible-ключ 910 некорректен")
+        raise InfraManagerError("Открытый Ansible-ключ infra-manager некорректен")
     normalized_key = " ".join(key_parts[:2])
 
     config = _ssh(node, "pct", "config", str(vmid), capture=True).stdout
