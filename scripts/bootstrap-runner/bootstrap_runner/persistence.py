@@ -10,6 +10,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+from .errors import BootstrapError
+
 
 class BootstrapPersistenceMixin:
     def managed_guests_exist(self) -> bool:
