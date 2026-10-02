@@ -730,7 +730,7 @@ def persist_github_key() -> None:
         )
     if GITHUB_KEY_COPY != GITHUB_KEY:
         raise InfraManagerError(
-            "GitHub Deploy Key не должен иметь постоянную копию внутри 910"
+            "GitHub Deploy Key не должен иметь постоянную копию внутри infra-manager"
         )
 
 
