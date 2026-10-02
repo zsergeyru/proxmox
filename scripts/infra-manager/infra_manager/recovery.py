@@ -1,4 +1,4 @@
-"""Подготовка и проверка аварийного PVE-only контура 910."""
+"""Подготовка и проверка аварийного PVE-only контура infra-manager."""
 
 from __future__ import annotations
 
@@ -38,7 +38,7 @@ def pve_node_from_environment() -> str:
 def prepare_recovery(repo_root: Path) -> int:
     """Установить PVE helper и подготовить аварийную Git-копию."""
     node = pve_node_from_environment()
-    console.info("Подготовка аварийного контура 910")
+    console.info("Подготовка аварийного контура infra-manager")
     install_recovery_host_support(node, repo_root)
     prepare_recovery_git(node)
     console.result("PVE recovery helper и аварийный Git-доступ подготовлены")
