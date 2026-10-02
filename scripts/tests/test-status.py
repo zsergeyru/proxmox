@@ -308,7 +308,37 @@ def main_test() -> None:
     definition = load_status_definition(status_file)
 
     if definition.guest_vmid != 910:
-        fail("status.yaml должен описывать 910")
+        fail("status.yaml должен описывать текущий VMID infra-manager")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        fake = Path(tmp)
+        guest_dir = fake / "infrastructure/guests/920-infra-manager"
+        guest_dir.mkdir(parents=True)
+        (guest_dir / "guest.yaml").write_text(
+            "schema_version: 12\n"
+            "vmid: 920\n"
+            "name: infra-manager\n"
+            "role: infra-manager\n",
+            encoding="utf-8",
+        )
+        moved_status = guest_dir / "status.yaml"
+        moved_status.write_text(
+            status_file.read_text(encoding="utf-8").replace(
+                "guest_vmid: 910",
+                "guest_vmid: 920",
+                1,
+            ),
+            encoding="utf-8",
+        )
+        with patch.object(
+            status_module,
+            "PATHS",
+            SimpleNamespace(repo_root=fake),
+        ):
+            moved_definition = load_status_definition(moved_status)
+        if moved_definition.guest_vmid != 920:
+            fail("status должен следовать VMID гостя с ролью infra-manager")
+
     if [item["type"] for item in definition.checks] != [
         "runtime",
         "openbao",
