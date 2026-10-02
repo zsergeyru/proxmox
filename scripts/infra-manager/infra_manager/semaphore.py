@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from .common import LOG_LEVEL_ENV, LOG_LEVELS, InfraManagerError, console
+from .guest_catalog import find_guest_by_role
 from .pve_host import update_openbao_semaphore_api_token
 from .settings import PATHS, SETTINGS
 
@@ -41,38 +42,47 @@ class TemplateSpec:
     app: str = "python"
 
 
-SEMAPHORE_TEMPLATES = (
-    TemplateSpec(
-        name="OpenTofu Plan",
-        playbook="scripts/infra-manager/jobs/opentofu-plan.py",
-        arguments="[]",
-    ),
-    TemplateSpec(
-        name="Build Template 9000",
-        playbook="scripts/infra-manager/jobs/build-template.py",
-        arguments='["9000"]',
-    ),
-    TemplateSpec(
-        name="Deploy Guest 410",
-        playbook="scripts/infra-manager/jobs/deploy-guest.py",
-        arguments='["410"]',
-    ),
-    TemplateSpec(
-        name="Deploy Guest 910",
-        playbook="scripts/infra-manager/jobs/deploy-guest.py",
-        arguments='["910"]',
-    ),
-    TemplateSpec(
-        name="Sync SSH Access",
-        playbook="scripts/infra-manager/jobs/sync-ssh-access.py",
-        arguments="[]",
-    ),
-    TemplateSpec(
-        name="Initialize OpenBao 910",
-        playbook="scripts/infra-manager/jobs/initialize-openbao.py",
-        arguments="[]",
-    ),
-)
+def semaphore_templates(
+    repo_root: Path | None = None,
+) -> tuple[TemplateSpec, ...]:
+    """Собрать задания Semaphore с текущим VMID infra-manager."""
+
+    root = repo_root or PATHS.repo_root
+    infra_manager = find_guest_by_role(root, SETTINGS.infra_manager_role)
+
+    return (
+        TemplateSpec(
+            name="OpenTofu Plan",
+            playbook="scripts/infra-manager/jobs/opentofu-plan.py",
+            arguments="[]",
+        ),
+        TemplateSpec(
+            name="Build Template 9000",
+            playbook="scripts/infra-manager/jobs/build-template.py",
+            arguments='["9000"]',
+        ),
+        TemplateSpec(
+            name="Deploy Guest 410",
+            playbook="scripts/infra-manager/jobs/deploy-guest.py",
+            arguments='["410"]',
+        ),
+        TemplateSpec(
+            name=f"Deploy Guest {infra_manager.vmid}",
+            playbook="scripts/infra-manager/jobs/deploy-guest.py",
+            arguments=json.dumps([str(infra_manager.vmid)], separators=(",", ":")),
+        ),
+        TemplateSpec(
+            name="Sync SSH Access",
+            playbook="scripts/infra-manager/jobs/sync-ssh-access.py",
+            arguments="[]",
+        ),
+        TemplateSpec(
+            name=f"Initialize OpenBao {infra_manager.vmid}",
+            playbook="scripts/infra-manager/jobs/initialize-openbao.py",
+            arguments="[]",
+        ),
+    )
+
 
 
 def nonempty(path: Path) -> bool:
@@ -757,7 +767,7 @@ def configure_project(branch: str | None = None) -> int:
         opentofu_environment_id,
         infra_manager_environment_id,
     ]
-    for template in SEMAPHORE_TEMPLATES:
+    for template in semaphore_templates():
         client.ensure_template(
             project_id,
             repository_id,
