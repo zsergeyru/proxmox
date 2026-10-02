@@ -48,8 +48,7 @@ scripts/
 │   └── jobs/                                # Задания, непосредственно запускаемые Semaphore
 │       ├── opentofu-plan.py                  # Формирует входные данные OpenTofu и строит только план изменений
 │       ├── deploy-guest.py                   # Разворачивает или приводит выбранную гостевую систему к описанному состоянию
-│       ├── build-template.py                 # Собирает Packer-шаблон VM 9000 и запускает его проверку
-│       └── verify-template.py                # Проверяет шаблон 9000 через временную полную копию 9099
+│       └── build-template.py                 # Собирает Packer-шаблон VM 9000 и запускает его проверку
 │
 └── tests/                                    # Локальные и автоматические проверки без постоянных изменений инфраструктуры
     ├── test-guest-deploy.py                  # Проверяет планирование и безопасное применение изменений гостевой системы
@@ -155,10 +154,10 @@ Semaphore: Build Template 9000
 → scripts/infra-manager/jobs/build-template.py 9000
 → Packer
 → tpl-debian13
-→ scripts/infra-manager/jobs/verify-template.py 9000
+→ infra_manager.template_verify
 ```
 
-`verify-template.py` создаёт временную полную копию 9099, проверяет Cloud-Init, QEMU Guest Agent, SSH, machine-id и SSH host keys, затем удаляет клон.
+`template_verify.py` вызывается сборкой напрямую: создаёт временную полную копию 9099, проверяет Cloud-Init, QEMU Guest Agent, SSH, machine-id и SSH host keys, затем удаляет клон.
 
 ## `infra-manager/commands/`
 
