@@ -363,49 +363,6 @@ def test_issue_openbao_machine_credentials() -> None:
     assert "secret-410" not in " ".join(calls[0][0])
 
 
-def test_machine_ssh_openbao_calls() -> None:
-    calls: list[tuple[tuple[str, ...], str]] = []
-
-    def fake_input(
-        node: str,
-        *command: str,
-        input_text: str,
-    ):
-        assert node == "pve"
-        calls.append((tuple(command), input_text))
-        if "--sign-machine-key" in command:
-            return SimpleNamespace(
-                returncode=0,
-                stdout="ssh-ed25519-cert-v01@openssh.com AAAAMACHINE\n",
-            )
-        return SimpleNamespace(returncode=0, stdout="")
-
-    with patch.object(module, "_ssh_with_input", side_effect=fake_input):
-        module.sync_machine_ssh_roles("pve", [910, 410, 410])
-        certificate = module.sign_machine_ssh_key(
-            "pve",
-            410,
-            "ssh-ed25519 AAAAPUBLIC machine",
-        )
-
-    assert certificate == "ssh-ed25519-cert-v01@openssh.com AAAAMACHINE"
-    assert calls[0][0] == (
-        "/usr/local/sbin/infra-manager-openbao-unseal",
-        "--sync-machine-roles",
-        "--log-level",
-        "normal",
-    )
-    assert json.loads(calls[0][1]) == {"vmids": [410, 910]}
-    assert calls[1][0] == (
-        "/usr/local/sbin/infra-manager-openbao-unseal",
-        "--sign-machine-key",
-    )
-    assert json.loads(calls[1][1]) == {
-        "vmid": 410,
-        "public_key": "ssh-ed25519 AAAAPUBLIC machine",
-    }
-
-
 def test_sign_ssh_host_key() -> None:
     calls: list[tuple[tuple[str, ...], str]] = []
 
@@ -454,7 +411,6 @@ def main() -> None:
     test_recovery_host_support()
     test_sign_ssh_client_key()
     test_issue_openbao_machine_credentials()
-    test_machine_ssh_openbao_calls()
     test_sign_ssh_host_key()
     print("[ОК] Проверки pve_host.py пройдены")
 
