@@ -15,33 +15,47 @@ system:
     - python3
     - python3-venv
 
-components:
-  ai_control:
-    required: true
-    root: /opt/ai-control
+ai_control:
+  user: ai-control
+  group: ai-control
 
-  agents:
+  agent:
     primary: hermes
     replaceable: true
-    root: /opt/ai-control/agents
 
-  project_repository:
-    path: /opt/ai-control/repos/proxmox
+  web:
+    required: true
 
-  instructions:
-    root: /opt/ai-control/instructions
+  service:
+    name: ai-control
+    unit: ai-control.service
+    executable: /opt/ai-control/core/bin/ai-control
 
-  tools:
-    root: /opt/ai-control/tools
+  paths:
+    root: /opt/ai-control
+    core: /opt/ai-control/core
+    agents: /opt/ai-control/agents
+    primary_agent: /opt/ai-control/agents/hermes
+    project_repository: /opt/ai-control/repos/proxmox
+    instructions: /opt/ai-control/instructions
+    tools: /opt/ai-control/tools
+    state: /opt/ai-control/state
+    configuration: /etc/ai-control
+    runtime: /run/ai-control
+    cache: /var/cache/ai-control
 
-  state:
-    root: /opt/ai-control/state
-    persistent: true
+  state_directories:
+    - memory
+    - conversations
+    - tasks
+    - events
+    - observations
+    - agents/hermes
 
 integrations:
   infrastructure_executor:
-    guest_vmid: 910
-    name: infra-manager
+    role: infra-manager
+    service: semaphore
     purpose: Повторяемое выполнение OpenTofu, Ansible и других инфраструктурных задач
     local_opentofu_required: false
     local_ansible_controller_required: false
@@ -57,10 +71,16 @@ boundaries:
 persistence:
   backup_required:
     - /opt/ai-control/state
-    - /etc/proxmox-guest/ssh
 
   reproducible:
-    - /opt/ai-control/repos/proxmox
+    - /opt/ai-control/core
     - /opt/ai-control/agents
+    - /opt/ai-control/repos/proxmox
     - /opt/ai-control/instructions
     - /opt/ai-control/tools
+    - /etc/ai-control
+    - /etc/systemd/system/ai-control.service
+
+  ephemeral:
+    - /run/ai-control
+    - /var/cache/ai-control
