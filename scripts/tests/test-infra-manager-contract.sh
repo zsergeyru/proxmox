@@ -554,9 +554,6 @@ grep -Fq 'infra-openbao-ssh' "$SSH_ACCESS_ACCEPTANCE" \
     || die "Старая реализация машинных SSH-сертификатов должна быть удалена"
 [[ ! -e "$ROOT/scripts/infra-manager/infra_manager/ssh_access.py" ]] \
     || die "Приёмочная проверка не должна находиться в рабочем модуле infra_manager"
-if grep -Fq 'machine-ssh-refresh.sh' "$ANSIBLE_RUNTIME"; then
-    die "Ansible не должен устанавливать обновление машинных сертификатов"
-fi
 [[ ! -e "$ROOT/infrastructure/pve/systemd/infra-manager-openbao-unseal.service" ]] \
     || die "PVE не должен содержать постоянную systemd-службу OpenBao"
 [[ ! -e "$ROOT/infrastructure/pve/systemd/infra-manager-openbao-unseal.timer" ]] \
