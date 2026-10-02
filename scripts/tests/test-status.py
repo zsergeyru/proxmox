@@ -491,6 +491,7 @@ def main_test() -> None:
         "semaphore_password": "secret-pass",
         "project_branch": "main",
         "project_revision": "abc1234",
+        "guest_vmid": "910",
     }
     output = io.StringIO()
     with (
@@ -507,7 +508,7 @@ def main_test() -> None:
 
     summary_text = output.getvalue()
     for expected in (
-        "Состояние 910 infra-manager",
+        "Состояние infra-manager",
         "[ОК] Docker и infra-runtime работают",
         "[ОК] OpenBao запущен",
         "[ОК] Semaphore работает",
@@ -519,7 +520,7 @@ def main_test() -> None:
         "Ветка:   main",
         "Версия:  abc1234",
         "pct exec 910 -- infra-manager-status --full",
-        "910 infra-manager полностью готов",
+        "infra-manager полностью готов",
     ):
         if expected not in summary_text:
             fail(f"Полный экран состояния не содержит: {expected}")
