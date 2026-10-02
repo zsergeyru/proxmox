@@ -46,6 +46,7 @@ expected_paths = {
     "core": "/opt/ai-control/core",
     "agents": "/opt/ai-control/agents",
     "primary_agent": "/opt/ai-control/agents/hermes",
+    "repositories": "/opt/ai-control/repos",
     "project_repository": "/opt/ai-control/repos/proxmox",
     "instructions": "/opt/ai-control/instructions",
     "tools": "/opt/ai-control/tools",
@@ -90,6 +91,7 @@ assert "Group=ai-control" in unit_text
 assert "ConditionPathIsExecutable=/opt/ai-control/core/bin/ai-control" in unit_text
 assert "ExecStart=/opt/ai-control/core/bin/ai-control" in unit_text
 assert "ProtectSystem=strict" in unit_text
+assert "/opt/ai-control/repos/proxmox" in unit_text
 assert "NoNewPrivileges=true" in unit_text
 
 print("[ОК] AI Control base contract")
