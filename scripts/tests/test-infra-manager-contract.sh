@@ -30,6 +30,7 @@ PY_TEMPLATE_VERIFY="$ROOT/scripts/infra-manager/infra_manager/template_verify.py
 COMPOSE="$ROOT/infrastructure/guests/910-infra-manager/rootfs/opt/infra-manager/compose/docker-compose.yml"
 OPENBAO_CONFIG="$ROOT/infrastructure/guests/910-infra-manager/rootfs/opt/infra-manager/compose/openbao/openbao.hcl"
 OPENBAO_HOST="$ROOT/scripts/infra-manager/host/openbao-unseal.py"
+OPENBAO_HOST_PACKAGE="$ROOT/scripts/infra-manager/host/openbao_host"
 OPENBAO_STARTUP_COMMAND="$ROOT/scripts/infra-manager/commands/openbao-startup-unseal.sh"
 OPENBAO_STARTUP_SERVICE="$ROOT/infrastructure/guests/910-infra-manager/rootfs/etc/systemd/system/infra-manager-openbao-startup-unseal.service.j2"
 OPENBAO_JOB="$ROOT/scripts/infra-manager/jobs/initialize-openbao.py"
@@ -485,21 +486,21 @@ grep -Fq 'tls_disable     = true' "$OPENBAO_CONFIG" \
 if grep -Eq '(^|[^a-z])dev([^a-z]|$)' "$OPENBAO_CONFIG"; then
     die "OpenBao config не должен содержать dev-режим"
 fi
-grep -Fq '"secret_shares": 1' "$OPENBAO_HOST" \
+grep -RFq '"secret_shares": 1' "$OPENBAO_HOST_PACKAGE" \
     || die "Первичная инициализация OpenBao должна создавать один unseal-ключ"
-grep -Fq '"secret_threshold": 1' "$OPENBAO_HOST" \
+grep -RFq '"secret_threshold": 1' "$OPENBAO_HOST_PACKAGE" \
     || die "Порог разблокировки OpenBao должен быть равен одному ключу"
 grep -Fq '/mnt/bindmounts/infra-manager/pve-only/openbao' "$OPENBAO_HOST" \
     || die "Unseal-ключ OpenBao должен храниться только в pve-only каталоге"
-grep -Fq 'payload.pop("root_token", None)' "$OPENBAO_HOST" \
+grep -RFq 'payload.pop("root_token", None)' "$OPENBAO_HOST_PACKAGE" \
     || die "Initial root token OpenBao должен извлекаться без постоянного сохранения"
-grep -Fq '/v1/auth/token/revoke-self' "$OPENBAO_HOST" \
+grep -RFq '/v1/auth/token/revoke-self' "$OPENBAO_HOST_PACKAGE" \
     || die "Initial root token OpenBao должен отзываться после инициализации"
 grep -Fq 'input_text=token' "$OPENBAO_HOST" \
     || die "Initial root token должен передаваться на отзыв только через stdin"
-grep -Fq '"ssh-client-signer"' "$OPENBAO_HOST" \
+grep -RFq '"ssh-client-signer"' "$OPENBAO_HOST_PACKAGE" \
     || die "OpenBao должен иметь отдельный SSH-центр доступа"
-grep -Fq '"ssh-host-signer"' "$OPENBAO_HOST" \
+grep -RFq '"ssh-host-signer"' "$OPENBAO_HOST_PACKAGE" \
     || die "OpenBao должен иметь отдельный SSH-центр серверов"
 grep -Fq 'SSH_ACCESS_PATH = KEY_DIR / "ssh-access.json"' "$OPENBAO_HOST" \
     || die "Служебные SSH-доступы OpenBao должны храниться только в pve-only"
@@ -507,25 +508,25 @@ grep -Fq 'KV_ACCESS_PATH = KEY_DIR / "kv-access.json"' "$OPENBAO_HOST" \
     || die "Служебный доступ к KV должен храниться только в pve-only"
 grep -Fq 'KV_MOUNT = "infra-secrets"' "$OPENBAO_HOST" \
     || die "OpenBao должен использовать отдельный mount рабочих секретов"
-grep -Fq '"options": {"version": "2"}' "$OPENBAO_HOST" \
+grep -RFq '"options": {"version": "2"}' "$OPENBAO_HOST_PACKAGE" \
     || die "Хранилище рабочих секретов должно быть KV v2"
-grep -Fq '"pve/api/infra-manager"' "$OPENBAO_HOST" \
+grep -RFq '"pve/api/infra-manager"' "$OPENBAO_HOST_PACKAGE" \
     || die "KV должен содержать отдельный PVE API credential"
-grep -Fq '"git/github/proxmox-read"' "$OPENBAO_HOST" \
+grep -RFq '"git/github/proxmox-read"' "$OPENBAO_HOST_PACKAGE" \
     || die "KV должен содержать отдельный Git credential"
-grep -Fq '"services/semaphore"' "$OPENBAO_HOST" \
+grep -RFq '"services/semaphore"' "$OPENBAO_HOST_PACKAGE" \
     || die "KV должен содержать сервисные credentials Semaphore"
-grep -Fq 'infra-manager-kv-read' "$OPENBAO_HOST" \
+grep -RFq 'infra-manager-kv-read' "$OPENBAO_HOST_PACKAGE" \
     || die "KV должен иметь отдельную ограниченную read-policy"
 grep -Fq '/run/infra-manager/secrets' "$OPENBAO_HOST" \
     || die "Секреты OpenBao должны материализоваться только во временную область"
-grep -Fq 'infra-manager-ssh-ca-config' "$OPENBAO_HOST" \
+grep -RFq 'infra-manager-ssh-ca-config' "$OPENBAO_HOST_PACKAGE" \
     || die "OpenBao должен иметь отдельную политику настройки SSH CA"
-grep -Fq 'infra-manager-ssh-signer' "$OPENBAO_HOST" \
+grep -RFq 'infra-manager-ssh-signer' "$OPENBAO_HOST_PACKAGE" \
     || die "OpenBao должен иметь отдельную политику подписи SSH"
-grep -Fq '"token_bound_cidrs": ["127.0.0.1/32"]' "$OPENBAO_HOST" \
+grep -RFq '"token_bound_cidrs": ["127.0.0.1/32"]' "$OPENBAO_HOST_PACKAGE" \
     || die "Служебные OpenBao token должны быть ограничены loopback"
-grep -Fq '/v1/sys/generate-root/attempt' "$OPENBAO_HOST" \
+grep -RFq '/v1/sys/generate-root/attempt' "$OPENBAO_HOST_PACKAGE" \
     || die "OpenBao должен поддерживать штатный выпуск временного root token"
 grep -Fq 'input_text=unseal_key' "$OPENBAO_HOST" \
     || die "Unseal-ключ для generate-root должен передаваться только через stdin"
