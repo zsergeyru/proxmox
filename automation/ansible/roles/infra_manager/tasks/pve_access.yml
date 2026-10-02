@@ -27,6 +27,21 @@
     group: root
     mode: "0755"
 
+- name: Подготовить идентичность infra-manager для PVE OpenBao
+  ansible.builtin.copy:
+    dest: /run/infra-manager/host-support/openbao-host.json
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      {{
+        {
+          'vmid': guest_manifest.vmid | int,
+          'name': guest_manifest.name,
+          'address': ansible_host | default(inventory_hostname)
+        } | to_nice_json
+      }}
+
 - name: Передать актуальный сценарий OpenBao на PVE
   ansible.builtin.command:
     argv:
@@ -43,6 +58,24 @@
       - IdentitiesOnly=yes
       - /run/infra-manager/host-support/openbao-unseal.py
       - "root@{{ infra_pve_node }}:/tmp/infra-manager-openbao-unseal.new"
+  changed_when: true
+
+- name: Передать идентичность infra-manager на PVE
+  ansible.builtin.command:
+    argv:
+      - scp
+      - -i
+      - "{{ provision.access_materialization.pve.root_ssh_private_key }}"
+      - -o
+      - "UserKnownHostsFile={{ provision.access_materialization.pve.root_ssh_known_hosts }}"
+      - -o
+      - StrictHostKeyChecking=yes
+      - -o
+      - BatchMode=yes
+      - -o
+      - IdentitiesOnly=yes
+      - /run/infra-manager/host-support/openbao-host.json
+      - "root@{{ infra_pve_node }}:/tmp/infra-manager-openbao-host.json.new"
   changed_when: true
 
 - name: Установить актуальный PVE-only сценарий OpenBao
@@ -64,7 +97,13 @@
         install -o root -g root -m 0755
         /tmp/infra-manager-openbao-unseal.new
         /usr/local/sbin/infra-manager-openbao-unseal
-        && rm -f /tmp/infra-manager-openbao-unseal.new
+        && install -d -o root -g root -m 0755 /etc/infra-manager
+        && install -o root -g root -m 0644
+        /tmp/infra-manager-openbao-host.json.new
+        /etc/infra-manager/openbao-host.json
+        && rm -f
+        /tmp/infra-manager-openbao-unseal.new
+        /tmp/infra-manager-openbao-host.json.new
   changed_when: true
 
 - name: Подготовить TLS OpenBao на PVE
@@ -88,7 +127,7 @@
       - quiet
   changed_when: false
 
-- name: Подготовить каталог TLS OpenBao внутри 910
+- name: Подготовить каталог TLS OpenBao внутри infra-manager
   ansible.builtin.file:
     path: "{{ provision.access_materialization.openbao_tls.target }}"
     state: directory
