@@ -82,6 +82,7 @@ def _ssh_with_input(
 
 
 OPENBAO_HOST_COMMAND = Path("/usr/local/sbin/infra-manager-openbao-unseal")
+OPENBAO_HOST_LIBRARY = Path("/usr/local/lib/infra-manager/openbao_host")
 OPENBAO_HOST_CONFIG = Path("/etc/infra-manager/openbao-host.json")
 RECOVERY_HOST_COMMAND = Path("/usr/local/sbin/infra-manager-recovery")
 OPENBAO_LEGACY_SERVICE = "infra-manager-openbao-unseal.service"
@@ -121,6 +122,78 @@ trap - EXIT
     )
 
 
+def _install_remote_text_tree(
+    node: str,
+    source: Path,
+    target: Path,
+) -> None:
+    """Атомарно установить каталог текстовых файлов на PVE."""
+    if not source.is_dir():
+        raise InfraManagerError(f"Не найден исходный каталог {source}")
+
+    files: dict[str, str] = {}
+    for path in sorted(source.rglob("*")):
+        if path.is_symlink():
+            raise InfraManagerError(f"Символьные ссылки запрещены: {path}")
+        if not path.is_file():
+            continue
+        relative = path.relative_to(source).as_posix()
+        files[relative] = path.read_text(encoding="utf-8")
+    if not files:
+        raise InfraManagerError(f"Исходный каталог пуст: {source}")
+
+    script = r"""
+import json
+import os
+from pathlib import Path, PurePosixPath
+import shutil
+import sys
+import tempfile
+
+target = Path(sys.argv[1])
+payload = json.load(sys.stdin)
+if not isinstance(payload, dict) or not payload:
+    raise SystemExit("empty directory payload")
+
+target.parent.mkdir(parents=True, exist_ok=True)
+temporary = Path(tempfile.mkdtemp(prefix=f".{target.name}.new.", dir=target.parent))
+backup = target.with_name(f".{target.name}.old.{os.getpid()}")
+try:
+    for relative, content in payload.items():
+        path = PurePosixPath(relative)
+        if path.is_absolute() or ".." in path.parts or not path.parts:
+            raise SystemExit(f"invalid relative path: {relative!r}")
+        destination = temporary.joinpath(*path.parts)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(content, encoding="utf-8")
+        os.chmod(destination, 0o644)
+
+    if backup.exists():
+        shutil.rmtree(backup)
+    if target.exists():
+        os.replace(target, backup)
+    try:
+        os.replace(temporary, target)
+    except BaseException:
+        if backup.exists() and not target.exists():
+            os.replace(backup, target)
+        raise
+    if backup.exists():
+        shutil.rmtree(backup)
+finally:
+    if temporary.exists():
+        shutil.rmtree(temporary)
+"""
+    _ssh_with_input(
+        node,
+        "python3",
+        "-c",
+        script,
+        str(target),
+        input_text=json.dumps(files, ensure_ascii=False),
+    )
+
+
 def _install_remote_text(
     node: str,
     content: str,
@@ -156,9 +229,9 @@ trap - EXIT
 
 def install_openbao_host_support(node: str, repo_root: Path) -> None:
     """Установить на PVE только сценарий разблокировки OpenBao."""
-    command_source = (
-        repo_root / "scripts" / "infra-manager" / "host" / "openbao-unseal.py"
-    )
+    host_source = repo_root / "scripts" / "infra-manager" / "host"
+    command_source = host_source / "openbao-unseal.py"
+    library_source = host_source / "openbao_host"
     identity = find_guest_by_role(repo_root, SETTINGS.infra_manager_role)
     address = guest_management_address(repo_root, identity)
     if address is None:
@@ -187,6 +260,11 @@ systemctl daemon-reload
 """
     _ssh(node, "sh", "-c", cleanup)
 
+    _install_remote_text_tree(
+        node,
+        library_source,
+        OPENBAO_HOST_LIBRARY,
+    )
     _install_remote_file(
         node,
         command_source,
