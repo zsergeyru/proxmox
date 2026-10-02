@@ -64,10 +64,15 @@ scripts/
     ├── test-guest-resolver.py                # Проверяет сборщик конфигурации, управление, начальную настройку и возможности профиля
     ├── test-infra-manager-python.py          # Проверяет основу Python-пакета, командную оболочку и вспомогательные функции PVE
     ├── test-pve-lifecycle.py                 # Проверяет lifecycle test без реального изменения PVE
+    ├── test-python-command.py                # Поведенчески проверяет общую оболочку трёх административных команд
     ├── test-opentofu-input.py                # Проверяет состав guests.json и исключение специальных объектов
-    ├── test-status.py                        # Проверяет снимок и контракты состояния Semaphore
+    ├── test-status.py                        # Проверяет снимок, шаблоны и контракты Semaphore
     ├── test-template.py                      # Проверяет параметры и валидацию шаблона Packer
-    └── test-infra-manager-contract.sh        # Проверяет согласованность infra-manager, Semaphore, PVE, OpenTofu и Packer
+    ├── test-infra-manager-guest-contract.sh  # Проверяет описание гостя и общий Ansible-контур
+    ├── test-infra-manager-openbao-contract.sh # Проверяет OpenBao, восстановление и runtime-связи
+    ├── test-infra-manager-tooling-contract.sh # Проверяет OpenTofu, Semaphore, status и Compose
+    ├── test-infra-manager-ssh-contract.sh    # Проверяет SSH-доверие и безопасную активацию
+    └── test-infra-manager-contract.sh        # Локально запускает все четыре контрактные проверки
 ```
 
 Старого контура `scripts/pve/`, `sync-management-keys.py` и PVE Configuration в действующем коде нет.
@@ -220,10 +225,11 @@ python scripts/validate_repo.py
 - `test-opentofu-input.py` проверяет состав входа OpenTofu и исключение 910.
 - `test-infra-manager-python.py` проверяет основу Python-пакета, командную оболочку и PVE-вспомогательные функции.
 - `test-pve-lifecycle.py` проверяет полный сценарий lifecycle test, защиту занятого VMID и аварийную очистку без реального PVE.
+- `test-python-command.py` запускает общую оболочку под всеми тремя установленными именами и проверяет фактическую передачу команды в Python CLI.
 - `test-bootstrap-host.py` проверяет состояния первоначального контура, восстановление, строгую метку владения 910 и безопасное удаление.
 - `test-status.py` проверяет чтение и валидацию состояния Semaphore.
 - `test-template.py` проверяет безопасную передачу параметров Packer и валидацию шаблона.
-- `test-infra-manager-contract.sh` проверяет согласованность кода 910, Compose, доступ PVE, Semaphore, OpenTofu и Packer.
+- Контракт infra-manager разделён на `guest`, `openbao`, `tooling` и `ssh`; `test-infra-manager-contract.sh` остаётся только общим локальным запускателем.
 
 ## Правило размещения нового кода
 
