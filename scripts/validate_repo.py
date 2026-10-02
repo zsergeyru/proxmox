@@ -450,14 +450,14 @@ def _check_manifest_identity(
         else:
             state.seen_roles[role] = rel
 
-        if role == "infra-manager":
+        if role in {"infra-manager", "ai-control"}:
             if data.get("pve_management") is not False:
                 fail(
-                    f"{rel}: роль infra-manager должна иметь "
+                    f"{rel}: роль {role} должна иметь "
                     "pve_management: false"
                 )
             if data.get("profile") is None:
-                fail(f"{rel}: роль infra-manager должна иметь profile")
+                fail(f"{rel}: роль {role} должна иметь profile")
 
 
 def _validate_profiled_manifest(
