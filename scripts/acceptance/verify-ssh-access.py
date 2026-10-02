@@ -17,9 +17,10 @@ sys.path.insert(0, str(ROOT / "scripts" / "infra-manager"))
 
 from infra_manager.access import AccessPolicy, GuestRecord, load_access_policy
 from infra_manager.common import InfraManagerError, console, require_command, run
+from infra_manager.guest_catalog import find_guest_by_role
 from infra_manager.pve import PveClient
 from infra_manager.pve_host import sign_ssh_client_key
-from infra_manager.settings import PATHS
+from infra_manager.settings import PATHS, SETTINGS
 
 
 @dataclass(frozen=True)
@@ -180,9 +181,15 @@ def verify_ssh_access(repo_root: Path, node: str) -> None:
             f"гости не запущены или их адрес не определён: {missing}"
         )
 
-    manager = policy.guests.get(910)
+    infra_manager = find_guest_by_role(
+        repo_root,
+        SETTINGS.infra_manager_role,
+    )
+    manager = policy.guests.get(infra_manager.vmid)
     if manager is None or manager.address is None:
-        raise InfraManagerError("Для SSH OTP не определён адрес OpenBao на 910")
+        raise InfraManagerError(
+            "Для SSH OTP не определён адрес OpenBao на infra-manager"
+        )
 
     subnets = {running[vmid].record.subnet for vmid in required}
     if len(subnets) != 1:
