@@ -339,6 +339,20 @@ def main_test() -> None:
             moved_definition = load_status_definition(moved_status)
         if moved_definition.guest_vmid != 920:
             fail("status должен следовать VMID гостя с ролью infra-manager")
+        pve_fields = [
+            field
+            for section in moved_definition.sections
+            for field in section["fields"]
+            if field["label"] == "С PVE"
+        ]
+        if len(pve_fields) != 1:
+            fail("status должен содержать одну команду проверки с PVE")
+        moved_command = status_module._field_value(
+            pve_fields[0],
+            {"guest_vmid": "920"},
+        )
+        if moved_command != "pct exec 920 -- infra-manager-status --full":
+            fail("Команда status с PVE не следует текущему VMID infra-manager")
 
     if [item["type"] for item in definition.checks] != [
         "runtime",
