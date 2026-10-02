@@ -165,6 +165,9 @@ class BootstrapHost:
         self.host_openbao_unseal_command = Path(
             "/usr/local/sbin/infra-manager-openbao-unseal"
         )
+        self.host_openbao_config = Path(
+            "/etc/infra-manager/openbao-host.json"
+        )
         self.host_openbao_unseal_service = Path(
             "/etc/systemd/system/infra-manager-openbao-unseal.service"
         )
@@ -1524,6 +1527,7 @@ class BootstrapHost:
         self.host_openbao_unseal_timer.unlink(missing_ok=True)
         self.host_openbao_unseal_service.unlink(missing_ok=True)
         self.host_openbao_unseal_command.unlink(missing_ok=True)
+        self.host_openbao_config.unlink(missing_ok=True)
         self.run("systemctl", "daemon-reload", check=False, quiet=True)
         self.ok("Сценарий разблокировки OpenBao удалён; ключ на PVE сохранён")
 
