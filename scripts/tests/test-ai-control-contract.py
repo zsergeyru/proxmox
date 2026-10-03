@@ -103,7 +103,11 @@ assert executor["service"] == "semaphore"
 assert "guest_vmid" not in executor
 
 persistence = provision["persistence"]
-assert persistence["backup_required"] == ["/opt/ai-control/state"]
+assert persistence["backup_required"] == [
+    "/opt/ai-control/state",
+    "/etc/ai-control/api.env",
+    "/etc/ai-control/open-webui.env",
+]
 assert "/opt/ai-control/compose" in persistence["reproducible"]
 assert "/etc/ai-control/api.env" not in persistence["reproducible"]
 assert "/etc/ai-control/open-webui.env" not in persistence["reproducible"]
