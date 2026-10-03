@@ -6,6 +6,8 @@
       - provision.ai_control is defined
       - provision.ai_control.agent.primary == "hermes"
       - provision.ai_control.agent.image is defined
+      - provision.ai_control.agent.uid | int > 0
+      - provision.ai_control.agent.gid | int > 0
       - provision.ai_control.agent.api.enabled | bool
       - provision.ai_control.agent.api.host == "127.0.0.1"
       - provision.ai_control.agent.api.port | int > 0
@@ -21,7 +23,7 @@
       - provision.docker.required_packages is defined
     fail_msg: "Для роли ai_control требуется контракт Hermes + Open WebUI + Docker"
 
-- name: Создать каталоги AI Control
+- name: Создать системные каталоги AI Control
   ansible.builtin.file:
     path: "{{ item.path }}"
     state: directory
@@ -34,13 +36,19 @@
     - path: "{{ provision.ai_control.paths.compose }}"
       mode: "0755"
     - path: "{{ provision.ai_control.paths.state }}"
-      mode: "0700"
-    - path: "{{ provision.ai_control.paths.hermes_data }}"
-      mode: "0700"
+      mode: "0711"
     - path: "{{ provision.ai_control.paths.open_webui_data }}"
       mode: "0700"
     - path: "{{ provision.ai_control.paths.configuration }}"
       mode: "0700"
+
+- name: Подготовить постоянный каталог Hermes
+  ansible.builtin.file:
+    path: "{{ provision.ai_control.paths.hermes_data }}"
+    state: directory
+    owner: "{{ provision.ai_control.agent.uid }}"
+    group: "{{ provision.ai_control.agent.gid }}"
+    mode: "0700"
 
 - name: Проверить секреты Hermes
   ansible.builtin.stat:
