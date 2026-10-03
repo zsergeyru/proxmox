@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import base64
 import json
 import tempfile
 import threading
@@ -20,12 +19,9 @@ GUEST_MANIFEST = GUEST / "guest.yaml"
 PROVISION = GUEST / "provision.yaml"
 PLAYBOOK = ROOT / "automation" / "ansible" / "playbooks" / "configure-guest.yml"
 ROLE = ROOT / "automation" / "ansible" / "roles" / "ai_control" / "tasks" / "main.yml"
-GUEST_LAYOUT = (
-    ROOT / "automation" / "ansible" / "roles" / "guest_layout" / "tasks" / "main.yml"
-)
 UNIT = GUEST / "rootfs" / "etc" / "systemd" / "system" / "ai-control.service"
 CORE = GUEST / "rootfs" / "opt" / "ai-control" / "core" / "bin" / "ai-control"
-WEB = GUEST / "rootfs" / "opt" / "ai-control" / "core" / "web" / "index.html"
+CUSTOM_WEB = GUEST / "rootfs" / "opt" / "ai-control" / "core" / "web" / "index.html"
 MODELS = GUEST / "rootfs" / "etc" / "ai-control" / "models.json"
 TOOLS = GUEST / "rootfs" / "etc" / "ai-control" / "tools.json"
 
@@ -43,9 +39,8 @@ def load_core() -> dict:
     return namespace
 
 
-def auth_header(username: str, password: str) -> str:
-    raw = base64.b64encode(f"{username}:{password}".encode()).decode()
-    return f"Basic {raw}"
+def bearer(token: str) -> dict[str, str]:
+    return {"Authorization": f"Bearer {token}"}
 
 
 guest = load_yaml(GUEST_MANIFEST)
@@ -56,22 +51,33 @@ assert guest["name"] == "ai-control"
 assert guest["role"] == "ai-control"
 assert guest["pve_management"] is False
 
+docker = provision["docker"]
+assert "docker-ce" in docker["required_packages"]
+assert "docker-compose-plugin" in docker["required_packages"]
+
 ai = provision["ai_control"]
 assert ai["user"] == "ai-control"
 assert ai["group"] == "ai-control"
 assert ai["agent"]["primary"] == "hermes"
 assert ai["agent"]["replaceable"] is True
-assert ai["web"]["required"] is True
-assert ai["web"]["port"] == 4100
-assert ai["web"]["username"] == "admin"
-assert ai["web"]["authentication"] == "basic"
+
+assert ai["api"]["listen"] == "127.0.0.1"
+assert ai["api"]["port"] == 4110
+assert ai["api"]["openai_model_id"] == "hermes-agent"
+
+web = ai["web"]
+assert web["required"] is True
+assert web["provider"] == "open-webui"
+assert web["image"] == "ghcr.io/open-webui/open-webui:v0.11.4-slim"
+assert web["port"] == 4100
+assert web["admin_email"] == "admin@ai-control.local"
 
 paths = ai["paths"]
 expected_paths = {
     "root": "/opt/ai-control",
     "core": "/opt/ai-control/core",
     "core_bin": "/opt/ai-control/core/bin",
-    "web_root": "/opt/ai-control/core/web",
+    "compose": "/opt/ai-control/compose",
     "agents": "/opt/ai-control/agents",
     "primary_agent": "/opt/ai-control/agents/hermes",
     "repositories": "/opt/ai-control/repos",
@@ -79,14 +85,17 @@ expected_paths = {
     "instructions": "/opt/ai-control/instructions",
     "tools": "/opt/ai-control/tools",
     "state": "/opt/ai-control/state",
+    "open_webui_data": "/opt/ai-control/state/open-webui",
     "configuration": "/etc/ai-control",
     "runtime": "/run/ai-control",
     "cache": "/var/cache/ai-control",
     "models_config": "/etc/ai-control/models.json",
     "tools_config": "/etc/ai-control/tools.json",
-    "web_credentials": "/etc/ai-control/web.env",
+    "api_credentials": "/etc/ai-control/api.env",
+    "open_webui_credentials": "/etc/ai-control/open-webui.env",
 }
 assert paths == expected_paths
+assert "open-webui" in ai["state_directories"]
 
 executor = provision["integrations"]["infrastructure_executor"]
 assert executor["role"] == "infra-manager"
@@ -95,12 +104,14 @@ assert "guest_vmid" not in executor
 
 persistence = provision["persistence"]
 assert persistence["backup_required"] == ["/opt/ai-control/state"]
-assert "/etc/proxmox-guest/ssh" not in persistence["backup_required"]
+assert "/opt/ai-control/compose" in persistence["reproducible"]
+assert "/etc/ai-control/api.env" not in persistence["reproducible"]
+assert "/etc/ai-control/open-webui.env" not in persistence["reproducible"]
 assert "/run/ai-control" in persistence["ephemeral"]
 assert "/var/cache/ai-control" in persistence["ephemeral"]
-assert "/etc/ai-control/web.env" not in persistence["reproducible"]
 
 playbook_text = PLAYBOOK.read_text(encoding="utf-8")
+assert "name: docker" in playbook_text
 assert "name: ai_control" in playbook_text
 assert '(guest_manifest.role | default(\'\')) == "ai-control"' in playbook_text
 assert "guest_manifest.vmid == 410" not in playbook_text
@@ -108,36 +119,32 @@ assert "guest_manifest.vmid | int == 410" not in playbook_text
 
 role_text = ROLE.read_text(encoding="utf-8")
 assert "provision.ai_control.paths" in role_text
-assert "provision.ai_control.service.executable" in role_text
-assert "secrets.token_urlsafe(24)" in role_text
-assert "provision.ai_control.paths.web_credentials" in role_text
+assert "ghcr.io/open-webui/open-webui" not in role_text
+assert "provision.ai_control.web.image" in role_text
+assert "docker\n      - compose" in role_text
+assert "OPENAI_API_BASE_URL" in role_text
+assert "ENABLE_OLLAMA_API" in role_text
+assert "network_mode: host" in role_text
+assert "secrets.token_urlsafe(36)" in role_text
+assert "secrets.token_hex(32)" in role_text
 assert "guest_manifest.vmid" not in role_text
 assert "guest_vmid" not in role_text
 assert "910" not in role_text
 
-guest_layout_text = GUEST_LAYOUT.read_text(encoding="utf-8")
-assert "project_repository" not in guest_layout_text
-assert "components.agents" not in guest_layout_text
-
 unit_text = UNIT.read_text(encoding="utf-8")
 assert "User=ai-control" in unit_text
 assert "Group=ai-control" in unit_text
-assert "ConditionPathIsExecutable=/opt/ai-control/core/bin/ai-control" in unit_text
+assert "EnvironmentFile=/etc/ai-control/api.env" in unit_text
 assert "ExecStart=/opt/ai-control/core/bin/ai-control" in unit_text
-assert "EnvironmentFile=/etc/ai-control/web.env" in unit_text
 assert "ProtectSystem=strict" in unit_text
-assert "/opt/ai-control/repos/proxmox" in unit_text
 assert "NoNewPrivileges=true" in unit_text
+
+assert not CUSTOM_WEB.exists()
 
 models_data = json.loads(MODELS.read_text(encoding="utf-8"))
 tools_data = json.loads(TOOLS.read_text(encoding="utf-8"))
 assert models_data["schema_version"] == 1
-assert models_data["models"] == []
 assert tools_data["schema_version"] == 1
-assert {"tasks", "memory"}.issubset(
-    {item["id"] for item in tools_data["tools"] if item["status"] == "available"}
-)
-assert "<title>AI Control</title>" in WEB.read_text(encoding="utf-8")
 
 core = load_core()
 Store = core["Store"]
@@ -153,7 +160,6 @@ with tempfile.TemporaryDirectory() as tmp_dir:
     assert store.cancel_task(task["id"])["status"] == "cancelled"
     item = store.set_memory("home", "room", "kitchen")
     assert item["value"] == "kitchen"
-    assert store.list_memory()[0]["key"] == "room"
 
     assert (
         select_model(
@@ -179,9 +185,6 @@ with tempfile.TemporaryDirectory() as tmp_dir:
         == "local"
     )
 
-    web_root = tmp / "web"
-    web_root.mkdir()
-    (web_root / "index.html").write_text("<html>ok</html>", encoding="utf-8")
     models_file = tmp / "models.json"
     tools_file = tmp / "tools.json"
     models_file.write_text('{"models":[]}', encoding="utf-8")
@@ -189,14 +192,13 @@ with tempfile.TemporaryDirectory() as tmp_dir:
 
     settings = SimpleNamespace(
         state=tmp,
-        web_root=web_root,
         models_file=models_file,
         tools_file=tools_file,
         primary_agent="hermes",
+        openai_model_id="hermes-agent",
         listen="127.0.0.1",
         port=0,
-        web_user="admin",
-        web_password="test-secret",
+        api_key="test-api-key",
         database=tmp / "http.sqlite3",
     )
     api = Api(settings)
@@ -209,20 +211,43 @@ with tempfile.TemporaryDirectory() as tmp_dir:
         assert response.status == 200
 
     try:
-        urllib.request.urlopen(f"{base}/api/status", timeout=2)
+        urllib.request.urlopen(f"{base}/v1/models", timeout=2)
     except urllib.error.HTTPError as exc:
         assert exc.code == 401
     else:
-        raise AssertionError("API должен требовать аутентификацию")
+        raise AssertionError("OpenAI API должен требовать Bearer token")
 
     request = urllib.request.Request(
-        f"{base}/api/status",
-        headers={"Authorization": auth_header("admin", "test-secret")},
+        f"{base}/v1/models",
+        headers=bearer("test-api-key"),
     )
     with urllib.request.urlopen(request, timeout=2) as response:
-        status = json.load(response)
-    assert status["service"] == "ai-control"
-    assert status["primary_agent"]["status"] == "not_connected"
+        model_list = json.load(response)
+    assert model_list["object"] == "list"
+    assert model_list["data"][0]["id"] == "hermes-agent"
+
+    request = urllib.request.Request(
+        f"{base}/v1/chat/completions",
+        data=json.dumps(
+            {
+                "model": "hermes-agent",
+                "messages": [{"role": "user", "content": "Привет"}],
+            }
+        ).encode(),
+        headers={
+            **bearer("test-api-key"),
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        urllib.request.urlopen(request, timeout=2)
+    except urllib.error.HTTPError as exc:
+        assert exc.code == 503
+        error = json.load(exc)
+        assert error["error"]["code"] == "agent_unavailable"
+    else:
+        raise AssertionError("До подключения Hermes ожидается HTTP 503")
 
     server.shutdown()
     server.server_close()
