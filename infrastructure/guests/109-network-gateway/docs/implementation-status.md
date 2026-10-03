@@ -56,8 +56,8 @@
 1. Реализовать общий контракт `network.interfaces` в схеме, resolver, OpenTofu и тестах.
 2. Определить формат списка постоянных устройств и DHCP-резерваций.
 3. После реализации многосетевого контракта заполнить сетевые параметры `guest.yaml`.
-3. Добавить provision.yaml.
-4. Создать Ansible-роли для сетевой настройки, dnsmasq, nftables, SmartDNS, WireGuard/AmneziaWG, PBR и проверок.
+4. Добавить `provision.yaml`.
+5. Создать Ansible-роли для сетевой настройки, dnsmasq, nftables, SmartDNS, WireGuard/AmneziaWG, PBR и проверок.
 6. Настроить VLAN 10 и VLAN 20 на Keenetic.
 7. Настроить VLAN-aware bridge на PVE.
 8. Добавить два VirtIO-интерфейса VM 109.
