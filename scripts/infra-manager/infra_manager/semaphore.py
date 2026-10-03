@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from .common import LOG_LEVEL_ENV, LOG_LEVELS, InfraManagerError, console
-from .guest_catalog import find_guest_by_role
+from .guest_catalog import find_guest_by_role, guests_by_provision_section
 from .pve_host import update_openbao_semaphore_api_token
 from .settings import PATHS, SETTINGS
 
@@ -49,6 +49,18 @@ def semaphore_templates(
 
     root = repo_root or PATHS.repo_root
     infra_manager = find_guest_by_role(root, SETTINGS.infra_manager_role)
+    ai_control = find_guest_by_role(root, "ai-control")
+    ai_services = guests_by_provision_section(root, "ai_services")
+
+    deploy_guests = (ai_control, *ai_services, infra_manager)
+    deploy_templates = tuple(
+        TemplateSpec(
+            name=f"Deploy Guest {guest.vmid}",
+            playbook="scripts/infra-manager/jobs/deploy-guest.py",
+            arguments=json.dumps([str(guest.vmid)], separators=(",", ":")),
+        )
+        for guest in deploy_guests
+    )
 
     return (
         TemplateSpec(
@@ -61,16 +73,7 @@ def semaphore_templates(
             playbook="scripts/infra-manager/jobs/build-template.py",
             arguments='["9000"]',
         ),
-        TemplateSpec(
-            name="Deploy Guest 410",
-            playbook="scripts/infra-manager/jobs/deploy-guest.py",
-            arguments='["410"]',
-        ),
-        TemplateSpec(
-            name=f"Deploy Guest {infra_manager.vmid}",
-            playbook="scripts/infra-manager/jobs/deploy-guest.py",
-            arguments=json.dumps([str(infra_manager.vmid)], separators=(",", ":")),
-        ),
+        *deploy_templates,
         TemplateSpec(
             name="Sync SSH Access",
             playbook="scripts/infra-manager/jobs/sync-ssh-access.py",

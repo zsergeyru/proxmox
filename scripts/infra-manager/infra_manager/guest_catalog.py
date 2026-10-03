@@ -152,3 +152,35 @@ def find_guest_by_role(repo_root: Path, role: str) -> GuestIdentity:
             f"Роль {role!r} должна принадлежать одному гостю: {locations}"
         )
     return matches[0]
+
+def guests_by_provision_section(
+    repo_root: Path,
+    section: str,
+) -> tuple[GuestIdentity, ...]:
+    """Вернуть гостей, чей provision.yaml содержит указанный раздел."""
+
+    if not section:
+        raise ValueError("section не должен быть пустым")
+
+    guests_root = repo_root / "infrastructure" / "guests"
+    matches: list[GuestIdentity] = []
+
+    for provision in sorted(guests_root.glob("*/provision.yaml")):
+        data = _load_manifest(provision)
+        if section not in data:
+            continue
+
+        vmid = data.get("guest_vmid")
+        if not isinstance(vmid, int) or vmid <= 0:
+            raise InfraManagerError(
+                f"{provision}: раздел {section!r} связан с некорректным guest_vmid"
+            )
+        identity = guest_identity(repo_root, vmid)
+        if identity.directory != provision.parent:
+            raise InfraManagerError(
+                f"{provision}: guest_vmid {vmid} указывает на другой каталог гостя"
+            )
+        matches.append(identity)
+
+    return tuple(sorted(matches, key=lambda item: item.vmid))
+

@@ -78,6 +78,13 @@
         - (provision_phase | default('full')) == "full"
         - (guest_manifest.role | default('')) == "ai-control"
 
+    - name: Настроить общие AI-службы
+      ansible.builtin.include_role:
+        name: ai_services
+      when:
+        - (provision_phase | default('full')) == "full"
+        - provision.ai_services is defined
+
     - name: Подготовить структуру каталогов гостя
       ansible.builtin.include_role:
         name: guest_layout
