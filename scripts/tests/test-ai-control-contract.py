@@ -68,7 +68,7 @@ assert ai["api"]["openai_model_id"] == "hermes-agent"
 web = ai["web"]
 assert web["required"] is True
 assert web["provider"] == "open-webui"
-assert web["image"] == "ghcr.io/open-webui/open-webui:v0.11.4-slim"
+assert web["image"] == "ghcr.io/open-webui/open-webui:0.11.4-slim"
 assert web["port"] == 4100
 assert web["admin_email"] == "admin@ai-control.local"
 
