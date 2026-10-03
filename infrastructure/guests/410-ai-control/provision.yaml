@@ -13,35 +13,65 @@ system:
     - jq
     - openssh-client
     - python3
-    - python3-venv
 
-components:
-  ai_control:
-    required: true
-    root: /opt/ai-control
+docker:
+  source: docker-official-repository
+  service:
+    name: docker
+    enabled: true
+    state: running
 
-  agents:
+  required_packages:
+    - docker-ce
+    - docker-ce-cli
+    - containerd.io
+    - docker-buildx-plugin
+    - docker-compose-plugin
+
+ai_control:
+  agent:
     primary: hermes
     replaceable: true
-    root: /opt/ai-control/agents
+    image: nousresearch/hermes-agent:v2026.9.14
+    container_name: hermes
+    command: gateway run
+    shm_size: 1g
+    uid: 10000
+    gid: 10000
 
-  project_repository:
-    path: /opt/ai-control/repos/proxmox
+    api:
+      enabled: true
+      host: 127.0.0.1
+      port: 8642
+      model_name: hermes-agent
 
-  instructions:
-    root: /opt/ai-control/instructions
+    dashboard:
+      enabled: false
+      port: 9119
 
-  tools:
-    root: /opt/ai-control/tools
+  web:
+    required: true
+    provider: open-webui
+    image: ghcr.io/open-webui/open-webui:0.11.4-slim
+    container_name: open-webui
+    port: 4100
+    admin_email: admin@ai-control.local
 
-  state:
-    root: /opt/ai-control/state
-    persistent: true
+  paths:
+    root: /opt/ai-control
+    compose: /opt/ai-control/compose
+    compose_file: /opt/ai-control/compose/docker-compose.yml
+    state: /opt/ai-control/state
+    hermes_data: /opt/ai-control/state/hermes
+    open_webui_data: /opt/ai-control/state/open-webui
+    configuration: /etc/ai-control
+    hermes_env: /etc/ai-control/hermes.env
+    open_webui_env: /etc/ai-control/open-webui.env
 
 integrations:
   infrastructure_executor:
-    guest_vmid: 910
-    name: infra-manager
+    role: infra-manager
+    service: semaphore
     purpose: Повторяемое выполнение OpenTofu, Ansible и других инфраструктурных задач
     local_opentofu_required: false
     local_ansible_controller_required: false
@@ -57,10 +87,12 @@ boundaries:
 persistence:
   backup_required:
     - /opt/ai-control/state
-    - /etc/proxmox-guest/ssh
+    - /etc/ai-control/hermes.env
+    - /etc/ai-control/open-webui.env
 
   reproducible:
-    - /opt/ai-control/repos/proxmox
-    - /opt/ai-control/agents
-    - /opt/ai-control/instructions
-    - /opt/ai-control/tools
+    - /opt/ai-control/compose
+
+  ephemeral:
+    - docker-images
+    - docker-build-cache

@@ -1,0 +1,32 @@
+services:
+  hermes:
+    image: {{ provision.ai_control.agent.image }}
+    container_name: {{ provision.ai_control.agent.container_name }}
+    restart: unless-stopped
+    command: {{ provision.ai_control.agent.command }}
+    network_mode: host
+    shm_size: {{ provision.ai_control.agent.shm_size }}
+    env_file:
+      - {{ provision.ai_control.paths.hermes_env }}
+    environment:
+      HERMES_UID: "{{ provision.ai_control.agent.uid }}"
+      HERMES_GID: "{{ provision.ai_control.agent.gid }}"
+    volumes:
+      - {{ provision.ai_control.paths.hermes_data }}:/opt/data
+
+  open-webui:
+    image: {{ provision.ai_control.web.image }}
+    container_name: {{ provision.ai_control.web.container_name }}
+    restart: unless-stopped
+    network_mode: host
+    env_file:
+      - {{ provision.ai_control.paths.open_webui_env }}
+    environment:
+      HOST: 0.0.0.0
+      PORT: "{{ provision.ai_control.web.port }}"
+      WEBUI_NAME: AI Control
+      ENABLE_OLLAMA_API: "false"
+      ENABLE_SIGNUP: "false"
+      OPENAI_API_BASE_URL: "http://127.0.0.1:{{ provision.ai_control.agent.api.port }}/v1"
+    volumes:
+      - {{ provision.ai_control.paths.open_webui_data }}:/app/backend/data

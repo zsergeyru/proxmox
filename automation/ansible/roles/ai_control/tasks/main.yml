@@ -1,0 +1,213 @@
+---
+- name: Проверить контракт AI Control
+  ansible.builtin.assert:
+    that:
+      - (guest_manifest.role | default('')) == "ai-control"
+      - provision.ai_control is defined
+      - provision.ai_control.agent.primary == "hermes"
+      - provision.ai_control.agent.image is defined
+      - provision.ai_control.agent.uid | int > 0
+      - provision.ai_control.agent.gid | int > 0
+      - provision.ai_control.agent.api.enabled | bool
+      - provision.ai_control.agent.api.host == "127.0.0.1"
+      - provision.ai_control.agent.api.port | int > 0
+      - provision.ai_control.agent.api.port | int < 65536
+      - provision.ai_control.web.provider == "open-webui"
+      - provision.ai_control.web.image is defined
+      - provision.ai_control.web.port | int > 0
+      - provision.ai_control.web.port | int < 65536
+      - provision.ai_control.paths.compose_file is defined
+      - provision.ai_control.paths.hermes_data is defined
+      - provision.ai_control.paths.open_webui_data is defined
+      - provision.docker is defined
+      - provision.docker.required_packages is defined
+    fail_msg: "Для роли ai_control требуется контракт Hermes + Open WebUI + Docker"
+
+- name: Создать системные каталоги AI Control
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "{{ item.mode }}"
+  loop:
+    - path: "{{ provision.ai_control.paths.root }}"
+      mode: "0755"
+    - path: "{{ provision.ai_control.paths.compose }}"
+      mode: "0755"
+    - path: "{{ provision.ai_control.paths.state }}"
+      mode: "0711"
+    - path: "{{ provision.ai_control.paths.open_webui_data }}"
+      mode: "0700"
+    - path: "{{ provision.ai_control.paths.configuration }}"
+      mode: "0700"
+
+- name: Подготовить постоянный каталог Hermes
+  ansible.builtin.file:
+    path: "{{ provision.ai_control.paths.hermes_data }}"
+    state: directory
+    owner: "{{ provision.ai_control.agent.uid }}"
+    group: "{{ provision.ai_control.agent.gid }}"
+    mode: "0700"
+
+- name: Проверить секреты Hermes
+  ansible.builtin.stat:
+    path: "{{ provision.ai_control.paths.hermes_env }}"
+  register: ai_control_hermes_env_file
+
+- name: Создать ключ API Hermes
+  ansible.builtin.command:
+    argv:
+      - python3
+      - -c
+      - "import secrets; print(secrets.token_urlsafe(36))"
+  changed_when: false
+  no_log: true
+  register: ai_control_generated_hermes_api_key
+  when: not ai_control_hermes_env_file.stat.exists
+
+- name: Сохранить конфигурацию API Hermes
+  ansible.builtin.copy:
+    dest: "{{ provision.ai_control.paths.hermes_env }}"
+    owner: root
+    group: root
+    mode: "0600"
+    force: false
+    content: |
+      API_SERVER_ENABLED=true
+      API_SERVER_HOST={{ provision.ai_control.agent.api.host }}
+      API_SERVER_PORT={{ provision.ai_control.agent.api.port }}
+      API_SERVER_MODEL_NAME={{ provision.ai_control.agent.api.model_name }}
+      API_SERVER_KEY={{ ai_control_generated_hermes_api_key.stdout }}
+  no_log: true
+  when: not ai_control_hermes_env_file.stat.exists
+
+- name: Прочитать конфигурацию API Hermes
+  ansible.builtin.slurp:
+    src: "{{ provision.ai_control.paths.hermes_env }}"
+  no_log: true
+  register: ai_control_hermes_env_content
+
+- name: Получить ключ API Hermes
+  ansible.builtin.set_fact:
+    ai_control_hermes_api_key: >-
+      {{
+        (
+          ai_control_hermes_env_content.content
+          | b64decode
+          | regex_findall('(?m)^API_SERVER_KEY=(.+)$')
+        )[0]
+      }}
+  no_log: true
+
+- name: Проверить секреты Open WebUI
+  ansible.builtin.stat:
+    path: "{{ provision.ai_control.paths.open_webui_env }}"
+  register: ai_control_open_webui_env_file
+
+- name: Создать секреты Open WebUI
+  ansible.builtin.command:
+    argv:
+      - python3
+      - -c
+      - >-
+        import json,secrets;
+        print(json.dumps({
+        "secret":secrets.token_hex(32),
+        "password":secrets.token_urlsafe(24)}))
+  changed_when: false
+  no_log: true
+  register: ai_control_generated_open_webui_secrets
+  when: not ai_control_open_webui_env_file.stat.exists
+
+- name: Сохранить секреты Open WebUI
+  ansible.builtin.copy:
+    dest: "{{ provision.ai_control.paths.open_webui_env }}"
+    owner: root
+    group: root
+    mode: "0600"
+    force: false
+    content: |
+      OPENAI_API_KEY={{ ai_control_hermes_api_key }}
+      WEBUI_SECRET_KEY={{ (ai_control_generated_open_webui_secrets.stdout | from_json).secret }}
+      WEBUI_ADMIN_EMAIL={{ provision.ai_control.web.admin_email }}
+      WEBUI_ADMIN_PASSWORD={{ (ai_control_generated_open_webui_secrets.stdout | from_json).password }}
+      WEBUI_ADMIN_NAME=Administrator
+  no_log: true
+  when: not ai_control_open_webui_env_file.stat.exists
+
+- name: Синхронизировать ключ Hermes в Open WebUI
+  ansible.builtin.lineinfile:
+    path: "{{ provision.ai_control.paths.open_webui_env }}"
+    regexp: '^OPENAI_API_KEY='
+    line: "OPENAI_API_KEY={{ ai_control_hermes_api_key }}"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+
+- name: Сформировать Compose AI Control
+  ansible.builtin.template:
+    src: docker-compose.yml.j2
+    dest: "{{ provision.ai_control.paths.compose_file }}"
+    owner: root
+    group: root
+    mode: "0644"
+  register: ai_control_compose
+
+- name: Проверить Compose AI Control
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ provision.ai_control.paths.compose_file }}"
+      - config
+      - --quiet
+  changed_when: false
+
+- name: Получить образы AI Control
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ provision.ai_control.paths.compose_file }}"
+      - pull
+  changed_when: false
+
+- name: Запустить AI Control
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ provision.ai_control.paths.compose_file }}"
+      - up
+      - -d
+      - --remove-orphans
+  register: ai_control_compose_up
+  changed_when: >-
+    'Started' in (ai_control_compose_up.stdout + ai_control_compose_up.stderr)
+    or 'Created' in (ai_control_compose_up.stdout + ai_control_compose_up.stderr)
+    or 'Recreated' in (ai_control_compose_up.stdout + ai_control_compose_up.stderr)
+
+- name: Дождаться API Hermes
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ provision.ai_control.agent.api.port }}/health"
+    method: GET
+    status_code: 200
+  register: ai_control_hermes_health
+  retries: 30
+  delay: 2
+  until: ai_control_hermes_health.status == 200
+
+- name: Дождаться Open WebUI
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ provision.ai_control.web.port }}/health"
+    method: GET
+    status_code: 200
+  register: ai_control_open_webui_health
+  retries: 60
+  delay: 2
+  until: ai_control_open_webui_health.status == 200

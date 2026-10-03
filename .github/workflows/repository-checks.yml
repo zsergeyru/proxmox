@@ -63,6 +63,9 @@ jobs:
       - name: Validate repository
         run: python scripts/validate_repo.py
 
+      - name: Run AI Control contract checks
+        run: python scripts/tests/test-ai-control-contract.py
+
       - name: Check Python with Ruff
         run: ruff check scripts
 
