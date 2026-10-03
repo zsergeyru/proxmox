@@ -1,0 +1,69 @@
+schema_version: 1
+guest_vmid: 420
+
+system:
+  distribution: debian
+  version: "13"
+  architecture: amd64
+
+  required_packages:
+    - ca-certificates
+    - curl
+    - jq
+
+docker:
+  source: docker-official-repository
+  service:
+    name: docker
+    enabled: true
+    state: running
+
+  required_packages:
+    - docker-ce
+    - docker-ce-cli
+    - containerd.io
+    - docker-buildx-plugin
+    - docker-compose-plugin
+
+ai_services:
+  speaches:
+    image: ghcr.io/speaches-ai/speaches:0.8.3-cpu
+    container_name: speaches
+    port: 8000
+    stt:
+      model: Systran/faster-whisper-small
+      alias: stt-default
+    tts:
+      model: speaches-ai/piper-ru_RU-irina-medium
+      alias: tts-default-ru
+
+  wyoming_openai:
+    image: ghcr.io/roryeckel/wyoming_openai:0.5.0
+    container_name: wyoming-openai
+    port: 10300
+    languages:
+      - ru
+    stt_backend: SPEACHES
+    tts_backend: SPEACHES
+
+  paths:
+    root: /opt/ai-services
+    compose: /opt/ai-services/compose
+    compose_file: /opt/ai-services/compose/docker-compose.yml
+    configuration: /etc/ai-services
+    speaches_configuration: /etc/ai-services/speaches
+    model_aliases: /etc/ai-services/speaches/model_aliases.json
+    cache: /var/cache/ai-services
+    speaches_cache: /var/cache/ai-services/speaches/huggingface
+
+persistence:
+  backup_required: []
+
+  reproducible:
+    - /opt/ai-services/compose
+    - /etc/ai-services
+
+  ephemeral:
+    - /var/cache/ai-services
+    - docker-images
+    - docker-build-cache
