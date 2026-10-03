@@ -65,6 +65,8 @@ paths = services["paths"]
 
 assert speaches["image"] == "ghcr.io/speaches-ai/speaches:0.8.3-cpu"
 assert speaches["container_name"] == "speaches"
+assert speaches["uid"] == 1000
+assert speaches["gid"] == 1000
 assert speaches["port"] == 8000
 assert speaches["stt"] == {
     "model": "Systran/faster-whisper-small",
