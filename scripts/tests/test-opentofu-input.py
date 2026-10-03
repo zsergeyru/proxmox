@@ -29,7 +29,23 @@ guests = payload["guests"]
 assert "109" in guests
 assert guests["109"]["name"] == "network-gateway"
 assert guests["109"]["type"] == "vm"
-assert guests["109"]["network"]["ipv4"] == "192.168.1.9/16"
+assert guests["109"]["network"]["interfaces"] == [
+    {
+        "name": "wan",
+        "bridge": "vmbr0",
+        "vlan": 10,
+        "ipv4": "10.0.0.2/30",
+        "gateway": "10.0.0.1",
+        "management": False,
+    },
+    {
+        "name": "lan",
+        "bridge": "vmbr0",
+        "vlan": 20,
+        "ipv4": "192.168.1.9/16",
+        "management": True,
+    },
+]
 
 # AI Control разворачивается как обычная VM, но не должен попадать
 # в собственную область управления managed.
@@ -96,9 +112,21 @@ with tempfile.TemporaryDirectory() as tmp:
 for vmid, guest in guests.items():
     assert str(guest["vmid"]) == vmid
     assert guest["type"] in {"vm", "lxc"}
-    assert guest["network"]["bridge"] == "vmbr0"
     assert guest["resources"]["disk_storage"] == "local-lvm"
-    ipv4 = guest["network"]["ipv4"]
-    assert ipv4 == "dhcp" or "/" in ipv4
+
+    network = guest["network"]
+    if "interfaces" in network:
+        assert network["interfaces"]
+        management = [
+            item for item in network["interfaces"] if item["management"]
+        ]
+        assert len(management) == 1
+        for item in network["interfaces"]:
+            assert item["bridge"]
+            assert item["ipv4"] == "dhcp" or "/" in item["ipv4"]
+    else:
+        assert network["bridge"] == "vmbr0"
+        ipv4 = network["ipv4"]
+        assert ipv4 == "dhcp" or "/" in ipv4
 
 print("[ОК] OpenTofu input contract")

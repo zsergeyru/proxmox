@@ -18,6 +18,7 @@ from .guest_deploy_infrastructure import (
     _build_deployment_context,
     _build_guest_plan,
     _find_guest_directory,
+    _ensure_ssh_host_key,
     _prepare_self_update_workspace,
     _validate_pve_and_state,
 )

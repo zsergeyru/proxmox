@@ -10,6 +10,20 @@ locals {
     vmid => guest
     if guest.type == "lxc"
   }
+
+  guest_networks = {
+    for vmid, guest in local.guests :
+    vmid => try(
+      guest.network.interfaces,
+      [{
+        name       = "eth0"
+        bridge     = guest.network.bridge
+        ipv4       = guest.network.ipv4
+        gateway    = guest.network.ipv4 == "dhcp" ? null : guest.network.gateway
+        management = true
+      }]
+    )
+  }
 }
 
 resource "proxmox_virtual_environment_vm" "guest" {
@@ -70,10 +84,14 @@ resource "proxmox_virtual_environment_vm" "guest" {
     datastore_id = each.value.resources.disk_storage
     interface    = "ide0"
 
-    ip_config {
-      ipv4 {
-        address = each.value.network.ipv4
-        gateway = each.value.network.ipv4 == "dhcp" ? null : each.value.network.gateway
+    dynamic "ip_config" {
+      for_each = local.guest_networks[each.key]
+
+      content {
+        ipv4 {
+          address = ip_config.value.ipv4
+          gateway = ip_config.value.ipv4 == "dhcp" ? null : try(ip_config.value.gateway, null)
+        }
       }
     }
 
@@ -83,9 +101,14 @@ resource "proxmox_virtual_environment_vm" "guest" {
     }
   }
 
-  network_device {
-    bridge = each.value.network.bridge
-    model  = "virtio"
+  dynamic "network_device" {
+    for_each = local.guest_networks[each.key]
+
+    content {
+      bridge  = network_device.value.bridge
+      model   = "virtio"
+      vlan_id = try(network_device.value.vlan, null)
+    }
   }
 
   operating_system {
@@ -138,10 +161,14 @@ resource "proxmox_virtual_environment_container" "guest" {
   initialization {
     hostname = each.value.name
 
-    ip_config {
-      ipv4 {
-        address = each.value.network.ipv4
-        gateway = each.value.network.ipv4 == "dhcp" ? null : each.value.network.gateway
+    dynamic "ip_config" {
+      for_each = local.guest_networks[each.key]
+
+      content {
+        ipv4 {
+          address = ip_config.value.ipv4
+          gateway = ip_config.value.ipv4 == "dhcp" ? null : try(ip_config.value.gateway, null)
+        }
       }
     }
 
@@ -150,9 +177,14 @@ resource "proxmox_virtual_environment_container" "guest" {
     }
   }
 
-  network_interface {
-    name   = "eth0"
-    bridge = each.value.network.bridge
+  dynamic "network_interface" {
+    for_each = local.guest_networks[each.key]
+
+    content {
+      name    = network_interface.value.name
+      bridge  = network_interface.value.bridge
+      vlan_id = try(network_interface.value.vlan, null)
+    }
   }
 
   operating_system {

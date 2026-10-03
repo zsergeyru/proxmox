@@ -67,6 +67,70 @@ def main() -> None:
     dhcp_source["network"] = {"ipv4": "dhcp"}
     assert not list(source_validator.iter_errors(dhcp_source))
 
+    multi_source = copy.deepcopy(source_109)
+    multi_source["network"] = {
+        "interfaces": [
+            {
+                "name": "wan",
+                "bridge": "vmbr0",
+                "vlan": 10,
+                "ipv4": "10.0.0.2/30",
+                "gateway": "10.0.0.1",
+            },
+            {
+                "name": "lan",
+                "bridge": "vmbr0",
+                "vlan": 20,
+                "ipv4": "192.168.1.9/16",
+                "management": True,
+            },
+        ]
+    }
+    assert not list(source_validator.iter_errors(multi_source))
+
+    mixed_source = copy.deepcopy(multi_source)
+    mixed_source["network"]["ipv4"] = "192.168.1.9"
+    assert list(source_validator.iter_errors(mixed_source))
+
+    bad_vlan = copy.deepcopy(multi_source)
+    bad_vlan["network"]["interfaces"][0]["vlan"] = 4095
+    assert list(source_validator.iter_errors(bad_vlan))
+
+    resolved_multi = resolve_effective_guest(multi_source, defaults)
+    assert resolved_multi.management_ip is not None
+    assert str(resolved_multi.management_ip) == "192.168.1.9"
+    assert resolved_multi.management_ip_source == "interfaces"
+    interfaces = resolved_multi.effective["network"]["interfaces"]
+    assert len(interfaces) == 2
+    assert interfaces[0] == {
+        "name": "wan",
+        "bridge": "vmbr0",
+        "vlan": 10,
+        "ipv4": "10.0.0.2/30",
+        "gateway": "10.0.0.1",
+        "management": False,
+    }
+    assert interfaces[1] == {
+        "name": "lan",
+        "bridge": "vmbr0",
+        "vlan": 20,
+        "ipv4": "192.168.1.9/16",
+        "management": True,
+    }
+    assert not list(effective_validator.iter_errors(resolved_multi.effective))
+
+    duplicate_name = copy.deepcopy(multi_source)
+    duplicate_name["network"]["interfaces"][1]["name"] = "wan"
+    expect_error(duplicate_name, defaults, "дублирующееся имя")
+
+    duplicate_management = copy.deepcopy(multi_source)
+    duplicate_management["network"]["interfaces"][0]["management"] = True
+    expect_error(duplicate_management, defaults, "ровно один management=true")
+
+    duplicate_gateway = copy.deepcopy(multi_source)
+    duplicate_gateway["network"]["interfaces"][1]["gateway"] = "192.168.1.1"
+    expect_error(duplicate_gateway, defaults, "не более одного gateway")
+
     assert not list(
         effective_validator.iter_errors(resolved_dhcp.effective)
     )

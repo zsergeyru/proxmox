@@ -252,17 +252,52 @@ def check_effective_network(
     used: dict[ipaddress.IPv4Address, Path],
 ) -> None:
     net = effective["network"]
+
+    interfaces = net.get("interfaces")
+    if isinstance(interfaces, list):
+        management = [
+            item
+            for item in interfaces
+            if isinstance(item, dict) and item.get("management") is True
+        ]
+        if len(management) != 1:
+            fail(f"{rel}: effective network должен иметь ровно один management-интерфейс")
+            return
+
+        value = management[0].get("ipv4")
+        if is_dhcp_ipv4(value):
+            return
+
+        try:
+            iface = ipaddress.ip_interface(value)
+        except (TypeError, ValueError) as exc:
+            fail(f"{rel}: некорректный management IPv4: {exc}")
+            return
+
+        if not isinstance(iface, ipaddress.IPv4Interface):
+            fail(f"{rel}: management IPv4 должен быть IPv4 или dhcp")
+            return
+
+        check_address(rel, source["vmid"], iface.ip, cfg, used)
+        return
+
     try:
         effective_subnet = ipaddress.ip_network(net["subnet"], strict=True)
         effective_gateway = ipaddress.ip_address(net["gateway"])
-    except (TypeError, ValueError) as exc:
+    except (KeyError, TypeError, ValueError) as exc:
         fail(f"{rel}: некорректная effective network: {exc}")
         return
 
     if effective_subnet != cfg.subnet:
-        fail(f"{rel}: effective subnet должен приходить из infrastructure/guests/defaults.yaml")
+        fail(
+            f"{rel}: effective subnet должен приходить из "
+            "infrastructure/guests/defaults.yaml"
+        )
     if effective_gateway != cfg.gateway:
-        fail(f"{rel}: effective gateway должен приходить из infrastructure/guests/defaults.yaml")
+        fail(
+            f"{rel}: effective gateway должен приходить из "
+            "infrastructure/guests/defaults.yaml"
+        )
 
     if is_dhcp_ipv4(net.get("ipv4")):
         return
