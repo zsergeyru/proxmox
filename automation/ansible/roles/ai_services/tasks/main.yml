@@ -4,6 +4,8 @@
     that:
       - provision.ai_services is defined
       - provision.ai_services.speaches.image is defined
+      - provision.ai_services.speaches.uid | int > 0
+      - provision.ai_services.speaches.gid | int > 0
       - provision.ai_services.speaches.port | int > 0
       - provision.ai_services.speaches.port | int < 65536
       - provision.ai_services.speaches.stt.model is defined
@@ -39,8 +41,13 @@
       mode: "0755"
     - path: "{{ provision.ai_services.paths.cache }}"
       mode: "0755"
-    - path: "{{ provision.ai_services.paths.speaches_cache }}"
-      mode: "0755"
+- name: Подготовить кэш моделей Speaches
+  ansible.builtin.file:
+    path: "{{ provision.ai_services.paths.speaches_cache }}"
+    state: directory
+    owner: "{{ provision.ai_services.speaches.uid }}"
+    group: "{{ provision.ai_services.speaches.gid }}"
+    mode: "0755"
 
 - name: Сформировать логические имена моделей Speaches
   ansible.builtin.template:
