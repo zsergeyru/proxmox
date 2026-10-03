@@ -15,6 +15,20 @@ system:
     - python3
     - python3-venv
 
+docker:
+  source: docker-official-repository
+  service:
+    name: docker
+    enabled: true
+    state: running
+
+  required_packages:
+    - docker-ce
+    - docker-ce-cli
+    - containerd.io
+    - docker-buildx-plugin
+    - docker-compose-plugin
+
 ai_control:
   user: ai-control
   group: ai-control
@@ -23,13 +37,18 @@ ai_control:
     primary: hermes
     replaceable: true
 
+  api:
+    listen: 127.0.0.1
+    port: 4110
+    openai_model_id: hermes-agent
+
   web:
     required: true
-    listen: 0.0.0.0
+    provider: open-webui
+    image: ghcr.io/open-webui/open-webui:v0.11.4-slim
     port: 4100
-    username: admin
-    authentication: basic
-    index: /opt/ai-control/core/web/index.html
+    admin_email: admin@ai-control.local
+    compose_file: /opt/ai-control/compose/open-webui.yml
 
   service:
     name: ai-control
@@ -40,7 +59,7 @@ ai_control:
     root: /opt/ai-control
     core: /opt/ai-control/core
     core_bin: /opt/ai-control/core/bin
-    web_root: /opt/ai-control/core/web
+    compose: /opt/ai-control/compose
     agents: /opt/ai-control/agents
     primary_agent: /opt/ai-control/agents/hermes
     repositories: /opt/ai-control/repos
@@ -48,12 +67,14 @@ ai_control:
     instructions: /opt/ai-control/instructions
     tools: /opt/ai-control/tools
     state: /opt/ai-control/state
+    open_webui_data: /opt/ai-control/state/open-webui
     configuration: /etc/ai-control
     runtime: /run/ai-control
     cache: /var/cache/ai-control
     models_config: /etc/ai-control/models.json
     tools_config: /etc/ai-control/tools.json
-    web_credentials: /etc/ai-control/web.env
+    api_credentials: /etc/ai-control/api.env
+    open_webui_credentials: /etc/ai-control/open-webui.env
 
   state_directories:
     - memory
@@ -62,6 +83,7 @@ ai_control:
     - events
     - observations
     - agents/hermes
+    - open-webui
 
 integrations:
   infrastructure_executor:
@@ -86,6 +108,7 @@ persistence:
   reproducible:
     - /opt/ai-control/core
     - /opt/ai-control/agents
+    - /opt/ai-control/compose
     - /opt/ai-control/repos/proxmox
     - /opt/ai-control/instructions
     - /opt/ai-control/tools
