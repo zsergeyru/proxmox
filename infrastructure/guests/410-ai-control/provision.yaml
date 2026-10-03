@@ -36,6 +36,8 @@ ai_control:
     container_name: hermes
     command: gateway run
     shm_size: 1g
+    uid: 10000
+    gid: 10000
 
     api:
       enabled: true
