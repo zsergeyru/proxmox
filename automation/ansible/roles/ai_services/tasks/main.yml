@@ -56,6 +56,7 @@
     owner: root
     group: root
     mode: "0644"
+  register: ai_services_model_aliases
 
 - name: Сформировать Compose AI-служб
   ansible.builtin.template:
@@ -102,6 +103,18 @@
     or 'Created' in (ai_services_speaches_up.stdout + ai_services_speaches_up.stderr)
     or 'Recreated' in (ai_services_speaches_up.stdout + ai_services_speaches_up.stderr)
 
+- name: Перезапустить Speaches после изменения логических имён моделей
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ provision.ai_services.paths.compose_file }}"
+      - restart
+      - speaches
+  changed_when: true
+  when: ai_services_model_aliases.changed
+
 - name: Дождаться Speaches
   ansible.builtin.uri:
     url: "http://127.0.0.1:{{ provision.ai_services.speaches.port }}/health"
@@ -122,6 +135,7 @@
       - 200
       - 201
     return_content: true
+    timeout: 600
   loop:
     - "{{ provision.ai_services.speaches.stt.model }}"
     - "{{ provision.ai_services.speaches.tts.model }}"
