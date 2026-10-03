@@ -119,6 +119,122 @@ def is_dhcp_ipv4(value: object) -> bool:
     return value == DHCP
 
 
+def _resolve_interfaces(
+    source: dict,
+    defaults: dict,
+) -> tuple[list[dict[str, Any]], ipaddress.IPv4Address | None, str]:
+    """Нормализовать расширенный сетевой контракт и определить management IP."""
+    network = source.get("network")
+    if not isinstance(network, dict):
+        raise GuestConfigError("network должен быть mapping/object")
+    raw_interfaces = network.get("interfaces")
+    if not isinstance(raw_interfaces, list) or not raw_interfaces:
+        raise GuestConfigError("network.interfaces должен быть непустым list")
+
+    default_bridge = get_nested(defaults, ("defaults", "network", "bridge"))
+    if not isinstance(default_bridge, str) or not default_bridge:
+        raise GuestConfigError("defaults.network.bridge должен быть непустой строкой")
+
+    seen_names: set[str] = set()
+    normalized: list[dict[str, Any]] = []
+    management_indexes: list[int] = []
+    gateway_count = 0
+
+    for index, raw in enumerate(raw_interfaces):
+        if not isinstance(raw, dict):
+            raise GuestConfigError(
+                f"network.interfaces[{index}] должен быть mapping/object"
+            )
+        name = raw.get("name")
+        if not isinstance(name, str) or not name:
+            raise GuestConfigError(
+                f"network.interfaces[{index}].name должен быть непустой строкой"
+            )
+        if name in seen_names:
+            raise GuestConfigError(f"дублирующееся имя сетевого интерфейса {name!r}")
+        seen_names.add(name)
+
+        ipv4_value = raw.get("ipv4")
+        if ipv4_value == DHCP:
+            normalized_ipv4 = DHCP
+        else:
+            if not isinstance(ipv4_value, str):
+                raise GuestConfigError(
+                    f"network.interfaces[{index}].ipv4 должен быть IPv4/prefix или dhcp"
+                )
+            try:
+                iface = ipaddress.ip_interface(ipv4_value)
+            except ValueError as exc:
+                raise GuestConfigError(
+                    f"некорректный network.interfaces[{index}].ipv4 "
+                    f"{ipv4_value!r}: {exc}"
+                ) from exc
+            if not isinstance(iface, ipaddress.IPv4Interface):
+                raise GuestConfigError(
+                    f"network.interfaces[{index}].ipv4 должен быть IPv4"
+                )
+            normalized_ipv4 = str(iface)
+
+        bridge = raw.get("bridge", default_bridge)
+        if not isinstance(bridge, str) or not bridge:
+            raise GuestConfigError(
+                f"network.interfaces[{index}].bridge должен быть непустой строкой"
+            )
+
+        item: dict[str, Any] = {
+            "name": name,
+            "bridge": bridge,
+            "ipv4": normalized_ipv4,
+            "management": bool(raw.get("management", False)),
+        }
+
+        vlan = raw.get("vlan")
+        if vlan is not None:
+            if not isinstance(vlan, int) or isinstance(vlan, bool) or not 1 <= vlan <= 4094:
+                raise GuestConfigError(
+                    f"network.interfaces[{index}].vlan должен быть от 1 до 4094"
+                )
+            item["vlan"] = vlan
+
+        gateway = raw.get("gateway")
+        if gateway is not None:
+            try:
+                parsed_gateway = ipaddress.ip_address(gateway)
+            except ValueError as exc:
+                raise GuestConfigError(
+                    f"некорректный network.interfaces[{index}].gateway "
+                    f"{gateway!r}: {exc}"
+                ) from exc
+            if not isinstance(parsed_gateway, ipaddress.IPv4Address):
+                raise GuestConfigError(
+                    f"network.interfaces[{index}].gateway должен быть IPv4"
+                )
+            item["gateway"] = str(parsed_gateway)
+            gateway_count += 1
+
+        if item["management"]:
+            management_indexes.append(index)
+        normalized.append(item)
+
+    if gateway_count > 1:
+        raise GuestConfigError("network.interfaces допускает не более одного gateway")
+
+    if len(normalized) == 1 and not management_indexes:
+        normalized[0]["management"] = True
+        management_indexes = [0]
+    elif len(management_indexes) != 1:
+        raise GuestConfigError(
+            "network.interfaces должен содержать ровно один management=true"
+        )
+
+    management = normalized[management_indexes[0]]
+    if management["ipv4"] == DHCP:
+        return normalized, None, DHCP
+
+    management_iface = ipaddress.ip_interface(management["ipv4"])
+    return normalized, management_iface.ip, "interfaces"
+
+
 def resolve_management_ip(
     source: dict,
     network: NetworkConfig,
@@ -208,6 +324,12 @@ def _build_effective_guest(
     effective = deep_merge(effective, source)
     if kind == "lxc":
         effective["features"] = list(features)
+
+    source_network = source.get("network")
+    if isinstance(source_network, dict) and "interfaces" in source_network:
+        interfaces, management_ip, ip_source = _resolve_interfaces(source, defaults)
+        effective["network"] = {"interfaces": interfaces}
+        return effective, management_ip, ip_source
 
     management_ip, ip_source = resolve_management_ip(source, network)
     effective_network = effective.get("network")
