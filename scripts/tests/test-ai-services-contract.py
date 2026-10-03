@@ -4,10 +4,16 @@
 from __future__ import annotations
 
 from pathlib import Path
+import sys
 
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
+MODULE_ROOT = ROOT / "scripts" / "infra-manager"
+sys.path.insert(0, str(MODULE_ROOT))
+
+from infra_manager.guest_catalog import guests_by_provision_section
+
 GUEST = ROOT / "infrastructure" / "guests" / "420-ai-services"
 GUEST_MANIFEST = GUEST / "guest.yaml"
 PROVISION = GUEST / "provision.yaml"
@@ -22,6 +28,8 @@ COMPOSE_TEMPLATE = (
     / "templates"
     / "docker-compose.yml.j2"
 )
+SEMAPHORE = MODULE_ROOT / "infra_manager" / "semaphore.py"
+
 ALIASES_TEMPLATE = (
     ROOT
     / "automation"
@@ -104,10 +112,21 @@ assert persistence["reproducible"] == [
 assert "/var/cache/ai-services" in persistence["ephemeral"]
 
 playbook = PLAYBOOK.read_text(encoding="utf-8")
+assert isinstance(yaml.safe_load(playbook), list)
 assert "name: ai_services" in playbook
 assert "provision.ai_services is defined" in playbook
 assert "guest_manifest.vmid == 420" not in playbook
 assert "guest_manifest.vmid | int == 420" not in playbook
+
+ai_service_guests = guests_by_provision_section(ROOT, "ai_services")
+assert [guest.vmid for guest in ai_service_guests] == [420]
+assert [guest.name for guest in ai_service_guests] == ["ai-services"]
+
+semaphore_text = SEMAPHORE.read_text(encoding="utf-8")
+assert 'guests_by_provision_section(root, "ai_services")' in semaphore_text
+assert 'name=f"Deploy Guest {guest.vmid}"' in semaphore_text
+assert 'arguments=json.dumps([str(guest.vmid)]' in semaphore_text
+assert 'name="Deploy Guest 420"' not in semaphore_text
 
 role_text = ROLE.read_text(encoding="utf-8")
 assert isinstance(yaml.safe_load(role_text), list)
