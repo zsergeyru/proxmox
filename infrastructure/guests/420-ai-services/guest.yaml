@@ -1,0 +1,12 @@
+schema_version: 12
+vmid: 420
+name: ai-services
+profile: debian-lxc-docker
+
+description: Общие AI- и голосовые службы
+
+resources:
+  cores: 2
+  memory_mb: 4096
+  swap_mb: 1024
+  disk_size_gb: 32
