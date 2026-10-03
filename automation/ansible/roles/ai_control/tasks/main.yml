@@ -9,11 +9,17 @@
       - provision.ai_control.paths is defined
       - provision.ai_control.service is defined
       - provision.ai_control.agent is defined
+      - provision.ai_control.api is defined
+      - provision.ai_control.api.listen == "127.0.0.1"
+      - provision.ai_control.api.port | int > 0
+      - provision.ai_control.api.port | int < 65536
       - provision.ai_control.web is defined
+      - provision.ai_control.web.provider == "open-webui"
       - provision.ai_control.web.port | int > 0
       - provision.ai_control.web.port | int < 65536
-      - provision.ai_control.web.username | length > 0
-    fail_msg: "Для роли ai_control требуется guest role=ai-control и раздел provision.ai_control"
+      - provision.docker is defined
+      - provision.docker.required_packages is defined
+    fail_msg: "Для роли ai_control требуется полный контракт AI Control и Docker"
 
 - name: Создать системную группу AI Control
   ansible.builtin.group:
@@ -42,7 +48,7 @@
     - "{{ provision.ai_control.paths.root }}"
     - "{{ provision.ai_control.paths.core }}"
     - "{{ provision.ai_control.paths.core_bin }}"
-    - "{{ provision.ai_control.paths.web_root }}"
+    - "{{ provision.ai_control.paths.compose }}"
     - "{{ provision.ai_control.paths.agents }}"
     - "{{ provision.ai_control.paths.primary_agent }}"
     - "{{ provision.ai_control.paths.repositories }}"
@@ -62,13 +68,25 @@
     path: "{{ item.path }}"
     state: directory
     owner: "{{ item.owner }}"
-    group: "{{ provision.ai_control.group }}"
-    mode: "0750"
+    group: "{{ item.group }}"
+    mode: "{{ item.mode }}"
   loop:
-    - { path: "{{ provision.ai_control.paths.state }}", owner: "{{ provision.ai_control.user }}" }
-    - { path: "{{ provision.ai_control.paths.configuration }}", owner: root }
-    - { path: "{{ provision.ai_control.paths.runtime }}", owner: "{{ provision.ai_control.user }}" }
-    - { path: "{{ provision.ai_control.paths.cache }}", owner: "{{ provision.ai_control.user }}" }
+    - path: "{{ provision.ai_control.paths.state }}"
+      owner: "{{ provision.ai_control.user }}"
+      group: "{{ provision.ai_control.group }}"
+      mode: "0750"
+    - path: "{{ provision.ai_control.paths.configuration }}"
+      owner: root
+      group: "{{ provision.ai_control.group }}"
+      mode: "0750"
+    - path: "{{ provision.ai_control.paths.runtime }}"
+      owner: "{{ provision.ai_control.user }}"
+      group: "{{ provision.ai_control.group }}"
+      mode: "0750"
+    - path: "{{ provision.ai_control.paths.cache }}"
+      owner: "{{ provision.ai_control.user }}"
+      group: "{{ provision.ai_control.group }}"
+      mode: "0750"
 
 - name: Создать внутренние каталоги постоянного состояния
   ansible.builtin.file:
@@ -90,9 +108,6 @@
     - source: opt/ai-control/core/bin/ai-control
       dest: /opt/ai-control/core/bin/ai-control
       mode: "0755"
-    - source: opt/ai-control/core/web/index.html
-      dest: /opt/ai-control/core/web/index.html
-      mode: "0644"
     - source: etc/ai-control/models.json
       dest: "{{ provision.ai_control.paths.models_config }}"
       mode: "0640"
@@ -101,37 +116,81 @@
       mode: "0640"
   register: ai_control_core_files
 
-- name: Проверить наличие локальных данных входа веб-интерфейса
-  ansible.builtin.stat:
-    path: "{{ provision.ai_control.paths.web_credentials }}"
-  register: ai_control_web_credentials_file
+- name: Удалить устаревший самописный веб-интерфейс
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /opt/ai-control/core/web
+    - /etc/ai-control/web.env
 
-- name: Сформировать начальный пароль веб-интерфейса
+- name: Проверить внутренний ключ API AI Control
+  ansible.builtin.stat:
+    path: "{{ provision.ai_control.paths.api_credentials }}"
+  register: ai_control_api_credentials_file
+
+- name: Сформировать внутренний ключ API AI Control
   ansible.builtin.command:
     argv:
       - python3
       - -c
-      - "import secrets; print(secrets.token_urlsafe(24))"
+      - "import secrets; print(secrets.token_urlsafe(36))"
   changed_when: false
   no_log: true
-  register: ai_control_generated_web_password
-  when: not ai_control_web_credentials_file.stat.exists
+  register: ai_control_generated_api_key
+  when: not ai_control_api_credentials_file.stat.exists
 
-- name: Сохранить локальные данные входа веб-интерфейса
+- name: Сохранить внутренний ключ API AI Control
   ansible.builtin.copy:
-    dest: "{{ provision.ai_control.paths.web_credentials }}"
+    dest: "{{ provision.ai_control.paths.api_credentials }}"
     owner: root
-    group: "{{ provision.ai_control.group }}"
-    mode: "0640"
+    group: root
+    mode: "0600"
     force: false
     content: |
-      AI_CONTROL_WEB_USER={{ provision.ai_control.web.username }}
-      AI_CONTROL_WEB_PASSWORD={{ ai_control_generated_web_password.stdout }}
+      AI_CONTROL_API_KEY={{ ai_control_generated_api_key.stdout }}
+      OPENAI_API_KEY={{ ai_control_generated_api_key.stdout }}
   no_log: true
-  register: ai_control_web_credentials
-  when: not ai_control_web_credentials_file.stat.exists
+  register: ai_control_api_credentials
+  when: not ai_control_api_credentials_file.stat.exists
 
-- name: Записать несекретную конфигурацию путей AI Control
+- name: Проверить данные входа Open WebUI
+  ansible.builtin.stat:
+    path: "{{ provision.ai_control.paths.open_webui_credentials }}"
+  register: ai_control_open_webui_credentials_file
+
+- name: Сформировать секреты Open WebUI
+  ansible.builtin.command:
+    argv:
+      - python3
+      - -c
+      - >-
+        import json,secrets;
+        print(json.dumps({
+        "secret":secrets.token_hex(32),
+        "password":secrets.token_urlsafe(24)}))
+  changed_when: false
+  no_log: true
+  register: ai_control_generated_open_webui_secrets
+  when: not ai_control_open_webui_credentials_file.stat.exists
+
+- name: Сохранить секреты Open WebUI
+  ansible.builtin.copy:
+    dest: "{{ provision.ai_control.paths.open_webui_credentials }}"
+    owner: root
+    group: root
+    mode: "0600"
+    force: false
+    content: |
+      WEBUI_SECRET_KEY={{ (ai_control_generated_open_webui_secrets.stdout | from_json).secret }}
+      WEBUI_ADMIN_EMAIL={{ provision.ai_control.web.admin_email }}
+      WEBUI_ADMIN_PASSWORD={{ (ai_control_generated_open_webui_secrets.stdout | from_json).password }}
+      WEBUI_ADMIN_NAME=Administrator
+  no_log: true
+  register: ai_control_open_webui_credentials
+  when: not ai_control_open_webui_credentials_file.stat.exists
+
+- name: Записать несекретную конфигурацию AI Control
   ansible.builtin.copy:
     dest: "{{ provision.ai_control.paths.configuration }}/ai-control.env"
     owner: root
@@ -144,12 +203,50 @@
       AI_CONTROL_CACHE={{ provision.ai_control.paths.cache }}
       AI_CONTROL_PROJECT_REPOSITORY={{ provision.ai_control.paths.project_repository }}
       AI_CONTROL_PRIMARY_AGENT={{ provision.ai_control.agent.primary }}
-      AI_CONTROL_WEB_ROOT={{ provision.ai_control.paths.web_root }}
-      AI_CONTROL_WEB_LISTEN={{ provision.ai_control.web.listen }}
-      AI_CONTROL_WEB_PORT={{ provision.ai_control.web.port }}
+      AI_CONTROL_API_LISTEN={{ provision.ai_control.api.listen }}
+      AI_CONTROL_API_PORT={{ provision.ai_control.api.port }}
+      AI_CONTROL_OPENAI_MODEL_ID={{ provision.ai_control.api.openai_model_id }}
       AI_CONTROL_MODELS_FILE={{ provision.ai_control.paths.models_config }}
       AI_CONTROL_TOOLS_FILE={{ provision.ai_control.paths.tools_config }}
   register: ai_control_environment
+
+- name: Сформировать Compose Open WebUI
+  ansible.builtin.copy:
+    dest: "{{ provision.ai_control.web.compose_file }}"
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      services:
+        open-webui:
+          image: {{ provision.ai_control.web.image }}
+          container_name: open-webui
+          network_mode: host
+          restart: unless-stopped
+          env_file:
+            - {{ provision.ai_control.paths.api_credentials }}
+            - {{ provision.ai_control.paths.open_webui_credentials }}
+          environment:
+            HOST: 0.0.0.0
+            PORT: "{{ provision.ai_control.web.port }}"
+            WEBUI_NAME: AI Control
+            ENABLE_OLLAMA_API: "false"
+            ENABLE_SIGNUP: "false"
+            OPENAI_API_BASE_URL: "http://127.0.0.1:{{ provision.ai_control.api.port }}/v1"
+          volumes:
+            - {{ provision.ai_control.paths.open_webui_data }}:/app/backend/data
+  register: ai_control_open_webui_compose
+
+- name: Проверить Compose Open WebUI
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ provision.ai_control.web.compose_file }}"
+      - config
+      - --quiet
+  changed_when: false
 
 - name: Установить systemd-службу AI Control
   ansible.builtin.copy:
@@ -171,7 +268,7 @@
     enabled: true
     daemon_reload: true
 
-- name: Запустить AI Control после установки ядра
+- name: Запустить AI Control
   ansible.builtin.systemd_service:
     name: "{{ provision.ai_control.service.unit }}"
     state: >-
@@ -181,7 +278,7 @@
           ai_control_service_unit.changed
           or ai_control_environment.changed
           or ai_control_core_files.changed
-          or (ai_control_web_credentials.changed | default(false))
+          or (ai_control_api_credentials.changed | default(false))
         )
         else 'started'
       }}
@@ -191,12 +288,28 @@
     - ai_control_executable.stat.exists
     - ai_control_executable.stat.executable | default(false)
 
-- name: Остановить AI Control до установки рабочего ядра
-  ansible.builtin.systemd_service:
-    name: "{{ provision.ai_control.service.unit }}"
-    state: stopped
-  when: >-
-    not (
-      ai_control_executable.stat.exists
-      and (ai_control_executable.stat.executable | default(false))
-    )
+- name: Получить образ Open WebUI
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ provision.ai_control.web.compose_file }}"
+      - pull
+  changed_when: false
+
+- name: Запустить Open WebUI
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ provision.ai_control.web.compose_file }}"
+      - up
+      - -d
+      - --remove-orphans
+  register: ai_control_open_webui_up
+  changed_when: >-
+    'Started' in (ai_control_open_webui_up.stdout + ai_control_open_webui_up.stderr)
+    or 'Created' in (ai_control_open_webui_up.stdout + ai_control_open_webui_up.stderr)
+    or 'Recreated' in (ai_control_open_webui_up.stdout + ai_control_open_webui_up.stderr)
