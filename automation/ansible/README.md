@@ -46,6 +46,11 @@ automation/
         ├── ai_control/
         │   ├── tasks/main.yml
         │   └── templates/docker-compose.yml.j2
+        ├── ai_services/
+        │   ├── tasks/main.yml
+        │   └── templates/
+        │       ├── docker-compose.yml.j2
+        │       └── model_aliases.json.j2
         └── infra_manager/
             └── tasks/
                 ├── main.yml
@@ -75,6 +80,7 @@ linux_base
 → docker, если Docker требуется гостю
 → infra_manager, если guest.yaml содержит role: infra-manager
 → ai_control, если guest.yaml содержит role: ai-control
+→ ai_services, если provision.yaml содержит ai_services
 → guest_layout
 ```
 
@@ -84,9 +90,10 @@ linux_base
 - `docker` — устанавливает и запускает Docker;
 - `infra_manager` — настраивает постоянное состояние, доступы, Semaphore, OpenBao и управляющую среду гостя с ролью `infra-manager`;
 - `ai_control` — разворачивает Hermes и Open WebUI через Docker Compose, создаёт их постоянные каталоги и локальные секреты и проверяет доступность обоих сервисов;
+- `ai_services` — разворачивает готовые Speaches и Wyoming OpenAI, загружает требуемые модели и проверяет их готовность;
 - `guest_layout` — создаёт только общие каталоги из `provision.components`, если они определены.
 
-Для 410 применяются `linux_base`, `docker`, `ai_control` и общий `guest_layout`. Для 910 применяются `linux_base`, `docker`, `infra_manager` и общий `guest_layout`.
+Для 410 применяются `linux_base`, `docker`, `ai_control` и общий `guest_layout`. Для 420 применяются `linux_base`, `docker`, `ai_services` и общий `guest_layout`. Для 910 применяются `linux_base`, `docker`, `infra_manager` и общий `guest_layout`.
 
 Постоянный файл `inventory` сейчас не хранится. `deploy-guest` определяет адрес выбранного гостя и запускает Ansible с одноузловым inventory через `-i <адрес>,`. Поэтому отдельный каталог `inventory/` не создаётся.
 
