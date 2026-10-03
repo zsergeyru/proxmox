@@ -97,6 +97,14 @@
     mode: "0750"
   loop: "{{ provision.ai_control.state_directories }}"
 
+- name: Защитить постоянные данные Open WebUI
+  ansible.builtin.file:
+    path: "{{ provision.ai_control.paths.open_webui_data }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
 - name: Установить минимальное ядро AI Control
   ansible.builtin.copy:
     src: "{{ guest_root }}/rootfs/{{ item.source }}"
@@ -223,6 +231,8 @@
           container_name: open-webui
           network_mode: host
           restart: unless-stopped
+          security_opt:
+            - no-new-privileges:true
           env_file:
             - {{ provision.ai_control.paths.api_credentials }}
             - {{ provision.ai_control.paths.open_webui_credentials }}
