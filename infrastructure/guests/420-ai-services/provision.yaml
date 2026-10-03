@@ -29,6 +29,8 @@ ai_services:
   speaches:
     image: ghcr.io/speaches-ai/speaches:0.8.3-cpu
     container_name: speaches
+    uid: 1000
+    gid: 1000
     port: 8000
     stt:
       model: Systran/faster-whisper-small
