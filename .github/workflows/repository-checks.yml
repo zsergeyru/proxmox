@@ -66,6 +66,9 @@ jobs:
       - name: Run AI Control contract checks
         run: python scripts/tests/test-ai-control-contract.py
 
+      - name: Run AI services contract checks
+        run: python scripts/tests/test-ai-services-contract.py
+
       - name: Check Python with Ruff
         run: ruff check scripts
 
