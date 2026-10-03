@@ -104,6 +104,8 @@ boundaries:
 persistence:
   backup_required:
     - /opt/ai-control/state
+    - /etc/ai-control/api.env
+    - /etc/ai-control/open-webui.env
 
   reproducible:
     - /opt/ai-control/core
