@@ -122,6 +122,7 @@ assert "guest_manifest.vmid == 410" not in playbook_text
 assert "guest_manifest.vmid | int == 410" not in playbook_text
 
 role_text = ROLE.read_text(encoding="utf-8")
+assert isinstance(yaml.safe_load(role_text), list)
 assert "provision.ai_control.paths" in role_text
 assert "ghcr.io/open-webui/open-webui" not in role_text
 assert "provision.ai_control.web.image" in role_text
