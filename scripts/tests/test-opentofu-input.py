@@ -96,9 +96,21 @@ with tempfile.TemporaryDirectory() as tmp:
 for vmid, guest in guests.items():
     assert str(guest["vmid"]) == vmid
     assert guest["type"] in {"vm", "lxc"}
-    assert guest["network"]["bridge"] == "vmbr0"
     assert guest["resources"]["disk_storage"] == "local-lvm"
-    ipv4 = guest["network"]["ipv4"]
-    assert ipv4 == "dhcp" or "/" in ipv4
+
+    network = guest["network"]
+    if "interfaces" in network:
+        assert network["interfaces"]
+        management = [
+            item for item in network["interfaces"] if item["management"]
+        ]
+        assert len(management) == 1
+        for item in network["interfaces"]:
+            assert item["bridge"]
+            assert item["ipv4"] == "dhcp" or "/" in item["ipv4"]
+    else:
+        assert network["bridge"] == "vmbr0"
+        ipv4 = network["ipv4"]
+        assert ipv4 == "dhcp" or "/" in ipv4
 
 print("[ОК] OpenTofu input contract")
