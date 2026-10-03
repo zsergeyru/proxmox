@@ -95,6 +95,7 @@ properties:
     uniqueItems: true
     items:
       enum: [container-host]
+
 $defs:
   simpleNetwork:
     type: object
@@ -114,34 +115,7 @@ $defs:
         oneOf:
           - const: dhcp
           - type: string
-            pattern: '^(?:[0-9]{1,3}\\.){3}[0-9]{1,3}/[0-9]{1,2}  - if:
-      properties:
-        type:
-          const: vm
-    then:
-      required: [template_vmid]
-      properties:
-        resources:
-          not:
-            required: [swap_mb]
-      not:
-        anyOf:
-          - required: [ostemplate]
-          - required: [features]
-  - if:
-      properties:
-        type:
-          const: lxc
-    then:
-      required: [ostemplate, features]
-      properties:
-        resources:
-          required: [swap_mb]
-          not:
-            required: [ballooning_mb]
-      not:
-        required: [template_vmid]
-
+            pattern: '^(?:[0-9]{1,3}[.]){3}[0-9]{1,3}/[0-9]{1,2}$'
   multiNetwork:
     type: object
     additionalProperties: false
@@ -171,66 +145,13 @@ $defs:
         oneOf:
           - const: dhcp
           - type: string
-            pattern: '^(?:[0-9]{1,3}\\.){3}[0-9]{1,3}/[0-9]{1,2}  - if:
-      properties:
-        type:
-          const: vm
-    then:
-      required: [template_vmid]
-      properties:
-        resources:
-          not:
-            required: [swap_mb]
-      not:
-        anyOf:
-          - required: [ostemplate]
-          - required: [features]
-  - if:
-      properties:
-        type:
-          const: lxc
-    then:
-      required: [ostemplate, features]
-      properties:
-        resources:
-          required: [swap_mb]
-          not:
-            required: [ballooning_mb]
-      not:
-        required: [template_vmid]
-
+            pattern: '^(?:[0-9]{1,3}[.]){3}[0-9]{1,3}/[0-9]{1,2}$'
       gateway:
         type: string
-        pattern: '^(?:[0-9]{1,3}\\.){3}[0-9]{1,3}  - if:
-      properties:
-        type:
-          const: vm
-    then:
-      required: [template_vmid]
-      properties:
-        resources:
-          not:
-            required: [swap_mb]
-      not:
-        anyOf:
-          - required: [ostemplate]
-          - required: [features]
-  - if:
-      properties:
-        type:
-          const: lxc
-    then:
-      required: [ostemplate, features]
-      properties:
-        resources:
-          required: [swap_mb]
-          not:
-            required: [ballooning_mb]
-      not:
-        required: [template_vmid]
-
+        pattern: '^(?:[0-9]{1,3}[.]){3}[0-9]{1,3}$'
       management:
         type: boolean
+
 allOf:
   - if:
       properties:
