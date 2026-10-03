@@ -74,7 +74,7 @@ Open WebUI запускается в Docker внутри VM 410.
 Текущая версия:
 
 ```text
-ghcr.io/open-webui/open-webui:v0.11.4-slim
+ghcr.io/open-webui/open-webui:0.11.4-slim
 ```
 
 Используется облегчённый образ, потому что сами AI-модели не запускаются внутри контейнера Open WebUI.
