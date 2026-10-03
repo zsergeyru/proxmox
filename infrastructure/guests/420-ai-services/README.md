@@ -1,0 +1,54 @@
+# 420 — ai-services
+
+**Тип:** LXC  
+**Статус:** проектируется  
+**Назначение:** общие готовые AI- и голосовые службы, которыми могут пользоваться несколько систем квартиры.
+
+`420 ai-services` не является агентом и не заменяет `410 ai-control`.
+
+Целевая схема:
+
+```text
+410 ai-control ───────┐
+Open WebUI ───────────┤
+Home Assistant ───────┼──► 420 ai-services
+голосовые панели ─────┘
+                         ├── Speaches
+                         │   ├── STT
+                         │   └── TTS
+                         └── Wyoming OpenAI
+```
+
+## Состав
+
+В базовую версию 420 входят только готовые проекты:
+
+- **Speaches** — общий OpenAI-совместимый API распознавания и синтеза речи;
+- **Wyoming OpenAI** — готовый мост между Home Assistant/Wyoming и Speaches.
+
+Собственные API, прокси и обёртки для этих функций не разрабатываются.
+
+Дополнительные общие AI-службы допускаются позже только при наличии реального общего потребителя.
+
+## Границы
+
+На 420 не размещаются:
+
+- Hermes и его память — это 410;
+- Open WebUI — это 410;
+- Home Assistant — область 200;
+- Frigate — область 500;
+- мониторинг — область 700;
+- инфраструктурный исполнитель — 910;
+- локальные LLM только ради Hermes — их размещение определяется отдельно.
+
+## Документация
+
+- [`docs/README.md`](docs/README.md) — навигация по локальной документации;
+- [`docs/ai-services.md`](docs/ai-services.md) — устройство 420 целиком;
+- [`docs/speaches.md`](docs/speaches.md) — STT/TTS через Speaches;
+- [`docs/wyoming-openai.md`](docs/wyoming-openai.md) — интеграция Home Assistant;
+- [`docs/decisions.md`](docs/decisions.md) — причины локальных решений;
+- [`docs/implementation-status.md`](docs/implementation-status.md) — текущее состояние реализации.
+
+Машинные файлы `guest.yaml`, `provision.yaml`, Compose и Ansible пока не создаются. Сначала фиксируется целевая локальная спецификация.
