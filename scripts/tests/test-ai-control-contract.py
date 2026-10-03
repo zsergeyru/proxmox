@@ -60,6 +60,8 @@ assert agent["image"] == "nousresearch/hermes-agent:v2026.9.14"
 assert agent["container_name"] == "hermes"
 assert agent["command"] == "gateway run"
 assert agent["shm_size"] == "1g"
+assert agent["uid"] == 10000
+assert agent["gid"] == 10000
 assert agent["api"] == {
     "enabled": True,
     "host": "127.0.0.1",
@@ -126,6 +128,8 @@ assert "open-webui:" in compose
 assert "command: {{ provision.ai_control.agent.command }}" in compose
 assert "network_mode: host" in compose
 assert "shm_size: {{ provision.ai_control.agent.shm_size }}" in compose
+assert 'HERMES_UID: "{{ provision.ai_control.agent.uid }}"' in compose
+assert 'HERMES_GID: "{{ provision.ai_control.agent.gid }}"' in compose
 assert "{{ provision.ai_control.paths.hermes_data }}:/opt/data" in compose
 assert (
     "{{ provision.ai_control.paths.open_webui_data }}:/app/backend/data"
