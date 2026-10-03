@@ -45,7 +45,7 @@ ai_control:
   web:
     required: true
     provider: open-webui
-    image: ghcr.io/open-webui/open-webui:v0.11.4-slim
+    image: ghcr.io/open-webui/open-webui:0.11.4-slim
     port: 4100
     admin_email: admin@ai-control.local
     compose_file: /opt/ai-control/compose/open-webui.yml
