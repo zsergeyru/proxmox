@@ -136,6 +136,16 @@
   no_log: true
   when: not ai_control_open_webui_env_file.stat.exists
 
+- name: Синхронизировать ключ Hermes в Open WebUI
+  ansible.builtin.lineinfile:
+    path: "{{ provision.ai_control.paths.open_webui_env }}"
+    regexp: '^OPENAI_API_KEY='
+    line: "OPENAI_API_KEY={{ ai_control_hermes_api_key }}"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+
 - name: Сформировать Compose AI Control
   ansible.builtin.template:
     src: docker-compose.yml.j2
