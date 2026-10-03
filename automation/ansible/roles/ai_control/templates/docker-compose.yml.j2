@@ -8,6 +8,9 @@ services:
     shm_size: {{ provision.ai_control.agent.shm_size }}
     env_file:
       - {{ provision.ai_control.paths.hermes_env }}
+    environment:
+      HERMES_UID: "{{ provision.ai_control.agent.uid }}"
+      HERMES_GID: "{{ provision.ai_control.agent.gid }}"
     volumes:
       - {{ provision.ai_control.paths.hermes_data }}:/opt/data
 
