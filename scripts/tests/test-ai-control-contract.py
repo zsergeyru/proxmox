@@ -130,6 +130,7 @@ assert "docker\n      - compose" in role_text
 assert "OPENAI_API_BASE_URL" in role_text
 assert "ENABLE_OLLAMA_API" in role_text
 assert "network_mode: host" in role_text
+assert "no-new-privileges:true" in role_text
 assert "secrets.token_urlsafe(36)" in role_text
 assert "secrets.token_hex(32)" in role_text
 assert "guest_manifest.vmid" not in role_text
