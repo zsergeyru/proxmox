@@ -1,9 +1,8 @@
 #!/usr/bin/python3
-"""Минимальное ядро AI Control: веб-интерфейс, API, задачи и память."""
+"""Минимальное ядро AI Control: API, задачи, память и адаптеры."""
 
 from __future__ import annotations
 
-import base64
 import hmac
 import json
 import os
@@ -17,7 +16,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
 
-VERSION = "0.1.0"
+VERSION = "0.2.0"
 MAX_BODY_BYTES = 1024 * 1024
 
 
@@ -35,9 +34,6 @@ def env(name: str, default: str | None = None) -> str:
 class Settings:
     def __init__(self) -> None:
         self.state = Path(env("AI_CONTROL_STATE", "/opt/ai-control/state"))
-        self.web_root = Path(
-            env("AI_CONTROL_WEB_ROOT", "/opt/ai-control/core/web")
-        )
         self.models_file = Path(
             env("AI_CONTROL_MODELS_FILE", "/etc/ai-control/models.json")
         )
@@ -45,10 +41,13 @@ class Settings:
             env("AI_CONTROL_TOOLS_FILE", "/etc/ai-control/tools.json")
         )
         self.primary_agent = env("AI_CONTROL_PRIMARY_AGENT", "hermes")
-        self.listen = env("AI_CONTROL_WEB_LISTEN", "0.0.0.0")
-        self.port = int(env("AI_CONTROL_WEB_PORT", "4100"))
-        self.web_user = env("AI_CONTROL_WEB_USER")
-        self.web_password = env("AI_CONTROL_WEB_PASSWORD")
+        self.openai_model_id = env(
+            "AI_CONTROL_OPENAI_MODEL_ID",
+            "hermes-agent",
+        )
+        self.listen = env("AI_CONTROL_API_LISTEN", "127.0.0.1")
+        self.port = int(env("AI_CONTROL_API_PORT", "4110"))
+        self.api_key = env("AI_CONTROL_API_KEY")
         self.database = self.state / "ai-control.sqlite3"
 
 
@@ -106,11 +105,24 @@ class Store:
                 """
             )
 
-    def audit(self, action: str, subject: str, details: dict | None = None) -> None:
+    def audit(
+        self,
+        action: str,
+        subject: str,
+        details: dict | None = None,
+    ) -> None:
         with self._lock, self.connect() as db:
             db.execute(
-                "INSERT INTO audit(created_at, action, subject, details) VALUES (?, ?, ?, ?)",
-                (utc_now(), action, subject, json.dumps(details or {}, ensure_ascii=False)),
+                """
+                INSERT INTO audit(created_at, action, subject, details)
+                VALUES (?, ?, ?, ?)
+                """,
+                (
+                    utc_now(),
+                    action,
+                    subject,
+                    json.dumps(details or {}, ensure_ascii=False),
+                ),
             )
 
     def list_tasks(self) -> list[dict]:
@@ -138,7 +150,8 @@ class Store:
     def get_task(self, task_id: str) -> dict:
         with self._lock, self.connect() as db:
             row = db.execute(
-                "SELECT * FROM tasks WHERE id = ?", (task_id,)
+                "SELECT * FROM tasks WHERE id = ?",
+                (task_id,),
             ).fetchone()
         if row is None:
             raise KeyError(task_id)
@@ -147,13 +160,18 @@ class Store:
     def cancel_task(self, task_id: str) -> dict:
         with self._lock, self.connect() as db:
             row = db.execute(
-                "SELECT status FROM tasks WHERE id = ?", (task_id,)
+                "SELECT status FROM tasks WHERE id = ?",
+                (task_id,),
             ).fetchone()
             if row is None:
                 raise KeyError(task_id)
             if row["status"] not in {"completed", "failed", "cancelled"}:
                 db.execute(
-                    "UPDATE tasks SET status='cancelled', updated_at=? WHERE id=?",
+                    """
+                    UPDATE tasks
+                    SET status='cancelled', updated_at=?
+                    WHERE id=?
+                    """,
                     (utc_now(), task_id),
                 )
         self.audit("task.cancelled", task_id)
@@ -177,8 +195,9 @@ class Store:
         with self._lock, self.connect() as db:
             db.execute(
                 """
-                INSERT INTO memory(id, created_at, updated_at, category, key, value)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO memory(
+                    id, created_at, updated_at, category, key, value
+                ) VALUES (?, ?, ?, ?, ?, ?)
                 ON CONFLICT(category, key) DO UPDATE SET
                     updated_at=excluded.updated_at,
                     value=excluded.value
@@ -188,7 +207,8 @@ class Store:
             row = db.execute(
                 """
                 SELECT id, created_at, updated_at, category, key, value
-                FROM memory WHERE category=? AND key=?
+                FROM memory
+                WHERE category=? AND key=?
                 """,
                 (category, key),
             ).fetchone()
@@ -213,7 +233,10 @@ class Store:
     def save_conversation(self, role: str, content: str) -> None:
         with self._lock, self.connect() as db:
             db.execute(
-                "INSERT INTO conversations(created_at, role, content) VALUES (?, ?, ?)",
+                """
+                INSERT INTO conversations(created_at, role, content)
+                VALUES (?, ?, ?)
+                """,
                 (utc_now(), role, content),
             )
 
@@ -227,7 +250,11 @@ def load_registry(path: Path, key: str) -> list[dict]:
     return value if isinstance(value, list) else []
 
 
-def select_model(models: list[dict], privacy: str, capability: str) -> dict | None:
+def select_model(
+    models: list[dict],
+    privacy: str,
+    capability: str,
+) -> dict | None:
     candidates = []
     for model in models:
         if not model.get("enabled", False):
@@ -265,6 +292,7 @@ class Api:
                 "name": self.settings.primary_agent,
                 "status": "not_connected",
             },
+            "openai_model_id": self.settings.openai_model_id,
             "models": {
                 "configured": len(models),
                 "enabled": sum(bool(item.get("enabled")) for item in models),
@@ -275,15 +303,26 @@ class Api:
                     item.get("status") == "available" for item in tools
                 ),
             },
-            "tasks": {
-                "count": len(self.store.list_tasks()),
-            },
+            "tasks": {"count": len(self.store.list_tasks())},
             "database": str(self.settings.database),
+        }
+
+    def openai_models(self) -> dict:
+        return {
+            "object": "list",
+            "data": [
+                {
+                    "id": self.settings.openai_model_id,
+                    "object": "model",
+                    "created": 0,
+                    "owned_by": "ai-control",
+                }
+            ],
         }
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "AIControl/0.1"
+    server_version = "AIControl/0.2"
 
     @property
     def api(self) -> Api:
@@ -295,7 +334,17 @@ class Handler(BaseHTTPRequestHandler):
             f"{fmt % args}\n"
         )
 
-    def send_json(self, payload: object, status: int = HTTPStatus.OK) -> None:
+    def security_headers(self) -> None:
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("Referrer-Policy", "no-referrer")
+        self.send_header("Cache-Control", "no-store")
+
+    def send_json(
+        self,
+        payload: object,
+        status: int = HTTPStatus.OK,
+    ) -> None:
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -304,51 +353,25 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def send_text(
-        self,
-        body: bytes,
-        content_type: str,
-        status: int = HTTPStatus.OK,
-    ) -> None:
-        self.send_response(status)
-        self.send_header("Content-Type", content_type)
-        self.send_header("Content-Length", str(len(body)))
-        self.security_headers()
-        self.end_headers()
-        self.wfile.write(body)
-
-    def security_headers(self) -> None:
-        self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("X-Frame-Options", "DENY")
-        self.send_header("Referrer-Policy", "no-referrer")
-        self.send_header(
-            "Content-Security-Policy",
-            "default-src 'self'; style-src 'self' 'unsafe-inline'; "
-            "script-src 'self' 'unsafe-inline'; connect-src 'self'",
-        )
-        self.send_header("Cache-Control", "no-store")
-
     def authorized(self) -> bool:
         header = self.headers.get("Authorization", "")
-        if not header.startswith("Basic "):
+        if not header.startswith("Bearer "):
             return False
-        try:
-            raw = base64.b64decode(header[6:], validate=True).decode("utf-8")
-            username, password = raw.split(":", 1)
-        except (ValueError, UnicodeDecodeError):
-            return False
-        return hmac.compare_digest(username, self.api.settings.web_user) and (
-            hmac.compare_digest(password, self.api.settings.web_password)
-        )
+        token = header.removeprefix("Bearer ").strip()
+        return hmac.compare_digest(token, self.api.settings.api_key)
 
     def require_auth(self) -> bool:
         if self.authorized():
             return True
-        self.send_response(HTTPStatus.UNAUTHORIZED)
-        self.send_header("WWW-Authenticate", 'Basic realm="AI Control"')
-        self.send_header("Content-Length", "0")
-        self.security_headers()
-        self.end_headers()
+        self.send_json(
+            {
+                "error": {
+                    "message": "Требуется внутренний API key AI Control",
+                    "type": "authentication_error",
+                }
+            },
+            HTTPStatus.UNAUTHORIZED,
+        )
         return False
 
     def read_json(self) -> dict:
@@ -376,17 +399,8 @@ class Handler(BaseHTTPRequestHandler):
         if not self.require_auth():
             return
 
-        if path in {"/", "/index.html"}:
-            index = self.api.settings.web_root / "index.html"
-            try:
-                body = index.read_bytes()
-            except OSError:
-                self.send_json(
-                    {"error": "web_ui_unavailable"},
-                    HTTPStatus.SERVICE_UNAVAILABLE,
-                )
-                return
-            self.send_text(body, "text/html; charset=utf-8")
+        if path == "/v1/models":
+            self.send_json(self.api.openai_models())
             return
         if path == "/api/status":
             self.send_json(self.api.status())
@@ -418,6 +432,10 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
             return
 
+        if path == "/v1/chat/completions":
+            self._openai_chat(data)
+            return
+
         if path == "/api/tasks":
             title = str(data.get("title", "")).strip()
             description = str(data.get("description", "")).strip()
@@ -440,7 +458,10 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 task = self.api.store.cancel_task(task_id)
             except KeyError:
-                self.send_json({"error": "task_not_found"}, HTTPStatus.NOT_FOUND)
+                self.send_json(
+                    {"error": "task_not_found"},
+                    HTTPStatus.NOT_FOUND,
+                )
                 return
             self.send_json(task)
             return
@@ -466,7 +487,11 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/models/select":
             privacy = str(data.get("privacy", "normal")).strip() or "normal"
             capability = str(data.get("capability", "chat")).strip() or "chat"
-            selected = select_model(self.api.models(), privacy, capability)
+            selected = select_model(
+                self.api.models(),
+                privacy,
+                capability,
+            )
             self.api.store.audit(
                 "model.select",
                 selected.get("id", "none") if selected else "none",
@@ -475,32 +500,50 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"model": selected})
             return
 
-        if path == "/api/chat":
-            message = str(data.get("message", "")).strip()
-            if not message:
-                self.send_json(
-                    {"error": "Поле message обязательно"},
-                    HTTPStatus.BAD_REQUEST,
-                )
-                return
-            self.api.store.save_conversation("user", message[:50000])
-            response = (
-                "Ядро AI Control работает, но основной агент Hermes ещё не "
-                "подключён. Сообщение сохранено в истории."
-            )
-            self.api.store.save_conversation("system", response)
-            self.api.store.audit("chat.agent_unavailable", "hermes")
+        self.send_json({"error": "not_found"}, HTTPStatus.NOT_FOUND)
+
+    def _openai_chat(self, data: dict) -> None:
+        requested_model = str(data.get("model", "")).strip()
+        if requested_model != self.api.settings.openai_model_id:
             self.send_json(
                 {
-                    "status": "agent_unavailable",
-                    "agent": self.api.settings.primary_agent,
-                    "message": response,
+                    "error": {
+                        "message": "Неизвестная модель AI Control",
+                        "type": "invalid_request_error",
+                    }
                 },
-                HTTPStatus.SERVICE_UNAVAILABLE,
+                HTTPStatus.NOT_FOUND,
             )
             return
 
-        self.send_json({"error": "not_found"}, HTTPStatus.NOT_FOUND)
+        messages = data.get("messages", [])
+        if isinstance(messages, list):
+            for message in messages:
+                if not isinstance(message, dict):
+                    continue
+                role = str(message.get("role", "")).strip()
+                content = message.get("content")
+                if role and isinstance(content, str) and content:
+                    self.api.store.save_conversation(role[:32], content[:50000])
+
+        self.api.store.audit(
+            "chat.agent_unavailable",
+            self.api.settings.primary_agent,
+            {"model": requested_model},
+        )
+        self.send_json(
+            {
+                "error": {
+                    "message": (
+                        "AI Control и Open WebUI работают, но Hermes ещё "
+                        "не подключён к ядру."
+                    ),
+                    "type": "service_unavailable",
+                    "code": "agent_unavailable",
+                }
+            },
+            HTTPStatus.SERVICE_UNAVAILABLE,
+        )
 
 
 class Server(ThreadingHTTPServer):
