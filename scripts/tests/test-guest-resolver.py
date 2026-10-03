@@ -67,6 +67,35 @@ def main() -> None:
     dhcp_source["network"] = {"ipv4": "dhcp"}
     assert not list(source_validator.iter_errors(dhcp_source))
 
+    multi_source = copy.deepcopy(source_109)
+    multi_source["network"] = {
+        "interfaces": [
+            {
+                "name": "wan",
+                "bridge": "vmbr0",
+                "vlan": 10,
+                "ipv4": "10.0.0.2/30",
+                "gateway": "10.0.0.1",
+            },
+            {
+                "name": "lan",
+                "bridge": "vmbr0",
+                "vlan": 20,
+                "ipv4": "192.168.1.9/16",
+                "management": True,
+            },
+        ]
+    }
+    assert not list(source_validator.iter_errors(multi_source))
+
+    mixed_source = copy.deepcopy(multi_source)
+    mixed_source["network"]["ipv4"] = "192.168.1.9"
+    assert list(source_validator.iter_errors(mixed_source))
+
+    bad_vlan = copy.deepcopy(multi_source)
+    bad_vlan["network"]["interfaces"][0]["vlan"] = 4095
+    assert list(source_validator.iter_errors(bad_vlan))
+
     assert not list(
         effective_validator.iter_errors(resolved_dhcp.effective)
     )
