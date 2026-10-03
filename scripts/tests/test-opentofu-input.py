@@ -29,7 +29,23 @@ guests = payload["guests"]
 assert "109" in guests
 assert guests["109"]["name"] == "network-gateway"
 assert guests["109"]["type"] == "vm"
-assert guests["109"]["network"]["ipv4"] == "192.168.1.9/16"
+assert guests["109"]["network"]["interfaces"] == [
+    {
+        "name": "wan",
+        "bridge": "vmbr0",
+        "vlan": 10,
+        "ipv4": "10.0.0.2/30",
+        "gateway": "10.0.0.1",
+        "management": False,
+    },
+    {
+        "name": "lan",
+        "bridge": "vmbr0",
+        "vlan": 20,
+        "ipv4": "192.168.1.9/16",
+        "management": True,
+    },
+]
 
 # AI Control разворачивается как обычная VM, но не должен попадать
 # в собственную область управления managed.
