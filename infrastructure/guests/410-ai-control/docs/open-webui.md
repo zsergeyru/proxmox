@@ -157,7 +157,7 @@ Open WebUI обращается к API AI Control по отдельному вн
 /app/backend/data
 ```
 
-Он входит в общий резервируемый каталог `/opt/ai-control/state/`.
+Он входит в общий резервируемый каталог `/opt/ai-control/state/`. На хосте каталог создаётся с владельцем `root` и режимом `0700`.
 
 В нём находятся пользовательские учётные записи, диалоги и внутренние настройки Open WebUI.
 
@@ -203,7 +203,7 @@ grep '^WEBUI_ADMIN_PASSWORD=' /etc/ai-control/open-webui.env
 4. сформировать Compose-файл;
 5. проверить его через `docker compose config --quiet`;
 6. получить закреплённый образ;
-7. запустить контейнер;
+7. запустить контейнер с `no-new-privileges`;
 8. оставить автоперезапуск `unless-stopped`.
 
 Compose-файл:
