@@ -77,7 +77,7 @@ tasks_text = (ROLE / "tasks/main.yml").read_text(encoding="utf-8")
 assert "ansible_facts.interfaces" in tasks_text
 assert "network_gateway_wan_address" in tasks_text
 assert "network_gateway_lan_address" in tasks_text
-assert "direct_wan_nat is sameas false" in tasks_text
+assert "direct_wan_nat == false" in tasks_text
 
 dnsmasq = (ROLE / "templates/dnsmasq.conf.j2").read_text(encoding="utf-8")
 assert "port=0" in dnsmasq
