@@ -1,0 +1,9 @@
+services:
+  adguard-home:
+    image: {{ provision.network_gateway.adguard_home.image }}
+    container_name: {{ provision.network_gateway.adguard_home.container_name }}
+    network_mode: host
+    restart: unless-stopped
+    volumes:
+      - {{ provision.network_gateway.adguard_home.paths.work }}:/opt/adguardhome/work
+      - {{ provision.network_gateway.adguard_home.paths.config }}:/opt/adguardhome/conf
