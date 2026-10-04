@@ -14,7 +14,7 @@
       - provision.network_gateway.forwarding.enabled is boolean
       - provision.network_gateway.dhcp.enabled is boolean
       - provision.network_gateway.firewall.enabled is boolean
-      - provision.network_gateway.firewall.direct_wan_nat is sameas false
+      - provision.network_gateway.firewall.direct_wan_nat == false
     fail_msg: "network_gateway должен ссылаться на два разных интерфейса из guest.yaml"
 
 - name: Выбрать логические WAN и LAN
