@@ -1,0 +1,34 @@
+schema_version: 1
+guest_vmid: 109
+
+system:
+  distribution: debian
+  version: "13"
+  architecture: amd64
+  required_packages:
+    - dnsmasq
+    - iproute2
+    - nftables
+    - wireguard-tools
+
+network_gateway:
+  interfaces:
+    wan: wan
+    lan: lan
+
+  forwarding:
+    enabled: true
+
+  dhcp:
+    enabled: true
+    interface: lan
+    range:
+      start: 192.168.1.100
+      end: 192.168.1.250
+    lease_time: 24h
+    domain: home.arpa
+    reservations: []
+
+  firewall:
+    enabled: true
+    direct_wan_nat: false

@@ -78,6 +78,13 @@
         - (provision_phase | default('full')) == "full"
         - (guest_manifest.role | default('')) == "ai-control"
 
+    - name: Настроить сетевой шлюз
+      ansible.builtin.include_role:
+        name: network_gateway
+      when:
+        - (provision_phase | default('full')) == "full"
+        - (guest_manifest.role | default('')) == "network-gateway"
+
     - name: Подготовить структуру каталогов гостя
       ansible.builtin.include_role:
         name: guest_layout

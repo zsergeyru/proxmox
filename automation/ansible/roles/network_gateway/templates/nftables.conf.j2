@@ -1,0 +1,24 @@
+#!/usr/sbin/nft -f
+# Управляется Ansible. Прямой WAN не использует NAT на 109.
+
+flush ruleset
+
+table inet network_gateway {
+  chain input {
+    type filter hook input priority filter;
+    policy accept;
+  }
+
+  chain forward {
+    type filter hook forward priority filter;
+    policy drop;
+
+    ct state established,related accept
+    iifname "{{ network_gateway_lan_device }}" oifname "{{ network_gateway_wan_device }}" accept
+  }
+
+  chain output {
+    type filter hook output priority filter;
+    policy accept;
+  }
+}

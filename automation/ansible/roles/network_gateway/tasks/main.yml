@@ -1,0 +1,108 @@
+---
+- name: Проверить контракт сетевого шлюза
+  ansible.builtin.assert:
+    that:
+      - provision.network_gateway is mapping
+      - provision.network_gateway.interfaces is mapping
+      - provision.network_gateway.interfaces.wan is string
+      - provision.network_gateway.interfaces.lan is string
+      - guest_manifest.network.interfaces is defined
+      - guest_manifest.network.interfaces | length >= 2
+      - provision.network_gateway.interfaces.wan in (guest_manifest.network.interfaces | map(attribute='name') | list)
+      - provision.network_gateway.interfaces.lan in (guest_manifest.network.interfaces | map(attribute='name') | list)
+      - provision.network_gateway.interfaces.wan != provision.network_gateway.interfaces.lan
+      - provision.network_gateway.forwarding.enabled is boolean
+      - provision.network_gateway.dhcp.enabled is boolean
+      - provision.network_gateway.firewall.enabled is boolean
+      - provision.network_gateway.firewall.direct_wan_nat == false
+    fail_msg: "network_gateway должен ссылаться на два разных интерфейса из guest.yaml"
+
+- name: Выбрать логические WAN и LAN
+  ansible.builtin.set_fact:
+    network_gateway_wan_manifest: >-
+      {{ (guest_manifest.network.interfaces
+          | selectattr('name', 'equalto', provision.network_gateway.interfaces.wan)
+          | list
+          | first) }}
+    network_gateway_lan_manifest: >-
+      {{ (guest_manifest.network.interfaces
+          | selectattr('name', 'equalto', provision.network_gateway.interfaces.lan)
+          | list
+          | first) }}
+
+- name: Получить адреса WAN и LAN
+  ansible.builtin.set_fact:
+    network_gateway_wan_address: "{{ network_gateway_wan_manifest.ipv4.split('/')[0] }}"
+    network_gateway_lan_address: "{{ network_gateway_lan_manifest.ipv4.split('/')[0] }}"
+
+- name: Найти системный WAN-интерфейс по адресу
+  ansible.builtin.set_fact:
+    network_gateway_wan_device: "{{ item }}"
+  loop: "{{ ansible_facts.interfaces }}"
+  when:
+    - ansible_facts[item] is mapping
+    - ansible_facts[item].ipv4 is defined
+    - ansible_facts[item].ipv4.address == network_gateway_wan_address
+
+- name: Найти системный LAN-интерфейс по адресу
+  ansible.builtin.set_fact:
+    network_gateway_lan_device: "{{ item }}"
+  loop: "{{ ansible_facts.interfaces }}"
+  when:
+    - ansible_facts[item] is mapping
+    - ansible_facts[item].ipv4 is defined
+    - ansible_facts[item].ipv4.address == network_gateway_lan_address
+
+- name: Проверить найденные интерфейсы
+  ansible.builtin.assert:
+    that:
+      - network_gateway_wan_device is defined
+      - network_gateway_lan_device is defined
+      - network_gateway_wan_device != network_gateway_lan_device
+    fail_msg: >-
+      Не удалось однозначно сопоставить логические WAN/LAN из guest.yaml
+      с интерфейсами Debian по их IPv4-адресам.
+
+- name: Настроить пересылку IPv4
+  ansible.builtin.template:
+    src: sysctl.conf.j2
+    dest: /etc/sysctl.d/90-network-gateway.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Применить sysctl сетевого шлюза
+
+- name: Настроить DHCP dnsmasq
+  ansible.builtin.template:
+    src: dnsmasq.conf.j2
+    dest: /etc/dnsmasq.d/network-gateway.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Перезапустить dnsmasq
+  when: provision.network_gateway.dhcp.enabled | bool
+
+- name: Включить dnsmasq
+  ansible.builtin.systemd:
+    name: dnsmasq
+    enabled: true
+    state: started
+  when: provision.network_gateway.dhcp.enabled | bool
+
+- name: Настроить nftables
+  ansible.builtin.template:
+    src: nftables.conf.j2
+    dest: /etc/nftables.conf
+    owner: root
+    group: root
+    mode: "0644"
+    validate: "nft -c -f %s"
+  notify: Перезапустить nftables
+  when: provision.network_gateway.firewall.enabled | bool
+
+- name: Включить nftables
+  ansible.builtin.systemd:
+    name: nftables
+    enabled: true
+    state: started
+  when: provision.network_gateway.firewall.enabled | bool
