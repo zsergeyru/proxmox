@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+import importlib.util
+import tempfile
 
 import yaml
 
@@ -87,6 +89,9 @@ required_files = [
     ROLE / "handlers/main.yml",
     ROLE / "templates/sysctl.conf.j2",
     ROLE / "templates/nftables.conf.j2",
+    ROLE / "templates/routing-sources.yaml.j2",
+    ROLE / "tasks/routing_sources.yml",
+    ROLE / "files/network-gateway-lists.py",
 ]
 for path in required_files:
     assert path.is_file() and path.stat().st_size > 0, path
@@ -102,5 +107,87 @@ assert "policy drop" in nftables
 assert "ct state established,related accept" in nftables
 assert "masquerade" not in nftables.lower()
 assert "snat" not in nftables.lower()
+
+normalizer_path = ROLE / "files/network-gateway-lists.py"
+spec = importlib.util.spec_from_file_location("network_gateway_lists", normalizer_path)
+assert spec is not None and spec.loader is not None
+normalizer = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(normalizer)
+
+assert normalizer.normalize("Example.COM\n# comment\nexample.com\n", "domain-list") == [
+    "example.com"
+]
+assert normalizer.normalize(
+    "127.0.0.1 localhost\n192.168.1.10 PC-SERGEY\n",
+    "hosts",
+) == ["localhost", "pc-sergey"]
+assert normalizer.normalize("192.168.1.1\n192.168.1.1\n", "ip-list") == [
+    "192.168.1.1"
+]
+assert normalizer.normalize("10.0.0.1/24\n", "cidr-list") == ["10.0.0.0/24"]
+
+merged = normalizer.merge_sources(
+    [
+        {
+            "name": "remote",
+            "format": "domain-list",
+            "target": "vpn1",
+            "priority": 100,
+            "values": ["example.com"],
+        },
+        {
+            "name": "local",
+            "format": "domain-list",
+            "target": "direct",
+            "priority": 1000,
+            "values": ["example.com"],
+        },
+    ]
+)
+assert merged["domain-list:example.com"]["target"] == "direct"
+
+try:
+    normalizer.merge_sources(
+        [
+            {
+                "name": "a",
+                "format": "domain-list",
+                "target": "vpn1",
+                "priority": 100,
+                "values": ["conflict.example"],
+            },
+            {
+                "name": "b",
+                "format": "domain-list",
+                "target": "vpn2",
+                "priority": 100,
+                "values": ["conflict.example"],
+            },
+        ]
+    )
+except ValueError:
+    pass
+else:
+    raise AssertionError("конфликт одинакового приоритета должен завершаться ошибкой")
+
+with tempfile.TemporaryDirectory() as tmp:
+    tmp_path = Path(tmp)
+    source_file = tmp_path / "domains.txt"
+    source_file.write_text("example.com\n", encoding="utf-8")
+    state = tmp_path / "state"
+    source = {
+        "name": "test",
+        "type": "file",
+        "path": str(source_file),
+        "format": "domain-list",
+        "target": "vpn1",
+        "priority": 100,
+    }
+    first = normalizer.load_source(source, state, True)
+    assert first["from_last_good"] is False
+    source_file.unlink()
+    fallback = normalizer.load_source(source, state, True)
+    assert fallback["from_last_good"] is True
+    assert fallback["values"] == ["example.com"]
 
 print("[ОК] Network Gateway contract")
