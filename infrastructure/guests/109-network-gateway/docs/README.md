@@ -10,7 +10,8 @@
 |---|---|
 | [network-gateway.md](network-gateway.md) | Полная спецификация VM 109: сеть, службы, запуск, проверка и восстановление |
 | [smartdns.md](smartdns.md) | Локальная спецификация SmartDNS на 109 |
-| [routing-vpn.md](routing-vpn.md) | nftables, PBR, обычный WAN и VPN-маршруты |
+| [routing-vpn.md](routing-vpn.md) | nftables, PBR, обычный WAN, VPN и nfqws2 |
+| [routing-lists.md](routing-lists.md) | Источники списков доменов/IP, приоритеты, обновление и назначения direct/VPN/zapret |
 | [implementation-status.md](implementation-status.md) | Что уже реализовано и что ещё требуется сделать |
 
 Причины ключевых решений хранятся отдельно в каталоге [../decisions/](../decisions/).
