@@ -6,7 +6,8 @@ system:
   version: "13"
   architecture: amd64
   required_packages:
-    - dnsmasq
+    - ca-certificates
+    - curl
     - iproute2
     - nftables
     - wireguard-tools
@@ -19,15 +20,44 @@ network_gateway:
   forwarding:
     enabled: true
 
-  dhcp:
+  adguard_home:
     enabled: true
     interface: lan
-    range:
-      start: 192.168.1.100
-      end: 192.168.1.250
-    lease_time: 24h
     domain: home.arpa
-    reservations: []
+    dhcp:
+      enabled: true
+      range:
+        start: 192.168.1.100
+        end: 192.168.1.250
+      lease_time: 24h
+    upstream:
+      host: 127.0.0.1
+      port: 6053
+
+  smartdns:
+    enabled: true
+    listen:
+      host: 127.0.0.1
+      port: 6053
+    domain_sets:
+      enabled: true
+
+  routing:
+    default: direct
+    sources: []
+    update:
+      enabled: true
+      interval: 6h
+      keep_last_good: true
+    targets:
+      direct:
+        type: wan
+      zapret:
+        type: nfqws2
+
+  nfqws2:
+    enabled: true
+    target: zapret
 
   firewall:
     enabled: true
