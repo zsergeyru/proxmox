@@ -10,3 +10,8 @@
   ansible.builtin.systemd:
     name: nftables
     state: restarted
+
+- name: Перезапустить SmartDNS
+  ansible.builtin.systemd:
+    name: smartdns
+    state: restarted
