@@ -43,6 +43,9 @@ assert gateway["interfaces"] == {"wan": "wan", "lan": "lan"}
 assert gateway["forwarding"]["enabled"] is True
 adguard = gateway["adguard_home"]
 assert adguard["enabled"] is True
+assert adguard["image"] == "adguard/adguardhome:v0.107.79"
+assert adguard["web"]["port"] == 3000
+assert adguard["dhcp"]["lease_seconds"] == 86400
 assert adguard["interface"] == "lan"
 assert adguard["domain"] == "home.arpa"
 assert adguard["dhcp"]["enabled"] is True
@@ -54,6 +57,8 @@ assert adguard["upstream"] == {"host": "127.0.0.1", "port": 6053}
 
 smartdns = gateway["smartdns"]
 assert smartdns["enabled"] is True
+assert smartdns["version"] == "48.4"
+assert len(smartdns["upstreams"]) >= 2
 assert smartdns["listen"] == {"host": "127.0.0.1", "port": 6053}
 assert smartdns["domain_sets"]["enabled"] is True
 
@@ -92,6 +97,14 @@ required_files = [
     ROLE / "templates/routing-sources.yaml.j2",
     ROLE / "tasks/routing_sources.yml",
     ROLE / "files/network-gateway-lists.py",
+    ROLE / "tasks/smartdns.yml",
+    ROLE / "templates/smartdns.conf.j2",
+    ROLE / "tasks/adguard_home.yml",
+    ROLE / "tasks/adguard_home_bootstrap.yml",
+    ROLE / "tasks/adguard_home_configure.yml",
+    ROLE / "templates/docker-compose.yml.j2",
+    ROLE / "templates/network-gateway-lists.service.j2",
+    ROLE / "templates/network-gateway-lists.timer.j2",
 ]
 for path in required_files:
     assert path.is_file() and path.stat().st_size > 0, path
@@ -107,6 +120,17 @@ assert "policy drop" in nftables
 assert "ct state established,related accept" in nftables
 assert "masquerade" not in nftables.lower()
 assert "snat" not in nftables.lower()
+assert "route_direct_v4" in nftables
+assert "route_zapret_v4" in nftables
+
+smartdns_template = (ROLE / "templates/smartdns.conf.j2").read_text(encoding="utf-8")
+assert "server-https" in smartdns_template
+assert "domain-set" in smartdns_template
+assert "-nftset" in smartdns_template
+
+compose_template = (ROLE / "templates/docker-compose.yml.j2").read_text(encoding="utf-8")
+assert "network_mode: host" in compose_template
+assert "adguard-home" in compose_template
 
 normalizer_path = ROLE / "files/network-gateway-lists.py"
 spec = importlib.util.spec_from_file_location("network_gateway_lists", normalizer_path)
