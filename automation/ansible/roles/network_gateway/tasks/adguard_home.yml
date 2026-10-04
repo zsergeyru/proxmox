@@ -1,0 +1,63 @@
+---
+- name: Проверить контракт AdGuard Home
+  ansible.builtin.assert:
+    that:
+      - provision.docker is defined
+      - provision.network_gateway.adguard_home.image is string
+      - provision.network_gateway.adguard_home.interface == provision.network_gateway.interfaces.lan
+      - provision.network_gateway.adguard_home.dhcp.enabled is boolean
+    fail_msg: "Некорректный контракт AdGuard Home"
+
+- name: Создать каталоги AdGuard Home
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - "{{ provision.network_gateway.adguard_home.paths.root }}"
+    - "{{ provision.network_gateway.adguard_home.paths.compose }}"
+    - "{{ provision.network_gateway.adguard_home.paths.work }}"
+    - "{{ provision.network_gateway.adguard_home.paths.config }}"
+
+- name: Сформировать Compose сетевых служб
+  ansible.builtin.template:
+    src: docker-compose.yml.j2
+    dest: "{{ provision.network_gateway.adguard_home.paths.compose_file }}"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Проверить Compose сетевых служб
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ provision.network_gateway.adguard_home.paths.compose_file }}"
+      - config
+      - --quiet
+  changed_when: false
+
+- name: Получить образ AdGuard Home
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ provision.network_gateway.adguard_home.paths.compose_file }}"
+      - pull
+  changed_when: false
+
+- name: Проверить существующую конфигурацию AdGuard Home
+  ansible.builtin.stat:
+    path: "{{ provision.network_gateway.adguard_home.paths.config }}/AdGuardHome.yaml"
+  register: network_gateway_adguard_config
+
+- name: Подготовить начальную настройку AdGuard Home
+  ansible.builtin.include_tasks: adguard_home_bootstrap.yml
+  when: not network_gateway_adguard_config.stat.exists
+
+- name: Настроить рабочее состояние AdGuard Home
+  ansible.builtin.include_tasks: adguard_home_configure.yml
