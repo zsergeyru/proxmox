@@ -191,7 +191,7 @@ role_order = [
     if isinstance(task, dict)
     and isinstance(task.get("ansible.builtin.include_role"), dict)
 ]
-expected_role_order = ["linux_base", "docker", "infra_manager", "ai_control", "guest_layout"]
+expected_role_order = ["linux_base", "docker", "infra_manager", "ai_control", "network_gateway", "guest_layout"]
 if role_order != expected_role_order:
     raise SystemExit(
         f"неожиданный порядок Ansible roles: {role_order!r}; "
