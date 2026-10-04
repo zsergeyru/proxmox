@@ -149,7 +149,9 @@ def render(config: dict, state_dir: Path, output_dir: Path) -> None:
     ]
     merged = merge_sources(loaded)
 
-    target_values: dict[str, dict[str, list[str]]] = {}
+    target_values: dict[str, dict[str, list[str]]] = {
+        name: {} for name in routing.get("targets", {})
+    }
     for entry in merged.values():
         target = target_values.setdefault(entry["target"], {})
         target.setdefault(entry["format"], []).append(entry["value"])
@@ -157,6 +159,15 @@ def render(config: dict, state_dir: Path, output_dir: Path) -> None:
     staging = Path(tempfile.mkdtemp(prefix=".routing.", dir=output_dir.parent))
     try:
         for target, formats in target_values.items():
+            target_dir = staging / target
+            target_dir.mkdir(parents=True, exist_ok=True)
+            domains = sorted(
+                set(formats.get("domain-list", [])) | set(formats.get("hosts", []))
+            )
+            (target_dir / "domains.txt").write_text(
+                ("\n".join(domains) + "\n") if domains else "",
+                encoding="utf-8",
+            )
             for fmt, values in formats.items():
                 path = staging / target / f"{fmt}.txt"
                 path.parent.mkdir(parents=True, exist_ok=True)
