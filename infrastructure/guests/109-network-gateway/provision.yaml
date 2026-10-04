@@ -12,6 +12,19 @@ system:
     - nftables
     - wireguard-tools
 
+docker:
+  source: docker-official-repository
+  service:
+    name: docker
+    enabled: true
+    state: running
+  required_packages:
+    - docker-ce
+    - docker-ce-cli
+    - containerd.io
+    - docker-buildx-plugin
+    - docker-compose-plugin
+
 network_gateway:
   interfaces:
     wan: wan
@@ -22,14 +35,26 @@ network_gateway:
 
   adguard_home:
     enabled: true
+    image: adguard/adguardhome:v0.107.79
+    container_name: adguard-home
     interface: lan
     domain: home.arpa
+    web:
+      port: 3000
+      admin_user: admin
+    paths:
+      root: /opt/network-gateway
+      compose: /opt/network-gateway/compose
+      compose_file: /opt/network-gateway/compose/docker-compose.yml
+      work: /opt/network-gateway/adguard/work
+      config: /opt/network-gateway/adguard/conf
+      admin_secret: /etc/network-gateway/adguard-admin.env
     dhcp:
       enabled: true
       range:
         start: 192.168.1.100
         end: 192.168.1.250
-      lease_time: 24h
+      lease_seconds: 86400
     upstream:
       host: 127.0.0.1
       port: 6053
