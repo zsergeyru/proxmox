@@ -1,0 +1,17 @@
+---
+- name: Применить sysctl сетевого шлюза
+  ansible.builtin.command:
+    argv:
+      - sysctl
+      - --system
+  changed_when: true
+
+- name: Перезапустить dnsmasq
+  ansible.builtin.systemd:
+    name: dnsmasq
+    state: restarted
+
+- name: Перезапустить nftables
+  ansible.builtin.systemd:
+    name: nftables
+    state: restarted
