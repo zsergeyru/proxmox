@@ -65,3 +65,33 @@
       - --output-dir
       - /var/lib/network-gateway/routing/current
   changed_when: true
+
+- name: Установить службу обновления списков
+  ansible.builtin.template:
+    src: network-gateway-lists.service.j2
+    dest: /etc/systemd/system/network-gateway-lists.service
+    owner: root
+    group: root
+    mode: "0644"
+  register: network_gateway_lists_service
+
+- name: Установить таймер обновления списков
+  ansible.builtin.template:
+    src: network-gateway-lists.timer.j2
+    dest: /etc/systemd/system/network-gateway-lists.timer
+    owner: root
+    group: root
+    mode: "0644"
+  register: network_gateway_lists_timer
+
+- name: Перечитать systemd после изменения обновления списков
+  ansible.builtin.systemd:
+    daemon_reload: true
+  when: network_gateway_lists_service.changed or network_gateway_lists_timer.changed
+
+- name: Включить таймер обновления списков
+  ansible.builtin.systemd:
+    name: network-gateway-lists.timer
+    enabled: true
+    state: started
+  when: provision.network_gateway.routing.update.enabled | bool
