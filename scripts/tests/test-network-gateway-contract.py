@@ -39,19 +39,38 @@ assert provision["system"]["architecture"] == "amd64"
 gateway = provision["network_gateway"]
 assert gateway["interfaces"] == {"wan": "wan", "lan": "lan"}
 assert gateway["forwarding"]["enabled"] is True
-assert gateway["dhcp"]["enabled"] is True
-assert gateway["dhcp"]["range"] == {
+adguard = gateway["adguard_home"]
+assert adguard["enabled"] is True
+assert adguard["interface"] == "lan"
+assert adguard["domain"] == "home.arpa"
+assert adguard["dhcp"]["enabled"] is True
+assert adguard["dhcp"]["range"] == {
     "start": "192.168.1.100",
     "end": "192.168.1.250",
 }
-assert gateway["dhcp"]["domain"] == "home.arpa"
+assert adguard["upstream"] == {"host": "127.0.0.1", "port": 6053}
+
+smartdns = gateway["smartdns"]
+assert smartdns["enabled"] is True
+assert smartdns["listen"] == {"host": "127.0.0.1", "port": 6053}
+assert smartdns["domain_sets"]["enabled"] is True
+
+routing = gateway["routing"]
+assert routing["default"] == "direct"
+assert routing["sources"] == []
+assert routing["update"]["keep_last_good"] is True
+assert routing["targets"]["direct"]["type"] == "wan"
+assert routing["targets"]["zapret"]["type"] == "nfqws2"
+
+assert gateway["nfqws2"] == {"enabled": True, "target": "zapret"}
 assert gateway["firewall"]["enabled"] is True
 assert gateway["firewall"]["direct_wan_nat"] is False
 
 required_packages = set(provision["system"]["required_packages"])
-assert {"dnsmasq", "iproute2", "nftables", "wireguard-tools"}.issubset(
+assert {"ca-certificates", "curl", "iproute2", "nftables", "wireguard-tools"}.issubset(
     required_packages
 )
+assert "dnsmasq" not in required_packages
 
 tasks = playbook[0]["tasks"]
 network_gateway_tasks = [
@@ -67,7 +86,6 @@ required_files = [
     ROLE / "tasks/main.yml",
     ROLE / "handlers/main.yml",
     ROLE / "templates/sysctl.conf.j2",
-    ROLE / "templates/dnsmasq.conf.j2",
     ROLE / "templates/nftables.conf.j2",
 ]
 for path in required_files:
@@ -78,12 +96,6 @@ assert "ansible_facts.interfaces" in tasks_text
 assert "network_gateway_wan_address" in tasks_text
 assert "network_gateway_lan_address" in tasks_text
 assert "direct_wan_nat == false" in tasks_text
-
-dnsmasq = (ROLE / "templates/dnsmasq.conf.j2").read_text(encoding="utf-8")
-assert "port=0" in dnsmasq
-assert "dhcp-range=" in dnsmasq
-assert "option:router" in dnsmasq
-assert "option:dns-server" in dnsmasq
 
 nftables = (ROLE / "templates/nftables.conf.j2").read_text(encoding="utf-8")
 assert "policy drop" in nftables
