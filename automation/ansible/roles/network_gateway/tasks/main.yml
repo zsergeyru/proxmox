@@ -12,7 +12,14 @@
       - provision.network_gateway.interfaces.lan in (guest_manifest.network.interfaces | map(attribute='name') | list)
       - provision.network_gateway.interfaces.wan != provision.network_gateway.interfaces.lan
       - provision.network_gateway.forwarding.enabled is boolean
-      - provision.network_gateway.dhcp.enabled is boolean
+      - provision.network_gateway.adguard_home.enabled is boolean
+      - provision.network_gateway.adguard_home.dhcp.enabled is boolean
+      - provision.network_gateway.smartdns.enabled is boolean
+      - provision.network_gateway.routing.default == "direct"
+      - provision.network_gateway.routing.sources is sequence
+      - provision.network_gateway.routing.update.keep_last_good is boolean
+      - provision.network_gateway.routing.targets.direct.type == "wan"
+      - provision.network_gateway.nfqws2.target == "zapret"
       - provision.network_gateway.firewall.enabled is boolean
       - provision.network_gateway.firewall.direct_wan_nat == false
     fail_msg: "network_gateway должен ссылаться на два разных интерфейса из guest.yaml"
@@ -72,22 +79,8 @@
     mode: "0644"
   notify: Применить sysctl сетевого шлюза
 
-- name: Настроить DHCP dnsmasq
-  ansible.builtin.template:
-    src: dnsmasq.conf.j2
-    dest: /etc/dnsmasq.d/network-gateway.conf
-    owner: root
-    group: root
-    mode: "0644"
-  notify: Перезапустить dnsmasq
-  when: provision.network_gateway.dhcp.enabled | bool
-
-- name: Включить dnsmasq
-  ansible.builtin.systemd:
-    name: dnsmasq
-    enabled: true
-    state: started
-  when: provision.network_gateway.dhcp.enabled | bool
+- name: Подготовить механизм списков маршрутизации
+  ansible.builtin.include_tasks: routing_sources.yml
 
 - name: Настроить nftables
   ansible.builtin.template:
