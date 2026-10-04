@@ -134,7 +134,9 @@ Keenetic должен иметь маршрут к HOME через 10.0.0.2, п�
 
 AdGuard Home и SmartDNS могут работать в Docker, но маршрутизация и межсетевой экран не должны зависеть от Docker-сети.
 
-AdGuard Home является основным DHCP и точкой входа DNS для клиентов HOME. Он ведёт клиентов, DHCP-аренды и локальные имена home.arpa. SmartDNS работает за ним и отвечает за внешнее DNS-разрешение, доменные группы и передачу полученных адресов в nftables sets для PBR.
+AdGuard Home является основным DHCP и точкой входа DNS для клиентов HOME. Он ведёт клиентов, DHCP-аренды и локальные имена home.arpa. SmartDNS работает за ним и отвечает за внешнее DNS-разрешение и доменную классификацию. Доменные/IP-списки могут приходить из локальных файлов и внешних источников; после нормализации они управляют назначениями direct, VPN и zapret.
+
+`nfqws2` используется как отдельный способ обработки только выбранного трафика через NFQUEUE. Он не заменяет VPN и не обрабатывает весь трафик по умолчанию.
 
 sing-box допускается только там, где обычной L3-маршрутизации недостаточно.
 
@@ -305,6 +307,7 @@ VM должна быть воспроизводима из guest.yaml, provision
 
 - [smartdns.md](smartdns.md)
 - [routing-vpn.md](routing-vpn.md)
+- [routing-lists.md](routing-lists.md)
 - [implementation-status.md](implementation-status.md)
 - [ADR 002](../decisions/002-primary-gateway-and-fallback.md)
 - [Общая схема сети](../../../../docs/400-network/410-network-layout.md)
