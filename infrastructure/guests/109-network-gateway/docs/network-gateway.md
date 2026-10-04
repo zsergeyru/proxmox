@@ -143,25 +143,25 @@ sing-box допускается только там, где обычной L3-м
 ### 3.2. Общая логика
 
 ~~~text
-DHCP
-  ├── IP
-  ├── gateway = 109
-  └── DNS = 109
-
-DNS request
+клиент HOME
   ↓
-SmartDNS
-  ↓
-destination addresses / nftables set
-  ↓
-fwmark
-  ↓
-ip rule
-  ↓
-routing table
-  ├── ordinary WAN
-  ├── AmneziaWG
-  └── other VPN
+AdGuard Home
+  ├── DHCP
+  ├── клиенты
+  ├── home.arpa
+  └── внешний DNS
+          ↓
+       SmartDNS
+          ↑
+ локальные/внешние списки
+          ↓
+ direct / vpn1 / vpn2 / zapret
+          ↓
+      nftables
+      ├── direct → main → Keenetic
+      ├── vpn1   → table VPN1
+      ├── vpn2   → table VPN2
+      └── zapret → NFQUEUE → nfqws2 → main → Keenetic
 ~~~
 
 ## 4. DHCP и локальные имена
@@ -305,6 +305,7 @@ VM должна быть воспроизводима из guest.yaml, provision
 
 ## 8. Связанные документы
 
+- [adguard-home.md](adguard-home.md)
 - [smartdns.md](smartdns.md)
 - [routing-vpn.md](routing-vpn.md)
 - [routing-lists.md](routing-lists.md)
