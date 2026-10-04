@@ -104,3 +104,7 @@
   ansible.builtin.include_tasks: smartdns.yml
   when: provision.network_gateway.smartdns.enabled | bool
 
+
+- name: Настроить AdGuard Home
+  ansible.builtin.include_tasks: adguard_home.yml
+  when: provision.network_gateway.adguard_home.enabled | bool
