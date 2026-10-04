@@ -1,0 +1,2 @@
+# Управляется Ansible. Ручные изменения будут перезаписаны.
+net.ipv4.ip_forward = {{ 1 if provision.network_gateway.forwarding.enabled | bool else 0 }}
