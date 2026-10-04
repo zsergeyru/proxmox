@@ -82,6 +82,10 @@
 - name: Подготовить механизм списков маршрутизации
   ansible.builtin.include_tasks: routing_sources.yml
 
+- name: Настроить SmartDNS
+  ansible.builtin.include_tasks: smartdns.yml
+  when: provision.network_gateway.smartdns.enabled | bool
+
 - name: Настроить nftables
   ansible.builtin.template:
     src: nftables.conf.j2
