@@ -10,6 +10,7 @@ system:
     - curl
     - iproute2
     - nftables
+    - openssl
     - wireguard-tools
 
 docker:
