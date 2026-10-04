@@ -50,6 +50,45 @@
       - pull
   changed_when: false
 
+- name: Создать каталог настроек systemd-resolved
+  ansible.builtin.file:
+    path: /etc/systemd/resolved.conf.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Проверить systemd-resolved
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - is-active
+      - systemd-resolved
+  register: network_gateway_resolved_active
+  changed_when: false
+  failed_when: false
+
+- name: Отключить DNSStubListener systemd-resolved
+  ansible.builtin.copy:
+    dest: /etc/systemd/resolved.conf.d/adguardhome.conf
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      [Resolve]
+      DNS=127.0.0.1
+      DNSStubListener=no
+  register: network_gateway_resolved_config
+  when: network_gateway_resolved_active.rc == 0
+
+- name: Перезапустить systemd-resolved
+  ansible.builtin.systemd:
+    name: systemd-resolved
+    state: restarted
+  when:
+    - network_gateway_resolved_active.rc == 0
+    - network_gateway_resolved_config.changed
+
 - name: Проверить существующую конфигурацию AdGuard Home
   ansible.builtin.stat:
     path: "{{ provision.network_gateway.adguard_home.paths.config }}/AdGuardHome.yaml"
