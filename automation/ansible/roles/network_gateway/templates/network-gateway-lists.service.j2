@@ -1,0 +1,8 @@
+[Unit]
+Description=Обновление списков маршрутизации 109
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/libexec/network-gateway-lists --config /etc/network-gateway/routing-sources.yaml --state-dir /var/lib/network-gateway --output-dir /var/lib/network-gateway/routing/current
