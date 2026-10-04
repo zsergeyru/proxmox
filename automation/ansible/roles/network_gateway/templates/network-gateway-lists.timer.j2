@@ -1,0 +1,11 @@
+[Unit]
+Description=Периодическое обновление списков маршрутизации 109
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec={{ provision.network_gateway.routing.update.interval }}
+Persistent=true
+RandomizedDelaySec=5min
+
+[Install]
+WantedBy=timers.target
