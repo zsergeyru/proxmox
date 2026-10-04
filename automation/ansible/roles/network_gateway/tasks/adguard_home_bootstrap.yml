@@ -1,0 +1,87 @@
+---
+- name: Проверить секрет администратора AdGuard Home
+  ansible.builtin.stat:
+    path: "{{ provision.network_gateway.adguard_home.paths.admin_secret }}"
+  register: network_gateway_adguard_secret
+
+- name: Создать пароль администратора AdGuard Home
+  ansible.builtin.command:
+    argv:
+      - openssl
+      - rand
+      - -base64
+      - "24"
+  register: network_gateway_adguard_generated_password
+  changed_when: false
+  no_log: true
+  when: not network_gateway_adguard_secret.stat.exists
+
+- name: Сохранить пароль администратора AdGuard Home
+  ansible.builtin.copy:
+    dest: "{{ provision.network_gateway.adguard_home.paths.admin_secret }}"
+    owner: root
+    group: root
+    mode: "0600"
+    force: false
+    content: |
+      ADGUARD_ADMIN_PASSWORD={{ network_gateway_adguard_generated_password.stdout }}
+  no_log: true
+  when: not network_gateway_adguard_secret.stat.exists
+
+- name: Прочитать пароль администратора AdGuard Home
+  ansible.builtin.slurp:
+    src: "{{ provision.network_gateway.adguard_home.paths.admin_secret }}"
+  register: network_gateway_adguard_secret_content
+  no_log: true
+
+- name: Получить пароль администратора AdGuard Home
+  ansible.builtin.set_fact:
+    network_gateway_adguard_admin_password: >-
+      {{
+        (
+          network_gateway_adguard_secret_content.content
+          | b64decode
+          | regex_findall('(?m)^ADGUARD_ADMIN_PASSWORD=(.+)$')
+        )[0]
+      }}
+  no_log: true
+
+- name: Запустить AdGuard Home для начальной настройки
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ provision.network_gateway.adguard_home.paths.compose_file }}"
+      - up
+      - -d
+      - adguard-home
+  changed_when: true
+
+- name: Дождаться мастера установки AdGuard Home
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ provision.network_gateway.adguard_home.web.port }}/control/install/get_addresses"
+    method: GET
+    status_code: 200
+  register: network_gateway_adguard_install_ready
+  retries: 30
+  delay: 2
+  until: network_gateway_adguard_install_ready.status == 200
+
+- name: Выполнить начальную настройку AdGuard Home
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ provision.network_gateway.adguard_home.web.port }}/control/install/configure"
+    method: POST
+    body_format: json
+    body:
+      web:
+        ip: 0.0.0.0
+        port: "{{ provision.network_gateway.adguard_home.web.port | int }}"
+      dns:
+        ip: 0.0.0.0
+        port: 53
+      username: "{{ provision.network_gateway.adguard_home.web.admin_user }}"
+      password: "{{ network_gateway_adguard_admin_password }}"
+      language: ru
+    status_code: 200
+  no_log: true
