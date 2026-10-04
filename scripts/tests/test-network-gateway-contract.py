@@ -120,8 +120,8 @@ assert "policy drop" in nftables
 assert "ct state established,related accept" in nftables
 assert "masquerade" not in nftables.lower()
 assert "snat" not in nftables.lower()
-assert "route_direct_v4" in nftables
-assert "route_zapret_v4" in nftables
+assert "route_{{ target_name }}_v4" in nftables
+assert "flags timeout" in nftables
 
 smartdns_template = (ROLE / "templates/smartdns.conf.j2").read_text(encoding="utf-8")
 assert "server-https" in smartdns_template
