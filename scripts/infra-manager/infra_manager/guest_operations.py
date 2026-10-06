@@ -174,14 +174,20 @@ def _infra_manager_test(identity: GuestIdentity) -> None:
     console.ok("Расширенная проверка infra-manager пройдена")
 
 
-def _infra_manager_sync(identity: GuestIdentity) -> None:
+def _infra_manager_sync(
+    repo_root: Path,
+    identity: GuestIdentity,
+) -> None:
     del identity
     from .semaphore import sync_project_from_task
 
     console.info(
         "Синхронизация Semaphore из Git-версии текущего задания"
     )
-    sync_project_from_task(branch=SETTINGS.project_branch())
+    sync_project_from_task(
+        branch=SETTINGS.project_branch(),
+        repo_root=repo_root,
+    )
     console.ok("Конфигурация Semaphore синхронизирована")
 
 
@@ -291,7 +297,7 @@ def _run_sync(
         )
 
     if identity.role == SETTINGS.infra_manager_role:
-        _infra_manager_sync(identity)
+        _infra_manager_sync(repo_root, identity)
         return 0
 
     raise InfraManagerError(
