@@ -173,6 +173,77 @@ def test_host_initialization_does_not_print_secrets() -> None:
         fail("Хостовый сценарий вывел секрет OpenBao в журнал")
 
 
+def test_waits_for_active_raft_node() -> None:
+    host = load_host_module()
+    responses = iter(
+        [
+            SimpleNamespace(
+                returncode=0,
+                stdout=json.dumps(
+                    {
+                        "http_status": 429,
+                        "body": {
+                            "initialized": True,
+                            "sealed": False,
+                            "standby": True,
+                        },
+                    }
+                ),
+                stderr="",
+            ),
+            SimpleNamespace(
+                returncode=0,
+                stdout=json.dumps(
+                    {
+                        "http_status": 200,
+                        "body": {
+                            "initialized": True,
+                            "sealed": False,
+                            "standby": False,
+                        },
+                    }
+                ),
+                stderr="",
+            ),
+        ]
+    )
+
+    def fake_pct_exec(
+        *args: str,
+        capture: bool = False,
+        check: bool = True,
+        input_text: str | None = None,
+    ):
+        del capture, check, input_text
+        if args[:2] != ("python3", "-c") or args[2] != host.HEALTH_CODE:
+            fail(f"Неожиданная команда health: {args!r}")
+        return next(responses)
+
+    with (
+        patch.object(host, "pct_exec", side_effect=fake_pct_exec),
+        patch.object(host.time, "sleep") as sleep,
+    ):
+        body = host.wait_until_active(attempts=3, delay=0.1)
+
+    if body.get("standby") is not False:
+        fail("OpenBao должен считаться готовым только после перехода active")
+    sleep.assert_called_once_with(0.1)
+
+
+def test_unseal_waits_for_active_node_when_already_unsealed() -> None:
+    host = load_host_module()
+    with (
+        patch.object(
+            host,
+            "read_status",
+            return_value={"initialized": True, "sealed": False},
+        ),
+        patch.object(host, "wait_until_active") as wait_active,
+    ):
+        host.unseal()
+    wait_active.assert_called_once_with()
+
+
 def test_existing_openbao_skips_root_when_ready() -> None:
     host = load_host_module()
     with tempfile.TemporaryDirectory() as tmp:
@@ -1112,6 +1183,8 @@ def test_stale_key_is_not_overwritten() -> None:
 def main() -> None:
     test_orchestration()
     test_host_initialization_does_not_print_secrets()
+    test_waits_for_active_raft_node()
+    test_unseal_waits_for_active_node_when_already_unsealed()
     test_existing_openbao_skips_root_when_ready()
     test_existing_openbao_recovers_broken_kv_approle()
     test_existing_openbao_bootstraps_missing_ssh_security()
