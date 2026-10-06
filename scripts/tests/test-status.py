@@ -1113,7 +1113,6 @@ def main_test() -> None:
 
     values = {
         "address": "192.168.9.10",
-        "semaphore_password": "secret-pass",
         "project_branch": "main",
         "project_revision": "abc1234",
         "guest_vmid": "910",
@@ -1133,17 +1132,14 @@ def main_test() -> None:
 
     summary_text = output.getvalue()
     for expected in (
-        "Состояние infra-manager",
+        "Внутренняя проверка infra-manager",
         "[ОК] Docker и infra-runtime работают",
         "[ОК] Homepage и его действия работают",
         "[ОК] OpenBao запущен",
         "[ОК] Semaphore работает",
         "[ОК] OpenTofu, Ansible и Packer готовы",
         "[ОК] Доступ к PVE подтверждён",
-        "http://192.168.9.10:3001",
-        "http://192.168.9.10:3000",
-        "Логин:   admin",
-        "Пароль:  secret-pass",
+        "Адрес:   192.168.9.10",
         "Ветка:   main",
         "Версия:  abc1234",
         "infra-manager status",
