@@ -1,5 +1,36 @@
 """Встроенные программы, выполняемые внутри infra-manager/OpenBao."""
 
+HEALTH_CODE = r"""
+import json
+import urllib.error
+import urllib.request
+
+request = urllib.request.Request(
+    "http://127.0.0.1:8200/v1/sys/health",
+    method="GET",
+)
+try:
+    with urllib.request.urlopen(request, timeout=5) as response:
+        status = response.status
+        raw = response.read()
+except urllib.error.HTTPError as exc:
+    status = exc.code
+    raw = exc.read()
+
+try:
+    body = json.loads(raw.decode("utf-8")) if raw else {}
+except json.JSONDecodeError:
+    body = {}
+
+print(
+    json.dumps(
+        {"http_status": status, "body": body},
+        separators=(",", ":"),
+    )
+)
+"""
+
+
 STATUS_CODE = r"""
 import urllib.request
 with urllib.request.urlopen(
