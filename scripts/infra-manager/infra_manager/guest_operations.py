@@ -17,7 +17,6 @@ from .common import (
 )
 from .guest_catalog import GuestIdentity, deployable_guests, guest_identity, guest_management_address
 from .guest_deploy import project_branch_for_checkout, run_deploy_guest
-from .guest_status import show_guest_status
 from .pve import PveClient
 from .pve_host import (
     check_infra_manager_status,
@@ -200,7 +199,7 @@ def _infra_manager_sync(
 
 
 def _run_deploy(repo_root: Path, identity: GuestIdentity) -> int:
-    """Выполнить Deploy Guest и показать единый операторский статус."""
+    """Выполнить обычный Deploy Guest с защитой самообновления."""
 
     activation_reserved = False
     try:
@@ -210,15 +209,9 @@ def _run_deploy(repo_root: Path, identity: GuestIdentity) -> int:
             activation_reserved = True
 
         result = run_deploy_guest(repo_root, identity.vmid)
-        if result != 0:
-            if activation_reserved:
-                cancel_runtime_activation()
-            return result
-
-        client = PveClient.from_opentofu_env()
-        resource = _generic_status(client, repo_root, identity)
-        show_guest_status(repo_root, identity, resource)
-        return 0
+        if result != 0 and activation_reserved:
+            cancel_runtime_activation()
+        return result
     except BaseException:
         if activation_reserved:
             cancel_runtime_activation()
@@ -233,7 +226,6 @@ def _run_status(
     resource = _generic_status(client, repo_root, identity)
     if identity.role == SETTINGS.infra_manager_role:
         _infra_manager_status(str(resource["node"]), identity)
-    show_guest_status(repo_root, identity, resource)
     return 0
 
 
