@@ -15,7 +15,11 @@ from .common import (
     reserve_runtime_activation,
 )
 from .guest_catalog import GuestIdentity, deployable_guests, guest_identity
-from .guest_deploy import project_branch_for_checkout, run_deploy_guest
+from .guest_deploy import (
+    project_branch_for_checkout,
+    project_revision,
+    run_deploy_guest,
+)
 from .guest_status import show_guest_status, verify_guest_status
 from .pve import PveClient
 from .pve_host import (
@@ -213,6 +217,8 @@ def _run_deploy(repo_root: Path, identity: GuestIdentity) -> int:
             resource,
             full=True,
             show_secrets=True,
+            project_branch=project_branch_for_checkout(repo_root),
+            project_revision=project_revision(repo_root),
         )
         return 0
     except BaseException:
@@ -238,6 +244,8 @@ def _run_status(
         resource,
         full=True,
         show_secrets=True,
+        project_branch=project_branch_for_checkout(repo_root),
+        project_revision=project_revision(repo_root),
     )
     return 0
 

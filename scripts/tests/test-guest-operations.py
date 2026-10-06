@@ -92,7 +92,19 @@ def check_status_operation() -> None:
 
     for identity, resource in cases:
         client = FakePveClient(resource)
-        with patch.object(operations, "show_guest_status") as show:
+        with (
+            patch.object(operations, "show_guest_status") as show,
+            patch.object(
+                operations,
+                "project_branch_for_checkout",
+                return_value="feature/unified-guest-status",
+            ),
+            patch.object(
+                operations,
+                "project_revision",
+                return_value="abc1234",
+            ),
+        ):
             if operations._run_status(client, ROOT, identity) != 0:
                 fail(
                     f"Status Guest должен завершаться успешно для {identity.vmid}"
@@ -101,8 +113,16 @@ def check_status_operation() -> None:
         args, kwargs = show.call_args
         if args[:3] != (ROOT, identity, resource):
             fail("Status Guest передал неверные данные общему выводу")
-        if kwargs != {"full": True, "show_secrets": True}:
-            fail("Операторский Status Guest должен показывать полный статус")
+        if kwargs != {
+            "full": True,
+            "show_secrets": True,
+            "project_branch": "feature/unified-guest-status",
+            "project_revision": "abc1234",
+        }:
+            fail(
+                "Операторский Status Guest должен показывать полный статус "
+                "и версию проекта"
+            )
 
     stopped = FakePveClient(
         {
@@ -245,6 +265,16 @@ def check_deploy_operation() -> None:
             return_value=client,
         ),
         patch.object(operations, "show_guest_status") as show,
+        patch.object(
+            operations,
+            "project_branch_for_checkout",
+            return_value="feature/unified-guest-status",
+        ),
+        patch.object(
+            operations,
+            "project_revision",
+            return_value="abc1234",
+        ),
         patch.object(operations, "reserve_runtime_activation") as reserve,
         patch.object(operations, "cancel_runtime_activation") as cancel,
     ):
@@ -255,8 +285,16 @@ def check_deploy_operation() -> None:
     args, kwargs = show.call_args
     if args[:3] != (ROOT, identity, resource):
         fail("Deploy Guest передал неверные данные общему выводу")
-    if kwargs != {"full": True, "show_secrets": True}:
-        fail("Успешный Deploy Guest должен показывать операторский итог")
+    if kwargs != {
+        "full": True,
+        "show_secrets": True,
+        "project_branch": "feature/unified-guest-status",
+        "project_revision": "abc1234",
+    }:
+        fail(
+            "Успешный Deploy Guest должен показывать операторский итог "
+            "и версию проекта"
+        )
     reserve.assert_not_called()
     cancel.assert_not_called()
 
