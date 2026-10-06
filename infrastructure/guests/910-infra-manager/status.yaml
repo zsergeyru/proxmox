@@ -26,10 +26,6 @@ checks:
 data:
   address:
     type: primary_ipv4
-  semaphore_password:
-    type: file
-    path: /run/infra-manager/secrets/initial-admin-password
-    sensitive: true
   project_branch:
     type: project_branch
   project_revision:
@@ -41,20 +37,6 @@ sections:
     fields:
       - label: "Адрес"
         source: address
-
-  - title: "Портал"
-    fields:
-      - label: "Адрес"
-        template: "http://{address}:3001"
-
-  - title: "Semaphore"
-    fields:
-      - label: "Адрес"
-        template: "http://{address}:3000"
-      - label: "Логин"
-        value: "admin"
-      - label: "Пароль"
-        source: semaphore_password
 
   - title: "Проект"
     fields:
