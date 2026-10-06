@@ -2248,6 +2248,13 @@ def request(method, path, body=None, *, token=None):
     return json.loads(raw.decode("utf-8")) if raw else {}
 
 
+mounts_payload = request("GET", "/v1/sys/internal/ui/mounts")
+mounts_data = mounts_payload.get("data", mounts_payload)
+auth_mounts = mounts_data.get("auth") if isinstance(mounts_data, dict) else None
+userpass = auth_mounts.get("userpass/") if isinstance(auth_mounts, dict) else None
+if not isinstance(userpass, dict) or userpass.get("type") != "userpass":
+    raise SystemExit("userpass is not visible in unauthenticated UI mounts")
+
 escaped_username = urllib.parse.quote(username, safe="")
 login = request(
     "POST",
