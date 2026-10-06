@@ -799,7 +799,7 @@ portal:
 
 ### 5.5. Внутренний формат infra-manager
 
-Файл `infrastructure/guests/910-infra-manager/infra-manager-status.yaml` остаётся отдельным внутренним описанием глубокой проверки 910 и имеет прежний формат версии `1`. Он устанавливается как `/etc/infra-manager/status.yaml` и используется только технической командой `infra-manager-status`.
+Файл `infrastructure/guests/910-infra-manager/infra-manager-status.yaml` остаётся отдельным внутренним описанием глубокой проверки 910 и имеет прежний формат версии `1`. Он не входит в общую схему `guest-status.schema.yaml`, устанавливается как `/etc/infra-manager/status.yaml` и используется только технической командой `infra-manager-status`.
 
 Обычный `infrastructure/guests/910-infra-manager/status.yaml` имеет тот же общий формат версии `2`, что и остальные гости, и подключает внутреннюю проверку через тип `local_status`.
 
