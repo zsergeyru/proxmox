@@ -63,7 +63,8 @@ ai_control:
     admin_email: admin@ai-control.local
     portal:
       name: Open WebUI
-      icon: mdi-robot
+      description: Веб-интерфейс ИИ
+      icon: mdi-robot-#38bdf8
       scheme: http
       port: 4100
       targets:
