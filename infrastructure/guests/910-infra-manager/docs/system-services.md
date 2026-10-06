@@ -296,7 +296,7 @@ pct exec 910 -- infra-manager-status --full
 | startup unseal | `journalctl -u infra-manager-openbao-startup-unseal.service` |
 | активация runtime | `/var/log/infra-manager/runtime-activation.log` |
 
-Секреты не должны выводиться в обычные журналы.
+Служебные машинные секреты не должны выводиться в обычные журналы. Исключение для домашнего контура — текущий пароль ограниченного пользователя OpenBao UI: он намеренно показывается в пользовательском результате успешного Deploy/Status, но не в технических журналах OpenBao, startup-unseal или systemd.
 
 ### Восстановление системного слоя
 
