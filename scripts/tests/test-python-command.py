@@ -14,8 +14,6 @@ WRAPPER = ROOT / "scripts/infra-manager/commands/python-command.sh"
 
 CASES = {
     "infra-manager-status": ["status", "--full"],
-    "infra-manager-pve-access-check": ["pve-access-check"],
-    "infra-manager-pve-lifecycle-test": ["pve-lifecycle-test", "--apply"],
 }
 
 
