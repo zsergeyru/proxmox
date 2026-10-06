@@ -190,6 +190,7 @@ def main() -> None:
         "unseal.key",
         "kv-access.json",
         "ssh-access.json",
+        "operator-access.json",
         "private_key:",
         "token_secret:",
     ):
