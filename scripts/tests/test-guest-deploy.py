@@ -250,7 +250,7 @@ def check_project_branch_after_semaphore_branch_switch() -> None:
         "run",
         side_effect=fake_run,
     ):
-        branch = guest_deploy_module._project_branch(ROOT)
+        branch = guest_deploy_module.project_branch_for_checkout(ROOT)
 
     if branch != "feature/guest-portals":
         fail(
@@ -322,7 +322,7 @@ def check_infra_manager_self_update_path_after_vmid_change() -> None:
             ),
             patch.object(
                 guest_deploy_module,
-                "_project_branch",
+                "project_branch_for_checkout",
                 return_value="feature/infra-manager-role",
             ),
             patch.object(
