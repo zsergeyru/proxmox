@@ -38,8 +38,10 @@ SSH_ACCESS_JOB="$ROOT/scripts/infra-manager/jobs/sync-ssh-access.py"
 SSH_ACCESS_ACCEPTANCE="$ROOT/scripts/acceptance/verify-ssh-access.py"
 PY_ACCESS_POLICY="$ROOT/scripts/infra-manager/infra_manager/access.py"
 PY_OPENBAO="$ROOT/scripts/infra-manager/infra_manager/openbao.py"
+PY_GUEST_DEPLOY="$ROOT/scripts/infra-manager/infra_manager/guest_deploy.py"
 PY_RECOVERY="$ROOT/scripts/infra-manager/infra_manager/recovery.py"
 RECOVERY_HOST="$ROOT/scripts/infra-manager/host/recovery.py"
+PVE_OPERATOR="$ROOT/scripts/infra-manager/host/manager.py"
 DOCKERFILE="$ROOT/infrastructure/guests/910-infra-manager/rootfs/opt/infra-manager/compose/runtime/Dockerfile"
 REQ="$ROOT/infrastructure/guests/910-infra-manager/rootfs/opt/infra-manager/compose/runtime/requirements.txt"
 PLAN="$ROOT/scripts/infra-manager/jobs/opentofu-plan.py"
@@ -78,8 +80,29 @@ cat "$ANSIBLE_RUNTIME_MAIN" > "$ANSIBLE_RUNTIME"
 for task_file in "${ANSIBLE_RUNTIME_PARTS[@]}"; do
     cat "$ANSIBLE_RUNTIME_DIR/$task_file" >> "$ANSIBLE_RUNTIME"
 done
+[[ -s "$PVE_OPERATOR" ]] \
+    || die "Отсутствует единая операторская команда PVE"
+grep -Fq '"status"' "$PVE_OPERATOR" \
+    || die "PVE-команда infra-manager должна поддерживать status"
+grep -Fq '"repair"' "$PVE_OPERATOR" \
+    || die "PVE-команда infra-manager должна поддерживать repair"
+grep -Fq '"recover"' "$PVE_OPERATOR" \
+    || die "PVE-команда infra-manager должна поддерживать recover"
+grep -Fq 'install_openbao_host_support(context.node, repo_root)' "$PY_GUEST_DEPLOY" \
+    || die "Deploy Guest должен обновлять PVE OpenBao support до SSH-подписания"
+grep -Fq 'install_recovery_host_support(context.node, repo_root)' "$PY_GUEST_DEPLOY" \
+    || die "Самообновление infra-manager должно обновлять PVE recovery/operator support"
+grep -Fq 'OPENBAO_HOST_LIBRARY = Path("/usr/local/lib/infra-manager/openbao_host")' "$PY_PVE_HOST" \
+    || die "PVE OpenBao helper должен устанавливать отдельный пакет openbao_host"
+grep -Fq '_install_remote_text_tree(' "$PY_PVE_HOST" \
+    || die "Пакет openbao_host должен устанавливаться целиком"
+if grep -Fq 'host-support/openbao-unseal.py' "$ANSIBLE_RUNTIME"; then
+    die "Ansible не должен отдельно заменять openbao-unseal.py без пакета openbao_host"
+fi
 grep -Fq 'path    = "/openbao/file/raft"' "$OPENBAO_CONFIG" \
     || die "OpenBao должен использовать постоянное Raft-хранилище"
+grep -Fq 'ui = true' "$OPENBAO_CONFIG" \
+    || die "OpenBao должен публиковать встроенный web UI через TLS listener"
 grep -Fq 'address         = "127.0.0.1:8200"' "$OPENBAO_CONFIG" \
     || die "OpenBao API должен слушать только loopback 910"
 grep -Fq 'tls_disable     = true' "$OPENBAO_CONFIG" \
@@ -229,8 +252,8 @@ grep -Fq ':8202/v1/sys/health' "$OPENBAO_STARTUP_COMMAND" \
 if grep -Fq 'echo "[ОК] OpenBao уже разблокирован"' "$OPENBAO_STARTUP_COMMAND"; then
     die "Startup unseal не должен завершаться до восстановления секретов и проверок"
 fi
-grep -Fq 'OpenBao не инициализирован; сначала выполните Initialize OpenBao для infra-manager' "$OPENBAO_STARTUP_COMMAND" \
-    || die "Startup unseal должен завершаться ошибкой для неинициализированного OpenBao"
+grep -Fq 'на PVE выполните infra-manager repair' "$OPENBAO_STARTUP_COMMAND" \
+    || die "Startup unseal должен направлять оператора в единую PVE-команду"
 grep -q 'infra-manager-status --full --quiet' "$ACTIVATE_RUNTIME" \
     || die "Отложенная активация должна завершаться полной проверкой infra-manager"
 if grep -Fq 'infra-manager-status' "$ANSIBLE_VERIFY"; then
@@ -246,11 +269,13 @@ grep -q 'python_install_root: Path = Path("/usr/local/lib/infra-manager")' "$PY_
 grep -Fq 'dest: "{{ provision.paths.python_package }}/infra_manager/"' "$ANSIBLE_RUNTIME" \
     || die "Ansible должен устанавливать служебный код infra_manager"
 python_wrapper_count="$(grep -Fc 'source: python-command.sh' "$ANSIBLE_RUNTIME" || true)"
-[[ "$python_wrapper_count" -eq 3 ]] \
-    || die "Ansible должен установить общую Python-оболочку под тремя административными именами"
-for command in infra-manager-status infra-manager-pve-access-check infra-manager-pve-lifecycle-test; do
-    grep -Fq "target: $command" "$ANSIBLE_RUNTIME" \
-        || die "Ansible не устанавливает административную команду $command"
+[[ "$python_wrapper_count" -eq 1 ]] \
+    || die "Внутри 910 должна устанавливаться только техническая status-команда"
+grep -Fq 'target: infra-manager-status' "$ANSIBLE_RUNTIME" \
+    || die "Ansible не устанавливает внутреннюю status-команду"
+for obsolete in infra-manager-pve-access-check infra-manager-pve-lifecycle-test; do
+    grep -Fq "/usr/local/sbin/$obsolete" "$ANSIBLE_RUNTIME" \
+        || die "Ansible должен удалять прежнюю операторскую команду $obsolete"
 done
 grep -Fq 'dest: /usr/bin/infra-manager-status' "$ANSIBLE_RUNTIME" \
     || die "Команда infra-manager-status должна быть доступна через pct exec"

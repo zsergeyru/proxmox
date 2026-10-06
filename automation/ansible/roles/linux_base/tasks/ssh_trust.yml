@@ -14,7 +14,8 @@
     fail_msg: >-
       Не найден открытый ключ центра доступа OpenBao:
       /etc/infra-manager/ca/ssh-client-ca.pub.
-      Сначала выполните Initialize OpenBao для infra-manager.
+      Проверьте infra-manager с PVE командой 'infra-manager status';
+      для безопасного исправления используйте 'infra-manager repair'.
   when: (provision_phase | default('full')) != 'base'
 
 - name: Подготовить каталог дополнительных настроек SSH

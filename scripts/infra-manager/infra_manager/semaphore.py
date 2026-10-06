@@ -5,6 +5,7 @@ from __future__ import annotations
 import http.cookiejar
 import json
 import os
+import re
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -13,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from .common import LOG_LEVEL_ENV, LOG_LEVELS, InfraManagerError, console
-from .guest_catalog import find_guest_by_role
+from .guest_catalog import deployable_guests
 from .pve_host import update_openbao_semaphore_api_token
 from .settings import PATHS, SETTINGS
 
@@ -40,15 +41,41 @@ class TemplateSpec:
     playbook: str
     arguments: str
     app: str = "python"
+    survey_vars: tuple[dict[str, Any], ...] = ()
+
+
+def _deploy_guest_survey(repo_root: Path) -> tuple[dict[str, Any], ...]:
+    """Сформировать безопасный список гостей для формы Deploy Guest."""
+
+    values = [
+        {
+            "name": f"{guest.vmid} — {guest.name}",
+            "value": str(guest.vmid),
+        }
+        for guest in deployable_guests(repo_root)
+    ]
+    if not values:
+        raise InfraManagerError(
+            "Не найдено гостей с guest.yaml и provision.yaml для Deploy Guest"
+        )
+    return (
+        {
+            "name": "GUEST_VMID",
+            "title": "Гость",
+            "description": "Выберите гостя из машинного каталога проекта",
+            "type": "enum",
+            "required": True,
+            "values": values,
+        },
+    )
 
 
 def semaphore_templates(
     repo_root: Path | None = None,
 ) -> tuple[TemplateSpec, ...]:
-    """Собрать задания Semaphore с текущим VMID infra-manager."""
+    """Собрать компактный набор инфраструктурных заданий Semaphore."""
 
     root = repo_root or PATHS.repo_root
-    infra_manager = find_guest_by_role(root, SETTINGS.infra_manager_role)
 
     return (
         TemplateSpec(
@@ -62,27 +89,17 @@ def semaphore_templates(
             arguments='["9000"]',
         ),
         TemplateSpec(
-            name="Deploy Guest 410",
+            name="Deploy Guest",
             playbook="scripts/infra-manager/jobs/deploy-guest.py",
-            arguments='["410"]',
-        ),
-        TemplateSpec(
-            name=f"Deploy Guest {infra_manager.vmid}",
-            playbook="scripts/infra-manager/jobs/deploy-guest.py",
-            arguments=json.dumps([str(infra_manager.vmid)], separators=(",", ":")),
+            arguments="[]",
+            survey_vars=_deploy_guest_survey(root),
         ),
         TemplateSpec(
             name="Sync SSH Access",
             playbook="scripts/infra-manager/jobs/sync-ssh-access.py",
             arguments="[]",
         ),
-        TemplateSpec(
-            name=f"Initialize OpenBao {infra_manager.vmid}",
-            playbook="scripts/infra-manager/jobs/initialize-openbao.py",
-            arguments="[]",
-        ),
     )
-
 
 
 def nonempty(path: Path) -> bool:
@@ -232,6 +249,9 @@ class SemaphoreClient:
 
     def put(self, path: str, payload: Any) -> Any:
         return self._request("PUT", path, payload)
+
+    def delete(self, path: str) -> Any:
+        return self._request("DELETE", path)
 
     def ping(self) -> None:
         request = urllib.request.Request(
@@ -677,6 +697,7 @@ class SemaphoreClient:
         branch: str,
         arguments: str,
         app: str = "python",
+        survey_vars: tuple[dict[str, Any], ...] = (),
     ) -> int:
         templates = self.get(
             f"/project/{project_id}/templates?sort=name&order=asc"
@@ -692,6 +713,7 @@ class SemaphoreClient:
             "type": "",
             "git_branch": branch,
             "arguments": arguments,
+            "survey_vars": [dict(item) for item in survey_vars],
             "allow_override_args_in_task": False,
             "allow_override_branch_in_task": False,
         }
@@ -721,6 +743,42 @@ class SemaphoreClient:
                 f"Semaphore не вернул id шаблона {name}"
             )
         return template_id
+
+    def remove_obsolete_managed_templates(
+        self,
+        project_id: int,
+        expected_names: set[str],
+    ) -> None:
+        """Удалить старые шаблоны Deploy Guest N и Initialize OpenBao N."""
+
+        templates = self.get(
+            f"/project/{project_id}/templates?sort=name&order=asc"
+        )
+        if not isinstance(templates, list):
+            raise InfraManagerError(
+                "Semaphore вернул некорректный список шаблонов"
+            )
+        legacy_name = re.compile(
+            r"^(?:Deploy Guest|Initialize OpenBao) [0-9]+$"
+        )
+        for template in templates:
+            if not isinstance(template, dict):
+                raise InfraManagerError(
+                    "Semaphore вернул некорректный объект шаблона"
+                )
+            name = template.get("name")
+            if not isinstance(name, str) or not legacy_name.fullmatch(name):
+                continue
+            if name in expected_names:
+                continue
+            template_id = template.get("id")
+            if not isinstance(template_id, int):
+                raise InfraManagerError(
+                    f"Устаревший шаблон Semaphore '{name}' имеет неверный id"
+                )
+            self.delete(
+                f"/project/{project_id}/templates/{template_id}"
+            )
 
 
 def persist_github_key() -> None:
@@ -767,7 +825,8 @@ def configure_project(branch: str | None = None) -> int:
         opentofu_environment_id,
         infra_manager_environment_id,
     ]
-    for template in semaphore_templates():
+    templates = semaphore_templates()
+    for template in templates:
         client.ensure_template(
             project_id,
             repository_id,
@@ -777,7 +836,12 @@ def configure_project(branch: str | None = None) -> int:
             branch=branch,
             arguments=template.arguments,
             app=template.app,
+            survey_vars=template.survey_vars,
         )
+    client.remove_obsolete_managed_templates(
+        project_id,
+        {template.name for template in templates},
+    )
 
     console.ok(
         "Проект Semaphore, общие настройки и инфраструктурные задания подготовлены"

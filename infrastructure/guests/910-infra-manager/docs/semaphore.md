@@ -302,10 +302,12 @@ Semaphore должен содержать как минимум:
 |---|---|
 | `OpenTofu Plan` | показать изменения инфраструктуры |
 | `Build Template 9000` | собрать базовый шаблон Debian |
-| `Deploy Guest 410` | развернуть/обновить 410 |
-| `Deploy Guest 910` | обновить 910 с безопасной активацией runtime |
+| `Deploy Guest` | выбрать гостя из списка и привести его к `guest.yaml + provision.yaml` |
 | `Sync SSH Access` | синхронизировать AppRole, policy и OTP-роли OpenBao из `access.yaml` |
-| `Initialize OpenBao 910` | инициализировать и привести OpenBao к целевой конфигурации |
+
+`Deploy Guest` должен использовать обязательную survey-переменную `GUEST_VMID` типа `enum`. Список вариантов строится автоматически только из каталогов, где одновременно существуют `guest.yaml` и `provision.yaml`. Произвольный VMID через свободные аргументы Semaphore не разрешается.
+
+Первичная команда `scripts/infra-manager/jobs/initialize-openbao.py` сохраняется как внутренний механизм bootstrap/recovery и не должна отображаться как обычный шаблон Semaphore. Оператор использует только PVE-команды `infra-manager repair` и `infra-manager recover`.
 
 Задание `Sync SSH Access` должно выполнять только идемпотентную синхронизацию OpenBao, описанную в [`openbao.md`](openbao.md). Оно не развёртывает гостей и не выполняет сквозные SSH-тесты. Настройка гостя относится к `Deploy Guest`, а приёмочная проверка выполняется отдельным сценарием `scripts/acceptance/verify-ssh-access.py`.
 
@@ -325,7 +327,7 @@ Semaphore должен содержать как минимум:
 
 ### Самообновление 910
 
-При `Deploy Guest 910` текущий `infra-runtime` нельзя уничтожать до завершения выполняющегося в нём задания.
+При `Deploy Guest` с выбранным `910 infra-manager` текущий `infra-runtime` нельзя уничтожать до завершения выполняющегося в нём задания.
 
 После Ansible внешняя активация должна:
 
@@ -366,7 +368,8 @@ test -s /mnt/persistent-state/semaphore/semaphore.sqlite
 test -s /run/infra-manager/secrets/semaphore-server.env
 test -s /run/infra-manager/secrets/initial-admin-password
 test -s /run/infra-manager/secrets/semaphore-api-token
-infra-manager-status --full
+# итоговая операторская проверка выполняется на PVE:
+infra-manager status
 ```
 
 Дополнительно через API нужно подтвердить:
@@ -380,19 +383,19 @@ infra-manager-status --full
 
 ### Восстановление
 
-Если контейнер потерян, но постоянные данные сохранены:
+Обычный сбой работающего 910 исправляется с PVE:
 
-1. подключить прежний `state/semaphore`;
-2. восстановить OpenBao;
-3. материализовать Semaphore/Git/PVE secrets;
-4. собрать `infra-runtime`;
-5. запустить Compose;
-6. дождаться API Semaphore;
-7. выполнить `semaphore-project`;
-8. проверить целевой набор заданий и переменных;
-9. выполнить `infra-manager-status --full`.
+```bash
+infra-manager repair
+```
 
-SQLite и `SEMAPHORE_ACCESS_KEY_ENCRYPTION` должны восстанавливаться согласованно.
+Если 910 потерян или обычного исправления недостаточно:
+
+```bash
+infra-manager recover
+```
+
+Обе команды сохраняют прежний `state/semaphore`; SQLite и `SEMAPHORE_ACCESS_KEY_ENCRYPTION` должны восстанавливаться согласованно. После завершения единая операторская команда сама выполняет итоговый status.
 
 ### Типичные ошибки
 

@@ -176,16 +176,22 @@ mp1: /mnt/bindmounts/infra-manager/state,mp=/mnt/persistent-state
 /root/.ssh/authorized_keys
 ```
 
-Хостовые служебные команды:
+Операторская команда PVE:
+
+```text
+/usr/local/sbin/infra-manager
+```
+
+Она предоставляет только три штатных действия: `status`, `repair` и `recover`.
+
+Низкоуровневые PVE-механизмы сохраняются отдельно:
 
 ```text
 /usr/local/sbin/infra-manager-openbao-unseal
 /usr/local/sbin/infra-manager-recovery
 ```
 
-`infra-manager-openbao-unseal` выполняет только узкие операции, которым нужны полномочия PVE или доступ к `pve-only/`: работу с блокировкой OpenBao, настройку ограниченных SSH-доступов и запросы SSH-подписи.
-
-`infra-manager-recovery` является локальной root-командой PVE для проверки аварийного состояния и восстановления bootstrap Git-доступа. Она не требует работающего 910 и не выводит закрытый Deploy Key в журнал.
+Они считаются внутренней реализацией и вызываются единой операторской командой, bootstrap и автоматикой 910. `infra-manager-openbao-unseal` выполняет узкие операции OpenBao, а `infra-manager-recovery` проверяет PVE-only состояние и восстанавливает bootstrap Git-доступ.
 
 Технический журнал первоначального контура:
 
@@ -214,7 +220,7 @@ debian13-template.ref
 
 Исходный GitHub Deploy Key создаётся первоначальным контуром в этом каталоге. Каноническая аварийная копия сохраняется в `pve-only/recovery/`. Постоянная копия ключа в `access/` не создаётся.
 
-Каталог `/root/.config/proxmox-bootstrap/` не является каноническим хранилищем recovery-данных. Его Git key может быть восстановлен командой `infra-manager-recovery --restore-git-access`.
+Каталог `/root/.config/proxmox-bootstrap/` не является каноническим хранилищем recovery-данных. Его Git key восстанавливается автоматически при `infra-manager recover`; внутренний helper `infra-manager-recovery` оператору напрямую не требуется.
 
 ## 8. Временные файлы
 
@@ -223,6 +229,7 @@ debian13-template.ref
 ```text
 /run/lock/infra-manager-openbao-unseal.lock
 /run/lock/infra-manager-recovery.lock
+/run/lock/infra-manager-operator.lock
 ```
 
 Сам хостовый сценарий может создавать краткоживущие временные файлы на PVE под `/run/`; их имена не являются частью постоянного контракта.

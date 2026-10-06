@@ -105,7 +105,7 @@ automation/opentofu/
 
 ### Применение одного гостя
 
-`Deploy Guest <VMID>` должен:
+`Deploy Guest` после выбора гостя должен:
 
 1. сформировать план только выбранного ресурса;
 2. проверить JSON plan;
@@ -162,6 +162,8 @@ root SSH в управляемый Linux-гость
 ```
 
 Постоянный `guest_ed25519` не является частью конечной схемы и после завершения перехода должен быть удалён из постоянного состояния 910.
+
+Перед запросом временного сертификата `deploy-guest` обязан сначала синхронизировать на PVE полный комплект OpenBao helper: исполняемый файл, пакет `openbao_host/` и описание infra-manager. Обновлять один `infra-manager-openbao-unseal` отдельно запрещено, потому что его версия должна совпадать с версией Python-пакета.
 
 Проверка сервера должна выполняться через host CA. Автоматическое отключение `StrictHostKeyChecking` запрещено.
 
@@ -268,10 +270,8 @@ Python не должен содержать независимую вторую 
 |---|---|
 | `OpenTofu Plan` | OpenTofu + Python |
 | `Build Template 9000` | Packer + Python |
-| `Deploy Guest <VMID>` | OpenTofu + Ansible + Python |
-| `Deploy Guest 910` | Ansible + безопасная активация runtime |
+| `Deploy Guest` | выбор гостя + OpenTofu + Ansible + Python |
 | `Sync SSH Access` | OpenBao + Python + `access.yaml` |
-| `Initialize OpenBao 910` | OpenBao + PVE-only helper + Python |
 
 ### Режимы deploy-guest
 
@@ -284,7 +284,7 @@ Python не должен содержать независимую вторую 
 настройку уже существующего объекта
 ```
 
-Обычный пользовательский путь должен оставаться единым заданием `Deploy Guest <VMID>`.
+Обычный пользовательский путь должен оставаться единым заданием `Deploy Guest` с ограниченным выбором гостя.
 
 Для 910 обычное обновление должно определяться как самообновление и использовать отложенную активацию `infra-runtime`.
 
@@ -296,7 +296,7 @@ docker exec infra-runtime packer version
 docker exec infra-runtime ansible --version
 docker exec infra-runtime python3 -c 'import proxmoxer, yaml, jsonschema'
 docker exec infra-runtime git --version
-infra-manager-status --full
+infra-manager status
 ```
 
 Дополнительно нужно подтверждать:
@@ -324,24 +324,23 @@ rootfs/opt/infra-manager/compose/runtime/requirements.txt
 rootfs/opt/infra-manager/compose/runtime/Dockerfile
 ```
 
-После изменения выполняется `Deploy Guest 910`. Ручная установка новых бинарников внутрь текущего контейнера не считается обновлением.
+После изменения выполняется единый `Deploy Guest` с выбором `910 infra-manager`. Ручная установка новых бинарников внутрь текущего контейнера не считается обновлением.
 
 ### Восстановление
 
-После потери `infra-runtime` нужно:
+Для обычного сбоя управляющей среды с PVE выполняется:
 
-1. восстановить `state/opentofu`;
-2. восстановить доступы и OpenBao;
-3. получить проект;
-4. собрать `infra-runtime`;
-5. проверить версии;
-6. проверить OpenTofu state;
-7. синхронизировать Semaphore;
-8. синхронизировать SSH OTP-контракт;
-9. выполнить `OpenTofu Plan`;
-10. выполнить полный status.
+```bash
+infra-manager repair
+```
 
-Если инфраструктура существует, а ожидаемый прежний OpenTofu state отсутствует, `apply` запрещён до выяснения причины.
+Если 910 потерян или обычное исправление невозможно, используется:
+
+```bash
+infra-manager recover
+```
+
+Обе операции защищают существующее состояние. Если инфраструктура существует, а ожидаемый прежний OpenTofu state отсутствует, автоматическое восстановление и `apply` запрещены до выяснения причины.
 
 ## 7. Источники и связанные документы
 

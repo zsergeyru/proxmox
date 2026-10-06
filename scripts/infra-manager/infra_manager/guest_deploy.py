@@ -26,6 +26,8 @@ from .opentofu import prepare_workspace
 from .pve_host import (
     apply_host_requirements,
     ensure_infra_self_access,
+    install_openbao_host_support,
+    install_recovery_host_support,
     issue_openbao_machine_credentials,
     read_openbao_tls_ca,
     sign_ssh_client_key,
@@ -614,6 +616,12 @@ def _configure_guest_os(
 
     _ensure_ssh_host_key(context.paths.known_hosts, context.address)
     console.info(f"Настройка ОС {context.vmid}")
+
+    repo_root = context.paths.guest_dir.parents[2]
+    console.detail("Обновление PVE-only служебного контура")
+    install_openbao_host_support(context.node, repo_root)
+    if self_update:
+        install_recovery_host_support(context.node, repo_root)
 
     if not PATHS.ssh_client_ca_public_key.is_file():
         console.info(

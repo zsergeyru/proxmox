@@ -80,6 +80,24 @@ def guest_identity(repo_root: Path, vmid: int) -> GuestIdentity:
     )
 
 
+def deployable_guests(repo_root: Path) -> tuple[GuestIdentity, ...]:
+    """Вернуть гостей, для которых есть guest.yaml и provision.yaml."""
+
+    guests_root = repo_root / "infrastructure" / "guests"
+    result: list[GuestIdentity] = []
+    for manifest in sorted(guests_root.glob("*/guest.yaml")):
+        if not (manifest.parent / "provision.yaml").is_file():
+            continue
+        source = _load_manifest(manifest)
+        vmid = source.get("vmid")
+        if not isinstance(vmid, int) or vmid <= 0:
+            raise InfraManagerError(
+                f"{manifest}: некорректный vmid для развёртываемого гостя"
+            )
+        result.append(guest_identity(repo_root, vmid))
+    return tuple(result)
+
+
 def guest_management_address(
     repo_root: Path,
     identity: GuestIdentity,

@@ -160,14 +160,6 @@ class Paths:
     def status_command(self) -> Path:
         return Path("/usr/local/sbin/infra-manager-status")
 
-    @property
-    def access_check_command(self) -> Path:
-        return Path("/usr/local/sbin/infra-manager-pve-access-check")
-
-    @property
-    def lifecycle_test_command(self) -> Path:
-        return Path("/usr/local/sbin/infra-manager-pve-lifecycle-test")
-
 
 @dataclass(frozen=True)
 class Settings:

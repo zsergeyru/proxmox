@@ -18,7 +18,7 @@ sys.path.insert(0, str(MODULE_ROOT))
 
 from infra_manager import status as status_module
 from infra_manager.common import InfraManagerError
-from infra_manager.guest_catalog import find_guest_by_role
+from infra_manager.guest_catalog import deployable_guests
 from infra_manager.semaphore import (
     PROJECT_REPO,
     SemaphoreClient,
@@ -73,28 +73,18 @@ def main_test() -> None:
         if not (ROOT / spec.playbook).is_file():
             fail(f"Playbook Semaphore не существует: {spec.playbook}")
 
-    infra_identity = find_guest_by_role(ROOT, SETTINGS.infra_manager_role)
-    infra_vmid = str(infra_identity.vmid)
     expected_templates = {
         "OpenTofu Plan": ("scripts/infra-manager/jobs/opentofu-plan.py", "[]"),
         "Build Template 9000": (
             "scripts/infra-manager/jobs/build-template.py",
             '["9000"]',
         ),
-        "Deploy Guest 410": (
+        "Deploy Guest": (
             "scripts/infra-manager/jobs/deploy-guest.py",
-            '["410"]',
-        ),
-        f"Deploy Guest {infra_vmid}": (
-            "scripts/infra-manager/jobs/deploy-guest.py",
-            f'["{infra_vmid}"]',
+            "[]",
         ),
         "Sync SSH Access": (
             "scripts/infra-manager/jobs/sync-ssh-access.py",
-            "[]",
-        ),
-        f"Initialize OpenBao {infra_vmid}": (
-            "scripts/infra-manager/jobs/initialize-openbao.py",
             "[]",
         ),
     }
@@ -104,6 +94,24 @@ def main_test() -> None:
     }
     if actual_templates != expected_templates:
         fail(f"Неожиданный состав шаблонов Semaphore: {actual_templates!r}")
+
+    deploy = next(
+        spec for spec in SEMAPHORE_TEMPLATES if spec.name == "Deploy Guest"
+    )
+    expected_values = [
+        {"name": f"{guest.vmid} — {guest.name}", "value": str(guest.vmid)}
+        for guest in deployable_guests(ROOT)
+    ]
+    if len(deploy.survey_vars) != 1:
+        fail("Deploy Guest должен иметь одну survey-переменную")
+    guest_survey = deploy.survey_vars[0]
+    if (
+        guest_survey.get("name") != "GUEST_VMID"
+        or guest_survey.get("type") != "enum"
+        or guest_survey.get("required") is not True
+        or guest_survey.get("values") != expected_values
+    ):
+        fail("Deploy Guest должен предлагать только гостей из машинного каталога")
 
     with tempfile.TemporaryDirectory() as tmp:
         fake = Path(tmp)
@@ -115,12 +123,20 @@ def main_test() -> None:
             "role: infra-manager\n",
             encoding="utf-8",
         )
+        (guest.parent / "provision.yaml").write_text(
+            "schema_version: 1\nguest_vmid: 920\n",
+            encoding="utf-8",
+        )
         moved = {item.name: item for item in semaphore_templates(fake)}
-    moved_deploy = moved.get("Deploy Guest 920")
-    if moved_deploy is None or moved_deploy.arguments != '["920"]':
-        fail("Deploy Guest infra-manager не следует VMID из guest.yaml")
-    if "Initialize OpenBao 920" not in moved:
-        fail("Initialize OpenBao не следует VMID из guest.yaml")
+    moved_deploy = moved.get("Deploy Guest")
+    if moved_deploy is None:
+        fail("Единый Deploy Guest отсутствует")
+    if moved_deploy.survey_vars[0].get("values") != [
+        {"name": "920 — infra-manager", "value": "920"}
+    ]:
+        fail("Deploy Guest не строит выбор из guest.yaml + provision.yaml")
+    if any(name.startswith("Initialize OpenBao") for name in moved):
+        fail("Initialize OpenBao не должен быть обычным шаблоном Semaphore")
 
     templates = [
         {
@@ -271,6 +287,31 @@ def main_test() -> None:
         fail("Шаблон Semaphore не должен разрешать замену аргументов")
     if created.get("allow_override_branch_in_task") is not False:
         fail("Шаблон Semaphore не должен разрешать замену Git-ветки")
+    if created.get("survey_vars") != []:
+        fail("Обычный шаблон Semaphore не должен получать survey-поля")
+
+    survey = (
+        {
+            "name": "GUEST_VMID",
+            "title": "Гость",
+            "type": "enum",
+            "required": True,
+            "values": [{"name": "410 — ai-control", "value": "410"}],
+        },
+    )
+    survey_template = TemplateClient(existing=None)
+    survey_template.ensure_template(
+        1,
+        2,
+        [8, 10],
+        name="Deploy Guest",
+        playbook="job.py",
+        branch="feature/test",
+        arguments="[]",
+        survey_vars=survey,
+    )
+    if survey_template.posts[0].get("survey_vars") != list(survey):
+        fail("Survey-переменная Deploy Guest не передаётся в Semaphore")
 
     update_template = TemplateClient(existing={"id": 23, "name": "Test"})
     if update_template.ensure_template(
@@ -285,6 +326,36 @@ def main_test() -> None:
         fail("Обновление шаблона Semaphore вернуло неверный id")
     if update_template.puts[0].get("id") != 23:
         fail("PUT шаблона Semaphore должен содержать id обновляемого объекта")
+
+    class CleanupClient(SemaphoreClient):
+        def __init__(self) -> None:
+            self.deleted: list[str] = []
+
+        def get(self, path: str, *, auth: str | None = None):
+            del path, auth
+            return [
+                {"id": 1, "name": "Deploy Guest"},
+                {"id": 2, "name": "Deploy Guest 410"},
+                {"id": 3, "name": "Deploy Guest 910"},
+                {"id": 4, "name": "Initialize OpenBao 910"},
+                {"id": 5, "name": "My custom task"},
+            ]
+
+        def delete(self, path: str):
+            self.deleted.append(path)
+            return None
+
+    cleanup_client = CleanupClient()
+    cleanup_client.remove_obsolete_managed_templates(
+        1,
+        {"Deploy Guest"},
+    )
+    if cleanup_client.deleted != [
+        "/project/1/templates/2",
+        "/project/1/templates/3",
+        "/project/1/templates/4",
+    ]:
+        fail("Синхронизация Semaphore неверно удаляет старые шаблоны")
 
     invalid_level = InfraManagerEnvironmentClient(
         existing={"id": 10, "name": SETTINGS.infra_manager_env_name},
@@ -364,6 +435,7 @@ def main_test() -> None:
                 "app": spec.app,
                 "playbook": spec.playbook,
                 "arguments": spec.arguments,
+                "survey_vars": [dict(item) for item in spec.survey_vars],
                 "environment_ids": [8, 10],
             }
             for spec in SEMAPHORE_TEMPLATES
@@ -449,20 +521,20 @@ def main_test() -> None:
             moved_definition = load_status_definition(moved_status)
         if moved_definition.guest_vmid != 920:
             fail("status должен следовать VMID гостя с ролью infra-manager")
-        pve_fields = [
+        operator_fields = [
             field
             for section in moved_definition.sections
             for field in section["fields"]
-            if field["label"] == "С PVE"
+            if field["label"] == "Операторская команда"
         ]
-        if len(pve_fields) != 1:
-            fail("status должен содержать одну команду проверки с PVE")
-        moved_command = status_module._field_value(
-            pve_fields[0],
+        if len(operator_fields) != 1:
+            fail("status должен содержать одну операторскую команду")
+        operator_command = status_module._field_value(
+            operator_fields[0],
             {"guest_vmid": "920"},
         )
-        if moved_command != "pct exec 920 -- infra-manager-status --full":
-            fail("Команда status с PVE не следует текущему VMID infra-manager")
+        if operator_command != "infra-manager status":
+            fail("status должен показывать единую PVE-команду")
 
     if [item["type"] for item in definition.checks] != [
         "runtime",
@@ -643,7 +715,7 @@ def main_test() -> None:
         "Пароль:  secret-pass",
         "Ветка:   main",
         "Версия:  abc1234",
-        "pct exec 910 -- infra-manager-status --full",
+        "infra-manager status",
         "infra-manager полностью готов",
     ):
         if expected not in summary_text:

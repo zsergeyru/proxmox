@@ -132,10 +132,8 @@ semaphore:
     - Infra Manager
     - OpenTofu Plan
     - Build Template 9000
-    - Deploy Guest 410
-    - Deploy Guest 910
+    - Deploy Guest
     - Sync SSH Access
-    - Initialize OpenBao 910
 
 persistence:
   target_layout:

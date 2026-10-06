@@ -5,12 +5,6 @@ case "$(basename "$0")" in
     infra-manager-status)
         COMMAND="status"
         ;;
-    infra-manager-pve-access-check)
-        COMMAND="pve-access-check"
-        ;;
-    infra-manager-pve-lifecycle-test)
-        COMMAND="pve-lifecycle-test"
-        ;;
     *)
         printf 'ОШИБКА: неизвестное имя команды infra-manager: %s\n' "$(basename "$0")" >&2
         exit 2

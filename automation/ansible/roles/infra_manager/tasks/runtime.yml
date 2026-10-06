@@ -40,21 +40,19 @@
     mode: "0755"
   loop:
     - { source: python-command.sh, target: infra-manager-status }
-    - { source: python-command.sh, target: infra-manager-pve-access-check }
-    - { source: python-command.sh, target: infra-manager-pve-lifecycle-test }
     - { source: activate-runtime.sh, target: infra-manager-activate-runtime }
     - { source: openbao-startup-unseal.sh, target: infra-manager-openbao-startup-unseal }
 
-- name: Создать короткие команды управления
+- name: Удалить прежние операторские команды из infra-manager
   ansible.builtin.file:
-    src: "/usr/local/sbin/{{ item }}"
-    dest: "/usr/local/bin/{{ item }}"
-    state: link
-    force: true
+    path: "{{ item }}"
+    state: absent
   loop:
-    - infra-manager-status
-    - infra-manager-pve-access-check
-    - infra-manager-pve-lifecycle-test
+    - /usr/local/sbin/infra-manager-pve-access-check
+    - /usr/local/sbin/infra-manager-pve-lifecycle-test
+    - /usr/local/bin/infra-manager-status
+    - /usr/local/bin/infra-manager-pve-access-check
+    - /usr/local/bin/infra-manager-pve-lifecycle-test
 
 - name: Сделать команду состояния доступной через pct exec
   ansible.builtin.file:

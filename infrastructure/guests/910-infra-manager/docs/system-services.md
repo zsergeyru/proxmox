@@ -160,47 +160,51 @@ journalctl -u infra-manager-openbao-startup-unseal.service
 systemctl start infra-manager-openbao-startup-unseal.service
 ```
 
-## 4. Служебные команды и самообновление
+## 4. Команды и самообновление
 
-### Постоянные команды
+### Единая операторская команда
 
-Ansible должен устанавливать команды из:
+Человек управляет контуром с физического PVE через одну команду:
 
-```text
-scripts/infra-manager/commands/
+```bash
+infra-manager status
+infra-manager repair
+infra-manager recover
 ```
 
-в:
+Она устанавливается как:
 
 ```text
-/usr/local/sbin/
+/usr/local/sbin/infra-manager
 ```
 
-с владельцем `root:root` и режимом `0755`.
+и является единственной штатной операторской точкой входа.
 
-Обязательный набор:
+- `status` ничего не изменяет: проверяет PVE-only аварийный контур, объект infra-manager и полный внутренний status 910;
+- `repair` разрешает только повторяемые безопасные действия: запуск существующего 910, Docker, восстановление OpenBao на прежнем Raft, материализацию секретов, запуск управляющей среды и синхронизацию Semaphore;
+- `recover` сначала проверяет сохранность обязательного состояния, восстанавливает bootstrap Git-доступ и только затем запускает штатный bootstrap в режиме восстановления.
+
+`repair` не должен удалять Raft, создавать новое пустое состояние OpenTofu, менять SSH CA из-за отсутствия прежнего состояния или пересоздавать 910. Если безопасного исправления недостаточно, команда завершается ошибкой и предлагает `infra-manager recover`.
+
+### Внутренние команды 910
+
+Ansible устанавливает в `/usr/local/sbin/` только технические команды, необходимые автоматике:
 
 | Команда | Назначение |
 |---|---|
-| `infra-manager-status` | полная проверка 910 |
-| `infra-manager-pve-access-check` | проверка PVE API и root SSH |
-| `infra-manager-pve-lifecycle-test` | интеграционная проверка PVE |
+| `infra-manager-status` | внутренняя полная проверка 910 |
 | `infra-manager-activate-runtime` | безопасная отложенная активация нового `infra-runtime` |
 | `infra-manager-openbao-startup-unseal` | проверка и разблокировка OpenBao после запуска |
 
-Для операторских команд должны существовать ссылки:
+Отдельные операторские оболочки `infra-manager-pve-access-check` и `infra-manager-pve-lifecycle-test` не устанавливаются. Соответствующая Python-логика остаётся частью внутренних модулей и тестов.
 
-```text
-/usr/local/bin/infra-manager-status
-/usr/local/bin/infra-manager-pve-access-check
-/usr/local/bin/infra-manager-pve-lifecycle-test
-```
-
-Для вызова с PVE через `pct exec`:
+Для вызова внутреннего состояния с PVE через `pct exec` сохраняется:
 
 ```text
 /usr/bin/infra-manager-status
 ```
+
+Отдельные ссылки `/usr/local/bin/infra-manager-*` внутри 910 не создаются.
 
 ### Python и status.yaml
 
@@ -254,13 +258,13 @@ systemd-run
 
 ### Итоговая проверка
 
-Основная команда:
+Основная операторская команда выполняется на PVE:
 
 ```bash
-infra-manager-status --full
+infra-manager status
 ```
 
-С PVE:
+Она сама вызывает внутреннюю проверку 910. Для диагностики реализации остаётся технический вызов:
 
 ```bash
 pct exec 910 -- infra-manager-status --full
@@ -309,7 +313,14 @@ pct exec 910 -- infra-manager-status --full
 
 ### Типичные неисправности
 
-Если OpenBao после перезагрузки остаётся запечатанным:
+Если OpenBao после перезагрузки остаётся запечатанным, сначала выполнить с PVE:
+
+```bash
+infra-manager status
+infra-manager repair
+```
+
+Для углублённой диагностики внутри 910:
 
 ```bash
 systemctl status infra-manager-openbao-startup-unseal.service
