@@ -1,6 +1,11 @@
 schema_version: 1
 guest_vmid: 109
 
+portal:
+  local:
+    enabled: true
+    title: Сетевой шлюз
+
 system:
   distribution: debian
   version: "13"
@@ -43,6 +48,13 @@ network_gateway:
     web:
       port: 3000
       admin_user: admin
+    portal:
+      name: AdGuard Home
+      scheme: http
+      port: 3000
+      targets:
+        - local
+        - home
     paths:
       root: /opt/network-gateway
       compose: /opt/network-gateway/compose
