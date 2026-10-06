@@ -42,22 +42,14 @@ def check_bookmarks() -> None:
             fail(f"В Homepage 910 отсутствует ссылка {expected}")
 
     gateway = build_portal_bookmarks(109)
-    if _labels(gateway) != {"Проверить", "Исправить"}:
-        fail(
-            "Homepage 109 должен показывать только реально поддерживаемые "
-            "операции; Sync для этой роли пока не реализован"
-        )
+    if _labels(gateway) != {"Проверить", "Синхронизировать", "Исправить"}:
+        fail("Homepage 109 должен содержать три стандартных действия")
 
 
 def check_action_validation() -> None:
     portal_gateway._validate_action("status", 910)
 
-    try:
-        portal_gateway._validate_action("sync", 109)
-    except InfraManagerError:
-        pass
-    else:
-        fail("Посредник не должен разрешать неподдерживаемый Sync Guest 109")
+    portal_gateway._validate_action("sync", 109)
 
     try:
         portal_gateway._validate_action("deploy", 910)
