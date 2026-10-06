@@ -1463,6 +1463,7 @@ def test_operator_policy_is_narrow_and_visible_in_ui() -> None:
         '"infra-secrets/data/*"',
         '"sys/auth"',
         '"sys/policies/acl"',
+        '"sys/internal/ui/resultant-acl"',
         '"ssh-client-signer/roles"',
         '"ssh-host-signer/roles"',
         '"ssh-otp/roles"',
