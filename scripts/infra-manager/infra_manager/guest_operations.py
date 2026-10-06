@@ -157,7 +157,6 @@ def _infra_manager_repair(
 ) -> None:
     del identity
     from .semaphore import sync_project_from_task
-    from .status import check_status
 
     console.info("Обновление PVE-only OpenBao helper")
     install_openbao_host_support(node, repo_root)
@@ -168,7 +167,10 @@ def _infra_manager_repair(
         branch=project_branch_for_checkout(repo_root),
         repo_root=repo_root,
     )
-    check_status(full=True, quiet=False)
+    console.ok(
+        "OpenBao восстановлен, проект Semaphore синхронизирован; "
+        "полная готовность проверяется отдельным Status Guest"
+    )
 
 
 def _infra_manager_test(identity: GuestIdentity) -> None:
