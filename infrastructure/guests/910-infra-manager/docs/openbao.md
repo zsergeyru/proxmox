@@ -1014,7 +1014,7 @@ provision.yaml
 10. проверить `auth/machine`;
 11. проверить `ssh-otp`;
 12. проверить TLS listener;
-13. выполнить `infra-manager-status --full`.
+13. подтвердить итог с PVE командой `infra-manager status`.
 
 Если изменён `access.yaml`, после обновления нужно выполнить `Sync SSH Access`, чтобы привести OTP-роли и машинные AppRole OpenBao к новым правилам. Если изменена конфигурация конкретного гостя, его нужно обновить через `Deploy Guest`. Сквозная проверка соединений выполняется отдельно через `scripts/acceptance/verify-ssh-access.py`.
 
