@@ -38,6 +38,7 @@ SSH_ACCESS_JOB="$ROOT/scripts/infra-manager/jobs/sync-ssh-access.py"
 SSH_ACCESS_ACCEPTANCE="$ROOT/scripts/acceptance/verify-ssh-access.py"
 PY_ACCESS_POLICY="$ROOT/scripts/infra-manager/infra_manager/access.py"
 PY_OPENBAO="$ROOT/scripts/infra-manager/infra_manager/openbao.py"
+PY_GUEST_DEPLOY="$ROOT/scripts/infra-manager/infra_manager/guest_deploy.py"
 PY_RECOVERY="$ROOT/scripts/infra-manager/infra_manager/recovery.py"
 RECOVERY_HOST="$ROOT/scripts/infra-manager/host/recovery.py"
 PVE_OPERATOR="$ROOT/scripts/infra-manager/host/manager.py"
@@ -87,10 +88,17 @@ grep -Fq '"repair"' "$PVE_OPERATOR" \
     || die "PVE-команда infra-manager должна поддерживать repair"
 grep -Fq '"recover"' "$PVE_OPERATOR" \
     || die "PVE-команда infra-manager должна поддерживать recover"
-grep -Fq 'source: manager.py' "$ANSIBLE_RUNTIME" \
-    || die "Deploy Guest infra-manager должен обновлять PVE-команду infra-manager"
-grep -Fq '/usr/local/sbin/infra-manager' "$ANSIBLE_RUNTIME" \
-    || die "Ansible должен устанавливать единую операторскую команду на PVE"
+grep -Fq 'install_openbao_host_support(context.node, repo_root)' "$PY_GUEST_DEPLOY" \
+    || die "Deploy Guest должен обновлять PVE OpenBao support до SSH-подписания"
+grep -Fq 'install_recovery_host_support(context.node, repo_root)' "$PY_GUEST_DEPLOY" \
+    || die "Самообновление infra-manager должно обновлять PVE recovery/operator support"
+grep -Fq 'OPENBAO_HOST_LIBRARY = Path("/usr/local/lib/infra-manager/openbao_host")' "$PY_PVE_HOST" \
+    || die "PVE OpenBao helper должен устанавливать отдельный пакет openbao_host"
+grep -Fq '_install_remote_text_tree(' "$PY_PVE_HOST" \
+    || die "Пакет openbao_host должен устанавливаться целиком"
+if grep -Fq 'host-support/openbao-unseal.py' "$ANSIBLE_RUNTIME"; then
+    die "Ansible не должен отдельно заменять openbao-unseal.py без пакета openbao_host"
+fi
 grep -Fq 'path    = "/openbao/file/raft"' "$OPENBAO_CONFIG" \
     || die "OpenBao должен использовать постоянное Raft-хранилище"
 grep -Fq 'ui = true' "$OPENBAO_CONFIG" \
