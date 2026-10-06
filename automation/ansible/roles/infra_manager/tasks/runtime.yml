@@ -43,7 +43,7 @@
     - { source: activate-runtime.sh, target: infra-manager-activate-runtime }
     - { source: openbao-startup-unseal.sh, target: infra-manager-openbao-startup-unseal }
 
-- name: Удалить прежние операторские команды из 910
+- name: Удалить прежние операторские команды из infra-manager
   ansible.builtin.file:
     path: "{{ item }}"
     state: absent
