@@ -43,6 +43,22 @@
     - { source: activate-runtime.sh, target: infra-manager-activate-runtime }
     - { source: openbao-startup-unseal.sh, target: infra-manager-openbao-startup-unseal }
 
+- name: Установить службу действий локального портала
+  ansible.builtin.copy:
+    remote_src: true
+    src: "{{ provision.paths.bootstrap_repository }}/infrastructure/guests/{{ guest }}/rootfs/etc/systemd/system/infra-manager-portal-gateway.service"
+    dest: /etc/systemd/system/infra-manager-portal-gateway.service
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Включить службу действий локального портала
+  ansible.builtin.systemd_service:
+    name: infra-manager-portal-gateway.service
+    enabled: true
+    state: restarted
+    daemon_reload: true
+
 - name: Удалить прежние операторские команды из infra-manager
   ansible.builtin.file:
     path: "{{ item }}"
