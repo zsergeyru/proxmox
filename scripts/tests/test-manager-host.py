@@ -130,6 +130,37 @@ def test_repair() -> None:
     ) in guest_calls
 
 
+def test_openbao_operator() -> None:
+    calls: list[list[str]] = []
+
+    def fake_run(argv: list[str], **kwargs: object):
+        del kwargs
+        calls.append(argv)
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    with (
+        patch.object(module, "require_executable"),
+        patch.object(module, "run", side_effect=fake_run),
+    ):
+        assert module.openbao_operator(rotate=False) == 0
+        assert module.openbao_operator(rotate=True) == 0
+
+    assert calls == [
+        [
+            "/usr/local/sbin/infra-manager-openbao-unseal",
+            "--show-operator-credentials",
+            "--log-level",
+            "quiet",
+        ],
+        [
+            "/usr/local/sbin/infra-manager-openbao-unseal",
+            "--rotate-operator-password",
+            "--log-level",
+            "quiet",
+        ],
+    ]
+
+
 def test_recover() -> None:
     recovery_modes: list[str] = []
     host_calls: list[list[str]] = []
@@ -164,6 +195,7 @@ def main() -> None:
     test_verify_guest_owned()
     test_status()
     test_repair()
+    test_openbao_operator()
     test_recover()
     print("[ОК] Единая операторская команда PVE проверена")
 
