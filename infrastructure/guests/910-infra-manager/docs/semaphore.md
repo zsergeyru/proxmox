@@ -209,6 +209,8 @@ Views:         Guests / Infrastructure / Security
 Templates:     целевой набор инфраструктурных заданий
 ```
 
+Semaphore сам создаёт встроенную группу `All` с позицией `0`. Управляемые проектом группы должны идти после неё: `Guests=1`, `Infrastructure=2`, `Security=3`.
+
 Проект:
 
 ```text
