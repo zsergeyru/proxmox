@@ -429,25 +429,39 @@ def recover_single_node_raft() -> Path:
         check=False,
     )
 
-    backup = _backup_openbao_state()
-    log_status(f"[ОК] Резервная копия OpenBao сохранена: {backup}")
+    started = False
+    try:
+        backup = _backup_openbao_state()
+        log_status(f"[ОК] Резервная копия OpenBao сохранена: {backup}")
 
-    _write_single_node_peers()
-    log_status(
-        "[ИНФО] Raft peer set зафиксирован как "
-        "infra-manager@127.0.0.1:8201"
-    )
-
-    pct_exec("docker", "start", "openbao", capture=True)
-    unseal()
-
-    if PVE_RAFT_PEERS_PATH.exists():
-        raise OpenBaoHostError(
-            "OpenBao не применил peers.json после восстановления Raft; "
-            f"резервная копия: {backup}"
+        _write_single_node_peers()
+        log_status(
+            "[ИНФО] Raft peer set зафиксирован как "
+            "infra-manager@127.0.0.1:8201"
         )
 
-    wait_until_active()
+        pct_exec("docker", "start", "openbao", capture=True)
+        started = True
+        unseal()
+
+        if PVE_RAFT_PEERS_PATH.exists():
+            raise OpenBaoHostError(
+                "OpenBao не применил peers.json после восстановления Raft; "
+                f"резервная копия: {backup}"
+            )
+
+        wait_until_active()
+    except BaseException:
+        if not started:
+            pct_exec(
+                "docker",
+                "start",
+                "openbao",
+                capture=True,
+                check=False,
+            )
+        raise
+
     log_status("[ОК] Одноузловой Raft восстановлен, infra-manager стал active")
     return backup
 
