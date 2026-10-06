@@ -511,11 +511,11 @@ def main_test() -> None:
         patch.object(semaphore_module, "persist_github_key"),
         patch.object(semaphore_module, "_sync_project_objects") as sync_objects,
     ):
-        if sync_project_from_task(branch="main") != 0:
+        if sync_project_from_task(branch="main", repo_root=ROOT) != 0:
             fail("Безопасная синхронизация Semaphore вернула ошибку")
     if task_client.auth_mode != "token":
         fail("Sync Guest должен использовать существующий API token")
-    sync_objects.assert_called_once_with(task_client, 41, "main")
+    sync_objects.assert_called_once_with(task_client, 41, "main", ROOT)
 
     invalid_task_client = TaskSyncClient(token_valid=False)
     with (
@@ -529,7 +529,7 @@ def main_test() -> None:
         patch.object(semaphore_module, "_sync_project_objects") as sync_objects,
     ):
         try:
-            sync_project_from_task(branch="main")
+            sync_project_from_task(branch="main", repo_root=ROOT)
         except InfraManagerError:
             pass
         else:
