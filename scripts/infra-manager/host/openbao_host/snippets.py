@@ -2286,6 +2286,7 @@ try:
                 "infra-secrets/data/services/semaphore",
                 "sys/auth",
                 "sys/policies/acl",
+                "sys/internal/ui/resultant-acl",
                 "ssh-client-signer/roles",
                 "sys/storage/raft/configuration",
                 "sys/init",
@@ -2302,6 +2303,7 @@ try:
         },
         "sys/auth": {"read"},
         "sys/policies/acl": {"list"},
+        "sys/internal/ui/resultant-acl": {"read"},
         "ssh-client-signer/roles": {"list"},
     }
     for path, required in expected.items():
