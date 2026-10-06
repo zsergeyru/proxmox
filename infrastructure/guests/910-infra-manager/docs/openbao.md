@@ -331,6 +331,7 @@ secret_threshold = 1
 unseal.key
 ssh-access.json
 kv-access.json
+operator-access.json
 ```
 
 **unseal.key**
@@ -364,6 +365,17 @@ kv-semaphore-writer
 ```
 
 Он не должен давать административное управление OpenBao.
+
+**operator-access.json**
+
+Файл содержит только логин и текущий пароль человека для входа в OpenBao UI:
+
+```text
+username: operator
+password: <случайный пароль>
+```
+
+Пароль создаётся автоматически, хранится с правами `0600` только в PVE-only и никогда не выводится обычным Deploy/Repair/Status. Внутри OpenBao хранится только состояние userpass.
 
 Машинные SecretID обычных гостей не должны накапливаться в этих PVE-only файлах как общий реестр.
 
@@ -478,6 +490,71 @@ semaphore-api-token
 После успешной инициализации OpenBao этот каталог не должен оставаться постоянным рабочим источником.
 
 ## 4. SSH CA и служебный доступ
+
+### Операторский вход в UI
+
+Для человека должен использоваться отдельный auth method:
+
+```text
+auth/userpass/
+```
+
+Он должен быть опубликован в UI-specific unauthenticated listing через:
+
+```text
+listing_visibility = unauth
+```
+
+Пользователь:
+
+```text
+operator
+```
+
+должен получать только политику:
+
+```text
+infra-operator
+```
+
+Целевой срок пользовательского token:
+
+```text
+token_ttl:     1h
+token_max_ttl: 8h
+```
+
+Политика `infra-operator` разрешает:
+
+- просматривать и изменять значения только в `infra-secrets`;
+- просматривать список auth methods;
+- просматривать ACL policies;
+- просматривать роли `ssh-client-signer`, `ssh-host-signer` и `ssh-otp`;
+- проверять и отзывать собственный token.
+
+Она не должна разрешать:
+
+- `sys/init`;
+- изменение или восстановление Raft;
+- выпуск root token;
+- изменение auth methods;
+- изменение ACL policies;
+- чтение закрытых SSH CA keys;
+- создание AppRole SecretID.
+
+Получить текущие данные для входа можно только на PVE от root:
+
+```text
+infra-manager openbao-operator
+```
+
+Сменить пароль:
+
+```text
+infra-manager openbao-operator --rotate
+```
+
+Команда выводит пароль только по явному запросу оператора и не должна использоваться внутри Semaphore-задач или обычных журналов.
 
 ### SSH client CA
 
