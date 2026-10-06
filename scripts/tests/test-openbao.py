@@ -147,6 +147,10 @@ def test_host_initialization_does_not_print_secrets() -> None:
             patch.object(host, "ensure_ssh_cas") as ensure_cas,
             patch.object(host, "configure_ssh_access") as configure_access,
             patch.object(host, "configure_kv_access") as configure_kv,
+            patch.object(
+                host,
+                "configure_operator_access",
+            ) as configure_operator,
             patch.object(host, "materialize_runtime_secrets") as materialize,
             patch.object(host, "publish_client_ca") as publish_ca,
             patch.object(host, "publish_host_ca") as publish_host_ca,
@@ -161,6 +165,7 @@ def test_host_initialization_does_not_print_secrets() -> None:
     ensure_cas.assert_called_once_with(root_token)
     configure_access.assert_called_once_with(root_token)
     configure_kv.assert_called_once_with(root_token)
+    configure_operator.assert_called_once_with(root_token)
     materialize.assert_called_once_with()
     publish_ca.assert_called_once_with(root_token)
     publish_host_ca.assert_called_once_with()
@@ -418,13 +423,19 @@ def test_existing_openbao_skips_root_when_ready() -> None:
         key_path = Path(tmp) / "unseal.key"
         access_path = Path(tmp) / "ssh-access.json"
         kv_access_path = Path(tmp) / "kv-access.json"
+        operator_access_path = Path(tmp) / "operator-access.json"
         key_path.write_text("existing-key\n", encoding="utf-8")
         access_path.write_text("{}\n", encoding="utf-8")
         kv_access_path.write_text("{}\n", encoding="utf-8")
+        operator_access_path.write_text(
+            '{"username":"operator","password":"test-password-012345678901234567890"}\n',
+            encoding="utf-8",
+        )
         with (
             patch.object(host, "KEY_PATH", key_path),
             patch.object(host, "SSH_ACCESS_PATH", access_path),
             patch.object(host, "KV_ACCESS_PATH", kv_access_path),
+            patch.object(host, "OPERATOR_ACCESS_PATH", operator_access_path),
             patch.object(
                 host,
                 "read_status",
@@ -436,6 +447,10 @@ def test_existing_openbao_skips_root_when_ready() -> None:
             patch.object(host, "client_ca_published", return_value=True),
             patch.object(host, "check_ssh_access") as check_access,
             patch.object(host, "check_kv_access") as check_kv,
+            patch.object(
+                host,
+                "check_operator_access",
+            ) as check_operator,
             patch.object(host, "materialize_runtime_secrets") as materialize,
             patch.object(host, "publish_host_ca") as publish_host_ca,
             patch.object(host, "ensure_client_signing_role") as ensure_client_role,
@@ -447,6 +462,7 @@ def test_existing_openbao_skips_root_when_ready() -> None:
     unseal.assert_called_once_with()
     check_access.assert_called_once_with()
     check_kv.assert_called_once_with()
+    check_operator.assert_called_once_with()
     materialize.assert_called_once_with()
     publish_host_ca.assert_called_once_with()
     ensure_client_role.assert_called_once_with()
@@ -460,14 +476,20 @@ def test_existing_openbao_recovers_broken_kv_approle() -> None:
         key_path = Path(tmp) / "unseal.key"
         access_path = Path(tmp) / "ssh-access.json"
         kv_access_path = Path(tmp) / "kv-access.json"
+        operator_access_path = Path(tmp) / "operator-access.json"
         key_path.write_text("existing-key\n", encoding="utf-8")
         access_path.write_text("{}\n", encoding="utf-8")
         kv_access_path.write_text("{}\n", encoding="utf-8")
+        operator_access_path.write_text(
+            '{"username":"operator","password":"test-password-012345678901234567890"}\n',
+            encoding="utf-8",
+        )
 
         with (
             patch.object(host, "KEY_PATH", key_path),
             patch.object(host, "SSH_ACCESS_PATH", access_path),
             patch.object(host, "KV_ACCESS_PATH", kv_access_path),
+            patch.object(host, "OPERATOR_ACCESS_PATH", operator_access_path),
             patch.object(
                 host,
                 "read_status",
@@ -489,6 +511,10 @@ def test_existing_openbao_recovers_broken_kv_approle() -> None:
                     "HTTP 500 from stale kv-reader SecretID"
                 ),
             ) as check_kv,
+            patch.object(
+                host,
+                "check_operator_access",
+            ) as check_operator,
             patch.object(
                 host,
                 "generate_temporary_root_token",
@@ -513,6 +539,8 @@ def test_existing_openbao_recovers_broken_kv_approle() -> None:
         fail("Сломанный KV AppRole должен обнаруживаться ровно одной проверкой")
     if check_ssh.call_count != 2:
         fail("SSH AppRole должен повторно подтверждаться после recovery-окна")
+    if check_operator.call_count != 2:
+        fail("Операторский userpass должен повторно подтверждаться после recovery-окна")
     generate_root.assert_called_once_with()
     ensure_cas.assert_called_once_with("TEMP-ROOT-TOKEN")
     reconcile_kv.assert_called_once_with("TEMP-ROOT-TOKEN")
@@ -530,11 +558,13 @@ def test_existing_openbao_bootstraps_missing_ssh_security() -> None:
         key_path = Path(tmp) / "unseal.key"
         access_path = Path(tmp) / "ssh-access.json"
         kv_access_path = Path(tmp) / "kv-access.json"
+        operator_access_path = Path(tmp) / "operator-access.json"
         key_path.write_text("existing-key\n", encoding="utf-8")
         with (
             patch.object(host, "KEY_PATH", key_path),
             patch.object(host, "SSH_ACCESS_PATH", access_path),
             patch.object(host, "KV_ACCESS_PATH", kv_access_path),
+            patch.object(host, "OPERATOR_ACCESS_PATH", operator_access_path),
             patch.object(
                 host,
                 "read_status",
@@ -551,6 +581,10 @@ def test_existing_openbao_bootstraps_missing_ssh_security() -> None:
             patch.object(host, "ensure_ssh_cas") as ensure_cas,
             patch.object(host, "configure_ssh_access") as configure_access,
             patch.object(host, "configure_kv_access") as configure_kv,
+            patch.object(
+                host,
+                "configure_operator_access",
+            ) as configure_operator,
             patch.object(host, "materialize_runtime_secrets") as materialize,
             patch.object(host, "publish_client_ca") as publish_ca,
             patch.object(host, "publish_host_ca") as publish_host_ca,
@@ -568,6 +602,7 @@ def test_existing_openbao_bootstraps_missing_ssh_security() -> None:
         rotate_secret_ids=False,
     )
     configure_kv.assert_called_once_with("TEMP-ROOT-TOKEN")
+    configure_operator.assert_called_once_with("TEMP-ROOT-TOKEN")
     materialize.assert_called_once_with()
     publish_ca.assert_called_once_with("TEMP-ROOT-TOKEN")
     publish_host_ca.assert_called_once_with()
