@@ -43,6 +43,17 @@
     - { source: activate-runtime.sh, target: infra-manager-activate-runtime }
     - { source: openbao-startup-unseal.sh, target: infra-manager-openbao-startup-unseal }
 
+- name: Удалить прежние операторские команды из 910
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /usr/local/sbin/infra-manager-pve-access-check
+    - /usr/local/sbin/infra-manager-pve-lifecycle-test
+    - /usr/local/bin/infra-manager-status
+    - /usr/local/bin/infra-manager-pve-access-check
+    - /usr/local/bin/infra-manager-pve-lifecycle-test
+
 - name: Сделать команду состояния доступной через pct exec
   ansible.builtin.file:
     src: /usr/local/sbin/infra-manager-status
