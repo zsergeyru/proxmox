@@ -916,6 +916,7 @@ def _sync_project_objects(
     client: SemaphoreClient,
     project_id: int,
     branch: str,
+    repo_root: Path,
 ) -> None:
     """Синхронизировать управляемые объекты внутри существующего проекта."""
 
@@ -948,7 +949,7 @@ def _sync_project_objects(
         for view in views
     }
 
-    templates = semaphore_templates()
+    templates = semaphore_templates(repo_root)
     for template in templates:
         client.ensure_template(
             project_id,
@@ -986,7 +987,12 @@ def configure_project(branch: str | None = None) -> int:
     client = SemaphoreClient()
     client.ensure_api_token()
     project_id = client.ensure_project()
-    _sync_project_objects(client, project_id, branch)
+    _sync_project_objects(
+        client,
+        project_id,
+        branch,
+        PATHS.repo_root,
+    )
 
     console.ok(
         "Проект Semaphore, общие настройки и инфраструктурные задания подготовлены"
@@ -994,7 +1000,10 @@ def configure_project(branch: str | None = None) -> int:
     return 0
 
 
-def sync_project_from_task(branch: str | None = None) -> int:
+def sync_project_from_task(
+    branch: str | None = None,
+    repo_root: Path | None = None,
+) -> int:
     """Обновить проект из задания Semaphore без root и ротации секретов."""
 
     if not nonempty(PVE_API_ENV):
@@ -1024,7 +1033,12 @@ def sync_project_from_task(branch: str | None = None) -> int:
             "Проект Semaphore имеет некорректный id"
         )
 
-    _sync_project_objects(client, project_id, branch)
+    _sync_project_objects(
+        client,
+        project_id,
+        branch,
+        repo_root or PATHS.repo_root,
+    )
     console.ok(
         "Проект Semaphore синхронизирован без изменения root-секретов"
     )
