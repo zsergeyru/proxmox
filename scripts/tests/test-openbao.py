@@ -215,6 +215,76 @@ def test_existing_openbao_skips_root_when_ready() -> None:
     generate_root.assert_not_called()
 
 
+def test_existing_openbao_recovers_broken_kv_approle() -> None:
+    host = load_host_module()
+    with tempfile.TemporaryDirectory() as tmp:
+        key_path = Path(tmp) / "unseal.key"
+        access_path = Path(tmp) / "ssh-access.json"
+        kv_access_path = Path(tmp) / "kv-access.json"
+        key_path.write_text("existing-key\n", encoding="utf-8")
+        access_path.write_text("{}\n", encoding="utf-8")
+        kv_access_path.write_text("{}\n", encoding="utf-8")
+
+        with (
+            patch.object(host, "KEY_PATH", key_path),
+            patch.object(host, "SSH_ACCESS_PATH", access_path),
+            patch.object(host, "KV_ACCESS_PATH", kv_access_path),
+            patch.object(
+                host,
+                "read_status",
+                return_value={"initialized": True, "sealed": False},
+            ),
+            patch.object(host, "unseal") as unseal,
+            patch.object(host, "ssh_cas_ready", return_value=True),
+            patch.object(
+                host,
+                "ssh_access_credentials_complete",
+                return_value=True,
+            ),
+            patch.object(host, "client_ca_published", return_value=True),
+            patch.object(host, "check_ssh_access") as check_ssh,
+            patch.object(
+                host,
+                "check_kv_access",
+                side_effect=host.OpenBaoHostError(
+                    "HTTP 500 from stale kv-reader SecretID"
+                ),
+            ) as check_kv,
+            patch.object(
+                host,
+                "generate_temporary_root_token",
+                return_value="TEMP-ROOT-TOKEN",
+            ) as generate_root,
+            patch.object(host, "ensure_ssh_cas") as ensure_cas,
+            patch.object(
+                host,
+                "reconcile_kv_access",
+            ) as reconcile_kv,
+            patch.object(host, "materialize_runtime_secrets") as materialize,
+            patch.object(host, "publish_client_ca") as publish_ca,
+            patch.object(host, "publish_host_ca") as publish_host_ca,
+            patch.object(host, "ensure_client_signing_role") as ensure_client_role,
+            patch.object(host, "ensure_host_signing_role") as ensure_host_role,
+            patch.object(host, "revoke_temporary_root_token") as revoke_root,
+        ):
+            host.initialize()
+
+    unseal.assert_called_once_with()
+    if check_kv.call_count != 1:
+        fail("Сломанный KV AppRole должен обнаруживаться ровно одной проверкой")
+    if check_ssh.call_count != 2:
+        fail("SSH AppRole должен повторно подтверждаться после recovery-окна")
+    generate_root.assert_called_once_with()
+    ensure_cas.assert_called_once_with("TEMP-ROOT-TOKEN")
+    reconcile_kv.assert_called_once_with("TEMP-ROOT-TOKEN")
+    materialize.assert_called_once_with()
+    publish_ca.assert_called_once_with("TEMP-ROOT-TOKEN")
+    publish_host_ca.assert_called_once_with()
+    ensure_client_role.assert_called_once_with()
+    ensure_host_role.assert_called_once_with()
+    revoke_root.assert_called_once_with("TEMP-ROOT-TOKEN")
+
+
 def test_existing_openbao_bootstraps_missing_ssh_security() -> None:
     host = load_host_module()
     with tempfile.TemporaryDirectory() as tmp:
@@ -1040,6 +1110,7 @@ def main() -> None:
     test_orchestration()
     test_host_initialization_does_not_print_secrets()
     test_existing_openbao_skips_root_when_ready()
+    test_existing_openbao_recovers_broken_kv_approle()
     test_existing_openbao_bootstraps_missing_ssh_security()
     test_ssh_ca_reconcile_requires_initial_admin_token()
     test_raw_root_generation_uses_unseal_key_via_stdin()
