@@ -79,8 +79,7 @@ def build_parser() -> argparse.ArgumentParser:
     portal_bookmarks.add_argument(
         "--guest-vmid",
         type=int,
-        required=True,
-        help="VMID гостя",
+        help="VMID гостя; без значения используется роль infra-manager",
     )
     portal_bookmarks.add_argument(
         "--output",
@@ -135,12 +134,21 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.handler == "portal-bookmarks":
             from pathlib import Path
 
+            from .guest_catalog import find_guest_by_role
             from .portal import render_portal_bookmarks, write_portal_bookmarks
+            from .settings import PATHS, SETTINGS
+
+            vmid = args.guest_vmid
+            if vmid is None:
+                vmid = find_guest_by_role(
+                    PATHS.repo_root,
+                    SETTINGS.infra_manager_role,
+                ).vmid
 
             if args.output:
-                write_portal_bookmarks(args.guest_vmid, Path(args.output))
+                write_portal_bookmarks(vmid, Path(args.output))
             else:
-                print(render_portal_bookmarks(args.guest_vmid), end="")
+                print(render_portal_bookmarks(vmid), end="")
             return 0
 
         raise InfraManagerError(f"Неизвестная команда: {args.command}")
