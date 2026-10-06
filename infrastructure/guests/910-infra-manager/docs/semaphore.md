@@ -302,10 +302,12 @@ Semaphore должен содержать как минимум:
 |---|---|
 | `OpenTofu Plan` | показать изменения инфраструктуры |
 | `Build Template 9000` | собрать базовый шаблон Debian |
-| `Deploy Guest 410` | развернуть/обновить 410 |
-| `Deploy Guest 910` | обновить 910 с безопасной активацией runtime |
+| `Deploy Guest` | выбрать гостя из списка и привести его к `guest.yaml + provision.yaml` |
 | `Sync SSH Access` | синхронизировать AppRole, policy и OTP-роли OpenBao из `access.yaml` |
-| `Initialize OpenBao 910` | инициализировать и привести OpenBao к целевой конфигурации |
+
+`Deploy Guest` должен использовать обязательную survey-переменную `GUEST_VMID` типа `enum`. Список вариантов строится автоматически только из каталогов, где одновременно существуют `guest.yaml` и `provision.yaml`. Произвольный VMID через свободные аргументы Semaphore не разрешается.
+
+Первичная команда `scripts/infra-manager/jobs/initialize-openbao.py` сохраняется для первоначального развёртывания и восстановления, но не должна отображаться как обычный шаблон Semaphore. Её вызывает bootstrap/recovery-контур либо оператор в явном восстановительном сценарии.
 
 Задание `Sync SSH Access` должно выполнять только идемпотентную синхронизацию OpenBao, описанную в [`openbao.md`](openbao.md). Оно не развёртывает гостей и не выполняет сквозные SSH-тесты. Настройка гостя относится к `Deploy Guest`, а приёмочная проверка выполняется отдельным сценарием `scripts/acceptance/verify-ssh-access.py`.
 
