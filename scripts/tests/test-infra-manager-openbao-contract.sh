@@ -103,6 +103,12 @@ grep -Fq 'path    = "/openbao/file/raft"' "$OPENBAO_CONFIG" \
     || die "OpenBao должен использовать постоянное Raft-хранилище"
 grep -Fq 'ui = true' "$OPENBAO_CONFIG" \
     || die "OpenBao должен публиковать встроенный web UI через TLS listener"
+grep -Fq -- '--force-recreate' "$ANSIBLE_RUNTIME" \
+    || die "OpenBao должен перезапускаться после изменения bind-mounted конфигурации"
+grep -Fq '/ui/' "$ANSIBLE_RUNTIME_DIR/openbao.yml" \
+    || die "Ansible должен проверять встроенный OpenBao UI после запуска"
+grep -Fq ':8202/ui/' "$PY_STATUS" \
+    || die "Полный status должен проверять встроенный OpenBao UI"
 grep -Fq 'address         = "127.0.0.1:8200"' "$OPENBAO_CONFIG" \
     || die "OpenBao API должен слушать только loopback 910"
 grep -Fq 'tls_disable     = true' "$OPENBAO_CONFIG" \

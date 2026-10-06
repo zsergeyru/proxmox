@@ -16,9 +16,13 @@ from .common import (
     reserve_runtime_activation,
 )
 from .guest_catalog import GuestIdentity, deployable_guests, guest_identity, guest_management_address
-from .guest_deploy import run_deploy_guest
+from .guest_deploy import project_branch_for_checkout, run_deploy_guest
 from .pve import PveClient
-from .pve_host import check_infra_manager_status, trigger_openbao_unseal
+from .pve_host import (
+    check_infra_manager_status,
+    install_openbao_host_support,
+    repair_openbao_on_host,
+)
 from .settings import SETTINGS
 
 GUEST_OPERATIONS: Final[tuple[str, ...]] = (
@@ -28,7 +32,6 @@ GUEST_OPERATIONS: Final[tuple[str, ...]] = (
     "test",
     "sync",
 )
-SYNC_ROLES: Final[frozenset[str]] = frozenset({SETTINGS.infra_manager_role})
 
 
 def extract_survey_vmid(argv: list[str]) -> tuple[list[str], int | None]:
@@ -59,15 +62,7 @@ def operation_guests(
     if operation not in GUEST_OPERATIONS:
         raise InfraManagerError(f"Неизвестная операция гостя: {operation}")
 
-    guests = deployable_guests(repo_root)
-    if operation != "sync":
-        return guests
-
-    return tuple(
-        guest
-        for guest in guests
-        if guest.role in SYNC_ROLES
-    )
+    return deployable_guests(repo_root)
 
 
 def _expected_resource_type(repo_root: Path, identity: GuestIdentity) -> str:
@@ -155,16 +150,27 @@ def _infra_manager_status(
     check_infra_manager_status(node)
 
 
-def _infra_manager_repair(node: str, identity: GuestIdentity) -> None:
+def _infra_manager_repair(
+    node: str,
+    repo_root: Path,
+    identity: GuestIdentity,
+) -> None:
     del identity
-    from .semaphore import configure_project
-    from .status import check_status
+    from .semaphore import sync_project_from_task
 
+    console.info("Обновление PVE-only OpenBao helper")
+    install_openbao_host_support(node, repo_root)
     console.info("Безопасное восстановление OpenBao")
-    trigger_openbao_unseal(node)
+    repair_openbao_on_host(node)
     console.info("Синхронизация проекта Semaphore")
-    configure_project(branch=SETTINGS.project_branch())
-    check_status(full=True, quiet=False)
+    sync_project_from_task(
+        branch=project_branch_for_checkout(repo_root),
+        repo_root=repo_root,
+    )
+    console.ok(
+        "OpenBao восстановлен, проект Semaphore синхронизирован; "
+        "полная готовность проверяется отдельным Status Guest"
+    )
 
 
 def _infra_manager_test(identity: GuestIdentity) -> None:
@@ -186,7 +192,7 @@ def _infra_manager_sync(
         "Синхронизация Semaphore из Git-версии текущего задания"
     )
     sync_project_from_task(
-        branch=SETTINGS.project_branch(),
+        branch=project_branch_for_checkout(repo_root),
         repo_root=repo_root,
     )
     console.ok("Конфигурация Semaphore синхронизирована")
@@ -248,7 +254,7 @@ def _run_repair(
         )
 
     if identity.role == SETTINGS.infra_manager_role:
-        _infra_manager_repair(node, identity)
+        _infra_manager_repair(node, repo_root, identity)
     else:
         console.ok(
             f"Гость {identity.vmid} {identity.name}: "
@@ -290,19 +296,18 @@ def _run_sync(
     repo_root: Path,
     identity: GuestIdentity,
 ) -> int:
-    allowed = operation_guests(repo_root, "sync")
-    if identity.vmid not in {guest.vmid for guest in allowed}:
-        raise InfraManagerError(
-            f"Операция Sync для роли {identity.role or '(без роли)'} "
-            "пока не поддерживается"
-        )
-
     if identity.role == SETTINGS.infra_manager_role:
         _infra_manager_sync(repo_root, identity)
         return 0
 
-    raise InfraManagerError(
-        f"Для роли {identity.role or '(без роли)'} не задан обработчик Sync"
+    console.info(
+        f"Синхронизация provision.yaml гостя {identity.vmid} "
+        "без полного развёртывания"
+    )
+    return run_deploy_guest(
+        repo_root,
+        identity.vmid,
+        phase="provision",
     )
 
 

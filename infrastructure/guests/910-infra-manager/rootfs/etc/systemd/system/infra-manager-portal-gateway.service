@@ -1,0 +1,19 @@
+[Unit]
+Description=Infra Manager portal action gateway
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=PYTHONPATH=/usr/local/lib/infra-manager
+ExecStart=/usr/bin/python3 -m infra_manager portal-gateway
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+[Install]
+WantedBy=multi-user.target

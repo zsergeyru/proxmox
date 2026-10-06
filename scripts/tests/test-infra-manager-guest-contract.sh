@@ -33,6 +33,7 @@ OPENBAO_HOST="$ROOT/scripts/infra-manager/host/openbao-unseal.py"
 OPENBAO_HOST_PACKAGE="$ROOT/scripts/infra-manager/host/openbao_host"
 OPENBAO_STARTUP_COMMAND="$ROOT/scripts/infra-manager/commands/openbao-startup-unseal.sh"
 OPENBAO_STARTUP_SERVICE="$ROOT/infrastructure/guests/910-infra-manager/rootfs/etc/systemd/system/infra-manager-openbao-startup-unseal.service.j2"
+PORTAL_GATEWAY_SERVICE="$ROOT/infrastructure/guests/910-infra-manager/rootfs/etc/systemd/system/infra-manager-portal-gateway.service"
 OPENBAO_JOB="$ROOT/scripts/infra-manager/jobs/initialize-openbao.py"
 SSH_ACCESS_JOB="$ROOT/scripts/infra-manager/jobs/sync-ssh-access.py"
 SSH_ACCESS_ACCEPTANCE="$ROOT/scripts/acceptance/verify-ssh-access.py"
@@ -80,9 +81,15 @@ for task_file in "${ANSIBLE_RUNTIME_PARTS[@]}"; do
     cat "$ANSIBLE_RUNTIME_DIR/$task_file" >> "$ANSIBLE_RUNTIME"
 done
 
-for file in "$PY_COMMON" "$ANSIBLE_CONFIG" "$ANSIBLE_PLAYBOOK" "$ANSIBLE_LINUX_BASE" "$PROJECT_GIT_TASKS" "$ANSIBLE_GUEST_LAYOUT" "$ANSIBLE_DOCKER" "$ANSIBLE_RUNTIME" "$PY_SETTINGS" "$PY_SEMAPHORE" "$PY_STATUS" "$PY_PVE" "$PY_LIFECYCLE" "$PYTHON_COMMAND" "$ACTIVATE_RUNTIME" "$BUILD_TEMPLATE" "$DEPLOY_GUEST" "$PY_OPENTOFU" "$PY_TEMPLATE" "$PY_TEMPLATE_BUILD" "$PY_TEMPLATE_VERIFY" "$COMPOSE" "$OPENBAO_CONFIG" "$OPENBAO_HOST" "$OPENBAO_STARTUP_COMMAND" "$OPENBAO_STARTUP_SERVICE" "$OPENBAO_JOB" "$SSH_ACCESS_JOB" "$SSH_ACCESS_ACCEPTANCE" "$PY_ACCESS_POLICY" "$PY_OPENBAO" "$PY_RECOVERY" "$RECOVERY_HOST" "$DOCKERFILE" "$REQ" "$PLAN" "$PY_PVE_HOST" "$OPENTOFU_LOCK" "$GUEST_MANIFEST" "$PROVISION" "$SSH_CONFIG"; do
+for file in "$PY_COMMON" "$ANSIBLE_CONFIG" "$ANSIBLE_PLAYBOOK" "$ANSIBLE_LINUX_BASE" "$PROJECT_GIT_TASKS" "$ANSIBLE_GUEST_LAYOUT" "$ANSIBLE_DOCKER" "$ANSIBLE_RUNTIME" "$PY_SETTINGS" "$PY_SEMAPHORE" "$PY_STATUS" "$PY_PVE" "$PY_LIFECYCLE" "$PYTHON_COMMAND" "$ACTIVATE_RUNTIME" "$BUILD_TEMPLATE" "$DEPLOY_GUEST" "$PY_OPENTOFU" "$PY_TEMPLATE" "$PY_TEMPLATE_BUILD" "$PY_TEMPLATE_VERIFY" "$COMPOSE" "$OPENBAO_CONFIG" "$OPENBAO_HOST" "$OPENBAO_STARTUP_COMMAND" "$OPENBAO_STARTUP_SERVICE" "$PORTAL_GATEWAY_SERVICE" "$OPENBAO_JOB" "$SSH_ACCESS_JOB" "$SSH_ACCESS_ACCEPTANCE" "$PY_ACCESS_POLICY" "$PY_OPENBAO" "$PY_RECOVERY" "$RECOVERY_HOST" "$DOCKERFILE" "$REQ" "$PLAN" "$PY_PVE_HOST" "$OPENTOFU_LOCK" "$GUEST_MANIFEST" "$PROVISION" "$SSH_CONFIG"; do
     [[ -s "$file" ]] || die "Отсутствует обязательный файл: $file"
 done
+
+grep -Fq 'src: "{{ guest_root }}/rootfs/etc/systemd/system/infra-manager-portal-gateway.service"' "$ANSIBLE_RUNTIME" \
+    || die "Portal gateway unit должен устанавливаться из checkout текущего задания"
+if grep -Fq 'bootstrap_repository }}/infrastructure/guests/{{ guest }}/rootfs/etc/systemd/system/infra-manager-portal-gateway.service' "$ANSIBLE_RUNTIME"; then
+    die "Portal gateway unit не должен браться из старой bootstrap-repo"
+fi
 
 PVE_ACCESS_TASKS="$ANSIBLE_RUNTIME_DIR/pve_access.yml"
 SEMAPHORE_TASKS="$ANSIBLE_RUNTIME_DIR/semaphore.yml"
@@ -200,7 +207,7 @@ role_order = [
     if isinstance(task, dict)
     and isinstance(task.get("ansible.builtin.include_role"), dict)
 ]
-expected_role_order = ["linux_base", "docker", "infra_manager", "ai_control", "network_gateway", "guest_layout"]
+expected_role_order = ["linux_base", "docker", "infra_manager", "ai_control", "network_gateway", "portal", "guest_layout"]
 if role_order != expected_role_order:
     raise SystemExit(
         f"неожиданный порядок Ansible roles: {role_order!r}; "

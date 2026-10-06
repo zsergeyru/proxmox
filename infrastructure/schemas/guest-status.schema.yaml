@@ -52,6 +52,7 @@ properties:
         type:
           enum:
             - runtime
+            - portal
             - openbao
             - semaphore
             - runtime_tools

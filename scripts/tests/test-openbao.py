@@ -173,6 +173,245 @@ def test_host_initialization_does_not_print_secrets() -> None:
         fail("Хостовый сценарий вывел секрет OpenBao в журнал")
 
 
+def test_waits_for_active_raft_node() -> None:
+    host = load_host_module()
+    responses = iter(
+        [
+            SimpleNamespace(
+                returncode=0,
+                stdout=json.dumps(
+                    {
+                        "http_status": 429,
+                        "body": {
+                            "initialized": True,
+                            "sealed": False,
+                            "standby": True,
+                        },
+                    }
+                ),
+                stderr="",
+            ),
+            SimpleNamespace(
+                returncode=0,
+                stdout=json.dumps(
+                    {
+                        "http_status": 200,
+                        "body": {
+                            "initialized": True,
+                            "sealed": False,
+                            "standby": False,
+                        },
+                    }
+                ),
+                stderr="",
+            ),
+        ]
+    )
+
+    def fake_pct_exec(
+        *args: str,
+        capture: bool = False,
+        check: bool = True,
+        input_text: str | None = None,
+    ):
+        del capture, check, input_text
+        if args[:2] != ("python3", "-c") or args[2] != host.HEALTH_CODE:
+            fail(f"Неожиданная команда health: {args!r}")
+        return next(responses)
+
+    with (
+        patch.object(host, "pct_exec", side_effect=fake_pct_exec),
+        patch.object(host.time, "sleep") as sleep,
+    ):
+        body = host.wait_until_active(attempts=3, delay=0.1)
+
+    if body.get("standby") is not False:
+        fail("OpenBao должен считаться готовым только после перехода active")
+    sleep.assert_called_once_with(0.1)
+
+
+def test_unseal_waits_for_active_node_when_already_unsealed() -> None:
+    host = load_host_module()
+    with (
+        patch.object(
+            host,
+            "read_status",
+            return_value={"initialized": True, "sealed": False},
+        ),
+        patch.object(host, "wait_until_active") as wait_active,
+    ):
+        host.unseal()
+    wait_active.assert_called_once_with()
+
+
+def test_repair_recovers_single_node_raft() -> None:
+    host = load_host_module()
+    with (
+        patch.object(host, "prepare_tls_material") as prepare_tls,
+        patch.object(
+            host,
+            "initialize",
+            side_effect=[
+                host.OpenBaoRaftInactiveError(
+                    "OpenBao разблокирован, но Raft-узел не стал активным"
+                ),
+                None,
+            ],
+        ) as initialize,
+        patch.object(
+            host,
+            "recover_single_node_raft",
+            return_value=Path("/backup/openbao"),
+        ) as recover,
+    ):
+        host.repair()
+
+    prepare_tls.assert_called_once_with()
+    if initialize.call_count != 2:
+        fail("Repair должен повторить initialize после восстановления Raft")
+    recover.assert_called_once_with()
+
+
+def test_single_node_raft_recovery_writes_expected_peer() -> None:
+    host = load_host_module()
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        state = root / "state" / "openbao"
+        storage = state / "raft"
+        inner = storage / "raft"
+        inner.mkdir(parents=True)
+        (storage / "raft.db").write_bytes(b"raft-state")
+        key = root / "pve-only" / "openbao" / "unseal.key"
+        key.parent.mkdir(parents=True)
+        key.write_text("unseal-key\n", encoding="utf-8")
+        peers = inner / "peers.json"
+        backup = root / "backup"
+        backup.mkdir()
+
+        calls: list[tuple[str, ...]] = []
+
+        def fake_pct_exec(
+            *args: str,
+            capture: bool = False,
+            check: bool = True,
+            input_text: str | None = None,
+        ):
+            del capture, check, input_text
+            calls.append(tuple(args))
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        def consume_peers() -> None:
+            if not peers.is_file():
+                fail("Recovery должен создать peers.json до unseal")
+            payload = json.loads(peers.read_text(encoding="utf-8"))
+            if payload != [
+                {
+                    "id": "infra-manager",
+                    "address": "127.0.0.1:8201",
+                    "non_voter": False,
+                }
+            ]:
+                fail(f"Некорректный одноузловой peers.json: {payload!r}")
+            peers.unlink()
+
+        with (
+            patch.object(host, "PVE_OPENBAO_STATE_PATH", state),
+            patch.object(host, "PVE_RAFT_STORAGE_PATH", storage),
+            patch.object(host, "PVE_RAFT_PEERS_PATH", peers),
+            patch.object(host, "KEY_PATH", key),
+            patch.object(host, "_verify_single_node_raft_contract"),
+            patch.object(host, "_backup_openbao_state", return_value=backup),
+            patch.object(host, "pct_exec", side_effect=fake_pct_exec),
+            patch.object(host, "unseal", side_effect=consume_peers) as unseal,
+            patch.object(host, "wait_until_active") as wait_active,
+        ):
+            returned = host.recover_single_node_raft()
+
+        if returned != backup:
+            fail("Recovery должен вернуть путь резервной копии")
+        unseal.assert_called_once_with()
+        wait_active.assert_called_once_with()
+        required = {
+            ("docker", "stop", "openbao"),
+            ("docker", "start", "openbao"),
+        }
+        if not required.issubset(set(calls)):
+            fail(f"Recovery не выполнил обязательный stop/start: {calls!r}")
+
+
+def test_single_node_raft_recovery_rejects_multi_node_config() -> None:
+    host = load_host_module()
+    with tempfile.TemporaryDirectory() as tmp:
+        storage = Path(tmp) / "raft"
+        storage.mkdir()
+        (storage / "raft.db").write_bytes(b"raft-state")
+        guest_config = (
+            "hostname: infra-manager\n"
+            "description: owner=proxmox-project;role=infra-manager\n"
+        )
+        openbao_config = """
+storage "raft" {
+  path    = "/openbao/file/raft"
+  node_id = "infra-manager"
+  retry_join {
+    leader_api_addr = "https://other:8200"
+  }
+}
+cluster_addr = "http://127.0.0.1:8201"
+listener "tcp" {
+  cluster_address = "127.0.0.1:8201"
+}
+"""
+
+        def fake_run(
+            argv: list[str],
+            *,
+            capture: bool = False,
+            check: bool = True,
+            input_text: str | None = None,
+        ):
+            del capture, check, input_text
+            if argv[:2] == ["pct", "config"]:
+                return SimpleNamespace(
+                    returncode=0,
+                    stdout=guest_config,
+                    stderr="",
+                )
+            fail(f"Неожиданная команда: {argv!r}")
+            raise AssertionError
+
+        def fake_pct_exec(
+            *args: str,
+            capture: bool = False,
+            check: bool = True,
+            input_text: str | None = None,
+        ):
+            del capture, check, input_text
+            if args[:2] == ("cat", str(host.CT_OPENBAO_CONFIG_PATH)):
+                return SimpleNamespace(
+                    returncode=0,
+                    stdout=openbao_config,
+                    stderr="",
+                )
+            fail(f"Неожиданная pct-команда: {args!r}")
+            raise AssertionError
+
+        with (
+            patch.object(host, "VMID", 910),
+            patch.object(host, "TLS_DNS_NAME", "infra-manager"),
+            patch.object(host, "PVE_RAFT_STORAGE_PATH", storage),
+            patch.object(host, "run", side_effect=fake_run),
+            patch.object(host, "pct_exec", side_effect=fake_pct_exec),
+        ):
+            try:
+                host._verify_single_node_raft_contract()
+            except host.OpenBaoHostError as exc:
+                if "многоузловая" not in str(exc):
+                    fail(f"Неожиданный отказ recovery: {exc}")
+            else:
+                fail("Многоузловая конфигурация не должна допускать auto-recovery")
+
+
 def test_existing_openbao_skips_root_when_ready() -> None:
     host = load_host_module()
     with tempfile.TemporaryDirectory() as tmp:
@@ -215,6 +454,76 @@ def test_existing_openbao_skips_root_when_ready() -> None:
     generate_root.assert_not_called()
 
 
+def test_existing_openbao_recovers_broken_kv_approle() -> None:
+    host = load_host_module()
+    with tempfile.TemporaryDirectory() as tmp:
+        key_path = Path(tmp) / "unseal.key"
+        access_path = Path(tmp) / "ssh-access.json"
+        kv_access_path = Path(tmp) / "kv-access.json"
+        key_path.write_text("existing-key\n", encoding="utf-8")
+        access_path.write_text("{}\n", encoding="utf-8")
+        kv_access_path.write_text("{}\n", encoding="utf-8")
+
+        with (
+            patch.object(host, "KEY_PATH", key_path),
+            patch.object(host, "SSH_ACCESS_PATH", access_path),
+            patch.object(host, "KV_ACCESS_PATH", kv_access_path),
+            patch.object(
+                host,
+                "read_status",
+                return_value={"initialized": True, "sealed": False},
+            ),
+            patch.object(host, "unseal") as unseal,
+            patch.object(host, "ssh_cas_ready", return_value=True),
+            patch.object(
+                host,
+                "ssh_access_credentials_complete",
+                return_value=True,
+            ),
+            patch.object(host, "client_ca_published", return_value=True),
+            patch.object(host, "check_ssh_access") as check_ssh,
+            patch.object(
+                host,
+                "check_kv_access",
+                side_effect=host.OpenBaoHostError(
+                    "HTTP 500 from stale kv-reader SecretID"
+                ),
+            ) as check_kv,
+            patch.object(
+                host,
+                "generate_temporary_root_token",
+                return_value="TEMP-ROOT-TOKEN",
+            ) as generate_root,
+            patch.object(host, "ensure_ssh_cas") as ensure_cas,
+            patch.object(
+                host,
+                "reconcile_kv_access",
+            ) as reconcile_kv,
+            patch.object(host, "materialize_runtime_secrets") as materialize,
+            patch.object(host, "publish_client_ca") as publish_ca,
+            patch.object(host, "publish_host_ca") as publish_host_ca,
+            patch.object(host, "ensure_client_signing_role") as ensure_client_role,
+            patch.object(host, "ensure_host_signing_role") as ensure_host_role,
+            patch.object(host, "revoke_temporary_root_token") as revoke_root,
+        ):
+            host.initialize()
+
+    unseal.assert_called_once_with()
+    if check_kv.call_count != 1:
+        fail("Сломанный KV AppRole должен обнаруживаться ровно одной проверкой")
+    if check_ssh.call_count != 2:
+        fail("SSH AppRole должен повторно подтверждаться после recovery-окна")
+    generate_root.assert_called_once_with()
+    ensure_cas.assert_called_once_with("TEMP-ROOT-TOKEN")
+    reconcile_kv.assert_called_once_with("TEMP-ROOT-TOKEN")
+    materialize.assert_called_once_with()
+    publish_ca.assert_called_once_with("TEMP-ROOT-TOKEN")
+    publish_host_ca.assert_called_once_with()
+    ensure_client_role.assert_called_once_with()
+    ensure_host_role.assert_called_once_with()
+    revoke_root.assert_called_once_with("TEMP-ROOT-TOKEN")
+
+
 def test_existing_openbao_bootstraps_missing_ssh_security() -> None:
     host = load_host_module()
     with tempfile.TemporaryDirectory() as tmp:
@@ -254,7 +563,10 @@ def test_existing_openbao_bootstraps_missing_ssh_security() -> None:
     unseal.assert_called_once_with()
     generate_root.assert_called_once_with()
     ensure_cas.assert_called_once_with("TEMP-ROOT-TOKEN")
-    configure_access.assert_called_once_with("TEMP-ROOT-TOKEN")
+    configure_access.assert_called_once_with(
+        "TEMP-ROOT-TOKEN",
+        rotate_secret_ids=False,
+    )
     configure_kv.assert_called_once_with("TEMP-ROOT-TOKEN")
     materialize.assert_called_once_with()
     publish_ca.assert_called_once_with("TEMP-ROOT-TOKEN")
@@ -1039,7 +1351,13 @@ def test_stale_key_is_not_overwritten() -> None:
 def main() -> None:
     test_orchestration()
     test_host_initialization_does_not_print_secrets()
+    test_waits_for_active_raft_node()
+    test_unseal_waits_for_active_node_when_already_unsealed()
+    test_repair_recovers_single_node_raft()
+    test_single_node_raft_recovery_writes_expected_peer()
+    test_single_node_raft_recovery_rejects_multi_node_config()
     test_existing_openbao_skips_root_when_ready()
+    test_existing_openbao_recovers_broken_kv_approle()
     test_existing_openbao_bootstraps_missing_ssh_security()
     test_ssh_ca_reconcile_requires_initial_admin_token()
     test_raw_root_generation_uses_unseal_key_via_stdin()

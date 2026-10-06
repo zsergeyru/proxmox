@@ -1,6 +1,11 @@
 schema_version: 1
 guest_vmid: 910
 
+portal:
+  local:
+    enabled: true
+    title: Управление инфраструктурой
+
 system:
   distribution: debian
   version: "13"
@@ -42,6 +47,13 @@ docker:
       network_mode: host
       database: sqlite
       data_path: /var/lib/infra-manager/semaphore
+
+      portal:
+        name: Semaphore
+        scheme: http
+        port: 3000
+        targets:
+          - local
 
       system_packages:
         - ca-certificates
@@ -85,6 +97,14 @@ docker:
       config_file: rootfs/opt/infra-manager/compose/openbao/openbao.hcl
       storage: raft
       auto_initialize: false
+
+      portal:
+        name: OpenBao
+        scheme: https
+        port: 8202
+        path: /ui/
+        targets:
+          - local
 
 paths:
   configuration: /etc/infra-manager

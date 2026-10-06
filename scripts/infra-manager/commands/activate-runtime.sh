@@ -55,6 +55,7 @@ for _ in $(seq 1 60); do
     if curl -fsS http://127.0.0.1:3000/api/ping >/dev/null 2>&1; then
         PYTHONPATH=/usr/local/lib/infra-manager         INFRA_PROJECT_BRANCH="$BRANCH"             python3 -m infra_manager semaphore-project
 
+
         INFRA_PROJECT_BRANCH="$BRANCH"             /usr/local/sbin/infra-manager-status --full --quiet
         printf '[ОК] infra-runtime активирован, OpenBao разблокирован, Semaphore синхронизирован и проверен\n'
         exit 0

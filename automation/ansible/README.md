@@ -46,6 +46,9 @@ automation/
         ├── ai_control/
         │   ├── tasks/main.yml
         │   └── templates/docker-compose.yml.j2
+        ├── portal/
+        │   ├── tasks/main.yml
+        │   └── templates/
         └── infra_manager/
             └── tasks/
                 ├── main.yml
@@ -75,6 +78,8 @@ linux_base
 → docker, если Docker требуется гостю
 → infra_manager, если guest.yaml содержит role: infra-manager
 → ai_control, если guest.yaml содержит role: ai-control
+→ network_gateway, если guest.yaml содержит role: network-gateway
+→ portal, если provision.yaml включает portal.local
 → guest_layout
 ```
 
@@ -84,9 +89,11 @@ linux_base
 - `docker` — устанавливает и запускает Docker;
 - `infra_manager` — настраивает постоянное состояние, доступы, Semaphore, OpenBao и управляющую среду гостя с ролью `infra-manager`;
 - `ai_control` — разворачивает Hermes и Open WebUI через Docker Compose, создаёт их постоянные каталоги и локальные секреты и проверяет доступность обоих сервисов;
+- `network_gateway` — настраивает сетевые службы гостя с ролью `network-gateway`;
+- `portal` — разворачивает локальный Homepage из `portal.local`, формирует опубликованные службы из вложенных `portal.targets` и стандартные действия обслуживания;
 - `guest_layout` — создаёт только общие каталоги из `provision.components`, если они определены.
 
-Для 410 применяются `linux_base`, `docker`, `ai_control` и общий `guest_layout`. Для 910 применяются `linux_base`, `docker`, `infra_manager` и общий `guest_layout`.
+Для 109, 410 и 910 после их специализированной настройки применяется общая роль `portal`, потому что их `provision.yaml` включает `portal.local`. Затем выполняется общий `guest_layout`.
 
 Постоянный файл `inventory` сейчас не хранится. `deploy-guest` определяет адрес выбранного гостя и запускает Ansible с одноузловым inventory через `-i <адрес>,`. Поэтому отдельный каталог `inventory/` не создаётся.
 

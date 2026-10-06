@@ -361,6 +361,18 @@ def trigger_openbao_unseal(node: str) -> None:
     _ssh(node, str(OPENBAO_HOST_COMMAND))
 
 
+def repair_openbao_on_host(node: str) -> None:
+    """Безопасно восстановить OpenBao, включая одноузловой Raft quorum."""
+
+    _ssh(
+        node,
+        str(OPENBAO_HOST_COMMAND),
+        "--repair",
+        "--log-level",
+        log_level(),
+    )
+
+
 def check_openbao_kv(node: str) -> None:
     """Проверить KV v2 через PVE-only AppRole без выдачи секретов."""
     _ssh(

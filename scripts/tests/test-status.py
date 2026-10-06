@@ -913,6 +913,7 @@ def main_test() -> None:
 
     if [item["type"] for item in definition.checks] != [
         "runtime",
+        "portal",
         "openbao",
         "semaphore",
         "runtime_tools",
@@ -1030,11 +1031,48 @@ def main_test() -> None:
     check_ssh_access_full.assert_called_once_with("pve")
     check_recovery_full.assert_called_once_with("pve")
 
+    portal_run = Mock(
+        side_effect=[
+            SimpleNamespace(returncode=0, stdout="true\n"),
+            SimpleNamespace(returncode=0, stdout=""),
+            SimpleNamespace(returncode=0, stdout=""),
+            SimpleNamespace(returncode=0, stdout=""),
+        ]
+    )
+    with patch.object(
+        status_module,
+        "command_runner",
+        SimpleNamespace(run=portal_run),
+    ):
+        status_module._check_portal()
+    portal_calls = [call.args[0] for call in portal_run.call_args_list]
+    if not any("homepage" in argv for argv in portal_calls):
+        fail("status не проверяет контейнер Homepage")
+    if not any(
+        "http://127.0.0.1:3001/api/healthcheck" in argv
+        for argv in portal_calls
+    ):
+        fail("status не проверяет healthcheck Homepage")
+    if not any(
+        "infra-manager-portal-gateway.service" in argv
+        for argv in portal_calls
+    ):
+        fail("status не проверяет systemd-службу шлюза Homepage")
+    if not any(
+        f"http://127.0.0.1:{status_module.SETTINGS.portal_gateway_port}/health"
+        in argv
+        for argv in portal_calls
+    ):
+        fail("status не проверяет healthcheck шлюза Homepage")
+
     tls_run = Mock(
-        return_value=SimpleNamespace(
-            returncode=0,
-            stdout='{"initialized": true, "sealed": false}',
-        )
+        side_effect=[
+            SimpleNamespace(
+                returncode=0,
+                stdout='{"initialized": true, "sealed": false}',
+            ),
+            SimpleNamespace(returncode=0, stdout=""),
+        ]
     )
     with (
         patch.object(status_module, "required_file") as require_tls_ca,
@@ -1051,11 +1089,22 @@ def main_test() -> None:
     ):
         status_module._check_openbao_tls()
     require_tls_ca.assert_called_once_with(status_module.OPENBAO_TLS_CA)
-    tls_argv = tls_run.call_args.args[0]
-    if str(status_module.OPENBAO_TLS_CA) not in tls_argv:
-        fail("TLS-проверка OpenBao не использует доверенный CA")
-    if "https://192.168.9.10:8202/v1/sys/health" not in tls_argv:
+    tls_calls = [call.args[0] for call in tls_run.call_args_list]
+    if not all(
+        str(status_module.OPENBAO_TLS_CA) in argv
+        for argv in tls_calls
+    ):
+        fail("TLS-проверки OpenBao не используют доверенный CA")
+    if not any(
+        "https://192.168.9.10:8202/v1/sys/health" in argv
+        for argv in tls_calls
+    ):
         fail("TLS-проверка OpenBao не обращается к машинному входу :8202")
+    if not any(
+        "https://192.168.9.10:8202/ui/" in argv
+        for argv in tls_calls
+    ):
+        fail("Полный status не проверяет встроенный интерфейс OpenBao")
 
     values = {
         "address": "192.168.9.10",
@@ -1081,10 +1130,12 @@ def main_test() -> None:
     for expected in (
         "Состояние infra-manager",
         "[ОК] Docker и infra-runtime работают",
+        "[ОК] Homepage и его действия работают",
         "[ОК] OpenBao запущен",
         "[ОК] Semaphore работает",
         "[ОК] OpenTofu, Ansible и Packer готовы",
         "[ОК] Доступ к PVE подтверждён",
+        "http://192.168.9.10:3001",
         "http://192.168.9.10:3000",
         "Логин:   admin",
         "Пароль:  secret-pass",

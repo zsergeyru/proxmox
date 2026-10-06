@@ -13,6 +13,7 @@ MODULE_ROOT = ROOT / "scripts" / "infra-manager"
 sys.path.insert(0, str(MODULE_ROOT))
 
 from infra_manager import guest_operations as operations
+from infra_manager import semaphore as semaphore_module
 from infra_manager.common import InfraManagerError
 from infra_manager.guest_catalog import deployable_guests, guest_identity
 
@@ -33,11 +34,12 @@ def check_operation_catalog() -> None:
                 f"Операция {operation} должна использовать общий каталог гостей"
             )
 
-    sync_guests = operations.operation_guests(ROOT, "sync")
-    if not sync_guests:
-        fail("Sync Guest должен иметь хотя бы один поддерживаемый гость")
-    if any(guest.role != "infra-manager" for guest in sync_guests):
-        fail("На текущем этапе Sync должен быть реализован только для infra-manager")
+    actual_sync = {
+        guest.vmid
+        for guest in operations.operation_guests(ROOT, "sync")
+    }
+    if actual_sync != expected:
+        fail("Sync Guest должен использовать общий каталог гостей")
 
 
 class FakePveClient:
@@ -123,6 +125,48 @@ def check_repair_operation() -> None:
         fail(f"Repair Guest выполнил неожиданные действия: {client.actions!r}")
 
 
+def check_infra_manager_repair_operation() -> None:
+    identity = guest_identity(ROOT, 910)
+    client = FakePveClient(
+        {
+            "vmid": 910,
+            "name": "infra-manager",
+            "type": "lxc",
+            "node": "pve",
+            "status": "running",
+        }
+    )
+    with (
+        patch.object(
+            operations,
+            "install_openbao_host_support",
+        ) as install_host,
+        patch.object(
+            operations,
+            "repair_openbao_on_host",
+        ) as repair_openbao,
+        patch.object(
+            operations,
+            "project_branch_for_checkout",
+            return_value="feature/guest-portals",
+        ) as project_branch,
+        patch.object(
+            semaphore_module,
+            "sync_project_from_task",
+        ) as sync_project,
+    ):
+        if operations._run_repair(client, ROOT, identity) != 0:
+            fail("Repair Guest infra-manager должен завершаться успешно")
+
+    install_host.assert_called_once_with("pve", ROOT)
+    repair_openbao.assert_called_once_with("pve")
+    project_branch.assert_called_once_with(ROOT)
+    sync_project.assert_called_once_with(
+        branch="feature/guest-portals",
+        repo_root=ROOT,
+    )
+
+
 def check_test_operation() -> None:
     identity = guest_identity(ROOT, 109)
     client = FakePveClient(
@@ -159,13 +203,15 @@ def check_sync_operation() -> None:
             fail("Sync Guest infra-manager должен завершаться успешно")
     sync.assert_called_once_with(ROOT, identity)
 
-    unsupported = guest_identity(ROOT, 109)
-    try:
-        operations._run_sync(ROOT, unsupported)
-    except InfraManagerError:
-        pass
-    else:
-        fail("Sync Guest не должен молча работать для роли без обработчика")
+    regular = guest_identity(ROOT, 109)
+    with patch.object(
+        operations,
+        "run_deploy_guest",
+        return_value=0,
+    ) as deploy:
+        if operations._run_sync(ROOT, regular) != 0:
+            fail("Sync Guest обычного гостя должен завершаться успешно")
+    deploy.assert_called_once_with(ROOT, 109, phase="provision")
 
 
 def check_deploy_operation() -> None:
@@ -230,6 +276,7 @@ def main() -> None:
     check_operation_catalog()
     check_status_operation()
     check_repair_operation()
+    check_infra_manager_repair_operation()
     check_test_operation()
     check_sync_operation()
     check_deploy_operation()

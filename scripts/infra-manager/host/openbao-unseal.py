@@ -21,7 +21,7 @@ if (_HOST_MODULE_ROOT / "openbao_host").is_dir():
 else:
     sys.path.insert(0, str(_INSTALLED_HOST_MODULE_ROOT))
 
-from openbao_host.errors import OpenBaoHostError
+from openbao_host.errors import OpenBaoHostError, OpenBaoRaftInactiveError
 from openbao_host.tls import prepare_tls_material as _prepare_tls_material
 from openbao_host.snippets import (
     CHECK_KV_ACCESS_CODE,
@@ -33,12 +33,14 @@ from openbao_host.snippets import (
     CONFIGURE_SSH_ACCESS_CODE,
     CONFIGURE_SSH_CA_CODE,
     GENERATE_ROOT_CODE,
+    HEALTH_CODE,
     INIT_CODE,
     ISSUE_MACHINE_CREDENTIALS_CODE,
     MATERIALIZE_RUNTIME_SECRETS_CODE,
     PREPARE_GENERATE_ROOT_CONFIG_CODE,
     READ_CLIENT_CA_CODE,
     READ_HOST_CA_CODE,
+    RECONCILE_KV_ACCESS_CODE,
     REVOKE_ROOT_CODE,
     SIGN_CLIENT_KEY_CODE,
     SIGN_HOST_KEY_CODE,
@@ -54,6 +56,10 @@ TLS_ADDRESS = ""
 TLS_DNS_NAME = ""
 OPENBAO_URL = "http://127.0.0.1:8200"
 KEY_DIR = Path("/mnt/bindmounts/infra-manager/pve-only/openbao")
+PVE_OPENBAO_STATE_PATH = Path("/mnt/bindmounts/infra-manager/state/openbao")
+PVE_RAFT_STORAGE_PATH = PVE_OPENBAO_STATE_PATH / "raft"
+PVE_RAFT_PEERS_PATH = PVE_RAFT_STORAGE_PATH / "raft" / "peers.json"
+PVE_RAFT_RECOVERY_DIR = KEY_DIR / "raft-recovery"
 KEY_PATH = KEY_DIR / "unseal.key"
 SSH_ACCESS_PATH = KEY_DIR / "ssh-access.json"
 KV_ACCESS_PATH = KEY_DIR / "kv-access.json"
@@ -202,6 +208,279 @@ def read_status(*, wait: bool) -> dict[str, object]:
         "OpenBao в infra-manager не стал доступен"
         + (f": {last_error}" if last_error else "")
     )
+
+
+
+def wait_until_active(*, attempts: int = 60, delay: float = 1.0) -> dict[str, object]:
+    """Дождаться, когда разблокированный Raft-узел станет активным."""
+
+    last_detail = ""
+    for attempt in range(attempts):
+        result = pct_exec(
+            "python3",
+            "-c",
+            HEALTH_CODE,
+            capture=True,
+            check=False,
+        )
+        if result.returncode == 0:
+            try:
+                payload = json.loads(result.stdout)
+            except json.JSONDecodeError:
+                last_detail = "некорректный JSON health"
+            else:
+                if isinstance(payload, dict):
+                    status = payload.get("http_status")
+                    body = payload.get("body")
+                    if (
+                        status == 200
+                        and isinstance(body, dict)
+                        and body.get("initialized") is True
+                        and body.get("sealed") is False
+                        and body.get("standby") is not True
+                    ):
+                        return body
+                    last_detail = (
+                        f"HTTP {status}, standby="
+                        f"{body.get('standby') if isinstance(body, dict) else '?'}"
+                    )
+                else:
+                    last_detail = "некорректный health-ответ"
+        else:
+            last_detail = (result.stderr or "").strip() or (
+                f"код {result.returncode}"
+            )
+
+        if attempt + 1 < attempts:
+            time.sleep(delay)
+
+    raise OpenBaoRaftInactiveError(
+        "OpenBao разблокирован, но Raft-узел не стал активным"
+        + (f": {last_detail}" if last_detail else "")
+    )
+
+
+def require_active_openbao(action: str) -> dict[str, object]:
+    """Проверить unseal и дождаться активного узла перед служебной операцией."""
+
+    status = read_status(wait=False)
+    if status.get("sealed") is not False:
+        raise OpenBaoHostError(f"OpenBao запечатан; {action} невозможна")
+    return wait_until_active()
+
+
+def _verify_single_node_raft_contract() -> None:
+    """Разрешить quorum recovery только для строго одноузлового infra-manager."""
+
+    guest = run(
+        ["pct", "config", str(VMID)],
+        capture=True,
+    ).stdout
+    lines = guest.splitlines()
+    if f"hostname: {TLS_DNS_NAME}" not in lines:
+        raise OpenBaoHostError(
+            f"LXC {VMID} не подтверждает имя infra-manager {TLS_DNS_NAME}"
+        )
+    description = next(
+        (line for line in lines if line.startswith("description: ")),
+        "",
+    )
+    if (
+        "owner=proxmox-project" not in description
+        or "role=infra-manager" not in description
+    ):
+        raise OpenBaoHostError(
+            f"LXC {VMID} не подтверждён как принадлежащий infra-manager"
+        )
+
+    config = pct_exec(
+        "cat",
+        str(CT_OPENBAO_CONFIG_PATH),
+        capture=True,
+    ).stdout
+    required = (
+        'storage "raft" {',
+        'path    = "/openbao/file/raft"',
+        'node_id = "infra-manager"',
+        'cluster_addr = "http://127.0.0.1:8201"',
+        'cluster_address = "127.0.0.1:8201"',
+    )
+    missing = [item for item in required if item not in config]
+    if missing:
+        raise OpenBaoHostError(
+            "Автоматическое восстановление Raft запрещено: "
+            "конфигурация не подтверждает одноузловой infra-manager: "
+            + ", ".join(missing)
+        )
+    forbidden = (
+        "retry_join",
+        "retry_join_as_non_voter",
+        "non_voter",
+    )
+    present = [item for item in forbidden if item in config]
+    if present:
+        raise OpenBaoHostError(
+            "Автоматическое восстановление Raft запрещено: "
+            "обнаружена многоузловая настройка: "
+            + ", ".join(present)
+        )
+
+    if not PVE_RAFT_STORAGE_PATH.is_dir():
+        raise OpenBaoHostError(
+            f"Не найден постоянный Raft-каталог: {PVE_RAFT_STORAGE_PATH}"
+        )
+    if not any(
+        item.is_file() and item.stat().st_size > 0
+        for item in PVE_RAFT_STORAGE_PATH.rglob("*")
+    ):
+        raise OpenBaoHostError("Постоянное Raft-состояние OpenBao пусто")
+
+
+def _backup_openbao_state() -> Path:
+    """Сохранить offline-копию всего постоянного OpenBao state."""
+
+    if not PVE_OPENBAO_STATE_PATH.is_dir():
+        raise OpenBaoHostError(
+            f"Не найден постоянный OpenBao state: {PVE_OPENBAO_STATE_PATH}"
+        )
+    PVE_RAFT_RECOVERY_DIR.mkdir(parents=True, exist_ok=True)
+    os.chmod(PVE_RAFT_RECOVERY_DIR, 0o700)
+
+    stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+    target = PVE_RAFT_RECOVERY_DIR / stamp
+    suffix = 0
+    while target.exists():
+        suffix += 1
+        target = PVE_RAFT_RECOVERY_DIR / f"{stamp}-{suffix}"
+
+    run(
+        [
+            "cp",
+            "-a",
+            "--reflink=auto",
+            str(PVE_OPENBAO_STATE_PATH),
+            str(target),
+        ]
+    )
+    if not target.is_dir() or not any(target.rglob("*")):
+        raise OpenBaoHostError(
+            f"Не удалось подтвердить резервную копию OpenBao: {target}"
+        )
+    return target
+
+
+def _write_single_node_peers() -> None:
+    """Записать штатный peers.json для единственного узла infra-manager."""
+
+    parent = PVE_RAFT_PEERS_PATH.parent
+    if not parent.is_dir():
+        raise OpenBaoHostError(
+            f"Не найден внутренний Raft-каталог: {parent}"
+        )
+
+    owner = parent.stat()
+    fd, temporary_name = tempfile.mkstemp(
+        prefix=".peers.",
+        dir=parent,
+        text=True,
+    )
+    temporary = Path(temporary_name)
+    try:
+        os.fchown(fd, owner.st_uid, owner.st_gid)
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            json.dump(
+                [
+                    {
+                        "id": "infra-manager",
+                        "address": "127.0.0.1:8201",
+                        "non_voter": False,
+                    }
+                ],
+                stream,
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, PVE_RAFT_PEERS_PATH)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def recover_single_node_raft() -> Path:
+    """Восстановить кворум строго одноузлового OpenBao из сохранённого state."""
+
+    _verify_single_node_raft_contract()
+    if not KEY_PATH.is_file() or KEY_PATH.stat().st_size == 0:
+        raise OpenBaoHostError(
+            "Восстановление Raft запрещено без PVE-only unseal-ключа"
+        )
+
+    log_status("[ИНФО] Остановка OpenBao для восстановления одноузлового Raft")
+    pct_exec("docker", "stop", "openbao", capture=True)
+    pct_exec(
+        "docker",
+        "rm",
+        "-f",
+        TEMP_OPENBAO_CONTAINER,
+        capture=True,
+        check=False,
+    )
+
+    started = False
+    try:
+        backup = _backup_openbao_state()
+        log_status(f"[ОК] Резервная копия OpenBao сохранена: {backup}")
+
+        _write_single_node_peers()
+        log_status(
+            "[ИНФО] Raft peer set зафиксирован как "
+            "infra-manager@127.0.0.1:8201"
+        )
+
+        pct_exec("docker", "start", "openbao", capture=True)
+        started = True
+        unseal()
+
+        if PVE_RAFT_PEERS_PATH.exists():
+            raise OpenBaoHostError(
+                "OpenBao не применил peers.json после восстановления Raft; "
+                f"резервная копия: {backup}"
+            )
+
+        wait_until_active()
+    except BaseException:
+        if not started:
+            pct_exec(
+                "docker",
+                "start",
+                "openbao",
+                capture=True,
+                check=False,
+            )
+        raise
+
+    log_status("[ОК] Одноузловой Raft восстановлен, infra-manager стал active")
+    return backup
+
+
+def repair() -> None:
+    """Безопасно восстановить OpenBao, включая потерянный одноузловой quorum."""
+
+    prepare_tls_material()
+    try:
+        initialize()
+        return
+    except OpenBaoRaftInactiveError:
+        log_status(
+            "[ИНФО] Одноузловой OpenBao потерял Raft quorum; "
+            "запускается защищённое восстановление"
+        )
+
+    recover_single_node_raft()
+    initialize()
 
 
 def prepare_tls_material() -> None:
@@ -374,6 +653,31 @@ def configure_kv_access(root_token: str) -> None:
     log_detail("[ОК] KV v2 и ограниченный доступ к рабочим секретам настроены")
 
 
+def reconcile_kv_access(root_token: str) -> None:
+    """Восстановить служебные KV AppRole без изменения KV-данных."""
+
+    result = pct_exec(
+        "python3",
+        "-c",
+        RECONCILE_KV_ACCESS_CODE,
+        capture=True,
+        input_text=root_token,
+    )
+    try:
+        credentials = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise OpenBaoHostError(
+            "OpenBao вернул некорректные восстановленные данные доступа к KV"
+        ) from exc
+    if not isinstance(credentials, dict):
+        raise OpenBaoHostError(
+            "OpenBao вернул некорректные восстановленные данные доступа к KV"
+        )
+    write_kv_access_credentials(credentials)
+    check_kv_access()
+    log_status("[ОК] Служебный доступ к KV восстановлен")
+
+
 def materialize_runtime_secrets() -> None:
     credentials = read_kv_access_credentials()
     result = pct_exec(
@@ -436,7 +740,8 @@ def unseal() -> None:
         log_detail("[ИНФО] OpenBao ещё не инициализирован")
         return
     if not bool(status["sealed"]):
-        log_status("[ОК] OpenBao уже разблокирован")
+        wait_until_active()
+        log_status("[ОК] OpenBao уже разблокирован и активен")
         return
     if not KEY_PATH.is_file() or KEY_PATH.stat().st_size == 0:
         raise OpenBaoHostError(
@@ -477,7 +782,8 @@ def unseal() -> None:
     finally:
         pct_exec("rm", "-f", str(CT_KEY_PATH), check=False)
 
-    log_status("[ОК] OpenBao разблокирован")
+    wait_until_active()
+    log_status("[ОК] OpenBao разблокирован и активен")
 
 
 def _revoke_root_token(token: str) -> None:
@@ -1039,7 +1345,11 @@ def check_ssh_access() -> None:
         )
 
 
-def configure_ssh_access(root_token: str) -> None:
+def configure_ssh_access(
+    root_token: str,
+    *,
+    rotate_secret_ids: bool = False,
+) -> None:
     existing_credentials: dict[str, object] = {}
     if SSH_ACCESS_PATH.exists():
         existing_credentials = read_ssh_access_credentials(allow_legacy=True)
@@ -1052,6 +1362,7 @@ def configure_ssh_access(root_token: str) -> None:
             {
                 "root_token": root_token,
                 "existing_credentials": existing_credentials,
+                "rotate_secret_ids": rotate_secret_ids,
             },
             separators=(",", ":"),
         ),
@@ -1213,32 +1524,57 @@ finally:
 
 
 def ensure_existing_openbao_ssh() -> None:
+    ssh_access_broken = False
+    kv_access_broken = False
+
     if (
         ssh_cas_ready()
         and ssh_access_credentials_complete()
         and KV_ACCESS_PATH.is_file()
         and client_ca_published()
     ):
-        check_ssh_access()
-        check_kv_access()
-        materialize_runtime_secrets()
-        publish_host_ca()
-        ensure_client_signing_role()
-        ensure_host_signing_role()
-        log_detail("[ОК] SSH-центры, KV v2 и служебные доступы OpenBao уже готовы")
-        return
+        try:
+            check_ssh_access()
+        except OpenBaoHostError:
+            ssh_access_broken = True
+        try:
+            check_kv_access()
+        except OpenBaoHostError:
+            kv_access_broken = True
+
+        if not ssh_access_broken and not kv_access_broken:
+            materialize_runtime_secrets()
+            publish_host_ca()
+            ensure_client_signing_role()
+            ensure_host_signing_role()
+            log_detail(
+                "[ОК] SSH-центры, KV v2 и служебные доступы OpenBao уже готовы"
+            )
+            return
+
+        log_status(
+            "[ИНФО] Служебный AppRole OpenBao требует восстановления"
+        )
 
     root_token = generate_temporary_root_token()
     try:
         ensure_ssh_cas(root_token)
-        if ssh_access_credentials_complete():
+
+        if ssh_access_credentials_complete() and not ssh_access_broken:
             check_ssh_access()
         else:
-            configure_ssh_access(root_token)
-        if KV_ACCESS_PATH.is_file():
+            configure_ssh_access(
+                root_token,
+                rotate_secret_ids=ssh_access_broken,
+            )
+
+        if KV_ACCESS_PATH.is_file() and not kv_access_broken:
             check_kv_access()
+        elif KV_ACCESS_PATH.is_file():
+            reconcile_kv_access(root_token)
         else:
             configure_kv_access(root_token)
+
         materialize_runtime_secrets()
         publish_client_ca(root_token)
         publish_host_ca()
@@ -1348,6 +1684,11 @@ def main() -> int:
         help="Однократно инициализировать пустой OpenBao перед разблокировкой",
     )
     mode.add_argument(
+        "--repair",
+        action="store_true",
+        help="Восстановить OpenBao и одноузловой Raft при потере quorum",
+    )
+    mode.add_argument(
         "--prepare-tls",
         action="store_true",
         help="Подготовить TLS CA и серверный сертификат OpenBao на PVE",
@@ -1402,19 +1743,17 @@ def main() -> int:
         fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
         if args.prepare_tls:
             prepare_tls_material()
+        elif args.repair:
+            repair()
         elif args.initialize:
             prepare_tls_material()
             initialize()
         elif args.sign_client_key:
-            status = read_status(wait=False)
-            if status.get("sealed") is not False:
-                raise OpenBaoHostError("OpenBao запечатан; подпись SSH невозможна")
+            require_active_openbao("подпись SSH")
             public_key = __import__("sys").stdin.read()
             print(sign_client_public_key(public_key))
         elif args.sign_host_key:
-            status = read_status(wait=False)
-            if status.get("sealed") is not False:
-                raise OpenBaoHostError("OpenBao запечатан; подпись SSH невозможна")
+            require_active_openbao("подпись SSH")
             request_payload = json.loads(__import__("sys").stdin.read())
             if not isinstance(request_payload, dict):
                 raise OpenBaoHostError("Некорректный запрос подписи SSH-сервера")
@@ -1436,32 +1775,20 @@ def main() -> int:
             )
             print(sign_host_public_key(public_key, principals))
         elif args.sync_otp_contract:
-            status = read_status(wait=False)
-            if status.get("sealed") is not False:
-                raise OpenBaoHostError(
-                    "OpenBao запечатан; синхронизация SSH OTP невозможна"
-                )
+            require_active_openbao("синхронизация SSH OTP")
             payload = json.loads(__import__("sys").stdin.read())
             sources = payload.get("sources") if isinstance(payload, dict) else None
             if not isinstance(sources, list):
                 raise OpenBaoHostError("Не передан OTP-контракт")
             sync_otp_contract(sources)
         elif args.check_ssh_access:
-            status = read_status(wait=False)
-            if status.get("sealed") is not False:
-                raise OpenBaoHostError(
-                    "OpenBao запечатан; проверка SSH-доступов невозможна"
-                )
+            require_active_openbao("проверка SSH-доступов")
             check_ssh_access()
             log_status(
                 "[ОК] Служебные SSH-доступы, ssh-otp и auth/machine подтверждены"
             )
         elif args.issue_machine_credentials:
-            status = read_status(wait=False)
-            if status.get("sealed") is not False:
-                raise OpenBaoHostError(
-                    "OpenBao запечатан; выдача машинной идентичности невозможна"
-                )
+            require_active_openbao("выдача машинной идентичности")
             payload = json.loads(__import__("sys").stdin.read())
             vmid = payload.get("vmid") if isinstance(payload, dict) else None
             if not isinstance(vmid, int) or vmid <= 0:
@@ -1473,17 +1800,11 @@ def main() -> int:
                 )
             )
         elif args.check_kv:
-            status = read_status(wait=False)
-            if status.get("sealed") is not False:
-                raise OpenBaoHostError("OpenBao запечатан; проверка KV невозможна")
+            require_active_openbao("проверка KV")
             check_kv_access()
             log_status("[ОК] KV v2 и ограниченные AppRole подтверждены")
         elif args.update_semaphore_api_token:
-            status = read_status(wait=False)
-            if status.get("sealed") is not False:
-                raise OpenBaoHostError(
-                    "OpenBao запечатан; обновление Semaphore token невозможно"
-                )
+            require_active_openbao("обновление Semaphore token")
             update_semaphore_api_token(__import__("sys").stdin.read())
         else:
             unseal()
@@ -1491,9 +1812,8 @@ def main() -> int:
             if (
                 status.get("initialized") is True
                 and status.get("sealed") is False
-                and KV_ACCESS_PATH.is_file()
             ):
-                materialize_runtime_secrets()
+                ensure_existing_openbao_ssh()
     return 0
 
 

@@ -765,16 +765,57 @@ def _project_revision(repo_root: Path) -> str:
     return result.stdout.strip() or "не определена"
 
 
-def _project_branch(repo_root: Path) -> str:
-    """Вернуть фактическую ветку рабочей копии проекта."""
-    result = run(
+def project_branch_for_checkout(repo_root: Path) -> str:
+    """Вернуть фактическую ветку содержимого рабочей копии проекта."""
+
+    current_result = run(
         ["git", "-C", str(repo_root), "branch", "--show-current"],
         check=False,
         capture_output=True,
     )
-    if not result.returncode and result.stdout.strip():
-        return result.stdout.strip()
-    return SETTINGS.project_branch()
+    current = (
+        current_result.stdout.strip()
+        if not current_result.returncode
+        else ""
+    )
+
+    remote_result = run(
+        [
+            "git",
+            "-C",
+            str(repo_root),
+            "for-each-ref",
+            "--format=%(refname:short)",
+            "--points-at",
+            "HEAD",
+            "refs/remotes/origin/",
+        ],
+        check=False,
+        capture_output=True,
+    )
+    remote_branches: list[str] = []
+    if not remote_result.returncode:
+        for raw in remote_result.stdout.splitlines():
+            ref = raw.strip()
+            if not ref.startswith("origin/") or ref == "origin/HEAD":
+                continue
+            remote_branches.append(ref.removeprefix("origin/"))
+
+    configured = SETTINGS.project_branch()
+    if configured in remote_branches:
+        return configured
+    if current in remote_branches:
+        return current
+    if len(remote_branches) == 1:
+        return remote_branches[0]
+    if len(remote_branches) > 1:
+        raise InfraManagerError(
+            "Не удалось однозначно определить Git-ветку текущего задания: "
+            + ", ".join(sorted(remote_branches))
+        )
+    if current:
+        return current
+    return configured
 
 
 def _show_guest_summary(
@@ -784,7 +825,7 @@ def _show_guest_summary(
     """Показать итог полного развёртывания обычного гостя."""
     separator = "=" * 60
     kind = "VM" if context.kind == "vm" else "LXC"
-    branch = _project_branch(repo_root)
+    branch = project_branch_for_checkout(repo_root)
     revision = _project_revision(repo_root)
 
     print()
@@ -863,7 +904,7 @@ def run_deploy_guest(
 
     console.info("Проверка проекта")
     run([sys.executable, str(repo_root / "scripts" / "validate_repo.py")])
-    project_branch = _project_branch(repo_root)
+    project_branch = project_branch_for_checkout(repo_root)
 
     workspace = (
         _prepare_self_update_workspace(repo_root, vmid)

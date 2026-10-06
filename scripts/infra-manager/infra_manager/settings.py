@@ -167,6 +167,7 @@ class Settings:
 
     default_project_branch: str = "main"
     semaphore_url: str = "http://127.0.0.1:3000"
+    portal_gateway_port: int = 3002
     project_name: str = "Proxmox Infrastructure"
     project_repo: str = "git@github.com:zsergeyru/proxmox.git"
     opentofu_env_name: str = "OpenTofu PVE"

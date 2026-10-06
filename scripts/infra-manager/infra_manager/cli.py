@@ -71,6 +71,55 @@ def build_parser() -> argparse.ArgumentParser:
         help="проверить полный аварийный контур infra-manager",
     )
     recovery_check.set_defaults(handler="recovery-check")
+
+    portal_bookmarks = subparsers.add_parser(
+        "portal-bookmarks",
+        help="сформировать кнопки Homepage для операций гостя",
+    )
+    portal_bookmarks.add_argument(
+        "--guest-vmid",
+        type=int,
+        help="VMID гостя; без значения используется роль infra-manager",
+    )
+    portal_bookmarks.add_argument(
+        "--output",
+        type=str,
+        help="записать bookmarks.yaml в файл вместо stdout",
+    )
+    portal_bookmarks.set_defaults(handler="portal-bookmarks")
+
+    portal_services = subparsers.add_parser(
+        "portal-services",
+        help="сформировать services.yaml Homepage для гостя",
+    )
+    portal_services.add_argument(
+        "--guest-vmid",
+        type=int,
+        required=True,
+        help="VMID гостя",
+    )
+    portal_services.add_argument(
+        "--output",
+        type=str,
+        help="записать services.yaml в файл вместо stdout",
+    )
+    portal_services.set_defaults(handler="portal-services")
+
+    portal_gateway = subparsers.add_parser(
+        "portal-gateway",
+        help="запустить защищённый переход к операциям Semaphore",
+    )
+    portal_gateway.add_argument(
+        "--bind",
+        default="0.0.0.0",
+        help="адрес прослушивания",
+    )
+    portal_gateway.add_argument(
+        "--port",
+        type=int,
+        help="TCP-порт; по умолчанию берётся из общих настроек",
+    )
+    portal_gateway.set_defaults(handler="portal-gateway")
     return parser
 
 
@@ -114,6 +163,52 @@ def main(argv: Sequence[str] | None = None) -> int:
             from .recovery import check_recovery
 
             return check_recovery()
+
+        if args.handler == "portal-bookmarks":
+            from pathlib import Path
+
+            from .guest_catalog import find_guest_by_role
+            from .portal import render_portal_bookmarks, write_portal_bookmarks
+            from .settings import PATHS, SETTINGS
+
+            vmid = args.guest_vmid
+            if vmid is None:
+                vmid = find_guest_by_role(
+                    PATHS.repo_root,
+                    SETTINGS.infra_manager_role,
+                ).vmid
+
+            if args.output:
+                write_portal_bookmarks(vmid, Path(args.output))
+            else:
+                print(render_portal_bookmarks(vmid), end="")
+            return 0
+
+        if args.handler == "portal-services":
+            from pathlib import Path
+
+            from .portal import render_portal_services, write_portal_services
+
+            if args.output:
+                write_portal_services(args.guest_vmid, Path(args.output))
+            else:
+                print(render_portal_services(args.guest_vmid), end="")
+            return 0
+
+        if args.handler == "portal-gateway":
+            from .portal_gateway import run_portal_gateway
+            from .settings import SETTINGS
+
+            port = (
+                SETTINGS.portal_gateway_port
+                if args.port is None
+                else args.port
+            )
+            if not (0 < port < 65536):
+                raise InfraManagerError(
+                    "Порт посредника должен быть от 1 до 65535"
+                )
+            return run_portal_gateway(args.bind, port)
 
         raise InfraManagerError(f"Неизвестная команда: {args.command}")
     except (InfraManagerError, OSError) as exc:
