@@ -151,7 +151,8 @@ persistence
 - `infra-runtime`;
 - Semaphore;
 - OpenTofu input;
-- служебные команды.
+- служебные команды;
+- локальный Homepage и шлюз стандартных действий.
 
 Общий Ansible применяет эти требования через roles `linux_base`, `docker`, `infra_manager`, `portal` и `guest_layout`. Специализированная логика 910 находится только внутри `infra_manager`; данные конкретного гостя остаются в `provision.yaml`.
 
@@ -276,6 +277,7 @@ infra-manager status
 - Docker и Compose;
 - обязательное постоянное состояние;
 - `infra-runtime`;
+- Homepage и шлюз стандартных действий;
 - OpenBao, его состояние и доступ к KV v2;
 - материализованные рабочие секреты;
 - Semaphore;
