@@ -93,6 +93,25 @@ def _guest_survey(
     )
 
 
+def _log_level_survey() -> tuple[dict[str, Any], ...]:
+    """Сформировать список постоянного уровня вывода infra-manager."""
+
+    return (
+        {
+            "name": LOG_LEVEL_ENV,
+            "title": "Режим вывода",
+            "description": "Применяется ко всем следующим заданиям Semaphore",
+            "type": "enum",
+            "required": True,
+            "values": [
+                {"name": "Обычный", "value": "normal"},
+                {"name": "Подробный", "value": "verbose"},
+                {"name": "Тихий", "value": "quiet"},
+            ],
+        },
+    )
+
+
 def semaphore_templates(
     repo_root: Path | None = None,
 ) -> tuple[TemplateSpec, ...]:
@@ -112,6 +131,13 @@ def semaphore_templates(
             playbook="scripts/infra-manager/jobs/build-template.py",
             arguments='["9000"]',
             view="Infrastructure",
+        ),
+        TemplateSpec(
+            name="Set Log Level",
+            playbook="scripts/infra-manager/jobs/set-log-level.py",
+            arguments="[]",
+            view="Infrastructure",
+            survey_vars=_log_level_survey(),
         ),
         TemplateSpec(
             name="Deploy Guest",
@@ -765,6 +791,83 @@ class SemaphoreClient:
 
         return environment_id
 
+    def set_infra_manager_log_level(
+        self,
+        project_id: int,
+        level: str,
+    ) -> None:
+        """Сохранить постоянный уровень вывода в существующей Variable Group."""
+
+        normalized = level.strip().lower()
+        if normalized not in LOG_LEVELS:
+            allowed = ", ".join(sorted(LOG_LEVELS))
+            raise InfraManagerError(
+                f"{LOG_LEVEL_ENV} должен быть одним из значений: {allowed}"
+            )
+
+        environments = self.get(
+            f"/project/{project_id}/environment?sort=name&order=asc"
+        )
+        existing = require_unique_by_name(
+            environments,
+            INFRA_MANAGER_ENV_NAME,
+            "Variable Group",
+        )
+        environment_id = existing.get("id")
+        if not isinstance(environment_id, int):
+            raise InfraManagerError(
+                "Variable Group Infra Manager имеет некорректный id"
+            )
+
+        full = self.get(
+            f"/project/{project_id}/environment/{environment_id}"
+        )
+        if not isinstance(full, dict):
+            raise InfraManagerError(
+                "Variable Group Infra Manager имеет некорректное содержимое"
+            )
+
+        raw_env = full.get("env", "{}")
+        if isinstance(raw_env, str):
+            try:
+                values = json.loads(raw_env or "{}")
+            except json.JSONDecodeError as exc:
+                raise InfraManagerError(
+                    "Variable Group Infra Manager содержит некорректный JSON"
+                ) from exc
+        elif isinstance(raw_env, dict):
+            values = dict(raw_env)
+        else:
+            raise InfraManagerError(
+                "Variable Group Infra Manager имеет некорректный env"
+            )
+        if not isinstance(values, dict):
+            raise InfraManagerError(
+                "Variable Group Infra Manager должен содержать объект env"
+            )
+
+        secrets = full.get("secrets", [])
+        if secrets not in (None, []):
+            raise InfraManagerError(
+                "Variable Group Infra Manager неожиданно содержит secrets; "
+                "изменение уровня вывода остановлено"
+            )
+
+        values[LOG_LEVEL_ENV] = normalized
+        self.put(
+            f"/project/{project_id}/environment/{environment_id}",
+            {
+                "id": environment_id,
+                "name": INFRA_MANAGER_ENV_NAME,
+                "project_id": project_id,
+                "password": None,
+                "json": full.get("json", "{}"),
+                "env": json.dumps(values, separators=(",", ":")),
+                "secrets": [],
+            },
+        )
+
+
     def ensure_view(
         self,
         project_id: int,
@@ -910,6 +1013,35 @@ def persist_github_key() -> None:
         raise InfraManagerError(
             "GitHub Deploy Key не должен иметь постоянную копию внутри infra-manager"
         )
+
+
+def set_log_level_from_task(level: str) -> int:
+    """Изменить постоянный уровень вывода из задания Semaphore."""
+
+    client = SemaphoreClient()
+    if not client.token_valid():
+        raise InfraManagerError(
+            "Рабочий API token Semaphore отсутствует или недействителен; "
+            "выполните Repair Guest для infra-manager"
+        )
+    client.auth_mode = "token"
+
+    project = require_unique_by_name(
+        client.get("/projects"),
+        PROJECT_NAME,
+        "project",
+    )
+    project_id = project.get("id")
+    if not isinstance(project_id, int):
+        raise InfraManagerError(
+            "Проект Semaphore имеет некорректный id"
+        )
+
+    client.set_infra_manager_log_level(project_id, level)
+    console.result(
+        f"Режим вывода сохранён: {level.strip().lower()}"
+    )
+    return 0
 
 
 def _require_existing_task_git(
