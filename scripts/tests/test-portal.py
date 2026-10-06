@@ -79,6 +79,10 @@ def check_service_discovery() -> None:
         fail("Semaphore должен иметь иконку")
     if _service(infra, "OpenBao").get("icon") != "mdi-lock":
         fail("OpenBao должен иметь иконку")
+    if _service(infra, "OpenBao").get("siteMonitor") != (
+        "https://192.168.9.10:8202/ui/"
+    ):
+        fail("OpenBao должен проверяться по HTTPS через siteMonitor")
 
     gateway = portal_services(109, "local")
     if {next(iter(item)) for item in gateway} != {"AdGuard Home"}:
@@ -116,6 +120,10 @@ def check_local_dashboard_address() -> None:
                 f"Гость {vmid} имеет неверный адрес локальной панели: "
                 f"{dashboard!r}"
             )
+        if vmid == 910 and dashboard.get("trusted_ca") != (
+            "/etc/infra-manager/openbao/tls/ca.crt"
+        ):
+            fail("Homepage 910 должен доверять TLS CA OpenBao")
 
     identity = guest_identity(ROOT, 311)
     if local_portal_definition(ROOT, identity) is not None:
@@ -138,7 +146,8 @@ def check_style_contract() -> None:
         "image: /images/background.svg",
         "opacity: 65",
         "hideVersion: true",
-        "columns: 4",
+        "columns: 2",
+        "columns: 3",
         "icon: mdi-apps",
         "icon: mdi-tools",
     )
@@ -150,11 +159,22 @@ def check_style_contract() -> None:
     if not background.is_file() or background.stat().st_size < 200:
         fail("Не найден локальный фон Homepage")
 
+    custom_css = role / "files" / "custom.css"
+    if not custom_css.is_file():
+        fail("Не найден общий custom.css Homepage")
+    css = custom_css.read_text(encoding="utf-8")
+    if "#layout-groups" not in css or "max-width: 1280px" not in css:
+        fail("Homepage должен центрировать группы в ограниченной ширине")
+
     compose = (
         role / "templates" / "docker-compose.yml.j2"
     ).read_text(encoding="utf-8")
     if "/app/public/images:ro" not in compose:
         fail("Локальные изображения Homepage не подключены в контейнер")
+    if "NODE_EXTRA_CA_CERTS" not in compose:
+        fail("Homepage не умеет подключать дополнительный TLS CA")
+    if "/etc/ssl/homepage/trusted-ca.crt:ro" not in compose:
+        fail("Доверенный TLS CA Homepage не подключён в контейнер")
 
 
 def check_action_validation() -> None:
