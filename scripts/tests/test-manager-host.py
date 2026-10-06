@@ -117,7 +117,7 @@ def test_repair() -> None:
     assert recovery_modes == ["--preflight"]
     assert [
         "/usr/local/sbin/infra-manager-openbao-unseal",
-        "--initialize",
+        "--repair",
         "--log-level",
         "normal",
     ] in host_calls
