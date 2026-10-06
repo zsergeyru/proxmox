@@ -13,6 +13,8 @@ MODULE_ROOT = ROOT / "scripts" / "infra-manager"
 sys.path.insert(0, str(MODULE_ROOT))
 
 from infra_manager import guest_operations as operations
+from infra_manager import semaphore as semaphore_module
+from infra_manager import status as status_module
 from infra_manager.common import InfraManagerError
 from infra_manager.guest_catalog import deployable_guests, guest_identity
 
@@ -124,6 +126,44 @@ def check_repair_operation() -> None:
         fail(f"Repair Guest выполнил неожиданные действия: {client.actions!r}")
 
 
+def check_infra_manager_repair_operation() -> None:
+    identity = guest_identity(ROOT, 910)
+    client = FakePveClient(
+        {
+            "vmid": 910,
+            "name": "infra-manager",
+            "type": "lxc",
+            "node": "pve",
+            "status": "running",
+        }
+    )
+    with (
+        patch.object(
+            operations,
+            "install_openbao_host_support",
+        ) as install_host,
+        patch.object(
+            operations,
+            "repair_openbao_on_host",
+        ) as repair_openbao,
+        patch.object(
+            semaphore_module,
+            "configure_project",
+        ) as configure_project,
+        patch.object(
+            status_module,
+            "check_status",
+        ) as check_status,
+    ):
+        if operations._run_repair(client, ROOT, identity) != 0:
+            fail("Repair Guest infra-manager должен завершаться успешно")
+
+    install_host.assert_called_once_with("pve", ROOT)
+    repair_openbao.assert_called_once_with("pve")
+    configure_project.assert_called_once()
+    check_status.assert_called_once_with(full=True, quiet=False)
+
+
 def check_test_operation() -> None:
     identity = guest_identity(ROOT, 109)
     client = FakePveClient(
@@ -233,6 +273,7 @@ def main() -> None:
     check_operation_catalog()
     check_status_operation()
     check_repair_operation()
+    check_infra_manager_repair_operation()
     check_test_operation()
     check_sync_operation()
     check_deploy_operation()
