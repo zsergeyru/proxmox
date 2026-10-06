@@ -231,8 +231,8 @@ grep -Fq ':8202/v1/sys/health' "$OPENBAO_STARTUP_COMMAND" \
 if grep -Fq 'echo "[ОК] OpenBao уже разблокирован"' "$OPENBAO_STARTUP_COMMAND"; then
     die "Startup unseal не должен завершаться до восстановления секретов и проверок"
 fi
-grep -Fq 'OpenBao не инициализирован; сначала выполните Initialize OpenBao для infra-manager' "$OPENBAO_STARTUP_COMMAND" \
-    || die "Startup unseal должен завершаться ошибкой для неинициализированного OpenBao"
+grep -Fq 'на PVE выполните infra-manager repair' "$OPENBAO_STARTUP_COMMAND" \
+    || die "Startup unseal должен направлять оператора в единую PVE-команду"
 grep -q 'infra-manager-status --full --quiet' "$ACTIVATE_RUNTIME" \
     || die "Отложенная активация должна завершаться полной проверкой infra-manager"
 if grep -Fq 'infra-manager-status' "$ANSIBLE_VERIFY"; then
