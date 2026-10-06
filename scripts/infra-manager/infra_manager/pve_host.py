@@ -384,6 +384,17 @@ def check_openbao_kv(node: str) -> None:
     )
 
 
+def check_openbao_operator_access(node: str) -> None:
+    """Проверить userpass-вход оператора OpenBao без выдачи пароля."""
+    _ssh(
+        node,
+        str(OPENBAO_HOST_COMMAND),
+        "--check-operator-access",
+        "--log-level",
+        "quiet",
+    )
+
+
 def check_openbao_ssh_access(node: str) -> None:
     """Проверить служебный SSH-доступ, ssh-otp и auth/machine через PVE."""
     _ssh(
