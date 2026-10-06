@@ -43,7 +43,7 @@ STATUS_FILE = PATHS.status_file
 PROJECT_REPO = SETTINGS.project_repo
 
 STATUS_CHECK_TYPES = frozenset(
-    {"runtime", "openbao", "semaphore", "runtime_tools", "pve_access"}
+    {"runtime", "portal", "openbao", "semaphore", "runtime_tools", "pve_access"}
 )
 STATUS_DATA_SOURCE_TYPES = frozenset(
     {"primary_ipv4", "project_branch", "git_revision", "file"}
@@ -353,6 +353,69 @@ def _check_runtime() -> None:
     )
     if running.returncode or running.stdout.strip() != "true":
         raise InfraManagerError("Semaphore Server не запущен")
+
+
+def _check_portal() -> None:
+    """Проверить Homepage и шлюз стандартных действий."""
+
+    running = command_runner.run(
+        [
+            "docker",
+            "inspect",
+            "-f",
+            "{{.State.Running}}",
+            "homepage",
+        ],
+        capture=True,
+        check=False,
+    )
+    if running.returncode or running.stdout.strip() != "true":
+        raise InfraManagerError("Homepage не запущен")
+
+    homepage = command_runner.run(
+        [
+            "curl",
+            "-fsS",
+            "--connect-timeout",
+            "5",
+            "--max-time",
+            "10",
+            "http://127.0.0.1:3001/api/healthcheck",
+        ],
+        quiet=True,
+        check=False,
+    )
+    if homepage.returncode:
+        raise InfraManagerError("Homepage :3001 не отвечает")
+
+    gateway_service = command_runner.run(
+        [
+            "systemctl",
+            "is-active",
+            "--quiet",
+            "infra-manager-portal-gateway.service",
+        ],
+        quiet=True,
+        check=False,
+    )
+    if gateway_service.returncode:
+        raise InfraManagerError("Шлюз действий Homepage не запущен")
+
+    gateway = command_runner.run(
+        [
+            "curl",
+            "-fsS",
+            "--connect-timeout",
+            "5",
+            "--max-time",
+            "10",
+            f"http://127.0.0.1:{SETTINGS.portal_gateway_port}/health",
+        ],
+        quiet=True,
+        check=False,
+    )
+    if gateway.returncode:
+        raise InfraManagerError("Шлюз действий Homepage не отвечает")
 
 
 def _check_openbao_tls() -> None:
@@ -802,6 +865,8 @@ def _run_status_checks(
         check_type = check["type"]
         if check_type == "runtime":
             _check_runtime_bundle()
+        elif check_type == "portal":
+            _check_portal()
         elif check_type == "openbao":
             _check_openbao(full=full)
         elif check_type == "semaphore":
