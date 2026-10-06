@@ -4,6 +4,7 @@
     that:
       - provision.portal.local.title is string
       - provision.portal.local.title | length > 0
+      - provision.portal.local.trusted_ca is not defined or provision.portal.local.trusted_ca is string
       - provision.docker is defined
     fail_msg: >-
       Локальный портал требует непустой portal.local.title и Docker
@@ -12,6 +13,7 @@
 - name: Определить параметры локального портала
   ansible.builtin.set_fact:
     portal_local_port: "{{ provision.portal.local.port | default(portal_default_port) | int }}"
+    portal_trusted_ca: "{{ provision.portal.local.trusted_ca | default('') }}"
 
 - name: Проверить порт локального портала
   ansible.builtin.assert:
@@ -19,6 +21,26 @@
       - portal_local_port | int > 0
       - portal_local_port | int < 65536
     fail_msg: "portal.local.port должен быть допустимым TCP-портом"
+
+- name: Проверить путь доверенного CA Homepage
+  ansible.builtin.assert:
+    that:
+      - portal_trusted_ca | length == 0 or portal_trusted_ca is match('^/')
+    fail_msg: "portal.local.trusted_ca должен быть абсолютным путём"
+
+- name: Проверить доверенный CA Homepage
+  ansible.builtin.stat:
+    path: "{{ portal_trusted_ca }}"
+  register: portal_trusted_ca_state
+  when: portal_trusted_ca | length > 0
+
+- name: Подтвердить доверенный CA Homepage
+  ansible.builtin.assert:
+    that:
+      - portal_trusted_ca_state.stat.exists
+      - portal_trusted_ca_state.stat.isreg
+    fail_msg: "Не найден доверенный CA Homepage: {{ portal_trusted_ca }}"
+  when: portal_trusted_ca | length > 0
 
 - name: Подготовить каталоги локального портала
   ansible.builtin.file:
