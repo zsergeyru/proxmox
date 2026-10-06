@@ -28,7 +28,6 @@ GUEST_OPERATIONS: Final[tuple[str, ...]] = (
     "test",
     "sync",
 )
-SYNC_ROLES: Final[frozenset[str]] = frozenset({SETTINGS.infra_manager_role})
 
 
 def extract_survey_vmid(argv: list[str]) -> tuple[list[str], int | None]:
@@ -59,15 +58,7 @@ def operation_guests(
     if operation not in GUEST_OPERATIONS:
         raise InfraManagerError(f"Неизвестная операция гостя: {operation}")
 
-    guests = deployable_guests(repo_root)
-    if operation != "sync":
-        return guests
-
-    return tuple(
-        guest
-        for guest in guests
-        if guest.role in SYNC_ROLES
-    )
+    return deployable_guests(repo_root)
 
 
 def _expected_resource_type(repo_root: Path, identity: GuestIdentity) -> str:
@@ -290,19 +281,18 @@ def _run_sync(
     repo_root: Path,
     identity: GuestIdentity,
 ) -> int:
-    allowed = operation_guests(repo_root, "sync")
-    if identity.vmid not in {guest.vmid for guest in allowed}:
-        raise InfraManagerError(
-            f"Операция Sync для роли {identity.role or '(без роли)'} "
-            "пока не поддерживается"
-        )
-
     if identity.role == SETTINGS.infra_manager_role:
         _infra_manager_sync(repo_root, identity)
         return 0
 
-    raise InfraManagerError(
-        f"Для роли {identity.role or '(без роли)'} не задан обработчик Sync"
+    console.info(
+        f"Синхронизация provision.yaml гостя {identity.vmid} "
+        "без полного развёртывания"
+    )
+    return run_deploy_guest(
+        repo_root,
+        identity.vmid,
+        phase="provision",
     )
 
 
