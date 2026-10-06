@@ -16,6 +16,7 @@ ROOT = Path(__file__).resolve().parents[2]
 MODULE_ROOT = ROOT / "scripts" / "infra-manager"
 sys.path.insert(0, str(MODULE_ROOT))
 
+from infra_manager import semaphore as semaphore_module
 from infra_manager import status as status_module
 from infra_manager.common import InfraManagerError
 from infra_manager.guest_operations import operation_guests
@@ -27,6 +28,7 @@ from infra_manager.semaphore import (
     require_unique_by_name,
     semaphore_templates,
     semaphore_views,
+    sync_project_from_task,
 )
 from infra_manager.settings import SETTINGS
 from infra_manager.status import (
@@ -484,6 +486,55 @@ def main_test() -> None:
         "/project/1/templates/4",
     ]:
         fail("Синхронизация Semaphore неверно удаляет старые шаблоны")
+
+    class TaskSyncClient:
+        def __init__(self, token_valid: bool) -> None:
+            self.auth_mode = "cookie"
+            self._token_valid = token_valid
+
+        def token_valid(self) -> bool:
+            return self._token_valid
+
+        def get(self, path: str):
+            if path != "/projects":
+                raise AssertionError(f"Неожиданный GET: {path}")
+            return [{"id": 41, "name": "Proxmox Infrastructure"}]
+
+    task_client = TaskSyncClient(token_valid=True)
+    with (
+        patch.object(
+            semaphore_module,
+            "SemaphoreClient",
+            return_value=task_client,
+        ),
+        patch.object(semaphore_module, "nonempty", return_value=True),
+        patch.object(semaphore_module, "persist_github_key"),
+        patch.object(semaphore_module, "_sync_project_objects") as sync_objects,
+    ):
+        if sync_project_from_task(branch="main") != 0:
+            fail("Безопасная синхронизация Semaphore вернула ошибку")
+    if task_client.auth_mode != "token":
+        fail("Sync Guest должен использовать существующий API token")
+    sync_objects.assert_called_once_with(task_client, 41, "main")
+
+    invalid_task_client = TaskSyncClient(token_valid=False)
+    with (
+        patch.object(
+            semaphore_module,
+            "SemaphoreClient",
+            return_value=invalid_task_client,
+        ),
+        patch.object(semaphore_module, "nonempty", return_value=True),
+        patch.object(semaphore_module, "persist_github_key"),
+        patch.object(semaphore_module, "_sync_project_objects") as sync_objects,
+    ):
+        try:
+            sync_project_from_task(branch="main")
+        except InfraManagerError:
+            pass
+        else:
+            fail("Sync Guest не должен перевыпускать недействительный API token")
+    sync_objects.assert_not_called()
 
     invalid_level = InfraManagerEnvironmentClient(
         existing={"id": 10, "name": SETTINGS.infra_manager_env_name},
