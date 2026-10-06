@@ -36,6 +36,16 @@ def _labels(bookmarks: list[dict]) -> set[str]:
     return {next(iter(item)) for item in groups}
 
 
+def _service(items: list[dict], name: str) -> dict:
+    for item in items:
+        if name in item:
+            value = item[name]
+            if isinstance(value, dict):
+                return value
+    fail(f"Не найдена служба Homepage {name}")
+    return {}
+
+
 def check_bookmarks() -> None:
     infra = build_portal_bookmarks(910)
     if _labels(infra) != {"Проверить", "Синхронизировать", "Исправить"}:
@@ -48,6 +58,14 @@ def check_bookmarks() -> None:
         if expected not in serialized:
             fail(f"В Homepage 910 отсутствует ссылка {expected}")
 
+    for icon in (
+        "mdi-check-circle-outline",
+        "mdi-sync",
+        "mdi-wrench",
+    ):
+        if icon not in serialized:
+            fail(f"В Homepage 910 отсутствует иконка действия {icon}")
+
     gateway = build_portal_bookmarks(109)
     if _labels(gateway) != {"Проверить", "Синхронизировать", "Исправить"}:
         fail("Homepage 109 должен содержать три стандартных действия")
@@ -57,14 +75,22 @@ def check_service_discovery() -> None:
     infra = portal_services(910, "local")
     if {next(iter(item)) for item in infra} != {"Semaphore", "OpenBao"}:
         fail("Homepage 910 должен публиковать Semaphore и OpenBao")
+    if _service(infra, "Semaphore").get("icon") != "mdi-server":
+        fail("Semaphore должен иметь иконку")
+    if _service(infra, "OpenBao").get("icon") != "mdi-lock":
+        fail("OpenBao должен иметь иконку")
 
     gateway = portal_services(109, "local")
     if {next(iter(item)) for item in gateway} != {"AdGuard Home"}:
         fail("Homepage 109 должен публиковать AdGuard Home")
+    if _service(gateway, "AdGuard Home").get("icon") != "adguard-home.png":
+        fail("AdGuard Home должен иметь иконку")
 
     ai = portal_services(410, "local")
     if {next(iter(item)) for item in ai} != {"Open WebUI"}:
         fail("Homepage 410 должен публиковать Open WebUI")
+    if _service(ai, "Open WebUI").get("icon") != "mdi-robot":
+        fail("Open WebUI должен иметь иконку")
 
     if {next(iter(item)) for item in portal_services(109, "home")} != {
         "AdGuard Home"
@@ -94,6 +120,37 @@ def check_local_dashboard_address() -> None:
     identity = guest_identity(ROOT, 311)
     if local_portal_definition(ROOT, identity) is not None:
         fail("Гость 311 без portal.local не должен иметь локальную панель")
+
+
+def check_style_contract() -> None:
+    role = ROOT / "automation" / "ansible" / "roles" / "portal"
+    settings = (
+        role / "templates" / "settings.yaml.j2"
+    ).read_text(encoding="utf-8")
+    expected = (
+        "theme: dark",
+        "color: slate",
+        "headerStyle: clean",
+        "iconStyle: theme",
+        "cardBlur: md",
+        "useEqualHeights: true",
+        "disableCollapse: true",
+        "image: /images/background.svg",
+        "opacity: 38",
+    )
+    for value in expected:
+        if value not in settings:
+            fail(f"Единый стиль Homepage не содержит {value!r}")
+
+    background = role / "files" / "background.svg"
+    if not background.is_file() or background.stat().st_size < 200:
+        fail("Не найден локальный фон Homepage")
+
+    compose = (
+        role / "templates" / "docker-compose.yml.j2"
+    ).read_text(encoding="utf-8")
+    if "/app/public/images:ro" not in compose:
+        fail("Локальные изображения Homepage не подключены в контейнер")
 
 
 def check_action_validation() -> None:
@@ -304,6 +361,7 @@ def main() -> None:
     check_bookmarks()
     check_service_discovery()
     check_local_dashboard_address()
+    check_style_contract()
     check_action_validation()
     check_queue_payload()
     check_gateway_http()
