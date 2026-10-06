@@ -607,6 +607,9 @@ def _validate_status_manifest(path: Path, state: ValidationState) -> None:
     if not guest_manifest.is_file():
         fail(f"{rel}: status.yaml не имеет соответствующего guest.yaml")
 
+    if data["schema_version"] != 1:
+        return
+
     sources = set(data["data"]) | {"guest_vmid"}
     for section in data["sections"]:
         for field in section["fields"]:
