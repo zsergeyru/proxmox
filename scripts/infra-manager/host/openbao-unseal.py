@@ -8,6 +8,7 @@ import fcntl
 import ipaddress
 import json
 import os
+import secrets
 import subprocess
 import sys
 import tempfile
@@ -25,10 +26,12 @@ from openbao_host.errors import OpenBaoHostError, OpenBaoRaftInactiveError
 from openbao_host.tls import prepare_tls_material as _prepare_tls_material
 from openbao_host.snippets import (
     CHECK_KV_ACCESS_CODE,
+    CHECK_OPERATOR_ACCESS_CODE,
     CHECK_SSH_ACCESS_CODE,
     CONFIGURE_CLIENT_SIGNING_ROLE_CODE,
     CONFIGURE_HOST_SIGNING_ROLE_CODE,
     CONFIGURE_KV_CODE,
+    CONFIGURE_OPERATOR_ACCESS_CODE,
     CONFIGURE_OTP_CONTRACT_CODE,
     CONFIGURE_SSH_ACCESS_CODE,
     CONFIGURE_SSH_CA_CODE,
@@ -63,6 +66,8 @@ PVE_RAFT_RECOVERY_DIR = KEY_DIR / "raft-recovery"
 KEY_PATH = KEY_DIR / "unseal.key"
 SSH_ACCESS_PATH = KEY_DIR / "ssh-access.json"
 KV_ACCESS_PATH = KEY_DIR / "kv-access.json"
+OPERATOR_ACCESS_PATH = KEY_DIR / "operator-access.json"
+OPERATOR_USERNAME = "operator"
 LOCK_PATH = Path("/run/lock/infra-manager-openbao-unseal.lock")
 CT_RUNTIME_DIR = Path("/run/infra-manager")
 CT_KEY_PATH = CT_RUNTIME_DIR / "openbao-unseal.key"
@@ -585,6 +590,179 @@ def write_kv_access_credentials(credentials: dict[str, object]) -> None:
         os.chmod(KV_ACCESS_PATH, 0o600)
     finally:
         temporary.unlink(missing_ok=True)
+
+
+def write_operator_access_credentials(credentials: dict[str, str]) -> None:
+    if set(credentials) != {"username", "password"}:
+        raise OpenBaoHostError(
+            "OpenBao operator credentials имеют некорректный состав"
+        )
+    if credentials.get("username") != OPERATOR_USERNAME:
+        raise OpenBaoHostError("Некорректное имя оператора OpenBao")
+    password = credentials.get("password")
+    if not isinstance(password, str) or len(password) < 24:
+        raise OpenBaoHostError("Некорректный пароль оператора OpenBao")
+
+    KEY_DIR.mkdir(parents=True, exist_ok=True)
+    os.chmod(KEY_DIR, 0o700)
+    fd, temporary_name = tempfile.mkstemp(
+        prefix=".operator-access.",
+        dir=KEY_DIR,
+        text=True,
+    )
+    temporary = Path(temporary_name)
+    try:
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            json.dump(
+                credentials,
+                stream,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, OPERATOR_ACCESS_PATH)
+        os.chmod(OPERATOR_ACCESS_PATH, 0o600)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def read_operator_access_credentials() -> dict[str, str]:
+    if (
+        not OPERATOR_ACCESS_PATH.is_file()
+        or OPERATOR_ACCESS_PATH.stat().st_size == 0
+    ):
+        raise OpenBaoHostError(
+            "Не найдены учётные данные оператора OpenBao: "
+            f"{OPERATOR_ACCESS_PATH}"
+        )
+    try:
+        payload = json.loads(
+            OPERATOR_ACCESS_PATH.read_text(encoding="utf-8")
+        )
+    except (OSError, json.JSONDecodeError) as exc:
+        raise OpenBaoHostError(
+            "Учётные данные оператора OpenBao повреждены"
+        ) from exc
+    if not isinstance(payload, dict):
+        raise OpenBaoHostError(
+            "Учётные данные оператора OpenBao имеют неверный формат"
+        )
+    username = payload.get("username")
+    password = payload.get("password")
+    if username != OPERATOR_USERNAME:
+        raise OpenBaoHostError("Некорректное имя оператора OpenBao")
+    if not isinstance(password, str) or len(password) < 24:
+        raise OpenBaoHostError("Некорректный пароль оператора OpenBao")
+    return {
+        "username": username,
+        "password": password,
+    }
+
+
+def check_operator_access(
+    credentials: dict[str, str] | None = None,
+) -> None:
+    effective = (
+        read_operator_access_credentials()
+        if credentials is None
+        else credentials
+    )
+    result = pct_exec(
+        "python3",
+        "-c",
+        CHECK_OPERATOR_ACCESS_CODE,
+        capture=True,
+        input_text=json.dumps(effective, separators=(",", ":")),
+    )
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise OpenBaoHostError(
+            "OpenBao вернул некорректный результат проверки оператора"
+        ) from exc
+    if payload != {"ready": True}:
+        raise OpenBaoHostError(
+            "Операторский вход OpenBao не прошёл проверку"
+        )
+
+
+def configure_operator_access(
+    root_token: str,
+    *,
+    rotate_password: bool = False,
+) -> dict[str, str]:
+    credentials: dict[str, str] | None = None
+    if OPERATOR_ACCESS_PATH.is_file() and not rotate_password:
+        try:
+            credentials = read_operator_access_credentials()
+        except OpenBaoHostError:
+            credentials = None
+
+    if credentials is None:
+        credentials = {
+            "username": OPERATOR_USERNAME,
+            "password": secrets.token_urlsafe(32),
+        }
+
+    result = pct_exec(
+        "python3",
+        "-c",
+        CONFIGURE_OPERATOR_ACCESS_CODE,
+        capture=True,
+        input_text=json.dumps(
+            {
+                "root_token": root_token,
+                **credentials,
+            },
+            separators=(",", ":"),
+        ),
+    )
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise OpenBaoHostError(
+            "OpenBao вернул некорректный ответ настройки оператора"
+        ) from exc
+    if payload != {"ready": True}:
+        raise OpenBaoHostError(
+            "OpenBao не подтвердил настройку операторского входа"
+        )
+
+    check_operator_access(credentials)
+    write_operator_access_credentials(credentials)
+    log_detail(
+        "[ОК] userpass и политика infra-operator настроены; "
+        "пароль хранится только в PVE-only"
+    )
+    return credentials
+
+
+def show_operator_credentials() -> None:
+    credentials = read_operator_access_credentials()
+    check_operator_access(credentials)
+    print(f"URL: https://{TLS_ADDRESS}:8202/ui/")
+    print(f"Username: {credentials['username']}")
+    print(f"Password: {credentials['password']}")
+
+
+def rotate_operator_password() -> None:
+    root_token = generate_temporary_root_token()
+    try:
+        credentials = configure_operator_access(
+            root_token,
+            rotate_password=True,
+        )
+    finally:
+        revoke_temporary_root_token(root_token)
+        del root_token
+
+    print(f"URL: https://{TLS_ADDRESS}:8202/ui/")
+    print(f"Username: {credentials['username']}")
+    print(f"Password: {credentials['password']}")
 
 
 def read_kv_access_credentials() -> dict[str, object]:
@@ -1526,11 +1704,13 @@ finally:
 def ensure_existing_openbao_ssh() -> None:
     ssh_access_broken = False
     kv_access_broken = False
+    operator_access_broken = False
 
     if (
         ssh_cas_ready()
         and ssh_access_credentials_complete()
         and KV_ACCESS_PATH.is_file()
+        and OPERATOR_ACCESS_PATH.is_file()
         and client_ca_published()
     ):
         try:
@@ -1541,19 +1721,27 @@ def ensure_existing_openbao_ssh() -> None:
             check_kv_access()
         except OpenBaoHostError:
             kv_access_broken = True
+        try:
+            check_operator_access()
+        except OpenBaoHostError:
+            operator_access_broken = True
 
-        if not ssh_access_broken and not kv_access_broken:
+        if (
+            not ssh_access_broken
+            and not kv_access_broken
+            and not operator_access_broken
+        ):
             materialize_runtime_secrets()
             publish_host_ca()
             ensure_client_signing_role()
             ensure_host_signing_role()
             log_detail(
-                "[ОК] SSH-центры, KV v2 и служебные доступы OpenBao уже готовы"
+                "[ОК] SSH, KV и операторский вход OpenBao уже готовы"
             )
             return
 
         log_status(
-            "[ИНФО] Служебный AppRole OpenBao требует восстановления"
+            "[ИНФО] Доступ OpenBao требует восстановления"
         )
 
     root_token = generate_temporary_root_token()
@@ -1574,6 +1762,11 @@ def ensure_existing_openbao_ssh() -> None:
             reconcile_kv_access(root_token)
         else:
             configure_kv_access(root_token)
+
+        if OPERATOR_ACCESS_PATH.is_file() and not operator_access_broken:
+            check_operator_access()
+        else:
+            configure_operator_access(root_token)
 
         materialize_runtime_secrets()
         publish_client_ca(root_token)
@@ -1600,7 +1793,12 @@ def initialize() -> None:
 
     stale = [
         path
-        for path in (KEY_PATH, SSH_ACCESS_PATH, KV_ACCESS_PATH)
+        for path in (
+            KEY_PATH,
+            SSH_ACCESS_PATH,
+            KV_ACCESS_PATH,
+            OPERATOR_ACCESS_PATH,
+        )
         if path.exists()
     ]
     if stale:
@@ -1644,6 +1842,7 @@ def initialize() -> None:
         ensure_ssh_cas(root_token)
         configure_ssh_access(root_token)
         configure_kv_access(root_token)
+        configure_operator_access(root_token)
         materialize_runtime_secrets()
         publish_client_ca(root_token)
         publish_host_ca()
@@ -1724,9 +1923,24 @@ def main() -> int:
         help="Проверить KV v2 и ограниченный доступ к рабочим секретам",
     )
     mode.add_argument(
+        "--check-operator-access",
+        action="store_true",
+        help="Проверить userpass-вход и политику оператора OpenBao",
+    )
+    mode.add_argument(
         "--update-semaphore-api-token",
         action="store_true",
         help="Обновить API token Semaphore в KV v2 из stdin",
+    )
+    mode.add_argument(
+        "--show-operator-credentials",
+        action="store_true",
+        help="Показать логин и пароль оператора OpenBao из PVE-only",
+    )
+    mode.add_argument(
+        "--rotate-operator-password",
+        action="store_true",
+        help="Сменить пароль оператора OpenBao и показать новый",
     )
     args = parser.parse_args()
 
@@ -1803,9 +2017,19 @@ def main() -> int:
             require_active_openbao("проверка KV")
             check_kv_access()
             log_status("[ОК] KV v2 и ограниченные AppRole подтверждены")
+        elif args.check_operator_access:
+            require_active_openbao("проверка оператора")
+            check_operator_access()
+            log_status("[ОК] userpass и политика infra-operator подтверждены")
         elif args.update_semaphore_api_token:
             require_active_openbao("обновление Semaphore token")
             update_semaphore_api_token(__import__("sys").stdin.read())
+        elif args.show_operator_credentials:
+            require_active_openbao("получение учётных данных оператора")
+            show_operator_credentials()
+        elif args.rotate_operator_password:
+            require_active_openbao("смена пароля оператора")
+            rotate_operator_password()
         else:
             unseal()
             status = read_status(wait=False)

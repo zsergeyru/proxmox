@@ -331,6 +331,7 @@ secret_threshold = 1
 unseal.key
 ssh-access.json
 kv-access.json
+operator-access.json
 ```
 
 **unseal.key**
@@ -364,6 +365,17 @@ kv-semaphore-writer
 ```
 
 Он не должен давать административное управление OpenBao.
+
+**operator-access.json**
+
+Файл содержит только логин и текущий пароль человека для входа в OpenBao UI:
+
+```text
+username: operator
+password: <случайный пароль>
+```
+
+Пароль создаётся автоматически и хранится с правами `0600` только в PVE-only. Для домашнего контура текущие URL, логин и пароль должны выводиться после каждого успешного `Deploy Guest` для infra-manager и при каждом штатном `Status Guest` для infra-manager. `Repair Guest` не обязан выводить пароль. Внутри OpenBao хранится только состояние userpass.
 
 Машинные SecretID обычных гостей не должны накапливаться в этих PVE-only файлах как общий реестр.
 
@@ -478,6 +490,77 @@ semaphore-api-token
 После успешной инициализации OpenBao этот каталог не должен оставаться постоянным рабочим источником.
 
 ## 4. SSH CA и служебный доступ
+
+### Операторский вход в UI
+
+Для человека должен использоваться отдельный auth method:
+
+```text
+auth/userpass/
+```
+
+Он должен быть опубликован в UI-specific unauthenticated listing через:
+
+```text
+listing_visibility = unauth
+```
+
+Пользователь:
+
+```text
+operator
+```
+
+должен получать только политику:
+
+```text
+infra-operator
+```
+
+Целевой срок пользовательского token:
+
+```text
+token_ttl:     1h
+token_max_ttl: 8h
+```
+
+Политика `infra-operator` разрешает:
+
+- просматривать и изменять значения только в `infra-secrets`;
+- просматривать список auth methods;
+- просматривать ACL policies;
+- просматривать роли `ssh-client-signer`, `ssh-host-signer` и `ssh-otp`;
+- читать внутреннее описание собственных разрешений, необходимое встроенному UI;
+- проверять и отзывать собственный token.
+
+Она не должна разрешать:
+
+- `sys/init`;
+- изменение или восстановление Raft;
+- выпуск root token;
+- изменение auth methods;
+- изменение ACL policies;
+- чтение закрытых SSH CA keys;
+- создание AppRole SecretID.
+
+Текущие данные для входа должны автоматически показываться:
+
+- после каждого успешного `Deploy Guest` для infra-manager;
+- при каждом штатном `Status Guest` для infra-manager.
+
+Дополнительно получить их вручную на PVE можно командой:
+
+```text
+infra-manager openbao-operator
+```
+
+Сменить пароль:
+
+```text
+infra-manager openbao-operator --rotate
+```
+
+Обычные технические журналы OpenBao, startup-unseal и фоновые проверки пароль выводить не должны.
 
 ### SSH client CA
 

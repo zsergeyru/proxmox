@@ -56,15 +56,18 @@ state/  → /mnt/persistent-state RW
 /mnt/bindmounts/infra-manager/pve-only/openbao/
 ├── unseal.key
 ├── ssh-access.json
-└── kv-access.json
+├── kv-access.json
+└── operator-access.json
 ```
 
 Эти файлы:
 
 - не подключаются внутрь 910;
-- не хранят root token;
+- не хранят постоянный root token;
 - резервируются как критичные данные восстановления;
 - используются только доверенными PVE-only операциями.
+
+`operator-access.json` содержит логин `operator` и текущий случайный пароль человека для OpenBao UI. Он хранится с правами `0600` только на PVE. Если файл потерян при сохранных Raft и unseal key, пароль может быть перевыпущен; это не требует смены CA или очистки OpenBao.
 
 ### TLS CA OpenBao
 
@@ -278,7 +281,7 @@ Docker images
 | Данные | Область | Можно создать заново без потери доверия |
 |---|---|---|
 | OpenBao Raft | `state/openbao` | нет |
-| OpenBao unseal/AppRole PVE | `pve-only/openbao` | не как обычное восстановление |
+| OpenBao unseal/AppRole/операторский доступ | `pve-only/openbao` | AppRole и пароль оператора можно перевыпустить при сохранных Raft и unseal key; unseal key — нет |
 | TLS CA OpenBao | `pve-only/openbao-tls` | нет без смены доверия |
 | TLS server material | `access/openbao-tls` | да, если сохранён тот же TLS CA |
 | Semaphore | `state/semaphore` | прежнее состояние — нет |

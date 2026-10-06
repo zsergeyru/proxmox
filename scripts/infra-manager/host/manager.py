@@ -190,6 +190,8 @@ def status() -> int:
         )
         return 1
 
+    print("\n==> OpenBao UI")
+    openbao_operator(rotate=False)
     print("\n[ОК] infra-manager полностью готов")
     return 0
 
@@ -284,6 +286,26 @@ def repair() -> int:
     return status()
 
 
+def openbao_operator(*, rotate: bool) -> int:
+    """Показать или сменить учётные данные оператора OpenBao UI."""
+
+    require_executable(OPENBAO_COMMAND)
+    mode = (
+        "--rotate-operator-password"
+        if rotate
+        else "--show-operator-credentials"
+    )
+    run(
+        [
+            str(OPENBAO_COMMAND),
+            mode,
+            "--log-level",
+            "quiet",
+        ]
+    )
+    return 0
+
+
 def _download_bootstrap(target: Path) -> None:
     try:
         with urllib.request.urlopen(BOOTSTRAP_URL, timeout=30) as response:
@@ -345,6 +367,15 @@ def parse_args() -> argparse.Namespace:
         "repair",
         help="Безопасно исправить штатные сбои без пересоздания состояния",
     )
+    operator = subparsers.add_parser(
+        "openbao-operator",
+        help="Показать учётные данные оператора OpenBao UI",
+    )
+    operator.add_argument(
+        "--rotate",
+        action="store_true",
+        help="Сменить пароль оператора и показать новый",
+    )
     subparsers.add_parser(
         "recover",
         help="Запустить защищённое аварийное восстановление через bootstrap",
@@ -360,6 +391,8 @@ def main() -> int:
     with acquire_operator_lock():
         if args.command == "repair":
             return repair()
+        if args.command == "openbao-operator":
+            return openbao_operator(rotate=args.rotate)
         if args.command == "recover":
             return recover()
     raise OperatorError(f"Неизвестная команда: {args.command}")

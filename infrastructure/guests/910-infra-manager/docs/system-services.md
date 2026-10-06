@@ -138,8 +138,8 @@ WantedBy=multi-user.target
 5. при `sealed=true` разблокировать OpenBao, а при `sealed=false` продолжить без повторной разблокировки;
 6. подтвердить `initialized=true, sealed=false`;
 7. восстановить рабочие секреты;
-8. проверить обязательные функции OpenBao, включая оба SSH CA, `ssh-otp` и `auth/machine`;
-9. проверить TLS-вход для SSH OTP;
+8. проверить обязательные функции OpenBao, включая оба SSH CA, `ssh-otp`, `auth/machine` и ограниченный `userpass` оператора;
+9. проверить TLS-вход для SSH OTP и встроенного UI;
 10. завершиться ошибкой, если целевое состояние не достигнуто.
 
 `sealed=false` является обязательной частью рабочего состояния OpenBao, но не основанием завершать startup-службу до восстановления секретов и остальных проверок.
@@ -170,6 +170,7 @@ systemctl start infra-manager-openbao-startup-unseal.service
 infra-manager status
 infra-manager repair
 infra-manager recover
+infra-manager openbao-operator
 ```
 
 Она устанавливается как:
@@ -180,9 +181,10 @@ infra-manager recover
 
 и является единственной штатной операторской точкой входа.
 
-- `status` ничего не изменяет: проверяет PVE-only аварийный контур, объект infra-manager и полный внутренний status 910;
+- `status` ничего не изменяет: проверяет PVE-only аварийный контур, объект infra-manager и полный внутренний status 910, затем показывает текущие URL, логин и пароль OpenBao UI;
 - `repair` разрешает только повторяемые безопасные действия: запуск существующего 910, Docker, восстановление OpenBao на прежнем Raft, материализацию секретов, запуск управляющей среды и синхронизацию Semaphore;
-- `recover` сначала проверяет сохранность обязательного состояния, восстанавливает bootstrap Git-доступ и только затем запускает штатный bootstrap в режиме восстановления.
+- `recover` сначала проверяет сохранность обязательного состояния, восстанавливает bootstrap Git-доступ и только затем запускает штатный bootstrap в режиме восстановления;
+- `openbao-operator` вручную показывает те же URL, логин и пароль ограниченного пользователя OpenBao UI; вариант `--rotate` меняет пароль.
 
 `repair` не должен удалять Raft, создавать новое пустое состояние OpenTofu, менять SSH CA из-за отсутствия прежнего состояния или пересоздавать 910. Если безопасного исправления недостаточно, команда завершается ошибкой и предлагает `infra-manager recover`.
 
@@ -270,13 +272,16 @@ infra-manager status
 pct exec 910 -- infra-manager-status --full
 ```
 
+После успешной проверки штатный status должен также показать текущие данные входа OpenBao UI.
+
 Целевой status должен проверять:
 
 - Docker;
 - `openbao`;
 - `infra-runtime`;
 - состояние OpenBao;
-- TLS-вход OpenBao для OTP;
+- TLS-вход OpenBao для OTP и UI;
+- вход ограниченного оператора OpenBao;
 - Semaphore;
 - OpenTofu, Ansible и Packer;
 - PVE-доступ;
@@ -291,7 +296,7 @@ pct exec 910 -- infra-manager-status --full
 | startup unseal | `journalctl -u infra-manager-openbao-startup-unseal.service` |
 | активация runtime | `/var/log/infra-manager/runtime-activation.log` |
 
-Секреты не должны выводиться в обычные журналы.
+Служебные машинные секреты не должны выводиться в обычные журналы. Исключение для домашнего контура — текущий пароль ограниченного пользователя OpenBao UI: он намеренно показывается в пользовательском результате успешного Deploy/Status, но не в технических журналах OpenBao, startup-unseal или systemd.
 
 ### Восстановление системного слоя
 

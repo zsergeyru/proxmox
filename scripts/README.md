@@ -180,6 +180,7 @@ Semaphore: Build Template 9000
 infra-manager status
 infra-manager repair
 infra-manager recover
+infra-manager openbao-operator
 ```
 
 Его реализация находится в `scripts/infra-manager/host/manager.py`.
@@ -222,7 +223,7 @@ python scripts/validate_repo.py
 - `test-infra-manager-python.py` проверяет основу Python-пакета, командную оболочку и PVE-вспомогательные функции.
 - `test-pve-lifecycle.py` проверяет полный сценарий lifecycle test, защиту занятого VMID и аварийную очистку без реального PVE.
 - `test-python-command.py` проверяет внутреннюю оболочку `infra-manager-status`.
-- `test-manager-host.py` проверяет `infra-manager status/repair/recover` без реального изменения PVE.
+- `test-manager-host.py` проверяет `infra-manager status/repair/recover/openbao-operator` без реального изменения PVE.
 - `test-bootstrap-host.py` проверяет состояния первоначального контура, восстановление, строгую метку владения 910 и безопасное удаление.
 - `test-status.py` проверяет чтение и валидацию состояния Semaphore.
 - `test-template.py` проверяет безопасную передачу параметров Packer и валидацию шаблона.

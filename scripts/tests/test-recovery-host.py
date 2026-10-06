@@ -46,6 +46,9 @@ def configure_paths(module, root: Path) -> None:
     module.OPENBAO_UNSEAL_KEY = module.OPENBAO_DIR / "unseal.key"
     module.OPENBAO_SSH_ACCESS = module.OPENBAO_DIR / "ssh-access.json"
     module.OPENBAO_KV_ACCESS = module.OPENBAO_DIR / "kv-access.json"
+    module.OPENBAO_OPERATOR_ACCESS = (
+        module.OPENBAO_DIR / "operator-access.json"
+    )
     module.OPENBAO_TLS_DIR = module.PVE_ONLY_DIR / "openbao-tls"
     module.OPENBAO_TLS_CA_KEY = module.OPENBAO_TLS_DIR / "ca.key"
     module.OPENBAO_TLS_CA_CERT = module.OPENBAO_TLS_DIR / "ca.crt"
@@ -70,6 +73,10 @@ def prepare_complete_state(module) -> None:
     write(module.OPENBAO_UNSEAL_KEY)
     write(module.OPENBAO_SSH_ACCESS, "{}\n")
     write(module.OPENBAO_KV_ACCESS, "{}\n")
+    write(
+        module.OPENBAO_OPERATOR_ACCESS,
+        '{"username":"operator","password":"recovery-test-password"}\n',
+    )
     write(module.OPENBAO_RAFT_DIR / "raft.db")
     write(module.OPENTOFU_STATE, "{}\n")
     write(module.SEMAPHORE_DB)
@@ -161,6 +168,7 @@ def test_preflight_allows_missing_approle_files() -> None:
         prepare_complete_state(module)
         module.OPENBAO_SSH_ACCESS.unlink()
         module.OPENBAO_KV_ACCESS.unlink()
+        module.OPENBAO_OPERATOR_ACCESS.unlink()
 
         with patch.object(module, "managed_guests_exist", return_value=False):
             module.verify_recovery_state(require_approle=False)
@@ -168,7 +176,14 @@ def test_preflight_allows_missing_approle_files() -> None:
             try:
                 module.verify_recovery_state(require_approle=True)
             except module.RecoveryError as exc:
-                assert "ssh-access.json" in str(exc) or "kv-access.json" in str(exc)
+                assert any(
+                    name in str(exc)
+                    for name in (
+                        "ssh-access.json",
+                        "kv-access.json",
+                        "operator-access.json",
+                    )
+                )
             else:
                 raise AssertionError(
                     "Полный recovery-check должен требовать восстановленные AppRole-файлы"

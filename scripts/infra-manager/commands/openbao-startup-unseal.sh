@@ -72,6 +72,7 @@ fi
 # Проверки выполняются через PVE-only AppRole; служебные данные OpenBao
 # не передаются в infra-manager и не попадают в журналы.
 run_pve_openbao --check-kv --log-level quiet
+run_pve_openbao --check-operator-access --log-level quiet
 run_pve_openbao --check-ssh-access --log-level quiet
 
 if [[ ! -s "$tls_ca" || ! -s "$tls_certificate" ]]; then

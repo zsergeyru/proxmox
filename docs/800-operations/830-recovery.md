@@ -120,7 +120,9 @@ Rootfs infra-manager считается воспроизводимым.
 
 Если `pool managed` пуст, отсутствие `proxmox.tfstate` допустимо.
 
-Потеря `ssh-access.json` или `kv-access.json` не является необратимой: при сохранных Raft и unseal key служебные AppRole могут быть выпущены заново.
+Потеря `ssh-access.json`, `kv-access.json` или `operator-access.json` не является необратимой: при сохранных Raft и unseal key служебные AppRole могут быть выпущены заново, а оператору может быть создан новый случайный пароль.
+
+Поэтому начальный recovery-preflight не требует эти три файла. После восстановления полный `infra-manager-recovery --check` обязан подтвердить их наличие вместе с остальным рабочим контуром.
 
 ### Существующий infra-manager
 

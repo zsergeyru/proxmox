@@ -1018,6 +1018,10 @@ def main_test() -> None:
         patch.object(status_module, "_check_openbao_tls") as check_tls_full,
         patch.object(
             status_module,
+            "check_openbao_operator_access",
+        ) as check_operator_full,
+        patch.object(
+            status_module,
             "check_openbao_ssh_access",
         ) as check_ssh_access_full,
         patch.object(
@@ -1028,6 +1032,7 @@ def main_test() -> None:
         status_module._check_openbao(full=True)
     check_kv_full.assert_called_once_with("pve")
     check_tls_full.assert_called_once_with()
+    check_operator_full.assert_called_once_with("pve")
     check_ssh_access_full.assert_called_once_with("pve")
     check_recovery_full.assert_called_once_with("pve")
 

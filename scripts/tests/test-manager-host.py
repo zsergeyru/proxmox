@@ -70,6 +70,7 @@ def test_status() -> None:
         patch.object(module, "verify_guest_owned"),
         patch.object(module, "guest_running", return_value=True),
         patch.object(module, "exec_guest", side_effect=fake_exec),
+        patch.object(module, "openbao_operator", return_value=0) as operator,
     ):
         assert module.status() == 0
 
@@ -79,6 +80,7 @@ def test_status() -> None:
     assert guest_calls == [
         (920, "infra-manager-status", "--full")
     ]
+    operator.assert_called_once_with(rotate=False)
 
 
 def test_repair() -> None:
@@ -130,6 +132,37 @@ def test_repair() -> None:
     ) in guest_calls
 
 
+def test_openbao_operator() -> None:
+    calls: list[list[str]] = []
+
+    def fake_run(argv: list[str], **kwargs: object):
+        del kwargs
+        calls.append(argv)
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    with (
+        patch.object(module, "require_executable"),
+        patch.object(module, "run", side_effect=fake_run),
+    ):
+        assert module.openbao_operator(rotate=False) == 0
+        assert module.openbao_operator(rotate=True) == 0
+
+    assert calls == [
+        [
+            "/usr/local/sbin/infra-manager-openbao-unseal",
+            "--show-operator-credentials",
+            "--log-level",
+            "quiet",
+        ],
+        [
+            "/usr/local/sbin/infra-manager-openbao-unseal",
+            "--rotate-operator-password",
+            "--log-level",
+            "quiet",
+        ],
+    ]
+
+
 def test_recover() -> None:
     recovery_modes: list[str] = []
     host_calls: list[list[str]] = []
@@ -164,6 +197,7 @@ def main() -> None:
     test_verify_guest_owned()
     test_status()
     test_repair()
+    test_openbao_operator()
     test_recover()
     print("[ОК] Единая операторская команда PVE проверена")
 

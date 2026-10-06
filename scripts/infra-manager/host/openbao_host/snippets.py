@@ -2049,6 +2049,287 @@ print(json.dumps(credentials, separators=(",", ":")))
 """
 
 
+CONFIGURE_OPERATOR_ACCESS_CODE = r"""
+import json
+import sys
+import urllib.parse
+import urllib.request
+
+BASE = "http://127.0.0.1:8200"
+payload = json.loads(sys.stdin.read())
+if not isinstance(payload, dict):
+    raise SystemExit("invalid operator configuration payload")
+
+token = payload.get("root_token")
+username = payload.get("username")
+password = payload.get("password")
+if not isinstance(token, str) or not token:
+    raise SystemExit("empty root token")
+if username != "operator":
+    raise SystemExit("unexpected operator username")
+if not isinstance(password, str) or len(password) < 24:
+    raise SystemExit("operator password is too short")
+
+
+def request(method, path, body=None):
+    data = None
+    headers = {
+        "Content-Type": "application/json",
+        "X-Vault-Token": token,
+    }
+    if body is not None:
+        data = json.dumps(body, separators=(",", ":")).encode("utf-8")
+    req = urllib.request.Request(
+        f"{BASE}{path}",
+        data=data,
+        headers=headers,
+        method=method,
+    )
+    with urllib.request.urlopen(req, timeout=30) as response:
+        raw = response.read()
+    return json.loads(raw.decode("utf-8")) if raw else {}
+
+
+operator_policy = json.dumps(
+    {
+        "path": {
+            "infra-secrets/config": {
+                "capabilities": ["read"],
+            },
+            "infra-secrets/data/*": {
+                "capabilities": ["create", "read", "update", "delete"],
+            },
+            "infra-secrets/metadata": {
+                "capabilities": ["list"],
+            },
+            "infra-secrets/metadata/*": {
+                "capabilities": ["create", "read", "update", "delete", "list"],
+            },
+            "infra-secrets/delete/*": {
+                "capabilities": ["update"],
+            },
+            "infra-secrets/undelete/*": {
+                "capabilities": ["update"],
+            },
+            "infra-secrets/destroy/*": {
+                "capabilities": ["update"],
+            },
+            "sys/mounts": {
+                "capabilities": ["read"],
+            },
+            "sys/auth": {
+                "capabilities": ["read"],
+            },
+            "sys/policies/acl": {
+                "capabilities": ["list"],
+            },
+            "sys/policies/acl/*": {
+                "capabilities": ["read"],
+            },
+            "ssh-client-signer/roles": {
+                "capabilities": ["list"],
+            },
+            "ssh-client-signer/roles/*": {
+                "capabilities": ["read"],
+            },
+            "ssh-host-signer/roles": {
+                "capabilities": ["list"],
+            },
+            "ssh-host-signer/roles/*": {
+                "capabilities": ["read"],
+            },
+            "ssh-otp/roles": {
+                "capabilities": ["list"],
+            },
+            "ssh-otp/roles/*": {
+                "capabilities": ["read"],
+            },
+            "auth/token/lookup-self": {
+                "capabilities": ["read"],
+            },
+            "auth/token/renew-self": {
+                "capabilities": ["update"],
+            },
+            "auth/token/revoke-self": {
+                "capabilities": ["update"],
+            },
+            "sys/capabilities-self": {
+                "capabilities": ["update"],
+            },
+            "sys/internal/ui/resultant-acl": {
+                "capabilities": ["read"],
+            },
+        }
+    },
+    separators=(",", ":"),
+)
+request(
+    "POST",
+    "/v1/sys/policies/acl/infra-operator",
+    {"policy": operator_policy},
+)
+
+auth_payload = request("GET", "/v1/sys/auth")
+auth_methods = auth_payload.get("data", auth_payload)
+if not isinstance(auth_methods, dict):
+    raise SystemExit("OpenBao returned invalid auth methods list")
+
+existing = auth_methods.get("userpass/")
+if existing is None:
+    request(
+        "POST",
+        "/v1/sys/auth/userpass",
+        {
+            "type": "userpass",
+            "description": "Вход оператора в OpenBao UI",
+        },
+    )
+elif not isinstance(existing, dict) or existing.get("type") != "userpass":
+    raise SystemExit("auth/userpass exists with unexpected type")
+
+request(
+    "POST",
+    "/v1/sys/auth/userpass/tune",
+    {
+        "listing_visibility": "unauth",
+        "default_lease_ttl": "1h",
+        "max_lease_ttl": "8h",
+    },
+)
+
+escaped_username = urllib.parse.quote(username, safe="")
+request(
+    "POST",
+    f"/v1/auth/userpass/users/{escaped_username}",
+    {
+        "password": password,
+        "token_policies": ["infra-operator"],
+        "token_ttl": "1h",
+        "token_max_ttl": "8h",
+        "token_no_default_policy": True,
+    },
+)
+
+print(json.dumps({"ready": True}, separators=(",", ":")))
+"""
+
+
+CHECK_OPERATOR_ACCESS_CODE = r"""
+import json
+import sys
+import urllib.parse
+import urllib.request
+
+BASE = "http://127.0.0.1:8200"
+payload = json.loads(sys.stdin.read())
+if not isinstance(payload, dict):
+    raise SystemExit("invalid operator credentials")
+
+username = payload.get("username")
+password = payload.get("password")
+if username != "operator":
+    raise SystemExit("unexpected operator username")
+if not isinstance(password, str) or not password:
+    raise SystemExit("missing operator password")
+
+
+def request(method, path, body=None, *, token=None):
+    data = None
+    headers = {"Content-Type": "application/json"}
+    if token:
+        headers["X-Vault-Token"] = token
+    if body is not None:
+        data = json.dumps(body, separators=(",", ":")).encode("utf-8")
+    req = urllib.request.Request(
+        f"{BASE}{path}",
+        data=data,
+        headers=headers,
+        method=method,
+    )
+    with urllib.request.urlopen(req, timeout=30) as response:
+        raw = response.read()
+    return json.loads(raw.decode("utf-8")) if raw else {}
+
+
+mounts_payload = request("GET", "/v1/sys/internal/ui/mounts")
+mounts_data = mounts_payload.get("data", mounts_payload)
+auth_mounts = mounts_data.get("auth") if isinstance(mounts_data, dict) else None
+userpass = auth_mounts.get("userpass/") if isinstance(auth_mounts, dict) else None
+if not isinstance(userpass, dict) or userpass.get("type") != "userpass":
+    raise SystemExit("userpass is not visible in unauthenticated UI mounts")
+
+escaped_username = urllib.parse.quote(username, safe="")
+login = request(
+    "POST",
+    f"/v1/auth/userpass/login/{escaped_username}",
+    {"password": password},
+)
+auth = login.get("auth")
+client_token = auth.get("client_token") if isinstance(auth, dict) else None
+policies = auth.get("token_policies") if isinstance(auth, dict) else None
+if not isinstance(client_token, str) or not client_token:
+    raise SystemExit("OpenBao did not authenticate operator")
+if policies != ["infra-operator"]:
+    raise SystemExit("operator token has unexpected policies")
+
+try:
+    request(
+        "GET",
+        "/v1/auth/token/lookup-self",
+        token=client_token,
+    )
+    capabilities = request(
+        "POST",
+        "/v1/sys/capabilities-self",
+        {
+            "paths": [
+                "infra-secrets/data/services/semaphore",
+                "sys/auth",
+                "sys/policies/acl",
+                "sys/internal/ui/resultant-acl",
+                "ssh-client-signer/roles",
+                "sys/storage/raft/configuration",
+                "sys/init",
+            ]
+        },
+        token=client_token,
+    ).get("data", {})
+    if not isinstance(capabilities, dict):
+        raise SystemExit("OpenBao returned invalid operator capabilities")
+
+    expected = {
+        "infra-secrets/data/services/semaphore": {
+            "create", "read", "update", "delete"
+        },
+        "sys/auth": {"read"},
+        "sys/policies/acl": {"list"},
+        "sys/internal/ui/resultant-acl": {"read"},
+        "ssh-client-signer/roles": {"list"},
+    }
+    for path, required in expected.items():
+        actual = capabilities.get(path)
+        if not isinstance(actual, list) or not required.issubset(set(actual)):
+            raise SystemExit(f"operator lacks required capabilities on {path}")
+
+    for forbidden in (
+        "sys/storage/raft/configuration",
+        "sys/init",
+    ):
+        actual = capabilities.get(forbidden)
+        if isinstance(actual, list) and any(item != "deny" for item in actual):
+            raise SystemExit(f"operator unexpectedly has access to {forbidden}")
+finally:
+    request(
+        "POST",
+        "/v1/auth/token/revoke-self",
+        {},
+        token=client_token,
+    )
+
+print(json.dumps({"ready": True}, separators=(",", ":")))
+"""
+
+
 CHECK_KV_ACCESS_CODE = r"""
 import json
 import sys

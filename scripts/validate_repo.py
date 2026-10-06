@@ -82,6 +82,7 @@ SECRET_LOCATION_MARKERS = (
     "unseal.key",
     "kv-access.json",
     "ssh-access.json",
+    "operator-access.json",
 )
 ACCESS_MATRIX = {
     ("pve-api", "guests"): {"read", "create", "clone", "configure", "power", "delete"},
