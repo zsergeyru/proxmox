@@ -11,35 +11,9 @@ MODULE_ROOT = Path(__file__).resolve().parents[1]
 REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(MODULE_ROOT))
 
-from infra_manager.common import (
-    InfraManagerError,
-    cancel_runtime_activation,
-    console,
-    require_runtime_activation_idle,
-    reserve_runtime_activation,
-)
-from infra_manager.guest_catalog import guest_identity
-from infra_manager.guest_deploy import run_deploy_guest
-from infra_manager.settings import SETTINGS
-
-
-def _extract_survey_vmid(argv: list[str]) -> tuple[list[str], int | None]:
-    """Извлечь GUEST_VMID, который Semaphore передаёт как survey-переменную."""
-
-    remaining: list[str] = []
-    values: list[str] = []
-    for item in argv:
-        if item.startswith("GUEST_VMID="):
-            values.append(item.split("=", 1)[1])
-        else:
-            remaining.append(item)
-    if len(values) > 1:
-        raise InfraManagerError("GUEST_VMID передан более одного раза")
-    if not values:
-        return remaining, None
-    if not values[0].isdigit() or int(values[0]) <= 0:
-        raise InfraManagerError("GUEST_VMID должен быть положительным VMID")
-    return remaining, int(values[0])
+from infra_manager.common import InfraManagerError, console
+from infra_manager.guest_operations import deploy_guest
+from infra_manager.job_args import extract_survey_vmid
 
 
 def main() -> int:
@@ -77,7 +51,7 @@ def main() -> int:
         ),
     )
     try:
-        cli_args, survey_vmid = _extract_survey_vmid(sys.argv[1:])
+        cli_args, survey_vmid = extract_survey_vmid(sys.argv[1:])
     except InfraManagerError as exc:
         parser.error(str(exc))
     args = parser.parse_args(cli_args)
@@ -87,7 +61,6 @@ def main() -> int:
     if vmid is None:
         parser.error("нужно выбрать гостя или передать VMID")
 
-    activation_reserved = False
     try:
         selected_phase = (
             "infrastructure"
@@ -100,29 +73,13 @@ def main() -> int:
             if args.provision_existing_only
             else "all"
         )
-        require_runtime_activation_idle()
-        identity = guest_identity(REPO_ROOT, vmid)
-        self_update = (
-            identity.role == SETTINGS.infra_manager_role
-            and not args.bootstrap_scope
-            and selected_phase == "all"
-        )
-        if self_update:
-            reserve_runtime_activation()
-            activation_reserved = True
-
-        result = run_deploy_guest(
+        return deploy_guest(
             REPO_ROOT,
             vmid,
             bootstrap_scope=args.bootstrap_scope,
             phase=selected_phase,
         )
-        if result != 0 and activation_reserved:
-            cancel_runtime_activation()
-        return result
     except (InfraManagerError, OSError) as exc:
-        if activation_reserved:
-            cancel_runtime_activation()
         console.error(str(exc))
         return 1
 
