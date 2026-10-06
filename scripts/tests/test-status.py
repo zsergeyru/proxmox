@@ -561,6 +561,73 @@ def main_test() -> None:
     if existing_git_client.puts:
         fail("Task Sync не должен переписывать Git-контур без изменений")
 
+    order_events: list[str] = []
+
+    class SyncOrderClient:
+        def ensure_opentofu_environment(self, project_id: int) -> int:
+            del project_id
+            return 8
+
+        def ensure_infra_manager_environment(self, project_id: int) -> int:
+            del project_id
+            return 10
+
+        def ensure_view(
+            self,
+            project_id: int,
+            *,
+            title: str,
+            position: int,
+        ) -> int:
+            del project_id, title, position
+            return 31
+
+        def remove_obsolete_managed_templates(
+            self,
+            project_id: int,
+            expected_names: set[str],
+        ) -> None:
+            del project_id, expected_names
+
+    def record_templates(repo_root: Path):
+        if repo_root != ROOT:
+            fail("Синхронизация получила неверный корень checkout")
+        order_events.append("catalog")
+        return ()
+
+    def record_git(
+        client,
+        project_id: int,
+        branch_name: str,
+    ) -> tuple[int, int]:
+        del client, project_id, branch_name
+        order_events.append("git")
+        return 7, 9
+
+    with (
+        patch.object(
+            semaphore_module,
+            "semaphore_templates",
+            side_effect=record_templates,
+        ),
+        patch.object(
+            semaphore_module,
+            "_require_existing_task_git",
+            side_effect=record_git,
+        ),
+    ):
+        semaphore_module._sync_project_objects(
+            SyncOrderClient(),
+            41,
+            "main",
+            ROOT,
+            reuse_existing_git=True,
+        )
+    if order_events != ["catalog", "git"]:
+        fail(
+            "Каталог гостей должен считываться до изменения Git-контура Semaphore"
+        )
+
     invalid_task_client = TaskSyncClient(token_valid=False)
     with (
         patch.object(
