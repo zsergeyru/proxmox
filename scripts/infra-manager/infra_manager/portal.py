@@ -18,9 +18,9 @@ from .settings import PATHS, SETTINGS
 
 
 PORTAL_ACTIONS = (
-    ("status", "Проверить", "ST"),
-    ("sync", "Синхронизировать", "SY"),
-    ("repair", "Исправить", "RP"),
+    ("status", "Проверить", "ST", "mdi-check-circle-outline"),
+    ("sync", "Синхронизировать", "SY", "mdi-sync"),
+    ("repair", "Исправить", "RP", "mdi-wrench"),
 )
 PORTAL_TARGETS = frozenset({"local", "home"})
 PORTAL_DEFAULT_PORT = 3001
@@ -48,7 +48,7 @@ def build_portal_bookmarks(vmid: int) -> list[dict]:
     gateway = _gateway_base_url()
 
     entries: list[dict] = []
-    for operation, label, abbreviation in PORTAL_ACTIONS:
+    for operation, label, abbreviation, icon in PORTAL_ACTIONS:
         supported = {
             item.vmid for item in operation_guests(PATHS.repo_root, operation)
         }
@@ -60,6 +60,7 @@ def build_portal_bookmarks(vmid: int) -> list[dict]:
                 label: [
                     {
                         "abbr": abbreviation,
+                        "icon": icon,
                         "href": (
                             f"{gateway}/action/{operation}?vmid={vmid}"
                         ),
@@ -219,6 +220,7 @@ def _validated_portal(source: str, portal: dict) -> dict[str, Any]:
     port = portal.get("port")
     path = portal.get("path", "/")
     targets = portal.get("targets")
+    icon = portal.get("icon")
 
     if not isinstance(name, str) or not name.strip():
         raise InfraManagerError(
@@ -254,6 +256,12 @@ def _validated_portal(source: str, portal: dict) -> dict[str, Any]:
         raise InfraManagerError(
             f"{source}.portal.targets содержит повторы"
         )
+    if icon is not None and (
+        not isinstance(icon, str) or not icon.strip()
+    ):
+        raise InfraManagerError(
+            f"{source}.portal.icon должен быть непустой строкой"
+        )
 
     return {
         "name": name.strip(),
@@ -261,6 +269,7 @@ def _validated_portal(source: str, portal: dict) -> dict[str, Any]:
         "port": port,
         "path": path,
         "targets": targets,
+        "icon": icon.strip() if isinstance(icon, str) else None,
         "operator": _validated_operator(source, portal.get("operator")),
     }
 
@@ -321,6 +330,9 @@ def portal_services(vmid: int, target: str) -> list[dict[str, Any]]:
         name = portal["name"]
         url = portal["url"]
         service: dict[str, Any] = {"href": url}
+        icon = portal.get("icon")
+        if isinstance(icon, str):
+            service["icon"] = icon
         if portal["scheme"] == "http":
             service["siteMonitor"] = url
         result.append({name: service})

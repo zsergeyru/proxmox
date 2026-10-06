@@ -50,6 +50,7 @@ network_gateway:
       admin_user: admin
     portal:
       name: AdGuard Home
+      icon: adguard-home.png
       scheme: http
       port: 3000
       targets:

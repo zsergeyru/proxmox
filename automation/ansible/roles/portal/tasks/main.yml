@@ -29,7 +29,16 @@
     mode: "0755"
   loop:
     - "{{ portal_config_dir }}"
+    - "{{ portal_images_dir }}"
     - "{{ portal_compose_dir }}"
+
+- name: Установить фон Homepage
+  ansible.builtin.copy:
+    src: background.svg
+    dest: "{{ portal_images_dir }}/background.svg"
+    owner: root
+    group: root
+    mode: "0644"
 
 - name: Сформировать настройки Homepage
   ansible.builtin.template:

@@ -1,8 +1,25 @@
 title: {{ provision.portal.local.title | to_json }}
 language: ru
 target: _blank
+
+theme: dark
+color: slate
+headerStyle: clean
+iconStyle: theme
+cardBlur: md
+useEqualHeights: true
+disableCollapse: true
 statusStyle: dot
+background:
+  image: /images/background.svg
+  opacity: 38
+
 layout:
   Службы:
+    icon: mdi-apps
+    style: row
+    columns: 3
+  Управление:
+    icon: mdi-tools
     style: row
     columns: 3
