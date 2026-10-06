@@ -303,8 +303,10 @@ def test_recovery_host_support() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         command = root / "scripts/infra-manager/host/recovery.py"
+        manager = root / "scripts/infra-manager/host/manager.py"
         command.parent.mkdir(parents=True)
         command.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
+        manager.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
 
         def record_install(
             node: str,
@@ -339,7 +341,12 @@ def test_recovery_host_support() -> None:
             str(command),
             "/usr/local/sbin/infra-manager-recovery",
             "0755",
-        )
+        ),
+        (
+            str(manager),
+            "/usr/local/sbin/infra-manager",
+            "0755",
+        ),
     ]
     assert calls == [
         ("/usr/local/sbin/infra-manager-recovery", "--prepare"),
