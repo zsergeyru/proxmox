@@ -275,19 +275,28 @@ def test_openbao_host_support() -> None:
 
 
 def test_openbao_status_checks() -> None:
-    calls: list[tuple[str, ...]] = []
+    calls: list[tuple[tuple[str, ...], bool]] = []
 
     def record_ssh(
         node: str,
         *command_args: str,
         capture: bool = False,
     ):
-        del capture
         assert node == "pve"
-        calls.append(tuple(command_args))
-        return SimpleNamespace(returncode=0, stdout="")
+        calls.append((tuple(command_args), capture))
+        stdout = (
+            "URL: https://192.168.9.10:8202/ui/\n"
+            "Username: operator\n"
+            "Password: test-password\n"
+            if "--show-operator-credentials" in command_args
+            else ""
+        )
+        return SimpleNamespace(returncode=0, stdout=stdout)
 
-    with patch.object(module, "_ssh", side_effect=record_ssh):
+    with (
+        patch.object(module, "_ssh", side_effect=record_ssh),
+        patch("builtins.print") as mocked_print,
+    ):
         module.check_openbao_kv("pve")
         module.show_openbao_operator_credentials("pve")
         module.check_openbao_operator_access("pve")
@@ -295,51 +304,83 @@ def test_openbao_status_checks() -> None:
 
     assert calls == [
         (
-            "/usr/local/sbin/infra-manager-openbao-unseal",
-            "--check-kv",
-            "--log-level",
-            "quiet",
+            (
+                "/usr/local/sbin/infra-manager-openbao-unseal",
+                "--check-kv",
+                "--log-level",
+                "quiet",
+            ),
+            False,
         ),
         (
-            "/usr/local/sbin/infra-manager-openbao-unseal",
-            "--show-operator-credentials",
-            "--log-level",
-            "quiet",
+            (
+                "/usr/local/sbin/infra-manager-openbao-unseal",
+                "--show-operator-credentials",
+                "--log-level",
+                "quiet",
+            ),
+            True,
         ),
         (
-            "/usr/local/sbin/infra-manager-openbao-unseal",
-            "--check-operator-access",
-            "--log-level",
-            "quiet",
+            (
+                "/usr/local/sbin/infra-manager-openbao-unseal",
+                "--check-operator-access",
+                "--log-level",
+                "quiet",
+            ),
+            False,
         ),
         (
-            "/usr/local/sbin/infra-manager-openbao-unseal",
-            "--check-ssh-access",
-            "--log-level",
-            "quiet",
+            (
+                "/usr/local/sbin/infra-manager-openbao-unseal",
+                "--check-ssh-access",
+                "--log-level",
+                "quiet",
+            ),
+            False,
         ),
     ]
+    output = "\n".join(
+        str(call.args[0]) if call.args else ""
+        for call in mocked_print.call_args_list
+    )
+    assert "URL: https://192.168.9.10:8202/ui/" in output
+    assert "Username: operator" in output
+    assert "Password: test-password" in output
 
 
 def test_operator_status() -> None:
-    calls: list[tuple[str, ...]] = []
+    calls: list[tuple[tuple[str, ...], bool]] = []
 
     def record_ssh(
         node: str,
         *command_args: str,
         capture: bool = False,
     ):
-        del capture
         assert node == "pve"
-        calls.append(tuple(command_args))
-        return SimpleNamespace(returncode=0, stdout="")
+        calls.append((tuple(command_args), capture))
+        return SimpleNamespace(
+            returncode=0,
+            stdout="[ОК] infra-manager полностью готов\n",
+        )
 
-    with patch.object(module, "_ssh", side_effect=record_ssh):
+    with (
+        patch.object(module, "_ssh", side_effect=record_ssh),
+        patch("builtins.print") as mocked_print,
+    ):
         module.check_infra_manager_status("pve")
 
     assert calls == [
-        ("/usr/local/sbin/infra-manager", "status"),
+        (
+            ("/usr/local/sbin/infra-manager", "status"),
+            True,
+        ),
     ]
+    output = "\n".join(
+        str(call.args[0]) if call.args else ""
+        for call in mocked_print.call_args_list
+    )
+    assert "[ОК] infra-manager полностью готов" in output
 
 
 def test_recovery_host_support() -> None:
