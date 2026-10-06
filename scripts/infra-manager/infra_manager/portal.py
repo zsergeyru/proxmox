@@ -1,10 +1,6 @@
-"""Формирование ссылок локальных Homepage на операции Semaphore."""
+"""Формирование ссылок локальных Homepage на стандартные операции гостя."""
 
 from __future__ import annotations
-
-from pathlib import Path
-
-import yaml
 
 from .common import InfraManagerError
 from .guest_catalog import (
@@ -13,39 +9,17 @@ from .guest_catalog import (
     guest_management_address,
 )
 from .guest_operations import operation_guests
-from .semaphore import (
-    PROJECT_NAME,
-    SemaphoreClient,
-    find_unique_by_name,
-    require_unique_by_name,
-)
 from .settings import PATHS, SETTINGS
 
 
 PORTAL_ACTIONS = (
-    ("status", "Проверить", "Status Guest", "ST"),
-    ("sync", "Синхронизировать", "Sync Guest", "SY"),
-    ("repair", "Исправить", "Repair Guest", "RP"),
+    ("status", "Проверить", "ST"),
+    ("sync", "Синхронизировать", "SY"),
+    ("repair", "Исправить", "RP"),
 )
 
 
-def _semaphore_context() -> tuple[SemaphoreClient, int, str]:
-    client = SemaphoreClient()
-    if not client.token_valid():
-        raise InfraManagerError(
-            "Рабочий API token Semaphore отсутствует или недействителен"
-        )
-    client.auth_mode = "token"
-
-    project = require_unique_by_name(
-        client.get("/projects"),
-        PROJECT_NAME,
-        "project",
-    )
-    project_id = project.get("id")
-    if not isinstance(project_id, int):
-        raise InfraManagerError("Проект Semaphore имеет некорректный id")
-
+def _gateway_base_url() -> str:
     manager = find_guest_by_role(
         PATHS.repo_root,
         SETTINGS.infra_manager_role,
@@ -55,40 +29,22 @@ def _semaphore_context() -> tuple[SemaphoreClient, int, str]:
         raise InfraManagerError(
             "Не удалось определить административный адрес infra-manager"
         )
-    return client, project_id, address
+    return f"http://{address}:{SETTINGS.portal_gateway_port}"
 
 
 def build_portal_bookmarks(vmid: int) -> list[dict]:
     """Сформировать блок Homepage со стандартными действиями гостя."""
 
     guest_identity(PATHS.repo_root, vmid)
-    client, project_id, manager_address = _semaphore_context()
-    templates = client.get(
-        f"/project/{project_id}/templates?sort=name&order=asc"
-    )
+    gateway = _gateway_base_url()
 
     entries: list[dict] = []
-    for operation, label, template_name, abbreviation in PORTAL_ACTIONS:
+    for operation, label, abbreviation in PORTAL_ACTIONS:
         supported = {
             item.vmid for item in operation_guests(PATHS.repo_root, operation)
         }
         if vmid not in supported:
             continue
-
-        template = find_unique_by_name(
-            templates,
-            template_name,
-            "template",
-        )
-        if template is None:
-            raise InfraManagerError(
-                f"В Semaphore отсутствует шаблон '{template_name}'"
-            )
-        template_id = template.get("id")
-        if not isinstance(template_id, int):
-            raise InfraManagerError(
-                f"Semaphore template '{template_name}' имеет некорректный id"
-            )
 
         entries.append(
             {
@@ -96,8 +52,7 @@ def build_portal_bookmarks(vmid: int) -> list[dict]:
                     {
                         "abbr": abbreviation,
                         "href": (
-                            f"http://{manager_address}:3000/project/"
-                            f"{project_id}/templates/{template_id}"
+                            f"{gateway}/action/{operation}?vmid={vmid}"
                         ),
                         "description": f"Гость {vmid}",
                     }
@@ -113,16 +68,17 @@ def build_portal_bookmarks(vmid: int) -> list[dict]:
 def render_portal_bookmarks(vmid: int) -> str:
     """Вернуть bookmarks.yaml для одного гостя."""
 
-    data = build_portal_bookmarks(vmid)
+    import yaml
+
     return yaml.safe_dump(
-        data,
+        build_portal_bookmarks(vmid),
         allow_unicode=True,
         sort_keys=False,
         default_flow_style=False,
     )
 
 
-def write_portal_bookmarks(vmid: int, output: Path) -> None:
+def write_portal_bookmarks(vmid: int, output) -> None:
     """Записать bookmarks.yaml атомарной заменой."""
 
     output.parent.mkdir(parents=True, exist_ok=True)
