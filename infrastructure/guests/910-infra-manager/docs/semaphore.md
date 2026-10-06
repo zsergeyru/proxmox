@@ -205,6 +205,7 @@ Repository:    proxmox
 SSH key:       GitHub project read-only
 VariableGroup: OpenTofu PVE
 VariableGroup: Infra Manager
+Views:         Guests / Infrastructure / Security
 Templates:     целевой набор инфраструктурных заданий
 ```
 
@@ -293,6 +294,18 @@ normal
 ```
 
 Повторная синхронизация должна сохранять вручную выбранное допустимое значение.
+
+### Группы шаблонов
+
+В разделе Task Templates должны существовать три управляемые группы Semaphore Views:
+
+| View | Позиция | Содержимое |
+|---|---:|---|
+| `Guests` | 0 | `Deploy Guest`, `Status Guest`, `Repair Guest`, `Test Guest`, `Sync Guest` |
+| `Infrastructure` | 1 | `OpenTofu Plan`, `Build Template 9000` |
+| `Security` | 2 | `Sync SSH Access` |
+
+Views являются частью декларативной настройки проекта. `semaphore-project` должен создавать отсутствующие Views, исправлять их позиции и записывать соответствующий `view_id` в каждый управляемый шаблон. Ручные дополнительные Views не удаляются.
 
 ### Целевые задания
 
@@ -398,6 +411,8 @@ infra-manager status
 - ровно один проект с ожидаемым именем;
 - ровно один репозиторий;
 - ожидаемые группы переменных;
+- Views `Guests`, `Infrastructure`, `Security` и их порядок;
+- правильную принадлежность каждого управляемого шаблона к View;
 - целевой набор заданий;
 - наличие задания синхронизации OTP;
 - `max_parallel_tasks=1`.
