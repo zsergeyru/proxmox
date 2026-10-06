@@ -1,0 +1,5 @@
+---
+portal_homepage_image: ghcr.io/gethomepage/homepage:v2.4.0
+portal_default_port: 3001
+portal_config_dir: /etc/infra-portal/homepage
+portal_compose_dir: /opt/infra-portal
