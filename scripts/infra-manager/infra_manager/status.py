@@ -14,7 +14,13 @@ import yaml
 from .common import InfraManagerError, command_runner, console
 from .guest_catalog import find_guest_by_role
 from .pve import PveClient, check_access, read_env_file
-from .semaphore import SemaphoreClient, require_unique_by_name, semaphore_templates
+from .semaphore import (
+    SemaphoreClient,
+    find_unique_by_title,
+    require_unique_by_name,
+    semaphore_templates,
+    semaphore_views,
+)
 from .pve_host import (
     check_openbao_kv,
     check_openbao_ssh_access,
@@ -53,6 +59,7 @@ class SemaphoreSnapshot:
     repository: dict[str, Any]
     branches: tuple[str, ...]
     environments: tuple[dict[str, Any], ...]
+    views: tuple[dict[str, Any], ...]
     templates: tuple[dict[str, Any], ...]
 
 
@@ -568,6 +575,7 @@ def load_semaphore_snapshot(
     environments = semaphore.get(
         f"/project/{project_id}/environment?sort=name&order=asc"
     )
+    views = semaphore.get(f"/project/{project_id}/views")
     templates = semaphore.get(
         f"/project/{project_id}/templates?sort=name&order=asc"
     )
@@ -578,6 +586,7 @@ def load_semaphore_snapshot(
         repository=repository,
         branches=tuple(branches),
         environments=_dict_items(environments, "Variable Group"),
+        views=_dict_items(views, "Views"),
         templates=_dict_items(templates, "шаблоны"),
     )
 
@@ -629,6 +638,29 @@ def validate_semaphore_snapshot(
         github_key_id=github_key_id,
         project_branch=project_branch,
     )
+
+    view_ids: dict[str, int] = {}
+    for spec in semaphore_views():
+        view = find_unique_by_title(
+            list(snapshot.views),
+            spec.title,
+            "View Semaphore",
+        )
+        if view is None:
+            raise InfraManagerError(
+                f"В Semaphore отсутствует View '{spec.title}'"
+            )
+        view_id = view.get("id")
+        if not isinstance(view_id, int):
+            raise InfraManagerError(
+                f"View Semaphore '{spec.title}' имеет некорректный id"
+            )
+        if view.get("position") != spec.position:
+            raise InfraManagerError(
+                f"View Semaphore '{spec.title}' имеет неверную позицию"
+            )
+        view_ids[spec.title] = view_id
+
     for spec in semaphore_templates():
         template = require_unique_by_name(
             list(snapshot.templates),
@@ -639,6 +671,7 @@ def validate_semaphore_snapshot(
             template.get("app") != spec.app
             or template.get("playbook") != spec.playbook
             or str(template.get("arguments") or "[]") != spec.arguments
+            or template.get("view_id") != view_ids[spec.view]
             or not _survey_vars_match(
                 template.get("survey_vars") or [],
                 spec.survey_vars,
