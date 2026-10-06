@@ -329,11 +329,14 @@ def check_recovery_contour(node: str) -> None:
 
 def check_infra_manager_status(node: str) -> None:
     """Выполнить штатную операторскую проверку infra-manager на PVE."""
-    _ssh(
+    result = _ssh(
         node,
         str(OPERATOR_HOST_COMMAND),
         "status",
+        capture=True,
     )
+    if result.stdout:
+        print(result.stdout, end="" if result.stdout.endswith("\n") else "\n")
 
 
 def cleanup_transition_state(node: str) -> None:
@@ -386,13 +389,20 @@ def check_openbao_kv(node: str) -> None:
 
 def show_openbao_operator_credentials(node: str) -> None:
     """Показать действующие данные входа OpenBao UI через PVE-only."""
-    _ssh(
+    result = _ssh(
         node,
         str(OPENBAO_HOST_COMMAND),
         "--show-operator-credentials",
         "--log-level",
         "quiet",
+        capture=True,
     )
+    output = result.stdout.strip()
+    if not output:
+        raise InfraManagerError(
+            "PVE/OpenBao не вернул данные входа оператора"
+        )
+    print(output)
 
 
 def check_openbao_operator_access(node: str) -> None:
