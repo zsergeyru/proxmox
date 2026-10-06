@@ -102,6 +102,7 @@ def check_operator_contracts() -> None:
 def check_status_definitions() -> None:
     expected_types = {
         109: ("docker", "systemd", "file"),
+        311: (),
         410: ("docker", "docker", "file"),
         910: ("local_status",),
     }
