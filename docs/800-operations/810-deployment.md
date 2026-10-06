@@ -196,6 +196,7 @@ infra-runtime
 - общие настройки `Infra Manager`;
 - `OpenTofu Plan`;
 - `Build Template 9000`;
+- `Set Log Level`;
 - `Deploy Guest`;
 - `Status Guest`;
 - `Repair Guest`;
@@ -215,7 +216,8 @@ Guests
 
 Infrastructure
 ├── OpenTofu Plan
-└── Build Template 9000
+├── Build Template 9000
+└── Set Log Level
 
 Security
 └── Sync SSH Access
@@ -237,7 +239,7 @@ python3 -m infra_manager semaphore-project
 INFRA_LOG_LEVEL=normal
 ```
 
-Её можно изменить в веб-интерфейсе Semaphore без правки шаблонов. `normal` используется для штатной работы, `verbose` — для разработки и диагностики, `quiet` — когда нужен только итог и ошибки. Синхронизация проекта сохраняет вручную выбранное допустимое значение.
+Она меняется штатным заданием `Set Log Level` через выпадающий список `Обычный / Подробный / Тихий`. В Variable Group сохраняются соответственно `normal / verbose / quiet`; выбранное значение применяется ко всем следующим заданиям и не перезаписывается обычной синхронизацией проекта.
 
 ## 9. OpenTofu
 
