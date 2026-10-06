@@ -391,6 +391,8 @@ def show_guest_status(
     *,
     full: bool = True,
     show_secrets: bool = True,
+    project_branch: str | None = None,
+    project_revision: str | None = None,
 ) -> None:
     """Проверить и показать единый статус любого поддерживаемого гостя."""
 
@@ -432,6 +434,11 @@ def show_guest_status(
     print(f"  {'Роль:':<12}{identity.role or '-'}")
     print(f"  {'Адрес:':<12}{address}")
     print(f"  {'Узел:':<12}{node}")
+
+    if project_branch is not None or project_revision is not None:
+        print("\nПроект")
+        print(f"  {'Ветка:':<12}{project_branch or 'не определена'}")
+        print(f"  {'Версия:':<12}{project_revision or 'не определена'}")
 
     for service in services:
         fields = _service_fields(
