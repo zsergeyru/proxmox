@@ -267,17 +267,19 @@ docker exec infra-runtime test -d /etc/infra-manager/ansible
 docker exec infra-runtime test -d /run/infra-manager/secrets
 ```
 
-Полная проверка:
+Штатная операторская проверка выполняется с PVE:
 
 ```bash
-infra-manager-status --full
+infra-manager status
 ```
+
+Внутренний `infra-manager-status --full` остаётся технической проверкой автоматики.
 
 ## 4. Самообновление 910
 
 ### Почему самообновление отличается
 
-`Deploy Guest 910` выполняется **внутри того же `infra-runtime`**, который это задание может изменить.
+Единый `Deploy Guest` с выбранным `910 infra-manager` выполняется **внутри того же `infra-runtime`**, который это задание может изменить.
 
 Если Ansible сразу выполнит обычный `docker compose up`, текущий контейнер может быть уничтожен до завершения собственного задания.
 
