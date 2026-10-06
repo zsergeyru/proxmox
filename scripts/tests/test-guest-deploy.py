@@ -1119,10 +1119,115 @@ def check_pve_host_support_before_signing() -> None:
             )
 
 
+def check_opentofu_provider_mirror() -> None:
+    payload = b"provider-package"
+    checksum = __import__("hashlib").sha256(payload).hexdigest()
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        opentofu_dir = root / "opentofu"
+        mirror_root = root / "mirror"
+        opentofu_dir.mkdir()
+        (opentofu_dir / ".terraform.lock.hcl").write_text(
+            'provider "registry.opentofu.org/bpg/proxmox" {\n'
+            '  version = "0.112.0"\n'
+            '  hashes = [\n'
+            f'    "zh:{checksum}",\n'
+            '  ]\n'
+            '}\n',
+            encoding="utf-8",
+        )
+
+        filename = (
+            "terraform-provider-proxmox_0.112.0_linux_amd64.zip"
+        )
+        package = (
+            mirror_root
+            / "registry.opentofu.org"
+            / "bpg"
+            / "proxmox"
+            / filename
+        )
+        package.parent.mkdir(parents=True)
+        package.write_bytes(payload)
+
+        with (
+            patch.object(
+                opentofu_module,
+                "PROVIDER_MIRROR_DIR",
+                mirror_root,
+            ),
+            patch.object(
+                opentofu_module,
+                "_provider_platform",
+                return_value=("linux", "amd64"),
+            ),
+            patch.object(opentofu_module, "_download_text") as download_text,
+            patch.object(opentofu_module, "_download_file") as download_file,
+        ):
+            actual = opentofu_module._prepare_proxmox_provider_mirror(
+                opentofu_dir
+            )
+        if actual != mirror_root:
+            fail("OpenTofu provider mirror вернул неверный каталог")
+        download_text.assert_not_called()
+        download_file.assert_not_called()
+
+        package.unlink()
+
+        def fake_download(_url: str, target: Path) -> None:
+            target.write_bytes(payload)
+
+        with (
+            patch.object(
+                opentofu_module,
+                "PROVIDER_MIRROR_DIR",
+                mirror_root,
+            ),
+            patch.object(
+                opentofu_module,
+                "_provider_platform",
+                return_value=("linux", "amd64"),
+            ),
+            patch.object(
+                opentofu_module,
+                "_download_text",
+                return_value=f"{checksum}  {filename}\n",
+            ),
+            patch.object(
+                opentofu_module,
+                "_download_file",
+                side_effect=fake_download,
+            ),
+        ):
+            opentofu_module._prepare_proxmox_provider_mirror(
+                opentofu_dir
+            )
+        if package.read_bytes() != payload:
+            fail("OpenTofu provider mirror не сохранил проверенный пакет")
+
+        with (
+            patch.object(
+                opentofu_module,
+                "_prepare_proxmox_provider_mirror",
+                return_value=mirror_root,
+            ),
+            patch.object(opentofu_module, "run") as tofu_run,
+        ):
+            opentofu_module._init(
+                opentofu_dir,
+                {"SSL_CERT_FILE": "/tmp/ca.crt"},
+            )
+        argv = tofu_run.call_args.args[0]
+        if f"-plugin-dir={mirror_root}" not in argv:
+            fail("tofu init не использует локальное зеркало провайдера")
+
+
 def main_test() -> None:
     check_deploy_guest_survey_input()
     check_pve_host_support_before_signing()
     check_opentofu_state_status()
+    check_opentofu_provider_mirror()
     check_guest_summary()
     check_infra_manager_self_update_path_after_vmid_change()
     check_openbao_machine_identity_preparation()
