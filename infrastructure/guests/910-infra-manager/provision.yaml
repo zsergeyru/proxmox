@@ -108,7 +108,8 @@ docker:
 
       portal:
         name: OpenBao
-        icon: mdi-lock
+        description: Хранилище секретов
+        icon: mdi-lock-#e0f2fe
         scheme: https
         port: 8202
         path: /ui/
