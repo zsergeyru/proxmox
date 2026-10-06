@@ -1,0 +1,51 @@
+schema_version: 1
+guest_vmid: 910
+
+title: "Внутренняя проверка infra-manager"
+short_ready_message: "infra-manager готов"
+ready_message: "infra-manager полностью готов"
+
+layout:
+  separator: "="
+  width: 60
+
+checks:
+  - type: runtime
+    message: "Docker и infra-runtime работают"
+  - type: portal
+    message: "Homepage и его действия работают"
+  - type: openbao
+    message: "OpenBao запущен"
+  - type: semaphore
+    message: "Semaphore работает"
+  - type: runtime_tools
+    message: "OpenTofu, Ansible и Packer готовы"
+  - type: pve_access
+    message: "Доступ к PVE подтверждён"
+
+data:
+  address:
+    type: primary_ipv4
+  project_branch:
+    type: project_branch
+  project_revision:
+    type: git_revision
+    repository: /var/lib/infra-manager/bootstrap-repo
+
+sections:
+  - title: "Система"
+    fields:
+      - label: "Адрес"
+        source: address
+
+  - title: "Проект"
+    fields:
+      - label: "Ветка"
+        source: project_branch
+      - label: "Версия"
+        source: project_revision
+
+  - title: "Проверка"
+    fields:
+      - label: "Операторская команда"
+        value: "infra-manager status"
