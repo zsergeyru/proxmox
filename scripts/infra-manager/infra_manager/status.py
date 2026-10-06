@@ -23,6 +23,7 @@ from .semaphore import (
 )
 from .pve_host import (
     check_openbao_kv,
+    check_openbao_operator_access,
     check_openbao_ssh_access,
     check_recovery_contour,
 )
@@ -543,6 +544,7 @@ def _check_openbao(*, full: bool) -> None:
         check_openbao_kv(node)
         if full:
             _check_openbao_tls()
+            check_openbao_operator_access(node)
             check_openbao_ssh_access(node)
             check_recovery_contour(node)
 
