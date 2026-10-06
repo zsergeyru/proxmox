@@ -1,0 +1,94 @@
+---
+- name: Проверить описание локального портала
+  ansible.builtin.assert:
+    that:
+      - provision.portal.local.title is string
+      - provision.portal.local.title | length > 0
+      - provision.docker is defined
+    fail_msg: >-
+      Локальный портал требует непустой portal.local.title и Docker
+      в provision.yaml.
+
+- name: Определить параметры локального портала
+  ansible.builtin.set_fact:
+    portal_local_port: "{{ provision.portal.local.port | default(portal_default_port) | int }}"
+
+- name: Проверить порт локального портала
+  ansible.builtin.assert:
+    that:
+      - portal_local_port | int > 0
+      - portal_local_port | int < 65536
+    fail_msg: "portal.local.port должен быть допустимым TCP-портом"
+
+- name: Подготовить каталоги локального портала
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - "{{ portal_config_dir }}"
+    - "{{ portal_compose_dir }}"
+
+- name: Сформировать настройки Homepage
+  ansible.builtin.template:
+    src: settings.yaml.j2
+    dest: "{{ portal_config_dir }}/settings.yaml"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Сформировать список служб Homepage
+  ansible.builtin.template:
+    src: services.yaml.j2
+    dest: "{{ portal_config_dir }}/services.yaml"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Подготовить пустые дополнительные настройки Homepage
+  ansible.builtin.copy:
+    dest: "{{ portal_config_dir }}/{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+    content: "[]\n"
+  loop:
+    - bookmarks.yaml
+    - widgets.yaml
+
+- name: Сформировать запуск Homepage
+  ansible.builtin.template:
+    src: docker-compose.yml.j2
+    dest: "{{ portal_compose_dir }}/docker-compose.yml"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Запустить Homepage
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ portal_compose_dir }}/docker-compose.yml"
+      - up
+      - -d
+      - --remove-orphans
+  register: portal_compose
+  changed_when: >-
+    'Started' in portal_compose.stdout
+    or 'Created' in portal_compose.stdout
+    or 'Recreated' in portal_compose.stdout
+    or 'Pulled' in portal_compose.stdout
+
+- name: Проверить Homepage
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ portal_local_port }}/api/healthcheck"
+    method: GET
+    status_code: 200
+  register: portal_health
+  retries: 12
+  delay: 2
+  until: portal_health.status == 200
