@@ -294,7 +294,11 @@ infra-runtime
 - общие настройки `Infra Manager`;
 - `OpenTofu Plan`;
 - `Build Template 9000`;
-- единый `Deploy Guest` с выбором гостя;
+- `Deploy Guest`;
+- `Status Guest`;
+- `Repair Guest`;
+- `Test Guest`;
+- `Sync Guest`;
 - `Sync SSH Access`.
 
 ## Первичный пароль Semaphore
