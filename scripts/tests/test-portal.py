@@ -14,7 +14,10 @@ MODULE_ROOT = ROOT / "scripts" / "infra-manager"
 sys.path.insert(0, str(MODULE_ROOT))
 
 from infra_manager.common import InfraManagerError
-from infra_manager.portal import build_portal_bookmarks
+from infra_manager.portal import (
+    build_portal_bookmarks,
+    portal_services,
+)
 from infra_manager import portal_gateway
 
 
@@ -44,6 +47,29 @@ def check_bookmarks() -> None:
     gateway = build_portal_bookmarks(109)
     if _labels(gateway) != {"Проверить", "Синхронизировать", "Исправить"}:
         fail("Homepage 109 должен содержать три стандартных действия")
+
+
+def check_service_discovery() -> None:
+    infra = portal_services(910, "local")
+    if {next(iter(item)) for item in infra} != {"Semaphore", "OpenBao"}:
+        fail("Homepage 910 должен публиковать Semaphore и OpenBao")
+
+    gateway = portal_services(109, "local")
+    if {next(iter(item)) for item in gateway} != {"AdGuard Home"}:
+        fail("Homepage 109 должен публиковать AdGuard Home")
+
+    ai = portal_services(410, "local")
+    if {next(iter(item)) for item in ai} != {"Open WebUI"}:
+        fail("Homepage 410 должен публиковать Open WebUI")
+
+    if {next(iter(item)) for item in portal_services(109, "home")} != {
+        "AdGuard Home"
+    }:
+        fail("AdGuard Home должен быть доступен общему порталу квартиры")
+    if {next(iter(item)) for item in portal_services(410, "home")} != {
+        "Open WebUI"
+    }:
+        fail("Open WebUI должен быть доступен общему порталу квартиры")
 
 
 def check_action_validation() -> None:
@@ -125,6 +151,7 @@ def check_rejected_task() -> None:
 
 def main() -> None:
     check_bookmarks()
+    check_service_discovery()
     check_action_validation()
     check_queue_payload()
     check_rejected_task()
