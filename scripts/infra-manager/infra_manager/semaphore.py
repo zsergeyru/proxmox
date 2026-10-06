@@ -912,6 +912,63 @@ def persist_github_key() -> None:
         )
 
 
+def _require_existing_task_git(
+    client: SemaphoreClient,
+    project_id: int,
+    branch: str,
+) -> tuple[int, int]:
+    """Проверить существующий Git-контур без изменения SSH-ключа."""
+
+    key = require_unique_by_name(
+        client.get(f"/project/{project_id}/keys?sort=name&order=asc"),
+        "GitHub project read-only",
+        "SSH key",
+    )
+    key_id = key.get("id")
+    if not isinstance(key_id, int):
+        raise InfraManagerError(
+            "GitHub project read-only имеет некорректный id; "
+            "выполните Repair Guest для infra-manager"
+        )
+
+    repository = require_unique_by_name(
+        client.get(
+            f"/project/{project_id}/repositories?sort=name&order=asc"
+        ),
+        "proxmox",
+        "Git repository",
+    )
+    repository_id = repository.get("id")
+    if not isinstance(repository_id, int):
+        raise InfraManagerError(
+            "Git repository proxmox имеет некорректный id; "
+            "выполните Repair Guest для infra-manager"
+        )
+    if (
+        repository.get("git_url") != PROJECT_REPO
+        or repository.get("ssh_key_id") != key_id
+    ):
+        raise InfraManagerError(
+            "Git-контур Semaphore не соответствует проекту; "
+            "выполните Repair Guest для infra-manager"
+        )
+
+    if repository.get("git_branch") != branch:
+        client.put(
+            f"/project/{project_id}/repositories/{repository_id}",
+            {
+                "id": repository_id,
+                "name": "proxmox",
+                "project_id": project_id,
+                "git_url": PROJECT_REPO,
+                "git_branch": branch,
+                "ssh_key_id": key_id,
+            },
+        )
+
+    return key_id, repository_id
+
+
 def _sync_project_objects(
     client: SemaphoreClient,
     project_id: int,
