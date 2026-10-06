@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import sys
 import tempfile
@@ -33,6 +34,33 @@ from infra_manager.opentofu import OpenTofuWorkspace
 
 def fail(message: str) -> None:
     raise SystemExit(message)
+
+
+def check_deploy_guest_survey_input() -> None:
+    job_path = ROOT / "scripts/infra-manager/jobs/deploy-guest.py"
+    spec = importlib.util.spec_from_file_location("deploy_guest_job", job_path)
+    if spec is None or spec.loader is None:
+        fail("Не удалось загрузить deploy-guest.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    remaining, vmid = module._extract_survey_vmid(
+        ["GUEST_VMID=410", "--provision-only"]
+    )
+    if remaining != ["--provision-only"] or vmid != 410:
+        fail("Deploy Guest неверно разбирает survey-переменную GUEST_VMID")
+
+    remaining, vmid = module._extract_survey_vmid(["910"])
+    if remaining != ["910"] or vmid is not None:
+        fail("Позиционный VMID должен сохранять совместимость CLI")
+
+    for invalid in (["GUEST_VMID=bad"], ["GUEST_VMID=410", "GUEST_VMID=910"]):
+        try:
+            module._extract_survey_vmid(invalid)
+        except InfraManagerError:
+            pass
+        else:
+            fail("Deploy Guest принял некорректную survey-переменную")
 
 
 def check_opentofu_state_status() -> None:
@@ -954,6 +982,7 @@ def check_certificate_failure_is_fatal_after_trust() -> None:
 
 
 def main_test() -> None:
+    check_deploy_guest_survey_input()
     check_opentofu_state_status()
     check_guest_summary()
     check_infra_manager_self_update_path_after_vmid_change()
