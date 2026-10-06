@@ -137,6 +137,8 @@ def check_style_contract() -> None:
         "disableCollapse: true",
         "image: /images/background.svg",
         "opacity: 38",
+        "icon: mdi-apps",
+        "icon: mdi-tools",
     )
     for value in expected:
         if value not in settings:
