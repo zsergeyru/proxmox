@@ -85,6 +85,7 @@ OPENBAO_HOST_COMMAND = Path("/usr/local/sbin/infra-manager-openbao-unseal")
 OPENBAO_HOST_LIBRARY = Path("/usr/local/lib/infra-manager/openbao_host")
 OPENBAO_HOST_CONFIG = Path("/etc/infra-manager/openbao-host.json")
 RECOVERY_HOST_COMMAND = Path("/usr/local/sbin/infra-manager-recovery")
+OPERATOR_HOST_COMMAND = Path("/usr/local/sbin/infra-manager")
 OPENBAO_LEGACY_SERVICE = "infra-manager-openbao-unseal.service"
 OPENBAO_LEGACY_TIMER = "infra-manager-openbao-unseal.timer"
 
@@ -291,17 +292,21 @@ systemctl daemon-reload
 
 
 def install_recovery_host_support(node: str, repo_root: Path) -> None:
-    """Установить на PVE независимый helper аварийного восстановления."""
-    source = (
-        repo_root / "scripts" / "infra-manager" / "host" / "recovery.py"
-    )
+    """Установить на PVE внутренний recovery helper и операторскую команду."""
+    host_root = repo_root / "scripts" / "infra-manager" / "host"
     _install_remote_file(
         node,
-        source,
+        host_root / "recovery.py",
         RECOVERY_HOST_COMMAND,
         "0755",
     )
-    console.detail("Recovery helper установлен на PVE")
+    _install_remote_file(
+        node,
+        host_root / "manager.py",
+        OPERATOR_HOST_COMMAND,
+        "0755",
+    )
+    console.detail("Recovery helper и команда infra-manager установлены на PVE")
 
 
 def prepare_recovery_git(node: str) -> None:
