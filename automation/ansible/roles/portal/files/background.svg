@@ -2,21 +2,30 @@
   <defs>
     <linearGradient id="base" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0" stop-color="#020617"/>
-      <stop offset="0.55" stop-color="#0f172a"/>
+      <stop offset="0.48" stop-color="#0b1220"/>
       <stop offset="1" stop-color="#111827"/>
     </linearGradient>
-    <radialGradient id="glow-a" cx="0" cy="0" r="1" gradientTransform="translate(520 240) rotate(35) scale(850 650)">
-      <stop offset="0" stop-color="#1d4ed8" stop-opacity=".48"/>
-      <stop offset=".55" stop-color="#1e40af" stop-opacity=".16"/>
+    <radialGradient id="glow-a" cx="0" cy="0" r="1"
+      gradientTransform="translate(430 210) rotate(30) scale(980 720)">
+      <stop offset="0" stop-color="#2563eb" stop-opacity=".72"/>
+      <stop offset=".46" stop-color="#1d4ed8" stop-opacity=".28"/>
       <stop offset="1" stop-color="#1e3a8a" stop-opacity="0"/>
     </radialGradient>
-    <radialGradient id="glow-b" cx="0" cy="0" r="1" gradientTransform="translate(2150 1180) rotate(210) scale(900 620)">
-      <stop offset="0" stop-color="#0f766e" stop-opacity=".34"/>
-      <stop offset=".55" stop-color="#115e59" stop-opacity=".12"/>
+    <radialGradient id="glow-b" cx="0" cy="0" r="1"
+      gradientTransform="translate(2190 1160) rotate(210) scale(980 690)">
+      <stop offset="0" stop-color="#0d9488" stop-opacity=".58"/>
+      <stop offset=".48" stop-color="#0f766e" stop-opacity=".22"/>
       <stop offset="1" stop-color="#134e4a" stop-opacity="0"/>
     </radialGradient>
-    <radialGradient id="glow-c" cx="0" cy="0" r="1" gradientTransform="translate(1520 480) rotate(145) scale(700 520)">
-      <stop offset="0" stop-color="#334155" stop-opacity=".44"/>
+    <radialGradient id="glow-c" cx="0" cy="0" r="1"
+      gradientTransform="translate(1610 360) rotate(150) scale(760 560)">
+      <stop offset="0" stop-color="#7c3aed" stop-opacity=".24"/>
+      <stop offset=".55" stop-color="#4f46e5" stop-opacity=".10"/>
+      <stop offset="1" stop-color="#312e81" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glow-d" cx="0" cy="0" r="1"
+      gradientTransform="translate(1250 1100) rotate(90) scale(760 980)">
+      <stop offset="0" stop-color="#334155" stop-opacity=".38"/>
       <stop offset="1" stop-color="#334155" stop-opacity="0"/>
     </radialGradient>
   </defs>
@@ -24,4 +33,5 @@
   <rect width="2560" height="1440" fill="url(#glow-a)"/>
   <rect width="2560" height="1440" fill="url(#glow-b)"/>
   <rect width="2560" height="1440" fill="url(#glow-c)"/>
+  <rect width="2560" height="1440" fill="url(#glow-d)"/>
 </svg>
