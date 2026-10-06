@@ -58,7 +58,5 @@ sections:
 
   - title: "Проверка"
     fields:
-      - label: "Внутри infra-manager"
-        value: "infra-manager-status --full"
-      - label: "С PVE"
-        template: "pct exec {guest_vmid} -- infra-manager-status --full"
+      - label: "Операторская команда"
+        value: "infra-manager status"
