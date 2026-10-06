@@ -68,6 +68,12 @@ ai_control:
       targets:
         - local
         - home
+      operator:
+        username: admin@ai-control.local
+        password:
+          source: guest_env
+          path: /etc/ai-control/open-webui.env
+          key: WEBUI_ADMIN_PASSWORD
 
   paths:
     root: /opt/ai-control
