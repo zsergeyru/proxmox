@@ -18,7 +18,11 @@ from .common import (
 from .guest_catalog import GuestIdentity, deployable_guests, guest_identity, guest_management_address
 from .guest_deploy import run_deploy_guest
 from .pve import PveClient
-from .pve_host import check_infra_manager_status, trigger_openbao_unseal
+from .pve_host import (
+    check_infra_manager_status,
+    install_openbao_host_support,
+    repair_openbao_on_host,
+)
 from .settings import SETTINGS
 
 GUEST_OPERATIONS: Final[tuple[str, ...]] = (
@@ -146,13 +150,19 @@ def _infra_manager_status(
     check_infra_manager_status(node)
 
 
-def _infra_manager_repair(node: str, identity: GuestIdentity) -> None:
+def _infra_manager_repair(
+    node: str,
+    repo_root: Path,
+    identity: GuestIdentity,
+) -> None:
     del identity
     from .semaphore import configure_project
     from .status import check_status
 
+    console.info("Обновление PVE-only OpenBao helper")
+    install_openbao_host_support(node, repo_root)
     console.info("Безопасное восстановление OpenBao")
-    trigger_openbao_unseal(node)
+    repair_openbao_on_host(node)
     console.info("Синхронизация проекта Semaphore")
     configure_project(branch=SETTINGS.project_branch())
     check_status(full=True, quiet=False)
@@ -239,7 +249,7 @@ def _run_repair(
         )
 
     if identity.role == SETTINGS.infra_manager_role:
-        _infra_manager_repair(node, identity)
+        _infra_manager_repair(node, repo_root, identity)
     else:
         console.ok(
             f"Гость {identity.vmid} {identity.name}: "
