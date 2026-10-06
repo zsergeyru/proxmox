@@ -270,7 +270,7 @@ def require_active_openbao(action: str) -> dict[str, object]:
 
 
 def _verify_single_node_raft_contract() -> None:
-    """Разрешить quorum recovery только для строго одноузлового 910."""
+    """Разрешить quorum recovery только для строго одноузлового infra-manager."""
 
     guest = run(
         ["pct", "config", str(VMID)],
