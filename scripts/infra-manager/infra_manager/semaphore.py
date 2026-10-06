@@ -979,6 +979,10 @@ def _sync_project_objects(
 ) -> None:
     """Синхронизировать управляемые объекты внутри существующего проекта."""
 
+    # Текущий task может выполняться из checkout этого же repository.
+    # Каталог гостей нужно считать до любых изменений Git-контура Semaphore.
+    templates = semaphore_templates(repo_root)
+
     if reuse_existing_git:
         github_key_id, repository_id = _require_existing_task_git(
             client,
@@ -1015,7 +1019,6 @@ def _sync_project_objects(
         for view in views
     }
 
-    templates = semaphore_templates(repo_root)
     for template in templates:
         client.ensure_template(
             project_id,
