@@ -23,11 +23,30 @@ from infra_manager.guest_deploy import run_deploy_guest
 from infra_manager.settings import SETTINGS
 
 
+def _extract_survey_vmid(argv: list[str]) -> tuple[list[str], int | None]:
+    """Извлечь GUEST_VMID, который Semaphore передаёт как survey-переменную."""
+
+    remaining: list[str] = []
+    values: list[str] = []
+    for item in argv:
+        if item.startswith("GUEST_VMID="):
+            values.append(item.split("=", 1)[1])
+        else:
+            remaining.append(item)
+    if len(values) > 1:
+        raise InfraManagerError("GUEST_VMID передан более одного раза")
+    if not values:
+        return remaining, None
+    if not values[0].isdigit() or int(values[0]) <= 0:
+        raise InfraManagerError("GUEST_VMID должен быть положительным VMID")
+    return remaining, int(values[0])
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Привести одну VM к состоянию guest.yaml + provision.yaml"
     )
-    parser.add_argument("vmid", type=int, help="VMID гостя")
+    parser.add_argument("vmid", nargs="?", type=int, help="VMID гостя")
     parser.add_argument(
         "--bootstrap-scope",
         action="store_true",
@@ -57,7 +76,16 @@ def main() -> int:
             "без требования OpenTofu state"
         ),
     )
-    args = parser.parse_args()
+    try:
+        cli_args, survey_vmid = _extract_survey_vmid(sys.argv[1:])
+    except InfraManagerError as exc:
+        parser.error(str(exc))
+    args = parser.parse_args(cli_args)
+    if args.vmid is not None and survey_vmid is not None:
+        parser.error("VMID нельзя одновременно передавать позиционно и через GUEST_VMID")
+    vmid = survey_vmid if survey_vmid is not None else args.vmid
+    if vmid is None:
+        parser.error("нужно выбрать гостя или передать VMID")
 
     activation_reserved = False
     try:
@@ -73,7 +101,7 @@ def main() -> int:
             else "all"
         )
         require_runtime_activation_idle()
-        identity = guest_identity(REPO_ROOT, args.vmid)
+        identity = guest_identity(REPO_ROOT, vmid)
         self_update = (
             identity.role == SETTINGS.infra_manager_role
             and not args.bootstrap_scope
@@ -85,7 +113,7 @@ def main() -> int:
 
         result = run_deploy_guest(
             REPO_ROOT,
-            args.vmid,
+            vmid,
             bootstrap_scope=args.bootstrap_scope,
             phase=selected_phase,
         )
