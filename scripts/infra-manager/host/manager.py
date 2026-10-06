@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import fcntl
 import json
 import os
 import socket
@@ -26,6 +27,7 @@ COMPOSE_FILE = COMPOSE_DIR / "docker-compose.yml"
 VERSIONS_FILE = COMPOSE_DIR / ".versions.env"
 PROJECT_DIR = Path("/var/lib/infra-manager/bootstrap-repo")
 ACTIVATE_RUNTIME = Path("/usr/local/sbin/infra-manager-activate-runtime")
+LOCK_PATH = Path("/run/lock/infra-manager-operator.lock")
 
 
 class OperatorError(RuntimeError):
@@ -38,12 +40,17 @@ def run(
     check: bool = True,
     capture: bool = False,
 ) -> subprocess.CompletedProcess[str]:
-    result = subprocess.run(
-        argv,
-        text=True,
-        capture_output=capture,
-        check=False,
-    )
+    try:
+        result = subprocess.run(
+            argv,
+            text=True,
+            capture_output=capture,
+            check=False,
+        )
+    except OSError as exc:
+        raise OperatorError(
+            f"Не удалось запустить команду {' '.join(argv)}: {exc}"
+        ) from exc
     if check and result.returncode:
         detail = ""
         if capture:
@@ -146,6 +153,7 @@ def recovery_check(mode: str) -> None:
 def status() -> int:
     vmid, name = load_identity()
     failures: list[str] = []
+    require_executable(RECOVERY_COMMAND)
 
     print("==> PVE-only аварийный контур")
     result = run(
@@ -309,6 +317,21 @@ def recover() -> int:
     return status()
 
 
+def acquire_operator_lock():
+    """Не допустить одновременный repair/recover."""
+
+    LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
+    stream = LOCK_PATH.open("w", encoding="utf-8")
+    try:
+        fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError as exc:
+        stream.close()
+        raise OperatorError(
+            "Другая операция infra-manager repair/recover уже выполняется"
+        ) from exc
+    return stream
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Проверка и восстановление infra-manager с PVE"
@@ -330,14 +353,15 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> int:
-    require_root()
     args = parse_args()
+    require_root()
     if args.command == "status":
         return status()
-    if args.command == "repair":
-        return repair()
-    if args.command == "recover":
-        return recover()
+    with acquire_operator_lock():
+        if args.command == "repair":
+            return repair()
+        if args.command == "recover":
+            return recover()
     raise OperatorError(f"Неизвестная команда: {args.command}")
 
 
