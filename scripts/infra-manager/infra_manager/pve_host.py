@@ -81,6 +81,37 @@ def _ssh_with_input(
     )
 
 
+def read_pve_json_value(node: str, path: str, key: str) -> str:
+    """Прочитать одно обязательное строковое поле root-only JSON на PVE."""
+
+    target = Path(path)
+    if not target.is_absolute():
+        raise InfraManagerError(
+            f"Путь JSON на PVE должен быть абсолютным: {path}"
+        )
+    if not key:
+        raise InfraManagerError("Ключ JSON на PVE не должен быть пустым")
+
+    response = _ssh(node, "cat", "--", path, capture=True)
+    try:
+        payload = json.loads(response.stdout)
+    except json.JSONDecodeError as exc:
+        raise InfraManagerError(
+            f"Файл {path} на PVE содержит некорректный JSON"
+        ) from exc
+
+    if not isinstance(payload, dict):
+        raise InfraManagerError(
+            f"Файл {path} на PVE должен содержать JSON-объект"
+        )
+    value = payload.get(key)
+    if not isinstance(value, str) or not value:
+        raise InfraManagerError(
+            f"Файл {path} на PVE не содержит непустое строковое поле {key}"
+        )
+    return value
+
+
 OPENBAO_HOST_COMMAND = Path("/usr/local/sbin/infra-manager-openbao-unseal")
 OPENBAO_HOST_LIBRARY = Path("/usr/local/lib/infra-manager/openbao_host")
 OPENBAO_HOST_CONFIG = Path("/etc/infra-manager/openbao-host.json")
