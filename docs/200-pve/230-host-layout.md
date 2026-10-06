@@ -229,6 +229,7 @@ debian13-template.ref
 ```text
 /run/lock/infra-manager-openbao-unseal.lock
 /run/lock/infra-manager-recovery.lock
+/run/lock/infra-manager-operator.lock
 ```
 
 Сам хостовый сценарий может создавать краткоживущие временные файлы на PVE под `/run/`; их имена не являются частью постоянного контракта.
