@@ -61,6 +61,12 @@ infra-manager repair
 infra-manager recover
 ~~~
 
+Данные ограниченного пользователя встроенного OpenBao UI выдаются только по явному запросу root на PVE:
+
+~~~bash
+infra-manager openbao-operator
+~~~
+
 Внутри 910 остаётся техническая команда `infra-manager-status --full`, которую операторская команда вызывает автоматически. Состав внутренних проверок и итогового экрана задаёт [`status.yaml`](status.yaml).
 
 ## Источники точных значений
