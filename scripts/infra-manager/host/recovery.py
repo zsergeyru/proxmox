@@ -32,6 +32,7 @@ OPENBAO_DIR = PVE_ONLY_DIR / "openbao"
 OPENBAO_UNSEAL_KEY = OPENBAO_DIR / "unseal.key"
 OPENBAO_SSH_ACCESS = OPENBAO_DIR / "ssh-access.json"
 OPENBAO_KV_ACCESS = OPENBAO_DIR / "kv-access.json"
+OPENBAO_OPERATOR_ACCESS = OPENBAO_DIR / "operator-access.json"
 OPENBAO_TLS_DIR = PVE_ONLY_DIR / "openbao-tls"
 OPENBAO_TLS_CA_KEY = OPENBAO_TLS_DIR / "ca.key"
 OPENBAO_TLS_CA_CERT = OPENBAO_TLS_DIR / "ca.crt"
@@ -228,6 +229,7 @@ def verify_recovery_state(*, require_approle: bool = True) -> None:
             (
                 OPENBAO_SSH_ACCESS,
                 OPENBAO_KV_ACCESS,
+                OPENBAO_OPERATOR_ACCESS,
             )
         )
         if otp_tls_initialized():
