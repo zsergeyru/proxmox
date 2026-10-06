@@ -137,6 +137,7 @@ semaphore:
     - Infra Manager
     - OpenTofu Plan
     - Build Template 9000
+    - Set Log Level
     - Deploy Guest
     - Status Guest
     - Repair Guest
