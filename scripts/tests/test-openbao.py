@@ -324,7 +324,10 @@ def test_existing_openbao_bootstraps_missing_ssh_security() -> None:
     unseal.assert_called_once_with()
     generate_root.assert_called_once_with()
     ensure_cas.assert_called_once_with("TEMP-ROOT-TOKEN")
-    configure_access.assert_called_once_with("TEMP-ROOT-TOKEN")
+    configure_access.assert_called_once_with(
+        "TEMP-ROOT-TOKEN",
+        rotate_secret_ids=False,
+    )
     configure_kv.assert_called_once_with("TEMP-ROOT-TOKEN")
     materialize.assert_called_once_with()
     publish_ca.assert_called_once_with("TEMP-ROOT-TOKEN")
