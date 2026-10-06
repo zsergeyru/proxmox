@@ -66,6 +66,7 @@ def test_status() -> None:
     with (
         patch.object(module, "load_identity", return_value=(920, "infra-manager")),
         patch.object(module, "run", side_effect=fake_run),
+        patch.object(module, "require_executable"),
         patch.object(module, "verify_guest_owned"),
         patch.object(module, "guest_running", return_value=True),
         patch.object(module, "exec_guest", side_effect=fake_exec),
