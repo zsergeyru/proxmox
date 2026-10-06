@@ -66,6 +66,7 @@ scripts/
 │       ├── guest-operation.py                # Общая точка входа пяти гостевых операций Semaphore
 │       ├── deploy-guest.py                   # Совместимая точка специальных фаз bootstrap
 │       ├── build-template.py                 # Собирает Packer-шаблон VM 9000 и запускает его проверку
+│       ├── set-log-level.py                  # Сохраняет выбранный режим вывода в настройках Semaphore
 │       ├── initialize-openbao.py             # Инициализирует и проверяет OpenBao через доверенный PVE
 │       └── sync-ssh-access.py                # Синхронизирует SSH OTP/AppRole по access.yaml
 │
@@ -111,7 +112,7 @@ scripts/
 
 ### Python-пакет `infra_manager/`
 
-`semaphore.py` — создаёт и синхронизирует проект `Proxmox Infrastructure`, ключ доступа GitHub, репозиторий, группы `OpenTofu PVE` и `Infra Manager`, а также задания Semaphore. Группа `Infra Manager` хранит общий переключатель `INFRA_LOG_LEVEL` для краткого, подробного или минимального вывода.
+`semaphore.py` — создаёт и синхронизирует проект `Proxmox Infrastructure`, ключ доступа GitHub, репозиторий, группы `OpenTofu PVE` и `Infra Manager`, а также задания Semaphore. Группа `Infra Manager` хранит общий переключатель `INFRA_LOG_LEVEL` для обычного, подробного или минимального вывода. Оператор меняет его через отдельное задание `Set Log Level` с выпадающим списком, а не ручным редактированием Variable Group.
 
 `access.py` — строит эффективные межмашинные SSH-связи из `infrastructure/security/access.yaml` и гостевых описаний.
 
