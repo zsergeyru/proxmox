@@ -3,8 +3,10 @@
 
 from __future__ import annotations
 
+import http.client
 import json
 import sys
+import threading
 from http import HTTPStatus
 from pathlib import Path
 from unittest.mock import patch
@@ -124,6 +126,133 @@ def check_queue_payload() -> None:
         fail(f"Неверный GUEST_VMID: {environment!r}")
 
 
+def _http_request(
+    server: portal_gateway.PortalActionServer,
+    method: str,
+    path: str,
+    *,
+    headers: dict[str, str] | None = None,
+) -> tuple[int, dict[str, str], str]:
+    host, port = server.server_address
+    connection = http.client.HTTPConnection(host, port, timeout=5)
+    connection.request(method, path, headers=headers or {})
+    response = connection.getresponse()
+    body = response.read().decode("utf-8", errors="replace")
+    response_headers = {key: value for key, value in response.getheaders()}
+    status = response.status
+    connection.close()
+    return status, response_headers, body
+
+
+def check_gateway_http() -> None:
+    server = portal_gateway.PortalActionServer(
+        ("127.0.0.1", 0),
+        "192.168.9.10",
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+
+    try:
+        status, _, body = _http_request(server, "GET", "/health")
+        if status != HTTPStatus.OK or body != "ok\n":
+            fail("Health шлюза Homepage должен возвращать 200")
+
+        with patch.object(
+            portal_gateway,
+            "_session_valid",
+            return_value=False,
+        ):
+            status, _, body = _http_request(
+                server,
+                "GET",
+                "/action/status?vmid=910",
+            )
+        if status != HTTPStatus.UNAUTHORIZED or "Требуется вход" not in body:
+            fail("Без сессии Semaphore шлюз должен требовать вход")
+
+        with patch.object(
+            portal_gateway,
+            "_session_valid",
+            return_value=True,
+        ):
+            status, _, body = _http_request(
+                server,
+                "GET",
+                "/action/status?vmid=910",
+                headers={"Cookie": "semaphore=session-cookie"},
+            )
+        if status != HTTPStatus.OK or "910 — infra-manager" not in body:
+            fail("GET действия должен показывать подтверждение и выбранный VMID")
+
+        host, port = server.server_address
+        same_origin = f"http://{host}:{port}"
+        with (
+            patch.object(
+                portal_gateway,
+                "_session_valid",
+                return_value=True,
+            ),
+            patch.object(
+                portal_gateway,
+                "queue_action",
+                return_value=(1, 64),
+            ) as queue,
+        ):
+            status, headers, _ = _http_request(
+                server,
+                "POST",
+                "/action/status?vmid=910",
+                headers={
+                    "Cookie": "semaphore=session-cookie",
+                    "Origin": same_origin,
+                },
+            )
+        if status != HTTPStatus.SEE_OTHER:
+            fail("Подтверждённое действие должно создать задание Semaphore")
+        if headers.get("Location") != (
+            "http://192.168.9.10:3000/project/1/history?t=64"
+        ):
+            fail("После запуска шлюз должен открыть созданное задание Semaphore")
+        queue.assert_called_once_with(
+            "status",
+            910,
+            "semaphore=session-cookie",
+        )
+
+        with (
+            patch.object(
+                portal_gateway,
+                "_session_valid",
+                return_value=True,
+            ),
+            patch.object(portal_gateway, "queue_action") as queue,
+        ):
+            status, _, _ = _http_request(
+                server,
+                "POST",
+                "/action/status?vmid=910",
+                headers={
+                    "Cookie": "semaphore=session-cookie",
+                    "Origin": "http://example.invalid",
+                },
+            )
+        if status != HTTPStatus.FORBIDDEN:
+            fail("Шлюз должен отклонять POST с другого источника")
+        queue.assert_not_called()
+
+        status, _, _ = _http_request(
+            server,
+            "GET",
+            "/action/delete?vmid=910",
+        )
+        if status != HTTPStatus.BAD_REQUEST:
+            fail("Шлюз должен отклонять действие вне белого списка")
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
 def check_rejected_task() -> None:
     with (
         patch.object(
@@ -154,6 +283,7 @@ def main() -> None:
     check_service_discovery()
     check_action_validation()
     check_queue_payload()
+    check_gateway_http()
     check_rejected_task()
     print("[ОК] Локальный портал гостей проверен")
 
