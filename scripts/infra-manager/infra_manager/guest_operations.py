@@ -18,7 +18,7 @@ from .common import (
 from .guest_catalog import GuestIdentity, deployable_guests, guest_identity, guest_management_address
 from .guest_deploy import run_deploy_guest
 from .pve import PveClient
-from .pve_host import trigger_openbao_unseal
+from .pve_host import check_infra_manager_status, trigger_openbao_unseal
 from .settings import SETTINGS
 
 GUEST_OPERATIONS: Final[tuple[str, ...]] = (
@@ -147,11 +147,12 @@ def _generic_status(
     return resource
 
 
-def _infra_manager_status(identity: GuestIdentity) -> None:
+def _infra_manager_status(
+    node: str,
+    identity: GuestIdentity,
+) -> None:
     del identity
-    from .status import check_status
-
-    check_status(full=True, quiet=False)
+    check_infra_manager_status(node)
 
 
 def _infra_manager_repair(node: str, identity: GuestIdentity) -> None:
@@ -216,9 +217,9 @@ def _run_status(
     repo_root: Path,
     identity: GuestIdentity,
 ) -> int:
-    _generic_status(client, repo_root, identity)
+    resource = _generic_status(client, repo_root, identity)
     if identity.role == SETTINGS.infra_manager_role:
-        _infra_manager_status(identity)
+        _infra_manager_status(str(resource["node"]), identity)
     return 0
 
 
