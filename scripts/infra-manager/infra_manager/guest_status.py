@@ -173,11 +173,6 @@ def _load_common_checks(identity: GuestIdentity) -> tuple[dict[str, Any], ...]:
     if not isinstance(raw, dict):
         raise InfraManagerError(f"{path}: ожидается YAML-объект")
 
-    # Внутренний формат версии 1 остаётся допустимым для технической
-    # глубокой проверки специального гостя.
-    if raw.get("schema_version") == 1:
-        return ()
-
     if raw.get("schema_version") != COMMON_STATUS_SCHEMA_VERSION:
         raise InfraManagerError(
             f"{path}: неподдерживаемая версия описания состояния"
