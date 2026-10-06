@@ -338,13 +338,13 @@ def main_test() -> None:
     if create_view.ensure_view(
         1,
         title="Guests",
-        position=0,
+        position=1,
     ) != 31:
         fail("Создание Semaphore View вернуло неверный id")
     if create_view.posts[0] != {
         "project_id": 1,
         "title": "Guests",
-        "position": 0,
+        "position": 1,
     }:
         fail("Semaphore View создаётся с неверным контрактом")
 
@@ -359,14 +359,14 @@ def main_test() -> None:
     if update_view.ensure_view(
         1,
         title="Guests",
-        position=0,
+        position=1,
     ) != 32:
         fail("Обновление Semaphore View вернуло неверный id")
     if update_view.puts[0] != {
         "id": 32,
         "project_id": 1,
         "title": "Guests",
-        "position": 0,
+        "position": 1,
     }:
         fail("Semaphore View не приводится к целевой позиции")
 
