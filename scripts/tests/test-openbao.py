@@ -1496,6 +1496,12 @@ def test_operator_policy_is_narrow_and_visible_in_ui() -> None:
         if forbidden in policy_prefix:
             fail(f"Политика оператора получила запрещённый доступ: {forbidden}")
 
+    if '"sys/internal/ui/resultant-acl"' in host.CONFIGURE_SSH_ACCESS_CODE:
+        fail(
+            "UI-specific resultant-acl не должен попадать "
+            "в служебные AppRole policy"
+        )
+
 
 def test_corrupted_operator_file_generates_new_password() -> None:
     host = load_host_module()
