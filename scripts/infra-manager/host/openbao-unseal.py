@@ -21,7 +21,7 @@ if (_HOST_MODULE_ROOT / "openbao_host").is_dir():
 else:
     sys.path.insert(0, str(_INSTALLED_HOST_MODULE_ROOT))
 
-from openbao_host.errors import OpenBaoHostError
+from openbao_host.errors import OpenBaoHostError, OpenBaoRaftInactiveError
 from openbao_host.tls import prepare_tls_material as _prepare_tls_material
 from openbao_host.snippets import (
     CHECK_KV_ACCESS_CODE,
@@ -56,6 +56,10 @@ TLS_ADDRESS = ""
 TLS_DNS_NAME = ""
 OPENBAO_URL = "http://127.0.0.1:8200"
 KEY_DIR = Path("/mnt/bindmounts/infra-manager/pve-only/openbao")
+PVE_OPENBAO_STATE_PATH = Path("/mnt/bindmounts/infra-manager/state/openbao")
+PVE_RAFT_STORAGE_PATH = PVE_OPENBAO_STATE_PATH / "raft"
+PVE_RAFT_PEERS_PATH = PVE_RAFT_STORAGE_PATH / "raft" / "peers.json"
+PVE_RAFT_RECOVERY_DIR = KEY_DIR / "raft-recovery"
 KEY_PATH = KEY_DIR / "unseal.key"
 SSH_ACCESS_PATH = KEY_DIR / "ssh-access.json"
 KV_ACCESS_PATH = KEY_DIR / "kv-access.json"
@@ -250,7 +254,7 @@ def wait_until_active(*, attempts: int = 60, delay: float = 1.0) -> dict[str, ob
         if attempt + 1 < attempts:
             time.sleep(delay)
 
-    raise OpenBaoHostError(
+    raise OpenBaoRaftInactiveError(
         "OpenBao разблокирован, но Raft-узел не стал активным"
         + (f": {last_detail}" if last_detail else "")
     )
@@ -263,6 +267,206 @@ def require_active_openbao(action: str) -> dict[str, object]:
     if status.get("sealed") is not False:
         raise OpenBaoHostError(f"OpenBao запечатан; {action} невозможна")
     return wait_until_active()
+
+
+def _verify_single_node_raft_contract() -> None:
+    """Разрешить quorum recovery только для строго одноузлового 910."""
+
+    guest = run(
+        ["pct", "config", str(VMID)],
+        capture=True,
+    ).stdout
+    lines = guest.splitlines()
+    if f"hostname: {TLS_DNS_NAME}" not in lines:
+        raise OpenBaoHostError(
+            f"LXC {VMID} не подтверждает имя infra-manager {TLS_DNS_NAME}"
+        )
+    description = next(
+        (line for line in lines if line.startswith("description: ")),
+        "",
+    )
+    if (
+        "owner=proxmox-project" not in description
+        or "role=infra-manager" not in description
+    ):
+        raise OpenBaoHostError(
+            f"LXC {VMID} не подтверждён как принадлежащий infra-manager"
+        )
+
+    config = pct_exec(
+        "cat",
+        str(CT_OPENBAO_CONFIG_PATH),
+        capture=True,
+    ).stdout
+    required = (
+        'storage "raft" {',
+        'path    = "/openbao/file/raft"',
+        'node_id = "infra-manager"',
+        'cluster_addr = "http://127.0.0.1:8201"',
+        'cluster_address = "127.0.0.1:8201"',
+    )
+    missing = [item for item in required if item not in config]
+    if missing:
+        raise OpenBaoHostError(
+            "Автоматическое восстановление Raft запрещено: "
+            "конфигурация не подтверждает одноузловой infra-manager: "
+            + ", ".join(missing)
+        )
+    forbidden = (
+        "retry_join",
+        "retry_join_as_non_voter",
+        "non_voter",
+    )
+    present = [item for item in forbidden if item in config]
+    if present:
+        raise OpenBaoHostError(
+            "Автоматическое восстановление Raft запрещено: "
+            "обнаружена многоузловая настройка: "
+            + ", ".join(present)
+        )
+
+    if not PVE_RAFT_STORAGE_PATH.is_dir():
+        raise OpenBaoHostError(
+            f"Не найден постоянный Raft-каталог: {PVE_RAFT_STORAGE_PATH}"
+        )
+    if not any(
+        item.is_file() and item.stat().st_size > 0
+        for item in PVE_RAFT_STORAGE_PATH.rglob("*")
+    ):
+        raise OpenBaoHostError("Постоянное Raft-состояние OpenBao пусто")
+
+
+def _backup_openbao_state() -> Path:
+    """Сохранить offline-копию всего постоянного OpenBao state."""
+
+    if not PVE_OPENBAO_STATE_PATH.is_dir():
+        raise OpenBaoHostError(
+            f"Не найден постоянный OpenBao state: {PVE_OPENBAO_STATE_PATH}"
+        )
+    PVE_RAFT_RECOVERY_DIR.mkdir(parents=True, exist_ok=True)
+    os.chmod(PVE_RAFT_RECOVERY_DIR, 0o700)
+
+    stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+    target = PVE_RAFT_RECOVERY_DIR / stamp
+    suffix = 0
+    while target.exists():
+        suffix += 1
+        target = PVE_RAFT_RECOVERY_DIR / f"{stamp}-{suffix}"
+
+    run(
+        [
+            "cp",
+            "-a",
+            "--reflink=auto",
+            str(PVE_OPENBAO_STATE_PATH),
+            str(target),
+        ]
+    )
+    if not target.is_dir() or not any(target.rglob("*")):
+        raise OpenBaoHostError(
+            f"Не удалось подтвердить резервную копию OpenBao: {target}"
+        )
+    return target
+
+
+def _write_single_node_peers() -> None:
+    """Записать штатный peers.json для единственного узла infra-manager."""
+
+    parent = PVE_RAFT_PEERS_PATH.parent
+    if not parent.is_dir():
+        raise OpenBaoHostError(
+            f"Не найден внутренний Raft-каталог: {parent}"
+        )
+
+    owner = parent.stat()
+    fd, temporary_name = tempfile.mkstemp(
+        prefix=".peers.",
+        dir=parent,
+        text=True,
+    )
+    temporary = Path(temporary_name)
+    try:
+        os.fchown(fd, owner.st_uid, owner.st_gid)
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            json.dump(
+                [
+                    {
+                        "id": "infra-manager",
+                        "address": "127.0.0.1:8201",
+                        "non_voter": False,
+                    }
+                ],
+                stream,
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, PVE_RAFT_PEERS_PATH)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def recover_single_node_raft() -> Path:
+    """Восстановить кворум строго одноузлового OpenBao из сохранённого state."""
+
+    _verify_single_node_raft_contract()
+    if not KEY_PATH.is_file() or KEY_PATH.stat().st_size == 0:
+        raise OpenBaoHostError(
+            "Восстановление Raft запрещено без PVE-only unseal-ключа"
+        )
+
+    log_status("[ИНФО] Остановка OpenBao для восстановления одноузлового Raft")
+    pct_exec("docker", "stop", "openbao", capture=True)
+    pct_exec(
+        "docker",
+        "rm",
+        "-f",
+        TEMP_OPENBAO_CONTAINER,
+        capture=True,
+        check=False,
+    )
+
+    backup = _backup_openbao_state()
+    log_status(f"[ОК] Резервная копия OpenBao сохранена: {backup}")
+
+    _write_single_node_peers()
+    log_status(
+        "[ИНФО] Raft peer set зафиксирован как "
+        "infra-manager@127.0.0.1:8201"
+    )
+
+    pct_exec("docker", "start", "openbao", capture=True)
+    unseal()
+
+    if PVE_RAFT_PEERS_PATH.exists():
+        raise OpenBaoHostError(
+            "OpenBao не применил peers.json после восстановления Raft; "
+            f"резервная копия: {backup}"
+        )
+
+    wait_until_active()
+    log_status("[ОК] Одноузловой Raft восстановлен, infra-manager стал active")
+    return backup
+
+
+def repair() -> None:
+    """Безопасно восстановить OpenBao, включая потерянный одноузловой quorum."""
+
+    prepare_tls_material()
+    try:
+        initialize()
+        return
+    except OpenBaoRaftInactiveError:
+        log_status(
+            "[ИНФО] Одноузловой OpenBao потерял Raft quorum; "
+            "запускается защищённое восстановление"
+        )
+
+    recover_single_node_raft()
+    initialize()
 
 
 def prepare_tls_material() -> None:
@@ -1466,6 +1670,11 @@ def main() -> int:
         help="Однократно инициализировать пустой OpenBao перед разблокировкой",
     )
     mode.add_argument(
+        "--repair",
+        action="store_true",
+        help="Восстановить OpenBao и одноузловой Raft при потере quorum",
+    )
+    mode.add_argument(
         "--prepare-tls",
         action="store_true",
         help="Подготовить TLS CA и серверный сертификат OpenBao на PVE",
@@ -1520,6 +1729,8 @@ def main() -> int:
         fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
         if args.prepare_tls:
             prepare_tls_material()
+        elif args.repair:
+            repair()
         elif args.initialize:
             prepare_tls_material()
             initialize()
