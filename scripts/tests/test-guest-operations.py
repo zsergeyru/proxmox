@@ -75,8 +75,10 @@ def check_status_operation() -> None:
             "status": "running",
         }
     )
-    if operations._run_status(client, ROOT, identity) != 0:
-        fail("Status Guest должен завершаться успешно для работающего гостя")
+    with patch.object(operations, "_infra_manager_status") as infra_status:
+        if operations._run_status(client, ROOT, identity) != 0:
+            fail("Status Guest должен завершаться успешно для работающего гостя")
+    infra_status.assert_not_called()
 
     client.resource["status"] = "stopped"
     try:
@@ -85,6 +87,21 @@ def check_status_operation() -> None:
         pass
     else:
         fail("Status Guest должен считать остановленный гость ошибкой")
+
+    infra = guest_identity(ROOT, 910)
+    infra_client = FakePveClient(
+        {
+            "vmid": 910,
+            "name": "infra-manager",
+            "type": "lxc",
+            "node": "pve",
+            "status": "running",
+        }
+    )
+    with patch.object(operations, "_infra_manager_status") as infra_status:
+        if operations._run_status(infra_client, ROOT, infra) != 0:
+            fail("Status Guest infra-manager должен завершаться успешно")
+    infra_status.assert_called_once_with("pve", infra)
 
 
 def check_repair_operation() -> None:
