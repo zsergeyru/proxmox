@@ -161,6 +161,34 @@ def check_declared_check_dispatch() -> None:
         fail("docker-проверка использует неверный контейнер")
 
 
+def check_dashboard_port() -> None:
+    identity = guest_identity(ROOT, 109)
+    resource = _resource(109, "network-gateway")
+
+    with (
+        patch.object(status, "_check_tcp") as check_tcp,
+        patch.object(status, "_run_declared_check"),
+    ):
+        node, address, _, messages = status.verify_guest_status(
+            ROOT,
+            identity,
+            resource,
+        )
+
+    if node != "pve" or address != "192.168.1.9":
+        fail("Базовый статус вернул неверную цель для панели")
+    tcp_targets = [call.args for call in check_tcp.call_args_list]
+    for expected in (
+        ("192.168.1.9", 22),
+        ("192.168.1.9", 3001),
+        ("192.168.1.9", 3000),
+    ):
+        if expected not in tcp_targets:
+            fail(f"Базовый статус не проверяет TCP {expected!r}")
+    if "Локальная панель доступна" not in messages:
+        fail("Базовый статус не сообщает о готовности локальной панели")
+
+
 def check_rendered_status() -> None:
     guest_files = {
         "/etc/network-gateway/adguard-admin.env": (
@@ -195,21 +223,35 @@ def check_rendered_status() -> None:
             "network-gateway",
             "qemu",
             "192.168.1.9",
-            ("AdGuard Home", "adguard-password"),
+            (
+                "http://192.168.1.9:3001/",
+                "AdGuard Home",
+                "adguard-password",
+            ),
         ),
         (
             410,
             "ai-control",
             "qemu",
             "192.168.4.10",
-            ("Open WebUI", "webui-password"),
+            (
+                "http://192.168.4.10:3001/",
+                "Open WebUI",
+                "webui-password",
+            ),
         ),
         (
             910,
             "infra-manager",
             "lxc",
             "192.168.9.10",
-            ("Semaphore", "semaphore-password", "OpenBao", "openbao-password"),
+            (
+                "http://192.168.9.10:3001/",
+                "Semaphore",
+                "semaphore-password",
+                "OpenBao",
+                "openbao-password",
+            ),
         ),
     )
 
@@ -289,6 +331,7 @@ def main() -> None:
     check_operator_contracts()
     check_status_definitions()
     check_declared_check_dispatch()
+    check_dashboard_port()
     check_rendered_status()
     check_secret_modes()
     print("[ОК] Единый статус гостей проверен")

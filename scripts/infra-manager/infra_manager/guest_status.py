@@ -13,7 +13,7 @@ import yaml
 
 from .common import InfraManagerError, console, require_command, run
 from .guest_catalog import GuestIdentity, guest_management_address
-from .portal import portal_definitions
+from .portal import local_portal_definition, portal_definitions
 from .pve_host import read_pve_json_value, sign_ssh_client_key
 from .settings import PATHS
 
@@ -336,8 +336,15 @@ def verify_guest_status(
     _check_tcp(address, 22)
     messages = ["SSH доступен"]
 
-    services = tuple(portal_definitions(repo_root, identity))
+    dashboard = local_portal_definition(repo_root, identity)
     checked_ports: set[int] = set()
+    if dashboard is not None:
+        dashboard_port = dashboard["port"]
+        _check_tcp(address, dashboard_port)
+        checked_ports.add(dashboard_port)
+        messages.append("Локальная панель доступна")
+
+    services = tuple(portal_definitions(repo_root, identity))
     for service in services:
         port = service.get("port")
         if isinstance(port, int) and port not in checked_ports:
@@ -429,6 +436,9 @@ def show_guest_status(
     print(f"  {'Роль:':<12}{identity.role or '-'}")
     print(f"  {'Адрес:':<12}{address}")
     print(f"  {'Узел:':<12}{node}")
+    dashboard = local_portal_definition(repo_root, identity)
+    if dashboard is not None:
+        print(f"  {'Панель:':<12}{dashboard['url']}")
 
     if project_branch is not None or project_revision is not None:
         print("\nПроект")
