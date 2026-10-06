@@ -180,6 +180,11 @@ def check_guest_summary() -> None:
                 returncode=0,
                 stdout="feature/bootstrap-990\n",
             )
+        if "for-each-ref" in argv:
+            return SimpleNamespace(
+                returncode=0,
+                stdout="origin/feature/bootstrap-990\n",
+            )
         if argv[-3:] == ["rev-parse", "--short", "HEAD"]:
             return SimpleNamespace(
                 returncode=0,
@@ -224,6 +229,37 @@ def check_guest_summary() -> None:
         fail("Итог развёртывания не подтверждает настройку Ansible")
     if "Semaphore" in output:
         fail("Обычный итог гостя не должен содержать сведения о Semaphore")
+
+
+def check_project_branch_after_semaphore_branch_switch() -> None:
+    """Semaphore может оставить имя local branch main после pull другой ветки."""
+
+    def fake_run(argv: list[str], **_kwargs: object) -> SimpleNamespace:
+        if argv[-2:] == ["branch", "--show-current"]:
+            return SimpleNamespace(returncode=0, stdout="main\n")
+        if "for-each-ref" in argv:
+            return SimpleNamespace(
+                returncode=0,
+                stdout="origin/feature/guest-portals\n",
+            )
+        fail(f"Неожиданная Git-команда: {argv!r}")
+        raise AssertionError
+
+    with (
+        patch.object(guest_deploy_module, "run", side_effect=fake_run),
+        patch.object(
+            guest_deploy_module.SETTINGS,
+            "project_branch",
+            return_value="main",
+        ),
+    ):
+        branch = guest_deploy_module._project_branch(ROOT)
+
+    if branch != "feature/guest-portals":
+        fail(
+            "Фактическая ветка задания должна определяться по remote ref HEAD, "
+            "а не по устаревшему имени локальной ветки"
+        )
 
 
 def check_infra_manager_self_update_path_after_vmid_change() -> None:
@@ -1229,6 +1265,7 @@ def main_test() -> None:
     check_opentofu_state_status()
     check_opentofu_provider_mirror()
     check_guest_summary()
+    check_project_branch_after_semaphore_branch_switch()
     check_infra_manager_self_update_path_after_vmid_change()
     check_openbao_machine_identity_preparation()
     check_openbao_target_only_preparation()
