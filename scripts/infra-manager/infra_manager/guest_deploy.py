@@ -617,12 +617,11 @@ def _configure_guest_os(
     _ensure_ssh_host_key(context.paths.known_hosts, context.address)
     console.info(f"Настройка ОС {context.vmid}")
 
-    if provision_phase != "base":
-        repo_root = context.paths.guest_dir.parents[2]
-        console.detail("Обновление PVE-only служебного контура")
-        install_openbao_host_support(context.node, repo_root)
-        if self_update:
-            install_recovery_host_support(context.node, repo_root)
+    repo_root = context.paths.guest_dir.parents[2]
+    console.detail("Обновление PVE-only служебного контура")
+    install_openbao_host_support(context.node, repo_root)
+    if self_update:
+        install_recovery_host_support(context.node, repo_root)
 
     if not PATHS.ssh_client_ca_public_key.is_file():
         console.info(
