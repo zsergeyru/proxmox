@@ -47,16 +47,38 @@
     group: root
     mode: "0644"
 
-- name: Подготовить пустые дополнительные настройки Homepage
+- name: Сформировать ссылки управления гостем
+  ansible.builtin.command:
+    argv:
+      - python3
+      - -m
+      - infra_manager
+      - portal-bookmarks
+      - --guest-vmid
+      - "{{ provision.guest_vmid | string }}"
+  environment:
+    PYTHONPATH: "{{ project_root }}/scripts/infra-manager"
+  delegate_to: localhost
+  become: false
+  register: portal_bookmarks
+  changed_when: false
+  failed_when: false
+
+- name: Установить ссылки управления Homepage
   ansible.builtin.copy:
-    dest: "{{ portal_config_dir }}/{{ item }}"
+    dest: "{{ portal_config_dir }}/bookmarks.yaml"
+    owner: root
+    group: root
+    mode: "0644"
+    content: "{{ portal_bookmarks.stdout if portal_bookmarks.rc == 0 else '[]\n' }}"
+
+- name: Подготовить пустые виджеты Homepage
+  ansible.builtin.copy:
+    dest: "{{ portal_config_dir }}/widgets.yaml"
     owner: root
     group: root
     mode: "0644"
     content: "[]\n"
-  loop:
-    - bookmarks.yaml
-    - widgets.yaml
 
 - name: Сформировать запуск Homepage
   ansible.builtin.template:
