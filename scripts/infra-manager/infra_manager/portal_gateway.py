@@ -250,7 +250,7 @@ class PortalActionHandler(BaseHTTPRequestHandler):
         )
         return False
 
-    def do_GET(self) -> None:  # noqa: N802
+    def do_GET(self) -> None:
         if self.path == "/health":
             body = b"ok\n"
             self.send_response(HTTPStatus.OK)
@@ -291,7 +291,7 @@ class PortalActionHandler(BaseHTTPRequestHandler):
             ),
         )
 
-    def do_POST(self) -> None:  # noqa: N802
+    def do_POST(self) -> None:
         try:
             operation, vmid = self._parse_action()
             _validate_action(operation, vmid)
