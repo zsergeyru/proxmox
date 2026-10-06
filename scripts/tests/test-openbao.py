@@ -610,6 +610,90 @@ def test_existing_openbao_recovers_broken_kv_approle() -> None:
     revoke_root.assert_called_once_with("TEMP-ROOT-TOKEN")
 
 
+def test_existing_openbao_reconciles_operator_policy() -> None:
+    host = load_host_module()
+    with tempfile.TemporaryDirectory() as tmp:
+        key_path = Path(tmp) / "unseal.key"
+        access_path = Path(tmp) / "ssh-access.json"
+        kv_access_path = Path(tmp) / "kv-access.json"
+        operator_access_path = Path(tmp) / "operator-access.json"
+        key_path.write_text("existing-key\n", encoding="utf-8")
+        access_path.write_text("{}\n", encoding="utf-8")
+        kv_access_path.write_text("{}\n", encoding="utf-8")
+        operator_access_path.write_text(
+            '{"username":"operator","password":"test-password-012345678901234567890"}\n',
+            encoding="utf-8",
+        )
+
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(patch.object(host, "KEY_PATH", key_path))
+            stack.enter_context(patch.object(host, "SSH_ACCESS_PATH", access_path))
+            stack.enter_context(patch.object(host, "KV_ACCESS_PATH", kv_access_path))
+            stack.enter_context(
+                patch.object(host, "OPERATOR_ACCESS_PATH", operator_access_path)
+            )
+            stack.enter_context(
+                patch.object(host, "ssh_cas_ready", return_value=True)
+            )
+            stack.enter_context(
+                patch.object(
+                    host,
+                    "ssh_access_credentials_complete",
+                    return_value=True,
+                )
+            )
+            stack.enter_context(
+                patch.object(host, "client_ca_published", return_value=True)
+            )
+            check_ssh = stack.enter_context(
+                patch.object(host, "check_ssh_access")
+            )
+            check_kv = stack.enter_context(
+                patch.object(host, "check_kv_access")
+            )
+            stack.enter_context(
+                patch.object(
+                    host,
+                    "check_operator_access",
+                    side_effect=host.OpenBaoHostError(
+                        "operator lacks required UI ACL"
+                    ),
+                )
+            )
+            generate_root = stack.enter_context(
+                patch.object(
+                    host,
+                    "generate_temporary_root_token",
+                    return_value="TEMP-ROOT-TOKEN",
+                )
+            )
+            stack.enter_context(patch.object(host, "ensure_ssh_cas"))
+            configure_operator = stack.enter_context(
+                patch.object(host, "configure_operator_access")
+            )
+            stack.enter_context(
+                patch.object(host, "materialize_runtime_secrets")
+            )
+            stack.enter_context(patch.object(host, "publish_client_ca"))
+            stack.enter_context(patch.object(host, "publish_host_ca"))
+            stack.enter_context(
+                patch.object(host, "ensure_client_signing_role")
+            )
+            stack.enter_context(
+                patch.object(host, "ensure_host_signing_role")
+            )
+            revoke_root = stack.enter_context(
+                patch.object(host, "revoke_temporary_root_token")
+            )
+            host.ensure_existing_openbao_ssh()
+
+    if check_ssh.call_count != 2 or check_kv.call_count != 2:
+        fail("Здоровые SSH/KV доступы должны подтверждаться после admin-окна")
+    generate_root.assert_called_once_with()
+    configure_operator.assert_called_once_with("TEMP-ROOT-TOKEN")
+    revoke_root.assert_called_once_with("TEMP-ROOT-TOKEN")
+
+
 def test_existing_openbao_bootstraps_missing_ssh_security() -> None:
     host = load_host_module()
     with tempfile.TemporaryDirectory() as tmp:
@@ -1473,6 +1557,8 @@ def test_operator_policy_is_narrow_and_visible_in_ui() -> None:
 
     if "/v1/sys/internal/ui/mounts" not in check:
         fail("Проверка оператора не подтверждает видимость userpass в UI")
+    if '"sys/internal/ui/resultant-acl": {"read"}' not in check:
+        fail("Проверка оператора не требует ACL, необходимый встроенному UI")
     for forbidden in (
         '"sys/storage/raft/configuration"',
         '"sys/init"',
@@ -1594,6 +1680,7 @@ def main() -> None:
     test_single_node_raft_recovery_rejects_multi_node_config()
     test_existing_openbao_skips_root_when_ready()
     test_existing_openbao_recovers_broken_kv_approle()
+    test_existing_openbao_reconciles_operator_policy()
     test_existing_openbao_bootstraps_missing_ssh_security()
     test_ssh_ca_reconcile_requires_initial_admin_token()
     test_raw_root_generation_uses_unseal_key_via_stdin()
