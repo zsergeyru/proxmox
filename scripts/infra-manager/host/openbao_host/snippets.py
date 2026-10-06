@@ -434,6 +434,9 @@ config_policy = json.dumps(
             "sys/capabilities-self": {
                 "capabilities": ["update"],
             },
+            "sys/internal/ui/resultant-acl": {
+                "capabilities": ["read"],
+            },
         }
     },
     separators=(",", ":"),
