@@ -88,6 +88,23 @@ def build_parser() -> argparse.ArgumentParser:
     )
     portal_bookmarks.set_defaults(handler="portal-bookmarks")
 
+    portal_services = subparsers.add_parser(
+        "portal-services",
+        help="сформировать services.yaml Homepage для гостя",
+    )
+    portal_services.add_argument(
+        "--guest-vmid",
+        type=int,
+        required=True,
+        help="VMID гостя",
+    )
+    portal_services.add_argument(
+        "--output",
+        type=str,
+        help="записать services.yaml в файл вместо stdout",
+    )
+    portal_services.set_defaults(handler="portal-services")
+
     portal_gateway = subparsers.add_parser(
         "portal-gateway",
         help="запустить защищённый переход к операциям Semaphore",
@@ -166,6 +183,17 @@ def main(argv: Sequence[str] | None = None) -> int:
                 write_portal_bookmarks(vmid, Path(args.output))
             else:
                 print(render_portal_bookmarks(vmid), end="")
+            return 0
+
+        if args.handler == "portal-services":
+            from pathlib import Path
+
+            from .portal import render_portal_services, write_portal_services
+
+            if args.output:
+                write_portal_services(args.guest_vmid, Path(args.output))
+            else:
+                print(render_portal_services(args.guest_vmid), end="")
             return 0
 
         if args.handler == "portal-gateway":
