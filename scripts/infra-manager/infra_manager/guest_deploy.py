@@ -30,6 +30,7 @@ from .pve_host import (
     install_recovery_host_support,
     issue_openbao_machine_credentials,
     read_openbao_tls_ca,
+    show_openbao_operator_credentials,
     sign_ssh_client_key,
     sign_ssh_host_key,
 )
@@ -946,6 +947,8 @@ def run_deploy_guest(
             "активация новой управляющей среды назначена "
             "после завершения задания Semaphore"
         )
+        print("\nOpenBao UI")
+        show_openbao_operator_credentials(context.node)
         return 0
 
     console.info("Инициализация OpenTofu")
@@ -1026,4 +1029,7 @@ def run_deploy_guest(
         )
     else:
         _show_guest_summary(repo_root, context)
+        if is_infra_manager:
+            print("\nOpenBao UI")
+            show_openbao_operator_credentials(context.node)
     return 0
