@@ -121,6 +121,15 @@ def local_portal_definition(
             "portal.local.port должен быть числом от 1 до 65535"
         )
 
+    trusted_ca = local.get("trusted_ca")
+    if trusted_ca is not None and (
+        not isinstance(trusted_ca, str) or not trusted_ca.startswith("/")
+    ):
+        raise InfraManagerError(
+            f"{identity.directory / 'provision.yaml'}: "
+            "portal.local.trusted_ca должен быть абсолютным путём"
+        )
+
     address = guest_management_address(repo_root, identity)
     if not address:
         raise InfraManagerError(
@@ -133,6 +142,7 @@ def local_portal_definition(
         "port": port,
         "path": "/",
         "url": f"http://{address}:{port}/",
+        "trusted_ca": trusted_ca,
     }
 
 
@@ -333,8 +343,7 @@ def portal_services(vmid: int, target: str) -> list[dict[str, Any]]:
         icon = portal.get("icon")
         if isinstance(icon, str):
             service["icon"] = icon
-        if portal["scheme"] == "http":
-            service["siteMonitor"] = url
+        service["siteMonitor"] = url
         result.append({name: service})
 
     return result
