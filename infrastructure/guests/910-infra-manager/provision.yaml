@@ -97,6 +97,7 @@ paths:
   semaphore_data: /var/lib/infra-manager/semaphore
   semaphore_persistent_data: /mnt/persistent-state/semaphore
   opentofu_data: /var/lib/infra-manager/opentofu
+  opentofu_provider_mirror: /var/lib/infra-manager/opentofu/provider-mirror
   opentofu_persistent_state_dir: /mnt/persistent-state/opentofu/state
   openbao_data: /var/lib/persistent/openbao
   opentofu_state: /var/lib/infra-manager/opentofu/state/proxmox.tfstate
