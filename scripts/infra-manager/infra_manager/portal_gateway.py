@@ -122,6 +122,49 @@ def _validate_action(operation: str, vmid: int):
     return identity
 
 
+def queue_action(operation: str, vmid: int, cookie: str) -> tuple[int, int]:
+    """Создать штатное задание Semaphore от имени текущего пользователя."""
+
+    _validate_action(operation, vmid)
+    project_id, template_id = _semaphore_objects(operation)
+    status, raw = _semaphore_request(
+        "POST",
+        f"/project/{project_id}/tasks",
+        cookie=cookie,
+        payload={
+            "template_id": template_id,
+            "environment": json.dumps(
+                {"GUEST_VMID": str(vmid)},
+                separators=(",", ":"),
+            ),
+            "secret": "{}",
+            "params": {},
+            "message": f"Homepage: guest {vmid}",
+        },
+    )
+    if status != HTTPStatus.CREATED:
+        detail = raw.decode("utf-8", errors="replace").strip()
+        raise InfraManagerError(
+            f"Semaphore отклонил задание: HTTP {status}: "
+            f"{detail or '(пустой ответ)'}"
+        )
+
+    try:
+        task = json.loads(raw.decode("utf-8"))
+        task_id = int(task["id"])
+    except (
+        UnicodeDecodeError,
+        json.JSONDecodeError,
+        KeyError,
+        TypeError,
+        ValueError,
+    ) as exc:
+        raise InfraManagerError(
+            "Semaphore создал задание, но не вернул его номер"
+        ) from exc
+    return project_id, task_id
+
+
 def _page(title: str, body: str) -> bytes:
     return f"""<!doctype html>
 <html lang="ru">
@@ -275,50 +318,19 @@ class PortalActionHandler(BaseHTTPRequestHandler):
                 return
 
         try:
-            project_id, template_id = _semaphore_objects(operation)
-            status, raw = _semaphore_request(
-                "POST",
-                f"/project/{project_id}/tasks",
-                cookie=self._cookie(),
-                payload={
-                    "template_id": template_id,
-                    "environment": json.dumps(
-                        {"GUEST_VMID": str(vmid)},
-                        separators=(",", ":"),
-                    ),
-                    "secret": "{}",
-                    "params": {},
-                    "message": f"Homepage: guest {vmid}",
-                },
+            project_id, task_id = queue_action(
+                operation,
+                vmid,
+                self._cookie(),
             )
         except InfraManagerError as exc:
             self._send_html(
-                HTTPStatus.SERVICE_UNAVAILABLE,
-                "Не удалось создать задание",
-                f"<h1>Не удалось создать задание</h1><p>{html.escape(str(exc))}</p>",
-            )
-            return
-
-        if status != HTTPStatus.CREATED:
-            detail = raw.decode("utf-8", errors="replace").strip()
-            self._send_html(
-                status if 400 <= status < 600 else HTTPStatus.BAD_GATEWAY,
-                "Semaphore отклонил задание",
-                (
-                    "<h1>Semaphore отклонил задание</h1>"
-                    f"<p>HTTP {status}: {html.escape(detail or '(пустой ответ)')}</p>"
-                ),
-            )
-            return
-
-        try:
-            task = json.loads(raw.decode("utf-8"))
-            task_id = int(task["id"])
-        except (UnicodeDecodeError, json.JSONDecodeError, KeyError, TypeError, ValueError):
-            self._send_html(
                 HTTPStatus.BAD_GATEWAY,
-                "Некорректный ответ Semaphore",
-                "<h1>Semaphore создал задание, но не вернул его номер.</h1>",
+                "Не удалось создать задание",
+                (
+                    "<h1>Не удалось создать задание</h1>"
+                    f"<p>{html.escape(str(exc))}</p>"
+                ),
             )
             return
 
