@@ -327,6 +327,15 @@ def check_recovery_contour(node: str) -> None:
     )
 
 
+def check_infra_manager_status(node: str) -> None:
+    """Выполнить штатную операторскую проверку infra-manager на PVE."""
+    _ssh(
+        node,
+        str(OPERATOR_HOST_COMMAND),
+        "status",
+    )
+
+
 def cleanup_transition_state(node: str) -> None:
     """Удалить проверенные переходные файловые secret-источники на PVE."""
     _ssh(
