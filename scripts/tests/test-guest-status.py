@@ -233,10 +233,15 @@ def check_rendered_status() -> None:
                         _resource(vmid, name, kind),
                         full=True,
                         show_secrets=True,
+                        project_branch="feature/unified-guest-status",
+                        project_revision="abc1234",
                     )
             text = output.getvalue()
             for expected in (
                 f"Гость {vmid} — {name}",
+                "Проект",
+                "feature/unified-guest-status",
+                "abc1234",
                 *expected_values,
             ):
                 if expected not in text:
