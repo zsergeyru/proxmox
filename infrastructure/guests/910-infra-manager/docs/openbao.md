@@ -967,6 +967,24 @@ rootfs/etc/systemd/system/infra-manager-openbao-startup-unseal.service.j2
 
 Unseal key внутрь 910 не передаётся.
 
+### PVE-only helper
+
+Команда OpenBao на PVE является единым комплектом:
+
+```text
+/usr/local/sbin/infra-manager-openbao-unseal
+/usr/local/lib/infra-manager/openbao_host/
+    __init__.py
+    errors.py
+    snippets.py
+    tls.py
+/etc/infra-manager/openbao-host.json
+```
+
+Нельзя обновлять только исполняемый файл без соответствующего пакета `openbao_host`. Перед первым обращением `Deploy Guest` к OpenBao для подписи временного SSH-ключа весь комплект должен быть приведён к версии выполняемой рабочей копии проекта. Только после этого допускается `--sign-client-key`, host signing и запуск Ansible.
+
+Такой порядок позволяет автоматически восстановить PVE после незавершённого старого обновления, когда исполняемый файл и библиотека оказались разных версий.
+
 ### Обычный запуск
 
 Compose должен запускать OpenBao:
