@@ -295,7 +295,17 @@ INFRA_LOG_LEVEL
 normal
 ```
 
-Повторная синхронизация должна сохранять вручную выбранное допустимое значение.
+Повторная синхронизация должна сохранять выбранное допустимое значение.
+
+Оператор меняет его штатным заданием `Set Log Level` в группе `Infrastructure`. В форме запуска отображается список:
+
+| Название | Сохраняемое значение |
+|---|---|
+| `Обычный` | `normal` |
+| `Подробный` | `verbose` |
+| `Тихий` | `quiet` |
+
+Выбранное значение записывается в существующую Variable Group `Infra Manager` через API Semaphore и применяется к следующим заданиям. Задание не изменяет Git, OpenBao, PVE или другие секреты.
 
 ### Группы шаблонов
 
@@ -303,9 +313,9 @@ normal
 
 | View | Позиция | Содержимое |
 |---|---:|---|
-| `Guests` | 0 | `Deploy Guest`, `Status Guest`, `Repair Guest`, `Test Guest`, `Sync Guest` |
-| `Infrastructure` | 1 | `OpenTofu Plan`, `Build Template 9000` |
-| `Security` | 2 | `Sync SSH Access` |
+| `Guests` | 1 | `Deploy Guest`, `Status Guest`, `Repair Guest`, `Test Guest`, `Sync Guest` |
+| `Infrastructure` | 2 | `OpenTofu Plan`, `Build Template 9000`, `Set Log Level` |
+| `Security` | 3 | `Sync SSH Access` |
 
 Views являются частью декларативной настройки проекта. `semaphore-project` должен создавать отсутствующие Views, исправлять их позиции и записывать соответствующий `view_id` в каждый управляемый шаблон. Ручные дополнительные Views не удаляются.
 
@@ -317,6 +327,7 @@ Semaphore должен содержать как минимум:
 |---|---|
 | `OpenTofu Plan` | показать изменения инфраструктуры |
 | `Build Template 9000` | собрать базовый шаблон Debian |
+| `Set Log Level` | выбрать постоянный режим вывода для следующих заданий |
 | `Deploy Guest` | полностью привести выбранный гость к `guest.yaml + provision.yaml` |
 | `Status Guest` | проверить состояние выбранного гостя без изменений |
 | `Repair Guest` | выполнить только безопасные повторяемые исправления |
