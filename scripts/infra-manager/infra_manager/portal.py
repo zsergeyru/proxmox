@@ -23,6 +23,7 @@ PORTAL_ACTIONS = (
     ("repair", "Исправить", "RP"),
 )
 PORTAL_TARGETS = frozenset({"local", "home"})
+PORTAL_DEFAULT_PORT = 3001
 
 
 def _gateway_base_url() -> str:
@@ -88,6 +89,50 @@ def _load_provision(identity: GuestIdentity) -> dict[str, Any]:
             f"{path}: guest_vmid не соответствует guest.yaml"
         )
     return data
+
+
+def local_portal_definition(
+    repo_root: Path,
+    identity: GuestIdentity,
+) -> dict[str, Any] | None:
+    """Вернуть описание локальной панели Homepage гостя."""
+
+    provision = _load_provision(identity)
+    portal = provision.get("portal")
+    if not isinstance(portal, dict):
+        return None
+
+    local = portal.get("local")
+    if not isinstance(local, dict) or local.get("enabled") is not True:
+        return None
+
+    title = local.get("title")
+    if not isinstance(title, str) or not title.strip():
+        raise InfraManagerError(
+            f"{identity.directory / 'provision.yaml'}: "
+            "portal.local.title должен быть непустой строкой"
+        )
+
+    port = local.get("port", PORTAL_DEFAULT_PORT)
+    if isinstance(port, bool) or not isinstance(port, int) or not 0 < port < 65536:
+        raise InfraManagerError(
+            f"{identity.directory / 'provision.yaml'}: "
+            "portal.local.port должен быть числом от 1 до 65535"
+        )
+
+    address = guest_management_address(repo_root, identity)
+    if not address:
+        raise InfraManagerError(
+            f"Для гостя {identity.vmid} не определён административный IPv4"
+        )
+
+    return {
+        "name": title.strip(),
+        "scheme": "http",
+        "port": port,
+        "path": "/",
+        "url": f"http://{address}:{port}/",
+    }
 
 
 def _walk_portals(value: Any, source: str = "provision") -> list[tuple[str, dict]]:
