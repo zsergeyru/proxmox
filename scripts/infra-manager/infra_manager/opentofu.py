@@ -2,9 +2,15 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import platform
+import re
 import sys
+import tempfile
+import urllib.error
+import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -18,6 +24,11 @@ CA_BUNDLE = PATHS.ca_bundle
 STATE_DIR = PATHS.opentofu_dir
 STATE_FILE = PATHS.opentofu_state_dir / "proxmox.tfstate"
 GUEST_STATE_FILE = PATHS.opentofu_input
+PROVIDER_MIRROR_DIR = STATE_DIR / "provider-mirror"
+PROXMOX_PROVIDER_SOURCE = "registry.opentofu.org/bpg/proxmox"
+PROXMOX_PROVIDER_RELEASE = (
+    "https://github.com/bpg/terraform-provider-proxmox/releases/download"
+)
 
 
 @dataclass(frozen=True)
@@ -209,6 +220,160 @@ def prepare_workspace(
         env=_opentofu_env(),
         payload=payload,
     )
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _proxmox_provider_lock(
+    opentofu_dir: Path,
+) -> tuple[str, frozenset[str]]:
+    lock_file = opentofu_dir / ".terraform.lock.hcl"
+    if not lock_file.is_file():
+        raise InfraManagerError(
+            f"Не найден lock-файл OpenTofu: {lock_file}"
+        )
+    text = lock_file.read_text(encoding="utf-8")
+    block_match = re.search(
+        r'provider\s+"'
+        + re.escape(PROXMOX_PROVIDER_SOURCE)
+        + r'"\s*\{(?P<body>.*?)\n\}',
+        text,
+        re.DOTALL,
+    )
+    if block_match is None:
+        raise InfraManagerError(
+            "Lock-файл OpenTofu не содержит bpg/proxmox"
+        )
+    body = block_match.group("body")
+    version_match = re.search(
+        r'^\s*version\s*=\s*"([^"]+)"',
+        body,
+        re.MULTILINE,
+    )
+    if version_match is None:
+        raise InfraManagerError(
+            "Lock-файл OpenTofu не содержит версию bpg/proxmox"
+        )
+    hashes = frozenset(
+        match.lower()
+        for match in re.findall(r'"zh:([0-9a-fA-F]{64})"', body)
+    )
+    if not hashes:
+        raise InfraManagerError(
+            "Lock-файл OpenTofu не содержит SHA256 bpg/proxmox"
+        )
+    return version_match.group(1), hashes
+
+
+def _provider_platform() -> tuple[str, str]:
+    system = platform.system().lower()
+    machine = platform.machine().lower()
+    arch = {
+        "x86_64": "amd64",
+        "amd64": "amd64",
+        "aarch64": "arm64",
+        "arm64": "arm64",
+    }.get(machine)
+    if system != "linux" or arch is None:
+        raise InfraManagerError(
+            f"Неподдерживаемая платформа провайдера: {system}/{machine}"
+        )
+    return system, arch
+
+
+def _download_text(url: str) -> str:
+    try:
+        with urllib.request.urlopen(url, timeout=30) as response:
+            return response.read().decode("utf-8")
+    except (
+        urllib.error.URLError,
+        urllib.error.HTTPError,
+        UnicodeDecodeError,
+        OSError,
+    ) as exc:
+        raise InfraManagerError(
+            f"Не удалось загрузить {url}: {exc}"
+        ) from exc
+
+
+def _download_file(url: str, target: Path) -> None:
+    try:
+        with urllib.request.urlopen(url, timeout=60) as response:
+            with target.open("wb") as stream:
+                while True:
+                    chunk = response.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    stream.write(chunk)
+    except (urllib.error.URLError, urllib.error.HTTPError, OSError) as exc:
+        target.unlink(missing_ok=True)
+        raise InfraManagerError(
+            f"Не удалось загрузить {url}: {exc}"
+        ) from exc
+
+
+def _prepare_proxmox_provider_mirror(opentofu_dir: Path) -> Path:
+    """Подготовить проверенный локальный пакет bpg/proxmox без Registry."""
+
+    version, locked_hashes = _proxmox_provider_lock(opentofu_dir)
+    system, arch = _provider_platform()
+    filename = (
+        f"terraform-provider-proxmox_{version}_{system}_{arch}.zip"
+    )
+    mirror = (
+        PROVIDER_MIRROR_DIR
+        / "registry.opentofu.org"
+        / "bpg"
+        / "proxmox"
+    )
+    package = mirror / filename
+    if package.is_file() and _sha256(package) in locked_hashes:
+        return PROVIDER_MIRROR_DIR
+
+    release_base = f"{PROXMOX_PROVIDER_RELEASE}/v{version}"
+    sums_url = (
+        f"{release_base}/terraform-provider-proxmox_{version}_SHA256SUMS"
+    )
+    sums = _download_text(sums_url)
+    expected = None
+    for line in sums.splitlines():
+        checksum, separator, name = line.strip().partition("  ")
+        if separator and name == filename:
+            expected = checksum.lower()
+            break
+    if expected is None or expected not in locked_hashes:
+        raise InfraManagerError(
+            f"SHA256 {filename} отсутствует в доверенном lock-файле"
+        )
+
+    mirror.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        prefix=f".{filename}.",
+        dir=mirror,
+        delete=False,
+    ) as temporary:
+        temporary_path = Path(temporary.name)
+    try:
+        _download_file(
+            f"{release_base}/{filename}",
+            temporary_path,
+        )
+        actual = _sha256(temporary_path)
+        if actual != expected:
+            raise InfraManagerError(
+                f"SHA256 {filename} не совпадает: {actual}"
+            )
+        temporary_path.replace(package)
+    finally:
+        temporary_path.unlink(missing_ok=True)
+
+    return PROVIDER_MIRROR_DIR
 
 
 def _init(opentofu_dir: Path, env: dict[str, str]) -> None:
