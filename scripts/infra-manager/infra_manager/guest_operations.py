@@ -176,12 +176,12 @@ def _infra_manager_test(identity: GuestIdentity) -> None:
 
 def _infra_manager_sync(identity: GuestIdentity) -> None:
     del identity
-    from .semaphore import configure_project
+    from .semaphore import sync_project_from_task
 
     console.info(
         "Синхронизация Semaphore из Git-версии текущего задания"
     )
-    configure_project(branch=SETTINGS.project_branch())
+    sync_project_from_task(branch=SETTINGS.project_branch())
     console.ok("Конфигурация Semaphore синхронизирована")
 
 
