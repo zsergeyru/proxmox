@@ -1,87 +1,204 @@
 $schema: https://json-schema.org/draft/2020-12/schema
 $title: Guest status definition
-type: object
-additionalProperties: false
-required:
-  - schema_version
-  - guest_vmid
-  - title
-  - short_ready_message
-  - ready_message
-  - layout
-  - checks
-  - data
-  - sections
-properties:
-  schema_version:
-    const: 1
-  guest_vmid:
-    type: integer
-    minimum: 100
-    maximum: 999
-  title:
-    type: string
-    minLength: 1
-  short_ready_message:
-    type: string
-    minLength: 1
-  ready_message:
-    type: string
-    minLength: 1
-  layout:
+oneOf:
+  - $ref: '#/$defs/legacyStatus'
+  - $ref: '#/$defs/commonStatus'
+
+$defs:
+  legacyStatus:
     type: object
     additionalProperties: false
-    required: [separator, width]
+    required:
+      - schema_version
+      - guest_vmid
+      - title
+      - short_ready_message
+      - ready_message
+      - layout
+      - checks
+      - data
+      - sections
     properties:
-      separator:
+      schema_version:
+        const: 1
+      guest_vmid:
+        type: integer
+        minimum: 100
+        maximum: 999
+      title:
         type: string
         minLength: 1
-        maxLength: 4
-      width:
-        type: integer
-        minimum: 20
-        maximum: 120
-  checks:
-    type: array
-    minItems: 1
-    items:
-      type: object
-      additionalProperties: false
-      required: [type, message]
-      properties:
-        type:
-          enum:
-            - runtime
-            - portal
-            - openbao
-            - semaphore
-            - runtime_tools
-            - pve_access
-        message:
-          type: string
-          minLength: 1
-  data:
+      short_ready_message:
+        type: string
+        minLength: 1
+      ready_message:
+        type: string
+        minLength: 1
+      layout:
+        type: object
+        additionalProperties: false
+        required: [separator, width]
+        properties:
+          separator:
+            type: string
+            minLength: 1
+            maxLength: 4
+          width:
+            type: integer
+            minimum: 20
+            maximum: 120
+      checks:
+        type: array
+        minItems: 1
+        items:
+          type: object
+          additionalProperties: false
+          required: [type, message]
+          properties:
+            type:
+              enum:
+                - runtime
+                - portal
+                - openbao
+                - semaphore
+                - runtime_tools
+                - pve_access
+            message:
+              type: string
+              minLength: 1
+      data:
+        type: object
+        minProperties: 1
+        additionalProperties:
+          $ref: '#/$defs/dataSource'
+      sections:
+        type: array
+        minItems: 1
+        items:
+          type: object
+          additionalProperties: false
+          required: [title, fields]
+          properties:
+            title:
+              type: string
+              minLength: 1
+            fields:
+              type: array
+              minItems: 1
+              items:
+                $ref: '#/$defs/field'
+
+  commonStatus:
     type: object
-    minProperties: 1
-    additionalProperties:
-      $ref: '#/$defs/dataSource'
-  sections:
-    type: array
-    minItems: 1
-    items:
-      type: object
-      additionalProperties: false
-      required: [title, fields]
-      properties:
-        title:
-          type: string
-          minLength: 1
-        fields:
-          type: array
-          minItems: 1
-          items:
-            $ref: '#/$defs/field'
-$defs:
+    additionalProperties: false
+    required:
+      - schema_version
+      - guest_vmid
+      - checks
+    properties:
+      schema_version:
+        const: 2
+      guest_vmid:
+        type: integer
+        minimum: 100
+        maximum: 999
+      checks:
+        type: array
+        minItems: 1
+        items:
+          oneOf:
+            - $ref: '#/$defs/dockerCheck'
+            - $ref: '#/$defs/fileCheck'
+            - $ref: '#/$defs/httpCheck'
+            - $ref: '#/$defs/localStatusCheck'
+            - $ref: '#/$defs/systemdCheck'
+            - $ref: '#/$defs/tcpCheck'
+
+  dockerCheck:
+    type: object
+    additionalProperties: false
+    required: [type, message, container]
+    properties:
+      type:
+        const: docker
+      message:
+        type: string
+        minLength: 1
+      container:
+        type: string
+        minLength: 1
+
+  fileCheck:
+    type: object
+    additionalProperties: false
+    required: [type, message, path]
+    properties:
+      type:
+        const: file
+      message:
+        type: string
+        minLength: 1
+      path:
+        type: string
+        pattern: '^/'
+
+  httpCheck:
+    type: object
+    additionalProperties: false
+    required: [type, message, url]
+    properties:
+      type:
+        const: http
+      message:
+        type: string
+        minLength: 1
+      url:
+        type: string
+        minLength: 1
+
+  localStatusCheck:
+    type: object
+    additionalProperties: false
+    required: [type, message, command]
+    properties:
+      type:
+        const: local_status
+      message:
+        type: string
+        minLength: 1
+      command:
+        type: string
+        pattern: '^/'
+
+  systemdCheck:
+    type: object
+    additionalProperties: false
+    required: [type, message, unit]
+    properties:
+      type:
+        const: systemd
+      message:
+        type: string
+        minLength: 1
+      unit:
+        type: string
+        minLength: 1
+
+  tcpCheck:
+    type: object
+    additionalProperties: false
+    required: [type, message, port]
+    properties:
+      type:
+        const: tcp
+      message:
+        type: string
+        minLength: 1
+      port:
+        type: integer
+        minimum: 1
+        maximum: 65535
+
   dataSource:
     oneOf:
       - type: object
@@ -116,6 +233,7 @@ $defs:
             pattern: '^/'
           sensitive:
             type: boolean
+
   field:
     type: object
     additionalProperties: false
