@@ -23,8 +23,10 @@ from infra_manager.semaphore import (
     PROJECT_REPO,
     SemaphoreClient,
     find_unique_by_name,
+    find_unique_by_title,
     require_unique_by_name,
     semaphore_templates,
+    semaphore_views,
 )
 from infra_manager.settings import SETTINGS
 from infra_manager.status import (
@@ -110,6 +112,33 @@ def main_test() -> None:
     }
     if actual_templates != expected_templates:
         fail(f"Неожиданный состав шаблонов Semaphore: {actual_templates!r}")
+
+    expected_views = [
+        ("Guests", 0),
+        ("Infrastructure", 1),
+        ("Security", 2),
+    ]
+    actual_views = [
+        (spec.title, spec.position)
+        for spec in semaphore_views()
+    ]
+    if actual_views != expected_views:
+        fail(f"Неожиданный состав Views Semaphore: {actual_views!r}")
+
+    expected_template_views = {
+        "Deploy Guest": "Guests",
+        "Status Guest": "Guests",
+        "Repair Guest": "Guests",
+        "Test Guest": "Guests",
+        "Sync Guest": "Guests",
+        "OpenTofu Plan": "Infrastructure",
+        "Build Template 9000": "Infrastructure",
+        "Sync SSH Access": "Security",
+    }
+    if {
+        spec.name: spec.view for spec in SEMAPHORE_TEMPLATES
+    } != expected_template_views:
+        fail("Шаблоны Semaphore распределены по Views неверно")
 
     operation_templates = {
         "Deploy Guest": "deploy",
@@ -285,6 +314,62 @@ def main_test() -> None:
     if SETTINGS.infra_manager_env_name != "Infra Manager":
         fail("Имя Variable Group Infra Manager изменилось")
 
+    class ViewClient(SemaphoreClient):
+        def __init__(self, existing):
+            self.existing = existing
+            self.posts = []
+            self.puts = []
+
+        def get(self, path: str, *, auth: str | None = None):
+            del path, auth
+            return [] if self.existing is None else [self.existing]
+
+        def post(self, path: str, payload, *, auth: str | None = None):
+            del path, auth
+            self.posts.append(payload)
+            return {"id": 31}
+
+        def put(self, path: str, payload):
+            del path
+            self.puts.append(payload)
+            return None
+
+    create_view = ViewClient(existing=None)
+    if create_view.ensure_view(
+        1,
+        title="Guests",
+        position=0,
+    ) != 31:
+        fail("Создание Semaphore View вернуло неверный id")
+    if create_view.posts[0] != {
+        "project_id": 1,
+        "title": "Guests",
+        "position": 0,
+    }:
+        fail("Semaphore View создаётся с неверным контрактом")
+
+    update_view = ViewClient(
+        existing={
+            "id": 32,
+            "project_id": 1,
+            "title": "Guests",
+            "position": 7,
+        }
+    )
+    if update_view.ensure_view(
+        1,
+        title="Guests",
+        position=0,
+    ) != 32:
+        fail("Обновление Semaphore View вернуло неверный id")
+    if update_view.puts[0] != {
+        "id": 32,
+        "project_id": 1,
+        "title": "Guests",
+        "position": 0,
+    }:
+        fail("Semaphore View не приводится к целевой позиции")
+
     class TemplateClient(SemaphoreClient):
         def __init__(self, existing):
             self.existing = existing
@@ -314,6 +399,7 @@ def main_test() -> None:
         playbook="job.py",
         branch="feature/test",
         arguments="[]",
+        view_id=31,
     ) != 22:
         fail("Создание шаблона Semaphore вернуло неверный id")
     created = create_template.posts[0]
@@ -321,6 +407,8 @@ def main_test() -> None:
         fail("Шаблон Semaphore должен выполняться как Python")
     if created.get("environment_ids") != [8, 10]:
         fail("Шаблон Semaphore должен получать обе Variable Group")
+    if created.get("view_id") != 31:
+        fail("Шаблон Semaphore должен быть привязан к View")
     if created.get("allow_override_args_in_task") is not False:
         fail("Шаблон Semaphore не должен разрешать замену аргументов")
     if created.get("allow_override_branch_in_task") is not False:
@@ -346,6 +434,7 @@ def main_test() -> None:
         playbook="job.py",
         branch="feature/test",
         arguments="[]",
+        view_id=31,
         survey_vars=survey,
     )
     if survey_template.posts[0].get("survey_vars") != list(survey):
@@ -360,6 +449,7 @@ def main_test() -> None:
         playbook="job.py",
         branch="feature/test",
         arguments="[]",
+        view_id=31,
     ) != 23:
         fail("Обновление шаблона Semaphore вернуло неверный id")
     if update_template.puts[0].get("id") != 23:
@@ -405,6 +495,28 @@ def main_test() -> None:
         pass
     else:
         fail("Некорректный INFRA_LOG_LEVEL должен отклоняться")
+
+    view = find_unique_by_title(
+        [{"id": 31, "title": "Guests"}],
+        "Guests",
+        "View",
+    )
+    if view is None or view.get("id") != 31:
+        fail("find_unique_by_title не вернул ожидаемый View")
+
+    try:
+        find_unique_by_title(
+            [
+                {"id": 31, "title": "Guests"},
+                {"id": 32, "title": "Guests"},
+            ],
+            "Guests",
+            "View",
+        )
+    except InfraManagerError:
+        pass
+    else:
+        fail("find_unique_by_title разрешил дубликаты")
 
     one = find_unique_by_name(
         [{"id": 1, "name": "proxmox"}],
@@ -466,6 +578,11 @@ def main_test() -> None:
             {"id": 8, "name": SETTINGS.opentofu_env_name},
             {"id": 10, "name": SETTINGS.infra_manager_env_name},
         ),
+        views=(
+            {"id": 31, "title": "Guests", "position": 0},
+            {"id": 32, "title": "Infrastructure", "position": 1},
+            {"id": 33, "title": "Security", "position": 2},
+        ),
         templates=tuple(
             {
                 "name": spec.name,
@@ -473,6 +590,11 @@ def main_test() -> None:
                 "app": spec.app,
                 "playbook": spec.playbook,
                 "arguments": spec.arguments,
+                "view_id": {
+                    "Guests": 31,
+                    "Infrastructure": 32,
+                    "Security": 33,
+                }[spec.view],
                 "survey_vars": [dict(item) for item in spec.survey_vars],
                 "environment_ids": [8, 10],
             }
@@ -496,6 +618,8 @@ def main_test() -> None:
                 return [{"id": 9, "name": "proxmox", **repository}]
             if "/environment?" in path:
                 return list(semaphore_snapshot.environments)
+            if path.endswith("/views"):
+                return list(semaphore_snapshot.views)
             if "/templates?" in path:
                 return list(semaphore_snapshot.templates)
             raise AssertionError(f"Неожиданный конечный адрес Semaphore API: {path}")
@@ -513,10 +637,11 @@ def main_test() -> None:
         repository={"id": 9, "name": "proxmox", **repository},
         branches=("main", branch),
         environments=semaphore_snapshot.environments,
+        views=semaphore_snapshot.views,
         templates=semaphore_snapshot.templates,
     ):
         fail("load_semaphore_snapshot неверно собрал состояние проекта")
-    if len(snapshot_client.paths) != 4:
+    if len(snapshot_client.paths) != 5:
         fail("Снимок Semaphore должен читать каждую коллекцию ровно один раз")
 
     status_file = (
