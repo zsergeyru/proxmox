@@ -263,6 +263,17 @@ def test_openbao_host_support() -> None:
         )
 
 
+    with patch.object(module, "_ssh") as mocked:
+        module.repair_openbao_on_host("pve")
+        mocked.assert_called_once_with(
+            "pve",
+            "/usr/local/sbin/infra-manager-openbao-unseal",
+            "--repair",
+            "--log-level",
+            "normal",
+        )
+
+
 def test_openbao_status_checks() -> None:
     calls: list[tuple[str, ...]] = []
 
