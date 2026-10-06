@@ -50,7 +50,8 @@
 ├── openbao/
 │   ├── unseal.key
 │   ├── ssh-access.json
-│   └── kv-access.json
+│   ├── kv-access.json
+│   └── operator-access.json
 └── recovery/
     └── github_proxmox_repo_ed25519
 ```
@@ -60,6 +61,7 @@
 | `/mnt/bindmounts/infra-manager/pve-only/openbao/unseal.key` | ключ снятия блокировки OpenBao |
 | `/mnt/bindmounts/infra-manager/pve-only/openbao/ssh-access.json` | служебные RoleID/SecretID для операций SSH-подписи OpenBao |
 | `/mnt/bindmounts/infra-manager/pve-only/openbao/kv-access.json` | служебные RoleID/SecretID для чтения KV и узкого обновления Semaphore token |
+| `/mnt/bindmounts/infra-manager/pve-only/openbao/operator-access.json` | логин и текущий пароль человека для ограниченного входа в OpenBao UI |
 | `/mnt/bindmounts/infra-manager/pve-only/recovery/github_proxmox_repo_ed25519` | аварийная PVE-only копия read-only GitHub Deploy Key для восстановления проекта до запуска 910/OpenBao |
 
 Весь каталог `pve-only/` остаётся только на PVE и в 910 не монтируется.
@@ -148,6 +150,7 @@ mp1: /mnt/bindmounts/infra-manager/state,mp=/mnt/persistent-state
 | `pve-only/openbao/unseal.key` | `0600` | `0:0` |
 | `pve-only/openbao/ssh-access.json` | `0600` | `0:0` |
 | `pve-only/openbao/kv-access.json` | `0600` | `0:0` |
+| `pve-only/openbao/operator-access.json` | `0600` | `0:0` |
 | `pve-only/recovery/github_proxmox_repo_ed25519` | `0600` | `0:0` |
 | `access/pve-host/root_ed25519` | `0600` | `101001:100000` |
 | `access/pve-host/root_ed25519.pub` | `0644` | `101001:100000` |
