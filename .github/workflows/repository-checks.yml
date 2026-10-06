@@ -90,6 +90,9 @@ jobs:
       - name: Run guest deployment checks
         run: python scripts/tests/test-guest-deploy.py
 
+      - name: Run guest operation checks
+        run: python scripts/tests/test-guest-operations.py
+
       - name: Run PVE host access checks
         run: python scripts/tests/test-pve-host.py
 
