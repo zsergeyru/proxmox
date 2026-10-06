@@ -33,6 +33,7 @@ from openbao_host.snippets import (
     CONFIGURE_SSH_ACCESS_CODE,
     CONFIGURE_SSH_CA_CODE,
     GENERATE_ROOT_CODE,
+    HEALTH_CODE,
     INIT_CODE,
     ISSUE_MACHINE_CREDENTIALS_CODE,
     MATERIALIZE_RUNTIME_SECRETS_CODE,
@@ -203,6 +204,65 @@ def read_status(*, wait: bool) -> dict[str, object]:
         "OpenBao в infra-manager не стал доступен"
         + (f": {last_error}" if last_error else "")
     )
+
+
+
+def wait_until_active(*, attempts: int = 60, delay: float = 1.0) -> dict[str, object]:
+    """Дождаться, когда разблокированный Raft-узел станет активным."""
+
+    last_detail = ""
+    for attempt in range(attempts):
+        result = pct_exec(
+            "python3",
+            "-c",
+            HEALTH_CODE,
+            capture=True,
+            check=False,
+        )
+        if result.returncode == 0:
+            try:
+                payload = json.loads(result.stdout)
+            except json.JSONDecodeError:
+                last_detail = "некорректный JSON health"
+            else:
+                if isinstance(payload, dict):
+                    status = payload.get("http_status")
+                    body = payload.get("body")
+                    if (
+                        status == 200
+                        and isinstance(body, dict)
+                        and body.get("initialized") is True
+                        and body.get("sealed") is False
+                        and body.get("standby") is not True
+                    ):
+                        return body
+                    last_detail = (
+                        f"HTTP {status}, standby="
+                        f"{body.get('standby') if isinstance(body, dict) else '?'}"
+                    )
+                else:
+                    last_detail = "некорректный health-ответ"
+        else:
+            last_detail = (result.stderr or "").strip() or (
+                f"код {result.returncode}"
+            )
+
+        if attempt + 1 < attempts:
+            time.sleep(delay)
+
+    raise OpenBaoHostError(
+        "OpenBao разблокирован, но Raft-узел не стал активным"
+        + (f": {last_detail}" if last_detail else "")
+    )
+
+
+def require_active_openbao(action: str) -> dict[str, object]:
+    """Проверить unseal и дождаться активного узла перед служебной операцией."""
+
+    status = read_status(wait=False)
+    if status.get("sealed") is not False:
+        raise OpenBaoHostError(f"OpenBao запечатан; {action} невозможна")
+    return wait_until_active()
 
 
 def prepare_tls_material() -> None:
@@ -462,7 +522,8 @@ def unseal() -> None:
         log_detail("[ИНФО] OpenBao ещё не инициализирован")
         return
     if not bool(status["sealed"]):
-        log_status("[ОК] OpenBao уже разблокирован")
+        wait_until_active()
+        log_status("[ОК] OpenBao уже разблокирован и активен")
         return
     if not KEY_PATH.is_file() or KEY_PATH.stat().st_size == 0:
         raise OpenBaoHostError(
@@ -503,7 +564,8 @@ def unseal() -> None:
     finally:
         pct_exec("rm", "-f", str(CT_KEY_PATH), check=False)
 
-    log_status("[ОК] OpenBao разблокирован")
+    wait_until_active()
+    log_status("[ОК] OpenBao разблокирован и активен")
 
 
 def _revoke_root_token(token: str) -> None:
@@ -1462,15 +1524,11 @@ def main() -> int:
             prepare_tls_material()
             initialize()
         elif args.sign_client_key:
-            status = read_status(wait=False)
-            if status.get("sealed") is not False:
-                raise OpenBaoHostError("OpenBao запечатан; подпись SSH невозможна")
+            require_active_openbao("подпись SSH")
             public_key = __import__("sys").stdin.read()
             print(sign_client_public_key(public_key))
         elif args.sign_host_key:
-            status = read_status(wait=False)
-            if status.get("sealed") is not False:
-                raise OpenBaoHostError("OpenBao запечатан; подпись SSH невозможна")
+            require_active_openbao("подпись SSH")
             request_payload = json.loads(__import__("sys").stdin.read())
             if not isinstance(request_payload, dict):
                 raise OpenBaoHostError("Некорректный запрос подписи SSH-сервера")
@@ -1492,32 +1550,20 @@ def main() -> int:
             )
             print(sign_host_public_key(public_key, principals))
         elif args.sync_otp_contract:
-            status = read_status(wait=False)
-            if status.get("sealed") is not False:
-                raise OpenBaoHostError(
-                    "OpenBao запечатан; синхронизация SSH OTP невозможна"
-                )
+            require_active_openbao("синхронизация SSH OTP")
             payload = json.loads(__import__("sys").stdin.read())
             sources = payload.get("sources") if isinstance(payload, dict) else None
             if not isinstance(sources, list):
                 raise OpenBaoHostError("Не передан OTP-контракт")
             sync_otp_contract(sources)
         elif args.check_ssh_access:
-            status = read_status(wait=False)
-            if status.get("sealed") is not False:
-                raise OpenBaoHostError(
-                    "OpenBao запечатан; проверка SSH-доступов невозможна"
-                )
+            require_active_openbao("проверка SSH-доступов")
             check_ssh_access()
             log_status(
                 "[ОК] Служебные SSH-доступы, ssh-otp и auth/machine подтверждены"
             )
         elif args.issue_machine_credentials:
-            status = read_status(wait=False)
-            if status.get("sealed") is not False:
-                raise OpenBaoHostError(
-                    "OpenBao запечатан; выдача машинной идентичности невозможна"
-                )
+            require_active_openbao("выдача машинной идентичности")
             payload = json.loads(__import__("sys").stdin.read())
             vmid = payload.get("vmid") if isinstance(payload, dict) else None
             if not isinstance(vmid, int) or vmid <= 0:
@@ -1529,17 +1575,11 @@ def main() -> int:
                 )
             )
         elif args.check_kv:
-            status = read_status(wait=False)
-            if status.get("sealed") is not False:
-                raise OpenBaoHostError("OpenBao запечатан; проверка KV невозможна")
+            require_active_openbao("проверка KV")
             check_kv_access()
             log_status("[ОК] KV v2 и ограниченные AppRole подтверждены")
         elif args.update_semaphore_api_token:
-            status = read_status(wait=False)
-            if status.get("sealed") is not False:
-                raise OpenBaoHostError(
-                    "OpenBao запечатан; обновление Semaphore token невозможно"
-                )
+            require_active_openbao("обновление Semaphore token")
             update_semaphore_api_token(__import__("sys").stdin.read())
         else:
             unseal()
