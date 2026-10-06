@@ -1,6 +1,11 @@
 schema_version: 1
 guest_vmid: 410
 
+portal:
+  local:
+    enabled: true
+    title: Управление ИИ
+
 system:
   distribution: debian
   version: "13"
@@ -56,6 +61,13 @@ ai_control:
     container_name: open-webui
     port: 4100
     admin_email: admin@ai-control.local
+    portal:
+      name: Open WebUI
+      scheme: http
+      port: 4100
+      targets:
+        - local
+        - home
 
   paths:
     root: /opt/ai-control
