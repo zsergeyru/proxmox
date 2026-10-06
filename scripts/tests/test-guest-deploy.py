@@ -26,6 +26,7 @@ from infra_manager.guest_deploy import (
     _build_guest_plan,
     _find_guest_directory,
     _reconcile_guest_infrastructure,
+    _show_guest_summary,
     _validate_pve_and_state,
 )
 from infra_manager.opentofu import OpenTofuWorkspace
@@ -158,6 +159,78 @@ def check_opentofu_state_status() -> None:
                 fail("Ошибка чтения существующего состояния была скрыта")
 
 
+def check_guest_summary() -> None:
+    context = DeploymentContext(
+        client=SimpleNamespace(),
+        vmid=410,
+        name="ai-control",
+        node="pve",
+        kind="vm",
+        features=(),
+        template_vmid=9000,
+        address="192.168.9.41",
+        target='proxmox_virtual_environment_vm.guest["410"]',
+        workspace=SimpleNamespace(),
+        paths=SimpleNamespace(),
+    )
+
+    def git_result(argv: list[str], **_kwargs: object) -> SimpleNamespace:
+        if argv[-2:] == ["branch", "--show-current"]:
+            return SimpleNamespace(
+                returncode=0,
+                stdout="feature/bootstrap-990\n",
+            )
+        if "for-each-ref" in argv:
+            return SimpleNamespace(
+                returncode=0,
+                stdout="origin/feature/bootstrap-990\n",
+            )
+        if argv[-3:] == ["rev-parse", "--short", "HEAD"]:
+            return SimpleNamespace(
+                returncode=0,
+                stdout="abc1234\n",
+            )
+        fail(f"Неожиданная Git-команда итогового вывода: {argv}")
+        raise AssertionError
+
+    ok_messages: list[str] = []
+    with (
+        patch.object(
+            guest_deploy_module,
+            "run",
+            side_effect=git_result,
+        ),
+        patch("builtins.print") as mocked_print,
+        patch.object(
+            guest_deploy_module,
+            "console",
+            SimpleNamespace(ok=ok_messages.append),
+        ),
+    ):
+        _show_guest_summary(ROOT, context)
+
+    output = "\n".join(
+        str(call.args[0]) if call.args else ""
+        for call in mocked_print.call_args_list
+    )
+    for expected in (
+        "Гость 410 ai-control готов",
+        "Тип:     VM",
+        "Адрес:   192.168.9.41",
+        "Узел:    pve",
+        "Ветка:   feature/bootstrap-990",
+        "Версия:  abc1234",
+        "Развёртывание завершено без ошибок",
+    ):
+        if expected not in output:
+            fail(f"Итог развёртывания не содержит: {expected}")
+
+    if "Настройка ОС через Ansible завершена" not in ok_messages:
+        fail("Итог развёртывания не подтверждает настройку Ansible")
+    if "Semaphore" in output:
+        fail("Обычный итог гостя не должен содержать сведения о Semaphore")
+
+
 def check_project_branch_after_semaphore_branch_switch() -> None:
     """Semaphore может оставить имя local branch main после pull другой ветки."""
 
@@ -279,6 +352,10 @@ def check_infra_manager_self_update_path_after_vmid_change() -> None:
             ),
             patch.object(
                 guest_deploy_module,
+                "show_openbao_operator_credentials",
+            ) as show_operator,
+            patch.object(
+                guest_deploy_module,
                 "prepare_workspace",
                 side_effect=AssertionError(
                     "Самообновление infra-manager не должно готовить OpenTofu workspace"
@@ -300,6 +377,7 @@ def check_infra_manager_self_update_path_after_vmid_change() -> None:
             if guest_deploy_module.run_deploy_guest(root, 920) != 0:
                 fail("Самообновление infra-manager с VMID 920 должно завершаться успешно")
 
+    show_operator.assert_called_once_with("pve")
     if validated != [920]:
         fail("Самообновление должно проверить существующий объект infra-manager")
     if access_calls != [
@@ -1188,6 +1266,7 @@ def main_test() -> None:
     check_pve_host_support_before_signing()
     check_opentofu_state_status()
     check_opentofu_provider_mirror()
+    check_guest_summary()
     check_project_branch_after_semaphore_branch_switch()
     check_infra_manager_self_update_path_after_vmid_change()
     check_openbao_machine_identity_preparation()
