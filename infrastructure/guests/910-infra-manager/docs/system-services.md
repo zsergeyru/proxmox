@@ -138,8 +138,8 @@ WantedBy=multi-user.target
 5. при `sealed=true` разблокировать OpenBao, а при `sealed=false` продолжить без повторной разблокировки;
 6. подтвердить `initialized=true, sealed=false`;
 7. восстановить рабочие секреты;
-8. проверить обязательные функции OpenBao, включая оба SSH CA, `ssh-otp` и `auth/machine`;
-9. проверить TLS-вход для SSH OTP;
+8. проверить обязательные функции OpenBao, включая оба SSH CA, `ssh-otp`, `auth/machine` и ограниченный `userpass` оператора;
+9. проверить TLS-вход для SSH OTP и встроенного UI;
 10. завершиться ошибкой, если целевое состояние не достигнуто.
 
 `sealed=false` является обязательной частью рабочего состояния OpenBao, но не основанием завершать startup-службу до восстановления секретов и остальных проверок.
@@ -170,6 +170,7 @@ systemctl start infra-manager-openbao-startup-unseal.service
 infra-manager status
 infra-manager repair
 infra-manager recover
+infra-manager openbao-operator
 ```
 
 Она устанавливается как:
@@ -182,7 +183,8 @@ infra-manager recover
 
 - `status` ничего не изменяет: проверяет PVE-only аварийный контур, объект infra-manager и полный внутренний status 910;
 - `repair` разрешает только повторяемые безопасные действия: запуск существующего 910, Docker, восстановление OpenBao на прежнем Raft, материализацию секретов, запуск управляющей среды и синхронизацию Semaphore;
-- `recover` сначала проверяет сохранность обязательного состояния, восстанавливает bootstrap Git-доступ и только затем запускает штатный bootstrap в режиме восстановления.
+- `recover` сначала проверяет сохранность обязательного состояния, восстанавливает bootstrap Git-доступ и только затем запускает штатный bootstrap в режиме восстановления;
+- `openbao-operator` по явному запросу root показывает URL, логин и пароль ограниченного пользователя OpenBao UI; вариант `--rotate` меняет пароль.
 
 `repair` не должен удалять Raft, создавать новое пустое состояние OpenTofu, менять SSH CA из-за отсутствия прежнего состояния или пересоздавать 910. Если безопасного исправления недостаточно, команда завершается ошибкой и предлагает `infra-manager recover`.
 
@@ -276,7 +278,8 @@ pct exec 910 -- infra-manager-status --full
 - `openbao`;
 - `infra-runtime`;
 - состояние OpenBao;
-- TLS-вход OpenBao для OTP;
+- TLS-вход OpenBao для OTP и UI;
+- вход ограниченного оператора OpenBao;
 - Semaphore;
 - OpenTofu, Ansible и Packer;
 - PVE-доступ;
