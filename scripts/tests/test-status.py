@@ -1066,10 +1066,13 @@ def main_test() -> None:
         fail("status не проверяет healthcheck шлюза Homepage")
 
     tls_run = Mock(
-        return_value=SimpleNamespace(
-            returncode=0,
-            stdout='{"initialized": true, "sealed": false}',
-        )
+        side_effect=[
+            SimpleNamespace(
+                returncode=0,
+                stdout='{"initialized": true, "sealed": false}',
+            ),
+            SimpleNamespace(returncode=0, stdout=""),
+        ]
     )
     with (
         patch.object(status_module, "required_file") as require_tls_ca,
@@ -1086,11 +1089,22 @@ def main_test() -> None:
     ):
         status_module._check_openbao_tls()
     require_tls_ca.assert_called_once_with(status_module.OPENBAO_TLS_CA)
-    tls_argv = tls_run.call_args.args[0]
-    if str(status_module.OPENBAO_TLS_CA) not in tls_argv:
-        fail("TLS-проверка OpenBao не использует доверенный CA")
-    if "https://192.168.9.10:8202/v1/sys/health" not in tls_argv:
+    tls_calls = [call.args[0] for call in tls_run.call_args_list]
+    if not all(
+        str(status_module.OPENBAO_TLS_CA) in argv
+        for argv in tls_calls
+    ):
+        fail("TLS-проверки OpenBao не используют доверенный CA")
+    if not any(
+        "https://192.168.9.10:8202/v1/sys/health" in argv
+        for argv in tls_calls
+    ):
         fail("TLS-проверка OpenBao не обращается к машинному входу :8202")
+    if not any(
+        "https://192.168.9.10:8202/ui/" in argv
+        for argv in tls_calls
+    ):
+        fail("Полный status не проверяет встроенный интерфейс OpenBao")
 
     values = {
         "address": "192.168.9.10",
