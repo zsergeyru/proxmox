@@ -39,6 +39,7 @@ from openbao_host.snippets import (
     PREPARE_GENERATE_ROOT_CONFIG_CODE,
     READ_CLIENT_CA_CODE,
     READ_HOST_CA_CODE,
+    RECONCILE_KV_ACCESS_CODE,
     REVOKE_ROOT_CODE,
     SIGN_CLIENT_KEY_CODE,
     SIGN_HOST_KEY_CODE,
@@ -372,6 +373,31 @@ def configure_kv_access(root_token: str) -> None:
     write_kv_access_credentials(credentials)
     check_kv_access()
     log_detail("[ОК] KV v2 и ограниченный доступ к рабочим секретам настроены")
+
+
+def reconcile_kv_access(root_token: str) -> None:
+    """Восстановить служебные KV AppRole без изменения KV-данных."""
+
+    result = pct_exec(
+        "python3",
+        "-c",
+        RECONCILE_KV_ACCESS_CODE,
+        capture=True,
+        input_text=root_token,
+    )
+    try:
+        credentials = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise OpenBaoHostError(
+            "OpenBao вернул некорректные восстановленные данные доступа к KV"
+        ) from exc
+    if not isinstance(credentials, dict):
+        raise OpenBaoHostError(
+            "OpenBao вернул некорректные восстановленные данные доступа к KV"
+        )
+    write_kv_access_credentials(credentials)
+    check_kv_access()
+    log_status("[ОК] Служебный доступ к KV восстановлен")
 
 
 def materialize_runtime_secrets() -> None:
@@ -1039,7 +1065,11 @@ def check_ssh_access() -> None:
         )
 
 
-def configure_ssh_access(root_token: str) -> None:
+def configure_ssh_access(
+    root_token: str,
+    *,
+    rotate_secret_ids: bool = False,
+) -> None:
     existing_credentials: dict[str, object] = {}
     if SSH_ACCESS_PATH.exists():
         existing_credentials = read_ssh_access_credentials(allow_legacy=True)
@@ -1052,6 +1082,7 @@ def configure_ssh_access(root_token: str) -> None:
             {
                 "root_token": root_token,
                 "existing_credentials": existing_credentials,
+                "rotate_secret_ids": rotate_secret_ids,
             },
             separators=(",", ":"),
         ),
@@ -1213,32 +1244,57 @@ finally:
 
 
 def ensure_existing_openbao_ssh() -> None:
+    ssh_access_broken = False
+    kv_access_broken = False
+
     if (
         ssh_cas_ready()
         and ssh_access_credentials_complete()
         and KV_ACCESS_PATH.is_file()
         and client_ca_published()
     ):
-        check_ssh_access()
-        check_kv_access()
-        materialize_runtime_secrets()
-        publish_host_ca()
-        ensure_client_signing_role()
-        ensure_host_signing_role()
-        log_detail("[ОК] SSH-центры, KV v2 и служебные доступы OpenBao уже готовы")
-        return
+        try:
+            check_ssh_access()
+        except OpenBaoHostError:
+            ssh_access_broken = True
+        try:
+            check_kv_access()
+        except OpenBaoHostError:
+            kv_access_broken = True
+
+        if not ssh_access_broken and not kv_access_broken:
+            materialize_runtime_secrets()
+            publish_host_ca()
+            ensure_client_signing_role()
+            ensure_host_signing_role()
+            log_detail(
+                "[ОК] SSH-центры, KV v2 и служебные доступы OpenBao уже готовы"
+            )
+            return
+
+        log_status(
+            "[ИНФО] Служебный AppRole OpenBao требует восстановления"
+        )
 
     root_token = generate_temporary_root_token()
     try:
         ensure_ssh_cas(root_token)
-        if ssh_access_credentials_complete():
+
+        if ssh_access_credentials_complete() and not ssh_access_broken:
             check_ssh_access()
         else:
-            configure_ssh_access(root_token)
-        if KV_ACCESS_PATH.is_file():
+            configure_ssh_access(
+                root_token,
+                rotate_secret_ids=ssh_access_broken,
+            )
+
+        if KV_ACCESS_PATH.is_file() and not kv_access_broken:
             check_kv_access()
+        elif KV_ACCESS_PATH.is_file():
+            reconcile_kv_access(root_token)
         else:
             configure_kv_access(root_token)
+
         materialize_runtime_secrets()
         publish_client_ca(root_token)
         publish_host_ca()
@@ -1491,9 +1547,8 @@ def main() -> int:
             if (
                 status.get("initialized") is True
                 and status.get("sealed") is False
-                and KV_ACCESS_PATH.is_file()
             ):
-                materialize_runtime_secrets()
+                ensure_existing_openbao_ssh()
     return 0
 
 
