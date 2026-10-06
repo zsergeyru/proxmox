@@ -20,26 +20,8 @@ from infra_manager.common import (
 )
 from infra_manager.guest_catalog import guest_identity
 from infra_manager.guest_deploy import run_deploy_guest
+from infra_manager.guest_operations import extract_survey_vmid
 from infra_manager.settings import SETTINGS
-
-
-def _extract_survey_vmid(argv: list[str]) -> tuple[list[str], int | None]:
-    """Извлечь GUEST_VMID, который Semaphore передаёт как survey-переменную."""
-
-    remaining: list[str] = []
-    values: list[str] = []
-    for item in argv:
-        if item.startswith("GUEST_VMID="):
-            values.append(item.split("=", 1)[1])
-        else:
-            remaining.append(item)
-    if len(values) > 1:
-        raise InfraManagerError("GUEST_VMID передан более одного раза")
-    if not values:
-        return remaining, None
-    if not values[0].isdigit() or int(values[0]) <= 0:
-        raise InfraManagerError("GUEST_VMID должен быть положительным VMID")
-    return remaining, int(values[0])
 
 
 def main() -> int:
@@ -77,7 +59,7 @@ def main() -> int:
         ),
     )
     try:
-        cli_args, survey_vmid = _extract_survey_vmid(sys.argv[1:])
+        cli_args, survey_vmid = extract_survey_vmid(sys.argv[1:])
     except InfraManagerError as exc:
         parser.error(str(exc))
     args = parser.parse_args(cli_args)
