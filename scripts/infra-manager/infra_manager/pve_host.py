@@ -387,24 +387,6 @@ def check_openbao_kv(node: str) -> None:
     )
 
 
-def show_openbao_operator_credentials(node: str) -> None:
-    """Показать действующие данные входа OpenBao UI через PVE-only."""
-    result = _ssh(
-        node,
-        str(OPENBAO_HOST_COMMAND),
-        "--show-operator-credentials",
-        "--log-level",
-        "quiet",
-        capture=True,
-    )
-    output = result.stdout.strip()
-    if not output:
-        raise InfraManagerError(
-            "PVE/OpenBao не вернул данные входа оператора"
-        )
-    print(output)
-
-
 def read_pve_json_value(node: str, path: str, key: str) -> str:
     """Прочитать строковое значение из защищённого JSON на PVE."""
 
