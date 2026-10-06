@@ -86,6 +86,8 @@ grep -Fq '"status"' "$PVE_OPERATOR" \
     || die "PVE-команда infra-manager должна поддерживать status"
 grep -Fq '"repair"' "$PVE_OPERATOR" \
     || die "PVE-команда infra-manager должна поддерживать repair"
+grep -Fq '"openbao-operator"' "$PVE_OPERATOR" \
+    || die "PVE-команда infra-manager должна выдавать operator credentials OpenBao"
 grep -Fq '"recover"' "$PVE_OPERATOR" \
     || die "PVE-команда infra-manager должна поддерживать recover"
 grep -Fq 'install_openbao_host_support(context.node, repo_root)' "$PY_GUEST_DEPLOY" \
@@ -142,6 +144,16 @@ grep -Fq 'SSH_ACCESS_PATH = KEY_DIR / "ssh-access.json"' "$OPENBAO_HOST" \
     || die "Служебные SSH-доступы OpenBao должны храниться только в pve-only"
 grep -Fq 'KV_ACCESS_PATH = KEY_DIR / "kv-access.json"' "$OPENBAO_HOST" \
     || die "Служебный доступ к KV должен храниться только в pve-only"
+grep -Fq 'OPERATOR_ACCESS_PATH = KEY_DIR / "operator-access.json"' "$OPENBAO_HOST" \
+    || die "Учётные данные оператора OpenBao должны храниться только в pve-only"
+grep -RFq 'infra-operator' "$OPENBAO_HOST_PACKAGE" \
+    || die "OpenBao должен иметь отдельную policy infra-operator"
+grep -RFq '/v1/sys/auth/userpass' "$OPENBAO_HOST_PACKAGE" \
+    || die "OpenBao должен включать userpass для входа оператора"
+grep -RFq '"listing_visibility": "unauth"' "$OPENBAO_HOST_PACKAGE" \
+    || die "userpass должен быть виден на странице входа OpenBao UI"
+grep -RFq '"sys/storage/raft/configuration"' "$OPENBAO_HOST_PACKAGE" \
+    || die "Проверка оператора должна подтверждать отсутствие Raft-доступа"
 grep -Fq 'KV_MOUNT = "infra-secrets"' "$OPENBAO_HOST" \
     || die "OpenBao должен использовать отдельный mount рабочих секретов"
 grep -RFq '"options": {"version": "2"}' "$OPENBAO_HOST_PACKAGE" \
@@ -249,6 +261,8 @@ grep -Fq 'infra-manager-openbao-startup-unseal "$PVE_NODE"' "$ACTIVATE_RUNTIME" 
     || die "После перезапуска runtime OpenBao должен разблокироваться до проверки"
 grep -Fq 'run_pve_openbao --check-kv --log-level quiet' "$OPENBAO_STARTUP_COMMAND" \
     || die "Startup unseal должен проверять KV после восстановления секретов"
+grep -Fq 'run_pve_openbao --check-operator-access --log-level quiet' "$OPENBAO_STARTUP_COMMAND" \
+    || die "Startup unseal должен проверять операторский userpass"
 grep -Fq 'run_pve_openbao --check-ssh-access --log-level quiet' "$OPENBAO_STARTUP_COMMAND" \
     || die "Startup unseal должен проверять SSH CA, ssh-otp и auth/machine"
 grep -Fq -- '--cacert "$tls_ca"' "$OPENBAO_STARTUP_COMMAND" \
