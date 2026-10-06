@@ -126,6 +126,11 @@ semaphore:
   project: Proxmox Infrastructure
   repository: proxmox
 
+  views:
+    - { title: Guests, position: 0 }
+    - { title: Infrastructure, position: 1 }
+    - { title: Security, position: 2 }
+
   objects:
     - GitHub project read-only
     - OpenTofu PVE
