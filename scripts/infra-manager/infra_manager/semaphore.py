@@ -34,14 +34,33 @@ PROJECT_REPO = SETTINGS.project_repo
 
 
 @dataclass(frozen=True)
+class ViewSpec:
+    """Декларативное описание группы шаблонов Semaphore."""
+
+    title: str
+    position: int
+
+
+@dataclass(frozen=True)
 class TemplateSpec:
     """Декларативное описание задания Semaphore."""
 
     name: str
     playbook: str
     arguments: str
+    view: str
     app: str = "python"
     survey_vars: tuple[dict[str, Any], ...] = ()
+
+
+def semaphore_views() -> tuple[ViewSpec, ...]:
+    """Вернуть целевые группы шаблонов в порядке интерфейса."""
+
+    return (
+        ViewSpec(title="Guests", position=0),
+        ViewSpec(title="Infrastructure", position=1),
+        ViewSpec(title="Security", position=2),
+    )
 
 
 def _guest_survey(
@@ -86,46 +105,54 @@ def semaphore_templates(
             name="OpenTofu Plan",
             playbook="scripts/infra-manager/jobs/opentofu-plan.py",
             arguments="[]",
+            view="Infrastructure",
         ),
         TemplateSpec(
             name="Build Template 9000",
             playbook="scripts/infra-manager/jobs/build-template.py",
             arguments='["9000"]',
+            view="Infrastructure",
         ),
         TemplateSpec(
             name="Deploy Guest",
             playbook="scripts/infra-manager/jobs/guest-operation.py",
             arguments='["deploy"]',
+            view="Guests",
             survey_vars=_guest_survey(root, "deploy"),
         ),
         TemplateSpec(
             name="Status Guest",
             playbook="scripts/infra-manager/jobs/guest-operation.py",
             arguments='["status"]',
+            view="Guests",
             survey_vars=_guest_survey(root, "status"),
         ),
         TemplateSpec(
             name="Repair Guest",
             playbook="scripts/infra-manager/jobs/guest-operation.py",
             arguments='["repair"]',
+            view="Guests",
             survey_vars=_guest_survey(root, "repair"),
         ),
         TemplateSpec(
             name="Test Guest",
             playbook="scripts/infra-manager/jobs/guest-operation.py",
             arguments='["test"]',
+            view="Guests",
             survey_vars=_guest_survey(root, "test"),
         ),
         TemplateSpec(
             name="Sync Guest",
             playbook="scripts/infra-manager/jobs/guest-operation.py",
             arguments='["sync"]',
+            view="Guests",
             survey_vars=_guest_survey(root, "sync"),
         ),
         TemplateSpec(
             name="Sync SSH Access",
             playbook="scripts/infra-manager/jobs/sync-ssh-access.py",
             arguments="[]",
+            view="Security",
         ),
     )
 
@@ -164,6 +191,30 @@ def find_unique_by_name(
         raise InfraManagerError(
             f"В Semaphore найдено несколько объектов {kind} "
             f"с именем '{name}'"
+        )
+    return matches[0] if matches else None
+
+
+def find_unique_by_title(
+    items: Any,
+    title: str,
+    kind: str,
+) -> dict[str, Any] | None:
+    """Найти единственный объект Semaphore по полю title."""
+
+    if not isinstance(items, list):
+        raise InfraManagerError(
+            f"Не удалось проверить объекты Semaphore: {kind}"
+        )
+    matches = [
+        item
+        for item in items
+        if isinstance(item, dict) and item.get("title") == title
+    ]
+    if len(matches) > 1:
+        raise InfraManagerError(
+            f"В Semaphore найдено несколько объектов {kind} "
+            f"с названием '{title}'"
         )
     return matches[0] if matches else None
 
@@ -714,6 +765,45 @@ class SemaphoreClient:
 
         return environment_id
 
+    def ensure_view(
+        self,
+        project_id: int,
+        *,
+        title: str,
+        position: int,
+    ) -> int:
+        """Создать или привести к целевому состоянию группу шаблонов."""
+
+        views = self.get(f"/project/{project_id}/views")
+        existing = find_unique_by_title(views, title, "View")
+        payload = {
+            "project_id": project_id,
+            "title": title,
+            "position": position,
+        }
+        if existing is None:
+            response = self.post(
+                f"/project/{project_id}/views",
+                payload,
+            )
+            view_id = response.get("id") if isinstance(response, dict) else None
+        else:
+            view_id = existing.get("id")
+            if not isinstance(view_id, int):
+                raise InfraManagerError(
+                    f"Semaphore View '{title}' имеет некорректный id"
+                )
+            self.put(
+                f"/project/{project_id}/views/{view_id}",
+                {"id": view_id, **payload},
+            )
+
+        if not isinstance(view_id, int):
+            raise InfraManagerError(
+                f"Semaphore не вернул id View '{title}'"
+            )
+        return view_id
+
     def ensure_template(
         self,
         project_id: int,
@@ -724,6 +814,7 @@ class SemaphoreClient:
         playbook: str,
         branch: str,
         arguments: str,
+        view_id: int,
         app: str = "python",
         survey_vars: tuple[dict[str, Any], ...] = (),
     ) -> int:
@@ -736,6 +827,7 @@ class SemaphoreClient:
             "project_id": project_id,
             "repository_id": repository_id,
             "environment_ids": environment_ids,
+            "view_id": view_id,
             "playbook": playbook,
             "app": app,
             "type": "",
@@ -853,6 +945,16 @@ def configure_project(branch: str | None = None) -> int:
         opentofu_environment_id,
         infra_manager_environment_id,
     ]
+    views = semaphore_views()
+    view_ids = {
+        view.title: client.ensure_view(
+            project_id,
+            title=view.title,
+            position=view.position,
+        )
+        for view in views
+    }
+
     templates = semaphore_templates()
     for template in templates:
         client.ensure_template(
@@ -863,6 +965,7 @@ def configure_project(branch: str | None = None) -> int:
             playbook=template.playbook,
             branch=branch,
             arguments=template.arguments,
+            view_id=view_ids[template.view],
             app=template.app,
             survey_vars=template.survey_vars,
         )
