@@ -13,6 +13,7 @@ from .common import (
     console,
     require_runtime_activation_idle,
     reserve_runtime_activation,
+    run,
 )
 from .guest_catalog import GuestIdentity, guest_identity
 from .guest_deploy import run_deploy_guest
@@ -156,15 +157,26 @@ def test_guest(repo_root: Path, vmid: int) -> int:
     return 0
 
 
+def _current_repo_branch(repo_root: Path) -> str:
+    result = run(
+        ["git", "-C", str(repo_root), "branch", "--show-current"],
+        check=False,
+        capture_output=True,
+    )
+    branch = result.stdout.strip() if result.returncode == 0 else ""
+    return branch or SETTINGS.project_branch()
+
+
 def _sync_infra_manager(repo_root: Path, identity: GuestIdentity) -> int:
     from .semaphore import configure_project
 
+    branch = _current_repo_branch(repo_root)
     console.info(
         f"Синхронизация управляющих данных {identity.name} "
-        "из текущей рабочей копии Git"
+        f"из текущей рабочей копии Git ({branch})"
     )
     return configure_project(
-        branch=SETTINGS.project_branch(),
+        branch=branch,
         repo_root=repo_root,
     )
 
