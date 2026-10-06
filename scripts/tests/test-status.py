@@ -515,7 +515,51 @@ def main_test() -> None:
             fail("Безопасная синхронизация Semaphore вернула ошибку")
     if task_client.auth_mode != "token":
         fail("Sync Guest должен использовать существующий API token")
-    sync_objects.assert_called_once_with(task_client, 41, "main", ROOT)
+    sync_objects.assert_called_once_with(
+        task_client,
+        41,
+        "main",
+        ROOT,
+        reuse_existing_git=True,
+    )
+
+    class ExistingGitClient:
+        def __init__(self) -> None:
+            self.puts: list[tuple[str, dict]] = []
+
+        def get(self, path: str):
+            if "/keys?" in path:
+                return [
+                    {
+                        "id": 7,
+                        "name": "GitHub project read-only",
+                    }
+                ]
+            if "/repositories?" in path:
+                return [
+                    {
+                        "id": 9,
+                        "name": "proxmox",
+                        "git_url": PROJECT_REPO,
+                        "git_branch": "main",
+                        "ssh_key_id": 7,
+                    }
+                ]
+            raise AssertionError(f"Неожиданный GET: {path}")
+
+        def put(self, path: str, payload: dict):
+            self.puts.append((path, payload))
+            return None
+
+    existing_git_client = ExistingGitClient()
+    if semaphore_module._require_existing_task_git(
+        existing_git_client,
+        41,
+        "main",
+    ) != (7, 9):
+        fail("Task Sync не использует существующий Git-контур")
+    if existing_git_client.puts:
+        fail("Task Sync не должен переписывать Git-контур без изменений")
 
     invalid_task_client = TaskSyncClient(token_valid=False)
     with (
