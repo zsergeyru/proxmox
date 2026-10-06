@@ -83,6 +83,10 @@ def main_test() -> None:
             "scripts/infra-manager/jobs/build-template.py",
             '["9000"]',
         ),
+        "Set Log Level": (
+            "scripts/infra-manager/jobs/set-log-level.py",
+            "[]",
+        ),
         "Deploy Guest": (
             "scripts/infra-manager/jobs/guest-operation.py",
             '["deploy"]',
@@ -135,6 +139,7 @@ def main_test() -> None:
         "Sync Guest": "Guests",
         "OpenTofu Plan": "Infrastructure",
         "Build Template 9000": "Infrastructure",
+        "Set Log Level": "Infrastructure",
         "Sync SSH Access": "Security",
     }
     if {
@@ -172,6 +177,24 @@ def main_test() -> None:
             fail(
                 f"{template_name} получил неверный список гостей"
             )
+
+    log_template = next(
+        spec for spec in SEMAPHORE_TEMPLATES if spec.name == "Set Log Level"
+    )
+    if len(log_template.survey_vars) != 1:
+        fail("Set Log Level должен иметь одну survey-переменную")
+    log_survey = log_template.survey_vars[0]
+    if (
+        log_survey.get("name") != "INFRA_LOG_LEVEL"
+        or log_survey.get("type") != "enum"
+        or log_survey.get("required") is not True
+        or log_survey.get("values") != [
+            {"name": "Обычный", "value": "normal"},
+            {"name": "Подробный", "value": "verbose"},
+            {"name": "Тихий", "value": "quiet"},
+        ]
+    ):
+        fail("Set Log Level получил неверный список режимов")
 
     with tempfile.TemporaryDirectory() as tmp:
         fake = Path(tmp)
@@ -310,6 +333,33 @@ def main_test() -> None:
     updated_values = __import__("json").loads(missing_level.updated[0]["env"])
     if updated_values != {"OTHER": "value", "INFRA_LOG_LEVEL": "normal"}:
         fail("Добавление INFRA_LOG_LEVEL не должно удалять другие настройки")
+
+    log_level_env = InfraManagerEnvironmentClient(
+        existing={"id": 10, "name": SETTINGS.infra_manager_env_name},
+        full={
+            "json": "{}",
+            "env": '{"OTHER":"value","INFRA_LOG_LEVEL":"normal"}',
+            "secrets": [],
+        },
+    )
+    log_level_env.set_infra_manager_log_level(1, "verbose")
+    if len(log_level_env.updated) != 1:
+        fail("Set Log Level должен обновлять Variable Group один раз")
+    log_level_values = __import__("json").loads(
+        log_level_env.updated[0]["env"]
+    )
+    if log_level_values != {
+        "OTHER": "value",
+        "INFRA_LOG_LEVEL": "verbose",
+    }:
+        fail("Set Log Level не должен удалять другие переменные")
+
+    try:
+        log_level_env.set_infra_manager_log_level(1, "debug")
+    except InfraManagerError:
+        pass
+    else:
+        fail("Set Log Level принял неподдерживаемый режим debug")
 
     if SETTINGS.opentofu_env_name != "OpenTofu PVE":
         fail("Имя Variable Group OpenTofu PVE изменилось")
