@@ -861,12 +861,12 @@ def main_test() -> None:
         / "infrastructure"
         / "guests"
         / "910-infra-manager"
-        / "status.yaml"
+        / "infra-manager-status.yaml"
     )
     definition = load_status_definition(status_file)
 
     if definition.guest_vmid != 910:
-        fail("status.yaml должен описывать текущий VMID infra-manager")
+        fail("Внутреннее описание состояния должно учитывать текущий VMID infra-manager")
 
     with tempfile.TemporaryDirectory() as tmp:
         fake = Path(tmp)
@@ -879,7 +879,7 @@ def main_test() -> None:
             "role: infra-manager\n",
             encoding="utf-8",
         )
-        moved_status = guest_dir / "status.yaml"
+        moved_status = guest_dir / "infra-manager-status.yaml"
         moved_status.write_text(
             status_file.read_text(encoding="utf-8").replace(
                 "guest_vmid: 910",
