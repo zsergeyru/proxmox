@@ -12,6 +12,8 @@ layout:
 checks:
   - type: runtime
     message: "Docker и infra-runtime работают"
+  - type: portal
+    message: "Homepage и его действия работают"
   - type: openbao
     message: "OpenBao запущен"
   - type: semaphore
@@ -39,6 +41,11 @@ sections:
     fields:
       - label: "Адрес"
         source: address
+
+  - title: "Портал"
+    fields:
+      - label: "Адрес"
+        template: "http://{address}:3001"
 
   - title: "Semaphore"
     fields:
