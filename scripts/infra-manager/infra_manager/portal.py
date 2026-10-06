@@ -14,7 +14,6 @@ from .guest_catalog import (
     guest_identity,
     guest_management_address,
 )
-from .guest_operations import operation_guests
 from .settings import PATHS, SETTINGS
 
 
@@ -41,6 +40,8 @@ def _gateway_base_url() -> str:
 
 def build_portal_bookmarks(vmid: int) -> list[dict]:
     """Сформировать блок Homepage со стандартными действиями гостя."""
+
+    from .guest_operations import operation_guests
 
     guest_identity(PATHS.repo_root, vmid)
     gateway = _gateway_base_url()
