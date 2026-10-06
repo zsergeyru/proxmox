@@ -125,7 +125,11 @@ def test_current_repo_branch() -> None:
                 stderr="",
             ),
         ),
-        patch.object(module.SETTINGS, "project_branch", return_value="main"),
+        patch.object(
+            module,
+            "SETTINGS",
+            SimpleNamespace(project_branch=lambda: "main"),
+        ),
     ):
         assert module._current_repo_branch(Path("/repo")) == "main"
 
