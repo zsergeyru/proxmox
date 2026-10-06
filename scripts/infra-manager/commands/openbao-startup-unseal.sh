@@ -53,7 +53,7 @@ fi
 read -r initialized sealed < <(read_status_flags <<<"$status_json")
 
 if [[ "$initialized" != "true" ]]; then
-    echo "ОШИБКА: OpenBao не инициализирован; сначала выполните Initialize OpenBao для infra-manager" >&2
+    echo "ОШИБКА: OpenBao не инициализирован; на PVE выполните infra-manager repair, а при потере состояния — infra-manager recover" >&2
     exit 1
 fi
 
