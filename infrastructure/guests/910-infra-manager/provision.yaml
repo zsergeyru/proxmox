@@ -54,6 +54,11 @@ docker:
         port: 3000
         targets:
           - local
+        operator:
+          username: admin
+          password:
+            source: guest_file
+            path: /run/infra-manager/secrets/initial-admin-password
 
       system_packages:
         - ca-certificates
@@ -105,6 +110,12 @@ docker:
         path: /ui/
         targets:
           - local
+        operator:
+          username: operator
+          password:
+            source: pve_json
+            path: /mnt/bindmounts/infra-manager/pve-only/openbao/operator-access.json
+            key: password
 
 paths:
   configuration: /etc/infra-manager
