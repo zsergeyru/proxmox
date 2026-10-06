@@ -70,6 +70,7 @@ def test_status() -> None:
         patch.object(module, "verify_guest_owned"),
         patch.object(module, "guest_running", return_value=True),
         patch.object(module, "exec_guest", side_effect=fake_exec),
+        patch.object(module, "openbao_operator", return_value=0) as operator,
     ):
         assert module.status() == 0
 
@@ -79,6 +80,7 @@ def test_status() -> None:
     assert guest_calls == [
         (920, "infra-manager-status", "--full")
     ]
+    operator.assert_called_once_with(rotate=False)
 
 
 def test_repair() -> None:
