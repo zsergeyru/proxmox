@@ -71,6 +71,23 @@ def build_parser() -> argparse.ArgumentParser:
         help="проверить полный аварийный контур infra-manager",
     )
     recovery_check.set_defaults(handler="recovery-check")
+
+    portal_bookmarks = subparsers.add_parser(
+        "portal-bookmarks",
+        help="сформировать кнопки Homepage для операций гостя",
+    )
+    portal_bookmarks.add_argument(
+        "--guest-vmid",
+        type=int,
+        required=True,
+        help="VMID гостя",
+    )
+    portal_bookmarks.add_argument(
+        "--output",
+        type=str,
+        help="записать bookmarks.yaml в файл вместо stdout",
+    )
+    portal_bookmarks.set_defaults(handler="portal-bookmarks")
     return parser
 
 
@@ -114,6 +131,17 @@ def main(argv: Sequence[str] | None = None) -> int:
             from .recovery import check_recovery
 
             return check_recovery()
+
+        if args.handler == "portal-bookmarks":
+            from pathlib import Path
+
+            from .portal import render_portal_bookmarks, write_portal_bookmarks
+
+            if args.output:
+                write_portal_bookmarks(args.guest_vmid, Path(args.output))
+            else:
+                print(render_portal_bookmarks(args.guest_vmid), end="")
+            return 0
 
         raise InfraManagerError(f"Неизвестная команда: {args.command}")
     except (InfraManagerError, OSError) as exc:
