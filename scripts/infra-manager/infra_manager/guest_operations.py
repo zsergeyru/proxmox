@@ -16,7 +16,7 @@ from .common import (
     reserve_runtime_activation,
 )
 from .guest_catalog import GuestIdentity, deployable_guests, guest_identity, guest_management_address
-from .guest_deploy import run_deploy_guest
+from .guest_deploy import project_branch_for_checkout, run_deploy_guest
 from .pve import PveClient
 from .pve_host import (
     check_infra_manager_status,
@@ -165,7 +165,7 @@ def _infra_manager_repair(
     repair_openbao_on_host(node)
     console.info("Синхронизация проекта Semaphore")
     sync_project_from_task(
-        branch=SETTINGS.project_branch(),
+        branch=project_branch_for_checkout(repo_root),
         repo_root=repo_root,
     )
     check_status(full=True, quiet=False)
@@ -190,7 +190,7 @@ def _infra_manager_sync(
         "Синхронизация Semaphore из Git-версии текущего задания"
     )
     sync_project_from_task(
-        branch=SETTINGS.project_branch(),
+        branch=project_branch_for_checkout(repo_root),
         repo_root=repo_root,
     )
     console.ok("Конфигурация Semaphore синхронизирована")
