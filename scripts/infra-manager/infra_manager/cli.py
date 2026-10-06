@@ -117,8 +117,7 @@ def build_parser() -> argparse.ArgumentParser:
     portal_gateway.add_argument(
         "--port",
         type=int,
-        default=3002,
-        help="TCP-порт",
+        help="TCP-порт; по умолчанию берётся из общих настроек",
     )
     portal_gateway.set_defaults(handler="portal-gateway")
     return parser
@@ -198,10 +197,18 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         if args.handler == "portal-gateway":
             from .portal_gateway import run_portal_gateway
+            from .settings import SETTINGS
 
-            if not (0 < args.port < 65536):
-                raise InfraManagerError("Порт посредника должен быть от 1 до 65535")
-            return run_portal_gateway(args.bind, args.port)
+            port = (
+                SETTINGS.portal_gateway_port
+                if args.port is None
+                else args.port
+            )
+            if not (0 < port < 65536):
+                raise InfraManagerError(
+                    "Порт посредника должен быть от 1 до 65535"
+                )
+            return run_portal_gateway(args.bind, port)
 
         raise InfraManagerError(f"Неизвестная команда: {args.command}")
     except (InfraManagerError, OSError) as exc:
