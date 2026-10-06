@@ -458,6 +458,28 @@ def _check_openbao_tls() -> None:
             "TLS-вход OpenBao не подтверждает готовое разблокированное состояние"
         )
 
+    ui = command_runner.run(
+        [
+            "curl",
+            "-fsS",
+            "--connect-timeout",
+            "5",
+            "--max-time",
+            "10",
+            "--cacert",
+            str(OPENBAO_TLS_CA),
+            "--output",
+            "/dev/null",
+            f"https://{address}:8202/ui/",
+        ],
+        quiet=True,
+        check=False,
+    )
+    if ui.returncode:
+        raise InfraManagerError(
+            "Встроенный интерфейс OpenBao :8202/ui/ недоступен"
+        )
+
 
 def _check_openbao(*, full: bool) -> None:
     """Проверить OpenBao и при full также TLS/OTP и аварийный PVE-only контур."""
