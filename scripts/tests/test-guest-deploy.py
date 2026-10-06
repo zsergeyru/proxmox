@@ -245,13 +245,10 @@ def check_project_branch_after_semaphore_branch_switch() -> None:
         fail(f"Неожиданная Git-команда: {argv!r}")
         raise AssertionError
 
-    with (
-        patch.object(guest_deploy_module, "run", side_effect=fake_run),
-        patch.object(
-            guest_deploy_module.SETTINGS,
-            "project_branch",
-            return_value="main",
-        ),
+    with patch.object(
+        guest_deploy_module,
+        "run",
+        side_effect=fake_run,
     ):
         branch = guest_deploy_module._project_branch(ROOT)
 
