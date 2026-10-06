@@ -37,6 +37,7 @@ scripts/
 │   │   ├── common.py                        # Общие ошибки, вывод и безопасный запуск внешних команд
 │   │   ├── settings.py                      # Хранит единые неизменяемые пути, имена, версии и значения по умолчанию
 │   │   ├── guest_catalog.py                 # Находит специальных гостей по role и читает их VMID, имя и адрес
+│   │   ├── guest_operations.py              # Выполняет общие Deploy/Status/Repair/Test/Sync операции над гостями
 │   │   ├── semaphore.py                     # Синхронизирует проект, Git, группу переменных и задания Semaphore
 │   │   ├── pve.py                           # Проверяет PVE API и полный административный контракт infra-manager
 │   │   ├── pve_lifecycle.py                 # Выполняет приёмочную проверку полного жизненного цикла временного LXC 9098
@@ -62,7 +63,8 @@ scripts/
 │   │
 │   └── jobs/                                # Задания, непосредственно запускаемые Semaphore
 │       ├── opentofu-plan.py                  # Формирует входные данные OpenTofu и строит только план изменений
-│       ├── deploy-guest.py                   # Разворачивает или приводит выбранную гостевую систему к описанному состоянию
+│       ├── guest-operation.py                # Общая точка входа пяти гостевых операций Semaphore
+│       ├── deploy-guest.py                   # Совместимая точка специальных фаз bootstrap
 │       ├── build-template.py                 # Собирает Packer-шаблон VM 9000 и запускает его проверку
 │       ├── initialize-openbao.py             # Инициализирует и проверяет OpenBao через доверенный PVE
 │       └── sync-ssh-access.py                # Синхронизирует SSH OTP/AppRole по access.yaml
@@ -72,6 +74,7 @@ scripts/
 │
 └── tests/                                    # Локальные и автоматические проверки без постоянных изменений инфраструктуры
     ├── test-guest-deploy.py                  # Проверяет планирование и безопасное применение изменений гостевой системы
+    ├── test-guest-operations.py              # Проверяет общий контракт Deploy/Status/Repair/Test/Sync
     ├── test-guest-resolver.py                # Проверяет сборщик конфигурации, управление, начальную настройку и возможности профиля
     ├── test-infra-manager-python.py          # Проверяет основу Python-пакета, командную оболочку и вспомогательные функции PVE
     ├── test-pve-lifecycle.py                 # Проверяет lifecycle test без реального изменения PVE
@@ -136,19 +139,21 @@ Semaphore: OpenTofu Plan
 
 Задание строит только план и не выполняет `apply` или `destroy`.
 
-`deploy-guest.py`:
+`guest-operation.py` является общей точкой входа пяти отдельных шаблонов Semaphore:
 
 ```text
-Semaphore: Deploy Guest
-→ выбрать гостя из ограниченного списка GUEST_VMID
-→ scripts/infra-manager/jobs/deploy-guest.py
-→ OpenTofu apply для выбранной гостевой системы
-→ Ansible-настройка гостевой системы
+Deploy Guest ─┐
+Status Guest ─┤
+Repair Guest ─┤
+Test Guest ───┤→ guest-operation.py → guest_operations.py
+Sync Guest ───┘
 ```
 
-Для гостя с `role: infra-manager` используется тот же вход. Он проверяет существующий infra-manager без собственного OpenTofu state, применяет общий `provision.yaml` и откладывает активацию `infra-runtime` до завершения текущего задания.
+Во всех шаблонах гость выбирается только из `GUEST_VMID` типа `enum`. `Deploy`, `Status`, `Repair` и `Test` используют общий каталог гостей с `guest.yaml + provision.yaml`. `Sync` показывает только роли, для которых существует безопасный обработчик.
 
-Таким образом, отдельного оркестратора обновления infra-manager нет. Отличается только владение объектом Proxmox и безопасный момент перезапуска контейнера, внутри которого выполняется Semaphore.
+`Deploy Guest` вызывает общий OpenTofu + Ansible-контур. Для `role: infra-manager` он сохраняет прежнее правило отложенной активации `infra-runtime`.
+
+`deploy-guest.py` остаётся совместимой технической точкой специальных фаз первоначального bootstrap: создание объекта, базовая настройка и provision существующего infra-manager.
 
 `initialize-openbao.py` остаётся внутренней точкой первоначального bootstrap и восстановления. В Semaphore отдельного шаблона для неё нет. Для человека штатные действия вынесены в PVE-команду `infra-manager repair` и `infra-manager recover`.
 
