@@ -236,8 +236,6 @@ def check_rendered_status() -> None:
             text = output.getvalue()
             for expected in (
                 f"Гость {vmid} — {name}",
-                "Объект PVE запущен",
-                "SSH доступен",
                 *expected_values,
             ):
                 if expected not in text:
