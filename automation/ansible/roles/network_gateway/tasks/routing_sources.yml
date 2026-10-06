@@ -1,0 +1,97 @@
+---
+- name: Проверить источники маршрутизации
+  ansible.builtin.assert:
+    that:
+      - item.name is string
+      - item.type in ["file", "http"]
+      - item.format in ["domain-list", "hosts", "ip-list", "cidr-list"]
+      - item.target in provision.network_gateway.routing.targets
+      - (item.type != "http") or (item.url is defined)
+      - (item.type != "file") or (item.path is defined)
+      - (item.priority | default(100) | int) >= 0
+    fail_msg: "Некорректный источник списка маршрутизации: {{ item.name | default('без имени') }}"
+  loop: "{{ provision.network_gateway.routing.sources }}"
+
+- name: Установить зависимости обработчика списков
+  ansible.builtin.apt:
+    name:
+      - python3
+      - python3-yaml
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Создать каталоги сетевого шлюза
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "{{ item.mode }}"
+  loop:
+    - path: /etc/network-gateway
+      mode: "0755"
+    - path: /var/lib/network-gateway
+      mode: "0755"
+    - path: /var/lib/network-gateway/routing
+      mode: "0755"
+    - path: /usr/local/libexec
+      mode: "0755"
+
+- name: Установить обработчик списков
+  ansible.builtin.copy:
+    src: network-gateway-lists.py
+    dest: /usr/local/libexec/network-gateway-lists
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Сформировать описание источников списков
+  ansible.builtin.template:
+    src: routing-sources.yaml.j2
+    dest: /etc/network-gateway/routing-sources.yaml
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Обновить нормализованные списки
+  ansible.builtin.command:
+    argv:
+      - /usr/local/libexec/network-gateway-lists
+      - --config
+      - /etc/network-gateway/routing-sources.yaml
+      - --state-dir
+      - /var/lib/network-gateway
+      - --output-dir
+      - /var/lib/network-gateway/routing/current
+  changed_when: true
+
+- name: Установить службу обновления списков
+  ansible.builtin.template:
+    src: network-gateway-lists.service.j2
+    dest: /etc/systemd/system/network-gateway-lists.service
+    owner: root
+    group: root
+    mode: "0644"
+  register: network_gateway_lists_service
+
+- name: Установить таймер обновления списков
+  ansible.builtin.template:
+    src: network-gateway-lists.timer.j2
+    dest: /etc/systemd/system/network-gateway-lists.timer
+    owner: root
+    group: root
+    mode: "0644"
+  register: network_gateway_lists_timer
+
+- name: Перечитать systemd после изменения обновления списков
+  ansible.builtin.systemd:
+    daemon_reload: true
+  when: network_gateway_lists_service.changed or network_gateway_lists_timer.changed
+
+- name: Включить таймер обновления списков
+  ansible.builtin.systemd:
+    name: network-gateway-lists.timer
+    enabled: true
+    state: started
+  when: provision.network_gateway.routing.update.enabled | bool

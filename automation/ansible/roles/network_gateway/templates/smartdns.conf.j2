@@ -1,0 +1,23 @@
+# Управляется Ansible. Ручные изменения будут перезаписаны.
+bind {{ provision.network_gateway.smartdns.listen.host }}:{{ provision.network_gateway.smartdns.listen.port }}
+cache-size 32768
+prefetch-domain yes
+serve-expired yes
+nftset-timeout yes
+
+{% for upstream in provision.network_gateway.smartdns.upstreams %}
+{% if upstream.type == "https" %}
+server-https {{ upstream.address }}
+{% elif upstream.type == "tls" %}
+server-tls {{ upstream.address }}
+{% else %}
+server {{ upstream.address }}
+{% endif %}
+{% endfor %}
+
+{% if provision.network_gateway.smartdns.domain_sets.enabled | bool %}
+{% for target_name, target in provision.network_gateway.routing.targets.items() %}
+domain-set -name route-{{ target_name }} -type list -file /var/lib/network-gateway/routing/current/{{ target_name }}/domains.txt
+domain-rules /domain-set:route-{{ target_name }}/ -nftset #4:inet#network_gateway#route_{{ target_name }}_v4 -c none
+{% endfor %}
+{% endif %}

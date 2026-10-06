@@ -4,6 +4,13 @@
 flush ruleset
 
 table inet network_gateway {
+{% for target_name, target in provision.network_gateway.routing.targets.items() %}
+  set route_{{ target_name }}_v4 {
+    type ipv4_addr
+    flags timeout
+  }
+
+{% endfor %}
   chain input {
     type filter hook input priority filter;
     policy accept;

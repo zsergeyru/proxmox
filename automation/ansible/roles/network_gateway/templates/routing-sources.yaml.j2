@@ -1,0 +1,23 @@
+routing:
+  default: {{ provision.network_gateway.routing.default }}
+  update:
+    keep_last_good: {{ provision.network_gateway.routing.update.keep_last_good | bool | lower }}
+  targets:
+{% for name, target in provision.network_gateway.routing.targets.items() %}
+    {{ name }}:
+      type: {{ target.type }}
+{% endfor %}
+  sources:
+{% for source in provision.network_gateway.routing.sources %}
+    - name: {{ source.name }}
+      type: {{ source.type }}
+{% if source.url is defined %}
+      url: {{ source.url | to_json }}
+{% endif %}
+{% if source.path is defined %}
+      path: {{ source.path | to_json }}
+{% endif %}
+      format: {{ source.format }}
+      target: {{ source.target }}
+      priority: {{ source.priority | default(100) }}
+{% endfor %}

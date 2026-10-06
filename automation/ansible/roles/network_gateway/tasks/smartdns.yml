@@ -1,0 +1,41 @@
+---
+- name: Проверить контракт SmartDNS
+  ansible.builtin.assert:
+    that:
+      - provision.network_gateway.smartdns.enabled is boolean
+      - provision.network_gateway.smartdns.version is string
+      - provision.network_gateway.smartdns.package.url is string
+      - provision.network_gateway.smartdns.package.sha256 is string
+      - provision.network_gateway.smartdns.listen.host == "127.0.0.1"
+      - provision.network_gateway.smartdns.listen.port | int > 0
+      - provision.network_gateway.smartdns.upstreams | length >= 2
+    fail_msg: "Некорректный контракт SmartDNS"
+
+- name: Скачать пакет SmartDNS
+  ansible.builtin.get_url:
+    url: "{{ provision.network_gateway.smartdns.package.url }}"
+    dest: "/var/cache/smartdns-{{ provision.network_gateway.smartdns.version }}.deb"
+    checksum: "sha256:{{ provision.network_gateway.smartdns.package.sha256 }}"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Установить SmartDNS
+  ansible.builtin.apt:
+    deb: "/var/cache/smartdns-{{ provision.network_gateway.smartdns.version }}.deb"
+    state: present
+
+- name: Настроить SmartDNS
+  ansible.builtin.template:
+    src: smartdns.conf.j2
+    dest: /etc/smartdns/smartdns.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Перезапустить SmartDNS
+
+- name: Включить SmartDNS
+  ansible.builtin.systemd:
+    name: smartdns
+    enabled: true
+    state: started

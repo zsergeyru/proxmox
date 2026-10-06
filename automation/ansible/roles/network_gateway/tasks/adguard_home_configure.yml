@@ -1,0 +1,60 @@
+---
+- name: Остановить AdGuard Home для безопасного изменения конфигурации
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ provision.network_gateway.adguard_home.paths.compose_file }}"
+      - stop
+      - adguard-home
+  changed_when: false
+
+- name: Настроить DNS, DHCP и home.arpa AdGuard Home
+  ansible.builtin.command:
+    argv:
+      - python3
+      - -c
+      - |
+        import pathlib, yaml
+        path = pathlib.Path("{{ provision.network_gateway.adguard_home.paths.config }}/AdGuardHome.yaml")
+        data = yaml.safe_load(path.read_text()) or {}
+        dns = data.setdefault("dns", {})
+        dns["upstream_dns"] = ["{{ provision.network_gateway.adguard_home.upstream.host }}:{{ provision.network_gateway.adguard_home.upstream.port }}"]
+        dns["local_domain_name"] = "{{ provision.network_gateway.adguard_home.domain }}"
+        dhcp = data.setdefault("dhcp", {})
+        dhcp["enabled"] = {{ 'True' if provision.network_gateway.adguard_home.dhcp.enabled | bool else 'False' }}
+        dhcp["interface_name"] = "{{ network_gateway_lan_device }}"
+        dhcp["local_domain_name"] = "{{ provision.network_gateway.adguard_home.domain }}"
+        v4 = dhcp.setdefault("dhcpv4", {})
+        v4["gateway_ip"] = "{{ network_gateway_lan_address }}"
+        v4["subnet_mask"] = "{{ ansible_facts[network_gateway_lan_device].ipv4.netmask }}"
+        v4["range_start"] = "{{ provision.network_gateway.adguard_home.dhcp.range.start }}"
+        v4["range_end"] = "{{ provision.network_gateway.adguard_home.dhcp.range.end }}"
+        v4["lease_duration"] = {{ provision.network_gateway.adguard_home.dhcp.lease_seconds | int }}
+        path.write_text(yaml.safe_dump(data, sort_keys=False))
+  changed_when: true
+
+- name: Запустить AdGuard Home после настройки
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ provision.network_gateway.adguard_home.paths.compose_file }}"
+      - up
+      - -d
+      - adguard-home
+  changed_when: false
+
+- name: Дождаться DNS AdGuard Home
+  ansible.builtin.wait_for:
+    host: "{{ network_gateway_lan_address }}"
+    port: 53
+    timeout: 60
+
+- name: Дождаться веб-интерфейса AdGuard Home
+  ansible.builtin.wait_for:
+    host: "{{ network_gateway_lan_address }}"
+    port: "{{ provision.network_gateway.adguard_home.web.port }}"
+    timeout: 60

@@ -490,27 +490,52 @@ system:
 | `interfaces.wan` | логическое имя WAN-интерфейса из `guest.yaml` |
 | `interfaces.lan` | логическое имя LAN-интерфейса из `guest.yaml` |
 | `forwarding.enabled` | требование IPv4 forwarding |
-| `dhcp.enabled` | включение DHCP на LAN |
-| `dhcp.interface` | логический интерфейс DHCP |
-| `dhcp.range.start` | начало динамического диапазона |
-| `dhcp.range.end` | конец динамического диапазона |
-| `dhcp.lease_time` | срок аренды |
-| `dhcp.domain` | локальный домен клиентов |
-| `dhcp.reservations` | список постоянных DHCP-назначений |
-| `firewall.enabled` | включение базового nftables |
+| `adguard_home.enabled` | требование AdGuard Home |
+| `adguard_home.interface` | логический LAN-интерфейс DHCP/DNS |
+| `adguard_home.domain` | локальный домен HOME |
+| `adguard_home.dhcp.*` | диапазон и срок DHCP-аренды |
+| `adguard_home.upstream` | локальный SmartDNS, которому передаются внешние запросы |
+| `smartdns.enabled` | требование SmartDNS |
+| `smartdns.listen` | локальный адрес и порт SmartDNS |
+| `smartdns.domain_sets.enabled` | связь доменных групп с nftables sets |
+| `routing.default` | маршрут по умолчанию; сейчас `direct` |
+| `routing.sources` | независимые локальные и внешние источники списков |
+| `routing.update` | период обновления и использование последней рабочей копии |
+| `routing.targets` | допустимые назначения правил |
+| `nfqws2.enabled` | требование DPI-обработчика |
+| `nfqws2.target` | логическая группа, передаваемая в NFQUEUE |
+| `firewall.enabled` | включение nftables |
 | `firewall.direct_wan_nat` | допустимость NAT на обычном WAN |
+
+Каждая запись `routing.sources` имеет независимое имя и содержит:
+
+| Поле | Назначение |
+|---|---|
+| `name` | уникальное имя источника |
+| `type` | `file` или `http` |
+| `path` / `url` | путь или адрес источника |
+| `format` | `domain-list`, `hosts`, `ip-list` или `cidr-list` |
+| `target` | назначение, например `direct`, `vpn1`, `vpn2`, `zapret` |
+| `priority` | приоритет при пересечении правил |
+
+Поставщик списка не является частью машинного контракта. Новый источник подключается новой записью и не требует изменения роли только из-за имени поставщика.
 
 Текущая реализация роли:
 
 - находит реальные Linux-интерфейсы по IPv4 из `guest.yaml`;
 - включает IPv4 forwarding;
-- настраивает `dnsmasq` только как DHCP;
-- формирует базовый `nftables` для пересылки LAN → WAN;
-- запрещает NAT на обычном WAN.
+- формирует базовый `nftables` без NAT на обычном WAN;
+- проверяет описание источников списков;
+- загружает локальные или HTTP-источники;
+- нормализует домены, hosts, IP и CIDR;
+- удаляет дубликаты;
+- применяет приоритеты и отклоняет неоднозначный конфликт одинакового приоритета;
+- хранит последнюю рабочую копию внешнего источника;
+- атомарно заменяет сформированные списки.
+
+AdGuard Home, SmartDNS, PBR, `nfqws2` и VPN должны исполняться этой же ролью по мере реализации соответствующих шагов.
 
 Параметры VLAN, IPv4 и gateway повторно в `provision.yaml` не задаются. Их источником остаётся `guest.yaml`.
-
-SmartDNS, PBR и VPN расширяют этот раздел только после появления соответствующего владельца в роли и контрактных проверок.
 
 ### 4.6. `ai_control`
 

@@ -6,10 +6,25 @@ system:
   version: "13"
   architecture: amd64
   required_packages:
-    - dnsmasq
+    - ca-certificates
+    - curl
     - iproute2
     - nftables
+    - openssl
     - wireguard-tools
+
+docker:
+  source: docker-official-repository
+  service:
+    name: docker
+    enabled: true
+    state: running
+  required_packages:
+    - docker-ce
+    - docker-ce-cli
+    - containerd.io
+    - docker-buildx-plugin
+    - docker-compose-plugin
 
 network_gateway:
   interfaces:
@@ -19,15 +34,65 @@ network_gateway:
   forwarding:
     enabled: true
 
-  dhcp:
+  adguard_home:
     enabled: true
+    image: adguard/adguardhome:v0.107.79
+    container_name: adguard-home
     interface: lan
-    range:
-      start: 192.168.1.100
-      end: 192.168.1.250
-    lease_time: 24h
     domain: home.arpa
-    reservations: []
+    web:
+      port: 3000
+      admin_user: admin
+    paths:
+      root: /opt/network-gateway
+      compose: /opt/network-gateway/compose
+      compose_file: /opt/network-gateway/compose/docker-compose.yml
+      work: /opt/network-gateway/adguard/work
+      config: /opt/network-gateway/adguard/conf
+      admin_secret: /etc/network-gateway/adguard-admin.env
+    dhcp:
+      enabled: true
+      range:
+        start: 192.168.1.100
+        end: 192.168.1.250
+      lease_seconds: 86400
+    upstream:
+      host: 127.0.0.1
+      port: 6053
+
+  smartdns:
+    enabled: true
+    version: "48.4"
+    package:
+      url: https://github.com/pymumu/smartdns/releases/download/Release48.4/smartdns.1.2026.08.05-0921.x86_64-debian-all.deb
+      sha256: 4cc1b8f9db10110e1212d981cfee7eb89a3c80f5766760e3b5f7541c8da8b546
+    listen:
+      host: 127.0.0.1
+      port: 6053
+    upstreams:
+      - type: https
+        address: https://dns.quad9.net/dns-query
+      - type: https
+        address: https://cloudflare-dns.com/dns-query
+    domain_sets:
+      enabled: true
+
+  routing:
+    default: direct
+    sources: []
+    update:
+      enabled: true
+      interval: 6h
+      keep_last_good: true
+    targets:
+      direct:
+        type: wan
+      zapret:
+        type: nfqws2
+
+  nfqws2:
+    enabled: true
+    target: zapret
 
   firewall:
     enabled: true
