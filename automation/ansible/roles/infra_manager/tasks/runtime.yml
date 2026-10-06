@@ -15,7 +15,7 @@
 - name: Установить описание состояния infra-manager
   ansible.builtin.copy:
     remote_src: true
-    src: "{{ provision.paths.bootstrap_repository }}/infrastructure/guests/{{ guest }}/status.yaml"
+    src: "{{ provision.paths.bootstrap_repository }}/infrastructure/guests/{{ guest }}/infra-manager-status.yaml"
     dest: "{{ provision.paths.configuration }}/status.yaml"
     owner: root
     group: root

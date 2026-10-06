@@ -14,7 +14,6 @@ from .guest_catalog import (
     guest_identity,
     guest_management_address,
 )
-from .guest_operations import operation_guests
 from .settings import PATHS, SETTINGS
 
 
@@ -41,6 +40,8 @@ def _gateway_base_url() -> str:
 
 def build_portal_bookmarks(vmid: int) -> list[dict]:
     """Сформировать блок Homepage со стандартными действиями гостя."""
+
+    from .guest_operations import operation_guests
 
     guest_identity(PATHS.repo_root, vmid)
     gateway = _gateway_base_url()
@@ -105,6 +106,68 @@ def _walk_portals(value: Any, source: str = "provision") -> list[tuple[str, dict
     return found
 
 
+def _validated_operator(source: str, operator: object) -> dict[str, Any] | None:
+    if operator is None:
+        return None
+    if not isinstance(operator, dict):
+        raise InfraManagerError(
+            f"{source}.portal.operator должен быть объектом"
+        )
+
+    username = operator.get("username")
+    if username is not None and (
+        not isinstance(username, str) or not username.strip()
+    ):
+        raise InfraManagerError(
+            f"{source}.portal.operator.username должен быть непустой строкой"
+        )
+
+    password = operator.get("password")
+    normalized_password: dict[str, str] | None = None
+    if password is not None:
+        if not isinstance(password, dict):
+            raise InfraManagerError(
+                f"{source}.portal.operator.password должен быть объектом"
+            )
+        source_type = password.get("source")
+        if source_type not in {"guest_file", "guest_env", "pve_json"}:
+            raise InfraManagerError(
+                f"{source}.portal.operator.password.source имеет "
+                f"неподдерживаемое значение {source_type!r}"
+            )
+        path = password.get("path")
+        if not isinstance(path, str) or not path.startswith("/"):
+            raise InfraManagerError(
+                f"{source}.portal.operator.password.path "
+                "должен быть абсолютным путём"
+            )
+
+        normalized_password = {
+            "source": source_type,
+            "path": path,
+        }
+        if source_type in {"guest_env", "pve_json"}:
+            key = password.get("key")
+            if not isinstance(key, str) or not key.strip():
+                raise InfraManagerError(
+                    f"{source}.portal.operator.password.key "
+                    "должен быть непустой строкой"
+                )
+            normalized_password["key"] = key.strip()
+
+    if username is None and normalized_password is None:
+        raise InfraManagerError(
+            f"{source}.portal.operator должен задавать username или password"
+        )
+
+    result: dict[str, Any] = {}
+    if isinstance(username, str):
+        result["username"] = username.strip()
+    if normalized_password is not None:
+        result["password"] = normalized_password
+    return result
+
+
 def _validated_portal(source: str, portal: dict) -> dict[str, Any]:
     name = portal.get("name")
     scheme = portal.get("scheme")
@@ -153,7 +216,46 @@ def _validated_portal(source: str, portal: dict) -> dict[str, Any]:
         "port": port,
         "path": path,
         "targets": targets,
+        "operator": _validated_operator(source, portal.get("operator")),
     }
+
+
+def portal_definitions(
+    repo_root: Path,
+    identity: GuestIdentity,
+) -> list[dict[str, Any]]:
+    """Вернуть канонические описания опубликованных служб гостя."""
+
+    address = guest_management_address(repo_root, identity)
+    if not address:
+        raise InfraManagerError(
+            f"Для гостя {identity.vmid} не определён административный IPv4"
+        )
+
+    provision = _load_provision(identity)
+    result: list[dict[str, Any]] = []
+    names: set[str] = set()
+
+    for source, raw in _walk_portals(provision):
+        portal = _validated_portal(source, raw)
+        name = portal["name"]
+        if name in names:
+            raise InfraManagerError(
+                f"У гостя {identity.vmid} повторяется имя службы {name!r}"
+            )
+        names.add(name)
+
+        result.append(
+            {
+                **portal,
+                "source": source,
+                "url": (
+                    f"{portal['scheme']}://{address}:{portal['port']}"
+                    f"{portal['path']}"
+                ),
+            }
+        )
+    return result
 
 
 def portal_services(vmid: int, target: str) -> list[dict[str, Any]]:
@@ -165,32 +267,14 @@ def portal_services(vmid: int, target: str) -> list[dict[str, Any]]:
         )
 
     identity = guest_identity(PATHS.repo_root, vmid)
-    address = guest_management_address(PATHS.repo_root, identity)
-    if not address:
-        raise InfraManagerError(
-            f"Для гостя {vmid} не определён административный IPv4"
-        )
-
-    provision = _load_provision(identity)
     result: list[dict[str, Any]] = []
-    names: set[str] = set()
 
-    for source, raw in _walk_portals(provision):
-        portal = _validated_portal(source, raw)
+    for portal in portal_definitions(PATHS.repo_root, identity):
         if target not in portal["targets"]:
             continue
 
         name = portal["name"]
-        if name in names:
-            raise InfraManagerError(
-                f"Для назначения {target} повторяется имя службы {name!r}"
-            )
-        names.add(name)
-
-        url = (
-            f"{portal['scheme']}://{address}:{portal['port']}"
-            f"{portal['path']}"
-        )
+        url = portal["url"]
         service: dict[str, Any] = {"href": url}
         if portal["scheme"] == "http":
             service["siteMonitor"] = url

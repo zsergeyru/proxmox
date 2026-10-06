@@ -1,138 +1,115 @@
 $schema: https://json-schema.org/draft/2020-12/schema
 $title: Guest status definition
-type: object
-additionalProperties: false
-required:
-  - schema_version
-  - guest_vmid
-  - title
-  - short_ready_message
-  - ready_message
-  - layout
-  - checks
-  - data
-  - sections
-properties:
-  schema_version:
-    const: 1
-  guest_vmid:
-    type: integer
-    minimum: 100
-    maximum: 999
-  title:
-    type: string
-    minLength: 1
-  short_ready_message:
-    type: string
-    minLength: 1
-  ready_message:
-    type: string
-    minLength: 1
-  layout:
-    type: object
-    additionalProperties: false
-    required: [separator, width]
-    properties:
-      separator:
-        type: string
-        minLength: 1
-        maxLength: 4
-      width:
-        type: integer
-        minimum: 20
-        maximum: 120
-  checks:
-    type: array
-    minItems: 1
-    items:
-      type: object
-      additionalProperties: false
-      required: [type, message]
-      properties:
-        type:
-          enum:
-            - runtime
-            - portal
-            - openbao
-            - semaphore
-            - runtime_tools
-            - pve_access
-        message:
-          type: string
-          minLength: 1
-  data:
-    type: object
-    minProperties: 1
-    additionalProperties:
-      $ref: '#/$defs/dataSource'
-  sections:
-    type: array
-    minItems: 1
-    items:
-      type: object
-      additionalProperties: false
-      required: [title, fields]
-      properties:
-        title:
-          type: string
-          minLength: 1
-        fields:
-          type: array
-          minItems: 1
-          items:
-            $ref: '#/$defs/field'
+$ref: '#/$defs/commonStatus'
+
 $defs:
-  dataSource:
-    oneOf:
-      - type: object
-        additionalProperties: false
-        required: [type]
-        properties:
-          type:
-            const: primary_ipv4
-      - type: object
-        additionalProperties: false
-        required: [type]
-        properties:
-          type:
-            const: project_branch
-      - type: object
-        additionalProperties: false
-        required: [type, repository]
-        properties:
-          type:
-            const: git_revision
-          repository:
-            type: string
-            pattern: '^/'
-      - type: object
-        additionalProperties: false
-        required: [type, path]
-        properties:
-          type:
-            const: file
-          path:
-            type: string
-            pattern: '^/'
-          sensitive:
-            type: boolean
-  field:
+  commonStatus:
     type: object
     additionalProperties: false
-    required: [label]
+    required:
+      - schema_version
+      - guest_vmid
+      - checks
     properties:
-      label:
+      schema_version:
+        const: 2
+      guest_vmid:
+        type: integer
+        minimum: 100
+        maximum: 999
+      checks:
+        type: array
+        minItems: 1
+        items:
+          oneOf:
+            - $ref: '#/$defs/dockerCheck'
+            - $ref: '#/$defs/fileCheck'
+            - $ref: '#/$defs/httpCheck'
+            - $ref: '#/$defs/localStatusCheck'
+            - $ref: '#/$defs/systemdCheck'
+            - $ref: '#/$defs/tcpCheck'
+
+  dockerCheck:
+    type: object
+    additionalProperties: false
+    required: [type, message, container]
+    properties:
+      type:
+        const: docker
+      message:
         type: string
         minLength: 1
-      source:
+      container:
         type: string
         minLength: 1
-      value:
-        type: string
-      template:
+
+  fileCheck:
+    type: object
+    additionalProperties: false
+    required: [type, message, path]
+    properties:
+      type:
+        const: file
+      message:
         type: string
         minLength: 1
-    oneOf:
-      - required: [source]
-      - required: [value]
-      - required: [template]
+      path:
+        type: string
+        pattern: '^/'
+
+  httpCheck:
+    type: object
+    additionalProperties: false
+    required: [type, message, url]
+    properties:
+      type:
+        const: http
+      message:
+        type: string
+        minLength: 1
+      url:
+        type: string
+        minLength: 1
+
+  localStatusCheck:
+    type: object
+    additionalProperties: false
+    required: [type, message, command]
+    properties:
+      type:
+        const: local_status
+      message:
+        type: string
+        minLength: 1
+      command:
+        type: string
+        pattern: '^/'
+
+  systemdCheck:
+    type: object
+    additionalProperties: false
+    required: [type, message, unit]
+    properties:
+      type:
+        const: systemd
+      message:
+        type: string
+        minLength: 1
+      unit:
+        type: string
+        minLength: 1
+
+  tcpCheck:
+    type: object
+    additionalProperties: false
+    required: [type, message, port]
+    properties:
+      type:
+        const: tcp
+      message:
+        type: string
+        minLength: 1
+      port:
+        type: integer
+        minimum: 1
+        maximum: 65535

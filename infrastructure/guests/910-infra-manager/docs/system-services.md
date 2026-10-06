@@ -208,17 +208,19 @@ Ansible устанавливает в `/usr/local/sbin/` только техни
 
 Отдельные ссылки `/usr/local/bin/infra-manager-*` внутри 910 не создаются.
 
-### Python и status.yaml
+### Python и внутреннее состояние
 
 Ansible должен устанавливать:
 
 ```text
-status.yaml
+infra-manager-status.yaml
 → /etc/infra-manager/status.yaml
 
 scripts/infra-manager/infra_manager/
 → /usr/local/lib/infra-manager/infra_manager/
 ```
+
+Файл `../status.yaml` остаётся общим описанием `Status Guest` и внутрь 910 под этим именем не устанавливается.
 
 Проверка:
 
@@ -306,7 +308,7 @@ pct exec 910 -- infra-manager-status --full
 2. получить проект;
 3. установить Docker;
 4. установить Compose-файлы из `rootfs`;
-5. установить Python-код и `status.yaml`;
+5. установить Python-код и внутренний `infra-manager-status.yaml`;
 6. установить служебные команды;
 7. установить `infra-manager-openbao-startup-unseal.service`;
 8. выполнить `systemctl daemon-reload`;
@@ -354,7 +356,8 @@ systemctl --failed
 Целевое состояние должно быть реализовано через:
 
 - [`../rootfs/etc/systemd/system/`](../rootfs/etc/systemd/system/) — unit-файлы 910;
-- [`../status.yaml`](../status.yaml) — итоговые проверки;
+- [`../status.yaml`](../status.yaml) — подключение 910 к общему `Status Guest`;
+- [`../infra-manager-status.yaml`](../infra-manager-status.yaml) — внутренняя глубокая проверка 910;
 - Ansible-роль `infra_manager`;
 - `scripts/infra-manager/commands/` — служебные команды.
 

@@ -1,69 +1,7 @@
-schema_version: 1
+schema_version: 2
 guest_vmid: 910
 
-title: "Состояние infra-manager"
-short_ready_message: "infra-manager готов"
-ready_message: "infra-manager полностью готов"
-
-layout:
-  separator: "="
-  width: 60
-
 checks:
-  - type: runtime
-    message: "Docker и infra-runtime работают"
-  - type: portal
-    message: "Homepage и его действия работают"
-  - type: openbao
-    message: "OpenBao запущен"
-  - type: semaphore
-    message: "Semaphore работает"
-  - type: runtime_tools
-    message: "OpenTofu, Ansible и Packer готовы"
-  - type: pve_access
-    message: "Доступ к PVE подтверждён"
-
-data:
-  address:
-    type: primary_ipv4
-  semaphore_password:
-    type: file
-    path: /run/infra-manager/secrets/initial-admin-password
-    sensitive: true
-  project_branch:
-    type: project_branch
-  project_revision:
-    type: git_revision
-    repository: /var/lib/infra-manager/bootstrap-repo
-
-sections:
-  - title: "Система"
-    fields:
-      - label: "Адрес"
-        source: address
-
-  - title: "Портал"
-    fields:
-      - label: "Адрес"
-        template: "http://{address}:3001"
-
-  - title: "Semaphore"
-    fields:
-      - label: "Адрес"
-        template: "http://{address}:3000"
-      - label: "Логин"
-        value: "admin"
-      - label: "Пароль"
-        source: semaphore_password
-
-  - title: "Проект"
-    fields:
-      - label: "Ветка"
-        source: project_branch
-      - label: "Версия"
-        source: project_revision
-
-  - title: "Проверка"
-    fields:
-      - label: "Операторская команда"
-        value: "infra-manager status"
+  - type: local_status
+    command: /usr/local/sbin/infra-manager-status
+    message: "Внутренняя проверка infra-manager пройдена"

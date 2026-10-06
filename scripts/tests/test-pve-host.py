@@ -515,6 +515,33 @@ def test_issue_openbao_machine_credentials() -> None:
     assert "secret-410" not in " ".join(calls[0][0])
 
 
+def test_read_pve_json_value() -> None:
+    calls: list[tuple[str, tuple[str, ...], bool]] = []
+
+    def fake_ssh(node: str, *command: str, capture: bool = False):
+        calls.append((node, tuple(command), capture))
+        return SimpleNamespace(
+            returncode=0,
+            stdout='{"username":"operator","password":"secret"}\n',
+        )
+
+    with patch.object(module, "_ssh", side_effect=fake_ssh):
+        value = module.read_pve_json_value(
+            "pve",
+            "/mnt/private/operator-access.json",
+            "password",
+        )
+
+    assert value == "secret"
+    assert calls == [
+        (
+            "pve",
+            ("cat", "--", "/mnt/private/operator-access.json"),
+            True,
+        )
+    ]
+
+
 def test_sign_ssh_host_key() -> None:
     calls: list[tuple[tuple[str, ...], str]] = []
 
@@ -564,6 +591,7 @@ def main() -> None:
     test_recovery_host_support()
     test_sign_ssh_client_key()
     test_issue_openbao_machine_credentials()
+    test_read_pve_json_value()
     test_sign_ssh_host_key()
     print("[ОК] Проверки pve_host.py пройдены")
 

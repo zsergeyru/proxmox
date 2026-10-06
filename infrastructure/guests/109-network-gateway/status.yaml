@@ -1,0 +1,13 @@
+schema_version: 2
+guest_vmid: 109
+
+checks:
+  - type: docker
+    container: adguard-home
+    message: "AdGuard Home запущен"
+  - type: systemd
+    unit: smartdns
+    message: "SmartDNS работает"
+  - type: file
+    path: /etc/network-gateway/adguard-admin.env
+    message: "Данные входа AdGuard Home созданы"

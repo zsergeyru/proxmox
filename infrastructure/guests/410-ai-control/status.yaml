@@ -1,0 +1,13 @@
+schema_version: 2
+guest_vmid: 410
+
+checks:
+  - type: docker
+    container: hermes
+    message: "Hermes запущен"
+  - type: docker
+    container: open-webui
+    message: "Open WebUI запущен"
+  - type: file
+    path: /etc/ai-control/open-webui.env
+    message: "Данные входа Open WebUI созданы"

@@ -55,6 +55,12 @@ network_gateway:
       targets:
         - local
         - home
+      operator:
+        username: admin
+        password:
+          source: guest_env
+          path: /etc/network-gateway/adguard-admin.env
+          key: ADGUARD_ADMIN_PASSWORD
     paths:
       root: /opt/network-gateway
       compose: /opt/network-gateway/compose
