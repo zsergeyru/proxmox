@@ -148,8 +148,8 @@ def check_infra_manager_repair_operation() -> None:
         ) as repair_openbao,
         patch.object(
             semaphore_module,
-            "configure_project",
-        ) as configure_project,
+            "sync_project_from_task",
+        ) as sync_project,
         patch.object(
             status_module,
             "check_status",
@@ -160,7 +160,10 @@ def check_infra_manager_repair_operation() -> None:
 
     install_host.assert_called_once_with("pve", ROOT)
     repair_openbao.assert_called_once_with("pve")
-    configure_project.assert_called_once()
+    sync_project.assert_called_once_with(
+        branch=operations.SETTINGS.project_branch(),
+        repo_root=ROOT,
+    )
     check_status.assert_called_once_with(full=True, quiet=False)
 
 
