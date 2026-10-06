@@ -314,6 +314,8 @@ def run_guest_operation(
 
     if operation == "deploy":
         return _run_deploy(repo_root, identity)
+    if operation == "sync":
+        return _run_sync(repo_root, identity)
 
     client = PveClient.from_opentofu_env()
     if operation == "status":
@@ -322,7 +324,5 @@ def run_guest_operation(
         return _run_repair(client, repo_root, identity)
     if operation == "test":
         return _run_test(client, repo_root, identity)
-    if operation == "sync":
-        return _run_sync(repo_root, identity)
 
     raise InfraManagerError(f"Неизвестная операция гостя: {operation}")
