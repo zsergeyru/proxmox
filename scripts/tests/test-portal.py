@@ -18,6 +18,7 @@ sys.path.insert(0, str(MODULE_ROOT))
 from infra_manager.common import InfraManagerError
 from infra_manager.portal import (
     build_portal_bookmarks,
+    local_portal_definition,
     portal_services,
 )
 from infra_manager import portal_gateway
@@ -72,6 +73,26 @@ def check_service_discovery() -> None:
         "Open WebUI"
     }:
         fail("Open WebUI должен быть доступен общему порталу квартиры")
+
+
+def check_local_dashboard_address() -> None:
+    expected = {
+        109: "http://192.168.1.9:3001/",
+        410: "http://192.168.4.10:3001/",
+        910: "http://192.168.9.10:3001/",
+    }
+    for vmid, url in expected.items():
+        identity = portal_gateway.guest_identity(ROOT, vmid)
+        dashboard = local_portal_definition(ROOT, identity)
+        if not isinstance(dashboard, dict) or dashboard.get("url") != url:
+            fail(
+                f"Гость {vmid} имеет неверный адрес локальной панели: "
+                f"{dashboard!r}"
+            )
+
+    identity = portal_gateway.guest_identity(ROOT, 311)
+    if local_portal_definition(ROOT, identity) is not None:
+        fail("Гость 311 без portal.local не должен иметь локальную панель")
 
 
 def check_action_validation() -> None:
@@ -281,6 +302,7 @@ def check_rejected_task() -> None:
 def main() -> None:
     check_bookmarks()
     check_service_discovery()
+    check_local_dashboard_address()
     check_action_validation()
     check_queue_payload()
     check_gateway_http()
