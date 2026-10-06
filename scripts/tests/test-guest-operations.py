@@ -147,6 +147,11 @@ def check_infra_manager_repair_operation() -> None:
             "repair_openbao_on_host",
         ) as repair_openbao,
         patch.object(
+            operations,
+            "project_branch_for_checkout",
+            return_value="feature/guest-portals",
+        ) as project_branch,
+        patch.object(
             semaphore_module,
             "sync_project_from_task",
         ) as sync_project,
@@ -160,8 +165,9 @@ def check_infra_manager_repair_operation() -> None:
 
     install_host.assert_called_once_with("pve", ROOT)
     repair_openbao.assert_called_once_with("pve")
+    project_branch.assert_called_once_with(ROOT)
     sync_project.assert_called_once_with(
-        branch=operations.SETTINGS.project_branch(),
+        branch="feature/guest-portals",
         repo_root=ROOT,
     )
     check_status.assert_called_once_with(full=True, quiet=False)
