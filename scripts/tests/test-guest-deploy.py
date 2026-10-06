@@ -664,6 +664,14 @@ def check_temporary_certificate_path() -> None:
             patch.object(guest_deploy_module, "_ensure_ssh_host_key"),
             patch.object(
                 guest_deploy_module,
+                "install_openbao_host_support",
+            ),
+            patch.object(
+                guest_deploy_module,
+                "install_recovery_host_support",
+            ),
+            patch.object(
+                guest_deploy_module,
                 "_prepare_openbao_machine_ansible_vars",
                 return_value=["-e", "infra_openbao_machine_enabled=false"],
             ),
@@ -772,6 +780,14 @@ def check_host_certificate_is_passed_to_ansible() -> None:
             patch.object(guest_deploy_module, "_ensure_ssh_host_key"),
             patch.object(
                 guest_deploy_module,
+                "install_openbao_host_support",
+            ),
+            patch.object(
+                guest_deploy_module,
+                "install_recovery_host_support",
+            ),
+            patch.object(
+                guest_deploy_module,
                 "_prepare_openbao_machine_ansible_vars",
                 return_value=["-e", "infra_openbao_machine_enabled=false"],
             ),
@@ -876,6 +892,14 @@ def check_certificate_bootstrap_fallback() -> None:
             patch.object(guest_deploy_module, "_ensure_ssh_host_key"),
             patch.object(
                 guest_deploy_module,
+                "install_openbao_host_support",
+            ),
+            patch.object(
+                guest_deploy_module,
+                "install_recovery_host_support",
+            ),
+            patch.object(
+                guest_deploy_module,
                 "_prepare_openbao_machine_ansible_vars",
                 return_value=["-e", "infra_openbao_machine_enabled=false"],
             ),
@@ -961,6 +985,14 @@ def check_certificate_failure_is_fatal_after_trust() -> None:
             patch.object(guest_deploy_module, "_ensure_ssh_host_key"),
             patch.object(
                 guest_deploy_module,
+                "install_openbao_host_support",
+            ),
+            patch.object(
+                guest_deploy_module,
+                "install_recovery_host_support",
+            ),
+            patch.object(
+                guest_deploy_module,
                 "_prepare_openbao_machine_ansible_vars",
                 return_value=["-e", "infra_openbao_machine_enabled=false"],
             ),
@@ -981,8 +1013,117 @@ def check_certificate_failure_is_fatal_after_trust() -> None:
             fail("После установленного CA запрещён откат Ansible на постоянный ключ")
 
 
+def check_pve_host_support_before_signing() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        ca = root / "ssh-client-ca.pub"
+        ca.write_text("ssh-ed25519 AAAACA\n", encoding="utf-8")
+        permanent_key = root / "guest_ed25519"
+        permanent_key.write_text("permanent", encoding="utf-8")
+        context = DeploymentContext(
+            client=SimpleNamespace(),
+            vmid=920,
+            name="infra-manager",
+            node="pve",
+            kind="lxc",
+            features=("container-host",),
+            template_vmid=None,
+            address="192.0.2.20",
+            target='proxmox_virtual_environment_container.guest["920"]',
+            workspace=SimpleNamespace(),
+            paths=DeploymentPaths(
+                guest_dir=ROOT / "infrastructure/guests/910-infra-manager",
+                private_key=permanent_key,
+                playbook=ROOT / "automation/ansible/playbooks/configure-guest.yml",
+                known_hosts=root / "known_hosts",
+                plan_file=root / "plan",
+            ),
+        )
+        calls: list[str] = []
+
+        def record_openbao(node: str, repo_root: Path) -> None:
+            assert node == "pve"
+            assert repo_root == ROOT
+            calls.append("openbao-support")
+
+        def record_recovery(node: str, repo_root: Path) -> None:
+            assert node == "pve"
+            assert repo_root == ROOT
+            calls.append("recovery-support")
+
+        def sign_client(node: str, public_key: str) -> str:
+            assert node == "pve"
+            assert public_key.startswith("ssh-ed25519 ")
+            calls.append("sign-client")
+            return "ssh-ed25519-cert-v01@openssh.com AAAACERT"
+
+        def fake_run(argv: list[str], **kwargs: object) -> SimpleNamespace:
+            if argv[0] == "ssh-keygen" and "-t" in argv:
+                key = Path(argv[argv.index("-f") + 1])
+                key.write_text("PRIVATE", encoding="utf-8")
+                Path(str(key) + ".pub").write_text(
+                    "ssh-ed25519 AAAAPUBLIC temporary\n",
+                    encoding="utf-8",
+                )
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+            if argv[:2] == ["ssh-keygen", "-L"]:
+                return SimpleNamespace(returncode=0, stdout="valid", stderr="")
+            if argv[0] == "ssh":
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+            if argv[0] == "ansible-playbook":
+                calls.append("ansible")
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+            raise AssertionError(f"Неожиданная команда: {argv!r}")
+
+        with (
+            patch.object(
+                guest_deploy_module,
+                "PATHS",
+                SimpleNamespace(ssh_client_ca_public_key=ca),
+            ),
+            patch.object(guest_deploy_module, "run", side_effect=fake_run),
+            patch.object(guest_deploy_module, "_ensure_ssh_host_key"),
+            patch.object(
+                guest_deploy_module,
+                "install_openbao_host_support",
+                side_effect=record_openbao,
+            ),
+            patch.object(
+                guest_deploy_module,
+                "install_recovery_host_support",
+                side_effect=record_recovery,
+            ),
+            patch.object(
+                guest_deploy_module,
+                "sign_ssh_client_key",
+                side_effect=sign_client,
+            ),
+            patch.object(
+                guest_deploy_module,
+                "_prepare_openbao_machine_ansible_vars",
+                return_value=["-e", "infra_openbao_machine_enabled=false"],
+            ),
+        ):
+            guest_deploy_module._configure_guest_os(
+                context,
+                provision_phase="full",
+                self_update=True,
+            )
+
+        if calls[:3] != [
+            "openbao-support",
+            "recovery-support",
+            "sign-client",
+        ]:
+            fail(
+                "PVE helper должен обновляться полностью до первого "
+                f"SSH-подписания: {calls!r}"
+            )
+
+
 def main_test() -> None:
     check_deploy_guest_survey_input()
+    check_pve_host_support_before_signing()
     check_opentofu_state_status()
     check_guest_summary()
     check_infra_manager_self_update_path_after_vmid_change()
