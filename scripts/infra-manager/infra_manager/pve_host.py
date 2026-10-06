@@ -405,6 +405,32 @@ def show_openbao_operator_credentials(node: str) -> None:
     print(output)
 
 
+def read_pve_json_value(node: str, path: str, key: str) -> str:
+    """Прочитать строковое значение из защищённого JSON на PVE."""
+
+    target = Path(path)
+    if not target.is_absolute() or not str(target).startswith("/mnt/bindmounts/"):
+        raise InfraManagerError(
+            "Операторский PVE JSON разрешён только внутри /mnt/bindmounts"
+        )
+    if not key:
+        raise InfraManagerError("Не задан ключ операторского PVE JSON")
+
+    result = _ssh(node, "cat", str(target), capture=True)
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise InfraManagerError(
+            f"PVE вернул некорректный JSON: {target}"
+        ) from exc
+    value = payload.get(key) if isinstance(payload, dict) else None
+    if not isinstance(value, str) or not value:
+        raise InfraManagerError(
+            f"PVE JSON {target} не содержит строковое поле {key!r}"
+        )
+    return value
+
+
 def check_openbao_operator_access(node: str) -> None:
     """Проверить userpass-вход оператора OpenBao без выдачи пароля."""
     _ssh(
