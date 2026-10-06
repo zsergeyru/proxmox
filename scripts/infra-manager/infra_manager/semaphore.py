@@ -974,20 +974,29 @@ def _sync_project_objects(
     project_id: int,
     branch: str,
     repo_root: Path,
+    *,
+    reuse_existing_git: bool = False,
 ) -> None:
     """Синхронизировать управляемые объекты внутри существующего проекта."""
 
-    github_key_id = client.ensure_ssh_key(
-        project_id,
-        "GitHub project read-only",
-        "git",
-        GITHUB_KEY_COPY,
-    )
-    repository_id = client.ensure_repository(
-        project_id,
-        github_key_id,
-        branch,
-    )
+    if reuse_existing_git:
+        github_key_id, repository_id = _require_existing_task_git(
+            client,
+            project_id,
+            branch,
+        )
+    else:
+        github_key_id = client.ensure_ssh_key(
+            project_id,
+            "GitHub project read-only",
+            "git",
+            GITHUB_KEY_COPY,
+        )
+        repository_id = client.ensure_repository(
+            project_id,
+            github_key_id,
+            branch,
+        )
     opentofu_environment_id = client.ensure_opentofu_environment(project_id)
     infra_manager_environment_id = client.ensure_infra_manager_environment(
         project_id
@@ -1095,6 +1104,7 @@ def sync_project_from_task(
         project_id,
         branch,
         repo_root or PATHS.repo_root,
+        reuse_existing_git=True,
     )
     console.ok(
         "Проект Semaphore синхронизирован без изменения root-секретов"
