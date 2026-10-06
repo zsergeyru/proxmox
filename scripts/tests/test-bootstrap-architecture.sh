@@ -23,6 +23,7 @@ GUEST="$GUEST_DIR/guest.yaml"
 PROVISION="$GUEST_DIR/provision.yaml"
 STATUS="$GUEST_DIR/status.yaml"
 DEPLOY="$ROOT/scripts/infra-manager/jobs/deploy-guest.py"
+GUEST_OPERATIONS="$ROOT/scripts/infra-manager/infra_manager/guest_operations.py"
 PLAYBOOK="$ROOT/automation/ansible/playbooks/configure-guest.yml"
 BOOTSTRAP_DIR="$ROOT/scripts/bootstrap-runner"
 
@@ -71,7 +72,8 @@ done
 [[ -s "$BOOTSTRAP_DIR/deploy-infra-manager.sh" ]] || die "Отсутствует сценарий deploy-infra-manager.sh"
 [[ ! -e "$BOOTSTRAP_DIR/deploy-910.sh" ]] || die "Сценарий с VMID в имени не должен возвращаться"
 
-grep -q 'run_deploy_guest' "$DEPLOY"     || die "infra-manager должен разворачиваться через общий deploy-guest"
+grep -q 'deploy_guest' "$DEPLOY"     || die "bootstrap должен использовать общий механизм Deploy"
+grep -q 'run_deploy_guest' "$GUEST_OPERATIONS"     || die "общий Deploy должен использовать guest_deploy"
 grep -q 'provision.yaml' "$PLAYBOOK"     || die "Общий Ansible playbook должен применять provision.yaml"
 
 if grep -R -n -E     'scripts/infra-manager/setup\.sh|python3[[:space:]]+-m[[:space:]]+infra_manager[[:space:]]+setup|infra_manager[[:space:]]+setup'     "$BOOTSTRAP_DIR"; then
