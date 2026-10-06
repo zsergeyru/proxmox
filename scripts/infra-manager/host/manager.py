@@ -178,7 +178,6 @@ def status() -> int:
                 vmid,
                 "infra-manager-status",
                 "--full",
-                "--quiet",
                 check=False,
             )
             if result.returncode:
@@ -191,6 +190,8 @@ def status() -> int:
         )
         return 1
 
+    print("\n==> OpenBao UI")
+    openbao_operator(rotate=False)
     print("\n[ОК] infra-manager полностью готов")
     return 0
 
