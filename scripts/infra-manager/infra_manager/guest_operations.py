@@ -156,7 +156,7 @@ def _infra_manager_repair(
     identity: GuestIdentity,
 ) -> None:
     del identity
-    from .semaphore import configure_project
+    from .semaphore import sync_project_from_task
     from .status import check_status
 
     console.info("Обновление PVE-only OpenBao helper")
@@ -164,7 +164,10 @@ def _infra_manager_repair(
     console.info("Безопасное восстановление OpenBao")
     repair_openbao_on_host(node)
     console.info("Синхронизация проекта Semaphore")
-    configure_project(branch=SETTINGS.project_branch())
+    sync_project_from_task(
+        branch=SETTINGS.project_branch(),
+        repo_root=repo_root,
+    )
     check_status(full=True, quiet=False)
 
 
