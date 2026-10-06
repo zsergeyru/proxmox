@@ -114,9 +114,9 @@ def main_test() -> None:
         fail(f"Неожиданный состав шаблонов Semaphore: {actual_templates!r}")
 
     expected_views = [
-        ("Guests", 0),
-        ("Infrastructure", 1),
-        ("Security", 2),
+        ("Guests", 1),
+        ("Infrastructure", 2),
+        ("Security", 3),
     ]
     actual_views = [
         (spec.title, spec.position)
