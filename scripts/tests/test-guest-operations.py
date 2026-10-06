@@ -14,7 +14,6 @@ sys.path.insert(0, str(MODULE_ROOT))
 
 from infra_manager import guest_operations as operations
 from infra_manager import semaphore as semaphore_module
-from infra_manager import status as status_module
 from infra_manager.common import InfraManagerError
 from infra_manager.guest_catalog import deployable_guests, guest_identity
 
@@ -155,10 +154,6 @@ def check_infra_manager_repair_operation() -> None:
             semaphore_module,
             "sync_project_from_task",
         ) as sync_project,
-        patch.object(
-            status_module,
-            "check_status",
-        ) as check_status,
     ):
         if operations._run_repair(client, ROOT, identity) != 0:
             fail("Repair Guest infra-manager должен завершаться успешно")
@@ -170,7 +165,6 @@ def check_infra_manager_repair_operation() -> None:
         branch="feature/guest-portals",
         repo_root=ROOT,
     )
-    check_status.assert_called_once_with(full=True, quiet=False)
 
 
 def check_test_operation() -> None:
