@@ -351,10 +351,13 @@ if not isinstance(payload, dict):
     raise SystemExit("invalid configuration payload")
 token = payload.get("root_token")
 existing_credentials = payload.get("existing_credentials", {})
+rotate_secret_ids = payload.get("rotate_secret_ids", False)
 if not isinstance(token, str) or not token:
     raise SystemExit("empty root token")
 if not isinstance(existing_credentials, dict):
     raise SystemExit("invalid existing credentials")
+if not isinstance(rotate_secret_ids, bool):
+    raise SystemExit("invalid rotate_secret_ids")
 
 
 def request(method, path, payload=None):
@@ -686,7 +689,7 @@ for role_name, policy_name, token_ttl, token_max_ttl in roles:
         raise SystemExit(f"OpenBao did not return RoleID for {role_name}")
     existing_item = existing_credentials.get(role_name)
     secret_id = None
-    if isinstance(existing_item, dict):
+    if not rotate_secret_ids and isinstance(existing_item, dict):
         existing_role_id = existing_item.get("role_id")
         existing_secret_id = existing_item.get("secret_id")
         if (
@@ -1798,6 +1801,154 @@ writer_policy = json.dumps(
         }
     },
     separators=(",", ":"),
+)
+request(
+    "POST",
+    "/v1/sys/policies/acl/infra-manager-kv-semaphore-write",
+    {"policy": writer_policy},
+)
+
+auth_payload = request("GET", "/v1/sys/auth")
+auth_methods = auth_payload.get("data", auth_payload)
+if not isinstance(auth_methods, dict):
+    raise SystemExit("OpenBao returned invalid auth methods list")
+existing_auth = auth_methods.get("infra-manager/")
+if existing_auth is None:
+    request(
+        "POST",
+        "/v1/sys/auth/infra-manager",
+        {
+            "type": "approle",
+            "description": "Служебный доступ infra-manager",
+        },
+    )
+elif not isinstance(existing_auth, dict) or existing_auth.get("type") != "approle":
+    raise SystemExit("auth/infra-manager exists with unexpected type")
+
+role_definitions = (
+    ("kv-reader", "infra-manager-kv-read"),
+    ("kv-semaphore-writer", "infra-manager-kv-semaphore-write"),
+)
+credentials = {}
+for role_name, policy_name in role_definitions:
+    request(
+        "POST",
+        f"/v1/auth/infra-manager/role/{role_name}",
+        {
+            "bind_secret_id": True,
+            "secret_id_bound_cidrs": ["127.0.0.1/32"],
+            "secret_id_num_uses": 0,
+            "secret_id_ttl": "0s",
+            "token_bound_cidrs": ["127.0.0.1/32"],
+            "token_num_uses": 0,
+            "token_policies": [policy_name],
+            "token_ttl": "5m",
+            "token_max_ttl": "10m",
+        },
+    )
+    role_payload = request(
+        "GET",
+        f"/v1/auth/infra-manager/role/{role_name}/role-id",
+    )
+    secret_payload = request(
+        "POST",
+        f"/v1/auth/infra-manager/role/{role_name}/secret-id",
+        {},
+    )
+    role_id = role_payload.get("data", {}).get("role_id")
+    secret_id = secret_payload.get("data", {}).get("secret_id")
+    if not isinstance(role_id, str) or not role_id:
+        raise SystemExit(f"OpenBao did not return RoleID for {role_name}")
+    if not isinstance(secret_id, str) or not secret_id:
+        raise SystemExit(f"OpenBao did not return SecretID for {role_name}")
+    credentials[role_name] = {
+        "role_id": role_id,
+        "secret_id": secret_id,
+    }
+
+print(json.dumps(credentials, separators=(",", ":")))
+"""
+
+
+RECONCILE_KV_ACCESS_CODE = r"""
+import json
+import sys
+import urllib.request
+
+BASE = "http://127.0.0.1:8200"
+MOUNT = "infra-secrets"
+token = sys.stdin.read().strip()
+if not token:
+    raise SystemExit("empty root token")
+
+
+def request(method, path, payload=None):
+    data = None
+    headers = {
+        "Content-Type": "application/json",
+        "X-Vault-Token": token,
+    }
+    if payload is not None:
+        data = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+    req = urllib.request.Request(
+        f"{BASE}{path}",
+        data=data,
+        headers=headers,
+        method=method,
+    )
+    with urllib.request.urlopen(req, timeout=30) as response:
+        raw = response.read()
+    return json.loads(raw.decode("utf-8")) if raw else {}
+
+
+reader_policy = json.dumps(
+    {
+        "path": {
+            f"{MOUNT}/data/pve/api/infra-manager": {
+                "capabilities": ["read"],
+            },
+            f"{MOUNT}/data/git/github/proxmox-read": {
+                "capabilities": ["read"],
+            },
+            f"{MOUNT}/data/services/semaphore": {
+                "capabilities": ["read"],
+            },
+            "auth/token/lookup-self": {
+                "capabilities": ["read"],
+            },
+            "auth/token/revoke-self": {
+                "capabilities": ["update"],
+            },
+            "sys/capabilities-self": {
+                "capabilities": ["update"],
+            },
+        }
+    },
+    separators=(",", ":"),
+)
+writer_policy = json.dumps(
+    {
+        "path": {
+            f"{MOUNT}/data/services/semaphore": {
+                "capabilities": ["read", "update"],
+            },
+            "auth/token/lookup-self": {
+                "capabilities": ["read"],
+            },
+            "auth/token/revoke-self": {
+                "capabilities": ["update"],
+            },
+            "sys/capabilities-self": {
+                "capabilities": ["update"],
+            },
+        }
+    },
+    separators=(",", ":"),
+)
+request(
+    "POST",
+    "/v1/sys/policies/acl/infra-manager-kv-read",
+    {"policy": reader_policy},
 )
 request(
     "POST",
