@@ -33,11 +33,12 @@ def check_operation_catalog() -> None:
                 f"Операция {operation} должна использовать общий каталог гостей"
             )
 
-    sync_guests = operations.operation_guests(ROOT, "sync")
-    if not sync_guests:
-        fail("Sync Guest должен иметь хотя бы один поддерживаемый гость")
-    if any(guest.role != "infra-manager" for guest in sync_guests):
-        fail("На текущем этапе Sync должен быть реализован только для infra-manager")
+    actual_sync = {
+        guest.vmid
+        for guest in operations.operation_guests(ROOT, "sync")
+    }
+    if actual_sync != expected:
+        fail("Sync Guest должен использовать общий каталог гостей")
 
 
 class FakePveClient:
@@ -159,13 +160,15 @@ def check_sync_operation() -> None:
             fail("Sync Guest infra-manager должен завершаться успешно")
     sync.assert_called_once_with(ROOT, identity)
 
-    unsupported = guest_identity(ROOT, 109)
-    try:
-        operations._run_sync(ROOT, unsupported)
-    except InfraManagerError:
-        pass
-    else:
-        fail("Sync Guest не должен молча работать для роли без обработчика")
+    regular = guest_identity(ROOT, 109)
+    with patch.object(
+        operations,
+        "run_deploy_guest",
+        return_value=0,
+    ) as deploy:
+        if operations._run_sync(ROOT, regular) != 0:
+            fail("Sync Guest обычного гостя должен завершаться успешно")
+    deploy.assert_called_once_with(ROOT, 109, phase="provision")
 
 
 def check_deploy_operation() -> None:
