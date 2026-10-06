@@ -289,6 +289,7 @@ def test_openbao_status_checks() -> None:
 
     with patch.object(module, "_ssh", side_effect=record_ssh):
         module.check_openbao_kv("pve")
+        module.show_openbao_operator_credentials("pve")
         module.check_openbao_operator_access("pve")
         module.check_openbao_ssh_access("pve")
 
@@ -296,6 +297,12 @@ def test_openbao_status_checks() -> None:
         (
             "/usr/local/sbin/infra-manager-openbao-unseal",
             "--check-kv",
+            "--log-level",
+            "quiet",
+        ),
+        (
+            "/usr/local/sbin/infra-manager-openbao-unseal",
+            "--show-operator-credentials",
             "--log-level",
             "quiet",
         ),
