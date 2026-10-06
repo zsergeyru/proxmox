@@ -165,6 +165,14 @@ def check_style_contract() -> None:
     css = custom_css.read_text(encoding="utf-8")
     if "#layout-groups" not in css or "max-width: 1280px" not in css:
         fail("Homepage должен центрировать группы в ограниченной ширине")
+    for value in (
+        "min-height: 68px",
+        "min-height: 58px",
+        "width: 3.5rem",
+        "width: 3.25rem",
+    ):
+        if value not in css:
+            fail(f"Homepage не содержит увеличенный размер карточек: {value}")
 
     compose = (
         role / "templates" / "docker-compose.yml.j2"
