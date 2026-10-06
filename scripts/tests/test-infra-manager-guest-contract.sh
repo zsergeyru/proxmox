@@ -40,6 +40,7 @@ PY_ACCESS_POLICY="$ROOT/scripts/infra-manager/infra_manager/access.py"
 PY_OPENBAO="$ROOT/scripts/infra-manager/infra_manager/openbao.py"
 PY_RECOVERY="$ROOT/scripts/infra-manager/infra_manager/recovery.py"
 RECOVERY_HOST="$ROOT/scripts/infra-manager/host/recovery.py"
+PVE_OPERATOR="$ROOT/scripts/infra-manager/host/manager.py"
 DOCKERFILE="$ROOT/infrastructure/guests/910-infra-manager/rootfs/opt/infra-manager/compose/runtime/Dockerfile"
 REQ="$ROOT/infrastructure/guests/910-infra-manager/rootfs/opt/infra-manager/compose/runtime/requirements.txt"
 PLAN="$ROOT/scripts/infra-manager/jobs/opentofu-plan.py"
@@ -111,10 +112,18 @@ grep -Fq 'RECOVERY_GITHUB_KEY = RECOVERY_DIR / "github_proxmox_repo_ed25519"' "$
     || die "PVE recovery helper должен иметь аварийную Git-копию"
 grep -Fq -- '--restore-git-access' "$RECOVERY_HOST" \
     || die "PVE recovery helper должен уметь восстанавливать bootstrap Git-доступ"
+[[ -s "$PVE_OPERATOR" ]] \
+    || die "PVE должен иметь единую операторскую команду infra-manager"
+grep -Fq 'recovery_check("--preflight")' "$PVE_OPERATOR" \
+    || die "repair/recover должны начинаться с проверки постоянного состояния"
+grep -Fq 'verify_guest_owned(vmid, name)' "$PVE_OPERATOR" \
+    || die "repair должен проверять строгую принадлежность объекта infra-manager"
+grep -Fq 'run(["bash", str(bootstrap), "--recover"])' "$PVE_OPERATOR" \
+    || die "recover должен использовать защищённый bootstrap recovery"
 grep -Fq 'check_recovery_contour(node)' "$PY_OPENBAO" \
-    || die "Initialize OpenBao должен завершаться полной recovery-проверкой"
+    || die "Внутренняя инициализация OpenBao должна завершаться полной recovery-проверкой"
 grep -Fq 'cleanup_transition_state(node)' "$PY_OPENBAO" \
-    || die "Initialize OpenBao должен удалять проверенные остатки старой схемы"
+    || die "Внутренняя инициализация OpenBao должна удалять проверенные остатки старой схемы"
 grep -Fq -- '--cleanup-transition' "$RECOVERY_HOST" \
     || die "PVE recovery helper должен иметь безопасную очистку старой схемы"
 
