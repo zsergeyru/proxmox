@@ -9,22 +9,6 @@
       Локальный портал требует непустой portal.local.title и Docker
       в provision.yaml.
 
-- name: Проверить публикацию служб локального портала
-  ansible.builtin.assert:
-    that:
-      - item.value.portal.name is string
-      - item.value.portal.name | length > 0
-      - item.value.portal.scheme in ["http", "https"]
-      - item.value.portal.port | int > 0
-      - item.value.portal.port | int < 65536
-      - item.value.portal.targets is iterable
-      - item.value.portal.targets is not string
-      - item.value.portal.targets | difference(["local", "home"]) | length == 0
-    fail_msg: >-
-      Некорректный portal у службы {{ item.key }} в provision.yaml.
-  loop: "{{ provision.docker.services | default({}) | dict2items }}"
-  when: item.value.portal is defined
-
 - name: Определить параметры локального портала
   ansible.builtin.set_fact:
     portal_local_port: "{{ provision.portal.local.port | default(portal_default_port) | int }}"
@@ -56,12 +40,29 @@
     mode: "0644"
 
 - name: Сформировать список служб Homepage
-  ansible.builtin.template:
-    src: services.yaml.j2
+  ansible.builtin.command:
+    argv:
+      - python3
+      - -m
+      - infra_manager
+      - portal-services
+      - --guest-vmid
+      - "{{ provision.guest_vmid | string }}"
+  environment:
+    PYTHONPATH: "{{ project_root }}/scripts/infra-manager"
+  delegate_to: localhost
+  become: false
+  register: portal_services
+  changed_when: false
+
+- name: Установить список служб Homepage
+  ansible.builtin.copy:
     dest: "{{ portal_config_dir }}/services.yaml"
     owner: root
     group: root
     mode: "0644"
+    content: |
+      {{ portal_services.stdout | default('[]') }}
 
 - name: Сформировать ссылки управления гостем
   ansible.builtin.command:
