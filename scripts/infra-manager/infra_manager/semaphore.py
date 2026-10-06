@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from .common import LOG_LEVEL_ENV, LOG_LEVELS, InfraManagerError, console
-from .guest_catalog import deployable_guests
+from .guest_operations import operation_guests
 from .pve_host import update_openbao_semaphore_api_token
 from .settings import PATHS, SETTINGS
 
@@ -44,19 +44,23 @@ class TemplateSpec:
     survey_vars: tuple[dict[str, Any], ...] = ()
 
 
-def _deploy_guest_survey(repo_root: Path) -> tuple[dict[str, Any], ...]:
-    """Сформировать безопасный список гостей для формы Deploy Guest."""
+def _guest_survey(
+    repo_root: Path,
+    operation: str,
+) -> tuple[dict[str, Any], ...]:
+    """Сформировать безопасный список гостей для одной операции."""
 
+    guests = operation_guests(repo_root, operation)
     values = [
         {
             "name": f"{guest.vmid} — {guest.name}",
             "value": str(guest.vmid),
         }
-        for guest in deployable_guests(repo_root)
+        for guest in guests
     ]
     if not values:
         raise InfraManagerError(
-            "Не найдено гостей с guest.yaml и provision.yaml для Deploy Guest"
+            f"Для операции {operation} не найдено поддерживаемых гостей"
         )
     return (
         {
@@ -90,9 +94,33 @@ def semaphore_templates(
         ),
         TemplateSpec(
             name="Deploy Guest",
-            playbook="scripts/infra-manager/jobs/deploy-guest.py",
-            arguments="[]",
-            survey_vars=_deploy_guest_survey(root),
+            playbook="scripts/infra-manager/jobs/guest-operation.py",
+            arguments='["deploy"]',
+            survey_vars=_guest_survey(root, "deploy"),
+        ),
+        TemplateSpec(
+            name="Status Guest",
+            playbook="scripts/infra-manager/jobs/guest-operation.py",
+            arguments='["status"]',
+            survey_vars=_guest_survey(root, "status"),
+        ),
+        TemplateSpec(
+            name="Repair Guest",
+            playbook="scripts/infra-manager/jobs/guest-operation.py",
+            arguments='["repair"]',
+            survey_vars=_guest_survey(root, "repair"),
+        ),
+        TemplateSpec(
+            name="Test Guest",
+            playbook="scripts/infra-manager/jobs/guest-operation.py",
+            arguments='["test"]',
+            survey_vars=_guest_survey(root, "test"),
+        ),
+        TemplateSpec(
+            name="Sync Guest",
+            playbook="scripts/infra-manager/jobs/guest-operation.py",
+            arguments='["sync"]',
+            survey_vars=_guest_survey(root, "sync"),
         ),
         TemplateSpec(
             name="Sync SSH Access",
