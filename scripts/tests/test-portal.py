@@ -16,6 +16,7 @@ MODULE_ROOT = ROOT / "scripts" / "infra-manager"
 sys.path.insert(0, str(MODULE_ROOT))
 
 from infra_manager.common import InfraManagerError
+from infra_manager.guest_catalog import guest_identity
 from infra_manager.portal import (
     build_portal_bookmarks,
     local_portal_definition,
@@ -82,7 +83,7 @@ def check_local_dashboard_address() -> None:
         910: "http://192.168.9.10:3001/",
     }
     for vmid, url in expected.items():
-        identity = portal_gateway.guest_identity(ROOT, vmid)
+        identity = guest_identity(ROOT, vmid)
         dashboard = local_portal_definition(ROOT, identity)
         if not isinstance(dashboard, dict) or dashboard.get("url") != url:
             fail(
@@ -90,7 +91,7 @@ def check_local_dashboard_address() -> None:
                 f"{dashboard!r}"
             )
 
-    identity = portal_gateway.guest_identity(ROOT, 311)
+    identity = guest_identity(ROOT, 311)
     if local_portal_definition(ROOT, identity) is not None:
         fail("Гость 311 без portal.local не должен иметь локальную панель")
 
