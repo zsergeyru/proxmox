@@ -49,15 +49,16 @@ scripts/
 │   │   ├── template_verify.py               # Проверяет шаблон через временную полную копию 9099
 │   │   └── status.py                        # Исполняет проверки и вывод из status.yaml infra-manager
 │   │
-│   ├── commands/                            # Исходные файлы административных команд, устанавливаемых в /usr/local/sbin
-│   │   ├── python-command.sh                # Общая оболочка status, PVE access check и lifecycle test
+│   ├── commands/                            # Внутренние команды 910
+│   │   ├── python-command.sh                # Техническая оболочка внутреннего status
 │   │   ├── activate-runtime.sh              # Отложенно активирует обновлённую управляющую среду
 │   │   └── openbao-startup-unseal.sh        # Восстанавливает OpenBao при запуске infra-manager
 │   │
 │   ├── host/                                # Код, устанавливаемый и выполняемый непосредственно на PVE
-│   │   ├── openbao-unseal.py                # Оркестрирует инициализацию, разблокировку и служебные операции OpenBao
+│   │   ├── manager.py                       # Единая операторская команда infra-manager: status/repair/recover
+│   │   ├── openbao-unseal.py                # Внутренний helper OpenBao
 │   │   ├── openbao_host/                    # Встроенные программы, TLS и общие ошибки хостовой поддержки OpenBao
-│   │   └── recovery.py                      # Независимый аварийный контур восстановления infra-manager
+│   │   └── recovery.py                      # Внутренний PVE-only helper аварийного состояния
 │   │
 │   └── jobs/                                # Задания, непосредственно запускаемые Semaphore
 │       ├── opentofu-plan.py                  # Формирует входные данные OpenTofu и строит только план изменений
@@ -74,7 +75,8 @@ scripts/
     ├── test-guest-resolver.py                # Проверяет сборщик конфигурации, управление, начальную настройку и возможности профиля
     ├── test-infra-manager-python.py          # Проверяет основу Python-пакета, командную оболочку и вспомогательные функции PVE
     ├── test-pve-lifecycle.py                 # Проверяет lifecycle test без реального изменения PVE
-    ├── test-python-command.py                # Поведенчески проверяет общую оболочку трёх административных команд
+    ├── test-python-command.py                # Проверяет внутреннюю оболочку status
+    ├── test-manager-host.py                  # Проверяет единую операторскую команду PVE
     ├── test-opentofu-input.py                # Проверяет состав guests.json и исключение специальных объектов
     ├── test-status.py                        # Проверяет снимок, шаблоны и контракты Semaphore
     ├── test-template.py                      # Проверяет параметры и валидацию шаблона Packer
@@ -137,38 +139,18 @@ Semaphore: OpenTofu Plan
 `deploy-guest.py`:
 
 ```text
-Semaphore: Deploy Guest 410
+Semaphore: Deploy Guest
+→ выбрать гостя из ограниченного списка GUEST_VMID
 → scripts/infra-manager/jobs/deploy-guest.py
 → OpenTofu apply для выбранной гостевой системы
 → Ansible-настройка гостевой системы
 ```
 
-Для гостя с `role: infra-manager` используется тот же вход:
-
-```text
-Semaphore: Deploy Guest <VMID infra-manager>
-→ scripts/infra-manager/jobs/deploy-guest.py
-→ проверить существующий infra-manager без собственного OpenTofu state
-→ общий Ansible применяет provision.yaml
-→ отложенная активация infra-runtime после завершения задания
-```
+Для гостя с `role: infra-manager` используется тот же вход. Он проверяет существующий infra-manager без собственного OpenTofu state, применяет общий `provision.yaml` и откладывает активацию `infra-runtime` до завершения текущего задания.
 
 Таким образом, отдельного оркестратора обновления infra-manager нет. Отличается только владение объектом Proxmox и безопасный момент перезапуска контейнера, внутри которого выполняется Semaphore.
 
-`initialize-openbao.py`:
-
-```text
-Semaphore: Initialize OpenBao <VMID infra-manager>
-→ scripts/infra-manager/jobs/initialize-openbao.py
-→ infra_manager.openbao
-→ root SSH к PVE
-→ установка хостового сценария разблокировки
-→ первичная инициализация OpenBao
-→ сохранение ключа снятия блокировки только на PVE
-→ проверка sealed=false
-```
-
-Задание идемпотентно. Первоначальный bootstrap вызывает ту же инициализацию автоматически до удаления временных credentials; отдельный запуск Semaphore остаётся штатным способом повторной проверки и восстановления конфигурации OpenBao.
+`initialize-openbao.py` остаётся внутренней точкой первоначального bootstrap и восстановления. В Semaphore отдельного шаблона для неё нет. Для человека штатные действия вынесены в PVE-команду `infra-manager repair` и `infra-manager recover`.
 
 При запуске самого 910 используется отдельная одноразовая команда `openbao-startup-unseal.sh`. Она ждёт доступности OpenBao и требует рабочее состояние `initialized=true, sealed=false`. Для любого уже инициализированного OpenBao команда вызывает хостовый сценарий на PVE: при `sealed=true` он снимает блокировку, а при `sealed=false` пропускает повторную разблокировку, но всё равно восстанавливает рабочие секреты и выполняет обязательные проверки. Неинициализированный OpenBao считается ошибкой запуска; автоматический `sys/init` не выполняется. Периодического запуска на PVE нет.
 
@@ -184,23 +166,21 @@ Semaphore: Build Template 9000
 
 `template_verify.py` вызывается сборкой напрямую: создаёт временную полную копию 9099, проверяет Cloud-Init, QEMU Guest Agent, SSH, machine-id и SSH host keys, затем удаляет клон.
 
-## `infra-manager/commands/`
+## Операторская и внутренние команды
 
-Это стабильные административные команды, которые общий Ansible-механизм устанавливает в `/usr/local/sbin`.
-
-Один файл `python-command.sh` устанавливается под тремя именами:
+Единственный штатный интерфейс человека устанавливается на физическом PVE:
 
 ```text
-infra-manager-status
-infra-manager-pve-access-check
-infra-manager-pve-lifecycle-test
+infra-manager status
+infra-manager repair
+infra-manager recover
 ```
 
-Оболочка определяет нужную Python-подкоманду по своему установленному имени и запускает `python3 -m infra_manager`. Поэтому поиск установленного Python-пакета, настройка `PYTHONPATH` и аварийный переход к рабочей копии проекта описаны только один раз.
+Его реализация находится в `scripts/infra-manager/host/manager.py`.
 
-Реальная логика lifecycle test находится в `infra_manager/pve_lifecycle.py` и использует общий `PveClient`. Команда только с `--apply` создаёт временный LXC 9098 в pool `managed`, изменяет его, запускает, останавливает и удаляет; аварийная очистка удаляет объект только после проверки ожидаемых типа и имени.
+Внутри 910 остаётся техническая `infra-manager-status`, которую PVE вызывает через `pct exec`. Отдельные установленные команды `infra-manager-pve-access-check` и `infra-manager-pve-lifecycle-test` удалены; соответствующая Python-логика остаётся доступна тестам и внутреннему коду через `python3 -m infra_manager`.
 
-`activate-runtime.sh` устанавливается как `infra-manager-activate-runtime` и используется только для отложенной активации новой управляющей среды после самообновления 910.
+`infra-manager-activate-runtime` и `infra-manager-openbao-startup-unseal` являются внутренними командами автоматизации, а PVE-команды `infra-manager-openbao-unseal` и `infra-manager-recovery` — внутренними helper-механизмами для единой операторской команды.
 
 ## `guests/`
 
@@ -235,7 +215,8 @@ python scripts/validate_repo.py
 - `test-opentofu-input.py` проверяет состав входа OpenTofu и исключение 910.
 - `test-infra-manager-python.py` проверяет основу Python-пакета, командную оболочку и PVE-вспомогательные функции.
 - `test-pve-lifecycle.py` проверяет полный сценарий lifecycle test, защиту занятого VMID и аварийную очистку без реального PVE.
-- `test-python-command.py` запускает общую оболочку под всеми тремя установленными именами и проверяет фактическую передачу команды в Python CLI.
+- `test-python-command.py` проверяет внутреннюю оболочку `infra-manager-status`.
+- `test-manager-host.py` проверяет `infra-manager status/repair/recover` без реального изменения PVE.
 - `test-bootstrap-host.py` проверяет состояния первоначального контура, восстановление, строгую метку владения 910 и безопасное удаление.
 - `test-status.py` проверяет чтение и валидацию состояния Semaphore.
 - `test-template.py` проверяет безопасную передачу параметров Packer и валидацию шаблона.
@@ -245,7 +226,8 @@ python scripts/validate_repo.py
 
 - код жизненного цикла 910 → `scripts/infra-manager/`;
 - задания Semaphore → `scripts/infra-manager/jobs/`;
-- установленные административные команды → `scripts/infra-manager/commands/`;
+- операторская команда PVE → `scripts/infra-manager/host/manager.py`;
+- внутренние команды 910 → `scripts/infra-manager/commands/`;
 - общая логика конфигурации гостей → `scripts/guests/`;
 - проверки → `scripts/tests/`;
 - общая проверка всего репозитория → `scripts/validate_repo.py`.
