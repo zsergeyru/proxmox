@@ -87,6 +87,23 @@ def build_parser() -> argparse.ArgumentParser:
         help="записать bookmarks.yaml в файл вместо stdout",
     )
     portal_bookmarks.set_defaults(handler="portal-bookmarks")
+
+    portal_gateway = subparsers.add_parser(
+        "portal-gateway",
+        help="запустить защищённый переход к операциям Semaphore",
+    )
+    portal_gateway.add_argument(
+        "--bind",
+        default="0.0.0.0",
+        help="адрес прослушивания",
+    )
+    portal_gateway.add_argument(
+        "--port",
+        type=int,
+        default=3002,
+        help="TCP-порт",
+    )
+    portal_gateway.set_defaults(handler="portal-gateway")
     return parser
 
 
@@ -150,6 +167,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             else:
                 print(render_portal_bookmarks(vmid), end="")
             return 0
+
+        if args.handler == "portal-gateway":
+            from .portal_gateway import run_portal_gateway
+
+            if not (0 < args.port < 65536):
+                raise InfraManagerError("Порт посредника должен быть от 1 до 65535")
+            return run_portal_gateway(args.bind, args.port)
 
         raise InfraManagerError(f"Неизвестная команда: {args.command}")
     except (InfraManagerError, OSError) as exc:
