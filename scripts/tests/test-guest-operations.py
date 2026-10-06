@@ -67,44 +67,58 @@ class FakePveClient:
 
 
 def check_status_operation() -> None:
-    identity = guest_identity(ROOT, 109)
-    client = FakePveClient(
+    cases = (
+        (
+            guest_identity(ROOT, 109),
+            {
+                "vmid": 109,
+                "name": "network-gateway",
+                "type": "qemu",
+                "node": "pve",
+                "status": "running",
+            },
+        ),
+        (
+            guest_identity(ROOT, 910),
+            {
+                "vmid": 910,
+                "name": "infra-manager",
+                "type": "lxc",
+                "node": "pve",
+                "status": "running",
+            },
+        ),
+    )
+
+    for identity, resource in cases:
+        client = FakePveClient(resource)
+        with patch.object(operations, "show_guest_status") as show:
+            if operations._run_status(client, ROOT, identity) != 0:
+                fail(
+                    f"Status Guest должен завершаться успешно для {identity.vmid}"
+                )
+        show.assert_called_once()
+        args, kwargs = show.call_args
+        if args[:3] != (ROOT, identity, resource):
+            fail("Status Guest передал неверные данные общему выводу")
+        if kwargs != {"full": True, "show_secrets": True}:
+            fail("Операторский Status Guest должен показывать полный статус")
+
+    stopped = FakePveClient(
         {
             "vmid": 109,
             "name": "network-gateway",
             "type": "qemu",
             "node": "pve",
-            "status": "running",
+            "status": "stopped",
         }
     )
-    with patch.object(operations, "_infra_manager_status") as infra_status:
-        if operations._run_status(client, ROOT, identity) != 0:
-            fail("Status Guest должен завершаться успешно для работающего гостя")
-    infra_status.assert_not_called()
-
-    client.resource["status"] = "stopped"
     try:
-        operations._run_status(client, ROOT, identity)
+        operations._run_status(stopped, ROOT, guest_identity(ROOT, 109))
     except InfraManagerError:
         pass
     else:
         fail("Status Guest должен считать остановленный гость ошибкой")
-
-    infra = guest_identity(ROOT, 910)
-    infra_client = FakePveClient(
-        {
-            "vmid": 910,
-            "name": "infra-manager",
-            "type": "lxc",
-            "node": "pve",
-            "status": "running",
-        }
-    )
-    with patch.object(operations, "_infra_manager_status") as infra_status:
-        if operations._run_status(infra_client, ROOT, infra) != 0:
-            fail("Status Guest infra-manager должен завершаться успешно")
-    infra_status.assert_called_once_with("pve", infra)
-
 
 def check_repair_operation() -> None:
     identity = guest_identity(ROOT, 109)
@@ -169,29 +183,23 @@ def check_infra_manager_repair_operation() -> None:
 
 def check_test_operation() -> None:
     identity = guest_identity(ROOT, 109)
-    client = FakePveClient(
-        {
-            "vmid": 109,
-            "name": "network-gateway",
-            "type": "qemu",
-            "node": "pve",
-            "status": "running",
-        }
-    )
+    resource = {
+        "vmid": 109,
+        "name": "network-gateway",
+        "type": "qemu",
+        "node": "pve",
+        "status": "running",
+    }
+    client = FakePveClient(resource)
 
-    connection = Mock()
-    connection.__enter__ = Mock(return_value=connection)
-    connection.__exit__ = Mock(return_value=False)
     with patch.object(
-        operations.socket,
-        "create_connection",
-        return_value=connection,
-    ) as connect:
+        operations,
+        "verify_guest_status",
+    ) as verify:
         if operations._run_test(client, ROOT, identity) != 0:
-            fail("Test Guest должен завершаться успешно при доступном SSH")
+            fail("Test Guest должен завершаться успешно")
 
-    connect.assert_called_once_with(("192.168.1.9", 22), timeout=5)
-
+    verify.assert_called_once_with(ROOT, identity, resource)
 
 def check_sync_operation() -> None:
     identity = guest_identity(ROOT, 910)
@@ -216,18 +224,39 @@ def check_sync_operation() -> None:
 
 def check_deploy_operation() -> None:
     identity = guest_identity(ROOT, 410)
+    resource = {
+        "vmid": 410,
+        "name": "ai-control",
+        "type": "qemu",
+        "node": "pve",
+        "status": "running",
+    }
+    client = FakePveClient(resource)
+
     with (
         patch.object(
             operations,
             "run_deploy_guest",
             return_value=0,
         ) as deploy,
+        patch.object(
+            operations.PveClient,
+            "from_opentofu_env",
+            return_value=client,
+        ),
+        patch.object(operations, "show_guest_status") as show,
         patch.object(operations, "reserve_runtime_activation") as reserve,
         patch.object(operations, "cancel_runtime_activation") as cancel,
     ):
         if operations._run_deploy(ROOT, identity) != 0:
             fail("Deploy Guest должен возвращать результат общего deploy")
     deploy.assert_called_once_with(ROOT, 410)
+    show.assert_called_once()
+    args, kwargs = show.call_args
+    if args[:3] != (ROOT, identity, resource):
+        fail("Deploy Guest передал неверные данные общему выводу")
+    if kwargs != {"full": True, "show_secrets": True}:
+        fail("Успешный Deploy Guest должен показывать операторский итог")
     reserve.assert_not_called()
     cancel.assert_not_called()
 
@@ -245,7 +274,6 @@ def check_deploy_operation() -> None:
             fail("Deploy Guest должен сохранять код ошибки самообновления")
     reserve.assert_called_once_with()
     cancel.assert_called_once_with()
-
 
 def check_dispatch() -> None:
     with (
