@@ -18,9 +18,27 @@ from .settings import PATHS, SETTINGS
 
 
 PORTAL_ACTIONS = (
-    ("status", "Проверить", "ST", "mdi-check-circle-outline"),
-    ("sync", "Синхронизировать", "SY", "mdi-sync"),
-    ("repair", "Исправить", "RP", "mdi-wrench"),
+    (
+        "status",
+        "Проверить",
+        "ST",
+        "mdi-check-circle-outline-#34d399",
+        "Проверка состояния",
+    ),
+    (
+        "sync",
+        "Синхронизировать",
+        "SY",
+        "mdi-sync-#38bdf8",
+        "Обновление конфигурации",
+    ),
+    (
+        "repair",
+        "Исправить",
+        "RP",
+        "mdi-wrench-#fb923c",
+        "Устранение проблем",
+    ),
 )
 PORTAL_TARGETS = frozenset({"local", "home"})
 PORTAL_DEFAULT_PORT = 3001
@@ -48,7 +66,7 @@ def build_portal_bookmarks(vmid: int) -> list[dict]:
     gateway = _gateway_base_url()
 
     entries: list[dict] = []
-    for operation, label, abbreviation, icon in PORTAL_ACTIONS:
+    for operation, label, abbreviation, icon, description in PORTAL_ACTIONS:
         supported = {
             item.vmid for item in operation_guests(PATHS.repo_root, operation)
         }
@@ -64,7 +82,7 @@ def build_portal_bookmarks(vmid: int) -> list[dict]:
                         "href": (
                             f"{gateway}/action/{operation}?vmid={vmid}"
                         ),
-                        "description": f"Гость {vmid}",
+                        "description": description,
                     }
                 ]
             }
@@ -231,6 +249,7 @@ def _validated_portal(source: str, portal: dict) -> dict[str, Any]:
     path = portal.get("path", "/")
     targets = portal.get("targets")
     icon = portal.get("icon")
+    description = portal.get("description")
 
     if not isinstance(name, str) or not name.strip():
         raise InfraManagerError(
@@ -272,6 +291,12 @@ def _validated_portal(source: str, portal: dict) -> dict[str, Any]:
         raise InfraManagerError(
             f"{source}.portal.icon должен быть непустой строкой"
         )
+    if description is not None and (
+        not isinstance(description, str) or not description.strip()
+    ):
+        raise InfraManagerError(
+            f"{source}.portal.description должен быть непустой строкой"
+        )
 
     return {
         "name": name.strip(),
@@ -280,6 +305,9 @@ def _validated_portal(source: str, portal: dict) -> dict[str, Any]:
         "path": path,
         "targets": targets,
         "icon": icon.strip() if isinstance(icon, str) else None,
+        "description": (
+            description.strip() if isinstance(description, str) else None
+        ),
         "operator": _validated_operator(source, portal.get("operator")),
     }
 
@@ -343,6 +371,9 @@ def portal_services(vmid: int, target: str) -> list[dict[str, Any]]:
         icon = portal.get("icon")
         if isinstance(icon, str):
             service["icon"] = icon
+        description = portal.get("description")
+        if isinstance(description, str):
+            service["description"] = description
         service["siteMonitor"] = url
         result.append({name: service})
 
