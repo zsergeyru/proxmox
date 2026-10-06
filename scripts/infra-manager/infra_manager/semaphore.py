@@ -57,9 +57,9 @@ def semaphore_views() -> tuple[ViewSpec, ...]:
     """Вернуть целевые группы шаблонов в порядке интерфейса."""
 
     return (
-        ViewSpec(title="Guests", position=0),
-        ViewSpec(title="Infrastructure", position=1),
-        ViewSpec(title="Security", position=2),
+        ViewSpec(title="Guests", position=1),
+        ViewSpec(title="Infrastructure", position=2),
+        ViewSpec(title="Security", position=3),
     )
 
 
