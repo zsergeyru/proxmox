@@ -912,22 +912,13 @@ def persist_github_key() -> None:
         )
 
 
-def configure_project(branch: str | None = None) -> int:
-    if os.geteuid() != 0:
-        raise InfraManagerError(
-            "Настройка Semaphore должна выполняться от root"
-        )
-    if not nonempty(PVE_API_ENV):
-        raise InfraManagerError(
-            "Не найден постоянный PVE API credential"
-        )
+def _sync_project_objects(
+    client: SemaphoreClient,
+    project_id: int,
+    branch: str,
+) -> None:
+    """Синхронизировать управляемые объекты внутри существующего проекта."""
 
-    branch = branch or SETTINGS.project_branch()
-    persist_github_key()
-
-    client = SemaphoreClient()
-    client.ensure_api_token()
-    project_id = client.ensure_project()
     github_key_id = client.ensure_ssh_key(
         project_id,
         "GitHub project read-only",
@@ -940,7 +931,9 @@ def configure_project(branch: str | None = None) -> int:
         branch,
     )
     opentofu_environment_id = client.ensure_opentofu_environment(project_id)
-    infra_manager_environment_id = client.ensure_infra_manager_environment(project_id)
+    infra_manager_environment_id = client.ensure_infra_manager_environment(
+        project_id
+    )
     environment_ids = [
         opentofu_environment_id,
         infra_manager_environment_id,
@@ -974,7 +967,65 @@ def configure_project(branch: str | None = None) -> int:
         {template.name for template in templates},
     )
 
+
+def configure_project(branch: str | None = None) -> int:
+    """Полностью синхронизировать Semaphore из доверенного root-контура."""
+
+    if os.geteuid() != 0:
+        raise InfraManagerError(
+            "Настройка Semaphore должна выполняться от root"
+        )
+    if not nonempty(PVE_API_ENV):
+        raise InfraManagerError(
+            "Не найден постоянный PVE API credential"
+        )
+
+    branch = branch or SETTINGS.project_branch()
+    persist_github_key()
+
+    client = SemaphoreClient()
+    client.ensure_api_token()
+    project_id = client.ensure_project()
+    _sync_project_objects(client, project_id, branch)
+
     console.ok(
         "Проект Semaphore, общие настройки и инфраструктурные задания подготовлены"
+    )
+    return 0
+
+
+def sync_project_from_task(branch: str | None = None) -> int:
+    """Обновить проект из задания Semaphore без root и ротации секретов."""
+
+    if not nonempty(PVE_API_ENV):
+        raise InfraManagerError(
+            "Не найден рабочий PVE API credential"
+        )
+
+    branch = branch or SETTINGS.project_branch()
+    persist_github_key()
+
+    client = SemaphoreClient()
+    if not client.token_valid():
+        raise InfraManagerError(
+            "Рабочий API token Semaphore отсутствует или недействителен; "
+            "выполните Repair Guest для infra-manager"
+        )
+    client.auth_mode = "token"
+
+    project = require_unique_by_name(
+        client.get("/projects"),
+        PROJECT_NAME,
+        "project",
+    )
+    project_id = project.get("id")
+    if not isinstance(project_id, int):
+        raise InfraManagerError(
+            "Проект Semaphore имеет некорректный id"
+        )
+
+    _sync_project_objects(client, project_id, branch)
+    console.ok(
+        "Проект Semaphore синхронизирован без изменения root-секретов"
     )
     return 0
