@@ -106,6 +106,7 @@ docker:
 
       portal:
         name: OpenBao
+        icon: mdi-lock
         scheme: https
         port: 8202
         path: /ui/
