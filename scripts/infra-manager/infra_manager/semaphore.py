@@ -44,8 +44,8 @@ class TemplateSpec:
     survey_vars: tuple[dict[str, Any], ...] = ()
 
 
-def _deploy_guest_survey(repo_root: Path) -> tuple[dict[str, Any], ...]:
-    """Сформировать безопасный список гостей для формы Deploy Guest."""
+def _guest_survey(repo_root: Path) -> tuple[dict[str, Any], ...]:
+    """Сформировать безопасный список гостей для стандартных операций."""
 
     values = [
         {
@@ -56,7 +56,7 @@ def _deploy_guest_survey(repo_root: Path) -> tuple[dict[str, Any], ...]:
     ]
     if not values:
         raise InfraManagerError(
-            "Не найдено гостей с guest.yaml и provision.yaml для Deploy Guest"
+            "Не найдено гостей с guest.yaml и provision.yaml"
         )
     return (
         {
@@ -90,9 +90,33 @@ def semaphore_templates(
         ),
         TemplateSpec(
             name="Deploy Guest",
-            playbook="scripts/infra-manager/jobs/deploy-guest.py",
-            arguments="[]",
-            survey_vars=_deploy_guest_survey(root),
+            playbook="scripts/infra-manager/jobs/guest-operation.py",
+            arguments='["deploy"]',
+            survey_vars=_guest_survey(root),
+        ),
+        TemplateSpec(
+            name="Status Guest",
+            playbook="scripts/infra-manager/jobs/guest-operation.py",
+            arguments='["status"]',
+            survey_vars=_guest_survey(root),
+        ),
+        TemplateSpec(
+            name="Repair Guest",
+            playbook="scripts/infra-manager/jobs/guest-operation.py",
+            arguments='["repair"]',
+            survey_vars=_guest_survey(root),
+        ),
+        TemplateSpec(
+            name="Test Guest",
+            playbook="scripts/infra-manager/jobs/guest-operation.py",
+            arguments='["test"]',
+            survey_vars=_guest_survey(root),
+        ),
+        TemplateSpec(
+            name="Sync Guest",
+            playbook="scripts/infra-manager/jobs/guest-operation.py",
+            arguments='["sync"]',
+            survey_vars=_guest_survey(root),
         ),
         TemplateSpec(
             name="Sync SSH Access",
@@ -792,7 +816,10 @@ def persist_github_key() -> None:
         )
 
 
-def configure_project(branch: str | None = None) -> int:
+def configure_project(
+    branch: str | None = None,
+    repo_root: Path | None = None,
+) -> int:
     if os.geteuid() != 0:
         raise InfraManagerError(
             "Настройка Semaphore должна выполняться от root"
@@ -825,7 +852,7 @@ def configure_project(branch: str | None = None) -> int:
         opentofu_environment_id,
         infra_manager_environment_id,
     ]
-    templates = semaphore_templates()
+    templates = semaphore_templates(repo_root)
     for template in templates:
         client.ensure_template(
             project_id,
