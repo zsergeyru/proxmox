@@ -181,7 +181,7 @@ def status() -> int:
                 check=False,
             )
             if result.returncode:
-                failures.append("полная проверка 910")
+                failures.append("полная проверка infra-manager")
 
     if failures:
         print(
@@ -339,7 +339,7 @@ def parse_args() -> argparse.Namespace:
     subparsers = parser.add_subparsers(dest="command", required=True)
     subparsers.add_parser(
         "status",
-        help="Проверить PVE, recovery-контур и полный статус 910",
+        help="Проверить PVE, recovery-контур и полный статус infra-manager",
     )
     subparsers.add_parser(
         "repair",
