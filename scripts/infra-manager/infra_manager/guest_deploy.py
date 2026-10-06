@@ -765,7 +765,7 @@ def _project_revision(repo_root: Path) -> str:
     return result.stdout.strip() or "не определена"
 
 
-def _project_branch(repo_root: Path) -> str:
+def project_branch_for_checkout(repo_root: Path) -> str:
     """Вернуть фактическую ветку содержимого рабочей копии проекта."""
 
     current_result = run(
@@ -825,7 +825,7 @@ def _show_guest_summary(
     """Показать итог полного развёртывания обычного гостя."""
     separator = "=" * 60
     kind = "VM" if context.kind == "vm" else "LXC"
-    branch = _project_branch(repo_root)
+    branch = project_branch_for_checkout(repo_root)
     revision = _project_revision(repo_root)
 
     print()
@@ -904,7 +904,7 @@ def run_deploy_guest(
 
     console.info("Проверка проекта")
     run([sys.executable, str(repo_root / "scripts" / "validate_repo.py")])
-    project_branch = _project_branch(repo_root)
+    project_branch = project_branch_for_checkout(repo_root)
 
     workspace = (
         _prepare_self_update_workspace(repo_root, vmid)
