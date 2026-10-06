@@ -80,8 +80,24 @@ def main_test() -> None:
             '["9000"]',
         ),
         "Deploy Guest": (
-            "scripts/infra-manager/jobs/deploy-guest.py",
-            "[]",
+            "scripts/infra-manager/jobs/guest-operation.py",
+            '["deploy"]',
+        ),
+        "Status Guest": (
+            "scripts/infra-manager/jobs/guest-operation.py",
+            '["status"]',
+        ),
+        "Repair Guest": (
+            "scripts/infra-manager/jobs/guest-operation.py",
+            '["repair"]',
+        ),
+        "Test Guest": (
+            "scripts/infra-manager/jobs/guest-operation.py",
+            '["test"]',
+        ),
+        "Sync Guest": (
+            "scripts/infra-manager/jobs/guest-operation.py",
+            '["sync"]',
         ),
         "Sync SSH Access": (
             "scripts/infra-manager/jobs/sync-ssh-access.py",
@@ -95,23 +111,33 @@ def main_test() -> None:
     if actual_templates != expected_templates:
         fail(f"Неожиданный состав шаблонов Semaphore: {actual_templates!r}")
 
-    deploy = next(
-        spec for spec in SEMAPHORE_TEMPLATES if spec.name == "Deploy Guest"
-    )
     expected_values = [
         {"name": f"{guest.vmid} — {guest.name}", "value": str(guest.vmid)}
         for guest in deployable_guests(ROOT)
     ]
-    if len(deploy.survey_vars) != 1:
-        fail("Deploy Guest должен иметь одну survey-переменную")
-    guest_survey = deploy.survey_vars[0]
-    if (
-        guest_survey.get("name") != "GUEST_VMID"
-        or guest_survey.get("type") != "enum"
-        or guest_survey.get("required") is not True
-        or guest_survey.get("values") != expected_values
-    ):
-        fail("Deploy Guest должен предлагать только гостей из машинного каталога")
+    guest_template_names = {
+        "Deploy Guest",
+        "Status Guest",
+        "Repair Guest",
+        "Test Guest",
+        "Sync Guest",
+    }
+    for spec in SEMAPHORE_TEMPLATES:
+        if spec.name not in guest_template_names:
+            continue
+        if len(spec.survey_vars) != 1:
+            fail(f"{spec.name} должен иметь одну survey-переменную")
+        guest_survey = spec.survey_vars[0]
+        if (
+            guest_survey.get("name") != "GUEST_VMID"
+            or guest_survey.get("type") != "enum"
+            or guest_survey.get("required") is not True
+            or guest_survey.get("values") != expected_values
+        ):
+            fail(
+                f"{spec.name} должен предлагать только гостей "
+                "из машинного каталога"
+            )
 
     with tempfile.TemporaryDirectory() as tmp:
         fake = Path(tmp)
@@ -128,13 +154,22 @@ def main_test() -> None:
             encoding="utf-8",
         )
         moved = {item.name: item for item in semaphore_templates(fake)}
-    moved_deploy = moved.get("Deploy Guest")
-    if moved_deploy is None:
-        fail("Единый Deploy Guest отсутствует")
-    if moved_deploy.survey_vars[0].get("values") != [
-        {"name": "920 — infra-manager", "value": "920"}
-    ]:
-        fail("Deploy Guest не строит выбор из guest.yaml + provision.yaml")
+    for name in (
+        "Deploy Guest",
+        "Status Guest",
+        "Repair Guest",
+        "Test Guest",
+        "Sync Guest",
+    ):
+        moved_template = moved.get(name)
+        if moved_template is None:
+            fail(f"Шаблон {name} отсутствует")
+        if moved_template.survey_vars[0].get("values") != [
+            {"name": "920 — infra-manager", "value": "920"}
+        ]:
+            fail(
+                f"{name} не строит выбор из guest.yaml + provision.yaml"
+            )
     if any(name.startswith("Initialize OpenBao") for name in moved):
         fail("Initialize OpenBao не должен быть обычным шаблоном Semaphore")
 
