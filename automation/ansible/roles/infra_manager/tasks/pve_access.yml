@@ -27,6 +27,17 @@
     group: root
     mode: "0755"
 
+- name: Подготовить актуальные PVE-команды управления
+  ansible.builtin.copy:
+    src: "{{ project_root }}/scripts/infra-manager/host/{{ item.source }}"
+    dest: "/run/infra-manager/host-support/{{ item.target }}"
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - { source: recovery.py, target: infra-manager-recovery }
+    - { source: manager.py, target: infra-manager }
+
 - name: Подготовить идентичность infra-manager для PVE OpenBao
   ansible.builtin.copy:
     dest: /run/infra-manager/host-support/openbao-host.json
@@ -58,6 +69,27 @@
       - IdentitiesOnly=yes
       - /run/infra-manager/host-support/openbao-unseal.py
       - "root@{{ infra_pve_node }}:/tmp/infra-manager-openbao-unseal.new"
+  changed_when: true
+
+- name: Передать актуальные PVE-команды управления
+  ansible.builtin.command:
+    argv:
+      - scp
+      - -i
+      - "{{ provision.access_materialization.pve.root_ssh_private_key }}"
+      - -o
+      - "UserKnownHostsFile={{ provision.access_materialization.pve.root_ssh_known_hosts }}"
+      - -o
+      - StrictHostKeyChecking=yes
+      - -o
+      - BatchMode=yes
+      - -o
+      - IdentitiesOnly=yes
+      - "/run/infra-manager/host-support/{{ item }}"
+      - "root@{{ infra_pve_node }}:/tmp/{{ item }}.new"
+  loop:
+    - infra-manager-recovery
+    - infra-manager
   changed_when: true
 
 - name: Передать идентичность infra-manager на PVE
@@ -104,6 +136,33 @@
         && rm -f
         /tmp/infra-manager-openbao-unseal.new
         /tmp/infra-manager-openbao-host.json.new
+  changed_when: true
+
+- name: Установить актуальные PVE-команды управления
+  ansible.builtin.command:
+    argv:
+      - ssh
+      - -i
+      - "{{ provision.access_materialization.pve.root_ssh_private_key }}"
+      - -o
+      - "UserKnownHostsFile={{ provision.access_materialization.pve.root_ssh_known_hosts }}"
+      - -o
+      - StrictHostKeyChecking=yes
+      - -o
+      - BatchMode=yes
+      - -o
+      - IdentitiesOnly=yes
+      - "root@{{ infra_pve_node }}"
+      - >-
+        install -o root -g root -m 0755
+        /tmp/infra-manager-recovery.new
+        /usr/local/sbin/infra-manager-recovery
+        && install -o root -g root -m 0755
+        /tmp/infra-manager.new
+        /usr/local/sbin/infra-manager
+        && rm -f
+        /tmp/infra-manager-recovery.new
+        /tmp/infra-manager.new
   changed_when: true
 
 - name: Подготовить TLS OpenBao на PVE
