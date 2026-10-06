@@ -5,6 +5,7 @@ portal:
   local:
     enabled: true
     title: Управление инфраструктурой
+    trusted_ca: /etc/infra-manager/openbao/tls/ca.crt
 
 system:
   distribution: debian
