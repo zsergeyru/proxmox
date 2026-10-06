@@ -85,6 +85,15 @@
         - (provision_phase | default('full')) == "full"
         - (guest_manifest.role | default('')) == "network-gateway"
 
+    - name: Настроить локальный портал
+      ansible.builtin.include_role:
+        name: portal
+      when:
+        - (provision_phase | default('full')) == "full"
+        - provision.portal is defined
+        - provision.portal.local is defined
+        - provision.portal.local.enabled | default(false) | bool
+
     - name: Подготовить структуру каталогов гостя
       ansible.builtin.include_role:
         name: guest_layout
