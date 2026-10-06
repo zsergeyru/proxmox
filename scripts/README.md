@@ -37,6 +37,8 @@ scripts/
 │   │   ├── common.py                        # Общие ошибки, вывод и безопасный запуск внешних команд
 │   │   ├── settings.py                      # Хранит единые неизменяемые пути, имена, версии и значения по умолчанию
 │   │   ├── guest_catalog.py                 # Находит специальных гостей по role и читает их VMID, имя и адрес
+│   │   ├── guest_operations.py              # Общий механизм Deploy/Status/Repair/Test/Sync для выбранного гостя
+│   │   ├── job_args.py                      # Общий разбор survey-переменной GUEST_VMID
 │   │   ├── semaphore.py                     # Синхронизирует проект, Git, группу переменных и задания Semaphore
 │   │   ├── pve.py                           # Проверяет PVE API и полный административный контракт infra-manager
 │   │   ├── pve_lifecycle.py                 # Выполняет приёмочную проверку полного жизненного цикла временного LXC 9098
@@ -62,7 +64,8 @@ scripts/
 │   │
 │   └── jobs/                                # Задания, непосредственно запускаемые Semaphore
 │       ├── opentofu-plan.py                  # Формирует входные данные OpenTofu и строит только план изменений
-│       ├── deploy-guest.py                   # Разворачивает или приводит выбранную гостевую систему к описанному состоянию
+│       ├── guest-operation.py                # Общая точка входа пяти гостевых заданий Semaphore
+│       ├── deploy-guest.py                   # Совместимая точка входа bootstrap для фаз Deploy
 │       ├── build-template.py                 # Собирает Packer-шаблон VM 9000 и запускает его проверку
 │       ├── initialize-openbao.py             # Инициализирует и проверяет OpenBao через доверенный PVE
 │       └── sync-ssh-access.py                # Синхронизирует SSH OTP/AppRole по access.yaml
@@ -72,6 +75,7 @@ scripts/
 │
 └── tests/                                    # Локальные и автоматические проверки без постоянных изменений инфраструктуры
     ├── test-guest-deploy.py                  # Проверяет планирование и безопасное применение изменений гостевой системы
+    ├── test-guest-operations.py              # Проверяет общий механизм Deploy/Status/Repair/Test/Sync
     ├── test-guest-resolver.py                # Проверяет сборщик конфигурации, управление, начальную настройку и возможности профиля
     ├── test-infra-manager-python.py          # Проверяет основу Python-пакета, командную оболочку и вспомогательные функции PVE
     ├── test-pve-lifecycle.py                 # Проверяет lifecycle test без реального изменения PVE
@@ -136,19 +140,25 @@ Semaphore: OpenTofu Plan
 
 Задание строит только план и не выполняет `apply` или `destroy`.
 
-`deploy-guest.py`:
+`guest-operation.py` — общая точка входа пяти отдельных шаблонов Semaphore:
 
 ```text
-Semaphore: Deploy Guest
-→ выбрать гостя из ограниченного списка GUEST_VMID
-→ scripts/infra-manager/jobs/deploy-guest.py
-→ OpenTofu apply для выбранной гостевой системы
-→ Ansible-настройка гостевой системы
+Deploy Guest  → guest-operation.py deploy
+Status Guest  → guest-operation.py status
+Repair Guest  → guest-operation.py repair
+Test Guest    → guest-operation.py test
+Sync Guest    → guest-operation.py sync
+                         ↓
+                    GUEST_VMID
+                         ↓
+             infra_manager.guest_operations
 ```
 
-Для гостя с `role: infra-manager` используется тот же вход. Он проверяет существующий infra-manager без собственного OpenTofu state, применяет общий `provision.yaml` и откладывает активацию `infra-runtime` до завершения текущего задания.
+Во всех пяти формах гость выбирается из одного каталога `guest.yaml + provision.yaml`. Операция задаётся самим шаблоном и не выбирается пользователем вторым полем.
 
-Таким образом, отдельного оркестратора обновления infra-manager нет. Отличается только владение объектом Proxmox и безопасный момент перезапуска контейнера, внутри которого выполняется Semaphore.
+`Deploy` использует прежний общий OpenTofu + Ansible механизм. Для роли `infra-manager` сохраняется безопасная отложенная активация `infra-runtime`. Файл `deploy-guest.py` остаётся совместимой точкой входа первоначального bootstrap, где нужны отдельные фазы создания и настройки.
+
+`Status` только читает состояние, `Repair` выполняет ограниченное безопасное исправление, `Test` проверяет PVE и административную сеть, а `Sync` вызывает обработчик роли без полного Deploy. Для `infra-manager` Sync повторно синхронизирует Semaphore из актуальной рабочей копии Git.
 
 `initialize-openbao.py` остаётся внутренней точкой первоначального bootstrap и восстановления. В Semaphore отдельного шаблона для неё нет. Для человека штатные действия вынесены в PVE-команду `infra-manager repair` и `infra-manager recover`.
 
@@ -212,6 +222,7 @@ python scripts/validate_repo.py
 
 - `test-guest-resolver.py` проверяет сборщик конфигурации и возможности начальной настройки гостей.
 - `test-guest-deploy.py` проверяет планирование, сверку состояния и безопасное применение изменений гостя.
+- `test-guest-operations.py` проверяет общий диспетчер Deploy/Status/Repair/Test/Sync и безопасный Repair.
 - `test-opentofu-input.py` проверяет состав входа OpenTofu и исключение 910.
 - `test-infra-manager-python.py` проверяет основу Python-пакета, командную оболочку и PVE-вспомогательные функции.
 - `test-pve-lifecycle.py` проверяет полный сценарий lifecycle test, защиту занятого VMID и аварийную очистку без реального PVE.
