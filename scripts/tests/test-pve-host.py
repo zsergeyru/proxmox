@@ -296,6 +296,27 @@ def test_openbao_status_checks() -> None:
     ]
 
 
+def test_operator_status() -> None:
+    calls: list[tuple[str, ...]] = []
+
+    def record_ssh(
+        node: str,
+        *command_args: str,
+        capture: bool = False,
+    ):
+        del capture
+        assert node == "pve"
+        calls.append(tuple(command_args))
+        return SimpleNamespace(returncode=0, stdout="")
+
+    with patch.object(module, "_ssh", side_effect=record_ssh):
+        module.check_infra_manager_status("pve")
+
+    assert calls == [
+        ("/usr/local/sbin/infra-manager", "status"),
+    ]
+
+
 def test_recovery_host_support() -> None:
     installs: list[tuple[str, str, str]] = []
     calls: list[tuple[str, ...]] = []
@@ -473,6 +494,7 @@ def main() -> None:
     test_infra_self_access()
     test_openbao_host_support()
     test_openbao_status_checks()
+    test_operator_status()
     test_recovery_host_support()
     test_sign_ssh_client_key()
     test_issue_openbao_machine_credentials()
