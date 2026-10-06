@@ -40,6 +40,7 @@ PY_ACCESS_POLICY="$ROOT/scripts/infra-manager/infra_manager/access.py"
 PY_OPENBAO="$ROOT/scripts/infra-manager/infra_manager/openbao.py"
 PY_RECOVERY="$ROOT/scripts/infra-manager/infra_manager/recovery.py"
 RECOVERY_HOST="$ROOT/scripts/infra-manager/host/recovery.py"
+PVE_OPERATOR="$ROOT/scripts/infra-manager/host/manager.py"
 DOCKERFILE="$ROOT/infrastructure/guests/910-infra-manager/rootfs/opt/infra-manager/compose/runtime/Dockerfile"
 REQ="$ROOT/infrastructure/guests/910-infra-manager/rootfs/opt/infra-manager/compose/runtime/requirements.txt"
 PLAN="$ROOT/scripts/infra-manager/jobs/opentofu-plan.py"
@@ -78,6 +79,18 @@ cat "$ANSIBLE_RUNTIME_MAIN" > "$ANSIBLE_RUNTIME"
 for task_file in "${ANSIBLE_RUNTIME_PARTS[@]}"; do
     cat "$ANSIBLE_RUNTIME_DIR/$task_file" >> "$ANSIBLE_RUNTIME"
 done
+[[ -s "$PVE_OPERATOR" ]] \
+    || die "Отсутствует единая операторская команда PVE"
+grep -Fq '"status"' "$PVE_OPERATOR" \
+    || die "PVE-команда infra-manager должна поддерживать status"
+grep -Fq '"repair"' "$PVE_OPERATOR" \
+    || die "PVE-команда infra-manager должна поддерживать repair"
+grep -Fq '"recover"' "$PVE_OPERATOR" \
+    || die "PVE-команда infra-manager должна поддерживать recover"
+grep -Fq 'source: manager.py' "$ANSIBLE_RUNTIME" \
+    || die "Deploy Guest infra-manager должен обновлять PVE-команду infra-manager"
+grep -Fq '/usr/local/sbin/infra-manager' "$ANSIBLE_RUNTIME" \
+    || die "Ansible должен устанавливать единую операторскую команду на PVE"
 grep -Fq 'path    = "/openbao/file/raft"' "$OPENBAO_CONFIG" \
     || die "OpenBao должен использовать постоянное Raft-хранилище"
 grep -Fq 'ui = true' "$OPENBAO_CONFIG" \
