@@ -377,6 +377,7 @@ def _prepare_proxmox_provider_mirror(opentofu_dir: Path) -> Path:
 
 
 def _init(opentofu_dir: Path, env: dict[str, str]) -> None:
+    mirror = _prepare_proxmox_provider_mirror(opentofu_dir)
     run(
         [
             "tofu",
@@ -385,6 +386,7 @@ def _init(opentofu_dir: Path, env: dict[str, str]) -> None:
             "-input=false",
             "-no-color",
             "-lockfile=readonly",
+            f"-plugin-dir={mirror}",
             f"-backend-config=path={STATE_FILE}",
         ],
         env=env,
