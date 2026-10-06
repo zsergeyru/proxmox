@@ -1919,6 +1919,11 @@ def main() -> int:
         help="Проверить KV v2 и ограниченный доступ к рабочим секретам",
     )
     mode.add_argument(
+        "--check-operator-access",
+        action="store_true",
+        help="Проверить userpass-вход и политику оператора OpenBao",
+    )
+    mode.add_argument(
         "--update-semaphore-api-token",
         action="store_true",
         help="Обновить API token Semaphore в KV v2 из stdin",
@@ -2008,6 +2013,10 @@ def main() -> int:
             require_active_openbao("проверка KV")
             check_kv_access()
             log_status("[ОК] KV v2 и ограниченные AppRole подтверждены")
+        elif args.check_operator_access:
+            require_active_openbao("проверка оператора")
+            check_operator_access()
+            log_status("[ОК] userpass и политика infra-operator подтверждены")
         elif args.update_semaphore_api_token:
             require_active_openbao("обновление Semaphore token")
             update_semaphore_api_token(__import__("sys").stdin.read())
