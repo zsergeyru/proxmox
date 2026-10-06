@@ -136,7 +136,9 @@ def check_style_contract() -> None:
         "useEqualHeights: true",
         "disableCollapse: true",
         "image: /images/background.svg",
-        "opacity: 38",
+        "opacity: 65",
+        "hideVersion: true",
+        "columns: 4",
         "icon: mdi-apps",
         "icon: mdi-tools",
     )
