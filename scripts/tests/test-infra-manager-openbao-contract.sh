@@ -80,6 +80,8 @@ for task_file in "${ANSIBLE_RUNTIME_PARTS[@]}"; do
 done
 grep -Fq 'path    = "/openbao/file/raft"' "$OPENBAO_CONFIG" \
     || die "OpenBao должен использовать постоянное Raft-хранилище"
+grep -Fq 'ui = true' "$OPENBAO_CONFIG" \
+    || die "OpenBao должен публиковать встроенный web UI через TLS listener"
 grep -Fq 'address         = "127.0.0.1:8200"' "$OPENBAO_CONFIG" \
     || die "OpenBao API должен слушать только loopback 910"
 grep -Fq 'tls_disable     = true' "$OPENBAO_CONFIG" \
