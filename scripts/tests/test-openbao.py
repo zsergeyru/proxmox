@@ -1426,6 +1426,116 @@ def test_kv_access_credentials_are_pve_only() -> None:
             fail("Служебные данные KV должны иметь права 0600")
 
 
+def test_operator_access_credentials_are_pve_only() -> None:
+    host = load_host_module()
+    credentials = {
+        "username": "operator",
+        "password": "operator-password-012345678901234567890",
+    }
+    with tempfile.TemporaryDirectory() as tmp:
+        key_dir = Path(tmp)
+        target = key_dir / "operator-access.json"
+        with (
+            patch.object(host, "KEY_DIR", key_dir),
+            patch.object(host, "OPERATOR_ACCESS_PATH", target),
+        ):
+            host.write_operator_access_credentials(credentials)
+            actual = host.read_operator_access_credentials()
+
+        if actual != credentials:
+            fail("Учётные данные оператора записаны с искажением")
+        if target.stat().st_mode & 0o777 != 0o600:
+            fail("Учётные данные оператора должны иметь права 0600")
+
+
+def test_operator_policy_is_narrow_and_visible_in_ui() -> None:
+    host = load_host_module()
+    configure = host.CONFIGURE_OPERATOR_ACCESS_CODE
+    check = host.CHECK_OPERATOR_ACCESS_CODE
+
+    for expected in (
+        "infra-operator",
+        "/v1/sys/auth/userpass",
+        '"listing_visibility": "unauth"',
+        '"token_no_default_policy": True',
+        '"token_ttl": "1h"',
+        '"token_max_ttl": "8h"',
+        '"infra-secrets/data/*"',
+        '"sys/auth"',
+        '"sys/policies/acl"',
+        '"ssh-client-signer/roles"',
+        '"ssh-host-signer/roles"',
+        '"ssh-otp/roles"',
+    ):
+        if expected not in configure:
+            fail(f"Операторский контракт OpenBao не содержит {expected}")
+
+    if "/v1/sys/internal/ui/mounts" not in check:
+        fail("Проверка оператора не подтверждает видимость userpass в UI")
+    for forbidden in (
+        '"sys/storage/raft/configuration"',
+        '"sys/init"',
+    ):
+        if forbidden not in check:
+            fail(f"Проверка оператора не контролирует запрет {forbidden}")
+
+    policy_prefix = configure.split(
+        "operator_policy = json.dumps(",
+        1,
+    )[1].split(
+        'request(\n    "POST",\n    "/v1/sys/policies/acl/infra-operator"',
+        1,
+    )[0]
+    for forbidden in (
+        '"sys/storage/raft/configuration": {',
+        '"sys/init": {',
+        '"sys/auth/*": {',
+        '"sys/policies/acl/*": {"capabilities": ["create"',
+    ):
+        if forbidden in policy_prefix:
+            fail(f"Политика оператора получила запрещённый доступ: {forbidden}")
+
+
+def test_corrupted_operator_file_generates_new_password() -> None:
+    host = load_host_module()
+    with tempfile.TemporaryDirectory() as tmp:
+        target = Path(tmp) / "operator-access.json"
+        target.write_text("{broken", encoding="utf-8")
+        generated = "generated-operator-password-012345678901234"
+        with (
+            patch.object(host, "OPERATOR_ACCESS_PATH", target),
+            patch.object(
+                host.secrets,
+                "token_urlsafe",
+                return_value=generated,
+            ),
+            patch.object(
+                host,
+                "pct_exec",
+                return_value=SimpleNamespace(
+                    returncode=0,
+                    stdout='{"ready":true}',
+                    stderr="",
+                ),
+            ) as pct_exec,
+            patch.object(host, "check_operator_access") as check_access,
+            patch.object(host, "write_operator_access_credentials") as write_access,
+        ):
+            result = host.configure_operator_access("TEMP-ROOT")
+
+    if result != {"username": "operator", "password": generated}:
+        fail("Повреждённый operator-access.json не был восстановлен")
+    payload = json.loads(pct_exec.call_args.kwargs["input_text"])
+    if payload != {
+        "root_token": "TEMP-ROOT",
+        "username": "operator",
+        "password": generated,
+    }:
+        fail("Новые операторские данные переданы OpenBao некорректно")
+    check_access.assert_called_once_with(result)
+    write_access.assert_called_once_with(result)
+
+
 def test_semaphore_token_update_is_narrow() -> None:
     host = load_host_module()
     code = host.UPDATE_SEMAPHORE_API_TOKEN_CODE
@@ -1496,6 +1606,9 @@ def main() -> None:
     test_ssh_access_credentials_are_pve_only()
     test_kv_contract_is_narrow_and_versioned()
     test_kv_access_credentials_are_pve_only()
+    test_operator_access_credentials_are_pve_only()
+    test_operator_policy_is_narrow_and_visible_in_ui()
+    test_corrupted_operator_file_generates_new_password()
     test_semaphore_token_update_is_narrow()
     test_stale_key_is_not_overwritten()
     print("[ОК] Проверки OpenBao пройдены")
