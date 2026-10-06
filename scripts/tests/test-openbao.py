@@ -417,6 +417,7 @@ listener "tcp" {
                 fail("Многоузловая конфигурация не должна допускать auto-recovery")
 
 
+
 def test_existing_openbao_skips_root_when_ready() -> None:
     host = load_host_module()
     with tempfile.TemporaryDirectory() as tmp:
@@ -431,32 +432,59 @@ def test_existing_openbao_skips_root_when_ready() -> None:
             '{"username":"operator","password":"test-password-012345678901234567890"}\n',
             encoding="utf-8",
         )
-        with (
-            patch.object(host, "KEY_PATH", key_path),
-            patch.object(host, "SSH_ACCESS_PATH", access_path),
-            patch.object(host, "KV_ACCESS_PATH", kv_access_path),
-            patch.object(host, "OPERATOR_ACCESS_PATH", operator_access_path),
-            patch.object(
-                host,
-                "read_status",
-                return_value={"initialized": True, "sealed": False},
-            ),
-            patch.object(host, "unseal") as unseal,
-            patch.object(host, "ssh_cas_ready", return_value=True),
-            patch.object(host, "ssh_access_credentials_complete", return_value=True),
-            patch.object(host, "client_ca_published", return_value=True),
-            patch.object(host, "check_ssh_access") as check_access,
-            patch.object(host, "check_kv_access") as check_kv,
-            patch.object(
-                host,
-                "check_operator_access",
-            ) as check_operator,
-            patch.object(host, "materialize_runtime_secrets") as materialize,
-            patch.object(host, "publish_host_ca") as publish_host_ca,
-            patch.object(host, "ensure_client_signing_role") as ensure_client_role,
-            patch.object(host, "ensure_host_signing_role") as ensure_host_role,
-            patch.object(host, "generate_temporary_root_token") as generate_root,
-        ):
+
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(patch.object(host, "KEY_PATH", key_path))
+            stack.enter_context(patch.object(host, "SSH_ACCESS_PATH", access_path))
+            stack.enter_context(patch.object(host, "KV_ACCESS_PATH", kv_access_path))
+            stack.enter_context(
+                patch.object(host, "OPERATOR_ACCESS_PATH", operator_access_path)
+            )
+            stack.enter_context(
+                patch.object(
+                    host,
+                    "read_status",
+                    return_value={"initialized": True, "sealed": False},
+                )
+            )
+            unseal = stack.enter_context(patch.object(host, "unseal"))
+            stack.enter_context(
+                patch.object(host, "ssh_cas_ready", return_value=True)
+            )
+            stack.enter_context(
+                patch.object(
+                    host,
+                    "ssh_access_credentials_complete",
+                    return_value=True,
+                )
+            )
+            stack.enter_context(
+                patch.object(host, "client_ca_published", return_value=True)
+            )
+            check_access = stack.enter_context(
+                patch.object(host, "check_ssh_access")
+            )
+            check_kv = stack.enter_context(
+                patch.object(host, "check_kv_access")
+            )
+            check_operator = stack.enter_context(
+                patch.object(host, "check_operator_access")
+            )
+            materialize = stack.enter_context(
+                patch.object(host, "materialize_runtime_secrets")
+            )
+            publish_host_ca = stack.enter_context(
+                patch.object(host, "publish_host_ca")
+            )
+            ensure_client_role = stack.enter_context(
+                patch.object(host, "ensure_client_signing_role")
+            )
+            ensure_host_role = stack.enter_context(
+                patch.object(host, "ensure_host_signing_role")
+            )
+            generate_root = stack.enter_context(
+                patch.object(host, "generate_temporary_root_token")
+            )
             host.initialize()
 
     unseal.assert_called_once_with()
@@ -485,53 +513,80 @@ def test_existing_openbao_recovers_broken_kv_approle() -> None:
             encoding="utf-8",
         )
 
-        with (
-            patch.object(host, "KEY_PATH", key_path),
-            patch.object(host, "SSH_ACCESS_PATH", access_path),
-            patch.object(host, "KV_ACCESS_PATH", kv_access_path),
-            patch.object(host, "OPERATOR_ACCESS_PATH", operator_access_path),
-            patch.object(
-                host,
-                "read_status",
-                return_value={"initialized": True, "sealed": False},
-            ),
-            patch.object(host, "unseal") as unseal,
-            patch.object(host, "ssh_cas_ready", return_value=True),
-            patch.object(
-                host,
-                "ssh_access_credentials_complete",
-                return_value=True,
-            ),
-            patch.object(host, "client_ca_published", return_value=True),
-            patch.object(host, "check_ssh_access") as check_ssh,
-            patch.object(
-                host,
-                "check_kv_access",
-                side_effect=host.OpenBaoHostError(
-                    "HTTP 500 from stale kv-reader SecretID"
-                ),
-            ) as check_kv,
-            patch.object(
-                host,
-                "check_operator_access",
-            ) as check_operator,
-            patch.object(
-                host,
-                "generate_temporary_root_token",
-                return_value="TEMP-ROOT-TOKEN",
-            ) as generate_root,
-            patch.object(host, "ensure_ssh_cas") as ensure_cas,
-            patch.object(
-                host,
-                "reconcile_kv_access",
-            ) as reconcile_kv,
-            patch.object(host, "materialize_runtime_secrets") as materialize,
-            patch.object(host, "publish_client_ca") as publish_ca,
-            patch.object(host, "publish_host_ca") as publish_host_ca,
-            patch.object(host, "ensure_client_signing_role") as ensure_client_role,
-            patch.object(host, "ensure_host_signing_role") as ensure_host_role,
-            patch.object(host, "revoke_temporary_root_token") as revoke_root,
-        ):
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(patch.object(host, "KEY_PATH", key_path))
+            stack.enter_context(patch.object(host, "SSH_ACCESS_PATH", access_path))
+            stack.enter_context(patch.object(host, "KV_ACCESS_PATH", kv_access_path))
+            stack.enter_context(
+                patch.object(host, "OPERATOR_ACCESS_PATH", operator_access_path)
+            )
+            stack.enter_context(
+                patch.object(
+                    host,
+                    "read_status",
+                    return_value={"initialized": True, "sealed": False},
+                )
+            )
+            unseal = stack.enter_context(patch.object(host, "unseal"))
+            stack.enter_context(
+                patch.object(host, "ssh_cas_ready", return_value=True)
+            )
+            stack.enter_context(
+                patch.object(
+                    host,
+                    "ssh_access_credentials_complete",
+                    return_value=True,
+                )
+            )
+            stack.enter_context(
+                patch.object(host, "client_ca_published", return_value=True)
+            )
+            check_ssh = stack.enter_context(
+                patch.object(host, "check_ssh_access")
+            )
+            check_kv = stack.enter_context(
+                patch.object(
+                    host,
+                    "check_kv_access",
+                    side_effect=host.OpenBaoHostError(
+                        "HTTP 500 from stale kv-reader SecretID"
+                    ),
+                )
+            )
+            check_operator = stack.enter_context(
+                patch.object(host, "check_operator_access")
+            )
+            generate_root = stack.enter_context(
+                patch.object(
+                    host,
+                    "generate_temporary_root_token",
+                    return_value="TEMP-ROOT-TOKEN",
+                )
+            )
+            ensure_cas = stack.enter_context(
+                patch.object(host, "ensure_ssh_cas")
+            )
+            reconcile_kv = stack.enter_context(
+                patch.object(host, "reconcile_kv_access")
+            )
+            materialize = stack.enter_context(
+                patch.object(host, "materialize_runtime_secrets")
+            )
+            publish_ca = stack.enter_context(
+                patch.object(host, "publish_client_ca")
+            )
+            publish_host_ca = stack.enter_context(
+                patch.object(host, "publish_host_ca")
+            )
+            ensure_client_role = stack.enter_context(
+                patch.object(host, "ensure_client_signing_role")
+            )
+            ensure_host_role = stack.enter_context(
+                patch.object(host, "ensure_host_signing_role")
+            )
+            revoke_root = stack.enter_context(
+                patch.object(host, "revoke_temporary_root_token")
+            )
             host.initialize()
 
     unseal.assert_called_once_with()
@@ -540,7 +595,10 @@ def test_existing_openbao_recovers_broken_kv_approle() -> None:
     if check_ssh.call_count != 2:
         fail("SSH AppRole должен повторно подтверждаться после recovery-окна")
     if check_operator.call_count != 2:
-        fail("Операторский userpass должен повторно подтверждаться после recovery-окна")
+        fail(
+            "Операторский userpass должен повторно подтверждаться "
+            "после recovery-окна"
+        )
     generate_root.assert_called_once_with()
     ensure_cas.assert_called_once_with("TEMP-ROOT-TOKEN")
     reconcile_kv.assert_called_once_with("TEMP-ROOT-TOKEN")
@@ -560,38 +618,65 @@ def test_existing_openbao_bootstraps_missing_ssh_security() -> None:
         kv_access_path = Path(tmp) / "kv-access.json"
         operator_access_path = Path(tmp) / "operator-access.json"
         key_path.write_text("existing-key\n", encoding="utf-8")
-        with (
-            patch.object(host, "KEY_PATH", key_path),
-            patch.object(host, "SSH_ACCESS_PATH", access_path),
-            patch.object(host, "KV_ACCESS_PATH", kv_access_path),
-            patch.object(host, "OPERATOR_ACCESS_PATH", operator_access_path),
-            patch.object(
-                host,
-                "read_status",
-                return_value={"initialized": True, "sealed": False},
-            ),
-            patch.object(host, "unseal") as unseal,
-            patch.object(host, "ssh_cas_ready", return_value=False),
-            patch.object(host, "client_ca_published", return_value=False),
-            patch.object(
-                host,
-                "generate_temporary_root_token",
-                return_value="TEMP-ROOT-TOKEN",
-            ) as generate_root,
-            patch.object(host, "ensure_ssh_cas") as ensure_cas,
-            patch.object(host, "configure_ssh_access") as configure_access,
-            patch.object(host, "configure_kv_access") as configure_kv,
-            patch.object(
-                host,
-                "configure_operator_access",
-            ) as configure_operator,
-            patch.object(host, "materialize_runtime_secrets") as materialize,
-            patch.object(host, "publish_client_ca") as publish_ca,
-            patch.object(host, "publish_host_ca") as publish_host_ca,
-            patch.object(host, "ensure_client_signing_role") as ensure_client_role,
-            patch.object(host, "ensure_host_signing_role") as ensure_host_role,
-            patch.object(host, "revoke_temporary_root_token") as revoke_root,
-        ):
+
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(patch.object(host, "KEY_PATH", key_path))
+            stack.enter_context(patch.object(host, "SSH_ACCESS_PATH", access_path))
+            stack.enter_context(patch.object(host, "KV_ACCESS_PATH", kv_access_path))
+            stack.enter_context(
+                patch.object(host, "OPERATOR_ACCESS_PATH", operator_access_path)
+            )
+            stack.enter_context(
+                patch.object(
+                    host,
+                    "read_status",
+                    return_value={"initialized": True, "sealed": False},
+                )
+            )
+            unseal = stack.enter_context(patch.object(host, "unseal"))
+            stack.enter_context(
+                patch.object(host, "ssh_cas_ready", return_value=False)
+            )
+            stack.enter_context(
+                patch.object(host, "client_ca_published", return_value=False)
+            )
+            generate_root = stack.enter_context(
+                patch.object(
+                    host,
+                    "generate_temporary_root_token",
+                    return_value="TEMP-ROOT-TOKEN",
+                )
+            )
+            ensure_cas = stack.enter_context(
+                patch.object(host, "ensure_ssh_cas")
+            )
+            configure_access = stack.enter_context(
+                patch.object(host, "configure_ssh_access")
+            )
+            configure_kv = stack.enter_context(
+                patch.object(host, "configure_kv_access")
+            )
+            configure_operator = stack.enter_context(
+                patch.object(host, "configure_operator_access")
+            )
+            materialize = stack.enter_context(
+                patch.object(host, "materialize_runtime_secrets")
+            )
+            publish_ca = stack.enter_context(
+                patch.object(host, "publish_client_ca")
+            )
+            publish_host_ca = stack.enter_context(
+                patch.object(host, "publish_host_ca")
+            )
+            ensure_client_role = stack.enter_context(
+                patch.object(host, "ensure_client_signing_role")
+            )
+            ensure_host_role = stack.enter_context(
+                patch.object(host, "ensure_host_signing_role")
+            )
+            revoke_root = stack.enter_context(
+                patch.object(host, "revoke_temporary_root_token")
+            )
             host.initialize()
 
     unseal.assert_called_once_with()
@@ -609,7 +694,6 @@ def test_existing_openbao_bootstraps_missing_ssh_security() -> None:
     ensure_client_role.assert_called_once_with()
     ensure_host_role.assert_called_once_with()
     revoke_root.assert_called_once_with("TEMP-ROOT-TOKEN")
-
 
 def test_ssh_ca_reconcile_requires_initial_admin_token() -> None:
     host = load_host_module()
