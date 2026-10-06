@@ -140,7 +140,7 @@ def check_sync_operation() -> None:
     ) as sync:
         if operations._run_sync(ROOT, identity) != 0:
             fail("Sync Guest infra-manager должен завершаться успешно")
-    sync.assert_called_once_with(identity)
+    sync.assert_called_once_with(ROOT, identity)
 
     unsupported = guest_identity(ROOT, 109)
     try:
