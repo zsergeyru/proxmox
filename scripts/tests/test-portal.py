@@ -59,12 +59,20 @@ def check_bookmarks() -> None:
             fail(f"В Homepage 910 отсутствует ссылка {expected}")
 
     for icon in (
-        "mdi-check-circle-outline",
-        "mdi-sync",
-        "mdi-wrench",
+        "mdi-check-circle-outline-#34d399",
+        "mdi-sync-#38bdf8",
+        "mdi-wrench-#fb923c",
     ):
         if icon not in serialized:
             fail(f"В Homepage 910 отсутствует иконка действия {icon}")
+
+    for description in (
+        "Проверка состояния",
+        "Обновление конфигурации",
+        "Устранение проблем",
+    ):
+        if description not in serialized:
+            fail(f"В Homepage 910 отсутствует описание действия {description}")
 
     gateway = build_portal_bookmarks(109)
     if _labels(gateway) != {"Проверить", "Синхронизировать", "Исправить"}:
@@ -75,10 +83,14 @@ def check_service_discovery() -> None:
     infra = portal_services(910, "local")
     if {next(iter(item)) for item in infra} != {"Semaphore", "OpenBao"}:
         fail("Homepage 910 должен публиковать Semaphore и OpenBao")
-    if _service(infra, "Semaphore").get("icon") != "mdi-server":
-        fail("Semaphore должен иметь иконку")
-    if _service(infra, "OpenBao").get("icon") != "mdi-lock":
-        fail("OpenBao должен иметь иконку")
+    if _service(infra, "Semaphore").get("icon") != "mdi-server-#38bdf8":
+        fail("Semaphore должен иметь цветную иконку")
+    if _service(infra, "Semaphore").get("description") != "Задачи и автоматизация":
+        fail("Semaphore должен иметь описание")
+    if _service(infra, "OpenBao").get("icon") != "mdi-lock-#e0f2fe":
+        fail("OpenBao должен иметь цветную иконку")
+    if _service(infra, "OpenBao").get("description") != "Хранилище секретов":
+        fail("OpenBao должен иметь описание")
     if _service(infra, "OpenBao").get("siteMonitor") != (
         "https://192.168.9.10:8202/ui/"
     ):
@@ -89,12 +101,18 @@ def check_service_discovery() -> None:
         fail("Homepage 109 должен публиковать AdGuard Home")
     if _service(gateway, "AdGuard Home").get("icon") != "adguard-home.png":
         fail("AdGuard Home должен иметь иконку")
+    if _service(gateway, "AdGuard Home").get("description") != (
+        "DNS, DHCP и фильтрация"
+    ):
+        fail("AdGuard Home должен иметь описание")
 
     ai = portal_services(410, "local")
     if {next(iter(item)) for item in ai} != {"Open WebUI"}:
         fail("Homepage 410 должен публиковать Open WebUI")
-    if _service(ai, "Open WebUI").get("icon") != "mdi-robot":
-        fail("Open WebUI должен иметь иконку")
+    if _service(ai, "Open WebUI").get("icon") != "mdi-robot-#38bdf8":
+        fail("Open WebUI должен иметь цветную иконку")
+    if _service(ai, "Open WebUI").get("description") != "Веб-интерфейс ИИ":
+        fail("Open WebUI должен иметь описание")
 
     if {next(iter(item)) for item in portal_services(109, "home")} != {
         "AdGuard Home"
@@ -148,8 +166,8 @@ def check_style_contract() -> None:
         "hideVersion: true",
         "columns: 2",
         "columns: 3",
-        "icon: mdi-apps",
-        "icon: mdi-tools",
+        "icon: mdi-apps-#38bdf8",
+        "icon: mdi-tools-#e2e8f0",
     )
     for value in expected:
         if value not in settings:
@@ -158,21 +176,31 @@ def check_style_contract() -> None:
     background = role / "files" / "background.svg"
     if not background.is_file() or background.stat().st_size < 200:
         fail("Не найден локальный фон Homepage")
+    background_text = background.read_text(encoding="utf-8")
+    if 'id="hexGrid"' not in background_text:
+        fail("Фон Homepage должен содержать технологичную шестигранную сетку")
 
-    custom_css = role / "files" / "custom.css"
+    custom_css = role / "templates" / "custom.css.j2"
     if not custom_css.is_file():
-        fail("Не найден общий custom.css Homepage")
+        fail("Не найден шаблон custom.css Homepage")
     css = custom_css.read_text(encoding="utf-8")
-    if "#layout-groups" not in css or "max-width: 1280px" not in css:
-        fail("Homepage должен центрировать группы в ограниченной ширине")
     for value in (
-        "min-height: 68px",
-        "min-height: 58px",
-        "width: 3.5rem",
-        "width: 3.25rem",
+        "#layout-groups::before",
+        "max-width: 1360px",
+        "content: {{ provision.portal.local.title | to_json }}",
+        "min-height: 92px",
+        "min-height: 88px",
+        "rgba(52, 211, 153, 0.9)",
+        "rgba(56, 189, 248, 0.9)",
+        "rgba(251, 146, 60, 0.92)",
+        'content: "Гость {{ provision.guest_vmid }}"',
     ):
         if value not in css:
-            fail(f"Homepage не содержит увеличенный размер карточек: {value}")
+            fail(f"Неоновая тема Homepage не содержит {value!r}")
+
+    tasks = (role / "tasks" / "main.yml").read_text(encoding="utf-8")
+    if "src: custom.css.j2" not in tasks or "ansible.builtin.template" not in tasks:
+        fail("Оформление Homepage должно формироваться из шаблона custom.css.j2")
 
     compose = (
         role / "templates" / "docker-compose.yml.j2"
