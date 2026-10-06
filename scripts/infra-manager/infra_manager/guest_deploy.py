@@ -753,7 +753,7 @@ def _reconcile_guest_infrastructure(context: DeploymentContext) -> None:
         context.paths.plan_file.unlink(missing_ok=True)
 
 
-def _project_revision(repo_root: Path) -> str:
+def project_revision(repo_root: Path) -> str:
     """Вернуть короткий хэш выполняемой рабочей копии проекта."""
     result = run(
         ["git", "-C", str(repo_root), "rev-parse", "--short", "HEAD"],
