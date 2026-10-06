@@ -103,6 +103,33 @@ def test_guest_checks_management_address() -> None:
         assert module.test_guest(Path("/repo"), 410) == 0
 
 
+def test_current_repo_branch() -> None:
+    with patch.object(
+        module,
+        "run",
+        return_value=SimpleNamespace(
+            returncode=0,
+            stdout="feature/test\n",
+            stderr="",
+        ),
+    ):
+        assert module._current_repo_branch(Path("/repo")) == "feature/test"
+
+    with (
+        patch.object(
+            module,
+            "run",
+            return_value=SimpleNamespace(
+                returncode=1,
+                stdout="",
+                stderr="",
+            ),
+        ),
+        patch.object(module.SETTINGS, "project_branch", return_value="main"),
+    ):
+        assert module._current_repo_branch(Path("/repo")) == "main"
+
+
 def test_sync_dispatches_by_role() -> None:
     calls: list[tuple[Path, int]] = []
 
@@ -176,6 +203,7 @@ def main() -> None:
     test_status_guest()
     test_repair_starts_stopped_guest()
     test_guest_checks_management_address()
+    test_current_repo_branch()
     test_sync_dispatches_by_role()
     test_deploy_reserves_self_update_activation()
     test_operation_dispatch()
