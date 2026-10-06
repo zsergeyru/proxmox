@@ -263,7 +263,7 @@ def repair() -> int:
     run(
         [
             str(OPENBAO_COMMAND),
-            "--initialize",
+            "--repair",
             "--log-level",
             "normal",
         ]
