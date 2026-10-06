@@ -289,12 +289,19 @@ def test_openbao_status_checks() -> None:
 
     with patch.object(module, "_ssh", side_effect=record_ssh):
         module.check_openbao_kv("pve")
+        module.check_openbao_operator_access("pve")
         module.check_openbao_ssh_access("pve")
 
     assert calls == [
         (
             "/usr/local/sbin/infra-manager-openbao-unseal",
             "--check-kv",
+            "--log-level",
+            "quiet",
+        ),
+        (
+            "/usr/local/sbin/infra-manager-openbao-unseal",
+            "--check-operator-access",
             "--log-level",
             "quiet",
         ),
