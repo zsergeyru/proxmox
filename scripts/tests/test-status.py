@@ -913,6 +913,7 @@ def main_test() -> None:
 
     if [item["type"] for item in definition.checks] != [
         "runtime",
+        "portal",
         "openbao",
         "semaphore",
         "runtime_tools",
@@ -1030,6 +1031,40 @@ def main_test() -> None:
     check_ssh_access_full.assert_called_once_with("pve")
     check_recovery_full.assert_called_once_with("pve")
 
+    portal_run = Mock(
+        side_effect=[
+            SimpleNamespace(returncode=0, stdout="true\n"),
+            SimpleNamespace(returncode=0, stdout=""),
+            SimpleNamespace(returncode=0, stdout=""),
+            SimpleNamespace(returncode=0, stdout=""),
+        ]
+    )
+    with patch.object(
+        status_module,
+        "command_runner",
+        SimpleNamespace(run=portal_run),
+    ):
+        status_module._check_portal()
+    portal_calls = [call.args[0] for call in portal_run.call_args_list]
+    if not any("homepage" in argv for argv in portal_calls):
+        fail("status не проверяет контейнер Homepage")
+    if not any(
+        "http://127.0.0.1:3001/api/healthcheck" in argv
+        for argv in portal_calls
+    ):
+        fail("status не проверяет healthcheck Homepage")
+    if not any(
+        "infra-manager-portal-gateway.service" in argv
+        for argv in portal_calls
+    ):
+        fail("status не проверяет systemd-службу шлюза Homepage")
+    if not any(
+        f"http://127.0.0.1:{status_module.SETTINGS.portal_gateway_port}/health"
+        in argv
+        for argv in portal_calls
+    ):
+        fail("status не проверяет healthcheck шлюза Homepage")
+
     tls_run = Mock(
         return_value=SimpleNamespace(
             returncode=0,
@@ -1081,10 +1116,12 @@ def main_test() -> None:
     for expected in (
         "Состояние infra-manager",
         "[ОК] Docker и infra-runtime работают",
+        "[ОК] Homepage и его действия работают",
         "[ОК] OpenBao запущен",
         "[ОК] Semaphore работает",
         "[ОК] OpenTofu, Ansible и Packer готовы",
         "[ОК] Доступ к PVE подтверждён",
+        "http://192.168.9.10:3001",
         "http://192.168.9.10:3000",
         "Логин:   admin",
         "Пароль:  secret-pass",
