@@ -51,7 +51,8 @@ docker:
 
       portal:
         name: Semaphore
-        icon: mdi-server
+        description: Задачи и автоматизация
+        icon: mdi-server-#38bdf8
         scheme: http
         port: 3000
         targets:
