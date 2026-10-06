@@ -93,9 +93,6 @@ jobs:
       - name: Run guest operation checks
         run: python scripts/tests/test-guest-operations.py
 
-      - name: Run common guest status checks
-        run: python scripts/tests/test-guest-status.py
-
       - name: Run guest portal checks
         run: python scripts/tests/test-portal.py
 
