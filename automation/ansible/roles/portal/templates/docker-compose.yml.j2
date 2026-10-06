@@ -1,0 +1,11 @@
+services:
+  homepage:
+    image: {{ portal_homepage_image }}
+    container_name: homepage
+    restart: unless-stopped
+    ports:
+      - "{{ portal_local_port }}:3000"
+    environment:
+      HOMEPAGE_ALLOWED_HOSTS: "{{ inventory_hostname }}:{{ portal_local_port }},localhost:{{ portal_local_port }},127.0.0.1:{{ portal_local_port }}"
+    volumes:
+      - "{{ portal_config_dir }}:/app/config"
