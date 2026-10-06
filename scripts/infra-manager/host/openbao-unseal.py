@@ -695,10 +695,14 @@ def configure_operator_access(
     *,
     rotate_password: bool = False,
 ) -> dict[str, str]:
-    credentials: dict[str, str]
+    credentials: dict[str, str] | None = None
     if OPERATOR_ACCESS_PATH.is_file() and not rotate_password:
-        credentials = read_operator_access_credentials()
-    else:
+        try:
+            credentials = read_operator_access_credentials()
+        except OpenBaoHostError:
+            credentials = None
+
+    if credentials is None:
         credentials = {
             "username": OPERATOR_USERNAME,
             "password": secrets.token_urlsafe(32),
