@@ -248,11 +248,13 @@ grep -q 'python_install_root: Path = Path("/usr/local/lib/infra-manager")' "$PY_
 grep -Fq 'dest: "{{ provision.paths.python_package }}/infra_manager/"' "$ANSIBLE_RUNTIME" \
     || die "Ansible должен устанавливать служебный код infra_manager"
 python_wrapper_count="$(grep -Fc 'source: python-command.sh' "$ANSIBLE_RUNTIME" || true)"
-[[ "$python_wrapper_count" -eq 3 ]] \
-    || die "Ansible должен установить общую Python-оболочку под тремя административными именами"
-for command in infra-manager-status infra-manager-pve-access-check infra-manager-pve-lifecycle-test; do
-    grep -Fq "target: $command" "$ANSIBLE_RUNTIME" \
-        || die "Ansible не устанавливает административную команду $command"
+[[ "$python_wrapper_count" -eq 1 ]] \
+    || die "Внутри 910 должна устанавливаться только техническая status-команда"
+grep -Fq 'target: infra-manager-status' "$ANSIBLE_RUNTIME" \
+    || die "Ansible не устанавливает внутреннюю status-команду"
+for obsolete in infra-manager-pve-access-check infra-manager-pve-lifecycle-test; do
+    grep -Fq "/usr/local/sbin/$obsolete" "$ANSIBLE_RUNTIME" \
+        || die "Ansible должен удалять прежнюю операторскую команду $obsolete"
 done
 grep -Fq 'dest: /usr/bin/infra-manager-status' "$ANSIBLE_RUNTIME" \
     || die "Команда infra-manager-status должна быть доступна через pct exec"
