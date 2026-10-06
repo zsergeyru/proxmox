@@ -203,6 +203,24 @@ infra-runtime
 - `Sync Guest`;
 - `Sync SSH Access`.
 
+В веб-интерфейсе эти шаблоны распределяются по Views:
+
+```text
+Guests
+├── Deploy Guest
+├── Status Guest
+├── Repair Guest
+├── Test Guest
+└── Sync Guest
+
+Infrastructure
+├── OpenTofu Plan
+└── Build Template 9000
+
+Security
+└── Sync SSH Access
+```
+
 Синхронизация этих объектов выполняется узкой Python-командой:
 
 ```text
