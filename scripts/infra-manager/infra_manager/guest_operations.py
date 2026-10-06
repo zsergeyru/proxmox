@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import socket
 from pathlib import Path
 from typing import Final
 
@@ -15,12 +14,11 @@ from .common import (
     require_runtime_activation_idle,
     reserve_runtime_activation,
 )
-from .guest_catalog import GuestIdentity, deployable_guests, guest_identity, guest_management_address
+from .guest_catalog import GuestIdentity, deployable_guests, guest_identity
 from .guest_deploy import project_branch_for_checkout, run_deploy_guest
-from .guest_status import show_guest_status
+from .guest_status import show_guest_status, verify_guest_status
 from .pve import PveClient
 from .pve_host import (
-    check_infra_manager_status,
     install_openbao_host_support,
     repair_openbao_on_host,
 )
@@ -146,14 +144,6 @@ def _generic_status(
     return resource
 
 
-def _infra_manager_status(
-    node: str,
-    identity: GuestIdentity,
-) -> None:
-    del identity
-    check_infra_manager_status(node)
-
-
 def _infra_manager_repair(
     node: str,
     repo_root: Path,
@@ -175,14 +165,6 @@ def _infra_manager_repair(
         "OpenBao восстановлен, проект Semaphore синхронизирован; "
         "полная готовность проверяется отдельным Status Guest"
     )
-
-
-def _infra_manager_test(identity: GuestIdentity) -> None:
-    del identity
-    from .status import check_status
-
-    check_status(full=True, quiet=True)
-    console.ok("Расширенная проверка infra-manager пройдена")
 
 
 def _infra_manager_sync(
@@ -250,8 +232,6 @@ def _run_status(
         identity,
         announce=False,
     )
-    if identity.role == SETTINGS.infra_manager_role:
-        _infra_manager_status(str(resource["node"]), identity)
     show_guest_status(
         repo_root,
         identity,
@@ -301,27 +281,16 @@ def _run_test(
     repo_root: Path,
     identity: GuestIdentity,
 ) -> int:
-    _generic_status(client, repo_root, identity)
-
-    address = guest_management_address(repo_root, identity)
-    if address is None:
-        raise InfraManagerError(
-            f"Для гостя {identity.vmid} не определён административный IPv4"
-        )
-    try:
-        with socket.create_connection((address, 22), timeout=5):
-            pass
-    except OSError as exc:
-        raise InfraManagerError(
-            f"Гость {identity.vmid} {identity.name}: "
-            f"SSH {address}:22 недоступен: {exc}"
-        ) from exc
-    console.ok(
-        f"Гость {identity.vmid} {identity.name}: SSH {address}:22 доступен"
+    resource = _generic_status(
+        client,
+        repo_root,
+        identity,
+        announce=False,
     )
-
-    if identity.role == SETTINGS.infra_manager_role:
-        _infra_manager_test(identity)
+    verify_guest_status(repo_root, identity, resource)
+    console.ok(
+        f"Гость {identity.vmid} {identity.name}: расширенная проверка пройдена"
+    )
     return 0
 
 
