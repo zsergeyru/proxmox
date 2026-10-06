@@ -579,9 +579,9 @@ def main_test() -> None:
             {"id": 10, "name": SETTINGS.infra_manager_env_name},
         ),
         views=(
-            {"id": 31, "title": "Guests", "position": 0},
-            {"id": 32, "title": "Infrastructure", "position": 1},
-            {"id": 33, "title": "Security", "position": 2},
+            {"id": 31, "title": "Guests", "position": 1},
+            {"id": 32, "title": "Infrastructure", "position": 2},
+            {"id": 33, "title": "Security", "position": 3},
         ),
         templates=tuple(
             {
