@@ -270,6 +270,7 @@ Python не должен содержать независимую вторую 
 |---|---|
 | `OpenTofu Plan` | OpenTofu + Python |
 | `Build Template 9000` | Packer + Python |
+| `Set Log Level` | Semaphore API + постоянная настройка `INFRA_LOG_LEVEL` |
 | `Deploy Guest` | выбор гостя + OpenTofu + Ansible + Python |
 | `Status Guest` | PVE + проверки роли |
 | `Repair Guest` | PVE + безопасные повторяемые исправления |
