@@ -62,9 +62,9 @@
     group: root
     mode: "0644"
 
-- name: Установить оформление Homepage
-  ansible.builtin.copy:
-    src: custom.css
+- name: Сформировать оформление Homepage
+  ansible.builtin.template:
+    src: custom.css.j2
     dest: "{{ portal_config_dir }}/custom.css"
     owner: root
     group: root
