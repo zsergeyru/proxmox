@@ -507,6 +507,23 @@ def _dict_items(value: Any, kind: str) -> tuple[dict[str, Any], ...]:
     return tuple(value)
 
 
+def _survey_vars_match(
+    actual: Any,
+    expected: tuple[dict[str, Any], ...],
+) -> bool:
+    """Проверить управляемые поля survey-переменных, разрешая служебные поля API."""
+
+    if not isinstance(actual, list) or len(actual) != len(expected):
+        return False
+    for actual_item, expected_item in zip(actual, expected, strict=True):
+        if not isinstance(actual_item, dict):
+            return False
+        for key, value in expected_item.items():
+            if actual_item.get(key) != value:
+                return False
+    return True
+
+
 def load_semaphore_snapshot(
     semaphore: SemaphoreClient,
     project_id: int,
@@ -622,6 +639,10 @@ def validate_semaphore_snapshot(
             template.get("app") != spec.app
             or template.get("playbook") != spec.playbook
             or str(template.get("arguments") or "[]") != spec.arguments
+            or not _survey_vars_match(
+                template.get("survey_vars") or [],
+                spec.survey_vars,
+            )
         ):
             raise InfraManagerError(
                 f"Шаблон Semaphore '{spec.name}' "
