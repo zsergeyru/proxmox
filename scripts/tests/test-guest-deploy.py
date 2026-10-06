@@ -1103,6 +1103,11 @@ def check_pve_host_support_before_signing() -> None:
                 "_prepare_openbao_machine_ansible_vars",
                 return_value=["-e", "infra_openbao_machine_enabled=false"],
             ),
+            patch.object(
+                guest_deploy_module,
+                "_project_git_ansible_vars",
+                return_value=["-e", "infra_project_git_read=false"],
+            ),
         ):
             guest_deploy_module._configure_guest_os(
                 context,
