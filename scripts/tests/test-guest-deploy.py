@@ -352,6 +352,10 @@ def check_infra_manager_self_update_path_after_vmid_change() -> None:
             ),
             patch.object(
                 guest_deploy_module,
+                "show_openbao_operator_credentials",
+            ) as show_operator,
+            patch.object(
+                guest_deploy_module,
                 "prepare_workspace",
                 side_effect=AssertionError(
                     "Самообновление infra-manager не должно готовить OpenTofu workspace"
@@ -373,6 +377,7 @@ def check_infra_manager_self_update_path_after_vmid_change() -> None:
             if guest_deploy_module.run_deploy_guest(root, 920) != 0:
                 fail("Самообновление infra-manager с VMID 920 должно завершаться успешно")
 
+    show_operator.assert_called_once_with("pve")
     if validated != [920]:
         fail("Самообновление должно проверить существующий объект infra-manager")
     if access_calls != [
