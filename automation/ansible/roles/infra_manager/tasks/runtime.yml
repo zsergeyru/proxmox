@@ -167,7 +167,7 @@
       - runtime
   changed_when: true
 
-- name: Запустить OpenBao
+- name: Запустить OpenBao с актуальной конфигурацией
   ansible.builtin.command:
     argv:
       - docker
@@ -178,6 +178,7 @@
       - "{{ provision.paths.compose }}/docker-compose.yml"
       - up
       - -d
+      - --force-recreate
       - openbao
   changed_when: true
 
