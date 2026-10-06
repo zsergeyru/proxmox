@@ -45,8 +45,7 @@
 
 - name: Установить службу действий локального портала
   ansible.builtin.copy:
-    remote_src: true
-    src: "{{ provision.paths.bootstrap_repository }}/infrastructure/guests/{{ guest }}/rootfs/etc/systemd/system/infra-manager-portal-gateway.service"
+    src: "{{ guest_root }}/rootfs/etc/systemd/system/infra-manager-portal-gateway.service"
     dest: /etc/systemd/system/infra-manager-portal-gateway.service
     owner: root
     group: root
