@@ -141,6 +141,29 @@ def operator_guest_status(
     )
 
 
+def _prepare_guest_operation_environment() -> None:
+    """Подготовить OpenTofu-переменные для прямого запуска внутри гостя."""
+
+    client = PveClient()
+    if not PATHS.ansible_public_key.is_file():
+        raise InfraManagerError(
+            f"Не найден открытый ключ Ansible: {PATHS.ansible_public_key}"
+        )
+    ansible_public_key = PATHS.ansible_public_key.read_text(
+        encoding="utf-8"
+    ).strip()
+    if not ansible_public_key:
+        raise InfraManagerError(
+            f"Открытый ключ Ansible пуст: {PATHS.ansible_public_key}"
+        )
+
+    os.environ["TF_VAR_pve_endpoint"] = client.url
+    os.environ["TF_VAR_pve_api_token"] = (
+        f"{client.token_id}={client.token_secret}"
+    )
+    os.environ["TF_VAR_ansible_ssh_public_key"] = ansible_public_key
+
+
 def operator_guest_task(
     operation: str,
     vmid: int,
@@ -149,6 +172,7 @@ def operator_guest_task(
 ) -> int:
     """Выполнить штатную операцию напрямую внутри infra-manager."""
 
+    _prepare_guest_operation_environment()
     result = run_guest_operation(
         PATHS.repo_root,
         operation,
