@@ -265,6 +265,26 @@ def _run_status(
     return 0
 
 
+def list_local_guests(repo_root: Path) -> int:
+    """Показать поддерживаемых гостей и состояние объектов PVE."""
+
+    client = PveClient()
+    print(f"{'VMID':<7}{'Имя':<24}{'Роль':<20}Состояние")
+    for identity in deployable_guests(repo_root):
+        resource = client.find_vm(identity.vmid)
+        if resource is None:
+            state = "отсутствует"
+        else:
+            state = str(resource.get("status") or "неизвестно")
+        print(
+            f"{identity.vmid:<7}"
+            f"{identity.name:<24}"
+            f"{(identity.role or '-'):<20}"
+            f"{state}"
+        )
+    return 0
+
+
 def run_local_guest_status(
     repo_root: Path,
     vmid: int,
