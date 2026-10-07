@@ -75,11 +75,6 @@ def test_orchestration() -> None:
             "check_recovery_contour",
             side_effect=lambda node: calls.append(("check-recovery", node)),
         ),
-        patch.object(
-            openbao_module,
-            "cleanup_transition_state",
-            side_effect=lambda node: calls.append(("cleanup-transition", node)),
-        ),
     ):
         if openbao_module.run_initialize_openbao(ROOT) != 0:
             fail("Инициализация OpenBao должна завершаться кодом 0")
@@ -91,7 +86,6 @@ def test_orchestration() -> None:
         ("initialize", "pve"),
         ("sync-otp", "pve"),
         ("check-recovery", "pve"),
-        ("cleanup-transition", "pve"),
         ("check-recovery", "pve"),
     ]:
         fail(f"Неожиданный порядок инициализации OpenBao: {calls!r}")
