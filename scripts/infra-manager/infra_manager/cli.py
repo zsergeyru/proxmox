@@ -37,6 +37,23 @@ def build_parser() -> argparse.ArgumentParser:
     )
     status_parser.set_defaults(handler="status")
 
+    guest_status_parser = subparsers.add_parser(
+        "guest-status",
+        help="показать общий статус выбранного гостя",
+    )
+    guest_status_parser.add_argument(
+        "--guest-vmid",
+        type=int,
+        required=True,
+        help="VMID гостя",
+    )
+    guest_status_parser.add_argument(
+        "--show-secrets",
+        action="store_true",
+        help="явно разрешить вывод операторских паролей",
+    )
+    guest_status_parser.set_defaults(handler="guest-status")
+
     access_parser = subparsers.add_parser(
         "pve-access-check",
         help="проверить права PVE API token infra-manager",
@@ -141,6 +158,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             from .status import check_status
 
             return check_status(full=args.full, quiet=args.quiet)
+
+        if args.handler == "guest-status":
+            from .guest_operations import run_local_guest_status
+            from .settings import PATHS
+
+            return run_local_guest_status(
+                PATHS.repo_root,
+                args.guest_vmid,
+                show_secrets=args.show_secrets,
+            )
 
         if args.handler == "pve-access-check":
             from .pve import check_access
