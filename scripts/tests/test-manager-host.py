@@ -238,6 +238,7 @@ def test_operator_guest_task_secret_policy() -> None:
                     "infra-manager-direct",
                     operation,
                     "410",
+                    operator.RUNTIME_PROJECT_ROOT,
                 ],
                 check=False,
             )
