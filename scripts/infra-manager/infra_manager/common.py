@@ -174,7 +174,7 @@ def _runtime_activation_scope() -> str:
 
 
 def _default_runtime_activation_marker() -> Path:
-    """Выбрать один физический marker для 910 и infra-runtime."""
+    """Выбрать один физический marker для управляющего гостя и infra-runtime."""
 
     if _runtime_activation_scope() == "host":
         root = HOST_SEMAPHORE_STATE_DIR
