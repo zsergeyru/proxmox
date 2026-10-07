@@ -13,7 +13,7 @@ from pathlib import Path
 from .common import InfraManagerError
 from .guest_catalog import guest_identity
 from .guest_operations import operation_guests
-from .settings import PATHS
+from .settings import PATHS, SETTINGS
 
 
 ACTION_LABELS = {
