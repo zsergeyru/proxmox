@@ -264,6 +264,42 @@ def test_operator_guest_task_secret_policy() -> None:
         "Операция deploy для гостя 410 завершилась с кодом 7"
     )
 
+    with (
+        patch.object(
+            operator,
+            "_prepare_runtime_snapshot",
+            return_value="/tmp/infra-manager-direct-test-910",
+        ),
+        patch.object(
+            operator,
+            "run",
+            return_value=SimpleNamespace(returncode=0),
+        ),
+        patch.object(
+            operator,
+            "guest_identity",
+            return_value=SimpleNamespace(
+                vmid=910,
+                name="infra-manager",
+                role=operator.SETTINGS.infra_manager_role,
+            ),
+        ) as identity,
+        patch.object(operator, "operator_guest_status") as status,
+        patch.object(operator, "console") as console,
+    ):
+        assert operator.operator_guest_task(
+            "deploy",
+            910,
+            show_secrets=True,
+        ) == 0
+
+    identity.assert_called_once_with(operator.PATHS.repo_root, 910)
+    status.assert_not_called()
+    console.info.assert_called_once_with(
+        "Отложенная активация infra-runtime продолжится "
+        "после завершения команды"
+    )
+
 
 def test_internal_project_refresh_uses_existing_checkout() -> None:
     with tempfile.TemporaryDirectory() as tmp:
