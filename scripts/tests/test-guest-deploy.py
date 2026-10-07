@@ -202,7 +202,6 @@ def check_infra_manager_self_update_path_after_vmid_change() -> None:
     )
     configured: list[dict[str, object]] = []
     validated: list[int] = []
-    access_calls: list[tuple[str, int, str, str]] = []
 
     def record_configure(
         deployment: DeploymentContext,
@@ -214,15 +213,6 @@ def check_infra_manager_self_update_path_after_vmid_change() -> None:
 
     def record_validate(deployment: DeploymentContext) -> None:
         validated.append(deployment.vmid)
-
-    def record_access(
-        node: str,
-        vmid: int,
-        *,
-        hostname: str,
-        public_key: str,
-    ) -> None:
-        access_calls.append((node, vmid, hostname, public_key))
 
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
@@ -237,9 +227,6 @@ def check_infra_manager_self_update_path_after_vmid_change() -> None:
             "pve_management: false\n",
             encoding="utf-8",
         )
-        public_key = root / "guest_ed25519.pub"
-        public_key.write_text("ssh-ed25519 AAAATEST", encoding="utf-8")
-
         with (
             patch.object(guest_deploy_module, "require_command"),
             patch.object(
@@ -269,11 +256,6 @@ def check_infra_manager_self_update_path_after_vmid_change() -> None:
             ),
             patch.object(
                 guest_deploy_module,
-                "ensure_infra_self_access",
-                side_effect=record_access,
-            ),
-            patch.object(
-                guest_deploy_module,
                 "_configure_guest_os",
                 side_effect=record_configure,
             ),
@@ -291,26 +273,18 @@ def check_infra_manager_self_update_path_after_vmid_change() -> None:
                     "Самообновление infra-manager не должно менять объект Proxmox"
                 ),
             ),
-            patch.object(
-                guest_deploy_module,
-                "PATHS",
-                SimpleNamespace(ansible_public_key=public_key),
-            ),
         ):
             if guest_deploy_module.run_deploy_guest(root, 920) != 0:
                 fail("Самообновление infra-manager с VMID 920 должно завершаться успешно")
 
     if validated != [920]:
         fail("Самообновление должно проверить существующий объект infra-manager")
-    if access_calls != [
-        ("pve", 920, "infra-manager", "ssh-ed25519 AAAATEST")
-    ]:
-        fail("Самообновление должно использовать фактический VMID infra-manager")
     if configured != [
         {
             "provision_phase": "full",
             "self_update": True,
             "project_branch": "feature/infra-manager-role",
+            "allow_legacy_bootstrap": False,
         }
     ]:
         fail(
