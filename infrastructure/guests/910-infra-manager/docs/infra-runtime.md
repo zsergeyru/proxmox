@@ -319,17 +319,23 @@ INFRA_PVE_NODE
 
 ### Признак отложенной активации
 
-Во время самообновления используется:
+Во время самообновления используется один физический файл, видимый под разными путями:
 
 ```text
-/var/lib/semaphore/.infra-manager-runtime-activation-pending
+на 910:          /mnt/persistent-state/semaphore/.infra-manager-runtime-activation-pending
+в infra-runtime: /var/lib/semaphore/.infra-manager-runtime-activation-pending
 ```
 
-Так как `/var/lib/semaphore` является постоянным подключённым каталогом, файл одновременно видят система 910 снаружи контейнера и `infra-runtime`. PID относится к процессу, который запустил самообновление: это может быть операторский процесс на 910 при вызове с PVE или процесс задания Semaphore внутри старого контейнера.
+В файл записывается пространство PID и PID процесса, который запустил самообновление:
 
-В файл записывается PID текущего задания.
+```text
+host:<PID>
+runtime:<PID>
+```
 
-Новые инфраструктурные задания проверяют этот признак и не должны начинать изменение инфраструктуры во время замены среды.
+`host` используется при прямом запуске с PVE через операторский процесс на 910, `runtime` — при запуске задания Semaphore внутри `infra-runtime`. Для безопасного первого перехода активация также принимает старый числовой формат как `runtime:<PID>`.
+
+Новые инфраструктурные операции проверяют этот признак и не должны начинать изменение инфраструктуры во время замены среды.
 
 ### Как работает активация
 
@@ -341,9 +347,9 @@ INFRA_PVE_NODE
 
 Порядок:
 
-1. читает PID из файла-признака;
-2. проверяет, что PID имеет числовой формат;
-3. через `docker exec` ждёт завершения этого процесса в старом `infra-runtime`;
+1. читает пространство PID и PID из файла-признака;
+2. проверяет формат `host:<PID>`, `runtime:<PID>` или совместимый старый числовой формат;
+3. для `host` ждёт процесс через `kill -0` на 910, а для `runtime` — через `docker exec ... kill -0` в старом `infra-runtime`;
 4. максимальное ожидание — 15 минут;
 5. выполняет `docker compose up -d --remove-orphans` уже с новым образом;
 6. выполняет `infra-manager-openbao-startup-unseal`;
@@ -371,7 +377,7 @@ systemctl list-units 'infra-manager-runtime-activate-*'
 Проверить признак:
 
 ```bash
-ls -l /var/lib/semaphore/.infra-manager-runtime-activation-pending
+ls -l /mnt/persistent-state/semaphore/.infra-manager-runtime-activation-pending
 ```
 
 После успешной активации признак должен исчезнуть.
