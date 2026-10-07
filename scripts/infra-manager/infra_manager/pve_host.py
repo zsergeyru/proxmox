@@ -323,7 +323,8 @@ systemctl daemon-reload
 
 
 def install_recovery_host_support(node: str, repo_root: Path) -> None:
-    """Установить на PVE внутренний recovery helper и операторскую команду."""
+    """Установить на PVE независимый recovery helper."""
+
     host_root = repo_root / "scripts" / "infra-manager" / "host"
     _install_remote_file(
         node,
@@ -331,13 +332,20 @@ def install_recovery_host_support(node: str, repo_root: Path) -> None:
         RECOVERY_HOST_COMMAND,
         "0755",
     )
+    console.detail("Recovery helper установлен на PVE")
+
+
+def install_operator_host_support(node: str, repo_root: Path) -> None:
+    """Установить на PVE тонкую операторскую оболочку."""
+
+    host_root = repo_root / "scripts" / "infra-manager" / "host"
     _install_remote_file(
         node,
         host_root / "manager.py",
         OPERATOR_HOST_COMMAND,
         "0755",
     )
-    console.detail("Recovery helper и команда infra-manager установлены на PVE")
+    console.detail("Операторская оболочка infra-manager установлена на PVE")
 
 
 def prepare_recovery_git(node: str) -> None:
