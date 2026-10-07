@@ -195,6 +195,25 @@ def check_log_levels() -> None:
         if hidden.stdout.strip() != "HIDDEN-SUCCESS":
             fail("normal должен перехватывать подробный stdout успешной команды")
 
+        streamed = runner.run(
+            [sys.executable, "-c", "raise SystemExit(0)"],
+            stream_output=True,
+            check=False,
+        )
+        if streamed.stdout is not None or streamed.stderr is not None:
+            fail("stream_output должен оставлять stdout/stderr у вызывающего процесса")
+
+        try:
+            runner.run(
+                [sys.executable, "-c", "raise SystemExit(0)"],
+                capture=True,
+                stream_output=True,
+            )
+        except ValueError:
+            pass
+        else:
+            fail("stream_output нельзя сочетать с capture")
+
         try:
             runner.run(
                 [

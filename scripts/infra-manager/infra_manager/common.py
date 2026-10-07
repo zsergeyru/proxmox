@@ -253,6 +253,7 @@ class CommandRunner:
         *,
         capture: bool = False,
         quiet: bool = False,
+        stream_output: bool = False,
         log_file: Path | None = None,
         check: bool = True,
         cwd: Path | None = None,
@@ -263,10 +264,16 @@ class CommandRunner:
         """Запустить внешнюю команду с едиными правилами вывода и ошибок."""
         if not argv:
             raise ValueError("argv не должен быть пустым")
-        if capture and quiet:
-            raise ValueError("capture и quiet нельзя включать одновременно")
+        if sum((capture, quiet, stream_output)) > 1:
+            raise ValueError(
+                "capture, quiet и stream_output нельзя включать одновременно"
+            )
 
         actual_log = log_file if log_file is not None else self.default_log_file
+        if stream_output and actual_log is not None:
+            raise ValueError(
+                "stream_output нельзя сочетать с записью вывода в файл"
+            )
         redacted = _redact_argv(argv, sensitive_args)
 
         stdout: object | None = None
@@ -287,6 +294,10 @@ class CommandRunner:
         elif capture:
             stdout = subprocess.PIPE
             stderr = subprocess.PIPE
+        elif stream_output:
+            # Высокоуровневые дочерние команды infra-manager должны передавать
+            # свой уже отфильтрованный вывод вызывающему терминалу или HTTP-потоку.
+            pass
         elif log_level() != "verbose":
             # В обычном режиме внешние инструменты не засоряют журнал
             # успешными подробностями. При ошибке их хвост попадёт в исключение.
@@ -342,6 +353,7 @@ def run(
     *,
     check: bool = True,
     capture_output: bool = False,
+    stream_output: bool = False,
     cwd: Path | None = None,
     env: Mapping[str, str] | None = None,
     input_text: str | None = None,
@@ -352,6 +364,7 @@ def run(
         argv,
         check=check,
         capture=capture_output,
+        stream_output=stream_output,
         cwd=cwd,
         env=env,
         input_text=input_text,
