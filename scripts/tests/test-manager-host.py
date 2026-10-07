@@ -238,6 +238,10 @@ def test_operator_repair_runs_inside_manager() -> None:
             patch.object(operator, "ACTIVATE_RUNTIME", activate),
             patch.object(operator, "_pve_node", return_value="pve"),
             patch.object(operator, "run", side_effect=fake_run),
+            patch.object(
+                operator,
+                "preflight_recovery_contour",
+            ) as preflight,
             patch.object(operator, "repair_openbao_on_host") as repair_openbao,
             patch.object(
                 operator,
@@ -248,6 +252,7 @@ def test_operator_repair_runs_inside_manager() -> None:
         ):
             assert operator.operator_repair(show_secrets=True) == 0
 
+    preflight.assert_called_once_with("pve")
     repair_openbao.assert_called_once_with("pve")
     status.assert_called_once_with(show_secrets=True)
     assert ["systemctl", "start", "docker"] in [call[0] for call in calls]
