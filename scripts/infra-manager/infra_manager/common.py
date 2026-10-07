@@ -163,9 +163,21 @@ class Console:
 console = Console()
 
 
-RUNTIME_ACTIVATION_MARKER = Path(
-    "/var/lib/semaphore/.infra-manager-runtime-activation-pending"
-)
+HOST_SEMAPHORE_STATE_DIR = Path("/mnt/persistent-state/semaphore")
+RUNTIME_SEMAPHORE_STATE_DIR = Path("/var/lib/semaphore")
+
+
+def _default_runtime_activation_marker() -> Path:
+    """Выбрать один физический marker для 910 и infra-runtime."""
+
+    if HOST_SEMAPHORE_STATE_DIR.is_dir():
+        root = HOST_SEMAPHORE_STATE_DIR
+    else:
+        root = RUNTIME_SEMAPHORE_STATE_DIR
+    return root / ".infra-manager-runtime-activation-pending"
+
+
+RUNTIME_ACTIVATION_MARKER = _default_runtime_activation_marker()
 
 
 def require_runtime_activation_idle() -> None:
