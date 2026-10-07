@@ -46,7 +46,7 @@ class BootstrapInfraMixin:
         self.log(title)
 
         # Временный 990 использует отдельную внутреннюю bootstrap-точку входа.
-        # Публичный deploy-guest не содержит bootstrap-фаз 910.
+        # Публичный deploy-guest не содержит bootstrap-фаз infra-manager.
         deploy_args = [
             "env", f"INFRA_PROJECT_BRANCH={self.project_branch}",
             "bash", str(self.project_dir / "scripts/bootstrap-runner/deploy-infra-manager.sh"),
