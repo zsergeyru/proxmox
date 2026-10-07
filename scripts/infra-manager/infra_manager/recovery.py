@@ -9,6 +9,7 @@ from urllib.parse import urlparse
 from .common import InfraManagerError, console
 from .pve_host import (
     check_recovery_contour,
+    install_operator_host_support,
     install_recovery_host_support,
     prepare_recovery_git,
 )
@@ -40,6 +41,7 @@ def prepare_recovery(repo_root: Path) -> int:
     node = pve_node_from_environment()
     console.info("Подготовка аварийного контура infra-manager")
     install_recovery_host_support(node, repo_root)
+    install_operator_host_support(node, repo_root)
     prepare_recovery_git(node)
     console.result("PVE recovery helper и аварийный Git-доступ подготовлены")
     return 0
