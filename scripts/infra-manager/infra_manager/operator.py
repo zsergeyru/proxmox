@@ -32,6 +32,12 @@ def _require_root() -> None:
 
 
 def _pve_node() -> str:
+    explicit = os.environ.get("INFRA_PVE_NODE", "").strip()
+    if explicit:
+        if any(character.isspace() for character in explicit) or "/" in explicit:
+            raise InfraManagerError("INFRA_PVE_NODE имеет некорректный формат")
+        return explicit
+
     client = PveClient()
     node = urlparse(client.url).hostname
     if not node:
