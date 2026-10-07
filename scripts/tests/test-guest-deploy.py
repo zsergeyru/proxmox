@@ -703,6 +703,9 @@ def check_temporary_certificate_path() -> None:
             fail("Ansible должен запускаться из корня текущей копии проекта")
         if "infra_project_git_read=false" not in argv:
             fail("910 не должен получать постоянную гостевую копию Git credential")
+        expected_ca_var = f"infra_ssh_client_ca_file={ca}"
+        if expected_ca_var not in argv:
+            fail("Ansible не получил фактический путь клиентского SSH CA")
         if selected.exists():
             fail("Временный закрытый ключ не удалён после Ansible")
 
