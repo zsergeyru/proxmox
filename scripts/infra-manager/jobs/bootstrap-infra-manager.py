@@ -16,28 +16,23 @@ from infra_manager.common import (
     console,
     require_runtime_activation_idle,
 )
-from infra_manager.guest_deploy import run_bootstrap_infra_manager_phase
+from infra_manager.guest_deploy import run_bootstrap_infra_manager_step
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Внутренний bootstrap-вызов infra-manager из временного LXC 990"
     )
-    parser.add_argument("phase", choices=("create", "configure-base", "configure"))
+    parser.add_argument("step", choices=("create", "configure-base", "configure"))
     parser.add_argument("vmid", type=int)
     args = parser.parse_args()
 
     try:
         require_runtime_activation_idle()
-        phase = {
-            "create": "infrastructure",
-            "configure-base": "provision-base",
-            "configure": "provision",
-        }[args.phase]
-        return run_bootstrap_infra_manager_phase(
+        return run_bootstrap_infra_manager_step(
             REPO_ROOT,
             args.vmid,
-            phase=phase,
+            step=args.step,
         )
     except (InfraManagerError, OSError) as exc:
         console.error(str(exc))
