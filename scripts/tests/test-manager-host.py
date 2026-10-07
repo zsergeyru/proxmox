@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import contextlib
 import importlib.util
-import os
 import sys
 import tempfile
 from pathlib import Path
@@ -185,132 +184,78 @@ def test_host_wrapper_is_minimal() -> None:
         raise AssertionError("PVE-оболочка должна сохранять аварийный recover")
 
 
-def test_operator_guest_environment() -> None:
-    with tempfile.TemporaryDirectory() as tmp:
-        public_key = Path(tmp) / "guest_ed25519.pub"
-        public_key.write_text("ssh-ed25519 TEST guest\n", encoding="utf-8")
-        paths = SimpleNamespace(ansible_public_key=public_key)
-        client = SimpleNamespace(
-            url="https://pve.test:8006",
-            token_id="root@pam!infra-manager",
-            token_secret="secret",
-        )
-        old_values = {
-            name: os.environ.get(name)
-            for name in (
-                "TF_VAR_pve_endpoint",
-                "TF_VAR_pve_api_token",
-                "TF_VAR_ansible_ssh_public_key",
-            )
-        }
-        try:
-            with (
-                patch.object(operator, "PATHS", paths),
-                patch.object(operator, "PveClient", return_value=client),
-            ):
-                operator._prepare_guest_operation_environment()
-
-            assert os.environ["TF_VAR_pve_endpoint"] == client.url
-            assert (
-                os.environ["TF_VAR_pve_api_token"]
-                == "root@pam!infra-manager=secret"
-            )
-            assert (
-                os.environ["TF_VAR_ansible_ssh_public_key"]
-                == "ssh-ed25519 TEST guest"
-            )
-        finally:
-            for name, value in old_values.items():
-                if value is None:
-                    os.environ.pop(name, None)
-                else:
-                    os.environ[name] = value
-
-
 def test_operator_guest_task_secret_policy() -> None:
-    with (
-        patch.object(
-            operator,
-            "_prepare_guest_operation_environment",
-        ) as prepare,
-        patch.object(
-            operator,
-            "run_guest_operation",
-            return_value=0,
-        ) as task,
-        patch.object(operator, "operator_guest_status") as status,
-    ):
-        assert operator.operator_guest_task(
-            "deploy",
-            410,
-            show_secrets=True,
-        ) == 0
+    with tempfile.TemporaryDirectory() as tmp:
+        entrypoint = Path(tmp) / "guest-operation.py"
+        entrypoint.write_text("# test\n", encoding="utf-8")
 
-    prepare.assert_called_once_with()
-    task.assert_called_once_with(
-        operator.PATHS.repo_root,
-        "deploy",
-        410,
-        show_secrets=True,
-    )
-    status.assert_not_called()
+        for operation, expect_status in (
+            ("deploy", True),
+            ("sync", True),
+            ("repair", True),
+            ("test", False),
+        ):
+            with (
+                patch.object(
+                    operator,
+                    "RUNTIME_GUEST_OPERATION",
+                    entrypoint,
+                ),
+                patch.object(
+                    operator,
+                    "run",
+                    return_value=SimpleNamespace(returncode=0),
+                ) as runtime_run,
+                patch.object(
+                    operator,
+                    "operator_guest_status",
+                    return_value=0,
+                ) as status,
+            ):
+                assert operator.operator_guest_task(
+                    operation,
+                    410,
+                    show_secrets=True,
+                ) == 0
 
-    with (
-        patch.object(
-            operator,
-            "_prepare_guest_operation_environment",
-        ) as prepare,
-        patch.object(
-            operator,
-            "run_guest_operation",
-            return_value=0,
-        ) as task,
-        patch.object(
-            operator,
-            "operator_guest_status",
-            return_value=0,
-        ) as status,
-    ):
-        assert operator.operator_guest_task(
-            "sync",
-            410,
-            show_secrets=True,
-        ) == 0
+            runtime_run.assert_called_once_with(
+                [
+                    "docker",
+                    "exec",
+                    "--user",
+                    "1001:0",
+                    operator.RUNTIME_CONTAINER,
+                    "python3",
+                    str(entrypoint),
+                    operation,
+                    "410",
+                ],
+                check=False,
+            )
+            if expect_status:
+                status.assert_called_once_with(410, show_secrets=True)
+            else:
+                status.assert_not_called()
 
-    prepare.assert_called_once_with()
-    task.assert_called_once_with(
-        operator.PATHS.repo_root,
-        "sync",
-        410,
-        show_secrets=True,
-    )
-    status.assert_called_once_with(410, show_secrets=True)
-
-    with (
-        patch.object(
-            operator,
-            "_prepare_guest_operation_environment",
-        ) as prepare,
-        patch.object(
-            operator,
-            "run_guest_operation",
-            return_value=0,
-        ) as task,
-        patch.object(operator, "operator_guest_status") as status,
-    ):
-        assert operator.operator_guest_task(
-            "test",
-            410,
-            show_secrets=True,
-        ) == 0
-    prepare.assert_called_once_with()
-    task.assert_called_once_with(
-        operator.PATHS.repo_root,
-        "test",
-        410,
-        show_secrets=True,
-    )
-    status.assert_not_called()
+        with (
+            patch.object(
+                operator,
+                "RUNTIME_GUEST_OPERATION",
+                entrypoint,
+            ),
+            patch.object(
+                operator,
+                "run",
+                return_value=SimpleNamespace(returncode=7),
+            ),
+            patch.object(operator, "operator_guest_status") as status,
+        ):
+            assert operator.operator_guest_task(
+                "deploy",
+                410,
+                show_secrets=True,
+            ) == 7
+        status.assert_not_called()
 
 
 def test_operator_update_uses_existing_checkout() -> None:
@@ -480,7 +425,6 @@ def main() -> None:
     test_host_verifies_manager_ownership()
     test_host_recover_uses_only_recovery_helper()
     test_host_wrapper_is_minimal()
-    test_operator_guest_environment()
     test_operator_guest_task_secret_policy()
     test_operator_update_uses_existing_checkout()
     test_operator_status_secret_policy()
