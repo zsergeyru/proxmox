@@ -986,6 +986,8 @@ def _run_deploy_guest(
         "all",
         "infrastructure",
         "provision-base",
+        "provision-control-plane",
+        "provision-ssh-trust",
         "provision",
     }:
         raise InfraManagerError(f"Неизвестная фаза deploy-guest: {phase}")
@@ -1065,6 +1067,8 @@ def _run_deploy_guest(
 
     bootstrap_configure = bootstrap_scope and phase in {
         "provision-base",
+        "provision-control-plane",
+        "provision-ssh-trust",
         "provision",
     }
 
@@ -1127,12 +1131,28 @@ def _run_deploy_guest(
             project_branch=project_branch,
             bootstrap_private_key=bootstrap_private_key,
         )
+    elif phase == "provision-control-plane":
+        _configure_guest_os(
+            context,
+            provision_phase="bootstrap",
+            project_branch=project_branch,
+            bootstrap_private_key=bootstrap_private_key,
+        )
+    elif phase == "provision-ssh-trust":
+        _configure_guest_os(
+            context,
+            provision_phase="base",
+            project_branch=project_branch,
+            allow_legacy_bootstrap=True,
+            bootstrap_private_key=bootstrap_private_key,
+        )
     elif phase == "provision":
         _configure_guest_os(
             context,
             provision_phase="full",
             project_branch=project_branch,
-            bootstrap_private_key=bootstrap_private_key,
+            allow_legacy_bootstrap=not bootstrap_scope,
+            bootstrap_private_key=None if bootstrap_scope else bootstrap_private_key,
         )
 
     if bootstrap_private_key is not None and phase != "infrastructure":
@@ -1145,6 +1165,14 @@ def _run_deploy_guest(
     elif phase == "provision-base":
         console.result(
             f"{context.vmid} {context.name}: базовая настройка завершена"
+        )
+    elif phase == "provision-control-plane":
+        console.result(
+            f"{context.vmid} {context.name}: управляющий контур запущен"
+        )
+    elif phase == "provision-ssh-trust":
+        console.result(
+            f"{context.vmid} {context.name}: доверие к SSH CA установлено"
         )
     elif phase == "provision":
         console.result(
@@ -1184,6 +1212,8 @@ def run_bootstrap_infra_manager_step(
     phases = {
         "create": "infrastructure",
         "configure-base": "provision-base",
+        "configure-control-plane": "provision-control-plane",
+        "configure-ssh-trust": "provision-ssh-trust",
         "configure": "provision",
     }
     phase = phases.get(step)
