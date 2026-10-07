@@ -10,11 +10,7 @@ from urllib.parse import urlparse
 
 from .common import InfraManagerError, console, run
 from .guest_deploy import project_branch_for_checkout, project_revision
-from .guest_operations import (
-    list_local_guests,
-    run_guest_operation,
-    run_local_guest_status,
-)
+from .guest_operations import list_local_guests, run_local_guest_status
 from .operation_lock import project_checkout_lock
 from .pve import PveClient
 from .pve_host import (
@@ -27,6 +23,10 @@ from .settings import PATHS, SETTINGS
 ACTIVATE_RUNTIME = Path("/usr/local/sbin/infra-manager-activate-runtime")
 COMPOSE_FILE = PATHS.compose_dir / "docker-compose.yml"
 VERSIONS_FILE = PATHS.compose_dir / ".versions.env"
+RUNTIME_CONTAINER = "infra-runtime"
+RUNTIME_GUEST_OPERATION = (
+    PATHS.repo_root / "scripts" / "infra-manager" / "jobs" / "guest-operation.py"
+)
 
 
 def _require_root() -> None:
@@ -141,46 +141,37 @@ def operator_guest_status(
     )
 
 
-def _prepare_guest_operation_environment() -> None:
-    """Подготовить OpenTofu-переменные для прямого запуска внутри гостя."""
-
-    client = PveClient()
-    if not PATHS.ansible_public_key.is_file():
-        raise InfraManagerError(
-            f"Не найден открытый ключ Ansible: {PATHS.ansible_public_key}"
-        )
-    ansible_public_key = PATHS.ansible_public_key.read_text(
-        encoding="utf-8"
-    ).strip()
-    if not ansible_public_key:
-        raise InfraManagerError(
-            f"Открытый ключ Ansible пуст: {PATHS.ansible_public_key}"
-        )
-
-    os.environ["TF_VAR_pve_endpoint"] = client.url
-    os.environ["TF_VAR_pve_api_token"] = (
-        f"{client.token_id}={client.token_secret}"
-    )
-    os.environ["TF_VAR_ansible_ssh_public_key"] = ansible_public_key
-
-
 def operator_guest_task(
     operation: str,
     vmid: int,
     *,
     show_secrets: bool,
 ) -> int:
-    """Выполнить штатную операцию напрямую внутри infra-manager."""
+    """Выполнить штатную операцию напрямую внутри infra-runtime."""
 
-    _prepare_guest_operation_environment()
-    result = run_guest_operation(
-        PATHS.repo_root,
-        operation,
-        vmid,
-        show_secrets=show_secrets,
+    if not RUNTIME_GUEST_OPERATION.is_file():
+        raise InfraManagerError(
+            f"Не найдена точка входа операций: {RUNTIME_GUEST_OPERATION}"
+        )
+
+    result = run(
+        [
+            "docker",
+            "exec",
+            "--user",
+            "1001:0",
+            RUNTIME_CONTAINER,
+            "python3",
+            str(RUNTIME_GUEST_OPERATION),
+            operation,
+            str(vmid),
+        ],
+        check=False,
     )
-    if result != 0 or operation in {"deploy", "test"}:
-        return result
+    if result.returncode != 0:
+        return result.returncode
+    if operation == "test":
+        return 0
     return operator_guest_status(
         vmid,
         show_secrets=show_secrets,
