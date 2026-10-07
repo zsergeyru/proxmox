@@ -150,7 +150,7 @@ def recovery_check(mode: str) -> None:
     run([str(RECOVERY_COMMAND), mode])
 
 
-def status() -> int:
+def manager_status() -> int:
     vmid, name = load_identity()
     failures: list[str] = []
     require_executable(RECOVERY_COMMAND)
@@ -193,6 +193,34 @@ def status() -> int:
     print("\n==> OpenBao UI")
     openbao_operator(rotate=False)
     print("\n[ОК] infra-manager полностью готов")
+    return 0
+
+
+def guest_status(vmid: int) -> int:
+    """Показать статус выбранного гостя с секретами в root-сессии PVE."""
+
+    manager_vmid, manager_name = load_identity()
+    verify_guest_owned(manager_vmid, manager_name)
+    if not guest_running(manager_vmid):
+        raise OperatorError(f"LXC {manager_vmid} остановлен")
+
+    result = exec_guest(
+        manager_vmid,
+        "env",
+        "PYTHONPATH=/usr/local/lib/infra-manager",
+        "python3",
+        "-m",
+        "infra_manager",
+        "guest-status",
+        "--guest-vmid",
+        str(vmid),
+        "--show-secrets",
+        check=False,
+    )
+    if result.returncode:
+        raise OperatorError(
+            f"Не удалось получить статус гостя {vmid} через infra-manager"
+        )
     return 0
 
 
@@ -283,7 +311,7 @@ def repair() -> int:
     )
 
     print("==> Итоговая проверка")
-    return status()
+    return manager_status()
 
 
 def openbao_operator(*, rotate: bool) -> int:
@@ -359,9 +387,15 @@ def parse_args() -> argparse.Namespace:
         description="Проверка и восстановление infra-manager с PVE"
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
-    subparsers.add_parser(
+    status_parser = subparsers.add_parser(
         "status",
-        help="Проверить PVE, recovery-контур и полный статус infra-manager",
+        help="Проверить управляющий контур или выбранного гостя",
+    )
+    status_parser.add_argument(
+        "vmid",
+        nargs="?",
+        type=int,
+        help="VMID гостя; без VMID проверяется управляющий контур",
     )
     subparsers.add_parser(
         "repair",
@@ -387,7 +421,9 @@ def main() -> int:
     args = parse_args()
     require_root()
     if args.command == "status":
-        return status()
+        if args.vmid is None:
+            return manager_status()
+        return guest_status(args.vmid)
     with acquire_operator_lock():
         if args.command == "repair":
             return repair()
