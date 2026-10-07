@@ -21,7 +21,7 @@ from .guest_deploy import (
     run_deploy_guest,
 )
 from .guest_status import show_guest_status, verify_guest_status
-from .operation_lock import guest_operation_lock
+from .operation_lock import guest_operation_lock, project_checkout_lock
 from .pve import PveClient
 from .pve_host import (
     install_openbao_host_support,
@@ -269,20 +269,21 @@ def _run_status(
 def list_local_guests(repo_root: Path) -> int:
     """Показать поддерживаемых гостей и состояние объектов PVE."""
 
-    client = PveClient()
-    print(f"{'VMID':<7}{'Имя':<24}{'Роль':<20}Состояние")
-    for identity in deployable_guests(repo_root):
-        resource = client.find_vm(identity.vmid)
-        if resource is None:
-            state = "отсутствует"
-        else:
-            state = str(resource.get("status") or "неизвестно")
-        print(
-            f"{identity.vmid:<7}"
-            f"{identity.name:<24}"
-            f"{(identity.role or '-'):<20}"
-            f"{state}"
-        )
+    with project_checkout_lock(exclusive=False):
+        client = PveClient()
+        print(f"{'VMID':<7}{'Имя':<24}{'Роль':<20}Состояние")
+        for identity in deployable_guests(repo_root):
+            resource = client.find_vm(identity.vmid)
+            if resource is None:
+                state = "отсутствует"
+            else:
+                state = str(resource.get("status") or "неизвестно")
+            print(
+                f"{identity.vmid:<7}"
+                f"{identity.name:<24}"
+                f"{(identity.role or '-'):<20}"
+                f"{state}"
+            )
     return 0
 
 
@@ -295,13 +296,14 @@ def run_local_guest_status(
     """Показать статус гостя из управляющего контура с PVE credential."""
 
     require_runtime_activation_idle()
-    identity = guest_identity(repo_root, vmid)
-    return _run_status(
-        PveClient(),
-        repo_root,
-        identity,
-        show_secrets=show_secrets,
-    )
+    with project_checkout_lock(exclusive=False):
+        identity = guest_identity(repo_root, vmid)
+        return _run_status(
+            PveClient(),
+            repo_root,
+            identity,
+            show_secrets=show_secrets,
+        )
 
 
 def _run_repair(
@@ -388,30 +390,31 @@ def run_guest_operation(
         raise InfraManagerError(f"Неизвестная операция гостя: {operation}")
 
     require_runtime_activation_idle()
-    identity = guest_identity(repo_root, vmid)
+    with project_checkout_lock(exclusive=False):
+        identity = guest_identity(repo_root, vmid)
 
-    if operation == "status":
-        return _run_status(
-            PveClient.from_opentofu_env(),
-            repo_root,
-            identity,
-            show_secrets=show_secrets,
-        )
-
-    with guest_operation_lock(identity.vmid, operation):
-        if operation == "deploy":
-            return _run_deploy(
+        if operation == "status":
+            return _run_status(
+                PveClient.from_opentofu_env(),
                 repo_root,
                 identity,
                 show_secrets=show_secrets,
             )
-        if operation == "sync":
-            return _run_sync(repo_root, identity)
 
-        client = PveClient.from_opentofu_env()
-        if operation == "repair":
-            return _run_repair(client, repo_root, identity)
-        if operation == "test":
-            return _run_test(client, repo_root, identity)
+        with guest_operation_lock(identity.vmid, operation):
+            if operation == "deploy":
+                return _run_deploy(
+                    repo_root,
+                    identity,
+                    show_secrets=show_secrets,
+                )
+            if operation == "sync":
+                return _run_sync(repo_root, identity)
+
+            client = PveClient.from_opentofu_env()
+            if operation == "repair":
+                return _run_repair(client, repo_root, identity)
+            if operation == "test":
+                return _run_test(client, repo_root, identity)
 
     raise InfraManagerError(f"Неизвестная операция гостя: {operation}")
