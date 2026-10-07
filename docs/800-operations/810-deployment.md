@@ -401,9 +401,9 @@ Sync SSH Access
 
 ## 12. Обновление 910
 
-Обычное обновление существующего 910 выполняется через единое задание Semaphore `Deploy Guest` с выбором `910 infra-manager`.
+Обычное обновление существующего 910 может запускаться с PVE последовательностью `infra-manager update` → `infra-manager deploy 910` или через единое задание Semaphore `Deploy Guest` с выбором `910 infra-manager`. Оба входа вызывают один `run_guest_operation()`.
 
-Оно использует тот же `scripts/infra-manager/jobs/deploy-guest.py`, что и остальные гости. Специальный режим определяется `role: infra-manager` из `guest.yaml`, а не числом VMID; текущий VMID этого гостя — `910`:
+Дальше используется общий `run_deploy_guest()`, как и для остальных гостей. Специальный режим определяется `role: infra-manager` из `guest.yaml`, а не числом VMID; текущий VMID этого гостя — `910`:
 
 ```text
 проверить проект
