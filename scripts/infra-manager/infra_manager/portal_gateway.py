@@ -149,7 +149,7 @@ class PortalActionHandler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("X-Frame-Options", "DENY")
-        self.send_header("Referrer-Policy", "no-referrer")
+        self.send_header("Referrer-Policy", "same-origin")
         self.send_header(
             "Content-Security-Policy",
             "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'",
@@ -183,9 +183,26 @@ class PortalActionHandler(BaseHTTPRequestHandler):
 
     def _require_same_origin(self) -> bool:
         host = self.headers.get("Host", "").strip()
-        origin = self.headers.get("Origin", "").strip()
         expected = f"http://{host}" if host else ""
-        if not expected or origin.rstrip("/") != expected.rstrip("/"):
+        allowed = False
+
+        if expected:
+            origin = self.headers.get("Origin", "").strip()
+            referer = self.headers.get("Referer", "").strip()
+            fetch_site = self.headers.get("Sec-Fetch-Site", "").strip().lower()
+
+            if origin:
+                allowed = origin.rstrip("/") == expected.rstrip("/")
+            elif referer:
+                parsed = urllib.parse.urlparse(referer)
+                allowed = (
+                    parsed.scheme == "http"
+                    and parsed.netloc == host
+                )
+            else:
+                allowed = fetch_site == "same-origin"
+
+        if not allowed:
             self._send_html(
                 HTTPStatus.FORBIDDEN,
                 "Запрос отклонён",
