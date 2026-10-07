@@ -198,7 +198,7 @@ class BootstrapHost(
         )
         self.infra_pve_ca = self.infra_access_dir / "ca" / "pve-root-ca.crt"
         self.runner_pve_host_dir = Path("/etc/bootstrap-runner/pve-host")
-        self.infra_bootstrap_key_comment = "bootstrap-runner-990"
+        self.infra_bootstrap_key_comment = "infra-manager-bootstrap"
         self.infra_pve_host_dir = self.infra_access_dir / "pve-host"
 
         self.color = not os.environ.get("NO_COLOR") and os.environ.get("TERM") != "dumb"
