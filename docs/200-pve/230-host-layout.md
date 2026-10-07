@@ -185,7 +185,7 @@ mp1: /mnt/bindmounts/infra-manager/state,mp=/mnt/persistent-state
 /usr/local/sbin/infra-manager
 ```
 
-Она является единственной штатной точкой входа человека и предоставляет:
+является минимальной оболочкой и единственной штатной точкой входа человека. Пользовательский набор команд остаётся:
 
 ```text
 guests
@@ -197,7 +197,9 @@ test VMID
 recover
 ```
 
-Команды работы с конкретным гостем используют установленный код 910. Изменяющие операции передаются в штатные задания Semaphore; OpenTofu и Ansible непосредственно на PVE не запускаются. Только `status VMID` явно разрешает показать операторские секреты в текущем терминале root.
+Для всех команд кроме `recover` оболочка только читает VMID управляющего LXC из `/etc/infra-manager/openbao-host.json`, проверяет проектную метку объекта и передаёт аргументы через `pct exec` операторскому слою внутри 910. OpenTofu, Ansible, Semaphore, Docker и обычная логика состояния на PVE не размещаются.
+
+`repair` без VMID может запустить остановленный управляющий LXC перед передачей команды внутрь него. `recover` выполняется отдельно PVE-only recovery helper и поэтому не зависит от состояния 910.
 
 Низкоуровневые PVE-механизмы сохраняются отдельно:
 
@@ -206,7 +208,7 @@ recover
 /usr/local/sbin/infra-manager-recovery
 ```
 
-Они считаются внутренней реализацией и вызываются единой операторской командой, bootstrap и автоматикой 910. `infra-manager-openbao-unseal` выполняет узкие операции OpenBao, а `infra-manager-recovery` проверяет PVE-only состояние и восстанавливает bootstrap Git-доступ.
+Они считаются внутренней реализацией. `infra-manager-openbao-unseal` выполняет только узкие PVE-only операции OpenBao по запросу 910 и bootstrap. `infra-manager-recovery` хранит независимую аварийную логику: проверку постоянного состояния, восстановление bootstrap Git-доступа и запуск bootstrap recovery.
 
 Технический журнал первоначального контура:
 
@@ -244,7 +246,6 @@ debian13-template.ref
 ```text
 /run/lock/infra-manager-openbao-unseal.lock
 /run/lock/infra-manager-recovery.lock
-/run/lock/infra-manager-operator.lock
 ```
 
 Сам хостовый сценарий может создавать краткоживущие временные файлы на PVE под `/run/`; их имена не являются частью постоянного контракта.
