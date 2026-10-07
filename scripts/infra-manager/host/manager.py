@@ -224,6 +224,69 @@ def guest_status(vmid: int) -> int:
     return 0
 
 
+def guest_list() -> int:
+    """Показать каталог гостей через установленный код 910."""
+
+    manager_vmid, manager_name = load_identity()
+    verify_guest_owned(manager_vmid, manager_name)
+    if not guest_running(manager_vmid):
+        raise OperatorError(f"LXC {manager_vmid} остановлен")
+
+    result = exec_guest(
+        manager_vmid,
+        "env",
+        "PYTHONPATH=/usr/local/lib/infra-manager",
+        "python3",
+        "-m",
+        "infra_manager",
+        "guest-list",
+        check=False,
+    )
+    if result.returncode:
+        raise OperatorError("Не удалось получить список гостей через infra-manager")
+    return 0
+
+
+def guest_task(operation: str, vmid: int) -> int:
+    """Передать изменение гостя штатному заданию Semaphore."""
+
+    manager_vmid, manager_name = load_identity()
+    verify_guest_owned(manager_vmid, manager_name)
+    if not guest_running(manager_vmid):
+        raise OperatorError(f"LXC {manager_vmid} остановлен")
+
+    result = exec_guest(
+        manager_vmid,
+        "env",
+        "PYTHONPATH=/usr/local/lib/infra-manager",
+        "python3",
+        "-m",
+        "infra_manager",
+        "guest-task",
+        "--operation",
+        operation,
+        "--guest-vmid",
+        str(vmid),
+        check=False,
+    )
+    if result.returncode:
+        raise OperatorError(
+            f"Semaphore не выполнил {operation} для гостя {vmid}"
+        )
+
+    if operation == "test":
+        return 0
+
+    for attempt in range(30):
+        try:
+            return guest_status(vmid)
+        except OperatorError:
+            if attempt == 29:
+                raise
+            __import__("time").sleep(2)
+    return 0
+
+
 def _wait_running(vmid: int) -> None:
     if guest_running(vmid):
         return
@@ -398,18 +461,39 @@ def parse_args() -> argparse.Namespace:
         help="VMID гостя; без VMID проверяется управляющий контур",
     )
     subparsers.add_parser(
+        "guests",
+        help="Показать поддерживаемых гостей и их состояние",
+    )
+
+    deploy_parser = subparsers.add_parser(
+        "deploy",
+        help="Развернуть или обновить гостя через Semaphore",
+    )
+    deploy_parser.add_argument("vmid", type=int, help="VMID гостя")
+
+    sync_parser = subparsers.add_parser(
+        "sync",
+        help="Синхронизировать гостя через Semaphore",
+    )
+    sync_parser.add_argument("vmid", type=int, help="VMID гостя")
+
+    repair_parser = subparsers.add_parser(
         "repair",
-        help="Безопасно исправить штатные сбои без пересоздания состояния",
+        help="Исправить управляющий контур или выбранного гостя",
     )
-    operator = subparsers.add_parser(
-        "openbao-operator",
-        help="Показать учётные данные оператора OpenBao UI",
+    repair_parser.add_argument(
+        "vmid",
+        nargs="?",
+        type=int,
+        help="VMID гостя; без VMID исправляется управляющий контур",
     )
-    operator.add_argument(
-        "--rotate",
-        action="store_true",
-        help="Сменить пароль оператора и показать новый",
+
+    test_parser = subparsers.add_parser(
+        "test",
+        help="Проверить гостя через Semaphore без изменения состояния",
     )
+    test_parser.add_argument("vmid", type=int, help="VMID гостя")
+
     subparsers.add_parser(
         "recover",
         help="Запустить защищённое аварийное восстановление через bootstrap",
@@ -424,11 +508,20 @@ def main() -> int:
         if args.vmid is None:
             return manager_status()
         return guest_status(args.vmid)
+    if args.command == "guests":
+        return guest_list()
+
     with acquire_operator_lock():
+        if args.command == "deploy":
+            return guest_task("deploy", args.vmid)
+        if args.command == "sync":
+            return guest_task("sync", args.vmid)
         if args.command == "repair":
-            return repair()
-        if args.command == "openbao-operator":
-            return openbao_operator(rotate=args.rotate)
+            if args.vmid is None:
+                return repair()
+            return guest_task("repair", args.vmid)
+        if args.command == "test":
+            return guest_task("test", args.vmid)
         if args.command == "recover":
             return recover()
     raise OperatorError(f"Неизвестная команда: {args.command}")
