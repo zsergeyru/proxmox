@@ -13,7 +13,7 @@
 }
 
 #layout-groups::before {
-  content: {{ provision.portal.local.title | to_json }};
+  content: {{ provision.portal.local.title | to_json(ensure_ascii=False) }};
   display: block;
   flex-basis: 100%;
   width: 100%;
