@@ -336,25 +336,6 @@ def _ssh_identity_args(
     return args
 
 
-def _guest_trusts_client_ca(context: DeploymentContext) -> bool:
-    ca_path = PATHS.ssh_client_ca_public_key
-    if not ca_path.is_file():
-        return False
-    expected = ca_path.read_text(encoding="utf-8").strip()
-    if not expected:
-        return False
-
-    result = run(
-        [
-            *_ssh_identity_args(context, context.paths.private_key),
-            "cat /etc/ssh/trusted-user-ca-keys.pem 2>/dev/null || true",
-        ],
-        check=False,
-        capture_output=True,
-    )
-    return result.returncode == 0 and result.stdout.strip() == expected
-
-
 def _create_temporary_ssh_identity(
     context: DeploymentContext,
     directory: Path,
@@ -773,14 +754,16 @@ def _configure_guest_os(
         install_recovery_host_support(context.node, repo_root)
 
     if not PATHS.ssh_client_ca_public_key.is_file():
-        if not allow_legacy_bootstrap:
+        if (
+            not allow_legacy_bootstrap
+            or context.paths.private_key is None
+        ):
             raise InfraManagerError(
-                f"Гость {context.vmid}: SSH CA не опубликован; "
-                "самообновление без краткоживущего сертификата запрещено"
+                f"Гость {context.vmid}: SSH CA не опубликован и "
+                "одноразовый bootstrap-доступ недоступен"
             )
         console.info(
-            f"Гость {context.vmid}: SSH CA ещё не опубликован; "
-            "используется переходный постоянный ключ Ansible"
+            f"Гость {context.vmid}: используется начальный bootstrap-доступ"
         )
         _run_guest_ansible(
             context,
@@ -804,13 +787,21 @@ def _configure_guest_os(
             private_key,
             certificate,
         )
-        if not certificate_ready and bootstrap_private_key is not None:
+        bootstrap_key = bootstrap_private_key
+        if (
+            bootstrap_key is None
+            and allow_legacy_bootstrap
+            and context.paths.private_key is not None
+        ):
+            bootstrap_key = context.paths.private_key
+
+        if not certificate_ready and bootstrap_key is not None:
             console.info(
                 f"Гость {context.vmid}: первоначальная установка доверия к SSH CA"
             )
             _run_guest_ansible(
                 context,
-                private_key=bootstrap_private_key,
+                private_key=bootstrap_key,
                 certificate=None,
                 provision_phase="base",
                 self_update=self_update,
@@ -821,11 +812,6 @@ def _configure_guest_os(
                 private_key,
                 certificate,
             )
-            if not certificate_ready:
-                raise InfraManagerError(
-                    f"Гость {context.vmid}: после bootstrap не принимает "
-                    "краткоживущий SSH-сертификат"
-                )
 
         if certificate_ready:
             host_certificate = _host_certificate_if_available(
@@ -867,48 +853,10 @@ def _configure_guest_os(
                 _remove_bootstrap_identity(context.vmid)
             return
 
-        if _guest_trusts_client_ca(context):
-            raise InfraManagerError(
-                f"Гость {context.vmid} уже доверяет SSH CA, "
-                "но вход по временному сертификату не прошёл"
-            )
-        if not allow_legacy_bootstrap:
-            raise InfraManagerError(
-                f"Гость {context.vmid}: вход по краткоживущему "
-                "SSH-сертификату не прошёл; постоянный ключ для "
-                "самообновления запрещён"
-            )
-
-        console.info(
-            f"Гость {context.vmid}: доверие к SSH CA ещё не установлено; "
-            "используется переходный постоянный ключ Ansible"
-        )
-        host_certificate = _host_certificate_if_available(
-            context,
-            context.paths.private_key,
-            client_certificate=None,
-            directory=Path(temporary_dir),
-            provision_phase=provision_phase,
-        )
-        openbao_machine_args = (
-            _prepare_openbao_machine_ansible_vars(
-                context,
-                private_key=context.paths.private_key,
-                certificate=None,
-                directory=Path(temporary_dir),
-            )
-            if provision_phase == "full"
-            else ["-e", "infra_openbao_machine_enabled=false"]
-        )
-        _run_guest_ansible(
-            context,
-            private_key=context.paths.private_key,
-            certificate=None,
-            provision_phase=provision_phase,
-            self_update=self_update,
-            project_branch=project_branch,
-            host_certificate=host_certificate,
-            openbao_machine_args=openbao_machine_args,
+        raise InfraManagerError(
+            f"Гость {context.vmid}: вход по краткоживущему "
+            "SSH-сертификату не прошёл; bootstrap-доступ отсутствует "
+            "или не установил доверие к SSH CA"
         )
 
 
@@ -1080,7 +1028,7 @@ def run_deploy_guest(
         repo_root,
         vmid,
         workspace,
-        private_key=None if self_update else PATHS.ansible_private_key,
+        private_key=PATHS.ansible_private_key if bootstrap_scope else None,
     )
     bootstrap_private_key: Path | None = None
 
