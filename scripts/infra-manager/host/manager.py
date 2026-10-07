@@ -62,7 +62,12 @@ def verify_manager(vmid: int, name: str) -> None:
         check=False,
         capture=True,
     )
-    required = (f"hostname: {name}", "unprivileged: 1", "owner=proxmox-project", "role=infra-manager")
+    required = (
+        f"hostname: {name}",
+        "unprivileged: 1",
+        "owner=proxmox-project",
+        "role=infra-manager",
+    )
     if result.returncode or any(item not in result.stdout for item in required):
         raise OperatorError(
             f"VMID {vmid} не подтверждён как infra-manager; "
