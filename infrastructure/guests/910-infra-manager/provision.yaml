@@ -216,10 +216,12 @@ persistence:
         - opentofu-state
         - semaphore-data
         - ansible-identity
+        - operation-locks
       bindings:
         - { source: /mnt/persistent-state/ansible, target: /etc/infra-manager/ansible, owner: "1001", group: "0", mode: "0700" }
         - { source: /mnt/persistent-state/semaphore, target: /var/lib/infra-manager/semaphore, owner: "1001", group: "0", mode: "0770" }
         - { source: /mnt/persistent-state/opentofu, target: /var/lib/infra-manager/opentofu, owner: "1001", group: "0", mode: "0750" }
+        - { source: /mnt/persistent-state/locks, target: /var/lib/infra-manager/locks, owner: "1001", group: "0", mode: "0770" }
         - { source: /mnt/persistent-state/openbao, target: /var/lib/persistent/openbao, owner: root, group: root, mode: "0700" }
 
     guest_local:
