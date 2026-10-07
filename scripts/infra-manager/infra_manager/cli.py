@@ -37,6 +37,30 @@ def build_parser() -> argparse.ArgumentParser:
     )
     status_parser.set_defaults(handler="status")
 
+    guest_list_parser = subparsers.add_parser(
+        "guest-list",
+        help="показать поддерживаемых гостей проекта",
+    )
+    guest_list_parser.set_defaults(handler="guest-list")
+
+    guest_task_parser = subparsers.add_parser(
+        "guest-task",
+        help="создать штатное задание Semaphore для гостя",
+    )
+    guest_task_parser.add_argument(
+        "--operation",
+        required=True,
+        choices=("deploy", "repair", "test", "sync"),
+        help="операция над гостем",
+    )
+    guest_task_parser.add_argument(
+        "--guest-vmid",
+        type=int,
+        required=True,
+        help="VMID гостя",
+    )
+    guest_task_parser.set_defaults(handler="guest-task")
+
     guest_status_parser = subparsers.add_parser(
         "guest-status",
         help="показать общий статус выбранного гостя",
@@ -158,6 +182,21 @@ def main(argv: Sequence[str] | None = None) -> int:
             from .status import check_status
 
             return check_status(full=args.full, quiet=args.quiet)
+
+        if args.handler == "guest-list":
+            from .guest_operations import list_local_guests
+            from .settings import PATHS
+
+            return list_local_guests(PATHS.repo_root)
+
+        if args.handler == "guest-task":
+            from .semaphore import run_operator_guest_task
+
+            run_operator_guest_task(
+                args.operation,
+                args.guest_vmid,
+            )
+            return 0
 
         if args.handler == "guest-status":
             from .guest_operations import run_local_guest_status
