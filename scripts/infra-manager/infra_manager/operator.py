@@ -230,6 +230,10 @@ def operator_guest_task(
         stream_output=True,
     )
     if result.returncode != 0:
+        console.error(
+            f"Операция {operation} для гостя {vmid} "
+            f"завершилась с кодом {result.returncode}"
+        )
         return result.returncode
     if operation == "test":
         return 0
