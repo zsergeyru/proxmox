@@ -385,6 +385,7 @@ def test_recovery_host_support() -> None:
             patch.object(module, "_ssh", side_effect=record_ssh),
         ):
             module.install_recovery_host_support("pve", root)
+            module.install_operator_host_support("pve", root)
             module.prepare_recovery_git("pve")
             module.preflight_recovery_contour("pve")
             module.check_recovery_contour("pve")
