@@ -252,6 +252,7 @@ def test_operator_guest_task_secret_policy() -> None:
             return_value=SimpleNamespace(returncode=7),
         ),
         patch.object(operator, "operator_guest_status") as status,
+        patch.object(operator.console, "error") as error,
     ):
         assert operator.operator_guest_task(
             "deploy",
@@ -259,6 +260,9 @@ def test_operator_guest_task_secret_policy() -> None:
             show_secrets=True,
         ) == 7
     status.assert_not_called()
+    error.assert_called_once_with(
+        "Операция deploy для гостя 410 завершилась с кодом 7"
+    )
 
 
 def test_internal_project_refresh_uses_existing_checkout() -> None:
