@@ -97,6 +97,7 @@ def check_status_operation() -> None:
     for identity, resource in cases:
         client = FakePveClient(resource)
         with (
+            patch.object(operations, "console") as console,
             patch.object(operations, "show_guest_status") as show,
             patch.object(
                 operations,
@@ -113,6 +114,9 @@ def check_status_operation() -> None:
                 fail(
                     f"Status Guest должен завершаться успешно для {identity.vmid}"
                 )
+        console.info.assert_called_once_with(
+            f"Проверка состояния гостя {identity.vmid} — {identity.name}"
+        )
         show.assert_called_once()
         args, kwargs = show.call_args
         if args[:3] != (ROOT, identity, resource):

@@ -1063,6 +1063,9 @@ def check_status(*, full: bool = False, quiet: bool = False) -> int:
     definition = load_status_definition()
     project_branch = _project_branch()
 
+    if not quiet:
+        console.info("Проверка управляющего контура")
+
     _run_status_checks(
         definition,
         project_branch=project_branch,
