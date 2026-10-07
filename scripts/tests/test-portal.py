@@ -4,11 +4,14 @@
 from __future__ import annotations
 
 import http.client
+import io
 import json
 import sys
+import tempfile
 import threading
 from http import HTTPStatus
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -229,43 +232,34 @@ def check_action_validation() -> None:
         fail("Посредник не должен принимать действие вне белого списка")
 
 
-def check_queue_payload() -> None:
-    response = (HTTPStatus.CREATED, b'{"id":64}')
-    with (
-        patch.object(
-            portal_gateway,
-            "_semaphore_objects",
-            return_value=(1, 25),
-        ),
-        patch.object(
-            portal_gateway,
-            "_semaphore_request",
-            return_value=response,
-        ) as request,
-    ):
-        project_id, task_id = portal_gateway.queue_action(
-            "status",
-            910,
-            "semaphore=session-cookie",
-        )
+def check_direct_action_start() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        command = Path(tmp) / "infra-manager"
+        command.write_text("#!/bin/sh\n", encoding="utf-8")
+        process = SimpleNamespace(stdout=io.StringIO(""), wait=lambda: 0)
+        with (
+            patch.object(portal_gateway, "OPERATOR_COMMAND", command),
+            patch.object(
+                portal_gateway.subprocess,
+                "Popen",
+                return_value=process,
+            ) as popen,
+        ):
+            if portal_gateway.start_action("sync", 109) is not process:
+                fail("Посредник должен вернуть прямой операторский процесс")
 
-    if (project_id, task_id) != (1, 64):
-        fail("Посредник неверно обработал ответ Semaphore")
-
-    args, kwargs = request.call_args
-    if args != ("POST", "/project/1/tasks"):
-        fail(f"Неверный адрес создания задания: {args!r}")
-    if kwargs.get("cookie") != "semaphore=session-cookie":
-        fail("Посредник должен передавать пользовательскую сессию Semaphore")
-
-    payload = kwargs.get("payload")
-    if not isinstance(payload, dict):
-        fail("Посредник не передал JSON задания Semaphore")
-    if payload.get("template_id") != 25:
-        fail("Посредник использовал неверный шаблон Semaphore")
-    environment = json.loads(payload.get("environment", "{}"))
-    if environment != {"GUEST_VMID": "910"}:
-        fail(f"Неверный GUEST_VMID: {environment!r}")
+    argv = popen.call_args.args[0]
+    if argv != [str(command), "sync", "109"]:
+        fail(f"Посредник запускает неверную команду: {argv!r}")
+    if "--trusted-pve" in argv:
+        fail("Homepage не должен получать доверенный режим вывода секретов")
+    kwargs = popen.call_args.kwargs
+    if kwargs.get("stdout") is not portal_gateway.subprocess.PIPE:
+        fail("Прямой запуск должен передавать stdout в страницу результата")
+    if kwargs.get("stderr") is not portal_gateway.subprocess.STDOUT:
+        fail("stderr прямого запуска должен попадать в тот же журнал")
+    if kwargs.get("env", {}).get("PYTHONUNBUFFERED") != "1":
+        fail("Вывод прямого запуска должен быть построчным без буферизации")
 
 
 def _http_request(
@@ -286,10 +280,17 @@ def _http_request(
     return status, response_headers, body
 
 
+def _fake_process(output: str, returncode: int = 0):
+    return SimpleNamespace(
+        stdout=io.StringIO(output),
+        wait=lambda: returncode,
+    )
+
+
 def check_gateway_http() -> None:
     server = portal_gateway.PortalActionServer(
         ("127.0.0.1", 0),
-        "192.168.9.10",
+        portal_gateway.PortalActionHandler,
     )
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -299,88 +300,80 @@ def check_gateway_http() -> None:
         if status != HTTPStatus.OK or body != "ok\n":
             fail("Health шлюза Homepage должен возвращать 200")
 
-        with patch.object(
-            portal_gateway,
-            "_session_valid",
-            return_value=False,
-        ):
-            status, _, body = _http_request(
-                server,
-                "GET",
-                "/action/status?vmid=910",
-            )
-        if status != HTTPStatus.UNAUTHORIZED or "Требуется вход" not in body:
-            fail("Без сессии Semaphore шлюз должен требовать вход")
-
-        with patch.object(
-            portal_gateway,
-            "_session_valid",
-            return_value=True,
-        ):
-            status, _, body = _http_request(
-                server,
-                "GET",
-                "/action/status?vmid=910",
-                headers={"Cookie": "semaphore=session-cookie"},
-            )
-        if status != HTTPStatus.OK or "910 — infra-manager" not in body:
-            fail("GET действия должен показывать подтверждение и выбранный VMID")
+        status, _, body = _http_request(
+            server,
+            "GET",
+            "/action/status?vmid=910",
+        )
+        if status != HTTPStatus.OK:
+            fail("GET действия должен быть доступен без Semaphore")
+        if "910 — infra-manager" not in body or "Журнал появится" not in body:
+            fail("GET действия должен показывать подтверждение прямого запуска")
+        if "Semaphore" in body:
+            fail("Страница подтверждения не должна зависеть от Semaphore")
 
         host, port = server.server_address
         same_origin = f"http://{host}:{port}"
-        with (
-            patch.object(
-                portal_gateway,
-                "_session_valid",
-                return_value=True,
+        with patch.object(
+            portal_gateway,
+            "start_action",
+            return_value=_fake_process(
+                "[ИНФО] Проверка\n<опасный вывод>\n[ОК] Готово\n"
             ),
-            patch.object(
-                portal_gateway,
-                "queue_action",
-                return_value=(1, 64),
-            ) as queue,
-        ):
-            status, headers, _ = _http_request(
+        ) as start:
+            status, headers, body = _http_request(
                 server,
                 "POST",
                 "/action/status?vmid=910",
-                headers={
-                    "Cookie": "semaphore=session-cookie",
-                    "Origin": same_origin,
-                },
+                headers={"Origin": same_origin},
             )
-        if status != HTTPStatus.SEE_OTHER:
-            fail("Подтверждённое действие должно создать задание Semaphore")
-        if headers.get("Location") != (
-            "http://192.168.9.10:3000/project/1/history?t=64"
-        ):
-            fail("После запуска шлюз должен открыть созданное задание Semaphore")
-        queue.assert_called_once_with(
-            "status",
-            910,
-            "semaphore=session-cookie",
-        )
 
-        with (
-            patch.object(
-                portal_gateway,
-                "_session_valid",
-                return_value=True,
-            ),
-            patch.object(portal_gateway, "queue_action") as queue,
-        ):
+        if status != HTTPStatus.OK:
+            fail("Подтверждённое действие должно выполняться напрямую")
+        if "Location" in headers:
+            fail("Прямое действие Homepage не должно перенаправлять в Semaphore")
+        if "&lt;опасный вывод&gt;" not in body or "<опасный вывод>" in body:
+            fail("Журнал прямого запуска должен экранировать HTML")
+        if "Операция завершена успешно" not in body:
+            fail("Страница должна показывать успешный итог операции")
+        if "общий исполнитель infra-manager" not in body:
+            fail("Страница результата должна обозначать прямой запуск")
+        start.assert_called_once_with("status", 910)
+
+        with patch.object(portal_gateway, "start_action") as start:
             status, _, _ = _http_request(
                 server,
                 "POST",
                 "/action/status?vmid=910",
-                headers={
-                    "Cookie": "semaphore=session-cookie",
-                    "Origin": "http://example.invalid",
-                },
+                headers={"Origin": "http://example.invalid"},
             )
         if status != HTTPStatus.FORBIDDEN:
             fail("Шлюз должен отклонять POST с другого источника")
-        queue.assert_not_called()
+        start.assert_not_called()
+
+        with patch.object(portal_gateway, "start_action") as start:
+            status, _, _ = _http_request(
+                server,
+                "POST",
+                "/action/status?vmid=910",
+            )
+        if status != HTTPStatus.FORBIDDEN:
+            fail("Шлюз должен требовать Origin для изменяющего запроса")
+        start.assert_not_called()
+
+        with patch.object(
+            portal_gateway,
+            "start_action",
+            return_value=_fake_process("[ОШИБКА] Проверка\n", returncode=7),
+        ):
+            status, _, body = _http_request(
+                server,
+                "POST",
+                "/action/repair?vmid=910",
+                headers={"Origin": same_origin},
+            )
+        if status != HTTPStatus.OK or "кодом 7" not in body:
+            fail("Страница должна показывать код ошибки прямой операции")
 
         status, _, _ = _http_request(
             server,
@@ -395,40 +388,14 @@ def check_gateway_http() -> None:
         thread.join(timeout=5)
 
 
-def check_rejected_task() -> None:
-    with (
-        patch.object(
-            portal_gateway,
-            "_semaphore_objects",
-            return_value=(1, 25),
-        ),
-        patch.object(
-            portal_gateway,
-            "_semaphore_request",
-            return_value=(HTTPStatus.FORBIDDEN, b"forbidden"),
-        ),
-    ):
-        try:
-            portal_gateway.queue_action(
-                "status",
-                910,
-                "semaphore=session-cookie",
-            )
-        except InfraManagerError:
-            pass
-        else:
-            fail("Отказ Semaphore должен оставаться ошибкой посредника")
-
-
 def main() -> None:
     check_bookmarks()
     check_service_discovery()
     check_local_dashboard_address()
     check_style_contract()
     check_action_validation()
-    check_queue_payload()
+    check_direct_action_start()
     check_gateway_http()
-    check_rejected_task()
     print("[ОК] Локальный портал гостей проверен")
 
 
