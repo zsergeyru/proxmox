@@ -42,29 +42,27 @@ def run(
     return result
 
 
-def manager_vmid() -> int:
+def manager_identity() -> tuple[int, str]:
     try:
         payload = json.loads(HOST_CONFIG.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise OperatorError(f"Не удалось прочитать {HOST_CONFIG}") from exc
 
-    vmid = payload.get("vmid") if isinstance(payload, dict) else None
-    if not isinstance(vmid, int) or vmid <= 0:
-        raise OperatorError("Некорректный VMID infra-manager")
-    return vmid
+    if not isinstance(payload, dict):
+        raise OperatorError("Некорректное описание infra-manager")
+    vmid, name = payload.get("vmid"), payload.get("name")
+    if not isinstance(vmid, int) or vmid <= 0 or not isinstance(name, str) or not name:
+        raise OperatorError("Некорректное описание infra-manager")
+    return vmid, name
 
 
-def verify_manager(vmid: int) -> None:
+def verify_manager(vmid: int, name: str) -> None:
     result = run(
         ["pct", "config", str(vmid)],
         check=False,
         capture=True,
     )
-    required = (
-        "unprivileged: 1",
-        "owner=proxmox-project",
-        "role=infra-manager",
-    )
+    required = (f"hostname: {name}", "unprivileged: 1", "owner=proxmox-project", "role=infra-manager")
     if result.returncode or any(item not in result.stdout for item in required):
         raise OperatorError(
             f"VMID {vmid} не подтверждён как infra-manager; "
@@ -95,8 +93,8 @@ def start_manager(vmid: int) -> None:
 
 
 def proxy_to_manager(arguments: list[str]) -> int:
-    vmid = manager_vmid()
-    verify_manager(vmid)
+    vmid, name = manager_identity()
+    verify_manager(vmid, name)
     if arguments == ["repair"]:
         start_manager(vmid)
     elif not guest_running(vmid):
