@@ -203,6 +203,11 @@ def test_operator_guest_task_secret_policy() -> None:
                 ),
                 patch.object(
                     operator,
+                    "project_checkout_lock",
+                    return_value=contextlib.nullcontext(),
+                ) as checkout_lock,
+                patch.object(
+                    operator,
                     "run",
                     return_value=SimpleNamespace(returncode=0),
                 ) as runtime_run,
@@ -218,6 +223,7 @@ def test_operator_guest_task_secret_policy() -> None:
                     show_secrets=True,
                 ) == 0
 
+            checkout_lock.assert_called_once_with(exclusive=False)
             runtime_run.assert_called_once_with(
                 [
                     "docker",
@@ -245,6 +251,11 @@ def test_operator_guest_task_secret_policy() -> None:
             ),
             patch.object(
                 operator,
+                "project_checkout_lock",
+                return_value=contextlib.nullcontext(),
+            ) as checkout_lock,
+            patch.object(
+                operator,
                 "run",
                 return_value=SimpleNamespace(returncode=7),
             ),
@@ -255,6 +266,7 @@ def test_operator_guest_task_secret_policy() -> None:
                 410,
                 show_secrets=True,
             ) == 7
+        checkout_lock.assert_called_once_with(exclusive=False)
         status.assert_not_called()
 
 
