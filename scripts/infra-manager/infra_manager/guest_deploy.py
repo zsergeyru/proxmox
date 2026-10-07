@@ -846,11 +846,6 @@ def _configure_guest_os(
                 private_key,
                 certificate,
             )
-            if (
-                bootstrap_private_key is not None
-                and bootstrap_private_key == _bootstrap_identity_path(context.vmid)
-            ):
-                _remove_bootstrap_identity(context.vmid)
             return
 
         raise InfraManagerError(
@@ -1129,6 +1124,9 @@ def run_deploy_guest(
             project_branch=project_branch,
             bootstrap_private_key=bootstrap_private_key,
         )
+
+    if bootstrap_private_key is not None and phase != "infrastructure":
+        _remove_bootstrap_identity(context.vmid)
 
     if phase == "infrastructure":
         console.result(
