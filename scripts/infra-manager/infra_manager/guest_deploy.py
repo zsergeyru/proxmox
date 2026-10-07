@@ -27,7 +27,6 @@ from .pve_host import (
     apply_host_requirements,
     ensure_infra_self_access,
     install_openbao_host_support,
-    install_operator_host_support,
     install_recovery_host_support,
     issue_openbao_machine_credentials,
     read_openbao_tls_ca,
@@ -606,20 +605,6 @@ def _run_guest_ansible(
     )
 
 
-def _install_operator_wrapper_after_self_update(
-    context: DeploymentContext,
-    repo_root: Path,
-    *,
-    self_update: bool,
-) -> None:
-    """Обновить PVE-оболочку только после успешной настройки управляющего гостя."""
-
-    if not self_update:
-        return
-    console.detail("Обновление тонкой операторской оболочки PVE")
-    install_operator_host_support(context.node, repo_root)
-
-
 def _configure_guest_os(
     context: DeploymentContext,
     *,
@@ -650,11 +635,6 @@ def _configure_guest_os(
             provision_phase=provision_phase,
             self_update=self_update,
             project_branch=project_branch,
-        )
-        _install_operator_wrapper_after_self_update(
-            context,
-            repo_root,
-            self_update=self_update,
         )
         return
 
@@ -697,11 +677,6 @@ def _configure_guest_os(
                 host_certificate=host_certificate,
                 openbao_machine_args=openbao_machine_args,
             )
-            _install_operator_wrapper_after_self_update(
-                context,
-                repo_root,
-                self_update=self_update,
-            )
             return
 
         if _guest_trusts_client_ca(context):
@@ -740,11 +715,6 @@ def _configure_guest_os(
             project_branch=project_branch,
             host_certificate=host_certificate,
             openbao_machine_args=openbao_machine_args,
-        )
-        _install_operator_wrapper_after_self_update(
-            context,
-            repo_root,
-            self_update=self_update,
         )
 
 
