@@ -491,17 +491,9 @@ class BootstrapHost(
             # внешнее изменение как замену ресурса. Инфраструктурная фаза
             # считается завершённой; дальше проверку state выполняет каждая
             # provision-фаза без повторного plan/apply.
-            self.deploy_infra_phase(
-                "base",
-                f"Базовая настройка LXC {self.infra_ctid} через Ansible",
-                f"Базовая настройка {self.infra_ctid} завершена",
-            )
+            self.configure_infra_manager_base()
             self.handoff_infra("recover" if self.mode == "recover" else "apply")
-            self.deploy_infra_phase(
-                "provision",
-                f"Полная настройка LXC {self.infra_ctid} через Ansible",
-                f"Полная настройка {self.infra_ctid} завершена",
-            )
+            self.configure_infra_manager()
         elif existed:
             self.fail(
                 f"LXC {self.infra_ctid} уже существует и не принадлежит "
@@ -509,23 +501,11 @@ class BootstrapHost(
                 "а для полного пересоздания — recovery"
             )
         else:
-            self.deploy_infra_phase(
-                "infrastructure",
-                f"Создание LXC {self.infra_ctid} через OpenTofu",
-                f"LXC {self.infra_ctid} создан через состояние bootstrap-runner",
-            )
+            self.create_infra_manager()
             self.attach_persistent_layout()
-            self.deploy_infra_phase(
-                "base",
-                f"Базовая настройка LXC {self.infra_ctid} через Ansible",
-                f"Базовая настройка {self.infra_ctid} завершена",
-            )
+            self.configure_infra_manager_base()
             self.handoff_infra("recover" if self.mode == "recover" else "apply")
-            self.deploy_infra_phase(
-                "provision",
-                f"Полная настройка LXC {self.infra_ctid} через Ansible",
-                f"Полная настройка {self.infra_ctid} завершена",
-            )
+            self.configure_infra_manager()
 
         self.initialize_infra_openbao()
         self.verify_infra_ready(quiet=True)
