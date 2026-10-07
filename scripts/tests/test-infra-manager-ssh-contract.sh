@@ -59,6 +59,10 @@ grep -Fq 'TrustedUserCAKeys /etc/ssh/trusted-user-ca-keys.pem' "$LINUX_BASE_SSH_
     || die "Гости должны доверять пользовательскому SSH CA OpenBao"
 grep -Fq '/etc/infra-manager/ca/ssh-client-ca.pub' "$LINUX_BASE_SSH_TRUST" \
     || die "Ansible должен брать открытый SSH CA из каталога 910"
+grep -Fq 'infra_ssh_client_ca_file' "$LINUX_BASE_SSH_TRUST" \
+    || die "Ansible должен принимать фактический путь SSH CA от управляющего процесса"
+grep -Fq 'infra_ssh_client_ca_file=' "$PY_GUEST_DEPLOY" \
+    || die "guest_deploy должен явно передавать путь SSH CA в Ansible"
 grep -Fq 'name: ssh.socket' "$LINUX_BASE_SSH_TRUST" \
     || die "Debian 13 должен отключать socket-активацию SSH"
 grep -Fq 'name: ssh.service' "$LINUX_BASE_SSH_TRUST" \
