@@ -132,5 +132,31 @@ grep -q 'remove_bootstrap_ssh_access_from_infra' "$CLEANUP" || die "Успешн
 grep -q '"/etc/bootstrap-runner/bootstrap-ssh"' "$CLEANUP" || die "Успешный bootstrap обязан удалить локальную bootstrap-пару 990"
 grep -q 'allow_legacy_bootstrap=False' "$PY_GUEST_DEPLOY" || die "Обычный self-deploy infra-manager не должен иметь bootstrap fallback"
 grep -q '"/var/lib/bootstrap-runner/opentofu/state"' "$INFRA_RUNNER" || die "State шага create должен удаляться сразу после создания 910"
+grep -q 'allow_legacy_bootstrap=not bootstrap_scope' "$PY_GUEST_DEPLOY" || die "Финальный bootstrap configure должен запрещать fallback на начальный SSH-ключ"
+grep -q 'configure-control-plane' "$PY_GUEST_DEPLOY" || die "Bootstrap должен иметь отдельный этап запуска управляющего контура"
+grep -q 'configure-ssh-trust' "$PY_GUEST_DEPLOY" || die "Bootstrap должен иметь отдельный этап перехода на SSH CA"
+
+python3 - "$BOOTSTRAP_DIR/bootstrap-host.py" <<'PY'
+from pathlib import Path
+import sys
+
+source = Path(sys.argv[1]).read_text(encoding="utf-8")
+start = source.index("    def apply(self) -> None:")
+end = source.index("    def execute(self) -> None:", start)
+apply_body = source[start:end]
+steps = [
+    "self.configure_infra_manager_base()",
+    "self.handoff_infra(",
+    "self.configure_infra_manager_control_plane()",
+    "self.initialize_infra_openbao()",
+    "self.sync_infra_ssh_ca_to_runner()",
+    "self.configure_infra_manager_ssh_trust()",
+    "self.remove_bootstrap_ssh_access_from_infra()",
+    "self.configure_infra_manager()",
+]
+positions = [apply_body.index(step) for step in steps]
+if positions != sorted(positions):
+    raise SystemExit("Нарушен порядок перехода bootstrap 910 на SSH-сертификаты")
+PY
 
 printf '[ОК] Граница обычного deploy и bootstrap 910 зафиксирована\n'
