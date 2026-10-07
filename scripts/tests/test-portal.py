@@ -184,10 +184,13 @@ def check_style_contract() -> None:
     if not custom_css.is_file():
         fail("Не найден шаблон custom.css Homepage")
     css = custom_css.read_text(encoding="utf-8")
+    if "title | to_json }}" in css:
+        fail("Заголовок Homepage не должен кодировать кириллицу как \\uXXXX")
+
     for value in (
         "#layout-groups::before",
         "max-width: 1360px",
-        "content: {{ provision.portal.local.title | to_json }}",
+        "content: {{ provision.portal.local.title | to_json(ensure_ascii=False) }}",
         "min-height: 92px",
         "min-height: 88px",
         "rgba(52, 211, 153, 0.9)",
