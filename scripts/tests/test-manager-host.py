@@ -1,246 +1,33 @@
 #!/usr/bin/env python3
-"""Проверки единой операторской команды infra-manager на PVE."""
+"""Проверки минимальной PVE-оболочки и операторской логики 910."""
 
 from __future__ import annotations
 
 import importlib.util
+import sys
+import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
-TARGET = ROOT / "scripts" / "infra-manager" / "host" / "manager.py"
+MODULE_ROOT = ROOT / "scripts" / "infra-manager"
+sys.path.insert(0, str(MODULE_ROOT))
 
-spec = importlib.util.spec_from_file_location("infra_manager_host_manager", TARGET)
+HOST_TARGET = ROOT / "scripts" / "infra-manager" / "host" / "manager.py"
+spec = importlib.util.spec_from_file_location(
+    "infra_manager_host_manager",
+    HOST_TARGET,
+)
 if spec is None or spec.loader is None:
-    raise SystemExit(f"Не удалось загрузить {TARGET}")
-module = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(module)
+    raise SystemExit(f"Не удалось загрузить {HOST_TARGET}")
+host = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(host)
+
+from infra_manager import operator
 
 
-def test_verify_guest_owned() -> None:
-    good = (
-        "hostname: infra-manager\n"
-        "unprivileged: 1\n"
-        "description: test [owner=proxmox-project;role=infra-manager]\n"
-    )
-    with patch.object(module, "guest_config", return_value=good):
-        module.verify_guest_owned(910, "infra-manager")
-
-    with patch.object(module, "guest_config", return_value=None):
-        try:
-            module.verify_guest_owned(910, "infra-manager")
-        except module.OperatorError as exc:
-            assert "infra-manager recover" in str(exc)
-        else:
-            raise AssertionError("Отсутствующий 910 должен направлять в recover")
-
-    foreign = (
-        "hostname: foreign\n"
-        "unprivileged: 1\n"
-        "description: чужой объект\n"
-    )
-    with patch.object(module, "guest_config", return_value=foreign):
-        try:
-            module.verify_guest_owned(910, "infra-manager")
-        except module.OperatorError:
-            pass
-        else:
-            raise AssertionError("Чужой VMID нельзя автоматически изменять")
-
-
-def test_status() -> None:
-    recovery_calls: list[list[str]] = []
-    guest_calls: list[tuple[object, ...]] = []
-
-    def fake_run(argv: list[str], **kwargs: object):
-        del kwargs
-        recovery_calls.append(argv)
-        return SimpleNamespace(returncode=0, stdout="", stderr="")
-
-    def fake_exec(vmid: int, *argv: str, **kwargs: object):
-        del kwargs
-        guest_calls.append((vmid, *argv))
-        return SimpleNamespace(returncode=0, stdout="", stderr="")
-
-    with (
-        patch.object(module, "load_identity", return_value=(920, "infra-manager")),
-        patch.object(module, "run", side_effect=fake_run),
-        patch.object(module, "require_executable"),
-        patch.object(module, "verify_guest_owned"),
-        patch.object(module, "guest_running", return_value=True),
-        patch.object(module, "exec_guest", side_effect=fake_exec),
-        patch.object(module, "_show_openbao_credentials", return_value=0) as operator,
-    ):
-        assert module.manager_status() == 0
-
-    assert recovery_calls == [
-        ["/usr/local/sbin/infra-manager-recovery", "--check"]
-    ]
-    assert guest_calls == [
-        (920, "infra-manager-status", "--full")
-    ]
-    operator.assert_called_once_with()
-
-
-def test_guest_status() -> None:
-    guest_calls: list[tuple[object, ...]] = []
-
-    def fake_exec(vmid: int, *argv: str, **kwargs: object):
-        del kwargs
-        guest_calls.append((vmid, *argv))
-        return SimpleNamespace(returncode=0, stdout="", stderr="")
-
-    with (
-        patch.object(module, "load_identity", return_value=(910, "infra-manager")),
-        patch.object(module, "verify_guest_owned") as verify,
-        patch.object(module, "guest_running", return_value=True),
-        patch.object(module, "exec_guest", side_effect=fake_exec),
-    ):
-        assert module.guest_status(410) == 0
-
-    verify.assert_called_once_with(910, "infra-manager")
-    assert guest_calls == [
-        (
-            910,
-            "env",
-            "PYTHONPATH=/usr/local/lib/infra-manager",
-            "python3",
-            "-m",
-            "infra_manager",
-            "guest-status",
-            "--guest-vmid",
-            "410",
-            "--show-secrets",
-        )
-    ]
-
-
-def test_guest_list() -> None:
-    guest_calls: list[tuple[object, ...]] = []
-
-    def fake_exec(vmid: int, *argv: str, **kwargs: object):
-        del kwargs
-        guest_calls.append((vmid, *argv))
-        return SimpleNamespace(returncode=0, stdout="", stderr="")
-
-    with (
-        patch.object(module, "load_identity", return_value=(910, "infra-manager")),
-        patch.object(module, "verify_guest_owned"),
-        patch.object(module, "guest_running", return_value=True),
-        patch.object(module, "exec_guest", side_effect=fake_exec),
-    ):
-        assert module.guest_list() == 0
-
-    assert guest_calls == [
-        (
-            910,
-            "env",
-            "PYTHONPATH=/usr/local/lib/infra-manager",
-            "python3",
-            "-m",
-            "infra_manager",
-            "guest-list",
-        )
-    ]
-
-
-def test_guest_task() -> None:
-    guest_calls: list[tuple[object, ...]] = []
-
-    def fake_exec(vmid: int, *argv: str, **kwargs: object):
-        del kwargs
-        guest_calls.append((vmid, *argv))
-        return SimpleNamespace(returncode=0, stdout="", stderr="")
-
-    with (
-        patch.object(module, "load_identity", return_value=(910, "infra-manager")),
-        patch.object(module, "verify_guest_owned"),
-        patch.object(module, "guest_running", return_value=True),
-        patch.object(module, "exec_guest", side_effect=fake_exec),
-        patch.object(module, "guest_status", return_value=0) as status,
-    ):
-        assert module.guest_task("deploy", 410) == 0
-
-    assert guest_calls == [
-        (
-            910,
-            "env",
-            "PYTHONPATH=/usr/local/lib/infra-manager",
-            "python3",
-            "-m",
-            "infra_manager",
-            "guest-task",
-            "--operation",
-            "deploy",
-            "--guest-vmid",
-            "410",
-        )
-    ]
-    status.assert_called_once_with(410)
-
-    guest_calls.clear()
-    with (
-        patch.object(module, "load_identity", return_value=(910, "infra-manager")),
-        patch.object(module, "verify_guest_owned"),
-        patch.object(module, "guest_running", return_value=True),
-        patch.object(module, "exec_guest", side_effect=fake_exec),
-        patch.object(module, "guest_status") as status,
-    ):
-        assert module.guest_task("test", 410) == 0
-    status.assert_not_called()
-
-
-def test_repair() -> None:
-    recovery_modes: list[str] = []
-    host_calls: list[list[str]] = []
-    guest_calls: list[tuple[object, ...]] = []
-
-    def fake_run(argv: list[str], **kwargs: object):
-        del kwargs
-        host_calls.append(argv)
-        return SimpleNamespace(returncode=0, stdout="", stderr="")
-
-    def fake_exec(vmid: int, *argv: str, **kwargs: object):
-        del kwargs
-        guest_calls.append((vmid, *argv))
-        return SimpleNamespace(returncode=0, stdout="", stderr="")
-
-    with (
-        patch.object(module, "load_identity", return_value=(910, "infra-manager")),
-        patch.object(
-            module,
-            "recovery_check",
-            side_effect=lambda mode: recovery_modes.append(mode),
-        ),
-        patch.object(module, "verify_guest_owned"),
-        patch.object(module, "_wait_running"),
-        patch.object(module, "exec_guest", side_effect=fake_exec),
-        patch.object(module, "require_executable"),
-        patch.object(module, "run", side_effect=fake_run),
-        patch.object(module, "_project_branch", return_value="feature/test"),
-        patch.object(module.socket, "gethostname", return_value="pve.example"),
-        patch.object(module, "manager_status", return_value=0),
-    ):
-        assert module.repair() == 0
-
-    assert recovery_modes == ["--preflight"]
-    assert [
-        "/usr/local/sbin/infra-manager-openbao-unseal",
-        "--repair",
-        "--log-level",
-        "normal",
-    ] in host_calls
-    assert (
-        910,
-        "env",
-        "INFRA_PROJECT_BRANCH=feature/test",
-        "INFRA_PVE_NODE=pve",
-        "/usr/local/sbin/infra-manager-activate-runtime",
-    ) in guest_calls
-
-
-def test_openbao_credentials() -> None:
+def test_host_proxy() -> None:
     calls: list[list[str]] = []
 
     def fake_run(argv: list[str], **kwargs: object):
@@ -249,78 +36,216 @@ def test_openbao_credentials() -> None:
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
     with (
-        patch.object(module, "require_executable"),
-        patch.object(module, "run", side_effect=fake_run),
+        patch.object(host, "manager_vmid", return_value=920),
+        patch.object(host, "guest_running", return_value=True),
+        patch.object(host, "run", side_effect=fake_run),
     ):
-        assert module._show_openbao_credentials() == 0
+        assert host.proxy_to_manager(["status", "410"]) == 0
 
-    assert calls == [
-        [
-            "/usr/local/sbin/infra-manager-openbao-unseal",
-            "--show-operator-credentials",
-            "--log-level",
-            "quiet",
-        ],
-    ]
+    assert calls == [[
+        "pct",
+        "exec",
+        "920",
+        "--",
+        "/usr/local/sbin/infra-manager",
+        "--trusted-pve",
+        "status",
+        "410",
+    ]]
 
-def test_recover() -> None:
-    recovery_modes: list[str] = []
-    host_calls: list[list[str]] = []
 
-    def fake_run(argv: list[str], **kwargs: object):
-        del kwargs
-        host_calls.append(argv)
-        return SimpleNamespace(returncode=0, stdout="", stderr="")
+def test_host_repair_starts_manager() -> None:
+    with (
+        patch.object(host, "manager_vmid", return_value=920),
+        patch.object(host, "start_manager") as start,
+        patch.object(
+            host,
+            "run",
+            return_value=SimpleNamespace(returncode=0, stdout="", stderr=""),
+        ) as run,
+    ):
+        assert host.proxy_to_manager(["repair"]) == 0
 
-    def fake_download(target: Path) -> None:
-        target.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+    start.assert_called_once_with(920)
+    assert run.call_args.args[0][-2:] == ["--trusted-pve", "repair"]
+
+
+def test_host_refuses_stopped_manager_for_regular_commands() -> None:
+    with (
+        patch.object(host, "manager_vmid", return_value=920),
+        patch.object(host, "guest_running", return_value=False),
+    ):
+        try:
+            host.proxy_to_manager(["guests"])
+        except host.OperatorError as exc:
+            assert "repair" in str(exc)
+            assert "recover" in str(exc)
+        else:
+            raise AssertionError("Остановленный manager должен блокировать proxy")
+
+
+def test_host_recover_uses_only_recovery_helper() -> None:
+    with (
+        patch.object(host.RECOVERY_COMMAND, "is_file", return_value=True),
+        patch.object(host.os, "access", return_value=True),
+        patch.object(
+            host,
+            "run",
+            return_value=SimpleNamespace(returncode=0, stdout="", stderr=""),
+        ) as run,
+    ):
+        assert host.recover() == 0
+
+    run.assert_called_once_with(
+        ["/usr/local/sbin/infra-manager-recovery", "--recover"],
+        check=False,
+    )
+
+
+def test_host_wrapper_is_minimal() -> None:
+    source = HOST_TARGET.read_text(encoding="utf-8")
+    forbidden = (
+        "Semaphore",
+        "docker compose",
+        "BOOTSTRAP_URL",
+        "urllib.",
+        "OPENBAO_COMMAND",
+        "ACTIVATE_RUNTIME",
+        "project_branch",
+    )
+    for fragment in forbidden:
+        if fragment in source:
+            raise AssertionError(
+                f"PVE-оболочка содержит лишнюю рабочую логику: {fragment}"
+            )
+
+    if source.count("\n") > 150:
+        raise AssertionError("PVE-оболочка стала слишком большой")
+    if '"pct",\n            "exec"' not in source:
+        raise AssertionError("PVE-оболочка должна проксировать через pct exec")
+    if '"--recover"' not in source:
+        raise AssertionError("PVE-оболочка должна сохранять аварийный recover")
+
+
+def test_operator_guest_task_secret_policy() -> None:
+    with (
+        patch.object(operator, "run_operator_guest_task") as task,
+        patch.object(
+            operator,
+            "operator_guest_status",
+            return_value=0,
+        ) as status,
+    ):
+        assert operator.operator_guest_task(
+            "deploy",
+            410,
+            show_secrets=True,
+        ) == 0
+
+    task.assert_called_once_with("deploy", 410)
+    status.assert_called_once_with(410, show_secrets=True)
 
     with (
-        patch.object(
-            module,
-            "recovery_check",
-            side_effect=lambda mode: recovery_modes.append(mode),
-        ),
-        patch.object(module, "_download_bootstrap", side_effect=fake_download),
-        patch.object(module, "run", side_effect=fake_run),
-        patch.object(module, "manager_status", return_value=0),
+        patch.object(operator, "run_operator_guest_task") as task,
+        patch.object(operator, "operator_guest_status") as status,
     ):
-        assert module.recover() == 0
+        assert operator.operator_guest_task(
+            "test",
+            410,
+            show_secrets=True,
+        ) == 0
+    task.assert_called_once_with("test", 410)
+    status.assert_not_called()
 
-    assert recovery_modes == ["--preflight", "--restore-git-access"]
-    assert len(host_calls) == 1
-    assert host_calls[0][0] == "bash"
-    assert host_calls[0][-1] == "--recover"
+
+def test_operator_status_secret_policy() -> None:
+    import infra_manager.status as status_module
+
+    with (
+        patch.object(status_module, "check_status", return_value=0) as check,
+        patch.object(operator, "_pve_node", return_value="pve"),
+        patch.object(
+            operator,
+            "show_openbao_operator_credentials",
+        ) as credentials,
+    ):
+        assert operator.operator_status(show_secrets=False) == 0
+        credentials.assert_not_called()
+
+        assert operator.operator_status(show_secrets=True) == 0
+
+    check.assert_called_with(full=True, quiet=False)
+    credentials.assert_called_once_with("pve")
+
+
+def test_operator_repair_runs_inside_manager() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        compose = root / "docker-compose.yml"
+        versions = root / ".versions.env"
+        activate = root / "infra-manager-activate-runtime"
+        for path in (compose, versions, activate):
+            path.write_text("test\n", encoding="utf-8")
+
+        calls: list[tuple[list[str], dict[str, object]]] = []
+
+        def fake_run(argv: list[str], **kwargs: object):
+            calls.append((argv, kwargs))
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        with (
+            patch.object(operator, "COMPOSE_FILE", compose),
+            patch.object(operator, "VERSIONS_FILE", versions),
+            patch.object(operator, "ACTIVATE_RUNTIME", activate),
+            patch.object(operator, "_pve_node", return_value="pve"),
+            patch.object(operator, "run", side_effect=fake_run),
+            patch.object(operator, "repair_openbao_on_host") as repair_openbao,
+            patch.object(
+                operator,
+                "project_branch_for_checkout",
+                return_value="feature/test",
+            ),
+            patch.object(operator, "operator_status", return_value=0) as status,
+        ):
+            assert operator.operator_repair(show_secrets=True) == 0
+
+    repair_openbao.assert_called_once_with("pve")
+    status.assert_called_once_with(show_secrets=True)
+    assert ["systemctl", "start", "docker"] in [call[0] for call in calls]
+    assert any(call[0][-1] == "openbao" for call in calls)
+    activation = next(call for call in calls if call[0] == [str(activate)])
+    environment = activation[1]["env"]
+    assert environment["INFRA_PVE_NODE"] == "pve"
+    assert environment["INFRA_PROJECT_BRANCH"] == "feature/test"
 
 
 def test_public_command_contract() -> None:
-    source = TARGET.read_text(encoding="utf-8")
-    for command in (
-        '"guests"',
-        '"deploy"',
-        '"status"',
-        '"sync"',
-        '"repair"',
-        '"test"',
-        '"recover"',
+    parser = operator.build_parser()
+    for argv in (
+        ["guests"],
+        ["status"],
+        ["status", "410"],
+        ["deploy", "410"],
+        ["sync", "410"],
+        ["repair"],
+        ["repair", "410"],
+        ["test", "410"],
+        ["recover"],
     ):
-        if command not in source:
-            raise AssertionError(f"PVE CLI не содержит команду {command}")
-    if 'subparsers.add_parser(\n        "openbao-operator"' in source:
-        raise AssertionError("openbao-operator не должен быть публичной PVE-командой")
+        parser.parse_args(argv)
 
 
 def main() -> None:
-    test_verify_guest_owned()
-    test_status()
-    test_guest_status()
-    test_guest_list()
-    test_guest_task()
-    test_repair()
-    test_openbao_credentials()
-    test_recover()
+    test_host_proxy()
+    test_host_repair_starts_manager()
+    test_host_refuses_stopped_manager_for_regular_commands()
+    test_host_recover_uses_only_recovery_helper()
+    test_host_wrapper_is_minimal()
+    test_operator_guest_task_secret_policy()
+    test_operator_status_secret_policy()
+    test_operator_repair_runs_inside_manager()
     test_public_command_contract()
-    print("[ОК] Единая операторская команда PVE проверена")
+    print("[ОК] Минимальная PVE-оболочка и операторский слой 910 проверены")
 
 
 if __name__ == "__main__":
