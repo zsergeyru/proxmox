@@ -1063,17 +1063,29 @@ def _run_deploy_guest(
         )
         return 0
 
-    console.info("Инициализация OpenTofu")
-    context.workspace.initialize()
+    bootstrap_configure = bootstrap_scope and phase in {
+        "provision-base",
+        "provision",
+    }
 
-    state_present, state_status = context.workspace.get_resource_state(
-        context.target
-    )
-    _validate_pve_and_state(
-        context,
-        state_present=state_present,
-        state_status=state_status,
-    )
+    if bootstrap_configure:
+        # После create bootstrap-state больше не является источником истины.
+        # Последующие шаги подтверждают сам объект PVE и используют только
+        # одноразовый SSH-доступ текущего bootstrap-сеанса.
+        _validate_existing_guest_object(context)
+        state_present = False
+    else:
+        console.info("Инициализация OpenTofu")
+        context.workspace.initialize()
+
+        state_present, state_status = context.workspace.get_resource_state(
+            context.target
+        )
+        _validate_pve_and_state(
+            context,
+            state_present=state_present,
+            state_status=state_status,
+        )
 
     if not bootstrap_scope:
         if not state_present and phase in {"all", "infrastructure"}:
@@ -1090,21 +1102,6 @@ def _run_deploy_guest(
 
     if phase in {"all", "infrastructure"}:
         _reconcile_guest_infrastructure(context)
-
-    if phase in {"provision-base", "provision"}:
-        state_present, state_status = context.workspace.get_resource_state(
-            context.target
-        )
-        _validate_pve_and_state(
-            context,
-            state_present=state_present,
-            state_status=state_status,
-        )
-        if not state_present:
-            raise InfraManagerError(
-                f"Гость {context.vmid} отсутствует в OpenTofu state; "
-                "сначала выполните фазу infrastructure"
-            )
 
     # Некоторые свойства LXC Proxmox разрешает менять только самому root@pam,
     # а не API token. Они остаются частью общего guest/profile-контракта и
