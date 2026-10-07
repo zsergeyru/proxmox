@@ -122,7 +122,7 @@ scripts/
 
 `pve.py` — проверяет фактические права ключа доступа PVE API и отсутствие запрещённых административных полномочий.
 
-`guest_status.py` — общий движок `Status Guest` и `Test Guest`: проверяет базовое состояние PVE/SSH, опубликованные службы из `provision.yaml`, дополнительные проверки из общего `status.yaml` и формирует краткий или полный операторский вывод. Секреты читаются только для полного операторского результата `Status Guest` и успешного `Deploy Guest`.
+`guest_status.py` — общий движок состояния гостей: проверяет базовое состояние PVE/SSH, опубликованные службы из `provision.yaml`, дополнительные проверки из общего `status.yaml` и формирует краткий или полный вывод. По умолчанию секреты не читаются. Задания Semaphore и Homepage всегда используют этот безопасный режим; показать операторские пароли может только явный доверенный вызов с PVE.
 
 `status.py` — внутренний исполнитель глубокой проверки `infra-manager`. Он читает установленный `/etc/infra-manager/status.yaml`, который строится из локального `infra-manager-status.yaml`; операторский вывод служб и паролей в него больше не входит.
 
@@ -181,17 +181,22 @@ Semaphore: Build Template 9000
 Единственный штатный интерфейс человека устанавливается на физическом PVE:
 
 ```text
-infra-manager status
-infra-manager repair
+infra-manager guests
+infra-manager status [VMID]
+infra-manager deploy VMID
+infra-manager sync VMID
+infra-manager repair [VMID]
+infra-manager test VMID
 infra-manager recover
-infra-manager openbao-operator
 ```
 
 Его реализация находится в `scripts/infra-manager/host/manager.py`.
 
-Внутри 910 остаётся техническая `infra-manager-status`, которую PVE вызывает через `pct exec`. Отдельные установленные команды `infra-manager-pve-access-check` и `infra-manager-pve-lifecycle-test` удалены; соответствующая Python-логика остаётся доступна тестам и внутреннему коду через `python3 -m infra_manager`.
+`status VMID` явно включает доверенный вывод секретов в текущую root-сессию PVE. Операции `deploy`, `sync`, `repair VMID` и `test` не выполняют OpenTofu или Ansible на PVE: команда передаёт их существующему шаблону Semaphore в 910 и ждёт его завершения. Журнал самого задания остаётся без паролей.
 
-`infra-manager-activate-runtime` и `infra-manager-openbao-startup-unseal` являются внутренними командами автоматизации, а PVE-команды `infra-manager-openbao-unseal` и `infra-manager-recovery` — внутренними helper-механизмами для единой операторской команды.
+Внутри 910 остаётся техническая `infra-manager-status`, которую PVE вызывает через `pct exec`. Внутренние команды `guest-list`, `guest-task` и `guest-status` доступны только через `python3 -m infra_manager` и служат мостом для PVE-команды. Отдельные установленные команды `infra-manager-pve-access-check` и `infra-manager-pve-lifecycle-test` удалены.
+
+`infra-manager-activate-runtime` и `infra-manager-openbao-startup-unseal` являются внутренними командами автоматизации, а PVE-команды `infra-manager-openbao-unseal` и `infra-manager-recovery` — внутренними служебными механизмами единой операторской команды.
 
 ## `guests/`
 
@@ -227,7 +232,7 @@ python scripts/validate_repo.py
 - `test-infra-manager-python.py` проверяет основу Python-пакета, командную оболочку и PVE-вспомогательные функции.
 - `test-pve-lifecycle.py` проверяет полный сценарий lifecycle test, защиту занятого VMID и аварийную очистку без реального PVE.
 - `test-python-command.py` проверяет внутреннюю оболочку `infra-manager-status`.
-- `test-manager-host.py` проверяет `infra-manager status/repair/recover/openbao-operator` без реального изменения PVE.
+- `test-manager-host.py` проверяет единый набор `infra-manager guests/status/deploy/sync/repair/test/recover` без реального изменения PVE.
 - `test-bootstrap-host.py` проверяет состояния первоначального контура, восстановление, строгую метку владения 910 и безопасное удаление.
 - `test-status.py` проверяет чтение и валидацию состояния Semaphore.
 - `test-template.py` проверяет безопасную передачу параметров Packer и валидацию шаблона.
