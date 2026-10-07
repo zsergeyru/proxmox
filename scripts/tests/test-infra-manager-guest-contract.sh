@@ -507,8 +507,9 @@ grep -q 'pve_host_private_key' "$PY_SETTINGS" \
     || die "Путь root SSH-ключа PVE должен находиться в единых настройках"
 grep -q 'ensure_container_host' "$PY_PVE_HOST" \
     || die "Общий PVE host слой должен поддерживать container-host"
-grep -q 'ensure_infra_self_access' "$PY_PVE_HOST" \
-    || die "PVE host слой должен уметь безопасно восстановить самодоступ 910"
+if grep -q 'ensure_infra_self_access' "$PY_PVE_HOST"; then
+    die "Постоянный self SSH-доступ 910 через guest key запрещён"
+fi
 grep -Fq 'desired["keyctl"] = "1"' "$PY_PVE_HOST" \
     || die "container-host должен обеспечивать keyctl=1"
 grep -Fq 'desired["nesting"] = "1"' "$PY_PVE_HOST" \

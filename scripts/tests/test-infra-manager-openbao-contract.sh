@@ -276,8 +276,9 @@ grep -q 'packer, version' "$ANSIBLE_RUNTIME" \
 if grep -Fq 'register: ansible_private_key' "$ANSIBLE_RUNTIME"; then
     die "register ansible_private_key запрещён: это служебная переменная SSH connection plugin"
 fi
-grep -Fq 'register: infra_ansible_private_key_stat' "$ANSIBLE_RUNTIME" \
-    || die "Проверка постоянного Ansible-ключа должна использовать безопасное имя переменной"
+if grep -Fq 'infra_ansible_private_key_stat' "$ANSIBLE_RUNTIME"; then
+    die "Постоянный Ansible guest key больше не должен создаваться или проверяться"
+fi
 
 grep -q 'runtime-activation.log' "$ACTIVATE_RUNTIME" \
     || die "Команда активации должна вести отдельный журнал"
