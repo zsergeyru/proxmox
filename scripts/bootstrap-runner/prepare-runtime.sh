@@ -29,9 +29,12 @@ command -v docker >/dev/null 2>&1 || {
 
 systemctl enable --now docker >/dev/null
 
-if [[ ! -s "$CONFIG_DIR/bootstrap-ssh/infra_manager_ed25519" ]]; then
-    ssh-keygen -q -t ed25519 -N ''         -C infra-manager-bootstrap         -f "$CONFIG_DIR/bootstrap-ssh/infra_manager_ed25519"
-fi
+rm -f \
+    "$CONFIG_DIR/bootstrap-ssh/infra_manager_ed25519" \
+    "$CONFIG_DIR/bootstrap-ssh/infra_manager_ed25519.pub"
+ssh-keygen -q -t ed25519 -N '' \
+    -C infra-manager-bootstrap \
+    -f "$CONFIG_DIR/bootstrap-ssh/infra_manager_ed25519"
 chmod 0600 "$CONFIG_DIR/bootstrap-ssh/infra_manager_ed25519"
 chmod 0644 "$CONFIG_DIR/bootstrap-ssh/infra_manager_ed25519.pub"
 
