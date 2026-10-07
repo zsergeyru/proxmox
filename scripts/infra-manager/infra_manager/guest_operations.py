@@ -257,6 +257,24 @@ def _run_status(
     return 0
 
 
+def run_local_guest_status(
+    repo_root: Path,
+    vmid: int,
+    *,
+    show_secrets: bool = False,
+) -> int:
+    """Показать статус гостя из 910 с локальным PVE credential."""
+
+    require_runtime_activation_idle()
+    identity = guest_identity(repo_root, vmid)
+    return _run_status(
+        PveClient(),
+        repo_root,
+        identity,
+        show_secrets=show_secrets,
+    )
+
+
 def _run_repair(
     client: PveClient,
     repo_root: Path,
