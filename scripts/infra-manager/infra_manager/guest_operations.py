@@ -239,6 +239,9 @@ def _run_status(
     *,
     show_secrets: bool = False,
 ) -> int:
+    console.info(
+        f"Проверка состояния гостя {identity.vmid} — {identity.name}"
+    )
     resource = _generic_status(
         client,
         repo_root,
