@@ -513,6 +513,18 @@ class ApplyHarness(BootstrapHost):
     def configure_infra_manager_base(self) -> None:
         self.events.append("configure_base")
 
+    def configure_infra_manager_control_plane(self) -> None:
+        self.events.append("configure_control_plane")
+
+    def configure_infra_manager_ssh_trust(self) -> None:
+        self.events.append("configure_ssh_trust")
+
+    def sync_infra_ssh_ca_to_runner(self) -> None:
+        self.events.append("sync_ssh_ca")
+
+    def remove_bootstrap_ssh_access_from_infra(self) -> None:
+        self.events.append("remove_bootstrap_auth")
+
     def configure_infra_manager(self) -> None:
         self.events.append("configure_full")
 
@@ -548,8 +560,12 @@ def test_new_install_flow() -> None:
             "attach_layout",
             "configure_base",
             "handoff:apply",
-            "configure_full",
+            "configure_control_plane",
             "initialize_openbao",
+            "sync_ssh_ca",
+            "configure_ssh_trust",
+            "remove_bootstrap_auth",
+            "configure_full",
             "verify_ready:quiet",
             "finalize_runner",
             "check_ready",
@@ -593,8 +609,12 @@ def test_recovery_recreates_existing_infra() -> None:
             "attach_layout",
             "configure_base",
             "handoff:recover",
-            "configure_full",
+            "configure_control_plane",
             "initialize_openbao",
+            "sync_ssh_ca",
+            "configure_ssh_trust",
+            "remove_bootstrap_auth",
+            "configure_full",
             "verify_ready:quiet",
             "finalize_runner",
             "check_ready",
@@ -617,8 +637,12 @@ def test_recovery_recreates_missing_infra() -> None:
             "attach_layout",
             "configure_base",
             "handoff:recover",
-            "configure_full",
+            "configure_control_plane",
             "initialize_openbao",
+            "sync_ssh_ca",
+            "configure_ssh_trust",
+            "remove_bootstrap_auth",
+            "configure_full",
             "verify_ready:quiet",
             "finalize_runner",
             "check_ready",
