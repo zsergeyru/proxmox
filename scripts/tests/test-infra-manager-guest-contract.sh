@@ -128,8 +128,10 @@ grep -Fq '"pct",' "$PVE_OPERATOR" \
     || die "PVE-оболочка должна передавать команды через pct exec"
 grep -Fq '"--trusted-pve"' "$PVE_OPERATOR" \
     || die "PVE-оболочка должна явно отмечать доверенный терминальный вызов"
-grep -Fq 'verify_manager(vmid)' "$PVE_OPERATOR" \
-    || die "PVE-оболочка должна проверять принадлежность управляющего LXC"
+grep -Fq 'verify_manager(vmid, name)' "$PVE_OPERATOR" \
+    || die "PVE-оболочка должна проверять VMID и имя управляющего LXC"
+grep -Fq 'f"hostname: {name}"' "$PVE_OPERATOR" \
+    || die "PVE-оболочка должна подтверждать hostname управляющего LXC"
 grep -Fq 'RECOVERY_COMMAND' "$PVE_OPERATOR" \
     || die "PVE-оболочка должна отдельно передавать recover аварийному helper"
 if grep -Eq 'docker|Semaphore|OPENBAO_COMMAND|ACTIVATE_RUNTIME|BOOTSTRAP_URL' "$PVE_OPERATOR"; then
