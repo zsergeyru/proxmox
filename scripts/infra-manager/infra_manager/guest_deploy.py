@@ -1076,7 +1076,12 @@ def run_deploy_guest(
             exclude_vmids=set() if bootstrap_scope else None,
         )
     )
-    context = _build_deployment_context(repo_root, vmid, workspace)
+    context = _build_deployment_context(
+        repo_root,
+        vmid,
+        workspace,
+        private_key=None if self_update else PATHS.ansible_private_key,
+    )
     bootstrap_private_key: Path | None = None
 
     if self_update:
