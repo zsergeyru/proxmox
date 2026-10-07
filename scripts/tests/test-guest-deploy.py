@@ -1404,7 +1404,7 @@ def main_test() -> None:
         else:
             fail("Ожидалась ошибка tofu apply")
     if protected_client.protection_values != [0, 1]:
-        fail("Защита шаблона не была восстановлена после ошибки tofu apply")
+        fail(f"Защита шаблона после ошибки tofu apply: {protected_client.protection_values!r}")
 
     with tempfile.TemporaryDirectory() as tmp:
         plan_file = Path(tmp) / "410.tfplan"
