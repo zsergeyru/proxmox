@@ -42,22 +42,46 @@ class BootstrapInfraMixin:
         self.infra_exec("sh", "-c", script, "sh", marker)
         self.ok(f"Временный SSH-доступ 990 к {self.infra_ctid} удалён")
 
-    def deploy_infra_phase(self, phase: str, title: str, success: str) -> None:
-        self.log(title)
-
-        # Временный 990 использует отдельную внутреннюю bootstrap-точку входа.
-        # Публичный deploy-guest не содержит bootstrap-фаз infra-manager.
-        deploy_args = [
-            "env", f"INFRA_PROJECT_BRANCH={self.project_branch}",
-            "bash", str(self.project_dir / "scripts/bootstrap-runner/deploy-infra-manager.sh"),
-            phase, str(self.infra_ctid), str(self.project_dir),
+    def _run_infra_bootstrap_step(
+        self,
+        step: str,
+        *,
+        progress: bool,
+    ) -> None:
+        command = [
+            "env",
+            f"INFRA_PROJECT_BRANCH={self.project_branch}",
+            "bash",
+            str(self.project_dir / "scripts/bootstrap-runner/deploy-infra-manager.sh"),
+            step,
+            str(self.infra_ctid),
+            str(self.project_dir),
         ]
         self.ct_exec(
-            *deploy_args,
+            *command,
             quiet=True,
-            progress=phase in {"base", "provision"},
+            progress=progress,
         )
-        self.ok(success)
+
+    def create_infra_manager(self) -> None:
+        """Создать объект infra-manager в bootstrap-state."""
+        self.log(f"Создание LXC {self.infra_ctid} через OpenTofu")
+        self._run_infra_bootstrap_step("create", progress=False)
+        self.ok(
+            f"LXC {self.infra_ctid} создан через состояние bootstrap-runner"
+        )
+
+    def configure_infra_manager_base(self) -> None:
+        """Установить минимальную ОС для перехода к доверенному контуру."""
+        self.log(f"Базовая настройка LXC {self.infra_ctid} через Ansible")
+        self._run_infra_bootstrap_step("configure-base", progress=True)
+        self.ok(f"Базовая настройка {self.infra_ctid} завершена")
+
+    def configure_infra_manager(self) -> None:
+        """Полностью применить декларацию infra-manager."""
+        self.log(f"Полная настройка LXC {self.infra_ctid} через Ansible")
+        self._run_infra_bootstrap_step("configure", progress=True)
+        self.ok(f"Полная настройка {self.infra_ctid} завершена")
 
     def infra_config_is_expected(self) -> bool:
         # Для любых разрушительных действий одного hostname недостаточно.
