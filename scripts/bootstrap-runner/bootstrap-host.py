@@ -427,19 +427,6 @@ class BootstrapHost(
             self.fail("после успешного bootstrap временный token 990 не должен существовать")
         self.verify_infra_ready()
 
-    def runner_owns_infra(self) -> bool:
-        # Наличие состояния OpenTofu означает незавершённую первоначальную установку:
-        # новый 990 не должен импортировать или заново присваивать себе infra-manager.
-        return (
-            self.ct_exec(
-                "test",
-                "-s",
-                "/var/lib/bootstrap-runner/opentofu/state/proxmox.tfstate",
-                check=False,
-            ).returncode
-            == 0
-        )
-
     def prepare_runner(self) -> None:
         self.verify_runner_contract()
         self.ensure_host_root_ssh_access()
@@ -454,63 +441,31 @@ class BootstrapHost(
             self.verify_recovery_state()
 
         if existed:
-            owns_infra = self.runner_owns_infra()
-            if owns_infra:
-                # Это продолжение оборванного bootstrap-сеанса.
-                if self.persistent_layout_attached():
-                    self.verify_persistent_layout()
-                else:
-                    self.attach_persistent_layout()
-            elif self.mode == "recover":
-                # Полный recovery сохраняет PVE-only/access/state, но всегда
-                # создаёт воспроизводимый rootfs управляющего гостя заново.
+            if self.mode == "recover":
                 self.verify_persistent_layout()
                 self.remove_infra_rootfs_for_recovery()
                 existed = False
-                owns_infra = False
             else:
-                # Обычный bootstrap не вмешивается в рабочий infra-manager.
                 self.verify_persistent_layout()
+                self.fail(
+                    f"LXC {self.infra_ctid} уже существует; "
+                    "для рабочего infra-manager используйте обычный deploy/repair, "
+                    "а для полного пересоздания — recovery"
+                )
+        elif self.mode == "recover":
+            self.info(
+                f"LXC {self.infra_ctid} отсутствует; "
+                "recovery создаст новый rootfs на сохранённом состоянии"
+            )
         else:
             self.prepare_new_persistent_layout()
-            owns_infra = False
 
         self.prepare_runner()
-        if not existed:
-            owns_infra = self.runner_owns_infra()
-
-        # Три пути намеренно разделены:
-        # 1) продолжение оборванной первоначальной установки;
-        # 2) обновление уже постоянного infra-manager без временного состояния;
-        # 3) чистое создание нового infra-manager.
-        if existed and owns_infra:
-            self.info(
-                f"Найден созданный {self.infra_ctid} {self.infra_hostname} "
-                "в состоянии первоначального контура; "
-                "продолжается настройка без повторного OpenTofu apply"
-            )
-            self.ensure_existing_infra_running()
-            # infra-manager уже создан и принадлежит state 990. После добавления
-            # host bind mount повторный OpenTofu plan может воспринимать
-            # внешнее изменение как замену ресурса. Инфраструктурная фаза
-            # считается завершённой; дальше проверку state выполняет каждая
-            # provision-фаза без повторного plan/apply.
-            self.configure_infra_manager_base()
-            self.handoff_infra("recover" if self.mode == "recover" else "apply")
-            self.configure_infra_manager()
-        elif existed:
-            self.fail(
-                f"LXC {self.infra_ctid} уже существует и не принадлежит "
-                "незавершённому bootstrap-сеансу; используйте обычный deploy/repair, "
-                "а для полного пересоздания — recovery"
-            )
-        else:
-            self.create_infra_manager()
-            self.attach_persistent_layout()
-            self.configure_infra_manager_base()
-            self.handoff_infra("recover" if self.mode == "recover" else "apply")
-            self.configure_infra_manager()
-
+        self.create_infra_manager()
+        self.attach_persistent_layout()
+        self.configure_infra_manager_base()
+        self.handoff_infra("recover" if self.mode == "recover" else "apply")
+        self.configure_infra_manager()
         self.initialize_infra_openbao()
         self.verify_infra_ready(quiet=True)
         self.finalize_runner()
