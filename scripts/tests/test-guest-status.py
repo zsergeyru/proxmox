@@ -129,11 +129,14 @@ def check_declared_check_dispatch() -> None:
                 "command": "/usr/local/sbin/infra-manager-status",
                 "message": "ok",
             },
+            project_branch="feature/ephemeral-guest-ssh",
         )
     run_guest.assert_called_once_with(
         "pve",
         "192.168.9.10",
         [
+            "env",
+            "INFRA_PROJECT_BRANCH=feature/ephemeral-guest-ssh",
             "/usr/local/sbin/infra-manager-status",
             "--full",
             "--quiet",
