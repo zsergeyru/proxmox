@@ -10,7 +10,7 @@ IMAGE="bootstrap-runtime:v1"
 
 command -v apt-get >/dev/null 2>&1 || { echo "ОШИБКА: не найден apt-get" >&2; exit 1; }
 
-install -d -m 0700 "$CONFIG_DIR/secrets" "$CONFIG_DIR/ansible"
+install -d -m 0700 "$CONFIG_DIR/secrets" "$CONFIG_DIR/bootstrap-ssh"
 install -d -m 0755 "$CONFIG_DIR/ca" "$DATA_DIR/opentofu/state"
 
 if ! command -v docker >/dev/null 2>&1; then
@@ -29,11 +29,11 @@ command -v docker >/dev/null 2>&1 || {
 
 systemctl enable --now docker >/dev/null
 
-if [[ ! -s "$CONFIG_DIR/ansible/guest_ed25519" ]]; then
-    ssh-keygen -q -t ed25519 -N ''         -C bootstrap-runner-990         -f "$CONFIG_DIR/ansible/guest_ed25519"
+if [[ ! -s "$CONFIG_DIR/bootstrap-ssh/infra_manager_ed25519" ]]; then
+    ssh-keygen -q -t ed25519 -N ''         -C infra-manager-bootstrap         -f "$CONFIG_DIR/bootstrap-ssh/infra_manager_ed25519"
 fi
-chmod 0600 "$CONFIG_DIR/ansible/guest_ed25519"
-chmod 0644 "$CONFIG_DIR/ansible/guest_ed25519.pub"
+chmod 0600 "$CONFIG_DIR/bootstrap-ssh/infra_manager_ed25519"
+chmod 0644 "$CONFIG_DIR/bootstrap-ssh/infra_manager_ed25519.pub"
 
 docker build     --build-arg OPENTOFU_VERSION=1.12.6     -t "$IMAGE"     "$REPO_ROOT/infrastructure/bootstrap-runner/runtime"
 
