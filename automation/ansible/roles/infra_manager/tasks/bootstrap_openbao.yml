@@ -1,0 +1,28 @@
+---
+- name: Записать версии для первоначального запуска OpenBao
+  ansible.builtin.copy:
+    dest: "{{ provision.paths.compose }}/.versions.env"
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      SEMAPHORE_VERSION={{ provision.docker.services.runtime.base_image.split(':')[-1] }}
+      RUNTIME_VERSION={{ provision.docker.services.runtime.image.split(':')[-1] }}
+      OPENTOFU_VERSION={{ provision.docker.services.runtime.tools.opentofu }}
+      PACKER_VERSION={{ provision.docker.services.runtime.tools.packer }}
+      OPENBAO_VERSION={{ provision.docker.services.openbao.image.split(':')[-1] }}
+
+- name: Запустить только OpenBao для восстановления центра доступа
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - --env-file
+      - "{{ provision.paths.compose }}/.versions.env"
+      - -f
+      - "{{ provision.paths.compose }}/docker-compose.yml"
+      - up
+      - -d
+      - --force-recreate
+      - openbao
+  changed_when: true
