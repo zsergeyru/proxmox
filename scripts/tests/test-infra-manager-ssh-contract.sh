@@ -44,6 +44,7 @@ DOCKERFILE="$ROOT/infrastructure/guests/910-infra-manager/rootfs/opt/infra-manag
 REQ="$ROOT/infrastructure/guests/910-infra-manager/rootfs/opt/infra-manager/compose/runtime/requirements.txt"
 PLAN="$ROOT/scripts/infra-manager/jobs/opentofu-plan.py"
 PY_PVE_HOST="$ROOT/scripts/infra-manager/infra_manager/pve_host.py"
+PY_GUEST_DEPLOY="$ROOT/scripts/infra-manager/infra_manager/guest_deploy.py"
 OPENTOFU_LOCK="$ROOT/automation/opentofu/.terraform.lock.hcl"
 GUEST_MANIFEST="$ROOT/infrastructure/guests/910-infra-manager/guest.yaml"
 PROVISION="$ROOT/infrastructure/guests/910-infra-manager/provision.yaml"
