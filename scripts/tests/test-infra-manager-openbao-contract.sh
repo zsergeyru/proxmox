@@ -283,8 +283,16 @@ grep -q 'runtime-activation.log' "$ACTIVATE_RUNTIME" \
     || die "Команда активации должна вести отдельный журнал"
 grep -Fq '.infra-manager-runtime-activation-pending' "$PY_COMMON" "$ACTIVATE_RUNTIME" \
     || die "Задания и активация runtime должны использовать общий маркер"
+grep -Fq '_runtime_activation_scope()' "$PY_COMMON" \
+    || die "Маркер активации должен различать host и runtime PID"
+grep -Fq 'deploy_scope="runtime"' "$ACTIVATE_RUNTIME" \
+    || die "Активация должна поддерживать runtime PID и старый числовой формат"
+grep -Fq 'if [[ "$deploy_scope" == "host" ]]' "$ACTIVATE_RUNTIME" \
+    || die "Активация должна отдельно ждать host PID"
+grep -Fq 'kill -0 "$deploy_pid"' "$ACTIVATE_RUNTIME" \
+    || die "Активация должна ждать host-процесс самообновления"
 grep -Fq 'docker exec --user 0 infra-runtime' "$ACTIVATE_RUNTIME" \
-    || die "Активация должна ждать завершения текущего самообновления infra-manager"
+    || die "Активация должна ждать runtime-процесс самообновления"
 grep -Fq 'infra-manager-openbao-startup-unseal "$PVE_NODE"' "$ACTIVATE_RUNTIME" \
     || die "После перезапуска runtime OpenBao должен разблокироваться до проверки"
 grep -Fq 'run_pve_openbao --check-kv --log-level quiet' "$OPENBAO_STARTUP_COMMAND" \
