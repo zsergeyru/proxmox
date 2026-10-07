@@ -22,17 +22,17 @@ EXPECTED_TARGET="proxmox_virtual_environment_container.guest[\"${INFRA_VMID}\"]"
 }
 
 case "$PHASE" in
-    infrastructure)
-        bash "$RUN_RUNTIME" python3 scripts/infra-manager/jobs/bootstrap-infra-manager.py infrastructure "$INFRA_VMID"
+    create)
+        bash "$RUN_RUNTIME" python3 scripts/infra-manager/jobs/bootstrap-infra-manager.py create "$INFRA_VMID"
         ;;
-    base)
-        bash "$RUN_RUNTIME" python3 scripts/infra-manager/jobs/bootstrap-infra-manager.py base "$INFRA_VMID"
+    configure-base)
+        bash "$RUN_RUNTIME" python3 scripts/infra-manager/jobs/bootstrap-infra-manager.py configure-base "$INFRA_VMID"
         ;;
-    provision)
-        bash "$RUN_RUNTIME" python3 scripts/infra-manager/jobs/bootstrap-infra-manager.py provision "$INFRA_VMID"
+    configure)
+        bash "$RUN_RUNTIME" python3 scripts/infra-manager/jobs/bootstrap-infra-manager.py configure "$INFRA_VMID"
         ;;
     *)
-        echo "Использование: deploy-infra-manager.sh infrastructure|base|provision VMID [REPO_ROOT]" >&2
+        echo "Использование: deploy-infra-manager.sh create|configure-base|configure VMID [REPO_ROOT]" >&2
         exit 2
         ;;
 esac
@@ -55,13 +55,13 @@ esac
 
 
 case "$PHASE" in
-    infrastructure)
+    create)
         printf '[ОК] Основа LXC %s infra-manager готова\n' "$INFRA_VMID"
         ;;
-    base)
+    configure-base)
         printf '[ОК] Базовая настройка %s infra-manager завершена\n' "$INFRA_VMID"
         ;;
-    provision)
+    configure)
         printf '[ОК] Полная настройка %s infra-manager завершена\n' "$INFRA_VMID"
         ;;
 esac
