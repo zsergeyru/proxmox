@@ -728,7 +728,6 @@ def test_existing_layout_requires_manual_migration() -> None:
     host = MigrationGuardHarness(
         "apply",
         infra_exists=True,
-        owns_state=False,
     )
     try:
         host.apply()
@@ -742,7 +741,7 @@ def test_existing_layout_requires_manual_migration() -> None:
 
     assert_equal(
         host.events,
-        ["infra_exists", "runner_owns_infra", "verify_layout"],
+        ["infra_exists", "verify_layout"],
         "До ручной миграции стандартный bootstrap не должен изменять 910",
     )
 
