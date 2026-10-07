@@ -387,6 +387,61 @@ def test_attach_persistent_layout_restores_protection_on_failure() -> None:
         raise AssertionError("Неуспешное подключение не должно считаться проверенным")
 
 
+class RecoveryRootfsHarness(BootstrapHost):
+    def __init__(self, *, owned: bool = True) -> None:
+        super().__init__("recover")
+        self.owned = owned
+        self.exists = True
+        self.events: list[str] = []
+
+    def infra_exists(self) -> bool:
+        return self.exists
+
+    def infra_config_is_expected(self) -> bool:
+        return self.owned
+
+    def pct_status(self, ctid: int) -> str:
+        if ctid != self.infra_ctid:
+            raise AssertionError(f"Неожиданный VMID: {ctid}")
+        return "running"
+
+    def pct(self, *args: str, **kwargs):
+        del kwargs
+        self.events.append("pct:" + " ".join(args))
+        return SimpleNamespace(returncode=0)
+
+    def run(self, *args: str, **kwargs):
+        del kwargs
+        self.events.append("run:" + " ".join(args))
+        if args[:2] == ("pct", "destroy"):
+            self.exists = False
+        return SimpleNamespace(returncode=0)
+
+    def ok(self, message: str) -> None:
+        del message
+
+
+def test_recovery_rootfs_removal_is_strict() -> None:
+    host = RecoveryRootfsHarness()
+    host.remove_infra_rootfs_for_recovery()
+    if not any("--protection 0" in event for event in host.events):
+        raise AssertionError("Recovery должен снять protection перед удалением rootfs")
+    if not any(event.startswith("pct:stop ") for event in host.events):
+        raise AssertionError("Recovery должен остановить работающий infra-manager")
+    if not any("pct destroy" in event and "--purge 1" in event for event in host.events):
+        raise AssertionError("Recovery должен удалить только объект/rootfs infra-manager")
+
+    foreign = RecoveryRootfsHarness(owned=False)
+    try:
+        foreign.remove_infra_rootfs_for_recovery()
+    except BootstrapError:
+        pass
+    else:
+        raise AssertionError("Recovery не должен удалять чужой объект")
+    if foreign.events:
+        raise AssertionError("До проверки владения разрушительные команды запрещены")
+
+
 class ApplyHarness(BootstrapHost):
     def __init__(
         self,
@@ -855,6 +910,7 @@ def main() -> None:
         test_infra_ready_uses_status_as_final_screen,
         test_attach_persistent_layout_temporarily_disables_protection,
         test_attach_persistent_layout_restores_protection_on_failure,
+        test_recovery_rootfs_removal_is_strict,
         test_new_install_flow,
         test_existing_without_bootstrap_state,
         test_resume_unfinished_initial_state,
