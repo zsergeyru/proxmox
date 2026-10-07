@@ -62,8 +62,8 @@ def test_orchestration() -> None:
         ),
         patch.object(
             openbao_module,
-            "initialize_openbao_on_host",
-            side_effect=lambda node: calls.append(("initialize", node)),
+            "repair_openbao_on_host",
+            side_effect=lambda node: calls.append(("ensure", node)),
         ),
         patch.object(
             openbao_module,
@@ -83,9 +83,8 @@ def test_orchestration() -> None:
         ("install", f"pve:{ROOT}"),
         ("install-recovery", f"pve:{ROOT}"),
         ("prepare-recovery", "pve"),
-        ("initialize", "pve"),
+        ("ensure", "pve"),
         ("sync-otp", "pve"),
-        ("check-recovery", "pve"),
         ("check-recovery", "pve"),
     ]:
         fail(f"Неожиданный порядок инициализации OpenBao: {calls!r}")
