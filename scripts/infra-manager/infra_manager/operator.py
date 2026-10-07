@@ -12,6 +12,7 @@ from .guest_deploy import project_branch_for_checkout
 from .guest_operations import list_local_guests, run_local_guest_status
 from .pve import PveClient
 from .pve_host import (
+    preflight_recovery_contour,
     repair_openbao_on_host,
     show_openbao_operator_credentials,
 )
@@ -87,6 +88,9 @@ def operator_repair(*, show_secrets: bool) -> int:
     """Безопасно восстановить службы управляющего гостя."""
 
     node = _pve_node()
+
+    console.info("Проверка сохранности постоянного состояния")
+    preflight_recovery_contour(node)
 
     console.info("Запуск Docker")
     run(["systemctl", "start", "docker"])
