@@ -9,14 +9,17 @@ from urllib.parse import urlparse
 
 from .common import InfraManagerError, console, run
 from .guest_deploy import project_branch_for_checkout
-from .guest_operations import list_local_guests, run_local_guest_status
+from .guest_operations import (
+    list_local_guests,
+    run_guest_operation,
+    run_local_guest_status,
+)
 from .pve import PveClient
 from .pve_host import (
     preflight_recovery_contour,
     repair_openbao_on_host,
     show_openbao_operator_credentials,
 )
-from .semaphore import run_operator_guest_task
 from .settings import PATHS
 
 ACTIVATE_RUNTIME = Path("/usr/local/sbin/infra-manager-activate-runtime")
