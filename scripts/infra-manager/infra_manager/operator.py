@@ -227,6 +227,7 @@ def operator_guest_task(
             str(vmid),
         ],
         check=False,
+        stream_output=True,
     )
     if result.returncode != 0:
         return result.returncode
