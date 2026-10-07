@@ -35,6 +35,15 @@ from .pve_host import (
 )
 from .settings import PATHS, SETTINGS
 
+BOOTSTRAP_INFRA_MANAGER_PHASES = {
+    "create": "infrastructure",
+    "configure-base": "provision-base",
+    "configure-control-plane": "provision-control-plane",
+    "configure-recovery-control-plane": "provision-recovery-control-plane",
+    "configure-ssh-trust": "provision-ssh-trust",
+    "configure": "provision",
+}
+
 
 def _bootstrap_scope_private_key() -> Path:
     """Получить ключ только из закрытого начального контура 990."""
@@ -1218,15 +1227,7 @@ def run_bootstrap_infra_manager_step(
         raise InfraManagerError(
             f"Гость {vmid} не имеет роль {SETTINGS.infra_manager_role!r}"
         )
-    phases = {
-        "create": "infrastructure",
-        "configure-base": "provision-base",
-        "configure-control-plane": "provision-control-plane",
-        "configure-recovery-control-plane": "provision-recovery-control-plane",
-        "configure-ssh-trust": "provision-ssh-trust",
-        "configure": "provision",
-    }
-    phase = phases.get(step)
+    phase = BOOTSTRAP_INFRA_MANAGER_PHASES.get(step)
     if phase is None:
         raise InfraManagerError(
             f"Недопустимый bootstrap-шаг infra-manager: {step}"
