@@ -287,12 +287,12 @@ def check_deploy_operation() -> None:
         fail("Deploy Guest передал неверные данные общему выводу")
     if kwargs != {
         "full": True,
-        "show_secrets": True,
+        "show_secrets": False,
         "project_branch": "feature/unified-guest-status",
         "project_revision": "abc1234",
     }:
         fail(
-            "Успешный Deploy Guest должен показывать операторский итог "
+            "Успешный Deploy Guest должен показывать итог без секретов "
             "и версию проекта"
         )
     reserve.assert_not_called()
@@ -338,6 +338,34 @@ def check_dispatch() -> None:
     status.assert_called_once()
     if status.call_args.kwargs != {"show_secrets": False}:
         fail("Диспетчер Semaphore должен запрещать вывод секретов")
+
+    status.reset_mock()
+    with (
+        patch.object(operations, "require_runtime_activation_idle"),
+        patch.object(
+            operations,
+            "guest_identity",
+            return_value=SimpleNamespace(
+                vmid=109,
+                name="network-gateway",
+                role="network-gateway",
+            ),
+        ),
+        patch.object(
+            operations.PveClient,
+            "from_opentofu_env",
+            return_value=SimpleNamespace(),
+        ),
+    ):
+        if operations.run_guest_operation(
+            ROOT,
+            "status",
+            109,
+            show_secrets=True,
+        ) != 0:
+            fail("Доверенный Status Guest вернул ошибку")
+    if status.call_args.kwargs != {"show_secrets": True}:
+        fail("Явный доверенный вызов должен разрешать вывод секретов")
 
 
 def main() -> None:
