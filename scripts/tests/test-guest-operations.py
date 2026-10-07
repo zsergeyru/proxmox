@@ -115,12 +115,12 @@ def check_status_operation() -> None:
             fail("Status Guest передал неверные данные общему выводу")
         if kwargs != {
             "full": True,
-            "show_secrets": True,
+            "show_secrets": False,
             "project_branch": "feature/unified-guest-status",
             "project_revision": "abc1234",
         }:
             fail(
-                "Операторский Status Guest должен показывать полный статус "
+                "Status Guest должен показывать полный статус без секретов "
                 "и версию проекта"
             )
 
@@ -336,6 +336,8 @@ def check_dispatch() -> None:
             fail("Диспетчер Status Guest вернул ошибку")
     idle.assert_called_once_with()
     status.assert_called_once()
+    if status.call_args.kwargs != {"show_secrets": False}:
+        fail("Диспетчер Semaphore должен запрещать вывод секретов")
 
 
 def main() -> None:
