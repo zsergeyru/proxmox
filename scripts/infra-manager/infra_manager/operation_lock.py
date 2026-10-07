@@ -48,6 +48,29 @@ def _read_lock_owner(descriptor: int) -> str:
 
 
 @contextmanager
+def project_checkout_lock(*, exclusive: bool) -> Iterator[None]:
+    """Защитить общую рабочую копию проекта от одновременного изменения."""
+
+    path = PATHS.data_dir / "locks" / "project.lock"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
+    mode = fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH
+    try:
+        try:
+            fcntl.flock(descriptor, mode | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise InfraManagerError(
+                "Рабочая копия проекта занята другой операцией"
+            ) from exc
+        try:
+            yield
+        finally:
+            fcntl.flock(descriptor, fcntl.LOCK_UN)
+    finally:
+        os.close(descriptor)
+
+
+@contextmanager
 def guest_operation_lock(
     vmid: int,
     operation: str,
