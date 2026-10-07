@@ -21,7 +21,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description="Внутренний bootstrap-вызов infra-manager из временного LXC 990"
     )
-    parser.add_argument("phase", choices=("infrastructure", "base", "provision", "existing"))
+    parser.add_argument("phase", choices=("infrastructure", "base", "provision"))
     parser.add_argument("vmid", type=int)
     args = parser.parse_args()
 
@@ -37,7 +37,6 @@ def main() -> int:
             "infrastructure": "infrastructure",
             "base": "provision-base",
             "provision": "provision",
-            "existing": "provision-existing",
         }[args.phase]
         return run_deploy_guest(
             REPO_ROOT,
