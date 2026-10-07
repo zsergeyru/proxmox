@@ -129,7 +129,9 @@ def _run_ansible_guest(
 ) -> None:
     """Запустить общий Ansible playbook выбранным SSH-доступом."""
 
+    repo_root = context.paths.guest_dir.parents[2]
     ansible_env = os.environ.copy()
+    ansible_env["ANSIBLE_CONFIG"] = str(repo_root / "ansible.cfg")
     ansible_env["ANSIBLE_HOST_KEY_CHECKING"] = "True"
     ssh_args = [
         f"-o UserKnownHostsFile={context.paths.known_hosts}",
@@ -162,6 +164,7 @@ def _run_ansible_guest(
             str(context.paths.playbook),
         ],
         env=ansible_env,
+        cwd=repo_root,
     )
 
 
@@ -552,7 +555,9 @@ def _run_guest_ansible(
     host_certificate: Path | None = None,
     openbao_machine_args: list[str] | None = None,
 ) -> None:
+    repo_root = context.paths.guest_dir.parents[2]
     ansible_env = os.environ.copy()
+    ansible_env["ANSIBLE_CONFIG"] = str(repo_root / "ansible.cfg")
     ansible_env["ANSIBLE_HOST_KEY_CHECKING"] = "True"
     ssh_args = (
         f"-o UserKnownHostsFile={context.paths.known_hosts} "
@@ -602,6 +607,7 @@ def _run_guest_ansible(
             str(context.paths.playbook),
         ],
         env=ansible_env,
+        cwd=repo_root,
     )
 
 
