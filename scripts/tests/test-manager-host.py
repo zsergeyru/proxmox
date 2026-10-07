@@ -72,7 +72,7 @@ def test_status() -> None:
         patch.object(module, "exec_guest", side_effect=fake_exec),
         patch.object(module, "openbao_operator", return_value=0) as operator,
     ):
-        assert module.status() == 0
+        assert module.manager_status() == 0
 
     assert recovery_calls == [
         ["/usr/local/sbin/infra-manager-recovery", "--check"]
@@ -81,6 +81,114 @@ def test_status() -> None:
         (920, "infra-manager-status", "--full")
     ]
     operator.assert_called_once_with(rotate=False)
+
+
+def test_guest_status() -> None:
+    guest_calls: list[tuple[object, ...]] = []
+
+    def fake_exec(vmid: int, *argv: str, **kwargs: object):
+        del kwargs
+        guest_calls.append((vmid, *argv))
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    with (
+        patch.object(module, "load_identity", return_value=(910, "infra-manager")),
+        patch.object(module, "verify_guest_owned") as verify,
+        patch.object(module, "guest_running", return_value=True),
+        patch.object(module, "exec_guest", side_effect=fake_exec),
+    ):
+        assert module.guest_status(410) == 0
+
+    verify.assert_called_once_with(910, "infra-manager")
+    assert guest_calls == [
+        (
+            910,
+            "env",
+            "PYTHONPATH=/usr/local/lib/infra-manager",
+            "python3",
+            "-m",
+            "infra_manager",
+            "guest-status",
+            "--guest-vmid",
+            "410",
+            "--show-secrets",
+        )
+    ]
+
+
+def test_guest_list() -> None:
+    guest_calls: list[tuple[object, ...]] = []
+
+    def fake_exec(vmid: int, *argv: str, **kwargs: object):
+        del kwargs
+        guest_calls.append((vmid, *argv))
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    with (
+        patch.object(module, "load_identity", return_value=(910, "infra-manager")),
+        patch.object(module, "verify_guest_owned"),
+        patch.object(module, "guest_running", return_value=True),
+        patch.object(module, "exec_guest", side_effect=fake_exec),
+    ):
+        assert module.guest_list() == 0
+
+    assert guest_calls == [
+        (
+            910,
+            "env",
+            "PYTHONPATH=/usr/local/lib/infra-manager",
+            "python3",
+            "-m",
+            "infra_manager",
+            "guest-list",
+        )
+    ]
+
+
+def test_guest_task() -> None:
+    guest_calls: list[tuple[object, ...]] = []
+
+    def fake_exec(vmid: int, *argv: str, **kwargs: object):
+        del kwargs
+        guest_calls.append((vmid, *argv))
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    with (
+        patch.object(module, "load_identity", return_value=(910, "infra-manager")),
+        patch.object(module, "verify_guest_owned"),
+        patch.object(module, "guest_running", return_value=True),
+        patch.object(module, "exec_guest", side_effect=fake_exec),
+        patch.object(module, "guest_status", return_value=0) as status,
+    ):
+        assert module.guest_task("deploy", 410) == 0
+
+    assert guest_calls == [
+        (
+            910,
+            "env",
+            "PYTHONPATH=/usr/local/lib/infra-manager",
+            "python3",
+            "-m",
+            "infra_manager",
+            "guest-task",
+            "--operation",
+            "deploy",
+            "--guest-vmid",
+            "410",
+        )
+    ]
+    status.assert_called_once_with(410)
+
+    guest_calls.clear()
+    with (
+        patch.object(module, "load_identity", return_value=(910, "infra-manager")),
+        patch.object(module, "verify_guest_owned"),
+        patch.object(module, "guest_running", return_value=True),
+        patch.object(module, "exec_guest", side_effect=fake_exec),
+        patch.object(module, "guest_status") as status,
+    ):
+        assert module.guest_task("test", 410) == 0
+    status.assert_not_called()
 
 
 def test_repair() -> None:
@@ -112,7 +220,7 @@ def test_repair() -> None:
         patch.object(module, "run", side_effect=fake_run),
         patch.object(module, "_project_branch", return_value="feature/test"),
         patch.object(module.socket, "gethostname", return_value="pve.example"),
-        patch.object(module, "status", return_value=0),
+        patch.object(module, "manager_status", return_value=0),
     ):
         assert module.repair() == 0
 
@@ -196,6 +304,9 @@ def test_recover() -> None:
 def main() -> None:
     test_verify_guest_owned()
     test_status()
+    test_guest_status()
+    test_guest_list()
+    test_guest_task()
     test_repair()
     test_openbao_operator()
     test_recover()
