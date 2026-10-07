@@ -185,7 +185,19 @@ mp1: /mnt/bindmounts/infra-manager/state,mp=/mnt/persistent-state
 /usr/local/sbin/infra-manager
 ```
 
-Она предоставляет только три штатных действия: `status`, `repair` и `recover`.
+Она является единственной штатной точкой входа человека и предоставляет:
+
+```text
+guests
+status [VMID]
+deploy VMID
+sync VMID
+repair [VMID]
+test VMID
+recover
+```
+
+Команды работы с конкретным гостем используют установленный код 910. Изменяющие операции передаются в штатные задания Semaphore; OpenTofu и Ansible непосредственно на PVE не запускаются. Только `status VMID` явно разрешает показать операторские секреты в текущем терминале root.
 
 Низкоуровневые PVE-механизмы сохраняются отдельно:
 
