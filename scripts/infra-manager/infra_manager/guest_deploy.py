@@ -979,7 +979,7 @@ def _run_deploy_guest(
     bootstrap_scope: bool,
     phase: str,
 ) -> int:
-    """Внутренний движок обычного deploy и временного bootstrap 910."""
+    """Внутренний движок обычного deploy и временного bootstrap infra-manager."""
 
     if vmid <= 0:
         raise InfraManagerError("VMID должен быть положительным числом")
