@@ -159,9 +159,10 @@ cat /opt/infra-manager/compose/.versions.env
 | `/mnt/pve-access/pve-host` | `/mnt/pve-access/pve-host` | RO |
 | `/mnt/persistent-state/opentofu` | `/var/lib/infra-manager/opentofu` | RW |
 | `/mnt/persistent-state/locks` | `/var/lib/infra-manager/locks` | RW |
+| `/var/lib/infra-manager/bootstrap-repo` | `/var/lib/infra-manager/bootstrap-repo` | RO |
 | `/run/infra-manager/secrets` | `/run/infra-manager/secrets` | RO |
 
-Контейнер может менять свои рабочие данные Semaphore и OpenTofu, а также общий каталог координационных lock-файлов. `/var/lib/infra-manager/locks` указывает на тот же `/mnt/persistent-state/locks`, который использует операторский процесс на 910, поэтому PVE CLI и Semaphore видят одни и те же блокировки. Идентичности Ansible, PVE-доступ и материализованные секреты контейнер получает только для чтения.
+Контейнер может менять свои рабочие данные Semaphore и OpenTofu, а также общий каталог координационных lock-файлов. `/var/lib/infra-manager/locks` указывает на тот же `/mnt/persistent-state/locks`, который использует операторский процесс на 910, поэтому PVE CLI и Semaphore видят одни и те же блокировки. Постоянная Git-копия подключена в контейнер только для чтения: оператор обновляет её отдельной командой `infra-manager update`, а прямой PVE-запуск использует её через `docker exec`. Идентичности Ansible, PVE-доступ и материализованные секреты контейнер также получает только для чтения.
 
 ## 3. Запуск и проверка
 
@@ -175,6 +176,7 @@ cat /opt/infra-manager/compose/.versions.env
 /mnt/persistent-state/opentofu/
 /mnt/persistent-state/locks/
 /mnt/persistent-state/ansible/
+/var/lib/infra-manager/bootstrap-repo/
 /etc/infra-manager/ca/
 /mnt/pve-access/pve-host/
 /run/infra-manager/secrets/
@@ -266,6 +268,7 @@ docker exec infra-runtime python3 -c 'import proxmoxer, yaml, jsonschema'
 docker exec infra-runtime test -d /var/lib/semaphore
 docker exec infra-runtime test -d /var/lib/infra-manager/opentofu
 docker exec infra-runtime test -w /var/lib/infra-manager/locks
+docker exec infra-runtime test -r /var/lib/infra-manager/bootstrap-repo/scripts/infra-manager/jobs/guest-operation.py
 docker exec infra-runtime test -d /etc/infra-manager/ansible
 docker exec infra-runtime test -d /run/infra-manager/secrets
 ```
@@ -333,7 +336,7 @@ host:<PID>
 runtime:<PID>
 ```
 
-`host` используется при прямом запуске с PVE через операторский процесс на 910, `runtime` — при запуске задания Semaphore внутри `infra-runtime`. Для безопасного первого перехода активация также принимает старый числовой формат как `runtime:<PID>`.
+Штатные гостевые операции как с PVE, так и из Semaphore выполняются внутри `infra-runtime` и используют `runtime:<PID>`. Формат `host:<PID>` поддерживается для служебного host-side исполнения общего механизма, а для безопасного первого перехода активация также принимает старый числовой формат как `runtime:<PID>`.
 
 Новые инфраструктурные операции проверяют этот признак и не должны начинать изменение инфраструктуры во время замены среды.
 
