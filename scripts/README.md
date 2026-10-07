@@ -202,6 +202,8 @@ infra-manager recover
 
 `infra-manager-activate-runtime` и `infra-manager-openbao-startup-unseal` являются внутренними командами автоматизации 910. На PVE остаются только тонкая оболочка, `infra-manager-recovery`, `infra-manager-openbao-unseal`, пакет его поддержки и PVE-only данные.
 
+Тонкая PVE-оболочка устанавливается одним путём: роль Ansible сначала устанавливает `/usr/local/sbin/infra-manager` внутри управляющего гостя, затем отдельной внутренней командой `operator-wrapper-install` обновляет оболочку на PVE. `guest_deploy`, инициализация OpenBao и подготовка recovery не устанавливают её напрямую.
+
 ## `guests/`
 
 `resolver.py` — единый сборщик конфигурации гостей. Он объединяет `defaults + profile + guest`, вычисляет административный IP-адрес, нормализует `features` и формирует итоговое состояние объекта Proxmox. Права доступа не входят в resolver: они находятся только в `infrastructure/security/access.yaml` и проверяются `validate_repo.py`.
