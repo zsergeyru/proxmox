@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import sys
 import tempfile
 from pathlib import Path
@@ -320,6 +321,11 @@ def check_dispatch() -> None:
         patch.object(operations, "require_runtime_activation_idle") as idle,
         patch.object(
             operations,
+            "project_checkout_lock",
+            return_value=contextlib.nullcontext(),
+        ),
+        patch.object(
+            operations,
             "guest_identity",
             return_value=SimpleNamespace(
                 vmid=109,
@@ -344,6 +350,11 @@ def check_dispatch() -> None:
     status.reset_mock()
     with (
         patch.object(operations, "require_runtime_activation_idle"),
+        patch.object(
+            operations,
+            "project_checkout_lock",
+            return_value=contextlib.nullcontext(),
+        ),
         patch.object(
             operations,
             "guest_identity",
