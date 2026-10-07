@@ -110,7 +110,16 @@ def operator_update() -> int:
             env=environment,
         )
         run(
-            ["git", "-C", str(repo_root), "reset", "--hard", "FETCH_HEAD"]
+            [
+                "git",
+                "-C",
+                str(repo_root),
+                "checkout",
+                "-f",
+                "-B",
+                branch,
+                "FETCH_HEAD",
+            ]
         )
         run(["git", "-C", str(repo_root), "clean", "-ffdx"])
 
