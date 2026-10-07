@@ -119,7 +119,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     portal_gateway = subparsers.add_parser(
         "portal-gateway",
-        help="запустить защищённый переход к операциям Semaphore",
+        help="запустить защищённый посредник прямых действий Homepage",
     )
     portal_gateway.add_argument(
         "--bind",
