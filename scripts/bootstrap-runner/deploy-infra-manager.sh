@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 [[ $EUID -eq 0 ]] || { echo "ОШИБКА: сценарий должен выполняться от root внутри LXC 990" >&2; exit 1; }
 
-PHASE="${1:-}"
+STEP="${1:-}"
 INFRA_VMID="${2:-}"
 REPO_ROOT="${3:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 RUN_RUNTIME="$REPO_ROOT/scripts/bootstrap-runner/run-runtime.sh"
@@ -21,7 +21,7 @@ EXPECTED_TARGET="proxmox_virtual_environment_container.guest[\"${INFRA_VMID}\"]"
     exit 1
 }
 
-case "$PHASE" in
+case "$STEP" in
     create)
         bash "$RUN_RUNTIME" python3 scripts/infra-manager/jobs/bootstrap-infra-manager.py create "$INFRA_VMID"
         ;;
@@ -54,7 +54,7 @@ esac
     fi
 
 
-case "$PHASE" in
+case "$STEP" in
     create)
         printf '[ОК] Основа LXC %s infra-manager готова\n' "$INFRA_VMID"
         ;;
