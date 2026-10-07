@@ -23,16 +23,16 @@ EXPECTED_TARGET="proxmox_virtual_environment_container.guest[\"${INFRA_VMID}\"]"
 
 case "$PHASE" in
     infrastructure)
-        bash "$RUN_RUNTIME" python3 scripts/infra-manager/jobs/deploy-guest.py             "$INFRA_VMID" --bootstrap-scope --infrastructure-only
+        bash "$RUN_RUNTIME" python3 scripts/infra-manager/jobs/bootstrap-infra-manager.py infrastructure "$INFRA_VMID"
         ;;
     base)
-        bash "$RUN_RUNTIME" python3 scripts/infra-manager/jobs/deploy-guest.py             "$INFRA_VMID" --bootstrap-scope --provision-base-only
+        bash "$RUN_RUNTIME" python3 scripts/infra-manager/jobs/bootstrap-infra-manager.py base "$INFRA_VMID"
         ;;
     provision)
-        bash "$RUN_RUNTIME" python3 scripts/infra-manager/jobs/deploy-guest.py             "$INFRA_VMID" --bootstrap-scope --provision-only
+        bash "$RUN_RUNTIME" python3 scripts/infra-manager/jobs/bootstrap-infra-manager.py provision "$INFRA_VMID"
         ;;
     existing)
-        bash "$RUN_RUNTIME" python3 scripts/infra-manager/jobs/deploy-guest.py             "$INFRA_VMID" --bootstrap-scope --provision-existing-only
+        bash "$RUN_RUNTIME" python3 scripts/infra-manager/jobs/bootstrap-infra-manager.py existing "$INFRA_VMID"
         ;;
     *)
         echo "Использование: deploy-infra-manager.sh infrastructure|base|provision|existing VMID [REPO_ROOT]" >&2
