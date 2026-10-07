@@ -39,6 +39,22 @@ def _validate_action(operation: str, vmid: int):
     return identity
 
 
+def _homepage_url(identity) -> str:
+    from .portal import local_portal_definition
+
+    portal = local_portal_definition(PATHS.repo_root, identity)
+    if not isinstance(portal, dict):
+        raise InfraManagerError(
+            f"Для гостя {identity.vmid} не настроен локальный Homepage"
+        )
+    url = portal.get("url")
+    if not isinstance(url, str) or not url.startswith("http://"):
+        raise InfraManagerError(
+            f"Для гостя {identity.vmid} не определён адрес локального Homepage"
+        )
+    return url
+
+
 def start_action(operation: str, vmid: int) -> subprocess.Popen[str]:
     """Запустить разрешённую операторскую команду без вывода секретов."""
 
@@ -205,6 +221,7 @@ class PortalActionHandler(BaseHTTPRequestHandler):
 
         label = ACTION_LABELS[operation]
         action = html.escape(self.path, quote=True)
+        homepage_url = html.escape(_homepage_url(identity), quote=True)
         self._send_html(
             HTTPStatus.OK,
             label,
@@ -216,7 +233,7 @@ class PortalActionHandler(BaseHTTPRequestHandler):
                 f'<form method="post" action="{action}">'
                 '<div class="actions"><button class="primary" type="submit">'
                 f"{html.escape(label)}</button>"
-                '<a class="button" href="javascript:history.back()">Отмена</a></div>'
+                f'<a class="button" href="{homepage_url}">Отмена</a></div>'
                 "</form>"
             ),
         )
@@ -250,6 +267,7 @@ class PortalActionHandler(BaseHTTPRequestHandler):
             return
 
         label = ACTION_LABELS[operation]
+        homepage_url = html.escape(_homepage_url(identity), quote=True)
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self._security_headers()
@@ -292,7 +310,7 @@ class PortalActionHandler(BaseHTTPRequestHandler):
             "</pre>"
             f'<p class="{result_class}">{html.escape(result_text)}</p>'
             '<div class="actions">'
-            '<a class="button" href="javascript:history.back()">Назад в Homepage</a>'
+            f'<a class="button" href="{homepage_url}">Назад в Homepage</a>'
             f'<a class="button" href="{html.escape(self.path, quote=True)}">Повторить</a>'
             "</div></div></body></html>"
         ).encode("utf-8")
