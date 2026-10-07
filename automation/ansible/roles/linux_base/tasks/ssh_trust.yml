@@ -1,7 +1,7 @@
 ---
 - name: Проверить открытый ключ центра доступа на управляющей системе
   ansible.builtin.stat:
-    path: /etc/infra-manager/ca/ssh-client-ca.pub
+    path: "{{ infra_ssh_client_ca_file | default('/etc/infra-manager/ca/ssh-client-ca.pub') }}"
   delegate_to: localhost
   become: false
   register: ssh_client_ca_source
@@ -13,7 +13,7 @@
       - ssh_client_ca_source.stat.isreg
     fail_msg: >-
       Не найден открытый ключ центра доступа OpenBao:
-      /etc/infra-manager/ca/ssh-client-ca.pub.
+      {{ infra_ssh_client_ca_file | default('/etc/infra-manager/ca/ssh-client-ca.pub') }}.
       Проверьте infra-manager с PVE командой 'infra-manager status';
       для безопасного исправления используйте 'infra-manager repair'.
   when: (provision_phase | default('full')) == 'full'
@@ -29,7 +29,7 @@
 
 - name: Установить открытый ключ центра доступа
   ansible.builtin.copy:
-    src: /etc/infra-manager/ca/ssh-client-ca.pub
+    src: "{{ infra_ssh_client_ca_file | default('/etc/infra-manager/ca/ssh-client-ca.pub') }}"
     dest: /etc/ssh/trusted-user-ca-keys.pem
     owner: root
     group: root
