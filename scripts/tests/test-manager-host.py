@@ -233,6 +233,7 @@ def test_operator_guest_task_secret_policy() -> None:
                 "410",
             ],
             check=False,
+            stream_output=True,
         )
         if expect_status:
             status.assert_called_once_with(410, show_secrets=True)
