@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import importlib.util
 import sys
 import tempfile
@@ -254,6 +255,72 @@ def test_operator_guest_task_secret_policy() -> None:
     status.assert_not_called()
 
 
+def test_operator_update_uses_existing_checkout() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp) / "repo"
+        root.mkdir()
+        (root / ".git").mkdir()
+        secret_dir = Path(tmp) / "secrets"
+        secret_dir.mkdir()
+        github_key = secret_dir / "github"
+        github_key.write_text("key\n", encoding="utf-8")
+        semaphore_dir = Path(tmp) / "semaphore"
+        semaphore_dir.mkdir()
+        known_hosts = semaphore_dir / "known_hosts"
+        known_hosts.write_text("github.test key\n", encoding="utf-8")
+
+        paths = SimpleNamespace(
+            repo_root=root,
+            github_key=github_key,
+            semaphore_dir=semaphore_dir,
+        )
+        calls: list[tuple[list[str], dict[str, object]]] = []
+
+        def fake_run(argv: list[str], **kwargs: object):
+            calls.append((argv, kwargs))
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        with (
+            patch.object(operator, "PATHS", paths),
+            patch.object(
+                operator.SETTINGS,
+                "project_branch",
+                return_value="feature/test",
+            ),
+            patch.object(operator, "run", side_effect=fake_run),
+            patch.object(
+                operator,
+                "project_checkout_lock",
+                return_value=contextlib.nullcontext(),
+            ) as checkout_lock,
+            patch.object(
+                operator,
+                "project_revision",
+                return_value="abc1234",
+            ),
+        ):
+            assert operator.operator_update() == 0
+
+    checkout_lock.assert_called_once_with(exclusive=True)
+    assert [call[0] for call in calls] == [
+        [
+            "git",
+            "-C",
+            str(root),
+            "fetch",
+            "--depth",
+            "1",
+            "origin",
+            "feature/test",
+        ],
+        ["git", "-C", str(root), "reset", "--hard", "FETCH_HEAD"],
+        ["git", "-C", str(root), "clean", "-ffdx"],
+    ]
+    environment = calls[0][1]["env"]
+    assert str(github_key) in environment["GIT_SSH_COMMAND"]
+    assert str(known_hosts) in environment["GIT_SSH_COMMAND"]
+
+
 def test_operator_status_secret_policy() -> None:
     import infra_manager.status as status_module
 
@@ -333,6 +400,7 @@ def test_public_command_contract() -> None:
     parser = operator.build_parser()
     for argv in (
         ["guests"],
+        ["update"],
         ["status"],
         ["status", "410"],
         ["deploy", "410"],
@@ -353,6 +421,7 @@ def main() -> None:
     test_host_recover_uses_only_recovery_helper()
     test_host_wrapper_is_minimal()
     test_operator_guest_task_secret_policy()
+    test_operator_update_uses_existing_checkout()
     test_operator_status_secret_policy()
     test_operator_prefers_explicit_pve_node()
     test_operator_repair_runs_inside_manager()
