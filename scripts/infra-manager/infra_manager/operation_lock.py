@@ -53,7 +53,8 @@ def project_checkout_lock(*, exclusive: bool) -> Iterator[None]:
 
     path = PATHS.data_dir / "locks" / "project.lock"
     path.parent.mkdir(parents=True, exist_ok=True)
-    descriptor = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
+    descriptor = os.open(path, os.O_RDWR | os.O_CREAT, 0o660)
+    os.fchmod(descriptor, 0o660)
     mode = fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH
     try:
         try:
@@ -82,7 +83,8 @@ def guest_operation_lock(
     path = _lock_path(vmid, lock_dir)
     path.parent.mkdir(parents=True, exist_ok=True)
 
-    descriptor = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
+    descriptor = os.open(path, os.O_RDWR | os.O_CREAT, 0o660)
+    os.fchmod(descriptor, 0o660)
     try:
         try:
             fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
