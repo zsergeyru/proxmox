@@ -14,8 +14,31 @@ from .common import InfraManagerError
 from .settings import PATHS
 
 
+RUNTIME_SEMAPHORE_DIR = Path("/var/lib/semaphore")
+
+
+def _lock_root() -> Path:
+    """Выбрать общий каталог блокировок с безопасным первым переходом."""
+
+    explicit = os.environ.get("INFRA_MANAGER_LOCK_DIR", "").strip()
+    if explicit:
+        return Path(explicit)
+
+    canonical = PATHS.data_dir / "locks"
+    if canonical.is_dir() and os.access(canonical, os.W_OK):
+        return canonical
+
+    if RUNTIME_SEMAPHORE_DIR.is_dir() and os.access(
+        RUNTIME_SEMAPHORE_DIR,
+        os.W_OK,
+    ):
+        return RUNTIME_SEMAPHORE_DIR / ".infra-manager-operation-locks"
+
+    return canonical
+
+
 def _lock_path(vmid: int, lock_dir: Path | None = None) -> Path:
-    root = lock_dir if lock_dir is not None else PATHS.data_dir / "locks"
+    root = lock_dir if lock_dir is not None else _lock_root()
     return root / f"{vmid}.lock"
 
 
@@ -51,7 +74,7 @@ def _read_lock_owner(descriptor: int) -> str:
 def project_checkout_lock(*, exclusive: bool) -> Iterator[None]:
     """Защитить общую рабочую копию проекта от одновременного изменения."""
 
-    path = PATHS.data_dir / "locks" / "project.lock"
+    path = _lock_root() / "project.lock"
     path.parent.mkdir(parents=True, exist_ok=True)
     descriptor = os.open(path, os.O_RDWR | os.O_CREAT, 0o660)
     try:
