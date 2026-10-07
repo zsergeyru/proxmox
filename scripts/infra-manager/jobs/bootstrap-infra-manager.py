@@ -16,7 +16,10 @@ from infra_manager.common import (
     console,
     require_runtime_activation_idle,
 )
-from infra_manager.guest_deploy import run_bootstrap_infra_manager_step
+from infra_manager.guest_deploy import (
+    BOOTSTRAP_INFRA_MANAGER_PHASES,
+    run_bootstrap_infra_manager_step,
+)
 
 
 def main() -> int:
@@ -25,14 +28,7 @@ def main() -> int:
     )
     parser.add_argument(
         "step",
-        choices=(
-            "create",
-            "configure-base",
-            "configure-control-plane",
-            "configure-recovery-control-plane",
-            "configure-ssh-trust",
-            "configure",
-        ),
+        choices=tuple(BOOTSTRAP_INFRA_MANAGER_PHASES),
     )
     parser.add_argument("vmid", type=int)
     args = parser.parse_args()
