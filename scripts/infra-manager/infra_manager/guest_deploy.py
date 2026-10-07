@@ -1171,22 +1171,28 @@ def run_deploy_guest(repo_root: Path, vmid: int) -> int:
     )
 
 
-def run_bootstrap_infra_manager_phase(
+def run_bootstrap_infra_manager_step(
     repo_root: Path,
     vmid: int,
     *,
-    phase: str,
+    step: str,
 ) -> int:
-    """Выполнить технический шаг первоначального контура infra-manager."""
+    """Выполнить внутренний линейный шаг bootstrap infra-manager."""
 
     identity = guest_identity(repo_root, vmid)
     if identity.role != SETTINGS.infra_manager_role:
         raise InfraManagerError(
             f"Гость {vmid} не имеет роль {SETTINGS.infra_manager_role!r}"
         )
-    if phase not in {"infrastructure", "provision-base", "provision"}:
+    phases = {
+        "create": "infrastructure",
+        "configure-base": "provision-base",
+        "configure": "provision",
+    }
+    phase = phases.get(step)
+    if phase is None:
         raise InfraManagerError(
-            f"Недопустимый bootstrap-шаг infra-manager: {phase}"
+            f"Недопустимый bootstrap-шаг infra-manager: {step}"
         )
     return _run_deploy_guest(
         repo_root,
