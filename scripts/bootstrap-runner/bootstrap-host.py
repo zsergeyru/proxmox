@@ -175,10 +175,15 @@ class BootstrapHost(
         )
 
         self.infra_role = INFRA_MANAGER_ROLE
-        self.infra_ctid, self.infra_hostname = _find_role_guest(
-            self.project_dir,
-            self.infra_role,
-        )
+        if self.project_dir.is_dir():
+            self.infra_ctid, self.infra_hostname = _find_role_guest(
+                self.project_dir,
+                self.infra_role,
+            )
+        else:
+            self.infra_ctid, self.infra_hostname = self._find_role_guest_in_runner(
+                self.infra_role,
+            )
         self.infra_project_dir = Path("/var/lib/infra-manager/bootstrap-repo")
         self.infra_access_dir = Path("/mnt/pve-access")
         self.infra_state_dir = Path("/mnt/persistent-state")
@@ -209,6 +214,95 @@ class BootstrapHost(
         self.c_yellow = "\033[33m" if self.color else ""
         self.c_red = "\033[31m" if self.color else ""
         self.c_cyan = "\033[36m" if self.color else ""
+
+    def _find_role_guest_in_runner(self, role: str) -> tuple[int, str]:
+        """Найти гостя по роли в закрытом проекте внутри временного 990."""
+
+        script = r"""
+import json
+import re
+import sys
+from pathlib import Path
+
+project_dir = Path(sys.argv[1])
+role = sys.argv[2]
+guests_dir = project_dir / "infrastructure" / "guests"
+matches = []
+
+for manifest in sorted(guests_dir.glob("*/guest.yaml")):
+    values = {}
+    for raw in manifest.read_text(encoding="utf-8").splitlines():
+        if not raw or raw[0].isspace() or raw.lstrip().startswith("#"):
+            continue
+        key, separator, value = raw.partition(":")
+        if not separator:
+            continue
+        value = value.strip()
+        if (
+            len(value) >= 2
+            and value[0] == value[-1]
+            and value[0] in {"'", '"'}
+        ):
+            value = value[1:-1]
+        values[key.strip()] = value
+
+    if values.get("role") != role:
+        continue
+
+    directory_match = re.fullmatch(r"(\d{3})-(.+)", manifest.parent.name)
+    if directory_match is None:
+        raise SystemExit(f"invalid guest directory: {manifest.parent.name}")
+
+    try:
+        manifest_vmid = int(values.get("vmid", ""))
+    except ValueError as exc:
+        raise SystemExit(f"invalid vmid in {manifest}") from exc
+
+    directory_vmid = int(directory_match.group(1))
+    directory_name = directory_match.group(2)
+    manifest_name = values.get("name", "")
+    if manifest_vmid != directory_vmid or manifest_name != directory_name:
+        raise SystemExit(f"guest identity mismatch: {manifest}")
+
+    matches.append((manifest_vmid, manifest_name))
+
+if len(matches) != 1:
+    raise SystemExit(f"role {role!r} matches {len(matches)} guests")
+
+print(json.dumps({"vmid": matches[0][0], "name": matches[0][1]}))
+""".strip()
+
+        result = self.ct_exec(
+            "python3",
+            "-c",
+            script,
+            str(self.project_dir),
+            role,
+            check=False,
+            capture=True,
+        )
+        if result.returncode:
+            detail = (result.stderr or "").strip()
+            suffix = f": {detail}" if detail else ""
+            self.fail(
+                f"Не удалось найти гостя с ролью {role!r} "
+                f"в закрытом проекте LXC {self.ctid}{suffix}"
+            )
+
+        try:
+            payload = json.loads(result.stdout or "{}")
+        except json.JSONDecodeError as exc:
+            raise BootstrapError(
+                f"LXC {self.ctid} вернул некорректное описание роли {role!r}"
+            ) from exc
+
+        vmid = payload.get("vmid")
+        name = payload.get("name")
+        if not isinstance(vmid, int) or vmid <= 0 or not isinstance(name, str) or not name:
+            self.fail(
+                f"LXC {self.ctid} вернул некорректное описание роли {role!r}"
+            )
+        return vmid, name
 
     def log(self, message: str) -> None:
         print(f"\n{self.c_bold}{self.c_blue}==> {message}{self.c_reset}")
