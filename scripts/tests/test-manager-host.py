@@ -482,6 +482,13 @@ def test_public_command_contract() -> None:
     ):
         parser.parse_args(argv)
 
+    try:
+        parser.parse_args(["update"])
+    except SystemExit:
+        pass
+    else:
+        raise AssertionError("Публичная команда update должна быть удалена")
+
 
 def main() -> None:
     test_host_proxy()
