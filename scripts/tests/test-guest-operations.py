@@ -496,7 +496,23 @@ def check_operation_lock() -> None:
                 if not expected.exists():
                     fail("Host rollout должен использовать общий Semaphore state")
 
-            fallback_host.rmdir()
+        with (
+            patch.object(
+                operation_lock,
+                "PATHS",
+                SimpleNamespace(data_dir=lock_dir / "missing-data"),
+            ),
+            patch.object(
+                operation_lock,
+                "HOST_SEMAPHORE_DIR",
+                lock_dir / "missing-host-semaphore",
+            ),
+            patch.object(
+                operation_lock,
+                "RUNTIME_SEMAPHORE_DIR",
+                fallback_runtime,
+            ),
+        ):
             with operation_lock.guest_operation_lock(420, "deploy"):
                 expected = (
                     fallback_runtime
