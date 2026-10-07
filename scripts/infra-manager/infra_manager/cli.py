@@ -66,6 +66,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     recovery_prepare.set_defaults(handler="recovery-prepare")
 
+    operator_wrapper = subparsers.add_parser(
+        "operator-wrapper-install",
+        help="установить тонкую операторскую оболочку на PVE",
+    )
+    operator_wrapper.add_argument(
+        "--repo-root",
+        type=str,
+        required=True,
+        help="корень рабочей копии проекта",
+    )
+    operator_wrapper.set_defaults(handler="operator-wrapper-install")
+
     recovery_check = subparsers.add_parser(
         "recovery-check",
         help="проверить полный аварийный контур infra-manager",
@@ -158,6 +170,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             from .recovery import prepare_recovery
 
             return prepare_recovery(Path(args.repo_root).resolve())
+
+        if args.handler == "operator-wrapper-install":
+            from pathlib import Path
+
+            from .recovery import install_operator_wrapper
+
+            return install_operator_wrapper(Path(args.repo_root).resolve())
 
         if args.handler == "recovery-check":
             from .recovery import check_recovery
