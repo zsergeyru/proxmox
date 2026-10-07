@@ -256,8 +256,8 @@ def test_bootstrap_steps_enable_progress() -> None:
 
     assert_equal(
         [call.get("progress") for call in host.calls],
-        [False, True, True],
-        "Шаги настройки 990 должны показывать потоковый прогресс",
+        [False, None, True, True],
+        "Create должен сразу очищать state, а Ansible-шаги показывать прогресс",
     )
     if not all(call.get("quiet") is True for call in host.calls):
         raise AssertionError("Подробный вывод должен продолжать сохраняться в журнале")
