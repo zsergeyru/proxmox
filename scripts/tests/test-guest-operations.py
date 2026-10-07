@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import sys
+import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -13,6 +14,7 @@ MODULE_ROOT = ROOT / "scripts" / "infra-manager"
 sys.path.insert(0, str(MODULE_ROOT))
 
 from infra_manager import guest_operations as operations
+from infra_manager import operation_lock
 from infra_manager import semaphore as semaphore_module
 from infra_manager.common import InfraManagerError
 from infra_manager.guest_catalog import deployable_guests, guest_identity
