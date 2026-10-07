@@ -69,7 +69,7 @@ for module in persistence access infra cleanup constants errors; do
         || die "Отсутствует модуль bootstrap_runner/$module.py"
 done
 [[ ! -e "$BOOTSTRAP_DIR/bootstrap-host.sh" ]] || die "Лишняя shell-оболочка bootstrap-host.sh не должна возвращаться"
-[[ -s "$BOOTSTRAP_DIR/deploy-infra-manager.sh" ]] || die "Отсутствует сценарий deploy-infra-manager.sh"
+[[ ! -e "$BOOTSTRAP_DIR/deploy-infra-manager.sh" ]] || die "Отдельная deploy shell-обёртка infra-manager не должна возвращаться"
 [[ ! -e "$BOOTSTRAP_DIR/deploy-910.sh" ]] || die "Сценарий с VMID в имени не должен возвращаться"
 
 grep -q 'run_deploy_guest' "$DEPLOY"     || die "Обычный deploy должен использовать общий run_deploy_guest"
@@ -85,11 +85,10 @@ if grep -R -n -E     'scripts/infra-manager/setup\.sh|python3[[:space:]]+-m[[:sp
     die "990 не должен вызывать отдельный setup для infra-manager"
 fi
 
-grep -q 'bootstrap-infra-manager.py create' "$BOOTSTRAP_DIR/deploy-infra-manager.sh" || die "990 должен иметь внутренний шаг создания 910"
-grep -q 'bootstrap-infra-manager.py configure-base' "$BOOTSTRAP_DIR/deploy-infra-manager.sh" || die "990 должен иметь внутренний базовый шаг 910"
-grep -q 'bootstrap-infra-manager.py configure' "$BOOTSTRAP_DIR/deploy-infra-manager.sh" || die "990 должен иметь внутренний полный шаг 910"
-if grep -q 'bootstrap-infra-manager.py existing' "$BOOTSTRAP_DIR/deploy-infra-manager.sh"; then
-    die "990 не должен обновлять существующий рабочий infra-manager"
+grep -q 'run-runtime.sh' "$BOOTSTRAP_DIR/bootstrap_runner/infra.py" || die "990 должен вызывать runtime напрямую"
+grep -q 'bootstrap-infra-manager.py' "$BOOTSTRAP_DIR/bootstrap_runner/infra.py" || die "990 должен вызывать внутреннюю Python-точку bootstrap"
+if grep -R -q 'runner_owns_infra\|handoff_existing_infra' "$BOOTSTRAP_DIR"; then
+    die "990 не должен владеть существующим 910 через старый bootstrap-state"
 fi
 if grep -R -q 'ensure_runner_ssh_access_to_infra' "$BOOTSTRAP_DIR"; then
     die "990 не должен вручную добавлять отдельный SSH-ключ в authorized_keys 910"
