@@ -1174,6 +1174,7 @@ def main_test() -> None:
         def __init__(self) -> None:
             self.auth_mode = "cookie"
             self.posts: list[tuple[str, dict, str | None]] = []
+            self.task_reads = 0
 
         def token_valid(self) -> bool:
             return True
@@ -1184,6 +1185,9 @@ def main_test() -> None:
             if path == "/project/41/templates?sort=name&order=asc":
                 return [{"id": 25, "name": "Deploy Guest"}]
             if path == "/project/41/tasks/64":
+                self.task_reads += 1
+                if self.task_reads == 1:
+                    raise InfraManagerError("временный перезапуск Semaphore")
                 return {"id": 64, "status": "success"}
             if path == "/project/41/tasks/64/output":
                 return [{"output": "[ОК] deploy без пароля\n"}]
@@ -1207,12 +1211,14 @@ def main_test() -> None:
             "SemaphoreClient",
             return_value=operator_client,
         ),
+        patch.object(semaphore_module.time, "sleep") as sleep,
         contextlib.redirect_stdout(operator_output),
     ):
         task_id = semaphore_module.run_operator_guest_task("deploy", 410)
 
     if task_id != 64:
         fail("PVE bridge получил неверный номер задания Semaphore")
+    sleep.assert_called_once_with(2)
     if len(operator_client.posts) != 1:
         fail("PVE bridge должен создать ровно одно задание Semaphore")
     task_path, task_payload, task_auth = operator_client.posts[0]
