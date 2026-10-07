@@ -55,7 +55,7 @@ class BootstrapInfraMixin:
         self.ct_exec(
             *deploy_args,
             quiet=True,
-            progress=phase in {"base", "provision", "existing"},
+            progress=phase in {"base", "provision"},
         )
         self.ok(success)
 
@@ -339,19 +339,6 @@ class BootstrapInfraMixin:
         self.checkout_infra_project()
         self.verify_infra_handoff()
 
-    def handoff_existing_infra(self) -> None:
-        self.ensure_host_root_ssh_access()
-        self.prepare_infra_pve_root_access()
-        self.prepare_infra_project_access()
-        self.checkout_infra_project()
-        if not (
-            self.infra_test("-s", self.infra_runtime_pve_api_env)
-            or self.infra_test("-s", self.infra_pve_api_env)
-        ):
-            self.fail(
-                f"в существующем {self.infra_ctid} отсутствует рабочий или bootstrap "
-                "PVE API credential"
-            )
 
     def initialize_infra_openbao(self) -> None:
         """Завершить bootstrap переносом runtime secrets в OpenBao."""
