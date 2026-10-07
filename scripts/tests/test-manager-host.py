@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import contextlib
 import importlib.util
+import os
 import sys
 import tempfile
 from pathlib import Path
