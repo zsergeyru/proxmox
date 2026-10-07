@@ -283,9 +283,11 @@ def test_operator_update_uses_existing_checkout() -> None:
         with (
             patch.object(operator, "PATHS", paths),
             patch.object(
-                operator.SETTINGS,
-                "project_branch",
-                return_value="feature/test",
+                operator,
+                "SETTINGS",
+                SimpleNamespace(
+                    project_branch=lambda: "feature/test",
+                ),
             ),
             patch.object(operator, "run", side_effect=fake_run),
             patch.object(
