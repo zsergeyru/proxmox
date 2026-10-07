@@ -98,7 +98,7 @@ class BootstrapInfraMixin:
         self.ok(f"SSH-доверие {self.infra_ctid} подтверждено")
 
     def sync_infra_ssh_ca_to_runner(self) -> None:
-        """Передать публичные SSH CA из восстановленного 910 во временный 990."""
+        """Передать публичные SSH CA из восстановленного управляющего гостя во временный runner."""
 
         self.verify_infra_object()
         runner_ca_dir = Path("/etc/bootstrap-runner/ca")
