@@ -349,6 +349,16 @@ def prepare_recovery_git(node: str) -> None:
     )
 
 
+def preflight_recovery_contour(node: str) -> None:
+    """Проверить минимальную сохранность PVE-only состояния перед repair."""
+
+    _ssh(
+        node,
+        str(RECOVERY_HOST_COMMAND),
+        "--preflight",
+    )
+
+
 def check_recovery_contour(node: str) -> None:
     """Проверить готовность полного аварийного контура на PVE."""
     _ssh(
