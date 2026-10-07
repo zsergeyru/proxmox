@@ -37,11 +37,13 @@ def test_host_proxy() -> None:
 
     with (
         patch.object(host, "manager_vmid", return_value=920),
+        patch.object(host, "verify_manager") as verify,
         patch.object(host, "guest_running", return_value=True),
         patch.object(host, "run", side_effect=fake_run),
     ):
         assert host.proxy_to_manager(["status", "410"]) == 0
 
+    verify.assert_called_once_with(920)
     assert calls == [[
         "pct",
         "exec",
@@ -57,6 +59,7 @@ def test_host_proxy() -> None:
 def test_host_repair_starts_manager() -> None:
     with (
         patch.object(host, "manager_vmid", return_value=920),
+        patch.object(host, "verify_manager") as verify,
         patch.object(host, "start_manager") as start,
         patch.object(
             host,
@@ -66,6 +69,7 @@ def test_host_repair_starts_manager() -> None:
     ):
         assert host.proxy_to_manager(["repair"]) == 0
 
+    verify.assert_called_once_with(920)
     start.assert_called_once_with(920)
     assert run.call_args.args[0][-2:] == ["--trusted-pve", "repair"]
 
@@ -73,6 +77,7 @@ def test_host_repair_starts_manager() -> None:
 def test_host_refuses_stopped_manager_for_regular_commands() -> None:
     with (
         patch.object(host, "manager_vmid", return_value=920),
+        patch.object(host, "verify_manager"),
         patch.object(host, "guest_running", return_value=False),
     ):
         try:
@@ -82,6 +87,32 @@ def test_host_refuses_stopped_manager_for_regular_commands() -> None:
             assert "recover" in str(exc)
         else:
             raise AssertionError("Остановленный manager должен блокировать proxy")
+
+
+def test_host_verifies_manager_ownership() -> None:
+    good = SimpleNamespace(
+        returncode=0,
+        stdout=(
+            "unprivileged: 1\n"
+            "description: [owner=proxmox-project;role=infra-manager]\n"
+        ),
+        stderr="",
+    )
+    with patch.object(host, "run", return_value=good):
+        host.verify_manager(920)
+
+    bad = SimpleNamespace(
+        returncode=0,
+        stdout="unprivileged: 1\ndescription: чужой объект\n",
+        stderr="",
+    )
+    with patch.object(host, "run", return_value=bad):
+        try:
+            host.verify_manager(920)
+        except host.OperatorError as exc:
+            assert "recover" in str(exc)
+        else:
+            raise AssertionError("Чужой VMID нельзя использовать как infra-manager")
 
 
 def test_host_recover_uses_only_recovery_helper() -> None:
@@ -247,6 +278,7 @@ def main() -> None:
     test_host_proxy()
     test_host_repair_starts_manager()
     test_host_refuses_stopped_manager_for_regular_commands()
+    test_host_verifies_manager_ownership()
     test_host_recover_uses_only_recovery_helper()
     test_host_wrapper_is_minimal()
     test_operator_guest_task_secret_policy()
