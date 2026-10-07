@@ -220,14 +220,26 @@ def check_test_operation() -> None:
     }
     client = FakePveClient(resource)
 
-    with patch.object(
-        operations,
-        "verify_guest_status",
-    ) as verify:
+    with (
+        patch.object(
+            operations,
+            "verify_guest_status",
+        ) as verify,
+        patch.object(
+            operations,
+            "project_branch_for_checkout",
+            return_value="feature/test-branch",
+        ),
+    ):
         if operations._run_test(client, ROOT, identity) != 0:
             fail("Test Guest должен завершаться успешно")
 
-    verify.assert_called_once_with(ROOT, identity, resource)
+    verify.assert_called_once_with(
+        ROOT,
+        identity,
+        resource,
+        project_branch="feature/test-branch",
+    )
 
 def check_sync_operation() -> None:
     identity = guest_identity(ROOT, 910)
