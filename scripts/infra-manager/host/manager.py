@@ -225,7 +225,7 @@ def guest_status(vmid: int) -> int:
 
 
 def guest_list() -> int:
-    """Показать каталог гостей через установленный код 910."""
+    """Показать каталог гостей через установленный управляющий код."""
 
     manager_vmid, manager_name = load_identity()
     verify_guest_owned(manager_vmid, manager_name)
