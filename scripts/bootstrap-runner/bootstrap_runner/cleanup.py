@@ -72,13 +72,13 @@ class BootstrapCleanupMixin:
             "rm",
             "-rf",
             "/etc/bootstrap-runner/secrets",
-            "/etc/bootstrap-runner/ansible",
+            "/etc/bootstrap-runner/bootstrap-ssh",
             "/etc/bootstrap-runner/pve-host",
             "/var/lib/bootstrap-runner/opentofu/state",
         )
         for temporary_path in (
             "/etc/bootstrap-runner/secrets",
-            "/etc/bootstrap-runner/ansible",
+            "/etc/bootstrap-runner/bootstrap-ssh",
             "/etc/bootstrap-runner/pve-host",
         ):
             if self.ct_exec("test", "!", "-e", temporary_path, check=False).returncode:
