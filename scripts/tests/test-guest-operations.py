@@ -527,8 +527,10 @@ def check_semaphore_secret_policy() -> None:
         fail("Точка входа операций должна готовить среду без Semaphore API")
     if "PveClient()" not in entrypoint:
         fail("Прямой запуск должен получать PVE credential из локального файла")
-    if "PATHS.ansible_public_key" not in entrypoint:
-        fail("Прямой запуск должен получать открытый Ansible-ключ локально")
+    if "PATHS.ansible_public_key" in entrypoint:
+        fail("Прямой запуск не должен зависеть от постоянного Ansible-ключа")
+    if "TF_VAR_bootstrap_ssh_public_key" in entrypoint:
+        fail("Одноразовый bootstrap key не должен жить в общей среде операций")
 
 
 def main() -> None:
