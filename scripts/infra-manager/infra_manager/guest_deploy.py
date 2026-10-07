@@ -917,7 +917,7 @@ def run_deploy_guest(
         console.result(
             f"{context.vmid} {context.name} обновлён через Ansible; "
             "активация новой управляющей среды назначена "
-            "после завершения задания Semaphore"
+            "после завершения текущей операции"
         )
         return 0
 
