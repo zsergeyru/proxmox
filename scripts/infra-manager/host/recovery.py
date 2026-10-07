@@ -11,6 +11,8 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 PERSISTENT_ROOT = Path("/mnt/bindmounts/infra-manager")
@@ -42,6 +44,10 @@ OPENTOFU_STATE = STATE_DIR / "opentofu" / "state" / "proxmox.tfstate"
 SEMAPHORE_DB = STATE_DIR / "semaphore" / "semaphore.sqlite"
 
 LOCK_PATH = Path("/run/lock/infra-manager-recovery.lock")
+BOOTSTRAP_URL = (
+    "https://raw.githubusercontent.com/"
+    "zsergeyru/proxmox-bootstrap/main/bootstrap-pve.sh"
+)
 
 
 class RecoveryError(RuntimeError):
@@ -298,6 +304,51 @@ def acquire_lock():
     return stream
 
 
+def _download_bootstrap(target: Path) -> None:
+    try:
+        with urllib.request.urlopen(BOOTSTRAP_URL, timeout=30) as response:
+            payload = response.read(1024 * 1024 + 1)
+    except (urllib.error.URLError, OSError) as exc:
+        raise RecoveryError(
+            f"Не удалось получить bootstrap recovery: {exc}"
+        ) from exc
+
+    if not payload or len(payload) > 1024 * 1024:
+        raise RecoveryError("Получен некорректный bootstrap recovery")
+    if not payload.startswith(b"#!"):
+        raise RecoveryError(
+            "Bootstrap recovery не похож на исполняемый сценарий"
+        )
+
+    target.write_bytes(payload)
+    target.chmod(0o700)
+
+
+def run_recovery() -> None:
+    """Запустить полный recovery после локальной проверки PVE-only состояния."""
+
+    with acquire_lock():
+        verify_recovery_state(require_approle=False)
+        restore_git_access()
+
+    print("[ОК] Минимальное recovery-состояние сохранно")
+    print("[ОК] Bootstrap Git-доступ восстановлен из PVE-only recovery")
+
+    with tempfile.TemporaryDirectory(
+        prefix="infra-manager-recover."
+    ) as temporary:
+        bootstrap = Path(temporary) / "bootstrap-pve.sh"
+        _download_bootstrap(bootstrap)
+        result = subprocess.run(
+            ["bash", str(bootstrap), "--recover"],
+            check=False,
+        )
+    if result.returncode:
+        raise RecoveryError(
+            f"Bootstrap recovery завершился с кодом {result.returncode}"
+        )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="PVE-only аварийный контур infra-manager"
@@ -328,6 +379,11 @@ def main() -> int:
         action="store_true",
         help="Удалить проверенные переходные файловые secret-источники",
     )
+    mode.add_argument(
+        "--recover",
+        action="store_true",
+        help="Запустить полный аварийный bootstrap recovery",
+    )
     args = parser.parse_args()
 
     if os.geteuid() != 0:
@@ -335,6 +391,11 @@ def main() -> int:
         return 1
 
     try:
+        if args.recover:
+            run_recovery()
+            print("[ОК] Аварийное восстановление infra-manager завершено")
+            return 0
+
         with acquire_lock():
             if args.prepare:
                 prepare_git_recovery()
