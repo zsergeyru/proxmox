@@ -36,6 +36,22 @@ from .pve_host import (
 from .settings import PATHS, SETTINGS
 
 
+def _bootstrap_scope_private_key() -> Path:
+    """Получить ключ только из закрытого начального контура 990."""
+
+    raw = os.environ.get("INFRA_BOOTSTRAP_SSH_PRIVATE_KEY", "").strip()
+    if not raw:
+        raise InfraManagerError(
+            "Начальный контур не передал INFRA_BOOTSTRAP_SSH_PRIVATE_KEY"
+        )
+    path = Path(raw)
+    if not path.is_absolute() or not path.is_file() or path.stat().st_size == 0:
+        raise InfraManagerError(
+            f"Некорректный bootstrap SSH-ключ начального контура: {path}"
+        )
+    return path
+
+
 def _bootstrap_identity_path(vmid: int) -> Path:
     """Путь одноразовой SSH-идентичности незавершённого нового гостя."""
 
@@ -1023,7 +1039,7 @@ def run_deploy_guest(
         repo_root,
         vmid,
         workspace,
-        private_key=PATHS.ansible_private_key if bootstrap_scope else None,
+        private_key=_bootstrap_scope_private_key() if bootstrap_scope else None,
     )
     bootstrap_private_key: Path | None = None
 
