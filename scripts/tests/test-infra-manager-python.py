@@ -116,12 +116,10 @@ def check_cli_and_commands() -> None:
         ["--help"],
         ["semaphore-project", "--help"],
         ["status", "--help"],
-        ["guest-list", "--help"],
-        ["guest-task", "--help"],
-        ["guest-status", "--help"],
         ["pve-access-check", "--help"],
         ["pve-lifecycle-test", "--help"],
         ["recovery-prepare", "--help"],
+        ["operator-wrapper-install", "--help"],
         ["recovery-check", "--help"],
     )
     for args in cli_help_cases:

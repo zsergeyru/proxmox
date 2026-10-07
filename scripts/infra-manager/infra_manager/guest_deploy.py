@@ -717,6 +717,7 @@ def _configure_guest_os(
             openbao_machine_args=openbao_machine_args,
         )
 
+
 def _validate_existing_guest_object(context: DeploymentContext) -> None:
     """Проверить существующий объект без требования OpenTofu state."""
     resource = context.client.find_vm(context.vmid)

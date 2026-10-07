@@ -10,6 +10,7 @@ ANSIBLE_GUEST_LAYOUT="$ROOT/automation/ansible/roles/guest_layout/tasks/main.yml
 ANSIBLE_DOCKER="$ROOT/automation/ansible/roles/docker/tasks/main.yml"
 ANSIBLE_RUNTIME_DIR="$ROOT/automation/ansible/roles/infra_manager/tasks"
 ANSIBLE_VERIFY="$ANSIBLE_RUNTIME_DIR/verify.yml"
+ANSIBLE_RECOVERY="$ANSIBLE_RUNTIME_DIR/recovery.yml"
 ANSIBLE_RUNTIME_MAIN="$ANSIBLE_RUNTIME_DIR/main.yml"
 BOOTSTRAP_HOST="$ROOT/scripts/bootstrap-runner/bootstrap-host.py"
 BOOTSTRAP_INFRA="$ROOT/scripts/bootstrap-runner/bootstrap_runner/infra.py"
@@ -40,6 +41,7 @@ PY_ACCESS_POLICY="$ROOT/scripts/infra-manager/infra_manager/access.py"
 PY_OPENBAO="$ROOT/scripts/infra-manager/infra_manager/openbao.py"
 PY_GUEST_DEPLOY="$ROOT/scripts/infra-manager/infra_manager/guest_deploy.py"
 PY_RECOVERY="$ROOT/scripts/infra-manager/infra_manager/recovery.py"
+PY_OPERATOR="$ROOT/scripts/infra-manager/infra_manager/operator.py"
 RECOVERY_HOST="$ROOT/scripts/infra-manager/host/recovery.py"
 PVE_OPERATOR="$ROOT/scripts/infra-manager/host/manager.py"
 DOCKERFILE="$ROOT/infrastructure/guests/910-infra-manager/rootfs/opt/infra-manager/compose/runtime/Dockerfile"
@@ -74,6 +76,17 @@ for task_file in "${ANSIBLE_RUNTIME_PARTS[@]}"; do
         || die "main.yml роли infra_manager не подключает $task_file"
 done
 
+runtime_line="$(grep -n 'import_tasks: runtime.yml' "$ANSIBLE_RUNTIME_MAIN" | cut -d: -f1)"
+recovery_line="$(grep -n 'import_tasks: recovery.yml' "$ANSIBLE_RUNTIME_MAIN" | cut -d: -f1)"
+[[ -n "$runtime_line" && -n "$recovery_line" && "$runtime_line" -lt "$recovery_line" ]] \
+    || die "runtime.yml должен выполняться раньше recovery.yml"
+
+recovery_prepare_line="$(grep -n 'recovery-prepare' "$ANSIBLE_RECOVERY" | cut -d: -f1)"
+wrapper_install_line="$(grep -n 'operator-wrapper-install' "$ANSIBLE_RECOVERY" | cut -d: -f1)"
+[[ -n "$recovery_prepare_line" && -n "$wrapper_install_line" \
+    && "$recovery_prepare_line" -lt "$wrapper_install_line" ]] \
+    || die "PVE-оболочка должна устанавливаться после подготовки recovery"
+
 ANSIBLE_RUNTIME="$(mktemp)"
 trap 'rm -f "$ANSIBLE_RUNTIME"' EXIT
 cat "$ANSIBLE_RUNTIME_MAIN" > "$ANSIBLE_RUNTIME"
@@ -81,18 +94,34 @@ for task_file in "${ANSIBLE_RUNTIME_PARTS[@]}"; do
     cat "$ANSIBLE_RUNTIME_DIR/$task_file" >> "$ANSIBLE_RUNTIME"
 done
 [[ -s "$PVE_OPERATOR" ]] \
-    || die "Отсутствует единая операторская команда PVE"
+    || die "Отсутствует минимальная операторская оболочка PVE"
+[[ -s "$PY_OPERATOR" ]] \
+    || die "Отсутствует операторский слой внутри infra-manager"
 for operator_command in guests deploy status sync repair test recover; do
-    grep -Fq "\"$operator_command\"" "$PVE_OPERATOR" \
-        || die "PVE-команда infra-manager не поддерживает $operator_command"
+    grep -Fq "\"$operator_command\"" "$PY_OPERATOR" \
+        || die "Операторский слой 910 не поддерживает $operator_command"
 done
-if grep -Fq '"openbao-operator"' "$PVE_OPERATOR"; then
-    die "openbao-operator не должен быть отдельной операторской командой PVE"
+grep -Fq '"--trusted-pve"' "$PVE_OPERATOR" \
+    || die "PVE-оболочка должна явно передавать доверенный режим"
+grep -Fq '"pct",' "$PVE_OPERATOR" \
+    || die "PVE-оболочка должна использовать pct exec"
+if grep -Fq '"openbao-operator"' "$PVE_OPERATOR" "$PY_OPERATOR"; then
+    die "openbao-operator не должен быть отдельной операторской командой"
 fi
 grep -Fq 'install_openbao_host_support(context.node, repo_root)' "$PY_GUEST_DEPLOY" \
     || die "Deploy Guest должен обновлять PVE OpenBao support до SSH-подписания"
 grep -Fq 'install_recovery_host_support(context.node, repo_root)' "$PY_GUEST_DEPLOY" \
-    || die "Самообновление infra-manager должно обновлять PVE recovery/operator support"
+    || die "Самообновление infra-manager должно заранее обновлять PVE recovery helper"
+if grep -Fq 'install_operator_host_support' "$PY_GUEST_DEPLOY"; then
+    die "guest_deploy не должен устанавливать тонкую PVE-оболочку напрямую"
+fi
+if grep -Fq 'install_operator_host_support' "$PY_OPENBAO"; then
+    die "Инициализация OpenBao не должна устанавливать PVE-оболочку"
+fi
+grep -Fq 'operator-wrapper-install' "$ANSIBLE_RECOVERY" \
+    || die "PVE-оболочка должна устанавливаться отдельным Ansible-шагом"
+grep -Fq 'install_operator_wrapper' "$PY_RECOVERY" \
+    || die "Внутренний recovery-модуль должен иметь единую установку PVE-оболочки"
 grep -Fq 'OPENBAO_HOST_LIBRARY = Path("/usr/local/lib/infra-manager/openbao_host")' "$PY_PVE_HOST" \
     || die "PVE OpenBao helper должен устанавливать отдельный пакет openbao_host"
 grep -Fq '_install_remote_text_tree(' "$PY_PVE_HOST" \

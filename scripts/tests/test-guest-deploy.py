@@ -1074,8 +1074,13 @@ def check_pve_host_support_before_signing() -> None:
             "sign-client",
         ]:
             fail(
-                "PVE helper должен обновляться полностью до первого "
+                "OpenBao и recovery helper должны обновляться до первого "
                 f"SSH-подписания: {calls!r}"
+            )
+        if calls[-1:] != ["ansible"]:
+            fail(
+                "guest_deploy не должен отдельно устанавливать PVE-оболочку: "
+                f"{calls!r}"
             )
 
 

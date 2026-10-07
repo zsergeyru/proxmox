@@ -40,6 +40,7 @@ SSH_ACCESS_ACCEPTANCE="$ROOT/scripts/acceptance/verify-ssh-access.py"
 PY_ACCESS_POLICY="$ROOT/scripts/infra-manager/infra_manager/access.py"
 PY_OPENBAO="$ROOT/scripts/infra-manager/infra_manager/openbao.py"
 PY_RECOVERY="$ROOT/scripts/infra-manager/infra_manager/recovery.py"
+PY_OPERATOR="$ROOT/scripts/infra-manager/infra_manager/operator.py"
 RECOVERY_HOST="$ROOT/scripts/infra-manager/host/recovery.py"
 PVE_OPERATOR="$ROOT/scripts/infra-manager/host/manager.py"
 DOCKERFILE="$ROOT/infrastructure/guests/910-infra-manager/rootfs/opt/infra-manager/compose/runtime/Dockerfile"
@@ -120,13 +121,34 @@ grep -Fq 'RECOVERY_GITHUB_KEY = RECOVERY_DIR / "github_proxmox_repo_ed25519"' "$
 grep -Fq -- '--restore-git-access' "$RECOVERY_HOST" \
     || die "PVE recovery helper должен уметь восстанавливать bootstrap Git-доступ"
 [[ -s "$PVE_OPERATOR" ]] \
-    || die "PVE должен иметь единую операторскую команду infra-manager"
-grep -Fq 'recovery_check("--preflight")' "$PVE_OPERATOR" \
-    || die "repair/recover должны начинаться с проверки постоянного состояния"
-grep -Fq 'verify_guest_owned(vmid, name)' "$PVE_OPERATOR" \
-    || die "repair должен проверять строгую принадлежность объекта infra-manager"
-grep -Fq 'run(["bash", str(bootstrap), "--recover"])' "$PVE_OPERATOR" \
-    || die "recover должен использовать защищённый bootstrap recovery"
+    || die "PVE должен иметь минимальную оболочку infra-manager"
+[[ -s "$PY_OPERATOR" ]] \
+    || die "Операторская логика должна находиться внутри infra-manager"
+grep -Fq '"pct",' "$PVE_OPERATOR" \
+    || die "PVE-оболочка должна передавать команды через pct exec"
+grep -Fq '"--trusted-pve"' "$PVE_OPERATOR" \
+    || die "PVE-оболочка должна явно отмечать доверенный терминальный вызов"
+grep -Fq 'verify_manager(vmid, name)' "$PVE_OPERATOR" \
+    || die "PVE-оболочка должна проверять VMID и имя управляющего LXC"
+grep -Fq 'f"hostname: {name}"' "$PVE_OPERATOR" \
+    || die "PVE-оболочка должна подтверждать hostname управляющего LXC"
+grep -Fq 'RECOVERY_COMMAND' "$PVE_OPERATOR" \
+    || die "PVE-оболочка должна отдельно передавать recover аварийному helper"
+if grep -Eq 'docker|Semaphore|OPENBAO_COMMAND|ACTIVATE_RUNTIME|BOOTSTRAP_URL' "$PVE_OPERATOR"; then
+    die "PVE-оболочка не должна содержать рабочую логику infra-manager"
+fi
+grep -Fq 'def operator_repair(' "$PY_OPERATOR" \
+    || die "Обычный repair управляющего контура должен выполняться внутри 910"
+grep -Fq 'repair_openbao_on_host(node)' "$PY_OPERATOR" \
+    || die "Repair внутри 910 должен использовать минимальный PVE-only OpenBao helper"
+grep -Fq 'ACTIVATE_RUNTIME' "$PY_OPERATOR" \
+    || die "Repair внутри 910 должен активировать управляющую среду"
+grep -Fq 'verify_recovery_state(require_approle=False)' "$RECOVERY_HOST" \
+    || die "Recover должен начинаться с проверки PVE-only состояния"
+grep -Fq 'restore_git_access()' "$RECOVERY_HOST" \
+    || die "Recover должен восстанавливать bootstrap Git-доступ из PVE-only"
+grep -Fq '["bash", str(bootstrap), "--recover"]' "$RECOVERY_HOST" \
+    || die "PVE recovery helper должен запускать защищённый bootstrap recovery"
 grep -Fq 'check_recovery_contour(node)' "$PY_OPENBAO" \
     || die "Внутренняя инициализация OpenBao должна завершаться полной recovery-проверкой"
 grep -Fq 'cleanup_transition_state(node)' "$PY_OPENBAO" \

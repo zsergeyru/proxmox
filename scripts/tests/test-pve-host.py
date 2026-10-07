@@ -13,6 +13,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts" / "infra-manager"))
 
 module = importlib.import_module("infra_manager.pve_host")
+recovery_module = importlib.import_module("infra_manager.recovery")
 
 
 def test_feature_parser() -> None:
@@ -349,40 +350,6 @@ def test_openbao_status_checks() -> None:
     assert "Password: test-password" in output
 
 
-def test_operator_status() -> None:
-    calls: list[tuple[tuple[str, ...], bool]] = []
-
-    def record_ssh(
-        node: str,
-        *command_args: str,
-        capture: bool = False,
-    ):
-        assert node == "pve"
-        calls.append((tuple(command_args), capture))
-        return SimpleNamespace(
-            returncode=0,
-            stdout="[ОК] infra-manager полностью готов\n",
-        )
-
-    with (
-        patch.object(module, "_ssh", side_effect=record_ssh),
-        patch("builtins.print") as mocked_print,
-    ):
-        module.check_infra_manager_status("pve")
-
-    assert calls == [
-        (
-            ("/usr/local/sbin/infra-manager", "status"),
-            True,
-        ),
-    ]
-    output = "\n".join(
-        str(call.args[0]) if call.args else ""
-        for call in mocked_print.call_args_list
-    )
-    assert "[ОК] infra-manager полностью готов" in output
-
-
 def test_recovery_host_support() -> None:
     installs: list[tuple[str, str, str]] = []
     calls: list[tuple[str, ...]] = []
@@ -419,7 +386,9 @@ def test_recovery_host_support() -> None:
             patch.object(module, "_ssh", side_effect=record_ssh),
         ):
             module.install_recovery_host_support("pve", root)
+            module.install_operator_host_support("pve", root)
             module.prepare_recovery_git("pve")
+            module.preflight_recovery_contour("pve")
             module.check_recovery_contour("pve")
             module.cleanup_transition_state("pve")
 
@@ -437,9 +406,44 @@ def test_recovery_host_support() -> None:
     ]
     assert calls == [
         ("/usr/local/sbin/infra-manager-recovery", "--prepare"),
+        ("/usr/local/sbin/infra-manager-recovery", "--preflight"),
         ("/usr/local/sbin/infra-manager-recovery", "--check"),
         ("/usr/local/sbin/infra-manager-recovery", "--cleanup-transition"),
     ]
+
+
+def test_operator_wrapper_install_guard() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        missing = root / "infra-manager"
+        with patch.object(recovery_module, "OPERATOR_COMMAND", missing):
+            try:
+                recovery_module.install_operator_wrapper(ROOT)
+            except recovery_module.InfraManagerError as exc:
+                assert "ещё не готова" in str(exc)
+            else:
+                raise AssertionError(
+                    "PVE-оболочка не должна устанавливаться до operator command"
+                )
+
+        command = root / "infra-manager"
+        command.write_text("#!/bin/sh\n", encoding="utf-8")
+        command.chmod(0o700)
+        with (
+            patch.object(recovery_module, "OPERATOR_COMMAND", command),
+            patch.object(
+                recovery_module,
+                "pve_node_from_environment",
+                return_value="pve",
+            ),
+            patch.object(
+                recovery_module,
+                "install_operator_host_support",
+            ) as install,
+        ):
+            assert recovery_module.install_operator_wrapper(ROOT) == 0
+
+        install.assert_called_once_with("pve", ROOT)
 
 
 def test_sign_ssh_client_key() -> None:
@@ -587,8 +591,8 @@ def main() -> None:
     test_infra_self_access()
     test_openbao_host_support()
     test_openbao_status_checks()
-    test_operator_status()
     test_recovery_host_support()
+    test_operator_wrapper_install_guard()
     test_sign_ssh_client_key()
     test_issue_openbao_machine_credentials()
     test_read_pve_json_value()

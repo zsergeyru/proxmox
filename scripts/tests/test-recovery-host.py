@@ -273,6 +273,36 @@ def test_cleanup_rejects_divergent_legacy_git_key() -> None:
         assert module.LEGACY_ACCESS_GITHUB_KEY.is_file()
 
 
+def test_run_recovery_owns_bootstrap() -> None:
+    module = load_module()
+    with tempfile.TemporaryDirectory() as tmp:
+        configure_paths(module, Path(tmp))
+        prepare_complete_state(module)
+
+        commands: list[list[str]] = []
+
+        def fake_download(target: Path) -> None:
+            target.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+
+        def fake_run(argv: list[str], **kwargs: object):
+            del kwargs
+            commands.append(argv)
+            return type("Result", (), {"returncode": 0})()
+
+        with (
+            patch.object(module, "managed_guests_exist", return_value=False),
+            patch.object(module.os, "chown", lambda *_args: None),
+            patch.object(module, "_download_bootstrap", side_effect=fake_download),
+            patch.object(module.subprocess, "run", side_effect=fake_run),
+        ):
+            module.run_recovery()
+
+        assert module.BOOTSTRAP_GITHUB_KEY.read_text() == "git-key\n"
+        assert len(commands) == 1
+        assert commands[0][0] == "bash"
+        assert commands[0][-1] == "--recover"
+
+
 def main() -> None:
     tests = (
         test_prepare_git_recovery,
@@ -285,6 +315,7 @@ def main() -> None:
         test_opentofu_state_required_only_for_managed_guests,
         test_cleanup_transition_state,
         test_cleanup_rejects_divergent_legacy_git_key,
+        test_run_recovery_owns_bootstrap,
     )
     for test in tests:
         test()
