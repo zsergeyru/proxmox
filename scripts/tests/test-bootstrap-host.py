@@ -472,6 +472,41 @@ def test_recovery_rootfs_removal_is_strict() -> None:
         raise AssertionError("До проверки владения разрушительные команды запрещены")
 
 
+class ControlPlaneHarness(BootstrapHost):
+    def __init__(self, mode: str) -> None:
+        super().__init__(mode)
+        self.steps: list[str] = []
+
+    def log(self, message: str) -> None:
+        del message
+
+    def ok(self, message: str) -> None:
+        del message
+
+    def _run_infra_bootstrap_step(self, step: str, *, progress: bool) -> None:
+        if not progress:
+            raise AssertionError("Управляющий этап должен показывать прогресс")
+        self.steps.append(step)
+
+
+def test_control_plane_step_depends_on_bootstrap_mode() -> None:
+    fresh = ControlPlaneHarness("apply")
+    fresh.configure_infra_manager_control_plane()
+    assert_equal(
+        fresh.steps,
+        ["configure-control-plane"],
+        "Новая установка должна подготовить первичные секреты до OpenBao",
+    )
+
+    recovery = ControlPlaneHarness("recover")
+    recovery.configure_infra_manager_control_plane()
+    assert_equal(
+        recovery.steps,
+        ["configure-recovery-control-plane"],
+        "Recovery не должен запускать Semaphore до восстановления OpenBao",
+    )
+
+
 class ApplyHarness(BootstrapHost):
     def __init__(
         self,
@@ -891,6 +926,7 @@ def main() -> None:
         test_attach_persistent_layout_temporarily_disables_protection,
         test_attach_persistent_layout_restores_protection_on_failure,
         test_recovery_rootfs_removal_is_strict,
+        test_control_plane_step_depends_on_bootstrap_mode,
         test_new_install_flow,
         test_existing_infra_requires_normal_operations,
         test_recovery_recreates_existing_infra,
