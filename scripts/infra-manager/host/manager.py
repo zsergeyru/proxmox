@@ -364,7 +364,7 @@ def recover() -> int:
         run(["bash", str(bootstrap), "--recover"])
 
     print("==> Итоговая проверка")
-    return status()
+    return manager_status()
 
 
 def acquire_operator_lock():
