@@ -185,12 +185,12 @@ def test_host_wrapper_is_minimal() -> None:
 
 def test_operator_guest_task_secret_policy() -> None:
     with (
-        patch.object(operator, "run_operator_guest_task") as task,
         patch.object(
             operator,
-            "operator_guest_status",
+            "run_guest_operation",
             return_value=0,
-        ) as status,
+        ) as task,
+        patch.object(operator, "operator_guest_status") as status,
     ):
         assert operator.operator_guest_task(
             "deploy",
@@ -198,11 +198,46 @@ def test_operator_guest_task_secret_policy() -> None:
             show_secrets=True,
         ) == 0
 
-    task.assert_called_once_with("deploy", 410)
+    task.assert_called_once_with(
+        operator.PATHS.repo_root,
+        "deploy",
+        410,
+        show_secrets=True,
+    )
+    status.assert_not_called()
+
+    with (
+        patch.object(
+            operator,
+            "run_guest_operation",
+            return_value=0,
+        ) as task,
+        patch.object(
+            operator,
+            "operator_guest_status",
+            return_value=0,
+        ) as status,
+    ):
+        assert operator.operator_guest_task(
+            "sync",
+            410,
+            show_secrets=True,
+        ) == 0
+
+    task.assert_called_once_with(
+        operator.PATHS.repo_root,
+        "sync",
+        410,
+        show_secrets=True,
+    )
     status.assert_called_once_with(410, show_secrets=True)
 
     with (
-        patch.object(operator, "run_operator_guest_task") as task,
+        patch.object(
+            operator,
+            "run_guest_operation",
+            return_value=0,
+        ) as task,
         patch.object(operator, "operator_guest_status") as status,
     ):
         assert operator.operator_guest_task(
@@ -210,7 +245,12 @@ def test_operator_guest_task_secret_policy() -> None:
             410,
             show_secrets=True,
         ) == 0
-    task.assert_called_once_with("test", 410)
+    task.assert_called_once_with(
+        operator.PATHS.repo_root,
+        "test",
+        410,
+        show_secrets=True,
+    )
     status.assert_not_called()
 
 
