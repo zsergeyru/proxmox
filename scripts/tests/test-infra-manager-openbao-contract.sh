@@ -99,7 +99,11 @@ fi
 grep -Fq 'install_openbao_host_support(context.node, repo_root)' "$PY_GUEST_DEPLOY" \
     || die "Deploy Guest должен обновлять PVE OpenBao support до SSH-подписания"
 grep -Fq 'install_recovery_host_support(context.node, repo_root)' "$PY_GUEST_DEPLOY" \
-    || die "Самообновление infra-manager должно обновлять PVE recovery/operator support"
+    || die "Самообновление infra-manager должно заранее обновлять PVE recovery helper"
+grep -Fq 'install_operator_host_support(context.node, repo_root)' "$PY_GUEST_DEPLOY" \
+    || die "Самообновление infra-manager должно отдельно обновлять тонкую PVE-оболочку"
+grep -Fq '_install_operator_wrapper_after_self_update(' "$PY_GUEST_DEPLOY" \
+    || die "PVE-оболочка должна обновляться после успешной настройки 910"
 grep -Fq 'OPENBAO_HOST_LIBRARY = Path("/usr/local/lib/infra-manager/openbao_host")' "$PY_PVE_HOST" \
     || die "PVE OpenBao helper должен устанавливать отдельный пакет openbao_host"
 grep -Fq '_install_remote_text_tree(' "$PY_PVE_HOST" \
