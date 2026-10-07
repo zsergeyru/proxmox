@@ -55,7 +55,6 @@ ok()  { printf '[ОК] %s\n' "$*"; }
 ANSIBLE_RUNTIME_PARTS=(
     persistence.yml
     pve_access.yml
-    ansible_access.yml
     repository.yml
     semaphore.yml
     runtime.yml
