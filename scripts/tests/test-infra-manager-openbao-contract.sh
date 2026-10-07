@@ -381,8 +381,9 @@ for target, markers in targets.items():
 PY
 grep -Fq '/usr/local/sbin/infra-manager-openbao-unseal' "$ANSIBLE_RUNTIME" \
     || die "Повторная настройка должна сначала восстанавливать секреты из OpenBao"
-grep -q 'infra-manager ansible self' "$ANSIBLE_RUNTIME" \
-    || die "910 должен сохранять управляемый блок собственного Ansible-ключа"
+if grep -q 'infra-manager ansible self' "$ANSIBLE_RUNTIME"; then
+    die "Постоянный self SSH-key 910 запрещён"
+fi
 grep -q 'systemd-run' "$ANSIBLE_PLAYBOOK" \
     || die "Общий playbook должен передавать активацию внешней systemd-службе"
 grep -Fq '"INFRA_PVE_NODE={{ infra_pve_node }}"' "$ANSIBLE_PLAYBOOK" \
