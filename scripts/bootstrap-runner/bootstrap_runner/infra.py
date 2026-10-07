@@ -85,8 +85,75 @@ class BootstrapInfraMixin:
         self._run_infra_bootstrap_step("configure-base", progress=True)
         self.ok(f"Базовая настройка {self.infra_ctid} завершена")
 
+    def configure_infra_manager_control_plane(self) -> None:
+        """Поднять минимальный управляющий контур для запуска OpenBao."""
+        self.log(f"Запуск управляющего контура LXC {self.infra_ctid} через Ansible")
+        self._run_infra_bootstrap_step("configure-control-plane", progress=True)
+        self.ok(f"Управляющий контур {self.infra_ctid} запущен")
+
+    def configure_infra_manager_ssh_trust(self) -> None:
+        """Установить SSH CA и подтвердить вход по временному сертификату."""
+        self.log(f"Переход LXC {self.infra_ctid} на SSH-сертификаты OpenBao")
+        self._run_infra_bootstrap_step("configure-ssh-trust", progress=True)
+        self.ok(f"SSH-доверие {self.infra_ctid} подтверждено")
+
+    def sync_infra_ssh_ca_to_runner(self) -> None:
+        """Передать публичные SSH CA из восстановленного 910 во временный 990."""
+
+        self.verify_infra_object()
+        runner_ca_dir = Path("/etc/bootstrap-runner/ca")
+        self.ct_exec("install", "-d", "-m", "0755", str(runner_ca_dir))
+
+        for name in ("ssh-client-ca.pub", "ssh-host-ca.pub"):
+            source = Path("/etc/infra-manager/ca") / name
+            result = self.infra_exec(
+                "cat",
+                str(source),
+                capture=True,
+                check=False,
+            )
+            value = result.stdout.strip() if result.returncode == 0 else ""
+            if not value.startswith(("ssh-", "ecdsa-", "sk-")):
+                self.fail(
+                    f"{self.infra_ctid} не опубликовал корректный SSH CA: {source}"
+                )
+
+            fd, temporary_name = tempfile.mkstemp(
+                prefix=f"bootstrap-runner-{name}.",
+                dir="/run",
+            )
+            os.close(fd)
+            temporary = Path(temporary_name)
+            try:
+                temporary.write_text(value + "\n", encoding="utf-8")
+                temporary.chmod(0o644)
+                self.pct(
+                    "push",
+                    str(self.ctid),
+                    str(temporary),
+                    str(runner_ca_dir / name),
+                    "--user",
+                    "0",
+                    "--group",
+                    "0",
+                    "--perms",
+                    "0644",
+                )
+            finally:
+                temporary.unlink(missing_ok=True)
+
+            if self.ct_exec(
+                "test",
+                "-s",
+                str(runner_ca_dir / name),
+                check=False,
+            ).returncode:
+                self.fail(f"LXC {self.ctid} не получил {name}")
+
+        self.ok("Публичные SSH CA OpenBao переданы временному 990")
+
     def configure_infra_manager(self) -> None:
-        """Полностью применить декларацию infra-manager."""
+        """Полностью применить декларацию infra-manager только по SSH-сертификату."""
         self.log(f"Полная настройка LXC {self.infra_ctid} через Ansible")
         self._run_infra_bootstrap_step("configure", progress=True)
         self.ok(f"Полная настройка {self.infra_ctid} завершена")
