@@ -37,15 +37,6 @@ GUEST_OPERATIONS: Final[tuple[str, ...]] = (
     "sync",
 )
 
-GUEST_OPERATION_TEMPLATES: Final[dict[str, str]] = {
-    "deploy": "Deploy Guest",
-    "status": "Status Guest",
-    "repair": "Repair Guest",
-    "test": "Test Guest",
-    "sync": "Sync Guest",
-}
-
-
 def extract_survey_vmid(argv: list[str]) -> tuple[list[str], int | None]:
     """Извлечь GUEST_VMID, который Semaphore передаёт как survey-переменную."""
 
