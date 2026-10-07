@@ -456,16 +456,20 @@ class BootstrapHost(
         if existed:
             owns_infra = self.runner_owns_infra()
             if owns_infra:
-                # Это не миграция старого infra-manager, а продолжение оборванного
-                # первоначального создания. Если сбой произошёл между OpenTofu
-                # create и attach, подключаем уже подготовленные области.
+                # Это продолжение оборванного bootstrap-сеанса.
                 if self.persistent_layout_attached():
                     self.verify_persistent_layout()
                 else:
                     self.attach_persistent_layout()
+            elif self.mode == "recover":
+                # Полный recovery сохраняет PVE-only/access/state, но всегда
+                # создаёт воспроизводимый rootfs управляющего гостя заново.
+                self.verify_persistent_layout()
+                self.remove_infra_rootfs_for_recovery()
+                existed = False
+                owns_infra = False
             else:
-                # Готовый infra-manager без новой схемы автоматически не мигрируется.
-                # Проверка выполняется до подготовки runner и иных изменений.
+                # Обычный bootstrap не вмешивается в рабочий infra-manager.
                 self.verify_persistent_layout()
         else:
             self.prepare_new_persistent_layout()
