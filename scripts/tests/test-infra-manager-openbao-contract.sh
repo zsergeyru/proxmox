@@ -241,8 +241,8 @@ grep -Fq 'infra-openbao-ssh' "$SSH_ACCESS_ACCEPTANCE" \
     || die "PVE не должен содержать периодический timer OpenBao"
 grep -q 'install_openbao_host_support' "$PY_OPENBAO" \
     || die "Задание OpenBao должно устанавливать хостовый сценарий"
-grep -q 'initialize_openbao_on_host' "$PY_OPENBAO" \
-    || die "Задание OpenBao должно выполнять первичную инициализацию через PVE"
+grep -q 'repair_openbao_on_host' "$PY_OPENBAO" \
+    || die "Задание OpenBao должно идемпотентно готовить или восстанавливать OpenBao через PVE"
 if grep -q 'infra-manager@pve' "$ANSIBLE_PLAYBOOK" "$ANSIBLE_LINUX_BASE" "$ANSIBLE_GUEST_LAYOUT" "$ANSIBLE_DOCKER" "$ANSIBLE_RUNTIME" "$PY_SEMAPHORE" "$PY_STATUS" "$PY_PVE"; then
     die "Старая PVE-идентичность не должна присутствовать в чистой схеме"
 fi
