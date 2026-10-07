@@ -55,7 +55,6 @@ ok()  { printf '[ОК] %s\n' "$*"; }
 ANSIBLE_RUNTIME_PARTS=(
     persistence.yml
     pve_access.yml
-    ansible_access.yml
     repository.yml
     semaphore.yml
     runtime.yml
@@ -151,8 +150,10 @@ grep -q '"-lockfile=readonly"' "$PY_OPENTOFU" \
 if grep -Eq '^[[:space:]]+keyctl[[:space:]]*=' "$ROOT/automation/opentofu/main.tf"; then
     die "OpenTofu не должен передавать keyctl через PVE API token"
 fi
-grep -Fq 'ignore_changes = [features[0].keyctl]' "$ROOT/automation/opentofu/main.tf" \
+grep -Fq 'features[0].keyctl,' "$ROOT/automation/opentofu/main.tf" \
     || die "OpenTofu должен игнорировать keyctl, которым управляет host-only слой"
+grep -Fq 'initialization[0].user_account[0].keys,' "$ROOT/automation/opentofu/main.tf" \
+    || die "OpenTofu не должен менять bootstrap SSH key существующего гостя"
 
 grep -q 'provider "registry.opentofu.org/bpg/proxmox"' "$OPENTOFU_LOCK" \
     || die "OpenTofu lock file должен фиксировать bpg/proxmox из OpenTofu Registry"
@@ -197,11 +198,12 @@ if openbao.get('command') != ['server']:
     raise SystemExit('OpenBao must run in normal server mode')
 
 volumes = runtime.get('volumes', [])
+if '/mnt/persistent-state/ansible:/etc/infra-manager/ansible:ro' in volumes:
+    raise SystemExit('Permanent Ansible guest key volume must not be mounted')
 required = {
     '/mnt/persistent-state/semaphore:/var/lib/semaphore',
     '/mnt/persistent-state/opentofu:/var/lib/infra-manager/opentofu',
     '/etc/infra-manager/ca:/etc/infra-manager/ca:ro',
-    '/mnt/persistent-state/ansible:/etc/infra-manager/ansible:ro',
     '/mnt/pve-access/pve-host:/mnt/pve-access/pve-host:ro',
 }
 missing = required.difference(volumes)

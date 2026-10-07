@@ -97,7 +97,7 @@ resource "proxmox_virtual_environment_vm" "guest" {
 
     user_account {
       username = "root"
-      keys     = [trimspace(var.ansible_ssh_public_key)]
+      keys     = compact([trimspace(var.bootstrap_ssh_public_key)])
     }
   }
 
@@ -117,6 +117,10 @@ resource "proxmox_virtual_environment_vm" "guest" {
 
   lifecycle {
     prevent_destroy = true
+
+    # SSH-ключ нужен только для первого входа при создании гостя.
+    # После установки доверия к client CA его смена не должна менять VM.
+    ignore_changes = [initialization[0].user_account[0].keys]
   }
 }
 
@@ -173,7 +177,7 @@ resource "proxmox_virtual_environment_container" "guest" {
     }
 
     user_account {
-      keys = [trimspace(var.ansible_ssh_public_key)]
+      keys = compact([trimspace(var.bootstrap_ssh_public_key)])
     }
   }
 
@@ -195,8 +199,11 @@ resource "proxmox_virtual_environment_container" "guest" {
   lifecycle {
     prevent_destroy = true
 
-    # keyctl поддерживается общим host-only шагом deploy-guest и не должен
-    # откатываться провайдером при следующем плане.
-    ignore_changes = [features[0].keyctl]
+    # keyctl поддерживается общим host-only шагом deploy-guest.
+    # SSH-ключ нужен только для первого входа при создании контейнера.
+    ignore_changes = [
+      features[0].keyctl,
+      initialization[0].user_account[0].keys,
+    ]
   }
 }

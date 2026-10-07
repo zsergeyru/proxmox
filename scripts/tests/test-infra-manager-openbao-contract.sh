@@ -59,7 +59,6 @@ ok()  { printf '[ОК] %s\n' "$*"; }
 ANSIBLE_RUNTIME_PARTS=(
     persistence.yml
     pve_access.yml
-    ansible_access.yml
     repository.yml
     semaphore.yml
     runtime.yml
@@ -276,8 +275,9 @@ grep -q 'packer, version' "$ANSIBLE_RUNTIME" \
 if grep -Fq 'register: ansible_private_key' "$ANSIBLE_RUNTIME"; then
     die "register ansible_private_key запрещён: это служебная переменная SSH connection plugin"
 fi
-grep -Fq 'register: infra_ansible_private_key_stat' "$ANSIBLE_RUNTIME" \
-    || die "Проверка постоянного Ansible-ключа должна использовать безопасное имя переменной"
+if grep -Fq 'infra_ansible_private_key_stat' "$ANSIBLE_RUNTIME"; then
+    die "Постоянный Ansible guest key больше не должен создаваться или проверяться"
+fi
 
 grep -q 'runtime-activation.log' "$ACTIVATE_RUNTIME" \
     || die "Команда активации должна вести отдельный журнал"
@@ -380,8 +380,9 @@ for target, markers in targets.items():
 PY
 grep -Fq '/usr/local/sbin/infra-manager-openbao-unseal' "$ANSIBLE_RUNTIME" \
     || die "Повторная настройка должна сначала восстанавливать секреты из OpenBao"
-grep -q 'infra-manager ansible self' "$ANSIBLE_RUNTIME" \
-    || die "910 должен сохранять управляемый блок собственного Ansible-ключа"
+if grep -q 'infra-manager ansible self' "$ANSIBLE_RUNTIME"; then
+    die "Постоянный self SSH-key 910 запрещён"
+fi
 grep -q 'systemd-run' "$ANSIBLE_PLAYBOOK" \
     || die "Общий playbook должен передавать активацию внешней systemd-службе"
 grep -Fq '"INFRA_PVE_NODE={{ infra_pve_node }}"' "$ANSIBLE_PLAYBOOK" \

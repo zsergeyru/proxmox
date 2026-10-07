@@ -81,65 +81,6 @@ def test_container_host_noop() -> None:
     assert calls == [("pct", "config", "420")], calls
 
 
-def test_infra_self_access() -> None:
-    calls: list[tuple[str, ...]] = []
-
-    def fake_ssh(node: str, *command: str, capture: bool = False):
-        del node, capture
-        calls.append(tuple(command))
-        if command[:2] == ("pct", "config"):
-            return SimpleNamespace(
-                returncode=0,
-                stdout=(
-                    "hostname: infra-manager\n"
-                    "description: test "
-                    "[owner=proxmox-project;role=infra-manager]\n"
-                ),
-            )
-        return SimpleNamespace(returncode=0, stdout="")
-
-    with patch.object(module, "_ssh", fake_ssh):
-        module.ensure_infra_self_access(
-            "pve",
-            910,
-            hostname="infra-manager",
-            public_key="ssh-ed25519 AAAATEST old-comment",
-        )
-
-    assert calls[0] == ("pct", "config", "910")
-    exec_call = calls[1]
-    assert exec_call[:5] == (
-        "pct",
-        "exec",
-        "910",
-        "--",
-        "python3",
-    )
-    assert exec_call[-1] == "ssh-ed25519 AAAATEST"
-
-    with patch.object(
-        module,
-        "_ssh",
-        return_value=SimpleNamespace(
-            returncode=0,
-            stdout="hostname: чужой\n",
-        ),
-    ):
-        try:
-            module.ensure_infra_self_access(
-                "pve",
-                910,
-                hostname="infra-manager",
-                public_key="ssh-ed25519 AAAATEST",
-            )
-        except module.InfraManagerError:
-            pass
-        else:
-            raise AssertionError(
-                "Самодоступ нельзя выдавать непроверенному VMID 910"
-            )
-
-
 def test_openbao_host_support() -> None:
     installs: list[tuple[str, str, str]] = []
     tree_installs: list[tuple[str, str]] = []
@@ -582,7 +523,6 @@ def main() -> None:
     test_feature_parser()
     test_container_host_reconcile()
     test_container_host_noop()
-    test_infra_self_access()
     test_openbao_host_support()
     test_openbao_status_checks()
     test_recovery_host_support()

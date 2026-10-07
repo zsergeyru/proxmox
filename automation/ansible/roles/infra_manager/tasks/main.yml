@@ -5,9 +5,6 @@
 - name: Настроить доступ к PVE
   ansible.builtin.import_tasks: pve_access.yml
 
-- name: Настроить ключи управления
-  ansible.builtin.import_tasks: ansible_access.yml
-
 - name: Подготовить рабочую копию проекта
   ansible.builtin.import_tasks: repository.yml
 

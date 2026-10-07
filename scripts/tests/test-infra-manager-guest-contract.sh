@@ -58,7 +58,6 @@ ok()  { printf '[ОК] %s\n' "$*"; }
 ANSIBLE_RUNTIME_PARTS=(
     persistence.yml
     pve_access.yml
-    ansible_access.yml
     repository.yml
     semaphore.yml
     runtime.yml
@@ -337,10 +336,11 @@ required_state = {
     "openbao-raft",
     "opentofu-state",
     "semaphore-data",
-    "ansible-identity",
     "operation-locks",
 }
 state_contains = set(state.get("contains", []))
+if "ansible-identity" in state_contains:
+    raise SystemExit("Постоянная Ansible identity не должна входить в состояние 910")
 if not required_state.issubset(state_contains):
     raise SystemExit("Целевая схема не содержит весь обязательный набор состояния 910")
 if "infra-manager-secrets" in state_contains:
@@ -350,8 +350,9 @@ if "git-checkout" not in guest_local:
     raise SystemExit("Git checkout должен оставаться локальным и воспроизводимым внутри 910")
 bindings = state.get("bindings", [])
 binding_pairs = {(item.get("source"), item.get("target")) for item in bindings}
+if ("/mnt/persistent-state/ansible", "/etc/infra-manager/ansible") in binding_pairs:
+    raise SystemExit("Постоянный Ansible guest key не должен иметь привязку")
 required_bindings = {
-    ("/mnt/persistent-state/ansible", "/etc/infra-manager/ansible"),
     ("/mnt/persistent-state/semaphore", "/var/lib/infra-manager/semaphore"),
     ("/mnt/persistent-state/opentofu", "/var/lib/infra-manager/opentofu"),
     ("/mnt/persistent-state/locks", "/var/lib/infra-manager/locks"),
@@ -451,7 +452,6 @@ if not required_openbao_volumes.issubset(set(compose_openbao.get("volumes", []))
 required_runtime_fragments = (
     "provision.access_materialization.pve.ca_source",
     "provision.access_materialization.pve.runtime_credential",
-    "provision.paths.ansible_identity",
     "provision.paths.semaphore_persistent_data",
     "provision.paths.opentofu_persistent_state_dir",
     "provision.persistence.target_layout.state.bindings",
@@ -507,8 +507,9 @@ grep -q 'pve_host_private_key' "$PY_SETTINGS" \
     || die "Путь root SSH-ключа PVE должен находиться в единых настройках"
 grep -q 'ensure_container_host' "$PY_PVE_HOST" \
     || die "Общий PVE host слой должен поддерживать container-host"
-grep -q 'ensure_infra_self_access' "$PY_PVE_HOST" \
-    || die "PVE host слой должен уметь безопасно восстановить самодоступ 910"
+if grep -q 'ensure_infra_self_access' "$PY_PVE_HOST"; then
+    die "Постоянный self SSH-доступ 910 через guest key запрещён"
+fi
 grep -Fq 'desired["keyctl"] = "1"' "$PY_PVE_HOST" \
     || die "container-host должен обеспечивать keyctl=1"
 grep -Fq 'desired["nesting"] = "1"' "$PY_PVE_HOST" \

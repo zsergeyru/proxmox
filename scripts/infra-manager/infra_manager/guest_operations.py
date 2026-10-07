@@ -345,7 +345,12 @@ def _run_test(
         identity,
         announce=False,
     )
-    verify_guest_status(repo_root, identity, resource)
+    verify_guest_status(
+        repo_root,
+        identity,
+        resource,
+        project_branch=project_branch_for_checkout(repo_root),
+    )
     console.ok(
         f"Гость {identity.vmid} {identity.name}: расширенная проверка пройдена"
     )

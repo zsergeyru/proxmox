@@ -220,14 +220,26 @@ def check_test_operation() -> None:
     }
     client = FakePveClient(resource)
 
-    with patch.object(
-        operations,
-        "verify_guest_status",
-    ) as verify:
+    with (
+        patch.object(
+            operations,
+            "verify_guest_status",
+        ) as verify,
+        patch.object(
+            operations,
+            "project_branch_for_checkout",
+            return_value="feature/test-branch",
+        ),
+    ):
         if operations._run_test(client, ROOT, identity) != 0:
             fail("Test Guest должен завершаться успешно")
 
-    verify.assert_called_once_with(ROOT, identity, resource)
+    verify.assert_called_once_with(
+        ROOT,
+        identity,
+        resource,
+        project_branch="feature/test-branch",
+    )
 
 def check_sync_operation() -> None:
     identity = guest_identity(ROOT, 910)
@@ -527,8 +539,10 @@ def check_semaphore_secret_policy() -> None:
         fail("Точка входа операций должна готовить среду без Semaphore API")
     if "PveClient()" not in entrypoint:
         fail("Прямой запуск должен получать PVE credential из локального файла")
-    if "PATHS.ansible_public_key" not in entrypoint:
-        fail("Прямой запуск должен получать открытый Ansible-ключ локально")
+    if "PATHS.ansible_public_key" in entrypoint:
+        fail("Прямой запуск не должен зависеть от постоянного Ansible-ключа")
+    if "TF_VAR_bootstrap_ssh_public_key" in entrypoint:
+        fail("Одноразовый bootstrap key не должен жить в общей среде операций")
 
 
 def main() -> None:

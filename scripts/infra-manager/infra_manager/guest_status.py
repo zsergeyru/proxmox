@@ -29,28 +29,56 @@ def _required_file(path: Path, label: str) -> None:
         raise InfraManagerError(f"Не найден {label}: {path}")
 
 
-def _ssh_material(node: str) -> tuple[str, str]:
+def _ssh_material(
+    node: str,
+    directory: Path,
+) -> tuple[Path, Path, Path]:
+    """Создать краткоживущую SSH-идентичность для одной проверки."""
+
     require_command("ssh")
-    _required_file(
-        PATHS.ansible_private_key,
-        "закрытый ключ административного доступа к гостям",
-    )
-    _required_file(
-        PATHS.ansible_public_key,
-        "открытый ключ административного доступа к гостям",
-    )
+    require_command("ssh-keygen")
     _required_file(
         PATHS.ssh_host_ca_public_key,
         "публичный SSH host CA",
     )
+
+    private_key = directory / "status_ed25519"
+    public_key = directory / "status_ed25519.pub"
+    certificate_path = directory / "status_ed25519-cert.pub"
+    known_hosts = directory / "known_hosts"
+
+    run(
+        [
+            "ssh-keygen",
+            "-q",
+            "-t",
+            "ed25519",
+            "-N",
+            "",
+            "-C",
+            "infra-manager-status",
+            "-f",
+            str(private_key),
+        ]
+    )
+    private_key.chmod(0o600)
+
     certificate = sign_ssh_client_key(
         node,
-        PATHS.ansible_public_key.read_text(encoding="utf-8").strip(),
+        public_key.read_text(encoding="utf-8").strip(),
     )
+    certificate_path.write_text(certificate + "\n", encoding="utf-8")
+    certificate_path.chmod(0o600)
+
     host_ca = PATHS.ssh_host_ca_public_key.read_text(
         encoding="utf-8"
     ).strip()
-    return certificate, host_ca
+    known_hosts.write_text(
+        f"@cert-authority * {host_ca}\n",
+        encoding="utf-8",
+    )
+    known_hosts.chmod(0o600)
+    return private_key, certificate_path, known_hosts
 
 
 def _run_guest_command(
@@ -65,26 +93,19 @@ def _run_guest_command(
     if not argv or any(not isinstance(item, str) or not item for item in argv):
         raise InfraManagerError("Некорректная команда проверки гостя")
 
-    certificate, host_ca = _ssh_material(node)
     with tempfile.TemporaryDirectory(prefix="guest-status-") as temporary_dir:
         temporary = Path(temporary_dir)
-        certificate_path = temporary / "guest_ed25519-cert.pub"
-        known_hosts = temporary / "known_hosts"
-
-        certificate_path.write_text(certificate + "\n", encoding="utf-8")
-        certificate_path.chmod(0o600)
-        known_hosts.write_text(
-            f"@cert-authority * {host_ca}\n",
-            encoding="utf-8",
+        private_key, certificate_path, known_hosts = _ssh_material(
+            node,
+            temporary,
         )
-        known_hosts.chmod(0o600)
 
         remote_command = shlex.join(argv)
         return run(
             [
                 "ssh",
                 "-i",
-                str(PATHS.ansible_private_key),
+                str(private_key),
                 "-o",
                 f"CertificateFile={certificate_path}",
                 "-o",
@@ -220,6 +241,8 @@ def _run_declared_check(
     node: str,
     address: str,
     check: dict[str, Any],
+    *,
+    project_branch: str | None = None,
 ) -> None:
     check_type = check["type"]
 
@@ -285,10 +308,17 @@ def _run_declared_check(
             raise InfraManagerError(
                 "local_status требует абсолютный command"
             )
+        argv = [command, "--full", "--quiet"]
+        if project_branch:
+            argv = [
+                "env",
+                f"INFRA_PROJECT_BRANCH={project_branch}",
+                *argv,
+            ]
         _run_guest_command(
             node,
             address,
-            [command, "--full", "--quiet"],
+            argv,
         )
         return
 
@@ -318,6 +348,8 @@ def verify_guest_status(
     repo_root: Path,
     identity: GuestIdentity,
     resource: dict[str, object],
+    *,
+    project_branch: str | None = None,
 ) -> tuple[str, str, tuple[dict[str, Any], ...], tuple[str, ...]]:
     """Проверить базовое состояние и вернуть данные для единого вывода."""
 
@@ -353,7 +385,12 @@ def verify_guest_status(
         messages.append(f"{service['name']} доступен")
 
     for check in _load_common_checks(identity):
-        _run_declared_check(node, address, check)
+        _run_declared_check(
+            node,
+            address,
+            check,
+            project_branch=project_branch,
+        )
         messages.append(str(check["message"]))
 
     return node, address, services, tuple(messages)
@@ -402,6 +439,7 @@ def show_guest_status(
         repo_root,
         identity,
         resource,
+        project_branch=project_branch,
     )
 
     resource_type = resource.get("type")

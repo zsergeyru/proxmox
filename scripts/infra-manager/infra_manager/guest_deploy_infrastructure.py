@@ -19,7 +19,7 @@ class DeploymentPaths:
     """Пути, используемые на нескольких этапах развёртывания VM."""
 
     guest_dir: Path
-    private_key: Path
+    private_key: Path | None
     playbook: Path
     known_hosts: Path
     plan_file: Path
@@ -191,6 +191,17 @@ def _apply_plan(
     context: DeploymentContext,
     actions: list[str],
 ) -> None:
+    if "create" in actions:
+        bootstrap_key = context.workspace.env.get(
+            "TF_VAR_bootstrap_ssh_public_key",
+            "",
+        ).strip()
+        if not bootstrap_key:
+            raise InfraManagerError(
+                f"Гость {context.vmid}: создание без одноразового "
+                "bootstrap SSH-ключа запрещено"
+            )
+
     changed_template_protection = False
     try:
         if "create" in actions and context.kind == "vm":
@@ -340,6 +351,8 @@ def _build_deployment_context(
     repo_root: Path,
     vmid: int,
     workspace: OpenTofuWorkspace,
+    *,
+    private_key: Path | None = None,
 ) -> DeploymentContext:
     """Проверить описание VM и собрать общий контекст развёртывания."""
     guests = workspace.payload["guests"]
@@ -392,10 +405,9 @@ def _build_deployment_context(
             f"Не найден provision.yaml: {provision_file}"
         )
 
-    private_key = PATHS.ansible_private_key
-    if not private_key.is_file():
+    if private_key is not None and not private_key.is_file():
         raise InfraManagerError(
-            f"Не найден закрытый ключ Ansible: {private_key}"
+            f"Не найден закрытый SSH-ключ: {private_key}"
         )
 
     playbook = (

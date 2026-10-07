@@ -80,18 +80,6 @@ class Paths:
         return self.openbao_tls_dir / "ca.crt"
 
     @property
-    def ansible_dir(self) -> Path:
-        return self.config_dir / "ansible"
-
-    @property
-    def ansible_private_key(self) -> Path:
-        return self.ansible_dir / "guest_ed25519"
-
-    @property
-    def ansible_public_key(self) -> Path:
-        return self.ansible_dir / "guest_ed25519.pub"
-
-    @property
     def pve_host_dir(self) -> Path:
         return Path(
             os.environ.get(
