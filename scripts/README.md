@@ -18,8 +18,7 @@ scripts/
 │   │   ├── constants.py                     # Общие константы bootstrap
 │   │   └── errors.py                        # Общая ошибка bootstrap
 │   ├── prepare-runtime.sh                   # Подготавливает временную среду инструментов внутри 990
-│   ├── run-runtime.sh                       # Запускает команды внутри временной среды 990
-│   └── deploy-infra-manager.sh              # Вызывает общий deploy-guest для фаз создания и настройки infra-manager
+│   └── run-runtime.sh                       # Запускает внутренние Python-шаги bootstrap внутри временной среды 990
 │
 ├── maintenance/                             # Служебная очистка тестового PVE, не часть штатного bootstrap
 │   ├── reset-pve-test-state.sh              # Удаляет только распознанные следы проекта для повторного теста
