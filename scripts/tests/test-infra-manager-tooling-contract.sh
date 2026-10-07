@@ -151,8 +151,10 @@ grep -q '"-lockfile=readonly"' "$PY_OPENTOFU" \
 if grep -Eq '^[[:space:]]+keyctl[[:space:]]*=' "$ROOT/automation/opentofu/main.tf"; then
     die "OpenTofu не должен передавать keyctl через PVE API token"
 fi
-grep -Fq 'ignore_changes = [features[0].keyctl]' "$ROOT/automation/opentofu/main.tf" \
+grep -Fq 'features[0].keyctl,' "$ROOT/automation/opentofu/main.tf" \
     || die "OpenTofu должен игнорировать keyctl, которым управляет host-only слой"
+grep -Fq 'initialization[0].user_account[0].keys,' "$ROOT/automation/opentofu/main.tf" \
+    || die "OpenTofu не должен менять bootstrap SSH key существующего гостя"
 
 grep -q 'provider "registry.opentofu.org/bpg/proxmox"' "$OPENTOFU_LOCK" \
     || die "OpenTofu lock file должен фиксировать bpg/proxmox из OpenTofu Registry"
