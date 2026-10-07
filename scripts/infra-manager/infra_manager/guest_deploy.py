@@ -25,7 +25,6 @@ from .guest_deploy_infrastructure import (
 from .opentofu import prepare_workspace
 from .pve_host import (
     apply_host_requirements,
-    ensure_infra_self_access,
     install_openbao_host_support,
     install_recovery_host_support,
     issue_openbao_machine_credentials,
@@ -617,6 +616,7 @@ def _configure_guest_os(
     provision_phase: str = "full",
     self_update: bool = False,
     project_branch: str | None = None,
+    allow_legacy_bootstrap: bool = True,
 ) -> None:
     """Проверить SSH и применить конфигурацию Ansible."""
 
@@ -630,6 +630,11 @@ def _configure_guest_os(
         install_recovery_host_support(context.node, repo_root)
 
     if not PATHS.ssh_client_ca_public_key.is_file():
+        if not allow_legacy_bootstrap:
+            raise InfraManagerError(
+                f"Гость {context.vmid}: SSH CA не опубликован; "
+                "самообновление без краткоживущего сертификата запрещено"
+            )
         console.info(
             f"Гость {context.vmid}: SSH CA ещё не опубликован; "
             "используется переходный постоянный ключ Ansible"
@@ -689,6 +694,12 @@ def _configure_guest_os(
             raise InfraManagerError(
                 f"Гость {context.vmid} уже доверяет SSH CA, "
                 "но вход по временному сертификату не прошёл"
+            )
+        if not allow_legacy_bootstrap:
+            raise InfraManagerError(
+                f"Гость {context.vmid}: вход по краткоживущему "
+                "SSH-сертификату не прошёл; постоянный ключ для "
+                "самообновления запрещён"
             )
 
         console.info(
@@ -896,23 +907,12 @@ def run_deploy_guest(
             "без собственного OpenTofu state"
         )
         _validate_existing_guest_object(context)
-        if not PATHS.ansible_public_key.is_file():
-            raise InfraManagerError(
-                f"Не найден открытый ключ Ansible: {PATHS.ansible_public_key}"
-            )
-        ensure_infra_self_access(
-            context.node,
-            context.vmid,
-            hostname=context.name,
-            public_key=PATHS.ansible_public_key.read_text(
-                encoding="utf-8"
-            ).strip(),
-        )
         _configure_guest_os(
             context,
             provision_phase="full",
             self_update=True,
             project_branch=project_branch,
+            allow_legacy_bootstrap=False,
         )
         console.result(
             f"{context.vmid} {context.name} обновлён через Ansible; "
