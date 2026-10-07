@@ -159,6 +159,7 @@ known_hosts   1001:0 0644
 /mnt/persistent-state/
 ├── semaphore/
 ├── opentofu/
+├── locks/
 └── openbao/
 ```
 
@@ -170,6 +171,7 @@ known_hosts   1001:0 0644
 |---|---:|---:|---|
 | `/mnt/persistent-state/semaphore` | `1001:0` | `0770` | SQLite, история и данные Semaphore |
 | `/mnt/persistent-state/opentofu` | `1001:0` | `0750` | рабочие данные и state OpenTofu |
+| `/mnt/persistent-state/locks` | `1001:0` | `0770` | общие блокировки операций PVE CLI и `infra-runtime` |
 | `/mnt/persistent-state/openbao` | `root:root` | `0700` | Raft OpenBao |
 
 OpenTofu state:
@@ -191,6 +193,15 @@ Semaphore:
 /var/lib/infra-manager/semaphore
 → /mnt/persistent-state/semaphore
 ```
+
+Блокировки операций:
+
+```text
+/var/lib/infra-manager/locks
+→ /mnt/persistent-state/locks
+```
+
+Lock-файлы содержат только сведения для диагностики. Фактическая блокировка удерживается ядром через `flock`; после завершения процесса старый файл не препятствует следующему запуску и не требует резервного копирования.
 
 OpenBao:
 
@@ -321,6 +332,7 @@ mountpoint /mnt/pve-access
 mountpoint /mnt/persistent-state
 stat /mnt/persistent-state/semaphore
 stat /mnt/persistent-state/opentofu
+stat /mnt/persistent-state/locks
 stat /mnt/persistent-state/openbao
 ```
 
