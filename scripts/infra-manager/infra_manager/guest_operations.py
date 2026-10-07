@@ -21,6 +21,7 @@ from .guest_deploy import (
     run_deploy_guest,
 )
 from .guest_status import show_guest_status, verify_guest_status
+from .operation_lock import guest_operation_lock
 from .pve import PveClient
 from .pve_host import (
     install_openbao_host_support,
