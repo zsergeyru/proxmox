@@ -199,11 +199,12 @@ if openbao.get('command') != ['server']:
     raise SystemExit('OpenBao must run in normal server mode')
 
 volumes = runtime.get('volumes', [])
+if '/mnt/persistent-state/ansible:/etc/infra-manager/ansible:ro' in volumes:
+    raise SystemExit('Permanent Ansible guest key volume must not be mounted')
 required = {
     '/mnt/persistent-state/semaphore:/var/lib/semaphore',
     '/mnt/persistent-state/opentofu:/var/lib/infra-manager/opentofu',
     '/etc/infra-manager/ca:/etc/infra-manager/ca:ro',
-    '/mnt/persistent-state/ansible:/etc/infra-manager/ansible:ro',
     '/mnt/pve-access/pve-host:/mnt/pve-access/pve-host:ro',
 }
 missing = required.difference(volumes)

@@ -88,7 +88,6 @@ docker:
       mounts:
         - /mnt/persistent-state/semaphore:/var/lib/semaphore
         - /etc/infra-manager/ca:/etc/infra-manager/ca:ro
-        - /mnt/persistent-state/ansible:/etc/infra-manager/ansible:ro
         - /mnt/pve-access/pve-host:/mnt/pve-access/pve-host:ro
         - /mnt/persistent-state/opentofu:/var/lib/infra-manager/opentofu
         - /mnt/persistent-state/locks:/var/lib/infra-manager/locks
@@ -129,7 +128,6 @@ paths:
   ca: /etc/infra-manager/ca
   ssh_client_ca: /etc/infra-manager/ca/ssh-client-ca.pub
   openbao_tls: /etc/infra-manager/openbao/tls
-  ansible_identity: /etc/infra-manager/ansible
   pve_host_identity: /mnt/pve-access/pve-host
   data: /var/lib/infra-manager
   semaphore_data: /var/lib/infra-manager/semaphore
@@ -217,10 +215,8 @@ persistence:
         - openbao-raft
         - opentofu-state
         - semaphore-data
-        - ansible-identity
         - operation-locks
       bindings:
-        - { source: /mnt/persistent-state/ansible, target: /etc/infra-manager/ansible, owner: "1001", group: "0", mode: "0700" }
         - { source: /mnt/persistent-state/semaphore, target: /var/lib/infra-manager/semaphore, owner: "1001", group: "0", mode: "0770" }
         - { source: /mnt/persistent-state/opentofu, target: /var/lib/infra-manager/opentofu, owner: "1001", group: "0", mode: "0750" }
         - { source: /mnt/persistent-state/locks, target: /var/lib/infra-manager/locks, owner: "1001", group: "0", mode: "0770" }
@@ -235,7 +231,6 @@ persistence:
         - caches
 
   backup_required:
-    - /etc/infra-manager/ansible
     - /mnt/pve-access/pve-host
     - /var/lib/infra-manager/semaphore
     - /var/lib/infra-manager/opentofu/state
