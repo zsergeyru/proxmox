@@ -1004,6 +1004,11 @@ def check_pve_host_support_before_signing() -> None:
             assert repo_root == ROOT
             calls.append("recovery-support")
 
+        def record_operator(node: str, repo_root: Path) -> None:
+            assert node == "pve"
+            assert repo_root == ROOT
+            calls.append("operator-support")
+
         def sign_client(node: str, public_key: str) -> str:
             assert node == "pve"
             assert public_key.startswith("ssh-ed25519 ")
@@ -1048,6 +1053,11 @@ def check_pve_host_support_before_signing() -> None:
             ),
             patch.object(
                 guest_deploy_module,
+                "install_operator_host_support",
+                side_effect=record_operator,
+            ),
+            patch.object(
+                guest_deploy_module,
                 "sign_ssh_client_key",
                 side_effect=sign_client,
             ),
@@ -1074,8 +1084,13 @@ def check_pve_host_support_before_signing() -> None:
             "sign-client",
         ]:
             fail(
-                "PVE helper должен обновляться полностью до первого "
+                "OpenBao и recovery helper должны обновляться до первого "
                 f"SSH-подписания: {calls!r}"
+            )
+        if calls[-2:] != ["ansible", "operator-support"]:
+            fail(
+                "PVE-оболочка должна обновляться только после успешного Ansible: "
+                f"{calls!r}"
             )
 
 
