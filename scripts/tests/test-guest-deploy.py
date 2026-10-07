@@ -1200,7 +1200,10 @@ def main_test() -> None:
     workspace = OpenTofuWorkspace(
         directory=Path("/tmp/opentofu"),
         state_dir=Path("/tmp/state"),
-        env={"SSL_CERT_FILE": "/tmp/ca.crt"},
+        env={
+            "SSL_CERT_FILE": "/tmp/ca.crt",
+            "TF_VAR_bootstrap_ssh_public_key": "ssh-ed25519 AAAATEST bootstrap",
+        },
         payload={"guests": {}},
     )
     deployment_paths = DeploymentPaths(
@@ -1377,6 +1380,18 @@ def main_test() -> None:
             self.protection_values.append(form["protection"])
 
     protected_client = ProtectedTemplateClient()
+
+    bootstrap_key = workspace.env.pop("TF_VAR_bootstrap_ssh_public_key")
+    try:
+        _apply_plan(deployment_for(protected_client), ["create"])
+    except InfraManagerError:
+        pass
+    else:
+        fail("Создание гостя без одноразового bootstrap key должно быть запрещено")
+    finally:
+        workspace.env["TF_VAR_bootstrap_ssh_public_key"] = bootstrap_key
+    if protected_client.protection_values:
+        fail("Запрет создания без bootstrap key должен срабатывать до изменения шаблона")
 
     def failed_apply(argv: list[str], **kwargs: object):
         raise InfraManagerError("ожидаемая ошибка применения")
