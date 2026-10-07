@@ -334,6 +334,14 @@ def check_gateway_http() -> None:
         if "Semaphore" in body:
             fail("Страница подтверждения не должна зависеть от Semaphore")
 
+        status, headers, _ = _http_request(
+            server,
+            "GET",
+            "/action/status?vmid=910",
+        )
+        if headers.get("Referrer-Policy") != "same-origin":
+            fail("Посредник должен разрешать Referer только внутри своего origin")
+
         host, port = server.server_address
         same_origin = f"http://{host}:{port}"
         with patch.object(
@@ -373,6 +381,38 @@ def check_gateway_http() -> None:
             fail("Шлюз должен отклонять POST с другого источника")
         start.assert_not_called()
 
+        with patch.object(
+            portal_gateway,
+            "start_action",
+            return_value=_fake_process("[ОК] Referer\n"),
+        ) as start:
+            status, _, _ = _http_request(
+                server,
+                "POST",
+                "/action/status?vmid=910",
+                headers={
+                    "Referer": same_origin + "/action/status?vmid=910",
+                },
+            )
+        if status != HTTPStatus.OK:
+            fail("Шлюз должен принимать same-origin Referer без Origin")
+        start.assert_called_once_with("status", 910)
+
+        with patch.object(
+            portal_gateway,
+            "start_action",
+            return_value=_fake_process("[ОК] Fetch-Site\n"),
+        ) as start:
+            status, _, _ = _http_request(
+                server,
+                "POST",
+                "/action/status?vmid=910",
+                headers={"Sec-Fetch-Site": "same-origin"},
+            )
+        if status != HTTPStatus.OK:
+            fail("Шлюз должен принимать браузерный Sec-Fetch-Site same-origin")
+        start.assert_called_once_with("status", 910)
+
         with patch.object(portal_gateway, "start_action") as start:
             status, _, _ = _http_request(
                 server,
@@ -380,7 +420,22 @@ def check_gateway_http() -> None:
                 "/action/status?vmid=910",
             )
         if status != HTTPStatus.FORBIDDEN:
-            fail("Шлюз должен требовать Origin для изменяющего запроса")
+            fail("Шлюз должен отклонять POST без признака same-origin")
+        start.assert_not_called()
+
+        with patch.object(portal_gateway, "start_action") as start:
+            status, _, _ = _http_request(
+                server,
+                "POST",
+                "/action/status?vmid=910",
+                headers={
+                    "Origin": "http://example.invalid",
+                    "Referer": same_origin + "/action/status?vmid=910",
+                    "Sec-Fetch-Site": "same-origin",
+                },
+            )
+        if status != HTTPStatus.FORBIDDEN:
+            fail("Явно чужой Origin должен иметь приоритет над резервными заголовками")
         start.assert_not_called()
 
         with patch.object(
