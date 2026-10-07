@@ -79,11 +79,16 @@ def operator_guest_task(
     *,
     show_secrets: bool,
 ) -> int:
-    """Запустить штатное задание Semaphore и показать итог."""
+    """Выполнить штатную операцию напрямую внутри infra-manager."""
 
-    run_operator_guest_task(operation, vmid)
-    if operation == "test":
-        return 0
+    result = run_guest_operation(
+        PATHS.repo_root,
+        operation,
+        vmid,
+        show_secrets=show_secrets,
+    )
+    if result != 0 or operation in {"deploy", "test"}:
+        return result
     return operator_guest_status(
         vmid,
         show_secrets=show_secrets,
@@ -170,9 +175,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     for command, help_text in (
-        ("deploy", "развернуть или обновить гостя через Semaphore"),
-        ("sync", "синхронизировать гостя через Semaphore"),
-        ("test", "проверить гостя через Semaphore без изменений"),
+        ("deploy", "развернуть или обновить гостя"),
+        ("sync", "синхронизировать гостя"),
+        ("test", "проверить гостя без изменений"),
     ):
         command_parser = subparsers.add_parser(command, help=help_text)
         command_parser.add_argument("vmid", type=int, help="VMID гостя")
