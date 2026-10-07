@@ -13,7 +13,6 @@ from .pve_host import (
     cleanup_transition_state,
     initialize_openbao_on_host,
     install_openbao_host_support,
-    install_operator_host_support,
     install_recovery_host_support,
     prepare_recovery_git,
     sync_openbao_otp_contract,
@@ -81,7 +80,6 @@ def run_initialize_openbao(repo_root: Path) -> int:
     console.detail("Установка служебных PVE-only сценариев")
     install_openbao_host_support(node, repo_root)
     install_recovery_host_support(node, repo_root)
-    install_operator_host_support(node, repo_root)
     prepare_recovery_git(node)
 
     console.detail("Инициализация OpenBao, KV v2 и проверка SSH-центров доверия")
