@@ -14,6 +14,8 @@ from .pve_host import (
     prepare_recovery_git,
 )
 
+OPERATOR_COMMAND = Path("/usr/local/sbin/infra-manager")
+
 
 def pve_node_from_environment() -> str:
     explicit = os.environ.get("INFRA_PVE_NODE", "").strip()
@@ -48,6 +50,12 @@ def prepare_recovery(repo_root: Path) -> int:
 
 def install_operator_wrapper(repo_root: Path) -> int:
     """Установить тонкую PVE-оболочку после настройки управляющего гостя."""
+
+    if not OPERATOR_COMMAND.is_file() or not os.access(OPERATOR_COMMAND, os.X_OK):
+        raise InfraManagerError(
+            f"Операторская команда управляющего гостя ещё не готова: "
+            f"{OPERATOR_COMMAND}"
+        )
 
     node = pve_node_from_environment()
     install_operator_host_support(node, repo_root)
