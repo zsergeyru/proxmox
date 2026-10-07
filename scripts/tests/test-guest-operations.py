@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import contextlib
+import stat
 import sys
 import tempfile
 from pathlib import Path
@@ -393,6 +394,9 @@ def check_operation_lock() -> None:
             "deploy",
             lock_dir=lock_dir,
         ):
+            mode = stat.S_IMODE(lock_path.stat().st_mode)
+            if mode != 0o660:
+                fail(f"Lock-файл должен иметь режим 0660, получен {mode:o}")
             try:
                 with operation_lock.guest_operation_lock(
                     410,
@@ -438,6 +442,28 @@ def check_operation_lock() -> None:
             lock_dir=lock_dir,
         ):
             pass
+
+
+        with patch.object(
+            operation_lock,
+            "PATHS",
+            SimpleNamespace(data_dir=lock_dir),
+        ):
+            with operation_lock.project_checkout_lock(exclusive=False):
+                with operation_lock.project_checkout_lock(exclusive=False):
+                    pass
+                try:
+                    with operation_lock.project_checkout_lock(exclusive=True):
+                        fail("Update не должен идти одновременно с чтением проекта")
+                except InfraManagerError:
+                    pass
+
+            with operation_lock.project_checkout_lock(exclusive=True):
+                try:
+                    with operation_lock.project_checkout_lock(exclusive=False):
+                        fail("Операция не должна читать проект во время update")
+                except InfraManagerError:
+                    pass
 
 
 def check_semaphore_secret_policy() -> None:
