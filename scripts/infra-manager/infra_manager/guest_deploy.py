@@ -987,6 +987,7 @@ def _run_deploy_guest(
         "infrastructure",
         "provision-base",
         "provision-control-plane",
+        "provision-recovery-control-plane",
         "provision-ssh-trust",
         "provision",
     }:
@@ -1068,6 +1069,7 @@ def _run_deploy_guest(
     bootstrap_configure = bootstrap_scope and phase in {
         "provision-base",
         "provision-control-plane",
+        "provision-recovery-control-plane",
         "provision-ssh-trust",
         "provision",
     }
@@ -1138,6 +1140,13 @@ def _run_deploy_guest(
             project_branch=project_branch,
             bootstrap_private_key=bootstrap_private_key,
         )
+    elif phase == "provision-recovery-control-plane":
+        _configure_guest_os(
+            context,
+            provision_phase="recovery",
+            project_branch=project_branch,
+            bootstrap_private_key=bootstrap_private_key,
+        )
     elif phase == "provision-ssh-trust":
         _configure_guest_os(
             context,
@@ -1166,7 +1175,7 @@ def _run_deploy_guest(
         console.result(
             f"{context.vmid} {context.name}: базовая настройка завершена"
         )
-    elif phase == "provision-control-plane":
+    elif phase in {"provision-control-plane", "provision-recovery-control-plane"}:
         console.result(
             f"{context.vmid} {context.name}: управляющий контур запущен"
         )
@@ -1213,6 +1222,7 @@ def run_bootstrap_infra_manager_step(
         "create": "infrastructure",
         "configure-base": "provision-base",
         "configure-control-plane": "provision-control-plane",
+        "configure-recovery-control-plane": "provision-recovery-control-plane",
         "configure-ssh-trust": "provision-ssh-trust",
         "configure": "provision",
     }
