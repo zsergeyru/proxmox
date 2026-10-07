@@ -130,11 +130,20 @@ def run_operator_guest_task(
 
     deadline = time.monotonic() + timeout
     final_status = ""
+    last_error: InfraManagerError | None = None
     while time.monotonic() < deadline:
-        current = client.get(
-            f"/project/{project_id}/tasks/{task_id}",
-            auth="token",
-        )
+        try:
+            current = client.get(
+                f"/project/{project_id}/tasks/{task_id}",
+                auth="token",
+            )
+            last_error = None
+        except InfraManagerError as exc:
+            # Самообновление управляющего гостя кратко перезапускает Semaphore.
+            last_error = exc
+            time.sleep(2)
+            continue
+
         final_status = (
             str(current.get("status", ""))
             if isinstance(current, dict)
@@ -144,14 +153,23 @@ def run_operator_guest_task(
             break
         time.sleep(2)
     else:
+        detail = f": {last_error}" if last_error is not None else ""
         raise InfraManagerError(
             f"Semaphore: ожидание задания #{task_id} превысило {timeout} с"
+            f"{detail}"
         )
 
-    output = client.get(
-        f"/project/{project_id}/tasks/{task_id}/output",
-        auth="token",
-    )
+    while True:
+        try:
+            output = client.get(
+                f"/project/{project_id}/tasks/{task_id}/output",
+                auth="token",
+            )
+            break
+        except InfraManagerError:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(2)
     if isinstance(output, list):
         for item in output:
             if not isinstance(item, dict):
