@@ -76,6 +76,17 @@ for task_file in "${ANSIBLE_RUNTIME_PARTS[@]}"; do
         || die "main.yml роли infra_manager не подключает $task_file"
 done
 
+runtime_line="$(grep -n 'import_tasks: runtime.yml' "$ANSIBLE_RUNTIME_MAIN" | cut -d: -f1)"
+recovery_line="$(grep -n 'import_tasks: recovery.yml' "$ANSIBLE_RUNTIME_MAIN" | cut -d: -f1)"
+[[ -n "$runtime_line" && -n "$recovery_line" && "$runtime_line" -lt "$recovery_line" ]] \
+    || die "runtime.yml должен выполняться раньше recovery.yml"
+
+recovery_prepare_line="$(grep -n 'recovery-prepare' "$ANSIBLE_RECOVERY" | cut -d: -f1)"
+wrapper_install_line="$(grep -n 'operator-wrapper-install' "$ANSIBLE_RECOVERY" | cut -d: -f1)"
+[[ -n "$recovery_prepare_line" && -n "$wrapper_install_line" \
+    && "$recovery_prepare_line" -lt "$wrapper_install_line" ]] \
+    || die "PVE-оболочка должна устанавливаться после подготовки recovery"
+
 ANSIBLE_RUNTIME="$(mktemp)"
 trap 'rm -f "$ANSIBLE_RUNTIME"' EXIT
 cat "$ANSIBLE_RUNTIME_MAIN" > "$ANSIBLE_RUNTIME"
