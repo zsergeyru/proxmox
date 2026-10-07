@@ -277,6 +277,13 @@ if set(services) != {"runtime", "openbao"}:
     )
 runtime = services["runtime"]
 openbao = services["openbao"]
+runtime_mounts = set(runtime.get("mounts", []))
+required_runtime_mounts = {
+    "/mnt/persistent-state/locks:/var/lib/infra-manager/locks",
+    "/var/lib/infra-manager/bootstrap-repo:/var/lib/infra-manager/bootstrap-repo:ro",
+}
+if not required_runtime_mounts.issubset(runtime_mounts):
+    raise SystemExit("provision.yaml не описывает mount блокировок и Git-копии runtime")
 if runtime.get("container_name") != "infra-runtime":
     raise SystemExit("provision.yaml: container_name должен быть infra-runtime")
 if runtime.get("image") != "infra-runtime:v1":
@@ -424,6 +431,8 @@ if "/run/infra-manager/secrets:/run/infra-manager/secrets:ro" not in runtime_vol
     raise SystemExit("infra-runtime должен видеть материализованные секреты только для чтения")
 if "/mnt/persistent-state/locks:/var/lib/infra-manager/locks" not in runtime_volumes:
     raise SystemExit("PVE CLI и Semaphore должны использовать общий каталог блокировок")
+if "/var/lib/infra-manager/bootstrap-repo:/var/lib/infra-manager/bootstrap-repo:ro" not in runtime_volumes:
+    raise SystemExit("infra-runtime должен читать постоянную рабочую Git-копию")
 
 compose_openbao = compose_services["openbao"]
 if compose_openbao.get("container_name") != openbao.get("container_name"):
