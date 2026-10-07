@@ -10,7 +10,7 @@ from .access import load_access_policy
 from .common import InfraManagerError, console
 from .pve_host import (
     check_recovery_contour,
-    initialize_openbao_on_host,
+    repair_openbao_on_host,
     install_openbao_host_support,
     install_recovery_host_support,
     prepare_recovery_git,
@@ -72,7 +72,7 @@ def _otp_sources(repo_root: Path) -> list[dict[str, object]]:
 
 
 def run_initialize_openbao(repo_root: Path) -> int:
-    """Инициализировать OpenBao, KV v2 и два SSH-центра доверия."""
+    """Идемпотентно подготовить или восстановить OpenBao и его контур доступа."""
     node = _pve_node_from_environment()
 
     console.info("Проверка OpenBao infra-manager")
@@ -81,15 +81,13 @@ def run_initialize_openbao(repo_root: Path) -> int:
     install_recovery_host_support(node, repo_root)
     prepare_recovery_git(node)
 
-    console.detail("Инициализация OpenBao, KV v2 и проверка SSH-центров доверия")
-    initialize_openbao_on_host(node)
+    console.detail("Приведение OpenBao к рабочему состоянию")
+    repair_openbao_on_host(node)
 
     console.detail("Синхронизация SSH OTP и машинных AppRole")
     sync_openbao_otp_contract(node, _otp_sources(repo_root))
 
     console.detail("Проверка аварийного контура")
-    check_recovery_contour(node)
-
     check_recovery_contour(node)
 
     console.result(
