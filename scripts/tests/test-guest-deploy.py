@@ -762,13 +762,14 @@ def check_host_certificate_is_passed_to_ansible() -> None:
             fail("Временный host-сертификат не удалён после задания")
 
 
+
 def check_certificate_bootstrap_fallback() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         ca = root / "ssh-client-ca.pub"
-        ca.write_text("ssh-rsa AAAACA\n", encoding="utf-8")
-        permanent_key = root / "guest_ed25519"
-        permanent_key.write_text("permanent", encoding="utf-8")
+        ca.write_text("ssh-ed25519 AAAACA\n", encoding="utf-8")
+        bootstrap_key = root / "bootstrap_ed25519"
+        bootstrap_key.write_text("BOOTSTRAP", encoding="utf-8")
         github_key = root / "github_proxmox_repo_ed25519"
         github_key.write_text("PRIVATE-GIT-KEY", encoding="utf-8")
         context = DeploymentContext(
@@ -784,15 +785,17 @@ def check_certificate_bootstrap_fallback() -> None:
             workspace=SimpleNamespace(),
             paths=DeploymentPaths(
                 guest_dir=ROOT / "infrastructure/guests/410-ai-control",
-                private_key=permanent_key,
+                private_key=None,
                 playbook=ROOT / "automation/ansible/playbooks/configure-guest.yml",
                 known_hosts=root / "known_hosts",
                 plan_file=root / "plan",
             ),
         )
         ansible_calls: list[tuple[list[str], dict[str, str]]] = []
+        certificate_checks = 0
 
         def fake_run(argv: list[str], **kwargs: object) -> SimpleNamespace:
+            nonlocal certificate_checks
             if argv[0] == "ssh-keygen" and "-t" in argv:
                 key = Path(argv[argv.index("-f") + 1])
                 key.write_text("PRIVATE", encoding="utf-8")
@@ -804,7 +807,14 @@ def check_certificate_bootstrap_fallback() -> None:
             if argv[:2] == ["ssh-keygen", "-L"]:
                 return SimpleNamespace(returncode=0, stdout="valid", stderr="")
             if argv[0] == "ssh":
-                return SimpleNamespace(returncode=255, stdout="", stderr="denied")
+                if "CertificateFile=" in " ".join(argv):
+                    certificate_checks += 1
+                    return SimpleNamespace(
+                        returncode=0 if certificate_checks >= 2 else 255,
+                        stdout="",
+                        stderr="",
+                    )
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
             if argv[0] == "ansible-playbook":
                 ansible_calls.append((argv, kwargs["env"]))
                 return SimpleNamespace(returncode=0, stdout="", stderr="")
@@ -839,23 +849,40 @@ def check_certificate_bootstrap_fallback() -> None:
                 "sign_ssh_client_key",
                 return_value="ssh-ed25519-cert-v01@openssh.com AAAACERT",
             ),
+            patch.object(
+                guest_deploy_module,
+                "_remove_obsolete_guest_authorizations",
+            ),
         ):
-            guest_deploy_module._configure_guest_os(context)
+            guest_deploy_module._configure_guest_os(
+                context,
+                bootstrap_private_key=bootstrap_key,
+            )
 
-        argv, env = ansible_calls[0]
-        if Path(argv[argv.index("--private-key") + 1]) != permanent_key:
-            fail("Первичный гость должен сохранить переходный постоянный ключ")
-        if "CertificateFile=" in env["ANSIBLE_SSH_ARGS"]:
-            fail("Отклонённый сертификат не должен передаваться Ansible")
+        if len(ansible_calls) != 2:
+            fail("Bootstrap должен дать один base-запуск и один сертификатный запуск")
+        first_argv, first_env = ansible_calls[0]
+        if Path(first_argv[first_argv.index("--private-key") + 1]) != bootstrap_key:
+            fail("Первичная установка CA должна использовать одноразовый bootstrap key")
+        if "provision_phase=base" not in first_argv:
+            fail("Bootstrap должен применять только базовую настройку")
+        if "CertificateFile=" in first_env["ANSIBLE_SSH_ARGS"]:
+            fail("Bootstrap-вход не должен притворяться сертификатным")
+
+        second_argv, second_env = ansible_calls[1]
+        if Path(second_argv[second_argv.index("--private-key") + 1]) == bootstrap_key:
+            fail("После установки CA основной Ansible не должен использовать bootstrap key")
+        if "CertificateFile=" not in second_env["ANSIBLE_SSH_ARGS"]:
+            fail("После bootstrap основной Ansible обязан использовать сертификат")
+        if certificate_checks < 2:
+            fail("После bootstrap сертификат должен быть проверен повторно")
 
 
 def check_certificate_failure_is_fatal_after_trust() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         ca = root / "ssh-client-ca.pub"
-        ca.write_text("ssh-rsa AAAACA\n", encoding="utf-8")
-        permanent_key = root / "guest_ed25519"
-        permanent_key.write_text("permanent", encoding="utf-8")
+        ca.write_text("ssh-ed25519 AAAACA\n", encoding="utf-8")
         context = DeploymentContext(
             client=SimpleNamespace(),
             vmid=910,
@@ -869,7 +896,7 @@ def check_certificate_failure_is_fatal_after_trust() -> None:
             workspace=SimpleNamespace(),
             paths=DeploymentPaths(
                 guest_dir=ROOT / "infrastructure/guests/910-infra-manager",
-                private_key=permanent_key,
+                private_key=None,
                 playbook=ROOT / "automation/ansible/playbooks/configure-guest.yml",
                 known_hosts=root / "known_hosts",
                 plan_file=root / "plan",
@@ -890,16 +917,10 @@ def check_certificate_failure_is_fatal_after_trust() -> None:
             if argv[:2] == ["ssh-keygen", "-L"]:
                 return SimpleNamespace(returncode=0, stdout="valid", stderr="")
             if argv[0] == "ssh":
-                if "CertificateFile=" in " ".join(argv):
-                    return SimpleNamespace(
-                        returncode=255,
-                        stdout="",
-                        stderr="certificate denied",
-                    )
                 return SimpleNamespace(
-                    returncode=0,
-                    stdout="ssh-rsa AAAACA\n",
-                    stderr="",
+                    returncode=255,
+                    stdout="",
+                    stderr="certificate denied",
                 )
             if argv[0] == "ansible-playbook":
                 ansible_called = True
@@ -924,25 +945,22 @@ def check_certificate_failure_is_fatal_after_trust() -> None:
             ),
             patch.object(
                 guest_deploy_module,
-                "_prepare_openbao_machine_ansible_vars",
-                return_value=["-e", "infra_openbao_machine_enabled=false"],
-            ),
-            patch.object(
-                guest_deploy_module,
                 "sign_ssh_client_key",
                 return_value="ssh-ed25519-cert-v01@openssh.com AAAACERT",
             ),
         ):
             try:
-                guest_deploy_module._configure_guest_os(context)
+                guest_deploy_module._configure_guest_os(
+                    context,
+                    allow_legacy_bootstrap=False,
+                )
             except InfraManagerError:
                 pass
             else:
-                fail("Ошибка сертификата скрыта переходным постоянным ключом")
+                fail("Ошибка сертификата была скрыта без bootstrap-доступа")
 
         if ansible_called:
-            fail("После установленного CA запрещён откат Ansible на постоянный ключ")
-
+            fail("Без bootstrap-доступа запрещён откат Ansible на постоянный ключ")
 
 def check_pve_host_support_before_signing() -> None:
     with tempfile.TemporaryDirectory() as tmp:
