@@ -972,14 +972,14 @@ def project_branch_for_checkout(repo_root: Path) -> str:
     return configured
 
 
-def run_deploy_guest(
+def _run_deploy_guest(
     repo_root: Path,
     vmid: int,
     *,
-    bootstrap_scope: bool = False,
-    phase: str = "all",
+    bootstrap_scope: bool,
+    phase: str,
 ) -> int:
-    """Привести одного гостя к состоянию guest.yaml + provision.yaml."""
+    """Внутренний движок обычного deploy и временного bootstrap 910."""
 
     if vmid <= 0:
         raise InfraManagerError("VMID должен быть положительным числом")
@@ -1166,3 +1166,39 @@ def run_deploy_guest(
             f"{context.vmid} {context.name}: полное развёртывание завершено"
         )
     return 0
+
+
+def run_deploy_guest(repo_root: Path, vmid: int) -> int:
+    """Привести существующего или обычного управляемого гостя к декларации."""
+
+    return _run_deploy_guest(
+        repo_root,
+        vmid,
+        bootstrap_scope=False,
+        phase="all",
+    )
+
+
+def run_bootstrap_infra_manager_phase(
+    repo_root: Path,
+    vmid: int,
+    *,
+    phase: str,
+) -> int:
+    """Выполнить технический шаг первоначального контура infra-manager."""
+
+    identity = guest_identity(repo_root, vmid)
+    if identity.role != SETTINGS.infra_manager_role:
+        raise InfraManagerError(
+            f"Гость {vmid} не имеет роль {SETTINGS.infra_manager_role!r}"
+        )
+    if phase not in {"infrastructure", "provision-base", "provision"}:
+        raise InfraManagerError(
+            f"Недопустимый bootstrap-шаг infra-manager: {phase}"
+        )
+    return _run_deploy_guest(
+        repo_root,
+        vmid,
+        bootstrap_scope=True,
+        phase=phase,
+    )
