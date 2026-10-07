@@ -1156,6 +1156,22 @@ def main_test() -> None:
             "load_status_definition",
             return_value=definition,
         ),
+        patch.object(status_module, "_project_branch", return_value="main"),
+        patch.object(status_module, "_run_status_checks") as run_checks,
+        patch.object(status_module, "console") as console,
+    ):
+        if check_status(full=False, quiet=False) != 0:
+            fail("Обычная проверка состояния должна завершаться успешно")
+        console.info.assert_called_once_with("Проверка управляющего контура")
+        console.ok.assert_called_once_with(definition.short_ready_message)
+        run_checks.assert_called_once()
+
+    with (
+        patch.object(
+            status_module,
+            "load_status_definition",
+            return_value=definition,
+        ),
         patch.object(status_module, "_run_status_checks") as run_checks,
         patch.object(
             status_module,
@@ -1163,12 +1179,14 @@ def main_test() -> None:
             return_value=values,
         ) as resolve_data,
         patch.object(status_module, "_show_full_status") as show_summary,
+        patch.object(status_module, "console") as console,
     ):
         if check_status(full=True, quiet=True) != 0:
             fail("Скрытая полная проверка должна завершаться успешно")
         run_checks.assert_called_once()
         resolve_data.assert_called_once()
         show_summary.assert_not_called()
+        console.info.assert_not_called()
 
     print("Проверки состояния infra-manager пройдены.")
 
