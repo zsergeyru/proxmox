@@ -50,21 +50,29 @@ Home Assistant, MQTT, Zigbee2MQTT, ESPHome, Frigate и другие прикла
 
 В обычном контуре 910 проверяется тем же заданием Semaphore `Status Guest`, что и остальные управляемые гости. Общий [`status.yaml`](status.yaml) подключает внутреннюю глубокую проверку 910, а итоговый операторский экран формирует общий механизм состояния гостей.
 
-На физическом PVE сохраняется независимая аварийно-операторская команда:
+На физическом PVE сохраняется единая операторская команда:
 
 ~~~bash
-infra-manager status
-infra-manager repair
+infra-manager guests
+infra-manager status [VMID]
+infra-manager deploy VMID
+infra-manager sync VMID
+infra-manager repair [VMID]
+infra-manager test VMID
 infra-manager recover
 ~~~
 
+Изменяющие операции конкретного гостя передаются в существующие задания Semaphore внутри 910. PVE не выполняет параллельный OpenTofu/Ansible-контур.
+
 Внутри 910 остаётся техническая команда `infra-manager-status --full`. Её машинное описание находится в [`infra-manager-status.yaml`](infra-manager-status.yaml), устанавливается как `/etc/infra-manager/status.yaml` и не является отдельным операторским экраном.
 
-Данные ограниченного пользователя встроенного OpenBao UI по-прежнему можно получить напрямую от root на PVE:
+Данные входа OpenBao и другие операторские пароли выводятся только по доверенному запросу root с PVE, например:
 
 ~~~bash
-infra-manager openbao-operator
+infra-manager status 910
 ~~~
+
+В журналах Semaphore и Homepage пароли скрываются.
 
 ## Источники точных значений
 

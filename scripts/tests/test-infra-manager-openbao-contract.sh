@@ -82,14 +82,13 @@ for task_file in "${ANSIBLE_RUNTIME_PARTS[@]}"; do
 done
 [[ -s "$PVE_OPERATOR" ]] \
     || die "Отсутствует единая операторская команда PVE"
-grep -Fq '"status"' "$PVE_OPERATOR" \
-    || die "PVE-команда infra-manager должна поддерживать status"
-grep -Fq '"repair"' "$PVE_OPERATOR" \
-    || die "PVE-команда infra-manager должна поддерживать repair"
-grep -Fq '"openbao-operator"' "$PVE_OPERATOR" \
-    || die "PVE-команда infra-manager должна выдавать operator credentials OpenBao"
-grep -Fq '"recover"' "$PVE_OPERATOR" \
-    || die "PVE-команда infra-manager должна поддерживать recover"
+for operator_command in guests deploy status sync repair test recover; do
+    grep -Fq "\"$operator_command\"" "$PVE_OPERATOR" \
+        || die "PVE-команда infra-manager не поддерживает $operator_command"
+done
+if grep -Fq '"openbao-operator"' "$PVE_OPERATOR"; then
+    die "openbao-operator не должен быть отдельной операторской командой PVE"
+fi
 grep -Fq 'install_openbao_host_support(context.node, repo_root)' "$PY_GUEST_DEPLOY" \
     || die "Deploy Guest должен обновлять PVE OpenBao support до SSH-подписания"
 grep -Fq 'install_recovery_host_support(context.node, repo_root)' "$PY_GUEST_DEPLOY" \

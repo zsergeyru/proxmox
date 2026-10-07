@@ -326,6 +326,25 @@ def check_secret_modes() -> None:
             show_secrets=False,
         )
 
+    with (
+        patch.object(status, "verify_guest_status", return_value=verified),
+        patch.object(
+            status,
+            "_resolve_password",
+            side_effect=AssertionError("Пароль не должен читаться по умолчанию"),
+        ),
+    ):
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            status.show_guest_status(
+                ROOT,
+                identity,
+                resource,
+                full=True,
+            )
+        if "Пароль:" not in output.getvalue() or "скрыт" not in output.getvalue():
+            fail("Режим по умолчанию должен скрывать пароль")
+
 
 def main() -> None:
     check_operator_contracts()

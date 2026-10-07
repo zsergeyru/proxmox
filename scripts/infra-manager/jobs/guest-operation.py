@@ -45,7 +45,12 @@ def main() -> int:
         parser.error("нужно выбрать гостя или передать VMID")
 
     try:
-        return run_guest_operation(REPO_ROOT, args.operation, vmid)
+        return run_guest_operation(
+            REPO_ROOT,
+            args.operation,
+            vmid,
+            show_secrets=False,
+        )
     except (InfraManagerError, OSError) as exc:
         console.error(str(exc))
         return 1

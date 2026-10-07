@@ -392,7 +392,7 @@ def show_guest_status(
     resource: dict[str, object],
     *,
     full: bool = True,
-    show_secrets: bool = True,
+    show_secrets: bool = False,
     project_branch: str | None = None,
     project_revision: str | None = None,
 ) -> None:

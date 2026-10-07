@@ -318,9 +318,15 @@ infra-runtime
 /run/infra-manager/secrets/initial-admin-password
 ```
 
-После успешного `Deploy Guest 910` общий операторский итог показывает адрес Semaphore, логин `admin` и сохранённый пароль. Те же данные показывает `Status Guest 910`. Общий процесс Ansible и внутренние технические проверки пароль не печатают и в технический журнал его не записывают.
+Задания Semaphore `Deploy Guest 910` и `Status Guest 910` показывают адрес и логин, но пароль в их журнале всегда скрыт. Общий процесс Ansible и внутренние технические проверки также пароль не печатают.
 
-Получить его от root внутри 910 можно также явно:
+Фактические данные входа выводятся только по явному доверенному запросу root на PVE:
+
+```bash
+infra-manager status 910
+```
+
+При необходимости пароль по-прежнему доступен root внутри 910 в рабочем временном файле:
 
 ```bash
 cat /run/infra-manager/secrets/initial-admin-password
@@ -328,15 +334,19 @@ cat /run/infra-manager/secrets/initial-admin-password
 
 ## Операторская команда
 
-На PVE используется одна команда:
+На PVE используется одна команда с единым набором операций:
 
 ```bash
-infra-manager status
-infra-manager repair
+infra-manager guests
+infra-manager status [VMID]
+infra-manager deploy VMID
+infra-manager sync VMID
+infra-manager repair [VMID]
+infra-manager test VMID
 infra-manager recover
 ```
 
-`status` только проверяет состояние. `repair` выполняет безопасные повторяемые исправления без удаления Raft, OpenTofu state или SSH CA. `recover` запускает защищённый аварийный bootstrap только после проверки сохранности постоянных данных.
+Операции `deploy`, `sync`, `repair VMID` и `test` передаются штатным заданиям Semaphore в 910; PVE не становится вторым исполнителем OpenTofu или Ansible. `status VMID` выполняет доверенную проверку через 910 и может показать операторские пароли только в текущем терминале root. `status` и `repair` без VMID относятся к самому управляющему контуру, а `recover` запускает защищённое аварийное восстановление.
 
 Команды внутри 910 и PVE helper-команды считаются внутренней реализацией.
 

@@ -274,13 +274,21 @@ INFRA_LOG_LEVEL=normal
 /usr/local/sbin/infra-manager-status --full --quiet
 ```
 
-На физическом PVE сохраняется отдельная аварийно-операторская команда:
+На физическом PVE сохраняется единая операторская команда:
 
 ```bash
-infra-manager status
+infra-manager guests
+infra-manager status [VMID]
+infra-manager deploy VMID
+infra-manager sync VMID
+infra-manager repair [VMID]
+infra-manager test VMID
+infra-manager recover
 ```
 
-Она проверяет PVE-only контур и состояние самого управляющего гостя независимо от Semaphore.
+`status` без VMID проверяет PVE-only контур и состояние самого управляющего гостя независимо от Semaphore. `status VMID` выполняет общий статус выбранного гостя и в доверенной root-сессии PVE явно разрешает вывод операторских паролей.
+
+Изменяющие команды для конкретного гостя не создают второй механизм развёртывания на PVE. Они запускают соответствующие существующие задания Semaphore в 910, ждут результат и выводят их журнал. Сам журнал Semaphore всегда формируется без секретов.
 
 Для 910 в глубокой проверке подтверждаются:
 
@@ -310,9 +318,15 @@ infra-manager status
 
 Права временного файла — `0600`.
 
-Адрес Semaphore, логин `admin` и сохранённый пароль показывает полный операторский результат `Status Guest` и успешного `Deploy Guest`. Техническая команда `infra-manager-status` используется только для глубокой проверки и пароль не выводит. Общий процесс Ansible также не печатает пароль и не записывает его в технический журнал.
+Адрес Semaphore и логин `admin` остаются в полном результате `Status Guest` и успешного `Deploy Guest`, но сохранённый пароль в журнал Semaphore не выводится. Техническая команда `infra-manager-status`, общий процесс Ansible, Homepage и автоматические проверки также пароль не печатают.
 
-Получить пароль от root внутри 910 можно также явно:
+Получить фактический пароль в доверенной root-сессии физического PVE можно через единый статус гостя:
+
+```bash
+infra-manager status 910
+```
+
+От root внутри 910 рабочее значение также доступно явно:
 
 ```bash
 cat /run/infra-manager/secrets/initial-admin-password

@@ -36,6 +36,14 @@ GUEST_OPERATIONS: Final[tuple[str, ...]] = (
     "sync",
 )
 
+GUEST_OPERATION_TEMPLATES: Final[dict[str, str]] = {
+    "deploy": "Deploy Guest",
+    "status": "Status Guest",
+    "repair": "Repair Guest",
+    "test": "Test Guest",
+    "sync": "Sync Guest",
+}
+
 
 def extract_survey_vmid(argv: list[str]) -> tuple[list[str], int | None]:
     """Извлечь GUEST_VMID, который Semaphore передаёт как survey-переменную."""
@@ -188,7 +196,12 @@ def _infra_manager_sync(
     console.ok("Конфигурация Semaphore синхронизирована")
 
 
-def _run_deploy(repo_root: Path, identity: GuestIdentity) -> int:
+def _run_deploy(
+    repo_root: Path,
+    identity: GuestIdentity,
+    *,
+    show_secrets: bool = False,
+) -> int:
     """Выполнить Deploy Guest и показать единый итоговый статус."""
 
     activation_reserved = False
@@ -216,7 +229,7 @@ def _run_deploy(repo_root: Path, identity: GuestIdentity) -> int:
             identity,
             resource,
             full=True,
-            show_secrets=True,
+            show_secrets=show_secrets,
             project_branch=project_branch_for_checkout(repo_root),
             project_revision=project_revision(repo_root),
         )
@@ -231,6 +244,8 @@ def _run_status(
     client: PveClient,
     repo_root: Path,
     identity: GuestIdentity,
+    *,
+    show_secrets: bool = False,
 ) -> int:
     resource = _generic_status(
         client,
@@ -243,11 +258,49 @@ def _run_status(
         identity,
         resource,
         full=True,
-        show_secrets=True,
+        show_secrets=show_secrets,
         project_branch=project_branch_for_checkout(repo_root),
         project_revision=project_revision(repo_root),
     )
     return 0
+
+
+def list_local_guests(repo_root: Path) -> int:
+    """Показать поддерживаемых гостей и состояние объектов PVE."""
+
+    client = PveClient()
+    print(f"{'VMID':<7}{'Имя':<24}{'Роль':<20}Состояние")
+    for identity in deployable_guests(repo_root):
+        resource = client.find_vm(identity.vmid)
+        if resource is None:
+            state = "отсутствует"
+        else:
+            state = str(resource.get("status") or "неизвестно")
+        print(
+            f"{identity.vmid:<7}"
+            f"{identity.name:<24}"
+            f"{(identity.role or '-'):<20}"
+            f"{state}"
+        )
+    return 0
+
+
+def run_local_guest_status(
+    repo_root: Path,
+    vmid: int,
+    *,
+    show_secrets: bool = False,
+) -> int:
+    """Показать статус гостя из управляющего контура с PVE credential."""
+
+    require_runtime_activation_idle()
+    identity = guest_identity(repo_root, vmid)
+    return _run_status(
+        PveClient(),
+        repo_root,
+        identity,
+        show_secrets=show_secrets,
+    )
 
 
 def _run_repair(
@@ -325,6 +378,8 @@ def run_guest_operation(
     repo_root: Path,
     operation: str,
     vmid: int,
+    *,
+    show_secrets: bool = False,
 ) -> int:
     """Выполнить одну стандартную операцию над выбранным гостем."""
 
@@ -335,13 +390,22 @@ def run_guest_operation(
     identity = guest_identity(repo_root, vmid)
 
     if operation == "deploy":
-        return _run_deploy(repo_root, identity)
+        return _run_deploy(
+            repo_root,
+            identity,
+            show_secrets=show_secrets,
+        )
     if operation == "sync":
         return _run_sync(repo_root, identity)
 
     client = PveClient.from_opentofu_env()
     if operation == "status":
-        return _run_status(client, repo_root, identity)
+        return _run_status(
+            client,
+            repo_root,
+            identity,
+            show_secrets=show_secrets,
+        )
     if operation == "repair":
         return _run_repair(client, repo_root, identity)
     if operation == "test":
