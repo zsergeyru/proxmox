@@ -217,6 +217,29 @@ def check_log_levels() -> None:
 
 def check_runtime_activation_guard() -> None:
     with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        host_state = root / "host-semaphore"
+        runtime_state = root / "runtime-semaphore"
+        host_state.mkdir()
+        runtime_state.mkdir()
+
+        original_host_state = common.HOST_SEMAPHORE_STATE_DIR
+        original_runtime_state = common.RUNTIME_SEMAPHORE_STATE_DIR
+        try:
+            common.HOST_SEMAPHORE_STATE_DIR = host_state
+            common.RUNTIME_SEMAPHORE_STATE_DIR = runtime_state
+            expected = host_state / ".infra-manager-runtime-activation-pending"
+            if common._default_runtime_activation_marker() != expected:
+                fail("На 910 marker активации должен использовать persistent-state")
+
+            common.HOST_SEMAPHORE_STATE_DIR = root / "missing-host-state"
+            expected = runtime_state / ".infra-manager-runtime-activation-pending"
+            if common._default_runtime_activation_marker() != expected:
+                fail("В infra-runtime marker активации должен использовать /var/lib/semaphore")
+        finally:
+            common.HOST_SEMAPHORE_STATE_DIR = original_host_state
+            common.RUNTIME_SEMAPHORE_STATE_DIR = original_runtime_state
+
         marker = Path(tmp) / "runtime-activation-pending"
         original = common.RUNTIME_ACTIVATION_MARKER
         common.RUNTIME_ACTIVATION_MARKER = marker
