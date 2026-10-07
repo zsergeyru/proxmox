@@ -109,4 +109,26 @@ grep -q '_ensure_bootstrap_identity(context.vmid)' "$ROOT/scripts/infra-manager/
 grep -q '_remove_bootstrap_identity(context.vmid)' "$ROOT/scripts/infra-manager/infra_manager/guest_deploy.py" \
     || die "Обычный deploy должен удалять одноразовый bootstrap SSH key после настройки"
 
+# Контракт SSH-ключей bootstrap 910.
+PREPARE_RUNTIME="$BOOTSTRAP_DIR/prepare-runtime.sh"
+RUN_RUNTIME="$BOOTSTRAP_DIR/run-runtime.sh"
+CLEANUP="$BOOTSTRAP_DIR/bootstrap_runner/cleanup.py"
+INFRA_RUNNER="$BOOTSTRAP_DIR/bootstrap_runner/infra.py"
+PY_GUEST_DEPLOY="$ROOT/scripts/infra-manager/infra_manager/guest_deploy.py"
+
+grep -q 'rm -f' "$PREPARE_RUNTIME" || die "Новый bootstrap-сеанс должен удалять старую пару ключей перед генерацией"
+grep -q 'infra_manager_ed25519' "$PREPARE_RUNTIME" || die "Bootstrap 910 должен использовать единственную сеансовую identity"
+grep -q 'ssh-keygen .*infra-manager-bootstrap' "$PREPARE_RUNTIME" || die "Bootstrap key должен генерироваться заново для каждого сеанса"
+grep -q 'INFRA_BOOTSTRAP_SSH_PRIVATE_KEY=.*infra_manager_ed25519' "$RUN_RUNTIME" || die "Runtime должен получать только одноразовый bootstrap key 910"
+if grep -q 'guest_ed25519' "$RUN_RUNTIME" "$PREPARE_RUNTIME" "$CLEANUP" "$INFRA_RUNNER" "$PY_GUEST_DEPLOY"; then
+    die "Постоянный guest_ed25519 не должен возвращаться в активный deploy/bootstrap-контур"
+fi
+if grep -R -q 'bootstrap-runner-990' "$BOOTSTRAP_DIR"; then
+    die "Отдельный постоянный SSH marker bootstrap-runner-990 не должен возвращаться"
+fi
+grep -q 'remove_bootstrap_ssh_access_from_infra' "$CLEANUP" || die "Успешный bootstrap обязан удалить authorization одноразового ключа из 910"
+grep -q '"/etc/bootstrap-runner/bootstrap-ssh"' "$CLEANUP" || die "Успешный bootstrap обязан удалить локальную bootstrap-пару 990"
+grep -q 'allow_legacy_bootstrap=False' "$PY_GUEST_DEPLOY" || die "Обычный self-deploy infra-manager не должен иметь bootstrap fallback"
+grep -q '"/var/lib/bootstrap-runner/opentofu/state"' "$INFRA_RUNNER" || die "State шага create должен удаляться сразу после создания 910"
+
 printf '[ОК] Граница обычного deploy и bootstrap 910 зафиксирована\n'
