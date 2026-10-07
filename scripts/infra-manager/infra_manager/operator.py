@@ -36,7 +36,7 @@ RUNTIME_GUEST_OPERATION = (
 RUNTIME_DIRECT_SCRIPT = """
 work="$(mktemp -d /tmp/infra-manager-direct.XXXXXX)"
 trap 'rm -rf "$work"' EXIT INT TERM
-cp -a /var/lib/infra-manager/bootstrap-repo/. "$work/"
+cp -a "$3"/. "$work/"
 python3 "$work/scripts/infra-manager/jobs/guest-operation.py" "$1" "$2"
 """.strip()
 
@@ -192,6 +192,7 @@ def operator_guest_task(
                 "infra-manager-direct",
                 operation,
                 str(vmid),
+                RUNTIME_PROJECT_ROOT,
             ],
             check=False,
         )
