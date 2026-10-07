@@ -173,12 +173,6 @@ class BootstrapHost(
         self.host_openbao_config = Path(
             "/etc/infra-manager/openbao-host.json"
         )
-        self.host_openbao_unseal_service = Path(
-            "/etc/systemd/system/infra-manager-openbao-unseal.service"
-        )
-        self.host_openbao_unseal_timer = Path(
-            "/etc/systemd/system/infra-manager-openbao-unseal.timer"
-        )
 
         self.infra_role = INFRA_MANAGER_ROLE
         self.infra_ctid, self.infra_hostname = _find_role_guest(
