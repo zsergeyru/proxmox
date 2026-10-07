@@ -420,6 +420,7 @@ def test_recovery_host_support() -> None:
         ):
             module.install_recovery_host_support("pve", root)
             module.prepare_recovery_git("pve")
+            module.preflight_recovery_contour("pve")
             module.check_recovery_contour("pve")
             module.cleanup_transition_state("pve")
 
@@ -437,6 +438,7 @@ def test_recovery_host_support() -> None:
     ]
     assert calls == [
         ("/usr/local/sbin/infra-manager-recovery", "--prepare"),
+        ("/usr/local/sbin/infra-manager-recovery", "--preflight"),
         ("/usr/local/sbin/infra-manager-recovery", "--check"),
         ("/usr/local/sbin/infra-manager-recovery", "--cleanup-transition"),
     ]
