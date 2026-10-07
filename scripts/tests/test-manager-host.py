@@ -291,7 +291,7 @@ def test_recover() -> None:
         ),
         patch.object(module, "_download_bootstrap", side_effect=fake_download),
         patch.object(module, "run", side_effect=fake_run),
-        patch.object(module, "status", return_value=0),
+        patch.object(module, "manager_status", return_value=0),
     ):
         assert module.recover() == 0
 
@@ -299,6 +299,23 @@ def test_recover() -> None:
     assert len(host_calls) == 1
     assert host_calls[0][0] == "bash"
     assert host_calls[0][-1] == "--recover"
+
+
+def test_public_command_contract() -> None:
+    source = TARGET.read_text(encoding="utf-8")
+    for command in (
+        '"guests"',
+        '"deploy"',
+        '"status"',
+        '"sync"',
+        '"repair"',
+        '"test"',
+        '"recover"',
+    ):
+        if command not in source:
+            raise AssertionError(f"PVE CLI не содержит команду {command}")
+    if 'subparsers.add_parser(\n        "openbao-operator"' in source:
+        raise AssertionError("openbao-operator не должен быть публичной PVE-командой")
 
 
 def main() -> None:
@@ -310,6 +327,7 @@ def main() -> None:
     test_repair()
     test_openbao_operator()
     test_recover()
+    test_public_command_contract()
     print("[ОК] Единая операторская команда PVE проверена")
 
 
