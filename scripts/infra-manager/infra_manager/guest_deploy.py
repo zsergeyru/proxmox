@@ -612,7 +612,7 @@ def _install_operator_wrapper_after_self_update(
     *,
     self_update: bool,
 ) -> None:
-    """Обновить PVE-оболочку только после успешной настройки 910."""
+    """Обновить PVE-оболочку только после успешной настройки управляющего гостя."""
 
     if not self_update:
         return
