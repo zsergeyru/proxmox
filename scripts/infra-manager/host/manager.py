@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+import socket
 import subprocess
 import sys
 import time
@@ -110,6 +111,8 @@ def proxy_to_manager(arguments: list[str]) -> int:
             "exec",
             str(vmid),
             "--",
+            "env",
+            f"INFRA_PVE_NODE={socket.gethostname().split('.')[0]}",
             GUEST_COMMAND,
             "--trusted-pve",
             *arguments,
