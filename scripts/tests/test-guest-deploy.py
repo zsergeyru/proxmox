@@ -36,10 +36,8 @@ def fail(message: str) -> None:
 
 
 def check_deploy_guest_survey_input() -> None:
-    remaining, vmid = extract_survey_vmid(
-        ["GUEST_VMID=410", "--provision-only"]
-    )
-    if remaining != ["--provision-only"] or vmid != 410:
+    remaining, vmid = extract_survey_vmid(["GUEST_VMID=410"])
+    if remaining != [] or vmid != 410:
         fail("Guest operation неверно разбирает survey-переменную GUEST_VMID")
 
     remaining, vmid = extract_survey_vmid(["910"])
@@ -291,6 +289,83 @@ def check_infra_manager_self_update_path_after_vmid_change() -> None:
             "Самообновление infra-manager должно применять полный provision "
             "в безопасном режиме"
         )
+
+def check_infra_manager_self_update_points_to_recovery() -> None:
+    context = DeploymentContext(
+        client=SimpleNamespace(),
+        vmid=920,
+        name="infra-manager",
+        node="pve",
+        kind="lxc",
+        features=("container-host",),
+        template_vmid=None,
+        address="192.0.2.20",
+        target='proxmox_virtual_environment_container.guest["920"]',
+        workspace=SimpleNamespace(),
+        paths=SimpleNamespace(),
+    )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        guest_dir = root / "infrastructure/guests/920-infra-manager"
+        guest_dir.mkdir(parents=True)
+        (guest_dir / "guest.yaml").write_text(
+            "schema_version: 12\n"
+            "vmid: 920\n"
+            "name: infra-manager\n"
+            "role: infra-manager\n"
+            "profile: debian-lxc-docker\n"
+            "pve_management: false\n",
+            encoding="utf-8",
+        )
+
+        with (
+            patch.object(guest_deploy_module, "require_command"),
+            patch.object(
+                guest_deploy_module,
+                "run",
+                return_value=SimpleNamespace(returncode=0, stdout=""),
+            ),
+            patch.object(
+                guest_deploy_module,
+                "project_branch_for_checkout",
+                return_value="feature/unified-guest-deploy",
+            ),
+            patch.object(
+                guest_deploy_module,
+                "_prepare_self_update_workspace",
+                return_value=SimpleNamespace(),
+            ),
+            patch.object(
+                guest_deploy_module,
+                "_build_deployment_context",
+                return_value=context,
+            ),
+            patch.object(
+                guest_deploy_module,
+                "_validate_existing_guest_object",
+                side_effect=InfraManagerError("гость недоступен"),
+            ),
+            patch.object(
+                guest_deploy_module,
+                "_configure_guest_os",
+                side_effect=AssertionError(
+                    "Ansible не должен запускаться после ошибки preflight"
+                ),
+            ),
+        ):
+            try:
+                guest_deploy_module.run_deploy_guest(root, 920)
+            except InfraManagerError as exc:
+                message = str(exc)
+                if "infra-manager recover" not in message:
+                    fail(
+                        "Ошибка штатного deploy infra-manager должна явно "
+                        "направлять в recovery"
+                    )
+            else:
+                fail("Недоступный infra-manager не должен считаться обновлённым")
+
 
 def check_openbao_machine_identity_preparation() -> None:
     with tempfile.TemporaryDirectory() as tmp:
@@ -1191,6 +1266,7 @@ def main_test() -> None:
     check_opentofu_provider_mirror()
     check_project_branch_after_semaphore_branch_switch()
     check_infra_manager_self_update_path_after_vmid_change()
+    check_infra_manager_self_update_points_to_recovery()
     check_openbao_machine_identity_preparation()
     check_openbao_target_only_preparation()
     check_temporary_certificate_path()
