@@ -8,17 +8,25 @@
 - name: Подготовить рабочую копию проекта
   ansible.builtin.import_tasks: repository.yml
 
+- name: Поднять OpenBao для первоначального перехода доверия
+  ansible.builtin.import_tasks: bootstrap_openbao.yml
+  when: (provision_phase | default('full')) == 'bootstrap'
+
 - name: Настроить Semaphore
   ansible.builtin.import_tasks: semaphore.yml
+  when: (provision_phase | default('full')) == 'full'
 
 - name: Установить и запустить управляющую среду
   ansible.builtin.import_tasks: runtime.yml
+  when: (provision_phase | default('full')) == 'full'
 
 - name: Проверить и разблокировать OpenBao
   ansible.builtin.import_tasks: openbao.yml
 
 - name: Подготовить аварийный контур
   ansible.builtin.import_tasks: recovery.yml
+  when: (provision_phase | default('full')) == 'full'
 
 - name: Завершить настройку и проверить готовность
   ansible.builtin.import_tasks: verify.yml
+  when: (provision_phase | default('full')) == 'full'
