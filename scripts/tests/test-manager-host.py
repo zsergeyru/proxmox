@@ -36,7 +36,11 @@ def test_host_proxy() -> None:
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
     with (
-        patch.object(host, "manager_vmid", return_value=920),
+        patch.object(
+            host,
+            "manager_identity",
+            return_value=(920, "infra-manager"),
+        ),
         patch.object(host, "verify_manager") as verify,
         patch.object(host, "guest_running", return_value=True),
         patch.object(host.socket, "gethostname", return_value="pve.example"),
@@ -44,7 +48,7 @@ def test_host_proxy() -> None:
     ):
         assert host.proxy_to_manager(["status", "410"]) == 0
 
-    verify.assert_called_once_with(920)
+    verify.assert_called_once_with(920, "infra-manager")
     assert calls == [[
         "pct",
         "exec",
@@ -61,7 +65,11 @@ def test_host_proxy() -> None:
 
 def test_host_repair_starts_manager() -> None:
     with (
-        patch.object(host, "manager_vmid", return_value=920),
+        patch.object(
+            host,
+            "manager_identity",
+            return_value=(920, "infra-manager"),
+        ),
         patch.object(host, "verify_manager") as verify,
         patch.object(host, "start_manager") as start,
         patch.object(host.socket, "gethostname", return_value="pve.example"),
@@ -73,14 +81,18 @@ def test_host_repair_starts_manager() -> None:
     ):
         assert host.proxy_to_manager(["repair"]) == 0
 
-    verify.assert_called_once_with(920)
+    verify.assert_called_once_with(920, "infra-manager")
     start.assert_called_once_with(920)
     assert run.call_args.args[0][-2:] == ["--trusted-pve", "repair"]
 
 
 def test_host_refuses_stopped_manager_for_regular_commands() -> None:
     with (
-        patch.object(host, "manager_vmid", return_value=920),
+        patch.object(
+            host,
+            "manager_identity",
+            return_value=(920, "infra-manager"),
+        ),
         patch.object(host, "verify_manager"),
         patch.object(host, "guest_running", return_value=False),
     ):
@@ -97,13 +109,14 @@ def test_host_verifies_manager_ownership() -> None:
     good = SimpleNamespace(
         returncode=0,
         stdout=(
+            "hostname: infra-manager\n"
             "unprivileged: 1\n"
             "description: [owner=proxmox-project;role=infra-manager]\n"
         ),
         stderr="",
     )
     with patch.object(host, "run", return_value=good):
-        host.verify_manager(920)
+        host.verify_manager(920, "infra-manager")
 
     bad = SimpleNamespace(
         returncode=0,
@@ -112,7 +125,7 @@ def test_host_verifies_manager_ownership() -> None:
     )
     with patch.object(host, "run", return_value=bad):
         try:
-            host.verify_manager(920)
+            host.verify_manager(920, "infra-manager")
         except host.OperatorError as exc:
             assert "recover" in str(exc)
         else:
