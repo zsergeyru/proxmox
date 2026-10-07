@@ -12,3 +12,18 @@
     PYTHONPATH: "{{ provision.paths.python_package }}"
     INFRA_PVE_NODE: "{{ infra_pve_node }}"
   changed_when: true
+
+- name: Установить тонкую операторскую оболочку PVE
+  ansible.builtin.command:
+    argv:
+      - python3
+      - -m
+      - infra_manager
+      - operator-wrapper-install
+      - --repo-root
+      - "{{ provision.paths.bootstrap_repository }}"
+  environment:
+    PYTHONPATH: "{{ provision.paths.python_package }}"
+    INFRA_PVE_NODE: "{{ infra_pve_node }}"
+  changed_when: true
+
