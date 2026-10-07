@@ -369,6 +369,14 @@ def check_dispatch() -> None:
         fail("Явный доверенный вызов должен разрешать вывод секретов")
 
 
+def check_semaphore_secret_policy() -> None:
+    entrypoint = (
+        ROOT / "scripts" / "infra-manager" / "jobs" / "guest-operation.py"
+    ).read_text(encoding="utf-8")
+    if "show_secrets=False" not in entrypoint:
+        fail("Точка входа Semaphore должна явно запрещать вывод секретов")
+
+
 def main() -> None:
     check_operation_catalog()
     check_status_operation()
@@ -378,6 +386,7 @@ def main() -> None:
     check_sync_operation()
     check_deploy_operation()
     check_dispatch()
+    check_semaphore_secret_policy()
     print("[ОК] Стандартные операции над гостями проверены")
 
 
