@@ -253,11 +253,10 @@ def test_ansible_phases_enable_progress() -> None:
     host.deploy_infra_phase("infrastructure", "infra", "ok")
     host.deploy_infra_phase("base", "base", "ok")
     host.deploy_infra_phase("provision", "full", "ok")
-    host.deploy_infra_phase("existing", "existing", "ok")
 
     assert_equal(
         [call.get("progress") for call in host.calls],
-        [False, True, True, True],
+        [False, True, True],
         "Ansible-фазы должны показывать потоковый прогресс",
     )
     if not all(call.get("quiet") is True for call in host.calls):
@@ -433,9 +432,6 @@ class ApplyHarness(BootstrapHost):
     def ensure_existing_infra_running(self) -> None:
         self.events.append("ensure_existing")
 
-    def ensure_runner_ssh_access_to_infra(self) -> None:
-        self.events.append("ensure_runner_ssh")
-
     def deploy_infra_phase(self, phase: str, title: str, success: str) -> None:
         del title, success
         self.events.append(f"deploy:{phase}")
@@ -477,7 +473,6 @@ def test_new_install_flow() -> None:
             "runner_owns_infra",
             "deploy:infrastructure",
             "attach_layout",
-            "ensure_runner_ssh",
             "deploy:base",
             "handoff:apply",
             "deploy:provision",
@@ -492,7 +487,14 @@ def test_new_install_flow() -> None:
 
 def test_existing_without_bootstrap_state() -> None:
     host = ApplyHarness("apply", infra_exists=True, owns_state=False)
-    host.apply()
+    try:
+        host.apply()
+    except BootstrapError as exc:
+        if "обычный deploy/repair" not in str(exc):
+            raise
+    else:
+        raise AssertionError("990 не должен обновлять существующий рабочий 910")
+
     assert_equal(
         host.events,
         [
@@ -500,17 +502,8 @@ def test_existing_without_bootstrap_state() -> None:
             "runner_owns_infra",
             "verify_layout",
             "prepare_runner",
-            "ensure_existing",
-            "pve_access:apply",
-            "handoff_existing",
-            "ensure_runner_ssh",
-            "deploy:existing",
-            "initialize_openbao",
-            "verify_ready:quiet",
-            "finalize_runner",
-            "check_ready",
         ],
-        "Существующий 910 без state 990 должен обновляться без OpenTofu-владения 910",
+        "990 должен остановиться до изменения существующего рабочего 910",
     )
 
 
@@ -536,10 +529,6 @@ def test_resume_unfinished_initial_state() -> None:
     if "deploy:base" not in host.events or "deploy:provision" not in host.events:
         raise AssertionError(
             "После восстановления mount point настройка должна продолжиться с Ansible"
-        )
-    if "ensure_runner_ssh" not in host.events:
-        raise AssertionError(
-            "Перед Ansible незавершённая установка должна восстановить SSH-доступ 990"
         )
     if "deploy:existing" in host.events:
         raise AssertionError(
@@ -578,7 +567,16 @@ def test_resume_unfinished_with_layout_already_attached() -> None:
 
 def test_recover_existing_without_state() -> None:
     host = ApplyHarness("recover", infra_exists=True, owns_state=False)
-    host.apply()
+    try:
+        host.apply()
+    except BootstrapError as exc:
+        if "полного пересоздания" not in str(exc):
+            raise
+    else:
+        raise AssertionError(
+            "Текущий 990 не должен чинить существующий рабочий 910 через existing-путь"
+        )
+
     assert_equal(
         host.events,
         [
@@ -587,17 +585,8 @@ def test_recover_existing_without_state() -> None:
             "runner_owns_infra",
             "verify_layout",
             "prepare_runner",
-            "ensure_existing",
-            "pve_access:recover",
-            "handoff_existing",
-            "ensure_runner_ssh",
-            "deploy:existing",
-            "initialize_openbao",
-            "verify_ready:quiet",
-            "finalize_runner",
-            "check_ready",
         ],
-        "Recovery существующего 910 должен сначала восстановить PVE-доступ",
+        "Recovery должен остановиться до старого existing-handoff",
     )
 
 
