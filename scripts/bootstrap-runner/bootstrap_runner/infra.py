@@ -52,16 +52,24 @@ class BootstrapInfraMixin:
             "env",
             f"INFRA_PROJECT_BRANCH={self.project_branch}",
             "bash",
-            str(self.project_dir / "scripts/bootstrap-runner/deploy-infra-manager.sh"),
+            str(self.project_dir / "scripts/bootstrap-runner/run-runtime.sh"),
+            "python3",
+            "scripts/infra-manager/jobs/bootstrap-infra-manager.py",
             step,
             str(self.infra_ctid),
-            str(self.project_dir),
         ]
         self.ct_exec(
             *command,
             quiet=True,
             progress=progress,
         )
+        if step == "create":
+            self.ct_exec(
+                "rm",
+                "-rf",
+                "/var/lib/bootstrap-runner/opentofu/state",
+                quiet=True,
+            )
 
     def create_infra_manager(self) -> None:
         """Создать объект infra-manager в bootstrap-state."""
