@@ -381,31 +381,30 @@ def run_guest_operation(
         raise InfraManagerError(f"Неизвестная операция гостя: {operation}")
 
     require_runtime_activation_idle()
-    with project_checkout_lock(exclusive=False):
-        identity = guest_identity(repo_root, vmid)
+    identity = guest_identity(repo_root, vmid)
 
-        if operation == "status":
-            return _run_status(
-                PveClient.from_opentofu_env(),
+    if operation == "status":
+        return _run_status(
+            PveClient.from_opentofu_env(),
+            repo_root,
+            identity,
+            show_secrets=show_secrets,
+        )
+
+    with guest_operation_lock(identity.vmid, operation):
+        if operation == "deploy":
+            return _run_deploy(
                 repo_root,
                 identity,
                 show_secrets=show_secrets,
             )
+        if operation == "sync":
+            return _run_sync(repo_root, identity)
 
-        with guest_operation_lock(identity.vmid, operation):
-            if operation == "deploy":
-                return _run_deploy(
-                    repo_root,
-                    identity,
-                    show_secrets=show_secrets,
-                )
-            if operation == "sync":
-                return _run_sync(repo_root, identity)
-
-            client = PveClient.from_opentofu_env()
-            if operation == "repair":
-                return _run_repair(client, repo_root, identity)
-            if operation == "test":
-                return _run_test(client, repo_root, identity)
+        client = PveClient.from_opentofu_env()
+        if operation == "repair":
+            return _run_repair(client, repo_root, identity)
+        if operation == "test":
+            return _run_test(client, repo_root, identity)
 
     raise InfraManagerError(f"Неизвестная операция гостя: {operation}")
