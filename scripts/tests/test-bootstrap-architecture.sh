@@ -118,7 +118,8 @@ PY_GUEST_DEPLOY="$ROOT/scripts/infra-manager/infra_manager/guest_deploy.py"
 
 grep -q 'rm -f' "$PREPARE_RUNTIME" || die "Новый bootstrap-сеанс должен удалять старую пару ключей перед генерацией"
 grep -q 'infra_manager_ed25519' "$PREPARE_RUNTIME" || die "Bootstrap 910 должен использовать единственную сеансовую identity"
-grep -q 'ssh-keygen .*infra-manager-bootstrap' "$PREPARE_RUNTIME" || die "Bootstrap key должен генерироваться заново для каждого сеанса"
+grep -q 'ssh-keygen -q -t ed25519' "$PREPARE_RUNTIME" || die "Bootstrap key должен генерироваться через ssh-keygen"
+grep -q 'infra-manager-bootstrap' "$PREPARE_RUNTIME" || die "Bootstrap key должен иметь единый сеансовый marker"
 grep -q 'INFRA_BOOTSTRAP_SSH_PRIVATE_KEY=.*infra_manager_ed25519' "$RUN_RUNTIME" || die "Runtime должен получать только одноразовый bootstrap key 910"
 if grep -q 'guest_ed25519' "$RUN_RUNTIME" "$PREPARE_RUNTIME" "$CLEANUP" "$INFRA_RUNNER" "$PY_GUEST_DEPLOY"; then
     die "Постоянный guest_ed25519 не должен возвращаться в активный deploy/bootstrap-контур"
