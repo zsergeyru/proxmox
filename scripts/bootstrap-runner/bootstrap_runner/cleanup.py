@@ -108,6 +108,35 @@ class BootstrapCleanupMixin:
             self.remove_named_token("root@pam", "bootstrap-runner")
         self.remove_downloaded_template()
 
+    def remove_infra_rootfs_for_recovery(self) -> None:
+        """Удалить только воспроизводимый объект infra-manager перед recovery."""
+        if not self.infra_exists():
+            return
+        if not self.infra_config_is_expected():
+            self.fail(
+                f"VMID {self.infra_ctid} не имеет строгой метки владения infra-manager"
+            )
+
+        self.pct("set", str(self.infra_ctid), "--protection", "0", quiet=True)
+        if self.pct_status(self.infra_ctid) == "running":
+            self.pct("stop", str(self.infra_ctid))
+        self.run(
+            "pct",
+            "destroy",
+            str(self.infra_ctid),
+            "--purge",
+            "1",
+            quiet=True,
+        )
+        if self.infra_exists():
+            self.fail(
+                f"LXC {self.infra_ctid} не удалён перед аварийным пересозданием"
+            )
+        self.ok(
+            f"Воспроизводимый rootfs {self.infra_ctid} удалён; "
+            "постоянное состояние сохранено на PVE"
+        )
+
     def remove_openbao_host_support(self) -> None:
         """Убрать хостовый сценарий OpenBao, сохранив unseal-ключ."""
         self.host_openbao_unseal_command.unlink(missing_ok=True)
