@@ -241,6 +241,8 @@ def _run_declared_check(
     node: str,
     address: str,
     check: dict[str, Any],
+    *,
+    project_branch: str | None = None,
 ) -> None:
     check_type = check["type"]
 
@@ -306,10 +308,17 @@ def _run_declared_check(
             raise InfraManagerError(
                 "local_status требует абсолютный command"
             )
+        argv = [command, "--full", "--quiet"]
+        if project_branch:
+            argv = [
+                "env",
+                f"INFRA_PROJECT_BRANCH={project_branch}",
+                *argv,
+            ]
         _run_guest_command(
             node,
             address,
-            [command, "--full", "--quiet"],
+            argv,
         )
         return
 
@@ -339,6 +348,8 @@ def verify_guest_status(
     repo_root: Path,
     identity: GuestIdentity,
     resource: dict[str, object],
+    *,
+    project_branch: str | None = None,
 ) -> tuple[str, str, tuple[dict[str, Any], ...], tuple[str, ...]]:
     """Проверить базовое состояние и вернуть данные для единого вывода."""
 
@@ -374,7 +385,12 @@ def verify_guest_status(
         messages.append(f"{service['name']} доступен")
 
     for check in _load_common_checks(identity):
-        _run_declared_check(node, address, check)
+        _run_declared_check(
+            node,
+            address,
+            check,
+            project_branch=project_branch,
+        )
         messages.append(str(check["message"]))
 
     return node, address, services, tuple(messages)
@@ -423,6 +439,7 @@ def show_guest_status(
         repo_root,
         identity,
         resource,
+        project_branch=project_branch,
     )
 
     resource_type = resource.get("type")
