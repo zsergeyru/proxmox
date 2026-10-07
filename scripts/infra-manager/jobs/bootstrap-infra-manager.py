@@ -11,10 +11,12 @@ MODULE_ROOT = Path(__file__).resolve().parents[1]
 REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(MODULE_ROOT))
 
-from infra_manager.common import InfraManagerError, console, require_runtime_activation_idle
-from infra_manager.guest_catalog import guest_identity
-from infra_manager.guest_deploy import run_deploy_guest
-from infra_manager.settings import SETTINGS
+from infra_manager.common import (
+    InfraManagerError,
+    console,
+    require_runtime_activation_idle,
+)
+from infra_manager.guest_deploy import run_bootstrap_infra_manager_phase
 
 
 def main() -> int:
@@ -27,21 +29,14 @@ def main() -> int:
 
     try:
         require_runtime_activation_idle()
-        identity = guest_identity(REPO_ROOT, args.vmid)
-        if identity.role != SETTINGS.infra_manager_role:
-            raise InfraManagerError(
-                f"Гость {args.vmid} не имеет роль {SETTINGS.infra_manager_role!r}"
-            )
-
         phase = {
             "infrastructure": "infrastructure",
             "base": "provision-base",
             "provision": "provision",
         }[args.phase]
-        return run_deploy_guest(
+        return run_bootstrap_infra_manager_phase(
             REPO_ROOT,
             args.vmid,
-            bootstrap_scope=True,
             phase=phase,
         )
     except (InfraManagerError, OSError) as exc:
