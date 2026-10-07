@@ -191,7 +191,7 @@ def manager_status() -> int:
         return 1
 
     print("\n==> OpenBao UI")
-    openbao_operator(rotate=False)
+    _show_openbao_credentials()
     print("\n[ОК] infra-manager полностью готов")
     return 0
 
@@ -377,19 +377,14 @@ def repair() -> int:
     return manager_status()
 
 
-def openbao_operator(*, rotate: bool) -> int:
-    """Показать или сменить учётные данные оператора OpenBao UI."""
+def _show_openbao_credentials() -> int:
+    """Показать данные входа OpenBao как часть доверенного PVE status."""
 
     require_executable(OPENBAO_COMMAND)
-    mode = (
-        "--rotate-operator-password"
-        if rotate
-        else "--show-operator-credentials"
-    )
     run(
         [
             str(OPENBAO_COMMAND),
-            mode,
+            "--show-operator-credentials",
             "--log-level",
             "quiet",
         ]
