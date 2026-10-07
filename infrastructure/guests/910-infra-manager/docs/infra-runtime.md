@@ -155,14 +155,13 @@ cat /opt/infra-manager/compose/.versions.env
 |---|---|---|
 | `/mnt/persistent-state/semaphore` | `/var/lib/semaphore` | RW |
 | `/etc/infra-manager/ca` | `/etc/infra-manager/ca` | RO |
-| `/mnt/persistent-state/ansible` | `/etc/infra-manager/ansible` | RO |
 | `/mnt/pve-access/pve-host` | `/mnt/pve-access/pve-host` | RO |
 | `/mnt/persistent-state/opentofu` | `/var/lib/infra-manager/opentofu` | RW |
 | `/mnt/persistent-state/locks` | `/var/lib/infra-manager/locks` | RW |
 | `/var/lib/infra-manager/bootstrap-repo` | `/var/lib/infra-manager/bootstrap-repo` | RO |
 | `/run/infra-manager/secrets` | `/run/infra-manager/secrets` | RO |
 
-Контейнер может менять свои рабочие данные Semaphore и OpenTofu, а также общий каталог координационных lock-файлов. `/var/lib/infra-manager/locks` указывает на тот же `/mnt/persistent-state/locks`, который использует операторский процесс на 910, поэтому PVE CLI и Semaphore видят одни и те же блокировки. Постоянная Git-копия подключена в контейнер только для чтения. Перед прямым `deploy` оператор автоматически обновляет её под исключительной блокировкой и создаёт временный каталог `/tmp/infra-manager-direct-*` внутри `infra-runtime`; `sync/repair/test` создают такой же снимок текущей копии под разделяемой блокировкой. После создания снимка блокировка проекта освобождается, а `guest-operation.py` выполняется уже из снимка. Поэтому самообновление управляющего гостя может менять постоянную Git-копию, не меняя файлы уже запущенного процесса. Идентичности Ansible, PVE-доступ и материализованные секреты контейнер также получает только для чтения.
+Контейнер может менять свои рабочие данные Semaphore и OpenTofu, а также общий каталог координационных lock-файлов. `/var/lib/infra-manager/locks` указывает на тот же `/mnt/persistent-state/locks`, который использует операторский процесс на 910, поэтому PVE CLI и Semaphore видят одни и те же блокировки. Постоянная Git-копия подключена в контейнер только для чтения. Перед прямым `deploy` оператор автоматически обновляет её под исключительной блокировкой и создаёт временный каталог `/tmp/infra-manager-direct-*` внутри `infra-runtime`; `sync/repair/test` создают такой же снимок текущей копии под разделяемой блокировкой. После создания снимка блокировка проекта освобождается, а `guest-operation.py` выполняется уже из снимка. Поэтому самообновление управляющего гостя может менять постоянную Git-копию, не меняя файлы уже запущенного процесса. PVE-доступ, центр SSH-доверия и материализованные секреты контейнер получает только для чтения.
 
 ## 3. Запуск и проверка
 
@@ -175,7 +174,6 @@ cat /opt/infra-manager/compose/.versions.env
 /mnt/persistent-state/semaphore/
 /mnt/persistent-state/opentofu/
 /mnt/persistent-state/locks/
-/mnt/persistent-state/ansible/
 /var/lib/infra-manager/bootstrap-repo/
 /etc/infra-manager/ca/
 /mnt/pve-access/pve-host/
@@ -269,7 +267,6 @@ docker exec infra-runtime test -d /var/lib/semaphore
 docker exec infra-runtime test -d /var/lib/infra-manager/opentofu
 docker exec infra-runtime test -w /var/lib/infra-manager/locks
 docker exec infra-runtime test -r /var/lib/infra-manager/bootstrap-repo/scripts/infra-manager/jobs/guest-operation.py
-docker exec infra-runtime test -d /etc/infra-manager/ansible
 docker exec infra-runtime test -d /run/infra-manager/secrets
 ```
 
