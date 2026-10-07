@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shlex
 import sys
 import tempfile
 from pathlib import Path
@@ -33,6 +34,147 @@ from .pve_host import (
     sign_ssh_host_key,
 )
 from .settings import PATHS, SETTINGS
+
+
+def _bootstrap_identity_path(vmid: int) -> Path:
+    """Путь одноразовой SSH-идентичности незавершённого нового гостя."""
+
+    return PATHS.opentofu_dir / "bootstrap-ssh" / str(vmid) / "id_ed25519"
+
+
+def _bootstrap_public_key(private_key: Path, vmid: int) -> str:
+    public_key = Path(str(private_key) + ".pub")
+    if not private_key.is_file() or not public_key.is_file():
+        raise InfraManagerError(
+            f"Гость {vmid}: одноразовый bootstrap SSH-ключ неполон"
+        )
+    value = public_key.read_text(encoding="utf-8").strip()
+    parts = value.split()
+    if len(parts) < 2 or parts[0] != "ssh-ed25519":
+        raise InfraManagerError(
+            f"Гость {vmid}: одноразовый bootstrap SSH-ключ некорректен"
+        )
+    return value
+
+
+def _ensure_bootstrap_identity(vmid: int) -> Path:
+    """Создать или продолжить одноразовую identity первого входа гостя."""
+
+    private_key = _bootstrap_identity_path(vmid)
+    public_key = Path(str(private_key) + ".pub")
+    if private_key.exists() != public_key.exists():
+        raise InfraManagerError(
+            f"Гость {vmid}: найден неполный одноразовый bootstrap SSH-ключ"
+        )
+    if not private_key.exists():
+        private_key.parent.mkdir(parents=True, exist_ok=True)
+        private_key.parent.chmod(0o700)
+        run(
+            [
+                "ssh-keygen",
+                "-q",
+                "-t",
+                "ed25519",
+                "-N",
+                "",
+                "-C",
+                f"infra-manager-bootstrap-{vmid}",
+                "-f",
+                str(private_key),
+            ]
+        )
+    private_key.chmod(0o600)
+    public_key.chmod(0o644)
+    _bootstrap_public_key(private_key, vmid)
+    return private_key
+
+
+def _existing_bootstrap_identity(vmid: int) -> Path | None:
+    private_key = _bootstrap_identity_path(vmid)
+    public_key = Path(str(private_key) + ".pub")
+    if not private_key.exists() and not public_key.exists():
+        return None
+    _bootstrap_public_key(private_key, vmid)
+    return private_key
+
+
+def _remove_bootstrap_identity(vmid: int) -> None:
+    """Удалить локальную одноразовую identity после перехода на SSH CA."""
+
+    private_key = _bootstrap_identity_path(vmid)
+    directory = private_key.parent
+    public_key = Path(str(private_key) + ".pub")
+    private_key.unlink(missing_ok=True)
+    public_key.unlink(missing_ok=True)
+    if directory.is_dir():
+        unknown = list(directory.iterdir())
+        if unknown:
+            raise InfraManagerError(
+                f"Гость {vmid}: bootstrap-каталог содержит неизвестные файлы"
+            )
+        directory.rmdir()
+
+
+def _remove_obsolete_guest_authorizations(
+    context: DeploymentContext,
+    private_key: Path,
+    certificate: Path,
+) -> None:
+    """Удалить bootstrap и старый постоянный guest key через сертификат."""
+
+    script = r"""
+from pathlib import Path
+import os
+import sys
+
+marker = sys.argv[1]
+target = Path("/root/.ssh/authorized_keys")
+if not target.exists():
+    raise SystemExit(0)
+
+begin = "# BEGIN infra-manager ansible self"
+end = "# END infra-manager ansible self"
+result = []
+inside = False
+for line in target.read_text(encoding="utf-8").splitlines():
+    if line == begin:
+        inside = True
+        continue
+    if line == end:
+        inside = False
+        continue
+    if inside:
+        continue
+    if " infra-manager ansible guest" in line:
+        continue
+    if marker in line:
+        continue
+    result.append(line)
+
+target.write_text(
+    ("\n".join(result) + "\n") if result else "",
+    encoding="utf-8",
+)
+os.chmod(target, 0o600)
+"""
+    command = shlex.join(
+        [
+            "python3",
+            "-c",
+            script,
+            f"infra-manager-bootstrap-{context.vmid}",
+        ]
+    )
+    run(
+        [
+            *_ssh_identity_args(
+                context,
+                private_key,
+                certificate=certificate,
+            ),
+            command,
+        ]
+    )
 
 
 def _create_temporary_client_certificate(
@@ -617,6 +759,7 @@ def _configure_guest_os(
     self_update: bool = False,
     project_branch: str | None = None,
     allow_legacy_bootstrap: bool = True,
+    bootstrap_private_key: Path | None = None,
 ) -> None:
     """Проверить SSH и применить конфигурацию Ansible."""
 
@@ -656,11 +799,35 @@ def _configure_guest_os(
             context,
             Path(temporary_dir),
         )
-        if _verify_temporary_ssh_identity(
+        certificate_ready = _verify_temporary_ssh_identity(
             context,
             private_key,
             certificate,
-        ):
+        )
+        if not certificate_ready and bootstrap_private_key is not None:
+            console.info(
+                f"Гость {context.vmid}: первоначальная установка доверия к SSH CA"
+            )
+            _run_guest_ansible(
+                context,
+                private_key=bootstrap_private_key,
+                certificate=None,
+                provision_phase="base",
+                self_update=self_update,
+                project_branch=project_branch,
+            )
+            certificate_ready = _verify_temporary_ssh_identity(
+                context,
+                private_key,
+                certificate,
+            )
+            if not certificate_ready:
+                raise InfraManagerError(
+                    f"Гость {context.vmid}: после bootstrap не принимает "
+                    "краткоживущий SSH-сертификат"
+                )
+
+        if certificate_ready:
             host_certificate = _host_certificate_if_available(
                 context,
                 private_key,
@@ -688,6 +855,16 @@ def _configure_guest_os(
                 host_certificate=host_certificate,
                 openbao_machine_args=openbao_machine_args,
             )
+            _remove_obsolete_guest_authorizations(
+                context,
+                private_key,
+                certificate,
+            )
+            if (
+                bootstrap_private_key is not None
+                and bootstrap_private_key == _bootstrap_identity_path(context.vmid)
+            ):
+                _remove_bootstrap_identity(context.vmid)
             return
 
         if _guest_trusts_client_ca(context):
@@ -900,6 +1077,7 @@ def run_deploy_guest(
         )
     )
     context = _build_deployment_context(repo_root, vmid, workspace)
+    bootstrap_private_key: Path | None = None
 
     if self_update:
         console.info(
@@ -936,6 +1114,19 @@ def run_deploy_guest(
             state_status=state_status,
         )
 
+    if not bootstrap_scope:
+        if not state_present and phase in {"all", "infrastructure"}:
+            bootstrap_private_key = _ensure_bootstrap_identity(context.vmid)
+        else:
+            bootstrap_private_key = _existing_bootstrap_identity(context.vmid)
+        if bootstrap_private_key is not None:
+            context.workspace.env["TF_VAR_bootstrap_ssh_public_key"] = (
+                _bootstrap_public_key(
+                    bootstrap_private_key,
+                    context.vmid,
+                )
+            )
+
     if phase in {"all", "infrastructure"}:
         _reconcile_guest_infrastructure(context)
 
@@ -966,18 +1157,24 @@ def run_deploy_guest(
     )
 
     if phase == "all":
-        _configure_guest_os(context, project_branch=project_branch)
+        _configure_guest_os(
+            context,
+            project_branch=project_branch,
+            bootstrap_private_key=bootstrap_private_key,
+        )
     elif phase == "provision-base":
         _configure_guest_os(
             context,
             provision_phase="base",
             project_branch=project_branch,
+            bootstrap_private_key=bootstrap_private_key,
         )
     elif phase in {"provision", "provision-existing"}:
         _configure_guest_os(
             context,
             provision_phase="full",
             project_branch=project_branch,
+            bootstrap_private_key=bootstrap_private_key,
         )
 
     if phase == "infrastructure":
