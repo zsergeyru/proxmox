@@ -117,6 +117,7 @@ INFRA_RUNNER="$BOOTSTRAP_DIR/bootstrap_runner/infra.py"
 PY_GUEST_DEPLOY="$ROOT/scripts/infra-manager/infra_manager/guest_deploy.py"
 
 grep -q 'rm -f' "$PREPARE_RUNTIME" || die "Новый bootstrap-сеанс должен удалять старую пару ключей перед генерацией"
+grep -q 'rm -rf.*opentofu/state' "$PREPARE_RUNTIME" || die "Новый bootstrap-сеанс должен начинаться с пустого временного OpenTofu state"
 grep -q 'infra_manager_ed25519' "$PREPARE_RUNTIME" || die "Bootstrap 910 должен использовать единственную сеансовую identity"
 grep -q 'ssh-keygen -q -t ed25519' "$PREPARE_RUNTIME" || die "Bootstrap key должен генерироваться через ssh-keygen"
 grep -q 'infra-manager-bootstrap' "$PREPARE_RUNTIME" || die "Bootstrap key должен иметь единый сеансовый marker"
