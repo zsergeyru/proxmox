@@ -75,6 +75,9 @@ done
 grep -q 'run_deploy_guest' "$DEPLOY"     || die "Обычный deploy должен использовать общий run_deploy_guest"
 [[ -s "$BOOTSTRAP_DEPLOY" ]] || die "Отсутствует отдельная внутренняя bootstrap-точка 910"
 grep -q 'run_bootstrap_infra_manager_step' "$BOOTSTRAP_DEPLOY" || die "Bootstrap 910 должен использовать отдельный внутренний интерфейс"
+grep -q 'BOOTSTRAP_INFRA_MANAGER_PHASES' "$BOOTSTRAP_DEPLOY" || die "Bootstrap job должен брать допустимые шаги из единого контракта"
+grep -q 'choices=tuple(BOOTSTRAP_INFRA_MANAGER_PHASES)' "$BOOTSTRAP_DEPLOY" || die "Bootstrap job не должен дублировать список внутренних шагов"
+grep -q '"configure-recovery-control-plane": "provision-recovery-control-plane"' "$PY_GUEST_DEPLOY" || die "Единый bootstrap-контракт должен содержать recovery-этап OpenBao"
 grep -q 'provision.yaml' "$PLAYBOOK"     || die "Общий Ansible playbook должен применять provision.yaml"
 
 if grep -q -E -- '--bootstrap-scope|--infrastructure-only|--provision-base-only|--provision-only|--provision-existing-only' "$DEPLOY"; then
