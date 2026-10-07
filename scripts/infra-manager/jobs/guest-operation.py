@@ -41,16 +41,16 @@ def prepare_operation_environment() -> None:
         "",
     ).strip()
     if not bootstrap_public_key:
-        if not PATHS.bootstrap_public_key.is_file():
+        if not PATHS.ansible_public_key.is_file():
             raise InfraManagerError(
-                f"Не найден открытый ключ Ansible: {PATHS.bootstrap_public_key}"
+                f"Не найден bootstrap SSH-ключ: {PATHS.ansible_public_key}"
             )
-        bootstrap_public_key = PATHS.bootstrap_public_key.read_text(
+        bootstrap_public_key = PATHS.ansible_public_key.read_text(
             encoding="utf-8"
         ).strip()
         if not bootstrap_public_key:
             raise InfraManagerError(
-                f"Bootstrap SSH-ключ пуст: {PATHS.bootstrap_public_key}"
+                f"Bootstrap SSH-ключ пуст: {PATHS.ansible_public_key}"
             )
         os.environ["TF_VAR_bootstrap_ssh_public_key"] = bootstrap_public_key
 
