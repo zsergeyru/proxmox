@@ -119,6 +119,7 @@ def check_cli_and_commands() -> None:
         ["pve-access-check", "--help"],
         ["pve-lifecycle-test", "--help"],
         ["recovery-prepare", "--help"],
+        ["operator-wrapper-install", "--help"],
         ["recovery-check", "--help"],
     )
     for args in cli_help_cases:
