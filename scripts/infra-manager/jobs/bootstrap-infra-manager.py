@@ -23,16 +23,16 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description="Внутренний bootstrap-вызов infra-manager из временного LXC 990"
     )
-    parser.add_argument("phase", choices=("infrastructure", "base", "provision"))
+    parser.add_argument("phase", choices=("create", "configure-base", "configure"))
     parser.add_argument("vmid", type=int)
     args = parser.parse_args()
 
     try:
         require_runtime_activation_idle()
         phase = {
-            "infrastructure": "infrastructure",
-            "base": "provision-base",
-            "provision": "provision",
+            "create": "infrastructure",
+            "configure-base": "provision-base",
+            "configure": "provision",
         }[args.phase]
         return run_bootstrap_infra_manager_phase(
             REPO_ROOT,
