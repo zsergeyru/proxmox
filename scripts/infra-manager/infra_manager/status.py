@@ -32,8 +32,6 @@ from .settings import PATHS, SETTINGS
 PVE_ENV = PATHS.pve_api_env
 CA_BUNDLE = PATHS.ca_bundle
 OPENBAO_TLS_CA = PATHS.openbao_tls_ca
-ANSIBLE_PRIVATE_KEY = PATHS.ansible_private_key
-ANSIBLE_PUBLIC_KEY = PATHS.ansible_public_key
 SERVER_ENV = PATHS.server_env
 GITHUB_KEY_COPY = PATHS.github_key_copy
 PROJECT_ID_FILE = PATHS.semaphore_project_id_file
@@ -330,8 +328,6 @@ def _check_local_prerequisites() -> None:
         PROJECT_ID_FILE,
         OPENTOFU_INPUT,
         CA_BUNDLE,
-        ANSIBLE_PRIVATE_KEY,
-        ANSIBLE_PUBLIC_KEY,
     ):
         required_file(path)
 
@@ -798,22 +794,7 @@ def _check_semaphore(*, project_branch: str) -> None:
 
 
 def _check_runtime_tools() -> None:
-    """Проверить ключ Ansible и обязательные инструменты infra-runtime."""
-    if command_runner.run(
-        [
-            "docker",
-            "exec",
-            "infra-runtime",
-            "test",
-            "-r",
-            str(ANSIBLE_PRIVATE_KEY),
-        ],
-        quiet=True,
-        check=False,
-    ).returncode:
-        raise InfraManagerError(
-            "Закрытый ключ Ansible недоступен внутри infra-runtime"
-        )
+    """Проверить обязательные инструменты infra-runtime."""
 
     checks = (
         (
