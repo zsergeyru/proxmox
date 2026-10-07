@@ -528,7 +528,13 @@ def check_semaphore_secret_policy() -> None:
         ROOT / "scripts" / "infra-manager" / "jobs" / "guest-operation.py"
     ).read_text(encoding="utf-8")
     if "show_secrets=False" not in entrypoint:
-        fail("Точка входа Semaphore должна явно запрещать вывод секретов")
+        fail("Точка входа операций должна явно запрещать вывод секретов")
+    if "prepare_operation_environment()" not in entrypoint:
+        fail("Точка входа операций должна готовить среду без Semaphore API")
+    if "PveClient()" not in entrypoint:
+        fail("Прямой запуск должен получать PVE credential из локального файла")
+    if "PATHS.ansible_public_key" not in entrypoint:
+        fail("Прямой запуск должен получать открытый Ansible-ключ локально")
 
 
 def main() -> None:
