@@ -291,7 +291,7 @@ def run_local_guest_status(
     *,
     show_secrets: bool = False,
 ) -> int:
-    """Показать статус гостя из 910 с локальным PVE credential."""
+    """Показать статус гостя из управляющего контура с PVE credential."""
 
     require_runtime_activation_idle()
     identity = guest_identity(repo_root, vmid)
