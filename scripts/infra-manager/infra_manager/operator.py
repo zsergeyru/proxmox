@@ -170,20 +170,21 @@ def operator_guest_task(
             f"Не найдена точка входа операций: {RUNTIME_GUEST_OPERATION}"
         )
 
-    result = run(
-        [
-            "docker",
-            "exec",
-            "--user",
-            "1001:0",
-            RUNTIME_CONTAINER,
-            "python3",
-            str(RUNTIME_GUEST_OPERATION),
-            operation,
-            str(vmid),
-        ],
-        check=False,
-    )
+    with project_checkout_lock(exclusive=False):
+        result = run(
+            [
+                "docker",
+                "exec",
+                "--user",
+                "1001:0",
+                RUNTIME_CONTAINER,
+                "python3",
+                str(RUNTIME_GUEST_OPERATION),
+                operation,
+                str(vmid),
+            ],
+            check=False,
+        )
     if result.returncode != 0:
         return result.returncode
     if operation == "test":
