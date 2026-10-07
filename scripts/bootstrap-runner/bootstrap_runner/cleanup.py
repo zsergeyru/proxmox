@@ -67,15 +67,22 @@ class BootstrapCleanupMixin:
     def finalize_runner(self) -> None:
         # Успешный bootstrap не должен оставлять состояние, секреты, token или 990.
         self.assert_owned_runner()
-        self.remove_runner_ssh_access_from_infra()
+        self.remove_bootstrap_ssh_access_from_infra()
         self.ct_exec(
             "rm",
             "-rf",
             "/etc/bootstrap-runner/secrets",
+            "/etc/bootstrap-runner/ansible",
+            "/etc/bootstrap-runner/pve-host",
             "/var/lib/bootstrap-runner/opentofu/state",
         )
-        if self.ct_exec("test", "!", "-e", "/etc/bootstrap-runner/secrets", check=False).returncode:
-            self.fail("временные секреты 990 не удалены")
+        for temporary_path in (
+            "/etc/bootstrap-runner/secrets",
+            "/etc/bootstrap-runner/ansible",
+            "/etc/bootstrap-runner/pve-host",
+        ):
+            if self.ct_exec("test", "!", "-e", temporary_path, check=False).returncode:
+                self.fail(f"временные данные 990 не удалены: {temporary_path}")
         if self.ct_exec(
             "test", "!", "-e", "/var/lib/bootstrap-runner/opentofu/state", check=False
         ).returncode:
