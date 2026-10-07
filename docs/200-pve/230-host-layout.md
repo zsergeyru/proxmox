@@ -95,7 +95,6 @@
 
 | Полный путь на PVE | Путь после подключения в 910 | Назначение |
 |---|---|---|
-| `/mnt/bindmounts/infra-manager/state/ansible/` | `/mnt/persistent-state/ansible/` | постоянная Ansible-идентичность |
 | `/mnt/bindmounts/infra-manager/state/semaphore/` | `/mnt/persistent-state/semaphore/` | база и служебные данные Semaphore |
 | `/mnt/bindmounts/infra-manager/state/opentofu/` | `/mnt/persistent-state/opentofu/` | постоянные данные и состояние OpenTofu |
 | `/mnt/bindmounts/infra-manager/state/locks/` | `/mnt/persistent-state/locks/` | общие координационные lock-файлы PVE CLI и `infra-runtime` |
@@ -116,7 +115,6 @@ mp1: /mnt/bindmounts/infra-manager/state,mp=/mnt/persistent-state
 
 | Источник внутри 910 | Рабочий путь |
 |---|---|
-| `/mnt/persistent-state/ansible` | `/etc/infra-manager/ansible` |
 | `/mnt/persistent-state/semaphore` | `/var/lib/infra-manager/semaphore` |
 | `/mnt/persistent-state/opentofu` | `/var/lib/infra-manager/opentofu` |
 | `/mnt/persistent-state/locks` | `/var/lib/infra-manager/locks` |
