@@ -356,6 +356,7 @@ def check_dispatch() -> None:
             "from_opentofu_env",
             return_value=SimpleNamespace(),
         ),
+        patch.object(operations, "_run_status", status),
     ):
         if operations.run_guest_operation(
             ROOT,
