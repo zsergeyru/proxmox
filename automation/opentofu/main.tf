@@ -97,7 +97,7 @@ resource "proxmox_virtual_environment_vm" "guest" {
 
     user_account {
       username = "root"
-      keys     = [trimspace(var.ansible_ssh_public_key)]
+      keys     = [trimspace(var.bootstrap_ssh_public_key)]
     }
   }
 
@@ -177,7 +177,7 @@ resource "proxmox_virtual_environment_container" "guest" {
     }
 
     user_account {
-      keys = [trimspace(var.ansible_ssh_public_key)]
+      keys = [trimspace(var.bootstrap_ssh_public_key)]
     }
   }
 

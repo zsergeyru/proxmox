@@ -21,12 +21,12 @@ locals {
 }
 
 
-variable "ansible_ssh_public_key" {
-  description = "Открытый SSH-ключ Ansible для Cloud-Init управляемых Linux-гостей"
+variable "bootstrap_ssh_public_key" {
+  description = "Одноразовый открытый SSH-ключ первоначального доступа к новому Linux-гостю"
   type        = string
 
   validation {
-    condition     = length(trimspace(var.ansible_ssh_public_key)) > 0
-    error_message = "ansible_ssh_public_key не должен быть пустым"
+    condition     = length(trimspace(var.bootstrap_ssh_public_key)) > 0
+    error_message = "bootstrap_ssh_public_key не должен быть пустым"
   }
 }

@@ -612,7 +612,7 @@ class SemaphoreClient:
         env_json = json.dumps(
             {
                 "TF_VAR_pve_endpoint": endpoint,
-                "TF_VAR_ansible_ssh_public_key": ansible_public_key,
+                "TF_VAR_bootstrap_ssh_public_key": ansible_public_key,
             },
             ensure_ascii=False,
             separators=(",", ":"),

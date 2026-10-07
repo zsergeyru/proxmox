@@ -36,23 +36,23 @@ def prepare_operation_environment() -> None:
                 f"{client.token_id}={client.token_secret}"
             )
 
-    ansible_public_key = os.environ.get(
-        "TF_VAR_ansible_ssh_public_key",
+    bootstrap_public_key = os.environ.get(
+        "TF_VAR_bootstrap_ssh_public_key",
         "",
     ).strip()
-    if not ansible_public_key:
-        if not PATHS.ansible_public_key.is_file():
+    if not bootstrap_public_key:
+        if not PATHS.bootstrap_public_key.is_file():
             raise InfraManagerError(
-                f"Не найден открытый ключ Ansible: {PATHS.ansible_public_key}"
+                f"Не найден открытый ключ Ansible: {PATHS.bootstrap_public_key}"
             )
-        ansible_public_key = PATHS.ansible_public_key.read_text(
+        bootstrap_public_key = PATHS.bootstrap_public_key.read_text(
             encoding="utf-8"
         ).strip()
-        if not ansible_public_key:
+        if not bootstrap_public_key:
             raise InfraManagerError(
-                f"Открытый ключ Ansible пуст: {PATHS.ansible_public_key}"
+                f"Bootstrap SSH-ключ пуст: {PATHS.bootstrap_public_key}"
             )
-        os.environ["TF_VAR_ansible_ssh_public_key"] = ansible_public_key
+        os.environ["TF_VAR_bootstrap_ssh_public_key"] = bootstrap_public_key
 
 
 def main() -> int:
