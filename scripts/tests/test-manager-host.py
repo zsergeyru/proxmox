@@ -85,19 +85,27 @@ def test_host_refuses_stopped_manager_for_regular_commands() -> None:
 
 
 def test_host_recover_uses_only_recovery_helper() -> None:
-    with (
-        patch.object(host.RECOVERY_COMMAND, "is_file", return_value=True),
-        patch.object(host.os, "access", return_value=True),
-        patch.object(
-            host,
-            "run",
-            return_value=SimpleNamespace(returncode=0, stdout="", stderr=""),
-        ) as run,
-    ):
-        assert host.recover() == 0
+    with tempfile.TemporaryDirectory() as tmp:
+        recovery = Path(tmp) / "infra-manager-recovery"
+        recovery.write_text("#!/bin/sh\n", encoding="utf-8")
+        recovery.chmod(0o700)
+
+        with (
+            patch.object(host, "RECOVERY_COMMAND", recovery),
+            patch.object(
+                host,
+                "run",
+                return_value=SimpleNamespace(
+                    returncode=0,
+                    stdout="",
+                    stderr="",
+                ),
+            ) as run,
+        ):
+            assert host.recover() == 0
 
     run.assert_called_once_with(
-        ["/usr/local/sbin/infra-manager-recovery", "--recover"],
+        [str(recovery), "--recover"],
         check=False,
     )
 
