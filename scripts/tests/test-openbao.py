@@ -57,6 +57,13 @@ def test_orchestration() -> None:
         ),
         patch.object(
             openbao_module,
+            "install_operator_host_support",
+            side_effect=lambda node, repo: calls.append(
+                ("install-operator", f"{node}:{repo}")
+            ),
+        ),
+        patch.object(
+            openbao_module,
             "prepare_recovery_git",
             side_effect=lambda node: calls.append(("prepare-recovery", node)),
         ),
@@ -87,6 +94,7 @@ def test_orchestration() -> None:
     if calls != [
         ("install", f"pve:{ROOT}"),
         ("install-recovery", f"pve:{ROOT}"),
+        ("install-operator", f"pve:{ROOT}"),
         ("prepare-recovery", "pve"),
         ("initialize", "pve"),
         ("sync-otp", "pve"),
