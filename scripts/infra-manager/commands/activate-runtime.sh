@@ -19,16 +19,27 @@ trap cleanup_marker EXIT
 printf '\n[%s] Активация infra-runtime, ветка %s\n' "$(date -Is)" "$BRANCH"
 
 if [[ -f "$ACTIVATION_MARKER" ]]; then
-    read -r deploy_pid < "$ACTIVATION_MARKER" || true
-    if [[ ! "$deploy_pid" =~ ^[0-9]+$ ]]; then
+    read -r deploy_ref < "$ACTIVATION_MARKER" || true
+    deploy_scope="runtime"
+    deploy_pid="$deploy_ref"
+
+    if [[ "$deploy_ref" =~ ^(host|runtime):([0-9]+)$ ]]; then
+        deploy_scope="${BASH_REMATCH[1]}"
+        deploy_pid="${BASH_REMATCH[2]}"
+    elif [[ ! "$deploy_ref" =~ ^[0-9]+$ ]]; then
         printf 'ОШИБКА: Некорректный PID в маркере активации: %s\n' "$ACTIVATION_MARKER" >&2
         exit 1
     fi
 
-    printf '[ИНФО] Ожидание завершения самообновления infra-manager, PID %s\n' "$deploy_pid"
+    printf '[ИНФО] Ожидание завершения самообновления infra-manager, %s PID %s\n' "$deploy_scope" "$deploy_pid"
     deploy_finished=0
     for _ in $(seq 1 900); do
-        if ! docker exec --user 0 infra-runtime             sh -c "kill -0 $deploy_pid 2>/dev/null"; then
+        if [[ "$deploy_scope" == "host" ]]; then
+            if ! kill -0 "$deploy_pid" 2>/dev/null; then
+                deploy_finished=1
+                break
+            fi
+        elif ! docker exec --user 0 infra-runtime sh -c "kill -0 $deploy_pid 2>/dev/null"; then
             deploy_finished=1
             break
         fi
