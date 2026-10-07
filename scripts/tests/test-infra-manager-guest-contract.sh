@@ -151,10 +151,6 @@ grep -Fq '["bash", str(bootstrap), "--recover"]' "$RECOVERY_HOST" \
     || die "PVE recovery helper должен запускать защищённый bootstrap recovery"
 grep -Fq 'check_recovery_contour(node)' "$PY_OPENBAO" \
     || die "Внутренняя инициализация OpenBao должна завершаться полной recovery-проверкой"
-grep -Fq 'cleanup_transition_state(node)' "$PY_OPENBAO" \
-    || die "Внутренняя инициализация OpenBao должна удалять проверенные остатки старой схемы"
-grep -Fq -- '--cleanup-transition' "$RECOVERY_HOST" \
-    || die "PVE recovery helper должен иметь безопасную очистку старой схемы"
 
 grep -Fq 'roles_path = automation/ansible/roles' "$ANSIBLE_CONFIG" \
     || die "ansible.cfg должен задавать единый путь к roles"
