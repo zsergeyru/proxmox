@@ -19,7 +19,7 @@ class DeploymentPaths:
     """Пути, используемые на нескольких этапах развёртывания VM."""
 
     guest_dir: Path
-    private_key: Path
+    private_key: Path | None
     playbook: Path
     known_hosts: Path
     plan_file: Path
@@ -340,6 +340,8 @@ def _build_deployment_context(
     repo_root: Path,
     vmid: int,
     workspace: OpenTofuWorkspace,
+    *,
+    private_key: Path | None = None,
 ) -> DeploymentContext:
     """Проверить описание VM и собрать общий контекст развёртывания."""
     guests = workspace.payload["guests"]
@@ -392,10 +394,9 @@ def _build_deployment_context(
             f"Не найден provision.yaml: {provision_file}"
         )
 
-    private_key = PATHS.ansible_private_key
-    if not private_key.is_file():
+    if private_key is not None and not private_key.is_file():
         raise InfraManagerError(
-            f"Не найден закрытый ключ Ansible: {private_key}"
+            f"Не найден закрытый SSH-ключ: {private_key}"
         )
 
     playbook = (
