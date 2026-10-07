@@ -102,4 +102,12 @@ grep -q 'name: guest_layout' "$PLAYBOOK"     || die "Общий playbook дол�
 grep -q 'name: docker' "$PLAYBOOK"     || die "Общий playbook должен подключать общую роль Docker"
 grep -q 'name: infra_manager' "$PLAYBOOK"     || die "Общий playbook должен подключать роль infra_manager по provision.yaml"
 
+# Обычный deploy новых гостей должен сохранить собственный одноразовый bootstrap.
+grep -q 'bootstrap_scope=False' "$ROOT/scripts/infra-manager/infra_manager/guest_deploy.py" \
+    || die "Обычный deploy должен оставаться вне bootstrap-области infra-manager"
+grep -q '_ensure_bootstrap_identity(context.vmid)' "$ROOT/scripts/infra-manager/infra_manager/guest_deploy.py" \
+    || die "Обычный новый гость должен получать одноразовый bootstrap SSH key"
+grep -q '_remove_bootstrap_identity(context.vmid)' "$ROOT/scripts/infra-manager/infra_manager/guest_deploy.py" \
+    || die "Обычный deploy должен удалять одноразовый bootstrap SSH key после настройки"
+
 printf '[ОК] Граница обычного deploy и bootstrap 910 зафиксирована\n'
