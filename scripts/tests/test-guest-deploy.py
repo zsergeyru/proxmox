@@ -587,7 +587,7 @@ def check_temporary_certificate_path() -> None:
                 plan_file=root / "plan",
             ),
         )
-        ansible_calls: list[tuple[list[str], dict[str, str]]] = []
+        ansible_calls: list[tuple[list[str], dict[str, str], Path | None]] = []
 
         def fake_run(argv: list[str], **kwargs: object) -> SimpleNamespace:
             if argv[0] == "ssh-keygen" and "-t" in argv:
@@ -603,7 +603,7 @@ def check_temporary_certificate_path() -> None:
             if argv[0] == "ssh":
                 return SimpleNamespace(returncode=0, stdout="", stderr="")
             if argv[0] == "ansible-playbook":
-                ansible_calls.append((argv, kwargs["env"]))
+                ansible_calls.append((argv, kwargs["env"], kwargs.get("cwd")))
                 return SimpleNamespace(returncode=0, stdout="", stderr="")
             raise AssertionError(f"Неожиданная команда: {argv!r}")
 
@@ -642,12 +642,16 @@ def check_temporary_certificate_path() -> None:
 
         if len(ansible_calls) != 1:
             fail("Ansible должен запускаться ровно один раз")
-        argv, env = ansible_calls[0]
+        argv, env, cwd = ansible_calls[0]
         selected = Path(argv[argv.index("--private-key") + 1])
         if selected == permanent_key:
             fail("При рабочем CA Ansible не перешёл на временный ключ")
         if "CertificateFile=" not in env["ANSIBLE_SSH_ARGS"]:
             fail("Ansible не получил временный SSH-сертификат")
+        if env.get("ANSIBLE_CONFIG") != str(ROOT / "ansible.cfg"):
+            fail("Ansible должен явно использовать ansible.cfg текущей копии проекта")
+        if cwd != ROOT:
+            fail("Ansible должен запускаться из корня текущей копии проекта")
         if "infra_project_git_read=false" not in argv:
             fail("910 не должен получать постоянную гостевую копию Git credential")
         if selected.exists():
