@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -17,6 +18,41 @@ from infra_manager.guest_operations import (
     extract_survey_vmid,
     run_guest_operation,
 )
+from infra_manager.pve import PveClient
+from infra_manager.settings import PATHS
+
+
+def prepare_operation_environment() -> None:
+    """Дополнить OpenTofu-переменные из локально материализованных данных."""
+
+    endpoint = os.environ.get("TF_VAR_pve_endpoint", "").strip()
+    token = os.environ.get("TF_VAR_pve_api_token", "").strip()
+    if not endpoint or not token:
+        client = PveClient()
+        if not endpoint:
+            os.environ["TF_VAR_pve_endpoint"] = client.url
+        if not token:
+            os.environ["TF_VAR_pve_api_token"] = (
+                f"{client.token_id}={client.token_secret}"
+            )
+
+    ansible_public_key = os.environ.get(
+        "TF_VAR_ansible_ssh_public_key",
+        "",
+    ).strip()
+    if not ansible_public_key:
+        if not PATHS.ansible_public_key.is_file():
+            raise InfraManagerError(
+                f"Не найден открытый ключ Ansible: {PATHS.ansible_public_key}"
+            )
+        ansible_public_key = PATHS.ansible_public_key.read_text(
+            encoding="utf-8"
+        ).strip()
+        if not ansible_public_key:
+            raise InfraManagerError(
+                f"Открытый ключ Ansible пуст: {PATHS.ansible_public_key}"
+            )
+        os.environ["TF_VAR_ansible_ssh_public_key"] = ansible_public_key
 
 
 def main() -> int:
@@ -45,6 +81,7 @@ def main() -> int:
         parser.error("нужно выбрать гостя или передать VMID")
 
     try:
+        prepare_operation_environment()
         return run_guest_operation(
             REPO_ROOT,
             args.operation,

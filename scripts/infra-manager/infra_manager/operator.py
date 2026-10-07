@@ -4,24 +4,41 @@ from __future__ import annotations
 
 import argparse
 import os
+import shlex
 from pathlib import Path
 from urllib.parse import urlparse
 
-from .common import InfraManagerError, console, run
-from .guest_deploy import project_branch_for_checkout
+from .common import (
+    InfraManagerError,
+    console,
+    require_runtime_activation_idle,
+    run,
+)
+from .guest_deploy import project_branch_for_checkout, project_revision
 from .guest_operations import list_local_guests, run_local_guest_status
+from .operation_lock import project_checkout_lock
 from .pve import PveClient
 from .pve_host import (
     preflight_recovery_contour,
     repair_openbao_on_host,
     show_openbao_operator_credentials,
 )
-from .semaphore import run_operator_guest_task
-from .settings import PATHS
+from .settings import PATHS, SETTINGS
 
 ACTIVATE_RUNTIME = Path("/usr/local/sbin/infra-manager-activate-runtime")
 COMPOSE_FILE = PATHS.compose_dir / "docker-compose.yml"
 VERSIONS_FILE = PATHS.compose_dir / ".versions.env"
+RUNTIME_CONTAINER = "infra-runtime"
+RUNTIME_PROJECT_ROOT = str(PATHS.repo_root)
+RUNTIME_GUEST_OPERATION = (
+    PATHS.repo_root / "scripts" / "infra-manager" / "jobs" / "guest-operation.py"
+)
+RUNTIME_DIRECT_SCRIPT = """
+work="$(mktemp -d /tmp/infra-manager-direct.XXXXXX)"
+trap 'rm -rf "$work"' EXIT INT TERM
+cp -a "$3"/. "$work/"
+python3 "$work/scripts/infra-manager/jobs/guest-operation.py" "$1" "$2"
+""".strip()
 
 
 def _require_root() -> None:
@@ -45,6 +62,79 @@ def _pve_node() -> str:
             f"Не удалось определить узел PVE из {client.url!r}"
         )
     return node
+
+
+def operator_update() -> int:
+    """Обновить постоянную рабочую копию проекта из выбранной Git-ветки."""
+
+    require_runtime_activation_idle()
+    repo_root = PATHS.repo_root
+    git_dir = repo_root / ".git"
+    known_hosts = PATHS.semaphore_dir / "known_hosts"
+    for path, label in (
+        (git_dir, "Git-репозиторий проекта"),
+        (PATHS.github_key, "GitHub Deploy Key"),
+        (known_hosts, "GitHub known_hosts"),
+    ):
+        if not path.exists():
+            raise InfraManagerError(f"Не найден {label}: {path}")
+
+    branch = SETTINGS.project_branch().strip()
+    if not branch or any(character.isspace() for character in branch):
+        raise InfraManagerError("Некорректная Git-ветка проекта")
+
+    ssh_command = shlex.join(
+        [
+            "ssh",
+            "-i",
+            str(PATHS.github_key),
+            "-o",
+            f"UserKnownHostsFile={known_hosts}",
+            "-o",
+            "StrictHostKeyChecking=yes",
+            "-o",
+            "IdentitiesOnly=yes",
+            "-o",
+            "BatchMode=yes",
+        ]
+    )
+    environment = os.environ.copy()
+    environment["GIT_SSH_COMMAND"] = ssh_command
+
+    with project_checkout_lock(exclusive=True):
+        console.info(f"Получение Git-ветки {branch}")
+        run(
+            [
+                "git",
+                "-C",
+                str(repo_root),
+                "fetch",
+                "--depth",
+                "1",
+                "origin",
+                branch,
+            ],
+            env=environment,
+        )
+        run(
+            [
+                "git",
+                "-C",
+                str(repo_root),
+                "checkout",
+                "-f",
+                "-B",
+                branch,
+                "FETCH_HEAD",
+            ]
+        )
+        run(["git", "-C", str(repo_root), "clean", "-ffdx"])
+
+    console.result(
+        f"Рабочая копия проекта обновлена: {branch} "
+        f"({project_revision(repo_root)})"
+    )
+    return 0
 
 
 def operator_status(*, show_secrets: bool) -> int:
@@ -79,9 +169,35 @@ def operator_guest_task(
     *,
     show_secrets: bool,
 ) -> int:
-    """Запустить штатное задание Semaphore и показать итог."""
+    """Выполнить штатную операцию напрямую внутри infra-runtime."""
 
-    run_operator_guest_task(operation, vmid)
+    require_runtime_activation_idle()
+    if not RUNTIME_GUEST_OPERATION.is_file():
+        raise InfraManagerError(
+            f"Не найдена точка входа операций: {RUNTIME_GUEST_OPERATION}"
+        )
+
+    with project_checkout_lock(exclusive=False):
+        result = run(
+            [
+                "docker",
+                "exec",
+                "--user",
+                "1001:0",
+                RUNTIME_CONTAINER,
+                "sh",
+                "-eu",
+                "-c",
+                RUNTIME_DIRECT_SCRIPT,
+                "infra-manager-direct",
+                operation,
+                str(vmid),
+                RUNTIME_PROJECT_ROOT,
+            ],
+            check=False,
+        )
+    if result.returncode != 0:
+        return result.returncode
     if operation == "test":
         return 0
     return operator_guest_status(
@@ -158,6 +274,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="показать поддерживаемых гостей и их состояние",
     )
 
+    subparsers.add_parser(
+        "update",
+        help="обновить постоянную рабочую копию проекта из Git",
+    )
+
     status_parser = subparsers.add_parser(
         "status",
         help="проверить управляющий контур или выбранного гостя",
@@ -170,9 +291,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     for command, help_text in (
-        ("deploy", "развернуть или обновить гостя через Semaphore"),
-        ("sync", "синхронизировать гостя через Semaphore"),
-        ("test", "проверить гостя через Semaphore без изменений"),
+        ("deploy", "развернуть или обновить гостя"),
+        ("sync", "синхронизировать гостя"),
+        ("test", "проверить гостя без изменений"),
     ):
         command_parser = subparsers.add_parser(command, help=help_text)
         command_parser.add_argument("vmid", type=int, help="VMID гостя")
@@ -204,6 +325,8 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.command == "guests":
             return list_local_guests(PATHS.repo_root)
+        if args.command == "update":
+            return operator_update()
         if args.command == "status":
             if args.vmid is None:
                 return operator_status(show_secrets=show_secrets)

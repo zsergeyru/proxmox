@@ -98,6 +98,7 @@
 | `/mnt/bindmounts/infra-manager/state/ansible/` | `/mnt/persistent-state/ansible/` | постоянная Ansible-идентичность |
 | `/mnt/bindmounts/infra-manager/state/semaphore/` | `/mnt/persistent-state/semaphore/` | база и служебные данные Semaphore |
 | `/mnt/bindmounts/infra-manager/state/opentofu/` | `/mnt/persistent-state/opentofu/` | постоянные данные и состояние OpenTofu |
+| `/mnt/bindmounts/infra-manager/state/locks/` | `/mnt/persistent-state/locks/` | общие координационные lock-файлы PVE CLI и `infra-runtime` |
 | `/mnt/bindmounts/infra-manager/state/openbao/` | `/mnt/persistent-state/openbao/` | постоянные Raft-данные OpenBao |
 
 ## 5. Связи каталогов внутри 910
@@ -118,6 +119,7 @@ mp1: /mnt/bindmounts/infra-manager/state,mp=/mnt/persistent-state
 | `/mnt/persistent-state/ansible` | `/etc/infra-manager/ansible` |
 | `/mnt/persistent-state/semaphore` | `/var/lib/infra-manager/semaphore` |
 | `/mnt/persistent-state/opentofu` | `/var/lib/infra-manager/opentofu` |
+| `/mnt/persistent-state/locks` | `/var/lib/infra-manager/locks` |
 | `/mnt/persistent-state/openbao` | `/var/lib/persistent/openbao` |
 
 Основной файл состояния OpenTofu доступен внутри 910 по пути:
@@ -189,6 +191,7 @@ mp1: /mnt/bindmounts/infra-manager/state,mp=/mnt/persistent-state
 
 ```text
 guests
+update
 status [VMID]
 deploy VMID
 sync VMID
@@ -197,7 +200,7 @@ test VMID
 recover
 ```
 
-Для всех команд кроме `recover` оболочка только читает VMID управляющего LXC из `/etc/infra-manager/openbao-host.json`, проверяет проектную метку объекта и передаёт аргументы через `pct exec` операторскому слою внутри 910. OpenTofu, Ansible, Semaphore, Docker и обычная логика состояния на PVE не размещаются.
+Для всех команд кроме `recover` оболочка только читает VMID управляющего LXC из `/etc/infra-manager/openbao-host.json`, проверяет проектную метку объекта и передаёт аргументы через `pct exec` операторскому слою внутри 910. `update` синхронизирует уже существующую Git-копию внутри 910. Для `deploy/sync/repair/test` оператор запускает общий `guest-operation.py` через `docker exec` в `infra-runtime`; Semaphore API в этом маршруте не участвует. OpenTofu и Ansible на PVE и в системе 910 не устанавливаются повторно — они остаются внутри `infra-runtime`.
 
 `repair` без VMID может запустить остановленный управляющий LXC перед передачей команды внутрь него. `recover` выполняется отдельно PVE-only recovery helper и поэтому не зависит от состояния 910.
 

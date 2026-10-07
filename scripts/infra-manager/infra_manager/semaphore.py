@@ -6,7 +6,6 @@ import http.cookiejar
 import json
 import os
 import re
-import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -15,10 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from .common import LOG_LEVEL_ENV, LOG_LEVELS, InfraManagerError, console
-from .guest_operations import (
-    GUEST_OPERATION_TEMPLATES,
-    operation_guests,
-)
+from .guest_operations import operation_guests
 from .pve_host import update_openbao_semaphore_api_token
 from .settings import PATHS, SETTINGS
 
@@ -55,137 +51,6 @@ class TemplateSpec:
     view: str
     app: str = "python"
     survey_vars: tuple[dict[str, Any], ...] = ()
-
-
-def run_operator_guest_task(
-    operation: str,
-    vmid: int,
-    *,
-    timeout: int = 3600,
-) -> int:
-    """Запустить штатное гостевое задание Semaphore из PVE CLI."""
-
-    template_name = GUEST_OPERATION_TEMPLATES.get(operation)
-    if template_name is None:
-        raise InfraManagerError(f"Неизвестная операция гостя: {operation}")
-
-    allowed = {guest.vmid for guest in operation_guests(PATHS.repo_root, operation)}
-    if vmid not in allowed:
-        raise InfraManagerError(
-            f"Операция {operation} не поддерживается для гостя {vmid}"
-        )
-
-    client = SemaphoreClient()
-    if not client.token_valid():
-        raise InfraManagerError(
-            "Рабочий API token Semaphore отсутствует или недействителен"
-        )
-    client.auth_mode = "token"
-
-    project = require_unique_by_name(
-        client.get("/projects", auth="token"),
-        PROJECT_NAME,
-        "project",
-    )
-    project_id = project.get("id")
-    if not isinstance(project_id, int):
-        raise InfraManagerError("Проект Semaphore имеет некорректный id")
-
-    templates = client.get(
-        f"/project/{project_id}/templates?sort=name&order=asc",
-        auth="token",
-    )
-    template = require_unique_by_name(
-        templates,
-        template_name,
-        "template",
-    )
-    template_id = template.get("id")
-    if not isinstance(template_id, int):
-        raise InfraManagerError(
-            f"Semaphore template '{template_name}' имеет некорректный id"
-        )
-
-    task = client.post(
-        f"/project/{project_id}/tasks",
-        {
-            "template_id": template_id,
-            "environment": json.dumps(
-                {"GUEST_VMID": str(vmid)},
-                separators=(",", ":"),
-            ),
-            "secret": "{}",
-            "params": {},
-            "message": f"PVE CLI: guest {vmid}",
-        },
-        auth="token",
-    )
-    task_id = task.get("id") if isinstance(task, dict) else None
-    if not isinstance(task_id, int):
-        raise InfraManagerError("Semaphore не вернул номер созданного задания")
-
-    console.info(
-        f"Semaphore: задание #{task_id} '{template_name}' для гостя {vmid}"
-    )
-
-    deadline = time.monotonic() + timeout
-    final_status = ""
-    last_error: InfraManagerError | None = None
-    while time.monotonic() < deadline:
-        try:
-            current = client.get(
-                f"/project/{project_id}/tasks/{task_id}",
-                auth="token",
-            )
-            last_error = None
-        except InfraManagerError as exc:
-            # Самообновление управляющего гостя кратко перезапускает Semaphore.
-            last_error = exc
-            time.sleep(2)
-            continue
-
-        final_status = (
-            str(current.get("status", ""))
-            if isinstance(current, dict)
-            else ""
-        )
-        if final_status in {"success", "error", "stopped"}:
-            break
-        time.sleep(2)
-    else:
-        detail = f": {last_error}" if last_error is not None else ""
-        raise InfraManagerError(
-            f"Semaphore: ожидание задания #{task_id} превысило {timeout} с"
-            f"{detail}"
-        )
-
-    while True:
-        try:
-            output = client.get(
-                f"/project/{project_id}/tasks/{task_id}/output",
-                auth="token",
-            )
-            break
-        except InfraManagerError:
-            if time.monotonic() >= deadline:
-                raise
-            time.sleep(2)
-    if isinstance(output, list):
-        for item in output:
-            if not isinstance(item, dict):
-                continue
-            line = item.get("output")
-            if isinstance(line, str) and line:
-                print(line, end="" if line.endswith("\n") else "\n")
-
-    if final_status != "success":
-        raise InfraManagerError(
-            f"Semaphore: задание #{task_id} завершилось со статусом "
-            f"{final_status or 'неизвестно'}"
-        )
-
-    console.ok(f"Semaphore: задание #{task_id} завершено")
-    return task_id
 
 
 def semaphore_views() -> tuple[ViewSpec, ...]:

@@ -18,6 +18,8 @@ services:
       - /mnt/persistent-state/ansible:/etc/infra-manager/ansible:ro
       - /mnt/pve-access/pve-host:/mnt/pve-access/pve-host:ro
       - /mnt/persistent-state/opentofu:/var/lib/infra-manager/opentofu
+      - /mnt/persistent-state/locks:/var/lib/infra-manager/locks
+      - /var/lib/infra-manager/bootstrap-repo:/var/lib/infra-manager/bootstrap-repo:ro
       - /run/infra-manager/secrets:/run/infra-manager/secrets:ro
 
   openbao:

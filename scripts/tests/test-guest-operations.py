@@ -3,7 +3,10 @@
 
 from __future__ import annotations
 
+import contextlib
+import stat
 import sys
+import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -13,6 +16,7 @@ MODULE_ROOT = ROOT / "scripts" / "infra-manager"
 sys.path.insert(0, str(MODULE_ROOT))
 
 from infra_manager import guest_operations as operations
+from infra_manager import operation_lock
 from infra_manager import semaphore as semaphore_module
 from infra_manager.common import InfraManagerError
 from infra_manager.guest_catalog import deployable_guests, guest_identity
@@ -318,6 +322,11 @@ def check_dispatch() -> None:
         patch.object(operations, "require_runtime_activation_idle") as idle,
         patch.object(
             operations,
+            "project_checkout_lock",
+            return_value=contextlib.nullcontext(),
+        ),
+        patch.object(
+            operations,
             "guest_identity",
             return_value=SimpleNamespace(
                 vmid=109,
@@ -342,6 +351,11 @@ def check_dispatch() -> None:
     status.reset_mock()
     with (
         patch.object(operations, "require_runtime_activation_idle"),
+        patch.object(
+            operations,
+            "project_checkout_lock",
+            return_value=contextlib.nullcontext(),
+        ),
         patch.object(
             operations,
             "guest_identity",
@@ -369,12 +383,158 @@ def check_dispatch() -> None:
         fail("Явный доверенный вызов должен разрешать вывод секретов")
 
 
+
+def check_operation_lock() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        lock_dir = Path(tmp)
+        lock_path = lock_dir / "410.lock"
+
+        with operation_lock.guest_operation_lock(
+            410,
+            "deploy",
+            lock_dir=lock_dir,
+        ):
+            mode = stat.S_IMODE(lock_path.stat().st_mode)
+            if mode != 0o660:
+                fail(f"Lock-файл должен иметь режим 0660, получен {mode:o}")
+            try:
+                with operation_lock.guest_operation_lock(
+                    410,
+                    "repair",
+                    lock_dir=lock_dir,
+                ):
+                    fail("Повторная операция над одним VMID не должна запускаться")
+            except InfraManagerError as exc:
+                if "410" not in str(exc) or "deploy" not in str(exc):
+                    fail("Ошибка блокировки должна показывать занятого гостя и операцию")
+
+            with operation_lock.guest_operation_lock(
+                420,
+                "deploy",
+                lock_dir=lock_dir,
+            ):
+                pass
+
+        lock_path.write_text(
+            '{"vmid": 410, "operation": "old", "pid": 999999}\n',
+            encoding="utf-8",
+        )
+        with operation_lock.guest_operation_lock(
+            410,
+            "sync",
+            lock_dir=lock_dir,
+        ):
+            pass
+
+        try:
+            with operation_lock.guest_operation_lock(
+                410,
+                "test",
+                lock_dir=lock_dir,
+            ):
+                raise RuntimeError("test")
+        except RuntimeError:
+            pass
+
+        with operation_lock.guest_operation_lock(
+            410,
+            "repair",
+            lock_dir=lock_dir,
+        ):
+            pass
+
+
+        with patch.object(
+            operation_lock,
+            "PATHS",
+            SimpleNamespace(data_dir=lock_dir),
+        ):
+            with operation_lock.project_checkout_lock(exclusive=False):
+                with operation_lock.project_checkout_lock(exclusive=False):
+                    pass
+                try:
+                    with operation_lock.project_checkout_lock(exclusive=True):
+                        fail("Update не должен идти одновременно с чтением проекта")
+                except InfraManagerError:
+                    pass
+
+            with operation_lock.project_checkout_lock(exclusive=True):
+                try:
+                    with operation_lock.project_checkout_lock(exclusive=False):
+                        fail("Операция не должна читать проект во время update")
+                except InfraManagerError:
+                    pass
+
+
+        fallback_host = lock_dir / "host-semaphore"
+        fallback_runtime = lock_dir / "runtime-semaphore"
+        fallback_host.mkdir()
+        fallback_runtime.mkdir()
+        with (
+            patch.object(
+                operation_lock,
+                "PATHS",
+                SimpleNamespace(data_dir=lock_dir / "missing-data"),
+            ),
+            patch.object(
+                operation_lock,
+                "HOST_SEMAPHORE_DIR",
+                fallback_host,
+            ),
+            patch.object(
+                operation_lock,
+                "RUNTIME_SEMAPHORE_DIR",
+                fallback_runtime,
+            ),
+        ):
+            with operation_lock.guest_operation_lock(410, "deploy"):
+                expected = (
+                    fallback_host
+                    / ".infra-manager-operation-locks"
+                    / "410.lock"
+                )
+                if not expected.exists():
+                    fail("Host rollout должен использовать общий Semaphore state")
+
+        with (
+            patch.object(
+                operation_lock,
+                "PATHS",
+                SimpleNamespace(data_dir=lock_dir / "missing-data"),
+            ),
+            patch.object(
+                operation_lock,
+                "HOST_SEMAPHORE_DIR",
+                lock_dir / "missing-host-semaphore",
+            ),
+            patch.object(
+                operation_lock,
+                "RUNTIME_SEMAPHORE_DIR",
+                fallback_runtime,
+            ),
+        ):
+            with operation_lock.guest_operation_lock(420, "deploy"):
+                expected = (
+                    fallback_runtime
+                    / ".infra-manager-operation-locks"
+                    / "420.lock"
+                )
+                if not expected.exists():
+                    fail("Runtime rollout должен использовать общий Semaphore state")
+
+
 def check_semaphore_secret_policy() -> None:
     entrypoint = (
         ROOT / "scripts" / "infra-manager" / "jobs" / "guest-operation.py"
     ).read_text(encoding="utf-8")
     if "show_secrets=False" not in entrypoint:
-        fail("Точка входа Semaphore должна явно запрещать вывод секретов")
+        fail("Точка входа операций должна явно запрещать вывод секретов")
+    if "prepare_operation_environment()" not in entrypoint:
+        fail("Точка входа операций должна готовить среду без Semaphore API")
+    if "PveClient()" not in entrypoint:
+        fail("Прямой запуск должен получать PVE credential из локального файла")
+    if "PATHS.ansible_public_key" not in entrypoint:
+        fail("Прямой запуск должен получать открытый Ansible-ключ локально")
 
 
 def main() -> None:

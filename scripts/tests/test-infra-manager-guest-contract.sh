@@ -277,6 +277,13 @@ if set(services) != {"runtime", "openbao"}:
     )
 runtime = services["runtime"]
 openbao = services["openbao"]
+runtime_mounts = set(runtime.get("mounts", []))
+required_runtime_mounts = {
+    "/mnt/persistent-state/locks:/var/lib/infra-manager/locks",
+    "/var/lib/infra-manager/bootstrap-repo:/var/lib/infra-manager/bootstrap-repo:ro",
+}
+if not required_runtime_mounts.issubset(runtime_mounts):
+    raise SystemExit("provision.yaml не описывает mount блокировок и Git-копии runtime")
 if runtime.get("container_name") != "infra-runtime":
     raise SystemExit("provision.yaml: container_name должен быть infra-runtime")
 if runtime.get("image") != "infra-runtime:v1":
@@ -335,6 +342,7 @@ required_state = {
     "opentofu-state",
     "semaphore-data",
     "ansible-identity",
+    "operation-locks",
 }
 state_contains = set(state.get("contains", []))
 if not required_state.issubset(state_contains):
@@ -350,6 +358,7 @@ required_bindings = {
     ("/mnt/persistent-state/ansible", "/etc/infra-manager/ansible"),
     ("/mnt/persistent-state/semaphore", "/var/lib/infra-manager/semaphore"),
     ("/mnt/persistent-state/opentofu", "/var/lib/infra-manager/opentofu"),
+    ("/mnt/persistent-state/locks", "/var/lib/infra-manager/locks"),
     ("/mnt/persistent-state/openbao", "/var/lib/persistent/openbao"),
 }
 if not required_bindings.issubset(binding_pairs):
@@ -420,6 +429,10 @@ if compose_services["runtime"].get("env_file") != [
 runtime_volumes = set(compose_services["runtime"].get("volumes", []))
 if "/run/infra-manager/secrets:/run/infra-manager/secrets:ro" not in runtime_volumes:
     raise SystemExit("infra-runtime должен видеть материализованные секреты только для чтения")
+if "/mnt/persistent-state/locks:/var/lib/infra-manager/locks" not in runtime_volumes:
+    raise SystemExit("PVE CLI и Semaphore должны использовать общий каталог блокировок")
+if "/var/lib/infra-manager/bootstrap-repo:/var/lib/infra-manager/bootstrap-repo:ro" not in runtime_volumes:
+    raise SystemExit("infra-runtime должен читать постоянную рабочую Git-копию")
 
 compose_openbao = compose_services["openbao"]
 if compose_openbao.get("container_name") != openbao.get("container_name"):

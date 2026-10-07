@@ -38,6 +38,7 @@ scripts/
 │   │   ├── settings.py                      # Хранит единые неизменяемые пути, имена, версии и значения по умолчанию
 │   │   ├── guest_catalog.py                 # Находит специальных гостей по role и читает их VMID, имя и адрес
 │   │   ├── guest_operations.py              # Выполняет общие Deploy/Status/Repair/Test/Sync операции над гостями
+│   │   ├── operation_lock.py                 # Координирует общую Git-копию и блокировки изменяющих операций по VMID
 │   │   ├── guest_status.py                  # Проверяет и выводит единое состояние любого поддерживаемого гостя
 │   │   ├── operator.py                      # Операторская логика, выполняемая внутри 910
 │   │   ├── semaphore.py                     # Синхронизирует проект, Git, группу переменных и задания Semaphore
@@ -184,6 +185,7 @@ Semaphore: Build Template 9000
 
 ```text
 infra-manager guests
+infra-manager update
 infra-manager status [VMID]
 infra-manager deploy VMID
 infra-manager sync VMID
@@ -193,6 +195,8 @@ infra-manager recover
 ```
 
 Но `scripts/infra-manager/host/manager.py` теперь является только минимальной оболочкой. Для всех обычных операций она проверяет VMID управляющего LXC и передаёт аргументы через `pct exec` установленной команде `/usr/local/sbin/infra-manager` внутри 910. Реальная операторская логика находится в `infra_manager/operator.py`.
+
+`deploy/sync/repair/test` из PVE не создают задание Semaphore через API: оператор внутри 910 под разделяемой блокировкой делает временный снимок постоянной Git-копии внутри `infra-runtime` и запускает из него `jobs/guest-operation.py`. Это защищает прямой запуск от изменения файлов во время самообновления управляющего гостя. Шаблоны Semaphore вызывают ту же точку входа из своей рабочей копии задания. Оба пути сходятся в `run_guest_operation()` и используют общий каталог `/var/lib/infra-manager/locks`; изменяющие операции блокируются по VMID, а `infra-manager update` получает отдельную исключительную блокировку рабочей Git-копии.
 
 Доверенный вызов с PVE помечается `--trusted-pve`; только в этом режиме итоговый status может вывести операторские пароли в текущий root-терминал. Semaphore, Homepage и внутренние проверки этот режим не используют.
 
@@ -238,7 +242,7 @@ python scripts/validate_repo.py
 - `test-infra-manager-python.py` проверяет основу Python-пакета, командную оболочку и PVE-вспомогательные функции.
 - `test-pve-lifecycle.py` проверяет полный сценарий lifecycle test, защиту занятого VMID и аварийную очистку без реального PVE.
 - `test-python-command.py` проверяет внутреннюю оболочку `infra-manager-status`.
-- `test-manager-host.py` проверяет единый набор `infra-manager guests/status/deploy/sync/repair/test/recover` без реального изменения PVE.
+- `test-manager-host.py` проверяет единый набор `infra-manager guests/update/status/deploy/sync/repair/test/recover` без реального изменения PVE.
 - `test-bootstrap-host.py` проверяет состояния первоначального контура, восстановление, строгую метку владения 910 и безопасное удаление.
 - `test-status.py` проверяет чтение и валидацию состояния Semaphore.
 - `test-template.py` проверяет безопасную передачу параметров Packer и валидацию шаблона.

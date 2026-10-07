@@ -116,9 +116,9 @@ infra-manager status
 
 ## Обычное обновление 910
 
-После первоначального создания 990 для обычных обновлений не нужен. В Semaphore используется единое задание `Deploy Guest`, где выбирается гость `910 infra-manager`.
+После первоначального создания 990 для обычных обновлений не нужен. С PVE используется `infra-manager update`, затем `infra-manager deploy 910`. В Semaphore остаётся единое задание `Deploy Guest`, где можно выбрать `910 infra-manager`; оба входа выполняют один общий диспетчер внутри `infra-runtime`.
 
-Оно применяет общий `deploy-guest → Ansible`, но не включает собственный объект 910 в постоянное состояние OpenTofu. Перезапуск `infra-runtime` откладывается до завершения задания, чтобы Semaphore не остановил сам себя.
+Общий путь применяет `deploy-guest → Ansible`, но не включает собственный объект 910 в постоянное состояние OpenTofu. Перезапуск `infra-runtime` откладывается до завершения текущего процесса независимо от того, пришёл запуск из PVE CLI или из Semaphore.
 
 Обычный журнал заданий работает в сокращённом режиме. Уровень вывода меняется штатным заданием Semaphore `Set Log Level`: в форме выбирается `Обычный`, `Подробный` или `Тихий`, а выбранное значение сохраняется для следующих заданий.
 
@@ -227,6 +227,7 @@ infrastructure/guests/910-infra-manager/provision.yaml
 /mnt/pve-access/pve-host/
 /var/lib/infra-manager/semaphore/
 /var/lib/infra-manager/opentofu/state/
+/var/lib/infra-manager/locks/
 ```
 
 Рабочие PVE, Git и Semaphore secrets берутся из OpenBao и материализуются только во временный каталог `/run/infra-manager/secrets/`.
@@ -338,6 +339,7 @@ cat /run/infra-manager/secrets/initial-admin-password
 
 ```bash
 infra-manager guests
+infra-manager update
 infra-manager status [VMID]
 infra-manager deploy VMID
 infra-manager sync VMID
@@ -346,7 +348,9 @@ infra-manager test VMID
 infra-manager recover
 ```
 
-PVE не содержит обычную логику этих операций. Оболочка читает VMID управляющего LXC, проверяет его принадлежность проекту и передаёт `guests/status/deploy/sync/repair/test` через `pct exec` операторской команде внутри 910. Там уже используются общий статус и штатные задания Semaphore; OpenTofu и Ansible непосредственно на PVE не запускаются.
+PVE не содержит обычную логику этих операций. Оболочка читает VMID управляющего LXC, проверяет его принадлежность проекту и передаёт `guests/update/status/deploy/sync/repair/test` через `pct exec` операторской команде внутри 910. Для `deploy/sync/repair/test` оператор запускает через `docker exec` общий `guest-operation.py` внутри уже существующего `infra-runtime`; Semaphore использует ту же точку входа из своих заданий, но не является промежуточным слоем для PVE-команд. OpenTofu и Ansible остаются только в `infra-runtime` и непосредственно на PVE или в системе 910 не дублируются.
+
+`infra-manager update` отдельно обновляет постоянную рабочую копию проекта из выбранной Git-ветки без нового клонирования. Во время обновления рабочая копия имеет исключительную блокировку. Изменяющие операции `deploy/sync/repair/test` дополнительно используют общую для PVE CLI и Semaphore блокировку по VMID в `/var/lib/infra-manager/locks/`; `status` не берёт блокировку VMID и остаётся операцией чтения.
 
 Доверенный вызов с физического PVE явно отмечается оболочкой, поэтому `status [VMID]` может показать операторские пароли только в текущем root-терминале. Запуск из Semaphore, Homepage и внутренних проверок остаётся без секретов.
 

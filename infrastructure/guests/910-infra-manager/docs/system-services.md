@@ -168,6 +168,7 @@ systemctl start infra-manager-openbao-startup-unseal.service
 
 ```bash
 infra-manager guests
+infra-manager update
 infra-manager status [VMID]
 infra-manager deploy VMID
 infra-manager sync VMID
@@ -185,9 +186,11 @@ infra-manager recover
 уже внутри 910. Внутренняя команда реализована модулем `infra_manager.operator`.
 
 - `guests` показывает поддерживаемых гостей и состояние их объектов Proxmox;
+- `update` обновляет существующую рабочую Git-копию 910 и на время `fetch/reset/clean` получает исключительную блокировку проекта;
 - `status` без VMID выполняет полную проверку управляющего контура из 910, включая PVE-only проверки через ограниченные helper-механизмы;
 - `status VMID` выполняет общий статус выбранного гостя;
-- `deploy VMID`, `sync VMID`, `repair VMID` и `test VMID` внутри 910 создают существующее штатное задание Semaphore, ждут его завершения и выводят журнал;
+- `deploy VMID`, `sync VMID`, `repair VMID` и `test VMID` внутри 910 через `docker exec` запускают `guest-operation.py` в `infra-runtime`; Semaphore вызывает ту же точку входа из своих заданий, но не участвует в маршруте PVE-команды;
+- изменяющие гостевые операции используют общий для PVE CLI и `infra-runtime` lock по VMID в `/var/lib/infra-manager/locks`; `status` не блокирует VMID, но все операции чтения рабочей копии координируются с `update`;
 - PVE-оболочка передаёт скрытый признак доверенного вызова, поэтому после операции пароль может появиться только в текущем root-терминале PVE; журналы Semaphore и Homepage секретов не содержат;
 - `repair` без VMID при необходимости запускает остановленный LXC на PVE, но Docker, OpenBao и активация управляющей среды выполняются операторским слоем внутри 910;
 - `recover` не передаётся в 910: его выполняет PVE-only `infra-manager-recovery`, который проверяет постоянное состояние, восстанавливает bootstrap Git-доступ и запускает штатный bootstrap recovery.

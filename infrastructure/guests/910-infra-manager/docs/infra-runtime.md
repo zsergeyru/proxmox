@@ -158,9 +158,11 @@ cat /opt/infra-manager/compose/.versions.env
 | `/mnt/persistent-state/ansible` | `/etc/infra-manager/ansible` | RO |
 | `/mnt/pve-access/pve-host` | `/mnt/pve-access/pve-host` | RO |
 | `/mnt/persistent-state/opentofu` | `/var/lib/infra-manager/opentofu` | RW |
+| `/mnt/persistent-state/locks` | `/var/lib/infra-manager/locks` | RW |
+| `/var/lib/infra-manager/bootstrap-repo` | `/var/lib/infra-manager/bootstrap-repo` | RO |
 | `/run/infra-manager/secrets` | `/run/infra-manager/secrets` | RO |
 
-Контейнер может менять только свои рабочие данные Semaphore и OpenTofu. Идентичности Ansible, PVE-доступ и материализованные секреты он получает только для чтения.
+Контейнер может менять свои рабочие данные Semaphore и OpenTofu, а также общий каталог координационных lock-файлов. `/var/lib/infra-manager/locks` указывает на тот же `/mnt/persistent-state/locks`, который использует операторский процесс на 910, поэтому PVE CLI и Semaphore видят одни и те же блокировки. Постоянная Git-копия подключена в контейнер только для чтения: оператор обновляет её отдельной командой `infra-manager update`. Для прямого PVE-запуска оператор под разделяемой блокировкой копирует её во временный каталог `/tmp/infra-manager-direct.*` внутри `infra-runtime` и выполняет `guest-operation.py` уже из снимка. Поэтому самообновление управляющего гостя может менять постоянную Git-копию, не меняя файлы уже запущенного процесса. Идентичности Ansible, PVE-доступ и материализованные секреты контейнер также получает только для чтения.
 
 ## 3. Запуск и проверка
 
@@ -172,7 +174,9 @@ cat /opt/infra-manager/compose/.versions.env
 /opt/infra-manager/compose/
 /mnt/persistent-state/semaphore/
 /mnt/persistent-state/opentofu/
+/mnt/persistent-state/locks/
 /mnt/persistent-state/ansible/
+/var/lib/infra-manager/bootstrap-repo/
 /etc/infra-manager/ca/
 /mnt/pve-access/pve-host/
 /run/infra-manager/secrets/
@@ -263,6 +267,8 @@ docker exec infra-runtime python3 -c 'import proxmoxer, yaml, jsonschema'
 ```bash
 docker exec infra-runtime test -d /var/lib/semaphore
 docker exec infra-runtime test -d /var/lib/infra-manager/opentofu
+docker exec infra-runtime test -w /var/lib/infra-manager/locks
+docker exec infra-runtime test -r /var/lib/infra-manager/bootstrap-repo/scripts/infra-manager/jobs/guest-operation.py
 docker exec infra-runtime test -d /etc/infra-manager/ansible
 docker exec infra-runtime test -d /run/infra-manager/secrets
 ```
@@ -316,20 +322,23 @@ INFRA_PVE_NODE
 
 ### Признак отложенной активации
 
-Во время самообновления используется:
+Во время самообновления используется один физический файл, видимый под разными путями:
 
 ```text
-/var/lib/semaphore/.infra-manager-runtime-activation-pending
+на 910:          /mnt/persistent-state/semaphore/.infra-manager-runtime-activation-pending
+в infra-runtime: /var/lib/semaphore/.infra-manager-runtime-activation-pending
 ```
 
-Так как `/var/lib/semaphore` является постоянным подключённым каталогом, файл одновременно видят:
+В файл записывается пространство PID и PID процесса, который запустил самообновление:
 
-- текущее задание внутри старого контейнера;
-- система 910 снаружи контейнера.
+```text
+host:<PID>
+runtime:<PID>
+```
 
-В файл записывается PID текущего задания.
+Штатные гостевые операции как с PVE, так и из Semaphore выполняются внутри `infra-runtime` и используют `runtime:<PID>`. Формат `host:<PID>` поддерживается для служебного host-side исполнения общего механизма, а для безопасного первого перехода активация также принимает старый числовой формат как `runtime:<PID>`.
 
-Новые инфраструктурные задания проверяют этот признак и не должны начинать изменение инфраструктуры во время замены среды.
+Новые инфраструктурные операции проверяют этот признак и не должны начинать изменение инфраструктуры во время замены среды.
 
 ### Как работает активация
 
@@ -341,9 +350,9 @@ INFRA_PVE_NODE
 
 Порядок:
 
-1. читает PID из файла-признака;
-2. проверяет, что PID имеет числовой формат;
-3. через `docker exec` ждёт завершения этого процесса в старом `infra-runtime`;
+1. читает пространство PID и PID из файла-признака;
+2. проверяет формат `host:<PID>`, `runtime:<PID>` или совместимый старый числовой формат;
+3. для `host` ждёт процесс через `kill -0` на 910, а для `runtime` — через `docker exec ... kill -0` в старом `infra-runtime`;
 4. максимальное ожидание — 15 минут;
 5. выполняет `docker compose up -d --remove-orphans` уже с новым образом;
 6. выполняет `infra-manager-openbao-startup-unseal`;
@@ -371,7 +380,7 @@ systemctl list-units 'infra-manager-runtime-activate-*'
 Проверить признак:
 
 ```bash
-ls -l /var/lib/semaphore/.infra-manager-runtime-activation-pending
+ls -l /mnt/persistent-state/semaphore/.infra-manager-runtime-activation-pending
 ```
 
 После успешной активации признак должен исчезнуть.

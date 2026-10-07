@@ -217,14 +217,43 @@ def check_log_levels() -> None:
 
 def check_runtime_activation_guard() -> None:
     with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        host_state = root / "host-semaphore"
+        runtime_state = root / "runtime-semaphore"
+        host_state.mkdir()
+        runtime_state.mkdir()
+
+        original_host_state = common.HOST_SEMAPHORE_STATE_DIR
+        original_runtime_state = common.RUNTIME_SEMAPHORE_STATE_DIR
+        try:
+            common.HOST_SEMAPHORE_STATE_DIR = host_state
+            common.RUNTIME_SEMAPHORE_STATE_DIR = runtime_state
+            expected = host_state / ".infra-manager-runtime-activation-pending"
+            if common._default_runtime_activation_marker() != expected:
+                fail("На 910 marker активации должен использовать persistent-state")
+
+            common.HOST_SEMAPHORE_STATE_DIR = root / "missing-host-state"
+            expected = runtime_state / ".infra-manager-runtime-activation-pending"
+            if common._default_runtime_activation_marker() != expected:
+                fail("В infra-runtime marker активации должен использовать /var/lib/semaphore")
+        finally:
+            common.HOST_SEMAPHORE_STATE_DIR = original_host_state
+            common.RUNTIME_SEMAPHORE_STATE_DIR = original_runtime_state
+
         marker = Path(tmp) / "runtime-activation-pending"
         original = common.RUNTIME_ACTIVATION_MARKER
         common.RUNTIME_ACTIVATION_MARKER = marker
         try:
             common.require_runtime_activation_idle()
             common.reserve_runtime_activation()
-            if marker.read_text(encoding="utf-8").strip() != str(os.getpid()):
-                fail("Маркер активации должен содержать PID текущего задания")
+            expected_ref = (
+                f"{common._runtime_activation_scope()}:{os.getpid()}"
+            )
+            if marker.read_text(encoding="utf-8").strip() != expected_ref:
+                fail(
+                    "Маркер активации должен содержать пространство PID "
+                    "и PID текущего процесса"
+                )
             if marker.stat().st_mode & 0o777 != 0o600:
                 fail("Маркер активации должен иметь права 0600")
             try:
