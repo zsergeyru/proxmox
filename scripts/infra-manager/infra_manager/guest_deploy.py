@@ -876,8 +876,7 @@ def _validate_existing_guest_object(context: DeploymentContext) -> None:
     resource = context.client.find_vm(context.vmid)
     if resource is None:
         raise InfraManagerError(
-            f"Гость {context.vmid} отсутствует в PVE; "
-            "режим provision-existing не может его создать"
+            f"Гость {context.vmid} отсутствует в PVE"
         )
     actual_type = str(resource.get("type") or "")
     actual_name = str(resource.get("name") or "")
@@ -988,7 +987,6 @@ def _run_deploy_guest(
         "infrastructure",
         "provision-base",
         "provision",
-        "provision-existing",
     }:
         raise InfraManagerError(f"Неизвестная фаза deploy-guest: {phase}")
     identity = guest_identity(repo_root, vmid)
@@ -999,11 +997,6 @@ def _run_deploy_guest(
             f"Гость {vmid} не имеет роль {SETTINGS.infra_manager_role!r} "
             "и не принадлежит начальному контуру"
         )
-    if phase == "provision-existing" and not bootstrap_scope:
-        raise InfraManagerError(
-            "provision-existing разрешён только начальному контуру"
-        )
-
     self_update = not bootstrap_scope and is_infra_manager
     if self_update and phase != "all":
         raise InfraManagerError(
@@ -1048,14 +1041,21 @@ def _run_deploy_guest(
             f"Проверка существующего {context.vmid} {context.name} "
             "без собственного OpenTofu state"
         )
-        _validate_existing_guest_object(context)
-        _configure_guest_os(
-            context,
-            provision_phase="full",
-            self_update=True,
-            project_branch=project_branch,
-            allow_legacy_bootstrap=False,
-        )
+        try:
+            _validate_existing_guest_object(context)
+            _configure_guest_os(
+                context,
+                provision_phase="full",
+                self_update=True,
+                project_branch=project_branch,
+                allow_legacy_bootstrap=False,
+            )
+        except InfraManagerError as exc:
+            raise InfraManagerError(
+                f"Штатный deploy {context.name} невозможен: {exc}. "
+                "Постоянный SSH-ключ не используется; для полного "
+                "восстановления запустите на PVE: infra-manager recover"
+            ) from exc
         console.result(
             f"{context.vmid} {context.name} обновлён через Ansible; "
             "активация новой управляющей среды назначена "
@@ -1069,14 +1069,11 @@ def _run_deploy_guest(
     state_present, state_status = context.workspace.get_resource_state(
         context.target
     )
-    if phase == "provision-existing":
-        _validate_existing_guest_object(context)
-    else:
-        _validate_pve_and_state(
-            context,
-            state_present=state_present,
-            state_status=state_status,
-        )
+    _validate_pve_and_state(
+        context,
+        state_present=state_present,
+        state_status=state_status,
+    )
 
     if not bootstrap_scope:
         if not state_present and phase in {"all", "infrastructure"}:
@@ -1133,7 +1130,7 @@ def _run_deploy_guest(
             project_branch=project_branch,
             bootstrap_private_key=bootstrap_private_key,
         )
-    elif phase in {"provision", "provision-existing"}:
+    elif phase == "provision":
         _configure_guest_os(
             context,
             provision_phase="full",
@@ -1155,11 +1152,6 @@ def _run_deploy_guest(
     elif phase == "provision":
         console.result(
             f"{context.vmid} {context.name}: полная настройка завершена"
-        )
-    elif phase == "provision-existing":
-        console.result(
-            f"{context.vmid} {context.name}: существующий гость "
-            "настроен через provision.yaml без владения OpenTofu state"
         )
     else:
         console.result(
