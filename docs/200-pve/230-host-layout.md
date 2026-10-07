@@ -200,7 +200,7 @@ test VMID
 recover
 ```
 
-Для всех команд кроме `recover` оболочка только читает VMID управляющего LXC из `/etc/infra-manager/openbao-host.json`, проверяет проектную метку объекта и передаёт аргументы через `pct exec` операторскому слою внутри 910. `update` синхронизирует уже существующую Git-копию внутри 910. Для `deploy/sync/repair/test` оператор запускает общий `guest-operation.py` через `docker exec` в `infra-runtime`; Semaphore API в этом маршруте не участвует. OpenTofu и Ansible на PVE и в системе 910 не устанавливаются повторно — они остаются внутри `infra-runtime`.
+Для всех команд кроме `recover` оболочка только читает VMID управляющего LXC из `/etc/infra-manager/openbao-host.json`, проверяет проектную метку объекта и передаёт аргументы через `pct exec` операторскому слою внутри 910. Перед прямым `deploy` оператор автоматически синхронизирует существующую Git-копию внутри 910 и создаёт снимок для текущего запуска. Для `deploy/sync/repair/test` общий `guest-operation.py` выполняется через `docker exec` в `infra-runtime`; Semaphore API в этом маршруте не участвует. OpenTofu и Ansible на PVE и в системе 910 не устанавливаются повторно — они остаются внутри `infra-runtime`.
 
 `repair` без VMID может запустить остановленный управляющий LXC перед передачей команды внутрь него. `recover` выполняется отдельно PVE-only recovery helper и поэтому не зависит от состояния 910.
 
