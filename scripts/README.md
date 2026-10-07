@@ -178,7 +178,7 @@ Semaphore: Build Template 9000
 
 ## Операторская и внутренние команды
 
-Единственный штатный интерфейс человека устанавливается на физическом PVE:
+Штатная точка входа человека остаётся на физическом PVE:
 
 ```text
 infra-manager guests
@@ -190,13 +190,15 @@ infra-manager test VMID
 infra-manager recover
 ```
 
-Его реализация находится в `scripts/infra-manager/host/manager.py`.
+Но `scripts/infra-manager/host/manager.py` теперь является только минимальной оболочкой. Для всех обычных операций она проверяет VMID управляющего LXC и передаёт аргументы через `pct exec` установленной команде `/usr/local/sbin/infra-manager` внутри 910. Реальная операторская логика находится в `infra_manager/operator.py`.
 
-`status VMID` явно включает доверенный вывод секретов в текущую root-сессию PVE. Операции `deploy`, `sync`, `repair VMID` и `test` не выполняют OpenTofu или Ansible на PVE: команда передаёт их существующему шаблону Semaphore в 910 и ждёт его завершения. Журнал самого задания остаётся без паролей.
+Доверенный вызов с PVE помечается `--trusted-pve`; только в этом режиме итоговый status может вывести операторские пароли в текущий root-терминал. Semaphore, Homepage и внутренние проверки этот режим не используют.
 
-Внутри 910 остаётся техническая `infra-manager-status`, которую PVE вызывает через `pct exec`. Внутренние команды `guest-list`, `guest-task` и `guest-status` доступны только через `python3 -m infra_manager` и служат мостом для PVE-команды. Отдельные установленные команды `infra-manager-pve-access-check` и `infra-manager-pve-lifecycle-test` удалены.
+`repair` без VMID может запустить остановленный управляющий LXC, но Docker/OpenBao/активация runtime выполняются уже операторским слоем внутри 910. `recover` является исключением: PVE-оболочка передаёт его напрямую `infra-manager-recovery`, чтобы восстановление не зависело от работоспособности 910.
 
-`infra-manager-activate-runtime` и `infra-manager-openbao-startup-unseal` являются внутренними командами автоматизации, а PVE-команды `infra-manager-openbao-unseal` и `infra-manager-recovery` — внутренними служебными механизмами единой операторской команды.
+Внутри 910 также остаётся техническая `infra-manager-status`. Отдельные установленные команды `infra-manager-pve-access-check` и `infra-manager-pve-lifecycle-test` удалены.
+
+`infra-manager-activate-runtime` и `infra-manager-openbao-startup-unseal` являются внутренними командами автоматизации 910. На PVE остаются только тонкая оболочка, `infra-manager-recovery`, `infra-manager-openbao-unseal`, пакет его поддержки и PVE-only данные.
 
 ## `guests/`
 
@@ -242,7 +244,8 @@ python scripts/validate_repo.py
 
 - код жизненного цикла 910 → `scripts/infra-manager/`;
 - задания Semaphore → `scripts/infra-manager/jobs/`;
-- операторская команда PVE → `scripts/infra-manager/host/manager.py`;
+- тонкая операторская оболочка PVE → `scripts/infra-manager/host/manager.py`;
+- операторская логика 910 → `scripts/infra-manager/infra_manager/operator.py`;
 - внутренние команды 910 → `scripts/infra-manager/commands/`;
 - общая логика конфигурации гостей → `scripts/guests/`;
 - проверки → `scripts/tests/`;
