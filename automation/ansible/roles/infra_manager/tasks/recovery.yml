@@ -26,4 +26,3 @@
     PYTHONPATH: "{{ provision.paths.python_package }}"
     INFRA_PVE_NODE: "{{ infra_pve_node }}"
   changed_when: true
-
