@@ -86,9 +86,14 @@ class BootstrapInfraMixin:
         self.ok(f"Базовая настройка {self.infra_ctid} завершена")
 
     def configure_infra_manager_control_plane(self) -> None:
-        """Поднять минимальный управляющий контур для запуска OpenBao."""
+        """Поднять управляющий контур, необходимый до перехода на SSH CA."""
         self.log(f"Запуск управляющего контура LXC {self.infra_ctid} через Ansible")
-        self._run_infra_bootstrap_step("configure-control-plane", progress=True)
+        step = (
+            "configure-recovery-control-plane"
+            if self.mode == "recover"
+            else "configure-control-plane"
+        )
+        self._run_infra_bootstrap_step(step, progress=True)
         self.ok(f"Управляющий контур {self.infra_ctid} запущен")
 
     def configure_infra_manager_ssh_trust(self) -> None:
