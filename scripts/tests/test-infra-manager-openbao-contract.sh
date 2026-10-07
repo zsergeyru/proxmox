@@ -40,6 +40,7 @@ PY_ACCESS_POLICY="$ROOT/scripts/infra-manager/infra_manager/access.py"
 PY_OPENBAO="$ROOT/scripts/infra-manager/infra_manager/openbao.py"
 PY_GUEST_DEPLOY="$ROOT/scripts/infra-manager/infra_manager/guest_deploy.py"
 PY_RECOVERY="$ROOT/scripts/infra-manager/infra_manager/recovery.py"
+PY_OPERATOR="$ROOT/scripts/infra-manager/infra_manager/operator.py"
 RECOVERY_HOST="$ROOT/scripts/infra-manager/host/recovery.py"
 PVE_OPERATOR="$ROOT/scripts/infra-manager/host/manager.py"
 DOCKERFILE="$ROOT/infrastructure/guests/910-infra-manager/rootfs/opt/infra-manager/compose/runtime/Dockerfile"
@@ -81,13 +82,19 @@ for task_file in "${ANSIBLE_RUNTIME_PARTS[@]}"; do
     cat "$ANSIBLE_RUNTIME_DIR/$task_file" >> "$ANSIBLE_RUNTIME"
 done
 [[ -s "$PVE_OPERATOR" ]] \
-    || die "Отсутствует единая операторская команда PVE"
+    || die "Отсутствует минимальная операторская оболочка PVE"
+[[ -s "$PY_OPERATOR" ]] \
+    || die "Отсутствует операторский слой внутри infra-manager"
 for operator_command in guests deploy status sync repair test recover; do
-    grep -Fq "\"$operator_command\"" "$PVE_OPERATOR" \
-        || die "PVE-команда infra-manager не поддерживает $operator_command"
+    grep -Fq "\"$operator_command\"" "$PY_OPERATOR" \
+        || die "Операторский слой 910 не поддерживает $operator_command"
 done
-if grep -Fq '"openbao-operator"' "$PVE_OPERATOR"; then
-    die "openbao-operator не должен быть отдельной операторской командой PVE"
+grep -Fq '"--trusted-pve"' "$PVE_OPERATOR" \
+    || die "PVE-оболочка должна явно передавать доверенный режим"
+grep -Fq '"pct",' "$PVE_OPERATOR" \
+    || die "PVE-оболочка должна использовать pct exec"
+if grep -Fq '"openbao-operator"' "$PVE_OPERATOR" "$PY_OPERATOR"; then
+    die "openbao-operator не должен быть отдельной операторской командой"
 fi
 grep -Fq 'install_openbao_host_support(context.node, repo_root)' "$PY_GUEST_DEPLOY" \
     || die "Deploy Guest должен обновлять PVE OpenBao support до SSH-подписания"
