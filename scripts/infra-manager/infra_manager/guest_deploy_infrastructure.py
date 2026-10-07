@@ -191,6 +191,17 @@ def _apply_plan(
     context: DeploymentContext,
     actions: list[str],
 ) -> None:
+    if "create" in actions:
+        bootstrap_key = context.workspace.env.get(
+            "TF_VAR_bootstrap_ssh_public_key",
+            "",
+        ).strip()
+        if not bootstrap_key:
+            raise InfraManagerError(
+                f"Гость {context.vmid}: создание без одноразового "
+                "bootstrap SSH-ключа запрещено"
+            )
+
     changed_template_protection = False
     try:
         if "create" in actions and context.kind == "vm":
