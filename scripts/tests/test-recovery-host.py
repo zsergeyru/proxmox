@@ -35,12 +35,6 @@ def configure_paths(module, root: Path) -> None:
     module.BOOTSTRAP_GITHUB_KEY = (
         module.BOOTSTRAP_DIR / "github_proxmox_repo_ed25519"
     )
-    module.LEGACY_ACCESS_GITHUB_DIR = module.ACCESS_DIR / "github"
-    module.LEGACY_ACCESS_GITHUB_KEY = (
-        module.LEGACY_ACCESS_GITHUB_DIR / "github_proxmox_repo_ed25519"
-    )
-    module.LEGACY_ACCESS_PVE_API_DIR = module.ACCESS_DIR / "pve-api"
-    module.LEGACY_STATE_SECRETS_DIR = module.STATE_DIR / "secrets"
 
     module.OPENBAO_DIR = module.PVE_ONLY_DIR / "openbao"
     module.OPENBAO_UNSEAL_KEY = module.OPENBAO_DIR / "unseal.key"
@@ -94,27 +88,9 @@ def test_prepare_git_recovery() -> None:
         expected = b"git-key\n"
         assert module.RECOVERY_GITHUB_KEY.read_bytes() == expected
         assert module.BOOTSTRAP_GITHUB_KEY.read_bytes() == expected
-        assert not module.LEGACY_ACCESS_GITHUB_KEY.exists()
         assert module.RECOVERY_GITHUB_KEY.stat().st_mode & 0o777 == 0o600
         assert module.RECOVERY_DIR.stat().st_mode & 0o777 == 0o700
         assert module.BOOTSTRAP_DIR.stat().st_mode & 0o777 == 0o700
-
-
-def test_prepare_rejects_divergent_legacy_key() -> None:
-    module = load_module()
-    with tempfile.TemporaryDirectory() as tmp:
-        configure_paths(module, Path(tmp))
-        write(module.RECOVERY_GITHUB_KEY, "recovery-key\n")
-        write(module.LEGACY_ACCESS_GITHUB_KEY, "different-key\n")
-
-        with patch.object(module, "prepare_git_directories") as prepare_dirs:
-            try:
-                module.prepare_git_recovery()
-            except module.RecoveryError as exc:
-                assert "разные GitHub Deploy Key" in str(exc)
-            else:
-                raise AssertionError("Разные Git key должны блокировать prepare")
-        prepare_dirs.assert_not_called()
 
 
 def test_restore_git_access_from_recovery() -> None:
@@ -127,7 +103,6 @@ def test_restore_git_access_from_recovery() -> None:
             module.restore_git_access()
 
         assert module.BOOTSTRAP_GITHUB_KEY.read_text() == "git-key\n"
-        assert not module.LEGACY_ACCESS_GITHUB_KEY.exists()
         assert module.BOOTSTRAP_DIR.stat().st_mode & 0o777 == 0o700
 
 
@@ -236,43 +211,6 @@ def test_opentofu_state_required_only_for_managed_guests() -> None:
                 )
 
 
-def test_cleanup_transition_state() -> None:
-    module = load_module()
-    with tempfile.TemporaryDirectory() as tmp:
-        configure_paths(module, Path(tmp))
-        prepare_complete_state(module)
-        write(module.LEGACY_ACCESS_GITHUB_KEY, "git-key\n")
-        write(module.LEGACY_ACCESS_PVE_API_DIR / "pve-api.env")
-        write(module.LEGACY_STATE_SECRETS_DIR / "semaphore-server.env")
-
-        with patch.object(module, "managed_guests_exist", return_value=False):
-            module.cleanup_transition_state()
-
-        assert not module.LEGACY_ACCESS_GITHUB_DIR.exists()
-        assert not module.LEGACY_ACCESS_PVE_API_DIR.exists()
-        assert not module.LEGACY_STATE_SECRETS_DIR.exists()
-        assert module.RECOVERY_GITHUB_KEY.is_file()
-
-
-def test_cleanup_rejects_divergent_legacy_git_key() -> None:
-    module = load_module()
-    with tempfile.TemporaryDirectory() as tmp:
-        configure_paths(module, Path(tmp))
-        prepare_complete_state(module)
-        write(module.LEGACY_ACCESS_GITHUB_KEY, "different-key\n")
-
-        with patch.object(module, "managed_guests_exist", return_value=False):
-            try:
-                module.cleanup_transition_state()
-            except module.RecoveryError as exc:
-                assert "отличается" in str(exc)
-            else:
-                raise AssertionError(
-                    "Очистка не должна удалять отличный legacy Git key"
-                )
-        assert module.LEGACY_ACCESS_GITHUB_KEY.is_file()
-
-
 def test_run_recovery_owns_bootstrap() -> None:
     module = load_module()
     with tempfile.TemporaryDirectory() as tmp:
@@ -306,15 +244,12 @@ def test_run_recovery_owns_bootstrap() -> None:
 def main() -> None:
     tests = (
         test_prepare_git_recovery,
-        test_prepare_rejects_divergent_legacy_key,
         test_restore_git_access_from_recovery,
         test_verify_recovery_state,
         test_full_check_does_not_require_access_directory,
         test_preflight_allows_missing_approle_files,
         test_tls_ca_required_after_otp_migration,
         test_opentofu_state_required_only_for_managed_guests,
-        test_cleanup_transition_state,
-        test_cleanup_rejects_divergent_legacy_git_key,
         test_run_recovery_owns_bootstrap,
     )
     for test in tests:
