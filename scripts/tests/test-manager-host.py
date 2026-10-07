@@ -39,6 +39,7 @@ def test_host_proxy() -> None:
         patch.object(host, "manager_vmid", return_value=920),
         patch.object(host, "verify_manager") as verify,
         patch.object(host, "guest_running", return_value=True),
+        patch.object(host.socket, "gethostname", return_value="pve.example"),
         patch.object(host, "run", side_effect=fake_run),
     ):
         assert host.proxy_to_manager(["status", "410"]) == 0
@@ -49,6 +50,8 @@ def test_host_proxy() -> None:
         "exec",
         "920",
         "--",
+        "env",
+        "INFRA_PVE_NODE=pve",
         "/usr/local/sbin/infra-manager",
         "--trusted-pve",
         "status",
@@ -61,6 +64,7 @@ def test_host_repair_starts_manager() -> None:
         patch.object(host, "manager_vmid", return_value=920),
         patch.object(host, "verify_manager") as verify,
         patch.object(host, "start_manager") as start,
+        patch.object(host.socket, "gethostname", return_value="pve.example"),
         patch.object(
             host,
             "run",
@@ -217,6 +221,15 @@ def test_operator_status_secret_policy() -> None:
     credentials.assert_called_once_with("pve")
 
 
+def test_operator_prefers_explicit_pve_node() -> None:
+    with (
+        patch.dict(operator.os.environ, {"INFRA_PVE_NODE": "pve"}, clear=False),
+        patch.object(operator, "PveClient") as client,
+    ):
+        assert operator._pve_node() == "pve"
+    client.assert_not_called()
+
+
 def test_operator_repair_runs_inside_manager() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
@@ -288,6 +301,7 @@ def main() -> None:
     test_host_wrapper_is_minimal()
     test_operator_guest_task_secret_policy()
     test_operator_status_secret_policy()
+    test_operator_prefers_explicit_pve_node()
     test_operator_repair_runs_inside_manager()
     test_public_command_contract()
     print("[ОК] Минимальная PVE-оболочка и операторский слой 910 проверены")
