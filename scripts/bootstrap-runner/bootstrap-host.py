@@ -198,10 +198,7 @@ class BootstrapHost(
         )
         self.infra_pve_ca = self.infra_access_dir / "ca" / "pve-root-ca.crt"
         self.runner_pve_host_dir = Path("/etc/bootstrap-runner/pve-host")
-        self.runner_ansible_public_key = Path(
-            "/etc/bootstrap-runner/ansible/guest_ed25519.pub"
-        )
-        self.runner_ssh_key_comment = "bootstrap-runner-990"
+        self.infra_bootstrap_key_comment = "bootstrap-runner-990"
         self.infra_pve_host_dir = self.infra_access_dir / "pve-host"
 
         self.color = not os.environ.get("NO_COLOR") and os.environ.get("TERM") != "dumb"
@@ -494,7 +491,6 @@ class BootstrapHost(
             # внешнее изменение как замену ресурса. Инфраструктурная фаза
             # считается завершённой; дальше проверку state выполняет каждая
             # provision-фаза без повторного plan/apply.
-            self.ensure_runner_ssh_access_to_infra()
             self.deploy_infra_phase(
                 "base",
                 f"Базовая настройка LXC {self.infra_ctid} через Ansible",
@@ -507,16 +503,10 @@ class BootstrapHost(
                 f"Полная настройка {self.infra_ctid} завершена",
             )
         elif existed:
-            self.ensure_existing_infra_running()
-            self.prepare_infra_pve_access(
-                "recover" if self.mode == "recover" else "apply"
-            )
-            self.handoff_existing_infra()
-            self.ensure_runner_ssh_access_to_infra()
-            self.deploy_infra_phase(
-                "existing",
-                f"Обновление существующего LXC {self.infra_ctid}",
-                f"Существующий {self.infra_ctid} обновлён",
+            self.fail(
+                f"LXC {self.infra_ctid} уже существует и не принадлежит "
+                "незавершённому bootstrap-сеансу; используйте обычный deploy/repair, "
+                "а для полного пересоздания — recovery"
             )
         else:
             self.deploy_infra_phase(
@@ -525,7 +515,6 @@ class BootstrapHost(
                 f"LXC {self.infra_ctid} создан через состояние bootstrap-runner",
             )
             self.attach_persistent_layout()
-            self.ensure_runner_ssh_access_to_infra()
             self.deploy_infra_phase(
                 "base",
                 f"Базовая настройка LXC {self.infra_ctid} через Ansible",
