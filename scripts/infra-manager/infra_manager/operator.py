@@ -14,6 +14,7 @@ from .common import (
     require_runtime_activation_idle,
     run,
 )
+from .guest_catalog import guest_identity
 from .guest_deploy import project_branch_for_checkout, project_revision
 from .guest_operations import list_local_guests, run_local_guest_status
 from .operation_lock import project_checkout_lock
@@ -237,6 +238,16 @@ def operator_guest_task(
         return result.returncode
     if operation == "test":
         return 0
+
+    if operation == "deploy":
+        identity = guest_identity(PATHS.repo_root, vmid)
+        if identity.role == SETTINGS.infra_manager_role:
+            console.info(
+                "Отложенная активация infra-runtime продолжится "
+                "после завершения команды"
+            )
+            return 0
+
     return operator_guest_status(
         vmid,
         show_secrets=show_secrets,
