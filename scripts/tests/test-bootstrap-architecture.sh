@@ -85,9 +85,9 @@ if grep -R -n -E     'scripts/infra-manager/setup\.sh|python3[[:space:]]+-m[[:sp
     die "990 не должен вызывать отдельный setup для infra-manager"
 fi
 
-grep -q 'bootstrap-infra-manager.py infrastructure' "$BOOTSTRAP_DIR/deploy-infra-manager.sh" || die "990 должен иметь внутренний шаг создания 910"
-grep -q 'bootstrap-infra-manager.py base' "$BOOTSTRAP_DIR/deploy-infra-manager.sh" || die "990 должен иметь внутренний базовый шаг 910"
-grep -q 'bootstrap-infra-manager.py provision' "$BOOTSTRAP_DIR/deploy-infra-manager.sh" || die "990 должен иметь внутренний полный шаг 910"
+grep -q 'bootstrap-infra-manager.py create' "$BOOTSTRAP_DIR/deploy-infra-manager.sh" || die "990 должен иметь внутренний шаг создания 910"
+grep -q 'bootstrap-infra-manager.py configure-base' "$BOOTSTRAP_DIR/deploy-infra-manager.sh" || die "990 должен иметь внутренний базовый шаг 910"
+grep -q 'bootstrap-infra-manager.py configure' "$BOOTSTRAP_DIR/deploy-infra-manager.sh" || die "990 должен иметь внутренний полный шаг 910"
 if grep -q 'bootstrap-infra-manager.py existing' "$BOOTSTRAP_DIR/deploy-infra-manager.sh"; then
     die "990 не должен обновлять существующий рабочий infra-manager"
 fi
