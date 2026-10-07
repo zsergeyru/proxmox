@@ -375,7 +375,7 @@ username: operator
 password: <случайный пароль>
 ```
 
-Пароль создаётся автоматически и хранится с правами `0600` только в PVE-only. Для домашнего контура текущие URL, логин и пароль должны выводиться после каждого успешного `Deploy Guest` для infra-manager и при каждом штатном `Status Guest` для infra-manager. `Repair Guest` не обязан выводить пароль. Внутри OpenBao хранится только состояние userpass.
+Пароль создаётся автоматически и хранится с правами `0600` только в PVE-only. Задания Semaphore `Deploy Guest` и `Status Guest` для infra-manager не должны выводить его в журнал. Текущие URL, логин и пароль разрешено показывать только при явном доверенном вызове root на физическом PVE через `infra-manager status` или `infra-manager status 910`. Внутри OpenBao хранится только состояние userpass.
 
 Машинные SecretID обычных гостей не должны накапливаться в этих PVE-only файлах как общий реестр.
 
@@ -543,24 +543,14 @@ token_max_ttl: 8h
 - чтение закрытых SSH CA keys;
 - создание AppRole SecretID.
 
-Текущие данные для входа должны автоматически показываться:
-
-- после каждого успешного `Deploy Guest` для infra-manager;
-- при каждом штатном `Status Guest` для infra-manager.
-
-Дополнительно получить их вручную на PVE можно командой:
+Текущие данные для входа должны показываться только в доверенном терминале root на PVE:
 
 ```text
-infra-manager openbao-operator
+infra-manager status
+infra-manager status 910
 ```
 
-Сменить пароль:
-
-```text
-infra-manager openbao-operator --rotate
-```
-
-Обычные технические журналы OpenBao, startup-unseal и фоновые проверки пароль выводить не должны.
+Задания Semaphore, Homepage, обычные технические журналы OpenBao, startup-unseal и фоновые проверки пароль выводить не должны. Отдельной пользовательской команды для OpenBao credentials нет. Возможность внутренней ротации пароля остаётся частью PVE-only механизма OpenBao и не является отдельным стабильным операторским интерфейсом.
 
 ### SSH client CA
 
