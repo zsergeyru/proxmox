@@ -23,7 +23,17 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description="Внутренний bootstrap-вызов infra-manager из временного LXC 990"
     )
-    parser.add_argument("step", choices=("create", "configure-base", "configure"))
+    parser.add_argument(
+        "step",
+        choices=(
+            "create",
+            "configure-base",
+            "configure-control-plane",
+            "configure-recovery-control-plane",
+            "configure-ssh-trust",
+            "configure",
+        ),
+    )
     parser.add_argument("vmid", type=int)
     args = parser.parse_args()
 
