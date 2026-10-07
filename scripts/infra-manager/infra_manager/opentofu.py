@@ -157,7 +157,6 @@ def _prepare_input(
     require_command("tofu")
     _require_env("TF_VAR_pve_endpoint")
     _require_env("TF_VAR_pve_api_token")
-    _require_env("TF_VAR_bootstrap_ssh_public_key")
     opentofu_dir, renderer = _paths(repo_root)
 
     STATE_DIR.mkdir(parents=True, exist_ok=True)

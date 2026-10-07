@@ -24,9 +24,13 @@ locals {
 variable "bootstrap_ssh_public_key" {
   description = "Одноразовый открытый SSH-ключ первоначального доступа к новому Linux-гостю"
   type        = string
+  default     = ""
 
   validation {
-    condition     = length(trimspace(var.bootstrap_ssh_public_key)) > 0
-    error_message = "bootstrap_ssh_public_key не должен быть пустым"
+    condition = (
+      trimspace(var.bootstrap_ssh_public_key) == ""
+      || startswith(trimspace(var.bootstrap_ssh_public_key), "ssh-ed25519 ")
+    )
+    error_message = "bootstrap_ssh_public_key должен быть пустым или Ed25519 public key"
   }
 }

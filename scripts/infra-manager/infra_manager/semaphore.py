@@ -28,7 +28,6 @@ OPENBAO_MATERIALIZED_MARKER = PATHS.openbao_materialized_marker
 PVE_API_ENV = PATHS.pve_api_env
 GITHUB_KEY = PATHS.github_key
 GITHUB_KEY_COPY = PATHS.github_key_copy
-ANSIBLE_PUBLIC_KEY = PATHS.ansible_public_key
 PROJECT_REPO = SETTINGS.project_repo
 
 
@@ -601,19 +600,8 @@ class SemaphoreClient:
             "Variable Group",
         )
 
-        if not nonempty(ANSIBLE_PUBLIC_KEY):
-            raise InfraManagerError(
-                f"Не найден открытый ключ Ansible: {ANSIBLE_PUBLIC_KEY}"
-            )
-        ansible_public_key = ANSIBLE_PUBLIC_KEY.read_text(
-            encoding="utf-8"
-        ).strip()
-
         env_json = json.dumps(
-            {
-                "TF_VAR_pve_endpoint": endpoint,
-                "TF_VAR_bootstrap_ssh_public_key": ansible_public_key,
-            },
+            {"TF_VAR_pve_endpoint": endpoint},
             ensure_ascii=False,
             separators=(",", ":"),
         )
