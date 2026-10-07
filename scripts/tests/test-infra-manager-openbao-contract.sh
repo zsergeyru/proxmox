@@ -10,6 +10,7 @@ ANSIBLE_GUEST_LAYOUT="$ROOT/automation/ansible/roles/guest_layout/tasks/main.yml
 ANSIBLE_DOCKER="$ROOT/automation/ansible/roles/docker/tasks/main.yml"
 ANSIBLE_RUNTIME_DIR="$ROOT/automation/ansible/roles/infra_manager/tasks"
 ANSIBLE_VERIFY="$ANSIBLE_RUNTIME_DIR/verify.yml"
+ANSIBLE_RECOVERY="$ANSIBLE_RUNTIME_DIR/recovery.yml"
 ANSIBLE_RUNTIME_MAIN="$ANSIBLE_RUNTIME_DIR/main.yml"
 BOOTSTRAP_HOST="$ROOT/scripts/bootstrap-runner/bootstrap-host.py"
 BOOTSTRAP_INFRA="$ROOT/scripts/bootstrap-runner/bootstrap_runner/infra.py"
@@ -100,10 +101,16 @@ grep -Fq 'install_openbao_host_support(context.node, repo_root)' "$PY_GUEST_DEPL
     || die "Deploy Guest должен обновлять PVE OpenBao support до SSH-подписания"
 grep -Fq 'install_recovery_host_support(context.node, repo_root)' "$PY_GUEST_DEPLOY" \
     || die "Самообновление infra-manager должно заранее обновлять PVE recovery helper"
-grep -Fq 'install_operator_host_support(context.node, repo_root)' "$PY_GUEST_DEPLOY" \
-    || die "Самообновление infra-manager должно отдельно обновлять тонкую PVE-оболочку"
-grep -Fq '_install_operator_wrapper_after_self_update(' "$PY_GUEST_DEPLOY" \
-    || die "PVE-оболочка должна обновляться после успешной настройки 910"
+if grep -Fq 'install_operator_host_support' "$PY_GUEST_DEPLOY"; then
+    die "guest_deploy не должен устанавливать тонкую PVE-оболочку напрямую"
+fi
+if grep -Fq 'install_operator_host_support' "$PY_OPENBAO"; then
+    die "Инициализация OpenBao не должна устанавливать PVE-оболочку"
+fi
+grep -Fq 'operator-wrapper-install' "$ANSIBLE_RECOVERY" \
+    || die "PVE-оболочка должна устанавливаться отдельным Ansible-шагом"
+grep -Fq 'install_operator_wrapper' "$PY_RECOVERY" \
+    || die "Внутренний recovery-модуль должен иметь единую установку PVE-оболочки"
 grep -Fq 'OPENBAO_HOST_LIBRARY = Path("/usr/local/lib/infra-manager/openbao_host")' "$PY_PVE_HOST" \
     || die "PVE OpenBao helper должен устанавливать отдельный пакет openbao_host"
 grep -Fq '_install_remote_text_tree(' "$PY_PVE_HOST" \
