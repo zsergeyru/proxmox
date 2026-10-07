@@ -335,6 +335,7 @@ required_state = {
     "opentofu-state",
     "semaphore-data",
     "ansible-identity",
+    "operation-locks",
 }
 state_contains = set(state.get("contains", []))
 if not required_state.issubset(state_contains):
@@ -350,6 +351,7 @@ required_bindings = {
     ("/mnt/persistent-state/ansible", "/etc/infra-manager/ansible"),
     ("/mnt/persistent-state/semaphore", "/var/lib/infra-manager/semaphore"),
     ("/mnt/persistent-state/opentofu", "/var/lib/infra-manager/opentofu"),
+    ("/mnt/persistent-state/locks", "/var/lib/infra-manager/locks"),
     ("/mnt/persistent-state/openbao", "/var/lib/persistent/openbao"),
 }
 if not required_bindings.issubset(binding_pairs):
@@ -420,6 +422,8 @@ if compose_services["runtime"].get("env_file") != [
 runtime_volumes = set(compose_services["runtime"].get("volumes", []))
 if "/run/infra-manager/secrets:/run/infra-manager/secrets:ro" not in runtime_volumes:
     raise SystemExit("infra-runtime должен видеть материализованные секреты только для чтения")
+if "/mnt/persistent-state/locks:/var/lib/infra-manager/locks" not in runtime_volumes:
+    raise SystemExit("PVE CLI и Semaphore должны использовать общий каталог блокировок")
 
 compose_openbao = compose_services["openbao"]
 if compose_openbao.get("container_name") != openbao.get("container_name"):
