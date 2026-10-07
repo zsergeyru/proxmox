@@ -14,6 +14,7 @@ from .common import InfraManagerError
 from .settings import PATHS
 
 
+HOST_SEMAPHORE_DIR = Path("/mnt/persistent-state/semaphore")
 RUNTIME_SEMAPHORE_DIR = Path("/var/lib/semaphore")
 
 
@@ -28,11 +29,9 @@ def _lock_root() -> Path:
     if canonical.is_dir() and os.access(canonical, os.W_OK):
         return canonical
 
-    if RUNTIME_SEMAPHORE_DIR.is_dir() and os.access(
-        RUNTIME_SEMAPHORE_DIR,
-        os.W_OK,
-    ):
-        return RUNTIME_SEMAPHORE_DIR / ".infra-manager-operation-locks"
+    for semaphore_dir in (HOST_SEMAPHORE_DIR, RUNTIME_SEMAPHORE_DIR):
+        if semaphore_dir.is_dir() and os.access(semaphore_dir, os.W_OK):
+            return semaphore_dir / ".infra-manager-operation-locks"
 
     return canonical
 
