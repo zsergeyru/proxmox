@@ -29,9 +29,16 @@ ACTIVATE_RUNTIME = Path("/usr/local/sbin/infra-manager-activate-runtime")
 COMPOSE_FILE = PATHS.compose_dir / "docker-compose.yml"
 VERSIONS_FILE = PATHS.compose_dir / ".versions.env"
 RUNTIME_CONTAINER = "infra-runtime"
+RUNTIME_PROJECT_ROOT = "/var/lib/infra-manager/bootstrap-repo"
 RUNTIME_GUEST_OPERATION = (
     PATHS.repo_root / "scripts" / "infra-manager" / "jobs" / "guest-operation.py"
 )
+RUNTIME_DIRECT_SCRIPT = """
+work="$(mktemp -d /tmp/infra-manager-direct.XXXXXX)"
+trap 'rm -rf "$work"' EXIT INT TERM
+cp -a /var/lib/infra-manager/bootstrap-repo/. "$work/"
+python3 "$work/scripts/infra-manager/jobs/guest-operation.py" "$1" "$2"
+""".strip()
 
 
 def _require_root() -> None:
@@ -178,8 +185,11 @@ def operator_guest_task(
                 "--user",
                 "1001:0",
                 RUNTIME_CONTAINER,
-                "python3",
-                str(RUNTIME_GUEST_OPERATION),
+                "sh",
+                "-eu",
+                "-c",
+                RUNTIME_DIRECT_SCRIPT,
+                "infra-manager-direct",
                 operation,
                 str(vmid),
             ],
