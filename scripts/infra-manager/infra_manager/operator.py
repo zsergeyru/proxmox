@@ -29,7 +29,7 @@ ACTIVATE_RUNTIME = Path("/usr/local/sbin/infra-manager-activate-runtime")
 COMPOSE_FILE = PATHS.compose_dir / "docker-compose.yml"
 VERSIONS_FILE = PATHS.compose_dir / ".versions.env"
 RUNTIME_CONTAINER = "infra-runtime"
-RUNTIME_PROJECT_ROOT = "/var/lib/infra-manager/bootstrap-repo"
+RUNTIME_PROJECT_ROOT = str(PATHS.repo_root)
 RUNTIME_GUEST_OPERATION = (
     PATHS.repo_root / "scripts" / "infra-manager" / "jobs" / "guest-operation.py"
 )
