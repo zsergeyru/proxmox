@@ -11,16 +11,16 @@ IMAGE="${BOOTSTRAP_RUNNER_IMAGE:-bootstrap-runtime:v1}"
 
 [[ -s "$PVE_ENV" ]] || { echo "ОШИБКА: не найден временный PVE API credential: $PVE_ENV" >&2; exit 1; }
 [[ -s "$CONFIG_DIR/ca/ca-bundle.crt" ]] || { echo "ОШИБКА: не найден PVE CA" >&2; exit 1; }
-[[ -s "$CONFIG_DIR/ansible/guest_ed25519" ]] || { echo "ОШИБКА: не найден bootstrap SSH-ключ" >&2; exit 1; }
-[[ -s "$CONFIG_DIR/ansible/guest_ed25519.pub" ]] || { echo "ОШИБКА: не найден открытый bootstrap SSH-ключ" >&2; exit 1; }
+[[ -s "$CONFIG_DIR/bootstrap-ssh/infra_manager_ed25519" ]] || { echo "ОШИБКА: не найден bootstrap SSH-ключ" >&2; exit 1; }
+[[ -s "$CONFIG_DIR/bootstrap-ssh/infra_manager_ed25519.pub" ]] || { echo "ОШИБКА: не найден открытый bootstrap SSH-ключ" >&2; exit 1; }
 
 set -a
 # shellcheck disable=SC1090
 source "$PVE_ENV"
 set +a
 
-INFRA_BOOTSTRAP_SSH_PRIVATE_KEY="$CONFIG_DIR/ansible/guest_ed25519"
-TF_VAR_bootstrap_ssh_public_key="$(cat "$CONFIG_DIR/ansible/guest_ed25519.pub")"
+INFRA_BOOTSTRAP_SSH_PRIVATE_KEY="$CONFIG_DIR/bootstrap-ssh/infra_manager_ed25519"
+TF_VAR_bootstrap_ssh_public_key="$(cat "$CONFIG_DIR/bootstrap-ssh/infra_manager_ed25519.pub")"
 TF_VAR_guest_state_file="$DATA_DIR/opentofu/guests.json"
 export INFRA_BOOTSTRAP_SSH_PRIVATE_KEY TF_VAR_bootstrap_ssh_public_key TF_VAR_guest_state_file
 
