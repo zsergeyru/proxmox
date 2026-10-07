@@ -8,7 +8,12 @@ import shlex
 from pathlib import Path
 from urllib.parse import urlparse
 
-from .common import InfraManagerError, console, run
+from .common import (
+    InfraManagerError,
+    console,
+    require_runtime_activation_idle,
+    run,
+)
 from .guest_deploy import project_branch_for_checkout, project_revision
 from .guest_operations import list_local_guests, run_local_guest_status
 from .operation_lock import project_checkout_lock
@@ -55,6 +60,7 @@ def _pve_node() -> str:
 def operator_update() -> int:
     """Обновить постоянную рабочую копию проекта из выбранной Git-ветки."""
 
+    require_runtime_activation_idle()
     repo_root = PATHS.repo_root
     git_dir = repo_root / ".git"
     known_hosts = PATHS.semaphore_dir / "known_hosts"
@@ -149,6 +155,7 @@ def operator_guest_task(
 ) -> int:
     """Выполнить штатную операцию напрямую внутри infra-runtime."""
 
+    require_runtime_activation_idle()
     if not RUNTIME_GUEST_OPERATION.is_file():
         raise InfraManagerError(
             f"Не найдена точка входа операций: {RUNTIME_GUEST_OPERATION}"
