@@ -1170,6 +1170,62 @@ def main_test() -> None:
         resolve_data.assert_called_once()
         show_summary.assert_not_called()
 
+    class OperatorTaskClient:
+        def __init__(self) -> None:
+            self.auth_mode = "cookie"
+            self.posts: list[tuple[str, dict, str | None]] = []
+
+        def token_valid(self) -> bool:
+            return True
+
+        def get(self, path: str, *, auth: str | None = None):
+            if path == "/projects":
+                return [{"id": 41, "name": "Proxmox Infrastructure"}]
+            if path == "/project/41/templates?sort=name&order=asc":
+                return [{"id": 25, "name": "Deploy Guest"}]
+            if path == "/project/41/tasks/64":
+                return {"id": 64, "status": "success"}
+            if path == "/project/41/tasks/64/output":
+                return [{"output": "[ОК] deploy без пароля\n"}]
+            raise AssertionError(f"Неожиданный GET: {path} auth={auth}")
+
+        def post(
+            self,
+            path: str,
+            payload: dict,
+            *,
+            auth: str | None = None,
+        ):
+            self.posts.append((path, payload, auth))
+            return {"id": 64}
+
+    operator_client = OperatorTaskClient()
+    operator_output = io.StringIO()
+    with (
+        patch.object(
+            semaphore_module,
+            "SemaphoreClient",
+            return_value=operator_client,
+        ),
+        contextlib.redirect_stdout(operator_output),
+    ):
+        task_id = semaphore_module.run_operator_guest_task("deploy", 410)
+
+    if task_id != 64:
+        fail("PVE bridge получил неверный номер задания Semaphore")
+    if len(operator_client.posts) != 1:
+        fail("PVE bridge должен создать ровно одно задание Semaphore")
+    task_path, task_payload, task_auth = operator_client.posts[0]
+    if task_path != "/project/41/tasks" or task_auth != "token":
+        fail("PVE bridge использует неверный адрес или режим Semaphore")
+    environment = __import__("json").loads(task_payload.get("environment", "{}"))
+    if environment != {"GUEST_VMID": "410"}:
+        fail(f"PVE bridge передал неверный GUEST_VMID: {environment!r}")
+    if task_payload.get("template_id") != 25:
+        fail("PVE bridge выбрал неверный шаблон Semaphore")
+    if "[ОК] deploy без пароля" not in operator_output.getvalue():
+        fail("PVE bridge не вывел журнал выполненного задания")
+
     print("Проверки состояния infra-manager пройдены.")
 
 
