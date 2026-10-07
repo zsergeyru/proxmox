@@ -31,16 +31,12 @@ case "$PHASE" in
     provision)
         bash "$RUN_RUNTIME" python3 scripts/infra-manager/jobs/bootstrap-infra-manager.py provision "$INFRA_VMID"
         ;;
-    existing)
-        bash "$RUN_RUNTIME" python3 scripts/infra-manager/jobs/bootstrap-infra-manager.py existing "$INFRA_VMID"
-        ;;
     *)
-        echo "Использование: deploy-infra-manager.sh infrastructure|base|provision|existing VMID [REPO_ROOT]" >&2
+        echo "Использование: deploy-infra-manager.sh infrastructure|base|provision VMID [REPO_ROOT]" >&2
         exit 2
         ;;
 esac
 
-if [[ "$PHASE" != "existing" ]]; then
     [[ -s "$STATE_FILE" ]] || {
         echo "ОШИБКА: отсутствует состояние bootstrap-runner: $STATE_FILE" >&2
         exit 1
@@ -56,12 +52,7 @@ if [[ "$PHASE" != "existing" ]]; then
         printf '  %s\n' "${resources[@]:-(пусто)}" >&2
         exit 1
     fi
-else
-    if [[ -s "$STATE_FILE" ]]; then
-        echo "ОШИБКА: при обновлении существующего infra-manager временный OpenTofu state не должен существовать" >&2
-        exit 1
-    fi
-fi
+
 
 case "$PHASE" in
     infrastructure)
