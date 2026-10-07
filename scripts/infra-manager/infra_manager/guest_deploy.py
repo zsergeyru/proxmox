@@ -734,6 +734,14 @@ def _run_guest_ansible(
             f"infra_project_branch={project_branch or SETTINGS.project_branch()}",
             "-e",
             f"infra_pve_node={context.node}",
+            *(
+                [
+                    "-e",
+                    f"infra_ssh_client_ca_file={PATHS.ssh_client_ca_public_key}",
+                ]
+                if PATHS.ssh_client_ca_public_key.is_file()
+                else []
+            ),
             *_project_git_ansible_vars(context),
             *(
                 openbao_machine_args
