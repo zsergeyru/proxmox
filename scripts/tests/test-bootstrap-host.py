@@ -432,6 +432,10 @@ class ApplyHarness(BootstrapHost):
     def ensure_existing_infra_running(self) -> None:
         self.events.append("ensure_existing")
 
+    def remove_infra_rootfs_for_recovery(self) -> None:
+        self.events.append("remove_rootfs")
+        self._infra_exists = False
+
     def create_infra_manager(self) -> None:
         self.events.append("create_infra")
 
@@ -572,16 +576,7 @@ def test_resume_unfinished_with_layout_already_attached() -> None:
 
 def test_recover_existing_without_state() -> None:
     host = ApplyHarness("recover", infra_exists=True, owns_state=False)
-    try:
-        host.apply()
-    except BootstrapError as exc:
-        if "полного пересоздания" not in str(exc):
-            raise
-    else:
-        raise AssertionError(
-            "Текущий 990 не должен чинить существующий рабочий 910 через existing-путь"
-        )
-
+    host.apply()
     assert_equal(
         host.events,
         [
@@ -589,9 +584,20 @@ def test_recover_existing_without_state() -> None:
             "verify_recovery_state",
             "runner_owns_infra",
             "verify_layout",
+            "remove_rootfs",
             "prepare_runner",
+            "runner_owns_infra",
+            "create_infra",
+            "attach_layout",
+            "configure_base",
+            "handoff:recover",
+            "configure_full",
+            "initialize_openbao",
+            "verify_ready:quiet",
+            "finalize_runner",
+            "check_ready",
         ],
-        "Recovery должен остановиться до старого existing-handoff",
+        "Recovery должен полностью пересоздавать rootfs через единый bootstrap",
     )
 
 
