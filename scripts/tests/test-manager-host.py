@@ -185,96 +185,82 @@ def test_host_wrapper_is_minimal() -> None:
 
 
 def test_operator_guest_task_secret_policy() -> None:
-    with tempfile.TemporaryDirectory() as tmp:
-        entrypoint = Path(tmp) / "guest-operation.py"
-        entrypoint.write_text("# test\n", encoding="utf-8")
-
-        for operation, expect_status in (
-            ("deploy", True),
-            ("sync", True),
-            ("repair", True),
-            ("test", False),
-        ):
-            with (
-                patch.object(
-                    operator,
-                    "RUNTIME_GUEST_OPERATION",
-                    entrypoint,
-                ),
-                patch.object(
-                    operator,
-                    "project_checkout_lock",
-                    return_value=contextlib.nullcontext(),
-                ) as checkout_lock,
-                patch.object(
-                    operator,
-                    "run",
-                    return_value=SimpleNamespace(returncode=0),
-                ) as runtime_run,
-                patch.object(
-                    operator,
-                    "operator_guest_status",
-                    return_value=0,
-                ) as status,
-            ):
-                assert operator.operator_guest_task(
-                    operation,
-                    410,
-                    show_secrets=True,
-                ) == 0
-
-            checkout_lock.assert_called_once_with(exclusive=False)
-            runtime_run.assert_called_once_with(
-                [
-                    "docker",
-                    "exec",
-                    "--user",
-                    "1001:0",
-                    operator.RUNTIME_CONTAINER,
-                    "sh",
-                    "-eu",
-                    "-c",
-                    operator.RUNTIME_DIRECT_SCRIPT,
-                    "infra-manager-direct",
-                    operation,
-                    "410",
-                    operator.RUNTIME_PROJECT_ROOT,
-                ],
-                check=False,
-            )
-            if expect_status:
-                status.assert_called_once_with(410, show_secrets=True)
-            else:
-                status.assert_not_called()
-
+    snapshot = "/tmp/infra-manager-direct-test-410"
+    for operation, expect_status in (
+        ("deploy", True),
+        ("sync", True),
+        ("repair", True),
+        ("test", False),
+    ):
         with (
             patch.object(
                 operator,
-                "RUNTIME_GUEST_OPERATION",
-                entrypoint,
-            ),
-            patch.object(
-                operator,
-                "project_checkout_lock",
-                return_value=contextlib.nullcontext(),
-            ) as checkout_lock,
+                "_prepare_runtime_snapshot",
+                return_value=snapshot,
+            ) as prepare_snapshot,
             patch.object(
                 operator,
                 "run",
-                return_value=SimpleNamespace(returncode=7),
-            ),
-            patch.object(operator, "operator_guest_status") as status,
+                return_value=SimpleNamespace(returncode=0),
+            ) as runtime_run,
+            patch.object(
+                operator,
+                "operator_guest_status",
+                return_value=0,
+            ) as status,
         ):
             assert operator.operator_guest_task(
-                "deploy",
+                operation,
                 410,
                 show_secrets=True,
-            ) == 7
-        checkout_lock.assert_called_once_with(exclusive=False)
-        status.assert_not_called()
+            ) == 0
+
+        prepare_snapshot.assert_called_once_with(operation, 410)
+        runtime_run.assert_called_once_with(
+            [
+                "docker",
+                "exec",
+                "--user",
+                "1001:0",
+                operator.RUNTIME_CONTAINER,
+                "sh",
+                "-eu",
+                "-c",
+                operator.RUNTIME_DIRECT_SCRIPT,
+                "infra-manager-direct",
+                snapshot,
+                operation,
+                "410",
+            ],
+            check=False,
+        )
+        if expect_status:
+            status.assert_called_once_with(410, show_secrets=True)
+        else:
+            status.assert_not_called()
+
+    with (
+        patch.object(
+            operator,
+            "_prepare_runtime_snapshot",
+            return_value=snapshot,
+        ),
+        patch.object(
+            operator,
+            "run",
+            return_value=SimpleNamespace(returncode=7),
+        ),
+        patch.object(operator, "operator_guest_status") as status,
+    ):
+        assert operator.operator_guest_task(
+            "deploy",
+            410,
+            show_secrets=True,
+        ) == 7
+    status.assert_not_called()
 
 
-def test_operator_update_uses_existing_checkout() -> None:
+def test_internal_project_refresh_uses_existing_checkout() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp) / "repo"
         root.mkdir()
@@ -311,18 +297,12 @@ def test_operator_update_uses_existing_checkout() -> None:
             patch.object(operator, "run", side_effect=fake_run),
             patch.object(
                 operator,
-                "project_checkout_lock",
-                return_value=contextlib.nullcontext(),
-            ) as checkout_lock,
-            patch.object(
-                operator,
                 "project_revision",
                 return_value="abc1234",
             ),
         ):
-            assert operator.operator_update() == 0
+            operator._refresh_project_checkout()
 
-    checkout_lock.assert_called_once_with(exclusive=True)
     assert [call[0] for call in calls] == [
         [
             "git",
@@ -349,6 +329,67 @@ def test_operator_update_uses_existing_checkout() -> None:
     environment = calls[0][1]["env"]
     assert str(github_key) in environment["GIT_SSH_COMMAND"]
     assert str(known_hosts) in environment["GIT_SSH_COMMAND"]
+
+
+def test_runtime_snapshot_refresh_policy() -> None:
+    snapshot_run = SimpleNamespace(returncode=0)
+    with (
+        patch.object(
+            operator,
+            "RUNTIME_GUEST_OPERATION",
+            SimpleNamespace(is_file=lambda: True),
+        ),
+        patch.object(
+            operator,
+            "project_checkout_lock",
+            return_value=contextlib.nullcontext(),
+        ) as checkout_lock,
+        patch.object(operator, "_refresh_project_checkout") as refresh,
+        patch.object(operator, "run", return_value=snapshot_run) as run_command,
+        patch.object(operator.os, "getpid", return_value=1234),
+    ):
+        snapshot = operator._prepare_runtime_snapshot("deploy", 410)
+
+    assert snapshot == "/tmp/infra-manager-direct-1234-410"
+    checkout_lock.assert_called_once_with(exclusive=True)
+    refresh.assert_called_once_with()
+    run_command.assert_called_once_with(
+        [
+            "docker",
+            "exec",
+            "--user",
+            "1001:0",
+            operator.RUNTIME_CONTAINER,
+            "sh",
+            "-eu",
+            "-c",
+            operator.RUNTIME_SNAPSHOT_SCRIPT,
+            "infra-manager-snapshot",
+            snapshot,
+            operator.RUNTIME_PROJECT_ROOT,
+        ]
+    )
+
+    with (
+        patch.object(
+            operator,
+            "RUNTIME_GUEST_OPERATION",
+            SimpleNamespace(is_file=lambda: True),
+        ),
+        patch.object(
+            operator,
+            "project_checkout_lock",
+            return_value=contextlib.nullcontext(),
+        ) as checkout_lock,
+        patch.object(operator, "_refresh_project_checkout") as refresh,
+        patch.object(operator, "run", return_value=snapshot_run),
+        patch.object(operator.os, "getpid", return_value=1235),
+    ):
+        snapshot = operator._prepare_runtime_snapshot("sync", 420)
+
+    assert snapshot == "/tmp/infra-manager-direct-1235-420"
+    checkout_lock.assert_called_once_with(exclusive=False)
+    refresh.assert_not_called()
 
 
 def test_operator_status_secret_policy() -> None:
@@ -430,7 +471,6 @@ def test_public_command_contract() -> None:
     parser = operator.build_parser()
     for argv in (
         ["guests"],
-        ["update"],
         ["status"],
         ["status", "410"],
         ["deploy", "410"],
@@ -451,7 +491,8 @@ def main() -> None:
     test_host_recover_uses_only_recovery_helper()
     test_host_wrapper_is_minimal()
     test_operator_guest_task_secret_policy()
-    test_operator_update_uses_existing_checkout()
+    test_internal_project_refresh_uses_existing_checkout()
+    test_runtime_snapshot_refresh_policy()
     test_operator_status_secret_policy()
     test_operator_prefers_explicit_pve_node()
     test_operator_repair_runs_inside_manager()
