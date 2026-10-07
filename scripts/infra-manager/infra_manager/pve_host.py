@@ -376,15 +376,6 @@ def check_recovery_contour(node: str) -> None:
     )
 
 
-def cleanup_transition_state(node: str) -> None:
-    """Удалить проверенные переходные файловые secret-источники на PVE."""
-    _ssh(
-        node,
-        str(RECOVERY_HOST_COMMAND),
-        "--cleanup-transition",
-    )
-
-
 def initialize_openbao_on_host(node: str) -> None:
     """Выполнить первичную инициализацию OpenBao на стороне PVE."""
     _ssh(
