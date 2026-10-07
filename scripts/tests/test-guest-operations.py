@@ -369,6 +369,64 @@ def check_dispatch() -> None:
         fail("Явный доверенный вызов должен разрешать вывод секретов")
 
 
+
+def check_operation_lock() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        lock_dir = Path(tmp)
+        lock_path = lock_dir / "410.lock"
+
+        with operation_lock.guest_operation_lock(
+            410,
+            "deploy",
+            lock_dir=lock_dir,
+        ):
+            try:
+                with operation_lock.guest_operation_lock(
+                    410,
+                    "repair",
+                    lock_dir=lock_dir,
+                ):
+                    fail("Повторная операция над одним VMID не должна запускаться")
+            except InfraManagerError as exc:
+                if "410" not in str(exc) or "deploy" not in str(exc):
+                    fail("Ошибка блокировки должна показывать занятого гостя и операцию")
+
+            with operation_lock.guest_operation_lock(
+                420,
+                "deploy",
+                lock_dir=lock_dir,
+            ):
+                pass
+
+        lock_path.write_text(
+            '{"vmid": 410, "operation": "old", "pid": 999999}\n',
+            encoding="utf-8",
+        )
+        with operation_lock.guest_operation_lock(
+            410,
+            "sync",
+            lock_dir=lock_dir,
+        ):
+            pass
+
+        try:
+            with operation_lock.guest_operation_lock(
+                410,
+                "test",
+                lock_dir=lock_dir,
+            ):
+                raise RuntimeError("test")
+        except RuntimeError:
+            pass
+
+        with operation_lock.guest_operation_lock(
+            410,
+            "repair",
+            lock_dir=lock_dir,
+        ):
+            pass
+
+
 def check_semaphore_secret_policy() -> None:
     entrypoint = (
         ROOT / "scripts" / "infra-manager" / "jobs" / "guest-operation.py"
