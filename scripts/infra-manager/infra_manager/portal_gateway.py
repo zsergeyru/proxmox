@@ -1,114 +1,31 @@
-"""Защищённый переход от локального Homepage к операциям Semaphore."""
+"""Защищённый прямой запуск стандартных действий из локального Homepage."""
 
 from __future__ import annotations
 
 import html
-import json
-import urllib.error
+import os
+import subprocess
 import urllib.parse
-import urllib.request
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any
+from pathlib import Path
 
 from .common import InfraManagerError
 from .guest_catalog import guest_identity
 from .guest_operations import operation_guests
-from .semaphore import (
-    PROJECT_NAME,
-    SemaphoreClient,
-    find_unique_by_name,
-    require_unique_by_name,
-)
-from .settings import PATHS, SETTINGS
+from .settings import PATHS
 
 
-ACTION_TEMPLATES = {
-    "status": ("Проверить", "Status Guest"),
-    "sync": ("Синхронизировать", "Sync Guest"),
-    "repair": ("Исправить", "Repair Guest"),
+ACTION_LABELS = {
+    "status": "Проверить",
+    "sync": "Синхронизировать",
+    "repair": "Исправить",
 }
-
-
-def _semaphore_objects(operation: str) -> tuple[int, int]:
-    client = SemaphoreClient()
-    if not client.token_valid():
-        raise InfraManagerError(
-            "Рабочий API token Semaphore отсутствует или недействителен"
-        )
-    client.auth_mode = "token"
-
-    project = require_unique_by_name(
-        client.get("/projects"),
-        PROJECT_NAME,
-        "project",
-    )
-    project_id = project.get("id")
-    if not isinstance(project_id, int):
-        raise InfraManagerError("Проект Semaphore имеет некорректный id")
-
-    _, template_name = ACTION_TEMPLATES[operation]
-    templates = client.get(
-        f"/project/{project_id}/templates?sort=name&order=asc"
-    )
-    template = find_unique_by_name(templates, template_name, "template")
-    if template is None:
-        raise InfraManagerError(
-            f"В Semaphore отсутствует шаблон '{template_name}'"
-        )
-    template_id = template.get("id")
-    if not isinstance(template_id, int):
-        raise InfraManagerError(
-            f"Semaphore template '{template_name}' имеет некорректный id"
-        )
-    return project_id, template_id
-
-
-def _semaphore_request(
-    method: str,
-    path: str,
-    *,
-    cookie: str,
-    payload: dict[str, Any] | None = None,
-) -> tuple[int, bytes]:
-    body = None
-    headers = {"Accept": "application/json"}
-    if cookie:
-        headers["Cookie"] = cookie
-    if payload is not None:
-        headers["Content-Type"] = "application/json"
-        body = json.dumps(
-            payload,
-            ensure_ascii=False,
-            separators=(",", ":"),
-        ).encode("utf-8")
-
-    request = urllib.request.Request(
-        f"{SETTINGS.semaphore_url}/api{path}",
-        data=body,
-        headers=headers,
-        method=method,
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=20) as response:
-            return response.status, response.read()
-    except urllib.error.HTTPError as exc:
-        return exc.code, exc.read()
-    except (urllib.error.URLError, OSError) as exc:
-        raise InfraManagerError(
-            f"Semaphore API недоступен: {exc}"
-        ) from exc
-
-
-def _session_valid(cookie: str) -> bool:
-    if not cookie:
-        return False
-    status, _ = _semaphore_request("GET", "/user", cookie=cookie)
-    return status == HTTPStatus.OK
+OPERATOR_COMMAND = Path("/usr/local/sbin/infra-manager")
 
 
 def _validate_action(operation: str, vmid: int):
-    if operation not in ACTION_TEMPLATES:
+    if operation not in ACTION_LABELS:
         raise InfraManagerError(f"Неизвестное действие портала: {operation}")
     identity = guest_identity(PATHS.repo_root, vmid)
     allowed = {
@@ -122,47 +39,27 @@ def _validate_action(operation: str, vmid: int):
     return identity
 
 
-def queue_action(operation: str, vmid: int, cookie: str) -> tuple[int, int]:
-    """Создать штатное задание Semaphore от имени текущего пользователя."""
+def start_action(operation: str, vmid: int) -> subprocess.Popen[str]:
+    """Запустить разрешённую операторскую команду без вывода секретов."""
 
     _validate_action(operation, vmid)
-    project_id, template_id = _semaphore_objects(operation)
-    status, raw = _semaphore_request(
-        "POST",
-        f"/project/{project_id}/tasks",
-        cookie=cookie,
-        payload={
-            "template_id": template_id,
-            "environment": json.dumps(
-                {"GUEST_VMID": str(vmid)},
-                separators=(",", ":"),
-            ),
-            "secret": "{}",
-            "params": {},
-            "message": f"Homepage: guest {vmid}",
-        },
-    )
-    if status != HTTPStatus.CREATED:
-        detail = raw.decode("utf-8", errors="replace").strip()
+    if not OPERATOR_COMMAND.is_file():
         raise InfraManagerError(
-            f"Semaphore отклонил задание: HTTP {status}: "
-            f"{detail or '(пустой ответ)'}"
+            f"Не найдена операторская команда: {OPERATOR_COMMAND}"
         )
 
-    try:
-        task = json.loads(raw.decode("utf-8"))
-        task_id = int(task["id"])
-    except (
-        UnicodeDecodeError,
-        json.JSONDecodeError,
-        KeyError,
-        TypeError,
-        ValueError,
-    ) as exc:
-        raise InfraManagerError(
-            "Semaphore создал задание, но не вернул его номер"
-        ) from exc
-    return project_id, task_id
+    environment = os.environ.copy()
+    environment["PYTHONUNBUFFERED"] = "1"
+    return subprocess.Popen(
+        [str(OPERATOR_COMMAND), operation, str(vmid)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        bufsize=1,
+        env=environment,
+    )
 
 
 def _page(title: str, body: str) -> bytes:
@@ -173,12 +70,21 @@ def _page(title: str, body: str) -> bytes:
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>{html.escape(title)}</title>
   <style>
-    body {{ font-family: sans-serif; max-width: 640px; margin: 4rem auto; padding: 0 1rem; }}
-    .card {{ border: 1px solid #ccc; border-radius: 12px; padding: 1.5rem; }}
+    :root {{ color-scheme: dark; }}
+    body {{ font-family: system-ui, sans-serif; max-width: 900px; margin: 3rem auto;
+      padding: 0 1rem; background: #0f172a; color: #e2e8f0; }}
+    .card {{ border: 1px solid #334155; border-radius: 14px; padding: 1.5rem;
+      background: #111827; box-shadow: 0 18px 50px rgba(0,0,0,.25); }}
     .actions {{ display: flex; gap: .75rem; margin-top: 1.5rem; flex-wrap: wrap; }}
-    button, a.button {{ padding: .7rem 1rem; border-radius: 8px; border: 1px solid #888;
-      background: #fff; color: inherit; text-decoration: none; cursor: pointer; }}
-    button.primary {{ font-weight: 600; }}
+    button, a.button {{ padding: .7rem 1rem; border-radius: 8px; border: 1px solid #475569;
+      background: #1e293b; color: #e2e8f0; text-decoration: none; cursor: pointer; }}
+    button.primary {{ font-weight: 700; border-color: #38bdf8; }}
+    pre.log {{ white-space: pre-wrap; overflow-wrap: anywhere; min-height: 12rem;
+      max-height: 65vh; overflow: auto; padding: 1rem; border-radius: 10px;
+      background: #020617; border: 1px solid #1e293b; color: #cbd5e1; }}
+    .ok {{ color: #34d399; font-weight: 700; }}
+    .error {{ color: #fb7185; font-weight: 700; }}
+    .muted {{ color: #94a3b8; }}
   </style>
 </head>
 <body><div class="card">{body}</div></body>
@@ -186,12 +92,52 @@ def _page(title: str, body: str) -> bytes:
 """.encode("utf-8")
 
 
+def _stream_page_start(title: str, vmid: int, name: str) -> bytes:
+    return f"""<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>{html.escape(title)}</title>
+  <style>
+    :root {{ color-scheme: dark; }}
+    body {{ font-family: system-ui, sans-serif; max-width: 900px; margin: 3rem auto;
+      padding: 0 1rem; background: #0f172a; color: #e2e8f0; }}
+    .card {{ border: 1px solid #334155; border-radius: 14px; padding: 1.5rem;
+      background: #111827; box-shadow: 0 18px 50px rgba(0,0,0,.25); }}
+    .actions {{ display: flex; gap: .75rem; margin-top: 1.5rem; flex-wrap: wrap; }}
+    a.button {{ padding: .7rem 1rem; border-radius: 8px; border: 1px solid #475569;
+      background: #1e293b; color: #e2e8f0; text-decoration: none; }}
+    pre.log {{ white-space: pre-wrap; overflow-wrap: anywhere; min-height: 12rem;
+      max-height: 65vh; overflow: auto; padding: 1rem; border-radius: 10px;
+      background: #020617; border: 1px solid #1e293b; color: #cbd5e1; }}
+    .ok {{ color: #34d399; font-weight: 700; }}
+    .error {{ color: #fb7185; font-weight: 700; }}
+    .muted {{ color: #94a3b8; }}
+  </style>
+</head>
+<body><div class="card">
+<h1>{html.escape(title)}</h1>
+<p>Гость: <strong>{vmid} — {html.escape(name)}</strong></p>
+<p class="muted">Операция выполняется напрямую через общий исполнитель infra-manager.</p>
+<pre class="log">""".encode("utf-8")
+
+
 class PortalActionHandler(BaseHTTPRequestHandler):
-    server_version = "InfraPortal/1"
+    server_version = "InfraPortal/2"
 
     def log_message(self, fmt: str, *args: object) -> None:
-        # Журнал systemd уже содержит адрес клиента и строку запроса.
         super().log_message(fmt, *args)
+
+    def _security_headers(self) -> None:
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("Referrer-Policy", "no-referrer")
+        self.send_header(
+            "Content-Security-Policy",
+            "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'",
+        )
 
     def _send_html(
         self,
@@ -203,9 +149,7 @@ class PortalActionHandler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(content)))
-        self.send_header("Cache-Control", "no-store")
-        self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("X-Frame-Options", "DENY")
+        self._security_headers()
         self.end_headers()
         self.wfile.write(content)
 
@@ -221,34 +165,21 @@ class PortalActionHandler(BaseHTTPRequestHandler):
             raise InfraManagerError("Некорректный VMID")
         return operation, int(raw_vmid)
 
-    def _cookie(self) -> str:
-        return self.headers.get("Cookie", "")
-
-    def _require_session(self) -> bool:
-        try:
-            valid = _session_valid(self._cookie())
-        except InfraManagerError as exc:
+    def _require_same_origin(self) -> bool:
+        host = self.headers.get("Host", "").strip()
+        origin = self.headers.get("Origin", "").strip()
+        expected = f"http://{host}" if host else ""
+        if not expected or origin.rstrip("/") != expected.rstrip("/"):
             self._send_html(
-                HTTPStatus.SERVICE_UNAVAILABLE,
-                "Semaphore недоступен",
-                f"<h1>Semaphore недоступен</h1><p>{html.escape(str(exc))}</p>",
+                HTTPStatus.FORBIDDEN,
+                "Запрос отклонён",
+                (
+                    "<h1>Запрос отклонён</h1>"
+                    "<p>Подтверждение должно быть отправлено со страницы посредника.</p>"
+                ),
             )
             return False
-        if valid:
-            return True
-
-        self._send_html(
-            HTTPStatus.UNAUTHORIZED,
-            "Требуется вход",
-            (
-                "<h1>Требуется вход в Semaphore</h1>"
-                "<p>Откройте Semaphore, войдите в систему и повторите действие.</p>"
-                '<div class="actions"><a class="button" '
-                f'href="http://{html.escape(self.server.manager_address)}:3000/auth/login">'
-                "Открыть Semaphore</a></div>"
-            ),
-        )
-        return False
+        return True
 
     def do_GET(self) -> None:
         if self.path == "/health":
@@ -256,6 +187,7 @@ class PortalActionHandler(BaseHTTPRequestHandler):
             self.send_response(HTTPStatus.OK)
             self.send_header("Content-Type", "text/plain; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
+            self._security_headers()
             self.end_headers()
             self.wfile.write(body)
             return
@@ -271,10 +203,7 @@ class PortalActionHandler(BaseHTTPRequestHandler):
             )
             return
 
-        if not self._require_session():
-            return
-
-        label, _ = ACTION_TEMPLATES[operation]
+        label = ACTION_LABELS[operation]
         action = html.escape(self.path, quote=True)
         self._send_html(
             HTTPStatus.OK,
@@ -282,7 +211,8 @@ class PortalActionHandler(BaseHTTPRequestHandler):
             (
                 f"<h1>{html.escape(label)}</h1>"
                 f"<p>Гость: <strong>{identity.vmid} — {html.escape(identity.name)}</strong></p>"
-                "<p>После подтверждения будет создано штатное задание Semaphore.</p>"
+                "<p>После подтверждения операция будет выполнена напрямую. "
+                "Журнал появится на этой странице.</p>"
                 f'<form method="post" action="{action}">'
                 '<div class="actions"><button class="primary" type="submit">'
                 f"{html.escape(label)}</button>"
@@ -294,7 +224,7 @@ class PortalActionHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         try:
             operation, vmid = self._parse_action()
-            _validate_action(operation, vmid)
+            identity = _validate_action(operation, vmid)
         except InfraManagerError as exc:
             self._send_html(
                 HTTPStatus.BAD_REQUEST,
@@ -303,71 +233,82 @@ class PortalActionHandler(BaseHTTPRequestHandler):
             )
             return
 
-        if not self._require_session():
+        if not self._require_same_origin():
             return
 
-        origin = self.headers.get("Origin")
-        if origin:
-            expected = f"http://{self.headers.get('Host', '')}"
-            if origin.rstrip("/") != expected.rstrip("/"):
-                self._send_html(
-                    HTTPStatus.FORBIDDEN,
-                    "Запрос отклонён",
-                    "<h1>Запрос отклонён</h1><p>Источник запроса не совпадает с порталом.</p>",
-                )
-                return
-
         try:
-            project_id, task_id = queue_action(
-                operation,
-                vmid,
-                self._cookie(),
-            )
-        except InfraManagerError as exc:
+            process = start_action(operation, vmid)
+        except (InfraManagerError, OSError) as exc:
             self._send_html(
-                HTTPStatus.BAD_GATEWAY,
-                "Не удалось создать задание",
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                "Не удалось запустить действие",
                 (
-                    "<h1>Не удалось создать задание</h1>"
+                    "<h1>Не удалось запустить действие</h1>"
                     f"<p>{html.escape(str(exc))}</p>"
                 ),
             )
             return
 
-        location = (
-            f"http://{self.server.manager_address}:3000/project/"
-            f"{project_id}/history?t={task_id}"
-        )
-        self.send_response(HTTPStatus.SEE_OTHER)
-        self.send_header("Location", location)
-        self.send_header("Cache-Control", "no-store")
+        label = ACTION_LABELS[operation]
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self._security_headers()
         self.end_headers()
+
+        connected = True
+        try:
+            self.wfile.write(
+                _stream_page_start(
+                    label,
+                    identity.vmid,
+                    identity.name,
+                )
+            )
+            self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError):
+            connected = False
+
+        assert process.stdout is not None
+        for line in process.stdout:
+            if not connected:
+                continue
+            try:
+                self.wfile.write(html.escape(line).encode("utf-8"))
+                self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError):
+                connected = False
+
+        returncode = process.wait()
+        if not connected:
+            return
+
+        result_class = "ok" if returncode == 0 else "error"
+        result_text = (
+            "Операция завершена успешно"
+            if returncode == 0
+            else f"Операция завершилась с кодом {returncode}"
+        )
+        tail = (
+            "</pre>"
+            f'<p class="{result_class}">{html.escape(result_text)}</p>'
+            '<div class="actions">'
+            '<a class="button" href="javascript:history.back()">Назад в Homepage</a>'
+            f'<a class="button" href="{html.escape(self.path, quote=True)}">Повторить</a>'
+            "</div></div></body></html>"
+        ).encode("utf-8")
+        try:
+            self.wfile.write(tail)
+            self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError):
+            return
 
 
 class PortalActionServer(ThreadingHTTPServer):
-    def __init__(
-        self,
-        server_address: tuple[str, int],
-        manager_address: str,
-    ) -> None:
-        self.manager_address = manager_address
-        super().__init__(server_address, PortalActionHandler)
+    pass
 
 
 def run_portal_gateway(bind: str, port: int) -> int:
-    manager = guest_identity(
-        PATHS.repo_root,
-        find_infra_manager_vmid(),
-    )
-    from .guest_catalog import guest_management_address
-
-    address = guest_management_address(PATHS.repo_root, manager)
-    if not address:
-        raise InfraManagerError(
-            "Не удалось определить административный адрес infra-manager"
-        )
-
-    server = PortalActionServer((bind, port), address)
+    server = PortalActionServer((bind, port), PortalActionHandler)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
@@ -375,12 +316,3 @@ def run_portal_gateway(bind: str, port: int) -> int:
     finally:
         server.server_close()
     return 0
-
-
-def find_infra_manager_vmid() -> int:
-    from .guest_catalog import find_guest_by_role
-
-    return find_guest_by_role(
-        PATHS.repo_root,
-        SETTINGS.infra_manager_role,
-    ).vmid
