@@ -13,6 +13,7 @@ command -v apt-get >/dev/null 2>&1 || { echo "ОШИБКА: не найден ap
 install -d -m 0700 "$CONFIG_DIR/secrets" "$CONFIG_DIR/bootstrap-ssh"
 rm -rf "$DATA_DIR/opentofu/state"
 install -d -m 0755 "$CONFIG_DIR/ca" "$DATA_DIR/opentofu/state"
+rm -f "$CONFIG_DIR/ca/ssh-client-ca.pub" "$CONFIG_DIR/ca/ssh-host-ca.pub"
 
 if ! command -v docker >/dev/null 2>&1; then
     apt-get update
