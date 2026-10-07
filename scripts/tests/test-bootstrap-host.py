@@ -448,13 +448,9 @@ class ApplyHarness(BootstrapHost):
         mode: str,
         *,
         infra_exists: bool,
-        owns_state: bool,
-        layout_attached: bool = False,
     ) -> None:
         super().__init__(mode)
         self._infra_exists = infra_exists
-        self._owns_state = owns_state
-        self._layout_attached = layout_attached
         self.events: list[str] = []
 
     def verify_recovery_state(self) -> None:
@@ -467,10 +463,6 @@ class ApplyHarness(BootstrapHost):
     def prepare_new_persistent_layout(self) -> None:
         self.events.append("prepare_new_layout")
 
-    def persistent_layout_attached(self) -> bool:
-        self.events.append("layout_attached")
-        return self._layout_attached
-
     def verify_persistent_layout(self) -> None:
         self.events.append("verify_layout")
 
@@ -480,19 +472,13 @@ class ApplyHarness(BootstrapHost):
     def prepare_runner(self) -> None:
         self.events.append("prepare_runner")
 
-    def runner_owns_infra(self) -> bool:
-        self.events.append("runner_owns_infra")
-        return self._owns_state
-
-    def ensure_existing_infra_running(self) -> None:
-        self.events.append("ensure_existing")
-
     def remove_infra_rootfs_for_recovery(self) -> None:
         self.events.append("remove_rootfs")
         self._infra_exists = False
 
     def create_infra_manager(self) -> None:
         self.events.append("create_infra")
+        self._infra_exists = True
 
     def configure_infra_manager_base(self) -> None:
         self.events.append("configure_base")
@@ -502,12 +488,6 @@ class ApplyHarness(BootstrapHost):
 
     def handoff_infra(self, access_mode: str = "apply") -> None:
         self.events.append(f"handoff:{access_mode}")
-
-    def prepare_infra_pve_access(self, access_mode: str = "apply") -> None:
-        self.events.append(f"pve_access:{access_mode}")
-
-    def handoff_existing_infra(self) -> None:
-        self.events.append("handoff_existing")
 
     def initialize_infra_openbao(self) -> None:
         self.events.append("initialize_openbao")
@@ -522,11 +502,11 @@ class ApplyHarness(BootstrapHost):
         self.events.append("check_ready")
 
     def info(self, message: str) -> None:
-        self.events.append(f"info:{message}")
+        self.events.append("info")
 
 
 def test_new_install_flow() -> None:
-    host = ApplyHarness("apply", infra_exists=False, owns_state=False)
+    host = ApplyHarness("apply", infra_exists=False)
     host.apply()
     assert_equal(
         host.events,
@@ -534,7 +514,6 @@ def test_new_install_flow() -> None:
             "infra_exists",
             "prepare_new_layout",
             "prepare_runner",
-            "runner_owns_infra",
             "create_infra",
             "attach_layout",
             "configure_base",
@@ -545,103 +524,41 @@ def test_new_install_flow() -> None:
             "finalize_runner",
             "check_ready",
         ],
-        "Новая установка должна пройти полный путь создания 910",
+        "Новая установка должна проходить один линейный bootstrap",
     )
 
 
-def test_existing_without_bootstrap_state() -> None:
-    host = ApplyHarness("apply", infra_exists=True, owns_state=False)
+def test_existing_infra_requires_normal_operations() -> None:
+    host = ApplyHarness("apply", infra_exists=True)
     try:
         host.apply()
     except BootstrapError as exc:
         if "обычный deploy/repair" not in str(exc):
             raise
     else:
-        raise AssertionError("990 не должен обновлять существующий рабочий 910")
+        raise AssertionError("990 не должен обслуживать существующий рабочий 910")
 
     assert_equal(
         host.events,
         [
             "infra_exists",
-            "runner_owns_infra",
             "verify_layout",
-            "prepare_runner",
         ],
-        "990 должен остановиться до изменения существующего рабочего 910",
+        "Обычный bootstrap должен остановиться до подготовки 990",
     )
 
 
-def test_resume_unfinished_initial_state() -> None:
-    host = ApplyHarness("apply", infra_exists=True, owns_state=True)
-    host.apply()
-    expected_prefix = [
-        "infra_exists",
-        "runner_owns_infra",
-        "layout_attached",
-        "attach_layout",
-        "prepare_runner",
-    ]
-    assert_equal(
-        host.events[:5],
-        expected_prefix,
-        "Незавершённая установка должна сначала обнаружить state 990",
-    )
-    if "create_infra" in host.events:
-        raise AssertionError(
-            "Уже созданный 910 не должен повторно проходить OpenTofu plan/apply"
-        )
-    if "configure_base" not in host.events or "configure_full" not in host.events:
-        raise AssertionError(
-            "После восстановления mount point настройка должна продолжиться с Ansible"
-        )
-    if "configure_existing" in host.events:
-        raise AssertionError(
-            "Незавершённая установка не должна переходить на existing-путь"
-        )
-
-
-def test_resume_unfinished_with_layout_already_attached() -> None:
-    host = ApplyHarness(
-        "apply",
-        infra_exists=True,
-        owns_state=True,
-        layout_attached=True,
-    )
-    host.apply()
-    assert_equal(
-        host.events[:5],
-        [
-            "infra_exists",
-            "runner_owns_infra",
-            "layout_attached",
-            "verify_layout",
-            "prepare_runner",
-        ],
-        "Повторный запуск не должен заново подключать уже готовые mount point",
-    )
-    if "attach_layout" in host.events:
-        raise AssertionError(
-            "Уже подключённая новая схема не должна подключаться повторно"
-        )
-    if "create_infra" in host.events:
-        raise AssertionError(
-            "Повторный запуск с готовыми mount point не должен делать OpenTofu apply"
-        )
-
-
-def test_recover_existing_without_state() -> None:
-    host = ApplyHarness("recover", infra_exists=True, owns_state=False)
+def test_recovery_recreates_existing_infra() -> None:
+    host = ApplyHarness("recover", infra_exists=True)
     host.apply()
     assert_equal(
         host.events,
         [
             "infra_exists",
             "verify_recovery_state",
-            "runner_owns_infra",
             "verify_layout",
             "remove_rootfs",
             "prepare_runner",
-            "runner_owns_infra",
             "create_infra",
             "attach_layout",
             "configure_base",
@@ -652,23 +569,32 @@ def test_recover_existing_without_state() -> None:
             "finalize_runner",
             "check_ready",
         ],
-        "Recovery должен полностью пересоздавать rootfs через единый bootstrap",
+        "Recovery должен всегда создавать новый rootfs через новый bootstrap-сеанс",
     )
 
 
-def test_recover_unfinished_initial_state() -> None:
-    host = ApplyHarness("recover", infra_exists=True, owns_state=True)
+def test_recovery_recreates_missing_infra() -> None:
+    host = ApplyHarness("recover", infra_exists=False)
     host.apply()
-    if host.events[:2] != ["infra_exists", "verify_recovery_state"]:
-        raise AssertionError("Recovery должен начинаться со строгой проверки состояния")
-    if "handoff:recover" not in host.events:
-        raise AssertionError(
-            "Recovery незавершённой первоначальной установки должен передать режим recover"
-        )
-    if "pve_access:recover" in host.events:
-        raise AssertionError(
-            "Незавершённый первоначальный state должен использовать общий handoff recover"
-        )
+    assert_equal(
+        host.events,
+        [
+            "infra_exists",
+            "verify_recovery_state",
+            "info",
+            "prepare_runner",
+            "create_infra",
+            "attach_layout",
+            "configure_base",
+            "handoff:recover",
+            "configure_full",
+            "initialize_openbao",
+            "verify_ready:quiet",
+            "finalize_runner",
+            "check_ready",
+        ],
+        "Recovery отсутствующего 910 должен использовать тот же новый bootstrap-сеанс",
+    )
 
 
 class RecoveryStateHarness(BootstrapHost):
@@ -912,11 +838,9 @@ def main() -> None:
         test_attach_persistent_layout_restores_protection_on_failure,
         test_recovery_rootfs_removal_is_strict,
         test_new_install_flow,
-        test_existing_without_bootstrap_state,
-        test_resume_unfinished_initial_state,
-        test_resume_unfinished_with_layout_already_attached,
-        test_recover_existing_without_state,
-        test_recover_unfinished_initial_state,
+        test_existing_infra_requires_normal_operations,
+        test_recovery_recreates_existing_infra,
+        test_recovery_recreates_missing_infra,
         test_recovery_preflight_accepts_complete_state,
         test_recovery_preflight_allows_missing_approle_files,
         test_recovery_preflight_allows_missing_access_directory,
