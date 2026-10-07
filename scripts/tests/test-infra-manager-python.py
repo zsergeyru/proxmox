@@ -246,8 +246,14 @@ def check_runtime_activation_guard() -> None:
         try:
             common.require_runtime_activation_idle()
             common.reserve_runtime_activation()
-            if marker.read_text(encoding="utf-8").strip() != str(os.getpid()):
-                fail("Маркер активации должен содержать PID текущего задания")
+            expected_ref = (
+                f"{common._runtime_activation_scope()}:{os.getpid()}"
+            )
+            if marker.read_text(encoding="utf-8").strip() != expected_ref:
+                fail(
+                    "Маркер активации должен содержать пространство PID "
+                    "и PID текущего процесса"
+                )
             if marker.stat().st_mode & 0o777 != 0o600:
                 fail("Маркер активации должен иметь права 0600")
             try:
