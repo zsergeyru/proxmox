@@ -53,6 +53,24 @@ def manager_vmid() -> int:
     return vmid
 
 
+def verify_manager(vmid: int) -> None:
+    result = run(
+        ["pct", "config", str(vmid)],
+        check=False,
+        capture=True,
+    )
+    required = (
+        "unprivileged: 1",
+        "owner=proxmox-project",
+        "role=infra-manager",
+    )
+    if result.returncode or any(item not in result.stdout for item in required):
+        raise OperatorError(
+            f"VMID {vmid} не подтверждён как infra-manager; "
+            "используйте infra-manager recover"
+        )
+
+
 def guest_running(vmid: int) -> bool:
     result = run(
         ["pct", "status", str(vmid)],
@@ -77,6 +95,7 @@ def start_manager(vmid: int) -> None:
 
 def proxy_to_manager(arguments: list[str]) -> int:
     vmid = manager_vmid()
+    verify_manager(vmid)
     if arguments == ["repair"]:
         start_manager(vmid)
     elif not guest_running(vmid):
