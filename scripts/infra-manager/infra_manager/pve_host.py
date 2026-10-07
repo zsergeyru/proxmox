@@ -117,8 +117,6 @@ OPENBAO_HOST_LIBRARY = Path("/usr/local/lib/infra-manager/openbao_host")
 OPENBAO_HOST_CONFIG = Path("/etc/infra-manager/openbao-host.json")
 RECOVERY_HOST_COMMAND = Path("/usr/local/sbin/infra-manager-recovery")
 OPERATOR_HOST_COMMAND = Path("/usr/local/sbin/infra-manager")
-OPENBAO_LEGACY_SERVICE = "infra-manager-openbao-unseal.service"
-OPENBAO_LEGACY_TIMER = "infra-manager-openbao-unseal.timer"
 
 
 def _install_remote_file(
@@ -279,18 +277,6 @@ def install_openbao_host_support(node: str, repo_root: Path) -> None:
         ensure_ascii=False,
         sort_keys=True,
     ) + "\n"
-
-    cleanup = f"""
-systemctl disable --now {OPENBAO_LEGACY_TIMER} {OPENBAO_LEGACY_SERVICE} \
-    >/dev/null 2>&1 || true
-rm -f \
-    /etc/systemd/system/{OPENBAO_LEGACY_TIMER} \
-    /etc/systemd/system/{OPENBAO_LEGACY_SERVICE} \
-    /etc/systemd/system/timers.target.wants/{OPENBAO_LEGACY_TIMER} \
-    /etc/systemd/system/multi-user.target.wants/{OPENBAO_LEGACY_SERVICE}
-systemctl daemon-reload
-"""
-    _ssh(node, "sh", "-c", cleanup)
 
     command_text = command_source.read_text(encoding="utf-8")
     if "from openbao_host." in command_text:
