@@ -167,10 +167,16 @@ HOST_SEMAPHORE_STATE_DIR = Path("/mnt/persistent-state/semaphore")
 RUNTIME_SEMAPHORE_STATE_DIR = Path("/var/lib/semaphore")
 
 
+def _runtime_activation_scope() -> str:
+    """Вернуть пространство PID текущего исполнителя."""
+
+    return "host" if HOST_SEMAPHORE_STATE_DIR.is_dir() else "runtime"
+
+
 def _default_runtime_activation_marker() -> Path:
     """Выбрать один физический marker для 910 и infra-runtime."""
 
-    if HOST_SEMAPHORE_STATE_DIR.is_dir():
+    if _runtime_activation_scope() == "host":
         root = HOST_SEMAPHORE_STATE_DIR
     else:
         root = RUNTIME_SEMAPHORE_STATE_DIR
@@ -206,7 +212,7 @@ def reserve_runtime_activation() -> None:
 
     try:
         with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
-            stream.write(f"{os.getpid()}\n")
+            stream.write(f"{_runtime_activation_scope()}:{os.getpid()}\n")
             stream.flush()
             os.fsync(stream.fileno())
     except OSError:
