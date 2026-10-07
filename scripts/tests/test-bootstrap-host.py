@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 import sys
 import tempfile
 from pathlib import Path
@@ -41,6 +42,35 @@ def test_infra_manager_role_can_move_to_another_vmid() -> None:
         vmid, name = module._find_role_guest(root, "infra-manager")
         assert_equal(vmid, 920, "Роль infra-manager не должна зависеть от VMID 910")
         assert_equal(name, "infra-manager", "Имя должно читаться из guest.yaml")
+
+
+class RunnerRoleHarness(BootstrapHost):
+    def __init__(self) -> None:
+        original = os.environ.get("PROJECT_DIR")
+        os.environ["PROJECT_DIR"] = "/var/lib/bootstrap-runner/project"
+        try:
+            super().__init__("recover")
+        finally:
+            if original is None:
+                os.environ.pop("PROJECT_DIR", None)
+            else:
+                os.environ["PROJECT_DIR"] = original
+
+    def ct_exec(self, *args: str, **kwargs):
+        assert_equal(args[0], "python3", "Роль должна читаться внутри 990 через Python")
+        assert_equal(args[-2], "/var/lib/bootstrap-runner/project", "Неверный путь проекта 990")
+        assert_equal(args[-1], "infra-manager", "Неверная искомая роль")
+        return SimpleNamespace(
+            returncode=0,
+            stdout='{"vmid": 920, "name": "infra-manager"}\n',
+            stderr="",
+        )
+
+
+def test_role_is_read_from_project_inside_runner() -> None:
+    host = RunnerRoleHarness()
+    assert_equal(host.infra_ctid, 920, "VMID должен определяться из проекта внутри 990")
+    assert_equal(host.infra_hostname, "infra-manager", "Имя должно определяться из проекта внутри 990")
 
 
 class OwnershipHarness(BootstrapHost):
@@ -825,6 +855,7 @@ def test_remove_rejects_foreign_910() -> None:
 def main() -> None:
     tests = [
         test_infra_manager_role_can_move_to_another_vmid,
+        test_role_is_read_from_project_inside_runner,
         test_strict_ownership_marker,
         test_full_pve_token_contract,
         test_full_pve_token_missing_secret_is_removed,
