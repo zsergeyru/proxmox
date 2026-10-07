@@ -466,7 +466,9 @@ def check_operation_lock() -> None:
                     pass
 
 
+        fallback_host = lock_dir / "host-semaphore"
         fallback_runtime = lock_dir / "runtime-semaphore"
+        fallback_host.mkdir()
         fallback_runtime.mkdir()
         with (
             patch.object(
@@ -476,18 +478,33 @@ def check_operation_lock() -> None:
             ),
             patch.object(
                 operation_lock,
+                "HOST_SEMAPHORE_DIR",
+                fallback_host,
+            ),
+            patch.object(
+                operation_lock,
                 "RUNTIME_SEMAPHORE_DIR",
                 fallback_runtime,
             ),
         ):
             with operation_lock.guest_operation_lock(410, "deploy"):
                 expected = (
-                    fallback_runtime
+                    fallback_host
                     / ".infra-manager-operation-locks"
                     / "410.lock"
                 )
                 if not expected.exists():
-                    fail("Первый rollout должен использовать общий Semaphore state")
+                    fail("Host rollout должен использовать общий Semaphore state")
+
+            fallback_host.rmdir()
+            with operation_lock.guest_operation_lock(420, "deploy"):
+                expected = (
+                    fallback_runtime
+                    / ".infra-manager-operation-locks"
+                    / "420.lock"
+                )
+                if not expected.exists():
+                    fail("Runtime rollout должен использовать общий Semaphore state")
 
 
 def check_semaphore_secret_policy() -> None:
