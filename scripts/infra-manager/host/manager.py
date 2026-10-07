@@ -426,7 +426,7 @@ def recover() -> int:
 
 
 def acquire_operator_lock():
-    """Не допустить одновременный repair/recover."""
+    """Не допустить одновременные изменяющие операторские операции."""
 
     LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
     stream = LOCK_PATH.open("w", encoding="utf-8")
