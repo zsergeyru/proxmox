@@ -466,6 +466,30 @@ def check_operation_lock() -> None:
                     pass
 
 
+        fallback_runtime = lock_dir / "runtime-semaphore"
+        fallback_runtime.mkdir()
+        with (
+            patch.object(
+                operation_lock,
+                "PATHS",
+                SimpleNamespace(data_dir=lock_dir / "missing-data"),
+            ),
+            patch.object(
+                operation_lock,
+                "RUNTIME_SEMAPHORE_DIR",
+                fallback_runtime,
+            ),
+        ):
+            with operation_lock.guest_operation_lock(410, "deploy"):
+                expected = (
+                    fallback_runtime
+                    / ".infra-manager-operation-locks"
+                    / "410.lock"
+                )
+                if not expected.exists():
+                    fail("Первый rollout должен использовать общий Semaphore state")
+
+
 def check_semaphore_secret_policy() -> None:
     entrypoint = (
         ROOT / "scripts" / "infra-manager" / "jobs" / "guest-operation.py"
