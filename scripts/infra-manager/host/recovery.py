@@ -25,10 +25,6 @@ RECOVERY_GITHUB_KEY = RECOVERY_DIR / "github_proxmox_repo_ed25519"
 
 BOOTSTRAP_DIR = Path("/root/.config/proxmox-bootstrap")
 BOOTSTRAP_GITHUB_KEY = BOOTSTRAP_DIR / "github_proxmox_repo_ed25519"
-LEGACY_ACCESS_GITHUB_DIR = ACCESS_DIR / "github"
-LEGACY_ACCESS_GITHUB_KEY = LEGACY_ACCESS_GITHUB_DIR / "github_proxmox_repo_ed25519"
-LEGACY_ACCESS_PVE_API_DIR = ACCESS_DIR / "pve-api"
-LEGACY_STATE_SECRETS_DIR = STATE_DIR / "secrets"
 
 OPENBAO_DIR = PVE_ONLY_DIR / "openbao"
 OPENBAO_UNSEAL_KEY = OPENBAO_DIR / "unseal.key"
@@ -120,7 +116,6 @@ def _select_git_source() -> Path:
     for candidate in (
         RECOVERY_GITHUB_KEY,
         BOOTSTRAP_GITHUB_KEY,
-        LEGACY_ACCESS_GITHUB_KEY,
     ):
         if nonempty(candidate):
             return candidate
@@ -136,7 +131,6 @@ def prepare_git_recovery() -> None:
     for candidate in (
         RECOVERY_GITHUB_KEY,
         BOOTSTRAP_GITHUB_KEY,
-        LEGACY_ACCESS_GITHUB_KEY,
     ):
         if nonempty(candidate) and not same_content(source, candidate):
             raise RecoveryError(
@@ -267,30 +261,6 @@ def verify_recovery_state(*, require_approle: bool = True) -> None:
         )
 
 
-def cleanup_transition_state() -> None:
-    """Удалить старые файловые secret-источники после полной проверки."""
-
-    verify_recovery_state(require_approle=True)
-    if nonempty(LEGACY_ACCESS_GITHUB_KEY) and not same_content(
-        RECOVERY_GITHUB_KEY,
-        LEGACY_ACCESS_GITHUB_KEY,
-    ):
-        raise RecoveryError(
-            "Старый access Git key отличается от recovery-копии; "
-            "автоматическое удаление запрещено"
-        )
-
-    for path in (
-        LEGACY_ACCESS_GITHUB_DIR,
-        LEGACY_ACCESS_PVE_API_DIR,
-        LEGACY_STATE_SECRETS_DIR,
-    ):
-        if path.is_symlink() or path.is_file():
-            path.unlink(missing_ok=True)
-        elif path.is_dir():
-            shutil.rmtree(path)
-
-
 def acquire_lock():
     LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
     stream = LOCK_PATH.open("w", encoding="utf-8")
@@ -375,11 +345,6 @@ def main() -> int:
         help="Проверить полную готовность recovery-контура",
     )
     mode.add_argument(
-        "--cleanup-transition",
-        action="store_true",
-        help="Удалить проверенные переходные файловые secret-источники",
-    )
-    mode.add_argument(
         "--recover",
         action="store_true",
         help="Запустить полный аварийный bootstrap recovery",
@@ -406,9 +371,6 @@ def main() -> int:
             elif args.preflight:
                 verify_recovery_state(require_approle=False)
                 print("[ОК] Минимальное recovery-состояние infra-manager сохранно")
-            elif args.cleanup_transition:
-                cleanup_transition_state()
-                print("[ОК] Переходные файловые secret-источники удалены")
             else:
                 verify_recovery_state(require_approle=True)
                 print("[ОК] Аварийный контур infra-manager готов")
