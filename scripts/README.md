@@ -39,6 +39,7 @@ scripts/
 │   │   ├── guest_catalog.py                 # Находит специальных гостей по role и читает их VMID, имя и адрес
 │   │   ├── guest_operations.py              # Выполняет общие Deploy/Status/Repair/Test/Sync операции над гостями
 │   │   ├── guest_status.py                  # Проверяет и выводит единое состояние любого поддерживаемого гостя
+│   │   ├── operator.py                      # Операторская логика, выполняемая внутри 910
 │   │   ├── semaphore.py                     # Синхронизирует проект, Git, группу переменных и задания Semaphore
 │   │   ├── pve.py                           # Проверяет PVE API и полный административный контракт infra-manager
 │   │   ├── pve_lifecycle.py                 # Выполняет приёмочную проверку полного жизненного цикла временного LXC 9098
@@ -51,16 +52,17 @@ scripts/
 │   │   ├── template_verify.py               # Проверяет шаблон через временную полную копию 9099
 │   │   └── status.py                        # Исполняет внутреннюю глубокую проверку infra-manager
 │   │
-│   ├── commands/                            # Внутренние команды 910
+│   ├── commands/                            # Устанавливаемые команды 910
+│   │   ├── operator.sh                      # Запускает операторский слой infra_manager.operator
 │   │   ├── python-command.sh                # Техническая оболочка внутреннего status
 │   │   ├── activate-runtime.sh              # Отложенно активирует обновлённую управляющую среду
 │   │   └── openbao-startup-unseal.sh        # Восстанавливает OpenBao при запуске infra-manager
 │   │
-│   ├── host/                                # Код, устанавливаемый и выполняемый непосредственно на PVE
-│   │   ├── manager.py                       # Единая операторская команда infra-manager: status/repair/recover
-│   │   ├── openbao-unseal.py                # Внутренний helper OpenBao
+│   ├── host/                                # Минимальный код, устанавливаемый непосредственно на PVE
+│   │   ├── manager.py                       # Тонкая оболочка: проверка LXC, pct exec и recover
+│   │   ├── openbao-unseal.py                # Узкий PVE-only helper OpenBao
 │   │   ├── openbao_host/                    # Встроенные программы, TLS и общие ошибки хостовой поддержки OpenBao
-│   │   └── recovery.py                      # Внутренний PVE-only helper аварийного состояния
+│   │   └── recovery.py                      # PVE-only проверка состояния и bootstrap recovery
 │   │
 │   └── jobs/                                # Задания, непосредственно запускаемые Semaphore
 │       ├── opentofu-plan.py                  # Формирует входные данные OpenTofu и строит только план изменений
