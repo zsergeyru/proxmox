@@ -41,9 +41,17 @@ def prepare_recovery(repo_root: Path) -> int:
     node = pve_node_from_environment()
     console.info("Подготовка аварийного контура infra-manager")
     install_recovery_host_support(node, repo_root)
-    install_operator_host_support(node, repo_root)
     prepare_recovery_git(node)
     console.result("PVE recovery helper и аварийный Git-доступ подготовлены")
+    return 0
+
+
+def install_operator_wrapper(repo_root: Path) -> int:
+    """Установить тонкую PVE-оболочку после настройки управляющего гостя."""
+
+    node = pve_node_from_environment()
+    install_operator_host_support(node, repo_root)
+    console.result("Тонкая операторская оболочка PVE установлена")
     return 0
 
 
