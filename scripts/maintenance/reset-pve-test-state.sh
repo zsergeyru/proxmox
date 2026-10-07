@@ -404,10 +404,6 @@ remove_project_files() {
     remove_path /var/lib/pvedeploy "удалить старый home/runtime"
     remove_path /var/log/proxmox-deployer "удалить старые журналы"
 
-    remove_path /usr/local/sbin/pve-configuration-status "удалить старую служебную команду"
-    remove_path /usr/local/sbin/deploy-guest "удалить старую служебную команду"
-    remove_path /usr/local/sbin/sync-management-keys "удалить старую служебную команду"
-
     remove_path /var/lib/vz/snippets/debian13-template-builder-9000.yaml "удалить старый snippet VM template"
 
     remove_path /run/proxmox-bootstrap "удалить временный каталог bootstrap"
