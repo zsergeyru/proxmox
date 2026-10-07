@@ -185,7 +185,6 @@ Semaphore: Build Template 9000
 
 ```text
 infra-manager guests
-infra-manager update
 infra-manager status [VMID]
 infra-manager deploy VMID
 infra-manager sync VMID
@@ -196,7 +195,7 @@ infra-manager recover
 
 Но `scripts/infra-manager/host/manager.py` теперь является только минимальной оболочкой. Для всех обычных операций она проверяет VMID управляющего LXC и передаёт аргументы через `pct exec` установленной команде `/usr/local/sbin/infra-manager` внутри 910. Реальная операторская логика находится в `infra_manager/operator.py`.
 
-`deploy/sync/repair/test` из PVE не создают задание Semaphore через API: оператор внутри 910 под разделяемой блокировкой делает временный снимок постоянной Git-копии внутри `infra-runtime` и запускает из него `jobs/guest-operation.py`. Это защищает прямой запуск от изменения файлов во время самообновления управляющего гостя. Шаблоны Semaphore вызывают ту же точку входа из своей рабочей копии задания. Оба пути сходятся в `run_guest_operation()` и используют общий каталог `/var/lib/infra-manager/locks`; изменяющие операции блокируются по VMID, а `infra-manager update` получает отдельную исключительную блокировку рабочей Git-копии.
+`deploy/sync/repair/test` из PVE не создают задание Semaphore через API. Перед прямым `deploy` оператор внутри 910 сам обновляет постоянную Git-копию под исключительной блокировкой и создаёт временный снимок внутри `infra-runtime`; `sync/repair/test` создают снимок текущей копии под разделяемой блокировкой. После создания снимка длительная операция идёт уже без блокировки проекта. Шаблоны Semaphore вызывают ту же точку входа из своей рабочей копии задания. Оба пути сходятся в `run_guest_operation()` и используют общий каталог `/var/lib/infra-manager/locks`; изменяющие операции блокируются по VMID.
 
 Доверенный вызов с PVE помечается `--trusted-pve`; только в этом режиме итоговый status может вывести операторские пароли в текущий root-терминал. Semaphore, Homepage и внутренние проверки этот режим не используют.
 

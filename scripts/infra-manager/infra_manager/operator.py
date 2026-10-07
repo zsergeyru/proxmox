@@ -33,11 +33,14 @@ RUNTIME_PROJECT_ROOT = str(PATHS.repo_root)
 RUNTIME_GUEST_OPERATION = (
     PATHS.repo_root / "scripts" / "infra-manager" / "jobs" / "guest-operation.py"
 )
+RUNTIME_SNAPSHOT_SCRIPT = """
+rm -rf "$1"
+mkdir -p "$1"
+cp -a "$2"/. "$1"/
+""".strip()
 RUNTIME_DIRECT_SCRIPT = """
-work="$(mktemp -d /tmp/infra-manager-direct.XXXXXX)"
-trap 'rm -rf "$work"' EXIT INT TERM
-cp -a "$3"/. "$work/"
-python3 "$work/scripts/infra-manager/jobs/guest-operation.py" "$1" "$2"
+trap 'rm -rf "$1"' EXIT INT TERM
+python3 "$1/scripts/infra-manager/jobs/guest-operation.py" "$2" "$3"
 """.strip()
 
 
@@ -64,10 +67,9 @@ def _pve_node() -> str:
     return node
 
 
-def operator_update() -> int:
-    """Обновить постоянную рабочую копию проекта из выбранной Git-ветки."""
+def _refresh_project_checkout() -> None:
+    """Обновить постоянную Git-копию. Блокировку обеспечивает вызывающий код."""
 
-    require_runtime_activation_idle()
     repo_root = PATHS.repo_root
     git_dir = repo_root / ".git"
     known_hosts = PATHS.semaphore_dir / "known_hosts"
@@ -101,40 +103,75 @@ def operator_update() -> int:
     environment = os.environ.copy()
     environment["GIT_SSH_COMMAND"] = ssh_command
 
-    with project_checkout_lock(exclusive=True):
-        console.info(f"Получение Git-ветки {branch}")
-        run(
-            [
-                "git",
-                "-C",
-                str(repo_root),
-                "fetch",
-                "--depth",
-                "1",
-                "origin",
-                branch,
-            ],
-            env=environment,
-        )
-        run(
-            [
-                "git",
-                "-C",
-                str(repo_root),
-                "checkout",
-                "-f",
-                "-B",
-                branch,
-                "FETCH_HEAD",
-            ]
-        )
-        run(["git", "-C", str(repo_root), "clean", "-ffdx"])
-
+    console.info(f"Получение Git-ветки {branch}")
+    run(
+        [
+            "git",
+            "-C",
+            str(repo_root),
+            "fetch",
+            "--depth",
+            "1",
+            "origin",
+            branch,
+        ],
+        env=environment,
+    )
+    run(
+        [
+            "git",
+            "-C",
+            str(repo_root),
+            "checkout",
+            "-f",
+            "-B",
+            branch,
+            "FETCH_HEAD",
+        ]
+    )
+    run(["git", "-C", str(repo_root), "clean", "-ffdx"])
     console.result(
         f"Рабочая копия проекта обновлена: {branch} "
         f"({project_revision(repo_root)})"
     )
-    return 0
+
+
+def _prepare_runtime_snapshot(operation: str, vmid: int) -> str:
+    """Подготовить неизменяемый на время операции снимок проекта в runtime."""
+
+    snapshot = f"/tmp/infra-manager-direct-{os.getpid()}-{vmid}"
+
+    def copy_snapshot() -> None:
+        if not RUNTIME_GUEST_OPERATION.is_file():
+            raise InfraManagerError(
+                f"Не найдена точка входа операций: {RUNTIME_GUEST_OPERATION}"
+            )
+        run(
+            [
+                "docker",
+                "exec",
+                "--user",
+                "1001:0",
+                RUNTIME_CONTAINER,
+                "sh",
+                "-eu",
+                "-c",
+                RUNTIME_SNAPSHOT_SCRIPT,
+                "infra-manager-snapshot",
+                snapshot,
+                RUNTIME_PROJECT_ROOT,
+            ]
+        )
+
+    if operation == "deploy":
+        with project_checkout_lock(exclusive=True):
+            _refresh_project_checkout()
+            copy_snapshot()
+    else:
+        with project_checkout_lock(exclusive=False):
+            copy_snapshot()
+
+    return snapshot
 
 
 def operator_status(*, show_secrets: bool) -> int:
@@ -172,30 +209,25 @@ def operator_guest_task(
     """Выполнить штатную операцию напрямую внутри infra-runtime."""
 
     require_runtime_activation_idle()
-    if not RUNTIME_GUEST_OPERATION.is_file():
-        raise InfraManagerError(
-            f"Не найдена точка входа операций: {RUNTIME_GUEST_OPERATION}"
-        )
-
-    with project_checkout_lock(exclusive=False):
-        result = run(
-            [
-                "docker",
-                "exec",
-                "--user",
-                "1001:0",
-                RUNTIME_CONTAINER,
-                "sh",
-                "-eu",
-                "-c",
-                RUNTIME_DIRECT_SCRIPT,
-                "infra-manager-direct",
-                operation,
-                str(vmid),
-                RUNTIME_PROJECT_ROOT,
-            ],
-            check=False,
-        )
+    snapshot = _prepare_runtime_snapshot(operation, vmid)
+    result = run(
+        [
+            "docker",
+            "exec",
+            "--user",
+            "1001:0",
+            RUNTIME_CONTAINER,
+            "sh",
+            "-eu",
+            "-c",
+            RUNTIME_DIRECT_SCRIPT,
+            "infra-manager-direct",
+            snapshot,
+            operation,
+            str(vmid),
+        ],
+        check=False,
+    )
     if result.returncode != 0:
         return result.returncode
     if operation == "test":
@@ -274,11 +306,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="показать поддерживаемых гостей и их состояние",
     )
 
-    subparsers.add_parser(
-        "update",
-        help="обновить постоянную рабочую копию проекта из Git",
-    )
-
     status_parser = subparsers.add_parser(
         "status",
         help="проверить управляющий контур или выбранного гостя",
@@ -325,8 +352,6 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.command == "guests":
             return list_local_guests(PATHS.repo_root)
-        if args.command == "update":
-            return operator_update()
         if args.command == "status":
             if args.vmid is None:
                 return operator_status(show_secrets=show_secrets)
