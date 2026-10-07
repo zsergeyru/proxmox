@@ -39,6 +39,7 @@
     group: root
     mode: "0755"
   loop:
+    - { source: operator.sh, target: infra-manager }
     - { source: python-command.sh, target: infra-manager-status }
     - { source: activate-runtime.sh, target: infra-manager-activate-runtime }
     - { source: openbao-startup-unseal.sh, target: infra-manager-openbao-startup-unseal }
