@@ -230,7 +230,7 @@ def test_progress_streaming() -> None:
             raise AssertionError("Полный вывод должен одновременно сохраняться в журнале")
 
 
-class PhaseProgressHarness(BootstrapHost):
+class BootstrapStepHarness(BootstrapHost):
     def __init__(self) -> None:
         super().__init__("apply")
         self.calls: list[dict[str, object]] = []
@@ -247,17 +247,17 @@ class PhaseProgressHarness(BootstrapHost):
         return SimpleNamespace(returncode=0)
 
 
-def test_ansible_phases_enable_progress() -> None:
-    host = PhaseProgressHarness()
+def test_bootstrap_steps_enable_progress() -> None:
+    host = BootstrapStepHarness()
 
-    host.deploy_infra_phase("infrastructure", "infra", "ok")
-    host.deploy_infra_phase("base", "base", "ok")
-    host.deploy_infra_phase("provision", "full", "ok")
+    host.create_infra_manager()
+    host.configure_infra_manager_base()
+    host.configure_infra_manager()
 
     assert_equal(
         [call.get("progress") for call in host.calls],
         [False, True, True],
-        "Ansible-фазы должны показывать потоковый прогресс",
+        "Шаги настройки 990 должны показывать потоковый прогресс",
     )
     if not all(call.get("quiet") is True for call in host.calls):
         raise AssertionError("Подробный вывод должен продолжать сохраняться в журнале")
@@ -432,9 +432,14 @@ class ApplyHarness(BootstrapHost):
     def ensure_existing_infra_running(self) -> None:
         self.events.append("ensure_existing")
 
-    def deploy_infra_phase(self, phase: str, title: str, success: str) -> None:
-        del title, success
-        self.events.append(f"deploy:{phase}")
+    def create_infra_manager(self) -> None:
+        self.events.append("create_infra")
+
+    def configure_infra_manager_base(self) -> None:
+        self.events.append("configure_base")
+
+    def configure_infra_manager(self) -> None:
+        self.events.append("configure_full")
 
     def handoff_infra(self, access_mode: str = "apply") -> None:
         self.events.append(f"handoff:{access_mode}")
@@ -471,11 +476,11 @@ def test_new_install_flow() -> None:
             "prepare_new_layout",
             "prepare_runner",
             "runner_owns_infra",
-            "deploy:infrastructure",
+            "create_infra",
             "attach_layout",
-            "deploy:base",
+            "configure_base",
             "handoff:apply",
-            "deploy:provision",
+            "configure_full",
             "initialize_openbao",
             "verify_ready:quiet",
             "finalize_runner",
@@ -522,15 +527,15 @@ def test_resume_unfinished_initial_state() -> None:
         expected_prefix,
         "Незавершённая установка должна сначала обнаружить state 990",
     )
-    if "deploy:infrastructure" in host.events:
+    if "create_infra" in host.events:
         raise AssertionError(
             "Уже созданный 910 не должен повторно проходить OpenTofu plan/apply"
         )
-    if "deploy:base" not in host.events or "deploy:provision" not in host.events:
+    if "configure_base" not in host.events or "configure_full" not in host.events:
         raise AssertionError(
             "После восстановления mount point настройка должна продолжиться с Ansible"
         )
-    if "deploy:existing" in host.events:
+    if "configure_existing" in host.events:
         raise AssertionError(
             "Незавершённая установка не должна переходить на existing-путь"
         )
@@ -559,7 +564,7 @@ def test_resume_unfinished_with_layout_already_attached() -> None:
         raise AssertionError(
             "Уже подключённая новая схема не должна подключаться повторно"
         )
-    if "deploy:infrastructure" in host.events:
+    if "create_infra" in host.events:
         raise AssertionError(
             "Повторный запуск с готовыми mount point не должен делать OpenTofu apply"
         )
@@ -840,7 +845,7 @@ def main() -> None:
         test_full_pve_token_invalid_json_is_removed,
         test_pve_node_address,
         test_progress_streaming,
-        test_ansible_phases_enable_progress,
+        test_bootstrap_steps_enable_progress,
         test_infra_ready_uses_status_as_final_screen,
         test_attach_persistent_layout_temporarily_disables_protection,
         test_attach_persistent_layout_restores_protection_on_failure,
