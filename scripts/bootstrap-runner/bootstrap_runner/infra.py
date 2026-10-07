@@ -20,39 +20,7 @@ class BootstrapInfraMixin:
         )
         self.ok("Среда bootstrap-runner готова")
 
-    def _runner_ansible_public_key_text(self) -> str:
-        result = self.ct_exec(
-            "cat",
-            str(self.runner_ansible_public_key),
-            capture=True,
-        )
-        parts = result.stdout.strip().split()
-        if len(parts) < 2 or parts[0] != "ssh-ed25519":
-            self.fail("открытый SSH-ключ 990 имеет некорректный формат")
-        return f"{parts[0]} {parts[1]} {self.runner_ssh_key_comment}"
-
-    def ensure_runner_ssh_access_to_infra(self) -> None:
-        """Временно разрешить 990 SSH-вход в принадлежащий проекту infra-manager."""
-        self.verify_infra_object()
-        public_key = self._runner_ansible_public_key_text()
-        marker = f" {self.runner_ssh_key_comment}"
-        self.infra_exec("install", "-d", "-m", "0700", "/root/.ssh")
-        script = (
-            "set -eu; "
-            "key=$1; marker=$2; "
-            "file=/root/.ssh/authorized_keys; "
-            "tmp=/root/.ssh/authorized_keys.bootstrap-runner; "
-            "touch \"$file\"; "
-            "chmod 0600 \"$file\"; "
-            "grep -vF \"$marker\" \"$file\" > \"$tmp\" || true; "
-            "printf '%s\\n' \"$key\" >> \"$tmp\"; "
-            "chmod 0600 \"$tmp\"; "
-            "mv \"$tmp\" \"$file\""
-        )
-        self.infra_exec("sh", "-c", script, "sh", public_key, marker)
-        self.ok(f"Временный SSH-доступ 990 к {self.infra_ctid} подготовлен")
-
-    def remove_runner_ssh_access_from_infra(self) -> None:
+    def remove_bootstrap_ssh_access_from_infra(self) -> None:
         """Удалить из infra-manager временный SSH-ключ первоначального контура."""
         if not self.infra_exists():
             return
@@ -60,7 +28,7 @@ class BootstrapInfraMixin:
             self.fail(
                 f"VMID {self.infra_ctid} не имеет строгой метки владения infra-manager"
             )
-        marker = f" {self.runner_ssh_key_comment}"
+        marker = f" {self.infra_bootstrap_key_comment}"
         script = (
             "set -eu; "
             "marker=$1; "
@@ -77,7 +45,8 @@ class BootstrapInfraMixin:
     def deploy_infra_phase(self, phase: str, title: str, success: str) -> None:
         self.log(title)
 
-        # Shell здесь остаётся тонкой оболочкой над общим deploy-guest.
+        # Временный 990 использует отдельную внутреннюю bootstrap-точку входа.
+        # Публичный deploy-guest не содержит bootstrap-фаз 910.
         deploy_args = [
             "env", f"INFRA_PROJECT_BRANCH={self.project_branch}",
             "bash", str(self.project_dir / "scripts/bootstrap-runner/deploy-infra-manager.sh"),
