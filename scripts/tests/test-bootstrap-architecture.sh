@@ -74,7 +74,7 @@ done
 
 grep -q 'run_deploy_guest' "$DEPLOY"     || die "Обычный deploy должен использовать общий run_deploy_guest"
 [[ -s "$BOOTSTRAP_DEPLOY" ]] || die "Отсутствует отдельная внутренняя bootstrap-точка 910"
-grep -q 'run_bootstrap_infra_manager_phase' "$BOOTSTRAP_DEPLOY" || die "Bootstrap 910 должен использовать отдельный внутренний интерфейс"
+grep -q 'run_bootstrap_infra_manager_step' "$BOOTSTRAP_DEPLOY" || die "Bootstrap 910 должен использовать отдельный внутренний интерфейс"
 grep -q 'provision.yaml' "$PLAYBOOK"     || die "Общий Ansible playbook должен применять provision.yaml"
 
 if grep -q -E -- '--bootstrap-scope|--infrastructure-only|--provision-base-only|--provision-only|--provision-existing-only' "$DEPLOY"; then
