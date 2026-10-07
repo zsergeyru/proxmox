@@ -507,36 +507,6 @@ def main_test() -> None:
     if update_template.puts[0].get("id") != 23:
         fail("PUT шаблона Semaphore должен содержать id обновляемого объекта")
 
-    class CleanupClient(SemaphoreClient):
-        def __init__(self) -> None:
-            self.deleted: list[str] = []
-
-        def get(self, path: str, *, auth: str | None = None):
-            del path, auth
-            return [
-                {"id": 1, "name": "Deploy Guest"},
-                {"id": 2, "name": "Deploy Guest 410"},
-                {"id": 3, "name": "Deploy Guest 910"},
-                {"id": 4, "name": "Initialize OpenBao 910"},
-                {"id": 5, "name": "My custom task"},
-            ]
-
-        def delete(self, path: str):
-            self.deleted.append(path)
-            return None
-
-    cleanup_client = CleanupClient()
-    cleanup_client.remove_obsolete_managed_templates(
-        1,
-        {"Deploy Guest"},
-    )
-    if cleanup_client.deleted != [
-        "/project/1/templates/2",
-        "/project/1/templates/3",
-        "/project/1/templates/4",
-    ]:
-        fail("Синхронизация Semaphore неверно удаляет старые шаблоны")
-
     class TaskSyncClient:
         def __init__(self, token_valid: bool) -> None:
             self.auth_mode = "cookie"
@@ -631,13 +601,6 @@ def main_test() -> None:
         ) -> int:
             del project_id, title, position
             return 31
-
-        def remove_obsolete_managed_templates(
-            self,
-            project_id: int,
-            expected_names: set[str],
-        ) -> None:
-            del project_id, expected_names
 
     def record_templates(repo_root: Path):
         if repo_root != ROOT:

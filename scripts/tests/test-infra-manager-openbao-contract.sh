@@ -329,10 +329,6 @@ python_wrapper_count="$(grep -Fc 'source: python-command.sh' "$ANSIBLE_RUNTIME" 
     || die "Внутри 910 должна устанавливаться только техническая status-команда"
 grep -Fq 'target: infra-manager-status' "$ANSIBLE_RUNTIME" \
     || die "Ansible не устанавливает внутреннюю status-команду"
-for obsolete in infra-manager-pve-access-check infra-manager-pve-lifecycle-test; do
-    grep -Fq "/usr/local/sbin/$obsolete" "$ANSIBLE_RUNTIME" \
-        || die "Ansible должен удалять прежнюю операторскую команду $obsolete"
-done
 grep -Fq 'dest: /usr/bin/infra-manager-status' "$ANSIBLE_RUNTIME" \
     || die "Команда infra-manager-status должна быть доступна через pct exec"
 grep -q 'activate-runtime.sh' "$ANSIBLE_RUNTIME" \

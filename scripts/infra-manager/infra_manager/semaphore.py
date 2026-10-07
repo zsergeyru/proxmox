@@ -5,7 +5,6 @@ from __future__ import annotations
 import http.cookiejar
 import json
 import os
-import re
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -967,42 +966,6 @@ class SemaphoreClient:
             )
         return template_id
 
-    def remove_obsolete_managed_templates(
-        self,
-        project_id: int,
-        expected_names: set[str],
-    ) -> None:
-        """Удалить старые шаблоны Deploy Guest N и Initialize OpenBao N."""
-
-        templates = self.get(
-            f"/project/{project_id}/templates?sort=name&order=asc"
-        )
-        if not isinstance(templates, list):
-            raise InfraManagerError(
-                "Semaphore вернул некорректный список шаблонов"
-            )
-        legacy_name = re.compile(
-            r"^(?:Deploy Guest|Initialize OpenBao) [0-9]+$"
-        )
-        for template in templates:
-            if not isinstance(template, dict):
-                raise InfraManagerError(
-                    "Semaphore вернул некорректный объект шаблона"
-                )
-            name = template.get("name")
-            if not isinstance(name, str) or not legacy_name.fullmatch(name):
-                continue
-            if name in expected_names:
-                continue
-            template_id = template.get("id")
-            if not isinstance(template_id, int):
-                raise InfraManagerError(
-                    f"Устаревший шаблон Semaphore '{name}' имеет неверный id"
-                )
-            self.delete(
-                f"/project/{project_id}/templates/{template_id}"
-            )
-
 
 def persist_github_key() -> None:
     if not nonempty(GITHUB_KEY):
@@ -1164,10 +1127,6 @@ def _sync_project_objects(
             app=template.app,
             survey_vars=template.survey_vars,
         )
-    client.remove_obsolete_managed_templates(
-        project_id,
-        {template.name for template in templates},
-    )
 
 
 def configure_project(branch: str | None = None) -> int:

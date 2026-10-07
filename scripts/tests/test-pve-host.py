@@ -240,11 +240,7 @@ def test_openbao_host_support() -> None:
     }
     assert config_target == "/etc/infra-manager/openbao-host.json"
     assert config_mode == "0644"
-    assert len(ssh_calls) == 1
-    assert ssh_calls[0][:2] == ("sh", "-c")
-    cleanup = ssh_calls[0][2]
-    assert "infra-manager-openbao-unseal.timer" in cleanup
-    assert "infra-manager-openbao-unseal.service" in cleanup
+    assert ssh_calls == []
 
     with patch.object(module, "_ssh") as mocked:
         module.initialize_openbao_on_host("pve")
@@ -390,7 +386,6 @@ def test_recovery_host_support() -> None:
             module.prepare_recovery_git("pve")
             module.preflight_recovery_contour("pve")
             module.check_recovery_contour("pve")
-            module.cleanup_transition_state("pve")
 
     assert installs == [
         (
@@ -408,7 +403,6 @@ def test_recovery_host_support() -> None:
         ("/usr/local/sbin/infra-manager-recovery", "--prepare"),
         ("/usr/local/sbin/infra-manager-recovery", "--preflight"),
         ("/usr/local/sbin/infra-manager-recovery", "--check"),
-        ("/usr/local/sbin/infra-manager-recovery", "--cleanup-transition"),
     ]
 
 
