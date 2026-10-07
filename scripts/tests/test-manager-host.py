@@ -318,7 +318,16 @@ def test_operator_update_uses_existing_checkout() -> None:
             "origin",
             "feature/test",
         ],
-        ["git", "-C", str(root), "reset", "--hard", "FETCH_HEAD"],
+        [
+            "git",
+            "-C",
+            str(root),
+            "checkout",
+            "-f",
+            "-B",
+            "feature/test",
+            "FETCH_HEAD",
+        ],
         ["git", "-C", str(root), "clean", "-ffdx"],
     ]
     environment = calls[0][1]["env"]
