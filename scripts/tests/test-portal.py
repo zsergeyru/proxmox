@@ -219,6 +219,28 @@ def check_style_contract() -> None:
         fail("Доверенный TLS CA Homepage не подключён в контейнер")
 
 
+def check_gateway_service_hardening() -> None:
+    service = (
+        ROOT
+        / "infrastructure"
+        / "guests"
+        / "910-infra-manager"
+        / "rootfs"
+        / "etc"
+        / "systemd"
+        / "system"
+        / "infra-manager-portal-gateway.service"
+    ).read_text(encoding="utf-8")
+    for required in (
+        "NoNewPrivileges=true",
+        "PrivateTmp=true",
+        "ProtectSystem=strict",
+        "ReadWritePaths=/var/lib/infra-manager/locks",
+    ):
+        if required not in service:
+            fail(f"Служба посредника Homepage должна содержать {required!r}")
+
+
 def check_action_validation() -> None:
     portal_gateway._validate_action("status", 910)
 
@@ -393,6 +415,7 @@ def main() -> None:
     check_service_discovery()
     check_local_dashboard_address()
     check_style_contract()
+    check_gateway_service_hardening()
     check_action_validation()
     check_direct_action_start()
     check_gateway_http()
