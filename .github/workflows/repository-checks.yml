@@ -387,6 +387,54 @@ jobs:
           docker run --rm --entrypoint python3 infra-runtime:test -c 'import proxmoxer'
           docker run --rm --entrypoint python3 infra-runtime:test -c 'import yaml, jsonschema'
 
+      - name: Verify real Semaphore startup in infra-runtime
+        run: |
+          set -Eeuo pipefail
+          trap 'docker rm -f infra-runtime-smoke >/dev/null 2>&1 || true' EXIT
+
+          # Временная БД, тестовый пароль. Данные настоящего 910 не подключаются.
+          docker run -d \
+            --name infra-runtime-smoke \
+            --publish 127.0.0.1:3000:3000 \
+            --tmpfs /var/lib/semaphore:rw,uid=1001,gid=0,mode=0770 \
+            -e SEMAPHORE_DB_DIALECT=sqlite \
+            -e SEMAPHORE_DB_HOST=/var/lib/semaphore/semaphore.sqlite \
+            -e SEMAPHORE_ADMIN=admin \
+            -e SEMAPHORE_ADMIN_PASSWORD=CI-Only-Temporary-Password \
+            -e SEMAPHORE_ADMIN_NAME=Admin \
+            -e SEMAPHORE_ADMIN_EMAIL=admin@localhost \
+            -e SEMAPHORE_ACCESS_KEY_ENCRYPTION="$(openssl rand -hex 16)" \
+            infra-runtime:test
+
+          if [ "$(docker inspect -f '{{.Config.User}}' infra-runtime-smoke)" != "1001:0" ]; then
+            echo "[ОШИБКА] Semaphore должен запускаться без root, uid=1001" >&2
+            exit 1
+          fi
+          ready=0
+          for _ in $(seq 1 60); do
+            if curl -fsS --max-time 2 http://127.0.0.1:3000/api/ping >/dev/null 2>&1; then
+              ready=1
+              break
+            fi
+            if [ "$(docker inspect -f '{{.State.Running}}' infra-runtime-smoke)" != "true" ]; then
+              break
+            fi
+            sleep 2
+          done
+          if [ "$ready" != 1 ]; then
+            echo "[ОШИБКА] Semaphore не открыл /api/ping на порту 3000" >&2
+            docker inspect -f 'status={{.State.Status}} exit={{.State.ExitCode}}' infra-runtime-smoke
+            docker logs --tail 40 infra-runtime-smoke 2>&1
+            exit 1
+          fi
+
+          docker exec infra-runtime-smoke sh -c 'test ! -e /etc/semaphore/requirements.txt'
+          if docker logs infra-runtime-smoke 2>&1 | grep -Fq 'Installing additional python dependencies'; then
+            echo "[ОШИБКА] Semaphore пытается переустановить Python-зависимости при запуске" >&2
+            exit 1
+          fi
+          echo "[ОК] Semaphore запущен от uid 1001; порт 3000 отвечает"
+
       - name: Build bootstrap-runner image
         run: |
           docker build \

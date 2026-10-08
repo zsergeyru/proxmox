@@ -31,8 +31,12 @@ RUN set -eux; \
 COPY --from=packer_source /bin/packer /usr/local/bin/packer
 RUN packer version
 
-COPY requirements.txt /etc/semaphore/requirements.txt
-RUN python3 -m pip install --no-cache-dir -r /etc/semaphore/requirements.txt
+# Зависимости устанавливаются только при сборке: server-wrapper Semaphore
+# повторяет pip install при наличии /etc/semaphore/requirements.txt.
+COPY requirements.txt /tmp/infra-runtime-requirements.txt
+RUN python3 -m pip install --no-cache-dir -r /tmp/infra-runtime-requirements.txt \
+    && rm -f /tmp/infra-runtime-requirements.txt \
+    && test ! -e /etc/semaphore/requirements.txt
 
 COPY ssh_config /etc/ssh/ssh_config.d/99-infra-manager.conf
 RUN rm -f /etc/ssh/ssh_config.d/semaphore.conf
