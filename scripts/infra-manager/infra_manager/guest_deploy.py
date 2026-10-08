@@ -6,6 +6,7 @@ import os
 import shlex
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 from .access import load_access_policy
@@ -715,56 +716,65 @@ def _run_guest_ansible(
         ssh_args += f" -o CertificateFile={certificate}"
     ansible_env["ANSIBLE_SSH_ARGS"] = ssh_args
 
-    run(
-        [
-            "ansible-playbook",
-            "-i",
-            f"{context.address},",
-            "-u",
-            "root",
-            "--private-key",
-            str(private_key),
-            "-e",
-            f"guest={context.paths.guest_dir.name}",
-            "-e",
-            f"provision_phase={provision_phase}",
-            "-e",
-            f"infra_self_update={'true' if self_update else 'false'}",
-            "-e",
-            f"infra_project_branch={project_branch or SETTINGS.project_branch()}",
-            "-e",
-            f"infra_pve_node={context.node}",
-            *(
-                [
-                    "-e",
-                    f"infra_ssh_client_ca_file={PATHS.ssh_client_ca_public_key}",
-                ]
-                if PATHS.ssh_client_ca_public_key.is_file()
-                else []
-            ),
-            *_project_git_ansible_vars(context),
-            *(
-                openbao_machine_args
-                if openbao_machine_args is not None
-                else [
-                    "-e",
-                    "infra_openbao_machine_enabled=false",
-                ]
-            ),
-            *(
-                [
-                    "-e",
-                    f"infra_ssh_host_certificate_file={host_certificate}",
-                ]
-                if host_certificate is not None
-                else []
-            ),
-            str(context.paths.playbook),
-        ],
-        env=ansible_env,
-        cwd=repo_root,
-    )
-
+    started = time.monotonic()
+    completed = False
+    try:
+        run(
+            [
+                "ansible-playbook",
+                "-i",
+                f"{context.address},",
+                "-u",
+                "root",
+                "--private-key",
+                str(private_key),
+                "-e",
+                f"guest={context.paths.guest_dir.name}",
+                "-e",
+                f"provision_phase={provision_phase}",
+                "-e",
+                f"infra_self_update={'true' if self_update else 'false'}",
+                "-e",
+                f"infra_project_branch={project_branch or SETTINGS.project_branch()}",
+                "-e",
+                f"infra_pve_node={context.node}",
+                *(
+                    [
+                        "-e",
+                        f"infra_ssh_client_ca_file={PATHS.ssh_client_ca_public_key}",
+                    ]
+                    if PATHS.ssh_client_ca_public_key.is_file()
+                    else []
+                ),
+                *_project_git_ansible_vars(context),
+                *(
+                    openbao_machine_args
+                    if openbao_machine_args is not None
+                    else [
+                        "-e",
+                        "infra_openbao_machine_enabled=false",
+                    ]
+                ),
+                *(
+                    [
+                        "-e",
+                        f"infra_ssh_host_certificate_file={host_certificate}",
+                    ]
+                    if host_certificate is not None
+                    else []
+                ),
+                str(context.paths.playbook),
+            ],
+            env=ansible_env,
+            cwd=repo_root,
+        )
+        completed = True
+    finally:
+        console.timing(
+            f"Ansible гостя {context.vmid} ({provision_phase})",
+            time.monotonic() - started,
+            interrupted=not completed,
+        )
 
 def _configure_guest_os(
     context: DeploymentContext,
