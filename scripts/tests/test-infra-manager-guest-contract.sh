@@ -525,3 +525,62 @@ grep -q '^access_materialization:' "$PROVISION" \
 if grep -Eq '^[[:space:]]+(guest_scope|managed_pool_assignment|privilege_separation):' "$PROVISION"; then
     die "Политика доступа не должна дублироваться в provision.yaml"
 fi
+
+
+# Повторное применение Ansible не должно запускать дорогостоящую
+# работу без изменений, но первый запуск Docker обязан обновить
+# список пакетов после добавления его источника.
+python3 - "$ANSIBLE_DOCKER" "$ANSIBLE_RUNTIME_DIR/runtime.yml" "$ANSIBLE_RUNTIME_DIR/bootstrap_openbao.yml" <<'PY'
+from pathlib import Path
+import sys
+import yaml
+
+
+def tasks(path):
+    return yaml.safe_load(Path(path).read_text(encoding="utf-8"))
+
+
+def named(items, name):
+    matches = [item for item in items if item.get("name") == name]
+    if len(matches) != 1:
+        raise SystemExit(f"Ожидается ровно одна задача: {name}")
+    return matches[0]
+
+
+docker, runtime, bootstrap = map(tasks, sys.argv[1:])
+key = named(docker, "Получить ключ Docker")
+source = named(docker, "Подключить источник Docker")
+update = named(docker, "Обновить списки пакетов после изменения источника Docker")
+install = named(docker, "Установить Docker")
+
+if key.get("register") != "docker_apt_key":
+    raise SystemExit("Изменение ключа Docker должно отслеживаться")
+if source.get("register") != "docker_apt_repository":
+    raise SystemExit("Изменение источника Docker должно отслеживаться")
+if update.get("when") != "docker_apt_key.changed or docker_apt_repository.changed":
+    raise SystemExit("Новый источник Docker должен немедленно обновить индекс APT")
+if update.get("ansible.builtin.apt", {}).get("update_cache") is not True:
+    raise SystemExit("При изменении источника Docker индекс APT не обновляется")
+apt_install = install.get("ansible.builtin.apt", {})
+if apt_install.get("cache_valid_time", 0) < 3600 or not apt_install.get("update_cache"):
+    raise SystemExit("Повторное применение Ansible не должно принудительно обновлять APT")
+
+runtime_openbao = named(runtime, "Запустить OpenBao с актуальной конфигурацией")
+bootstrap_openbao = named(bootstrap, "Запустить только OpenBao для восстановления центра доступа")
+runtime_args = runtime_openbao["ansible.builtin.command"]["argv"]
+bootstrap_args = bootstrap_openbao["ansible.builtin.command"]["argv"]
+if "--force-recreate" in runtime_args:
+    raise SystemExit("Полная настройка не должна безусловно пересоздавать OpenBao")
+if "--force-recreate" not in bootstrap_args:
+    raise SystemExit("Первый запуск OpenBao при recovery должен сохранять принудительное создание")
+
+portal = named(runtime, "Включить службу действий локального портала")
+portal_service = portal["ansible.builtin.systemd_service"]
+if portal_service.get("state") != "{{ 'restarted' if portal_gateway_unit.changed else 'started' }}":
+    raise SystemExit("Портал не должен безусловно перезапускаться при Ansible")
+if portal_service.get("daemon_reload") != "{{ portal_gateway_unit.changed }}":
+    raise SystemExit("systemd портала должен перечитывать службу только при изменении")
+unseal = named(runtime, "Включить разблокировку OpenBao при запуске infra-manager")
+if unseal["ansible.builtin.systemd_service"].get("daemon_reload") != "{{ openbao_startup_unit.changed }}":
+    raise SystemExit("systemd OpenBao должен перечитывать службу только при изменении")
+PY
