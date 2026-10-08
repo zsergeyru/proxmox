@@ -395,8 +395,20 @@ branch_env_count="$(grep -Fc 'INFRA_PROJECT_BRANCH: "{{ infra_project_branch' "$
     || die "Выбранная ветка должна передаваться настройке Semaphore"
 grep -Fq 'f"INFRA_PROJECT_BRANCH={self.project_branch}"' "$BOOTSTRAP_INFRA" \
     || die "Финальная bootstrap-проверка 910 должна использовать выбранную ветку"
-grep -Fq 'self.initialize_infra_openbao()' "$BOOTSTRAP_HOST" \
-    || die "Bootstrap должен инициализировать OpenBao перед финальной проверкой 910"
-grep -Fq 'self.verify_infra_ready(quiet=True)' "$BOOTSTRAP_HOST" \
-    || die "Bootstrap должен завершаться финальным status --full после Initialize OpenBao"
+python3 - "$BOOTSTRAP_HOST" <<'PY'
+from pathlib import Path
+import sys
+
+source = Path(sys.argv[1]).read_text(encoding="utf-8")
+begin = source.index("    def apply(self) -> None:")
+end = source.index("    def execute(self) -> None:", begin)
+apply = source[begin:end]
+steps = (
+    'self.timed_step("Восстановление OpenBao", self.initialize_infra_openbao)',
+    'self.timed_step("Проверка готовности", self.verify_infra_ready, quiet=True)',
+)
+positions = [apply.find(step) for step in steps]
+if -1 in positions or positions != sorted(positions):
+    raise SystemExit("Bootstrap должен восстанавливать OpenBao до финальной проверки")
+PY
 
