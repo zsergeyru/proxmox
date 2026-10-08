@@ -100,7 +100,8 @@ OpenTofu устанавливается из официального архив
 
 **Python**
 
-`runtime/requirements.txt` устанавливает:
+Зависимости из `runtime/requirements.txt` устанавливаются **однократно
+при сборке образа** из временного файла:
 
 ```text
 proxmoxer>=2.2.0,<3
@@ -108,6 +109,16 @@ requests>=2.32,<3
 PyYAML==6.0.2
 jsonschema==4.25.1
 ```
+
+Файл `/etc/semaphore/requirements.txt` в работающем образе **не создаётся**:
+штатный запуск Semaphore при наличии такого файла самостоятельно повторно
+вызывает `pip install`, даже если пакеты уже установлены. Этот дополнительный
+запуск может завершиться ошибкой прав доступа и вызвать бесконечные
+перезапуски контейнера. Временный файл зависимостей удаляется после сборки.
+
+GitHub Actions не только собирает образ, но и запускает Semaphore под
+`1001:0` с временной базой SQLite, ждёт ответа `/api/ping` на порту 3000
+и проверяет отсутствие повторной установки Python-зависимостей.
 
 **SSH**
 
@@ -508,11 +519,18 @@ docker compose --env-file /opt/infra-manager/compose/.versions.env \
 
 ```bash
 docker ps -a --filter name=infra-runtime
-docker logs --tail 200 infra-runtime
+docker logs --tail 40 infra-runtime
 test -s /run/infra-manager/secrets/semaphore-server.env
 ```
 
-Также проверить владельца `/mnt/persistent-state/semaphore`.
+Если в журнале указано `Permission denied: '/etc/semaphore/requirements.txt'`,
+причина в ошибочном Docker-образе, который запускает `pip install`
+при старте Semaphore. Исправление выполняется через Dockerfile проекта
+и повторную штатную сборку; **не нужно менять права** постоянной базы SQLite,
+создавать файл вручную или открывать каталог `/etc/semaphore` для всех.
+
+При других ошибках проверить владельца `/mnt/persistent-state/semaphore`
+и материализацию рабочих настроек.
 
 **Самообновление зависло**
 
