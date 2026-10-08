@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import os
 import shlex
+import time
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -202,6 +203,31 @@ def operator_guest_status(
 
 
 def operator_guest_task(
+    operation: str,
+    vmid: int,
+    *,
+    show_secrets: bool,
+) -> int:
+    """Выполнить операцию и показать полное время работы команды."""
+    started = time.monotonic()
+    completed = False
+    try:
+        result = _operator_guest_task(
+            operation,
+            vmid,
+            show_secrets=show_secrets,
+        )
+        completed = result == 0
+        return result
+    finally:
+        console.timing(
+            f"Команда {operation} гостя {vmid}",
+            time.monotonic() - started,
+            interrupted=not completed,
+        )
+
+
+def _operator_guest_task(
     operation: str,
     vmid: int,
     *,
