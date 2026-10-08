@@ -395,7 +395,7 @@ if not packer_image.startswith(f"hashicorp/packer:{packer_version}@sha256:"):
     raise SystemExit("Официальный Docker-образ Packer не соответствует выбранной версии")
 if len(packer_image.split("@sha256:")[-1]) != 64:
     raise SystemExit("Packer должен быть закреплён по SHA256 Docker-образа")
-if "ARG PACKER_IMAGE" not in dockerfile_text or "FROM ${PACKER_IMAGE} AS packer_source" not in dockerfile_text:
+if f"ARG PACKER_IMAGE={packer_image}" not in dockerfile_text or "FROM ${PACKER_IMAGE} AS packer_source" not in dockerfile_text:
     raise SystemExit("Packer должен устанавливаться из официального Docker-образа")
 if "COPY --from=packer_source /bin/packer /usr/local/bin/packer" not in dockerfile_text:
     raise SystemExit("Исполняемый файл Packer должен копироваться из официального образа")
