@@ -103,6 +103,8 @@ def _format_duration(seconds: float) -> str:
     total = max(0, int(seconds))
     hours, remainder = divmod(total, 3600)
     minutes, remaining_seconds = divmod(remainder, 60)
+    if not hours:
+        return f"{minutes:02d}:{remaining_seconds:02d}"
     return f"{hours:02d}:{minutes:02d}:{remaining_seconds:02d}"
 
 
