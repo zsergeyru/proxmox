@@ -132,61 +132,7 @@
 - name: Проверить версию проекта для готового образа
   ansible.builtin.assert:
     that:
-      - infra_runtime_revision.stdout is match('^[0-9a-f]{40}
-- name: Перезапустить OpenBao после изменения конфигурации
-  ansible.builtin.command:
-    argv:
-      - docker
-      - compose
-      - --env-file
-      - "{{ provision.paths.compose }}/.versions.env"
-      - -f
-      - "{{ provision.paths.compose }}/docker-compose.yml"
-      - up
-      - -d
-      - --force-recreate
-      - openbao
-  changed_when: true
-  when: >-
-    infra_compose_files.changed
-    or infra_compose_versions.changed
-    or (openbao_tls_files.results | selectattr('changed') | list | length > 0)
-
-- name: Подтвердить запуск OpenBao без повторного создания
-  ansible.builtin.command:
-    argv:
-      - docker
-      - compose
-      - --env-file
-      - "{{ provision.paths.compose }}/.versions.env"
-      - -f
-      - "{{ provision.paths.compose }}/docker-compose.yml"
-      - up
-      - -d
-      - openbao
-  changed_when: true
-  when: >-
-    not (
-      infra_compose_files.changed
-      or infra_compose_versions.changed
-      or (openbao_tls_files.results | selectattr('changed') | list | length > 0)
-    )
-
-- name: Запустить управляющую среду
-  ansible.builtin.command:
-    argv:
-      - docker
-      - compose
-      - --env-file
-      - "{{ provision.paths.compose }}/.versions.env"
-      - -f
-      - "{{ provision.paths.compose }}/docker-compose.yml"
-      - up
-      - -d
-      - --remove-orphans
-  changed_when: true
-  when: not (infra_self_update | default(false) | bool)
-)
+      - "infra_runtime_revision.stdout is match('^[0-9a-f]{40}$')"
     fail_msg: "Не удалось определить точную версию проекта для infra-runtime"
 
 - name: Скачать проверенный образ управляющей среды
@@ -250,6 +196,7 @@
       - runtime
   changed_when: true
   when: infra_runtime_pull.rc != 0
+
 
 - name: Перезапустить OpenBao после изменения конфигурации
   ansible.builtin.command:
