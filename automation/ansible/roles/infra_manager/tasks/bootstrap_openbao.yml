@@ -10,6 +10,7 @@
       RUNTIME_VERSION={{ provision.docker.services.runtime.image.split(':')[-1] }}
       OPENTOFU_VERSION={{ provision.docker.services.runtime.tools.opentofu }}
       PACKER_VERSION={{ provision.docker.services.runtime.tools.packer }}
+      PACKER_IMAGE={{ provision.docker.services.runtime.tools.packer_image }}
       OPENBAO_VERSION={{ provision.docker.services.openbao.image.split(':')[-1] }}
 
 - name: Запустить только OpenBao для восстановления центра доступа
