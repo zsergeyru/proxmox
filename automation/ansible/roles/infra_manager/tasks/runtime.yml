@@ -140,7 +140,6 @@
       - "{{ provision.paths.compose }}/docker-compose.yml"
       - up
       - -d
-      - --force-recreate
       - openbao
   changed_when: true
 
