@@ -270,6 +270,31 @@ def test_bootstrap_timing_success_and_failure() -> None:
         raise AssertionError("Формат времени должен поддерживать часы")
 
 
+def test_section_totals_include_interrupted_section() -> None:
+    host = BootstrapHost("apply")
+    output = io.StringIO()
+    with (
+        patch.object(
+            module.time,
+            "monotonic",
+            side_effect=[10.0, 35.4, 50.0, 61.6],
+        ),
+        contextlib.redirect_stdout(output),
+    ):
+        host.log("Подготовка 990")
+        host.log("Настройка 910")
+        host.finish_section(interrupted=True)
+        host.finish_section()
+
+    text = output.getvalue()
+    if "[ИТОГ] Подготовка 990" not in text or "(00:25)" not in text:
+        raise AssertionError("Раздел должен завершаться строкой с общим временем")
+    if "[ПРЕРВАНО] Настройка 910" not in text or "(00:11)" not in text:
+        raise AssertionError("Прерванный раздел должен показывать прошедшее время")
+    if text.count("[ИТОГ]") != 1 or text.count("[ПРЕРВАНО]") != 1:
+        raise AssertionError("Итог раздела нельзя печатать повторно")
+
+
 class ProgressHarness(BootstrapHost):
     def __init__(self, log_file: Path) -> None:
         super().__init__("apply")
@@ -972,6 +997,7 @@ def main() -> None:
         test_full_pve_token_invalid_json_is_removed,
         test_pve_node_address,
         test_bootstrap_timing_success_and_failure,
+        test_section_totals_include_interrupted_section,
         test_progress_streaming,
         test_bootstrap_steps_enable_progress,
         test_infra_ready_uses_status_as_final_screen,
