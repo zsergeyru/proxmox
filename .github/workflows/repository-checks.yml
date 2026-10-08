@@ -172,9 +172,6 @@ jobs:
       - name: Run infra-manager guest contract
         run: bash scripts/tests/test-infra-manager-guest-contract.sh
 
-      - name: Check infra-runtime image distribution
-        run: python scripts/tests/test-runtime-distribution.py
-
       - name: Run infra-manager OpenBao contract
         run: bash scripts/tests/test-infra-manager-openbao-contract.sh
 
@@ -426,41 +423,3 @@ jobs:
           else
             git diff --check "$BEFORE_SHA..$CURRENT_SHA"
           fi
-
-  publish-infra-runtime:
-    name: Publish verified infra-runtime
-    needs: validate
-    if: >-
-      github.event_name == 'push'
-      && (github.ref == 'refs/heads/main'
-          || github.ref == 'refs/heads/feature/unified-guest-deploy')
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-
-    steps:
-      - name: Checkout verified commit
-        uses: actions/checkout@v4
-
-      - name: Authenticate with GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build image from verified source
-        run: |
-          docker build \
-            --build-arg SEMAPHORE_VERSION=v2.18.30 \
-            --build-arg OPENTOFU_VERSION=1.12.6 \
-            --build-arg PACKER_VERSION=1.15.4 \
-            --label "org.opencontainers.image.source=https://github.com/${{ github.repository }}" \
-            --label "org.opencontainers.image.revision=${{ github.sha }}" \
-            -t "ghcr.io/zsergeyru/proxmox-infra-runtime:sha-${{ github.sha }}" \
-            infrastructure/guests/910-infra-manager/rootfs/opt/infra-manager/compose/runtime
-
-      - name: Publish immutable-commit-tagged image
-        run: |
-          docker push "ghcr.io/zsergeyru/proxmox-infra-runtime:sha-${{ github.sha }}"
