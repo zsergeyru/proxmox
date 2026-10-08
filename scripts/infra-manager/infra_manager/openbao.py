@@ -15,6 +15,7 @@ from .pve_host import (
     install_recovery_host_support,
     prepare_recovery_git,
     sync_openbao_otp_contract,
+    update_openbao_pve_api_credential,
 )
 
 
@@ -29,6 +30,50 @@ def _pve_node_from_environment() -> str:
             f"Некорректный адрес PVE в TF_VAR_pve_endpoint: {endpoint!r}"
         )
     return parsed.hostname
+
+
+BOOTSTRAP_PVE_API_ENV = Path(
+    "/run/infra-manager/bootstrap-secrets/pve-api.env"
+)
+
+
+def _read_env_file(path: Path) -> dict[str, str]:
+    values: dict[str, str] = {}
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        if not raw or raw.lstrip().startswith("#") or "=" not in raw:
+            continue
+        key, value = raw.split("=", 1)
+        values[key] = value
+    return values
+
+
+def _staged_pve_api_credential() -> dict[str, str] | None:
+    """Прочитать одноразовый PVE credential recovery, если он передан."""
+
+    if not BOOTSTRAP_PVE_API_ENV.is_file():
+        return None
+
+    values = _read_env_file(BOOTSTRAP_PVE_API_ENV)
+    endpoint = values.get("PVE_API_URL", "")
+    token_id = values.get("PVE_API_TOKEN_ID", "")
+    token_secret = values.get("PVE_API_TOKEN_SECRET", "")
+    if not endpoint.startswith("https://"):
+        raise InfraManagerError(
+            f"Некорректный PVE endpoint в {BOOTSTRAP_PVE_API_ENV}"
+        )
+    if token_id != "root@pam!infra-manager":
+        raise InfraManagerError(
+            f"Некорректный PVE token id в {BOOTSTRAP_PVE_API_ENV}"
+        )
+    if not token_secret or any(char.isspace() for char in token_secret):
+        raise InfraManagerError(
+            f"Некорректный PVE token secret в {BOOTSTRAP_PVE_API_ENV}"
+        )
+    return {
+        "endpoint": endpoint,
+        "token_id": token_id,
+        "token_secret": token_secret,
+    }
 
 
 def _otp_sources(repo_root: Path) -> list[dict[str, object]]:
@@ -83,6 +128,16 @@ def run_initialize_openbao(repo_root: Path) -> int:
 
     console.detail("Приведение OpenBao к рабочему состоянию")
     repair_openbao_on_host(node)
+
+    staged_pve = _staged_pve_api_credential()
+    if staged_pve is not None:
+        console.detail("Обновление PVE API credential после recovery")
+        update_openbao_pve_api_credential(
+            node,
+            endpoint=staged_pve["endpoint"],
+            token_id=staged_pve["token_id"],
+            token_secret=staged_pve["token_secret"],
+        )
 
     console.detail("Синхронизация SSH OTP и машинных AppRole")
     sync_openbao_otp_contract(node, _otp_sources(repo_root))
