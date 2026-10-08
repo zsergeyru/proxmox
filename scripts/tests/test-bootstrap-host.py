@@ -593,6 +593,9 @@ class ApplyHarness(BootstrapHost):
         super().__init__(mode)
         self._infra_exists = infra_exists
         self.events: list[str] = []
+        # Тесты не должны зависеть от каталогов реального PVE.
+        self._test_data = tempfile.TemporaryDirectory()
+        self.host_persistent_root = Path(self._test_data.name) / "infra-manager"
 
     def verify_recovery_state(self) -> None:
         self.events.append("verify_recovery_state")
@@ -682,6 +685,62 @@ def test_new_install_flow() -> None:
             "check_ready",
         ],
         "Новая установка должна проходить один линейный bootstrap",
+    )
+
+
+def test_auto_recovery_for_absent_infra_and_existing_data() -> None:
+    host = ApplyHarness("apply", infra_exists=False)
+    host.host_persistent_root.mkdir()
+    host.apply()
+    assert_equal(host.mode, "recover", "Сохранённые данные должны выбирать recovery")
+    assert_equal(
+        host.events[:4],
+        ["infra_exists", "info", "verify_recovery_state", "info"],
+        "Проверка сохранённых данных должна предшествовать изменяющим операциям",
+    )
+    if "prepare_new_layout" in host.events or "handoff:apply" in host.events:
+        raise AssertionError("Старые данные нельзя обрабатывать как новую установку")
+    if "handoff:recover" not in host.events:
+        raise AssertionError("Сохранённые данные требуют режима recovery")
+
+
+class IncompleteAutoRecoveryHarness(ApplyHarness):
+    def verify_recovery_state(self) -> None:
+        self.events.append("verify_recovery_state")
+        raise BootstrapError("Recovery запрещён: состояние неполное")
+
+
+def test_auto_recovery_stops_on_incomplete_data() -> None:
+    host = IncompleteAutoRecoveryHarness("apply", infra_exists=False)
+    (host.host_persistent_root / "pve-only").mkdir(parents=True)
+    try:
+        host.apply()
+    except BootstrapError as exc:
+        if "состояние неполное" not in str(exc):
+            raise
+    else:
+        raise AssertionError("Неполные постоянные каталоги должны блокировать запуск")
+    assert_equal(
+        host.events,
+        ["infra_exists", "info", "verify_recovery_state"],
+        "При неполном состоянии запрещены создание 910 и изменение данных",
+    )
+
+
+def test_existing_infra_with_data_is_not_automatically_recreated() -> None:
+    host = ApplyHarness("apply", infra_exists=True)
+    host.host_persistent_root.mkdir()
+    try:
+        host.apply()
+    except BootstrapError as exc:
+        if "обычный deploy/repair" not in str(exc):
+            raise
+    else:
+        raise AssertionError("Обычный запуск не должен пересоздавать работающий 910")
+    assert_equal(
+        host.events,
+        ["infra_exists", "verify_layout"],
+        "Существующий 910 требует явного --recover для пересоздания",
     )
 
 
@@ -1006,6 +1065,9 @@ def main() -> None:
         test_recovery_rootfs_removal_is_strict,
         test_control_plane_step_depends_on_bootstrap_mode,
         test_new_install_flow,
+        test_auto_recovery_for_absent_infra_and_existing_data,
+        test_auto_recovery_stops_on_incomplete_data,
+        test_existing_infra_with_data_is_not_automatically_recreated,
         test_existing_infra_requires_normal_operations,
         test_recovery_recreates_existing_infra,
         test_recovery_recreates_missing_infra,
