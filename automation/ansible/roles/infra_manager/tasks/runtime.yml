@@ -118,70 +118,6 @@
       - "+"
   changed_when: true
 
-- name: Определить версию проекта для готового образа
-  ansible.builtin.command:
-    argv:
-      - git
-      - -C
-      - "{{ provision.paths.bootstrap_repository }}"
-      - rev-parse
-      - HEAD
-  register: infra_runtime_revision
-  changed_when: false
-
-- name: Проверить версию проекта для готового образа
-  ansible.builtin.assert:
-    that:
-      - "infra_runtime_revision.stdout is match('^[0-9a-f]{40}$')"
-    fail_msg: "Не удалось определить точную версию проекта для infra-runtime"
-
-- name: Скачать проверенный образ управляющей среды
-  ansible.builtin.command:
-    argv:
-      - timeout
-      - "120"
-      - docker
-      - pull
-      - "{{ provision.docker.services.runtime.registry_image }}:sha-{{ infra_runtime_revision.stdout }}"
-  register: infra_runtime_pull
-  changed_when: infra_runtime_pull.rc == 0
-  failed_when: false
-
-- name: Прочитать сведения скачанного образа
-  ansible.builtin.command:
-    argv:
-      - docker
-      - image
-      - inspect
-      - "{{ provision.docker.services.runtime.registry_image }}:sha-{{ infra_runtime_revision.stdout }}"
-  register: infra_runtime_inspect
-  changed_when: false
-  when: infra_runtime_pull.rc == 0
-
-- name: Подтвердить соответствие образа версии проекта
-  ansible.builtin.assert:
-    that:
-      - >-
-        (infra_runtime_inspect.stdout | from_json | first).Config.Labels['org.opencontainers.image.revision']
-        == infra_runtime_revision.stdout
-    fail_msg: "Скачанный infra-runtime не соответствует версии проекта"
-  when: infra_runtime_pull.rc == 0
-
-- name: Назначить рабочую метку скачанному образу
-  ansible.builtin.command:
-    argv:
-      - docker
-      - tag
-      - "{{ provision.docker.services.runtime.registry_image }}:sha-{{ infra_runtime_revision.stdout }}"
-      - "{{ provision.docker.services.runtime.image }}"
-  changed_when: true
-  when: infra_runtime_pull.rc == 0
-
-- name: Сообщить о локальной сборке управляющей среды
-  ansible.builtin.debug:
-    msg: "Готовый infra-runtime недоступен, выполняется локальная сборка"
-  when: infra_runtime_pull.rc != 0
-
 - name: Собрать управляющую среду
   ansible.builtin.command:
     argv:
@@ -195,7 +131,7 @@
       - --pull
       - runtime
   changed_when: true
-  when: infra_runtime_pull.rc != 0
+
 
 
 - name: Перезапустить OpenBao после изменения конфигурации
