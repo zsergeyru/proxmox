@@ -408,15 +408,38 @@ print(json.dumps({"vmid": matches[0][0], "name": matches[0][1]}))
                     env=command_env,
                 )
                 assert process.stdout is not None
+                active_task: str | None = None
+                task_started = 0.0
+
+                def finish_task() -> None:
+                    nonlocal active_task
+                    if active_task is None:
+                        return
+                    elapsed = time.monotonic() - task_started
+                    message = (
+                        f"[ВРЕМЯ] Ansible: {active_task}: "
+                        f"{_format_duration(elapsed)}"
+                    )
+                    log.write(message + "\n")
+                    log.flush()
+                    # В консоли показываем только долгие Ansible-задачи.
+                    if elapsed >= 5.0:
+                        print(message, flush=True)
+                    active_task = None
+
                 for line in process.stdout:
                     log.write(line)
                     log.flush()
                     stripped = line.strip()
                     if stripped.startswith("TASK ["):
+                        finish_task()
                         end = stripped.find("]")
                         task = stripped[6:end] if end > 6 else stripped
+                        active_task = task
+                        task_started = time.monotonic()
                         self.info(f"Ansible: {task}")
                     elif stripped.startswith("PLAY RECAP"):
+                        finish_task()
                         self.info("Ansible: формирование итогов")
                     elif stripped.startswith("[ИНФО] "):
                         self.info(stripped.removeprefix("[ИНФО] "))
@@ -430,6 +453,7 @@ print(json.dumps({"vmid": matches[0][0], "name": matches[0][1]}))
                             flush=True,
                         )
                 returncode = process.wait()
+                finish_task()
 
             result = subprocess.CompletedProcess(args, returncode)
             if check and returncode:
@@ -608,7 +632,7 @@ print(json.dumps({"vmid": matches[0][0], "name": matches[0][1]}))
             self.prepare_new_persistent_layout()
 
         self.timed_step("Подготовка 990", self.prepare_runner)
-        self.timed_step("Создание LXC 910", self.create_infra_manager)
+        self.timed_step(f"Создание LXC {self.infra_ctid}", self.create_infra_manager)
         self.timed_step("Подключение постоянных данных", self.attach_persistent_layout)
         self.timed_step("Базовая настройка ОС", self.configure_infra_manager_base)
         self.timed_step(
