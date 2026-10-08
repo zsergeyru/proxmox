@@ -114,7 +114,8 @@ class BootstrapHost(
 ):
     def __init__(self, mode: str) -> None:
         self.mode = mode
-        self._timings: list[tuple[str, float, bool]] = []
+        self._active_timing: tuple[str, float] | None = None
+        self._timed_ok_count = 0
         self._started_at = time.monotonic()
         self.ctid = int(os.environ.get("BOOTSTRAP_RUNNER_CTID", "990"))
         self.ct_hostname = "bootstrap-runner"
@@ -321,6 +322,10 @@ print(json.dumps({"vmid": matches[0][0], "name": matches[0][1]}))
         print(f"\n{self.c_bold}{self.c_blue}==> {message}{self.c_reset}")
 
     def ok(self, message: str) -> None:
+        if self._active_timing is not None:
+            _, started = self._active_timing
+            message += f" ({_format_duration(time.monotonic() - started)})"
+            self._timed_ok_count += 1
         print(f"{self.c_bold}{self.c_green}[ОК]{self.c_reset} {message}")
 
     def info(self, message: str) -> None:
@@ -330,44 +335,24 @@ print(json.dumps({"vmid": matches[0][0], "name": matches[0][1]}))
         raise BootstrapError(message)
 
     def timed_step(self, name: str, operation, *args, **kwargs):
-        """Замерить этап, сохранив исходную обработку ошибок."""
+        """Дополнить успешный статус временем, не добавляя отдельной строки."""
 
         started = time.monotonic()
-        success = False
+        previous = self._active_timing
+        previous_count = self._timed_ok_count
+        self._active_timing = (name, started)
+        self._timed_ok_count = 0
         try:
             result = operation(*args, **kwargs)
-            success = True
+            if not self._timed_ok_count:
+                self.ok(f"{name} завершён")
             return result
+        except BootstrapError as exc:
+            elapsed = _format_duration(time.monotonic() - started)
+            raise BootstrapError(f"{exc} (этап «{name}»: {elapsed})") from exc
         finally:
-            elapsed = time.monotonic() - started
-            self._timings.append((name, elapsed, success))
-            marker = "[ВРЕМЯ]" if success else "[ВРЕМЯ][ОШИБКА]"
-            print(
-                f"{marker} {name}: {_format_duration(elapsed)}",
-                flush=True,
-            )
-
-    def print_timing_summary(self) -> None:
-        """Кратко показать самые долгие операции даже при ошибке."""
-
-        if not self._timings:
-            return
-        print("\n[ВРЕМЯ] Самые долгие этапы:", flush=True)
-        for name, elapsed, success in sorted(
-            self._timings,
-            key=lambda entry: entry[1],
-            reverse=True,
-        )[:5]:
-            status = "" if success else " (прерван)"
-            print(
-                f"[ВРЕМЯ] {_format_duration(elapsed)} — {name}{status}",
-                flush=True,
-            )
-        print(
-            f"[ВРЕМЯ] Всего в закрытом bootstrap: "
-            f"{_format_duration(time.monotonic() - self._started_at)}",
-            flush=True,
-        )
+            self._active_timing = previous
+            self._timed_ok_count = previous_count
 
     def show_log_tail(self) -> None:
         print(
@@ -422,9 +407,8 @@ print(json.dumps({"vmid": matches[0][0], "name": matches[0][1]}))
                     )
                     log.write(message + "\n")
                     log.flush()
-                    # В консоли показываем только долгие Ansible-задачи.
-                    if elapsed >= 5.0:
-                        print(message, flush=True)
+                    # Время отдельных Ansible-задач сохраняется только
+                    # в подробном журнале; основная консоль остаётся краткой.
                     active_task = None
 
                 for line in process.stdout:
@@ -444,7 +428,12 @@ print(json.dumps({"vmid": matches[0][0], "name": matches[0][1]}))
                     elif stripped.startswith("[ИНФО] "):
                         self.info(stripped.removeprefix("[ИНФО] "))
                     elif stripped.startswith("[ОК] "):
-                        self.ok(stripped.removeprefix("[ОК] "))
+                        # Сообщение вложенного процесса — не итог нашего этапа.
+                        print(
+                            f"{self.c_bold}{self.c_green}[ОК]{self.c_reset} "
+                            f"{stripped.removeprefix('[ОК] ')}",
+                            flush=True,
+                        )
                     elif stripped.startswith("ОШИБКА: "):
                         print(
                             f"{self.c_bold}{self.c_red}ОШИБКА:{self.c_reset} "
@@ -663,10 +652,7 @@ print(json.dumps({"vmid": matches[0][0], "name": matches[0][1]}))
         self.info(f"Закрытый bootstrap {VERSION}, режим: {self.mode}")
 
         if self.mode in {"apply", "recover"}:
-            try:
-                self.apply()
-            finally:
-                self.print_timing_summary()
+            self.apply()
         elif self.mode == "check":
             self.verify_infra_ready(quiet=True)
             self.finalize_runner()
