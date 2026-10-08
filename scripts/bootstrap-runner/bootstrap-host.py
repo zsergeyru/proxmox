@@ -119,6 +119,8 @@ class BootstrapHost(
         self._active_timing: tuple[str, float] | None = None
         self._timed_ok_count = 0
         self._started_at = time.monotonic()
+        self._section_title: str | None = None
+        self._section_started = 0.0
         self.ctid = int(os.environ.get("BOOTSTRAP_RUNNER_CTID", "990"))
         self.ct_hostname = "bootstrap-runner"
         self.project_branch = os.environ.get("PROJECT_BRANCH", "main")
@@ -320,7 +322,21 @@ print(json.dumps({"vmid": matches[0][0], "name": matches[0][1]}))
             )
         return vmid, name
 
+    def finish_section(self, *, interrupted: bool = False) -> None:
+        """Подвести итог раздела без изменения результата операций."""
+
+        title = self._section_title
+        if title is None:
+            return
+        elapsed = _format_duration(time.monotonic() - self._section_started)
+        marker = "[ИТОГ]" if not interrupted else "[ПРЕРВАНО]"
+        print(f"{marker} {title:<55} ({elapsed})", flush=True)
+        self._section_title = None
+
     def log(self, message: str) -> None:
+        self.finish_section()
+        self._section_title = message
+        self._section_started = time.monotonic()
         print(f"\n{self.c_bold}{self.c_blue}==> {message}{self.c_reset}")
 
     def ok(self, message: str) -> None:
@@ -653,23 +669,29 @@ print(json.dumps({"vmid": matches[0][0], "name": matches[0][1]}))
         self.verify_runner_contract()
         self.info(f"Закрытый bootstrap {VERSION}, режим: {self.mode}")
 
-        if self.mode in {"apply", "recover"}:
-            self.apply()
-        elif self.mode == "check":
-            self.verify_infra_ready(quiet=True)
-            self.finalize_runner()
-            self.check_ready()
-        elif self.mode == "remove":
-            self.remove_infra()
-        elif self.mode == "purge":
-            self.remove_infra()
-            shutil.rmtree(self.host_bootstrap_dir, ignore_errors=True)
-            self.ok(
-                "Старый bootstrap-каталог удалён; "
-                "постоянное состояние /mnt/bindmounts/infra-manager сохранено"
-            )
+        try:
+            if self.mode in {"apply", "recover"}:
+                self.apply()
+            elif self.mode == "check":
+                self.verify_infra_ready(quiet=True)
+                self.finalize_runner()
+                self.check_ready()
+            elif self.mode == "remove":
+                self.remove_infra()
+            elif self.mode == "purge":
+                self.remove_infra()
+                shutil.rmtree(self.host_bootstrap_dir, ignore_errors=True)
+                self.ok(
+                    "Старый bootstrap-каталог удалён; "
+                    "постоянное состояние /mnt/bindmounts/infra-manager сохранено"
+                )
+            else:
+                self.fail(f"неизвестный режим: {self.mode}")
+        except BaseException:
+            self.finish_section(interrupted=True)
+            raise
         else:
-            self.fail(f"неизвестный режим: {self.mode}")
+            self.finish_section()
 
 
 def parse_args() -> argparse.Namespace:
