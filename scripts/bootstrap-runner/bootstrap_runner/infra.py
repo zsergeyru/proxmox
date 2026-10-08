@@ -20,39 +20,7 @@ class BootstrapInfraMixin:
         )
         self.ok("Среда bootstrap-runner готова")
 
-    def _runner_ansible_public_key_text(self) -> str:
-        result = self.ct_exec(
-            "cat",
-            str(self.runner_ansible_public_key),
-            capture=True,
-        )
-        parts = result.stdout.strip().split()
-        if len(parts) < 2 or parts[0] != "ssh-ed25519":
-            self.fail("открытый SSH-ключ 990 имеет некорректный формат")
-        return f"{parts[0]} {parts[1]} {self.runner_ssh_key_comment}"
-
-    def ensure_runner_ssh_access_to_infra(self) -> None:
-        """Временно разрешить 990 SSH-вход в принадлежащий проекту infra-manager."""
-        self.verify_infra_object()
-        public_key = self._runner_ansible_public_key_text()
-        marker = f" {self.runner_ssh_key_comment}"
-        self.infra_exec("install", "-d", "-m", "0700", "/root/.ssh")
-        script = (
-            "set -eu; "
-            "key=$1; marker=$2; "
-            "file=/root/.ssh/authorized_keys; "
-            "tmp=/root/.ssh/authorized_keys.bootstrap-runner; "
-            "touch \"$file\"; "
-            "chmod 0600 \"$file\"; "
-            "grep -vF \"$marker\" \"$file\" > \"$tmp\" || true; "
-            "printf '%s\\n' \"$key\" >> \"$tmp\"; "
-            "chmod 0600 \"$tmp\"; "
-            "mv \"$tmp\" \"$file\""
-        )
-        self.infra_exec("sh", "-c", script, "sh", public_key, marker)
-        self.ok(f"Временный SSH-доступ 990 к {self.infra_ctid} подготовлен")
-
-    def remove_runner_ssh_access_from_infra(self) -> None:
+    def remove_bootstrap_ssh_access_from_infra(self) -> None:
         """Удалить из infra-manager временный SSH-ключ первоначального контура."""
         if not self.infra_exists():
             return
@@ -60,7 +28,7 @@ class BootstrapInfraMixin:
             self.fail(
                 f"VMID {self.infra_ctid} не имеет строгой метки владения infra-manager"
             )
-        marker = f" {self.runner_ssh_key_comment}"
+        marker = f" {self.infra_bootstrap_key_comment}"
         script = (
             "set -eu; "
             "marker=$1; "
@@ -74,21 +42,126 @@ class BootstrapInfraMixin:
         self.infra_exec("sh", "-c", script, "sh", marker)
         self.ok(f"Временный SSH-доступ 990 к {self.infra_ctid} удалён")
 
-    def deploy_infra_phase(self, phase: str, title: str, success: str) -> None:
-        self.log(title)
-
-        # Shell здесь остаётся тонкой оболочкой над общим deploy-guest.
-        deploy_args = [
-            "env", f"INFRA_PROJECT_BRANCH={self.project_branch}",
-            "bash", str(self.project_dir / "scripts/bootstrap-runner/deploy-infra-manager.sh"),
-            phase, str(self.infra_ctid), str(self.project_dir),
+    def _run_infra_bootstrap_step(
+        self,
+        step: str,
+        *,
+        progress: bool,
+    ) -> None:
+        command = [
+            "env",
+            f"INFRA_PROJECT_BRANCH={self.project_branch}",
+            "bash",
+            str(self.project_dir / "scripts/bootstrap-runner/run-runtime.sh"),
+            "python3",
+            "scripts/infra-manager/jobs/bootstrap-infra-manager.py",
+            step,
+            str(self.infra_ctid),
         ]
         self.ct_exec(
-            *deploy_args,
+            *command,
             quiet=True,
-            progress=phase in {"base", "provision", "existing"},
+            progress=progress,
         )
-        self.ok(success)
+        if step == "create":
+            self.ct_exec(
+                "rm",
+                "-rf",
+                "/var/lib/bootstrap-runner/opentofu/state",
+                quiet=True,
+            )
+
+    def create_infra_manager(self) -> None:
+        """Создать объект infra-manager в bootstrap-state."""
+        self.log(f"Создание LXC {self.infra_ctid} через OpenTofu")
+        self._run_infra_bootstrap_step("create", progress=False)
+        self.ok(
+            f"LXC {self.infra_ctid} создан через состояние bootstrap-runner"
+        )
+
+    def configure_infra_manager_base(self) -> None:
+        """Установить минимальную ОС для перехода к доверенному контуру."""
+        self.log(f"Базовая настройка LXC {self.infra_ctid} через Ansible")
+        self._run_infra_bootstrap_step("configure-base", progress=True)
+        self.ok(f"Базовая настройка {self.infra_ctid} завершена")
+
+    def configure_infra_manager_control_plane(self) -> None:
+        """Поднять управляющий контур, необходимый до перехода на SSH CA."""
+        self.log(f"Запуск управляющего контура LXC {self.infra_ctid} через Ansible")
+        step = (
+            "configure-recovery-control-plane"
+            if self.mode == "recover"
+            else "configure-control-plane"
+        )
+        self._run_infra_bootstrap_step(step, progress=True)
+        self.ok(f"Управляющий контур {self.infra_ctid} запущен")
+
+    def configure_infra_manager_ssh_trust(self) -> None:
+        """Установить SSH CA и подтвердить вход по временному сертификату."""
+        self.log(f"Переход LXC {self.infra_ctid} на SSH-сертификаты OpenBao")
+        self._run_infra_bootstrap_step("configure-ssh-trust", progress=True)
+        self.ok(f"SSH-доверие {self.infra_ctid} подтверждено")
+
+    def sync_infra_ssh_ca_to_runner(self) -> None:
+        """Передать публичные SSH CA из восстановленного управляющего гостя во временный runner."""
+
+        self.verify_infra_object()
+        runner_ca_dir = Path("/etc/bootstrap-runner/ca")
+        self.ct_exec("install", "-d", "-m", "0755", str(runner_ca_dir))
+
+        for name in ("ssh-client-ca.pub", "ssh-host-ca.pub"):
+            source = Path("/etc/infra-manager/ca") / name
+            result = self.infra_exec(
+                "cat",
+                str(source),
+                capture=True,
+                check=False,
+            )
+            value = result.stdout.strip() if result.returncode == 0 else ""
+            if not value.startswith(("ssh-", "ecdsa-", "sk-")):
+                self.fail(
+                    f"{self.infra_ctid} не опубликовал корректный SSH CA: {source}"
+                )
+
+            fd, temporary_name = tempfile.mkstemp(
+                prefix=f"bootstrap-runner-{name}.",
+                dir="/run",
+            )
+            os.close(fd)
+            temporary = Path(temporary_name)
+            try:
+                temporary.write_text(value + "\n", encoding="utf-8")
+                temporary.chmod(0o644)
+                self.pct(
+                    "push",
+                    str(self.ctid),
+                    str(temporary),
+                    str(runner_ca_dir / name),
+                    "--user",
+                    "0",
+                    "--group",
+                    "0",
+                    "--perms",
+                    "0644",
+                )
+            finally:
+                temporary.unlink(missing_ok=True)
+
+            if self.ct_exec(
+                "test",
+                "-s",
+                str(runner_ca_dir / name),
+                check=False,
+            ).returncode:
+                self.fail(f"LXC {self.ctid} не получил {name}")
+
+        self.ok("Публичные SSH CA OpenBao переданы временному 990")
+
+    def configure_infra_manager(self) -> None:
+        """Полностью применить декларацию infra-manager только по SSH-сертификату."""
+        self.log(f"Полная настройка LXC {self.infra_ctid} через Ansible")
+        self._run_infra_bootstrap_step("configure", progress=True)
+        self.ok(f"Полная настройка {self.infra_ctid} завершена")
 
     def infra_config_is_expected(self) -> bool:
         # Для любых разрушительных действий одного hostname недостаточно.
@@ -370,19 +443,6 @@ class BootstrapInfraMixin:
         self.checkout_infra_project()
         self.verify_infra_handoff()
 
-    def handoff_existing_infra(self) -> None:
-        self.ensure_host_root_ssh_access()
-        self.prepare_infra_pve_root_access()
-        self.prepare_infra_project_access()
-        self.checkout_infra_project()
-        if not (
-            self.infra_test("-s", self.infra_runtime_pve_api_env)
-            or self.infra_test("-s", self.infra_pve_api_env)
-        ):
-            self.fail(
-                f"в существующем {self.infra_ctid} отсутствует рабочий или bootstrap "
-                "PVE API credential"
-            )
 
     def initialize_infra_openbao(self) -> None:
         """Завершить bootstrap переносом runtime secrets в OpenBao."""

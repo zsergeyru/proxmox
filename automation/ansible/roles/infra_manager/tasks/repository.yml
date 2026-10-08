@@ -50,6 +50,7 @@
     owner: root
     group: root
     mode: preserve
+  register: infra_compose_files
 
 - name: Зафиксировать ключ GitHub для Semaphore
   ansible.builtin.copy:

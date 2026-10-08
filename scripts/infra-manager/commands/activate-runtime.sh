@@ -10,11 +10,25 @@ PVE_NODE="${INFRA_PVE_NODE:-}"
 
 install -d -m 0755 "$LOG_DIR"
 exec >>"$LOG_FILE" 2>&1
+started=$SECONDS
 
-cleanup_marker() {
+finish_activation() {
+    local result=$?
+    local elapsed=$((SECONDS - started))
+    local duration
+    printf -v duration '%02d:%02d' "$((elapsed / 60))" "$((elapsed % 60))"
+    if ((elapsed >= 3600)); then
+        printf -v duration '%02d:%02d:%02d' "$((elapsed / 3600))" "$(((elapsed / 60) % 60))" "$((elapsed % 60))"
+    fi
+
+    if ((result == 0)); then
+        printf '[ВРЕМЯ] Отложенная активация infra-runtime: %s\n' "$duration"
+    else
+        printf '[ПРЕРВАНО] Отложенная активация infra-runtime: %s (код %s)\n' "$duration" "$result"
+    fi
     rm -f "$ACTIVATION_MARKER"
 }
-trap cleanup_marker EXIT
+trap finish_activation EXIT
 
 printf '\n[%s] Активация infra-runtime, ветка %s\n' "$(date -Is)" "$BRANCH"
 

@@ -172,9 +172,9 @@ class BootstrapAccessMixin:
                 "prepare-runtime.sh",
             ),
             (
-                self.project_dir / "scripts/bootstrap-runner/deploy-infra-manager.sh",
+                self.project_dir / "scripts/bootstrap-runner/run-runtime.sh",
                 "-s",
-                "deploy-infra-manager.sh",
+                "run-runtime.sh",
             ),
         )
         for path, test_flag, label in checks:

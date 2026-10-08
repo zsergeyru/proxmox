@@ -441,6 +441,40 @@ def check_openbao_ssh_access(node: str) -> None:
     )
 
 
+def update_openbao_pve_api_credential(
+    node: str,
+    *,
+    endpoint: str,
+    token_id: str,
+    token_secret: str,
+) -> None:
+    """Сохранить перевыпущенный PVE API credential в OpenBao через PVE-only роль."""
+
+    if not endpoint.startswith("https://"):
+        raise InfraManagerError("Некорректный PVE endpoint")
+    if token_id != "root@pam!infra-manager":
+        raise InfraManagerError("Некорректный PVE token id")
+    if not token_secret or any(character.isspace() for character in token_secret):
+        raise InfraManagerError("Некорректный PVE token secret")
+
+    _ssh_with_input(
+        node,
+        str(OPENBAO_HOST_COMMAND),
+        "--update-pve-api-credential",
+        "--log-level",
+        "quiet",
+        input_text=json.dumps(
+            {
+                "endpoint": endpoint,
+                "token_id": token_id,
+                "token_secret": token_secret,
+            },
+            separators=(",", ":"),
+        )
+        + "\n",
+    )
+
+
 def update_openbao_semaphore_api_token(node: str, api_token: str) -> None:
     """Сохранить перевыпущенный Semaphore token через узкую PVE-only роль."""
     clean = api_token.strip()

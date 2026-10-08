@@ -60,7 +60,7 @@
       ansible.builtin.include_role:
         name: docker
       when:
-        - (provision_phase | default('full')) == "full"
+        - (provision_phase | default('full')) in ["full", "bootstrap", "recovery"]
         - provision.docker is defined
         - provision.docker.required_packages is defined
 
@@ -68,7 +68,7 @@
       ansible.builtin.include_role:
         name: infra_manager
       when:
-        - (provision_phase | default('full')) == "full"
+        - (provision_phase | default('full')) in ["full", "bootstrap", "recovery"]
         - (guest_manifest.role | default('')) == "infra-manager"
 
     - name: Настроить AI Control

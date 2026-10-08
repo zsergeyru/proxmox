@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import contextlib
 import importlib.util
+import io
+import os
 import sys
 import tempfile
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
 MODULE_PATH = ROOT / "scripts/bootstrap-runner/bootstrap-host.py"
@@ -41,6 +45,35 @@ def test_infra_manager_role_can_move_to_another_vmid() -> None:
         vmid, name = module._find_role_guest(root, "infra-manager")
         assert_equal(vmid, 920, "Роль infra-manager не должна зависеть от VMID 910")
         assert_equal(name, "infra-manager", "Имя должно читаться из guest.yaml")
+
+
+class RunnerRoleHarness(BootstrapHost):
+    def __init__(self) -> None:
+        original = os.environ.get("PROJECT_DIR")
+        os.environ["PROJECT_DIR"] = "/var/lib/bootstrap-runner/project"
+        try:
+            super().__init__("recover")
+        finally:
+            if original is None:
+                os.environ.pop("PROJECT_DIR", None)
+            else:
+                os.environ["PROJECT_DIR"] = original
+
+    def ct_exec(self, *args: str, **kwargs):
+        assert_equal(args[0], "python3", "Роль должна читаться внутри 990 через Python")
+        assert_equal(args[-2], "/var/lib/bootstrap-runner/project", "Неверный путь проекта 990")
+        assert_equal(args[-1], "infra-manager", "Неверная искомая роль")
+        return SimpleNamespace(
+            returncode=0,
+            stdout='{"vmid": 920, "name": "infra-manager"}\n',
+            stderr="",
+        )
+
+
+def test_role_is_read_from_project_inside_runner() -> None:
+    host = RunnerRoleHarness()
+    assert_equal(host.infra_ctid, 920, "VMID должен определяться из проекта внутри 990")
+    assert_equal(host.infra_hostname, "infra-manager", "Имя должно определяться из проекта внутри 990")
 
 
 class OwnershipHarness(BootstrapHost):
@@ -191,6 +224,77 @@ def test_pve_node_address() -> None:
         raise AssertionError("Отсутствие IPv4 PVE должно считаться ошибкой")
 
 
+def test_bootstrap_timing_success_and_failure() -> None:
+    host = BootstrapHost("apply")
+    output = io.StringIO()
+    with (
+        patch.object(module.time, "monotonic", side_effect=[10.0, 72.4]),
+        contextlib.redirect_stdout(output),
+    ):
+        host.timed_step("Тестовый этап", lambda: host.ok("Тест завершён"))
+
+    if not any(
+        "[ОК]" in line and "Тест завершён" in line and line.endswith("(01:02)")
+        for line in output.getvalue().splitlines()
+    ):
+        raise AssertionError("Время должно быть справа в исходной строке [ОК]")
+    if "[ВРЕМЯ]" in output.getvalue():
+        raise AssertionError("Отдельный вывод [ВРЕМЯ] запрещён")
+
+    output = io.StringIO()
+    with (
+        patch.object(module.time, "monotonic", side_effect=[10.0, 11.3]),
+        contextlib.redirect_stdout(output),
+    ):
+        result = host.timed_step("Проверка", lambda: "ready")
+    assert_equal(result, "ready", "Замер не должен менять результат этапа")
+    if not any(
+        "[ОК]" in line and "Проверка" in line and line.endswith("(00:01)")
+        for line in output.getvalue().splitlines()
+    ):
+        raise AssertionError("Этап без собственного [ОК] должен получить итоговый статус")
+
+    def fail_operation():
+        raise BootstrapError("ожидаемая ошибка")
+
+    with patch.object(module.time, "monotonic", side_effect=[100.0, 107.5]):
+        try:
+            host.timed_step("Сбой этапа", fail_operation)
+        except BootstrapError as exc:
+            if str(exc) != "ожидаемая ошибка (этап «Сбой этапа»: 00:07)":
+                raise
+        else:
+            raise AssertionError("Замер не должен скрывать ошибку этапа")
+
+    if module._format_duration(3661.9) != "01:01:01":
+        raise AssertionError("Формат времени должен поддерживать часы")
+
+
+def test_section_totals_include_interrupted_section() -> None:
+    host = BootstrapHost("apply")
+    output = io.StringIO()
+    with (
+        patch.object(
+            module.time,
+            "monotonic",
+            side_effect=[10.0, 35.4, 50.0, 61.6],
+        ),
+        contextlib.redirect_stdout(output),
+    ):
+        host.log("Подготовка 990")
+        host.log("Настройка 910")
+        host.finish_section(interrupted=True)
+        host.finish_section()
+
+    text = output.getvalue()
+    if "[ИТОГ] Подготовка 990" not in text or "(00:25)" not in text:
+        raise AssertionError("Раздел должен завершаться строкой с общим временем")
+    if "[ПРЕРВАНО] Настройка 910" not in text or "(00:11)" not in text:
+        raise AssertionError("Прерванный раздел должен показывать прошедшее время")
+    if text.count("[ИТОГ]") != 1 or text.count("[ПРЕРВАНО]") != 1:
+        raise AssertionError("Итог раздела нельзя печатать повторно")
+
+
 class ProgressHarness(BootstrapHost):
     def __init__(self, log_file: Path) -> None:
         super().__init__("apply")
@@ -228,9 +332,11 @@ def test_progress_streaming() -> None:
         log_text = log_file.read_text(encoding="utf-8")
         if "TASK [Собрать infra-runtime]" not in log_text or "PLAY RECAP" not in log_text:
             raise AssertionError("Полный вывод должен одновременно сохраняться в журнале")
+        if "[ВРЕМЯ] Ansible: Собрать infra-runtime:" not in log_text:
+            raise AssertionError("Журнал должен сохранять длительность каждой Ansible-задачи")
 
 
-class PhaseProgressHarness(BootstrapHost):
+class BootstrapStepHarness(BootstrapHost):
     def __init__(self) -> None:
         super().__init__("apply")
         self.calls: list[dict[str, object]] = []
@@ -247,18 +353,17 @@ class PhaseProgressHarness(BootstrapHost):
         return SimpleNamespace(returncode=0)
 
 
-def test_ansible_phases_enable_progress() -> None:
-    host = PhaseProgressHarness()
+def test_bootstrap_steps_enable_progress() -> None:
+    host = BootstrapStepHarness()
 
-    host.deploy_infra_phase("infrastructure", "infra", "ok")
-    host.deploy_infra_phase("base", "base", "ok")
-    host.deploy_infra_phase("provision", "full", "ok")
-    host.deploy_infra_phase("existing", "existing", "ok")
+    host.create_infra_manager()
+    host.configure_infra_manager_base()
+    host.configure_infra_manager()
 
     assert_equal(
         [call.get("progress") for call in host.calls],
-        [False, True, True, True],
-        "Ansible-фазы должны показывать потоковый прогресс",
+        [False, None, True, True],
+        "Create должен сразу очищать state, а Ansible-шаги показывать прогресс",
     )
     if not all(call.get("quiet") is True for call in host.calls):
         raise AssertionError("Подробный вывод должен продолжать сохраняться в журнале")
@@ -388,19 +493,105 @@ def test_attach_persistent_layout_restores_protection_on_failure() -> None:
         raise AssertionError("Неуспешное подключение не должно считаться проверенным")
 
 
+class RecoveryRootfsHarness(BootstrapHost):
+    def __init__(self, *, owned: bool = True) -> None:
+        super().__init__("recover")
+        self.owned = owned
+        self.exists = True
+        self.events: list[str] = []
+
+    def infra_exists(self) -> bool:
+        return self.exists
+
+    def infra_config_is_expected(self) -> bool:
+        return self.owned
+
+    def pct_status(self, ctid: int) -> str:
+        if ctid != self.infra_ctid:
+            raise AssertionError(f"Неожиданный VMID: {ctid}")
+        return "running"
+
+    def pct(self, *args: str, **kwargs):
+        del kwargs
+        self.events.append("pct:" + " ".join(args))
+        return SimpleNamespace(returncode=0)
+
+    def run(self, *args: str, **kwargs):
+        del kwargs
+        self.events.append("run:" + " ".join(args))
+        if args[:2] == ("pct", "destroy"):
+            self.exists = False
+        return SimpleNamespace(returncode=0)
+
+    def ok(self, message: str) -> None:
+        del message
+
+
+def test_recovery_rootfs_removal_is_strict() -> None:
+    host = RecoveryRootfsHarness()
+    host.remove_infra_rootfs_for_recovery()
+    if not any("--protection 0" in event for event in host.events):
+        raise AssertionError("Recovery должен снять protection перед удалением rootfs")
+    if not any(event.startswith("pct:stop ") for event in host.events):
+        raise AssertionError("Recovery должен остановить работающий infra-manager")
+    if not any("pct destroy" in event and "--purge 1" in event for event in host.events):
+        raise AssertionError("Recovery должен удалить только объект/rootfs infra-manager")
+
+    foreign = RecoveryRootfsHarness(owned=False)
+    try:
+        foreign.remove_infra_rootfs_for_recovery()
+    except BootstrapError:
+        pass
+    else:
+        raise AssertionError("Recovery не должен удалять чужой объект")
+    if foreign.events:
+        raise AssertionError("До проверки владения разрушительные команды запрещены")
+
+
+class ControlPlaneHarness(BootstrapHost):
+    def __init__(self, mode: str) -> None:
+        super().__init__(mode)
+        self.steps: list[str] = []
+
+    def log(self, message: str) -> None:
+        del message
+
+    def ok(self, message: str) -> None:
+        del message
+
+    def _run_infra_bootstrap_step(self, step: str, *, progress: bool) -> None:
+        if not progress:
+            raise AssertionError("Управляющий этап должен показывать прогресс")
+        self.steps.append(step)
+
+
+def test_control_plane_step_depends_on_bootstrap_mode() -> None:
+    fresh = ControlPlaneHarness("apply")
+    fresh.configure_infra_manager_control_plane()
+    assert_equal(
+        fresh.steps,
+        ["configure-control-plane"],
+        "Новая установка должна подготовить первичные секреты до OpenBao",
+    )
+
+    recovery = ControlPlaneHarness("recover")
+    recovery.configure_infra_manager_control_plane()
+    assert_equal(
+        recovery.steps,
+        ["configure-recovery-control-plane"],
+        "Recovery не должен запускать Semaphore до восстановления OpenBao",
+    )
+
+
 class ApplyHarness(BootstrapHost):
     def __init__(
         self,
         mode: str,
         *,
         infra_exists: bool,
-        owns_state: bool,
-        layout_attached: bool = False,
     ) -> None:
         super().__init__(mode)
         self._infra_exists = infra_exists
-        self._owns_state = owns_state
-        self._layout_attached = layout_attached
         self.events: list[str] = []
 
     def verify_recovery_state(self) -> None:
@@ -413,10 +604,6 @@ class ApplyHarness(BootstrapHost):
     def prepare_new_persistent_layout(self) -> None:
         self.events.append("prepare_new_layout")
 
-    def persistent_layout_attached(self) -> bool:
-        self.events.append("layout_attached")
-        return self._layout_attached
-
     def verify_persistent_layout(self) -> None:
         self.events.append("verify_layout")
 
@@ -426,28 +613,34 @@ class ApplyHarness(BootstrapHost):
     def prepare_runner(self) -> None:
         self.events.append("prepare_runner")
 
-    def runner_owns_infra(self) -> bool:
-        self.events.append("runner_owns_infra")
-        return self._owns_state
+    def remove_infra_rootfs_for_recovery(self) -> None:
+        self.events.append("remove_rootfs")
+        self._infra_exists = False
 
-    def ensure_existing_infra_running(self) -> None:
-        self.events.append("ensure_existing")
+    def create_infra_manager(self) -> None:
+        self.events.append("create_infra")
+        self._infra_exists = True
 
-    def ensure_runner_ssh_access_to_infra(self) -> None:
-        self.events.append("ensure_runner_ssh")
+    def configure_infra_manager_base(self) -> None:
+        self.events.append("configure_base")
 
-    def deploy_infra_phase(self, phase: str, title: str, success: str) -> None:
-        del title, success
-        self.events.append(f"deploy:{phase}")
+    def configure_infra_manager_control_plane(self) -> None:
+        self.events.append("configure_control_plane")
+
+    def configure_infra_manager_ssh_trust(self) -> None:
+        self.events.append("configure_ssh_trust")
+
+    def sync_infra_ssh_ca_to_runner(self) -> None:
+        self.events.append("sync_ssh_ca")
+
+    def remove_bootstrap_ssh_access_from_infra(self) -> None:
+        self.events.append("remove_bootstrap_auth")
+
+    def configure_infra_manager(self) -> None:
+        self.events.append("configure_full")
 
     def handoff_infra(self, access_mode: str = "apply") -> None:
         self.events.append(f"handoff:{access_mode}")
-
-    def prepare_infra_pve_access(self, access_mode: str = "apply") -> None:
-        self.events.append(f"pve_access:{access_mode}")
-
-    def handoff_existing_infra(self) -> None:
-        self.events.append("handoff_existing")
 
     def initialize_infra_openbao(self) -> None:
         self.events.append("initialize_openbao")
@@ -462,11 +655,11 @@ class ApplyHarness(BootstrapHost):
         self.events.append("check_ready")
 
     def info(self, message: str) -> None:
-        self.events.append(f"info:{message}")
+        self.events.append("info")
 
 
 def test_new_install_flow() -> None:
-    host = ApplyHarness("apply", infra_exists=False, owns_state=False)
+    host = ApplyHarness("apply", infra_exists=False)
     host.apply()
     assert_equal(
         host.events,
@@ -474,146 +667,99 @@ def test_new_install_flow() -> None:
             "infra_exists",
             "prepare_new_layout",
             "prepare_runner",
-            "runner_owns_infra",
-            "deploy:infrastructure",
+            "create_infra",
             "attach_layout",
-            "ensure_runner_ssh",
-            "deploy:base",
+            "configure_base",
             "handoff:apply",
-            "deploy:provision",
+            "configure_control_plane",
             "initialize_openbao",
+            "sync_ssh_ca",
+            "configure_ssh_trust",
+            "remove_bootstrap_auth",
+            "configure_full",
             "verify_ready:quiet",
             "finalize_runner",
             "check_ready",
         ],
-        "Новая установка должна пройти полный путь создания 910",
+        "Новая установка должна проходить один линейный bootstrap",
     )
 
 
-def test_existing_without_bootstrap_state() -> None:
-    host = ApplyHarness("apply", infra_exists=True, owns_state=False)
-    host.apply()
+def test_existing_infra_requires_normal_operations() -> None:
+    host = ApplyHarness("apply", infra_exists=True)
+    try:
+        host.apply()
+    except BootstrapError as exc:
+        if "обычный deploy/repair" not in str(exc):
+            raise
+    else:
+        raise AssertionError("990 не должен обслуживать существующий рабочий 910")
+
     assert_equal(
         host.events,
         [
             "infra_exists",
-            "runner_owns_infra",
             "verify_layout",
-            "prepare_runner",
-            "ensure_existing",
-            "pve_access:apply",
-            "handoff_existing",
-            "ensure_runner_ssh",
-            "deploy:existing",
-            "initialize_openbao",
-            "verify_ready:quiet",
-            "finalize_runner",
-            "check_ready",
         ],
-        "Существующий 910 без state 990 должен обновляться без OpenTofu-владения 910",
+        "Обычный bootstrap должен остановиться до подготовки 990",
     )
 
 
-def test_resume_unfinished_initial_state() -> None:
-    host = ApplyHarness("apply", infra_exists=True, owns_state=True)
-    host.apply()
-    expected_prefix = [
-        "infra_exists",
-        "runner_owns_infra",
-        "layout_attached",
-        "attach_layout",
-        "prepare_runner",
-    ]
-    assert_equal(
-        host.events[:5],
-        expected_prefix,
-        "Незавершённая установка должна сначала обнаружить state 990",
-    )
-    if "deploy:infrastructure" in host.events:
-        raise AssertionError(
-            "Уже созданный 910 не должен повторно проходить OpenTofu plan/apply"
-        )
-    if "deploy:base" not in host.events or "deploy:provision" not in host.events:
-        raise AssertionError(
-            "После восстановления mount point настройка должна продолжиться с Ansible"
-        )
-    if "ensure_runner_ssh" not in host.events:
-        raise AssertionError(
-            "Перед Ansible незавершённая установка должна восстановить SSH-доступ 990"
-        )
-    if "deploy:existing" in host.events:
-        raise AssertionError(
-            "Незавершённая установка не должна переходить на existing-путь"
-        )
-
-
-def test_resume_unfinished_with_layout_already_attached() -> None:
-    host = ApplyHarness(
-        "apply",
-        infra_exists=True,
-        owns_state=True,
-        layout_attached=True,
-    )
-    host.apply()
-    assert_equal(
-        host.events[:5],
-        [
-            "infra_exists",
-            "runner_owns_infra",
-            "layout_attached",
-            "verify_layout",
-            "prepare_runner",
-        ],
-        "Повторный запуск не должен заново подключать уже готовые mount point",
-    )
-    if "attach_layout" in host.events:
-        raise AssertionError(
-            "Уже подключённая новая схема не должна подключаться повторно"
-        )
-    if "deploy:infrastructure" in host.events:
-        raise AssertionError(
-            "Повторный запуск с готовыми mount point не должен делать OpenTofu apply"
-        )
-
-
-def test_recover_existing_without_state() -> None:
-    host = ApplyHarness("recover", infra_exists=True, owns_state=False)
+def test_recovery_recreates_existing_infra() -> None:
+    host = ApplyHarness("recover", infra_exists=True)
     host.apply()
     assert_equal(
         host.events,
         [
             "infra_exists",
             "verify_recovery_state",
-            "runner_owns_infra",
             "verify_layout",
+            "remove_rootfs",
             "prepare_runner",
-            "ensure_existing",
-            "pve_access:recover",
-            "handoff_existing",
-            "ensure_runner_ssh",
-            "deploy:existing",
+            "create_infra",
+            "attach_layout",
+            "configure_base",
+            "handoff:recover",
+            "configure_control_plane",
             "initialize_openbao",
+            "sync_ssh_ca",
+            "configure_ssh_trust",
+            "remove_bootstrap_auth",
+            "configure_full",
             "verify_ready:quiet",
             "finalize_runner",
             "check_ready",
         ],
-        "Recovery существующего 910 должен сначала восстановить PVE-доступ",
+        "Recovery должен всегда создавать новый rootfs через новый bootstrap-сеанс",
     )
 
 
-def test_recover_unfinished_initial_state() -> None:
-    host = ApplyHarness("recover", infra_exists=True, owns_state=True)
+def test_recovery_recreates_missing_infra() -> None:
+    host = ApplyHarness("recover", infra_exists=False)
     host.apply()
-    if host.events[:2] != ["infra_exists", "verify_recovery_state"]:
-        raise AssertionError("Recovery должен начинаться со строгой проверки состояния")
-    if "handoff:recover" not in host.events:
-        raise AssertionError(
-            "Recovery незавершённой первоначальной установки должен передать режим recover"
-        )
-    if "pve_access:recover" in host.events:
-        raise AssertionError(
-            "Незавершённый первоначальный state должен использовать общий handoff recover"
-        )
+    assert_equal(
+        host.events,
+        [
+            "infra_exists",
+            "verify_recovery_state",
+            "info",
+            "prepare_runner",
+            "create_infra",
+            "attach_layout",
+            "configure_base",
+            "handoff:recover",
+            "configure_control_plane",
+            "initialize_openbao",
+            "sync_ssh_ca",
+            "configure_ssh_trust",
+            "remove_bootstrap_auth",
+            "configure_full",
+            "verify_ready:quiet",
+            "finalize_runner",
+            "check_ready",
+        ],
+        "Recovery отсутствующего 910 должен использовать тот же новый bootstrap-сеанс",
+    )
 
 
 class RecoveryStateHarness(BootstrapHost):
@@ -747,7 +893,6 @@ def test_existing_layout_requires_manual_migration() -> None:
     host = MigrationGuardHarness(
         "apply",
         infra_exists=True,
-        owns_state=False,
     )
     try:
         host.apply()
@@ -761,7 +906,7 @@ def test_existing_layout_requires_manual_migration() -> None:
 
     assert_equal(
         host.events,
-        ["infra_exists", "runner_owns_infra", "verify_layout"],
+        ["infra_exists", "verify_layout"],
         "До ручной миграции стандартный bootstrap не должен изменять 910",
     )
 
@@ -845,22 +990,25 @@ def test_remove_rejects_foreign_910() -> None:
 def main() -> None:
     tests = [
         test_infra_manager_role_can_move_to_another_vmid,
+        test_role_is_read_from_project_inside_runner,
         test_strict_ownership_marker,
         test_full_pve_token_contract,
         test_full_pve_token_missing_secret_is_removed,
         test_full_pve_token_invalid_json_is_removed,
         test_pve_node_address,
+        test_bootstrap_timing_success_and_failure,
+        test_section_totals_include_interrupted_section,
         test_progress_streaming,
-        test_ansible_phases_enable_progress,
+        test_bootstrap_steps_enable_progress,
         test_infra_ready_uses_status_as_final_screen,
         test_attach_persistent_layout_temporarily_disables_protection,
         test_attach_persistent_layout_restores_protection_on_failure,
+        test_recovery_rootfs_removal_is_strict,
+        test_control_plane_step_depends_on_bootstrap_mode,
         test_new_install_flow,
-        test_existing_without_bootstrap_state,
-        test_resume_unfinished_initial_state,
-        test_resume_unfinished_with_layout_already_attached,
-        test_recover_existing_without_state,
-        test_recover_unfinished_initial_state,
+        test_existing_infra_requires_normal_operations,
+        test_recovery_recreates_existing_infra,
+        test_recovery_recreates_missing_infra,
         test_recovery_preflight_accepts_complete_state,
         test_recovery_preflight_allows_missing_approle_files,
         test_recovery_preflight_allows_missing_access_directory,

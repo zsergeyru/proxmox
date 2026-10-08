@@ -1,0 +1,13 @@
+schema_version: 2
+guest_vmid: 911
+
+checks:
+  - type: file
+    path: /etc/ssh/trusted-user-ca-keys.pem
+    message: Доверие к SSH CA установлено
+  - type: file
+    path: /etc/ssh/ssh_host_ed25519_key-cert.pub
+    message: Сертификат SSH-сервера установлен
+  - type: systemd
+    unit: ssh.service
+    message: Служба SSH запущена

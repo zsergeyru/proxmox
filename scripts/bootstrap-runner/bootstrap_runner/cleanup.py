@@ -67,15 +67,22 @@ class BootstrapCleanupMixin:
     def finalize_runner(self) -> None:
         # Успешный bootstrap не должен оставлять состояние, секреты, token или 990.
         self.assert_owned_runner()
-        self.remove_runner_ssh_access_from_infra()
+        self.remove_bootstrap_ssh_access_from_infra()
         self.ct_exec(
             "rm",
             "-rf",
             "/etc/bootstrap-runner/secrets",
+            "/etc/bootstrap-runner/bootstrap-ssh",
+            "/etc/bootstrap-runner/pve-host",
             "/var/lib/bootstrap-runner/opentofu/state",
         )
-        if self.ct_exec("test", "!", "-e", "/etc/bootstrap-runner/secrets", check=False).returncode:
-            self.fail("временные секреты 990 не удалены")
+        for temporary_path in (
+            "/etc/bootstrap-runner/secrets",
+            "/etc/bootstrap-runner/bootstrap-ssh",
+            "/etc/bootstrap-runner/pve-host",
+        ):
+            if self.ct_exec("test", "!", "-e", temporary_path, check=False).returncode:
+                self.fail(f"временные данные 990 не удалены: {temporary_path}")
         if self.ct_exec(
             "test", "!", "-e", "/var/lib/bootstrap-runner/opentofu/state", check=False
         ).returncode:
@@ -100,6 +107,35 @@ class BootstrapCleanupMixin:
         else:
             self.remove_named_token("root@pam", "bootstrap-runner")
         self.remove_downloaded_template()
+
+    def remove_infra_rootfs_for_recovery(self) -> None:
+        """Удалить только воспроизводимый объект infra-manager перед recovery."""
+        if not self.infra_exists():
+            return
+        if not self.infra_config_is_expected():
+            self.fail(
+                f"VMID {self.infra_ctid} не имеет строгой метки владения infra-manager"
+            )
+
+        self.pct("set", str(self.infra_ctid), "--protection", "0", quiet=True)
+        if self.pct_status(self.infra_ctid) == "running":
+            self.pct("stop", str(self.infra_ctid))
+        self.run(
+            "pct",
+            "destroy",
+            str(self.infra_ctid),
+            "--purge",
+            "1",
+            quiet=True,
+        )
+        if self.infra_exists():
+            self.fail(
+                f"LXC {self.infra_ctid} не удалён перед аварийным пересозданием"
+            )
+        self.ok(
+            f"Воспроизводимый rootfs {self.infra_ctid} удалён; "
+            "постоянное состояние сохранено на PVE"
+        )
 
     def remove_openbao_host_support(self) -> None:
         """Убрать хостовый сценарий OpenBao, сохранив unseal-ключ."""

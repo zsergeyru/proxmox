@@ -2658,6 +2658,76 @@ print(json.dumps({"ready": True}, separators=(",", ":")))
 """
 
 
+UPDATE_PVE_API_CREDENTIAL_CODE = r"""
+import json
+import sys
+import urllib.request
+
+BASE = "http://127.0.0.1:8200"
+MOUNT = "infra-secrets"
+payload = json.loads(sys.stdin.read())
+if not isinstance(payload, dict):
+    raise SystemExit("invalid PVE credential update payload")
+
+root_token = payload.get("root_token")
+endpoint = payload.get("endpoint")
+token_id = payload.get("token_id")
+token_secret = payload.get("token_secret")
+if not isinstance(root_token, str) or not root_token:
+    raise SystemExit("missing root token")
+if not isinstance(endpoint, str) or not endpoint.startswith("https://"):
+    raise SystemExit("invalid PVE endpoint")
+if token_id != "root@pam!infra-manager":
+    raise SystemExit("unexpected PVE token id")
+if (
+    not isinstance(token_secret, str)
+    or not token_secret
+    or any(char.isspace() for char in token_secret)
+):
+    raise SystemExit("invalid PVE token secret")
+
+
+def request(method, path, body=None):
+    data = None
+    headers = {
+        "Content-Type": "application/json",
+        "X-Vault-Token": root_token,
+    }
+    if body is not None:
+        data = json.dumps(body, separators=(",", ":")).encode("utf-8")
+    req = urllib.request.Request(
+        f"{BASE}{path}",
+        data=data,
+        headers=headers,
+        method=method,
+    )
+    with urllib.request.urlopen(req, timeout=30) as response:
+        raw = response.read()
+    return json.loads(raw.decode("utf-8")) if raw else {}
+
+
+secret = {
+    "endpoint": endpoint,
+    "token_id": token_id,
+    "token_secret": token_secret,
+}
+request(
+    "POST",
+    f"/v1/{MOUNT}/data/pve/api/infra-manager",
+    {"data": secret},
+)
+verified = request(
+    "GET",
+    f"/v1/{MOUNT}/data/pve/api/infra-manager",
+)
+stored = verified.get("data", {}).get("data")
+if stored != secret:
+    raise SystemExit("PVE API credential was not stored exactly")
+
+print(json.dumps({"ready": True}, separators=(",", ":")))
+"""
+
+
 UPDATE_SEMAPHORE_API_TOKEN_CODE = r"""
 import json
 import sys

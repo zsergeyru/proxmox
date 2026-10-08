@@ -185,6 +185,11 @@ def test_host_wrapper_is_minimal() -> None:
 
 
 def test_operator_guest_task_secret_policy() -> None:
+    assert 'if [ "$2" = "deploy" ]; then' in operator.RUNTIME_DIRECT_SCRIPT
+    assert (
+        "export INFRA_MANAGER_OPERATOR_FINAL_STATUS=1"
+        in operator.RUNTIME_DIRECT_SCRIPT
+    )
     snapshot = "/tmp/infra-manager-direct-test-410"
     for operation, expect_status in (
         ("deploy", True),
@@ -392,6 +397,10 @@ def test_runtime_snapshot_refresh_policy() -> None:
         snapshot = operator._prepare_runtime_snapshot("deploy", 410)
 
     assert snapshot == "/tmp/infra-manager-direct-1234-410"
+    # Постоянная Git-копия root-only; временный снимок читает root,
+    # но пользователь Semaphore получает права только на сам снимок.
+    assert 'cp -a "$2"/. "$1"/' in operator.RUNTIME_SNAPSHOT_SCRIPT
+    assert 'chown -R 1001:0 "$1"' in operator.RUNTIME_SNAPSHOT_SCRIPT
     checkout_lock.assert_called_once_with(exclusive=True)
     refresh.assert_called_once_with()
     run_command.assert_called_once_with(
@@ -399,7 +408,7 @@ def test_runtime_snapshot_refresh_policy() -> None:
             "docker",
             "exec",
             "--user",
-            "1001:0",
+            "0",
             operator.RUNTIME_CONTAINER,
             "sh",
             "-eu",
@@ -508,6 +517,50 @@ def test_operator_repair_runs_inside_manager() -> None:
     assert environment["INFRA_PROJECT_BRANCH"] == "feature/test"
 
 
+def test_operator_guest_operation_timing() -> None:
+    with (
+        patch.object(operator, "_operator_guest_task", return_value=0) as action,
+        patch.object(operator.time, "monotonic", side_effect=[10.0, 75.5]),
+        patch.object(operator, "console") as output,
+    ):
+        assert operator.operator_guest_task("deploy", 910, show_secrets=True) == 0
+    action.assert_called_once_with("deploy", 910, show_secrets=True)
+    output.timing.assert_called_once_with(
+        "Команда deploy гостя 910",
+        65.5,
+        interrupted=False,
+    )
+
+    with (
+        patch.object(operator, "_operator_guest_task", return_value=7),
+        patch.object(operator.time, "monotonic", side_effect=[10.0, 22.0]),
+        patch.object(operator, "console") as output,
+    ):
+        assert operator.operator_guest_task("deploy", 410, show_secrets=False) == 7
+    output.timing.assert_called_once_with(
+        "Команда deploy гостя 410",
+        12.0,
+        interrupted=True,
+    )
+
+    with (
+        patch.object(operator, "_operator_guest_task", side_effect=RuntimeError("test")),
+        patch.object(operator.time, "monotonic", side_effect=[100.0, 104.0]),
+        patch.object(operator, "console") as output,
+    ):
+        try:
+            operator.operator_guest_task("deploy", 410, show_secrets=False)
+        except RuntimeError:
+            pass
+        else:
+            raise AssertionError("Исключение должно сохраняться")
+    output.timing.assert_called_once_with(
+        "Команда deploy гостя 410",
+        4.0,
+        interrupted=True,
+    )
+
+
 def test_public_command_contract() -> None:
     parser = operator.build_parser()
     for argv in (
@@ -539,6 +592,7 @@ def main() -> None:
     test_host_recover_uses_only_recovery_helper()
     test_host_wrapper_is_minimal()
     test_operator_guest_task_secret_policy()
+    test_operator_guest_operation_timing()
     test_internal_project_refresh_uses_existing_checkout()
     test_runtime_snapshot_refresh_policy()
     test_operator_status_secret_policy()

@@ -36,10 +36,8 @@ def fail(message: str) -> None:
 
 
 def check_deploy_guest_survey_input() -> None:
-    remaining, vmid = extract_survey_vmid(
-        ["GUEST_VMID=410", "--provision-only"]
-    )
-    if remaining != ["--provision-only"] or vmid != 410:
+    remaining, vmid = extract_survey_vmid(["GUEST_VMID=410"])
+    if remaining != [] or vmid != 410:
         fail("Guest operation неверно разбирает survey-переменную GUEST_VMID")
 
     remaining, vmid = extract_survey_vmid(["910"])
@@ -291,6 +289,83 @@ def check_infra_manager_self_update_path_after_vmid_change() -> None:
             "Самообновление infra-manager должно применять полный provision "
             "в безопасном режиме"
         )
+
+def check_infra_manager_self_update_points_to_recovery() -> None:
+    context = DeploymentContext(
+        client=SimpleNamespace(),
+        vmid=920,
+        name="infra-manager",
+        node="pve",
+        kind="lxc",
+        features=("container-host",),
+        template_vmid=None,
+        address="192.0.2.20",
+        target='proxmox_virtual_environment_container.guest["920"]',
+        workspace=SimpleNamespace(),
+        paths=SimpleNamespace(),
+    )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        guest_dir = root / "infrastructure/guests/920-infra-manager"
+        guest_dir.mkdir(parents=True)
+        (guest_dir / "guest.yaml").write_text(
+            "schema_version: 12\n"
+            "vmid: 920\n"
+            "name: infra-manager\n"
+            "role: infra-manager\n"
+            "profile: debian-lxc-docker\n"
+            "pve_management: false\n",
+            encoding="utf-8",
+        )
+
+        with (
+            patch.object(guest_deploy_module, "require_command"),
+            patch.object(
+                guest_deploy_module,
+                "run",
+                return_value=SimpleNamespace(returncode=0, stdout=""),
+            ),
+            patch.object(
+                guest_deploy_module,
+                "project_branch_for_checkout",
+                return_value="feature/unified-guest-deploy",
+            ),
+            patch.object(
+                guest_deploy_module,
+                "_prepare_self_update_workspace",
+                return_value=SimpleNamespace(),
+            ),
+            patch.object(
+                guest_deploy_module,
+                "_build_deployment_context",
+                return_value=context,
+            ),
+            patch.object(
+                guest_deploy_module,
+                "_validate_existing_guest_object",
+                side_effect=InfraManagerError("гость недоступен"),
+            ),
+            patch.object(
+                guest_deploy_module,
+                "_configure_guest_os",
+                side_effect=AssertionError(
+                    "Ansible не должен запускаться после ошибки preflight"
+                ),
+            ),
+        ):
+            try:
+                guest_deploy_module.run_deploy_guest(root, 920)
+            except InfraManagerError as exc:
+                message = str(exc)
+                if "infra-manager recover" not in message:
+                    fail(
+                        "Ошибка штатного deploy infra-manager должна явно "
+                        "направлять в recovery"
+                    )
+            else:
+                fail("Недоступный infra-manager не должен считаться обновлённым")
+
 
 def check_openbao_machine_identity_preparation() -> None:
     with tempfile.TemporaryDirectory() as tmp:
@@ -628,6 +703,9 @@ def check_temporary_certificate_path() -> None:
             fail("Ansible должен запускаться из корня текущей копии проекта")
         if "infra_project_git_read=false" not in argv:
             fail("910 не должен получать постоянную гостевую копию Git credential")
+        expected_ca_var = f"infra_ssh_client_ca_file={ca}"
+        if expected_ca_var not in argv:
+            fail("Ansible не получил фактический путь клиентского SSH CA")
         if selected.exists():
             fail("Временный закрытый ключ не удалён после Ansible")
 
@@ -1184,13 +1262,79 @@ def check_opentofu_provider_mirror() -> None:
             fail("tofu init не использует локальное зеркало провайдера")
 
 
+def check_ansible_duration() -> None:
+    paths = DeploymentPaths(
+        guest_dir=ROOT / "infrastructure/guests/410-ai-control",
+        private_key=None,
+        playbook=ROOT / "automation/ansible/playbooks/configure-guest.yml",
+        known_hosts=Path("/tmp/test-known-hosts"),
+        plan_file=Path("/tmp/test.tfplan"),
+    )
+    context = DeploymentContext(
+        client=SimpleNamespace(),
+        vmid=410,
+        name="ai-control",
+        node="pve",
+        kind="vm",
+        features=(),
+        template_vmid=9000,
+        address="192.0.2.10",
+        target='proxmox_virtual_environment_vm.guest["410"]',
+        workspace=SimpleNamespace(),
+        paths=paths,
+    )
+    for failure in (False, True):
+        with (
+            patch.object(
+                guest_deploy_module,
+                "PATHS",
+                SimpleNamespace(ssh_client_ca_public_key=Path("/nonexistent")),
+            ),
+            patch.object(guest_deploy_module, "_project_git_ansible_vars", return_value=[]),
+            patch.object(
+                guest_deploy_module,
+                "run",
+                side_effect=InfraManagerError("ожидаемая ошибка") if failure else None,
+            ) as run,
+            patch.object(
+                guest_deploy_module.time,
+                "monotonic",
+                side_effect=[10.0, 87.5],
+            ),
+            patch.object(guest_deploy_module, "console") as output,
+        ):
+            try:
+                guest_deploy_module._run_guest_ansible(
+                    context,
+                    private_key=Path("/tmp/test-identity"),
+                    certificate=None,
+                    provision_phase="full",
+                    self_update=False,
+                    project_branch="main",
+                )
+            except InfraManagerError:
+                if not failure:
+                    fail("Непредвиденная ошибка Ansible")
+            else:
+                if failure:
+                    fail("Ошибка Ansible должна приводить к исключению")
+            run.assert_called_once()
+            output.timing.assert_called_once_with(
+                "Ansible гостя 410 (full)",
+                77.5,
+                interrupted=failure,
+            )
+
+
 def main_test() -> None:
     check_deploy_guest_survey_input()
+    check_ansible_duration()
     check_pve_host_support_before_signing()
     check_opentofu_state_status()
     check_opentofu_provider_mirror()
     check_project_branch_after_semaphore_branch_switch()
     check_infra_manager_self_update_path_after_vmid_change()
+    check_infra_manager_self_update_points_to_recovery()
     check_openbao_machine_identity_preparation()
     check_openbao_target_only_preparation()
     check_temporary_certificate_path()

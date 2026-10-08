@@ -78,6 +78,7 @@
     - { name: ca.crt, mode: "0644" }
     - { name: server.crt, mode: "0644" }
     - { name: server.key, mode: "0600" }
+  register: openbao_tls_files
 
 - name: Проверить TLS certificate OpenBao
   ansible.builtin.command:

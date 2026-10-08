@@ -8,6 +8,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 _BOOTSTRAP_MODULE_ROOT = Path(__file__).resolve().parent
@@ -95,6 +96,18 @@ def _find_role_guest(project_dir: Path, role: str) -> tuple[int, str]:
     return vmid, name
 
 
+
+def _format_duration(seconds: float) -> str:
+    """Показать прошедшее время в формате часы:минуты:секунды."""
+
+    total = max(0, int(seconds))
+    hours, remainder = divmod(total, 3600)
+    minutes, remaining_seconds = divmod(remainder, 60)
+    if not hours:
+        return f"{minutes:02d}:{remaining_seconds:02d}"
+    return f"{hours:02d}:{minutes:02d}:{remaining_seconds:02d}"
+
+
 class BootstrapHost(
     BootstrapPersistenceMixin,
     BootstrapAccessMixin,
@@ -103,6 +116,11 @@ class BootstrapHost(
 ):
     def __init__(self, mode: str) -> None:
         self.mode = mode
+        self._active_timing: tuple[str, float] | None = None
+        self._timed_ok_count = 0
+        self._started_at = time.monotonic()
+        self._section_title: str | None = None
+        self._section_started = 0.0
         self.ctid = int(os.environ.get("BOOTSTRAP_RUNNER_CTID", "990"))
         self.ct_hostname = "bootstrap-runner"
         self.project_branch = os.environ.get("PROJECT_BRANCH", "main")
@@ -175,10 +193,15 @@ class BootstrapHost(
         )
 
         self.infra_role = INFRA_MANAGER_ROLE
-        self.infra_ctid, self.infra_hostname = _find_role_guest(
-            self.project_dir,
-            self.infra_role,
-        )
+        if self.project_dir.is_dir():
+            self.infra_ctid, self.infra_hostname = _find_role_guest(
+                self.project_dir,
+                self.infra_role,
+            )
+        else:
+            self.infra_ctid, self.infra_hostname = self._find_role_guest_in_runner(
+                self.infra_role,
+            )
         self.infra_project_dir = Path("/var/lib/infra-manager/bootstrap-repo")
         self.infra_access_dir = Path("/mnt/pve-access")
         self.infra_state_dir = Path("/mnt/persistent-state")
@@ -198,10 +221,7 @@ class BootstrapHost(
         )
         self.infra_pve_ca = self.infra_access_dir / "ca" / "pve-root-ca.crt"
         self.runner_pve_host_dir = Path("/etc/bootstrap-runner/pve-host")
-        self.runner_ansible_public_key = Path(
-            "/etc/bootstrap-runner/ansible/guest_ed25519.pub"
-        )
-        self.runner_ssh_key_comment = "bootstrap-runner-990"
+        self.infra_bootstrap_key_comment = "infra-manager-bootstrap"
         self.infra_pve_host_dir = self.infra_access_dir / "pve-host"
 
         self.color = not os.environ.get("NO_COLOR") and os.environ.get("TERM") != "dumb"
@@ -213,10 +233,117 @@ class BootstrapHost(
         self.c_red = "\033[31m" if self.color else ""
         self.c_cyan = "\033[36m" if self.color else ""
 
+    def _find_role_guest_in_runner(self, role: str) -> tuple[int, str]:
+        """Найти гостя по роли в закрытом проекте внутри временного 990."""
+
+        script = r"""
+import json
+import re
+import sys
+from pathlib import Path
+
+project_dir = Path(sys.argv[1])
+role = sys.argv[2]
+guests_dir = project_dir / "infrastructure" / "guests"
+matches = []
+
+for manifest in sorted(guests_dir.glob("*/guest.yaml")):
+    values = {}
+    for raw in manifest.read_text(encoding="utf-8").splitlines():
+        if not raw or raw[0].isspace() or raw.lstrip().startswith("#"):
+            continue
+        key, separator, value = raw.partition(":")
+        if not separator:
+            continue
+        value = value.strip()
+        if (
+            len(value) >= 2
+            and value[0] == value[-1]
+            and value[0] in {"'", '"'}
+        ):
+            value = value[1:-1]
+        values[key.strip()] = value
+
+    if values.get("role") != role:
+        continue
+
+    directory_match = re.fullmatch(r"(\d{3})-(.+)", manifest.parent.name)
+    if directory_match is None:
+        raise SystemExit(f"invalid guest directory: {manifest.parent.name}")
+
+    try:
+        manifest_vmid = int(values.get("vmid", ""))
+    except ValueError as exc:
+        raise SystemExit(f"invalid vmid in {manifest}") from exc
+
+    directory_vmid = int(directory_match.group(1))
+    directory_name = directory_match.group(2)
+    manifest_name = values.get("name", "")
+    if manifest_vmid != directory_vmid or manifest_name != directory_name:
+        raise SystemExit(f"guest identity mismatch: {manifest}")
+
+    matches.append((manifest_vmid, manifest_name))
+
+if len(matches) != 1:
+    raise SystemExit(f"role {role!r} matches {len(matches)} guests")
+
+print(json.dumps({"vmid": matches[0][0], "name": matches[0][1]}))
+""".strip()
+
+        result = self.ct_exec(
+            "python3",
+            "-c",
+            script,
+            str(self.project_dir),
+            role,
+            check=False,
+            capture=True,
+        )
+        if result.returncode:
+            detail = (result.stderr or "").strip()
+            suffix = f": {detail}" if detail else ""
+            self.fail(
+                f"Не удалось найти гостя с ролью {role!r} "
+                f"в закрытом проекте LXC {self.ctid}{suffix}"
+            )
+
+        try:
+            payload = json.loads(result.stdout or "{}")
+        except json.JSONDecodeError as exc:
+            raise BootstrapError(
+                f"LXC {self.ctid} вернул некорректное описание роли {role!r}"
+            ) from exc
+
+        vmid = payload.get("vmid")
+        name = payload.get("name")
+        if not isinstance(vmid, int) or vmid <= 0 or not isinstance(name, str) or not name:
+            self.fail(
+                f"LXC {self.ctid} вернул некорректное описание роли {role!r}"
+            )
+        return vmid, name
+
+    def finish_section(self, *, interrupted: bool = False) -> None:
+        """Подвести итог раздела без изменения результата операций."""
+
+        title = self._section_title
+        if title is None:
+            return
+        elapsed = _format_duration(time.monotonic() - self._section_started)
+        marker = "[ИТОГ]" if not interrupted else "[ПРЕРВАНО]"
+        print(f"{marker} {title:<55} ({elapsed})", flush=True)
+        self._section_title = None
+
     def log(self, message: str) -> None:
+        self.finish_section()
+        self._section_title = message
+        self._section_started = time.monotonic()
         print(f"\n{self.c_bold}{self.c_blue}==> {message}{self.c_reset}")
 
     def ok(self, message: str) -> None:
+        if self._active_timing is not None:
+            _, started = self._active_timing
+            message = f"{message:<55} ({_format_duration(time.monotonic() - started)})"
+            self._timed_ok_count += 1
         print(f"{self.c_bold}{self.c_green}[ОК]{self.c_reset} {message}")
 
     def info(self, message: str) -> None:
@@ -224,6 +351,26 @@ class BootstrapHost(
 
     def fail(self, message: str) -> None:
         raise BootstrapError(message)
+
+    def timed_step(self, name: str, operation, *args, **kwargs):
+        """Дополнить успешный статус временем, не добавляя отдельной строки."""
+
+        started = time.monotonic()
+        previous = self._active_timing
+        previous_count = self._timed_ok_count
+        self._active_timing = (name, started)
+        self._timed_ok_count = 0
+        try:
+            result = operation(*args, **kwargs)
+            if not self._timed_ok_count:
+                self.ok(name)
+            return result
+        except BootstrapError as exc:
+            elapsed = _format_duration(time.monotonic() - started)
+            raise BootstrapError(f"{exc} (этап «{name}»: {elapsed})") from exc
+        finally:
+            self._active_timing = previous
+            self._timed_ok_count = previous_count
 
     def show_log_tail(self) -> None:
         print(
@@ -264,20 +411,47 @@ class BootstrapHost(
                     env=command_env,
                 )
                 assert process.stdout is not None
+                active_task: str | None = None
+                task_started = 0.0
+
+                def finish_task() -> None:
+                    nonlocal active_task
+                    if active_task is None:
+                        return
+                    elapsed = time.monotonic() - task_started
+                    message = (
+                        f"[ВРЕМЯ] Ansible: {active_task}: "
+                        f"{_format_duration(elapsed)}"
+                    )
+                    log.write(message + "\n")
+                    log.flush()
+                    # Время отдельных Ansible-задач сохраняется только
+                    # в подробном журнале; основная консоль остаётся краткой.
+                    active_task = None
+
                 for line in process.stdout:
                     log.write(line)
                     log.flush()
                     stripped = line.strip()
                     if stripped.startswith("TASK ["):
+                        finish_task()
                         end = stripped.find("]")
                         task = stripped[6:end] if end > 6 else stripped
+                        active_task = task
+                        task_started = time.monotonic()
                         self.info(f"Ansible: {task}")
                     elif stripped.startswith("PLAY RECAP"):
+                        finish_task()
                         self.info("Ansible: формирование итогов")
                     elif stripped.startswith("[ИНФО] "):
                         self.info(stripped.removeprefix("[ИНФО] "))
                     elif stripped.startswith("[ОК] "):
-                        self.ok(stripped.removeprefix("[ОК] "))
+                        # Сообщение вложенного процесса — не итог нашего этапа.
+                        print(
+                            f"{self.c_bold}{self.c_green}[ОК]{self.c_reset} "
+                            f"{stripped.removeprefix('[ОК] ')}",
+                            flush=True,
+                        )
                     elif stripped.startswith("ОШИБКА: "):
                         print(
                             f"{self.c_bold}{self.c_red}ОШИБКА:{self.c_reset} "
@@ -286,6 +460,7 @@ class BootstrapHost(
                             flush=True,
                         )
                 returncode = process.wait()
+                finish_task()
 
             result = subprocess.CompletedProcess(args, returncode)
             if check and returncode:
@@ -430,19 +605,6 @@ class BootstrapHost(
             self.fail("после успешного bootstrap временный token 990 не должен существовать")
         self.verify_infra_ready()
 
-    def runner_owns_infra(self) -> bool:
-        # Наличие состояния OpenTofu означает незавершённую первоначальную установку:
-        # новый 990 не должен импортировать или заново присваивать себе infra-manager.
-        return (
-            self.ct_exec(
-                "test",
-                "-s",
-                "/var/lib/bootstrap-runner/opentofu/state/proxmox.tfstate",
-                check=False,
-            ).returncode
-            == 0
-        )
-
     def prepare_runner(self) -> None:
         self.verify_runner_contract()
         self.ensure_host_root_ssh_access()
@@ -454,94 +616,51 @@ class BootstrapHost(
         existed = self.infra_exists()
 
         if self.mode == "recover":
-            self.verify_recovery_state()
+            self.timed_step("Проверка сохранённых данных", self.verify_recovery_state)
 
         if existed:
-            owns_infra = self.runner_owns_infra()
-            if owns_infra:
-                # Это не миграция старого infra-manager, а продолжение оборванного
-                # первоначального создания. Если сбой произошёл между OpenTofu
-                # create и attach, подключаем уже подготовленные области.
-                if self.persistent_layout_attached():
-                    self.verify_persistent_layout()
-                else:
-                    self.attach_persistent_layout()
+            if self.mode == "recover":
+                self.timed_step("Проверка подключённых данных", self.verify_persistent_layout)
+                self.timed_step("Удаление старого rootfs", self.remove_infra_rootfs_for_recovery)
+                existed = False
             else:
-                # Готовый infra-manager без новой схемы автоматически не мигрируется.
-                # Проверка выполняется до подготовки runner и иных изменений.
-                self.verify_persistent_layout()
-        else:
-            self.prepare_new_persistent_layout()
-            owns_infra = False
-
-        self.prepare_runner()
-        if not existed:
-            owns_infra = self.runner_owns_infra()
-
-        # Три пути намеренно разделены:
-        # 1) продолжение оборванной первоначальной установки;
-        # 2) обновление уже постоянного infra-manager без временного состояния;
-        # 3) чистое создание нового infra-manager.
-        if existed and owns_infra:
+                self.timed_step("Проверка подключённых данных", self.verify_persistent_layout)
+                self.fail(
+                    f"LXC {self.infra_ctid} уже существует; "
+                    "для рабочего infra-manager используйте обычный deploy/repair, "
+                    "а для полного пересоздания — recovery"
+                )
+        elif self.mode == "recover":
             self.info(
-                f"Найден созданный {self.infra_ctid} {self.infra_hostname} "
-                "в состоянии первоначального контура; "
-                "продолжается настройка без повторного OpenTofu apply"
-            )
-            self.ensure_existing_infra_running()
-            # infra-manager уже создан и принадлежит state 990. После добавления
-            # host bind mount повторный OpenTofu plan может воспринимать
-            # внешнее изменение как замену ресурса. Инфраструктурная фаза
-            # считается завершённой; дальше проверку state выполняет каждая
-            # provision-фаза без повторного plan/apply.
-            self.ensure_runner_ssh_access_to_infra()
-            self.deploy_infra_phase(
-                "base",
-                f"Базовая настройка LXC {self.infra_ctid} через Ansible",
-                f"Базовая настройка {self.infra_ctid} завершена",
-            )
-            self.handoff_infra("recover" if self.mode == "recover" else "apply")
-            self.deploy_infra_phase(
-                "provision",
-                f"Полная настройка LXC {self.infra_ctid} через Ansible",
-                f"Полная настройка {self.infra_ctid} завершена",
-            )
-        elif existed:
-            self.ensure_existing_infra_running()
-            self.prepare_infra_pve_access(
-                "recover" if self.mode == "recover" else "apply"
-            )
-            self.handoff_existing_infra()
-            self.ensure_runner_ssh_access_to_infra()
-            self.deploy_infra_phase(
-                "existing",
-                f"Обновление существующего LXC {self.infra_ctid}",
-                f"Существующий {self.infra_ctid} обновлён",
+                f"LXC {self.infra_ctid} отсутствует; "
+                "recovery создаст новый rootfs на сохранённом состоянии"
             )
         else:
-            self.deploy_infra_phase(
-                "infrastructure",
-                f"Создание LXC {self.infra_ctid} через OpenTofu",
-                f"LXC {self.infra_ctid} создан через состояние bootstrap-runner",
-            )
-            self.attach_persistent_layout()
-            self.ensure_runner_ssh_access_to_infra()
-            self.deploy_infra_phase(
-                "base",
-                f"Базовая настройка LXC {self.infra_ctid} через Ansible",
-                f"Базовая настройка {self.infra_ctid} завершена",
-            )
-            self.handoff_infra("recover" if self.mode == "recover" else "apply")
-            self.deploy_infra_phase(
-                "provision",
-                f"Полная настройка LXC {self.infra_ctid} через Ansible",
-                f"Полная настройка {self.infra_ctid} завершена",
-            )
+            self.timed_step("Создание постоянных каталогов", self.prepare_new_persistent_layout)
 
-        self.initialize_infra_openbao()
-        self.verify_infra_ready(quiet=True)
-        self.finalize_runner()
-        self.check_ready()
+        self.timed_step("Подготовка 990", self.prepare_runner)
+        self.timed_step(f"Создание LXC {self.infra_ctid}", self.create_infra_manager)
+        self.timed_step("Подключение постоянных данных", self.attach_persistent_layout)
+        self.timed_step("Базовая настройка ОС", self.configure_infra_manager_base)
+        self.timed_step(
+            "Передача учётных данных",
+            self.handoff_infra,
+            "recover" if self.mode == "recover" else "apply",
+        )
+        self.timed_step(
+            "Запуск управляющего контура", self.configure_infra_manager_control_plane
+        )
+        self.timed_step("Восстановление OpenBao", self.initialize_infra_openbao)
+        self.timed_step("Передача SSH CA", self.sync_infra_ssh_ca_to_runner)
+        self.timed_step("Настройка SSH-доверия", self.configure_infra_manager_ssh_trust)
+        self.timed_step(
+            "Удаление начального SSH-доступа",
+            self.remove_bootstrap_ssh_access_from_infra,
+        )
+        self.timed_step("Полная настройка Ansible", self.configure_infra_manager)
+        self.timed_step("Проверка готовности", self.verify_infra_ready, quiet=True)
+        self.timed_step("Удаление временного 990", self.finalize_runner)
+        self.timed_step("Итоговая проверка", self.check_ready)
 
     def execute(self) -> None:
         # Любой режим приходит сюда уже после подготовки временного 990
@@ -550,23 +669,29 @@ class BootstrapHost(
         self.verify_runner_contract()
         self.info(f"Закрытый bootstrap {VERSION}, режим: {self.mode}")
 
-        if self.mode in {"apply", "recover"}:
-            self.apply()
-        elif self.mode == "check":
-            self.verify_infra_ready(quiet=True)
-            self.finalize_runner()
-            self.check_ready()
-        elif self.mode == "remove":
-            self.remove_infra()
-        elif self.mode == "purge":
-            self.remove_infra()
-            shutil.rmtree(self.host_bootstrap_dir, ignore_errors=True)
-            self.ok(
-                "Старый bootstrap-каталог удалён; "
-                "постоянное состояние /mnt/bindmounts/infra-manager сохранено"
-            )
+        try:
+            if self.mode in {"apply", "recover"}:
+                self.apply()
+            elif self.mode == "check":
+                self.verify_infra_ready(quiet=True)
+                self.finalize_runner()
+                self.check_ready()
+            elif self.mode == "remove":
+                self.remove_infra()
+            elif self.mode == "purge":
+                self.remove_infra()
+                shutil.rmtree(self.host_bootstrap_dir, ignore_errors=True)
+                self.ok(
+                    "Старый bootstrap-каталог удалён; "
+                    "постоянное состояние /mnt/bindmounts/infra-manager сохранено"
+                )
+            else:
+                self.fail(f"неизвестный режим: {self.mode}")
+        except BaseException:
+            self.finish_section(interrupted=True)
+            raise
         else:
-            self.fail(f"неизвестный режим: {self.mode}")
+            self.finish_section()
 
 
 def parse_args() -> argparse.Namespace:

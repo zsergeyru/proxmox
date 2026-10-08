@@ -29,35 +29,6 @@ def main() -> int:
         description="Привести одну VM к состоянию guest.yaml + provision.yaml"
     )
     parser.add_argument("vmid", nargs="?", type=int, help="VMID гостя")
-    parser.add_argument(
-        "--bootstrap-scope",
-        action="store_true",
-        help="Использовать отдельную область первоначального развёртывания",
-    )
-    phase = parser.add_mutually_exclusive_group()
-    phase.add_argument(
-        "--infrastructure-only",
-        action="store_true",
-        help="Только создать/сверить объект Proxmox без Ansible",
-    )
-    phase.add_argument(
-        "--provision-base-only",
-        action="store_true",
-        help="Применить только базовую часть provision.yaml",
-    )
-    phase.add_argument(
-        "--provision-only",
-        action="store_true",
-        help="Полностью применить provision.yaml к уже созданному гостю",
-    )
-    phase.add_argument(
-        "--provision-existing-only",
-        action="store_true",
-        help=(
-            "Настроить существующий bootstrap-гость через Ansible "
-            "без требования OpenTofu state"
-        ),
-    )
     try:
         cli_args, survey_vmid = extract_survey_vmid(sys.argv[1:])
     except InfraManagerError as exc:
@@ -71,34 +42,14 @@ def main() -> int:
 
     activation_reserved = False
     try:
-        selected_phase = (
-            "infrastructure"
-            if args.infrastructure_only
-            else "provision-base"
-            if args.provision_base_only
-            else "provision"
-            if args.provision_only
-            else "provision-existing"
-            if args.provision_existing_only
-            else "all"
-        )
         require_runtime_activation_idle()
         identity = guest_identity(REPO_ROOT, vmid)
-        self_update = (
-            identity.role == SETTINGS.infra_manager_role
-            and not args.bootstrap_scope
-            and selected_phase == "all"
-        )
+        self_update = identity.role == SETTINGS.infra_manager_role
         if self_update:
             reserve_runtime_activation()
             activation_reserved = True
 
-        result = run_deploy_guest(
-            REPO_ROOT,
-            vmid,
-            bootstrap_scope=args.bootstrap_scope,
-            phase=selected_phase,
-        )
+        result = run_deploy_guest(REPO_ROOT, vmid)
         if result != 0 and activation_reserved:
             cancel_runtime_activation()
         return result

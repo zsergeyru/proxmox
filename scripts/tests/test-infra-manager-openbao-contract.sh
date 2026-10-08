@@ -241,8 +241,8 @@ grep -Fq 'infra-openbao-ssh' "$SSH_ACCESS_ACCEPTANCE" \
     || die "PVE не должен содержать периодический timer OpenBao"
 grep -q 'install_openbao_host_support' "$PY_OPENBAO" \
     || die "Задание OpenBao должно устанавливать хостовый сценарий"
-grep -q 'initialize_openbao_on_host' "$PY_OPENBAO" \
-    || die "Задание OpenBao должно выполнять первичную инициализацию через PVE"
+grep -q 'repair_openbao_on_host' "$PY_OPENBAO" \
+    || die "Задание OpenBao должно идемпотентно готовить или восстанавливать OpenBao через PVE"
 if grep -q 'infra-manager@pve' "$ANSIBLE_PLAYBOOK" "$ANSIBLE_LINUX_BASE" "$ANSIBLE_GUEST_LAYOUT" "$ANSIBLE_DOCKER" "$ANSIBLE_RUNTIME" "$PY_SEMAPHORE" "$PY_STATUS" "$PY_PVE"; then
     die "Старая PVE-идентичность не должна присутствовать в чистой схеме"
 fi
@@ -395,8 +395,20 @@ branch_env_count="$(grep -Fc 'INFRA_PROJECT_BRANCH: "{{ infra_project_branch' "$
     || die "Выбранная ветка должна передаваться настройке Semaphore"
 grep -Fq 'f"INFRA_PROJECT_BRANCH={self.project_branch}"' "$BOOTSTRAP_INFRA" \
     || die "Финальная bootstrap-проверка 910 должна использовать выбранную ветку"
-grep -Fq 'self.initialize_infra_openbao()' "$BOOTSTRAP_HOST" \
-    || die "Bootstrap должен инициализировать OpenBao перед финальной проверкой 910"
-grep -Fq 'self.verify_infra_ready(quiet=True)' "$BOOTSTRAP_HOST" \
-    || die "Bootstrap должен завершаться финальным status --full после Initialize OpenBao"
+python3 - "$BOOTSTRAP_HOST" <<'PY'
+from pathlib import Path
+import sys
+
+source = Path(sys.argv[1]).read_text(encoding="utf-8")
+begin = source.index("    def apply(self) -> None:")
+end = source.index("    def execute(self) -> None:", begin)
+apply = source[begin:end]
+steps = (
+    'self.timed_step("Восстановление OpenBao", self.initialize_infra_openbao)',
+    'self.timed_step("Проверка готовности", self.verify_infra_ready, quiet=True)',
+)
+positions = [apply.find(step) for step in steps]
+if -1 in positions or positions != sorted(positions):
+    raise SystemExit("Bootstrap должен восстанавливать OpenBao до финальной проверки")
+PY
 

@@ -6,6 +6,7 @@ import os
 import shlex
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 from .access import load_access_policy
@@ -34,6 +35,15 @@ from .pve_host import (
     sign_ssh_host_key,
 )
 from .settings import PATHS, SETTINGS
+
+BOOTSTRAP_INFRA_MANAGER_PHASES = {
+    "create": "infrastructure",
+    "configure-base": "provision-base",
+    "configure-control-plane": "provision-control-plane",
+    "configure-recovery-control-plane": "provision-recovery-control-plane",
+    "configure-ssh-trust": "provision-ssh-trust",
+    "configure": "provision",
+}
 
 
 def _bootstrap_scope_private_key() -> Path:
@@ -706,48 +716,65 @@ def _run_guest_ansible(
         ssh_args += f" -o CertificateFile={certificate}"
     ansible_env["ANSIBLE_SSH_ARGS"] = ssh_args
 
-    run(
-        [
-            "ansible-playbook",
-            "-i",
-            f"{context.address},",
-            "-u",
-            "root",
-            "--private-key",
-            str(private_key),
-            "-e",
-            f"guest={context.paths.guest_dir.name}",
-            "-e",
-            f"provision_phase={provision_phase}",
-            "-e",
-            f"infra_self_update={'true' if self_update else 'false'}",
-            "-e",
-            f"infra_project_branch={project_branch or SETTINGS.project_branch()}",
-            "-e",
-            f"infra_pve_node={context.node}",
-            *_project_git_ansible_vars(context),
-            *(
-                openbao_machine_args
-                if openbao_machine_args is not None
-                else [
-                    "-e",
-                    "infra_openbao_machine_enabled=false",
-                ]
-            ),
-            *(
-                [
-                    "-e",
-                    f"infra_ssh_host_certificate_file={host_certificate}",
-                ]
-                if host_certificate is not None
-                else []
-            ),
-            str(context.paths.playbook),
-        ],
-        env=ansible_env,
-        cwd=repo_root,
-    )
-
+    started = time.monotonic()
+    completed = False
+    try:
+        run(
+            [
+                "ansible-playbook",
+                "-i",
+                f"{context.address},",
+                "-u",
+                "root",
+                "--private-key",
+                str(private_key),
+                "-e",
+                f"guest={context.paths.guest_dir.name}",
+                "-e",
+                f"provision_phase={provision_phase}",
+                "-e",
+                f"infra_self_update={'true' if self_update else 'false'}",
+                "-e",
+                f"infra_project_branch={project_branch or SETTINGS.project_branch()}",
+                "-e",
+                f"infra_pve_node={context.node}",
+                *(
+                    [
+                        "-e",
+                        f"infra_ssh_client_ca_file={PATHS.ssh_client_ca_public_key}",
+                    ]
+                    if PATHS.ssh_client_ca_public_key.is_file()
+                    else []
+                ),
+                *_project_git_ansible_vars(context),
+                *(
+                    openbao_machine_args
+                    if openbao_machine_args is not None
+                    else [
+                        "-e",
+                        "infra_openbao_machine_enabled=false",
+                    ]
+                ),
+                *(
+                    [
+                        "-e",
+                        f"infra_ssh_host_certificate_file={host_certificate}",
+                    ]
+                    if host_certificate is not None
+                    else []
+                ),
+                str(context.paths.playbook),
+            ],
+            env=ansible_env,
+            cwd=repo_root,
+        )
+        completed = True
+    finally:
+        console.timing(
+            f"Ansible гостя {context.vmid} ({provision_phase})",
+            time.monotonic() - started,
+            interrupted=not completed,
+        )
 
 def _configure_guest_os(
     context: DeploymentContext,
@@ -876,8 +903,7 @@ def _validate_existing_guest_object(context: DeploymentContext) -> None:
     resource = context.client.find_vm(context.vmid)
     if resource is None:
         raise InfraManagerError(
-            f"Гость {context.vmid} отсутствует в PVE; "
-            "режим provision-existing не может его создать"
+            f"Гость {context.vmid} отсутствует в PVE"
         )
     actual_type = str(resource.get("type") or "")
     actual_name = str(resource.get("name") or "")
@@ -972,14 +998,14 @@ def project_branch_for_checkout(repo_root: Path) -> str:
     return configured
 
 
-def run_deploy_guest(
+def _run_deploy_guest(
     repo_root: Path,
     vmid: int,
     *,
-    bootstrap_scope: bool = False,
-    phase: str = "all",
+    bootstrap_scope: bool,
+    phase: str,
 ) -> int:
-    """Привести одного гостя к состоянию guest.yaml + provision.yaml."""
+    """Внутренний движок обычного deploy и временного bootstrap infra-manager."""
 
     if vmid <= 0:
         raise InfraManagerError("VMID должен быть положительным числом")
@@ -987,8 +1013,10 @@ def run_deploy_guest(
         "all",
         "infrastructure",
         "provision-base",
+        "provision-control-plane",
+        "provision-recovery-control-plane",
+        "provision-ssh-trust",
         "provision",
-        "provision-existing",
     }:
         raise InfraManagerError(f"Неизвестная фаза deploy-guest: {phase}")
     identity = guest_identity(repo_root, vmid)
@@ -999,11 +1027,6 @@ def run_deploy_guest(
             f"Гость {vmid} не имеет роль {SETTINGS.infra_manager_role!r} "
             "и не принадлежит начальному контуру"
         )
-    if phase == "provision-existing" and not bootstrap_scope:
-        raise InfraManagerError(
-            "provision-existing разрешён только начальному контуру"
-        )
-
     self_update = not bootstrap_scope and is_infra_manager
     if self_update and phase != "all":
         raise InfraManagerError(
@@ -1048,14 +1071,21 @@ def run_deploy_guest(
             f"Проверка существующего {context.vmid} {context.name} "
             "без собственного OpenTofu state"
         )
-        _validate_existing_guest_object(context)
-        _configure_guest_os(
-            context,
-            provision_phase="full",
-            self_update=True,
-            project_branch=project_branch,
-            allow_legacy_bootstrap=False,
-        )
+        try:
+            _validate_existing_guest_object(context)
+            _configure_guest_os(
+                context,
+                provision_phase="full",
+                self_update=True,
+                project_branch=project_branch,
+                allow_legacy_bootstrap=False,
+            )
+        except InfraManagerError as exc:
+            raise InfraManagerError(
+                f"Штатный deploy {context.name} невозможен: {exc}. "
+                "Постоянный SSH-ключ не используется; для полного "
+                "восстановления запустите на PVE: infra-manager recover"
+            ) from exc
         console.result(
             f"{context.vmid} {context.name} обновлён через Ansible; "
             "активация новой управляющей среды назначена "
@@ -1063,15 +1093,27 @@ def run_deploy_guest(
         )
         return 0
 
-    console.info("Инициализация OpenTofu")
-    context.workspace.initialize()
+    bootstrap_configure = bootstrap_scope and phase in {
+        "provision-base",
+        "provision-control-plane",
+        "provision-recovery-control-plane",
+        "provision-ssh-trust",
+        "provision",
+    }
 
-    state_present, state_status = context.workspace.get_resource_state(
-        context.target
-    )
-    if phase == "provision-existing":
+    if bootstrap_configure:
+        # После create bootstrap-state больше не является источником истины.
+        # Последующие шаги подтверждают сам объект PVE и используют только
+        # одноразовый SSH-доступ текущего bootstrap-сеанса.
         _validate_existing_guest_object(context)
+        state_present = False
     else:
+        console.info("Инициализация OpenTofu")
+        context.workspace.initialize()
+
+        state_present, state_status = context.workspace.get_resource_state(
+            context.target
+        )
         _validate_pve_and_state(
             context,
             state_present=state_present,
@@ -1093,21 +1135,6 @@ def run_deploy_guest(
 
     if phase in {"all", "infrastructure"}:
         _reconcile_guest_infrastructure(context)
-
-    if phase in {"provision-base", "provision"}:
-        state_present, state_status = context.workspace.get_resource_state(
-            context.target
-        )
-        _validate_pve_and_state(
-            context,
-            state_present=state_present,
-            state_status=state_status,
-        )
-        if not state_present:
-            raise InfraManagerError(
-                f"Гость {context.vmid} отсутствует в OpenTofu state; "
-                "сначала выполните фазу infrastructure"
-            )
 
     # Некоторые свойства LXC Proxmox разрешает менять только самому root@pam,
     # а не API token. Они остаются частью общего guest/profile-контракта и
@@ -1133,12 +1160,35 @@ def run_deploy_guest(
             project_branch=project_branch,
             bootstrap_private_key=bootstrap_private_key,
         )
-    elif phase in {"provision", "provision-existing"}:
+    elif phase == "provision-control-plane":
+        _configure_guest_os(
+            context,
+            provision_phase="bootstrap",
+            project_branch=project_branch,
+            bootstrap_private_key=bootstrap_private_key,
+        )
+    elif phase == "provision-recovery-control-plane":
+        _configure_guest_os(
+            context,
+            provision_phase="recovery",
+            project_branch=project_branch,
+            bootstrap_private_key=bootstrap_private_key,
+        )
+    elif phase == "provision-ssh-trust":
+        _configure_guest_os(
+            context,
+            provision_phase="base",
+            project_branch=project_branch,
+            allow_legacy_bootstrap=True,
+            bootstrap_private_key=bootstrap_private_key,
+        )
+    elif phase == "provision":
         _configure_guest_os(
             context,
             provision_phase="full",
             project_branch=project_branch,
-            bootstrap_private_key=bootstrap_private_key,
+            allow_legacy_bootstrap=not bootstrap_scope,
+            bootstrap_private_key=None if bootstrap_scope else bootstrap_private_key,
         )
 
     if bootstrap_private_key is not None and phase != "infrastructure":
@@ -1152,17 +1202,57 @@ def run_deploy_guest(
         console.result(
             f"{context.vmid} {context.name}: базовая настройка завершена"
         )
+    elif phase in {"provision-control-plane", "provision-recovery-control-plane"}:
+        console.result(
+            f"{context.vmid} {context.name}: управляющий контур запущен"
+        )
+    elif phase == "provision-ssh-trust":
+        console.result(
+            f"{context.vmid} {context.name}: доверие к SSH CA установлено"
+        )
     elif phase == "provision":
         console.result(
             f"{context.vmid} {context.name}: полная настройка завершена"
-        )
-    elif phase == "provision-existing":
-        console.result(
-            f"{context.vmid} {context.name}: существующий гость "
-            "настроен через provision.yaml без владения OpenTofu state"
         )
     else:
         console.result(
             f"{context.vmid} {context.name}: полное развёртывание завершено"
         )
     return 0
+
+
+def run_deploy_guest(repo_root: Path, vmid: int) -> int:
+    """Привести существующего или обычного управляемого гостя к декларации."""
+
+    return _run_deploy_guest(
+        repo_root,
+        vmid,
+        bootstrap_scope=False,
+        phase="all",
+    )
+
+
+def run_bootstrap_infra_manager_step(
+    repo_root: Path,
+    vmid: int,
+    *,
+    step: str,
+) -> int:
+    """Выполнить внутренний линейный шаг bootstrap infra-manager."""
+
+    identity = guest_identity(repo_root, vmid)
+    if identity.role != SETTINGS.infra_manager_role:
+        raise InfraManagerError(
+            f"Гость {vmid} не имеет роль {SETTINGS.infra_manager_role!r}"
+        )
+    phase = BOOTSTRAP_INFRA_MANAGER_PHASES.get(step)
+    if phase is None:
+        raise InfraManagerError(
+            f"Недопустимый bootstrap-шаг infra-manager: {step}"
+        )
+    return _run_deploy_guest(
+        repo_root,
+        vmid,
+        bootstrap_scope=True,
+        phase=phase,
+    )

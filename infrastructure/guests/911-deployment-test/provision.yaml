@@ -1,0 +1,12 @@
+schema_version: 1
+guest_vmid: 911
+
+system:
+  distribution: debian
+  version: "13"
+  architecture: amd64
+  required_packages:
+    - ca-certificates
+    - openssh-client
+    - openssh-server
+    - python3

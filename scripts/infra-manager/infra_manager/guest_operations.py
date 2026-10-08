@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Final
 
@@ -208,6 +209,15 @@ def _run_deploy(
             if activation_reserved:
                 cancel_runtime_activation()
             return result
+
+        # При прямом deploy через PVE итоговый статус печатает оператор,
+        # чтобы не дублировать его и сохранить доверенный вывод секретов.
+        # Самообновление infra-manager продолжает выводить статус здесь.
+        if (
+            not self_update
+            and os.environ.get("INFRA_MANAGER_OPERATOR_FINAL_STATUS") == "1"
+        ):
+            return 0
 
         client = PveClient.from_opentofu_env()
         resource = _generic_status(

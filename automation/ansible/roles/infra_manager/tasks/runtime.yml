@@ -11,6 +11,7 @@
       OPENTOFU_VERSION={{ provision.docker.services.runtime.tools.opentofu }}
       PACKER_VERSION={{ provision.docker.services.runtime.tools.packer }}
       OPENBAO_VERSION={{ provision.docker.services.openbao.image.split(':')[-1] }}
+  register: infra_compose_versions
 
 - name: Установить описание состояния infra-manager
   ansible.builtin.copy:
@@ -51,13 +52,14 @@
     owner: root
     group: root
     mode: "0644"
+  register: portal_gateway_unit
 
 - name: Включить службу действий локального портала
   ansible.builtin.systemd_service:
     name: infra-manager-portal-gateway.service
     enabled: true
-    state: restarted
-    daemon_reload: true
+    state: "{{ 'restarted' if portal_gateway_unit.changed else 'started' }}"
+    daemon_reload: "{{ portal_gateway_unit.changed }}"
 
 - name: Сделать команду состояния доступной через pct exec
   ansible.builtin.file:
@@ -73,12 +75,13 @@
     owner: root
     group: root
     mode: "0644"
+  register: openbao_startup_unit
 
 - name: Включить разблокировку OpenBao при запуске infra-manager
   ansible.builtin.systemd_service:
     name: infra-manager-openbao-startup-unseal.service
     enabled: true
-    daemon_reload: true
+    daemon_reload: "{{ openbao_startup_unit.changed }}"
 
 - name: Настроить владельца данных Semaphore
   ansible.builtin.file:
@@ -129,7 +132,9 @@
       - runtime
   changed_when: true
 
-- name: Запустить OpenBao с актуальной конфигурацией
+
+
+- name: Перезапустить OpenBao после изменения конфигурации
   ansible.builtin.command:
     argv:
       - docker
@@ -143,6 +148,30 @@
       - --force-recreate
       - openbao
   changed_when: true
+  when: >-
+    infra_compose_files.changed
+    or infra_compose_versions.changed
+    or (openbao_tls_files.results | selectattr('changed') | list | length > 0)
+
+- name: Подтвердить запуск OpenBao без повторного создания
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - --env-file
+      - "{{ provision.paths.compose }}/.versions.env"
+      - -f
+      - "{{ provision.paths.compose }}/docker-compose.yml"
+      - up
+      - -d
+      - openbao
+  changed_when: true
+  when: >-
+    not (
+      infra_compose_files.changed
+      or infra_compose_versions.changed
+      or (openbao_tls_files.results | selectattr('changed') | list | length > 0)
+    )
 
 - name: Запустить управляющую среду
   ansible.builtin.command:

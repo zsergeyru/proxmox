@@ -62,8 +62,13 @@ def test_orchestration() -> None:
         ),
         patch.object(
             openbao_module,
-            "initialize_openbao_on_host",
-            side_effect=lambda node: calls.append(("initialize", node)),
+            "repair_openbao_on_host",
+            side_effect=lambda node: calls.append(("ensure", node)),
+        ),
+        patch.object(
+            openbao_module,
+            "_staged_pve_api_credential",
+            return_value=None,
         ),
         patch.object(
             openbao_module,
@@ -83,12 +88,131 @@ def test_orchestration() -> None:
         ("install", f"pve:{ROOT}"),
         ("install-recovery", f"pve:{ROOT}"),
         ("prepare-recovery", "pve"),
-        ("initialize", "pve"),
+        ("ensure", "pve"),
         ("sync-otp", "pve"),
-        ("check-recovery", "pve"),
         ("check-recovery", "pve"),
     ]:
         fail(f"Неожиданный порядок инициализации OpenBao: {calls!r}")
+
+
+def test_recovery_refreshes_pve_credential_before_otp() -> None:
+    calls: list[tuple[str, object]] = []
+    staged = {
+        "endpoint": "https://pve:8006",
+        "token_id": "root@pam!infra-manager",
+        "token_secret": "NEW-PVE-SECRET",
+    }
+    with (
+        patch.dict(
+            os.environ,
+            {"TF_VAR_pve_endpoint": "https://pve:8006"},
+            clear=False,
+        ),
+        patch.object(openbao_module, "install_openbao_host_support"),
+        patch.object(openbao_module, "install_recovery_host_support"),
+        patch.object(openbao_module, "prepare_recovery_git"),
+        patch.object(
+            openbao_module,
+            "repair_openbao_on_host",
+            side_effect=lambda node: calls.append(("repair", node)),
+        ),
+        patch.object(
+            openbao_module,
+            "_staged_pve_api_credential",
+            return_value=staged,
+        ),
+        patch.object(
+            openbao_module,
+            "update_openbao_pve_api_credential",
+            side_effect=lambda node, **kwargs: calls.append(
+                ("update-pve", (node, kwargs))
+            ),
+        ),
+        patch.object(
+            openbao_module,
+            "sync_openbao_otp_contract",
+            side_effect=lambda node, sources: calls.append(("sync-otp", node)),
+        ),
+        patch.object(openbao_module, "check_recovery_contour"),
+    ):
+        if openbao_module.run_initialize_openbao(ROOT) != 0:
+            fail("Recovery OpenBao должен завершаться кодом 0")
+
+    if calls[:3] != [
+        ("repair", "pve"),
+        (
+            "update-pve",
+            (
+                "pve",
+                {
+                    "endpoint": "https://pve:8006",
+                    "token_id": "root@pam!infra-manager",
+                    "token_secret": "NEW-PVE-SECRET",
+                },
+            ),
+        ),
+        ("sync-otp", "pve"),
+    ]:
+        fail(f"Неверный порядок обновления PVE credential: {calls!r}")
+
+
+def test_host_pve_credential_update_is_narrow_and_revokes_root() -> None:
+    host = load_host_module()
+    root_token = "TEMP-ROOT"
+    revoked: list[str] = []
+    received: list[dict[str, object]] = []
+
+    def fake_pct_exec(
+        *args: str,
+        capture: bool = False,
+        check: bool = True,
+        input_text: str | None = None,
+    ):
+        del capture, check
+        if args[:2] != ("python3", "-c"):
+            fail(f"Неожиданная команда обновления PVE credential: {args!r}")
+        if args[2] != host.UPDATE_PVE_API_CREDENTIAL_CODE:
+            fail("Обновление PVE credential использует посторонний snippet")
+        payload = json.loads(input_text or "{}")
+        received.append(payload)
+        return SimpleNamespace(
+            returncode=0,
+            stdout='{"ready":true}\n',
+            stderr="",
+        )
+
+    with (
+        patch.object(
+            host,
+            "generate_temporary_root_token",
+            return_value=root_token,
+        ),
+        patch.object(host, "pct_exec", side_effect=fake_pct_exec),
+        patch.object(host, "materialize_runtime_secrets") as materialize,
+        patch.object(
+            host,
+            "revoke_temporary_root_token",
+            side_effect=revoked.append,
+        ),
+    ):
+        host.update_pve_api_credential(
+            "https://pve:8006",
+            "root@pam!infra-manager",
+            "NEW-PVE-SECRET",
+        )
+
+    if received != [
+        {
+            "root_token": root_token,
+            "endpoint": "https://pve:8006",
+            "token_id": "root@pam!infra-manager",
+            "token_secret": "NEW-PVE-SECRET",
+        }
+    ]:
+        fail("PVE credential передан OpenBao с искажением")
+    materialize.assert_called_once_with()
+    if revoked != [root_token]:
+        fail("Временный root token не был отозван после обновления PVE credential")
 
 
 def test_host_initialization_does_not_print_secrets() -> None:
