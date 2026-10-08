@@ -11,6 +11,7 @@
       OPENTOFU_VERSION={{ provision.docker.services.runtime.tools.opentofu }}
       PACKER_VERSION={{ provision.docker.services.runtime.tools.packer }}
       OPENBAO_VERSION={{ provision.docker.services.openbao.image.split(':')[-1] }}
+  register: infra_compose_versions
 
 - name: Установить описание состояния infra-manager
   ansible.builtin.copy:
