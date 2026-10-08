@@ -231,37 +231,35 @@ def test_bootstrap_timing_success_and_failure() -> None:
         patch.object(module.time, "monotonic", side_effect=[10.0, 72.4]),
         contextlib.redirect_stdout(output),
     ):
-        result = host.timed_step("Тестовый этап", lambda: "ready")
+        host.timed_step("Тестовый этап", lambda: host.ok("Тест завершён"))
 
-    assert_equal(result, "ready", "Замер не должен менять результат этапа")
-    if "[ВРЕМЯ] Тестовый этап: 00:01:02" not in output.getvalue():
-        raise AssertionError("Успешный этап должен показывать длительность")
-    assert_equal(
-        host._timings[-1][2],
-        True,
-        "Успешный этап должен сохраняться в итогах",
-    )
+    if "[ОК] Тест завершён (01:02)" not in output.getvalue():
+        raise AssertionError("Время должно быть в исходной строке [ОК]")
+    if "[ВРЕМЯ]" in output.getvalue():
+        raise AssertionError("Отдельный вывод [ВРЕМЯ] запрещён")
 
     output = io.StringIO()
+    with (
+        patch.object(module.time, "monotonic", side_effect=[10.0, 11.3]),
+        contextlib.redirect_stdout(output),
+    ):
+        result = host.timed_step("Проверка", lambda: "ready")
+    assert_equal(result, "ready", "Замер не должен менять результат этапа")
+    if "[ОК] Проверка завершён (00:01)" not in output.getvalue():
+        raise AssertionError("Этап без собственного [ОК] должен получить итоговый статус")
+
     def fail_operation():
         raise BootstrapError("ожидаемая ошибка")
 
-    with (
-        patch.object(module.time, "monotonic", side_effect=[100.0, 107.5]),
-        contextlib.redirect_stdout(output),
-    ):
+    with patch.object(module.time, "monotonic", side_effect=[100.0, 107.5]):
         try:
             host.timed_step("Сбой этапа", fail_operation)
         except BootstrapError as exc:
-            if str(exc) != "ожидаемая ошибка":
+            if str(exc) != "ожидаемая ошибка (этап «Сбой этапа»: 00:07)":
                 raise
         else:
             raise AssertionError("Замер не должен скрывать ошибку этапа")
 
-    if "[ВРЕМЯ][ОШИБКА] Сбой этапа: 00:00:07" not in output.getvalue():
-        raise AssertionError("Прерванный этап должен показывать длительность")
-    if host._timings[-1][2] is not False:
-        raise AssertionError("Прерванный этап должен отмечаться в итогах")
     if module._format_duration(3661.9) != "01:01:01":
         raise AssertionError("Формат времени должен поддерживать часы")
 
