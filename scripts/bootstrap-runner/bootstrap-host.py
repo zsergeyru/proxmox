@@ -8,6 +8,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 _BOOTSTRAP_MODULE_ROOT = Path(__file__).resolve().parent
@@ -95,6 +96,16 @@ def _find_role_guest(project_dir: Path, role: str) -> tuple[int, str]:
     return vmid, name
 
 
+
+def _format_duration(seconds: float) -> str:
+    """Показать прошедшее время в формате часы:минуты:секунды."""
+
+    total = max(0, int(seconds))
+    hours, remainder = divmod(total, 3600)
+    minutes, remaining_seconds = divmod(remainder, 60)
+    return f"{hours:02d}:{minutes:02d}:{remaining_seconds:02d}"
+
+
 class BootstrapHost(
     BootstrapPersistenceMixin,
     BootstrapAccessMixin,
@@ -103,6 +114,8 @@ class BootstrapHost(
 ):
     def __init__(self, mode: str) -> None:
         self.mode = mode
+        self._timings: list[tuple[str, float, bool]] = []
+        self._started_at = time.monotonic()
         self.ctid = int(os.environ.get("BOOTSTRAP_RUNNER_CTID", "990"))
         self.ct_hostname = "bootstrap-runner"
         self.project_branch = os.environ.get("PROJECT_BRANCH", "main")
@@ -315,6 +328,46 @@ print(json.dumps({"vmid": matches[0][0], "name": matches[0][1]}))
 
     def fail(self, message: str) -> None:
         raise BootstrapError(message)
+
+    def timed_step(self, name: str, operation, *args, **kwargs):
+        """Замерить этап, сохранив исходную обработку ошибок."""
+
+        started = time.monotonic()
+        success = False
+        try:
+            result = operation(*args, **kwargs)
+            success = True
+            return result
+        finally:
+            elapsed = time.monotonic() - started
+            self._timings.append((name, elapsed, success))
+            marker = "[ВРЕМЯ]" if success else "[ВРЕМЯ][ОШИБКА]"
+            print(
+                f"{marker} {name}: {_format_duration(elapsed)}",
+                flush=True,
+            )
+
+    def print_timing_summary(self) -> None:
+        """Кратко показать самые долгие операции даже при ошибке."""
+
+        if not self._timings:
+            return
+        print("\n[ВРЕМЯ] Самые долгие этапы:", flush=True)
+        for name, elapsed, success in sorted(
+            self._timings,
+            key=lambda entry: entry[1],
+            reverse=True,
+        )[:5]:
+            status = "" if success else " (прерван)"
+            print(
+                f"[ВРЕМЯ] {_format_duration(elapsed)} — {name}{status}",
+                flush=True,
+            )
+        print(
+            f"[ВРЕМЯ] Всего в закрытом bootstrap: "
+            f"{_format_duration(time.monotonic() - self._started_at)}",
+            flush=True,
+        )
 
     def show_log_tail(self) -> None:
         print(
@@ -554,20 +607,29 @@ print(json.dumps({"vmid": matches[0][0], "name": matches[0][1]}))
         else:
             self.prepare_new_persistent_layout()
 
-        self.prepare_runner()
-        self.create_infra_manager()
-        self.attach_persistent_layout()
-        self.configure_infra_manager_base()
-        self.handoff_infra("recover" if self.mode == "recover" else "apply")
-        self.configure_infra_manager_control_plane()
-        self.initialize_infra_openbao()
-        self.sync_infra_ssh_ca_to_runner()
-        self.configure_infra_manager_ssh_trust()
-        self.remove_bootstrap_ssh_access_from_infra()
-        self.configure_infra_manager()
-        self.verify_infra_ready(quiet=True)
-        self.finalize_runner()
-        self.check_ready()
+        self.timed_step("Подготовка 990", self.prepare_runner)
+        self.timed_step("Создание LXC 910", self.create_infra_manager)
+        self.timed_step("Подключение постоянных данных", self.attach_persistent_layout)
+        self.timed_step("Базовая настройка ОС", self.configure_infra_manager_base)
+        self.timed_step(
+            "Передача учётных данных",
+            self.handoff_infra,
+            "recover" if self.mode == "recover" else "apply",
+        )
+        self.timed_step(
+            "Запуск управляющего контура", self.configure_infra_manager_control_plane
+        )
+        self.timed_step("Восстановление OpenBao", self.initialize_infra_openbao)
+        self.timed_step("Передача SSH CA", self.sync_infra_ssh_ca_to_runner)
+        self.timed_step("Настройка SSH-доверия", self.configure_infra_manager_ssh_trust)
+        self.timed_step(
+            "Удаление начального SSH-доступа",
+            self.remove_bootstrap_ssh_access_from_infra,
+        )
+        self.timed_step("Полная настройка Ansible", self.configure_infra_manager)
+        self.timed_step("Проверка готовности", self.verify_infra_ready, quiet=True)
+        self.timed_step("Удаление временного 990", self.finalize_runner)
+        self.timed_step("Итоговая проверка", self.check_ready)
 
     def execute(self) -> None:
         # Любой режим приходит сюда уже после подготовки временного 990
@@ -577,7 +639,10 @@ print(json.dumps({"vmid": matches[0][0], "name": matches[0][1]}))
         self.info(f"Закрытый bootstrap {VERSION}, режим: {self.mode}")
 
         if self.mode in {"apply", "recover"}:
-            self.apply()
+            try:
+                self.apply()
+            finally:
+                self.print_timing_summary()
         elif self.mode == "check":
             self.verify_infra_ready(quiet=True)
             self.finalize_runner()
