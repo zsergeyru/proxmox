@@ -508,6 +508,50 @@ def test_operator_repair_runs_inside_manager() -> None:
     assert environment["INFRA_PROJECT_BRANCH"] == "feature/test"
 
 
+def test_operator_guest_operation_timing() -> None:
+    with (
+        patch.object(operator, "_operator_guest_task", return_value=0) as action,
+        patch.object(operator.time, "monotonic", side_effect=[10.0, 75.5]),
+        patch.object(operator, "console") as output,
+    ):
+        assert operator.operator_guest_task("deploy", 910, show_secrets=True) == 0
+    action.assert_called_once_with("deploy", 910, show_secrets=True)
+    output.timing.assert_called_once_with(
+        "Команда deploy гостя 910",
+        65.5,
+        interrupted=False,
+    )
+
+    with (
+        patch.object(operator, "_operator_guest_task", return_value=7),
+        patch.object(operator.time, "monotonic", side_effect=[10.0, 22.0]),
+        patch.object(operator, "console") as output,
+    ):
+        assert operator.operator_guest_task("deploy", 410, show_secrets=False) == 7
+    output.timing.assert_called_once_with(
+        "Команда deploy гостя 410",
+        12.0,
+        interrupted=True,
+    )
+
+    with (
+        patch.object(operator, "_operator_guest_task", side_effect=RuntimeError("test")),
+        patch.object(operator.time, "monotonic", side_effect=[100.0, 104.0]),
+        patch.object(operator, "console") as output,
+    ):
+        try:
+            operator.operator_guest_task("deploy", 410, show_secrets=False)
+        except RuntimeError:
+            pass
+        else:
+            raise AssertionError("Исключение должно сохраняться")
+    output.timing.assert_called_once_with(
+        "Команда deploy гостя 410",
+        4.0,
+        interrupted=True,
+    )
+
+
 def test_public_command_contract() -> None:
     parser = operator.build_parser()
     for argv in (
@@ -539,6 +583,7 @@ def main() -> None:
     test_host_recover_uses_only_recovery_helper()
     test_host_wrapper_is_minimal()
     test_operator_guest_task_secret_policy()
+    test_operator_guest_operation_timing()
     test_internal_project_refresh_uses_existing_checkout()
     test_runtime_snapshot_refresh_policy()
     test_operator_status_secret_policy()
