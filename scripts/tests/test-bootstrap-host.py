@@ -233,8 +233,11 @@ def test_bootstrap_timing_success_and_failure() -> None:
     ):
         host.timed_step("Тестовый этап", lambda: host.ok("Тест завершён"))
 
-    if "[ОК] Тест завершён (01:02)" not in output.getvalue():
-        raise AssertionError("Время должно быть в исходной строке [ОК]")
+    if not any(
+        line.startswith("[ОК] Тест завершён") and line.endswith("(01:02)")
+        for line in output.getvalue().splitlines()
+    ):
+        raise AssertionError("Время должно быть справа в исходной строке [ОК]")
     if "[ВРЕМЯ]" in output.getvalue():
         raise AssertionError("Отдельный вывод [ВРЕМЯ] запрещён")
 
@@ -245,7 +248,10 @@ def test_bootstrap_timing_success_and_failure() -> None:
     ):
         result = host.timed_step("Проверка", lambda: "ready")
     assert_equal(result, "ready", "Замер не должен менять результат этапа")
-    if "[ОК] Проверка завершён (00:01)" not in output.getvalue():
+    if not any(
+        line.startswith("[ОК] Проверка") and line.endswith("(00:01)")
+        for line in output.getvalue().splitlines()
+    ):
         raise AssertionError("Этап без собственного [ОК] должен получить итоговый статус")
 
     def fail_operation():
