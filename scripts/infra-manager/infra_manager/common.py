@@ -93,6 +93,16 @@ class CommandError(InfraManagerError):
         super().__init__(message)
 
 
+def format_duration(seconds: float) -> str:
+    """Показать прошедшее время с точностью до секунды."""
+    total = max(0, int(seconds))
+    minutes, seconds = divmod(total, 60)
+    hours, minutes = divmod(minutes, 60)
+    if hours:
+        return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+    return f"{minutes:02d}:{seconds:02d}"
+
+
 @dataclass(frozen=True)
 class Console:
     """Единый формат сообщений, совместимый с текущими shell-скриптами."""
@@ -145,6 +155,21 @@ class Console:
         reset = self._color("\033[0m")
         print(
             f"{bold}{green}[ОК]{reset} {message}",
+            file=self.out,
+            flush=True,
+        )
+
+    def timing(
+        self,
+        message: str,
+        elapsed: float,
+        *,
+        interrupted: bool = False,
+    ) -> None:
+        """Показать длительность операции, включая прерванную."""
+        label = "ПРЕРВАНО" if interrupted else "ВРЕМЯ"
+        print(
+            f"[{label}] {message}: {format_duration(elapsed)}",
             file=self.out,
             flush=True,
         )
