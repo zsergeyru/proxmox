@@ -50,6 +50,7 @@ from openbao_host.snippets import (
     SSH_CA_STATUS_CODE,
     STATUS_CODE,
     UNSEAL_CODE,
+    UPDATE_PVE_API_CREDENTIAL_CODE,
     UPDATE_SEMAPHORE_API_TOKEN_CODE,
 )
 
@@ -878,6 +879,55 @@ def materialize_runtime_secrets() -> None:
     log_detail(
         f"[ОК] Рабочие секреты материализованы во временную область {RUNTIME_SECRET_DIR}"
     )
+
+
+def update_pve_api_credential(
+    endpoint: str,
+    token_id: str,
+    token_secret: str,
+) -> None:
+    """Обновить только PVE API credential в KV и перематериализовать runtime."""
+
+    if not endpoint.startswith("https://"):
+        raise OpenBaoHostError("Некорректный PVE endpoint")
+    if token_id != "root@pam!infra-manager":
+        raise OpenBaoHostError("Некорректный PVE token id")
+    if not token_secret or any(char.isspace() for char in token_secret):
+        raise OpenBaoHostError("Некорректный PVE token secret")
+
+    root_token = generate_temporary_root_token()
+    try:
+        result = pct_exec(
+            "python3",
+            "-c",
+            UPDATE_PVE_API_CREDENTIAL_CODE,
+            capture=True,
+            input_text=json.dumps(
+                {
+                    "root_token": root_token,
+                    "endpoint": endpoint,
+                    "token_id": token_id,
+                    "token_secret": token_secret,
+                },
+                separators=(",", ":"),
+            ),
+        )
+        try:
+            payload = json.loads(result.stdout)
+        except json.JSONDecodeError as exc:
+            raise OpenBaoHostError(
+                "OpenBao вернул некорректный результат обновления PVE API credential"
+            ) from exc
+        if payload != {"ready": True}:
+            raise OpenBaoHostError(
+                "PVE API credential не был обновлён в OpenBao"
+            )
+        materialize_runtime_secrets()
+    finally:
+        revoke_temporary_root_token(root_token)
+        del root_token
+
+    log_detail("[ОК] PVE API credential обновлён в OpenBao")
 
 
 def update_semaphore_api_token(api_token: str) -> None:
@@ -1928,6 +1978,11 @@ def main() -> int:
         help="Проверить userpass-вход и политику оператора OpenBao",
     )
     mode.add_argument(
+        "--update-pve-api-credential",
+        action="store_true",
+        help="Обновить PVE API credential в KV v2 из stdin",
+    )
+    mode.add_argument(
         "--update-semaphore-api-token",
         action="store_true",
         help="Обновить API token Semaphore в KV v2 из stdin",
@@ -2021,6 +2076,17 @@ def main() -> int:
             require_active_openbao("проверка оператора")
             check_operator_access()
             log_status("[ОК] userpass и политика infra-operator подтверждены")
+        elif args.update_pve_api_credential:
+            require_active_openbao("обновление PVE API credential")
+            payload = json.loads(__import__("sys").stdin.read())
+            if not isinstance(payload, dict):
+                raise OpenBaoHostError("Некорректный PVE API credential")
+            endpoint = payload.get("endpoint")
+            token_id = payload.get("token_id")
+            token_secret = payload.get("token_secret")
+            if not all(isinstance(value, str) for value in (endpoint, token_id, token_secret)):
+                raise OpenBaoHostError("Неполный PVE API credential")
+            update_pve_api_credential(endpoint, token_id, token_secret)
         elif args.update_semaphore_api_token:
             require_active_openbao("обновление Semaphore token")
             update_semaphore_api_token(__import__("sys").stdin.read())
