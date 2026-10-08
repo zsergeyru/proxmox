@@ -36,9 +36,13 @@ RUNTIME_GUEST_OPERATION = (
     PATHS.repo_root / "scripts" / "infra-manager" / "jobs" / "guest-operation.py"
 )
 RUNTIME_SNAPSHOT_SCRIPT = """
+# Только подготовка снимка требует root: Git-копия в 910 принадлежит root.
+# Код гостевых операций по-прежнему выполняется как Semaphore (1001:0).
+umask 077
 rm -rf "$1"
 mkdir -p "$1"
 cp -a "$2"/. "$1"/
+chown -R 1001:0 "$1"
 """.strip()
 RUNTIME_DIRECT_SCRIPT = """
 trap 'rm -rf "$1"' EXIT INT TERM
@@ -153,7 +157,7 @@ def _prepare_runtime_snapshot(operation: str, vmid: int) -> str:
                 "docker",
                 "exec",
                 "--user",
-                "1001:0",
+                "0",
                 RUNTIME_CONTAINER,
                 "sh",
                 "-eu",
