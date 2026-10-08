@@ -133,7 +133,7 @@
 
 - name: Сообщить причину недоступности источников сборки
   ansible.builtin.fail:
-    msg: "{{ infra_runtime_download_check.stdout | trim if (infra_runtime_download_check.stdout | default('') | trim) else 'Проверка внешних источников не запустилась. Проверьте python3 и curl в госте.' }}"
+    msg: "{{ infra_runtime_download_check.stdout | default('Проверка сетевых источников не запустилась: проверьте Python и curl в госте.', true) | trim }}"
   when: infra_runtime_download_check.rc != 0
 
 - name: Собрать управляющую среду
