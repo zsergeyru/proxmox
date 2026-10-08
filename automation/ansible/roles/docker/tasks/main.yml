@@ -41,6 +41,7 @@
     owner: root
     group: root
     mode: "0644"
+  register: docker_apt_key
 
 - name: Подключить источник Docker
   ansible.builtin.copy:
@@ -55,13 +56,20 @@
       Components: stable
       Architectures: amd64
       Signed-By: /etc/apt/keyrings/docker.asc
+  register: docker_apt_repository
+
+- name: Обновить списки пакетов после изменения источника Docker
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 0
+  when: docker_apt_key.changed or docker_apt_repository.changed
 
 - name: Установить Docker
   ansible.builtin.apt:
     name: "{{ provision.docker.required_packages }}"
     state: present
     update_cache: true
-    cache_valid_time: 0
+    cache_valid_time: 3600
 
 - name: Запустить Docker
   ansible.builtin.systemd_service:
