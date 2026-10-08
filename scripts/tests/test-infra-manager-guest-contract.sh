@@ -565,12 +565,21 @@ apt_install = install.get("ansible.builtin.apt", {})
 if apt_install.get("cache_valid_time", 0) < 3600 or not apt_install.get("update_cache"):
     raise SystemExit("Повторное применение Ansible не должно принудительно обновлять APT")
 
-runtime_openbao = named(runtime, "Запустить OpenBao с актуальной конфигурацией")
+runtime_restart = named(runtime, "Перезапустить OpenBao после изменения конфигурации")
+runtime_reuse = named(runtime, "Подтвердить запуск OpenBao без повторного создания")
 bootstrap_openbao = named(bootstrap, "Запустить только OpenBao для восстановления центра доступа")
-runtime_args = runtime_openbao["ansible.builtin.command"]["argv"]
+runtime_restart_args = runtime_restart["ansible.builtin.command"]["argv"]
+runtime_reuse_args = runtime_reuse["ansible.builtin.command"]["argv"]
 bootstrap_args = bootstrap_openbao["ansible.builtin.command"]["argv"]
-if "--force-recreate" in runtime_args:
-    raise SystemExit("Полная настройка не должна безусловно пересоздавать OpenBao")
+if "--force-recreate" not in runtime_restart_args or "--force-recreate" in runtime_reuse_args:
+    raise SystemExit("Принудительное пересоздание OpenBao допустимо только при изменениях")
+conditions = ("infra_compose_files.changed", "infra_compose_versions.changed", "openbao_tls_files.results")
+restart_when = runtime_restart.get("when", "")
+reuse_when = runtime_reuse.get("when", "")
+if not all(token in restart_when and token in reuse_when for token in conditions):
+    raise SystemExit("Обновление OpenBao должно учитывать изменения файлов, версий и TLS")
+if not reuse_when.strip().startswith("not ("):
+    raise SystemExit("Повторный запуск без пересоздания должен иметь обратное условие")
 if "--force-recreate" not in bootstrap_args:
     raise SystemExit("Первый запуск OpenBao при recovery должен сохранять принудительное создание")
 
