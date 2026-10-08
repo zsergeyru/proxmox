@@ -390,8 +390,17 @@ opentofu_version = str(tools.get("opentofu", ""))
 packer_version = str(tools.get("packer", ""))
 if f"ARG OPENTOFU_VERSION={opentofu_version}" not in dockerfile_text:
     raise SystemExit("Версия OpenTofu в Dockerfile расходится с provision.yaml")
-if f"ARG PACKER_VERSION={packer_version}" not in dockerfile_text:
-    raise SystemExit("Версия Packer в Dockerfile расходится с provision.yaml")
+packer_image = str(tools.get("packer_image", ""))
+if not packer_image.startswith(f"hashicorp/packer:{packer_version}@sha256:"):
+    raise SystemExit("Официальный Docker-образ Packer не соответствует выбранной версии")
+if len(packer_image.split("@sha256:")[-1]) != 64:
+    raise SystemExit("Packer должен быть закреплён по SHA256 Docker-образа")
+if "ARG PACKER_IMAGE" not in dockerfile_text or "FROM ${PACKER_IMAGE} AS packer_source" not in dockerfile_text:
+    raise SystemExit("Packer должен устанавливаться из официального Docker-образа")
+if "COPY --from=packer_source /bin/packer /usr/local/bin/packer" not in dockerfile_text:
+    raise SystemExit("Исполняемый файл Packer должен копироваться из официального образа")
+if "releases.hashicorp.com/packer/" in dockerfile_text:
+    raise SystemExit("Скачивание Packer через географически заблокированный адрес запрещено")
 for package in set(runtime.get("system_packages", [])):
     if package not in dockerfile_text:
         raise SystemExit(f"Dockerfile не устанавливает пакет infra-runtime из provision.yaml: {package}")
@@ -415,6 +424,8 @@ if set(compose_services) != {"runtime", "openbao"}:
         "docker-compose.yml: ожидаются services runtime и openbao: "
         f"{sorted(compose_services)}"
     )
+if compose_services["runtime"].get("build", {}).get("args", {}).get("PACKER_IMAGE") != "${PACKER_IMAGE}":
+    raise SystemExit("Compose должен передавать закреплённый образ Packer из provision.yaml")
 if compose_services["runtime"].get("container_name") != runtime.get("container_name"):
     raise SystemExit("container_name infra-runtime расходится с provision.yaml")
 if compose_services["runtime"].get("network_mode") != "host":
