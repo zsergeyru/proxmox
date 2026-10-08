@@ -10,6 +10,7 @@
       RUNTIME_VERSION={{ provision.docker.services.runtime.image.split(':')[-1] }}
       OPENTOFU_VERSION={{ provision.docker.services.runtime.tools.opentofu }}
       PACKER_VERSION={{ provision.docker.services.runtime.tools.packer }}
+      PACKER_IMAGE={{ provision.docker.services.runtime.tools.packer_image }}
       OPENBAO_VERSION={{ provision.docker.services.openbao.image.split(':')[-1] }}
   register: infra_compose_versions
 
@@ -125,6 +126,8 @@
       - "{{ provision.paths.bootstrap_repository }}/scripts/infra-manager/jobs/check-runtime-downloads.py"
       - --packer-version
       - "{{ provision.docker.services.runtime.tools.packer }}"
+      - --packer-image
+      - "{{ provision.docker.services.runtime.tools.packer_image }}"
       - --opentofu-version
       - "{{ provision.docker.services.runtime.tools.opentofu }}"
   register: infra_runtime_download_check

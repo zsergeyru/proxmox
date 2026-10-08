@@ -195,13 +195,20 @@ jobs:
 
       - name: Set up Packer
         run: |
-          version=1.15.4
-          archive="packer_${version}_linux_amd64.zip"
-          curl -fsSLo "/tmp/${archive}" "https://releases.hashicorp.com/packer/${version}/${archive}"
-          curl -fsSLo /tmp/packer_SHA256SUMS "https://releases.hashicorp.com/packer/${version}/packer_${version}_SHA256SUMS"
-          grep "  ${archive}$" /tmp/packer_SHA256SUMS > /tmp/packer.check
-          (cd /tmp && sha256sum -c packer.check)
-          sudo unzip -oq "/tmp/${archive}" -d /usr/local/bin
+          set -Eeuo pipefail
+          packer_image="$(python3 - <<'PY'
+          import os
+          from pathlib import Path
+          import yaml
+          provision = yaml.safe_load((Path(os.environ["INFRA_MANAGER_DIR"]) / "provision.yaml").read_text())
+          print(provision["docker"]["services"]["runtime"]["tools"]["packer_image"])
+          PY
+          )"
+          docker pull "$packer_image"
+          temporary_container="$(docker create "$packer_image")"
+          trap 'docker rm -f "$temporary_container" >/dev/null 2>&1 || true' EXIT
+          docker cp "$temporary_container:/bin/packer" /tmp/packer
+          sudo install -m 0755 /tmp/packer /usr/local/bin/packer
           packer version
 
       - name: Validate Packer 9000
@@ -371,10 +378,11 @@ jobs:
           docker build \
             --build-arg SEMAPHORE_VERSION=v2.18.30 \
             --build-arg OPENTOFU_VERSION=1.12.6 \
-            --build-arg PACKER_VERSION=1.15.4 \
+            --build-arg PACKER_IMAGE="$(python3 -c 'import os,yaml; from pathlib import Path; p=Path(os.environ["INFRA_MANAGER_DIR"])/"provision.yaml"; print(yaml.safe_load(p.read_text())["docker"]["services"]["runtime"]["tools"]["packer_image"])')" \
             -t infra-runtime:test \
             "$INFRA_MANAGER_DIR/rootfs/opt/infra-manager/compose/runtime"
           docker run --rm infra-runtime:test tofu version
+          docker run --rm --entrypoint packer infra-runtime:test version
           docker run --rm infra-runtime:test packer version
           docker run --rm --entrypoint python3 infra-runtime:test -c 'import proxmoxer'
           docker run --rm --entrypoint python3 infra-runtime:test -c 'import yaml, jsonschema'

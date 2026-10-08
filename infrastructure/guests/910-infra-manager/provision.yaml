@@ -78,6 +78,7 @@ docker:
         ansible: bundled-with-semaphore
         opentofu: "1.12.6"
         packer: "1.15.4"
+        packer_image: "hashicorp/packer:1.15.4@sha256:8be72877859e00e13124b26373f0505b2a2597c5393ecbea900be28b4be58186"
 
       python_packages:
         proxmoxer: ">=2.2.0,<3"
