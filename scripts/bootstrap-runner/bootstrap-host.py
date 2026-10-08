@@ -615,6 +615,24 @@ print(json.dumps({"vmid": matches[0][0], "name": matches[0][1]}))
     def apply(self) -> None:
         existed = self.infra_exists()
 
+        # Отсутствие управляющего гостя при сохранённых данных означает восстановление,
+        # а не новую установку. Даже неполный каталог должен пройти строгий
+        # recovery-preflight: нельзя создавать новое состояние поверх старого.
+        # Работающий управляющий гость без явного --recover не пересоздаём.
+        if (
+            self.mode == "apply"
+            and not existed
+            and (
+                self.host_persistent_root.exists()
+                or self.host_persistent_root.is_symlink()
+            )
+        ):
+            self.mode = "recover"
+            self.info(
+                f"Обнаружено постоянное состояние {self.host_persistent_root}; "
+                "автоматически выбран режим восстановления"
+            )
+
         if self.mode == "recover":
             self.timed_step("Проверка сохранённых данных", self.verify_recovery_state)
 

@@ -36,7 +36,7 @@ RUNTIME_GUEST_OPERATION = (
     PATHS.repo_root / "scripts" / "infra-manager" / "jobs" / "guest-operation.py"
 )
 RUNTIME_SNAPSHOT_SCRIPT = """
-# Только подготовка снимка требует root: Git-копия в 910 принадлежит root.
+# Только подготовка снимка требует root: Git-копия управляющего гостя принадлежит root.
 # Код гостевых операций по-прежнему выполняется как Semaphore (1001:0).
 umask 077
 rm -rf "$1"
