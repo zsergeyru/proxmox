@@ -87,8 +87,15 @@ if grep -q '/var/lib/infra-manager/semaphore/project-id' "$PY_SEMAPHORE" "$PY_ST
     die "project-id запрещено хранить внутри каталога SQLite Semaphore"
 fi
 
-grep -q '/etc/semaphore/requirements.txt' "$DOCKERFILE" \
-    || die "Semaphore Dockerfile должен устанавливать Python requirements"
+grep -Fq 'COPY requirements.txt /tmp/infra-runtime-requirements.txt' "$DOCKERFILE" \
+    || die "Python-зависимости должны попадать только во временный каталог при сборке"
+grep -Fq 'python3 -m pip install --no-cache-dir -r /tmp/infra-runtime-requirements.txt' "$DOCKERFILE" \
+    || die "Python-зависимости должны устанавливаться при сборке"
+grep -Fq 'rm -f /tmp/infra-runtime-requirements.txt' "$DOCKERFILE" \
+    || die "Временный файл зависимостей должен удаляться после сборки"
+if grep -Fq 'COPY requirements.txt /etc/semaphore/requirements.txt' "$DOCKERFILE"; then
+    die "Файл requirements.txt в /etc/semaphore вызывает повторную установку при каждом запуске"
+fi
 grep -q '^proxmoxer' "$REQ" \
     || die "Semaphore должен содержать proxmoxer"
 
