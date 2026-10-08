@@ -25,6 +25,21 @@ payload = module.build_payload(ROOT)
 assert payload["format_version"] == 1
 guests = payload["guests"]
 
+# Пустой startup вызывает ложный update существующих LXC/VM, после которого
+# Proxmox отвергает запрос провайдера с ошибкой "no options specified".
+# Для обоих типов гостей блок допустим только при явно заданных настройках.
+opentofu_hcl = (ROOT / "automation/opentofu/main.tf").read_text(
+    encoding="utf-8"
+)
+assert opentofu_hcl.count('dynamic "startup" {') == 2
+assert opentofu_hcl.count("try(each.value.boot.order, null) != null") == 2
+assert (
+    opentofu_hcl.count(
+        "try(each.value.boot.startup_delay_seconds, null) != null"
+    )
+    == 2
+)
+
 # Управляемый гость с profile обязан попасть во вход OpenTofu.
 assert "109" in guests
 assert guests["109"]["name"] == "network-gateway"
