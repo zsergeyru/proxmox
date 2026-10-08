@@ -19,6 +19,10 @@ module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 
 PACKER_URL = "https://releases.hashicorp.com/packer/1.15.4/packer_1.15.4_linux_amd64.zip"
+PACKER_IMAGE = (
+    "hashicorp/packer:1.15.4@"
+    "sha256:8be72877859e00e13124b26373f0505b2a2597c5393ecbea900be28b4be58186"
+)
 
 
 def test_curl_uses_small_get_and_preserves_https() -> None:
@@ -86,26 +90,52 @@ def test_timeout_and_missing_curl_have_short_advice() -> None:
 
 
 def test_sources_come_from_versions_and_known_domains() -> None:
-    urls = module.sources("1.15.4", "1.12.6", "x86_64")
-    assert len(urls) == 4
-    assert urls[0][1] == PACKER_URL
+    urls = module.sources("1.12.6", "x86_64")
+    assert len(urls) == 2
+    assert urls[0][1].endswith("tofu_1.12.6_linux_amd64.zip")
     assert "SHA256SUMS" in urls[1][1]
-    assert urls[2][1].endswith("tofu_1.12.6_linux_amd64.zip")
-    assert "SHA256SUMS" in urls[3][1]
-    arm_urls = module.sources("1.15.4", "1.12.6", "aarch64")
+    arm_urls = module.sources("1.12.6", "aarch64")
     assert arm_urls[0][1].endswith("linux_arm64.zip")
-    for version in ("../bad", "1.15.4?token=secret", "invalid"):
+    module.validate_packer_image(PACKER_IMAGE, "1.15.4")
+    for invalid in (
+        "hashicorp/packer:1.15.3@" + PACKER_IMAGE.split("@")[1],
+        "untrusted/packer:1.15.4@" + PACKER_IMAGE.split("@")[1],
+        "hashicorp/packer:1.15.4",
+        "hashicorp/packer:1.15.4@sha256:invalid",
+        PACKER_IMAGE + "?token=secret",
+    ):
         try:
-            module.sources(version, "1.12.6", "x86_64")
+            module.validate_packer_image(invalid, "1.15.4")
         except ValueError:
             continue
-        raise AssertionError("Нельзя включать произвольный URL в сетевую проверку")
+        raise AssertionError(f"Недостоверный образ Packer принят: {invalid}")
+
+
+def test_docker_manifest_is_checked_without_pull() -> None:
+    response = SimpleNamespace(returncode=0, stdout="{}", stderr="")
+    with patch.object(module.subprocess, "run", return_value=response) as mocked:
+        assert module.probe_packer_image(PACKER_IMAGE) is None
+    assert mocked.call_args.args[0] == ["docker", "manifest", "inspect", PACKER_IMAGE]
+
+
+def test_docker_manifest_reports_useful_failure() -> None:
+    response = SimpleNamespace(
+        returncode=1,
+        stdout="",
+        stderr="manifest unknown",
+    )
+    with patch.object(module.subprocess, "run", return_value=response):
+        error = module.probe_packer_image(PACKER_IMAGE)
+    assert error is not None
+    assert "packer_image" in error
+    assert "sha256" not in error
 
 
 def test_failure_prints_only_reason_and_advice() -> None:
     response = SimpleNamespace(
-        returncode=0,
-        stdout="HTTP/2 404\r\nx-amzn-waf-reason: geo\r\n\r\n__RUNTIME_DOWNLOAD_HTTP__:404\n",
+        returncode=1,
+        stdout="",
+        stderr="Get https://registry-1.docker.io/v2/: i/o timeout",
     )
     out = io.StringIO()
     with (
@@ -113,12 +143,48 @@ def test_failure_prints_only_reason_and_advice() -> None:
         patch.object(module.subprocess, "run", return_value=response) as mocked,
         contextlib.redirect_stdout(out),
     ):
-        code = module.main(["--packer-version", "1.15.4", "--opentofu-version", "1.12.6"])
+        code = module.main(
+            [
+                "--packer-version", "1.15.4",
+                "--packer-image", PACKER_IMAGE,
+                "--opentofu-version", "1.12.6",
+            ]
+        )
     assert code == 1
     assert mocked.call_count == 1
     assert len(out.getvalue().splitlines()) == 2
     assert "Keenetic" in out.getvalue()
     assert "Traceback" not in out.getvalue()
+
+
+def test_success_checks_packer_and_opentofu() -> None:
+    def run(args, **kwargs):
+        del kwargs
+        if args[:3] == ["docker", "manifest", "inspect"]:
+            return SimpleNamespace(returncode=0, stdout="{}", stderr="")
+        if args[0] == "curl":
+            return SimpleNamespace(
+                returncode=0,
+                stdout="HTTP/2 206\\r\\n\\r\\n__RUNTIME_DOWNLOAD_HTTP__:206\\n",
+            )
+        raise AssertionError(f"Unexpected call: {args}")
+
+    out = io.StringIO()
+    with (
+        patch.object(module.platform, "machine", return_value="x86_64"),
+        patch.object(module.subprocess, "run", side_effect=run) as mocked,
+        contextlib.redirect_stdout(out),
+    ):
+        code = module.main(
+            [
+                "--packer-version", "1.15.4",
+                "--packer-image", PACKER_IMAGE,
+                "--opentofu-version", "1.12.6",
+            ]
+        )
+    assert code == 0
+    assert mocked.call_count == 3
+    assert "образ Packer" in out.getvalue() or "Образ Packer" in out.getvalue()
 
 
 def main() -> None:
@@ -129,7 +195,10 @@ def main() -> None:
         test_dns_tls_network_and_server_errors,
         test_timeout_and_missing_curl_have_short_advice,
         test_sources_come_from_versions_and_known_domains,
+        test_docker_manifest_is_checked_without_pull,
+        test_docker_manifest_reports_useful_failure,
         test_failure_prints_only_reason_and_advice,
+        test_success_checks_packer_and_opentofu,
     ]
     for test in tests:
         test()
