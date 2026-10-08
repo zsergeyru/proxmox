@@ -43,6 +43,7 @@ docker:
     runtime:
       container_name: infra-runtime
       image: infra-runtime:v1
+      registry_image: ghcr.io/zsergeyru/proxmox-infra-runtime
       base_image: semaphoreui/semaphore:v2.18.30
       restart: unless-stopped
       network_mode: host
