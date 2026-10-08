@@ -609,15 +609,15 @@ print(json.dumps({"vmid": matches[0][0], "name": matches[0][1]}))
         existed = self.infra_exists()
 
         if self.mode == "recover":
-            self.verify_recovery_state()
+            self.timed_step("Проверка сохранённых данных", self.verify_recovery_state)
 
         if existed:
             if self.mode == "recover":
-                self.verify_persistent_layout()
-                self.remove_infra_rootfs_for_recovery()
+                self.timed_step("Проверка подключённых данных", self.verify_persistent_layout)
+                self.timed_step("Удаление старого rootfs", self.remove_infra_rootfs_for_recovery)
                 existed = False
             else:
-                self.verify_persistent_layout()
+                self.timed_step("Проверка подключённых данных", self.verify_persistent_layout)
                 self.fail(
                     f"LXC {self.infra_ctid} уже существует; "
                     "для рабочего infra-manager используйте обычный deploy/repair, "
@@ -629,7 +629,7 @@ print(json.dumps({"vmid": matches[0][0], "name": matches[0][1]}))
                 "recovery создаст новый rootfs на сохранённом состоянии"
             )
         else:
-            self.prepare_new_persistent_layout()
+            self.timed_step("Создание постоянных каталогов", self.prepare_new_persistent_layout)
 
         self.timed_step("Подготовка 990", self.prepare_runner)
         self.timed_step(f"Создание LXC {self.infra_ctid}", self.create_infra_manager)
