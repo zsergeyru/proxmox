@@ -132,7 +132,26 @@
       - runtime
   changed_when: true
 
-- name: Запустить OpenBao с актуальной конфигурацией
+- name: Перезапустить OpenBao после изменения конфигурации
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - --env-file
+      - "{{ provision.paths.compose }}/.versions.env"
+      - -f
+      - "{{ provision.paths.compose }}/docker-compose.yml"
+      - up
+      - -d
+      - --force-recreate
+      - openbao
+  changed_when: true
+  when: >-
+    infra_compose_files.changed
+    or infra_compose_versions.changed
+    or (openbao_tls_files.results | selectattr('changed') | list | length > 0)
+
+- name: Подтвердить запуск OpenBao без повторного создания
   ansible.builtin.command:
     argv:
       - docker
@@ -145,6 +164,12 @@
       - -d
       - openbao
   changed_when: true
+  when: >-
+    not (
+      infra_compose_files.changed
+      or infra_compose_versions.changed
+      or (openbao_tls_files.results | selectattr('changed') | list | length > 0)
+    )
 
 - name: Запустить управляющую среду
   ansible.builtin.command:
