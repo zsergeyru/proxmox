@@ -234,6 +234,29 @@ def check_log_levels() -> None:
             os.environ["INFRA_LOG_LEVEL"] = old_level
 
 
+def check_duration_output() -> None:
+    expected = {
+        0: "00:00",
+        9: "00:09",
+        72: "01:12",
+        3599: "59:59",
+        3600: "01:00:00",
+        3724: "01:02:04",
+    }
+    for seconds, label in expected.items():
+        if common.format_duration(seconds) != label:
+            fail(f"Неверный формат времени {seconds}: {label}")
+    output = io.StringIO()
+    terminal = Console(out=output, err=io.StringIO())
+    terminal.timing("Ansible", 72.9)
+    terminal.timing("Развёртывание", 12, interrupted=True)
+    if output.getvalue().splitlines() != [
+        "[ВРЕМЯ] Ansible: 01:12",
+        "[ПРЕРВАНО] Развёртывание: 00:12",
+    ]:
+        fail("Время успешных и прерванных операций должно быть видимым")
+
+
 def check_runtime_activation_guard() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
@@ -414,6 +437,7 @@ def check_pve_helpers() -> None:
 def main_test() -> None:
     check_cli_and_commands()
     check_log_levels()
+    check_duration_output()
     check_runtime_activation_guard()
     check_path_overrides()
     check_command_runner_contract()
