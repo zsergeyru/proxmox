@@ -118,6 +118,24 @@
       - "+"
   changed_when: true
 
+- name: Проверить доступ к источникам сборки управляющей среды
+  ansible.builtin.command:
+    argv:
+      - python3
+      - "{{ provision.paths.bootstrap_repository }}/scripts/infra-manager/jobs/check-runtime-downloads.py"
+      - --packer-version
+      - "{{ provision.docker.services.runtime.tools.packer }}"
+      - --opentofu-version
+      - "{{ provision.docker.services.runtime.tools.opentofu }}"
+  register: infra_runtime_download_check
+  changed_when: false
+  failed_when: false
+
+- name: Сообщить причину недоступности источников сборки
+  ansible.builtin.fail:
+    msg: "{{ infra_runtime_download_check.stdout | default('Проверка сетевых источников не запустилась: проверьте Python и curl в госте.', true) | trim }}"
+  when: infra_runtime_download_check.rc != 0
+
 - name: Собрать управляющую среду
   ansible.builtin.command:
     argv:
