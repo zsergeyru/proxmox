@@ -172,6 +172,9 @@ jobs:
       - name: Run infra-manager guest contract
         run: bash scripts/tests/test-infra-manager-guest-contract.sh
 
+      - name: Check infra-runtime image distribution
+        run: python scripts/tests/test-runtime-distribution.py
+
       - name: Run infra-manager OpenBao contract
         run: bash scripts/tests/test-infra-manager-openbao-contract.sh
 
