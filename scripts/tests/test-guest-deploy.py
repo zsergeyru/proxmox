@@ -1262,8 +1262,73 @@ def check_opentofu_provider_mirror() -> None:
             fail("tofu init не использует локальное зеркало провайдера")
 
 
+def check_ansible_duration() -> None:
+    paths = DeploymentPaths(
+        guest_dir=ROOT / "infrastructure/guests/410-ai-control",
+        private_key=None,
+        playbook=ROOT / "automation/ansible/playbooks/configure-guest.yml",
+        known_hosts=Path("/tmp/test-known-hosts"),
+        plan_file=Path("/tmp/test.tfplan"),
+    )
+    context = DeploymentContext(
+        client=SimpleNamespace(),
+        vmid=410,
+        name="ai-control",
+        node="pve",
+        kind="vm",
+        features=(),
+        template_vmid=9000,
+        address="192.0.2.10",
+        target='proxmox_virtual_environment_vm.guest["410"]',
+        workspace=SimpleNamespace(),
+        paths=paths,
+    )
+    for failure in (False, True):
+        with (
+            patch.object(
+                guest_deploy_module,
+                "PATHS",
+                SimpleNamespace(ssh_client_ca_public_key=Path("/nonexistent")),
+            ),
+            patch.object(guest_deploy_module, "_project_git_ansible_vars", return_value=[]),
+            patch.object(
+                guest_deploy_module,
+                "run",
+                side_effect=InfraManagerError("ожидаемая ошибка") if failure else None,
+            ) as run,
+            patch.object(
+                guest_deploy_module.time,
+                "monotonic",
+                side_effect=[10.0, 87.5],
+            ),
+            patch.object(guest_deploy_module, "console") as output,
+        ):
+            try:
+                guest_deploy_module._run_guest_ansible(
+                    context,
+                    private_key=Path("/tmp/test-identity"),
+                    certificate=None,
+                    provision_phase="full",
+                    self_update=False,
+                    project_branch="main",
+                )
+            except InfraManagerError:
+                if not failure:
+                    fail("Непредвиденная ошибка Ansible")
+            else:
+                if failure:
+                    fail("Ошибка Ansible должна приводить к исключению")
+            run.assert_called_once()
+            output.timing.assert_called_once_with(
+                "Ansible гостя 410 (full)",
+                77.5,
+                interrupted=failure,
+            )
+
+
 def main_test() -> None:
     check_deploy_guest_survey_input()
+    check_ansible_duration()
     check_pve_host_support_before_signing()
     check_opentofu_state_status()
     check_opentofu_provider_mirror()
