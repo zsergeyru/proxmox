@@ -51,13 +51,14 @@
     owner: root
     group: root
     mode: "0644"
+  register: portal_gateway_unit
 
 - name: Включить службу действий локального портала
   ansible.builtin.systemd_service:
     name: infra-manager-portal-gateway.service
     enabled: true
-    state: restarted
-    daemon_reload: true
+    state: "{{ 'restarted' if portal_gateway_unit.changed else 'started' }}"
+    daemon_reload: "{{ portal_gateway_unit.changed }}"
 
 - name: Сделать команду состояния доступной через pct exec
   ansible.builtin.file:
@@ -73,12 +74,13 @@
     owner: root
     group: root
     mode: "0644"
+  register: openbao_startup_unit
 
 - name: Включить разблокировку OpenBao при запуске infra-manager
   ansible.builtin.systemd_service:
     name: infra-manager-openbao-startup-unseal.service
     enabled: true
-    daemon_reload: true
+    daemon_reload: "{{ openbao_startup_unit.changed }}"
 
 - name: Настроить владельца данных Semaphore
   ansible.builtin.file:
