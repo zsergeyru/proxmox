@@ -318,6 +318,30 @@ def check_deploy_operation() -> None:
     reserve.assert_not_called()
     cancel.assert_not_called()
 
+    # Прямой deploy через оператор PVE показывает статус снаружи;
+    # стандартное задание Semaphore по-прежнему показывает его здесь.
+    with (
+        patch.dict(
+            operations.os.environ,
+            {"INFRA_MANAGER_OPERATOR_FINAL_STATUS": "1"},
+        ),
+        patch.object(
+            operations,
+            "run_deploy_guest",
+            return_value=0,
+        ) as deploy,
+        patch.object(operations, "show_guest_status") as show,
+        patch.object(
+            operations.PveClient,
+            "from_opentofu_env",
+        ) as client_factory,
+    ):
+        if operations._run_deploy(ROOT, identity) != 0:
+            fail("Прямой Deploy Guest завершился ошибкой")
+    deploy.assert_called_once_with(ROOT, 410)
+    show.assert_not_called()
+    client_factory.assert_not_called()
+
     infra = guest_identity(ROOT, 910)
     with (
         patch.object(
