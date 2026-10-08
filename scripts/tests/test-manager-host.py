@@ -392,6 +392,10 @@ def test_runtime_snapshot_refresh_policy() -> None:
         snapshot = operator._prepare_runtime_snapshot("deploy", 410)
 
     assert snapshot == "/tmp/infra-manager-direct-1234-410"
+    # Постоянная Git-копия root-only; временный снимок читает root,
+    # но пользователь Semaphore получает права только на сам снимок.
+    assert 'cp -a "$2"/. "$1"/' in operator.RUNTIME_SNAPSHOT_SCRIPT
+    assert 'chown -R 1001:0 "$1"' in operator.RUNTIME_SNAPSHOT_SCRIPT
     checkout_lock.assert_called_once_with(exclusive=True)
     refresh.assert_called_once_with()
     run_command.assert_called_once_with(
@@ -399,7 +403,7 @@ def test_runtime_snapshot_refresh_policy() -> None:
             "docker",
             "exec",
             "--user",
-            "1001:0",
+            "0",
             operator.RUNTIME_CONTAINER,
             "sh",
             "-eu",
