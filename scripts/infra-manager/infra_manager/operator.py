@@ -46,6 +46,11 @@ chown -R 1001:0 "$1"
 """.strip()
 RUNTIME_DIRECT_SCRIPT = """
 trap 'rm -rf "$1"' EXIT INT TERM
+# Итоговый статус обычного гостя выведет оператор PVE с доступными ему правами.
+# Для управляющего гостя статус сохраняется внутри операции развёртывания.
+if [ "$2" = "deploy" ]; then
+    export INFRA_MANAGER_OPERATOR_FINAL_STATUS=1
+fi
 python3 "$1/scripts/infra-manager/jobs/guest-operation.py" "$2" "$3"
 """.strip()
 
