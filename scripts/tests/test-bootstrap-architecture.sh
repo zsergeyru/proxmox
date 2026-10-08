@@ -148,14 +148,14 @@ start = source.index("    def apply(self) -> None:")
 end = source.index("    def execute(self) -> None:", start)
 apply_body = source[start:end]
 steps = [
-    "self.configure_infra_manager_base()",
-    "self.handoff_infra(",
-    "self.configure_infra_manager_control_plane()",
-    "self.initialize_infra_openbao()",
-    "self.sync_infra_ssh_ca_to_runner()",
-    "self.configure_infra_manager_ssh_trust()",
-    "self.remove_bootstrap_ssh_access_from_infra()",
-    "self.configure_infra_manager()",
+    'self.configure_infra_manager_base)',
+    'self.handoff_infra,',
+    'self.configure_infra_manager_control_plane',
+    'self.initialize_infra_openbao)',
+    'self.sync_infra_ssh_ca_to_runner)',
+    'self.configure_infra_manager_ssh_trust)',
+    'self.remove_bootstrap_ssh_access_from_infra,',
+    'self.configure_infra_manager)',
 ]
 positions = [apply_body.index(step) for step in steps]
 if positions != sorted(positions):
