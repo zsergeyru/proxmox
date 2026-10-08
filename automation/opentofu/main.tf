@@ -38,9 +38,18 @@ resource "proxmox_virtual_environment_vm" "guest" {
   on_boot    = each.value.boot.onboot
   protection = each.value.protection
 
-  startup {
-    order    = try(tostring(each.value.boot.order), null)
-    up_delay = try(each.value.boot.startup_delay_seconds, null)
+  # Не передавать PVE пустой startup: провайдер превращает его в -1/-1/-1
+  # и пытается применить изменение без фактических параметров (HTTP 500).
+  dynamic "startup" {
+    for_each = (
+      try(each.value.boot.order, null) != null ||
+      try(each.value.boot.startup_delay_seconds, null) != null
+    ) ? [1] : []
+
+    content {
+      order    = try(tostring(each.value.boot.order), null)
+      up_delay = try(each.value.boot.startup_delay_seconds, null)
+    }
   }
 
   # Обычное применение не должно автоматически останавливать гостя
@@ -136,9 +145,18 @@ resource "proxmox_virtual_environment_container" "guest" {
   start_on_boot = each.value.boot.onboot
   protection    = each.value.protection
 
-  startup {
-    order    = try(tostring(each.value.boot.order), null)
-    up_delay = try(each.value.boot.startup_delay_seconds, null)
+  # Не передавать PVE пустой startup: провайдер превращает его в -1/-1/-1
+  # и пытается применить изменение без фактических параметров (HTTP 500).
+  dynamic "startup" {
+    for_each = (
+      try(each.value.boot.order, null) != null ||
+      try(each.value.boot.startup_delay_seconds, null) != null
+    ) ? [1] : []
+
+    content {
+      order    = try(tostring(each.value.boot.order), null)
+      up_delay = try(each.value.boot.startup_delay_seconds, null)
+    }
   }
 
   cpu {
