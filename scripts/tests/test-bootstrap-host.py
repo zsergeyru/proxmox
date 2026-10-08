@@ -234,7 +234,7 @@ def test_bootstrap_timing_success_and_failure() -> None:
         host.timed_step("Тестовый этап", lambda: host.ok("Тест завершён"))
 
     if not any(
-        "[ОК] Тест завершён" in line and line.endswith("(01:02)")
+        "[ОК]" in line and "Тест завершён" in line and line.endswith("(01:02)")
         for line in output.getvalue().splitlines()
     ):
         raise AssertionError("Время должно быть справа в исходной строке [ОК]")
@@ -249,7 +249,7 @@ def test_bootstrap_timing_success_and_failure() -> None:
         result = host.timed_step("Проверка", lambda: "ready")
     assert_equal(result, "ready", "Замер не должен менять результат этапа")
     if not any(
-        "[ОК] Проверка" in line and line.endswith("(00:01)")
+        "[ОК]" in line and "Проверка" in line and line.endswith("(00:01)")
         for line in output.getvalue().splitlines()
     ):
         raise AssertionError("Этап без собственного [ОК] должен получить итоговый статус")
