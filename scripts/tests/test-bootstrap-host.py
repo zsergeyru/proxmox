@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import contextlib
 import importlib.util
+import io
 import os
 import sys
 import tempfile
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
 MODULE_PATH = ROOT / "scripts/bootstrap-runner/bootstrap-host.py"
@@ -221,6 +224,48 @@ def test_pve_node_address() -> None:
         raise AssertionError("Отсутствие IPv4 PVE должно считаться ошибкой")
 
 
+def test_bootstrap_timing_success_and_failure() -> None:
+    host = BootstrapHost("apply")
+    output = io.StringIO()
+    with (
+        patch.object(module.time, "monotonic", side_effect=[10.0, 72.4]),
+        contextlib.redirect_stdout(output),
+    ):
+        result = host.timed_step("Тестовый этап", lambda: "ready")
+
+    assert_equal(result, "ready", "Замер не должен менять результат этапа")
+    if "[ВРЕМЯ] Тестовый этап: 00:01:02" not in output.getvalue():
+        raise AssertionError("Успешный этап должен показывать длительность")
+    assert_equal(
+        host._timings[-1][2],
+        True,
+        "Успешный этап должен сохраняться в итогах",
+    )
+
+    output = io.StringIO()
+    def fail_operation():
+        raise BootstrapError("ожидаемая ошибка")
+
+    with (
+        patch.object(module.time, "monotonic", side_effect=[100.0, 107.5]),
+        contextlib.redirect_stdout(output),
+    ):
+        try:
+            host.timed_step("Сбой этапа", fail_operation)
+        except BootstrapError as exc:
+            if str(exc) != "ожидаемая ошибка":
+                raise
+        else:
+            raise AssertionError("Замер не должен скрывать ошибку этапа")
+
+    if "[ВРЕМЯ][ОШИБКА] Сбой этапа: 00:00:07" not in output.getvalue():
+        raise AssertionError("Прерванный этап должен показывать длительность")
+    if host._timings[-1][2] is not False:
+        raise AssertionError("Прерванный этап должен отмечаться в итогах")
+    if module._format_duration(3661.9) != "01:01:01":
+        raise AssertionError("Формат времени должен поддерживать часы")
+
+
 class ProgressHarness(BootstrapHost):
     def __init__(self, log_file: Path) -> None:
         super().__init__("apply")
@@ -258,6 +303,8 @@ def test_progress_streaming() -> None:
         log_text = log_file.read_text(encoding="utf-8")
         if "TASK [Собрать infra-runtime]" not in log_text or "PLAY RECAP" not in log_text:
             raise AssertionError("Полный вывод должен одновременно сохраняться в журнале")
+        if "[ВРЕМЯ] Ansible: Собрать infra-runtime:" not in log_text:
+            raise AssertionError("Журнал должен сохранять длительность каждой Ansible-задачи")
 
 
 class BootstrapStepHarness(BootstrapHost):
@@ -920,6 +967,7 @@ def main() -> None:
         test_full_pve_token_missing_secret_is_removed,
         test_full_pve_token_invalid_json_is_removed,
         test_pve_node_address,
+        test_bootstrap_timing_success_and_failure,
         test_progress_streaming,
         test_bootstrap_steps_enable_progress,
         test_infra_ready_uses_status_as_final_screen,
