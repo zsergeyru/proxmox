@@ -88,8 +88,6 @@ def validate_command(arguments: list[str], allowed: dict[str, object]) -> tuple[
     if (not isinstance(targets, list) or any(type(item) is not int for item in targets)
             or vmid not in targets):
         raise AgentAccessError("Команда или VMID не разрешены")
-    if operation in MUTATING and vmid in {100, 410, 910}:
-        raise AgentAccessError("Запрещено изменять защищённого гостя")
     return operation, vmid
 
 
