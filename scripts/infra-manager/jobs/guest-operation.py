@@ -69,8 +69,11 @@ def main() -> int:
             show_secrets=False,
         )
     except (InfraManagerError, OSError) as exc:
-        console.error(str(exc))
+        console.failure(exc, vmid=vmid)
         return 1
+    except KeyboardInterrupt:
+        console.warning(f"Операция остановлена пользователем. Перед повторным запуском выполните infra-manager status {vmid}.")
+        return 130
 
 
 if __name__ == "__main__":

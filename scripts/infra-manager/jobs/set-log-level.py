@@ -59,7 +59,7 @@ def main() -> int:
     try:
         return set_log_level_from_task(selected)
     except (InfraManagerError, OSError) as exc:
-        console.error(str(exc))
+        console.failure(exc)
         return 1
 
 

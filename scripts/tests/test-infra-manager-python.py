@@ -9,6 +9,7 @@ import os
 import subprocess
 import sys
 import tempfile
+from unittest.mock import patch
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -434,7 +435,43 @@ def check_pve_helpers() -> None:
         fail(f"Выбран неверный конечный адрес PVE API для LXC: {calls[-1]}")
 
 
+def check_user_errors_and_colors() -> None:
+    class Terminal(io.StringIO):
+        def isatty(self):
+            return True
+
+    for mode, no_color, term, enabled in (
+        ("auto", "", "xterm", True),
+        ("0", "", "xterm", False),
+        ("1", "1", "xterm", False),
+        ("1", "", "dumb", False),
+    ):
+        with patch.dict(os.environ, {"INFRA_MANAGER_COLOR": mode, "NO_COLOR": no_color, "TERM": term}):
+            out, err = Terminal(), Terminal()
+            terminal = Console(out=out, err=err)
+            terminal.result("success")
+            terminal.warning("warning")
+            terminal.timing("failure", 1, failed=True)
+            terminal.failure(CommandError(["ansible-playbook", "secret-argument"], 2, "secret-stderr"))
+            text = out.getvalue() + err.getvalue()
+            assert ("\033[" in text) == enabled
+            assert "secret-argument" not in text and "secret-stderr" not in text
+            assert "infra-manager status" in text and "2" in text
+            if enabled:
+                for code in ("32", "33", "31"):
+                    assert f"\033[{code}m" in text
+    with patch.dict(os.environ, {"INFRA_MANAGER_COLOR": "auto", "NO_COLOR": "", "TERM": "xterm"}):
+        out = io.StringIO()
+        Console(out=out).result("pipe")
+        assert "\033[" not in out.getvalue()
+    err = io.StringIO()
+    Console(err=err).failure(CommandError(["git"], 1, "connection timed out"))
+    assert "Git" not in err.getvalue()  # Network failure takes precedence.
+    assert "сети" in err.getvalue()
+
+
 def main_test() -> None:
+    check_user_errors_and_colors()
     check_cli_and_commands()
     check_log_levels()
     check_duration_output()

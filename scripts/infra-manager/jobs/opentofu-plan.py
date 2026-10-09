@@ -23,7 +23,7 @@ def main() -> int:
         require_runtime_activation_idle()
         return run_plan(REPO_ROOT)
     except (InfraManagerError, OSError) as exc:
-        console.error(str(exc))
+        console.failure(exc)
         return 1
 
 

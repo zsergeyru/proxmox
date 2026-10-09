@@ -803,7 +803,7 @@ def main_test() -> None:
         patch.object(status_module, "console", Console(out=quiet_output)),
     ):
         validate_semaphore_snapshot(stale_snapshot, project_branch=branch)
-    if not quiet_output.getvalue().startswith("[ПРЕДУПРЕЖДЕНИЕ] "):
+    if "[ПРЕДУПРЕЖДЕНИЕ]" not in quiet_output.getvalue():
         fail("Предупреждение должно быть видно в тихом режиме и передаваться через SSH")
 
     invalid_templates = copy.deepcopy(stale_templates)

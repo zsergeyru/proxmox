@@ -23,7 +23,7 @@ def main() -> int:
         require_runtime_activation_idle()
         return sync_ssh_access(REPO_ROOT)
     except (InfraManagerError, OSError, ValueError) as exc:
-        console.error(str(exc))
+        console.failure(exc)
         return 1
 
 

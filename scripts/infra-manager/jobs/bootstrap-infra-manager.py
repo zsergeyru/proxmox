@@ -41,7 +41,7 @@ def main() -> int:
             step=args.step,
         )
     except (InfraManagerError, OSError) as exc:
-        console.error(str(exc))
+        console.failure(exc)
         return 1
 
 

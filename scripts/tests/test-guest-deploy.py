@@ -1475,7 +1475,8 @@ def check_ansible_duration() -> None:
             output.timing.assert_called_once_with(
                 "Ansible гостя 410 (full)",
                 77.5,
-                interrupted=failure,
+                interrupted=False,
+                failed=failure,
             )
 
 

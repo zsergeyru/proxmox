@@ -110,11 +110,13 @@ class Console:
     out: object = sys.stdout
     err: object = sys.stderr
 
-    @staticmethod
-    def _color(code: str) -> str:
+    def _color(self, code: str, *, error: bool = False) -> str:
+        stream = self.err if error else self.out
+        mode = os.environ.get("INFRA_MANAGER_COLOR", "auto")
         enabled = (
-            os.environ.get("INFRA_MANAGER_COLOR", "0") == "1"
+            (mode == "1" or (mode == "auto" and getattr(stream, "isatty", lambda: False)()))
             and not os.environ.get("NO_COLOR")
+            and os.environ.get("TERM") != "dumb"
         )
         return code if enabled else ""
 
@@ -165,32 +167,62 @@ class Console:
         elapsed: float,
         *,
         interrupted: bool = False,
+        failed: bool = False,
     ) -> None:
         """Показать длительность операции, включая прерванную."""
-        label = "ПРЕРВАНО" if interrupted else "ВРЕМЯ"
+        label = "ПРЕРВАНО" if interrupted else "ОШИБКА" if failed else "ВРЕМЯ"
+        color = self._color("\033[33m" if interrupted else "\033[31m" if failed else "\033[36m")
+        reset = self._color("\033[0m")
         print(
-            f"[{label}] {message}: {format_duration(elapsed)}",
+            f"{color}[{label}]{reset} {message}: {format_duration(elapsed)}",
             file=self.out,
             flush=True,
         )
 
     def warning(self, message: str) -> None:
         """Показать предупреждение даже при тихой проверке состояния."""
+        yellow = self._color("\033[33m")
+        reset = self._color("\033[0m")
         print(
-            f"[ПРЕДУПРЕЖДЕНИЕ] {message}",
+            f"{yellow}[ПРЕДУПРЕЖДЕНИЕ]{reset} {message}",
             file=self.out,
             flush=True,
         )
 
     def error(self, message: str) -> None:
-        red = self._color("\033[31m")
-        bold = self._color("\033[1m")
-        reset = self._color("\033[0m")
+        red = self._color("\033[31m", error=True)
+        bold = self._color("\033[1m", error=True)
+        reset = self._color("\033[0m", error=True)
         print(
             f"{bold}{red}ОШИБКА:{reset} {message}",
             file=self.err,
             flush=True,
         )
+
+    def failure(self, exc: Exception, *, vmid: int | None = None) -> None:
+        """Показать причину и действие без аргументов команды и сырого stderr."""
+        if isinstance(exc, CommandError):
+            tool = Path(exc.argv[0]).name
+            detail = (exc.stderr or "").lower()
+            if "unreachable" in detail or "connection refused" in detail or "connection timed out" in detail:
+                message = "Не удалось подключиться к узлу или службе. Проверьте, что нужный узел запущен и доступен по сети; затем повторите операцию."
+            elif tool == "ansible-playbook":
+                message = "Настройка гостя не завершена. Проверьте состояние: infra-manager status <VMID>. Если служба не готова, проверьте её журнал внутри гостя, исправьте причину и повторите deploy."
+            elif tool == "git":
+                message = "Не удалось обновить проект. Проверьте доступ к Git-серверу, ключ доступа и наличие выбранной ветки; затем повторите операцию."
+            elif tool == "docker":
+                message = "Не удалось выполнить операцию Docker. Проверьте службу Docker и состояние контейнеров; затем повторите операцию."
+            elif tool in {"tofu", "terraform"}:
+                message = "Не удалось применить описание инфраструктуры. Проверьте доступ к PVE и параметры выбранного гостя; затем повторите операцию."
+            else:
+                message = "Операция не завершена. Проверьте состояние: infra-manager status <VMID>. Передайте администратору название операции и код ошибки."
+            if vmid is not None:
+                message = message.replace("<VMID>", str(vmid))
+            self.error(f"{message} Код ошибки: {exc.returncode}.")
+        elif isinstance(exc, OSError):
+            self.error("Не удалось обратиться к файлу или запустить программу. Проверьте наличие необходимых файлов, программ и права доступа; затем повторите операцию.")
+        else:
+            self.error(str(exc))
 
 
 console = Console()

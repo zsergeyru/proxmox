@@ -449,7 +449,7 @@ def check_gateway_http() -> None:
                 "/action/repair?vmid=910",
                 headers={"Origin": same_origin},
             )
-        if status != HTTPStatus.OK or "кодом 7" not in body:
+        if status != HTTPStatus.OK or "код 7" not in body or "infra-manager status 910" not in body or '<span class="error">' not in body:
             fail("Страница должна показывать код ошибки прямой операции")
 
         status, _, _ = _http_request(
@@ -466,6 +466,10 @@ def check_gateway_http() -> None:
 
 
 def main() -> None:
+    for label, style in (("[ОК]", "ok"), ("ОШИБКА:", "error"), ("[ПРЕРВАНО]", "warning"), ("[ВРЕМЯ]", "muted")):
+        rendered = portal_gateway.format_log_line(label + ' <script> & "')
+        assert f'class="{style}"' in rendered
+        assert '<script>' not in rendered and '&lt;script&gt;' in rendered
     check_bookmarks()
     check_service_discovery()
     check_local_dashboard_address()

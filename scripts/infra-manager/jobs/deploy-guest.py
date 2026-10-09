@@ -56,7 +56,7 @@ def main() -> int:
     except (InfraManagerError, OSError) as exc:
         if activation_reserved:
             cancel_runtime_activation()
-        console.error(str(exc))
+        console.failure(exc)
         return 1
 
 

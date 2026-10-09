@@ -721,6 +721,7 @@ def _run_guest_ansible(
 
     started = time.monotonic()
     completed = False
+    interrupted = False
     try:
         run(
             [
@@ -772,11 +773,15 @@ def _run_guest_ansible(
             cwd=repo_root,
         )
         completed = True
+    except KeyboardInterrupt:
+        interrupted = True
+        raise
     finally:
         console.timing(
             f"Ansible гостя {context.vmid} ({provision_phase})",
             time.monotonic() - started,
-            interrupted=not completed,
+            interrupted=interrupted,
+            failed=not completed and not interrupted,
         )
 
 def _configure_guest_os(

@@ -231,5 +231,5 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         raise InfraManagerError(f"Неизвестная команда: {args.command}")
     except (InfraManagerError, OSError) as exc:
-        console.error(str(exc))
+        console.failure(exc)
         return 1

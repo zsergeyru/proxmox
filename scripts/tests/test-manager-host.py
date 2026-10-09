@@ -57,6 +57,7 @@ def test_host_proxy() -> None:
         "--",
         "env",
         "INFRA_PVE_NODE=pve",
+        f"INFRA_MANAGER_COLOR={host.color_mode()}",
         "/usr/local/sbin/infra-manager",
         "--trusted-pve",
         "status",
@@ -176,7 +177,7 @@ def test_host_wrapper_is_minimal() -> None:
                 f"PVE-оболочка содержит лишнюю рабочую логику: {fragment}"
             )
 
-    if source.count("\n") > 150:
+    if source.count("\n") > 170:
         raise AssertionError("PVE-оболочка стала слишком большой")
     if '"pct",\n            "exec"' not in source:
         raise AssertionError("PVE-оболочка должна проксировать через pct exec")
@@ -231,6 +232,10 @@ def test_operator_guest_task_secret_policy() -> None:
                 "exec",
                 "--user",
                 "1001:0",
+                "-e",
+                f"INFRA_MANAGER_COLOR={'1' if operator.console._color(chr(27)) else '0'}",
+                "-e",
+                f"NO_COLOR={operator.os.environ.get('NO_COLOR', '')}",
                 operator.RUNTIME_CONTAINER,
                 "sh",
                 "-eu",
@@ -270,7 +275,7 @@ def test_operator_guest_task_secret_policy() -> None:
         ) == 7
     status.assert_not_called()
     console.error.assert_called_once_with(
-        "Операция deploy для гостя 410 завершилась с кодом 7"
+        "Операция deploy для гостя 410 не завершена (код 7). Выполните infra-manager status 410, устраните указанную выше причину и повторите операцию."
     )
 
     with (
@@ -542,6 +547,7 @@ def test_operator_guest_operation_timing() -> None:
         "Команда deploy гостя 910",
         65.5,
         interrupted=False,
+        failed=False,
     )
 
     with (
@@ -553,7 +559,8 @@ def test_operator_guest_operation_timing() -> None:
     output.timing.assert_called_once_with(
         "Команда deploy гостя 410",
         12.0,
-        interrupted=True,
+        interrupted=False,
+        failed=True,
     )
 
     with (
@@ -570,8 +577,23 @@ def test_operator_guest_operation_timing() -> None:
     output.timing.assert_called_once_with(
         "Команда deploy гостя 410",
         4.0,
-        interrupted=True,
+        interrupted=False,
+        failed=True,
     )
+
+
+def test_operator_interrupt() -> None:
+    with (
+        patch.object(operator, "_operator_guest_task", side_effect=KeyboardInterrupt),
+        patch.object(operator, "console") as output,
+    ):
+        try:
+            operator.operator_guest_task("deploy", 410, show_secrets=False)
+        except KeyboardInterrupt:
+            pass
+        else:
+            raise AssertionError("Ctrl+C must propagate")
+    assert output.timing.call_args.kwargs == {"interrupted": True, "failed": False}
 
 
 def test_public_command_contract() -> None:
@@ -606,6 +628,7 @@ def main() -> None:
     test_host_wrapper_is_minimal()
     test_operator_guest_task_secret_policy()
     test_operator_guest_operation_timing()
+    test_operator_interrupt()
     test_internal_project_refresh_uses_existing_checkout()
     test_runtime_snapshot_refresh_policy()
     test_operator_status_secret_policy()

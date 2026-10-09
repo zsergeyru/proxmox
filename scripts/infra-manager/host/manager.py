@@ -34,10 +34,10 @@ def run(
             check=False,
         )
     except OSError as exc:
-        raise OperatorError(f"Не удалось запустить {' '.join(argv)}: {exc}") from exc
+        raise OperatorError("Не удалось запустить операцию. Проверьте наличие необходимых программ и права root на PVE.") from exc
     if check and result.returncode:
         raise OperatorError(
-            f"Команда завершилась с кодом {result.returncode}: {' '.join(argv)}"
+            f"Операция не завершена (код {result.returncode}). Проверьте состояние управляющего гостя; при необходимости выполните infra-manager repair."
         )
     return result
 
@@ -116,12 +116,19 @@ def proxy_to_manager(arguments: list[str]) -> int:
             "--",
             "env",
             f"INFRA_PVE_NODE={socket.gethostname().split('.')[0]}",
+            f"INFRA_MANAGER_COLOR={color_mode()}",
             GUEST_COMMAND,
             "--trusted-pve",
             *arguments,
         ],
         check=False,
     ).returncode
+
+
+def color_mode() -> str:
+    mode = os.environ.get("INFRA_MANAGER_COLOR", "auto")
+    enabled = mode == "1" or (mode == "auto" and sys.stdout.isatty())
+    return "1" if enabled and not os.environ.get("NO_COLOR") and os.environ.get("TERM") != "dumb" else "0"
 
 
 def recover() -> int:
@@ -143,5 +150,9 @@ if __name__ == "__main__":
     try:
         raise SystemExit(main())
     except OperatorError as exc:
-        print(f"ОШИБКА: {exc}", file=sys.stderr)
+        label = "\033[31mОШИБКА:\033[0m" if color_mode() == "1" else "ОШИБКА:"
+        print(f"{label} {exc}", file=sys.stderr)
         raise SystemExit(1)
+    except KeyboardInterrupt:
+        print("Операция остановлена пользователем. Перед повторным запуском проверьте infra-manager status.", file=sys.stderr)
+        raise SystemExit(130)

@@ -218,6 +218,7 @@ def operator_guest_task(
     """Выполнить операцию и показать полное время работы команды."""
     started = time.monotonic()
     completed = False
+    interrupted = False
     try:
         result = _operator_guest_task(
             operation,
@@ -226,11 +227,15 @@ def operator_guest_task(
         )
         completed = result == 0
         return result
+    except KeyboardInterrupt:
+        interrupted = True
+        raise
     finally:
         console.timing(
             f"Команда {operation} гостя {vmid}",
             time.monotonic() - started,
-            interrupted=not completed,
+            interrupted=interrupted,
+            failed=not completed and not interrupted,
         )
 
 
@@ -250,6 +255,10 @@ def _operator_guest_task(
             "exec",
             "--user",
             "1001:0",
+            "-e",
+            f"INFRA_MANAGER_COLOR={'1' if console._color(chr(27)) else '0'}",
+            "-e",
+            f"NO_COLOR={os.environ.get('NO_COLOR', '')}",
             RUNTIME_CONTAINER,
             "sh",
             "-eu",
@@ -266,7 +275,8 @@ def _operator_guest_task(
     if result.returncode != 0:
         console.error(
             f"Операция {operation} для гостя {vmid} "
-            f"завершилась с кодом {result.returncode}"
+            f"не завершена (код {result.returncode}). "
+            f"Выполните infra-manager status {vmid}, устраните указанную выше причину и повторите операцию."
         )
         return result.returncode
     if operation == "test":
@@ -437,8 +447,13 @@ def main(argv: list[str] | None = None) -> int:
             )
         raise InfraManagerError(f"Неизвестная команда: {args.command}")
     except (InfraManagerError, OSError) as exc:
-        console.error(str(exc))
+        console.failure(exc, vmid=getattr(args, "vmid", None))
         return 1
+    except KeyboardInterrupt:
+        vmid = getattr(args, "vmid", None)
+        command = f"infra-manager status {vmid}" if vmid is not None else "infra-manager status"
+        console.warning(f"Операция остановлена пользователем. Перед повторным запуском выполните {command}.")
+        return 130
 
 
 if __name__ == "__main__":

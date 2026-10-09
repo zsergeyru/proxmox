@@ -66,6 +66,7 @@ def start_action(operation: str, vmid: int) -> subprocess.Popen[str]:
 
     environment = os.environ.copy()
     environment["PYTHONUNBUFFERED"] = "1"
+    environment["INFRA_MANAGER_COLOR"] = "0"
     return subprocess.Popen(
         [str(OPERATOR_COMMAND), operation, str(vmid)],
         stdout=subprocess.PIPE,
@@ -108,6 +109,20 @@ def _page(title: str, body: str) -> bytes:
 """.encode("utf-8")
 
 
+def format_log_line(line: str) -> str:
+    """Раскрасить статусы в HTML, сохранив экранирование всего вывода."""
+    escaped = html.escape(line)
+    label = line.lstrip()
+    style = (
+        "error" if label.startswith(("ОШИБКА:", "[ОШИБКА]"))
+        else "warning" if label.startswith(("[ПРЕДУПРЕЖДЕНИЕ]", "[ПРЕРВАНО]"))
+        else "ok" if label.startswith("[ОК]")
+        else "muted" if label.startswith(("[ИНФО]", "[ВРЕМЯ]"))
+        else ""
+    )
+    return f'<span class="{style}">{escaped}</span>' if style else escaped
+
+
 def _stream_page_start(title: str, vmid: int, name: str) -> bytes:
     return f"""<!doctype html>
 <html lang="ru">
@@ -130,6 +145,7 @@ def _stream_page_start(title: str, vmid: int, name: str) -> bytes:
     .ok {{ color: #34d399; font-weight: 700; }}
     .error {{ color: #fb7185; font-weight: 700; }}
     .muted {{ color: #94a3b8; }}
+    .warning {{ color: #fbbf24; font-weight: 700; }}
   </style>
 </head>
 <body><div class="card">
@@ -308,7 +324,7 @@ class PortalActionHandler(BaseHTTPRequestHandler):
             if not connected:
                 continue
             try:
-                self.wfile.write(html.escape(line).encode("utf-8"))
+                self.wfile.write(format_log_line(line).encode("utf-8"))
                 self.wfile.flush()
             except (BrokenPipeError, ConnectionResetError):
                 connected = False
@@ -321,7 +337,7 @@ class PortalActionHandler(BaseHTTPRequestHandler):
         result_text = (
             "Операция завершена успешно"
             if returncode == 0
-            else f"Операция завершилась с кодом {returncode}"
+            else f"Операция не завершена (код {returncode}). Выполните infra-manager status {identity.vmid}, устраните указанную выше причину и повторите операцию."
         )
         tail = (
             "</pre>"
