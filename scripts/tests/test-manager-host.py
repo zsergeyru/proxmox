@@ -190,6 +190,10 @@ def test_operator_guest_task_secret_policy() -> None:
         "export INFRA_MANAGER_OPERATOR_FINAL_STATUS=1"
         in operator.RUNTIME_DIRECT_SCRIPT
     )
+    assert (
+        "export INFRA_MANAGER_OPERATOR_STATUS_VERSION=2"
+        in operator.RUNTIME_DIRECT_SCRIPT
+    )
     snapshot = "/tmp/infra-manager-direct-test-410"
     for operation, expect_status in (
         ("deploy", True),
