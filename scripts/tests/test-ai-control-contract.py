@@ -170,10 +170,14 @@ with tempfile.TemporaryDirectory() as directory:
     env = os.environ | {
         "HERMES_CONFIG": str(config_path),
         "HERMES_MODEL_ROUTES": json.dumps(agent["api"]["model_routes"]),
-        "HERMES_UID": str(os.getuid()),
-        "HERMES_GID": str(os.getgid()),
+        "HERMES_UID": str(os.getuid() if os.name == 'posix' else 0),
+        "HERMES_GID": str(os.getgid() if os.name == 'posix' else 0),
     }
-    command = [sys.executable, "-c", merge_task["ansible.builtin.command"]["argv"][2]]
+    # Windows can verify the merge too; Unix ownership is checked on Linux.
+    code = merge_task["ansible.builtin.command"]["argv"][2]
+    if os.name == 'nt':
+        code = "import os\nos.chown=lambda *args: None\n" + code
+    command = [sys.executable, "-c", code]
     first = subprocess.run(command, env=env, capture_output=True, text=True, check=True)
     assert first.stdout.strip() == "changed"
     merged = load_yaml(config_path)
