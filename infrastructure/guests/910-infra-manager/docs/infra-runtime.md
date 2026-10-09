@@ -136,7 +136,11 @@ UserKnownHostsFile /var/lib/semaphore/known_hosts
 HashKnownHosts yes
 ```
 
+Файл `99-infra-manager.conf` устанавливается с правами `0644`, чтобы
+Semaphore (UID 1001, без прав root) мог прочитать конфигурацию OpenSSH.
 Штатный файл Semaphore `semaphore.conf` удаляется, чтобы он не ослабил эту настройку.
+В GitHub Actions выполняется `ssh -G github.com` от UID 1001 и проверяются
+права файла. Это проверяет конфигурацию SSH без попытки подключения к GitHub.
 
 ### Файл версий
 
