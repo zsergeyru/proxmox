@@ -210,13 +210,10 @@ def _run_deploy(
                 cancel_runtime_activation()
             return result
 
-        # При прямом deploy через PVE итоговый статус печатает оператор,
-        # чтобы не дублировать его и сохранить доверенный вывод секретов.
-        # Самообновление infra-manager продолжает выводить статус здесь.
-        if (
-            not self_update
-            and os.environ.get("INFRA_MANAGER_OPERATOR_FINAL_STATUS") == "1"
-        ):
+        # Итоговый статус прямого deploy (включая самообновление) печатает
+        # доверенный оператор PVE после завершения задачи. Задание Semaphore
+        # по-прежнему печатает общий итог здесь, но всегда без секретов.
+        if os.environ.get("INFRA_MANAGER_OPERATOR_FINAL_STATUS") == "1":
             return 0
 
         client = PveClient.from_opentofu_env()
@@ -296,12 +293,19 @@ def run_local_guest_status(
     vmid: int,
     *,
     show_secrets: bool = False,
+    allow_pending_activation: bool = False,
 ) -> int:
-    """Показать статус гостя из управляющего контура с PVE credential."""
+    """Показать статус гостя; при самообновлении разрешить только итог 910."""
 
-    require_runtime_activation_idle()
+    if not allow_pending_activation:
+        require_runtime_activation_idle()
     with project_checkout_lock(exclusive=False):
         identity = guest_identity(repo_root, vmid)
+        if allow_pending_activation and identity.role != SETTINGS.infra_manager_role:
+            raise InfraManagerError(
+                "Проверка при отложенной активации разрешена только "
+                "управляющему гостю"
+            )
         return _run_status(
             PveClient(),
             repo_root,
