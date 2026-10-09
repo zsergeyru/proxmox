@@ -217,14 +217,13 @@ def test_run_recovery_owns_bootstrap() -> None:
         configure_paths(module, Path(tmp))
         prepare_complete_state(module)
 
-        commands: list[list[str]] = []
+        commands: list[tuple[list[str], dict[str, object]]] = []
 
         def fake_download(target: Path) -> None:
             target.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
 
         def fake_run(argv: list[str], **kwargs: object):
-            del kwargs
-            commands.append(argv)
+            commands.append((argv, kwargs))
             return type("Result", (), {"returncode": 0})()
 
         with (
@@ -237,8 +236,10 @@ def test_run_recovery_owns_bootstrap() -> None:
 
         assert module.BOOTSTRAP_GITHUB_KEY.read_text() == "git-key\n"
         assert len(commands) == 1
-        assert commands[0][0] == "bash"
-        assert commands[0][-1] == "--recover"
+        argv, options = commands[0]
+        assert argv[0] == "bash"
+        assert len(argv) == 2, "Публичная команда не должна получать параметр --recover"
+        assert options["env"]["PROXMOX_BOOTSTRAP_INTERNAL_RECOVERY"] == "1"
 
 
 def main() -> None:
