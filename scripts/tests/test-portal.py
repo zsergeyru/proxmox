@@ -110,8 +110,10 @@ def check_service_discovery() -> None:
         fail("AdGuard Home должен иметь описание")
 
     ai = portal_services(410, "local")
-    if {next(iter(item)) for item in ai} != {"Open WebUI"}:
-        fail("Homepage 410 должен публиковать Open WebUI")
+    if {next(iter(item)) for item in ai} != {"Open WebUI", "Hermes Dashboard"}:
+        fail("Homepage 410 должен публиковать оба интерфейса")
+    if _service(ai, "Hermes Dashboard").get("href") != "http://192.168.4.10:9119/":
+        fail("Hermes Dashboard должен открываться на штатном порту")
     if _service(ai, "Open WebUI").get("icon") != "mdi-robot-#38bdf8":
         fail("Open WebUI должен иметь цветную иконку")
     if _service(ai, "Open WebUI").get("description") != "Веб-интерфейс ИИ":
@@ -122,7 +124,7 @@ def check_service_discovery() -> None:
     }:
         fail("AdGuard Home должен быть доступен общему порталу квартиры")
     if {next(iter(item)) for item in portal_services(410, "home")} != {
-        "Open WebUI"
+        "Open WebUI", "Hermes Dashboard"
     }:
         fail("Open WebUI должен быть доступен общему порталу квартиры")
 

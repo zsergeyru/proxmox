@@ -110,6 +110,84 @@
       }}
   no_log: true
 
+- name: Создать начальные секреты Dashboard
+  ansible.builtin.command:
+    argv:
+      - python3
+      - -c
+      - "import json,secrets; print(json.dumps({'password':secrets.token_urlsafe(24),'secret':secrets.token_hex(32)}))"
+  changed_when: false
+  no_log: true
+  register: ai_control_dashboard_secrets
+  when: provision.ai_control.agent.dashboard.enabled | bool
+
+- name: Настроить вход в Hermes Dashboard без замены существующих секретов
+  ansible.builtin.lineinfile:
+    path: "{{ provision.ai_control.paths.hermes_env }}"
+    regexp: "^{{ item.key }}="
+    line: "{{ item.key }}={{ item.value }}"
+    owner: root
+    group: root
+    mode: "0600"
+  loop:
+    - key: HERMES_DASHBOARD_BASIC_AUTH_USERNAME
+      value: "{{ provision.ai_control.agent.dashboard.username }}"
+    - key: HERMES_DASHBOARD_BASIC_AUTH_PASSWORD
+      value: "{{ (ai_control_dashboard_secrets.stdout | from_json).password }}"
+    - key: HERMES_DASHBOARD_BASIC_AUTH_SECRET
+      value: "{{ (ai_control_dashboard_secrets.stdout | from_json).secret }}"
+  when:
+    - provision.ai_control.agent.dashboard.enabled | bool
+    - not (ai_control_hermes_env_content.content | b64decode | regex_search('(?m)^' + item.key + '=.+$'))
+  no_log: true
+
+- name: Добавить начальные модели для выбора через Open WebUI
+  ansible.builtin.command:
+    argv:
+      - python3
+      - -c
+      - |
+        import json,os,pathlib,shutil,tempfile,yaml
+        path=pathlib.Path(os.environ['HERMES_CONFIG'])
+        config=yaml.safe_load(path.read_text()) if path.exists() else {}
+        config=config or {}
+        before=json.dumps(config,sort_keys=True)
+        if config.get('gateway') is None:
+            config['gateway']={}
+        gateway=config['gateway']
+        if gateway.get('platforms') is None:
+            gateway['platforms']={}
+        platforms=gateway['platforms']
+        if platforms.get('api_server') is None:
+            platforms['api_server']={}
+        api=platforms['api_server']
+        if api.get('model_routes') is None:
+            api['model_routes']={}
+        for alias,route in json.loads(os.environ['HERMES_MODEL_ROUTES']).items():
+            api['model_routes'].setdefault(alias,route)
+        if before != json.dumps(config,sort_keys=True):
+            if path.exists() and not path.with_suffix('.yaml.before-model-routes').exists():
+                shutil.copy2(path,path.with_suffix('.yaml.before-model-routes'))
+            fd,name=tempfile.mkstemp(dir=path.parent,prefix='.config-')
+            try:
+                with os.fdopen(fd,'w') as stream:
+                    yaml.safe_dump(config,stream,allow_unicode=True,sort_keys=False)
+                os.chmod(name,0o600)
+                os.chown(name,int(os.environ['HERMES_UID']),int(os.environ['HERMES_GID']))
+                os.replace(name,path)
+            finally:
+                if os.path.exists(name):
+                    os.unlink(name)
+            print('changed')
+  environment:
+    HERMES_CONFIG: "{{ provision.ai_control.paths.hermes_data }}/config.yaml"
+    HERMES_MODEL_ROUTES: "{{ provision.ai_control.agent.api.model_routes | default({}) | to_json }}"
+    HERMES_UID: "{{ provision.ai_control.agent.uid }}"
+    HERMES_GID: "{{ provision.ai_control.agent.gid }}"
+  register: ai_control_model_routes
+  changed_when: "'changed' in ai_control_model_routes.stdout"
+  no_log: true
+
 - name: Проверить секреты Open WebUI
   ansible.builtin.stat:
     path: "{{ provision.ai_control.paths.open_webui_env }}"
@@ -202,6 +280,17 @@
     or 'Created' in (ai_control_compose_up.stdout + ai_control_compose_up.stderr)
     or 'Recreated' in (ai_control_compose_up.stdout + ai_control_compose_up.stderr)
 
+- name: Перезапустить Hermes после добавления моделей
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ provision.ai_control.paths.compose_file }}"
+      - restart
+      - hermes
+  when: ai_control_model_routes.changed
+
 - name: Дождаться API Hermes
   ansible.builtin.uri:
     url: "http://127.0.0.1:{{ provision.ai_control.agent.api.port }}/health"
@@ -221,3 +310,14 @@
   retries: 60
   delay: 2
   until: ai_control_open_webui_health.status == 200
+
+- name: Дождаться Hermes Dashboard
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ provision.ai_control.agent.dashboard.port }}/login"
+    method: GET
+    status_code: 200
+  register: ai_control_dashboard_health
+  retries: 60
+  delay: 2
+  until: ai_control_dashboard_health.status == 200
+  when: provision.ai_control.agent.dashboard.enabled | bool

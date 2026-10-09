@@ -18,6 +18,7 @@ system:
     - jq
     - openssh-client
     - python3
+    - python3-yaml
 
 docker:
   source: docker-official-repository
@@ -49,10 +50,34 @@ ai_control:
       host: 127.0.0.1
       port: 8642
       model_name: hermes-agent
+      model_routes:
+        claude-opus-4.6:
+          model: anthropic/claude-opus-4.6
+          provider: openrouter
+        claude-sonnet-4.6:
+          model: anthropic/claude-sonnet-4.6
+          provider: openrouter
 
     dashboard:
-      enabled: false
+      enabled: true
+      host: 0.0.0.0
       port: 9119
+      username: admin
+      portal:
+        name: Hermes Dashboard
+        description: Настройки агента, моделей и инструментов
+        icon: mdi-tune-#38bdf8
+        scheme: http
+        port: 9119
+        targets:
+          - local
+          - home
+        operator:
+          username: admin
+          password:
+            source: guest_env
+            path: /etc/ai-control/hermes.env
+            key: HERMES_DASHBOARD_BASIC_AUTH_PASSWORD
 
   web:
     required: true

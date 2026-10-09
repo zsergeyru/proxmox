@@ -4,6 +4,11 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
+import os
+import subprocess
+import sys
+import tempfile
 
 import yaml
 
@@ -67,8 +72,14 @@ assert agent["api"] == {
     "host": "127.0.0.1",
     "port": 8642,
     "model_name": "hermes-agent",
+    "model_routes": {
+        "claude-opus-4.6": {"model": "anthropic/claude-opus-4.6", "provider": "openrouter"},
+        "claude-sonnet-4.6": {"model": "anthropic/claude-sonnet-4.6", "provider": "openrouter"},
+    },
 }
-assert agent["dashboard"]["enabled"] is False
+assert agent["dashboard"]["enabled"] is True
+assert agent["dashboard"]["port"] == 9119
+assert agent["dashboard"]["portal"]["operator"]["password"]["key"] == "HERMES_DASHBOARD_BASIC_AUTH_PASSWORD"
 
 assert web["required"] is True
 assert web["provider"] == "open-webui"
@@ -147,3 +158,31 @@ assert not CUSTOM_MODELS.exists()
 assert not CUSTOM_TOOLS.exists()
 
 print("[ОК] AI Control contract: Hermes + Open WebUI")
+
+# Execute the actual configuration merge: keep user choices and unrelated data,
+# add missing routes, then verify that a second deploy leaves the file untouched.
+tasks = yaml.safe_load(role_text)
+merge_task = next(task for task in tasks if task.get("register") == "ai_control_model_routes")
+with tempfile.TemporaryDirectory() as directory:
+    config_path = Path(directory) / "config.yaml"
+    initial = {"model": {"default": "user-model"}, "gateway": None, "custom": {"preserve": True}}
+    config_path.write_text(yaml.safe_dump(initial), encoding="utf-8")
+    env = os.environ | {
+        "HERMES_CONFIG": str(config_path),
+        "HERMES_MODEL_ROUTES": json.dumps(agent["api"]["model_routes"]),
+        "HERMES_UID": str(os.getuid()),
+        "HERMES_GID": str(os.getgid()),
+    }
+    command = [sys.executable, "-c", merge_task["ansible.builtin.command"]["argv"][2]]
+    first = subprocess.run(command, env=env, capture_output=True, text=True, check=True)
+    assert first.stdout.strip() == "changed"
+    merged = load_yaml(config_path)
+    assert merged["model"] == initial["model"] and merged["custom"] == initial["custom"]
+    routes = merged["gateway"]["platforms"]["api_server"]["model_routes"]
+    routes["claude-opus-4.6"]["model"] = "user-selected-opus"
+    config_path.write_text(yaml.safe_dump(merged), encoding="utf-8")
+    before = config_path.read_bytes()
+    second = subprocess.run(command, env=env, capture_output=True, text=True, check=True)
+    assert second.stdout == "" and config_path.read_bytes() == before
+    assert load_yaml(config_path.with_suffix('.yaml.before-model-routes')) == initial
+print("[ОК] Model routes preserve user configuration across deploys")

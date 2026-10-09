@@ -11,6 +11,9 @@ services:
     environment:
       HERMES_UID: "{{ provision.ai_control.agent.uid }}"
       HERMES_GID: "{{ provision.ai_control.agent.gid }}"
+      HERMES_DASHBOARD: "{{ 'true' if provision.ai_control.agent.dashboard.enabled else 'false' }}"
+      HERMES_DASHBOARD_HOST: "{{ provision.ai_control.agent.dashboard.host | default('127.0.0.1') }}"
+      HERMES_DASHBOARD_PORT: "{{ provision.ai_control.agent.dashboard.port }}"
     volumes:
       - {{ provision.ai_control.paths.hermes_data }}:/opt/data
 
