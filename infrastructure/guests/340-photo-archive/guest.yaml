@@ -1,0 +1,16 @@
+schema_version: 12
+vmid: 340
+name: photo-archive
+profile: debian-lxc-docker
+
+description: Постоянный фотоархив Immich с удалённой обработкой на Windows
+
+resources:
+  cores: 2
+  memory_mb: 4096
+  swap_mb: 1024
+  disk_size_gb: 16
+
+boot:
+  onboot: true
+  order: 40
