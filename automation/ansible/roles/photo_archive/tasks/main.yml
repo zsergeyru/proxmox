@@ -1,0 +1,120 @@
+---
+- name: Проверить описание фотоархива
+  ansible.builtin.assert:
+    that:
+      - provision.photo_archive.application == "immich"
+      - provision.photo_archive.mode == "api-only"
+      - provision.photo_archive.storage.allow_missing_mount == false
+    fail_msg: "340: некорректное описание Photo Archive"
+
+- name: Проверить подключение постоянного хранилища
+  ansible.builtin.command:
+    argv:
+      - mountpoint
+      - -q
+      - "{{ provision.photo_archive.storage.required_external_mount }}"
+  changed_when: false
+  # При отсутствии mp0 не допускаем создания архива на системном диске.
+
+- name: Проверить наличие каталога оригиналов
+  ansible.builtin.stat:
+    path: "{{ provision.photo_archive.paths.originals }}"
+  register: photo_archive_originals
+
+- name: Проверить каталог оригиналов
+  ansible.builtin.assert:
+    that:
+      - photo_archive_originals.stat.isdir | default(false)
+    fail_msg: "340: на подключённом хранилище отсутствует каталог originals"
+
+- name: Создать постоянные каталоги приложения
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0750"
+  loop:
+    - "{{ provision.photo_archive.paths.root }}"
+    - "{{ provision.photo_archive.paths.compose }}"
+    - "{{ provision.photo_archive.paths.configuration }}"
+    - "{{ provision.photo_archive.paths.uploads }}"
+    - "{{ provision.photo_archive.paths.database }}"
+
+- name: Проверить существующий пароль PostgreSQL
+  ansible.builtin.stat:
+    path: "{{ provision.photo_archive.paths.environment }}"
+  register: photo_archive_env
+
+- name: Сгенерировать пароль базы при первом запуске
+  ansible.builtin.command:
+    argv: [python3, -c, "import secrets,string; a=string.ascii_letters+string.digits; print(''.join(secrets.choice(a) for _ in range(48)))"]
+  changed_when: false
+  register: photo_archive_generated_password
+  no_log: true
+  when: not photo_archive_env.stat.exists
+
+- name: Сохранить параметры подключения к базе
+  ansible.builtin.copy:
+    dest: "{{ provision.photo_archive.paths.environment }}"
+    owner: root
+    group: root
+    mode: "0600"
+    force: false
+    content: |
+      DB_PASSWORD={{ photo_archive_generated_password.stdout }}
+      POSTGRES_PASSWORD={{ photo_archive_generated_password.stdout }}
+      DB_USERNAME=postgres
+      DB_DATABASE_NAME=immich
+      DB_HOSTNAME=database
+      REDIS_HOSTNAME=redis
+      TZ=Europe/Moscow
+  no_log: true
+  when: not photo_archive_env.stat.exists
+
+- name: Сформировать состав служб
+  ansible.builtin.template:
+    src: docker-compose.yml.j2
+    dest: "{{ provision.photo_archive.paths.compose_file }}"
+    mode: "0644"
+
+- name: Проверить состав служб
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ provision.photo_archive.paths.compose_file }}"
+      - config
+      - --quiet
+  changed_when: false
+
+- name: Загрузить образы
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ provision.photo_archive.paths.compose_file }}"
+      - pull
+  changed_when: false
+
+- name: Запустить сервер фотоархива
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ provision.photo_archive.paths.compose_file }}"
+      - up
+      - -d
+      - --remove-orphans
+  register: photo_archive_started
+  changed_when: "'Started' in (photo_archive_started.stdout + photo_archive_started.stderr) or 'Created' in (photo_archive_started.stdout + photo_archive_started.stderr) or 'Recreated' in (photo_archive_started.stdout + photo_archive_started.stderr)"
+
+- name: Дождаться ответа Immich
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ provision.photo_archive.web_port }}/api/server/ping"
+    status_code: 200
+  register: photo_archive_health
+  until: photo_archive_health.status == 200
+  retries: 60
+  delay: 3
