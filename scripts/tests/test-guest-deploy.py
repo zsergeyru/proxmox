@@ -156,6 +156,159 @@ def check_opentofu_state_status() -> None:
                 fail("Ошибка чтения существующего состояния была скрыта")
 
 
+def check_missing_guest_recreation_safety() -> None:
+    """Запрещать пересоздание при томах, неполной проверке и опасном плане."""
+
+    def preflight_context(client: object, state_dir: Path) -> SimpleNamespace:
+        return SimpleNamespace(
+            vmid=410,
+            name="ai-control",
+            kind="vm",
+            node="pve",
+            target='proxmox_virtual_environment_vm.guest["410"]',
+            client=client,
+            workspace=SimpleNamespace(
+                directory=Path("/tmp/opentofu"),
+                state_dir=state_dir,
+                env={"TF_VAR_pve_endpoint": "https://pve.example"},
+            ),
+        )
+
+    def storage_client(
+        *, volumes: list[dict[str, str]] | None = None,
+        offline: bool = False,
+        api_error: bool = False,
+        occupied: bool = False,
+    ) -> SimpleNamespace:
+        def data(endpoint: str, *, query: dict | None = None):
+            if api_error:
+                raise InfraManagerError("Недостаточно прав API")
+            if endpoint == "/storage":
+                return [{
+                    "storage": "local-lvm",
+                    "content": "images,rootdir",
+                    "disable": 1 if offline else 0,
+                }]
+            if endpoint == "/nodes":
+                return [{"node": "pve", "status": "online"}]
+            if endpoint == "/nodes/pve/storage/local-lvm/content":
+                assert query == {"vmid": 410}
+                return [] if volumes is None else volumes
+            raise AssertionError(f"Неожиданный PVE API: {endpoint}")
+
+        return SimpleNamespace(
+            data=data,
+            find_vm=lambda vmid: {"vmid": vmid} if occupied else None,
+        )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        good = preflight_context(storage_client(), base)
+        guest_infra_module._preflight_missing_guest_recreation(good)
+
+        for description, client in (
+            ("диск", storage_client(volumes=[{"volid": "local-lvm:vm-410-disk-0"}])),
+            ("отключённое хранилище", storage_client(offline=True)),
+            ("ошибка API", storage_client(api_error=True)),
+            ("VMID уже существует", storage_client(occupied=True)),
+        ):
+            try:
+                guest_infra_module._preflight_missing_guest_recreation(
+                    preflight_context(client, base)
+                )
+            except InfraManagerError:
+                pass
+            else:
+                fail(f"При {description} пересоздание ошибочно разрешено")
+
+        # Путь к архиву не должен зависеть от запуска вручную; данные state
+        # могут содержать секреты и не должны попасть в обычные журналы.
+        state = json.dumps({
+            "version": 4,
+            "serial": 9,
+            "resources": [{
+                "type": "proxmox_virtual_environment_vm",
+                "name": "guest",
+                "instances": [{"index_key": "410", "status": "ready"}],
+            }],
+        })
+        with patch.object(
+            guest_infra_module, "run",
+            return_value=SimpleNamespace(stdout=state),
+        ) as pull:
+            guest_infra_module._backup_state_before_recreation(good)
+        assert pull.call_args.args[0][-2:] == ["state", "pull"]
+        backups = list((base / "recovery-backups").glob("*.tfstate"))
+        if len(backups) != 1:
+            fail("Перед восстановлением отсутствует единственная копия state")
+        if backups[0].read_text(encoding="utf-8") != state:
+            fail("Резервная копия OpenTofu повреждена")
+        if backups[0].stat().st_mode & 0o077:
+            fail("Файл резервной копии state доступен посторонним")
+        if (base / "recovery-backups").stat().st_mode & 0o077:
+            fail("Каталог резервных копий доступен посторонним")
+
+        # Восстановление не должно изменять другие ресурсы или удалять
+        # прежние тома ни при каких возможных планах.
+        target = good.target
+        plan_path = base / "recreate.tfplan"
+        context = SimpleNamespace(
+            vmid=410,
+            target=target,
+            client=storage_client(),
+            paths=SimpleNamespace(plan_file=plan_path),
+        )
+        for actions in (("delete", "create"), ("update",), ("no-op",), ()):
+            plan_path.touch()
+            with (
+                patch.object(
+                    guest_deploy_module, "_build_guest_plan",
+                    return_value=SimpleNamespace(actions=actions),
+                ),
+                patch.object(guest_deploy_module, "_apply_plan") as apply,
+            ):
+                try:
+                    guest_deploy_module._reconcile_guest_infrastructure(
+                        context, missing_recreation=True
+                    )
+                except InfraManagerError:
+                    pass
+                else:
+                    fail(f"Опасный план {actions!r} ошибочно принят")
+            apply.assert_not_called()
+            if plan_path.exists():
+                fail("Временный план не удалён после запрещённого восстановления")
+
+        with (
+            patch.object(
+                guest_deploy_module, "_build_guest_plan",
+                return_value=SimpleNamespace(actions=("create",)),
+            ),
+            patch.object(guest_deploy_module, "_apply_plan") as apply,
+        ):
+            guest_deploy_module._reconcile_guest_infrastructure(
+                context, missing_recreation=True
+            )
+        apply.assert_called_once_with(context, ["create"])
+
+        # Никакое отсутствие PVE-объекта без явного допуска не может
+        # обойти исходную проверку даже при наличии старого state.
+        guest_infra_module._validate_pve_and_state(
+            good, state_present=True, state_status="ready",
+            missing_recreation_allowed=True,
+        )
+        for status in ("tainted", "unknown"):
+            try:
+                guest_infra_module._validate_pve_and_state(
+                    good, state_present=True, state_status=status,
+                    missing_recreation_allowed=True,
+                )
+            except InfraManagerError:
+                pass
+            else:
+                fail(f"Небезопасное состояние {status} разрешено")
+
+
 def check_project_branch_after_semaphore_branch_switch() -> None:
     """Semaphore может оставить имя local branch main после pull другой ветки."""
 
@@ -1331,6 +1484,7 @@ def main_test() -> None:
     check_ansible_duration()
     check_pve_host_support_before_signing()
     check_opentofu_state_status()
+    check_missing_guest_recreation_safety()
     check_opentofu_provider_mirror()
     check_project_branch_after_semaphore_branch_switch()
     check_infra_manager_self_update_path_after_vmid_change()
