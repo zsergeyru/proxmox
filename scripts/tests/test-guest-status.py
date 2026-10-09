@@ -44,6 +44,12 @@ def check_operator_contracts() -> None:
             ),
         },
         410: {
+            "Hermes Dashboard": (
+                "admin",
+                "guest_env",
+                "/etc/ai-control/hermes.env",
+                "HERMES_DASHBOARD_BASIC_AUTH_PASSWORD",
+            ),
             "Open WebUI": (
                 "admin@ai-control.local",
                 "guest_env",
@@ -103,7 +109,7 @@ def check_status_definitions() -> None:
     expected_types = {
         109: ("docker", "systemd", "file"),
         311: (),
-        410: ("docker", "docker", "file"),
+        410: ("docker", "docker", "http", "file"),
         910: ("local_status",),
     }
     for vmid, types in expected_types.items():
@@ -212,6 +218,9 @@ def check_rendered_status() -> None:
         "/etc/ai-control/open-webui.env": (
             "WEBUI_ADMIN_PASSWORD=webui-password\n"
         ),
+        "/etc/ai-control/hermes.env": (
+            "HERMES_DASHBOARD_BASIC_AUTH_PASSWORD=dashboard-password\n"
+        ),
         "/run/infra-manager/secrets/initial-admin-password": (
             "semaphore-password\n"
         ),
@@ -253,6 +262,8 @@ def check_rendered_status() -> None:
                 "http://192.168.4.10:3001/",
                 "Open WebUI",
                 "webui-password",
+                "Hermes Dashboard",
+                "dashboard-password",
             ),
         ),
         (
