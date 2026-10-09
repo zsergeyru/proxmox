@@ -49,6 +49,8 @@ trap 'rm -rf "$1"' EXIT INT TERM
 # В обычном задании Semaphore единый итог остаётся внутри задания без секретов.
 if [ "$2" = "deploy" ]; then
     export INFRA_MANAGER_OPERATOR_FINAL_STATUS=1
+    # Только новый оператор умеет выводить итог после самообновления.
+    export INFRA_MANAGER_OPERATOR_STATUS_VERSION=2
 fi
 python3 "$1/scripts/infra-manager/jobs/guest-operation.py" "$2" "$3"
 """.strip()

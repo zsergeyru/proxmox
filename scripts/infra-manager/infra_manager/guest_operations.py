@@ -213,7 +213,13 @@ def _run_deploy(
         # Итоговый статус прямого deploy (включая самообновление) печатает
         # доверенный оператор PVE после завершения задачи. Задание Semaphore
         # по-прежнему печатает общий итог здесь, но всегда без секретов.
-        if os.environ.get("INFRA_MANAGER_OPERATOR_FINAL_STATUS") == "1":
+        if (
+            os.environ.get("INFRA_MANAGER_OPERATOR_FINAL_STATUS") == "1"
+            and (
+                not self_update
+                or os.environ.get("INFRA_MANAGER_OPERATOR_STATUS_VERSION") == "2"
+            )
+        ):
             return 0
 
         client = PveClient.from_opentofu_env()
