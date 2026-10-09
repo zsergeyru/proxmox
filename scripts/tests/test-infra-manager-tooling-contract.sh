@@ -96,6 +96,8 @@ grep -Fq 'rm -f /tmp/infra-runtime-requirements.txt' "$DOCKERFILE" \
 if grep -Fq 'COPY requirements.txt /etc/semaphore/requirements.txt' "$DOCKERFILE"; then
     die "Файл requirements.txt в /etc/semaphore вызывает повторную установку при каждом запуске"
 fi
+grep -Fq 'COPY --chmod=0644 ssh_config /etc/ssh/ssh_config.d/99-infra-manager.conf' "$DOCKERFILE" \
+    || die "SSH-конфигурация должна быть читаема пользователем Semaphore (1001)"
 grep -q '^proxmoxer' "$REQ" \
     || die "Semaphore должен содержать proxmoxer"
 
