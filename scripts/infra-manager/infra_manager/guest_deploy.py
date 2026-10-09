@@ -17,10 +17,13 @@ from .guest_deploy_infrastructure import (
     DeploymentPaths,
     GuestPlan,
     _apply_plan,
+    _backup_state_before_recreation,
     _build_deployment_context,
     _build_guest_plan,
     _find_guest_directory,
     _ensure_ssh_host_key,
+    _forget_recreated_guest_host_key,
+    _preflight_missing_guest_recreation,
     _prepare_self_update_workspace,
     _validate_pve_and_state,
 )
@@ -915,12 +918,27 @@ def _validate_existing_guest_object(context: DeploymentContext) -> None:
         )
 
 
-def _reconcile_guest_infrastructure(context: DeploymentContext) -> None:
+def _reconcile_guest_infrastructure(
+    context: DeploymentContext,
+    *,
+    missing_recreation: bool = False,
+) -> None:
     """Применить состояние одной VM и всегда удалить временный plan."""
 
     console.info(f"Проверка состояния гостя {context.vmid}")
     try:
         plan = _build_guest_plan(context)
+        if missing_recreation:
+            # OpenTofu refresh обновляет исчезнувший объект при plan/apply
+            # без опасного ручного удаления записи из общего state.
+            if plan.actions != ("create",):
+                raise InfraManagerError(
+                    f"Гость {context.vmid}: для пересоздания ожидался "
+                    f"план только create; получено {plan.actions!r}"
+                )
+            # Проверка повторяется непосредственно перед применением:
+            # другой процесс мог создать объект или том после первой проверки.
+            _preflight_missing_guest_recreation(context)
         if not plan.actions or plan.actions == ("no-op",):
             console.ok(
                 f"OpenTofu: состояние гостя {context.vmid} "
@@ -1065,6 +1083,7 @@ def _run_deploy_guest(
         private_key=_bootstrap_scope_private_key() if bootstrap_scope else None,
     )
     bootstrap_private_key: Path | None = None
+    missing_recreation = False
 
     if self_update:
         console.info(
@@ -1114,14 +1133,32 @@ def _run_deploy_guest(
         state_present, state_status = context.workspace.get_resource_state(
             context.target
         )
+        missing_recreation = bool(
+            not bootstrap_scope
+            and phase == "all"
+            and state_present
+            and state_status == "ready"
+            and identity.source.get("recreate_if_missing") is True
+            and context.client.find_vm(context.vmid) is None
+        )
+        if missing_recreation:
+            console.info(
+                f"Гость {context.vmid} отсутствует: "
+                "проверка хранилищ и резервирование OpenTofu state"
+            )
+            _preflight_missing_guest_recreation(context)
+            _backup_state_before_recreation(context)
         _validate_pve_and_state(
             context,
             state_present=state_present,
             state_status=state_status,
+            missing_recreation_allowed=missing_recreation,
         )
 
     if not bootstrap_scope:
-        if not state_present and phase in {"all", "infrastructure"}:
+        if (not state_present or missing_recreation) and phase in {
+            "all", "infrastructure"
+        }:
             bootstrap_private_key = _ensure_bootstrap_identity(context.vmid)
         else:
             bootstrap_private_key = _existing_bootstrap_identity(context.vmid)
@@ -1134,7 +1171,15 @@ def _run_deploy_guest(
             )
 
     if phase in {"all", "infrastructure"}:
-        _reconcile_guest_infrastructure(context)
+        _reconcile_guest_infrastructure(
+            context,
+            missing_recreation=missing_recreation,
+        )
+        if missing_recreation:
+            _forget_recreated_guest_host_key(
+                context.paths.known_hosts,
+                context.address,
+            )
 
     # Некоторые свойства LXC Proxmox разрешает менять только самому root@pam,
     # а не API token. Они остаются частью общего guest/profile-контракта и
