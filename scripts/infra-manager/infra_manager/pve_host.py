@@ -394,7 +394,7 @@ install -d -o root -g root -m 0755 /var/lib/infra-agent/.ssh
 """)
     _install_remote_text(
         node,
-        "infra-agent ALL=(root) NOPASSWD: /usr/local/sbin/infra-manager-agent --execute *\\n",
+        "infra-agent ALL=(root) NOPASSWD: /usr/local/sbin/infra-manager-agent --execute *\n",
         Path("/etc/sudoers.d/infra-manager-agent"),
         "0440",
     )
