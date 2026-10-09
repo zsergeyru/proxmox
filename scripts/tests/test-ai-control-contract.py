@@ -73,6 +73,8 @@ assert agent["api"] == {
     "port": 8642,
     "model_name": "hermes-agent",
     "model_routes": {
+        "openrouter-free": {"model": "openrouter/free", "provider": "openrouter"},
+        "openai-gpt-5.4-mini": {"model": "gpt-5.4-mini", "provider": "openai-api"},
         "claude-opus-4.6": {"model": "anthropic/claude-opus-4.6", "provider": "openrouter"},
         "claude-sonnet-4.6": {"model": "anthropic/claude-sonnet-4.6", "provider": "openrouter"},
     },
@@ -170,6 +172,8 @@ with tempfile.TemporaryDirectory() as directory:
     env = os.environ | {
         "HERMES_CONFIG": str(config_path),
         "HERMES_MODEL_ROUTES": json.dumps(agent["api"]["model_routes"]),
+        "HERMES_INITIAL_CONFIG": json.dumps(agent['initial_config']),
+        "HERMES_DEFAULT_CONFIG": json.dumps({'_config_version':44,'model':'','terminal':{'backend':'local'}}),
         "HERMES_UID": str(os.getuid() if os.name == 'posix' else 0),
         "HERMES_GID": str(os.getgid() if os.name == 'posix' else 0),
     }
@@ -189,4 +193,24 @@ with tempfile.TemporaryDirectory() as directory:
     second = subprocess.run(command, env=env, capture_output=True, text=True, check=True)
     assert second.stdout == "" and config_path.read_bytes() == before
     assert load_yaml(config_path.with_suffix('.yaml.before-model-routes')) == initial
+    assert merged['providers']['local']['enabled'] is False
+    assert 'local-model' not in routes
+    fresh = Path(directory) / 'fresh.yaml'
+    subprocess.run(command, env=env | {'HERMES_CONFIG':str(fresh)}, capture_output=True, text=True, check=True)
+    seeded = load_yaml(fresh)
+    assert seeded['_config_version'] == 44
+    assert seeded['model'] == agent['initial_config']['model']
+    assert seeded['model']['provider'] == 'openrouter'
+    assert seeded['model']['default'] == 'openrouter/free'
+    assert seeded['terminal']['backend'] == 'local'
+    fresh_before = fresh.read_bytes()
+    subprocess.run(command, env=env | {'HERMES_CONFIG':str(fresh)}, capture_output=True, text=True, check=True)
+    assert fresh.read_bytes() == fresh_before
+    merged['providers']['local'].update(enabled=True,base_url='http://192.0.2.1:11434/v1',default_model='user-local-model')
+    config_path.write_text(yaml.safe_dump(merged),encoding='utf-8')
+    subprocess.run(command, env=env, capture_output=True, text=True, check=True)
+    configured = load_yaml(config_path)
+    local_route = configured['gateway']['platforms']['api_server']['model_routes']['local-model']
+    assert local_route == {'provider':'local','model':'user-local-model'}
+    assert configured['model'] == initial['model']
 print("[ОК] Model routes preserve user configuration across deploys")

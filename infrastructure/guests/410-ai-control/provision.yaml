@@ -45,12 +45,33 @@ ai_control:
     uid: 10000
     gid: 10000
 
+    initial_config:
+      model:
+        default: openrouter/free
+        provider: openrouter
+        base_url: https://openrouter.ai/api/v1
+        api_mode: chat_completions
+      providers:
+        local:
+          enabled: false
+          name: Local model
+          base_url: ""
+          default_model: ""
+          api_key: local
+          transport: chat_completions
+
     api:
       enabled: true
       host: 127.0.0.1
       port: 8642
       model_name: hermes-agent
       model_routes:
+        openrouter-free:
+          model: openrouter/free
+          provider: openrouter
+        openai-gpt-5.4-mini:
+          model: gpt-5.4-mini
+          provider: openai-api
         claude-opus-4.6:
           model: anthropic/claude-opus-4.6
           provider: openrouter

@@ -141,17 +141,50 @@
     - not (ai_control_hermes_env_content.content | b64decode | regex_search('(?m)^' + item.key + '=.+$'))
   no_log: true
 
-- name: Добавить начальные модели для выбора через Open WebUI
+- name: Получить закреплённый образ для первоначальной настройки Hermes
+  ansible.builtin.command:
+    argv:
+      - docker
+      - pull
+      - "{{ provision.ai_control.agent.image }}"
+  changed_when: false
+
+- name: Получить штатную конфигурацию из закреплённого образа без запуска Gateway
+  ansible.builtin.command:
+    argv:
+      - docker
+      - run
+      - --rm
+      - --workdir
+      - /opt/hermes
+      - --entrypoint
+      - /opt/hermes/.venv/bin/python
+      - "{{ provision.ai_control.agent.image }}"
+      - -c
+      - "import json; from hermes_cli.config import DEFAULT_CONFIG; print(json.dumps(DEFAULT_CONFIG))"
+  changed_when: false
+  register: ai_control_hermes_defaults
+  no_log: true
+
+- name: Подготовить первоначальную конфигурацию и отсутствующие маршруты моделей
   ansible.builtin.command:
     argv:
       - python3
       - -c
       - |
-        import json,os,pathlib,shutil,tempfile,yaml
+        import copy,json,os,pathlib,shutil,tempfile,yaml
         path=pathlib.Path(os.environ['HERMES_CONFIG'])
         config=yaml.safe_load(path.read_text()) if path.exists() else {}
         config=config or {}
         before=json.dumps(config,sort_keys=True)
+        initial=json.loads(os.environ['HERMES_INITIAL_CONFIG'])
+        if not config:
+            config=copy.deepcopy(json.loads(os.environ['HERMES_DEFAULT_CONFIG']))
+            config['model']=initial['model']
+        if config.get('providers') is None:
+            config['providers']={}
+        for name,provider in initial.get('providers',{}).items():
+            config['providers'].setdefault(name,provider)
         if config.get('gateway') is None:
             config['gateway']={}
         gateway=config['gateway']
@@ -165,6 +198,10 @@
             api['model_routes']={}
         for alias,route in json.loads(os.environ['HERMES_MODEL_ROUTES']).items():
             api['model_routes'].setdefault(alias,route)
+        local=config['providers'].get('local') or {}
+        if local.get('enabled') and local.get('base_url') and local.get('default_model'):
+            api['model_routes'].setdefault('local-model',{
+                'model':local['default_model'],'provider':'local'})
         if before != json.dumps(config,sort_keys=True):
             if path.exists() and not path.with_suffix('.yaml.before-model-routes').exists():
                 shutil.copy2(path,path.with_suffix('.yaml.before-model-routes'))
@@ -181,6 +218,8 @@
             print('changed')
   environment:
     HERMES_CONFIG: "{{ provision.ai_control.paths.hermes_data }}/config.yaml"
+    HERMES_DEFAULT_CONFIG: "{{ ai_control_hermes_defaults.stdout }}"
+    HERMES_INITIAL_CONFIG: "{{ provision.ai_control.agent.initial_config | to_json }}"
     HERMES_MODEL_ROUTES: "{{ provision.ai_control.agent.api.model_routes | default({}) | to_json }}"
     HERMES_UID: "{{ provision.ai_control.agent.uid }}"
     HERMES_GID: "{{ provision.ai_control.agent.gid }}"
