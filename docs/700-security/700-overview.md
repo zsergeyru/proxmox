@@ -210,7 +210,7 @@ infrastructure/security/access.yaml
 ```text
 guest:910 → pve-api/guests
 guest:410 → semaphore/infrastructure-task
-guest:410 → ssh/guest
+guest:910 → ssh/guest (цель guest:410)
 host:pve  → openbao/instance
 ```
 
