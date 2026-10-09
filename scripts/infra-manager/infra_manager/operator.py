@@ -15,7 +15,7 @@ from .common import (
     require_runtime_activation_idle,
     run,
 )
-from .guest_catalog import guest_identity
+from .guest_catalog import find_guest_by_role, guest_identity
 from .guest_deploy import project_branch_for_checkout, project_revision
 from .guest_operations import list_local_guests, run_local_guest_status
 from .operation_lock import project_checkout_lock
@@ -23,7 +23,6 @@ from .pve import PveClient
 from .pve_host import (
     preflight_recovery_contour,
     repair_openbao_on_host,
-    show_openbao_operator_credentials,
 )
 from .settings import PATHS, SETTINGS
 
@@ -46,8 +45,8 @@ chown -R 1001:0 "$1"
 """.strip()
 RUNTIME_DIRECT_SCRIPT = """
 trap 'rm -rf "$1"' EXIT INT TERM
-# Итоговый статус обычного гостя выведет оператор PVE с доступными ему правами.
-# Для управляющего гостя статус сохраняется внутри операции развёртывания.
+# Итоговый статус любого гостя печатает оператор PVE, а не Docker/Semaphore.
+# В обычном задании Semaphore единый итог остаётся внутри задания без секретов.
 if [ "$2" = "deploy" ]; then
     export INFRA_MANAGER_OPERATOR_FINAL_STATUS=1
 fi
@@ -186,21 +185,17 @@ def _prepare_runtime_snapshot(operation: str, vmid: int) -> str:
 
 
 def operator_status(*, show_secrets: bool) -> int:
-    """Проверить управляющий контур изнутри управляющего гостя."""
+    """Показать общий полный статус управляющего гостя по его роли."""
 
-    from .status import check_status
-
-    result = check_status(full=True, quiet=False)
-    if result == 0 and show_secrets:
-        print("\n==> OpenBao UI")
-        show_openbao_operator_credentials(_pve_node())
-    return result
+    identity = find_guest_by_role(PATHS.repo_root, SETTINGS.infra_manager_role)
+    return operator_guest_status(identity.vmid, show_secrets=show_secrets)
 
 
 def operator_guest_status(
     vmid: int,
     *,
     show_secrets: bool,
+    allow_pending_activation: bool = False,
 ) -> int:
     """Показать единый статус выбранного гостя."""
 
@@ -208,6 +203,7 @@ def operator_guest_status(
         PATHS.repo_root,
         vmid,
         show_secrets=show_secrets,
+        allow_pending_activation=allow_pending_activation,
     )
 
 
@@ -277,11 +273,20 @@ def _operator_guest_task(
     if operation == "deploy":
         identity = guest_identity(PATHS.repo_root, vmid)
         if identity.role == SETTINGS.infra_manager_role:
-            console.info(
-                "Отложенная активация infra-runtime продолжится "
-                "после завершения команды"
+            # Самообновление уже завершило Ansible и сняло блокировку задания.
+            # Ожидающая активация не должна подавлять ЕДИНЫЙ итоговый статус
+            # доверенного оператора PVE; остальные вызовы статусa блокируются.
+            result = operator_guest_status(
+                vmid,
+                show_secrets=show_secrets,
+                allow_pending_activation=True,
             )
-            return 0
+            if result == 0:
+                console.info(
+                    "Отложенная активация infra-runtime продолжится "
+                    "после завершения команды"
+                )
+            return result
 
     return operator_guest_status(
         vmid,
