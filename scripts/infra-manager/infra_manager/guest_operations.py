@@ -295,7 +295,7 @@ def run_local_guest_status(
     show_secrets: bool = False,
     allow_pending_activation: bool = False,
 ) -> int:
-    """Показать статус гостя; при самообновлении разрешить только итог 910."""
+    """Показать статус; при самообновлении разрешить только итог управляющего гостя."""
 
     if not allow_pending_activation:
         require_runtime_activation_idle()
