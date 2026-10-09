@@ -34,12 +34,15 @@ photo_archive:
     compose: /opt/photo-archive/compose
     compose_file: /opt/photo-archive/compose/docker-compose.yml
     configuration: /etc/photo-archive
-    environment: /etc/photo-archive/immich.env
+    environment: /mnt/persistent-state/secrets/immich.env
     originals: /srv/photo-archive/originals
-    uploads: /srv/photo-archive/immich
-    database: /var/lib/photo-archive/postgres
+    uploads: /mnt/persistent-state/immich
+    database: /mnt/persistent-state/postgres
   storage:
     required_external_mount: /srv/photo-archive
+    required_state_mount: /mnt/persistent-state
+    pve_state_source: /mnt/bindmounts/photo-archive/state
+    pve_data_source: /mnt/bindmounts/photo-archive/data
     originals_read_only: true
     allow_missing_mount: false
   workers:
@@ -58,9 +61,10 @@ photo_archive:
 
 persistence:
   backup_required:
-    - /var/lib/photo-archive/postgres
+    - /mnt/persistent-state/postgres
+    - /mnt/persistent-state/immich
+    - /mnt/persistent-state/secrets/immich.env
     - /srv/photo-archive
-    - /etc/photo-archive/immich.env
   reproducible:
     - /opt/photo-archive/compose
   ephemeral:
