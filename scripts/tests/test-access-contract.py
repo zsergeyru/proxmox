@@ -133,6 +133,14 @@ def main() -> None:
         and rule.get("resource") == "guest"
         for rule in rules_for(data, "guest:410")
     )
+    for target in (
+        "guests", "status:all", "test:managed", "deploy:managed",
+        "sync:managed", "repair:managed",
+    ):
+        require_rule(
+            data, subject="guest:410", service="pve-operator",
+            resource="guest-operation", target=target, permission="execute",
+        )
     assert not rules_for(data, "guest:311")
 
     # SSH identity и Git read определяются только access.yaml.
