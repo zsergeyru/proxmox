@@ -369,6 +369,26 @@ def test_recovery_host_support() -> None:
     ]
 
 
+def test_operator_agent_disabled_by_default() -> None:
+    installs: list[str] = []
+
+    def fake_install(node: str, source: Path, target: Path, mode: str):
+        assert node == "pve"
+        installs.append(str(target))
+
+    with (
+        patch.dict("os.environ", {"INFRA_ENABLE_PVE_AGENT_ACCESS": "0"}),
+        patch.object(module, "_install_remote_file", side_effect=fake_install),
+        patch.object(module, "_configure_agent_openbao_access") as openbao,
+        patch.object(module, "_configure_agent_ssh_host") as ssh,
+    ):
+        module.install_operator_host_support("pve", ROOT)
+
+    assert installs == ["/usr/local/sbin/infra-manager"]
+    openbao.assert_not_called()
+    ssh.assert_not_called()
+
+
 def test_operator_wrapper_install_guard() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
@@ -548,6 +568,7 @@ def main() -> None:
     test_openbao_host_support()
     test_openbao_status_checks()
     test_recovery_host_support()
+    test_operator_agent_disabled_by_default()
     test_operator_wrapper_install_guard()
     test_sign_ssh_client_key()
     test_issue_openbao_machine_credentials()
