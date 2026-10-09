@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import time
+from datetime import UTC, datetime
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -69,6 +71,7 @@ def _validate_pve_and_state(
     *,
     state_present: bool,
     state_status: str,
+    missing_recreation_allowed: bool = False,
 ) -> None:
     resource = context.client.find_vm(context.vmid)
 
@@ -100,9 +103,132 @@ def _validate_pve_and_state(
         return
 
     if state_present:
+        if missing_recreation_allowed and state_status == "ready":
+            return
         raise InfraManagerError(
             f"Гость {context.vmid} есть в OpenTofu state, но отсутствует в PVE"
         )
+
+
+def _preflight_missing_guest_recreation(context: DeploymentContext) -> None:
+    """Разрешить создание только при отсутствии объекта и сохранённых томов."""
+
+    if context.client.find_vm(context.vmid) is not None:
+        raise InfraManagerError(
+            f"Гость {context.vmid} появился в PVE: повторная проверка обязательна"
+        )
+
+    stores = context.client.data("/storage")
+    nodes = context.client.data("/nodes")
+    if not isinstance(stores, list) or not stores:
+        raise InfraManagerError("PVE не вернул полный список хранилищ")
+    if not isinstance(nodes, list) or not nodes:
+        raise InfraManagerError("PVE не вернул список узлов для проверки дисков")
+
+    node_names: list[str] = []
+    for node in nodes:
+        if not isinstance(node, dict) or not isinstance(node.get("node"), str):
+            raise InfraManagerError("Неполный список узлов PVE")
+        node_name = node["node"]
+        if not re.fullmatch(r"[A-Za-z0-9_-]+", node_name):
+            raise InfraManagerError("Некорректное имя узла PVE")
+        node_names.append(node_name)
+
+    found_disk_stores = False
+    for store in stores:
+        if not isinstance(store, dict):
+            raise InfraManagerError("Некорректное описание хранилища PVE")
+        content = store.get("content")
+        storage_id = store.get("storage")
+        if not isinstance(content, str) or not isinstance(storage_id, str):
+            raise InfraManagerError("PVE не вернул тип содержимого или имя хранилища")
+        if not re.fullmatch(r"[A-Za-z0-9_-]+", storage_id):
+            raise InfraManagerError("Некорректное имя хранилища PVE")
+        if not (set(content.split(",")) & {"images", "rootdir"}):
+            continue
+        found_disk_stores = True
+        if str(store.get("disable", "0")) in {"1", "true"}:
+            raise InfraManagerError(
+                f"Хранилище {storage_id} отключено: отсутствие дисков не доказано"
+            )
+        allowed = store.get("nodes")
+        if allowed is not None and not isinstance(allowed, str):
+            raise InfraManagerError("Некорректный список узлов хранилища PVE")
+        applicable = set(allowed.split(",")) if allowed else set(node_names)
+        if not applicable or not applicable.issubset(set(node_names)):
+            raise InfraManagerError(
+                f"Хранилище {storage_id}: невозможно проверить все узлы"
+            )
+        for node_name in sorted(applicable):
+            # PVE сам отбирает тома по VMID. При отказе API операция
+            # прерывается: неполная проверка не разрешает пересоздание.
+            volumes = context.client.data(
+                f"/nodes/{node_name}/storage/{storage_id}/content",
+                query={"vmid": context.vmid},
+            )
+            if not isinstance(volumes, list):
+                raise InfraManagerError(
+                    f"Хранилище {storage_id}: не удалось проверить тома"
+                )
+            if volumes:
+                raise InfraManagerError(
+                    f"Гость {context.vmid}: на {storage_id} (узел {node_name}) "
+                    "остались диски. Автоматическое пересоздание запрещено"
+                )
+    if not found_disk_stores:
+        raise InfraManagerError(
+            "PVE не сообщил ни одного дискового хранилища: "
+            "проверка отсутствия дисков невозможна"
+        )
+
+
+def _backup_state_before_recreation(context: DeploymentContext) -> None:
+    """Сохранить закрытую копию OpenTofu state до первого refresh/plan."""
+
+    pulled = run(
+        ["tofu", f"-chdir={context.workspace.directory}", "state", "pull"],
+        capture_output=True,
+        env=context.workspace.env,
+    ).stdout
+    try:
+        payload = json.loads(pulled)
+    except (ValueError, TypeError) as exc:
+        raise InfraManagerError("Не удалось сохранить состояние OpenTofu") from exc
+    if not isinstance(payload, dict) or not isinstance(payload.get("resources"), list):
+        raise InfraManagerError("Резервируемый OpenTofu state имеет неверный формат")
+
+    exists = any(
+        isinstance(resource, dict)
+        and resource.get("type") == context.target.split(".", 1)[0]
+        and resource.get("name") == "guest"
+        and any(
+            isinstance(instance, dict)
+            and str(instance.get("index_key")) == str(context.vmid)
+            for instance in resource.get("instances", [])
+        )
+        for resource in payload["resources"]
+        if isinstance(resource, dict)
+        and isinstance(resource.get("instances"), list)
+    )
+    if not exists:
+        raise InfraManagerError(
+            f"OpenTofu state изменился: запись гостя {context.vmid} исчезла"
+        )
+
+    backup_dir = context.workspace.state_dir / "recovery-backups"
+    if backup_dir.is_symlink():
+        raise InfraManagerError("Резервный каталог OpenTofu не должен быть ссылкой")
+    backup_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+    backup_dir.chmod(0o700)
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
+    backup = backup_dir / f"before-recreate-{context.vmid}-{stamp}-{os.getpid()}.tfstate"
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(backup, flags, 0o600)
+    with os.fdopen(descriptor, "w", encoding="utf-8") as file:
+        file.write(pulled)
+        file.flush()
+        os.fsync(file.fileno())
+    console.ok(f"Закрытая копия OpenTofu state сохранена: {backup}")
 
 
 def _set_template_protection(
@@ -183,6 +309,18 @@ def _apply_plan(
             console.ok(
                 f"Защита шаблона {context.template_vmid} восстановлена"
             )
+
+
+def _forget_recreated_guest_host_key(known_hosts: Path, address: str) -> None:
+    """Удалить прежний ключ ТОЛЬКО успешно пересозданного гостя."""
+
+    if not known_hosts.exists():
+        return
+    run(
+        ["ssh-keygen", "-R", address, "-f", str(known_hosts)],
+        check=False,
+        capture_output=True,
+    )
 
 
 def _ensure_ssh_host_key(
