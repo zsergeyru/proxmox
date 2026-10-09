@@ -407,6 +407,53 @@ install -d -o root -g root -m 0755 /var/lib/infra-agent/.ssh
     )
 
 
+def _configure_agent_openbao_access(node: str, repo_root: Path) -> None:
+    """Сопоставить одну роль AI с адресом и подписывающей ролью OpenBao."""
+
+    policy = load_access_policy(repo_root)
+    ai_control = find_guest_by_role(repo_root, "ai-control")
+    guest = policy.guests.get(ai_control.vmid)
+    if guest is None or guest.address is None:
+        raise InfraManagerError("Для агента необходим проверенный постоянный IPv4")
+    _ssh_with_input(
+        node,
+        str(OPENBAO_HOST_COMMAND),
+        "--configure-agent-access",
+        input_text=json.dumps({
+            "vmid": ai_control.vmid,
+            "source_cidr": f"{guest.address}/32",
+        }, separators=(",", ":")),
+    )
+
+
+def issue_pve_agent_credentials(node: str, source_vmid: int) -> dict[str, str]:
+    """Получить ограниченную identity агента из PVE-only зоны."""
+
+    result = _ssh_with_input(
+        node, str(OPENBAO_HOST_COMMAND), "--issue-agent-credentials",
+        input_text=json.dumps({"vmid": source_vmid}, separators=(",", ":")),
+    )
+    try:
+        data = json.loads(result.stdout)
+    except (ValueError, AttributeError) as exc:
+        raise InfraManagerError("PVE вернул некорректную identity агента") from exc
+    if not isinstance(data, dict) or not all(
+        isinstance(data.get(k), str) and data[k] for k in ("role_id", "secret_id")
+    ):
+        raise InfraManagerError("PVE не выдал полную identity агента")
+    return data
+
+
+def read_pve_ssh_host_key(node: str) -> str:
+    """Получить открытый ключ PVE по уже проверенному административному SSH."""
+
+    result = _ssh(node, "cat", "/etc/ssh/ssh_host_ed25519_key.pub", capture=True)
+    parts = result.stdout.strip().split()
+    if len(parts) < 2 or parts[0] != "ssh-ed25519":
+        raise InfraManagerError("Публичный ключ SSH PVE имеет неверный формат")
+    return " ".join(parts[:2])
+
+
 def install_operator_host_support(node: str, repo_root: Path) -> None:
     """Установить PVE-оболочку и ограниченный операторский доступ 410."""
 
@@ -428,6 +475,7 @@ def install_operator_host_support(node: str, repo_root: Path) -> None:
         "0644",
     )
     _required_file(PATHS.ssh_client_ca_public_key, "открытый SSH client CA")
+    _configure_agent_openbao_access(node, repo_root)
     _configure_agent_ssh_host(
         node,
         PATHS.ssh_client_ca_public_key.read_text(encoding="utf-8").strip(),
