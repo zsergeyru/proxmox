@@ -309,9 +309,12 @@ def run_recovery() -> None:
     ) as temporary:
         bootstrap = Path(temporary) / "bootstrap-pve.sh"
         _download_bootstrap(bootstrap)
+        # Аварийный режим передаёт только штатный помощник PVE.
+        # Публичная команда bootstrap-pve.sh остаётся установщиком без параметров.
         result = subprocess.run(
-            ["bash", str(bootstrap), "--recover"],
+            ["bash", str(bootstrap)],
             check=False,
+            env={**os.environ, "PROXMOX_BOOTSTRAP_INTERNAL_RECOVERY": "1"},
         )
     if result.returncode:
         raise RecoveryError(
