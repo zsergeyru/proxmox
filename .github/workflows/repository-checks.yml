@@ -90,6 +90,9 @@ jobs:
       - name: Run PVE operator command checks
         run: python scripts/tests/test-manager-host.py
 
+      - name: Run restricted PVE agent checks
+        run: python scripts/tests/test-pve-agent.py
+
       - name: Run guest deployment checks
         run: python scripts/tests/test-guest-deploy.py
 
