@@ -16,6 +16,14 @@
   changed_when: false
   # При отсутствии mp0 не допускаем создания архива на системном диске.
 
+- name: Проверить подключение постоянного состояния
+  ansible.builtin.command:
+    argv:
+      - mountpoint
+      - -q
+      - "{{ provision.photo_archive.storage.required_state_mount }}"
+  changed_when: false
+
 - name: Проверить наличие каталога оригиналов
   ansible.builtin.stat:
     path: "{{ provision.photo_archive.paths.originals }}"
@@ -36,6 +44,7 @@
     - "{{ provision.photo_archive.paths.root }}"
     - "{{ provision.photo_archive.paths.compose }}"
     - "{{ provision.photo_archive.paths.configuration }}"
+    - "{{ provision.photo_archive.storage.required_state_mount }}/secrets"
     - "{{ provision.photo_archive.paths.uploads }}"
     - "{{ provision.photo_archive.paths.database }}"
 
