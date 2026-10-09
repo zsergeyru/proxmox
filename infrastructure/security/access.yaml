@@ -93,6 +93,23 @@ rules:
     access:
       - execute
 
+  # 410 вправе вызывать только ограниченный операторский интерфейс PVE.
+  # status:all разрешает просмотр состояния, но не раскрытие паролей.
+  # Изменения managed-гостей дополнительно требуют одобрения оператора на PVE.
+  - id: ai-control-pve-operator
+    subject: guest:410
+    service: pve-operator
+    resource: guest-operation
+    targets:
+      - guests
+      - status:all
+      - test:managed
+      - deploy:managed
+      - sync:managed
+      - repair:managed
+    access:
+      - execute
+
   # PVE-only механизм обслуживает OpenBao до появления штатных рабочих доступов.
   - id: pve-openbao-unseal
     subject: host:pve
