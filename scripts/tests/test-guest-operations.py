@@ -343,6 +343,60 @@ def check_deploy_operation() -> None:
     client_factory.assert_not_called()
 
     infra = guest_identity(ROOT, 910)
+    # При прямом обновлении PVE единый итоговый статус выводит оператор,
+    # а не infra-runtime; блокировка активации остаётся зарезервированной.
+    with (
+        patch.dict(
+            operations.os.environ,
+            {"INFRA_MANAGER_OPERATOR_FINAL_STATUS": "1"},
+        ),
+        patch.object(
+            operations, "run_deploy_guest", return_value=0,
+        ) as deploy,
+        patch.object(operations, "reserve_runtime_activation") as reserve,
+        patch.object(operations, "cancel_runtime_activation") as cancel,
+        patch.object(operations, "show_guest_status") as show,
+        patch.object(
+            operations.PveClient, "from_opentofu_env",
+        ) as client_factory,
+    ):
+        if operations._run_deploy(ROOT, infra) != 0:
+            fail("Прямой deploy infra-manager должен завершиться успешно")
+    deploy.assert_called_once_with(ROOT, infra.vmid)
+    reserve.assert_called_once_with()
+    cancel.assert_not_called()
+    show.assert_not_called()
+    client_factory.assert_not_called()
+
+    with (
+        patch.object(
+            operations, "run_deploy_guest", return_value=0,
+        ),
+        patch.object(operations, "reserve_runtime_activation") as reserve,
+        patch.object(operations, "cancel_runtime_activation") as cancel,
+        patch.object(
+            operations.PveClient, "from_opentofu_env",
+            return_value=FakePveClient({
+                "vmid": infra.vmid, "name": infra.name, "type": "lxc",
+                "node": "pve", "status": "running",
+            }),
+        ),
+        patch.object(operations, "show_guest_status") as show,
+        patch.object(
+            operations, "project_branch_for_checkout", return_value="main",
+        ),
+        patch.object(
+            operations, "project_revision", return_value="abc1234",
+        ),
+    ):
+        if operations._run_deploy(ROOT, infra) != 0:
+            fail("Deploy infra-manager через Semaphore должен завершиться успешно")
+    reserve.assert_called_once_with()
+    cancel.assert_not_called()
+    show.assert_called_once()
+    if show.call_args.kwargs["show_secrets"]:
+        fail("Статус в Semaphore не должен выводить пароли")
+
     with (
         patch.object(
             operations,
@@ -356,6 +410,59 @@ def check_deploy_operation() -> None:
             fail("Deploy Guest должен сохранять код ошибки самообновления")
     reserve.assert_called_once_with()
     cancel.assert_called_once_with()
+
+def check_status_during_self_update() -> None:
+    # Только итоговый статус управляющего гостя может обходить блокировку
+    # отложенной активации. Все обычные запросы сохраняют проверку.
+    from contextlib import nullcontext
+
+    with (
+        patch.object(
+            operations, "guest_identity",
+            return_value=guest_identity(ROOT, 910),
+        ),
+        patch.object(
+            operations, "project_checkout_lock",
+            return_value=nullcontext(),
+        ),
+        patch.object(operations, "require_runtime_activation_idle") as idle,
+        patch.object(operations, "_run_status", return_value=0) as show,
+        patch.object(operations, "PveClient") as client,
+    ):
+        if operations.run_local_guest_status(
+            ROOT, 910, show_secrets=True, allow_pending_activation=True,
+        ) != 0:
+            fail("Итоговый статус управляющего гостя недоступен")
+    idle.assert_not_called()
+    show.assert_called_once()
+    if show.call_args.kwargs != {"show_secrets": True}:
+        fail("Доверенный итог должен сохранить показ секретов")
+    client.assert_called_once_with()
+
+    with (
+        patch.object(
+            operations, "guest_identity",
+            return_value=guest_identity(ROOT, 410),
+        ),
+        patch.object(
+            operations, "project_checkout_lock",
+            return_value=nullcontext(),
+        ),
+        patch.object(operations, "require_runtime_activation_idle") as idle,
+        patch.object(operations, "_run_status") as show,
+    ):
+        try:
+            operations.run_local_guest_status(
+                ROOT, 410, allow_pending_activation=True,
+            )
+        except InfraManagerError as exc:
+            if "управляющему гостю" not in str(exc):
+                raise
+        else:
+            fail("Другим гостям нельзя обходить блокировку активации")
+    idle.assert_not_called()
+    show.assert_not_called()
+
 
 def check_dispatch() -> None:
     with (
@@ -577,6 +684,7 @@ def main() -> None:
     check_test_operation()
     check_sync_operation()
     check_deploy_operation()
+    check_status_during_self_update()
     check_dispatch()
     check_semaphore_secret_policy()
     print("[ОК] Стандартные операции над гостями проверены")
