@@ -320,7 +320,17 @@ def test_recovery_host_support() -> None:
 
         with (
             patch.object(module, "_install_remote_file", side_effect=record_install),
+            patch.object(module, "_install_remote_text"),
             patch.object(module, "_ssh", side_effect=record_ssh),
+            patch.object(module, "_agent_operator_policy", return_value={
+                "schema_version": 1, "subject": "guest:410", "allowed": {}
+            }),
+            patch.object(module, "_required_file"),
+            patch.object(module, "_configure_agent_ssh_host"),
+            patch.object(module, "PATHS", SimpleNamespace(
+                ssh_client_ca_public_key=Path("/dev/null"),
+            )),
+            patch.object(Path, "read_text", return_value="ssh-ed25519 AAABBB"),
         ):
             module.install_recovery_host_support("pve", root)
             module.install_operator_host_support("pve", root)
@@ -337,6 +347,16 @@ def test_recovery_host_support() -> None:
         (
             str(manager),
             "/usr/local/sbin/infra-manager",
+            "0755",
+        ),
+        (
+            str(manager.parent / "agent_operator.py"),
+            "/usr/local/sbin/infra-manager-agent",
+            "0755",
+        ),
+        (
+            str(manager.parent / "agent_ssh.py"),
+            "/usr/local/sbin/infra-manager-agent-ssh",
             "0755",
         ),
     ]
