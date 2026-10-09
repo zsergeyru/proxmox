@@ -1437,42 +1437,34 @@ def main_test() -> None:
         else:
             fail(f"Проверка состояния VM приняла небезопасный случай: {description}")
 
-    class TaintedClient:
-        def __init__(self) -> None:
-            self.resource = {"type": "qemu", "name": "test-vm"}
-            self.tasks: list[tuple[str, str]] = []
-
-        def find_vm(self, vmid: int):
-            return self.resource
-
-        def data(self, path: str):
-            return {"status": "stopped"}
-
-        def put(self, path: str, *, form: dict[str, int]) -> None:
-            self.tasks.append(("PUT", path))
-
-        def run_task(self, method: str, path: str, **kwargs: object) -> None:
-            self.tasks.append((method, path))
-            if method == "DELETE":
-                self.resource = None
-
-    tainted_client = TaintedClient()
-    tainted_commands: list[list[str]] = []
-
-    def record_tainted_run(argv: list[str], **kwargs: object):
-        tainted_commands.append(argv)
-        return SimpleNamespace(returncode=0, stdout="")
-
-    with patch.object(guest_infra_module, "run", record_tainted_run):
-        _validate_pve_and_state(
-            deployment_for(tainted_client),
-            state_present=True,
-            state_status="tainted",
-        )
-    if not any(method == "DELETE" for method, _ in tainted_client.tasks):
-        fail("Повреждённая VM не была удалена после проверки типа и имени")
-    if not any(command[2:4] == ["state", "rm"] for command in tainted_commands):
-        fail("Повреждённая VM не была удалена из состояния OpenTofu")
+    for existing in (deployment, lxc_deployment):
+        with (
+            patch.object(existing.client, "find_vm", wraps=existing.client.find_vm) as find_vm,
+            patch.object(existing.client, "put", create=True) as put,
+            patch.object(existing.client, "run_task", create=True) as run_task,
+            patch.object(guest_infra_module, "run") as external_run,
+        ):
+            try:
+                _validate_pve_and_state(
+                    existing,
+                    state_present=True,
+                    state_status="tainted",
+                )
+            except InfraManagerError as exc:
+                message = str(exc)
+                if (
+                    f"{existing.vmid} {existing.name}" not in message
+                    or "незавершённом или повреждённом состоянии" not in message
+                    or "автоматическое удаление запрещено" not in message
+                    or "Проверьте гостя в PVE" not in message
+                ):
+                    fail(f"Непонятное сообщение о состоянии гостя: {message}")
+            else:
+                fail("Развёртывание гостя с tainted должно останавливаться")
+            find_vm.assert_called_once_with(existing.vmid)
+            put.assert_not_called()
+            run_task.assert_not_called()
+            external_run.assert_not_called()
 
     def unexpected_plan_run(argv: list[str], **kwargs: object):
         if "-json" in argv:

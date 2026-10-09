@@ -64,83 +64,6 @@ def _find_guest_directory(repo_root: Path, vmid: int) -> Path:
     return matches[0]
 
 
-def _remove_known_host(known_hosts: Path, address: str) -> None:
-    if not known_hosts.exists():
-        return
-    run(
-        [
-            "ssh-keygen",
-            "-R",
-            address,
-            "-f",
-            str(known_hosts),
-        ],
-        check=False,
-        capture_output=True,
-    )
-
-
-def _recover_tainted_guest(context: DeploymentContext) -> None:
-    resource = context.client.find_vm(context.vmid)
-    if resource is None:
-        raise InfraManagerError(
-            f"Гость {context.vmid} есть в OpenTofu state, но отсутствует в PVE"
-        )
-
-    actual_type = str(resource.get("type") or "")
-    actual_name = str(resource.get("name") or "")
-    expected_type = "qemu" if context.kind == "vm" else "lxc"
-    if actual_type != expected_type or actual_name != context.name:
-        raise InfraManagerError(
-            f"VMID {context.vmid} занят объектом '{actual_name}' "
-            f"типа '{actual_type}'; автоматическое удаление запрещено"
-        )
-
-    console.info(
-        f"Удаление незавершённого гостя {context.vmid} после неудачного применения"
-    )
-    api_kind = "qemu" if context.kind == "vm" else "lxc"
-    status = context.client.data(
-        f"/nodes/{context.node}/{api_kind}/{context.vmid}/status/current"
-    )
-    if isinstance(status, dict) and status.get("status") == "running":
-        context.client.run_task(
-            "POST",
-            f"/nodes/{context.node}/{api_kind}/{context.vmid}/status/stop",
-            node=context.node,
-        )
-
-    context.client.put(
-        f"/nodes/{context.node}/{api_kind}/{context.vmid}/config",
-        form={"protection": 0},
-    )
-    context.client.run_task(
-        "DELETE",
-        f"/nodes/{context.node}/{api_kind}/{context.vmid}",
-        node=context.node,
-        query={"purge": 1},
-    )
-    if context.client.find_vm(context.vmid) is not None:
-        raise InfraManagerError(
-            f"Незавершённого гостя {context.vmid} не удалось удалить"
-        )
-
-    run(
-        [
-            "tofu",
-            f"-chdir={context.workspace.directory}",
-            "state",
-            "rm",
-            context.target,
-        ],
-        env=context.workspace.env,
-    )
-    _remove_known_host(context.paths.known_hosts, context.address)
-    console.ok(
-        f"Незавершённый гость {context.vmid} удалён; OpenTofu state очищен"
-    )
-
-
 def _validate_pve_and_state(
     context: DeploymentContext,
     *,
@@ -165,7 +88,15 @@ def _validate_pve_and_state(
                 "VM запрещён"
             )
         if state_status == "tainted":
-            _recover_tainted_guest(context)
+            raise InfraManagerError(
+                f"Развёртывание гостя {context.vmid} {context.name} остановлено: "
+                "в сохранённом состоянии OpenTofu осталась отметка о незавершённом "
+                "или повреждённом состоянии гостя (tainted). "
+                "Гость может содержать нужные данные, поэтому автоматическое "
+                "удаление запрещено. Проверьте гостя в PVE: если он исправен, "
+                "вручную снимите отметку tainted; если создание не завершено, "
+                "отдельно подтвердите удаление и повторное создание."
+            )
         return
 
     if state_present:
