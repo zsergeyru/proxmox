@@ -289,7 +289,9 @@ def test_operator_guest_task_secret_policy() -> None:
                 role=operator.SETTINGS.infra_manager_role,
             ),
         ) as identity,
-        patch.object(operator, "operator_guest_status") as status,
+        patch.object(
+            operator, "operator_guest_status", return_value=0
+        ) as status,
         patch.object(operator, "console") as console,
     ):
         assert operator.operator_guest_task(
@@ -299,7 +301,9 @@ def test_operator_guest_task_secret_policy() -> None:
         ) == 0
 
     identity.assert_called_once_with(operator.PATHS.repo_root, 910)
-    status.assert_not_called()
+    status.assert_called_once_with(
+        910, show_secrets=True, allow_pending_activation=True
+    )
     console.info.assert_called_once_with(
         "Отложенная активация infra-runtime продолжится "
         "после завершения команды"
@@ -443,23 +447,28 @@ def test_runtime_snapshot_refresh_policy() -> None:
 
 
 def test_operator_status_secret_policy() -> None:
-    import infra_manager.status as status_module
-
+    # «infra-manager status» и «status 910» используют единый экран гостя.
+    # Секреты разрешены только при доверенном вызове с физического PVE.
     with (
-        patch.object(status_module, "check_status", return_value=0) as check,
-        patch.object(operator, "_pve_node", return_value="pve"),
         patch.object(
-            operator,
-            "show_openbao_operator_credentials",
-        ) as credentials,
+            operator, "find_guest_by_role",
+            return_value=SimpleNamespace(vmid=910),
+        ) as find_manager,
+        patch.object(
+            operator, "operator_guest_status", return_value=0,
+        ) as show,
     ):
         assert operator.operator_status(show_secrets=False) == 0
-        credentials.assert_not_called()
+        show.assert_called_once_with(910, show_secrets=False)
+        show.reset_mock()
 
         assert operator.operator_status(show_secrets=True) == 0
+        show.assert_called_once_with(910, show_secrets=True)
 
-    check.assert_called_with(full=True, quiet=False)
-    credentials.assert_called_once_with("pve")
+    assert find_manager.call_count == 2
+    find_manager.assert_called_with(
+        operator.PATHS.repo_root, operator.SETTINGS.infra_manager_role
+    )
 
 
 def test_operator_prefers_explicit_pve_node() -> None:
