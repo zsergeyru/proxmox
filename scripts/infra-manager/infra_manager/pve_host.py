@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import json
-
 import shlex
+
+import yaml
 from pathlib import Path
 
 from .access import load_access_policy
@@ -331,8 +332,6 @@ def _agent_operator_policy(repo_root: Path) -> dict[str, object]:
 
     access = load_access_policy(repo_root)
     source = repo_root / "infrastructure/security/access.yaml"
-    import yaml
-
     raw = yaml.safe_load(source.read_text(encoding="utf-8"))
     rules = [
         rule for rule in raw.get("rules", [])
