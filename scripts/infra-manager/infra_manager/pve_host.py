@@ -376,8 +376,6 @@ def _configure_agent_ssh_host(node: str, ssh_ca_key: str) -> None:
         raise InfraManagerError("Неизвестный формат открытого SSH CA OpenBao")
     if any(character in ssh_ca_key for character in "\r\n\""):
         raise InfraManagerError("Некорректный SSH CA для PVE")
-    required = "cert-authority,principals=\\\"infra-agent\\\",restrict,command=\\\"/usr/local/sbin/infra-manager-agent-ssh\\\" "
-    # Экранирование выше относится только к Python-строке; в authorized_keys нужны обычные кавычки.
     authorization = 'cert-authority,principals="infra-agent",restrict,command="/usr/local/sbin/infra-manager-agent-ssh" ' + " ".join(key_parts[:2]) + "\n"
     _ssh(node, "sh", "-eu", "-c", r"""
 if ! command -v sudo >/dev/null 2>&1; then
@@ -396,7 +394,7 @@ install -d -o root -g root -m 0755 /var/lib/infra-agent/.ssh
 """)
     _install_remote_text(
         node,
-        "infra-agent ALL=(root) NOPASSWD: /usr/local/sbin/infra-manager-agent --execute *\\n".replace("\\n", "\n"),
+        "infra-agent ALL=(root) NOPASSWD: /usr/local/sbin/infra-manager-agent --execute *\\n",
         Path("/etc/sudoers.d/infra-manager-agent"),
         "0440",
     )
