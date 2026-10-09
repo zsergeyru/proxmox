@@ -147,7 +147,7 @@ def _preflight_missing_guest_recreation(context: DeploymentContext) -> None:
         if not (set(content.split(",")) & {"images", "rootdir"}):
             continue
         found_disk_stores = True
-        if str(store.get("disable", "0")) in {"1", "true"}:
+        if str(store.get("disable", "0")).lower() in {"1", "true"}:
             raise InfraManagerError(
                 f"Хранилище {storage_id} отключено: отсутствие дисков не доказано"
             )
