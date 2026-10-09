@@ -386,6 +386,11 @@ jobs:
           docker run --rm infra-runtime:test packer version
           docker run --rm --entrypoint python3 infra-runtime:test -c 'import proxmoxer'
           docker run --rm --entrypoint python3 infra-runtime:test -c 'import yaml, jsonschema'
+          # SSH-конфигурация должна быть доступна штатному пользователю Semaphore.
+          docker run --rm --user 1001:0 --entrypoint sh infra-runtime:test -c \
+            'test "$(stat -c %a /etc/ssh/ssh_config.d/99-infra-manager.conf)" = 644'
+          docker run --rm --user 1001:0 --entrypoint ssh infra-runtime:test \
+            -G github.com >/dev/null
 
       - name: Verify real Semaphore startup in infra-runtime
         run: |
