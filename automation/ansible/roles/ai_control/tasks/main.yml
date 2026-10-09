@@ -82,6 +82,16 @@
   no_log: true
   when: not ai_control_hermes_env_file.stat.exists
 
+- name: Исключить поиск EC2 credentials при запуске Hermes в Proxmox
+  ansible.builtin.lineinfile:
+    path: "{{ provision.ai_control.paths.hermes_env }}"
+    regexp: '^AWS_EC2_METADATA_DISABLED='
+    line: 'AWS_EC2_METADATA_DISABLED=true'
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+
 - name: Прочитать конфигурацию API Hermes
   ansible.builtin.slurp:
     src: "{{ provision.ai_control.paths.hermes_env }}"
