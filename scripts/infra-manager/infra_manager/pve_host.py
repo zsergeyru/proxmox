@@ -353,7 +353,7 @@ def _agent_operator_policy(repo_root: Path) -> dict[str, object]:
         raise InfraManagerError("Неизвестная команда агентского доступа в access.yaml")
     managed = sorted(
         vmid for vmid, guest in access.guests.items()
-        if guest.pve_management and vmid not in {100, 410, 910}
+        if guest.pve_management
     )
     return {
         "schema_version": 1,
