@@ -29,6 +29,8 @@ properties:
     type: boolean
   pve_management:
     type: boolean
+  recreate_if_missing:
+    type: boolean
   resources:
     $ref: '#/$defs/resources'
   network:
