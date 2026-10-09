@@ -61,6 +61,7 @@
     force: false
     content: |
       DB_PASSWORD={{ photo_archive_generated_password.stdout }}
+      POSTGRES_PASSWORD={{ photo_archive_generated_password.stdout }}
       DB_USERNAME=postgres
       DB_DATABASE_NAME=immich
       DB_HOSTNAME=database
