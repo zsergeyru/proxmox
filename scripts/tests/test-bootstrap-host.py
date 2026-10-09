@@ -773,8 +773,8 @@ def test_recovery_recreates_existing_infra() -> None:
             "infra_exists",
             "verify_recovery_state",
             "verify_layout",
-            "remove_rootfs",
             "prepare_runner",
+            "remove_rootfs",
             "create_infra",
             "attach_layout",
             "configure_base",
@@ -791,6 +791,31 @@ def test_recovery_recreates_existing_infra() -> None:
         ],
         "Recovery должен всегда создавать новый rootfs через новый bootstrap-сеанс",
     )
+
+
+class FailingRunnerHarness(ApplyHarness):
+    def prepare_runner(self) -> None:
+        self.events.append("prepare_runner")
+        raise BootstrapError("Не удалось подготовить временный 990")
+
+
+def test_recovery_runner_failure_keeps_existing_910() -> None:
+    host = FailingRunnerHarness("recover", infra_exists=True)
+    try:
+        host.apply()
+    except BootstrapError as exc:
+        if "временный 990" not in str(exc):
+            raise
+    else:
+        raise AssertionError("Ошибка подготовки 990 должна прервать recovery")
+
+    assert_equal(
+        host.events,
+        ["infra_exists", "verify_recovery_state", "verify_layout", "prepare_runner"],
+        "Подготовка 990 должна предшествовать удалению работающего 910",
+    )
+    if not host._infra_exists:
+        raise AssertionError("Существующий 910 нельзя удалять до готовности 990")
 
 
 def test_recovery_recreates_missing_infra() -> None:
@@ -1070,6 +1095,7 @@ def main() -> None:
         test_existing_infra_with_data_is_not_automatically_recreated,
         test_existing_infra_requires_normal_operations,
         test_recovery_recreates_existing_infra,
+        test_recovery_runner_failure_keeps_existing_910,
         test_recovery_recreates_missing_infra,
         test_recovery_preflight_accepts_complete_state,
         test_recovery_preflight_allows_missing_approle_files,
