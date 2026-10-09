@@ -7,6 +7,7 @@ import json
 import shlex
 from pathlib import Path
 
+from .access import load_access_policy
 from .common import InfraManagerError, console, log_level, require_command, run
 from .guest_catalog import find_guest_by_role, guest_management_address
 from .settings import PATHS, SETTINGS
@@ -117,6 +118,9 @@ OPENBAO_HOST_LIBRARY = Path("/usr/local/lib/infra-manager/openbao_host")
 OPENBAO_HOST_CONFIG = Path("/etc/infra-manager/openbao-host.json")
 RECOVERY_HOST_COMMAND = Path("/usr/local/sbin/infra-manager-recovery")
 OPERATOR_HOST_COMMAND = Path("/usr/local/sbin/infra-manager")
+AGENT_HOST_COMMAND = Path("/usr/local/sbin/infra-manager-agent")
+AGENT_SSH_COMMAND = Path("/usr/local/sbin/infra-manager-agent-ssh")
+AGENT_HOST_POLICY = Path("/etc/infra-manager/agent-policy.json")
 
 
 def _install_remote_file(
@@ -321,17 +325,117 @@ def install_recovery_host_support(node: str, repo_root: Path) -> None:
     console.detail("Recovery helper установлен на PVE")
 
 
+
+def _agent_operator_policy(repo_root: Path) -> dict[str, object]:
+    """Скомпилировать access.yaml без выдачи секретов и административных прав."""
+
+    access = load_access_policy(repo_root)
+    source = repo_root / "infrastructure/security/access.yaml"
+    import yaml
+
+    raw = yaml.safe_load(source.read_text(encoding="utf-8"))
+    rules = [
+        rule for rule in raw.get("rules", [])
+        if rule.get("subject") == "guest:410"
+        and rule.get("service") == "pve-operator"
+        and rule.get("resource") == "guest-operation"
+        and rule.get("access") == ["execute"]
+    ]
+    if len(rules) != 1:
+        raise InfraManagerError("Для 410 требуется ровно одно правило pve-operator")
+
+    targets = set(rules[0]["targets"])
+    known = {
+        "guests", "status:all", "test:managed",
+        "deploy:managed", "sync:managed", "repair:managed",
+    }
+    if not targets <= known:
+        raise InfraManagerError("Неизвестная команда агентского доступа в access.yaml")
+    managed = sorted(
+        vmid for vmid, guest in access.guests.items()
+        if guest.pve_management and vmid not in {100, 410, 910}
+    )
+    return {
+        "schema_version": 1,
+        "subject": "guest:410",
+        "allowed": {
+            "guests": "guests" in targets,
+            "status": "all" if "status:all" in targets else "none",
+            **{
+                command: managed if f"{command}:managed" in targets else []
+                for command in ("test", "deploy", "sync", "repair")
+            },
+        },
+    }
+
+
+def _configure_agent_ssh_host(node: str, ssh_ca_key: str) -> None:
+    """Создать отдельного непривилегированного пользователя с принудительной командой."""
+
+    key_parts = ssh_ca_key.split()
+    if len(key_parts) < 2 or not key_parts[0].startswith(("ssh-", "ecdsa-")):
+        raise InfraManagerError("Неизвестный формат открытого SSH CA OpenBao")
+    if any(character in ssh_ca_key for character in "\r\n\""):
+        raise InfraManagerError("Некорректный SSH CA для PVE")
+    required = "cert-authority,principals=\\\"infra-agent\\\",restrict,command=\\\"/usr/local/sbin/infra-manager-agent-ssh\\\" "
+    # Экранирование выше относится только к Python-строке; в authorized_keys нужны обычные кавычки.
+    authorization = 'cert-authority,principals="infra-agent",restrict,command="/usr/local/sbin/infra-manager-agent-ssh" ' + " ".join(key_parts[:2]) + "\n"
+    _ssh(node, "sh", "-eu", "-c", r"""
+if ! command -v sudo >/dev/null 2>&1; then
+    echo "На PVE требуется установленный sudo для ограниченного агентского входа" >&2
+    exit 1
+fi
+if id infra-agent >/dev/null 2>&1; then
+    test "$(id -u infra-agent)" -ne 0
+    test "$(getent passwd infra-agent | cut -d: -f6)" = "/var/lib/infra-agent"
+    test "$(getent passwd infra-agent | cut -d: -f7)" = "/bin/sh"
+else
+    useradd --system --no-create-home --home-dir /var/lib/infra-agent --shell /bin/sh infra-agent
+fi
+install -d -o root -g root -m 0755 /var/lib/infra-agent
+install -d -o root -g root -m 0755 /var/lib/infra-agent/.ssh
+""")
+    _install_remote_text(
+        node,
+        "infra-agent ALL=(root) NOPASSWD: /usr/local/sbin/infra-manager-agent --execute *\\n".replace("\\n", "\n"),
+        Path("/etc/sudoers.d/infra-manager-agent"),
+        "0440",
+    )
+    _ssh(node, "visudo", "-cf", "/etc/sudoers.d/infra-manager-agent")
+    _install_remote_text(
+        node,
+        authorization,
+        Path("/var/lib/infra-agent/.ssh/authorized_keys"),
+        "0644",
+    )
+
+
 def install_operator_host_support(node: str, repo_root: Path) -> None:
-    """Установить на PVE тонкую операторскую оболочку."""
+    """Установить PVE-оболочку и ограниченный операторский доступ 410."""
 
     host_root = repo_root / "scripts" / "infra-manager" / "host"
     _install_remote_file(
-        node,
-        host_root / "manager.py",
-        OPERATOR_HOST_COMMAND,
-        "0755",
+        node, host_root / "manager.py", OPERATOR_HOST_COMMAND, "0755",
     )
-    console.detail("Операторская оболочка infra-manager установлена на PVE")
+    _install_remote_file(
+        node, host_root / "agent_operator.py", AGENT_HOST_COMMAND, "0755",
+    )
+    _install_remote_file(
+        node, host_root / "agent_ssh.py", AGENT_SSH_COMMAND, "0755",
+    )
+    policy = _agent_operator_policy(repo_root)
+    _install_remote_text(
+        node,
+        json.dumps(policy, ensure_ascii=False, sort_keys=True) + "\n",
+        AGENT_HOST_POLICY,
+        "0644",
+    )
+    _required_file(PATHS.ssh_client_ca_public_key, "открытый SSH client CA")
+    _configure_agent_ssh_host(
+        node,
+        PATHS.ssh_client_ca_public_key.read_text(encoding="utf-8").strip(),
+    )
+    console.detail("Оболочка infra-manager и ограниченный SSH-вход 410 установлены на PVE")
 
 
 def prepare_recovery_git(node: str) -> None:
