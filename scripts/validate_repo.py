@@ -91,6 +91,7 @@ ACCESS_MATRIX = {
     ("ssh", "identity"): {"issue"},
     ("github", "repository"): {"read"},
     ("semaphore", "infrastructure-task"): {"execute"},
+    ("pve-operator", "guest-operation"): {"execute"},
     ("openbao", "credential"): {"materialize", "update"},
     ("openbao", "ssh-ca"): {"configure", "sign"},
     ("openbao", "instance"): {"unseal"},
