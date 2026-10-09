@@ -29,7 +29,6 @@ services:
     environment:
       POSTGRES_USER: postgres
       POSTGRES_DB: immich
-      POSTGRES_PASSWORD: ${DB_PASSWORD}
       POSTGRES_INITDB_ARGS: '--data-checksums'
     volumes:
       - {{ provision.photo_archive.paths.database }}:/var/lib/postgresql/data
