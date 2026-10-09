@@ -9,7 +9,7 @@ checks:
     container: open-webui
     message: "Open WebUI запущен"
   - type: http
-    url: http://127.0.0.1:9119/login
+    url: http://{address}:9119/login
     message: "Вход в Hermes Dashboard доступен"
   - type: file
     path: /etc/ai-control/open-webui.env
