@@ -146,8 +146,10 @@ grep -Fq 'verify_recovery_state(require_approle=False)' "$RECOVERY_HOST" \
     || die "Recover должен начинаться с проверки PVE-only состояния"
 grep -Fq 'restore_git_access()' "$RECOVERY_HOST" \
     || die "Recover должен восстанавливать bootstrap Git-доступ из PVE-only"
-grep -Fq '["bash", str(bootstrap), "--recover"]' "$RECOVERY_HOST" \
-    || die "PVE recovery helper должен запускать защищённый bootstrap recovery"
+grep -Fq '["bash", str(bootstrap)]' "$RECOVERY_HOST" \
+    || die "PVE recovery helper должен запускать публичный bootstrap без параметров"
+grep -Fq '"PROXMOX_BOOTSTRAP_INTERNAL_RECOVERY": "1"' "$RECOVERY_HOST" \
+    || die "PVE recovery helper должен передавать внутренний режим восстановления"
 grep -Fq 'check_recovery_contour(node)' "$PY_OPENBAO" \
     || die "Внутренняя инициализация OpenBao должна завершаться полной recovery-проверкой"
 
