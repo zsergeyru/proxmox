@@ -936,10 +936,9 @@ def _reconcile_guest_infrastructure(
                     f"Гость {context.vmid}: для пересоздания ожидался "
                     f"план только create; получено {plan.actions!r}"
                 )
-            if context.client.find_vm(context.vmid) is not None:
-                raise InfraManagerError(
-                    f"VMID {context.vmid} занят перед применением плана"
-                )
+            # Проверка повторяется непосредственно перед применением:
+            # другой процесс мог создать объект или том после первой проверки.
+            _preflight_missing_guest_recreation(context)
         if not plan.actions or plan.actions == ("no-op",):
             console.ok(
                 f"OpenTofu: состояние гостя {context.vmid} "
