@@ -348,7 +348,10 @@ def check_deploy_operation() -> None:
     with (
         patch.dict(
             operations.os.environ,
-            {"INFRA_MANAGER_OPERATOR_FINAL_STATUS": "1"},
+            {
+                "INFRA_MANAGER_OPERATOR_FINAL_STATUS": "1",
+                "INFRA_MANAGER_OPERATOR_STATUS_VERSION": "2",
+            },
         ),
         patch.object(
             operations, "run_deploy_guest", return_value=0,
@@ -367,6 +370,38 @@ def check_deploy_operation() -> None:
     cancel.assert_not_called()
     show.assert_not_called()
     client_factory.assert_not_called()
+
+    # Первая загрузка нового кода ещё из старого PVE-оператора:
+    # не подавлять единственный доступный в старом процессе итоговый экран.
+    with (
+        patch.dict(
+            operations.os.environ,
+            {
+                "INFRA_MANAGER_OPERATOR_FINAL_STATUS": "1",
+                "INFRA_MANAGER_OPERATOR_STATUS_VERSION": "",
+            },
+        ),
+        patch.object(operations, "run_deploy_guest", return_value=0),
+        patch.object(operations, "reserve_runtime_activation") as reserve,
+        patch.object(operations, "cancel_runtime_activation") as cancel,
+        patch.object(
+            operations.PveClient, "from_opentofu_env",
+            return_value=FakePveClient({
+                "vmid": infra.vmid, "name": infra.name, "type": "lxc",
+                "node": "pve", "status": "running",
+            }),
+        ),
+        patch.object(operations, "show_guest_status") as show,
+        patch.object(operations, "project_branch_for_checkout", return_value="main"),
+        patch.object(operations, "project_revision", return_value="abc1234"),
+    ):
+        if operations._run_deploy(ROOT, infra) != 0:
+            fail("Первый deploy должен сохранить совместимый итоговый статус")
+    reserve.assert_called_once_with()
+    cancel.assert_not_called()
+    show.assert_called_once()
+    if show.call_args.kwargs["show_secrets"]:
+        fail("Первый deploy из старого оператора не должен раскрывать пароли")
 
     with (
         patch.object(
