@@ -38,7 +38,7 @@ RUN python3 -m pip install --no-cache-dir -r /tmp/infra-runtime-requirements.txt
     && rm -f /tmp/infra-runtime-requirements.txt \
     && test ! -e /etc/semaphore/requirements.txt
 
-COPY ssh_config /etc/ssh/ssh_config.d/99-infra-manager.conf
+COPY --chmod=0644 ssh_config /etc/ssh/ssh_config.d/99-infra-manager.conf
 RUN rm -f /etc/ssh/ssh_config.d/semaphore.conf
 
 USER 1001:0
