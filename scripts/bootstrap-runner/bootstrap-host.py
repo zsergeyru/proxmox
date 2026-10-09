@@ -653,7 +653,7 @@ print(json.dumps({"vmid": matches[0][0], "name": matches[0][1]}))
             self.timed_step("Создание постоянных каталогов", self.prepare_new_persistent_layout)
 
         # Сначала подготовить 990, Docker, Ansible и временный PVE-доступ.
-        # Не удалять исправный rootfs 910, если подготовка 990 не удалась.
+        # Не удалять rootfs управляющего гостя, если подготовка не удалась.
         self.timed_step("Подготовка 990", self.prepare_runner)
         if existed and self.mode == "recover":
             self.timed_step("Удаление старого rootfs", self.remove_infra_rootfs_for_recovery)
