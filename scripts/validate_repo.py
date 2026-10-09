@@ -696,6 +696,14 @@ def _validate_access_contract(state: ValidationState) -> None:
             continue
         if rule["service"] == "pve-api":
             fail(f"{rel}: guest:410 не должен иметь прямой PVE API-доступ")
+        if rule["service"] == "pve-operator":
+            expected = {
+                "guests", "status:all", "test:managed",
+                "deploy:managed", "sync:managed", "repair:managed",
+            }
+            if (rule["resource"] != "guest-operation"
+                    or not set(rule["targets"]).issubset(expected)):
+                fail(f"{rel}: guest:410 содержит неизвестную операторскую команду")
         if rule["service"] == "ssh" and "host:pve" in rule["targets"]:
             fail(f"{rel}: guest:410 не должен иметь root SSH-доступ к PVE")
 
