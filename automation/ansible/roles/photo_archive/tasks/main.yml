@@ -5,7 +5,7 @@
       - provision.photo_archive.application == "immich"
       - provision.photo_archive.mode == "api-only"
       - provision.photo_archive.storage.allow_missing_mount == false
-    fail_msg: "430: некорректное описание Photo Archive"
+    fail_msg: "340: некорректное описание Photo Archive"
 
 - name: Проверить подключение постоянного хранилища
   ansible.builtin.command:
@@ -25,7 +25,7 @@
   ansible.builtin.assert:
     that:
       - photo_archive_originals.stat.isdir | default(false)
-    fail_msg: "430: на подключённом хранилище отсутствует каталог originals"
+    fail_msg: "340: на подключённом хранилище отсутствует каталог originals"
 
 - name: Создать постоянные каталоги приложения
   ansible.builtin.file:
