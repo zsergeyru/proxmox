@@ -4,11 +4,13 @@
 from __future__ import annotations
 
 import contextlib
+import copy
 import io
 import os
 import sys
 import tempfile
 from pathlib import Path
+from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -18,7 +20,7 @@ sys.path.insert(0, str(MODULE_ROOT))
 
 from infra_manager import semaphore as semaphore_module
 from infra_manager import status as status_module
-from infra_manager.common import InfraManagerError
+from infra_manager.common import Console, InfraManagerError
 from infra_manager.guest_operations import operation_guests
 from infra_manager.semaphore import (
     PROJECT_REPO,
@@ -781,6 +783,64 @@ def main_test() -> None:
         project_branch=branch,
     )
 
+    stale_templates = copy.deepcopy(semaphore_snapshot.templates)
+    deploy_template = next(item for item in stale_templates if item["name"] == "Deploy Guest")
+    guest_choices = deploy_template["survey_vars"][0]["values"]
+    deploy_template["survey_vars"][0]["values"] = [
+        item for item in guest_choices if item["value"] != "340"
+    ] + [{"name": "999 — removed-guest", "value": "999"}]
+    stale_snapshot = replace(semaphore_snapshot, templates=stale_templates)
+    with patch.object(status_module, "console") as output:
+        validate_semaphore_snapshot(stale_snapshot, project_branch=branch)
+    output.warning.assert_called_once()
+    warning = output.warning.call_args.args[0]
+    if any(text not in warning for text in ("Deploy Guest", "340", "photo-archive", "999", "infra-manager sync 910")):
+        fail(f"Предупреждение не объясняет расхождение списка гостей: {warning}")
+
+    quiet_output = io.StringIO()
+    with (
+        patch.dict(os.environ, {"INFRA_LOG_LEVEL": "quiet", "INFRA_MANAGER_COLOR": "1"}),
+        patch.object(status_module, "console", Console(out=quiet_output)),
+    ):
+        validate_semaphore_snapshot(stale_snapshot, project_branch=branch)
+    if not quiet_output.getvalue().startswith("[ПРЕДУПРЕЖДЕНИЕ] "):
+        fail("Предупреждение должно быть видно в тихом режиме и передаваться через SSH")
+
+    invalid_templates = copy.deepcopy(stale_templates)
+    invalid_deploy = next(item for item in invalid_templates if item["name"] == "Deploy Guest")
+    for field, invalid_value in (
+        ("playbook", "wrong-command.py"),
+        ("arguments", '["repair"]'),
+        ("survey_vars", [{**invalid_deploy["survey_vars"][0], "required": False}]),
+        ("survey_vars", [{**invalid_deploy["survey_vars"][0], "values": ["invalid"]}]),
+        ("environment_ids", [8]),
+    ):
+        original = invalid_deploy[field]
+        invalid_deploy[field] = invalid_value
+        try:
+            validate_semaphore_snapshot(
+                replace(semaphore_snapshot, templates=invalid_templates),
+                project_branch=branch,
+            )
+        except InfraManagerError:
+            pass
+        else:
+            fail(f"Изменение обязательного поля {field} должно оставаться ошибкой")
+        finally:
+            invalid_deploy[field] = original
+
+    try:
+        validate_semaphore_snapshot(
+            replace(semaphore_snapshot, templates=tuple(
+                item for item in stale_templates if item["name"] != "Deploy Guest"
+            )),
+            project_branch=branch,
+        )
+    except InfraManagerError:
+        pass
+    else:
+        fail("Отсутствующий обязательный шаблон должен оставаться ошибкой")
+
     class SnapshotClient:
         def __init__(self) -> None:
             self.paths: list[str] = []
@@ -827,6 +887,23 @@ def main_test() -> None:
         / "infra-manager-status.yaml"
     )
     definition = load_status_definition(status_file)
+
+    with (
+        patch.object(status_module, "load_status_definition", return_value=definition),
+        patch.object(status_module, "_project_branch", return_value=branch),
+        patch.object(status_module, "_check_runtime_bundle"),
+        patch.object(status_module, "_check_portal"),
+        patch.object(status_module, "_check_openbao"),
+        patch.object(status_module, "_check_semaphore", side_effect=lambda **kwargs: validate_semaphore_snapshot(stale_snapshot, project_branch=branch)),
+        patch.object(status_module, "_check_runtime_tools") as check_tools,
+        patch.object(status_module, "_check_pve") as check_pve,
+        patch.object(status_module, "console") as output,
+    ):
+        if check_status(quiet=True) != 0:
+            fail("Устаревший список гостей не должен менять успешный код статуса")
+    output.warning.assert_called_once()
+    check_tools.assert_called_once()
+    check_pve.assert_called_once_with(full=False)
 
     if definition.guest_vmid != 910:
         fail("Внутреннее описание состояния должно учитывать текущий VMID infra-manager")

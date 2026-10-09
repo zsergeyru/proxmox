@@ -600,6 +600,8 @@ def _dict_items(value: Any, kind: str) -> tuple[dict[str, Any], ...]:
 def _survey_vars_match(
     actual: Any,
     expected: tuple[dict[str, Any], ...],
+    *,
+    ignore_guest_choices: bool = False,
 ) -> bool:
     """Проверить управляемые поля survey-переменных, разрешая служебные поля API."""
 
@@ -609,6 +611,20 @@ def _survey_vars_match(
         if not isinstance(actual_item, dict):
             return False
         for key, value in expected_item.items():
+            if (
+                ignore_guest_choices
+                and expected_item.get("name") == "GUEST_VMID"
+                and key == "values"
+            ):
+                choices = actual_item.get(key)
+                if not isinstance(choices, list) or any(
+                    not isinstance(item, dict)
+                    or not isinstance(item.get("name"), str)
+                    or not isinstance(item.get("value"), str)
+                    for item in choices
+                ):
+                    return False
+                continue
             if actual_item.get(key) != value:
                 return False
     return True
@@ -758,6 +774,7 @@ def validate_semaphore_snapshot(
             or not _survey_vars_match(
                 template.get("survey_vars") or [],
                 spec.survey_vars,
+                ignore_guest_choices=True,
             )
         ):
             raise InfraManagerError(
@@ -772,6 +789,31 @@ def validate_semaphore_snapshot(
             raise InfraManagerError(
                 f"Шаблон Semaphore '{spec.name}' "
                 "не подключён к обеим Variable Group"
+            )
+        actual_survey = template.get("survey_vars") or []
+        if not _survey_vars_match(actual_survey, spec.survey_vars):
+            expected_guests = next(
+                item["values"] for item in spec.survey_vars
+                if item["name"] == "GUEST_VMID"
+            )
+            actual_guests = next(
+                item["values"] for item in actual_survey
+                if item["name"] == "GUEST_VMID"
+            )
+            actual_ids = {item["value"] for item in actual_guests}
+            expected_ids = {item["value"] for item in expected_guests}
+            missing = [item["name"] for item in expected_guests if item["value"] not in actual_ids]
+            obsolete = [item["value"] for item in actual_guests if item["value"] not in expected_ids]
+            details = []
+            if missing:
+                details.append("отсутствуют гости: " + ", ".join(missing))
+            if obsolete:
+                details.append("есть гости, отсутствующие в проекте: " + ", ".join(obsolete))
+            suffix = "; " + "; ".join(details) if details else ""
+            manager = find_guest_by_role(PATHS.repo_root, SETTINGS.infra_manager_role)
+            console.warning(
+                f"В задании Semaphore '{spec.name}' устарел список гостей{suffix}. "
+                f"Обновите списки командой: infra-manager sync {manager.vmid}"
             )
 
 

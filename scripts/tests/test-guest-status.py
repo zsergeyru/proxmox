@@ -143,6 +143,18 @@ def check_declared_check_dispatch() -> None:
         ],
     )
 
+    with (
+        patch.object(status, "_run_guest_command", return_value=SimpleNamespace(
+            stdout="ignored output\n[ПРЕДУПРЕЖДЕНИЕ] В Semaphore отсутствует гость 340\n",
+        )),
+        patch.object(status, "console") as output,
+    ):
+        status._run_declared_check(
+            "pve", "192.168.9.10",
+            {"type": "local_status", "command": "/usr/local/sbin/infra-manager-status"},
+        )
+    output.warning.assert_called_once_with("В Semaphore отсутствует гость 340")
+
     with patch.object(
         status,
         "_run_guest_command",

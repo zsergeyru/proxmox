@@ -174,6 +174,14 @@ class Console:
             flush=True,
         )
 
+    def warning(self, message: str) -> None:
+        """Показать предупреждение даже при тихой проверке состояния."""
+        print(
+            f"[ПРЕДУПРЕЖДЕНИЕ] {message}",
+            file=self.out,
+            flush=True,
+        )
+
     def error(self, message: str) -> None:
         red = self._color("\033[31m")
         bold = self._color("\033[1m")

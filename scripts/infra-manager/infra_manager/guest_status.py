@@ -315,11 +315,14 @@ def _run_declared_check(
                 f"INFRA_PROJECT_BRANCH={project_branch}",
                 *argv,
             ]
-        _run_guest_command(
+        result = _run_guest_command(
             node,
             address,
             argv,
         )
+        for line in (result.stdout or "").splitlines():
+            if line.startswith("[ПРЕДУПРЕЖДЕНИЕ] "):
+                console.warning(line.removeprefix("[ПРЕДУПРЕЖДЕНИЕ] "))
         return
 
     if check_type == "http":
