@@ -171,15 +171,18 @@ def execute(arguments: list[str]) -> int:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Ограниченный вызов infra-manager на PVE")
     sub = parser.add_subparsers(dest="mode", required=True)
-    sub.add_parser("--execute").add_argument("args", nargs="*")
-    approval = sub.add_parser("--approve")
+    sub.add_parser("execute").add_argument("args", nargs="*")
+    approval = sub.add_parser("approve")
     approval.add_argument("operation", choices=sorted(MUTATING))
     approval.add_argument("vmid", type=int)
-    args = parser.parse_args(argv)
+    raw = list(sys.argv[1:] if argv is None else argv)
+    if raw and raw[0] in {"--execute", "--approve"}:
+        raw[0] = raw[0][2:]
+    args = parser.parse_args(raw)
     if os.geteuid() != 0:
         raise AgentAccessError("Ограниченный исполнитель требует root через sudo")
     policy = load_policy()
-    if args.mode == "--approve":
+    if args.mode == "approve":
         # sudoers разрешает только --execute; утверждение возможно лишь из root PVE.
         if os.getuid() != 0:
             raise AgentAccessError("Подтверждать изменения может только root PVE")
