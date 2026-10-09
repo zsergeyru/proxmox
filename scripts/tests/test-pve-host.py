@@ -327,6 +327,8 @@ def test_recovery_host_support() -> None:
             }),
             patch.object(module, "_required_file"),
             patch.object(module, "_configure_agent_ssh_host"),
+            patch.object(module, "_configure_agent_openbao_access"),
+            patch.dict("os.environ", {"INFRA_ENABLE_PVE_AGENT_ACCESS": "1"}),
             patch.object(module, "PATHS", SimpleNamespace(
                 ssh_client_ca_public_key=Path("/dev/null"),
             )),
