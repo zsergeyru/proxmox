@@ -637,12 +637,8 @@ print(json.dumps({"vmid": matches[0][0], "name": matches[0][1]}))
             self.timed_step("Проверка сохранённых данных", self.verify_recovery_state)
 
         if existed:
-            if self.mode == "recover":
-                self.timed_step("Проверка подключённых данных", self.verify_persistent_layout)
-                self.timed_step("Удаление старого rootfs", self.remove_infra_rootfs_for_recovery)
-                existed = False
-            else:
-                self.timed_step("Проверка подключённых данных", self.verify_persistent_layout)
+            self.timed_step("Проверка подключённых данных", self.verify_persistent_layout)
+            if self.mode != "recover":
                 self.fail(
                     f"LXC {self.infra_ctid} уже существует; "
                     "для рабочего infra-manager используйте обычный deploy/repair, "
@@ -656,7 +652,11 @@ print(json.dumps({"vmid": matches[0][0], "name": matches[0][1]}))
         else:
             self.timed_step("Создание постоянных каталогов", self.prepare_new_persistent_layout)
 
+        # Сначала подготовить 990, Docker, Ansible и временный PVE-доступ.
+        # Не удалять исправный rootfs 910, если подготовка 990 не удалась.
         self.timed_step("Подготовка 990", self.prepare_runner)
+        if existed and self.mode == "recover":
+            self.timed_step("Удаление старого rootfs", self.remove_infra_rootfs_for_recovery)
         self.timed_step(f"Создание LXC {self.infra_ctid}", self.create_infra_manager)
         self.timed_step("Подключение постоянных данных", self.attach_persistent_layout)
         self.timed_step("Базовая настройка ОС", self.configure_infra_manager_base)
