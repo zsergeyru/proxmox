@@ -22,6 +22,7 @@ if (_HOST_MODULE_ROOT / "openbao_host").is_dir():
 else:
     sys.path.insert(0, str(_INSTALLED_HOST_MODULE_ROOT))
 
+from openbao_host.agent import CONFIGURE_AGENT_CODE
 from openbao_host.errors import OpenBaoHostError, OpenBaoRaftInactiveError
 from openbao_host.tls import prepare_tls_material as _prepare_tls_material
 from openbao_host.snippets import (
@@ -66,6 +67,7 @@ PVE_RAFT_PEERS_PATH = PVE_RAFT_STORAGE_PATH / "raft" / "peers.json"
 PVE_RAFT_RECOVERY_DIR = KEY_DIR / "raft-recovery"
 KEY_PATH = KEY_DIR / "unseal.key"
 SSH_ACCESS_PATH = KEY_DIR / "ssh-access.json"
+AGENT_ACCESS_PATH = KEY_DIR / "agent-access.json"
 KV_ACCESS_PATH = KEY_DIR / "kv-access.json"
 OPERATOR_ACCESS_PATH = KEY_DIR / "operator-access.json"
 OPERATOR_USERNAME = "operator"
@@ -1610,6 +1612,78 @@ def configure_ssh_access(
     log_detail("[ОК] Ограниченный служебный доступ к SSH-центрам настроен")
 
 
+def configure_agent_access(payload: dict[str, object]) -> None:
+    """Инициализировать отдельную AppRole агентского PVE SSH (идемпотентно).
+
+    Временный административный OpenBao токен нужен только при смене
+    контракта; действующие учётные данные остаются в PVE-only хранилище.
+    """
+    vmid = payload.get("vmid")
+    cidr = payload.get("source_cidr")
+    if type(vmid) is not int or vmid <= 0:
+        raise OpenBaoHostError("Некорректный VMID источника")
+    try:
+        network = ipaddress.IPv4Network(cidr, strict=True)
+    except (TypeError, ValueError) as exc:
+        raise OpenBaoHostError("Неверная сеть агентского доступа") from exc
+    if network.prefixlen != 32:
+        raise OpenBaoHostError("Нужен точный адрес /32")
+    expected = {"vmid": vmid, "source_cidr": str(network), "version": 1}
+    if AGENT_ACCESS_PATH.is_file():
+        old = json.loads(AGENT_ACCESS_PATH.read_text(encoding="utf-8"))
+        if isinstance(old, dict) and all(old.get(k) == v for k, v in expected.items()):
+            if old.get("role_id") and old.get("secret_id"):
+                log_detail("[ОК] Ограниченный AppRole агента уже настроен")
+                return
+    require_active_openbao("настройка агентского SSH")
+    token = generate_temporary_root_token()
+    try:
+        result = pct_exec(
+            "python3", "-c", CONFIGURE_AGENT_CODE, capture=True,
+            input_text=json.dumps({**expected, "token": token}, separators=(",", ":")),
+        )
+    finally:
+        revoke_temporary_root_token(token)
+        del token
+    try:
+        creds = json.loads(result.stdout)
+    except (ValueError, AttributeError) as exc:
+        raise OpenBaoHostError("OpenBao вернул неверную identity агента") from exc
+    if not isinstance(creds, dict) or not all(
+        isinstance(creds.get(key), str) and creds[key]
+        for key in ("role_id", "secret_id")
+    ):
+        raise OpenBaoHostError("OpenBao не выдал агентские учётные данные")
+    KEY_DIR.mkdir(parents=True, exist_ok=True)
+    os.chmod(KEY_DIR, 0o700)
+    fd, tempname = tempfile.mkstemp(prefix=".agent-access.", dir=KEY_DIR, text=True)
+    temporary = Path(tempname)
+    try:
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            json.dump({**expected, **creds}, stream, separators=(",", ":"))
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, AGENT_ACCESS_PATH)
+        os.chmod(AGENT_ACCESS_PATH, 0o600)
+    finally:
+        temporary.unlink(missing_ok=True)
+    log_status("[ОК] Ограниченный SSH-доступ OpenBao для агента подготовлен")
+
+
+def issue_agent_credentials(payload: dict[str, object]) -> dict[str, str]:
+    vmid = payload.get("vmid")
+    if type(vmid) is not int:
+        raise OpenBaoHostError("Некорректная машинная identity")
+    if not AGENT_ACCESS_PATH.is_file():
+        raise OpenBaoHostError("Агентская SSH-идентичность не инициализирована")
+    data = json.loads(AGENT_ACCESS_PATH.read_text(encoding="utf-8"))
+    if data.get("vmid") != vmid:
+        raise OpenBaoHostError("Агентская identity не соответствует VMID")
+    return {"role_id": data["role_id"], "secret_id": data["secret_id"]}
+
+
 def client_ca_published() -> bool:
     result = pct_exec(
         "cat",
@@ -1968,6 +2042,16 @@ def main() -> int:
         help="Выпустить RoleID/SecretID одной машинной AppRole из stdin",
     )
     mode.add_argument(
+        "--configure-agent-access",
+        action="store_true",
+        help="Подготовить ограниченную AppRole агента PVE из stdin",
+    )
+    mode.add_argument(
+        "--issue-agent-credentials",
+        action="store_true",
+        help="Выдать ранее подготовленную ограниченную AppRole агенту",
+    )
+    mode.add_argument(
         "--check-kv",
         action="store_true",
         help="Проверить KV v2 и ограниченный доступ к рабочим секретам",
@@ -2068,6 +2152,10 @@ def main() -> int:
                     separators=(",", ":"),
                 )
             )
+        elif args.configure_agent_access:
+            configure_agent_access(json.loads(sys.stdin.read()))
+        elif args.issue_agent_credentials:
+            print(json.dumps(issue_agent_credentials(json.loads(sys.stdin.read())), separators=(",", ":")))
         elif args.check_kv:
             require_active_openbao("проверка KV")
             check_kv_access()
