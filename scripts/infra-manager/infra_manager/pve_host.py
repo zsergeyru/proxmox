@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shlex
 
 import yaml
@@ -461,6 +462,9 @@ def install_operator_host_support(node: str, repo_root: Path) -> None:
     _install_remote_file(
         node, host_root / "manager.py", OPERATOR_HOST_COMMAND, "0755",
     )
+    if os.environ.get("INFRA_ENABLE_PVE_AGENT_ACCESS") != "1":
+        console.detail("Оператор PVE обновлён; незавершённый агентский доступ выключен")
+        return
     _install_remote_file(
         node, host_root / "agent_operator.py", AGENT_HOST_COMMAND, "0755",
     )
