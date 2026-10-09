@@ -1,0 +1,68 @@
+schema_version: 1
+guest_vmid: 430
+
+system:
+  distribution: debian
+  version: "13"
+  architecture: amd64
+  required_packages:
+    - ca-certificates
+    - curl
+    - python3
+
+docker:
+  source: docker-official-repository
+  service:
+    name: docker
+    enabled: true
+    state: running
+  required_packages:
+    - docker-ce
+    - docker-ce-cli
+    - containerd.io
+    - docker-buildx-plugin
+    - docker-compose-plugin
+
+photo_archive:
+  application: immich
+  mode: api-only
+  # Версия и образы должны быть закреплены совместно перед первым запуском.
+  immich_version: v3
+  web_port: 2283
+  paths:
+    root: /opt/photo-archive
+    compose: /opt/photo-archive/compose
+    compose_file: /opt/photo-archive/compose/docker-compose.yml
+    configuration: /etc/photo-archive
+    environment: /etc/photo-archive/immich.env
+    originals: /srv/photo-archive/originals
+    uploads: /srv/photo-archive/immich
+    database: /var/lib/photo-archive/postgres
+  storage:
+    required_external_mount: /srv/photo-archive
+    originals_read_only: true
+    allow_missing_mount: false
+  workers:
+    include: api
+    windows_background_worker_required: true
+  database:
+    engine: postgresql
+    vector_extension: vectorchord
+    network_exposure: disabled
+  queue:
+    engine: redis
+    network_exposure: disabled
+  external_library:
+    enabled: true
+    automatic_registration: false
+
+persistence:
+  backup_required:
+    - /var/lib/photo-archive/postgres
+    - /srv/photo-archive
+    - /etc/photo-archive/immich.env
+  reproducible:
+    - /opt/photo-archive/compose
+  ephemeral:
+    - docker-images
+    - docker-build-cache
