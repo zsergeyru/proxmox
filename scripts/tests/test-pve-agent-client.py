@@ -44,6 +44,23 @@ def check_commands() -> None:
             raise AssertionError(f"Операция {op} {vmid} не отклонена")
 
 
+def check_empty_openbao_response() -> None:
+    class EmptyResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self):
+            return b""
+
+    with patch.object(client.request, "urlopen", return_value=EmptyResponse()):
+        assert client._post(
+            "https://192.0.2.10:8202/v1/auth/token/revoke-self", {}, object()
+        ) == {}
+
+
 def check_verified_transient_certificate() -> None:
     with tempfile.TemporaryDirectory() as temp:
         root = Path(temp)
@@ -106,6 +123,7 @@ def check_verified_transient_certificate() -> None:
 
 def main() -> None:
     check_commands()
+    check_empty_openbao_response()
     check_verified_transient_certificate()
     print("Hermes restricted operator client checks passed.")
 
