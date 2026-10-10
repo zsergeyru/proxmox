@@ -908,8 +908,9 @@ def test_restart_unfinished_installation() -> None:
     host._test_marker_state = "installing"
     host.apply()
     assert_equal(host.mode, "apply", "Прерванная новая установка не должна становиться recovery")
-    if host.events[:5] != [
-        "infra_exists", "verify_unfinished", "info", "prepare_runner", "remove_rootfs"
+    if host.events[:6] != [
+        "infra_exists", "verify_unfinished", "info", "prepare_new_layout",
+        "prepare_runner", "remove_rootfs"
     ]:
         raise AssertionError(f"Перед пересозданием необходимо проверить состояние: {host.events}")
     if host._test_marker_state != "ready":
@@ -1711,6 +1712,160 @@ def test_bootstrap_python_sources_follow_rule_010() -> None:
                     )
 
 
+
+def _use_temporary_persistent_paths(host: BootstrapHost, root: Path) -> None:
+    """Перенаправить все постоянные пути PVE в испытательный каталог."""
+    host.host_persistent_root = root
+    host.host_pve_only_dir = root / "pve-only"
+    host.host_access_dir = root / "access"
+    host.host_state_dir = root / "state"
+    host.host_access_pve_host_dir = host.host_access_dir / "pve-host"
+    host.host_access_ca_dir = host.host_access_dir / "ca"
+    host.host_openbao_unseal_key = host.host_pve_only_dir / "openbao/unseal.key"
+    host.host_recovery_dir = host.host_pve_only_dir / "recovery"
+    host.host_recovery_github_key = host.host_recovery_dir / "github_ed25519"
+    host.host_pve_ca = host.host_access_ca_dir / "pve-root-ca.crt"
+    host.host_github_key = root.parent / "github_ed25519"
+
+
+def test_installing_marker_precedes_mutable_layout() -> None:
+    """Маркер должен существовать даже при отказе сразу после подготовки корня."""
+    with tempfile.TemporaryDirectory() as temp:
+        host = BootstrapHost("apply")
+        root = Path(temp) / "infra-manager"
+        _use_temporary_persistent_paths(host, root)
+        with patch.object(host, "_set_mode_owner", side_effect=BootstrapError("отказ прав")):
+            try:
+                host.prepare_new_persistent_layout()
+            except BootstrapError as exc:
+                if "отказ прав" not in str(exc):
+                    raise
+            else:
+                raise AssertionError("Ошибка подготовки не должна скрываться")
+        assert_equal(host._read_installation_marker(), "installing",
+                     "Частичная подготовка должна оставлять маркер installing")
+        host.verify_unfinished_installation(guest_exists=False)
+
+        def copy_for_test(source: Path, target: Path, **kwargs) -> None:
+            """Имитировать копирование ключей без обращения к файловой системе PVE."""
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text("test-access", encoding="utf-8")
+
+        with (
+            patch.object(host, "_set_mode_owner", return_value=None),
+            patch.object(host, "_copy_access_file", side_effect=copy_for_test),
+        ):
+            host.prepare_new_persistent_layout()
+        assert_equal(host._read_installation_marker(), "installing",
+                     "Повтор подготовки не должен объявлять установку готовой")
+        if not host.host_recovery_github_key.is_file() or not host.host_pve_ca.is_file():
+            raise AssertionError("Повторная подготовка должна довести файлы доступа")
+        if not host.host_state_dir.is_dir():
+            raise AssertionError("После повтора каталог состояния должен быть создан")
+
+
+def test_installing_marker_survives_before_state_directory() -> None:
+    """Записанный до state маркер позволяет безопасно продолжить установку."""
+    with tempfile.TemporaryDirectory() as temp:
+        host = BootstrapHost("apply")
+        _use_temporary_persistent_paths(host, Path(temp) / "infra-manager")
+        host.begin_new_installation()
+        assert_equal(host.installation_state(guest_exists=False), "unfinished",
+                     "Ранняя установка не должна считаться recovery")
+        if host.host_state_dir.exists():
+            raise AssertionError("Состояние не должно появиться до начала настройки")
+        host.verify_unfinished_installation(guest_exists=False)
+
+
+def test_marker_creation_failure_keeps_root_absent() -> None:
+    """Ошибка записи маркера не оставляет нераспознаваемый постоянный каталог."""
+    with tempfile.TemporaryDirectory() as temp:
+        host = BootstrapHost("apply")
+        root = Path(temp) / "infra-manager"
+        _use_temporary_persistent_paths(host, root)
+        with patch.object(host, "_write_installation_marker_to",
+                          side_effect=BootstrapError("нельзя записать маркер")):
+            try:
+                host.begin_new_installation()
+            except BootstrapError:
+                pass
+            else:
+                raise AssertionError("Ошибка маркера должна остановить процесс")
+        if root.exists() or list(Path(temp).glob(".infra-manager-install-*")):
+            raise AssertionError("Отказ записи маркера должен удалить временные каталоги")
+
+
+def test_new_layout_refuses_unmarked_old_directory() -> None:
+    """Не подменять существующий постоянный каталог новой установкой."""
+    with tempfile.TemporaryDirectory() as temp:
+        host = BootstrapHost("apply")
+        root = Path(temp) / "infra-manager"
+        _use_temporary_persistent_paths(host, root)
+        root.mkdir()
+        sentinel = root / "semaphore.sqlite"
+        sentinel.write_bytes(b"preserve")
+        try:
+            host.prepare_new_persistent_layout()
+        except BootstrapError:
+            pass
+        else:
+            raise AssertionError("Данные без маркера нельзя считать чистой установкой")
+        assert_equal(sentinel.read_bytes(), b"preserve",
+                     "Отказ должен сохранить прежние данные")
+
+
+class RunnerPreflightFailureHarness(ExecuteHarness):
+    """Имитирует ошибку подтверждения принадлежности временного 990."""
+
+    def verify_runner_contract(self) -> None:
+        """Прервать проверку до создания или изменения гостя."""
+        self.events.append("verify_runner_failed")
+        raise BootstrapError("чужой временный контейнер")
+
+    def remove_private_access(self) -> None:
+        """Подтвердить отзыв оставшегося временного токена."""
+        self.events.append("revoke_token")
+
+
+def test_stale_token_revoked_on_runner_preflight_failure() -> None:
+    """Даже чужой или неисправный 990 не должен оставлять временный PVE токен."""
+    host = RunnerPreflightFailureHarness("apply")
+    try:
+        host.execute()
+    except BootstrapError as exc:
+        if "чужой" not in str(exc):
+            raise
+    else:
+        raise AssertionError("Ошибочный 990 должен останавливать установку")
+    assert_equal(
+        host.events,
+        ["require_host", "verify_runner_failed", "revoke_token"],
+        "Проверка 990 не должна блокировать отзыв оставшегося токена",
+    )
+
+
+class HostPreflightFailureHarness(RunnerPreflightFailureHarness):
+    """Имитирует отсутствие доступа к командам PVE до их проверки."""
+
+    def require_host(self) -> None:
+        """Остановить программу до подтверждения хоста."""
+        self.events.append("require_host_failed")
+        raise BootstrapError("нет доступа к PVE")
+
+
+def test_no_token_cleanup_before_host_verified() -> None:
+    """Нельзя менять PVE при отказе проверки самого физического узла."""
+    host = HostPreflightFailureHarness("apply")
+    try:
+        host.execute()
+    except BootstrapError:
+        pass
+    else:
+        raise AssertionError("Ожидался отказ проверки хоста")
+    assert_equal(host.events, ["require_host_failed"],
+                 "Токен нельзя изменять до проверки PVE")
+
+
 def main() -> None:
     """Последовательно выполнить все проверки без доступа к рабочему PVE."""
     tests = [
@@ -1764,6 +1919,12 @@ def main() -> None:
         test_lock_rejects_symlink_without_touching_target,
         test_purge_keeps_persistent_storage,
         test_bootstrap_python_sources_follow_rule_010,
+        test_installing_marker_precedes_mutable_layout,
+        test_installing_marker_survives_before_state_directory,
+        test_marker_creation_failure_keeps_root_absent,
+        test_new_layout_refuses_unmarked_old_directory,
+        test_stale_token_revoked_on_runner_preflight_failure,
+        test_no_token_cleanup_before_host_verified,
     ]
     for test in tests:
         test()
