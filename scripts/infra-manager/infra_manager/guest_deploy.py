@@ -705,8 +705,10 @@ def _prepare_pve_agent_ansible_vars(
     context: DeploymentContext,
     directory: Path,
 ) -> list[str]:
-    """Подготовить доступ к оператору PVE только гостю с правом в access.yaml."""
+    """Подготовить доступ к оператору PVE только после явного включения."""
 
+    if os.environ.get("INFRA_ENABLE_PVE_AGENT_ACCESS") != "1":
+        return ["-e", "infra_pve_agent_enabled=false"]
     repo_root = context.paths.guest_dir.parents[2]
     role = find_guest_by_role(repo_root, "ai-control")
     if context.vmid != role.vmid:
