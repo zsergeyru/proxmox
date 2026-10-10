@@ -60,7 +60,7 @@ class BootstrapCommandsMixin:
         capture: bool = False,
     ) -> subprocess.CompletedProcess[str]:
         """Выполнить внешнюю команду с выбранным способом отображения вывода.
-        
+
         quiet записывает вывод в журнал, progress дополнительно показывает этапы
         Ansible; capture возвращает stdout/stderr вызывающему методу. По умолчанию
         неуспешный код завершения вызывает BootstrapError. Аргументы запуска
