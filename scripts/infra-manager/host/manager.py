@@ -14,7 +14,6 @@ from pathlib import Path
 HOST_CONFIG = Path("/etc/infra-manager/openbao-host.json")
 RECOVERY_COMMAND = Path("/usr/local/sbin/infra-manager-recovery")
 GUEST_COMMAND = "/usr/local/sbin/infra-manager"
-AGENT_COMMAND = "/usr/local/sbin/infra-manager-agent"
 
 
 class OperatorError(RuntimeError):
@@ -98,7 +97,7 @@ def start_manager(vmid: int) -> None:
     )
 
 
-def proxy_to_manager(arguments: list[str], *, trusted: bool = True) -> int:
+def proxy_to_manager(arguments: list[str]) -> int:
     vmid, name = manager_identity()
     verify_manager(vmid, name)
     if arguments == ["repair"]:
@@ -118,10 +117,8 @@ def proxy_to_manager(arguments: list[str], *, trusted: bool = True) -> int:
             "env",
             f"INFRA_PVE_NODE={socket.gethostname().split('.')[0]}",
             f"INFRA_MANAGER_COLOR={color_mode()}",
-            *(["INFRA_ENABLE_PVE_AGENT_ACCESS=1"] if trusted and
-              os.environ.get("INFRA_ENABLE_PVE_AGENT_ACCESS") == "1" else []),
             GUEST_COMMAND,
-            *(["--trusted-pve"] if trusted else []),
+            "--trusted-pve",
             *arguments,
         ],
         check=False,
@@ -146,14 +143,6 @@ def main() -> int:
     arguments = sys.argv[1:] or ["--help"]
     if arguments == ["recover"]:
         return recover()
-    if arguments and arguments[0] == "agent-approve":
-        if len(arguments) != 3:
-            raise OperatorError("Использование: infra-manager agent-approve OPERATION VMID")
-        return run([AGENT_COMMAND, "--approve", *arguments[1:]], check=False).returncode
-    if arguments and arguments[0] == "--agent":
-        if arguments[1:] == ["recover"] or not arguments[1:]:
-            raise OperatorError("Агенту не разрешено восстановление PVE")
-        return proxy_to_manager(arguments[1:], trusted=False)
     return proxy_to_manager(arguments)
 
 

@@ -24,7 +24,7 @@ $defs:
         type: string
         pattern: '^(guest:[1-9][0-9]{2}|host:pve|service:[a-z0-9][a-z0-9-]*)$'
       service:
-        enum: [pve-api, ssh, github, semaphore, pve-operator, openbao]
+        enum: [pve-api, ssh, github, semaphore, openbao]
       resource:
         enum:
           - guests
@@ -34,7 +34,6 @@ $defs:
           - identity
           - repository
           - infrastructure-task
-          - guest-operation
           - credential
           - ssh-ca
           - instance

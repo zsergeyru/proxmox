@@ -320,20 +320,7 @@ def test_recovery_host_support() -> None:
 
         with (
             patch.object(module, "_install_remote_file", side_effect=record_install),
-            patch.object(module, "_install_remote_text"),
             patch.object(module, "_ssh", side_effect=record_ssh),
-            patch.object(module, "_agent_operator_policy", return_value={
-                "schema_version": 1, "subject": "guest:410", "allowed": {}
-            }),
-            patch.object(module, "_required_file"),
-            patch.object(module, "_configure_agent_ssh_host"),
-            patch.object(module, "_configure_agent_openbao_access"),
-            patch.object(module, "_disable_agent_ssh_host"),
-            patch.dict("os.environ", {"INFRA_ENABLE_PVE_AGENT_ACCESS": "1"}),
-            patch.object(module, "PATHS", SimpleNamespace(
-                ssh_client_ca_public_key=Path("/dev/null"),
-            )),
-            patch.object(Path, "read_text", return_value="ssh-ed25519 AAABBB"),
         ):
             module.install_recovery_host_support("pve", root)
             module.install_operator_host_support("pve", root)
@@ -352,46 +339,12 @@ def test_recovery_host_support() -> None:
             "/usr/local/sbin/infra-manager",
             "0755",
         ),
-        (
-            str(manager.parent / "agent_operator.py"),
-            "/usr/local/sbin/infra-manager-agent",
-            "0755",
-        ),
-        (
-            str(manager.parent / "agent_ssh.py"),
-            "/usr/local/sbin/infra-manager-agent-ssh",
-            "0755",
-        ),
     ]
     assert calls == [
         ("/usr/local/sbin/infra-manager-recovery", "--prepare"),
         ("/usr/local/sbin/infra-manager-recovery", "--preflight"),
         ("/usr/local/sbin/infra-manager-recovery", "--check"),
     ]
-
-
-def test_operator_agent_disabled_by_default() -> None:
-    installs: list[str] = []
-
-    def fake_install(node: str, source: Path, target: Path, mode: str):
-        assert node == "pve"
-        installs.append(str(target))
-
-    with (
-        patch.dict("os.environ", {"INFRA_ENABLE_PVE_AGENT_ACCESS": "0"}),
-        patch.object(module, "_install_remote_file", side_effect=fake_install),
-        patch.object(module, "_configure_agent_openbao_access") as openbao,
-        patch.object(module, "_configure_agent_ssh_host") as ssh,
-        patch.object(module, "_disable_agent_ssh_host") as revoke,
-        patch.object(module, "_revoke_agent_openbao_access") as revoke_openbao,
-    ):
-        module.install_operator_host_support("pve", ROOT)
-
-    assert installs == ["/usr/local/sbin/infra-manager"]
-    revoke.assert_called_once_with("pve")
-    revoke_openbao.assert_called_once_with("pve")
-    openbao.assert_not_called()
-    ssh.assert_not_called()
 
 
 def test_operator_wrapper_install_guard() -> None:
@@ -573,7 +526,6 @@ def main() -> None:
     test_openbao_host_support()
     test_openbao_status_checks()
     test_recovery_host_support()
-    test_operator_agent_disabled_by_default()
     test_operator_wrapper_install_guard()
     test_sign_ssh_client_key()
     test_issue_openbao_machine_credentials()

@@ -104,12 +104,7 @@ assert paths == {
 
 executor = provision["integrations"]["infrastructure_executor"]
 assert executor["role"] == "infra-manager"
-assert executor["service"] == "pve-operator"
-assert executor["ssh"]["account"] == "infra-agent"
-assert executor["ssh"]["direct_pve_admin"] is False
-skill_dir = ROOT / "automation" / "ansible" / "roles" / "ai_control" / "files"
-assert (skill_dir / "pve-infra-manager.py").is_file()
-assert "name: infra-manager" in (skill_dir / "pve-infra-manager-SKILL.md").read_text(encoding="utf-8")
+assert executor["service"] == "semaphore"
 assert "guest_vmid" not in executor
 
 persistence = provision["persistence"]
