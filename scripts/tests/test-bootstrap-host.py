@@ -1980,10 +1980,23 @@ class NewRootfsTokenHarness(BootstrapHost):
         pass
 
 
+def _prepare_test_new_rootfs_token(host: NewRootfsTokenHarness) -> None:
+    """Запустить реальную выдачу токена с временным файлом вне /run."""
+    with tempfile.TemporaryDirectory() as directory:
+        original_mkstemp = tempfile.mkstemp
+        with patch(
+            "bootstrap_runner.infra.tempfile.mkstemp",
+            side_effect=lambda **kwargs: original_mkstemp(
+                prefix=kwargs["prefix"], dir=directory
+            ),
+        ):
+            host.prepare_infra_pve_access()
+
+
 def test_new_rootfs_always_rotates_token() -> None:
     """Даже старый правильный токен не переиспользуется без его секрета."""
     host = NewRootfsTokenHarness()
-    host.prepare_infra_pve_access()
+    _prepare_test_new_rootfs_token(host)
     assert_equal(
         host.events[:4],
         ["verify_guest", "revoke:root@pam!infra-manager",
@@ -1996,7 +2009,7 @@ def test_failed_new_rootfs_token_transfer_revokes_new_token() -> None:
     """Секрет не должен оставаться действующим после ошибки его передачи."""
     host = NewRootfsTokenHarness(fail_stage=True)
     try:
-        host.prepare_infra_pve_access()
+        _prepare_test_new_rootfs_token(host)
     except BootstrapError as exc:
         if "передача токена" not in str(exc):
             raise
