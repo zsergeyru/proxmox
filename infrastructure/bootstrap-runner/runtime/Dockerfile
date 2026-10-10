@@ -1,3 +1,6 @@
+# Временная среда только для OpenTofu, Ansible и проверки описаний гостей.
+# Образ не содержит Semaphore, Packer или постоянных ключей/состояний.
+# Запускается по требованию внутри LXC 990, после завершения удаляется.
 FROM debian:13-slim
 
 ARG OPENTOFU_VERSION=1.12.6
@@ -17,6 +20,8 @@ RUN apt-get update \
         unzip \
     && rm -rf /var/lib/apt/lists/*
 
+# Загрузка OpenTofu проверяется по опубликованным контрольным суммам.
+# Версия закреплена аргументом сборки; сеть необходима только при сборке.
 RUN set -eux; \
     archive="tofu_${OPENTOFU_VERSION}_linux_amd64.zip"; \
     base="https://github.com/opentofu/opentofu/releases/download/v${OPENTOFU_VERSION}"; \

@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+# Подготовить одноразовую среду 990: Docker, средства развёртывания,
+# чистый временный OpenTofu state и новую пару SSH-ключей.
+# Выполняется от root внутри 990, не создаёт постоянных служб на PVE.
+# Старые временные ключи удаляются перед генерацией новых; этот сценарий
+# нельзя запускать для восстановления постоянных учётных данных гостя.
+
 [[ $EUID -eq 0 ]] || { echo "ОШИБКА: сценарий должен выполняться от root внутри LXC 990" >&2; exit 1; }
 
 REPO_ROOT="${1:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
@@ -11,6 +17,8 @@ IMAGE="bootstrap-runtime:v1"
 command -v apt-get >/dev/null 2>&1 || { echo "ОШИБКА: не найден apt-get" >&2; exit 1; }
 
 install -d -m 0700 "$CONFIG_DIR/secrets" "$CONFIG_DIR/bootstrap-ssh"
+# Старый локальный план/состояние временной среды нельзя использовать
+# для новой операции: истина о работающих гостях хранится отдельно на PVE.
 rm -rf "$DATA_DIR/opentofu/state"
 install -d -m 0755 "$CONFIG_DIR/ca" "$DATA_DIR/opentofu/state"
 rm -f "$CONFIG_DIR/ca/ssh-client-ca.pub" "$CONFIG_DIR/ca/ssh-host-ca.pub"
@@ -31,6 +39,8 @@ command -v docker >/dev/null 2>&1 || {
 
 systemctl enable --now docker >/dev/null
 
+# Одноразовый ключ заменяется только внутри 990; закрытая часть никогда
+# не становится постоянным ключом управления действующим гостем.
 rm -f \
     "$CONFIG_DIR/bootstrap-ssh/infra_manager_ed25519" \
     "$CONFIG_DIR/bootstrap-ssh/infra_manager_ed25519.pub"
