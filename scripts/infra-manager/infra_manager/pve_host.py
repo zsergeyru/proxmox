@@ -471,7 +471,8 @@ def _revoke_agent_openbao_access(node: str) -> None:
 
     _ssh(
         node, "sh", "-eu", "-c",
-        f"if test -x {OPENBAO_HOST_COMMAND}; then "
+        "if test -f /mnt/bindmounts/infra-manager/pve-only/openbao/agent-access.json; then "
+        f"test -x {OPENBAO_HOST_COMMAND}; "
         f"{OPENBAO_HOST_COMMAND} --revoke-agent-access --log-level quiet; fi",
     )
 
