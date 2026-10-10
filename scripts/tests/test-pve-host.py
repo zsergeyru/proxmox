@@ -328,6 +328,7 @@ def test_recovery_host_support() -> None:
             patch.object(module, "_required_file"),
             patch.object(module, "_configure_agent_ssh_host"),
             patch.object(module, "_configure_agent_openbao_access"),
+            patch.object(module, "_disable_agent_ssh_host"),
             patch.dict("os.environ", {"INFRA_ENABLE_PVE_AGENT_ACCESS": "1"}),
             patch.object(module, "PATHS", SimpleNamespace(
                 ssh_client_ca_public_key=Path("/dev/null"),
@@ -381,10 +382,12 @@ def test_operator_agent_disabled_by_default() -> None:
         patch.object(module, "_install_remote_file", side_effect=fake_install),
         patch.object(module, "_configure_agent_openbao_access") as openbao,
         patch.object(module, "_configure_agent_ssh_host") as ssh,
+        patch.object(module, "_disable_agent_ssh_host") as revoke,
     ):
         module.install_operator_host_support("pve", ROOT)
 
     assert installs == ["/usr/local/sbin/infra-manager"]
+    revoke.assert_called_once_with("pve")
     openbao.assert_not_called()
     ssh.assert_not_called()
 
