@@ -3,12 +3,98 @@
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 from pathlib import Path
 
 from .errors import BootstrapError
 
 
 class BootstrapPersistenceMixin:
+    """Проверка постоянных данных и состояния первоначальной установки.
+
+    Маркер сохраняется на PVE отдельно от rootfs гостя. Отсутствие маркера
+    при существующем хранилище не разрешает новую установку: такие данные
+    считаются ранее созданным состоянием и требуют проверки восстановления.
+    """
+
+    def _installation_marker_path(self) -> Path:
+        """Вернуть путь к маркеру установки в закрытой области PVE."""
+        return self.host_pve_only_dir / "bootstrap-installation.json"
+
+    def _read_installation_marker(self) -> str | None:
+        """Проверить маркер и вернуть installing/ready либо None."""
+        marker = self._installation_marker_path()
+        if marker.is_symlink():
+            self.fail(f"Небезопасная символьная ссылка вместо маркера: {marker}")
+        if not marker.exists():
+            return None
+        if not marker.is_file():
+            self.fail(f"Маркер установки не является файлом: {marker}")
+        try:
+            payload = json.loads(marker.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            raise BootstrapError(f"Повреждён маркер установки {marker}: {exc}") from exc
+        if (
+            not isinstance(payload, dict)
+            or payload.get("schema_version") != 1
+            or payload.get("role") != self.infra_role
+            or payload.get("vmid") != self.infra_ctid
+            or payload.get("state") not in {"installing", "ready"}
+        ):
+            self.fail(f"Маркер установки {marker} не соответствует управляющему гостю")
+        return payload["state"]
+
+    def installation_state(self, *, guest_exists: bool) -> str:
+        """Классифицировать состояние без изменения файлов и гостя.
+
+        new: никогда не создававшаяся установка;
+        unfinished: прерванная установка, подтверждённая маркером PVE;
+        existing: управляющий контейнер уже существует;
+        recovery: контейнер утрачен, но постоянные данные сохраняются.
+        """
+        marker_state = self._read_installation_marker()
+        if marker_state == "installing":
+            return "unfinished"
+        if guest_exists:
+            return "existing"
+        if marker_state == "ready":
+            return "recovery"
+        if self.host_persistent_root.exists() or self.host_persistent_root.is_symlink():
+            return "recovery"
+        return "new"
+
+    def write_installation_marker(self, state: str) -> None:
+        """Атомарно сохранить состояние на PVE с доступом только root."""
+        if state not in {"installing", "ready"}:
+            self.fail(f"Неизвестное состояние установки: {state}")
+        marker = self._installation_marker_path()
+        if self.host_persistent_root.is_symlink() or self.host_pve_only_dir.is_symlink():
+            self.fail("Каталоги постоянного состояния не должны быть символьными ссылками")
+        if not self.host_pve_only_dir.is_dir() or marker.is_symlink():
+            self.fail("Небезопасный или отсутствующий каталог маркера установки")
+        fd, tmp_name = tempfile.mkstemp(prefix=".bootstrap-install-", dir=self.host_pve_only_dir)
+        temporary = Path(tmp_name)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as file:
+                json.dump(
+                    {
+                        "schema_version": 1,
+                        "role": self.infra_role,
+                        "vmid": self.infra_ctid,
+                        "state": state,
+                    },
+                    file,
+                    ensure_ascii=False,
+                )
+                file.write("\n")
+                file.flush()
+                os.fsync(file.fileno())
+            temporary.chmod(0o600)
+            os.replace(temporary, marker)
+        finally:
+            temporary.unlink(missing_ok=True)
+
     def managed_guests_exist(self) -> bool:
         result = self.run(
             "pvesh",

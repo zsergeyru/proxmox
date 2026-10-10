@@ -1071,6 +1071,37 @@ def test_remove_rejects_foreign_910() -> None:
     )
 
 
+def test_installation_marker_states() -> None:
+    """Маркер различает чистую, прерванную, готовую и утраченную установку."""
+    with tempfile.TemporaryDirectory() as temp:
+        host = BootstrapHost("apply")
+        host.host_persistent_root = Path(temp) / "state"
+        host.host_pve_only_dir = host.host_persistent_root / "pve-only"
+        assert_equal(host.installation_state(guest_exists=False), "new", "Чистый PVE")
+        host.host_pve_only_dir.mkdir(parents=True)
+        host.write_installation_marker("installing")
+        assert_equal(host.installation_state(guest_exists=False), "unfinished", "Незаконченная установка")
+        assert_equal(host.installation_state(guest_exists=True), "unfinished", "Неоконченная установка с LXC")
+        host.write_installation_marker("ready")
+        assert_equal(host.installation_state(guest_exists=True), "existing", "Готовый LXC")
+        assert_equal(host.installation_state(guest_exists=False), "recovery", "Утраченный LXC")
+
+        host._installation_marker_path().write_text(
+            '{"schema_version":1,"role":"infra-manager","vmid":999,"state":"installing"}',
+            encoding="utf-8",
+        )
+        try:
+            host.installation_state(guest_exists=False)
+        except BootstrapError:
+            pass
+        else:
+            raise AssertionError("Чужой маркер установки должен отклоняться")
+
+        host._installation_marker_path().unlink()
+        assert_equal(host.installation_state(guest_exists=False), "recovery",
+                     "Неопознанные сохранённые данные требуют recovery")
+
+
 def main() -> None:
     tests = [
         test_infra_manager_role_can_move_to_another_vmid,
@@ -1105,6 +1136,7 @@ def main() -> None:
         test_existing_layout_requires_manual_migration,
         test_check_mode_finishes_temporary_runner,
         test_remove_rejects_foreign_910,
+        test_installation_marker_states,
     ]
     for test in tests:
         test()
