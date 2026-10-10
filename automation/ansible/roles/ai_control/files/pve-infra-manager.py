@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 from urllib import error, request
+from urllib.parse import urlsplit
 
 CONFIG = Path("/opt/data/skills/infra-manager/identity.json")
 CA = Path("/opt/data/skills/infra-manager/ca.crt")
@@ -43,6 +44,10 @@ def run(operation: str, vmid: str | None) -> int:
 
     config = json.loads(CONFIG.read_text(encoding="utf-8"))
     url = config["openbao_url"].rstrip("/")
+    parsed = urlsplit(url)
+    if (parsed.scheme != "https" or not parsed.hostname or parsed.username
+            or parsed.password or parsed.path or parsed.query or parsed.fragment):
+        raise ValueError("OpenBao должен иметь простой HTTPS-адрес")
     context = ssl.create_default_context(cafile=str(CA))
     with tempfile.TemporaryDirectory(prefix="pve-agent-") as name:
         path = Path(name)
@@ -71,7 +76,11 @@ def run(operation: str, vmid: str | None) -> int:
         if vmid is not None:
             cmd.append(vmid)
         return subprocess.run([
-            "ssh", "-T", "-o", "BatchMode=yes", "-o", "IdentitiesOnly=yes",
+            "ssh", "-F", "/dev/null", "-T",
+            "-o", "BatchMode=yes", "-o", "IdentitiesOnly=yes",
+            "-o", "HostKeyAlgorithms=ssh-ed25519",
+            "-o", "PasswordAuthentication=no", "-o", "KbdInteractiveAuthentication=no",
+            "-o", "ConnectTimeout=10",
             "-o", "StrictHostKeyChecking=yes",
             "-o", "ClearAllForwardings=yes",
             "-o", f"UserKnownHostsFile={KNOWN_HOSTS}",
