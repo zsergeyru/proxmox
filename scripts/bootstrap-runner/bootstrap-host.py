@@ -1,4 +1,17 @@
 #!/usr/bin/env python3
+"""Внутренний первоначальный загрузчик управляющего контура Proxmox.
+
+Выполняется от root на физическом PVE после подготовки временного LXC
+публичным установщиком. Выбирает режим, проверяет сохранённые данные,
+последовательно создаёт или восстанавливает управляющий контейнер и
+удаляет временный контур после подтверждения готовности.
+
+Обычное обслуживание работающего гостя сюда не входит. Полное
+восстановление проверяет сохранённое состояние до удаления rootfs.
+На контролируемой ошибке временный токен отзывается, однако если процесс
+аварийно убит, его отзыв не гарантируется.
+"""
+
 from __future__ import annotations
 
 import argparse
@@ -46,7 +59,9 @@ class BootstrapHost(
     BootstrapInfraMixin,
     BootstrapCleanupMixin,
 ):
+    """Координатор первоначального контура PVE, доступов и его проверки."""
     def __init__(self, mode: str) -> None:
+        """Подготовить режим, пути, цвета и роль; до изменения PVE найти управляющий гостевой объект."""
         self.mode = mode
         self._active_timing: tuple[str, float] | None = None
         self._timed_ok_count = 0
@@ -137,12 +152,14 @@ class BootstrapHost(
         self._section_title = None
 
     def log(self, message: str) -> None:
+        """Начать новый раздел, завершив учёт времени предыдущего."""
         self.finish_section()
         self._section_title = message
         self._section_started = time.monotonic()
         print(f"\n{self.c_bold}{self.c_blue}==> {message}{self.c_reset}")
 
     def ok(self, message: str) -> None:
+        """Сообщить об успешном действии; при активном этапе добавить длительность."""
         if self._active_timing is not None:
             _, started = self._active_timing
             message = f"{message:<55} ({_format_duration(time.monotonic() - started)})"
@@ -150,9 +167,11 @@ class BootstrapHost(
         print(f"{self.c_bold}{self.c_green}[ОК]{self.c_reset} {message}")
 
     def info(self, message: str) -> None:
+        """Вывести информационное сообщение без изменения состояния этапа."""
         print(f"{self.c_bold}{self.c_cyan}[ИНФО]{self.c_reset} {message}")
 
     def fail(self, message: str) -> None:
+        """Остановить сценарий ожидаемой ошибкой для операторского вывода."""
         raise BootstrapError(message)
 
     def timed_step(self, name: str, operation, *args, **kwargs):
@@ -176,6 +195,7 @@ class BootstrapHost(
             self._timed_ok_count = previous_count
 
     def check_ready(self) -> None:
+        """Подтвердить, что управляющий контейнер работает, а временный 990 и токен удалены."""
         if not self.infra_exists():
             self.fail(f"LXC {self.infra_ctid} отсутствует")
         if self.ct_exists():
@@ -185,6 +205,7 @@ class BootstrapHost(
         self.verify_infra_ready()
 
     def prepare_runner(self) -> None:
+        """Проверить 990 и передать ему только необходимые начальные доступы и инструменты."""
         self.verify_runner_contract()
         self.ensure_host_root_ssh_access()
         self.stage_runner_pve_root_access()
@@ -192,7 +213,14 @@ class BootstrapHost(
         self.prepare_runtime()
 
     def apply(self) -> None:
-        """Создать или восстановить управляющий контейнер без потери данных."""
+        """Выбрать новую установку или восстановление по состоянию на PVE.
+
+При наличии постоянных данных без готового маркера новая установка
+запрещена. Для прерванной установки разрешён повтор только до появления
+невоспроизводимых данных; старая rootfs удаляется после подготовки 990.
+После проверки готовности фиксируется маркер ready и удаляется временный
+контур. Любой промежуточный отказ оставляет часть выполненных действий.
+"""
         existed = self.infra_exists()
         unfinished = False
 
@@ -349,6 +377,7 @@ class BootstrapHost(
 
 
 def parse_args() -> argparse.Namespace:
+    """Выбрать один из взаимоисключающих внутренних режимов; по умолчанию apply."""
     parser = argparse.ArgumentParser(
         description="Закрытая оркестрация первоначального контура Proxmox."
     )
@@ -362,6 +391,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> int:
+    """Запустить выбранный режим; ожидаемые ошибки вывести кратко и вернуть код 1."""
     args = parse_args()
     try:
         BootstrapHost(args.mode).execute()

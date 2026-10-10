@@ -1,4 +1,11 @@
-"""Часть оркестрации bootstrap-runner."""
+"""Первоначальные SSH-доступы и временные полномочия PVE для 990.
+
+Проверяет принадлежность временного контейнера, подготавливает SSH-доступ
+к физическому узлу и выдаёт кратковременный токен PVE без разделения прав.
+Секрет передаётся в защищённый каталог 990, а не в постоянное состояние.
+Выданный токен необходимо отзывать при завершении и контролируемом отказе.
+Обычные права пользователей и повседневный SSH-доступ этот модуль не ведёт.
+"""
 
 from __future__ import annotations
 
@@ -12,6 +19,7 @@ from .errors import BootstrapError
 
 
 class BootstrapAccessMixin:
+    """Операции начальных доступов для общего координатора."""
     def ensure_host_root_ssh_access(self) -> None:
         """Подготовить отдельный root SSH-ключ для управляющего контура."""
         self.host_bootstrap_dir.mkdir(parents=True, exist_ok=True)
@@ -145,6 +153,7 @@ class BootstrapAccessMixin:
         self.ok(f"Root SSH-доступ PVE доступен в {self.infra_ctid} только для чтения")
 
     def assert_owned_runner(self) -> None:
+        """Не допустить действий над чужим LXC: сверить имя, теги и единственную метку владельца."""
         # VMID недостаточно для доказательства владения: проверяем также
         # hostname, tags и description, чтобы не затронуть чужой LXC 990.
         if not self.ct_exists():
@@ -170,6 +179,7 @@ class BootstrapAccessMixin:
             self.fail(f"LXC {self.ctid} не принадлежит bootstrap")
 
     def verify_runner_contract(self) -> None:
+        """Проверить работающий 990, принадлежность проекту и обязательные файлы проекта."""
         self.assert_owned_runner()
         if self.pct_status(self.ctid) != "running":
             self.fail(f"LXC {self.ctid} должен быть запущен")
@@ -205,7 +215,12 @@ class BootstrapAccessMixin:
         return node, addresses[0].split()[0]
 
     def create_full_pve_token(self, token_name: str) -> tuple[str, str]:
-        """Создать token root@pam без разделения привилегий и вернуть secret."""
+        """Создать токен root@pam с полными полномочиями и вернуть его секрет.
+
+Токен позволяет действия уровня администратора PVE. При ошибочном
+ответе PVE токен удаляется; вызывающий код обязан удалить его после
+использования и не выводить секрет в журнал.
+"""
         token_id = f"root@pam!{token_name}"
         created = self.run(
             "pveum",
@@ -235,7 +250,12 @@ class BootstrapAccessMixin:
         return token_id, secret
 
     def prepare_runner_pve_access(self) -> None:
-        """Создать полный временный API token и передать его в 990."""
+        """Перевыпустить полный временный токен и передать его внутрь 990.
+
+Сначала отзывается предыдущий токен с тем же именем; новый секрет
+передаётся через временный файл с режимом 0600. При сбое передачи токен
+отзывается, после успешного завершения его удаляет общий этап очистки.
+"""
         token_name = "bootstrap-runner"
         self.remove_named_token("root@pam", token_name)
         token_id, secret = self.create_full_pve_token(token_name)

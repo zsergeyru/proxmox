@@ -1,4 +1,11 @@
-"""Часть оркестрации bootstrap-runner."""
+"""Первоначальное создание и настройка управляющего гостя через 990.
+
+Последовательно вызывает OpenTofu и общий Ansible-путь, передаёт
+временные PVE/Git-доступы, инициализирует OpenBao и SSH-доверие.
+Для разрушительных действий проверяет точные метки принадлежности гостя.
+Не отвечает за обычное обновление уже работающего управляющего контура.
+Учётные данные остаются только во временном каталоге до их переноса.
+"""
 
 from __future__ import annotations
 
@@ -11,7 +18,9 @@ from .constants import GITHUB_ED25519_KNOWN_HOST
 
 
 class BootstrapInfraMixin:
+    """Операции настройки гостя для общего координатора."""
     def prepare_runtime(self) -> None:
+        """Установить и проверить инструменты внутри 990; полный вывод сохранить в журнал."""
         self.log("Подготовка среды bootstrap-runner")
         self.ct_exec(
             "bash",
@@ -49,6 +58,12 @@ class BootstrapInfraMixin:
         *,
         progress: bool,
     ) -> None:
+        """Запустить указанный внутренний этап через Docker временного 990.
+        
+        Аргумент step передаётся закрытой задаче развёртывания гостя, progress
+        показывает шаги Ansible. После успешного create удалить временный
+        OpenTofu state, чтобы следующий запуск не продолжал прошлый сеанс.
+        """
         command = [
             "env",
             f"INFRA_PROJECT_BRANCH={self.project_branch}",
@@ -165,6 +180,7 @@ class BootstrapInfraMixin:
         self.ok(f"Полная настройка {self.infra_ctid} завершена")
 
     def infra_config_is_expected(self) -> bool:
+        """Подтвердить имя, непривилегированный режим и точные метки роли и владельца."""
         # Для любых разрушительных действий одного hostname недостаточно.
         # Строгая метка в description подтверждает владение infra-manager проектом.
         if not self.infra_exists():
@@ -188,6 +204,7 @@ class BootstrapInfraMixin:
         )
 
     def verify_infra_object(self) -> None:
+        """Остановить операцию, если управляющий объект чужой, отсутствует или выключен."""
         if not self.infra_exists():
             self.fail(f"LXC {self.infra_ctid} отсутствует")
         if not self.infra_config_is_expected():
@@ -198,6 +215,7 @@ class BootstrapInfraMixin:
             self.fail(f"LXC {self.infra_ctid} должен быть запущен")
 
     def infra_test(self, flag: str, path: Path | str) -> bool:
+        """Проверить существование/непустоту файла внутри гостя через команду test."""
         return self.infra_exec("test", flag, str(path), check=False).returncode == 0
 
     def stage_infra_bootstrap_file(
@@ -359,6 +377,7 @@ class BootstrapInfraMixin:
         self.ok(f"Временный GitHub-доступ {self.infra_ctid} подготовлен из PVE-only recovery")
 
     def _write_infra_file(self, path: Path, content: str, mode: str) -> None:
+        """Временно записать текст на PVE и передать гостю с указанными правами."""
         # pct push работает с локальным файлом, поэтому текст сначала
         # записывается во временный файл на PVE.
         fd, tmp_name = tempfile.mkstemp(prefix="infra-manager-file.", dir="/run")
@@ -371,6 +390,12 @@ class BootstrapInfraMixin:
             tmp.unlink(missing_ok=True)
 
     def checkout_infra_project(self) -> None:
+        """Получить выбранную Git-ветку во внутреннюю рабочую копию гостя.
+        
+        Существующую копию принудительно приводим к origin: локальные изменения
+        в ней удаляются. GitHub-доступ берётся из временного файла с проверкой
+        ключа сервера, а не из постоянных пользовательских SSH-ключей.
+        """
         git_ssh = f"ssh -F {self.infra_github_config}"
 
         if self.infra_test("-d", self.infra_project_dir / ".git"):
@@ -410,6 +435,7 @@ class BootstrapInfraMixin:
         self.ok(f"Закрытый проект передан в {self.infra_ctid}")
 
     def verify_infra_handoff(self) -> None:
+        """Проверить PVE API, CA, SSH, Git и рабочую копию перед дальнейшей настройкой."""
         # Перед полной настройкой Ansible требуем весь минимальный набор доверия:
         # учётные данные PVE, CA, Deploy Key и рабочую копию проекта.
         self.verify_infra_object()
@@ -436,6 +462,7 @@ class BootstrapInfraMixin:
         self.ok(f"Данные для настройки {self.infra_ctid} переданы")
 
     def handoff_infra(self, access_mode: str = "apply") -> None:
+        """Передать необходимые PVE/Git-доступы и сверить полученные данные."""
         self.prepare_infra_pve_access(access_mode)
         self.prepare_infra_pve_root_access()
         self.prepare_infra_project_access()
@@ -474,6 +501,7 @@ class BootstrapInfraMixin:
         self.ok("Рабочие secrets перенесены в OpenBao; bootstrap-копии удалены")
 
     def verify_infra_ready(self, *, quiet: bool = False) -> None:
+        """Запустить полную проверку состояния управляющего гостя, при необходимости без вывода."""
         self.verify_infra_object()
         if not self.infra_test("-x", "/usr/local/sbin/infra-manager-status"):
             self.fail(f"в {self.infra_ctid} отсутствует infra-manager-status")

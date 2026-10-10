@@ -37,6 +37,7 @@ class BootstrapCommandsMixin:
     """Общие команды PVE и запуск внешних средств с журналированием."""
 
     def show_log_tail(self) -> None:
+        """Вывести оператору последние 30 строк технического журнала при ошибке команды."""
         print(
             f"{self.c_yellow}Последние строки технического журнала:{self.c_reset}",
             file=sys.stderr,
@@ -58,6 +59,14 @@ class BootstrapCommandsMixin:
         check: bool = True,
         capture: bool = False,
     ) -> subprocess.CompletedProcess[str]:
+        """Выполнить внешнюю команду с выбранным способом отображения вывода.
+        
+        quiet записывает вывод в журнал, progress дополнительно показывает этапы
+        Ansible; capture возвращает stdout/stderr вызывающему методу. По умолчанию
+        неуспешный код завершения вызывает BootstrapError. Аргументы запуска
+        передаются без оболочки; не следует передавать секреты в аргументах,
+        поскольку строка неуспешной команды может оказаться в ошибке.
+        """
         command_env = os.environ.copy()
         if env:
             command_env.update(env)
@@ -79,6 +88,7 @@ class BootstrapCommandsMixin:
                 task_started = 0.0
 
                 def finish_task() -> None:
+                    """Записать длительность текущей задачи Ansible только в подробный журнал."""
                     nonlocal active_task
                     if active_task is None:
                         return
@@ -170,9 +180,11 @@ class BootstrapCommandsMixin:
         return result
 
     def command_exists(self, name: str) -> bool:
+        """Убедиться, что исполняемая программа доступна в системном PATH."""
         return shutil.which(name) is not None
 
     def require_host(self) -> None:
+        """Проверить root, программы PVE и непустой ключ получения проекта."""
         if os.geteuid() != 0:
             self.fail("сценарий должен выполняться от root на PVE")
         for command in ("pct", "pveum", "pvesh", "pvesm", "python3", "ssh-keygen"):
@@ -182,6 +194,7 @@ class BootstrapCommandsMixin:
             self.fail(f"отсутствует GitHub Deploy Key: {self.host_github_key}")
 
     def pct(self, *args: str, **kwargs) -> subprocess.CompletedProcess[str]:
+        """Выполнить административную команду pct на физическом PVE."""
         return self.run("pct", *args, **kwargs)
 
     def ct_exec(
@@ -192,6 +205,7 @@ class BootstrapCommandsMixin:
         check: bool = True,
         capture: bool = False,
     ) -> subprocess.CompletedProcess[str]:
+        """Выполнить команду внутри временного LXC с нужным режимом вывода."""
         return self.run(
             "pct",
             "exec",
@@ -211,6 +225,7 @@ class BootstrapCommandsMixin:
         check: bool = True,
         capture: bool = False,
     ) -> subprocess.CompletedProcess[str]:
+        """Выполнить команду внутри управляющего контейнера через pct exec."""
         return self.run(
             "pct",
             "exec",
@@ -223,15 +238,19 @@ class BootstrapCommandsMixin:
         )
 
     def ct_exists(self) -> bool:
+        """Проверить наличие временного объекта по его конфигурации PVE."""
         return self.pct("config", str(self.ctid), check=False, capture=True).returncode == 0
 
     def infra_exists(self) -> bool:
+        """Проверить наличие управляющего объекта по его конфигурации PVE."""
         return self.pct("config", str(self.infra_ctid), check=False, capture=True).returncode == 0
 
     def pct_config(self, ctid: int) -> str:
+        """Получить текст конфигурации указанного объекта PVE."""
         return self.pct("config", str(ctid), capture=True).stdout
 
     def pct_status(self, ctid: int) -> str:
+        """Получить состояние LXC из ответа pct status."""
         output = self.pct("status", str(ctid), capture=True).stdout.strip()
         return output.split()[-1] if output else ""
 
@@ -242,6 +261,7 @@ class BootstrapCommandsMixin:
         uid: int,
         gid: int,
     ) -> None:
+        """Выставить права файла и назначить владельца по UID/GID PVE."""
         path.chmod(mode)
         os.chown(path, uid, gid)
 
@@ -254,6 +274,7 @@ class BootstrapCommandsMixin:
         uid: int,
         gid: int,
     ) -> None:
+        """Проверить исходный файл доступа и скопировать с заданными правами."""
         if not source.is_file() or source.stat().st_size == 0:
             self.fail(f"отсутствует исходный файл доступа: {source}")
         target.parent.mkdir(parents=True, exist_ok=True)

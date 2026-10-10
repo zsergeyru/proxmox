@@ -1,4 +1,10 @@
-"""Часть оркестрации bootstrap-runner."""
+"""Проверка постоянного состояния и подключений управляющего гостя.
+
+Хранит маркер installing/ready в закрытой области PVE, проверяет данные
+до аварийного пересоздания rootfs и подготавливает постоянные каталоги.
+Не удаляет OpenBao, Semaphore или OpenTofu state. Частично заполненное
+состояние запрещает автоматическую повторную первоначальную установку.
+"""
 
 from __future__ import annotations
 
@@ -123,6 +129,7 @@ class BootstrapPersistenceMixin:
         self.ok("Незавершённая установка подтверждена; постоянных данных ещё нет")
 
     def managed_guests_exist(self) -> bool:
+        """Проверить состав пула managed; ошибку чтения существующего пула считать отказом."""
         result = self.run(
             "pvesh",
             "get",
@@ -154,6 +161,7 @@ class BootstrapPersistenceMixin:
 
     @staticmethod
     def _directory_has_files(path: Path) -> bool:
+        """Найти хотя бы один непустой файл в каталоге состояния."""
         if not path.is_dir():
             return False
         try:
@@ -162,7 +170,13 @@ class BootstrapPersistenceMixin:
             return False
 
     def verify_recovery_state(self) -> None:
-        """Проверить аварийное состояние до изменений infra-manager."""
+        """Проверить данные восстановления до удаления существующего rootfs.
+
+Требуются ключ разблокировки, копия ключа GitHub, непустое хранилище
+OpenBao и база Semaphore. При наличии объектов managed необходим
+сохранённый OpenTofu state. Проверяется наличие файлов, не целостность
+внутренних баз — проверка не заменяет отдельный резерв и его испытание.
+"""
         required_dirs = (
             self.host_pve_only_dir,
             self.host_recovery_dir,
@@ -266,6 +280,7 @@ class BootstrapPersistenceMixin:
         *,
         read_only: bool,
     ) -> bool:
+        """Сверить источник, назначение и режим чтения одной точки подключения PVE."""
         line = next(
             (row for row in config.splitlines() if row.startswith(f"{name}: ")),
             "",
