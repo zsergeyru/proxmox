@@ -259,6 +259,11 @@ def _operator_guest_task(
             f"INFRA_MANAGER_COLOR={'1' if console._color(chr(27)) else '0'}",
             "-e",
             f"NO_COLOR={os.environ.get('NO_COLOR', '')}",
+            *(
+                ["-e", "INFRA_ENABLE_PVE_AGENT_ACCESS=1"]
+                if show_secrets and os.environ.get("INFRA_ENABLE_PVE_AGENT_ACCESS") == "1"
+                else []
+            ),
             RUNTIME_CONTAINER,
             "sh",
             "-eu",
