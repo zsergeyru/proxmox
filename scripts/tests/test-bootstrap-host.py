@@ -660,6 +660,10 @@ class RecoveryRootfsHarness(BootstrapHost):
             raise AssertionError(f"Неожиданный VMID: {ctid}")
         return "running"
 
+    def pct_config(self, ctid: int) -> str:
+        """Вернуть объект с включённой защитой PVE."""
+        return "protection: 1\n"
+
     def pct(self, *args: str, **kwargs):
         """Записать или запретить административную команду в испытании."""
         del kwargs
@@ -896,7 +900,7 @@ def test_auto_recovery_for_absent_infra_and_existing_data() -> None:
         ["infra_exists", "info", "verify_recovery_state", "info"],
         "Проверка сохранённых данных должна предшествовать изменяющим операциям",
     )
-    if "prepare_new_layout" in host.events or "handoff" in host.events:
+    if "prepare_new_layout" in host.events:
         raise AssertionError("Старые данные нельзя обрабатывать как новую установку")
     if "handoff" not in host.events:
         raise AssertionError("Сохранённые данные требуют режима recovery")
@@ -2137,6 +2141,81 @@ def test_template_release_failure_keeps_marker() -> None:
             raise AssertionError("Не допускается прямое удаление файла шаблона")
 
 
+
+class RecoveryDestroyFailureHarness(RecoveryRootfsHarness):
+    """Проверяет восстановление protection при невозможности удаления."""
+
+    def run(self, *args: str, **kwargs):
+        """Остановить уничтожение после снятия защиты."""
+        self.events.append("run:" + " ".join(args))
+        raise BootstrapError("хранилище PVE недоступно")
+
+
+def test_recovery_destroy_failure_restores_protection() -> None:
+    """Если destroy не выполнился, объект остаётся под прежней защитой."""
+    host = RecoveryDestroyFailureHarness()
+    try:
+        host.remove_infra_rootfs_for_recovery()
+    except BootstrapError as exc:
+        if "хранилище" not in str(exc):
+            raise
+    else:
+        raise AssertionError("Ошибка PVE должна сохраниться")
+    if not host.exists:
+        raise AssertionError("Неуспешное удаление не должно терять объект")
+    if host.events[-1] != "pct:set 910 --protection 1":
+        raise AssertionError("После отказа удаления protection должен восстановиться")
+
+
+def test_host_authorized_keys_atomic_replacement() -> None:
+    """Ошибка переименования не повреждает другой доступ к root PVE."""
+    with tempfile.TemporaryDirectory() as temp:
+        host = BootstrapHost("apply")
+        ssh_dir = Path(temp) / ".ssh"
+        ssh_dir.mkdir()
+        target = ssh_dir / "authorized_keys"
+        host.host_root_authorized_keys = target
+        original = "ssh-ed25519 AAAA-other another-admin\n"
+        target.write_text(original, encoding="utf-8")
+        with patch("bootstrap_runner.access.os.replace",
+                   side_effect=OSError("не удалось заменить")):
+            try:
+                host._write_host_authorized_keys(
+                    ["ssh-ed25519 AAAA-other another-admin", "ssh-ed25519 BBBB bootstrap"]
+                )
+            except OSError:
+                pass
+            else:
+                raise AssertionError("Ошибка атомарной замены должна передаваться")
+        assert_equal(target.read_text(encoding="utf-8"), original,
+                     "При ошибке старые ключи не меняются")
+        if list(ssh_dir.glob(".authorized_keys.*")):
+            raise AssertionError("После ошибки временный файл должен исчезнуть")
+        host._write_host_authorized_keys(
+            ["ssh-ed25519 AAAA-other another-admin", "ssh-ed25519 BBBB bootstrap"]
+        )
+        if "AAAA-other" not in target.read_text(encoding="utf-8"):
+            raise AssertionError("Чужой root-доступ нельзя удалять")
+
+
+def test_host_authorized_keys_rejects_symlink() -> None:
+    """Не следовать символьной ссылке на другой root SSH-файл."""
+    with tempfile.TemporaryDirectory() as temp:
+        host = BootstrapHost("apply")
+        actual = Path(temp) / "other"
+        actual.write_text("preserve", encoding="utf-8")
+        host.host_root_authorized_keys = Path(temp) / "authorized_keys"
+        host.host_root_authorized_keys.symlink_to(actual)
+        try:
+            host._write_host_authorized_keys(["new"])
+        except BootstrapError:
+            pass
+        else:
+            raise AssertionError("Запрещено следовать ссылке authorized_keys")
+        assert_equal(actual.read_text(encoding="utf-8"), "preserve",
+                     "Внешний файл не должен изменяться")
+
+
 def main() -> None:
     """Последовательно выполнить все проверки без доступа к рабочему PVE."""
     tests = [
@@ -2204,6 +2283,9 @@ def main() -> None:
         test_runner_destroy_continues_when_token_revoke_fails,
         test_cleanup_does_not_destroy_foreign_runner,
         test_template_release_failure_keeps_marker,
+        test_recovery_destroy_failure_restores_protection,
+        test_host_authorized_keys_atomic_replacement,
+        test_host_authorized_keys_rejects_symlink,
     ]
     for test in tests:
         test()

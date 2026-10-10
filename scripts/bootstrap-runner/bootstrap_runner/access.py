@@ -20,6 +20,27 @@ from .errors import BootstrapError
 
 class BootstrapAccessMixin:
     """Операции начальных доступов для общего координатора."""
+    def _write_host_authorized_keys(self, lines: list[str]) -> None:
+        """Атомарно заменить root authorized_keys, сохранив остальные записи.
+
+        Сначала подготавливается закрытый файл рядом с действующим, затем
+        он переименовывается одной операцией. Символьные ссылки запрещены.
+        """
+        target = self.host_root_authorized_keys
+        if target.is_symlink() or target.parent.is_symlink():
+            self.fail(f"Небезопасный SSH-файл PVE: {target}")
+        fd, filename = tempfile.mkstemp(prefix=".authorized_keys.", dir=target.parent)
+        temporary = Path(filename)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as file:
+                file.write("\n".join(lines) + ("\n" if lines else ""))
+                file.flush()
+                os.fsync(file.fileno())
+            temporary.chmod(0o600)
+            os.replace(temporary, target)
+        finally:
+            temporary.unlink(missing_ok=True)
+
     def ensure_host_root_ssh_access(self) -> None:
         """Подготовить отдельный root SSH-ключ для управляющего контура."""
         self.host_bootstrap_dir.mkdir(parents=True, exist_ok=True)
@@ -49,6 +70,8 @@ class BootstrapAccessMixin:
             self.fail("не удалось подготовить открытый root SSH-ключ PVE")
 
         root_ssh_dir = self.host_root_authorized_keys.parent
+        if root_ssh_dir.is_symlink() or self.host_root_authorized_keys.is_symlink():
+            self.fail("Символьная ссылка в root SSH-доступе PVE запрещена")
         root_ssh_dir.mkdir(parents=True, exist_ok=True)
         root_ssh_dir.chmod(0o700)
 
@@ -60,11 +83,7 @@ class BootstrapAccessMixin:
         marker = f" {self.host_pve_root_key_comment}"
         lines = [line for line in existing if not line.rstrip().endswith(marker)]
         lines.append(public_key.read_text(encoding="utf-8").strip())
-        self.host_root_authorized_keys.write_text(
-            "\n".join(lines) + "\n",
-            encoding="utf-8",
-        )
-        self.host_root_authorized_keys.chmod(0o600)
+        self._write_host_authorized_keys(lines)
 
         if not self.host_ssh_public_key.is_file():
             self.fail(f"не найден SSH host key PVE: {self.host_ssh_public_key}")
@@ -100,12 +119,7 @@ class BootstrapAccessMixin:
             ).splitlines()
             if not line.rstrip().endswith(marker)
         ]
-        text = "\n".join(lines)
-        self.host_root_authorized_keys.write_text(
-            f"{text}\n" if text else "",
-            encoding="utf-8",
-        )
-        self.host_root_authorized_keys.chmod(0o600)
+        self._write_host_authorized_keys(lines)
 
     def stage_runner_pve_root_access(self) -> None:
         """Передать временному 990 тот же root SSH-доступ, что использует deploy-guest."""

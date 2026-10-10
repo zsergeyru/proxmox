@@ -152,11 +152,10 @@ class BootstrapCleanupMixin:
         self.remove_downloaded_template()
 
     def remove_infra_rootfs_for_recovery(self) -> None:
-        """Удалить только воспроизводимый объект управляющего гостя перед recovery.
+        """Удалить только свой воспроизводимый rootfs и сохранить данные PVE.
 
-        До снятия protection проверяется метка владения: чужой объект удалять
-        запрещено. Запускается только после проверки сохранённых данных и
-        подготовки 990. При отказе после снятия защиты возможно частичное состояние.
+        Защита снимается лишь на время удаления. Если операция stop/destroy
+        завершилась ошибкой и объект остался, protection восстанавливается.
         """
         if not self.infra_exists():
             return
@@ -164,22 +163,22 @@ class BootstrapCleanupMixin:
             self.fail(
                 f"VMID {self.infra_ctid} не имеет строгой метки владения infra-manager"
             )
-
-        self.pct("set", str(self.infra_ctid), "--protection", "0", quiet=True)
-        if self.pct_status(self.infra_ctid) == "running":
-            self.pct("stop", str(self.infra_ctid))
-        self.run(
-            "pct",
-            "destroy",
-            str(self.infra_ctid),
-            "--purge",
-            "1",
-            quiet=True,
-        )
-        if self.infra_exists():
-            self.fail(
-                f"LXC {self.infra_ctid} не удалён перед аварийным пересозданием"
+        protected = "protection: 1" in self.pct_config(self.infra_ctid).splitlines()
+        if protected:
+            self.pct("set", str(self.infra_ctid), "--protection", "0", quiet=True)
+        try:
+            if self.pct_status(self.infra_ctid) == "running":
+                self.pct("stop", str(self.infra_ctid))
+            self.run(
+                "pct", "destroy", str(self.infra_ctid), "--purge", "1", quiet=True
             )
+            if self.infra_exists():
+                self.fail(
+                    f"LXC {self.infra_ctid} не удалён перед аварийным пересозданием"
+                )
+        finally:
+            if protected and self.infra_exists():
+                self.pct("set", str(self.infra_ctid), "--protection", "1")
         self.ok(
             f"Воспроизводимый rootfs {self.infra_ctid} удалён; "
             "постоянное состояние сохранено на PVE"
@@ -207,12 +206,7 @@ class BootstrapCleanupMixin:
             if not self.infra_config_is_expected():
                 self.fail(f"VMID {self.infra_ctid} занят чужим объектом")
             self.remove_named_token("root@pam", "infra-manager")
-            self.pct("set", str(self.infra_ctid), "--protection", "0", quiet=True)
-            if self.pct_status(self.infra_ctid) == "running":
-                self.pct("stop", str(self.infra_ctid))
-            self.run(
-                "pct", "destroy", str(self.infra_ctid), "--purge", "1", quiet=True
-            )
+            self.remove_infra_rootfs_for_recovery()
             self.ok(f"LXC {self.infra_ctid} удалён")
         else:
             self.remove_named_token("root@pam", "infra-manager")
