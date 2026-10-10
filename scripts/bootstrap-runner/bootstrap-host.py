@@ -758,7 +758,7 @@ print(json.dumps({"vmid": matches[0][0], "name": matches[0][1]}))
                 if runner_verified and self.mode in {"apply", "recover", "check"}:
                     try:
                         self.remove_private_access()
-                    except Exception as cleanup_error:
+                    except (BootstrapError, OSError) as cleanup_error:
                         print(
                             f"ОШИБКА: не удалось отозвать временный токен PVE: "
                             f"{cleanup_error}",
