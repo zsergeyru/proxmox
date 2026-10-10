@@ -268,9 +268,9 @@ class BootstrapInfraMixin:
             tmp = Path(tmp_name)
             try:
                 tmp.write_text(
-                    f"PVE_API_URL=https://{node}:8006\\n"
-                    f"PVE_API_TOKEN_ID={token_id}\\n"
-                    f"PVE_API_TOKEN_SECRET={secret}\\n",
+                    f"PVE_API_URL=https://{node}:8006\n"
+                    f"PVE_API_TOKEN_ID={token_id}\n"
+                    f"PVE_API_TOKEN_SECRET={secret}\n",
                     encoding="utf-8",
                 )
                 tmp.chmod(0o600)

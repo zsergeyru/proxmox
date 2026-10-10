@@ -22,10 +22,12 @@ class BootstrapCleanupMixin:
         """Получить список объектов PVE, преобразовав JSON; некорректный ответ останавливает очистку."""
         result = self.run("pveum", *args, "--output-format", "json", capture=True)
         try:
-            value = json.loads(result.stdout or "[]")
-        except json.JSONDecodeError as exc:
+            value = json.loads(result.stdout)
+        except (json.JSONDecodeError, TypeError) as exc:
             raise BootstrapError("PVE вернул некорректный JSON") from exc
-        return value if isinstance(value, list) else []
+        if not isinstance(value, list) or any(not isinstance(row, dict) for row in value):
+            raise BootstrapError("PVE вернул неожиданный формат списка объектов")
+        return value
 
     def token_exists(self, user: str, token_name: str) -> bool:
         """Проверить наличие токена данного пользователя по точному имени."""
@@ -164,9 +166,9 @@ class BootstrapCleanupMixin:
                 f"VMID {self.infra_ctid} не имеет строгой метки владения infra-manager"
             )
         protected = "protection: 1" in self.pct_config(self.infra_ctid).splitlines()
-        if protected:
-            self.pct("set", str(self.infra_ctid), "--protection", "0", quiet=True)
         try:
+            if protected:
+                self.pct("set", str(self.infra_ctid), "--protection", "0", quiet=True)
             if self.pct_status(self.infra_ctid) == "running":
                 self.pct("stop", str(self.infra_ctid))
             self.run(

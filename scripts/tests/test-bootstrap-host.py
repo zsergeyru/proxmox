@@ -1950,8 +1950,17 @@ class NewRootfsTokenHarness(BootstrapHost):
 
     def stage_infra_bootstrap_file(self, source: Path, target: Path) -> None:
         """Проверить перенос вновь созданного секрета."""
-        if "new-secret" not in source.read_text(encoding="utf-8"):
-            raise AssertionError("Новый секрет должен передаваться в новый rootfs")
+        content = source.read_text(encoding="utf-8")
+        lines = content.splitlines()
+        expected = [
+            "PVE_API_URL=https://pve:8006",
+            "PVE_API_TOKEN_ID=root@pam!infra-manager",
+            "PVE_API_TOKEN_SECRET=new-secret",
+        ]
+        if lines != expected:
+            raise AssertionError(
+                f"Учётные данные должны передаваться тремя строками: {lines!r}"
+            )
         self.events.append("stage_token")
         if self.fail_stage:
             raise BootstrapError("передача токена оборвалась")
@@ -2233,6 +2242,30 @@ def test_host_authorized_keys_rejects_symlink() -> None:
                      "Внешний файл не должен изменяться")
 
 
+
+def test_pveum_json_rejects_invalid_shape() -> None:
+    """Не считать повреждённый ответ PVE отсутствием объектов или токенов."""
+    class JSONShapeHarness(BootstrapHost):
+        """Возвращает разные некорректные ответы PVE без настоящих команд."""
+
+        def __init__(self, response: str) -> None:
+            """Запомнить испытательный JSON."""
+            super().__init__("apply")
+            self.response = response
+
+        def run(self, *args: str, **kwargs):
+            """Подменить ответ pveum в проверке."""
+            return SimpleNamespace(returncode=0, stdout=self.response)
+
+    for payload in ("", "{}", '["not-an-object"]', "null", "{broken"):
+        host = JSONShapeHarness(payload)
+        try:
+            host.pveum_json("user", "token", "list", "root@pam")
+        except BootstrapError:
+            pass
+        else:
+            raise AssertionError(f"Некорректный JSON PVE принят: {payload!r}")
+
 def main() -> None:
     """Последовательно выполнить все проверки без доступа к рабочему PVE."""
     tests = [
@@ -2303,6 +2336,7 @@ def main() -> None:
         test_recovery_destroy_failure_restores_protection,
         test_host_authorized_keys_atomic_replacement,
         test_host_authorized_keys_rejects_symlink,
+        test_pveum_json_rejects_invalid_shape,
     ]
     for test in tests:
         test()
