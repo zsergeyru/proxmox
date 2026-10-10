@@ -335,11 +335,14 @@ class BootstrapHost(
     def execute(self) -> None:
         """Выполнить режим под блокировкой и отозвать токен при ошибке."""
         with self.execution_lock():
-            runner_verified = False
+            # Остаточный токен принадлежит первоначальному контуру PVE,
+            # а не конкретному объекту 990. После успешной проверки хоста
+            # его нужно отзывать даже при ошибке проверки самого LXC.
+            host_verified = False
             try:
                 self.require_host()
+                host_verified = True
                 self.verify_runner_contract()
-                runner_verified = True
                 self.info(f"Закрытый bootstrap {VERSION}, режим: {self.mode}")
 
                 if self.mode in {"apply", "recover"}:
@@ -363,7 +366,7 @@ class BootstrapHost(
                     self.fail(f"неизвестный режим: {self.mode}")
             except BaseException:
                 self.finish_section(interrupted=True)
-                if runner_verified and self.mode in {"apply", "recover", "check"}:
+                if host_verified and self.mode in {"apply", "recover", "check"}:
                     try:
                         self.remove_private_access()
                     except (BootstrapError, OSError) as cleanup_error:
