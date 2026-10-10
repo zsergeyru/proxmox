@@ -760,7 +760,7 @@ def test_existing_infra_requires_normal_operations() -> None:
             "infra_exists",
             "verify_layout",
         ],
-        "Обычный bootstrap должен остановиться до подготовки 990",
+        "Обычный сценарий внутри 990 должен остановиться до изменяющих шагов",
     )
 
 
