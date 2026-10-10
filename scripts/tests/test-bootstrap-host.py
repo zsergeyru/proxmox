@@ -1206,6 +1206,26 @@ def test_exclusive_bootstrap_lock() -> None:
             pass
 
 
+class FinishCheckHarness(ExecuteHarness):
+    def _read_installation_marker(self) -> str | None:
+        return "installing"
+
+    def write_installation_marker(self, state: str) -> None:
+        assert state == "ready"
+        self.events.append("mark_ready")
+
+
+def test_check_marks_verified_installation_ready() -> None:
+    host = FinishCheckHarness("check")
+    host.execute()
+    assert_equal(
+        host.events,
+        ["require_host", "verify_runner", "info", "verify_ready:quiet",
+         "mark_ready", "finalize_runner", "check_ready"],
+        "Проверка после прерывания должна фиксировать подтверждённую готовность",
+    )
+
+
 class FailingExecuteHarness(ExecuteHarness):
     def apply(self) -> None:
         self.events.append("apply")
@@ -1270,6 +1290,7 @@ def main() -> None:
         test_restart_rejects_persistent_data,
         test_token_revoked_on_bootstrap_failure,
         test_exclusive_bootstrap_lock,
+        test_check_marks_verified_installation_ready,
     ]
     for test in tests:
         test()

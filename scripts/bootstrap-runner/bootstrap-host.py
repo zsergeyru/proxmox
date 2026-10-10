@@ -645,7 +645,7 @@ print(json.dumps({"vmid": matches[0][0], "name": matches[0][1]}))
                     self.prepare_new_persistent_layout,
                 )
                 self.write_installation_marker("installing")
-            # existing проверяется ниже: обычная установка не меняет 910.
+            # existing проверяется ниже: обычная установка не меняет управляющий контейнер.
 
         if self.mode == "recover":
             self.timed_step("Проверка сохранённых данных", self.verify_recovery_state)
@@ -740,6 +740,8 @@ print(json.dumps({"vmid": matches[0][0], "name": matches[0][1]}))
                     self.apply()
                 elif self.mode == "check":
                     self.verify_infra_ready(quiet=True)
+                    if self._read_installation_marker() == "installing":
+                        self.write_installation_marker("ready")
                     self.finalize_runner()
                     self.check_ready()
                 elif self.mode == "remove":
