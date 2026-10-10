@@ -86,51 +86,25 @@ class BootstrapCleanupMixin:
         self.host_template_marker.unlink(missing_ok=True)
 
     def finalize_runner(self) -> None:
-        """Удалить временные доступы, токен и LXC после успешной проверки.
+        """Завершить успешную установку, отозвав доступы и удалив временный 990.
 
-        До разрушительных действий подтверждается принадлежность 990. Отдельно
-        удаляются начальные разрешения в управляющем госте и временное состояние
-        OpenTofu. Постоянные каталоги PVE не затрагиваются; сбой завершения
-        останавливает итоговую проверку и должен разбираться оператором.
+        После подтверждённого перехода на SSH CA удаляется одноразовое
+        SSH-разрешение из гостя. Нет смысла удалять файлы внутри 990
+        отдельно: его проверенный rootfs уничтожается целиком.
         """
-        # Успешный bootstrap не должен оставлять состояние, секреты, token или 990.
-        self.assert_owned_runner()
-        self.remove_bootstrap_ssh_access_from_infra()
-        self.ct_exec(
-            "rm",
-            "-rf",
-            "/etc/bootstrap-runner/secrets",
-            "/etc/bootstrap-runner/bootstrap-ssh",
-            "/etc/bootstrap-runner/pve-host",
-            "/var/lib/bootstrap-runner/opentofu/state",
-        )
-        for temporary_path in (
-            "/etc/bootstrap-runner/secrets",
-            "/etc/bootstrap-runner/bootstrap-ssh",
-            "/etc/bootstrap-runner/pve-host",
-        ):
-            if self.ct_exec("test", "!", "-e", temporary_path, check=False).returncode:
-                self.fail(f"временные данные 990 не удалены: {temporary_path}")
-        if self.ct_exec(
-            "test", "!", "-e", "/var/lib/bootstrap-runner/opentofu/state", check=False
-        ).returncode:
-            self.fail("временное состояние 990 не удалено")
-
-        self.remove_private_access()
-        if self.pct_status(self.ctid) == "running":
-            self.pct("stop", str(self.ctid))
-        self.run("pct", "destroy", str(self.ctid), "--purge", "1", quiet=True)
         if self.ct_exists():
-            self.fail("LXC 990 не удалён")
-        self.remove_downloaded_template()
+            self.assert_owned_runner()
+        self.remove_bootstrap_ssh_access_from_infra()
+        self.remove_private_access()
+        self.remove_runner_if_present()
         self.ok("Временный контур 990 полностью удалён")
 
-    def remove_owned_runner_after_failure(self) -> None:
-        """Удалить свой одноразовый 990 после отказа, оставив журнал на PVE.
+    def remove_runner_if_present(self) -> None:
+        """Удалить только свой одноразовый 990 и освободить временный шаблон.
 
-        Токен отзывается вызывающим кодом отдельно: ошибка его отзыва не
-        должна оставлять в 990 действующие постоянные SSH-ключи.
-        Для чужого контейнера действия прекращаются до stop/destroy.
+        Токен отзывается отдельно вызывающим кодом: очистка контейнера
+        выполняется даже при ошибке отзыва токена. Прочие PVE-гости
+        и все постоянные каталоги остаются без изменений.
         """
         if self.ct_exists():
             self.assert_owned_runner()
@@ -138,19 +112,7 @@ class BootstrapCleanupMixin:
                 self.pct("stop", str(self.ctid))
             self.run("pct", "destroy", str(self.ctid), "--purge", "1", quiet=True)
             if self.ct_exists():
-                self.fail(f"Временный LXC {self.ctid} не удалён после ошибки")
-        self.remove_downloaded_template()
-
-    def remove_runner_if_present(self) -> None:
-        """Удалить принадлежащий проекту временный контейнер и токен либо лишь оставшийся токен."""
-        if self.ct_exists():
-            self.assert_owned_runner()
-            self.remove_private_access()
-            if self.pct_status(self.ctid) == "running":
-                self.pct("stop", str(self.ctid))
-            self.run("pct", "destroy", str(self.ctid), "--purge", "1", quiet=True)
-        else:
-            self.remove_named_token("root@pam", "bootstrap-runner")
+                self.fail(f"Одноразовый LXC {self.ctid} не удалён")
         self.remove_downloaded_template()
 
     def remove_infra_rootfs_for_recovery(self) -> None:
@@ -203,6 +165,7 @@ class BootstrapCleanupMixin:
         """
         # Сначала убираем временный контур. Сам infra-manager удаляем только после
         # строгой проверки метки владения.
+        self.remove_private_access()
         self.remove_runner_if_present()
         if self.infra_exists():
             if not self.infra_config_is_expected():

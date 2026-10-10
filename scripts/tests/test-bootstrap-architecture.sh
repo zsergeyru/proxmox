@@ -132,7 +132,7 @@ if grep -R -q 'bootstrap-runner-990' "$BOOTSTRAP_DIR"; then
     die "Отдельный постоянный SSH marker bootstrap-runner-990 не должен возвращаться"
 fi
 grep -q 'remove_bootstrap_ssh_access_from_infra' "$CLEANUP" || die "Успешный bootstrap обязан удалить authorization одноразового ключа из 910"
-grep -q '"/etc/bootstrap-runner/bootstrap-ssh"' "$CLEANUP" || die "Успешный bootstrap обязан удалить локальную bootstrap-пару 990"
+grep -q 'self.remove_runner_if_present()' "$CLEANUP" || die "Успешный bootstrap обязан удалять одноразовый rootfs 990, включая SSH-ключи"
 grep -q 'allow_legacy_bootstrap=False' "$PY_GUEST_DEPLOY" || die "Обычный self-deploy infra-manager не должен иметь bootstrap fallback"
 grep -q '"/var/lib/bootstrap-runner/opentofu/state"' "$INFRA_RUNNER" || die "State шага create должен удаляться сразу после создания 910"
 grep -q 'allow_legacy_bootstrap=not bootstrap_scope' "$PY_GUEST_DEPLOY" || die "Финальный bootstrap configure должен запрещать fallback на начальный SSH-ключ"

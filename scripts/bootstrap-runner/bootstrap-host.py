@@ -374,7 +374,7 @@ class BootstrapHost(
                     # оставлять в 990 копию постоянного root SSH-ключа PVE.
                     for label, operation in (
                         ("отозвать временный токен PVE", self.remove_private_access),
-                        ("удалить одноразовый LXC 990", self.remove_owned_runner_after_failure),
+                        ("удалить одноразовый LXC 990", self.remove_runner_if_present),
                     ):
                         try:
                             operation()

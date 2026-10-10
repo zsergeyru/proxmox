@@ -1333,6 +1333,10 @@ class ForeignRemoveHarness(BootstrapHost):
         super().__init__("remove")
         self.events: list[str] = []
 
+    def remove_private_access(self) -> None:
+        """Зарегистрировать отзыв временного токена."""
+        self.events.append("revoke_token")
+
     def remove_runner_if_present(self) -> None:
         """Зарегистрировать очистку временного контейнера."""
         self.events.append("remove_runner")
@@ -1620,47 +1624,69 @@ def test_failed_token_revoke_preserves_original_error() -> None:
         raise AssertionError("Отзыв должен быть выполнен даже после ошибки bootstrap")
 
 
-class DirtyFinalizationHarness(BootstrapHost):
-    """Отказывает в финализации, если после удаления остались секреты 990."""
+class RunnerFinalizationHarness(BootstrapHost):
+    """Проверить успешное удаление 990 без очистки его файлов по одному."""
 
     def __init__(self) -> None:
-        """Подготовить проверку без настоящих команд PVE."""
+        """Создать журнал испытательных действий вместо реального PVE."""
         super().__init__("check")
         self.events: list[str] = []
+        self.present = True
+
+    def ct_exists(self) -> bool:
+        """Показать наличие временного объекта PVE."""
+        return self.present
 
     def assert_owned_runner(self) -> None:
-        """Считать принадлежность временного 990 ранее проверенной."""
-        self.events.append("owned")
+        """Подтвердить владение 990 до удаления."""
+        self.events.append("owner")
 
     def remove_bootstrap_ssh_access_from_infra(self) -> None:
-        """Зарегистрировать попытку удалить временное разрешение."""
-        self.events.append("remove_bootstrap_ssh")
+        """Снять начальное разрешение SSH из управляющего гостя."""
+        self.events.append("remove_bootstrap_auth")
 
-    def ct_exec(self, *args: str, **kwargs):
-        """Имитировать сохранившиеся файлы после команды rm."""
-        self.events.append("ct:" + str(args[0]))
-        return SimpleNamespace(returncode=1 if args[0] == "test" else 0)
+    def remove_private_access(self) -> None:
+        """Отозвать временный полный токен 990."""
+        self.events.append("revoke_token")
+
+    def pct_status(self, ctid: int) -> str:
+        """Имитировать запущенный контейнер."""
+        return "running"
 
     def pct(self, *args: str, **kwargs):
-        """Запретить остановку/удаление 990 до очистки секретов."""
-        raise AssertionError("Нельзя удалять 990, пока временные секреты остались")
+        """Остановить 990 до удаления его rootfs."""
+        self.events.append("pct:" + " ".join(args))
+        return SimpleNamespace(returncode=0)
+
+    def run(self, *args: str, **kwargs):
+        """Удалить только временный контейнер."""
+        self.events.append("run:" + " ".join(args))
+        if args[:2] == ("pct", "destroy"):
+            self.present = False
+        return SimpleNamespace(returncode=0)
+
+    def remove_downloaded_template(self) -> None:
+        """Завершить удаление шаблона после очистки 990."""
+        self.events.append("template")
+
+    def ct_exec(self, *args: str, **kwargs):
+        """Запретить ненужные действия с файлами внутри уничтожаемого LXC."""
+        raise AssertionError("Удалять секреты внутри уничтожаемого 990 избыточно")
+
+    def ok(self, message: str) -> None:
+        """Подтвердить завершение операции без вывода."""
+        self.events.append("ok")
 
 
-def test_cleanup_stops_if_temporary_secrets_remain() -> None:
-    """Очистка останавливается до pct destroy при остающихся файлах."""
-    host = DirtyFinalizationHarness()
-    try:
-        host.finalize_runner()
-    except BootstrapError as exc:
-        if "временные данные" not in str(exc):
-            raise
-    else:
-        raise AssertionError("Неочищенные секреты должны блокировать завершение")
-    assert_equal(
-        host.events,
-        ["owned", "remove_bootstrap_ssh", "ct:rm", "ct:test"],
-        "Должна проверяться очистка ещё до обращения к pct destroy",
-    )
+def test_finalize_runner_uses_single_destroy_path() -> None:
+    """После успеха удалить 990 одним общим способом и отозвать токен."""
+    host = RunnerFinalizationHarness()
+    host.finalize_runner()
+    assert_equal(host.events,
+                 ["owner", "remove_bootstrap_auth", "revoke_token",
+                  "owner", "pct:stop 990",
+                  "run:pct destroy 990 --purge 1", "template", "ok"],
+                 "Не нужно отдельно чистить файлы перед уничтожением rootfs")
 
 
 def test_lock_rejects_symlink_without_touching_target() -> None:
@@ -2315,7 +2341,7 @@ def main() -> None:
         test_unfinished_installation_rejects_unseal_key,
         test_check_failure_revokes_token_without_destroying_runner,
         test_failed_token_revoke_preserves_original_error,
-        test_cleanup_stops_if_temporary_secrets_remain,
+        test_finalize_runner_uses_single_destroy_path,
         test_lock_rejects_symlink_without_touching_target,
         test_purge_keeps_persistent_storage,
         test_bootstrap_python_sources_follow_rule_010,
