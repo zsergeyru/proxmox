@@ -16,6 +16,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -274,9 +275,22 @@ class BootstrapCommandsMixin:
         uid: int,
         gid: int,
     ) -> None:
-        """Проверить исходный файл доступа и скопировать с заданными правами."""
+        """Атомарно скопировать файл доступа с правами перед его публикацией.
+
+        Создание файла или назначение прав может завершиться неудачей.
+        Временный файл записывается рядом с получателем и заменяет его
+        только после успешного копирования: при сбое прежний файл остаётся
+        неповреждённым. Закрытые ключи не становятся доступны посторонним.
+        """
         if not source.is_file() or source.stat().st_size == 0:
             self.fail(f"отсутствует исходный файл доступа: {source}")
         target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(source, target)
-        self._set_mode_owner(target, mode, uid, gid)
+        fd, filename = tempfile.mkstemp(prefix=".bootstrap-access-", dir=target.parent)
+        os.close(fd)
+        temporary = Path(filename)
+        try:
+            shutil.copyfile(source, temporary)
+            self._set_mode_owner(temporary, mode, uid, gid)
+            os.replace(temporary, target)
+        finally:
+            temporary.unlink(missing_ok=True)

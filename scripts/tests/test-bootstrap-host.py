@@ -1866,6 +1866,32 @@ def test_no_token_cleanup_before_host_verified() -> None:
                  "Токен нельзя изменять до проверки PVE")
 
 
+
+def test_access_copy_is_atomic_when_permissions_fail() -> None:
+    """Частичная ошибка копирования не должна повредить существующий ключ."""
+    with tempfile.TemporaryDirectory() as temp:
+        host = BootstrapHost("apply")
+        source = Path(temp) / "source.key"
+        target = Path(temp) / "recovery.key"
+        source.write_bytes(b"new-secret")
+        target.write_bytes(b"old-secret")
+        with patch.object(host, "_set_mode_owner", side_effect=BootstrapError("ошибка прав")):
+            try:
+                host._copy_access_file(source, target, mode=0o600, uid=0, gid=0)
+            except BootstrapError:
+                pass
+            else:
+                raise AssertionError("Ошибка прав должна остановить копирование")
+        assert_equal(target.read_bytes(), b"old-secret",
+                     "При ошибке нельзя перезаписывать рабочий ключ")
+        if list(Path(temp).glob(".bootstrap-access-*")):
+            raise AssertionError("После отказа нельзя оставлять временный секрет")
+        with patch.object(host, "_set_mode_owner", return_value=None):
+            host._copy_access_file(source, target, mode=0o600, uid=0, gid=0)
+        assert_equal(target.read_bytes(), b"new-secret",
+                     "После повторного копирования должен появиться полный файл")
+
+
 def main() -> None:
     """Последовательно выполнить все проверки без доступа к рабочему PVE."""
     tests = [
@@ -1925,6 +1951,7 @@ def main() -> None:
         test_new_layout_refuses_unmarked_old_directory,
         test_stale_token_revoked_on_runner_preflight_failure,
         test_no_token_cleanup_before_host_verified,
+        test_access_copy_is_atomic_when_permissions_fail,
     ]
     for test in tests:
         test()

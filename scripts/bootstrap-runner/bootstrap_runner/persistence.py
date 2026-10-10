@@ -309,7 +309,12 @@ class BootstrapPersistenceMixin:
             path.mkdir(parents=True, exist_ok=True)
             self._set_mode_owner(path, mode, uid, gid)
 
-        if not self.host_recovery_github_key.exists():
+        if self.host_recovery_github_key.is_symlink():
+            self.fail("Ключ восстановления GitHub не должен быть символьной ссылкой")
+        if (
+            not self.host_recovery_github_key.is_file()
+            or self.host_recovery_github_key.stat().st_size == 0
+        ):
             self._copy_access_file(
                 self.host_github_key,
                 self.host_recovery_github_key,
