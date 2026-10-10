@@ -1203,6 +1203,27 @@ def test_remove_rejects_foreign_910() -> None:
     )
 
 
+def test_bootstrap_command_run_modes() -> None:
+    """Перенос команд не меняет обычный и тихий режимы вывода."""
+    with tempfile.TemporaryDirectory() as temp:
+        host = BootstrapHost("check")
+        host.log_file = Path(temp) / "bootstrap.log"
+        result = host.run(
+            sys.executable, "-c", "print('captured')",
+            capture=True,
+        )
+        assert_equal(result.returncode, 0, "Обычная команда должна завершиться успешно")
+        assert_equal(result.stdout.strip(), "captured", "Обычный вывод должен возвращаться")
+
+        silent = host.run(
+            sys.executable, "-c", "print('logged')",
+            quiet=True,
+        )
+        assert_equal(silent.returncode, 0, "Тихая команда должна завершиться успешно")
+        if "logged" not in host.log_file.read_text(encoding="utf-8"):
+            raise AssertionError("Тихая команда должна записывать вывод в журнал")
+
+
 def test_bootstrap_path_groups() -> None:
     """Пути состояния и доступа должны остаться прежними после выделения."""
     host = BootstrapHost("check")
@@ -1355,6 +1376,7 @@ def main() -> None:
         test_remove_rejects_foreign_910,
         test_installation_marker_states,
         test_bootstrap_path_groups,
+        test_bootstrap_command_run_modes,
         test_restart_unfinished_installation,
         test_restart_rejects_persistent_data,
         test_token_revoked_on_bootstrap_failure,
