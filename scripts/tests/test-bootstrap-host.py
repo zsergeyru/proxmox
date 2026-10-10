@@ -103,12 +103,47 @@ description: Постоянный LXC [owner=proxmox-project;role=infra-manager]
         good.replace("unprivileged: 1", "unprivileged: 0"),
         good.replace("owner=proxmox-project;", ""),
         good.replace("role=infra-manager", "role=other"),
+        good.replace("owner=proxmox-project", "owner=proxmox-project-fake"),
+        good.replace("role=infra-manager", "role=infra-manager-fake"),
+        good.replace("role=infra-manager", "role=infra-manager;role=other"),
     )
     for config in variants:
         if OwnershipHarness(config).infra_config_is_expected():
             raise AssertionError(
                 "Неполный контракт владения не должен приниматься за infra-manager"
             )
+
+
+class RunnerOwnershipHarness(BootstrapHost):
+    def __init__(self, config: str) -> None:
+        super().__init__("apply")
+        self._config = config
+
+    def ct_exists(self) -> bool:
+        return True
+
+    def pct_config(self, ctid: int) -> str:
+        assert ctid == self.ctid
+        return self._config
+
+
+def test_runner_ownership_requires_exact_markers() -> None:
+    valid = ("hostname: bootstrap-runner\n"
+             "tags: bootstrap-runner;project\n"
+             "description: created [managed-by=proxmox-bootstrap]\n")
+    RunnerOwnershipHarness(valid).assert_owned_runner()
+    invalid = (
+        valid.replace("bootstrap-runner;project", "bootstrap-runner-foreign;project"),
+        valid.replace("managed-by=proxmox-bootstrap]", "managed-by=proxmox-bootstrap-fake]"),
+        valid.replace("managed-by=proxmox-bootstrap]", "managed-by=proxmox-bootstrap;managed-by=other]"),
+    )
+    for config in invalid:
+        try:
+            RunnerOwnershipHarness(config).assert_owned_runner()
+        except BootstrapError:
+            pass
+        else:
+            raise AssertionError("Чужой временный контейнер не должен приниматься за 990")
 
 
 class PveHelperHarness(BootstrapHost):
@@ -1053,6 +1088,9 @@ class ExecuteHarness(BootstrapHost):
     def verify_runner_contract(self) -> None:
         self.events.append("verify_runner")
 
+    def execution_lock(self):
+        return contextlib.nullcontext()
+
     def info(self, message: str) -> None:
         self.events.append("info")
 
@@ -1149,6 +1187,25 @@ def test_installation_marker_states() -> None:
                      "Неопознанные сохранённые данные требуют recovery")
 
 
+def test_exclusive_bootstrap_lock() -> None:
+    """Второй экземпляр должен завершаться до изменения PVE."""
+    with tempfile.TemporaryDirectory() as temp:
+        first = BootstrapHost("check")
+        second = BootstrapHost("apply")
+        lock_path = Path(temp) / "bootstrap.lock"
+        first.host_lock_file = lock_path
+        second.host_lock_file = lock_path
+        with first.execution_lock():
+            try:
+                with second.execution_lock():
+                    raise AssertionError("Параллельная операция получила блокировку")
+            except BootstrapError as exc:
+                if "уже выполняется" not in str(exc):
+                    raise
+        with second.execution_lock():
+            pass
+
+
 class FailingExecuteHarness(ExecuteHarness):
     def apply(self) -> None:
         self.events.append("apply")
@@ -1178,6 +1235,7 @@ def main() -> None:
         test_infra_manager_role_can_move_to_another_vmid,
         test_role_is_read_from_project_inside_runner,
         test_strict_ownership_marker,
+        test_runner_ownership_requires_exact_markers,
         test_full_pve_token_contract,
         test_full_pve_token_missing_secret_is_removed,
         test_full_pve_token_invalid_json_is_removed,
@@ -1211,6 +1269,7 @@ def main() -> None:
         test_restart_unfinished_installation,
         test_restart_rejects_persistent_data,
         test_token_revoked_on_bootstrap_failure,
+        test_exclusive_bootstrap_lock,
     ]
     for test in tests:
         test()

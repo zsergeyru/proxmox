@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import tempfile
 from pathlib import Path
 
@@ -176,9 +177,15 @@ class BootstrapInfraMixin:
             (line for line in lines if line.startswith("description: ")),
             "",
         )
-        owner_ok = "owner=proxmox-project" in description
-        role_ok = "role=infra-manager" in description
-        return hostname_ok and unprivileged_ok and owner_ok and role_ok
+        markers = re.findall(r"(?<![A-Za-z0-9_-])([A-Za-z_-]+)=([A-Za-z0-9_-]+)", description)
+        owners = [value for key, value in markers if key == "owner"]
+        roles = [value for key, value in markers if key == "role"]
+        return (
+            hostname_ok
+            and unprivileged_ok
+            and owners == ["proxmox-project"]
+            and roles == [self.infra_role]
+        )
 
     def ensure_existing_infra_running(self) -> None:
         if not self.infra_exists():

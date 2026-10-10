@@ -2,13 +2,16 @@
 from __future__ import annotations
 
 import argparse
+import fcntl
 import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import time
+from contextlib import contextmanager
 from pathlib import Path
 
 _BOOTSTRAP_MODULE_ROOT = Path(__file__).resolve().parent
@@ -116,6 +119,7 @@ class BootstrapHost(
 ):
     def __init__(self, mode: str) -> None:
         self.mode = mode
+        self.host_lock_file = Path("/run/proxmox-bootstrap-runner.lock")
         self._active_timing: tuple[str, float] | None = None
         self._timed_ok_count = 0
         self._started_at = time.monotonic()
@@ -688,46 +692,82 @@ print(json.dumps({"vmid": matches[0][0], "name": matches[0][1]}))
         self.timed_step("Удаление временного 990", self.finalize_runner)
         self.timed_step("Итоговая проверка", self.check_ready)
 
-    def execute(self) -> None:
-        """Выполнить режим и отозвать временный токен при ошибке."""
-        runner_verified = False
-        try:
-            self.require_host()
-            self.verify_runner_contract()
-            runner_verified = True
-            self.info(f"Закрытый bootstrap {VERSION}, режим: {self.mode}")
+    @contextmanager
+    def execution_lock(self):
+        """Запретить параллельную оркестрацию на одном PVE.
 
-            if self.mode in {"apply", "recover"}:
-                self.apply()
-            elif self.mode == "check":
-                self.verify_infra_ready(quiet=True)
-                self.finalize_runner()
-                self.check_ready()
-            elif self.mode == "remove":
-                self.remove_infra()
-            elif self.mode == "purge":
-                self.remove_infra()
-                shutil.rmtree(self.host_bootstrap_dir, ignore_errors=True)
-                self.ok(
-                    "Старый bootstrap-каталог удалён; "
-                    "постоянное состояние /mnt/bindmounts/infra-manager сохранено"
-                )
-            else:
-                self.fail(f"неизвестный режим: {self.mode}")
-        except BaseException:
-            self.finish_section(interrupted=True)
-            if runner_verified and self.mode in {"apply", "recover", "check"}:
-                try:
-                    self.remove_private_access()
-                except Exception as cleanup_error:
-                    print(
-                        f"ОШИБКА: не удалось отозвать временный токен PVE: "
-                        f"{cleanup_error}",
-                        file=sys.stderr,
+        Блокировка находится на PVE, а не внутри временного 990. Она
+        освобождается ядром также при аварийном завершении процесса.
+        """
+        path = self.host_lock_file
+        if path.is_symlink() or not path.parent.is_dir():
+            self.fail(f"Небезопасный путь блокировки: {path}")
+        try:
+            fd = os.open(path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
+        except OSError as exc:
+            raise BootstrapError(f"Не удалось открыть блокировку {path}: {exc}") from exc
+        try:
+            info = os.fstat(fd)
+            if (
+                not stat.S_ISREG(info.st_mode)
+                or info.st_uid != os.geteuid()
+                or info.st_nlink != 1
+                or (info.st_mode & 0o077)
+            ):
+                self.fail(f"Небезопасный файл блокировки: {path}")
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError as exc:
+                raise BootstrapError(
+                    "Первоначальное развёртывание уже выполняется на PVE; "
+                    "дождитесь завершения текущего процесса"
+                ) from exc
+            yield
+        finally:
+            os.close(fd)
+
+    def execute(self) -> None:
+        """Выполнить режим под блокировкой и отозвать токен при ошибке."""
+        with self.execution_lock():
+            runner_verified = False
+            try:
+                self.require_host()
+                self.verify_runner_contract()
+                runner_verified = True
+                self.info(f"Закрытый bootstrap {VERSION}, режим: {self.mode}")
+
+                if self.mode in {"apply", "recover"}:
+                    self.apply()
+                elif self.mode == "check":
+                    self.verify_infra_ready(quiet=True)
+                    self.finalize_runner()
+                    self.check_ready()
+                elif self.mode == "remove":
+                    self.remove_infra()
+                elif self.mode == "purge":
+                    self.remove_infra()
+                    shutil.rmtree(self.host_bootstrap_dir, ignore_errors=True)
+                    self.ok(
+                        "Старый bootstrap-каталог удалён; "
+                        "постоянное состояние /mnt/bindmounts/infra-manager сохранено"
                     )
-            raise
-        else:
-            self.finish_section()
+                else:
+                    self.fail(f"неизвестный режим: {self.mode}")
+            except BaseException:
+                self.finish_section(interrupted=True)
+                if runner_verified and self.mode in {"apply", "recover", "check"}:
+                    try:
+                        self.remove_private_access()
+                    except Exception as cleanup_error:
+                        print(
+                            f"ОШИБКА: не удалось отозвать временный токен PVE: "
+                            f"{cleanup_error}",
+                            file=sys.stderr,
+                        )
+                raise
+            else:
+                self.finish_section()
+
 
 
 

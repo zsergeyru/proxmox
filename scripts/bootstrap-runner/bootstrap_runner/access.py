@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import tempfile
 from pathlib import Path
 
@@ -151,13 +152,21 @@ class BootstrapAccessMixin:
         config = self.pct_config(self.ctid)
         if f"hostname: {self.ct_hostname}\n" not in f"{config}\n":
             self.fail(f"LXC {self.ctid} не принадлежит bootstrap")
-        if "bootstrap-runner" not in next(
-            (line for line in config.splitlines() if line.startswith("tags:")), ""
-        ):
+        tags_line = next(
+            (line for line in config.splitlines() if line.startswith("tags: ")), ""
+        )
+        tags = set(tags_line.removeprefix("tags: ").split(";"))
+        if "bootstrap-runner" not in tags:
             self.fail(f"LXC {self.ctid} не принадлежит bootstrap")
-        if "managed-by=proxmox-bootstrap" not in next(
-            (line for line in config.splitlines() if line.startswith("description:")), ""
-        ):
+        description = next(
+            (line.removeprefix("description: ") for line in config.splitlines()
+             if line.startswith("description: ")), ""
+        )
+        # Разбор всех marker=value не позволяет принять чужой суффикс
+        # bootstrap или подменить владельца вторым значением managed-by.
+        markers = re.findall(r"(?<![A-Za-z0-9_-])([A-Za-z_-]+)=([A-Za-z0-9_-]+)", description)
+        owners = [value for key, value in markers if key == "managed-by"]
+        if owners != ["proxmox-bootstrap"]:
             self.fail(f"LXC {self.ctid} не принадлежит bootstrap")
 
     def verify_runner_contract(self) -> None:
