@@ -149,7 +149,7 @@ end = source.index("    def execute(self) -> None:", start)
 apply_body = source[start:end]
 steps = [
     'self.configure_infra_manager_base)',
-    'self.handoff_infra,',
+    'self.handoff_infra)',
     'self.configure_infra_manager_control_plane',
     'self.initialize_infra_openbao)',
     'self.sync_infra_ssh_ca_to_runner)',
