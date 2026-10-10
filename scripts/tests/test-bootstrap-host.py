@@ -8,6 +8,7 @@
 """
 from __future__ import annotations
 
+import ast
 import contextlib
 import importlib.util
 import io
@@ -1691,6 +1692,25 @@ def test_purge_keeps_persistent_storage() -> None:
             raise AssertionError("Режим purge должен выполнить операцию удаления")
 
 
+def test_bootstrap_python_sources_follow_rule_010() -> None:
+    """У каждого Python-модуля, класса и метода должна быть строка документации."""
+    program = ROOT / "scripts/bootstrap-runner"
+    checked = sorted(program.rglob("*.py"))
+    checked.append(Path(__file__))
+    for path in checked:
+        source = path.read_text(encoding="utf-8")
+        tree = ast.parse(source, filename=str(path))
+        if not ast.get_docstring(tree):
+            raise AssertionError(f"Модуль без описания по правилу 010: {path}")
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+                if not ast.get_docstring(node):
+                    raise AssertionError(
+                        f"Отсутствует описание по правилу 010: "
+                        f"{path}:{node.lineno} {node.name}"
+                    )
+
+
 def main() -> None:
     """Последовательно выполнить все проверки без доступа к рабочему PVE."""
     tests = [
@@ -1743,6 +1763,7 @@ def main() -> None:
         test_cleanup_stops_if_temporary_secrets_remain,
         test_lock_rejects_symlink_without_touching_target,
         test_purge_keeps_persistent_storage,
+        test_bootstrap_python_sources_follow_rule_010,
     ]
     for test in tests:
         test()
