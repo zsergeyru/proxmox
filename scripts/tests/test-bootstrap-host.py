@@ -832,9 +832,9 @@ class ApplyHarness(BootstrapHost):
         """Зарегистрировать полную настройку гостя."""
         self.events.append("configure_full")
 
-    def handoff_infra(self, access_mode: str = "apply") -> None:
+    def handoff_infra(self) -> None:
         """Смоделировать передачу первоначальных учётных данных."""
-        self.events.append(f"handoff:{access_mode}")
+        self.events.append("handoff")
 
     def initialize_infra_openbao(self) -> None:
         """Зарегистрировать подготовку OpenBao без реального запуска."""
@@ -870,7 +870,7 @@ def test_new_install_flow() -> None:
             "create_infra",
             "attach_layout",
             "configure_base",
-            "handoff:apply",
+            "handoff",
             "configure_control_plane",
             "initialize_openbao",
             "sync_ssh_ca",
@@ -896,9 +896,9 @@ def test_auto_recovery_for_absent_infra_and_existing_data() -> None:
         ["infra_exists", "info", "verify_recovery_state", "info"],
         "Проверка сохранённых данных должна предшествовать изменяющим операциям",
     )
-    if "prepare_new_layout" in host.events or "handoff:apply" in host.events:
+    if "prepare_new_layout" in host.events or "handoff" in host.events:
         raise AssertionError("Старые данные нельзя обрабатывать как новую установку")
-    if "handoff:recover" not in host.events:
+    if "handoff" not in host.events:
         raise AssertionError("Сохранённые данные требуют режима recovery")
 
 
@@ -1020,7 +1020,7 @@ def test_recovery_recreates_existing_infra() -> None:
             "create_infra",
             "attach_layout",
             "configure_base",
-            "handoff:recover",
+            "handoff",
             "configure_control_plane",
             "initialize_openbao",
             "sync_ssh_ca",
@@ -1077,7 +1077,7 @@ def test_recovery_recreates_missing_infra() -> None:
             "create_infra",
             "attach_layout",
             "configure_base",
-            "handoff:recover",
+            "handoff",
             "configure_control_plane",
             "initialize_openbao",
             "sync_ssh_ca",
@@ -1892,6 +1892,108 @@ def test_access_copy_is_atomic_when_permissions_fail() -> None:
                      "После повторного копирования должен появиться полный файл")
 
 
+
+def test_ready_guest_only_checks_and_removes_runner() -> None:
+    """Готовый гость не должен пересоздаваться и терять действующий токен."""
+    host = ApplyHarness("apply", infra_exists=True)
+    host._test_marker_state = "ready"
+    host.apply()
+    assert_equal(
+        host.events,
+        ["infra_exists", "verify_layout", "verify_ready:quiet",
+         "finalize_runner", "check_ready"],
+        "Повторный запуск должен только проверить ready и удалить 990",
+    )
+
+
+class NewRootfsTokenHarness(BootstrapHost):
+    """Проверяет перевыпуск токена без настоящего PVE и контейнеров."""
+
+    def __init__(self, *, fail_stage: bool = False) -> None:
+        """Сохранить события выдачи токена и запретить доступ к PVE."""
+        super().__init__("apply")
+        self.fail_stage = fail_stage
+        self.events: list[str] = []
+
+    def verify_infra_object(self) -> None:
+        """Подтвердить создание нового гостя."""
+        self.events.append("verify_guest")
+
+    def remove_named_token(self, user: str, token_name: str) -> None:
+        """Записать отзыв токена."""
+        self.events.append(f"revoke:{user}!{token_name}")
+
+    def create_full_pve_token(self, token_name: str) -> tuple[str, str]:
+        """Создать испытательный токен."""
+        self.events.append("create_token")
+        return f"root@pam!{token_name}", "new-secret"
+
+    def pve_node_address(self) -> tuple[str, str]:
+        """Вернуть испытательное имя PVE."""
+        return "pve", "192.168.1.9"
+
+    def stage_infra_bootstrap_file(self, source: Path, target: Path) -> None:
+        """Проверить перенос вновь созданного секрета."""
+        if "new-secret" not in source.read_text(encoding="utf-8"):
+            raise AssertionError("Новый секрет должен передаваться в новый rootfs")
+        self.events.append("stage_token")
+        if self.fail_stage:
+            raise BootstrapError("передача токена оборвалась")
+
+    def pveum_json(self, *args: str) -> list[dict]:
+        """Вернуть существующий пул без настоящих запросов к PVE."""
+        if args == ("pool", "list"):
+            return [{"poolid": "managed"}]
+        raise AssertionError(f"Неожиданный список PVE: {args}")
+
+    def _copy_access_file(self, *args, **kwargs) -> None:
+        """Не копировать системный сертификат при испытании."""
+        self.events.append("stage_ca")
+
+    def infra_test(self, flag: str, path: Path | str) -> bool:
+        """Считать испытательный сертификат доступным гостю."""
+        return True
+
+    def infra_exec(self, *args, **kwargs):
+        """Подменить изменение hosts внутри гостя."""
+        self.events.append("set_hosts")
+        return SimpleNamespace(returncode=0)
+
+    def ok(self, message: str) -> None:
+        """Не выводить сообщения во время испытания."""
+        pass
+
+
+def test_new_rootfs_always_rotates_token() -> None:
+    """Даже старый правильный токен не переиспользуется без его секрета."""
+    host = NewRootfsTokenHarness()
+    host.prepare_infra_pve_access()
+    assert_equal(
+        host.events[:4],
+        ["verify_guest", "revoke:root@pam!infra-manager",
+         "create_token", "stage_token"],
+        "Сначала отзыв старого токена, затем выдача и передача нового",
+    )
+
+
+def test_failed_new_rootfs_token_transfer_revokes_new_token() -> None:
+    """Секрет не должен оставаться действующим после ошибки его передачи."""
+    host = NewRootfsTokenHarness(fail_stage=True)
+    try:
+        host.prepare_infra_pve_access()
+    except BootstrapError as exc:
+        if "передача токена" not in str(exc):
+            raise
+    else:
+        raise AssertionError("Должна сохраняться ошибка передачи токена")
+    assert_equal(
+        host.events,
+        ["verify_guest", "revoke:root@pam!infra-manager",
+         "create_token", "stage_token", "revoke:root@pam!infra-manager"],
+        "Сбой выдачи должен отзывать вновь созданный токен",
+    )
+
+
 def main() -> None:
     """Последовательно выполнить все проверки без доступа к рабочему PVE."""
     tests = [
@@ -1952,6 +2054,9 @@ def main() -> None:
         test_stale_token_revoked_on_runner_preflight_failure,
         test_no_token_cleanup_before_host_verified,
         test_access_copy_is_atomic_when_permissions_fail,
+        test_ready_guest_only_checks_and_removes_runner,
+        test_new_rootfs_always_rotates_token,
+        test_failed_new_rootfs_token_transfer_revokes_new_token,
     ]
     for test in tests:
         test()

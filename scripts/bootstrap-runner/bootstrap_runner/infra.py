@@ -246,27 +246,19 @@ class BootstrapInfraMixin:
             "0600",
         )
 
-    def prepare_infra_pve_access(self, access_mode: str = "apply") -> None:
-        """Проверить PVE token и временно передать его infra-manager при необходимости."""
+    def prepare_infra_pve_access(self) -> None:
+        """Перевыпустить токен PVE для только что созданного rootfs гостя.
+
+        Секрет прежнего токена невозможно извлечь из PVE. Поэтому при
+        первоначальном создании и полном восстановлении всегда отзывается
+        прежний токен, создаётся новый и передаётся гостю. Если передача
+        не удалась, вновь созданный токен также отзывается.
+        """
         self.verify_infra_object()
         token_name = "infra-manager"
-
-        rows = self.pveum_json("user", "token", "list", "root@pam")
-        token_row = next(
-            (row for row in rows if row.get("tokenid") == token_name),
-            None,
-        )
-        old_privsep = (
-            token_row is not None
-            and token_row.get("privsep") not in (0, False, "0")
-        )
-
-        if token_row is not None and (access_mode == "recover" or old_privsep):
-            self.remove_named_token("root@pam", token_name)
-            token_row = None
-
-        if token_row is None:
-            token_id, secret = self.create_full_pve_token(token_name)
+        self.remove_named_token("root@pam", token_name)
+        token_id, secret = self.create_full_pve_token(token_name)
+        try:
             node, _ = self.pve_node_address()
             fd, tmp_name = tempfile.mkstemp(
                 prefix="infra-manager-pve-api.",
@@ -276,9 +268,9 @@ class BootstrapInfraMixin:
             tmp = Path(tmp_name)
             try:
                 tmp.write_text(
-                    f"PVE_API_URL=https://{node}:8006\n"
-                    f"PVE_API_TOKEN_ID={token_id}\n"
-                    f"PVE_API_TOKEN_SECRET={secret}\n",
+                    f"PVE_API_URL=https://{node}:8006\\n"
+                    f"PVE_API_TOKEN_ID={token_id}\\n"
+                    f"PVE_API_TOKEN_SECRET={secret}\\n",
                     encoding="utf-8",
                 )
                 tmp.chmod(0o600)
@@ -288,6 +280,9 @@ class BootstrapInfraMixin:
                 )
             finally:
                 tmp.unlink(missing_ok=True)
+        except BaseException:
+            self.remove_named_token("root@pam", token_name)
+            raise
 
         pools = self.pveum_json("pool", "list")
         if not any(row.get("poolid") == "managed" for row in pools):
@@ -461,9 +456,9 @@ class BootstrapInfraMixin:
             self.fail(f"в {self.infra_ctid} отсутствует рабочая копия проекта")
         self.ok(f"Данные для настройки {self.infra_ctid} переданы")
 
-    def handoff_infra(self, access_mode: str = "apply") -> None:
+    def handoff_infra(self) -> None:
         """Передать необходимые PVE/Git-доступы и сверить полученные данные."""
-        self.prepare_infra_pve_access(access_mode)
+        self.prepare_infra_pve_access()
         self.prepare_infra_pve_root_access()
         self.prepare_infra_project_access()
         self.checkout_infra_project()

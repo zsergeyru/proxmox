@@ -258,6 +258,13 @@ class BootstrapHost(
 
         if existed and not unfinished:
             self.timed_step("Проверка подключённых данных", self.verify_persistent_layout)
+            if self.mode != "recover" and self._read_installation_marker() == "ready":
+                # Гость уже готов; повторение установочных шагов и ротация
+                # рабочего токена здесь запрещены. Нужно лишь удалить 990.
+                self.timed_step("Проверка готового гостя", self.verify_infra_ready, quiet=True)
+                self.timed_step("Удаление временного 990", self.finalize_runner)
+                self.timed_step("Итоговая проверка", self.check_ready)
+                return
             if self.mode != "recover":
                 self.fail(
                     f"LXC {self.infra_ctid} уже существует; "
@@ -277,11 +284,7 @@ class BootstrapHost(
         self.timed_step(f"Создание LXC {self.infra_ctid}", self.create_infra_manager)
         self.timed_step("Подключение постоянных данных", self.attach_persistent_layout)
         self.timed_step("Базовая настройка ОС", self.configure_infra_manager_base)
-        self.timed_step(
-            "Передача учётных данных",
-            self.handoff_infra,
-            "recover" if self.mode == "recover" else "apply",
-        )
+        self.timed_step("Передача учётных данных", self.handoff_infra)
         self.timed_step(
             "Запуск управляющего контура", self.configure_infra_manager_control_plane
         )
