@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import json
 import os
 import shlex
 import sys
 import tempfile
 import time
 from pathlib import Path
+from urllib.parse import urlparse
+
+import yaml
 
 from .access import load_access_policy
 from .common import InfraManagerError, console, require_command, run
@@ -33,6 +37,8 @@ from .pve_host import (
     install_openbao_host_support,
     install_recovery_host_support,
     issue_openbao_machine_credentials,
+    issue_pve_agent_credentials,
+    read_pve_ssh_host_key,
     read_openbao_tls_ca,
     sign_ssh_client_key,
     sign_ssh_host_key,
@@ -695,6 +701,72 @@ def _prepare_openbao_machine_ansible_vars(
     return args
 
 
+def _prepare_pve_agent_ansible_vars(
+    context: DeploymentContext,
+    directory: Path,
+) -> list[str]:
+    """Подготовить доступ к оператору PVE только гостю с правом в access.yaml."""
+
+    repo_root = context.paths.guest_dir.parents[2]
+    role = find_guest_by_role(repo_root, "ai-control")
+    if context.vmid != role.vmid:
+        return ["-e", "infra_pve_agent_enabled=false"]
+
+    access = yaml.safe_load(
+        (repo_root / "infrastructure/security/access.yaml").read_text(encoding="utf-8")
+    )
+    rules = [
+        rule for rule in access.get("rules", [])
+        if rule.get("subject") == f"guest:{context.vmid}"
+        and rule.get("service") == "pve-operator"
+        and rule.get("resource") == "guest-operation"
+        and "execute" in rule.get("access", [])
+    ]
+    if len(rules) != 1:
+        return ["-e", "infra_pve_agent_enabled=false"]
+
+    manager = find_guest_by_role(repo_root, SETTINGS.infra_manager_role)
+    manager_record = load_access_policy(repo_root).guests.get(manager.vmid)
+    if manager_record is None or manager_record.address is None:
+        raise InfraManagerError("Не определён доверенный адрес OpenBao")
+
+    pve_endpoint = os.environ.get("TF_VAR_pve_endpoint", "")
+    host = urlparse(pve_endpoint).hostname if pve_endpoint else context.node
+    if not host or any(ch.isspace() for ch in host):
+        raise InfraManagerError("Не определён безопасный адрес PVE")
+
+    credentials = issue_pve_agent_credentials(context.node, context.vmid)
+    identity = {
+        "openbao_url": f"https://{manager_record.address}:8202",
+        "role_id": credentials["role_id"],
+        "secret_id": credentials["secret_id"],
+        "pve_host": host,
+    }
+    identity_file = directory / "pve-agent-identity.json"
+    identity_file.write_text(json.dumps(identity, separators=(",", ":")) + "\n", encoding="utf-8")
+    identity_file.chmod(0o600)
+
+    ca_file = PATHS.openbao_tls_ca
+    if not ca_file.is_file() or ca_file.stat().st_size == 0:
+        ca_file = directory / "pve-agent-ca.crt"
+        ca_file.write_text(read_openbao_tls_ca(context.node), encoding="utf-8")
+        ca_file.chmod(0o600)
+
+    known_hosts = directory / "pve-agent-known-hosts"
+    known_hosts.write_text(
+        f"{host} {read_pve_ssh_host_key(context.node)}\n",
+        encoding="utf-8",
+    )
+    known_hosts.chmod(0o600)
+
+    return [
+        "-e", "infra_pve_agent_enabled=true",
+        "-e", f"infra_pve_agent_identity_file={identity_file}",
+        "-e", f"infra_pve_agent_ca_file={ca_file}",
+        "-e", f"infra_pve_agent_known_hosts_file={known_hosts}",
+    ]
+
+
 def _run_guest_ansible(
     context: DeploymentContext,
     *,
@@ -882,6 +954,10 @@ def _configure_guest_os(
                 if provision_phase == "full"
                 else ["-e", "infra_openbao_machine_enabled=false"]
             )
+            if provision_phase == "full":
+                openbao_machine_args.extend(
+                    _prepare_pve_agent_ansible_vars(context, Path(temporary_dir))
+                )
             _run_guest_ansible(
                 context,
                 private_key=private_key,
