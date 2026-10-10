@@ -137,11 +137,17 @@ ai_control:
 integrations:
   infrastructure_executor:
     role: infra-manager
-    service: semaphore
-    purpose: Повторяемое выполнение OpenTofu, Ansible и других инфраструктурных задач
+    service: pve-operator
+    purpose: Ограниченный вызов команды infra-manager на PVE с выполнением через 910
     local_opentofu_required: false
     local_ansible_controller_required: false
     local_packer_required: false
+    ssh:
+      account: infra-agent
+      authentication: openbao-short-lived-certificate
+      permission_contract: pve-operator/guest-operation
+      confirmation: pve-operator-one-use
+      direct_pve_admin: false
 
 boundaries:
   application_services_allowed: false
