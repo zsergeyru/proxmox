@@ -5,7 +5,6 @@ import argparse
 import fcntl
 import json
 import os
-import re
 import shutil
 import stat
 import subprocess
@@ -24,80 +23,18 @@ from bootstrap_runner.constants import INFRA_MANAGER_ROLE, VERSION
 from bootstrap_runner.errors import BootstrapError
 from bootstrap_runner.infra import BootstrapInfraMixin
 from bootstrap_runner.persistence import BootstrapPersistenceMixin
+from bootstrap_runner.role import RoleLookupError, find_role_guest
 
 # Этот файл выполняется на физическом PVE после того, как публичный bootstrap
 # уже создал 990 и получил закрытый проект. Здесь находится вся оркестрация
 # постоянного infra-manager.
 
-def _plain_top_level_scalars(path: Path) -> dict[str, str]:
-    """Прочитать простые верхнеуровневые scalar-поля guest.yaml без PyYAML."""
-
-    values: dict[str, str] = {}
-    try:
-        lines = path.read_text(encoding="utf-8").splitlines()
-    except (OSError, UnicodeError) as exc:
-        raise BootstrapError(f"Не удалось прочитать {path}: {exc}") from exc
-
-    for raw in lines:
-        if not raw or raw[0].isspace() or raw.lstrip().startswith("#"):
-            continue
-        key, separator, value = raw.partition(":")
-        if not separator:
-            continue
-        key = key.strip()
-        value = value.strip()
-        if (
-            len(value) >= 2
-            and value[0] == value[-1]
-            and value[0] in {"'", '"'}
-        ):
-            value = value[1:-1]
-        values[key] = value
-    return values
-
-
 def _find_role_guest(project_dir: Path, role: str) -> tuple[int, str]:
-    """Найти VMID и имя единственного гостя с указанной ролью."""
-
-    guests_dir = project_dir / "infrastructure" / "guests"
-    matches: list[tuple[int, str, Path]] = []
-    for manifest in sorted(guests_dir.glob("*/guest.yaml")):
-        values = _plain_top_level_scalars(manifest)
-        if values.get("role") != role:
-            continue
-
-        directory_match = re.fullmatch(r"(\d{3})-(.+)", manifest.parent.name)
-        if directory_match is None:
-            raise BootstrapError(
-                f"Каталог гостя с ролью {role!r} имеет неверное имя: "
-                f"{manifest.parent.name}"
-            )
-        directory_vmid = int(directory_match.group(1))
-        directory_name = directory_match.group(2)
-        try:
-            manifest_vmid = int(values.get("vmid", ""))
-        except ValueError as exc:
-            raise BootstrapError(
-                f"{manifest}: роль {role!r} имеет некорректный vmid"
-            ) from exc
-        manifest_name = values.get("name", "")
-
-        if manifest_vmid != directory_vmid or manifest_name != directory_name:
-            raise BootstrapError(
-                f"{manifest}: vmid/name не соответствуют имени каталога"
-            )
-        matches.append((manifest_vmid, manifest_name, manifest))
-
-    if not matches:
-        raise BootstrapError(f"Не найден гость с ролью {role!r}")
-    if len(matches) != 1:
-        locations = ", ".join(str(item[2]) for item in matches)
-        raise BootstrapError(
-            f"Роль {role!r} должна принадлежать одному гостю: {locations}"
-        )
-    vmid, name, _ = matches[0]
-    return vmid, name
-
+    """Найти управляющего гостя единой проверенной функцией из role.py."""
+    try:
+        return find_role_guest(project_dir, role)
+    except RoleLookupError as exc:
+        raise BootstrapError(str(exc)) from exc
 
 
 def _format_duration(seconds: float) -> str:
@@ -240,64 +177,16 @@ class BootstrapHost(
     def _find_role_guest_in_runner(self, role: str) -> tuple[int, str]:
         """Найти гостя по роли в закрытом проекте внутри временного 990."""
 
-        script = r"""
-import json
-import re
-import sys
-from pathlib import Path
-
-project_dir = Path(sys.argv[1])
-role = sys.argv[2]
-guests_dir = project_dir / "infrastructure" / "guests"
-matches = []
-
-for manifest in sorted(guests_dir.glob("*/guest.yaml")):
-    values = {}
-    for raw in manifest.read_text(encoding="utf-8").splitlines():
-        if not raw or raw[0].isspace() or raw.lstrip().startswith("#"):
-            continue
-        key, separator, value = raw.partition(":")
-        if not separator:
-            continue
-        value = value.strip()
-        if (
-            len(value) >= 2
-            and value[0] == value[-1]
-            and value[0] in {"'", '"'}
-        ):
-            value = value[1:-1]
-        values[key.strip()] = value
-
-    if values.get("role") != role:
-        continue
-
-    directory_match = re.fullmatch(r"(\d{3})-(.+)", manifest.parent.name)
-    if directory_match is None:
-        raise SystemExit(f"invalid guest directory: {manifest.parent.name}")
-
-    try:
-        manifest_vmid = int(values.get("vmid", ""))
-    except ValueError as exc:
-        raise SystemExit(f"invalid vmid in {manifest}") from exc
-
-    directory_vmid = int(directory_match.group(1))
-    directory_name = directory_match.group(2)
-    manifest_name = values.get("name", "")
-    if manifest_vmid != directory_vmid or manifest_name != directory_name:
-        raise SystemExit(f"guest identity mismatch: {manifest}")
-
-    matches.append((manifest_vmid, manifest_name))
-
-if len(matches) != 1:
-    raise SystemExit(f"role {role!r} matches {len(matches)} guests")
-
-print(json.dumps({"vmid": matches[0][0], "name": matches[0][1]}))
-""".strip()
-
+        helper = (
+            self.project_dir
+            / "scripts"
+            / "bootstrap-runner"
+            / "bootstrap_runner"
+            / "role.py"
+        )
         result = self.ct_exec(
             "python3",
-            "-c",
-            script,
+            str(helper),
             str(self.project_dir),
             role,
             check=False,

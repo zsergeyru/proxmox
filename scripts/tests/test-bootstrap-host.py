@@ -5,6 +5,7 @@ import contextlib
 import importlib.util
 import io
 import os
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -45,6 +46,52 @@ def test_infra_manager_role_can_move_to_another_vmid() -> None:
         vmid, name = module._find_role_guest(root, "infra-manager")
         assert_equal(vmid, 920, "Роль infra-manager не должна зависеть от VMID 910")
         assert_equal(name, "infra-manager", "Имя должно читаться из guest.yaml")
+
+
+def test_role_lookup_is_identical_in_runner_and_host() -> None:
+    """Один и тот же файл ищет роль в обоих режимах без копии алгоритма."""
+    with tempfile.TemporaryDirectory() as tmp:
+        project = Path(tmp)
+        manifest = project / "infrastructure/guests/920-infra-manager/guest.yaml"
+        manifest.parent.mkdir(parents=True)
+        manifest.write_text(
+            "schema_version: 12\nvmid: 920\nname: infra-manager\n"
+            "role: infra-manager\n",
+            encoding="utf-8",
+        )
+        expected = module._find_role_guest(project, "infra-manager")
+        helper = ROOT / "scripts/bootstrap-runner/bootstrap_runner/role.py"
+        completed = subprocess.run(
+            [sys.executable, str(helper), str(project), "infra-manager"],
+            text=True, capture_output=True, check=True,
+        )
+        import json
+
+        result = json.loads(completed.stdout)
+        assert_equal(
+            (result["vmid"], result["name"]), expected,
+            "Поиск в LXC должен использовать ту же реализацию, что и PVE",
+        )
+
+        manifest.write_text(
+            "schema_version: 12\nvmid: 920\nname: wrong\n"
+            "role: infra-manager\n",
+            encoding="utf-8",
+        )
+        assert_equal(
+            subprocess.run(
+                [sys.executable, str(helper), str(project), "infra-manager"],
+                text=True, capture_output=True, check=False,
+            ).returncode,
+            1,
+            "Самостоятельный сценарий должен отвергать неправильное описание",
+        )
+        try:
+            module._find_role_guest(project, "infra-manager")
+        except BootstrapError:
+            pass
+        else:
+            raise AssertionError("PVE должен отвергать то же неправильное описание")
 
 
 class RunnerRoleHarness(BootstrapHost):
@@ -1254,6 +1301,7 @@ def main() -> None:
     tests = [
         test_infra_manager_role_can_move_to_another_vmid,
         test_role_is_read_from_project_inside_runner,
+        test_role_lookup_is_identical_in_runner_and_host,
         test_strict_ownership_marker,
         test_runner_ownership_requires_exact_markers,
         test_full_pve_token_contract,
