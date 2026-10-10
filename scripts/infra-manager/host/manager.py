@@ -118,6 +118,11 @@ def proxy_to_manager(arguments: list[str], *, trusted: bool = True) -> int:
             "env",
             f"INFRA_PVE_NODE={socket.gethostname().split('.')[0]}",
             f"INFRA_MANAGER_COLOR={color_mode()}",
+            *(
+                ["INFRA_ENABLE_PVE_AGENT_ACCESS=1"]
+                if trusted and os.environ.get("INFRA_ENABLE_PVE_AGENT_ACCESS") == "1"
+                else []
+            ),
             GUEST_COMMAND,
             *(["--trusted-pve"] if trusted else []),
             *arguments,
