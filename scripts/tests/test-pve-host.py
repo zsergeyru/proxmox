@@ -383,11 +383,13 @@ def test_operator_agent_disabled_by_default() -> None:
         patch.object(module, "_configure_agent_openbao_access") as openbao,
         patch.object(module, "_configure_agent_ssh_host") as ssh,
         patch.object(module, "_disable_agent_ssh_host") as revoke,
+        patch.object(module, "_revoke_agent_openbao_access") as revoke_openbao,
     ):
         module.install_operator_host_support("pve", ROOT)
 
     assert installs == ["/usr/local/sbin/infra-manager"]
     revoke.assert_called_once_with("pve")
+    revoke_openbao.assert_called_once_with("pve")
     openbao.assert_not_called()
     ssh.assert_not_called()
 
