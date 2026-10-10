@@ -65,7 +65,7 @@ if provision.get("guest_vmid") != vmid:
 PY
 
 [[ -s "$BOOTSTRAP_DIR/bootstrap-host.py" ]] || die "Отсутствует Python-оркестратор bootstrap-host.py"
-for module in persistence access infra cleanup constants errors; do
+for module in persistence access infra cleanup constants errors role paths commands; do
     [[ -s "$BOOTSTRAP_DIR/bootstrap_runner/$module.py" ]] \
         || die "Отсутствует модуль bootstrap_runner/$module.py"
 done
