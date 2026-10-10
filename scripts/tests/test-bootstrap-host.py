@@ -1279,6 +1279,14 @@ class ExecuteHarness(BootstrapHost):
         """Сохранить диагностическое событие для проверки порядка действий."""
         self.events.append("info")
 
+    def ct_exists(self) -> bool:
+        """Не обращаться к реальному PVE при проверке очистки."""
+        return False
+
+    def remove_downloaded_template(self) -> None:
+        """Не обращаться к реальному хранилищу при испытании."""
+        pass
+
     def verify_infra_ready(self, *, quiet: bool = False) -> None:
         """Записать запрос проверки работоспособности."""
         self.events.append("verify_ready:quiet" if quiet else "verify_ready")
@@ -1491,7 +1499,7 @@ def test_token_revoked_on_bootstrap_failure() -> None:
     assert_equal(
         host.events,
         ["require_host", "verify_runner", "info", "apply", "revoke_token"],
-        "При ошибке временный токен нужно отозвать без удаления 990",
+        "При ошибке временный токен нужно отозвать и убрать 990",
     )
 
 
@@ -1561,7 +1569,7 @@ class FailingCheckHarness(ExecuteHarness):
 
 
 def test_check_failure_revokes_token_without_destroying_runner() -> None:
-    """Ошибка --check не должна удалять 990, но должна отзывать токен."""
+    """Ошибка --check должна отзывать токен и вызывать очистку своего 990."""
     host = FailingCheckHarness("check")
     try:
         host.execute()
@@ -1573,7 +1581,7 @@ def test_check_failure_revokes_token_without_destroying_runner() -> None:
     assert_equal(
         host.events,
         ["require_host", "verify_runner", "info", "verify_failed", "revoke_token"],
-        "После неудачного --check токен удаляется, а временный 990 сохраняется",
+        "После неудачного --check токен отзывается и запускается очистка 990",
     )
 
 
@@ -1994,6 +2002,141 @@ def test_failed_new_rootfs_token_transfer_revokes_new_token() -> None:
     )
 
 
+
+class FailedBootstrapCleanupHarness(FailingExecuteHarness):
+    """Имитирует работающий 990 при ошибке развёртывания."""
+
+    def __init__(self, *, foreign: bool = False, revoke_failure: bool = False):
+        """Подготовить условные объекты PVE для проверки очистки."""
+        super().__init__("apply")
+        self.foreign = foreign
+        self.revoke_failure = revoke_failure
+        self.runner_present = True
+
+    def ct_exists(self) -> bool:
+        """Сообщить о существовании 990 без обращения к PVE."""
+        return self.runner_present
+
+    def assert_owned_runner(self) -> None:
+        """Запретить разрушительные действия над чужим объектом."""
+        self.events.append("check_owner")
+        if self.foreign:
+            raise BootstrapError("чужой LXC 990")
+
+    def pct_status(self, ctid: int) -> str:
+        """Имитировать работающий 990."""
+        return "running"
+
+    def pct(self, *args: str, **kwargs):
+        """Записать остановку временного контейнера."""
+        self.events.append("pct:" + " ".join(args))
+        return SimpleNamespace(returncode=0)
+
+    def run(self, *args: str, **kwargs):
+        """Записать штатное удаление 990."""
+        self.events.append("run:" + " ".join(args))
+        if args[:2] == ("pct", "destroy"):
+            self.runner_present = False
+        return SimpleNamespace(returncode=0)
+
+    def remove_private_access(self) -> None:
+        """Имитировать успех или отказ отзыва временного токена."""
+        self.events.append("revoke_token")
+        if self.revoke_failure:
+            raise BootstrapError("отзыв токена недоступен")
+
+    def remove_downloaded_template(self) -> None:
+        """Записать очистку маркера шаблона."""
+        self.events.append("cleanup_template")
+
+
+def test_bootstrap_failure_destroys_owned_runner() -> None:
+    """Ошибка установки должна отзывать токен и уничтожать свой 990."""
+    host = FailedBootstrapCleanupHarness()
+    try:
+        host.execute()
+    except BootstrapError as exc:
+        if "Прерванный bootstrap" not in str(exc):
+            raise
+    else:
+        raise AssertionError("Первоначальная ошибка не должна теряться")
+    if host.runner_present:
+        raise AssertionError("990 должен быть удалён после отказа")
+    assert_equal(
+        host.events[-5:],
+        ["revoke_token", "check_owner", "pct:stop 990",
+         "run:pct destroy 990 --purge 1", "cleanup_template"],
+        "Удалять 990 разрешено только после проверки владельца",
+    )
+
+
+def test_runner_destroy_continues_when_token_revoke_fails() -> None:
+    """Отказ отзыва токена не должен сохранять копию ключа PVE в 990."""
+    host = FailedBootstrapCleanupHarness(revoke_failure=True)
+    stderr = io.StringIO()
+    with contextlib.redirect_stderr(stderr):
+        try:
+            host.execute()
+        except BootstrapError as exc:
+            if "Прерванный bootstrap" not in str(exc):
+                raise
+        else:
+            raise AssertionError("Основной отказ должен быть сохранён")
+    if host.runner_present or "отзыв токена недоступен" not in stderr.getvalue():
+        raise AssertionError("990 должен удаляться независимо от отзыва токена")
+
+
+def test_cleanup_does_not_destroy_foreign_runner() -> None:
+    """Чужой 990 нельзя удалять даже при неуспешной установке."""
+    host = FailedBootstrapCleanupHarness(foreign=True)
+    stderr = io.StringIO()
+    with contextlib.redirect_stderr(stderr):
+        try:
+            host.execute()
+        except BootstrapError:
+            pass
+        else:
+            raise AssertionError("Изначальная ошибка должна остаться")
+    if not host.runner_present or any(s.startswith(("pct:", "run:")) for s in host.events):
+        raise AssertionError("Чужой временный контейнер не должен изменяться")
+    if "чужой LXC 990" not in stderr.getvalue():
+        raise AssertionError("Невозможность безопасной очистки нужно сообщить")
+
+
+class TemplateReleaseHarness(BootstrapHost):
+    """Подменяет неуспешное освобождение шаблона через PVE."""
+
+    def __init__(self, marker: Path):
+        """Подготовить временный маркер и безопасную имитацию отказа."""
+        super().__init__("check")
+        self.host_template_marker = marker
+        self.events: list[str] = []
+
+    def run(self, *args: str, **kwargs):
+        """Только pvesm free разрешён для удаления временного шаблона."""
+        self.events.append(" ".join(args))
+        if args[:2] != ("pvesm", "free"):
+            raise AssertionError("Шаблон нельзя удалять вручную через pvesm path")
+        return SimpleNamespace(returncode=1)
+
+    def info(self, message: str) -> None:
+        """Записать предупреждение о неосвобождённом шаблоне."""
+        self.events.append(message)
+
+
+def test_template_release_failure_keeps_marker() -> None:
+    """Если pvesm free не удался, не удалять файл и маркер шаблона."""
+    with tempfile.TemporaryDirectory() as temp:
+        marker = Path(temp) / "template.ref"
+        marker.write_text("local:vztmpl/test.tar.zst", encoding="utf-8")
+        host = TemplateReleaseHarness(marker)
+        host.remove_downloaded_template()
+        if not marker.is_file() or not any("ПРЕДУПРЕЖДЕНИЕ" in e for e in host.events):
+            raise AssertionError("При ошибке PVE маркер сохраняется с предупреждением")
+        if host.events[0] != "pvesm free local:vztmpl/test.tar.zst":
+            raise AssertionError("Не допускается прямое удаление файла шаблона")
+
+
 def main() -> None:
     """Последовательно выполнить все проверки без доступа к рабочему PVE."""
     tests = [
@@ -2057,6 +2200,10 @@ def main() -> None:
         test_ready_guest_only_checks_and_removes_runner,
         test_new_rootfs_always_rotates_token,
         test_failed_new_rootfs_token_transfer_revokes_new_token,
+        test_bootstrap_failure_destroys_owned_runner,
+        test_runner_destroy_continues_when_token_revoke_fails,
+        test_cleanup_does_not_destroy_foreign_runner,
+        test_template_release_failure_keeps_marker,
     ]
     for test in tests:
         test()

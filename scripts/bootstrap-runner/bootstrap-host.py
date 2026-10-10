@@ -370,14 +370,19 @@ class BootstrapHost(
             except BaseException:
                 self.finish_section(interrupted=True)
                 if host_verified and self.mode in {"apply", "recover", "check"}:
-                    try:
-                        self.remove_private_access()
-                    except (BootstrapError, OSError) as cleanup_error:
-                        print(
-                            f"ОШИБКА: не удалось отозвать временный токен PVE: "
-                            f"{cleanup_error}",
-                            file=sys.stderr,
-                        )
+                    # Обе очистки независимы: отказ отзыва токена не должен
+                    # оставлять в 990 копию постоянного root SSH-ключа PVE.
+                    for label, operation in (
+                        ("отозвать временный токен PVE", self.remove_private_access),
+                        ("удалить одноразовый LXC 990", self.remove_owned_runner_after_failure),
+                    ):
+                        try:
+                            operation()
+                        except (BootstrapError, OSError) as cleanup_error:
+                            print(
+                                f"ОШИБКА: не удалось {label}: {cleanup_error}",
+                                file=sys.stderr,
+                            )
                 raise
             else:
                 self.finish_section()

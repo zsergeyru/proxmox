@@ -70,11 +70,16 @@ class BootstrapCleanupMixin:
         if not self.host_template_marker.is_file():
             return
         ref = self.host_template_marker.read_text().strip()
-        if ref and self.run("pvesm", "path", ref, check=False, capture=True).returncode == 0:
-            path_result = self.run("pvesm", "path", ref, capture=True)
-            actual_path = Path(path_result.stdout.strip())
-            if self.run("pvesm", "free", ref, check=False).returncode != 0:
-                actual_path.unlink(missing_ok=True)
+        if ref:
+            result = self.run("pvesm", "free", ref, check=False, capture=True)
+            if result.returncode:
+                # Не обходить слой хранения PVE прямым unlink. Маркер нужен
+                # для повторной штатной попытки или ручной диагностики.
+                self.info(
+                    f"ПРЕДУПРЕЖДЕНИЕ: временный LXC-шаблон {ref} не удалён "
+                    "через pvesm free; маркер сохранён"
+                )
+                return
             self.info(f"Удалён временно скачанный LXC-шаблон: {ref.split(':', 1)[-1]}")
         self.host_template_marker.unlink(missing_ok=True)
 
@@ -117,6 +122,22 @@ class BootstrapCleanupMixin:
             self.fail("LXC 990 не удалён")
         self.remove_downloaded_template()
         self.ok("Временный контур 990 полностью удалён")
+
+    def remove_owned_runner_after_failure(self) -> None:
+        """Удалить свой одноразовый 990 после отказа, оставив журнал на PVE.
+
+        Токен отзывается вызывающим кодом отдельно: ошибка его отзыва не
+        должна оставлять в 990 действующие постоянные SSH-ключи.
+        Для чужого контейнера действия прекращаются до stop/destroy.
+        """
+        if self.ct_exists():
+            self.assert_owned_runner()
+            if self.pct_status(self.ctid) == "running":
+                self.pct("stop", str(self.ctid))
+            self.run("pct", "destroy", str(self.ctid), "--purge", "1", quiet=True)
+            if self.ct_exists():
+                self.fail(f"Временный LXC {self.ctid} не удалён после ошибки")
+        self.remove_downloaded_template()
 
     def remove_runner_if_present(self) -> None:
         """Удалить принадлежащий проекту временный контейнер и токен либо лишь оставшийся токен."""
