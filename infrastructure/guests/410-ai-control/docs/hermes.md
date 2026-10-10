@@ -166,7 +166,7 @@ Open WebUI всегда обращается к логической модел�
 Hermes
 ├── встроенные возможности
 ├── Home Assistant
-├── MCP infra-manager → 910
+├── skill infra-manager → ограниченный SSH PVE → 910
 ├── MCP/интерфейс сети
 └── мониторинг
 ```
