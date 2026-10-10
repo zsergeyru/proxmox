@@ -56,8 +56,7 @@ def check_verified_transient_certificate() -> None:
             "secret_id": "test-secret",
             "pve_host": "192.0.2.9",
         }), encoding="utf-8")
-        ca.write_text("dummy trust
-", encoding="utf-8")
+        ca.write_text("dummy trust\n", encoding="utf-8")
         known_hosts.write_text("192.0.2.9 ssh-ed25519 dummy\n", encoding="utf-8")
 
         http_calls = []
