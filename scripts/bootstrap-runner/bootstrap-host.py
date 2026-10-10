@@ -242,12 +242,15 @@ class BootstrapHost(
                 )
                 unfinished = True
                 self.info("Повторяем первоначальную установку без сохранённых данных")
+                self.timed_step(
+                    "Завершение подготовки постоянных каталогов",
+                    self.prepare_new_persistent_layout,
+                )
             elif installation == "new":
                 self.timed_step(
                     "Создание постоянных каталогов",
                     self.prepare_new_persistent_layout,
                 )
-                self.write_installation_marker("installing")
             # existing проверяется ниже: обычная установка не меняет управляющий контейнер.
 
         if self.mode == "recover":

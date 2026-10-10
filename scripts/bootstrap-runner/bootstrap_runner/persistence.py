@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import tempfile
 from pathlib import Path
 
@@ -70,16 +71,13 @@ class BootstrapPersistenceMixin:
             return "recovery"
         return "new"
 
-    def write_installation_marker(self, state: str) -> None:
-        """Атомарно сохранить состояние на PVE с доступом только root."""
+    def _write_installation_marker_to(self, marker: Path, state: str) -> None:
+        """Атомарно записать маркер с идентификатором роли и гостя."""
         if state not in {"installing", "ready"}:
             self.fail(f"Неизвестное состояние установки: {state}")
-        marker = self._installation_marker_path()
-        if self.host_persistent_root.is_symlink() or self.host_pve_only_dir.is_symlink():
-            self.fail("Каталоги постоянного состояния не должны быть символьными ссылками")
-        if not self.host_pve_only_dir.is_dir() or marker.is_symlink():
-            self.fail("Небезопасный или отсутствующий каталог маркера установки")
-        fd, tmp_name = tempfile.mkstemp(prefix=".bootstrap-install-", dir=self.host_pve_only_dir)
+        if marker.is_symlink():
+            self.fail(f"Небезопасная символьная ссылка вместо маркера: {marker}")
+        fd, tmp_name = tempfile.mkstemp(prefix=".bootstrap-install-", dir=marker.parent)
         temporary = Path(tmp_name)
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as file:
@@ -101,6 +99,41 @@ class BootstrapPersistenceMixin:
         finally:
             temporary.unlink(missing_ok=True)
 
+    def write_installation_marker(self, state: str) -> None:
+        """Сохранить состояние на PVE, не переходя по ссылкам каталогов."""
+        if self.host_persistent_root.is_symlink() or self.host_pve_only_dir.is_symlink():
+            self.fail("Каталоги постоянного состояния не должны быть символьными ссылками")
+        if not self.host_pve_only_dir.is_dir():
+            self.fail("Небезопасный или отсутствующий каталог маркера установки")
+        self._write_installation_marker_to(self._installation_marker_path(), state)
+
+    def begin_new_installation(self) -> None:
+        """Создать корень первой установки вместе с маркером одной операцией.
+
+        Каталог с маркером installing предварительно создаётся на том же
+        разделе PVE под временным именем. Переименование всего каталога
+        не оставляет промежутка между его появлением и записью маркера.
+        Если подготовка прерывается, удаляется только наш временный каталог.
+        """
+        root = self.host_persistent_root
+        if root.exists() or root.is_symlink():
+            self.fail(f"Постоянный каталог уже существует: {root}")
+        root.parent.mkdir(parents=True, exist_ok=True)
+        staged = Path(tempfile.mkdtemp(prefix=f".{root.name}-install-", dir=root.parent))
+        try:
+            private_dir = staged / "pve-only"
+            private_dir.mkdir(mode=0o700)
+            self._write_installation_marker_to(
+                private_dir / "bootstrap-installation.json", "installing"
+            )
+            staged.chmod(0o755)
+            if root.exists() or root.is_symlink():
+                self.fail(f"Постоянный каталог появился во время подготовки: {root}")
+            os.rename(staged, root)
+        finally:
+            if staged.exists():
+                shutil.rmtree(staged)
+
     def verify_unfinished_installation(self, *, guest_exists: bool) -> None:
         """Разрешить повтор только до появления невоспроизводимых данных.
 
@@ -112,13 +145,27 @@ class BootstrapPersistenceMixin:
             self.fail("Повтор новой установки требует собственного маркера installing")
         if self.host_persistent_root.is_symlink() or self.host_state_dir.is_symlink():
             self.fail("Небезопасная символьная ссылка в постоянном состоянии")
-        if not self.host_state_dir.is_dir():
-            self.fail("Отсутствует каталог постоянного состояния; повтор запрещён")
+        if self.host_state_dir.exists() and not self.host_state_dir.is_dir():
+            self.fail("Путь постоянного состояния не является каталогом")
+        # При сбое сразу после установки маркера каталог state ещё не создан.
+        # Это допустимо, если в корне нет постоянных файлов или ключа OpenBao.
         try:
-            occupied = next((p for p in self.host_state_dir.rglob("*") if p.is_file() or p.is_symlink()), None)
+            occupied = (
+                next(
+                    (item for item in self.host_state_dir.rglob("*")
+                     if item.is_file() or item.is_symlink()),
+                    None,
+                )
+                if self.host_state_dir.is_dir()
+                else None
+            )
         except OSError as exc:
             raise BootstrapError(f"Не удалось проверить постоянные данные: {exc}") from exc
-        if occupied is not None or self.host_openbao_unseal_key.exists():
+        if (
+            occupied is not None
+            or self.host_openbao_unseal_key.exists()
+            or self.host_openbao_unseal_key.is_symlink()
+        ):
             self.fail(
                 "Незавершённая установка уже содержит постоянные данные; "
                 "автоматическое пересоздание запрещено. Проверьте состояние "
@@ -230,7 +277,17 @@ class BootstrapPersistenceMixin:
         self.ok(f"Аварийное состояние {self.infra_ctid} проверено до восстановления")
 
     def prepare_new_persistent_layout(self) -> None:
-        """Подготовить постоянную область для нового infra-manager без миграции."""
+        """Подготовить каталоги после атомарной записи маркера installing.
+
+        При повторе после безопасного частичного сбоя создаются только
+        недостающие каталоги и файлы доступа. Данные state не удаляются.
+        Вызывать только для новой или проверенной незавершённой установки.
+        """
+        marker_state = self._read_installation_marker()
+        if marker_state is None:
+            self.begin_new_installation()
+        elif marker_state != "installing":
+            self.fail("Нельзя пересоздавать каталоги готовой установки")
         self.host_persistent_root.mkdir(parents=True, exist_ok=True)
         self.host_pve_only_dir.mkdir(parents=True, exist_ok=True)
         self.host_access_dir.mkdir(parents=True, exist_ok=True)
