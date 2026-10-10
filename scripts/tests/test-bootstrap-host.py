@@ -1493,6 +1493,204 @@ def test_token_revoked_on_bootstrap_failure() -> None:
     )
 
 
+def test_invalid_installation_markers_fail_closed() -> None:
+    """Повреждённый маркер или ссылка не должны разрешать повторную установку."""
+    with tempfile.TemporaryDirectory() as temp:
+        host = BootstrapHost("apply")
+        host.host_persistent_root = Path(temp) / "persistent"
+        host.host_pve_only_dir = host.host_persistent_root / "pve-only"
+        host.host_pve_only_dir.mkdir(parents=True)
+        marker = host._installation_marker_path()
+        for invalid in ("{", '{"schema_version":1,"state":"bad"}'):
+            marker.write_text(invalid, encoding="utf-8")
+            try:
+                host.installation_state(guest_exists=False)
+            except BootstrapError:
+                pass
+            else:
+                raise AssertionError("Неверный маркер не должен выбирать новую установку")
+        marker.unlink()
+        target = Path(temp) / "unexpected.json"
+        target.write_text("{}", encoding="utf-8")
+        marker.symlink_to(target)
+        try:
+            host.installation_state(guest_exists=False)
+        except BootstrapError as exc:
+            if "символьная ссылка" not in str(exc):
+                raise
+        else:
+            raise AssertionError("Маркер-ссылка должен блокировать восстановление")
+
+
+def test_unfinished_installation_rejects_unseal_key() -> None:
+    """Наличие ключа OpenBao запрещает автоматическое пересоздание rootfs."""
+    with tempfile.TemporaryDirectory() as temp:
+        host = BootstrapHost("apply")
+        root = Path(temp) / "persistent"
+        host.host_persistent_root = root
+        host.host_pve_only_dir = root / "pve-only"
+        host.host_state_dir = root / "state"
+        host.host_openbao_unseal_key = root / "pve-only/openbao/unseal.key"
+        host.host_pve_only_dir.mkdir(parents=True)
+        host.host_state_dir.mkdir()
+        host.write_installation_marker("installing")
+        host.host_openbao_unseal_key.parent.mkdir()
+        host.host_openbao_unseal_key.write_text("test-secret", encoding="utf-8")
+        try:
+            host.verify_unfinished_installation(guest_exists=False)
+        except BootstrapError as exc:
+            if "постоянные данные" not in str(exc):
+                raise
+        else:
+            raise AssertionError("Начатое состояние OpenBao должно блокировать повтор")
+
+
+class FailingCheckHarness(ExecuteHarness):
+    """Имитирует отказ проверки готовности до очистки временного контейнера."""
+
+    def verify_infra_ready(self, *, quiet: bool = False) -> None:
+        """Остановить проверку с диагностической ошибкой."""
+        self.events.append("verify_failed")
+        raise BootstrapError("Управляющий контур не готов")
+
+    def remove_private_access(self) -> None:
+        """Зарегистрировать обязательный отзыв временного токена."""
+        self.events.append("revoke_token")
+
+
+def test_check_failure_revokes_token_without_destroying_runner() -> None:
+    """Ошибка --check не должна удалять 990, но должна отзывать токен."""
+    host = FailingCheckHarness("check")
+    try:
+        host.execute()
+    except BootstrapError as exc:
+        if "не готов" not in str(exc):
+            raise
+    else:
+        raise AssertionError("Ошибка проверки должна дойти до вызывающего кода")
+    assert_equal(
+        host.events,
+        ["require_host", "verify_runner", "info", "verify_failed", "revoke_token"],
+        "После неудачного --check токен удаляется, а временный 990 сохраняется",
+    )
+
+
+class FailingTokenRevokeHarness(FailingExecuteHarness):
+    """Имитирует ошибку отзыва токена во время обработки первого отказа."""
+
+    def remove_private_access(self) -> None:
+        """Сообщить об ошибке отдельной операции очистки."""
+        self.events.append("revoke_failed")
+        raise BootstrapError("токен остался действующим")
+
+
+def test_failed_token_revoke_preserves_original_error() -> None:
+    """Вторичная ошибка очистки не должна скрывать причину первого отказа."""
+    host = FailingTokenRevokeHarness("apply")
+    stderr = io.StringIO()
+    with contextlib.redirect_stderr(stderr):
+        try:
+            host.execute()
+        except BootstrapError as exc:
+            if "Прерванный bootstrap" not in str(exc):
+                raise
+        else:
+            raise AssertionError("Должна сохраниться ошибка основного этапа")
+    if "токен PVE" not in stderr.getvalue() or "токен остался" not in stderr.getvalue():
+        raise AssertionError("Оператор должен увидеть отдельную ошибку отзыва токена")
+    if "revoke_failed" not in host.events:
+        raise AssertionError("Отзыв должен быть выполнен даже после ошибки bootstrap")
+
+
+class DirtyFinalizationHarness(BootstrapHost):
+    """Отказывает в финализации, если после удаления остались секреты 990."""
+
+    def __init__(self) -> None:
+        """Подготовить проверку без настоящих команд PVE."""
+        super().__init__("check")
+        self.events: list[str] = []
+
+    def assert_owned_runner(self) -> None:
+        """Считать принадлежность временного 990 ранее проверенной."""
+        self.events.append("owned")
+
+    def remove_bootstrap_ssh_access_from_infra(self) -> None:
+        """Зарегистрировать попытку удалить временное разрешение."""
+        self.events.append("remove_bootstrap_ssh")
+
+    def ct_exec(self, *args: str, **kwargs):
+        """Имитировать сохранившиеся файлы после команды rm."""
+        self.events.append("ct:" + str(args[0]))
+        return SimpleNamespace(returncode=1 if args[0] == "test" else 0)
+
+    def pct(self, *args: str, **kwargs):
+        """Запретить остановку/удаление 990 до очистки секретов."""
+        raise AssertionError("Нельзя удалять 990, пока временные секреты остались")
+
+
+def test_cleanup_stops_if_temporary_secrets_remain() -> None:
+    """Очистка останавливается до pct destroy при остающихся файлах."""
+    host = DirtyFinalizationHarness()
+    try:
+        host.finalize_runner()
+    except BootstrapError as exc:
+        if "временные данные" not in str(exc):
+            raise
+    else:
+        raise AssertionError("Неочищенные секреты должны блокировать завершение")
+    assert_equal(
+        host.events,
+        ["owned", "remove_bootstrap_ssh", "ct:rm", "ct:test"],
+        "Должна проверяться очистка ещё до обращения к pct destroy",
+    )
+
+
+def test_lock_rejects_symlink_without_touching_target() -> None:
+    """Символьная ссылка вместо блокировки не должна изменять чужой файл."""
+    with tempfile.TemporaryDirectory() as temp:
+        host = BootstrapHost("apply")
+        target = Path(temp) / "data"
+        target.write_text("preserve", encoding="utf-8")
+        host.host_lock_file = Path(temp) / "lock"
+        host.host_lock_file.symlink_to(target)
+        try:
+            with host.execution_lock():
+                raise AssertionError("Нельзя получить блокировку через ссылку")
+        except BootstrapError as exc:
+            if "блокировки" not in str(exc):
+                raise
+        assert_equal(target.read_text(encoding="utf-8"), "preserve",
+                     "Чужой файл нельзя изменять")
+
+
+class NonDestructiveRemoveHarness(ExecuteHarness):
+    """Подменяет удаление управляющего гостя без реального обращения к PVE."""
+
+    def remove_infra(self) -> None:
+        """Запомнить вызов удаления без изменения инфраструктуры."""
+        self.events.append("remove_infra")
+
+
+def test_purge_keeps_persistent_storage() -> None:
+    """Режим purge удаляет каталог загрузчика, сохраняя данные PVE."""
+    with tempfile.TemporaryDirectory() as temp:
+        host = NonDestructiveRemoveHarness("purge")
+        host.host_bootstrap_dir = Path(temp) / "bootstrap"
+        host.host_persistent_root = Path(temp) / "permanent"
+        host.host_bootstrap_dir.mkdir()
+        host.host_persistent_root.mkdir()
+        (host.host_persistent_root / "openbao.db").write_text(
+            "data", encoding="utf-8"
+        )
+        host.execute()
+        if host.host_bootstrap_dir.exists():
+            raise AssertionError("Каталог старого загрузчика должен быть удалён")
+        if not (host.host_persistent_root / "openbao.db").is_file():
+            raise AssertionError("Режим purge не должен уничтожать постоянные данные")
+        if "remove_infra" not in host.events:
+            raise AssertionError("Режим purge должен выполнить операцию удаления")
+
+
 def main() -> None:
     """Последовательно выполнить все проверки без доступа к рабочему PVE."""
     tests = [
@@ -1538,6 +1736,13 @@ def main() -> None:
         test_token_revoked_on_bootstrap_failure,
         test_exclusive_bootstrap_lock,
         test_check_marks_verified_installation_ready,
+        test_invalid_installation_markers_fail_closed,
+        test_unfinished_installation_rejects_unseal_key,
+        test_check_failure_revokes_token_without_destroying_runner,
+        test_failed_token_revoke_preserves_original_error,
+        test_cleanup_stops_if_temporary_secrets_remain,
+        test_lock_rejects_symlink_without_touching_target,
+        test_purge_keeps_persistent_storage,
     ]
     for test in tests:
         test()
