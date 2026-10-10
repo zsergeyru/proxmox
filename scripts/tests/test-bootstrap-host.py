@@ -769,6 +769,10 @@ class ApplyHarness(BootstrapHost):
             return "unfinished"
         return super().installation_state(guest_exists=guest_exists)
 
+    def _read_installation_marker(self) -> str | None:
+        """Использовать то же испытательное состояние в обоих переходах."""
+        return self._test_marker_state
+
     def write_installation_marker(self, state: str) -> None:
         """Сохранить состояние маркера в памяти испытания."""
         self._test_marker_state = state
