@@ -29,7 +29,8 @@ def _post(url: str, payload: dict, context: ssl.SSLContext, token: str | None = 
         url, data=json.dumps(payload).encode(), headers=headers, method="POST"
     )
     with request.urlopen(req, timeout=15, context=context) as response:
-        return json.load(response)
+        raw = response.read()
+    return json.loads(raw) if raw else {}
 
 
 def run(operation: str, vmid: str | None) -> int:
