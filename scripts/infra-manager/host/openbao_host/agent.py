@@ -75,3 +75,33 @@ if not isinstance(rid, str) or not rid or not isinstance(sid, str) or not sid:
     raise SystemExit("OpenBao did not return agent AppRole credentials")
 print(json.dumps({"role_id": rid, "secret_id": sid}, separators=(",", ":")))
 """
+
+
+REVOKE_AGENT_CODE = r"""
+import json
+import sys
+import urllib.error
+import urllib.request
+
+data = json.loads(sys.stdin.read())
+token = data.get("token")
+vmid = data.get("vmid")
+if not isinstance(token, str) or not token or type(vmid) is not int or vmid <= 0:
+    raise SystemExit("invalid agent revocation")
+headers = {"X-Vault-Token": token, "Content-Type": "application/json"}
+for path in (
+    f"auth/machine/role/pve-agent-{vmid}",
+    "ssh-client-signer/roles/pve-agent",
+    "sys/policies/acl/pve-agent-ssh-sign",
+):
+    req = urllib.request.Request(
+        "http://127.0.0.1:8200/v1/" + path, method="DELETE", headers=headers,
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30):
+            pass
+    except urllib.error.HTTPError as exc:
+        if exc.code != 404:
+            raise
+print('{"revoked":true}')
+"""
