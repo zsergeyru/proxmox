@@ -1375,8 +1375,8 @@ def test_remove_rejects_foreign_910() -> None:
 
     assert_equal(
         host.events,
-        ["remove_runner"],
-        "После обнаружения чужого 910 не должно быть разрушительных действий над ним",
+        ["revoke_token", "remove_runner"],
+        "При чужом 910 допустима только очистка временного 990; управляющий гость не меняется",
     )
 
 
