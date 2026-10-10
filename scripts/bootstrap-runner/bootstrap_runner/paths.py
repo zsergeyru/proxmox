@@ -106,4 +106,3 @@ class BootstrapPathsMixin:
         self.runner_pve_host_dir = Path("/etc/bootstrap-runner/pve-host")
         self.infra_bootstrap_key_comment = "infra-manager-bootstrap"
         self.infra_pve_host_dir = self.infra_access_dir / "pve-host"
-
