@@ -16,6 +16,14 @@
   changed_when: false
   # При отсутствии mp0 не допускаем создания архива на системном диске.
 
+- name: Проверить подключение постоянного состояния
+  ansible.builtin.command:
+    argv:
+      - mountpoint
+      - -q
+      - "{{ provision.photo_archive.storage.required_state_mount }}"
+  changed_when: false
+
 - name: Проверить наличие каталога оригиналов
   ansible.builtin.stat:
     path: "{{ provision.photo_archive.paths.originals }}"
@@ -36,6 +44,7 @@
     - "{{ provision.photo_archive.paths.root }}"
     - "{{ provision.photo_archive.paths.compose }}"
     - "{{ provision.photo_archive.paths.configuration }}"
+    - "{{ provision.photo_archive.storage.required_state_mount }}/secrets"
     - "{{ provision.photo_archive.paths.uploads }}"
     - "{{ provision.photo_archive.paths.database }}"
 
@@ -43,6 +52,20 @@
   ansible.builtin.stat:
     path: "{{ provision.photo_archive.paths.environment }}"
   register: photo_archive_env
+
+- name: Проверить существующие файлы базы
+  ansible.builtin.find:
+    paths: "{{ provision.photo_archive.paths.database }}"
+    file_type: any
+    hidden: true
+    recurse: false
+  register: photo_archive_database_files
+
+- name: Не создавать новый пароль для существующей базы
+  ansible.builtin.assert:
+    that:
+      - photo_archive_env.stat.exists or photo_archive_database_files.matched | int == 0
+    fail_msg: "340: база уже существует, но постоянный файл секрета отсутствует. Восстановить прежний секрет из OpenBao или резервной копии."
 
 - name: Сгенерировать пароль базы при первом запуске
   ansible.builtin.command:
