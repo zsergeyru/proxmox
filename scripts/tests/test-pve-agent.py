@@ -127,13 +127,16 @@ def test_agent_never_receives_trusted_flag() -> None:
         patch.object(manager, "guest_running", return_value=True),
         patch.object(manager, "run", side_effect=fake_run),
     ):
-        assert manager.proxy_to_manager(["status", "340"], trusted=False) == 0
-        assert len(calls) == 1
-        assert "--trusted-pve" not in calls[0]
-        assert "/usr/local/sbin/infra-manager" in calls[0]
-        calls.clear()
-        assert manager.proxy_to_manager(["status", "340"]) == 0
-        assert "--trusted-pve" in calls[0]
+        with patch.dict("os.environ", {"INFRA_ENABLE_PVE_AGENT_ACCESS": "1"}):
+            assert manager.proxy_to_manager(["status", "340"], trusted=False) == 0
+            assert len(calls) == 1
+            assert "--trusted-pve" not in calls[0]
+            assert "INFRA_ENABLE_PVE_AGENT_ACCESS=1" not in calls[0]
+            assert "/usr/local/sbin/infra-manager" in calls[0]
+            calls.clear()
+            assert manager.proxy_to_manager(["status", "340"]) == 0
+            assert "--trusted-pve" in calls[0]
+            assert "INFRA_ENABLE_PVE_AGENT_ACCESS=1" in calls[0]
 
 
 def main() -> None:
