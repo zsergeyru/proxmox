@@ -286,23 +286,6 @@ class BootstrapPersistenceMixin:
             return False
         return (options.get("ro") == "1") if read_only else ("ro" not in options)
 
-    def persistent_layout_attached(self) -> bool:
-        """Проверить mount point постоянной схемы infra-manager."""
-        config = self.pct_config(self.infra_ctid)
-        return self._infra_mount_matches(
-            config,
-            "mp0",
-            self.host_access_dir,
-            self.infra_access_dir,
-            read_only=True,
-        ) and self._infra_mount_matches(
-            config,
-            "mp1",
-            self.host_state_dir,
-            self.infra_state_dir,
-            read_only=False,
-        )
-
     def verify_persistent_layout(self) -> None:
         """Проверить уже подготовленную схему, ничего не копируя."""
         required_dirs = (

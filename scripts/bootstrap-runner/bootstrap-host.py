@@ -59,7 +59,6 @@ class BootstrapHost(
         self.host_lock_file = Path("/run/proxmox-bootstrap-runner.lock")
         self._active_timing: tuple[str, float] | None = None
         self._timed_ok_count = 0
-        self._started_at = time.monotonic()
         self._section_title: str | None = None
         self._section_started = 0.0
         self.ctid = int(os.environ.get("BOOTSTRAP_RUNNER_CTID", "990"))

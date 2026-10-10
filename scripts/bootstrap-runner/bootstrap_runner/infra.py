@@ -187,14 +187,6 @@ class BootstrapInfraMixin:
             and roles == [self.infra_role]
         )
 
-    def ensure_existing_infra_running(self) -> None:
-        if not self.infra_exists():
-            return
-        if not self.infra_config_is_expected():
-            self.fail(f"VMID {self.infra_ctid} занят чужим LXC")
-        if self.pct_status(self.infra_ctid) != "running":
-            self.pct("start", str(self.infra_ctid))
-
     def verify_infra_object(self) -> None:
         if not self.infra_exists():
             self.fail(f"LXC {self.infra_ctid} отсутствует")
