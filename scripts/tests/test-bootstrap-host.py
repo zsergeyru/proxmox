@@ -2300,6 +2300,35 @@ def test_pveum_json_rejects_invalid_shape() -> None:
         else:
             raise AssertionError(f"Некорректный JSON PVE принят: {payload!r}")
 
+
+class RecoveryProtectionSetFailureHarness(RecoveryRootfsHarness):
+    """Имитирует PVE, который снял protection, но вернул ошибку."""
+
+    def pct(self, *args: str, **kwargs):
+        """Проверить, что восстановление защиты выполнено после ошибки set."""
+        self.events.append("pct:" + " ".join(args))
+        if args == ("set", str(self.infra_ctid), "--protection", "0"):
+            raise BootstrapError("снять protection не удалось")
+        return SimpleNamespace(returncode=0)
+
+
+def test_recovery_unprotect_failure_restores_protection() -> None:
+    """Защита возвращается и при сбое непосредственно на её снятии."""
+    host = RecoveryProtectionSetFailureHarness()
+    try:
+        host.remove_infra_rootfs_for_recovery()
+    except BootstrapError as exc:
+        if "снять protection" not in str(exc):
+            raise
+    else:
+        raise AssertionError("Ошибка PVE должна быть передана выше")
+    assert_equal(
+        host.events,
+        ["pct:set 910 --protection 0", "pct:set 910 --protection 1"],
+        "При сомнительном результате снятия защиты нужно вернуть protection",
+    )
+
+
 def main() -> None:
     """Последовательно выполнить все проверки без доступа к рабочему PVE."""
     tests = [
@@ -2371,6 +2400,7 @@ def main() -> None:
         test_host_authorized_keys_atomic_replacement,
         test_host_authorized_keys_rejects_symlink,
         test_pveum_json_rejects_invalid_shape,
+        test_recovery_unprotect_failure_restores_protection,
     ]
     for test in tests:
         test()
