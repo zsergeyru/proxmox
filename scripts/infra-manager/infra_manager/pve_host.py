@@ -466,6 +466,16 @@ def _disable_agent_ssh_host(node: str) -> None:
     )
 
 
+def _revoke_agent_openbao_access(node: str) -> None:
+    """Отозвать ранее выданную роль, если служебный OpenBao уже установлен."""
+
+    _ssh(
+        node, "sh", "-eu", "-c",
+        f"if test -x {OPENBAO_HOST_COMMAND}; then "
+        f"{OPENBAO_HOST_COMMAND} --revoke-agent-access --log-level quiet; fi",
+    )
+
+
 def install_operator_host_support(node: str, repo_root: Path) -> None:
     """Установить PVE-оболочку и ограниченный операторский доступ 410."""
 
@@ -475,7 +485,8 @@ def install_operator_host_support(node: str, repo_root: Path) -> None:
     )
     _disable_agent_ssh_host(node)
     if os.environ.get("INFRA_ENABLE_PVE_AGENT_ACCESS") != "1":
-        console.detail("Оператор PVE обновлён; незавершённый агентский доступ выключен")
+        _revoke_agent_openbao_access(node)
+        console.detail("Оператор PVE обновлён; агентский SSH-доступ отозван")
         return
     _install_remote_file(
         node, host_root / "agent_operator.py", AGENT_HOST_COMMAND, "0755",
