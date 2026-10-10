@@ -22,7 +22,7 @@ if (_HOST_MODULE_ROOT / "openbao_host").is_dir():
 else:
     sys.path.insert(0, str(_INSTALLED_HOST_MODULE_ROOT))
 
-from openbao_host.agent import CONFIGURE_AGENT_CODE
+from openbao_host.agent import CONFIGURE_AGENT_CODE, REVOKE_AGENT_CODE
 from openbao_host.errors import OpenBaoHostError, OpenBaoRaftInactiveError
 from openbao_host.tls import prepare_tls_material as _prepare_tls_material
 from openbao_host.snippets import (
@@ -1672,6 +1672,31 @@ def configure_agent_access(payload: dict[str, object]) -> None:
     log_status("[ОК] Ограниченный SSH-доступ OpenBao для агента подготовлен")
 
 
+def revoke_agent_access() -> None:
+    """Отозвать агентскую роль и секреты, если канал был настроен."""
+
+    if not AGENT_ACCESS_PATH.is_file():
+        return
+    payload = json.loads(AGENT_ACCESS_PATH.read_text(encoding="utf-8"))
+    vmid = payload.get("vmid") if isinstance(payload, dict) else None
+    if type(vmid) is not int or vmid <= 0:
+        raise OpenBaoHostError("Некорректная запись агентского доступа")
+    require_active_openbao("отзыв агентского SSH")
+    token = generate_temporary_root_token()
+    try:
+        result = pct_exec(
+            "python3", "-c", REVOKE_AGENT_CODE, capture=True,
+            input_text=json.dumps({"token": token, "vmid": vmid}, separators=(",", ":")),
+        )
+    finally:
+        revoke_temporary_root_token(token)
+        del token
+    if '"revoked":true' not in result.stdout.replace(" ", ""):
+        raise OpenBaoHostError("OpenBao не подтвердил отзыв агентской роли")
+    AGENT_ACCESS_PATH.unlink()
+    log_status("[ОК] OpenBao-право агента отозвано")
+
+
 def issue_agent_credentials(payload: dict[str, object]) -> dict[str, str]:
     vmid = payload.get("vmid")
     if type(vmid) is not int:
@@ -2047,6 +2072,11 @@ def main() -> int:
         help="Подготовить ограниченную AppRole агента PVE из stdin",
     )
     mode.add_argument(
+        "--revoke-agent-access",
+        action="store_true",
+        help="Отозвать ограниченный SSH-доступ агента PVE",
+    )
+    mode.add_argument(
         "--issue-agent-credentials",
         action="store_true",
         help="Выдать ранее подготовленную ограниченную AppRole агенту",
@@ -2154,6 +2184,8 @@ def main() -> int:
             )
         elif args.configure_agent_access:
             configure_agent_access(json.loads(sys.stdin.read()))
+        elif args.revoke_agent_access:
+            revoke_agent_access()
         elif args.issue_agent_credentials:
             print(json.dumps(issue_agent_credentials(json.loads(sys.stdin.read())), separators=(",", ":")))
         elif args.check_kv:
