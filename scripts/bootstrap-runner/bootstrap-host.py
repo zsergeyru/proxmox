@@ -336,7 +336,7 @@ class BootstrapHost(
             os.close(fd)
 
     def execute(self) -> None:
-        """Выполнить режим под блокировкой и отозвать токен при ошибке."""
+        """Выполнить режим под блокировкой; после отказа убрать свой временный 990."""
         with self.execution_lock():
             # Остаточный токен принадлежит первоначальному контуру PVE,
             # а не конкретному объекту 990. После успешной проверки хоста
@@ -369,7 +369,7 @@ class BootstrapHost(
                     self.fail(f"неизвестный режим: {self.mode}")
             except BaseException:
                 self.finish_section(interrupted=True)
-                if host_verified and self.mode in {"apply", "recover", "check"}:
+                if host_verified:
                     # Обе очистки независимы: отказ отзыва токена не должен
                     # оставлять в 990 копию постоянного root SSH-ключа PVE.
                     for label, operation in (
