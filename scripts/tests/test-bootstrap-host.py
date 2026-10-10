@@ -1203,6 +1203,26 @@ def test_remove_rejects_foreign_910() -> None:
     )
 
 
+def test_bootstrap_path_groups() -> None:
+    """Пути состояния и доступа должны остаться прежними после выделения."""
+    host = BootstrapHost("check")
+    assert_equal(
+        host.host_state_dir,
+        Path("/mnt/bindmounts/infra-manager/state"),
+        "Постоянные данные должны оставаться на PVE",
+    )
+    assert_equal(
+        host.infra_state_dir,
+        Path("/mnt/persistent-state"),
+        "Управляющий контейнер должен видеть ту же точку подключения",
+    )
+    assert_equal(
+        host.host_lock_file,
+        Path("/run/proxmox-bootstrap-runner.lock"),
+        "Блокировка должна находиться на PVE",
+    )
+
+
 def test_installation_marker_states() -> None:
     """Маркер различает чистую, прерванную, готовую и утраченную установку."""
     with tempfile.TemporaryDirectory() as temp:
@@ -1334,6 +1354,7 @@ def main() -> None:
         test_check_mode_finishes_temporary_runner,
         test_remove_rejects_foreign_910,
         test_installation_marker_states,
+        test_bootstrap_path_groups,
         test_restart_unfinished_installation,
         test_restart_rejects_persistent_data,
         test_token_revoked_on_bootstrap_failure,
