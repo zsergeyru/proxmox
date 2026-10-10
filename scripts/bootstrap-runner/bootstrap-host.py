@@ -80,14 +80,17 @@ class BootstrapHost(
         self.setup_host_paths()
 
         self.infra_role = INFRA_MANAGER_ROLE
-        if self.project_dir.is_dir():
-            self.infra_ctid, self.infra_hostname = _find_role_guest(
-                self.project_dir,
+        if os.environ.get("PROJECT_DIR"):
+            # При вызове публичным загрузчиком единственный источник роли —
+            # проект во временном 990. Сначала подтверждаем владение 990.
+            self.assert_owned_runner()
+            self.infra_ctid, self.infra_hostname = self._find_role_guest_in_runner(
                 self.infra_role,
             )
         else:
-            self.infra_ctid, self.infra_hostname = self._find_role_guest_in_runner(
-                self.infra_role,
+            # Локальный запуск проверок и разработки без живого PVE.
+            self.infra_ctid, self.infra_hostname = _find_role_guest(
+                self.project_dir, self.infra_role,
             )
         self.setup_infra_paths()
         self.color = not os.environ.get("NO_COLOR") and os.environ.get("TERM") != "dumb"

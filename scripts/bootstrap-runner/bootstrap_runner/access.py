@@ -191,6 +191,14 @@ class BootstrapAccessMixin:
         owners = [value for key, value in markers if key == "managed-by"]
         if owners != ["proxmox-bootstrap"]:
             self.fail(f"LXC {self.ctid} не принадлежит bootstrap")
+        # Не уничтожать 990 с вручную добавленными томами/устройствами.
+        for line in config.splitlines():
+            option = line.split(":", 1)[0]
+            if re.fullmatch(r"(?:mp|unused|dev)\d+", option) or option == "hookscript":
+                self.fail(
+                    f"LXC {self.ctid} содержит постороннее подключение {option}; "
+                    "автоматическое удаление запрещено"
+                )
 
     def verify_runner_contract(self) -> None:
         """Проверить работающий 990, принадлежность проекту и обязательные файлы проекта."""

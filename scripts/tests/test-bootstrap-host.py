@@ -108,6 +108,7 @@ class RunnerRoleHarness(BootstrapHost):
     """Подставляет чтение описания роли в временном контейнере."""
     def __init__(self) -> None:
         """Подготовить изолированный испытательный контур вместо реального PVE."""
+        self.access_events: list[str] = []
         original = os.environ.get("PROJECT_DIR")
         os.environ["PROJECT_DIR"] = "/var/lib/bootstrap-runner/project"
         try:
@@ -118,8 +119,13 @@ class RunnerRoleHarness(BootstrapHost):
             else:
                 os.environ["PROJECT_DIR"] = original
 
+    def assert_owned_runner(self) -> None:
+        """Подтвердить владение 990 до чтения кода из него."""
+        self.access_events.append("checked_owner")
+
     def ct_exec(self, *args: str, **kwargs):
         """Подменить запуск команды внутри 990 и вернуть результат испытания."""
+        self.access_events.append("read_role")
         assert_equal(args[0], "python3", "Роль должна читаться внутри 990 через Python")
         assert_equal(args[-2], "/var/lib/bootstrap-runner/project", "Неверный путь проекта 990")
         assert_equal(args[-1], "infra-manager", "Неверная искомая роль")
@@ -135,6 +141,8 @@ def test_role_is_read_from_project_inside_runner() -> None:
     host = RunnerRoleHarness()
     assert_equal(host.infra_ctid, 920, "VMID должен определяться из проекта внутри 990")
     assert_equal(host.infra_hostname, "infra-manager", "Имя должно определяться из проекта внутри 990")
+    assert_equal(host.access_events, ["checked_owner", "read_role"],
+                 "Нельзя выполнять код в 990 до проверки его принадлежности")
 
 
 class OwnershipHarness(BootstrapHost):
