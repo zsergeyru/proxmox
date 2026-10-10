@@ -455,6 +455,17 @@ def read_pve_ssh_host_key(node: str) -> str:
     return " ".join(parts[:2])
 
 
+def _disable_agent_ssh_host(node: str) -> None:
+    """Отозвать прежний SSH-вход агента до обновления конфигурации."""
+
+    _ssh(
+        node, "rm", "-f", "--",
+        "/var/lib/infra-agent/.ssh/authorized_keys",
+        "/etc/sudoers.d/infra-manager-agent",
+        str(AGENT_HOST_POLICY),
+    )
+
+
 def install_operator_host_support(node: str, repo_root: Path) -> None:
     """Установить PVE-оболочку и ограниченный операторский доступ 410."""
 
@@ -462,6 +473,7 @@ def install_operator_host_support(node: str, repo_root: Path) -> None:
     _install_remote_file(
         node, host_root / "manager.py", OPERATOR_HOST_COMMAND, "0755",
     )
+    _disable_agent_ssh_host(node)
     if os.environ.get("INFRA_ENABLE_PVE_AGENT_ACCESS") != "1":
         console.detail("Оператор PVE обновлён; незавершённый агентский доступ выключен")
         return
