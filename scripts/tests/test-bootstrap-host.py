@@ -596,6 +596,18 @@ class ApplyHarness(BootstrapHost):
         # Тесты не должны зависеть от каталогов реального PVE.
         self._test_data = tempfile.TemporaryDirectory()
         self.host_persistent_root = Path(self._test_data.name) / "infra-manager"
+        self._test_marker_state: str | None = None
+
+    def installation_state(self, *, guest_exists: bool) -> str:
+        if self._test_marker_state == "installing":
+            return "unfinished"
+        return super().installation_state(guest_exists=guest_exists)
+
+    def write_installation_marker(self, state: str) -> None:
+        self._test_marker_state = state
+
+    def verify_unfinished_installation(self, *, guest_exists: bool) -> None:
+        self.events.append("verify_unfinished")
 
     def verify_recovery_state(self) -> None:
         self.events.append("verify_recovery_state")
@@ -702,6 +714,41 @@ def test_auto_recovery_for_absent_infra_and_existing_data() -> None:
         raise AssertionError("Старые данные нельзя обрабатывать как новую установку")
     if "handoff:recover" not in host.events:
         raise AssertionError("Сохранённые данные требуют режима recovery")
+
+
+def test_restart_unfinished_installation() -> None:
+    host = ApplyHarness("apply", infra_exists=True)
+    host._test_marker_state = "installing"
+    host.apply()
+    assert_equal(host.mode, "apply", "Прерванная новая установка не должна становиться recovery")
+    if host.events[:5] != [
+        "infra_exists", "verify_unfinished", "info", "prepare_runner", "remove_rootfs"
+    ]:
+        raise AssertionError(f"Перед пересозданием необходимо проверить состояние: {host.events}")
+    if host._test_marker_state != "ready":
+        raise AssertionError("Успешная установка должна завершиться маркером ready")
+
+
+def test_restart_rejects_persistent_data() -> None:
+    with tempfile.TemporaryDirectory() as temp:
+        host = BootstrapHost("apply")
+        root = Path(temp) / "infra-manager"
+        host.host_persistent_root = root
+        host.host_pve_only_dir = root / "pve-only"
+        host.host_state_dir = root / "state"
+        host.host_openbao_unseal_key = root / "pve-only/openbao/unseal.key"
+        host.host_pve_only_dir.mkdir(parents=True)
+        host.host_state_dir.mkdir(parents=True)
+        host.write_installation_marker("installing")
+        host.verify_unfinished_installation(guest_exists=False)
+        (host.host_state_dir / "semaphore.sqlite").write_bytes(b"data")
+        try:
+            host.verify_unfinished_installation(guest_exists=False)
+        except BootstrapError as exc:
+            if "постоянные данные" not in str(exc):
+                raise
+        else:
+            raise AssertionError("Запрещено пересоздавать контейнер с постоянными данными")
 
 
 class IncompleteAutoRecoveryHarness(ApplyHarness):
@@ -1102,6 +1149,30 @@ def test_installation_marker_states() -> None:
                      "Неопознанные сохранённые данные требуют recovery")
 
 
+class FailingExecuteHarness(ExecuteHarness):
+    def apply(self) -> None:
+        self.events.append("apply")
+        raise BootstrapError("Прерванный bootstrap")
+
+    def remove_private_access(self) -> None:
+        self.events.append("revoke_token")
+
+
+def test_token_revoked_on_bootstrap_failure() -> None:
+    host = FailingExecuteHarness("apply")
+    try:
+        host.execute()
+    except BootstrapError:
+        pass
+    else:
+        raise AssertionError("Исключение первоначальной установки должно дойти до вызывающего кода")
+    assert_equal(
+        host.events,
+        ["require_host", "verify_runner", "info", "apply", "revoke_token"],
+        "При ошибке временный токен нужно отозвать без удаления 990",
+    )
+
+
 def main() -> None:
     tests = [
         test_infra_manager_role_can_move_to_another_vmid,
@@ -1137,6 +1208,9 @@ def main() -> None:
         test_check_mode_finishes_temporary_runner,
         test_remove_rejects_foreign_910,
         test_installation_marker_states,
+        test_restart_unfinished_installation,
+        test_restart_rejects_persistent_data,
+        test_token_revoked_on_bootstrap_failure,
     ]
     for test in tests:
         test()

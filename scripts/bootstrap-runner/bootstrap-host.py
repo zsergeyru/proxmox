@@ -613,30 +613,40 @@ print(json.dumps({"vmid": matches[0][0], "name": matches[0][1]}))
         self.prepare_runtime()
 
     def apply(self) -> None:
+        """Создать или восстановить управляющий контейнер без потери данных."""
         existed = self.infra_exists()
+        unfinished = False
 
-        # Отсутствие управляющего гостя при сохранённых данных означает восстановление,
-        # а не новую установку. Даже неполный каталог должен пройти строгий
-        # recovery-preflight: нельзя создавать новое состояние поверх старого.
-        # Работающий управляющий гость без явного --recover не пересоздаём.
-        if (
-            self.mode == "apply"
-            and not existed
-            and (
-                self.host_persistent_root.exists()
-                or self.host_persistent_root.is_symlink()
-            )
-        ):
-            self.mode = "recover"
-            self.info(
-                f"Обнаружено постоянное состояние {self.host_persistent_root}; "
-                "автоматически выбран режим восстановления"
-            )
+        if self.mode == "apply":
+            installation = self.installation_state(guest_exists=existed)
+            if installation == "recovery":
+                # Маркер отсутствует у старых установок: состояние не трогаем,
+                # пока полный аварийный набор не пройдёт проверку.
+                self.mode = "recover"
+                self.info(
+                    f"Обнаружено прежнее состояние {self.host_persistent_root}; "
+                    "выбран режим восстановления"
+                )
+            elif installation == "unfinished":
+                self.timed_step(
+                    "Проверка незавершённой установки",
+                    self.verify_unfinished_installation,
+                    guest_exists=existed,
+                )
+                unfinished = True
+                self.info("Повторяем первоначальную установку без сохранённых данных")
+            elif installation == "new":
+                self.timed_step(
+                    "Создание постоянных каталогов",
+                    self.prepare_new_persistent_layout,
+                )
+                self.write_installation_marker("installing")
+            # existing проверяется ниже: обычная установка не меняет 910.
 
         if self.mode == "recover":
             self.timed_step("Проверка сохранённых данных", self.verify_recovery_state)
 
-        if existed:
+        if existed and not unfinished:
             self.timed_step("Проверка подключённых данных", self.verify_persistent_layout)
             if self.mode != "recover":
                 self.fail(
@@ -644,18 +654,15 @@ print(json.dumps({"vmid": matches[0][0], "name": matches[0][1]}))
                     "для рабочего infra-manager используйте обычный deploy/repair, "
                     "а для полного пересоздания — recovery"
                 )
-        elif self.mode == "recover":
+        elif not existed and self.mode == "recover":
             self.info(
                 f"LXC {self.infra_ctid} отсутствует; "
                 "recovery создаст новый rootfs на сохранённом состоянии"
             )
-        else:
-            self.timed_step("Создание постоянных каталогов", self.prepare_new_persistent_layout)
 
-        # Сначала подготовить 990, Docker, Ansible и временный PVE-доступ.
-        # Не удалять rootfs управляющего гостя, если подготовка не удалась.
+        # Подготовка 990 должна предшествовать любому удалению rootfs.
         self.timed_step("Подготовка 990", self.prepare_runner)
-        if existed and self.mode == "recover":
+        if existed and (self.mode == "recover" or unfinished):
             self.timed_step("Удаление старого rootfs", self.remove_infra_rootfs_for_recovery)
         self.timed_step(f"Создание LXC {self.infra_ctid}", self.create_infra_manager)
         self.timed_step("Подключение постоянных данных", self.attach_persistent_layout)
@@ -677,17 +684,19 @@ print(json.dumps({"vmid": matches[0][0], "name": matches[0][1]}))
         )
         self.timed_step("Полная настройка Ansible", self.configure_infra_manager)
         self.timed_step("Проверка готовности", self.verify_infra_ready, quiet=True)
+        self.write_installation_marker("ready")
         self.timed_step("Удаление временного 990", self.finalize_runner)
         self.timed_step("Итоговая проверка", self.check_ready)
 
     def execute(self) -> None:
-        # Любой режим приходит сюда уже после подготовки временного 990
-        # публичным bootstrap-pve.py.
-        self.require_host()
-        self.verify_runner_contract()
-        self.info(f"Закрытый bootstrap {VERSION}, режим: {self.mode}")
-
+        """Выполнить режим и отозвать временный токен при ошибке."""
+        runner_verified = False
         try:
+            self.require_host()
+            self.verify_runner_contract()
+            runner_verified = True
+            self.info(f"Закрытый bootstrap {VERSION}, режим: {self.mode}")
+
             if self.mode in {"apply", "recover"}:
                 self.apply()
             elif self.mode == "check":
@@ -707,9 +716,19 @@ print(json.dumps({"vmid": matches[0][0], "name": matches[0][1]}))
                 self.fail(f"неизвестный режим: {self.mode}")
         except BaseException:
             self.finish_section(interrupted=True)
+            if runner_verified and self.mode in {"apply", "recover", "check"}:
+                try:
+                    self.remove_private_access()
+                except Exception as cleanup_error:
+                    print(
+                        f"ОШИБКА: не удалось отозвать временный токен PVE: "
+                        f"{cleanup_error}",
+                        file=sys.stderr,
+                    )
             raise
         else:
             self.finish_section()
+
 
 
 def parse_args() -> argparse.Namespace:

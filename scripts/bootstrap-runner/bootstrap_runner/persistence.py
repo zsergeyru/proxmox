@@ -95,6 +95,33 @@ class BootstrapPersistenceMixin:
         finally:
             temporary.unlink(missing_ok=True)
 
+    def verify_unfinished_installation(self, *, guest_exists: bool) -> None:
+        """Разрешить повтор только до появления невоспроизводимых данных.
+
+        После начала работы OpenBao, Semaphore или других служб в state/
+        автоматическое удаление rootfs запрещено. В этом случае оператор
+        должен сначала подтвердить восстановление сохранённого состояния.
+        """
+        if self._read_installation_marker() != "installing":
+            self.fail("Повтор новой установки требует собственного маркера installing")
+        if self.host_persistent_root.is_symlink() or self.host_state_dir.is_symlink():
+            self.fail("Небезопасная символьная ссылка в постоянном состоянии")
+        if not self.host_state_dir.is_dir():
+            self.fail("Отсутствует каталог постоянного состояния; повтор запрещён")
+        try:
+            occupied = next((p for p in self.host_state_dir.rglob("*") if p.is_file() or p.is_symlink()), None)
+        except OSError as exc:
+            raise BootstrapError(f"Не удалось проверить постоянные данные: {exc}") from exc
+        if occupied is not None or self.host_openbao_unseal_key.exists():
+            self.fail(
+                "Незавершённая установка уже содержит постоянные данные; "
+                "автоматическое пересоздание запрещено. Проверьте состояние "
+                "и используйте явное восстановление только при готовых резервных данных."
+            )
+        if guest_exists and not self.infra_config_is_expected():
+            self.fail(f"VMID {self.infra_ctid} занят чужим объектом")
+        self.ok("Незавершённая установка подтверждена; постоянных данных ещё нет")
+
     def managed_guests_exist(self) -> bool:
         result = self.run(
             "pvesh",
