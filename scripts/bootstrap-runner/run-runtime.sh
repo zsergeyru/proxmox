@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+# Запустить внутреннюю команду первоначального развёртывания в Docker.
+# Требует готового временного 990 и PVE API credential; передаёт только
+# оговорённые каталоги, SSH-ключ и переменные для OpenTofu/Ansible.
+# Не создаёт долговременной службы и не предназначен для обычного deploy.
+
 [[ $# -gt 0 ]] || { echo "Использование: run-runtime.sh КОМАНДА [АРГУМЕНТЫ...]" >&2; exit 2; }
 
 REPO_ROOT="${BOOTSTRAP_RUNNER_REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
@@ -14,6 +19,8 @@ IMAGE="${BOOTSTRAP_RUNNER_IMAGE:-bootstrap-runtime:v1}"
 [[ -s "$CONFIG_DIR/bootstrap-ssh/infra_manager_ed25519" ]] || { echo "ОШИБКА: не найден bootstrap SSH-ключ" >&2; exit 1; }
 [[ -s "$CONFIG_DIR/bootstrap-ssh/infra_manager_ed25519.pub" ]] || { echo "ОШИБКА: не найден открытый bootstrap SSH-ключ" >&2; exit 1; }
 
+# Учётные данные читаются из защищённого временного файла. Его нельзя
+# выводить в журнал или передавать сторонним процессам.
 set -a
 # shellcheck disable=SC1090
 source "$PVE_ENV"
@@ -24,4 +31,7 @@ TF_VAR_bootstrap_ssh_public_key="$(cat "$CONFIG_DIR/bootstrap-ssh/infra_manager_
 TF_VAR_guest_state_file="$DATA_DIR/opentofu/guests.json"
 export INFRA_BOOTSTRAP_SSH_PRIVATE_KEY TF_VAR_bootstrap_ssh_public_key TF_VAR_guest_state_file
 
+# /workspace — исходный код; конфигурация и ключи доступны образу
+# только для чтения, а временная рабочая область — для записи.
+# Контейнер Docker удаляется автоматически после завершения команды.
 exec docker run --rm     --network host     -e INFRA_MANAGER_CONFIG_DIR=/etc/bootstrap-runner     -e INFRA_MANAGER_DATA_DIR=/var/lib/bootstrap-runner     -e INFRA_PVE_HOST_DIR=/etc/bootstrap-runner/pve-host     -e INFRA_PROJECT_BRANCH="${INFRA_PROJECT_BRANCH:-main}"     -e INFRA_BOOTSTRAP_SSH_PRIVATE_KEY     -e TF_VAR_pve_endpoint     -e TF_VAR_pve_api_token     -e TF_VAR_bootstrap_ssh_public_key     -e TF_VAR_guest_state_file     -v "$REPO_ROOT:/workspace"     -v "$CONFIG_DIR:/etc/bootstrap-runner:ro"     -v "$DATA_DIR:/var/lib/bootstrap-runner"     -w /workspace     "$IMAGE" "$@"

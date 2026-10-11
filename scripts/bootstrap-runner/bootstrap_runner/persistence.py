@@ -1,15 +1,182 @@
-"""Часть оркестрации bootstrap-runner."""
+"""Проверка постоянного состояния и подключений управляющего гостя.
+
+Хранит маркер installing/ready в закрытой области PVE, проверяет данные
+до аварийного пересоздания rootfs и подготавливает постоянные каталоги.
+Не удаляет OpenBao, Semaphore или OpenTofu state. Частично заполненное
+состояние запрещает автоматическую повторную первоначальную установку.
+"""
 
 from __future__ import annotations
 
 import json
+import os
+import shutil
+import tempfile
 from pathlib import Path
 
 from .errors import BootstrapError
 
 
 class BootstrapPersistenceMixin:
+    """Проверка постоянных данных и состояния первоначальной установки.
+
+    Маркер сохраняется на PVE отдельно от rootfs гостя. Отсутствие маркера
+    при существующем хранилище не разрешает новую установку: такие данные
+    считаются ранее созданным состоянием и требуют проверки восстановления.
+    """
+
+    def _installation_marker_path(self) -> Path:
+        """Вернуть путь к маркеру установки в закрытой области PVE."""
+        return self.host_pve_only_dir / "bootstrap-installation.json"
+
+    def _read_installation_marker(self) -> str | None:
+        """Проверить маркер и вернуть installing/ready либо None."""
+        marker = self._installation_marker_path()
+        if marker.is_symlink():
+            self.fail(f"Небезопасная символьная ссылка вместо маркера: {marker}")
+        if not marker.exists():
+            return None
+        if not marker.is_file():
+            self.fail(f"Маркер установки не является файлом: {marker}")
+        try:
+            payload = json.loads(marker.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            raise BootstrapError(f"Повреждён маркер установки {marker}: {exc}") from exc
+        if (
+            not isinstance(payload, dict)
+            or payload.get("schema_version") != 1
+            or payload.get("role") != self.infra_role
+            or payload.get("vmid") != self.infra_ctid
+            or payload.get("state") not in {"installing", "ready"}
+        ):
+            self.fail(f"Маркер установки {marker} не соответствует управляющему гостю")
+        return payload["state"]
+
+    def installation_state(self, *, guest_exists: bool) -> str:
+        """Классифицировать состояние без изменения файлов и гостя.
+
+        new: никогда не создававшаяся установка;
+        unfinished: прерванная установка, подтверждённая маркером PVE;
+        existing: управляющий контейнер уже существует;
+        recovery: контейнер утрачен, но постоянные данные сохраняются.
+        """
+        marker_state = self._read_installation_marker()
+        if marker_state == "installing":
+            return "unfinished"
+        if guest_exists:
+            return "existing"
+        if marker_state == "ready":
+            return "recovery"
+        if self.host_persistent_root.exists() or self.host_persistent_root.is_symlink():
+            return "recovery"
+        return "new"
+
+    def _write_installation_marker_to(self, marker: Path, state: str) -> None:
+        """Атомарно записать маркер с идентификатором роли и гостя."""
+        if state not in {"installing", "ready"}:
+            self.fail(f"Неизвестное состояние установки: {state}")
+        if marker.is_symlink():
+            self.fail(f"Небезопасная символьная ссылка вместо маркера: {marker}")
+        fd, tmp_name = tempfile.mkstemp(prefix=".bootstrap-install-", dir=marker.parent)
+        temporary = Path(tmp_name)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as file:
+                json.dump(
+                    {
+                        "schema_version": 1,
+                        "role": self.infra_role,
+                        "vmid": self.infra_ctid,
+                        "state": state,
+                    },
+                    file,
+                    ensure_ascii=False,
+                )
+                file.write("\n")
+                file.flush()
+                os.fsync(file.fileno())
+            temporary.chmod(0o600)
+            os.replace(temporary, marker)
+        finally:
+            temporary.unlink(missing_ok=True)
+
+    def write_installation_marker(self, state: str) -> None:
+        """Сохранить состояние на PVE, не переходя по ссылкам каталогов."""
+        if self.host_persistent_root.is_symlink() or self.host_pve_only_dir.is_symlink():
+            self.fail("Каталоги постоянного состояния не должны быть символьными ссылками")
+        if not self.host_pve_only_dir.is_dir():
+            self.fail("Небезопасный или отсутствующий каталог маркера установки")
+        self._write_installation_marker_to(self._installation_marker_path(), state)
+
+    def begin_new_installation(self) -> None:
+        """Создать корень первой установки вместе с маркером одной операцией.
+
+        Каталог с маркером installing предварительно создаётся на том же
+        разделе PVE под временным именем. Переименование всего каталога
+        не оставляет промежутка между его появлением и записью маркера.
+        Если подготовка прерывается, удаляется только наш временный каталог.
+        """
+        root = self.host_persistent_root
+        if root.exists() or root.is_symlink():
+            self.fail(f"Постоянный каталог уже существует: {root}")
+        root.parent.mkdir(parents=True, exist_ok=True)
+        staged = Path(tempfile.mkdtemp(prefix=f".{root.name}-install-", dir=root.parent))
+        try:
+            private_dir = staged / "pve-only"
+            private_dir.mkdir(mode=0o700)
+            self._write_installation_marker_to(
+                private_dir / "bootstrap-installation.json", "installing"
+            )
+            staged.chmod(0o755)
+            if root.exists() or root.is_symlink():
+                self.fail(f"Постоянный каталог появился во время подготовки: {root}")
+            os.rename(staged, root)
+        finally:
+            if staged.exists():
+                shutil.rmtree(staged)
+
+    def verify_unfinished_installation(self, *, guest_exists: bool) -> None:
+        """Разрешить повтор только до появления невоспроизводимых данных.
+
+        После начала работы OpenBao, Semaphore или других служб в state/
+        автоматическое удаление rootfs запрещено. В этом случае оператор
+        должен сначала подтвердить восстановление сохранённого состояния.
+        """
+        if self._read_installation_marker() != "installing":
+            self.fail("Повтор новой установки требует собственного маркера installing")
+        if self.host_persistent_root.is_symlink() or self.host_state_dir.is_symlink():
+            self.fail("Небезопасная символьная ссылка в постоянном состоянии")
+        if self.host_state_dir.exists() and not self.host_state_dir.is_dir():
+            self.fail("Путь постоянного состояния не является каталогом")
+        # При сбое сразу после установки маркера каталог state ещё не создан.
+        # Это допустимо, если в корне нет постоянных файлов или ключа OpenBao.
+        try:
+            occupied = (
+                next(
+                    (item for item in self.host_state_dir.rglob("*")
+                     if item.is_file() or item.is_symlink()),
+                    None,
+                )
+                if self.host_state_dir.is_dir()
+                else None
+            )
+        except OSError as exc:
+            raise BootstrapError(f"Не удалось проверить постоянные данные: {exc}") from exc
+        if (
+            occupied is not None
+            or self.host_openbao_unseal_key.exists()
+            or self.host_openbao_unseal_key.is_symlink()
+        ):
+            self.fail(
+                "Незавершённая установка уже содержит постоянные данные; "
+                "автоматическое пересоздание запрещено. Проверьте состояние "
+                "и используйте явное восстановление только при готовых резервных данных."
+            )
+        if guest_exists and not self.infra_config_is_expected():
+            self.fail(f"VMID {self.infra_ctid} занят чужим объектом")
+        self.ok("Незавершённая установка подтверждена; постоянных данных ещё нет")
+
     def managed_guests_exist(self) -> bool:
+        """Проверить состав пула managed; ошибку чтения существующего пула считать отказом."""
         result = self.run(
             "pvesh",
             "get",
@@ -41,6 +208,7 @@ class BootstrapPersistenceMixin:
 
     @staticmethod
     def _directory_has_files(path: Path) -> bool:
+        """Найти хотя бы один непустой файл в каталоге состояния."""
         if not path.is_dir():
             return False
         try:
@@ -49,7 +217,13 @@ class BootstrapPersistenceMixin:
             return False
 
     def verify_recovery_state(self) -> None:
-        """Проверить аварийное состояние до изменений infra-manager."""
+        """Проверить данные восстановления до удаления существующего rootfs.
+
+        Требуются ключ разблокировки, копия ключа GitHub, непустое хранилище
+        OpenBao и база Semaphore. При наличии объектов managed необходим
+        сохранённый OpenTofu state. Проверяется наличие файлов, не целостность
+        внутренних баз — проверка не заменяет отдельный резерв и его испытание.
+        """
         required_dirs = (
             self.host_pve_only_dir,
             self.host_recovery_dir,
@@ -103,7 +277,17 @@ class BootstrapPersistenceMixin:
         self.ok(f"Аварийное состояние {self.infra_ctid} проверено до восстановления")
 
     def prepare_new_persistent_layout(self) -> None:
-        """Подготовить постоянную область для нового infra-manager без миграции."""
+        """Подготовить каталоги после атомарной записи маркера installing.
+
+        При повторе после безопасного частичного сбоя создаются только
+        недостающие каталоги и файлы доступа. Данные state не удаляются.
+        Вызывать только для новой или проверенной незавершённой установки.
+        """
+        marker_state = self._read_installation_marker()
+        if marker_state is None:
+            self.begin_new_installation()
+        elif marker_state != "installing":
+            self.fail("Нельзя пересоздавать каталоги готовой установки")
         self.host_persistent_root.mkdir(parents=True, exist_ok=True)
         self.host_pve_only_dir.mkdir(parents=True, exist_ok=True)
         self.host_access_dir.mkdir(parents=True, exist_ok=True)
@@ -125,7 +309,12 @@ class BootstrapPersistenceMixin:
             path.mkdir(parents=True, exist_ok=True)
             self._set_mode_owner(path, mode, uid, gid)
 
-        if not self.host_recovery_github_key.exists():
+        if self.host_recovery_github_key.is_symlink():
+            self.fail("Ключ восстановления GitHub не должен быть символьной ссылкой")
+        if (
+            not self.host_recovery_github_key.is_file()
+            or self.host_recovery_github_key.stat().st_size == 0
+        ):
             self._copy_access_file(
                 self.host_github_key,
                 self.host_recovery_github_key,
@@ -153,6 +342,7 @@ class BootstrapPersistenceMixin:
         *,
         read_only: bool,
     ) -> bool:
+        """Сверить источник, назначение и режим чтения одной точки подключения PVE."""
         line = next(
             (row for row in config.splitlines() if row.startswith(f"{name}: ")),
             "",
@@ -172,23 +362,6 @@ class BootstrapPersistenceMixin:
         if options.get("mp") != str(target):
             return False
         return (options.get("ro") == "1") if read_only else ("ro" not in options)
-
-    def persistent_layout_attached(self) -> bool:
-        """Проверить mount point постоянной схемы infra-manager."""
-        config = self.pct_config(self.infra_ctid)
-        return self._infra_mount_matches(
-            config,
-            "mp0",
-            self.host_access_dir,
-            self.infra_access_dir,
-            read_only=True,
-        ) and self._infra_mount_matches(
-            config,
-            "mp1",
-            self.host_state_dir,
-            self.infra_state_dir,
-            read_only=False,
-        )
 
     def verify_persistent_layout(self) -> None:
         """Проверить уже подготовленную схему, ничего не копируя."""

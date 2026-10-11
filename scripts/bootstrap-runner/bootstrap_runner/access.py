@@ -1,9 +1,17 @@
-"""Часть оркестрации bootstrap-runner."""
+"""Первоначальные SSH-доступы и временные полномочия PVE для 990.
+
+Проверяет принадлежность временного контейнера, подготавливает SSH-доступ
+к физическому узлу и выдаёт кратковременный токен PVE без разделения прав.
+Секрет передаётся в защищённый каталог 990, а не в постоянное состояние.
+Выданный токен необходимо отзывать при завершении и контролируемом отказе.
+Обычные права пользователей и повседневный SSH-доступ этот модуль не ведёт.
+"""
 
 from __future__ import annotations
 
 import json
 import os
+import re
 import tempfile
 from pathlib import Path
 
@@ -11,6 +19,28 @@ from .errors import BootstrapError
 
 
 class BootstrapAccessMixin:
+    """Операции начальных доступов для общего координатора."""
+    def _write_host_authorized_keys(self, lines: list[str]) -> None:
+        """Атомарно заменить root authorized_keys, сохранив остальные записи.
+
+        Сначала подготавливается закрытый файл рядом с действующим, затем
+        он переименовывается одной операцией. Символьные ссылки запрещены.
+        """
+        target = self.host_root_authorized_keys
+        if target.is_symlink() or target.parent.is_symlink():
+            self.fail(f"Небезопасный SSH-файл PVE: {target}")
+        fd, filename = tempfile.mkstemp(prefix=".authorized_keys.", dir=target.parent)
+        temporary = Path(filename)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as file:
+                file.write("\n".join(lines) + ("\n" if lines else ""))
+                file.flush()
+                os.fsync(file.fileno())
+            temporary.chmod(0o600)
+            os.replace(temporary, target)
+        finally:
+            temporary.unlink(missing_ok=True)
+
     def ensure_host_root_ssh_access(self) -> None:
         """Подготовить отдельный root SSH-ключ для управляющего контура."""
         self.host_bootstrap_dir.mkdir(parents=True, exist_ok=True)
@@ -40,6 +70,8 @@ class BootstrapAccessMixin:
             self.fail("не удалось подготовить открытый root SSH-ключ PVE")
 
         root_ssh_dir = self.host_root_authorized_keys.parent
+        if root_ssh_dir.is_symlink() or self.host_root_authorized_keys.is_symlink():
+            self.fail("Символьная ссылка в root SSH-доступе PVE запрещена")
         root_ssh_dir.mkdir(parents=True, exist_ok=True)
         root_ssh_dir.chmod(0o700)
 
@@ -51,11 +83,7 @@ class BootstrapAccessMixin:
         marker = f" {self.host_pve_root_key_comment}"
         lines = [line for line in existing if not line.rstrip().endswith(marker)]
         lines.append(public_key.read_text(encoding="utf-8").strip())
-        self.host_root_authorized_keys.write_text(
-            "\n".join(lines) + "\n",
-            encoding="utf-8",
-        )
-        self.host_root_authorized_keys.chmod(0o600)
+        self._write_host_authorized_keys(lines)
 
         if not self.host_ssh_public_key.is_file():
             self.fail(f"не найден SSH host key PVE: {self.host_ssh_public_key}")
@@ -91,12 +119,7 @@ class BootstrapAccessMixin:
             ).splitlines()
             if not line.rstrip().endswith(marker)
         ]
-        text = "\n".join(lines)
-        self.host_root_authorized_keys.write_text(
-            f"{text}\n" if text else "",
-            encoding="utf-8",
-        )
-        self.host_root_authorized_keys.chmod(0o600)
+        self._write_host_authorized_keys(lines)
 
     def stage_runner_pve_root_access(self) -> None:
         """Передать временному 990 тот же root SSH-доступ, что использует deploy-guest."""
@@ -144,6 +167,7 @@ class BootstrapAccessMixin:
         self.ok(f"Root SSH-доступ PVE доступен в {self.infra_ctid} только для чтения")
 
     def assert_owned_runner(self) -> None:
+        """Не допустить действий над чужим LXC: сверить имя, теги и единственную метку владельца."""
         # VMID недостаточно для доказательства владения: проверяем также
         # hostname, tags и description, чтобы не затронуть чужой LXC 990.
         if not self.ct_exists():
@@ -151,16 +175,33 @@ class BootstrapAccessMixin:
         config = self.pct_config(self.ctid)
         if f"hostname: {self.ct_hostname}\n" not in f"{config}\n":
             self.fail(f"LXC {self.ctid} не принадлежит bootstrap")
-        if "bootstrap-runner" not in next(
-            (line for line in config.splitlines() if line.startswith("tags:")), ""
-        ):
+        tags_line = next(
+            (line for line in config.splitlines() if line.startswith("tags: ")), ""
+        )
+        tags = set(tags_line.removeprefix("tags: ").split(";"))
+        if "bootstrap-runner" not in tags:
             self.fail(f"LXC {self.ctid} не принадлежит bootstrap")
-        if "managed-by=proxmox-bootstrap" not in next(
-            (line for line in config.splitlines() if line.startswith("description:")), ""
-        ):
+        description = next(
+            (line.removeprefix("description: ") for line in config.splitlines()
+             if line.startswith("description: ")), ""
+        )
+        # Разбор всех marker=value не позволяет принять чужой суффикс
+        # bootstrap или подменить владельца вторым значением managed-by.
+        markers = re.findall(r"(?<![A-Za-z0-9_-])([A-Za-z_-]+)=([A-Za-z0-9_-]+)", description)
+        owners = [value for key, value in markers if key == "managed-by"]
+        if owners != ["proxmox-bootstrap"]:
             self.fail(f"LXC {self.ctid} не принадлежит bootstrap")
+        # Не уничтожать 990 с вручную добавленными томами/устройствами.
+        for line in config.splitlines():
+            option = line.split(":", 1)[0]
+            if re.fullmatch(r"(?:mp|unused|dev)\d+", option) or option == "hookscript":
+                self.fail(
+                    f"LXC {self.ctid} содержит постороннее подключение {option}; "
+                    "автоматическое удаление запрещено"
+                )
 
     def verify_runner_contract(self) -> None:
+        """Проверить работающий 990, принадлежность проекту и обязательные файлы проекта."""
         self.assert_owned_runner()
         if self.pct_status(self.ctid) != "running":
             self.fail(f"LXC {self.ctid} должен быть запущен")
@@ -196,7 +237,12 @@ class BootstrapAccessMixin:
         return node, addresses[0].split()[0]
 
     def create_full_pve_token(self, token_name: str) -> tuple[str, str]:
-        """Создать token root@pam без разделения привилегий и вернуть secret."""
+        """Создать токен root@pam с полными полномочиями и вернуть его секрет.
+
+        Токен позволяет действия уровня администратора PVE. При ошибочном
+        ответе PVE токен удаляется; вызывающий код обязан удалить его после
+        использования и не выводить секрет в журнал.
+        """
         token_id = f"root@pam!{token_name}"
         created = self.run(
             "pveum",
@@ -226,7 +272,12 @@ class BootstrapAccessMixin:
         return token_id, secret
 
     def prepare_runner_pve_access(self) -> None:
-        """Создать полный временный API token и передать его в 990."""
+        """Перевыпустить полный временный токен и передать его внутрь 990.
+
+        Сначала отзывается предыдущий токен с тем же именем; новый секрет
+        передаётся через временный файл с режимом 0600. При сбое передачи токен
+        отзывается, после успешного завершения его удаляет общий этап очистки.
+        """
         token_name = "bootstrap-runner"
         self.remove_named_token("root@pam", token_name)
         token_id, secret = self.create_full_pve_token(token_name)

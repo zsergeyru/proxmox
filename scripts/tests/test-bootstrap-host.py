@@ -1,10 +1,19 @@
 #!/usr/bin/env python3
+"""Проверки закрытого первоначального загрузчика без рабочего сервера PVE.
+
+Проверяются состояния новой установки и восстановления, принадлежность
+объектов, передача временного доступа, защита от одновременных запусков
+и последовательность вызовов. Для разрушительных команд используются
+испытательные классы и временные каталоги; действующий PVE не изменяется.
+"""
 from __future__ import annotations
 
+import ast
 import contextlib
 import importlib.util
 import io
 import os
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -25,11 +34,13 @@ BootstrapHost = module.BootstrapHost
 
 
 def assert_equal(actual, expected, message: str) -> None:
+    """Сравнить фактическое и ожидаемое значение с пояснением для случая ошибки."""
     if actual != expected:
         raise AssertionError(f"{message}\nОжидалось: {expected!r}\nПолучено: {actual!r}")
 
 
 def test_infra_manager_role_can_move_to_another_vmid() -> None:
+    """Убедиться, что выбор роли не привязан к заранее выбранному VMID."""
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         guest_dir = root / "infrastructure/guests/920-infra-manager"
@@ -47,8 +58,57 @@ def test_infra_manager_role_can_move_to_another_vmid() -> None:
         assert_equal(name, "infra-manager", "Имя должно читаться из guest.yaml")
 
 
+def test_role_lookup_is_identical_in_runner_and_host() -> None:
+    """Один и тот же файл ищет роль в обоих режимах без копии алгоритма."""
+    with tempfile.TemporaryDirectory() as tmp:
+        project = Path(tmp)
+        manifest = project / "infrastructure/guests/920-infra-manager/guest.yaml"
+        manifest.parent.mkdir(parents=True)
+        manifest.write_text(
+            "schema_version: 12\nvmid: 920\nname: infra-manager\n"
+            "role: infra-manager\n",
+            encoding="utf-8",
+        )
+        expected = module._find_role_guest(project, "infra-manager")
+        helper = ROOT / "scripts/bootstrap-runner/bootstrap_runner/role.py"
+        completed = subprocess.run(
+            [sys.executable, str(helper), str(project), "infra-manager"],
+            text=True, capture_output=True, check=True,
+        )
+        import json
+
+        result = json.loads(completed.stdout)
+        assert_equal(
+            (result["vmid"], result["name"]), expected,
+            "Поиск в LXC должен использовать ту же реализацию, что и PVE",
+        )
+
+        manifest.write_text(
+            "schema_version: 12\nvmid: 920\nname: wrong\n"
+            "role: infra-manager\n",
+            encoding="utf-8",
+        )
+        assert_equal(
+            subprocess.run(
+                [sys.executable, str(helper), str(project), "infra-manager"],
+                text=True, capture_output=True, check=False,
+            ).returncode,
+            1,
+            "Самостоятельный сценарий должен отвергать неправильное описание",
+        )
+        try:
+            module._find_role_guest(project, "infra-manager")
+        except BootstrapError:
+            pass
+        else:
+            raise AssertionError("PVE должен отвергать то же неправильное описание")
+
+
 class RunnerRoleHarness(BootstrapHost):
+    """Подставляет чтение описания роли в временном контейнере."""
     def __init__(self) -> None:
+        """Подготовить изолированный испытательный контур вместо реального PVE."""
+        self.access_events: list[str] = []
         original = os.environ.get("PROJECT_DIR")
         os.environ["PROJECT_DIR"] = "/var/lib/bootstrap-runner/project"
         try:
@@ -59,7 +119,13 @@ class RunnerRoleHarness(BootstrapHost):
             else:
                 os.environ["PROJECT_DIR"] = original
 
+    def assert_owned_runner(self) -> None:
+        """Подтвердить владение 990 до чтения кода из него."""
+        self.access_events.append("checked_owner")
+
     def ct_exec(self, *args: str, **kwargs):
+        """Подменить запуск команды внутри 990 и вернуть результат испытания."""
+        self.access_events.append("read_role")
         assert_equal(args[0], "python3", "Роль должна читаться внутри 990 через Python")
         assert_equal(args[-2], "/var/lib/bootstrap-runner/project", "Неверный путь проекта 990")
         assert_equal(args[-1], "infra-manager", "Неверная искомая роль")
@@ -71,26 +137,34 @@ class RunnerRoleHarness(BootstrapHost):
 
 
 def test_role_is_read_from_project_inside_runner() -> None:
+    """Проверить поиск роли в закрытой копии проекта временного контейнера."""
     host = RunnerRoleHarness()
     assert_equal(host.infra_ctid, 920, "VMID должен определяться из проекта внутри 990")
     assert_equal(host.infra_hostname, "infra-manager", "Имя должно определяться из проекта внутри 990")
+    assert_equal(host.access_events, ["checked_owner", "read_role"],
+                 "Нельзя выполнять код в 990 до проверки его принадлежности")
 
 
 class OwnershipHarness(BootstrapHost):
+    """Изолирует проверку владения управляющим гостем."""
     def __init__(self, config: str) -> None:
+        """Подготовить изолированный испытательный контур вместо реального PVE."""
         super().__init__("apply")
         self._config = config
 
     def infra_exists(self) -> bool:
+        """Подменить проверку существования управляющего объекта."""
         return True
 
     def pct_config(self, ctid: int) -> str:
+        """Вернуть испытательное описание объекта PVE."""
         if ctid != self.infra_ctid:
             raise AssertionError(f"Неожиданный VMID: {ctid}")
         return self._config
 
 
 def test_strict_ownership_marker() -> None:
+    """Отвергать управляющие объекты с чужими метками или режимом."""
     good = """hostname: infra-manager
 unprivileged: 1
 description: Постоянный LXC [owner=proxmox-project;role=infra-manager]
@@ -103,6 +177,9 @@ description: Постоянный LXC [owner=proxmox-project;role=infra-manager]
         good.replace("unprivileged: 1", "unprivileged: 0"),
         good.replace("owner=proxmox-project;", ""),
         good.replace("role=infra-manager", "role=other"),
+        good.replace("owner=proxmox-project", "owner=proxmox-project-fake"),
+        good.replace("role=infra-manager", "role=infra-manager-fake"),
+        good.replace("role=infra-manager", "role=infra-manager;role=other"),
     )
     for config in variants:
         if OwnershipHarness(config).infra_config_is_expected():
@@ -111,19 +188,59 @@ description: Постоянный LXC [owner=proxmox-project;role=infra-manager]
             )
 
 
+class RunnerOwnershipHarness(BootstrapHost):
+    """Проверяет метки владения временным контейнером."""
+    def __init__(self, config: str) -> None:
+        """Подготовить изолированный испытательный контур вместо реального PVE."""
+        super().__init__("apply")
+        self._config = config
+
+    def ct_exists(self) -> bool:
+        """Подменить проверку наличия временного контейнера."""
+        return True
+
+    def pct_config(self, ctid: int) -> str:
+        """Вернуть испытательное описание объекта PVE."""
+        assert ctid == self.ctid
+        return self._config
+
+
+def test_runner_ownership_requires_exact_markers() -> None:
+    """Не принимать чужой временный LXC из-за частичного совпадения меток."""
+    valid = ("hostname: bootstrap-runner\n"
+             "tags: bootstrap-runner;project\n"
+             "description: created [managed-by=proxmox-bootstrap]\n")
+    RunnerOwnershipHarness(valid).assert_owned_runner()
+    invalid = (
+        valid.replace("bootstrap-runner;project", "bootstrap-runner-foreign;project"),
+        valid.replace("managed-by=proxmox-bootstrap]", "managed-by=proxmox-bootstrap-fake]"),
+        valid.replace("managed-by=proxmox-bootstrap]", "managed-by=proxmox-bootstrap;managed-by=other]"),
+    )
+    for config in invalid:
+        try:
+            RunnerOwnershipHarness(config).assert_owned_runner()
+        except BootstrapError:
+            pass
+        else:
+            raise AssertionError("Чужой временный контейнер не должен приниматься за 990")
+
+
 class PveHelperHarness(BootstrapHost):
+    """Имитирует команды PVE API и их ответы."""
     def __init__(
         self,
         *,
         token_payload: str = '{"value":"test-secret"}',
         addresses: str = "192.168.1.152 STREAM pve\n",
     ) -> None:
+        """Подготовить изолированный испытательный контур вместо реального PVE."""
         super().__init__("apply")
         self.token_payload = token_payload
         self.addresses = addresses
         self.events: list[tuple[str, ...] | str] = []
 
     def run(self, *args: str, **kwargs):
+        """Записать команду или вернуть подставленный результат без доступа к PVE."""
         del kwargs
         command = tuple(args)
         self.events.append(command)
@@ -151,10 +268,12 @@ class PveHelperHarness(BootstrapHost):
         raise AssertionError(f"Неожиданная команда: {command!r}")
 
     def remove_named_token(self, user: str, token_name: str) -> None:
+        """Записать отзыв токена вместо изменения PVE."""
         self.events.append(f"remove:{user}!{token_name}")
 
 
 def test_full_pve_token_contract() -> None:
+    """Проверить имя, полные права и передачу секрета токена PVE."""
     host = PveHelperHarness()
     token_id, secret = host.create_full_pve_token("infra-manager")
 
@@ -182,6 +301,7 @@ def test_full_pve_token_contract() -> None:
 
 
 def test_full_pve_token_missing_secret_is_removed() -> None:
+    """Удалить созданный токен, если PVE не вернул его секрет."""
     host = PveHelperHarness(token_payload="{}")
     try:
         host.create_full_pve_token("infra-manager")
@@ -195,6 +315,7 @@ def test_full_pve_token_missing_secret_is_removed() -> None:
 
 
 def test_full_pve_token_invalid_json_is_removed() -> None:
+    """Отозвать токен при повреждённом ответе JSON от PVE."""
     host = PveHelperHarness(token_payload="{invalid")
     try:
         host.create_full_pve_token("bootstrap-runner")
@@ -208,6 +329,7 @@ def test_full_pve_token_invalid_json_is_removed() -> None:
 
 
 def test_pve_node_address() -> None:
+    """Определить имя и адрес PVE без привязки к известному IP."""
     host = PveHelperHarness()
     assert_equal(
         host.pve_node_address(),
@@ -225,6 +347,7 @@ def test_pve_node_address() -> None:
 
 
 def test_bootstrap_timing_success_and_failure() -> None:
+    """Проверить время этапа при успехе и ожидаемой ошибке."""
     host = BootstrapHost("apply")
     output = io.StringIO()
     with (
@@ -255,6 +378,7 @@ def test_bootstrap_timing_success_and_failure() -> None:
         raise AssertionError("Этап без собственного [ОК] должен получить итоговый статус")
 
     def fail_operation():
+        """Смоделировать отказ внутреннего шага для проверки сообщения об ошибке."""
         raise BootstrapError("ожидаемая ошибка")
 
     with patch.object(module.time, "monotonic", side_effect=[100.0, 107.5]):
@@ -271,6 +395,7 @@ def test_bootstrap_timing_success_and_failure() -> None:
 
 
 def test_section_totals_include_interrupted_section() -> None:
+    """Завершать прерванный раздел с правильным статусом."""
     host = BootstrapHost("apply")
     output = io.StringIO()
     with (
@@ -296,16 +421,20 @@ def test_section_totals_include_interrupted_section() -> None:
 
 
 class ProgressHarness(BootstrapHost):
+    """Запоминает сообщения потока задач Ansible."""
     def __init__(self, log_file: Path) -> None:
+        """Подготовить изолированный испытательный контур вместо реального PVE."""
         super().__init__("apply")
         self.log_file = log_file
         self.events: list[str] = []
 
     def info(self, message: str) -> None:
+        """Сохранить диагностическое событие для проверки порядка действий."""
         self.events.append(message)
 
 
 def test_progress_streaming() -> None:
+    """Сохранить полный журнал и краткие сообщения долгих задач."""
     with tempfile.TemporaryDirectory() as tmp:
         log_file = Path(tmp) / "bootstrap.log"
         host = ProgressHarness(log_file)
@@ -337,23 +466,29 @@ def test_progress_streaming() -> None:
 
 
 class BootstrapStepHarness(BootstrapHost):
+    """Имитирует внутренние шаги первоначального развёртывания."""
     def __init__(self) -> None:
+        """Подготовить изолированный испытательный контур вместо реального PVE."""
         super().__init__("apply")
         self.calls: list[dict[str, object]] = []
 
     def log(self, message: str) -> None:
+        """Сохранить начало испытательного этапа."""
         del message
 
     def ok(self, message: str) -> None:
+        """Сохранить сообщение об успешном испытательном действии."""
         del message
 
     def ct_exec(self, *args: str, **kwargs):
+        """Подменить запуск команды внутри 990 и вернуть результат испытания."""
         del args
         self.calls.append(kwargs)
         return SimpleNamespace(returncode=0)
 
 
 def test_bootstrap_steps_enable_progress() -> None:
+    """Передавать правильный режим отображения внутренним этапам."""
     host = BootstrapStepHarness()
 
     host.create_infra_manager()
@@ -370,22 +505,28 @@ def test_bootstrap_steps_enable_progress() -> None:
 
 
 class InfraReadyHarness(BootstrapHost):
+    """Подставляет результат проверки готовности гостя."""
     def __init__(self) -> None:
+        """Подготовить изолированный испытательный контур вместо реального PVE."""
         super().__init__("apply")
         self.calls: list[tuple[tuple[str, ...], dict[str, object]]] = []
 
     def verify_infra_object(self) -> None:
+        """Не обращаться к PVE при проверке поведения вызывающего метода."""
         return
 
     def infra_test(self, flag: str, path: str) -> bool:
+        """Вернуть испытательное состояние файла внутри гостя."""
         return flag == "-x" and path == "/usr/local/sbin/infra-manager-status"
 
     def infra_exec(self, *args: str, **kwargs):
+        """Проверить переданные аргументы без вызова команд в госте."""
         self.calls.append((tuple(args), dict(kwargs)))
         return SimpleNamespace(returncode=0)
 
 
 def test_infra_ready_uses_status_as_final_screen() -> None:
+    """Использовать полную проверку состояния как критерий готовности."""
     host = InfraReadyHarness()
 
     host.verify_infra_ready(quiet=True)
@@ -406,33 +547,40 @@ def test_infra_ready_uses_status_as_final_screen() -> None:
 
 
 class PersistentAttachHarness(BootstrapHost):
+    """Имитирует PVE при подключении постоянных каталогов."""
     def __init__(self, *, fail_mount: bool = False) -> None:
+        """Подготовить изолированный испытательный контур вместо реального PVE."""
         super().__init__("apply")
         self.fail_mount = fail_mount
         self.running = True
         self.events: list[str] = []
 
     def infra_exists(self) -> bool:
+        """Подменить проверку существования управляющего объекта."""
         self.events.append("infra_exists")
         return True
 
     def infra_config_is_expected(self) -> bool:
+        """Вернуть ожидаемый результат проверки принадлежности."""
         self.events.append("infra_expected")
         return True
 
     def pct_config(self, ctid: int) -> str:
+        """Вернуть испытательное описание объекта PVE."""
         if ctid != self.infra_ctid:
             raise AssertionError(f"Неожиданный VMID: {ctid}")
         self.events.append("pct_config")
         return "protection: 1\n"
 
     def pct_status(self, ctid: int) -> str:
+        """Вернуть испытательное состояние контейнера."""
         if ctid != self.infra_ctid:
             raise AssertionError(f"Неожиданный VMID: {ctid}")
         self.events.append("status")
         return "running" if self.running else "stopped"
 
     def pct(self, *args: str, **kwargs):
+        """Записать или запретить административную команду в испытании."""
         check = kwargs.get("check", True)
         command = " ".join(args)
         self.events.append(
@@ -447,14 +595,17 @@ class PersistentAttachHarness(BootstrapHost):
         return SimpleNamespace(returncode=0)
 
     def verify_persistent_layout(self) -> None:
+        """Подменить проверку постоянных подключений."""
         self.events.append("verify_layout")
 
     def ok(self, message: str) -> None:
+        """Сохранить сообщение об успешном испытательном действии."""
         del message
         self.events.append("ok")
 
 
 def test_attach_persistent_layout_temporarily_disables_protection() -> None:
+    """Снимать защиту PVE только на время подключения постоянных каталогов."""
     host = PersistentAttachHarness()
     host.attach_persistent_layout()
 
@@ -477,6 +628,7 @@ def test_attach_persistent_layout_temporarily_disables_protection() -> None:
 
 
 def test_attach_persistent_layout_restores_protection_on_failure() -> None:
+    """Восстанавливать защиту после неудачного подключения."""
     host = PersistentAttachHarness(fail_mount=True)
     try:
         host.attach_persistent_layout()
@@ -494,29 +646,40 @@ def test_attach_persistent_layout_restores_protection_on_failure() -> None:
 
 
 class RecoveryRootfsHarness(BootstrapHost):
+    """Проверяет условия удаления воспроизводимого rootfs."""
     def __init__(self, *, owned: bool = True) -> None:
+        """Подготовить изолированный испытательный контур вместо реального PVE."""
         super().__init__("recover")
         self.owned = owned
         self.exists = True
         self.events: list[str] = []
 
     def infra_exists(self) -> bool:
+        """Подменить проверку существования управляющего объекта."""
         return self.exists
 
     def infra_config_is_expected(self) -> bool:
+        """Вернуть ожидаемый результат проверки принадлежности."""
         return self.owned
 
     def pct_status(self, ctid: int) -> str:
+        """Вернуть испытательное состояние контейнера."""
         if ctid != self.infra_ctid:
             raise AssertionError(f"Неожиданный VMID: {ctid}")
         return "running"
 
+    def pct_config(self, ctid: int) -> str:
+        """Вернуть объект с включённой защитой PVE."""
+        return "protection: 1\n"
+
     def pct(self, *args: str, **kwargs):
+        """Записать или запретить административную команду в испытании."""
         del kwargs
         self.events.append("pct:" + " ".join(args))
         return SimpleNamespace(returncode=0)
 
     def run(self, *args: str, **kwargs):
+        """Записать команду или вернуть подставленный результат без доступа к PVE."""
         del kwargs
         self.events.append("run:" + " ".join(args))
         if args[:2] == ("pct", "destroy"):
@@ -524,10 +687,12 @@ class RecoveryRootfsHarness(BootstrapHost):
         return SimpleNamespace(returncode=0)
 
     def ok(self, message: str) -> None:
+        """Сохранить сообщение об успешном испытательном действии."""
         del message
 
 
 def test_recovery_rootfs_removal_is_strict() -> None:
+    """Удалять при восстановлении только строго принадлежащий проекту объект."""
     host = RecoveryRootfsHarness()
     host.remove_infra_rootfs_for_recovery()
     if not any("--protection 0" in event for event in host.events):
@@ -549,23 +714,29 @@ def test_recovery_rootfs_removal_is_strict() -> None:
 
 
 class ControlPlaneHarness(BootstrapHost):
+    """Записывает выбранный этап настройки начальных служб."""
     def __init__(self, mode: str) -> None:
+        """Подготовить изолированный испытательный контур вместо реального PVE."""
         super().__init__(mode)
         self.steps: list[str] = []
 
     def log(self, message: str) -> None:
+        """Сохранить начало испытательного этапа."""
         del message
 
     def ok(self, message: str) -> None:
+        """Сохранить сообщение об успешном испытательном действии."""
         del message
 
     def _run_infra_bootstrap_step(self, step: str, *, progress: bool) -> None:
+        """Записать внутренний этап вместо настоящего развёртывания."""
         if not progress:
             raise AssertionError("Управляющий этап должен показывать прогресс")
         self.steps.append(step)
 
 
 def test_control_plane_step_depends_on_bootstrap_mode() -> None:
+    """Использовать отдельный начальный этап при восстановлении."""
     fresh = ControlPlaneHarness("apply")
     fresh.configure_infra_manager_control_plane()
     assert_equal(
@@ -584,84 +755,126 @@ def test_control_plane_step_depends_on_bootstrap_mode() -> None:
 
 
 class ApplyHarness(BootstrapHost):
+    """Имитирует все этапы первоначального создания или восстановления."""
     def __init__(
         self,
         mode: str,
         *,
         infra_exists: bool,
     ) -> None:
+        """Подготовить изолированный испытательный контур вместо реального PVE."""
         super().__init__(mode)
         self._infra_exists = infra_exists
         self.events: list[str] = []
         # Тесты не должны зависеть от каталогов реального PVE.
         self._test_data = tempfile.TemporaryDirectory()
         self.host_persistent_root = Path(self._test_data.name) / "infra-manager"
+        self._test_marker_state: str | None = None
+
+    def installation_state(self, *, guest_exists: bool) -> str:
+        """Вернуть испытательный класс состояния установки."""
+        if self._test_marker_state == "installing":
+            return "unfinished"
+        return super().installation_state(guest_exists=guest_exists)
+
+    def _read_installation_marker(self) -> str | None:
+        """Использовать то же испытательное состояние в обоих переходах."""
+        return self._test_marker_state
+
+    def write_installation_marker(self, state: str) -> None:
+        """Сохранить состояние маркера в памяти испытания."""
+        self._test_marker_state = state
+
+    def verify_unfinished_installation(self, *, guest_exists: bool) -> None:
+        """Записать предварительную проверку прерванной установки."""
+        self.events.append("verify_unfinished")
 
     def verify_recovery_state(self) -> None:
+        """Подменить проверку постоянных данных."""
         self.events.append("verify_recovery_state")
 
     def infra_exists(self) -> bool:
+        """Подменить проверку существования управляющего объекта."""
         self.events.append("infra_exists")
         return self._infra_exists
 
     def prepare_new_persistent_layout(self) -> None:
+        """Зарегистрировать подготовку каталогов без изменения PVE."""
         self.events.append("prepare_new_layout")
 
     def verify_persistent_layout(self) -> None:
+        """Подменить проверку постоянных подключений."""
         self.events.append("verify_layout")
 
     def attach_persistent_layout(self) -> None:
+        """Зарегистрировать подключение каталогов без изменения PVE."""
         self.events.append("attach_layout")
 
     def prepare_runner(self) -> None:
+        """Зарегистрировать подготовку временного контейнера."""
         self.events.append("prepare_runner")
 
     def remove_infra_rootfs_for_recovery(self) -> None:
+        """Смоделировать удаление воспроизводимого объекта."""
         self.events.append("remove_rootfs")
         self._infra_exists = False
 
     def create_infra_manager(self) -> None:
+        """Смоделировать создание управляющего контейнера."""
         self.events.append("create_infra")
         self._infra_exists = True
 
     def configure_infra_manager_base(self) -> None:
+        """Зарегистрировать базовую настройку ОС."""
         self.events.append("configure_base")
 
     def configure_infra_manager_control_plane(self) -> None:
+        """Зарегистрировать настройку начальных служб."""
         self.events.append("configure_control_plane")
 
     def configure_infra_manager_ssh_trust(self) -> None:
+        """Зарегистрировать переход к сертификатному SSH."""
         self.events.append("configure_ssh_trust")
 
     def sync_infra_ssh_ca_to_runner(self) -> None:
+        """Зарегистрировать передачу открытых сертификатов."""
         self.events.append("sync_ssh_ca")
 
     def remove_bootstrap_ssh_access_from_infra(self) -> None:
+        """Зарегистрировать удаление временного SSH-разрешения."""
         self.events.append("remove_bootstrap_auth")
 
     def configure_infra_manager(self) -> None:
+        """Зарегистрировать полную настройку гостя."""
         self.events.append("configure_full")
 
-    def handoff_infra(self, access_mode: str = "apply") -> None:
-        self.events.append(f"handoff:{access_mode}")
+    def handoff_infra(self) -> None:
+        """Смоделировать передачу первоначальных учётных данных."""
+        self.events.append("handoff")
 
     def initialize_infra_openbao(self) -> None:
+        """Зарегистрировать подготовку OpenBao без реального запуска."""
         self.events.append("initialize_openbao")
 
     def verify_infra_ready(self, *, quiet: bool = False) -> None:
+        """Записать запрос проверки работоспособности."""
         self.events.append("verify_ready:quiet" if quiet else "verify_ready")
 
     def finalize_runner(self) -> None:
+        """Зарегистрировать успешное удаление временного 990."""
         self.events.append("finalize_runner")
 
     def check_ready(self) -> None:
+        """Зафиксировать итоговую проверку отсутствия временного контура."""
         self.events.append("check_ready")
 
     def info(self, message: str) -> None:
+        """Сохранить диагностическое событие для проверки порядка действий."""
         self.events.append("info")
 
 
 def test_new_install_flow() -> None:
+    """Проверить полную последовательность создания на чистом PVE."""
     host = ApplyHarness("apply", infra_exists=False)
     host.apply()
     assert_equal(
@@ -673,7 +886,7 @@ def test_new_install_flow() -> None:
             "create_infra",
             "attach_layout",
             "configure_base",
-            "handoff:apply",
+            "handoff",
             "configure_control_plane",
             "initialize_openbao",
             "sync_ssh_ca",
@@ -689,6 +902,7 @@ def test_new_install_flow() -> None:
 
 
 def test_auto_recovery_for_absent_infra_and_existing_data() -> None:
+    """Не начинать чистую установку поверх прежних данных."""
     host = ApplyHarness("apply", infra_exists=False)
     host.host_persistent_root.mkdir()
     host.apply()
@@ -698,19 +912,60 @@ def test_auto_recovery_for_absent_infra_and_existing_data() -> None:
         ["infra_exists", "info", "verify_recovery_state", "info"],
         "Проверка сохранённых данных должна предшествовать изменяющим операциям",
     )
-    if "prepare_new_layout" in host.events or "handoff:apply" in host.events:
+    if "prepare_new_layout" in host.events:
         raise AssertionError("Старые данные нельзя обрабатывать как новую установку")
-    if "handoff:recover" not in host.events:
+    if "handoff" not in host.events:
         raise AssertionError("Сохранённые данные требуют режима recovery")
 
 
+def test_restart_unfinished_installation() -> None:
+    """Продолжить прерванную новую установку до появления состояния."""
+    host = ApplyHarness("apply", infra_exists=True)
+    host._test_marker_state = "installing"
+    host.apply()
+    assert_equal(host.mode, "apply", "Прерванная новая установка не должна становиться recovery")
+    if host.events[:6] != [
+        "infra_exists", "verify_unfinished", "info", "prepare_new_layout",
+        "prepare_runner", "remove_rootfs"
+    ]:
+        raise AssertionError(f"Перед пересозданием необходимо проверить состояние: {host.events}")
+    if host._test_marker_state != "ready":
+        raise AssertionError("Успешная установка должна завершиться маркером ready")
+
+
+def test_restart_rejects_persistent_data() -> None:
+    """Запретить пересоздание поверх заполненного постоянного состояния."""
+    with tempfile.TemporaryDirectory() as temp:
+        host = BootstrapHost("apply")
+        root = Path(temp) / "infra-manager"
+        host.host_persistent_root = root
+        host.host_pve_only_dir = root / "pve-only"
+        host.host_state_dir = root / "state"
+        host.host_openbao_unseal_key = root / "pve-only/openbao/unseal.key"
+        host.host_pve_only_dir.mkdir(parents=True)
+        host.host_state_dir.mkdir(parents=True)
+        host.write_installation_marker("installing")
+        host.verify_unfinished_installation(guest_exists=False)
+        (host.host_state_dir / "semaphore.sqlite").write_bytes(b"data")
+        try:
+            host.verify_unfinished_installation(guest_exists=False)
+        except BootstrapError as exc:
+            if "постоянные данные" not in str(exc):
+                raise
+        else:
+            raise AssertionError("Запрещено пересоздавать контейнер с постоянными данными")
+
+
 class IncompleteAutoRecoveryHarness(ApplyHarness):
+    """Имитирует отказ при неполных постоянных данных."""
     def verify_recovery_state(self) -> None:
+        """Подменить проверку постоянных данных."""
         self.events.append("verify_recovery_state")
         raise BootstrapError("Recovery запрещён: состояние неполное")
 
 
 def test_auto_recovery_stops_on_incomplete_data() -> None:
+    """Остановить восстановление, если обязательные данные неполны."""
     host = IncompleteAutoRecoveryHarness("apply", infra_exists=False)
     (host.host_persistent_root / "pve-only").mkdir(parents=True)
     try:
@@ -728,6 +983,7 @@ def test_auto_recovery_stops_on_incomplete_data() -> None:
 
 
 def test_existing_infra_with_data_is_not_automatically_recreated() -> None:
+    """Не пересоздавать существующий объект при обычном запуске."""
     host = ApplyHarness("apply", infra_exists=True)
     host.host_persistent_root.mkdir()
     try:
@@ -745,6 +1001,7 @@ def test_existing_infra_with_data_is_not_automatically_recreated() -> None:
 
 
 def test_existing_infra_requires_normal_operations() -> None:
+    """Направлять обслуживание работающего гостя в обычные операции."""
     host = ApplyHarness("apply", infra_exists=True)
     try:
         host.apply()
@@ -765,6 +1022,7 @@ def test_existing_infra_requires_normal_operations() -> None:
 
 
 def test_recovery_recreates_existing_infra() -> None:
+    """Проверить строгий порядок пересоздания существующего гостя."""
     host = ApplyHarness("recover", infra_exists=True)
     host.apply()
     assert_equal(
@@ -778,7 +1036,7 @@ def test_recovery_recreates_existing_infra() -> None:
             "create_infra",
             "attach_layout",
             "configure_base",
-            "handoff:recover",
+            "handoff",
             "configure_control_plane",
             "initialize_openbao",
             "sync_ssh_ca",
@@ -794,12 +1052,15 @@ def test_recovery_recreates_existing_infra() -> None:
 
 
 class FailingRunnerHarness(ApplyHarness):
+    """Имитирует отказ до удаления существующего гостя."""
     def prepare_runner(self) -> None:
+        """Зарегистрировать подготовку временного контейнера."""
         self.events.append("prepare_runner")
         raise BootstrapError("Не удалось подготовить временный 990")
 
 
 def test_recovery_runner_failure_keeps_existing_910() -> None:
+    """Сохранить старый управляющий объект при ошибке подготовки 990."""
     host = FailingRunnerHarness("recover", infra_exists=True)
     try:
         host.apply()
@@ -819,6 +1080,7 @@ def test_recovery_runner_failure_keeps_existing_910() -> None:
 
 
 def test_recovery_recreates_missing_infra() -> None:
+    """Создать отсутствующий объект поверх проверенного сохранённого состояния."""
     host = ApplyHarness("recover", infra_exists=False)
     host.apply()
     assert_equal(
@@ -831,7 +1093,7 @@ def test_recovery_recreates_missing_infra() -> None:
             "create_infra",
             "attach_layout",
             "configure_base",
-            "handoff:recover",
+            "handoff",
             "configure_control_plane",
             "initialize_openbao",
             "sync_ssh_ca",
@@ -847,7 +1109,9 @@ def test_recovery_recreates_missing_infra() -> None:
 
 
 class RecoveryStateHarness(BootstrapHost):
+    """Создаёт временную файловую схему восстановления."""
     def __init__(self, root: Path) -> None:
+        """Подготовить изолированный испытательный контур вместо реального PVE."""
         super().__init__("recover")
         self.host_persistent_root = root
         self.host_pve_only_dir = root / "pve-only"
@@ -872,13 +1136,16 @@ class RecoveryStateHarness(BootstrapHost):
         self.messages: list[str] = []
 
     def ok(self, message: str) -> None:
+        """Сохранить сообщение об успешном испытательном действии."""
         self.messages.append(message)
 
     def managed_guests_exist(self) -> bool:
+        """Вернуть испытательный признак существования управляемых гостей."""
         return False
 
 
 def _prepare_complete_recovery_state(host: RecoveryStateHarness) -> None:
+    """Создать имитацию полного постоянного состояния восстановления."""
     for directory in (
         host.host_openbao_dir,
         host.host_recovery_dir,
@@ -900,6 +1167,7 @@ def _prepare_complete_recovery_state(host: RecoveryStateHarness) -> None:
 
 
 def test_recovery_preflight_accepts_complete_state() -> None:
+    """Разрешить восстановление при полном наборе постоянных данных."""
     with tempfile.TemporaryDirectory() as tmp:
         host = RecoveryStateHarness(Path(tmp))
         _prepare_complete_recovery_state(host)
@@ -909,6 +1177,7 @@ def test_recovery_preflight_accepts_complete_state() -> None:
 
 
 def test_recovery_preflight_allows_missing_approle_files() -> None:
+    """Не требовать непостоянные файлы AppRole при восстановлении."""
     with tempfile.TemporaryDirectory() as tmp:
         host = RecoveryStateHarness(Path(tmp))
         _prepare_complete_recovery_state(host)
@@ -919,6 +1188,7 @@ def test_recovery_preflight_allows_missing_approle_files() -> None:
 
 
 def test_recovery_preflight_allows_missing_access_directory() -> None:
+    """Проверить допустимость отсутствующих восстанавливаемых доступов."""
     with tempfile.TemporaryDirectory() as tmp:
         host = RecoveryStateHarness(Path(tmp))
         _prepare_complete_recovery_state(host)
@@ -931,6 +1201,7 @@ def test_recovery_preflight_allows_missing_access_directory() -> None:
 
 
 def test_recovery_preflight_rejects_partial_state() -> None:
+    """Остановиться при неполных обязательных данных восстановления."""
     with tempfile.TemporaryDirectory() as tmp:
         host = RecoveryStateHarness(Path(tmp))
         _prepare_complete_recovery_state(host)
@@ -945,11 +1216,14 @@ def test_recovery_preflight_rejects_partial_state() -> None:
 
 
 class ManagedRecoveryStateHarness(RecoveryStateHarness):
+    """Имитирует наличие управляемых объектов в PVE."""
     def managed_guests_exist(self) -> bool:
+        """Вернуть испытательный признак существования управляемых гостей."""
         return True
 
 
 def test_recovery_preflight_requires_opentofu_state_for_managed_pool() -> None:
+    """Требовать состояние OpenTofu, если существуют управляемые гости."""
     with tempfile.TemporaryDirectory() as tmp:
         host = ManagedRecoveryStateHarness(Path(tmp))
         _prepare_complete_recovery_state(host)
@@ -966,7 +1240,9 @@ def test_recovery_preflight_requires_opentofu_state_for_managed_pool() -> None:
 
 
 class MigrationGuardHarness(ApplyHarness):
+    """Отвергает несовместимую старую схему каталогов."""
     def verify_persistent_layout(self) -> None:
+        """Подменить проверку постоянных подключений."""
         self.events.append("verify_layout")
         raise BootstrapError(
             "автоматическая миграция существующих данных запрещена"
@@ -974,6 +1250,7 @@ class MigrationGuardHarness(ApplyHarness):
 
 
 def test_existing_layout_requires_manual_migration() -> None:
+    """Отвергать старую схему подключений без автоматического переноса."""
     host = MigrationGuardHarness(
         "apply",
         infra_exists=True,
@@ -996,30 +1273,51 @@ def test_existing_layout_requires_manual_migration() -> None:
 
 
 class ExecuteHarness(BootstrapHost):
+    """Подменяет внешние команды точки входа."""
     def __init__(self, mode: str) -> None:
+        """Подготовить изолированный испытательный контур вместо реального PVE."""
         super().__init__(mode)
         self.events: list[str] = []
 
     def require_host(self) -> None:
+        """Подменить проверку root и средств PVE."""
         self.events.append("require_host")
 
     def verify_runner_contract(self) -> None:
+        """Подменить проверку временного 990."""
         self.events.append("verify_runner")
 
+    def execution_lock(self):
+        """Подменить блокировку в испытании последовательности шагов."""
+        return contextlib.nullcontext()
+
     def info(self, message: str) -> None:
+        """Сохранить диагностическое событие для проверки порядка действий."""
         self.events.append("info")
 
+    def ct_exists(self) -> bool:
+        """Не обращаться к реальному PVE при проверке очистки."""
+        return False
+
+    def remove_downloaded_template(self) -> None:
+        """Не обращаться к реальному хранилищу при испытании."""
+        pass
+
     def verify_infra_ready(self, *, quiet: bool = False) -> None:
+        """Записать запрос проверки работоспособности."""
         self.events.append("verify_ready:quiet" if quiet else "verify_ready")
 
     def finalize_runner(self) -> None:
+        """Зарегистрировать успешное удаление временного 990."""
         self.events.append("finalize_runner")
 
     def check_ready(self) -> None:
+        """Зафиксировать итоговую проверку отсутствия временного контура."""
         self.events.append("check_ready")
 
 
 def test_check_mode_finishes_temporary_runner() -> None:
+    """Проверка готовности должна завершить и удалить временный контур."""
     host = ExecuteHarness("check")
     host.execute()
     assert_equal(
@@ -1037,25 +1335,36 @@ def test_check_mode_finishes_temporary_runner() -> None:
 
 
 class ForeignRemoveHarness(BootstrapHost):
+    """Защищает чужой гостевой объект от удаления."""
     def __init__(self) -> None:
+        """Подготовить изолированный испытательный контур вместо реального PVE."""
         super().__init__("remove")
         self.events: list[str] = []
 
+    def remove_private_access(self) -> None:
+        """Зарегистрировать отзыв временного токена."""
+        self.events.append("revoke_token")
+
     def remove_runner_if_present(self) -> None:
+        """Зарегистрировать очистку временного контейнера."""
         self.events.append("remove_runner")
 
     def infra_exists(self) -> bool:
+        """Подменить проверку существования управляющего объекта."""
         return True
 
     def infra_config_is_expected(self) -> bool:
+        """Вернуть ожидаемый результат проверки принадлежности."""
         return False
 
     def pct(self, *args: str, **kwargs):
+        """Записать или запретить административную команду в испытании."""
         self.events.append("pct:" + " ".join(args))
         raise AssertionError("Разрушительная команда pct не должна выполняться для чужого 910")
 
 
 def test_remove_rejects_foreign_910() -> None:
+    """Не выполнять разрушительные команды для чужого объекта."""
     host = ForeignRemoveHarness()
     try:
         host.remove_infra()
@@ -1066,16 +1375,987 @@ def test_remove_rejects_foreign_910() -> None:
 
     assert_equal(
         host.events,
-        ["remove_runner"],
-        "После обнаружения чужого 910 не должно быть разрушительных действий над ним",
+        ["revoke_token", "remove_runner"],
+        "При чужом 910 допустима только очистка временного 990; управляющий гость не меняется",
+    )
+
+
+def test_bootstrap_command_run_modes() -> None:
+    """Перенос команд не меняет обычный и тихий режимы вывода."""
+    with tempfile.TemporaryDirectory() as temp:
+        host = BootstrapHost("check")
+        host.log_file = Path(temp) / "bootstrap.log"
+        result = host.run(
+            sys.executable, "-c", "print('captured')",
+            capture=True,
+        )
+        assert_equal(result.returncode, 0, "Обычная команда должна завершиться успешно")
+        assert_equal(result.stdout.strip(), "captured", "Обычный вывод должен возвращаться")
+
+        silent = host.run(
+            sys.executable, "-c", "print('logged')",
+            quiet=True,
+        )
+        assert_equal(silent.returncode, 0, "Тихая команда должна завершиться успешно")
+        if "logged" not in host.log_file.read_text(encoding="utf-8"):
+            raise AssertionError("Тихая команда должна записывать вывод в журнал")
+
+
+def test_bootstrap_path_groups() -> None:
+    """Пути состояния и доступа должны остаться прежними после выделения."""
+    host = BootstrapHost("check")
+    assert_equal(
+        host.host_state_dir,
+        Path("/mnt/bindmounts/infra-manager/state"),
+        "Постоянные данные должны оставаться на PVE",
+    )
+    assert_equal(
+        host.infra_state_dir,
+        Path("/mnt/persistent-state"),
+        "Управляющий контейнер должен видеть ту же точку подключения",
+    )
+    assert_equal(
+        host.host_lock_file,
+        Path("/run/proxmox-bootstrap-runner.lock"),
+        "Блокировка должна находиться на PVE",
+    )
+
+
+def test_installation_marker_states() -> None:
+    """Маркер различает чистую, прерванную, готовую и утраченную установку."""
+    with tempfile.TemporaryDirectory() as temp:
+        host = BootstrapHost("apply")
+        host.host_persistent_root = Path(temp) / "state"
+        host.host_pve_only_dir = host.host_persistent_root / "pve-only"
+        assert_equal(host.installation_state(guest_exists=False), "new", "Чистый PVE")
+        host.host_pve_only_dir.mkdir(parents=True)
+        host.write_installation_marker("installing")
+        assert_equal(host.installation_state(guest_exists=False), "unfinished", "Незаконченная установка")
+        assert_equal(host.installation_state(guest_exists=True), "unfinished", "Неоконченная установка с LXC")
+        host.write_installation_marker("ready")
+        assert_equal(host.installation_state(guest_exists=True), "existing", "Готовый LXC")
+        assert_equal(host.installation_state(guest_exists=False), "recovery", "Утраченный LXC")
+
+        host._installation_marker_path().write_text(
+            '{"schema_version":1,"role":"infra-manager","vmid":999,"state":"installing"}',
+            encoding="utf-8",
+        )
+        try:
+            host.installation_state(guest_exists=False)
+        except BootstrapError:
+            pass
+        else:
+            raise AssertionError("Чужой маркер установки должен отклоняться")
+
+        host._installation_marker_path().unlink()
+        assert_equal(host.installation_state(guest_exists=False), "recovery",
+                     "Неопознанные сохранённые данные требуют recovery")
+
+
+def test_exclusive_bootstrap_lock() -> None:
+    """Второй экземпляр должен завершаться до изменения PVE."""
+    with tempfile.TemporaryDirectory() as temp:
+        first = BootstrapHost("check")
+        second = BootstrapHost("apply")
+        lock_path = Path(temp) / "bootstrap.lock"
+        first.host_lock_file = lock_path
+        second.host_lock_file = lock_path
+        with first.execution_lock():
+            try:
+                with second.execution_lock():
+                    raise AssertionError("Параллельная операция получила блокировку")
+            except BootstrapError as exc:
+                if "уже выполняется" not in str(exc):
+                    raise
+        with second.execution_lock():
+            pass
+
+
+class FinishCheckHarness(ExecuteHarness):
+    """Подменяет маркер незавершённой установки."""
+    def _read_installation_marker(self) -> str | None:
+        """Вернуть испытательное состояние маркера."""
+        return "installing"
+
+    def write_installation_marker(self, state: str) -> None:
+        """Сохранить состояние маркера в памяти испытания."""
+        assert state == "ready"
+        self.events.append("mark_ready")
+
+
+def test_check_marks_verified_installation_ready() -> None:
+    """Записать ready только после проверки готовности."""
+    host = FinishCheckHarness("check")
+    host.execute()
+    assert_equal(
+        host.events,
+        ["require_host", "verify_runner", "info", "verify_ready:quiet",
+         "mark_ready", "finalize_runner", "check_ready"],
+        "Проверка после прерывания должна фиксировать подтверждённую готовность",
+    )
+
+
+class FailingExecuteHarness(ExecuteHarness):
+    """Имитирует ошибку развёртывания перед отзывом токена."""
+    def apply(self) -> None:
+        """Смоделировать ошибку основного процесса."""
+        self.events.append("apply")
+        raise BootstrapError("Прерванный bootstrap")
+
+    def remove_private_access(self) -> None:
+        """Зарегистрировать отзыв временного токена."""
+        self.events.append("revoke_token")
+
+
+def test_token_revoked_on_bootstrap_failure() -> None:
+    """Отозвать временный токен, сохранив исходную ошибку установки."""
+    host = FailingExecuteHarness("apply")
+    try:
+        host.execute()
+    except BootstrapError:
+        pass
+    else:
+        raise AssertionError("Исключение первоначальной установки должно дойти до вызывающего кода")
+    assert_equal(
+        host.events,
+        ["require_host", "verify_runner", "info", "apply", "revoke_token"],
+        "При ошибке временный токен нужно отозвать и убрать 990",
+    )
+
+
+def test_invalid_installation_markers_fail_closed() -> None:
+    """Повреждённый маркер или ссылка не должны разрешать повторную установку."""
+    with tempfile.TemporaryDirectory() as temp:
+        host = BootstrapHost("apply")
+        host.host_persistent_root = Path(temp) / "persistent"
+        host.host_pve_only_dir = host.host_persistent_root / "pve-only"
+        host.host_pve_only_dir.mkdir(parents=True)
+        marker = host._installation_marker_path()
+        for invalid in ("{", '{"schema_version":1,"state":"bad"}'):
+            marker.write_text(invalid, encoding="utf-8")
+            try:
+                host.installation_state(guest_exists=False)
+            except BootstrapError:
+                pass
+            else:
+                raise AssertionError("Неверный маркер не должен выбирать новую установку")
+        marker.unlink()
+        target = Path(temp) / "unexpected.json"
+        target.write_text("{}", encoding="utf-8")
+        marker.symlink_to(target)
+        try:
+            host.installation_state(guest_exists=False)
+        except BootstrapError as exc:
+            if "символьная ссылка" not in str(exc):
+                raise
+        else:
+            raise AssertionError("Маркер-ссылка должен блокировать восстановление")
+
+
+def test_unfinished_installation_rejects_unseal_key() -> None:
+    """Наличие ключа OpenBao запрещает автоматическое пересоздание rootfs."""
+    with tempfile.TemporaryDirectory() as temp:
+        host = BootstrapHost("apply")
+        root = Path(temp) / "persistent"
+        host.host_persistent_root = root
+        host.host_pve_only_dir = root / "pve-only"
+        host.host_state_dir = root / "state"
+        host.host_openbao_unseal_key = root / "pve-only/openbao/unseal.key"
+        host.host_pve_only_dir.mkdir(parents=True)
+        host.host_state_dir.mkdir()
+        host.write_installation_marker("installing")
+        host.host_openbao_unseal_key.parent.mkdir()
+        host.host_openbao_unseal_key.write_text("test-secret", encoding="utf-8")
+        try:
+            host.verify_unfinished_installation(guest_exists=False)
+        except BootstrapError as exc:
+            if "постоянные данные" not in str(exc):
+                raise
+        else:
+            raise AssertionError("Начатое состояние OpenBao должно блокировать повтор")
+
+
+class FailingCheckHarness(ExecuteHarness):
+    """Имитирует отказ проверки готовности до очистки временного контейнера."""
+
+    def verify_infra_ready(self, *, quiet: bool = False) -> None:
+        """Остановить проверку с диагностической ошибкой."""
+        self.events.append("verify_failed")
+        raise BootstrapError("Управляющий контур не готов")
+
+    def remove_private_access(self) -> None:
+        """Зарегистрировать обязательный отзыв временного токена."""
+        self.events.append("revoke_token")
+
+
+def test_check_failure_revokes_token_without_destroying_runner() -> None:
+    """Ошибка --check должна отзывать токен и вызывать очистку своего 990."""
+    host = FailingCheckHarness("check")
+    try:
+        host.execute()
+    except BootstrapError as exc:
+        if "не готов" not in str(exc):
+            raise
+    else:
+        raise AssertionError("Ошибка проверки должна дойти до вызывающего кода")
+    assert_equal(
+        host.events,
+        ["require_host", "verify_runner", "info", "verify_failed", "revoke_token"],
+        "После неудачного --check токен отзывается и запускается очистка 990",
+    )
+
+
+class FailingTokenRevokeHarness(FailingExecuteHarness):
+    """Имитирует ошибку отзыва токена во время обработки первого отказа."""
+
+    def remove_private_access(self) -> None:
+        """Сообщить об ошибке отдельной операции очистки."""
+        self.events.append("revoke_failed")
+        raise BootstrapError("токен остался действующим")
+
+
+def test_failed_token_revoke_preserves_original_error() -> None:
+    """Вторичная ошибка очистки не должна скрывать причину первого отказа."""
+    host = FailingTokenRevokeHarness("apply")
+    stderr = io.StringIO()
+    with contextlib.redirect_stderr(stderr):
+        try:
+            host.execute()
+        except BootstrapError as exc:
+            if "Прерванный bootstrap" not in str(exc):
+                raise
+        else:
+            raise AssertionError("Должна сохраниться ошибка основного этапа")
+    if "токен PVE" not in stderr.getvalue() or "токен остался" not in stderr.getvalue():
+        raise AssertionError("Оператор должен увидеть отдельную ошибку отзыва токена")
+    if "revoke_failed" not in host.events:
+        raise AssertionError("Отзыв должен быть выполнен даже после ошибки bootstrap")
+
+
+class RunnerFinalizationHarness(BootstrapHost):
+    """Проверить успешное удаление 990 без очистки его файлов по одному."""
+
+    def __init__(self) -> None:
+        """Создать журнал испытательных действий вместо реального PVE."""
+        super().__init__("check")
+        self.events: list[str] = []
+        self.present = True
+
+    def ct_exists(self) -> bool:
+        """Показать наличие временного объекта PVE."""
+        return self.present
+
+    def assert_owned_runner(self) -> None:
+        """Подтвердить владение 990 до удаления."""
+        self.events.append("owner")
+
+    def remove_bootstrap_ssh_access_from_infra(self) -> None:
+        """Снять начальное разрешение SSH из управляющего гостя."""
+        self.events.append("remove_bootstrap_auth")
+
+    def remove_private_access(self) -> None:
+        """Отозвать временный полный токен 990."""
+        self.events.append("revoke_token")
+
+    def pct_status(self, ctid: int) -> str:
+        """Имитировать запущенный контейнер."""
+        return "running"
+
+    def pct(self, *args: str, **kwargs):
+        """Остановить 990 до удаления его rootfs."""
+        self.events.append("pct:" + " ".join(args))
+        return SimpleNamespace(returncode=0)
+
+    def run(self, *args: str, **kwargs):
+        """Удалить только временный контейнер."""
+        self.events.append("run:" + " ".join(args))
+        if args[:2] == ("pct", "destroy"):
+            self.present = False
+        return SimpleNamespace(returncode=0)
+
+    def remove_downloaded_template(self) -> None:
+        """Завершить удаление шаблона после очистки 990."""
+        self.events.append("template")
+
+    def ct_exec(self, *args: str, **kwargs):
+        """Запретить ненужные действия с файлами внутри уничтожаемого LXC."""
+        raise AssertionError("Удалять секреты внутри уничтожаемого 990 избыточно")
+
+    def ok(self, message: str) -> None:
+        """Подтвердить завершение операции без вывода."""
+        self.events.append("ok")
+
+
+def test_finalize_runner_uses_single_destroy_path() -> None:
+    """После успеха удалить 990 одним общим способом и отозвать токен."""
+    with tempfile.TemporaryDirectory() as temp:
+        host = RunnerFinalizationHarness()
+        host.host_template_marker = Path(temp) / "template.ref"
+        host.finalize_runner()
+        assert_equal(host.events,
+                     ["owner", "remove_bootstrap_auth", "revoke_token",
+                      "owner", "pct:stop 990",
+                      "run:pct destroy 990 --purge 1", "template", "ok"],
+                     "Не нужно отдельно чистить файлы перед уничтожением rootfs")
+
+
+def test_finalize_runner_reports_remaining_template() -> None:
+    """Не сообщать о полной очистке, когда остался временный шаблон."""
+    with tempfile.TemporaryDirectory() as temp:
+        host = RunnerFinalizationHarness()
+        host.host_template_marker = Path(temp) / "template.ref"
+        host.host_template_marker.write_text(
+            "local:vztmpl/debian-13-bootstrap.tar.zst", encoding="utf-8"
+        )
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            host.finalize_runner()
+        if "очистка выполнена частично" not in output.getvalue():
+            raise AssertionError("Оставшийся шаблон должен быть виден оператору")
+        if "ok" in host.events:
+            raise AssertionError("Нельзя объявлять полную очистку при оставшемся шаблоне")
+
+
+def test_lock_rejects_symlink_without_touching_target() -> None:
+    """Символьная ссылка вместо блокировки не должна изменять чужой файл."""
+    with tempfile.TemporaryDirectory() as temp:
+        host = BootstrapHost("apply")
+        target = Path(temp) / "data"
+        target.write_text("preserve", encoding="utf-8")
+        host.host_lock_file = Path(temp) / "lock"
+        host.host_lock_file.symlink_to(target)
+        try:
+            with host.execution_lock():
+                raise AssertionError("Нельзя получить блокировку через ссылку")
+        except BootstrapError as exc:
+            if "блокировки" not in str(exc):
+                raise
+        assert_equal(target.read_text(encoding="utf-8"), "preserve",
+                     "Чужой файл нельзя изменять")
+
+
+class NonDestructiveRemoveHarness(ExecuteHarness):
+    """Подменяет удаление управляющего гостя без реального обращения к PVE."""
+
+    def remove_infra(self) -> None:
+        """Запомнить вызов удаления без изменения инфраструктуры."""
+        self.events.append("remove_infra")
+
+
+def test_purge_keeps_persistent_storage() -> None:
+    """Режим purge удаляет каталог загрузчика, сохраняя данные PVE."""
+    with tempfile.TemporaryDirectory() as temp:
+        host = NonDestructiveRemoveHarness("purge")
+        host.host_bootstrap_dir = Path(temp) / "bootstrap"
+        host.host_persistent_root = Path(temp) / "permanent"
+        host.host_bootstrap_dir.mkdir()
+        host.host_persistent_root.mkdir()
+        (host.host_persistent_root / "openbao.db").write_text(
+            "data", encoding="utf-8"
+        )
+        host.execute()
+        if host.host_bootstrap_dir.exists():
+            raise AssertionError("Каталог старого загрузчика должен быть удалён")
+        if not (host.host_persistent_root / "openbao.db").is_file():
+            raise AssertionError("Режим purge не должен уничтожать постоянные данные")
+        if "remove_infra" not in host.events:
+            raise AssertionError("Режим purge должен выполнить операцию удаления")
+
+
+def test_bootstrap_python_sources_follow_rule_010() -> None:
+    """У каждого Python-модуля, класса и метода должна быть строка документации."""
+    program = ROOT / "scripts/bootstrap-runner"
+    checked = sorted(program.rglob("*.py"))
+    checked.append(Path(__file__))
+    for path in checked:
+        source = path.read_text(encoding="utf-8")
+        tree = ast.parse(source, filename=str(path))
+        if not ast.get_docstring(tree):
+            raise AssertionError(f"Модуль без описания по правилу 010: {path}")
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+                if not ast.get_docstring(node):
+                    raise AssertionError(
+                        f"Отсутствует описание по правилу 010: "
+                        f"{path}:{node.lineno} {node.name}"
+                    )
+
+
+
+def _use_temporary_persistent_paths(host: BootstrapHost, root: Path) -> None:
+    """Перенаправить все постоянные пути PVE в испытательный каталог."""
+    host.host_persistent_root = root
+    host.host_pve_only_dir = root / "pve-only"
+    host.host_access_dir = root / "access"
+    host.host_state_dir = root / "state"
+    host.host_access_pve_host_dir = host.host_access_dir / "pve-host"
+    host.host_access_ca_dir = host.host_access_dir / "ca"
+    host.host_openbao_unseal_key = host.host_pve_only_dir / "openbao/unseal.key"
+    host.host_recovery_dir = host.host_pve_only_dir / "recovery"
+    host.host_recovery_github_key = host.host_recovery_dir / "github_ed25519"
+    host.host_pve_ca = host.host_access_ca_dir / "pve-root-ca.crt"
+    host.host_github_key = root.parent / "github_ed25519"
+
+
+def test_installing_marker_precedes_mutable_layout() -> None:
+    """Маркер должен существовать даже при отказе сразу после подготовки корня."""
+    with tempfile.TemporaryDirectory() as temp:
+        host = BootstrapHost("apply")
+        root = Path(temp) / "infra-manager"
+        _use_temporary_persistent_paths(host, root)
+        with patch.object(host, "_set_mode_owner", side_effect=BootstrapError("отказ прав")):
+            try:
+                host.prepare_new_persistent_layout()
+            except BootstrapError as exc:
+                if "отказ прав" not in str(exc):
+                    raise
+            else:
+                raise AssertionError("Ошибка подготовки не должна скрываться")
+        assert_equal(host._read_installation_marker(), "installing",
+                     "Частичная подготовка должна оставлять маркер installing")
+        host.verify_unfinished_installation(guest_exists=False)
+
+        def copy_for_test(source: Path, target: Path, **kwargs) -> None:
+            """Имитировать копирование ключей без обращения к файловой системе PVE."""
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text("test-access", encoding="utf-8")
+
+        with (
+            patch.object(host, "_set_mode_owner", return_value=None),
+            patch.object(host, "_copy_access_file", side_effect=copy_for_test),
+        ):
+            host.prepare_new_persistent_layout()
+        assert_equal(host._read_installation_marker(), "installing",
+                     "Повтор подготовки не должен объявлять установку готовой")
+        if not host.host_recovery_github_key.is_file() or not host.host_pve_ca.is_file():
+            raise AssertionError("Повторная подготовка должна довести файлы доступа")
+        if not host.host_state_dir.is_dir():
+            raise AssertionError("После повтора каталог состояния должен быть создан")
+
+
+def test_installing_marker_survives_before_state_directory() -> None:
+    """Записанный до state маркер позволяет безопасно продолжить установку."""
+    with tempfile.TemporaryDirectory() as temp:
+        host = BootstrapHost("apply")
+        _use_temporary_persistent_paths(host, Path(temp) / "infra-manager")
+        host.begin_new_installation()
+        assert_equal(host.installation_state(guest_exists=False), "unfinished",
+                     "Ранняя установка не должна считаться recovery")
+        if host.host_state_dir.exists():
+            raise AssertionError("Состояние не должно появиться до начала настройки")
+        host.verify_unfinished_installation(guest_exists=False)
+
+
+def test_marker_creation_failure_keeps_root_absent() -> None:
+    """Ошибка записи маркера не оставляет нераспознаваемый постоянный каталог."""
+    with tempfile.TemporaryDirectory() as temp:
+        host = BootstrapHost("apply")
+        root = Path(temp) / "infra-manager"
+        _use_temporary_persistent_paths(host, root)
+        with patch.object(host, "_write_installation_marker_to",
+                          side_effect=BootstrapError("нельзя записать маркер")):
+            try:
+                host.begin_new_installation()
+            except BootstrapError:
+                pass
+            else:
+                raise AssertionError("Ошибка маркера должна остановить процесс")
+        if root.exists() or list(Path(temp).glob(".infra-manager-install-*")):
+            raise AssertionError("Отказ записи маркера должен удалить временные каталоги")
+
+
+def test_new_layout_refuses_unmarked_old_directory() -> None:
+    """Не подменять существующий постоянный каталог новой установкой."""
+    with tempfile.TemporaryDirectory() as temp:
+        host = BootstrapHost("apply")
+        root = Path(temp) / "infra-manager"
+        _use_temporary_persistent_paths(host, root)
+        root.mkdir()
+        sentinel = root / "semaphore.sqlite"
+        sentinel.write_bytes(b"preserve")
+        try:
+            host.prepare_new_persistent_layout()
+        except BootstrapError:
+            pass
+        else:
+            raise AssertionError("Данные без маркера нельзя считать чистой установкой")
+        assert_equal(sentinel.read_bytes(), b"preserve",
+                     "Отказ должен сохранить прежние данные")
+
+
+class RunnerPreflightFailureHarness(ExecuteHarness):
+    """Имитирует ошибку подтверждения принадлежности временного 990."""
+
+    def verify_runner_contract(self) -> None:
+        """Прервать проверку до создания или изменения гостя."""
+        self.events.append("verify_runner_failed")
+        raise BootstrapError("чужой временный контейнер")
+
+    def remove_private_access(self) -> None:
+        """Подтвердить отзыв оставшегося временного токена."""
+        self.events.append("revoke_token")
+
+
+def test_stale_token_revoked_on_runner_preflight_failure() -> None:
+    """Даже чужой или неисправный 990 не должен оставлять временный PVE токен."""
+    host = RunnerPreflightFailureHarness("apply")
+    try:
+        host.execute()
+    except BootstrapError as exc:
+        if "чужой" not in str(exc):
+            raise
+    else:
+        raise AssertionError("Ошибочный 990 должен останавливать установку")
+    assert_equal(
+        host.events,
+        ["require_host", "verify_runner_failed", "revoke_token"],
+        "Проверка 990 не должна блокировать отзыв оставшегося токена",
+    )
+
+
+class HostPreflightFailureHarness(RunnerPreflightFailureHarness):
+    """Имитирует отсутствие доступа к командам PVE до их проверки."""
+
+    def require_host(self) -> None:
+        """Остановить программу до подтверждения хоста."""
+        self.events.append("require_host_failed")
+        raise BootstrapError("нет доступа к PVE")
+
+
+def test_no_token_cleanup_before_host_verified() -> None:
+    """Нельзя менять PVE при отказе проверки самого физического узла."""
+    host = HostPreflightFailureHarness("apply")
+    try:
+        host.execute()
+    except BootstrapError:
+        pass
+    else:
+        raise AssertionError("Ожидался отказ проверки хоста")
+    assert_equal(host.events, ["require_host_failed"],
+                 "Токен нельзя изменять до проверки PVE")
+
+
+
+def test_access_copy_is_atomic_when_permissions_fail() -> None:
+    """Частичная ошибка копирования не должна повредить существующий ключ."""
+    with tempfile.TemporaryDirectory() as temp:
+        host = BootstrapHost("apply")
+        source = Path(temp) / "source.key"
+        target = Path(temp) / "recovery.key"
+        source.write_bytes(b"new-secret")
+        target.write_bytes(b"old-secret")
+        with patch.object(host, "_set_mode_owner", side_effect=BootstrapError("ошибка прав")):
+            try:
+                host._copy_access_file(source, target, mode=0o600, uid=0, gid=0)
+            except BootstrapError:
+                pass
+            else:
+                raise AssertionError("Ошибка прав должна остановить копирование")
+        assert_equal(target.read_bytes(), b"old-secret",
+                     "При ошибке нельзя перезаписывать рабочий ключ")
+        if list(Path(temp).glob(".bootstrap-access-*")):
+            raise AssertionError("После отказа нельзя оставлять временный секрет")
+        with patch.object(host, "_set_mode_owner", return_value=None):
+            host._copy_access_file(source, target, mode=0o600, uid=0, gid=0)
+        assert_equal(target.read_bytes(), b"new-secret",
+                     "После повторного копирования должен появиться полный файл")
+
+
+
+def test_ready_guest_only_checks_and_removes_runner() -> None:
+    """Готовый гость не должен пересоздаваться и терять действующий токен."""
+    host = ApplyHarness("apply", infra_exists=True)
+    host._test_marker_state = "ready"
+    host.apply()
+    assert_equal(
+        host.events,
+        ["infra_exists", "verify_layout", "verify_ready:quiet",
+         "finalize_runner", "check_ready"],
+        "Повторный запуск должен только проверить ready и удалить 990",
+    )
+
+
+class NewRootfsTokenHarness(BootstrapHost):
+    """Проверяет перевыпуск токена без настоящего PVE и контейнеров."""
+
+    def __init__(self, *, fail_stage: bool = False) -> None:
+        """Сохранить события выдачи токена и запретить доступ к PVE."""
+        super().__init__("apply")
+        self.fail_stage = fail_stage
+        self.events: list[str] = []
+
+    def verify_infra_object(self) -> None:
+        """Подтвердить создание нового гостя."""
+        self.events.append("verify_guest")
+
+    def remove_named_token(self, user: str, token_name: str) -> None:
+        """Записать отзыв токена."""
+        self.events.append(f"revoke:{user}!{token_name}")
+
+    def create_full_pve_token(self, token_name: str) -> tuple[str, str]:
+        """Создать испытательный токен."""
+        self.events.append("create_token")
+        return f"root@pam!{token_name}", "new-secret"
+
+    def pve_node_address(self) -> tuple[str, str]:
+        """Вернуть испытательное имя PVE."""
+        return "pve", "192.168.1.9"
+
+    def stage_infra_bootstrap_file(self, source: Path, target: Path) -> None:
+        """Проверить перенос вновь созданного секрета."""
+        content = source.read_text(encoding="utf-8")
+        lines = content.splitlines()
+        expected = [
+            "PVE_API_URL=https://pve:8006",
+            "PVE_API_TOKEN_ID=root@pam!infra-manager",
+            "PVE_API_TOKEN_SECRET=new-secret",
+        ]
+        if lines != expected:
+            raise AssertionError(
+                f"Учётные данные должны передаваться тремя строками: {lines!r}"
+            )
+        self.events.append("stage_token")
+        if self.fail_stage:
+            raise BootstrapError("передача токена оборвалась")
+
+    def pveum_json(self, *args: str) -> list[dict]:
+        """Вернуть существующий пул без настоящих запросов к PVE."""
+        if args == ("pool", "list"):
+            return [{"poolid": "managed"}]
+        raise AssertionError(f"Неожиданный список PVE: {args}")
+
+    def _copy_access_file(self, *args, **kwargs) -> None:
+        """Не копировать системный сертификат при испытании."""
+        self.events.append("stage_ca")
+
+    def infra_test(self, flag: str, path: Path | str) -> bool:
+        """Считать испытательный сертификат доступным гостю."""
+        return True
+
+    def infra_exec(self, *args, **kwargs):
+        """Подменить изменение hosts внутри гостя."""
+        self.events.append("set_hosts")
+        return SimpleNamespace(returncode=0)
+
+    def ok(self, message: str) -> None:
+        """Не выводить сообщения во время испытания."""
+        pass
+
+
+def _prepare_test_new_rootfs_token(host: NewRootfsTokenHarness) -> None:
+    """Запустить реальную выдачу токена с временным файлом вне /run."""
+    with tempfile.TemporaryDirectory() as directory:
+        original_mkstemp = tempfile.mkstemp
+        with patch(
+            "bootstrap_runner.infra.tempfile.mkstemp",
+            side_effect=lambda **kwargs: original_mkstemp(
+                prefix=kwargs["prefix"], dir=directory
+            ),
+        ):
+            host.prepare_infra_pve_access()
+
+
+def test_new_rootfs_always_rotates_token() -> None:
+    """Даже старый правильный токен не переиспользуется без его секрета."""
+    host = NewRootfsTokenHarness()
+    _prepare_test_new_rootfs_token(host)
+    assert_equal(
+        host.events[:4],
+        ["verify_guest", "revoke:root@pam!infra-manager",
+         "create_token", "stage_token"],
+        "Сначала отзыв старого токена, затем выдача и передача нового",
+    )
+
+
+def test_failed_new_rootfs_token_transfer_revokes_new_token() -> None:
+    """Секрет не должен оставаться действующим после ошибки его передачи."""
+    host = NewRootfsTokenHarness(fail_stage=True)
+    try:
+        _prepare_test_new_rootfs_token(host)
+    except BootstrapError as exc:
+        if "передача токена" not in str(exc):
+            raise
+    else:
+        raise AssertionError("Должна сохраняться ошибка передачи токена")
+    assert_equal(
+        host.events,
+        ["verify_guest", "revoke:root@pam!infra-manager",
+         "create_token", "stage_token", "revoke:root@pam!infra-manager"],
+        "Сбой выдачи должен отзывать вновь созданный токен",
+    )
+
+
+
+class FailedBootstrapCleanupHarness(FailingExecuteHarness):
+    """Имитирует работающий 990 при ошибке развёртывания."""
+
+    def __init__(self, *, foreign: bool = False, revoke_failure: bool = False):
+        """Подготовить условные объекты PVE для проверки очистки."""
+        super().__init__("apply")
+        self.foreign = foreign
+        self.revoke_failure = revoke_failure
+        self.runner_present = True
+
+    def ct_exists(self) -> bool:
+        """Сообщить о существовании 990 без обращения к PVE."""
+        return self.runner_present
+
+    def assert_owned_runner(self) -> None:
+        """Запретить разрушительные действия над чужим объектом."""
+        self.events.append("check_owner")
+        if self.foreign:
+            raise BootstrapError("чужой LXC 990")
+
+    def pct_status(self, ctid: int) -> str:
+        """Имитировать работающий 990."""
+        return "running"
+
+    def pct(self, *args: str, **kwargs):
+        """Записать остановку временного контейнера."""
+        self.events.append("pct:" + " ".join(args))
+        return SimpleNamespace(returncode=0)
+
+    def run(self, *args: str, **kwargs):
+        """Записать штатное удаление 990."""
+        self.events.append("run:" + " ".join(args))
+        if args[:2] == ("pct", "destroy"):
+            self.runner_present = False
+        return SimpleNamespace(returncode=0)
+
+    def remove_private_access(self) -> None:
+        """Имитировать успех или отказ отзыва временного токена."""
+        self.events.append("revoke_token")
+        if self.revoke_failure:
+            raise BootstrapError("отзыв токена недоступен")
+
+    def remove_downloaded_template(self) -> None:
+        """Записать очистку маркера шаблона."""
+        self.events.append("cleanup_template")
+
+
+def test_bootstrap_failure_destroys_owned_runner() -> None:
+    """Ошибка установки должна отзывать токен и уничтожать свой 990."""
+    host = FailedBootstrapCleanupHarness()
+    try:
+        host.execute()
+    except BootstrapError as exc:
+        if "Прерванный bootstrap" not in str(exc):
+            raise
+    else:
+        raise AssertionError("Первоначальная ошибка не должна теряться")
+    if host.runner_present:
+        raise AssertionError("990 должен быть удалён после отказа")
+    assert_equal(
+        host.events[-5:],
+        ["revoke_token", "check_owner", "pct:stop 990",
+         "run:pct destroy 990 --purge 1", "cleanup_template"],
+        "Удалять 990 разрешено только после проверки владельца",
+    )
+
+
+def test_runner_destroy_continues_when_token_revoke_fails() -> None:
+    """Отказ отзыва токена не должен сохранять копию ключа PVE в 990."""
+    host = FailedBootstrapCleanupHarness(revoke_failure=True)
+    stderr = io.StringIO()
+    with contextlib.redirect_stderr(stderr):
+        try:
+            host.execute()
+        except BootstrapError as exc:
+            if "Прерванный bootstrap" not in str(exc):
+                raise
+        else:
+            raise AssertionError("Основной отказ должен быть сохранён")
+    if host.runner_present or "отзыв токена недоступен" not in stderr.getvalue():
+        raise AssertionError("990 должен удаляться независимо от отзыва токена")
+
+
+def test_cleanup_does_not_destroy_foreign_runner() -> None:
+    """Чужой 990 нельзя удалять даже при неуспешной установке."""
+    host = FailedBootstrapCleanupHarness(foreign=True)
+    stderr = io.StringIO()
+    with contextlib.redirect_stderr(stderr):
+        try:
+            host.execute()
+        except BootstrapError:
+            pass
+        else:
+            raise AssertionError("Изначальная ошибка должна остаться")
+    if not host.runner_present or any(s.startswith(("pct:", "run:")) for s in host.events):
+        raise AssertionError("Чужой временный контейнер не должен изменяться")
+    if "чужой LXC 990" not in stderr.getvalue():
+        raise AssertionError("Невозможность безопасной очистки нужно сообщить")
+
+
+class TemplateReleaseHarness(BootstrapHost):
+    """Подменяет неуспешное освобождение шаблона через PVE."""
+
+    def __init__(self, marker: Path):
+        """Подготовить временный маркер и безопасную имитацию отказа."""
+        super().__init__("check")
+        self.host_template_marker = marker
+        self.events: list[str] = []
+
+    def run(self, *args: str, **kwargs):
+        """Только pvesm free разрешён для удаления временного шаблона."""
+        self.events.append(" ".join(args))
+        if args[:2] != ("pvesm", "free"):
+            raise AssertionError("Шаблон нельзя удалять вручную через pvesm path")
+        return SimpleNamespace(returncode=1)
+
+    def info(self, message: str) -> None:
+        """Записать предупреждение о неосвобождённом шаблоне."""
+        self.events.append(message)
+
+
+def test_template_release_failure_keeps_marker() -> None:
+    """Если pvesm free не удался, не удалять файл и маркер шаблона."""
+    with tempfile.TemporaryDirectory() as temp:
+        marker = Path(temp) / "template.ref"
+        marker.write_text("local:vztmpl/test.tar.zst", encoding="utf-8")
+        host = TemplateReleaseHarness(marker)
+        host.remove_downloaded_template()
+        if not marker.is_file() or not any("ПРЕДУПРЕЖДЕНИЕ" in e for e in host.events):
+            raise AssertionError("При ошибке PVE маркер сохраняется с предупреждением")
+        if host.events[0] != "pvesm free local:vztmpl/test.tar.zst":
+            raise AssertionError("Не допускается прямое удаление файла шаблона")
+
+
+
+class RecoveryDestroyFailureHarness(RecoveryRootfsHarness):
+    """Проверяет восстановление protection при невозможности удаления."""
+
+    def run(self, *args: str, **kwargs):
+        """Остановить уничтожение после снятия защиты."""
+        self.events.append("run:" + " ".join(args))
+        raise BootstrapError("хранилище PVE недоступно")
+
+
+def test_recovery_destroy_failure_restores_protection() -> None:
+    """Если destroy не выполнился, объект остаётся под прежней защитой."""
+    host = RecoveryDestroyFailureHarness()
+    try:
+        host.remove_infra_rootfs_for_recovery()
+    except BootstrapError as exc:
+        if "хранилище" not in str(exc):
+            raise
+    else:
+        raise AssertionError("Ошибка PVE должна сохраниться")
+    if not host.exists:
+        raise AssertionError("Неуспешное удаление не должно терять объект")
+    if host.events[-1] != "pct:set 910 --protection 1":
+        raise AssertionError("После отказа удаления protection должен восстановиться")
+
+
+def test_host_authorized_keys_atomic_replacement() -> None:
+    """Ошибка переименования не повреждает другой доступ к root PVE."""
+    with tempfile.TemporaryDirectory() as temp:
+        host = BootstrapHost("apply")
+        ssh_dir = Path(temp) / ".ssh"
+        ssh_dir.mkdir()
+        target = ssh_dir / "authorized_keys"
+        host.host_root_authorized_keys = target
+        original = "ssh-ed25519 AAAA-other another-admin\n"
+        target.write_text(original, encoding="utf-8")
+        with patch("bootstrap_runner.access.os.replace",
+                   side_effect=OSError("не удалось заменить")):
+            try:
+                host._write_host_authorized_keys(
+                    ["ssh-ed25519 AAAA-other another-admin", "ssh-ed25519 BBBB bootstrap"]
+                )
+            except OSError:
+                pass
+            else:
+                raise AssertionError("Ошибка атомарной замены должна передаваться")
+        assert_equal(target.read_text(encoding="utf-8"), original,
+                     "При ошибке старые ключи не меняются")
+        if list(ssh_dir.glob(".authorized_keys.*")):
+            raise AssertionError("После ошибки временный файл должен исчезнуть")
+        host._write_host_authorized_keys(
+            ["ssh-ed25519 AAAA-other another-admin", "ssh-ed25519 BBBB bootstrap"]
+        )
+        if "AAAA-other" not in target.read_text(encoding="utf-8"):
+            raise AssertionError("Чужой root-доступ нельзя удалять")
+
+
+def test_host_authorized_keys_rejects_symlink() -> None:
+    """Не следовать символьной ссылке на другой root SSH-файл."""
+    with tempfile.TemporaryDirectory() as temp:
+        host = BootstrapHost("apply")
+        actual = Path(temp) / "other"
+        actual.write_text("preserve", encoding="utf-8")
+        host.host_root_authorized_keys = Path(temp) / "authorized_keys"
+        host.host_root_authorized_keys.symlink_to(actual)
+        try:
+            host._write_host_authorized_keys(["new"])
+        except BootstrapError:
+            pass
+        else:
+            raise AssertionError("Запрещено следовать ссылке authorized_keys")
+        assert_equal(actual.read_text(encoding="utf-8"), "preserve",
+                     "Внешний файл не должен изменяться")
+
+
+
+def test_pveum_json_rejects_invalid_shape() -> None:
+    """Не считать повреждённый ответ PVE отсутствием объектов или токенов."""
+    class JSONShapeHarness(BootstrapHost):
+        """Возвращает разные некорректные ответы PVE без настоящих команд."""
+
+        def __init__(self, response: str) -> None:
+            """Запомнить испытательный JSON."""
+            super().__init__("apply")
+            self.response = response
+
+        def run(self, *args: str, **kwargs):
+            """Подменить ответ pveum в проверке."""
+            return SimpleNamespace(returncode=0, stdout=self.response)
+
+    for payload in ("", "{}", '["not-an-object"]', "null", "{broken"):
+        host = JSONShapeHarness(payload)
+        try:
+            host.pveum_json("user", "token", "list", "root@pam")
+        except BootstrapError:
+            pass
+        else:
+            raise AssertionError(f"Некорректный JSON PVE принят: {payload!r}")
+
+
+class RecoveryProtectionSetFailureHarness(RecoveryRootfsHarness):
+    """Имитирует PVE, который снял protection, но вернул ошибку."""
+
+    def pct(self, *args: str, **kwargs):
+        """Проверить, что восстановление защиты выполнено после ошибки set."""
+        self.events.append("pct:" + " ".join(args))
+        if args == ("set", str(self.infra_ctid), "--protection", "0"):
+            raise BootstrapError("снять protection не удалось")
+        return SimpleNamespace(returncode=0)
+
+
+def test_recovery_unprotect_failure_restores_protection() -> None:
+    """Защита возвращается и при сбое непосредственно на её снятии."""
+    host = RecoveryProtectionSetFailureHarness()
+    try:
+        host.remove_infra_rootfs_for_recovery()
+    except BootstrapError as exc:
+        if "снять protection" not in str(exc):
+            raise
+    else:
+        raise AssertionError("Ошибка PVE должна быть передана выше")
+    assert_equal(
+        host.events,
+        ["pct:set 910 --protection 0", "pct:set 910 --protection 1"],
+        "При сомнительном результате снятия защиты нужно вернуть protection",
     )
 
 
 def main() -> None:
+    """Последовательно выполнить все проверки без доступа к рабочему PVE."""
     tests = [
         test_infra_manager_role_can_move_to_another_vmid,
         test_role_is_read_from_project_inside_runner,
+        test_role_lookup_is_identical_in_runner_and_host,
         test_strict_ownership_marker,
+        test_runner_ownership_requires_exact_markers,
         test_full_pve_token_contract,
         test_full_pve_token_missing_secret_is_removed,
         test_full_pve_token_invalid_json_is_removed,
@@ -1105,6 +2385,42 @@ def main() -> None:
         test_existing_layout_requires_manual_migration,
         test_check_mode_finishes_temporary_runner,
         test_remove_rejects_foreign_910,
+        test_installation_marker_states,
+        test_bootstrap_path_groups,
+        test_bootstrap_command_run_modes,
+        test_restart_unfinished_installation,
+        test_restart_rejects_persistent_data,
+        test_token_revoked_on_bootstrap_failure,
+        test_exclusive_bootstrap_lock,
+        test_check_marks_verified_installation_ready,
+        test_invalid_installation_markers_fail_closed,
+        test_unfinished_installation_rejects_unseal_key,
+        test_check_failure_revokes_token_without_destroying_runner,
+        test_failed_token_revoke_preserves_original_error,
+        test_finalize_runner_uses_single_destroy_path,
+        test_finalize_runner_reports_remaining_template,
+        test_lock_rejects_symlink_without_touching_target,
+        test_purge_keeps_persistent_storage,
+        test_bootstrap_python_sources_follow_rule_010,
+        test_installing_marker_precedes_mutable_layout,
+        test_installing_marker_survives_before_state_directory,
+        test_marker_creation_failure_keeps_root_absent,
+        test_new_layout_refuses_unmarked_old_directory,
+        test_stale_token_revoked_on_runner_preflight_failure,
+        test_no_token_cleanup_before_host_verified,
+        test_access_copy_is_atomic_when_permissions_fail,
+        test_ready_guest_only_checks_and_removes_runner,
+        test_new_rootfs_always_rotates_token,
+        test_failed_new_rootfs_token_transfer_revokes_new_token,
+        test_bootstrap_failure_destroys_owned_runner,
+        test_runner_destroy_continues_when_token_revoke_fails,
+        test_cleanup_does_not_destroy_foreign_runner,
+        test_template_release_failure_keeps_marker,
+        test_recovery_destroy_failure_restores_protection,
+        test_host_authorized_keys_atomic_replacement,
+        test_host_authorized_keys_rejects_symlink,
+        test_pveum_json_rejects_invalid_shape,
+        test_recovery_unprotect_failure_restores_protection,
     ]
     for test in tests:
         test()

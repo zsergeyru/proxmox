@@ -65,7 +65,7 @@ if provision.get("guest_vmid") != vmid:
 PY
 
 [[ -s "$BOOTSTRAP_DIR/bootstrap-host.py" ]] || die "Отсутствует Python-оркестратор bootstrap-host.py"
-for module in persistence access infra cleanup constants errors; do
+for module in persistence access infra cleanup constants errors role paths commands; do
     [[ -s "$BOOTSTRAP_DIR/bootstrap_runner/$module.py" ]] \
         || die "Отсутствует модуль bootstrap_runner/$module.py"
 done
@@ -132,7 +132,7 @@ if grep -R -q 'bootstrap-runner-990' "$BOOTSTRAP_DIR"; then
     die "Отдельный постоянный SSH marker bootstrap-runner-990 не должен возвращаться"
 fi
 grep -q 'remove_bootstrap_ssh_access_from_infra' "$CLEANUP" || die "Успешный bootstrap обязан удалить authorization одноразового ключа из 910"
-grep -q '"/etc/bootstrap-runner/bootstrap-ssh"' "$CLEANUP" || die "Успешный bootstrap обязан удалить локальную bootstrap-пару 990"
+grep -q 'self.remove_runner_if_present()' "$CLEANUP" || die "Успешный bootstrap обязан удалять одноразовый rootfs 990, включая SSH-ключи"
 grep -q 'allow_legacy_bootstrap=False' "$PY_GUEST_DEPLOY" || die "Обычный self-deploy infra-manager не должен иметь bootstrap fallback"
 grep -q '"/var/lib/bootstrap-runner/opentofu/state"' "$INFRA_RUNNER" || die "State шага create должен удаляться сразу после создания 910"
 grep -q 'allow_legacy_bootstrap=not bootstrap_scope' "$PY_GUEST_DEPLOY" || die "Финальный bootstrap configure должен запрещать fallback на начальный SSH-ключ"
@@ -149,7 +149,7 @@ end = source.index("    def execute(self) -> None:", start)
 apply_body = source[start:end]
 steps = [
     'self.configure_infra_manager_base)',
-    'self.handoff_infra,',
+    'self.handoff_infra)',
     'self.configure_infra_manager_control_plane',
     'self.initialize_infra_openbao)',
     'self.sync_infra_ssh_ca_to_runner)',
