@@ -4,22 +4,33 @@
 from __future__ import annotations
 
 import contextlib
+import copy
 import stat
 import sys
 import tempfile
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
+
+import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 MODULE_ROOT = ROOT / "scripts" / "infra-manager"
 sys.path.insert(0, str(MODULE_ROOT))
 
+from infra_manager import access as access_module
+from infra_manager import guest_deploy_infrastructure as guest_infra_module
 from infra_manager import guest_operations as operations
 from infra_manager import operation_lock
 from infra_manager import semaphore as semaphore_module
 from infra_manager.common import InfraManagerError
-from infra_manager.guest_catalog import deployable_guests, guest_identity
+from infra_manager.guest_catalog import (
+    deployable_guests,
+    guest_identity,
+    guest_management_address,
+    resolve_guest_configuration,
+)
 
 
 def fail(message: str) -> None:
@@ -44,6 +55,77 @@ def check_operation_catalog() -> None:
     }
     if actual_sync != expected:
         fail("Sync Guest должен использовать общий каталог гостей")
+
+
+def check_management_network() -> None:
+    """Несколько интерфейсов не должны менять выбранный SSH/OTP-адрес."""
+
+    identity = guest_identity(ROOT, 109)
+    defaults_path = ROOT / "infrastructure" / "guests" / "defaults.yaml"
+    defaults = yaml.safe_load(defaults_path.read_text(encoding="utf-8"))
+    effective, address, subnet = resolve_guest_configuration(
+        ROOT, identity.source, defaults
+    )
+    interfaces = effective["network"]["interfaces"]
+    if (
+        address != "192.168.1.9"
+        or subnet != "192.168.0.0/16"
+        or len(interfaces) != 2
+        or interfaces[0]["ipv4"] != "10.0.0.2/30"
+        or interfaces[1]["ipv4"] != "192.168.1.9/16"
+        or not interfaces[1]["management"]
+        or interfaces[0]["management"]
+    ):
+        fail("Resolver должен сохранять оба интерфейса 109 и выбирать LAN")
+
+    if guest_management_address(ROOT, identity) != address:
+        fail("Каталог гостей выбрал не административный адрес 109")
+    if identity.address != address:
+        fail("Свойство GuestIdentity.address должно учитывать management=true")
+    if access_module.load_access_policy(ROOT).guests[109].address != address:
+        fail("OpenBao/access.yaml выбрал неверный административный адрес 109")
+
+    workspace = SimpleNamespace(
+        payload={"guests": {"109": effective}},
+        state_dir=ROOT / "automation" / "opentofu",
+    )
+    with patch.object(
+        guest_infra_module.PveClient,
+        "from_opentofu_env",
+        return_value=object(),
+    ):
+        context = guest_infra_module._build_deployment_context(
+            ROOT, 109, workspace
+        )
+    if context.address != address:
+        fail("Deploy Guest не поддерживает management IP многосетевого гостя")
+
+    # Проверяем, что адрес выбирается по флагу, а не случайно совпадает с VMID.
+    altered = copy.deepcopy(identity.source)
+    altered["network"]["interfaces"][1]["ipv4"] = "192.168.1.20/16"
+    altered_identity = replace(identity, source=altered)
+    if guest_management_address(ROOT, altered_identity) != "192.168.1.20":
+        fail("Каталог игнорирует явно назначенный административный IP")
+
+    original_load = access_module._load_yaml
+
+    def load_with_changed_address(path: Path) -> dict:
+        if path == identity.manifest:
+            return altered
+        return original_load(path)
+
+    with patch.object(access_module, "_load_yaml", load_with_changed_address):
+        changed = access_module.load_access_policy(ROOT)
+    if changed.guests[109].address != "192.168.1.20":
+        fail("Правила доступа не учитывают изменённый адрес management")
+
+    altered["network"]["interfaces"][0]["management"] = True
+    try:
+        resolve_guest_configuration(ROOT, altered, defaults)
+    except InfraManagerError:
+        pass
+    else:
+        fail("Нельзя допускать два интерфейса management=true")
 
 
 class FakePveClient:
@@ -713,6 +795,7 @@ def check_semaphore_secret_policy() -> None:
 
 def main() -> None:
     check_operation_catalog()
+    check_management_network()
     check_status_operation()
     check_repair_operation()
     check_infra_manager_repair_operation()
