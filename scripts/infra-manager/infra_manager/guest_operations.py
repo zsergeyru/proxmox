@@ -6,8 +6,6 @@ import os
 from pathlib import Path
 from typing import Final
 
-import yaml
-
 from .common import (
     InfraManagerError,
     cancel_runtime_activation,
@@ -15,7 +13,7 @@ from .common import (
     require_runtime_activation_idle,
     reserve_runtime_activation,
 )
-from .guest_catalog import GuestIdentity, deployable_guests, guest_identity
+from .guest_catalog import GuestIdentity, deployable_guests, guest_identity, load_manifest
 from .guest_deploy import (
     project_branch_for_checkout,
     project_revision,
@@ -76,13 +74,8 @@ def _expected_resource_type(repo_root: Path, identity: GuestIdentity) -> str:
         raise InfraManagerError(f"{identity.manifest}: не задан profile")
 
     defaults_path = repo_root / "infrastructure" / "guests" / "defaults.yaml"
-    try:
-        defaults = yaml.safe_load(defaults_path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, yaml.YAMLError) as exc:
-        raise InfraManagerError(
-            f"Не удалось прочитать {defaults_path}: {exc}"
-        ) from exc
-    profiles = defaults.get("profiles") if isinstance(defaults, dict) else None
+    defaults = load_manifest(defaults_path)
+    profiles = defaults.get("profiles")
     profile_data = profiles.get(profile) if isinstance(profiles, dict) else None
     kind = profile_data.get("type") if isinstance(profile_data, dict) else None
     if kind == "vm":

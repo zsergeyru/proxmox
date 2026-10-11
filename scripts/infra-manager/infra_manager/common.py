@@ -22,6 +22,18 @@ LOG_LEVEL_ENV = "INFRA_LOG_LEVEL"
 LOG_LEVELS = frozenset({"normal", "verbose", "quiet"})
 
 
+def read_env_file(path: Path) -> dict[str, str]:
+    """Прочитать KEY=VALUE из файла без выполнения его содержимого."""
+
+    values: dict[str, str] = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line or line.lstrip().startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        values[key] = value
+    return values
+
+
 def log_level() -> str:
     """Вернуть выбранный уровень вывода инфраструктурных заданий."""
     value = os.environ.get(LOG_LEVEL_ENV, "normal").strip().lower()

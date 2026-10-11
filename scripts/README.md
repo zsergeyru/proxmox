@@ -130,7 +130,7 @@ scripts/
 
 `status.py` — внутренний исполнитель глубокой проверки `infra-manager`. Он читает установленный `/etc/infra-manager/status.yaml`, который строится из локального `infra-manager-status.yaml`; операторский вывод служб и паролей в него больше не входит.
 
-`cli.py`, `__main__.py` и `common.py` образуют общую командную оболочку и вспомогательные функции Python-части.
+`cli.py`, `__main__.py` и `common.py` образуют общую командную оболочку и вспомогательные функции Python-части. Чтение файлов переменных окружения выполняет одна функция `common.read_env_file`, YAML-описания гостей — `guest_catalog.load_manifest`, а настройки root SSH-доступа к PVE задаются единственным сборщиком в `pve_host.py`.
 
 ## `infra-manager/jobs/`
 

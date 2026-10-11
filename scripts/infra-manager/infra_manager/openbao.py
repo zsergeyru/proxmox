@@ -7,7 +7,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from .access import load_access_policy
-from .common import InfraManagerError, console
+from .common import InfraManagerError, console, read_env_file
 from .pve_host import (
     check_recovery_contour,
     repair_openbao_on_host,
@@ -37,23 +37,13 @@ BOOTSTRAP_PVE_API_ENV = Path(
 )
 
 
-def _read_env_file(path: Path) -> dict[str, str]:
-    values: dict[str, str] = {}
-    for raw in path.read_text(encoding="utf-8").splitlines():
-        if not raw or raw.lstrip().startswith("#") or "=" not in raw:
-            continue
-        key, value = raw.split("=", 1)
-        values[key] = value
-    return values
-
-
 def _staged_pve_api_credential() -> dict[str, str] | None:
     """Прочитать одноразовый PVE credential recovery, если он передан."""
 
     if not BOOTSTRAP_PVE_API_ENV.is_file():
         return None
 
-    values = _read_env_file(BOOTSTRAP_PVE_API_ENV)
+    values = read_env_file(BOOTSTRAP_PVE_API_ENV)
     endpoint = values.get("PVE_API_URL", "")
     token_id = values.get("PVE_API_TOKEN_ID", "")
     token_secret = values.get("PVE_API_TOKEN_SECRET", "")

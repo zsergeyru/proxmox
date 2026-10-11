@@ -522,8 +522,37 @@ def test_sign_ssh_host_key() -> None:
     }
 
 
+def test_pve_ssh_commands_share_trust_settings() -> None:
+    """Оба способа SSH используют одинаковые ключ, узел и параметры проверки."""
+
+    with (
+        patch.object(module, "require_command"),
+        patch.object(module, "_required_file"),
+        patch.object(module, "run", return_value=SimpleNamespace(returncode=0)) as execute,
+    ):
+        module._ssh("pve", "cat", "--", "/tmp/test file", capture=True)
+        first = execute.call_args
+        module._ssh_with_input(
+            "pve", "cat", "--", "/tmp/test file", input_text="secret payload"
+        )
+        second = execute.call_args
+
+    assert first.args == second.args
+    command = first.args[0]
+    assert command[-2:] == ["root@pve", "cat -- '/tmp/test file'"]
+    assert "StrictHostKeyChecking=yes" in command
+    assert "BatchMode=yes" in command
+    assert "IdentitiesOnly=yes" in command
+    assert first.kwargs == {"capture_output": True}
+    assert second.kwargs == {
+        "capture_output": True,
+        "input_text": "secret payload",
+    }
+
+
 def main() -> None:
     test_feature_parser()
+    test_pve_ssh_commands_share_trust_settings()
     test_container_host_reconcile()
     test_container_host_noop()
     test_openbao_host_support()

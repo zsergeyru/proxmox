@@ -470,9 +470,47 @@ def check_user_errors_and_colors() -> None:
     assert "сети" in err.getvalue()
 
 
+def check_shared_configuration_readers() -> None:
+    """Единые YAML- и env-читалки одинаковы для всех вызывающих модулей."""
+
+    from infra_manager import access, openbao, pve, semaphore
+    from infra_manager.guest_catalog import load_manifest
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        env_path = root / "access.env"
+        env_path.write_text(
+            "# comment\n  # indented comment\n"
+            "PVE_API_URL=https://pve.local:8006\n"
+            "PVE_API_TOKEN_SECRET=abc=def\n"
+            "BROKEN_LINE\n",
+            encoding="utf-8",
+        )
+        expected = {
+            "PVE_API_URL": "https://pve.local:8006",
+            "PVE_API_TOKEN_SECRET": "abc=def",
+        }
+        for read in (common.read_env_file, pve.read_env_file, semaphore.read_env_file, openbao.read_env_file):
+            if read(env_path) != expected:
+                fail("Все сервисы должны одинаково читать файлы KEY=VALUE")
+
+        manifest = root / "guest.yaml"
+        manifest.write_text("vmid: 109\nname: network-gateway\n", encoding="utf-8")
+        if load_manifest(manifest) != access._load_yaml(manifest):
+            fail("Правила доступа и каталог гостей должны иметь одну YAML-читалку")
+        manifest.write_text("- invalid list\n", encoding="utf-8")
+        try:
+            load_manifest(manifest)
+        except InfraManagerError:
+            pass
+        else:
+            fail("YAML-список вместо объекта должен быть отклонён")
+
+
 def main_test() -> None:
     check_user_errors_and_colors()
     check_cli_and_commands()
+    check_shared_configuration_readers()
     check_log_levels()
     check_duration_output()
     check_runtime_activation_guard()

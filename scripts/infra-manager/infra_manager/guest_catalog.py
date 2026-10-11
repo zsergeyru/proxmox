@@ -27,7 +27,8 @@ class GuestIdentity:
         return guest_management_address(self.directory.parents[2], self)
 
 
-def _load_manifest(path: Path) -> dict[str, Any]:
+def load_manifest(path: Path) -> dict[str, Any]:
+    """Прочитать YAML-объект машинного описания гостя."""
     try:
         value = yaml.safe_load(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, yaml.YAMLError) as exc:
@@ -53,7 +54,7 @@ def guest_identity(repo_root: Path, vmid: int) -> GuestIdentity:
         )
 
     manifest = matches[0]
-    source = _load_manifest(manifest)
+    source = load_manifest(manifest)
     actual_vmid = source.get("vmid")
     name = source.get("name")
     role = source.get("role")
@@ -85,7 +86,7 @@ def deployable_guests(repo_root: Path) -> tuple[GuestIdentity, ...]:
     for manifest in sorted(guests_root.glob("*/guest.yaml")):
         if not (manifest.parent / "provision.yaml").is_file():
             continue
-        source = _load_manifest(manifest)
+        source = load_manifest(manifest)
         vmid = source.get("vmid")
         if not isinstance(vmid, int) or vmid <= 0:
             raise InfraManagerError(
@@ -130,7 +131,7 @@ def guest_management_address(
 ) -> str | None:
     """Вернуть IP интерфейса management, не вычисляя адрес повторно."""
 
-    defaults = _load_manifest(
+    defaults = load_manifest(
         repo_root / "infrastructure" / "guests" / "defaults.yaml"
     )
     _, address, _ = resolve_guest_configuration(
@@ -146,7 +147,7 @@ def find_guest_by_role(repo_root: Path, role: str) -> GuestIdentity:
     guests_root = repo_root / "infrastructure" / "guests"
 
     for manifest in sorted(guests_root.glob("*/guest.yaml")):
-        source = _load_manifest(manifest)
+        source = load_manifest(manifest)
         if source.get("role") != role:
             continue
         vmid = source.get("vmid")

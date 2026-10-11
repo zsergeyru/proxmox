@@ -17,32 +17,36 @@ def _required_file(path: Path, label: str) -> None:
         raise InfraManagerError(f"Не найден {label}: {path}")
 
 
-def _ssh(node: str, *command: str, capture: bool = False):
-    """Выполнить команду на PVE от root по отдельному ключу infra-manager."""
+def _ssh_command(node: str, command: tuple[str, ...]) -> list[str]:
+    """Подготовить единый доверенный SSH-вызов root-доступа к PVE."""
+
     require_command("ssh")
     _required_file(PATHS.pve_host_private_key, "закрытый ключ root-доступа к PVE")
     _required_file(PATHS.pve_host_known_hosts, "known_hosts PVE")
+    return [
+        "ssh",
+        "-i",
+        str(PATHS.pve_host_private_key),
+        "-o",
+        f"UserKnownHostsFile={PATHS.pve_host_known_hosts}",
+        "-o",
+        "StrictHostKeyChecking=yes",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "IdentitiesOnly=yes",
+        "-o",
+        "ConnectTimeout=10",
+        f"root@{node}",
+        shlex.join(command),
+    ]
 
-    remote_command = shlex.join(command)
+
+def _ssh(node: str, *command: str, capture: bool = False):
+    """Выполнить команду на PVE от root по отдельному ключу infra-manager."""
 
     return run(
-        [
-            "ssh",
-            "-i",
-            str(PATHS.pve_host_private_key),
-            "-o",
-            f"UserKnownHostsFile={PATHS.pve_host_known_hosts}",
-            "-o",
-            "StrictHostKeyChecking=yes",
-            "-o",
-            "BatchMode=yes",
-            "-o",
-            "IdentitiesOnly=yes",
-            "-o",
-            "ConnectTimeout=10",
-            f"root@{node}",
-            remote_command,
-        ],
+        _ssh_command(node, command),
         capture_output=capture,
     )
 
@@ -53,29 +57,9 @@ def _ssh_with_input(
     input_text: str,
 ):
     """Передать данные на PVE через stdin, не помещая их в argv."""
-    require_command("ssh")
-    _required_file(PATHS.pve_host_private_key, "закрытый ключ root-доступа к PVE")
-    _required_file(PATHS.pve_host_known_hosts, "known_hosts PVE")
 
-    remote_command = shlex.join(command)
     return run(
-        [
-            "ssh",
-            "-i",
-            str(PATHS.pve_host_private_key),
-            "-o",
-            f"UserKnownHostsFile={PATHS.pve_host_known_hosts}",
-            "-o",
-            "StrictHostKeyChecking=yes",
-            "-o",
-            "BatchMode=yes",
-            "-o",
-            "IdentitiesOnly=yes",
-            "-o",
-            "ConnectTimeout=10",
-            f"root@{node}",
-            remote_command,
-        ],
+        _ssh_command(node, command),
         capture_output=True,
         input_text=input_text,
     )

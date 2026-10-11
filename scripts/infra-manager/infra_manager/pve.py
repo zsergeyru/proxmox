@@ -13,7 +13,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-from .common import InfraManagerError, console
+from .common import InfraManagerError, console, read_env_file
 from .pve_host import check_root_access
 from .settings import PATHS, SETTINGS
 
@@ -30,16 +30,6 @@ ROOT_ADMIN_PRIVS = {
 
 def nonempty(path: Path) -> bool:
     return path.is_file() and path.stat().st_size > 0
-
-
-def read_env_file(path: Path) -> dict[str, str]:
-    result: dict[str, str] = {}
-    for line in path.read_text(encoding="utf-8").splitlines():
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        result[key] = value
-    return result
 
 
 class PveClient:

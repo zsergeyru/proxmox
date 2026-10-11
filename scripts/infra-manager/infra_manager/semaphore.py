@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .common import LOG_LEVEL_ENV, LOG_LEVELS, InfraManagerError, console
+from .common import LOG_LEVEL_ENV, LOG_LEVELS, InfraManagerError, console, read_env_file
 from .guest_operations import operation_guests
 from .pve_host import update_openbao_semaphore_api_token
 from .settings import PATHS, SETTINGS
@@ -176,16 +176,6 @@ def semaphore_templates(
 
 def nonempty(path: Path) -> bool:
     return path.is_file() and path.stat().st_size > 0
-
-
-def read_env_file(path: Path) -> dict[str, str]:
-    result: dict[str, str] = {}
-    for line in path.read_text(encoding="utf-8").splitlines():
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        result[key] = value
-    return result
 
 
 def find_unique_by_name(

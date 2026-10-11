@@ -6,9 +6,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import yaml
-
 from .common import InfraManagerError
+from .guest_catalog import load_manifest as _load_yaml
 from .guest_catalog import resolve_guest_configuration
 
 
@@ -57,16 +56,6 @@ class AccessPolicy:
 
     def project_repository_read_allowed(self, vmid: int) -> bool:
         return vmid in self.project_repository_read_vmids
-
-
-def _load_yaml(path: Path) -> dict[str, Any]:
-    try:
-        value = yaml.safe_load(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, yaml.YAMLError) as exc:
-        raise InfraManagerError(f"Не удалось прочитать {path}: {exc}") from exc
-    if not isinstance(value, dict):
-        raise InfraManagerError(f"{path} должен содержать YAML object")
-    return value
 
 
 def _guest_records(repo_root: Path) -> dict[int, GuestRecord]:
