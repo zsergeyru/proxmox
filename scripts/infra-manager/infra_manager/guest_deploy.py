@@ -1271,14 +1271,23 @@ def _run_deploy_guest(
     return 0
 
 
-def run_deploy_guest(repo_root: Path, vmid: int) -> int:
-    """Привести существующего или обычного управляемого гостя к декларации."""
+def run_deploy_guest(
+    repo_root: Path,
+    vmid: int,
+    *,
+    phase: str = "all",
+) -> int:
+    """Развернуть гостя полностью или применить только provision существующего."""
 
+    if phase not in {"all", "provision"}:
+        raise InfraManagerError(
+            f"Штатный deploy гостя не поддерживает фазу {phase!r}"
+        )
     return _run_deploy_guest(
         repo_root,
         vmid,
         bootstrap_scope=False,
-        phase="all",
+        phase=phase,
     )
 
 
