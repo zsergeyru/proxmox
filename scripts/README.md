@@ -67,7 +67,7 @@ scripts/
 │   └── jobs/                                # Задания, непосредственно запускаемые Semaphore
 │       ├── opentofu-plan.py                  # Формирует входные данные OpenTofu и строит только план изменений
 │       ├── guest-operation.py                # Общая точка входа пяти гостевых операций Semaphore
-│       ├── deploy-guest.py                   # Совместимая точка специальных фаз bootstrap
+│       ├── bootstrap-infra-manager.py        # Внутренние шаги начального развёртывания infra-manager
 │       ├── build-template.py                 # Собирает Packer-шаблон VM 9000 и запускает его проверку
 │       ├── set-log-level.py                  # Сохраняет выбранный режим вывода в настройках Semaphore
 │       ├── initialize-openbao.py             # Инициализирует и проверяет OpenBao через доверенный PVE
@@ -120,7 +120,7 @@ scripts/
 
 `access.py` — строит эффективные межмашинные SSH-связи из `infrastructure/security/access.yaml` и гостевых описаний.
 
-`jobs/sync-ssh-access.py` синхронизирует только OpenBao SSH OTP/AppRole из `access.yaml`. Настройка конкретного гостя выполняется `deploy-guest.py`, а сквозная проверка разрешённых и запрещённых SSH OTP-связей вынесена в `scripts/acceptance/verify-ssh-access.py`.
+`jobs/sync-ssh-access.py` синхронизирует только OpenBao SSH OTP/AppRole из `access.yaml`. Настройка конкретного гостя запускается через `jobs/guest-operation.py` (операция `deploy`), а сквозная проверка разрешённых и запрещённых SSH OTP-связей вынесена в `scripts/acceptance/verify-ssh-access.py`.
 
 `pve.py` — проверяет фактические права ключа доступа PVE API и отсутствие запрещённых административных полномочий.
 
@@ -162,7 +162,7 @@ Sync Guest ───┘
 
 `Deploy Guest` вызывает общий OpenTofu + Ansible-контур. Для `role: infra-manager` он сохраняет прежнее правило отложенной активации `infra-runtime`.
 
-`deploy-guest.py` остаётся совместимой технической точкой специальных фаз первоначального bootstrap: создание объекта, базовая настройка и provision существующего infra-manager.
+`bootstrap-infra-manager.py` используется только начальным контуром 990 для последовательных этапов создания и настройки infra-manager. Обычное развёртывание и самообновление выполняются через `guest-operation.py`; прежняя отдельная точка `deploy-guest.py` удалена как дублирующая.
 
 `initialize-openbao.py` остаётся внутренней точкой первоначального bootstrap и восстановления. В Semaphore отдельного шаблона для неё нет. Для человека штатные действия вынесены в PVE-команду `infra-manager repair` и `infra-manager recover`.
 
