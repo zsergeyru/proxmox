@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .common import InfraManagerError, console, run
+from .guest_catalog import guest_identity, guest_management_address
 from .opentofu import OpenTofuWorkspace
 from .pve import PveClient
 from .settings import PATHS
@@ -459,13 +460,14 @@ def _build_deployment_context(
     if not isinstance(network, dict):
         raise InfraManagerError(f"VMID {vmid}: отсутствует network")
 
-    ipv4 = str(network.get("ipv4") or "")
-    if not ipv4 or ipv4 == "dhcp":
+    address = guest_management_address(
+        repo_root, guest_identity(repo_root, vmid)
+    )
+    if address is None:
         raise InfraManagerError(
-            f"VMID {vmid}: для текущего deploy-guest требуется "
-            "статический IPv4"
+            f"VMID {vmid}: для deploy-guest требуется "
+            "статический административный IPv4"
         )
-    address = ipv4.split("/", 1)[0]
 
     guest_dir = _find_guest_directory(repo_root, vmid)
     provision_file = guest_dir / "provision.yaml"
