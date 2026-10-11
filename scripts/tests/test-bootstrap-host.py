@@ -1697,6 +1697,23 @@ def test_finalize_runner_uses_single_destroy_path() -> None:
                  "Не нужно отдельно чистить файлы перед уничтожением rootfs")
 
 
+def test_finalize_runner_reports_remaining_template() -> None:
+    """Не сообщать о полной очистке, когда остался временный шаблон."""
+    with tempfile.TemporaryDirectory() as temp:
+        host = RunnerFinalizationHarness()
+        host.host_template_marker = Path(temp) / "template.ref"
+        host.host_template_marker.write_text(
+            "local:vztmpl/debian-13-bootstrap.tar.zst", encoding="utf-8"
+        )
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            host.finalize_runner()
+        if "очистка выполнена частично" not in output.getvalue():
+            raise AssertionError("Оставшийся шаблон должен быть виден оператору")
+        if "ok" in host.events:
+            raise AssertionError("Нельзя объявлять полную очистку при оставшемся шаблоне")
+
+
 def test_lock_rejects_symlink_without_touching_target() -> None:
     """Символьная ссылка вместо блокировки не должна изменять чужой файл."""
     with tempfile.TemporaryDirectory() as temp:
@@ -2379,6 +2396,7 @@ def main() -> None:
         test_check_failure_revokes_token_without_destroying_runner,
         test_failed_token_revoke_preserves_original_error,
         test_finalize_runner_uses_single_destroy_path,
+        test_finalize_runner_reports_remaining_template,
         test_lock_rejects_symlink_without_touching_target,
         test_purge_keeps_persistent_storage,
         test_bootstrap_python_sources_follow_rule_010,

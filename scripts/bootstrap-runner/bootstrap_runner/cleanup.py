@@ -97,7 +97,15 @@ class BootstrapCleanupMixin:
         self.remove_bootstrap_ssh_access_from_infra()
         self.remove_private_access()
         self.remove_runner_if_present()
-        self.ok("Временный контур 990 полностью удалён")
+        if self.host_template_marker.is_file():
+            # Не объявлять полную очистку, если pvesm free не смог
+            # освободить временный шаблон и маркер сохранён.
+            self.info(
+                "ПРЕДУПРЕЖДЕНИЕ: LXC 990 и временный токен удалены, "
+                "но шаблон остался; очистка выполнена частично"
+            )
+        else:
+            self.ok("Временный контур 990 полностью удалён")
 
     def remove_runner_if_present(self) -> None:
         """Удалить только свой одноразовый 990 и освободить временный шаблон.
