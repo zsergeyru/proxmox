@@ -156,6 +156,9 @@ def test_openbao_host_support() -> None:
             patch.object(module, "_install_remote_text_tree", side_effect=record_tree),
             patch.object(module, "_install_remote_text", side_effect=record_text),
             patch.object(module, "_ssh", side_effect=record_ssh),
+            patch.object(
+                module, "guest_management_address", return_value="192.168.9.20"
+            ),
         ):
             module.install_openbao_host_support("pve", root)
 
