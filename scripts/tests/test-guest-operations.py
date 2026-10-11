@@ -20,6 +20,7 @@ MODULE_ROOT = ROOT / "scripts" / "infra-manager"
 sys.path.insert(0, str(MODULE_ROOT))
 
 from infra_manager import access as access_module
+from infra_manager import guest_deploy as guest_deploy_module
 from infra_manager import guest_deploy_infrastructure as guest_infra_module
 from infra_manager import guest_operations as operations
 from infra_manager import operation_lock
@@ -334,14 +335,40 @@ def check_sync_operation() -> None:
     sync.assert_called_once_with(ROOT, identity)
 
     regular = guest_identity(ROOT, 109)
+    # Подменяем внутренний исполнитель, а не run_deploy_guest:
+    # реальный вызов Sync Guest должен принимать phase="provision".
     with patch.object(
-        operations,
-        "run_deploy_guest",
+        guest_deploy_module,
+        "_run_deploy_guest",
         return_value=0,
     ) as deploy:
         if operations._run_sync(ROOT, regular) != 0:
             fail("Sync Guest обычного гостя должен завершаться успешно")
-    deploy.assert_called_once_with(ROOT, 109, phase="provision")
+    deploy.assert_called_once_with(
+        ROOT, 109, bootstrap_scope=False, phase="provision"
+    )
+
+    # Deploy Guest по умолчанию сохраняет полное развёртывание.
+    with patch.object(
+        guest_deploy_module,
+        "_run_deploy_guest",
+        return_value=0,
+    ) as deploy:
+        if guest_deploy_module.run_deploy_guest(ROOT, 109) != 0:
+            fail("Deploy Guest должен использовать полное развёртывание")
+    deploy.assert_called_once_with(
+        ROOT, 109, bootstrap_scope=False, phase="all"
+    )
+
+    # Штатная точка входа не должна принимать фазы начального контура 990.
+    try:
+        guest_deploy_module.run_deploy_guest(
+            ROOT, 109, phase="provision-control-plane"
+        )
+    except InfraManagerError:
+        pass
+    else:
+        fail("Штатный deploy не должен принимать фазы начального контура")
 
 
 def check_deploy_operation() -> None:
