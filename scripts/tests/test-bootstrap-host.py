@@ -2296,6 +2296,68 @@ def test_host_authorized_keys_rejects_symlink() -> None:
 
 
 
+
+def test_host_authorized_keys_accepts_proxmox_link() -> None:
+    """Работать со штатной ссылкой PVE без её замены и изменения прав pmxcfs."""
+    with tempfile.TemporaryDirectory() as temp:
+        root = Path(temp)
+        ssh_dir = root / "root" / ".ssh"
+        ssh_dir.mkdir(parents=True)
+        target = root / "etc" / "pve" / "priv" / "authorized_keys"
+        target.parent.mkdir(parents=True)
+        target.write_text("ssh-ed25519 AAAA-other another-admin\n", encoding="utf-8")
+        link = ssh_dir / "authorized_keys"
+        link.symlink_to(target)
+        host = BootstrapHost("apply")
+        host.host_root_authorized_keys = link
+
+        with (
+            patch("bootstrap_runner.access.ROOT_AUTHORIZED_KEYS", link),
+            patch("bootstrap_runner.access.PVE_CLUSTER_AUTHORIZED_KEYS", target),
+            patch("bootstrap_runner.access.os.replace", side_effect=AssertionError(
+                "Кластерный файл не должен заменяться через os.replace"
+            )),
+        ):
+            host._write_host_authorized_keys([
+                "ssh-ed25519 AAAA-other another-admin",
+                "ssh-ed25519 BBBB-managed infra-manager-pve-root",
+            ])
+            if not link.is_symlink():
+                raise AssertionError("Штатная ссылка Proxmox должна остаться ссылкой")
+            if "AAAA-other" not in target.read_text(encoding="utf-8"):
+                raise AssertionError("Чужие ключи доступа к PVE необходимо сохранять")
+            host.remove_host_root_ssh_authorization()
+
+        assert_equal(target.read_text(encoding="utf-8"),
+                     "ssh-ed25519 AAAA-other another-admin\n",
+                     "Удаляется только ключ infra-manager, ссылка остаётся")
+        if not link.is_symlink():
+            raise AssertionError("Удаление ключа не должно нарушать ссылку PVE")
+
+
+def test_host_authorized_keys_rejects_forged_proxmox_link() -> None:
+    """Ссылка не из штатного расположения не считается доверенной."""
+    with tempfile.TemporaryDirectory() as temp:
+        root = Path(temp)
+        target = root / "etc/pve/priv/authorized_keys"
+        target.parent.mkdir(parents=True)
+        target.write_text("preserve\n", encoding="utf-8")
+        link = root / "other" / "authorized_keys"
+        link.parent.mkdir()
+        link.symlink_to(target)
+        host = BootstrapHost("apply")
+        host.host_root_authorized_keys = link
+        with patch("bootstrap_runner.access.PVE_CLUSTER_AUTHORIZED_KEYS", target):
+            try:
+                host._write_host_authorized_keys(["bad"])
+            except BootstrapError:
+                pass
+            else:
+                raise AssertionError("Нештатная ссылка должна отклоняться")
+        assert_equal(target.read_text(encoding="utf-8"), "preserve\n",
+                     "Посторонняя ссылка не должна менять содержимое")
+
+
 def test_pveum_json_rejects_invalid_shape() -> None:
     """Не считать повреждённый ответ PVE отсутствием объектов или токенов."""
     class JSONShapeHarness(BootstrapHost):
@@ -2419,6 +2481,8 @@ def main() -> None:
         test_recovery_destroy_failure_restores_protection,
         test_host_authorized_keys_atomic_replacement,
         test_host_authorized_keys_rejects_symlink,
+        test_host_authorized_keys_accepts_proxmox_link,
+        test_host_authorized_keys_rejects_forged_proxmox_link,
         test_pveum_json_rejects_invalid_shape,
         test_recovery_unprotect_failure_restores_protection,
     ]
