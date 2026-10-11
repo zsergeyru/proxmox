@@ -1688,13 +1688,15 @@ class RunnerFinalizationHarness(BootstrapHost):
 
 def test_finalize_runner_uses_single_destroy_path() -> None:
     """После успеха удалить 990 одним общим способом и отозвать токен."""
-    host = RunnerFinalizationHarness()
-    host.finalize_runner()
-    assert_equal(host.events,
-                 ["owner", "remove_bootstrap_auth", "revoke_token",
-                  "owner", "pct:stop 990",
-                  "run:pct destroy 990 --purge 1", "template", "ok"],
-                 "Не нужно отдельно чистить файлы перед уничтожением rootfs")
+    with tempfile.TemporaryDirectory() as temp:
+        host = RunnerFinalizationHarness()
+        host.host_template_marker = Path(temp) / "template.ref"
+        host.finalize_runner()
+        assert_equal(host.events,
+                     ["owner", "remove_bootstrap_auth", "revoke_token",
+                      "owner", "pct:stop 990",
+                      "run:pct destroy 990 --purge 1", "template", "ok"],
+                     "Не нужно отдельно чистить файлы перед уничтожением rootfs")
 
 
 def test_finalize_runner_reports_remaining_template() -> None:
