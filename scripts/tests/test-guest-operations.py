@@ -40,7 +40,7 @@ def fail(message: str) -> None:
 
 def check_operation_catalog() -> None:
     expected = {guest.vmid for guest in deployable_guests(ROOT)}
-    for operation in ("deploy", "status", "repair", "test"):
+    for operation in ("deploy", "status", "repair"):
         actual = {
             guest.vmid
             for guest in operations.operation_guests(ROOT, operation)
@@ -291,38 +291,6 @@ def check_infra_manager_repair_operation() -> None:
         repo_root=ROOT,
     )
 
-
-def check_test_operation() -> None:
-    identity = guest_identity(ROOT, 109)
-    resource = {
-        "vmid": 109,
-        "name": "network-gateway",
-        "type": "qemu",
-        "node": "pve",
-        "status": "running",
-    }
-    client = FakePveClient(resource)
-
-    with (
-        patch.object(
-            operations,
-            "verify_guest_status",
-        ) as verify,
-        patch.object(
-            operations,
-            "project_branch_for_checkout",
-            return_value="feature/test-branch",
-        ),
-    ):
-        if operations._run_test(client, ROOT, identity) != 0:
-            fail("Test Guest должен завершаться успешно")
-
-    verify.assert_called_once_with(
-        ROOT,
-        identity,
-        resource,
-        project_branch="feature/test-branch",
-    )
 
 def check_sync_operation() -> None:
     identity = guest_identity(ROOT, 910)
@@ -609,6 +577,13 @@ def check_status_during_self_update() -> None:
 
 
 def check_dispatch() -> None:
+    try:
+        operations.run_guest_operation(ROOT, "test", 109)
+    except InfraManagerError:
+        pass
+    else:
+        fail("Удалённая операция Test Guest не должна быть доступна")
+
     with (
         patch.object(operations, "require_runtime_activation_idle") as idle,
         patch.object(
@@ -710,7 +685,7 @@ def check_operation_lock() -> None:
         try:
             with operation_lock.guest_operation_lock(
                 410,
-                "test",
+                "sync",
                 lock_dir=lock_dir,
             ):
                 raise RuntimeError("test")
@@ -826,7 +801,6 @@ def main() -> None:
     check_status_operation()
     check_repair_operation()
     check_infra_manager_repair_operation()
-    check_test_operation()
     check_sync_operation()
     check_deploy_operation()
     check_status_during_self_update()

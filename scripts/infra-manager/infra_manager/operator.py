@@ -279,9 +279,6 @@ def _operator_guest_task(
             f"Выполните infra-manager status {vmid}, устраните указанную выше причину и повторите операцию."
         )
         return result.returncode
-    if operation == "test":
-        return 0
-
     if operation == "deploy":
         identity = guest_identity(PATHS.repo_root, vmid)
         if identity.role == SETTINGS.infra_manager_role:
@@ -388,7 +385,6 @@ def build_parser() -> argparse.ArgumentParser:
     for command, help_text in (
         ("deploy", "развернуть или обновить гостя"),
         ("sync", "синхронизировать гостя"),
-        ("test", "проверить гостя без изменений"),
     ):
         command_parser = subparsers.add_parser(command, help=help_text)
         command_parser.add_argument("vmid", type=int, help="VMID гостя")
@@ -435,7 +431,7 @@ def main(argv: list[str] | None = None) -> int:
                 args.vmid,
                 show_secrets=show_secrets,
             )
-        if args.command in {"deploy", "sync", "test"}:
+        if args.command in {"deploy", "sync"}:
             return operator_guest_task(
                 args.command,
                 args.vmid,

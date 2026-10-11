@@ -42,7 +42,7 @@ def main() -> int:
     parser.add_argument(
         "operation",
         choices=GUEST_OPERATIONS,
-        help="Операция: deploy/status/repair/test/sync",
+        help="Операция: deploy/status/repair/sync",
     )
     parser.add_argument("vmid", nargs="?", type=int, help="VMID гостя")
 

@@ -36,7 +36,7 @@ scripts/
 │   │   ├── common.py                        # Общие ошибки, вывод и безопасный запуск внешних команд
 │   │   ├── settings.py                      # Хранит единые неизменяемые пути, имена, версии и значения по умолчанию
 │   │   ├── guest_catalog.py                 # Находит специальных гостей по role и читает их VMID, имя и адрес
-│   │   ├── guest_operations.py              # Выполняет общие Deploy/Status/Repair/Test/Sync операции над гостями
+│   │   ├── guest_operations.py              # Выполняет общие Deploy/Status/Repair/Sync операции над гостями
 │   │   ├── operation_lock.py                 # Координирует общую Git-копию и блокировки изменяющих операций по VMID
 │   │   ├── guest_status.py                  # Проверяет и выводит единое состояние любого поддерживаемого гостя
 │   │   ├── operator.py                      # Операторская логика, выполняемая внутри 910
@@ -66,7 +66,7 @@ scripts/
 │   │
 │   └── jobs/                                # Задания, непосредственно запускаемые Semaphore
 │       ├── opentofu-plan.py                  # Формирует входные данные OpenTofu и строит только план изменений
-│       ├── guest-operation.py                # Общая точка входа пяти гостевых операций Semaphore
+│       ├── guest-operation.py                # Общая точка входа четырёх гостевых операций Semaphore
 │       ├── bootstrap-infra-manager.py        # Внутренние шаги начального развёртывания infra-manager
 │       ├── build-template.py                 # Собирает Packer-шаблон VM 9000 и запускает его проверку
 │       ├── set-log-level.py                  # Сохраняет выбранный режим вывода в настройках Semaphore
@@ -78,7 +78,7 @@ scripts/
 │
 └── tests/                                    # Локальные и автоматические проверки без постоянных изменений инфраструктуры
     ├── test-guest-deploy.py                  # Проверяет планирование и безопасное применение изменений гостевой системы
-    ├── test-guest-operations.py              # Проверяет общий контракт Deploy/Status/Repair/Test/Sync
+    ├── test-guest-operations.py              # Проверяет общий контракт Deploy/Status/Repair/Sync
     ├── test-guest-status.py                  # Проверяет единый статус, службы и безопасный вывод паролей
     ├── test-guest-resolver.py                # Проверяет сборщик конфигурации, управление, начальную настройку и возможности профиля
     ├── test-infra-manager-python.py          # Проверяет основу Python-пакета, командную оболочку и вспомогательные функции PVE
@@ -148,17 +148,16 @@ Semaphore: OpenTofu Plan
 
 Задание строит только план и не выполняет `apply` или `destroy`.
 
-`guest-operation.py` является общей точкой входа пяти отдельных шаблонов Semaphore:
+`guest-operation.py` является общей точкой входа четырёх отдельных шаблонов Semaphore:
 
 ```text
 Deploy Guest ─┐
 Status Guest ─┤
 Repair Guest ─┤
-Test Guest ───┤→ guest-operation.py → guest_operations.py
-Sync Guest ───┘
+Sync Guest ───┘→ guest-operation.py → guest_operations.py
 ```
 
-Во всех шаблонах гость выбирается только из `GUEST_VMID` типа `enum`. `Deploy`, `Status`, `Repair` и `Test` используют общий каталог гостей с `guest.yaml + provision.yaml`. `Sync` показывает только роли, для которых существует безопасный обработчик.
+Во всех шаблонах гость выбирается только из `GUEST_VMID` типа `enum`. Все четыре операции используют общий каталог гостей с `guest.yaml + provision.yaml`.
 
 `Deploy Guest` вызывает общий OpenTofu + Ansible-контур. Для `role: infra-manager` он сохраняет прежнее правило отложенной активации `infra-runtime`.
 
@@ -190,13 +189,12 @@ infra-manager status [VMID]
 infra-manager deploy VMID
 infra-manager sync VMID
 infra-manager repair [VMID]
-infra-manager test VMID
 infra-manager recover
 ```
 
 Но `scripts/infra-manager/host/manager.py` теперь является только минимальной оболочкой. Для всех обычных операций она проверяет VMID управляющего LXC и передаёт аргументы через `pct exec` установленной команде `/usr/local/sbin/infra-manager` внутри 910. Реальная операторская логика находится в `infra_manager/operator.py`.
 
-`deploy/sync/repair/test` из PVE не создают задание Semaphore через API. Перед прямым `deploy` оператор внутри 910 сам обновляет постоянную Git-копию под исключительной блокировкой и создаёт временный снимок внутри `infra-runtime`; `sync/repair/test` создают снимок текущей копии под разделяемой блокировкой. После создания снимка длительная операция идёт уже без блокировки проекта. Шаблоны Semaphore вызывают ту же точку входа из своей рабочей копии задания. Оба пути сходятся в `run_guest_operation()` и используют общий каталог `/var/lib/infra-manager/locks`; изменяющие операции блокируются по VMID.
+`deploy/sync/repair` из PVE не создают задание Semaphore через API. Перед прямым `deploy` оператор внутри 910 сам обновляет постоянную Git-копию под исключительной блокировкой и создаёт временный снимок внутри `infra-runtime`; `sync/repair` создают снимок текущей копии под разделяемой блокировкой. После создания снимка длительная операция идёт уже без блокировки проекта. Шаблоны Semaphore вызывают ту же точку входа из своей рабочей копии задания. Оба пути сходятся в `run_guest_operation()` и используют общий каталог `/var/lib/infra-manager/locks`; изменяющие операции блокируются по VMID.
 
 Доверенный вызов с PVE помечается `--trusted-pve`; только в этом режиме итоговый status может вывести операторские пароли в текущий root-терминал. Semaphore, Homepage и внутренние проверки этот режим не используют.
 
@@ -242,7 +240,7 @@ python scripts/validate_repo.py
 - `test-infra-manager-python.py` проверяет основу Python-пакета, командную оболочку и PVE-вспомогательные функции.
 - `test-pve-lifecycle.py` проверяет полный сценарий lifecycle test, защиту занятого VMID и аварийную очистку без реального PVE.
 - `test-python-command.py` проверяет внутреннюю оболочку `infra-manager-status`.
-- `test-manager-host.py` проверяет единый набор `infra-manager guests/update/status/deploy/sync/repair/test/recover` без реального изменения PVE.
+- `test-manager-host.py` проверяет единый набор `infra-manager guests/status/deploy/sync/repair/recover` без реального изменения PVE.
 - `test-bootstrap-host.py` проверяет состояния первоначального контура, восстановление, строгую метку владения 910 и безопасное удаление.
 - `test-status.py` проверяет чтение и валидацию состояния Semaphore.
 - `test-template.py` проверяет безопасную передачу параметров Packer и валидацию шаблона.

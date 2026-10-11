@@ -21,7 +21,7 @@ from .guest_deploy import (
     project_revision,
     run_deploy_guest,
 )
-from .guest_status import show_guest_status, verify_guest_status
+from .guest_status import show_guest_status
 from .operation_lock import guest_operation_lock, project_checkout_lock
 from .pve import PveClient
 from .pve_host import (
@@ -34,7 +34,6 @@ GUEST_OPERATIONS: Final[tuple[str, ...]] = (
     "deploy",
     "status",
     "repair",
-    "test",
     "sync",
 )
 
@@ -354,29 +353,6 @@ def _run_repair(
     return 0
 
 
-def _run_test(
-    client: PveClient,
-    repo_root: Path,
-    identity: GuestIdentity,
-) -> int:
-    resource = _generic_status(
-        client,
-        repo_root,
-        identity,
-        announce=False,
-    )
-    verify_guest_status(
-        repo_root,
-        identity,
-        resource,
-        project_branch=project_branch_for_checkout(repo_root),
-    )
-    console.ok(
-        f"Гость {identity.vmid} {identity.name}: расширенная проверка пройдена"
-    )
-    return 0
-
-
 def _run_sync(
     repo_root: Path,
     identity: GuestIdentity,
@@ -432,7 +408,5 @@ def run_guest_operation(
         client = PveClient.from_opentofu_env()
         if operation == "repair":
             return _run_repair(client, repo_root, identity)
-        if operation == "test":
-            return _run_test(client, repo_root, identity)
 
     raise InfraManagerError(f"Неизвестная операция гостя: {operation}")

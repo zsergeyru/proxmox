@@ -179,7 +179,6 @@ semaphore:
     - Deploy Guest
     - Status Guest
     - Repair Guest
-    - Test Guest
     - Sync Guest
     - Sync SSH Access
 

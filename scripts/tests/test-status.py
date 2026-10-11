@@ -101,10 +101,6 @@ def main_test() -> None:
             "scripts/infra-manager/jobs/guest-operation.py",
             '["repair"]',
         ),
-        "Test Guest": (
-            "scripts/infra-manager/jobs/guest-operation.py",
-            '["test"]',
-        ),
         "Sync Guest": (
             "scripts/infra-manager/jobs/guest-operation.py",
             '["sync"]',
@@ -137,7 +133,6 @@ def main_test() -> None:
         "Deploy Guest": "Guests",
         "Status Guest": "Guests",
         "Repair Guest": "Guests",
-        "Test Guest": "Guests",
         "Sync Guest": "Guests",
         "OpenTofu Plan": "Infrastructure",
         "Build Template 9000": "Infrastructure",
@@ -153,7 +148,6 @@ def main_test() -> None:
         "Deploy Guest": "deploy",
         "Status Guest": "status",
         "Repair Guest": "repair",
-        "Test Guest": "test",
         "Sync Guest": "sync",
     }
     for template_name, operation in operation_templates.items():
@@ -217,7 +211,6 @@ def main_test() -> None:
         "Deploy Guest",
         "Status Guest",
         "Repair Guest",
-        "Test Guest",
         "Sync Guest",
     ):
         moved_template = moved.get(template_name)
@@ -586,6 +579,18 @@ def main_test() -> None:
     order_events: list[str] = []
 
     class SyncOrderClient:
+        def get(self, path: str):
+            if path != "/project/41/templates?sort=name&order=asc":
+                raise AssertionError(f"Неожиданный GET: {path}")
+            order_events.append("templates")
+            return [
+                {"id": 71, "name": "Test Guest"},
+                {"id": 72, "name": "Deploy Guest"},
+            ]
+
+        def delete(self, path: str):
+            order_events.append(f"delete:{path}")
+
         def ensure_opentofu_environment(self, project_id: int) -> int:
             del project_id
             return 8
@@ -638,9 +643,14 @@ def main_test() -> None:
             ROOT,
             reuse_existing_git=True,
         )
-    if order_events != ["catalog", "git"]:
+    if order_events != [
+        "catalog",
+        "git",
+        "templates",
+        "delete:/project/41/templates/71",
+    ]:
         fail(
-            "Каталог гостей должен считываться до изменения Git-контура Semaphore"
+            f"Нарушен порядок настройки и удаления старого задания: {order_events!r}"
         )
 
     invalid_task_client = TaskSyncClient(token_valid=False)

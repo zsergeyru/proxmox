@@ -196,12 +196,7 @@ def test_operator_guest_task_secret_policy() -> None:
         in operator.RUNTIME_DIRECT_SCRIPT
     )
     snapshot = "/tmp/infra-manager-direct-test-410"
-    for operation, expect_status in (
-        ("deploy", True),
-        ("sync", True),
-        ("repair", True),
-        ("test", False),
-    ):
+    for operation in ("deploy", "sync", "repair"):
         with (
             patch.object(
                 operator,
@@ -249,10 +244,7 @@ def test_operator_guest_task_secret_policy() -> None:
             check=False,
             stream_output=True,
         )
-        if expect_status:
-            status.assert_called_once_with(410, show_secrets=True)
-        else:
-            status.assert_not_called()
+        status.assert_called_once_with(410, show_secrets=True)
 
     with (
         patch.object(
@@ -606,10 +598,16 @@ def test_public_command_contract() -> None:
         ["sync", "410"],
         ["repair"],
         ["repair", "410"],
-        ["test", "410"],
         ["recover"],
     ):
         parser.parse_args(argv)
+
+    try:
+        parser.parse_args(["test", "410"])
+    except SystemExit:
+        pass
+    else:
+        raise AssertionError("Команда Test Guest должна быть удалена")
 
     try:
         parser.parse_args(["update"])

@@ -95,7 +95,7 @@ done
     || die "Отсутствует минимальная операторская оболочка PVE"
 [[ -s "$PY_OPERATOR" ]] \
     || die "Отсутствует операторский слой внутри infra-manager"
-for operator_command in guests deploy status sync repair test recover; do
+for operator_command in guests deploy status sync repair recover; do
     grep -Fq "\"$operator_command\"" "$PY_OPERATOR" \
         || die "Операторский слой 910 не поддерживает $operator_command"
 done

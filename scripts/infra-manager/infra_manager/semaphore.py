@@ -159,13 +159,6 @@ def semaphore_templates(
             survey_vars=_guest_survey(root, "repair"),
         ),
         TemplateSpec(
-            name="Test Guest",
-            playbook="scripts/infra-manager/jobs/guest-operation.py",
-            arguments='["test"]',
-            view="Guests",
-            survey_vars=_guest_survey(root, "test"),
-        ),
-        TemplateSpec(
             name="Sync Guest",
             playbook="scripts/infra-manager/jobs/guest-operation.py",
             arguments='["sync"]',
@@ -1115,6 +1108,18 @@ def _sync_project_objects(
             app=template.app,
             survey_vars=template.survey_vars,
         )
+
+    # Удалить ранее созданный Test Guest: проверки выполняет Status Guest.
+    obsolete = find_unique_by_name(
+        client.get(f"/project/{project_id}/templates?sort=name&order=asc"),
+        "Test Guest",
+        "template",
+    )
+    if obsolete is not None:
+        template_id = obsolete.get("id")
+        if not isinstance(template_id, int):
+            raise InfraManagerError("Шаблон Test Guest имеет некорректный id")
+        client.delete(f"/project/{project_id}/templates/{template_id}")
 
 
 def configure_project(branch: str | None = None) -> int:
