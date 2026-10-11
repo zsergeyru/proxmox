@@ -22,7 +22,7 @@ PY
 GUEST="$GUEST_DIR/guest.yaml"
 PROVISION="$GUEST_DIR/provision.yaml"
 STATUS="$GUEST_DIR/status.yaml"
-DEPLOY="$ROOT/scripts/infra-manager/jobs/deploy-guest.py"
+DEPLOY="$ROOT/scripts/infra-manager/jobs/guest-operation.py"
 BOOTSTRAP_DEPLOY="$ROOT/scripts/infra-manager/jobs/bootstrap-infra-manager.py"
 PY_GUEST_DEPLOY="$ROOT/scripts/infra-manager/infra_manager/guest_deploy.py"
 PLAYBOOK="$ROOT/automation/ansible/playbooks/configure-guest.yml"
@@ -37,7 +37,7 @@ die() {
 [[ -s "$PROVISION" ]] || die "У infra-manager отсутствует provision.yaml"
 [[ -s "$STATUS" ]] || die "У infra-manager отсутствует status.yaml"
 [[ -s "$PLAYBOOK" ]] || die "Отсутствует общий Ansible playbook"
-[[ -s "$DEPLOY" ]] || die "Отсутствует общая команда deploy-guest"
+[[ -s "$DEPLOY" ]] || die "Отсутствует единая команда guest-operation"
 
 python3 - "$GUEST" "$PROVISION" <<'PY'
 from pathlib import Path
@@ -73,7 +73,7 @@ done
 [[ ! -e "$BOOTSTRAP_DIR/deploy-infra-manager.sh" ]] || die "Отдельная deploy shell-обёртка infra-manager не должна возвращаться"
 [[ ! -e "$BOOTSTRAP_DIR/deploy-910.sh" ]] || die "Сценарий с VMID в имени не должен возвращаться"
 
-grep -q 'run_deploy_guest' "$DEPLOY"     || die "Обычный deploy должен использовать общий run_deploy_guest"
+grep -q 'run_guest_operation' "$DEPLOY" || die "Обычный deploy должен проходить через общий диспетчер операций"
 [[ -s "$BOOTSTRAP_DEPLOY" ]] || die "Отсутствует отдельная внутренняя bootstrap-точка 910"
 grep -q 'run_bootstrap_infra_manager_step' "$BOOTSTRAP_DEPLOY" || die "Bootstrap 910 должен использовать отдельный внутренний интерфейс"
 grep -q 'BOOTSTRAP_INFRA_MANAGER_PHASES' "$BOOTSTRAP_DEPLOY" || die "Bootstrap job должен брать допустимые шаги из единого контракта"
@@ -81,6 +81,8 @@ grep -q 'choices=tuple(BOOTSTRAP_INFRA_MANAGER_PHASES)' "$BOOTSTRAP_DEPLOY" || d
 grep -q '"configure-recovery-control-plane": "provision-recovery-control-plane"' "$PY_GUEST_DEPLOY" || die "Единый bootstrap-контракт должен содержать recovery-этап OpenBao"
 grep -q 'provision.yaml' "$PLAYBOOK"     || die "Общий Ansible playbook должен применять provision.yaml"
 
+[[ ! -e "$ROOT/scripts/infra-manager/jobs/deploy-guest.py" ]] \
+    || die "Дублирующая точка запуска deploy-guest.py должна быть удалена"
 if grep -q -E -- '--bootstrap-scope|--infrastructure-only|--provision-base-only|--provision-only|--provision-existing-only' "$DEPLOY"; then
     die "Публичный deploy-guest не должен содержать bootstrap-фазы 910"
 fi
