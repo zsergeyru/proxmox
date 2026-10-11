@@ -18,22 +18,46 @@ from pathlib import Path
 from .errors import BootstrapError
 
 
+ROOT_AUTHORIZED_KEYS = Path("/root/.ssh/authorized_keys")
+PVE_CLUSTER_AUTHORIZED_KEYS = Path("/etc/pve/priv/authorized_keys")
+
+
 class BootstrapAccessMixin:
     """Операции начальных доступов для общего координатора."""
-    def _write_host_authorized_keys(self, lines: list[str]) -> None:
-        """Атомарно заменить root authorized_keys, сохранив остальные записи.
+    def _host_authorized_keys_target(self) -> Path:
+        """Разрешить только штатную ссылку Proxmox либо обычный SSH-файл."""
+        source = self.host_root_authorized_keys
+        if source.parent.is_symlink():
+            self.fail(f"Небезопасный каталог SSH-доступа PVE: {source.parent}")
+        if not source.is_symlink():
+            return source
+        # В PVE root authorized_keys обычно указывает на кластерный файл.
+        # Другие символьные ссылки, в том числе внутри /etc/pve, запрещены.
+        if (
+            source != ROOT_AUTHORIZED_KEYS
+            or source.resolve() != PVE_CLUSTER_AUTHORIZED_KEYS
+            or PVE_CLUSTER_AUTHORIZED_KEYS.is_symlink()
+            or not PVE_CLUSTER_AUTHORIZED_KEYS.is_file()
+        ):
+            self.fail(f"Небезопасная ссылка SSH-доступа PVE: {source}")
+        return PVE_CLUSTER_AUTHORIZED_KEYS
 
-        Сначала подготавливается закрытый файл рядом с действующим, затем
-        он переименовывается одной операцией. Символьные ссылки запрещены.
-        """
-        target = self.host_root_authorized_keys
-        if target.is_symlink() or target.parent.is_symlink():
-            self.fail(f"Небезопасный SSH-файл PVE: {target}")
+    def _write_host_authorized_keys(self, lines: list[str]) -> None:
+        """Сохранить SSH-ключи, не разрушая штатную ссылку Proxmox."""
+        target = self._host_authorized_keys_target()
+        content = "\n".join(lines) + ("\n" if lines else "")
+        if self.host_root_authorized_keys.is_symlink():
+            # /etc/pve — pmxcfs: запрещены chmod и замена самой ссылки.
+            # Запись выполняется через единственный допустимый целевой файл.
+            target.write_text(content, encoding="utf-8")
+            return
+
+        # Обычный локальный файл заменяется атомарно.
         fd, filename = tempfile.mkstemp(prefix=".authorized_keys.", dir=target.parent)
         temporary = Path(filename)
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as file:
-                file.write("\n".join(lines) + ("\n" if lines else ""))
+                file.write(content)
                 file.flush()
                 os.fsync(file.fileno())
             temporary.chmod(0o600)
@@ -70,14 +94,13 @@ class BootstrapAccessMixin:
             self.fail("не удалось подготовить открытый root SSH-ключ PVE")
 
         root_ssh_dir = self.host_root_authorized_keys.parent
-        if root_ssh_dir.is_symlink() or self.host_root_authorized_keys.is_symlink():
-            self.fail("Символьная ссылка в root SSH-доступе PVE запрещена")
+        target = self._host_authorized_keys_target()
         root_ssh_dir.mkdir(parents=True, exist_ok=True)
         root_ssh_dir.chmod(0o700)
 
         existing = (
-            self.host_root_authorized_keys.read_text(encoding="utf-8").splitlines()
-            if self.host_root_authorized_keys.is_file()
+            target.read_text(encoding="utf-8").splitlines()
+            if target.is_file()
             else []
         )
         marker = f" {self.host_pve_root_key_comment}"
@@ -109,14 +132,13 @@ class BootstrapAccessMixin:
 
     def remove_host_root_ssh_authorization(self) -> None:
         """Удалить из root authorized_keys только ключ infra-manager."""
-        if not self.host_root_authorized_keys.is_file():
+        target = self._host_authorized_keys_target()
+        if not target.is_file():
             return
         marker = f" {self.host_pve_root_key_comment}"
         lines = [
             line
-            for line in self.host_root_authorized_keys.read_text(
-                encoding="utf-8"
-            ).splitlines()
+            for line in target.read_text(encoding="utf-8").splitlines()
             if not line.rstrip().endswith(marker)
         ]
         self._write_host_authorized_keys(lines)
