@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import ipaddress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -10,6 +9,7 @@ from typing import Any
 import yaml
 
 from .common import InfraManagerError
+from .guest_catalog import resolve_guest_configuration
 
 
 @dataclass(frozen=True)
@@ -69,51 +69,6 @@ def _load_yaml(path: Path) -> dict[str, Any]:
     return value
 
 
-def _deep_merge(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
-    result = dict(base)
-    for key, value in overlay.items():
-        if isinstance(result.get(key), dict) and isinstance(value, dict):
-            result[key] = _deep_merge(result[key], value)
-        else:
-            result[key] = value
-    return result
-
-
-def _management_address(vmid: int, effective: dict[str, Any]) -> str | None:
-    network = effective.get("network")
-    if not isinstance(network, dict):
-        raise InfraManagerError(f"guest:{vmid} не содержит network")
-    value = network.get("ipv4")
-    subnet_value = network.get("subnet")
-    if value == "dhcp":
-        return None
-    if isinstance(value, str) and value:
-        try:
-            return str(ipaddress.ip_interface(value).ip)
-        except ValueError:
-            try:
-                return str(ipaddress.ip_address(value))
-            except ValueError as exc:
-                raise InfraManagerError(
-                    f"guest:{vmid} содержит некорректный network.ipv4"
-                ) from exc
-    if not isinstance(subnet_value, str):
-        raise InfraManagerError(f"guest:{vmid} не содержит network.subnet")
-    try:
-        subnet = ipaddress.ip_network(subnet_value, strict=True)
-    except ValueError as exc:
-        raise InfraManagerError(
-            f"guest:{vmid} содержит некорректный network.subnet"
-        ) from exc
-    if not isinstance(subnet, ipaddress.IPv4Network) or subnet.prefixlen != 16:
-        raise InfraManagerError(
-            f"guest:{vmid}: автоматический адрес поддерживает только IPv4 /16"
-        )
-    text = f"{vmid:03d}"
-    first, second, _, _ = str(subnet.network_address).split(".")
-    return f"{first}.{second}.{int(text[0])}.{int(text[1:])}"
-
-
 def _guest_records(repo_root: Path) -> dict[int, GuestRecord]:
     guests_root = repo_root / "infrastructure/guests"
     defaults = _load_yaml(guests_root / "defaults.yaml")
@@ -136,17 +91,12 @@ def _guest_records(repo_root: Path) -> dict[int, GuestRecord]:
         if not isinstance(profile, dict):
             continue
 
-        effective = _deep_merge(common, profile)
-        effective = _deep_merge(effective, source)
+        effective, address, subnet = resolve_guest_configuration(
+            repo_root, source, defaults
+        )
         kind = effective.get("type")
         node = effective.get("node")
-        network = effective.get("network")
         if kind not in {"vm", "lxc"} or not isinstance(node, str):
-            continue
-        if not isinstance(network, dict):
-            continue
-        subnet = network.get("subnet")
-        if not isinstance(subnet, str):
             continue
 
         records[vmid] = GuestRecord(
@@ -154,7 +104,7 @@ def _guest_records(repo_root: Path) -> dict[int, GuestRecord]:
             name=name,
             kind=kind,
             node=node,
-            address=_management_address(vmid, effective),
+            address=address,
             subnet=subnet,
             pve_management=effective.get("pve_management") is True,
             provisioned_linux=(manifest.parent / "provision.yaml").is_file(),
