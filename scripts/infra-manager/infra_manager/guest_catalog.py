@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import ipaddress
 from pathlib import Path
+import sys
 from typing import Any
 
 import yaml
@@ -23,11 +23,8 @@ class GuestIdentity:
 
     @property
     def address(self) -> str | None:
-        network = self.source.get("network")
-        if not isinstance(network, dict):
-            return None
-        value = network.get("ipv4")
-        return value if isinstance(value, str) and value != "dhcp" else None
+        """Вернуть административный IP из общего описания гостя."""
+        return guest_management_address(self.directory.parents[2], self)
 
 
 def _load_manifest(path: Path) -> dict[str, Any]:
@@ -98,51 +95,48 @@ def deployable_guests(repo_root: Path) -> tuple[GuestIdentity, ...]:
     return tuple(result)
 
 
+def resolve_guest_configuration(
+    repo_root: Path,
+    source: dict[str, Any],
+    defaults: dict[str, Any],
+) -> tuple[dict[str, Any], str | None, str]:
+    """Получить настройки и административный IP через единый resolver.py."""
+
+    # Сценарии гостя и установленный пакет infra_manager находятся в разных
+    # каталогах; корень переданной рабочей копии обеспечивает общий импорт.
+    root = str(repo_root.resolve())
+    if root not in sys.path:
+        sys.path.insert(0, root)
+    from scripts.guests.resolver import GuestConfigError, resolve_effective_guest
+
+    try:
+        resolved = resolve_effective_guest(source, defaults)
+    except GuestConfigError as exc:
+        raise InfraManagerError(
+            f"Некорректное описание гостя {source.get('vmid')}: {exc}"
+        ) from exc
+
+    address = (
+        str(resolved.management_ip)
+        if resolved.management_ip is not None
+        else None
+    )
+    return resolved.effective, address, str(resolved.network.subnet)
+
+
 def guest_management_address(
     repo_root: Path,
     identity: GuestIdentity,
 ) -> str | None:
-    """Вернуть административный IPv4 гостя из его машинного описания."""
-
-    network = identity.source.get("network")
-    if isinstance(network, dict):
-        value = network.get("ipv4")
-        if value == "dhcp":
-            return None
-        if isinstance(value, str) and value:
-            try:
-                address = ipaddress.ip_address(value)
-            except ValueError as exc:
-                raise InfraManagerError(
-                    f"{identity.manifest}: некорректный network.ipv4"
-                ) from exc
-            if not isinstance(address, ipaddress.IPv4Address):
-                raise InfraManagerError(
-                    f"{identity.manifest}: network.ipv4 должен быть IPv4"
-                )
-            return str(address)
+    """Вернуть IP интерфейса management, не вычисляя адрес повторно."""
 
     defaults = _load_manifest(
         repo_root / "infrastructure" / "guests" / "defaults.yaml"
     )
-    default_network = defaults.get("defaults", {}).get("network", {})
-    if not isinstance(default_network, dict):
-        raise InfraManagerError("defaults.yaml не содержит defaults.network")
-    subnet_value = default_network.get("subnet")
-    try:
-        subnet = ipaddress.ip_network(subnet_value, strict=True)
-    except (TypeError, ValueError) as exc:
-        raise InfraManagerError(
-            "defaults.network.subnet имеет некорректное значение"
-        ) from exc
-    if not isinstance(subnet, ipaddress.IPv4Network) or subnet.prefixlen != 16:
-        raise InfraManagerError(
-            "Автоматический адрес infra-manager требует административную IPv4 /16"
-        )
-
-    text = f"{identity.vmid:03d}"
-    first, second, _, _ = str(subnet.network_address).split(".")
-    return f"{first}.{second}.{int(text[0])}.{int(text[1:])}"
+    _, address, _ = resolve_guest_configuration(
+        repo_root, identity.source, defaults
+    )
+    return address
 
 
 def find_guest_by_role(repo_root: Path, role: str) -> GuestIdentity:
