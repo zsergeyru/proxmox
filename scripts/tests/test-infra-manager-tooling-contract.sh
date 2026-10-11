@@ -22,7 +22,8 @@ PY_COMMON="$ROOT/scripts/infra-manager/infra_manager/common.py"
 PYTHON_COMMAND="$ROOT/scripts/infra-manager/commands/python-command.sh"
 ACTIVATE_RUNTIME="$ROOT/scripts/infra-manager/commands/activate-runtime.sh"
 BUILD_TEMPLATE="$ROOT/scripts/infra-manager/jobs/build-template.py"
-DEPLOY_GUEST="$ROOT/scripts/infra-manager/jobs/deploy-guest.py"
+GUEST_OPERATION="$ROOT/scripts/infra-manager/jobs/guest-operation.py"
+PY_GUEST_OPERATIONS="$ROOT/scripts/infra-manager/infra_manager/guest_operations.py"
 PY_OPENTOFU="$ROOT/scripts/infra-manager/infra_manager/opentofu.py"
 PY_TEMPLATE="$ROOT/scripts/infra-manager/infra_manager/template.py"
 PY_TEMPLATE_BUILD="$ROOT/scripts/infra-manager/infra_manager/template_build.py"
@@ -139,13 +140,17 @@ grep -q 'run_verify_template(vmid)' "$PY_TEMPLATE_BUILD" \
     || die "После сборки должен запускаться короткий Full Clone test"
 grep -q '^TEST_VMID = 9099' "$PY_TEMPLATE_VERIFY" \
     || die "Проверка шаблона 9000 должна использовать VMID 9099"
-grep -q 'run_deploy_guest' "$DEPLOY_GUEST" \
-    || die "Deploy Guest должен передавать выполнение Python-модулю"
-grep -Fq 'reserve_runtime_activation()' "$DEPLOY_GUEST" \
+grep -Fq 'run_guest_operation(' "$GUEST_OPERATION" \
+    || die "Deploy Guest должен проходить через общий диспетчер операций"
+grep -Fq 'run_deploy_guest(repo_root, identity.vmid)' "$PY_GUEST_OPERATIONS" \
+    || die "Диспетчер Deploy Guest должен вызывать общий движок развёртывания"
+grep -Fq 'reserve_runtime_activation()' "$PY_GUEST_OPERATIONS" \
     || die "Самообновление infra-manager должно резервировать окно активации runtime"
-grep -Fq 'cancel_runtime_activation()' "$DEPLOY_GUEST" \
+grep -Fq 'cancel_runtime_activation()' "$PY_GUEST_OPERATIONS" \
     || die "Неуспешное самообновление infra-manager должно снимать резерв активации"
-for job in "$DEPLOY_GUEST" "$OPENBAO_JOB" "$PLAN" "$BUILD_TEMPLATE"; do
+grep -Fq 'require_runtime_activation_idle()' "$PY_GUEST_OPERATIONS" \
+    || die "Операции над гостями должны блокироваться во время активации runtime"
+for job in "$OPENBAO_JOB" "$PLAN" "$BUILD_TEMPLATE"; do
     grep -Fq 'require_runtime_activation_idle()' "$job" \
         || die "Infrastructure job должен блокироваться во время активации runtime: $job"
 done
