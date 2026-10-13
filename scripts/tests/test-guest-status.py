@@ -109,7 +109,7 @@ def check_status_definitions() -> None:
     expected_types = {
         109: ("docker", "systemd", "file"),
         311: (),
-        340: ("docker", "docker", "docker", "http"),
+        340: ("docker", "docker", "docker", "http", "http"),
         410: ("docker", "docker", "http", "file"),
         910: ("local_status",),
     }
