@@ -113,7 +113,7 @@ def check_semaphore_project_concurrency() -> None:
                 },
             )]:
                 fail("Проект должен вернуть лимит 1, сохранив настройку alert")
-            if project_id_file.read_text(encoding="utf-8") != "55\\n":
+            if project_id_file.read_text(encoding="utf-8").strip() != "55":
                 fail("Существующий project id должен сохраняться")
 
 
