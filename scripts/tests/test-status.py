@@ -117,7 +117,31 @@ def check_semaphore_project_concurrency() -> None:
                 fail("Существующий project id должен сохраняться")
 
 
+def check_infra_manager_environment_parsing() -> None:
+    """Общая группа принимает JSON и словарь, но не повреждённые данные."""
+    parse = semaphore_module._infra_manager_env_values
+    if parse('{"INFRA_LOG_LEVEL":"quiet"}') != {"INFRA_LOG_LEVEL": "quiet"}:
+        fail("Чтение JSON окружения Semaphore изменило значения")
+
+    original = {"INFRA_LOG_LEVEL": "verbose", "OTHER": "value"}
+    parsed = parse(original)
+    if parsed != original:
+        fail("Чтение словаря окружения Semaphore изменило значения")
+    parsed["OTHER"] = "changed"
+    if original["OTHER"] != "value":
+        fail("Чтение окружения должно сохранять исходный словарь")
+
+    for invalid in ("{", "[]", [], None, 123):
+        try:
+            parse(invalid)
+        except InfraManagerError:
+            pass
+        else:
+            fail(f"Окружение Semaphore приняло недопустимое значение: {invalid!r}")
+
+
 def main_test() -> None:
+    check_infra_manager_environment_parsing()
     check_semaphore_project_concurrency()
     previous_branch = os.environ.get("INFRA_PROJECT_BRANCH")
     try:
