@@ -30,6 +30,7 @@ from .guest_deploy_infrastructure import (
 from .opentofu import prepare_workspace
 from .pve_host import (
     apply_host_requirements,
+    ensure_guest_storage,
     install_openbao_host_support,
     install_recovery_host_support,
     issue_openbao_machine_credentials,
@@ -922,6 +923,12 @@ def _run_deploy_guest(
         vmid=context.vmid,
         kind=context.kind,
         features=context.features,
+    )
+    ensure_guest_storage(
+        context.node,
+        context.vmid,
+        context.kind,
+        context.paths.guest_dir,
     )
 
     ansible_phase = ANSIBLE_PHASE_BY_DEPLOY_PHASE[phase]

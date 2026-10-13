@@ -26,7 +26,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y shellcheck cloud-init jq unzip
-          python -m pip install --disable-pip-version-check PyYAML==6.0.2 jsonschema==4.25.1 ruff==0.16.8
+          python -m pip install --disable-pip-version-check PyYAML==6.0.2 jsonschema==4.25.1 ruff==0.16.8 Jinja2==3.1.6
 
       - name: Resolve infra-manager guest
         run: |
@@ -107,6 +107,11 @@ jobs:
 
       - name: Run PVE host access checks
         run: python scripts/tests/test-pve-host.py
+
+      - name: Run persistent guest storage checks
+        run: python scripts/tests/test-guest-storage.py
+      - name: Check Immich Compose template
+        run: python scripts/tests/test-photo-archive-compose.py
 
       - name: Run PVE lifecycle checks
         run: python scripts/tests/test-pve-lifecycle.py

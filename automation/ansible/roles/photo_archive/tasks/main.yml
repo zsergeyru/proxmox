@@ -3,7 +3,7 @@
   ansible.builtin.assert:
     that:
       - provision.photo_archive.application == "immich"
-      - provision.photo_archive.mode == "api-only"
+      - provision.photo_archive.mode == "api-with-local-worker"
       - provision.photo_archive.storage.allow_missing_mount == false
     fail_msg: "340: некорректное описание Photo Archive"
 
@@ -23,6 +23,15 @@
       - -q
       - "{{ provision.photo_archive.storage.required_state_mount }}"
   changed_when: false
+
+- name: Проверить подключение хранилища медиаданных
+  ansible.builtin.command:
+    argv:
+      - mountpoint
+      - -q
+      - "{{ provision.photo_archive.storage.required_media_mount }}"
+  changed_when: false
+  # Не допускаем записи миниатюр и видео в корневой диск LXC.
 
 - name: Проверить наличие каталога оригиналов
   ansible.builtin.stat:
@@ -85,6 +94,7 @@
     content: |
       DB_PASSWORD={{ photo_archive_generated_password.stdout }}
       POSTGRES_PASSWORD={{ photo_archive_generated_password.stdout }}
+      REDIS_PASSWORD={{ photo_archive_generated_password.stdout }}
       DB_USERNAME=postgres
       DB_DATABASE_NAME=immich
       DB_HOSTNAME=database
@@ -92,6 +102,17 @@
       TZ=Europe/Moscow
   no_log: true
   when: not photo_archive_env.stat.exists
+
+- name: Проверить наличие пароля Redis для существующих параметров
+  ansible.builtin.command:
+    argv:
+      - grep
+      - -q
+      - "^REDIS_PASSWORD=[A-Za-z0-9]\\{16,\\}$"
+      - "{{ provision.photo_archive.paths.environment }}"
+  changed_when: false
+  no_log: true
+  # При старых параметрах не перезаписывать пароль и не ломать базу.
 
 - name: Сформировать состав служб
   ansible.builtin.template:

@@ -1478,7 +1478,7 @@ def check_deploy_provision_phase_selection() -> None:
             kind="vm",
             features=(),
             address="192.0.2.10",
-            paths=SimpleNamespace(known_hosts=Path("/tmp/test-known-hosts")),
+            paths=SimpleNamespace(known_hosts=Path("/tmp/test-known-hosts"), guest_dir=ROOT / "infrastructure/guests/410-ai-control"),
             client=SimpleNamespace(find_vm=lambda vmid: {"name": "test-guest"}),
             workspace=workspace,
             target="test-target",
@@ -1511,6 +1511,7 @@ def check_deploy_provision_phase_selection() -> None:
             patch.object(guest_deploy_module, "_validate_pve_and_state"),
             patch.object(guest_deploy_module, "_reconcile_guest_infrastructure") as infra,
             patch.object(guest_deploy_module, "apply_host_requirements") as requirements,
+            patch.object(guest_deploy_module, "ensure_guest_storage") as storage,
             patch.object(
                 guest_deploy_module,
                 "_existing_bootstrap_identity",
@@ -1530,6 +1531,7 @@ def check_deploy_provision_phase_selection() -> None:
             if result != 0:
                 fail(f"{phase}: развёртывание завершилось с ошибкой")
             requirements.assert_called_once()
+            storage.assert_called_once_with("pve", 410, "vm", context.paths.guest_dir)
             if phase in {"all", "infrastructure"}:
                 infra.assert_called_once()
             else:
