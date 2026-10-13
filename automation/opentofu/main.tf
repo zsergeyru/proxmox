@@ -222,9 +222,11 @@ resource "proxmox_virtual_environment_container" "guest" {
     ignore_changes = [
       features[0].keyctl,
       initialization[0].user_account[0].keys,
-      # Независимые постоянные mp0/mp1 устанавливаются PVE-only шагом.
-      # OpenTofu не должен отключать их при повторном deploy.
+      # Постоянные mp0/mp1/mp2 и проверка томов перед запуском
+      # настраиваются на PVE отдельным этапом deploy.
+      # OpenTofu не должен удалять эти настройки при повторном применении.
       mount_point,
+      hook_script_file_id,
     ]
   }
 }
