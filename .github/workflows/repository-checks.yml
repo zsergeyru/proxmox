@@ -108,6 +108,9 @@ jobs:
       - name: Run PVE host access checks
         run: python scripts/tests/test-pve-host.py
 
+      - name: Run persistent guest storage checks
+        run: python scripts/tests/test-guest-storage.py
+
       - name: Run PVE lifecycle checks
         run: python scripts/tests/test-pve-lifecycle.py
 
