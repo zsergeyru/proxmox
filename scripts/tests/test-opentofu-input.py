@@ -48,7 +48,7 @@ lxc_resource = opentofu_hcl.split(
 lxc_lifecycle = (
     lxc_resource.split("lifecycle {", 1)[1]
     .split("ignore_changes = [", 1)[1]
-    .split("]", 1)[0]
+    .split("\n    ]", 1)[0]
 )
 assert "mount_point," in lxc_lifecycle
 assert "hook_script_file_id," in lxc_lifecycle
