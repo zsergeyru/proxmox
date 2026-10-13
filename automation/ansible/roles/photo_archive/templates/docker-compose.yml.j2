@@ -41,7 +41,7 @@ services:
 
   redis:
     # Пароль сохраняется на постоянном томе с параметрами Immich.
-    command: ["/bin/sh", "-c", "exec valkey-server --requirepass \"$REDIS_PASSWORD\""]
+    command: ["/bin/sh", "-c", "exec valkey-server --requirepass \"$$REDIS_PASSWORD\""]
     env_file:
       - {{ provision.photo_archive.paths.environment }}
 {% if provision.photo_archive.remote_worker.enabled %}
