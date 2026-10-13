@@ -317,20 +317,33 @@ def _save_startup_config(vmid: int, config: dict) -> None:
 
 
 def ensure_hook_storage() -> None:
-    """Разрешить локальному хранилищу PVE хранить сценарии запуска."""
-    config = command("pvesm", "config", "local").stdout
-    lines = config.splitlines()
-    if not lines or lines[0].strip() != "dir: local":
-        raise StorageError("Хранилище local должно быть каталогом PVE")
-    mapping = dict(
-        line.strip().split(" ", 1)
-        for line in lines[1:] if " " in line.strip()
+    """Проверить локальное хранилище PVE и разрешить файлы сценариев."""
+    # В Proxmox нет команды pvesm config. Конфигурацию хранилищ читает
+    # штатная команда pvesh через API самого узла.
+    result = command(
+        "pvesh", "get", "/storage/local", "--output-format", "json"
     )
-    if mapping.get("path") != "/var/lib/vz":
-        raise StorageError("Неожиданный путь PVE-хранилища local")
-    content = [part.strip() for part in mapping.get("content", "").split(",") if part.strip()]
+    try:
+        config = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise StorageError("PVE вернул некорректное описание хранилища local") from exc
+    if not isinstance(config, dict) or (
+        config.get("storage") != "local"
+        or config.get("type") != "dir"
+        or config.get("path") != "/var/lib/vz"
+    ):
+        raise StorageError("Хранилище local не соответствует ожидаемому каталогу PVE")
+
+    raw_content = config.get("content")
+    if not isinstance(raw_content, str) or not raw_content.strip():
+        raise StorageError("PVE не сообщил виды содержимого хранилища local")
+    content = [item.strip() for item in raw_content.split(",") if item.strip()]
     if "snippets" not in content:
-        command("pvesm", "set", "local", "--content", ",".join([*content, "snippets"]))
+        # Сохранить все прежние типы файлов; не заменять настройки local.
+        command(
+            "pvesm", "set", "local", "--content",
+            ",".join([*content, "snippets"]),
+        )
 
 
 def ensure_startup_hook(vmid: int, config: dict) -> None:
