@@ -52,7 +52,97 @@ def fail(message: str) -> None:
     raise SystemExit(message)
 
 
+def check_semaphore_project_concurrency() -> None:
+    """Существующий проект не должен терять ограничение на одно задание."""
+
+    class ProjectClient(SemaphoreClient):
+        def __init__(self, project: dict | None) -> None:
+            self.project = project
+            self.posts: list[tuple[str, dict]] = []
+            self.puts: list[tuple[str, dict]] = []
+
+        def get(self, path: str, *, auth: str | None = None):
+            del auth
+            if path != "/projects":
+                raise AssertionError(f"Неожиданный GET: {path}")
+            return [self.project] if self.project is not None else []
+
+        def post(self, path: str, payload: dict, *, auth: str | None = None):
+            del auth
+            self.posts.append((path, payload))
+            return {"id": 55}
+
+        def put(self, path: str, payload: dict):
+            self.puts.append((path, payload))
+
+    with tempfile.TemporaryDirectory() as tmp:
+        project_id_file = Path(tmp) / "semaphore-project-id"
+        with patch.object(semaphore_module, "PROJECT_ID_FILE", project_id_file):
+            created = ProjectClient(None)
+            if created.ensure_project() != 55:
+                fail("Создание проекта Semaphore вернуло неверный id")
+            if created.posts[0][1].get("max_parallel_tasks") != 1:
+                fail("Новый проект должен разрешать только одно задание")
+            if created.puts:
+                fail("Новый проект не должен обновляться повторным PUT")
+
+            correct = ProjectClient({
+                "id": 55,
+                "name": semaphore_module.PROJECT_NAME,
+                "alert": True,
+                "max_parallel_tasks": 1,
+            })
+            correct.ensure_project()
+            if correct.puts:
+                fail("Проект с правильным ограничением не должен обновляться")
+
+            changed = ProjectClient({
+                "id": 55,
+                "name": semaphore_module.PROJECT_NAME,
+                "alert": True,
+                "max_parallel_tasks": 4,
+            })
+            changed.ensure_project()
+            if changed.puts != [(
+                "/project/55/",
+                {
+                    "id": 55,
+                    "name": semaphore_module.PROJECT_NAME,
+                    "alert": True,
+                    "max_parallel_tasks": 1,
+                },
+            )]:
+                fail("Проект должен вернуть лимит 1, сохранив настройку alert")
+            if project_id_file.read_text(encoding="utf-8").strip() != "55":
+                fail("Существующий project id должен сохраняться")
+
+
+def check_infra_manager_environment_parsing() -> None:
+    """Общая группа принимает JSON и словарь, но не повреждённые данные."""
+    parse = semaphore_module._infra_manager_env_values
+    if parse('{"INFRA_LOG_LEVEL":"quiet"}') != {"INFRA_LOG_LEVEL": "quiet"}:
+        fail("Чтение JSON окружения Semaphore изменило значения")
+
+    original = {"INFRA_LOG_LEVEL": "verbose", "OTHER": "value"}
+    parsed = parse(original)
+    if parsed != original:
+        fail("Чтение словаря окружения Semaphore изменило значения")
+    parsed["OTHER"] = "changed"
+    if original["OTHER"] != "value":
+        fail("Чтение окружения должно сохранять исходный словарь")
+
+    for invalid in ("{", "[]", [], None, 123):
+        try:
+            parse(invalid)
+        except InfraManagerError:
+            pass
+        else:
+            fail(f"Окружение Semaphore приняло недопустимое значение: {invalid!r}")
+
+
 def main_test() -> None:
+    check_infra_manager_environment_parsing()
+    check_semaphore_project_concurrency()
     previous_branch = os.environ.get("INFRA_PROJECT_BRANCH")
     try:
         os.environ["INFRA_PROJECT_BRANCH"] = "feature/test-branch"
@@ -580,16 +670,10 @@ def main_test() -> None:
 
     class SyncOrderClient:
         def get(self, path: str):
-            if path != "/project/41/templates?sort=name&order=asc":
-                raise AssertionError(f"Неожиданный GET: {path}")
-            order_events.append("templates")
-            return [
-                {"id": 71, "name": "Test Guest"},
-                {"id": 72, "name": "Deploy Guest"},
-            ]
+            raise AssertionError(f"Лишнее чтение Semaphore: {path}")
 
         def delete(self, path: str):
-            order_events.append(f"delete:{path}")
+            raise AssertionError(f"Удаление задания запрещено: {path}")
 
         def ensure_opentofu_environment(self, project_id: int) -> int:
             del project_id
@@ -643,14 +727,9 @@ def main_test() -> None:
             ROOT,
             reuse_existing_git=True,
         )
-    if order_events != [
-        "catalog",
-        "git",
-        "templates",
-        "delete:/project/41/templates/71",
-    ]:
+    if order_events != ["catalog", "git"]:
         fail(
-            f"Нарушен порядок настройки и удаления старого задания: {order_events!r}"
+            f"Нарушен порядок безопасной синхронизации: {order_events!r}"
         )
 
     invalid_task_client = TaskSyncClient(token_valid=False)
