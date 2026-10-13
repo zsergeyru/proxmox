@@ -40,6 +40,7 @@ scripts/
 │   │   │   ├── errors.py  # Общие ошибки
 │   │   │   ├── snippets.py  # Встроенные программы поддержки OpenBao
 │   │   │   └── tls.py  # Материалы TLS OpenBao на PVE
+│   │   ├── guest-storage.py  # Создание и подключение постоянных томов LXC на PVE
 │   │   ├── manager.py  # Операторская оболочка PVE
 │   │   ├── openbao-unseal.py  # Привилегированные операции OpenBao через PVE
 │   │   └── recovery.py  # Аварийные действия и восстановление
@@ -88,6 +89,7 @@ scripts/
 │   ├── test-ai-control-contract.py
 │   ├── test-bootstrap-architecture.sh
 │   ├── test-bootstrap-host.py
+│   ├── test-guest-storage.py
 │   ├── test-guest-deploy.py
 │   ├── test-guest-operations.py
 │   ├── test-guest-resolver.py
@@ -134,7 +136,7 @@ scripts/
 
 `scripts/bootstrap-runner/bootstrap-host.py` выполняется на физическом PVE после того, как публичный сценарий получил основной проект через 990. Дополнительной shell-оболочки для него нет: при ручной диагностике файл запускается напрямую через `python3`. Файл хранит точку входа и общий порядок действий, а работа с постоянными каталогами, доступами, передачей infra-manager и очисткой разделена по модулям `bootstrap_runner/`.
 
-Временный и постоянный доступ к PVE подготавливает непосредственно основной `bootstrap-host.py`: он создаёт API token без разделения привилегий, передаёт PVE CA и отдельный root SSH-ключ. Отдельные shell-сценарии доступа больше не используются. Операции, которые Proxmox запрещает API token, выполняет общий модуль `infra_manager/pve_host.py`.
+Временный и постоянный доступ к PVE подготавливает непосредственно основной `bootstrap-host.py`: он создаёт API token без разделения привилегий, передаёт PVE CA и отдельный root SSH-ключ. Отдельные shell-сценарии доступа больше не используются. Операции, которые Proxmox запрещает API token, выполняет общий модуль `infra_manager/pve_host.py`. При наличии раздела `pve_storage` в описании гостя он вызывает на PVE `host/guest-storage.py`: тот безопасно подготавливает постоянные тома и подключения LXC до Ansible. Существующие тома не форматируются и не удаляются.
 
 Настройка ОС и служб infra-manager выполняется только через общий `provision.yaml` и общий Ansible playbook. Отдельного `setup.sh` и `infra_manager/setup.py` больше нет.
 
@@ -266,7 +268,7 @@ python scripts/validate_repo.py
 - **Управляющая программа:** `test-infra-manager-python.py`, `test-python-command.py`, `test-manager-host.py`, `test-status.py`, `test-portal.py`.
 - **Первоначальная установка и восстановление:** `test-bootstrap-host.py`, `test-bootstrap-architecture.sh`, `test-recovery-host.py`, `test-runtime-downloads.py`.
 - **OpenBao:** `test-openbao.py`, `test-openbao-live.py`, `test-openbao-ssh.py`, `test-openbao-otp-client.py`, `test-openbao-otp-verify.py`.
-- **PVE, OpenTofu и шаблоны:** `test-pve-host.py`, `test-pve-lifecycle.py`, `test-opentofu-input.py`, `test-template.py`.
+- **PVE, OpenTofu и шаблоны:** `test-guest-storage.py`, `test-pve-host.py`, `test-pve-lifecycle.py`, `test-opentofu-input.py`, `test-template.py`.
 - **Описание служб:** `test-ai-control-contract.py`, `test-network-gateway-contract.py`.
 - **Контрактные проверки 910:** `test-infra-manager-guest-contract.sh`, `test-infra-manager-openbao-contract.sh`, `test-infra-manager-ssh-contract.sh`, `test-infra-manager-tooling-contract.sh` и общий запускатель `test-infra-manager-contract.sh`.
 
