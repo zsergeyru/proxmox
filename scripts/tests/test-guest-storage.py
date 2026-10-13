@@ -308,7 +308,7 @@ def test_protected_guest_keeps_protection_after_success() -> None:
         if args[:2] == ("pct", "config"):
             return SimpleNamespace(
                 returncode=0,
-                stdout="unprivileged: 1\\nprotection: 1\\n",
+                stdout="unprivileged: 1\nprotection: 1\n",
             )
         return SimpleNamespace(returncode=0, stdout="")
 
@@ -340,7 +340,7 @@ def test_protected_guest_restores_protection_after_error() -> None:
         if args[:2] == ("pct", "status"):
             return SimpleNamespace(returncode=0, stdout="status: running")
         if args[:2] == ("pct", "config"):
-            return SimpleNamespace(returncode=0, stdout="protection: 1\\n")
+            return SimpleNamespace(returncode=0, stdout="protection: 1\n")
         if args[:3] == ("pct", "set", "340") and "--mp1" in args:
             raise storage.StorageError("Имитированная ошибка подключения")
         return SimpleNamespace(returncode=0, stdout="")
@@ -375,7 +375,7 @@ def test_existing_protected_mounts_do_not_toggle_protection() -> None:
         if args[:2] == ("pct", "config"):
             return SimpleNamespace(
                 returncode=0,
-                stdout=f"protection: 1\\nhookscript: {storage.HOOK_ID}\\n",
+                stdout=f"protection: 1\nhookscript: {storage.HOOK_ID}\n",
             )
         return SimpleNamespace(returncode=0, stdout="")
 
@@ -399,7 +399,7 @@ def test_protected_guest_hook_install_restores_protection() -> None:
         if args[:2] == ("pct", "status"):
             return SimpleNamespace(returncode=0, stdout="status: stopped")
         if args[:2] == ("pct", "config"):
-            return SimpleNamespace(returncode=0, stdout="protection: 1\\n")
+            return SimpleNamespace(returncode=0, stdout="protection: 1\n")
         return SimpleNamespace(returncode=0, stdout="")
 
     with (
