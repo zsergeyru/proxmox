@@ -1,105 +1,129 @@
 # Скрипты
 
-`scripts/` содержит исполняемый код и проверки проекта. Публичный `bootstrap-pve.py` создаёт временный 990, получает закрытый проект и передаёт управление `scripts/bootstrap-runner/bootstrap-host.py`. Вся оркестрация гостя с ролью `infra-manager` находится в этом закрытом репозитории.
+`scripts/` содержит исполняемый код и проверки проекта. Публичный `bootstrap-pve.py` создаёт временный 990, получает основной проект и передаёт управление `scripts/bootstrap-runner/bootstrap-host.py`. Вся оркестрация гостя с ролью `infra-manager` находится в этом основном репозитории.
 
 ## Структура
 
+Список отражает фактические файлы ветки `main`. В каталоге `tests/` перечислены названия проверок; их назначение приведено ниже.
+
 ```text
 scripts/
-├── validate_repo.py                         # Проверяет структуру репозитория, guest.yaml, схемы, IP-адреса и отсутствие закрытых данных
-│
-├── bootstrap-runner/                        # Закрытая оркестрация первоначального контура 990
-│   ├── bootstrap-host.py                    # Точка входа и общий порядок bootstrap на PVE
-│   ├── bootstrap_runner/                    # Разделённая внутренняя логика bootstrap
-│   │   ├── persistence.py                   # Постоянные каталоги, bind mount и восстановление состояния
-│   │   ├── access.py                        # PVE API и root SSH-доступ временного и постоянного контуров
-│   │   ├── infra.py                         # Передача проекта, настройка и проверка infra-manager
-│   │   ├── cleanup.py                       # Очистка token, 990 и хостовой поддержки OpenBao
-│   │   ├── constants.py                     # Общие константы bootstrap
-│   │   └── errors.py                        # Общая ошибка bootstrap
-│   ├── prepare-runtime.sh                   # Подготавливает временную среду инструментов внутри 990
-│   └── run-runtime.sh                       # Запускает внутренние Python-шаги bootstrap внутри временной среды 990
-│
-├── maintenance/                             # Служебная очистка тестового PVE, не часть штатного bootstrap
-│   ├── reset-pve-test-state.sh              # Удаляет только распознанные следы проекта для повторного теста
-│   └── reset-pve-clean-slate.sh             # Жёстко очищает тестовый PVE, сохраняя только VM 100
-│
-├── guests/                                  # Общая логика формирования итоговой конфигурации гостей
-│   ├── resolver.py                          # Собирает итоговое состояние из общих настроек, профиля и описания гостя
-│   └── render-opentofu-input.py             # Формирует guests.json для OpenTofu из управляемых описаний guest.yaml
-│
-├── infra-manager/                           # Всё, что относится к управляющей роли infra-manager
-│   ├── infra_manager/                       # Основная Python-программа управления и проверки infra-manager
-│   │   ├── __init__.py                      # Инициализация пакета Python infra_manager
-│   │   ├── __main__.py                      # Точка входа для python3 -m infra_manager
-│   │   ├── cli.py                           # Разбирает команды настройки, проверки состояния, доступа к PVE и настройки Semaphore
-│   │   ├── common.py                        # Общие ошибки, вывод и безопасный запуск внешних команд
-│   │   ├── settings.py                      # Хранит единые неизменяемые пути, имена, версии и значения по умолчанию
-│   │   ├── guest_catalog.py                 # Находит специальных гостей по role и читает их VMID, имя и адрес
-│   │   ├── guest_operations.py              # Выполняет общие Deploy/Status/Repair/Sync операции над гостями
-│   │   ├── operation_lock.py                 # Координирует общую Git-копию и блокировки изменяющих операций по VMID
-│   │   ├── guest_status.py                  # Проверяет и выводит единое состояние любого поддерживаемого гостя
-│   │   ├── operator.py                      # Операторская логика, выполняемая внутри 910
-│   │   ├── semaphore.py                     # Синхронизирует проект, Git, группу переменных и задания Semaphore
-│   │   ├── pve.py                           # Проверяет PVE API и полный административный контракт infra-manager
-│   │   ├── pve_lifecycle.py                 # Выполняет приёмочную проверку полного жизненного цикла временного LXC 9098
-│   │   ├── pve_host.py                      # Выполняет через root SSH операции PVE, недоступные API token
-│   │   ├── opentofu.py                      # Выполняет общие операции OpenTofu: подготовку входных данных, инициализацию, план и чтение состояния
-│   │   ├── guest_deploy.py                  # Оркестрирует настройку одной гостевой системы и Ansible
-│   │   ├── guest_deploy_infrastructure.py   # Планирует и применяет инфраструктурный этап OpenTofu/PVE
-│   │   ├── template.py                      # Проверяет общий конфигурационный контракт шаблона VM
-│   │   ├── template_build.py                # Собирает Packer-шаблон и запускает итоговую проверку
-│   │   ├── template_verify.py               # Проверяет шаблон через временную полную копию 9099
-│   │   └── status.py                        # Исполняет внутреннюю глубокую проверку infra-manager
-│   │
-│   ├── commands/                            # Устанавливаемые команды 910
-│   │   ├── operator.sh                      # Запускает операторский слой infra_manager.operator
-│   │   ├── python-command.sh                # Техническая оболочка внутреннего status
-│   │   ├── activate-runtime.sh              # Отложенно активирует обновлённую управляющую среду
-│   │   └── openbao-startup-unseal.sh        # Восстанавливает OpenBao при запуске infra-manager
-│   │
-│   ├── host/                                # Минимальный код, устанавливаемый непосредственно на PVE
-│   │   ├── manager.py                       # Тонкая оболочка: проверка LXC, pct exec и recover
-│   │   ├── openbao-unseal.py                # Узкий PVE-only helper OpenBao
-│   │   ├── openbao_host/                    # Встроенные программы, TLS и общие ошибки хостовой поддержки OpenBao
-│   │   └── recovery.py                      # PVE-only проверка состояния и bootstrap recovery
-│   │
-│   └── jobs/                                # Задания, непосредственно запускаемые Semaphore
-│       ├── opentofu-plan.py                  # Формирует входные данные OpenTofu и строит только план изменений
-│       ├── guest-operation.py                # Общая точка входа четырёх гостевых операций Semaphore
-│       ├── bootstrap-infra-manager.py        # Внутренние шаги начального развёртывания infra-manager
-│       ├── build-template.py                 # Собирает Packer-шаблон VM 9000 и запускает его проверку
-│       ├── set-log-level.py                  # Сохраняет выбранный режим вывода в настройках Semaphore
-│       ├── initialize-openbao.py             # Инициализирует и проверяет OpenBao через доверенный PVE
-│       └── sync-ssh-access.py                # Синхронизирует SSH OTP/AppRole по access.yaml
-│
-├── acceptance/                              # Сквозные приёмочные проверки работающей инфраструктуры
-│   └── verify-ssh-access.py                  # Проверяет разрешённые и запрещённые SSH OTP-связи
-│
-└── tests/                                    # Локальные и автоматические проверки без постоянных изменений инфраструктуры
-    ├── test-guest-deploy.py                  # Проверяет планирование и безопасное применение изменений гостевой системы
-    ├── test-guest-operations.py              # Проверяет общий контракт Deploy/Status/Repair/Sync
-    ├── test-guest-status.py                  # Проверяет единый статус, службы и безопасный вывод паролей
-    ├── test-guest-resolver.py                # Проверяет сборщик конфигурации, управление, начальную настройку и возможности профиля
-    ├── test-infra-manager-python.py          # Проверяет основу Python-пакета, командную оболочку и вспомогательные функции PVE
-    ├── test-pve-lifecycle.py                 # Проверяет lifecycle test без реального изменения PVE
-    ├── test-python-command.py                # Проверяет внутреннюю оболочку status
-    ├── test-manager-host.py                  # Проверяет единую операторскую команду PVE
-    ├── test-opentofu-input.py                # Проверяет состав guests.json и исключение специальных объектов
-    ├── test-status.py                        # Проверяет снимок, шаблоны и контракты Semaphore
-    ├── test-template.py                      # Проверяет параметры и валидацию шаблона Packer
-    ├── test-infra-manager-guest-contract.sh  # Проверяет описание гостя и общий Ansible-контур
-    ├── test-infra-manager-openbao-contract.sh # Проверяет OpenBao, восстановление и runtime-связи
-    ├── test-infra-manager-tooling-contract.sh # Проверяет OpenTofu, Semaphore, status и Compose
-    ├── test-infra-manager-ssh-contract.sh    # Проверяет SSH-доверие и безопасную активацию
-    └── test-infra-manager-contract.sh        # Локально запускает все четыре контрактные проверки
+├── acceptance/  # Проверки на работающей инфраструктуре
+│   └── verify-ssh-access.py  # Проверка разрешённых и запрещённых связей SSH OTP
+├── bootstrap-runner/  # Первоначальная установка и восстановление через 990
+│   ├── bootstrap_runner/
+│   │   ├── __init__.py  # Инициализация пакета
+│   │   ├── access.py  # Первоначальные права доступа к PVE
+│   │   ├── cleanup.py  # Удаление временных полномочий и ресурсов
+│   │   ├── commands.py  # Выполнение внешних команд и управление LXC
+│   │   ├── constants.py  # Общие константы
+│   │   ├── errors.py  # Общие ошибки
+│   │   ├── infra.py  # Развёртывание и настройка управляющего гостя
+│   │   ├── paths.py  # Расположение файлов и каталогов
+│   │   ├── persistence.py  # Постоянное состояние и подключения каталогов
+│   │   └── role.py  # Поиск управляющего гостя по роли
+│   ├── bootstrap-host.py  # Главный сценарий первоначальной установки на PVE
+│   ├── prepare-runtime.sh  # Подготовка инструментов во временном 990
+│   └── run-runtime.sh  # Запуск этапов настройки внутри 990
+├── guests/  # Сборка итоговых настроек гостей
+│   ├── render-opentofu-input.py  # Формирование входных данных OpenTofu
+│   └── resolver.py  # Объединение общих настроек, профиля и гостя
+├── infra-manager/  # Управление гостями, службами и PVE
+│   ├── commands/  # Устанавливаемые команды управляющего гостя
+│   │   ├── activate-runtime.sh  # Активация новой рабочей среды
+│   │   ├── openbao-startup-unseal.sh  # Разблокировка и проверка OpenBao при запуске
+│   │   ├── operator.sh  # Запуск операторского слоя
+│   │   └── python-command.sh  # Выполнение внутренних Python-команд
+│   ├── host/  # Программы, устанавливаемые непосредственно на PVE
+│   │   ├── openbao_host/  # Поддержка OpenBao на PVE
+│   │   │   ├── __init__.py  # Инициализация пакета
+│   │   │   ├── errors.py  # Общие ошибки
+│   │   │   ├── snippets.py  # Встроенные программы поддержки OpenBao
+│   │   │   └── tls.py  # Материалы TLS OpenBao на PVE
+│   │   ├── manager.py  # Операторская оболочка PVE
+│   │   ├── openbao-unseal.py  # Привилегированные операции OpenBao через PVE
+│   │   └── recovery.py  # Аварийные действия и восстановление
+│   ├── infra_manager/  # Основные программные модули
+│   │   ├── __init__.py  # Инициализация пакета
+│   │   ├── __main__.py  # Запуск пакета как модуля
+│   │   ├── access.py  # Первоначальные права доступа к PVE
+│   │   ├── cli.py  # Команды настройки и проверки
+│   │   ├── common.py  # Ошибки, вывод и запуск внешних команд
+│   │   ├── guest_catalog.py  # Поиск гостей и чтение описаний
+│   │   ├── guest_deploy_infrastructure.py  # Изменения инфраструктуры через OpenTofu/PVE
+│   │   ├── guest_deploy.py  # Настройка гостя через Ansible
+│   │   ├── guest_operations.py  # Операции deploy/status/repair/sync
+│   │   ├── guest_ssh.py  # Единый административный SSH-сеанс через OpenBao
+│   │   ├── guest_status.py  # Проверка состояния, включая сертификатный SSH-вход
+│   │   ├── openbao.py  # Первичная настройка OpenBao
+│   │   ├── opentofu.py  # Подготовка плана и состояния OpenTofu
+│   │   ├── operation_lock.py  # Блокировка одновременных операций
+│   │   ├── operator.py  # Логика команд управляющего гостя
+│   │   ├── portal_gateway.py  # Ограниченный запуск действий из Homepage
+│   │   ├── portal.py  # Описания служб и страниц портала
+│   │   ├── pve_host.py  # Отдельный служебный SSH-доступ к PVE
+│   │   ├── pve_lifecycle.py  # Проверка жизненного цикла испытательного LXC
+│   │   ├── pve.py  # Доступ к PVE API
+│   │   ├── recovery.py  # Аварийные действия и восстановление
+│   │   ├── semaphore.py  # Проекты и задания Semaphore
+│   │   ├── settings.py  # Пути и основные настройки
+│   │   ├── status.py  # Глубокая проверка infra-manager
+│   │   ├── template_build.py  # Сборка шаблона Packer
+│   │   ├── template_verify.py  # Проверка шаблона через испытательную VM 9099
+│   │   └── template.py  # Проверка настроек шаблона
+│   └── jobs/  # Точки запуска заданий и внутренних процедур
+│       ├── bootstrap-infra-manager.py  # Этапы первоначального развёртывания 910
+│       ├── build-template.py  # Создание и проверка шаблона 9000
+│       ├── check-runtime-downloads.py  # Проверка доступности источников загрузки
+│       ├── guest-operation.py  # Общая точка входа операций над гостями
+│       ├── initialize-openbao.py  # Первоначальная настройка OpenBao
+│       ├── opentofu-plan.py  # Формирование плана OpenTofu
+│       ├── set-log-level.py  # Переключение подробности журнала
+│       └── sync-ssh-access.py  # Согласование SSH OTP и AppRole с access.yaml
+├── maintenance/  # Очистка испытательного PVE
+│   ├── reset-pve-clean-slate.sh  # Полная очистка испытательного PVE с сохранением VM 100
+│   └── reset-pve-test-state.sh  # Очистка распознанных следов испытаний
+├── tests/  # Автоматические проверки без постоянных изменений PVE
+│   ├── test-access-contract.py
+│   ├── test-ai-control-contract.py
+│   ├── test-bootstrap-architecture.sh
+│   ├── test-bootstrap-host.py
+│   ├── test-guest-deploy.py
+│   ├── test-guest-operations.py
+│   ├── test-guest-resolver.py
+│   ├── test-guest-ssh.py
+│   ├── test-guest-status.py
+│   ├── test-infra-manager-contract.sh
+│   ├── test-infra-manager-guest-contract.sh
+│   ├── test-infra-manager-openbao-contract.sh
+│   ├── test-infra-manager-python.py
+│   ├── test-infra-manager-ssh-contract.sh
+│   ├── test-infra-manager-tooling-contract.sh
+│   ├── test-manager-host.py
+│   ├── test-network-gateway-contract.py
+│   ├── test-openbao-live.py
+│   ├── test-openbao-otp-client.py
+│   ├── test-openbao-otp-verify.py
+│   ├── test-openbao-ssh.py
+│   ├── test-openbao.py
+│   ├── test-opentofu-input.py
+│   ├── test-portal.py
+│   ├── test-pve-host.py
+│   ├── test-pve-lifecycle.py
+│   ├── test-python-command.py
+│   ├── test-recovery-host.py
+│   ├── test-runtime-downloads.py
+│   ├── test-status.py
+│   └── test-template.py
+├── README.md  # Описание скриптов и точек запуска
+└── validate_repo.py  # Общая проверка структуры и правил репозитория
 ```
 
 Старого контура `scripts/pve/`, `sync-management-keys.py` и PVE Configuration в действующем коде нет.
 
 ## `maintenance/`
 
-Эти сценарии используются только для ручной подготовки тестового PVE. Они намеренно находятся в закрытом репозитории и не входят в публичную точку входа.
+Эти сценарии используются только для ручной подготовки тестового PVE. Они намеренно находятся в основном репозитории и не входят в публичную точку входа.
 
 ## `infra-manager/`
 
@@ -108,13 +132,15 @@ scripts/
 
 ### Точки входа
 
-`scripts/bootstrap-runner/bootstrap-host.py` выполняется на физическом PVE после того, как публичный сценарий получил закрытый проект через 990. Дополнительной shell-оболочки для него нет: при ручной диагностике файл запускается напрямую через `python3`. Файл хранит точку входа и общий порядок действий, а работа с постоянными каталогами, доступами, передачей infra-manager и очисткой разделена по модулям `bootstrap_runner/`.
+`scripts/bootstrap-runner/bootstrap-host.py` выполняется на физическом PVE после того, как публичный сценарий получил основной проект через 990. Дополнительной shell-оболочки для него нет: при ручной диагностике файл запускается напрямую через `python3`. Файл хранит точку входа и общий порядок действий, а работа с постоянными каталогами, доступами, передачей infra-manager и очисткой разделена по модулям `bootstrap_runner/`.
 
-Временный и постоянный доступ к PVE подготавливает непосредственно закрытый `bootstrap-host.py`: он создаёт API token без разделения привилегий, передаёт PVE CA и отдельный root SSH-ключ. Отдельные shell-сценарии доступа больше не используются. Операции, которые Proxmox запрещает API token, выполняет общий модуль `infra_manager/pve_host.py`.
+Временный и постоянный доступ к PVE подготавливает непосредственно основной `bootstrap-host.py`: он создаёт API token без разделения привилегий, передаёт PVE CA и отдельный root SSH-ключ. Отдельные shell-сценарии доступа больше не используются. Операции, которые Proxmox запрещает API token, выполняет общий модуль `infra_manager/pve_host.py`.
 
 Настройка ОС и служб infra-manager выполняется только через общий `provision.yaml` и общий Ansible playbook. Отдельного `setup.sh` и `infra_manager/setup.py` больше нет.
 
 ### Python-пакет `infra_manager/`
+
+`guest_ssh.py` — общий класс `GuestSshSession` для административного SSH-доступа к управляемым гостям. Штатные команды `deploy` и `status`, а также Ansible используют временный клиентский ключ, сертификат OpenBao и проверку сервера через SSH Host CA. Временные материалы удаляются после операции; устаревшие записи обычных ключей гостей в постоянном `known_hosts` не используются. Для нового гостя существует явный режим первоначального доступа с одноразовым ключом и заранее подтверждённым ключом сервера; автоматическое ослабление проверки при сбое штатного доступа запрещено. Отдельный доступ к PVE и межмашинный SSH OTP в этот класс не входят.
 
 `semaphore.py` — создаёт и синхронизирует проект `Proxmox Infrastructure`, ключ доступа GitHub, репозиторий, группы `OpenTofu PVE` и `Infra Manager`, а также задания Semaphore. Группа `Infra Manager` хранит общий переключатель `INFRA_LOG_LEVEL` для обычного, подробного или минимального вывода. Оператор меняет его через отдельное задание `Set Log Level` с выпадающим списком, а не ручным редактированием Variable Group.
 
@@ -126,7 +152,7 @@ scripts/
 
 `portal_gateway.py` — ограниченный HTTP-посредник Homepage. Он принимает только `status/sync/repair`, требует подтверждение POST с той же страницы, запускает установленную операторскую команду 910 без `--trusted-pve` и потоково показывает экранированный журнал в браузере. Semaphore для этого маршрута не используется.
 
-`guest_status.py` — общий движок состояния гостей: проверяет базовое состояние PVE/SSH, опубликованные службы из `provision.yaml`, дополнительные проверки из общего `status.yaml` и формирует краткий или полный вывод. По умолчанию секреты не читаются. Задания Semaphore и Homepage всегда используют этот безопасный режим; показать операторские пароли может только явный доверенный вызов с PVE.
+`guest_status.py` — общий механизм проверки состояния гостей: проверяет PVE и реальный SSH-вход по сертификату (а не только открытый порт), опубликованные службы из `provision.yaml`, дополнительные проверки из общего `status.yaml` и формирует краткий или полный вывод. По умолчанию секреты не читаются. Задания Semaphore и Homepage всегда используют этот безопасный режим; показать операторские пароли может только явный доверенный вызов с PVE.
 
 `status.py` — внутренний исполнитель глубокой проверки `infra-manager`. Он читает установленный `/etc/infra-manager/status.yaml`, который строится из локального `infra-manager-status.yaml`; операторский вывод служб и паролей в него больше не входит.
 
@@ -134,7 +160,7 @@ scripts/
 
 ## `infra-manager/jobs/`
 
-Здесь находятся сценарии, которые запускает Semaphore.
+Здесь находятся точки входа заданий Semaphore и служебные процедуры первоначальной установки.
 
 `opentofu-plan.py`:
 
@@ -163,7 +189,9 @@ Sync Guest ───┘→ guest-operation.py → guest_operations.py
 
 `bootstrap-infra-manager.py` используется только начальным контуром 990 для последовательных этапов создания и настройки infra-manager. Обычное развёртывание и самообновление выполняются через `guest-operation.py`; прежняя отдельная точка `deploy-guest.py` удалена как дублирующая.
 
-`initialize-openbao.py` остаётся внутренней точкой первоначального bootstrap и восстановления. В Semaphore отдельного шаблона для неё нет. Для человека штатные действия вынесены в PVE-команду `infra-manager repair` и `infra-manager recover`.
+`check-runtime-downloads.py` проверяет доступность сетевых источников программ перед подготовкой рабочей среды. Это служебная проверка, не самостоятельный шаблон Semaphore.
+
+`initialize-openbao.py` остаётся внутренней точкой первоначальной установки и восстановления. В Semaphore отдельного шаблона для неё нет. Для человека штатные действия вынесены в PVE-команду `infra-manager repair` и `infra-manager recover`.
 
 При запуске самого 910 используется отдельная одноразовая команда `openbao-startup-unseal.sh`. Она ждёт доступности OpenBao и требует рабочее состояние `initialized=true, sealed=false`. Для любого уже инициализированного OpenBao команда вызывает хостовый сценарий на PVE: при `sealed=true` он снимает блокировку, а при `sealed=false` пропускает повторную разблокировку, но всё равно восстанавливает рабочие секреты и выполняет обязательные проверки. Неинициализированный OpenBao считается ошибкой запуска; автоматический `sys/init` не выполняется. Периодического запуска на PVE нет.
 
@@ -232,19 +260,17 @@ python scripts/validate_repo.py
 
 ## `tests/`
 
-Все проверки уровня репозитория и контрактов собраны в одном каталоге.
+Здесь находятся проверки Python-модулей, инфраструктурных контрактов, первоначальной установки и безопасности. Они запускаются локально либо в GitHub Actions; тесты, которым требуется специальная работающая среда, подготавливают её отдельно.
 
-- `test-guest-resolver.py` проверяет сборщик конфигурации и возможности начальной настройки гостей.
-- `test-guest-deploy.py` проверяет планирование, сверку состояния и безопасное применение изменений гостя.
-- `test-opentofu-input.py` проверяет состав входа OpenTofu и исключение 910.
-- `test-infra-manager-python.py` проверяет основу Python-пакета, командную оболочку и PVE-вспомогательные функции.
-- `test-pve-lifecycle.py` проверяет полный сценарий lifecycle test, защиту занятого VMID и аварийную очистку без реального PVE.
-- `test-python-command.py` проверяет внутреннюю оболочку `infra-manager-status`.
-- `test-manager-host.py` проверяет единый набор `infra-manager guests/status/deploy/sync/repair/recover` без реального изменения PVE.
-- `test-bootstrap-host.py` проверяет состояния первоначального контура, восстановление, строгую метку владения 910 и безопасное удаление.
-- `test-status.py` проверяет чтение и валидацию состояния Semaphore.
-- `test-template.py` проверяет безопасную передачу параметров Packer и валидацию шаблона.
-- Контракт infra-manager разделён на `guest`, `openbao`, `tooling` и `ssh`; `test-infra-manager-contract.sh` остаётся только общим локальным запускателем.
+- **Гости и SSH:** `test-guest-deploy.py`, `test-guest-operations.py`, `test-guest-resolver.py`, `test-guest-ssh.py`, `test-guest-status.py`, `test-access-contract.py`.
+- **Управляющая программа:** `test-infra-manager-python.py`, `test-python-command.py`, `test-manager-host.py`, `test-status.py`, `test-portal.py`.
+- **Первоначальная установка и восстановление:** `test-bootstrap-host.py`, `test-bootstrap-architecture.sh`, `test-recovery-host.py`, `test-runtime-downloads.py`.
+- **OpenBao:** `test-openbao.py`, `test-openbao-live.py`, `test-openbao-ssh.py`, `test-openbao-otp-client.py`, `test-openbao-otp-verify.py`.
+- **PVE, OpenTofu и шаблоны:** `test-pve-host.py`, `test-pve-lifecycle.py`, `test-opentofu-input.py`, `test-template.py`.
+- **Описание служб:** `test-ai-control-contract.py`, `test-network-gateway-contract.py`.
+- **Контрактные проверки 910:** `test-infra-manager-guest-contract.sh`, `test-infra-manager-openbao-contract.sh`, `test-infra-manager-ssh-contract.sh`, `test-infra-manager-tooling-contract.sh` и общий запускатель `test-infra-manager-contract.sh`.
+
+`test-guest-ssh.py` отдельно проверяет единый SSH-сеанс, отсутствие зависимости от старого `known_hosts` и границы первоначального доступа. `test-openbao-live.py` проверяет OpenBao в подготовленной испытательной среде; `scripts/acceptance/verify-ssh-access.py` предназначен для сквозной проверки реальных разрешённых и запрещённых SSH OTP-связей.
 
 ## Правило размещения нового кода
 
