@@ -24,6 +24,15 @@
       - "{{ provision.photo_archive.storage.required_state_mount }}"
   changed_when: false
 
+- name: Проверить подключение хранилища медиаданных
+  ansible.builtin.command:
+    argv:
+      - mountpoint
+      - -q
+      - "{{ provision.photo_archive.storage.required_media_mount }}"
+  changed_when: false
+  # Не допускаем записи миниатюр и видео в корневой диск LXC.
+
 - name: Проверить наличие каталога оригиналов
   ansible.builtin.stat:
     path: "{{ provision.photo_archive.paths.originals }}"
