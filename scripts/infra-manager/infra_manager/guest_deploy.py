@@ -180,7 +180,7 @@ for line in target.read_text(encoding="utf-8").splitlines():
     result.append(line)
 
 target.write_text(
-    ("\\n".join(result) + "\\n") if result else "",
+    ("\n".join(result) + "\n") if result else "",
     encoding="utf-8",
 )
 os.chmod(target, 0o600)
