@@ -1110,19 +1110,6 @@ def _sync_project_objects(
             survey_vars=template.survey_vars,
         )
 
-    # Удалить ранее созданный Test Guest: проверки выполняет Status Guest.
-    obsolete = find_unique_by_name(
-        client.get(f"/project/{project_id}/templates?sort=name&order=asc"),
-        "Test Guest",
-        "template",
-    )
-    if obsolete is not None:
-        template_id = obsolete.get("id")
-        if not isinstance(template_id, int):
-            raise InfraManagerError("Шаблон Test Guest имеет некорректный id")
-        client.delete(f"/project/{project_id}/templates/{template_id}")
-
-
 def configure_project(branch: str | None = None) -> int:
     """Полностью синхронизировать Semaphore из доверенного root-контура."""
 
