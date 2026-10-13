@@ -110,7 +110,6 @@ jobs:
 
       - name: Run persistent guest storage checks
         run: python scripts/tests/test-guest-storage.py
-      
       - name: Check Immich Compose template
         run: python scripts/tests/test-photo-archive-compose.py
 
