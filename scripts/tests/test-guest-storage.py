@@ -326,7 +326,8 @@ def test_protected_guest_keeps_protection_after_success() -> None:
             f"{storage.source_path(volumes, item)},mp={item['target']},ro={int(item['read_only'])}")) < on
         for item in config["mounts"]
     )
-    assert not any(item[:2] == ("pct", "start") for item in calls)
+    start = calls.index(("pct", "start", "340"))
+    assert on < start  # Защиту вернуть до включения LXC.
 
 
 def test_protected_guest_restores_protection_after_error() -> None:
@@ -386,6 +387,8 @@ def test_existing_protected_mounts_do_not_toggle_protection() -> None:
         storage.configure_lxc(340, volumes, config["mounts"], [], config)
     hook.assert_called_once_with(340, config)
     assert not any(item[:2] == ("pct", "set") for item in calls)
+    # Даже при настроенных mp повторный deploy поднимет ранее остановленный LXC.
+    assert ("pct", "start", "340") in calls
 
 
 def test_protected_guest_hook_install_restores_protection() -> None:
