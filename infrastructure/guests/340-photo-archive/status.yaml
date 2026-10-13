@@ -1,0 +1,19 @@
+schema_version: 2
+guest_vmid: 340
+
+checks:
+  - type: docker
+    container: immich_server
+    message: "Immich запущен"
+  - type: docker
+    container: immich_postgres
+    message: "База данных Immich запущена"
+  - type: docker
+    container: immich_redis
+    message: "Очередь Immich запущена"
+  - type: http
+    url: "http://{address}:2283/api/server/ping"
+    message: "Immich отвечает на запросы"
+  - type: http
+    url: "http://{address}:3001/api/healthcheck"
+    message: "Домашняя страница отвечает на запросы"

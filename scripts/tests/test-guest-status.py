@@ -109,6 +109,7 @@ def check_status_definitions() -> None:
     expected_types = {
         109: ("docker", "systemd", "file"),
         311: (),
+        340: ("docker", "docker", "docker", "http", "http"),
         410: ("docker", "docker", "http", "file"),
         910: ("local_status",),
     }
@@ -255,6 +256,17 @@ def check_rendered_status() -> None:
                 "http://192.168.1.9:3001/",
                 "AdGuard Home",
                 "adguard-password",
+            ),
+        ),
+        (
+            340,
+            "photo-archive",
+            "lxc",
+            "192.168.3.40",
+            (
+                "http://192.168.3.40:3001/",
+                "Immich",
+                "http://192.168.3.40:2283/",
             ),
         ),
         (

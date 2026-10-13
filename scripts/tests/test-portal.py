@@ -119,6 +119,16 @@ def check_service_discovery() -> None:
     if _service(ai, "Open WebUI").get("description") != "Веб-интерфейс ИИ":
         fail("Open WebUI должен иметь описание")
 
+    photo = portal_services(340, "local")
+    if {next(iter(item)) for item in photo} != {"Immich"}:
+        fail("Homepage 340 должен публиковать Immich")
+    if _service(photo, "Immich").get("href") != "http://192.168.3.40:2283/":
+        fail("Immich должен открываться по собственному адресу")
+    if _service(photo, "Immich").get("siteMonitor") != "http://192.168.3.40:2283/":
+        fail("Homepage должен отслеживать доступность Immich")
+    if {next(iter(item)) for item in portal_services(340, "home")} != {"Immich"}:
+        fail("Immich должен публиковаться и в общем портале квартиры")
+
     if {next(iter(item)) for item in portal_services(109, "home")} != {
         "AdGuard Home"
     }:
@@ -133,6 +143,7 @@ def check_local_dashboard_address() -> None:
     expected = {
         109: "http://192.168.1.9:3001/",
         410: "http://192.168.4.10:3001/",
+        340: "http://192.168.3.40:3001/",
         910: "http://192.168.9.10:3001/",
     }
     for vmid, url in expected.items():

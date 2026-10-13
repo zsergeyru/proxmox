@@ -1,6 +1,12 @@
 schema_version: 1
 guest_vmid: 340
 
+portal:
+  local:
+    enabled: true
+    title: Фотоархив
+
+
 system:
   distribution: debian
   version: "13"
@@ -59,6 +65,15 @@ photo_archive:
   # Закреплена конкретная совместимая версия для сервера и обработчиков Windows.
   immich_version: v3.3.1
   web_port: 2283
+  portal:
+    name: Immich
+    description: Фотографии, альбомы и поиск
+    icon: mdi-image-multiple-#38bdf8
+    scheme: http
+    port: 2283
+    targets:
+      - local
+      - home
   paths:
     root: /opt/photo-archive
     compose: /opt/photo-archive/compose
