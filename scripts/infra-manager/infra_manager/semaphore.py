@@ -427,7 +427,8 @@ class SemaphoreClient:
             PROJECT_NAME,
             "project",
         )
-        if existing is None:
+        created = existing is None
+        if created:
             existing = self.post(
                 "/projects",
                 {
@@ -442,7 +443,17 @@ class SemaphoreClient:
         )
         if not isinstance(project_id, int):
             raise InfraManagerError(
-                "Semaphore создал проект, но не вернул id"
+                "Semaphore не вернул корректный id проекта"
+            )
+        if not created and existing.get("max_parallel_tasks") != 1:
+            self.put(
+                f"/project/{project_id}/",
+                {
+                    "id": project_id,
+                    "name": PROJECT_NAME,
+                    "alert": existing.get("alert", False),
+                    "max_parallel_tasks": 1,
+                },
             )
         PROJECT_ID_FILE.write_text(
             f"{project_id}\n",
