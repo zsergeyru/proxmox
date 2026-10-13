@@ -188,6 +188,7 @@ def check_dashboard_port() -> None:
 
     with (
         patch.object(status, "_check_tcp") as check_tcp,
+        patch.object(status, "_run_guest_command") as run_guest,
         patch.object(status, "_run_declared_check"),
     ):
         node, address, _, messages = status.verify_guest_status(
@@ -206,6 +207,9 @@ def check_dashboard_port() -> None:
     ):
         if expected not in tcp_targets:
             fail(f"Базовый статус не проверяет TCP {expected!r}")
+    run_guest.assert_called_once_with("pve", "192.168.1.9", ["true"])
+    if "SSH по сертификату доступен" not in messages:
+        fail("Базовый статус не проверил сертификатный SSH-вход")
     if "Локальная панель доступна" not in messages:
         fail("Базовый статус не сообщает о готовности локальной панели")
 

@@ -38,6 +38,7 @@ from .pve_host import (
     sign_ssh_host_key,
 )
 from .settings import PATHS, SETTINGS
+from .guest_ssh import GuestSshSession
 
 BOOTSTRAP_INFRA_MANAGER_PHASES = {
     "create": "infrastructure",
@@ -146,11 +147,9 @@ def _remove_bootstrap_identity(vmid: int) -> None:
 
 def _remove_obsolete_guest_authorizations(
     context: DeploymentContext,
-    private_key: Path,
-    certificate: Path,
+    session: GuestSshSession,
 ) -> None:
-    """Удалить bootstrap и старый постоянный guest key через сертификат."""
-
+    """После успешного сертификатного входа убрать устаревшие разрешения."""
     script = r"""
 from pathlib import Path
 import os
@@ -186,102 +185,21 @@ target.write_text(
 )
 os.chmod(target, 0o600)
 """
-    command = shlex.join(
-        [
-            "python3",
-            "-c",
-            script,
-            f"infra-manager-bootstrap-{context.vmid}",
-        ]
-    )
-    run(
-        [
-            *_ssh_identity_args(
-                context,
-                private_key,
-                certificate=certificate,
-            ),
-            command,
-        ]
-    )
-
-
-def _ssh_identity_args(
-    context: DeploymentContext,
-    private_key: Path,
-    *,
-    certificate: Path | None = None,
-) -> list[str]:
-    args = [
-        "ssh",
-        "-i",
-        str(private_key),
-        "-o",
-        f"UserKnownHostsFile={context.paths.known_hosts}",
-        "-o",
-        "StrictHostKeyChecking=yes",
-        "-o",
-        "BatchMode=yes",
-        "-o",
-        "IdentitiesOnly=yes",
-        "-o",
-        "ConnectTimeout=10",
-    ]
-    if certificate is not None:
-        args.extend(["-o", f"CertificateFile={certificate}"])
-    args.append(f"root@{context.address}")
-    return args
-
-
-def _create_temporary_ssh_identity(
-    context: DeploymentContext,
-    directory: Path,
-) -> tuple[Path, Path]:
-    private_key = directory / "ansible_ed25519"
-    run(
-        [
-            "ssh-keygen",
-            "-q",
-            "-t",
-            "ed25519",
-            "-N",
-            "",
-            "-C",
-            f"infra-manager-ansible-{context.vmid}",
-            "-f",
-            str(private_key),
-        ]
-    )
-    public_key = private_key.with_suffix(".pub").read_text(
-        encoding="utf-8"
-    ).strip()
-    certificate = sign_ssh_client_key(context.node, public_key)
-    certificate_path = Path(str(private_key) + "-cert.pub")
-    certificate_path.write_text(certificate + "\n", encoding="utf-8")
-    certificate_path.chmod(0o600)
-
-    run(["ssh-keygen", "-L", "-f", str(certificate_path)])
-    return private_key, certificate_path
+    command = shlex.join([
+        "python3", "-c", script, f"infra-manager-bootstrap-{context.vmid}",
+    ])
+    run(session.ssh_command(command))
 
 
 def _create_temporary_host_certificate(
     context: DeploymentContext,
-    private_key: Path,
+    session: GuestSshSession,
     *,
-    client_certificate: Path | None,
     directory: Path,
 ) -> Path:
-    """Подписать реальный Ed25519 host key гостя через OpenBao."""
-
+    """Подписать действующий ключ SSH-сервера через OpenBao и PVE."""
     result = run(
-        [
-            *_ssh_identity_args(
-                context,
-                private_key,
-                certificate=client_certificate,
-            ),
-            "cat /etc/ssh/ssh_host_ed25519_key.pub",
-        ],
+        session.ssh_command("cat /etc/ssh/ssh_host_ed25519_key.pub"),
         capture_output=True,
     )
     public_key = result.stdout.strip()
@@ -291,16 +209,12 @@ def _create_temporary_host_certificate(
         )
 
     certificate = sign_ssh_host_key(
-        context.node,
-        public_key,
-        vmid=context.vmid,
-        hostname=context.name,
-        address=context.address,
+        context.node, public_key,
+        vmid=context.vmid, hostname=context.name, address=context.address,
     )
     certificate_path = directory / "ssh_host_ed25519_key-cert.pub"
     certificate_path.write_text(certificate + "\n", encoding="utf-8")
     certificate_path.chmod(0o600)
-
     inspected = run(
         ["ssh-keygen", "-L", "-f", str(certificate_path)],
         capture_output=True,
@@ -313,57 +227,29 @@ def _create_temporary_host_certificate(
         raise InfraManagerError(
             f"Host-сертификат гостя {context.vmid} не прошёл проверку"
         )
-    console.ok(
-        f"Гость {context.vmid}: SSH host key подписан OpenBao"
-    )
+    console.ok(f"Гость {context.vmid}: SSH host key подписан OpenBao")
     return certificate_path
 
 
 def _host_certificate_if_available(
     context: DeploymentContext,
-    private_key: Path,
+    session: GuestSshSession,
     *,
-    client_certificate: Path | None,
     directory: Path,
     provision_phase: str,
+    bootstrap_transition: bool = False,
 ) -> Path | None:
-    if provision_phase == "base":
+    """Не обновлять сертификат на базовой фазе, кроме первого перехода на CA."""
+    if provision_phase == "base" and not bootstrap_transition:
         return None
     host_ca = getattr(PATHS, "ssh_host_ca_public_key", None)
     if not isinstance(host_ca, Path) or not host_ca.is_file():
+        if bootstrap_transition:
+            raise InfraManagerError("Первый переход на SSH CA требует Host CA")
         return None
     return _create_temporary_host_certificate(
-        context,
-        private_key,
-        client_certificate=client_certificate,
-        directory=directory,
+        context, session, directory=directory,
     )
-
-
-def _verify_temporary_ssh_identity(
-    context: DeploymentContext,
-    private_key: Path,
-    certificate: Path,
-) -> bool:
-    result = run(
-        [
-            *_ssh_identity_args(
-                context,
-                private_key,
-                certificate=certificate,
-            ),
-            "true",
-        ],
-        check=False,
-        capture_output=True,
-    )
-    if result.returncode:
-        return False
-    console.ok(
-        f"Гость {context.vmid}: вход по временному SSH-сертификату подтверждён"
-    )
-    return True
-
 
 def _project_git_ansible_vars(
     context: DeploymentContext,
@@ -401,34 +287,26 @@ def _project_git_ansible_vars(
 
 def _guest_has_openbao_machine_identity(
     context: DeploymentContext,
-    private_key: Path,
+    session: GuestSshSession,
     *,
-    certificate: Path | None,
     target: str,
 ) -> bool:
-    """Проверить действующую машинную identity, не читая secret."""
+    """Проверить действующую машинную идентичность, не читая секрет."""
     result = run(
-        [
-            *_ssh_identity_args(
-                context,
-                private_key,
-                certificate=certificate,
-            ),
+        session.ssh_command(
             "test -s /etc/infra-manager/openbao/machine.env "
             "&& test -x /usr/local/sbin/infra-openbao-otp "
-            f"&& /usr/local/sbin/infra-openbao-otp {target} >/dev/null",
-        ],
+            f"&& /usr/local/sbin/infra-openbao-otp {target} >/dev/null"
+        ),
         check=False,
         capture_output=True,
     )
     return result.returncode == 0
 
-
 def _prepare_openbao_machine_ansible_vars(
     context: DeploymentContext,
     *,
-    private_key: Path,
-    certificate: Path | None,
+    session: GuestSshSession,
     directory: Path,
 ) -> list[str]:
     """Подготовить только собственную машинную OpenBao identity гостя."""
@@ -521,10 +399,7 @@ def _prepare_openbao_machine_ansible_vars(
     )
 
     if _guest_has_openbao_machine_identity(
-        context,
-        private_key,
-        certificate=certificate,
-        target=sorted(set(target_ips))[0],
+        context, session, target=sorted(set(target_ips))[0],
     ):
         return args
 
@@ -566,26 +441,21 @@ def _prepare_openbao_machine_ansible_vars(
 def _run_guest_ansible(
     context: DeploymentContext,
     *,
-    private_key: Path,
-    certificate: Path | None,
+    session: GuestSshSession,
     provision_phase: str,
     self_update: bool,
     project_branch: str | None,
     host_certificate: Path | None = None,
     openbao_machine_args: list[str] | None = None,
 ) -> None:
+    """Применить Ansible с тем же SSH-доверием, что и проверка подключения."""
+    if session.private_key is None:
+        raise InfraManagerError("SSH-сеанс Ansible не подготовлен")
     repo_root = context.paths.guest_dir.parents[2]
     ansible_env = os.environ.copy()
     ansible_env["ANSIBLE_CONFIG"] = str(repo_root / "ansible.cfg")
     ansible_env["ANSIBLE_HOST_KEY_CHECKING"] = "True"
-    ssh_args = (
-        f"-o UserKnownHostsFile={context.paths.known_hosts} "
-        "-o StrictHostKeyChecking=yes "
-        "-o IdentitiesOnly=yes"
-    )
-    if certificate is not None:
-        ssh_args += f" -o CertificateFile={certificate}"
-    ansible_env["ANSIBLE_SSH_ARGS"] = ssh_args
+    ansible_env["ANSIBLE_SSH_ARGS"] = session.ansible_ssh_args()
 
     started = time.monotonic()
     completed = False
@@ -594,46 +464,27 @@ def _run_guest_ansible(
         run(
             [
                 "ansible-playbook",
-                "-i",
-                f"{context.address},",
-                "-u",
-                "root",
-                "--private-key",
-                str(private_key),
-                "-e",
-                f"guest={context.paths.guest_dir.name}",
-                "-e",
-                f"provision_phase={provision_phase}",
-                "-e",
-                f"infra_self_update={'true' if self_update else 'false'}",
-                "-e",
-                f"infra_project_branch={project_branch or SETTINGS.project_branch()}",
-                "-e",
-                f"infra_pve_node={context.node}",
+                "-i", f"{context.address},",
+                "-u", "root",
+                "--private-key", str(session.private_key),
+                "-e", f"guest={context.paths.guest_dir.name}",
+                "-e", f"provision_phase={provision_phase}",
+                "-e", f"infra_self_update={'true' if self_update else 'false'}",
+                "-e", f"infra_project_branch={project_branch or SETTINGS.project_branch()}",
+                "-e", f"infra_pve_node={context.node}",
                 *(
-                    [
-                        "-e",
-                        f"infra_ssh_client_ca_file={PATHS.ssh_client_ca_public_key}",
-                    ]
-                    if PATHS.ssh_client_ca_public_key.is_file()
-                    else []
+                    ["-e", f"infra_ssh_client_ca_file={PATHS.ssh_client_ca_public_key}"]
+                    if PATHS.ssh_client_ca_public_key.is_file() else []
                 ),
                 *_project_git_ansible_vars(context),
                 *(
                     openbao_machine_args
                     if openbao_machine_args is not None
-                    else [
-                        "-e",
-                        "infra_openbao_machine_enabled=false",
-                    ]
+                    else ["-e", "infra_openbao_machine_enabled=false"]
                 ),
                 *(
-                    [
-                        "-e",
-                        f"infra_ssh_host_certificate_file={host_certificate}",
-                    ]
-                    if host_certificate is not None
-                    else []
+                    ["-e", f"infra_ssh_host_certificate_file={host_certificate}"]
+                    if host_certificate is not None else []
                 ),
                 str(context.paths.playbook),
             ],
@@ -661,118 +512,122 @@ def _configure_guest_os(
     allow_legacy_bootstrap: bool = True,
     bootstrap_private_key: Path | None = None,
 ) -> None:
-    """Проверить SSH и применить конфигурацию Ansible."""
+    """Подготовить доверенный SSH-сеанс и применить настройку Ansible.
 
-    _ensure_ssh_host_key(context.paths.known_hosts, context.address)
+    Для штатного обновления нужен и клиентский, и серверный CA OpenBao.
+    При первом создании гость может ещё не иметь host-сертификата; только
+    предъявленный одноразовый начальный ключ разрешает установить его.
+    Отказ штатного сертификата сам по себе не разрешает такой переход.
+    """
     console.info(f"Настройка ОС {context.vmid}")
-
     repo_root = context.paths.guest_dir.parents[2]
     console.detail("Обновление PVE-only служебного контура")
     install_openbao_host_support(context.node, repo_root)
     if self_update:
         install_recovery_host_support(context.node, repo_root)
 
+    bootstrap_key = bootstrap_private_key
+    if (
+        bootstrap_key is None
+        and allow_legacy_bootstrap
+        and context.paths.private_key is not None
+    ):
+        bootstrap_key = context.paths.private_key
+
     if not PATHS.ssh_client_ca_public_key.is_file():
-        if (
-            not allow_legacy_bootstrap
-            or context.paths.private_key is None
-        ):
+        if not allow_legacy_bootstrap or bootstrap_key is None:
             raise InfraManagerError(
-                f"Гость {context.vmid}: SSH CA не опубликован и "
-                "одноразовый bootstrap-доступ недоступен"
+                f"Гость {context.vmid}: клиентский SSH CA OpenBao отсутствует; "
+                "начальный одноразовый доступ недоступен"
             )
-        console.info(
-            f"Гость {context.vmid}: используется начальный bootstrap-доступ"
-        )
-        _run_guest_ansible(
-            context,
-            private_key=context.paths.private_key,
-            certificate=None,
-            provision_phase=provision_phase,
-            self_update=self_update,
-            project_branch=project_branch,
-        )
+        # До появления CA разрешён только одноразовый начальный ключ.
+        _ensure_ssh_host_key(context.paths.known_hosts, context.address)
+        console.info(f"Гость {context.vmid}: используется начальный SSH-доступ")
+        with GuestSshSession(
+            context.node, context.address,
+            bootstrap_key=bootstrap_key,
+            bootstrap_known_hosts=context.paths.known_hosts,
+            execute=run,
+        ) as initial_session:
+            _run_guest_ansible(
+                context, session=initial_session,
+                provision_phase=provision_phase,
+                self_update=self_update, project_branch=project_branch,
+            )
         return
 
     with tempfile.TemporaryDirectory(
         prefix=f"infra-manager-ssh-{context.vmid}-"
     ) as temporary_dir:
-        private_key, certificate = _create_temporary_ssh_identity(
-            context,
-            Path(temporary_dir),
-        )
-        certificate_ready = _verify_temporary_ssh_identity(
-            context,
-            private_key,
-            certificate,
-        )
-        bootstrap_key = bootstrap_private_key
-        if (
-            bootstrap_key is None
-            and allow_legacy_bootstrap
-            and context.paths.private_key is not None
-        ):
-            bootstrap_key = context.paths.private_key
+        temporary = Path(temporary_dir)
+        with GuestSshSession(
+            context.node,
+            context.address,
+            host_ca=PATHS.ssh_host_ca_public_key,
+            sign_client=sign_ssh_client_key,
+            execute=run,
+        ) as session:
+            certificate_ready, reason = session.verify_connection()
+            if not certificate_ready and bootstrap_key is not None and allow_legacy_bootstrap:
+                # Не менять доверие рабочего гостя: переход разрешён только
+                # при наличии одноразового ключа конкретного создания.
+                _ensure_ssh_host_key(context.paths.known_hosts, context.address)
+                console.info(
+                    f"Гость {context.vmid}: первоначальная установка доверия SSH CA"
+                )
+                with GuestSshSession(
+                    context.node, context.address,
+                    bootstrap_key=bootstrap_key,
+                    bootstrap_known_hosts=context.paths.known_hosts,
+                    execute=run,
+                ) as initial_session:
+                    host_certificate = _host_certificate_if_available(
+                        context, initial_session,
+                        directory=temporary,
+                        provision_phase="base",
+                        bootstrap_transition=True,
+                    )
+                    _run_guest_ansible(
+                        context, session=initial_session,
+                        provision_phase="base",
+                        self_update=self_update,
+                        project_branch=project_branch,
+                        host_certificate=host_certificate,
+                    )
+                certificate_ready, reason = session.verify_connection()
 
-        if not certificate_ready and bootstrap_key is not None:
-            console.info(
-                f"Гость {context.vmid}: первоначальная установка доверия к SSH CA"
-            )
-            _run_guest_ansible(
-                context,
-                private_key=bootstrap_key,
-                certificate=None,
-                provision_phase="base",
-                self_update=self_update,
-                project_branch=project_branch,
-            )
-            certificate_ready = _verify_temporary_ssh_identity(
-                context,
-                private_key,
-                certificate,
-            )
+            if not certificate_ready:
+                raise InfraManagerError(
+                    f"Гость {context.vmid}: вход по краткоживущему SSH-сертификату "
+                    f"не прошёл ({reason}); исправьте SSH CA/host-сертификат. "
+                    "Для полного восстановления управляющего гостя есть "
+                    "infra-manager recover"
+                )
 
-        if certificate_ready:
+            console.ok(
+                f"Гость {context.vmid}: вход по временному SSH-сертификату подтверждён"
+            )
             host_certificate = _host_certificate_if_available(
-                context,
-                private_key,
-                client_certificate=certificate,
-                directory=Path(temporary_dir),
+                context, session,
+                directory=temporary,
                 provision_phase=provision_phase,
             )
             openbao_machine_args = (
                 _prepare_openbao_machine_ansible_vars(
-                    context,
-                    private_key=private_key,
-                    certificate=certificate,
-                    directory=Path(temporary_dir),
+                    context, session=session, directory=temporary,
                 )
                 if provision_phase == "full"
                 else ["-e", "infra_openbao_machine_enabled=false"]
             )
             _run_guest_ansible(
-                context,
-                private_key=private_key,
-                certificate=certificate,
+                context, session=session,
                 provision_phase=provision_phase,
                 self_update=self_update,
                 project_branch=project_branch,
                 host_certificate=host_certificate,
                 openbao_machine_args=openbao_machine_args,
             )
-            _remove_obsolete_guest_authorizations(
-                context,
-                private_key,
-                certificate,
-            )
-            return
-
-        raise InfraManagerError(
-            f"Гость {context.vmid}: вход по краткоживущему "
-            "SSH-сертификату не прошёл; bootstrap-доступ отсутствует "
-            "или не установил доверие к SSH CA"
-        )
-
+            _remove_obsolete_guest_authorizations(context, session)
 
 def _validate_existing_guest_object(context: DeploymentContext) -> None:
     """Проверить существующий объект без требования OpenTofu state."""
