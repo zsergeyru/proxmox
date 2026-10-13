@@ -7,8 +7,8 @@ import json
 import shlex
 from pathlib import Path
 
-from .common import InfraManagerError, console, log_level, require_command, run
-from .guest_catalog import find_guest_by_role, guest_management_address
+from .common import CommandError, InfraManagerError, console, log_level, require_command, run
+from .guest_catalog import find_guest_by_role, guest_management_address, load_manifest
 from .settings import PATHS, SETTINGS
 
 
@@ -683,6 +683,53 @@ def apply_host_requirements(
         return
     if "container-host" in features:
         ensure_container_host(node, vmid)
+
+
+GUEST_STORAGE_HOST_COMMAND = Path("/usr/local/sbin/infra-manager-guest-storage")
+
+
+def ensure_guest_storage(
+    node: str,
+    vmid: int,
+    kind: str,
+    guest_dir: Path,
+) -> None:
+    """Создать постоянные тома только для гостей с описанием pve_storage.
+
+    Сценарий выполняется root на PVE через существующий SSH-контур.
+    Приложение гостя не получает доступа к управлению дисками.
+    """
+    manifest = load_manifest(guest_dir / "provision.yaml")
+    config = manifest.get("pve_storage")
+    if config is None:
+        return
+    if kind != "lxc" or not isinstance(config, dict):
+        raise InfraManagerError(
+            f"Гость {vmid}: pve_storage поддерживается только для LXC"
+        )
+    source = (
+        guest_dir.parents[2]
+        / "scripts" / "infra-manager" / "host" / "guest-storage.py"
+    )
+    console.info(f"Подготовка постоянных томов гостя {vmid} на PVE")
+    _install_remote_file(
+        node, source, GUEST_STORAGE_HOST_COMMAND, "0755",
+    )
+    try:
+        _ssh_with_input(
+            node,
+            str(GUEST_STORAGE_HOST_COMMAND),
+            str(vmid),
+            input_text=json.dumps(config, ensure_ascii=False),
+        )
+    except CommandError as exc:
+        # У PVE-only сценария нет секретов в выводе; передаём точную причину.
+        detail = (exc.stderr or "").strip()
+        raise InfraManagerError(
+            f"Гость {vmid}: не удалось подготовить хранилище. "
+            + (detail or f"Код ошибки {exc.returncode}")
+        ) from exc
+    console.ok(f"Гость {vmid}: постоянное хранилище подключено")
 
 
 def check_root_access(node: str) -> None:
