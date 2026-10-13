@@ -118,7 +118,7 @@ def source_path(volumes: dict[str, dict], item: dict) -> Path:
     return Path(volumes[item["volume"]]["mountpoint"]) / item["directory"]
 
 
-def existing_mount_config(vmid: int, volume: dict, mounts: list[dict]) -> list[dict]:
+def existing_mount_config(vmid: int, volumes: dict[str, dict], mounts: list[dict]) -> list[dict]:
     """Не переписывать уже занятые подключения LXC."""
     config = command("pct", "config", str(vmid)).stdout
     if "unprivileged: 1" not in config.splitlines():
@@ -134,7 +134,7 @@ def existing_mount_config(vmid: int, volume: dict, mounts: list[dict]) -> list[d
         attributes = dict(part.split("=", 1) for part in parts[1:] if "=" in part)
         readonly = attributes.get("ro", "0") == "1"
         if (
-            parts[0] != str(source_path(volume, item))
+            parts[0] != str(source_path(volumes, item))
             or attributes.get("mp") != item["target"]
             or readonly != item["read_only"]
         ):
@@ -241,10 +241,10 @@ def ensure_host_mount(device: Path, uuid: str, volume: dict) -> Path:
     return path
 
 
-def ensure_directories(volume: dict, mounts: list[dict]) -> None:
+def ensure_directories(volumes: dict[str, dict], mounts: list[dict]) -> None:
     """Создать только подкаталоги; существующее содержимое не трогать."""
     for item in mounts:
-        path = source_path(volume, item)
+        path = source_path(volumes, item)
         if path.is_symlink():
             raise StorageError(f"Вместо каталога обнаружена ссылка: {path}")
         path.mkdir(exist_ok=True)
@@ -265,7 +265,7 @@ def ensure_directories(volume: dict, mounts: list[dict]) -> None:
             path.chmod(0o750)
 
 
-def configure_lxc(vmid: int, volume: dict, mounts: list[dict], pending: list[dict]) -> None:
+def configure_lxc(vmid: int, volumes: dict[str, dict], mounts: list[dict], pending: list[dict]) -> None:
     """Подключить папки к LXC; при необходимости перезапустить контейнер."""
     active = command("pct", "status", str(vmid)).stdout.strip().endswith("running")
     if pending and active:
@@ -273,7 +273,7 @@ def configure_lxc(vmid: int, volume: dict, mounts: list[dict], pending: list[dic
     try:
         for item in pending:
             spec = (
-                f"{source_path(volume, item)},mp={item['target']},"
+                f"{source_path(volumes, item)},mp={item['target']},"
                 f"ro={int(item['read_only'])}"
             )
             command("pct", "set", str(vmid), f"--{item['slot']}", spec)
@@ -295,13 +295,14 @@ def configure_lxc(vmid: int, volume: dict, mounts: list[dict], pending: list[dic
 
 def main() -> int:
     vmid = int(sys.argv[1])
-    vg, pool, volume, mounts = validate(vmid, json.load(sys.stdin))
-    pending = existing_mount_config(vmid, volume, mounts)
-    device, uuid = ensure_volume(vg, pool, volume)
-    ensure_host_mount(device, uuid, volume)
-    ensure_directories(volume, mounts)
-    configure_lxc(vmid, volume, mounts, pending)
-    print(f"[ОК] LXC {vmid}: постоянный том подключён, mp0/mp1 готовы")
+    vg, pool, volumes, mounts = validate(vmid, json.load(sys.stdin))
+    pending = existing_mount_config(vmid, volumes, mounts)
+    for volume in volumes.values():
+        device, uuid = ensure_volume(vg, pool, volume)
+        ensure_host_mount(device, uuid, volume)
+    ensure_directories(volumes, mounts)
+    configure_lxc(vmid, volumes, mounts, pending)
+    print(f"[ОК] LXC {vmid}: тома подключены, каталоги готовы")
     return 0
 
 
