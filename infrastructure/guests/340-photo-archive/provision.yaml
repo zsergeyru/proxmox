@@ -56,8 +56,8 @@ pve_storage:
 photo_archive:
   application: immich
   mode: api-only
-  # Версия и образы должны быть закреплены совместно перед первым запуском.
-  immich_version: v3
+  # Закреплена конкретная совместимая версия для сервера и обработчиков Windows.
+  immich_version: v3.3.1
   web_port: 2283
   paths:
     root: /opt/photo-archive
