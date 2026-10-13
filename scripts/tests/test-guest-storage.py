@@ -124,123 +124,174 @@ def test_existing_mounts() -> None:
 
 
 def test_existing_volume_not_formatted() -> None:
-    calls: list[tuple] = []
+    calls = []
 
-    def fake_command(*args, check=True):
+    def fake(*args, check=True):
         calls.append(args)
         if args[:4] == ("lvs", "--noheadings", "-o", "lv_name"):
             return SimpleNamespace(returncode=0, stdout="data photo_archive infra_state")
-        if args[0] == "lvs" and "lv_size" in args:
-            return SimpleNamespace(returncode=0, stdout=str(240 * 1024**3))
-        if args[0] == "lvs" and "pool_lv" in args:
-            return SimpleNamespace(returncode=0, stdout="data")
-        if args[:4] == ("blkid", "-s", "TYPE", "-o"):
-            return SimpleNamespace(returncode=0, stdout="ext4")
-        if args[:4] == ("blkid", "-s", "UUID", "-o"):
-            return SimpleNamespace(returncode=0, stdout="abc123-456")
-        raise AssertionError(f"Непредвиденная команда: {args}")
-
-    photo = storage_config()["volumes"][0]
-    with patch.object(storage, "command", side_effect=fake_command):
-        device, uuid = storage.ensure_volume("pve", "data", photo)
-    assert str(device) == "/dev/pve/photo_archive"
-    assert uuid == "abc123-456"
-    assert not any(args[0] in ("mkfs.ext4", "lvcreate") for args in calls)
-
-    # Повторный deploy не откатывает вручную увеличенный том.
-    def larger_command(*args, check=True):
-        if args[:4] == ("lvs", "--noheadings", "-o", "lv_name"):
-            return SimpleNamespace(returncode=0, stdout="data photo_archive")
-        if args[0] == "lvs" and "lv_size" in args:
+        if "lv_size" in args:
             return SimpleNamespace(returncode=0, stdout=str(300 * 1024**3))
-        if args[0] == "lvs" and "pool_lv" in args:
+        if "pool_lv" in args:
             return SimpleNamespace(returncode=0, stdout="data")
-        if args[:4] == ("blkid", "-s", "TYPE", "-o"):
-            return SimpleNamespace(returncode=0, stdout="ext4")
-        if args[:4] == ("blkid", "-s", "UUID", "-o"):
-            return SimpleNamespace(returncode=0, stdout="abc123-456")
-        raise AssertionError(f"Непредвиденная команда: {args}")
-
-    with patch.object(storage, "command", side_effect=larger_command):
-        storage.ensure_volume("pve", "data", photo)
-
-
-def test_new_volume_only_formatted_once() -> None:
-    calls: list[tuple] = []
-
-    def fake_command(*args, check=True):
-        calls.append(args)
-        if args[0] == "lvs":
-            return SimpleNamespace(returncode=0, stdout="data vm-340-disk-0")
-        if args[0] in ("lvcreate", "mkfs.ext4"):
+        if "lv_tags" in args:
             return SimpleNamespace(returncode=0, stdout="")
-        if args[:4] == ("blkid", "-s", "TYPE", "-o"):
-            count = sum(call[0] == "mkfs.ext4" for call in calls)
-            return SimpleNamespace(
-                returncode=0 if count else 2,
-                stdout="ext4" if count else "",
-            )
-        if args[:4] == ("blkid", "-s", "UUID", "-o"):
+        if args[0] == "blkid" and "TYPE" in args:
+            return SimpleNamespace(returncode=0, stdout="ext4")
+        if args[0] == "blkid" and "UUID" in args:
             return SimpleNamespace(returncode=0, stdout="abc123-456")
-        raise AssertionError(f"Непредвиденная команда: {args}")
+        raise AssertionError(args)
 
-    with patch.object(storage, "command", side_effect=fake_command):
-        storage.ensure_volume("pve", "data", storage_config()["volumes"][1])
-    assert [args[0] for args in calls].count("lvcreate") == 1
-    assert [args[0] for args in calls].count("mkfs.ext4") == 1
+    with patch.object(storage, "command", side_effect=fake):
+        device, uuid = storage.ensure_volume("pve", "data", storage_config()["volumes"][0])
+    assert (str(device), uuid) == ("/dev/pve/photo_archive", "abc123-456")
+    assert not any(args[0] in ("lvcreate", "mkfs.ext4", "e2fsck") for args in calls)
+
+
+def test_new_volume_and_interrupted_recovery() -> None:
+    calls = []
+    exists = False
+    tags = ""
+    formatted = False
+
+    def fake(*args, check=True):
+        nonlocal exists, tags, formatted
+        calls.append(args)
+        if args[:4] == ("lvs", "--noheadings", "-o", "lv_name"):
+            return SimpleNamespace(returncode=0, stdout="data infra_state" if exists else "data")
+        if args[0] == "lvcreate":
+            exists = True
+            tags = storage.PENDING_TAG
+            return SimpleNamespace(returncode=0, stdout="")
+        if "lv_size" in args:
+            return SimpleNamespace(returncode=0, stdout=str(40 * 1024**3))
+        if "pool_lv" in args:
+            return SimpleNamespace(returncode=0, stdout="data")
+        if "lv_tags" in args:
+            return SimpleNamespace(returncode=0, stdout=tags)
+        if args[0] == "mkfs.ext4":
+            formatted = True
+            return SimpleNamespace(returncode=0, stdout="")
+        if args[0] == "e2fsck":
+            return SimpleNamespace(returncode=0, stdout="")
+        if args[0] == "lvchange":
+            tags = ""
+            return SimpleNamespace(returncode=0, stdout="")
+        if args[0] == "blkid" and "TYPE" in args:
+            return SimpleNamespace(
+                returncode=0 if formatted else 2, stdout="ext4" if formatted else ""
+            )
+        if args[0] == "blkid" and "UUID" in args:
+            return SimpleNamespace(returncode=0, stdout="abc123-456")
+        raise AssertionError(args)
+
+    volume = storage_config()["volumes"][1]
+    with patch.object(storage, "command", side_effect=fake):
+        storage.ensure_volume("pve", "data", volume)
+        storage.ensure_volume("pve", "data", volume)
+    assert [a[0] for a in calls].count("lvcreate") == 1
+    assert [a[0] for a in calls].count("mkfs.ext4") == 1
+    assert [a[0] for a in calls].count("e2fsck") == 1
+
+    # LV с незавершённой меткой разрешается оформить после сбоя.
+    exists, tags, formatted = True, storage.PENDING_TAG, False
+    calls.clear()
+    with patch.object(storage, "command", side_effect=fake):
+        storage.ensure_volume("pve", "data", volume)
+    assert [a[0] for a in calls].count("mkfs.ext4") == 1
 
 
 def test_unknown_existing_volume_does_not_format() -> None:
-    calls: list[tuple] = []
+    calls = []
 
-    def fake_command(*args, check=True):
+    def fake(*args, check=True):
         calls.append(args)
         if args[:4] == ("lvs", "--noheadings", "-o", "lv_name"):
             return SimpleNamespace(returncode=0, stdout="data infra_state")
-        if args[0] == "lvs" and "lv_size" in args:
+        if "lv_size" in args:
             return SimpleNamespace(returncode=0, stdout=str(40 * 1024**3))
-        if args[0] == "lvs" and "pool_lv" in args:
+        if "pool_lv" in args:
             return SimpleNamespace(returncode=0, stdout="data")
+        if "lv_tags" in args:
+            return SimpleNamespace(returncode=0, stdout="")
         if args[0] == "blkid":
             return SimpleNamespace(returncode=2, stdout="")
-        raise AssertionError(f"Непредвиденная команда: {args}")
+        raise AssertionError(args)
 
-    with patch.object(storage, "command", side_effect=fake_command):
+    with patch.object(storage, "command", side_effect=fake):
         try:
             storage.ensure_volume("pve", "data", storage_config()["volumes"][1])
         except storage.StorageError:
             pass
         else:
-            raise AssertionError("Неизвестный существующий том нельзя форматировать")
+            raise AssertionError("Неизвестный том нельзя форматировать")
     assert not any(args[0] in ("mkfs.ext4", "lvcreate") for args in calls)
 
 
 def test_guest_mount_paths() -> None:
     config = storage_config()
     volumes = {v["name"]: v for v in config["volumes"]}
-    calls: list[tuple] = []
+    calls = []
 
-    def fake_command(*args, check=True):
+    def fake(*args, check=True):
         calls.append(args)
         if args[:2] == ("pct", "status"):
             return SimpleNamespace(returncode=0, stdout="status: stopped")
         return SimpleNamespace(returncode=0, stdout="")
 
-    with patch.object(storage, "command", side_effect=fake_command):
-        storage.configure_lxc(340, volumes, config["mounts"], config["mounts"])
-    assert (
-        "pct", "set", "340", "--mp0",
-        "/mnt/bindmounts/photo-archive/data,mp=/srv/photo-archive,ro=1",
-    ) in calls
-    assert (
-        "pct", "set", "340", "--mp1",
-        "/mnt/bindmounts/infra-state/340-photo-archive,mp=/mnt/persistent-state,ro=0",
-    ) in calls
-    assert (
-        "pct", "set", "340", "--mp2",
-        "/mnt/bindmounts/photo-archive/immich-media,mp=/srv/photo-archive-media,ro=0",
-    ) in calls
-    assert not any(item[:2] == ("pct", "stop") for item in calls)
+    with (
+        patch.object(storage, "command", side_effect=fake),
+        patch.object(storage, "ensure_startup_hook") as hook,
+    ):
+        storage.configure_lxc(340, volumes, config["mounts"], config["mounts"], config)
+    hook.assert_called_once_with(340, config)
+    for number, path, target, readonly in [
+        ("mp0", "photo-archive/data", "/srv/photo-archive", 1),
+        ("mp1", "infra-state/340-photo-archive", "/mnt/persistent-state", 0),
+        ("mp2", "photo-archive/immich-media", "/srv/photo-archive-media", 0),
+    ]:
+        assert (
+            "pct", "set", "340", f"--{number}",
+            f"/mnt/bindmounts/{path},mp={target},ro={readonly}",
+        ) in calls
+
+
+def test_startup_guard_blocks_missing_storage() -> None:
+    config = storage_config()
+    volumes = {v["name"]: v for v in config["volumes"]}
+    with patch.object(storage, "command", return_value=SimpleNamespace(
+        returncode=1, stdout=""
+    )):
+        try:
+            storage.verify_mounted_volumes("pve", volumes, config["mounts"])
+        except storage.StorageError:
+            pass
+        else:
+            raise AssertionError("Нельзя запускать LXC без смонтированного тома")
+
+
+def test_no_start_on_incomplete_setup() -> None:
+    config = storage_config()
+    volumes = {v["name"]: v for v in config["volumes"]}
+    calls = []
+
+    def fake(*args, check=True):
+        calls.append(args)
+        if args[:2] == ("pct", "status"):
+            return SimpleNamespace(returncode=0, stdout="status: running")
+        if args[:2] == ("pct", "set"):
+            raise storage.StorageError("Имитация ошибки pct set")
+        return SimpleNamespace(returncode=0, stdout="")
+
+    with patch.object(storage, "command", side_effect=fake):
+        try:
+            storage.configure_lxc(340, volumes, config["mounts"], config["mounts"], config)
+        except storage.StorageError:
+            pass
+        else:
+            raise AssertionError("Ожидалась ошибка")
+    assert any(args[:2] == ("pct", "shutdown") for args in calls)
+    assert not any(args[:2] == ("pct", "start") for args in calls)
 
 
 def test_no_storage_on_other_guests() -> None:
@@ -279,9 +330,11 @@ if __name__ == "__main__":
     test_contract()
     test_existing_mounts()
     test_existing_volume_not_formatted()
-    test_new_volume_only_formatted_once()
+    test_new_volume_and_interrupted_recovery()
     test_unknown_existing_volume_does_not_format()
     test_guest_mount_paths()
+    test_startup_guard_blocks_missing_storage()
+    test_no_start_on_incomplete_setup()
     test_no_storage_on_other_guests()
     test_guest_storage_sent_to_pve()
     print("OK: Guest storage contract")
