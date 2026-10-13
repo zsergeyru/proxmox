@@ -10,7 +10,7 @@ from urllib.request import Request, urlopen
 
 import yaml
 
-from .common import InfraManagerError, console, require_command, run
+from .common import InfraManagerError, console, run
 from .guest_catalog import GuestIdentity, guest_management_address
 from .portal import local_portal_definition, portal_definitions
 from .guest_ssh import GuestSshSession
