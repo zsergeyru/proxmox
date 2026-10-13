@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Подготовка одного постоянного тома LXC с каталогами на PVE.
+"""Подготовка постоянных томов LXC и их каталогов на PVE.
 
 Сценарий получает описание гостя через stdin, выполняется только на PVE и
 никогда не форматирует существующий логический том.
@@ -28,8 +28,8 @@ def command(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
     return result
 
 
-def validate(vmid: int, config: dict) -> tuple[str, str, dict, list[dict]]:
-    """Проверить описание тома и обоих подключений до записи на диск."""
+def validate(vmid: int, config: dict) -> tuple[str, str, dict[str, dict], list[dict]]:
+    """Проверить описание томов и подключений до записи на диск."""
     if type(vmid) is not int or not 100 <= vmid <= 9999:
         raise StorageError("Некорректный VMID")
     if not isinstance(config, dict):
@@ -39,44 +39,60 @@ def validate(vmid: int, config: dict) -> tuple[str, str, dict, list[dict]]:
         if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9_+-]+", name):
             raise StorageError("Недопустимое имя группы томов или пула")
 
-    volume = config.get("volume")
-    if not isinstance(volume, dict):
-        raise StorageError("Ожидается описание одного общего тома")
-    name, size, mountpoint = (
-        volume.get("name"), volume.get("size_gb"), volume.get("mountpoint")
-    )
-    if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_+-]*", name):
-        raise StorageError("Недопустимое имя тома")
-    if type(size) is not int or not 1 <= size <= 10000:
-        raise StorageError("Некорректный размер тома")
-    if (
-        not isinstance(mountpoint, str)
-        or not mountpoint.startswith("/mnt/bindmounts/")
-        or not Path(mountpoint).is_absolute()
-        or ".." in Path(mountpoint).parts
-        or "//" in mountpoint
-        or str(Path(mountpoint)) != mountpoint
-    ):
-        raise StorageError("Недопустимая точка подключения тома PVE")
+    raw_volumes = config.get("volumes")
+    if not isinstance(raw_volumes, list) or not raw_volumes:
+        raise StorageError("Не описаны постоянные тома")
+    volumes: dict[str, dict] = {}
+    paths: set[str] = set()
+    for volume in raw_volumes:
+        if not isinstance(volume, dict):
+            raise StorageError("Некорректное описание тома")
+        name, size, mountpoint = (
+            volume.get("name"), volume.get("size_gb"), volume.get("mountpoint")
+        )
+        if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_+-]*", name):
+            raise StorageError("Недопустимое имя тома")
+        if type(size) is not int or not 1 <= size <= 10000:
+            raise StorageError("Некорректный размер тома")
+        if (
+            not isinstance(mountpoint, str)
+            or not mountpoint.startswith("/mnt/bindmounts/")
+            or not Path(mountpoint).is_absolute()
+            or ".." in Path(mountpoint).parts
+            or "//" in mountpoint
+            or str(Path(mountpoint)) != mountpoint
+        ):
+            raise StorageError("Недопустимая точка подключения тома PVE")
+        if name in volumes or mountpoint in paths:
+            raise StorageError("Повторяющийся том или путь на PVE")
+        volumes[name] = volume
+        paths.add(mountpoint)
+    for first in paths:
+        for second in paths:
+            if first != second and Path(first) in Path(second).parents:
+                raise StorageError("Вложенные точки подключения томов запрещены")
 
     mounts = config.get("mounts")
     if not isinstance(mounts, list) or not mounts:
         raise StorageError("Не описаны подключения гостя")
     slots: set[str] = set()
-    directories: set[str] = set()
+    directories: set[tuple[str, str]] = set()
     targets: set[str] = set()
     for item in mounts:
         if not isinstance(item, dict):
             raise StorageError("Некорректная запись подключения")
-        slot, directory, target = (
-            item.get("slot"), item.get("directory"), item.get("target")
+        slot, volume_name, directory, target = (
+            item.get("slot"), item.get("volume"),
+            item.get("directory"), item.get("target")
         )
-        if slot not in ("mp0", "mp1") or slot in slots:
+        if not isinstance(slot, str) or not re.fullmatch(r"mp[0-9]", slot) or slot in slots:
             raise StorageError("Недопустимый или повторяющийся номер подключения")
+        if not isinstance(volume_name, str) or volume_name not in volumes:
+            raise StorageError("Подключение ссылается на неизвестный том")
         if (
             not isinstance(directory, str)
-            or not re.fullmatch(r"[a-z][a-z0-9_-]*", directory)
-            or directory in directories
+            or not re.fullmatch(r"[a-z0-9][a-z0-9_-]*", directory)
+            or (volume_name, directory) in directories
         ):
             raise StorageError("Недопустимый или повторяющийся каталог тома")
         if (
@@ -92,14 +108,14 @@ def validate(vmid: int, config: dict) -> tuple[str, str, dict, list[dict]]:
         if type(item.get("read_only")) is not bool:
             raise StorageError("Не задан режим доступа к каталогу")
         slots.add(slot)
-        directories.add(directory)
+        directories.add((volume_name, directory))
         targets.add(target)
-    return vg, pool, volume, mounts
+    return vg, pool, volumes, mounts
 
 
-def source_path(volume: dict, item: dict) -> Path:
-    """Определить путь каталога внутри единственного тома на PVE."""
-    return Path(volume["mountpoint"]) / item["directory"]
+def source_path(volumes: dict[str, dict], item: dict) -> Path:
+    """Путь папки гостя внутри выбранного тома на PVE."""
+    return Path(volumes[item["volume"]]["mountpoint"]) / item["directory"]
 
 
 def existing_mount_config(vmid: int, volume: dict, mounts: list[dict]) -> list[dict]:
