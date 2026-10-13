@@ -1304,6 +1304,11 @@ def check_pve_host_support_before_signing() -> None:
             ),
             patch.object(
                 guest_deploy_module,
+                "_host_certificate_if_available",
+                return_value=None,
+            ),
+            patch.object(
+                guest_deploy_module,
                 "_project_git_ansible_vars",
                 return_value=["-e", "infra_project_git_read=false"],
             ),
