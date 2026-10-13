@@ -416,6 +416,70 @@ def test_protected_guest_hook_install_restores_protection() -> None:
 
 
 
+def test_local_storage_enables_snippets_without_losing_content() -> None:
+    """Поддерживаемая команда pvesh читает настройки, pvesm меняет только нужное."""
+    calls = []
+    config = {
+        "storage": "local", "type": "dir", "path": "/var/lib/vz",
+        "content": "iso,vztmpl,backup",
+    }
+
+    def fake(*args, check=True):
+        calls.append(args)
+        if args[0] == "pvesh":
+            return SimpleNamespace(returncode=0, stdout=json.dumps(config))
+        if args[0] == "pvesm" and args[1] == "set":
+            return SimpleNamespace(returncode=0, stdout="")
+        raise AssertionError(args)
+
+    with patch.object(storage, "command", side_effect=fake):
+        storage.ensure_hook_storage()
+    assert calls == [
+        ("pvesh", "get", "/storage/local", "--output-format", "json"),
+        ("pvesm", "set", "local", "--content", "iso,vztmpl,backup,snippets"),
+    ]
+
+
+def test_local_storage_snippets_already_enabled() -> None:
+    """Повторный запуск не должен переписывать настройки local."""
+    calls = []
+    config = {
+        "storage": "local", "type": "dir", "path": "/var/lib/vz",
+        "content": "backup,snippets,iso",
+    }
+
+    def fake(*args, check=True):
+        calls.append(args)
+        if args[0] != "pvesh":
+            raise AssertionError("Уже настроенное хранилище нельзя изменять")
+        return SimpleNamespace(returncode=0, stdout=json.dumps(config))
+
+    with patch.object(storage, "command", side_effect=fake):
+        storage.ensure_hook_storage()
+    assert calls == [("pvesh", "get", "/storage/local", "--output-format", "json")]
+
+
+def test_local_storage_unknown_configuration_stops_safely() -> None:
+    """Не затирать содержимое local при неполном ответе API."""
+    for config in (
+        {"storage": "local", "type": "lvmthin", "path": "/var/lib/vz", "content": "iso"},
+        {"storage": "local", "type": "dir", "path": "/another", "content": "iso"},
+        {"storage": "local", "type": "dir", "path": "/var/lib/vz"},
+    ):
+        with patch.object(
+            storage, "command", return_value=SimpleNamespace(
+                returncode=0, stdout=json.dumps(config),
+            ),
+        ) as fake:
+            try:
+                storage.ensure_hook_storage()
+            except storage.StorageError:
+                pass
+            else:
+                raise AssertionError("Неизвестная конфигурация должна быть отклонена")
+        assert fake.call_count == 1
+
+
 def test_no_storage_on_other_guests() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         guest = Path(tmp) / "infrastructure/guests/420-ui"
@@ -461,6 +525,9 @@ if __name__ == "__main__":
     test_protected_guest_restores_protection_after_error()
     test_existing_protected_mounts_do_not_toggle_protection()
     test_protected_guest_hook_install_restores_protection()
+    test_local_storage_enables_snippets_without_losing_content()
+    test_local_storage_snippets_already_enabled()
+    test_local_storage_unknown_configuration_stops_safely()
     test_no_storage_on_other_guests()
     test_guest_storage_sent_to_pve()
     print("OK: Guest storage contract")
