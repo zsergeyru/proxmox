@@ -646,16 +646,10 @@ def main_test() -> None:
 
     class SyncOrderClient:
         def get(self, path: str):
-            if path != "/project/41/templates?sort=name&order=asc":
-                raise AssertionError(f"Неожиданный GET: {path}")
-            order_events.append("templates")
-            return [
-                {"id": 71, "name": "Test Guest"},
-                {"id": 72, "name": "Deploy Guest"},
-            ]
+            raise AssertionError(f"Лишнее чтение Semaphore: {path}")
 
         def delete(self, path: str):
-            order_events.append(f"delete:{path}")
+            raise AssertionError(f"Удаление задания запрещено: {path}")
 
         def ensure_opentofu_environment(self, project_id: int) -> int:
             del project_id
@@ -709,14 +703,9 @@ def main_test() -> None:
             ROOT,
             reuse_existing_git=True,
         )
-    if order_events != [
-        "catalog",
-        "git",
-        "templates",
-        "delete:/project/41/templates/71",
-    ]:
+    if order_events != ["catalog", "git"]:
         fail(
-            f"Нарушен порядок настройки и удаления старого задания: {order_events!r}"
+            f"Нарушен порядок безопасной синхронизации: {order_events!r}"
         )
 
     invalid_task_client = TaskSyncClient(token_valid=False)
