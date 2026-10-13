@@ -23,23 +23,34 @@ docker:
     - docker-buildx-plugin
     - docker-compose-plugin
 
-# Один постоянный том на PVE с обычными каталогами для данных и состояния.
-# Том вне корневого диска LXC 340. Повторный deploy его не форматирует.
+# Два логических тома внутри local-lvm основного NVMe PVE 512 ГБ.
+# 240 ГиБ — фотографии и медиаданные; 40 ГиБ — общий том состояний LXC.
+# Ранее созданные тома не форматировать и не удалять.
 pve_storage:
   volume_group: pve
   thin_pool: data
-  volume:
-    name: photo_archive
-    size_gb: 240
-    mountpoint: /mnt/bindmounts/photo-archive
+  volumes:
+    - name: photo_archive
+      size_gb: 240
+      mountpoint: /mnt/bindmounts/photo-archive
+    - name: infra_state
+      size_gb: 40
+      mountpoint: /mnt/bindmounts/infra-state
   mounts:
     - slot: mp0
+      volume: photo_archive
       directory: data
       target: /srv/photo-archive
       read_only: true
     - slot: mp1
-      directory: state
+      volume: infra_state
+      directory: 340-photo-archive
       target: /mnt/persistent-state
+      read_only: false
+    - slot: mp2
+      volume: photo_archive
+      directory: immich-media
+      target: /srv/photo-archive-media
       read_only: false
 
 photo_archive:
@@ -55,13 +66,15 @@ photo_archive:
     configuration: /etc/photo-archive
     environment: /mnt/persistent-state/secrets/immich.env
     originals: /srv/photo-archive/originals
-    uploads: /mnt/persistent-state/immich
+    uploads: /srv/photo-archive-media
     database: /mnt/persistent-state/postgres
   storage:
     required_external_mount: /srv/photo-archive
     required_state_mount: /mnt/persistent-state
-    pve_state_source: /mnt/bindmounts/photo-archive/state
+    required_media_mount: /srv/photo-archive-media
+    pve_state_source: /mnt/bindmounts/infra-state/340-photo-archive
     pve_data_source: /mnt/bindmounts/photo-archive/data
+    pve_media_source: /mnt/bindmounts/photo-archive/immich-media
     originals_read_only: true
     allow_missing_mount: false
   workers:
@@ -81,7 +94,7 @@ photo_archive:
 persistence:
   backup_required:
     - /mnt/persistent-state/postgres
-    - /mnt/persistent-state/immich
+    - /srv/photo-archive-media
     - /mnt/persistent-state/secrets/immich.env
     - /srv/photo-archive
   reproducible:
