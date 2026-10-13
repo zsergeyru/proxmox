@@ -286,7 +286,10 @@ def verify_guest_status(
         )
 
     _check_tcp(address, 22)
-    messages = ["SSH доступен"]
+    # Доступность порта не равна успешному SSH-входу: проверяем
+    # сертификат клиента и сертификат сервера на каждом Status Guest.
+    _run_guest_command(node, address, ["true"])
+    messages = ["SSH по сертификату доступен"]
 
     dashboard = local_portal_definition(repo_root, identity)
     checked_ports: set[int] = set()
