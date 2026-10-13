@@ -23,6 +23,25 @@ docker:
     - docker-buildx-plugin
     - docker-compose-plugin
 
+# Постоянные тома создаются на PVE; не зависят от диска LXC 340.
+# После первого создания повторный deploy ничего не форматирует.
+pve_storage:
+  volume_group: pve
+  thin_pool: data
+  mounts:
+    - slot: mp0
+      lv: photo_archive_data
+      size_gb: 180
+      source: /mnt/bindmounts/photo-archive/data
+      target: /srv/photo-archive
+      read_only: true
+    - slot: mp1
+      lv: photo_archive_state
+      size_gb: 60
+      source: /mnt/bindmounts/photo-archive/state
+      target: /mnt/persistent-state
+      read_only: false
+
 photo_archive:
   application: immich
   mode: api-only
