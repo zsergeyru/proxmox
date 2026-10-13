@@ -1443,6 +1443,121 @@ def check_opentofu_provider_mirror() -> None:
             fail("tofu init не использует локальное зеркало провайдера")
 
 
+def check_deploy_provision_phase_selection() -> None:
+    """Все этапы должны вызывать Ansible с прежними настройками доступа."""
+    cases = (
+        # Фаза, начальный контур, этап Ansible, разрешён начальный SSH.
+        ("all", False, "full", True),
+        ("provision", False, "full", True),
+        ("infrastructure", True, None, True),
+        ("provision-base", True, "base", True),
+        ("provision-control-plane", True, "bootstrap", True),
+        ("provision-recovery-control-plane", True, "recovery", True),
+        ("provision-ssh-trust", True, "base", True),
+        ("provision", True, "full", False),
+    )
+    initial_key = Path("/tmp/test-bootstrap-initial")
+    for phase, bootstrap_scope, provision_phase, allow_initial in cases:
+        identity = SimpleNamespace(
+            role=(
+                guest_deploy_module.SETTINGS.infra_manager_role
+                if bootstrap_scope else "ai-control"
+            ),
+            name="test-guest",
+            source={},
+        )
+        workspace = SimpleNamespace(
+            env={},
+            initialize=lambda: None,
+            get_resource_state=lambda target: (True, "ready"),
+        )
+        context = SimpleNamespace(
+            vmid=410,
+            name="test-guest",
+            node="pve",
+            kind="vm",
+            features=(),
+            address="192.0.2.10",
+            paths=SimpleNamespace(known_hosts=Path("/tmp/test-known-hosts")),
+            client=SimpleNamespace(find_vm=lambda vmid: {"name": "test-guest"}),
+            workspace=workspace,
+            target="test-target",
+        )
+        with (
+            patch.object(guest_deploy_module, "guest_identity", return_value=identity),
+            patch.object(guest_deploy_module, "require_command"),
+            patch.object(guest_deploy_module, "run"),
+            patch.object(
+                guest_deploy_module,
+                "project_branch_for_checkout",
+                return_value="test-branch",
+            ),
+            patch.object(
+                guest_deploy_module,
+                "prepare_workspace",
+                return_value=workspace,
+            ),
+            patch.object(
+                guest_deploy_module,
+                "_bootstrap_scope_private_key",
+                return_value=Path("/tmp/test-scope-key"),
+            ),
+            patch.object(
+                guest_deploy_module,
+                "_build_deployment_context",
+                return_value=context,
+            ),
+            patch.object(guest_deploy_module, "_validate_existing_guest_object"),
+            patch.object(guest_deploy_module, "_validate_pve_and_state"),
+            patch.object(guest_deploy_module, "_reconcile_guest_infrastructure") as infra,
+            patch.object(guest_deploy_module, "apply_host_requirements") as requirements,
+            patch.object(
+                guest_deploy_module,
+                "_existing_bootstrap_identity",
+                return_value=initial_key,
+            ),
+            patch.object(
+                guest_deploy_module,
+                "_bootstrap_public_key",
+                return_value="ssh-ed25519 AAAAINITIAL",
+            ),
+            patch.object(guest_deploy_module, "_remove_bootstrap_identity") as cleanup,
+            patch.object(guest_deploy_module, "_configure_guest_os") as configure,
+        ):
+            result = guest_deploy_module._run_deploy_guest(
+                ROOT, 410, bootstrap_scope=bootstrap_scope, phase=phase,
+            )
+            if result != 0:
+                fail(f"{phase}: развёртывание завершилось с ошибкой")
+            requirements.assert_called_once()
+            if phase in {"all", "infrastructure"}:
+                infra.assert_called_once()
+            else:
+                infra.assert_not_called()
+            if provision_phase is None:
+                configure.assert_not_called()
+            else:
+                configure.assert_called_once()
+                arguments, settings = configure.call_args
+                if arguments != (context,):
+                    fail(f"{phase}: Ansible получил неверный объект гостя")
+                if settings.get("provision_phase", "full") != provision_phase:
+                    fail(f"{phase}: Ansible получил неверную фазу")
+                if settings.get("allow_legacy_bootstrap", True) != allow_initial:
+                    fail(f"{phase}: изменилось разрешение начального SSH-доступа")
+                if settings.get("project_branch") != "test-branch":
+                    fail(f"{phase}: потеряна выбранная ветка проекта")
+                expected_key = None if bootstrap_scope else initial_key
+                if settings.get("bootstrap_private_key") != expected_key:
+                    fail(f"{phase}: изменился начальный SSH-ключ")
+            if bootstrap_scope:
+                cleanup.assert_not_called()
+            elif phase == "infrastructure":
+                cleanup.assert_not_called()
+            else:
+                cleanup.assert_called_once_with(410)
+
+
 def check_ansible_duration() -> None:
     paths = DeploymentPaths(
         guest_dir=ROOT / "infrastructure/guests/410-ai-control",
@@ -1513,6 +1628,7 @@ def check_ansible_duration() -> None:
 def main_test() -> None:
     check_deploy_guest_survey_input()
     check_ansible_duration()
+    check_deploy_provision_phase_selection()
     check_pve_host_support_before_signing()
     check_opentofu_state_status()
     check_missing_guest_recreation_safety()
