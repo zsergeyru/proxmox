@@ -40,6 +40,19 @@ assert (
     == 2
 )
 
+# Hookscript и постоянные папки LXC устанавливает PVE-only шаг,
+# а OpenTofu не должен удалять их при последующем deploy.
+lxc_resource = opentofu_hcl.split(
+    'resource "proxmox_virtual_environment_container" "guest" {', 1
+)[1]
+lxc_lifecycle = (
+    lxc_resource.split("lifecycle {", 1)[1]
+    .split("ignore_changes = [", 1)[1]
+    .split("\n    ]", 1)[0]
+)
+assert "mount_point," in lxc_lifecycle
+assert "hook_script_file_id," in lxc_lifecycle
+
 # Управляемый гость с profile обязан попасть во вход OpenTofu.
 assert "109" in guests
 assert guests["109"]["name"] == "network-gateway"
