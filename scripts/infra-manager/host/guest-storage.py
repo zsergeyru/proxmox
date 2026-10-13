@@ -10,13 +10,21 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 
 class StorageError(RuntimeError):
     """Постоянное хранилище не соответствует описанию гостя."""
+
+
+STATE_DIR = Path("/etc/infra-manager/guest-storage")
+HOOK_SOURCE = Path("/var/lib/vz/snippets/infra-manager-guest-storage.py")
+HOOK_ID = "local:snippets/infra-manager-guest-storage.py"
+PENDING_TAG = "infra_manager_pending"
 
 
 def command(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -152,6 +160,7 @@ def ensure_volume(vg: str, pool: str, volume: dict) -> tuple[Path, str]:
         command(
             "lvcreate", "-V", f"{volume['size_gb']}G",
             "-T", f"{vg}/{pool}", "-n", volume["name"],
+            "--addtag", PENDING_TAG,
         )
     else:
         size_result = command(
@@ -176,16 +185,32 @@ def ensure_volume(vg: str, pool: str, volume: dict) -> tuple[Path, str]:
     filesystem = command(
         "blkid", "-s", "TYPE", "-o", "value", str(device), check=False
     )
-    if created:
-        if filesystem.returncode == 0 or filesystem.stdout.strip():
-            raise StorageError(f"Новый том {device} неожиданно содержит файловую систему")
-        # На данных фотоархива не нужно резервировать 5% блоков для root.
+    if filesystem.returncode or not filesystem.stdout.strip():
+        # Повторять форматирование можно лишь для LV, который был создан
+        # нашим сценарием и пока помечен как незавершённый.
+        tags = command(
+            "lvs", "--noheadings", "-o", "lv_tags", str(device)
+        ).stdout.strip().split(",")
+        if PENDING_TAG not in [tag.strip() for tag in tags]:
+            raise StorageError(
+                f"Том {device} без файловой системы. "
+                "Для существующих томов форматирование запрещено"
+            )
         command("mkfs.ext4", "-m", "0", str(device))
         filesystem = command("blkid", "-s", "TYPE", "-o", "value", str(device))
     if filesystem.returncode or filesystem.stdout.strip() != "ext4":
         raise StorageError(
             f"Том {device} не имеет ext4. Форматирование существующего тома запрещено"
         )
+    # При прерывании mkfs существует риск неполной файловой системы:
+    # проверка без исправлений предотвращает автоматическое повреждение.
+    command("e2fsck", "-fn", str(device))
+    tags = command(
+        "lvs", "--noheadings", "-o", "lv_tags", str(device)
+    ).stdout.strip().split(",")
+    if PENDING_TAG in [tag.strip() for tag in tags]:
+        command("lvchange", "--deltag", PENDING_TAG, str(device))
+
     uuid = command(
         "blkid", "-s", "UUID", "-o", "value", str(device)
     ).stdout.strip()
@@ -220,7 +245,7 @@ def ensure_host_mount(device: Path, uuid: str, volume: dict) -> Path:
         line.split() for line in content.splitlines()
         if line.strip() and not line.lstrip().startswith("#")
     ]
-    entry = f"UUID={uuid} {path} ext4 defaults 0 2"
+    entry = f"UUID={uuid} {path} ext4 defaults,nofail 0 2"
     matches = [parts for parts in entries if len(parts) >= 2 and parts[1] == str(path)]
     if matches:
         if len(matches) != 1 or matches[0][:3] != [f"UUID={uuid}", str(path), "ext4"]:
@@ -239,6 +264,98 @@ def ensure_host_mount(device: Path, uuid: str, volume: dict) -> Path:
     if os.path.realpath(mounted.stdout.strip()) != os.path.realpath(device):
         raise StorageError(f"Том {device} не подключён к {path}")
     return path
+
+
+def verify_mounted_volumes(vg: str, volumes: dict[str, dict], mounts: list[dict]) -> None:
+    """Не дать LXC запуститься на пустых папках системного раздела PVE."""
+    for name, volume in volumes.items():
+        device = Path(f"/dev/{vg}/{name}")
+        path = Path(volume["mountpoint"])
+        mounted = command(
+            "findmnt", "-rn", "-o", "SOURCE", "--mountpoint", str(path),
+            check=False,
+        )
+        if mounted.returncode or os.path.realpath(mounted.stdout.strip()) != os.path.realpath(device):
+            raise StorageError(f"Не подключён том {device} по {path}; запуск гостя запрещён")
+        if command("blkid", "-s", "TYPE", "-o", "value", str(device)).stdout.strip() != "ext4":
+            raise StorageError(f"Неожиданная файловая система {device}")
+    for item in mounts:
+        source = source_path(volumes, item)
+        if source.is_symlink() or not source.is_dir():
+            raise StorageError(f"Нет постоянного каталога {source}; запуск запрещён")
+
+
+def verify_guest_start(vmid: int) -> None:
+    """Проверка pre-start выполняется при каждом включении контейнера."""
+    manifest = STATE_DIR / f"{vmid}.json"
+    if not manifest.is_file():
+        raise StorageError(f"Для LXC {vmid} не найдено описание хранилища {manifest}")
+    vg, _pool, volumes, mounts = validate(
+        vmid, json.loads(manifest.read_text(encoding="utf-8"))
+    )
+    verify_mounted_volumes(vg, volumes, mounts)
+
+
+def _save_startup_config(vmid: int, config: dict) -> None:
+    """Сохранить проверенный перечень томов до включения защиты запуска."""
+    STATE_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
+    with tempfile.NamedTemporaryFile(
+        mode="w", encoding="utf-8", dir=STATE_DIR,
+        prefix=f".{vmid}-", delete=False
+    ) as temporary:
+        path = Path(temporary.name)
+        json.dump(config, temporary, ensure_ascii=False)
+        temporary.write("\n")
+    try:
+        path.chmod(0o600)
+        os.replace(path, STATE_DIR / f"{vmid}.json")
+    finally:
+        path.unlink(missing_ok=True)
+
+
+def ensure_hook_storage() -> None:
+    """Разрешить локальному хранилищу PVE хранить сценарии запуска."""
+    config = command("pvesm", "config", "local").stdout
+    lines = config.splitlines()
+    if not lines or lines[0].strip() != "dir: local":
+        raise StorageError("Хранилище local должно быть каталогом PVE")
+    mapping = dict(
+        line.strip().split(" ", 1)
+        for line in lines[1:] if " " in line.strip()
+    )
+    if mapping.get("path") != "/var/lib/vz":
+        raise StorageError("Неожиданный путь PVE-хранилища local")
+    content = [part.strip() for part in mapping.get("content", "").split(",") if part.strip()]
+    if "snippets" not in content:
+        command("pvesm", "set", "local", "--content", ",".join([*content, "snippets"]))
+
+
+def ensure_startup_hook(vmid: int, config: dict) -> None:
+    """Установить защиту pre-start, не заменяя чужие PVE hookscript."""
+    existing = command("pct", "config", str(vmid)).stdout
+    hooks = [
+        line.partition(": ")[2].strip()
+        for line in existing.splitlines() if line.startswith("hookscript: ")
+    ]
+    if hooks and hooks != [HOOK_ID]:
+        raise StorageError(f"LXC {vmid}: уже задан другой сценарий запуска {hooks}")
+    ensure_hook_storage()
+    HOOK_SOURCE.parent.mkdir(parents=True, exist_ok=True)
+    # Обновление через атомарную замену: при обновлении сценарий запуска
+    # никогда не увидит наполовину записанный Python-файл.
+    with tempfile.NamedTemporaryFile(
+        dir=HOOK_SOURCE.parent, prefix=".guest-storage-", delete=False,
+    ) as temporary:
+        temporary_path = Path(temporary.name)
+    try:
+        shutil.copyfile(Path(__file__), temporary_path)
+        temporary_path.chmod(0o755)
+        os.replace(temporary_path, HOOK_SOURCE)
+    finally:
+        temporary_path.unlink(missing_ok=True)
+    _save_startup_config(vmid, config)
+    if not hooks:
+        command("pct", "set", str(vmid), "--hookscript", HOOK_ID)
 
 
 def ensure_directories(volumes: dict[str, dict], mounts: list[dict]) -> None:
@@ -265,7 +382,7 @@ def ensure_directories(volumes: dict[str, dict], mounts: list[dict]) -> None:
             path.chmod(0o750)
 
 
-def configure_lxc(vmid: int, volumes: dict[str, dict], mounts: list[dict], pending: list[dict]) -> None:
+def configure_lxc(vmid: int, volumes: dict[str, dict], mounts: list[dict], pending: list[dict], config: dict) -> None:
     """Подключить папки к LXC; при необходимости перезапустить контейнер."""
     active = command("pct", "status", str(vmid)).stdout.strip().endswith("running")
     if pending and active:
@@ -277,6 +394,7 @@ def configure_lxc(vmid: int, volumes: dict[str, dict], mounts: list[dict], pendi
                 f"ro={int(item['read_only'])}"
             )
             command("pct", "set", str(vmid), f"--{item['slot']}", spec)
+        ensure_startup_hook(vmid, config)
     finally:
         if pending and active:
             command("pct", "start", str(vmid))
@@ -295,19 +413,24 @@ def configure_lxc(vmid: int, volumes: dict[str, dict], mounts: list[dict], pendi
 
 def main() -> int:
     vmid = int(sys.argv[1])
-    vg, pool, volumes, mounts = validate(vmid, json.load(sys.stdin))
+    config = json.load(sys.stdin)
+    vg, pool, volumes, mounts = validate(vmid, config)
     pending = existing_mount_config(vmid, volumes, mounts)
     for volume in volumes.values():
         device, uuid = ensure_volume(vg, pool, volume)
         ensure_host_mount(device, uuid, volume)
     ensure_directories(volumes, mounts)
-    configure_lxc(vmid, volumes, mounts, pending)
+    configure_lxc(vmid, volumes, mounts, pending, config)
     print(f"[ОК] LXC {vmid}: тома подключены, каталоги готовы")
     return 0
 
 
 if __name__ == "__main__":
     try:
+        if len(sys.argv) == 3 and sys.argv[2] in {"pre-start", "post-start", "pre-stop", "post-stop"}:
+            if sys.argv[2] == "pre-start":
+                verify_guest_start(int(sys.argv[1]))
+            raise SystemExit(0)
         raise SystemExit(main())
     except (StorageError, OSError, ValueError, KeyError, TypeError) as exc:
         print(f"[ОШИБКА] Подготовка постоянного хранилища: {exc}", file=sys.stderr)
