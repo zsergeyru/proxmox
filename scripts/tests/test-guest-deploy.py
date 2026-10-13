@@ -1002,6 +1002,9 @@ def check_certificate_bootstrap_fallback() -> None:
         ca.write_text("ssh-ed25519 AAAACA\n", encoding="utf-8")
         bootstrap_key = root / "bootstrap_ed25519"
         bootstrap_key.write_text("BOOTSTRAP", encoding="utf-8")
+        (root / "known_hosts").write_text(
+            "192.168.4.10 ssh-ed25519 AAAAINITIAL\n", encoding="utf-8"
+        )
         github_key = root / "github_proxmox_repo_ed25519"
         github_key.write_text("PRIVATE-GIT-KEY", encoding="utf-8")
         context = DeploymentContext(
