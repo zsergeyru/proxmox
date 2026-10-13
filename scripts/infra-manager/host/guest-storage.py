@@ -385,20 +385,41 @@ def ensure_directories(volumes: dict[str, dict], mounts: list[dict]) -> None:
             path.chmod(0o750)
 
 
-def configure_lxc(vmid: int, volumes: dict[str, dict], mounts: list[dict], pending: list[dict], config: dict) -> None:
-    """Подключить папки к LXC; при необходимости перезапустить контейнер."""
+def configure_lxc(
+    vmid: int,
+    volumes: dict[str, dict],
+    mounts: list[dict],
+    pending: list[dict],
+    config: dict,
+) -> None:
+    """Подключить папки; временно снять защиту только для изменения LXC."""
     active = command("pct", "status", str(vmid)).stdout.strip().endswith("running")
     if pending and active:
         command("pct", "shutdown", str(vmid), "--timeout", "60")
-    # При ошибке оставляем LXC остановленным: запуск с частью томов
-    # может привести к записи важных данных в неверное место.
-    for item in pending:
-        spec = (
-            f"{source_path(volumes, item)},mp={item['target']},"
-            f"ro={int(item['read_only'])}"
-        )
-        command("pct", "set", str(vmid), f"--{item['slot']}", spec)
-    ensure_startup_hook(vmid, config)
+
+    current = command("pct", "config", str(vmid)).stdout.splitlines()
+    protected = "protection: 1" in current
+    has_hook = f"hookscript: {HOOK_ID}" in current
+    # Proxmox не разрешает pct set --mpN при protection=1.
+    # Защита нужна и после установки, поэтому её нельзя снимать навсегда.
+    restore_protection = protected and (bool(pending) or not has_hook)
+    if restore_protection:
+        command("pct", "set", str(vmid), "--protection", "0")
+    try:
+        # При ошибке настройки LXC остаётся остановленным: не запускать
+        # контейнер с неполным набором постоянных подключений.
+        for item in pending:
+            spec = (
+                f"{source_path(volumes, item)},mp={item['target']},"
+                f"ro={int(item['read_only'])}"
+            )
+            command("pct", "set", str(vmid), f"--{item['slot']}", spec)
+        ensure_startup_hook(vmid, config)
+    finally:
+        if restore_protection:
+            # Выполняется и при ошибке pct set или установки сценария запуска.
+            command("pct", "set", str(vmid), "--protection", "1")
+
     if pending and active:
         command("pct", "start", str(vmid))
 
