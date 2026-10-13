@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import shlex
 import socket
-import tempfile
 from pathlib import Path
 from typing import Any
 from urllib.request import Request, urlopen
@@ -14,7 +13,8 @@ import yaml
 from .common import InfraManagerError, console, require_command, run
 from .guest_catalog import GuestIdentity, guest_management_address
 from .portal import local_portal_definition, portal_definitions
-from .pve_host import read_pve_json_value, sign_ssh_client_key
+from .guest_ssh import GuestSshSession
+from .pve_host import read_pve_json_value
 from .settings import PATHS
 
 
@@ -24,63 +24,6 @@ COMMON_CHECK_TYPES = frozenset(
 )
 
 
-def _required_file(path: Path, label: str) -> None:
-    if not path.is_file() or path.stat().st_size == 0:
-        raise InfraManagerError(f"Не найден {label}: {path}")
-
-
-def _ssh_material(
-    node: str,
-    directory: Path,
-) -> tuple[Path, Path, Path]:
-    """Создать краткоживущую SSH-идентичность для одной проверки."""
-
-    require_command("ssh")
-    require_command("ssh-keygen")
-    _required_file(
-        PATHS.ssh_host_ca_public_key,
-        "публичный SSH host CA",
-    )
-
-    private_key = directory / "status_ed25519"
-    public_key = directory / "status_ed25519.pub"
-    certificate_path = directory / "status_ed25519-cert.pub"
-    known_hosts = directory / "known_hosts"
-
-    run(
-        [
-            "ssh-keygen",
-            "-q",
-            "-t",
-            "ed25519",
-            "-N",
-            "",
-            "-C",
-            "infra-manager-status",
-            "-f",
-            str(private_key),
-        ]
-    )
-    private_key.chmod(0o600)
-
-    certificate = sign_ssh_client_key(
-        node,
-        public_key.read_text(encoding="utf-8").strip(),
-    )
-    certificate_path.write_text(certificate + "\n", encoding="utf-8")
-    certificate_path.chmod(0o600)
-
-    host_ca = PATHS.ssh_host_ca_public_key.read_text(
-        encoding="utf-8"
-    ).strip()
-    known_hosts.write_text(
-        f"@cert-authority * {host_ca}\n",
-        encoding="utf-8",
-    )
-    known_hosts.chmod(0o600)
-    return private_key, certificate_path, known_hosts
-
-
 def _run_guest_command(
     node: str,
     address: str,
@@ -88,39 +31,13 @@ def _run_guest_command(
     *,
     capture_output: bool = True,
 ):
-    """Выполнить заранее сформированную команду в госте по временному сертификату."""
-
+    """Выполнить команду в госте через единый временный SSH-сеанс OpenBao."""
     if not argv or any(not isinstance(item, str) or not item for item in argv):
         raise InfraManagerError("Некорректная команда проверки гостя")
 
-    with tempfile.TemporaryDirectory(prefix="guest-status-") as temporary_dir:
-        temporary = Path(temporary_dir)
-        private_key, certificate_path, known_hosts = _ssh_material(
-            node,
-            temporary,
-        )
-
-        remote_command = shlex.join(argv)
+    with GuestSshSession(node, address) as session:
         return run(
-            [
-                "ssh",
-                "-i",
-                str(private_key),
-                "-o",
-                f"CertificateFile={certificate_path}",
-                "-o",
-                f"UserKnownHostsFile={known_hosts}",
-                "-o",
-                "StrictHostKeyChecking=yes",
-                "-o",
-                "BatchMode=yes",
-                "-o",
-                "IdentitiesOnly=yes",
-                "-o",
-                "ConnectTimeout=10",
-                f"root@{address}",
-                remote_command,
-            ],
+            session.ssh_command(shlex.join(argv)),
             capture_output=capture_output,
         )
 
