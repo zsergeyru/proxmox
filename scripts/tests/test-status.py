@@ -52,7 +52,73 @@ def fail(message: str) -> None:
     raise SystemExit(message)
 
 
+def check_semaphore_project_concurrency() -> None:
+    """Существующий проект не должен терять ограничение на одно задание."""
+
+    class ProjectClient(SemaphoreClient):
+        def __init__(self, project: dict | None) -> None:
+            self.project = project
+            self.posts: list[tuple[str, dict]] = []
+            self.puts: list[tuple[str, dict]] = []
+
+        def get(self, path: str, *, auth: str | None = None):
+            del auth
+            if path != "/projects":
+                raise AssertionError(f"Неожиданный GET: {path}")
+            return [self.project] if self.project is not None else []
+
+        def post(self, path: str, payload: dict, *, auth: str | None = None):
+            del auth
+            self.posts.append((path, payload))
+            return {"id": 55}
+
+        def put(self, path: str, payload: dict):
+            self.puts.append((path, payload))
+
+    with tempfile.TemporaryDirectory() as tmp:
+        project_id_file = Path(tmp) / "semaphore-project-id"
+        with patch.object(semaphore_module, "PROJECT_ID_FILE", project_id_file):
+            created = ProjectClient(None)
+            if created.ensure_project() != 55:
+                fail("Создание проекта Semaphore вернуло неверный id")
+            if created.posts[0][1].get("max_parallel_tasks") != 1:
+                fail("Новый проект должен разрешать только одно задание")
+            if created.puts:
+                fail("Новый проект не должен обновляться повторным PUT")
+
+            correct = ProjectClient({
+                "id": 55,
+                "name": semaphore_module.PROJECT_NAME,
+                "alert": True,
+                "max_parallel_tasks": 1,
+            })
+            correct.ensure_project()
+            if correct.puts:
+                fail("Проект с правильным ограничением не должен обновляться")
+
+            changed = ProjectClient({
+                "id": 55,
+                "name": semaphore_module.PROJECT_NAME,
+                "alert": True,
+                "max_parallel_tasks": 4,
+            })
+            changed.ensure_project()
+            if changed.puts != [(
+                "/project/55/",
+                {
+                    "id": 55,
+                    "name": semaphore_module.PROJECT_NAME,
+                    "alert": True,
+                    "max_parallel_tasks": 1,
+                },
+            )]:
+                fail("Проект должен вернуть лимит 1, сохранив настройку alert")
+            if project_id_file.read_text(encoding="utf-8") != "55\\n":
+                fail("Существующий project id должен сохраняться")
+
+
 def main_test() -> None:
+    check_semaphore_project_concurrency()
     previous_branch = os.environ.get("INFRA_PROJECT_BRANCH")
     try:
         os.environ["INFRA_PROJECT_BRANCH"] = "feature/test-branch"
