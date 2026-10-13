@@ -77,9 +77,13 @@ photo_archive:
     pve_media_source: /mnt/bindmounts/photo-archive/immich-media
     originals_read_only: true
     allow_missing_mount: false
+  # До настройки Windows обеспечиваем полноценную обработку на LXC.
+  # При включении Windows API остаётся на 340, фоновые задания — на Windows.
+  remote_worker:
+    enabled: false
   workers:
-    include: api
-    windows_background_worker_required: true
+    include: api,microservices
+    windows_background_worker_required: false
   database:
     engine: postgresql
     vector_extension: vectorchord
