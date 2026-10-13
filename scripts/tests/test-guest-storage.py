@@ -113,6 +113,24 @@ def test_existing_volume_not_formatted() -> None:
     assert uuid == "abc123-456"
     assert not any(args[0] in ("mkfs.ext4", "lvcreate") for args in calls)
 
+    # Увеличенный вручную том тоже допустим и не изменяется повторным deploy.
+    def larger_command(*args, check=True):
+        if args[:4] == ("lvs", "--noheadings", "-o", "lv_name"):
+            return SimpleNamespace(returncode=0, stdout="data photo_archive")
+        if args[0] == "lvs" and "lv_size" in args:
+            return SimpleNamespace(returncode=0, stdout=str(300 * 1024**3))
+        if args[0] == "lvs" and "pool_lv" in args:
+            return SimpleNamespace(returncode=0, stdout="data")
+        if args[:4] == ("blkid", "-s", "TYPE", "-o"):
+            return SimpleNamespace(returncode=0, stdout="ext4")
+        if args[:4] == ("blkid", "-s", "UUID", "-o"):
+            return SimpleNamespace(returncode=0, stdout="abc123-456")
+        raise AssertionError(f"Непредвиденная команда: {args}")
+
+    with patch.object(storage, "command", side_effect=larger_command):
+        storage.ensure_volume("pve", "data", storage_config()["volume"])
+
+
 
 def test_new_volume_only_formatted_once() -> None:
     calls: list[tuple] = []
