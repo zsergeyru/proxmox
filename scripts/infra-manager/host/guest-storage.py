@@ -149,11 +149,13 @@ def ensure_volume(vg: str, pool: str, volume: dict) -> tuple[Path, str]:
             actual_size = int(float(size_result))
         except ValueError as exc:
             raise StorageError(f"Не удалось определить размер тома {device}") from exc
-        if pool_result != pool or abs(actual_size - volume["size_gb"] * 1024**3) >= 1024**2:
+        if pool_result != pool or actual_size + 1024**2 < volume["size_gb"] * 1024**3:
             raise StorageError(
-                f"Том {device} уже существует, но размер или пул отличаются. "
-                "Не изменяем существующий том автоматически"
+                f"Том {device} уже существует, но размер меньше требуемого "
+                "или он находится в другом пуле. Автоматическое изменение запрещено"
             )
+        # Разрешаем вручную увеличить том: повторный deploy не должен
+        # возвращать его к первоначальному размеру или блокировать обновление.
 
     filesystem = command(
         "blkid", "-s", "TYPE", "-o", "value", str(device), check=False
