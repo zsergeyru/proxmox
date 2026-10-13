@@ -420,19 +420,20 @@ def configure_lxc(
             # Выполняется и при ошибке pct set или установки сценария запуска.
             command("pct", "set", str(vmid), "--protection", "1")
 
-    if pending and active:
+    # Предыдущая неудачная попытка могла оставить LXC остановленным.
+    # Команда deploy должна вернуть его в рабочее состояние перед Ansible.
+    if not command("pct", "status", str(vmid)).stdout.strip().endswith("running"):
         command("pct", "start", str(vmid))
 
-    if command("pct", "status", str(vmid)).stdout.strip().endswith("running"):
-        for item in mounts:
-            test = command(
-                "pct", "exec", str(vmid), "--",
-                "mountpoint", "-q", item["target"], check=False,
+    for item in mounts:
+        test = command(
+            "pct", "exec", str(vmid), "--",
+            "mountpoint", "-q", item["target"], check=False,
+        )
+        if test.returncode:
+            raise StorageError(
+                f"LXC {vmid}: {item['target']} не подключён после настройки"
             )
-            if test.returncode:
-                raise StorageError(
-                    f"LXC {vmid}: {item['target']} не подключён после настройки"
-                )
 
 
 def main() -> int:
