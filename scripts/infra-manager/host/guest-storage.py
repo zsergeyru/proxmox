@@ -185,6 +185,7 @@ def ensure_volume(vg: str, pool: str, volume: dict) -> tuple[Path, str]:
     filesystem = command(
         "blkid", "-s", "TYPE", "-o", "value", str(device), check=False
     )
+    formatted_now = False
     if filesystem.returncode or not filesystem.stdout.strip():
         # Повторять форматирование можно лишь для LV, который был создан
         # нашим сценарием и пока помечен как незавершённый.
@@ -197,6 +198,7 @@ def ensure_volume(vg: str, pool: str, volume: dict) -> tuple[Path, str]:
                 "Для существующих томов форматирование запрещено"
             )
         command("mkfs.ext4", "-m", "0", str(device))
+        formatted_now = True
         filesystem = command("blkid", "-s", "TYPE", "-o", "value", str(device))
     if filesystem.returncode or filesystem.stdout.strip() != "ext4":
         raise StorageError(
@@ -204,7 +206,8 @@ def ensure_volume(vg: str, pool: str, volume: dict) -> tuple[Path, str]:
         )
     # При прерывании mkfs существует риск неполной файловой системы:
     # проверка без исправлений предотвращает автоматическое повреждение.
-    command("e2fsck", "-fn", str(device))
+    if formatted_now:
+        command("e2fsck", "-fn", str(device))
     tags = command(
         "lvs", "--noheadings", "-o", "lv_tags", str(device)
     ).stdout.strip().split(",")
@@ -245,7 +248,7 @@ def ensure_host_mount(device: Path, uuid: str, volume: dict) -> Path:
         line.split() for line in content.splitlines()
         if line.strip() and not line.lstrip().startswith("#")
     ]
-    entry = f"UUID={uuid} {path} ext4 defaults,nofail 0 2"
+    entry = f"UUID={uuid} {path} ext4 defaults,nofail,x-systemd.before=pve-guests.service 0 2"
     matches = [parts for parts in entries if len(parts) >= 2 and parts[1] == str(path)]
     if matches:
         if len(matches) != 1 or matches[0][:3] != [f"UUID={uuid}", str(path), "ext4"]:
@@ -387,17 +390,17 @@ def configure_lxc(vmid: int, volumes: dict[str, dict], mounts: list[dict], pendi
     active = command("pct", "status", str(vmid)).stdout.strip().endswith("running")
     if pending and active:
         command("pct", "shutdown", str(vmid), "--timeout", "60")
-    try:
-        for item in pending:
-            spec = (
-                f"{source_path(volumes, item)},mp={item['target']},"
-                f"ro={int(item['read_only'])}"
-            )
-            command("pct", "set", str(vmid), f"--{item['slot']}", spec)
-        ensure_startup_hook(vmid, config)
-    finally:
-        if pending and active:
-            command("pct", "start", str(vmid))
+    # При ошибке оставляем LXC остановленным: запуск с частью томов
+    # может привести к записи важных данных в неверное место.
+    for item in pending:
+        spec = (
+            f"{source_path(volumes, item)},mp={item['target']},"
+            f"ro={int(item['read_only'])}"
+        )
+        command("pct", "set", str(vmid), f"--{item['slot']}", spec)
+    ensure_startup_hook(vmid, config)
+    if pending and active:
+        command("pct", "start", str(vmid))
 
     if command("pct", "status", str(vmid)).stdout.strip().endswith("running"):
         for item in mounts:
