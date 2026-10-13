@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Проверки общего тома фотоархива без обращения к настоящему PVE."""
+"""Проверки двух постоянных томов без обращения к настоящему PVE."""
 
 from __future__ import annotations
 
@@ -26,22 +26,38 @@ def storage_config() -> dict:
     return {
         "volume_group": "pve",
         "thin_pool": "data",
-        "volume": {
-            "name": "photo_archive",
-            "size_gb": 240,
-            "mountpoint": "/mnt/bindmounts/photo-archive",
-        },
+        "volumes": [
+            {
+                "name": "photo_archive",
+                "size_gb": 240,
+                "mountpoint": "/mnt/bindmounts/photo-archive",
+            },
+            {
+                "name": "infra_state",
+                "size_gb": 40,
+                "mountpoint": "/mnt/bindmounts/infra-state",
+            },
+        ],
         "mounts": [
             {
                 "slot": "mp0",
+                "volume": "photo_archive",
                 "directory": "data",
                 "target": "/srv/photo-archive",
                 "read_only": True,
             },
             {
                 "slot": "mp1",
-                "directory": "state",
+                "volume": "infra_state",
+                "directory": "340-photo-archive",
                 "target": "/mnt/persistent-state",
+                "read_only": False,
+            },
+            {
+                "slot": "mp2",
+                "volume": "photo_archive",
+                "directory": "immich-media",
+                "target": "/srv/photo-archive-media",
                 "read_only": False,
             },
         ],
@@ -49,25 +65,41 @@ def storage_config() -> dict:
 
 
 def test_contract() -> None:
-    vg, pool, volume, mounts = storage.validate(340, storage_config())
+    vg, pool, volumes, mounts = storage.validate(340, storage_config())
     assert (vg, pool) == ("pve", "data")
-    assert volume["name"] == "photo_archive"
-    assert volume["size_gb"] == 240
-    assert [
-        str(storage.source_path(volume, item))
-        for item in mounts
-    ] == [
+    assert set(volumes) == {"photo_archive", "infra_state"}
+    assert volumes["photo_archive"]["size_gb"] == 240
+    assert volumes["infra_state"]["size_gb"] == 40
+    assert [str(storage.source_path(volumes, item)) for item in mounts] == [
         "/mnt/bindmounts/photo-archive/data",
-        "/mnt/bindmounts/photo-archive/state",
+        "/mnt/bindmounts/infra-state/340-photo-archive",
+        "/mnt/bindmounts/photo-archive/immich-media",
     ]
     bad = storage_config()
-    bad["mounts"][1]["directory"] = bad["mounts"][0]["directory"]
+    bad["mounts"][1]["volume"] = "photo_archive"
+    bad["mounts"][1]["directory"] = "data"
     try:
         storage.validate(340, bad)
     except storage.StorageError:
         pass
     else:
         raise AssertionError("Повторный каталог должен быть запрещён")
+    bad = storage_config()
+    bad["volumes"][1]["mountpoint"] = "/mnt/bindmounts/photo-archive"
+    try:
+        storage.validate(340, bad)
+    except storage.StorageError:
+        pass
+    else:
+        raise AssertionError("Повторная точка монтирования должна быть запрещена")
+    bad = storage_config()
+    bad["mounts"][0]["volume"] = "missing"
+    try:
+        storage.validate(340, bad)
+    except storage.StorageError:
+        pass
+    else:
+        raise AssertionError("Ссылка на неизвестный том должна быть запрещена")
 
 
 def test_existing_mounts() -> None:
@@ -75,15 +107,16 @@ def test_existing_mounts() -> None:
         "hostname: photo-archive\nunprivileged: 1\n"
         "mp0: /mnt/bindmounts/photo-archive/data,mp=/srv/photo-archive,ro=1\n"
     )
-    volume, mounts = storage_config()["volume"], storage_config()["mounts"]
+    cfg = storage_config()
+    volumes = {v["name"]: v for v in cfg["volumes"]}
     with patch.object(storage, "command", return_value=SimpleNamespace(stdout=config)):
-        missing = storage.existing_mount_config(340, volume, mounts)
-    assert [item["slot"] for item in missing] == ["mp1"]
+        missing = storage.existing_mount_config(340, volumes, cfg["mounts"])
+    assert [item["slot"] for item in missing] == ["mp1", "mp2"]
 
     conflicted = config.replace("ro=1", "ro=0")
     with patch.object(storage, "command", return_value=SimpleNamespace(stdout=conflicted)):
         try:
-            storage.existing_mount_config(340, volume, mounts)
+            storage.existing_mount_config(340, volumes, cfg["mounts"])
         except storage.StorageError:
             pass
         else:
@@ -96,7 +129,7 @@ def test_existing_volume_not_formatted() -> None:
     def fake_command(*args, check=True):
         calls.append(args)
         if args[:4] == ("lvs", "--noheadings", "-o", "lv_name"):
-            return SimpleNamespace(returncode=0, stdout="data photo_archive vm-340-disk-0")
+            return SimpleNamespace(returncode=0, stdout="data photo_archive infra_state")
         if args[0] == "lvs" and "lv_size" in args:
             return SimpleNamespace(returncode=0, stdout=str(240 * 1024**3))
         if args[0] == "lvs" and "pool_lv" in args:
@@ -107,13 +140,14 @@ def test_existing_volume_not_formatted() -> None:
             return SimpleNamespace(returncode=0, stdout="abc123-456")
         raise AssertionError(f"Непредвиденная команда: {args}")
 
+    photo = storage_config()["volumes"][0]
     with patch.object(storage, "command", side_effect=fake_command):
-        device, uuid = storage.ensure_volume("pve", "data", storage_config()["volume"])
+        device, uuid = storage.ensure_volume("pve", "data", photo)
     assert str(device) == "/dev/pve/photo_archive"
     assert uuid == "abc123-456"
     assert not any(args[0] in ("mkfs.ext4", "lvcreate") for args in calls)
 
-    # Увеличенный вручную том тоже допустим и не изменяется повторным deploy.
+    # Повторный deploy не откатывает вручную увеличенный том.
     def larger_command(*args, check=True):
         if args[:4] == ("lvs", "--noheadings", "-o", "lv_name"):
             return SimpleNamespace(returncode=0, stdout="data photo_archive")
@@ -128,8 +162,7 @@ def test_existing_volume_not_formatted() -> None:
         raise AssertionError(f"Непредвиденная команда: {args}")
 
     with patch.object(storage, "command", side_effect=larger_command):
-        storage.ensure_volume("pve", "data", storage_config()["volume"])
-
+        storage.ensure_volume("pve", "data", photo)
 
 
 def test_new_volume_only_formatted_once() -> None:
@@ -152,7 +185,7 @@ def test_new_volume_only_formatted_once() -> None:
         raise AssertionError(f"Непредвиденная команда: {args}")
 
     with patch.object(storage, "command", side_effect=fake_command):
-        storage.ensure_volume("pve", "data", storage_config()["volume"])
+        storage.ensure_volume("pve", "data", storage_config()["volumes"][1])
     assert [args[0] for args in calls].count("lvcreate") == 1
     assert [args[0] for args in calls].count("mkfs.ext4") == 1
 
@@ -163,9 +196,9 @@ def test_unknown_existing_volume_does_not_format() -> None:
     def fake_command(*args, check=True):
         calls.append(args)
         if args[:4] == ("lvs", "--noheadings", "-o", "lv_name"):
-            return SimpleNamespace(returncode=0, stdout="data photo_archive")
+            return SimpleNamespace(returncode=0, stdout="data infra_state")
         if args[0] == "lvs" and "lv_size" in args:
-            return SimpleNamespace(returncode=0, stdout=str(240 * 1024**3))
+            return SimpleNamespace(returncode=0, stdout=str(40 * 1024**3))
         if args[0] == "lvs" and "pool_lv" in args:
             return SimpleNamespace(returncode=0, stdout="data")
         if args[0] == "blkid":
@@ -174,7 +207,7 @@ def test_unknown_existing_volume_does_not_format() -> None:
 
     with patch.object(storage, "command", side_effect=fake_command):
         try:
-            storage.ensure_volume("pve", "data", storage_config()["volume"])
+            storage.ensure_volume("pve", "data", storage_config()["volumes"][1])
         except storage.StorageError:
             pass
         else:
@@ -184,6 +217,7 @@ def test_unknown_existing_volume_does_not_format() -> None:
 
 def test_guest_mount_paths() -> None:
     config = storage_config()
+    volumes = {v["name"]: v for v in config["volumes"]}
     calls: list[tuple] = []
 
     def fake_command(*args, check=True):
@@ -193,14 +227,18 @@ def test_guest_mount_paths() -> None:
         return SimpleNamespace(returncode=0, stdout="")
 
     with patch.object(storage, "command", side_effect=fake_command):
-        storage.configure_lxc(340, config["volume"], config["mounts"], config["mounts"])
+        storage.configure_lxc(340, volumes, config["mounts"], config["mounts"])
     assert (
         "pct", "set", "340", "--mp0",
         "/mnt/bindmounts/photo-archive/data,mp=/srv/photo-archive,ro=1",
     ) in calls
     assert (
         "pct", "set", "340", "--mp1",
-        "/mnt/bindmounts/photo-archive/state,mp=/mnt/persistent-state,ro=0",
+        "/mnt/bindmounts/infra-state/340-photo-archive,mp=/mnt/persistent-state,ro=0",
+    ) in calls
+    assert (
+        "pct", "set", "340", "--mp2",
+        "/mnt/bindmounts/photo-archive/immich-media,mp=/srv/photo-archive-media,ro=0",
     ) in calls
     assert not any(item[:2] == ("pct", "stop") for item in calls)
 
