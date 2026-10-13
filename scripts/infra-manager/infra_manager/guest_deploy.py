@@ -49,6 +49,18 @@ BOOTSTRAP_INFRA_MANAGER_PHASES = {
     "configure": "provision",
 }
 
+# Каждая фаза развёртывания соответствует одному этапу Ansible.
+# Для infrastructure настройка ОС не запускается.
+ANSIBLE_PHASE_BY_DEPLOY_PHASE: dict[str, str | None] = {
+    "all": "full",
+    "infrastructure": None,
+    "provision-base": "base",
+    "provision-control-plane": "bootstrap",
+    "provision-recovery-control-plane": "recovery",
+    "provision-ssh-trust": "base",
+    "provision": "full",
+}
+
 
 def _bootstrap_scope_private_key() -> Path:
     """Получить ключ только из закрытого начального контура 990."""
@@ -755,15 +767,7 @@ def _run_deploy_guest(
 
     if vmid <= 0:
         raise InfraManagerError("VMID должен быть положительным числом")
-    if phase not in {
-        "all",
-        "infrastructure",
-        "provision-base",
-        "provision-control-plane",
-        "provision-recovery-control-plane",
-        "provision-ssh-trust",
-        "provision",
-    }:
+    if phase not in ANSIBLE_PHASE_BY_DEPLOY_PHASE:
         raise InfraManagerError(f"Неизвестная фаза deploy-guest: {phase}")
     identity = guest_identity(repo_root, vmid)
     is_infra_manager = identity.role == SETTINGS.infra_manager_role
@@ -920,48 +924,19 @@ def _run_deploy_guest(
         features=context.features,
     )
 
-    if phase == "all":
+    ansible_phase = ANSIBLE_PHASE_BY_DEPLOY_PHASE[phase]
+    if ansible_phase is not None:
         _configure_guest_os(
             context,
+            provision_phase=ansible_phase,
             project_branch=project_branch,
-            bootstrap_private_key=bootstrap_private_key,
-        )
-    elif phase == "provision-base":
-        _configure_guest_os(
-            context,
-            provision_phase="base",
-            project_branch=project_branch,
-            bootstrap_private_key=bootstrap_private_key,
-        )
-    elif phase == "provision-control-plane":
-        _configure_guest_os(
-            context,
-            provision_phase="bootstrap",
-            project_branch=project_branch,
-            bootstrap_private_key=bootstrap_private_key,
-        )
-    elif phase == "provision-recovery-control-plane":
-        _configure_guest_os(
-            context,
-            provision_phase="recovery",
-            project_branch=project_branch,
-            bootstrap_private_key=bootstrap_private_key,
-        )
-    elif phase == "provision-ssh-trust":
-        _configure_guest_os(
-            context,
-            provision_phase="base",
-            project_branch=project_branch,
-            allow_legacy_bootstrap=True,
-            bootstrap_private_key=bootstrap_private_key,
-        )
-    elif phase == "provision":
-        _configure_guest_os(
-            context,
-            provision_phase="full",
-            project_branch=project_branch,
-            allow_legacy_bootstrap=not bootstrap_scope,
-            bootstrap_private_key=None if bootstrap_scope else bootstrap_private_key,
+            allow_legacy_bootstrap=(
+                phase != "provision" or not bootstrap_scope
+            ),
+            bootstrap_private_key=(
+                None if phase == "provision" and bootstrap_scope
+                else bootstrap_private_key
+            ),
         )
 
     if bootstrap_private_key is not None and phase != "infrastructure":

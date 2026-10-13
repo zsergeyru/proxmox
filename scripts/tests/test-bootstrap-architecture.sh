@@ -137,7 +137,8 @@ grep -q 'remove_bootstrap_ssh_access_from_infra' "$CLEANUP" || die "Успешн
 grep -q 'self.remove_runner_if_present()' "$CLEANUP" || die "Успешный bootstrap обязан удалять одноразовый rootfs 990, включая SSH-ключи"
 grep -q 'allow_legacy_bootstrap=False' "$PY_GUEST_DEPLOY" || die "Обычный self-deploy infra-manager не должен иметь bootstrap fallback"
 grep -q '"/var/lib/bootstrap-runner/opentofu/state"' "$INFRA_RUNNER" || die "State шага create должен удаляться сразу после создания 910"
-grep -q 'allow_legacy_bootstrap=not bootstrap_scope' "$PY_GUEST_DEPLOY" || die "Финальный bootstrap configure должен запрещать fallback на начальный SSH-ключ"
+grep -Fq 'phase != "provision" or not bootstrap_scope' "$PY_GUEST_DEPLOY" || die "Финальный bootstrap configure должен запрещать fallback на начальный SSH-ключ"
+grep -Fq 'None if phase == "provision" and bootstrap_scope' "$PY_GUEST_DEPLOY" || die "Финальный bootstrap configure не должен передавать одноразовый SSH-ключ"
 grep -q 'configure-control-plane' "$PY_GUEST_DEPLOY" || die "Bootstrap должен иметь отдельный этап запуска управляющего контура"
 grep -q 'configure-ssh-trust' "$PY_GUEST_DEPLOY" || die "Bootstrap должен иметь отдельный этап перехода на SSH CA"
 
