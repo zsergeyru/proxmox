@@ -578,8 +578,7 @@ def check_openbao_machine_identity_preparation() -> None:
         ):
             args = guest_deploy_module._prepare_openbao_machine_ansible_vars(
                 context,
-                private_key=private_key,
-                certificate=None,
+                session=SimpleNamespace(ssh_command=lambda command: ["ssh", command]),
                 directory=root,
             )
 
@@ -648,8 +647,7 @@ def check_openbao_machine_identity_preparation() -> None:
             existing_args = (
                 guest_deploy_module._prepare_openbao_machine_ansible_vars(
                     context,
-                    private_key=private_key,
-                    certificate=None,
+                    session=SimpleNamespace(ssh_command=lambda command: ["ssh", command]),
                     directory=root,
                 )
             )
@@ -684,8 +682,7 @@ def check_openbao_machine_identity_preparation() -> None:
         ):
             fallback_args = guest_deploy_module._prepare_openbao_machine_ansible_vars(
                 context,
-                private_key=private_key,
-                certificate=None,
+                session=SimpleNamespace(ssh_command=lambda command: ["ssh", command]),
                 directory=root,
             )
         read_ca.assert_called_once_with("pve")
@@ -737,8 +734,7 @@ def check_openbao_target_only_preparation() -> None:
         ):
             args = guest_deploy_module._prepare_openbao_machine_ansible_vars(
                 context,
-                private_key=private_key,
-                certificate=None,
+                session=SimpleNamespace(ssh_command=lambda command: ["ssh", command]),
                 directory=root,
             )
 
