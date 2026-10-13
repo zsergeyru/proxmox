@@ -813,7 +813,7 @@ def check_temporary_certificate_path() -> None:
             patch.object(
                 guest_deploy_module,
                 "PATHS",
-                SimpleNamespace(ssh_client_ca_public_key=ca),
+                SimpleNamespace(ssh_client_ca_public_key=ca, ssh_host_ca_public_key=ca),
             ),
             patch.object(guest_deploy_module, "run", side_effect=fake_run),
             patch.object(guest_deploy_module, "_ensure_ssh_host_key"),
@@ -1036,8 +1036,21 @@ def check_certificate_bootstrap_fallback() -> None:
                 )
                 return SimpleNamespace(returncode=0, stdout="", stderr="")
             if argv[:2] == ["ssh-keygen", "-L"]:
+                target = argv[argv.index("-f") + 1]
+                if "ssh_host_ed25519_key-cert.pub" in target:
+                    return SimpleNamespace(
+                        returncode=0,
+                        stdout="Type: host certificate\nPrincipals:\n ai-control\n 192.168.4.10\n",
+                        stderr="",
+                    )
                 return SimpleNamespace(returncode=0, stdout="valid", stderr="")
             if argv[0] == "ssh":
+                if argv[-1] == "cat /etc/ssh/ssh_host_ed25519_key.pub":
+                    return SimpleNamespace(
+                        returncode=0,
+                        stdout="ssh-ed25519 AAAAHOST root@ai-control\n",
+                        stderr="",
+                    )
                 if "CertificateFile=" in " ".join(argv):
                     certificate_checks += 1
                     return SimpleNamespace(
@@ -1057,6 +1070,7 @@ def check_certificate_bootstrap_fallback() -> None:
                 "PATHS",
                 SimpleNamespace(
                     ssh_client_ca_public_key=ca,
+                    ssh_host_ca_public_key=ca,
                     github_key=github_key,
                 ),
             ),
@@ -1079,6 +1093,11 @@ def check_certificate_bootstrap_fallback() -> None:
                 guest_deploy_module,
                 "sign_ssh_client_key",
                 return_value="ssh-ed25519-cert-v01@openssh.com AAAACERT",
+            ),
+            patch.object(
+                guest_deploy_module,
+                "sign_ssh_host_key",
+                return_value="ssh-ed25519-cert-v01@openssh.com AAAAHOSTCERT",
             ),
             patch.object(
                 guest_deploy_module,
@@ -1162,7 +1181,7 @@ def check_certificate_failure_is_fatal_after_trust() -> None:
             patch.object(
                 guest_deploy_module,
                 "PATHS",
-                SimpleNamespace(ssh_client_ca_public_key=ca),
+                SimpleNamespace(ssh_client_ca_public_key=ca, ssh_host_ca_public_key=ca),
             ),
             patch.object(guest_deploy_module, "run", side_effect=fake_run),
             patch.object(guest_deploy_module, "_ensure_ssh_host_key"),
@@ -1259,7 +1278,7 @@ def check_pve_host_support_before_signing() -> None:
             patch.object(
                 guest_deploy_module,
                 "PATHS",
-                SimpleNamespace(ssh_client_ca_public_key=ca),
+                SimpleNamespace(ssh_client_ca_public_key=ca, ssh_host_ca_public_key=ca),
             ),
             patch.object(guest_deploy_module, "run", side_effect=fake_run),
             patch.object(guest_deploy_module, "_ensure_ssh_host_key"),
@@ -1459,8 +1478,10 @@ def check_ansible_duration() -> None:
             try:
                 guest_deploy_module._run_guest_ansible(
                     context,
-                    private_key=Path("/tmp/test-identity"),
-                    certificate=None,
+                    session=SimpleNamespace(
+                        private_key=Path("/tmp/test-identity"),
+                        ansible_ssh_args=lambda: "-o StrictHostKeyChecking=yes",
+                    ),
                     provision_phase="full",
                     self_update=False,
                     project_branch="main",
