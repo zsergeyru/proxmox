@@ -178,6 +178,28 @@ def nonempty(path: Path) -> bool:
     return path.is_file() and path.stat().st_size > 0
 
 
+def _infra_manager_env_values(raw_env: Any) -> dict[str, Any]:
+    """Разобрать переменные общей группы Semaphore, не меняя источник."""
+    if isinstance(raw_env, str):
+        try:
+            values = json.loads(raw_env or "{}")
+        except json.JSONDecodeError as exc:
+            raise InfraManagerError(
+                "Variable Group Infra Manager содержит некорректный JSON"
+            ) from exc
+    elif isinstance(raw_env, dict):
+        values = dict(raw_env)
+    else:
+        raise InfraManagerError(
+            "Variable Group Infra Manager имеет некорректный env"
+        )
+    if not isinstance(values, dict):
+        raise InfraManagerError(
+            "Variable Group Infra Manager должен содержать объект env"
+        )
+    return values
+
+
 def find_unique_by_name(
     items: Any,
     name: str,
@@ -730,23 +752,7 @@ class SemaphoreClient:
             f"/project/{project_id}/environment/{environment_id}"
         )
         raw_env = full.get("env", "{}") if isinstance(full, dict) else "{}"
-        if isinstance(raw_env, str):
-            try:
-                values = json.loads(raw_env or "{}")
-            except json.JSONDecodeError as exc:
-                raise InfraManagerError(
-                    "Variable Group Infra Manager содержит некорректный JSON"
-                ) from exc
-        elif isinstance(raw_env, dict):
-            values = dict(raw_env)
-        else:
-            raise InfraManagerError(
-                "Variable Group Infra Manager имеет некорректный env"
-            )
-        if not isinstance(values, dict):
-            raise InfraManagerError(
-                "Variable Group Infra Manager должен содержать объект env"
-            )
+        values = _infra_manager_env_values(raw_env)
 
         level = values.get(LOG_LEVEL_ENV)
         if level is None:
@@ -809,23 +815,7 @@ class SemaphoreClient:
             )
 
         raw_env = full.get("env", "{}")
-        if isinstance(raw_env, str):
-            try:
-                values = json.loads(raw_env or "{}")
-            except json.JSONDecodeError as exc:
-                raise InfraManagerError(
-                    "Variable Group Infra Manager содержит некорректный JSON"
-                ) from exc
-        elif isinstance(raw_env, dict):
-            values = dict(raw_env)
-        else:
-            raise InfraManagerError(
-                "Variable Group Infra Manager имеет некорректный env"
-            )
-        if not isinstance(values, dict):
-            raise InfraManagerError(
-                "Variable Group Infra Manager должен содержать объект env"
-            )
+        values = _infra_manager_env_values(raw_env)
 
         secrets = full.get("secrets", [])
         if secrets not in (None, []):
