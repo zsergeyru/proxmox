@@ -828,6 +828,11 @@ def check_temporary_certificate_path() -> None:
             ),
             patch.object(
                 guest_deploy_module,
+                "_host_certificate_if_available",
+                return_value=None,
+            ),
+            patch.object(
+                guest_deploy_module,
                 "sign_ssh_client_key",
                 return_value="ssh-ed25519-cert-v01@openssh.com AAAACERT",
             ),
