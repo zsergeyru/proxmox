@@ -294,6 +294,128 @@ def test_no_start_on_incomplete_setup() -> None:
     assert not any(args[:2] == ("pct", "start") for args in calls)
 
 
+
+def test_protected_guest_keeps_protection_after_success() -> None:
+    """Завершить настройку mp0/mp1/mp2 защищённого контейнера."""
+    config = storage_config()
+    volumes = {volume["name"]: volume for volume in config["volumes"]}
+    calls: list[tuple[str, ...]] = []
+
+    def fake(*args, check=True):
+        calls.append(args)
+        if args[:2] == ("pct", "status"):
+            return SimpleNamespace(returncode=0, stdout="status: stopped")
+        if args[:2] == ("pct", "config"):
+            return SimpleNamespace(
+                returncode=0,
+                stdout="unprivileged: 1\nprotection: 1\n",
+            )
+        return SimpleNamespace(returncode=0, stdout="")
+
+    with (
+        patch.object(storage, "command", side_effect=fake),
+        patch.object(storage, "ensure_startup_hook") as hook,
+    ):
+        storage.configure_lxc(340, volumes, config["mounts"], config["mounts"], config)
+    hook.assert_called_once_with(340, config)
+    off = calls.index(("pct", "set", "340", "--protection", "0"))
+    on = calls.index(("pct", "set", "340", "--protection", "1"))
+    assert off < on
+    assert all(
+        off < calls.index(("pct", "set", "340", f"--{item['slot']}",
+            f"{storage.source_path(volumes, item)},mp={item['target']},ro={int(item['read_only'])}")) < on
+        for item in config["mounts"]
+    )
+    start = calls.index(("pct", "start", "340"))
+    assert on < start  # Защиту вернуть до включения LXC.
+
+
+def test_protected_guest_restores_protection_after_error() -> None:
+    """При ошибке mp1 защиту вернуть, контейнер не запускать."""
+    config = storage_config()
+    volumes = {volume["name"]: volume for volume in config["volumes"]}
+    calls: list[tuple[str, ...]] = []
+
+    def fake(*args, check=True):
+        calls.append(args)
+        if args[:2] == ("pct", "status"):
+            return SimpleNamespace(returncode=0, stdout="status: running")
+        if args[:2] == ("pct", "config"):
+            return SimpleNamespace(returncode=0, stdout="protection: 1\n")
+        if args[:3] == ("pct", "set", "340") and "--mp1" in args:
+            raise storage.StorageError("Имитированная ошибка подключения")
+        return SimpleNamespace(returncode=0, stdout="")
+
+    with (
+        patch.object(storage, "command", side_effect=fake),
+        patch.object(storage, "ensure_startup_hook") as hook,
+    ):
+        try:
+            storage.configure_lxc(340, volumes, config["mounts"], config["mounts"], config)
+        except storage.StorageError:
+            pass
+        else:
+            raise AssertionError("Ожидалась ошибка подключения")
+    hook.assert_not_called()
+    assert ("pct", "shutdown", "340", "--timeout", "60") in calls
+    assert ("pct", "set", "340", "--protection", "0") in calls
+    assert calls[-1] == ("pct", "set", "340", "--protection", "1")
+    assert not any(item[:2] == ("pct", "start") for item in calls)
+
+
+def test_existing_protected_mounts_do_not_toggle_protection() -> None:
+    """Обычный повторный deploy защищённого 340 оставляет защиту в покое."""
+    config = storage_config()
+    volumes = {volume["name"]: volume for volume in config["volumes"]}
+    calls: list[tuple[str, ...]] = []
+
+    def fake(*args, check=True):
+        calls.append(args)
+        if args[:2] == ("pct", "status"):
+            return SimpleNamespace(returncode=0, stdout="status: stopped")
+        if args[:2] == ("pct", "config"):
+            return SimpleNamespace(
+                returncode=0,
+                stdout=f"protection: 1\nhookscript: {storage.HOOK_ID}\n",
+            )
+        return SimpleNamespace(returncode=0, stdout="")
+
+    with (
+        patch.object(storage, "command", side_effect=fake),
+        patch.object(storage, "ensure_startup_hook") as hook,
+    ):
+        storage.configure_lxc(340, volumes, config["mounts"], [], config)
+    hook.assert_called_once_with(340, config)
+    assert not any(item[:2] == ("pct", "set") for item in calls)
+    # Даже при настроенных mp повторный deploy поднимет ранее остановленный LXC.
+    assert ("pct", "start", "340") in calls
+
+
+def test_protected_guest_hook_install_restores_protection() -> None:
+    """Даже при уже настроенных mp изменение hookscript учитывает protection."""
+    config = storage_config()
+    volumes = {volume["name"]: volume for volume in config["volumes"]}
+    calls: list[tuple[str, ...]] = []
+
+    def fake(*args, check=True):
+        calls.append(args)
+        if args[:2] == ("pct", "status"):
+            return SimpleNamespace(returncode=0, stdout="status: stopped")
+        if args[:2] == ("pct", "config"):
+            return SimpleNamespace(returncode=0, stdout="protection: 1\n")
+        return SimpleNamespace(returncode=0, stdout="")
+
+    with (
+        patch.object(storage, "command", side_effect=fake),
+        patch.object(storage, "ensure_startup_hook") as hook,
+    ):
+        storage.configure_lxc(340, volumes, config["mounts"], [], config)
+    hook.assert_called_once_with(340, config)
+    assert ("pct", "set", "340", "--protection", "0") in calls
+    assert ("pct", "set", "340", "--protection", "1") in calls
+
+
+
 def test_no_storage_on_other_guests() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         guest = Path(tmp) / "infrastructure/guests/420-ui"
@@ -335,6 +457,10 @@ if __name__ == "__main__":
     test_guest_mount_paths()
     test_startup_guard_blocks_missing_storage()
     test_no_start_on_incomplete_setup()
+    test_protected_guest_keeps_protection_after_success()
+    test_protected_guest_restores_protection_after_error()
+    test_existing_protected_mounts_do_not_toggle_protection()
+    test_protected_guest_hook_install_restores_protection()
     test_no_storage_on_other_guests()
     test_guest_storage_sent_to_pve()
     print("OK: Guest storage contract")
