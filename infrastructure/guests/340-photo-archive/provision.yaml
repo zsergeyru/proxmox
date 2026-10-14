@@ -129,6 +129,9 @@ persistence:
     - /mnt/persistent-state/postgres
     - /srv/photo-archive-media
     - /mnt/persistent-state/secrets/immich.env
+    - /mnt/persistent-state/secrets/immich-initial-users.json
+    - /mnt/persistent-state/initial-setup.done
+    - /mnt/persistent-state/initial-settings.done
     - /srv/photo-archive
   reproducible:
     - /opt/photo-archive/compose
