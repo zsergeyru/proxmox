@@ -163,6 +163,18 @@
   retries: 60
   delay: 3
 
+- name: Проверить запись в исходный каталог из Docker Immich
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - immich_server
+      - sh
+      - -c
+      - 'file=$(mktemp /external/originals/.immich-write-check.XXXXXX) && rm -f "$file"'
+  changed_when: false
+  when: not provision.photo_archive.storage.originals_read_only
+
 - name: Установить программу начальной настройки Immich
   ansible.builtin.copy:
     src: initial_setup.py
