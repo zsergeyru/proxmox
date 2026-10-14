@@ -47,7 +47,7 @@ pve_storage:
       volume: photo_archive
       directory: data
       target: /srv/photo-archive
-      read_only: true
+      read_only: false
     - slot: mp1
       volume: infra_state
       directory: 340-photo-archive
@@ -108,7 +108,7 @@ photo_archive:
     pve_state_source: /mnt/bindmounts/infra-state/340-photo-archive
     pve_data_source: /mnt/bindmounts/photo-archive/data
     pve_media_source: /mnt/bindmounts/photo-archive/immich-media
-    originals_read_only: true
+    originals_read_only: false
     allow_missing_mount: false
   # До настройки Windows обеспечиваем полноценную обработку на LXC.
   # При включении Windows API остаётся на 340, фоновые задания — на Windows.
@@ -138,6 +138,7 @@ photo_archive:
       name: Семейный фотоархив
       import_path: /external/originals
     scan_cron: "0 * * * *"
+    trash_days: 30
   external_library:
     enabled: true
     automatic_registration: true

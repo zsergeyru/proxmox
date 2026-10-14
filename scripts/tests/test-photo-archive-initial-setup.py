@@ -29,6 +29,7 @@ CONFIG = {
     ],
     "library": {"name": "Семейный фотоархив", "import_path": "/external/originals"},
     "scan_cron": "0 * * * *",
+    "trash_days": 30,
 }
 
 
@@ -50,6 +51,7 @@ def test_first_setup() -> None:
                             "watch": {"enabled": True},
                         },
                         "machineLearning": {"enabled": True},
+                        "trash": {"enabled": False, "days": 7},
                         "ffmpeg": {"transcode": "required"},
                         "job": {
                             key: {"concurrency": 5}
@@ -169,6 +171,7 @@ def test_first_setup() -> None:
                 assert server["libraries"][0]["importPaths"] == ["/external/originals"]
                 assert len(server["partners"]) == 2
                 assert server["config"]["library"]["scan"]["cronExpression"] == "0 * * * *"
+                assert server["config"]["trash"] == {"enabled": True, "days": 30}
                 assert server["config"]["library"]["watch"]["enabled"] is False
                 assert server["config"]["machineLearning"]["enabled"] is False
                 assert server["config"]["ffmpeg"]["transcode"] == "disabled"

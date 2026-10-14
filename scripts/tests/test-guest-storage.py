@@ -44,7 +44,7 @@ def storage_config() -> dict:
                 "volume": "photo_archive",
                 "directory": "data",
                 "target": "/srv/photo-archive",
-                "read_only": True,
+                "read_only": False,
             },
             {
                 "slot": "mp1",
@@ -103,24 +103,36 @@ def test_contract() -> None:
 
 
 def test_existing_mounts() -> None:
+    """Разрешить только смену ro при том же источнике и точке подключения."""
     config = (
         "hostname: photo-archive\nunprivileged: 1\n"
-        "mp0: /mnt/bindmounts/photo-archive/data,mp=/srv/photo-archive,ro=1\n"
+        "mp0: /mnt/bindmounts/photo-archive/data,mp=/srv/photo-archive,ro=0\n"
     )
     cfg = storage_config()
     volumes = {v["name"]: v for v in cfg["volumes"]}
     with patch.object(storage, "command", return_value=SimpleNamespace(stdout=config)):
-        missing = storage.existing_mount_config(340, volumes, cfg["mounts"])
-    assert [item["slot"] for item in missing] == ["mp1", "mp2"]
+        pending = storage.existing_mount_config(340, volumes, cfg["mounts"])
+    assert [item["slot"] for item in pending] == ["mp1", "mp2"]
 
-    conflicted = config.replace("ro=1", "ro=0")
-    with patch.object(storage, "command", return_value=SimpleNamespace(stdout=conflicted)):
-        try:
-            storage.existing_mount_config(340, volumes, cfg["mounts"])
-        except storage.StorageError:
-            pass
-        else:
-            raise AssertionError("Чужой mp0 нельзя перезаписывать")
+    # Старый mp0 подключён только на чтение; его разрешено изменить на запись.
+    old_read_only = config.replace("ro=0", "ro=1")
+    with patch.object(storage, "command", return_value=SimpleNamespace(stdout=old_read_only)):
+        pending = storage.existing_mount_config(340, volumes, cfg["mounts"])
+    assert [item["slot"] for item in pending] == ["mp0", "mp1", "mp2"]
+
+    # Неправильный каталог или посторонние настройки подключения не заменять.
+    for invalid in (
+        old_read_only.replace("photo-archive/data", "photo-archive/unknown"),
+        old_read_only.replace("ro=1", "ro=1,backup=1"),
+    ):
+        with patch.object(storage, "command", return_value=SimpleNamespace(stdout=invalid)):
+            try:
+                storage.existing_mount_config(340, volumes, cfg["mounts"])
+            except storage.StorageError:
+                pass
+            else:
+                raise AssertionError("Чужое или нестандартное mp0 нельзя перезаписывать")
+
 
 
 def test_existing_volume_not_formatted() -> None:
@@ -228,6 +240,77 @@ def test_unknown_existing_volume_does_not_format() -> None:
     assert not any(args[0] in ("mkfs.ext4", "lvcreate") for args in calls)
 
 
+def test_originals_acl() -> None:
+    """Разрешить изменение файлов, не трогая сами фотографии."""
+    with tempfile.TemporaryDirectory() as temp:
+        path = Path(temp) / "data"
+        photos = path / "originals"
+        nested = photos / "2026" / "10"
+        nested.mkdir(parents=True)
+        original = nested / "image.jpg"
+        original.write_bytes(b"existing photo")
+        original_mode = original.stat().st_mode
+        calls: list[tuple[str, ...]] = []
+        volumes = {"photo_archive": {"mountpoint": temp}}
+        mount = {
+            "slot": "mp0", "volume": "photo_archive",
+            "directory": "data", "target": "/srv/photo-archive", "read_only": False,
+        }
+        # source_path = temp/data; в тесте подменяем только изменение хозяина
+        # и исполнение setfacl, сама файловая система остаётся реальной.
+        with (
+            patch.object(storage.os, "chown"),
+            patch.object(storage.shutil, "which", return_value="/usr/bin/setfacl"),
+            patch.object(
+                storage, "command",
+                side_effect=lambda *args, **kwargs: (
+                    calls.append(args) or SimpleNamespace(returncode=0, stdout="")
+                ),
+            ),
+        ):
+            storage.ensure_directories(volumes, [mount])
+            storage.ensure_directories(volumes, [mount])
+        dirs = {str(photos), str(photos / "2026"), str(nested)}
+        assert {
+            args[-1] for args in calls if args[0] == "setfacl"
+        } == dirs
+        assert all(
+            args[1:4] == ("-m", "u:100000:rwx,d:u:100000:rwx", args[-1])
+            for args in calls
+        )
+        assert original.read_bytes() == b"existing photo"
+        assert original.stat().st_mode == original_mode
+        assert str(original) not in {args[-1] for args in calls}
+        with (
+            patch.object(storage.os, "chown"),
+            patch.object(storage.shutil, "which", return_value=None),
+        ):
+            try:
+                storage.ensure_directories(volumes, [mount])
+            except storage.StorageError as exc:
+                assert "setfacl" in str(exc)
+            else:
+                raise AssertionError("Неизвестные права оригиналов должны блокировать deploy")
+
+
+def test_readonly_mount_preserves_originals() -> None:
+    """В режиме просмотра ACL не обязателен и оригиналы не изменяются."""
+    with tempfile.TemporaryDirectory() as temp:
+        photos = Path(temp) / "data/originals"
+        photos.mkdir(parents=True)
+        (photos / "file.jpg").write_bytes(b"kept")
+        volumes = {"photo_archive": {"mountpoint": temp}}
+        with patch.object(storage.shutil, "which", side_effect=AssertionError("read-only")):
+            storage.ensure_directories(
+                volumes, [{
+                    "slot": "mp0", "volume": "photo_archive",
+                    "directory": "data", "target": "/srv/photo-archive",
+                    "read_only": True,
+                }],
+            )
+        assert (photos / "file.jpg").read_bytes() == b"kept"
+
+
 def test_guest_mount_paths() -> None:
     config = storage_config()
     volumes = {v["name"]: v for v in config["volumes"]}
@@ -246,7 +329,7 @@ def test_guest_mount_paths() -> None:
         storage.configure_lxc(340, volumes, config["mounts"], config["mounts"], config)
     hook.assert_called_once_with(340, config)
     for number, path, target, readonly in [
-        ("mp0", "photo-archive/data", "/srv/photo-archive", 1),
+        ("mp0", "photo-archive/data", "/srv/photo-archive", 0),
         ("mp1", "infra-state/340-photo-archive", "/mnt/persistent-state", 0),
         ("mp2", "photo-archive/immich-media", "/srv/photo-archive-media", 0),
     ]:
@@ -293,6 +376,57 @@ def test_no_start_on_incomplete_setup() -> None:
     assert any(args[:2] == ("pct", "shutdown") for args in calls)
     assert not any(args[:2] == ("pct", "start") for args in calls)
 
+
+
+def test_ro_change_protected_guest() -> None:
+    """Изменить только mp0 у защищённого активного LXC и перезапустить его."""
+    cfg = storage_config()
+    volumes = {v["name"]: v for v in cfg["volumes"]}
+    current = (
+        "unprivileged: 1\nprotection: 1\n"
+        "hookscript: local:snippets/infra-manager-guest-storage.py\n"
+        "mp0: /mnt/bindmounts/photo-archive/data,mp=/srv/photo-archive,ro=1\n"
+        "mp1: /mnt/bindmounts/infra-state/340-photo-archive,"
+        "mp=/mnt/persistent-state,ro=0\n"
+        "mp2: /mnt/bindmounts/photo-archive/immich-media,"
+        "mp=/srv/photo-archive-media,ro=0\n"
+    )
+    calls: list[tuple[str, ...]] = []
+    running = True
+
+    def fake(*args, check=True):
+        nonlocal running
+        calls.append(args)
+        if args[:2] == ("pct", "config"):
+            return SimpleNamespace(returncode=0, stdout=current)
+        if args[:2] == ("pct", "shutdown"):
+            running = False
+        if args[:2] == ("pct", "start"):
+            running = True
+        if args[:2] == ("pct", "status"):
+            return SimpleNamespace(
+                returncode=0,
+                stdout="status: running" if running else "status: stopped",
+            )
+        return SimpleNamespace(returncode=0, stdout="")
+
+    with patch.object(storage, "command", side_effect=fake):
+        pending = storage.existing_mount_config(340, volumes, cfg["mounts"])
+        assert [item["slot"] for item in pending] == ["mp0"]
+        with patch.object(storage, "ensure_startup_hook") as hook:
+            storage.configure_lxc(340, volumes, cfg["mounts"], pending, cfg)
+            hook.assert_called_once_with(340, cfg)
+    shutdown = ("pct", "shutdown", "340", "--timeout", "60")
+    off = ("pct", "set", "340", "--protection", "0")
+    mp0 = (
+        "pct", "set", "340", "--mp0",
+        "/mnt/bindmounts/photo-archive/data,mp=/srv/photo-archive,ro=0",
+    )
+    on = ("pct", "set", "340", "--protection", "1")
+    start = ("pct", "start", "340")
+    assert calls.index(shutdown) < calls.index(off) < calls.index(mp0)
+    assert calls.index(mp0) < calls.index(on) < calls.index(start)
+    assert not any(a[3:4] in (("--mp1",), ("--mp2",)) for a in calls)
 
 
 def test_protected_guest_keeps_protection_after_success() -> None:
@@ -515,6 +649,9 @@ def test_guest_storage_sent_to_pve() -> None:
 if __name__ == "__main__":
     test_contract()
     test_existing_mounts()
+    test_originals_acl()
+    test_readonly_mount_preserves_originals()
+    test_ro_change_protected_guest()
     test_existing_volume_not_formatted()
     test_new_volume_and_interrupted_recovery()
     test_unknown_existing_volume_does_not_format()
