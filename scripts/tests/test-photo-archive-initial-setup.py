@@ -67,7 +67,8 @@ def test_first_setup() -> None:
                 server["calls"].append((method, path))
                 if path == "/auth/admin-sign-up":
                     if server["users"]:
-                        raise module.ApiError(method, path, 403)
+                        # v3.3.1 отклоняет повторную регистрацию кодом HTTP 400.
+                        raise module.ApiError(method, path, 400)
                     server["users"][payload["email"]] = {
                         "id": "admin-id", "email": payload["email"],
                         "isAdmin": True, "password": payload["password"],
