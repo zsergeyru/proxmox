@@ -105,6 +105,31 @@ def check_operator_contracts() -> None:
                 )
 
 
+def check_immich_accounts() -> None:
+    """Проверить описание трёх учётных записей Immich."""
+    services = portal_definitions(ROOT, guest_identity(ROOT, 340))
+    immich = next(service for service in services if service["name"] == "Immich")
+    operator = immich.get("operator")
+    emails = (
+        "admin@zsergey.ru",
+        "mail@zsergey.ru",
+        "zsveta@elsoft35.ru",
+    )
+    accounts = operator.get("accounts") if isinstance(operator, dict) else None
+    if not isinstance(accounts, list) or len(accounts) != 3:
+        fail("340: требуется ровно три операторские учётные записи")
+    for account, email in zip(accounts, emails, strict=True):
+        if account != {
+            "username": email,
+            "password": {
+                "source": "guest_json",
+                "path": "/mnt/persistent-state/secrets/immich-initial-users.json",
+                "key": email,
+            },
+        }:
+            fail(f"340: неверное описание учётной записи {email}")
+
+
 def check_status_definitions() -> None:
     expected_types = {
         109: ("docker", "systemd", "file"),
@@ -229,6 +254,11 @@ def check_rendered_status() -> None:
         "/run/infra-manager/secrets/initial-admin-password": (
             "semaphore-password\n"
         ),
+        "/mnt/persistent-state/secrets/immich-initial-users.json": (
+            '{"admin@zsergey.ru": "immich-admin-password", '
+            '"mail@zsergey.ru": "immich-user-password", '
+            '"zsveta@elsoft35.ru": "immich-family-password"}'
+        ),
     }
 
     def read_guest_file(node: str, address: str, path: str) -> str:
@@ -267,6 +297,12 @@ def check_rendered_status() -> None:
                 "http://192.168.3.40:3001/",
                 "Immich",
                 "http://192.168.3.40:2283/",
+                "admin@zsergey.ru",
+                "immich-admin-password",
+                "mail@zsergey.ru",
+                "immich-user-password",
+                "zsveta@elsoft35.ru",
+                "immich-family-password",
             ),
         ),
         (
@@ -388,13 +424,42 @@ def check_secret_modes() -> None:
             fail("Режим по умолчанию должен скрывать пароль")
 
 
+def check_immich_hidden_passwords() -> None:
+    """В режиме Semaphore не читать ни один пароль Immich."""
+    identity = guest_identity(ROOT, 340)
+    services = tuple(portal_definitions(ROOT, identity))
+    verified = ("pve", "192.168.3.40", services, ("SSH доступен",))
+    with (
+        patch.object(status, "verify_guest_status", return_value=verified),
+        patch.object(
+            status,
+            "_read_guest_file",
+            side_effect=AssertionError("Semaphore не должен читать пароли Immich"),
+        ),
+    ):
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            status.show_guest_status(
+                ROOT,
+                identity,
+                _resource(340, "photo-archive", "lxc"),
+                full=True,
+                show_secrets=False,
+            )
+        result = output.getvalue()
+        if result.count("скрыт") != 3 or "immich-admin-password" in result:
+            fail("340: три пароля должны быть скрыты в Semaphore")
+
+
 def main() -> None:
     check_operator_contracts()
+    check_immich_accounts()
     check_status_definitions()
     check_declared_check_dispatch()
     check_dashboard_port()
     check_rendered_status()
     check_secret_modes()
+    check_immich_hidden_passwords()
     print("[ОК] Единый статус гостей проверен")
 
 

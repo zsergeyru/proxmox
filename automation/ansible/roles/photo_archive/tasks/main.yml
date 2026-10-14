@@ -162,3 +162,35 @@
   until: photo_archive_health.status == 200
   retries: 60
   delay: 3
+
+- name: Установить программу начальной настройки Immich
+  ansible.builtin.copy:
+    src: initial_setup.py
+    dest: "{{ provision.photo_archive.paths.root }}/initial_setup.py"
+    owner: root
+    group: root
+    mode: "0750"
+
+- name: Сохранить описание начальной настройки без паролей
+  ansible.builtin.copy:
+    dest: "{{ provision.photo_archive.paths.configuration }}/initial-setup.json"
+    owner: root
+    group: root
+    mode: "0644"
+    content: "{{ provision.photo_archive.initial_setup | to_nice_json(ensure_ascii=False) }}\\n"
+
+- name: Создать администратора, пользователей и семейную библиотеку при первом запуске
+  ansible.builtin.command:
+    argv:
+      - python3
+      - "{{ provision.photo_archive.paths.root }}/initial_setup.py"
+      - --base-url
+      - "http://127.0.0.1:{{ provision.photo_archive.web_port }}"
+      - --config
+      - "{{ provision.photo_archive.paths.configuration }}/initial-setup.json"
+      - --state
+      - "{{ provision.photo_archive.storage.required_state_mount }}"
+      - --originals
+      - "{{ provision.photo_archive.paths.originals }}"
+  register: photo_archive_initial_setup
+  changed_when: "'настройка Immich: применена' in photo_archive_initial_setup.stdout"

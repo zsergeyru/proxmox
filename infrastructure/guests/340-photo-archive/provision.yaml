@@ -74,6 +74,24 @@ photo_archive:
     targets:
       - local
       - home
+    # Первоначальные пароли выводятся только при вызове через оболочку PVE.
+    operator:
+      accounts:
+      - username: admin@zsergey.ru
+        password:
+          source: guest_json
+          path: /mnt/persistent-state/secrets/immich-initial-users.json
+          key: admin@zsergey.ru
+      - username: mail@zsergey.ru
+        password:
+          source: guest_json
+          path: /mnt/persistent-state/secrets/immich-initial-users.json
+          key: mail@zsergey.ru
+      - username: zsveta@elsoft35.ru
+        password:
+          source: guest_json
+          path: /mnt/persistent-state/secrets/immich-initial-users.json
+          key: zsveta@elsoft35.ru
   paths:
     root: /opt/photo-archive
     compose: /opt/photo-archive/compose
@@ -106,15 +124,32 @@ photo_archive:
   queue:
     engine: redis
     network_exposure: disabled
+  # Только при первом запуске; после этого изменения из веб-интерфейса сохраняются.
+  initial_setup:
+    admin:
+      email: admin@zsergey.ru
+      name: Администратор
+    users:
+      - email: mail@zsergey.ru
+        name: Основной пользователь
+      - email: zsveta@elsoft35.ru
+        name: Семейный пользователь
+    library:
+      name: Семейный фотоархив
+      import_path: /external/originals
+    scan_cron: "0 * * * *"
   external_library:
     enabled: true
-    automatic_registration: false
+    automatic_registration: true
 
 persistence:
   backup_required:
     - /mnt/persistent-state/postgres
     - /srv/photo-archive-media
     - /mnt/persistent-state/secrets/immich.env
+    - /mnt/persistent-state/secrets/immich-initial-users.json
+    - /mnt/persistent-state/initial-setup.done
+    - /mnt/persistent-state/initial-settings.done
     - /srv/photo-archive
   reproducible:
     - /opt/photo-archive/compose
