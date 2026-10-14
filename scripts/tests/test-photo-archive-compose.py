@@ -26,6 +26,9 @@ def test_compose() -> None:
     )
     template = env.get_template("docker-compose.yml.j2")
     assert provision["photo_archive"]["immich_version"] == "v3.3.1"
+    assert provision["pve_storage"]["mounts"][0]["read_only"] is False
+    assert provision["photo_archive"]["storage"]["originals_read_only"] is False
+    assert provision["photo_archive"]["initial_setup"]["trash_days"] == 30
 
     for windows_worker in (False, True):
         description = copy.deepcopy(provision)
@@ -53,7 +56,8 @@ def test_compose() -> None:
             )
             assert app["image"].endswith(":v3.3.1")
             assert app["volumes"][0].endswith(":/data")
-            assert app["volumes"][1].endswith(":/external/originals:ro")
+            assert app["volumes"][1].endswith(":/external/originals")
+            assert not app["volumes"][1].endswith(":ro")
             assert services["database"]["volumes"][0].endswith(":/var/lib/postgresql/data")
             assert services["redis"]["command"][-1].count("$$REDIS_PASSWORD") == 1
             for service in ("database", "redis"):
