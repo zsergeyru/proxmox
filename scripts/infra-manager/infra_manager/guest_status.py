@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import shlex
 import socket
 from pathlib import Path
@@ -89,6 +90,18 @@ def _resolve_password(
             spec["key"],
             path,
         )
+
+    if source == "guest_json":
+        try:
+            payload = json.loads(_read_guest_file(node, address, path))
+        except json.JSONDecodeError as exc:
+            raise InfraManagerError(f"Некорректный JSON с паролями: {path}") from exc
+        value = payload.get(spec["key"]) if isinstance(payload, dict) else None
+        if not isinstance(value, str) or not value:
+            raise InfraManagerError(
+                f"Файл {path} не содержит пароль для {spec['key']}"
+            )
+        return value
 
     if source == "pve_json":
         return read_pve_json_value(node, path, spec["key"])
@@ -331,10 +344,27 @@ def _service_fields(
     if not isinstance(operator, dict):
         return fields
 
+    accounts = operator.get("accounts")
+    if isinstance(accounts, list):
+        for account in accounts:
+            fields.extend(_operator_fields(node, address, account, show_secrets=show_secrets))
+    else:
+        fields.extend(_operator_fields(node, address, operator, show_secrets=show_secrets))
+    return fields
+
+
+def _operator_fields(
+    node: str,
+    address: str,
+    operator: dict[str, Any],
+    *,
+    show_secrets: bool,
+) -> list[tuple[str, str]]:
+    """Показать одну учётную запись, читая пароль только в доверенном режиме."""
+    fields: list[tuple[str, str]] = []
     username = operator.get("username")
     if isinstance(username, str):
         fields.append(("Логин", username))
-
     password = operator.get("password")
     if isinstance(password, dict):
         value = (
