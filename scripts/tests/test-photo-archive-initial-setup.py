@@ -190,18 +190,18 @@ def test_admin_cli_uses_tty_and_checks_email() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         fake = Path(tmp) / "fake-docker.py"
         fake.write_text(
-            "import os,sys\\n"
-            "email = os.environ['TEST_ADMIN_EMAIL']\\n"
-            "print('Found Admin:')\\n"
-            "print('- ID=123')\\n"
-            "print('- Email=' + email, flush=True)\\n"
-            "print('? Please choose a new password (optional) ', end='', flush=True)\\n"
-            "password = input()\\n"
-            "print('? Invalidate existing sessions? ', end='', flush=True)\\n"
-            "confirmation = input()\\n"
-            "if password != os.environ['TEST_ADMIN_PASSWORD'] or confirmation != 'y':\\n"
-            "    sys.exit(2)\\n"
-            "print('The admin password has been updated.', flush=True)\\n",
+            "import os,sys\n"
+            "email = os.environ['TEST_ADMIN_EMAIL']\n"
+            "print('Found Admin:')\n"
+            "print('- ID=123')\n"
+            "print('- Email=' + email, flush=True)\n"
+            "print('? Please choose a new password (optional) ', end='', flush=True)\n"
+            "password = input()\n"
+            "print('? Invalidate existing sessions? ', end='', flush=True)\n"
+            "confirmation = input()\n"
+            "if password != os.environ['TEST_ADMIN_PASSWORD'] or confirmation != 'y':\n"
+            "    sys.exit(2)\n"
+            "print('The admin password has been updated.', flush=True)\n",
             encoding="utf-8",
         )
         real_popen = module.subprocess.Popen
