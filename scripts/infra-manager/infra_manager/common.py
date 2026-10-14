@@ -216,10 +216,12 @@ class Console:
         if isinstance(exc, CommandError):
             tool = Path(exc.argv[0]).name
             detail = (exc.stderr or "").lower()
-            if "unreachable" in detail or "connection refused" in detail or "connection timed out" in detail:
-                message = "Не удалось подключиться к узлу или службе. Проверьте, что нужный узел запущен и доступен по сети; затем повторите операцию."
-            elif tool == "ansible-playbook":
+            # Итог Ansible всегда содержит unreachable=0, даже если упало
+            # локальное задание: нельзя считать его сетевой ошибкой.
+            if tool == "ansible-playbook":
                 message = "Настройка гостя не завершена. Проверьте состояние: infra-manager status <VMID>. Если служба не готова, проверьте её журнал внутри гостя, исправьте причину и повторите deploy."
+            elif "unreachable" in detail or "connection refused" in detail or "connection timed out" in detail:
+                message = "Не удалось подключиться к узлу или службе. Проверьте, что нужный узел запущен и доступен по сети; затем повторите операцию."
             elif tool == "git":
                 message = "Не удалось обновить проект. Проверьте доступ к Git-серверу, ключ доступа и наличие выбранной ветки; затем повторите операцию."
             elif tool == "docker":
