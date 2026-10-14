@@ -15,6 +15,7 @@ MODULE_ROOT = ROOT / "scripts" / "infra-manager"
 sys.path.insert(0, str(MODULE_ROOT))
 
 from infra_manager import guest_status as status
+from infra_manager.common import CommandError, Console
 from infra_manager.guest_catalog import guest_identity
 from infra_manager.portal import portal_definitions
 
@@ -451,6 +452,19 @@ def check_immich_hidden_passwords() -> None:
             fail("340: три пароля должны быть скрыты в Semaphore")
 
 
+def check_ansible_error_classification() -> None:
+    """Нулевой unreachable в сводке Ansible не означает сетевую ошибку."""
+    output = io.StringIO()
+    error = CommandError(
+        ["ansible-playbook"], 2,
+        "PLAY RECAP: guest : ok=9 changed=0 unreachable=0 failed=1",
+    )
+    Console(err=output).failure(error, vmid=340)
+    result = output.getvalue()
+    if "Не удалось подключиться" in result or "infra-manager status 340" not in result:
+        fail("Сбой Ansible неправильно классифицирован как недоступность сети")
+
+
 def main() -> None:
     check_operator_contracts()
     check_immich_accounts()
@@ -460,6 +474,7 @@ def main() -> None:
     check_rendered_status()
     check_secret_modes()
     check_immich_hidden_passwords()
+    check_ansible_error_classification()
     print("[ОК] Единый статус гостей проверен")
 
 
