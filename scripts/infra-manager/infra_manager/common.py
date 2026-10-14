@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -20,6 +21,46 @@ _SENSITIVE_OPTIONS = {"--token", "--password", "--secret"}
 _SENSITIVE_PACKER_VARS = {"proxmox_token", "build_password"}
 LOG_LEVEL_ENV = "INFRA_LOG_LEVEL"
 LOG_LEVELS = frozenset({"normal", "verbose", "quiet"})
+
+
+# Диагностику Ansible очищаем по принципу разрешённого списка.
+# Полный вывод может содержать пароли из параметров заданий.
+_ANSIBLE_SAFE_ERRORS: tuple[tuple[str, str], ...] = (
+    (
+        "Истекло время ожидания команды Immich для администратора",
+        "Immich не ответил на запрос сброса пароля администратора за 90 секунд.",
+    ),
+    (
+        "Immich не подтвердил изменение пароля администратора",
+        "Immich не подтвердил сброс пароля администратора.",
+    ),
+    (
+        "Администратор в базе Immich не совпадает с описанием гостя",
+        "Адрес администратора в Immich отличается от указанного в проекте; пароль не менялся.",
+    ),
+    (
+        "Extra data: line",
+        "JSON настройки содержит лишние данные.",
+    ),
+)
+
+
+def _ansible_failure_summary(output: str | None) -> str:
+    """Получить название неудачного задания и известную безопасную причину."""
+    if not output:
+        return ""
+    details: list[str] = []
+    tasks = re.findall(r"(?m)^TASK \[([^\]\r\n]{1,180})\]", output)
+    if tasks:
+        # Не печатать динамические заголовки с переменными или слишком длинными полями.
+        task = tasks[-1].strip()
+        if "{{" not in task and "}}" not in task:
+            details.append(f"Последнее задание Ansible: {task}.")
+    for fingerprint, description in _ANSIBLE_SAFE_ERRORS:
+        if fingerprint in output:
+            details.append(description)
+            break
+    return " ".join(details)
 
 
 def read_env_file(path: Path) -> dict[str, str]:
@@ -219,7 +260,7 @@ class Console:
             # Итог Ansible всегда содержит unreachable=0, даже если упало
             # локальное задание: нельзя считать его сетевой ошибкой.
             if tool == "ansible-playbook":
-                message = "Настройка гостя не завершена. Проверьте состояние: infra-manager status <VMID>. Если служба не готова, проверьте её журнал внутри гостя, исправьте причину и повторите deploy."
+                message = "Настройка гостя не завершена. " + _ansible_failure_summary(exc.stderr) + " Проверьте состояние: infra-manager status <VMID>."
             elif "unreachable" in detail or "connection refused" in detail or "connection timed out" in detail:
                 message = "Не удалось подключиться к узлу или службе. Проверьте, что нужный узел запущен и доступен по сети; затем повторите операцию."
             elif tool == "git":

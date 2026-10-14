@@ -465,6 +465,46 @@ def check_ansible_error_classification() -> None:
         fail("Сбой Ansible неправильно классифицирован как недоступность сети")
 
 
+    # Задание показываем, а сырой fatal/stdout с секретами — никогда.
+    output = io.StringIO()
+    error = CommandError(
+        ["ansible-playbook"], 2,
+        (
+            "TASK [photo_archive : Создать администратора и семейную библиотеку]\n"
+            'fatal: [340]: FAILED! => {"stderr": "ОШИБКА первоначальной настройки '
+            'Immich: Истекло время ожидания команды Immich для администратора", '
+            '"password": "VERY-SECRET-PASSWORD"}\n'
+            "PLAY RECAP: 340 : ok=29 unreachable=0 failed=1"
+        ),
+    )
+    Console(err=output).failure(error, vmid=340)
+    result = output.getvalue()
+    for required in (
+        "photo_archive : Создать администратора и семейную библиотеку",
+        "не ответил на запрос сброса пароля",
+        "infra-manager status 340",
+    ):
+        if required not in result:
+            fail(f"Нет безопасной диагностики Ansible: {required}")
+    if "VERY-SECRET-PASSWORD" in result or "fatal:" in result:
+        fail("Диагностика Ansible раскрыла сырой вывод или пароль")
+
+    # Другая ошибка Ansible: только имя задания, без неразрешённых подробностей.
+    output = io.StringIO()
+    error = CommandError(
+        ["ansible-playbook"], 2,
+        (
+            "TASK [Проверить службу]\n"
+            'fatal: [340]: FAILED! => {"stdout": "SECRET-TOKEN-123"}\n'
+            "PLAY RECAP: 340 : unreachable=0 failed=1"
+        ),
+    )
+    Console(err=output).failure(error, vmid=340)
+    result = output.getvalue()
+    if "Проверить службу" not in result or "SECRET-TOKEN-123" in result:
+        fail("Небезопасная диагностика неизвестной ошибки Ansible")
+
+
 def main() -> None:
     check_operator_contracts()
     check_immich_accounts()
