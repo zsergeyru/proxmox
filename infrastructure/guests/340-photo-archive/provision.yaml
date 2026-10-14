@@ -106,9 +106,23 @@ photo_archive:
   queue:
     engine: redis
     network_exposure: disabled
+  # Только при первом запуске; после этого изменения из веб-интерфейса сохраняются.
+  initial_setup:
+    admin:
+      email: admin@zsergey.ru
+      name: Администратор
+    users:
+      - email: mail@zsergey.ru
+        name: Основной пользователь
+      - email: zsveta@elsoft35.ru
+        name: Семейный пользователь
+    library:
+      name: Семейный фотоархив
+      import_path: /external/originals
+    scan_cron: "0 * * * *"
   external_library:
     enabled: true
-    automatic_registration: false
+    automatic_registration: true
 
 persistence:
   backup_required:
