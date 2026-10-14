@@ -392,13 +392,22 @@ def test_ro_change_protected_guest() -> None:
         "mp=/srv/photo-archive-media,ro=0\n"
     )
     calls: list[tuple[str, ...]] = []
+    running = True
 
     def fake(*args, check=True):
+        nonlocal running
         calls.append(args)
         if args[:2] == ("pct", "config"):
             return SimpleNamespace(returncode=0, stdout=current)
+        if args[:2] == ("pct", "shutdown"):
+            running = False
+        if args[:2] == ("pct", "start"):
+            running = True
         if args[:2] == ("pct", "status"):
-            return SimpleNamespace(returncode=0, stdout="status: running")
+            return SimpleNamespace(
+                returncode=0,
+                stdout="status: running" if running else "status: stopped",
+            )
         return SimpleNamespace(returncode=0, stdout="")
 
     with patch.object(storage, "command", side_effect=fake):
