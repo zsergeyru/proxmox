@@ -101,20 +101,20 @@ def reset_existing_admin(email: str, password: str) -> None:
                 # Весь вывод остаётся только в памяти: CLI может повторить пароль.
                 transcript = (transcript + chunk)[-65536:]
                 visible = re.sub(
-                    r"\\x1b\\[[0-?]*[ -/]*[@-~]", "",
+                    r"\x1b\[[0-?]*[ -/]*[@-~]", "",
                     transcript.decode("utf-8", errors="replace"),
                 )
                 if stage == "identify" and "Please choose a new password" in visible:
-                    found = re.search(r"- Email=([^\\r\\n]+)", visible)
+                    found = re.search(r"- Email=([^\r\n]+)", visible)
                     if not found or found.group(1).strip().lower() != email.lower():
                         raise RuntimeError(
                             "Администратор в базе Immich не совпадает с описанием гостя; "
                             "пароль оставлен без изменений"
                         )
-                    os.write(master, password.encode("utf-8") + b"\\n")
+                    os.write(master, password.encode("utf-8") + b"\n")
                     stage = "confirm"
                 elif stage == "confirm" and "Invalidate existing sessions?" in visible:
-                    os.write(master, b"y\\n")
+                    os.write(master, b"y\n")
                     stage = "finish"
             if process.poll() is not None and not ready:
                 break
