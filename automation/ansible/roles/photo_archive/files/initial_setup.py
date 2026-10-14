@@ -4,10 +4,16 @@
 from __future__ import annotations
 
 import argparse
+import errno
 import json
 import os
+import pty
+import re
 import secrets
+import select
+import subprocess
 import sys
+import time
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -59,6 +65,77 @@ def complete_marker(path: Path) -> None:
     path.write_text("1\n", encoding="utf-8")
 
 
+def reset_existing_admin(email: str, password: str) -> None:
+    """Один раз принять существующего администратора через штатную команду Immich.
+
+    CLI интерактивная: отдельный псевдотерминал позволяет проверить email
+    администратора ДО передачи пароля. Вывод (включая ввод) никогда не печатаем.
+    """
+    master, slave = pty.openpty()
+    try:
+        process = subprocess.Popen(
+            [
+                "docker", "exec", "-it", "-e", "TERM=xterm",
+                "immich_server", "immich-admin", "reset-admin-password",
+            ],
+            stdin=slave, stdout=slave, stderr=slave,
+        )
+    finally:
+        os.close(slave)
+
+    stage = "identify"
+    transcript = b""
+    deadline = time.monotonic() + 90
+    try:
+        while time.monotonic() < deadline:
+            ready, _, _ = select.select([master], [], [], 1)
+            if ready:
+                try:
+                    chunk = os.read(master, 4096)
+                except OSError as exc:
+                    if exc.errno != errno.EIO:
+                        raise
+                    chunk = b""
+                if not chunk:
+                    break
+                # Весь вывод остаётся только в памяти: CLI может повторить пароль.
+                transcript = (transcript + chunk)[-65536:]
+                visible = re.sub(
+                    r"\x1b\[[0-?]*[ -/]*[@-~]", "",
+                    transcript.decode("utf-8", errors="replace"),
+                )
+                if stage == "identify" and "Please choose a new password" in visible:
+                    found = re.search(r"- Email=([^\r\n]+)", visible)
+                    if not found or found.group(1).strip().lower() != email.lower():
+                        raise RuntimeError(
+                            "Администратор в базе Immich не совпадает с описанием гостя; "
+                            "пароль оставлен без изменений"
+                        )
+                    os.write(master, password.encode("utf-8") + b"\n")
+                    stage = "confirm"
+                elif stage == "confirm" and "Invalidate existing sessions?" in visible:
+                    os.write(master, b"y\n")
+                    stage = "finish"
+            if process.poll() is not None and not ready:
+                break
+        else:
+            raise RuntimeError("Истекло время ожидания команды Immich для администратора")
+
+        # Команда Immich сама ловит исключения и иногда завершает работу с кодом 0:
+        # проверять нужно и сообщение об успехе, и затем вход по API.
+        if (
+            process.wait(timeout=5) != 0
+            or stage != "finish"
+            or b"The admin password has been updated." not in transcript
+        ):
+            raise RuntimeError("Immich не подтвердил изменение пароля администратора")
+    finally:
+        if process.poll() is None:
+            process.kill()
+        process.wait()
+        os.close(master)
+
+
 def prepare_admin(base: str, config: dict, passwords: dict) -> str:
     """Создать первого администратора либо войти после частичного запуска."""
     admin = config["admin"]
@@ -74,10 +151,13 @@ def prepare_admin(base: str, config: dict, passwords: dict) -> str:
     try:
         login = api(base, "POST", "/auth/login", {"email": email, "password": passwords[email]})
     except ApiError as exc:
-        raise RuntimeError(
-            "Первый администратор уже существует, но сохранённый пароль не подходит. "
-            "Проверить учётную запись вручную; не сбрасывать базу и пароли."
-        ) from exc
+        if exc.code != 401:
+            raise
+        # Администратор уже существовал до первого deploy или пароль меняли
+        # во время незавершённой настройки. Сброс допустим только до маркера
+        # initial-setup.done; пароли остальных пользователей не затрагиваются.
+        reset_existing_admin(email, passwords[email])
+        login = api(base, "POST", "/auth/login", {"email": email, "password": passwords[email]})
     if not login.get("isAdmin"):
         raise RuntimeError("Указанная учётная запись не является администратором Immich")
     return login["accessToken"]
