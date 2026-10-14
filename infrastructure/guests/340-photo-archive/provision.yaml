@@ -74,6 +74,24 @@ photo_archive:
     targets:
       - local
       - home
+    # Первоначальные пароли выводятся только при вызове через оболочку PVE.
+    operator:
+      accounts:
+      - username: admin@zsergey.ru
+        password:
+          source: guest_json
+          path: /mnt/persistent-state/secrets/immich-initial-users.json
+          key: admin@zsergey.ru
+      - username: mail@zsergey.ru
+        password:
+          source: guest_json
+          path: /mnt/persistent-state/secrets/immich-initial-users.json
+          key: mail@zsergey.ru
+      - username: zsveta@elsoft35.ru
+        password:
+          source: guest_json
+          path: /mnt/persistent-state/secrets/immich-initial-users.json
+          key: zsveta@elsoft35.ru
   paths:
     root: /opt/photo-archive
     compose: /opt/photo-archive/compose
