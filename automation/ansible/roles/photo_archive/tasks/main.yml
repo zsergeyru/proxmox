@@ -177,7 +177,7 @@
     owner: root
     group: root
     mode: "0644"
-    content: "{{ provision.photo_archive.initial_setup | to_nice_json(ensure_ascii=False) }}\\n"
+    content: "{{ provision.photo_archive.initial_setup | to_nice_json(ensure_ascii=False) }}"
 
 - name: Создать администратора, пользователей и семейную библиотеку при первом запуске
   ansible.builtin.command:

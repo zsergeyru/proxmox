@@ -67,7 +67,9 @@ def prepare_admin(base: str, config: dict, passwords: dict) -> str:
         api(base, "POST", "/auth/admin-sign-up",
             {"email": email, "name": admin["name"], "password": passwords[email]})
     except ApiError as exc:
-        if exc.code != 403:
+        # Immich v3.3.1 отвечает HTTP 400, если администратор уже создан.
+        # После частичного первого запуска пробуем войти, не создавая дубль.
+        if exc.code not in (400, 403):
             raise
     try:
         login = api(base, "POST", "/auth/login", {"email": email, "password": passwords[email]})
