@@ -220,6 +220,7 @@ def ensure_settings(base: str, config: dict, token: str, marker: Path) -> None:
         return
     settings = api(base, "GET", "/admin/config", token=token)
     settings["library"]["scan"] = {"enabled": True, "cronExpression": config["scan_cron"]}
+    settings["trash"] = {"enabled": True, "days": config["trash_days"]}
     settings["library"]["watch"]["enabled"] = False
     settings["machineLearning"]["enabled"] = False
     settings["ffmpeg"]["transcode"] = "disabled"
