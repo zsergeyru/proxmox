@@ -188,6 +188,28 @@ def _validated_operator(source: str, operator: object) -> dict[str, Any] | None:
             f"{source}.portal.operator должен быть объектом"
         )
 
+    accounts = operator.get("accounts")
+    if accounts is not None:
+        if (
+            not isinstance(accounts, list)
+            or not accounts
+            or any(not isinstance(item, dict) or "accounts" in item for item in accounts)
+            or "username" in operator
+            or "password" in operator
+        ):
+            raise InfraManagerError(
+                f"{source}.portal.operator.accounts должен быть списком учётных записей"
+            )
+        validated = [
+            _validated_operator(f"{source}.accounts[{index}]", account)
+            for index, account in enumerate(accounts)
+        ]
+        if any(not item or not item.get("username") or not item.get("password") for item in validated):
+            raise InfraManagerError(
+                f"{source}.portal.operator.accounts требует логин и пароль"
+            )
+        return {"accounts": validated}
+
     username = operator.get("username")
     if username is not None and (
         not isinstance(username, str) or not username.strip()
@@ -204,7 +226,7 @@ def _validated_operator(source: str, operator: object) -> dict[str, Any] | None:
                 f"{source}.portal.operator.password должен быть объектом"
             )
         source_type = password.get("source")
-        if source_type not in {"guest_file", "guest_env", "pve_json"}:
+        if source_type not in {"guest_file", "guest_env", "guest_json", "pve_json"}:
             raise InfraManagerError(
                 f"{source}.portal.operator.password.source имеет "
                 f"неподдерживаемое значение {source_type!r}"
@@ -220,7 +242,7 @@ def _validated_operator(source: str, operator: object) -> dict[str, Any] | None:
             "source": source_type,
             "path": path,
         }
-        if source_type in {"guest_env", "pve_json"}:
+        if source_type in {"guest_env", "guest_json", "pve_json"}:
             key = password.get("key")
             if not isinstance(key, str) or not key.strip():
                 raise InfraManagerError(
