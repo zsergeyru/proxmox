@@ -14,7 +14,7 @@ services:
       REDIS_HOSTNAME: redis
     volumes:
       - {{ provision.photo_archive.paths.uploads }}:/data
-      - {{ provision.photo_archive.paths.originals }}:/external/originals:ro
+      - {{ provision.photo_archive.paths.originals }}:/external/originals{{ ':ro' if provision.photo_archive.storage.originals_read_only else '' }}
       - /etc/localtime:/etc/localtime:ro
     depends_on:
       - database
