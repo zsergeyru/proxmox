@@ -10,6 +10,8 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
+import yaml
+
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "automation/ansible/roles/photo_archive/files/initial_setup.py"
@@ -152,6 +154,21 @@ def test_first_setup() -> None:
             assert (state / "initial-setup.done").exists()
 
 
+def test_config_payload() -> None:
+    """Описание из Ansible должно быть JSON без буквального \\n в конце."""
+    role = ROOT / "automation/ansible/roles/photo_archive/tasks/main.yml"
+    tasks = yaml.safe_load(role.read_text(encoding="utf-8"))
+    task = next(
+        item for item in tasks
+        if item.get("name") == "Сохранить описание начальной настройки без паролей"
+    )
+    content = task["ansible.builtin.copy"]["content"]
+    assert content == "{{ provision.photo_archive.initial_setup | to_nice_json(ensure_ascii=False) }}", (
+        "Ansible добавляет лишние символы после JSON"
+    )
+
+
 if __name__ == "__main__":
+    test_config_payload()
     test_first_setup()
     print("OK: Immich initial setup contract")
