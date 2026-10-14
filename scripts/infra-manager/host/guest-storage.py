@@ -127,7 +127,7 @@ def source_path(volumes: dict[str, dict], item: dict) -> Path:
 
 
 def existing_mount_config(vmid: int, volumes: dict[str, dict], mounts: list[dict]) -> list[dict]:
-    """Не переписывать уже занятые подключения LXC."""
+    """Разрешить сменить ro только у того же каталога LXC, не заменяя источник."""
     config = command("pct", "config", str(vmid)).stdout
     if "unprivileged: 1" not in config.splitlines():
         raise StorageError(f"LXC {vmid} должен быть непривилегированным")
@@ -144,9 +144,17 @@ def existing_mount_config(vmid: int, volumes: dict[str, dict], mounts: list[dict
         if (
             parts[0] != str(source_path(volumes, item))
             or attributes.get("mp") != item["target"]
-            or readonly != item["read_only"]
         ):
             raise StorageError(f"{item['slot']} уже занят другим подключением: {old}")
+        if readonly != item["read_only"]:
+            # Меняем только флаг ro существующего подключения; неизвестные
+            # дополнительные параметры не должны теряться при pct set.
+            if set(attributes) - {"mp", "ro"}:
+                raise StorageError(
+                    f"{item['slot']}: смена режима запрещена при дополнительных "
+                    f"параметрах подключения: {old}"
+                )
+            pending.append(item)
     return pending
 
 
@@ -374,6 +382,24 @@ def ensure_startup_hook(vmid: int, config: dict) -> None:
         command("pct", "set", str(vmid), "--hookscript", HOOK_ID)
 
 
+def ensure_originals_writable(originals: Path) -> None:
+    """Разрешить root непривилегированного 340 удалять файлы из всех папок.
+
+    ACL на существующих каталогах обеспечивает удаление уже загруженных
+    файлов; ACL по умолчанию наследуется вновь создаваемыми папками.
+    Сами файлы и их содержимое не изменяются.
+    """
+    if shutil.which("setfacl") is None:
+        raise StorageError(
+            "На PVE отсутствует setfacl (пакет acl), "
+            "невозможно настроить запись в фотоархив"
+        )
+    for directory, _subdirs, _files in os.walk(originals, followlinks=False):
+        command(
+            "setfacl", "-m", "u:100000:rwx,d:u:100000:rwx", directory,
+        )
+
+
 def ensure_directories(volumes: dict[str, dict], mounts: list[dict]) -> None:
     """Создать только подкаталоги; существующее содержимое не трогать."""
     for item in mounts:
@@ -384,18 +410,21 @@ def ensure_directories(volumes: dict[str, dict], mounts: list[dict]) -> None:
         if not path.is_dir():
             raise StorageError(f"Не каталог: {path}")
         if item["read_only"]:
-            # Для папки оригиналов право чтения нужно root гостя (uid 100000).
             path.chmod(0o755)
-            if item["directory"] == "data":
-                originals = path / "originals"
-                if originals.is_symlink():
-                    raise StorageError(f"Вместо каталога обнаружена ссылка: {originals}")
-                originals.mkdir(exist_ok=True)
-                originals.chmod(0o755)
         else:
             # Непривилегированный LXC: root гостя соответствует uid/gid 100000.
             os.chown(path, 100000, 100000)
             path.chmod(0o750)
+
+        if item["directory"] == "data":
+            originals = path / "originals"
+            if originals.is_symlink():
+                raise StorageError(f"Вместо каталога обнаружена ссылка: {originals}")
+            originals.mkdir(exist_ok=True)
+            if item["read_only"]:
+                originals.chmod(0o755)
+            else:
+                ensure_originals_writable(originals)
 
 
 def configure_lxc(
