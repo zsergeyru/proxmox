@@ -105,8 +105,8 @@ def test_contract() -> None:
 def test_existing_mounts() -> None:
     """Разрешить только смену ro при том же источнике и точке подключения."""
     config = (
-        "hostname: photo-archive\\nunprivileged: 1\\n"
-        "mp0: /mnt/bindmounts/photo-archive/data,mp=/srv/photo-archive,ro=0\\n"
+        "hostname: photo-archive\nunprivileged: 1\n"
+        "mp0: /mnt/bindmounts/photo-archive/data,mp=/srv/photo-archive,ro=0\n"
     )
     cfg = storage_config()
     volumes = {v["name"]: v for v in cfg["volumes"]}
@@ -383,13 +383,13 @@ def test_ro_change_protected_guest() -> None:
     cfg = storage_config()
     volumes = {v["name"]: v for v in cfg["volumes"]}
     current = (
-        "unprivileged: 1\\nprotection: 1\\n"
-        "hookscript: local:snippets/infra-manager-guest-storage.py\\n"
-        "mp0: /mnt/bindmounts/photo-archive/data,mp=/srv/photo-archive,ro=1\\n"
+        "unprivileged: 1\nprotection: 1\n"
+        "hookscript: local:snippets/infra-manager-guest-storage.py\n"
+        "mp0: /mnt/bindmounts/photo-archive/data,mp=/srv/photo-archive,ro=1\n"
         "mp1: /mnt/bindmounts/infra-state/340-photo-archive,"
-        "mp=/mnt/persistent-state,ro=0\\n"
+        "mp=/mnt/persistent-state,ro=0\n"
         "mp2: /mnt/bindmounts/photo-archive/immich-media,"
-        "mp=/srv/photo-archive-media,ro=0\\n"
+        "mp=/srv/photo-archive-media,ro=0\n"
     )
     calls: list[tuple[str, ...]] = []
 
