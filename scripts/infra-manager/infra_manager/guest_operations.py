@@ -371,10 +371,11 @@ def _run_sync(
     repo_root: Path,
     identity: GuestIdentity,
 ) -> int:
-    """Синхронизировать настройки служб без полного создания инфраструктуры.
+    """Применить только разрешённые изменения конфигурации гостя.
 
-        Для infra-manager синхронизируется Semaphore, для прочих гостей
-        выполняется только этап provision через Ansible."""
+    Для infra-manager сохраняется синхронизация Semaphore, остальные
+    используют отдельную безопасную фазу Ansible без обновления программ.
+    """
     if identity.role == SETTINGS.infra_manager_role:
         _infra_manager_sync(repo_root, identity)
         return 0
@@ -386,7 +387,7 @@ def _run_sync(
     return run_deploy_guest(
         repo_root,
         identity.vmid,
-        phase="provision",
+        phase="sync",
     )
 
 
