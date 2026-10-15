@@ -15,7 +15,7 @@ MODULE_ROOT = ROOT / "scripts" / "infra-manager"
 sys.path.insert(0, str(MODULE_ROOT))
 
 from infra_manager import guest_status as status
-from infra_manager.common import CommandError, Console
+from infra_manager.common import CommandError, Console, InfraManagerError
 from infra_manager.guest_catalog import guest_identity
 from infra_manager.portal import portal_definitions
 
@@ -240,7 +240,7 @@ def check_docker_image_status() -> None:
             "pve", "192.168.3.40",
             {"type": "docker_image", "image": "", "message": "Ошибка"},
         )
-    except Exception as exc:
+    except InfraManagerError as exc:
         if "image" not in str(exc):
             fail("Нет объяснения при пустом имени образа")
     else:
