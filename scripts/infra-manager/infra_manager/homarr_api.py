@@ -216,6 +216,9 @@ class HomarrApiHandler(BaseHTTPRequestHandler):
         if not allowed_client(self.client_address[0], PATHS.repo_root):
             self._reply(HTTPStatus.FORBIDDEN, {"error": "Клиент не разрешён"})
             return False
+        if action and os.environ.get("INFRA_HOMARR_ACTIONS_ENABLED") != "1":
+            self._reply(HTTPStatus.FORBIDDEN, {"error": "Изменяющие команды пока отключены"})
+            return False
         token = WRITE_KEY if action else READ_KEY
         if not _key_matches(self.headers.get("Authorization", ""), token):
             self._reply(HTTPStatus.UNAUTHORIZED, {"error": "Нет доступа"})
@@ -228,7 +231,9 @@ class HomarrApiHandler(BaseHTTPRequestHandler):
         path = urlsplit(self.path).path
         try:
             if path == "/v1/guests":
-                self._reply(HTTPStatus.OK, read_guest_inventory(PATHS.repo_root))
+                inventory = read_guest_inventory(PATHS.repo_root)
+                inventory["actions_enabled"] = os.environ.get("INFRA_HOMARR_ACTIONS_ENABLED") == "1"
+                self._reply(HTTPStatus.OK, inventory)
             elif path.startswith("/v1/jobs/"):
                 self._reply(HTTPStatus.OK, job_details(path.rsplit("/", 1)[-1]))
             else:
