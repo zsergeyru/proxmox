@@ -1,4 +1,9 @@
-"""PVE HTTPS API client и проверка прав infra-manager."""
+"""Проверенный доступ к PVE HTTPS API и контроль полномочий.
+
+Все обращения используют доверенный корневой сертификат и служебный токен.
+Изменяющие запросы могут выполниться на PVE даже при обрыве соединения;
+повторять их без проверки фактического состояния небезопасно.
+"""
 
 from __future__ import annotations
 
@@ -29,10 +34,12 @@ ROOT_ADMIN_PRIVS = {
 
 
 def nonempty(path: Path) -> bool:
+    """Проверить наличие непустого файла для настройки доверия или доступа."""
     return path.is_file() and path.stat().st_size > 0
 
 
 class PveClient:
+    """Клиент HTTPS API Proxmox с обязательной проверкой сертификата узла."""
     def __init__(
         self,
         env_path: Path = PVE_ENV,
@@ -42,13 +49,17 @@ class PveClient:
         token_id: str | None = None,
         token_secret: str | None = None,
     ) -> None:
+        """Подготовить проверенный HTTPS-доступ к PVE.
+
+        Корневой сертификат и идентификатор токена обязательны; соединение
+        не должно отключать проверку TLS даже при ошибках доступа."""
         if not nonempty(ca_path):
-            raise InfraManagerError(f"Не найден CA bundle: {ca_path}")
+            raise InfraManagerError(f"Не найден CA bundle: {ca_path}. Проверьте доверенный сертификат PVE")
 
         if url is None and token_id is None and token_secret is None:
             if not nonempty(env_path):
                 raise InfraManagerError(
-                    f"Не найден PVE credential: {env_path}"
+                    f"Не найден PVE credential: {env_path}. Проверьте материализацию данных доступа к PVE"
                 )
             values = read_env_file(env_path)
             url = values.get("PVE_API_URL", "")
@@ -59,11 +70,11 @@ class PveClient:
         self.token_id = token_id or ""
         self.token_secret = token_secret or ""
         if not self.url:
-            raise InfraManagerError("PVE API URL пуст")
+            raise InfraManagerError("PVE API URL пуст. Проверьте PVE_API_URL в служебных настройках")
         if not self.token_id:
-            raise InfraManagerError("PVE API token id пуст")
+            raise InfraManagerError("PVE API token id пуст. Проверьте PVE_API_TOKEN_ID")
         if not self.token_secret:
-            raise InfraManagerError("PVE API token secret пуст")
+            raise InfraManagerError("PVE API token secret пуст. Проверьте PVE_API_TOKEN_SECRET")
 
         self.context = ssl.create_default_context(cafile=str(ca_path))
 
@@ -72,6 +83,9 @@ class PveClient:
         cls,
         ca_path: Path = CA_BUNDLE,
     ) -> PveClient:
+        """Собрать клиента из защищённых переменных задания OpenTofu.
+
+        Токен разбирается по первому знаку равенства без записи секрета в журнал."""
         endpoint = os.environ.get("TF_VAR_pve_endpoint", "").strip()
         token = os.environ.get("TF_VAR_pve_api_token", "").strip()
         token_id, separator, token_secret = token.partition("=")
@@ -97,6 +111,10 @@ class PveClient:
         form: dict[str, str | int] | None = None,
         timeout: int = 120,
     ) -> Any:
+        """Послать запрос PVE API и разобрать ответ.
+
+        Запросы с изменением состояния не повторяются автоматически:
+        сбой сети не доказывает, что PVE не успел применить изменение."""
         url = f"{self.url}/api2/json{endpoint}"
         if query:
             url += "?" + urllib.parse.urlencode(query)
@@ -152,6 +170,7 @@ class PveClient:
         *,
         query: dict[str, str | int] | None = None,
     ) -> Any:
+        """Получить ответ PVE API без изменения объекта."""
         return self._request("GET", endpoint, query=query)
 
     def post(
@@ -160,6 +179,7 @@ class PveClient:
         *,
         form: dict[str, str | int] | None = None,
     ) -> Any:
+        """Отправить команду создания или действия в PVE API."""
         return self._request("POST", endpoint, form=form)
 
     def put(
@@ -168,6 +188,7 @@ class PveClient:
         *,
         form: dict[str, str | int] | None = None,
     ) -> Any:
+        """Применить изменение настроек существующего объекта PVE."""
         return self._request("PUT", endpoint, form=form)
 
     def delete(
@@ -176,10 +197,12 @@ class PveClient:
         *,
         query: dict[str, str | int] | None = None,
     ) -> Any:
+        """Передать команду удаления после проверок вызывающего кода."""
         return self._request("DELETE", endpoint, query=query)
 
     @staticmethod
     def _data_from_payload(payload: Any, context: str) -> Any:
+        """Извлечь поле data; неправильный ответ PVE считать отказом."""
         if not isinstance(payload, dict) or "data" not in payload:
             raise InfraManagerError(f"{context} не содержит data")
         return payload["data"]
@@ -190,6 +213,7 @@ class PveClient:
         *,
         query: dict[str, str | int] | None = None,
     ) -> Any:
+        """Получить проверенное поле data из ответа GET."""
         return self._data_from_payload(
             self.get(endpoint, query=query),
             f"PVE API GET {endpoint}",
@@ -203,6 +227,7 @@ class PveClient:
         query: dict[str, str | int] | None = None,
         form: dict[str, str | int] | None = None,
     ) -> Any:
+        """Получить поле data после указанного метода PVE API."""
         return self._data_from_payload(
             self._request(method, endpoint, query=query, form=form),
             f"PVE API {method} {endpoint}",
@@ -215,6 +240,10 @@ class PveClient:
         upid: str,
         timeout: int = 180,
     ) -> None:
+        """Дождаться завершения задачи PVE и проверить её итог.
+
+        Окончание ожидания без подтверждения успеха не означает отмены
+        операции на PVE; перед новым запуском следует проверить состояние."""
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             payload = self.data(f"/nodes/{node}/tasks/{upid}/status")
@@ -239,6 +268,9 @@ class PveClient:
         form: dict[str, str | int] | None = None,
         timeout: int = 180,
     ) -> None:
+        """Запустить задачу PVE и дождаться подтверждённого завершения.
+
+        Метод не откатывает частично применённые изменения при сбое."""
         upid = self.request_data(
             method,
             endpoint,
@@ -246,10 +278,13 @@ class PveClient:
             form=form,
         )
         if not isinstance(upid, str) or not upid:
-            raise InfraManagerError("PVE не вернул task id")
+            raise InfraManagerError("PVE не вернул идентификатор задачи. Проверьте состояние объекта перед повтором")
         self.wait_task(node=node, upid=upid, timeout=timeout)
 
     def find_vm(self, vmid: int) -> dict[str, Any] | None:
+        """Найти объект по VMID во всём кластере.
+
+        Несколько совпадений запрещают дальнейшее автоматическое управление."""
         resources = self.data(
             "/cluster/resources",
             query={"type": "vm"},
@@ -271,22 +306,25 @@ class PveClient:
         return matches[0] if matches else None
 
     def vm_config(self, *, node: str, vmid: int) -> dict[str, Any]:
+        """Прочитать настройки выбранной виртуальной машины с проверкой формата."""
         config = self.data(f"/nodes/{node}/qemu/{vmid}/config")
         if not isinstance(config, dict):
             raise InfraManagerError(
-                f"PVE config VMID {vmid} имеет неожиданный формат"
+                f"PVE config VMID {vmid} имеет неожиданный формат. Проверьте ответ PVE API"
             )
         return config
 
     def vm_status(self, *, node: str, vmid: int) -> str:
+        """Получить состояние выбранной виртуальной машины."""
         status = self.data(f"/nodes/{node}/qemu/{vmid}/status/current")
         if not isinstance(status, dict):
             raise InfraManagerError(
-                f"PVE status VMID {vmid} имеет неожиданный формат"
+                f"PVE status VMID {vmid} имеет неожиданный формат. Проверьте ответ PVE API"
             )
         return str(status.get("status") or "")
 
     def permissions_at(self, path: str) -> Any:
+        """Прочитать фактические полномочия токена на указанном пути PVE."""
         return self.data(
             "/access/permissions",
             query={"path": path},
@@ -422,6 +460,7 @@ def select_management_ipv4(
 
 
 def permission_present(data: Any, privilege: str) -> bool:
+    """Проверить наличие конкретного разрешения в ответе API."""
     objects: list[dict[str, Any]] = []
     if isinstance(data, dict):
         objects.extend(
@@ -447,6 +486,9 @@ def require_permissions(
     path: str,
     required: set[str],
 ) -> None:
+    """Остановить операцию, если на пути PVE не хватает требуемых прав.
+
+    Проверка выполняется до потенциальных изменений инфраструктуры."""
     data = client.permissions_at(path)
     missing = sorted(
         privilege
