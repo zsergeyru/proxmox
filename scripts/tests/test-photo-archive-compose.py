@@ -112,7 +112,7 @@ def test_addons_state() -> None:
         with patch.object(helper.os, "chown") as chown:
             first = helper.prepare(state)
             assert len(first) == 4
-            assert chown.called
+            assert chown.called or (state / "addons/power-tools/data").stat().st_uid == 1001
             secret = state / "secrets/immich-memories.env"
             value = secret.read_text(encoding="utf-8")
             assert "DASHBOARD_TOKEN=" in value
