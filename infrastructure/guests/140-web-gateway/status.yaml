@@ -1,0 +1,42 @@
+schema_version: 2
+guest_vmid: 140
+
+# Дополнительные проверки после применения роли web_gateway.
+# Само наличие mp0 проверяется на PVE штатным механизмом pve_storage,
+# а до запуска Docker — ролью Ansible; тип проверки mount не предусмотрен.
+checks:
+  - type: docker
+    container: web-gateway-caddy
+    message: "Caddy запущен"
+
+  - type: docker
+    container: web-gateway-authelia
+    message: "Authelia запущена"
+
+  - type: docker
+    container: web-gateway-homarr
+    message: "Homarr запущен"
+
+  - type: tcp
+    port: 80
+    message: "Веб-шлюз принимает HTTP"
+
+  - type: tcp
+    port: 443
+    message: "Веб-шлюз принимает HTTPS"
+
+  - type: file
+    path: /etc/web-gateway/caddy/Caddyfile
+    message: "Конфигурация Caddy создана"
+
+  - type: file
+    path: /etc/web-gateway/authelia/configuration.yml
+    message: "Конфигурация Authelia создана"
+
+  - type: file
+    path: /var/lib/web-gateway/authelia/db.sqlite3
+    message: "Постоянная база Authelia содержит данные"
+
+  - type: file
+    path: /var/lib/web-gateway/homarr/db/db.sqlite
+    message: "Постоянная база Homarr содержит данные"
