@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import ast
 from pathlib import Path
 
 import yaml
@@ -59,6 +60,16 @@ def test() -> None:
             "Нельзя запускать приложения без постоянного тома")
     require(web["paths"]["persistent_state"] in provision["persistence"]["backup_required"],
             "Не перечислен обязательный каталог резервирования")
+    require(web["secrets"]["provider"] == "persistent-files",
+            "Секреты гостя 140 не должны зависеть от OpenBao")
+    require(web["paths"]["secrets"].startswith(web["paths"]["persistent_state"] + "/"),
+            "Секреты обязаны лежать на постоянном mp0")
+    require(web["authelia"]["users_file"].startswith(web["paths"]["persistent_state"] + "/"),
+            "Файл пользователей обязан лежать на постоянном mp0")
+    require(set(web["authelia"]["authentication"]["groups"]) == {"admins", "family", "guests"},
+            "Нужны три согласованные группы доступа")
+    require(set(web["authelia"]["oidc"]["clients"]) >= {"homarr", "immich"},
+            "Нужны отдельные клиенты OIDC для Homarr и Immich")
 
     environment = Environment(
         loader=FileSystemLoader(str(ROLE / "templates")),
@@ -102,6 +113,11 @@ def test() -> None:
     }, "Authelia должна получать секреты из защищённых файлов")
     require(services["homarr"]["env_file"] == [web["paths"]["secrets"] + "/homarr.env"],
             "Homarr должен использовать защищённый файл параметров")
+    require(services["homarr"]["environment"]["AUTH_OIDC_GROUPS_ATTRIBUTE"] == "groups",
+            "Homarr должен получать группы из OIDC")
+    require(services["authelia"]["volumes"][-1] == (
+        web["authelia"]["data"]["host"] + ":" + web["authelia"]["data"]["container"]
+    ), "Данные Authelia с файлом пользователей должны быть доступны для записи")
 
     routes = environment.get_template("sites.generated.caddy.j2").render(**variables)
     require("home.zsergey.ru" in routes and "auth.zsergey.ru" in routes,
@@ -116,6 +132,12 @@ def test() -> None:
             "Нужен защищённый OIDC-вход")
     require("/data/db.sqlite3" in authelia,
             "SQLite Authelia должна лежать на постоянном томе")
+    require("path: /data/users_database.yml" in authelia,
+            "Authelia должна работать с постоянным файлом пользователей")
+    require("algorithm: argon2" in authelia and "variant: argon2id" in authelia,
+            "Необходимо поддерживаемое имя алгоритма Argon2id")
+    require("client_id: immich" in authelia and "app.immich:///oauth-callback" in authelia,
+            "Нужен клиент Immich с мобильным адресом возврата")
 
     tasks = yaml.safe_load((ROLE / "tasks/main.yml").read_text(encoding="utf-8"))
     require(isinstance(tasks, list), "Роль Ansible должна содержать список задач")
@@ -125,6 +147,16 @@ def test() -> None:
             "Необходимо проверить реальное подключение до создания каталогов")
     require("no_log: true" in text and "force: false" in text,
             "Нельзя раскрывать секреты или перезаписывать сохранённые маршруты")
+    require("web_gateway_secret_material" not in text and "web_gateway_users_database" not in text,
+            "140 не должен ожидать материалы пользователей из OpenBao")
+    require("initialize.py" in text and "show-initial-password.py" in text,
+            "Нужна первичная инициализация без вывода пароля в журнал")
+    for name in ["initialize.py", "show-initial-password.py"]:
+        filename = ROLE / "files" / name
+        ast.parse(filename.read_text(encoding="utf-8"), filename=str(filename))
+    init = (ROLE / "files" / "initialize.py").read_text(encoding="utf-8")
+    require("O_EXCL" not in init and "os.link(name, path)" in init,
+            "Защищённые ключи не должны заменяться обычной записью")
     require("authelia.validate" not in text,
             "Неожиданная временная команда")
 
