@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -49,6 +50,34 @@ class BootstrapCommandsMixin:
             file=sys.stderr,
         )
 
+    def _open_private_log(self):
+        """Открыть журнал только для владельца, не следуя символьным ссылкам.
+
+        Ранее созданный файл с широкими правами также ограничивается 0600.
+        Небезопасный файл не используется для записи диагностических данных.
+        """
+        self.log_file.parent.mkdir(parents=True, exist_ok=True)
+        descriptor = os.open(
+            self.log_file,
+            os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW,
+            0o600,
+        )
+        try:
+            metadata = os.fstat(descriptor)
+            if (
+                not stat.S_ISREG(metadata.st_mode)
+                or metadata.st_uid != os.geteuid()
+                or metadata.st_nlink != 1
+            ):
+                raise BootstrapError(
+                    f"Небезопасный файл технического журнала: {self.log_file}"
+                )
+            os.fchmod(descriptor, 0o600)
+            return os.fdopen(descriptor, "a", encoding="utf-8")
+        except BaseException:
+            os.close(descriptor)
+            raise
+
     def run(
         self,
         *args: str,
@@ -74,8 +103,7 @@ class BootstrapCommandsMixin:
         if quiet and progress:
             # Полный вывод остаётся в журнале, но названия долгих Ansible-задач
             # показываются в основной консоли, чтобы bootstrap не выглядел зависшим.
-            self.log_file.parent.mkdir(parents=True, exist_ok=True)
-            with self.log_file.open("a", encoding="utf-8") as log:
+            with self._open_private_log() as log:
                 process = subprocess.Popen(
                     args,
                     text=True,
@@ -147,8 +175,7 @@ class BootstrapCommandsMixin:
         if quiet:
             # Подробности команд сохраняются в журнале. В консоли остаются
             # только понятные этапы и итоговые статусы.
-            self.log_file.parent.mkdir(parents=True, exist_ok=True)
-            with self.log_file.open("a", encoding="utf-8") as log:
+            with self._open_private_log() as log:
                 result = subprocess.run(
                     args,
                     text=True,
