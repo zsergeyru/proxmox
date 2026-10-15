@@ -118,8 +118,8 @@ def initialize(state: Path, email: str) -> None:
             "authelia-jwt-secret": secrets.token_urlsafe(48),
             "authelia-oidc-hmac-secret": secrets.token_urlsafe(48),
             "authelia-oidc-jwks-pem": rsa_private_key(),
-            "authelia-homarr-client-secret-hash": pbkdf2_sha512.hash(homarr_client),
-            "authelia-immich-client-secret-hash": pbkdf2_sha512.hash(immich_client),
+            "authelia-homarr-client-secret-hash": pbkdf2_sha512.using(rounds=310000).hash(homarr_client),
+            "authelia-immich-client-secret-hash": pbkdf2_sha512.using(rounds=310000).hash(immich_client),
             "homarr.env": (
                 f"SECRET_ENCRYPTION_KEY={secrets.token_hex(32)}\n"
                 f"AUTH_OIDC_CLIENT_SECRET={homarr_client}\n"
