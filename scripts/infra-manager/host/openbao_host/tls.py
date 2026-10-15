@@ -55,7 +55,7 @@ def _public_key_from_private_key(path: Path) -> str:
 
 def _atomic_copy(source: Path, target: Path, *, mode: int, uid: int, gid: int) -> None:
     """Атомарно заменить TLS-файл и назначить владельца и права.
-    
+
         Сначала записывается временный файл, чтобы ошибка копирования не
         оставила основной файл частично перезаписанным."""
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -79,7 +79,7 @@ def _atomic_copy(source: Path, target: Path, *, mode: int, uid: int, gid: int) -
 
 def _tls_ca_ready() -> bool:
     """Проверить соответствие ключа и сертификата действующего TLS CA.
-    
+
         Повреждение нельзя исправлять молчаливым созданием нового доверия."""
     if not TLS_CA_KEY.is_file() or not TLS_CA_CERT.is_file():
         return False
@@ -102,7 +102,7 @@ def _tls_ca_has_signing_usage() -> bool:
 
 def _tls_server_ready(address: str, dns_name: str) -> bool:
     """Проверить серверный комплект TLS для указанного адреса и имени.
-    
+
         Неподходящий комплект можно обновить только от действующего CA."""
     if not TLS_SERVER_KEY.is_file() or not TLS_SERVER_CERT.is_file():
         return False
@@ -148,7 +148,7 @@ def _tls_server_ready(address: str, dns_name: str) -> bool:
 
 def _otp_tls_was_initialized(ssh_access_path: Path) -> bool:
     """Определить, вводилась ли уже схема OTP/TLS по сохранённым SSH-данным.
-    
+
         Если она существовала, потеря CA должна блокировать автоматическую
         генерацию нового центра доверия."""
     if not ssh_access_path.is_file() or ssh_access_path.stat().st_size == 0:
