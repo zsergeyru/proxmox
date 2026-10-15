@@ -54,16 +54,33 @@ def extract_survey_vmid(argv: list[str]) -> tuple[list[str], int | None]:
     return remaining, int(values[0])
 
 
+def _supports_safe_sync(identity: GuestIdentity) -> bool:
+    """Разрешить Sync только там, где есть отдельные безопасные задачи."""
+    if identity.role == SETTINGS.infra_manager_role:
+        return True
+    provision = load_manifest(identity.directory / "provision.yaml")
+    if identity.name == "web-gateway" and "web_gateway" in provision:
+        return True
+    if "ai_services" in provision:
+        return True
+    portal = provision.get("portal")
+    local = portal.get("local") if isinstance(portal, dict) else None
+    return isinstance(local, dict) and local.get("enabled") is True
+
+
 def operation_guests(
     repo_root: Path,
     operation: str,
 ) -> tuple[GuestIdentity, ...]:
-    """Вернуть гостей, для которых операция доступна в Semaphore."""
+    """Вернуть гостей, для которых операция действительно поддерживается."""
 
     if operation not in GUEST_OPERATIONS:
         raise InfraManagerError(f"Неизвестная операция гостя: {operation}")
 
-    return deployable_guests(repo_root)
+    guests = deployable_guests(repo_root)
+    if operation == "sync":
+        return tuple(guest for guest in guests if _supports_safe_sync(guest))
+    return guests
 
 
 def _expected_resource_type(repo_root: Path, identity: GuestIdentity) -> str:
@@ -380,9 +397,14 @@ def _run_sync(
         _infra_manager_sync(repo_root, identity)
         return 0
 
+    if not _supports_safe_sync(identity):
+        raise InfraManagerError(
+            f"Для гостя {identity.vmid} нет безопасных задач Sync; "
+            "используйте infra-manager deploy после подготовки."
+        )
     console.info(
-        f"Синхронизация provision.yaml гостя {identity.vmid} "
-        "без полного развёртывания"
+        f"Безопасная синхронизация настроек гостя {identity.vmid} "
+        "без установки программ и обновления Docker-образов"
     )
     return run_deploy_guest(
         repo_root,
