@@ -47,7 +47,16 @@
     - "{{ provision.web_gateway.paths.configuration }}"
     - "{{ provision.web_gateway.paths.configuration }}/caddy"
     - "{{ provision.web_gateway.paths.configuration }}/authelia"
+    - "{{ provision.web_gateway.paths.configuration }}/ca"
     - "{{ provision.web_gateway.paths.secrets }}"
+
+- name: Установить публичный TLS CA управляющего гостя для Homarr
+  ansible.builtin.copy:
+    content: "{{ lookup('file', '/etc/infra-manager/openbao/tls/ca.crt') }}"
+    dest: "{{ provision.web_gateway.paths.configuration }}/ca/openbao-ca.crt"
+    owner: root
+    group: root
+    mode: "0644"
 
 - name: Подготовить каталоги на проверенном постоянном томе
   ansible.builtin.file:
