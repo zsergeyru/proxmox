@@ -22,10 +22,10 @@ checks:
     message: "Immich Memories Notify: служба запущена"
   - type: http
     url: "http://{address}:5000/health"
-    message: "Immich Memories Notify: панель отвечает (http://{address}:5000)"
+    message: "Immich Memories Notify: панель отвечает (порт 5000)"
   - type: docker_image
     image: ghcr.io/immich-power-tools/immich-power-tools:latest
-    message: "Immich Power Tools: образ установлен (запуск пока выключен)"
+    message: "Immich Power Tools: Docker-образ загружен"
   - type: docker_image
     image: ghcr.io/timasoft/immich-analyze:main
-    message: "Immich Analyze: образ установлен (ждёт настройки LM Studio)"
+    message: "Immich Analyze: Docker-образ загружен"
