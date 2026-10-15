@@ -114,6 +114,68 @@
   no_log: true
   # При старых параметрах не перезаписывать пароль и не ломать базу.
 
+- name: Установить программу подготовки дополнений
+  ansible.builtin.copy:
+    src: setup_addons.py
+    dest: "{{ provision.photo_archive.paths.root }}/setup_addons.py"
+    owner: root
+    group: root
+    mode: "0750"
+
+- name: Подготовить постоянные параметры дополнений
+  ansible.builtin.command:
+    argv:
+      - python3
+      - "{{ provision.photo_archive.paths.root }}/setup_addons.py"
+      - --state
+      - "{{ provision.photo_archive.storage.required_state_mount }}"
+  register: photo_archive_addons_prepared
+  changed_when: "'подготовлено файлов 0' not in photo_archive_addons_prepared.stdout"
+
+- name: Проверить ключ Immich для включённых инструментов управления
+  ansible.builtin.command:
+    argv:
+      - grep
+      - -Eq
+      - "^IMMICH_API_KEY=.+"
+      - /mnt/persistent-state/secrets/immich-power-tools.env
+  changed_when: false
+  no_log: true
+  when: provision.photo_archive.addons.power_tools.enabled
+
+- name: Проверить ключ Immich для включённого анализатора
+  ansible.builtin.command:
+    argv:
+      - grep
+      - -Eq
+      - "^IMMICH_API_KEY=.+"
+      - /mnt/persistent-state/secrets/immich-analyze.env
+  changed_when: false
+  no_log: true
+  when: provision.photo_archive.addons.analyze.enabled
+
+- name: Проверить адрес локальной модели для включённого анализатора
+  ansible.builtin.command:
+    argv:
+      - grep
+      - -Eq
+      - "^IMMICH_ANALYZE_HOSTS=https?://.+"
+      - /mnt/persistent-state/secrets/immich-analyze.env
+  changed_when: false
+  no_log: true
+  when: provision.photo_archive.addons.analyze.enabled
+
+- name: Проверить имя локальной модели для включённого анализатора
+  ansible.builtin.command:
+    argv:
+      - grep
+      - -Eq
+      - "^IMMICH_ANALYZE_MODEL_NAME=.+"
+      - /mnt/persistent-state/secrets/immich-analyze.env
+  changed_when: false
+  no_log: true
+  when: provision.photo_archive.addons.analyze.enabled
+
 - name: Сформировать состав служб
   ansible.builtin.template:
     src: docker-compose.yml.j2
@@ -136,6 +198,8 @@
     argv:
       - docker
       - compose
+      - --profile
+      - disabled-addons
       - -f
       - "{{ provision.photo_archive.paths.compose_file }}"
       - pull
@@ -206,3 +270,13 @@
       - "{{ provision.photo_archive.paths.originals }}"
   register: photo_archive_initial_setup
   changed_when: "'настройка Immich: применена' in photo_archive_initial_setup.stdout"
+
+- name: Дождаться интерфейса воспоминаний
+  ansible.builtin.uri:
+    url: "http://{{ ansible_host }}:{{ provision.photo_archive.addons.memories.web_port }}/"
+    status_code: [200, 302]
+  register: photo_archive_memories_health
+  until: photo_archive_memories_health.status in [200, 302]
+  retries: 20
+  delay: 3
+  when: provision.photo_archive.addons.memories.enabled
