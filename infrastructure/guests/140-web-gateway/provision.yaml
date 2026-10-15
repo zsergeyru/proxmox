@@ -170,7 +170,6 @@ web_gateway:
     # Обработчик Caddy/Authelia располагается только внутри сети Docker.
     public_access: false
     routes_state: /var/lib/web-gateway/management/routes.yaml
-    users_state: /var/lib/web-gateway/management/users.yaml
     # Операции над гостями выполняет существующий управляющий контур 910.
     guest_operations:
       manager_vmid: 910
