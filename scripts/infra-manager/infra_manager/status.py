@@ -78,6 +78,7 @@ class StatusDefinition:
 
 
 def required_file(path: Path) -> None:
+    """Остановить проверку состояния при отсутствии обязательного файла."""
     if not path.is_file() or path.stat().st_size == 0:
         raise InfraManagerError(
             f"Отсутствует обязательный файл: {path}"
@@ -85,6 +86,7 @@ def required_file(path: Path) -> None:
 
 
 def _required_text(value: Any, label: str) -> str:
+    """Потребовать непустую строку в описании проверок состояния."""
     if not isinstance(value, str) or not value.strip():
         raise InfraManagerError(
             f"status.yaml: {label} должен быть непустой строкой"
@@ -261,6 +263,7 @@ def load_status_definition(path: Path | None = None) -> StatusDefinition:
 
 
 def _project_branch() -> str:
+    """Получить активную ветку, выбранную для развёртывания проекта."""
     return SETTINGS.project_branch()
 
 
@@ -272,6 +275,10 @@ def _check_git_branch_contract(
     github_key_id: int,
     project_branch: str,
 ) -> None:
+    """Сверить репозиторий и шаблоны Semaphore с ожидаемой веткой.
+
+    Не считать настройку готовой, если ключ Git либо ветка задания
+    не соответствуют текущему проекту."""
     stored_key_id = repository.get("ssh_key_id")
     repository_matches = (
         repository.get("git_url") == PROJECT_REPO
@@ -1043,6 +1050,9 @@ def _render_template(template: str, values: dict[str, str]) -> str:
 
 
 def _field_value(field: dict[str, str], values: dict[str, str]) -> str:
+    """Получить значение поля из явного источника или шаблона.
+
+    Разрешённые способы задания поля определены проверенной схемой."""
     if "source" in field:
         return values[field["source"]]
     if "value" in field:
