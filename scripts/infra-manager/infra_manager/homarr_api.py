@@ -1,4 +1,4 @@
-"""Отдельный HTTPS-интерфейс Homarr с машинными ответами и заданиями 910.
+"""Отдельный HTTPS-интерфейс Homarr с машинными ответами и заданиями.
 
 Источник истины: каталог проекта и штатная команда infra-manager.
 Homepage продолжает обслуживаться прежним portal_gateway, его не меняем.
@@ -23,7 +23,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from .common import CommandRunner, InfraManagerError
-from .guest_catalog import guest_identity, guest_management_address
+from .guest_catalog import guest_identity, guest_management_address, guests_by_provision_section
 from .guest_operations import operation_guests
 from .homarr_inventory import read_guest_inventory
 from .settings import PATHS
@@ -80,8 +80,10 @@ def allowed_client(address: str, repo_root: Path) -> bool:
         remote = ipaddress.ip_address(address)
         if remote.is_loopback:
             return True
-        manager = guest_identity(repo_root, 140)
-        expected = guest_management_address(repo_root, manager)
+        portals = guests_by_provision_section(repo_root, "web_gateway")
+        if len(portals) != 1:
+            return False
+        expected = guest_management_address(repo_root, portals[0])
         return bool(expected) and remote == ipaddress.ip_address(expected)
     except (ValueError, InfraManagerError):
         return False
@@ -278,7 +280,7 @@ class HomarrApiServer(ThreadingHTTPServer):
 def run_homarr_api(bind: str, port: int, cert: Path, key: Path) -> int:
     """Для административных ключей обязательно использовать проверяемый TLS."""
     if not cert.is_file() or not key.is_file():
-        raise InfraManagerError("Сертификат HTTPS 910 отсутствует")
+        raise InfraManagerError("Сертификат HTTPS управляющего гостя отсутствует")
     initialize_keys()
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     context.minimum_version = ssl.TLSVersion.TLSv1_2
