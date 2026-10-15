@@ -22,12 +22,14 @@ class GuestConfigError(ValueError):
 
 @dataclass(frozen=True)
 class NetworkConfig:
+    """Проверенные административная IPv4-подсеть и основной шлюз гостей."""
     subnet: ipaddress.IPv4Network
     gateway: ipaddress.IPv4Address
 
 
 @dataclass(frozen=True)
 class ResolvedGuest:
+    """Итоговая конфигурация гостя и источник его административного адреса."""
     effective: dict[str, Any]
     network: NetworkConfig
     management_ip: ipaddress.IPv4Address | None
@@ -46,6 +48,9 @@ def deep_merge(base: dict, overlay: dict) -> dict:
 
 
 def get_nested(data: dict, path: tuple[str, ...]):
+    """Прочитать значение по вложенному пути без изменения исходных данных.
+
+    Отсутствующее поле отличается от явного значения None: возвращается MISSING."""
     value = data
     for part in path:
         if not isinstance(value, dict) or part not in value:
