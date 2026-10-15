@@ -44,12 +44,27 @@ def test_compose() -> None:
                 encoding="utf-8",
             )
             description["photo_archive"]["paths"]["environment"] = str(secret)
+            description["photo_archive"]["storage"]["required_state_mount"] = str(root)
+            secrets_dir = root / "secrets"
+            secrets_dir.mkdir()
+            for name in ("immich-memories.env", "immich-power-tools.env", "immich-analyze.env"):
+                (secrets_dir / name).write_text("IMMICH_API_KEY=sample\\n", encoding="utf-8")
             rendered = template.render(
                 provision=description, ansible_host="192.168.3.40"
             )
             config = yaml.safe_load(rendered)
             services = config["services"]
-            assert set(services) == {"immich-server", "redis", "database"}
+            assert set(services) == {
+                "immich-server", "redis", "database",
+                "immich-memories", "immich-power-tools", "immich-analyze",
+            }
+            assert "profiles" not in services["immich-memories"]
+            assert services["immich-power-tools"]["profiles"] == ["disabled-addons"]
+            assert services["immich-analyze"]["profiles"] == ["disabled-addons"]
+            assert services["immich-memories"]["ports"] == ["192.168.3.40:5000:5000"]
+            assert services["immich-power-tools"]["ports"] == ["192.168.3.40:8001:3000"]
+            assert "ports" not in services["immich-analyze"]
+            assert "ports" not in services["database"] or windows_worker
             app = services["immich-server"]
             assert app["environment"]["IMMICH_WORKERS_INCLUDE"] == (
                 "api" if windows_worker else "api,microservices"
