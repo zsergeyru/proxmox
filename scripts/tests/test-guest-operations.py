@@ -54,8 +54,9 @@ def check_operation_catalog() -> None:
         guest.vmid
         for guest in operations.operation_guests(ROOT, "sync")
     }
-    if actual_sync != expected:
-        fail("Sync Guest должен использовать общий каталог гостей")
+    # Не предлагать sync гостю без отдельных безопасных задач.
+    if actual_sync != expected - {311}:
+        fail("Sync Guest должен исключать гостей без безопасной синхронизации")
 
 
 def check_management_network() -> None:
@@ -304,7 +305,7 @@ def check_sync_operation() -> None:
 
     regular = guest_identity(ROOT, 109)
     # Подменяем внутренний исполнитель, а не run_deploy_guest:
-    # реальный вызов Sync Guest должен принимать phase="provision".
+    # реальный вызов Sync Guest должен принимать отдельную фазу sync.
     with patch.object(
         guest_deploy_module,
         "_run_deploy_guest",
@@ -313,7 +314,7 @@ def check_sync_operation() -> None:
         if operations._run_sync(ROOT, regular) != 0:
             fail("Sync Guest обычного гостя должен завершаться успешно")
     deploy.assert_called_once_with(
-        ROOT, 109, bootstrap_scope=False, phase="provision"
+        ROOT, 109, bootstrap_scope=False, phase="sync"
     )
 
     # Deploy Guest по умолчанию сохраняет полное развёртывание.
