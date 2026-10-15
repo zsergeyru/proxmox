@@ -1,4 +1,10 @@
-"""TLS-материалы OpenBao, которыми владеет доверенный PVE-хост."""
+"""Создание и проверка TLS-материалов OpenBao на доверенном PVE.
+
+Центр доверия хранится только на PVE. При неполном комплекте или утрате
+центра после включения OTP/TLS выполнение останавливается: автоматическая
+смена CA нарушила бы доверие существующих клиентов. Серверный комплект
+проверяется и при необходимости обновляется от сохранённого CA.
+"""
 
 from __future__ import annotations
 
@@ -21,6 +27,7 @@ TLS_SERVER_CERT = TLS_ACCESS_DIR / "server.crt"
 
 
 def _openssl(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
+    """Выполнить OpenSSL на PVE и проверить результат; сообщение ошибки не должно содержать закрытые ключи."""
     result = subprocess.run(
         ["openssl", *args],
         text=True,
@@ -37,14 +44,20 @@ def _openssl(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]
 
 
 def _public_key_from_certificate(path: Path) -> str:
+    """Извлечь открытый ключ из сертификата для сверки с закрытым ключом."""
     return _openssl("x509", "-in", str(path), "-noout", "-pubkey").stdout.strip()
 
 
 def _public_key_from_private_key(path: Path) -> str:
+    """Получить открытый ключ из локального закрытого ключа без его публикации."""
     return _openssl("pkey", "-in", str(path), "-pubout").stdout.strip()
 
 
 def _atomic_copy(source: Path, target: Path, *, mode: int, uid: int, gid: int) -> None:
+    """Атомарно заменить TLS-файл и назначить владельца и права.
+    
+        Сначала записывается временный файл, чтобы ошибка копирования не
+        оставила основной файл частично перезаписанным."""
     target.parent.mkdir(parents=True, exist_ok=True)
     fd, temporary_name = tempfile.mkstemp(
         prefix=f".{target.name}.",
@@ -65,6 +78,9 @@ def _atomic_copy(source: Path, target: Path, *, mode: int, uid: int, gid: int) -
 
 
 def _tls_ca_ready() -> bool:
+    """Проверить соответствие ключа и сертификата действующего TLS CA.
+    
+        Повреждение нельзя исправлять молчаливым созданием нового доверия."""
     if not TLS_CA_KEY.is_file() or not TLS_CA_CERT.is_file():
         return False
     try:
@@ -77,6 +93,7 @@ def _tls_ca_ready() -> bool:
 
 
 def _tls_ca_has_signing_usage() -> bool:
+    """Проверить, что сертификат CA действительно разрешает подпись сертификатов."""
     usage = _openssl(
         "x509", "-in", str(TLS_CA_CERT), "-noout", "-ext", "keyUsage"
     ).stdout
@@ -84,6 +101,9 @@ def _tls_ca_has_signing_usage() -> bool:
 
 
 def _tls_server_ready(address: str, dns_name: str) -> bool:
+    """Проверить серверный комплект TLS для указанного адреса и имени.
+    
+        Неподходящий комплект можно обновить только от действующего CA."""
     if not TLS_SERVER_KEY.is_file() or not TLS_SERVER_CERT.is_file():
         return False
     verify = _openssl(
@@ -127,6 +147,10 @@ def _tls_server_ready(address: str, dns_name: str) -> bool:
 
 
 def _otp_tls_was_initialized(ssh_access_path: Path) -> bool:
+    """Определить, вводилась ли уже схема OTP/TLS по сохранённым SSH-данным.
+    
+        Если она существовала, потеря CA должна блокировать автоматическую
+        генерацию нового центра доверия."""
     if not ssh_access_path.is_file() or ssh_access_path.stat().st_size == 0:
         return False
     try:
