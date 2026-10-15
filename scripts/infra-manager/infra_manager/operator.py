@@ -63,10 +63,10 @@ python3 "$1/scripts/infra-manager/jobs/guest-operation.py" "$2" "$3"
 
 
 def _require_root() -> None:
-    """Разрешить служебные операции только пользователю root внутри 910."""
+    """Разрешить служебные операции только пользователю root внутри управляющего гостя."""
     if os.geteuid() != 0:
         raise InfraManagerError(
-            "Операторская команда infra-manager должна выполняться от root внутри 910"
+            "Операторская команда infra-manager должна выполняться от root внутри управляющего гостя"
         )
 
 
