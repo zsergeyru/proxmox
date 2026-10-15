@@ -20,6 +20,9 @@ from infra_manager.template_build import run_build_template
 
 
 def main() -> int:
+    """Проверить аргумент VMID и передать сборку Packer в общую программу.
+
+    Во время отложенной активации сборка не запускается."""
     parser = argparse.ArgumentParser(
         description="Собрать и проверить Packer-шаблон"
     )
