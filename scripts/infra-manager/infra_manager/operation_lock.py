@@ -37,11 +37,16 @@ def _lock_root() -> Path:
 
 
 def _lock_path(vmid: int, lock_dir: Path | None = None) -> Path:
+    """Получить отдельный путь блокировки для выбранного VMID."""
     root = lock_dir if lock_dir is not None else _lock_root()
     return root / f"{vmid}.lock"
 
 
 def _read_lock_owner(descriptor: int) -> str:
+    """Прочитать описание владельца блокировки для понятной диагностики.
+
+    Отсутствие или повреждение описания не даёт права обходить
+    саму файловую блокировку."""
     try:
         os.lseek(descriptor, 0, os.SEEK_SET)
         raw = os.read(descriptor, 4096).decode("utf-8", errors="replace").strip()
