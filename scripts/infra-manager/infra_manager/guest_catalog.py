@@ -14,6 +14,9 @@ from .common import InfraManagerError
 
 @dataclass(frozen=True)
 class GuestIdentity:
+    """Проверенная принадлежность VMID каталогу и роли гостя.
+
+    Содержит описание из guest.yaml, а не фактическое состояние PVE."""
     vmid: int
     name: str
     role: str | None
