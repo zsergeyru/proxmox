@@ -19,6 +19,7 @@ from infra_manager.opentofu import run_plan
 
 
 def main() -> int:
+    """Построить общий план OpenTofu, не применяя изменения к гостям."""
     try:
         require_runtime_activation_idle()
         return run_plan(REPO_ROOT)
