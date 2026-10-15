@@ -69,6 +69,9 @@ jobs:
       - name: Run Network Gateway contract checks
         run: python scripts/tests/test-network-gateway-contract.py
 
+      - name: Run AI services contract checks
+        run: python scripts/tests/test-ai-services-contract.py
+
       - name: Check Python with Ruff
         run: ruff check scripts automation/ansible/roles/photo_archive/files/initial_setup.py automation/ansible/roles/photo_archive/files/setup_addons.py
 

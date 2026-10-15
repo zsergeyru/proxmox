@@ -1,0 +1,181 @@
+---
+- name: Проверить контракт AI-служб
+  ansible.builtin.assert:
+    that:
+      - provision.ai_services is defined
+      - provision.ai_services.speaches.image is defined
+      - provision.ai_services.speaches.uid | int > 0
+      - provision.ai_services.speaches.gid | int > 0
+      - provision.ai_services.speaches.port | int > 0
+      - provision.ai_services.speaches.port | int < 65536
+      - provision.ai_services.speaches.stt.model is defined
+      - provision.ai_services.speaches.stt.alias is defined
+      - provision.ai_services.speaches.tts.model is defined
+      - provision.ai_services.speaches.tts.alias is defined
+      - provision.ai_services.wyoming_openai.image is defined
+      - provision.ai_services.wyoming_openai.port | int > 0
+      - provision.ai_services.wyoming_openai.port | int < 65536
+      - provision.ai_services.wyoming_openai.languages | length > 0
+      - provision.ai_services.paths.compose_file is defined
+      - provision.ai_services.paths.model_aliases is defined
+      - provision.ai_services.paths.speaches_cache is defined
+      - provision.docker is defined
+      - provision.docker.required_packages is defined
+    fail_msg: "Для ai_services требуется контракт Speaches + Wyoming OpenAI + Docker"
+
+- name: Создать каталоги AI-служб
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "{{ item.mode }}"
+  loop:
+    - path: "{{ provision.ai_services.paths.root }}"
+      mode: "0755"
+    - path: "{{ provision.ai_services.paths.compose }}"
+      mode: "0755"
+    - path: "{{ provision.ai_services.paths.configuration }}"
+      mode: "0755"
+    - path: "{{ provision.ai_services.paths.speaches_configuration }}"
+      mode: "0755"
+    - path: "{{ provision.ai_services.paths.cache }}"
+      mode: "0755"
+- name: Подготовить кэш моделей Speaches
+  ansible.builtin.file:
+    path: "{{ provision.ai_services.paths.speaches_cache }}"
+    state: directory
+    owner: "{{ provision.ai_services.speaches.uid }}"
+    group: "{{ provision.ai_services.speaches.gid }}"
+    mode: "0755"
+
+- name: Сформировать логические имена моделей Speaches
+  ansible.builtin.template:
+    src: model_aliases.json.j2
+    dest: "{{ provision.ai_services.paths.model_aliases }}"
+    owner: root
+    group: root
+    mode: "0644"
+  register: ai_services_model_aliases
+
+- name: Сформировать Compose AI-служб
+  ansible.builtin.template:
+    src: docker-compose.yml.j2
+    dest: "{{ provision.ai_services.paths.compose_file }}"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Проверить Compose AI-служб
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ provision.ai_services.paths.compose_file }}"
+      - config
+      - --quiet
+  changed_when: false
+
+- name: Получить образы AI-служб
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ provision.ai_services.paths.compose_file }}"
+      - pull
+  changed_when: false
+
+- name: Запустить Speaches
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ provision.ai_services.paths.compose_file }}"
+      - up
+      - -d
+      - speaches
+  register: ai_services_speaches_up
+  changed_when: >-
+    'Started' in (ai_services_speaches_up.stdout + ai_services_speaches_up.stderr)
+    or 'Created' in (ai_services_speaches_up.stdout + ai_services_speaches_up.stderr)
+    or 'Recreated' in (ai_services_speaches_up.stdout + ai_services_speaches_up.stderr)
+
+- name: Перезапустить Speaches после изменения логических имён моделей
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ provision.ai_services.paths.compose_file }}"
+      - restart
+      - speaches
+  changed_when: true
+  when: ai_services_model_aliases.changed
+
+- name: Дождаться Speaches
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ provision.ai_services.speaches.port }}/health"
+    method: GET
+    status_code: 200
+  register: ai_services_speaches_health
+  retries: 30
+  delay: 2
+  until: ai_services_speaches_health.status == 200
+
+- name: Загрузить модели Speaches
+  ansible.builtin.uri:
+    url: >-
+      http://127.0.0.1:{{ provision.ai_services.speaches.port
+      }}/v1/models/{{ item }}
+    method: POST
+    status_code:
+      - 200
+      - 201
+    return_content: true
+    timeout: 600
+  loop:
+    - "{{ provision.ai_services.speaches.stt.model }}"
+    - "{{ provision.ai_services.speaches.tts.model }}"
+  register: ai_services_model_download
+  changed_when: ai_services_model_download.status == 200
+
+- name: Запустить полный набор AI-служб
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ provision.ai_services.paths.compose_file }}"
+      - up
+      - -d
+      - --remove-orphans
+  register: ai_services_compose_up
+  changed_when: >-
+    'Started' in (ai_services_compose_up.stdout + ai_services_compose_up.stderr)
+    or 'Created' in (ai_services_compose_up.stdout + ai_services_compose_up.stderr)
+    or 'Recreated' in (ai_services_compose_up.stdout + ai_services_compose_up.stderr)
+
+- name: Дождаться Wyoming OpenAI
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: "{{ provision.ai_services.wyoming_openai.port }}"
+    timeout: 60
+    state: started
+
+- name: Проверить список моделей Speaches
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ provision.ai_services.speaches.port }}/v1/models"
+    method: GET
+    status_code: 200
+    return_content: true
+  register: ai_services_models
+
+- name: Проверить наличие требуемых моделей
+  ansible.builtin.assert:
+    that:
+      - provision.ai_services.speaches.stt.model in ai_services_models.content
+      - provision.ai_services.speaches.tts.model in ai_services_models.content
+    fail_msg: "Speaches запущен, но требуемые STT/TTS-модели не загружены"

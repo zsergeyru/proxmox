@@ -1,0 +1,43 @@
+services:
+  speaches:
+    image: {{ provision.ai_services.speaches.image }}
+    container_name: {{ provision.ai_services.speaches.container_name }}
+    restart: unless-stopped
+    ports:
+      - "{{ provision.ai_services.speaches.port }}:8000"
+    environment:
+      enable_ui: "false"
+      log_level: info
+    volumes:
+      - "{{ provision.ai_services.paths.model_aliases }}:/home/ubuntu/speaches/model_aliases.json:ro"
+      - "{{ provision.ai_services.paths.speaches_cache }}:/home/ubuntu/.cache/huggingface/hub"
+    healthcheck:
+      test:
+        - CMD
+        - curl
+        - --fail
+        - http://127.0.0.1:8000/health
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  wyoming-openai:
+    image: {{ provision.ai_services.wyoming_openai.image }}
+    container_name: {{ provision.ai_services.wyoming_openai.container_name }}
+    restart: unless-stopped
+    ports:
+      - "{{ provision.ai_services.wyoming_openai.port }}:10300"
+    environment:
+      WYOMING_URI: tcp://0.0.0.0:10300
+      WYOMING_LOG_LEVEL: INFO
+      WYOMING_LANGUAGES: "{{ provision.ai_services.wyoming_openai.languages | join(' ') }}"
+      STT_OPENAI_URL: http://speaches:8000/v1
+      STT_MODELS: "{{ provision.ai_services.speaches.stt.alias }}"
+      STT_BACKEND: "{{ provision.ai_services.wyoming_openai.stt_backend }}"
+      TTS_OPENAI_URL: http://speaches:8000/v1
+      TTS_MODELS: "{{ provision.ai_services.speaches.tts.alias }}"
+      TTS_BACKEND: "{{ provision.ai_services.wyoming_openai.tts_backend }}"
+    depends_on:
+      speaches:
+        condition: service_healthy

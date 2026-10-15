@@ -49,6 +49,11 @@ automation/
         ├── portal/
         │   ├── tasks/main.yml
         │   └── templates/
+        ├── ai_services/
+        │   ├── tasks/main.yml
+        │   └── templates/
+        │       ├── docker-compose.yml.j2
+        │       └── model_aliases.json.j2
         └── infra_manager/
             └── tasks/
                 ├── main.yml
@@ -79,6 +84,7 @@ linux_base
 → ai_control, если guest.yaml содержит role: ai-control
 → network_gateway, если guest.yaml содержит role: network-gateway
 → portal, если provision.yaml включает portal.local
+→ ai_services, если provision.yaml содержит ai_services
 → guest_layout
 ```
 
@@ -90,6 +96,7 @@ linux_base
 - `ai_control` — разворачивает Hermes и Open WebUI через Docker Compose, создаёт их постоянные каталоги и локальные секреты и проверяет доступность обоих сервисов;
 - `network_gateway` — настраивает сетевые службы гостя с ролью `network-gateway`;
 - `portal` — разворачивает локальный Homepage из `portal.local`, применяет единое оформление, локальный фон, иконки, формирует опубликованные службы из вложенных `portal.targets` и стандартные действия обслуживания;
+- `ai_services` — разворачивает Speaches и Wyoming OpenAI, загружает модели и проверяет готовность;
 - `guest_layout` — создаёт только общие каталоги из `provision.components`, если они определены.
 
 Для 109, 410 и 910 после их специализированной настройки применяется общая роль `portal`, потому что их `provision.yaml` включает `portal.local`. Затем выполняется общий `guest_layout`.

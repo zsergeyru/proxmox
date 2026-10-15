@@ -344,6 +344,8 @@ Semaphore должен содержать как минимум:
 
 Первичная команда `scripts/infra-manager/jobs/initialize-openbao.py` сохраняется как внутренний механизм bootstrap/recovery и не должна отображаться как обычный шаблон Semaphore. Оператор использует только PVE-команды `infra-manager repair` и `infra-manager recover`.
 
+Гость 420 доступен через общие задания `Deploy Guest`, `Status Guest`, `Repair Guest` и `Sync Guest` в списке `GUEST_VMID`. Дополнительные экземпляры AI-служб попадают в этот список по общим правилам машинного каталога.
+
 Задание `Sync SSH Access` должно выполнять только идемпотентную синхронизацию OpenBao, описанную в [`openbao.md`](openbao.md). Оно не развёртывает гостей и не выполняет сквозные SSH-тесты. Настройка гостя относится к `Deploy Guest`, а приёмочная проверка выполняется отдельным сценарием `scripts/acceptance/verify-ssh-access.py`.
 
 ## 5. Жизненный цикл и самообновление
