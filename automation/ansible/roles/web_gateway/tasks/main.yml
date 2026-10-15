@@ -105,6 +105,9 @@
     owner: root
     group: root
     mode: "0600"
+    # Повторное развёртывание не должно затирать пользователей,
+    # изменённых через административную страницу Homarr.
+    force: false
   when: web_gateway_users_database is defined
   no_log: true
 
@@ -193,6 +196,7 @@
     owner: root
     group: root
     mode: "0644"
+  register: web_gateway_main_caddyfile
 
 - name: Подготовить маршруты из сохранённого состояния
   ansible.builtin.template:
@@ -201,6 +205,7 @@
     owner: root
     group: root
     mode: "0644"
+  register: web_gateway_generated_routes
 
 - name: Подготовить настройки Authelia
   ansible.builtin.template:
@@ -289,6 +294,19 @@
     'Started' in (web_gateway_started.stdout + web_gateway_started.stderr)
     or 'Created' in (web_gateway_started.stdout + web_gateway_started.stderr)
     or 'Recreated' in (web_gateway_started.stdout + web_gateway_started.stderr)
+
+- name: Применить изменённые маршруты без перезапуска Caddy
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - "{{ provision.web_gateway.caddy.container_name }}"
+      - caddy
+      - reload
+      - --config
+      - /etc/caddy/Caddyfile
+  changed_when: true
+  when: web_gateway_main_caddyfile.changed or web_gateway_generated_routes.changed
 
 - name: Проверить отклик Homarr только на локальном порту
   ansible.builtin.uri:
