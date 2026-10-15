@@ -217,6 +217,7 @@ persistence:
         - opentofu-state
         - semaphore-data
         - operation-locks
+        - homarr-api-keys-and-jobs
       bindings:
         - { source: /mnt/persistent-state/semaphore, target: /var/lib/infra-manager/semaphore, owner: "1001", group: "0", mode: "0770" }
         - { source: /mnt/persistent-state/opentofu, target: /var/lib/infra-manager/opentofu, owner: "1001", group: "0", mode: "0750" }
@@ -236,6 +237,7 @@ persistence:
     - /var/lib/infra-manager/semaphore
     - /var/lib/infra-manager/opentofu/state
     - /var/lib/persistent/openbao
+    - /mnt/persistent-state/homarr-api
 
   reproducible:
     - /var/lib/infra-manager/bootstrap-repo
