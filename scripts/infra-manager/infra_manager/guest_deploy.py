@@ -93,7 +93,7 @@ def _bootstrap_identity_path(vmid: int) -> Path:
 
 def _bootstrap_public_key(private_key: Path, vmid: int) -> str:
     """Прочитать открытый ключ одноразовой пары нового гостя.
-    
+
         Неполная пара или неверный тип ключа запрещают продолжать
         первоначальную установку, чтобы не использовать чужие полномочия."""
     public_key = Path(str(private_key) + ".pub")
@@ -144,7 +144,7 @@ def _ensure_bootstrap_identity(vmid: int) -> Path:
 
 def _existing_bootstrap_identity(vmid: int) -> Path | None:
     """Проверить, сохранилась ли одноразовая пара после незавершённого запуска.
-    
+
         Отсутствие обоих файлов допустимо; неполный или повреждённый набор
         вызывает отказ вместо незаметной генерации нового ключа."""
     private_key = _bootstrap_identity_path(vmid)
