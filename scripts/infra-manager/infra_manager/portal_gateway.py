@@ -25,6 +25,9 @@ OPERATOR_COMMAND = Path("/usr/local/sbin/infra-manager")
 
 
 def _validate_action(operation: str, vmid: int):
+    """Проверить, что действие разрешено именно этому гостю.
+
+    Поддерживаемая команда и VMID сверяются с каталогом проекта до запуска."""
     if operation not in ACTION_LABELS:
         raise InfraManagerError(f"Неизвестное действие портала: {operation}")
     identity = guest_identity(PATHS.repo_root, vmid)
@@ -40,6 +43,7 @@ def _validate_action(operation: str, vmid: int):
 
 
 def _homepage_url(identity) -> str:
+    """Получить только объявленный локальный HTTP-адрес страницы гостя."""
     from .portal import local_portal_definition
 
     portal = local_portal_definition(PATHS.repo_root, identity)
@@ -80,6 +84,7 @@ def start_action(operation: str, vmid: int) -> subprocess.Popen[str]:
 
 
 def _page(title: str, body: str) -> bytes:
+    """Сформировать HTML-страницу ответа с безопасным заголовком."""
     return f"""<!doctype html>
 <html lang="ru">
 <head>
@@ -124,6 +129,7 @@ def format_log_line(line: str) -> str:
 
 
 def _stream_page_start(title: str, vmid: int, name: str) -> bytes:
+    """Сформировать начало потоковой страницы выполнения операции."""
     return f"""<!doctype html>
 <html lang="ru">
 <head>
@@ -156,12 +162,15 @@ def _stream_page_start(title: str, vmid: int, name: str) -> bytes:
 
 
 class PortalActionHandler(BaseHTTPRequestHandler):
+    """Обработчик действий портала с проверкой адреса и происхождения запроса."""
     server_version = "InfraPortal/2"
 
     def log_message(self, fmt: str, *args: object) -> None:
+        """Записывать сведения о запросах стандартными средствами HTTP-сервера."""
         super().log_message(fmt, *args)
 
     def _security_headers(self) -> None:
+        """Добавить запрет кеширования, встраивания и посторонних источников."""
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("X-Frame-Options", "DENY")
@@ -177,6 +186,7 @@ class PortalActionHandler(BaseHTTPRequestHandler):
         title: str,
         body: str,
     ) -> None:
+        """Вернуть HTML-ответ с едиными заголовками безопасности."""
         content = _page(title, body)
         self.send_response(status)
         self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -186,6 +196,7 @@ class PortalActionHandler(BaseHTTPRequestHandler):
         self.wfile.write(content)
 
     def _parse_action(self) -> tuple[str, int]:
+        """Разобрать адрес действия и отклонить неправильный VMID."""
         parsed = urllib.parse.urlparse(self.path)
         prefix = "/action/"
         if not parsed.path.startswith(prefix):
@@ -198,6 +209,10 @@ class PortalActionHandler(BaseHTTPRequestHandler):
         return operation, int(raw_vmid)
 
     def _require_same_origin(self) -> bool:
+        """Проверить происхождение изменяющего запроса от той же страницы.
+
+        Запросы с чужого источника отвергаются до запуска операции;
+        это дополнительная проверка, а не замена авторизации перед порталом."""
         host = self.headers.get("Host", "").strip()
         expected = f"http://{host}" if host else ""
         allowed = False
@@ -231,6 +246,9 @@ class PortalActionHandler(BaseHTTPRequestHandler):
         return True
 
     def do_GET(self) -> None:
+        """Показать страницу подтверждения действия или ответ проверки здоровья.
+
+        Само изменяющее действие гостя не запускается запросом GET."""
         if self.path == "/health":
             body = b"ok\n"
             self.send_response(HTTPStatus.OK)
@@ -272,6 +290,10 @@ class PortalActionHandler(BaseHTTPRequestHandler):
         )
 
     def do_POST(self) -> None:
+        """Запустить подтверждённое действие только после проверок VMID и источника.
+
+        При сбое результат операции отображается пользователю; выполнение
+        может частично изменить гостя и не откатывается автоматически."""
         try:
             operation, vmid = self._parse_action()
             identity = _validate_action(operation, vmid)
@@ -355,10 +377,12 @@ class PortalActionHandler(BaseHTTPRequestHandler):
 
 
 class PortalActionServer(ThreadingHTTPServer):
+    """Параллельный HTTP-сервер операторского портала."""
     pass
 
 
 def run_portal_gateway(bind: str, port: int) -> int:
+    """Запустить HTTP-сервер и закрыть его при остановке процесса."""
     server = PortalActionServer((bind, port), PortalActionHandler)
     try:
         server.serve_forever()
