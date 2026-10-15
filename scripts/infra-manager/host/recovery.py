@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""PVE-only аварийный helper управляющего контура infra-manager."""
+"""Аварийное восстановление управляющего контура из данных PVE-only.
+
+Программа проверяет целостность критичных данных, восстанавливает Git-доступ
+и может запустить аварийный установщик. Перед действием проверяются наличие
+Raft/ключей и исключительная блокировка. Действия изменяют постоянные
+файлы; при ошибке уже выполненная часть не откатывается автоматически.
+"""
 
 from __future__ import annotations
 
@@ -47,14 +53,17 @@ BOOTSTRAP_URL = (
 
 
 class RecoveryError(RuntimeError):
+    """Ожидаемый отказ аварийного восстановления без сокрытия причины."""
     pass
 
 
 def nonempty(path: Path) -> bool:
+    """Проверить существование непустого файла перед использованием сохранённых ключей."""
     return path.is_file() and path.stat().st_size > 0
 
 
 def directory_has_files(path: Path) -> bool:
+    """Подтвердить, что каталог Raft содержит данные, а не только пустую структуру."""
     if not path.is_dir():
         return False
     return any(item.is_file() and item.stat().st_size > 0 for item in path.rglob("*"))
@@ -67,6 +76,10 @@ def ensure_directory(
     uid: int,
     gid: int,
 ) -> None:
+    """Подготовить каталог с заданными владельцем и правами.
+
+        Используется только для известных каталогов восстановления; чужие
+        каталоги не должны передаваться в эту функцию."""
     path.mkdir(parents=True, exist_ok=True)
     os.chown(path, uid, gid)
     os.chmod(path, mode)
@@ -86,6 +99,10 @@ def atomic_copy(
     uid: int,
     gid: int,
 ) -> None:
+    """Заменить файл восстановления через временную копию в том же каталоге.
+
+        Сначала копируются данные и устанавливаются права, затем выполняется
+        атомарная замена, чтобы сбой записи не повредил прежний файл."""
     if not nonempty(source):
         raise RecoveryError(f"Отсутствует исходный файл: {source}")
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -107,12 +124,17 @@ def atomic_copy(
 
 
 def same_content(first: Path, second: Path) -> bool:
+    """Сравнить содержимое двух непустых файлов без изменения их состояния."""
     if not nonempty(first) or not nonempty(second):
         return False
     return first.read_bytes() == second.read_bytes()
 
 
 def _select_git_source() -> Path:
+    """Выбрать сохранённый ключ Git из известных PVE-only мест.
+
+        При отсутствии обеих копий восстановление останавливается: новый
+        ключ не должен создаваться вместо прежнего доверенного."""
     for candidate in (
         RECOVERY_GITHUB_KEY,
         BOOTSTRAP_GITHUB_KEY,
@@ -196,6 +218,7 @@ def managed_guests_exist() -> bool:
 
 
 def otp_tls_initialized() -> bool:
+    """Определить необходимость проверки TLS CA по прежним настройкам OTP."""
     if not nonempty(OPENBAO_SSH_ACCESS):
         return False
     try:
@@ -206,6 +229,12 @@ def otp_tls_initialized() -> bool:
 
 
 def verify_recovery_state(*, require_approle: bool = True) -> None:
+    """Проверить наличие обязательных данных до начала восстановления.
+
+        Без каталога Raft, ключа разблокировки, Git-доступа и базы Semaphore
+        автоматическое восстановление может потерять рабочее состояние.
+        При наличии управляемых гостей требуется также OpenTofu state.
+        Флаг require_approle задаёт минимальную либо полную проверку."""
     required_dirs = [
         PVE_ONLY_DIR,
         STATE_DIR,
@@ -262,6 +291,10 @@ def verify_recovery_state(*, require_approle: bool = True) -> None:
 
 
 def acquire_lock():
+    """Запретить одновременное изменение общего аварийного контура.
+
+        Возвращаемый файловый поток удерживает блокировку до закрытия;
+        конфликт вызывает отказ до каких-либо изменений."""
     LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
     stream = LOCK_PATH.open("w", encoding="utf-8")
     try:
@@ -275,6 +308,10 @@ def acquire_lock():
 
 
 def _download_bootstrap(target: Path) -> None:
+    """Получить аварийный установщик в временный файл.
+
+        Проверяется наличие данных, ограничение размера и признак сценария.
+        Эти проверки не являются криптографическим подтверждением источника."""
     try:
         with urllib.request.urlopen(BOOTSTRAP_URL, timeout=30) as response:
             payload = response.read(1024 * 1024 + 1)
@@ -295,7 +332,14 @@ def _download_bootstrap(target: Path) -> None:
 
 
 def run_recovery() -> None:
-    """Запустить полный recovery после локальной проверки PVE-only состояния."""
+    """Запустить аварийное восстановление, сохраняя существующие данные.
+
+    Под исключительной блокировкой сначала проверяются критичные
+    PVE-only файлы и восстанавливается Git-доступ. После освобождения
+    блокировки выполняется внешний установщик во временном каталоге.
+    Если он завершится ошибкой, уже выполненные действия могут остаться;
+    автоматического удаления рабочих данных или повторного запуска нет.
+    """
 
     with acquire_lock():
         verify_recovery_state(require_approle=False)
@@ -323,6 +367,7 @@ def run_recovery() -> None:
 
 
 def main() -> int:
+    """Проверить права root, выбрать аварийное действие и сообщить о его результате."""
     parser = argparse.ArgumentParser(
         description="PVE-only аварийный контур infra-manager"
     )

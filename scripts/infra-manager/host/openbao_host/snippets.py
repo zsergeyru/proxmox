@@ -1,4 +1,10 @@
-"""Встроенные программы, выполняемые внутри infra-manager/OpenBao."""
+"""Встроенные Python-программы для ограниченных действий с OpenBao.
+
+Каждый фрагмент выполняется отдельно через python3 внутри управляющего
+контейнера. Он обращается к локальному API, иногда меняет права, ключи
+или материалы доверия. Вызывающий код PVE отвечает за предварительные
+проверки, передачу служебных данных и отзыв временных полномочий.
+"""
 
 HEALTH_CODE = r"""
 import json
@@ -132,6 +138,7 @@ if not unseal_key:
 
 
 def request(method, path, payload=None):
+    '''Выполнить HTTP-запрос к OpenBao при получении временных корневых полномочий. Ошибка API прерывает этот шаг.'''
     data = None
     headers = {"Content-Type": "application/json"}
     if payload is not None:
@@ -194,6 +201,7 @@ BASE = "http://127.0.0.1:8200"
 
 
 def public_key(mount):
+    '''Получить только открытый ключ SSH CA для проверки текущего доверия.'''
     try:
         with urllib.request.urlopen(
             f"{BASE}/v1/{mount}/public_key",
@@ -274,6 +282,7 @@ def request(
     authenticated=True,
     allow_missing_ca=False,
 ):
+    '''Выполнить HTTP-запрос к OpenBao при настройке SSH CA. Ошибка API прерывает этот шаг.'''
     data = None
     headers = {"Content-Type": "application/json"}
     if authenticated:
@@ -305,6 +314,7 @@ def request(
 
 
 def public_key(mount):
+    '''Получить только открытый ключ SSH CA для проверки текущего доверия.'''
     status, raw = request(
         "GET",
         f"/v1/{mount}/public_key",
@@ -392,6 +402,7 @@ if not isinstance(rotate_secret_ids, bool):
 
 
 def request(method, path, payload=None):
+    '''Выполнить HTTP-запрос к OpenBao при настройке SSH-доступа. Ошибка API прерывает этот шаг.'''
     data = None
     headers = {
         "Content-Type": "application/json",
@@ -763,6 +774,7 @@ if not isinstance(secret_id, str) or not secret_id:
 
 
 def request(method, path, payload=None, *, token=None):
+    '''Выполнить HTTP-запрос к OpenBao при настройке клиентской роли SSH. Ошибка API прерывает этот шаг.'''
     data = None
     headers = {"Content-Type": "application/json"}
     if token:
@@ -873,6 +885,7 @@ if not isinstance(secret_id, str) or not secret_id:
 
 
 def request(method, path, body=None, *, token=None):
+    '''Выполнить HTTP-запрос к OpenBao при подписи клиентского ключа. Ошибка API прерывает этот шаг.'''
     data = None
     headers = {"Content-Type": "application/json"}
     if token:
@@ -950,6 +963,7 @@ if not isinstance(secret_id, str) or not secret_id:
 
 
 def request(method, path, payload=None, *, token=None):
+    '''Выполнить HTTP-запрос к OpenBao при настройке роли SSH-сервера. Ошибка API прерывает этот шаг.'''
     data = None
     headers = {"Content-Type": "application/json"}
     if token:
@@ -1061,6 +1075,7 @@ if not isinstance(secret_id, str) or not secret_id:
 
 
 def request(method, path, body=None, *, token=None):
+    '''Выполнить HTTP-запрос к OpenBao при подписи ключа SSH-сервера. Ошибка API прерывает этот шаг.'''
     data = None
     headers = {"Content-Type": "application/json"}
     if token:
@@ -1136,6 +1151,7 @@ if not isinstance(credentials, dict):
 
 
 def request(method, path, payload=None, *, token=None):
+    '''Выполнить HTTP-запрос к OpenBao при проверке SSH-доступа. Ошибка API прерывает этот шаг.'''
     data = None
     headers = {"Content-Type": "application/json"}
     if token:
@@ -1310,6 +1326,7 @@ if not isinstance(secret_id, str) or not secret_id:
 
 
 def request(method, path, body=None, *, token=None):
+    '''Выполнить HTTP-запрос к OpenBao при согласовании прав машинного SSH OTP. Ошибка API прерывает этот шаг.'''
     data = None
     headers = {"Content-Type": "application/json"}
     if token:
@@ -1336,6 +1353,7 @@ def request(method, path, body=None, *, token=None):
 
 
 def list_keys(path, *, token):
+    '''Перечислить действующие секреты роли; отсутствие ресурса вернуть пустым списком.'''
     try:
         payload = request("LIST", path, token=token)
     except urllib.error.HTTPError as exc:
@@ -1347,6 +1365,7 @@ def list_keys(path, *, token):
 
 
 def private_host_cidr(value):
+    '''Проверить, что для OTP указан один частный IPv4 (/32), а не широкая сеть.'''
     try:
         network = ipaddress.ip_network(value, strict=True)
     except ValueError as exc:
@@ -1483,6 +1502,7 @@ try:
             token=token,
         )
         def read_role_value(suffix, key):
+            '''Прочитать текущий параметр машинной роли перед возможным обновлением.'''
             payload = request(
                 "GET",
                 f"/v1/auth/machine/role/{role_name}/{suffix}",
@@ -1510,6 +1530,7 @@ try:
         }:
             raise SystemExit(f"token policy mismatch for {role_name}")
         def normalized_cidrs(value):
+            '''Привести список разрешённых адресов к сравнимому виду перед проверкой прав.'''
             if isinstance(value, str):
                 values = [value]
             elif isinstance(value, list):
@@ -1613,6 +1634,7 @@ if not isinstance(secret_id, str) or not secret_id:
 
 
 def request(method, path, body=None, *, token=None):
+    '''Выполнить HTTP-запрос к OpenBao при выдаче машинных учётных данных. Ошибка API прерывает этот шаг.'''
     data = None
     headers = {"Content-Type": "application/json"}
     if token:
@@ -1688,6 +1710,7 @@ if not token:
 
 
 def request(method, path, payload=None, *, auth_token=token):
+    '''Выполнить HTTP-запрос к OpenBao при настройке KV. Ошибка API прерывает этот шаг.'''
     data = None
     headers = {"Content-Type": "application/json"}
     if auth_token:
@@ -1706,6 +1729,7 @@ def request(method, path, payload=None, *, auth_token=token):
 
 
 def read_env(path):
+    '''Разобрать рабочий файл окружения; не выводить его значения в журнал.'''
     result = {}
     for line in pathlib.Path(path).read_text(encoding="utf-8").splitlines():
         if not line or line.startswith("#") or "=" not in line:
@@ -1914,6 +1938,7 @@ if not token:
 
 
 def request(method, path, payload=None):
+    '''Выполнить HTTP-запрос к OpenBao при восстановлении прав KV. Ошибка API прерывает этот шаг.'''
     data = None
     headers = {
         "Content-Type": "application/json",
@@ -2072,6 +2097,7 @@ if not isinstance(password, str) or len(password) < 24:
 
 
 def request(method, path, body=None):
+    '''Выполнить HTTP-запрос к OpenBao при настройке доступа оператора. Ошибка API прерывает этот шаг.'''
     data = None
     headers = {
         "Content-Type": "application/json",
@@ -2234,6 +2260,7 @@ if not isinstance(password, str) or not password:
 
 
 def request(method, path, body=None, *, token=None):
+    '''Выполнить HTTP-запрос к OpenBao при проверке доступа оператора. Ошибка API прерывает этот шаг.'''
     data = None
     headers = {"Content-Type": "application/json"}
     if token:
@@ -2348,6 +2375,7 @@ if not isinstance(role_id, str) or not isinstance(secret_id, str):
 
 
 def request(method, path, body=None, *, token=None):
+    '''Выполнить HTTP-запрос к OpenBao при проверке прав KV. Ошибка API прерывает этот шаг.'''
     data = None
     headers = {"Content-Type": "application/json"}
     if token:
@@ -2523,6 +2551,7 @@ if not isinstance(role_id, str) or not isinstance(secret_id, str):
 
 
 def request(method, path, body=None, *, token=None):
+    '''Выполнить HTTP-запрос к OpenBao при получении рабочих секретов. Ошибка API прерывает этот шаг.'''
     data = None
     headers = {"Content-Type": "application/json"}
     if token:
@@ -2541,6 +2570,7 @@ def request(method, path, body=None, *, token=None):
 
 
 def read_secret(path, token):
+    '''Прочитать значение из KV v2 с явной проверкой структуры ответа.'''
     response = request(
         "GET",
         f"/v1/{MOUNT}/data/{path}",
@@ -2553,6 +2583,10 @@ def read_secret(path, token):
 
 
 def atomic_write(name, value):
+    '''Заменить временный файл секрета атомарно с ограниченными правами.
+
+        Сначала пишется защищённый временный файл, затем он подменяет
+        целевой, чтобы при ошибке не оставить секрет частично записанным.'''
     TARGET.mkdir(parents=True, exist_ok=True)
     os.chown(TARGET.parent, 0, 0)
     os.chmod(TARGET.parent, 0o750)
@@ -2688,6 +2722,7 @@ if (
 
 
 def request(method, path, body=None):
+    '''Выполнить HTTP-запрос к OpenBao при обновлении данных доступа PVE. Ошибка API прерывает этот шаг.'''
     data = None
     headers = {
         "Content-Type": "application/json",
@@ -2756,6 +2791,7 @@ if not isinstance(secret_id, str) or not secret_id:
 
 
 def request(method, path, body=None, *, token=None):
+    '''Выполнить HTTP-запрос к OpenBao при обновлении токена Semaphore. Ошибка API прерывает этот шаг.'''
     data = None
     headers = {"Content-Type": "application/json"}
     if token:

@@ -53,6 +53,10 @@ class GuestPlan:
 
 
 def _find_guest_directory(repo_root: Path, vmid: int) -> Path:
+    """Найти единственный каталог VMID перед применением настроек.
+
+        Несколько совпадений считаются ошибкой, чтобы не изменить
+        произвольно выбранного гостя."""
     guests_root = repo_root / "infrastructure" / "guests"
     matches = sorted(
         path
@@ -74,6 +78,12 @@ def _validate_pve_and_state(
     state_status: str,
     missing_recreation_allowed: bool = False,
 ) -> None:
+    """Сверить принадлежность VMID в PVE с сохранённым состоянием OpenTofu.
+
+        Несовпадение имени или типа, отсутствие записи в state и признак
+        tainted запрещают автоматическое изменение существующего объекта.
+        Пересоздание пропавшего гостя разрешается только после отдельной
+        проверки, что прежние диски не сохранились."""
     resource = context.client.find_vm(context.vmid)
 
     if resource is not None:
@@ -112,7 +122,13 @@ def _validate_pve_and_state(
 
 
 def _preflight_missing_guest_recreation(context: DeploymentContext) -> None:
-    """Разрешить создание только при отсутствии объекта и сохранённых томов."""
+    """Проверить отсутствие гостя и любых его дисков перед пересозданием.
+
+    Проверяются все подходящие хранилища и все разрешённые узлы PVE.
+    Если PVE не позволяет получить полный список, пересоздание
+    запрещается: нельзя принять недоступные диски за отсутствующие.
+    Такая проверка защищает прежние постоянные данные.
+    """
 
     if context.client.find_vm(context.vmid) is not None:
         raise InfraManagerError(
@@ -184,7 +200,13 @@ def _preflight_missing_guest_recreation(context: DeploymentContext) -> None:
 
 
 def _backup_state_before_recreation(context: DeploymentContext) -> None:
-    """Сохранить закрытую копию OpenTofu state до первого refresh/plan."""
+    """Сохранить OpenTofu state перед возможным пересозданием гостя.
+
+    Сначала подтверждается наличие нужной записи гостя в state, затем
+    файл создаётся без следования символьным ссылкам с правами 0600.
+    Только после успешной записи можно продолжать изменения: refresh
+    и повторный plan способны изменить исходную картину состояния.
+    """
 
     pulled = run(
         ["tofu", f"-chdir={context.workspace.directory}", "state", "pull"],
@@ -239,6 +261,10 @@ def _set_template_protection(
     template_vmid: int,
     enabled: bool,
 ) -> None:
+    """Изменить защиту шаблона PVE для операции клонирования.
+
+        Защита временно отключается только в _apply_plan; вызывающий код
+        обязан восстановить её даже при ошибке применения состояния."""
     client.put(
         f"/nodes/{node}/qemu/{template_vmid}/config",
         form={"protection": 1 if enabled else 0},
@@ -249,6 +275,12 @@ def _apply_plan(
     context: DeploymentContext,
     actions: list[str],
 ) -> None:
+    """Применить заранее подготовленный план OpenTofu к указанному гостю.
+
+        Создание без одноразового начального SSH-ключа запрещено.
+        Для клонирования VM защита шаблона временно снимается и возвращается
+        в finally. Ошибка tofu может оставить частично изменённое состояние:
+        автоматический откат гостя здесь не выполняется."""
     if "create" in actions:
         bootstrap_key = context.workspace.env.get(
             "TF_VAR_bootstrap_ssh_public_key",
@@ -328,6 +360,13 @@ def _ensure_ssh_host_key(
     known_hosts: Path,
     address: str,
 ) -> None:
+    """Записать ключ SSH-сервера для первоначального доступа к новому гостю.
+
+        Сначала сохраняется уже известный ключ; если записи нет, берётся
+        ключ из ssh-keyscan и закрепляется локально. Это доверие при первом
+        подключении, а НЕ проверка независимым центром доверия. Применять
+        только в явно разрешённом этапе первоначальной установки; штатный
+        сертификатный вход использует отдельную проверку SSH CA."""
     known_hosts.parent.mkdir(parents=True, exist_ok=True)
     known_hosts.touch(exist_ok=True)
     known_hosts.chmod(0o600)

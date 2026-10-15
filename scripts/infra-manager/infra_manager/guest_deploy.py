@@ -1,4 +1,10 @@
-"""Развёртывание одной гостевой VM через OpenTofu и Ansible."""
+"""Развёртывание гостя с проверкой доступа и состояния OpenTofu.
+
+Перед изменением гостя выполняются проверки принадлежности VMID,
+постоянных томов и одноразовых ключей первоначального доступа.
+Выполнение OpenTofu и Ansible может оставить часть изменений применённой;
+при сбое нельзя автоматически стирать данные существующего гостя.
+"""
 
 from __future__ import annotations
 
@@ -86,6 +92,10 @@ def _bootstrap_identity_path(vmid: int) -> Path:
 
 
 def _bootstrap_public_key(private_key: Path, vmid: int) -> str:
+    """Прочитать открытый ключ одноразовой пары нового гостя.
+
+        Неполная пара или неверный тип ключа запрещают продолжать
+        первоначальную установку, чтобы не использовать чужие полномочия."""
     public_key = Path(str(private_key) + ".pub")
     if not private_key.is_file() or not public_key.is_file():
         raise InfraManagerError(
@@ -133,6 +143,10 @@ def _ensure_bootstrap_identity(vmid: int) -> Path:
 
 
 def _existing_bootstrap_identity(vmid: int) -> Path | None:
+    """Проверить, сохранилась ли одноразовая пара после незавершённого запуска.
+
+        Отсутствие обоих файлов допустимо; неполный или повреждённый набор
+        вызывает отказ вместо незаметной генерации нового ключа."""
     private_key = _bootstrap_identity_path(vmid)
     public_key = Path(str(private_key) + ".pub")
     if not private_key.exists() and not public_key.exists():
@@ -764,7 +778,14 @@ def _run_deploy_guest(
     bootstrap_scope: bool,
     phase: str,
 ) -> int:
-    """Внутренний движок обычного deploy и временного bootstrap infra-manager."""
+    """Выполнить развёртывание гостя с контролем роли и этапа.
+
+    Обычный запуск и первоначальная настройка infra-manager имеют
+    разные границы доступа. До изменения PVE проверяются VMID, роль
+    гостя и допустимая фаза. OpenTofu и Ansible могут успеть выполнить
+    часть действий до ошибки; автоматическое удаление гостя не делается.
+    Повторная попытка должна опираться на фактическое состояние.
+    """
 
     if vmid <= 0:
         raise InfraManagerError("VMID должен быть положительным числом")
@@ -982,7 +1003,12 @@ def run_deploy_guest(
     *,
     phase: str = "all",
 ) -> int:
-    """Развернуть гостя полностью или применить только provision существующего."""
+    """Развернуть гостя либо повторно применить его настройки Ansible.
+
+    Фаза all включает инфраструктурные изменения; provision не должна
+    создавать новый объект PVE. Первоначальные полномочия управляющего
+    гостя через эту обычную точку входа не передаются.
+    """
 
     if phase not in {"all", "provision"}:
         raise InfraManagerError(

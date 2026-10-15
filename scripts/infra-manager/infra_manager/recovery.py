@@ -18,6 +18,11 @@ OPERATOR_COMMAND = Path("/usr/local/sbin/infra-manager")
 
 
 def pve_node_from_environment() -> str:
+    """Определить доверенный узел PVE для процедуры восстановления.
+
+    Явно заданное имя проверяется до использования в SSH. Если оно не
+    задано, адрес берётся только из проверенных параметров PVE.
+    """
     explicit = os.environ.get("INFRA_PVE_NODE", "").strip()
     if explicit:
         if any(character.isspace() for character in explicit) or "/" in explicit:

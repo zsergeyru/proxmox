@@ -1,5 +1,13 @@
 #!/usr/bin/env python3
-"""Инициализация и разблокировка OpenBao из доверенного PVE-хоста."""
+"""Инициализация, разблокировка и восстановление доступа OpenBao на PVE.
+
+Программа управляет PVE-only ключами, правами KV/SSH и временными
+корневыми полномочиями. Она не удаляет существующее хранилище и не
+инициализирует его повторно при обнаружении старых данных. Неудача
+на промежуточном шаге может оставить часть новых настроек применённой:
+повторный запуск сначала проверяет текущее состояние, а не стирает его.
+Секреты не предназначены для вывода в обычный журнал.
+"""
 
 from __future__ import annotations
 
@@ -138,6 +146,7 @@ def run(
     check: bool = True,
     input_text: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
+    """Выполнить команду на PVE и проверить результат по запрошенному режиму. Ошибка внешней программы прерывает текущую операцию."""
     result = subprocess.run(
         argv,
         input=input_text,
@@ -162,6 +171,7 @@ def pct_exec(
     check: bool = True,
     input_text: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
+    """Выполнить действие внутри управляющего LXC через PVE. Использовать только после определения доверенного VMID."""
     return run(
         ["pct", "exec", str(VMID), "--", *args],
         capture=capture,
@@ -171,6 +181,7 @@ def pct_exec(
 
 
 def container_running() -> bool:
+    """Проверить, запущен ли целевой LXC, не меняя его состояние."""
     result = run(
         ["pct", "status", str(VMID)],
         capture=True,
@@ -180,6 +191,7 @@ def container_running() -> bool:
 
 
 def read_status(*, wait: bool) -> dict[str, object]:
+    """Получить состояние OpenBao; при ожидании дать службе время на запуск. При недоступности не пытаться инициализировать её вслепую."""
     attempts = 60 if wait else 1
     last_error = ""
 
@@ -500,6 +512,10 @@ def prepare_tls_material() -> None:
 
 
 def write_unseal_key(key: str) -> None:
+    """Сохранить единственный ключ разблокировки на PVE с ограниченными правами.
+
+        Пустой ключ отвергается: повторная инициализация не должна подменять
+        уже созданное состояние OpenBao."""
     if not key:
         raise OpenBaoHostError("OpenBao вернул пустой unseal-ключ")
 
@@ -526,6 +542,10 @@ def write_unseal_key(key: str) -> None:
 
 
 def write_ssh_access_credentials(credentials: dict[str, object]) -> None:
+    """Сохранить служебные данные настройки SSH CA и OTP только на PVE.
+
+        До записи проверяется точный набор ролей, чтобы не закрепить частичную
+        конфигурацию, которая помешает последующему восстановлению."""
     required = {"ssh-ca-config", "ssh-signer", "ssh-otp-config"}
     if set(credentials) != required:
         raise OpenBaoHostError(
@@ -560,6 +580,9 @@ def write_ssh_access_credentials(credentials: dict[str, object]) -> None:
 
 
 def write_kv_access_credentials(credentials: dict[str, object]) -> None:
+    """Сохранить доступ к KV на PVE после проверки ожидаемых ролей.
+
+        При ошибке записи нельзя считать дальнейшее получение секретов настроенным."""
     required = {"kv-reader", "kv-semaphore-writer"}
     if set(credentials) != required:
         raise OpenBaoHostError(
@@ -594,6 +617,9 @@ def write_kv_access_credentials(credentials: dict[str, object]) -> None:
 
 
 def write_operator_access_credentials(credentials: dict[str, str]) -> None:
+    """Сохранить учётные данные оператора с проверкой состава.
+
+        Они чувствительны: содержимое нельзя включать в журнал."""
     if set(credentials) != {"username", "password"}:
         raise OpenBaoHostError(
             "OpenBao operator credentials имеют некорректный состав"
@@ -632,6 +658,10 @@ def write_operator_access_credentials(credentials: dict[str, str]) -> None:
 
 
 def read_operator_access_credentials() -> dict[str, str]:
+    """Прочитать операторские данные из защищённого хранилища PVE.
+
+        Отсутствие или повреждение файла считается ошибкой, а не поводом
+        незаметно выдавать новые полномочия."""
     if (
         not OPERATOR_ACCESS_PATH.is_file()
         or OPERATOR_ACCESS_PATH.stat().st_size == 0
@@ -667,6 +697,7 @@ def read_operator_access_credentials() -> dict[str, str]:
 def check_operator_access(
     credentials: dict[str, str] | None = None,
 ) -> None:
+    """Проверить действительность операторского входа без смены пароля."""
     effective = (
         read_operator_access_credentials()
         if credentials is None
@@ -696,6 +727,10 @@ def configure_operator_access(
     *,
     rotate_password: bool = False,
 ) -> dict[str, str]:
+    """Настроить доступ оператора OpenBao с учётом сохранённых данных.
+
+        Существующий пароль не меняется без явно выбранного восстановления
+        или поворота; частичное выполнение требует повторной проверки входа."""
     credentials: dict[str, str] | None = None
     if OPERATOR_ACCESS_PATH.is_file() and not rotate_password:
         try:
@@ -743,6 +778,9 @@ def configure_operator_access(
 
 
 def show_operator_credentials() -> None:
+    """Показать пароль только при явном доверенном вызове с PVE.
+
+        Перед выводом проверяется работоспособность учётных данных."""
     credentials = read_operator_access_credentials()
     check_operator_access(credentials)
     print(f"URL: https://{TLS_ADDRESS}:8202/ui/")
@@ -751,6 +789,10 @@ def show_operator_credentials() -> None:
 
 
 def rotate_operator_password() -> None:
+    """Сменить пароль оператора с временными корневыми полномочиями.
+
+        Корневой токен отзывается после настройки; прежний пароль после
+        успешной смены перестаёт быть пригодным для входа."""
     root_token = generate_temporary_root_token()
     try:
         credentials = configure_operator_access(
@@ -767,6 +809,7 @@ def rotate_operator_password() -> None:
 
 
 def read_kv_access_credentials() -> dict[str, object]:
+    """Прочитать данные доступа KV из PVE-only каталога; неполный набор отвергнуть."""
     if not KV_ACCESS_PATH.is_file() or KV_ACCESS_PATH.stat().st_size == 0:
         raise OpenBaoHostError(
             f"Не найдены служебные данные доступа к KV: {KV_ACCESS_PATH}"
@@ -786,6 +829,7 @@ def read_kv_access_credentials() -> dict[str, object]:
 
 
 def check_kv_access() -> None:
+    """Проверить существующие права KV до любых попыток перенастройки."""
     credentials = read_kv_access_credentials()
     result = pct_exec(
         "python3",
@@ -805,6 +849,10 @@ def check_kv_access() -> None:
 
 
 def configure_kv_access(root_token: str) -> None:
+    """Первоначально создать права доступа KV.
+
+        Наличие прежнего файла останавливает создание, чтобы не заменить
+        работающие служебные данные автоматически."""
     if KV_ACCESS_PATH.exists():
         raise OpenBaoHostError(
             f"Найден старый файл доступа к KV {KV_ACCESS_PATH}; "
@@ -858,6 +906,10 @@ def reconcile_kv_access(root_token: str) -> None:
 
 
 def materialize_runtime_secrets() -> None:
+    """Передать рабочие секреты из защищённого хранилища во временный каталог.
+
+        Данные нужны работающим службам; ошибка не означает, что прежние
+        секреты были успешно восстановлены."""
     credentials = read_kv_access_credentials()
     result = pct_exec(
         "python3",
@@ -931,6 +983,9 @@ def update_pve_api_credential(
 
 
 def update_semaphore_api_token(api_token: str) -> None:
+    """Обновить сохранённый токен Semaphore в OpenBao после проверки формата.
+
+        Значение токена не должно появляться в журнале."""
     clean = api_token.strip()
     if not clean or any(char.isspace() for char in clean):
         raise OpenBaoHostError("Некорректный API token Semaphore")
@@ -963,6 +1018,11 @@ def update_semaphore_api_token(api_token: str) -> None:
 
 
 def unseal() -> None:
+    """Разблокировать уже инициализированный OpenBao ключом из PVE-only.
+
+        Если хранилище не инициализировано, функция его не создаёт. Временная
+        копия ключа внутри LXC удаляется при завершении попытки, а состояние
+        OpenBao подтверждается отдельным ожиданием активности."""
     status = read_status(wait=True)
     if not bool(status["initialized"]):
         log_detail("[ИНФО] OpenBao ещё не инициализирован")
@@ -1015,6 +1075,9 @@ def unseal() -> None:
 
 
 def _revoke_root_token(token: str) -> None:
+    """Отозвать переданный корневой токен после привилегированной операции.
+
+        Нельзя оставлять такие полномочия действующими после настройки."""
     if not token:
         raise OpenBaoHostError("OpenBao вернул пустой корневой токен")
     pct_exec(
@@ -1027,16 +1090,22 @@ def _revoke_root_token(token: str) -> None:
 
 
 def revoke_initial_root_token(token: str) -> None:
+    """Отозвать первоначальный корневой токен после инициализации."""
     _revoke_root_token(token)
     log_detail("[ОК] Initial root token отозван")
 
 
 def revoke_temporary_root_token(token: str) -> None:
+    """Отозвать временный корневой токен после восстановления настроек."""
     _revoke_root_token(token)
     log_detail("[ОК] Временный корневой токен OpenBao отозван")
 
 
 def _generate_root_from_running_server() -> str:
+    """Получить временные полномочия от действующего OpenBao.
+
+        Используется PVE-only ключ: при его отсутствии автоматическое
+        восстановление полномочий запрещено."""
     if not KEY_PATH.is_file() or KEY_PATH.stat().st_size == 0:
         raise OpenBaoHostError(
             f"Не найден ключ разблокировки OpenBao: {KEY_PATH}"
@@ -1059,6 +1128,10 @@ def _generate_root_from_running_server() -> str:
 
 
 def generate_temporary_root_token() -> str:
+    """Временно получить корневые полномочия для исправления состояния OpenBao.
+
+        Вызывающая сторона обязана отозвать полученный токен в блоке finally;
+        его нельзя сохранять в обычных настройках или журнале."""
     image_result = pct_exec(
         "docker",
         "inspect",
@@ -1142,6 +1215,7 @@ def generate_temporary_root_token() -> str:
 
 
 def ssh_cas_ready() -> bool:
+    """Проверить наличие обоих независимых SSH-центров доверия."""
     result = pct_exec(
         "python3",
         "-c",
@@ -1166,6 +1240,10 @@ def ssh_cas_ready() -> bool:
 
 
 def configure_ssh_cas(token: str) -> None:
+    """Создать SSH-центры доверия при явно разрешённой первоначальной настройке.
+
+        Повторное создание вместо существующего доверия требует отдельной
+        процедуры восстановления, а не незаметной смены ключей."""
     result = pct_exec(
         "python3",
         "-c",
@@ -1194,6 +1272,9 @@ def configure_ssh_cas(token: str) -> None:
 
 
 def ensure_ssh_cas(root_token: str | None = None) -> None:
+    """Проверить SSH CA и настроить недостающие компоненты при наличии прав.
+
+        Готовое доверие сохраняется; после изменения выполняется проверка."""
     if ssh_cas_ready():
         log_detail("[ОК] Два SSH-центра доверия OpenBao уже готовы")
         return
@@ -1215,6 +1296,10 @@ def ensure_ssh_cas(root_token: str | None = None) -> None:
 
 
 def read_ssh_access_credentials(*, allow_legacy: bool = False) -> dict[str, object]:
+    """Прочитать служебные SSH-учётные данные из PVE-only области.
+
+        Неполный или устаревший формат допускается лишь там, где это
+        разрешено явно указанным режимом чтения."""
     if not SSH_ACCESS_PATH.is_file() or SSH_ACCESS_PATH.stat().st_size == 0:
         raise OpenBaoHostError(
             f"Не найдены служебные данные доступа OpenBao: {SSH_ACCESS_PATH}"
@@ -1237,6 +1322,7 @@ def read_ssh_access_credentials(*, allow_legacy: bool = False) -> dict[str, obje
 
 
 def ensure_client_signing_role() -> None:
+    """Проверить и привести роль подписи клиентских SSH-ключей к требуемому виду."""
     credentials = read_ssh_access_credentials()
     config_access = credentials.get("ssh-ca-config")
     result = pct_exec(
@@ -1260,6 +1346,10 @@ def ensure_client_signing_role() -> None:
 
 
 def sign_client_public_key(public_key: str) -> str:
+    """Подписать допустимый клиентский SSH-ключ через OpenBao.
+
+        Перед запросом отклоняется неправильный формат ключа; закрытый ключ
+        клиента в OpenBao не передаётся."""
     normalized = public_key.strip()
     if not normalized.startswith("ssh-ed25519 "):
         raise OpenBaoHostError("Для подписи ожидается открытый ключ Ed25519")
@@ -1363,6 +1453,7 @@ def issue_machine_credentials(vmid: int) -> dict[str, str]:
 
 
 def ensure_host_signing_role() -> None:
+    """Проверить и настроить роль выдачи сертификатов SSH-серверов."""
     credentials = read_ssh_access_credentials()
     config_access = credentials.get("ssh-ca-config")
     result = pct_exec(
@@ -1390,6 +1481,10 @@ def validate_managed_host_target(
     hostname: str,
     address: str,
 ) -> list[str]:
+    """Подтвердить право выдать сертификат именно указанному гостю.
+
+        Сверяются VMID, имя и частный IPv4 с реальной конфигурацией PVE;
+        без совпадения подпись запрещена, чтобы не выдать чужую идентичность."""
     import ipaddress
 
     if not isinstance(vmid, int) or vmid <= 0:
@@ -1474,6 +1569,10 @@ def validate_managed_host_target(
 
 
 def sign_host_public_key(public_key: str, principals: list[str]) -> str:
+    """Выдать сертификат SSH-сервера только для проверенных имён.
+
+        Список principals и открытый ключ проверяются до передачи в OpenBao;
+        возвращённый сертификат также проверяется по формату."""
     normalized = public_key.strip()
     if not normalized.startswith("ssh-ed25519 "):
         raise OpenBaoHostError(
@@ -1517,6 +1616,7 @@ def sign_host_public_key(public_key: str, principals: list[str]) -> str:
     return certificate
 
 def ssh_access_credentials_complete() -> bool:
+    """Проверить, что PVE-only файл содержит полный набор SSH-доступов."""
     if not SSH_ACCESS_PATH.is_file() or SSH_ACCESS_PATH.stat().st_size == 0:
         return False
     try:
@@ -1527,6 +1627,7 @@ def ssh_access_credentials_complete() -> bool:
 
 
 def ssh_access_credentials_current() -> bool:
+    """Определить, соответствуют ли сохранённые SSH-данные действующей схеме."""
     if not SSH_ACCESS_PATH.is_file() or SSH_ACCESS_PATH.stat().st_size == 0:
         return False
     try:
@@ -1541,6 +1642,7 @@ def ssh_access_credentials_current() -> bool:
 
 
 def check_ssh_access() -> None:
+    """Проверить состояние SSH CA, OTP и разрешённых служебных прав без выдачи новых."""
     if not ssh_cas_ready():
         raise OpenBaoHostError(
             "Два независимых SSH-центра доверия OpenBao не готовы"
@@ -1578,6 +1680,10 @@ def configure_ssh_access(
     *,
     rotate_secret_ids: bool = False,
 ) -> None:
+    """Настроить SSH-доступ и OTP с учётом существующего состояния.
+
+        Перевыпуск служебных идентификаторов выполняется только при явно
+        обнаруженном нарушении доступа, а не при каждом повторном запуске."""
     existing_credentials: dict[str, object] = {}
     if SSH_ACCESS_PATH.exists():
         existing_credentials = read_ssh_access_credentials(allow_legacy=True)
@@ -1611,6 +1717,7 @@ def configure_ssh_access(
 
 
 def client_ca_published() -> bool:
+    """Проверить опубликованный открытый ключ клиентского SSH CA внутри LXC."""
     result = pct_exec(
         "cat",
         str(CT_CLIENT_CA_PATH),
@@ -1622,6 +1729,9 @@ def client_ca_published() -> bool:
 
 
 def publish_client_ca(root_token: str) -> None:
+    """Опубликовать открытый ключ клиентского SSH CA и проверить результат.
+
+        Закрытый ключ центра доверия не переносится в гостя."""
     result = pct_exec(
         "python3",
         "-c",
@@ -1682,6 +1792,7 @@ finally:
 
 
 def host_ca_published() -> bool:
+    """Проверить, опубликован ли открытый ключ SSH CA серверов."""
     result = pct_exec(
         "cat",
         str(CT_HOST_CA_PATH),
@@ -1693,6 +1804,7 @@ def host_ca_published() -> bool:
 
 
 def publish_host_ca() -> None:
+    """Опубликовать открытый ключ SSH CA серверов с проверкой записи."""
     result = pct_exec(
         "python3",
         "-c",
@@ -1752,6 +1864,12 @@ finally:
 
 
 def ensure_existing_openbao_ssh() -> None:
+    """Восстановить рабочие доступы существующего OpenBao без переинициализации.
+
+        Сначала проверяются текущие SSH, KV и операторские полномочия.
+        При нарушении временно получаются корневые права; после настройки
+        обязательно отзывается временный токен. Частичное восстановление
+        считается ошибкой и требует повторной проверки."""
     ssh_access_broken = False
     kv_access_broken = False
     operator_access_broken = False
@@ -1829,6 +1947,13 @@ def ensure_existing_openbao_ssh() -> None:
 
 
 def initialize() -> None:
+    """Инициализировать новый OpenBao или проверить уже созданный.
+
+        До создания проверяется отсутствие прежних PVE-only ключей, чтобы
+        не уничтожить возможность восстановления старого хранилища.
+        Первоначальный корневой токен используется только для настройки
+        SSH CA, KV и учётных данных и затем отзывается. Повторный запуск
+        для существующего OpenBao не выполняет повторную инициализацию."""
     status = read_status(wait=True)
     if bool(status["initialized"]):
         if not KEY_PATH.is_file() or KEY_PATH.stat().st_size == 0:
@@ -1917,6 +2042,7 @@ def initialize() -> None:
 
 
 def main() -> int:
+    """Разобрать доверенные аргументы PVE и выполнить выбранную операцию OpenBao."""
     parser = argparse.ArgumentParser(
         description="Инициализация и разблокировка OpenBao для infra-manager"
     )

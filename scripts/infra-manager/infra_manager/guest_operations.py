@@ -119,6 +119,7 @@ def _guest_resource(
 
 
 def _require_running(resource: dict[str, object], identity: GuestIdentity) -> None:
+    """Остановить действие, если PVE не подтверждает запуск выбранного гостя."""
     if resource.get("status") != "running":
         raise InfraManagerError(
             f"Гость {identity.vmid} {identity.name} не запущен"
@@ -132,6 +133,7 @@ def _generic_status(
     *,
     announce: bool = True,
 ) -> dict[str, object]:
+    """Подтвердить принадлежность и состояние работающего гостя в PVE."""
     resource = _guest_resource(client, repo_root, identity)
     _require_running(resource, identity)
     if announce:
@@ -146,6 +148,11 @@ def _infra_manager_repair(
     repo_root: Path,
     identity: GuestIdentity,
 ) -> None:
+    """Восстановить служебный OpenBao и синхронизировать Semaphore.
+
+        Это изменяющая операция: сначала обновляется доверенный помощник PVE,
+        затем восстанавливаются доступы OpenBao, после чего синхронизируется
+        Semaphore. Окончательная готовность проверяется отдельным status."""
     del identity
     from .semaphore import sync_project_from_task
 
@@ -168,6 +175,7 @@ def _infra_manager_sync(
     repo_root: Path,
     identity: GuestIdentity,
 ) -> None:
+    """Согласовать Semaphore с выбранной версией проекта без восстановления OpenBao."""
     del identity
     from .semaphore import sync_project_from_task
 
@@ -187,7 +195,12 @@ def _run_deploy(
     *,
     show_secrets: bool = False,
 ) -> int:
-    """Выполнить Deploy Guest и показать единый итоговый статус."""
+    """Выполнить Deploy Guest и проверить итоговую готовность.
+
+    Для самообновления управляющего гостя заранее резервируется окно
+    активации. При ошибке развертывания резерв отменяется, но уже
+    выполненные инфраструктурные изменения не откатываются автоматически.
+    """
 
     activation_reserved = False
     try:
@@ -244,6 +257,9 @@ def _run_status(
     *,
     show_secrets: bool = False,
 ) -> int:
+    """Показать состояние гостя без его перенастройки.
+
+        Показ секретов возможен только при явно разрешённом доверенном режиме."""
     console.info(
         f"Проверка состояния гостя {identity.vmid} — {identity.name}"
     )
@@ -317,6 +333,11 @@ def _run_repair(
     repo_root: Path,
     identity: GuestIdentity,
 ) -> int:
+    """Запустить остановленного гостя и выполнить предусмотренное восстановление.
+
+        Перед запуском объект подтверждается по VMID и описанию. Для
+        infra-manager восстанавливаются OpenBao и Semaphore; у остальных
+        гостей эта операция не переустанавливает приложения."""
     resource = _guest_resource(client, repo_root, identity)
     node = str(resource["node"])
 
@@ -350,6 +371,10 @@ def _run_sync(
     repo_root: Path,
     identity: GuestIdentity,
 ) -> int:
+    """Синхронизировать настройки служб без полного создания инфраструктуры.
+
+        Для infra-manager синхронизируется Semaphore, для прочих гостей
+        выполняется только этап provision через Ansible."""
     if identity.role == SETTINGS.infra_manager_role:
         _infra_manager_sync(repo_root, identity)
         return 0
@@ -372,7 +397,13 @@ def run_guest_operation(
     *,
     show_secrets: bool = False,
 ) -> int:
-    """Выполнить одну стандартную операцию над выбранным гостем."""
+    """Выполнить разрешённую операцию над указанным гостем.
+
+    Новые операции не принимаются при активации управляющей среды.
+    Изменяющие действия защищены блокировкой по VMID, чтобы два
+    задания не меняли один объект одновременно. Status не изменяет
+    гостя и выполняется без этой блокировки.
+    """
 
     if operation not in GUEST_OPERATIONS:
         raise InfraManagerError(f"Неизвестная операция гостя: {operation}")
