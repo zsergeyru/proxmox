@@ -1,0 +1,92 @@
+---
+# Sync не загружает модели и образы. Допустимо лишь переназначение
+# существующих псевдонимов на уже загруженные модели в работающем Speaches.
+- name: Проверить установленную конфигурацию Speaches
+  ansible.builtin.stat:
+    path: "{{ provision.ai_services.paths.model_aliases }}"
+  register: ai_services_sync_aliases_state
+
+- name: Не создавать конфигурацию нового Speaches через Sync
+  ansible.builtin.assert:
+    that:
+      - ai_services_sync_aliases_state.stat.isreg | default(false)
+    fail_msg: "Speaches ещё не настроен; требуется infra-manager deploy."
+
+- name: Прочитать прежние псевдонимы моделей
+  ansible.builtin.slurp:
+    src: "{{ provision.ai_services.paths.model_aliases }}"
+  register: ai_services_sync_aliases_file
+
+- name: Получить прежнее соответствие моделей
+  ansible.builtin.set_fact:
+    ai_services_sync_existing_aliases: "{{ ai_services_sync_aliases_file.content | b64decode | from_json }}"
+
+- name: Не менять имена моделей, используемые Wyoming, без Deploy
+  ansible.builtin.assert:
+    that:
+      - ai_services_sync_existing_aliases is mapping
+      - >-
+        (ai_services_sync_existing_aliases.keys() | list | sort)
+        == ([provision.ai_services.speaches.stt.alias, provision.ai_services.speaches.tts.alias] | sort)
+    fail_msg: >-
+      Sync не изменяет псевдонимы Wyoming: для их смены
+      требуется полное управляемое обновление через Deploy.
+
+- name: Проверить доступность установленного Speaches
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ provision.ai_services.speaches.port }}/health"
+    status_code: 200
+  changed_when: false
+
+- name: Проверить загруженные модели без скачивания
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ provision.ai_services.speaches.port }}/v1/models"
+    status_code: 200
+    return_content: true
+  register: ai_services_sync_models
+  changed_when: false
+
+- name: Не переключаться на отсутствующие модели
+  ansible.builtin.assert:
+    that:
+      - provision.ai_services.speaches.stt.model in ai_services_sync_models.content
+      - provision.ai_services.speaches.tts.model in ai_services_sync_models.content
+    fail_msg: >-
+      Целевая модель отсутствует в установленном Speaches.
+      Sync не скачивает модели; сначала подготовьте полноценный Deploy.
+
+- name: Обновить только соответствие существующих моделей
+  ansible.builtin.template:
+    src: model_aliases.json.j2
+    dest: "{{ provision.ai_services.paths.model_aliases }}"
+    owner: root
+    group: root
+    mode: "0644"
+  register: ai_services_sync_aliases
+
+- name: Перезапустить тот же контейнер Speaches при изменении конфигурации
+  ansible.builtin.command:
+    argv:
+      - docker
+      - restart
+      - "{{ provision.ai_services.speaches.container_name }}"
+  changed_when: true
+  when: ai_services_sync_aliases.changed
+
+- name: Подтвердить готовность Speaches после синхронизации
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ provision.ai_services.speaches.port }}/health"
+    status_code: 200
+  register: ai_services_sync_health
+  retries: 30
+  delay: 2
+  until: ai_services_sync_health.status == 200
+  changed_when: false
+
+- name: Подтвердить доступность существующего Wyoming
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: "{{ provision.ai_services.wyoming_openai.port }}"
+    timeout: 60
+    state: started
+  changed_when: false
