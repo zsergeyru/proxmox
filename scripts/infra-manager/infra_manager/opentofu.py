@@ -1,4 +1,9 @@
-"""Задания OpenTofu для infra-manager."""
+"""Подготовка OpenTofu, закреплённого провайдера и состояния гостей.
+
+Проверяются доверенный сертификат PVE, источники входных данных и хеши
+провайдера. План строится отдельно от применения; повреждённое состояние
+не рассматривается как отсутствие гостя и не должно вести к пересозданию.
+"""
 
 from __future__ import annotations
 
@@ -52,6 +57,7 @@ class OpenTofuWorkspace:
 
 
 def _require_env(name: str) -> str:
+    """Прочитать обязательную переменную задания, не отображая её значение."""
     value = os.environ.get(name, "").strip()
     if not value:
         raise InfraManagerError(f"Не задан {name}")
@@ -59,8 +65,9 @@ def _require_env(name: str) -> str:
 
 
 def _opentofu_env() -> dict[str, str]:
+    """Передать OpenTofu доверенный сертификат PVE без отключения TLS."""
     if not CA_BUNDLE.is_file() or CA_BUNDLE.stat().st_size == 0:
-        raise InfraManagerError(f"Не найден CA bundle: {CA_BUNDLE}")
+        raise InfraManagerError(f"Не найден CA bundle: {CA_BUNDLE}. Проверьте сертификат доверия PVE")
     env = os.environ.copy()
     env["SSL_CERT_FILE"] = str(CA_BUNDLE)
     return env
@@ -135,6 +142,7 @@ def _resolve_lxc_templates(payload: dict[str, Any]) -> None:
 
 
 def _paths(repo_root: Path) -> tuple[Path, Path]:
+    """Проверить расположение описаний OpenTofu и программы сборки входных данных."""
     opentofu_dir = repo_root / "automation" / "opentofu"
     renderer = repo_root / "scripts" / "guests" / "render-opentofu-input.py"
     if not opentofu_dir.is_dir():
@@ -154,6 +162,10 @@ def _prepare_input(
     only_vmids: set[int] | None = None,
     exclude_vmids: set[int] | None = None,
 ) -> tuple[Path, dict[str, Any]]:
+    """Собрать проверенное описание выбранных гостей для OpenTofu.
+
+    Отбор VMID влияет только на входные данные; состояние PVE на этом
+    этапе не применяется."""
     require_command("tofu")
     _require_env("TF_VAR_pve_endpoint")
     _require_env("TF_VAR_pve_api_token")
@@ -222,6 +234,7 @@ def prepare_workspace(
 
 
 def _sha256(path: Path) -> str:
+    """Посчитать SHA256 пакета провайдера для сверки с закреплённым хешем."""
     digest = hashlib.sha256()
     with path.open("rb") as stream:
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
@@ -232,6 +245,9 @@ def _sha256(path: Path) -> str:
 def _proxmox_provider_lock(
     opentofu_dir: Path,
 ) -> tuple[str, frozenset[str]]:
+    """Получить закреплённые версию и хеши провайдера из файла блокировки.
+
+    Отсутствие ожидаемой записи запрещает загрузку непроверенного пакета."""
     lock_file = opentofu_dir / ".terraform.lock.hcl"
     if not lock_file.is_file():
         raise InfraManagerError(
@@ -247,7 +263,7 @@ def _proxmox_provider_lock(
     )
     if block_match is None:
         raise InfraManagerError(
-            "Lock-файл OpenTofu не содержит bpg/proxmox"
+            "Lock-файл OpenTofu не содержит bpg/proxmox. Проверьте .terraform.lock.hcl в проекте"
         )
     body = block_match.group("body")
     version_match = re.search(
@@ -271,6 +287,7 @@ def _proxmox_provider_lock(
 
 
 def _provider_platform() -> tuple[str, str]:
+    """Определить поддерживаемую платформу для двоичного пакета провайдера."""
     system = platform.system().lower()
     machine = platform.machine().lower()
     arch = {
@@ -287,6 +304,7 @@ def _provider_platform() -> tuple[str, str]:
 
 
 def _download_text(url: str) -> str:
+    """Получить текст из сетевого источника с ограничением времени ожидания."""
     try:
         with urllib.request.urlopen(url, timeout=30) as response:
             return response.read().decode("utf-8")
@@ -302,6 +320,10 @@ def _download_text(url: str) -> str:
 
 
 def _download_file(url: str, target: Path) -> None:
+    """Скачать пакет во временный файл.
+
+    При сетевой ошибке неполный файл удаляется, чтобы он не мог быть
+    принят за пригодный пакет."""
     try:
         with urllib.request.urlopen(url, timeout=60) as response:
             with target.open("wb") as stream:
@@ -376,6 +398,10 @@ def _prepare_proxmox_provider_mirror(opentofu_dir: Path) -> Path:
 
 
 def _init(opentofu_dir: Path, env: dict[str, str]) -> None:
+    """Инициализировать OpenTofu с закреплённым провайдером и состоянием.
+
+    Файл блокировки не обновляется автоматически, пакет провайдера
+    проверяется по хешу до использования."""
     mirror = _prepare_proxmox_provider_mirror(opentofu_dir)
     run(
         [
@@ -430,6 +456,10 @@ def _state_status(
     target: str,
     env: dict[str, str],
 ) -> tuple[bool, str]:
+    """Найти состояние выбранного объекта без применения изменений.
+
+    Ошибки разбора state не трактуются как отсутствие объекта: это
+    предотвращает непреднамеренное повторное создание."""
     if not STATE_FILE.is_file():
         return False, ""
 
@@ -447,11 +477,11 @@ def _state_status(
         state = json.loads(pulled.stdout)
     except json.JSONDecodeError as exc:
         raise InfraManagerError(
-            "OpenTofu state содержит некорректный JSON"
+            "OpenTofu state содержит некорректный JSON. Изменения остановлены; проверьте постоянное состояние OpenTofu"
         ) from exc
     if not isinstance(state, dict):
         raise InfraManagerError(
-            "OpenTofu state должен быть JSON-объектом"
+            "OpenTofu state должен быть JSON-объектом. Изменения остановлены; проверьте файл состояния"
         )
 
     resources = state.get("resources", [])
