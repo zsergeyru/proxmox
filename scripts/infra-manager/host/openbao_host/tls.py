@@ -167,7 +167,14 @@ def prepare_tls_material(
     ssh_access_path: Path,
     log_detail,
 ) -> None:
-    """Подготовить TLS CA на PVE и серверный комплект infra-manager."""
+    """Подготовить TLS CA и серверный сертификат OpenBao.
+
+    Прежде чем изменять файлы, проверяется целостность прежнего CA.
+    Если OTP/TLS уже применялся, утрата CA запрещает его автоматическую
+    замену: клиенты утратили бы прежнее доверие. Ключ CA остаётся на
+    PVE; внутрь LXC копируется только сертификат CA и серверный комплект.
+    При частичной ошибке повторный запуск снова проверяет состояние.
+    """
     TLS_PVE_ONLY_DIR.mkdir(parents=True, exist_ok=True)
     os.chmod(TLS_PVE_ONLY_DIR, 0o700)
     os.chown(TLS_PVE_ONLY_DIR, 0, 0)
