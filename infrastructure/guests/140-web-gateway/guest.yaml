@@ -1,0 +1,23 @@
+# Веб-шлюз домашней сети; обычный управляемый Linux-гость.
+# Адрес 192.168.1.40 вычисляется по общему правилу VMID.
+schema_version: 12
+vmid: 140
+name: web-gateway
+profile: debian-lxc-docker
+
+description: Веб-шлюз Caddy, Authelia и Homarr для домашних приложений
+
+protection: true
+# При отсутствии LXC разрешить безопасное пересоздание без удаления
+# оставшихся томов; постоянные данные восстанавливаются отдельно.
+recreate_if_missing: true
+
+resources:
+  cores: 2
+  memory_mb: 1024
+  swap_mb: 512
+  disk_size_gb: 16
+
+boot:
+  onboot: true
+  order: 30
