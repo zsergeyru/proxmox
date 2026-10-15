@@ -31,6 +31,7 @@
     owner: root
     group: root
     mode: preserve
+  register: infra_manager_python_installed
 
 - name: Установить команды управления
   ansible.builtin.copy:
@@ -84,7 +85,7 @@
   ansible.builtin.systemd_service:
     name: infra-manager-homarr-api.service
     enabled: true
-    state: "{{ 'restarted' if homarr_api_unit.changed else 'started' }}"
+    state: "{{ 'restarted' if (homarr_api_unit.changed or infra_manager_python_installed.changed) else 'started' }}"
     daemon_reload: "{{ homarr_api_unit.changed }}"
 
 - name: Сделать команду состояния доступной через pct exec
