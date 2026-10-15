@@ -246,10 +246,11 @@
       - docker
       - run
       - --rm
+      - --entrypoint
+      - caddy
       - --mount
       - "type=bind,src={{ provision.web_gateway.paths.configuration }}/caddy,dst=/etc/caddy,readonly"
       - "{{ provision.web_gateway.caddy.image }}"
-      - caddy
       - validate
       - --config
       - /etc/caddy/Caddyfile
