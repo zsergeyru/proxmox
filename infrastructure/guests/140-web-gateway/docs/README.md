@@ -9,6 +9,7 @@
 | [homarr.md](homarr.md) | Домашняя страница, плитки служб и права отображения |
 | [administration.md](administration.md) | Встроенная в Homarr панель управления Caddy и Authelia, права и хранение изменений |
 | [guest-management.md](guest-management.md) | Список гостей Proxmox и запуск штатных действий 910 из Homarr |
+| [storage.md](storage.md) | Постоянный том PVE, состав невоспроизводимых данных, резервирование и пересоздание LXC без потери состояния |
 | [operations.md](operations.md) | Общий порядок установки, проверки, обновления, резервирования и восстановления |
 | [decisions.md](decisions.md) | Причины разделения 109/140 и выбора готовых средств |
 | [implementation-status.md](implementation-status.md) | Уже подготовленные части и оставшаяся реализация |
