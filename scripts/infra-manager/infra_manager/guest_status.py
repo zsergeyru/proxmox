@@ -21,7 +21,7 @@ from .settings import PATHS
 
 COMMON_STATUS_SCHEMA_VERSION = 2
 COMMON_CHECK_TYPES = frozenset(
-    {"docker", "file", "http", "local_status", "systemd", "tcp"}
+    {"docker", "docker_image", "file", "http", "local_status", "systemd", "tcp"}
 )
 
 
@@ -204,6 +204,19 @@ def _run_declared_check(
             raise InfraManagerError(
                 f"Контейнер {container} не находится в состоянии running"
             )
+        return
+
+    if check_type == "docker_image":
+        image = check.get("image")
+        if not isinstance(image, str) or not image.strip():
+            raise InfraManagerError(
+                "docker_image-проверка требует имя image"
+            )
+        _run_guest_command(
+            node,
+            address,
+            ["docker", "image", "inspect", "--format", "{{.Id}}", image],
+        )
         return
 
     if check_type == "systemd":

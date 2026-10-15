@@ -17,3 +17,15 @@ checks:
   - type: http
     url: "http://{address}:3001/api/healthcheck"
     message: "Домашняя страница отвечает на запросы"
+  - type: docker
+    container: immich_memories
+    message: "Immich Memories Notify: служба запущена"
+  - type: http
+    url: "http://{address}:5000/health"
+    message: "Immich Memories Notify: панель отвечает (порт 5000)"
+  - type: docker_image
+    image: ghcr.io/immich-power-tools/immich-power-tools:latest
+    message: "Immich Power Tools: Docker-образ загружен"
+  - type: docker_image
+    image: ghcr.io/timasoft/immich-analyze:main
+    message: "Immich Analyze: Docker-образ загружен"

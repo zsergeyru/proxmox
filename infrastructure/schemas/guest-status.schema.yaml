@@ -23,6 +23,7 @@ $defs:
         items:
           oneOf:
             - $ref: '#/$defs/dockerCheck'
+            - $ref: '#/$defs/dockerImageCheck'
             - $ref: '#/$defs/fileCheck'
             - $ref: '#/$defs/httpCheck'
             - $ref: '#/$defs/localStatusCheck'
@@ -40,6 +41,20 @@ $defs:
         type: string
         minLength: 1
       container:
+        type: string
+        minLength: 1
+
+  dockerImageCheck:
+    type: object
+    additionalProperties: false
+    required: [type, message, image]
+    properties:
+      type:
+        const: docker_image
+      message:
+        type: string
+        minLength: 1
+      image:
         type: string
         minLength: 1
 
