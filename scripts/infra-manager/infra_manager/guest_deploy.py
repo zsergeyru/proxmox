@@ -66,6 +66,7 @@ ANSIBLE_PHASE_BY_DEPLOY_PHASE: dict[str, str | None] = {
     "provision-recovery-control-plane": "recovery",
     "provision-ssh-trust": "base",
     "provision": "full",
+    "sync": "sync",
 }
 
 
@@ -503,7 +504,7 @@ def _run_guest_ansible(
                     ["-e", f"infra_ssh_client_ca_file={PATHS.ssh_client_ca_public_key}"]
                     if PATHS.ssh_client_ca_public_key.is_file() else []
                 ),
-                *_project_git_ansible_vars(context),
+                *(_project_git_ansible_vars(context) if provision_phase != "sync" else []),
                 *(
                     openbao_machine_args
                     if openbao_machine_args is not None
@@ -548,10 +549,11 @@ def _configure_guest_os(
     """
     console.info(f"Настройка ОС {context.vmid}")
     repo_root = context.paths.guest_dir.parents[2]
-    console.detail("Обновление PVE-only служебного контура")
-    install_openbao_host_support(context.node, repo_root)
-    if self_update:
-        install_recovery_host_support(context.node, repo_root)
+    if provision_phase != "sync":
+        console.detail("Обновление PVE-only служебного контура")
+        install_openbao_host_support(context.node, repo_root)
+        if self_update:
+            install_recovery_host_support(context.node, repo_root)
 
     bootstrap_key = bootstrap_private_key
     if (
@@ -634,10 +636,13 @@ def _configure_guest_os(
             console.ok(
                 f"Гость {context.vmid}: вход по временному SSH-сертификату подтверждён"
             )
-            host_certificate = _host_certificate_if_available(
-                context, session,
-                directory=temporary,
-                provision_phase=provision_phase,
+            host_certificate = (
+                _host_certificate_if_available(
+                    context, session,
+                    directory=temporary,
+                    provision_phase=provision_phase,
+                )
+                if provision_phase != "sync" else None
             )
             openbao_machine_args = (
                 _prepare_openbao_machine_ansible_vars(
@@ -654,7 +659,8 @@ def _configure_guest_os(
                 host_certificate=host_certificate,
                 openbao_machine_args=openbao_machine_args,
             )
-            _remove_obsolete_guest_authorizations(context, session)
+            if provision_phase != "sync":
+                _remove_obsolete_guest_authorizations(context, session)
 
 def _validate_existing_guest_object(context: DeploymentContext) -> None:
     """Проверить существующий объект без требования OpenTofu state."""
@@ -812,7 +818,7 @@ def _run_deploy_guest(
         "ssh-keyscan",
         "ssh",
     ]
-    if not self_update:
+    if not self_update and phase != "sync":
         commands.insert(0, "tofu")
     for command in commands:
         require_command(command)
@@ -874,10 +880,9 @@ def _run_deploy_guest(
         "provision",
     }
 
-    if bootstrap_configure:
-        # После create bootstrap-state больше не является источником истины.
-        # Последующие шаги подтверждают сам объект PVE и используют только
-        # одноразовый SSH-доступ текущего bootstrap-сеанса.
+    if bootstrap_configure or phase == "sync":
+        # Sync не изменяет состояние PVE и не требует OpenTofu state.
+        # Начальный контур также проверяет уже созданный объект отдельно.
         _validate_existing_guest_object(context)
         state_present = False
     else:
@@ -909,7 +914,7 @@ def _run_deploy_guest(
             missing_recreation_allowed=missing_recreation,
         )
 
-    if not bootstrap_scope:
+    if not bootstrap_scope and phase != "sync":
         if (not state_present or missing_recreation) and phase in {
             "all", "infrastructure"
         }:
@@ -939,18 +944,19 @@ def _run_deploy_guest(
     # а не API token. Они остаются частью общего guest/profile-контракта и
     # применяются здесь одинаково для первоначального infra-manager
     # и обычных гостей.
-    apply_host_requirements(
-        node=context.node,
-        vmid=context.vmid,
-        kind=context.kind,
-        features=context.features,
-    )
-    ensure_guest_storage(
-        context.node,
-        context.vmid,
-        context.kind,
-        context.paths.guest_dir,
-    )
+    if phase != "sync":
+        apply_host_requirements(
+            node=context.node,
+            vmid=context.vmid,
+            kind=context.kind,
+            features=context.features,
+        )
+        ensure_guest_storage(
+            context.node,
+            context.vmid,
+            context.kind,
+            context.paths.guest_dir,
+        )
 
     ansible_phase = ANSIBLE_PHASE_BY_DEPLOY_PHASE[phase]
     if ansible_phase is not None:
@@ -959,7 +965,8 @@ def _run_deploy_guest(
             provision_phase=ansible_phase,
             project_branch=project_branch,
             allow_legacy_bootstrap=(
-                phase != "provision" or not bootstrap_scope
+                phase != "sync"
+                and (phase != "provision" or not bootstrap_scope)
             ),
             bootstrap_private_key=(
                 None if phase == "provision" and bootstrap_scope
@@ -990,6 +997,10 @@ def _run_deploy_guest(
         console.result(
             f"{context.vmid} {context.name}: полная настройка завершена"
         )
+    elif phase == "sync":
+        console.result(
+            f"{context.vmid} {context.name}: безопасная синхронизация завершена"
+        )
     else:
         console.result(
             f"{context.vmid} {context.name}: полное развёртывание завершено"
@@ -1003,14 +1014,14 @@ def run_deploy_guest(
     *,
     phase: str = "all",
 ) -> int:
-    """Развернуть гостя либо повторно применить его настройки Ansible.
+    """Развернуть гостя, настроить ОС либо синхронизировать безопасные файлы.
 
-    Фаза all включает инфраструктурные изменения; provision не должна
-    создавать новый объект PVE. Первоначальные полномочия управляющего
-    гостя через эту обычную точку входа не передаются.
+    Фаза all меняет инфраструктуру; provision применяет полный Ansible.
+    Фаза sync не запускает OpenTofu, установку программ или PVE-операции.
+    Первоначальные полномочия 990 через эту точку входа не передаются.
     """
 
-    if phase not in {"all", "provision"}:
+    if phase not in {"all", "provision", "sync"}:
         raise InfraManagerError(
             f"Штатный deploy гостя не поддерживает фазу {phase!r}"
         )
