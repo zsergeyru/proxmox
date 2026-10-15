@@ -15,6 +15,7 @@ services:
     volumes:
       - /mnt/persistent-state/semaphore:/var/lib/semaphore
       - /etc/infra-manager/ca:/etc/infra-manager/ca:ro
+      - /etc/infra-manager/openbao/tls/ca.crt:/etc/infra-manager/openbao/tls/ca.crt:ro
       - /mnt/pve-access/pve-host:/mnt/pve-access/pve-host:ro
       - /mnt/persistent-state/opentofu:/var/lib/infra-manager/opentofu
       - /mnt/persistent-state/locks:/var/lib/infra-manager/locks
