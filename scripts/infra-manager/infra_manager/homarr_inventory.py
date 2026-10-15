@@ -8,7 +8,7 @@ from typing import Any
 
 from .common import InfraManagerError
 from .guest_catalog import deployable_guests, guest_management_address
-from .guest_operations import GUEST_OPERATIONS, operation_guests
+from .guest_operations import GUEST_OPERATIONS, _expected_resource_type, operation_guests
 from .portal import _load_provision, portal_definitions
 from .pve import PveClient
 
@@ -80,7 +80,7 @@ def guest_inventory(
         match = (
             actual is not None
             and actual.get("name") == guest.name
-            and actual.get("type") in {"lxc", "qemu"}
+            and actual.get("type") == _expected_resource_type(repo_root, guest)
         )
         state = (
             "unknown" if resources is None
