@@ -14,7 +14,16 @@ ACTIVATION_MARKER="/mnt/persistent-state/semaphore/.infra-manager-runtime-activa
 BRANCH="${INFRA_PROJECT_BRANCH:-main}"
 PVE_NODE="${INFRA_PVE_NODE:-}"
 
-install -d -m 0755 "$LOG_DIR"
+# Вывод Docker и служб может содержать конфиденциальные детали.
+# Старый журнал также закрываем от других пользователей до перенаправления.
+umask 077
+install -d -m 0700 "$LOG_DIR"
+if [[ -L "$LOG_FILE" || ( -e "$LOG_FILE" && ! -f "$LOG_FILE" ) ]]; then
+    printf 'ОШИБКА: Небезопасный файл журнала активации: %s\n' "$LOG_FILE" >&2
+    exit 1
+fi
+touch "$LOG_FILE"
+chmod 0600 "$LOG_FILE"
 exec >>"$LOG_FILE" 2>&1
 started=$SECONDS
 
