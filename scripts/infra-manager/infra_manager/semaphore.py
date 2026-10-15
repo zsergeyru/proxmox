@@ -401,7 +401,7 @@ class SemaphoreClient:
     def login(self) -> None:
         """Открыть административный сеанс с паролем из защищённого файла."""
         if not nonempty(ADMIN_PASSWORD_FILE):
-            raise InfraManagerError("Не найден первичный пароль Semaphore. Проверьте файл администратора в постоянном состоянии 910")
+            raise InfraManagerError("Не найден первичный пароль Semaphore. Проверьте файл администратора в постоянном состоянии управляющего гостя")
         password = ADMIN_PASSWORD_FILE.read_text(
             encoding="utf-8"
         ).strip()
