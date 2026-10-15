@@ -7,6 +7,7 @@
 | [caddy.md](caddy.md) | Публикация адресов, обратный прокси, HTTPS и сертификаты |
 | [authelia.md](authelia.md) | Пользователи, группы, общий вход, второй фактор, OpenBao и SQLite |
 | [homarr.md](homarr.md) | Домашняя страница, плитки служб и права отображения |
+| [administration.md](administration.md) | Встроенная в Homarr панель управления Caddy и Authelia, права и хранение изменений |
 | [operations.md](operations.md) | Общий порядок установки, проверки, обновления, резервирования и восстановления |
 | [decisions.md](decisions.md) | Причины разделения 109/140 и выбора готовых средств |
 | [implementation-status.md](implementation-status.md) | Уже подготовленные части и оставшаяся реализация |
