@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Минимальная операторская оболочка infra-manager на PVE."""
+"""Тонкая операторская оболочка на физическом PVE.
+
+Сверяет управляющий LXC с установленной конфигурацией, затем передаёт
+обычные команды внутрь него. Восстановление выполняется на PVE напрямую,
+чтобы отказ управляющего контейнера не блокировал аварийный доступ.
+"""
 
 from __future__ import annotations
 
@@ -17,6 +22,7 @@ GUEST_COMMAND = "/usr/local/sbin/infra-manager"
 
 
 class OperatorError(RuntimeError):
+    """Ожидаемая ошибка запуска операторской команды непосредственно на PVE."""
     pass
 
 
@@ -26,6 +32,7 @@ def run(
     check: bool = True,
     capture: bool = False,
 ) -> subprocess.CompletedProcess[str]:
+    """Выполнить команду PVE и остановиться при неподтверждённом результате."""
     try:
         result = subprocess.run(
             argv,
@@ -43,6 +50,7 @@ def run(
 
 
 def manager_identity() -> tuple[int, str]:
+    """Прочитать VMID и имя управляющего гостя из установленной конфигурации PVE."""
     try:
         payload = json.loads(HOST_CONFIG.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
@@ -57,6 +65,9 @@ def manager_identity() -> tuple[int, str]:
 
 
 def verify_manager(vmid: int, name: str) -> None:
+    """Подтвердить, что найденный объект соответствует управляющему гостю.
+
+    Не передавать полномочия в LXC, если VMID занят посторонним объектом."""
     result = run(
         ["pct", "config", str(vmid)],
         check=False,
@@ -76,6 +87,7 @@ def verify_manager(vmid: int, name: str) -> None:
 
 
 def guest_running(vmid: int) -> bool:
+    """Проверить работоспособность управляющего LXC перед передачей команды."""
     result = run(
         ["pct", "status", str(vmid)],
         check=False,
@@ -85,6 +97,9 @@ def guest_running(vmid: int) -> bool:
 
 
 def start_manager(vmid: int) -> None:
+    """Запустить управляющий LXC только при необходимости.
+
+    Новый контейнер не создаётся, используется заранее подтверждённый VMID."""
     if guest_running(vmid):
         return
     run(["pct", "start", str(vmid)])
@@ -98,6 +113,9 @@ def start_manager(vmid: int) -> None:
 
 
 def proxy_to_manager(arguments: list[str]) -> int:
+    """Передать штатную команду внутрь проверенного управляющего LXC.
+
+    Аварийное восстановление и загрузка оператора остаются на стороне PVE."""
     vmid, name = manager_identity()
     verify_manager(vmid, name)
     if arguments == ["repair"]:
@@ -126,18 +144,23 @@ def proxy_to_manager(arguments: list[str]) -> int:
 
 
 def color_mode() -> str:
+    """Определить, можно ли сохранить цветной вывод при передаче команды."""
     mode = os.environ.get("INFRA_MANAGER_COLOR", "auto")
     enabled = mode == "1" or (mode == "auto" and sys.stdout.isatty())
     return "1" if enabled and not os.environ.get("NO_COLOR") and os.environ.get("TERM") != "dumb" else "0"
 
 
 def recover() -> int:
+    """Вызвать аварийную программу непосредственно на PVE.
+
+    Восстановление не должно зависеть от доступности управляющего контейнера."""
     if not RECOVERY_COMMAND.is_file() or not os.access(RECOVERY_COMMAND, os.X_OK):
         raise OperatorError(f"Не найдена аварийная команда: {RECOVERY_COMMAND}")
     return run([str(RECOVERY_COMMAND), "--recover"], check=False).returncode
 
 
 def main() -> int:
+    """Проверить root на PVE и передать запрос в нужный контур."""
     if os.geteuid() != 0:
         raise OperatorError("infra-manager должен выполняться от root на PVE")
     arguments = sys.argv[1:] or ["--help"]

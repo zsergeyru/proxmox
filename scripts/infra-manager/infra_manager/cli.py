@@ -9,6 +9,7 @@ from .common import InfraManagerError, console
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """Подготовить разрешённые внутренние команды проверки и настройки."""
     parser = argparse.ArgumentParser(
         prog="infra-manager",
         description="Управление служебным LXC infra-manager.",
@@ -136,6 +137,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Разобрать аргументы и выполнить выбранное штатное действие.
+
+    Ошибки перевести в понятные сообщения, не публикуя секретные
+    параметры внешних команд."""
     parser = build_parser()
 
     try:

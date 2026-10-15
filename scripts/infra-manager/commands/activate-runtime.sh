@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+# Отложенно активировать рабочую среду infra-manager внутри управляющего гостя.
+# Перезапускает состав Docker, проверяет OpenBao и Semaphore. Журнал
+# записывается в /var/log/infra-manager/runtime-activation.log.
+# При неуспехе часть контейнеров уже может быть перезапущена: автоматического
+# отката нет, повторение допустимо после проверки состояния служб.
+
 COMPOSE_DIR="/opt/infra-manager/compose"
 LOG_DIR="/var/log/infra-manager"
 LOG_FILE="$LOG_DIR/runtime-activation.log"
@@ -12,6 +18,9 @@ install -d -m 0755 "$LOG_DIR"
 exec >>"$LOG_FILE" 2>&1
 started=$SECONDS
 
+# Зафиксировать результат активации и снять отметку ожидающего задания.
+# Отметка удаляется и после ошибки, поэтому следующий запуск обязан
+# заново проверить состояние служб, а не считать активацию успешной.
 finish_activation() {
     local result=$?
     local elapsed=$((SECONDS - started))

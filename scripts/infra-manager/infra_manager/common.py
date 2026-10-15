@@ -1,4 +1,9 @@
-"""Общие безопасные примитивы для поэтапного переноса infra-manager на Python."""
+"""Общие команды, уровни вывода и обработка ошибок infra-manager.
+
+Внешние команды выполняются с проверкой результата. Известные секретные
+аргументы скрываются в диагностике; сырой stderr автоматически безопасным
+не считается и не должен без проверки показываться пользователю.
+"""
 
 from __future__ import annotations
 
@@ -134,6 +139,10 @@ class CommandError(InfraManagerError):
         stderr: str | None = None,
         sensitive_indices: Sequence[int] = (),
     ) -> None:
+        """Сохранить код отказа и очищенные аргументы команды для диагностики.
+
+        Полученный stderr хранится отдельно и не считается очищенным
+        от секретов; его нельзя без проверки передавать пользователю."""
         self.argv = _redact_argv(argv, sensitive_indices)
         self.returncode = returncode
         self.stderr = stderr
@@ -164,6 +173,7 @@ class Console:
     err: object = sys.stderr
 
     def _color(self, code: str, *, error: bool = False) -> str:
+        """Выбрать цвет терминального сообщения с учётом настройки и среды вывода."""
         stream = self.err if error else self.out
         mode = os.environ.get("INFRA_MANAGER_COLOR", "auto")
         enabled = (
@@ -174,6 +184,7 @@ class Console:
         return code if enabled else ""
 
     def info(self, message: str) -> None:
+        """Показать обычный этап операции, кроме режима минимального вывода."""
         if log_level() == "quiet":
             return
         cyan = self._color("\033[36m")
@@ -192,6 +203,7 @@ class Console:
         self.info(message)
 
     def ok(self, message: str) -> None:
+        """Показать подтверждённый успешный шаг в обычном журнале."""
         if log_level() == "quiet":
             return
         green = self._color("\033[32m")
@@ -243,6 +255,7 @@ class Console:
         )
 
     def error(self, message: str) -> None:
+        """Вывести понятную ошибку в отдельный поток без секретов."""
         red = self._color("\033[31m", error=True)
         bold = self._color("\033[1m", error=True)
         reset = self._color("\033[0m", error=True)
