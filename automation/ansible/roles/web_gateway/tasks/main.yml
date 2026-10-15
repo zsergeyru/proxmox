@@ -1,0 +1,320 @@
+---
+# 140: все изменяемые данные должны быть доступны ДО любой записи на диск.
+- name: Проверить машинное описание веб-шлюза
+  ansible.builtin.assert:
+    that:
+      - provision.guest_vmid == 140
+      - provision.web_gateway.storage.allow_missing_mount == false
+      - provision.web_gateway.storage.required_mount == "/var/lib/web-gateway"
+      - provision.web_gateway.paths.persistent_state == "/var/lib/web-gateway"
+      - provision.web_gateway.authelia.storage.type == "sqlite"
+      - provision.web_gateway.caddy.enabled | bool
+      - provision.web_gateway.authelia.enabled | bool
+      - provision.web_gateway.homarr.enabled | bool
+    fail_msg: "140: некорректная схема служб или постоянного хранилища"
+
+- name: Проверить настоящее подключение постоянного тома
+  ansible.builtin.command:
+    argv:
+      - mountpoint
+      - -q
+      - "{{ provision.web_gateway.storage.required_mount }}"
+  changed_when: false
+
+- name: Проверить каталог постоянного состояния
+  ansible.builtin.stat:
+    path: "{{ provision.web_gateway.paths.persistent_state }}"
+    follow: false
+  register: web_gateway_state
+
+- name: Запретить подмену постоянного каталога обычной папкой или ссылкой
+  ansible.builtin.assert:
+    that:
+      - web_gateway_state.stat.isdir | default(false)
+      - not (web_gateway_state.stat.islnk | default(false))
+    fail_msg: "140: постоянное состояние отсутствует, не запускать службы"
+
+- name: Подготовить каталоги воспроизводимых файлов
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"
+  loop:
+    - "{{ provision.web_gateway.paths.root }}"
+    - "{{ provision.web_gateway.paths.compose }}"
+    - "{{ provision.web_gateway.paths.configuration }}"
+    - "{{ provision.web_gateway.paths.configuration }}/caddy"
+    - "{{ provision.web_gateway.paths.configuration }}/authelia"
+    - "{{ provision.web_gateway.paths.secrets }}"
+
+- name: Подготовить каталоги на проверенном постоянном томе
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"
+  loop:
+    - "{{ provision.web_gateway.caddy.data.host }}"
+    - "{{ provision.web_gateway.caddy.config.host }}"
+    - "{{ provision.web_gateway.authelia.data.host }}"
+    - "{{ provision.web_gateway.homarr.data.host }}"
+    - "{{ provision.web_gateway.paths.persistent_state }}/management"
+
+# Внешний вызывающий контур может передать материалы из OpenBao как закрытые
+# Ansible-переменные. Существующие файлы не заменяются новым случайным ключом.
+- name: Проверить имена переданных секретов
+  ansible.builtin.assert:
+    that:
+      - item.key in web_gateway_allowed_secret_names
+      - item.value is string
+      - item.value | length > 0
+    fail_msg: "140: недопустимый набор секретов OpenBao"
+  loop: "{{ (web_gateway_secret_material | default({})) | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+  vars:
+    web_gateway_allowed_secret_names:
+      - authelia-session-secret
+      - authelia-storage-encryption-key
+      - authelia-jwt-secret
+      - authelia-oidc-hmac-secret
+      - authelia-oidc-jwks-pem
+      - authelia-homarr-client-secret-hash
+      - homarr.env
+  no_log: true
+
+- name: Материализовать переданные из закрытого контура секреты
+  ansible.builtin.copy:
+    dest: "{{ provision.web_gateway.paths.secrets }}/{{ item.key }}"
+    content: "{{ item.value }}"
+    owner: root
+    group: root
+    mode: "0600"
+  loop: "{{ (web_gateway_secret_material | default({})) | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+  no_log: true
+
+- name: Установить предоставленный из закрытого контура файл пользователей
+  ansible.builtin.copy:
+    dest: "{{ provision.web_gateway.authelia.users_file }}"
+    content: "{{ web_gateway_users_database }}"
+    owner: root
+    group: root
+    mode: "0600"
+    # Повторное развёртывание не должно затирать пользователей,
+    # изменённых через административную страницу Homarr.
+    force: false
+  when: web_gateway_users_database is defined
+  no_log: true
+
+- name: Проверить все необходимые рабочие секреты
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - "{{ provision.web_gateway.paths.secrets }}/authelia-session-secret"
+    - "{{ provision.web_gateway.paths.secrets }}/authelia-storage-encryption-key"
+    - "{{ provision.web_gateway.paths.secrets }}/authelia-jwt-secret"
+    - "{{ provision.web_gateway.paths.secrets }}/authelia-oidc-hmac-secret"
+    - "{{ provision.web_gateway.paths.secrets }}/authelia-oidc-jwks-pem"
+    - "{{ provision.web_gateway.paths.secrets }}/authelia-homarr-client-secret-hash"
+    - "{{ provision.web_gateway.paths.secrets }}/homarr.env"
+    - "{{ provision.web_gateway.authelia.users_file }}"
+  register: web_gateway_secret_status
+  no_log: true
+
+- name: Не запускать веб-шлюз без исходных секретов OpenBao
+  ansible.builtin.assert:
+    that:
+      - item.stat.isreg | default(false)
+      - (item.stat.size | default(0) | int) > 0
+    fail_msg: >-
+      140: не хватает защищённого материала OpenBao для Caddy/Authelia/Homarr.
+      Восстановить прежние значения и повторить настройку.
+  loop: "{{ web_gateway_secret_status.results }}"
+  no_log: true
+
+# Проверяем только имена параметров, не выводя значения и содержимое файла.
+- name: Проверить необходимые параметры Homarr
+  ansible.builtin.command:
+    argv:
+      - grep
+      - -Eq
+      - "{{ item }}"
+      - "{{ provision.web_gateway.paths.secrets }}/homarr.env"
+  loop:
+    - '^SECRET_ENCRYPTION_KEY=[0-9a-fA-F]{64}$'
+    - '^AUTH_OIDC_CLIENT_SECRET=.+$'
+  changed_when: false
+  no_log: true
+
+- name: Создать первоначальный список доменов только при отсутствии сохранённого
+  ansible.builtin.copy:
+    dest: "{{ provision.web_gateway.management.routes_state }}"
+    content: "{{ provision.web_gateway.caddy.routes | to_nice_yaml(indent=2, sort_keys=false) }}"
+    owner: root
+    group: root
+    mode: "0640"
+    force: false
+
+- name: Прочитать сохранённый список доменов
+  ansible.builtin.slurp:
+    src: "{{ provision.web_gateway.management.routes_state }}"
+  register: web_gateway_routes_content
+
+- name: Получить действующие настройки доменов
+  ansible.builtin.set_fact:
+    web_gateway_routes: "{{ web_gateway_routes_content.content | b64decode | from_yaml }}"
+
+- name: Проверить тип списка доменов
+  ansible.builtin.assert:
+    that:
+      - web_gateway_routes is sequence
+      - web_gateway_routes is not string
+    fail_msg: "140: сохранённый список доменов имеет неверный формат"
+
+- name: Проверить включённые маршруты перед формированием Caddyfile
+  ansible.builtin.assert:
+    that:
+      - item.domain is string
+      - item.domain is match('^[a-z0-9-]+(\\.[a-z0-9-]+)*\\.zsergey\\.ru$')
+      - item.upstream is defined
+      - item.upstream is string
+      - item.upstream is match('^https?://[A-Za-z0-9.:-]+$')
+    fail_msg: "140: неверное имя или назначение маршрута Caddy"
+  loop: "{{ web_gateway_routes | selectattr('enabled', 'equalto', true) | list }}"
+  loop_control:
+    label: "{{ item.domain | default('?') }}"
+
+- name: Подготовить основной Caddyfile
+  ansible.builtin.template:
+    src: Caddyfile.j2
+    dest: "{{ provision.web_gateway.caddy.config_file }}"
+    owner: root
+    group: root
+    mode: "0644"
+  register: web_gateway_main_caddyfile
+
+- name: Подготовить маршруты из сохранённого состояния
+  ansible.builtin.template:
+    src: sites.generated.caddy.j2
+    dest: "{{ provision.web_gateway.caddy.generated_routes_file }}"
+    owner: root
+    group: root
+    mode: "0644"
+  register: web_gateway_generated_routes
+
+- name: Подготовить настройки Authelia
+  ansible.builtin.template:
+    src: authelia-configuration.yml.j2
+    dest: "{{ provision.web_gateway.authelia.config_file }}"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Подготовить Docker Compose
+  ansible.builtin.template:
+    src: docker-compose.yml.j2
+    dest: "{{ provision.web_gateway.paths.compose_file }}"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Проверить Docker Compose без вывода секретов
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ provision.web_gateway.paths.compose_file }}"
+      - config
+      - --quiet
+  changed_when: false
+  no_log: true
+
+- name: Загрузить закреплённые образы
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ provision.web_gateway.paths.compose_file }}"
+      - pull
+  changed_when: false
+
+- name: Проверить Caddyfile до запуска
+  ansible.builtin.command:
+    argv:
+      - docker
+      - run
+      - --rm
+      - --entrypoint
+      - caddy
+      - --mount
+      - "type=bind,src={{ provision.web_gateway.paths.configuration }}/caddy,dst=/etc/caddy,readonly"
+      - "{{ provision.web_gateway.caddy.image }}"
+      - validate
+      - --config
+      - /etc/caddy/Caddyfile
+  changed_when: false
+
+- name: Проверить конфигурацию Authelia до запуска
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ provision.web_gateway.paths.compose_file }}"
+      - run
+      - --rm
+      - --no-deps
+      - authelia
+      - authelia
+      - config
+      - validate
+      - --config
+      - /config/configuration.yml
+  changed_when: false
+  no_log: true
+
+- name: Запустить веб-шлюз
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ provision.web_gateway.paths.compose_file }}"
+      - up
+      - -d
+      - --remove-orphans
+  register: web_gateway_started
+  changed_when: >-
+    'Started' in (web_gateway_started.stdout + web_gateway_started.stderr)
+    or 'Created' in (web_gateway_started.stdout + web_gateway_started.stderr)
+    or 'Recreated' in (web_gateway_started.stdout + web_gateway_started.stderr)
+
+- name: Применить изменённые маршруты без перезапуска Caddy
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - "{{ provision.web_gateway.caddy.container_name }}"
+      - caddy
+      - reload
+      - --config
+      - /etc/caddy/Caddyfile
+  changed_when: true
+  when: web_gateway_main_caddyfile.changed or web_gateway_generated_routes.changed
+
+- name: Проверить отклик Homarr только на локальном порту
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ provision.web_gateway.homarr.internal_port }}"
+    status_code: [200, 301, 302, 303, 307, 308]
+    follow_redirects: none
+  register: web_gateway_homarr_health
+  until: web_gateway_homarr_health.status in [200, 301, 302, 303, 307, 308]
+  retries: 20
+  delay: 3

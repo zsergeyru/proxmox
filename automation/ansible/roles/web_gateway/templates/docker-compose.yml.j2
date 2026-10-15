@@ -1,0 +1,52 @@
+# Все уникальные данные находятся на mp0. Не использовать docker compose down -v.
+services:
+  caddy:
+    image: "{{ provision.web_gateway.caddy.image }}"
+    container_name: "{{ provision.web_gateway.caddy.container_name }}"
+    restart: unless-stopped
+    ports:
+      - "{{ provision.web_gateway.caddy.listen.http }}:80"
+      - "{{ provision.web_gateway.caddy.listen.https }}:443"
+    volumes:
+      - "{{ provision.web_gateway.paths.configuration }}/caddy:/etc/caddy:ro"
+      - "{{ provision.web_gateway.caddy.data.host }}:{{ provision.web_gateway.caddy.data.container }}"
+      - "{{ provision.web_gateway.caddy.config.host }}:{{ provision.web_gateway.caddy.config.container }}"
+    depends_on:
+      - authelia
+      - homarr
+
+  authelia:
+    image: "{{ provision.web_gateway.authelia.image }}"
+    container_name: "{{ provision.web_gateway.authelia.container_name }}"
+    restart: unless-stopped
+    environment:
+      TZ: Europe/Moscow
+      X_AUTHELIA_CONFIG_FILTERS: template
+      AUTHELIA_SESSION_SECRET_FILE: /config/secrets/authelia-session-secret
+      AUTHELIA_STORAGE_ENCRYPTION_KEY_FILE: /config/secrets/authelia-storage-encryption-key
+      AUTHELIA_IDENTITY_VALIDATION_RESET_PASSWORD_JWT_SECRET_FILE: /config/secrets/authelia-jwt-secret
+      AUTHELIA_IDENTITY_PROVIDERS_OIDC_HMAC_SECRET_FILE: /config/secrets/authelia-oidc-hmac-secret
+    volumes:
+      - "{{ provision.web_gateway.paths.configuration }}/authelia:/config:ro"
+      - "{{ provision.web_gateway.paths.secrets }}:/config/secrets:ro"
+      - "{{ provision.web_gateway.authelia.data.host }}:{{ provision.web_gateway.authelia.data.container }}"
+
+  homarr:
+    image: "{{ provision.web_gateway.homarr.image }}"
+    container_name: "{{ provision.web_gateway.homarr.container_name }}"
+    restart: unless-stopped
+    ports:
+      # Порт для местной проверки, не публикация в домашнюю сеть.
+      - "127.0.0.1:{{ provision.web_gateway.homarr.internal_port }}:7575"
+    env_file:
+      - "{{ provision.web_gateway.paths.secrets }}/homarr.env"
+    environment:
+      TZ: Europe/Moscow
+      AUTH_PROVIDERS: oidc
+      AUTH_OIDC_ISSUER: "{{ provision.web_gateway.homarr.authentication.issuer }}"
+      AUTH_OIDC_CLIENT_ID: "{{ provision.web_gateway.homarr.authentication.client_id }}"
+      AUTH_OIDC_CLIENT_NAME: Authelia
+      AUTH_OIDC_FORCE_USERINFO: "true"
+    volumes:
+      - "{{ provision.web_gateway.homarr.data.host }}:{{ provision.web_gateway.homarr.data.container }}"
+    # Доступ к Docker-сокету Homarr не требуется.
