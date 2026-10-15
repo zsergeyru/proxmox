@@ -28,6 +28,7 @@ def _version_key(value: str) -> tuple[int, ...]:
 
 
 def _pve_node(client: PveClient) -> str:
+    """Выбрать доступный узел из проверенного ответа PVE API."""
     nodes = client.data("/nodes")
     if not isinstance(nodes, list):
         raise InfraManagerError("PVE API /nodes вернул неожиданный формат")
@@ -40,6 +41,7 @@ def _pve_node(client: PveClient) -> str:
 
 
 def _debian_template(client: PveClient, node: str) -> str:
+    """Найти допустимый Debian-шаблон среди файлов указанного хранилища."""
     content = client.data(
         f"/nodes/{node}/storage/{TEMPLATE_STORAGE}/content",
         query={"content": "vztmpl"},
@@ -64,6 +66,7 @@ def _debian_template(client: PveClient, node: str) -> str:
 
 
 def _pool_has_vmid(client: PveClient, vmid: int) -> bool:
+    """Проверить членство VMID в управляемом пуле перед действиями над ним."""
     payload = client.data(f"/pools/{MANAGED_POOL}")
     if not isinstance(payload, dict):
         raise InfraManagerError(
@@ -79,6 +82,7 @@ def _pool_has_vmid(client: PveClient, vmid: int) -> bool:
 
 
 def _lxc_status(client: PveClient, node: str) -> str:
+    """Прочитать текущее состояние испытательного LXC по API PVE."""
     payload = client.data(
         f"/nodes/{node}/lxc/{TEST_VMID}/status/current"
     )
