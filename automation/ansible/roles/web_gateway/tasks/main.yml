@@ -273,7 +273,8 @@
       - --no-deps
       - authelia
       - authelia
-      - validate-config
+      - config
+      - validate
       - --config
       - /config/configuration.yml
   changed_when: false
