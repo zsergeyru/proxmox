@@ -1,0 +1,23 @@
+[Unit]
+Description=Infra Manager HTTPS API for Homarr
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/etc/infra-manager/openbao/tls/server.crt
+ConditionPathExists=/etc/infra-manager/openbao/tls/server.key
+
+[Service]
+Type=simple
+Environment=PYTHONPATH=/usr/local/lib/infra-manager
+ExecStart=/usr/bin/python3 -m infra_manager homarr-api --bind 192.168.9.10 --port 3003
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+ProtectHome=true
+ProtectSystem=strict
+PrivateTmp=true
+ReadWritePaths=/mnt/persistent-state/homarr-api
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+[Install]
+WantedBy=multi-user.target
