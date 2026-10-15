@@ -10,7 +10,7 @@ Type=simple
 Environment=PYTHONPATH=/usr/local/lib/infra-manager
 # Пока не подтверждена изоляция административной страницы Homarr от Интернета.
 Environment=INFRA_HOMARR_ACTIONS_ENABLED=0
-ExecStart=/usr/bin/python3 -m infra_manager homarr-api --bind 192.168.9.10 --port 3003
+ExecStart=/usr/bin/python3 -m infra_manager homarr-api --port 3003
 Restart=on-failure
 RestartSec=5
 UMask=0077
