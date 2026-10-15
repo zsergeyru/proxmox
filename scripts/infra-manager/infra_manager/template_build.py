@@ -19,6 +19,7 @@ ISO_BASE = "https://cdimage.debian.org/debian-cd/current/amd64/iso-cd"
 
 
 def _tool_env() -> dict[str, str]:
+    """Подготовить доверенный набор сертификатов для внешних инструментов."""
     if not CA_BUNDLE.is_file() or CA_BUNDLE.stat().st_size == 0:
         raise InfraManagerError(f"Не найден CA bundle: {CA_BUNDLE}")
     env = os.environ.copy()
@@ -32,6 +33,10 @@ def _finalize_template(
     node: str,
     vmid: int,
 ) -> None:
+    """Завершить подготовку VM-шаблона настройками Cloud-Init и защитой.
+
+    Выполняется только после успешной сборки; повторная попытка должна
+    проверить существующий объект и его принадлежность."""
     console.info("Финальная конфигурация Cloud-Init и защиты")
     client.put(
         f"/nodes/{node}/qemu/{vmid}/config",
@@ -51,6 +56,9 @@ def _existing_template_is_compatible(
     node: str,
     vmid: int,
 ) -> bool:
+    """Сверить VMID, тип и свойства существующего шаблона.
+
+    Чужой объект с занятым VMID отвергается, а не удаляется."""
     resource = client.find_vm(vmid)
     if resource is None:
         return False
@@ -84,6 +92,9 @@ def _existing_template_is_compatible(
 
 
 def _resolve_debian_iso() -> tuple[str, str]:
+    """Получить имя установочного образа Debian 13 по опубликованным контрольным суммам.
+
+    Сетевой отказ не заменяется произвольным образом из хранилища."""
     console.info("Определение актуального Debian 13 netinst ISO")
     request = urllib.request.Request(
         f"{ISO_BASE}/SHA512SUMS",
