@@ -19,6 +19,9 @@ from infra_manager.openbao import sync_ssh_access
 
 
 def main() -> int:
+    """Согласовать SSH OTP и машинные права с access.yaml.
+
+    Проверить отсутствие ожидающей активации перед изменением прав доступа."""
     try:
         require_runtime_activation_idle()
         return sync_ssh_access(REPO_ROOT)
