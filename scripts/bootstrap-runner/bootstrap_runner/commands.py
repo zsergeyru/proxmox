@@ -38,18 +38,16 @@ class BootstrapCommandsMixin:
     """Общие команды PVE и запуск внешних средств с журналированием."""
 
     def show_log_tail(self) -> None:
-        """Вывести оператору последние 30 строк технического журнала при ошибке команды."""
+        """Указать путь к закрытому журналу, не раскрывая сырой вывод.
+
+        В выводе инструментов возможны секреты и временные учётные данные.
+        Журнал изучает администратор непосредственно на PVE.
+        """
         print(
-            f"{self.c_yellow}Последние строки технического журнала:{self.c_reset}",
+            f"Подробности ошибки в журнале PVE: {self.log_file}. "
+            "Проверьте состояние ресурсов перед повторным запуском.",
             file=sys.stderr,
         )
-        try:
-            lines = self.log_file.read_text(errors="replace").splitlines()[-30:]
-            for line in lines:
-                print(line, file=sys.stderr)
-        except OSError:
-            pass
-        print(f"Полный журнал: {self.log_file}", file=sys.stderr)
 
     def run(
         self,
@@ -65,8 +63,9 @@ class BootstrapCommandsMixin:
         quiet записывает вывод в журнал, progress дополнительно показывает этапы
         Ansible; capture возвращает stdout/stderr вызывающему методу. По умолчанию
         неуспешный код завершения вызывает BootstrapError. Аргументы запуска
-        передаются без оболочки; не следует передавать секреты в аргументах,
-        поскольку строка неуспешной команды может оказаться в ошибке.
+        передаются без оболочки; диагностический вывод может содержать секреты,
+        поэтому не показывается оператору при ошибке. Полный вывод тихих
+        операций остаётся в закрытом журнале PVE.
         """
         command_env = os.environ.copy()
         if env:
@@ -141,7 +140,7 @@ class BootstrapCommandsMixin:
             if check and returncode:
                 self.show_log_tail()
                 raise BootstrapError(
-                    f"команда завершилась с кодом {returncode}: {' '.join(args)}"
+                    f"Команда {Path(args[0]).name} завершилась с кодом {returncode}. Проверьте состояние PVE перед повтором."
                 )
             return result
 
@@ -161,7 +160,7 @@ class BootstrapCommandsMixin:
             if check and result.returncode:
                 self.show_log_tail()
                 raise BootstrapError(
-                    f"команда завершилась с кодом {result.returncode}: {' '.join(args)}"
+                    f"Команда {Path(args[0]).name} завершилась с кодом {result.returncode}. Проверьте состояние PVE перед повтором."
                 )
             return result
 
@@ -173,10 +172,10 @@ class BootstrapCommandsMixin:
             check=False,
         )
         if check and result.returncode:
-            if capture and result.stderr:
-                print(result.stderr.rstrip(), file=sys.stderr)
+            # Сырой stderr может содержать секреты; оператор получает только
+            # название инструмента и код отказа.
             raise BootstrapError(
-                f"команда завершилась с кодом {result.returncode}: {' '.join(args)}"
+                f"Команда {Path(args[0]).name} завершилась с кодом {result.returncode}. Проверьте состояние PVE перед повтором."
             )
         return result
 
