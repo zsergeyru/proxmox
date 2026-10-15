@@ -1,4 +1,4 @@
-# Воспроизводимая конфигурация. Секреты берутся из /config/secrets и OpenBao.
+# Воспроизводимая конфигурация. Секреты берутся из постоянного /config/secrets.
 server:
   address: "tcp://:{{ provision.web_gateway.authelia.internal_port }}"
 
@@ -9,10 +9,18 @@ totp:
   issuer: "{{ provision.web_gateway.domain }}"
 
 authentication_backend:
+  password_reset:
+    # Пока уведомления пишутся только в файл, восстановление по почте выключено.
+    disable: true
+  password_change:
+    disable: false
   file:
-    path: /config/users_database.yml
+    path: /data/users_database.yml
+    watch: true
     password:
-      algorithm: argon2id
+      algorithm: argon2
+      argon2:
+        variant: argon2id
 
 access_control:
   default_policy: deny
@@ -58,4 +66,30 @@ identity_providers:
           - profile
           - email
           - groups
+        userinfo_signed_response_alg: none
+        response_types:
+          - code
+        grant_types:
+          - authorization_code
+      - client_id: immich
+        client_name: Immich
+        client_secret: {% raw %}{{ secret "/config/secrets/authelia-immich-client-secret-hash" }}{% endraw %}
+        public: false
+        authorization_policy: two_factor
+        require_pkce: true
+        pkce_challenge_method: S256
+        token_endpoint_auth_method: client_secret_basic
+        redirect_uris:
+          - https://photos.zsergey.ru/auth/login
+          - https://photos.zsergey.ru/user-settings
+          - app.immich:///oauth-callback
+        scopes:
+          - openid
+          - profile
+          - email
+        response_types:
+          - code
+        grant_types:
+          - authorization_code
+        access_token_signed_response_alg: none
         userinfo_signed_response_alg: none
