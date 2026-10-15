@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-# Отложенно активировать рабочую среду infra-manager внутри 910.
+# Отложенно активировать рабочую среду infra-manager внутри управляющего гостя.
 # Перезапускает состав Docker, проверяет OpenBao и Semaphore. Журнал
 # записывается в /var/log/infra-manager/runtime-activation.log.
 # При неуспехе часть контейнеров уже может быть перезапущена: автоматического
