@@ -1,0 +1,8 @@
+# Управляемые маршруты. Не редактировать вручную: источник — management/routes.yaml.
+{% for route in web_gateway_routes if route.enabled | default(false) | bool %}
+{{ route.domain }} {
+    encode zstd gzip
+    reverse_proxy {{ route.upstream }}
+}
+
+{% endfor %}
