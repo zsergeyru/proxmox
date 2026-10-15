@@ -52,9 +52,26 @@
         fail_msg: "Гость должен работать на Debian 13 amd64"
 
   tasks:
+    - name: Проверить, что для гостя реализован безопасный sync
+      ansible.builtin.assert:
+        that:
+          - >-
+            provision.web_gateway is defined
+            or provision.ai_services is defined
+            or (
+              provision.portal is defined
+              and provision.portal.local is defined
+              and provision.portal.local.enabled | default(false) | bool
+            )
+        fail_msg: >-
+          Для гостя нет безопасной синхронизации. Используйте
+          infra-manager deploy после проверки изменений и резервной копии.
+      when: (provision_phase | default("full")) == "sync"
+
     - name: Выполнить базовую настройку Linux
       ansible.builtin.include_role:
         name: linux_base
+      when: (provision_phase | default("full")) != "sync"
 
     - name: Настроить Docker
       ansible.builtin.include_role:
@@ -117,9 +134,39 @@
         - (provision_phase | default('full')) == "full"
         - provision.ai_services is defined
 
+    # Sync выполняет только специально выделенные безопасные операции.
+    # Полные роли нельзя запускать: они устанавливают ПО и меняют образы.
+    - name: Синхронизировать маршруты веб-шлюза без обновления контейнеров
+      ansible.builtin.include_role:
+        name: web_gateway
+        tasks_from: sync
+      when:
+        - (provision_phase | default("full")) == "sync"
+        - guest_manifest.name == "web-gateway"
+        - provision.web_gateway is defined
+
+    - name: Синхронизировать настройки Speaches без загрузки моделей
+      ansible.builtin.include_role:
+        name: ai_services
+        tasks_from: sync
+      when:
+        - (provision_phase | default("full")) == "sync"
+        - provision.ai_services is defined
+
+    - name: Синхронизировать ссылки Homepage без обновления образа
+      ansible.builtin.include_role:
+        name: portal
+        tasks_from: sync
+      when:
+        - (provision_phase | default("full")) == "sync"
+        - provision.portal is defined
+        - provision.portal.local is defined
+        - provision.portal.local.enabled | default(false) | bool
+
     - name: Подготовить структуру каталогов гостя
       ansible.builtin.include_role:
         name: guest_layout
+      when: (provision_phase | default("full")) != "sync"
 
     - name: Назначить активацию новой управляющей среды после настройки infra-manager
       ansible.builtin.command:
