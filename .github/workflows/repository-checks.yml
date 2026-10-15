@@ -102,6 +102,9 @@ jobs:
       - name: Run guest operation checks
         run: python scripts/tests/test-guest-operations.py
 
+      - name: Check safe Sync does not update software
+        run: python scripts/tests/test-safe-sync.py
+
       - name: Run unified guest status checks
         run: python scripts/tests/test-guest-status.py
 
