@@ -44,6 +44,10 @@ def _run_guest_command(
 
 
 def _read_guest_file(node: str, address: str, path: str) -> str:
+    """Прочитать операторский файл гостя только по абсолютному пути.
+
+    Содержимое может включать секреты; вызывающая сторона определяет,
+    какие поля разрешено показать пользователю."""
     target = Path(path)
     if not target.is_absolute():
         raise InfraManagerError(
@@ -57,6 +61,7 @@ def _read_guest_file(node: str, address: str, path: str) -> str:
 
 
 def _read_env_value(content: str, key: str, path: str) -> str:
+    """Выбрать ровно одно непустое значение ключа из файла переменных."""
     prefix = f"{key}="
     matches = [
         line[len(prefix):]
@@ -75,6 +80,10 @@ def _resolve_password(
     address: str,
     spec: dict[str, str],
 ) -> str:
+    """Разрешить объявленный источник операторского пароля гостя.
+
+    Пароль извлекается из файла или файла переменных; эта функция
+    не должна сама выводить его в журнал."""
     source = spec["source"]
     path = spec["path"]
 
@@ -112,6 +121,9 @@ def _resolve_password(
 
 
 def _load_common_checks(identity: GuestIdentity) -> tuple[dict[str, Any], ...]:
+    """Загрузить проверки гостя из status.yaml с проверкой версии схемы.
+
+    Ошибки описания не заменяются пустым списком проверок."""
     path = identity.directory / "status.yaml"
     if not path.is_file():
         return ()
@@ -158,6 +170,7 @@ def _load_common_checks(identity: GuestIdentity) -> tuple[dict[str, Any], ...]:
 
 
 def _check_tcp(address: str, port: int) -> None:
+    """Проверить доступность указанного порта с ограничением времени ожидания."""
     try:
         with socket.create_connection((address, port), timeout=5):
             pass
@@ -174,6 +187,10 @@ def _run_declared_check(
     *,
     project_branch: str | None = None,
 ) -> None:
+    """Выполнить только разрешённую проверку из status.yaml.
+
+    Неизвестный тип или некорректные параметры считаются ошибкой
+    описания, а не успешной проверкой службы."""
     check_type = check["type"]
 
     if check_type == "tcp":
@@ -352,6 +369,10 @@ def _service_fields(
     *,
     show_secrets: bool,
 ) -> list[tuple[str, str]]:
+    """Собрать отображаемые поля службы и операторских учётных записей.
+
+    Скрытие паролей определяется show_secrets; без явного разрешения
+    секретные значения не должны отображаться."""
     fields = [("Адрес", str(service["url"]))]
     operator = service.get("operator")
     if not isinstance(operator, dict):

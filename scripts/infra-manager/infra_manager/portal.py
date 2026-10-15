@@ -45,6 +45,7 @@ PORTAL_DEFAULT_PORT = 3001
 
 
 def _gateway_base_url() -> str:
+    """Определить адрес портала по роли управляющего гостя, не по VMID."""
     manager = find_guest_by_role(
         PATHS.repo_root,
         SETTINGS.infra_manager_role,
@@ -94,6 +95,7 @@ def build_portal_bookmarks(vmid: int) -> list[dict]:
 
 
 def _load_provision(identity: GuestIdentity) -> dict[str, Any]:
+    """Прочитать provision.yaml и подтвердить принадлежность к гостю."""
     path = identity.directory / "provision.yaml"
     try:
         data = yaml.safe_load(path.read_text(encoding="utf-8"))
@@ -165,6 +167,7 @@ def local_portal_definition(
 
 
 def _walk_portals(value: Any, source: str = "provision") -> list[tuple[str, dict]]:
+    """Рекурсивно найти объявления портала с указанием исходного раздела."""
     found: list[tuple[str, dict]] = []
     if isinstance(value, dict):
         portal = value.get("portal")
@@ -181,6 +184,9 @@ def _walk_portals(value: Any, source: str = "provision") -> list[tuple[str, dict
 
 
 def _validated_operator(source: str, operator: object) -> dict[str, Any] | None:
+    """Проверить формат операторских учётных записей для портала.
+
+    Неполные или противоречивые описания отвергаются до публикации."""
     if operator is None:
         return None
     if not isinstance(operator, dict):
@@ -265,6 +271,9 @@ def _validated_operator(source: str, operator: object) -> dict[str, Any] | None:
 
 
 def _validated_portal(source: str, portal: dict) -> dict[str, Any]:
+    """Проверить адрес, параметры и цели локального портала.
+
+    Недопустимые значения не должны попадать в формируемые настройки."""
     name = portal.get("name")
     scheme = portal.get("scheme")
     port = portal.get("port")
@@ -434,6 +443,9 @@ def render_portal_bookmarks(vmid: int) -> str:
 
 
 def _write_yaml(output: Path, content: str) -> None:
+    """Записать результат через временный файл и атомарную замену.
+
+    Это снижает риск частично записанного YAML при ошибке записи."""
     output.parent.mkdir(parents=True, exist_ok=True)
     temporary = output.with_suffix(output.suffix + ".tmp")
     temporary.write_text(content, encoding="utf-8")

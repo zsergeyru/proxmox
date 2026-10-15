@@ -20,6 +20,10 @@ from infra_manager.semaphore import set_log_level_from_task
 
 
 def _extract_level(argv: list[str]) -> tuple[list[str], str | None]:
+    """Извлечь единственное значение уровня вывода из аргументов задания.
+
+    Несколько переданных значений считаются ошибкой, чтобы настройка
+    не зависела от порядка аргументов."""
     remaining: list[str] = []
     values: list[str] = []
     prefix = f"{LOG_LEVEL_ENV}="
@@ -38,6 +42,7 @@ def _extract_level(argv: list[str]) -> tuple[list[str], str | None]:
 
 
 def main() -> int:
+    """Проверить допустимость уровня вывода и сохранить его настройку."""
     parser = argparse.ArgumentParser(
         description="Сохранить уровень вывода инфраструктурных заданий"
     )

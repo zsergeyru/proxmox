@@ -13,10 +13,12 @@ TEMPLATE_VERSION = 8
 
 
 def is_truthy(value: Any) -> bool:
+    """Распознать булевы значения, возвращаемые API PVE в разных формах."""
     return value in (1, True, "1", "true")
 
 
 def _agent_enabled(config: dict[str, Any]) -> bool:
+    """Проверить признак гостевого агента в строковых настройках VM."""
     agent = str(config.get("agent") or "")
     return (
         agent == "1"

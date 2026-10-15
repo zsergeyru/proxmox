@@ -158,6 +158,10 @@ def probe_packer_image(image: str) -> str | None:
 
 
 def sources(opentofu_version: str, machine: str) -> list[tuple[str, str]]:
+    """Составить список внешних адресов для заданной версии OpenTofu.
+
+    Неизвестная архитектура или некорректная версия отклоняются
+    до сетевых обращений."""
     if not VERSION_RE.fullmatch(opentofu_version):
         raise ValueError("Некорректная версия OpenTofu в provision.yaml")
     architectures = {"x86_64": "amd64", "aarch64": "arm64"}
@@ -172,6 +176,9 @@ def sources(opentofu_version: str, machine: str) -> list[tuple[str, str]]:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Проверить разрешённый образ Packer и доступность источников OpenTofu.
+
+    Проверка не скачивает и не устанавливает пакеты в рабочую среду."""
     parser = argparse.ArgumentParser(description="Проверить внешние источники для infra-runtime.")
     parser.add_argument("--packer-version", required=True)
     parser.add_argument("--packer-image", required=True)

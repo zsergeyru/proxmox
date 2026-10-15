@@ -13,6 +13,7 @@ from .guest_catalog import resolve_guest_configuration
 
 @dataclass(frozen=True)
 class GuestRecord:
+    """Проверенные параметры гостя для расчёта прав из access.yaml."""
     vmid: int
     name: str
     kind: str
@@ -25,18 +26,21 @@ class GuestRecord:
 
 @dataclass(frozen=True)
 class SshOtpEdge:
+    """Разрешённое направленное соединение SSH OTP между двумя гостями."""
     source_vmid: int
     target_vmid: int
 
 
 @dataclass(frozen=True)
 class AccessPolicy:
+    """Единая модель разрешённых машинных идентичностей и связей SSH."""
     guests: dict[int, GuestRecord]
     machine_identity_vmids: frozenset[int]
     ssh_otp_edges: frozenset[SshOtpEdge]
     project_repository_read_vmids: frozenset[int]
 
     def sources_for(self, target_vmid: int) -> tuple[int, ...]:
+        """Перечислить допущенные источники SSH OTP для целевого гостя."""
         return tuple(
             sorted(
                 edge.source_vmid
@@ -46,6 +50,7 @@ class AccessPolicy:
         )
 
     def targets_for(self, source_vmid: int) -> tuple[int, ...]:
+        """Перечислить допустимые SSH-цели конкретного гостя."""
         return tuple(
             sorted(
                 edge.target_vmid
@@ -55,10 +60,15 @@ class AccessPolicy:
         )
 
     def project_repository_read_allowed(self, vmid: int) -> bool:
+        """Проверить явное разрешение читать исходный репозиторий проекта."""
         return vmid in self.project_repository_read_vmids
 
 
 def _guest_records(repo_root: Path) -> dict[int, GuestRecord]:
+    """Собрать каталог гостей из guest.yaml с учётом общих профилей.
+
+    Некорректные или неоднозначные описания должны остановить построение
+    прав: доступ нельзя выдавать по частично разобранным данным."""
     guests_root = repo_root / "infrastructure/guests"
     defaults = _load_yaml(guests_root / "defaults.yaml")
     common = defaults.get("defaults")
@@ -107,6 +117,10 @@ def _expand_target(
     source_vmid: int,
     guests: dict[int, GuestRecord],
 ) -> set[int]:
+    """Преобразовать объявленную SSH-цель в набор известных VMID.
+
+    Неподдерживаемые и несуществующие цели отвергаются, а соединение
+    гостя с самим собой не создаётся."""
     if selector.startswith("guest:"):
         try:
             vmid = int(selector.partition(":")[2])

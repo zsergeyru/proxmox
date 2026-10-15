@@ -41,6 +41,7 @@ class Paths:
 
     @property
     def asset_dir(self) -> Path:
+        """Найти исходные файлы Compose по роли управляющего гостя."""
         identity = find_guest_by_role(
             self.repo_root,
             INFRA_MANAGER_ROLE,
@@ -49,38 +50,47 @@ class Paths:
 
     @property
     def runtime_secret_dir(self) -> Path:
+        """Указать временный каталог секретов, не постоянное хранилище."""
         return Path("/run/infra-manager/secrets")
 
     @property
     def openbao_materialized_marker(self) -> Path:
+        """Указать отметку успешной выдачи рабочих секретов OpenBao."""
         return self.runtime_secret_dir / ".openbao-materialized"
 
     @property
     def ca_dir(self) -> Path:
+        """Указать каталог открытых материалов доверия."""
         return self.config_dir / "ca"
 
     @property
     def ca_bundle(self) -> Path:
+        """Найти набор доверенных сертификатов HTTPS для служб."""
         return self.ca_dir / "ca-bundle.crt"
 
     @property
     def ssh_client_ca_public_key(self) -> Path:
+        """Найти открытый ключ центра клиентских SSH-сертификатов."""
         return self.ca_dir / "ssh-client-ca.pub"
 
     @property
     def ssh_host_ca_public_key(self) -> Path:
+        """Найти открытый ключ центра SSH-сертификатов серверов."""
         return self.ca_dir / "ssh-host-ca.pub"
 
     @property
     def openbao_tls_dir(self) -> Path:
+        """Указать опубликованный каталог TLS OpenBao внутри гостя."""
         return self.config_dir / "openbao" / "tls"
 
     @property
     def openbao_tls_ca(self) -> Path:
+        """Найти открытый сертификат центра доверия TLS OpenBao."""
         return self.openbao_tls_dir / "ca.crt"
 
     @property
     def pve_host_dir(self) -> Path:
+        """Прочитать расположение доступных только управляющему гостю данных PVE."""
         return Path(
             os.environ.get(
                 "INFRA_PVE_HOST_DIR",
@@ -90,62 +100,77 @@ class Paths:
 
     @property
     def pve_host_private_key(self) -> Path:
+        """Найти закрытый ключ для служебного SSH-входа на PVE."""
         return self.pve_host_dir / "root_ed25519"
 
     @property
     def pve_host_known_hosts(self) -> Path:
+        """Найти список подтверждённых SSH-ключей PVE."""
         return self.pve_host_dir / "known_hosts"
 
     @property
     def semaphore_dir(self) -> Path:
+        """Указать каталог постоянных данных Semaphore."""
         return self.data_dir / "semaphore"
 
     @property
     def opentofu_dir(self) -> Path:
+        """Указать каталог постоянных данных OpenTofu."""
         return self.data_dir / "opentofu"
 
     @property
     def opentofu_state_dir(self) -> Path:
+        """Отделить сохраняемое состояние OpenTofu от временных файлов."""
         return self.opentofu_dir / "state"
 
     @property
     def opentofu_input(self) -> Path:
+        """Указать итоговое описание гостей, передаваемое OpenTofu."""
         return self.opentofu_dir / "guests.json"
 
     @property
     def status_file(self) -> Path:
+        """Найти установленное описание проверок состояния управляющего гостя."""
         return self.config_dir / "status.yaml"
 
     @property
     def server_env(self) -> Path:
+        """Найти временные переменные запуска Semaphore."""
         return self.runtime_secret_dir / "semaphore-server.env"
 
     @property
     def pve_api_env(self) -> Path:
+        """Найти временные данные обращения к PVE API."""
         return self.runtime_secret_dir / "pve-api.env"
 
     @property
     def admin_password_file(self) -> Path:
+        """Найти временно выданный начальный пароль администратора."""
         return self.runtime_secret_dir / "initial-admin-password"
 
     @property
     def semaphore_api_token_file(self) -> Path:
+        """Найти текущий служебный токен Semaphore."""
         return self.runtime_secret_dir / "semaphore-api-token"
 
     @property
     def github_key(self) -> Path:
+        """Найти рабочий ключ чтения проекта из временного хранилища."""
         return self.runtime_secret_dir / "github_proxmox_repo_ed25519"
 
     @property
     def github_key_copy(self) -> Path:
+        """Вернуть тот же путь к ключу без создания постоянной копии."""
         return self.github_key
 
     @property
     def semaphore_project_id_file(self) -> Path:
+        """Найти сохранённый идентификатор проекта Semaphore."""
         return self.data_dir / "semaphore-project-id"
 
     @property
     def status_command(self) -> Path:
+        """Получить путь к установленной команде проверки состояния."""
         return Path("/usr/local/sbin/infra-manager-status")
 
 

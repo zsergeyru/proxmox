@@ -23,6 +23,10 @@ from infra_manager.guest_deploy import (
 
 
 def main() -> int:
+    """Запустить разрешённый этап первоначальной установки управляющего гостя.
+
+    Запрос принимается только из установленного набора этапов;
+    при ожидающей активации управление гостем блокируется."""
     parser = argparse.ArgumentParser(
         description="Внутренний bootstrap-вызов infra-manager из временного LXC 990"
     )
