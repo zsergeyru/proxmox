@@ -23,6 +23,7 @@
 - [Обратный прокси и сертификаты](docs/caddy.md).
 - [Общий вход и второй фактор](docs/authelia.md).
 - [Домашняя страница](docs/homarr.md).
+- [Управление Caddy и Authelia из Homarr](docs/administration.md).
 - [Развёртывание и восстановление](docs/operations.md).
 - [Причины выбранной схемы](docs/decisions.md).
 - [Состояние реализации](docs/implementation-status.md).
