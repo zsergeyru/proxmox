@@ -52,6 +52,10 @@ def check_inventory() -> None:
     )
     assert next(x for x in mismatched["guests"] if x["vmid"] == 140)["state"] == "mismatch"
     assert next(x for x in mismatched["guests"] if x["vmid"] == 140)["actions"] == []
+    wrong_kind = homarr_inventory.guest_inventory(
+        ROOT, resources=[{"vmid": 140, "type": "qemu", "name": "web-gateway", "status": "running"}]
+    )
+    assert next(x for x in wrong_kind["guests"] if x["vmid"] == 140)["state"] == "mismatch"
 
 
 def check_tokens() -> None:
