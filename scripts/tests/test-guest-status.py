@@ -135,7 +135,10 @@ def check_status_definitions() -> None:
     expected_types = {
         109: ("docker", "systemd", "file"),
         311: (),
-        340: ("docker", "docker", "docker", "http", "http"),
+        340: (
+            "docker", "docker", "docker", "http", "http",
+            "docker", "http", "docker_image", "docker_image",
+        ),
         410: ("docker", "docker", "http", "file"),
         910: ("local_status",),
     }
@@ -207,6 +210,41 @@ def check_declared_check_dispatch() -> None:
         fail("docker-проверка использует неверную цель")
     if args[2][-1] != "open-webui":
         fail("docker-проверка использует неверный контейнер")
+
+
+def check_docker_image_status() -> None:
+    """Наличие образа не выдавать за запуск выключенного дополнения."""
+    image = "ghcr.io/immich-power-tools/immich-power-tools:latest"
+    with patch.object(
+        status,
+        "_run_guest_command",
+        return_value=SimpleNamespace(stdout="sha256:example"),
+    ) as run_guest:
+        status._run_declared_check(
+            "pve",
+            "192.168.3.40",
+            {
+                "type": "docker_image",
+                "image": image,
+                "message": "Образ загружен",
+            },
+        )
+    run_guest.assert_called_once_with(
+        "pve",
+        "192.168.3.40",
+        ["docker", "image", "inspect", "--format", "{{.Id}}", image],
+    )
+
+    try:
+        status._run_declared_check(
+            "pve", "192.168.3.40",
+            {"type": "docker_image", "image": "", "message": "Ошибка"},
+        )
+    except Exception as exc:
+        if "image" not in str(exc):
+            fail("Нет объяснения при пустом имени образа")
+    else:
+        fail("Пустой образ должен отклоняться")
 
 
 def check_dashboard_port() -> None:
@@ -510,6 +548,7 @@ def main() -> None:
     check_immich_accounts()
     check_status_definitions()
     check_declared_check_dispatch()
+    check_docker_image_status()
     check_dashboard_port()
     check_rendered_status()
     check_secret_modes()
