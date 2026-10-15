@@ -21,7 +21,7 @@ from .pve_host import (
 
 def _pve_node_from_environment() -> str:
     """Определить PVE-узел из проверенного адреса API.
-    
+
         Отсутствующий или неверный адрес останавливает работу с ключами
         на хосте, чтобы не отправить команду на случайный узел."""
     endpoint = os.environ.get("TF_VAR_pve_endpoint", "").strip()
@@ -72,7 +72,7 @@ def _staged_pve_api_credential() -> dict[str, str] | None:
 
 def _otp_sources(repo_root: Path) -> list[dict[str, object]]:
     """Собрать разрешённые источники машинного SSH OTP из access.yaml.
-    
+
         Только прошедшие проверку правила должны определять права,
         выдаваемые OpenBao; произвольные гостевые настройки не расширяют их."""
     policy = load_access_policy(repo_root)
