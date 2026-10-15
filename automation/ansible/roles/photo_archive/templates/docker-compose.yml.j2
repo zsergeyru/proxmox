@@ -63,15 +63,15 @@ services:
     ports:
       - "{{ ansible_host }}:{{ provision.photo_archive.addons.memories.web_port }}:5000"
     env_file:
-      - /mnt/persistent-state/secrets/immich-memories.env
+      - {{ provision.photo_archive.storage.required_state_mount }}/secrets/immich-memories.env
     environment:
       CONFIG_PATH: /app/config.yaml
       STATE_PATH: /app/state/state.json
       ENV_PATH: /app/.env
     volumes:
-      - /mnt/persistent-state/addons/memories/config.yaml:/app/config.yaml
-      - /mnt/persistent-state/addons/memories/state:/app/state
-      - /mnt/persistent-state/secrets/immich-memories.env:/app/.env
+      - {{ provision.photo_archive.storage.required_state_mount }}/addons/memories/config.yaml:/app/config.yaml
+      - {{ provision.photo_archive.storage.required_state_mount }}/addons/memories/state:/app/state
+      - {{ provision.photo_archive.storage.required_state_mount }}/secrets/immich-memories.env:/app/.env
       - /etc/localtime:/etc/localtime:ro
     depends_on:
       - immich-server
@@ -88,9 +88,9 @@ services:
       - "{{ ansible_host }}:{{ provision.photo_archive.addons.power_tools.web_port }}:3000"
     env_file:
       - {{ provision.photo_archive.paths.environment }}
-      - /mnt/persistent-state/secrets/immich-power-tools.env
+      - {{ provision.photo_archive.storage.required_state_mount }}/secrets/immich-power-tools.env
     volumes:
-      - /mnt/persistent-state/addons/power-tools/data:/app/data
+      - {{ provision.photo_archive.storage.required_state_mount }}/addons/power-tools/data:/app/data
     depends_on:
       - immich-server
       - database
@@ -104,6 +104,6 @@ services:
     profiles: ["disabled-addons"]
 {% endif %}
     env_file:
-      - /mnt/persistent-state/secrets/immich-analyze.env
+      - {{ provision.photo_archive.storage.required_state_mount }}/secrets/immich-analyze.env
     depends_on:
       - immich-server
