@@ -13,6 +13,7 @@ from .settings import PATHS, SETTINGS
 
 
 def _required_file(path: Path, label: str) -> None:
+    """Проверить наличие обязательного файла до привилегированного действия на PVE."""
     if not path.is_file() or path.stat().st_size == 0:
         raise InfraManagerError(f"Не найден {label}: {path}")
 
@@ -617,6 +618,7 @@ def _features_from_config(config: str) -> dict[str, str]:
 
 
 def _render_features(features: dict[str, str]) -> str:
+    """Собрать параметры LXC в устойчивом порядке для команды PVE."""
     return ",".join(
         f"{name}={value}"
         for name, value in sorted(features.items())
@@ -624,6 +626,7 @@ def _render_features(features: dict[str, str]) -> str:
 
 
 def _container_running(node: str, vmid: int) -> bool:
+    """Узнать состояние LXC через доверенный SSH-доступ к PVE."""
     result = _ssh(node, "pct", "status", str(vmid), capture=True)
     return result.stdout.strip().endswith("running")
 
