@@ -61,6 +61,17 @@ def check_cli_and_commands() -> None:
     else:
         fail("common.run не сообщил об ошибке внешней команды")
 
+    sensitive_output = "CONFIDENTIAL-STDERR-MARKER"
+    command_error = CommandError(
+        ["tool", "--token", "private-value"],
+        9,
+        sensitive_output,
+    )
+    if sensitive_output in str(command_error) or "private-value" in str(command_error):
+        fail("CommandError раскрывает секрет в строковом сообщении")
+    if command_error.stderr != sensitive_output:
+        fail("CommandError должен сохранять stderr отдельно для диагностики")
+
     runner = CommandRunner()
     captured = runner.run(
         [sys.executable, "-c", "print('CAPTURED')"],
