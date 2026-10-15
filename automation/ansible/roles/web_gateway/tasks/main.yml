@@ -324,3 +324,11 @@
   until: web_gateway_homarr_health.status in [200, 301, 302, 303, 307, 308]
   retries: 20
   delay: 3
+
+- name: Подсказать команду просмотра первого пароля из терминала PVE
+  ansible.builtin.debug:
+    msg: >-
+      140: пароль admin создан. Из доверенного терминала PVE выполните
+      pct exec 140 -- python3 /usr/local/lib/web-gateway/show-initial-password.py .
+      Команда удалит открытый пароль после показа; не запускайте её из Semaphore.
+  when: not web_gateway_initial_state.stat.exists
