@@ -19,6 +19,9 @@ from infra_manager.openbao import run_initialize_openbao
 
 
 def main() -> int:
+    """Вызвать штатную инициализацию или восстановление доступа OpenBao.
+
+    Ожидающая активация среды препятствует одновременному изменению состояния."""
     try:
         require_runtime_activation_idle()
         return run_initialize_openbao(REPO_ROOT)
