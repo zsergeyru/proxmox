@@ -25,11 +25,15 @@ from infra_manager.settings import PATHS, SETTINGS
 
 @dataclass(frozen=True)
 class RunningGuest:
+    """Проверенная запись запущенного Linux-гостя и его административный адрес."""
     record: GuestRecord
     address: str
 
 
 def _pve_node_from_environment() -> str:
+    """Определить узел PVE из HTTPS-адреса переменной OpenTofu.
+
+    Неверный протокол и отсутствие имени узла запрещают приёмочную проверку."""
     endpoint = os.environ.get("TF_VAR_pve_endpoint", "").strip()
     parsed = urlparse(endpoint)
     if parsed.scheme != "https" or not parsed.hostname:
@@ -40,6 +44,10 @@ def _pve_node_from_environment() -> str:
 
 
 def _host_pattern(subnet: str) -> str:
+    """Получить шаблон адресов административной сети для доверия SSH Host CA.
+
+    Здесь поддерживается только IPv4-подсеть /16; расширять шаблон
+    на неподтверждённые сети нельзя."""
     network = ipaddress.ip_network(subnet, strict=True)
     if not isinstance(network, ipaddress.IPv4Network) or network.prefixlen != 16:
         raise InfraManagerError(
@@ -50,6 +58,10 @@ def _host_pattern(subnet: str) -> str:
 
 
 def _temporary_admin_identity(node: str, directory: Path) -> tuple[Path, Path]:
+    """Создать временный ключ и подписанный OpenBao сертификат администратора.
+
+    Файлы размещаются во временном каталоге приёмочной проверки,
+    а закрытый ключ не сохраняется в постоянном состоянии."""
     require_command("ssh-keygen")
     private_key = directory / "admin_ed25519"
     run(
@@ -77,6 +89,10 @@ def _temporary_admin_identity(node: str, directory: Path) -> tuple[Path, Path]:
 
 
 def _temporary_host_ca_file(directory: Path, subnet: str) -> Path:
+    """Создать временный known_hosts с доверенным SSH Host CA.
+
+    Ключ центра берётся из опубликованного файла; неизвестный ключ
+    узла не принимается автоматически."""
     if not PATHS.ssh_host_ca_public_key.is_file():
         raise InfraManagerError(
             f"Не опубликован SSH host CA: {PATHS.ssh_host_ca_public_key}"
@@ -102,6 +118,10 @@ def _ssh(
     command: list[str],
     check: bool = True,
 ):
+    """Выполнить SSH-команду через временный сертификат с проверкой узла.
+
+    Проверка host CA обязательна даже для отрицательных испытаний
+    доступа; параметр check позволяет проверить ожидаемый отказ."""
     require_command("ssh")
     return run(
         [
@@ -134,6 +154,10 @@ def _running_guests(
     policy: AccessPolicy,
     client: PveClient,
 ) -> dict[int, RunningGuest]:
+    """Сверить управляемых Linux-гостей с фактическим состоянием PVE.
+
+    Гости с неверным типом вызывают ошибку; незапущенные и без
+    подтверждённого административного адреса не попадают в результат."""
     running: dict[int, RunningGuest] = {}
     for vmid, record in sorted(policy.guests.items()):
         if not record.provisioned_linux:
@@ -163,6 +187,12 @@ def _running_guests(
 
 
 def verify_ssh_access(repo_root: Path, node: str) -> None:
+    """Проверить разрешённые и запрещённые связи SSH OTP по access.yaml.
+
+    Перед испытанием требуется доступность всех участников объявленных
+    связей. Для разрешённых соединений проверяется успешный SSH-вход,
+    для остальных работающих гостей — отказ OTP. Временные ключи
+    удаляются при выходе из временного каталога."""
     policy = load_access_policy(repo_root)
     if not policy.ssh_otp_edges:
         console.result("В access.yaml нет межмашинных SSH OTP-связей")
@@ -273,6 +303,9 @@ def verify_ssh_access(repo_root: Path, node: str) -> None:
 
 
 def main() -> int:
+    """Выполнить приёмочную проверку SSH OTP и вывести понятную ошибку.
+
+    При любой ожидаемой ошибке возвращается ненулевой код завершения."""
     try:
         verify_ssh_access(ROOT, _pve_node_from_environment())
     except (InfraManagerError, OSError, ValueError) as exc:
