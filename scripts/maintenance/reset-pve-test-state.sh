@@ -120,6 +120,8 @@ parse_args() {
     (( PURGE_BACKUPS == 0 || APPLY == 1 ))         || die "--purge-backups используется только вместе с --apply"
 }
 
+# Испытательная очистка требует root и доступных команд PVE.
+# Без подтверждения среды удаляющие операции запрещены.
 require_pve_root() {
     local cmd
     [[ $EUID -eq 0 ]] || die "Запустите скрипт от root на PVE"
@@ -131,6 +133,8 @@ require_pve_root() {
     pveversion >/dev/null 2>&1 || die "Proxmox VE не обнаружен"
 }
 
+# Все реальные изменения проходят через этот переключатель.
+# Без --apply выводится план; частично выполненные удаления не откатываются.
 run() {
     local description=$1
     shift
@@ -157,6 +161,9 @@ config_value() {
     awk -F ': ' -v key="$key" '$1 == key {print $2; exit}' <<<"$config"
 }
 
+# Сверить VMID, тип, hostname и при необходимости метку владения.
+# Чужой или заблокированный LXC никогда не разблокируется и не удаляется;
+# защита снимается только после подтверждённой принадлежности.
 remove_known_ct() {
     local vmid=$1 expected_hostname=$2 require_project_marker=$3
     local config hostname description status lock protection
@@ -201,6 +208,8 @@ remove_known_ct() {
     run "удалить LXC $vmid ($expected_hostname)" pct destroy "$vmid" --purge 1
 }
 
+# Требовать совпадения VMID, типа и разрешённого имени перед удалением.
+# Неизвестную либо заблокированную VM оставляем без изменений.
 remove_known_vm() {
     local vmid=$1
     shift
@@ -390,12 +399,17 @@ remove_project_root_ssh_authorization() {
         sed -i '/ infra-manager-pve-root$/d' "$authorized_keys"
 }
 
+# Удаление разрешено только для фиксированных путей из сценария.
+# В реальном режиме требуется --apply; резервные копии защищены
+# отдельным флагом --purge-backups.
 remove_path() {
     local path=$1 description=$2
     [[ -e "$path" || -L "$path" ]] || return
     run "$description: $path" rm -rf -- "$path"
 }
 
+# Резервные данные сохраняются по умолчанию. Их удаление
+# требует одновременного явного подтверждения двух флагов.
 remove_project_files() {
     log "Файлы старых и текущих вариантов проекта на PVE"
 
@@ -421,6 +435,8 @@ remove_project_files() {
     fi
 }
 
+# Перед удалением каждого тестового гостя выполняется отдельная
+# проверка его типа и принадлежности проекту; чужие объекты сохраняются.
 remove_project_objects() {
     log "Виртуальные объекты проекта"
 
