@@ -67,7 +67,7 @@ def rsa_private_key() -> str:
     return result.stdout
 
 
-def initialize(state: Path, email: str) -> None:
+def initialize(state: Path, email: str, temporary: Path | None = None) -> None:
     """Инициализировать приложение один раз и проверять целостность повторно."""
     if not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", email):
         raise RuntimeError("Неверный адрес администратора в provision.yaml")
@@ -139,7 +139,8 @@ def initialize(state: Path, email: str) -> None:
         }}}
         write_once(users, yaml.safe_dump(data, allow_unicode=True, sort_keys=False))
 
-        temporary = Path("/run/web-gateway")
+        if temporary is None:
+            temporary = Path("/run/web-gateway")
         temporary.mkdir(mode=0o700, parents=True, exist_ok=True)
         os.chmod(temporary, 0o700)
         write_once(temporary / "initial-admin-password", password + "\n")
