@@ -4,8 +4,11 @@
 from __future__ import annotations
 
 import copy
+import importlib.util
+import stat
 import subprocess
 import tempfile
+from unittest.mock import patch
 from pathlib import Path
 
 import yaml
@@ -98,6 +101,28 @@ def test_compose() -> None:
             assert check.returncode == 0, check.stderr
 
 
+def test_addons_state() -> None:
+    path = ROOT / "automation/ansible/roles/photo_archive/files/setup_addons.py"
+    spec = importlib.util.spec_from_file_location("setup_addons", path)
+    assert spec is not None and spec.loader is not None
+    helper = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(helper)
+    with tempfile.TemporaryDirectory() as directory:
+        state = Path(directory)
+        with patch.object(helper.os, "chown") as chown:
+            first = helper.prepare(state)
+            assert len(first) == 4
+            assert chown.called
+            secret = state / "secrets/immich-memories.env"
+            value = secret.read_text(encoding="utf-8")
+            assert "DASHBOARD_TOKEN=" in value
+            assert stat.S_IMODE(secret.stat().st_mode) == 0o600
+            secret.write_text(value + "CUSTOM=1" + chr(10), encoding="utf-8")
+            assert helper.prepare(state) == []
+            assert secret.read_text(encoding="utf-8").endswith("CUSTOM=1" + chr(10))
+
+
 if __name__ == "__main__":
     test_compose()
-    print("OK: Immich compose template")
+    test_addons_state()
+    print("OK: Immich compose and add-ons state")
