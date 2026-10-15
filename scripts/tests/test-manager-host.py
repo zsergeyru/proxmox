@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import ast
 import contextlib
 import importlib.util
 import sys
@@ -177,8 +178,23 @@ def test_host_wrapper_is_minimal() -> None:
                 f"PVE-оболочка содержит лишнюю рабочую логику: {fragment}"
             )
 
-    if source.count("\n") > 170:
-        raise AssertionError("PVE-оболочка стала слишком большой")
+    # Правило 010 требует описания модулей и функций: они не должны
+    # считаться разрастанием исполняемой логики тонкой PVE-оболочки.
+    documentation_lines: set[int] = set()
+    for node in ast.walk(ast.parse(source)):
+        if not isinstance(
+            node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
+        ) or not node.body:
+            continue
+        first = node.body[0]
+        if isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant):
+            if isinstance(first.value.value, str):
+                documentation_lines.update(
+                    range(first.lineno, first.end_lineno + 1)
+                )
+
+    if len(source.splitlines()) - len(documentation_lines) > 170:
+        raise AssertionError("Исполняемая часть PVE-оболочки стала слишком большой")
     if '"pct",\n            "exec"' not in source:
         raise AssertionError("PVE-оболочка должна проксировать через pct exec")
     if '"--recover"' not in source:
