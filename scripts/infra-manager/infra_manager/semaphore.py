@@ -1,4 +1,10 @@
-"""Работа с Semaphore API и декларативная настройка проекта."""
+"""Обращение к Semaphore API и согласование проекта с описанием в Git.
+
+Модуль создаёт или обновляет источники Git, ключи, группы переменных и
+шаблоны заданий. При ошибке API изменения, уже принятые Semaphore,
+не откатываются; повторный запуск сверяет фактические объекты по именам.
+Пароли и токены читаются из служебных файлов и не предназначены для вывода.
+"""
 
 from __future__ import annotations
 
@@ -175,6 +181,7 @@ def semaphore_templates(
 
 
 def nonempty(path: Path) -> bool:
+    """Проверить наличие непустого файла без чтения конфиденциального содержимого."""
     return path.is_file() and path.stat().st_size > 0
 
 
@@ -264,7 +271,9 @@ def require_unique_by_name(
 
 
 class SemaphoreClient:
+    """Клиент API Semaphore с входом по сеансу или служебному токену."""
     def __init__(self, base_url: str = SEMAPHORE_URL) -> None:
+        """Подготовить HTTP-клиент и отдельное хранилище служебного сеанса."""
         self.base_url = base_url.rstrip("/")
         self.cookie_jar = http.cookiejar.CookieJar()
         self.cookie_opener = urllib.request.build_opener(
@@ -274,6 +283,7 @@ class SemaphoreClient:
 
     @staticmethod
     def _decode_json(body: bytes, context: str) -> Any:
+        """Разобрать ответ Semaphore; некорректный ответ не считать успешным."""
         if not body:
             return None
         try:
@@ -292,6 +302,10 @@ class SemaphoreClient:
         auth: str | None = None,
         timeout: int = 20,
     ) -> Any:
+        """Выполнить запрос API в выбранном режиме авторизации.
+
+        При ошибке HTTP операция прекращается. Содержимое токена не должно
+        попадать в вывод, даже если запрос изменял настройки."""
         body = None
         headers = {
             "Accept": "application/json",
@@ -344,6 +358,7 @@ class SemaphoreClient:
         return self._decode_json(raw, f"Semaphore API {method} {path}")
 
     def get(self, path: str, *, auth: str | None = None) -> Any:
+        """Прочитать объект Semaphore без изменения состояния."""
         return self._request("GET", path, auth=auth)
 
     def post(
@@ -353,15 +368,19 @@ class SemaphoreClient:
         *,
         auth: str | None = None,
     ) -> Any:
+        """Создать ресурс в Semaphore; результат должен быть проверен вызывающим кодом."""
         return self._request("POST", path, payload, auth=auth)
 
     def put(self, path: str, payload: Any) -> Any:
+        """Обновить ресурс Semaphore; частичное применение не откатывается автоматически."""
         return self._request("PUT", path, payload)
 
     def delete(self, path: str) -> Any:
+        """Удалить ресурс Semaphore только по заранее подтверждённому идентификатору."""
         return self._request("DELETE", path)
 
     def ping(self) -> None:
+        """Проверить доступность API Semaphore перед настройкой проекта."""
         request = urllib.request.Request(
             f"{self.base_url}/api/ping",
             headers={"Accept": "application/json"},
@@ -380,8 +399,9 @@ class SemaphoreClient:
             ) from exc
 
     def login(self) -> None:
+        """Открыть административный сеанс с паролем из защищённого файла."""
         if not nonempty(ADMIN_PASSWORD_FILE):
-            raise InfraManagerError("Не найден первичный пароль Semaphore")
+            raise InfraManagerError("Не найден первичный пароль Semaphore. Проверьте файл администратора в постоянном состоянии 910")
         password = ADMIN_PASSWORD_FILE.read_text(
             encoding="utf-8"
         ).strip()
@@ -393,6 +413,7 @@ class SemaphoreClient:
         self.auth_mode = "cookie"
 
     def token_valid(self) -> bool:
+        """Проверить рабочий токен безопасным запросом к данным пользователя."""
         if not nonempty(SEMAPHORE_API_TOKEN_FILE):
             return False
         try:
@@ -402,10 +423,14 @@ class SemaphoreClient:
         return True
 
     def _sync_api_token_to_openbao(self) -> None:
+        """Передать действующий API-токен Semaphore в OpenBao при готовом хранилище.
+
+        Если рабочие секреты ещё не подготовлены, обновление пропускается.
+        Значение токена не выводится в журнал."""
         if not OPENBAO_MATERIALIZED_MARKER.is_file():
             return
         if not nonempty(SEMAPHORE_API_TOKEN_FILE):
-            raise InfraManagerError("Отсутствует API token Semaphore для OpenBao")
+            raise InfraManagerError("Отсутствует API token Semaphore для OpenBao. Проверьте выдачу токена и выполните восстановление infra-manager")
         values = read_env_file(PVE_API_ENV)
         endpoint = values.get("PVE_API_URL", "")
         node = urllib.parse.urlparse(endpoint).hostname if endpoint else None
@@ -419,6 +444,11 @@ class SemaphoreClient:
         update_openbao_semaphore_api_token(node, token)
 
     def ensure_api_token(self) -> None:
+        """Переиспользовать действующий токен либо создать новый.
+
+        Создание выполняется только после неудачной проверки текущего токена.
+        Новый токен сохраняется с ограниченными правами и проверяется через API;
+        после этого синхронизируется OpenBao."""
         if self.token_valid():
             self.auth_mode = "token"
             self._sync_api_token_to_openbao()
@@ -444,6 +474,9 @@ class SemaphoreClient:
         self._sync_api_token_to_openbao()
 
     def ensure_project(self) -> int:
+        """Найти или создать проект и ограничить одновременный запуск заданий.
+
+        Идентификатор сохраняется только после подтверждения ответа API."""
         existing = find_unique_by_name(
             self.get("/projects"),
             PROJECT_NAME,
@@ -491,6 +524,10 @@ class SemaphoreClient:
         login: str,
         private_key_file: Path,
     ) -> int:
+        """Найти или зарегистрировать ключ Git-доступа в проекте Semaphore.
+
+        Закрытый ключ читается из защищённого файла и передаётся через API;
+        его нельзя выводить в сообщения и технический журнал."""
         keys = self.get(
             f"/project/{project_id}/keys?sort=name&order=asc"
         )
@@ -550,6 +587,7 @@ class SemaphoreClient:
         ssh_key_id: int,
         branch: str,
     ) -> int:
+        """Создать либо согласовать источник Git с веткой и выбранным SSH-ключом."""
         repositories = self.get(
             f"/project/{project_id}/repositories?sort=name&order=asc"
         )
@@ -594,9 +632,13 @@ class SemaphoreClient:
         return repository_id
 
     def ensure_opentofu_environment(self, project_id: int) -> int:
+        """Настроить переменные доступа OpenTofu в Semaphore.
+
+        Перед обращением к API проверяется наличие полного набора данных PVE;
+        секрет токена не должен попадать в пользовательский вывод."""
         if not nonempty(PVE_API_ENV):
             raise InfraManagerError(
-                "Не найден постоянный PVE API credential"
+                "Не найдены постоянные данные доступа к PVE API. Проверьте настройку PVE в infra-manager"
             )
         values = read_env_file(PVE_API_ENV)
         endpoint = values.get("PVE_API_URL", "")
@@ -604,7 +646,7 @@ class SemaphoreClient:
         token_secret = values.get("PVE_API_TOKEN_SECRET", "")
         if not endpoint or not token_id or not token_secret:
             raise InfraManagerError(
-                "PVE API credential неполон для OpenTofu"
+                "Данные доступа к PVE API неполны для OpenTofu. Проверьте адрес, идентификатор и секрет токена"
             )
 
         environments = self.get(
@@ -892,6 +934,10 @@ class SemaphoreClient:
         app: str = "python",
         survey_vars: tuple[dict[str, Any], ...] = (),
     ) -> int:
+        """Создать или обновить шаблон задания по фиксированному описанию.
+
+        В шаблоне запрещено свободное изменение аргументов и ветки при запуске;
+        это не позволяет обойти объявленные ограничения операций."""
         templates = self.get(
             f"/project/{project_id}/templates?sort=name&order=asc"
         )
@@ -940,6 +986,10 @@ class SemaphoreClient:
 
 
 def persist_github_key() -> None:
+    """Проверить наличие исходного ключа Git и отсутствие лишней копии.
+
+    Внутри управляющего гостя постоянная дублирующая копия ключа запрещена;
+    функция не записывает и не заменяет ключ."""
     if not nonempty(GITHUB_KEY):
         raise InfraManagerError(
             f"GitHub Deploy Key не найден: {GITHUB_KEY}"
