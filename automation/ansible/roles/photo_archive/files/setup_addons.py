@@ -42,6 +42,11 @@ def prepare(state: Path) -> list[str]:
     for subdir in ("memories", "memories/state", "power-tools", "power-tools/data"):
         ensure_directory(state / "addons" / subdir)
 
+    # Power Tools работает в контейнере от UID/GID 1001 и хранит SQLite.
+    power_data = state / "addons/power-tools/data"
+    if (power_data.stat().st_uid, power_data.stat().st_gid) != (1001, 1001):
+        os.chown(power_data, 1001, 1001)
+
     entries = {
         state / "secrets/immich-memories.env": (
             "IMMICH_URL=http://immich-server:2283\n"
