@@ -68,7 +68,7 @@ Home Assistant не имеет штатного OIDC-входа; способ п
 | Путь гостя | Назначение |
 |---|---|
 | `/etc/web-gateway/authelia/configuration.yml` | Основная конфигурация Authelia; несекретная часть воспроизводится из проекта |
-| `/var/lib/web-gateway/authelia/users_database.yml` | Сформированный локально файл пользователей, `0600` |
+| `/var/lib/web-gateway/authelia/users_database.yml` | Основной постоянный файл пользователей, `0600`, доступен Authelia для записи |
 | `/var/lib/web-gateway/secrets/` | Рабочие секреты, `0700` для каталога, `0600` для файлов |
 | `/var/lib/web-gateway/authelia/` | Постоянная база SQLite и другие данные Authelia |
 | `/opt/web-gateway/compose/` | Файлы повторяемого запуска служб |
