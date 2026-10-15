@@ -92,7 +92,7 @@ def initialize(state: Path, email: str) -> None:
         "immich-client-secret",
     )
     with (keys_dir / ".initialize.lock").open("a+") as lock:
-        os.chmod(lock.fileno(), 0o600)
+        os.fchmod(lock.fileno(), 0o600)
         fcntl.flock(lock, fcntl.LOCK_EX)
         if marker.exists():
             check_file(marker)
@@ -104,9 +104,11 @@ def initialize(state: Path, email: str) -> None:
             if "admin" not in (database or {}).get("users", {}):
                 raise RuntimeError("140: администратор отсутствует; восстановить пользователей")
             return
-        # Не считать утраченную метку признаком новой установки.
-        if users.exists() or (users_dir / "db.sqlite3").exists() or any((state / "homarr").iterdir()):
-            raise RuntimeError("140: найдены прежние данные без метки инициализации; восстановить метку или копию")
+        # Не считать утраченную метку или частично созданные ключи новой установкой.
+        if (users.exists() or (users_dir / "db.sqlite3").exists()
+                or any((state / "homarr").iterdir())
+                or any((keys_dir / name).exists() for name in required)):
+            raise RuntimeError("140: найдены прежние данные без метки инициализации; восстановить копию")
 
         homarr_client = secrets.token_hex(32)
         immich_client = secrets.token_hex(32)
