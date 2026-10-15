@@ -48,7 +48,7 @@ def test_compose() -> None:
             secrets_dir = root / "secrets"
             secrets_dir.mkdir()
             for name in ("immich-memories.env", "immich-power-tools.env", "immich-analyze.env"):
-                (secrets_dir / name).write_text("IMMICH_API_KEY=sample\\n", encoding="utf-8")
+                (secrets_dir / name).write_text("IMMICH_API_KEY=sample" + chr(10), encoding="utf-8")
             rendered = template.render(
                 provision=description, ansible_host="192.168.3.40"
             )
