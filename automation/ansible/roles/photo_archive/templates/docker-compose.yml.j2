@@ -51,3 +51,59 @@ services:
     image: docker.io/valkey/valkey:9@sha256:c123e3715db63d06d4ad6964884037aa0d5d4d703939b9929954112889708e1d
     container_name: immich_redis
     restart: unless-stopped
+
+  # Воспоминания готовятся сразу; уведомления требуют последующей настройки ntfy.
+  immich-memories:
+    image: {{ provision.photo_archive.addons.memories.image }}
+    container_name: immich_memories
+    restart: unless-stopped
+{% if not provision.photo_archive.addons.memories.enabled %}
+    profiles: ["disabled-addons"]
+{% endif %}
+    ports:
+      - "{{ ansible_host }}:{{ provision.photo_archive.addons.memories.web_port }}:5000"
+    env_file:
+      - {{ provision.photo_archive.storage.required_state_mount }}/secrets/immich-memories.env
+    environment:
+      CONFIG_PATH: /app/config.yaml
+      STATE_PATH: /app/state/state.json
+      ENV_PATH: /app/.env
+    volumes:
+      - {{ provision.photo_archive.storage.required_state_mount }}/addons/memories/config.yaml:/app/config.yaml
+      - {{ provision.photo_archive.storage.required_state_mount }}/addons/memories/state:/app/state
+      - {{ provision.photo_archive.storage.required_state_mount }}/secrets/immich-memories.env:/app/.env
+      - /etc/localtime:/etc/localtime:ro
+    depends_on:
+      - immich-server
+
+  # Подключение к PostgreSQL только внутри сети Compose, без публикации порта.
+  immich-power-tools:
+    image: {{ provision.photo_archive.addons.power_tools.image }}
+    container_name: immich_power_tools
+    restart: unless-stopped
+{% if not provision.photo_archive.addons.power_tools.enabled %}
+    profiles: ["disabled-addons"]
+{% endif %}
+    ports:
+      - "{{ ansible_host }}:{{ provision.photo_archive.addons.power_tools.web_port }}:3000"
+    env_file:
+      - {{ provision.photo_archive.paths.environment }}
+      - {{ provision.photo_archive.storage.required_state_mount }}/secrets/immich-power-tools.env
+    volumes:
+      - {{ provision.photo_archive.storage.required_state_mount }}/addons/power-tools/data:/app/data
+    depends_on:
+      - immich-server
+      - database
+
+  # Пока LM Studio не настроена, служба остаётся выключенной.
+  immich-analyze:
+    image: {{ provision.photo_archive.addons.analyze.image }}
+    container_name: immich_analyze
+    restart: unless-stopped
+{% if not provision.photo_archive.addons.analyze.enabled %}
+    profiles: ["disabled-addons"]
+{% endif %}
+    env_file:
+      - {{ provision.photo_archive.storage.required_state_mount }}/secrets/immich-analyze.env
+    depends_on:
+      - immich-server

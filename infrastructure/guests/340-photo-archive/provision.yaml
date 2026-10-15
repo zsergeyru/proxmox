@@ -143,11 +143,30 @@ photo_archive:
     enabled: true
     automatic_registration: true
 
+  # Состав служб создаётся при deploy; небезопасные действия включаются отдельно.
+  addons:
+    memories:
+      enabled: true
+      image: ghcr.io/ismaildakrory/immich-memories-notify:latest
+      web_port: 5000
+    power_tools:
+      enabled: false
+      image: ghcr.io/immich-power-tools/immich-power-tools:latest
+      web_port: 8001
+    analyze:
+      enabled: false
+      image: ghcr.io/timasoft/immich-analyze:main
+
 persistence:
   backup_required:
     - /mnt/persistent-state/postgres
     - /srv/photo-archive-media
     - /mnt/persistent-state/secrets/immich.env
+    - /mnt/persistent-state/secrets/immich-memories.env
+    - /mnt/persistent-state/secrets/immich-power-tools.env
+    - /mnt/persistent-state/secrets/immich-analyze.env
+    - /mnt/persistent-state/addons/memories
+    - /mnt/persistent-state/addons/power-tools
     - /mnt/persistent-state/secrets/immich-initial-users.json
     - /mnt/persistent-state/initial-setup.done
     - /mnt/persistent-state/initial-settings.done

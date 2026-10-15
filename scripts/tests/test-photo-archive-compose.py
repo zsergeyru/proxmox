@@ -4,8 +4,11 @@
 from __future__ import annotations
 
 import copy
+import importlib.util
+import stat
 import subprocess
 import tempfile
+from unittest.mock import patch
 from pathlib import Path
 
 import yaml
@@ -44,12 +47,27 @@ def test_compose() -> None:
                 encoding="utf-8",
             )
             description["photo_archive"]["paths"]["environment"] = str(secret)
+            description["photo_archive"]["storage"]["required_state_mount"] = str(root)
+            secrets_dir = root / "secrets"
+            secrets_dir.mkdir()
+            for name in ("immich-memories.env", "immich-power-tools.env", "immich-analyze.env"):
+                (secrets_dir / name).write_text("IMMICH_API_KEY=sample" + chr(10), encoding="utf-8")
             rendered = template.render(
                 provision=description, ansible_host="192.168.3.40"
             )
             config = yaml.safe_load(rendered)
             services = config["services"]
-            assert set(services) == {"immich-server", "redis", "database"}
+            assert set(services) == {
+                "immich-server", "redis", "database",
+                "immich-memories", "immich-power-tools", "immich-analyze",
+            }
+            assert "profiles" not in services["immich-memories"]
+            assert services["immich-power-tools"]["profiles"] == ["disabled-addons"]
+            assert services["immich-analyze"]["profiles"] == ["disabled-addons"]
+            assert services["immich-memories"]["ports"] == ["192.168.3.40:5000:5000"]
+            assert services["immich-power-tools"]["ports"] == ["192.168.3.40:8001:3000"]
+            assert "ports" not in services["immich-analyze"]
+            assert "ports" not in services["database"] or windows_worker
             app = services["immich-server"]
             assert app["environment"]["IMMICH_WORKERS_INCLUDE"] == (
                 "api" if windows_worker else "api,microservices"
@@ -83,6 +101,28 @@ def test_compose() -> None:
             assert check.returncode == 0, check.stderr
 
 
+def test_addons_state() -> None:
+    path = ROOT / "automation/ansible/roles/photo_archive/files/setup_addons.py"
+    spec = importlib.util.spec_from_file_location("setup_addons", path)
+    assert spec is not None and spec.loader is not None
+    helper = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(helper)
+    with tempfile.TemporaryDirectory() as directory:
+        state = Path(directory)
+        with patch.object(helper.os, "chown") as chown:
+            first = helper.prepare(state)
+            assert len(first) == 4
+            assert chown.called or (state / "addons/power-tools/data").stat().st_uid == 1001
+            secret = state / "secrets/immich-memories.env"
+            value = secret.read_text(encoding="utf-8")
+            assert "DASHBOARD_TOKEN=" in value
+            assert stat.S_IMODE(secret.stat().st_mode) == 0o600
+            secret.write_text(value + "CUSTOM=1" + chr(10), encoding="utf-8")
+            assert helper.prepare(state) == []
+            assert secret.read_text(encoding="utf-8").endswith("CUSTOM=1" + chr(10))
+
+
 if __name__ == "__main__":
     test_compose()
-    print("OK: Immich compose template")
+    test_addons_state()
+    print("OK: Immich compose and add-ons state")

@@ -281,16 +281,61 @@ def test_originals_acl() -> None:
         assert original.read_bytes() == b"existing photo"
         assert original.stat().st_mode == original_mode
         assert str(original) not in {args[-1] for args in calls}
+        # При отсутствии пакета deploy устанавливает acl перед изменением
+        # разрешений; повторная подготовка не запускает apt-get заново.
+        installed = iter([False, True])
+        def available(tool):
+            if tool == "apt-get":
+                return "/usr/bin/apt-get"
+            if tool == "setfacl":
+                return "/usr/bin/setfacl" if next(installed) else None
+            raise AssertionError(tool)
+
+        package_commands: list[tuple[str, ...]] = []
         with (
             patch.object(storage.os, "chown"),
-            patch.object(storage.shutil, "which", return_value=None),
+            patch.object(storage.shutil, "which", side_effect=available),
+            patch.object(
+                storage, "command",
+                side_effect=lambda *args, **kwargs: (
+                    package_commands.append(args)
+                    or SimpleNamespace(returncode=0, stdout="")
+                ),
+            ),
+        ):
+            storage.ensure_directories(volumes, [mount])
+        assert package_commands[:2] == [
+            ("apt-get", "update"),
+            ("apt-get", "install", "-y", "--no-install-recommends", "acl"),
+        ]
+        assert [entry[0] for entry in package_commands[2:]] == ["setfacl"] * 3
+        assert original.read_bytes() == b"existing photo"
+
+
+def test_acl_install_failure_preserves_photos() -> None:
+    """При недоступности apt развёртывание прекращается без изменения файлов."""
+    with tempfile.TemporaryDirectory() as tmp:
+        originals = Path(tmp) / "originals"
+        originals.mkdir()
+        photo = originals / "image.jpg"
+        photo.write_bytes(b"original")
+        def fake_command(*args, **_kwargs):
+            assert args == ("apt-get", "update")
+            raise storage.StorageError("apt-get update: источник пакетов недоступен")
+        with (
+            patch.object(
+                storage.shutil, "which",
+                side_effect=lambda tool: "/usr/bin/apt-get" if tool == "apt-get" else None,
+            ),
+            patch.object(storage, "command", side_effect=fake_command),
         ):
             try:
-                storage.ensure_directories(volumes, [mount])
+                storage.ensure_originals_writable(originals)
             except storage.StorageError as exc:
-                assert "setfacl" in str(exc)
+                assert "apt-get" in str(exc)
             else:
-                raise AssertionError("Неизвестные права оригиналов должны блокировать deploy")
+                raise AssertionError("Ошибка установки acl должна останавливать deploy")
+        assert photo.read_bytes() == b"original"
 
 
 def test_readonly_mount_preserves_originals() -> None:
@@ -650,6 +695,7 @@ if __name__ == "__main__":
     test_contract()
     test_existing_mounts()
     test_originals_acl()
+    test_acl_install_failure_preserves_photos()
     test_readonly_mount_preserves_originals()
     test_ro_change_protected_guest()
     test_existing_volume_not_formatted()
