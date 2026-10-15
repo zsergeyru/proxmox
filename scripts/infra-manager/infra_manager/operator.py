@@ -1,4 +1,10 @@
-"""Операторские команды, выполняемые внутри управляющего гостя."""
+"""Операторские команды внутри управляющего гостя infra-manager.
+
+Ветку Git и снимок проекта выбирает общий операторский слой.
+Изменяющий запуск защищён блокировкой на период подготовки снимка;
+длительная операция использует подготовленную копию. Прямой вывод
+служебных секретов разрешён только явно доверенным вызовам с PVE.
+"""
 
 from __future__ import annotations
 
@@ -57,17 +63,21 @@ python3 "$1/scripts/infra-manager/jobs/guest-operation.py" "$2" "$3"
 
 
 def _require_root() -> None:
+    """Разрешить служебные операции только пользователю root внутри 910."""
     if os.geteuid() != 0:
         raise InfraManagerError(
-            "операторская команда infra-manager должна выполняться от root"
+            "Операторская команда infra-manager должна выполняться от root внутри 910"
         )
 
 
 def _pve_node() -> str:
+    """Получить адрес доверенного PVE для привилегированных операций.
+
+    Явно переданное имя проверяется до использования в SSH-команде."""
     explicit = os.environ.get("INFRA_PVE_NODE", "").strip()
     if explicit:
         if any(character.isspace() for character in explicit) or "/" in explicit:
-            raise InfraManagerError("INFRA_PVE_NODE имеет некорректный формат")
+            raise InfraManagerError("INFRA_PVE_NODE имеет некорректный формат. Укажите имя узла PVE без пробелов и символа /")
         return explicit
 
     client = PveClient()
@@ -154,6 +164,9 @@ def _prepare_runtime_snapshot(operation: str, vmid: int) -> str:
     snapshot = f"/tmp/infra-manager-direct-{os.getpid()}-{vmid}"
 
     def copy_snapshot() -> None:
+        """Скопировать текущую версию проекта внутрь рабочей среды.
+
+        Отсутствие точки входа останавливает задачу до развёртывания гостя."""
         if not RUNTIME_GUEST_OPERATION.is_file():
             raise InfraManagerError(
                 f"Не найдена точка входа операций: {RUNTIME_GUEST_OPERATION}"
@@ -355,6 +368,7 @@ def operator_repair(*, show_secrets: bool) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """Описать разрешённые команды и скрытый доверенный режим с PVE."""
     parser = argparse.ArgumentParser(
         prog="infra-manager",
         description="Управление инфраструктурой через управляющий гость.",
@@ -408,6 +422,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Выполнить команду оператора и обработать ожидаемые ошибки.
+
+    Доверенный режим выводит секреты только по явному флагу PVE;
+    при прерывании предлагается проверить фактическое состояние гостя."""
     parser = build_parser()
     try:
         args = parser.parse_args(argv)
