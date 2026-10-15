@@ -135,8 +135,10 @@ def test() -> None:
             "status.yaml должен проверять контейнеры из Compose")
 
     playbook = yaml.safe_load(PLAYBOOK.read_text(encoding="utf-8"))
-    require("name: web_gateway" in str(playbook),
-            "Общая настройка Linux должна подключать роль web_gateway")
+    require(any(
+        task.get("ansible.builtin.include_role", {}).get("name") == "web_gateway"
+        for task in playbook[0]["tasks"]
+    ), "Общая настройка Linux должна подключать роль web_gateway")
     print("140: машинные YAML и шаблоны согласованы")
 
 
