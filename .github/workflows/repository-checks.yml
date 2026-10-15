@@ -26,7 +26,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y shellcheck cloud-init jq unzip
-          python -m pip install --disable-pip-version-check PyYAML==6.0.2 jsonschema==4.25.1 ruff==0.16.8 Jinja2==3.1.6
+          python -m pip install --disable-pip-version-check PyYAML==6.0.2 jsonschema==4.25.1 ruff==0.16.8 Jinja2==3.1.6 argon2-cffi==25.1.0 passlib==1.7.4
 
       - name: Resolve infra-manager guest
         run: |
@@ -112,6 +112,9 @@ jobs:
         run: python scripts/tests/test-guest-storage.py
       - name: Check Web Gateway configuration templates
         run: python scripts/tests/test-web-gateway.py
+
+      - name: Check Web Gateway initial identity and secrets
+        run: python scripts/tests/test-web-gateway-initialize.py
 
       - name: Check Immich Compose template
         run: python scripts/tests/test-photo-archive-compose.py

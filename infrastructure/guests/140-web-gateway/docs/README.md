@@ -5,7 +5,7 @@
 | Документ | Что содержит |
 |---|---|
 | [caddy.md](caddy.md) | Публикация адресов, обратный прокси, HTTPS и сертификаты |
-| [authelia.md](authelia.md) | Пользователи, группы, общий вход, второй фактор, OpenBao и SQLite |
+| [authelia.md](authelia.md) | Пользователи, группы, общий вход, второй фактор, постоянный файл пользователей и SQLite |
 | [homarr.md](homarr.md) | Домашняя страница, плитки служб и права отображения |
 | [administration.md](administration.md) | Встроенная в Homarr панель управления Caddy и Authelia, права и хранение изменений |
 | [guest-management.md](guest-management.md) | Список гостей Proxmox и запуск штатных действий 910 из Homarr |

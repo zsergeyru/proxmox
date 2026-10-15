@@ -38,5 +38,13 @@ checks:
     message: "Постоянная база Authelia содержит данные"
 
   - type: file
+    path: /var/lib/web-gateway/authelia/users_database.yml
+    message: "Файл пользователей Authelia на постоянном томе"
+
+  - type: file
+    path: /var/lib/web-gateway/secrets/.initialized
+    message: "Постоянные секреты инициализированы"
+
+  - type: file
     path: /var/lib/web-gateway/homarr/db/db.sqlite
     message: "Постоянная база Homarr содержит данные"

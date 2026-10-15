@@ -61,79 +61,85 @@
     - "{{ provision.web_gateway.caddy.config.host }}"
     - "{{ provision.web_gateway.authelia.data.host }}"
     - "{{ provision.web_gateway.homarr.data.host }}"
+    - "{{ provision.web_gateway.paths.secrets }}"
     - "{{ provision.web_gateway.paths.persistent_state }}/management"
 
-# Внешний вызывающий контур может передать материалы из OpenBao как закрытые
-# Ansible-переменные. Существующие файлы не заменяются новым случайным ключом.
-- name: Проверить имена переданных секретов
+# Все секреты и пользователи принадлежат самому гостю, хранятся на mp0.
+# Закрытый первоначальный пароль не должен попадать в журнал Semaphore.
+- name: Подготовить каталог сценариев гостя
+  ansible.builtin.file:
+    path: /usr/local/lib/web-gateway
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Установить сценарий однократной подготовки
+  ansible.builtin.copy:
+    src: initialize.py
+    dest: /usr/local/lib/web-gateway/initialize.py
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Установить сценарий одноразового просмотра первого пароля
+  ansible.builtin.copy:
+    src: show-initial-password.py
+    dest: /usr/local/lib/web-gateway/show-initial-password.py
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Проверить метку уже созданных секретов
+  ansible.builtin.stat:
+    path: "{{ provision.web_gateway.paths.secrets }}/.initialized"
+  register: web_gateway_initial_state
+
+- name: Подготовить недостающие секреты и первого администратора
+  ansible.builtin.command:
+    argv:
+      - python3
+      - /usr/local/lib/web-gateway/initialize.py
+      - "{{ provision.web_gateway.paths.persistent_state }}"
+      - "{{ provision.web_gateway.authelia.initial_admin.email }}"
+  register: web_gateway_initialized
+  changed_when: not web_gateway_initial_state.stat.exists
+  no_log: true
+
+- name: Проверить сохранённый файл пользователей
+  ansible.builtin.stat:
+    path: "{{ provision.web_gateway.authelia.users_file }}"
+  register: web_gateway_users_state
+
+- name: Остановить запуск без постоянного файла пользователей
   ansible.builtin.assert:
     that:
-      - item.key in web_gateway_allowed_secret_names
-      - item.value is string
-      - item.value | length > 0
-    fail_msg: "140: недопустимый набор секретов OpenBao"
-  loop: "{{ (web_gateway_secret_material | default({})) | dict2items }}"
-  loop_control:
-    label: "{{ item.key }}"
-  vars:
-    web_gateway_allowed_secret_names:
-      - authelia-session-secret
-      - authelia-storage-encryption-key
-      - authelia-jwt-secret
-      - authelia-oidc-hmac-secret
-      - authelia-oidc-jwks-pem
-      - authelia-homarr-client-secret-hash
-      - homarr.env
-  no_log: true
+      - web_gateway_users_state.stat.isreg | default(false)
+      - (web_gateway_users_state.stat.size | default(0) | int) > 0
+    fail_msg: "140: постоянный файл пользователей отсутствует; восстановить том или его копию"
 
-- name: Материализовать переданные из закрытого контура секреты
-  ansible.builtin.copy:
-    dest: "{{ provision.web_gateway.paths.secrets }}/{{ item.key }}"
-    content: "{{ item.value }}"
-    owner: root
-    group: root
-    mode: "0600"
-  loop: "{{ (web_gateway_secret_material | default({})) | dict2items }}"
-  loop_control:
-    label: "{{ item.key }}"
-  no_log: true
-
-- name: Установить предоставленный из закрытого контура файл пользователей
-  ansible.builtin.copy:
-    dest: "{{ provision.web_gateway.authelia.users_file }}"
-    content: "{{ web_gateway_users_database }}"
-    owner: root
-    group: root
-    mode: "0600"
-    # Повторное развёртывание не должно затирать пользователей,
-    # изменённых через административную страницу Homarr.
-    force: false
-  when: web_gateway_users_database is defined
-  no_log: true
-
-- name: Проверить все необходимые рабочие секреты
+- name: Проверить все обязательные постоянные секреты
   ansible.builtin.stat:
-    path: "{{ item }}"
+    path: "{{ provision.web_gateway.paths.secrets }}/{{ item }}"
   loop:
-    - "{{ provision.web_gateway.paths.secrets }}/authelia-session-secret"
-    - "{{ provision.web_gateway.paths.secrets }}/authelia-storage-encryption-key"
-    - "{{ provision.web_gateway.paths.secrets }}/authelia-jwt-secret"
-    - "{{ provision.web_gateway.paths.secrets }}/authelia-oidc-hmac-secret"
-    - "{{ provision.web_gateway.paths.secrets }}/authelia-oidc-jwks-pem"
-    - "{{ provision.web_gateway.paths.secrets }}/authelia-homarr-client-secret-hash"
-    - "{{ provision.web_gateway.paths.secrets }}/homarr.env"
-    - "{{ provision.web_gateway.authelia.users_file }}"
+    - authelia-session-secret
+    - authelia-storage-encryption-key
+    - authelia-jwt-secret
+    - authelia-oidc-hmac-secret
+    - authelia-oidc-jwks-pem
+    - authelia-homarr-client-secret-hash
+    - authelia-immich-client-secret-hash
+    - immich-client-secret
+    - homarr.env
   register: web_gateway_secret_status
   no_log: true
 
-- name: Не запускать веб-шлюз без исходных секретов OpenBao
+- name: Не запускать веб-шлюз без постоянных ключей
   ansible.builtin.assert:
     that:
       - item.stat.isreg | default(false)
       - (item.stat.size | default(0) | int) > 0
-    fail_msg: >-
-      140: не хватает защищённого материала OpenBao для Caddy/Authelia/Homarr.
-      Восстановить прежние значения и повторить настройку.
+    fail_msg: "140: постоянные секреты отсутствуют; восстановить прежнюю копию mp0"
   loop: "{{ web_gateway_secret_status.results }}"
   no_log: true
 
@@ -318,3 +324,11 @@
   until: web_gateway_homarr_health.status in [200, 301, 302, 303, 307, 308]
   retries: 20
   delay: 3
+
+- name: Подсказать команду просмотра первого пароля из терминала PVE
+  ansible.builtin.debug:
+    msg: >-
+      140: пароль admin создан. Из доверенного терминала PVE выполните
+      pct exec 140 -- python3 /usr/local/lib/web-gateway/show-initial-password.py .
+      Команда удалит открытый пароль после показа; не запускайте её из Semaphore.
+  when: not web_gateway_initial_state.stat.exists
