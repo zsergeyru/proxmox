@@ -122,7 +122,13 @@ def _validate_pve_and_state(
 
 
 def _preflight_missing_guest_recreation(context: DeploymentContext) -> None:
-    """Разрешить создание только при отсутствии объекта и сохранённых томов."""
+    """Проверить отсутствие гостя и любых его дисков перед пересозданием.
+
+    Проверяются все подходящие хранилища и все разрешённые узлы PVE.
+    Если PVE не позволяет получить полный список, пересоздание
+    запрещается: нельзя принять недоступные диски за отсутствующие.
+    Такая проверка защищает прежние постоянные данные.
+    """
 
     if context.client.find_vm(context.vmid) is not None:
         raise InfraManagerError(
@@ -194,7 +200,13 @@ def _preflight_missing_guest_recreation(context: DeploymentContext) -> None:
 
 
 def _backup_state_before_recreation(context: DeploymentContext) -> None:
-    """Сохранить закрытую копию OpenTofu state до первого refresh/plan."""
+    """Сохранить OpenTofu state перед возможным пересозданием гостя.
+
+    Сначала подтверждается наличие нужной записи гостя в state, затем
+    файл создаётся без следования символьным ссылкам с правами 0600.
+    Только после успешной записи можно продолжать изменения: refresh
+    и повторный plan способны изменить исходную картину состояния.
+    """
 
     pulled = run(
         ["tofu", f"-chdir={context.workspace.directory}", "state", "pull"],
