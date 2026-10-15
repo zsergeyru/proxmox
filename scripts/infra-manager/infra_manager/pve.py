@@ -144,13 +144,18 @@ class PveClient:
             ) as response:
                 raw = response.read()
         except urllib.error.HTTPError as exc:
-            detail = exc.read().decode(
-                "utf-8",
-                errors="replace",
-            ).strip()
+            # API PVE может вернуть исходные значения параметров запроса.
+            # Тело отказа нельзя без очистки показывать оператору.
+            reason = (
+                "Проверьте права токена PVE API."
+                if exc.code in (401, 403)
+                else "Проверьте адрес ресурса PVE API."
+                if exc.code == 404
+                else "Проверьте состояние объекта и журнал задач PVE."
+            )
             raise InfraManagerError(
-                f"PVE API {method} {endpoint} вернул HTTP {exc.code}: "
-                f"{detail or '(пустой ответ)'}"
+                f"PVE API {method} {endpoint} вернул HTTP {exc.code}. "
+                f"{reason}"
             ) from exc
         except (urllib.error.URLError, OSError) as exc:
             raise InfraManagerError(
