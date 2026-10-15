@@ -19,6 +19,7 @@ TEST_NAME = "smoke-template-9000"
 
 
 def _first_ipv4(interfaces: Any) -> str | None:
+    """Найти первый пригодный IPv4 в данных гостевого агента без изменения гостя."""
     records: list[Any]
     if isinstance(interfaces, dict):
         value = interfaces.get("result", interfaces)
@@ -50,6 +51,7 @@ def _first_ipv4(interfaces: Any) -> str | None:
 
 
 def _ssh_base(key: Path, known_hosts: Path, address: str) -> list[str]:
+    """Подготовить SSH-параметры проверочного клона и его временного ключа."""
     return [
         "ssh",
         "-i",
@@ -72,6 +74,9 @@ def _wait_test_ipv4(
     node: str,
     vmid: int,
 ) -> str:
+    """Дождаться IPv4 проверочной VM от гостевого агента.
+    
+        Если адрес не появился, дальнейшие проверки не запускаются."""
     for _ in range(120):
         try:
             interfaces = client.guest_interfaces(
@@ -92,6 +97,7 @@ def _wait_test_ipv4(
 
 
 def _parse_cloud_status(raw: str) -> dict[str, Any]:
+    """Разобрать JSON-состояние Cloud-Init; неожиданный ответ считать ошибкой."""
     try:
         data = json.loads(raw)
     except json.JSONDecodeError as exc:
@@ -106,6 +112,7 @@ def _parse_cloud_status(raw: str) -> dict[str, Any]:
 
 
 def _validate_recoverable_errors(recoverable: Any) -> None:
+    """Проверить, что Cloud-Init не сообщил о скрытых исправимых ошибках."""
     if not isinstance(recoverable, dict):
         raise InfraManagerError(
             "Cloud-Init вернул неожиданный recoverable_errors"
@@ -127,6 +134,7 @@ def _validate_recoverable_errors(recoverable: Any) -> None:
 
 
 def _validate_cloud_section(section: Any) -> None:
+    """Проверить структуру отдельного раздела состояния Cloud-Init."""
     if not isinstance(section, dict):
         raise InfraManagerError(
             "Cloud-Init вернул неожиданный формат состояния"
@@ -137,6 +145,7 @@ def _validate_cloud_section(section: Any) -> None:
 
 
 def _validate_cloud_status(raw: str) -> None:
+    """Сверить итоговые признаки готовности Cloud-Init по полученному отчёту."""
     data = _parse_cloud_status(raw)
     sections = (
         data,
@@ -169,6 +178,11 @@ def _prepare_test_vmid(
     *,
     node: str,
 ) -> None:
+    """Освободить VMID испытательного клона только после проверки владельца.
+    
+        Существующая VM с другим типом или именем не затрагивается.
+        Разрешённый оставшийся испытательный клон останавливается, с него
+        снимается защита и он удаляется без возможности восстановления."""
     resource = client.find_vm(TEST_VMID)
     if resource is None:
         return
@@ -215,6 +229,11 @@ def _delete_test_vm(
     *,
     node: str,
 ) -> None:
+    """Удалить проверочный клон после успешного завершения испытания.
+    
+        Вызывающий код должен гарантировать, что VMID принадлежит клону,
+        созданному этой проверкой. Функция останавливает VM, снимает защиту
+        и безвозвратно удаляет объект; повторно искать владельца не пытается."""
     if client.vm_status(node=node, vmid=TEST_VMID) == "running":
         client.run_task(
             "POST",
@@ -236,7 +255,13 @@ def _delete_test_vm(
 
 
 def run_verify_template(vmid: int) -> int:
-    """Создать проверочный Full Clone шаблона и проверить гостевую ОС."""
+    """Создать Full Clone шаблона и проверить гостевую ОС.
+
+    Перед клонированием проверяется занятость VMID 9099. Чужая машина
+    никогда не удаляется при подготовке. При сбое проверки созданный
+    клон остаётся для диагностики; удаление выполняется только после
+    успешной проверки Cloud-Init, агента и SSH-ключей.
+    """
 
     if vmid != 9000:
         raise InfraManagerError(
