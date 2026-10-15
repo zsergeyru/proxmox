@@ -47,6 +47,9 @@ services:
       AUTH_OIDC_CLIENT_ID: "{{ provision.web_gateway.homarr.authentication.client_id }}"
       AUTH_OIDC_CLIENT_NAME: Authelia
       AUTH_OIDC_FORCE_USERINFO: "true"
+      AUTH_OIDC_SCOPE_OVERWRITE: "openid email profile groups"
+      AUTH_OIDC_GROUPS_ATTRIBUTE: groups
+      AUTH_LOGOUT_REDIRECT_URL: "{{ provision.web_gateway.authelia.public_url }}/logout"
     volumes:
       - "{{ provision.web_gateway.homarr.data.host }}:{{ provision.web_gateway.homarr.data.container }}"
     # Доступ к Docker-сокету Homarr не требуется.
