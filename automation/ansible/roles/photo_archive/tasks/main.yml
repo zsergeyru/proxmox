@@ -273,10 +273,10 @@
 
 - name: Дождаться интерфейса воспоминаний
   ansible.builtin.uri:
-    url: "http://{{ ansible_host }}:{{ provision.photo_archive.addons.memories.web_port }}/"
-    status_code: [200, 302]
+    url: "http://{{ ansible_host }}:{{ provision.photo_archive.addons.memories.web_port }}/health"
+    status_code: 200
   register: photo_archive_memories_health
-  until: photo_archive_memories_health.status in [200, 302]
+  until: photo_archive_memories_health.status == 200
   retries: 20
   delay: 3
   when: provision.photo_archive.addons.memories.enabled
