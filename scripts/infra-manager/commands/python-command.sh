@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+# Запустить установленную команду состояния через Python-пакет infra-manager.
+# Выбирает пакет из рабочей копии либо установленного каталога.
+# Неподдерживаемое имя команды отклоняет без выполнения другого действия.
+
 case "$(basename "$0")" in
     infra-manager-status)
         COMMAND="status"
@@ -22,7 +26,7 @@ else
 fi
 
 [[ -d "${PYTHON_ROOT}/infra_manager" ]] || {
-    printf 'ОШИБКА: не найден Python package infra_manager: %s\n' "${PYTHON_ROOT}" >&2
+    printf 'ОШИБКА: не найден пакет Python infra_manager (проверьте установленную управляющую среду): %s\n' "${PYTHON_ROOT}" >&2
     exit 1
 }
 
