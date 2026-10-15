@@ -1,0 +1,195 @@
+schema_version: 1
+guest_vmid: 140
+
+# Никакого portal.local: на 140 используется Homarr, а не Homepage.
+system:
+  distribution: debian
+  version: "13"
+  architecture: amd64
+  required_packages:
+    - ca-certificates
+    - curl
+    - openssl
+    - python3
+
+docker:
+  source: docker-official-repository
+  service:
+    name: docker
+    enabled: true
+    state: running
+  required_packages:
+    - docker-ce
+    - docker-ce-cli
+    - containerd.io
+    - docker-buildx-plugin
+    - docker-compose-plugin
+
+# Общий том состояний уже используется гостем 340.
+# Не форматировать существующий том и не затрагивать чужие каталоги.
+# Подготовка производится штатным механизмом pve_storage на PVE.
+pve_storage:
+  volume_group: pve
+  thin_pool: data
+  volumes:
+    - name: infra_state
+      size_gb: 40
+      mountpoint: /mnt/bindmounts/infra-state
+  mounts:
+    - slot: mp0
+      volume: infra_state
+      directory: 140-web-gateway
+      target: /var/lib/web-gateway
+      read_only: false
+
+# Целевые параметры новой роли Ansible web_gateway.
+# Само описание не устанавливает программы, пока роль не подключена.
+web_gateway:
+  domain: zsergey.ru
+
+  paths:
+    root: /opt/web-gateway
+    compose: /opt/web-gateway/compose
+    compose_file: /opt/web-gateway/compose/docker-compose.yml
+    configuration: /etc/web-gateway
+    secrets: /etc/web-gateway/secrets
+    persistent_state: /var/lib/web-gateway
+
+  storage:
+    required_mount: /var/lib/web-gateway
+    pve_source: /mnt/bindmounts/infra-state/140-web-gateway
+    allow_missing_mount: false
+    # Приложения нельзя запускать с пустым каталогом вместо mp0.
+    require_mount_before_services: true
+
+  caddy:
+    enabled: true
+    image: caddy:2.11.7
+    container_name: web-gateway-caddy
+    config_file: /etc/web-gateway/caddy/Caddyfile
+    generated_routes_file: /etc/web-gateway/caddy/sites.generated.caddy
+    data:
+      host: /var/lib/web-gateway/caddy/data
+      container: /data
+    config:
+      host: /var/lib/web-gateway/caddy/config
+      container: /config
+    listen:
+      http: 80
+      https: 443
+    routes:
+      - domain: home.zsergey.ru
+        service: homarr
+        upstream: http://homarr:7575
+        enabled: true
+      - domain: auth.zsergey.ru
+        service: authelia
+        upstream: http://authelia:9091
+        enabled: true
+      # Внешние приложения подключать только после проверки авторизации.
+      - domain: photos.zsergey.ru
+        service: immich
+        guest_vmid: 340
+        port: 2283
+        enabled: false
+      - domain: ha.zsergey.ru
+        service: home-assistant
+        guest_vmid: 100
+        enabled: false
+      - domain: ai.zsergey.ru
+        service: open-webui
+        enabled: false
+
+  authelia:
+    enabled: true
+    image: authelia/authelia:4.39.28
+    container_name: web-gateway-authelia
+    internal_port: 9091
+    public_url: https://auth.zsergey.ru
+    config_file: /etc/web-gateway/authelia/configuration.yml
+    users_file: /etc/web-gateway/authelia/users_database.yml
+    data:
+      host: /var/lib/web-gateway/authelia
+      container: /data
+    storage:
+      type: sqlite
+      container_path: /data/db.sqlite3
+    authentication:
+      backend: file
+      groups:
+        - admins
+        - family
+        - guests
+      password_hash: argon2id
+      second_factor: totp
+    oidc:
+      enabled: true
+      # Конкретные адреса возврата закрепляются вместе с ролью и версией клиента.
+      clients:
+        - homarr
+
+  homarr:
+    enabled: true
+    image: ghcr.io/homarr-labs/homarr:v2.5.2
+    container_name: web-gateway-homarr
+    internal_port: 7575
+    public_url: https://home.zsergey.ru
+    data:
+      host: /var/lib/web-gateway/homarr
+      container: /appdata
+    docker_socket: false
+    authentication:
+      provider: oidc
+      issuer: https://auth.zsergey.ru
+      client_id: homarr
+    boards:
+      home:
+        groups:
+          - admins
+          - family
+          - guests
+      administration:
+        groups:
+          - admins
+        local_network_only: true
+        # Пользовательские виджеты Homarr v2: описания в Git,
+        # изменения и база Homarr — на постоянном томе.
+        widgets:
+          - caddy-routes
+          - authelia-users
+          - proxmox-guests
+
+  management:
+    # Обработчик Caddy/Authelia располагается только внутри сети Docker.
+    public_access: false
+    routes_state: /var/lib/web-gateway/management/routes.yaml
+    users_state: /var/lib/web-gateway/management/users.yaml
+    # Операции над гостями выполняет существующий управляющий контур 910.
+    guest_operations:
+      manager_vmid: 910
+      supported:
+        - deploy
+        - status
+        - sync
+        - repair
+      external_access: false
+
+  secrets:
+    provider: openbao
+    manager_vmid: 910
+    # Секретные значения и хеши никогда не помещаются в Git.
+    # Ссылки на конкретные пути KV добавляются при настройке роли.
+    local_directory: /etc/web-gateway/secrets
+
+persistence:
+  backup_required:
+    # Один каталог содержит все уникальные данные на подключении mp0:
+    # SQLite, 2FA, сертификаты, Homarr и изменения из административной панели.
+    - /var/lib/web-gateway
+  reproducible:
+    - /opt/web-gateway/compose
+    - /etc/web-gateway/caddy/Caddyfile
+    - /etc/web-gateway/authelia/configuration.yml
+  ephemeral:
+    - docker-images
+    - docker-build-cache
