@@ -14,7 +14,6 @@ import os
 import re
 import secrets
 import ssl
-import subprocess
 import threading
 import uuid
 from datetime import datetime, timezone
@@ -23,7 +22,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from .common import InfraManagerError
+from .common import CommandRunner, InfraManagerError
 from .guest_catalog import guest_identity, guest_management_address
 from .guest_operations import operation_guests
 from .homarr_inventory import read_guest_inventory
@@ -109,10 +108,10 @@ def _read_job(job_id: str) -> dict:
 
 
 def _unit_state(unit_name: str) -> dict[str, str]:
-    result = subprocess.run(
+    result = CommandRunner().run(
         ["systemctl", "show", unit_name,
          "--property=ActiveState,Result,ExecMainStatus", "--no-pager"],
-        text=True, capture_output=True, check=False, timeout=5,
+        capture=True, check=False,
     )
     if result.returncode:
         return {"status": "unknown", "result": "unknown"}
@@ -182,15 +181,17 @@ def start_job(vmid: int, operation: str, confirmation: str) -> dict:
     _write_json(JOBS_DIR / f"{job_id}.json", record)
     # systemd-run создаёт независимую службу: закрытие страницы не прерывает задачу.
     try:
-        subprocess.run(
+        result = CommandRunner().run(
             ["systemd-run", "--quiet", f"--unit={unit_name}",
              "--property=Type=exec",
              f"--property=StandardOutput=append:{log_path}",
              f"--property=StandardError=append:{log_path}",
              "--", str(OPERATOR), operation, str(vmid)],
-            check=True, capture_output=True, text=True, timeout=15,
+            capture=True, check=False,
         )
-    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+        if result.returncode:
+            raise InfraManagerError("Systemd отказал в запуске задания")
+    except (OSError, InfraManagerError) as exc:
         record["start_error"] = "Не удалось назначить задание systemd"
         _write_json(JOBS_DIR / f"{job_id}.json", record)
         raise InfraManagerError(record["start_error"]) from exc
