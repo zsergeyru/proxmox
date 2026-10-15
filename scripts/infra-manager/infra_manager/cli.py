@@ -133,6 +133,20 @@ def build_parser() -> argparse.ArgumentParser:
         help="TCP-порт; по умолчанию берётся из общих настроек",
     )
     portal_gateway.set_defaults(handler="portal-gateway")
+
+    homarr_api = subparsers.add_parser(
+        "homarr-api",
+        help="запустить отдельный HTTPS-интерфейс для Homarr",
+    )
+    homarr_api.add_argument("--bind", default="192.168.9.10")
+    homarr_api.add_argument("--port", type=int, default=3003)
+    homarr_api.add_argument(
+        "--tls-cert", default="/etc/infra-manager/openbao/tls/server.crt"
+    )
+    homarr_api.add_argument(
+        "--tls-key", default="/etc/infra-manager/openbao/tls/server.key"
+    )
+    homarr_api.set_defaults(handler="homarr-api")
     return parser
 
 
@@ -233,6 +247,16 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "Порт посредника должен быть от 1 до 65535"
                 )
             return run_portal_gateway(args.bind, port)
+
+        if args.handler == "homarr-api":
+            from pathlib import Path
+            from .homarr_api import run_homarr_api
+
+            if not 0 < args.port < 65536:
+                raise InfraManagerError("Недопустимый порт HTTPS-интерфейса")
+            return run_homarr_api(
+                args.bind, args.port, Path(args.tls_cert), Path(args.tls_key)
+            )
 
         raise InfraManagerError(f"Неизвестная команда: {args.command}")
     except (InfraManagerError, OSError) as exc:
