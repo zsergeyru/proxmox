@@ -106,14 +106,17 @@ warnings: list[str] = []
 
 
 def fail(msg: str) -> None:
+    """Запомнить ошибку проверки, не останавливая сбор остальных замечаний."""
     errors.append(msg)
 
 
 def warn(msg: str) -> None:
+    """Запомнить предупреждение, не делая его причиной отказа проверки."""
     warnings.append(msg)
 
 
 def load_yaml(path: Path) -> dict | None:
+    """Прочитать YAML-объект; при ошибке добавить сообщение и вернуть None."""
     try:
         data = yaml.safe_load(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, yaml.YAMLError) as exc:
@@ -126,6 +129,10 @@ def load_yaml(path: Path) -> dict | None:
 
 
 def load_validator(path: Path) -> Draft202012Validator:
+    """Подготовить проверяющую схему JSON Schema для YAML-данных.
+
+    При ошибке самой схемы замечание сохраняется, а пустая схема
+    позволяет собрать остальные ошибки за один проход."""
     try:
         schema = yaml.safe_load(path.read_text(encoding="utf-8"))
         Draft202012Validator.check_schema(schema)
@@ -141,6 +148,9 @@ def validate_schema(
     validator: Draft202012Validator,
     label: str,
 ) -> bool:
+    """Собрать ошибки соответствия схеме с указанием пути поля.
+
+    Возвращает False, если найдено хотя бы одно несоответствие."""
     found = sorted(
         validator.iter_errors(data),
         key=lambda err: (list(err.absolute_path), err.message),
@@ -152,6 +162,7 @@ def validate_schema(
 
 
 def leaves(value, path=()):
+    """Обойти конечные значения вложенных словарей и списков с их путями."""
     if isinstance(value, dict):
         for key, child in value.items():
             yield from leaves(child, path + (str(key),))
@@ -163,6 +174,7 @@ def leaves(value, path=()):
 
 
 def keys(value, path=()):
+    """Обойти все имена полей вложенного объекта вместе с путями."""
     if isinstance(value, dict):
         for key, child in value.items():
             current = path + (str(key),)
@@ -174,6 +186,10 @@ def keys(value, path=()):
 
 
 def check_secrets(rel: Path, data: dict) -> None:
+    """Искать запрещённые имена полей и маркеры закрытых ключей.
+
+    Это проверка описаний проекта, а не полноценный анализ секретов;
+    подозрительные значения не выводятся в диагностике."""
     for path, key in keys(data):
         if key.lower() in SECRET_KEYS:
             fail(f"{rel}: запрещено хранить секретоподобный ключ {'.'.join(path)}")
@@ -183,6 +199,7 @@ def check_secrets(rel: Path, data: dict) -> None:
 
 
 def network_defaults(defaults: dict) -> NetworkConfig | None:
+    """Проверить общие параметры административной сети из defaults.yaml."""
     try:
         return parse_network_config(defaults)
     except GuestConfigError as exc:
@@ -197,6 +214,10 @@ def check_address(
     cfg: NetworkConfig,
     used: dict[ipaddress.IPv4Address, Path],
 ) -> None:
+    """Сверить статический IP с подсетью, шлюзом и занятыми адресами.
+
+    Конфликт адресов считается ошибкой; отличие от правила VMID
+    отмечается предупреждением, поскольку явный адрес допустим."""
     subnet, gateway = cfg.subnet, cfg.gateway
     if address not in subnet:
         fail(f"{rel}: management IP {address} находится вне подсети {subnet}")
@@ -218,6 +239,10 @@ def check_address(
 
 
 def check_source_overrides(rel: Path, source: dict, defaults: dict) -> None:
+    """Предупредить об избыточных и значимых переопределениях профиля.
+
+    Сравниваются объявленные поля исходного гостя с наследуемыми
+    значениями. Явный IP исключён из проверки избыточности здесь."""
     if not source.get("profile"):
         return
     profile = defaults.get("profiles", {}).get(source.get("profile"))
@@ -251,6 +276,10 @@ def check_effective_network(
     cfg: NetworkConfig,
     used: dict[ipaddress.IPv4Address, Path],
 ) -> None:
+    """Проверить итоговую административную сеть гостя.
+
+    В схеме с несколькими интерфейсами требуется ровно один
+    административный интерфейс; для DHCP статический адрес не проверяется."""
     net = effective["network"]
 
     interfaces = net.get("interfaces")
@@ -325,6 +354,7 @@ def check_effective_network(
 
 
 def check_resources(rel: Path, data: dict, kind: str | None = None) -> None:
+    """Проверить ограничения памяти и допустимость параметров VM/LXC."""
     resources = data.get("resources", {})
     if not isinstance(resources, dict):
         return
@@ -342,6 +372,7 @@ def check_resources(rel: Path, data: dict, kind: str | None = None) -> None:
 
 
 def check_description(rel: Path, source: dict) -> None:
+    """Предупредить о маркерах незавершённости в описании гостя с профилем."""
     if not source.get("profile"):
         return
     text = str(source.get("description", "")).lower()
@@ -354,6 +385,7 @@ def check_description(rel: Path, source: dict) -> None:
 
 
 def valid_lxc_selector(value: object) -> bool:
+    """Разрешить селектор семейства LXC-шаблонов без версии и архива."""
     if not isinstance(value, str):
         return False
     lower = value.lower()
@@ -365,6 +397,7 @@ def valid_lxc_selector(value: object) -> bool:
 
 
 def check_profiles(defaults: dict) -> None:
+    """Проверить ссылки на семейства LXC-шаблонов в общих профилях."""
     rel = DEFAULTS.relative_to(ROOT)
     for name, profile in defaults.get("profiles", {}).items():
         if not isinstance(profile, dict):
@@ -377,6 +410,10 @@ def check_profiles(defaults: dict) -> None:
 
 
 def check_profiled_guest(rel: Path, source: dict, effective: dict) -> None:
+    """Проверить специфичные для VM и LXC ограничения итогового гостя.
+
+    VM не может использовать себя как шаблон; LXC должен ссылаться
+    на разрешённое семейство системного архива."""
     vmid, kind = effective["vmid"], effective["type"]
 
     if kind == "vm":
@@ -392,6 +429,9 @@ def check_profiled_guest(rel: Path, source: dict, effective: dict) -> None:
 
 
 def manifests() -> list[Path]:
+    """Найти guest.yaml только в каталогах с корректным именем VMID.
+
+    Неверное имя фиксируется как ошибка до чтения содержимого гостя."""
     found: list[Path] = []
     for path in sorted(GUESTS.glob("*/guest.yaml")):
         if not DIR_RE.fullmatch(path.parent.name):
@@ -411,6 +451,10 @@ def status_manifests() -> list[Path]:
 
 @dataclass
 class ValidationState:
+    """Накопленное состояние проверки гостей, адресов, ролей и профилей.
+
+    Общие списки обнаруженных значений позволяют выявить дубликаты
+    между несколькими файлами."""
     defaults: dict
     cfg: NetworkConfig
     validators: dict[str, Draft202012Validator]
@@ -422,6 +466,10 @@ class ValidationState:
 
 
 def _load_validation_state() -> ValidationState | None:
+    """Загрузить схемы, общие значения и сведения для проверки гостей.
+
+    При критической ошибке исходных общих данных дальнейшая проверка
+    гостей не запускается; уже найденные замечания сохраняются."""
     validators = {key: load_validator(path) for key, path in SCHEMAS.items()}
     defaults = load_yaml(DEFAULTS)
     if defaults is None:
@@ -457,6 +505,10 @@ def _check_manifest_identity(
     match: re.Match[str],
     state: ValidationState,
 ) -> None:
+    """Проверить совпадение VMID, имени и роли с каталогом проекта.
+
+    Повторяющийся VMID или роль фиксируются как ошибки; ограничения
+    специальных ролей проверяются до сборки итогового состояния."""
     vmid = data["vmid"]
     expected_vmid = int(match.group(1))
     expected_name = match.group(2)
@@ -500,6 +552,10 @@ def _validate_profiled_manifest(
     data: dict,
     state: ValidationState,
 ) -> None:
+    """Проверить гостя с профилем после объединения настроек.
+
+    Сначала строится итоговое состояние, затем проверяются схема,
+    сеть, ресурсы и специфичные для типа гостя ограничения."""
     profile_name = data.get("profile")
     if profile_name in state.profiles:
         state.used_profiles.add(profile_name)
@@ -536,6 +592,7 @@ def _validate_standalone_manifest(
     data: dict,
     state: ValidationState,
 ) -> None:
+    """Проверить гостя без профиля, включая ресурсы и явный IP."""
     check_resources(rel, data)
     override = get_nested(data, ("network", "ipv4"))
     if override is not MISSING and not is_dhcp_ipv4(override):
@@ -555,6 +612,10 @@ def _validate_standalone_manifest(
 
 
 def _validate_manifest(path: Path, state: ValidationState) -> None:
+    """Проверить описание гостя по схеме и правилам проекта.
+
+    После чтения данных проверяются идентификаторы и секреты,
+    затем применяется соответствующий сценарий проверки профиля."""
     rel = path.relative_to(ROOT)
     match = DIR_RE.fullmatch(path.parent.name)
     assert match is not None
@@ -577,6 +638,9 @@ def _validate_manifest(path: Path, state: ValidationState) -> None:
 
 
 def _validate_status_manifest(path: Path, state: ValidationState) -> None:
+    """Проверить status.yaml и его соответствие соседнему guest.yaml.
+
+    Отдельное описание проверок не допускается без описания гостя."""
     rel = path.relative_to(ROOT)
     match = DIR_RE.fullmatch(path.parent.name)
     if match is None:
@@ -608,6 +672,10 @@ def _validate_status_manifest(path: Path, state: ValidationState) -> None:
 
 
 def _validate_access_contract(state: ValidationState) -> None:
+    """Проверить access.yaml на известные субъекты, цели и допустимые права.
+
+    Для SSH-подключения требуется отдельное право получения идентичности;
+    запрещён прямой доступ AI-control к PVE. Проверка не выдаёт права."""
     rel = ACCESS.relative_to(ROOT)
     data = load_yaml(ACCESS)
     if data is None or not validate_schema(
@@ -700,6 +768,7 @@ def _validate_access_contract(state: ValidationState) -> None:
 
 
 def _warn_unused_profiles(state: ValidationState) -> None:
+    """Сообщить о профилях, которые не используются ни одним гостем."""
     rel_defaults = DEFAULTS.relative_to(ROOT)
     for profile in sorted(set(state.profiles) - state.used_profiles):
         warn(
@@ -709,6 +778,7 @@ def _warn_unused_profiles(state: ValidationState) -> None:
 
 
 def validate() -> None:
+    """Запустить общую последовательность проверок проекта без изменений PVE."""
     state = _load_validation_state()
     if state is None:
         return
@@ -721,6 +791,9 @@ def validate() -> None:
 
 
 def main() -> int:
+    """Вывести ошибки и предупреждения после полного прохода проверки.
+
+    Повторяющиеся предупреждения объединяются; при ошибках код выхода 1."""
     validate()
     unique = list(dict.fromkeys(warnings))
     if unique:
