@@ -481,6 +481,46 @@ def check_user_errors_and_colors() -> None:
     assert "сети" in err.getvalue()
 
 
+def check_http_error_messages_hide_secret_bodies() -> None:
+    """Не переносить произвольные тела HTTP-ошибок в вывод оператора."""
+
+    from urllib.error import HTTPError
+    from infra_manager.semaphore import SemaphoreClient
+
+    marker = b"PRIVATE-TOKEN-IN-HTTP-ERROR"
+    semaphore_client = SemaphoreClient()
+    with patch("infra_manager.semaphore.urllib.request.build_opener") as opener:
+        opener.return_value.open.side_effect = HTTPError(
+            "http://127.0.0.1:3000/api/projects",
+            403, "Forbidden", None, io.BytesIO(marker),
+        )
+        try:
+            semaphore_client.get("/projects", auth="none")
+        except InfraManagerError as exc:
+            if "403" not in str(exc) or marker.decode() in str(exc):
+                fail("Semaphore раскрыл секрет из тела HTTP-ошибки")
+        else:
+            fail("Semaphore должен сообщать об HTTP-отказе")
+
+    pve_client = PveClient.__new__(PveClient)
+    pve_client.url = "https://pve.invalid:8006"
+    pve_client.token_id = "test-user@pam!test"
+    pve_client.token_secret = "private-test-token"
+    pve_client.context = object()
+    with patch("infra_manager.pve.urllib.request.urlopen") as request:
+        request.side_effect = HTTPError(
+            "https://pve.invalid:8006/api2/json/version",
+            403, "Forbidden", None, io.BytesIO(marker),
+        )
+        try:
+            pve_client.get("/version")
+        except InfraManagerError as exc:
+            if "403" not in str(exc) or marker.decode() in str(exc):
+                fail("PVE API раскрыл секрет из тела HTTP-ошибки")
+        else:
+            fail("PVE API должен сообщать об HTTP-отказе")
+
+
 def check_shared_configuration_readers() -> None:
     """Единые YAML- и env-читалки одинаковы для всех вызывающих модулей."""
 
@@ -522,6 +562,7 @@ def main_test() -> None:
     check_user_errors_and_colors()
     check_cli_and_commands()
     check_shared_configuration_readers()
+    check_http_error_messages_hide_secret_bodies()
     check_log_levels()
     check_duration_output()
     check_runtime_activation_guard()
