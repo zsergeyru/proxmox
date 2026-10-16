@@ -16,7 +16,7 @@ import sys
 import yaml
 
 
-PASSWORD = Path("/var/lib/web-gateway/secrets/operator-admin.json")
+PASSWORD = Path("/var/lib/web-gateway/management/operator-admin.json")
 USERS = Path("/var/lib/web-gateway/authelia/users_database.yml")
 
 
