@@ -18,7 +18,9 @@
     handle @private_network {
         reverse_proxy {{ route.upstream }}
     }
-    respond "Доступ только из домашней сети" 403
+    handle {
+        respond "Доступ только из домашней сети" 403
+    }
 {% else %}
     reverse_proxy {{ route.upstream }}
 {% endif %}
