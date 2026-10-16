@@ -1,8 +1,27 @@
-# Управляемые маршруты. Не редактировать вручную: источник — management/routes.yaml.
+# Управляемые маршруты. Источник — постоянный management/routes.yaml.
+# Старые маршруты без access: публичны только имена из разрешённого списка;
+# остальные требуют входа. Это позволяет безопасно обновить существующий mp0.
 {% for route in web_gateway_routes if route.enabled | default(false) | bool %}
+{% set access = route.access | default('public' if route.domain in provision.web_gateway.caddy.public_domains else 'protected') %}
 {{ route.domain }} {
     encode zstd gzip
+{% if access == 'protected' %}
+    # Служба получает запрос только после подтверждения второго фактора.
+    forward_auth authelia:9091 {
+        uri /api/authz/forward-auth
+        copy_headers Remote-User Remote-Groups Remote-Email Remote-Name
+    }
     reverse_proxy {{ route.upstream }}
+{% elif access == 'private' %}
+    # Сравниваем исходный адрес TCP-соединения; подложные заголовки не доверены.
+    @private_network remote_ip {{ provision.web_gateway.caddy.private_networks | join(' ') }}
+    handle @private_network {
+        reverse_proxy {{ route.upstream }}
+    }
+    respond "Доступ только из домашней сети" 403
+{% else %}
+    reverse_proxy {{ route.upstream }}
+{% endif %}
 }
 
 {% endfor %}
