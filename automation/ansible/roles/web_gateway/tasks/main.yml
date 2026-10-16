@@ -47,16 +47,7 @@
     - "{{ provision.web_gateway.paths.configuration }}"
     - "{{ provision.web_gateway.paths.configuration }}/caddy"
     - "{{ provision.web_gateway.paths.configuration }}/authelia"
-    - "{{ provision.web_gateway.paths.configuration }}/ca"
     - "{{ provision.web_gateway.paths.secrets }}"
-
-- name: Установить публичный TLS CA управляющего гостя для Homarr
-  ansible.builtin.copy:
-    content: "{{ lookup('file', '/etc/infra-manager/openbao/tls/ca.crt') }}"
-    dest: "{{ provision.web_gateway.paths.configuration }}/ca/openbao-ca.crt"
-    owner: root
-    group: root
-    mode: "0644"
 
 - name: Подготовить каталоги на проверенном постоянном томе
   ansible.builtin.file:
@@ -73,6 +64,9 @@
     - "{{ provision.web_gateway.paths.secrets }}"
     - "{{ provision.web_gateway.paths.persistent_state }}/management"
     - "{{ provision.web_gateway.paths.persistent_state }}/management/catalog"
+
+- name: Сформировать каталог приложений Homarr из Git
+  ansible.builtin.include_tasks: catalog.yml
 
 # Все секреты и пользователи принадлежат самому гостю, хранятся на mp0.
 # Закрытый первоначальный пароль не должен попадать в журнал Semaphore.
