@@ -72,6 +72,7 @@
     - "{{ provision.web_gateway.homarr.data.host }}"
     - "{{ provision.web_gateway.paths.secrets }}"
     - "{{ provision.web_gateway.paths.persistent_state }}/management"
+    - "{{ provision.web_gateway.paths.persistent_state }}/management/catalog"
 
 # Все секреты и пользователи принадлежат самому гостю, хранятся на mp0.
 # Закрытый первоначальный пароль не должен попадать в журнал Semaphore.
