@@ -80,27 +80,39 @@ web_gateway:
     listen:
       http: 80
       https: 443
+    # Только эти имена допускают публичный доступ без предварительного входа.
+    public_domains:
+      - home.zsergey.ru
+      - auth.zsergey.ru
+    # Для внутренних маршрутов проверяется адрес соединения, не HTTP-заголовки.
+    private_networks:
+      - 192.168.0.0/16
     routes:
       - domain: home.zsergey.ru
         service: homarr
         upstream: http://homarr:7575
+        access: public
         enabled: true
       - domain: auth.zsergey.ru
         service: authelia
         upstream: http://authelia:9091
+        access: public
         enabled: true
       # Внешние приложения подключать только после проверки авторизации.
       - domain: photos.zsergey.ru
         service: immich
         guest_vmid: 340
         port: 2283
+        access: protected
         enabled: false
       - domain: ha.zsergey.ru
         service: home-assistant
         guest_vmid: 100
+        access: protected
         enabled: false
       - domain: ai.zsergey.ru
         service: open-webui
+        access: protected
         enabled: false
 
   authelia:

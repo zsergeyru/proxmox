@@ -149,6 +149,43 @@ def test() -> None:
             "Нет основных доменов")
     require("photos.zsergey.ru" not in routes and "ai.zsergey.ru" not in routes,
             "Непроверенные службы не должны публиковаться по умолчанию")
+    public_domains = web["caddy"]["public_domains"]
+    require(set(public_domains) == {"home.zsergey.ru", "auth.zsergey.ru"},
+            "По умолчанию публичны только приветствие и страница входа")
+    require(all(
+        route["access"] == ("public" if route["domain"] in public_domains else "protected")
+        for route in web["caddy"]["routes"]
+    ), "Начальные маршруты должны иметь явный режим доступа")
+
+    # Сохранённый до обновления routes.yaml не содержит access.
+    # Домены, не входящие в разрешённый список, обязаны получить защиту.
+    legacy = [
+        {key: value for key, value in route.items() if key != "access"}
+        for route in web["caddy"]["routes"][:2]
+    ]
+    example_routes = legacy + [
+        {"domain": "music.zsergey.ru", "upstream": "http://music:8080", "enabled": True},
+        {"domain": "vpn.zsergey.ru", "upstream": "http://vpn:8080",
+         "access": "private", "enabled": True},
+    ]
+    caddy_example = environment.get_template("sites.generated.caddy.j2").render(
+        provision=provision, web_gateway_routes=example_routes
+    )
+    home_segment = caddy_example.split("home.zsergey.ru {", 1)[1].split("\n}", 1)[0]
+    auth_segment = caddy_example.split("auth.zsergey.ru {", 1)[1].split("\n}", 1)[0]
+    music_segment = caddy_example.split("music.zsergey.ru {", 1)[1].split("\n}", 1)[0]
+    vpn_segment = caddy_example.split("vpn.zsergey.ru {", 1)[1].split("\n}", 1)[0]
+    require("forward_auth" not in home_segment and "forward_auth" not in auth_segment,
+            "Старые маршруты Homarr и Authelia должны оставаться открытыми")
+    require("forward_auth authelia:9091" in music_segment
+            and "/api/authz/forward-auth" in music_segment,
+            "Новый маршрут без access должен требовать входа через Authelia")
+    require("reverse_proxy http://music:8080" in music_segment,
+            "Разрешённые запросы должны доходить до защищённой службы")
+    require("remote_ip 192.168.0.0/16" in vpn_segment
+            and "respond" in vpn_segment and "403" in vpn_segment
+            and "forward_auth" not in vpn_segment,
+            "Закрытый маршрут обязан пропускать только домашнюю сеть")
 
     # Ansible включает trim_blocks=True, в отличие от обычного Jinja2.
     # Этот режим раньше склеивал raw-выражения секретов со следующими строками.
@@ -177,7 +214,9 @@ def test() -> None:
     require(parsed_authelia["access_control"]["default_policy"] == "deny",
             "Не разрешать все домены Authelia по умолчанию")
     require(parsed_authelia["access_control"]["rules"][0]["policy"] == "two_factor",
-            "При запрете по умолчанию нужна явная запись для домашней страницы")
+            "Защищённые маршруты должны требовать второй фактор")
+    require(parsed_authelia["access_control"]["rules"][0]["domain"] == "*.zsergey.ru",
+            "Authelia должна проверять и вновь добавленные поддомены")
     require(parsed_authelia["identity_providers"]["oidc"]["jwks"][0]["key"] == "test-secret",
             "JWKS не должен склеиваться со списком клиентов")
     oidc_clients = parsed_authelia["identity_providers"]["oidc"]["clients"]
@@ -215,6 +254,10 @@ def test() -> None:
             "Необходимо проверить реальное подключение до создания каталогов")
     require("no_log: true" in text and "force: false" in text,
             "Нельзя раскрывать секреты или перезаписывать сохранённые маршруты")
+    require("item.access | default(" in text
+            and "provision.web_gateway.caddy.public_domains" in text
+            and "'private'" in text,
+            "Ansible обязан запрещать неожиданные и неразрешённые публичные режимы")
     require("web_gateway_secret_material" not in text and "web_gateway_users_database" not in text,
             "140 не должен ожидать материалы пользователей из OpenBao")
     require(

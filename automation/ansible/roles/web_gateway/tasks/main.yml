@@ -11,6 +11,9 @@
       - provision.web_gateway.caddy.enabled | bool
       - provision.web_gateway.authelia.enabled | bool
       - provision.web_gateway.homarr.enabled | bool
+      - provision.web_gateway.caddy.private_networks | length > 0
+      - provision.web_gateway.authelia.public_url.split('://', 1)[1] in provision.web_gateway.caddy.public_domains
+      - provision.web_gateway.homarr.public_url.split('://', 1)[1] in provision.web_gateway.caddy.public_domains
     fail_msg: "140: некорректная схема служб или постоянного хранилища"
 
 - name: Проверить настоящее подключение постоянного тома
@@ -202,7 +205,10 @@
       - item.upstream is defined
       - item.upstream is string
       - item.upstream is match('^https?://[A-Za-z0-9.:-]+$')
-    fail_msg: "140: неверное имя или назначение маршрута Caddy"
+      - (item.access | default('public' if item.domain in provision.web_gateway.caddy.public_domains else 'protected')) in ['public', 'protected', 'private']
+      - (item.access | default('public' if item.domain in provision.web_gateway.caddy.public_domains else 'protected')) != 'public' or item.domain in provision.web_gateway.caddy.public_domains
+      - item.domain != provision.web_gateway.authelia.public_url.split('://', 1)[1] or (item.access | default('public')) == 'public'
+    fail_msg: "140: неверное имя, назначение или режим доступа маршрута Caddy"
   loop: "{{ web_gateway_routes | selectattr('enabled', 'equalto', true) | list }}"
   loop_control:
     label: "{{ item.domain | default('?') }}"
@@ -342,5 +348,5 @@
     msg: >-
       140: пароль admin создан. Из доверенного терминала PVE выполните
       pct exec 140 -- python3 /usr/local/lib/web-gateway/show-initial-password.py .
-      Команда удалит открытый пароль после показа; не запускайте её из Semaphore.
+      Команда читает сохранённый пароль без удаления; не запускайте её из Semaphore.
   when: not web_gateway_initial_state.stat.exists
