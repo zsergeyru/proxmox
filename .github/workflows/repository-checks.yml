@@ -127,6 +127,8 @@ jobs:
 
       - name: Check Homarr automatic onboarding and closed public setup
         run: python scripts/tests/test-web-gateway-homarr-onboarding.py
+      - name: Check safe Google Authenticator TOTP setup
+        run: python scripts/tests/test-web-gateway-totp.py
 
       - name: Check Immich Compose template
         run: python scripts/tests/test-photo-archive-compose.py
