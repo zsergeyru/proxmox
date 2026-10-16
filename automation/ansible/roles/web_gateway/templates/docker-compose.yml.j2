@@ -9,6 +9,7 @@ services:
       - "{{ provision.web_gateway.caddy.listen.https }}:443"
     volumes:
       - "{{ provision.web_gateway.paths.configuration }}/caddy:/etc/caddy:ro"
+      - "{{ provision.web_gateway.paths.persistent_state }}/management/catalog:/srv/homarr-catalog:ro"
       - "{{ provision.web_gateway.caddy.data.host }}:{{ provision.web_gateway.caddy.data.container }}"
       - "{{ provision.web_gateway.caddy.config.host }}:{{ provision.web_gateway.caddy.config.container }}"
     depends_on:
@@ -42,7 +43,6 @@ services:
       - "{{ provision.web_gateway.paths.secrets }}/homarr.env"
     environment:
       TZ: Europe/Moscow
-      NODE_EXTRA_CA_CERTS: /etc/ssl/homarr/openbao-ca.crt
       AUTH_PROVIDERS: oidc
       AUTH_OIDC_ISSUER: "{{ provision.web_gateway.homarr.authentication.issuer }}"
       AUTH_OIDC_CLIENT_ID: "{{ provision.web_gateway.homarr.authentication.client_id }}"
@@ -53,5 +53,4 @@ services:
       AUTH_LOGOUT_REDIRECT_URL: "{{ provision.web_gateway.authelia.public_url }}/logout"
     volumes:
       - "{{ provision.web_gateway.homarr.data.host }}:{{ provision.web_gateway.homarr.data.container }}"
-      - /etc/web-gateway/ca/openbao-ca.crt:/etc/ssl/homarr/openbao-ca.crt:ro
     # Доступ к Docker-сокету Homarr не требуется.
