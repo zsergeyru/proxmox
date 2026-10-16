@@ -1,0 +1,102 @@
+---
+# При Sync нельзя создавать Homarr, Authelia, Caddy или менять их Docker-образы.
+# Здесь обновляется только файл действующих маршрутов и выполняется caddy reload.
+- name: Проверить постоянный том веб-шлюза перед синхронизацией
+  ansible.builtin.command:
+    argv:
+      - mountpoint
+      - -q
+      - "{{ provision.web_gateway.storage.required_mount }}"
+  changed_when: false
+
+- name: Проверить сохранённый список маршрутов
+  ansible.builtin.stat:
+    path: "{{ provision.web_gateway.management.routes_state }}"
+  register: web_gateway_routes_state
+
+- name: Не создавать настройки маршрутов заново
+  ansible.builtin.assert:
+    that:
+      - web_gateway_routes_state.stat.isreg | default(false)
+    fail_msg: >-
+      Отсутствует сохранённый список маршрутов 140.
+      Sync не создаёт новое состояние; проверьте том и резервную копию.
+
+- name: Прочитать действующие маршруты
+  ansible.builtin.slurp:
+    src: "{{ provision.web_gateway.management.routes_state }}"
+  register: web_gateway_routes_content
+
+- name: Проверить формат маршрутов
+  ansible.builtin.set_fact:
+    web_gateway_routes: "{{ web_gateway_routes_content.content | b64decode | from_yaml }}"
+
+- name: Проверить список маршрутов
+  ansible.builtin.assert:
+    that:
+      - web_gateway_routes is sequence
+      - web_gateway_routes is not string
+    fail_msg: "140: сохранённый список маршрутов имеет неверный формат"
+
+- name: Проверить включённые маршруты перед изменением Caddy
+  ansible.builtin.assert:
+    that:
+      - item.domain is string
+      - item.domain is match('^[a-z0-9-]+(\\.[a-z0-9-]+)*\\.zsergey\\.ru$')
+      - item.upstream is defined
+      - item.upstream is string
+      - item.upstream is match('^https?://[A-Za-z0-9.:-]+$')
+    fail_msg: "140: неверное имя или назначение маршрута Caddy"
+  loop: "{{ web_gateway_routes | selectattr('enabled', 'equalto', true) | list }}"
+  loop_control:
+    label: "{{ item.domain | default('?') }}"
+
+- name: Проверить установленный Caddy без изменения контейнера
+  ansible.builtin.command:
+    argv:
+      - docker
+      - inspect
+      - "{{ provision.web_gateway.caddy.container_name }}"
+  changed_when: false
+
+- name: Сформировать маршруты из сохранённого состояния
+  ansible.builtin.template:
+    src: sites.generated.caddy.j2
+    dest: "{{ provision.web_gateway.caddy.generated_routes_file }}"
+    owner: root
+    group: root
+    mode: "0644"
+  register: web_gateway_generated_routes
+
+- name: Проверить новые маршруты в работающем Caddy
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - "{{ provision.web_gateway.caddy.container_name }}"
+      - caddy
+      - validate
+      - --config
+      - /etc/caddy/Caddyfile
+  changed_when: false
+  when: web_gateway_generated_routes.changed
+
+- name: Применить маршруты без обновления Caddy
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - "{{ provision.web_gateway.caddy.container_name }}"
+      - caddy
+      - reload
+      - --config
+      - /etc/caddy/Caddyfile
+  changed_when: true
+  when: web_gateway_generated_routes.changed
+
+- name: Проверить доступность действующего Homarr
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ provision.web_gateway.homarr.internal_port }}"
+    status_code: [200, 301, 302, 303, 307, 308]
+    follow_redirects: none
+  changed_when: false

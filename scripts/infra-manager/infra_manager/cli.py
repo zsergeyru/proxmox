@@ -133,6 +133,20 @@ def build_parser() -> argparse.ArgumentParser:
         help="TCP-порт; по умолчанию берётся из общих настроек",
     )
     portal_gateway.set_defaults(handler="portal-gateway")
+
+    homarr_api = subparsers.add_parser(
+        "homarr-api",
+        help="запустить отдельный HTTPS-интерфейс для Homarr",
+    )
+    homarr_api.add_argument("--bind", default=None)
+    homarr_api.add_argument("--port", type=int, default=3003)
+    homarr_api.add_argument(
+        "--tls-cert", default="/etc/infra-manager/openbao/tls/server.crt"
+    )
+    homarr_api.add_argument(
+        "--tls-key", default="/etc/infra-manager/openbao/tls/server.key"
+    )
+    homarr_api.set_defaults(handler="homarr-api")
     return parser
 
 
@@ -233,6 +247,22 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "Порт посредника должен быть от 1 до 65535"
                 )
             return run_portal_gateway(args.bind, port)
+
+        if args.handler == "homarr-api":
+            from pathlib import Path
+            from .homarr_api import run_homarr_api
+            from .guest_catalog import find_guest_by_role, guest_management_address
+            from .settings import PATHS, SETTINGS
+
+            if not 0 < args.port < 65536:
+                raise InfraManagerError("Недопустимый порт HTTPS-интерфейса")
+            manager = find_guest_by_role(PATHS.repo_root, SETTINGS.infra_manager_role)
+            bind = args.bind or guest_management_address(PATHS.repo_root, manager)
+            if not bind:
+                raise InfraManagerError("Не задан адрес управляющего гостя")
+            return run_homarr_api(
+                bind, args.port, Path(args.tls_cert), Path(args.tls_key)
+            )
 
         raise InfraManagerError(f"Неизвестная команда: {args.command}")
     except (InfraManagerError, OSError) as exc:

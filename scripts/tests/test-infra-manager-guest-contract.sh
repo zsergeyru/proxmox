@@ -225,6 +225,7 @@ role_order = [
     for task in play_tasks
     if isinstance(task, dict)
     and isinstance(task.get("ansible.builtin.include_role"), dict)
+    and task["ansible.builtin.include_role"].get("tasks_from", "main") == "main"
 ]
 expected_role_order = ["linux_base", "docker", "infra_manager", "ai_control", "photo_archive", "web_gateway", "network_gateway", "portal", "ai_services", "guest_layout"]
 if role_order != expected_role_order:

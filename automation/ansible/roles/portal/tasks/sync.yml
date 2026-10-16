@@ -1,0 +1,69 @@
+---
+# Изменяем только управляемые ссылки: запуск и версия Homepage остаются прежними.
+- name: Проверить существующую конфигурацию Homepage
+  ansible.builtin.stat:
+    path: "{{ portal_config_dir }}"
+  register: portal_sync_config
+
+- name: Не создавать Homepage при синхронизации
+  ansible.builtin.assert:
+    that:
+      - portal_sync_config.stat.isdir | default(false)
+    fail_msg: >-
+      Homepage ещё не развёрнут. Сначала выполните полный infra-manager deploy.
+
+- name: Сформировать актуальные ссылки служб
+  ansible.builtin.command:
+    argv:
+      - python3
+      - -m
+      - infra_manager
+      - portal-services
+      - --guest-vmid
+      - "{{ provision.guest_vmid | string }}"
+  environment:
+    PYTHONPATH: "{{ project_root }}/scripts/infra-manager"
+  delegate_to: localhost
+  become: false
+  register: portal_services
+  changed_when: false
+
+- name: Обновить ссылки служб Homepage
+  ansible.builtin.copy:
+    dest: "{{ portal_config_dir }}/services.yaml"
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      {{ portal_services.stdout | default('[]') }}
+
+- name: Сформировать действия обслуживания гостя
+  ansible.builtin.command:
+    argv:
+      - python3
+      - -m
+      - infra_manager
+      - portal-bookmarks
+      - --guest-vmid
+      - "{{ provision.guest_vmid | string }}"
+  environment:
+    PYTHONPATH: "{{ project_root }}/scripts/infra-manager"
+  delegate_to: localhost
+  become: false
+  register: portal_bookmarks
+  changed_when: false
+
+- name: Обновить действия обслуживания Homepage
+  ansible.builtin.copy:
+    dest: "{{ portal_config_dir }}/bookmarks.yaml"
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      {{ portal_bookmarks.stdout | default('[]') }}
+
+- name: Проверить доступность существующего Homepage
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ provision.portal.local.port | default(portal_default_port) }}/api/healthcheck"
+    status_code: 200
+  changed_when: false

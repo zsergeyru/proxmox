@@ -1449,6 +1449,7 @@ def check_deploy_provision_phase_selection() -> None:
         # Фаза, начальный контур, этап Ansible, разрешён начальный SSH.
         ("all", False, "full", True),
         ("provision", False, "full", True),
+        ("sync", False, "sync", False),
         ("infrastructure", True, None, True),
         ("provision-base", True, "base", True),
         ("provision-control-plane", True, "bootstrap", True),
@@ -1530,8 +1531,12 @@ def check_deploy_provision_phase_selection() -> None:
             )
             if result != 0:
                 fail(f"{phase}: развёртывание завершилось с ошибкой")
-            requirements.assert_called_once()
-            storage.assert_called_once_with("pve", 410, "vm", context.paths.guest_dir)
+            if phase == "sync":
+                requirements.assert_not_called()
+                storage.assert_not_called()
+            else:
+                requirements.assert_called_once()
+                storage.assert_called_once_with("pve", 410, "vm", context.paths.guest_dir)
             if phase in {"all", "infrastructure"}:
                 infra.assert_called_once()
             else:
@@ -1549,12 +1554,12 @@ def check_deploy_provision_phase_selection() -> None:
                     fail(f"{phase}: изменилось разрешение начального SSH-доступа")
                 if settings.get("project_branch") != "test-branch":
                     fail(f"{phase}: потеряна выбранная ветка проекта")
-                expected_key = None if bootstrap_scope else initial_key
+                expected_key = None if bootstrap_scope or phase == "sync" else initial_key
                 if settings.get("bootstrap_private_key") != expected_key:
                     fail(f"{phase}: изменился начальный SSH-ключ")
             if bootstrap_scope:
                 cleanup.assert_not_called()
-            elif phase == "infrastructure":
+            elif phase in {"infrastructure", "sync"}:
                 cleanup.assert_not_called()
             else:
                 cleanup.assert_called_once_with(410)

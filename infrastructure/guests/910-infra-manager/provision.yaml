@@ -89,6 +89,7 @@ docker:
       mounts:
         - /mnt/persistent-state/semaphore:/var/lib/semaphore
         - /etc/infra-manager/ca:/etc/infra-manager/ca:ro
+        - /etc/infra-manager/openbao/tls/ca.crt:/etc/infra-manager/openbao/tls/ca.crt:ro
         - /mnt/pve-access/pve-host:/mnt/pve-access/pve-host:ro
         - /mnt/persistent-state/opentofu:/var/lib/infra-manager/opentofu
         - /mnt/persistent-state/locks:/var/lib/infra-manager/locks
@@ -216,6 +217,7 @@ persistence:
         - opentofu-state
         - semaphore-data
         - operation-locks
+        - homarr-api-keys-and-jobs
       bindings:
         - { source: /mnt/persistent-state/semaphore, target: /var/lib/infra-manager/semaphore, owner: "1001", group: "0", mode: "0770" }
         - { source: /mnt/persistent-state/opentofu, target: /var/lib/infra-manager/opentofu, owner: "1001", group: "0", mode: "0750" }
@@ -235,6 +237,7 @@ persistence:
     - /var/lib/infra-manager/semaphore
     - /var/lib/infra-manager/opentofu/state
     - /var/lib/persistent/openbao
+    - /mnt/persistent-state/homarr-api
 
   reproducible:
     - /var/lib/infra-manager/bootstrap-repo
