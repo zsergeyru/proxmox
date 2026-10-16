@@ -1,0 +1,34 @@
+---
+# Каталог Homarr формируется из одной рабочей копии Git на управляющей машине.
+# Никакие пакеты, контейнеры или службы при этом не меняются.
+- name: Сформировать каталог гостей Homarr из Git
+  ansible.builtin.command:
+    argv:
+      - python3
+      - -m
+      - infra_manager
+      - homarr-catalog
+      - --repo-root
+      - "{{ project_root }}"
+  environment:
+    PYTHONPATH: "{{ project_root }}/scripts/infra-manager"
+  delegate_to: localhost
+  become: false
+  register: web_gateway_catalog_json
+  changed_when: false
+
+- name: Проверить формат каталога Homarr
+  ansible.builtin.assert:
+    that:
+      - (web_gateway_catalog_json.stdout | from_json).schema_version == 1
+      - (web_gateway_catalog_json.stdout | from_json).source == "git"
+      - (web_gateway_catalog_json.stdout | from_json).guests is sequence
+    fail_msg: "Не удалось сформировать каталог Homarr из описаний проекта"
+
+- name: Обновить каталог Homarr без перезапуска контейнеров
+  ansible.builtin.copy:
+    dest: "{{ provision.web_gateway.paths.persistent_state }}/management/catalog/guests.json"
+    owner: root
+    group: root
+    mode: "0644"
+    content: "{{ web_gateway_catalog_json.stdout | trim }}\n"
