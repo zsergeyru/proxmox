@@ -11,9 +11,9 @@ from urllib.request import Request, urlopen
 
 import yaml
 
-from .common import InfraManagerError, console, run
+from .common import CommandError, InfraManagerError, console, run
 from .guest_catalog import GuestIdentity, guest_management_address
-from .portal import local_portal_definition, portal_definitions
+from .portal import local_portal_definition, operator_service_definitions, portal_definitions
 from .guest_ssh import GuestSshSession
 from .pve_host import read_pve_json_value
 from .settings import PATHS
@@ -92,6 +92,31 @@ def _resolve_password(
         if not value:
             raise InfraManagerError(f"Операторский пароль в {path} пуст")
         return value
+
+    if source == "guest_credential":
+        # Не раскрывать устаревший пароль после смены его в самом приложении.
+        # В записи хранится хеш, соответствовавший паролю на момент создания.
+        try:
+            raw = _read_guest_file(node, address, path)
+        except CommandError:
+            return "не сохранён; требуется явный сброс"
+        try:
+            credential = json.loads(raw)
+        except json.JSONDecodeError:
+            return "сохранённая запись повреждена"
+        username = credential.get("username") if isinstance(credential, dict) else None
+        password = credential.get("password") if isinstance(credential, dict) else None
+        fingerprint = credential.get("password_hash") if isinstance(credential, dict) else None
+        if not all(isinstance(x, str) and x for x in (username, password, fingerprint)):
+            return "сохранённая запись повреждена"
+        try:
+            users = yaml.safe_load(_read_guest_file(node, address, spec["users_file"]))
+            entry = (users or {}).get("users", {}).get(username)
+        except (CommandError, yaml.YAMLError, AttributeError, TypeError):
+            return "не удалось проверить действующий пароль"
+        if not isinstance(entry, dict) or entry.get("password") != fingerprint:
+            return "пароль изменён в Authelia; сохранённый больше не показывается"
+        return password
 
     if source == "guest_env":
         return _read_env_value(
@@ -342,7 +367,12 @@ def verify_guest_status(
         checked_ports.add(dashboard_port)
         messages.append("Локальная панель доступна")
 
-    services = tuple(portal_definitions(repo_root, identity))
+    # Обычные порталы и веб-службы с public_url используют единый статус,
+    # но только порталы объявляют проверяемый внутренний порт.
+    services = tuple(
+        portal_definitions(repo_root, identity)
+        + operator_service_definitions(repo_root, identity)
+    )
     for service in services:
         port = service.get("port")
         if isinstance(port, int) and port not in checked_ports:
@@ -377,6 +407,7 @@ def _service_fields(
     operator = service.get("operator")
     if not isinstance(operator, dict):
         return fields
+    auth = service.get("authentication")
 
     accounts = operator.get("accounts")
     if isinstance(accounts, list):
@@ -384,6 +415,8 @@ def _service_fields(
             fields.extend(_operator_fields(node, address, account, show_secrets=show_secrets))
     else:
         fields.extend(_operator_fields(node, address, operator, show_secrets=show_secrets))
+    if isinstance(auth, str) and auth:
+        fields.append(("Пароль", f"через {auth}"))
     return fields
 
 
