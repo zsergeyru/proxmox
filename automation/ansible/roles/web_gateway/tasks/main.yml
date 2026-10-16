@@ -12,7 +12,8 @@
       - provision.web_gateway.authelia.enabled | bool
       - provision.web_gateway.homarr.enabled | bool
       - provision.web_gateway.caddy.private_networks | length > 0
-      - provision.web_gateway.caddy.public_domains | length == 2
+      - provision.web_gateway.authelia.public_url.split('://', 1)[1] in provision.web_gateway.caddy.public_domains
+      - provision.web_gateway.homarr.public_url.split('://', 1)[1] in provision.web_gateway.caddy.public_domains
     fail_msg: "140: некорректная схема служб или постоянного хранилища"
 
 - name: Проверить настоящее подключение постоянного тома
