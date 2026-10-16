@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import ast
+import re
 from pathlib import Path
 
 import yaml
@@ -149,7 +150,41 @@ def test() -> None:
     require("photos.zsergey.ru" not in routes and "ai.zsergey.ru" not in routes,
             "Непроверенные службы не должны публиковаться по умолчанию")
 
-    authelia = environment.get_template("authelia-configuration.yml.j2").render(**variables)
+    # Ansible включает trim_blocks=True, в отличие от обычного Jinja2.
+    # Этот режим раньше склеивал raw-выражения секретов со следующими строками.
+    authelia_environment = Environment(
+        loader=FileSystemLoader(str(ROLE / "templates")),
+        undefined=StrictUndefined,
+        keep_trailing_newline=True,
+        trim_blocks=True,
+    )
+    authelia = authelia_environment.get_template(
+        "authelia-configuration.yml.j2"
+    ).render(**variables)
+    secret_expressions = re.findall(r"\\{\\{ secret [^\\n]*? \\}\\}", authelia)
+    require(len(secret_expressions) == 3,
+            "Authelia должна сохранять ровно три выражения чтения секретов")
+    # Эти выражения выполняет сама Authelia после Ansible. Для проверки
+    # синтаксиса подменяем их безопасной строкой, не читая настоящие ключи.
+    authelia_yaml = re.sub(
+        r"\\{\\{ secret [^\\n]*? \\}\\}",
+        "'test-secret'",
+        authelia,
+    )
+    parsed_authelia = yaml.safe_load(authelia_yaml)
+    require(isinstance(parsed_authelia, dict),
+            "Ansible должен выдавать корректный YAML Authelia")
+    require(parsed_authelia["access_control"]["default_policy"] == "deny",
+            "Не разрешать все домены Authelia по умолчанию")
+    require(parsed_authelia["access_control"]["rules"][0]["policy"] == "two_factor",
+            "При запрете по умолчанию нужна явная запись для домашней страницы")
+    require(parsed_authelia["identity_providers"]["oidc"]["jwks"][0]["key"] == "test-secret",
+            "JWKS не должен склеиваться со списком клиентов")
+    oidc_clients = parsed_authelia["identity_providers"]["oidc"]["clients"]
+    require({item["client_id"] for item in oidc_clients} == {"homarr", "immich"},
+            "Не потерять клиентов Homarr и Immich при формировании YAML")
+    require(all(item["client_secret"] == "test-secret" for item in oidc_clients),
+            "Секреты OIDC не должны склеиваться с полем public")
     require("{{ secret " in authelia,
             "Authelia должна получать JWKS и хеш OIDC-клиента из файлов")
     for filename in (
