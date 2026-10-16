@@ -459,8 +459,9 @@ def test_runtime_snapshot_refresh_policy() -> None:
         snapshot = operator._prepare_runtime_snapshot("sync", 420)
 
     assert snapshot == "/tmp/infra-manager-direct-1235-420"
-    checkout_lock.assert_called_once_with(exclusive=False)
-    refresh.assert_not_called()
+    # Sync теперь тоже получает актуальные машинные описания из Git.
+    checkout_lock.assert_called_once_with(exclusive=True)
+    refresh.assert_called_once_with()
 
 
 def test_operator_status_secret_policy() -> None:
