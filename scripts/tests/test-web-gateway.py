@@ -81,7 +81,27 @@ def test() -> None:
     variables = {"provision": provision, "web_gateway_routes": web["caddy"]["routes"]}
 
     compose = yaml.safe_load(environment.get_template("docker-compose.yml.j2").render(**variables))
+    local_caddy = environment.get_template("Caddyfile.j2").render(**variables)
+    local_home = (ROLE / "files/local-home.html").read_text(encoding="utf-8")
+    require(web["caddy"]["listen"]["local_http"] == 8080,
+            "Локальная страница должна слушать согласованный порт 8080")
+    require(":8080 {" in local_caddy and "file_server" in local_caddy,
+            "Caddy должен отдавать локальную страницу по HTTP")
+    require("remote_ip 192.168.0.0/16" in local_caddy
+            and "respond" in local_caddy and "403" in local_caddy,
+            "Вход по HTTP разрешён только из домашней сети")
+    require("root * /etc/caddy/local-home" in local_caddy,
+            "Локальная страница должна обслуживаться из отдельного каталога")
+    require("<html lang=\"ru\">" in local_home and "Домашний сервер" in local_home,
+            "Отсутствует готовая домашняя страница")
+    require("/init" not in local_home and "http://" not in local_home,
+            "Страница не должна отправлять на первичную настройку Homarr")
     services = compose["services"]
+    require(f'{web["caddy"]["listen"]["local_http"]}:8080' in
+            [str(port) for port in services["caddy"]["ports"]],
+            "Docker обязан публиковать отдельный порт домашней страницы")
+    require(all("7575" not in str(port) for port in services["caddy"]["ports"]),
+            "Домашняя страница не должна открывать прямой порт Homarr")
     require(set(services) == {"caddy", "authelia", "homarr"},
             "Состав Docker Compose отличается от контракта")
     for name, expected in [
@@ -271,6 +291,8 @@ def test() -> None:
     text = (ROLE / "tasks/main.yml").read_text(encoding="utf-8")
     require(text.find("mountpoint") < text.find("state: directory"),
             "Необходимо проверить реальное подключение до создания каталогов")
+    require("src: local-home.html" in text and "caddy/local-home/index.html" in text,
+            "Статическая страница должна устанавливаться ролью до запуска Caddy")
     require("no_log: true" in text and "force: false" in text,
             "Нельзя раскрывать секреты или перезаписывать сохранённые маршруты")
     require(text.index("Закрыть публичный вход Homarr") < text.index("Запустить веб-шлюз")
@@ -299,6 +321,9 @@ def test() -> None:
             "Неожиданная временная команда")
 
 
+    require(any(check.get("type") == "tcp" and check.get("port") == 8080
+                for check in checks["checks"]),
+            "Статус гостя должен проверять локальный HTTP-порт")
     status_names = {item["container"] for item in checks["checks"] if item["type"] == "docker"}
     compose_names = {item["container_name"] for item in services.values()}
     require(status_names == compose_names,

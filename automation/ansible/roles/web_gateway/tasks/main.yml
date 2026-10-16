@@ -49,6 +49,7 @@
     - "{{ provision.web_gateway.paths.compose }}"
     - "{{ provision.web_gateway.paths.configuration }}"
     - "{{ provision.web_gateway.paths.configuration }}/caddy"
+    - "{{ provision.web_gateway.paths.configuration }}/caddy/local-home"
     - "{{ provision.web_gateway.paths.configuration }}/authelia"
     - "{{ provision.web_gateway.paths.secrets }}"
 
@@ -227,6 +228,15 @@
   loop: "{{ web_gateway_routes | selectattr('enabled', 'equalto', true) | list }}"
   loop_control:
     label: "{{ item.domain | default('?') }}"
+
+# Статическая страница не зависит от начальной настройки Homarr и HTTPS.
+- name: Установить начальную домашнюю страницу
+  ansible.builtin.copy:
+    src: local-home.html
+    dest: "{{ provision.web_gateway.paths.configuration }}/caddy/local-home/index.html"
+    owner: root
+    group: root
+    mode: "0644"
 
 - name: Подготовить основной Caddyfile
   ansible.builtin.template:

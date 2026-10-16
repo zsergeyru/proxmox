@@ -25,6 +25,14 @@ checks:
     port: 443
     message: "Веб-шлюз принимает HTTPS"
 
+  - type: tcp
+    port: 8080
+    message: "Локальная домашняя страница принимает HTTP без сертификата"
+
+  - type: file
+    path: /etc/web-gateway/caddy/local-home/index.html
+    message: "Локальная домашняя страница установлена"
+
   - type: file
     path: /etc/web-gateway/caddy/Caddyfile
     message: "Конфигурация Caddy создана"

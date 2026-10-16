@@ -7,6 +7,8 @@ services:
     ports:
       - "{{ provision.web_gateway.caddy.listen.http }}:80"
       - "{{ provision.web_gateway.caddy.listen.https }}:443"
+      # Отдельный домашний HTTP-вход без публичного имени и TLS.
+      - "{{ provision.web_gateway.caddy.listen.local_http }}:8080"
     volumes:
       - "{{ provision.web_gateway.paths.configuration }}/caddy:/etc/caddy:ro"
       - "{{ provision.web_gateway.paths.persistent_state }}/management/catalog:/srv/homarr-catalog:ro"

@@ -4,6 +4,21 @@
 # контейнера; наружу порт 2019 не публикуется. Это нужно для caddy reload.
 import sites.generated.caddy
 
+# Временная домашняя страница работает только по HTTP на отдельном порту.
+# Она не использует Homarr, OIDC или сертификаты и не открывает /init.
+:8080 {
+    @local_network remote_ip {{ provision.web_gateway.caddy.private_networks | join(' ') }}
+    handle @local_network {
+        root * /etc/caddy/local-home
+        file_server
+        header Cache-Control "no-store"
+        header X-Content-Type-Options "nosniff"
+    }
+    handle {
+        respond "Доступ только из домашней сети" 403
+    }
+}
+
 # Только внутренняя сеть Docker; порт 8081 не опубликован на узле.
 # Homarr читает машинный каталог из Git без дополнительной службы.
 :8081 {
