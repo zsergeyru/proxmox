@@ -161,6 +161,9 @@ web_gateway:
     container_name: web-gateway-homarr
     internal_port: 7575
     public_url: https://home.zsergey.ru
+    onboarding:
+      admin_group: admins
+      ready_file: /var/lib/web-gateway/management/catalog/homarr-ready
     operator_status:
       name: Homarr
       authentication: Authelia

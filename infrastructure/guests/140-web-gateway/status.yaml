@@ -50,5 +50,9 @@ checks:
     message: "Постоянная база Homarr содержит данные"
 
   - type: file
+    path: /var/lib/web-gateway/management/catalog/homarr-ready
+    message: "Первоначальная настройка Homarr завершена, внешний /init закрыт"
+
+  - type: file
     path: /var/lib/web-gateway/management/catalog/guests.json
     message: "Каталог гостей Homarr сформирован на постоянном томе"

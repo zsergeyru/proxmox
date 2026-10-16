@@ -21,6 +21,23 @@
     handle {
         respond "Доступ только из домашней сети" 403
     }
+{% elif route.domain == provision.web_gateway.homarr.public_url.split('://', 1)[1] %}
+    # Никакой посетитель не должен открывать мастер первичного администратора.
+    # Готовность устанавливается только после штатной инициализации Homarr.
+    @onboarding path /init /init/* /*/init /*/init/* /api/onboarding/* /api/trpc/onboard.* /api/trpc/group.createInitialExternalGroup* /api/trpc/user.initUser*
+    @homarr_ready file {
+        root /srv/homarr-catalog
+        try_files /homarr-ready
+    }
+    route {
+        respond @onboarding "Not Found" 404
+        handle @homarr_ready {
+            reverse_proxy {{ route.upstream }}
+        }
+        handle {
+            respond "Homarr ещё не настроен" 503
+        }
+    }
 {% else %}
     reverse_proxy {{ route.upstream }}
 {% endif %}

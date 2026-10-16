@@ -68,6 +68,13 @@
     - "{{ provision.web_gateway.paths.persistent_state }}/management"
     - "{{ provision.web_gateway.paths.persistent_state }}/management/catalog"
 
+# Во время любого развёртывания Homarr должен оставаться закрытым,
+# пока его действительное состояние не проверено через штатный интерфейс.
+- name: Закрыть публичный вход Homarr до подтверждения готовности
+  ansible.builtin.file:
+    path: "{{ provision.web_gateway.homarr.onboarding.ready_file }}"
+    state: absent
+
 - name: Сформировать каталог приложений Homarr из Git
   ansible.builtin.include_tasks: catalog.yml
 
@@ -77,6 +84,14 @@
   ansible.builtin.file:
     path: /usr/local/lib/web-gateway
     state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Установить сценарий начальной настройки Homarr
+  ansible.builtin.copy:
+    src: initialize-homarr.py
+    dest: /usr/local/lib/web-gateway/initialize-homarr.py
     owner: root
     group: root
     mode: "0700"
@@ -342,6 +357,21 @@
   until: web_gateway_homarr_health.status in [200, 301, 302, 303, 307, 308]
   retries: 20
   delay: 3
+
+# Выполняем запросы напрямую на закрытый loopback-порт Homarr.
+# Не обращаться через Caddy: сертификат пока может отсутствовать.
+- name: Завершить первоначальную настройку Homarr через его интерфейс
+  ansible.builtin.command:
+    argv:
+      - python3
+      - /usr/local/lib/web-gateway/initialize-homarr.py
+      - --url
+      - "http://127.0.0.1:{{ provision.web_gateway.homarr.internal_port }}"
+      - --state-file
+      - "{{ provision.web_gateway.homarr.onboarding.ready_file }}"
+      - --admin-group
+      - "{{ provision.web_gateway.homarr.onboarding.admin_group }}"
+  changed_when: false
 
 - name: Подсказать команду просмотра первого пароля из терминала PVE
   ansible.builtin.debug:
