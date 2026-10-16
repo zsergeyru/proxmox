@@ -29,6 +29,7 @@ def initialize(container: str, username: str, issuer: str, png: Path, container_
     require(png.name == f"{username}.png", "Неожиданное имя файла QR")
     require(png.parent.is_dir() and not png.parent.is_symlink(), "Нет постоянного каталога QR")
     require(container_png == f"/data/totp-setup/{username}.png", "Неожиданный путь QR в контейнере")
+    require(not png.is_symlink(), "Файл QR не может быть символической ссылкой")
     if png.is_file():
         # Действующий QR уже есть; не менять шифрованный ключ в базе.
         os.chmod(png, 0o600)
