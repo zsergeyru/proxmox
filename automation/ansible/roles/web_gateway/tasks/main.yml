@@ -11,6 +11,9 @@
       - provision.web_gateway.caddy.enabled | bool
       - provision.web_gateway.authelia.enabled | bool
       - provision.web_gateway.homarr.enabled | bool
+      - provision.web_gateway.authelia.totp_setup.username == provision.web_gateway.authelia.initial_admin.username
+      - provision.web_gateway.authelia.totp_setup.qr_host == provision.web_gateway.authelia.data.host ~ '/totp-setup/admin.png'
+      - provision.web_gateway.authelia.totp_setup.qr_container == '/data/totp-setup/admin.png'
       - provision.web_gateway.caddy.private_networks | length > 0
       - provision.web_gateway.authelia.public_url.split('://', 1)[1] in provision.web_gateway.caddy.public_domains
       - provision.web_gateway.homarr.public_url.split('://', 1)[1] in provision.web_gateway.caddy.public_domains
@@ -50,6 +53,7 @@
     - "{{ provision.web_gateway.paths.configuration }}"
     - "{{ provision.web_gateway.paths.configuration }}/caddy"
     - "{{ provision.web_gateway.paths.configuration }}/caddy/local-home"
+    - "{{ provision.web_gateway.paths.configuration }}/caddy/totp-setup"
     - "{{ provision.web_gateway.paths.configuration }}/authelia"
     - "{{ provision.web_gateway.paths.secrets }}"
 
@@ -64,6 +68,7 @@
     - "{{ provision.web_gateway.caddy.data.host }}"
     - "{{ provision.web_gateway.caddy.config.host }}"
     - "{{ provision.web_gateway.authelia.data.host }}"
+    - "{{ provision.web_gateway.authelia.data.host }}/totp-setup"
     - "{{ provision.web_gateway.homarr.data.host }}"
     - "{{ provision.web_gateway.paths.secrets }}"
     - "{{ provision.web_gateway.paths.persistent_state }}/management"
@@ -238,6 +243,14 @@
     group: root
     mode: "0644"
 
+- name: Установить страницу подключения Google Authenticator
+  ansible.builtin.copy:
+    src: totp-setup.html
+    dest: "{{ provision.web_gateway.paths.configuration }}/caddy/totp-setup/index.html"
+    owner: root
+    group: root
+    mode: "0644"
+
 - name: Подготовить основной Caddyfile
   ansible.builtin.template:
     src: Caddyfile.j2
@@ -382,6 +395,43 @@
       - --admin-group
       - "{{ provision.web_gateway.homarr.onboarding.admin_group }}"
   changed_when: false
+
+# Создание через штатную CLI Authelia: в SQLite сохраняется закрытый ключ,
+# QR не печатается в журналы и никогда не заменяется при повторном deploy.
+- name: Установить сценарий подготовки Google Authenticator
+  ansible.builtin.copy:
+    src: initialize-totp.py
+    dest: /usr/local/lib/web-gateway/initialize-totp.py
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Подготовить QR первого администратора через Authelia
+  ansible.builtin.command:
+    argv:
+      - python3
+      - /usr/local/lib/web-gateway/initialize-totp.py
+      - --container
+      - "{{ provision.web_gateway.authelia.container_name }}"
+      - --username
+      - "{{ provision.web_gateway.authelia.totp_setup.username }}"
+      - --issuer
+      - "{{ provision.web_gateway.domain }}"
+      - --png
+      - "{{ provision.web_gateway.authelia.totp_setup.qr_host }}"
+      - --container-png
+      - "{{ provision.web_gateway.authelia.totp_setup.qr_container }}"
+  changed_when: false
+  no_log: true
+
+- name: Подсказать адрес привязки Google Authenticator
+  ansible.builtin.debug:
+    msg: >-
+      140: первый вход Google Authenticator без почты — откройте
+      {{ provision.web_gateway.authelia.public_url }}{{ provision.web_gateway.authelia.totp_setup.url_path }}
+      из домашней сети, войдите под admin и отсканируйте QR.
+      Для работы адреса нужен действительный сертификат HTTPS.
+      После проверки входа QR нужно удалить из гостя.
 
 - name: Подсказать команду просмотра первого пароля из терминала PVE
   ansible.builtin.debug:

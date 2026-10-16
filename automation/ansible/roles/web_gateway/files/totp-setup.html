@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Подключение Google Authenticator</title>
+  <style>
+    body { background: #f5f7fb; color: #1b2b46; font-family: system-ui,sans-serif; margin: 0; padding: 36px 16px; }
+    main { margin: auto; padding: 30px; width: min(540px,100%); box-sizing: border-box; background: white; border: 1px solid #e2e8f0; border-radius: 18px; }
+    h1 { font-size: 28px; }
+    p, li { line-height: 1.65; }
+    img { display: block; width: min(300px,100%); margin: 26px auto; image-rendering: crisp-edges; }
+    .warning { padding: 12px; background: #fff6e6; border-radius: 12px; font-size: 14px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Подключение Google Authenticator</h1>
+    <p>Вы вошли в Authelia как администратор. Отсканируйте QR-код через приложение Google Authenticator на телефоне.</p>
+    <img src="/totp-setup/qr.png" alt="Закрытый QR-код для добавления одноразовых паролей">
+    <ol>
+      <li>Откройте приложение Google Authenticator.</li>
+      <li>Добавьте запись через сканирование QR-кода.</li>
+      <li>Перейдите на <a href="https://home.zsergey.ru">домашний портал</a> и подтвердите вход шестизначным кодом.</li>
+    </ol>
+    <p class="warning">QR-код — это секрет второго фактора. Не фотографируйте и не пересылайте его. После проверки удалите файл QR из гостя 140 через доверенный терминал PVE.</p>
+  </main>
+</body>
+</html>

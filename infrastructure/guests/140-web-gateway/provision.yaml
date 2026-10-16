@@ -142,6 +142,14 @@ web_gateway:
     initial_admin:
       username: admin
       email: admin@zsergey.ru  # Заменить действительным адресом до первого входа
+    totp_setup:
+      # Первый фактор для admin, только домашняя сеть и готовое HTTPS.
+      # Изменять уже зарегистрированные коды повторным deploy запрещено.
+      username: admin
+      url_path: /totp-setup
+      qr_host: /var/lib/web-gateway/authelia/totp-setup/admin.png
+      qr_container: /data/totp-setup/admin.png
+      qr_caddy_root: /srv/totp-setup
     authentication:
       backend: file
       groups:
