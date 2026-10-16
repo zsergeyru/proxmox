@@ -111,6 +111,30 @@ def test() -> None:
         "AUTHELIA_IDENTITY_PROVIDERS_OIDC_HMAC_SECRET_FILE",
         "AUTHELIA_IDENTITY_VALIDATION_RESET_PASSWORD_JWT_SECRET_FILE",
     }, "Authelia должна получать секреты из защищённых файлов")
+    # Секреты нельзя подключать внутрь /config: он уже смонтирован только
+    # для чтения и Docker не сможет создать в нём вложенную точку подключения.
+    authelia_volumes = services["authelia"]["volumes"]
+    config_mount = web["paths"]["configuration"] + "/authelia:/config:ro"
+    secrets_container_path = "/run/authelia-secrets"
+    secrets_mount = web["paths"]["secrets"] + ":" + secrets_container_path + ":ro"
+    require(config_mount in authelia_volumes,
+            "Конфигурация Authelia должна оставаться только для чтения")
+    require(secrets_mount in authelia_volumes,
+            "Секреты Authelia должны подключаться отдельным закрытым томом")
+    require(not secrets_container_path.startswith("/config/"),
+            "Нельзя подключать секреты внутрь /config:ro")
+    secret_files = {
+        "AUTHELIA_SESSION_SECRET_FILE": "authelia-session-secret",
+        "AUTHELIA_STORAGE_ENCRYPTION_KEY_FILE": "authelia-storage-encryption-key",
+        "AUTHELIA_IDENTITY_VALIDATION_RESET_PASSWORD_JWT_SECRET_FILE": "authelia-jwt-secret",
+        "AUTHELIA_IDENTITY_PROVIDERS_OIDC_HMAC_SECRET_FILE": "authelia-oidc-hmac-secret",
+    }
+    for key, filename in secret_files.items():
+        require(
+            services["authelia"]["environment"].get(key)
+            == secrets_container_path + "/" + filename,
+            f"Authelia: {key} должен ссылаться на подключённый каталог",
+        )
     require(services["homarr"]["env_file"] == [web["paths"]["secrets"] + "/homarr.env"],
             "Homarr должен использовать защищённый файл параметров")
     require(services["homarr"]["environment"]["AUTH_OIDC_GROUPS_ATTRIBUTE"] == "groups",
@@ -128,6 +152,15 @@ def test() -> None:
     authelia = environment.get_template("authelia-configuration.yml.j2").render(**variables)
     require("{{ secret " in authelia,
             "Authelia должна получать JWKS и хеш OIDC-клиента из файлов")
+    for filename in (
+        "authelia-oidc-jwks-pem",
+        "authelia-homarr-client-secret-hash",
+        "authelia-immich-client-secret-hash",
+    ):
+        require(secrets_container_path + "/" + filename in authelia,
+                f"Шаблон Authelia должен читать {filename} с отдельного тома")
+    require("/config/secrets/" not in authelia,
+            "Шаблон Authelia не должен использовать старое вложенное подключение")
     require("client_secret:" in authelia and "authorization_policy: two_factor" in authelia,
             "Нужен защищённый OIDC-вход")
     require("/data/db.sqlite3" in authelia,
