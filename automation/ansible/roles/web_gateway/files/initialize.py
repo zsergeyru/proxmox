@@ -74,14 +74,14 @@ def initialize(state: Path, email: str, temporary: Path | None = None) -> None:
         raise RuntimeError("Неверный адрес администратора в provision.yaml")
     users_dir = state / "authelia"
     keys_dir = state / "secrets"
-    if not state.is_dir() or not users_dir.is_dir() or not keys_dir.is_dir():
+    if not state.is_dir() or not users_dir.is_dir() or not keys_dir.is_dir() or not (state / "management").is_dir():
         raise RuntimeError("140: отсутствуют каталоги на проверенном mp0")
-    if keys_dir.is_symlink() or users_dir.is_symlink():
+    if keys_dir.is_symlink() or users_dir.is_symlink() or (state / "management").is_symlink():
         raise RuntimeError("140: подмена каталога состояния символической ссылкой")
     os.chmod(keys_dir, 0o700)
     marker = keys_dir / ".initialized"
     users = users_dir / "users_database.yml"
-    operator_file = keys_dir / "operator-admin.json"
+    operator_file = state / "management" / "operator-admin.json"
     old_password_file = (temporary or Path("/run/web-gateway")) / "initial-admin-password"
     required = (
         "authelia-session-secret",
