@@ -94,6 +94,22 @@
   changed_when: true
   when: web_gateway_generated_routes.changed
 
+- name: Проверить каталог для обмена с Homarr
+  ansible.builtin.stat:
+    path: "{{ provision.web_gateway.paths.persistent_state }}/management/catalog"
+  register: web_gateway_catalog_dir
+
+- name: Запретить синхронизацию без первоначальной настройки каталога
+  ansible.builtin.assert:
+    that:
+      - web_gateway_catalog_dir.stat.isdir | default(false)
+    fail_msg: >-
+      На 140 ещё нет каталога Homarr. Нужна однократная установка
+      настройки Caddy через infra-manager deploy 140.
+
+- name: Обновить список гостей Homarr без перезапуска
+  ansible.builtin.include_tasks: catalog.yml
+
 - name: Проверить доступность действующего Homarr
   ansible.builtin.uri:
     url: "http://127.0.0.1:{{ provision.web_gateway.homarr.internal_port }}"
