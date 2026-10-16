@@ -1,4 +1,4 @@
-# Воспроизводимая конфигурация. Секреты берутся из постоянного /config/secrets.
+# Воспроизводимая конфигурация. Секреты берутся из постоянного /run/authelia-secrets.
 server:
   address: "tcp://:{{ provision.web_gateway.authelia.internal_port }}"
 
@@ -50,11 +50,11 @@ identity_providers:
     # Authelia обрабатывает эти конструкции своим template-фильтром.
     # Не раскрывать значения при работе Ansible.
     jwks:
-      - key: {% raw %}{{ secret "/config/secrets/authelia-oidc-jwks-pem" | mindent 10 "|" | msquote }}{% endraw %}
+      - key: {% raw %}{{ secret "/run/authelia-secrets/authelia-oidc-jwks-pem" | mindent 10 "|" | msquote }}{% endraw %}
     clients:
       - client_id: "{{ provision.web_gateway.homarr.authentication.client_id }}"
         client_name: Homarr
-        client_secret: {% raw %}{{ secret "/config/secrets/authelia-homarr-client-secret-hash" }}{% endraw %}
+        client_secret: {% raw %}{{ secret "/run/authelia-secrets/authelia-homarr-client-secret-hash" }}{% endraw %}
         public: false
         authorization_policy: two_factor
         consent_mode: implicit
@@ -73,7 +73,7 @@ identity_providers:
           - authorization_code
       - client_id: immich
         client_name: Immich
-        client_secret: {% raw %}{{ secret "/config/secrets/authelia-immich-client-secret-hash" }}{% endraw %}
+        client_secret: {% raw %}{{ secret "/run/authelia-secrets/authelia-immich-client-secret-hash" }}{% endraw %}
         public: false
         authorization_policy: two_factor
         require_pkce: true
