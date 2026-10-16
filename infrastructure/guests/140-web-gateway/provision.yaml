@@ -109,6 +109,14 @@ web_gateway:
     container_name: web-gateway-authelia
     internal_port: 9091
     public_url: https://auth.zsergey.ru
+    operator_status:
+      name: Authelia
+      operator:
+        username: admin
+        password:
+          source: guest_credential
+          path: /var/lib/web-gateway/management/operator-admin.json
+          users_file: /var/lib/web-gateway/authelia/users_database.yml
     config_file: /etc/web-gateway/authelia/configuration.yml
     users_file: /var/lib/web-gateway/authelia/users_database.yml
     data:
@@ -141,6 +149,11 @@ web_gateway:
     container_name: web-gateway-homarr
     internal_port: 7575
     public_url: https://home.zsergey.ru
+    operator_status:
+      name: Homarr
+      authentication: Authelia
+      operator:
+        username: admin
     data:
       host: /var/lib/web-gateway/homarr
       container: /appdata

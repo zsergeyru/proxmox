@@ -48,3 +48,7 @@ checks:
   - type: file
     path: /var/lib/web-gateway/homarr/db/db.sqlite
     message: "Постоянная база Homarr содержит данные"
+
+  - type: file
+    path: /var/lib/web-gateway/management/catalog/guests.json
+    message: "Каталог гостей Homarr сформирован на постоянном томе"

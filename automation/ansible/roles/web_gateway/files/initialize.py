@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import fcntl
+import json
 import os
 from pathlib import Path
 import re
@@ -73,13 +74,15 @@ def initialize(state: Path, email: str, temporary: Path | None = None) -> None:
         raise RuntimeError("Неверный адрес администратора в provision.yaml")
     users_dir = state / "authelia"
     keys_dir = state / "secrets"
-    if not state.is_dir() or not users_dir.is_dir() or not keys_dir.is_dir():
+    if not state.is_dir() or not users_dir.is_dir() or not keys_dir.is_dir() or not (state / "management").is_dir():
         raise RuntimeError("140: отсутствуют каталоги на проверенном mp0")
-    if keys_dir.is_symlink() or users_dir.is_symlink():
+    if keys_dir.is_symlink() or users_dir.is_symlink() or (state / "management").is_symlink():
         raise RuntimeError("140: подмена каталога состояния символической ссылкой")
     os.chmod(keys_dir, 0o700)
     marker = keys_dir / ".initialized"
     users = users_dir / "users_database.yml"
+    operator_file = state / "management" / "operator-admin.json"
+    old_password_file = (temporary or Path("/run/web-gateway")) / "initial-admin-password"
     required = (
         "authelia-session-secret",
         "authelia-storage-encryption-key",
@@ -101,8 +104,31 @@ def initialize(state: Path, email: str, temporary: Path | None = None) -> None:
                 check_file(keys_dir / name)
             with users.open(encoding="utf-8") as file:
                 database = yaml.safe_load(file)
-            if "admin" not in (database or {}).get("users", {}):
+            admin = (database or {}).get("users", {}).get("admin")
+            if not isinstance(admin, dict) or not isinstance(admin.get("password"), str):
                 raise RuntimeError("140: администратор отсутствует; восстановить пользователей")
+            if operator_file.exists() or operator_file.is_symlink():
+                check_file(operator_file)
+                # Смена пароля через Authelia допустима: сохранённый первоначальный
+                # пароль не перезаписываем и не объявляем действующим.
+                return
+            # Совместимость с уже установленным гостем: переносим только
+            # сохранившийся прежний временный пароль, если он ещё действует.
+            # При его утрате не придумываем пароль и не изменяем файл пользователей.
+            if old_password_file.is_file() and not old_password_file.is_symlink():
+                check_file(old_password_file)
+                old_password = old_password_file.read_text(encoding="utf-8").strip()
+                try:
+                    valid = PasswordHasher().verify(admin["password"], old_password)
+                except Exception:
+                    valid = False
+                if valid:
+                    write_once(operator_file, json.dumps({
+                        "username": "admin",
+                        "password": old_password,
+                        "password_hash": admin["password"],
+                    }, ensure_ascii=False) + "\n")
+                    old_password_file.unlink()
             return
         # Не считать утраченную метку или частично созданные ключи новой установкой.
         if (users.exists() or (users_dir / "db.sqlite3").exists()
@@ -138,12 +164,14 @@ def initialize(state: Path, email: str, temporary: Path | None = None) -> None:
             "groups": ["admins"],
         }}}
         write_once(users, yaml.safe_dump(data, allow_unicode=True, sort_keys=False))
-
-        if temporary is None:
-            temporary = Path("/run/web-gateway")
-        temporary.mkdir(mode=0o700, parents=True, exist_ok=True)
-        os.chmod(temporary, 0o700)
-        write_once(temporary / "initial-admin-password", password + "\n")
+        # Операторский пароль хранится на mp0, отдельно от хеша пользователей.
+        # Снимок хеша позволяет Status отличать первоначальный пароль от
+        # сменённого пользователем. Доступ только root (0700/0600).
+        write_once(operator_file, json.dumps({
+            "username": "admin",
+            "password": password,
+            "password_hash": hash_value,
+        }, ensure_ascii=False) + "\n")
         write_once(marker, "v1\n")
 
 

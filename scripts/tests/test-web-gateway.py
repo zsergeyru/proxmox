@@ -217,9 +217,11 @@ def test() -> None:
             "Нельзя раскрывать секреты или перезаписывать сохранённые маршруты")
     require("web_gateway_secret_material" not in text and "web_gateway_users_database" not in text,
             "140 не должен ожидать материалы пользователей из OpenBao")
-    require("initialize.py" in text and "show-initial-password.py" in text,
-            "Нужна первичная инициализация без вывода пароля в журнал")
-    for name in ["initialize.py", "show-initial-password.py"]:
+    require(
+        all(name in text for name in ("initialize.py", "show-initial-password.py", "reset-admin-password.py")),
+        "Нужны подготовка, просмотр и явная смена пароля без вывода в журнал",
+    )
+    for name in ["initialize.py", "show-initial-password.py", "reset-admin-password.py"]:
         filename = ROLE / "files" / name
         ast.parse(filename.read_text(encoding="utf-8"), filename=str(filename))
     init = (ROLE / "files" / "initialize.py").read_text(encoding="utf-8")

@@ -86,10 +86,18 @@
     group: root
     mode: "0700"
 
-- name: Установить сценарий одноразового просмотра первого пароля
+- name: Установить сценарий просмотра сохранённого операторского пароля
   ansible.builtin.copy:
     src: show-initial-password.py
     dest: /usr/local/lib/web-gateway/show-initial-password.py
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Установить сценарий явной смены пароля администратора
+  ansible.builtin.copy:
+    src: reset-admin-password.py
+    dest: /usr/local/lib/web-gateway/reset-admin-password.py
     owner: root
     group: root
     mode: "0700"

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import json
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -17,7 +18,7 @@ sys.path.insert(0, str(MODULE_ROOT))
 from infra_manager import guest_status as status
 from infra_manager.common import CommandError, Console, InfraManagerError
 from infra_manager.guest_catalog import guest_identity
-from infra_manager.portal import portal_definitions
+from infra_manager.portal import operator_service_definitions, portal_definitions
 
 
 def fail(message: str) -> None:
@@ -104,6 +105,82 @@ def check_operator_contracts() -> None:
                 fail(
                     f"{vmid} {name}: неверный источник пароля {password!r}"
                 )
+
+
+def check_operator_services_140() -> None:
+    """Для 140 показывать адреса и защищённый пароль без Homepage."""
+    identity = guest_identity(ROOT, 140)
+    services = operator_service_definitions(ROOT, identity)
+    if [x["name"] for x in services] != ["Authelia", "Homarr"]:
+        fail("140: нужны Authelia и Homarr в общем статусе")
+    authelia, homarr = services
+    if authelia["url"] != "https://auth.zsergey.ru":
+        fail("140: неверный адрес Authelia")
+    if authelia["operator"] != {
+        "username": "admin",
+        "password": {
+            "source": "guest_credential",
+            "path": "/var/lib/web-gateway/management/operator-admin.json",
+            "users_file": "/var/lib/web-gateway/authelia/users_database.yml",
+        },
+    }:
+        fail("140: неверный источник операторского пароля")
+    if homarr["url"] != "https://home.zsergey.ru":
+        fail("140: неверный адрес Homarr")
+    if homarr["authentication"] != "Authelia":
+        fail("140: вход в Homarr должен использовать Authelia")
+    if portal_definitions(ROOT, identity):
+        fail("140: Homarr не должен превращаться в портал Homepage")
+
+
+def check_credential_validation_140() -> None:
+    """Не показывать старый пароль после изменения хеша Authelia."""
+    services = operator_service_definitions(ROOT, guest_identity(ROOT, 140))
+    spec = services[0]["operator"]["password"]
+    credential = json.dumps({
+        "username": "admin",
+        "password": "initial-authelia-secret",
+        "password_hash": "$argon2id$oldhash",
+    })
+    def reader(node: str, address: str, path: str) -> str:
+        if path == spec["path"]:
+            return credential
+        if path == spec["users_file"]:
+            return 'users:\n  admin:\n    password: "$argon2id$oldhash"\n'
+        raise AssertionError(path)
+
+    with patch.object(status, "_read_guest_file", side_effect=reader):
+        if status._resolve_password("pve", "192.168.1.40", spec) != "initial-authelia-secret":
+            fail("140: статус не вернул сохранённый действующий пароль")
+
+    with patch.object(status, "_read_guest_file", side_effect=lambda n, a, p: (
+        credential if p == spec["path"] else 'users:\n  admin:\n    password: "$argon2id$newhash"\n'
+    )):
+        actual = status._resolve_password("pve", "192.168.1.40", spec)
+        if "initial-authelia-secret" in actual or "изменён" not in actual:
+            fail("140: нельзя показывать пароль после изменения хеша")
+
+    with patch.object(status, "_read_guest_file", side_effect=CommandError(["cat"], 1)):
+        actual = status._resolve_password("pve", "192.168.1.40", spec)
+        if "не сохранён" not in actual:
+            fail("140: отсутствие прежнего пароля не должно ломать статус")
+
+    with (
+        patch.object(status, "verify_guest_status", return_value=(
+            "pve", "192.168.1.40", tuple(services), ("SSH доступен",)
+        )),
+        patch.object(status, "_read_guest_file", side_effect=AssertionError("Пароль прочитан в Semaphore")),
+    ):
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            status.show_guest_status(
+                ROOT, guest_identity(ROOT, 140), _resource(140, "web-gateway", "lxc"),
+                show_secrets=False,
+            )
+        text = output.getvalue()
+        for expected in ("https://auth.zsergey.ru", "https://home.zsergey.ru", "Логин:", "скрыт", "через Authelia"):
+            if expected not in text:
+                fail(f"140: в скрытом статусе отсутствует {expected}")
 
 
 def check_immich_accounts() -> None:
@@ -545,6 +622,8 @@ def check_ansible_error_classification() -> None:
 
 def main() -> None:
     check_operator_contracts()
+    check_operator_services_140()
+    check_credential_validation_140()
     check_immich_accounts()
     check_status_definitions()
     check_declared_check_dispatch()

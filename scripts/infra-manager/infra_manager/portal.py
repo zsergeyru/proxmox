@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import yaml
 
@@ -232,7 +233,7 @@ def _validated_operator(source: str, operator: object) -> dict[str, Any] | None:
                 f"{source}.portal.operator.password должен быть объектом"
             )
         source_type = password.get("source")
-        if source_type not in {"guest_file", "guest_env", "guest_json", "pve_json"}:
+        if source_type not in {"guest_file", "guest_env", "guest_json", "pve_json", "guest_credential"}:
             raise InfraManagerError(
                 f"{source}.portal.operator.password.source имеет "
                 f"неподдерживаемое значение {source_type!r}"
@@ -248,6 +249,13 @@ def _validated_operator(source: str, operator: object) -> dict[str, Any] | None:
             "source": source_type,
             "path": path,
         }
+        if source_type == "guest_credential":
+            users_file = password.get("users_file")
+            if not isinstance(users_file, str) or not users_file.startswith("/"):
+                raise InfraManagerError(
+                    f"{source}.portal.operator.password.users_file должен быть абсолютным путём"
+                )
+            normalized_password["users_file"] = users_file
         if source_type in {"guest_env", "guest_json", "pve_json"}:
             key = password.get("key")
             if not isinstance(key, str) or not key.strip():
@@ -378,6 +386,70 @@ def portal_definitions(
                 ),
             }
         )
+    return result
+
+
+
+def operator_service_definitions(
+    repo_root: Path,
+    identity: GuestIdentity,
+) -> list[dict[str, Any]]:
+    """Собрать операторские адреса без привязки к Homepage или VMID.
+
+    Поле operator_status задаётся рядом с public_url соответствующей службы.
+    Это только описание для вывода; опубликованные порты проверяет status.yaml.
+    """
+    provision = _load_provision(identity)
+    result: list[dict[str, Any]] = []
+    names: set[str] = set()
+
+    def walk(value: Any, source: str) -> None:
+        if isinstance(value, list):
+            for index, child in enumerate(value):
+                walk(child, f"{source}[{index}]")
+            return
+        if not isinstance(value, dict):
+            return
+
+        definition = value.get("operator_status")
+        if definition is not None:
+            if not isinstance(definition, dict):
+                raise InfraManagerError(f"{source}.operator_status должен быть объектом")
+            name = definition.get("name")
+            url = value.get("public_url")
+            if not isinstance(name, str) or not name.strip():
+                raise InfraManagerError(f"{source}.operator_status.name должен быть строкой")
+            if not isinstance(url, str):
+                raise InfraManagerError(f"{source}.public_url должен быть строкой")
+            parsed = urlsplit(url)
+            if (
+                parsed.scheme not in {"https", "http"}
+                or not parsed.hostname
+                or parsed.username is not None
+                or parsed.password is not None
+                or parsed.query or parsed.fragment
+            ):
+                raise InfraManagerError(f"{source}.public_url не является безопасным веб-адресом")
+            if name in names:
+                raise InfraManagerError(f"Повторяется операторская служба {name}")
+            names.add(name)
+            via = definition.get("authentication")
+            if via is not None and (not isinstance(via, str) or not via.strip()):
+                raise InfraManagerError(f"{source}.operator_status.authentication должен быть строкой")
+            result.append({
+                "name": name.strip(),
+                "url": url,
+                "operator": _validated_operator(
+                    f"{source}.operator_status", definition.get("operator")
+                ),
+                "authentication": via,
+            })
+
+        for key, child in value.items():
+            if key != "operator_status":
+                walk(child, f"{source}.{key}")
+
+    walk(provision, "provision")
     return result
 
 
