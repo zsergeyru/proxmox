@@ -161,13 +161,13 @@ def test() -> None:
     authelia = authelia_environment.get_template(
         "authelia-configuration.yml.j2"
     ).render(**variables)
-    secret_expressions = re.findall(r"\\{\\{ secret [^\\n]*? \\}\\}", authelia)
+    secret_expressions = re.findall(r"\{\{ secret [^\n]*? \}\}", authelia)
     require(len(secret_expressions) == 3,
             "Authelia должна сохранять ровно три выражения чтения секретов")
     # Эти выражения выполняет сама Authelia после Ansible. Для проверки
     # синтаксиса подменяем их безопасной строкой, не читая настоящие ключи.
     authelia_yaml = re.sub(
-        r"\\{\\{ secret [^\\n]*? \\}\\}",
+        r"\{\{ secret [^\n]*? \}\}",
         "'test-secret'",
         authelia,
     )
