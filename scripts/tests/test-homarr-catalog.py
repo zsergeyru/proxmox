@@ -14,8 +14,8 @@ import yaml
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts/infra-manager"))
 
-from infra_manager import homarr_catalog  # noqa: E402
-from infra_manager.guest_catalog import deployable_guests  # noqa: E402
+from infra_manager import homarr_catalog
+from infra_manager.guest_catalog import deployable_guests
 
 
 def test_catalog() -> None:
