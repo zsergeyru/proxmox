@@ -25,9 +25,11 @@ authentication_backend:
 access_control:
   default_policy: deny
   # Без единого правила Authelia отвергает политику запрета по умолчанию.
-  # Домашняя страница требует второй фактор; остальные домены закрыты.
+  # Caddy проверяет каждую защищённую службу через Authelia.
+  # Правило для всех поддоменов позволяет добавлять маршруты из routes.yaml,
+  # но не делает их публичными: в Caddy допуск определяется отдельно.
   rules:
-    - domain: "{{ provision.web_gateway.homarr.public_url.split('://', 1)[1] }}"
+    - domain: "*.{{ provision.web_gateway.domain }}"
       policy: two_factor
 
 session:
