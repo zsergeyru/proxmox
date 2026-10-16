@@ -149,6 +149,25 @@ def test() -> None:
             "Нет основных доменов")
     require("photos.zsergey.ru" not in routes and "ai.zsergey.ru" not in routes,
             "Непроверенные службы не должны публиковаться по умолчанию")
+    # Даже при открытом маршруте home мастер создания первого
+    # администратора закрыт, пока не завершён штатный запуск Homarr.
+    require("root /srv/homarr-catalog" in routes
+            and "try_files /homarr-ready" in routes
+            and "respond @onboarding" in routes
+            and "/api/onboarding/*" in routes
+            and "/api/trpc/group.createInitialExternalGroup*" in routes,
+            "Homarr должен оставаться закрытым до завершения инициализации")
+    require("reverse_proxy http://homarr:7575" in routes,
+            "После готовности Homarr должен работать через Caddy")
+    require(web["homarr"]["onboarding"]["admin_group"] == "admins",
+            "Группа первичного администратора должна совпадать с Authelia")
+    require(web["homarr"]["onboarding"]["ready_file"].startswith(
+        web["paths"]["persistent_state"] + "/management/"
+    ), "Отметка готовности должна находиться на постоянном томе")
+    require(any(check.get("path") == web["homarr"]["onboarding"]["ready_file"]
+                for check in checks["checks"]),
+            "Готовность гостя 140 должна учитывать завершённую настройку Homarr")
+
     public_domains = web["caddy"]["public_domains"]
     require(set(public_domains) == {"home.zsergey.ru", "auth.zsergey.ru"},
             "По умолчанию публичны только приветствие и страница входа")
@@ -254,6 +273,12 @@ def test() -> None:
             "Необходимо проверить реальное подключение до создания каталогов")
     require("no_log: true" in text and "force: false" in text,
             "Нельзя раскрывать секреты или перезаписывать сохранённые маршруты")
+    require(text.index("Закрыть публичный вход Homarr") < text.index("Запустить веб-шлюз")
+            < text.index("Завершить первоначальную настройку Homarr"),
+            "Публичный Homarr надо закрыть до его запуска и открыть после проверки")
+    require("initialize-homarr.py" in text,
+            "Первичная настройка должна выполняться из общего deploy 140")
+
     require("item.access | default(" in text
             and "provision.web_gateway.caddy.public_domains" in text
             and "'private'" in text,
