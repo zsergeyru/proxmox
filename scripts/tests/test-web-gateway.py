@@ -214,8 +214,16 @@ def test() -> None:
     auth_segment = caddy_example.split("auth.zsergey.ru {", 1)[1].split("\n}", 1)[0]
     music_segment = caddy_example.split("music.zsergey.ru {", 1)[1].split("\n}", 1)[0]
     vpn_segment = caddy_example.split("vpn.zsergey.ru {", 1)[1].split("\n}", 1)[0]
-    require("forward_auth" not in home_segment and "forward_auth" not in auth_segment,
-            "Старые маршруты Homarr и Authelia должны оставаться открытыми")
+    require("forward_auth" not in home_segment,
+            "Публичная страница Homarr должна оставаться открытой")
+    require("@totp_setup path /totp-setup" in auth_segment
+            and "@totp_lan remote_ip 192.168.0.0/16" in auth_segment
+            and "forward_auth authelia:9091" in auth_segment
+            and "root * /srv/totp-setup" in auth_segment
+            and "respond" in auth_segment and "403" in auth_segment,
+            "QR доступен только из домашней сети после проверки Authelia")
+    require("reverse_proxy http://authelia:9091" in auth_segment,
+            "Вне начальной привязки Authelia должна принимать обычные запросы")
     require("forward_auth authelia:9091" in music_segment
             and "/api/authz/forward-auth" in music_segment,
             "Новый маршрут без access должен требовать входа через Authelia")
@@ -252,10 +260,19 @@ def test() -> None:
             "Ansible должен выдавать корректный YAML Authelia")
     require(parsed_authelia["access_control"]["default_policy"] == "deny",
             "Не разрешать все домены Authelia по умолчанию")
-    require(parsed_authelia["access_control"]["rules"][0]["policy"] == "two_factor",
-            "Защищённые маршруты должны требовать второй фактор")
-    require(parsed_authelia["access_control"]["rules"][0]["domain"] == "*.zsergey.ru",
-            "Authelia должна проверять и вновь добавленные поддомены")
+    rules = parsed_authelia["access_control"]["rules"]
+    require(len(rules) == 3, "Authelia должна иметь узкое исключение и общее правило")
+    require(rules[0]["domain"] == "auth.zsergey.ru"
+            and rules[0]["policy"] == "one_factor"
+            and rules[0]["subject"] == "user:admin"
+            and rules[0]["resources"] == ["^/totp-setup([/?].*)?$"],
+            "Только admin после пароля может увидеть начальный QR")
+    require(rules[1]["domain"] == "auth.zsergey.ru"
+            and rules[1]["policy"] == "deny"
+            and rules[1]["resources"] == rules[0]["resources"],
+            "Остальным пользователям запрещён QR, даже при наличии второго фактора")
+    require(rules[2]["policy"] == "two_factor" and rules[2]["domain"] == "*.zsergey.ru",
+            "Все остальные поддомены должны требовать второй фактор")
     require(parsed_authelia["identity_providers"]["oidc"]["jwks"][0]["key"] == "test-secret",
             "JWKS не должен склеиваться со списком клиентов")
     oidc_clients = parsed_authelia["identity_providers"]["oidc"]["clients"]
@@ -293,6 +310,22 @@ def test() -> None:
             "Необходимо проверить реальное подключение до создания каталогов")
     require("src: local-home.html" in text and "caddy/local-home/index.html" in text,
             "Статическая страница должна устанавливаться ролью до запуска Caddy")
+    require("src: totp-setup.html" in text and "initialize-totp.py" in text,
+            "Штатная подготовка QR должна входить в общее развёртывание")
+    require(text.index("Запустить веб-шлюз") < text.index("Подготовить QR первого администратора"),
+            "Генерация TOTP должна выполняться только после запуска контейнера Authelia")
+    require("no_log: true" in text[text.index("Подготовить QR первого администратора"):],
+            "Секрет QR нельзя печатать в журналы")
+    require(web["authelia"]["totp_setup"]["username"] == "admin"
+            and web["authelia"]["totp_setup"]["qr_host"].startswith(
+                web["authelia"]["data"]["host"] + "/"
+            ), "QR должен принадлежать первому администратору и лежать на mp0")
+    require("root * /srv/totp-setup" in routes,
+            "QR должен обслуживаться через выделенный каталог")
+    require("totp-setup:ro" in str(services["caddy"]["volumes"]),
+            "Caddy должен получать QR только для чтения")
+    require("/var/lib/web-gateway/authelia/totp-setup" in str(services["caddy"]["volumes"]),
+            "Caddy не должен получать всю базу Authelia")
     require("no_log: true" in text and "force: false" in text,
             "Нельзя раскрывать секреты или перезаписывать сохранённые маршруты")
     require(text.index("Закрыть публичный вход Homarr") < text.index("Запустить веб-шлюз")
