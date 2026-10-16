@@ -171,10 +171,10 @@ def test() -> None:
     caddy_example = environment.get_template("sites.generated.caddy.j2").render(
         provision=provision, web_gateway_routes=example_routes
     )
-    home_segment = caddy_example.split("home.zsergey.ru {", 1)[1].split("\\n}", 1)[0]
-    auth_segment = caddy_example.split("auth.zsergey.ru {", 1)[1].split("\\n}", 1)[0]
-    music_segment = caddy_example.split("music.zsergey.ru {", 1)[1].split("\\n}", 1)[0]
-    vpn_segment = caddy_example.split("vpn.zsergey.ru {", 1)[1].split("\\n}", 1)[0]
+    home_segment = caddy_example.split("home.zsergey.ru {", 1)[1].split("\n}", 1)[0]
+    auth_segment = caddy_example.split("auth.zsergey.ru {", 1)[1].split("\n}", 1)[0]
+    music_segment = caddy_example.split("music.zsergey.ru {", 1)[1].split("\n}", 1)[0]
+    vpn_segment = caddy_example.split("vpn.zsergey.ru {", 1)[1].split("\n}", 1)[0]
     require("forward_auth" not in home_segment and "forward_auth" not in auth_segment,
             "Старые маршруты Homarr и Authelia должны оставаться открытыми")
     require("forward_auth authelia:9091" in music_segment
