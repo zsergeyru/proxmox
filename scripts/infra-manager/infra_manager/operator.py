@@ -188,7 +188,8 @@ def _prepare_runtime_snapshot(operation: str, vmid: int) -> str:
             ]
         )
 
-    if operation == "deploy":
+    if operation in {"deploy", "sync"}:
+        # Sync берёт свежие машинные описания из Git перед формированием каталога.
         with project_checkout_lock(exclusive=True):
             _refresh_project_checkout()
             copy_snapshot()

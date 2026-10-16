@@ -134,19 +134,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     portal_gateway.set_defaults(handler="portal-gateway")
 
-    homarr_api = subparsers.add_parser(
-        "homarr-api",
-        help="запустить отдельный HTTPS-интерфейс для Homarr",
+    catalog = subparsers.add_parser(
+        "homarr-catalog",
+        help="сформировать JSON каталога Homarr из машинных описаний Git",
     )
-    homarr_api.add_argument("--bind", default=None)
-    homarr_api.add_argument("--port", type=int, default=3003)
-    homarr_api.add_argument(
-        "--tls-cert", default="/etc/infra-manager/openbao/tls/server.crt"
-    )
-    homarr_api.add_argument(
-        "--tls-key", default="/etc/infra-manager/openbao/tls/server.key"
-    )
-    homarr_api.set_defaults(handler="homarr-api")
+    catalog.add_argument("--repo-root", type=str, required=True)
+    catalog.set_defaults(handler="homarr-catalog")
     return parser
 
 
@@ -248,21 +241,17 @@ def main(argv: Sequence[str] | None = None) -> int:
                 )
             return run_portal_gateway(args.bind, port)
 
-        if args.handler == "homarr-api":
+        if args.handler == "homarr-catalog":
+            import json
             from pathlib import Path
-            from .homarr_api import run_homarr_api
-            from .guest_catalog import find_guest_by_role, guest_management_address
-            from .settings import PATHS, SETTINGS
+            from .homarr_catalog import build_catalog
 
-            if not 0 < args.port < 65536:
-                raise InfraManagerError("Недопустимый порт HTTPS-интерфейса")
-            manager = find_guest_by_role(PATHS.repo_root, SETTINGS.infra_manager_role)
-            bind = args.bind or guest_management_address(PATHS.repo_root, manager)
-            if not bind:
-                raise InfraManagerError("Не задан адрес управляющего гостя")
-            return run_homarr_api(
-                bind, args.port, Path(args.tls_cert), Path(args.tls_key)
-            )
+            print(json.dumps(
+                build_catalog(Path(args.repo_root).resolve()),
+                ensure_ascii=False,
+                separators=(",", ":"),
+            ))
+            return 0
 
         raise InfraManagerError(f"Неизвестная команда: {args.command}")
     except (InfraManagerError, OSError) as exc:

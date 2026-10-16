@@ -3,3 +3,15 @@
 # Административный API остаётся только на локальном сокете Caddy внутри
 # контейнера; наружу порт 2019 не публикуется. Это нужно для caddy reload.
 import sites.generated.caddy
+
+# Только внутренняя сеть Docker; порт 8081 не опубликован на узле.
+# Homarr читает машинный каталог из Git без дополнительной службы.
+:8081 {
+    @catalog path /guests.json
+    handle @catalog {
+        root * /srv/homarr-catalog
+        header Cache-Control "no-store"
+        file_server
+    }
+    respond "Not Found" 404
+}

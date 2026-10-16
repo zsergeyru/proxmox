@@ -28,10 +28,15 @@ def tasks(path: Path) -> list[dict]:
     return loaded
 
 
-def verify_sync_tasks(role: str) -> None:
-    """Запретить установку пакетов и создание контейнеров в Sync-роли."""
-    path = ANSIBLE / "roles" / role / "tasks/sync.yml"
+def verify_sync_tasks(role: str, filename: str = "sync.yml") -> None:
+    """Запретить установку пакетов в Sync и во вложенных задачах роли."""
+    if "/" in filename or not filename.endswith(".yml"):
+        raise AssertionError((role, filename))
+    path = ANSIBLE / "roles" / role / "tasks" / filename
     for task in tasks(path):
+        included = task.get("ansible.builtin.include_tasks")
+        if isinstance(included, str):
+            verify_sync_tasks(role, included)
         assert not (UNSAFE_MODULES & task.keys()), (role, task.get("name"))
         command = task.get("ansible.builtin.command")
         if not isinstance(command, dict):

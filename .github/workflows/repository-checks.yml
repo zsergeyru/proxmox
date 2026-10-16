@@ -105,8 +105,8 @@ jobs:
       - name: Check safe Sync does not update software
         run: python scripts/tests/test-safe-sync.py
 
-      - name: Check Homarr inventory and HTTPS API contract
-        run: python scripts/tests/test-homarr-api.py
+      - name: Check Homarr Git catalog and Caddy integration
+        run: python scripts/tests/test-homarr-catalog.py
 
       - name: Run unified guest status checks
         run: python scripts/tests/test-guest-status.py

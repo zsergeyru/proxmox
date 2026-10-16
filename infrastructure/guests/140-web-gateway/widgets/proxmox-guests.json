@@ -1,114 +1,21 @@
 {
   "$schema": "homarr-custom-widget-v2",
   "name": "Гости Proxmox",
-  "description": "Живой список гостей из 910 infra-manager; без статического перечня VMID",
+  "description": "Список гостей и программ из Git. Каталог обновляется командой infra-manager sync 140.",
   "sources": {
     "default": {
-      "name": "Чтение 910",
-      "baseUrl": "https://192.168.9.10:3003",
+      "name": "Каталог Git через Caddy",
+      "baseUrl": "http://caddy:8081",
       "networkScope": "private",
-      "auth": "bearer"
-    },
-    "actions": {
-      "name": "Управление 910",
-      "baseUrl": "https://192.168.9.10:3003",
-      "networkScope": "private",
-      "auth": "bearer"
+      "auth": "none"
     }
   },
   "requests": {
     "inventory": {
-      "path": "/v1/guests",
-      "cacheSeconds": 10
-    },
-    "job": {
-      "path": "/v1/jobs/{param:id}",
-      "trigger": "manual",
+      "path": "/guests.json",
       "cacheSeconds": 0
-    },
-    "statusGuest": {
-      "source": "actions",
-      "kind": "action",
-      "method": "POST",
-      "path": "/v1/guests/{param:vmid}/actions",
-      "body": {
-        "operation": "status",
-        "confirm": {
-          "$param": "confirm"
-        }
-      },
-      "confirmation": "Запустить проверку выбранного гостя?",
-      "permission": "full",
-      "invalidates": [
-        "inventory"
-      ]
-    },
-    "syncGuest": {
-      "source": "actions",
-      "kind": "action",
-      "method": "POST",
-      "path": "/v1/guests/{param:vmid}/actions",
-      "body": {
-        "operation": "sync",
-        "confirm": {
-          "$param": "confirm"
-        }
-      },
-      "confirmation": {
-        "title": "Синхронизировать настройки",
-        "message": "Применить разрешённые настройки к выбранному гостю без обновления программ?",
-        "confirmLabel": "Синхронизировать"
-      },
-      "permission": "full",
-      "invalidates": [
-        "inventory"
-      ]
-    },
-    "repairGuest": {
-      "source": "actions",
-      "kind": "action",
-      "method": "POST",
-      "path": "/v1/guests/{param:vmid}/actions",
-      "body": {
-        "operation": "repair",
-        "confirm": {
-          "$param": "confirm"
-        }
-      },
-      "confirmation": {
-        "title": "Исправление гостя",
-        "message": "Запустить штатное исправление выбранного гостя? Эта операция может менять состояние машины.",
-        "confirmLabel": "Исправить",
-        "destructive": true
-      },
-      "permission": "full",
-      "invalidates": [
-        "inventory"
-      ]
-    },
-    "deployGuest": {
-      "source": "actions",
-      "kind": "action",
-      "method": "POST",
-      "path": "/v1/guests/{param:vmid}/actions",
-      "body": {
-        "operation": "deploy",
-        "confirm": {
-          "$param": "confirm"
-        }
-      },
-      "confirmation": {
-        "title": "Полное развёртывание",
-        "message": "Запустить полный Deploy выбранного гостя? Это может менять программы, хранилища и инфраструктуру.",
-        "confirmLabel": "Развернуть",
-        "destructive": true
-      },
-      "permission": "full",
-      "invalidates": [
-        "inventory"
-      ]
     }
   },
   "options": {},
-  "template": "<Stack gap=\"sm\" p=\"sm\">\n  <Group justify=\"space-between\" wrap=\"wrap\">\n    <Stack gap={2}>\n      <Text fw={700}>Гости Proxmox</Text>\n      <Text size=\"xs\" c=\"dimmed\">Данные из 910 · версии из Git отмечены как требуемые</Text>\n    </Stack>\n    <RefreshButton label=\"Обновить список гостей\" />\n  </Group>\n  {status.inventory?.loading ? <Skeleton height={130} /> : status.inventory?.error ? <Alert color=\"red\" title=\"Нет связи с infra-manager\">{status.inventory.error}</Alert> : (data.inventory?.guests?.length ?? 0) === 0 ? <Alert title=\"Список пуст\">Гости пока не найдены.</Alert> :\n    <Stack gap=\"xs\">\n      <Group gap=\"xs\">\n        <Badge color={data.inventory?.pve_available ? \"green\" : \"orange\"}>{data.inventory?.pve_available ? \"PVE доступен\" : \"PVE недоступен\"}</Badge>\n        <Badge color={data.inventory?.actions_enabled ? \"green\" : \"gray\"}>{data.inventory?.actions_enabled ? \"Действия включены\" : \"Только просмотр\"}</Badge>\n      </Group>\n      {(data.inventory?.guests ?? []).map(guest =>\n        <Paper key={guest.vmid} withBorder radius=\"md\" p=\"sm\">\n          <Stack gap=\"xs\">\n            <Group justify=\"space-between\" wrap=\"wrap\">\n              <Stack gap={2}>\n                <Text fw={600}>{guest.vmid} · {guest.name}</Text>\n                <Text size=\"xs\" c=\"dimmed\">{guest.kind ?? \"не создан\"} · {guest.address ?? \"адрес неизвестен\"}</Text>\n              </Stack>\n              <Badge color={guest.state === \"running\" ? \"green\" : guest.state === \"stopped\" ? \"yellow\" : \"gray\"}>{guest.state}</Badge>\n            </Group>\n            {(guest.services?.length ?? 0) > 0 ? <Group gap=\"sm\" wrap=\"wrap\">{guest.services.map(service => <Anchor key={service.url} href={service.url} target=\"_blank\" size=\"sm\">{service.name}</Anchor>)}</Group> : null}\n            {(guest.versions?.length ?? 0) > 0 ? <Stack gap={2}>{guest.versions.map(version => <Text key={version.source + version.configured_image} size=\"xs\" c=\"dimmed\">Требуется: {version.configured_image} · установлено: {version.installed_version ?? \"не проверено\"} · доступно: {version.available_version ?? \"не проверено\"}</Text>)}</Stack> : null}\n            {guest.managed && data.inventory?.actions_enabled ? <Group gap=\"xs\" wrap=\"wrap\">\n              {guest.actions?.includes(\"status\") ? <ActionButton requestId=\"statusGuest\" params={{vmid:guest.vmid,confirm:guest.vmid + \" \" + guest.name}}>Проверить</ActionButton> : null}\n              {guest.actions?.includes(\"sync\") ? <ActionButton requestId=\"syncGuest\" params={{vmid:guest.vmid,confirm:guest.vmid + \" \" + guest.name}}>Синхронизировать</ActionButton> : null}\n              {guest.actions?.includes(\"repair\") ? <ActionButton requestId=\"repairGuest\" params={{vmid:guest.vmid,confirm:guest.vmid + \" \" + guest.name}}>Исправить</ActionButton> : null}\n              {guest.actions?.includes(\"deploy\") ? <ActionButton requestId=\"deployGuest\" params={{vmid:guest.vmid,confirm:guest.vmid + \" \" + guest.name}}>Развернуть</ActionButton> : null}\n            </Group> : <Text size=\"xs\" c=\"dimmed\">Управляющие действия пока недоступны</Text>}\n          </Stack>\n        </Paper>\n      )}\n    </Stack>\n  }\n  {data.statusGuest?.id ? <Text size=\"xs\">Проверка: {data.statusGuest.id}</Text> : null}\n  {data.syncGuest?.id ? <Text size=\"xs\">Синхронизация: {data.syncGuest.id}</Text> : null}\n  {data.repairGuest?.id ? <Text size=\"xs\">Исправление: {data.repairGuest.id}</Text> : null}\n  {data.deployGuest?.id ? <Text size=\"xs\">Развёртывание: {data.deployGuest.id}</Text> : null}\n  <Divider />\n  <TextInput bind=\"jobId\" label=\"Номер задания\" placeholder=\"Вставьте номер задания для просмотра журнала\" />\n  <SubFetch requestId=\"job\" trigger=\"manual\" params={{id:inputs.jobId}}>\n    {(job) => <Stack gap=\"xs\"><Badge>{job?.status ?? \"неизвестно\"}</Badge><Code block>{job?.log_tail ?? \"Журнал пуст\"}</Code></Stack>}\n  </SubFetch>\n</Stack>"
+  "template": "<Stack gap=\"sm\" p=\"sm\">\n  <Group justify=\"space-between\" wrap=\"wrap\">\n    <Stack gap={2}>\n      <Text fw={700}>Гости Proxmox</Text>\n      <Text size=\"xs\" c=\"dimmed\">Сведения из Git · состояние PVE показывается отдельной интеграцией</Text>\n    </Stack>\n    <RefreshButton label=\"Перечитать каталог\" />\n  </Group>\n  {status.inventory?.loading ? <Skeleton height={130} /> : status.inventory?.error ?\n    <Alert color=\"red\" title=\"Не удалось прочитать каталог\">{status.inventory.error}</Alert> :\n    <Stack gap=\"xs\">\n      <Group justify=\"space-between\">\n        <Badge color=\"gray\">Только просмотр</Badge>\n        <Text size=\"xs\" c=\"dimmed\">Обновлено: {data.inventory?.generated_at ?? \"неизвестно\"}</Text>\n      </Group>\n      {(data.inventory?.guests ?? []).map(guest =>\n        <Paper key={guest.vmid} withBorder radius=\"md\" p=\"sm\">\n          <Stack gap=\"xs\">\n            <Text fw={600}>{guest.vmid} · {guest.name}</Text>\n            <Text size=\"xs\" c=\"dimmed\">{guest.address ?? \"адрес не задан\"} · фактическое состояние не проверялось</Text>\n            {(guest.services?.length ?? 0) > 0 ?\n              <Group gap=\"sm\" wrap=\"wrap\">\n                {guest.services.map(service => <Anchor key={service.url} href={service.url} target=\"_blank\" size=\"sm\">{service.name}</Anchor>)}\n              </Group> : null}\n            {(guest.versions?.length ?? 0) > 0 ?\n              <Stack gap={2}>\n                {guest.versions.map(version =>\n                  <Text key={version.source + version.configured_image} size=\"xs\" c=\"dimmed\">Из Git: {version.configured_image} · установлено: не проверено · доступно: не проверено</Text>\n                )}\n              </Stack> : null}\n          </Stack>\n        </Paper>\n      )}\n    </Stack>\n  }\n</Stack>"
 }
