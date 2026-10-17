@@ -20,6 +20,7 @@ STATE = Path("/var/lib/web-gateway")
 TOKEN_FILE = STATE / "secrets/administration-token"
 SOCKET = STATE / "management/admin-socket/control.sock"
 CODE_ROOT = Path("/usr/local/lib/web-gateway")
+ROUTE_POLICY = Path("/etc/web-gateway/caddy/routes-policy.json")
 
 
 def import_file(filename: str, name: str):
@@ -94,7 +95,7 @@ class Handler(BaseHTTPRequestHandler):
                 routes = yaml.safe_load(route_file.read_text(encoding="utf-8"))
                 if not isinstance(routes, list):
                     raise RuntimeError("Сохранённые маршруты повреждены")
-                policy_path = Path("/etc/web-gateway/caddy/routes-policy.json")
+                policy_path = ROUTE_POLICY
                 if policy_path.is_symlink() or not policy_path.is_file():
                     raise RuntimeError("Правила доменов недоступны")
                 policy = json.loads(policy_path.read_text(encoding="utf-8"))
