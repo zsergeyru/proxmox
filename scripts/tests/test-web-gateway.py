@@ -192,7 +192,11 @@ def test() -> None:
     require(set(public_domains) == {"home.zsergey.ru", "auth.zsergey.ru"},
             "По умолчанию публичны только приветствие и страница входа")
     require(all(
-        route["access"] == ("public" if route["domain"] in public_domains else "protected")
+        route["access"] == (
+            "public" if route["domain"] in public_domains
+            else "app_auth" if route["domain"] == "photos.zsergey.ru"
+            else "protected"
+        )
         for route in web["caddy"]["routes"]
     ), "Начальные маршруты должны иметь явный режим доступа")
 
@@ -207,6 +211,18 @@ def test() -> None:
         {"domain": "vpn.zsergey.ru", "upstream": "http://vpn:8080",
          "access": "private", "enabled": True},
     ]
+    # Immich требует собственного входа: общий вход Caddy мешает мобильному приложению.
+    immich_only = environment.get_template("sites.generated.caddy.j2").render(
+        provision=provision, web_gateway_routes=[{
+            "domain": "photos.zsergey.ru",
+            "service": "immich",
+            "upstream": "http://192.168.3.40:2283",
+            "enabled": True, "access": "app_auth",
+        }]
+    )
+    require("reverse_proxy http://192.168.3.40:2283" in immich_only
+            and "forward_auth" not in immich_only,
+            "Мобильный Immich нельзя отправлять через общий вход Caddy")
     caddy_example = environment.get_template("sites.generated.caddy.j2").render(
         provision=provision, web_gateway_routes=example_routes
     )
