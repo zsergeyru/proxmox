@@ -71,8 +71,12 @@ def test():
             rejects(lambda: manager.change_route(state, config, "home.zsergey.ru", False, "private"))
             rejects(lambda: manager.change_route(state, config, "new.zsergey.ru", True, "protected"))
             rejects(lambda: manager.change_route(state, config, "photos.zsergey.ru", True, "app_auth"))
-            with patch.object(manager.subprocess, "run", return_value=SimpleNamespace(returncode=0)) as run:
+            with (
+                patch.object(manager.subprocess, "run", return_value=SimpleNamespace(returncode=0)) as run,
+                patch.object(manager, "_refresh_apps") as refresh,
+            ):
                 manager.change_route(state, config, "ai.zsergey.ru", True, "private")
+                assert refresh.call_count == 1
                 assert run.call_count == 2
                 assert run.call_args_list[0].args[0][4] == "validate"
                 assert run.call_args_list[1].args[0][4] == "reload"
@@ -87,8 +91,12 @@ def test():
             statuses = [0, 1, 0]
             def runner(*args, **kwargs):
                 return SimpleNamespace(returncode=statuses.pop(0))
-            with patch.object(manager.subprocess, "run", side_effect=runner):
+            with (
+                patch.object(manager.subprocess, "run", side_effect=runner),
+                patch.object(manager, "_refresh_apps") as refresh,
+            ):
                 rejects(lambda: manager.change_route(state, config, "ai.zsergey.ru", False, "protected"))
+                assert refresh.call_count == 1
             assert routes.read_bytes() == before_yaml
             assert active.read_bytes() == before_caddy
             assert not (config / ".candidate-Caddyfile").exists()
