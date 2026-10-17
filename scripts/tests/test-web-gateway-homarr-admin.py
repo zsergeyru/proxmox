@@ -116,12 +116,16 @@ def test() -> None:
                 assert db.execute("PRAGMA foreign_key_check").fetchall() == []
                 db.execute("UPDATE custom_widget_v2_definition SET name='Своя подпись' "
                            "WHERE id='web_gateway_140_users'")
+                db.execute("UPDATE board SET name='Мой раздел' WHERE id=?", (manager.BOARD_ID,))
                 db.commit()
             assert "сохранены" in deploy()
             with sqlite3.connect(db_path) as db:
                 assert db.execute(
                     "SELECT name FROM custom_widget_v2_definition WHERE id='web_gateway_140_users'"
                 ).fetchone()[0] == "Своя подпись"
+                assert db.execute(
+                    "SELECT name FROM board WHERE id=?", (manager.BOARD_ID,)
+                ).fetchone()[0] == "Мой раздел"
                 db.execute("INSERT INTO boardGroupPermission VALUES (?,?,?)",
                            (manager.BOARD_ID, "group-admin", "view"))
                 db.commit()
