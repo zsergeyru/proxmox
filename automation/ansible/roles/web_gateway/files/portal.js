@@ -55,7 +55,11 @@ async function showTab(name){
   ["users","routes","guests"].forEach(n=>q("#"+n+"-panel").classList.toggle("hidden",n!==name));
   try{await ({users,routes,guests})[name]();}catch(e){notify(e.message);}
 }
-if(page==="home"){applications();q("#refresh").addEventListener("click",applications);}
+if(page==="home"){
+  applications();
+  q("#refresh").addEventListener("click",applications);
+  request("/api/admin/access").then(()=>{q("#admin-link").hidden=false;}).catch(()=>{});
+}
 if(page==="admin"){
   document.querySelectorAll("[data-tab]").forEach(b=>b.addEventListener("click",()=>showTab(b.dataset.tab)));
   q("#user-form").addEventListener("submit",async event=>{
