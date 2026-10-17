@@ -36,10 +36,11 @@ def test() -> None:
     module = load_initializer()
     with TemporaryDirectory() as root:
         state = Path(root) / "persistent"
-        for dirname in ["authelia", "homarr", "secrets", "management"]:
+        for dirname in ["authelia", "secrets", "management"]:
             (state / dirname).mkdir(parents=True, mode=0o700)
         ephemeral = Path(root) / "run"
         module.initialize(state, "admin@zsergey.ru", ephemeral)
+        assert not (state / "homarr").exists(), "Новый портал не создаёт старую базу Homarr"
 
         database = yaml.safe_load((state / "authelia/users_database.yml").read_text())
         user = database["users"]["admin"]
@@ -105,6 +106,22 @@ def test() -> None:
         else:
             raise AssertionError("Отсутствующий секрет должен блокировать запуск, а не пересоздаваться")
         assert not (secrets_dir / "immich-client-secret").exists()
+    # Данные прежнего Homarr без метки установки нельзя принять за чистый mp0.
+    with TemporaryDirectory() as root:
+        state = Path(root) / "persistent"
+        for dirname in ("authelia", "secrets", "management", "homarr"):
+            (state / dirname).mkdir(parents=True, mode=0o700)
+        legacy = state / "homarr/database.sqlite"
+        legacy.write_bytes(b"old-data")
+        try:
+            module.initialize(state, "admin@zsergey.ru")
+        except RuntimeError as error:
+            assert "прежние данные" in str(error)
+        else:
+            raise AssertionError("Существующие данные Homarr нельзя переписать")
+        assert legacy.read_bytes() == b"old-data"
+        assert not (state / "secrets/.initialized").exists()
+
     # Явный сброс обновляет только пароль admin и операторскую копию.
     reset_source = SOURCE.with_name("reset-admin-password.py")
     spec = importlib.util.spec_from_file_location("web_gateway_reset", reset_source)
