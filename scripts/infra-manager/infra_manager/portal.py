@@ -478,6 +478,7 @@ def operator_service_definitions(
                 "url": url,
                 "setup_url": url.rstrip("/") + setup_path if setup_path else None,
                 "setup_instructions": setup_instructions or [],
+                "connection_key": connection_key,
                 "operator": _validated_operator(
                     f"{source}.operator_status", definition.get("operator")
                 ),
