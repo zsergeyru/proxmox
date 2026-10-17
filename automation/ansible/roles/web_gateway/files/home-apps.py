@@ -16,7 +16,7 @@ NAMES = {
     "home-assistant": ("Умный дом", "Home Assistant", "🏠"),
     "open-webui": ("ИИ-помощник", "Open WebUI", "🤖"),
 }
-INTERNAL = frozenset({"homarr", "authelia"})
+INTERNAL = frozenset({"homarr", "authelia", "portal"})
 DOMAIN = re.compile(r"[a-z0-9-]+(?:\.[a-z0-9-]+)*\.zsergey\.ru\Z")
 
 
@@ -68,7 +68,7 @@ def update(state: Path, policy_path: Path) -> bool:
     if routes_path.is_symlink() or not routes_path.is_file() or policy_path.is_symlink() or not policy_path.is_file():
         raise CatalogueError("Нет сохранённых маршрутов или утверждённых правил")
     if not destination.parent.is_dir() or destination.parent.is_symlink() or destination.is_symlink():
-        raise CatalogueError("Отсутствует закрытый каталог Homarr")
+        raise CatalogueError("Отсутствует каталог домашних приложений")
     routes = yaml.safe_load(routes_path.read_text(encoding="utf-8"))
     policy = json.loads(policy_path.read_text(encoding="utf-8"))
     content = (json.dumps(build_apps(routes, policy), ensure_ascii=False, indent=2) + "\n").encode()
