@@ -101,6 +101,16 @@ def test():
             assert active.read_bytes() == before_caddy
             assert not (config / ".candidate-Caddyfile").exists()
             assert not (config / ".candidate-routes.caddy").exists()
+            # Если не удалось обновить домашние ссылки, вернуть Caddy и маршруты.
+            with (
+                patch.object(manager.subprocess, "run", return_value=SimpleNamespace(returncode=0)),
+                patch.object(manager, "_refresh_apps",
+                             side_effect=[RuntimeError("catalogue"), None]) as refresh,
+            ):
+                rejects(lambda: manager.change_route(state, config, "ai.zsergey.ru", False, "protected"))
+                assert refresh.call_count == 2
+            assert routes.read_bytes() == before_yaml
+            assert active.read_bytes() == before_caddy
         with patch.object(manager.os.path, "ismount", return_value=False):
             rejects(lambda: manager.change_route(state, config, "ai.zsergey.ru", False, "protected"))
     print("140: изменение маршрута откатывается при ошибке Caddy")
