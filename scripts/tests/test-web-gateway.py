@@ -63,6 +63,14 @@ def check() -> None:
     caddy=environment.get_template("Caddyfile.j2").render(**context)
     routes=environment.get_template("sites.generated.caddy.j2").render(**context)
     assert "remote_ip 192.168.0.0/16" in caddy
+    # Повторный deploy не переписывает существующий список доменов.
+    role = yaml.safe_load((ROOT / "automation/ansible/roles/web_gateway/tasks/main.yml").read_text())
+    original = next(task for task in role if task.get("name", "").startswith("Создать первоначальный список доменов"))
+    assert original["ansible.builtin.copy"]["force"] is False
+    checked = [task.get("name", "") for task in role]
+    assert checked.index("Проверить сохранённые пользовательские домены без изменения данных") < checked.index(
+        "Подготовить маршруты из сохранённого состояния"
+    )
     assert "forward_auth authelia:9091" in routes
     assert "@admin_ui_lan" in routes and "@admin_api_lan" in routes
     assert "header_up X-Portal-Verified admin" in routes
