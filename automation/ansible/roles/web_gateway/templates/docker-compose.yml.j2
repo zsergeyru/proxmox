@@ -37,4 +37,3 @@ services:
       - "{{ provision.web_gateway.paths.configuration }}/authelia:/config:ro"
       - "{{ provision.web_gateway.paths.secrets }}:/run/authelia-secrets:ro"
       - "{{ provision.web_gateway.authelia.data.host }}:{{ provision.web_gateway.authelia.data.container }}"
-
