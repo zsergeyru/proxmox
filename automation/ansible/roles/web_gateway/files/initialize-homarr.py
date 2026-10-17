@@ -13,6 +13,7 @@ import argparse
 import http.cookiejar
 import json
 import os
+import subprocess
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlsplit
@@ -82,7 +83,10 @@ class HomarrClient:
             raise OnboardingError("Homarr не выдал право первоначальной настройки")
 
 
-def initialize(base_url: str, state_file: Path, admin_group: str) -> str:
+def initialize(
+    base_url: str, state_file: Path, admin_group: str,
+    bootstrap_command: list[str] | None = None,
+) -> str:
     """Создать начальные настройки один раз, оставив Caddy закрытым при ошибке.
 
     Признак готовности не является базой: состояние сначала подтверждается
@@ -130,6 +134,18 @@ def initialize(base_url: str, state_file: Path, admin_group: str) -> str:
             )
     if client.step() != "finish":
         raise OnboardingError("Homarr не завершил первоначальную настройку")
+    if bootstrap_command:
+        try:
+            completed = subprocess.run(
+                bootstrap_command, capture_output=True, timeout=90, check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise OnboardingError("Не удалось создать закрытую административную страницу Homarr") from exc
+        if completed.returncode != 0:
+            raise OnboardingError(
+                "Homarr не подготовил административную страницу и три виджета; "
+                "проверьте диагностику настройки гостя 140"
+            )
     temporary = state_file.with_name(state_file.name + ".tmp")
     with temporary.open("w", encoding="utf-8") as fh:
         fh.write("ready\n")
@@ -144,9 +160,20 @@ def main() -> int:
     parser.add_argument("--url", default="http://127.0.0.1:7575")
     parser.add_argument("--state-file", required=True, type=Path)
     parser.add_argument("--admin-group", default="admins")
+    parser.add_argument("--db", type=Path, required=True)
+    parser.add_argument("--widgets", type=Path, required=True)
+    parser.add_argument("--token", type=Path, required=True)
+    parser.add_argument("--env", type=Path, required=True)
+    parser.add_argument("--state", type=Path, default=Path("/var/lib/web-gateway"))
     args = parser.parse_args()
+    bootstrap = [
+        "python3", "/usr/local/lib/web-gateway/configure-homarr-admin.py",
+        "--db", str(args.db), "--widgets", str(args.widgets),
+        "--token", str(args.token), "--env", str(args.env),
+        "--state", str(args.state),
+    ]
     try:
-        print(initialize(args.url, args.state_file, args.admin_group))
+        print(initialize(args.url, args.state_file, args.admin_group, bootstrap))
         return 0
     except OnboardingError as exc:
         parser.exit(1, f"140: {exc}. Публичный вход Homarr остаётся закрытым.\n")

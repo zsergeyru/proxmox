@@ -112,6 +112,14 @@
     group: root
     mode: "0700"
 
+- name: Установить первоначальное создание административной страницы Homarr
+  ansible.builtin.copy:
+    src: configure-homarr-admin.py
+    dest: /usr/local/lib/web-gateway/configure-homarr-admin.py
+    owner: root
+    group: root
+    mode: "0700"
+
 - name: Установить сценарий однократной подготовки
   ansible.builtin.copy:
     src: initialize.py
@@ -352,23 +360,28 @@
     group: root
     mode: "0644"
 
-# Несекретные определения доступны только из домашней сети.
-# Они предназначены для первоначального импорта в Homarr через браузер.
-- name: Подготовить папку для определений виджетов Homarr
+# Определения устанавливаются без скачивания файлов пользователем.
+# Веб-сервер не должен отдавать их как часть открытой домашней страницы.
+- name: Закрыть прежний путь ручного получения виджетов
   ansible.builtin.file:
     path: "{{ provision.web_gateway.paths.configuration }}/caddy/local-home/widgets"
+    state: absent
+
+- name: Подготовить закрытую папку определений Homarr
+  ansible.builtin.file:
+    path: "{{ provision.web_gateway.paths.configuration }}/homarr/widgets"
     state: directory
     owner: root
     group: root
-    mode: "0755"
+    mode: "0700"
 
-- name: Опубликовать несекретные определения виджетов для установки через Homarr
+- name: Установить три определения для автоматической настройки Homarr
   ansible.builtin.copy:
     src: "{{ project_root }}/infrastructure/guests/140-web-gateway/widgets/{{ item }}"
-    dest: "{{ provision.web_gateway.paths.configuration }}/caddy/local-home/widgets/{{ item }}"
+    dest: "{{ provision.web_gateway.paths.configuration }}/homarr/widgets/{{ item }}"
     owner: root
     group: root
-    mode: "0644"
+    mode: "0600"
   loop:
     - authelia-users.json
     - caddy-routes.json
@@ -555,6 +568,16 @@
       - "{{ provision.web_gateway.homarr.onboarding.ready_file }}"
       - --admin-group
       - "{{ provision.web_gateway.homarr.onboarding.admin_group }}"
+      - --db
+      - "{{ provision.web_gateway.homarr.data.host }}/db/db.sqlite"
+      - --widgets
+      - "{{ provision.web_gateway.paths.configuration }}/homarr/widgets"
+      - --token
+      - "{{ provision.web_gateway.paths.secrets }}/administration-token"
+      - --env
+      - "{{ provision.web_gateway.paths.secrets }}/homarr.env"
+      - --state
+      - "{{ provision.web_gateway.paths.persistent_state }}"
   changed_when: false
 
 # Создание через штатную CLI Authelia: в SQLite сохраняется закрытый ключ,

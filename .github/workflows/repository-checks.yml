@@ -26,7 +26,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y shellcheck cloud-init jq unzip
-          python -m pip install --disable-pip-version-check PyYAML==6.0.2 jsonschema==4.25.1 ruff==0.16.8 Jinja2==3.1.6 argon2-cffi==25.1.0 passlib==1.7.4
+          python -m pip install --disable-pip-version-check PyYAML==6.0.2 jsonschema==4.25.1 ruff==0.16.8 Jinja2==3.1.6 argon2-cffi==25.1.0 passlib==1.7.4 cryptography==46.0.3
 
       - name: Resolve infra-manager guest
         run: |
@@ -127,6 +127,8 @@ jobs:
 
       - name: Check Homarr automatic onboarding and closed public setup
         run: python scripts/tests/test-web-gateway-homarr-onboarding.py
+      - name: Check automatic Homarr admin page and widget creation
+        run: python scripts/tests/test-web-gateway-homarr-admin.py
       - name: Check safe Google Authenticator TOTP setup
         run: python scripts/tests/test-web-gateway-totp.py
       - name: Check user management for web gateway
