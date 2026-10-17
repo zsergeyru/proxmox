@@ -29,17 +29,6 @@ access_control:
   # Правило для всех поддоменов позволяет добавлять маршруты из routes.yaml,
   # но не делает их публичными: в Caddy допуск определяется отдельно.
   rules:
-    # Начальная привязка второго фактора: только администратор с паролем.
-    # Дополнительно Caddy разрешает этот путь лишь с адресов домашней сети.
-    - domain: "{{ provision.web_gateway.authelia.public_url.split('://', 1)[1] }}"
-      resources:
-        - '^/totp-setup([/?].*)?$'
-      subject: "user:{{ provision.web_gateway.authelia.totp_setup.username }}"
-      policy: one_factor
-    - domain: "{{ provision.web_gateway.authelia.public_url.split('://', 1)[1] }}"
-      resources:
-        - '^/totp-setup([/?].*)?$'
-      policy: deny
     - domain: "*.{{ provision.web_gateway.domain }}"
       policy: two_factor
 
