@@ -322,6 +322,9 @@ def test() -> None:
     require("totp-setup-server.py" in text and "state: restarted" in text,
             "Обработчик должен запускаться только при незавершённой регистрации")
     require("totp-users.py" in text, "Администратору нужны операции для пользователей")
+    require("Запретить повторное развёртывание с утраченной базой Authelia" in text
+            and "web_gateway_initial_state.stat.exists" in text,
+            "После исчезновения SQLite повторный deploy должен остановиться")
     require("no_log: true" in text and "force: false" in text,
             "Нельзя раскрывать секреты или перезаписывать сохранённые маршруты")
     require(text.index("Закрыть публичный вход Homarr") < text.index("Запустить веб-шлюз")
