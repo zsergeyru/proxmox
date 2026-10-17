@@ -12,6 +12,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import stat
 import sqlite3
 import subprocess
 import tempfile
@@ -47,11 +48,19 @@ def consistent_copy(source: Path, target: Path) -> None:
     stage = target / "140-web-gateway"
     def _ignore(current, names):
         relative = Path(current).relative_to(source)
-        return [
-            name for name in names
-            if (relative / name).as_posix() in ignored
-            or name.endswith(("-wal", "-shm"))
-        ]
+        excluded = []
+        for name in names:
+            path = Path(current) / name
+            item = path.lstat()
+            if stat.S_ISLNK(item.st_mode):
+                raise RuntimeError("В постоянных данных обнаружена ссылка: " + str(path))
+            if ((relative / name).as_posix() in ignored
+                    or name.endswith(("-wal", "-shm"))
+                    or stat.S_ISSOCK(item.st_mode)):
+                excluded.append(name)
+            elif not (stat.S_ISDIR(item.st_mode) or stat.S_ISREG(item.st_mode)):
+                raise RuntimeError("Неподдерживаемый файл: " + str(path))
+        return excluded
     shutil.copytree(source, stage, symlinks=False, ignore=_ignore)
     for rel in DATABASES:
         destination = stage / rel
