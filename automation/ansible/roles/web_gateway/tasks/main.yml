@@ -551,7 +551,7 @@
 - name: Запустить закрытое управление пользователями
   ansible.builtin.systemd_service:
     name: web-gateway-admin-api.service
-    state: started
+    state: restarted
     enabled: true
     daemon_reload: true
 
