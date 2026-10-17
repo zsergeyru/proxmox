@@ -203,16 +203,112 @@ async function userAction(action,item,button){
   }catch(error){notify(error.message,true);}
   finally{button.disabled=false;}
 }
-async function routes(){
-  const data=await request("/api/admin/routes");
-  entries(q("#routes-list"),data.routes,item=>{
-    const row=el("div","record");
-    row.append(el("strong","",item.domain),el("div","muted",item.service+" · "+item.access+" · "+(item.enabled?"Включён":"Выключен")));
-    return row;
+let allRoutes=[];
+let editingRoute=null;
+const accessLabels={public:"Служебный вход",protected:"Через Authelia",private:"Домашняя сеть / VPN",app_auth:"Вход в самом приложении"};
+function routeCard(item){
+  const card=el("article","route-card");
+  const details=el("div","route-details");
+  const title=el("div","route-title");
+  title.append(el("h3","",item.name||item.service||item.domain),el("span","status-pill "+(item.enabled?"on":"off"),item.enabled?"Включён":"Выключен"));
+  details.append(title,el("p","route-host",item.domain),
+    el("p","route-upstream",item.upstream||"Адрес службы ещё не указан"),
+    el("span","group-tag",accessLabels[item.access]||item.access));
+  const tools=el("div","route-actions");
+  const fixed=["home.zsergey.ru","auth.zsergey.ru"].includes(item.domain);
+  const label=el("label","switch-field");
+  const switcher=el("input");switcher.type="checkbox";switcher.checked=item.enabled;
+  switcher.disabled=fixed||item.access==="app_auth";
+  switcher.setAttribute("aria-label",(item.enabled?"Выключить ":"Включить ")+item.domain);
+  const slider=el("span","switch-track");slider.setAttribute("aria-hidden","true");
+  label.append(switcher,slider);
+  switcher.addEventListener("change",async()=>{
+    switcher.disabled=true;
+    try{
+      await request("/api/admin/routes",{action:"update",domain:item.domain,
+        enabled:switcher.checked,access:item.access});
+      await routes();notify("Домен «"+item.domain+"» обновлён.");
+    }catch(error){
+      switcher.checked=item.enabled;notify(error.message,true);
+      switcher.disabled=false;
+    }
   });
-  const select=q("#route-domain");select.replaceChildren();
-  data.routes.filter(x=>!["home.zsergey.ru","auth.zsergey.ru","photos.zsergey.ru"].includes(x.domain))
-    .forEach(item=>{const option=el("option","",item.domain);option.value=item.domain;select.append(option);});
+  tools.append(label);
+  if(!fixed&&item.access!=="app_auth"){
+    const edit=el("button","secondary","Изменить");edit.type="button";
+    edit.addEventListener("click",()=>openRouteForm(item));tools.append(edit);
+  }
+  if(!item.managed){
+    const remove=el("button","danger","Удалить");remove.type="button";
+    remove.addEventListener("click",()=>removeRoute(item,remove));tools.append(remove);
+  }
+  if(fixed)tools.append(el("span","muted route-fixed","Защищённый системный домен"));
+  card.append(details,tools);return card;
+}
+function renderRoutes(){
+  const query=q("#routes-search").value.trim().toLocaleLowerCase("ru");
+  const rows=allRoutes.filter(item=>(item.domain+" "+item.name+" "+item.upstream).toLocaleLowerCase("ru").includes(query));
+  text(q("#routes-count"),allRoutes.length);
+  entries(q("#routes-list"),rows,routeCard);
+}
+async function routes(){
+  const data=await request("/api/admin/routes");allRoutes=data.routes;renderRoutes();
+}
+function openRouteForm(item=null){
+  editingRoute=item;
+  const form=q("#route-form");form.reset();
+  text(q("#route-dialog-title"),item?"Изменить домен":"Добавить домен");
+  text(q("#route-help"),item?.managed?
+    "Этот домен описан в Git: можно изменить только доступ и состояние.":
+    "Укажите поддомен zsergey.ru и внутренний IP-адрес приложения.");
+  const fields=form.elements;
+  fields.domain.value=item?item.domain:"";
+  fields.domain.readOnly=!!item;
+  fields.name.value=item?(item.name||item.service):"";
+  fields.name.readOnly=!!item?.managed;
+  fields.upstream.value=item?(item.upstream||""):"";
+  fields.upstream.readOnly=!!item?.managed;
+  fields.upstream.required=!item?.managed;
+  fields.name.required=!item?.managed;
+  form.querySelectorAll('input[name="access"]').forEach(input=>{
+    input.checked=item?input.value===item.access:input.value==="protected";
+  });
+  fields.enabled.checked=item?item.enabled:false;
+  text(q("#save-route"),item?"Сохранить изменения":"Добавить домен");
+  q("#route-form-error").hidden=true;
+  q("#route-dialog").showModal();
+}
+async function saveRoute(event){
+  event.preventDefault();
+  const form=q("#route-form");const fields=form.elements;
+  const access=form.querySelector('input[name="access"]:checked')?.value;
+  if(!access)return;
+  const payload={action:editingRoute?"update":"create",
+    domain:fields.domain.value.trim().toLowerCase(),enabled:fields.enabled.checked,access};
+  if(!editingRoute||!editingRoute.managed){
+    payload.name=fields.name.value.trim();
+    payload.upstream=fields.upstream.value.trim();
+  }
+  const button=q("#save-route"),error=q("#route-form-error");
+  button.disabled=true;
+  try{
+    await request("/api/admin/routes",payload);
+    q("#route-dialog").close();
+    notify(editingRoute?"Домен обновлён.":"Новый домен добавлен.");
+    await routes();
+  }catch(e){text(error,e.message);error.hidden=false;}
+  finally{button.disabled=false;}
+}
+async function removeRoute(item,button){
+  const accepted=await askConfirmation("Удалить домен?",
+    "Адрес «"+item.domain+"» исчезнет из Caddy и списка приложений. Остальные домены сохранятся.",true);
+  if(!accepted)return;
+  button.disabled=true;
+  try{
+    await request("/api/admin/routes",{action:"delete",domain:item.domain,confirm:true});
+    notify("Домен удалён.");await routes();
+  }catch(e){notify(e.message,true);}
+  finally{button.disabled=false;}
 }
 async function guests(){
   const data=await request("/api/admin/guests");
@@ -249,12 +345,9 @@ if(page==="admin"){
   q("#cancel-user").addEventListener("click",closeUserForm);
   q("#cancel-confirm").addEventListener("click",()=>q("#confirm-dialog").close());
   q("#copy-credential").addEventListener("click",copyCredential);
-  q("#route-form").addEventListener("submit",async event=>{
-    event.preventDefault();const form=event.currentTarget,values=Object.fromEntries(new FormData(form));
-    const body={domain:values.domain,access:values.access,enabled:form.elements.enabled.checked,
-      confirm:form.elements.confirm.checked};
-    try{await request("/api/admin/routes",body);notify("Маршрут проверен и применён");await routes();}
-    catch(error){notify(error.message,true);}
-  });
+  q("#add-route").addEventListener("click",()=>openRouteForm());
+  q("#routes-search").addEventListener("input",renderRoutes);
+  q("#route-form").addEventListener("submit",saveRoute);
+  q("#cancel-route").addEventListener("click",()=>q("#route-dialog").close());
   showTab("users");
 }
