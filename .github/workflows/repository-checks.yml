@@ -137,6 +137,8 @@ jobs:
         run: python scripts/tests/test-web-gateway-backup.py
       - name: Check Immich login safety in web gateway
         run: python scripts/tests/test-web-gateway-immich.py
+      - name: Check Homarr error diagnostics
+        run: python scripts/tests/test-web-gateway-homarr-diagnostics.py
 
       - name: Check Immich Compose template
         run: python scripts/tests/test-photo-archive-compose.py
