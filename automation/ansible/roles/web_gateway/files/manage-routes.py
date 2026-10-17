@@ -35,7 +35,7 @@ def _atomic(path: Path, content: bytes) -> None:
         raise RuntimeError("Недопустимая ссылка вместо файла: " + path.name)
     fd, temp = tempfile.mkstemp(dir=path.parent, prefix=".route-write-")
     try:
-        os.fchmod(fd, 0o640 if path.suffix in {".yaml", ".caddy"} else 0o600)
+        os.fchmod(fd, 0o640 if path.suffix == ".yaml" else 0o644)
         with os.fdopen(fd, "wb") as stream:
             stream.write(content)
             stream.flush()
@@ -104,6 +104,7 @@ def _validate_routes(routes: object, policy: dict) -> list[dict]:
 
 def _render(routes: list[dict], policy: dict, template: Path) -> bytes:
     env = Environment(autoescape=False, undefined=StrictUndefined, keep_trailing_newline=True)
+    env.filters["bool"] = bool
     result = env.from_string(template.read_text(encoding="utf-8")).render(
         web_gateway_routes=routes, provision=policy,
     )
