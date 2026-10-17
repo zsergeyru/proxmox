@@ -139,6 +139,18 @@ photo_archive:
       import_path: /external/originals
     scan_cron: "0 * * * *"
     trash_days: 30
+  # Подключать только после сопоставления всех существующих пользователей
+  # с учётными записями Authelia; фотографии и права не переназначать.
+  oauth:
+    enabled: false
+    provider_guest_vmid: 140
+    issuer_url: https://auth.zsergey.ru
+    client_id: immich
+    public_url: https://photos.zsergey.ru
+    mobile_redirect: app.immich:///oauth-callback
+    auto_register: false
+    keep_password_login: true
+
   external_library:
     enabled: true
     automatic_registration: true
