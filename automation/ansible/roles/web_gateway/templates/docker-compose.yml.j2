@@ -12,8 +12,8 @@ services:
     volumes:
       - "{{ provision.web_gateway.paths.configuration }}/caddy:/etc/caddy:ro"
       - "{{ provision.web_gateway.paths.persistent_state }}/management/catalog:/srv/homarr-catalog:ro"
-      # Только QR первого администратора; без доступа к SQLite/паролям.
-      - "{{ provision.web_gateway.paths.persistent_state }}/authelia/totp-setup:{{ provision.web_gateway.authelia.totp_setup.qr_caddy_root }}:ro"
+      # Только Unix-сокет временной страницы, никаких секретов Authelia.
+      - "{{ provision.web_gateway.paths.persistent_state }}/management/totp-setup-socket:/run/totp-setup:ro"
       - "{{ provision.web_gateway.caddy.data.host }}:{{ provision.web_gateway.caddy.data.container }}"
       - "{{ provision.web_gateway.caddy.config.host }}:{{ provision.web_gateway.caddy.config.container }}"
     depends_on:

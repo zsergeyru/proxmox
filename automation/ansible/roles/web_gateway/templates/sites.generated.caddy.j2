@@ -22,30 +22,13 @@
         respond "Доступ только из домашней сети" 403
     }
 {% elif route.domain == provision.web_gateway.authelia.public_url.split('://', 1)[1] %}
-    # Начальная привязка Google Authenticator — только для администратора
-    # по паролю через Authelia и только из домашней сети.
+    # Временная страница не требует пароля и существует только пока
+    # работает не включённая в автозапуск служба (максимум 15 минут).
     @totp_setup path /totp-setup /totp-setup/*
     handle @totp_setup {
         @totp_lan remote_ip {{ provision.web_gateway.caddy.private_networks | join(' ') }}
         handle @totp_lan {
-            forward_auth authelia:9091 {
-                uri /api/authz/forward-auth
-            }
-            @totp_qr path /totp-setup/qr.png
-            handle @totp_qr {
-                rewrite * /admin.png
-                root * {{ provision.web_gateway.authelia.totp_setup.qr_caddy_root }}
-                header Cache-Control "no-store"
-                header X-Content-Type-Options "nosniff"
-                file_server
-            }
-            handle {
-                rewrite * /index.html
-                root * /etc/caddy/totp-setup
-                header Cache-Control "no-store"
-                header X-Content-Type-Options "nosniff"
-                file_server
-            }
+            reverse_proxy unix//run/totp-setup/setup.sock
         }
         handle {
             respond "Доступ только из домашней сети" 403

@@ -1,30 +1,33 @@
 <!doctype html>
 <html lang="ru">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="robots" content="noindex, nofollow">
-  <title>Подключение Google Authenticator</title>
-  <style>
-    body { background: #f5f7fb; color: #1b2b46; font-family: system-ui,sans-serif; margin: 0; padding: 36px 16px; }
-    main { margin: auto; padding: 30px; width: min(540px,100%); box-sizing: border-box; background: white; border: 1px solid #e2e8f0; border-radius: 18px; }
-    h1 { font-size: 28px; }
-    p, li { line-height: 1.65; }
-    img { display: block; width: min(300px,100%); margin: 26px auto; image-rendering: crisp-edges; }
-    .warning { padding: 12px; background: #fff6e6; border-radius: 12px; font-size: 14px; }
-  </style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>Первоначальная настройка Google Authenticator</title>
+<style>
+body{font-family:system-ui,sans-serif;background:#f4f6fa;color:#18243b;margin:0;padding:30px 12px}
+main{max-width:500px;margin:auto;background:white;border-radius:14px;padding:26px;box-sizing:border-box}
+h1{font-size:24px}img{display:block;width:260px;max-width:100%;margin:22px auto}
+label{display:block;margin:15px 0 6px}input{font:inherit;font-size:24px;letter-spacing:7px;width:100%;box-sizing:border-box;padding:12px}
+button{font:inherit;padding:12px 16px;margin-top:12px;cursor:pointer}
+small{color:#555}p{line-height:1.5}
+</style>
 </head>
 <body>
-  <main>
-    <h1>Подключение Google Authenticator</h1>
-    <p>Вы вошли в Authelia как администратор. Отсканируйте QR-код через приложение Google Authenticator на телефоне.</p>
-    <img src="/totp-setup/qr.png" alt="Закрытый QR-код для добавления одноразовых паролей">
-    <ol>
-      <li>Откройте приложение Google Authenticator.</li>
-      <li>Добавьте запись через сканирование QR-кода.</li>
-      <li>Перейдите на <a href="https://home.zsergey.ru">домашний портал</a> и подтвердите вход шестизначным кодом.</li>
-    </ol>
-    <p class="warning">QR-код — это секрет второго фактора. Не фотографируйте и не пересылайте его. После проверки удалите файл QR из гостя 140 через доверенный терминал PVE.</p>
-  </main>
+<main>
+<h1>Подключение Google Authenticator</h1>
+<p>Отсканируйте QR-код телефоном. Введите шестизначный код из приложения и нажмите кнопку подтверждения.</p>
+<img src="/totp-setup/qr.png" alt="QR-код первоначального администратора">
+<form method="post" action="/totp-setup/confirm">
+<label for="code">Код из Google Authenticator</label>
+<input id="code" name="code" type="text" pattern="[0-9 ]{6,7}" inputmode="numeric" autocomplete="one-time-code" maxlength="7" required>
+<button type="submit">Подтвердить и удалить QR-код</button>
+</form>
+<p><small>Доступ только из домашней сети в течение 15 минут после развёртывания. После подтверждения QR-код будет удалён, но второй фактор продолжит работать.</small></p>
+<form method="post" action="/totp-setup/close">
+<button type="submit">Закрыть без подтверждения</button>
+</form>
+</main>
 </body>
 </html>

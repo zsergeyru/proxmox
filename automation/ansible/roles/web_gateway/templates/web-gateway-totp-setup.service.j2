@@ -1,0 +1,17 @@
+[Unit]
+Description=Временная первоначальная регистрация TOTP для гостя 140
+After=network.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+ExecStart=/usr/bin/python3 /usr/local/lib/web-gateway/totp-setup-server.py --socket /var/lib/web-gateway/management/totp-setup-socket/setup.sock --html /etc/web-gateway/caddy/totp-setup/index.html --png /var/lib/web-gateway/authelia/totp-setup/admin.png --uri /var/lib/web-gateway/authelia/totp-setup/admin.uri --confirmed /var/lib/web-gateway/authelia/totp-setup/admin.confirmed
+RuntimeMaxSec=900
+Restart=no
+StandardOutput=null
+StandardError=journal
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

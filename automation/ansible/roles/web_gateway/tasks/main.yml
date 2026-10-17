@@ -73,6 +73,7 @@
     - "{{ provision.web_gateway.paths.secrets }}"
     - "{{ provision.web_gateway.paths.persistent_state }}/management"
     - "{{ provision.web_gateway.paths.persistent_state }}/management/catalog"
+    - "{{ provision.web_gateway.paths.persistent_state }}/management/totp-setup-socket"
 
 # Во время любого развёртывания Homarr должен оставаться закрытым,
 # пока его действительное состояние не проверено через штатный интерфейс.
@@ -126,6 +127,14 @@
     group: root
     mode: "0700"
 
+- name: Установить служебное управление вторым фактором пользователей
+  ansible.builtin.copy:
+    src: totp-users.py
+    dest: /usr/local/lib/web-gateway/totp-users.py
+    owner: root
+    group: root
+    mode: "0700"
+
 - name: Проверить метку уже созданных секретов
   ansible.builtin.stat:
     path: "{{ provision.web_gateway.paths.secrets }}/.initialized"
@@ -153,6 +162,22 @@
       - web_gateway_users_state.stat.isreg | default(false)
       - (web_gateway_users_state.stat.size | default(0) | int) > 0
     fail_msg: "140: постоянный файл пользователей отсутствует; восстановить том или его копию"
+
+# Если установка уже отмечена как завершённая, исчезновение SQLite
+# нельзя принимать за первое развёртывание и создавать пустую базу.
+- name: Проверить сохранённую базу Authelia
+  ansible.builtin.stat:
+    path: "{{ provision.web_gateway.authelia.data.host }}/db.sqlite3"
+    follow: false
+  register: web_gateway_authelia_db
+
+- name: Запретить повторное развёртывание с утраченной базой Authelia
+  ansible.builtin.assert:
+    that:
+      - web_gateway_authelia_db.stat.isreg | default(false)
+      - (web_gateway_authelia_db.stat.size | default(0) | int) > 0
+    fail_msg: "140: прежняя база SQLite отсутствует или пуста; остановлено без восстановления"
+  when: web_gateway_initial_state.stat.exists
 
 - name: Проверить все обязательные постоянные секреты
   ansible.builtin.stat:
@@ -424,14 +449,75 @@
   changed_when: false
   no_log: true
 
+# Постоянного дополнительного веб-сервиса нет: systemd запускает временный
+# обработчик только при незавершённой первичной регистрации (не более 15 минут).
+- name: Установить временный обработчик QR
+  ansible.builtin.copy:
+    src: totp-setup-server.py
+    dest: /usr/local/lib/web-gateway/totp-setup-server.py
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Установить описание временной службы QR
+  ansible.builtin.template:
+    src: web-gateway-totp-setup.service.j2
+    dest: /etc/systemd/system/web-gateway-totp-setup.service
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Проверить наличие незавершённой регистрации
+  ansible.builtin.stat:
+    path: "{{ provision.web_gateway.authelia.totp_setup.qr_host }}"
+  register: web_gateway_totp_qr
+
+- name: Проверить наличие временного URI
+  ansible.builtin.stat:
+    path: "{{ provision.web_gateway.authelia.totp_setup.qr_host | regex_replace('\\.png$', '.uri') }}"
+  register: web_gateway_totp_uri
+  no_log: true
+
+- name: Проверить подтверждение Google Authenticator
+  ansible.builtin.stat:
+    path: "{{ provision.web_gateway.authelia.totp_setup.qr_host | regex_replace('\\.png$', '.confirmed') }}"
+  register: web_gateway_totp_confirmed
+
+- name: Открыть временную страницу на 15 минут
+  ansible.builtin.systemd_service:
+    name: web-gateway-totp-setup.service
+    state: restarted
+    enabled: false
+    daemon_reload: true
+  when:
+    - web_gateway_totp_qr.stat.isreg | default(false)
+    - web_gateway_totp_uri.stat.isreg | default(false)
+    - not (web_gateway_totp_confirmed.stat.exists | default(false))
+
+- name: Закрыть временную страницу если настройка уже завершена
+  ansible.builtin.systemd_service:
+    name: web-gateway-totp-setup.service
+    state: stopped
+    enabled: false
+    daemon_reload: true
+  when: >-
+    not (web_gateway_totp_qr.stat.isreg | default(false))
+    or not (web_gateway_totp_uri.stat.isreg | default(false))
+    or (web_gateway_totp_confirmed.stat.exists | default(false))
+
 - name: Подсказать адрес привязки Google Authenticator
   ansible.builtin.debug:
     msg: >-
       140: первый вход Google Authenticator без почты — откройте
       {{ provision.web_gateway.authelia.public_url }}{{ provision.web_gateway.authelia.totp_setup.url_path }}
-      из домашней сети, войдите под admin и отсканируйте QR.
+      из домашней сети в течение 15 минут и отсканируйте QR.
+      Введите шестизначный код для завершения: QR удалится автоматически.
       Для работы адреса нужен действительный сертификат HTTPS.
-      После проверки входа QR нужно удалить из гостя.
+
+  when:
+    - web_gateway_totp_qr.stat.isreg | default(false)
+    - web_gateway_totp_uri.stat.isreg | default(false)
+    - not (web_gateway_totp_confirmed.stat.exists | default(false))
 
 - name: Подсказать команду просмотра первого пароля из терминала PVE
   ansible.builtin.debug:
