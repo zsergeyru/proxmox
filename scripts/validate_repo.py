@@ -724,6 +724,16 @@ def _validate_access_contract(state: ValidationState) -> None:
                     f"{rel}: правило {rule_id!r} не должно содержать "
                     f"путь хранения секрета {target!r}"
                 )
+            if target.startswith("host:") and target != "host:pve":
+                physical_name = target.partition(":")[2]
+                physical_manifest = (
+                    ROOT / "infrastructure" / "hosts" / physical_name / "host.yaml"
+                )
+                if not physical_manifest.is_file():
+                    fail(
+                        f"{rel}: правило {rule_id!r} ссылается "
+                        f"на неизвестную физическую машину {target}"
+                    )
             if target.startswith("guest:"):
                 target_vmid = int(target.partition(":")[2])
                 if target_vmid not in known_vmids:
