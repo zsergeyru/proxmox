@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import closing
 from email.utils import parseaddr
 import os
 from pathlib import Path
@@ -80,7 +81,7 @@ def factor_statuses(db: Path = STATE / "db.sqlite3") -> dict[str, dict[str, bool
         raise RuntimeError("База Authelia недоступна")
     uri = db.resolve().as_uri() + "?mode=ro"
     try:
-        with sqlite3.connect(uri, uri=True, timeout=3) as connection:
+        with closing(sqlite3.connect(uri, uri=True, timeout=3)) as connection:
             tables = {row[0] for row in connection.execute(
                 "SELECT name FROM sqlite_master WHERE type='table'"
             )}
