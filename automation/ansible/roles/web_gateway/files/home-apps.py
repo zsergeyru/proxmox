@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -32,16 +33,26 @@ def build_apps(routes: object, policy: dict) -> dict:
     if not isinstance(configured, list):
         raise CatalogueError("Не найден проверенный перечень назначений")
     allowed = {route.get("domain"): route for route in configured if isinstance(route, dict)}
+    validator_path = Path(__file__).with_name("manage-routes.py")
+    spec = importlib.util.spec_from_file_location("gateway_routes_validation", validator_path)
+    if spec is None or spec.loader is None:
+        raise CatalogueError("Нет проверок доменов")
+    validator = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(validator)
+    try:
+        validator._validate_routes(routes, policy)
+    except (ValueError, RuntimeError, KeyError) as error:
+        raise CatalogueError("Маршруты не прошли проверку") from error
     result = []
     seen = set()
     for route in routes:
         if not isinstance(route, dict):
             raise CatalogueError("Повреждена запись маршрута")
         domain = route.get("domain")
-        if not isinstance(domain, str) or domain not in allowed or not DOMAIN.fullmatch(domain) or domain in seen:
+        if not isinstance(domain, str) or not DOMAIN.fullmatch(domain) or domain in seen:
             raise CatalogueError("Неизвестный или повторяющийся маршрут")
         seen.add(domain)
-        spec = allowed[domain]
+        spec = allowed.get(domain, route)
         if route.get("service") != spec.get("service"):
             raise CatalogueError("Назначение маршрута отличается от утверждённого")
         if not isinstance(route.get("enabled"), bool):
@@ -55,7 +66,7 @@ def build_apps(routes: object, policy: dict) -> dict:
         if route.get("access") not in {"protected", "private", "app_auth"}:
             raise CatalogueError("Доступ к приложению не подтверждён")
         service = spec["service"]
-        name, subtitle, emoji = NAMES.get(service, (service.replace("-", " ").title(), service, "🔗"))
+        name, subtitle, emoji = NAMES.get(service, (route.get("name", service.replace("-", " ").title()), domain, "🔗"))
         result.append({"name": name, "description": subtitle, "icon": emoji, "url": "https://" + domain})
     return {"schema_version": 1, "apps": sorted(result, key=lambda a: a["name"])}
 

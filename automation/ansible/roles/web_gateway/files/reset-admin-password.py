@@ -43,23 +43,26 @@ def replace_private(path: Path, value: str) -> None:
             os.unlink(temp)
 
 
-def main() -> int:
-    """Изменить только пароль существующего admin после проверки mp0."""
+def reset_admin_password(state: Path = STATE) -> str:
+    """Сменить пароль admin и согласованно сохранить копию для оператора."""
+    users = state / "authelia/users_database.yml"
+    credential = state / "management/operator-admin.json"
+    lockfile = state / "secrets/.initialize.lock"
     if os.geteuid() != 0:
         raise PermissionError("Команду выполняет root")
-    if not os.path.ismount(STATE):
+    if not os.path.ismount(state):
         raise RuntimeError("Постоянное хранилище 140 не подключено")
-    for path in (USERS, LOCK):
+    for path in (users, lockfile):
         if path.is_symlink() or not path.is_file():
             raise RuntimeError(f"Нет защищённого файла: {path}")
     if stat.S_IMODE(USERS.stat().st_mode) & 0o077:
         raise RuntimeError("Файл пользователей имеет открытые права")
-    if CREDENTIAL.parent.is_symlink() or not CREDENTIAL.parent.is_dir():
+    if credential.parent.is_symlink() or not CREDENTIAL.parent.is_dir():
         raise RuntimeError("Нет постоянного каталога операторских данных")
 
-    with LOCK.open("r+") as lock:
+    with lockfile.open("r+") as lock:
         fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
-        database = yaml.safe_load(USERS.read_text(encoding="utf-8"))
+        database = yaml.safe_load(users.read_text(encoding="utf-8"))
         admin = (database or {}).get("users", {}).get("admin")
         if not isinstance(admin, dict) or not isinstance(admin.get("password"), str):
             raise RuntimeError("Пользователь admin не найден. Восстановите файл пользователей.")
@@ -71,17 +74,22 @@ def main() -> int:
         # Сначала заменяется файл пользователей. Если запись пароля не удастся,
         # общий статус не покажет старый пароль как действующий.
         replace_private(
-            USERS,
+            users,
             yaml.safe_dump(database, allow_unicode=True, sort_keys=False),
         )
         replace_private(
-            CREDENTIAL,
+            credential,
             json.dumps({
                 "username": "admin",
                 "password": password,
                 "password_hash": fingerprint,
             }, ensure_ascii=False) + "\n",
         )
+    return password
+
+
+def main() -> int:
+    password = reset_admin_password(STATE)
     print("Администратор: admin")
     print("Новый пароль:", password)
     print("Второй фактор и остальные пользователи не изменялись.")

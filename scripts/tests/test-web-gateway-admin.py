@@ -64,6 +64,10 @@ def test():
             {"domain": "photos.zsergey.ru", "service": "immich",
              "access": "app_auth", "enabled": False},
         ]), encoding="utf-8")
+        policy_file = state / "management/routes-policy.json"
+        policy_file.write_text(json.dumps({"web_gateway": {"caddy": {
+            "routes": [{"domain": "home.zsergey.ru"}, {"domain": "photos.zsergey.ru"}]
+        }}}), encoding="utf-8")
         token = state / "secrets/administration-token"
         with patch.object(api, "STATE", state), patch.object(api.os.path, "ismount", return_value=True):
             assert api.initialize_token(token) is True
@@ -73,11 +77,13 @@ def test():
             assert token.stat().st_mode & 0o777 == 0o600
 
         sock = state / "management/admin-socket/control.sock"
-        with patch.object(api, "STATE", state), patch.object(users.os.path, "ismount", return_value=True):
+        with (patch.object(api, "STATE", state),
+              patch.object(api, "ROUTE_POLICY", policy_file),
+              patch.object(users.os.path, "ismount", return_value=True)):
             route_action = Mock()
             with api.ControlServer(
                 sock, "secret-token-for-testing", users, totp,
-                SimpleNamespace(change_route=route_action),
+                SimpleNamespace(change_route=route_action, apply_route=route_action),
             ) as server:
                 server.timeout = 1
                 assert query(server, "/management/users", auth="wrong")[0] == 403
@@ -97,16 +103,39 @@ def test():
                 })
                 assert code == 200 and body["password"]
                 assert "password" not in query(server, "/management/users")[1]["users"][1]
+                code, body = query(server, "/management/action", "POST", {
+                    "action": "edit", "username": "anna", "name": "Анна новая",
+                    "groups": "family,guests", "confirm": False,
+                })
+                assert code == 200
+                people = yaml.safe_load(file.read_text())["users"]
+                assert people["anna"]["displayname"] == "Анна новая"
+                assert people["anna"]["groups"] == ["family", "guests"]
                 code, body = query(server, "/management/action", "POST",
                                    {"action": "password", "username": "anna", "confirm": False})
                 assert code == 400 and "error" in body
                 code, body = query(server, "/management/action", "POST",
                                    {"action": "password", "username": "anna", "confirm": True})
                 assert code == 200 and body["password"]
+                # Удаление должно подтверждаться и очищать второй фактор до файла.
+                code, _ = query(server, "/management/action", "POST", {
+                    "action": "delete", "username": "anna", "confirm": False,
+                })
+                assert code == 400
+                with patch.object(totp, "revoke_for_deletion", return_value=None) as revoke:
+                    code, body = query(server, "/management/action", "POST", {
+                        "action": "delete", "username": "anna", "confirm": True,
+                    })
+                    assert code == 200 and body["status"] == "ok"
+                    revoke.assert_called_once_with("anna")
+                assert "anna" not in yaml.safe_load(file.read_text())["users"]
+                assert query(server, "/management/action", "POST", {
+                    "action": "delete", "username": "admin", "confirm": True,
+                })[0] == 400
                 assert query(server, "/management/route-action", "POST", {
                     "domain": "ai.zsergey.ru", "access": "private",
                     "enabled": True, "confirm": False,
-                })[0] == 400
+                })[0] == 200
                 assert query(server, "/management/route-action", "POST", {
                     "domain": "ai.zsergey.ru", "access": "private",
                     "enabled": "true", "confirm": True,
@@ -115,14 +144,27 @@ def test():
                     "domain": "ai.zsergey.ru", "access": "private",
                     "enabled": True, "confirm": True,
                 }, auth="incorrect")[0] == 403
-                assert route_action.call_count == 0
+                assert route_action.call_count == 1
                 code, body = query(server, "/management/route-action", "POST", {
                     "domain": "ai.zsergey.ru", "access": "private",
                     "enabled": True, "confirm": True,
                 })
                 assert code == 200 and body["status"] == "ok"
-                assert route_action.call_count == 1
-                assert route_action.call_args.args[2:] == ("ai.zsergey.ru", True, "private")
+                assert route_action.call_count == 2
+                assert route_action.call_args.args[2:] == ("update", "ai.zsergey.ru")
+                assert route_action.call_args.kwargs["enabled"] is True
+                assert route_action.call_args.kwargs["access"] == "private"
+                for action in ("create", "update", "delete"):
+                    payload = {"action": action, "domain": "printer.zsergey.ru"}
+                    if action == "create":
+                        payload.update(name="Принтер", upstream="http://192.168.1.50:7125",
+                                       enabled=False, access="protected")
+                    if action == "update":
+                        payload.update(enabled=True, access="private")
+                    if action == "delete":
+                        assert query(server, "/management/route-action", "POST", payload)[0] == 400
+                        payload["confirm"] = True
+                    assert query(server, "/management/route-action", "POST", payload)[0] == 200
                 assert query(server, "/unknown")[0] == 404
         assert file.stat().st_mode & 0o777 == 0o600
         assert yaml.safe_load(file.read_text())["users"]["admin"]["password"] == "hash"

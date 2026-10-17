@@ -111,6 +111,47 @@ def test():
                 assert refresh.call_count == 2
             assert routes.read_bytes() == before_yaml
             assert active.read_bytes() == before_caddy
+
+            # Собственный поддомен сохраняется вне списка из Git.
+            with (
+                patch.object(manager.subprocess, "run", return_value=SimpleNamespace(returncode=0)),
+                patch.object(manager, "_refresh_apps"),
+            ):
+                manager.apply_route(state, config, "create", "printer.zsergey.ru",
+                    upstream="http://192.168.1.50:7125", name="3D принтер",
+                    enabled=True, access="protected")
+                saved = yaml.safe_load(routes.read_text())
+                custom = next(row for row in saved if row["domain"] == "printer.zsergey.ru")
+                assert custom["upstream"] == "http://192.168.1.50:7125"
+                assert custom["access"] == "protected"
+                # Новый адрес должен попадать в каталог приложений и переживать
+                # повторную проверку состояния, хотя его нет в Git.
+                app_spec = importlib.util.spec_from_file_location(
+                    "home_apps_140", FILES / "home-apps.py")
+                assert app_spec and app_spec.loader
+                apps = importlib.util.module_from_spec(app_spec)
+                app_spec.loader.exec_module(apps)
+                items = apps.build_apps(saved, policy)["apps"]
+                assert any(row["name"] == "3D принтер" and
+                           row["url"] == "https://printer.zsergey.ru" for row in items)
+                assert manager._validate_routes(saved, policy) == saved
+                manager.apply_route(state, config, "update", "printer.zsergey.ru",
+                    upstream="http://192.168.1.51:7125", name="Новый принтер",
+                    enabled=False, access="private")
+                updated = yaml.safe_load(routes.read_text())
+                assert next(row for row in updated if row["domain"] == "printer.zsergey.ru")["name"] == "Новый принтер"
+                snapshot = routes.read_bytes()
+                for bad in ("http://8.8.8.8:80", "http://127.0.0.1:80",
+                            "http://192.168.1.50:80/path", "http://localhost:80"):
+                    rejects(lambda bad=bad: manager.apply_route(state, config, "update",
+                        "printer.zsergey.ru", upstream=bad, enabled=True, access="protected"))
+                    assert routes.read_bytes() == snapshot
+                rejects(lambda: manager.apply_route(state, config, "create",
+                    "public.zsergey.ru", upstream="http://192.168.1.51:80",
+                    name="Открыто", enabled=True, access="public"))
+                rejects(lambda: manager.apply_route(state, config, "delete", "home.zsergey.ru"))
+                manager.apply_route(state, config, "delete", "printer.zsergey.ru")
+                assert "printer.zsergey.ru" not in {r["domain"] for r in yaml.safe_load(routes.read_text())}
         with patch.object(manager.os.path, "ismount", return_value=False):
             rejects(lambda: manager.change_route(state, config, "ai.zsergey.ru", False, "protected"))
     print("140: изменение маршрута откатывается при ошибке Caddy")

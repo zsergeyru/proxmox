@@ -7,6 +7,7 @@ import hashlib
 import hmac
 import importlib.util
 import os
+import sqlite3
 from pathlib import Path
 import socket
 import struct
@@ -132,6 +133,17 @@ def test() -> None:
             pass
         else:
             raise AssertionError("Код другого пользователя нельзя показывать")
+        # Статус читается без доступа к секрету второго фактора.
+        database = directory / "status.sqlite3"
+        with sqlite3.connect(database) as connection:
+            connection.execute("CREATE TABLE totp_configurations (username TEXT, secret BLOB)")
+            connection.execute("CREATE TABLE webauthn_devices (username TEXT)")
+            connection.execute("INSERT INTO totp_configurations VALUES ('anna', X'010203')")
+            connection.execute("INSERT INTO webauthn_devices VALUES ('ivan')")
+        statuses = users_code.factor_statuses(database)
+        assert statuses["anna"]["totp"] is True and statuses["anna"]["webauthn"] is False
+        assert statuses["ivan"]["totp"] is False and statuses["ivan"]["webauthn"] is True
+        assert users_code.available_code("anna") is None or isinstance(users_code.available_code("anna"), dict)
         with patch.object(users_code.subprocess, "run", return_value=SimpleNamespace(returncode=0)) as command:
             users_code.reset_totp("anna", users)
             assert command.call_count == 1
@@ -139,6 +151,20 @@ def test() -> None:
             assert args[:3] == ["docker", "exec", "web-gateway-authelia"]
             assert args[3:7] == ["authelia", "storage", "user", "totp"]
             assert "delete" in args and "anna" in args
+        # Удаление пользователя отзывает оба вида факторов и не правит YAML.
+        with patch.object(users_code.subprocess, "run",
+                          return_value=SimpleNamespace(returncode=0, stderr=b"")) as command:
+            users_code.revoke_for_deletion("anna", users)
+            assert command.call_count == 2
+            assert ["storage", "user", "webauthn", "delete", "anna", "--all"] == command.call_args.args[0][4:10]
+        with patch.object(users_code.subprocess, "run",
+                          return_value=SimpleNamespace(returncode=1, stderr=b"unexpected error")):
+            try:
+                users_code.revoke_for_deletion("anna", users)
+            except RuntimeError:
+                pass
+            else:
+                raise AssertionError("Ошибка очистки TOTP должна остановить удаление")
         assert "ivan" in users.read_text(), "Сброс TOTP не изменяет пользователей"
         records = yaml.safe_load(users.read_text())
         records["users"]["admin"] = {"email": "admin@example.com", "password": "hash"}

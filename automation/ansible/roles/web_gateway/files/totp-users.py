@@ -11,6 +11,7 @@ from email.utils import parseaddr
 import os
 from pathlib import Path
 import re
+import sqlite3
 import subprocess
 import sys
 import time
@@ -68,6 +69,39 @@ def latest_code(username: str, users: Path = USERS, notifications: Path = NOTIFI
     return codes[0]
 
 
+
+def factor_statuses(db: Path = STATE / "db.sqlite3") -> dict[str, dict[str, bool]]:
+    """Прочитать только признаки регистрации, не извлекая TOTP-секреты.
+
+    Схему проверяем прежде чем запрашивать таблицы: неизвестная версия базы
+    не должна выглядеть как отсутствие настроенного второго фактора.
+    """
+    if db.is_symlink() or not db.is_file():
+        raise RuntimeError("База Authelia недоступна")
+    uri = "file:" + db.resolve().as_posix() + "?mode=ro"
+    with sqlite3.connect(uri, uri=True, timeout=3) as connection:
+        tables = {row[0] for row in connection.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        )}
+        if not {"totp_configurations", "webauthn_devices"}.issubset(tables):
+            raise RuntimeError("Неизвестная версия базы второго фактора")
+        result: dict[str, dict[str, bool]] = {}
+        for name, field in (("totp_configurations", "totp"), ("webauthn_devices", "webauthn")):
+            for (username,) in connection.execute("SELECT DISTINCT username FROM " + name):
+                result.setdefault(username, {"totp": False, "webauthn": False})[field] = True
+        return result
+
+
+def available_code(username: str) -> dict[str, object] | None:
+    """Код последнего письма показывается до истечения пяти минут."""
+    try:
+        code = latest_code(username)
+    except (OSError, RuntimeError, ValueError):
+        return None
+    deadline = int(NOTIFICATIONS.stat().st_mtime + 300)
+    return {"value": code, "expires_at": deadline}
+
+
 def reset_totp(username: str, users: Path = USERS) -> None:
     """Удалить только регистрацию второго фактора средствами Authelia."""
     account(username, users)
@@ -81,6 +115,37 @@ def reset_totp(username: str, users: Path = USERS) -> None:
         for name in ("admin.confirmed", "admin.png", "admin.uri"):
             (STATE / "totp-setup" / name).unlink(missing_ok=True)
     # Пароли, группы, пользователи и другие базы не меняются.
+
+
+
+def revoke_for_deletion(username: str, users: Path = USERS) -> None:
+    """Очистить зарегистрированные факторы перед удалением учётной записи.
+
+    Если Authelia не смогла удалить хотя бы один тип регистрации, пользователь
+    остаётся в файловой базе. Старые факторы нельзя привязать к новому
+    владельцу того же логина.
+    """
+    account(username, users)
+    commands = (
+        ["storage", "user", "totp", "delete", username],
+        ["storage", "user", "webauthn", "delete", username, "--all"],
+    )
+    for args in commands:
+        result = subprocess.run(
+            ["docker", "exec", CONTAINER, "authelia", *args,
+             "--config", "/config/configuration.yml"],
+            capture_output=True, check=False, timeout=30,
+        )
+        if result.returncode:
+            message = (result.stderr or b"").decode("utf-8", "replace").lower()
+            # Отсутствие ещё не подключённого фактора — штатный случай.
+            missing = (
+                "no totp configuration for user",
+                "no webauthn credential found",
+                "no webauthn credentials",
+            )
+            if not any(value in message for value in missing):
+                raise RuntimeError("Не удалось очистить сохранённые факторы; пользователь не удалён")
 
 
 def main() -> int:
