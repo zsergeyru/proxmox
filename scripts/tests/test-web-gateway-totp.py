@@ -151,12 +151,39 @@ def test() -> None:
             assert args[:3] == ["docker", "exec", "web-gateway-authelia"]
             assert args[3:7] == ["authelia", "storage", "user", "totp"]
             assert "delete" in args and "anna" in args
-        # Удаление пользователя отзывает оба вида факторов и не правит YAML.
-        with patch.object(users_code.subprocess, "run",
-                          return_value=SimpleNamespace(returncode=0, stderr=b"")) as command:
+        # При отсутствии факторов удалять нечего, CLI не вызывается.
+        database = directory / "db.sqlite3"
+        with sqlite3.connect(database) as connection:
+            connection.execute("CREATE TABLE totp_configurations (username TEXT)")
+            connection.execute("CREATE TABLE webauthn_devices (username TEXT)")
+        with patch.object(users_code.subprocess, "run") as command:
+            users_code.revoke_for_deletion("anna", users)
+            command.assert_not_called()
+        # Если есть лишь TOTP, не пытаться удалять несуществующий WebAuthn.
+        with sqlite3.connect(database) as connection:
+            connection.execute("INSERT INTO totp_configurations VALUES ('anna')")
+        def delete_registered(argv, **kwargs):
+            with sqlite3.connect(database) as connection:
+                if argv[6] == "totp":
+                    connection.execute("DELETE FROM totp_configurations WHERE username = 'anna'")
+                elif argv[6] == "webauthn":
+                    connection.execute("DELETE FROM webauthn_devices WHERE username = 'anna'")
+                else:
+                    raise AssertionError("Неожиданный второй фактор")
+            return SimpleNamespace(returncode=0, stderr=b"")
+        with patch.object(users_code.subprocess, "run", side_effect=delete_registered) as command:
+            users_code.revoke_for_deletion("anna", users)
+            assert command.call_count == 1
+            assert "totp" in command.call_args.args[0]
+        with sqlite3.connect(database) as connection:
+            connection.execute("INSERT INTO totp_configurations VALUES ('anna')")
+            connection.execute("INSERT INTO webauthn_devices VALUES ('anna')")
+        with patch.object(users_code.subprocess, "run", side_effect=delete_registered) as command:
             users_code.revoke_for_deletion("anna", users)
             assert command.call_count == 2
-            assert ["storage", "user", "webauthn", "delete", "anna", "--all"] == command.call_args.args[0][4:10]
+        # Ошибка удаления не должна приводить к ложному успеху.
+        with sqlite3.connect(database) as connection:
+            connection.execute("INSERT INTO totp_configurations VALUES ('anna')")
         with patch.object(users_code.subprocess, "run",
                           return_value=SimpleNamespace(returncode=1, stderr=b"unexpected error")):
             try:
@@ -164,7 +191,17 @@ def test() -> None:
             except RuntimeError:
                 pass
             else:
-                raise AssertionError("Ошибка очистки TOTP должна остановить удаление")
+                raise AssertionError("Ошибка удаления должна остановить операцию")
+        assert users_code.factor_statuses(database)["anna"]["totp"] is True
+        # Повреждённая SQLite-база не должна скрываться как отсутствие TOTP.
+        damaged = directory / "broken.sqlite3"
+        damaged.write_bytes(b"not sqlite")
+        try:
+            users_code.factor_statuses(damaged)
+        except RuntimeError:
+            pass
+        else:
+            raise AssertionError("Повреждённая база обязана возвращать контролируемую ошибку")
         assert "ivan" in users.read_text(), "Сброс TOTP не изменяет пользователей"
         records = yaml.safe_load(users.read_text())
         records["users"]["admin"] = {"email": "admin@example.com", "password": "hash"}
