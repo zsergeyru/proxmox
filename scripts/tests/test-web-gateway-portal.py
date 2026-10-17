@@ -67,6 +67,7 @@ def test_policy():
     assert "password" not in home.lower()
     assert 'id="admin-link" hidden' in home
     assert 'id="user-form"' in admin and 'id="route-form"' in admin
+    assert 'name="email"' not in admin
     assert "textContent" in js and "innerHTML" not in js
     assert 'Origin' not in js  # браузер отправляет Origin сам
     assert "X-Requested-With" in js
