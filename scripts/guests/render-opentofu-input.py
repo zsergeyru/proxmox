@@ -17,6 +17,7 @@ from resolver import GuestConfigError, resolve_effective_guest
 
 
 def load_yaml(path: Path) -> dict:
+    """Прочитать YAML-описание и потребовать объект с именованными полями."""
     data = yaml.safe_load(path.read_text(encoding="utf-8"))
     if not isinstance(data, dict):
         raise TypeError(f"{path}: ожидается YAML mapping")
@@ -29,6 +30,10 @@ def build_payload(
     only_vmids: set[int] | None = None,
     exclude_vmids: set[int] | None = None,
 ) -> dict:
+    """Собрать желаемое состояние управляемых гостей для OpenTofu.
+
+    Гости без профиля не включаются. Фильтры VMID ограничивают состав
+    результата, а повторяющийся VMID вызывает ошибку до записи JSON."""
     guests_dir = root / "infrastructure" / "guests"
     defaults = load_yaml(guests_dir / "defaults.yaml")
     result: dict[str, dict] = {}
@@ -70,6 +75,9 @@ def build_payload(
 
 
 def main() -> int:
+    """Проверить аргументы, сформировать JSON и записать его в файл или stdout.
+
+    При ошибке подготовки результат не записывается; код возврата ненулевой."""
     parser = argparse.ArgumentParser(
         description="Собрать итоговое состояние управляемых гостей для OpenTofu"
     )
