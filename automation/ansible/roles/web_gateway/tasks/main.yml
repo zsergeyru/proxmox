@@ -120,6 +120,22 @@
     group: root
     mode: "0700"
 
+- name: Установить автоматическую домашнюю страницу Homarr
+  ansible.builtin.copy:
+    src: configure-homarr-home.py
+    dest: /usr/local/lib/web-gateway/configure-homarr-home.py
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Установить формирование списка домашних приложений
+  ansible.builtin.copy:
+    src: home-apps.py
+    dest: /usr/local/lib/web-gateway/home-apps.py
+    owner: root
+    group: root
+    mode: "0700"
+
 - name: Установить сценарий однократной подготовки
   ansible.builtin.copy:
     src: initialize.py
@@ -386,6 +402,7 @@
     - authelia-users.json
     - caddy-routes.json
     - proxmox-guests.json
+    - home-apps.json
 
 - name: Установить страницу подключения Google Authenticator
   ansible.builtin.copy:
@@ -555,6 +572,18 @@
   retries: 20
   delay: 3
 
+# Файл доступен только Homarr через внутренний Caddy без нового порта.
+- name: Сформировать список включённых приложений из сохранённых маршрутов
+  ansible.builtin.command:
+    argv:
+      - python3
+      - /usr/local/lib/web-gateway/home-apps.py
+      - --state
+      - "{{ provision.web_gateway.paths.persistent_state }}"
+      - --policy
+      - "{{ provision.web_gateway.paths.configuration }}/caddy/routes-policy.json"
+  changed_when: false
+
 # Выполняем запросы напрямую на закрытый loopback-порт Homarr.
 # Не обращаться через Caddy: сертификат пока может отсутствовать.
 - name: Завершить первоначальную настройку Homarr через его интерфейс
@@ -578,6 +607,8 @@
       - "{{ provision.web_gateway.paths.secrets }}/homarr.env"
       - --state
       - "{{ provision.web_gateway.paths.persistent_state }}"
+      - --home-widget
+      - "{{ provision.web_gateway.paths.configuration }}/homarr/widgets/home-apps.json"
   changed_when: false
 
 # Создание через штатную CLI Authelia: в SQLite сохраняется закрытый ключ,
