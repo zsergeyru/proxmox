@@ -22,6 +22,12 @@ import sites.generated.caddy
 # Только внутренняя сеть Docker; порт 8081 не опубликован на узле.
 # Homarr читает машинный каталог из Git без дополнительной службы.
 :8081 {
+    @management path /management/*
+    handle @management {
+        # Доступно только Homarr в сети Docker, без опубликованного порта.
+        # Дополнительно Python проверяет сохранённый закрытый ключ.
+        reverse_proxy unix//run/admin-control/control.sock
+    }
     @catalog path /guests.json
     handle @catalog {
         root * /srv/homarr-catalog
