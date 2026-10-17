@@ -72,8 +72,8 @@ def _command(args: list[str]) -> None:
         raise RuntimeError("Caddy отклонил настройки или не ответил: " + args[3])
 
 
-DOMAIN = re.compile(r"(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+zsergey\\.ru\\Z")
-LABEL = re.compile(r"[a-zA-Zа-яА-ЯёЁ0-9 _.-]{1,60}\\Z")
+DOMAIN = re.compile(r"(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+zsergey\.ru\Z")
+LABEL = re.compile(r"[a-zA-Zа-яА-ЯёЁ0-9 _.-]{1,60}\Z")
 
 
 def _private_upstream(value: object, policy: dict) -> bool:
@@ -161,7 +161,7 @@ def apply_route(state: Path, config: Path, action: str, domain: str, *,
         raise ValueError("Неизвестное действие")
     if not os.path.ismount(state) or state.is_symlink():
         raise RuntimeError("Постоянный том не подключён")
-    if not isinstance(domain, str) or not re.fullmatch(r"[a-z0-9.-]+\.zsergey\.ru", domain):
+    if not isinstance(domain, str) or not DOMAIN.fullmatch(domain):
         raise ValueError("Неверное имя домена")
     if action != "delete" and (type(enabled) is not bool or access not in ALLOWED_ACCESS):
         raise ValueError("Укажите разрешённый режим доступа и включения")
