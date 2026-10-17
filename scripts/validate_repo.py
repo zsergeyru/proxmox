@@ -767,6 +767,19 @@ def _validate_access_contract(state: ValidationState) -> None:
             fail(f"{rel}: guest:410 не должен иметь root SSH-доступ к PVE")
 
 
+def _validate_physical_hosts() -> None:
+    """Проверить физические серверы независимо от перечня VMID."""
+
+    sys.path.insert(0, str(ROOT / "scripts" / "infra-manager"))
+    from infra_manager.common import InfraManagerError
+    from infra_manager.physical_hosts import list_physical_hosts
+
+    try:
+        list_physical_hosts(ROOT)
+    except (InfraManagerError, OSError, ValueError) as exc:
+        fail(f"infrastructure/hosts: {exc}")
+
+
 def _warn_unused_profiles(state: ValidationState) -> None:
     """Сообщить о профилях, которые не используются ни одним гостем."""
     rel_defaults = DEFAULTS.relative_to(ROOT)
@@ -787,6 +800,7 @@ def validate() -> None:
     for path in status_manifests():
         _validate_status_manifest(path, state)
     _validate_access_contract(state)
+    _validate_physical_hosts()
     _warn_unused_profiles(state)
 
 
