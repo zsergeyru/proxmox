@@ -89,9 +89,7 @@ def initialize(state: Path, email: str, temporary: Path | None = None) -> None:
         "authelia-jwt-secret",
         "authelia-oidc-hmac-secret",
         "authelia-oidc-jwks-pem",
-        "authelia-homarr-client-secret-hash",
         "authelia-immich-client-secret-hash",
-        "homarr.env",
         "immich-client-secret",
     )
     with (keys_dir / ".initialize.lock").open("a+") as lock:
@@ -136,7 +134,6 @@ def initialize(state: Path, email: str, temporary: Path | None = None) -> None:
                 or any((keys_dir / name).exists() for name in required)):
             raise RuntimeError("140: найдены прежние данные без метки инициализации; восстановить копию")
 
-        homarr_client = secrets.token_hex(32)
         immich_client = secrets.token_hex(32)
         values = {
             "authelia-session-secret": secrets.token_urlsafe(48),
@@ -144,12 +141,7 @@ def initialize(state: Path, email: str, temporary: Path | None = None) -> None:
             "authelia-jwt-secret": secrets.token_urlsafe(48),
             "authelia-oidc-hmac-secret": secrets.token_urlsafe(48),
             "authelia-oidc-jwks-pem": rsa_private_key(),
-            "authelia-homarr-client-secret-hash": pbkdf2_sha512.using(rounds=310000).hash(homarr_client),
             "authelia-immich-client-secret-hash": pbkdf2_sha512.using(rounds=310000).hash(immich_client),
-            "homarr.env": (
-                f"SECRET_ENCRYPTION_KEY={secrets.token_hex(32)}\n"
-                f"AUTH_OIDC_CLIENT_SECRET={homarr_client}\n"
-            ),
             "immich-client-secret": immich_client,
         }
         for name, value in values.items():
