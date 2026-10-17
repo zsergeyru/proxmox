@@ -102,3 +102,12 @@ footer{text-align:center;padding:2rem;color:var(--muted);font-size:.87rem}
   .user-actions button{flex:1 1 auto}
   .dialog-actions button{flex:1}
 }
+
+/* Состояние второго фактора: открытый код и возможность копирования. */
+.factor-details{display:grid;gap:.4rem;padding:.8rem .9rem;background:var(--bg);border-radius:11px}
+.factor-details p{margin:0}
+.factor-label{font-size:.86rem;font-weight:600}
+.inline-code{display:flex;align-items:center;gap:.65rem;flex-wrap:wrap}
+.inline-code .totp-code{font:750 1.3rem/1.5 ui-monospace,Consolas,monospace;letter-spacing:.08em;overflow-wrap:anywhere}
+.inline-code button{font-size:.8rem;padding:.3rem .65rem}
+.code-title,.code-expiry,.code-empty{font-size:.82rem;color:var(--muted)}
