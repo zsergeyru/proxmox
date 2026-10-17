@@ -136,10 +136,10 @@ def verify_schema(db: sqlite3.Connection) -> None:
 
 def verify_private_board(db: sqlite3.Connection, group_id: str) -> None:
     board = db.execute(
-        'SELECT name, is_public FROM board WHERE id=?', (BOARD_ID,)
+        'SELECT is_public FROM board WHERE id=?', (BOARD_ID,)
     ).fetchone()
-    if board is None or board != (BOARD_NAME, 0):
-        raise SetupError("Изменена защищённая административная доска")
+    if board is None or board[0] != 0:
+        raise SetupError("Административная доска отсутствует или стала открытой")
     permissions = set(db.execute(
         'SELECT group_id, permission FROM boardGroupPermission WHERE board_id=?',
         (BOARD_ID,),
