@@ -157,6 +157,36 @@ def test() -> None:
             server.server_close()
             thread.join()
 
+    # Если создание закрытой доски не получилось, нельзя помечать Homarr готовым.
+    with TemporaryDirectory() as tempdir:
+        marker = Path(tempdir) / "homarr-ready"
+        state = HomarrState()
+        state.step = "finish"
+        server, thread = start_server(state)
+        try:
+            from unittest.mock import patch
+            from types import SimpleNamespace
+
+            with patch.object(
+                module.subprocess, "run",
+                return_value=SimpleNamespace(returncode=1),
+            ):
+                try:
+                    module.initialize(
+                        f"http://127.0.0.1:{server.server_port}",
+                        marker, "admins", ["python3", "invalid-bootstrap"],
+                    )
+                except module.OnboardingError:
+                    pass
+                else:
+                    raise AssertionError("При ошибке создания виджетов нужен отказ")
+            require(not marker.exists(),
+                    "Нельзя показывать публичный Homarr без административной доски")
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join()
+
     try:
         module.HomarrClient("http://192.168.1.40:7575")
     except module.OnboardingError:
