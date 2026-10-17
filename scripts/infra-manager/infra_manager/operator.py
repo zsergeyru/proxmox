@@ -339,6 +339,7 @@ def operator_physical_task(operation: str, name: str) -> int:
         [
             "docker", "exec", "--user", "1001:0",
             "-e", f"INFRA_MANAGER_COLOR={'1' if console._color(chr(27)) else '0'}",
+            "-e", f"INFRA_PVE_NODE={_pve_node()}",
             RUNTIME_CONTAINER,
             "sh", "-eu", "-c", RUNTIME_PHYSICAL_SCRIPT,
             "infra-manager-host", snapshot, operation, name,
