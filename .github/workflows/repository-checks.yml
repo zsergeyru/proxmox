@@ -105,7 +105,7 @@ jobs:
       - name: Check safe Sync does not update software
         run: python scripts/tests/test-safe-sync.py
 
-      - name: Check Homarr Git catalog and Caddy integration
+      - name: Check Git guest catalog and Caddy integration
         run: python scripts/tests/test-homarr-catalog.py
 
       - name: Run unified guest status checks
@@ -125,26 +125,21 @@ jobs:
       - name: Check Web Gateway initial identity and secrets
         run: python scripts/tests/test-web-gateway-initialize.py
 
-      - name: Check Homarr automatic onboarding and closed public setup
-        run: python scripts/tests/test-web-gateway-homarr-onboarding.py
-      - name: Check automatic Homarr admin page and widget creation
-        run: python scripts/tests/test-web-gateway-homarr-admin.py
-      - name: Check Homarr home page and automatic applications
-        run: python scripts/tests/test-web-gateway-home.py
       - name: Check safe Google Authenticator TOTP setup
         run: python scripts/tests/test-web-gateway-totp.py
       - name: Check user management for web gateway
         run: python scripts/tests/test-web-gateway-users.py
       - name: Check Caddy route change and rollback on web gateway
         run: python scripts/tests/test-web-gateway-routes.py
-      - name: Check private Homarr administration gateway
+      - name: Check internal administration gateway
         run: python scripts/tests/test-web-gateway-admin.py
+
+      - name: Check secure static pages and two-factor access
+        run: python scripts/tests/test-web-gateway-portal.py
       - name: Check encrypted backup preparation for web gateway
         run: python scripts/tests/test-web-gateway-backup.py
       - name: Check Immich login safety in web gateway
         run: python scripts/tests/test-web-gateway-immich.py
-      - name: Check Homarr error diagnostics
-        run: python scripts/tests/test-web-gateway-homarr-diagnostics.py
 
       - name: Check Immich Compose template
         run: python scripts/tests/test-photo-archive-compose.py
