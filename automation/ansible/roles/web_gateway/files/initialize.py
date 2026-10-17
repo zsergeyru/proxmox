@@ -131,7 +131,9 @@ def initialize(state: Path, email: str, temporary: Path | None = None) -> None:
         # Не считать утраченную метку или частично созданные ключи новой установкой.
         if (users.exists() or (users_dir / "db.sqlite3").exists()
                 or any((state / "homarr").iterdir())
-                or any((keys_dir / name).exists() for name in required)):
+                or any((keys_dir / name).exists()
+                       for name in (*required, "homarr.env",
+                                    "authelia-homarr-client-secret-hash"))):
             raise RuntimeError("140: найдены прежние данные без метки инициализации; восстановить копию")
 
         immich_client = secrets.token_hex(32)
