@@ -259,7 +259,8 @@
       - item.upstream is defined
       - item.upstream is string
       - item.upstream is match('^https?://[A-Za-z0-9.:-]+$')
-      - (item.access | default('public' if item.domain in provision.web_gateway.caddy.public_domains else 'protected')) in ['public', 'protected', 'private']
+      - (item.access | default('public' if item.domain in provision.web_gateway.caddy.public_domains else 'protected')) in ['public', 'protected', 'private', 'app_auth']
+      - (item.access | default('protected')) != 'app_auth' or (item.domain == 'photos.zsergey.ru' and item.service | default('') == 'immich')
       - (item.access | default('public' if item.domain in provision.web_gateway.caddy.public_domains else 'protected')) != 'public' or item.domain in provision.web_gateway.caddy.public_domains
       - item.domain != provision.web_gateway.authelia.public_url.split('://', 1)[1] or (item.access | default('public')) == 'public'
     fail_msg: "140: неверное имя, назначение или режим доступа маршрута Caddy"
