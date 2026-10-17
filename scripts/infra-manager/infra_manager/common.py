@@ -129,7 +129,7 @@ class CommandError(InfraManagerError):
     """Внешняя команда завершилась с ошибкой.
 
     Аргументы команды редактируются по известным правилам. stderr сохраняется
-    как диагностический вывод и не считается автоматически очищенным от секретов.
+    отдельно для анализа причины, но не включается в текст исключения.
     """
 
     def __init__(
@@ -147,12 +147,11 @@ class CommandError(InfraManagerError):
         self.returncode = returncode
         self.stderr = stderr
 
+        # stderr может содержать токены и значения конфигурации.
+        # Храним его для внутренней классификации ошибок, но исключение
+        # при преобразовании в строку не должно раскрывать сырые данные.
         command = " ".join(self.argv)
-        message = f"Команда завершилась с кодом {returncode}: {command}"
-        if stderr:
-            message += f"\n{stderr.rstrip()}"
-
-        super().__init__(message)
+        super().__init__(f"Команда завершилась с кодом {returncode}: {command}")
 
 
 def format_duration(seconds: float) -> str:

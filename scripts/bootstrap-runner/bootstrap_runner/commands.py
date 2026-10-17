@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -38,18 +39,44 @@ class BootstrapCommandsMixin:
     """Общие команды PVE и запуск внешних средств с журналированием."""
 
     def show_log_tail(self) -> None:
-        """Вывести оператору последние 30 строк технического журнала при ошибке команды."""
+        """Указать путь к закрытому журналу, не раскрывая сырой вывод.
+
+        В выводе инструментов возможны секреты и временные учётные данные.
+        Журнал изучает администратор непосредственно на PVE.
+        """
         print(
-            f"{self.c_yellow}Последние строки технического журнала:{self.c_reset}",
+            f"Подробности ошибки в журнале PVE: {self.log_file}. "
+            "Проверьте состояние ресурсов перед повторным запуском.",
             file=sys.stderr,
         )
+
+    def _open_private_log(self):
+        """Открыть журнал только для владельца, не следуя символьным ссылкам.
+
+        Ранее созданный файл с широкими правами также ограничивается 0600.
+        Небезопасный файл не используется для записи диагностических данных.
+        """
+        self.log_file.parent.mkdir(parents=True, exist_ok=True)
+        descriptor = os.open(
+            self.log_file,
+            os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW,
+            0o600,
+        )
         try:
-            lines = self.log_file.read_text(errors="replace").splitlines()[-30:]
-            for line in lines:
-                print(line, file=sys.stderr)
-        except OSError:
-            pass
-        print(f"Полный журнал: {self.log_file}", file=sys.stderr)
+            metadata = os.fstat(descriptor)
+            if (
+                not stat.S_ISREG(metadata.st_mode)
+                or metadata.st_uid != os.geteuid()
+                or metadata.st_nlink != 1
+            ):
+                raise BootstrapError(
+                    f"Небезопасный файл технического журнала: {self.log_file}"
+                )
+            os.fchmod(descriptor, 0o600)
+            return os.fdopen(descriptor, "a", encoding="utf-8")
+        except BaseException:
+            os.close(descriptor)
+            raise
 
     def run(
         self,
@@ -65,8 +92,9 @@ class BootstrapCommandsMixin:
         quiet записывает вывод в журнал, progress дополнительно показывает этапы
         Ansible; capture возвращает stdout/stderr вызывающему методу. По умолчанию
         неуспешный код завершения вызывает BootstrapError. Аргументы запуска
-        передаются без оболочки; не следует передавать секреты в аргументах,
-        поскольку строка неуспешной команды может оказаться в ошибке.
+        передаются без оболочки; диагностический вывод может содержать секреты,
+        поэтому не показывается оператору при ошибке. Полный вывод тихих
+        операций остаётся в закрытом журнале PVE.
         """
         command_env = os.environ.copy()
         if env:
@@ -75,8 +103,7 @@ class BootstrapCommandsMixin:
         if quiet and progress:
             # Полный вывод остаётся в журнале, но названия долгих Ansible-задач
             # показываются в основной консоли, чтобы bootstrap не выглядел зависшим.
-            self.log_file.parent.mkdir(parents=True, exist_ok=True)
-            with self.log_file.open("a", encoding="utf-8") as log:
+            with self._open_private_log() as log:
                 process = subprocess.Popen(
                     args,
                     text=True,
@@ -141,15 +168,14 @@ class BootstrapCommandsMixin:
             if check and returncode:
                 self.show_log_tail()
                 raise BootstrapError(
-                    f"команда завершилась с кодом {returncode}: {' '.join(args)}"
+                    f"Команда {Path(args[0]).name} завершилась с кодом {returncode}. Проверьте состояние PVE перед повтором."
                 )
             return result
 
         if quiet:
             # Подробности команд сохраняются в журнале. В консоли остаются
             # только понятные этапы и итоговые статусы.
-            self.log_file.parent.mkdir(parents=True, exist_ok=True)
-            with self.log_file.open("a", encoding="utf-8") as log:
+            with self._open_private_log() as log:
                 result = subprocess.run(
                     args,
                     text=True,
@@ -161,7 +187,7 @@ class BootstrapCommandsMixin:
             if check and result.returncode:
                 self.show_log_tail()
                 raise BootstrapError(
-                    f"команда завершилась с кодом {result.returncode}: {' '.join(args)}"
+                    f"Команда {Path(args[0]).name} завершилась с кодом {result.returncode}. Проверьте состояние PVE перед повтором."
                 )
             return result
 
@@ -173,10 +199,10 @@ class BootstrapCommandsMixin:
             check=False,
         )
         if check and result.returncode:
-            if capture and result.stderr:
-                print(result.stderr.rstrip(), file=sys.stderr)
+            # Сырой stderr может содержать секреты; оператор получает только
+            # название инструмента и код отказа.
             raise BootstrapError(
-                f"команда завершилась с кодом {result.returncode}: {' '.join(args)}"
+                f"Команда {Path(args[0]).name} завершилась с кодом {result.returncode}. Проверьте состояние PVE перед повтором."
             )
         return result
 

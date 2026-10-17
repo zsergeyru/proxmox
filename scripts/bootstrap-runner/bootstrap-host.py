@@ -121,11 +121,12 @@ class BootstrapHost(
             capture=True,
         )
         if result.returncode:
-            detail = (result.stderr or "").strip()
-            suffix = f": {detail}" if detail else ""
+            # Сырой stderr вспомогательной программы может содержать
+            # конфиденциальное содержимое файлов описания гостя.
             self.fail(
                 f"Не удалось найти гостя с ролью {role!r} "
-                f"в закрытом проекте LXC {self.ctid}{suffix}"
+                f"в закрытом проекте LXC {self.ctid} "
+                f"(код {result.returncode}). Проверьте описание роли в guest.yaml"
             )
 
         try:

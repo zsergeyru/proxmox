@@ -112,6 +112,9 @@ initial_package_list() {
 }
 
 
+# Полную очистку разрешаем только root на одиночном PVE.
+# До любых удалений подтверждаем существование сохраняемой QEMU VM и
+# отказываем, если её номер занят LXC: ошибка здесь уничтожила бы данные.
 require_pve_root() {
     local cmd node_count name
     [[ $EUID -eq 0 ]] || die "Запустите скрипт от root на PVE"
@@ -143,6 +146,9 @@ require_pve_root() {
     fi
 }
 
+# Единственный исполнитель изменений: без --apply только показывает план.
+# При отказе команды set -e останавливает дальнейшую очистку; уже
+# выполненные удаления автоматически не восстанавливаются.
 run() {
     local description=$1
     shift
@@ -165,6 +171,9 @@ guest_rows() {
         '         | sort -n
 }
 
+# Режим полной очистки сознательно снимает защиту и блокировку чужих VM,
+# кроме сохраняемой VM 100. Запуск с --apply необратим и предназначен
+# только для заранее проверенного одиночного испытательного PVE.
 remove_qemu() {
     local vmid=$1 name=$2
     local config status lock protection
@@ -181,6 +190,9 @@ remove_qemu() {
     run "удалить VM $vmid${name:+ ($name)}"         qm destroy "$vmid" --purge 1 --destroy-unreferenced-disks 1
 }
 
+# Режим полной очистки удаляет любой LXC, кроме сохранённого объекта VM.
+# Снятие блокировки и защиты допустимо только после общей проверки хоста
+# и только по явному --apply; автоматического отката нет.
 remove_lxc() {
     local vmid=$1 name=$2
     local config status lock protection
@@ -197,6 +209,9 @@ remove_lxc() {
     run "удалить LXC $vmid${name:+ ($name)}"         pct destroy "$vmid" --purge 1 --destroy-unreferenced-disks 1
 }
 
+# Отбор делается по фактическому списку ресурсов кластера, а не по именам.
+# Любой объект с номером, отличным от сохраняемого, попадает в план
+# уничтожения, поэтому скрипт запрещён для обычного обслуживания.
 remove_other_guests() {
     local vmid type name status
 
@@ -338,6 +353,8 @@ remove_project_root_ssh_authorization() {
         sed -i '/ infra-manager-pve-root$/d' "$authorized_keys"
 }
 
+# Удалять только явно перечисленные проектные пути через общий run.
+# Не передавать сюда произвольные пользовательские каталоги.
 remove_path() {
     local path=$1 description=$2
     [[ -e "$path" || -L "$path" ]] || return 0
@@ -622,6 +639,8 @@ apt_simulation_removals() {
         | awk '$1 == "Remv" {print $2}'
 }
 
+# Сначала просим APT смоделировать удаление и запрещаем затрагивать
+# базовые пакеты PVE/Debian. Это защита от разрушения загрузки и сети.
 assert_no_protected_package_removal() {
     local action=$1
     shift
@@ -643,6 +662,9 @@ assert_no_protected_package_removal() {
     return 0
 }
 
+# Удаляем только отобранные по истории/исходному составу пакеты.
+# Каждую кандидатуру и общий набор предварительно проверяет APT;
+# отказ проверки оставляет пакеты, а не обходит защиту.
 remove_non_initial_manual_packages() {
     local pkg
     local -a candidates=()
@@ -717,6 +739,8 @@ print_bootstrap_entrypoint() {
     printf 'curl -fsSL %s | bash\n' "$url"
 }
 
+# После --apply проверяем, сохранилась ли нужная VM и базовые службы.
+# Успешное удаление отдельных объектов ещё не означает чистый PVE.
 verify_final_state() {
     local extra_guests extra_users extra_groups
 

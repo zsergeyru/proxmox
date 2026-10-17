@@ -1401,6 +1401,60 @@ def test_bootstrap_command_run_modes() -> None:
             raise AssertionError("Тихая команда должна записывать вывод в журнал")
 
 
+def test_bootstrap_diagnostics_hide_secrets() -> None:
+    """Секретные аргументы и stderr не должны попадать в ошибки загрузчика."""
+    with tempfile.TemporaryDirectory() as temp:
+        host = BootstrapHost("check")
+        host.log_file = Path(temp) / "bootstrap.log"
+        host.log_file.write_text("старый журнал\n", encoding="utf-8")
+        host.log_file.chmod(0o644)
+        secret = "BOOTSTRAP-SENSITIVE-TEST-VALUE"
+
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            try:
+                host.run(
+                    sys.executable, "-c",
+                    "import sys; print(sys.argv[1]); sys.exit(7)",
+                    secret,
+                    quiet=True,
+                )
+            except BootstrapError as exc:
+                error = str(exc)
+                if "кодом 7" not in error:
+                    raise AssertionError("Код отказа должен оставаться видимым")
+                if secret in error:
+                    raise AssertionError("Команда раскрыла аргумент с секретом")
+            else:
+                raise AssertionError("Ошибка команды должна быть обнаружена")
+
+        if secret in stderr.getvalue():
+            raise AssertionError("Сырой журнал попал в вывод оператора")
+        if str(host.log_file) not in stderr.getvalue():
+            raise AssertionError("Оператор должен видеть путь к журналу")
+        if secret not in host.log_file.read_text(encoding="utf-8"):
+            raise AssertionError("Подробная диагностика должна сохраняться в файле")
+        if host.log_file.stat().st_mode & 0o077:
+            raise AssertionError("Журнал загрузчика должен быть доступен только владельцу")
+
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            try:
+                host.run(
+                    sys.executable, "-c",
+                    "import sys; print(sys.argv[1], file=sys.stderr); sys.exit(9)",
+                    secret,
+                    capture=True,
+                )
+            except BootstrapError as exc:
+                if secret in str(exc):
+                    raise AssertionError("Ошибка перехвата вывода раскрыла секрет")
+            else:
+                raise AssertionError("Неуспешная команда с capture должна завершиться ошибкой")
+        if secret in stderr.getvalue():
+            raise AssertionError("Сырой stderr не должен печататься пользователю")
+
+
 def test_bootstrap_path_groups() -> None:
     """Пути состояния и доступа должны остаться прежними после выделения."""
     host = BootstrapHost("check")
@@ -2450,6 +2504,7 @@ def main() -> None:
         test_installation_marker_states,
         test_bootstrap_path_groups,
         test_bootstrap_command_run_modes,
+        test_bootstrap_diagnostics_hide_secrets,
         test_restart_unfinished_installation,
         test_restart_rejects_persistent_data,
         test_token_revoked_on_bootstrap_failure,

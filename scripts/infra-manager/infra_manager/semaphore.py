@@ -344,11 +344,18 @@ class SemaphoreClient:
             with opener.open(request, timeout=timeout) as response:
                 raw = response.read()
         except urllib.error.HTTPError as exc:
-            error_body = exc.read().decode("utf-8", errors="replace").strip()
-            suffix = error_body or "(пустой ответ)"
+            # Ответ сервера может включать присланные параметры и секреты.
+            # Не переносим тело HTTP-ошибки в операторский вывод.
+            reason = (
+                "Проверьте служебный токен и права проекта."
+                if exc.code in (401, 403)
+                else "Проверьте адрес и наличие ресурса API."
+                if exc.code == 404
+                else "Проверьте состояние Semaphore и его журнал."
+            )
             raise InfraManagerError(
                 f"Semaphore API {method} {path} вернул HTTP "
-                f"{exc.code}: {suffix}"
+                f"{exc.code}. {reason}"
             ) from exc
         except (urllib.error.URLError, OSError) as exc:
             raise InfraManagerError(
