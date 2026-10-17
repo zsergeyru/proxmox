@@ -124,6 +124,17 @@ def test():
                 custom = next(row for row in saved if row["domain"] == "printer.zsergey.ru")
                 assert custom["upstream"] == "http://192.168.1.50:7125"
                 assert custom["access"] == "protected"
+                # Новый адрес должен попадать в каталог приложений и переживать
+                # повторную проверку состояния, хотя его нет в Git.
+                app_spec = importlib.util.spec_from_file_location(
+                    "home_apps_140", FILES / "home-apps.py")
+                assert app_spec and app_spec.loader
+                apps = importlib.util.module_from_spec(app_spec)
+                app_spec.loader.exec_module(apps)
+                items = apps.build_apps(saved, policy)["apps"]
+                assert any(row["name"] == "3D принтер" and
+                           row["url"] == "https://printer.zsergey.ru" for row in items)
+                assert manager._validate_routes(saved, policy) == saved
                 manager.apply_route(state, config, "update", "printer.zsergey.ru",
                     upstream="http://192.168.1.51:7125", name="Новый принтер",
                     enabled=False, access="private")
