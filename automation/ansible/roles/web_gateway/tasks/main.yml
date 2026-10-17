@@ -10,13 +10,13 @@
       - provision.web_gateway.authelia.storage.type == "sqlite"
       - provision.web_gateway.caddy.enabled | bool
       - provision.web_gateway.authelia.enabled | bool
-      - provision.web_gateway.homarr.enabled | bool
+      - provision.web_gateway.portal.enabled | bool
       - provision.web_gateway.authelia.totp_setup.username == provision.web_gateway.authelia.initial_admin.username
       - provision.web_gateway.authelia.totp_setup.qr_host == provision.web_gateway.authelia.data.host ~ '/totp-setup/admin.png'
       - provision.web_gateway.authelia.totp_setup.qr_container == '/data/totp-setup/admin.png'
       - provision.web_gateway.caddy.private_networks | length > 0
       - provision.web_gateway.authelia.public_url.split('://', 1)[1] in provision.web_gateway.caddy.public_domains
-      - provision.web_gateway.homarr.public_url.split('://', 1)[1] in provision.web_gateway.caddy.public_domains
+      - provision.web_gateway.portal.public_url.split('://', 1)[1] in provision.web_gateway.caddy.public_domains
     fail_msg: "140: некорректная схема служб или постоянного хранилища"
 
 - name: Проверить настоящее подключение постоянного тома
@@ -54,6 +54,7 @@
     - "{{ provision.web_gateway.paths.configuration }}/caddy"
     - "{{ provision.web_gateway.paths.configuration }}/caddy/local-home"
     - "{{ provision.web_gateway.paths.configuration }}/caddy/totp-setup"
+    - "{{ provision.web_gateway.portal.assets }}"
     - "{{ provision.web_gateway.paths.configuration }}/authelia"
     - "{{ provision.web_gateway.paths.secrets }}"
 
@@ -75,15 +76,10 @@
     - "{{ provision.web_gateway.paths.persistent_state }}/management/catalog"
     - "{{ provision.web_gateway.paths.persistent_state }}/management/totp-setup-socket"
     - "{{ provision.web_gateway.paths.persistent_state }}/management/admin-socket"
+    - "{{ provision.web_gateway.paths.persistent_state }}/management/portal-socket"
 
-# Во время любого развёртывания Homarr должен оставаться закрытым,
-# пока его действительное состояние не проверено через штатный интерфейс.
-- name: Закрыть публичный вход Homarr до подтверждения готовности
-  ansible.builtin.file:
-    path: "{{ provision.web_gateway.homarr.onboarding.ready_file }}"
-    state: absent
-
-- name: Сформировать каталог приложений Homarr из Git
+# Машинный каталог PVE для закрытой административной страницы.
+- name: Сформировать каталог гостей из Git
   ansible.builtin.include_tasks: catalog.yml
 
 # Все секреты и пользователи принадлежат самому гостю, хранятся на mp0.
@@ -96,37 +92,29 @@
     group: root
     mode: "0700"
 
-- name: Установить проверку ошибок Homarr без вывода личных сведений
+- name: Установить закрытый обработчик домашнего интерфейса
   ansible.builtin.copy:
-    src: homarr-diagnostics.py
-    dest: /usr/local/lib/web-gateway/homarr-diagnostics.py
+    src: portal-web.py
+    dest: /usr/local/lib/web-gateway/portal-web.py
     owner: root
     group: root
     mode: "0700"
 
-- name: Установить сценарий начальной настройки Homarr
+- name: Установить одноразовую миграцию домашних маршрутов
   ansible.builtin.copy:
-    src: initialize-homarr.py
-    dest: /usr/local/lib/web-gateway/initialize-homarr.py
+    src: migrate-portal-routes.py
+    dest: /usr/local/lib/web-gateway/migrate-portal-routes.py
     owner: root
     group: root
     mode: "0700"
 
-- name: Установить первоначальное создание административной страницы Homarr
-  ansible.builtin.copy:
-    src: configure-homarr-admin.py
-    dest: /usr/local/lib/web-gateway/configure-homarr-admin.py
+- name: Установить описание закрытой службы домашнего интерфейса
+  ansible.builtin.template:
+    src: web-gateway-portal.service.j2
+    dest: /etc/systemd/system/web-gateway-portal.service
     owner: root
     group: root
-    mode: "0700"
-
-- name: Установить автоматическую домашнюю страницу Homarr
-  ansible.builtin.copy:
-    src: configure-homarr-home.py
-    dest: /usr/local/lib/web-gateway/configure-homarr-home.py
-    owner: root
-    group: root
-    mode: "0700"
+    mode: "0644"
 
 - name: Установить формирование списка домашних приложений
   ansible.builtin.copy:
@@ -301,6 +289,15 @@
     mode: "0640"
     force: false
 
+- name: Заменить только старые назначения Homarr на собственный интерфейс
+  ansible.builtin.command:
+    argv:
+      - python3
+      - /usr/local/lib/web-gateway/migrate-portal-routes.py
+      - --state
+      - "{{ provision.web_gateway.paths.persistent_state }}"
+  changed_when: false
+
 - name: Прочитать сохранённый список доменов
   ansible.builtin.slurp:
     src: "{{ provision.web_gateway.management.routes_state }}"
@@ -376,33 +373,24 @@
     group: root
     mode: "0644"
 
-# Определения устанавливаются без скачивания файлов пользователем.
-# Веб-сервер не должен отдавать их как часть открытой домашней страницы.
+# Сохранённые определения Homarr не используются в новом интерфейсе.
 - name: Закрыть прежний путь ручного получения виджетов
   ansible.builtin.file:
     path: "{{ provision.web_gateway.paths.configuration }}/caddy/local-home/widgets"
     state: absent
 
-- name: Подготовить закрытую папку определений Homarr
-  ansible.builtin.file:
-    path: "{{ provision.web_gateway.paths.configuration }}/homarr/widgets"
-    state: directory
-    owner: root
-    group: root
-    mode: "0700"
-
-- name: Установить три определения для автоматической настройки Homarr
+- name: Установить готовые страницы и оформление веб-портала
   ansible.builtin.copy:
-    src: "{{ project_root }}/infrastructure/guests/140-web-gateway/widgets/{{ item }}"
-    dest: "{{ provision.web_gateway.paths.configuration }}/homarr/widgets/{{ item }}"
+    src: "{{ item.src }}"
+    dest: "{{ provision.web_gateway.portal.assets }}/{{ item.dest }}"
     owner: root
     group: root
-    mode: "0600"
+    mode: "0644"
   loop:
-    - authelia-users.json
-    - caddy-routes.json
-    - proxmox-guests.json
-    - home-apps.json
+    - { src: portal-home.html, dest: portal-home.html }
+    - { src: portal-admin.html, dest: portal-admin.html }
+    - { src: portal.css, dest: portal.css }
+    - { src: portal.js, dest: portal.js }
 
 - name: Установить страницу подключения Google Authenticator
   ansible.builtin.copy:
@@ -436,7 +424,7 @@
               "private_networks": provision.web_gateway.caddy.private_networks
             },
             "authelia": {"public_url": provision.web_gateway.authelia.public_url},
-            "homarr": {"public_url": provision.web_gateway.homarr.public_url}
+            "portal": {"public_url": provision.web_gateway.portal.public_url}
           },
           "allow_immich_activation": false
         } | to_nice_json
@@ -562,18 +550,8 @@
   changed_when: true
   when: web_gateway_main_caddyfile.changed or web_gateway_generated_routes.changed
 
-- name: Проверить отклик Homarr только на локальном порту
-  ansible.builtin.uri:
-    url: "http://127.0.0.1:{{ provision.web_gateway.homarr.internal_port }}"
-    status_code: [200, 301, 302, 303, 307, 308]
-    follow_redirects: none
-  register: web_gateway_homarr_health
-  until: web_gateway_homarr_health.status in [200, 301, 302, 303, 307, 308]
-  retries: 20
-  delay: 3
-
-# Файл доступен только Homarr через внутренний Caddy без нового порта.
-- name: Сформировать список включённых приложений из сохранённых маршрутов
+# Страницы отдаются Caddy напрямую; отдельного контейнера Homarr нет.
+- name: Сформировать список включённых приложений
   ansible.builtin.command:
     argv:
       - python3
@@ -582,33 +560,6 @@
       - "{{ provision.web_gateway.paths.persistent_state }}"
       - --policy
       - "{{ provision.web_gateway.paths.configuration }}/caddy/routes-policy.json"
-  changed_when: false
-
-# Выполняем запросы напрямую на закрытый loopback-порт Homarr.
-# Не обращаться через Caddy: сертификат пока может отсутствовать.
-- name: Завершить первоначальную настройку Homarr через его интерфейс
-  ansible.builtin.command:
-    argv:
-      - python3
-      - /usr/local/lib/web-gateway/initialize-homarr.py
-      - --url
-      - "http://127.0.0.1:{{ provision.web_gateway.homarr.internal_port }}"
-      - --state-file
-      - "{{ provision.web_gateway.homarr.onboarding.ready_file }}"
-      - --admin-group
-      - "{{ provision.web_gateway.homarr.onboarding.admin_group }}"
-      - --db
-      - "{{ provision.web_gateway.homarr.data.host }}/db/db.sqlite"
-      - --widgets
-      - "{{ provision.web_gateway.paths.configuration }}/homarr/widgets"
-      - --token
-      - "{{ provision.web_gateway.paths.secrets }}/administration-token"
-      - --env
-      - "{{ provision.web_gateway.paths.secrets }}/homarr.env"
-      - --state
-      - "{{ provision.web_gateway.paths.persistent_state }}"
-      - --home-widget
-      - "{{ provision.web_gateway.paths.configuration }}/homarr/widgets/home-apps.json"
   changed_when: false
 
 # Создание через штатную CLI Authelia: в SQLite сохраняется закрытый ключ,
@@ -701,6 +652,28 @@
     state: restarted
     enabled: true
     daemon_reload: true
+
+- name: Запустить закрытый интерфейс домашней и административной страниц
+  ansible.builtin.systemd_service:
+    name: web-gateway-portal.service
+    state: restarted
+    enabled: true
+    daemon_reload: true
+
+- name: Проверить, что локальный сокет страниц доступен
+  ansible.builtin.stat:
+    path: "{{ provision.web_gateway.portal.socket }}"
+  register: web_gateway_portal_socket
+  until: web_gateway_portal_socket.stat.issock | default(false)
+  retries: 8
+  delay: 2
+
+- name: Не открывать страницу при отсутствии закрытого обработчика
+  ansible.builtin.assert:
+    that:
+      - web_gateway_portal_socket.stat.issock | default(false)
+    fail_msg: "140: служба страниц не готова; проверьте web-gateway-portal.service"
+
 
 - name: Подсказать адрес привязки Google Authenticator
   ansible.builtin.debug:
