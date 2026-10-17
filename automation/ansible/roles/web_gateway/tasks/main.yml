@@ -74,6 +74,7 @@
     - "{{ provision.web_gateway.paths.persistent_state }}/management"
     - "{{ provision.web_gateway.paths.persistent_state }}/management/catalog"
     - "{{ provision.web_gateway.paths.persistent_state }}/management/totp-setup-socket"
+    - "{{ provision.web_gateway.paths.persistent_state }}/management/admin-socket"
 
 # Во время любого развёртывания Homarr должен оставаться закрытым,
 # пока его действительное состояние не проверено через штатный интерфейс.
@@ -91,6 +92,14 @@
   ansible.builtin.file:
     path: /usr/local/lib/web-gateway
     state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Установить проверку ошибок Homarr без вывода личных сведений
+  ansible.builtin.copy:
+    src: homarr-diagnostics.py
+    dest: /usr/local/lib/web-gateway/homarr-diagnostics.py
     owner: root
     group: root
     mode: "0700"
@@ -126,6 +135,47 @@
     owner: root
     group: root
     mode: "0700"
+
+- name: Установить безопасное управление учётными записями
+  ansible.builtin.copy:
+    src: user-accounts.py
+    dest: /usr/local/lib/web-gateway/user-accounts.py
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Установить проверяемое управление доменами Caddy
+  ansible.builtin.copy:
+    src: manage-routes.py
+    dest: /usr/local/lib/web-gateway/manage-routes.py
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Установить закрытый административный интерфейс
+  ansible.builtin.copy:
+    src: admin-api.py
+    dest: /usr/local/lib/web-gateway/admin-api.py
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Подготовить ключ закрытого административного интерфейса
+  ansible.builtin.command:
+    argv:
+      - python3
+      - /usr/local/lib/web-gateway/admin-api.py
+      - init
+  changed_when: false
+  no_log: true
+
+- name: Установить описание службы административного интерфейса
+  ansible.builtin.template:
+    src: web-gateway-admin-api.service.j2
+    dest: /etc/systemd/system/web-gateway-admin-api.service
+    owner: root
+    group: root
+    mode: "0644"
 
 - name: Установить служебное управление вторым фактором пользователей
   ansible.builtin.copy:
@@ -243,6 +293,39 @@
       - web_gateway_routes is not string
     fail_msg: "140: сохранённый список доменов имеет неверный формат"
 
+# Новые заранее разрешённые домены из Git добавляются выключенными:
+# существующие решения администратора и маршруты из mp0 не переписываются.
+- name: Найти новые подготовленные домены из описания проекта
+  ansible.builtin.set_fact:
+    web_gateway_new_routes: >-
+      {{
+        provision.web_gateway.caddy.routes
+        | rejectattr('domain', 'in', web_gateway_routes | map(attribute='domain') | list)
+        | list
+      }}
+
+- name: Не включать новые домены автоматически
+  ansible.builtin.assert:
+    that:
+      - not (item.enabled | default(false) | bool)
+    fail_msg: "140: новый маршрут должен быть выключен до проверки администратором"
+  loop: "{{ web_gateway_new_routes }}"
+  loop_control:
+    label: "{{ item.domain }}"
+
+- name: Дополнить список только отсутствующими доменами
+  ansible.builtin.set_fact:
+    web_gateway_routes: "{{ web_gateway_routes + web_gateway_new_routes }}"
+
+- name: Сохранить новые выключенные домены без потери прежних настроек
+  ansible.builtin.copy:
+    dest: "{{ provision.web_gateway.management.routes_state }}"
+    content: "{{ web_gateway_routes | to_nice_yaml(indent=2, sort_keys=false) }}"
+    owner: root
+    group: root
+    mode: "0640"
+  when: web_gateway_new_routes | length > 0
+
 - name: Проверить включённые маршруты перед формированием Caddyfile
   ansible.builtin.assert:
     that:
@@ -251,7 +334,8 @@
       - item.upstream is defined
       - item.upstream is string
       - item.upstream is match('^https?://[A-Za-z0-9.:-]+$')
-      - (item.access | default('public' if item.domain in provision.web_gateway.caddy.public_domains else 'protected')) in ['public', 'protected', 'private']
+      - (item.access | default('public' if item.domain in provision.web_gateway.caddy.public_domains else 'protected')) in ['public', 'protected', 'private', 'app_auth']
+      - (item.access | default('protected')) != 'app_auth' or (item.domain == 'photos.zsergey.ru' and item.service | default('') == 'immich')
       - (item.access | default('public' if item.domain in provision.web_gateway.caddy.public_domains else 'protected')) != 'public' or item.domain in provision.web_gateway.caddy.public_domains
       - item.domain != provision.web_gateway.authelia.public_url.split('://', 1)[1] or (item.access | default('public')) == 'public'
     fail_msg: "140: неверное имя, назначение или режим доступа маршрута Caddy"
@@ -268,6 +352,28 @@
     group: root
     mode: "0644"
 
+# Несекретные определения доступны только из домашней сети.
+# Они предназначены для первоначального импорта в Homarr через браузер.
+- name: Подготовить папку для определений виджетов Homarr
+  ansible.builtin.file:
+    path: "{{ provision.web_gateway.paths.configuration }}/caddy/local-home/widgets"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Опубликовать несекретные определения виджетов для установки через Homarr
+  ansible.builtin.copy:
+    src: "{{ project_root }}/infrastructure/guests/140-web-gateway/widgets/{{ item }}"
+    dest: "{{ provision.web_gateway.paths.configuration }}/caddy/local-home/widgets/{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - authelia-users.json
+    - caddy-routes.json
+    - proxmox-guests.json
+
 - name: Установить страницу подключения Google Authenticator
   ansible.builtin.copy:
     src: totp-setup.html
@@ -275,6 +381,36 @@
     owner: root
     group: root
     mode: "0644"
+
+- name: Установить исходный шаблон маршрутов для проверки изменений
+  ansible.builtin.copy:
+    src: "{{ role_path }}/templates/sites.generated.caddy.j2"
+    dest: "{{ provision.web_gateway.paths.configuration }}/caddy/sites.generated.caddy.j2"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Установить перечень разрешённых маршрутов и внутренних адресов
+  ansible.builtin.copy:
+    dest: "{{ provision.web_gateway.paths.configuration }}/caddy/routes-policy.json"
+    owner: root
+    group: root
+    mode: "0640"
+    content: >-
+      {{
+        {
+          "web_gateway": {
+            "caddy": {
+              "routes": provision.web_gateway.caddy.routes,
+              "public_domains": provision.web_gateway.caddy.public_domains,
+              "private_networks": provision.web_gateway.caddy.private_networks
+            },
+            "authelia": {"public_url": provision.web_gateway.authelia.public_url},
+            "homarr": {"public_url": provision.web_gateway.homarr.public_url}
+          },
+          "allow_immich_activation": false
+        } | to_nice_json
+      }}
 
 - name: Подготовить основной Caddyfile
   ansible.builtin.template:
@@ -504,6 +640,13 @@
     not (web_gateway_totp_qr.stat.isreg | default(false))
     or not (web_gateway_totp_uri.stat.isreg | default(false))
     or (web_gateway_totp_confirmed.stat.exists | default(false))
+
+- name: Запустить закрытое управление пользователями
+  ansible.builtin.systemd_service:
+    name: web-gateway-admin-api.service
+    state: restarted
+    enabled: true
+    daemon_reload: true
 
 - name: Подсказать адрес привязки Google Authenticator
   ansible.builtin.debug:

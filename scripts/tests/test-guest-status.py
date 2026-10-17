@@ -118,8 +118,15 @@ def check_operator_services_140() -> None:
         fail("140: неверный адрес Authelia")
     if authelia.get("setup_url") != "https://auth.zsergey.ru/totp-setup":
         fail("140: ссылка первоначальной настройки TOTP должна быть в статусе")
-    if homarr.get("setup_url") is not None:
-        fail("140: Homarr не должен показывать ссылку настройки TOTP")
+    if homarr.get("setup_url") != "https://home.zsergey.ru/manage/custom-widgets":
+        fail("140: в статусе должна быть ссылка на настройку административных виджетов")
+    if len(homarr.get("setup_instructions", [])) != 6:
+        fail("140: нужны шесть шагов первоначального подключения Homarr")
+    if homarr.get("connection_key") != {
+        "label": "Ключ подключения виджетов",
+        "path": "/var/lib/web-gateway/secrets/administration-token",
+    }:
+        fail("140: ключ соединения должен читаться только из постоянного защищённого файла")
     steps = authelia.get("setup_instructions")
     if not isinstance(steps, list) or len(steps) != 4:
         fail("140: нужны четыре понятных шага подключения телефона")
@@ -189,9 +196,26 @@ def check_credential_validation_140() -> None:
                 show_secrets=False,
             )
         text = output.getvalue()
-        for expected in ("https://auth.zsergey.ru", "https://auth.zsergey.ru/totp-setup", "Первое подключение телефона", "Шаг 1:", "Шаг 2:", "Шаг 3:", "Шаг 4:", "шесть цифр", "https://home.zsergey.ru", "Логин:", "скрыт", "через Authelia"):
+        for expected in ("https://auth.zsergey.ru", "https://auth.zsergey.ru/totp-setup", "Первое подключение телефона", "Шаг 1:", "Шаг 2:", "Шаг 3:", "Шаг 4:", "Шаг 5:", "Шаг 6:", "шесть цифр", "https://home.zsergey.ru", "Ключ подключения виджетов:", "Логин:", "скрыт", "через Authelia"):
             if expected not in text:
                 fail(f"140: в скрытом статусе отсутствует {expected}")
+
+
+def check_homarr_widget_credential() -> None:
+    """Ключ показывается только в доверенном состоянии root PVE."""
+    services = operator_service_definitions(ROOT, guest_identity(ROOT, 140))
+    expected = "fake-widget-key-" + "test" * 12
+    with patch.object(status, "_read_guest_file", return_value=expected):
+        hidden = status._service_fields(
+            "pve", "192.168.1.40", services[1], show_secrets=False,
+        )
+        if expected in repr(hidden):
+            fail("140: нельзя показывать ключ виджетов в журналах Semaphore")
+        actual = status._service_fields(
+            "pve", "192.168.1.40", services[1], show_secrets=True,
+        )
+        if ("Ключ подключения виджетов", expected) not in actual:
+            fail("140: root PVE должен видеть ключ установки виджетов")
 
 
 def check_immich_accounts() -> None:
@@ -634,6 +658,7 @@ def check_ansible_error_classification() -> None:
 def main() -> None:
     check_operator_contracts()
     check_operator_services_140()
+    check_homarr_widget_credential()
     check_credential_validation_140()
     check_immich_accounts()
     check_status_definitions()

@@ -46,6 +46,9 @@
       - item.upstream is defined
       - item.upstream is string
       - item.upstream is match('^https?://[A-Za-z0-9.:-]+$')
+      - (item.access | default('protected')) in ['public', 'protected', 'private', 'app_auth']
+      - (item.access | default('protected')) != 'app_auth' or (item.domain == 'photos.zsergey.ru' and item.service | default('') == 'immich')
+      - (item.access | default('protected')) != 'public' or item.domain in provision.web_gateway.caddy.public_domains
     fail_msg: "140: неверное имя или назначение маршрута Caddy"
   loop: "{{ web_gateway_routes | selectattr('enabled', 'equalto', true) | list }}"
   loop_control:

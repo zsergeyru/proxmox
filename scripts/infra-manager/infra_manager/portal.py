@@ -464,11 +464,21 @@ def operator_service_definitions(
                 raise InfraManagerError(
                     f"{source}.operator_status.setup_instructions должен быть списком коротких строк"
                 )
+            connection_key = definition.get("connection_key")
+            if connection_key is not None:
+                if not isinstance(connection_key, dict) or set(connection_key) != {"label", "path"}:
+                    raise InfraManagerError(f"{source}.operator_status.connection_key должен содержать label и path")
+                label, path = connection_key["label"], connection_key["path"]
+                if not isinstance(label, str) or not label.strip() or len(label) > 70:
+                    raise InfraManagerError(f"{source}.operator_status.connection_key.label задан неверно")
+                if not isinstance(path, str) or not path.startswith("/") or ".." in path.split("/") or len(path) > 240:
+                    raise InfraManagerError(f"{source}.operator_status.connection_key.path должен быть абсолютным путём")
             result.append({
                 "name": name.strip(),
                 "url": url,
                 "setup_url": url.rstrip("/") + setup_path if setup_path else None,
                 "setup_instructions": setup_instructions or [],
+                "connection_key": connection_key,
                 "operator": _validated_operator(
                     f"{source}.operator_status", definition.get("operator")
                 ),

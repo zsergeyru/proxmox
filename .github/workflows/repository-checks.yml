@@ -129,6 +129,18 @@ jobs:
         run: python scripts/tests/test-web-gateway-homarr-onboarding.py
       - name: Check safe Google Authenticator TOTP setup
         run: python scripts/tests/test-web-gateway-totp.py
+      - name: Check user management for web gateway
+        run: python scripts/tests/test-web-gateway-users.py
+      - name: Check Caddy route change and rollback on web gateway
+        run: python scripts/tests/test-web-gateway-routes.py
+      - name: Check private Homarr administration gateway
+        run: python scripts/tests/test-web-gateway-admin.py
+      - name: Check encrypted backup preparation for web gateway
+        run: python scripts/tests/test-web-gateway-backup.py
+      - name: Check Immich login safety in web gateway
+        run: python scripts/tests/test-web-gateway-immich.py
+      - name: Check Homarr error diagnostics
+        run: python scripts/tests/test-web-gateway-homarr-diagnostics.py
 
       - name: Check Immich Compose template
         run: python scripts/tests/test-photo-archive-compose.py

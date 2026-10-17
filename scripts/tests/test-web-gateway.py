@@ -192,7 +192,12 @@ def test() -> None:
     require(set(public_domains) == {"home.zsergey.ru", "auth.zsergey.ru"},
             "По умолчанию публичны только приветствие и страница входа")
     require(all(
-        route["access"] == ("public" if route["domain"] in public_domains else "protected")
+        route["access"] == (
+            "public" if route["domain"] in public_domains
+            else "app_auth" if route["domain"] == "photos.zsergey.ru"
+            else "private" if route["domain"] == "check.zsergey.ru"
+            else "protected"
+        )
         for route in web["caddy"]["routes"]
     ), "Начальные маршруты должны иметь явный режим доступа")
 
@@ -207,6 +212,18 @@ def test() -> None:
         {"domain": "vpn.zsergey.ru", "upstream": "http://vpn:8080",
          "access": "private", "enabled": True},
     ]
+    # Immich требует собственного входа: общий вход Caddy мешает мобильному приложению.
+    immich_only = environment.get_template("sites.generated.caddy.j2").render(
+        provision=provision, web_gateway_routes=[{
+            "domain": "photos.zsergey.ru",
+            "service": "immich",
+            "upstream": "http://192.168.3.40:2283",
+            "enabled": True, "access": "app_auth",
+        }]
+    )
+    require("reverse_proxy http://192.168.3.40:2283" in immich_only
+            and "forward_auth" not in immich_only,
+            "Мобильный Immich нельзя отправлять через общий вход Caddy")
     caddy_example = environment.get_template("sites.generated.caddy.j2").render(
         provision=provision, web_gateway_routes=example_routes
     )
@@ -337,6 +354,40 @@ def test() -> None:
     require("totp-setup-server.py" in text and "state: restarted" in text,
             "Обработчик должен запускаться только при незавершённой регистрации")
     require("totp-users.py" in text, "Администратору нужны операции для пользователей")
+    require("local-home/widgets" in text
+            and "authelia-users.json" in text
+            and "caddy-routes.json" in text
+            and "proxmox-guests.json" in text,
+            "Все три несекретных виджета должны устанавливаться из Git на 140")
+    probe = next((route for route in web["caddy"]["routes"]
+                  if route["domain"] == "check.zsergey.ru"), None)
+    require(isinstance(probe, dict) and probe.get("enabled") is False
+            and probe.get("access") == "private"
+            and probe.get("upstream") == "http://homarr:7575",
+            "Пробный маршрут должен быть выключен и доступен только из домашней сети")
+    for widget in ("authelia-users.json", "caddy-routes.json", "proxmox-guests.json"):
+        definition = __import__("json").loads(
+            (GUEST_DIR / "widgets" / widget).read_text(encoding="utf-8")
+        )
+        require(definition["$schema"] == "homarr-custom-widget-v2"
+                and "template" in definition
+                and definition["sources"]["default"]["networkScope"] == "private",
+                "Несекретный виджет должен соответствовать формату Homarr v2")
+    require("web_gateway_new_routes" in text
+            and "Дополнить список только отсутствующими доменами" in text,
+            "Добавление новых пробных маршрутов не должно сбрасывать постоянные настройки")
+    require("manage-routes.py" in text
+            and "sites.generated.caddy.j2" in text
+            and "routes-policy.json" in text,
+            "Для доменов должны устанавливаться проверка Caddy и перечень разрешённых адресов")
+    require("python3-jinja2" in provision["system"]["required_packages"],
+            "Для проверки доменов нужен штатный Jinja2")
+    route_widget = __import__("json").loads(
+        (GUEST_DIR / "widgets/caddy-routes.json").read_text(encoding="utf-8")
+    )
+    require(route_widget["requests"]["update"]["permission"] == "full"
+            and route_widget["requests"]["update"]["kind"] == "action",
+            "Изменение доменов разрешено только полноправному администратору")
     require("Запретить повторное развёртывание с утраченной базой Authelia" in text
             and "web_gateway_initial_state.stat.exists" in text,
             "После исчезновения SQLite повторный deploy должен остановиться")

@@ -406,9 +406,19 @@ def _service_fields(
     fields = [("Адрес", str(service["url"]))]
     setup_url = service.get("setup_url")
     if isinstance(setup_url, str) and setup_url:
-        fields.append(("Первое подключение телефона", setup_url))
+        heading = "Первое подключение телефона" if service.get("name") == "Authelia" else "Первоначальная настройка"
+        fields.append((heading, setup_url))
         for number, instruction in enumerate(service.get("setup_instructions", []), start=1):
             fields.append((f"Шаг {number}", instruction))
+    key = service.get("connection_key")
+    if isinstance(key, dict):
+        value = "скрыт"
+        if show_secrets:
+            try:
+                value = _read_guest_file(node, address, key["path"]).strip() or "не создан"
+            except (InfraManagerError, CommandError):
+                value = "ещё не создан"
+        fields.append((key["label"], value))
     operator = service.get("operator")
     if not isinstance(operator, dict):
         return fields
