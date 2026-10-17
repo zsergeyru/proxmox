@@ -94,12 +94,19 @@ class Handler(BaseHTTPRequestHandler):
                 routes = yaml.safe_load(route_file.read_text(encoding="utf-8"))
                 if not isinstance(routes, list):
                     raise RuntimeError("Сохранённые маршруты повреждены")
+                policy_path = Path("/etc/web-gateway/caddy/routes-policy.json")
+                if policy_path.is_symlink() or not policy_path.is_file():
+                    raise RuntimeError("Правила доменов недоступны")
+                policy = json.loads(policy_path.read_text(encoding="utf-8"))
+                declared = {r["domain"] for r in policy["web_gateway"]["caddy"]["routes"]}
                 items = []
                 for route in routes:
                     if not isinstance(route, dict):
                         raise RuntimeError("Неверный формат маршрута")
                     items.append({
                         "domain": route.get("domain", ""),
+                        "name": route.get("name", route.get("service", "")),
+                        "managed": route.get("domain") in declared,
                         "service": route.get("service", ""),
                         "upstream": route.get("upstream", ""),
                         "access": route.get("access", "protected"),
@@ -143,25 +150,37 @@ class Handler(BaseHTTPRequestHandler):
                 if self.server.routes is None:
                     raise RuntimeError("Управление доменами ещё не подготовлено")
                 length = int(self.headers.get("Content-Length", "-1"))
-                if not 2 <= length <= 1024:
+                if not 2 <= length <= 2048:
                     raise ValueError("Неверный размер запроса")
                 body = json.loads(self.rfile.read(length))
-                if not isinstance(body, dict) or set(body) != {
-                    "domain", "enabled", "access", "confirm"
+                if not isinstance(body, dict) or set(body) - {
+                    "action", "domain", "enabled", "access", "name", "upstream", "confirm"
                 }:
-                    raise ValueError("Необходимо указать домен, доступ и подтверждение")
-                if body["confirm"] is not True:
-                    raise ValueError("Подтвердите изменение домена")
-                if not isinstance(body["domain"], str) or type(body["enabled"]) is not bool:
-                    raise ValueError("Неверный домен или состояние")
-                if not isinstance(body["access"], str):
-                    raise ValueError("Неверный режим доступа")
-                self.server.routes.change_route(
-                    STATE, Path("/etc/web-gateway/caddy"),
-                    body["domain"], body["enabled"], body["access"],
+                    raise ValueError("Неожиданные поля домена")
+                action = body.get("action", "update")
+                domain = body.get("domain")
+                if action not in ("create", "update", "delete") or not isinstance(domain, str):
+                    raise ValueError("Неверное действие или домен")
+                if action == "delete" and body.get("confirm") is not True:
+                    raise ValueError("Подтвердите удаление домена")
+                if action != "delete":
+                    if type(body.get("enabled")) is not bool or not isinstance(body.get("access"), str):
+                        raise ValueError("Неверный доступ или состояние")
+                    if action == "create" and (not isinstance(body.get("upstream"), str)
+                                              or not isinstance(body.get("name"), str)):
+                        raise ValueError("Укажите название и внутренний адрес")
+                if any(key in body and not isinstance(body[key], str) for key in ("name", "upstream")):
+                    raise ValueError("Неверное значение поля домена")
+                if action == "update" and body.get("confirm", False) not in (True, False):
+                    raise ValueError("Неверное подтверждение")
+                self.server.routes.apply_route(
+                    STATE, Path("/etc/web-gateway/caddy"), action, domain,
+                    enabled=body.get("enabled", False),
+                    access=body.get("access", "protected"),
+                    name=body.get("name"), upstream=body.get("upstream"),
                 )
-                self.reply(200, {"status": "ok", "domain": body["domain"]})
-            except (OSError, RuntimeError, ValueError, TypeError, KeyError) as exc:
+                self.reply(200, {"status": "ok", "domain": domain})
+            except (OSError, RuntimeError, ValueError, TypeError, KeyError, json.JSONDecodeError) as exc:
                 self.reply(response_code_for(exc), {"error": str(exc)})
             return
         if self.path != "/management/action":
