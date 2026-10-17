@@ -1,0 +1,22 @@
+{
+  "$schema": "homarr-custom-widget-v2",
+  "name": "Домены веб-шлюза",
+  "description": "Список направлений Caddy из постоянного состояния. Пока только просмотр, без опасного изменения маршрутов.",
+  "sources": {
+    "default": {
+      "name": "Закрытое управление гостя 140",
+      "baseUrl": "http://caddy:8081",
+      "networkScope": "private",
+      "auth": "bearer"
+    }
+  },
+  "requests": {
+    "routes": {
+      "path": "/management/routes",
+      "permission": "full",
+      "cacheSeconds": 0
+    }
+  },
+  "options": {},
+  "template": "<Stack gap=\"sm\" p=\"sm\">\n  <Group justify=\"space-between\"><Text fw={700}>Домены</Text><RefreshButton /></Group>\n  <Text size=\"xs\" c=\"dimmed\">Действующие и подготовленные адреса. Изменения требуют проверки Caddy перед применением.</Text>\n  {status.routes?.loading ? <Skeleton height={100} /> : status.routes?.error ?\n    <Alert color=\"red\" title=\"Не удалось прочитать домены\">{status.routes.error}</Alert> :\n    <Stack gap=\"xs\">\n      {(data.routes?.routes ?? []).map(route =>\n        <Paper withBorder key={route.domain} p=\"sm\">\n          <Group justify=\"space-between\">\n            <Text fw={600}>{route.domain}</Text>\n            <Badge color={route.enabled ? \"green\" : \"gray\"}>{route.enabled ? \"Включён\" : \"Выключен\"}</Badge>\n          </Group>\n          <Text size=\"xs\" c=\"dimmed\">{route.service} · {route.access}</Text>\n        </Paper>\n      )}\n    </Stack>}\n</Stack>"
+}
