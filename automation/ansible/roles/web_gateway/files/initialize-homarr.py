@@ -86,6 +86,7 @@ class HomarrClient:
 def initialize(
     base_url: str, state_file: Path, admin_group: str,
     bootstrap_command: list[str] | None = None,
+    home_command: list[str] | None = None,
 ) -> str:
     """Создать начальные настройки один раз, оставив Caddy закрытым при ошибке.
 
@@ -146,6 +147,18 @@ def initialize(
                 "Homarr не подготовил административную страницу и три виджета; "
                 "проверьте диагностику настройки гостя 140"
             )
+    if home_command:
+        try:
+            completed = subprocess.run(
+                home_command, capture_output=True, timeout=90, check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise OnboardingError("Не удалось создать домашнюю страницу приложений") from exc
+        if completed.returncode != 0:
+            raise OnboardingError(
+                "Homarr не подготовил обычную страницу; "
+                "проверьте диагностику настройки гостя 140"
+            )
     temporary = state_file.with_name(state_file.name + ".tmp")
     with temporary.open("w", encoding="utf-8") as fh:
         fh.write("ready\n")
@@ -165,6 +178,7 @@ def main() -> int:
     parser.add_argument("--token", type=Path, required=True)
     parser.add_argument("--env", type=Path, required=True)
     parser.add_argument("--state", type=Path, default=Path("/var/lib/web-gateway"))
+    parser.add_argument("--home-widget", type=Path, required=True)
     args = parser.parse_args()
     bootstrap = [
         "python3", "/usr/local/lib/web-gateway/configure-homarr-admin.py",
@@ -173,7 +187,12 @@ def main() -> int:
         "--state", str(args.state),
     ]
     try:
-        print(initialize(args.url, args.state_file, args.admin_group, bootstrap))
+        home_command = [
+            "python3", "/usr/local/lib/web-gateway/configure-homarr-home.py",
+            "--db", str(args.db), "--widget", str(args.home_widget),
+            "--state", str(args.state),
+        ]
+        print(initialize(args.url, args.state_file, args.admin_group, bootstrap, home_command))
         return 0
     except OnboardingError as exc:
         parser.exit(1, f"140: {exc}. Публичный вход Homarr остаётся закрытым.\n")

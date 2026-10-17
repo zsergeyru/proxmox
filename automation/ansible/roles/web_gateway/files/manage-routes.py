@@ -25,6 +25,18 @@ CONTAINER = "web-gateway-caddy"
 ALLOWED_ACCESS = frozenset({"protected", "private", "app_auth"})
 
 
+def _refresh_apps(state: Path, config: Path) -> None:
+    """Синхронизировать домашние ссылки после подтверждённого Caddy reload."""
+    script = Path(__file__).with_name("home-apps.py")
+    result = subprocess.run(
+        ["python3", str(script), "--state", str(state),
+         "--policy", str(config / "routes-policy.json")],
+        capture_output=True, check=False, timeout=20,
+    )
+    if result.returncode:
+        raise RuntimeError("Не удалось обновить каталог приложений Homarr")
+
+
 def _file(path: Path) -> None:
     if path.is_symlink() or not path.is_file() or path.stat().st_size == 0:
         raise RuntimeError("Не найден или повреждён обязательный файл: " + path.name)
@@ -170,11 +182,13 @@ def change_route(
                 _atomic(generated, candidate)
                 _command(["docker", "exec", CONTAINER, "caddy", "reload",
                           "--config", "/etc/caddy/Caddyfile"])
+                _refresh_apps(state, config)
             except (OSError, RuntimeError):
                 _atomic(stored, original_stored)
                 _atomic(generated, original_generated)
                 _command(["docker", "exec", CONTAINER, "caddy", "reload",
                           "--config", "/etc/caddy/Caddyfile"])
+                _refresh_apps(state, config)
                 raise RuntimeError("Новые настройки отклонены; прежние возвращены")
         finally:
             proposed_site.unlink(missing_ok=True)

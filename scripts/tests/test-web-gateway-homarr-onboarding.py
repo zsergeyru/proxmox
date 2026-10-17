@@ -187,6 +187,34 @@ def test() -> None:
             server.server_close()
             thread.join()
 
+    # Обычная доска так же обязательна: ошибка не открывает внешний Homarr.
+    with TemporaryDirectory() as tempdir:
+        marker = Path(tempdir) / "homarr-ready"
+        state = HomarrState()
+        state.step = "finish"
+        server, thread = start_server(state)
+        try:
+            from unittest.mock import patch
+            from types import SimpleNamespace
+
+            with patch.object(module.subprocess, "run", side_effect=[
+                SimpleNamespace(returncode=0), SimpleNamespace(returncode=1),
+            ]):
+                try:
+                    module.initialize(
+                        f"http://127.0.0.1:{server.server_port}", marker, "admins",
+                        ["python3", "admin-setup"], ["python3", "home-setup"],
+                    )
+                except module.OnboardingError:
+                    pass
+                else:
+                    raise AssertionError("Нельзя открывать Homarr без домашней страницы")
+            require(not marker.exists(), "При ошибке домашней доски готовность не подтверждена")
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join()
+
     try:
         module.HomarrClient("http://192.168.1.40:7575")
     except module.OnboardingError:
