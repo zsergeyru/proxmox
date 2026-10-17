@@ -1,0 +1,19 @@
+[Unit]
+Description=Закрытое управление пользователями гостя 140
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=simple
+User=root
+Group=root
+UMask=0077
+ExecStart=/usr/bin/python3 /usr/local/lib/web-gateway/admin-api.py serve
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
