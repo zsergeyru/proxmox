@@ -144,6 +144,14 @@
     group: root
     mode: "0700"
 
+- name: Установить проверяемое управление доменами Caddy
+  ansible.builtin.copy:
+    src: manage-routes.py
+    dest: /usr/local/lib/web-gateway/manage-routes.py
+    owner: root
+    group: root
+    mode: "0700"
+
 - name: Установить закрытый административный интерфейс
   ansible.builtin.copy:
     src: admin-api.py
@@ -318,6 +326,36 @@
     owner: root
     group: root
     mode: "0644"
+
+- name: Установить исходный шаблон маршрутов для проверки изменений
+  ansible.builtin.copy:
+    src: "{{ role_path }}/templates/sites.generated.caddy.j2"
+    dest: "{{ provision.web_gateway.paths.configuration }}/caddy/sites.generated.caddy.j2"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Установить перечень разрешённых маршрутов и внутренних адресов
+  ansible.builtin.copy:
+    dest: "{{ provision.web_gateway.paths.configuration }}/caddy/routes-policy.json"
+    owner: root
+    group: root
+    mode: "0640"
+    content: >-
+      {{
+        {
+          "web_gateway": {
+            "caddy": {
+              "routes": provision.web_gateway.caddy.routes,
+              "public_domains": provision.web_gateway.caddy.public_domains,
+              "private_networks": provision.web_gateway.caddy.private_networks
+            },
+            "authelia": {"public_url": provision.web_gateway.authelia.public_url},
+            "homarr": {"public_url": provision.web_gateway.homarr.public_url}
+          },
+          "allow_immich_activation": false
+        } | to_nice_json
+      }}
 
 - name: Подготовить основной Caddyfile
   ansible.builtin.template:
