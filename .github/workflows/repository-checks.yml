@@ -150,7 +150,16 @@ jobs:
           env = Environment(loader=FileSystemLoader(str(templates)), undefined=StrictUndefined,
                             keep_trailing_newline=True)
           env.filters["bool"] = bool
-          values = {"provision": provision, "web_gateway_routes": provision["web_gateway"]["caddy"]["routes"]}
+          routes = list(provision["web_gateway"]["caddy"]["routes"])
+          routes.extend([
+              {"domain": "printer.zsergey.ru", "service": "custom",
+               "name": "3D принтер", "upstream": "http://192.168.1.50:7125",
+               "enabled": True, "access": "protected"},
+              {"domain": "nas.zsergey.ru", "service": "custom",
+               "name": "Файлы", "upstream": "http://192.168.1.20:80",
+               "enabled": True, "access": "private"},
+          ])
+          values = {"provision": provision, "web_gateway_routes": routes}
           for source, dest in (("Caddyfile.j2", "Caddyfile"),
                                ("sites.generated.caddy.j2", "sites.generated.caddy")):
               (output / dest).write_text(env.get_template(source).render(**values), encoding="utf-8")

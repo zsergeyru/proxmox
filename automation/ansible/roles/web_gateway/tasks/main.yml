@@ -413,6 +413,18 @@
         } | to_nice_json
       }}
 
+- name: Проверить сохранённые пользовательские домены без изменения данных
+  ansible.builtin.command:
+    argv:
+      - python3
+      - /usr/local/lib/web-gateway/manage-routes.py
+      - verify
+      - --state
+      - "{{ provision.web_gateway.paths.persistent_state }}"
+      - --policy
+      - "{{ provision.web_gateway.paths.configuration }}/caddy/routes-policy.json"
+  changed_when: false
+
 - name: Подготовить основной Caddyfile
   ansible.builtin.template:
     src: Caddyfile.j2
