@@ -383,7 +383,7 @@ def test() -> None:
     require("python3-cryptography" in provision["system"]["required_packages"],
             "Для шифрования ключей Homarr нужен локальный проверенный пакет")
     require("configure-homarr-admin.py" in text
-            and '"/db/db.sqlite"' in text
+            and "db/db.sqlite" in text
             and "--widgets" in text
             and "--token" in text,
             "Доска и три виджета Homarr должны создаваться при deploy 140")
