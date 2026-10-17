@@ -15,6 +15,7 @@ system:
     - python3-argon2
     - python3-passlib
     - python3-jinja2
+    - python3-cryptography
 
 docker:
   source: docker-official-repository
@@ -192,17 +193,7 @@ web_gateway:
     operator_status:
       name: Homarr
       authentication: Authelia
-      setup_path: /manage/custom-widgets
-      setup_instructions:
-        - Войдите под администратором и откройте раздел «Управление — Пользовательские виджеты».
-        - "Файл Пользователи: http://192.168.1.40:8080/widgets/authelia-users.json"
-        - "Файл Домены: http://192.168.1.40:8080/widgets/caddy-routes.json"
-        - "Файл Гости: http://192.168.1.40:8080/widgets/proxmox-guests.json"
-        - Импортируйте файлы и настройте источники с адресом http://caddy:8081 и ключом ниже.
-        - Создайте закрытую страницу «Администрирование» только для admins и поместите на неё три раздела.
-      connection_key:
-        label: Ключ подключения виджетов
-        path: /var/lib/web-gateway/secrets/administration-token
+      # Закрытая доска и все виджеты создаются автоматически при deploy 140.
       operator:
         username: admin
     data:
