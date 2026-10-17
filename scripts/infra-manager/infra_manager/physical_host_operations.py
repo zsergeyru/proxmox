@@ -15,7 +15,7 @@ from .physical_storage import read_disk_inspection
 from .common import run
 
 
-SUPPORTED_HOST_OPERATIONS = frozenset({"status", "inspect", "deploy", "repair"})
+SUPPORTED_HOST_OPERATIONS = frozenset({"hosts", "status", "inspect", "deploy", "repair"})
 
 
 def require_host_access(repo_root: Path, host_name: str) -> None:
@@ -61,6 +61,8 @@ def run_physical_host_operation(repo_root: Path, operation: str, name: str) -> i
 
     if operation not in SUPPORTED_HOST_OPERATIONS:
         raise InfraManagerError(f"Недопустимая операция физического сервера: {operation}")
+    if operation == "hosts":
+        return list_hosts(repo_root)
     host = load_physical_host(repo_root, name)
     require_host_access(repo_root, name)
     console.info(f"Физический сервер: {host.name}")
