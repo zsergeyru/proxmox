@@ -332,12 +332,29 @@ async function showTab(name){
   try{await ({users,routes,guests})[name]();}
   catch(error){notify(error.message,true);}
 }
+function setupTheme(){
+  const button=q("#theme-toggle");
+  if(!button)return;
+  try{
+    const saved=localStorage.getItem("web-gateway-theme");
+    if(saved==="light"||saved==="dark")document.documentElement.dataset.theme=saved;
+  }catch(_error){/* Настройка темы необязательна. */}
+  const refresh=()=>{text(button,document.documentElement.dataset.theme==="dark"?"☀ Светлая тема":"☾ Тёмная тема");};
+  refresh();
+  button.addEventListener("click",()=>{
+    const next=document.documentElement.dataset.theme==="dark"?"light":"dark";
+    document.documentElement.dataset.theme=next;
+    try{localStorage.setItem("web-gateway-theme",next);}catch(_error){}
+    refresh();
+  });
+}
 if(page==="home"){
   applications();
   q("#refresh").addEventListener("click",applications);
   request("/api/admin/access").then(()=>{q("#admin-link").hidden=false;}).catch(()=>{});
 }
 if(page==="admin"){
+  setupTheme();
   document.querySelectorAll("[data-tab]").forEach(b=>b.addEventListener("click",()=>showTab(b.dataset.tab)));
   q("#add-user").addEventListener("click",()=>openUserForm());
   q("#users-search").addEventListener("input",renderUsers);
