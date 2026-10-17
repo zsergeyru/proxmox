@@ -11,7 +11,6 @@
 <form id="user-form" class="formgrid">
 <label>Действие<select name="action" required><option value="add">Создать</option><option value="password">Новый пароль</option><option value="groups">Изменить группы</option><option value="disable">Отключить вход</option><option value="enable">Разрешить вход</option><option value="reset_totp">Сбросить Google Authenticator</option><option value="code">Показать проверочный код</option></select></label>
 <label>Имя пользователя<input name="username" required minlength="2" maxlength="32" autocomplete="off" placeholder="ivan"></label>
-<label>Почта (для создания)<input name="email" type="email" autocomplete="off" placeholder="ivan@example.org"></label>
 <label>Отображаемое имя<input name="name" placeholder="Иван" maxlength="60"></label>
 <label>Группы через запятую<input name="groups" placeholder="family или admins,family"></label>
 <label class="check"><input type="checkbox" name="confirm">Подтверждаю изменение</label>
