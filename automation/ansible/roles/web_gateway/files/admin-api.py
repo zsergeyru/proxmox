@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
-"""Закрытый интерфейс управления 140 для виджета Homarr.
+"""Закрытое управление пользователями и маршрутами домашнего портала 140.
 
-Единственный вход: Unix-сокет, установленный в госте и доступный Caddy
-только внутри контейнерной сети. Все запросы требуют закрытый ключ доступа.
+Доступ только по локальному Unix-сокету с обязательным служебным ключом.
 """
 from __future__ import annotations
 
@@ -176,15 +175,21 @@ class Handler(BaseHTTPRequestHandler):
             if body.get("confirm", False) not in (True, False):
                 raise ValueError("Подтверждение должно быть логическим значением")
             self.server.accounts.require_state(STATE)
-            sensitive = {"password", "disable", "reset_totp"}
+            sensitive = {"password", "disable", "delete", "reset_totp"}
             if action in sensitive and body.get("confirm") is not True:
                 raise ValueError("Подтвердите действие")
-            if action in {"add", "password", "groups", "disable", "enable"}:
-                password = self.server.accounts.change(
-                    STATE, action, username,
-                    email=body.get("email", ""), displayname=body.get("name", ""),
-                    groups=body.get("groups", "")
-                )
+            if action in {"add", "password", "groups", "edit", "disable", "enable", "delete"}:
+                if action == "password" and username == "admin":
+                    if self.server.admin_reset is None:
+                        raise RuntimeError("Сброс пароля администратора не подготовлен")
+                    password = self.server.admin_reset.reset_admin_password(STATE)
+                else:
+                    password = self.server.accounts.change(
+                        STATE, action, username,
+                        email=body.get("email", ""), displayname=body.get("name", ""),
+                        groups=body.get("groups", ""),
+                        revoke_totp=self.server.totp.reset_totp if action == "delete" else None,
+                    )
                 answer = {"status": "ok", "username": username}
                 if password:
                     answer["password"] = password
@@ -202,8 +207,9 @@ class Handler(BaseHTTPRequestHandler):
 
 
 class ControlServer(socketserver.UnixStreamServer):
-    def __init__(self, path: Path, token: str, accounts, totp, routes=None):
+    def __init__(self, path: Path, token: str, accounts, totp, routes=None, admin_reset=None):
         self.token, self.accounts, self.totp, self.routes = token, accounts, totp, routes
+        self.admin_reset = admin_reset
         super().__init__(str(path), Handler)
         os.chmod(path, 0o660)
 
@@ -219,9 +225,10 @@ def run_server() -> None:
     accounts = import_file("user-accounts.py", "accounts_140")
     totp = import_file("totp-users.py", "totp_140")
     routes = import_file("manage-routes.py", "routes_140")
+    admin_reset = import_file("reset-admin-password.py", "admin_reset_140")
     SOCKET.unlink(missing_ok=True)
     try:
-        with ControlServer(SOCKET, secret, accounts, totp, routes) as server:
+        with ControlServer(SOCKET, secret, accounts, totp, routes, admin_reset) as server:
             server.serve_forever(poll_interval=0.5)
     finally:
         SOCKET.unlink(missing_ok=True)
