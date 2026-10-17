@@ -111,15 +111,15 @@ def check_operator_services_140() -> None:
     """Для 140 показывать адреса и защищённый пароль без Homepage."""
     identity = guest_identity(ROOT, 140)
     services = operator_service_definitions(ROOT, identity)
-    if [x["name"] for x in services] != ["Authelia", "Homarr"]:
-        fail("140: нужны Authelia и Homarr в общем статусе")
-    authelia, homarr = services
+    if [x["name"] for x in services] != ["Authelia", "Домашний сервер"]:
+        fail("140: нужны Authelia и домашний сервер в общем статусе")
+    authelia, portal = services
     if authelia["url"] != "https://auth.zsergey.ru":
         fail("140: неверный адрес Authelia")
     if authelia.get("setup_url") != "https://auth.zsergey.ru/totp-setup":
         fail("140: ссылка первоначальной настройки TOTP должна быть в статусе")
-    if homarr.get("setup_url") is not None or homarr.get("connection_key") is not None:
-        fail("140: Homarr должен настраиваться автоматически без ручной ссылки и ключа")
+    if portal.get("setup_url") is not None or portal.get("connection_key") is not None:
+        fail("140: веб-портал не должен требовать ручной ссылки и ключа")
     steps = authelia.get("setup_instructions")
     if not isinstance(steps, list) or len(steps) != 4:
         fail("140: нужны четыре понятных шага подключения телефона")
@@ -136,12 +136,12 @@ def check_operator_services_140() -> None:
         },
     }:
         fail("140: неверный источник операторского пароля")
-    if homarr["url"] != "https://home.zsergey.ru":
-        fail("140: неверный адрес Homarr")
-    if homarr["authentication"] != "Authelia":
-        fail("140: вход в Homarr должен использовать Authelia")
+    if portal["url"] != "https://home.zsergey.ru":
+        fail("140: неверный адрес веб-портала")
+    if portal["authentication"] != "Authelia":
+        fail("140: вход на домашнюю страницу должен использовать Authelia")
     if portal_definitions(ROOT, identity):
-        fail("140: Homarr не должен превращаться в портал Homepage")
+        fail("140: веб-страница не должна создавать второй портал Homepage")
 
 
 def check_credential_validation_140() -> None:
