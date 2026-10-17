@@ -38,6 +38,8 @@ def test_policy():
     assert "homarr" not in compose["services"]
     assert all("docker.sock" not in str(c) for c in compose["services"].values())
     assert "/run/portal:ro" in str(compose["services"]["caddy"]["volumes"])
+    assert "/srv/portal:ro" in str(compose["services"]["caddy"]["volumes"])
+    assert "/etc/caddy/portal" not in str(compose["services"]["caddy"]["volumes"])
     assert not any("portal" in str(x) for x in compose["services"]["caddy"]["ports"])
     policy = env.get_template("authelia-configuration.yml.j2").render(**variables)
     p = yaml.safe_load(policy.split("\nidentity_providers:", 1)[0])
