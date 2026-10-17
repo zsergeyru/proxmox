@@ -40,21 +40,89 @@
     handle {
         reverse_proxy {{ route.upstream }}
     }
-{% elif route.domain == provision.web_gateway.homarr.public_url.split('://', 1)[1] %}
-    # Никакой посетитель не должен открывать мастер первичного администратора.
-    # Готовность устанавливается только после штатной инициализации Homarr.
-    @onboarding path /init /init/* /*/init /*/init/* /api/onboarding/* /api/trpc/onboard.* /api/trpc/group.createInitialExternalGroup* /api/trpc/user.initUser*
-    @homarr_ready file {
-        root /srv/homarr-catalog
-        try_files /homarr-ready
+{% elif route.domain == provision.web_gateway.portal.public_url.split('://', 1)[1] %}
+    # Каждая страница и запрос проверяются Authelia: пароль + TOTP.
+    # /admin и /api/admin дополнительно требуют домашнюю сеть и группу admins.
+    header {
+        X-Content-Type-Options nosniff
+        Referrer-Policy no-referrer
+        X-Frame-Options DENY
+        Cache-Control "no-store"
+        Content-Security-Policy "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
     }
+    @setup_denied path /init /init/* /api/onboarding/* /api/trpc/onboard.* /api/trpc/group.createInitialExternalGroup*
+    @admin_ui_lan {
+        path /admin /admin/*
+        remote_ip {{ provision.web_gateway.caddy.private_networks | join(' ') }}
+    }
+    @admin_api_lan {
+        path /api/admin/*
+        remote_ip {{ provision.web_gateway.caddy.private_networks | join(' ') }}
+    }
+    @admin_ui path /admin /admin/*
+    @admin_api path /api/admin/*
+    @applications path /api/apps
+    @static path /static/*
     route {
-        respond @onboarding "Not Found" 404
-        handle @homarr_ready {
-            reverse_proxy {{ route.upstream }}
+        respond @setup_denied "Not Found" 404
+        handle @admin_api_lan {
+            route {
+                forward_auth authelia:9091 {
+                    uri /api/authz/forward-auth
+                }
+                reverse_proxy unix//run/portal/portal.sock {
+                    # Всегда заменять клиентский заголовок после проверки Authelia.
+                    header_up X-Portal-Verified admin
+                    header_up -Authorization
+                }
+            }
+        }
+        handle @admin_api {
+            respond "Администрирование доступно только из домашней сети/VPN" 403
+        }
+        handle @admin_ui_lan {
+            route {
+                forward_auth authelia:9091 {
+                    uri /api/authz/forward-auth
+                }
+                rewrite * /portal-admin.html
+                root * /etc/caddy/portal
+                file_server
+            }
+        }
+        handle @admin_ui {
+            respond "Администрирование доступно только из домашней сети/VPN" 403
+        }
+        handle @applications {
+            route {
+                forward_auth authelia:9091 {
+                    uri /api/authz/forward-auth
+                }
+                reverse_proxy unix//run/portal/portal.sock {
+                    header_up X-Portal-Verified home
+                    header_up -Authorization
+                }
+            }
+        }
+        handle @static {
+            route {
+                forward_auth authelia:9091 {
+                    uri /api/authz/forward-auth
+                }
+                uri strip_prefix /static
+                root * /etc/caddy/portal
+                file_server
+            }
         }
         handle {
-            respond "Homarr ещё не настроен" 503
+            route {
+                forward_auth authelia:9091 {
+                    uri /api/authz/forward-auth
+                }
+                rewrite * /portal-home.html
+                root * /etc/caddy/portal
+                file_server
+            }
         }
     }
 {% else %}
