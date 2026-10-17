@@ -135,6 +135,8 @@ def test():
                 assert any(row["name"] == "3D принтер" and
                            row["url"] == "https://printer.zsergey.ru" for row in items)
                 assert manager._validate_routes(saved, policy) == saved
+                assert manager.check_saved_routes(state, config / "routes-policy.json") == saved
+                assert yaml.safe_load(routes.read_text()) == saved
                 manager.apply_route(state, config, "update", "printer.zsergey.ru",
                     upstream="http://192.168.1.51:7125", name="Новый принтер",
                     enabled=False, access="private")
