@@ -195,6 +195,7 @@ def test() -> None:
         route["access"] == (
             "public" if route["domain"] in public_domains
             else "app_auth" if route["domain"] == "photos.zsergey.ru"
+            else "private" if route["domain"] == "check.zsergey.ru"
             else "protected"
         )
         for route in web["caddy"]["routes"]
