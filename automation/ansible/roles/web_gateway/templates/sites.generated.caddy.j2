@@ -62,7 +62,7 @@
     @admin_ui path /admin /admin/*
     @admin_api path /api/admin/*
     @applications path /api/apps
-    @static path /static/*
+    @static path /static/portal.css /static/portal.js
     route {
         respond @setup_denied "Not Found" 404
         handle @admin_api_lan {
