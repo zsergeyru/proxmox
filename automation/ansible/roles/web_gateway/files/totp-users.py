@@ -83,6 +83,37 @@ def reset_totp(username: str, users: Path = USERS) -> None:
     # Пароли, группы, пользователи и другие базы не меняются.
 
 
+
+def revoke_for_deletion(username: str, users: Path = USERS) -> None:
+    """Очистить зарегистрированные факторы перед удалением учётной записи.
+
+    Если Authelia не смогла удалить хотя бы один тип регистрации, пользователь
+    остаётся в файловой базе. Старые факторы нельзя привязать к новому
+    владельцу того же логина.
+    """
+    account(username, users)
+    commands = (
+        ["storage", "user", "totp", "delete", username],
+        ["storage", "user", "webauthn", "delete", username, "--all"],
+    )
+    for args in commands:
+        result = subprocess.run(
+            ["docker", "exec", CONTAINER, "authelia", *args,
+             "--config", "/config/configuration.yml"],
+            capture_output=True, check=False, timeout=30,
+        )
+        if result.returncode:
+            message = (result.stderr or b"").decode("utf-8", "replace").lower()
+            # Отсутствие ещё не подключённого фактора — штатный случай.
+            missing = (
+                "no totp configuration for user",
+                "no webauthn credential found",
+                "no webauthn credentials",
+            )
+            if not any(value in message for value in missing):
+                raise RuntimeError("Не удалось очистить сохранённые факторы; пользователь не удалён")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="action", required=True)
