@@ -353,6 +353,28 @@ def test() -> None:
     require("totp-setup-server.py" in text and "state: restarted" in text,
             "Обработчик должен запускаться только при незавершённой регистрации")
     require("totp-users.py" in text, "Администратору нужны операции для пользователей")
+    require("local-home/widgets" in text
+            and "authelia-users.json" in text
+            and "caddy-routes.json" in text
+            and "proxmox-guests.json" in text,
+            "Все три несекретных виджета должны устанавливаться из Git на 140")
+    probe = next((route for route in web["caddy"]["routes"]
+                  if route["domain"] == "check.zsergey.ru"), None)
+    require(isinstance(probe, dict) and probe.get("enabled") is False
+            and probe.get("access") == "private"
+            and probe.get("upstream") == "http://homarr:7575",
+            "Пробный маршрут должен быть выключен и доступен только из домашней сети")
+    for widget in ("authelia-users.json", "caddy-routes.json", "proxmox-guests.json"):
+        definition = __import__("json").loads(
+            (GUEST_DIR / "widgets" / widget).read_text(encoding="utf-8")
+        )
+        require(definition["$schema"] == "homarr-custom-widget-v2"
+                and "template" in definition
+                and definition["sources"]["default"]["networkScope"] == "private",
+                "Несекретный виджет должен соответствовать формату Homarr v2")
+    require("web_gateway_new_routes" in text
+            and "Дополнить список только отсутствующими доменами" in text,
+            "Добавление новых пробных маршрутов не должно сбрасывать постоянные настройки")
     require("manage-routes.py" in text
             and "sites.generated.caddy.j2" in text
             and "routes-policy.json" in text,
