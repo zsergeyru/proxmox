@@ -86,10 +86,10 @@ def test():
                 assert query(server, "/management/users", auth="")[0] == 403
                 code, body = query(server, "/management/users")
                 assert code == 200 and len(body["users"]) == 1
+                assert "password" not in body["users"][0]
                 code, body = query(server, "/management/routes")
                 assert code == 200 and len(body["routes"]) == 2
                 assert body["routes"][1]["enabled"] is False
-                assert "password" not in body["users"][0]
                 code, _ = query(server, "/management/action", "POST",
                                 {"action": "disable", "username": "admin", "confirm": True})
                 assert code == 400
