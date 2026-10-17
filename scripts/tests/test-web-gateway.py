@@ -353,6 +353,18 @@ def test() -> None:
     require("totp-setup-server.py" in text and "state: restarted" in text,
             "Обработчик должен запускаться только при незавершённой регистрации")
     require("totp-users.py" in text, "Администратору нужны операции для пользователей")
+    require("manage-routes.py" in text
+            and "sites.generated.caddy.j2" in text
+            and "routes-policy.json" in text,
+            "Для доменов должны устанавливаться проверка Caddy и перечень разрешённых адресов")
+    require("python3-jinja2" in provision["system"]["required_packages"],
+            "Для проверки доменов нужен штатный Jinja2")
+    route_widget = __import__("json").loads(
+        (GUEST_DIR / "widgets/caddy-routes.json").read_text(encoding="utf-8")
+    )
+    require(route_widget["requests"]["update"]["permission"] == "full"
+            and route_widget["requests"]["update"]["kind"] == "action",
+            "Изменение доменов разрешено только полноправному администратору")
     require("Запретить повторное развёртывание с утраченной базой Authelia" in text
             and "web_gateway_initial_state.stat.exists" in text,
             "После исчезновения SQLite повторный deploy должен остановиться")
