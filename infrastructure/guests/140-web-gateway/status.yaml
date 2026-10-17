@@ -78,6 +78,14 @@ checks:
     message: "Форма изменения доменов установлена для Homarr"
 
   - type: file
+    path: /var/lib/web-gateway/management/catalog/apps.json
+    message: "Список включённых домашних приложений подготовлен"
+
+  - type: file
+    path: /etc/web-gateway/homarr/widgets/home-apps.json
+    message: "Определение обычной страницы Homarr подготовлено"
+
+  - type: file
     path: /etc/web-gateway/homarr/widgets/proxmox-guests.json
     message: "Перечень гостей установлен для Homarr"
 
