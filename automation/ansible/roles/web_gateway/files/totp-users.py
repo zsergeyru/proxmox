@@ -13,6 +13,7 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+import time
 
 import yaml
 
@@ -39,8 +40,13 @@ def latest_code(username: str, users: Path = USERS, notifications: Path = NOTIFI
     if not notifications.is_file() or notifications.is_symlink():
         raise RuntimeError("Проверочный код ещё не запрошен")
     # Файловый уведомитель Authelia перезаписывает файл при новом сообщении.
-    if notifications.stat().st_size > 32768:
+    status = notifications.stat()
+    if status.st_size > 32768:
         raise RuntimeError("Неожиданный размер файла уведомления")
+    # Не показывать устаревший код: Authelia проверяет его ограниченное время.
+    age = time.time() - status.st_mtime
+    if not 0 <= age <= 300:
+        raise RuntimeError("Проверочный код устарел; запросите новый в Authelia")
     lines = notifications.read_text(encoding="utf-8").splitlines()
     headers = {}
     for line in lines[:6]:
