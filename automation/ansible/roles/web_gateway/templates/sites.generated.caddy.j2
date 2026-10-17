@@ -86,7 +86,7 @@
                     uri /api/authz/forward-auth
                 }
                 rewrite * /portal-admin.html
-                root * /etc/caddy/portal
+                root * /srv/portal
                 file_server
             }
         }
@@ -110,7 +110,7 @@
                     uri /api/authz/forward-auth
                 }
                 uri strip_prefix /static
-                root * /etc/caddy/portal
+                root * /srv/portal
                 file_server
             }
         }
@@ -120,7 +120,7 @@
                     uri /api/authz/forward-auth
                 }
                 rewrite * /portal-home.html
-                root * /etc/caddy/portal
+                root * /srv/portal
                 file_server
             }
         }
