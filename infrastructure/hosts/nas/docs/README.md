@@ -6,5 +6,6 @@
 - [services.md](services.md) — общие папки, торренты и настройка через Infra Manager.
 - [operations.md](operations.md) — подготовка, проверки, обслуживание и восстановление.
 - [decisions.md](decisions.md) — причины выбора архитектуры.
+- [implementation-status.md](implementation-status.md) — что реализовано в коде, а что ещё нет.
 
 Правила документации проекта: [000](../../../../docs/000-documentation-rules.md).
