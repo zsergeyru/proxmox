@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+import os
+import re
 from pathlib import Path
 
 from .common import InfraManagerError, console
 from .physical_hosts import list_physical_hosts, load_physical_host
+from .physical_host_ssh import PhysicalHostSshSession
+from .physical_storage import read_disk_inspection
+from .common import run
 
 
 SUPPORTED_HOST_OPERATIONS = frozenset({"status", "inspect", "deploy", "repair"})
@@ -41,6 +46,57 @@ def run_physical_host_operation(repo_root: Path, operation: str, name: str) -> i
             f"{host.directory / 'host.yaml'}: не указан подтверждённый SSH-отпечаток "
             "физического сервера; нельзя доверять найденному ключу автоматически"
         )
+
+    if operation in {"inspect", "status"}:
+        pve_node = os.environ.get("INFRA_PVE_NODE", "")
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.:-]{0,252}", pve_node):
+            raise InfraManagerError(
+                "Не определён доверенный PVE-узел для подписи временного SSH-ключа"
+            )
+        console.info("Проверка SSH-ключа NAS и временного сертификата OpenBao")
+        with PhysicalHostSshSession(host, pve_node) as session:
+            result = run(
+                session.command(
+                    "lsblk --json --bytes --output "
+                    "NAME,PATH,MODEL,SERIAL,SIZE,TYPE,FSTYPE,UUID,PTTYPE,MOUNTPOINTS"
+                ),
+                capture_output=True,
+            )
+        disks = read_disk_inspection(result.stdout)
+        expected_serials = {
+            item["serial"]: item["role"]
+            for item in host.devices if item["serial"] is not None
+        }
+        for disk in disks:
+            identity = disk.serial or "серийный номер отсутствует"
+            role = expected_serials.get(disk.serial, "роль не подтверждена")
+            condition = "системный" if disk.is_system else (
+                "с существующей разметкой" if disk.contains_existing_layout
+                else "без обнаруженной разметки"
+            )
+            console.info(
+                f"{disk.path}: {disk.model} | {disk.capacity_bytes // 10**9} ГБ "
+                f"| {identity} | {condition} | {role}"
+            )
+        if operation == "status":
+            missing = [
+                item["role"] for item in host.devices if item["serial"] is None
+            ]
+            if missing:
+                raise InfraManagerError(
+                    "Идентификаторы накопителей пока не согласованы: "
+                    + ", ".join(missing)
+                )
+            observed = {disk.serial for disk in disks}
+            absent = sorted(serial for serial in expected_serials if serial not in observed)
+            if absent:
+                raise InfraManagerError(
+                    "Отсутствуют назначенные диски NAS: " + ", ".join(absent)
+                )
+            console.result("NAS доступен по доверенному SSH, назначенные диски найдены")
+        else:
+            console.result("Чтение сведений о накопителях NAS завершено без изменений")
+        return 0
 
     # До готовности доверенного доступа и алгоритма защиты дисков ни одна
     # изменяющая операция не имитирует успешное развёртывание.
