@@ -11,7 +11,7 @@ import yaml
 from .common import InfraManagerError, console
 from .physical_hosts import list_physical_hosts, load_physical_host
 from .physical_host_ssh import PhysicalHostSshSession
-from .physical_storage import read_disk_inspection
+from .physical_storage import read_disk_inspection, verify_expected_disks
 from .common import run
 
 
@@ -109,20 +109,7 @@ def run_physical_host_operation(repo_root: Path, operation: str, name: str) -> i
                 f"| {identity} | {condition} | {role}"
             )
         if operation == "status":
-            missing = [
-                item["role"] for item in host.devices if item["serial"] is None
-            ]
-            if missing:
-                raise InfraManagerError(
-                    "Идентификаторы накопителей пока не согласованы: "
-                    + ", ".join(missing)
-                )
-            observed = {disk.serial for disk in disks}
-            absent = sorted(serial for serial in expected_serials if serial not in observed)
-            if absent:
-                raise InfraManagerError(
-                    "Отсутствуют назначенные диски NAS: " + ", ".join(absent)
-                )
+            verify_expected_disks(host.devices, disks)
             console.result("NAS доступен по доверенному SSH, назначенные диски найдены")
         else:
             console.result("Чтение сведений о накопителях NAS завершено без изменений")
