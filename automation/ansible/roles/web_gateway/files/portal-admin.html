@@ -37,17 +37,13 @@
   </section>
 
   <section id="routes-panel" class="panel hidden" role="tabpanel" aria-labelledby="routes-tab" hidden>
-    <h2>Маршруты Caddy</h2><div id="routes-list"></div>
-    <form id="route-form" class="formgrid">
-      <label>Домен<select name="domain" id="route-domain" required></select></label>
-      <label>Доступ<select name="access"><option value="protected">После входа в Authelia</option><option value="private">Только домашняя сеть / VPN</option></select></label>
-      <label class="check"><input type="checkbox" name="enabled">Домен включён</label>
-      <label class="check"><input type="checkbox" name="confirm" required>Подтверждаю изменение маршрута</label>
-      <button type="submit">Проверить и применить</button>
-    </form>
-    <p class="muted">Новые назначения пока утверждаются в Git. Изменение доменов — следующий этап обновления.</p>
+    <div class="section-heading">
+      <div><p class="eyebrow">СЕТЕВЫЕ АДРЕСА</p><h2>Домены <span class="count" id="routes-count"></span></h2><p class="muted">Управление адресами и доступом. Изменения проверяются Caddy и применяются сразу.</p></div>
+      <button type="button" id="add-route">＋ Добавить домен</button>
+    </div>
+    <label class="search-field"><span>Поиск домена</span><input type="search" id="routes-search" placeholder="Например, printer.zsergey.ru"></label>
+    <div id="routes-list" class="route-grid" aria-live="polite"></div>
   </section>
-
   <section id="guests-panel" class="panel hidden" role="tabpanel" aria-labelledby="guests-tab" hidden>
     <h2>Гости Proxmox</h2><p class="muted">Список из Git: фактическое состояние машин здесь пока не проверяется.</p><div id="guests-list"></div>
   </section>
@@ -65,6 +61,22 @@
       </fieldset>
       <p class="form-error" id="user-form-error" role="alert" hidden></p>
       <div class="dialog-actions"><button type="button" class="secondary" id="cancel-user">Отмена</button><button type="submit" id="save-user">Создать</button></div>
+    </form>
+  </dialog>
+  <dialog id="route-dialog" aria-labelledby="route-dialog-title">
+    <form id="route-form" class="dialog-form">
+      <div class="dialog-heading"><p class="eyebrow">ДОМЕН</p><h2 id="route-dialog-title">Добавить домен</h2><p class="muted" id="route-help">Укажите адрес службы в домашней сети.</p></div>
+      <label>Имя домена<input name="domain" required placeholder="printer.zsergey.ru" autocomplete="off"></label>
+      <label>Название службы<input name="name" required maxlength="60" placeholder="3D-принтер"></label>
+      <label>Внутренний адрес<input name="upstream" required placeholder="http://192.168.1.50:7125" autocomplete="off" spellcheck="false"></label>
+      <fieldset class="group-choices" id="route-access">
+        <legend>Кто может открыть</legend>
+        <label><input type="radio" name="access" value="protected" checked> После входа в Authelia</label>
+        <label><input type="radio" name="access" value="private"> Только домашняя сеть / VPN</label>
+      </fieldset>
+      <label class="check"><input type="checkbox" name="enabled"> Включить сразу после проверки</label>
+      <p class="form-error" id="route-form-error" role="alert" hidden></p>
+      <div class="dialog-actions"><button type="button" class="secondary" id="cancel-route">Отмена</button><button type="submit" id="save-route">Добавить домен</button></div>
     </form>
   </dialog>
   <dialog id="confirm-dialog" aria-labelledby="confirm-title" aria-describedby="confirm-description">
