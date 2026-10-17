@@ -89,7 +89,7 @@ def reset_admin_password(state: Path = STATE) -> str:
 
 
 def main() -> int:
-    password = reset_admin_password()
+    password = reset_admin_password(STATE)
     print("Администратор: admin")
     print("Новый пароль:", password)
     print("Второй фактор и остальные пользователи не изменялись.")
