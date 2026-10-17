@@ -109,7 +109,7 @@ def test_socket():
                     trusted={"X-Portal-Verified":"admin","Content-Type":"application/json",
                              "X-Requested-With":"web-gateway","Origin":module.ORIGIN}
                     body=b'{"action":"add","username":"test"}'
-                    assert call("/api/admin/users","POST",{"X-Portal-Verified":"admin"},body)[0] == 403
+                    assert call("/api/admin/users","POST",{"X-Portal-Verified":"admin"})[0] == 403
                     for field,value in [
                         ("Origin","https://evil.example"),
                         ("X-Requested-With","bad"),
@@ -117,7 +117,7 @@ def test_socket():
                         ("X-Portal-Verified","home")
                     ]:
                         hdr={**trusted,field:value}
-                        assert call("/api/admin/users","POST",hdr,body)[0] == 403
+                        assert call("/api/admin/users","POST",hdr)[0] == 403
                     with patch.object(module,"upstream",return_value=(200,b'{"status":"ok"}')) as upstream:
                         assert call("/api/admin/users","POST",trusted,body) == (200,{"status":"ok"})
                         upstream.assert_called_once_with("/management/action","POST",body)
