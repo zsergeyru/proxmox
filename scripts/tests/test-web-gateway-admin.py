@@ -64,6 +64,12 @@ def test():
             "email": "admin@example.org", "password": "hash", "groups": ["admins"],
         }}}), encoding="utf-8")
         file.chmod(0o600)
+        (state / "management/routes.yaml").write_text(yaml.safe_dump([
+            {"domain": "home.zsergey.ru", "service": "homarr",
+             "access": "public", "enabled": True},
+            {"domain": "photos.zsergey.ru", "service": "immich",
+             "access": "app_auth", "enabled": False},
+        ]), encoding="utf-8")
         token = state / "secrets/administration-token"
         with patch.object(api, "STATE", state), patch.object(api.os.path, "ismount", return_value=True):
             assert api.initialize_token(token) is True
@@ -80,6 +86,9 @@ def test():
                 assert query(server, "/management/users", auth="")[0] == 403
                 code, body = query(server, "/management/users")
                 assert code == 200 and len(body["users"]) == 1
+                code, body = query(server, "/management/routes")
+                assert code == 200 and len(body["routes"]) == 2
+                assert body["routes"][1]["enabled"] is False
                 assert "password" not in body["users"][0]
                 code, _ = query(server, "/management/action", "POST",
                                 {"action": "disable", "username": "admin", "confirm": True})
