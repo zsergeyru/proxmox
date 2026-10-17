@@ -6,6 +6,8 @@ import importlib.util
 import json
 from pathlib import Path
 import socket
+from types import SimpleNamespace
+from unittest.mock import Mock
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
@@ -50,6 +52,11 @@ def test():
     assert definition["sources"]["default"]["networkScope"] == "private"
     assert definition["sources"]["default"]["auth"] == "bearer"
     assert definition["requests"]["operate"]["permission"] == "full"
+    routes_widget = json.loads((
+        ROOT / "infrastructure/guests/140-web-gateway/widgets/caddy-routes.json"
+    ).read_text(encoding="utf-8"))
+    assert routes_widget["requests"]["update"]["permission"] == "full"
+    assert routes_widget["requests"]["update"]["kind"] == "action"
     assert "secret-token-for-testing" not in WIDGET.read_text()
     assert not any("/var/run/docker.sock" in str(item) for item in definition.values())
 
@@ -80,7 +87,11 @@ def test():
 
         sock = state / "management/admin-socket/control.sock"
         with patch.object(api, "STATE", state), patch.object(users.os.path, "ismount", return_value=True):
-            with api.ControlServer(sock, "secret-token-for-testing", users, totp) as server:
+            route_action = Mock()
+            with api.ControlServer(
+                sock, "secret-token-for-testing", users, totp,
+                SimpleNamespace(change_route=route_action),
+            ) as server:
                 server.timeout = 1
                 assert query(server, "/management/users", auth="wrong")[0] == 403
                 assert query(server, "/management/users", auth="")[0] == 403
@@ -105,6 +116,26 @@ def test():
                 code, body = query(server, "/management/action", "POST",
                                    {"action": "password", "username": "anna", "confirm": True})
                 assert code == 200 and body["password"]
+                assert query(server, "/management/route-action", "POST", {
+                    "domain": "ai.zsergey.ru", "access": "private",
+                    "enabled": True, "confirm": False,
+                })[0] == 400
+                assert query(server, "/management/route-action", "POST", {
+                    "domain": "ai.zsergey.ru", "access": "private",
+                    "enabled": "true", "confirm": True,
+                })[0] == 400
+                assert query(server, "/management/route-action", "POST", {
+                    "domain": "ai.zsergey.ru", "access": "private",
+                    "enabled": True, "confirm": True,
+                }, auth="incorrect")[0] == 403
+                assert route_action.call_count == 0
+                code, body = query(server, "/management/route-action", "POST", {
+                    "domain": "ai.zsergey.ru", "access": "private",
+                    "enabled": True, "confirm": True,
+                })
+                assert code == 200 and body["status"] == "ok"
+                assert route_action.call_count == 1
+                assert route_action.call_args.args[2:] == ("ai.zsergey.ru", True, "private")
                 assert query(server, "/unknown")[0] == 404
         assert file.stat().st_mode & 0o777 == 0o600
         assert yaml.safe_load(file.read_text())["users"]["admin"]["password"] == "hash"
