@@ -188,7 +188,7 @@ class Handler(BaseHTTPRequestHandler):
                         STATE, action, username,
                         email=body.get("email", ""), displayname=body.get("name", ""),
                         groups=body.get("groups", ""),
-                        revoke_totp=self.server.totp.reset_totp if action == "delete" else None,
+                        revoke_totp=self.server.totp.revoke_for_deletion if action == "delete" else None,
                     )
                 answer = {"status": "ok", "username": username}
                 if password:
