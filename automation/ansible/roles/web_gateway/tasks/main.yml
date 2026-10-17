@@ -74,6 +74,7 @@
     - "{{ provision.web_gateway.paths.persistent_state }}/management"
     - "{{ provision.web_gateway.paths.persistent_state }}/management/catalog"
     - "{{ provision.web_gateway.paths.persistent_state }}/management/totp-setup-socket"
+    - "{{ provision.web_gateway.paths.persistent_state }}/management/admin-socket"
 
 # Во время любого развёртывания Homarr должен оставаться закрытым,
 # пока его действительное состояние не проверено через штатный интерфейс.
