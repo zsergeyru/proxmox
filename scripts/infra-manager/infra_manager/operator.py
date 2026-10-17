@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import shlex
 import time
 from pathlib import Path
@@ -25,8 +26,6 @@ from .guest_catalog import find_guest_by_role, guest_identity
 from .guest_deploy import project_branch_for_checkout, project_revision
 from .guest_operations import list_local_guests, run_local_guest_status
 from .operation_lock import project_checkout_lock
-from .physical_host_operations import list_hosts
-from .physical_hosts import load_physical_host
 from .pve import PveClient
 from .pve_host import (
     preflight_recovery_contour,
@@ -332,7 +331,8 @@ def _operator_guest_task(
 def operator_physical_task(operation: str, name: str) -> int:
     """Передать штатное действие физической машины напрямую из PVE в 910."""
 
-    load_physical_host(PATHS.repo_root, name)
+    if not re.fullmatch(r"[a-z][a-z0-9-]*", name):
+        raise InfraManagerError("Некорректное имя физического сервера")
     require_runtime_activation_idle()
     snapshot = _prepare_runtime_snapshot(operation, name, physical=True)
     result = run(
@@ -498,7 +498,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "guests":
             return list_local_guests(PATHS.repo_root)
         if args.command == "hosts":
-            return list_hosts(PATHS.repo_root)
+            return operator_physical_task("hosts", "all")
         if args.command == "inspect":
             return operator_physical_task("inspect", args.name)
         if args.command == "status":
