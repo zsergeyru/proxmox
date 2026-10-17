@@ -64,6 +64,10 @@ def test():
             {"domain": "photos.zsergey.ru", "service": "immich",
              "access": "app_auth", "enabled": False},
         ]), encoding="utf-8")
+        policy_file = state / "management/routes-policy.json"
+        policy_file.write_text(json.dumps({"web_gateway": {"caddy": {
+            "routes": [{"domain": "home.zsergey.ru"}, {"domain": "photos.zsergey.ru"}]
+        }}}), encoding="utf-8")
         token = state / "secrets/administration-token"
         with patch.object(api, "STATE", state), patch.object(api.os.path, "ismount", return_value=True):
             assert api.initialize_token(token) is True
@@ -73,7 +77,9 @@ def test():
             assert token.stat().st_mode & 0o777 == 0o600
 
         sock = state / "management/admin-socket/control.sock"
-        with patch.object(api, "STATE", state), patch.object(users.os.path, "ismount", return_value=True):
+        with (patch.object(api, "STATE", state),
+              patch.object(api, "ROUTE_POLICY", policy_file),
+              patch.object(users.os.path, "ismount", return_value=True)):
             route_action = Mock()
             with api.ControlServer(
                 sock, "secret-token-for-testing", users, totp,
