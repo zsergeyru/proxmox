@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import importlib.util
-import json
 from pathlib import Path
 import sqlite3
 from tempfile import TemporaryDirectory
@@ -65,10 +64,10 @@ def schema(db: sqlite3.Connection) -> None:
     """)
 
 
-def should_fail(operation) -> None:
+def should_fail(manager, operation) -> None:
     try:
         operation()
-    except (RuntimeError, ValueError, sqlite3.DatabaseError):
+    except (manager.SetupError, RuntimeError, ValueError, sqlite3.DatabaseError):
         return
     raise AssertionError("Действие без полномочий или данных должно быть отклонено")
 
@@ -92,7 +91,7 @@ def test() -> None:
             return manager.initialize(db_path, WIDGETS, token, env, persistent_root=root)
 
         with patch.object(manager.os.path, "ismount", return_value=False):
-            should_fail(deploy)
+            should_fail(manager, deploy)
         with patch.object(manager.os.path, "ismount", return_value=True):
             result = deploy()
             assert "три виджета" in result
