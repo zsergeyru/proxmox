@@ -352,6 +352,28 @@
     group: root
     mode: "0644"
 
+# Несекретные определения доступны только из домашней сети.
+# Они предназначены для первоначального импорта в Homarr через браузер.
+- name: Подготовить папку для определений виджетов Homarr
+  ansible.builtin.file:
+    path: "{{ provision.web_gateway.paths.configuration }}/caddy/local-home/widgets"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Опубликовать несекретные определения виджетов для установки через Homarr
+  ansible.builtin.copy:
+    src: "{{ project_root }}/infrastructure/guests/140-web-gateway/widgets/{{ item }}"
+    dest: "{{ provision.web_gateway.paths.configuration }}/caddy/local-home/widgets/{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - authelia-users.json
+    - caddy-routes.json
+    - proxmox-guests.json
+
 - name: Установить страницу подключения Google Authenticator
   ansible.builtin.copy:
     src: totp-setup.html
