@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Callable
 import fcntl
 import os
 from pathlib import Path
@@ -90,7 +91,8 @@ def active_admins(users: dict) -> int:
 
 
 def change(state: Path, action: str, username: str, *,
-           email: str = "", displayname: str = "", groups: str = "") -> str | None:
+           email: str = "", displayname: str = "", groups: str = "",
+           revoke_totp: Callable[[str], None] | None = None) -> str | None:
     """Применить одну операцию под общим замком и проверить последнего администратора."""
     validate_name(username)
     require_state(state)
@@ -122,7 +124,7 @@ def change(state: Path, action: str, username: str, *,
                 "groups": selected,
                 "disabled": False,
             }
-        elif action in {"password", "groups", "disable", "enable"}:
+        elif action in {"password", "groups", "edit", "disable", "enable", "delete"}:
             if not isinstance(record, dict):
                 raise ValueError("Учётная запись не найдена")
             if action == "password":
@@ -130,8 +132,23 @@ def change(state: Path, action: str, username: str, *,
                     raise ValueError("Для admin используйте штатный reset-admin-password.py")
                 password = secrets.token_urlsafe(24)
                 record["password"] = PasswordHasher(time_cost=3, memory_cost=65536, parallelism=2).hash(password)
-            elif action == "groups":
+            elif action in {"groups", "edit"}:
                 record["groups"] = validate_groups(groups)
+                if action == "edit":
+                    name = displayname.strip()
+                    if not 1 <= len(name) <= 60:
+                        raise ValueError("Отображаемое имя должно содержать от 1 до 60 символов")
+                    record["displayname"] = name
+            elif action == "delete":
+                if username == "admin":
+                    raise ValueError("Первоначальную учётную запись admin удалить нельзя")
+                if revoke_totp is None:
+                    raise RuntimeError("Удаление требует очистки второго фактора")
+                # Сначала удалить регистрацию TOTP. При ошибке учётная
+                # запись остаётся действующей, чтобы не оставить старый
+                # второй фактор у нового владельца того же имени.
+                revoke_totp(username)
+                del users[username]
             else:
                 record["disabled"] = action == "disable"
         else:
