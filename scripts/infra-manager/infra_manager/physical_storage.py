@@ -89,3 +89,38 @@ def read_disk_inspection(raw_json: str) -> tuple[DiskInspection, ...]:
     if sum(disk.is_system for disk in disks) != 1:
         raise InfraManagerError("Несколько дисков содержат корневую файловую систему")
     return tuple(disks)
+
+
+def verify_expected_disks(
+    devices: tuple[dict[str, object], ...],
+    disks: tuple[DiskInspection, ...],
+) -> None:
+    """Сверить назначенные диски по номерам, модели, ёмкости и системной роли."""
+
+    serials = [disk.serial for disk in disks if disk.serial]
+    if len(serials) != len(set(serials)):
+        raise InfraManagerError("Обнаружены несколько дисков с одинаковым серийным номером")
+    observed = {disk.serial: disk for disk in disks if disk.serial}
+    for device in devices:
+        serial = device.get("serial")
+        role = device.get("role")
+        if not isinstance(serial, str) or not serial:
+            raise InfraManagerError(f"Не подтверждён серийный номер для роли {role}")
+        disk = observed.get(serial)
+        if disk is None:
+            raise InfraManagerError(f"Не найден назначенный диск {role}: {serial}")
+        model = device.get("model")
+        expected_size = device.get("capacity_gb")
+        if (
+            not isinstance(model, str)
+            or model.lower() not in disk.model.lower()
+            or not isinstance(expected_size, int)
+            or abs(disk.capacity_bytes / 10**9 - expected_size) > expected_size * 0.05
+        ):
+            raise InfraManagerError(
+                f"Диск {serial}: модель или ёмкость не соответствуют роли {role}"
+            )
+        if (role == "system") != disk.is_system:
+            raise InfraManagerError(
+                f"Диск {serial}: назначение system не совпадает с корневой ФС"
+            )
