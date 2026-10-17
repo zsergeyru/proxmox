@@ -136,3 +136,9 @@ input[type="radio"],input[type="checkbox"]{accent-color:var(--accent)}
 #route-form .group-choices{display:grid;gap:.65rem}
 @media(max-width:650px){.route-card{align-items:flex-start}.route-actions{width:100%}.route-actions .route-fixed{width:100%}.route-actions button{flex:1}.route-details{flex-basis:100%}}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important;scroll-behavior:auto!important}}
+
+/* Явный выбор темы имеет приоритет над системной настройкой. */
+html[data-theme="light"]{color-scheme:light;--bg:#f4f6fa;--card:#fff;--accent:#2867dc;--accent-light:#eaf1ff;--text:#19243a;--muted:#66758d;--line:#dce3ee;--top:#fff;--input:#fff;--shadow:0 12px 34px rgba(24,43,79,.07);--success-bg:#e9f7ef;--success:#146c3b;--danger:#b83442;--danger-bg:#fff0f1}
+html[data-theme="dark"]{color-scheme:dark;--bg:#121925;--card:#1e2838;--accent:#82b7ff;--accent-light:#1c3557;--text:#eff4ff;--muted:#a0b0c6;--line:#35465e;--top:#182131;--input:#16202e;--shadow:0 16px 38px rgba(0,0,0,.13);--success-bg:#193c32;--success:#88d8b3;--danger:#ff9199;--danger-bg:#47252d}
+html[data-theme="dark"] button:not(.secondary):not(.danger){color:#102136}
+.theme-toggle{font-size:.87rem;padding:.4rem .7rem}
