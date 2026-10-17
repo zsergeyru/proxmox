@@ -4,29 +4,46 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex,nofollow">
-<title>Первоначальная настройка Google Authenticator</title>
+<title>Подключение телефона для входа</title>
 <style>
-body{font-family:system-ui,sans-serif;background:#f4f6fa;color:#18243b;margin:0;padding:30px 12px}
-main{max-width:500px;margin:auto;background:white;border-radius:14px;padding:26px;box-sizing:border-box}
-h1{font-size:24px}img{display:block;width:260px;max-width:100%;margin:22px auto}
-label{display:block;margin:15px 0 6px}input{font:inherit;font-size:24px;letter-spacing:7px;width:100%;box-sizing:border-box;padding:12px}
+body{font-family:system-ui,sans-serif;background:#f4f6fa;color:#18243b;margin:0;padding:24px 12px}
+main{max-width:560px;margin:auto;background:white;border-radius:14px;padding:26px;box-sizing:border-box}
+h1{font-size:24px}h2{font-size:19px;margin-top:24px}
+p,li{line-height:1.55}li{margin-bottom:10px}
+img{display:block;width:260px;max-width:100%;margin:22px auto}
+label{display:block;margin:15px 0 6px}
+input{font:inherit;font-size:24px;letter-spacing:7px;width:100%;box-sizing:border-box;padding:12px}
 button{font:inherit;padding:12px 16px;margin-top:12px;cursor:pointer}
-small{color:#555}p{line-height:1.5}
+.notice{background:#f1f5fb;padding:12px 14px;border-radius:8px}
+.small{font-size:14px;color:#445064}
 </style>
 </head>
 <body>
 <main>
-<h1>Подключение Google Authenticator</h1>
-<p>Отсканируйте QR-код телефоном. Введите шестизначный код из приложения и нажмите кнопку подтверждения.</p>
-<img src="/totp-setup/qr.png" alt="QR-код первоначального администратора">
+<h1>Подключение телефона для входа</h1>
+<p>Это нужно сделать только один раз. После подключения для входа в домашние службы вы будете вводить код из приложения на телефоне.</p>
+<p class="notice">Удобнее открыть эту страницу на компьютере, а телефон держать рядом. Если вы открыли страницу на самом телефоне, откройте её также на компьютере или другом устройстве.</p>
+<h2>Что нужно сделать</h2>
+<ol>
+  <li>Откройте на телефоне приложение <strong>Google Authenticator</strong>. Если его ещё нет, установите приложение.</li>
+  <li>Нажмите в приложении знак <strong>«+»</strong>, чтобы добавить новую запись.</li>
+  <li>Выберите добавление с помощью камеры. Наведите камеру телефона на квадратный рисунок ниже.</li>
+</ol>
+<img src="/totp-setup/qr.png" alt="Квадратный рисунок для подключения телефона">
+<ol start="4">
+  <li>На телефоне появится запись <strong>zsergey.ru</strong> с шестью цифрами. Эти цифры время от времени меняются — так и должно быть.</li>
+  <li>Введите шесть цифр в поле ниже и нажмите <strong>«Подтвердить»</strong>. Дождитесь сообщения об успешном подключении.</li>
+</ol>
 <form method="post" action="/totp-setup/confirm">
-<label for="code">Код из Google Authenticator</label>
-<input id="code" name="code" type="text" pattern="[0-9 ]{6,7}" inputmode="numeric" autocomplete="one-time-code" maxlength="7" required>
-<button type="submit">Подтвердить и удалить QR-код</button>
+  <label for="code"><strong>Шесть цифр с телефона</strong></label>
+  <input id="code" name="code" type="text" pattern="[0-9 ]{6,7}" inputmode="numeric" autocomplete="one-time-code" maxlength="7" required>
+  <button type="submit">Подтвердить подключение</button>
 </form>
-<p><small>Доступ только из домашней сети в течение 15 минут после развёртывания. После подтверждения QR-код будет удалён, но второй фактор продолжит работать.</small></p>
+<p class="notice">После подтверждения рисунок для подключения будет удалён автоматически. Приложение на телефоне продолжит выдавать коды для входа. Ничего удалять вручную не нужно.</p>
+<p class="small">Страница доступна только из домашней сети в течение 15 минут после развёртывания гостя 140. Если время вышло, а телефон ещё не подключён, повторите развёртывание гостя 140. Если вы уже входите с кодом из телефона, повторять подключение не нужно.</p>
+<p class="small">Не фотографируйте рисунок и не пересылайте его другим людям: с его помощью можно подключить ещё один телефон.</p>
 <form method="post" action="/totp-setup/close">
-<button type="submit">Закрыть без подтверждения</button>
+  <button type="submit">Закрыть без подключения</button>
 </form>
 </main>
 </body>
