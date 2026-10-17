@@ -354,7 +354,7 @@ def test() -> None:
     require("totp-setup-server.py" in text and "state: restarted" in text,
             "Обработчик должен запускаться только при незавершённой регистрации")
     require("totp-users.py" in text, "Администратору нужны операции для пользователей")
-    require("local-home/widgets" in text
+    require("homarr/widgets" in text
             and "authelia-users.json" in text
             and "caddy-routes.json" in text
             and "proxmox-guests.json" in text,
@@ -380,6 +380,13 @@ def test() -> None:
             and "sites.generated.caddy.j2" in text
             and "routes-policy.json" in text,
             "Для доменов должны устанавливаться проверка Caddy и перечень разрешённых адресов")
+    require("python3-cryptography" in provision["system"]["required_packages"],
+            "Для шифрования ключей Homarr нужен локальный проверенный пакет")
+    require("configure-homarr-admin.py" in text
+            and '"/db/db.sqlite"' in text
+            and "--widgets" in text
+            and "--token" in text,
+            "Доска и три виджета Homarr должны создаваться при deploy 140")
     require("python3-jinja2" in provision["system"]["required_packages"],
             "Для проверки доменов нужен штатный Jinja2")
     route_widget = __import__("json").loads(
