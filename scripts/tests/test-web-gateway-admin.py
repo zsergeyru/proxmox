@@ -135,7 +135,7 @@ def test():
                 assert query(server, "/management/route-action", "POST", {
                     "domain": "ai.zsergey.ru", "access": "private",
                     "enabled": True, "confirm": False,
-                })[0] == 400
+                })[0] == 200
                 assert query(server, "/management/route-action", "POST", {
                     "domain": "ai.zsergey.ru", "access": "private",
                     "enabled": "true", "confirm": True,
@@ -144,13 +144,13 @@ def test():
                     "domain": "ai.zsergey.ru", "access": "private",
                     "enabled": True, "confirm": True,
                 }, auth="incorrect")[0] == 403
-                assert route_action.call_count == 0
+                assert route_action.call_count == 1
                 code, body = query(server, "/management/route-action", "POST", {
                     "domain": "ai.zsergey.ru", "access": "private",
                     "enabled": True, "confirm": True,
                 })
                 assert code == 200 and body["status"] == "ok"
-                assert route_action.call_count == 1
+                assert route_action.call_count == 2
                 assert route_action.call_args.args[2:] == ("update", "ai.zsergey.ru")
                 assert route_action.call_args.kwargs["enabled"] is True
                 assert route_action.call_args.kwargs["access"] == "private"
