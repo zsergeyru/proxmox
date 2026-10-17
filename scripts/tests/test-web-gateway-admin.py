@@ -97,12 +97,35 @@ def test():
                 })
                 assert code == 200 and body["password"]
                 assert "password" not in query(server, "/management/users")[1]["users"][1]
+                code, body = query(server, "/management/action", "POST", {
+                    "action": "edit", "username": "anna", "name": "Анна новая",
+                    "groups": "family,guests", "confirm": False,
+                })
+                assert code == 200
+                people = yaml.safe_load(file.read_text())["users"]
+                assert people["anna"]["displayname"] == "Анна новая"
+                assert people["anna"]["groups"] == ["family", "guests"]
                 code, body = query(server, "/management/action", "POST",
                                    {"action": "password", "username": "anna", "confirm": False})
                 assert code == 400 and "error" in body
                 code, body = query(server, "/management/action", "POST",
                                    {"action": "password", "username": "anna", "confirm": True})
                 assert code == 200 and body["password"]
+                # Удаление должно подтверждаться и очищать второй фактор до файла.
+                code, _ = query(server, "/management/action", "POST", {
+                    "action": "delete", "username": "anna", "confirm": False,
+                })
+                assert code == 400
+                with patch.object(totp, "revoke_for_deletion", return_value=None) as revoke:
+                    code, body = query(server, "/management/action", "POST", {
+                        "action": "delete", "username": "anna", "confirm": True,
+                    })
+                    assert code == 200 and body["status"] == "ok"
+                    revoke.assert_called_once_with("anna")
+                assert "anna" not in yaml.safe_load(file.read_text())["users"]
+                assert query(server, "/management/action", "POST", {
+                    "action": "delete", "username": "admin", "confirm": True,
+                })[0] == 400
                 assert query(server, "/management/route-action", "POST", {
                     "domain": "ai.zsergey.ru", "access": "private",
                     "enabled": True, "confirm": False,
