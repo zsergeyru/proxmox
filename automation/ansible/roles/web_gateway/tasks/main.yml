@@ -96,6 +96,14 @@
     group: root
     mode: "0700"
 
+- name: Установить проверку ошибок Homarr без вывода личных сведений
+  ansible.builtin.copy:
+    src: homarr-diagnostics.py
+    dest: /usr/local/lib/web-gateway/homarr-diagnostics.py
+    owner: root
+    group: root
+    mode: "0700"
+
 - name: Установить сценарий начальной настройки Homarr
   ansible.builtin.copy:
     src: initialize-homarr.py
