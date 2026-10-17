@@ -125,7 +125,7 @@ def test() -> None:
                 db.execute("INSERT INTO boardGroupPermission VALUES (?,?,?)",
                            (manager.BOARD_ID, "group-admin", "view"))
                 db.commit()
-            should_fail(deploy)
+            should_fail(manager, deploy)
             with sqlite3.connect(db_path) as db:
                 db.execute("DELETE FROM boardGroupPermission WHERE permission='view'")
                 db.execute("DELETE FROM board WHERE id=?", (manager.BOARD_ID,))
@@ -138,7 +138,7 @@ def test() -> None:
                 db.execute("DELETE FROM section")
                 db.execute("DELETE FROM groupPermission")
                 db.commit()
-            should_fail(deploy)
+            should_fail(manager, deploy)
             with sqlite3.connect(db_path) as db:
                 assert db.execute("SELECT COUNT(*) FROM board").fetchone()[0] == 1
                 assert db.execute("SELECT COUNT(*) FROM item").fetchone()[0] == 0
