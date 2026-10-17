@@ -142,6 +142,8 @@ def change(state: Path, action: str, username: str, *,
             elif action == "delete":
                 if username == "admin":
                     raise ValueError("Первоначальную учётную запись admin удалить нельзя")
+                if active_admins(users) == 1 and "admins" in record.get("groups", []) and record.get("disabled") is not True:
+                    raise ValueError("Нельзя удалить последнего администратора")
                 if revoke_totp is None:
                     raise RuntimeError("Удаление требует очистки второго фактора")
                 # Сначала удалить регистрацию TOTP. При ошибке учётная
