@@ -136,6 +136,31 @@
     group: root
     mode: "0700"
 
+- name: Установить закрытый административный интерфейс
+  ansible.builtin.copy:
+    src: admin-api.py
+    dest: /usr/local/lib/web-gateway/admin-api.py
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Подготовить ключ закрытого административного интерфейса
+  ansible.builtin.command:
+    argv:
+      - python3
+      - /usr/local/lib/web-gateway/admin-api.py
+      - init
+  changed_when: false
+  no_log: true
+
+- name: Установить описание службы административного интерфейса
+  ansible.builtin.template:
+    src: web-gateway-admin-api.service.j2
+    dest: /etc/systemd/system/web-gateway-admin-api.service
+    owner: root
+    group: root
+    mode: "0644"
+
 - name: Установить служебное управление вторым фактором пользователей
   ansible.builtin.copy:
     src: totp-users.py
