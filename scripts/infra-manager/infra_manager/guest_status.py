@@ -404,6 +404,9 @@ def _service_fields(
     Скрытие паролей определяется show_secrets; без явного разрешения
     секретные значения не должны отображаться."""
     fields = [("Адрес", str(service["url"]))]
+    setup_url = service.get("setup_url")
+    if isinstance(setup_url, str) and setup_url:
+        fields.append(("Первый TOTP (15 мин)", setup_url))
     operator = service.get("operator")
     if not isinstance(operator, dict):
         return fields
