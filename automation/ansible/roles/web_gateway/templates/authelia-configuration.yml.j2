@@ -38,6 +38,13 @@ access_control:
       subject:
         - "group:admins"
       policy: two_factor
+    # Если пользователь не состоит в admins, запрещаем путь явно.
+    # Иначе более общее wildcard-правило допустило бы family/guests!
+    - domain: "{{ provision.web_gateway.portal.public_url.split('://', 1)[1] }}"
+      resources:
+        - "^/admin(?:/.*)?$"
+        - "^/api/admin(?:/.*)?$"
+      policy: deny
     - domain: "*.{{ provision.web_gateway.domain }}"
       policy: two_factor
 
