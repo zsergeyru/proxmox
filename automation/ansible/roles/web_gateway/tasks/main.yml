@@ -540,6 +540,13 @@
     or not (web_gateway_totp_uri.stat.isreg | default(false))
     or (web_gateway_totp_confirmed.stat.exists | default(false))
 
+- name: Запустить закрытое управление пользователями
+  ansible.builtin.systemd_service:
+    name: web-gateway-admin-api.service
+    state: started
+    enabled: true
+    daemon_reload: true
+
 - name: Подсказать адрес привязки Google Authenticator
   ansible.builtin.debug:
     msg: >-
