@@ -101,6 +101,13 @@ web_gateway:
         upstream: http://authelia:9091
         access: public
         enabled: true
+      # Пробный адрес для проверки изменений через Homarr. Доступ только
+      # из домашней сети; приложение за ним дополнительно требует входа.
+      - domain: check.zsergey.ru
+        service: homarr
+        upstream: http://homarr:7575
+        access: private
+        enabled: false
       # Внешние приложения подключать только после проверки авторизации.
       - domain: photos.zsergey.ru
         service: immich
