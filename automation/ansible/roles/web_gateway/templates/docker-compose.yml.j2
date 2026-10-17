@@ -11,7 +11,8 @@ services:
       - "{{ provision.web_gateway.caddy.listen.local_http }}:8080"
     volumes:
       - "{{ provision.web_gateway.paths.configuration }}/caddy:/etc/caddy:ro"
-      - "{{ provision.web_gateway.portal.assets }}:/etc/caddy/portal:ro"
+      # Отдельная точка: /etc/caddy уже подключён только для чтения.
+      - "{{ provision.web_gateway.portal.assets }}:/srv/portal:ro"
       - "{{ provision.web_gateway.paths.persistent_state }}/management/portal-socket:/run/portal:ro"
       - "{{ provision.web_gateway.paths.persistent_state }}/management/catalog:/srv/homarr-catalog:ro"
       # Только Unix-сокет временной страницы, никаких секретов Authelia.
