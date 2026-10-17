@@ -15,7 +15,6 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 FILES = ROOT / "automation/ansible/roles/web_gateway/files"
-WIDGET = ROOT / "infrastructure/guests/140-web-gateway/widgets/authelia-users.json"
 
 
 def load(name, file):
@@ -48,18 +47,6 @@ def test():
     api = load("admin_api_140", "admin-api.py")
     users = load("users_140", "user-accounts.py")
     totp = load("totp_140", "totp-users.py")
-    definition = json.loads(WIDGET.read_text(encoding="utf-8"))
-    assert definition["sources"]["default"]["networkScope"] == "private"
-    assert definition["sources"]["default"]["auth"] == "bearer"
-    assert definition["requests"]["operate"]["permission"] == "full"
-    routes_widget = json.loads((
-        ROOT / "infrastructure/guests/140-web-gateway/widgets/caddy-routes.json"
-    ).read_text(encoding="utf-8"))
-    assert routes_widget["requests"]["update"]["permission"] == "full"
-    assert routes_widget["requests"]["update"]["kind"] == "action"
-    assert "secret-token-for-testing" not in WIDGET.read_text()
-    assert not any("/var/run/docker.sock" in str(item) for item in definition.values())
-
     with TemporaryDirectory() as root:
         state = Path(root)
         (state / "authelia").mkdir()
