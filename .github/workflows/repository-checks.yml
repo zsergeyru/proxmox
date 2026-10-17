@@ -81,6 +81,9 @@ jobs:
       - name: Check physical host descriptions
         run: python scripts/tests/test-physical-hosts.py
 
+      - name: Check physical storage and operator commands
+        run: python scripts/tests/test-physical-storage.py
+
       - name: Run infra-manager Python foundation checks
         run: python scripts/tests/test-infra-manager-python.py
 
