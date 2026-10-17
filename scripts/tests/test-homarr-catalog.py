@@ -34,8 +34,8 @@ def test_catalog() -> None:
     assert all(guest["actions"] == [] for guest in guests)
 
     web_gateway = next(guest for guest in guests if guest["name"] == "web-gateway")
-    assert any(
-        "homarr:v2.5.2" in version["configured_image"].lower()
+    assert all(
+        "homarr" not in version["configured_image"].lower()
         for version in web_gateway["versions"]
     )
     assert all(version["installed_version"] is None for version in web_gateway["versions"])
@@ -91,17 +91,10 @@ def test_pipeline() -> None:
     assert "8081:8081" not in compose
     assert '"8081:8081"' not in compose
 
-    widget = json.loads(
-        (ROOT / "infrastructure/guests/140-web-gateway/widgets/proxmox-guests.json")
-        .read_text(encoding="utf-8")
-    )
-    assert widget["$schema"] == "homarr-custom-widget-v2"
-    assert widget["sources"]["default"]["baseUrl"] == "http://caddy:8081"
-    assert widget["sources"]["default"]["networkScope"] == "private"
-    assert widget["sources"]["default"]["auth"] == "none"
-    assert list(widget["requests"]) == ["inventory"]
-    assert widget["requests"]["inventory"]["path"] == "/guests.json"
-    assert "ActionButton" not in widget["template"]
+    portal = (role / "files/portal-web.py").read_text(encoding="utf-8")
+    assert '"/api/admin/guests"' in portal
+    assert 'CATALOG / "guests.json"' in portal
+    assert "/api/admin/guests" in (role / "files/portal.js").read_text(encoding="utf-8")
 
 
 def test_existing_portal_kept() -> None:
@@ -122,4 +115,4 @@ if __name__ == "__main__":
     test_catalog()
     test_pipeline()
     test_existing_portal_kept()
-    print("[ОК] Homarr: каталог Git, безопасный sync, внутренний Caddy, старый Homepage сохранён")
+    print("[ОК] Портал: каталог Git, безопасный sync, внутренний Caddy")
