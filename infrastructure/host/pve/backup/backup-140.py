@@ -95,7 +95,7 @@ def backup(source: Path, destinations: list[Path], password_file: Path) -> None:
         raise RuntimeError("Пароль должен быть доступен только администратору")
     if shutil.which("restic") is None:
         raise RuntimeError("Не установлен restic")
-    with tempfile.TemporaryDirectory(prefix="backup-140-", dir="/var/tmp") as workspace:
+    with tempfile.TemporaryDirectory(prefix="backup-140-", dir="/run") as workspace:
         stage = Path(workspace)
         os.chmod(stage, 0o700)
         consistent_copy(source, stage)
