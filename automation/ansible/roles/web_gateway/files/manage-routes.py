@@ -6,6 +6,7 @@
 """
 from __future__ import annotations
 
+import argparse
 import fcntl
 import ipaddress
 import json
@@ -239,6 +240,33 @@ def apply_route(state: Path, config: Path, action: str, domain: str, *,
         finally:
             proposed_site.unlink(missing_ok=True)
             proposed_main.unlink(missing_ok=True)
+
+
+
+def check_saved_routes(state: Path, policy_file: Path) -> list[dict]:
+    """До развёртывания проверить весь сохранённый список, не изменяя его."""
+    if state.is_symlink() or not os.path.ismount(state):
+        raise RuntimeError("Постоянное хранилище не подключено")
+    stored = state / "management/routes.yaml"
+    _file(stored)
+    _file(policy_file)
+    routes = yaml.safe_load(stored.read_text(encoding="utf-8"))
+    policy = json.loads(policy_file.read_text(encoding="utf-8"))
+    return _validate_routes(routes, policy)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Проверить постоянные маршруты гостя 140")
+    parser.add_argument("action", choices=["verify"])
+    parser.add_argument("--state", type=Path, default=STATE)
+    parser.add_argument("--policy", type=Path, default=POLICY)
+    args = parser.parse_args()
+    checked = check_saved_routes(args.state, args.policy)
+    print(f"140: проверено доменов: {len(checked)}")
+
+
+if __name__ == "__main__":
+    main()
 
 
 def change_route(state: Path, config: Path, domain: str, enabled: bool, access: str) -> None:
