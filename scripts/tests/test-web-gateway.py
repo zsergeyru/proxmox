@@ -357,8 +357,11 @@ def test() -> None:
     require("homarr/widgets" in text
             and "authelia-users.json" in text
             and "caddy-routes.json" in text
-            and "proxmox-guests.json" in text,
-            "Все три несекретных виджета должны устанавливаться из Git на 140")
+            and "proxmox-guests.json" in text
+            and "home-apps.json" in text
+            and "configure-homarr-home.py" in text
+            and "home-apps.py" in text,
+            "Домашняя и административная страницы должны настраиваться из Git")
     probe = next((route for route in web["caddy"]["routes"]
                   if route["domain"] == "check.zsergey.ru"), None)
     require(isinstance(probe, dict) and probe.get("enabled") is False
@@ -380,6 +383,10 @@ def test() -> None:
             and "sites.generated.caddy.j2" in text
             and "routes-policy.json" in text,
             "Для доменов должны устанавливаться проверка Caddy и перечень разрешённых адресов")
+    require("Сформировать список включённых приложений" in text
+            and "home-apps.json" in text
+            and "configure-homarr-home.py" in text,
+            "Домашняя страница обязана создаваться при deploy 140")
     require("python3-cryptography" in provision["system"]["required_packages"],
             "Для шифрования ключей Homarr нужен локальный проверенный пакет")
     require("configure-homarr-admin.py" in text
