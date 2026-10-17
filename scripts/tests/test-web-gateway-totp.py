@@ -1,94 +1,133 @@
 #!/usr/bin/env python3
-"""Проверка первичной привязки Google Authenticator без настоящих секретов."""
-
+"""Проверка одноразовой страницы, сохранения ключа и действий администратора."""
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
 import importlib.util
-import io
-from contextlib import redirect_stdout
+import os
 from pathlib import Path
+import socket
+import struct
 from tempfile import TemporaryDirectory
+import time
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import yaml
+
 ROOT = Path(__file__).resolve().parents[2]
-SCRIPT = ROOT / "automation/ansible/roles/web_gateway/files/initialize-totp.py"
+FILES = ROOT / "automation/ansible/roles/web_gateway/files"
+URI = ("otpauth://totp/zsergey.ru:admin?algorithm=SHA1&digits=6&"
+       "issuer=zsergey.ru&period=30&secret=GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ")
 
 
-def require(condition: bool, message: str) -> None:
-    if not condition:
-        raise AssertionError(message)
+def module(name: str, filename: str):
+    """Загрузить установленную программу без запуска её точки входа."""
+    spec = importlib.util.spec_from_file_location(name, FILES / filename)
+    assert spec is not None and spec.loader is not None
+    obj = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(obj)
+    return obj
 
 
-def load():
-    spec = importlib.util.spec_from_file_location("web_gateway_totp", SCRIPT)
-    require(spec is not None and spec.loader is not None, "Нет сценария TOTP")
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+def otp(now: float) -> str:
+    key = base64.b32decode("GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ")
+    digest = hmac.new(key, struct.pack(">Q", int(now // 30)), hashlib.sha1).digest()
+    position = digest[-1] & 15
+    value = struct.unpack(">I", digest[position:position + 4])[0] & 0x7fffffff
+    return str(value % 1_000_000).zfill(6)
+
+
+def request(server, socket_path: Path, method: str, path: str, body: str = "") -> bytes:
+    client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    client.connect(str(socket_path))
+    data = body.encode()
+    client.sendall((f"{method} {path} HTTP/1.1\r\nHost: auth.zsergey.ru\r\n"
+                    f"Content-Length: {len(data)}\r\nConnection: close\r\n\r\n").encode() + data)
+    server.handle_request()
+    result = bytearray()
+    while chunk := client.recv(65536):
+        result.extend(chunk)
+    client.close()
+    return bytes(result)
 
 
 def test() -> None:
-    mod = load()
-    with TemporaryDirectory() as dirname:
-        path = Path(dirname) / "admin.png"
+    setup = module("gateway_totp_initialize", "initialize-totp.py")
+    server_code = module("gateway_totp_server", "totp-setup-server.py")
+    users_code = module("gateway_totp_users", "totp-users.py")
+    assert server_code.totp_matches(URI, "287082", now=59)
+    assert not server_code.totp_matches(URI, "000000", now=59)
+    assert not server_code.totp_matches(URI, "1234567", now=59)
 
+    with TemporaryDirectory() as root:
+        folder = Path(root)
+        png = folder / "admin.png"
         def generated(argv, **kwargs):
-            require(argv[0:3] == ["docker", "exec", "web-gateway-authelia"],
-                    "Генерация должна происходить только внутри Authelia")
-            require("generate" in argv and "admin" in argv and "--force" not in argv,
-                    "Нельзя сбрасывать зарегистрированный TOTP")
-            require(argv[-2:] == ["--path", "/data/totp-setup/admin.png"],
-                    "QR должен попасть в закрытый каталог")
-            require(kwargs.get("stdout") is not None and kwargs.get("stderr") is not None,
-                    "Секреты нельзя выводить через стандартные потоки")
-            path.write_bytes(b"imitation-png")
-            return SimpleNamespace(returncode=0, stdout=b"otpauth://secret", stderr=b"")
+            assert argv[:3] == ["docker", "exec", "web-gateway-authelia"]
+            assert "generate" in argv and "--force" not in argv
+            assert kwargs.get("capture_output")
+            png.write_bytes(b"private-png")
+            return SimpleNamespace(returncode=0, stdout=("generated URI '" + URI + "'").encode(), stderr=b"")
+        with patch.object(setup.subprocess, "run", side_effect=generated) as command:
+            setup.initialize("web-gateway-authelia", "admin", "zsergey.ru",
+                             png, "/data/totp-setup/admin.png")
+            assert command.call_count == 1
+            assert png.stat().st_mode & 0o777 == 0o600
+            assert (folder / "admin.uri").stat().st_mode & 0o777 == 0o600
+            assert URI in (folder / "admin.uri").read_text()
+            setup.initialize("web-gateway-authelia", "admin", "zsergey.ru",
+                             png, "/data/totp-setup/admin.png")
+            assert command.call_count == 1, "Повторный deploy не должен менять TOTP"
 
-        with patch.object(mod.subprocess, "run", side_effect=generated) as command:
-            with redirect_stdout(io.StringIO()) as output:
-                result = mod.initialize(
-                    "web-gateway-authelia", "admin", "zsergey.ru", path,
-                    "/data/totp-setup/admin.png",
-                )
-            require(command.call_count == 1, "При первой установке CLI должна вызываться")
-            require(path.stat().st_mode & 0o777 == 0o600,
-                    "QR должен быть доступен только владельцу")
-            require("secret" not in result and "secret" not in output.getvalue(),
-                    "Секрет TOTP не должен попадать в журнал")
-            mod.initialize(
-                "web-gateway-authelia", "admin", "zsergey.ru", path,
-                "/data/totp-setup/admin.png",
-            )
-            require(command.call_count == 1,
-                    "Повторное развёртывание не должно менять ключ второго фактора")
+        html = folder / "page.html"
+        html.write_text("<html>QR</html>")
+        socket_path = folder / "test.sock"
+        with server_code.SetupServer(socket_path, html, png,
+                                     folder / "admin.uri", folder / "admin.confirmed") as server:
+            server.timeout = 1
+            assert b"200 OK" in request(server, socket_path, "GET", "/totp-setup")
+            assert b"private-png" in request(server, socket_path, "GET", "/totp-setup/qr.png")
+            assert b"400 Bad Request" in request(server, socket_path, "POST",
+                                                "/totp-setup/confirm", "code=000000")
+            assert png.exists(), "Неверный код не должен удалять QR"
+            assert b"200 OK" in request(server, socket_path, "POST",
+                                       "/totp-setup/confirm", "code=" + otp(time.time()))
+            assert not png.exists() and not (folder / "admin.uri").exists()
+            assert (folder / "admin.confirmed").exists()
+        result = setup.initialize("web-gateway-authelia", "admin", "zsergey.ru",
+                                  png, "/data/totp-setup/admin.png")
+        assert "подтверждён" in result and not png.exists()
 
-        path.unlink()
-        with patch.object(mod.subprocess, "run", return_value=SimpleNamespace(
-            returncode=1, stdout=b"", stderr=b"Configuration already exists",
-        )) as command:
-            result = mod.initialize(
-                "web-gateway-authelia", "admin", "zsergey.ru", path,
-                "/data/totp-setup/admin.png",
-            )
-            require("уже есть" in result and command.call_count == 1,
-                    "Существующий TOTP нельзя сбрасывать ради нового QR")
-            require(not path.exists(), "Отсутствующий QR не надо создавать вручную")
-
-        with patch.object(mod.subprocess, "run", return_value=SimpleNamespace(
-            returncode=1, stdout=b"", stderr=b"Storage failure",
-        )):
-            try:
-                mod.initialize(
-                    "web-gateway-authelia", "admin", "zsergey.ru", path,
-                    "/data/totp-setup/admin.png",
-                )
-            except RuntimeError:
-                pass
-            else:
-                raise AssertionError("Ошибка записи SQLite должна остановить развёртывание")
-
-    print("140: TOTP готовится штатной CLI, ключ не меняется при повторном развёртывании")
+    with TemporaryDirectory() as root:
+        directory = Path(root)
+        users = directory / "users_database.yml"
+        users.write_text(yaml.safe_dump({"users": {
+            "anna": {"email": "anna@example.com", "password": "hash"},
+            "ivan": {"email": "ivan@example.com", "password": "hash"},
+        }}), encoding="utf-8")
+        notice = directory / "notifications.txt"
+        notice.write_text("Date: now\nRecipient: Anna <anna@example.com>\n"
+                          "Subject: Confirm your identity\n"
+                          "Your one-time code is 12345678\n", encoding="utf-8")
+        assert users_code.latest_code("anna", users, notice) == "12345678"
+        try:
+            users_code.latest_code("ivan", users, notice)
+        except RuntimeError:
+            pass
+        else:
+            raise AssertionError("Код другого пользователя нельзя показывать")
+        with patch.object(users_code.subprocess, "run", return_value=SimpleNamespace(returncode=0)) as command:
+            users_code.reset_totp("anna", users)
+            assert command.call_count == 1
+            args = command.call_args.args[0]
+            assert args[:3] == ["docker", "exec", "web-gateway-authelia"]
+            assert args[3:7] == ["authelia", "storage", "user", "totp"]
+            assert "delete" in args and "anna" in args
+        assert "ivan" in users.read_text(), "Сброс TOTP не изменяет пользователей"
+    print("140: QR ограничен, подтверждается кодом и удаляется без сброса TOTP")
 
 
 if __name__ == "__main__":
