@@ -71,15 +71,15 @@ checks:
 
   - type: file
     path: /etc/web-gateway/homarr/widgets/authelia-users.json
-    message: "Форма управления пользователями подготовлена для Homarr"
+    message: "Форма управления пользователями установлена для Homarr"
 
   - type: file
-    path: /etc/web-gateway/caddy/local-home/widgets/caddy-routes.json
-    message: "Форма изменения доменов подготовлена для Homarr"
+    path: /etc/web-gateway/homarr/widgets/caddy-routes.json
+    message: "Форма изменения доменов установлена для Homarr"
 
   - type: file
-    path: /etc/web-gateway/caddy/local-home/widgets/proxmox-guests.json
-    message: "Перечень гостей подготовлен для Homarr"
+    path: /etc/web-gateway/homarr/widgets/proxmox-guests.json
+    message: "Перечень гостей установлен для Homarr"
 
   - type: file
     path: /etc/web-gateway/caddy/routes-policy.json
