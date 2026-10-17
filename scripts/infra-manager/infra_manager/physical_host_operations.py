@@ -6,6 +6,8 @@ import os
 import re
 from pathlib import Path
 
+import yaml
+
 from .common import InfraManagerError, console
 from .physical_hosts import list_physical_hosts, load_physical_host
 from .physical_host_ssh import PhysicalHostSshSession
@@ -14,6 +16,31 @@ from .common import run
 
 
 SUPPORTED_HOST_OPERATIONS = frozenset({"status", "inspect", "deploy", "repair"})
+
+
+def require_host_access(repo_root: Path, host_name: str) -> None:
+    """Проверить явное машинное право 910 на конкретный физический сервер."""
+
+    path = repo_root / "infrastructure" / "security" / "access.yaml"
+    try:
+        document = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError) as exc:
+        raise InfraManagerError("Не удалось прочитать политику доступа проекта") from exc
+    rules = document.get("rules") if isinstance(document, dict) else None
+    if not isinstance(rules, list):
+        raise InfraManagerError("Политика доступа не содержит корректных rules")
+    matched = [
+        rule for rule in rules if isinstance(rule, dict)
+        and rule.get("subject") == "guest:910"
+        and rule.get("service") == "ssh"
+        and rule.get("resource") == "host"
+        and "connect-root" in rule.get("access", [])
+        and f"host:{host_name}" in rule.get("targets", [])
+    ]
+    if len(matched) != 1:
+        raise InfraManagerError(
+            f"Доступ guest:910 к host:{host_name} не разрешён однозначно в access.yaml"
+        )
 
 
 def list_hosts(repo_root: Path) -> int:
@@ -35,6 +62,7 @@ def run_physical_host_operation(repo_root: Path, operation: str, name: str) -> i
     if operation not in SUPPORTED_HOST_OPERATIONS:
         raise InfraManagerError(f"Недопустимая операция физического сервера: {operation}")
     host = load_physical_host(repo_root, name)
+    require_host_access(repo_root, name)
     console.info(f"Физический сервер: {host.name}")
     if host.address is None:
         raise InfraManagerError(
