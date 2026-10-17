@@ -68,3 +68,19 @@ checks:
   - type: file
     path: /var/lib/web-gateway/management/catalog/guests.json
     message: "Каталог гостей Homarr сформирован на постоянном томе"
+
+  - type: file
+    path: /etc/web-gateway/caddy/local-home/widgets/authelia-users.json
+    message: "Форма управления пользователями подготовлена для Homarr"
+
+  - type: file
+    path: /etc/web-gateway/caddy/local-home/widgets/caddy-routes.json
+    message: "Форма изменения доменов подготовлена для Homarr"
+
+  - type: file
+    path: /etc/web-gateway/caddy/local-home/widgets/proxmox-guests.json
+    message: "Перечень гостей подготовлен для Homarr"
+
+  - type: file
+    path: /etc/web-gateway/caddy/routes-policy.json
+    message: "Разрешённые домены для управления определены"
