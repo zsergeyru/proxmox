@@ -69,6 +69,11 @@ def test_policy():
     assert "password" not in home.lower()
     assert 'id="admin-link" hidden' in home
     assert 'id="user-form"' in admin and 'id="route-form"' in admin
+    assert 'id="add-route"' in admin and 'id="route-dialog"' in admin
+    assert 'id="routes-search"' in admin and 'id="theme-toggle"' in admin
+    assert 'name="upstream"' in admin and 'name="domain"' in admin
+    assert 'removeRoute(' in js and 'saveRoute(' in js
+    assert 'setupTheme()' in js and 'switch-track' in js
     assert 'name="email"' not in admin
     assert 'name="action"' not in admin
     for identifier in ('add-user', 'users-list', 'users-search', 'user-dialog',
