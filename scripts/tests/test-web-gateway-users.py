@@ -71,6 +71,12 @@ def test():
             people = yaml.safe_load(users.read_text())["users"]
             assert PasswordHasher().verify(people["anna"]["password"], changed)
             mod.change(root, "groups", "anna", groups="admins,family")
+            mod.change(root, "edit", "anna", groups="family,guests", displayname="Анна")
+            people = yaml.safe_load(users.read_text())["users"]
+            assert people["anna"]["displayname"] == "Анна"
+            assert people["anna"]["groups"] == ["family", "guests"]
+            expect_error(lambda: mod.change(root, "edit", "admin", groups="family", displayname="Главный"))
+            expect_error(lambda: mod.change(root, "edit", "anna", groups="", displayname=""))
             mod.change(root, "disable", "anna")
             people = yaml.safe_load(users.read_text())["users"]
             assert people["anna"]["disabled"] is True
@@ -79,6 +85,20 @@ def test():
             assert yaml.safe_load(users.read_text())["users"]["anna"]["disabled"] is False
             expect_error(lambda: mod.change(root, "groups", "anna", groups="root"))
             expect_error(lambda: mod.change(root, "password", "admin"))
+            expect_error(lambda: mod.change(root, "delete", "admin", revoke_totp=lambda _: None))
+            expect_error(lambda: mod.change(root, "delete", "anna"))
+            revoked = []
+            def failed_revoke(username):
+                revoked.append(username)
+                raise RuntimeError("Authelia недоступна")
+            old = users.read_bytes()
+            expect_error(lambda: mod.change(root, "delete", "anna", revoke_totp=failed_revoke))
+            assert users.read_bytes() == old
+            assert revoked == ["anna"]
+            mod.change(root, "delete", "anna", revoke_totp=revoked.append)
+            assert "anna" not in yaml.safe_load(users.read_text())["users"]
+            assert revoked == ["anna", "anna"]
+            assert "admin" in yaml.safe_load(users.read_text())["users"]
         with patch.object(mod.os.path, "ismount", return_value=False):
             expect_error(lambda: mod.change(root, "add", "igor",
                                          email="igor@example.org", groups="family"))
