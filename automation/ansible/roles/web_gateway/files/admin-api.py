@@ -85,7 +85,31 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         if not self.authorised():
             return
-        if self.path == "/management/users":
+        if self.path == "/management/routes":
+            try:
+                self.server.accounts.require_state(STATE)
+                import yaml
+                route_file = STATE / "management/routes.yaml"
+                if route_file.is_symlink() or not route_file.is_file():
+                    raise RuntimeError("Сохранённые маршруты недоступны")
+                routes = yaml.safe_load(route_file.read_text(encoding="utf-8"))
+                if not isinstance(routes, list):
+                    raise RuntimeError("Сохранённые маршруты повреждены")
+                items = []
+                for route in routes:
+                    if not isinstance(route, dict):
+                        raise RuntimeError("Неверный формат маршрута")
+                    items.append({
+                        "domain": route.get("domain", ""),
+                        "service": route.get("service", ""),
+                        "upstream": route.get("upstream", ""),
+                        "access": route.get("access", "protected"),
+                        "enabled": route.get("enabled", False) is True,
+                    })
+                self.reply(200, {"routes": items})
+            except (OSError, RuntimeError, ValueError, yaml.YAMLError) as exc:
+                self.reply(503, {"error": str(exc)})
+        elif self.path == "/management/users":
             try:
                 module = self.server.accounts
                 module.require_state(STATE)
