@@ -80,7 +80,7 @@ def test():
             mod.change(root, "disable", "anna")
             people = yaml.safe_load(users.read_text())["users"]
             assert people["anna"]["disabled"] is True
-            assert people["anna"]["groups"] == ["admins", "family"]
+            assert people["anna"]["groups"] == ["family", "guests"]
             mod.change(root, "enable", "anna")
             assert yaml.safe_load(users.read_text())["users"]["anna"]["disabled"] is False
             expect_error(lambda: mod.change(root, "groups", "anna", groups="root"))
