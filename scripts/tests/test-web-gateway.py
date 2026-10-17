@@ -304,6 +304,21 @@ def test() -> None:
             "Статическая страница должна устанавливаться ролью до запуска Caddy")
     require("src: totp-setup.html" in text and "initialize-totp.py" in text,
             "Штатная подготовка QR должна входить в общее развёртывание")
+    setup_page = (ROLE / "files/totp-setup.html").read_text(encoding="utf-8")
+    require(all(part in setup_page for part in (
+        "Подключение телефона для входа",
+        "Что нужно сделать",
+        "Google Authenticator",
+        "знак <strong>«+»</strong>",
+        "квадратный рисунок",
+        "Шесть цифр с телефона",
+        "Подтвердить подключение",
+        "15 минут",
+        "ничего удалять вручную не нужно",
+        'action="/totp-setup/confirm"',
+    )), "Страница должна объяснять подключение простыми словами")
+    require("QR-код" not in setup_page and "TOTP" not in setup_page,
+            "Не использовать специальные обозначения в тексте страницы")
     require(text.index("Запустить веб-шлюз") < text.index("Подготовить QR первого администратора"),
             "Генерация TOTP должна выполняться только после запуска контейнера Authelia")
     require("no_log: true" in text[text.index("Подготовить QR первого администратора"):],
