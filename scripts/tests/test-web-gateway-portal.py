@@ -70,6 +70,14 @@ def test_policy():
     assert 'id="admin-link" hidden' in home
     assert 'id="user-form"' in admin and 'id="route-form"' in admin
     assert 'name="email"' not in admin
+    assert 'name="action"' not in admin
+    for identifier in ('add-user', 'users-list', 'users-search', 'user-dialog',
+                       'confirm-dialog', 'copy-credential', 'credential-value'):
+        assert 'id="' + identifier + '"' in admin
+    assert 'name="group"' in admin
+    assert 'userAction(' in js and 'openUserForm(' in js
+    assert 'result.code' in js and 'credential(result.code' in js
+    assert 'type="password"' not in admin
     assert "textContent" in js and "innerHTML" not in js
     assert 'Origin' not in js  # браузер отправляет Origin сам
     assert "X-Requested-With" in js
