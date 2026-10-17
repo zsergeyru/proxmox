@@ -11,6 +11,7 @@ from email.utils import parseaddr
 import os
 from pathlib import Path
 import re
+import sqlite3
 import subprocess
 import sys
 import time
@@ -66,6 +67,39 @@ def latest_code(username: str, users: Path = USERS, notifications: Path = NOTIFI
     if len(codes) != 1:
         raise RuntimeError("Не удалось однозначно определить проверочный код")
     return codes[0]
+
+
+
+def factor_statuses(db: Path = STATE / "db.sqlite3") -> dict[str, dict[str, bool]]:
+    """Прочитать только признаки регистрации, не извлекая TOTP-секреты.
+
+    Схему проверяем прежде чем запрашивать таблицы: неизвестная версия базы
+    не должна выглядеть как отсутствие настроенного второго фактора.
+    """
+    if db.is_symlink() or not db.is_file():
+        raise RuntimeError("База Authelia недоступна")
+    uri = "file:" + db.resolve().as_posix() + "?mode=ro"
+    with sqlite3.connect(uri, uri=True, timeout=3) as connection:
+        tables = {row[0] for row in connection.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        )}
+        if not {"totp_configurations", "webauthn_devices"}.issubset(tables):
+            raise RuntimeError("Неизвестная версия базы второго фактора")
+        result: dict[str, dict[str, bool]] = {}
+        for name, field in (("totp_configurations", "totp"), ("webauthn_devices", "webauthn")):
+            for (username,) in connection.execute("SELECT DISTINCT username FROM " + name):
+                result.setdefault(username, {"totp": False, "webauthn": False})[field] = True
+        return result
+
+
+def available_code(username: str) -> dict[str, object] | None:
+    """Код последнего письма показывается до истечения пяти минут."""
+    try:
+        code = latest_code(username)
+    except (OSError, RuntimeError, ValueError):
+        return None
+    deadline = int(NOTIFICATIONS.stat().st_mtime + 300)
+    return {"value": code, "expires_at": deadline}
 
 
 def reset_totp(username: str, users: Path = USERS) -> None:
