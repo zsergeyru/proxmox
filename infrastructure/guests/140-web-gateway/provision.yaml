@@ -192,6 +192,15 @@ web_gateway:
     operator_status:
       name: Homarr
       authentication: Authelia
+      setup_path: /manage/custom-widgets
+      setup_instructions:
+        - Войдите под администратором и откройте раздел «Управление — Пользовательские виджеты».
+        - Получите три файла с адреса http://192.168.1.40:8080/widgets/ (названия есть в инструкции гостя 140).
+        - Импортируйте три файла, настройте внутренние адреса и введите ключ подключения из состояния гостя.
+        - Разместите три раздела на закрытой странице «Администрирование» только для группы admins.
+      connection_key:
+        label: Ключ подключения виджетов
+        path: /var/lib/web-gateway/secrets/administration-token
       operator:
         username: admin
     data:
