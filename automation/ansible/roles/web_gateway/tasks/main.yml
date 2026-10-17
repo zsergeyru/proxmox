@@ -293,6 +293,39 @@
       - web_gateway_routes is not string
     fail_msg: "140: сохранённый список доменов имеет неверный формат"
 
+# Новые заранее разрешённые домены из Git добавляются выключенными:
+# существующие решения администратора и маршруты из mp0 не переписываются.
+- name: Найти новые подготовленные домены из описания проекта
+  ansible.builtin.set_fact:
+    web_gateway_new_routes: >-
+      {{
+        provision.web_gateway.caddy.routes
+        | rejectattr('domain', 'in', web_gateway_routes | map(attribute='domain') | list)
+        | list
+      }}
+
+- name: Не включать новые домены автоматически
+  ansible.builtin.assert:
+    that:
+      - not (item.enabled | default(false) | bool)
+    fail_msg: "140: новый маршрут должен быть выключен до проверки администратором"
+  loop: "{{ web_gateway_new_routes }}"
+  loop_control:
+    label: "{{ item.domain }}"
+
+- name: Дополнить список только отсутствующими доменами
+  ansible.builtin.set_fact:
+    web_gateway_routes: "{{ web_gateway_routes + web_gateway_new_routes }}"
+
+- name: Сохранить новые выключенные домены без потери прежних настроек
+  ansible.builtin.copy:
+    dest: "{{ provision.web_gateway.management.routes_state }}"
+    content: "{{ web_gateway_routes | to_nice_yaml(indent=2, sort_keys=false) }}"
+    owner: root
+    group: root
+    mode: "0640"
+  when: web_gateway_new_routes | length > 0
+
 - name: Проверить включённые маршруты перед формированием Caddyfile
   ansible.builtin.assert:
     that:
