@@ -187,6 +187,9 @@ web_gateway:
     socket: /var/lib/web-gateway/management/portal-socket/portal.sock
     authentication: authelia
     second_factor: true
+    operator_status:
+      name: Домашний сервер
+      authentication: Authelia
     administration:
       path: /admin
       groups:
