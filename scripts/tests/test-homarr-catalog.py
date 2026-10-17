@@ -84,6 +84,10 @@ def test_pipeline() -> None:
     assert "/srv/homarr-catalog:ro" in compose
     assert ":8081 {" in caddy
     assert "file_server" in caddy
+    assert "/apps.json" in caddy
+    sync = (role / "tasks/sync.yml").read_text(encoding="utf-8")
+    assert "home-apps.py" in sync
+    assert "home-apps.py" in (role / "tasks/main.yml").read_text(encoding="utf-8")
     assert "8081:8081" not in compose
     assert '"8081:8081"' not in compose
 
