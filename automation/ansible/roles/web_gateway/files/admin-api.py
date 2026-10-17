@@ -129,6 +129,32 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         if not self.authorised():
             return
+        if self.path == "/management/route-action":
+            try:
+                if self.server.routes is None:
+                    raise RuntimeError("Управление доменами ещё не подготовлено")
+                length = int(self.headers.get("Content-Length", "-1"))
+                if not 2 <= length <= 1024:
+                    raise ValueError("Неверный размер запроса")
+                body = json.loads(self.rfile.read(length))
+                if not isinstance(body, dict) or set(body) != {
+                    "domain", "enabled", "access", "confirm"
+                }:
+                    raise ValueError("Необходимо указать домен, доступ и подтверждение")
+                if body["confirm"] is not True:
+                    raise ValueError("Подтвердите изменение домена")
+                if not isinstance(body["domain"], str) or type(body["enabled"]) is not bool:
+                    raise ValueError("Неверный домен или состояние")
+                if not isinstance(body["access"], str):
+                    raise ValueError("Неверный режим доступа")
+                self.server.routes.change_route(
+                    STATE, Path("/etc/web-gateway/caddy"),
+                    body["domain"], body["enabled"], body["access"],
+                )
+                self.reply(200, {"status": "ok", "domain": body["domain"]})
+            except (OSError, RuntimeError, ValueError, TypeError, KeyError) as exc:
+                self.reply(response_code_for(exc), {"error": str(exc)})
+            return
         if self.path != "/management/action":
             self.reply(404, {"error": "Не найдено"})
             return
@@ -176,8 +202,8 @@ class Handler(BaseHTTPRequestHandler):
 
 
 class ControlServer(socketserver.UnixStreamServer):
-    def __init__(self, path: Path, token: str, accounts, totp):
-        self.token, self.accounts, self.totp = token, accounts, totp
+    def __init__(self, path: Path, token: str, accounts, totp, routes=None):
+        self.token, self.accounts, self.totp, self.routes = token, accounts, totp, routes
         super().__init__(str(path), Handler)
         os.chmod(path, 0o660)
 
@@ -192,9 +218,10 @@ def run_server() -> None:
         raise RuntimeError("Недействительный ключ управления")
     accounts = import_file("user-accounts.py", "accounts_140")
     totp = import_file("totp-users.py", "totp_140")
+    routes = import_file("manage-routes.py", "routes_140")
     SOCKET.unlink(missing_ok=True)
     try:
-        with ControlServer(SOCKET, secret, accounts, totp) as server:
+        with ControlServer(SOCKET, secret, accounts, totp, routes) as server:
             server.serve_forever(poll_interval=0.5)
     finally:
         SOCKET.unlink(missing_ok=True)
