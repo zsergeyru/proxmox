@@ -113,12 +113,22 @@ class Handler(BaseHTTPRequestHandler):
                 module = self.server.accounts
                 module.require_state(STATE)
                 entries = module.read_users(STATE / "authelia/users_database.yml")["users"]
-                rows = [
-                    {"username": username, "displayname": item.get("displayname", username),
-                     "email": item.get("email", ""), "groups": item.get("groups", []),
-                     "disabled": item.get("disabled") is True}
-                    for username, item in sorted(entries.items())
-                ]
+                try:
+                    factor_status = self.server.totp.factor_statuses()
+                except (OSError, RuntimeError):
+                    factor_status = None
+                rows = []
+                for username, item in sorted(entries.items()):
+                    registered = factor_status.get(username, {}) if factor_status is not None else {}
+                    rows.append({
+                        "username": username,
+                        "displayname": item.get("displayname", username),
+                        "email": item.get("email", ""), "groups": item.get("groups", []),
+                        "disabled": item.get("disabled") is True,
+                        "totp": registered.get("totp") if factor_status is not None else None,
+                        "webauthn": registered.get("webauthn") if factor_status is not None else None,
+                        "verification": self.server.totp.available_code(username),
+                    })
                 self.reply(200, {"users": rows})
             except (OSError, RuntimeError, ValueError) as exc:
                 self.reply(503, {"error": str(exc)})
