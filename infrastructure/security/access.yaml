@@ -35,6 +35,16 @@ rules:
     access:
       - connect-root
 
+  # Физический NAS — отдельная подтверждённая SSH-цель, не гость PVE.
+  - id: infra-manager-nas
+    subject: guest:910
+    service: ssh
+    resource: host
+    targets:
+      - host:nas
+    access:
+      - connect-root
+
   - id: infra-manager-project-repository
     subject: guest:910
     service: github
