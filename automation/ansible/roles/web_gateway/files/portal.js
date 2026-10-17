@@ -51,11 +51,11 @@ function credential(value,username,type){
   text(q("#credential-value"),value);
   panel.hidden=false;
 }
-async function copyCredential(){
-  const value=q("#credential-value").textContent;
+async function copyValue(value){
   try{await navigator.clipboard.writeText(value);notify("Значение скопировано.");}
   catch(error){notify("Не удалось скопировать автоматически. Выделите значение и скопируйте вручную.",true);}
 }
+async function copyCredential(){await copyValue(q("#credential-value").textContent);}
 function userButton(label,action,user,variant="secondary"){
   const button=el("button",variant,label);
   button.type="button";
@@ -73,16 +73,36 @@ function userCard(item){
   header.append(avatar,heading,status);
   const groups=el("div","group-tags");
   (item.groups||[]).forEach(g=>groups.append(el("span","group-tag",({admins:"Администратор",family:"Семья",guests:"Гость"})[g]||g)));
+  const factors=el("div","factor-details");
+  const statusLine=el("p","factor-label","Google Authenticator: "+
+    (item.totp===true?"Подключён":item.totp===false?"Не подключён":"Состояние не определено"));
+  factors.append(statusLine);
+  if(item.webauthn===true)factors.append(el("p","factor-label","Ключ WebAuthn подключён"));
+  if(item.verification){
+    const codeBox=el("div","inline-code");
+    codeBox.append(el("span","code-title","Проверочный код: "));
+    codeBox.append(el("code","totp-code",item.verification.value));
+    const copy=el("button","secondary","Скопировать");
+    copy.type="button";
+    copy.addEventListener("click",()=>copyValue(item.verification.value));
+    codeBox.append(copy);
+    const timeLeft=Math.max(0,item.verification.expires_at-Math.floor(Date.now()/1000));
+    factors.append(codeBox,el("p","code-expiry","Действует ещё "+Math.ceil(timeLeft/60)+" мин."));
+  }else{
+    factors.append(el("p","muted code-empty","Нет ожидающего кода. Запросите его в Authelia."));
+  }
   const actions=el("div","user-actions");
   const edit=el("button","secondary","Изменить");edit.type="button";
   edit.addEventListener("click",()=>openUserForm(item));
   actions.append(edit);
   actions.append(userButton("Новый пароль","password",item));
-  actions.append(userButton("Проверочный код","code",item));
+  const refresh=el("button","secondary","Обновить код");refresh.type="button";
+  refresh.addEventListener("click",async()=>{refresh.disabled=true;try{await users();notify("Данные TOTP обновлены.");}catch(e){notify(e.message,true);}finally{refresh.disabled=false;}});
+  actions.append(refresh);
   actions.append(userButton("Сбросить TOTP","reset_totp",item));
   actions.append(userButton(item.disabled?"Включить":"Отключить",item.disabled?"enable":"disable",item));
   if(item.username!=="admin")actions.append(userButton("Удалить","delete",item,"danger"));
-  card.append(header,groups,actions);
+  card.append(header,groups,factors,actions);
   return card;
 }
 function renderUsers(){
