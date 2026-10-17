@@ -127,6 +127,14 @@
     group: root
     mode: "0700"
 
+- name: Установить служебное управление вторым фактором пользователей
+  ansible.builtin.copy:
+    src: totp-users.py
+    dest: /usr/local/lib/web-gateway/totp-users.py
+    owner: root
+    group: root
+    mode: "0700"
+
 - name: Проверить метку уже созданных секретов
   ansible.builtin.stat:
     path: "{{ provision.web_gateway.paths.secrets }}/.initialized"
