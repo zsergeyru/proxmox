@@ -121,6 +121,11 @@ class Handler(BaseHTTPRequestHandler):
             username = body.get("username")
             if not isinstance(action, str) or not isinstance(username, str):
                 raise ValueError("Укажите действие и пользователя")
+            if any(not isinstance(body.get(field, ""), str) for field in ("email", "name", "groups")):
+                raise ValueError("Неверные значения полей")
+            if body.get("confirm", False) not in (True, False):
+                raise ValueError("Подтверждение должно быть логическим значением")
+            self.server.accounts.require_state(STATE)
             sensitive = {"password", "disable", "reset_totp"}
             if action in sensitive and body.get("confirm") is not True:
                 raise ValueError("Подтвердите действие")
