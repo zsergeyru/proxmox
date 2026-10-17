@@ -67,7 +67,11 @@ def reset_totp(username: str, users: Path = USERS) -> None:
     result = subprocess.run(argv, capture_output=True, check=False)
     if result.returncode:
         raise RuntimeError("Authelia не смогла сбросить TOTP; база не изменена этим сценарием")
-    # Успешный сброс не меняет пароль, группы, пользователей или другие базы.
+    # После явного сброса admin следующий deploy может заново подготовить QR.
+    if username == "admin":
+        for name in ("admin.confirmed", "admin.png", "admin.uri"):
+            (STATE / "totp-setup" / name).unlink(missing_ok=True)
+    # Пароли, группы, пользователи и другие базы не меняются.
 
 
 def main() -> int:
