@@ -105,7 +105,8 @@ web_gateway:
         service: immich
         guest_vmid: 340
         port: 2283
-        access: protected
+        # Не включать без проверки связки Immich и мобильного приложения.
+        access: app_auth
         enabled: false
       - domain: ha.zsergey.ru
         service: home-assistant
