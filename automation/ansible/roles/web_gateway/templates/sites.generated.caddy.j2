@@ -12,6 +12,9 @@
         copy_headers Remote-User Remote-Groups Remote-Email Remote-Name
     }
     reverse_proxy {{ route.upstream }}
+{% elif access == 'app_auth' %}
+    # Приложение само проверяет вход; запросы мобильных клиентов не перехватываем.
+    reverse_proxy {{ route.upstream }}
 {% elif access == 'private' %}
     # Сравниваем исходный адрес TCP-соединения; подложные заголовки не доверены.
     @private_network remote_ip {{ provision.web_gateway.caddy.private_networks | join(' ') }}
