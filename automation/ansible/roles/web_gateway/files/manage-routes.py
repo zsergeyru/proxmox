@@ -7,12 +7,14 @@
 from __future__ import annotations
 
 import fcntl
+import ipaddress
 import json
 import os
 from pathlib import Path
 import re
 import subprocess
 import tempfile
+from urllib.parse import urlsplit
 
 from jinja2 import Environment, StrictUndefined
 import yaml
@@ -34,7 +36,7 @@ def _refresh_apps(state: Path, config: Path) -> None:
         capture_output=True, check=False, timeout=20,
     )
     if result.returncode:
-        raise RuntimeError("Не удалось обновить каталог приложений Homarr")
+        raise RuntimeError("Не удалось обновить домашние приложения")
 
 
 def _file(path: Path) -> None:
@@ -70,12 +72,33 @@ def _command(args: list[str]) -> None:
         raise RuntimeError("Caddy отклонил настройки или не ответил: " + args[3])
 
 
+DOMAIN = re.compile(r"(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+zsergey\\.ru\\Z")
+LABEL = re.compile(r"[a-zA-Zа-яА-ЯёЁ0-9 _.-]{1,60}\\Z")
+
+
+def _private_upstream(value: object, policy: dict) -> bool:
+    if not isinstance(value, str) or len(value) > 160:
+        return False
+    try:
+        url = urlsplit(value)
+        if (url.scheme not in ("http", "https") or not url.hostname
+                or url.username or url.password or url.path or url.query or url.fragment
+                or not url.port or url.port > 65535):
+            return False
+        ip = ipaddress.ip_address(url.hostname)
+        networks = policy["web_gateway"]["caddy"]["private_networks"]
+        return (ip.version == 4 and not ip.is_loopback and not ip.is_multicast
+                and not ip.is_unspecified and
+                any(ip in ipaddress.ip_network(net, strict=False) for net in networks))
+    except (ValueError, TypeError, KeyError, AttributeError):
+        return False
+
+
 def _validate_routes(routes: object, policy: dict) -> list[dict]:
-    """Не разрешать ни новые назначения, ни обход проверки через неожиданный YAML."""
+    """Проверить полный список перед изменением Caddy."""
     if not isinstance(routes, list):
         raise RuntimeError("Список доменов повреждён")
-    defined = policy["web_gateway"]["caddy"]["routes"]
-    allowed = {route["domain"]: route for route in defined}
+    allowed = {r["domain"]: r for r in policy["web_gateway"]["caddy"]["routes"]}
     public = set(policy["web_gateway"]["caddy"]["public_domains"])
     seen: set[str] = set()
     result = []
@@ -83,36 +106,41 @@ def _validate_routes(routes: object, policy: dict) -> list[dict]:
         if not isinstance(row, dict) or not isinstance(row.get("domain"), str):
             raise RuntimeError("Неверная запись маршрута")
         domain = row["domain"]
-        if domain in seen or domain not in allowed:
-            raise RuntimeError("Повторяющееся или неизвестное имя домена")
+        if domain in seen or not DOMAIN.fullmatch(domain):
+            raise RuntimeError("Неверное или повторяющееся имя домена")
         seen.add(domain)
-        baseline = allowed[domain]
-        if row.get("service") != baseline.get("service"):
-            raise RuntimeError("Нельзя менять назначение домена через эту форму")
-        if row.get("upstream") is not None and row["upstream"] != baseline.get("upstream"):
-            raise RuntimeError("Адрес приложения должен определяться только в Git")
-        if row.get("enabled") not in (True, False):
+        if type(row.get("enabled")) is not bool:
             raise RuntimeError("Неверное значение включения")
+        baseline = allowed.get(domain)
         mode = row.get("access", "public" if domain in public else "protected")
-        if domain in public:
-            if not row["enabled"] or mode != "public":
-                raise RuntimeError("Нельзя отключить основной вход или домашнюю страницу")
-        elif mode not in ALLOWED_ACCESS:
-            raise RuntimeError("Открытый доступ для этого домена запрещён")
-        if mode == "app_auth" and (domain != "photos.zsergey.ru" or baseline.get("service") != "immich"):
-            raise RuntimeError("Самостоятельный вход разрешён только для Immich")
-        if row["enabled"]:
-            expected_upstream = baseline.get("upstream")
-            if not isinstance(expected_upstream, str) or not re.fullmatch(
-                    r"http://[a-z0-9.-]+:[0-9]{2,5}", expected_upstream):
-                raise RuntimeError("Нет заранее утверждённого адреса приложения")
-            if mode == "app_auth" and not policy.get("allow_immich_activation", False):
-                raise RuntimeError("Immich сначала должен пройти отдельную проверку входа")
+        if baseline is None:
+            if (row.get("service") != "custom" or mode not in {"protected", "private"}
+                    or not _private_upstream(row.get("upstream"), policy)
+                    or not isinstance(row.get("name"), str) or not LABEL.fullmatch(row["name"])
+                    or set(row) != {"domain", "service", "upstream", "name", "enabled", "access"}):
+                raise RuntimeError("Новый домен должен указывать на внутренний адрес")
+        else:
+            if row.get("service") != baseline.get("service"):
+                raise RuntimeError("Нельзя менять назначение домена из Git")
+            if row.get("upstream") is not None and row["upstream"] != baseline.get("upstream"):
+                raise RuntimeError("Адрес приложения должен определяться только в Git")
+            if domain in public:
+                if not row["enabled"] or mode != "public":
+                    raise RuntimeError("Нельзя отключить основной вход или домашнюю страницу")
+            elif mode not in ALLOWED_ACCESS:
+                raise RuntimeError("Открытый доступ для этого домена запрещён")
+            if mode == "app_auth" and (domain != "photos.zsergey.ru" or baseline.get("service") != "immich"):
+                raise RuntimeError("Самостоятельный вход разрешён только для Immich")
+            if row["enabled"]:
+                expected = baseline.get("upstream")
+                if not isinstance(expected, str) or not re.fullmatch(r"http://[a-z0-9.-]+:[0-9]{2,5}", expected):
+                    raise RuntimeError("Нет заранее утверждённого адреса приложения")
+                if mode == "app_auth" and not policy.get("allow_immich_activation", False):
+                    raise RuntimeError("Immich сначала должен пройти отдельную проверку входа")
         result.append(dict(row))
-    if set(public) - seen:
+    if not public.issubset(seen):
         raise RuntimeError("Отсутствует обязательный домен")
     return result
-
 
 def _render(routes: list[dict], policy: dict, template: Path) -> bytes:
     env = Environment(autoescape=False, undefined=StrictUndefined, keep_trailing_newline=True)
@@ -125,15 +153,17 @@ def _render(routes: list[dict], policy: dict, template: Path) -> bytes:
     return result.encode("utf-8")
 
 
-def change_route(
-    state: Path, config: Path, domain: str, enabled: bool, access: str
-) -> None:
-    """Проверить, применить или восстановить старую конфигурацию одним действием."""
-    if not os.path.ismount(state):
+def apply_route(state: Path, config: Path, action: str, domain: str, *,
+                enabled: bool = False, access: str = "protected",
+                upstream: str | None = None, name: str | None = None) -> None:
+    """Создать, изменить или удалить домен с проверкой и полным откатом."""
+    if action not in {"create", "update", "delete"}:
+        raise ValueError("Неизвестное действие")
+    if not os.path.ismount(state) or state.is_symlink():
         raise RuntimeError("Постоянный том не подключён")
     if not isinstance(domain, str) or not re.fullmatch(r"[a-z0-9.-]+\.zsergey\.ru", domain):
         raise ValueError("Неверное имя домена")
-    if type(enabled) is not bool or access not in ALLOWED_ACCESS:
+    if action != "delete" and (type(enabled) is not bool or access not in ALLOWED_ACCESS):
         raise ValueError("Укажите разрешённый режим доступа и включения")
     stored = state / "management/routes.yaml"
     generated = config / "sites.generated.caddy"
@@ -150,12 +180,28 @@ def change_route(
         policy = json.loads(policy_file.read_text(encoding="utf-8"))
         original_stored, original_generated = stored.read_bytes(), generated.read_bytes()
         rows = _validate_routes(yaml.safe_load(original_stored), policy)
+        declared = {r["domain"] for r in policy["web_gateway"]["caddy"]["routes"]}
         selected = next((entry for entry in rows if entry["domain"] == domain), None)
-        if selected is None:
-            raise ValueError("Домен ещё не описан в Git")
-        if domain in policy["web_gateway"]["caddy"]["public_domains"]:
-            raise ValueError("Основной вход и домашнюю страницу нельзя менять")
-        selected["enabled"], selected["access"] = enabled, access
+        if action == "create":
+            if selected is not None or domain in declared:
+                raise ValueError("Домен уже существует")
+            rows.append({"domain": domain, "service": "custom", "name": name,
+                         "upstream": upstream, "enabled": enabled, "access": access})
+        elif action == "delete":
+            if selected is None or domain in declared:
+                raise ValueError("Удалять можно только пользовательские домены")
+            rows.remove(selected)
+        else:
+            if selected is None:
+                raise ValueError("Домен не найден")
+            if domain in policy["web_gateway"]["caddy"]["public_domains"]:
+                raise ValueError("Основной вход и домашнюю страницу нельзя менять")
+            selected["enabled"], selected["access"] = enabled, access
+            if domain not in declared:
+                if upstream is not None: selected["upstream"] = upstream
+                if name is not None: selected["name"] = name
+            elif upstream is not None or name is not None:
+                raise ValueError("Назначения из Git нельзя менять")
         rows = _validate_routes(rows, policy)
         candidate = _render(rows, policy, template)
         yaml_bytes = yaml.safe_dump(rows, allow_unicode=True, sort_keys=False).encode()
@@ -193,3 +239,8 @@ def change_route(
         finally:
             proposed_site.unlink(missing_ok=True)
             proposed_main.unlink(missing_ok=True)
+
+
+def change_route(state: Path, config: Path, domain: str, enabled: bool, access: str) -> None:
+    """Совместимость с прежним действием переключения маршрута."""
+    apply_route(state, config, "update", domain, enabled=enabled, access=access)
