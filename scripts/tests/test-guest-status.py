@@ -189,7 +189,7 @@ def check_credential_validation_140() -> None:
                 show_secrets=False,
             )
         text = output.getvalue()
-        for expected in ("https://auth.zsergey.ru", "https://auth.zsergey.ru/totp-setup", "Первое подключение телефона", "Шаг 1:", "Шаг 2:", "Шаг 3:", "Шаг 4:", "шесть цифр", "https://home.zsergey.ru", "Логин:", "скрыт", "через Authelia"):
+        for expected in ("https://auth.zsergey.ru", "https://auth.zsergey.ru/totp-setup", "Первое подключение телефона", "Шаг 1:", "Шаг 2:", "Шаг 3:", "Шаг 4:", "шесть цифр", "https://home.zsergey.ru", "Логин:", "скрыт", "Authelia"):
             if expected not in text:
                 fail(f"140: в скрытом статусе отсутствует {expected}")
 
