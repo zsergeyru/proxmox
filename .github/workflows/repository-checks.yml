@@ -78,6 +78,9 @@ jobs:
       - name: Compile Python tooling
         run: python -m compileall -q scripts
 
+      - name: Check physical host descriptions
+        run: python scripts/tests/test-physical-hosts.py
+
       - name: Run infra-manager Python foundation checks
         run: python scripts/tests/test-infra-manager-python.py
 
