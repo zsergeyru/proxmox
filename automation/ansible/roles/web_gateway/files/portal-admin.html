@@ -1,30 +1,76 @@
 <!doctype html>
-<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Администрирование — Домашний сервер</title><link rel="stylesheet" href="/static/portal.css"><script defer src="/static/portal.js"></script></head>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Управление домом — Домашний сервер</title>
+  <link rel="stylesheet" href="/static/portal.css">
+  <script defer src="/static/portal.js"></script>
+</head>
 <body data-page="admin">
-<header class="top"><a class="brand" href="/">⌂ Домашний сервер</a><nav><a href="/">Приложения</a><a href="https://auth.zsergey.ru/logout">Выход</a></nav></header>
-<main class="wrap"><p class="eyebrow">Только администраторы · домашняя сеть / VPN</p><h1>Администрирование</h1>
-<p class="muted">Изменения применяются штатными программами гостя 140. Секреты не хранятся в странице.</p>
-<div class="tabs" role="tablist"><button type="button" data-tab="users" class="selected">Пользователи</button><button type="button" data-tab="routes">Домены</button><button type="button" data-tab="guests">Гости Proxmox</button></div>
-<div id="notification" aria-live="polite"></div>
-<section id="users-panel" class="panel" aria-label="Пользователи"><h2>Учётные записи Authelia</h2><div id="users-list"></div>
-<form id="user-form" class="formgrid">
-<label>Действие<select name="action" required><option value="add">Создать</option><option value="password">Новый пароль</option><option value="groups">Изменить группы</option><option value="disable">Отключить вход</option><option value="enable">Разрешить вход</option><option value="reset_totp">Сбросить Google Authenticator</option><option value="code">Показать проверочный код</option></select></label>
-<label>Имя пользователя<input name="username" required minlength="2" maxlength="32" autocomplete="off" placeholder="ivan"></label>
-<label>Отображаемое имя<input name="name" placeholder="Иван" maxlength="60"></label>
-<label>Группы через запятую<input name="groups" placeholder="family или admins,family"></label>
-<label class="check"><input type="checkbox" name="confirm">Подтверждаю изменение</label>
-<button type="submit">Выполнить</button></form>
-</section>
-<section id="routes-panel" class="panel hidden" aria-label="Домены"><h2>Маршруты Caddy</h2><div id="routes-list"></div>
-<form id="route-form" class="formgrid">
-<label>Домен<select name="domain" id="route-domain" required></select></label>
-<label>Доступ<select name="access"><option value="protected">После входа в Authelia</option><option value="private">Только домашняя сеть / VPN</option></select></label>
-<label class="check"><input type="checkbox" name="enabled">Домен включён</label>
-<label class="check"><input type="checkbox" name="confirm" required>Подтверждаю изменение маршрута</label>
-<button type="submit">Проверить и применить</button></form>
-<p class="muted">Новые назначения сначала утверждаются в Git. Основные домены и неподготовленный Immich нельзя изменить этой формой.</p>
-</section>
-<section id="guests-panel" class="panel hidden" aria-label="Гости Proxmox"><h2>Гости Proxmox</h2><p class="muted">Список из Git; не показывает подтверждённое состояние работающих машин. Управляющих кнопок пока нет.</p><div id="guests-list"></div></section>
-</main><footer>Доступ разрешён только группе admins из доверенной сети.</footer>
+<header class="top">
+  <a class="brand" href="/">⌂ Домашний сервер</a>
+  <nav aria-label="Основная навигация"><a href="/">Приложения</a><a href="https://auth.zsergey.ru/logout">Выход</a></nav>
+</header>
+<main class="wrap dashboard">
+  <div class="page-heading">
+    <div><p class="eyebrow">Настройки · домашняя сеть / VPN</p><h1>Управление домом</h1><p class="muted">Пользователи, службы и домены в одном месте.</p></div>
+  </div>
+  <div class="tabs" role="tablist" aria-label="Разделы управления">
+    <button type="button" role="tab" id="users-tab" aria-controls="users-panel" aria-selected="true" data-tab="users" class="selected">Пользователи</button>
+    <button type="button" role="tab" id="routes-tab" aria-controls="routes-panel" aria-selected="false" data-tab="routes">Домены</button>
+    <button type="button" role="tab" id="guests-tab" aria-controls="guests-panel" aria-selected="false" data-tab="guests">Гости Proxmox</button>
+  </div>
+  <div id="notification" role="status" aria-live="polite" hidden></div>
+  <section id="credential-panel" class="credential-panel" aria-live="polite" hidden>
+    <div><strong id="credential-heading">Новый пароль</strong><p class="muted" id="credential-description">Скопируйте значение: прежний пароль по хешу восстановить нельзя.</p></div>
+    <div class="credential-line"><code id="credential-value"></code><button type="button" class="secondary" id="copy-credential">Скопировать</button></div>
+  </section>
+
+  <section id="users-panel" class="panel user-section" role="tabpanel" aria-labelledby="users-tab">
+    <div class="section-heading">
+      <div><p class="eyebrow">УЧЁТНЫЕ ЗАПИСИ</p><h2>Пользователи <span class="count" id="users-count" aria-live="polite"></span></h2><p class="muted">Управляйте доступом и паролями без команд и технических форм.</p></div>
+      <button type="button" id="add-user" class="primary">＋ Добавить пользователя</button>
+    </div>
+    <label class="search-field"><span>Поиск пользователя</span><input id="users-search" type="search" placeholder="Имя или логин" autocomplete="off"></label>
+    <div id="users-list" class="user-grid" aria-live="polite"><p class="muted">Загрузка пользователей…</p></div>
+  </section>
+
+  <section id="routes-panel" class="panel hidden" role="tabpanel" aria-labelledby="routes-tab" hidden>
+    <h2>Маршруты Caddy</h2><div id="routes-list"></div>
+    <form id="route-form" class="formgrid">
+      <label>Домен<select name="domain" id="route-domain" required></select></label>
+      <label>Доступ<select name="access"><option value="protected">После входа в Authelia</option><option value="private">Только домашняя сеть / VPN</option></select></label>
+      <label class="check"><input type="checkbox" name="enabled">Домен включён</label>
+      <label class="check"><input type="checkbox" name="confirm" required>Подтверждаю изменение маршрута</label>
+      <button type="submit">Проверить и применить</button>
+    </form>
+    <p class="muted">Новые назначения пока утверждаются в Git. Изменение доменов — следующий этап обновления.</p>
+  </section>
+
+  <section id="guests-panel" class="panel hidden" role="tabpanel" aria-labelledby="guests-tab" hidden>
+    <h2>Гости Proxmox</h2><p class="muted">Список из Git: фактическое состояние машин здесь пока не проверяется.</p><div id="guests-list"></div>
+  </section>
+
+  <dialog id="user-dialog" aria-labelledby="user-dialog-title">
+    <form id="user-form" class="dialog-form">
+      <div class="dialog-heading"><p class="eyebrow">УЧЁТНАЯ ЗАПИСЬ</p><h2 id="user-dialog-title">Добавить пользователя</h2><p class="muted">Реальный адрес электронной почты не требуется.</p></div>
+      <label>Логин <input name="username" required minlength="2" maxlength="32" pattern="[a-z][a-z0-9_.-]{1,31}" autocomplete="off" placeholder="ivan"></label>
+      <label>Отображаемое имя <input name="name" maxlength="60" required placeholder="Иван"></label>
+      <fieldset class="group-choices">
+        <legend>Группы доступа</legend>
+        <label><input type="checkbox" name="group" value="admins"> Администраторы</label>
+        <label><input type="checkbox" name="group" value="family"> Семья</label>
+        <label><input type="checkbox" name="group" value="guests"> Гости</label>
+      </fieldset>
+      <p class="form-error" id="user-form-error" role="alert" hidden></p>
+      <div class="dialog-actions"><button type="button" class="secondary" id="cancel-user">Отмена</button><button type="submit" id="save-user">Создать</button></div>
+    </form>
+  </dialog>
+  <dialog id="confirm-dialog" aria-labelledby="confirm-title" aria-describedby="confirm-description">
+    <div class="dialog-heading"><h2 id="confirm-title">Подтверждение</h2><p id="confirm-description"></p></div>
+    <div class="dialog-actions"><button type="button" class="secondary" id="cancel-confirm">Отмена</button><button type="button" id="apply-confirm">Продолжить</button></div>
+  </dialog>
+</main>
+<footer>Управление доступно только администраторам из доверенной сети.</footer>
 </body></html>
