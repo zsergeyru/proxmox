@@ -113,6 +113,17 @@
 - name: Обновить список гостей Homarr без перезапуска
   ansible.builtin.include_tasks: catalog.yml
 
+- name: Обновить домашние приложения без перезапуска Homarr
+  ansible.builtin.command:
+    argv:
+      - python3
+      - /usr/local/lib/web-gateway/home-apps.py
+      - --state
+      - "{{ provision.web_gateway.paths.persistent_state }}"
+      - --policy
+      - "{{ provision.web_gateway.paths.configuration }}/caddy/routes-policy.json"
+  changed_when: false
+
 - name: Проверить доступность действующего Homarr
   ansible.builtin.uri:
     url: "http://127.0.0.1:{{ provision.web_gateway.homarr.internal_port }}"
