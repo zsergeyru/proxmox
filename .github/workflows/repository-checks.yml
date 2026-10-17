@@ -133,6 +133,8 @@ jobs:
         run: python scripts/tests/test-web-gateway-users.py
       - name: Check private Homarr administration gateway
         run: python scripts/tests/test-web-gateway-admin.py
+      - name: Check encrypted backup preparation for web gateway
+        run: python scripts/tests/test-web-gateway-backup.py
 
       - name: Check Immich Compose template
         run: python scripts/tests/test-photo-archive-compose.py
