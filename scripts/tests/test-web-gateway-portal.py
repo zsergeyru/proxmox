@@ -76,7 +76,8 @@ def test_policy():
         assert 'id="' + identifier + '"' in admin
     assert 'name="group"' in admin
     assert 'userAction(' in js and 'openUserForm(' in js
-    assert 'result.code' in js and 'credential(result.code' in js
+    assert 'item.verification.value' in js and 'copyValue(item.verification.value)' in js
+    assert 'item.totp===true' in js and 'item.webauthn===true' in js
     assert 'type="password"' not in admin
     assert "textContent" in js and "innerHTML" not in js
     assert 'Origin' not in js  # браузер отправляет Origin сам
