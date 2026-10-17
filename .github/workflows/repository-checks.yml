@@ -131,6 +131,8 @@ jobs:
         run: python scripts/tests/test-web-gateway-totp.py
       - name: Check user management for web gateway
         run: python scripts/tests/test-web-gateway-users.py
+      - name: Check private Homarr administration gateway
+        run: python scripts/tests/test-web-gateway-admin.py
 
       - name: Check Immich Compose template
         run: python scripts/tests/test-photo-archive-compose.py
