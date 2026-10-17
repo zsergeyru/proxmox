@@ -17,6 +17,10 @@ checks:
     container: web-gateway-homarr
     message: "Homarr запущен"
 
+  - type: local_status
+    command: /usr/local/lib/web-gateway/homarr-diagnostics.py
+    message: "Ошибки Homarr проверены без вывода личных сведений"
+
   - type: tcp
     port: 80
     message: "Веб-шлюз принимает HTTP"
