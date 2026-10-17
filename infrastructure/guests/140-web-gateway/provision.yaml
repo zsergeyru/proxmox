@@ -157,7 +157,7 @@ web_gateway:
       container_path: /data/db.sqlite3
     initial_admin:
       username: admin
-      email: admin@zsergey.ru  # Заменить действительным адресом до первого входа
+      email: admin@zsergey.ru  # Служебное поле Authelia; почтовый ящик не требуется
     totp_setup:
       # Первый фактор для admin, только домашняя сеть и готовое HTTPS.
       # Изменять уже зарегистрированные коды повторным deploy запрещено.
