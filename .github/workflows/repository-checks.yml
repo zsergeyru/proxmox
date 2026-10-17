@@ -129,6 +129,8 @@ jobs:
         run: python scripts/tests/test-web-gateway-homarr-onboarding.py
       - name: Check automatic Homarr admin page and widget creation
         run: python scripts/tests/test-web-gateway-homarr-admin.py
+      - name: Check Homarr home page and automatic applications
+        run: python scripts/tests/test-web-gateway-home.py
       - name: Check safe Google Authenticator TOTP setup
         run: python scripts/tests/test-web-gateway-totp.py
       - name: Check user management for web gateway
