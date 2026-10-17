@@ -406,7 +406,9 @@ def _service_fields(
     fields = [("Адрес", str(service["url"]))]
     setup_url = service.get("setup_url")
     if isinstance(setup_url, str) and setup_url:
-        fields.append(("Первый TOTP (15 мин)", setup_url))
+        fields.append(("Первое подключение телефона", setup_url))
+        for number, instruction in enumerate(service.get("setup_instructions", []), start=1):
+            fields.append((f"Шаг {number}", instruction))
     operator = service.get("operator")
     if not isinstance(operator, dict):
         return fields
