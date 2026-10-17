@@ -111,3 +111,28 @@ footer{text-align:center;padding:2rem;color:var(--muted);font-size:.87rem}
 .inline-code .totp-code{font:750 1.3rem/1.5 ui-monospace,Consolas,monospace;letter-spacing:.08em;overflow-wrap:anywhere}
 .inline-code button{font-size:.8rem;padding:.3rem .65rem}
 .code-title,.code-expiry,.code-empty{font-size:.82rem;color:var(--muted)}
+
+/* Домены: компактная адаптивная сетка и переключатель. */
+.route-grid{display:grid;gap:.85rem}
+.route-card{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:1rem;border:1px solid var(--line);border-radius:14px;padding:1rem 1.2rem;background:var(--card)}
+.route-details{min-width:0;flex:1 1 270px;display:grid;gap:.35rem}
+.route-title{display:flex;align-items:center;gap:.7rem;flex-wrap:wrap}
+.route-details p{margin:0;overflow-wrap:anywhere}
+.route-host{font-weight:700;color:var(--accent);font-size:.94rem}
+.route-upstream{font:500 .85rem ui-monospace,Consolas,monospace;color:var(--muted)}
+.route-details .group-tag{justify-self:start}
+.route-actions{display:flex;align-items:center;gap:.55rem;flex-wrap:wrap}
+.route-actions button{font-size:.88rem}
+.route-fixed{font-size:.82rem}
+.switch-field{display:inline-flex;position:relative;align-items:center;cursor:pointer;width:46px;height:29px}
+.switch-field input{position:absolute;opacity:0;width:100%;height:100%;margin:0;cursor:pointer}
+.switch-track{width:46px;height:26px;border-radius:18px;background:var(--line);position:relative;transition:background .2s}
+.switch-track:before{content:"";position:absolute;top:3px;left:3px;height:20px;width:20px;border-radius:50%;background:#fff;transition:transform .2s;box-shadow:0 1px 4px #0002}
+.switch-field input:checked+.switch-track{background:var(--accent)}
+.switch-field input:checked+.switch-track:before{transform:translateX(20px)}
+.switch-field input:focus-visible+.switch-track{outline:3px solid var(--accent);outline-offset:3px}
+.switch-field input:disabled+.switch-track{opacity:.4;cursor:not-allowed}
+input[type="radio"],input[type="checkbox"]{accent-color:var(--accent)}
+#route-form .group-choices{display:grid;gap:.65rem}
+@media(max-width:650px){.route-card{align-items:flex-start}.route-actions{width:100%}.route-actions .route-fixed{width:100%}.route-actions button{flex:1}.route-details{flex-basis:100%}}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important;scroll-behavior:auto!important}}
