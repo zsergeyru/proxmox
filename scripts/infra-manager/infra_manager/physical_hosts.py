@@ -56,10 +56,12 @@ def load_physical_host(repo_root: Path, name: str) -> PhysicalHost:
     if data["name"] != name:
         raise InfraManagerError(f"{manifest}: name не совпадает с каталогом {name}")
     roles = [device["role"] for device in data["storage"]["devices"]]
-    for required in ("system", "shared", "data", "backup"):
-        if roles.count(required) != 1:
+    if roles.count("system") != 1:
+        raise InfraManagerError(f"{manifest}: нужен ровно один системный накопитель")
+    for role in ("shared", "data", "backup"):
+        if roles.count(role) > 1:
             raise InfraManagerError(
-                f"{manifest}: роль накопителя {required} должна встречаться ровно один раз"
+                f"{manifest}: роль накопителя {role} не может повторяться"
             )
     serials = [device["serial"] for device in data["storage"]["devices"] if device["serial"]]
     if len(serials) != len(set(serials)):
