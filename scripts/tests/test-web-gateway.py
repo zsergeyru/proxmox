@@ -47,7 +47,15 @@ def check() -> None:
     assert compose["services"]["caddy"]["image"] == "caddy:2.11.7"
     assert compose["services"]["authelia"]["image"] == "authelia/authelia:4.39.28"
     assert any("/run/portal:ro" in volume for volume in compose["services"]["caddy"]["volumes"])
-    assert any("/etc/caddy/portal:ro" in volume for volume in compose["services"]["caddy"]["volumes"])
+    assert any("/srv/portal:ro" in volume for volume in compose["services"]["caddy"]["volumes"])
+    # Запрещать вложенные точки монтирования внутри томов только для чтения.
+    mounts = [str(volume).rsplit(":", 2) for volume in compose["services"]["caddy"]["volumes"]]
+    for parent in mounts:
+        if len(parent) == 3 and parent[2] == "ro":
+            assert not any(
+                child is not parent and child[1].startswith(parent[1].rstrip("/") + "/")
+                for child in mounts
+            ), f"Вложенный том в каталоге только для чтения: {parent[1]}"
     for service in compose["services"].values():
         assert not any("docker.sock" in str(v) for v in service.get("volumes", []))
     assert all("7575" not in str(x) for x in compose["services"]["caddy"]["ports"])
