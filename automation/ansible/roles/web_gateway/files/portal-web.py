@@ -102,6 +102,27 @@ class Handler(BaseHTTPRequestHandler):
             except (OSError, ValueError, RuntimeError):
                 self.reply(503, {"error": "Список приложений временно недоступен"})
             return
+        if self.path in {"/api/admin/access", "/api/admin/guests"}:
+            if not self.permitted(admin=True):
+                return
+            if self.path == "/api/admin/access":
+                self.reply(200, {"allowed": True})
+                return
+            try:
+                catalog = CATALOG / "guests.json"
+                if catalog.is_symlink() or not catalog.is_file():
+                    raise RuntimeError("Нет списка гостей")
+                data = json.loads(catalog.read_text(encoding="utf-8"))
+                guests = data.get("guests")
+                if not isinstance(guests, list):
+                    raise RuntimeError("Неправильный каталог гостей")
+                self.reply(200, {"guests": [
+                    {"vmid": item.get("vmid"), "name": item.get("name")}
+                    for item in guests if isinstance(item, dict)
+                ]})
+            except (OSError, RuntimeError, ValueError):
+                self.reply(503, {"error": "Список гостей временно недоступен"})
+            return
         mapping = {
             "/api/admin/users": "/management/users",
             "/api/admin/routes": "/management/routes",
