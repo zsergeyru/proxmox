@@ -82,6 +82,9 @@ def initialize(state: Path, email: str, temporary: Path | None = None) -> None:
     marker = keys_dir / ".initialized"
     users = users_dir / "users_database.yml"
     operator_file = state / "management" / "operator-admin.json"
+    legacy_homarr = state / "homarr"
+    if legacy_homarr.is_symlink():
+        raise RuntimeError("140: каталог прежнего Homarr не может быть ссылкой")
     old_password_file = (temporary or Path("/run/web-gateway")) / "initial-admin-password"
     required = (
         "authelia-session-secret",
@@ -130,7 +133,8 @@ def initialize(state: Path, email: str, temporary: Path | None = None) -> None:
             return
         # Не считать утраченную метку или частично созданные ключи новой установкой.
         if (users.exists() or (users_dir / "db.sqlite3").exists()
-                or any((state / "homarr").iterdir())
+                or (legacy_homarr.is_dir() and any(legacy_homarr.iterdir()))
+                or (legacy_homarr.exists() and not legacy_homarr.is_dir())
                 or any((keys_dir / name).exists()
                        for name in (*required, "homarr.env",
                                     "authelia-homarr-client-secret-hash"))):

@@ -70,7 +70,6 @@
     - "{{ provision.web_gateway.caddy.config.host }}"
     - "{{ provision.web_gateway.authelia.data.host }}"
     - "{{ provision.web_gateway.authelia.data.host }}/totp-setup"
-    - "{{ provision.web_gateway.homarr.data.host }}"
     - "{{ provision.web_gateway.paths.secrets }}"
     - "{{ provision.web_gateway.paths.persistent_state }}/management"
     - "{{ provision.web_gateway.paths.persistent_state }}/management/catalog"
