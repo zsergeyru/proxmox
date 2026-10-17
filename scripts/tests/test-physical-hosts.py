@@ -14,6 +14,7 @@ sys.path.insert(0, str(ROOT / "scripts" / "infra-manager"))
 
 from infra_manager.common import InfraManagerError
 from infra_manager.physical_hosts import list_physical_hosts, load_physical_host
+from infra_manager.physical_host_operations import require_host_access
 
 
 def check_contract() -> None:
@@ -80,6 +81,7 @@ def main() -> int:
     check_contract()
     check_invalid_names()
     check_disk_identity()
+    require_host_access(ROOT, "nas")
     print("[ОК] Машинные описания физических узлов проверены")
     return 0
 
