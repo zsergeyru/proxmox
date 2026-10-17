@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Закрытое управление через Homarr: права, пароль, доступ и безопасность."""
+"""Закрытое управление 140: права, пароль, доступ и безопасность."""
 from __future__ import annotations
 
 import importlib.util
@@ -72,7 +72,7 @@ def test():
         }}}), encoding="utf-8")
         file.chmod(0o600)
         (state / "management/routes.yaml").write_text(yaml.safe_dump([
-            {"domain": "home.zsergey.ru", "service": "homarr",
+            {"domain": "home.zsergey.ru", "service": "portal",
              "access": "public", "enabled": True},
             {"domain": "photos.zsergey.ru", "service": "immich",
              "access": "app_auth", "enabled": False},
