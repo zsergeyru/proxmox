@@ -125,6 +125,7 @@ web_gateway:
     public_url: https://auth.zsergey.ru
     operator_status:
       name: Authelia
+      setup_path: /totp-setup
       operator:
         username: admin
         password:

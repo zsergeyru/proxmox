@@ -436,9 +436,22 @@ def operator_service_definitions(
             via = definition.get("authentication")
             if via is not None and (not isinstance(via, str) or not via.strip()):
                 raise InfraManagerError(f"{source}.operator_status.authentication должен быть строкой")
+            setup_path = definition.get("setup_path")
+            if setup_path is not None and (
+                not isinstance(setup_path, str)
+                or not setup_path.startswith("/")
+                or setup_path.startswith("//")
+                or not setup_path[1:]
+                or any(char not in "abcdefghijklmnopqrstuvwxyz0123456789/-" for char in setup_path[1:])
+                or "//" in setup_path
+            ):
+                raise InfraManagerError(
+                    f"{source}.operator_status.setup_path должен быть безопасным относительным путём"
+                )
             result.append({
                 "name": name.strip(),
                 "url": url,
+                "setup_url": url.rstrip("/") + setup_path if setup_path else None,
                 "operator": _validated_operator(
                     f"{source}.operator_status", definition.get("operator")
                 ),

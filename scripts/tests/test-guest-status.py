@@ -116,6 +116,10 @@ def check_operator_services_140() -> None:
     authelia, homarr = services
     if authelia["url"] != "https://auth.zsergey.ru":
         fail("140: неверный адрес Authelia")
+    if authelia.get("setup_url") != "https://auth.zsergey.ru/totp-setup":
+        fail("140: ссылка первоначальной настройки TOTP должна быть в статусе")
+    if homarr.get("setup_url") is not None:
+        fail("140: Homarr не должен показывать ссылку настройки TOTP")
     if authelia["operator"] != {
         "username": "admin",
         "password": {
@@ -178,7 +182,7 @@ def check_credential_validation_140() -> None:
                 show_secrets=False,
             )
         text = output.getvalue()
-        for expected in ("https://auth.zsergey.ru", "https://home.zsergey.ru", "Логин:", "скрыт", "через Authelia"):
+        for expected in ("https://auth.zsergey.ru", "https://auth.zsergey.ru/totp-setup", "Первый TOTP (15 мин)", "https://home.zsergey.ru", "Логин:", "скрыт", "через Authelia"):
             if expected not in text:
                 fail(f"140: в скрытом статусе отсутствует {expected}")
 
