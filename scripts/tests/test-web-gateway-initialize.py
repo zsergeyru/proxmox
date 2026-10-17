@@ -61,6 +61,11 @@ def test() -> None:
             (secrets_dir / "immich-client-secret").read_text().strip(),
             (secrets_dir / "authelia-immich-client-secret-hash").read_text().strip(),
         )
+        # Старые секреты Homarr не требуются, но при повторном deploy
+        # должны оставаться без изменений для возможного возврата.
+        legacy = secrets_dir / "homarr.env"
+        legacy.write_text("Сохранённые данные старой установки\\n", encoding="utf-8")
+        legacy.chmod(0o600)
         before = {
             path.relative_to(state): path.read_bytes()
             for path in state.rglob("*") if path.is_file()
