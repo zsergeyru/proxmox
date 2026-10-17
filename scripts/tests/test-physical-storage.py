@@ -12,7 +12,7 @@ sys.path.insert(0, str(ROOT / "scripts" / "infra-manager"))
 
 from infra_manager.common import InfraManagerError
 from infra_manager.operator import build_parser
-from infra_manager.physical_storage import read_disk_inspection
+from infra_manager.physical_storage import read_disk_inspection, verify_expected_disks
 
 
 def fixture() -> dict[str, object]:
@@ -71,6 +71,24 @@ def test_existing_partition() -> None:
     assert disks[1].contains_existing_layout
 
 
+def test_assignments() -> None:
+    """Проверить соответствие системного диска и постоянных номеров."""
+
+    disks = read_disk_inspection(json.dumps(fixture()))
+    devices = (
+        {"role": "system", "model": "SPCC", "capacity_gb": 120, "serial": "SYSTEM123"},
+        {"role": "data", "model": "Seagate", "capacity_gb": 4000, "serial": "DATA123"},
+    )
+    verify_expected_disks(devices, disks)
+    wrong = (dict(devices[0], serial="DATA123"), dict(devices[1], serial="SYSTEM123"))
+    try:
+        verify_expected_disks(wrong, disks)
+    except InfraManagerError:
+        pass
+    else:
+        raise AssertionError("Ошибочное назначение системного диска принято")
+
+
 def test_cli() -> None:
     """Проверить совместимость выбора VMID и физических целей."""
 
@@ -92,6 +110,7 @@ def main() -> int:
     test_disks()
     test_missing_root()
     test_existing_partition()
+    test_assignments()
     test_cli()
     print("[ОК] Чтение дисков и команды физических узлов проверены")
     return 0
