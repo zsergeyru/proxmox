@@ -136,6 +136,27 @@ jobs:
 
       - name: Check secure static pages and two-factor access
         run: python scripts/tests/test-web-gateway-portal.py
+      - name: Validate actual Caddy gateway syntax
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import yaml
+          from jinja2 import Environment, FileSystemLoader, StrictUndefined
+
+          provision = yaml.safe_load(Path("infrastructure/guests/140-web-gateway/provision.yaml").read_text())
+          templates = Path("automation/ansible/roles/web_gateway/templates")
+          output = Path("/tmp/portal-caddy-140")
+          output.mkdir(exist_ok=True)
+          env = Environment(loader=FileSystemLoader(str(templates)), undefined=StrictUndefined,
+                            keep_trailing_newline=True)
+          env.filters["bool"] = bool
+          values = {"provision": provision, "web_gateway_routes": provision["web_gateway"]["caddy"]["routes"]}
+          for source, dest in (("Caddyfile.j2", "Caddyfile"),
+                               ("sites.generated.caddy.j2", "sites.generated.caddy")):
+              (output / dest).write_text(env.get_template(source).render(**values), encoding="utf-8")
+          PY
+          docker run --rm --entrypoint caddy -v /tmp/portal-caddy-140:/etc/caddy:ro \
+            caddy:2.11.7 validate --config /etc/caddy/Caddyfile
       - name: Check encrypted backup preparation for web gateway
         run: python scripts/tests/test-web-gateway-backup.py
       - name: Check Immich login safety in web gateway
