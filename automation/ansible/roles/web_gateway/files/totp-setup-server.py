@@ -78,7 +78,7 @@ class SetupHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         if not self.active():
-            self.page("Срок первоначальной настройки истёк", 410)
+            self.page("Время для подключения закончилось. Если телефон ещё не подключён, повторите развёртывание гостя 140.", 410)
             return
         if self.path in ("/totp-setup", "/totp-setup/"):
             self.respond(200, self.server.html.read_bytes())
@@ -89,14 +89,14 @@ class SetupHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         if not self.active():
-            self.page("Страница настройки закрыта", 410)
+            self.page("Страница подключения закрыта. Если вход с кодом из телефона уже работает, ничего делать не нужно.", 410)
             return
         if self.path not in ("/totp-setup/confirm", "/totp-setup/close"):
             self.page("Страница не найдена", 404)
             return
         if self.path.endswith("/close"):
             self.server.finished = True
-            self.page("Страница закрыта. Для повторной попытки выполните deploy 140.")
+            self.page("Страница закрыта без подключения. Чтобы попробовать снова, повторите развёртывание гостя 140.")
             return
         try:
             size = int(self.headers.get("Content-Length", "-1"))
@@ -110,7 +110,7 @@ class SetupHandler(BaseHTTPRequestHandler):
         try:
             ok = totp_matches(self.server.uri.read_text(encoding="utf-8"), code)
         except (ValueError, KeyError, UnicodeError):
-            self.page("Невозможно проверить код. Настройка остановлена.", 500)
+            self.page("Не получилось проверить шесть цифр с телефона. Подключение не завершено.", 500)
             self.server.finished = True
             return
         if not ok:
@@ -125,7 +125,7 @@ class SetupHandler(BaseHTTPRequestHandler):
         self.server.png.unlink(missing_ok=True)
         self.server.uri.unlink(missing_ok=True)
         self.server.finished = True
-        self.page("Google Authenticator подключён. QR-код удалён.")
+        self.page("Телефон подключён. Рисунок удалён. Теперь для входа используйте код из приложения Google Authenticator.")
 
 
 class SetupServer(socketserver.UnixStreamServer):
