@@ -64,7 +64,7 @@ if(page==="admin"){
   document.querySelectorAll("[data-tab]").forEach(b=>b.addEventListener("click",()=>showTab(b.dataset.tab)));
   q("#user-form").addEventListener("submit",async event=>{
     event.preventDefault();const form=event.currentTarget,values=Object.fromEntries(new FormData(form));
-    const body={action:values.action,username:values.username,email:values.email||"",name:values.name||"",
+    const body={action:values.action,username:values.username,name:values.name||"",
       groups:values.groups||"",confirm:form.elements.confirm.checked};
     try{const result=await request("/api/admin/users",body);notify(
       "Действие выполнено для "+result.username+(result.password?"\nНовый пароль (сохраните его): "+result.password:"")+
