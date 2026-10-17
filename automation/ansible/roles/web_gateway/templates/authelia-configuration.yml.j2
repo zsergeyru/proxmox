@@ -29,6 +29,22 @@ access_control:
   # Правило для всех поддоменов позволяет добавлять маршруты из routes.yaml,
   # но не делает их публичными: в Caddy допуск определяется отдельно.
   rules:
+    # Первый совпавший ресурс решает доступ; домашняя админ-страница
+    # требует одновременно двух факторов и принадлежности группе admins.
+    - domain: "{{ provision.web_gateway.portal.public_url.split('://', 1)[1] }}"
+      resources:
+        - "^/admin(?:/.*)?$"
+        - "^/api/admin(?:/.*)?$"
+      subject:
+        - "group:admins"
+      policy: two_factor
+    # Если пользователь не состоит в admins, запрещаем путь явно.
+    # Иначе более общее wildcard-правило допустило бы family/guests!
+    - domain: "{{ provision.web_gateway.portal.public_url.split('://', 1)[1] }}"
+      resources:
+        - "^/admin(?:/.*)?$"
+        - "^/api/admin(?:/.*)?$"
+      policy: deny
     - domain: "*.{{ provision.web_gateway.domain }}"
       policy: two_factor
 
@@ -37,7 +53,7 @@ session:
     - name: authelia_session
       domain: "{{ provision.web_gateway.domain }}"
       authelia_url: "{{ provision.web_gateway.authelia.public_url }}"
-      default_redirection_url: "{{ provision.web_gateway.homarr.public_url }}"
+      default_redirection_url: "{{ provision.web_gateway.portal.public_url }}"
 
 regulation:
   max_retries: 5
@@ -59,25 +75,6 @@ identity_providers:
     jwks:
       - key: {% raw %}{{ secret "/run/authelia-secrets/authelia-oidc-jwks-pem" | mindent 10 "|" | msquote }}{% endraw +%}
     clients:
-      - client_id: "{{ provision.web_gateway.homarr.authentication.client_id }}"
-        client_name: Homarr
-        client_secret: {% raw %}{{ secret "/run/authelia-secrets/authelia-homarr-client-secret-hash" }}{% endraw +%}
-        public: false
-        authorization_policy: two_factor
-        consent_mode: implicit
-        token_endpoint_auth_method: client_secret_basic
-        redirect_uris:
-          - "{{ provision.web_gateway.homarr.public_url }}/api/auth/callback/oidc"
-        scopes:
-          - openid
-          - profile
-          - email
-          - groups
-        userinfo_signed_response_alg: none
-        response_types:
-          - code
-        grant_types:
-          - authorization_code
       - client_id: immich
         client_name: Immich
         client_secret: {% raw %}{{ secret "/run/authelia-secrets/authelia-immich-client-secret-hash" }}{% endraw +%}

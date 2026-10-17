@@ -13,14 +13,6 @@ checks:
     container: web-gateway-authelia
     message: "Authelia запущена"
 
-  - type: docker
-    container: web-gateway-homarr
-    message: "Homarr запущен"
-
-  - type: local_status
-    command: /usr/local/lib/web-gateway/homarr-diagnostics.py
-    message: "Ошибки Homarr проверены без вывода личных сведений"
-
   - type: tcp
     port: 80
     message: "Веб-шлюз принимает HTTP"
@@ -58,36 +50,20 @@ checks:
     message: "Постоянные секреты инициализированы"
 
   - type: file
-    path: /var/lib/web-gateway/homarr/db/db.sqlite
-    message: "Постоянная база Homarr содержит данные"
+    path: /etc/web-gateway/portal/portal-home.html
+    message: "Домашняя страница установлена"
 
   - type: file
-    path: /var/lib/web-gateway/management/catalog/homarr-ready
-    message: "Первоначальная настройка Homarr завершена, внешний /init закрыт"
+    path: /etc/web-gateway/portal/portal-admin.html
+    message: "Административная страница установлена"
 
   - type: file
     path: /var/lib/web-gateway/management/catalog/guests.json
-    message: "Каталог гостей Homarr сформирован на постоянном томе"
-
-  - type: file
-    path: /etc/web-gateway/homarr/widgets/authelia-users.json
-    message: "Форма управления пользователями установлена для Homarr"
-
-  - type: file
-    path: /etc/web-gateway/homarr/widgets/caddy-routes.json
-    message: "Форма изменения доменов установлена для Homarr"
+    message: "Каталог гостей Proxmox сформирован"
 
   - type: file
     path: /var/lib/web-gateway/management/catalog/apps.json
-    message: "Список включённых домашних приложений подготовлен"
-
-  - type: file
-    path: /etc/web-gateway/homarr/widgets/home-apps.json
-    message: "Определение обычной страницы Homarr подготовлено"
-
-  - type: file
-    path: /etc/web-gateway/homarr/widgets/proxmox-guests.json
-    message: "Перечень гостей установлен для Homarr"
+    message: "Список включённых приложений подготовлен"
 
   - type: file
     path: /etc/web-gateway/caddy/routes-policy.json

@@ -111,8 +111,21 @@ def test() -> None:
         notice = directory / "notifications.txt"
         notice.write_text("Date: now\nRecipient: Anna <anna@example.com>\n"
                           "Subject: Confirm your identity\n"
-                          "Your one-time code is 12345678\n", encoding="utf-8")
+                          "The one-time code to confirm identity:\n"
+                          "----------------------------------------\n"
+                          "PRQYUNRB\n"
+                          "----------------------------------------\n", encoding="utf-8")
+        assert users_code.latest_code("anna", users, notice) == "PRQYUNRB"
+        notice.write_text(notice.read_text().replace("PRQYUNRB", "12345678"))
         assert users_code.latest_code("anna", users, notice) == "12345678"
+        os.utime(notice, (time.time() - 301, time.time() - 301))
+        try:
+            users_code.latest_code("anna", users, notice)
+        except RuntimeError as exc:
+            assert "устарел" in str(exc)
+        else:
+            raise AssertionError("Нельзя выдавать код старше пяти минут")
+        os.utime(notice, None)
         try:
             users_code.latest_code("ivan", users, notice)
         except RuntimeError:

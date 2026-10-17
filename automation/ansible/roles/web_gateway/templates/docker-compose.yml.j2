@@ -11,6 +11,8 @@ services:
       - "{{ provision.web_gateway.caddy.listen.local_http }}:8080"
     volumes:
       - "{{ provision.web_gateway.paths.configuration }}/caddy:/etc/caddy:ro"
+      - "{{ provision.web_gateway.portal.assets }}:/etc/caddy/portal:ro"
+      - "{{ provision.web_gateway.paths.persistent_state }}/management/portal-socket:/run/portal:ro"
       - "{{ provision.web_gateway.paths.persistent_state }}/management/catalog:/srv/homarr-catalog:ro"
       # Только Unix-сокет временной страницы, никаких секретов Authelia.
       - "{{ provision.web_gateway.paths.persistent_state }}/management/totp-setup-socket:/run/totp-setup:ro"
@@ -19,7 +21,6 @@ services:
       - "{{ provision.web_gateway.caddy.config.host }}:{{ provision.web_gateway.caddy.config.container }}"
     depends_on:
       - authelia
-      - homarr
 
   authelia:
     image: "{{ provision.web_gateway.authelia.image }}"
@@ -36,26 +37,3 @@ services:
       - "{{ provision.web_gateway.paths.configuration }}/authelia:/config:ro"
       - "{{ provision.web_gateway.paths.secrets }}:/run/authelia-secrets:ro"
       - "{{ provision.web_gateway.authelia.data.host }}:{{ provision.web_gateway.authelia.data.container }}"
-
-  homarr:
-    image: "{{ provision.web_gateway.homarr.image }}"
-    container_name: "{{ provision.web_gateway.homarr.container_name }}"
-    restart: unless-stopped
-    ports:
-      # Порт для местной проверки, не публикация в домашнюю сеть.
-      - "127.0.0.1:{{ provision.web_gateway.homarr.internal_port }}:7575"
-    env_file:
-      - "{{ provision.web_gateway.paths.secrets }}/homarr.env"
-    environment:
-      TZ: Europe/Moscow
-      AUTH_PROVIDERS: oidc
-      AUTH_OIDC_ISSUER: "{{ provision.web_gateway.homarr.authentication.issuer }}"
-      AUTH_OIDC_CLIENT_ID: "{{ provision.web_gateway.homarr.authentication.client_id }}"
-      AUTH_OIDC_CLIENT_NAME: Authelia
-      AUTH_OIDC_FORCE_USERINFO: "true"
-      AUTH_OIDC_SCOPE_OVERWRITE: "openid email profile groups"
-      AUTH_OIDC_GROUPS_ATTRIBUTE: groups
-      AUTH_LOGOUT_REDIRECT_URL: "{{ provision.web_gateway.authelia.public_url }}/logout"
-    volumes:
-      - "{{ provision.web_gateway.homarr.data.host }}:{{ provision.web_gateway.homarr.data.container }}"
-    # Доступ к Docker-сокету Homarr не требуется.

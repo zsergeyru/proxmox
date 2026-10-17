@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Закрытое управление через Homarr: права, пароль, доступ и безопасность."""
+"""Закрытое управление 140: права, пароль, доступ и безопасность."""
 from __future__ import annotations
 
 import importlib.util
@@ -15,7 +15,6 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 FILES = ROOT / "automation/ansible/roles/web_gateway/files"
-WIDGET = ROOT / "infrastructure/guests/140-web-gateway/widgets/authelia-users.json"
 
 
 def load(name, file):
@@ -48,18 +47,6 @@ def test():
     api = load("admin_api_140", "admin-api.py")
     users = load("users_140", "user-accounts.py")
     totp = load("totp_140", "totp-users.py")
-    definition = json.loads(WIDGET.read_text(encoding="utf-8"))
-    assert definition["sources"]["default"]["networkScope"] == "private"
-    assert definition["sources"]["default"]["auth"] == "bearer"
-    assert definition["requests"]["operate"]["permission"] == "full"
-    routes_widget = json.loads((
-        ROOT / "infrastructure/guests/140-web-gateway/widgets/caddy-routes.json"
-    ).read_text(encoding="utf-8"))
-    assert routes_widget["requests"]["update"]["permission"] == "full"
-    assert routes_widget["requests"]["update"]["kind"] == "action"
-    assert "secret-token-for-testing" not in WIDGET.read_text()
-    assert not any("/var/run/docker.sock" in str(item) for item in definition.values())
-
     with TemporaryDirectory() as root:
         state = Path(root)
         (state / "authelia").mkdir()
@@ -72,7 +59,7 @@ def test():
         }}}), encoding="utf-8")
         file.chmod(0o600)
         (state / "management/routes.yaml").write_text(yaml.safe_dump([
-            {"domain": "home.zsergey.ru", "service": "homarr",
+            {"domain": "home.zsergey.ru", "service": "portal",
              "access": "public", "enabled": True},
             {"domain": "photos.zsergey.ru", "service": "immich",
              "access": "app_auth", "enabled": False},

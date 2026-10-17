@@ -1,5 +1,5 @@
 ---
-# При Sync нельзя создавать Homarr, Authelia, Caddy или менять их Docker-образы.
+# При Sync нельзя создавать службы, менять их образы или секреты.
 # Здесь обновляется только файл действующих маршрутов и выполняется caddy reload.
 - name: Проверить постоянный том веб-шлюза перед синхронизацией
   ansible.builtin.command:
@@ -97,23 +97,23 @@
   changed_when: true
   when: web_gateway_generated_routes.changed
 
-- name: Проверить каталог для обмена с Homarr
+- name: Проверить сохранённый каталог приложений
   ansible.builtin.stat:
     path: "{{ provision.web_gateway.paths.persistent_state }}/management/catalog"
   register: web_gateway_catalog_dir
 
-- name: Запретить синхронизацию без первоначальной настройки каталога
+- name: Запретить синхронизацию без первоначального развёртывания
   ansible.builtin.assert:
     that:
       - web_gateway_catalog_dir.stat.isdir | default(false)
     fail_msg: >-
-      На 140 ещё нет каталога Homarr. Нужна однократная установка
+      На 140 ещё нет каталога портала. Нужна однократная установка
       настройки Caddy через infra-manager deploy 140.
 
-- name: Обновить список гостей Homarr без перезапуска
+- name: Обновить список гостей для администрирования
   ansible.builtin.include_tasks: catalog.yml
 
-- name: Обновить домашние приложения без перезапуска Homarr
+- name: Обновить домашние приложения без перезапуска служб
   ansible.builtin.command:
     argv:
       - python3
@@ -124,9 +124,12 @@
       - "{{ provision.web_gateway.paths.configuration }}/caddy/routes-policy.json"
   changed_when: false
 
-- name: Проверить доступность действующего Homarr
-  ansible.builtin.uri:
-    url: "http://127.0.0.1:{{ provision.web_gateway.homarr.internal_port }}"
-    status_code: [200, 301, 302, 303, 307, 308]
-    follow_redirects: none
-  changed_when: false
+- name: Проверить, что закрытая служба страниц работает
+  ansible.builtin.stat:
+    path: "{{ provision.web_gateway.portal.socket }}"
+  register: web_gateway_portal_sync
+
+- name: Запретить синхронизацию без работающего веб-портала
+  ansible.builtin.assert:
+    that:
+      - web_gateway_portal_sync.stat.issock | default(false)

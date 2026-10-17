@@ -18,17 +18,16 @@ import subprocess
 import tempfile
 
 DEFAULT_SOURCE = Path("/mnt/bindmounts/infra-state/140-web-gateway")
-DATABASES = (
-    Path("authelia/db.sqlite3"),
-    Path("homarr/db/db.sqlite"),
-)
+REQUIRED_DATABASES = (Path("authelia/db.sqlite3"),)
+OPTIONAL_DATABASES = (Path("homarr/db/db.sqlite"),)  # Оставленная база прежнего интерфейса.
+DATABASES = REQUIRED_DATABASES + OPTIONAL_DATABASES
 
 
 def check_source(root: Path) -> None:
     if root.is_symlink() or not root.is_dir() or not root.parent.is_mount():
         raise RuntimeError("Том infra_state не подключён; резервирование запрещено")
     required = (root / "secrets/.initialized", root / "authelia/users_database.yml", *(
-        root / rel for rel in DATABASES
+        root / rel for rel in REQUIRED_DATABASES
     ))
     for path in required:
         if path.is_symlink() or not path.is_file() or path.stat().st_size == 0:
@@ -62,7 +61,10 @@ def consistent_copy(source: Path, target: Path) -> None:
                 raise RuntimeError("Неподдерживаемый файл: " + str(path))
         return excluded
     shutil.copytree(source, stage, symlinks=False, ignore=_ignore)
-    for rel in DATABASES:
+    present_databases = [
+        rel for rel in DATABASES if (source / rel).is_file()
+    ]
+    for rel in present_databases:
         destination = stage / rel
         destination.parent.mkdir(parents=True, exist_ok=True)
         with sqlite3.connect(f"file:{source / rel}?mode=ro", uri=True) as original:
@@ -75,7 +77,7 @@ def consistent_copy(source: Path, target: Path) -> None:
         "guest": 140,
         "created_utc": datetime.now(timezone.utc).isoformat(),
         "source": str(source),
-        "sqlite_databases": [str(x) for x in DATABASES],
+        "sqlite_databases": [str(x) for x in present_databases],
         "restoration": "Ручное восстановление; развёртывание никогда не восстанавливает копии",
     }
     (target / "manifest.json").write_text(

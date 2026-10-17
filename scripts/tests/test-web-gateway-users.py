@@ -53,12 +53,14 @@ def test():
             expect_error(lambda: mod.change(root, "add", "anna",
                                          email="admin@example.org", groups="family"))
             assert users.read_bytes() == original
-            password = mod.change(root, "add", "anna",
-                                  email="anna@example.org", groups="family")
+            # Реальная почта не требуется: при создании используется адрес
+            # файлового уведомителя, не предназначенный для доставки писем.
+            password = mod.change(root, "add", "anna", groups="family")
             people = yaml.safe_load(users.read_text())["users"]
             assert people["admin"]["password"] == "existing-hash"
             assert PasswordHasher().verify(people["anna"]["password"], password)
             assert people["anna"]["groups"] == ["family"]
+            assert people["anna"]["email"] == "anna@users.zsergey.ru"
             assert users.stat().st_mode & 0o777 == 0o600
             before = users.read_bytes()
             expect_error(lambda: mod.change(root, "add", "anna",

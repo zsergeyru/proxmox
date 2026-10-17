@@ -6,9 +6,9 @@
 |---|---|
 | [caddy.md](caddy.md) | Публикация адресов, обратный прокси, HTTPS и сертификаты |
 | [authelia.md](authelia.md) | Пользователи, группы, общий вход, второй фактор, постоянный файл пользователей и SQLite |
-| [homarr.md](homarr.md) | Домашняя страница, плитки служб и права отображения |
-| [administration.md](administration.md) | Встроенная в Homarr панель управления Caddy и Authelia, права и хранение изменений |
-| [guest-management.md](guest-management.md) | Список гостей и программ из Git в Homarr, обновление через `sync 140` |
+| [portal.md](portal.md) | Домашняя страница и администрация, вход через Authelia, ограничения сети |
+| [administration.md](administration.md) | Закрытая страница управления Caddy и Authelia, права и хранение изменений |
+| [guest-management.md](guest-management.md) | Список гостей и программ из Git на странице управления, обновление через `sync 140` |
 | [storage.md](storage.md) | Постоянный том PVE, состав невоспроизводимых данных, резервирование и пересоздание LXC без потери состояния |
 | [operations.md](operations.md) | Общий порядок установки, проверки, обновления, резервирования и восстановления |
 | [decisions.md](decisions.md) | Причины разделения 109/140 и выбора готовых средств |

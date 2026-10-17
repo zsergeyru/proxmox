@@ -1,0 +1,21 @@
+[Unit]
+Description=Закрытый интерфейс домашней страницы гостя 140
+Requires=web-gateway-admin-api.service
+After=web-gateway-admin-api.service
+
+[Service]
+Type=simple
+User=root
+Group=root
+UMask=0077
+ExecStart=/usr/bin/python3 /usr/local/lib/web-gateway/portal-web.py
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

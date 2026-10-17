@@ -62,7 +62,7 @@ def test():
                 "caddy": {"routes": old, "public_domains": ["home.zsergey.ru", "auth.zsergey.ru"],
                           "private_networks": ["192.168.0.0/16"]},
                 "authelia": {"public_url": "https://auth.zsergey.ru"},
-                "homarr": {"public_url": "https://home.zsergey.ru"},
+                "portal": {"public_url": "https://home.zsergey.ru"},
             },
             "allow_immich_activation": False,
         }

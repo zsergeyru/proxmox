@@ -104,8 +104,12 @@ def change(state: Path, action: str, username: str, *,
         if action == "add":
             if record is not None:
                 raise ValueError("Учётная запись уже существует")
+            # Authelia требует непустое поле email, но фактическая почта
+            # не нужна: проверочные коды выдаёт администратор из уведомителя.
+            # Служебный адрес уникален и не используется для доставки писем.
+            email = email.strip() or f"{username}@users.zsergey.ru"
             if not EMAIL.fullmatch(email):
-                raise ValueError("Укажите адрес пользователя")
+                raise ValueError("Неверный адрес пользователя")
             if any(isinstance(v, dict) and v.get("email", "").lower() == email.lower()
                    for v in users.values()):
                 raise ValueError("Указанный адрес уже принадлежит другому пользователю")

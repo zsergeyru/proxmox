@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Администрирование — Домашний сервер</title><link rel="stylesheet" href="/static/portal.css"><script defer src="/static/portal.js"></script></head>
+<body data-page="admin">
+<header class="top"><a class="brand" href="/">⌂ Домашний сервер</a><nav><a href="/">Приложения</a><a href="https://auth.zsergey.ru/logout">Выход</a></nav></header>
+<main class="wrap"><p class="eyebrow">Только администраторы · домашняя сеть / VPN</p><h1>Администрирование</h1>
+<p class="muted">Изменения применяются штатными программами гостя 140. Секреты не хранятся в странице.</p>
+<div class="tabs" role="tablist"><button type="button" data-tab="users" class="selected">Пользователи</button><button type="button" data-tab="routes">Домены</button><button type="button" data-tab="guests">Гости Proxmox</button></div>
+<div id="notification" aria-live="polite"></div>
+<section id="users-panel" class="panel" aria-label="Пользователи"><h2>Учётные записи Authelia</h2><div id="users-list"></div>
+<form id="user-form" class="formgrid">
+<label>Действие<select name="action" required><option value="add">Создать</option><option value="password">Новый пароль</option><option value="groups">Изменить группы</option><option value="disable">Отключить вход</option><option value="enable">Разрешить вход</option><option value="reset_totp">Сбросить Google Authenticator</option><option value="code">Показать проверочный код</option></select></label>
+<label>Имя пользователя<input name="username" required minlength="2" maxlength="32" autocomplete="off" placeholder="ivan"></label>
+<label>Отображаемое имя<input name="name" placeholder="Иван" maxlength="60"></label>
+<label>Группы через запятую<input name="groups" placeholder="family или admins,family"></label>
+<label class="check"><input type="checkbox" name="confirm">Подтверждаю изменение</label>
+<button type="submit">Выполнить</button></form>
+</section>
+<section id="routes-panel" class="panel hidden" aria-label="Домены"><h2>Маршруты Caddy</h2><div id="routes-list"></div>
+<form id="route-form" class="formgrid">
+<label>Домен<select name="domain" id="route-domain" required></select></label>
+<label>Доступ<select name="access"><option value="protected">После входа в Authelia</option><option value="private">Только домашняя сеть / VPN</option></select></label>
+<label class="check"><input type="checkbox" name="enabled">Домен включён</label>
+<label class="check"><input type="checkbox" name="confirm" required>Подтверждаю изменение маршрута</label>
+<button type="submit">Проверить и применить</button></form>
+<p class="muted">Новые назначения сначала утверждаются в Git. Основные домены и неподготовленный Immich нельзя изменить этой формой.</p>
+</section>
+<section id="guests-panel" class="panel hidden" aria-label="Гости Proxmox"><h2>Гости Proxmox</h2><p class="muted">Список из Git; не показывает подтверждённое состояние работающих машин. Управляющих кнопок пока нет.</p><div id="guests-list"></div></section>
+</main><footer>Доступ разрешён только группе admins из доверенной сети.</footer>
+</body></html>

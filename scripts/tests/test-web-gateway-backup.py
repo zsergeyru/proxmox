@@ -52,6 +52,17 @@ def test():
                     assert row == ("existing-record",)
             assert not (saved / "management/admin-socket/control.sock").exists()
             assert (staging / "manifest.json").exists()
+        # Чистая установка без Homarr также должна резервироваться.
+        (state / "homarr/db/db.sqlite").unlink()
+        staging_new = root / "new-portal"
+        staging_new.mkdir()
+        script.consistent_copy(state, staging_new)
+        saved_new = staging_new / "140-web-gateway"
+        assert (saved_new / "authelia/db.sqlite3").is_file()
+        assert not (saved_new / "homarr/db/db.sqlite").exists()
+        import json
+        manifest = json.loads((staging_new / "manifest.json").read_text())
+        assert manifest["sqlite_databases"] == ["authelia/db.sqlite3"]
         (state / "authelia/links").symlink_to(root)
         try:
             staging2 = root / "stage2"
@@ -61,7 +72,7 @@ def test():
             pass
         else:
             raise AssertionError("Резервирование не должно следовать за ссылками")
-    print("140: согласованные копии двух SQLite созданы, сокеты и ссылки исключены")
+    print("140: копия Authelia обязательна, прежняя база Homarr необязательна")
 
 
 if __name__ == "__main__":
