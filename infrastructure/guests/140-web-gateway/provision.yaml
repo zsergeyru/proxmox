@@ -1,7 +1,7 @@
 schema_version: 1
 guest_vmid: 140
 
-# Никакого portal.local: на 140 используется Homarr, а не Homepage.
+# Домашние страницы отдаются Caddy; вход и двухфакторная проверка выполняются Authelia.
 system:
   distribution: debian
   version: "13"
@@ -93,8 +93,8 @@ web_gateway:
       - 192.168.0.0/16
     routes:
       - domain: home.zsergey.ru
-        service: homarr
-        upstream: http://homarr:7575
+        service: portal
+        upstream: http://caddy:8080
         access: public
         enabled: true
       - domain: auth.zsergey.ru
@@ -102,11 +102,11 @@ web_gateway:
         upstream: http://authelia:9091
         access: public
         enabled: true
-      # Пробный адрес для проверки изменений через Homarr. Доступ только
+      # Пробный адрес для проверки изменений через Caddy. Доступ только
       # из домашней сети; приложение за ним дополнительно требует входа.
       - domain: check.zsergey.ru
-        service: homarr
-        upstream: http://homarr:7575
+        service: portal
+        upstream: http://caddy:8080
         access: private
         enabled: false
       # Внешние приложения подключать только после проверки авторизации.
@@ -178,48 +178,23 @@ web_gateway:
       enabled: true
       # Конкретные адреса возврата закрепляются вместе с ролью и версией клиента.
       clients:
-        - homarr
         - immich
 
-  homarr:
+  portal:
     enabled: true
-    image: ghcr.io/homarr-labs/homarr:v2.5.2
-    container_name: web-gateway-homarr
-    internal_port: 7575
     public_url: https://home.zsergey.ru
-    onboarding:
-      admin_group: admins
-      ready_file: /var/lib/web-gateway/management/catalog/homarr-ready
-    operator_status:
-      name: Homarr
-      authentication: Authelia
-      # Закрытая доска и все виджеты создаются автоматически при deploy 140.
-      operator:
-        username: admin
-    data:
-      host: /var/lib/web-gateway/homarr
-      container: /appdata
-    docker_socket: false
-    authentication:
-      provider: oidc
-      issuer: https://auth.zsergey.ru
-      client_id: homarr
-    boards:
-      home:
-        groups:
-          - admins
-          - family
-          - guests
-      administration:
-        groups:
-          - admins
-        local_network_only: true
-        # Пользовательские виджеты Homarr v2: описания в Git,
-        # изменения и база Homarr — на постоянном томе.
-        widgets:
-          - caddy-routes
-          - authelia-users
-          - proxmox-guests
+    assets: /etc/web-gateway/portal
+    socket: /var/lib/web-gateway/management/portal-socket/portal.sock
+    authentication: authelia
+    second_factor: true
+    administration:
+      path: /admin
+      groups:
+        - admins
+      private_networks: true
+
+  # Существующие данные Homarr сохраняются на mp0 для возможного отката.
+  # Контейнер и его публичный маршрут больше не запускаются.
 
   management:
     # Обработчик Caddy/Authelia располагается только внутри сети Docker.
@@ -233,7 +208,7 @@ web_gateway:
 persistence:
   backup_required:
     # Один каталог содержит все уникальные данные на подключении mp0:
-    # SQLite, 2FA, сертификаты, Homarr и изменения из административной панели.
+    # SQLite Authelia, 2FA, сертификаты и изменения из административной панели.
     - /var/lib/web-gateway
   reproducible:
     - /opt/web-gateway/compose
