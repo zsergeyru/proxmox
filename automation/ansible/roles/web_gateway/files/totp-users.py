@@ -59,7 +59,10 @@ def latest_code(username: str, users: Path = USERS, notifications: Path = NOTIFI
     if "confirm your identity" not in headers.get("Subject", "").lower():
         raise RuntimeError("Последнее уведомление не является подтверждением личности")
     body = "\n".join(lines[3:])
-    codes = re.findall(r"\b[0-9]{8}\b", body)
+    # Штатный текстовый шаблон Authelia выводит восьмисимвольный
+    # буквенно-цифровой код отдельной строкой между разделителями.
+    # Не искать его среди произвольных слов, ссылок и адресов сообщения.
+    codes = re.findall(r"(?m)^[ \t]*([A-Z0-9]{8})[ \t]*$", body)
     if len(codes) != 1:
         raise RuntimeError("Не удалось однозначно определить проверочный код")
     return codes[0]
