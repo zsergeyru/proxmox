@@ -78,18 +78,21 @@ def factor_statuses(db: Path = STATE / "db.sqlite3") -> dict[str, dict[str, bool
     """
     if db.is_symlink() or not db.is_file():
         raise RuntimeError("База Authelia недоступна")
-    uri = "file:" + db.resolve().as_posix() + "?mode=ro"
-    with sqlite3.connect(uri, uri=True, timeout=3) as connection:
-        tables = {row[0] for row in connection.execute(
-            "SELECT name FROM sqlite_master WHERE type='table'"
-        )}
-        if not {"totp_configurations", "webauthn_devices"}.issubset(tables):
-            raise RuntimeError("Неизвестная версия базы второго фактора")
-        result: dict[str, dict[str, bool]] = {}
-        for name, field in (("totp_configurations", "totp"), ("webauthn_devices", "webauthn")):
-            for (username,) in connection.execute("SELECT DISTINCT username FROM " + name):
-                result.setdefault(username, {"totp": False, "webauthn": False})[field] = True
-        return result
+    uri = db.resolve().as_uri() + "?mode=ro"
+    try:
+        with sqlite3.connect(uri, uri=True, timeout=3) as connection:
+            tables = {row[0] for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )}
+            if not {"totp_configurations", "webauthn_devices"}.issubset(tables):
+                raise RuntimeError("Неизвестная версия базы второго фактора")
+            result: dict[str, dict[str, bool]] = {}
+            for name, field in (("totp_configurations", "totp"), ("webauthn_devices", "webauthn")):
+                for (username,) in connection.execute("SELECT DISTINCT username FROM " + name):
+                    result.setdefault(username, {"totp": False, "webauthn": False})[field] = True
+            return result
+    except sqlite3.DatabaseError as exc:
+        raise RuntimeError("Не удалось прочитать состояние второго фактора") from exc
 
 
 def available_code(username: str) -> dict[str, object] | None:
@@ -119,33 +122,36 @@ def reset_totp(username: str, users: Path = USERS) -> None:
 
 
 def revoke_for_deletion(username: str, users: Path = USERS) -> None:
-    """Очистить зарегистрированные факторы перед удалением учётной записи.
+    """Удалить только действительно существующие TOTP и WebAuthn.
 
-    Если Authelia не смогла удалить хотя бы один тип регистрации, пользователь
-    остаётся в файловой базе. Старые факторы нельзя привязать к новому
-    владельцу того же логина.
+    Проверка SQLite не изменяет данные. При любой ошибке очистки учётная
+    запись в файле сохраняется. Не трактуем неизвестные ошибки CLI как
+    отсутствие фактора.
     """
     account(username, users)
-    commands = (
-        ["storage", "user", "totp", "delete", username],
-        ["storage", "user", "webauthn", "delete", username, "--all"],
+    enrolled = factor_statuses(users.parent / "db.sqlite3").get(
+        username, {"totp": False, "webauthn": False},
     )
-    for args in commands:
+    commands = (
+        ("totp", ["storage", "user", "totp", "delete", username]),
+        ("webauthn", ["storage", "user", "webauthn", "delete", username, "--all"]),
+    )
+    for factor, args in commands:
+        if not enrolled[factor]:
+            continue
         result = subprocess.run(
             ["docker", "exec", CONTAINER, "authelia", *args,
              "--config", "/config/configuration.yml"],
             capture_output=True, check=False, timeout=30,
         )
         if result.returncode:
-            message = (result.stderr or b"").decode("utf-8", "replace").lower()
-            # Отсутствие ещё не подключённого фактора — штатный случай.
-            missing = (
-                "no totp configuration for user",
-                "no webauthn credential found",
-                "no webauthn credentials",
-            )
-            if not any(value in message for value in missing):
-                raise RuntimeError("Не удалось очистить сохранённые факторы; пользователь не удалён")
+            raise RuntimeError("Не удалось очистить " + factor + "; пользователь сохранён")
+    current = factor_statuses(users.parent / "db.sqlite3").get(
+        username, {"totp": False, "webauthn": False},
+    )
+    if current["totp"] or current["webauthn"]:
+        raise RuntimeError("Регистрация второго фактора осталась в базе")
+
 
 
 def main() -> int:
