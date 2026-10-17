@@ -75,6 +75,8 @@ def check() -> None:
     assert tasks.index("Заменить только старые назначения Homarr") < tasks.index("Получить действующие настройки доменов")
     assert tasks.index("Запустить веб-шлюз") < tasks.index("Запустить закрытый интерфейс домашней")
     assert "docker" in tasks and "--remove-orphans" in tasks
+    # Раздел Homarr удалён из provision.yaml: обращение к нему роняет Ansible.
+    assert "provision.web_gateway.homarr" not in tasks
     assert all(key in tasks for key in (
         "portal-web.py","migrate-portal-routes.py","portal-home.html",
         "portal-admin.html","portal.css","portal.js","home-apps.py",
