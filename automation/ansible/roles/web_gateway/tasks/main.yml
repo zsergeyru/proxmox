@@ -250,10 +250,8 @@
     - authelia-jwt-secret
     - authelia-oidc-hmac-secret
     - authelia-oidc-jwks-pem
-    - authelia-homarr-client-secret-hash
     - authelia-immich-client-secret-hash
     - immich-client-secret
-    - homarr.env
   register: web_gateway_secret_status
   no_log: true
 
@@ -264,20 +262,6 @@
       - (item.stat.size | default(0) | int) > 0
     fail_msg: "140: постоянные секреты отсутствуют; восстановить прежнюю копию mp0"
   loop: "{{ web_gateway_secret_status.results }}"
-  no_log: true
-
-# Проверяем только имена параметров, не выводя значения и содержимое файла.
-- name: Проверить необходимые параметры Homarr
-  ansible.builtin.command:
-    argv:
-      - grep
-      - -Eq
-      - "{{ item }}"
-      - "{{ provision.web_gateway.paths.secrets }}/homarr.env"
-  loop:
-    - '^SECRET_ENCRYPTION_KEY=[0-9a-fA-F]{64}$'
-    - '^AUTH_OIDC_CLIENT_SECRET=.+$'
-  changed_when: false
   no_log: true
 
 - name: Создать первоначальный список доменов только при отсутствии сохранённого
