@@ -77,7 +77,7 @@ def test():
             route_action = Mock()
             with api.ControlServer(
                 sock, "secret-token-for-testing", users, totp,
-                SimpleNamespace(change_route=route_action),
+                SimpleNamespace(change_route=route_action, apply_route=route_action),
             ) as server:
                 server.timeout = 1
                 assert query(server, "/management/users", auth="wrong")[0] == 403
@@ -145,7 +145,20 @@ def test():
                 })
                 assert code == 200 and body["status"] == "ok"
                 assert route_action.call_count == 1
-                assert route_action.call_args.args[2:] == ("ai.zsergey.ru", True, "private")
+                assert route_action.call_args.args[2:] == ("update", "ai.zsergey.ru")
+                assert route_action.call_args.kwargs["enabled"] is True
+                assert route_action.call_args.kwargs["access"] == "private"
+                for action in ("create", "update", "delete"):
+                    payload = {"action": action, "domain": "printer.zsergey.ru"}
+                    if action == "create":
+                        payload.update(name="Принтер", upstream="http://192.168.1.50:7125",
+                                       enabled=False, access="protected")
+                    if action == "update":
+                        payload.update(enabled=True, access="private")
+                    if action == "delete":
+                        assert query(server, "/management/route-action", "POST", payload)[0] == 400
+                        payload["confirm"] = True
+                    assert query(server, "/management/route-action", "POST", payload)[0] == 200
                 assert query(server, "/unknown")[0] == 404
         assert file.stat().st_mode & 0o777 == 0o600
         assert yaml.safe_load(file.read_text())["users"]["admin"]["password"] == "hash"
