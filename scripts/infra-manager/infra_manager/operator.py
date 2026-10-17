@@ -25,6 +25,8 @@ from .guest_catalog import find_guest_by_role, guest_identity
 from .guest_deploy import project_branch_for_checkout, project_revision
 from .guest_operations import list_local_guests, run_local_guest_status
 from .operation_lock import project_checkout_lock
+from .physical_host_operations import list_hosts
+from .physical_hosts import load_physical_host
 from .pve import PveClient
 from .pve_host import (
     preflight_recovery_contour,
@@ -39,6 +41,9 @@ RUNTIME_CONTAINER = "infra-runtime"
 RUNTIME_PROJECT_ROOT = str(PATHS.repo_root)
 RUNTIME_GUEST_OPERATION = (
     PATHS.repo_root / "scripts" / "infra-manager" / "jobs" / "guest-operation.py"
+)
+RUNTIME_PHYSICAL_OPERATION = (
+    PATHS.repo_root / "scripts" / "infra-manager" / "jobs" / "physical-host-operation.py"
 )
 RUNTIME_SNAPSHOT_SCRIPT = """
 # Только подготовка снимка требует root: Git-копия управляющего гостя принадлежит root.
@@ -59,6 +64,12 @@ if [ "$2" = "deploy" ]; then
     export INFRA_MANAGER_OPERATOR_STATUS_VERSION=2
 fi
 python3 "$1/scripts/infra-manager/jobs/guest-operation.py" "$2" "$3"
+""".strip()
+
+
+RUNTIME_PHYSICAL_SCRIPT = """
+trap 'rm -rf "$1"' EXIT INT TERM
+python3 "$1/scripts/infra-manager/jobs/physical-host-operation.py" "$2" "$3"
 """.strip()
 
 
@@ -158,7 +169,7 @@ def _refresh_project_checkout() -> None:
     )
 
 
-def _prepare_runtime_snapshot(operation: str, vmid: int) -> str:
+def _prepare_runtime_snapshot(operation: str, vmid: int | str, *, physical: bool = False) -> str:
     """Подготовить неизменяемый на время операции снимок проекта в runtime."""
 
     snapshot = f"/tmp/infra-manager-direct-{os.getpid()}-{vmid}"
@@ -167,9 +178,10 @@ def _prepare_runtime_snapshot(operation: str, vmid: int) -> str:
         """Скопировать текущую версию проекта внутрь рабочей среды.
 
         Отсутствие точки входа останавливает задачу до развёртывания гостя."""
-        if not RUNTIME_GUEST_OPERATION.is_file():
+        entrypoint = RUNTIME_PHYSICAL_OPERATION if physical else RUNTIME_GUEST_OPERATION
+        if not entrypoint.is_file():
             raise InfraManagerError(
-                f"Не найдена точка входа операций: {RUNTIME_GUEST_OPERATION}"
+                f"Не найдена точка входа операций: {entrypoint}"
             )
         run(
             [
@@ -317,6 +329,46 @@ def _operator_guest_task(
     )
 
 
+def operator_physical_task(operation: str, name: str) -> int:
+    """Передать штатное действие физической машины напрямую из PVE в 910."""
+
+    load_physical_host(PATHS.repo_root, name)
+    require_runtime_activation_idle()
+    snapshot = _prepare_runtime_snapshot(operation, name, physical=True)
+    result = run(
+        [
+            "docker", "exec", "--user", "1001:0",
+            "-e", f"INFRA_MANAGER_COLOR={'1' if console._color(chr(27)) else '0'}",
+            RUNTIME_CONTAINER,
+            "sh", "-eu", "-c", RUNTIME_PHYSICAL_SCRIPT,
+            "infra-manager-host", snapshot, operation, name,
+        ],
+        check=False,
+        stream_output=True,
+    )
+    if result.returncode:
+        console.error(
+            f"Операция {operation} для физического сервера {name} не выполнена "
+            f"(код {result.returncode})"
+        )
+    return result.returncode
+
+
+def _operator_target(value: str, operation: str, *, show_secrets: bool) -> int:
+    """Направить числовую цель гостю, имя — физическому серверу."""
+
+    if value.isdecimal():
+        vmid = int(value)
+        if operation == "status":
+            return operator_guest_status(vmid, show_secrets=show_secrets)
+        return operator_guest_task(operation, vmid, show_secrets=show_secrets)
+    if operation == "sync":
+        raise InfraManagerError(
+            "Синхронизация физического сервера не предусмотрена; используйте deploy"
+        )
+    return operator_physical_task(operation, value)
+
+
 def operator_repair(*, show_secrets: bool) -> int:
     """Безопасно восстановить службы управляющего гостя."""
 
@@ -385,6 +437,15 @@ def build_parser() -> argparse.ArgumentParser:
         "guests",
         help="показать поддерживаемых гостей и их состояние",
     )
+    subparsers.add_parser(
+        "hosts",
+        help="показать физические серверы",
+    )
+    inspect_parser = subparsers.add_parser(
+        "inspect",
+        help="проверить оборудование физического сервера (без изменений)",
+    )
+    inspect_parser.add_argument("name", type=str)
 
     status_parser = subparsers.add_parser(
         "status",
@@ -393,8 +454,8 @@ def build_parser() -> argparse.ArgumentParser:
     status_parser.add_argument(
         "vmid",
         nargs="?",
-        type=int,
-        help="VMID гостя; без VMID проверяется управляющий контур",
+        type=str,
+        help="VMID гостя или имя физического сервера",
     )
 
     for command, help_text in (
@@ -402,7 +463,7 @@ def build_parser() -> argparse.ArgumentParser:
         ("sync", "синхронизировать гостя"),
     ):
         command_parser = subparsers.add_parser(command, help=help_text)
-        command_parser.add_argument("vmid", type=int, help="VMID гостя")
+        command_parser.add_argument("vmid", type=str, help="VMID гостя или имя физического сервера")
 
     repair_parser = subparsers.add_parser(
         "repair",
@@ -411,8 +472,8 @@ def build_parser() -> argparse.ArgumentParser:
     repair_parser.add_argument(
         "vmid",
         nargs="?",
-        type=int,
-        help="VMID гостя; без VMID исправляется управляющий контур",
+        type=str,
+        help="VMID гостя или имя физического сервера",
     )
 
     subparsers.add_parser(
@@ -435,26 +496,25 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.command == "guests":
             return list_local_guests(PATHS.repo_root)
+        if args.command == "hosts":
+            return list_hosts(PATHS.repo_root)
+        if args.command == "inspect":
+            return operator_physical_task("inspect", args.name)
         if args.command == "status":
             if args.vmid is None:
                 return operator_status(show_secrets=show_secrets)
-            return operator_guest_status(
-                args.vmid,
-                show_secrets=show_secrets,
+            return _operator_target(
+                args.vmid, "status", show_secrets=show_secrets,
             )
         if args.command == "repair":
             if args.vmid is None:
                 return operator_repair(show_secrets=show_secrets)
-            return operator_guest_task(
-                "repair",
-                args.vmid,
-                show_secrets=show_secrets,
+            return _operator_target(
+                args.vmid, "repair", show_secrets=show_secrets,
             )
         if args.command in {"deploy", "sync"}:
-            return operator_guest_task(
-                args.command,
-                args.vmid,
-                show_secrets=show_secrets,
+            return _operator_target(
+                args.vmid, args.command, show_secrets=show_secrets,
             )
         if args.command == "recover":
             raise InfraManagerError(
