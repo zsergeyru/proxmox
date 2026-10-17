@@ -448,10 +448,27 @@ def operator_service_definitions(
                 raise InfraManagerError(
                     f"{source}.operator_status.setup_path должен быть безопасным относительным путём"
                 )
+            setup_instructions = definition.get("setup_instructions")
+            if setup_instructions is not None and (
+                not setup_path
+                or not isinstance(setup_instructions, list)
+                or not 1 <= len(setup_instructions) <= 6
+                or any(
+                    not isinstance(line, str)
+                    or not line.strip()
+                    or len(line) > 200
+                    or any(ord(char) < 32 for char in line)
+                    for line in setup_instructions
+                )
+            ):
+                raise InfraManagerError(
+                    f"{source}.operator_status.setup_instructions должен быть списком коротких строк"
+                )
             result.append({
                 "name": name.strip(),
                 "url": url,
                 "setup_url": url.rstrip("/") + setup_path if setup_path else None,
+                "setup_instructions": setup_instructions or [],
                 "operator": _validated_operator(
                     f"{source}.operator_status", definition.get("operator")
                 ),

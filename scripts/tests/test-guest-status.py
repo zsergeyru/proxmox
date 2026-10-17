@@ -120,6 +120,13 @@ def check_operator_services_140() -> None:
         fail("140: ссылка первоначальной настройки TOTP должна быть в статусе")
     if homarr.get("setup_url") is not None:
         fail("140: Homarr не должен показывать ссылку настройки TOTP")
+    steps = authelia.get("setup_instructions")
+    if not isinstance(steps, list) or len(steps) != 4:
+        fail("140: нужны четыре понятных шага подключения телефона")
+    if any("TOTP" in step or "QR-код" in step for step in steps):
+        fail("140: в шагах для пользователя не должно быть специальных терминов")
+    if "Google Authenticator" not in steps[1] or "шесть цифр" not in steps[2]:
+        fail("140: описать добавление телефона и ввод шести цифр")
     if authelia["operator"] != {
         "username": "admin",
         "password": {
@@ -182,7 +189,7 @@ def check_credential_validation_140() -> None:
                 show_secrets=False,
             )
         text = output.getvalue()
-        for expected in ("https://auth.zsergey.ru", "https://auth.zsergey.ru/totp-setup", "Первый TOTP (15 мин)", "https://home.zsergey.ru", "Логин:", "скрыт", "через Authelia"):
+        for expected in ("https://auth.zsergey.ru", "https://auth.zsergey.ru/totp-setup", "Первое подключение телефона", "Шаг 1:", "Шаг 2:", "Шаг 3:", "Шаг 4:", "шесть цифр", "https://home.zsergey.ru", "Логин:", "скрыт", "через Authelia"):
             if expected not in text:
                 fail(f"140: в скрытом статусе отсутствует {expected}")
 
