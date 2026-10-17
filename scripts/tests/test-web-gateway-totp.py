@@ -127,6 +127,18 @@ def test() -> None:
             assert args[3:7] == ["authelia", "storage", "user", "totp"]
             assert "delete" in args and "anna" in args
         assert "ivan" in users.read_text(), "Сброс TOTP не изменяет пользователей"
+        records = yaml.safe_load(users.read_text())
+        records["users"]["admin"] = {"email": "admin@example.com", "password": "hash"}
+        users.write_text(yaml.safe_dump(records), encoding="utf-8")
+        setup_dir = directory / "totp-setup"
+        setup_dir.mkdir()
+        for name in ("admin.confirmed", "admin.png", "admin.uri"):
+            (setup_dir / name).write_text("old")
+        with (patch.object(users_code, "STATE", directory),
+              patch.object(users_code.subprocess, "run",
+                           return_value=SimpleNamespace(returncode=0))):
+            users_code.reset_totp("admin", users)
+        assert not any(setup_dir.iterdir()), "Явный сброс admin должен разрешить новую регистрацию"
     print("140: QR ограничен, подтверждается кодом и удаляется без сброса TOTP")
 
 
