@@ -1,0 +1,30 @@
+# Машинное описание физического NAS. Отсутствующие идентификаторы не угадываются.
+schema_version: 1
+name: nas
+kind: physical
+system:
+  distribution: debian
+  version: "13"
+connection:
+  address: null
+  port: 22
+  user: root
+  ssh_host_fingerprint: null
+storage:
+  devices:
+    - role: system
+      model: SPCC
+      capacity_gb: 120
+      serial: null
+    - role: shared
+      model: ST1000DM003
+      capacity_gb: 1000
+      serial: null
+    - role: data
+      model: ST4000VX016
+      capacity_gb: 4000
+      serial: null
+    - role: backup
+      model: ST4000VX016
+      capacity_gb: 4000
+      serial: null
