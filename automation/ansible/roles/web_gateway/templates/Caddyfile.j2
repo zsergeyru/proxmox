@@ -28,7 +28,7 @@ import sites.generated.caddy
         # Дополнительно Python проверяет сохранённый закрытый ключ.
         reverse_proxy unix//run/admin-control/control.sock
     }
-    @catalog path /guests.json
+    @catalog path /guests.json /apps.json
     handle @catalog {
         root * /srv/homarr-catalog
         header Cache-Control "no-store"
