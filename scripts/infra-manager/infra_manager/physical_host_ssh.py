@@ -122,3 +122,15 @@ class PhysicalHostSshSession:
             f"{self.host.user}@{self.host.address}",
             remote_command,
         ]
+
+    def verify_connection(self) -> tuple[bool, str]:
+        """Проверить вход по сертификату без изменения NAS."""
+
+        result = run(
+            self.command("true"),
+            check=False,
+            capture_output=True,
+        )
+        return result.returncode == 0, (
+            "" if result.returncode == 0 else "NAS не принял временный SSH-сертификат"
+        )
