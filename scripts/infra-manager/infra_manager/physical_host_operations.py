@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import json
 import shlex
 import re
 import sys
@@ -18,6 +19,8 @@ from .physical_host_ssh import PhysicalHostSshSession
 from .physical_host_bootstrap import bootstrap_physical_host
 from .physical_storage import read_disk_inspection, verify_expected_disks
 from .physical_storage_plan import propose_storage, format_storage_plan
+from .physical_nas_storage_state import apply_saved_storage
+from .physical_nas_storage_prepare import prepare_blank_disks
 from .physical_nas_system import read_nas_system, require_omv8
 from .physical_nas_ansible import (
     configure_nas, configure_nas_apps, configure_nas_backups, configure_nas_smb,
@@ -27,7 +30,7 @@ from .physical_nas_volumes import verify_nas_volumes
 from .common import run
 
 
-SUPPORTED_HOST_OPERATIONS = frozenset({"hosts", "status", "inspect", "storage-plan", "deploy", "repair", "bootstrap"})
+SUPPORTED_HOST_OPERATIONS = frozenset({"hosts", "status", "inspect", "storage-plan", "storage-prepare", "deploy", "repair", "bootstrap"})
 
 
 def require_host_access(repo_root: Path, host_name: str) -> None:
@@ -77,7 +80,7 @@ def run_physical_host_operation(repo_root: Path, operation: str, name: str) -> i
         raise InfraManagerError(f"Недопустимая операция физического сервера: {operation}")
     if operation == "hosts":
         return list_hosts(repo_root)
-    host = load_physical_host(repo_root, name)
+    host = apply_saved_storage(load_physical_host(repo_root, name))
     require_host_access(repo_root, name)
     console.info(f"Физический сервер: {host.name}")
     if host.address is None:
@@ -100,6 +103,23 @@ def run_physical_host_operation(repo_root: Path, operation: str, name: str) -> i
             raise InfraManagerError("Некорректный закрытый ввод для первого подключения")
         bootstrap_physical_host(host, pve_node, payload)
         console.result("Начальное доверие NAS установлено, вход OpenBao подтверждён")
+        return 0
+
+    if operation == "storage-prepare":
+        pve_node = os.environ.get("INFRA_PVE_NODE", "")
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.:-]{0,252}", pve_node):
+            raise InfraManagerError("Не определён доверенный узел PVE")
+        payload = sys.stdin.readline(2048)
+        if not payload or len(payload) > 2047 or not payload.endswith("\n"):
+            raise InfraManagerError("Не получено подтверждение плана HDD")
+        try:
+            approved = json.loads(payload)
+        except json.JSONDecodeError as exc:
+            raise InfraManagerError("Некорректное подтверждение подготовки") from exc
+        if not isinstance(approved, dict) or set(approved) != {"fingerprint"}:
+            raise InfraManagerError("Некорректная форма подтверждения HDD")
+        with PhysicalHostSshSession(host, pve_node) as session:
+            prepare_blank_disks(repo_root, host, session, approved["fingerprint"])
         return 0
 
     if operation in {"inspect", "status", "storage-plan", "deploy", "repair"}:
@@ -155,6 +175,17 @@ def run_physical_host_operation(repo_root: Path, operation: str, name: str) -> i
                             + item.serial
                         )
                 console.info(format_storage_plan(plan))
+                console.info(
+                    "NAS_STORAGE_PLAN_JSON=" + json.dumps({
+                        "fingerprint": plan.fingerprint,
+                        "requires_creation": plan.requires_creation,
+                        "items": [
+                            {"role": item.role, "serial": item.serial,
+                             "action": item.action}
+                            for item in plan.assignments
+                        ],
+                    }, ensure_ascii=False, separators=(",", ":"))
+                )
                 return 0
             if operation in {"deploy", "repair"}:
                 require_omv8(system)
