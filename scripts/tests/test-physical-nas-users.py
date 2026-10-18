@@ -35,7 +35,11 @@ def main() -> int:
     catalog = load_user_catalog(ROOT)
     assert catalog["schema_version"] == 1
     assert catalog["groups"] == ["admins", "family", "guests"]
-    assert catalog["users"] == []
+    assert catalog["users"] == [
+        {"name": "sergey", "groups": ["admins"]},
+        {"name": "sveta", "groups": ["family"]},
+        {"name": "danya", "groups": ["family"]},
+    ]
     merged = load_nas_users(ROOT)
     assert merged["groups"] == catalog["groups"]
     assert merged["users"] == catalog["users"]
