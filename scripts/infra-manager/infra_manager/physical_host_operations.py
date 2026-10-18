@@ -15,7 +15,7 @@ from .physical_host_ssh import PhysicalHostSshSession
 from .physical_host_bootstrap import bootstrap_physical_host
 from .physical_storage import read_disk_inspection, verify_expected_disks
 from .physical_nas_system import read_nas_system, require_omv8
-from .physical_nas_ansible import configure_nas
+from .physical_nas_ansible import configure_nas, configure_nas_apps
 from .physical_nas_volumes import verify_nas_volumes
 from .common import run
 
@@ -121,11 +121,16 @@ def run_physical_host_operation(repo_root: Path, operation: str, name: str) -> i
                 verified = verify_nas_volumes(host, system, session)
                 for volume in verified:
                     console.ok(f"Том {volume.role}: {volume.mountpoint} ({volume.filesystem})")
-                # Настройка служб появится только после проверки
-                # действительных UUID и регистрации всех томов в OMV.
+                shared = next(volume for volume in verified if volume.role == "shared")
+                shared_uuid = host.volumes["shared"]["filesystem_uuid"]
+                configure_nas_apps(
+                    repo_root, session,
+                    shared_mount=shared.mountpoint, shared_uuid=shared_uuid,
+                )
                 raise InfraManagerError(
-                    "Базовая настройка и проверка хранилищ NAS выполнены, "
-                    "но SMB, Docker и резервирование пока не настроены"
+                    "Базовые компоненты и qBittorrent настроены. "
+                    "Регистрация общих папок SMB и резервирование ZFS "
+                    "пока не выполняются автоматически"
                 )
         expected_serials = {
             item["serial"]: item["role"]
