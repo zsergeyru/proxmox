@@ -1,0 +1,16 @@
+[Unit]
+Description=Локальная передача снимков ZFS nas-data в nas-backup
+After=local-fs.target
+ConditionPathIsMountPoint={{ nas_data_mountpoint }}
+ConditionPathIsMountPoint={{ nas_backup_mountpoint }}
+RequiresMountsFor={{ nas_data_mountpoint }} {{ nas_backup_mountpoint }}
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=/usr/local/sbin/nas-zfs-backup
+TimeoutStartSec=infinity
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
