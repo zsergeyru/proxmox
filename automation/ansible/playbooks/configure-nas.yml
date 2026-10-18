@@ -1,0 +1,58 @@
+---
+- name: Настроить базовые компоненты физического NAS
+  hosts: nas
+  gather_facts: true
+  become: false
+  tasks:
+    - name: Проверить Debian 13
+      ansible.builtin.assert:
+        that:
+          - ansible_facts['distribution'] == 'Debian'
+          - ansible_facts['distribution_major_version'] == '13'
+          - ansible_facts['architecture'] == 'x86_64'
+        fail_msg: Установить Debian 13 необходимо вручную
+
+    - name: Проверить установленную OpenMediaVault
+      ansible.builtin.command:
+        argv: [dpkg-query, -W, '-f=${Version}', openmediavault]
+      changed_when: false
+      register: nas_omv_version
+
+    - name: Требовать OpenMediaVault 8
+      ansible.builtin.assert:
+        that:
+          - nas_omv_version.stdout is match('^(?:[0-9]+:)?8\\.')
+        fail_msg: Установить OpenMediaVault 8 необходимо вручную
+
+    - name: Установить средства диагностики, не изменяя разметку
+      ansible.builtin.apt:
+        name:
+          - smartmontools
+          - jq
+          - ca-certificates
+          - curl
+          - python3
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Включить службу наблюдения за SMART
+      ansible.builtin.systemd_service:
+        name: smartmontools.service
+        enabled: true
+        state: started
+
+    - name: Подтвердить доступность конфигурационной базы OMV
+      ansible.builtin.command:
+        argv:
+          - omv-confdbadm
+          - read
+          - conf.system.filesystem.mountpoint
+      changed_when: false
+      register: nas_mounts
+
+    - name: Проверить структуру ответа OMV
+      ansible.builtin.assert:
+        that:
+          - (nas_mounts.stdout | from_json) is sequence
+        fail_msg: Не удалось прочитать зарегистрированные тома OpenMediaVault
