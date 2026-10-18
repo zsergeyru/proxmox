@@ -82,7 +82,7 @@ def _install_client_ca(
         import paramiko
     except ImportError as exc:
         raise InfraManagerError(
-            "Для начального доступа 910 необходим пакет paramiko в infra-runtime"
+            "Для начального доступа управляющего гостя необходим пакет paramiko в infra-runtime"
         ) from exc
 
     # Публичные данные CA передаются в аргументе удалённой команды;
