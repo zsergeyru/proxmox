@@ -91,22 +91,6 @@
         update_cache: true
       when: nas_omv_extras.stdout is not search('install ok installed')
 
-    - name: Проверить наличие модуля ZFS в действующем ядре
-      ansible.builtin.command:
-        argv: [modinfo, zfs]
-      register: nas_zfs_module
-      changed_when: false
-      failed_when: false
-
-    - name: Не менять ядро NAS автоматически ради ZFS
-      ansible.builtin.assert:
-        that:
-          - nas_zfs_module.rc == 0
-        fail_msg: >-
-          В текущем ядре NAS нет модуля ZFS. Нельзя автоматически менять
-          ядро работающего NAS. Сначала требуется отдельная проверка
-          совместимого ядра и порядка перезагрузки.
-
     - name: Установить расширения OMV для ZFS и Docker
       ansible.builtin.apt:
         name:
@@ -115,6 +99,22 @@
         state: present
         update_cache: true
         cache_valid_time: 3600
+
+    - name: Проверить наличие модуля ZFS после установки расширения
+      ansible.builtin.command:
+        argv: [modinfo, zfs]
+      register: nas_zfs_module
+      changed_when: false
+      failed_when: false
+
+    - name: Подтвердить готовность ZFS без замены ядра
+      ansible.builtin.assert:
+        that:
+          - nas_zfs_module.rc == 0
+        fail_msg: >-
+          Пакет ZFS установлен, но модуль не доступен в действующем ядре.
+          Нельзя автоматически менять ядро или перезагружать NAS.
+          Проверьте совместимость ядра отдельным действием.
 
     - name: Проверить доступность инструментов ZFS
       ansible.builtin.command:
