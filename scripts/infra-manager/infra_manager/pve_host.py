@@ -310,6 +310,13 @@ def install_operator_host_support(node: str, repo_root: Path) -> None:
     """Установить на PVE тонкую операторскую оболочку."""
 
     host_root = repo_root / "scripts" / "infra-manager" / "host"
+    # Сначала вспомогательная функция запроса пароля, затем основной вход.
+    _install_remote_file(
+        node,
+        host_root / "infra_manager_nas_bootstrap.py",
+        OPERATOR_HOST_COMMAND.with_name("infra_manager_nas_bootstrap.py"),
+        "0644",
+    )
     _install_remote_file(
         node,
         host_root / "manager.py",
