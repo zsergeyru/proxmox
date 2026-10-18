@@ -9,10 +9,13 @@ groups:
   - family
   - guests
 
-# Заполняется после согласования имён; начального администратора
-# Authelia «admin» создаёт сам гость, это служебная запись.
-# Пример (неактивен):
-# users:
-#   - name: exampleuser
-#     groups: [family]
-users: []
+# Логины в нижнем регистре; это начальные назначения ролей.
+# Служебного администратора Authelia «admin» создаёт сам гость.
+# Живые учётные записи приложений не сбрасываются по этому перечню.
+users:
+  - name: sergey
+    groups: [admins]
+  - name: sveta
+    groups: [family]
+  - name: danya
+    groups: [family]
