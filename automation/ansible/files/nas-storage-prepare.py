@@ -132,10 +132,20 @@ def preflight(items: list[dict[str, object]]) -> dict[str, str]:
     if pools.returncode == 0 and any(name in pools.stdout.splitlines()
                                       for name in ("nas-data", "nas-backup")):
         raise StorageError("Пул nas-data или nas-backup уже существует")
-    for target in ("/nas-data", "/nas-backup", "/srv/nas-shared"):
+    for target in ("/nas-data", "/nas-backup"):
         mount = execute("findmnt", "--mountpoint", target, allowed=(0, 1))
         if mount.returncode == 0:
             raise StorageError(f"Точка подключения уже используется: {target}")
+        directory = Path(target)
+        if directory.is_symlink() or (
+            directory.exists() and (
+                not directory.is_dir() or any(directory.iterdir())
+            )
+        ):
+            raise StorageError(
+                f"Каталог {target} не пуст или является ссылкой; "
+                "нельзя скрывать существующие данные монтированием ZFS"
+            )
     return matched
 
 
@@ -274,6 +284,15 @@ def apply(items: list[dict[str, object]], fingerprint: str) -> dict[str, object]
 
     shared_path = "/srv/dev-disk-by-uuid-" + ext_uuid
     shared_source = "/dev/disk/by-uuid/" + ext_uuid
+    existing = Path(shared_path)
+    if existing.is_symlink() or (
+        existing.exists() and (
+            not existing.is_dir() or any(existing.iterdir())
+        )
+    ):
+        raise StorageError(
+            "На системном диске уже есть данные по пути будущего тома ext4"
+        )
     refs: dict[str, str] = {}
     refs["shared"] = register_omv("shared", "ext4", shared_source, shared_path)
     for role, name in (("data", "nas-data"), ("backup", "nas-backup")):
