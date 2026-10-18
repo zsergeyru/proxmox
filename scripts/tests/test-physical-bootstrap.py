@@ -18,6 +18,9 @@ from infra_manager import operator, physical_host_bootstrap as bootstrap
 from infra_manager.common import InfraManagerError
 from infra_manager.physical_hosts import load_physical_host
 
+sys.path.insert(0, str(ROOT / "scripts/infra-manager/host"))
+import infra_manager_nas_bootstrap as password_prompt
+
 host_path = ROOT / "scripts/infra-manager/host/manager.py"
 spec = importlib.util.spec_from_file_location("nas_host_manager", host_path)
 if spec is None or spec.loader is None:
@@ -96,11 +99,11 @@ def test_pve_password_transport() -> None:
         return 0
 
     with (
-        patch.object(host.sys.stdin, "isatty", return_value=True),
+        patch.object(password_prompt.sys, "stdin", SimpleNamespace(isatty=lambda: True)),
         patch("builtins.input", return_value="sergey"),
-        patch.object(host.getpass, "getpass", return_value="TEST-NOT-REAL-SECRET"),
+        patch.object(password_prompt.getpass, "getpass", return_value="TEST-NOT-REAL-SECRET"),
     ):
-        assert host._initial_nas_access("nas", forward) == 0
+        assert password_prompt.initial_nas_access("nas", forward, host.OperatorError) == 0
     assert calls[0] == (["bootstrap-state", "nas"], None)
     assert calls[1][0] == ["bootstrap", "nas"]
     assert json.loads(calls[1][1]) == {
@@ -109,11 +112,11 @@ def test_pve_password_transport() -> None:
     assert all("TEST-NOT-REAL-SECRET" not in str(command) for command, _ in calls)
 
     calls.clear()
-    with patch.object(host.getpass, "getpass") as prompt:
+    with patch.object(password_prompt.getpass, "getpass") as prompt:
         def already_done(command: list[str], *, input_text: str | None = None) -> int:
             calls.append((command, input_text))
             return 0
-        assert host._initial_nas_access("nas", already_done) == 0
+        assert password_prompt.initial_nas_access("nas", already_done, host.OperatorError) == 0
         prompt.assert_not_called()
 
 
