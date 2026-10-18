@@ -8,7 +8,6 @@
 
 from __future__ import annotations
 
-import getpass
 import json
 import os
 import socket
@@ -115,37 +114,6 @@ def start_manager(vmid: int) -> None:
     )
 
 
-BOOTSTRAP_REQUIRED = 20
-
-
-def _initial_nas_access(name: str, forward) -> int:
-    """Запросить разовый пароль только при отсутствии отметки первого доверия."""
-
-    state = forward(["bootstrap-state", name])
-    if state == 0:
-        return 0
-    if state != BOOTSTRAP_REQUIRED:
-        return state
-    if not sys.stdin.isatty():
-        raise OperatorError(
-            "Для первого подключения NAS откройте терминал PVE"
-        )
-    print("Первый доступ: существующий пользователь NAS с правами sudo.")
-    username = input("Пользователь NAS: ").strip()
-    if not username or len(username) > 64 or not all(
-        char.isascii() and (char.isalnum() or char in "._-") for char in username
-    ):
-        raise OperatorError("Некорректное имя пользователя NAS")
-    password = getpass.getpass("Пароль NAS (ввод не отображается): ")
-    if not password or "\n" in password or "\r" in password:
-        raise OperatorError("Пароль NAS не может быть пустым или многострочным")
-    payload = json.dumps(
-        {"username": username, "password": password}, ensure_ascii=False
-    ) + "\n"
-    del password
-    return forward(["bootstrap", name], input_text=payload)
-
-
 def proxy_to_manager(arguments: list[str]) -> int:
     """Передать штатную команду внутрь проверенного управляющего LXC.
 
@@ -180,7 +148,11 @@ def proxy_to_manager(arguments: list[str]) -> int:
         return run(argv, check=False, input_text=input_text).returncode
 
     if arguments == ["deploy", "nas"]:
-        bootstrap_result = _initial_nas_access("nas", forward)
+        # Вспомогательный модуль устанавливается рядом с PVE-оболочкой.
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from infra_manager_nas_bootstrap import initial_nas_access
+
+        bootstrap_result = initial_nas_access("nas", forward, OperatorError)
         if bootstrap_result != 0:
             return bootstrap_result
     return forward(arguments)
