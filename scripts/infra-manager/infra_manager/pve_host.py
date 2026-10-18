@@ -319,6 +319,12 @@ def install_operator_host_support(node: str, repo_root: Path) -> None:
     )
     _install_remote_file(
         node,
+        host_root / "infra_manager_nas_storage.py",
+        OPERATOR_HOST_COMMAND.with_name("infra_manager_nas_storage.py"),
+        "0644",
+    )
+    _install_remote_file(
+        node,
         host_root / "manager.py",
         OPERATOR_HOST_COMMAND,
         "0755",
