@@ -16,6 +16,7 @@ from .physical_host_bootstrap import bootstrap_physical_host
 from .physical_storage import read_disk_inspection, verify_expected_disks
 from .physical_nas_system import read_nas_system, require_omv8
 from .physical_nas_ansible import configure_nas
+from .physical_nas_volumes import verify_nas_volumes
 from .common import run
 
 
@@ -117,11 +118,14 @@ def run_physical_host_operation(repo_root: Path, operation: str, name: str) -> i
                 require_omv8(system)
                 verify_expected_disks(host.devices, disks)
                 configure_nas(repo_root, session)
-                # Не объявлять весь NAS развёрнутым после одной базовой роли.
+                verified = verify_nas_volumes(host, system, session)
+                for volume in verified:
+                    console.ok(f"Том {volume.role}: {volume.mountpoint} ({volume.filesystem})")
+                # Настройка служб появится только после проверки
+                # действительных UUID и регистрации всех томов в OMV.
                 raise InfraManagerError(
-                    "Базовая настройка ОС завершена. Настройка хранилищ, "
-                    "SMB и резервного копирования ещё не реализована; "
-                    "существующие диски не изменялись"
+                    "Базовая настройка и проверка хранилищ NAS выполнены, "
+                    "но SMB, Docker и резервирование пока не настроены"
                 )
         expected_serials = {
             item["serial"]: item["role"]
@@ -139,8 +143,13 @@ def run_physical_host_operation(repo_root: Path, operation: str, name: str) -> i
                 f"| {identity} | {condition} | {role}"
             )
         if operation == "status":
+            require_omv8(system)
             verify_expected_disks(host.devices, disks)
-            console.result("NAS доступен по доверенному SSH, назначенные диски найдены")
+            with PhysicalHostSshSession(host, pve_node) as connection:
+                verified = verify_nas_volumes(host, system, connection)
+            for volume in verified:
+                console.ok(f"Том {volume.role}: {volume.mountpoint} ({volume.filesystem})")
+            console.result("NAS: ОС, доверенный SSH, диски и тома проверены; службы ещё не проверяются")
         else:
             console.result("Чтение сведений о накопителях NAS завершено без изменений")
         return 0
