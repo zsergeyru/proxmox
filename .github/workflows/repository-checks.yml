@@ -84,6 +84,9 @@ jobs:
       - name: Check physical storage and operator commands
         run: python scripts/tests/test-physical-storage.py
 
+      - name: Check safe NAS storage plan
+        run: python scripts/tests/test-physical-storage-plan.py
+
       - name: Check first NAS SSH access
         run: python scripts/tests/test-physical-bootstrap.py
 
