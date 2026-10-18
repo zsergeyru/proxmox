@@ -33,7 +33,7 @@ def _configured_path(raw: object) -> str:
         not re.fullmatch(r"/[A-Za-z0-9_./-]+", raw)
         or ".." in raw.split("/")
         or posixpath.normpath(raw) != raw
-        or raw.startswith(("/etc/", "/boot/", "/var/", "/usr/", "/root/"))
+        or any(raw == prefix or raw.startswith(prefix + "/") for prefix in ("/etc", "/boot", "/var", "/usr", "/root"))
     ):
         raise InfraManagerError("Небезопасный путь подключения тома NAS")
     return raw
