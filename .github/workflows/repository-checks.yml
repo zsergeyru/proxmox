@@ -90,6 +90,9 @@ jobs:
       - name: Check Debian, OMV and NAS volume guards
         run: python scripts/tests/test-physical-nas-system.py
 
+      - name: Check NAS SMB and ZFS safety
+        run: python scripts/tests/test-physical-nas-services.py
+
       - name: Run infra-manager Python foundation checks
         run: python scripts/tests/test-infra-manager-python.py
 
