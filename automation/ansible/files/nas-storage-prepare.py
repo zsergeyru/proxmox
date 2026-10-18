@@ -193,8 +193,16 @@ def register_omv(role: str, filesystem: str, source: str, path: str) -> str:
     match = [entry for entry in records
              if entry.get("dir") == path or entry.get("fsname") == source]
     if match:
+        if len(match) == 1 and all((
+            match[0].get("fsname") == source,
+            match[0].get("dir") == path,
+            match[0].get("type") == filesystem,
+            isinstance(match[0].get("uuid"), str),
+        )):
+            # Расширение ZFS может автоматически зарегистрировать созданный пул.
+            return match[0]["uuid"]
         raise StorageError(
-            f"В OMV уже зарегистрирован том {role}; автоматическая замена запрещена"
+            f"В OMV уже зарегистрирован другой том {role}; замена запрещена"
         )
     uid = str(uuid.uuid4())
     if filesystem == "ext4":
@@ -287,9 +295,17 @@ def apply(items: list[dict[str, object]], fingerprint: str) -> dict[str, object]
                    "pool_guid": pool_guid("nas-backup"),
                    "omv_reference": refs["backup"]},
     }
-    return {"volumes": volumes, "serials": {
+    result = {"volumes": volumes, "serials": {
         item["role"]: item["serial"] for item in items
     }, "fingerprint": fingerprint}
+    # Сохранить проверенные результаты для разбирательства при потере 910.
+    # Журнал первоначальной попытки не удаляется и не разрешает повторную запись.
+    complete = JOURNAL.with_name("storage-preparation-result.json")
+    with complete.open("x", encoding="utf-8") as stream:
+        json.dump(result, stream, ensure_ascii=False, sort_keys=True)
+        stream.flush()
+        os.fsync(stream.fileno())
+    return result
 
 
 def main() -> int:
