@@ -41,8 +41,8 @@ def disk_list() -> list[dict[str, object]]:
     """Прочитать аппаратную топологию на самом NAS перед изменениями."""
 
     data = json.loads(execute(
-        "lsblk", "--json", "--bytes", "--output",
-        "PATH,MODEL,SERIAL,SIZE,TYPE,FSTYPE,UUID,PTTYPE,MOUNTPOINTS",
+        "lsblk", "--json", "--tree", "--bytes", "--output",
+        "NAME,PATH,MODEL,SERIAL,SIZE,TYPE,FSTYPE,UUID,PTTYPE,MOUNTPOINTS",
     ).stdout)
     items = data.get("blockdevices")
     if not isinstance(items, list):
