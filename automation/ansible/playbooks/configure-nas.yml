@@ -116,6 +116,28 @@
           Нельзя автоматически менять ядро или перезагружать NAS.
           Проверьте совместимость ядра отдельным действием.
 
+    - name: Установить Docker через источник пакетов, управляемый OMV-Extras
+      ansible.builtin.apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-compose-plugin
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Запустить Docker с автоматическим запуском после загрузки NAS
+      ansible.builtin.systemd_service:
+        name: docker.service
+        enabled: true
+        state: started
+
+    - name: Проверить поддержку Docker Compose
+      ansible.builtin.command:
+        argv: [docker, compose, version]
+      changed_when: false
+
     - name: Проверить доступность инструментов ZFS
       ansible.builtin.command:
         argv: [zpool, --version]
