@@ -1,0 +1,27 @@
+# Управляет infra-manager 910; запуск только через systemd-проверку тома.
+services:
+  qbittorrent:
+    image: "{{ nas_qbit_image }}"
+    container_name: nas-qbittorrent
+    environment:
+      PUID: "{{ nas_qbit_uid.stdout }}"
+      PGID: "{{ nas_qbit_gid.stdout }}"
+      TZ: Etc/UTC
+      WEBUI_PORT: "8080"
+      TORRENTING_PORT: "6881"
+    volumes:
+      - type: bind
+        source: /var/lib/nas-apps/qbittorrent/config
+        target: /config
+        bind:
+          create_host_path: false
+      - type: bind
+        source: "{{ nas_shared_mount }}/downloads"
+        target: /downloads
+        bind:
+          create_host_path: false
+    ports:
+      - "8080:8080"
+      - "6881:6881/tcp"
+      - "6881:6881/udp"
+    restart: "no"
