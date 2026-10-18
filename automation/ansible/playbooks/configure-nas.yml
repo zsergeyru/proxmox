@@ -21,7 +21,7 @@
     - name: Требовать OpenMediaVault 8
       ansible.builtin.assert:
         that:
-          - nas_omv_version.stdout is match('^(?:[0-9]+:)?8\\.')
+          - (nas_omv_version.stdout | regex_replace('^[0-9]+:', '')).startswith('8.')
         fail_msg: Установить OpenMediaVault 8 необходимо вручную
 
     - name: Установить средства диагностики, не изменяя разметку
