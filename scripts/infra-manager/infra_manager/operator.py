@@ -491,6 +491,12 @@ def build_parser() -> argparse.ArgumentParser:
     state.add_argument("name")
     bootstrap = subparsers.add_parser("bootstrap", help=argparse.SUPPRESS)
     bootstrap.add_argument("name")
+    plan_parser = subparsers.add_parser(
+        "storage-plan",
+        help="предложить назначение дисков NAS без изменений",
+    )
+    plan_parser.add_argument("name")
+
     inspect_parser = subparsers.add_parser(
         "inspect",
         help="проверить оборудование физического сервера (без изменений)",
@@ -557,6 +563,8 @@ def main(argv: list[str] | None = None) -> int:
             if not payload or len(payload) > 16384 or not payload.endswith("\n"):
                 raise InfraManagerError("Некорректный ввод учётных данных NAS")
             return operator_physical_task("bootstrap", args.name, input_text=payload)
+        if args.command == "storage-plan":
+            return operator_physical_task("storage-plan", args.name)
         if args.command == "inspect":
             return operator_physical_task("inspect", args.name)
         if args.command == "status":
