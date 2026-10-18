@@ -122,7 +122,8 @@ def proxy_to_manager(arguments: list[str]) -> int:
             "или infra-manager recover"
         )
 
-    def forward(command: list[str], *, input_text: str | None = None) -> int:
+    def forward(command: list[str], *, input_text: str | None = None,
+                capture_output: bool = False):
         """Передать команду и, только для начального доступа, закрытый ввод."""
 
         argv = [
@@ -137,9 +138,8 @@ def proxy_to_manager(arguments: list[str]) -> int:
             "--trusted-pve",
             *command,
         ]
-        if input_text is None:
-            return run(argv, check=False).returncode
-        return run(argv, check=False, input_text=input_text).returncode
+        result = run(argv, check=False, capture=capture_output, input_text=input_text)
+        return result if capture_output else result.returncode
 
     if arguments == ["deploy", "nas"]:
         # Вспомогательный модуль устанавливается рядом с PVE-оболочкой.
@@ -149,6 +149,10 @@ def proxy_to_manager(arguments: list[str]) -> int:
         bootstrap_result = initial_nas_access("nas", forward, OperatorError)
         if bootstrap_result != 0:
             return bootstrap_result
+        from infra_manager_nas_storage import confirm_nas_storage
+        storage_result = confirm_nas_storage("nas", forward, OperatorError)
+        if storage_result != 0:
+            return storage_result
     return forward(arguments)
 def color_mode() -> str:
     """Определить, можно ли сохранить цветной вывод при передаче команды."""
