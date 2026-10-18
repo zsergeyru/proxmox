@@ -1,0 +1,97 @@
+---
+- name: Настроить резервирование ZFS на физическом NAS
+  hosts: nas
+  gather_facts: false
+  become: false
+  tasks:
+    - name: Подтвердить источник и резервный пул
+      ansible.builtin.assert:
+        that:
+          - nas_data_pool == 'nas-data'
+          - nas_backup_pool == 'nas-backup'
+          - nas_data_guid is match('^[0-9]{1,20}$')
+          - nas_backup_guid is match('^[0-9]{1,20}$')
+          - nas_data_guid != nas_backup_guid
+        fail_msg: Нельзя резервировать данные между неподтверждёнными пулами
+
+    - name: Проверить GUID исходного пула
+      ansible.builtin.command:
+        argv: [zpool, get, -H, -o, value, guid, nas-data]
+      changed_when: false
+      register: nas_source_guid
+
+    - name: Проверить GUID резервного пула
+      ansible.builtin.command:
+        argv: [zpool, get, -H, -o, value, guid, nas-backup]
+      changed_when: false
+      register: nas_destination_guid
+
+    - name: Исключить ошибочную замену пула
+      ansible.builtin.assert:
+        that:
+          - nas_source_guid.stdout == nas_data_guid
+          - nas_destination_guid.stdout == nas_backup_guid
+        fail_msg: GUID пула изменился; резервирование запрещено
+
+    - name: Создать защищённый каталог настроек
+      ansible.builtin.file:
+        path: /etc/nas-apps
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+
+    - name: Записать только подтверждённые идентификаторы пулов
+      ansible.builtin.copy:
+        dest: /etc/nas-apps/zfs-backup.json
+        owner: root
+        group: root
+        mode: "0600"
+        content: |
+          {{ {
+            'source_pool': nas_data_pool,
+            'source_guid': nas_data_guid,
+            'backup_pool': nas_backup_pool,
+            'backup_guid': nas_backup_guid
+          } | to_nice_json }}
+
+    - name: Установить программу копирования ZFS на NAS
+      ansible.builtin.copy:
+        src: ../files/nas-zfs-backup.py
+        dest: /usr/local/sbin/nas-zfs-backup
+        owner: root
+        group: root
+        mode: "0750"
+
+    - name: Установить службу резервирования
+      ansible.builtin.template:
+        src: ../templates/nas-zfs-backup.service.j2
+        dest: /etc/systemd/system/nas-zfs-backup.service
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: Установить ежедневное расписание резервирования
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/nas-zfs-backup.timer
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Ежедневное резервирование данных NAS
+
+          [Timer]
+          OnCalendar=*-*-* 03:00:00
+          Persistent=true
+          Unit=nas-zfs-backup.service
+
+          [Install]
+          WantedBy=timers.target
+
+    - name: Включить резервирование на самом NAS
+      ansible.builtin.systemd_service:
+        name: nas-zfs-backup.timer
+        enabled: true
+        state: started
+        daemon_reload: true
