@@ -782,6 +782,7 @@ def _validate_physical_hosts() -> None:
 
     sys.path.insert(0, str(ROOT / "scripts" / "infra-manager"))
     from infra_manager.common import InfraManagerError
+    from infra_manager.guest_catalog import guests_by_provision_section
     from infra_manager.physical_hosts import list_physical_hosts
     from infra_manager.physical_nas_users import load_nas_users
     from infra_manager.user_catalog import load_user_catalog
@@ -790,8 +791,11 @@ def _validate_physical_hosts() -> None:
         catalog = load_user_catalog(ROOT)
         list_physical_hosts(ROOT)
         load_nas_users(ROOT)
+        gateways = guests_by_provision_section(ROOT, "web_gateway")
+        if len(gateways) != 1:
+            raise InfraManagerError("Ожидается ровно один гость с веб-шлюзом")
         provision = yaml.safe_load(
-            (GUESTS / "140-web-gateway" / "provision.yaml").read_text(encoding="utf-8")
+            (gateways[0].directory / "provision.yaml").read_text(encoding="utf-8")
         )
         authelia_groups = provision["web_gateway"]["authelia"]["authentication"]["groups"]
         if set(catalog["groups"]) != set(authelia_groups):
