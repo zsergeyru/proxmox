@@ -201,7 +201,7 @@ def _prepare_runtime_snapshot(operation: str, vmid: int | str, *, physical: bool
             ]
         )
 
-    if operation in {"deploy", "sync", "bootstrap"}:
+    if operation in {"deploy", "sync", "bootstrap", "storage-plan", "storage-prepare"}:
         # Sync берёт свежие машинные описания из Git перед формированием каталога.
         with project_checkout_lock(exclusive=True):
             _refresh_project_checkout()
@@ -487,6 +487,8 @@ def build_parser() -> argparse.ArgumentParser:
         "hosts",
         help="показать физические серверы",
     )
+    preparer = subparsers.add_parser("storage-prepare", help=argparse.SUPPRESS)
+    preparer.add_argument("name")
     state = subparsers.add_parser("bootstrap-state", help=argparse.SUPPRESS)
     state.add_argument("name")
     bootstrap = subparsers.add_parser("bootstrap", help=argparse.SUPPRESS)
@@ -563,6 +565,13 @@ def main(argv: list[str] | None = None) -> int:
             if not payload or len(payload) > 16384 or not payload.endswith("\n"):
                 raise InfraManagerError("Некорректный ввод учётных данных NAS")
             return operator_physical_task("bootstrap", args.name, input_text=payload)
+        if args.command == "storage-prepare":
+            if not show_secrets:
+                raise InfraManagerError("Подготовка дисков разрешена только с доверенного PVE")
+            payload = sys.stdin.readline(2048)
+            if not payload or len(payload) > 2047 or not payload.endswith("\n"):
+                raise InfraManagerError("Подготовка HDD требует отдельного подтверждения")
+            return operator_physical_task("storage-prepare", args.name, input_text=payload)
         if args.command == "storage-plan":
             return operator_physical_task("storage-plan", args.name)
         if args.command == "inspect":
