@@ -1,7 +1,7 @@
-"""Проверка списка учётных записей NAS без чтения или хранения паролей.
+"""Доступ NAS по SMB: общий каталог людей и локальные разрешения папок.
 
-Файл users.yaml является источником только имён, групп и прав SMB.
-Пароли должны выдаваться отдельно через OpenBao.
+Имена и группы объявлены единожды в infrastructure/users.yaml.
+Права четырёх сетевых папок задаёт только NAS в access.yaml.
 """
 
 from __future__ import annotations
@@ -12,87 +12,71 @@ import yaml
 from jsonschema import Draft202012Validator
 
 from .common import InfraManagerError
+from .user_catalog import load_user_catalog
 
-_RESERVED = frozenset({
-    "root", "admin", "nobody", "daemon", "bin", "sys", "sync",
-    "games", "man", "lp", "mail", "news", "uucp", "proxy",
-    "www-data", "backup", "list", "irc", "gnats",
-    "systemd-network", "systemd-timesync", "messagebus",
-    "sshd", "docker", "sudo", "users", "adm", "nas-qbittorrent",
-})
 _SHARE_NAMES = ("shared", "movies", "music", "data")
 
 
-def validate_nas_users(repo_root: Path, document: object) -> dict[str, object]:
-    """Проверить синтаксис, отсутствие секретов и ссылки на группы."""
+def validate_nas_access(
+    repo_root: Path, document: object,
+    catalog: dict[str, object] | None = None,
+) -> dict[str, object]:
+    """Проверить права только на группы из общего каталога."""
 
-    schema_path = repo_root / "infrastructure" / "schemas" / "nas-users.schema.yaml"
+    if catalog is None:
+        catalog = load_user_catalog(repo_root)
+    schema_path = repo_root / "infrastructure" / "schemas" / "nas-access.schema.yaml"
     try:
         schema = yaml.safe_load(schema_path.read_text(encoding="utf-8"))
-        validator = Draft202012Validator(schema)
-        errors = sorted(validator.iter_errors(document), key=lambda error: str(error.path))
+        errors = sorted(
+            Draft202012Validator(schema).iter_errors(document),
+            key=lambda error: str(error.path),
+        )
     except (OSError, yaml.YAMLError, ValueError) as exc:
-        raise InfraManagerError("Не удалось прочитать схему пользователей NAS") from exc
+        raise InfraManagerError("Не удалось проверить схему прав NAS") from exc
     if errors:
         error = errors[0]
-        field = ".".join(map(str, error.path)) or "users.yaml"
-        raise InfraManagerError(f"Пользователи NAS: {field}: {error.message}")
+        field = ".".join(map(str, error.path)) or "access.yaml"
+        raise InfraManagerError(f"NAS access.yaml: {field}: {error.message}")
     assert isinstance(document, dict)
-
-    groups = document["groups"]
-    users = document["users"]
-    shares = document["shares"]
-    group_names = set(groups)
-    if len(group_names) != len(groups):
-        raise InfraManagerError("Повторяющиеся группы в users.yaml")
-    if group_names & _RESERVED:
-        raise InfraManagerError(
-            "Группа NAS совпадает с существующим системным именем"
-        )
-
-    seen: set[str] = set()
-    for user in users:
-        name = user["name"]
-        if name in seen or name in _RESERVED:
-            raise InfraManagerError(
-                f"Повторяющееся или системное имя пользователя NAS: {name}"
-            )
-        seen.add(name)
-        if not set(user["groups"]) <= group_names:
-            raise InfraManagerError(
-                f"Пользователь {name} ссылается на неизвестную группу"
-            )
-
+    known_groups = set(catalog["groups"])
     for share in _SHARE_NAMES:
-        entry = shares[share]
+        rights = document["shares"][share]
         unknown = (
-            set(entry["read_groups"]) | set(entry["write_groups"])
-        ) - group_names
+            set(rights["read_groups"]) | set(rights["write_groups"])
+        ) - known_groups
         if unknown:
             raise InfraManagerError(
-                f"Папка {share}: неизвестные группы доступа: {sorted(unknown)}"
+                f"Папка NAS {share}: неизвестные общие группы: {sorted(unknown)}"
             )
     return document
 
 
 def load_nas_users(repo_root: Path) -> dict[str, object]:
-    """Загрузить машинное описание пользователей до развёртывания."""
+    """Собрать начальные имена и права из двух непересекающихся источников."""
 
-    path = repo_root / "infrastructure" / "hosts" / "nas" / "users.yaml"
+    catalog = load_user_catalog(repo_root)
+    path = repo_root / "infrastructure" / "hosts" / "nas" / "access.yaml"
     try:
-        document = yaml.safe_load(path.read_text(encoding="utf-8"))
+        rights = yaml.safe_load(path.read_text(encoding="utf-8"))
     except (OSError, yaml.YAMLError) as exc:
-        raise InfraManagerError("Нельзя прочитать infrastructure/hosts/nas/users.yaml") from exc
-    return validate_nas_users(repo_root, document)
+        raise InfraManagerError("Не найден или повреждён NAS access.yaml") from exc
+    validate_nas_access(repo_root, rights, catalog)
+    return {
+        "schema_version": 1,
+        "users": catalog["users"],
+        "groups": catalog["groups"],
+        "shares": rights["shares"],
+    }
 
 
 def require_nas_users_configured(repo_root: Path) -> dict[str, object]:
-    """Не позволить объявить пользователей NAS настроенными при пустом файле."""
+    """Не считать SMB готовым при отсутствии согласованных людей и прав."""
 
     document = load_nas_users(repo_root)
     if not document["users"]:
         raise InfraManagerError(
-            "Сначала укажите пользователей NAS в infrastructure/hosts/nas/users.yaml"
+            "Укажите пользователей в infrastructure/users.yaml до настройки SMB"
         )
     if not any(
         document["shares"][share]["read_groups"]
@@ -100,6 +84,6 @@ def require_nas_users_configured(repo_root: Path) -> dict[str, object]:
         for share in _SHARE_NAMES
     ):
         raise InfraManagerError(
-            "В users.yaml ещё не назначены права ни на одну папку SMB"
+            "Назначьте права в infrastructure/hosts/nas/access.yaml"
         )
     return document
