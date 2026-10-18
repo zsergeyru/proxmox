@@ -175,7 +175,7 @@ def run_physical_host_operation(repo_root: Path, operation: str, name: str) -> i
                             + item.serial
                         )
                 console.info(format_storage_plan(plan))
-                console.info(
+                print(
                     "NAS_STORAGE_PLAN_JSON=" + json.dumps({
                         "fingerprint": plan.fingerprint,
                         "requires_creation": plan.requires_creation,
