@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+import sys
 from pathlib import Path
 
 import yaml
@@ -11,11 +12,12 @@ import yaml
 from .common import InfraManagerError, console
 from .physical_hosts import list_physical_hosts, load_physical_host
 from .physical_host_ssh import PhysicalHostSshSession
+from .physical_host_bootstrap import bootstrap_physical_host
 from .physical_storage import read_disk_inspection, verify_expected_disks
 from .common import run
 
 
-SUPPORTED_HOST_OPERATIONS = frozenset({"hosts", "status", "inspect", "deploy", "repair"})
+SUPPORTED_HOST_OPERATIONS = frozenset({"hosts", "status", "inspect", "deploy", "repair", "bootstrap"})
 
 
 def require_host_access(repo_root: Path, host_name: str) -> None:
@@ -76,6 +78,17 @@ def run_physical_host_operation(repo_root: Path, operation: str, name: str) -> i
             f"{host.directory / 'host.yaml'}: не указан подтверждённый SSH-отпечаток "
             "физического сервера; нельзя доверять найденному ключу автоматически"
         )
+
+    if operation == "bootstrap":
+        pve_node = os.environ.get("INFRA_PVE_NODE", "")
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.:-]{0,252}", pve_node):
+            raise InfraManagerError("Не определён доверенный узел PVE")
+        payload = sys.stdin.readline(16385)
+        if not payload or len(payload) > 16384 or not payload.endswith("\n"):
+            raise InfraManagerError("Некорректный закрытый ввод для первого подключения")
+        bootstrap_physical_host(host, pve_node, payload)
+        console.result("Начальное доверие NAS установлено, вход OpenBao подтверждён")
+        return 0
 
     if operation in {"inspect", "status"}:
         pve_node = os.environ.get("INFRA_PVE_NODE", "")
