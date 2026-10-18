@@ -74,7 +74,7 @@ def configure_nas_apps(
     run_nas_playbook(repo_root, session, "configure-nas-apps.yml", {
         "nas_shared_mount": shared_mount,
         "nas_shared_uuid": shared_uuid,
-        "nas_qbit_image": "lscr.io/linuxserver/qbittorrent:latest",
+        "nas_qbit_image": "lscr.io/linuxserver/qbittorrent:5.2.4_v2.0.15-ls479",
     })
 
 
