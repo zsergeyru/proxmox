@@ -10,6 +10,8 @@ from pathlib import Path
 import yaml
 
 from .common import InfraManagerError, console
+from .guest_catalog import find_guest_by_role
+from .settings import SETTINGS
 from .physical_hosts import list_physical_hosts, load_physical_host
 from .physical_host_ssh import PhysicalHostSshSession
 from .physical_host_bootstrap import bootstrap_physical_host
@@ -37,9 +39,11 @@ def require_host_access(repo_root: Path, host_name: str) -> None:
     rules = document.get("rules") if isinstance(document, dict) else None
     if not isinstance(rules, list):
         raise InfraManagerError("Политика доступа не содержит корректных rules")
+    identity = find_guest_by_role(repo_root, SETTINGS.infra_manager_role)
+    subject = f"guest:{identity.vmid}"
     matched = [
         rule for rule in rules if isinstance(rule, dict)
-        and rule.get("subject") == "guest:910"
+        and rule.get("subject") == subject
         and rule.get("service") == "ssh"
         and rule.get("resource") == "host"
         and "connect-root" in rule.get("access", [])
@@ -47,7 +51,7 @@ def require_host_access(repo_root: Path, host_name: str) -> None:
     ]
     if len(matched) != 1:
         raise InfraManagerError(
-            f"Доступ guest:910 к host:{host_name} не разрешён однозначно в access.yaml"
+            f"Доступ {subject} к host:{host_name} не разрешён однозначно в access.yaml"
         )
 
 
