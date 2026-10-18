@@ -165,12 +165,19 @@ def test_remote_preflight():
          "pttype": None, "mountpoints": [None], "children": []},
     ]
 
+    def no_signatures(*args, **_kwargs):
+        """Разрешить только чтение пустых накопителей."""
+        if args[0] == "wipefs":
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+        if args[0] == "blkid":
+            return SimpleNamespace(returncode=2, stdout="", stderr="")
+        return SimpleNamespace(returncode=1, stdout="", stderr="")
+
     with (
         patch.object(script, "disk_list", return_value=disks),
         patch.object(script, "stable_device",
                      side_effect=lambda path, _serial: "/dev/disk/by-id/" + path[-3:]),
-        patch.object(script, "execute", return_value=SimpleNamespace(
-            returncode=1, stdout="", stderr="")),
+        patch.object(script, "execute", side_effect=no_signatures),
     ):
         matched = script.preflight(items)
         assert len(matched) == 3
