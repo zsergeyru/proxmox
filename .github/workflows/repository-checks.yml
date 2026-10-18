@@ -99,6 +99,9 @@ jobs:
       - name: Check NAS SMB and ZFS safety
         run: python scripts/tests/test-physical-nas-services.py
 
+      - name: Check NAS users, groups and SMB rights
+        run: python scripts/tests/test-physical-nas-users.py
+
       - name: Run infra-manager Python foundation checks
         run: python scripts/tests/test-infra-manager-python.py
 
