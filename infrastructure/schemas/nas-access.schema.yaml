@@ -1,0 +1,39 @@
+$schema: https://json-schema.org/draft/2020-12/schema
+title: Права сетевых папок NAS
+type: object
+additionalProperties: false
+required: [schema_version, shares]
+properties:
+  schema_version:
+    const: 1
+  shares:
+    type: object
+    additionalProperties: false
+    required: [shared, movies, music, data]
+    properties:
+      shared:
+        $ref: '#/$defs/permissions'
+      movies:
+        $ref: '#/$defs/permissions'
+      music:
+        $ref: '#/$defs/permissions'
+      data:
+        $ref: '#/$defs/permissions'
+$defs:
+  permissions:
+    type: object
+    additionalProperties: false
+    required: [read_groups, write_groups]
+    properties:
+      read_groups:
+        type: array
+        uniqueItems: true
+        items:
+          type: string
+          pattern: '^[a-z][a-z0-9_-]{1,31}$'
+      write_groups:
+        type: array
+        uniqueItems: true
+        items:
+          type: string
+          pattern: '^[a-z][a-z0-9_-]{1,31}$'
