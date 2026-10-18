@@ -9,9 +9,11 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import shlex
+import sys
 import time
 from pathlib import Path
 from urllib.parse import urlparse
@@ -199,7 +201,7 @@ def _prepare_runtime_snapshot(operation: str, vmid: int | str, *, physical: bool
             ]
         )
 
-    if operation in {"deploy", "sync"}:
+    if operation in {"deploy", "sync", "bootstrap"}:
         # Sync берёт свежие машинные описания из Git перед формированием каталога.
         with project_checkout_lock(exclusive=True):
             _refresh_project_checkout()
@@ -328,24 +330,67 @@ def _operator_guest_task(
     )
 
 
-def operator_physical_task(operation: str, name: str) -> int:
+def operator_physical_bootstrap_state(name: str) -> int:
+    """Запросить пароль только до первого подтверждённого SSH-сертификата."""
+
+    import yaml
+
+    if name != "nas":
+        raise InfraManagerError("Начальный доступ пока поддерживается только для NAS")
+    manifest = PATHS.repo_root / "infrastructure" / "hosts" / name / "host.yaml"
+    if not manifest.is_file():
+        raise InfraManagerError("Машинное описание NAS отсутствует")
+    try:
+        document = yaml.safe_load(manifest.read_text(encoding="utf-8"))
+        connection = document["connection"]
+        fingerprint = connection["ssh_host_fingerprint"]
+        address = connection["address"]
+    except (OSError, yaml.YAMLError, KeyError, TypeError) as exc:
+        raise InfraManagerError("Не удалось проверить адрес и SSH-ключ NAS") from exc
+    if not isinstance(address, str) or not address or not isinstance(fingerprint, str) or not fingerprint:
+        raise InfraManagerError(
+            "Укажите проверенные адрес и SSH-отпечаток NAS в host.yaml до первого входа"
+        )
+    path = PATHS.data_dir / "locks" / "physical-hosts" / f"{name}.json"
+    if not path.exists():
+        return 20
+    try:
+        record = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise InfraManagerError("Повреждена отметка SSH-доверия NAS") from exc
+    if (
+        not isinstance(record, dict)
+        or record.get("name") != name
+        or record.get("address") != address
+        or record.get("fingerprint") != fingerprint
+    ):
+        raise InfraManagerError(
+            "Данные NAS изменились; повторный пароль автоматически запрашивать нельзя"
+        )
+    return 0
+
+
+def operator_physical_task(
+    operation: str, name: str, *, input_text: str | None = None
+) -> int:
     """Передать штатное действие физической машины напрямую из PVE в 910."""
 
     if not re.fullmatch(r"[a-z][a-z0-9-]*", name):
         raise InfraManagerError("Некорректное имя физического сервера")
     require_runtime_activation_idle()
     snapshot = _prepare_runtime_snapshot(operation, name, physical=True)
+    argv = [
+        "docker", "exec",
+        *(["-i"] if input_text is not None else []),
+        "--user", "1001:0",
+        "-e", f"INFRA_MANAGER_COLOR={'1' if console._color(chr(27)) else '0'}",
+        "-e", f"INFRA_PVE_NODE={_pve_node()}",
+        RUNTIME_CONTAINER,
+        "sh", "-eu", "-c", RUNTIME_PHYSICAL_SCRIPT,
+        "infra-manager-host", snapshot, operation, name,
+    ]
     result = run(
-        [
-            "docker", "exec", "--user", "1001:0",
-            "-e", f"INFRA_MANAGER_COLOR={'1' if console._color(chr(27)) else '0'}",
-            "-e", f"INFRA_PVE_NODE={_pve_node()}",
-            RUNTIME_CONTAINER,
-            "sh", "-eu", "-c", RUNTIME_PHYSICAL_SCRIPT,
-            "infra-manager-host", snapshot, operation, name,
-        ],
-        check=False,
-        stream_output=True,
+        argv, check=False, stream_output=True, input_text=input_text,
     )
     if result.returncode:
         console.error(
@@ -442,6 +487,10 @@ def build_parser() -> argparse.ArgumentParser:
         "hosts",
         help="показать физические серверы",
     )
+    state = subparsers.add_parser("bootstrap-state", help=argparse.SUPPRESS)
+    state.add_argument("name")
+    bootstrap = subparsers.add_parser("bootstrap", help=argparse.SUPPRESS)
+    bootstrap.add_argument("name")
     inspect_parser = subparsers.add_parser(
         "inspect",
         help="проверить оборудование физического сервера (без изменений)",
@@ -499,6 +548,15 @@ def main(argv: list[str] | None = None) -> int:
             return list_local_guests(PATHS.repo_root)
         if args.command == "hosts":
             return operator_physical_task("hosts", "all")
+        if args.command in {"bootstrap", "bootstrap-state"}:
+            if not show_secrets:
+                raise InfraManagerError("Начальное доверие доступно только из терминала PVE")
+            if args.command == "bootstrap-state":
+                return operator_physical_bootstrap_state(args.name)
+            payload = sys.stdin.readline(16385)
+            if not payload or len(payload) > 16384 or not payload.endswith("\n"):
+                raise InfraManagerError("Некорректный ввод учётных данных NAS")
+            return operator_physical_task("bootstrap", args.name, input_text=payload)
         if args.command == "inspect":
             return operator_physical_task("inspect", args.name)
         if args.command == "status":
