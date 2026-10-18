@@ -147,7 +147,7 @@ def run_physical_host_operation(repo_root: Path, operation: str, name: str) -> i
                     data_mountpoint=data.mountpoint,
                     backup_mountpoint=backup.mountpoint,
                 )
-                verify_nas_services(session)
+                verify_nas_services(session, disks=disks, volumes=verified)
                 console.result(
                     "NAS настроен: OMV, ZFS, SMB, Docker, qBittorrent, "
                     "расписание резервирования. Данные не форматировались"
@@ -176,7 +176,7 @@ def run_physical_host_operation(repo_root: Path, operation: str, name: str) -> i
             for volume in verified:
                 console.ok(f"Том {volume.role}: {volume.mountpoint} ({volume.filesystem})")
             with PhysicalHostSshSession(host, pve_node) as connection:
-                verify_nas_services(connection)
+                verify_nas_services(connection, disks=disks, volumes=verified)
             console.result("NAS: ОС, SSH, диски, тома и службы проверены")
         else:
             console.result("Чтение сведений о накопителях NAS завершено без изменений")
