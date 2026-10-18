@@ -15,7 +15,10 @@ from .physical_host_ssh import PhysicalHostSshSession
 from .physical_host_bootstrap import bootstrap_physical_host
 from .physical_storage import read_disk_inspection, verify_expected_disks
 from .physical_nas_system import read_nas_system, require_omv8
-from .physical_nas_ansible import (configure_nas, configure_nas_apps, configure_nas_backups)
+from .physical_nas_ansible import (
+    configure_nas, configure_nas_apps, configure_nas_backups, configure_nas_smb,
+)
+from .physical_nas_status import verify_nas_services
 from .physical_nas_volumes import verify_nas_volumes
 from .common import run
 
@@ -129,6 +132,14 @@ def run_physical_host_operation(repo_root: Path, operation: str, name: str) -> i
                 )
                 data = next(volume for volume in verified if volume.role == "data")
                 backup = next(volume for volume in verified if volume.role == "backup")
+                configure_nas_smb(
+                    repo_root, session,
+                    shared_mount=shared.mountpoint,
+                    shared_uuid=shared_uuid,
+                    shared_ref=host.volumes["shared"]["omv_reference"],
+                    data_mountpoint=data.mountpoint,
+                    data_ref=host.volumes["data"]["omv_reference"],
+                )
                 configure_nas_backups(
                     repo_root, session,
                     source_guid=host.volumes["data"]["pool_guid"],
@@ -136,11 +147,12 @@ def run_physical_host_operation(repo_root: Path, operation: str, name: str) -> i
                     data_mountpoint=data.mountpoint,
                     backup_mountpoint=backup.mountpoint,
                 )
-                raise InfraManagerError(
-                    "Программы, qBittorrent и резервирование ZFS настроены. "
-                    "Создание пользователей и папок SMB средствами OMV "
-                    "ещё не автоматизировано"
+                verify_nas_services(session)
+                console.result(
+                    "NAS настроен: OMV, ZFS, SMB, Docker, qBittorrent, "
+                    "расписание резервирования. Данные не форматировались"
                 )
+                return 0
         expected_serials = {
             item["serial"]: item["role"]
             for item in host.devices if item["serial"] is not None
@@ -163,7 +175,9 @@ def run_physical_host_operation(repo_root: Path, operation: str, name: str) -> i
                 verified = verify_nas_volumes(host, system, connection)
             for volume in verified:
                 console.ok(f"Том {volume.role}: {volume.mountpoint} ({volume.filesystem})")
-            console.result("NAS: ОС, доверенный SSH, диски и тома проверены; службы ещё не проверяются")
+            with PhysicalHostSshSession(host, pve_node) as connection:
+                verify_nas_services(connection)
+            console.result("NAS: ОС, SSH, диски, тома и службы проверены")
         else:
             console.result("Чтение сведений о накопителях NAS завершено без изменений")
         return 0
