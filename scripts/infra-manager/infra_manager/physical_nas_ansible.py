@@ -16,7 +16,7 @@ def run_nas_playbook(
 ) -> None:
     """Запустить разрешённый сценарий с теми же временными SSH-полномочиями."""
 
-    if name not in {"configure-nas.yml", "configure-nas-apps.yml"}:
+    if name not in {"configure-nas.yml", "configure-nas-apps.yml", "configure-nas-backup.yml"}:
         raise InfraManagerError("Неизвестный сценарий настройки NAS")
     target = session.host
     if not target.address:
@@ -75,4 +75,21 @@ def configure_nas_apps(
         "nas_shared_mount": shared_mount,
         "nas_shared_uuid": shared_uuid,
         "nas_qbit_image": "lscr.io/linuxserver/qbittorrent:latest",
+    })
+
+
+def configure_nas_backups(
+    repo_root: Path, session: PhysicalHostSshSession,
+    *, source_guid: str, backup_guid: str,
+    data_mountpoint: str, backup_mountpoint: str,
+) -> None:
+    """Включить независимую передачу ZFS без удаления старых копий."""
+
+    run_nas_playbook(repo_root, session, "configure-nas-backup.yml", {
+        "nas_data_pool": "nas-data",
+        "nas_backup_pool": "nas-backup",
+        "nas_data_guid": source_guid,
+        "nas_backup_guid": backup_guid,
+        "nas_data_mountpoint": data_mountpoint,
+        "nas_backup_mountpoint": backup_mountpoint,
     })
