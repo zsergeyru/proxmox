@@ -29,7 +29,7 @@ SUPPORTED_HOST_OPERATIONS = frozenset({"hosts", "status", "inspect", "deploy", "
 
 
 def require_host_access(repo_root: Path, host_name: str) -> None:
-    """Проверить явное машинное право 910 на конкретный физический сервер."""
+    """Проверить явное право управляющей роли на физический сервер."""
 
     path = repo_root / "infrastructure" / "security" / "access.yaml"
     try:
