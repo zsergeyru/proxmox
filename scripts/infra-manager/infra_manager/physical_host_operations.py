@@ -14,6 +14,8 @@ from .physical_hosts import list_physical_hosts, load_physical_host
 from .physical_host_ssh import PhysicalHostSshSession
 from .physical_host_bootstrap import bootstrap_physical_host
 from .physical_storage import read_disk_inspection, verify_expected_disks
+from .physical_nas_system import read_nas_system, require_omv8
+from .physical_nas_ansible import configure_nas
 from .common import run
 
 
@@ -90,7 +92,7 @@ def run_physical_host_operation(repo_root: Path, operation: str, name: str) -> i
         console.result("Начальное доверие NAS установлено, вход OpenBao подтверждён")
         return 0
 
-    if operation in {"inspect", "status"}:
+    if operation in {"inspect", "status", "deploy", "repair"}:
         pve_node = os.environ.get("INFRA_PVE_NODE", "")
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.:-]{0,252}", pve_node):
             raise InfraManagerError(
@@ -98,6 +100,11 @@ def run_physical_host_operation(repo_root: Path, operation: str, name: str) -> i
             )
         console.info("Проверка SSH-ключа NAS и временного сертификата OpenBao")
         with PhysicalHostSshSession(host, pve_node) as session:
+            system = read_nas_system(session)
+            console.info(
+                f"ОС: Debian {system.debian}, OpenMediaVault "
+                f"{system.omv_version or 'не установлена'}"
+            )
             result = run(
                 session.command(
                     "lsblk --json --bytes --output "
@@ -105,7 +112,17 @@ def run_physical_host_operation(repo_root: Path, operation: str, name: str) -> i
                 ),
                 capture_output=True,
             )
-        disks = read_disk_inspection(result.stdout)
+            disks = read_disk_inspection(result.stdout)
+            if operation in {"deploy", "repair"}:
+                require_omv8(system)
+                verify_expected_disks(host.devices, disks)
+                configure_nas(repo_root, session)
+                # Не объявлять весь NAS развёрнутым после одной базовой роли.
+                raise InfraManagerError(
+                    "Базовая настройка ОС завершена. Настройка хранилищ, "
+                    "SMB и резервного копирования ещё не реализована; "
+                    "существующие диски не изменялись"
+                )
         expected_serials = {
             item["serial"]: item["role"]
             for item in host.devices if item["serial"] is not None
@@ -128,9 +145,4 @@ def run_physical_host_operation(repo_root: Path, operation: str, name: str) -> i
             console.result("Чтение сведений о накопителях NAS завершено без изменений")
         return 0
 
-    # До готовности доверенного доступа и алгоритма защиты дисков ни одна
-    # изменяющая операция не имитирует успешное развёртывание.
-    raise InfraManagerError(
-        f"Операция {operation} для {name} ещё не реализована: "
-        "пока доступна проверка машинного описания; диски не изменены"
-    )
+    raise InfraManagerError(f"Неизвестная операция NAS: {operation}")
