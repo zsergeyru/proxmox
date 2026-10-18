@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shlex
 import re
 import sys
 from pathlib import Path
@@ -16,6 +17,7 @@ from .physical_hosts import list_physical_hosts, load_physical_host
 from .physical_host_ssh import PhysicalHostSshSession
 from .physical_host_bootstrap import bootstrap_physical_host
 from .physical_storage import read_disk_inspection, verify_expected_disks
+from .physical_storage_plan import propose_storage, format_storage_plan
 from .physical_nas_system import read_nas_system, require_omv8
 from .physical_nas_ansible import (
     configure_nas, configure_nas_apps, configure_nas_backups, configure_nas_smb,
@@ -25,7 +27,7 @@ from .physical_nas_volumes import verify_nas_volumes
 from .common import run
 
 
-SUPPORTED_HOST_OPERATIONS = frozenset({"hosts", "status", "inspect", "deploy", "repair", "bootstrap"})
+SUPPORTED_HOST_OPERATIONS = frozenset({"hosts", "status", "inspect", "storage-plan", "deploy", "repair", "bootstrap"})
 
 
 def require_host_access(repo_root: Path, host_name: str) -> None:
@@ -100,7 +102,7 @@ def run_physical_host_operation(repo_root: Path, operation: str, name: str) -> i
         console.result("Начальное доверие NAS установлено, вход OpenBao подтверждён")
         return 0
 
-    if operation in {"inspect", "status", "deploy", "repair"}:
+    if operation in {"inspect", "status", "storage-plan", "deploy", "repair"}:
         pve_node = os.environ.get("INFRA_PVE_NODE", "")
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.:-]{0,252}", pve_node):
             raise InfraManagerError(
@@ -121,6 +123,39 @@ def run_physical_host_operation(repo_root: Path, operation: str, name: str) -> i
                 capture_output=True,
             )
             disks = read_disk_inspection(result.stdout)
+            if operation == "storage-plan":
+                require_omv8(system)
+                plan = propose_storage(host.devices, disks)
+                for item in plan.assignments:
+                    if item.action == "preserve":
+                        continue
+                    # Наличие разделов в lsblk недостаточно для доказательства
+                    # пустоты HDD: обязателен поиск скрытых сигнатур.
+                    checked = run(
+                        session.command(
+                            "wipefs --no-act " + shlex.quote(item.path_for_display)
+                        ),
+                        capture_output=True, check=False,
+                    )
+                    if checked.returncode != 0 or checked.stdout.strip():
+                        raise InfraManagerError(
+                            "Диск " + item.serial +
+                            " содержит сигнатуры или не прошёл проверку wipefs; "
+                            "создание файловой системы запрещено"
+                        )
+                    signature = run(
+                        session.command(
+                            "blkid -p " + shlex.quote(item.path_for_display)
+                        ),
+                        capture_output=True, check=False,
+                    )
+                    if signature.returncode != 2 or signature.stdout.strip():
+                        raise InfraManagerError(
+                            "Не удалось подтвердить отсутствие сигнатур на HDD: "
+                            + item.serial
+                        )
+                console.info(format_storage_plan(plan))
+                return 0
             if operation in {"deploy", "repair"}:
                 require_omv8(system)
                 verify_expected_disks(host.devices, disks)
