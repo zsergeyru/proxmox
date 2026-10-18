@@ -203,7 +203,7 @@ def apply(shared: str, data: str, shared_mount: str, data_mount: str) -> None:
 
 
 def main() -> int:
-    """Разобрать доверенные параметры 910 и вернуть безопасную ошибку."""
+    """Разобрать параметры управляющей программы и вернуть безопасную ошибку."""
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--shared-ref", required=True)
