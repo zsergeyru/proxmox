@@ -373,7 +373,7 @@ def operator_physical_bootstrap_state(name: str) -> int:
 def operator_physical_task(
     operation: str, name: str, *, input_text: str | None = None
 ) -> int:
-    """Передать штатное действие физической машины напрямую из PVE в 910."""
+    """Передать штатное действие физической машины из PVE управляющему гостю."""
 
     if not re.fullmatch(r"[a-z][a-z0-9-]*", name):
         raise InfraManagerError("Некорректное имя физического сервера")
