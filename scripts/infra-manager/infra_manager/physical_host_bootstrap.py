@@ -97,11 +97,14 @@ def _install_client_ca(
         'trap \'rm -f "$ca_tmp" "$config_tmp"\' EXIT',
         f"printf '%s\\n' {ca} > \"$ca_tmp\"",
         'chmod 0644 "$ca_tmp"',
-        "printf '%s\\n' 'TrustedUserCAKeys /etc/ssh/trusted-user-ca-keys.pem' > \"$config_tmp\"",
+        "printf '%s\\n' 'TrustedUserCAKeys /etc/ssh/trusted-user-ca-keys.pem\\nPermitRootLogin prohibit-password' > \"$config_tmp\"",
         'chmod 0644 "$config_tmp"',
         'mv -f "$ca_tmp" /etc/ssh/trusted-user-ca-keys.pem',
         'mv -f "$config_tmp" /etc/ssh/sshd_config.d/40-infra-manager-user-ca.conf',
         "/usr/sbin/sshd -t",
+        "sshd_effective=$(/usr/sbin/sshd -T -C user=root,host=localhost,addr=127.0.0.1)",
+        'printf "%s\\n" "$sshd_effective" | grep -Fxq "trustedusercakeys /etc/ssh/trusted-user-ca-keys.pem"',
+        'printf "%s\\n" "$sshd_effective" | grep -Eq "^permitrootlogin (prohibit-password|without-password)$"',
         "systemctl reload ssh.service",
     ])
     with tempfile.TemporaryDirectory(prefix="nas-password-ssh-") as temp:
