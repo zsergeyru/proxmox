@@ -87,6 +87,9 @@ jobs:
       - name: Check safe NAS storage plan
         run: python scripts/tests/test-physical-storage-plan.py
 
+      - name: Check confirmed NAS storage preparation
+        run: python scripts/tests/test-physical-storage-prepare.py
+
       - name: Check first NAS SSH access
         run: python scripts/tests/test-physical-bootstrap.py
 
