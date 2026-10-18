@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import re
+import shlex
 import tempfile
 from pathlib import Path
 
@@ -122,6 +123,24 @@ class PhysicalHostSshSession:
             f"{self.host.user}@{self.host.address}",
             remote_command,
         ]
+
+    def ansible_parameters(self) -> tuple[str, str]:
+        """Вернуть временный закрытый ключ и параметры проверки SSH."""
+
+        if not self._private or not self._known_hosts or not self.host.address:
+            raise InfraManagerError("Сначала откройте доверенный SSH-сеанс")
+        options = [
+            "-F", "/dev/null",
+            "-o", f"UserKnownHostsFile={self._known_hosts}",
+            "-o", "GlobalKnownHostsFile=/dev/null",
+            "-o", "StrictHostKeyChecking=yes",
+            "-o", "UpdateHostKeys=no",
+            "-o", "IdentitiesOnly=yes",
+            "-o", "BatchMode=yes",
+            "-o", "ConnectTimeout=10",
+            "-p", str(self.host.port),
+        ]
+        return str(self._private), shlex.join(options)
 
     def verify_connection(self) -> tuple[bool, str]:
         """Проверить вход по сертификату без изменения NAS."""
