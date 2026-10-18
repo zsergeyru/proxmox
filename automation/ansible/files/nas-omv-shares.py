@@ -189,15 +189,17 @@ def apply(shared: str, data: str, shared_mount: str, data_mount: str) -> None:
             "omv-confdbadm", "update", "conf.service.smb.share",
             json.dumps(item, ensure_ascii=False),
         )
-    if not global_settings.get("enable"):
+    enabled_before = bool(global_settings.get("enable"))
+    if not enabled_before:
         global_settings["enable"] = True
         command(
             "omv-confdbadm", "update", "conf.service.smb",
             json.dumps(global_settings, ensure_ascii=False),
         )
-    if missing_folders or missing_smb or not global_settings.get("enable"):
+    if missing_folders or missing_smb or not enabled_before:
         command("omv-salt", "deploy", "run", "samba")
-    print("[ОК] Папки SMB зарегистрированы в OpenMediaVault без гостевого доступа")
+        print("[ОК] Созданы новые записи SMB в OpenMediaVault")
+    print("[ОК] Папки SMB зарегистрированы без гостевого доступа")
 
 
 def main() -> int:
