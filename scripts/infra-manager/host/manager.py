@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import getpass
 import json
 import os
 import socket
@@ -31,6 +32,7 @@ def run(
     *,
     check: bool = True,
     capture: bool = False,
+    input_text: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Выполнить команду PVE и остановиться при неподтверждённом результате."""
     try:
@@ -38,6 +40,7 @@ def run(
             argv,
             text=True,
             capture_output=capture,
+            input=input_text,
             check=False,
         )
     except OSError as exc:
@@ -112,6 +115,37 @@ def start_manager(vmid: int) -> None:
     )
 
 
+BOOTSTRAP_REQUIRED = 20
+
+
+def _initial_nas_access(name: str, forward) -> int:
+    """Запросить разовый пароль только при отсутствии отметки первого доверия."""
+
+    state = forward(["bootstrap-state", name])
+    if state == 0:
+        return 0
+    if state != BOOTSTRAP_REQUIRED:
+        return state
+    if not sys.stdin.isatty():
+        raise OperatorError(
+            "Для первого подключения NAS откройте терминал PVE"
+        )
+    print("Первый доступ: существующий пользователь NAS с правами sudo.")
+    username = input("Пользователь NAS: ").strip()
+    if not username or len(username) > 64 or not all(
+        char.isascii() and (char.isalnum() or char in "._-") for char in username
+    ):
+        raise OperatorError("Некорректное имя пользователя NAS")
+    password = getpass.getpass("Пароль NAS (ввод не отображается): ")
+    if not password or "\n" in password or "\r" in password:
+        raise OperatorError("Пароль NAS не может быть пустым или многострочным")
+    payload = json.dumps(
+        {"username": username, "password": password}, ensure_ascii=False
+    ) + "\n"
+    del password
+    return forward(["bootstrap", name], input_text=payload)
+
+
 def proxy_to_manager(arguments: list[str]) -> int:
     """Передать штатную команду внутрь проверенного управляющего LXC.
 
@@ -126,8 +160,10 @@ def proxy_to_manager(arguments: list[str]) -> int:
             "или infra-manager recover"
         )
 
-    return run(
-        [
+    def forward(command: list[str], *, input_text: str | None = None) -> int:
+        """Передать команду и, только для начального доступа, закрытый ввод."""
+
+        argv = [
             "pct",
             "exec",
             str(vmid),
@@ -137,10 +173,17 @@ def proxy_to_manager(arguments: list[str]) -> int:
             f"INFRA_MANAGER_COLOR={color_mode()}",
             GUEST_COMMAND,
             "--trusted-pve",
-            *arguments,
-        ],
-        check=False,
-    ).returncode
+            *command,
+        ]
+        if input_text is None:
+            return run(argv, check=False).returncode
+        return run(argv, check=False, input_text=input_text).returncode
+
+    if arguments == ["deploy", "nas"]:
+        bootstrap_result = _initial_nas_access("nas", forward)
+        if bootstrap_result != 0:
+            return bootstrap_result
+    return forward(arguments)
 
 
 def color_mode() -> str:
