@@ -1,0 +1,20 @@
+# Права сетевых папок NAS. Пользователи и группы — в ../../users.yaml.
+# Пароли SMB и данные Authelia здесь не хранятся.
+schema_version: 1
+
+# Пустые списки запрещают соответствующий доступ.
+# Группы из infrastructure/users.yaml: admins, family, guests.
+# Запись также разрешает чтение.
+shares:
+  shared:
+    read_groups: []
+    write_groups: []
+  movies:
+    read_groups: []
+    write_groups: []
+  music:
+    read_groups: []
+    write_groups: []
+  data:
+    read_groups: []
+    write_groups: []
