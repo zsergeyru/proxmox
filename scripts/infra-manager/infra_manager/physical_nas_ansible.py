@@ -16,7 +16,7 @@ def run_nas_playbook(
 ) -> None:
     """Запустить разрешённый сценарий с теми же временными SSH-полномочиями."""
 
-    if name not in {"configure-nas.yml", "configure-nas-apps.yml", "configure-nas-backup.yml"}:
+    if name not in {"configure-nas.yml", "configure-nas-apps.yml", "configure-nas-backup.yml", "configure-nas-smb.yml"}:
         raise InfraManagerError("Неизвестный сценарий настройки NAS")
     target = session.host
     if not target.address:
@@ -92,4 +92,20 @@ def configure_nas_backups(
         "nas_backup_guid": backup_guid,
         "nas_data_mountpoint": data_mountpoint,
         "nas_backup_mountpoint": backup_mountpoint,
+    })
+
+
+def configure_nas_smb(
+    repo_root: Path, session: PhysicalHostSshSession,
+    *, shared_mount: str, shared_uuid: str, shared_ref: str,
+    data_mountpoint: str, data_ref: str,
+) -> None:
+    """Создать защищённые общие папки штатной базой OMV, без smb.conf."""
+
+    run_nas_playbook(repo_root, session, "configure-nas-smb.yml", {
+        "nas_shared_mount": shared_mount,
+        "nas_shared_uuid": shared_uuid,
+        "nas_shared_ref": shared_ref,
+        "nas_data_mountpoint": data_mountpoint,
+        "nas_data_ref": data_ref,
     })
