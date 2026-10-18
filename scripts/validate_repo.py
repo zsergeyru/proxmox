@@ -784,12 +784,23 @@ def _validate_physical_hosts() -> None:
     from infra_manager.common import InfraManagerError
     from infra_manager.physical_hosts import list_physical_hosts
     from infra_manager.physical_nas_users import load_nas_users
+    from infra_manager.user_catalog import load_user_catalog
 
     try:
+        catalog = load_user_catalog(ROOT)
         list_physical_hosts(ROOT)
         load_nas_users(ROOT)
-    except (InfraManagerError, OSError, ValueError) as exc:
-        fail(f"infrastructure/hosts: {exc}")
+        provision = yaml.safe_load(
+            (GUESTS / "140-web-gateway" / "provision.yaml").read_text(encoding="utf-8")
+        )
+        authelia_groups = provision["web_gateway"]["authelia"]["authentication"]["groups"]
+        if set(catalog["groups"]) != set(authelia_groups):
+            raise InfraManagerError(
+                "Группы infrastructure/users.yaml отличаются от разрешённых групп Authelia; "
+                "согласуйте оба механизма перед изменением общего списка"
+            )
+    except (InfraManagerError, OSError, ValueError, KeyError, TypeError) as exc:
+        fail(f"infrastructure/users.yaml или hosts/nas/access.yaml: {exc}")
 
 
 def _warn_unused_profiles(state: ValidationState) -> None:
