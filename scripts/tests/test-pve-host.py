@@ -299,10 +299,12 @@ def test_recovery_host_support() -> None:
         command = root / "scripts/infra-manager/host/recovery.py"
         manager = root / "scripts/infra-manager/host/manager.py"
         helper = root / "scripts/infra-manager/host/infra_manager_nas_bootstrap.py"
+        storage_helper = root / "scripts/infra-manager/host/infra_manager_nas_storage.py"
         command.parent.mkdir(parents=True)
         command.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
         manager.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
         helper.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
+        storage_helper.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
 
         def record_install(
             node: str,
@@ -342,6 +344,11 @@ def test_recovery_host_support() -> None:
         (
             str(helper),
             "/usr/local/sbin/infra_manager_nas_bootstrap.py",
+            "0644",
+        ),
+        (
+            str(storage_helper),
+            "/usr/local/sbin/infra_manager_nas_storage.py",
             "0644",
         ),
         (
