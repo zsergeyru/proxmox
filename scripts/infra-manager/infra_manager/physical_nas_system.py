@@ -35,7 +35,7 @@ def parse_os_release(raw: str) -> str:
         values[key] = value.strip().strip('"').strip("'")
     if values.get("ID") != "debian" or values.get("VERSION_ID") != "13":
         raise InfraManagerError(
-            "NAS должен использовать Debian 13; установка ОС из 910 запрещена"
+            "NAS должен использовать Debian 13; установка ОС управляющим гостем запрещена"
         )
     return values["VERSION_ID"]
 
