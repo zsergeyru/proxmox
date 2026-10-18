@@ -56,3 +56,72 @@
         that:
           - (nas_mounts.stdout | from_json) is sequence
         fail_msg: Не удалось прочитать зарегистрированные тома OpenMediaVault
+
+    - name: Установить зависимости установки пакетов OMV
+      ansible.builtin.apt:
+        name:
+          - python3-debian
+          - xz-utils
+          - gnupg
+        state: present
+
+    - name: Проверить наличие OMV-Extras
+      ansible.builtin.command:
+        argv: [dpkg-query, -W, '-f=${Status}', openmediavault-omvextrasorg]
+      register: nas_omv_extras
+      changed_when: false
+      failed_when: false
+
+    - name: Получить пакет OMV-Extras для восьмой версии
+      ansible.builtin.get_url:
+        url: https://github.com/OpenMediaVault-Plugin-Developers/packages/raw/master/openmediavault-omvextrasorg_latest_all8.deb
+        dest: /var/cache/apt/archives/omv-extras8.deb
+        mode: "0644"
+        timeout: 40
+      when: nas_omv_extras.stdout is not search('install ok installed')
+
+    - name: Установить OMV-Extras штатным пакетным менеджером
+      ansible.builtin.apt:
+        deb: /var/cache/apt/archives/omv-extras8.deb
+        state: present
+      when: nas_omv_extras.stdout is not search('install ok installed')
+
+    - name: Обновить перечень пакетов после установки OMV-Extras
+      ansible.builtin.apt:
+        update_cache: true
+      when: nas_omv_extras.stdout is not search('install ok installed')
+
+    - name: Проверить наличие модуля ZFS в действующем ядре
+      ansible.builtin.command:
+        argv: [modinfo, zfs]
+      register: nas_zfs_module
+      changed_when: false
+      failed_when: false
+
+    - name: Не менять ядро NAS автоматически ради ZFS
+      ansible.builtin.assert:
+        that:
+          - nas_zfs_module.rc == 0
+        fail_msg: >-
+          В текущем ядре NAS нет модуля ZFS. Нельзя автоматически менять
+          ядро работающего NAS. Сначала требуется отдельная проверка
+          совместимого ядра и порядка перезагрузки.
+
+    - name: Установить расширения OMV для ZFS и Docker
+      ansible.builtin.apt:
+        name:
+          - openmediavault-zfs
+          - openmediavault-compose
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Проверить доступность инструментов ZFS
+      ansible.builtin.command:
+        argv: [zpool, --version]
+      changed_when: false
+
+    - name: Проверить доступность Docker
+      ansible.builtin.command:
+        argv: [docker, --version]
+      changed_when: false
