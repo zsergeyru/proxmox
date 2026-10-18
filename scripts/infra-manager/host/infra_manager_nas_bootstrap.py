@@ -36,5 +36,3 @@ def initial_nas_access(name: str, forward, error_type: type[Exception]) -> int:
     ) + "\n"
     del password
     return forward(["bootstrap", name], input_text=payload)
-
-
