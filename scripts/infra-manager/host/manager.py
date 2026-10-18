@@ -19,13 +19,9 @@ from pathlib import Path
 HOST_CONFIG = Path("/etc/infra-manager/openbao-host.json")
 RECOVERY_COMMAND = Path("/usr/local/sbin/infra-manager-recovery")
 GUEST_COMMAND = "/usr/local/sbin/infra-manager"
-
-
 class OperatorError(RuntimeError):
     """Ожидаемая ошибка запуска операторской команды непосредственно на PVE."""
     pass
-
-
 def run(
     argv: list[str],
     *,
@@ -49,8 +45,6 @@ def run(
             f"Операция не завершена (код {result.returncode}). Проверьте состояние управляющего гостя; при необходимости выполните infra-manager repair."
         )
     return result
-
-
 def manager_identity() -> tuple[int, str]:
     """Прочитать VMID и имя управляющего гостя из установленной конфигурации PVE."""
     try:
@@ -156,8 +150,6 @@ def proxy_to_manager(arguments: list[str]) -> int:
         if bootstrap_result != 0:
             return bootstrap_result
     return forward(arguments)
-
-
 def color_mode() -> str:
     """Определить, можно ли сохранить цветной вывод при передаче команды."""
     mode = os.environ.get("INFRA_MANAGER_COLOR", "auto")
