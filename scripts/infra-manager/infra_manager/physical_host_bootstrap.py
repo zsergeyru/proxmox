@@ -162,7 +162,12 @@ def bootstrap_physical_host(
         public_ca = PATHS.ssh_client_ca_public_key.read_text(encoding="utf-8").strip()
     except OSError as exc:
         raise InfraManagerError("Не найден открытый ключ клиентского CA OpenBao") from exc
-    if "\n" in public_ca or not public_ca.startswith("ssh-ed25519 "):
+    parts = public_ca.split()
+    if (
+        "\n" in public_ca or len(parts) < 2
+        or parts[0] not in {"ssh-ed25519", "ssh-rsa"}
+        or not re.fullmatch(r"[A-Za-z0-9+/]+={0,2}", parts[1])
+    ):
         raise InfraManagerError("Некорректный открытый ключ клиентского CA OpenBao")
     _install_client_ca(host, username, password, public_ca)
     # Второе независимое SSH-подключение обязательно: пароль уже не
