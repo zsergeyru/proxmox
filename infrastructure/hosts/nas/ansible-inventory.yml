@@ -1,0 +1,5 @@
+# Адрес передаётся из проверенного host.yaml при запуске, а не хранится здесь.
+all:
+  hosts:
+    nas:
+      ansible_connection: ssh
