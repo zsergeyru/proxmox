@@ -28,6 +28,10 @@
       ansible.builtin.apt:
         name:
           - smartmontools
+          - gdisk
+          - e2fsprogs
+          - util-linux
+          - udev
           - jq
           - ca-certificates
           - curl
@@ -147,3 +151,11 @@
       ansible.builtin.command:
         argv: [docker, --version]
       changed_when: false
+
+    - name: Установить одноразовый исполнитель подготовки пустых HDD
+      ansible.builtin.copy:
+        src: ../files/nas-storage-prepare.py
+        dest: /usr/local/sbin/nas-storage-prepare
+        owner: root
+        group: root
+        mode: "0700"
