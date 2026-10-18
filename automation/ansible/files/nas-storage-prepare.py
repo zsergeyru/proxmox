@@ -298,7 +298,7 @@ def apply(items: list[dict[str, object]], fingerprint: str) -> dict[str, object]
     result = {"volumes": volumes, "serials": {
         item["role"]: item["serial"] for item in items
     }, "fingerprint": fingerprint}
-    # Сохранить проверенные результаты для разбирательства при потере 910.
+    # Сохранить проверенные результаты для разбирательства при потере управляющего гостя.
     # Журнал первоначальной попытки не удаляется и не разрешает повторную запись.
     complete = JOURNAL.with_name("storage-preparation-result.json")
     with complete.open("x", encoding="utf-8") as stream:
