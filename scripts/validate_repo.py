@@ -783,9 +783,11 @@ def _validate_physical_hosts() -> None:
     sys.path.insert(0, str(ROOT / "scripts" / "infra-manager"))
     from infra_manager.common import InfraManagerError
     from infra_manager.physical_hosts import list_physical_hosts
+    from infra_manager.physical_nas_users import load_nas_users
 
     try:
         list_physical_hosts(ROOT)
+        load_nas_users(ROOT)
     except (InfraManagerError, OSError, ValueError) as exc:
         fail(f"infrastructure/hosts: {exc}")
 
