@@ -26,6 +26,7 @@ class PhysicalHost:
     ssh_host_fingerprint: str | None
     devices: tuple[dict[str, object], ...]
     directory: Path
+    volumes: dict[str, dict[str, object]] | None = None
 
 
 def load_physical_host(repo_root: Path, name: str) -> PhysicalHost:
@@ -75,6 +76,7 @@ def load_physical_host(repo_root: Path, name: str) -> PhysicalHost:
         ssh_host_fingerprint=conn["ssh_host_fingerprint"],
         devices=tuple(data["storage"]["devices"]),
         directory=directory,
+        volumes=data["storage"].get("volumes"),
     )
 
 
