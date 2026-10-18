@@ -97,7 +97,7 @@ def _install_client_ca(
         'trap \'rm -f "$ca_tmp" "$config_tmp"\' EXIT',
         f"printf '%s\\n' {ca} > \"$ca_tmp\"",
         'chmod 0644 "$ca_tmp"',
-        "printf '%s\\n' 'TrustedUserCAKeys /etc/ssh/trusted-user-ca-keys.pem\\nPermitRootLogin prohibit-password' > \"$config_tmp\"",
+        "printf '%s\n' 'TrustedUserCAKeys /etc/ssh/trusted-user-ca-keys.pem' 'PermitRootLogin prohibit-password' > \"$config_tmp\"",
         'chmod 0644 "$config_tmp"',
         'mv -f "$ca_tmp" /etc/ssh/trusted-user-ca-keys.pem',
         'mv -f "$config_tmp" /etc/ssh/sshd_config.d/40-infra-manager-user-ca.conf',
