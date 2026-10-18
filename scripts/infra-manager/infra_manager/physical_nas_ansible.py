@@ -10,15 +10,24 @@ from .common import InfraManagerError, run, console
 from .physical_host_ssh import PhysicalHostSshSession
 
 
-def configure_nas(repo_root: Path, session: PhysicalHostSshSession) -> None:
-    """Применить безопасную базовую настройку к уже установленной OMV 8."""
+def run_nas_playbook(
+    repo_root: Path, session: PhysicalHostSshSession,
+    name: str, variables: dict[str, object] | None = None,
+) -> None:
+    """Запустить разрешённый сценарий с теми же временными SSH-полномочиями."""
 
+    if name not in {"configure-nas.yml", "configure-nas-apps.yml"}:
+        raise InfraManagerError("Неизвестный сценарий настройки NAS")
     target = session.host
     if not target.address:
         raise InfraManagerError("Не задан адрес физического NAS")
-    playbook = repo_root / "automation" / "ansible" / "playbooks" / "configure-nas.yml"
-    if not playbook.is_file():
-        raise InfraManagerError(f"Отсутствует Ansible-сценарий NAS: {playbook}")
+    playbook = repo_root / "automation" / "ansible" / "playbooks" / name
+    inventory = (
+        repo_root / "infrastructure" / "hosts" / target.name
+        / "ansible-inventory.yml"
+    )
+    if not playbook.is_file() or not inventory.is_file():
+        raise InfraManagerError("Не найдены Ansible-сценарий или инвентарь NAS")
     key, ssh_args = session.ansible_parameters()
     environment = os.environ.copy()
     environment.update({
@@ -26,27 +35,44 @@ def configure_nas(repo_root: Path, session: PhysicalHostSshSession) -> None:
         "ANSIBLE_RETRY_FILES_ENABLED": "False",
         "ANSIBLE_LOG_PATH": "",
     })
+    options = {
+        "ansible_host": target.address,
+        "ansible_ssh_common_args": ssh_args,
+        **(variables or {}),
+    }
     args = [
         "ansible-playbook", str(playbook),
-        "-i", f"{target.address},",
+        "-i", str(inventory),
         "-u", target.user,
         "--private-key", key,
-        "-e", json.dumps({
-            "ansible_host": target.address,
-            "ansible_ssh_common_args": ssh_args,
-        }),
+        "-e", json.dumps(options),
     ]
-    # Для литерального -i адреса важно, чтобы host playbook был 'nas'.
-    # --limit не требуется: динамическая группа создаётся отдельным
-    # инвентарём в следующей функции.
-    inventory = repo_root / "infrastructure" / "hosts" / target.name / "ansible-inventory.yml"
-    if not inventory.is_file():
-        raise InfraManagerError(f"Отсутствует Ansible-инвентарь NAS: {inventory}")
-    args[2:4] = ["-i", str(inventory)]
-    console.info("Применение базовых настроек Debian/OMV через Ansible")
-    result = run(args, env=environment, stream_output=True, check=False)
+    console.info(f"Применение конфигурации NAS: {name}")
+    result = run(
+        args, env=environment, cwd=repo_root,
+        stream_output=True, check=False,
+    )
     if result.returncode:
         raise InfraManagerError(
-            "Ansible не смог настроить NAS. Хранилища не изменялись; "
-            "проверьте причину выше и повторите deploy nas"
+            f"Сценарий NAS {name} завершился с ошибкой "
+            f"({result.returncode}). Диски не форматировались"
         )
+
+
+def configure_nas(repo_root: Path, session: PhysicalHostSshSession) -> None:
+    """Установить базовые программы Debian/OMV, не изменяя хранилища."""
+
+    run_nas_playbook(repo_root, session, "configure-nas.yml")
+
+
+def configure_nas_apps(
+    repo_root: Path, session: PhysicalHostSshSession,
+    *, shared_mount: str, shared_uuid: str,
+) -> None:
+    """Настроить qBittorrent после подтверждения UUID HDD и OMV."""
+
+    run_nas_playbook(repo_root, session, "configure-nas-apps.yml", {
+        "nas_shared_mount": shared_mount,
+        "nas_shared_uuid": shared_uuid,
+        "nas_qbit_image": "lscr.io/linuxserver/qbittorrent:latest",
+    })
