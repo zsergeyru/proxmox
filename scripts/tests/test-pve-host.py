@@ -337,7 +337,7 @@ def test_recovery_host_support() -> None:
             module.prepare_recovery_git("pve")
             module.preflight_recovery_contour("pve")
             module.check_recovery_contour("pve")
-            backup_install.assert_called_once_with("pve", root)
+            backup_install.assert_not_called()
 
     assert installs == [
         (
