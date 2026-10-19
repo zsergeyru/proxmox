@@ -99,6 +99,7 @@ def test_data_protection() -> None:
         assert settings["server"]["EXTERNAL_URL"] == "https://git.zsergey.ru/"
         assert settings["server"]["START_SSH_SERVER"] == "true"
         assert settings["server"]["SSH_LISTEN_PORT"] == "2222"
+        assert settings["server"]["SSH_DOMAIN"] == "192.168.3.10"
         assert settings["auth"]["REQUIRE_SIGNIN_VIEW"] == "true"
         assert settings["auth"]["DISABLE_REGISTRATION"] == "true"
         assert settings["auth"]["ENABLE_REVERSE_PROXY_AUTHENTICATION"] == "false"

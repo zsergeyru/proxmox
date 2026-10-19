@@ -190,6 +190,7 @@ def configure(data: Path, domain: str, url: str, ssh_port: int) -> None:
             "DISABLE_SSH": "false",
             "START_SSH_SERVER": "true",
             "SSH_PORT": str(ssh_port),
+            "SSH_DOMAIN": "192.168.3.10",
             "SSH_LISTEN_PORT": str(ssh_port),
         },
         "auth": {

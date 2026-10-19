@@ -72,7 +72,7 @@ def verify_playbook() -> None:
         elif role in {"linux_base", "guest_layout"}:
             assert "sync" in str(action.get("when")), role
         elif role in {"docker", "infra_manager", "ai_control",
-                      "photo_archive", "web_gateway", "network_gateway",
+                      "photo_archive", "gogs", "web_gateway", "network_gateway",
                       "portal", "ai_services"}:
             assert "full" in str(action.get("when")), role
     assert set(safe_roles) == set(SYNC_ROLES), safe_roles
