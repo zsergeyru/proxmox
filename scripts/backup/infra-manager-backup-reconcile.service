@@ -1,0 +1,12 @@
+[Unit]
+Description=Проверка и согласование резервных копий Proxmox
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+UMask=0077
+ExecStart=/usr/bin/python3 /usr/local/lib/infra-manager/backup/backup-reconcile.py
+TimeoutStartSec=6h
+Nice=10
