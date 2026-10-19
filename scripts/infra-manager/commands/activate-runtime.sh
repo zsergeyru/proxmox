@@ -104,6 +104,26 @@ docker compose     --env-file "$COMPOSE_DIR/.versions.env"     -f "$COMPOSE_DIR/
 
 /usr/local/sbin/infra-manager-openbao-startup-unseal "$PVE_NODE"
 
+if grep -qx 'RUNTIME_MODE=standalone' "$COMPOSE_DIR/.versions.env"; then
+    for _ in $(seq 1 60); do
+        if docker exec infra-runtime tofu version >/dev/null 2>&1 \
+            && docker exec infra-runtime ansible --version >/dev/null 2>&1 \
+            && docker exec infra-runtime packer version >/dev/null 2>&1; then
+            if [[ -n "$OPERATION_ID" ]]; then
+                PYTHONPATH=/usr/local/lib/infra-manager \
+                    python3 -m infra_manager.operation_activation verifying "$OPERATION_ID"
+            fi
+            INFRA_PROJECT_BRANCH="$BRANCH" \
+                /usr/local/sbin/infra-manager-status --full --quiet
+            printf '[ОК] Независимый infra-runtime и OpenBao проверены без Semaphore\\n'
+            exit 0
+        fi
+        sleep 2
+    done
+    printf 'ОШИБКА: Независимый infra-runtime не прошёл проверку готовности\\n' >&2
+    exit 1
+fi
+
 for _ in $(seq 1 60); do
     if curl -fsS http://127.0.0.1:3000/api/ping >/dev/null 2>&1; then
         PYTHONPATH=/usr/local/lib/infra-manager         INFRA_PROJECT_BRANCH="$BRANCH"             python3 -m infra_manager semaphore-project
