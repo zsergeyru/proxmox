@@ -39,3 +39,21 @@ services:
       - /mnt/persistent-state/openbao:/openbao/file
       - /etc/infra-manager/openbao/tls:/openbao/tls:ro
       - ./openbao/openbao.hcl:/openbao/config/openbao.hcl:ro
+
+  web:
+    profiles:
+      - preview
+    build:
+      context: ./web
+    image: infra-web:preview1
+    container_name: infra-web
+    restart: unless-stopped
+    network_mode: host
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 64
+    volumes:
+      - /mnt/persistent-state/operations:/srv/operations:ro
