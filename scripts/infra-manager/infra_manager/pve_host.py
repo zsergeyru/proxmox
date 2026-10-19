@@ -307,6 +307,22 @@ def install_recovery_host_support(node: str, repo_root: Path) -> None:
     console.detail("Recovery helper установлен на PVE")
 
 
+def read_backup_host_status(node: str) -> str:
+    """Проверить копии на физическом PVE без выдачи закрытых данных гостю."""
+
+    result = _ssh(
+        node,
+        "python3",
+        "/usr/local/lib/infra-manager/backup/backup-reconcile.py",
+        "--status",
+        capture=True,
+    )
+    line = (result.stdout or "").strip()
+    if not line or len(line) > 1200:
+        raise InfraManagerError("PVE не вернул состояние резервирования")
+    return line
+
+
 def install_backup_host_support(node: str, repo_root: Path) -> None:
     """Подключить резервирование к обычному deploy без отдельной команды.
 
