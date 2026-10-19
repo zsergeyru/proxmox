@@ -36,7 +36,8 @@ RUN python3 -m pip install --no-cache-dir \
        -r /tmp/infra-runtime-requirements.txt \
     && rm -f /tmp/infra-runtime-requirements.txt \
     && useradd --uid 1001 --gid 0 --no-create-home \
-       --shell /usr/sbin/nologin infra-runtime
+       --shell /usr/sbin/nologin infra-runtime \
+    && install -d -o 1001 -g 0 -m 0700 /home/infra-runtime
 
 USER 1001:0
 WORKDIR /var/lib/infra-manager/bootstrap-repo
