@@ -1,0 +1,45 @@
+ARG PACKER_IMAGE=hashicorp/packer:1.15.4@sha256:8be72877859e00e13124b26373f0505b2a2597c5393ecbea900be28b4be58186
+FROM ${PACKER_IMAGE} AS packer_source
+FROM alpine:3.21
+
+USER root
+
+ARG OPENTOFU_VERSION=1.12.6
+
+RUN apk add --no-cache ca-certificates curl unzip git openssh-client openssl bash python3 py3-pip
+
+RUN set -eux; \
+    arch="$(apk --print-arch)"; \
+    case "$arch" in \
+      x86_64) tofu_arch=amd64 ;; \
+      aarch64) tofu_arch=arm64 ;; \
+      *) echo "Unsupported architecture: $arch" >&2; exit 1 ;; \
+    esac; \
+    tofu_zip="tofu_${OPENTOFU_VERSION}_linux_${tofu_arch}.zip"; \
+    curl -fsSLo "/tmp/${tofu_zip}" \
+      "https://github.com/opentofu/opentofu/releases/download/v${OPENTOFU_VERSION}/${tofu_zip}"; \
+    curl -fsSLo /tmp/tofu_SHA256SUMS \
+      "https://github.com/opentofu/opentofu/releases/download/v${OPENTOFU_VERSION}/tofu_${OPENTOFU_VERSION}_SHA256SUMS"; \
+    grep "  ${tofu_zip}$" /tmp/tofu_SHA256SUMS > /tmp/tofu.check; \
+    (cd /tmp && sha256sum -c tofu.check); \
+    unzip -oq "/tmp/${tofu_zip}" -d /usr/local/bin; \
+    chmod 0755 /usr/local/bin/tofu; \
+    rm -f "/tmp/${tofu_zip}" /tmp/tofu_SHA256SUMS /tmp/tofu.check
+
+COPY --from=packer_source /bin/packer /usr/local/bin/packer
+RUN packer version
+
+# Устанавливать библиотеки в отдельную среду Python без Semaphore.
+COPY requirements.txt /tmp/infra-runtime-requirements.txt
+RUN python3 -m venv /opt/infra-runtime-venv \
+    && /opt/infra-runtime-venv/bin/pip install --no-cache-dir -r /tmp/infra-runtime-requirements.txt \
+    && rm -f /tmp/infra-runtime-requirements.txt
+
+COPY --chmod=0644 ssh_config /etc/ssh/ssh_config.d/99-infra-manager.conf
+
+ENV PATH=/opt/infra-runtime-venv/bin:$PATH
+
+RUN addgroup -g 1001 infra-runtime && adduser -D -u 1001 -G infra-runtime infra-runtime
+USER 1001:0
+
+CMD ["sh", "-c", "trap : TERM INT; while :; do sleep 3600 & wait $!; done"]
