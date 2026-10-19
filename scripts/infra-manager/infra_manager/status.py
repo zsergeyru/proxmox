@@ -316,6 +316,17 @@ def _check_git_branch_contract(
             )
 
 
+def _standalone_runtime() -> bool:
+    """Проверить закреплённый режим образа без обращения к Semaphore."""
+    versions = PATHS.compose_dir / ".versions.env"
+    if not versions.is_file() or versions.is_symlink():
+        return False
+    mode = read_env_file(versions).get("RUNTIME_MODE", "semaphore")
+    if mode not in {"semaphore", "standalone"}:
+        raise InfraManagerError("Некорректный RUNTIME_MODE")
+    return mode == "standalone"
+
+
 def _check_local_prerequisites() -> None:
     """Проверить Docker, обязательные файлы и каталог состояния OpenTofu."""
     if shutil.which("docker") is None:
@@ -327,15 +338,10 @@ def _check_local_prerequisites() -> None:
     ).returncode:
         raise InfraManagerError("Docker Compose недоступен")
 
-    for path in (
-        PVE_ENV,
-        SERVER_ENV,
-        SEMAPHORE_API_TOKEN_FILE,
-        GITHUB_KEY_COPY,
-        PROJECT_ID_FILE,
-        OPENTOFU_INPUT,
-        CA_BUNDLE,
-    ):
+    files = [PVE_ENV, GITHUB_KEY_COPY, OPENTOFU_INPUT, CA_BUNDLE]
+    if not _standalone_runtime():
+        files.extend([SERVER_ENV, SEMAPHORE_API_TOKEN_FILE, PROJECT_ID_FILE])
+    for path in files:
         required_file(path)
 
     if not OPENTOFU_STATE_DIR.is_dir():
@@ -356,7 +362,7 @@ def _check_runtime() -> None:
         check=False,
     )
     if running.returncode or running.stdout.strip() != "true":
-        raise InfraManagerError("Semaphore Server не запущен")
+        raise InfraManagerError("infra-runtime не запущен" if _standalone_runtime() else "Semaphore Server не запущен")
 
 
 def _check_portal() -> None:
@@ -924,6 +930,8 @@ def _run_status_checks(
         elif check_type == "openbao":
             _check_openbao(full=full)
         elif check_type == "semaphore":
+            if _standalone_runtime():
+                raise InfraManagerError("Новая управляющая среда не должна требовать Semaphore")
             _check_semaphore(project_branch=project_branch)
         elif check_type == "runtime_tools":
             _check_runtime_tools()
