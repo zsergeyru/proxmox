@@ -261,6 +261,7 @@ def operator_guest_task(
     started = time.monotonic()
     completed = False
     interrupted = False
+    deferred = False
     store = None
     operation_id = None
     if operation == "deploy":
@@ -294,10 +295,12 @@ def operator_guest_task(
                     f"Активация продолжается отдельно: {operation_id}; "
                     "результат ещё не подтверждён"
                 )
+                deferred = True
                 return 2
             current = store.get(operation_id)
             if current["phase"] in {"activating", "verifying"}:
                 console.info(f"Результат ещё ожидается: {operation_id}")
+                deferred = True
                 return 2
             completed = current["phase"] == "completed" and current["result"] == "ok"
             return 0 if completed else 1
@@ -315,7 +318,7 @@ def operator_guest_task(
             f"Команда {operation} гостя {vmid}",
             time.monotonic() - started,
             interrupted=interrupted,
-            failed=not completed and not interrupted,
+            failed=not completed and not interrupted and not deferred,
         )
 
 
