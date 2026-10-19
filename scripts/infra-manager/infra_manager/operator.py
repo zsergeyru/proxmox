@@ -277,12 +277,10 @@ def operator_guest_task(
             store.start(operation_id)
             console.info(f"Операция самообновления: {operation_id}")
     try:
-        result = _operator_guest_task(
-            operation,
-            vmid,
-            show_secrets=show_secrets,
-            operation_id=operation_id,
-        )
+        task_options = {"show_secrets": show_secrets}
+        if operation_id is not None:
+            task_options["operation_id"] = operation_id
+        result = _operator_guest_task(operation, vmid, **task_options)
         if store is not None and operation_id is not None:
             current = store.get(operation_id)
             if result != 0 and current["phase"] == "running":
