@@ -119,12 +119,32 @@
     mode: "0644"
   register: managed_backup_timer
 
-- name: Включить резервирование из управляющего гостя
+- name: Прочитать утверждённые назначения резервирования
+  ansible.builtin.slurp:
+    src: "{{ provision.paths.bootstrap_repository }}/infrastructure/hosts/pve/backup.yaml"
+  register: managed_backup_policy
+  no_log: true
+
+- name: Определить готовность описания носителей без записи на диски
+  ansible.builtin.set_fact:
+    managed_backup_destinations: "{{ (managed_backup_policy.content | b64decode | from_yaml).destinations }}"
+  no_log: true
+
+- name: Включить резервирование только после указания идентичности обоих носителей
   ansible.builtin.systemd_service:
     name: infra-manager-backup.timer
-    enabled: true
-    state: started
+    enabled: "{{ managed_backup_ready }}"
+    state: "{{ 'started' if managed_backup_ready else 'stopped' }}"
     daemon_reload: "{{ managed_backup_service.changed or managed_backup_timer.changed }}"
+  vars:
+    managed_backup_ready: >-
+      {{
+        managed_backup_destinations | length == 2
+        and (managed_backup_destinations[0].uuid | default('', true) | length > 0
+             or managed_backup_destinations[0].source | default('', true) | length > 0)
+        and (managed_backup_destinations[1].uuid | default('', true) | length > 0
+             or managed_backup_destinations[1].source | default('', true) | length > 0)
+      }}
 
 - name: Установить команды управления
   ansible.builtin.copy:
