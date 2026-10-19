@@ -173,6 +173,15 @@ def test_gogs_compose_and_manifest() -> None:
         for item in actions
         if "ansible.builtin.command" in item
     ]
+    volume_access = next(
+        i for i, task in enumerate(actions)
+        if task.get("name") == "Открыть владельцу Gogs доступ к корню подключённого тома"
+    )
+    import_check = next(
+        i for i, task in enumerate(actions)
+        if task.get("name") == "Проверить целостность перенесённого состояния Gogs"
+    )
+    assert volume_access < import_check
     check = next(cmd for cmd in commands if "--check" in cmd)
     configure = next(cmd for cmd in commands if "--configure" in cmd)
     pull = next(cmd for cmd in commands if "pull" in cmd)

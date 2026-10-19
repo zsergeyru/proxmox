@@ -596,7 +596,7 @@ def check_openbao_machine_identity_preparation() -> None:
             for item in args
             if item.startswith("infra_openbao_otp_target_ips=")
         ]
-        if target_args != ["infra_openbao_otp_target_ips=192.168.4.10"]:
+        if target_args != ["infra_openbao_otp_target_ips=192.168.3.10,192.168.4.10"]:
             fail(f"OTP-источник получил неверные SSH-цели: {target_args!r}")
         env_args = [
             item

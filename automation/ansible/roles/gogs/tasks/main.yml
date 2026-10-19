@@ -21,6 +21,16 @@
   changed_when: false
   # Отсутствующее подключение нельзя заменять каталогом на системном диске.
 
+# Общая подготовка pve_storage назначает корню каталога UID root гостя.
+# Gogs edge работает от UID/GID 1000, поэтому до запуска возвращаем права.
+- name: Открыть владельцу Gogs доступ к корню подключённого тома
+  ansible.builtin.file:
+    path: "{{ provision.gogs.paths.data }}"
+    state: directory
+    owner: "1000"
+    group: "1000"
+    mode: "0750"
+
 - name: Подготовить только воспроизводимые каталоги Gogs
   ansible.builtin.file:
     path: "{{ item }}"
