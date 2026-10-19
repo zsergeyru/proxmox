@@ -272,6 +272,7 @@ def operator_guest_task(
             store = OperationStore()
             record, _ = store.reserve(
                 "deploy", vmid, project_revision(PATHS.repo_root),
+                activation_required=True,
             )
             operation_id = record["id"]
             store.start(operation_id)
