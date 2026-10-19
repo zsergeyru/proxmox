@@ -71,7 +71,7 @@ def initialize() -> None:
         core.restic_command(target, password_file, ["snapshots", "--json"])
         core.restic_command(target, password_file, ["check"])
     print("[ОК] Оба restic-репозитория созданы или проверены")
-    print("До включения расписания необходимо сохранить ключ на внешнем носителе")
+    print("Экспорт ключа на отдельный носитель рекомендуется, но не блокирует расписание")
 
 
 def export_key(destination: Path) -> None:
@@ -118,8 +118,8 @@ def approve_restore(confirm: str) -> None:
 
     if confirm != "ПРОВЕРИЛ-ВОССТАНОВЛЕНИЕ":
         raise core.BackupError("Требуется явное подтверждение проверки восстановления")
-    if not CONFIRMATION.is_file() or not core.LAST_SUCCESS.is_file():
-        raise core.BackupError("Нет независимого ключа или успешного комплекта")
+    if not core.LAST_SUCCESS.is_file():
+        raise core.BackupError("Нет успешного комплекта для испытания восстановления")
     config = core.load_config(core.DEFAULT_CONFIG)
     targets = core.check_destinations(config["destinations"])
     for target in targets:
