@@ -37,8 +37,8 @@ def main() -> None:
     assert "/mnt/persistent-state/operations" in service
     with patch.object(backup_controller, "POLICY", ROOT / "infrastructure/hosts/pve/backup.yaml"):
         assert refused(backup_controller.policy), "Нельзя резервировать до подтверждения SSD и NAS"
-    source = (guest / "rootfs/opt/infra-manager/compose/runtime/Dockerfile.standalone").read_text()
-    assert "FROM alpine:" in source
+    source = (guest / "rootfs/opt/infra-manager/compose/runtime-next/Dockerfile").read_text()
+    assert "FROM python:" in source
     assert "semaphoreui/semaphore:" not in source
     assert "ansible" in source and "tofu" in source and "packer" in source
     active = (guest / "rootfs/opt/infra-manager/compose/docker-compose.yml").read_text()
