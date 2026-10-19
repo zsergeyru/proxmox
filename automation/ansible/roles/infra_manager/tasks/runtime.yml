@@ -240,3 +240,55 @@
       - --remove-orphans
   changed_when: true
   when: not (infra_self_update | default(false) | bool)
+
+- name: Прочитать единое описание резервирования
+  ansible.builtin.set_fact:
+    infra_backup_policy: "{{ lookup('file', provision.paths.bootstrap_repository ~ '/infrastructure/hosts/pve/backup.yaml') | from_yaml }}"
+
+- name: Проверить расписание резервирования из backup.yaml
+  ansible.builtin.assert:
+    that:
+      - infra_backup_policy.schema_version == 1
+      - infra_backup_policy.job == 'infra-core'
+      - infra_backup_policy.schedule is match('^([01][0-9]|2[0-3])(,([01][0-9]|2[0-3]))*:[0-5][0-9]$')
+      - infra_backup_policy.destinations | length == 2
+    fail_msg: Неверные параметры backup.yaml
+
+- name: Определить подтверждение носителей без изменения их состояния
+  ansible.builtin.set_fact:
+    infra_backup_enabled: >-
+      {{
+        (infra_backup_policy.destinations[0].uuid | default('', true) | length > 0
+         or infra_backup_policy.destinations[0].source | default('', true) | length > 0)
+        and
+        (infra_backup_policy.destinations[1].uuid | default('', true) | length > 0
+         or infra_backup_policy.destinations[1].source | default('', true) | length > 0)
+      }}
+
+- name: Установить системную службу резервирования 910
+  ansible.builtin.copy:
+    src: "{{ guest_root }}/rootfs/etc/systemd/system/infra-manager-backup.service"
+    dest: /etc/systemd/system/infra-manager-backup.service
+    owner: root
+    group: root
+    mode: "0644"
+  register: infra_backup_service_unit
+
+- name: Установить расписание из backup.yaml в systemd управляющего гостя
+  ansible.builtin.template:
+    src: "{{ guest_root }}/rootfs/etc/systemd/system/infra-manager-backup.timer.j2"
+    dest: /etc/systemd/system/infra-manager-backup.timer
+    owner: root
+    group: root
+    mode: "0644"
+  vars:
+    infra_backup_schedule: "{{ infra_backup_policy.schedule }}"
+  register: infra_backup_timer_unit
+
+- name: Включить расписание только при описании обоих подтверждённых носителей
+  ansible.builtin.systemd_service:
+    name: infra-manager-backup.timer
+    enabled: "{{ infra_backup_enabled | bool }}"
+    state: "{{ 'started' if infra_backup_enabled | bool else 'stopped' }}"
+    daemon_reload: true
+
