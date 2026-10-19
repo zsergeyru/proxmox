@@ -373,15 +373,19 @@ def install_backup_host_support(node: str, repo_root: Path) -> None:
         "|| ! command -v restic >/dev/null 2>&1 "
         "|| ! command -v partprobe >/dev/null 2>&1 "
         "|| ! command -v mount.nfs4 >/dev/null 2>&1; then "
-        "apt-get update >/dev/null && "
-        "DEBIAN_FRONTEND=noninteractive apt-get install -y "
-        "python3-yaml restic parted nfs-common >/dev/null; "
+        "if ! apt-get update >/dev/null 2>&1 "
+        "|| ! DEBIAN_FRONTEND=noninteractive apt-get install -y "
+        "python3-yaml restic parted nfs-common >/dev/null 2>&1; then "
+        "printf '[ПРЕДУПРЕЖДЕНИЕ] Средства резервирования пока не установлены\\n'; "
+        "fi; "
         "fi; "
         "systemctl daemon-reload; "
         "systemctl enable --now infra-manager-backup-reconcile.timer >/dev/null; "
-        "python3 /usr/local/lib/infra-manager/backup/backup-reconcile.py",
+        "if python3 -c 'import yaml' >/dev/null 2>&1; then "
+        "python3 /usr/local/lib/infra-manager/backup/backup-reconcile.py; "
+        "else printf '[ПРЕДУПРЕЖДЕНИЕ] Резервирование ожидает пакеты Python\\n'; fi",
     )
-    console.detail("Резервирование включено в развёртывание; проверка носителей выполнена")
+    console.detail("Резервирование подключено к deploy; проверки ожидающих носителей не меняют 910")
 
 
 
