@@ -19,7 +19,7 @@ from pathlib import Path
 import yaml
 
 from .common import InfraManagerError
-from .pve_host import _ssh_command, _pve_node  # noqa: F401
+from .pve_host import _ssh_command
 from .settings import PATHS
 
 POLICY = PATHS.repo_root / "infrastructure/hosts/pve/backup.yaml"
