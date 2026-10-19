@@ -376,8 +376,10 @@ jobs:
           path = Path(os.environ["INFRA_MANAGER_DIR"]) / "rootfs/opt/infra-manager/compose/docker-compose.yml"
           data = yaml.safe_load(path.read_text(encoding="utf-8"))
           services = data.get("services", {})
-          if set(services) != {"runtime", "openbao"}:
+          if set(services) != {"runtime", "openbao", "web"}:
               raise SystemExit(f"Unexpected services: {sorted(services)}")
+          if services["web"].get("profiles") != ["preview"] or services["web"].get("read_only") is not True:
+              raise SystemExit("infra-web preview must stay disabled and read-only")
           if services["runtime"].get("image") != "infra-runtime:${RUNTIME_VERSION}":
               raise SystemExit("infra-runtime image must use pinned runtime version variable")
           if services["runtime"].get("container_name") != "infra-runtime":
