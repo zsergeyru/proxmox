@@ -57,6 +57,15 @@ def test_marker() -> None:
                 replace(machine, address="192.0.2.23")
             ))
             assert "password" not in bootstrap.marker_path("nas").read_text()
+            # Если назначение дисков осталось, но отметка SSH исчезла,
+            # повторный парольный вход не должен запускаться.
+            marker = bootstrap.marker_path("nas")
+            (marker.parent / "nas-storage.json").write_text(
+                json.dumps({"name": "nas", "devices": [], "volumes": {}}),
+                encoding="utf-8",
+            )
+            marker.unlink()
+            expect_refusal(lambda: bootstrap.is_bootstrapped(machine))
 
 
 def test_operator_state() -> None:
@@ -83,6 +92,12 @@ def test_operator_state() -> None:
             )
             assert operator.operator_physical_bootstrap_state("nas") == 0
             marker.write_text('{"name":"nas","address":"192.0.2.23"}')
+            expect_refusal(lambda: operator.operator_physical_bootstrap_state("nas"))
+            marker.unlink()
+            (marker.parent / "nas-storage.json").write_text(
+                json.dumps({"name": "nas", "devices": [], "volumes": {}}),
+                encoding="utf-8",
+            )
             expect_refusal(lambda: operator.operator_physical_bootstrap_state("nas"))
 
 
