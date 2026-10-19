@@ -73,12 +73,12 @@ def nas_example() -> dict:
                 "filesystem_uuid": "10000000-0000-0000-0000-000000000001",
                 "omv_reference": "20000000-0000-0000-0000-000000000001",
             },
-            {
+            *[{
                 "id": role, "kind": "zfs_pool", "device": role,
                 "pool": "nas-" + role, "pool_guid": guid,
                 "omv_reference": f"20000000-0000-0000-0000-{guid:0>12}",
             }
-            for role, guid in (("data", "1111111"), ("backup", "2222222"))
+            for role, guid in (("data", "1111111"), ("backup", "2222222"))],
         ],
         "mounts": [
             {"volume": "shared", "path": "/srv/dev-disk-by-uuid-aabbcc"},
