@@ -89,8 +89,8 @@ def test_restore_never_writes_live():
         target.mkdir(mode=0o700)
         restore.check_target(target)
         (target / "conflict").write_text("data", encoding="utf-8")
-        refusal(lambda: restore.check_target(target), core.BackupError)
-    refusal(lambda: restore.check_target(Path("/etc")), core.BackupError)
+        refusal(lambda: restore.check_target(target), restore.core.BackupError)
+    refusal(lambda: restore.check_target(Path("/etc")), restore.core.BackupError)
 
 
 def test_vm_manifest_rejects_unexpected_vm():
