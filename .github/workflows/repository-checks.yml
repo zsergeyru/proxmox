@@ -536,11 +536,11 @@ jobs:
       - name: Build Semaphore-free runtime candidate
         run: |
           docker build \
-            -f "$INFRA_MANAGER_DIR/rootfs/opt/infra-manager/compose/runtime/Dockerfile.standalone" \
+            -f "$INFRA_MANAGER_DIR/rootfs/opt/infra-manager/compose/runtime-next/Dockerfile" \
             --build-arg OPENTOFU_VERSION=1.12.6 \
             --build-arg PACKER_IMAGE="$(python3 -c 'import os,yaml; from pathlib import Path; p=Path(os.environ["INFRA_MANAGER_DIR"])/"provision.yaml"; print(yaml.safe_load(p.read_text())["docker"]["services"]["runtime"]["tools"]["packer_image"])')" \
             -t infra-runtime:standalone-test \
-            "$INFRA_MANAGER_DIR/rootfs/opt/infra-manager/compose/runtime"
+            "$INFRA_MANAGER_DIR/rootfs/opt/infra-manager/compose"
           docker run --rm --entrypoint tofu infra-runtime:standalone-test version
           docker run --rm --entrypoint ansible infra-runtime:standalone-test --version
           docker run --rm --entrypoint packer infra-runtime:standalone-test version
