@@ -98,8 +98,17 @@ def validate_storage(
         [item for item in volumes if item["kind"] == "zfs_pool"],
         "pool", "имена пулов ZFS",
     )
+    _unique(volumes, "filesystem_uuid", "UUID файловых систем")
+    _unique(volumes, "pool_guid", "GUID пулов ZFS")
+    _unique(volumes, "omv_reference", "идентификаторы OMV")
     _unique(mounts, "volume", "подключения одного тома")
     _unique(mounts, "path", "пути подключения")
+    for device in devices:
+        by_id = device["by_id"]
+        if by_id is not None and by_id.rsplit("/", 1)[-1] in {".", ".."}:
+            raise InfraManagerError(
+                f"{path}: недопустимый постоянный путь диска {device['id']}"
+            )
     device_by_id = {device["id"]: device for device in devices}
     volume_by_id = {volume["id"]: volume for volume in volumes}
     direct_devices: set[str] = set()
