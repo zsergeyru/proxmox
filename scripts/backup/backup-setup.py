@@ -113,6 +113,25 @@ def export_key(destination: Path) -> None:
     print("[ОК] Восстановительный ключ записан и проверен на независимом носителе")
 
 
+def approve_restore(confirm: str) -> None:
+    """Разрешить очистку только после реального испытания восстановления."""
+
+    if confirm != "ПРОВЕРИЛ-ВОССТАНОВЛЕНИЕ":
+        raise core.BackupError("Требуется явное подтверждение проверки восстановления")
+    if not CONFIRMATION.is_file() or not core.LAST_SUCCESS.is_file():
+        raise core.BackupError("Нет независимого ключа или успешного комплекта")
+    config = core.load_config(core.DEFAULT_CONFIG)
+    targets = core.check_destinations(config["destinations"])
+    for target in targets:
+        core.restic_command(target, Path(config["password_file"]), ["check"])
+    core.RESTORE_APPROVED.parent.mkdir(parents=True, exist_ok=True)
+    core.RESTORE_APPROVED.write_text(
+        datetime.now(timezone.utc).isoformat() + "\n", encoding="utf-8"
+    )
+    core.RESTORE_APPROVED.chmod(0o600)
+    print("[ОК] После пробного восстановления разрешено выполнять правила хранения")
+
+
 def status() -> None:
     """Показать состояние, не раскрывая пароль и содержимое архивов."""
 
@@ -123,6 +142,7 @@ def status() -> None:
     else:
         print("Успешных копий новой программы пока нет")
     print("Независимая копия ключа:", "подтверждена" if CONFIRMATION.is_file() else "не подтверждена")
+    print("Испытание восстановления:", "подтверждено" if core.RESTORE_APPROVED.is_file() else "не подтверждено")
     r = subprocess.run(["systemctl", "is-enabled", TIMER], capture_output=True, text=True)
     print("Расписание:", "включено" if r.returncode == 0 else "выключено")
 
@@ -153,6 +173,8 @@ def main() -> int:
     sub.add_parser("status")
     sub.add_parser("enable")
     sub.add_parser("disable")
+    approved = sub.add_parser("approve-restore")
+    approved.add_argument("--confirm", required=True)
     key = sub.add_parser("export-key")
     key.add_argument("--to", type=Path, required=True)
     args = parser.parse_args()
@@ -167,6 +189,8 @@ def main() -> int:
             export_key(args.to)
         elif args.action == "enable":
             enable()
+        elif args.action == "approve-restore":
+            approve_restore(args.confirm)
         else:
             subprocess.run(["systemctl", "disable", "--now", TIMER], check=True)
             print("[ОК] Периодическое резервирование выключено")
