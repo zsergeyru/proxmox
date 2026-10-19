@@ -212,7 +212,7 @@ management:
 4. проверить свободное место и права доступа;
 5. не начинать восстановление рабочих систем, пока источник резервных копий не проверен чтением и просмотром содержимого.
 
-Фактические сведения о хранилищах нужно брать из [`../../infrastructure/hosts/pve/storage/README.md`](../../infrastructure/hosts/pve/storage/README.md) и [`../../infrastructure/hosts/pve/backup/README.md`](../../infrastructure/hosts/pve/backup/README.md), а не из этой инструкции.
+Фактические сведения о хранилищах нужно брать из [`../../infrastructure/hosts/pve/storage.md`](../../infrastructure/hosts/pve/storage.md) и [`../../infrastructure/hosts/pve/backup.md`](../../infrastructure/hosts/pve/backup.md), а не из этой инструкции.
 
 ## 7. Порядок восстановления гостевых систем
 

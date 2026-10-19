@@ -4,7 +4,7 @@
 **Статус:** Действующий  
 **Основной источник:** Да — для общей архитектуры IPv4, VLAN, VPN, PBR и сетевых требований проекта.
 
-Фактическое состояние PVE хранится в [`../../infrastructure/hosts/pve/network/README.md`](../../infrastructure/hosts/pve/network/README.md), детали VM `109` — в [`../guests/109-network-gateway/README.md`](../guests/109-network-gateway/README.md).
+Фактическое состояние PVE хранится в [`../../infrastructure/hosts/pve/network.md`](../../infrastructure/hosts/pve/network.md), детали VM `109` — в [`../guests/109-network-gateway/README.md`](../guests/109-network-gateway/README.md).
 
 ## Базовые принципы
 

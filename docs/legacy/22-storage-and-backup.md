@@ -28,7 +28,7 @@ Proxmox
 
 NAS и Proxmox Backup Server пока не являются обязательной частью архитектуры. PBS имеет смысл вводить, когда появится практическая потребность в дедупликации, централизованном управлении сроками хранения, инкрементальном копировании или расширенной проверке резервных копий.
 
-Фактическое состояние подключённых хранилищ находится в [`../../infrastructure/hosts/pve/storage/README.md`](../../infrastructure/hosts/pve/storage/README.md) и [`../../infrastructure/hosts/pve/backup/README.md`](../../infrastructure/hosts/pve/backup/README.md).
+Фактическое состояние подключённых хранилищ находится в [`../../infrastructure/hosts/pve/storage.md`](../../infrastructure/hosts/pve/storage.md) и [`../../infrastructure/hosts/pve/backup.md`](../../infrastructure/hosts/pve/backup.md).
 
 ## 3. Классы резервного копирования
 
