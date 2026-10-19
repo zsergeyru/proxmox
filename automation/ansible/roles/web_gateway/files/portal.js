@@ -205,7 +205,7 @@ async function userAction(action,item,button){
 }
 let allRoutes=[];
 let editingRoute=null;
-const accessLabels={public:"Служебный вход",protected:"Через Authelia",private:"Домашняя сеть / VPN",app_auth:"Вход в самом приложении"};
+const accessLabels={public:"Служебный вход",protected:"Через Authelia",private:"Домашняя сеть / VPN",app_auth:"Вход в самом приложении",git_https:"Git HTTPS — вход Gogs"};
 function routeCard(item){
   const card=el("article","route-card");
   const details=el("div","route-details");
@@ -258,7 +258,10 @@ function openRouteForm(item=null){
   editingRoute=item;
   const form=q("#route-form");form.reset();
   text(q("#route-dialog-title"),item?"Изменить домен":"Добавить домен");
-  text(q("#route-help"),item?.managed?
+  const isGit=item?.managed && item.domain==="git.zsergey.ru" && item.service==="gogs";
+  text(q("#route-help"),isGit?
+    "Для Gogs укажите его внутренний адрес (например, http://192.168.1.50:3000). Git будет работать через HTTPS на порту 443 без Authelia.":
+    item?.managed?
     "Этот домен описан в Git: можно изменить только доступ и состояние.":
     "Укажите поддомен zsergey.ru и внутренний IP-адрес приложения.");
   const fields=form.elements;
@@ -267,10 +270,12 @@ function openRouteForm(item=null){
   fields.name.value=item?(item.name||item.service):"";
   fields.name.readOnly=!!item?.managed;
   fields.upstream.value=item?(item.upstream||""):"";
-  fields.upstream.readOnly=!!item?.managed;
-  fields.upstream.required=!item?.managed;
+  fields.upstream.readOnly=!!item?.managed&&!isGit;
+  fields.upstream.required=!item?.managed||isGit;
   fields.name.required=!item?.managed;
   form.querySelectorAll('input[name="access"]').forEach(input=>{
+    input.disabled=isGit?input.value!=="git_https":input.value==="git_https";
+    if(input.value==="git_https")input.closest("label").hidden=!isGit;
     input.checked=item?input.value===item.access:input.value==="protected";
   });
   fields.enabled.checked=item?item.enabled:false;
@@ -287,6 +292,8 @@ async function saveRoute(event){
     domain:fields.domain.value.trim().toLowerCase(),enabled:fields.enabled.checked,access};
   if(!editingRoute||!editingRoute.managed){
     payload.name=fields.name.value.trim();
+  }
+  if(!editingRoute||!editingRoute.managed||editingRoute.domain==="git.zsergey.ru"){
     payload.upstream=fields.upstream.value.trim();
   }
   const button=q("#save-route"),error=q("#route-form-error");
