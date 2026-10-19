@@ -7,6 +7,8 @@
 from __future__ import annotations
 
 import json
+import fcntl
+import shlex
 import os
 import subprocess
 import tempfile
@@ -17,7 +19,6 @@ from .common import InfraManagerError
 from .managed_backup import CONFIG, HELPER, EXPECTED_MOUNTS, _targets
 from .operation_store import OperationStore, _atomic_json
 from .pve_host import _ssh_command
-from .settings import PATHS
 
 REPOS = {"fast-ssd": "infra-core", "nas-backup": "pve-infra-core"}
 
@@ -39,9 +40,9 @@ def _restic_env(node: str, password_path: Path, repo: Path) -> tuple[list[str], 
     ssh = _ssh_command(node, ("true",))
     # _ssh_command уже проверяет известный хост и ключ; удаляем лишь
     # последнюю часть команды для вызова SFTP через restic.
-    command = ssh[:-2] + [f"root@{node}", "-s", "sftp"]
+    command = ssh[:-2] + ["-s", f"root@{node}", "sftp"]
     base = ["restic", "-o", "sftp.command=" + " ".join(
-        __import__("shlex").quote(item) for item in command
+        shlex.quote(item) for item in command
     ), "-r", f"sftp:root@{node}:{repo}"]
     env = os.environ.copy()
     env["RESTIC_PASSWORD_FILE"] = str(password_path)
@@ -112,6 +113,25 @@ def run_backup(node: str, config_path: Path = CONFIG) -> dict:
     if set(existing) != set(REPOS) or not set(existing.values()) <= {"existing", "missing"}:
         raise InfraManagerError("Неподтверждённые хранилища restic")
     store = OperationStore()
+    lock_path = store.settings / "backup.lock"
+    lock_fd = os.open(lock_path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    try:
+        fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError as exc:
+        os.close(lock_fd)
+        raise InfraManagerError("Резервирование уже выполняется") from exc
+    try:
+        return _run_locked_backup(node, targets, existing, store)
+    finally:
+        fcntl.flock(lock_fd, fcntl.LOCK_UN)
+        os.close(lock_fd)
+
+
+def _run_locked_backup(
+    node: str, targets: dict[str, str],
+    existing: dict[str, str], store: OperationStore,
+) -> dict:
+    """Выполнять только одну копию во всех таймерах и запросах."""
     # Запуск только при отсутствии выполняемой активации; независимо
     # от браузера и контейнера runtime.
     if list(store.active.glob("*.json")):
