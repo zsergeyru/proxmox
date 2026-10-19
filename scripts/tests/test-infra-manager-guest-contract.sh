@@ -268,11 +268,16 @@ if 'provision.docker.required_packages' not in docker_tasks_text:
     raise SystemExit("общий Ansible-модуль Docker не использует required_packages")
 
 services = docker.get("services", {})
-if set(services) != {"runtime", "openbao"}:
+if set(services) != {"runtime", "openbao", "web"}:
     raise SystemExit(
-        "provision.yaml: ожидаются Docker services runtime и openbao: "
+        "provision.yaml: ожидаются runtime, openbao и отключённый web-preview: "
         f"{sorted(services)}"
     )
+web = services["web"]
+if web.get("enabled") is not False or web.get("profile") != "preview":
+    raise SystemExit("Предварительный просмотр infra-web нельзя запускать по умолчанию")
+if web.get("bind") != "127.0.0.1" or web.get("port") != 3104:
+    raise SystemExit("infra-web preview должен быть доступен только на loopback")
 runtime = services["runtime"]
 openbao = services["openbao"]
 runtime_mounts = set(runtime.get("mounts", []))
