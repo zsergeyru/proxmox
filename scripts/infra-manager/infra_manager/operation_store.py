@@ -140,7 +140,7 @@ def _append_event(path: Path, operation_id: str, phase: str) -> None:
 
 
 def _valid_id(value: str) -> str:
-    if not ID_PATTERN.fullmatch(value):
+    if not isinstance(value, str) or not ID_PATTERN.fullmatch(value):
         raise InfraManagerError("Идентификатор задания должен содержать 32 знака UUID")
     return value
 
@@ -246,7 +246,8 @@ class OperationStore:
             history_path = self._history_path(operation_id)
             if history_path.exists() or history_path.is_symlink():
                 previous = _read(history_path)
-                if previous.get("kind") != kind or previous.get("target") != target:
+                if (previous.get("kind") != kind or previous.get("target") != target
+                        or previous.get("revision") != revision):
                     raise InfraManagerError("Идентификатор уже принадлежит другой операции")
                 return previous, False
             if active_path.exists() or active_path.is_symlink():
@@ -332,7 +333,7 @@ def run_recorded(
     code = 1
     try:
         code = execute(kind, target)
-        if not isinstance(code, int):
+        if isinstance(code, bool) or not isinstance(code, int):
             code = 1
     except (Exception, KeyboardInterrupt):
         code = 1
