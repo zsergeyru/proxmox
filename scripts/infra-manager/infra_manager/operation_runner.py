@@ -1,4 +1,4 @@
-"""Операторский вход в единое постоянное хранилище операций 910.
+"""Операторский вход в единое постоянное хранилище операций управляющего гостя.
 
 Пока не завершён переход с Semaphore, новый путь запускается явно через
 'operations run'. Обычные команды 'deploy/sync/repair/status' не меняются.
@@ -27,7 +27,7 @@ def _allowed(kind: str, vmid: int) -> None:
     identity = guest_identity(PATHS.repo_root, vmid)
     if kind == "deploy" and identity.role == SETTINGS.infra_manager_role:
         raise InfraManagerError(
-            "Самообновление 910 пока доступно только штатной командой: "
+            "Самообновление управляющего гостя пока доступно только штатной командой: "
             "подтверждение независимой активации относится к следующему этапу"
         )
 
@@ -63,7 +63,7 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
         if os.geteuid() != 0:
-            raise InfraManagerError("Управление постоянными заданиями разрешено только root 910")
+            raise InfraManagerError("Управление постоянными заданиями разрешено только root управляющего гостя")
         if args.action == "run":
             if args.vmid <= 0:
                 raise InfraManagerError("VMID должен быть положительным числом")
