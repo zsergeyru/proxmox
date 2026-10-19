@@ -323,7 +323,7 @@ def read_backup_host_status(node: str) -> str:
 
 
 def install_backup_host_support(node: str, repo_root: Path) -> None:
-    """Установить только минимальную PVE-only проверку состояния копий.
+    """Установить только узкие PVE-only помощники проверки и экспорта копий.
 
     Настройкой носителей, выполнением и расписанием резервирования
     управляет управляющий гость. Никаких apt, форматирования, монтирования, systemd-таймеров
@@ -334,6 +334,18 @@ def install_backup_host_support(node: str, repo_root: Path) -> None:
         node,
         repo_root / "scripts" / "infra-manager" / "host" / "backup-status.py",
         Path("/usr/local/lib/infra-manager/backup/backup-status.py"),
+        "0700",
+    )
+    _install_remote_file(
+        node,
+        repo_root / "scripts" / "infra-manager" / "host" / "backup-export.py",
+        Path("/usr/local/lib/infra-manager/backup/backup-export.py"),
+        "0700",
+    )
+    _install_remote_file(
+        node,
+        repo_root / "scripts" / "backup" / "openbao-raft-guest.py",
+        Path("/usr/local/lib/infra-manager/backup/openbao-raft-guest.py"),
         "0700",
     )
     console.detail(
