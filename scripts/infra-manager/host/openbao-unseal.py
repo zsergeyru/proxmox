@@ -36,6 +36,7 @@ from openbao_host.snippets import (
     CHECK_KV_ACCESS_CODE,
     CHECK_OPERATOR_ACCESS_CODE,
     CHECK_SSH_ACCESS_CODE,
+    CONFIGURE_BACKUP_ACCESS_CODE,
     CONFIGURE_CLIENT_SIGNING_ROLE_CODE,
     CONFIGURE_HOST_SIGNING_ROLE_CODE,
     CONFIGURE_KV_CODE,
@@ -76,6 +77,7 @@ KEY_PATH = KEY_DIR / "unseal.key"
 SSH_ACCESS_PATH = KEY_DIR / "ssh-access.json"
 KV_ACCESS_PATH = KEY_DIR / "kv-access.json"
 OPERATOR_ACCESS_PATH = KEY_DIR / "operator-access.json"
+BACKUP_ACCESS_PATH = KEY_DIR / "backup-access.json"
 OPERATOR_USERNAME = "operator"
 LOCK_PATH = Path("/run/lock/infra-manager-openbao-unseal.lock")
 CT_RUNTIME_DIR = Path("/run/infra-manager")
@@ -806,6 +808,53 @@ def rotate_operator_password() -> None:
     print(f"URL: https://{TLS_ADDRESS}:8202/ui/")
     print(f"Username: {credentials['username']}")
     print(f"Password: {credentials['password']}")
+
+
+def configure_raft_backup_access() -> None:
+    """Разово создать ограниченный AppRole снимка Raft для PVE-only копий.
+
+    Root token используется только во время подготовки и всегда отзывается.
+    Повторный вызов не меняет существующий secret_id.
+    """
+
+    if BACKUP_ACCESS_PATH.exists():
+        if BACKUP_ACCESS_PATH.is_symlink() or BACKUP_ACCESS_PATH.stat().st_size == 0:
+            raise OpenBaoHostError("Файл доступа Raft повреждён; замена запрещена")
+        log_status("[ОК] Данные доступа к снимку Raft уже существуют")
+        return
+    require_active_openbao("создание доступа резервирования")
+    root_token = generate_temporary_root_token()
+    try:
+        result = pct_exec(
+            "python3", "-c", CONFIGURE_BACKUP_ACCESS_CODE,
+            input_text=root_token, capture=True,
+        )
+        payload = json.loads(result.stdout)
+        if (
+            not isinstance(payload, dict)
+            or set(payload) != {"role_id", "secret_id"}
+            or not all(isinstance(v, str) and v for v in payload.values())
+        ):
+            raise OpenBaoHostError("Неверные данные ограниченного доступа Raft")
+        KEY_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
+        fd, temp_name = tempfile.mkstemp(dir=KEY_DIR, prefix=".backup-access.")
+        temp = Path(temp_name)
+        try:
+            os.fchmod(fd, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as stream:
+                json.dump(payload, stream, separators=(",", ":"))
+                stream.write("\n")
+                stream.flush()
+                os.fsync(stream.fileno())
+            if BACKUP_ACCESS_PATH.exists():
+                raise OpenBaoHostError("Доступ Raft уже настроен, замена запрещена")
+            os.replace(temp, BACKUP_ACCESS_PATH)
+        finally:
+            temp.unlink(missing_ok=True)
+    finally:
+        revoke_temporary_root_token(root_token)
+        del root_token
+    log_status("[ОК] Ограниченный доступ для снимков OpenBao подготовлен")
 
 
 def read_kv_access_credentials() -> dict[str, object]:
@@ -2123,6 +2172,10 @@ def main() -> int:
         action="store_true",
         help="Сменить пароль оператора OpenBao и показать новый",
     )
+    mode.add_argument(
+        "--configure-backup-access", action="store_true",
+        help="Разово выпустить ограниченный PVE-only AppRole для Raft-снимков",
+    )
     args = parser.parse_args()
 
     global LOG_LEVEL
@@ -2136,7 +2189,9 @@ def main() -> int:
     LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
     with LOCK_PATH.open("a+", encoding="utf-8") as lock:
         fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
-        if args.prepare_tls:
+        if args.configure_backup_access:
+            configure_raft_backup_access()
+        elif args.prepare_tls:
             prepare_tls_material()
         elif args.repair:
             repair()

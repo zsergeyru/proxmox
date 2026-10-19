@@ -2854,3 +2854,66 @@ finally:
 
 print(json.dumps({"ready": True}, separators=(",", ":")))
 """
+
+CONFIGURE_BACKUP_ACCESS_CODE = r"""
+import json
+import sys
+from urllib.request import Request, urlopen
+
+BASE = "http://127.0.0.1:8200"
+token = sys.stdin.read().strip()
+if not token:
+    raise SystemExit("missing temporary root token")
+
+
+def request(method, path, data=None):
+    headers = {"X-Vault-Token": token, "Content-Type": "application/json"}
+    encoded = json.dumps(data).encode() if data is not None else None
+    with urlopen(
+        Request(BASE + path, headers=headers, data=encoded, method=method),
+        timeout=30,
+    ) as response:
+        body = response.read()
+    return json.loads(body) if body else {}
+
+
+auth = request("GET", "/v1/sys/auth").get("data", {})
+if not isinstance(auth, dict) or auth.get("infra-manager/", {}).get("type") != "approle":
+    raise SystemExit("expected existing auth/infra-manager approle")
+
+policy = json.dumps({
+    "path": {
+        "sys/storage/raft/snapshot": {"capabilities": ["read", "sudo"]},
+        "auth/token/lookup-self": {"capabilities": ["read"]},
+        "auth/token/revoke-self": {"capabilities": ["update"]},
+    }
+}, separators=(",", ":"))
+request(
+    "POST", "/v1/sys/policies/acl/infra-manager-raft-backup", {"policy": policy}
+)
+name = "pve-raft-backup"
+request("POST", f"/v1/auth/infra-manager/role/{name}", {
+    "bind_secret_id": True,
+    "secret_id_bound_cidrs": ["127.0.0.1/32"],
+    "secret_id_num_uses": 0,
+    "secret_id_ttl": "0s",
+    "token_bound_cidrs": ["127.0.0.1/32"],
+    "token_no_default_policy": True,
+    "token_policies": ["infra-manager-raft-backup"],
+    "token_num_uses": 0,
+    "token_ttl": "5m",
+    "token_max_ttl": "10m",
+})
+role_id = request(
+    "GET", f"/v1/auth/infra-manager/role/{name}/role-id"
+).get("data", {}).get("role_id")
+secret_id = request(
+    "POST", f"/v1/auth/infra-manager/role/{name}/secret-id", {}
+).get("data", {}).get("secret_id")
+if not role_id or not secret_id:
+    raise SystemExit("OpenBao did not return limited backup credentials")
+print(json.dumps(
+    {"role_id": role_id, "secret_id": secret_id},
+    separators=(",", ":"),
+))
+"""
