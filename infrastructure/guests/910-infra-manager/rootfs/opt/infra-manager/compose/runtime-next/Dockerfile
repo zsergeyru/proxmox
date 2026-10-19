@@ -1,7 +1,7 @@
 # Следующее поколение infra-runtime без Semaphore.
 # До переключения штатной активации образ проверяется отдельно от текущего.
 ARG PACKER_IMAGE=hashicorp/packer:1.15.4@sha256:8be72877859e00e13124b26373f0505b2a2597c5393ecbea900be28b4be58186
-FROM \${PACKER_IMAGE} AS packer_source
+FROM ${PACKER_IMAGE} AS packer_source
 
 FROM python:3.12.12-slim-bookworm
 
@@ -18,12 +18,12 @@ RUN set -eux; \
       amd64|arm64) : ;; \
       *) echo "Unsupported architecture: $arch" >&2; exit 1 ;; \
     esac; \
-    archive="tofu_\${OPENTOFU_VERSION}_linux_\${arch}.zip"; \
+    archive="tofu_${OPENTOFU_VERSION}_linux_${arch}.zip"; \
     curl -fsSLo "/tmp/$archive" \
-      "https://github.com/opentofu/opentofu/releases/download/v\${OPENTOFU_VERSION}/\${archive}"; \
+      "https://github.com/opentofu/opentofu/releases/download/v${OPENTOFU_VERSION}/${archive}"; \
     curl -fsSLo /tmp/SHA256SUMS \
-      "https://github.com/opentofu/opentofu/releases/download/v\${OPENTOFU_VERSION}/tofu_\${OPENTOFU_VERSION}_SHA256SUMS"; \
-    grep "  \${archive}$" /tmp/SHA256SUMS > /tmp/tofu.check; \
+      "https://github.com/opentofu/opentofu/releases/download/v${OPENTOFU_VERSION}/tofu_${OPENTOFU_VERSION}_SHA256SUMS"; \
+    grep "  ${archive}$" /tmp/SHA256SUMS > /tmp/tofu.check; \
     (cd /tmp && sha256sum -c tofu.check); \
     unzip -oq "/tmp/$archive" -d /usr/local/bin; \
     chmod 0755 /usr/local/bin/tofu; \
