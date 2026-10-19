@@ -127,6 +127,9 @@ jobs:
       - name: Run PVE operator command checks
         run: python scripts/tests/test-manager-host.py
 
+      - name: Check deferred infra-runtime readiness
+        run: python scripts/tests/test-runtime-activation-readiness.py
+
       - name: Run common guest SSH session checks
         run: python scripts/tests/test-guest-ssh.py
 
