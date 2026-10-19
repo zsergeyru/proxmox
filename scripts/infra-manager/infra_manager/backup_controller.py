@@ -1,7 +1,7 @@
 """Расписание и зашифрованные копии под управлением управляющего LXC.
 
 PVE выполняет только проверку подключений и выдачу защищённого снимка.
-restic и запись через SFTP выполняются исключительно внутри 910.
+restic и запись через SFTP выполняются исключительно внутри управляющего гостя.
 """
 
 from __future__ import annotations
@@ -112,7 +112,7 @@ def _credentials(node: str, directory: Path, verified: dict[str, str],
 
 def _restic(node: str, destination: str, key: Path, args: list[str],
             *, source=None) -> None:
-    """Запустить restic в 910 через подтверждённый root SSH/SFTP к PVE."""
+    """Запустить restic в управляющего гостя через подтверждённый root SSH/SFTP к PVE."""
     mountpoint, _filesystem, repository = DESTINATIONS[destination]
     backend = f"sftp:root@{node}:{mountpoint}/{repository}"
     ssh_args = [
@@ -145,7 +145,7 @@ def _restic(node: str, destination: str, key: Path, args: list[str],
 
 def _stream_snapshot(node: str, verified: dict[str, str],
                      key: Path, destination: str, *, vm100: bool = False) -> None:
-    """Передать последовательный полный поток PVE или VM 100 в restic 910."""
+    """Передать последовательный полный поток PVE или VM 100 в restic управляющего гостя."""
     payload = json.dumps(verified, separators=(",", ":")).encode()
     export = subprocess.Popen(
         _ssh_command(node, ("python3", HOST_HELPER,
@@ -262,7 +262,7 @@ def execute(*, run: bool = False) -> None:
             "includes_vm100": True,
             "restore_tested": False,
         })
-        print("[ОК] Состояние PVE/910 и ежедневный снимок VM 100 сохранены "
+        print("[ОК] Состояние PVE/управляющего гостя и ежедневный снимок VM 100 сохранены "
               "в обоих хранилищах; пробное восстановление ещё не подтверждено")
 
 
@@ -272,7 +272,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         if os.geteuid() != 0:
-            raise InfraManagerError("Нужны полномочия системной службы 910")
+            raise InfraManagerError("Нужны полномочия системной службы управляющего гостя")
         execute(run=args.run)
         return 0
     except (InfraManagerError, OSError, ValueError, yaml.YAMLError) as exc:
