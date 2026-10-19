@@ -60,6 +60,14 @@
     group: root
     mode: "0700"
 
+- name: Создать ограниченный каталог передачи активации исполнителю
+  ansible.builtin.file:
+    path: "{{ provision.paths.operations_state }}/activation"
+    state: directory
+    owner: root
+    group: "0"
+    mode: "0770"
+
 - name: Опубликовать проверенный Git known_hosts вне данных Semaphore
   ansible.builtin.copy:
     remote_src: true
