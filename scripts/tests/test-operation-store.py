@@ -94,10 +94,14 @@ def check_persistence_and_idempotency(root: Path) -> None:
 
 def check_activation_phases(root: Path) -> None:
     store = OperationStore(root, require_mount=False)
-    record, _ = store.reserve("deploy", 109, "abc")
+    record, _ = store.reserve("deploy", 109, "abc", activation_required=True)
     operation_id = record["id"]
     store.start(operation_id)
     check(store.get(operation_id)["result"] is None, "Установка преждевременно успешна")
+    fails(
+        lambda: store.finish(operation_id, exit_code=0),
+        "Самообновление не должно завершиться до systemd-проверки",
+    )
     store.transition(operation_id, "activating")
     store.transition(operation_id, "verifying")
     check(store.get(operation_id)["phase"] == "verifying", "Нет этапа проверки")
