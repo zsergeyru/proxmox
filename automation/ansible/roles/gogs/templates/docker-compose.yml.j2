@@ -1,0 +1,16 @@
+services:
+  gogs:
+    # Digest ветки 0.15 edge зафиксирован: deploy не обновляет версию сам.
+    image: {{ provision.gogs.image }}
+    container_name: {{ provision.gogs.container_name }}
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    ports:
+      # HTTP доступен Caddy 140 по внутреннему адресу гостя.
+      - "{{ ansible_host }}:{{ provision.gogs.network.http_port }}:3000"
+      # SSH только внутри LAN; не публиковать 2222 на Keenetic.
+      - "{{ ansible_host }}:{{ provision.gogs.network.ssh_port }}:2222"
+    volumes:
+      - {{ provision.gogs.paths.data }}:/data
+    stop_grace_period: 60s

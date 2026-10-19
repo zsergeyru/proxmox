@@ -73,7 +73,7 @@ jobs:
         run: python scripts/tests/test-ai-services-contract.py
 
       - name: Check Python with Ruff
-        run: ruff check scripts automation/ansible/roles/photo_archive/files/initial_setup.py automation/ansible/roles/photo_archive/files/setup_addons.py
+        run: ruff check scripts automation/ansible/roles/photo_archive/files/initial_setup.py automation/ansible/roles/photo_archive/files/setup_addons.py automation/ansible/roles/gogs/files/prepare_data.py
 
       - name: Compile Python tooling
         run: python -m compileall -q scripts
@@ -198,6 +198,9 @@ jobs:
         run: python scripts/tests/test-web-gateway-backup.py
       - name: Check Immich login safety in web gateway
         run: python scripts/tests/test-web-gateway-immich.py
+
+      - name: Check Gogs guest and safe migration
+        run: python scripts/tests/test-gogs-contract.py
 
       - name: Check Immich Compose template
         run: python scripts/tests/test-photo-archive-compose.py

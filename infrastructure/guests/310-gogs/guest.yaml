@@ -1,0 +1,19 @@
+schema_version: 12
+vmid: 310
+name: gogs
+profile: debian-lxc-docker
+
+description: Личный Git-сервер Gogs с отдельным постоянным томом
+
+protection: true
+recreate_if_missing: true
+
+resources:
+  cores: 2
+  memory_mb: 1024
+  swap_mb: 512
+  disk_size_gb: 12
+
+boot:
+  onboot: true
+  order: 40

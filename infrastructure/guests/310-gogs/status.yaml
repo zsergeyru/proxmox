@@ -1,0 +1,22 @@
+schema_version: 2
+guest_vmid: 310
+
+checks:
+  - type: docker
+    container: gogs
+    message: "Gogs запущен"
+  - type: tcp
+    port: 3000
+    message: "Gogs принимает HTTP для Caddy"
+  - type: tcp
+    port: 2222
+    message: "Gogs принимает SSH внутри домашней сети"
+  - type: file
+    path: /var/lib/gogs/.gogs-imported
+    message: "Подтверждён перенос постоянных данных Gogs"
+  - type: file
+    path: /var/lib/gogs/gogs/conf/app.ini
+    message: "Постоянная конфигурация Gogs доступна"
+  - type: file
+    path: /var/lib/gogs/gogs/data/gogs.db
+    message: "Постоянная база пользователей Gogs доступна"

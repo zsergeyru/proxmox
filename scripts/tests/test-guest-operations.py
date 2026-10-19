@@ -55,7 +55,7 @@ def check_operation_catalog() -> None:
         for guest in operations.operation_guests(ROOT, "sync")
     }
     # Не предлагать sync гостю без отдельных безопасных задач.
-    if actual_sync != expected - {311}:
+    if actual_sync != expected - {310, 311}:
         fail("Sync Guest должен исключать гостей без безопасной синхронизации")
 
 

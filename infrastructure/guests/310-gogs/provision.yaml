@@ -1,0 +1,81 @@
+schema_version: 1
+guest_vmid: 310
+
+system:
+  distribution: debian
+  version: "13"
+  architecture: amd64
+  required_packages:
+    - ca-certificates
+    - python3
+    - sqlite3
+
+docker:
+  source: docker-official-repository
+  service:
+    name: docker
+    enabled: true
+    state: running
+  required_packages:
+    - docker-ce
+    - docker-ce-cli
+    - containerd.io
+    - docker-buildx-plugin
+    - docker-compose-plugin
+
+# Постоянные репозитории не находятся на корневом диске LXC.
+# Общее хранилище infra_state и каталоги 910 здесь не используются.
+pve_storage:
+  volume_group: pve
+  thin_pool: data
+  volumes:
+    - name: gogs_data
+      size_gb: 30
+      mountpoint: /mnt/bindmounts/gogs-data
+  mounts:
+    - slot: mp0
+      volume: gogs_data
+      directory: 310-gogs
+      target: /var/lib/gogs
+      read_only: false
+
+gogs:
+  # Официальная сборка edge ветки 0.15, закреплённая по digest.
+  # Не заменять на изменяемый тег edge и не менять версию при deploy.
+  # Перед первым запуском требуется перенос и проверка копии данных Windows.
+  image: "docker.io/gogs/gogs@sha256:375be66dccefaa72a95afb8c0840f7ddf4d1c30e9b08991c68a9e1012f488259"
+  source_version: "0.15.0+dev"
+  container_name: gogs
+  paths:
+    root: /opt/gogs
+    compose: /opt/gogs/compose
+    compose_file: /opt/gogs/compose/docker-compose.yml
+    data: /var/lib/gogs
+    config: /var/lib/gogs/gogs/conf/app.ini
+    database: /var/lib/gogs/gogs/data/gogs.db
+    repositories: /var/lib/gogs/git/gogs-repositories
+    prepared_marker: /var/lib/gogs/.gogs-imported
+  network:
+    public_url: https://git.zsergey.ru/
+    domain: git.zsergey.ru
+    http_port: 3000
+    ssh_port: 2222
+    ssh_public: false
+  storage:
+    required_mount: /var/lib/gogs
+    allow_missing_mount: false
+    require_import_before_start: true
+  access:
+    type: gogs
+    require_signin: true
+    allow_registration: false
+    allow_reverse_proxy_authentication: false
+
+persistence:
+  backup_required:
+    - /var/lib/gogs
+  reproducible:
+    - /opt/gogs
+  ephemeral:
+    - docker-images
+    - docker-build-cache
