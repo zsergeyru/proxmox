@@ -294,7 +294,7 @@
          or infra_backup_policy.destinations[1].source | default('', true) | length > 0)
       }}
 
-- name: Установить системную службу резервирования 910
+- name: Установить системную службу резервирования управляющего гостя
   ansible.builtin.copy:
     src: "{{ guest_root }}/rootfs/etc/systemd/system/infra-manager-backup.service"
     dest: /etc/systemd/system/infra-manager-backup.service
