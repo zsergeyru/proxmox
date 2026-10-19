@@ -73,6 +73,7 @@
         <legend>Кто может открыть</legend>
         <label><input type="radio" name="access" value="protected" checked> После входа в Authelia</label>
         <label><input type="radio" name="access" value="private"> Только домашняя сеть / VPN</label>
+        <label id="git-access-option" hidden><input type="radio" name="access" value="git_https"> Git HTTPS — вход средствами Gogs, без Authelia</label>
       </fieldset>
       <label class="check"><input type="checkbox" name="enabled"> Включить сразу после проверки</label>
       <p class="form-error" id="route-form-error" role="alert" hidden></p>
