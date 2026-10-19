@@ -10,38 +10,3 @@ connection:
   port: 22
   user: root
   ssh_host_fingerprint: null
-storage:
-  devices:
-    - role: system
-      model: SPCC
-      capacity_gb: 120
-      serial: null
-    - role: shared
-      model: ST1000DM003
-      capacity_gb: 1000
-      serial: null
-    - role: data
-      model: ST4000VX016
-      capacity_gb: 4000
-      serial: null
-    - role: backup
-      model: ST4000VX016
-      capacity_gb: 4000
-      serial: null
-  # Значения заполняются только после чтения реальных томов.
-  # Незаполненный идентификатор запрещает создание папок и запуск служб.
-  volumes:
-    shared:
-      mountpoint: null
-      filesystem_uuid: null
-      omv_reference: null
-    data:
-      mountpoint: null
-      pool: nas-data
-      pool_guid: null
-      omv_reference: null
-    backup:
-      mountpoint: null
-      pool: nas-backup
-      pool_guid: null
-      omv_reference: null
