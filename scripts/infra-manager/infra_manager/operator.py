@@ -242,25 +242,25 @@ def operator_guest_status(
 def _await_runtime_activation(timeout_seconds: int = 1080) -> None:
     """Дождаться отложенного запуска и подтверждённой синхронизации Semaphore.
 
-    Исполняется на 910 после выхода задания из старого infra-runtime.
+    Исполняется на управляющем госте после выхода задания из старого infra-runtime.
     Не перезапускает контейнер самостоятельно и не читает закрытый журнал.
     """
 
     marker = RUNTIME_ACTIVATION_MARKER
     if not marker.is_file():
         raise InfraManagerError(
-            "Не обнаружена ожидаемая активация 910; проверьте "
+            "Не обнаружена ожидаемая активация управляющего гостя; проверьте "
             "/var/log/infra-manager/runtime-activation.log"
         )
     deploy_ref = marker.read_text(encoding="utf-8").strip()
     if not re.fullmatch(r"(?:runtime|host):[0-9]+", deploy_ref):
-        raise InfraManagerError("Некорректная отметка отложенной активации 910")
+        raise InfraManagerError("Некорректная отметка отложенной активации управляющего гостя")
     deadline = time.monotonic() + timeout_seconds
     console.info("Ожидание активации infra-runtime и синхронизации Semaphore")
     while marker.exists():
         if time.monotonic() >= deadline:
             raise InfraManagerError(
-                "Активация 910 не завершилась; проверьте "
+                "Активация управляющего гостя не завершилась; проверьте "
                 "/var/log/infra-manager/runtime-activation.log"
             )
         time.sleep(1)
@@ -270,7 +270,7 @@ def _await_runtime_activation(timeout_seconds: int = 1080) -> None:
         outcome = RUNTIME_ACTIVATION_RESULT.read_text(encoding="utf-8").strip()
     except OSError as exc:
         raise InfraManagerError(
-            "Нет подтверждения отложенной активации 910; проверьте "
+            "Нет подтверждения отложенной активации управляющего гостя; проверьте "
             "/var/log/infra-manager/runtime-activation.log"
         ) from exc
     if outcome != expected:
