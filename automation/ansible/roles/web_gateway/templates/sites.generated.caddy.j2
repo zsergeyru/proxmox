@@ -5,7 +5,13 @@
 {% set access = route.access | default('public' if route.domain in provision.web_gateway.caddy.public_domains else 'protected') %}
 {{ route.domain }} {
     encode zstd gzip
-{% if access == 'protected' %}
+{% if access == 'git_https' %}
+    # Gogs обрабатывает Basic/токен Git HTTP сам. Не допускать
+    # подмены пользователя заголовком от внешнего клиента.
+    reverse_proxy {{ route.upstream }} {
+        header_up -X-WEBAUTH-USER
+    }
+{% elif access == 'protected' %}
     # Служба получает запрос только после подтверждения второго фактора.
     forward_auth authelia:9091 {
         uri /api/authz/forward-auth
