@@ -182,6 +182,7 @@ cat /opt/infra-manager/compose/.versions.env
 | `/mnt/pve-access/pve-host` | `/mnt/pve-access/pve-host` | RO |
 | `/mnt/persistent-state/opentofu` | `/var/lib/infra-manager/opentofu` | RW |
 | `/mnt/persistent-state/locks` | `/var/lib/infra-manager/locks` | RW |
+| `/mnt/persistent-state/physical-hosts` | `/var/lib/infra-manager/physical-hosts` | RW |
 | `/var/lib/infra-manager/bootstrap-repo` | `/var/lib/infra-manager/bootstrap-repo` | RO |
 | `/run/infra-manager/secrets` | `/run/infra-manager/secrets` | RO |
 
@@ -198,6 +199,7 @@ cat /opt/infra-manager/compose/.versions.env
 /mnt/persistent-state/semaphore/
 /mnt/persistent-state/opentofu/
 /mnt/persistent-state/locks/
+/mnt/persistent-state/physical-hosts/
 /var/lib/infra-manager/bootstrap-repo/
 /etc/infra-manager/ca/
 /mnt/pve-access/pve-host/
@@ -310,6 +312,7 @@ docker exec infra-runtime python3 -c 'import proxmoxer, yaml, jsonschema'
 docker exec infra-runtime test -d /var/lib/semaphore
 docker exec infra-runtime test -d /var/lib/infra-manager/opentofu
 docker exec infra-runtime test -w /var/lib/infra-manager/locks
+docker exec infra-runtime test -d /var/lib/infra-manager/physical-hosts
 docker exec infra-runtime test -r /var/lib/infra-manager/bootstrap-repo/scripts/infra-manager/jobs/guest-operation.py
 docker exec infra-runtime test -d /run/infra-manager/secrets
 ```
