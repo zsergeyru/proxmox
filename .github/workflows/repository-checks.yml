@@ -175,7 +175,10 @@ jobs:
           env = Environment(loader=FileSystemLoader(str(templates)), undefined=StrictUndefined,
                             keep_trailing_newline=True)
           env.filters["bool"] = bool
-          routes = list(provision["web_gateway"]["caddy"]["routes"])
+          # Проверяем также включённый маршрут Git HTTPS, не только выключенный шаблон.
+          routes = [dict(route, upstream="http://192.168.1.55:3000", enabled=True)
+                    if route["domain"] == "git.zsergey.ru" else route
+                    for route in provision["web_gateway"]["caddy"]["routes"]]
           routes.extend([
               {"domain": "printer.zsergey.ru", "service": "custom",
                "name": "3D принтер", "upstream": "http://192.168.1.50:7125",
