@@ -147,7 +147,15 @@ def proxy_to_manager(arguments: list[str]) -> int:
         storage_result = confirm_nas_storage("nas", forward, OperatorError)
         if storage_result != 0:
             return storage_result
-    return forward(arguments)
+    result = forward(arguments)
+    if result == 0 and arguments in (["status"], ["status", str(vmid)]):
+        # Резервирование — часть общего статуса, не отдельная команда.
+        helper = Path("/usr/local/lib/infra-manager/backup/backup-reconcile.py")
+        if helper.is_file() and not helper.is_symlink():
+            run(["python3", str(helper), "--status"], check=False)
+        else:
+            print("[ПРЕДУПРЕЖДЕНИЕ] Резервирование ещё не установлено")
+    return result
 def color_mode() -> str:
     """Определить, можно ли сохранить цветной вывод при передаче команды."""
     mode = os.environ.get("INFRA_MANAGER_COLOR", "auto")
@@ -171,9 +179,6 @@ def main() -> int:
     arguments = sys.argv[1:] or ["--help"]
     if arguments == ["recover"]:
         return recover()
-    if arguments and arguments[0] == "backup":
-        from infra_manager_backup import dispatch_backup
-        return dispatch_backup(arguments[1:], OperatorError)
     return proxy_to_manager(arguments)
 
 
