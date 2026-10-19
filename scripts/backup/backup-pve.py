@@ -34,6 +34,7 @@ SEMAPHORE_DB = STATE / "semaphore/semaphore.sqlite"
 OPENTOFU_STATE = STATE / "opentofu/state/proxmox.tfstate"
 ACTIVATION = STATE / "semaphore/.infra-manager-runtime-activation-pending"
 LOCK = STATE / "locks/910.lock"
+BACKUP_GATE = STATE / "locks/backup-gate.lock"
 SOURCES = (
     Path("/etc/pve"),
     Path("/etc/network/interfaces"),
@@ -171,21 +172,33 @@ def check_source() -> None:
 
 @contextlib.contextmanager
 def operation_guard():
-    """Не читать OpenTofu и секреты одновременно с изменяющим deploy 910."""
+    """Исключить изменяющие задания всех гостей на время копии 910."""
 
-    if LOCK.is_symlink() or not LOCK.parent.is_dir():
-        raise BackupError("Постоянные блокировки 910 не подготовлены")
-    fd = os.open(LOCK, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o660)
+    for path in (BACKUP_GATE, LOCK):
+        if path.is_symlink() or not path.is_file():
+            raise BackupError(
+                f"Нет общей блокировки {path}; сначала обновите управляющий контур"
+            )
+    barrier = os.open(BACKUP_GATE, os.O_RDONLY | os.O_NOFOLLOW)
     try:
         try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            fcntl.flock(barrier, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as exc:
-            raise BackupError("910 занят изменяющей операцией") from exc
-        if ACTIVATION.exists():
-            raise BackupError("Самообновление 910 ещё не завершено")
-        yield
+            raise BackupError("Задания infra-manager ещё выполняются") from exc
+        descriptor = os.open(LOCK, os.O_RDONLY | os.O_NOFOLLOW)
+        try:
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError as exc:
+                raise BackupError("Управляющий гость занят изменениями") from exc
+            if ACTIVATION.exists():
+                raise BackupError("Самообновление 910 ещё не завершено")
+            yield
+        finally:
+            os.close(descriptor)
     finally:
-        os.close(fd)
+        os.close(barrier)
+
 
 
 def sqlite_snapshot(target: Path) -> None:
