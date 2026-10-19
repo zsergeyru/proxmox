@@ -22,6 +22,7 @@ system:
     - openssl
     - python3
     - python3-yaml
+    - python3-jsonschema
 
 docker:
   source: docker-official-repository

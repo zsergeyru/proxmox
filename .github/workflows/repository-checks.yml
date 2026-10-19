@@ -108,6 +108,8 @@ jobs:
         run: python scripts/tests/test-physical-nas-users.py
 
 
+      - name: Check infra-manager startup without jsonschema
+        run: python scripts/tests/test-host-python-deps.py
       - name: Run infra-manager Python foundation checks
         run: python scripts/tests/test-infra-manager-python.py
 
