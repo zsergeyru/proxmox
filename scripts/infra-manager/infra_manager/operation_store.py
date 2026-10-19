@@ -22,7 +22,7 @@ from .common import InfraManagerError
 DEFAULT_ROOT = Path("/mnt/persistent-state/operations")
 MOUNT_ROOT = Path("/mnt/persistent-state")
 KINDS = frozenset({"deploy", "sync", "repair", "status"})
-TERMINAL = frozenset({"completed", "failed", "needs-recovery"})
+TERMINAL = frozenset({"completed", "failed"})
 ID_PATTERN = re.compile(r"^[0-9a-f]{32}$")
 MAX_RECORD_BYTES = 65536
 
@@ -292,6 +292,39 @@ class OperationStore:
             _atomic_json(self._history_path(operation_id), record)
             _append_event(self.logs / f"{operation_id}.jsonl", operation_id, "running")
             return record
+
+    def reconcile_interrupted(self) -> list[str]:
+        """При запуске управляющей машины оставить прерванные задания заблокированными.
+
+        Не предполагать, что PID прежнего запуска ещё существует, и не
+        разрешать автоматическое повторение неизвестного изменения.
+        """
+        interrupted = []
+        with self._registry():
+            for path in self.active.iterdir():
+                if not path.name.endswith(".json") or not path.stem.isdigit():
+                    continue
+                active = _read(path)
+                operation_id = _valid_id(active.get("id", ""))
+                record = self.get(operation_id)
+                if record["phase"] in TERMINAL:
+                    path.unlink()
+                    _sync_dir(self.active)
+                    continue
+                if record["phase"] == "needs-recovery":
+                    interrupted.append(operation_id)
+                    continue
+                record.update(
+                    phase="needs-recovery",
+                    result=None,
+                    finished_at=None,
+                )
+                _atomic_json(self._history_path(operation_id), record)
+                _append_event(
+                    self.logs / f"{operation_id}.jsonl", operation_id, "needs-recovery"
+                )
+                interrupted.append(operation_id)
+        return interrupted
 
     def transition(self, operation_id: str, phase: str) -> dict:
         """Записать этап самообновления с проверкой предыдущего этапа."""
