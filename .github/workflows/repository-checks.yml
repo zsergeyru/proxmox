@@ -136,6 +136,9 @@ jobs:
       - name: Run guest operation checks
         run: python scripts/tests/test-guest-operations.py
 
+      - name: Check protected persistent operation store
+        run: python scripts/tests/test-operation-store.py
+
       - name: Check safe Sync does not update software
         run: python scripts/tests/test-safe-sync.py
 
