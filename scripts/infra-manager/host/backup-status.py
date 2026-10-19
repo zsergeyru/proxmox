@@ -36,6 +36,8 @@ def _read_record(path: Path) -> dict | None:
 def _core_status(now: datetime) -> str:
     record = _read_record(LAST_SUCCESS)
     if not record:
+        if LAST_SUCCESS.exists() or LAST_SUCCESS.is_symlink():
+            return "[ПРЕДУПРЕЖДЕНИЕ] Запись о последней копии повреждена"
         return "[ОЖИДАНИЕ] Нет подтверждённой полной копии PVE и 910"
     try:
         stamp = datetime.fromisoformat(record["created_utc"])
@@ -66,6 +68,8 @@ def _core_status(now: datetime) -> str:
 def _vm100_status(now: datetime) -> str:
     record = _read_record(LAST_VM100)
     if not record:
+        if LAST_VM100.exists() or LAST_VM100.is_symlink():
+            return "[ПРЕДУПРЕЖДЕНИЕ] Запись о VM 100 повреждена"
         return "[ОЖИДАНИЕ] Нет подтверждения ежедневной копии VM 100"
     try:
         stamp = date.fromisoformat(record["date"])
