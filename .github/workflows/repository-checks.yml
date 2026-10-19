@@ -148,6 +148,9 @@ jobs:
       - name: Check infra-web readonly preview
         run: python scripts/tests/test-infra-web.py
 
+      - name: Check managed backup and standalone runtime transition
+        run: python scripts/tests/test-manager-backup-transition.py
+
       - name: Check safe Sync does not update software
         run: python scripts/tests/test-safe-sync.py
 
