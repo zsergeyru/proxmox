@@ -238,6 +238,22 @@ def operator_guest_status(
     )
     manager = find_guest_by_role(PATHS.repo_root, SETTINGS.infra_manager_role)
     if vmid == manager.vmid:
+        # Проверяемые копии нового системного исполнителя не следует путать
+        # с прежним PVE-only статусом полной резервной копии.
+        try:
+            from .operation_store import OperationStore
+
+            record = OperationStore().settings / "backup-last-core.json"
+            if record.is_file() and not record.is_symlink():
+                contents = json.loads(record.read_text(encoding="utf-8"))
+                if (contents.get("includes_vm100") is False
+                        and contents.get("restore_tested") is False):
+                    console.warning(
+                        "Состояние 910/PVE резервировалось отдельно; "
+                        "копия VM 100 и пробное восстановление не подтверждены"
+                    )
+        except (InfraManagerError, OSError, ValueError, TypeError):
+            pass
         # Результат резервирования независим от других проверок управляющего гостя.
         # Плохой статус Docker/OpenBao не должен скрывать состояние копий.
         try:
