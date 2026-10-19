@@ -160,6 +160,11 @@ def _generic_status(
     return resource
 
 
+def _standalone_runtime() -> bool:
+    """Определить независимую рабочую среду из доверенного запуска 910."""
+    return os.environ.get("INFRA_RUNTIME_MODE") == "standalone"
+
+
 def _infra_manager_repair(
     node: str,
     repo_root: Path,
@@ -171,12 +176,19 @@ def _infra_manager_repair(
         затем восстанавливаются доступы OpenBao, после чего синхронизируется
         Semaphore. Окончательная готовность проверяется отдельным status."""
     del identity
-    from .semaphore import sync_project_from_task
+    if not _standalone_runtime():
+        from .semaphore import sync_project_from_task
 
     console.info("Обновление PVE-only OpenBao helper")
     install_openbao_host_support(node, repo_root)
     console.info("Безопасное восстановление OpenBao")
     repair_openbao_on_host(node)
+    if _standalone_runtime():
+        console.ok(
+            "OpenBao восстановлен; независимая рабочая среда "
+            "проверяется отдельным Status Guest"
+        )
+        return
     console.info("Синхронизация проекта Semaphore")
     sync_project_from_task(
         branch=project_branch_for_checkout(repo_root),
@@ -194,6 +206,12 @@ def _infra_manager_sync(
 ) -> None:
     """Согласовать Semaphore с выбранной версией проекта без восстановления OpenBao."""
     del identity
+    if _standalone_runtime():
+        console.ok(
+            "Требуемая Git-версия инфраструктуры уже подготовлена "
+            "общим операторским исполнителем; шаблоны Semaphore не используются"
+        )
+        return
     from .semaphore import sync_project_from_task
 
     console.info(
@@ -238,7 +256,9 @@ def _run_deploy(
         if self_update:
             console.info(
                 "Настройка управляющего гостя завершена; "
-                "активация и синхронизация Semaphore назначены "
+                ("активация и проверка независимой среды назначены "
+                 if _standalone_runtime()
+                 else "активация и синхронизация Semaphore назначены ")
                 "после выхода текущего задания"
             )
             return 0
