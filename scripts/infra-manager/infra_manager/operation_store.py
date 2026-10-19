@@ -234,6 +234,7 @@ class OperationStore:
         revision: str,
         *,
         request_id: str | None = None,
+        activation_required: bool = False,
     ) -> tuple[dict, bool]:
         """Создать запрос или вернуть ровно тот же запрос без повторного пуска."""
         if kind not in KINDS:
@@ -247,7 +248,8 @@ class OperationStore:
             if history_path.exists() or history_path.is_symlink():
                 previous = _read(history_path)
                 if (previous.get("kind") != kind or previous.get("target") != target
-                        or previous.get("revision") != revision):
+                        or previous.get("revision") != revision
+                        or previous.get("activation_required", False) != activation_required):
                     raise InfraManagerError("Идентификатор уже принадлежит другой операции")
                 return previous, False
             if active_path.exists() or active_path.is_symlink():
@@ -268,6 +270,7 @@ class OperationStore:
                 "kind": kind,
                 "target": target,
                 "revision": revision,
+                "activation_required": activation_required,
                 "created_at": _now(),
                 "started_at": None,
                 "finished_at": None,
@@ -353,6 +356,10 @@ class OperationStore:
             if _read(active_path).get("id") != operation_id or record["phase"] not in {"running", "activating", "verifying"}:
                 raise InfraManagerError("Итог не принадлежит действующей операции")
             successful = exit_code == 0
+            if successful and record.get("activation_required") and record["phase"] != "verifying":
+                raise InfraManagerError(
+                    "Нельзя подтверждать самообновление до полной проверки systemd"
+                )
             phase = "completed" if successful else "failed"
             record.update(
                 phase=phase,
