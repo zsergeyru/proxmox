@@ -10,6 +10,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+import yaml
+
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts/infra-manager"))
 
@@ -132,11 +134,47 @@ def test_requires_real_directory():
         refuses(lambda: checked_record_path("nas", data_root=root), InfraManagerError)
 
 
+def test_runtime_and_backup_contract():
+    """Проверить одно и то же постоянное подключение у 910 и в Docker."""
+
+    provision = yaml.safe_load(
+        (ROOT / "infrastructure/guests/910-infra-manager/provision.yaml")
+        .read_text(encoding="utf-8")
+    )
+    compose = yaml.safe_load(
+        (ROOT / "infrastructure/guests/910-infra-manager/rootfs/opt/"
+                "infra-manager/compose/docker-compose.yml").read_text(encoding="utf-8")
+    )
+    physical = "/mnt/persistent-state/physical-hosts"
+    inside = "/var/lib/infra-manager/physical-hosts"
+    binding = [
+        item for item in provision["persistence"]["target_layout"]["state"]["bindings"]
+        if item["source"] == physical
+    ]
+    assert len(binding) == 1
+    assert binding[0]["target"] == inside
+    assert binding[0]["mode"] == "0700"
+    assert binding[0]["owner"] == "1001"
+    volume = f"{physical}:{inside}"
+    assert volume in provision["docker"]["services"]["runtime"]["mounts"]
+    assert volume in compose["services"]["runtime"]["volumes"]
+    assert inside in provision["persistence"]["backup_required"]
+
+    tasks = (
+        ROOT / "automation/ansible/roles/infra_manager/tasks/persistence.yml"
+    ).read_text(encoding="utf-8")
+    assert "scripts/infra-manager/host/migrate-physical-host-state.py" in tasks
+    assert tasks.index("Создать каталоги постоянного состояния") < tasks.index(
+        "Сохранить подтверждения физических машин"
+    )
+
+
 def main():
     test_migration_and_idempotency()
     test_conflict_preflight_no_partial_copy()
     test_bad_inputs()
     test_requires_real_directory()
+    test_runtime_and_backup_contract()
     print("[ОК] Сохранение SSH-доверия и идентификаторов дисков NAS проверено")
     return 0
 
