@@ -60,6 +60,7 @@ ANSIBLE_RUNTIME_PARTS=(
     pve_access.yml
     repository.yml
     semaphore.yml
+    runtime_prerequisites.yml
     runtime.yml
     openbao.yml
     recovery.yml
