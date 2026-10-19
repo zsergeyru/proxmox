@@ -1597,7 +1597,15 @@ def check_ansible_duration() -> None:
             patch.object(
                 guest_deploy_module,
                 "run",
-                side_effect=InfraManagerError("ожидаемая ошибка") if failure else None,
+                return_value=SimpleNamespace(
+                    returncode=2 if failure else 0,
+                    stdout=(
+                        "TASK [infra_manager : Проверить финальную настройку] ******\\n"
+                        "fatal: [host]: FAILED! => secret=DO-NOT-PRINT\\n"
+                        if failure else ""
+                    ),
+                    stderr="",
+                ),
             ) as run,
             patch.object(
                 guest_deploy_module.time,
@@ -1617,9 +1625,13 @@ def check_ansible_duration() -> None:
                     self_update=False,
                     project_branch="main",
                 )
-            except InfraManagerError:
+            except InfraManagerError as exc:
                 if not failure:
                     fail("Непредвиденная ошибка Ansible")
+                if "Проверить финальную настройку" not in str(exc):
+                    fail(f"Не показано безопасное имя задания: {exc}")
+                if "DO-NOT-PRINT" in str(exc):
+                    fail("Сырой ответ Ansible не должен содержаться в ошибке")
             else:
                 if failure:
                     fail("Ошибка Ansible должна приводить к исключению")

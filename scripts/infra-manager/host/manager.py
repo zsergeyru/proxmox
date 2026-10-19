@@ -51,15 +51,12 @@ def manager_identity() -> tuple[int, str]:
         payload = json.loads(HOST_CONFIG.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise OperatorError(f"Не удалось прочитать {HOST_CONFIG}") from exc
-
     if not isinstance(payload, dict):
         raise OperatorError("Некорректное описание infra-manager")
     vmid, name = payload.get("vmid"), payload.get("name")
     if not isinstance(vmid, int) or vmid <= 0 or not isinstance(name, str) or not name:
         raise OperatorError("Некорректное описание infra-manager")
     return vmid, name
-
-
 def verify_manager(vmid: int, name: str) -> None:
     """Подтвердить, что найденный объект соответствует управляющему гостю.
 
@@ -80,8 +77,6 @@ def verify_manager(vmid: int, name: str) -> None:
             f"VMID {vmid} не подтверждён как infra-manager; "
             "используйте infra-manager recover"
         )
-
-
 def guest_running(vmid: int) -> bool:
     """Проверить работоспособность управляющего LXC перед передачей команды."""
     result = run(
@@ -90,8 +85,6 @@ def guest_running(vmid: int) -> bool:
         capture=True,
     )
     return result.returncode == 0 and result.stdout.strip().endswith("running")
-
-
 def start_manager(vmid: int) -> None:
     """Запустить управляющий LXC только при необходимости.
 
@@ -106,8 +99,6 @@ def start_manager(vmid: int) -> None:
     raise OperatorError(
         f"LXC {vmid} не запустился; используйте infra-manager recover"
     )
-
-
 def proxy_to_manager(arguments: list[str]) -> int:
     """Передать штатную команду внутрь проверенного управляющего LXC.
 
@@ -141,6 +132,9 @@ def proxy_to_manager(arguments: list[str]) -> int:
         result = run(argv, check=False, capture=capture_output, input_text=input_text)
         return result if capture_output else result.returncode
 
+    if arguments == ["deploy", str(vmid)]:
+        from infra_manager_python_deps import restore_manager_python_dependency
+        restore_manager_python_dependency(vmid, run=run, error_type=OperatorError)
     if arguments == ["deploy", "nas"]:
         # Вспомогательный модуль устанавливается рядом с PVE-оболочкой.
         sys.path.insert(0, str(Path(__file__).resolve().parent))

@@ -243,7 +243,7 @@ settings_text = settings_path.read_text(encoding="utf-8")
 required_host_packages = set(system.get("required_packages", []))
 expected_host_packages = {
     "ca-certificates", "curl", "git", "gnupg", "jq",
-    "openssh-client", "openssl", "python3", "python3-yaml",
+    "openssh-client", "openssl", "python3", "python3-jsonschema", "python3-yaml",
 }
 if required_host_packages != expected_host_packages:
     raise SystemExit(f"неожиданный список пакетов 910: {sorted(required_host_packages)}")

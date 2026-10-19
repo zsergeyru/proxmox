@@ -16,7 +16,7 @@ import time
 from pathlib import Path
 
 from .access import load_access_policy
-from .common import InfraManagerError, console, require_command, run
+from .common import InfraManagerError, _ansible_failure_summary, console, require_command, run
 from .guest_catalog import find_guest_by_role, guest_identity
 from .guest_deploy_infrastructure import (
     DeploymentContext,
@@ -489,7 +489,7 @@ def _run_guest_ansible(
     completed = False
     interrupted = False
     try:
-        run(
+        result = run(
             [
                 "ansible-playbook",
                 "-i", f"{context.address},",
@@ -518,7 +518,20 @@ def _run_guest_ansible(
             ],
             env=ansible_env,
             cwd=repo_root,
+            capture_output=True,
+            check=False,
         )
+        if result.returncode:
+            # Не публиковать сырой Ansible stdout/stderr: внутри могут
+            # находиться рабочие секреты. Показывать только название задания.
+            summary = _ansible_failure_summary(
+                "\n".join((result.stdout or "", result.stderr or ""))
+            )
+            reason = f" {summary}" if summary else " Название задания определить не удалось."
+            raise InfraManagerError(
+                f"Ansible гостя {context.vmid} ({provision_phase}) завершился "
+                f"с кодом {result.returncode}.{reason}"
+            )
         completed = True
     except KeyboardInterrupt:
         interrupted = True

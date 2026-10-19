@@ -12,7 +12,6 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from jsonschema import Draft202012Validator
 
 from .common import InfraManagerError
 
@@ -68,6 +67,16 @@ def validate_storage(
     repo_root: Path, host: str, document: Any, *, manifest: Path | None = None,
 ) -> PhysicalStorage:
     """Проверить схему и перекрёстные ссылки без изменения реальных дисков."""
+
+    # Команды статуса и аварийного восстановления должны запускаться
+    # даже при ещё не завершённой установке системных зависимостей.
+    # Проверка схемы по-прежнему обязательна перед обработкой дисков.
+    try:
+        from jsonschema import Draft202012Validator
+    except ImportError as exc:
+        raise InfraManagerError(
+            "Для проверки описания дисков требуется пакет python3-jsonschema"
+        ) from exc
 
     path = manifest or storage_path(repo_root, host)
     schema_path = repo_root / "infrastructure" / "schemas" / "physical-storage.schema.yaml"
