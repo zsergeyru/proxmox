@@ -42,37 +42,94 @@ def check_invalid_names() -> None:
 
 
 def check_disk_identity() -> None:
-    """Запретить повторяющиеся серийные номера и подмену имени."""
+    """Отказать при дубликатах и порче отдельно вынесенного storage.yaml."""
 
-    manifest = ROOT / "infrastructure" / "hosts" / "nas" / "host.yaml"
-    schema = ROOT / "infrastructure" / "schemas" / "physical-host.schema.yaml"
-    base = yaml.safe_load(manifest.read_text(encoding="utf-8"))
+    host_path = ROOT / "infrastructure/hosts/nas/host.yaml"
+    storage_path = ROOT / "infrastructure/hosts/nas/storage.yaml"
+    host_data = yaml.safe_load(host_path.read_text(encoding="utf-8"))
+    storage_data = yaml.safe_load(storage_path.read_text(encoding="utf-8"))
     with tempfile.TemporaryDirectory() as temporary:
         root = Path(temporary)
-        (root / "infrastructure" / "hosts" / "nas").mkdir(parents=True)
-        (root / "infrastructure" / "schemas").mkdir(parents=True)
-        (root / "infrastructure" / "schemas" / schema.name).write_bytes(
-            schema.read_bytes()
-        )
-        target = root / "infrastructure" / "hosts" / "nas" / "host.yaml"
-        base["storage"]["devices"][1]["serial"] = "DUPLICATE"
-        base["storage"]["devices"][2]["serial"] = "DUPLICATE"
-        target.write_text(yaml.safe_dump(base, allow_unicode=True), encoding="utf-8")
+        target_dir = root / "infrastructure/hosts/nas"
+        schema_dir = root / "infrastructure/schemas"
+        target_dir.mkdir(parents=True)
+        schema_dir.mkdir(parents=True)
+        for name in ("physical-host", "physical-storage"):
+            filename = f"{name}.schema.yaml"
+            (schema_dir / filename).write_bytes(
+                (ROOT / "infrastructure/schemas" / filename).read_bytes()
+            )
+        host_target = target_dir / "host.yaml"
+        storage_target = target_dir / "storage.yaml"
+
+        def write(host, storage):
+            host_target.write_text(
+                yaml.safe_dump(host, allow_unicode=True), encoding="utf-8"
+            )
+            storage_target.write_text(
+                yaml.safe_dump(storage, allow_unicode=True), encoding="utf-8"
+            )
+
+        write(host_data, storage_data)
+        assert len(load_physical_host(root, "nas").devices) == 4
+
+        duplicate = yaml.safe_load(storage_target.read_text(encoding="utf-8"))
+        duplicate["devices"][1]["serial"] = "DUPLICATE"
+        duplicate["devices"][2]["serial"] = "DUPLICATE"
+        write(host_data, duplicate)
         try:
             load_physical_host(root, "nas")
         except InfraManagerError:
             pass
         else:
             raise AssertionError("Повторяющийся серийный номер принят")
-        base["storage"]["devices"][2]["serial"] = "DIFFERENT"
-        base["name"] = "other"
-        target.write_text(yaml.safe_dump(base, allow_unicode=True), encoding="utf-8")
+
+        invalid = yaml.safe_load(storage_path.read_text(encoding="utf-8"))
+        invalid["host"] = "pve"
+        write(host_data, invalid)
+        try:
+            load_physical_host(root, "nas")
+        except InfraManagerError:
+            pass
+        else:
+            raise AssertionError("Подмена имени хранилища принята")
+
+        invalid = yaml.safe_load(storage_path.read_text(encoding="utf-8"))
+        invalid["volumes"][0]["device"] = "system"
+        write(host_data, invalid)
+        try:
+            load_physical_host(root, "nas")
+        except InfraManagerError:
+            pass
+        else:
+            raise AssertionError("Подмена системного диска принята")
+
+        wrong_host = dict(host_data, name="other")
+        write(wrong_host, storage_data)
         try:
             load_physical_host(root, "nas")
         except InfraManagerError:
             pass
         else:
             raise AssertionError("Подмена имени физического узла принята")
+
+        wrong_host = dict(host_data, storage={})
+        write(wrong_host, storage_data)
+        try:
+            load_physical_host(root, "nas")
+        except InfraManagerError:
+            pass
+        else:
+            raise AssertionError("Повторная секция storage в host.yaml принята")
+
+        write(host_data, storage_data)
+        storage_target.unlink()
+        try:
+            load_physical_host(root, "nas")
+        except InfraManagerError:
+            pass
+        else:
+            raise AssertionError("Отсутствующий storage.yaml был принят")
 
 
 def main() -> int:
