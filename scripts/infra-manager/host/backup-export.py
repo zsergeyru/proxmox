@@ -33,6 +33,7 @@ ROLE = ROOT / "pve-only/openbao/backup-access.json"
 RAFT_HELPER = Path("/usr/local/lib/infra-manager/backup/openbao-raft-guest.py")
 BACKUP_GATE = STATE / "locks/backup-gate.lock"
 ACTIVATION = STATE / "semaphore/.infra-manager-runtime-activation-pending"
+INDEPENDENT_ACTIVATION = STATE / "operations/activation/runtime-activation-pending"
 SOURCES = (
     Path("/etc/pve"),
     Path("/etc/network/interfaces"),
@@ -108,7 +109,8 @@ def check_sources() -> int:
     ):
         if path.is_symlink() or not path.is_file() or path.stat().st_size == 0:
             raise ExportError("Неполное PVE-only состояние для резервирования")
-    if ACTIVATION.exists() or ACTIVATION.is_symlink():
+    if any(marker.exists() or marker.is_symlink()
+           for marker in (ACTIVATION, INDEPENDENT_ACTIVATION)):
         raise ExportError("Самообновление infra-manager ещё выполняется")
     role = _read_json(ROLE)
     if set(role) != {"role_id", "secret_id"} or not all(
