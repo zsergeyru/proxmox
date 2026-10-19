@@ -308,13 +308,12 @@ def install_recovery_host_support(node: str, repo_root: Path) -> None:
 
 
 def read_backup_host_status(node: str) -> str:
-    """Проверить копии на физическом PVE без выдачи закрытых данных гостю."""
+    """Получить безопасный отчёт PVE-only, не выдавая закрытое состояние 910."""
 
     result = _ssh(
         node,
         "python3",
-        "/usr/local/lib/infra-manager/backup/backup-reconcile.py",
-        "--status",
+        "/usr/local/lib/infra-manager/backup/backup-status.py",
         capture=True,
     )
     line = (result.stdout or "").strip()
@@ -324,77 +323,23 @@ def read_backup_host_status(node: str) -> str:
 
 
 def install_backup_host_support(node: str, repo_root: Path) -> None:
-    """Подключить резервирование к обычному deploy без отдельной команды.
+    """Установить только минимальную PVE-only проверку состояния копий.
 
-    Устанавливает код и безопасное часовое согласование. Отсутствие или
-    неподтверждённость носителей не влияет на рабочий контур 910.
+    Настройкой носителей, выполнением и расписанием резервирования
+    управляет 910. Никаких apt, форматирования, монтирования, systemd-таймеров
+    или резервировщиков на PVE эта функция не добавляет.
     """
 
-    source = repo_root / "scripts" / "backup"
-    target = Path("/usr/local/lib/infra-manager/backup")
-    for name in (
-        "backup-pve.py",
-        "backup-device.py",
-        "backup-mount.py",
-        "backup-setup.py",
-        "backup-restore.py",
-        "openbao-raft-guest.py",
-        "backup-reconcile.py",
-    ):
-        _install_remote_file(node, source / name, target / name, "0700")
-    for name in (
-        "infra-manager-backup.service",
-        "infra-manager-backup.timer",
-        "infra-manager-backup-reconcile.service",
-        "infra-manager-backup-reconcile.timer",
-    ):
-        _install_remote_file(
-            node, source / name, Path("/etc/systemd/system") / name, "0644",
-        )
     _install_remote_file(
         node,
-        repo_root / "infrastructure/hosts/pve/backup.yaml",
-        Path("/usr/local/share/infra-manager/backup.yaml.default"),
-        "0600",
+        repo_root / "scripts" / "infra-manager" / "host" / "backup-status.py",
+        Path("/usr/local/lib/infra-manager/backup/backup-status.py"),
+        "0700",
     )
-    _install_remote_file(
-        node,
-        repo_root / "infrastructure/hosts/pve/storage.yaml",
-        Path("/usr/local/share/infra-manager/storage-pve.yaml.default"),
-        "0600",
+    console.detail(
+        "PVE-only состояние резервирования доступно; "
+        "установка дополнительных пакетов и автоматическая подготовка носителей не выполняются"
     )
-    # Установить системные зависимости автоматически, а не давать владельцу
-    # дополнительные команды apt. Используются пакеты самого Debian PVE.
-    _ssh(
-        node, "sh", "-c",
-        "set -eu; "
-        "install -d -m 0700 /etc/infra-manager/backup; "
-        "if ! python3 -c 'import yaml' >/dev/null 2>&1 "
-        "|| ! command -v restic >/dev/null 2>&1 "
-        "|| ! command -v partprobe >/dev/null 2>&1 "
-        "|| ! command -v mount.nfs4 >/dev/null 2>&1; then "
-        "if ! apt-get update >/dev/null 2>&1 "
-        "|| ! DEBIAN_FRONTEND=noninteractive apt-get install -y "
-        "python3-yaml restic parted nfs-common >/dev/null 2>&1; then "
-        "printf '[ПРЕДУПРЕЖДЕНИЕ] Средства резервирования пока не установлены\\n'; "
-        "fi; "
-        "fi; "
-        "legacy=/usr/local/sbin/infra-manager-backup; "
-        "if [ -f \"$legacy\" ] && "
-        "grep -Fq 'Операторская команда резервирования прямо на физическом PVE' \"$legacy\"; "
-        "then rm -f \"$legacy\"; fi; "
-        "legacy=/usr/local/sbin/infra_manager_backup.py; "
-        "if [ -f \"$legacy\" ] && "
-        "grep -Fq 'Изолированные PVE-only команды резервирования' \"$legacy\"; "
-        "then rm -f \"$legacy\"; fi; "
-        "systemctl daemon-reload; "
-        "systemctl enable --now infra-manager-backup-reconcile.timer >/dev/null; "
-        "if python3 -c 'import yaml' >/dev/null 2>&1; then "
-        "python3 /usr/local/lib/infra-manager/backup/backup-reconcile.py; "
-        "else printf '[ПРЕДУПРЕЖДЕНИЕ] Резервирование ожидает пакеты Python\\n'; fi",
-    )
-    console.detail("Резервирование подключено к deploy; проверки ожидающих носителей не меняют 910")
-
 
 
 def install_operator_host_support(node: str, repo_root: Path) -> None:
