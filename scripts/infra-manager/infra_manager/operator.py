@@ -177,7 +177,7 @@ def _refresh_project_checkout() -> None:
 
 
 def _standalone_runtime() -> bool:
-    """Определить версию исполнения по установленным версиям 910."""
+    """Определить версию исполнения по установленным версиям управляющего гостя."""
     if VERSIONS_FILE.is_symlink() or not VERSIONS_FILE.is_file():
         return False
     return "RUNTIME_MODE=standalone" in VERSIONS_FILE.read_text(
@@ -262,7 +262,7 @@ def operator_guest_status(
                 if (contents.get("includes_vm100") is False
                         and contents.get("restore_tested") is False):
                     console.warning(
-                        "Состояние 910/PVE резервировалось отдельно; "
+                        "Состояние управляющего гостя/PVE резервировалось отдельно; "
                         "копия VM 100 и пробное восстановление не подтверждены"
                     )
         except (InfraManagerError, OSError, ValueError, TypeError):
