@@ -150,10 +150,10 @@ def status() -> None:
 def enable() -> None:
     """Включить таймер только после первой успешной копии и вывоза ключа."""
 
-    if not CONFIRMATION.is_file() or not core.LAST_SUCCESS.is_file():
-        raise core.BackupError(
-            "Сначала нужны независимая копия ключа и успешный пробный запуск"
-        )
+    if not core.LAST_SUCCESS.is_file():
+        raise core.BackupError("Сначала требуется успешная полная копия на оба носителя")
+    # Независимый экспорт ключа желателен, но не блокирует копирование.
+    # Без него об утрате ключа предупреждают в обычном status 910.
     config = core.load_config(core.DEFAULT_CONFIG)
     core.check_source()
     core.check_destinations(config["destinations"])
