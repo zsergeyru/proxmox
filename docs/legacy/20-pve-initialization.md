@@ -176,7 +176,7 @@ state/last-run обновлены
 
 Названия `state/last-run` и значение `passed` оставлены без перевода, поскольку это реальные имена файлов и машинных состояний.
 
-Дополнительно проверить фактическое состояние хоста в [`../host/pve/README.md`](../host/pve/README.md) и профильных документах `host/pve/*`.
+Дополнительно проверить фактическое состояние хоста в [`../../infrastructure/hosts/pve/README.md`](../../infrastructure/hosts/pve/README.md) и профильных документах `infrastructure/hosts/pve/*`.
 
 ## 11. Если запуск остановился
 

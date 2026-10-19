@@ -102,6 +102,7 @@ def refuses(operation) -> None:
 def test_schema_and_loading(repo: Path) -> None:
     """Проверить один загрузчик для разных каталогов PVE и NAS."""
 
+    assert storage_path(repo, "pve") == repo / "infrastructure/hosts/pve/storage.yaml"
     for name, sample in (("pve", pve_example()), ("nas", nas_example())):
         path = storage_path(repo, name)
         path.parent.mkdir(parents=True)

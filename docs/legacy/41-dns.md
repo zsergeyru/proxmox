@@ -4,7 +4,7 @@
 **Статус:** Действующий  
 **Основной источник:** Да — для правил DNS, `home.arpa`, SmartDNS и mDNS в проекте.
 
-Фактическое состояние DNS на работающем PVE хранится в [`../host/pve/network/README.md`](../host/pve/network/README.md), а не в этом документе.
+Фактическое состояние DNS на работающем PVE хранится в [`../../infrastructure/hosts/pve/network/README.md`](../../infrastructure/hosts/pve/network/README.md), а не в этом документе.
 
 ## Основной внутренний DNS-домен
 
@@ -148,5 +148,5 @@ mDNS через VPN не считается обязательной часть�
 
 - [`40-network.md`](40-network.md) — спецификация IPv4, VLAN и VPN;
 - [`42-ipv6.md`](42-ipv6.md) — политика одновременного использования IPv4 и IPv6;
-- [`../host/pve/network/README.md`](../host/pve/network/README.md) — фактическое состояние сети и DNS на PVE;
+- [`../../infrastructure/hosts/pve/network/README.md`](../../infrastructure/hosts/pve/network/README.md) — фактическое состояние сети и DNS на PVE;
 - [`../guests/109-network-gateway/README.md`](../guests/109-network-gateway/README.md) — реализация DNS и маршрутизации на сетевом шлюзе.

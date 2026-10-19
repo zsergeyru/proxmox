@@ -19,7 +19,7 @@
 
 | Машина | Целевой источник описания дисков |
 |---|---|
-| PVE | `infrastructure/host/pve/storage.yaml` |
+| PVE | `infrastructure/hosts/pve/storage.yaml` |
 | NAS | `infrastructure/hosts/nas/storage.yaml` |
 
 Файл описывает физические накопители (`devices`), тома и пулы (`volumes`), подключения (`mounts`) и ограничения (`policies`). Проверяемый формат версии 1 задан в `infrastructure/schemas/physical-storage.schema.yaml`, общий загрузчик — `scripts/infra-manager/infra_manager/storage_catalog.py`. Он проверяет структуру, ссылки между объектами, уникальность идентификаторов и отсутствие вложенных точек подключения.

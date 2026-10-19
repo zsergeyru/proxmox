@@ -55,7 +55,7 @@ good_restore
 
 VM подключена к `vmbr0`. IP внутри HAOS в сведениях о хосте не фиксировался, поэтому он не записывается здесь наугад.
 
-Текущая сеть Proxmox-хоста описана в [`../../host/pve/network/README.md`](../../host/pve/network/README.md).
+Текущая сеть Proxmox-хоста описана в [`../../hosts/pve/network/README.md`](../../hosts/pve/network/README.md).
 
 ## Резервное копирование
 

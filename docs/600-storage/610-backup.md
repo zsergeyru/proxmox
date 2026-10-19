@@ -246,6 +246,6 @@
 - [`../700-security/740-openbao.md`](../700-security/740-openbao.md) — сохранность OpenBao, SSH CA и данных разблокировки.
 - [`../800-operations/830-recovery.md`](../800-operations/830-recovery.md) — последовательность восстановления управляющего контура.
 - [`../../infrastructure/guests/910-infra-manager/provision.yaml`](../../infrastructure/guests/910-infra-manager/provision.yaml) — машинный состав постоянных данных 910.
-- [`../../infrastructure/host/pve/backup/README.md`](../../infrastructure/host/pve/backup/README.md) — зафиксированное состояние мест резервного копирования PVE.
+- [`../../infrastructure/hosts/pve/backup/README.md`](../../infrastructure/hosts/pve/backup/README.md) — зафиксированное состояние мест резервного копирования PVE.
 - [Резервное копирование Proxmox VE](https://pve.proxmox.com/pve-docs/chapter-vzdump.html) — границы копирования дисков и дополнительных подключений.
 - [Снимки Raft OpenBao](https://openbao.org/docs/commands/operator/raft/#snapshot) — штатное сохранение и восстановление состояния Raft.

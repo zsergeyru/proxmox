@@ -45,7 +45,7 @@ def storage_path(repo_root: Path, host: str) -> Path:
     if not _HOST_NAME.fullmatch(host):
         raise InfraManagerError(f"Недопустимое имя физической машины: {host!r}")
     if host == "pve":
-        return repo_root / "infrastructure" / "host" / "pve" / "storage.yaml"
+        return repo_root / "infrastructure" / "hosts" / "pve" / "storage.yaml"
     return repo_root / "infrastructure" / "hosts" / host / "storage.yaml"
 
 
