@@ -32,7 +32,7 @@ def test_unconfirmed_targets() -> None:
     config = backup.load_config(ROOT / "infrastructure/hosts/pve/backup.yaml")
     assert config["host"] == "pve"
     assert len(config["destinations"]) == 2
-    # Прежний SSD NTFS и не смонтированный NAS не могут получить запись.
+    # Неразмеченный, неизвестный или не подключённый SSD не получает запись.
     refuses(lambda: backup.check_destinations(config["destinations"]), "пока не подтверждён")
 
 
@@ -66,10 +66,16 @@ def test_wrong_device_and_same_device() -> None:
             refuses(lambda: backup.check_destinations(wrong), "только ext4 или zfs")
             wrong = [dict(entry) for entry in targets]
             wrong[1]["source"] = "/dev/sdb1"
-            with patch.object(backup, "_mounted_device", return_value={
-                "target": str(p1), "source": "/dev/sdb1", "fstype": "ext4", "uuid": "UUID1"
-            }):
-                refuses(lambda: backup.check_destinations(wrong), "подключение")
+            # Оба пути указывают на один и тот же реальный источник;
+            # второй файловой системой остаётся zfs.
+            def same_device(where):
+                item = mounted(where)
+                if where == p2:
+                    item["source"] = "/dev/sdb1"
+                return item
+
+            with patch.object(backup, "_mounted_device", side_effect=same_device):
+                refuses(lambda: backup.check_destinations(wrong), "одном источнике")
 
 
 def test_password_mode() -> None:
