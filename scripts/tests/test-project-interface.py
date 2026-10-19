@@ -28,8 +28,8 @@ def test_project_rules() -> None:
     assert not (ROOT / "scripts/infra-manager/host/infra_manager_backup.py").exists()
     manager = (ROOT / "scripts/infra-manager/host/manager.py").read_text(encoding="utf-8")
     assert 'arguments[0] == "backup"' not in manager
-    assert '["status", str(vmid)]' in manager
     operator = (ROOT / "scripts/infra-manager/infra_manager/operator.py").read_text(encoding="utf-8")
+    assert 'read_backup_host_status(_pve_node())' in operator
     assert 'subparsers.add_parser("backup")' not in operator
     host = (ROOT / "scripts/infra-manager/infra_manager/pve_host.py").read_text(encoding="utf-8")
     assert 'OPERATOR_HOST_COMMAND.with_name("infra-manager-backup")' not in host
