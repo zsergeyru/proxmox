@@ -1,11 +1,18 @@
 # Требуемые зашифрованные копии PVE и управляющего контура.
 # Подключения НЕ подготовлены: пустые идентификаторы намеренно запрещают запись.
-# После фактической сверки SSD и NAS заполнить uuid/source в защищённой ветке.
+# После сверки оборудования идентичность SSD задаётся в storage.yaml,
+# адрес NAS — в этом файле. UUID подтверждённых подключений хранится на PVE.
 schema_version: 1
 host: pve
 job: infra-core
 schedule: "03,09,15,21:30"
 password_file: /etc/infra-manager/backup/restic-password
+# Опасная разметка возможна только если тут указан серийный номер того же
+# физического диска, что и backup_ssd в storage.yaml. По умолчанию запрещена.
+initialize_blank_ssd_serial: null
+# Отдельно подтверждённый третий физический носитель для ключа восстановления.
+# Пока null — автоматическое расписание не включается.
+recovery_key_destination: null
 openbao:
   approle_file: /mnt/bindmounts/infra-manager/pve-only/openbao/backup-access.json
   identity_file: /etc/infra-manager/openbao-host.json
