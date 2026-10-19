@@ -13,6 +13,7 @@ LOG_FILE="$LOG_DIR/runtime-activation.log"
 ACTIVATION_MARKER="/mnt/persistent-state/semaphore/.infra-manager-runtime-activation-pending"
 BRANCH="${INFRA_PROJECT_BRANCH:-main}"
 PVE_NODE="${INFRA_PVE_NODE:-}"
+OPERATION_ID=""
 
 # Вывод Docker и служб может содержать конфиденциальные детали.
 # Старый журнал также закрываем от других пользователей до перенаправления.
@@ -44,6 +45,14 @@ finish_activation() {
     else
         printf '[ПРЕРВАНО] Отложенная активация infra-runtime: %s (код %s)\n' "$duration" "$result"
     fi
+    if [[ -n "$OPERATION_ID" ]]; then
+        # Успешный итог фиксируется вне Docker до снятия маркера.
+        if ! PYTHONPATH=/usr/local/lib/infra-manager \
+            python3 -m infra_manager.operation_activation finish "$OPERATION_ID" "$result"; then
+            printf 'ОШИБКА: Итог активации не сохранён; маркер остаётся для восстановления\\n' >&2
+            exit 1
+        fi
+    fi
     rm -f "$ACTIVATION_MARKER"
 }
 trap finish_activation EXIT
@@ -55,9 +64,10 @@ if [[ -f "$ACTIVATION_MARKER" ]]; then
     deploy_scope="runtime"
     deploy_pid="$deploy_ref"
 
-    if [[ "$deploy_ref" =~ ^(host|runtime):([0-9]+)$ ]]; then
+    if [[ "$deploy_ref" =~ ^(host|runtime):([0-9]+)(:([0-9a-f]{32}))?$ ]]; then
         deploy_scope="${BASH_REMATCH[1]}"
         deploy_pid="${BASH_REMATCH[2]}"
+        OPERATION_ID="${BASH_REMATCH[4]:-}"
     elif [[ ! "$deploy_ref" =~ ^[0-9]+$ ]]; then
         printf 'ОШИБКА: Некорректный PID в маркере активации: %s\n' "$ACTIVATION_MARKER" >&2
         exit 1
@@ -99,6 +109,10 @@ for _ in $(seq 1 60); do
         PYTHONPATH=/usr/local/lib/infra-manager         INFRA_PROJECT_BRANCH="$BRANCH"             python3 -m infra_manager semaphore-project
 
 
+        if [[ -n "$OPERATION_ID" ]]; then
+            PYTHONPATH=/usr/local/lib/infra-manager \
+                python3 -m infra_manager.operation_activation verifying "$OPERATION_ID"
+        fi
         INFRA_PROJECT_BRANCH="$BRANCH"             /usr/local/sbin/infra-manager-status --full --quiet
         printf '[ОК] infra-runtime активирован, OpenBao разблокирован, Semaphore синхронизирован и проверен\n'
         exit 0
