@@ -109,6 +109,14 @@ web_gateway:
         upstream: http://caddy:8080
         access: private
         enabled: false
+      # Gogs сам проверяет Git HTTP и веб-вход; Authelia не должна
+      # перенаправлять команды git clone/pull/push на страницу авторизации.
+      # Неизвестный внутренний адрес задаётся администратором после проверки.
+      - domain: git.zsergey.ru
+        service: gogs
+        upstream: null
+        access: git_https
+        enabled: false
       # Внешние приложения подключать только после проверки авторизации.
       - domain: photos.zsergey.ru
         service: immich
