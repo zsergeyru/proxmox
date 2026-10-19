@@ -205,6 +205,12 @@ jobs:
             caddy:2.11.7 validate --config /etc/caddy/Caddyfile
       - name: Check encrypted backup preparation for web gateway
         run: python scripts/tests/test-web-gateway-backup.py
+
+      - name: Check PVE and infra-manager encrypted backup safeguards
+        run: python scripts/tests/test-backup-pve.py
+
+      - name: Check disk and recovery backup preparations
+        run: python scripts/tests/test-backup-pve-setup.py
       - name: Check Immich login safety in web gateway
         run: python scripts/tests/test-web-gateway-immich.py
 

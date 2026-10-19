@@ -1,0 +1,16 @@
+[Unit]
+Description=Encrypted backup of Proxmox and infra-manager state
+Wants=network-online.target
+After=network-online.target
+Conflicts=shutdown.target
+
+[Service]
+Type=oneshot
+User=root
+UMask=0077
+ExecStart=/usr/bin/python3 /usr/local/lib/infra-manager/backup/backup-pve.py --run
+TimeoutStartSec=6h
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+# Отказ обязателен при недоступном SSD, NAS, ключах или работающем deploy.

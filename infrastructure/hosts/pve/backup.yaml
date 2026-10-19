@@ -1,0 +1,40 @@
+# Требуемые зашифрованные копии PVE и управляющего контура.
+# Подключения НЕ подготовлены: пустые идентификаторы намеренно запрещают запись.
+# После фактической сверки SSD и NAS заполнить uuid/source в защищённой ветке.
+schema_version: 1
+host: pve
+job: infra-core
+schedule: "03,09,15,21:30"
+password_file: /etc/infra-manager/backup/restic-password
+openbao:
+  approle_file: /mnt/bindmounts/infra-manager/pve-only/openbao/backup-access.json
+  identity_file: /etc/infra-manager/openbao-host.json
+destinations:
+  - id: fast-ssd
+    mountpoint: /mnt/pve/backup-fast
+    filesystem: ext4
+    uuid: null
+    source: null
+    repository: infra-core
+  - id: nas-backup
+    mountpoint: /mnt/pve/nas-backup
+    filesystem: nfs4
+    uuid: null
+    # Сервер и путь NFS необходимо подтвердить на NAS отдельно.
+    source: null
+    repository: pve-infra-core
+guests:
+  # Резервная копия самой VM 100 отдельно от состояния 910.
+  - vmid: 100
+    schedule: daily
+    mode: snapshot
+    compression: zstd
+retention:
+  fast_ssd:
+    keep_last: 2
+    target_days: 14
+  nas_backup:
+    keep_daily: 7
+    keep_weekly: 4
+# Удаление старых точек и восстановление всегда выполняются отдельно,
+# только после проверки новых копий и процедуры восстановления.
