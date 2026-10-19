@@ -104,7 +104,13 @@ if [[ -z "$PVE_NODE" ]]; then
     exit 1
 fi
 
-docker compose     --env-file "$COMPOSE_DIR/.versions.env"     -f "$COMPOSE_DIR/docker-compose.yml"     up -d --remove-orphans
+COMPOSE_FILE="$COMPOSE_DIR/docker-compose.yml"
+if grep -qx 'RUNTIME_MODE=standalone' "$COMPOSE_DIR/.versions.env"; then
+    COMPOSE_FILE="$COMPOSE_DIR/docker-compose-standalone.yml"
+fi
+docker compose \
+    --env-file "$COMPOSE_DIR/.versions.env" \
+    -f "$COMPOSE_FILE" up -d --remove-orphans
 
 /usr/local/sbin/infra-manager-openbao-startup-unseal "$PVE_NODE"
 
