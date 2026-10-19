@@ -318,13 +318,10 @@ def test_operator_guest_task_secret_policy() -> None:
         ) == 0
 
     identity.assert_called_once_with(operator.PATHS.repo_root, 910)
-    status.assert_called_once_with(
-        910, show_secrets=True, allow_pending_activation=True
-    )
-    console.info.assert_called_once_with(
-        "Отложенная активация infra-runtime продолжится "
-        "после завершения команды"
-    )
+    status.assert_not_called()
+    info = console.info.call_args.args[0]
+    assert "синхронизирует Semaphore" in info
+    assert "runtime-activation.log" in info
 
 
 def test_internal_project_refresh_uses_existing_checkout() -> None:

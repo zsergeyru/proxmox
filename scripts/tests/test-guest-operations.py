@@ -449,8 +449,8 @@ def check_deploy_operation() -> None:
     show.assert_not_called()
     client_factory.assert_not_called()
 
-    # Первая загрузка нового кода ещё из старого PVE-оператора:
-    # не подавлять единственный доступный в старом процессе итоговый экран.
+    # Ни первая загрузка через старую PVE-оболочку, ни Semaphore не
+    # должны показывать «полностью готов» до смены Docker-контейнера.
     with (
         patch.dict(
             operations.os.environ,
@@ -462,24 +462,15 @@ def check_deploy_operation() -> None:
         patch.object(operations, "run_deploy_guest", return_value=0),
         patch.object(operations, "reserve_runtime_activation") as reserve,
         patch.object(operations, "cancel_runtime_activation") as cancel,
-        patch.object(
-            operations.PveClient, "from_opentofu_env",
-            return_value=FakePveClient({
-                "vmid": infra.vmid, "name": infra.name, "type": "lxc",
-                "node": "pve", "status": "running",
-            }),
-        ),
+        patch.object(operations.PveClient, "from_opentofu_env") as client_factory,
         patch.object(operations, "show_guest_status") as show,
-        patch.object(operations, "project_branch_for_checkout", return_value="main"),
-        patch.object(operations, "project_revision", return_value="abc1234"),
     ):
         if operations._run_deploy(ROOT, infra) != 0:
-            fail("Первый deploy должен сохранить совместимый итоговый статус")
+            fail("Первый deploy должен назначить отложенную активацию")
     reserve.assert_called_once_with()
     cancel.assert_not_called()
-    show.assert_called_once()
-    if show.call_args.kwargs["show_secrets"]:
-        fail("Первый deploy из старого оператора не должен раскрывать пароли")
+    show.assert_not_called()
+    client_factory.assert_not_called()
 
     with (
         patch.object(
@@ -506,9 +497,7 @@ def check_deploy_operation() -> None:
             fail("Deploy infra-manager через Semaphore должен завершиться успешно")
     reserve.assert_called_once_with()
     cancel.assert_not_called()
-    show.assert_called_once()
-    if show.call_args.kwargs["show_secrets"]:
-        fail("Статус в Semaphore не должен выводить пароли")
+    show.assert_not_called()
 
     with (
         patch.object(

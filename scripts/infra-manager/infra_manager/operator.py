@@ -310,20 +310,16 @@ def _operator_guest_task(
     if operation == "deploy":
         identity = guest_identity(PATHS.repo_root, vmid)
         if identity.role == SETTINGS.infra_manager_role:
-            # Самообновление уже завершило Ansible и сняло блокировку задания.
-            # Ожидающая активация не должна подавлять ЕДИНЫЙ итоговый статус
-            # доверенного оператора PVE; остальные вызовы статусa блокируются.
-            result = operator_guest_status(
-                vmid,
-                show_secrets=show_secrets,
-                allow_pending_activation=True,
+            # Текущий infra-runtime ещё старый, а Semaphore может не
+            # содержать новых гостей. Нельзя сообщать «полностью готов»
+            # до внешней активации и синхронизации.
+            console.info(
+                "Настройка завершена. После выхода текущего задания "
+                "служба активирует infra-runtime, синхронизирует Semaphore "
+                "и проверит готовность; результат — в "
+                "/var/log/infra-manager/runtime-activation.log"
             )
-            if result == 0:
-                console.info(
-                    "Отложенная активация infra-runtime продолжится "
-                    "после завершения команды"
-                )
-            return result
+            return 0
 
     return operator_guest_status(
         vmid,
