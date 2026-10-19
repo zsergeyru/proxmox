@@ -1,0 +1,21 @@
+[Unit]
+Description=Infra Manager check interrupted operations before Docker
+After=local-fs.target
+Before=docker.service
+AssertPathIsMountPoint=/mnt/persistent-state
+
+[Service]
+Type=oneshot
+Environment=PYTHONPATH=/usr/local/lib/infra-manager
+ExecStart=/usr/bin/python3 -m infra_manager.operation_activation reconcile
+User=root
+Group=root
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/mnt/persistent-state/operations
+
+[Install]
+WantedBy=multi-user.target
