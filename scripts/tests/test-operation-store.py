@@ -92,6 +92,29 @@ def check_persistence_and_idempotency(root: Path) -> None:
     )
 
 
+def check_activation_phases(root: Path) -> None:
+    store = OperationStore(root, require_mount=False)
+    record, _ = store.reserve("deploy", 109, "abc")
+    operation_id = record["id"]
+    store.start(operation_id)
+    check(store.get(operation_id)["result"] is None, "Установка преждевременно успешна")
+    store.transition(operation_id, "activating")
+    store.transition(operation_id, "verifying")
+    check(store.get(operation_id)["phase"] == "verifying", "Нет этапа проверки")
+    check(store.get(operation_id)["result"] is None, "Проверка ещё не подтверждена")
+    fails(
+        lambda: store.transition(operation_id, "activating"),
+        "Нельзя вернуться от проверки к предыдущему этапу",
+    )
+    final = store.finish(operation_id, exit_code=7)
+    check(final["phase"] == "failed", "Ошибка проверки должна сохраняться")
+    check(final["exit_code"] == 7, "Потерян код ошибки активации")
+    fails(
+        lambda: store.finish(operation_id, exit_code=0),
+        "Нельзя заменить подтверждённую ошибку последующим успехом",
+    )
+
+
 def check_failure_and_duplicates(root: Path) -> None:
     store = OperationStore(root, require_mount=False)
     calls = []
@@ -186,6 +209,7 @@ def main() -> None:
     with tempfile.TemporaryDirectory() as temporary:
         base = Path(temporary)
         check_persistence_and_idempotency(base / "a")
+        check_activation_phases(base / "activation")
         check_failure_and_duplicates(base / "b")
         check_process_lock(base / "c")
         check_safety(base / "d")
