@@ -296,10 +296,15 @@ def check_runtime_activation_guard() -> None:
 
         marker = Path(tmp) / "runtime-activation-pending"
         original = common.RUNTIME_ACTIVATION_MARKER
+        original_result = common.RUNTIME_ACTIVATION_RESULT
         common.RUNTIME_ACTIVATION_MARKER = marker
+        common.RUNTIME_ACTIVATION_RESULT = marker.with_name("runtime-activation-result")
+        common.RUNTIME_ACTIVATION_RESULT.write_text("ok runtime:0", encoding="utf-8")
         try:
             common.require_runtime_activation_idle()
             common.reserve_runtime_activation()
+            if common.RUNTIME_ACTIVATION_RESULT.exists():
+                fail("Повторное развёртывание обязано сбрасывать предыдущий результат")
             expected_ref = (
                 f"{common._runtime_activation_scope()}:{os.getpid()}"
             )
@@ -327,6 +332,7 @@ def check_runtime_activation_guard() -> None:
                 fail("Отмена активации не удалила маркер")
         finally:
             common.RUNTIME_ACTIVATION_MARKER = original
+            common.RUNTIME_ACTIVATION_RESULT = original_result
             marker.unlink(missing_ok=True)
 
 

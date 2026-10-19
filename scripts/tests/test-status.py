@@ -879,21 +879,17 @@ def main_test() -> None:
         item for item in guest_choices if item["value"] != "340"
     ] + [{"name": "999 — removed-guest", "value": "999"}]
     stale_snapshot = replace(semaphore_snapshot, templates=stale_templates)
-    with patch.object(status_module, "console") as output:
+    # Расхождение выбора гостей теперь означает неполную готовность.
+    try:
         validate_semaphore_snapshot(stale_snapshot, project_branch=branch)
-    output.warning.assert_called_once()
-    warning = output.warning.call_args.args[0]
-    if any(text not in warning for text in ("Deploy Guest", "340", "photo-archive", "999", "infra-manager sync 910")):
-        fail(f"Предупреждение не объясняет расхождение списка гостей: {warning}")
-
-    quiet_output = io.StringIO()
-    with (
-        patch.dict(os.environ, {"INFRA_LOG_LEVEL": "quiet", "INFRA_MANAGER_COLOR": "1"}),
-        patch.object(status_module, "console", Console(out=quiet_output)),
-    ):
-        validate_semaphore_snapshot(stale_snapshot, project_branch=branch)
-    if "[ПРЕДУПРЕЖДЕНИЕ]" not in quiet_output.getvalue():
-        fail("Предупреждение должно быть видно в тихом режиме и передаваться через SSH")
+    except InfraManagerError as exc:
+        error = str(exc)
+        if any(part not in error for part in (
+            "Deploy Guest", "340", "photo-archive", "999", "infra-manager sync 910",
+        )):
+            fail(f"Ошибка не объясняет расхождение списка гостей: {error}")
+    else:
+        fail("Устаревший выбор гостей не должен считаться готовностью")
 
     invalid_templates = copy.deepcopy(stale_templates)
     invalid_deploy = next(item for item in invalid_templates if item["name"] == "Deploy Guest")
@@ -988,11 +984,15 @@ def main_test() -> None:
         patch.object(status_module, "_check_pve") as check_pve,
         patch.object(status_module, "console") as output,
     ):
-        if check_status(quiet=True) != 0:
-            fail("Устаревший список гостей не должен менять успешный код статуса")
-    output.warning.assert_called_once()
-    check_tools.assert_called_once()
-    check_pve.assert_called_once_with(full=False)
+        try:
+            check_status(quiet=True)
+        except InfraManagerError as exc:
+            if "устарел список гостей" not in str(exc):
+                fail(f"Неверная причина неготовности: {exc}")
+        else:
+            fail("Устаревший список гостей обязан блокировать готовность")
+    check_tools.assert_not_called()
+    check_pve.assert_not_called()
 
     if definition.guest_vmid != 910:
         fail("Внутреннее описание состояния должно учитывать текущий VMID infra-manager")
