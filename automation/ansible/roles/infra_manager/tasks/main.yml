@@ -14,7 +14,9 @@
 
 - name: Настроить Semaphore
   ansible.builtin.import_tasks: semaphore.yml
-  when: (provision_phase | default('full')) in ['full', 'bootstrap']
+  when:
+    - (provision_phase | default('full')) in ['full', 'bootstrap']
+    - provision.docker.services.runtime.mode | default('semaphore') == 'semaphore'
 
 - name: Установить и запустить управляющую среду
   ansible.builtin.import_tasks: runtime.yml
