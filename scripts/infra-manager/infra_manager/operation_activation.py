@@ -33,8 +33,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.operation_id is None:
             raise InfraManagerError("Не указан идентификатор операции")
         record = store.get(args.operation_id)
-        if record.get("kind") != "deploy":
-            raise InfraManagerError("Идентификатор не относится к обновлению гостя")
+        if record.get("kind") != "deploy" or record.get("activation_required") is not True:
+            raise InfraManagerError("Идентификатор не относится к подтверждаемому самообновлению")
         if args.action == "verifying":
             if args.exit_code is not None:
                 raise InfraManagerError("Проверка не принимает код завершения")
