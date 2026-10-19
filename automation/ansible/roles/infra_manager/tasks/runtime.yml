@@ -373,4 +373,3 @@
     enabled: "{{ infra_backup_enabled | bool }}"
     state: "{{ 'started' if infra_backup_enabled | bool else 'stopped' }}"
     daemon_reload: true
-
