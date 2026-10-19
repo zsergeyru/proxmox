@@ -185,6 +185,13 @@ def test_invalid_definitions(repo: Path) -> None:
 
 
 def main() -> int:
+    # Описания машин не должны дублироваться в host/ и hosts/.
+    assert not (ROOT / "infrastructure/host").exists()
+    for name in ("pve", "nas"):
+        assert (ROOT / "infrastructure/hosts" / name / "README.md").is_file()
+    # Исполняемая программа резервирования находится отдельно от описаний.
+    assert (ROOT / "scripts/backup/backup-140.py").is_file()
+    assert not (ROOT / "infrastructure/hosts/pve/backup/backup-140.py").exists()
     with tempfile.TemporaryDirectory() as temporary:
         root = Path(temporary)
         schema = ROOT / "infrastructure/schemas/physical-storage.schema.yaml"
