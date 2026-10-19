@@ -20,6 +20,8 @@ spec.loader.exec_module(storage)
 
 sys.path.insert(0, str(ROOT / "scripts/infra-manager"))
 from infra_manager import pve_host
+from infra_manager.common import InfraManagerError
+from infra_manager.storage_catalog import load_physical_storage, render_pve_guest_storage
 
 
 def storage_config() -> dict:
@@ -659,6 +661,53 @@ def test_local_storage_unknown_configuration_stops_safely() -> None:
         assert fake.call_count == 1
 
 
+def test_shared_pve_manifest() -> None:
+    """Общее описание PVE — единственный источник размеров всех трёх томов."""
+
+    host = load_physical_storage(ROOT, "pve")
+    assert host.host == "pve"
+    assert set(volume["id"] for volume in host.volumes) == {
+        "infra_state", "gogs_data", "photo_archive"
+    }
+    assert {volume["id"]: volume["size_gb"] for volume in host.volumes} == {
+        "infra_state": 40, "gogs_data": 30, "photo_archive": 240,
+    }
+    assert {device["role"] for device in host.devices} == {"system", "backup"}
+    assert all(volume["device"] == "nvme" for volume in host.volumes)
+    assert render_pve_guest_storage(
+        host, {"mounts": storage_config()["mounts"]}
+    ) == storage_config()
+
+    def refuses(config: object) -> None:
+        try:
+            render_pve_guest_storage(host, config)
+        except InfraManagerError:
+            return
+        raise AssertionError("Подмена описания физического тома была принята")
+
+    # Гость не вправе задавать размер, пул или путь физического тома.
+    refuses({**storage_config(), "mounts": storage_config()["mounts"]})
+    refuses({"mounts": [
+        {**storage_config()["mounts"][0], "volume": "unknown"}
+    ]})
+    refuses({"mounts": []})
+
+
+def test_bootstrap_guest_independent_of_shared_storage() -> None:
+    """Первоначальный управляющий гость не зависит от общих томов PVE."""
+
+    guest = ROOT / "infrastructure/guests/910-infra-manager"
+    with (
+        patch.object(
+            pve_host, "load_physical_storage",
+            side_effect=AssertionError("990 не должен читать shared storage"),
+        ),
+        patch.object(pve_host, "_install_remote_file") as install,
+    ):
+        pve_host.ensure_guest_storage("pve", 910, "lxc", guest)
+    install.assert_not_called()
+
+
 def test_no_storage_on_other_guests() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         guest = Path(tmp) / "infrastructure/guests/420-ui"
@@ -720,6 +769,8 @@ if __name__ == "__main__":
     test_local_storage_enables_snippets_without_losing_content()
     test_local_storage_snippets_already_enabled()
     test_local_storage_unknown_configuration_stops_safely()
+    test_shared_pve_manifest()
+    test_bootstrap_guest_independent_of_shared_storage()
     test_no_storage_on_other_guests()
     test_guest_storage_sent_to_pve()
     print("OK: Guest storage contract")
