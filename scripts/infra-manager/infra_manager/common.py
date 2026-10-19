@@ -344,7 +344,14 @@ def reserve_runtime_activation() -> None:
 
     try:
         with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
-            stream.write(f"{_runtime_activation_scope()}:{os.getpid()}\n")
+            operation_id = os.environ.get("INFRA_OPERATION_ID", "").strip()
+            if operation_id:
+                import re
+
+                if not re.fullmatch(r"[0-9a-f]{32}", operation_id):
+                    raise InfraManagerError("Некорректный идентификатор самообновления")
+            suffix = f":{operation_id}" if operation_id else ""
+            stream.write(f"{_runtime_activation_scope()}:{os.getpid()}{suffix}\n")
             stream.flush()
             os.fsync(stream.fileno())
     except OSError:
