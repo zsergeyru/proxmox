@@ -510,6 +510,23 @@ jobs:
           docker build -t infra-web:ci "$INFRA_MANAGER_DIR/rootfs/opt/infra-manager/compose/web"
           docker run --rm --entrypoint python3 infra-web:ci -m py_compile /opt/infra-web/app.py
 
+      - name: Build independent infra-runtime without Semaphore
+        run: |
+          docker build \
+            --build-arg OPENTOFU_VERSION=1.12.6 \
+            --build-arg PACKER_IMAGE="$(python3 -c 'import os,yaml; from pathlib import Path; p=Path(os.environ["INFRA_MANAGER_DIR"])/"provision.yaml"; print(yaml.safe_load(p.read_text())["docker"]["services"]["runtime"]["tools"]["packer_image"])')" \
+            -f "$INFRA_MANAGER_DIR/rootfs/opt/infra-manager/compose/runtime-next/Dockerfile" \
+            -t infra-runtime:next \
+            "$INFRA_MANAGER_DIR/rootfs/opt/infra-manager/compose"
+          docker run --rm infra-runtime:next tofu version
+          docker run --rm infra-runtime:next packer version
+          docker run --rm infra-runtime:next ansible --version
+          docker run --rm --entrypoint python3 infra-runtime:next -c 'import proxmoxer, yaml, jsonschema'
+          if docker run --rm --entrypoint sh infra-runtime:next -c 'test -e /etc/semaphore'; then
+            echo 'Next runtime unexpectedly includes Semaphore'
+            exit 1
+          fi
+
       - name: Build infra-runtime image
         run: |
           docker build \
