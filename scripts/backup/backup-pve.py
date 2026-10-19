@@ -13,6 +13,7 @@ import contextlib
 from datetime import datetime, timezone
 import fcntl
 import json
+import hashlib
 import os
 from pathlib import Path
 import shutil
@@ -25,6 +26,7 @@ import yaml
 
 
 DEFAULT_CONFIG = Path("/etc/infra-manager/backup/backup.yaml")
+LAST_SUCCESS = Path("/var/lib/infra-manager/backup/last-success.json")
 RAFT_HELPER = Path("/usr/local/lib/infra-manager/backup/openbao-raft-guest.py")
 STATE = Path("/mnt/bindmounts/infra-manager/state")
 ROOT = Path("/mnt/bindmounts/infra-manager")
@@ -103,7 +105,9 @@ def _mounted_device(path: Path) -> dict[str, str]:
     return entries[0]
 
 
-def check_destinations(targets: list[dict[str, Any]]) -> list[Path]:
+def check_destinations(
+    targets: list[dict[str, Any]], *, allow_uninitialized: bool = False,
+) -> list[Path]:
     """Перед любой записью сверить смонтированные и разные физические тома."""
 
     result: list[Path] = []
@@ -139,9 +143,12 @@ def check_destinations(targets: list[dict[str, Any]]) -> list[Path]:
         if not isinstance(repository, str) or not repository or "/" in repository:
             raise BackupError("Некорректное имя restic-хранилища")
         folder = mount / repository
-        if folder.is_symlink() or not folder.is_dir():
-            raise BackupError(f"Restic-хранилище не подготовлено: {folder}")
-        _regular_file(folder / "config")
+        if folder.is_symlink():
+            raise BackupError(f"Ссылка вместо restic-хранилища: {folder}")
+        if not allow_uninitialized:
+            if not folder.is_dir():
+                raise BackupError(f"Restic-хранилище не подготовлено: {folder}")
+            _regular_file(folder / "config")
         result.append(folder)
     return result
 
@@ -288,6 +295,90 @@ def restic_command(repo: Path, password_file: Path, argv: list[str]) -> None:
         )
 
 
+def _digest(path: Path) -> str:
+    """Посчитать SHA256 на независимом носителе, не доверяя завершению копирования."""
+
+    checksum = hashlib.sha256()
+    with path.open("rb") as input_file:
+        for block in iter(lambda: input_file.read(1024 * 1024), b""):
+            checksum.update(block)
+    return checksum.hexdigest()
+
+
+def backup_vm100(config: dict[str, Any], targets: list[Path], password: Path) -> None:
+    """Сохранить HAOS VM 100 в те же два шифрованных restic-хранилища."""
+
+    guests = config.get("guests", [])
+    if guests != [{
+        "vmid": 100, "schedule": "daily",
+        "mode": "snapshot", "compression": "zstd",
+    }]:
+        raise BackupError("Неподдерживаемый перечень гостей для резервирования")
+    if shutil.which("vzdump") is None:
+        raise BackupError("На физическом PVE нет vzdump")
+    if shutil.which("qm") is None:
+        raise BackupError("На физическом PVE нет qm")
+    if subprocess.run(
+        ["qm", "status", "100"], capture_output=True, text=True,
+        check=False,
+    ).returncode:
+        raise BackupError("VM 100 отсутствует; резервирование невозможно")
+
+    # Архив vzdump временно хранится на проверенном отдельном SSD, никогда
+    # не на NVMe PVE. После включения в оба restic-хранилища удаляется.
+    ssd_root = targets[0].parent
+    with tempfile.TemporaryDirectory(prefix=".haos-vzdump-", dir=ssd_root) as tmp:
+        workspace = Path(tmp)
+        workspace.chmod(0o700)
+        run = subprocess.run(
+            [
+                "vzdump", "100", "--mode", "snapshot",
+                "--compress", "zstd", "--dumpdir", str(workspace),
+            ],
+            text=True, stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE, check=False, timeout=7200,
+        )
+        if run.returncode:
+            raise BackupError("vzdump VM 100 завершился ошибкой")
+        archives = list(workspace.glob("vzdump-qemu-100-*.vma.zst"))
+        if len(archives) != 1 or archives[0].is_symlink():
+            raise BackupError("vzdump не создал ровно один архив HAOS VM 100")
+        archive = archives[0]
+        if archive.stat().st_size < 512:
+            raise BackupError("Пустой архив HAOS VM 100")
+        for repo in targets:
+            restic_command(
+                repo, password,
+                ["backup", str(archive), "--tag", "haos", "--tag", "vm-100"],
+            )
+            restic_command(repo, password, ["check", "--read-data-subset=1%"])
+
+
+def save_result(config: dict[str, Any], targets: list[Path]) -> None:
+    """Зафиксировать подтверждённый успех только после обеих независимых копий."""
+
+    LAST_SUCCESS.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    descriptor, name = tempfile.mkstemp(
+        prefix=".last-success-", dir=LAST_SUCCESS.parent,
+    )
+    temporary = Path(name)
+    try:
+        os.fchmod(descriptor, 0o600)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            json.dump({
+                "created_utc": datetime.now(timezone.utc).isoformat(),
+                "job": "infra-core",
+                "destinations": [str(p) for p in targets],
+                "guests": [guest["vmid"] for guest in config.get("guests", [])],
+            }, stream)
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, LAST_SUCCESS)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
 def backup(config: dict[str, Any], *, execute: bool = False) -> None:
     """Проверить все требования до начала записи в зашифрованные репозитории."""
 
@@ -342,7 +433,9 @@ def backup(config: dict[str, Any], *, execute: bool = False) -> None:
                      "--tag", "infra-core", "--tag", "pve", *exclusions],
                 )
                 restic_command(target, password_file, ["check", "--read-data-subset=1%"])
-    print("[ОК] Два зашифрованных комплекта PVE и 910 записаны и проверены")
+        backup_vm100(config, targets, password_file)
+        save_result(config, targets)
+    print("[ОК] Две шифрованные копии PVE, 910 и HAOS VM 100 записаны и проверены")
 
 
 def main() -> int:
