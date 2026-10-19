@@ -39,7 +39,7 @@ from .pve_host import (
     ensure_guest_storage,
     install_openbao_host_support,
     install_recovery_host_support,
-    install_operator_host_support,
+    install_backup_host_support,
     issue_openbao_machine_credentials,
     read_openbao_tls_ca,
     sign_ssh_client_key,
@@ -568,9 +568,9 @@ def _configure_guest_os(
         install_openbao_host_support(context.node, repo_root)
         if self_update:
             install_recovery_host_support(context.node, repo_root)
-            # Оболочка и код резервирования устанавливаются атомарно
+            # Код резервирования устанавливается атомарно
             # до отложенной замены Docker, без запуска таймера или дисков.
-            install_operator_host_support(context.node, repo_root)
+            install_backup_host_support(context.node, repo_root)
 
     bootstrap_key = bootstrap_private_key
     if (
