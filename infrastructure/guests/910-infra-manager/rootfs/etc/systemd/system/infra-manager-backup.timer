@@ -1,0 +1,11 @@
+[Unit]
+Description=Infra Manager backup schedule from backup.yaml
+
+[Timer]
+OnCalendar=*-*-* 03,09,15,21:30:00
+Persistent=true
+RandomizedDelaySec=0
+Unit=infra-manager-backup.service
+
+[Install]
+WantedBy=timers.target
