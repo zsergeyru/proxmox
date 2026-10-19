@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import subprocess
+import shutil
 
 
 ROOT = Path("/usr/local/lib/infra-manager/backup")
@@ -24,6 +25,31 @@ SCRIPTS = {
 }
 
 
+def ensure_backup_tools(action: str, error_type: type[Exception]) -> None:
+    """Установить только недостающие Debian-пакеты до вызова программы."""
+
+    if action in {"inspect", "plan-ssd", "openbao-access"}:
+        return
+    checks = [
+        subprocess.run(
+            ["python3", "-c", "import yaml"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
+        ).returncode == 0,
+        shutil.which("restic") is not None,
+        shutil.which("partprobe") is not None,
+        shutil.which("mount.nfs4") is not None,
+    ]
+    if all(checks):
+        return
+    for command in (
+        ["apt-get", "update"],
+        ["apt-get", "install", "-y",
+         "python3-yaml", "restic", "parted", "nfs-common"],
+    ):
+        if subprocess.run(command, check=False).returncode:
+            raise error_type("Не удалось установить обязательные средства резервирования")
+
+
 def dispatch_backup(args: list[str], error_type: type[Exception]) -> int:
     """Пропускать только явно объявленные команды на физическом PVE."""
 
@@ -32,6 +58,7 @@ def dispatch_backup(args: list[str], error_type: type[Exception]) -> int:
             "Команды: inspect, plan-ssd, prepare-ssd, mount-ssd, mount-nas, "
             "openbao-access, init, run, status, enable, disable, export-key, verify"
         )
+    ensure_backup_tools(args[0], error_type)
     if args[0] == "openbao-access":
         if len(args) != 1:
             raise error_type("openbao-access не принимает дополнительных аргументов")
