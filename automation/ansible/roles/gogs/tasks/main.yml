@@ -1,0 +1,133 @@
+---
+- name: Проверить описание Gogs 310
+  ansible.builtin.assert:
+    that:
+      - guest_manifest.vmid | int == 310
+      - provision.gogs.storage.require_import_before_start | bool
+      - not provision.gogs.storage.allow_missing_mount | bool
+      - provision.gogs.paths.data == provision.gogs.storage.required_mount
+      - provision.gogs.image is match('^docker.io/gogs/gogs@sha256:[a-f0-9]{64}$')
+      - provision.gogs.network.ssh_public == false
+      - provision.gogs.network.public_url == 'https://git.zsergey.ru/'
+      - provision.gogs.access.allow_reverse_proxy_authentication == false
+    fail_msg: "310: некорректное описание Gogs"
+
+- name: Проверить настоящий подключённый том данных Gogs
+  ansible.builtin.command:
+    argv:
+      - mountpoint
+      - -q
+      - "{{ provision.gogs.storage.required_mount }}"
+  changed_when: false
+  # Отсутствующее подключение нельзя заменять каталогом на системном диске.
+
+- name: Подготовить только воспроизводимые каталоги Gogs
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - "{{ provision.gogs.paths.root }}"
+    - "{{ provision.gogs.paths.compose }}"
+
+- name: Установить проверку перенесённых данных
+  ansible.builtin.copy:
+    src: prepare_data.py
+    dest: "{{ provision.gogs.paths.root }}/prepare_data.py"
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Проверить целостность перенесённого состояния Gogs
+  ansible.builtin.command:
+    argv:
+      - python3
+      - "{{ provision.gogs.paths.root }}/prepare_data.py"
+      - --data
+      - "{{ provision.gogs.paths.data }}"
+      - --check
+  changed_when: false
+  # Первый deploy до переноса преднамеренно завершается здесь.
+  # Никакого docker pull/up и создания пустой SQLite до подтверждения миграции.
+
+- name: Сохранить секреты и скорректировать только настройки доступа
+  ansible.builtin.command:
+    argv:
+      - python3
+      - "{{ provision.gogs.paths.root }}/prepare_data.py"
+      - --data
+      - "{{ provision.gogs.paths.data }}"
+      - --configure
+      - --domain
+      - "{{ provision.gogs.network.domain }}"
+      - --url
+      - "{{ provision.gogs.network.public_url }}"
+      - --ssh-port
+      - "{{ provision.gogs.network.ssh_port }}"
+  register: gogs_configure
+  changed_when: "'GOGS_CONFIG_CHANGED' in gogs_configure.stdout"
+  no_log: true
+
+- name: Установить состав Docker Compose
+  ansible.builtin.template:
+    src: docker-compose.yml.j2
+    dest: "{{ provision.gogs.paths.compose_file }}"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Проверить состав Docker Compose
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ provision.gogs.paths.compose_file }}"
+      - config
+      - --quiet
+  changed_when: false
+
+- name: Загрузить только закреплённый образ Gogs
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ provision.gogs.paths.compose_file }}"
+      - pull
+  changed_when: false
+
+- name: Запустить или восстановить Gogs
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ provision.gogs.paths.compose_file }}"
+      - up
+      - -d
+      - --remove-orphans
+  register: gogs_started
+  changed_when: >-
+    'Started' in (gogs_started.stdout + gogs_started.stderr)
+    or 'Created' in (gogs_started.stdout + gogs_started.stderr)
+    or 'Recreated' in (gogs_started.stdout + gogs_started.stderr)
+
+- name: Дождаться веб-интерфейса Gogs
+  ansible.builtin.uri:
+    url: "http://{{ ansible_host }}:{{ provision.gogs.network.http_port }}/user/login"
+    status_code: [200, 302]
+    follow_redirects: none
+    return_content: false
+  register: gogs_http_health
+  until: gogs_http_health.status in [200, 302]
+  retries: 30
+  delay: 3
+
+- name: Дождаться внутреннего SSH Gogs
+  ansible.builtin.wait_for:
+    host: "{{ ansible_host }}"
+    port: "{{ provision.gogs.network.ssh_port | int }}"
+    timeout: 30

@@ -103,6 +103,14 @@
         - guest_manifest.name == "photo-archive"
         - provision.photo_archive is defined
 
+    - name: Настроить сервер Git Gogs
+      ansible.builtin.include_role:
+        name: gogs
+      when:
+        - (provision_phase | default('full')) == "full"
+        - guest_manifest.name == "gogs"
+        - provision.gogs is defined
+
     - name: Настроить веб-шлюз
       ansible.builtin.include_role:
         name: web_gateway
