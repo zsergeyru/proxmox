@@ -330,12 +330,14 @@ def test_recovery_host_support() -> None:
         with (
             patch.object(module, "_install_remote_file", side_effect=record_install),
             patch.object(module, "_ssh", side_effect=record_ssh),
+            patch.object(module, "install_backup_host_support") as backup_install,
         ):
             module.install_recovery_host_support("pve", root)
             module.install_operator_host_support("pve", root)
             module.prepare_recovery_git("pve")
             module.preflight_recovery_contour("pve")
             module.check_recovery_contour("pve")
+            backup_install.assert_called_once_with("pve", root)
 
     assert installs == [
         (
