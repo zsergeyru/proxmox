@@ -10,6 +10,7 @@ import yaml
 from jsonschema import Draft202012Validator
 
 from .common import InfraManagerError
+from .storage_catalog import load_physical_storage
 
 
 _NAME = re.compile(r"^[a-z][a-z0-9-]*$")
@@ -56,17 +57,77 @@ def load_physical_host(repo_root: Path, name: str) -> PhysicalHost:
         )
     if data["name"] != name:
         raise InfraManagerError(f"{manifest}: name не совпадает с каталогом {name}")
-    roles = [device["role"] for device in data["storage"]["devices"]]
-    if roles.count("system") != 1:
-        raise InfraManagerError(f"{manifest}: нужен ровно один системный накопитель")
-    for role in ("shared", "data", "backup"):
-        if roles.count(role) > 1:
+    # Диски и тома принадлежат только storage.yaml; host.yaml описывает
+    # систему и связь с ней. Не поддерживать конкурирующий источник данных.
+    storage = load_physical_storage(repo_root, name)
+    roles = [entry["role"] for entry in storage.devices]
+    if name == "nas":
+        # Исполнитель сейчас независимо выбирает /dev/disk/by-id по серийному
+        # номеру с NAS. Заданное в Git значение by_id пока не проверяется
+        # им на оборудовании; запрещаем делать вид, что оно проверено.
+        if any(entry["by_id"] is not None for entry in storage.devices):
             raise InfraManagerError(
-                f"{manifest}: роль накопителя {role} не может повторяться"
+                f"{storage.manifest}: закрепление by_id будет поддержано "
+                "только после проверки его исполнителем NAS; пока укажите null"
             )
-    serials = [device["serial"] for device in data["storage"]["devices"] if device["serial"]]
-    if len(serials) != len(set(serials)):
-        raise InfraManagerError(f"{manifest}: повторяются серийные номера дисков")
+        for role in ("shared", "data", "backup"):
+            if roles.count(role) != 1:
+                raise InfraManagerError(
+                    f"{storage.manifest}: NAS требует ровно один диск роли {role}"
+                )
+        if {entry["id"] for entry in storage.volumes} != {
+            "shared", "data", "backup"
+        }:
+            raise InfraManagerError(
+                f"{storage.manifest}: NAS требует тома shared, data и backup"
+            )
+
+    # Пока исполнитель NAS использует проверенный прежний внутренний
+    # контракт, преобразование делается только здесь. Дублирования в Git нет.
+    devices = tuple({
+        "role": entry["role"], "model": entry["model"],
+        "capacity_gb": entry["capacity_gb"], "serial": entry["serial"],
+    } for entry in storage.devices)
+    mounts = {entry["volume"]: entry["path"] for entry in storage.mounts}
+    volumes: dict[str, dict[str, object]] = {}
+    for entry in storage.volumes:
+        name_of_volume = entry["id"]
+        volume: dict[str, object] = {"mountpoint": mounts[name_of_volume]}
+        if entry["kind"] == "ext4":
+            volume.update({
+                "filesystem_uuid": entry["filesystem_uuid"],
+                "omv_reference": entry.get("omv_reference"),
+            })
+        elif entry["kind"] == "zfs_pool":
+            volume.update({
+                "pool": entry["pool"],
+                "pool_guid": entry["pool_guid"],
+                "omv_reference": entry.get("omv_reference"),
+            })
+        elif name == "nas":
+            raise InfraManagerError(
+                f"{storage.manifest}: LVM не используется для томов NAS"
+            )
+        volumes[name_of_volume] = volume
+    if name == "nas":
+        expected = {"shared": "ext4", "data": "zfs_pool", "backup": "zfs_pool"}
+        kinds = {entry["id"]: entry["kind"] for entry in storage.volumes}
+        if kinds != expected:
+            raise InfraManagerError(
+                f"{storage.manifest}: неверный тип файловой системы NAS"
+            )
+        for entry in storage.volumes:
+            if entry["device"] != entry["id"]:
+                raise InfraManagerError(
+                    f"{storage.manifest}: том NAS назначен чужой роли накопителя"
+                )
+        for role in ("data", "backup"):
+            if volumes[role]["pool"] != "nas-" + role:
+                raise InfraManagerError(
+                    f"{storage.manifest}: некорректное имя ZFS-пула {role}"
+                )
+    # Незаполненные серийные номера допустимы для первоначального плана.
+    # Постоянная идентичность потом подтверждается планом и сохранённым состоянием.
     conn = data["connection"]
     return PhysicalHost(
         name=name,
@@ -74,9 +135,9 @@ def load_physical_host(repo_root: Path, name: str) -> PhysicalHost:
         port=conn["port"],
         user=conn["user"],
         ssh_host_fingerprint=conn["ssh_host_fingerprint"],
-        devices=tuple(data["storage"]["devices"]),
+        devices=devices,
         directory=directory,
-        volumes=data["storage"].get("volumes"),
+        volumes=volumes,
     )
 
 

@@ -16,10 +16,10 @@ from pathlib import Path
 from .common import InfraManagerError
 from .physical_host_ssh import PhysicalHostSshSession, _scan_verified_key
 from .physical_hosts import PhysicalHost
+from .physical_host_state import checked_record_path
 from .settings import PATHS
 
 
-_MARKER_DIR = PATHS.data_dir / "locks" / "physical-hosts"
 _USER = re.compile(r"^[a-z_][a-z0-9_.-]{0,63}$")
 _REQUIRED = 20
 
@@ -29,7 +29,7 @@ def marker_path(name: str) -> Path:
 
     if not re.fullmatch(r"[a-z][a-z0-9-]*", name):
         raise InfraManagerError("Некорректное имя физического сервера")
-    return _MARKER_DIR / f"{name}.json"
+    return checked_record_path(name, data_root=PATHS.data_dir)
 
 
 def is_bootstrapped(host: PhysicalHost) -> bool:
@@ -37,6 +37,11 @@ def is_bootstrapped(host: PhysicalHost) -> bool:
 
     path = marker_path(host.name)
     if not path.exists():
+        if checked_record_path(host.name, storage=True, data_root=PATHS.data_dir).exists():
+            raise InfraManagerError(
+                "Назначения дисков сохранились, но отметка SSH-доверия исчезла. "
+                "Автоматический повтор начального входа запрещён"
+            )
         return False
     try:
         marker = json.loads(path.read_text(encoding="utf-8"))
@@ -54,9 +59,8 @@ def is_bootstrapped(host: PhysicalHost) -> bool:
 def _save_bootstrapped(host: PhysicalHost) -> None:
     """Атомарно запомнить успешный сертификатный вход без секретов."""
 
-    _MARKER_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
     path = marker_path(host.name)
-    fd, name = tempfile.mkstemp(prefix=f".{host.name}.", dir=_MARKER_DIR)
+    fd, name = tempfile.mkstemp(prefix=f".{host.name}.", dir=path.parent)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as stream:
             json.dump(

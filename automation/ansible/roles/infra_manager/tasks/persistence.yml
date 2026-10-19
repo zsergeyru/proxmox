@@ -93,6 +93,16 @@
     mode: "{{ item.mode }}"
   loop: "{{ provision.persistence.target_layout.state.bindings }}"
 
+- name: Сохранить подтверждения физических машин до обновления управляющей среды
+  ansible.builtin.script:
+    cmd: >-
+      {{ guest_root }}/../../../scripts/infra-manager/host/migrate-physical-host-state.py
+      {{ provision.persistence.target_layout.state.guest_path }}/locks/physical-hosts
+      {{ provision.persistence.target_layout.state.guest_path }}/physical-hosts
+    executable: python3
+  register: physical_host_state_migration
+  changed_when: "'скопировано: 0' not in physical_host_state_migration.stdout"
+
 - name: Создать каталог OpenTofu state
   ansible.builtin.file:
     path: "{{ provision.paths.opentofu_persistent_state_dir }}"

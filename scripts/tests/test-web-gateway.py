@@ -114,7 +114,9 @@ def check() -> None:
     ))
     assert "home-apps.py" in sync
     assert "git_https" in tasks and "git_https" in sync
-    assert "infra_state" in provision["pve_storage"]["volumes"][0]["name"]
+    assert set(provision["pve_storage"]) == {"mounts"}
+    host_storage = yaml.safe_load((ROOT / "infrastructure/hosts/pve/storage.yaml").read_text())
+    assert "infra_state" in {entry["id"] for entry in host_storage["volumes"]}
     files={r["path"] for r in status["checks"] if r["type"]=="file"}
     assert "/etc/web-gateway/portal/portal-home.html" in files
     assert "/etc/web-gateway/portal/portal-admin.html" in files

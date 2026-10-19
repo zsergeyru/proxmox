@@ -48,7 +48,8 @@ def test_marker() -> None:
         ssh_host_fingerprint="SHA256:" + "B" * 43,
     )
     with tempfile.TemporaryDirectory() as directory:
-        with patch.object(bootstrap, "_MARKER_DIR", Path(directory)):
+        (Path(directory) / "physical-hosts").mkdir()
+        with patch.object(bootstrap, "PATHS", SimpleNamespace(data_dir=Path(directory))):
             assert not bootstrap.is_bootstrapped(machine)
             bootstrap._save_bootstrapped(machine)
             assert bootstrap.is_bootstrapped(machine)
@@ -56,6 +57,15 @@ def test_marker() -> None:
                 replace(machine, address="192.0.2.23")
             ))
             assert "password" not in bootstrap.marker_path("nas").read_text()
+            # Если назначение дисков осталось, но отметка SSH исчезла,
+            # повторный парольный вход не должен запускаться.
+            marker = bootstrap.marker_path("nas")
+            (marker.parent / "nas-storage.json").write_text(
+                json.dumps({"name": "nas", "devices": [], "volumes": {}}),
+                encoding="utf-8",
+            )
+            marker.unlink()
+            expect_refusal(lambda: bootstrap.is_bootstrapped(machine))
 
 
 def test_operator_state() -> None:
@@ -71,10 +81,10 @@ def test_operator_state() -> None:
             encoding="utf-8",
         )
         paths = SimpleNamespace(repo_root=root, data_dir=root / "state")
+        (paths.data_dir / "physical-hosts").mkdir(parents=True)
         with patch.object(operator, "PATHS", paths):
             assert operator.operator_physical_bootstrap_state("nas") == 20
-            marker = paths.data_dir / "locks/physical-hosts/nas.json"
-            marker.parent.mkdir(parents=True)
+            marker = paths.data_dir / "physical-hosts/nas.json"
             marker.write_text(
                 json.dumps({"name": "nas", "address": "192.0.2.22",
                             "fingerprint": "SHA256:" + "B" * 43}),
@@ -82,6 +92,12 @@ def test_operator_state() -> None:
             )
             assert operator.operator_physical_bootstrap_state("nas") == 0
             marker.write_text('{"name":"nas","address":"192.0.2.23"}')
+            expect_refusal(lambda: operator.operator_physical_bootstrap_state("nas"))
+            marker.unlink()
+            (marker.parent / "nas-storage.json").write_text(
+                json.dumps({"name": "nas", "devices": [], "volumes": {}}),
+                encoding="utf-8",
+            )
             expect_refusal(lambda: operator.operator_physical_bootstrap_state("nas"))
 
 

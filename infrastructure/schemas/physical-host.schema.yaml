@@ -2,7 +2,7 @@ $schema: https://json-schema.org/draft/2020-12/schema
 $title: Описание физического сервера
 type: object
 additionalProperties: false
-required: [schema_version, name, kind, system, connection, storage]
+required: [schema_version, name, kind, system, connection]
 properties:
   schema_version:
     const: 1
@@ -43,89 +43,3 @@ properties:
           - type: 'null'
           - type: string
             pattern: '^SHA256:[A-Za-z0-9+/]{43}$'
-  storage:
-    type: object
-    additionalProperties: false
-    required: [devices]
-    properties:
-      devices:
-        type: array
-        minItems: 1
-        maxItems: 16
-        items:
-          type: object
-          additionalProperties: false
-          required: [role, model, capacity_gb, serial]
-          properties:
-            role:
-              enum: [system, shared, data, backup, unused]
-            model:
-              type: string
-              minLength: 1
-              maxLength: 100
-            capacity_gb:
-              type: integer
-              minimum: 1
-            serial:
-              oneOf:
-                - type: 'null'
-                - type: string
-                  minLength: 1
-                  maxLength: 128
-                  pattern: '^[A-Za-z0-9_-]+$'
-      volumes:
-        type: object
-        additionalProperties: false
-        required: [shared, data, backup]
-        properties:
-          shared:
-            type: object
-            additionalProperties: false
-            required: [mountpoint, filesystem_uuid, omv_reference]
-            properties:
-              mountpoint:
-                oneOf:
-                  - type: 'null'
-                  - type: string
-                    pattern: '^/srv/[a-zA-Z0-9_./-]+$'
-              filesystem_uuid:
-                oneOf:
-                  - type: 'null'
-                  - type: string
-                    minLength: 1
-                    maxLength: 128
-              omv_reference:
-                oneOf:
-                  - type: 'null'
-                  - type: string
-                    minLength: 1
-                    maxLength: 128
-          data:
-            $ref: '#/$defs/zfsVolume'
-          backup:
-            $ref: '#/$defs/zfsVolume'
-$defs:
-  zfsVolume:
-    type: object
-    additionalProperties: false
-    required: [mountpoint, pool, pool_guid, omv_reference]
-    properties:
-      mountpoint:
-        oneOf:
-          - type: 'null'
-          - type: string
-            pattern: '^/[a-zA-Z0-9_./-]+$'
-      pool:
-        type: string
-        pattern: '^nas-[a-z]+$'
-      pool_guid:
-        oneOf:
-          - type: 'null'
-          - type: string
-            pattern: '^[0-9]{1,20}$'
-      omv_reference:
-        oneOf:
-          - type: 'null'
-          - type: string
-            minLength: 1
-            maxLength: 128

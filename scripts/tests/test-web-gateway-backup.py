@@ -8,7 +8,7 @@ import sqlite3
 from tempfile import TemporaryDirectory
 
 ROOT = Path(__file__).resolve().parents[2]
-SOURCE = ROOT / "infrastructure/host/pve/backup/backup-140.py"
+SOURCE = ROOT / "scripts/backup/backup-140.py"
 
 
 def load():

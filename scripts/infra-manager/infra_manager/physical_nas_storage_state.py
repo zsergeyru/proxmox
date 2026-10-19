@@ -14,15 +14,13 @@ from pathlib import Path
 
 from .common import InfraManagerError
 from .physical_hosts import PhysicalHost
+from .physical_host_state import checked_record_path
 from .settings import PATHS
-
-_STATE_ROOT = PATHS.data_dir / "locks" / "physical-hosts"
-
 
 def storage_state_path(host: PhysicalHost) -> Path:
     """Хранить идентификаторы отдельно от одноразовой отметки SSH."""
 
-    return _STATE_ROOT / f"{host.name}-storage.json"
+    return checked_record_path(host.name, storage=True, data_root=PATHS.data_dir)
 
 
 def apply_saved_storage(host: PhysicalHost) -> PhysicalHost:
@@ -57,7 +55,7 @@ def apply_saved_storage(host: PhysicalHost) -> PhysicalHost:
         if any(saved.get(field) != entry.get(field) for field in ("role", "model", "capacity_gb")):
             raise InfraManagerError("Модель или объём назначенного HDD изменились")
         if entry.get("serial") not in (None, saved["serial"]):
-            raise InfraManagerError("Номер диска изменился по сравнению с host.yaml")
+            raise InfraManagerError("Номер диска изменился по сравнению с storage.yaml")
         resolved.append({**entry, "serial": saved["serial"]})
     volumes = data["volumes"]
     for role in ("shared", "data", "backup"):
@@ -67,7 +65,7 @@ def apply_saved_storage(host: PhysicalHost) -> PhysicalHost:
             raise InfraManagerError("Нет постоянного назначения тома NAS")
         for key, value in configured.items():
             if value is not None and recorded.get(key) != value:
-                raise InfraManagerError(f"Том {role} не соответствует host.yaml: {key}")
+                raise InfraManagerError(f"Том {role} не соответствует storage.yaml: {key}")
     return replace(host, devices=tuple(resolved), volumes=volumes)
 
 

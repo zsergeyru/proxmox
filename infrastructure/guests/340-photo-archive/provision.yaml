@@ -29,19 +29,10 @@ docker:
     - docker-buildx-plugin
     - docker-compose-plugin
 
-# Два логических тома внутри local-lvm основного NVMe PVE 512 ГБ.
-# 240 ГиБ — фотографии и медиаданные; 40 ГиБ — общий том состояний LXC.
+# Физические тома и размеры описаны в hosts/pve/storage.yaml.
+# Гость объявляет только собственные каталоги и точки подключения.
 # Ранее созданные тома не форматировать и не удалять.
 pve_storage:
-  volume_group: pve
-  thin_pool: data
-  volumes:
-    - name: photo_archive
-      size_gb: 240
-      mountpoint: /mnt/bindmounts/photo-archive
-    - name: infra_state
-      size_gb: 40
-      mountpoint: /mnt/bindmounts/infra-state
   mounts:
     - slot: mp0
       volume: photo_archive

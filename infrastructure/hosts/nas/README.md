@@ -20,6 +20,6 @@ NAS предоставляет домашним компьютерам общи�
 
 ## Документация
 
-Машинные настройки: [host.yaml](host.yaml). Локальные правила и процедуры находятся в [docs/README.md](docs/README.md).
+Машинные настройки: [host.yaml](host.yaml) — система и связь; [storage.yaml](storage.yaml) — физические накопители и тома. Локальные правила и процедуры находятся в [docs/README.md](docs/README.md).
 
 Общие правила оформления: [000-documentation-rules.md](../../../docs/000-documentation-rules.md).

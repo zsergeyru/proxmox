@@ -1,0 +1,150 @@
+$schema: https://json-schema.org/draft/2020-12/schema
+title: Единое описание физических хранилищ PVE и NAS
+type: object
+additionalProperties: false
+required: [schema_version, host, devices, volumes, mounts, policies]
+properties:
+  schema_version:
+    const: 1
+  host:
+    type: string
+    pattern: '^[a-z][a-z0-9-]*$'
+  devices:
+    type: array
+    minItems: 1
+    items:
+      $ref: '#/$defs/device'
+  volumes:
+    type: array
+    items:
+      oneOf:
+        - $ref: '#/$defs/lvmThin'
+        - $ref: '#/$defs/ext4'
+        - $ref: '#/$defs/zfsPool'
+  mounts:
+    type: array
+    items:
+      type: object
+      additionalProperties: false
+      required: [volume, path]
+      properties:
+        volume:
+          $ref: '#/$defs/identifier'
+        path:
+          oneOf:
+            - type: 'null'
+            - type: string
+              pattern: '^/(?:[A-Za-z0-9._-]+/)*[A-Za-z0-9._-]+$'
+  policies:
+    type: object
+    additionalProperties: false
+    required: [existing_data, unverified_devices, missing_mount]
+    properties:
+      existing_data:
+        const: preserve
+      unverified_devices:
+        const: reject_writes
+      missing_mount:
+        const: reject_writes
+$defs:
+  identifier:
+    type: string
+    pattern: '^[a-z][a-z0-9_-]*$'
+  nullableSerial:
+    oneOf:
+      - type: 'null'
+      - type: string
+        minLength: 1
+        maxLength: 128
+        pattern: '^[A-Za-z0-9._:-]+$'
+  nullableUuid:
+    oneOf:
+      - type: 'null'
+      - type: string
+        pattern: '^[a-fA-F0-9-]{16,40}$'
+  nullableOmvReference:
+    oneOf:
+      - type: 'null'
+      - type: string
+        pattern: '^[a-fA-F0-9-]{36}$'
+  device:
+    type: object
+    additionalProperties: false
+    required: [id, role, model, capacity_gb, serial, by_id]
+    properties:
+      id:
+        $ref: '#/$defs/identifier'
+      role:
+        enum: [system, shared, data, backup, unused]
+      model:
+        type: string
+        minLength: 1
+        maxLength: 100
+      capacity_gb:
+        type: integer
+        minimum: 1
+      serial:
+        $ref: '#/$defs/nullableSerial'
+      by_id:
+        oneOf:
+          - type: 'null'
+          - type: string
+            pattern: '^/dev/disk/by-id/[A-Za-z0-9._:+-]+$'
+  lvmThin:
+    type: object
+    additionalProperties: false
+    required: [id, kind, device, volume_group, thin_pool, size_gb, filesystem, filesystem_uuid]
+    properties:
+      id:
+        $ref: '#/$defs/identifier'
+      kind:
+        const: lvm_thin
+      device:
+        $ref: '#/$defs/identifier'
+      volume_group:
+        $ref: '#/$defs/identifier'
+      thin_pool:
+        $ref: '#/$defs/identifier'
+      size_gb:
+        type: integer
+        minimum: 1
+      filesystem:
+        const: ext4
+      filesystem_uuid:
+        $ref: '#/$defs/nullableUuid'
+  ext4:
+    type: object
+    additionalProperties: false
+    required: [id, kind, device, filesystem_uuid]
+    properties:
+      id:
+        $ref: '#/$defs/identifier'
+      kind:
+        const: ext4
+      device:
+        $ref: '#/$defs/identifier'
+      filesystem_uuid:
+        $ref: '#/$defs/nullableUuid'
+      omv_reference:
+        $ref: '#/$defs/nullableOmvReference'
+  zfsPool:
+    type: object
+    additionalProperties: false
+    required: [id, kind, device, pool, pool_guid]
+    properties:
+      id:
+        $ref: '#/$defs/identifier'
+      kind:
+        const: zfs_pool
+      device:
+        $ref: '#/$defs/identifier'
+      pool:
+        type: string
+        pattern: '^[a-z][a-z0-9-]*$'
+      pool_guid:
+        oneOf:
+          - type: 'null'
+          - type: string
+            pattern: '^[0-9]{1,20}$'
+      omv_reference:
+        $ref: '#/$defs/nullableOmvReference'

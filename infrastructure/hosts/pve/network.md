@@ -40,7 +40,7 @@ search home.arpa
 nameserver 192.168.1.1
 ~~~
 
-Сейчас PVE использует Keenetic как DNS. Общая архитектура DNS описана в [../../../../docs/400-network/420-dns.md](../../../../docs/400-network/420-dns.md).
+Сейчас PVE использует Keenetic как DNS. Общая архитектура DNS описана в [../../../docs/400-network/420-dns.md](../../../docs/400-network/420-dns.md).
 
 ## Текущее подключение
 
@@ -73,7 +73,7 @@ PVE остаётся L2-узлом для этих VLAN и не маршрути
 
 В штатном режиме VM 109 является основным шлюзом и DNS внутренней сети. Keenetic остаётся пограничным маршрутизатором к провайдеру и выполняет внешний NAT.
 
-Подробности находятся в [../../../../docs/400-network/410-network-layout.md](../../../../docs/400-network/410-network-layout.md).
+Подробности находятся в [../../../docs/400-network/410-network-layout.md](../../../docs/400-network/410-network-layout.md).
 
 ## Административный доступ к PVE
 

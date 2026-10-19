@@ -129,9 +129,13 @@ def test_gogs_compose_and_manifest() -> None:
     assert guest["name"] == "gogs"
     assert guest["recreate_if_missing"] is True
     assert guest["resources"]["disk_size_gb"] == 12
-    assert storage["volumes"] == [
-        {"name": "gogs_data", "size_gb": 30, "mountpoint": "/mnt/bindmounts/gogs-data"}
-    ]
+    assert set(storage) == {"mounts"}
+    host_storage = yaml.safe_load(
+        (ROOT / "infrastructure/hosts/pve/storage.yaml").read_text()
+    )
+    assert next(
+        volume for volume in host_storage["volumes"] if volume["id"] == "gogs_data"
+    )["size_gb"] == 30
     assert storage["mounts"] == [
         {
             "slot": "mp0",

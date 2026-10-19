@@ -25,13 +25,8 @@ docker:
 
 # Постоянные репозитории не находятся на корневом диске LXC.
 # Общее хранилище infra_state и каталоги 910 здесь не используются.
+# Размер тома gogs_data указан только в hosts/pve/storage.yaml.
 pve_storage:
-  volume_group: pve
-  thin_pool: data
-  volumes:
-    - name: gogs_data
-      size_gb: 30
-      mountpoint: /mnt/bindmounts/gogs-data
   mounts:
     - slot: mp0
       volume: gogs_data

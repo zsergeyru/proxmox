@@ -92,7 +92,7 @@ network:
 gateway 10.0.0.1
 ```
 
-Фактическое текущее состояние хоста хранится только в [`../host/pve/network/README.md`](../host/pve/network/README.md).
+Фактическое текущее состояние хоста хранится только в [`../../infrastructure/hosts/pve/network.md`](../../infrastructure/hosts/pve/network.md).
 
 ## Шлюзы
 

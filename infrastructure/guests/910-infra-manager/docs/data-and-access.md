@@ -34,6 +34,25 @@ state/  → /mnt/persistent-state RW
 
 Если bind mount отсутствует, Ansible должен завершиться ошибкой. Создавать обычный локальный каталог вместо ожидаемого подключения запрещено.
 
+### Связь с общим описанием PVE
+
+Общие логические тома PVE (`infra_state`, `gogs_data`, `photo_archive`) задаются
+один раз в [`infrastructure/hosts/pve/storage.yaml`](../../../hosts/pve/storage.yaml).
+Эти тома используются другими гостями, **не являются** тремя защищёнными
+каталогами управляющего гостя и не должны подменять их.
+
+Постоянные `pve-only/`, `access/` и `state/` лежат на корневой файловой
+системе физического PVE. Первоначальный установщик с временным гостем 990
+создаёт и проверяет их **до запуска 910**. При восстановлении сохранённые
+каталоги проверяются и повторно подключаются, не пересоздаются пустыми.
+Поэтому создание и аварийное восстановление 910 не требуют наличия
+`storage.yaml`, подготовленного NAS или диска резервных копий.
+
+Позднее 910 использует общий `storage.yaml` только для развёртывания
+тех гостей, которым нужны внешние логические тома. Он не переносит собственное
+состояние внутрь `infra_state` и не получает доступ к `pve-only/`.
+
+
 ### Что не хранится в rootfs LXC
 
 Корневая файловая система 910 не является единственным местом хранения:
@@ -160,6 +179,7 @@ known_hosts   1001:0 0644
 ├── semaphore/
 ├── opentofu/
 ├── locks/
+├── physical-hosts/
 └── openbao/
 ```
 
@@ -172,6 +192,7 @@ known_hosts   1001:0 0644
 | `/mnt/persistent-state/semaphore` | `1001:0` | `0770` | SQLite, история и данные Semaphore |
 | `/mnt/persistent-state/opentofu` | `1001:0` | `0750` | рабочие данные и state OpenTofu |
 | `/mnt/persistent-state/locks` | `1001:0` | `0770` | общие блокировки операций PVE CLI и `infra-runtime` |
+| `/mnt/persistent-state/physical-hosts` | `1001:0` | `0700` | подтверждённое SSH-доверие и постоянные идентификаторы физических серверов |
 | `/mnt/persistent-state/openbao` | `root:root` | `0700` | Raft OpenBao |
 
 OpenTofu state:
@@ -200,6 +221,10 @@ Semaphore:
 /var/lib/infra-manager/locks
 → /mnt/persistent-state/locks
 ```
+
+В `physical-hosts/` хранятся `nas.json` (однократно подтверждённое SSH-доверие) и `nas-storage.json` (назначение конкретных HDD, UUID/GUID и ссылки OMV), **не сами пользовательские файлы**. Оба JSON-файла должны иметь режим `0600`. Копирование в контейнер `infra-runtime` выполняется отдельным подключением `/var/lib/infra-manager/physical-hosts`, без использования папки блокировок.
+
+При обновлении роль Ansible **до запуска новой среды** проверяет и копирует прежние записи из `state/locks/physical-hosts/` в `state/physical-hosts/`. Совпадающие записи используются без изменений; повреждение, ссылка вместо файла или различие копий блокирует развёртывание. Старые оригиналы пока **не удаляются**: сначала обязательна проверенная независимая резервная копия новой папки. При отсутствии нового файла и наличии старого программы останавливаются, не предлагая повторную настройку NAS по паролю. После получения независимой копии и проверки восстановления старые файлы можно убрать отдельным проверяемым действием.
 
 Lock-файлы содержат только сведения для диагностики. Фактическая блокировка удерживается ядром через `flock`; после завершения процесса старый файл не препятствует следующему запуску и не требует резервного копирования.
 
@@ -297,6 +322,7 @@ Docker images
 | TLS server material | `access/openbao-tls` | да, если сохранён тот же TLS CA |
 | Semaphore | `state/semaphore` | прежнее состояние — нет |
 | OpenTofu state | `state/opentofu/state` | нет поверх существующей инфраструктуры |
+| Идентичность NAS и SSH-доверие | `state/physical-hosts` | только после независимой проверки физического NAS и восстановления доверия |
 | PVE root SSH / CA | `access/` | только через отдельную ротацию/выдачу |
 | Compose/Python/commands | Git / rootfs | да |
 | `/run/infra-manager/secrets` | временно | да, из OpenBao |
@@ -317,7 +343,7 @@ Docker images
 8. запустить и разблокировать OpenBao;
 9. восстановить рабочие секреты;
 10. восстановить Semaphore и `infra-runtime`;
-11. проверить OpenTofu state;
+11. проверить OpenTofu state и сохранённые подтверждения NAS в `physical-hosts/`; восстановить их **до** допуска действий с дисками;
 12. синхронизировать OTP-контракт;
 13. выполнить с PVE `infra-manager status`.
 
@@ -333,6 +359,7 @@ mountpoint /mnt/persistent-state
 stat /mnt/persistent-state/semaphore
 stat /mnt/persistent-state/opentofu
 stat /mnt/persistent-state/locks
+stat /mnt/persistent-state/physical-hosts
 stat /mnt/persistent-state/openbao
 ```
 
@@ -341,6 +368,7 @@ stat /mnt/persistent-state/openbao
 ```bash
 readlink -f /var/lib/infra-manager/semaphore
 readlink -f /var/lib/infra-manager/opentofu
+readlink -f /var/lib/infra-manager/physical-hosts
 readlink -f /var/lib/persistent/openbao
 ```
 

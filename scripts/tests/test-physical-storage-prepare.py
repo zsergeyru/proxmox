@@ -126,7 +126,8 @@ def test_storage_state():
     complete = _check_result(host, plan, data)
     from infra_manager import physical_nas_storage_state as state
     with tempfile.TemporaryDirectory() as folder:
-        with patch.object(state, "_STATE_ROOT", Path(folder)):
+        (Path(folder) / "physical-hosts").mkdir()
+        with patch.object(state, "PATHS", SimpleNamespace(data_dir=Path(folder))):
             save_storage_identity(host, list(complete.devices), complete.volumes)
             loaded = apply_saved_storage(host)
             assert loaded.devices == complete.devices
