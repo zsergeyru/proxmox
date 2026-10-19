@@ -93,6 +93,7 @@ docker:
         - /mnt/pve-access/pve-host:/mnt/pve-access/pve-host:ro
         - /mnt/persistent-state/opentofu:/var/lib/infra-manager/opentofu
         - /mnt/persistent-state/locks:/var/lib/infra-manager/locks
+        - /mnt/persistent-state/physical-hosts:/var/lib/infra-manager/physical-hosts
         - /var/lib/infra-manager/bootstrap-repo:/var/lib/infra-manager/bootstrap-repo:ro
         - /run/infra-manager/secrets:/run/infra-manager/secrets:ro
 
@@ -217,10 +218,12 @@ persistence:
         - opentofu-state
         - semaphore-data
         - operation-locks
+        - physical-host-identities
       bindings:
         - { source: /mnt/persistent-state/semaphore, target: /var/lib/infra-manager/semaphore, owner: "1001", group: "0", mode: "0770" }
         - { source: /mnt/persistent-state/opentofu, target: /var/lib/infra-manager/opentofu, owner: "1001", group: "0", mode: "0750" }
         - { source: /mnt/persistent-state/locks, target: /var/lib/infra-manager/locks, owner: "1001", group: "0", mode: "0770" }
+        - { source: /mnt/persistent-state/physical-hosts, target: /var/lib/infra-manager/physical-hosts, owner: "1001", group: "0", mode: "0700" }
         - { source: /mnt/persistent-state/openbao, target: /var/lib/persistent/openbao, owner: root, group: root, mode: "0700" }
 
     guest_local:
@@ -232,6 +235,7 @@ persistence:
         - caches
 
   backup_required:
+    - /var/lib/infra-manager/physical-hosts
     - /mnt/pve-access/pve-host
     - /var/lib/infra-manager/semaphore
     - /var/lib/infra-manager/opentofu/state
