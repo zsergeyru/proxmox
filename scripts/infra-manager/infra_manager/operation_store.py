@@ -85,9 +85,9 @@ def _read(path: Path) -> dict:
             os.close(fd)
         data = json.loads(chunks)
         if not isinstance(data, dict):
-            raise ValueError("JSON object required")
+            raise TypeError("JSON object required")
         return data
-    except (OSError, ValueError, UnicodeError) as exc:
+    except (OSError, ValueError, TypeError, UnicodeError) as exc:
         raise InfraManagerError(f"Запись операции недоступна или повреждена: {path.name}") from exc
 
 
