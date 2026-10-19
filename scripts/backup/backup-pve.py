@@ -28,6 +28,7 @@ import yaml
 DEFAULT_CONFIG = Path("/etc/infra-manager/backup/backup.yaml")
 LAST_SUCCESS = Path("/var/lib/infra-manager/backup/last-success.json")
 RESTORE_APPROVED = Path("/etc/infra-manager/backup/restore-tested")
+LAST_VM100 = Path("/var/lib/infra-manager/backup/last-vm100.json")
 RAFT_HELPER = Path("/usr/local/lib/infra-manager/backup/openbao-raft-guest.py")
 STATE = Path("/mnt/bindmounts/infra-manager/state")
 ROOT = Path("/mnt/bindmounts/infra-manager")
@@ -328,6 +329,19 @@ def backup_vm100(config: dict[str, Any], targets: list[Path], password: Path) ->
         "mode": "snapshot", "compression": "zstd",
     }]:
         raise BackupError("Неподдерживаемый перечень гостей для резервирования")
+    fingerprint = hashlib.sha256(json.dumps(
+        config["destinations"], sort_keys=True,
+    ).encode()).hexdigest()
+    if LAST_VM100.is_file():
+        try:
+            previous = json.loads(LAST_VM100.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            previous = {}
+        if (
+            previous.get("date") == datetime.now(timezone.utc).date().isoformat()
+            and previous.get("targets") == fingerprint
+        ):
+            return
     if shutil.which("vzdump") is None:
         raise BackupError("На физическом PVE нет vzdump")
     if shutil.which("qm") is None:
@@ -366,6 +380,24 @@ def backup_vm100(config: dict[str, Any], targets: list[Path], password: Path) ->
                 ["backup", str(archive), "--tag", "haos", "--tag", "vm-100"],
             )
             restic_command(repo, password, ["check", "--read-data-subset=1%"])
+    LAST_VM100.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=".vm100-", dir=LAST_VM100.parent,
+    )
+    temporary = Path(temporary_name)
+    try:
+        os.fchmod(descriptor, 0o600)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            json.dump({
+                "date": datetime.now(timezone.utc).date().isoformat(),
+                "targets": fingerprint,
+            }, stream)
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, LAST_VM100)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def save_result(config: dict[str, Any], targets: list[Path]) -> None:
