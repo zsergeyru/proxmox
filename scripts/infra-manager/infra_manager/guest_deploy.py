@@ -525,7 +525,7 @@ def _run_guest_ansible(
             # Не публиковать сырой Ansible stdout/stderr: внутри могут
             # находиться рабочие секреты. Показывать только название задания.
             summary = _ansible_failure_summary(
-                "\\n".join((result.stdout or "", result.stderr or ""))
+                "\n".join((result.stdout or "", result.stderr or ""))
             )
             reason = f" {summary}" if summary else " Название задания определить не удалось."
             raise InfraManagerError(
