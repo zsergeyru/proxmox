@@ -261,18 +261,56 @@ def operator_guest_task(
     started = time.monotonic()
     completed = False
     interrupted = False
+    store = None
+    operation_id = None
+    if operation == "deploy":
+        identity = guest_identity(PATHS.repo_root, vmid)
+        if identity.role == SETTINGS.infra_manager_role:
+            from .operation_store import OperationStore
+
+            store = OperationStore()
+            record, _ = store.reserve(
+                "deploy", vmid, project_revision(PATHS.repo_root),
+            )
+            operation_id = record["id"]
+            store.start(operation_id)
+            console.info(f"Операция самообновления: {operation_id}")
     try:
         result = _operator_guest_task(
             operation,
             vmid,
             show_secrets=show_secrets,
+            operation_id=operation_id,
         )
+        if store is not None and operation_id is not None:
+            current = store.get(operation_id)
+            if result != 0 and current["phase"] == "running":
+                store.finish(operation_id, exit_code=result)
+            elif result == 0 and current["phase"] == "running":
+                # Настройка завершилась, но отдельная systemd-служба ещё
+                # обязана проверить работоспособность нового поколения.
+                store.transition(operation_id, "activating")
+                console.info(
+                    f"Активация продолжается отдельно: {operation_id}; "
+                    "результат ещё не подтверждён"
+                )
+                return 2
+            current = store.get(operation_id)
+            if current["phase"] in {"activating", "verifying"}:
+                console.info(f"Результат ещё ожидается: {operation_id}")
+                return 2
+            completed = current["phase"] == "completed" and current["result"] == "ok"
+            return 0 if completed else 1
         completed = result == 0
         return result
     except KeyboardInterrupt:
         interrupted = True
         raise
     finally:
+        if store is not None and operation_id is not None:
+            current = store.get(operation_id)
+            if current["phase"] == "running":
+                store.finish(operation_id, exit_code=1)
         console.timing(
             f"Команда {operation} гостя {vmid}",
             time.monotonic() - started,
@@ -286,6 +324,7 @@ def _operator_guest_task(
     vmid: int,
     *,
     show_secrets: bool,
+    operation_id: str | None = None,
 ) -> int:
     """Выполнить штатную операцию напрямую внутри infra-runtime."""
 
@@ -301,6 +340,7 @@ def _operator_guest_task(
             f"INFRA_MANAGER_COLOR={'1' if console._color(chr(27)) else '0'}",
             "-e",
             f"NO_COLOR={os.environ.get('NO_COLOR', '')}",
+            *(["-e", f"INFRA_OPERATION_ID={operation_id}"] if operation_id else []),
             RUNTIME_CONTAINER,
             "sh",
             "-eu",
