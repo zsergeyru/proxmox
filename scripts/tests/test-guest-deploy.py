@@ -1298,8 +1298,8 @@ def check_pve_host_support_before_signing() -> None:
             ),
             patch.object(
                 guest_deploy_module,
-                "install_operator_host_support",
-                side_effect=lambda *a: calls.append("operator-support"),
+                "install_backup_host_support",
+                side_effect=lambda *a: calls.append("backup-support"),
             ),
             patch.object(
                 guest_deploy_module,
@@ -1331,7 +1331,7 @@ def check_pve_host_support_before_signing() -> None:
         if calls[:4] != [
             "openbao-support",
             "recovery-support",
-            "operator-support",
+            "backup-support",
             "sign-client",
         ]:
             fail(
@@ -1339,7 +1339,7 @@ def check_pve_host_support_before_signing() -> None:
                 f"SSH-подписания: {calls!r}"
             )
         if calls[-1:] != ["ansible"]:
-            fail("Обновление PVE-оболочки должно предшествовать Ansible")
+            fail("Установка резервирования PVE должна предшествовать Ansible")
 
 
 def check_opentofu_provider_mirror() -> None:
