@@ -122,6 +122,7 @@ def test_no_partial_success_if_snapshot_fails() -> None:
             "openbao": {},
         }
         calls = []
+        original_temporary = tempfile.TemporaryDirectory
         with (
             patch.object(backup, "check_source"),
             patch.object(backup, "check_destinations", return_value=targets),
@@ -130,7 +131,7 @@ def test_no_partial_success_if_snapshot_fails() -> None:
             patch.object(backup, "operation_guard", return_value=contextlib.nullcontext()),
             patch.object(backup, "sqlite_snapshot"),
             patch.object(backup, "openbao_snapshot", side_effect=backup.BackupError("Raft недоступен")),
-            patch.object(backup.tempfile, "TemporaryDirectory", wraps=lambda **k: tempfile.TemporaryDirectory(dir=root)),
+            patch.object(backup.tempfile, "TemporaryDirectory", side_effect=lambda **k: original_temporary(dir=root)),
         ):
             refuses(lambda: backup.backup(config, execute=True), "Raft недоступен")
         assert len(calls) == 2, "Нельзя записать неполный комплект при ошибке Raft"
