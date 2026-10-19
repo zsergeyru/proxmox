@@ -14,7 +14,6 @@ import json
 import os
 from pathlib import Path
 import subprocess
-import sys
 import tempfile
 from typing import Any
 
@@ -25,7 +24,6 @@ DESIRED = Path("/usr/local/share/infra-manager/backup.yaml.default")
 DEVICES = Path("/usr/local/share/infra-manager/storage-pve.yaml.default")
 CURRENT = Path("/etc/infra-manager/backup/backup.yaml")
 REPORT = Path("/var/lib/infra-manager/backup/reconcile.json")
-BLOCKED = ("Нет подтверждения SSD", "Нет подключения NAS", "Нет независимого ключа")
 
 
 def module(filename: str, name: str):
