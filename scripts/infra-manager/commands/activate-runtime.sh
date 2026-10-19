@@ -13,7 +13,7 @@ LOG_FILE="$LOG_DIR/runtime-activation.log"
 ACTIVATION_MARKER="/mnt/persistent-state/semaphore/.infra-manager-runtime-activation-pending"
 if [[ -f "$COMPOSE_DIR/.versions.env" ]] \
     && grep -qx 'RUNTIME_MODE=standalone' "$COMPOSE_DIR/.versions.env"; then
-    ACTIVATION_MARKER="/mnt/persistent-state/operations/runtime-activation-pending"
+    ACTIVATION_MARKER="/mnt/persistent-state/operations/activation/runtime-activation-pending"
 fi
 BRANCH="${INFRA_PROJECT_BRANCH:-main}"
 PVE_NODE="${INFRA_PVE_NODE:-}"
