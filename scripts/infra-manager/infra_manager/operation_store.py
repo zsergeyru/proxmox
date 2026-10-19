@@ -335,6 +335,7 @@ def run_recorded(
         code = execute(kind, target)
         if isinstance(code, bool) or not isinstance(code, int):
             code = 1
-    except (Exception, KeyboardInterrupt):
-        code = 1
+    except BaseException:
+        store.finish(operation_id, exit_code=1)
+        raise
     return store.finish(operation_id, exit_code=code)
