@@ -554,10 +554,10 @@ def test_operator_guest_operation_timing() -> None:
         patch.object(operator.time, "monotonic", side_effect=[10.0, 75.5]),
         patch.object(operator, "console") as output,
     ):
-        assert operator.operator_guest_task("deploy", 910, show_secrets=True) == 0
-    action.assert_called_once_with("deploy", 910, show_secrets=True)
+        assert operator.operator_guest_task("deploy", 410, show_secrets=True) == 0
+    action.assert_called_once_with("deploy", 410, show_secrets=True)
     output.timing.assert_called_once_with(
-        "Команда deploy гостя 910",
+        "Команда deploy гостя 410",
         65.5,
         interrupted=False,
         failed=False,
