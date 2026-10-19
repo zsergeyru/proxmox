@@ -1,0 +1,58 @@
+# Единое описание дисков NAS. Это намерение, а не результат обследования.
+# Идентификаторы заполняются только после фактической сверки на сервере.
+schema_version: 1
+host: nas
+devices:
+  - id: system
+    role: system
+    model: SPCC
+    capacity_gb: 120
+    serial: null
+    by_id: null
+  - id: shared
+    role: shared
+    model: ST1000DM003
+    capacity_gb: 1000
+    serial: null
+    by_id: null
+  - id: data
+    role: data
+    model: ST4000VX016
+    capacity_gb: 4000
+    serial: null
+    by_id: null
+  - id: backup
+    role: backup
+    model: ST4000VX016
+    capacity_gb: 4000
+    serial: null
+    by_id: null
+volumes:
+  - id: shared
+    kind: ext4
+    device: shared
+    filesystem_uuid: null
+    omv_reference: null
+  - id: data
+    kind: zfs_pool
+    device: data
+    pool: nas-data
+    pool_guid: null
+    omv_reference: null
+  - id: backup
+    kind: zfs_pool
+    device: backup
+    pool: nas-backup
+    pool_guid: null
+    omv_reference: null
+mounts:
+  - volume: shared
+    path: null
+  - volume: data
+    path: null
+  - volume: backup
+    path: null
+policies:
+  existing_data: preserve
+  unverified_devices: reject_writes
+  missing_mount: reject_writes
