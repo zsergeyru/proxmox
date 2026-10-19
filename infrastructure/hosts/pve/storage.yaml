@@ -1,0 +1,47 @@
+# Диски и общие тома PVE. Наблюдавшиеся размеры, не разрешение очистки.
+# Управление защищёнными pve-only/access/state для 910 остаётся у 990.
+schema_version: 1
+host: pve
+devices:
+  - id: nvme
+    role: system
+    model: SSD 512GB
+    capacity_gb: 512
+    serial: null
+    by_id: null
+volumes:
+  - id: infra_state
+    kind: lvm_thin
+    device: nvme
+    volume_group: pve
+    thin_pool: data
+    size_gb: 40
+    filesystem: ext4
+    filesystem_uuid: null
+  - id: gogs_data
+    kind: lvm_thin
+    device: nvme
+    volume_group: pve
+    thin_pool: data
+    size_gb: 30
+    filesystem: ext4
+    filesystem_uuid: null
+  - id: photo_archive
+    kind: lvm_thin
+    device: nvme
+    volume_group: pve
+    thin_pool: data
+    size_gb: 240
+    filesystem: ext4
+    filesystem_uuid: null
+mounts:
+  - volume: infra_state
+    path: /mnt/bindmounts/infra-state
+  - volume: gogs_data
+    path: /mnt/bindmounts/gogs-data
+  - volume: photo_archive
+    path: /mnt/bindmounts/photo-archive
+policies:
+  existing_data: preserve
+  unverified_devices: reject_writes
+  missing_mount: reject_writes
