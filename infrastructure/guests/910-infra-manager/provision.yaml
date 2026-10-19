@@ -136,6 +136,7 @@ paths:
   data: /var/lib/infra-manager
   semaphore_data: /var/lib/infra-manager/semaphore
   semaphore_persistent_data: /mnt/persistent-state/semaphore
+  operations_state: /mnt/persistent-state/operations
   opentofu_data: /var/lib/infra-manager/opentofu
   opentofu_provider_mirror: /var/lib/infra-manager/opentofu/provider-mirror
   opentofu_persistent_state_dir: /mnt/persistent-state/opentofu/state
@@ -219,6 +220,7 @@ persistence:
         - opentofu-state
         - semaphore-data
         - operation-locks
+        - operation-records
         - physical-host-identities
       bindings:
         - { source: /mnt/persistent-state/semaphore, target: /var/lib/infra-manager/semaphore, owner: "1001", group: "0", mode: "0770" }
@@ -236,6 +238,7 @@ persistence:
         - caches
 
   backup_required:
+    - /mnt/persistent-state/operations
     - /var/lib/infra-manager/physical-hosts
     - /mnt/pve-access/pve-host
     - /var/lib/infra-manager/semaphore
