@@ -142,6 +142,9 @@ jobs:
       - name: Check manager-owned backup preflight
         run: python scripts/tests/test-managed-backup.py
 
+      - name: Check staged runtime without Semaphore
+        run: python scripts/tests/test-standalone-runtime.py
+
       - name: Check infra-web readonly preview
         run: python scripts/tests/test-infra-web.py
 
