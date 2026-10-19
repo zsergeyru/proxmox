@@ -67,8 +67,10 @@ grep -Fq 'name: ssh.socket' "$LINUX_BASE_SSH_TRUST" \
     || die "Debian 13 должен отключать socket-активацию SSH"
 grep -Fq 'name: ssh.service' "$LINUX_BASE_SSH_TRUST" \
     || die "Debian 13 должен использовать обычную службу SSH"
-grep -Fq 'when: not (infra_self_update | default(false) | bool)' "$ROOT/automation/ansible/roles/infra_manager/tasks/verify.yml" \
-    || die "Самообновление 910 не должно менять Semaphore внутри текущего задания"
+grep -Fq 'not (infra_self_update | default(false) | bool)' "$ROOT/automation/ansible/roles/infra_manager/tasks/verify.yml" \
+    || die "Самообновление управляющего гостя не должно менять Semaphore внутри текущего задания"
+grep -Fq "provision.docker.services.runtime.mode | default('semaphore') == 'semaphore'" "$ROOT/automation/ansible/roles/infra_manager/tasks/verify.yml" \
+    || die "Независимый режим не должен требовать Semaphore"
 grep -Fq 'semaphore-project' "$ACTIVATE_RUNTIME" \
     || die "Самообновление 910 должно откладывать синхронизацию Semaphore до активации новой среды"
 grep -Fq 'infra-manager-status --full --quiet' "$ACTIVATE_RUNTIME" \
