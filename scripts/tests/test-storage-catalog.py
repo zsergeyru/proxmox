@@ -187,6 +187,11 @@ def test_invalid_definitions(repo: Path) -> None:
 def main() -> int:
     # Описания машин не должны дублироваться в host/ и hosts/.
     assert not (ROOT / "infrastructure/host").exists()
+    pve = ROOT / "infrastructure/hosts/pve"
+    for filename in ("README.md", "network.md", "storage.md", "backup.md"):
+        assert (pve / filename).is_file(), f"Нет {filename} в каталоге PVE"
+    for folder in ("network", "storage", "backup"):
+        assert not (pve / folder).exists(), f"Лишняя вложенная папка PVE: {folder}"
     for name in ("pve", "nas"):
         assert (ROOT / "infrastructure/hosts" / name / "README.md").is_file()
     # Исполняемая программа резервирования находится отдельно от описаний.
