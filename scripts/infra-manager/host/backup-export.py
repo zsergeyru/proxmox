@@ -212,20 +212,29 @@ def stream_backup() -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("command", choices=("check", "export"))
+    parser.add_argument("command", choices=("check", "export", "password"))
     args = parser.parse_args()
     if os.geteuid() != 0:
         parser.error("Нужны полномочия PVE-only root")
     try:
-        if args.command == "check":
-            check_sources()
+        if args.command == "password":
+            password = Path("/etc/infra-manager/backup/restic-password")
+            if (password.is_symlink() or not password.is_file()
+                    or password.stat().st_mode & 0o077
+                    or not 32 <= password.stat().st_size <= 256):
+                raise ExportError("Не подтверждён защищённый ключ restic")
+            with password.open("rb") as secret:
+                sys.stdout.buffer.write(secret.read(256))
+        else:
             expected = json.load(sys.stdin)
             if not isinstance(expected, dict):
                 raise ExportError("Неверное описание носителей")
             check_destinations(expected)
-            print("[ОК] Источники и физические носители подтверждены")
-        else:
-            stream_backup()
+            if args.command == "check":
+                check_sources()
+                print("[ОК] Источники и физические носители подтверждены")
+            else:
+                stream_backup()
         return 0
     except (ExportError, OSError, ValueError, KeyError, sqlite3.Error) as exc:
         # Во время двоичного экспорта stdout зарезервирован исключительно для tar.
