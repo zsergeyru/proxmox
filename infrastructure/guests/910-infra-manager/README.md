@@ -19,14 +19,16 @@ Home Assistant, MQTT, Zigbee2MQTT, ESPHome, Frigate и другие прикла
 
 ## Состав
 
-В 910 работают два основных контейнера:
+В текущем реализованном составе 910 работают два основных контейнера:
 
 | Контейнер | Назначение |
 |---|---|
 | `infra-runtime` | Semaphore и инструменты управления: Ansible, OpenTofu, Packer, Python, Git и OpenSSH |
 | `openbao` | рабочие секреты, SSH client/host CA, AppRole и SSH OTP |
 
-Кроме контейнеров, в 910 есть системные службы для запуска, разблокировки OpenBao и безопасной активации новой версии рабочей среды. Межмашинный SSH в целевой схеме использует OpenBao SSH OTP.
+В целевой схеме к ним добавляется отдельный `infra-web`: защищённая веб-панель заданий, журналов, состояния и обслуживания. До её приёмки действует локальный Homepage 910. Проектируемый состав и переход описаны в [`docs/infra-web.md`](docs/infra-web.md).
+
+Кроме контейнеров, в 910 есть системные службы для запуска, разблокировки OpenBao и безопасной активации новой версии рабочей среды. Дополнительные требования к проверенному откату, резервированию и использованию 990 только при первоначальной установке и критическом восстановлении описаны в [`docs/self-maintenance.md`](docs/self-maintenance.md). Межмашинный SSH в целевой схеме использует OpenBao SSH OTP.
 
 Подробное устройство частей 910 описано в [`docs/README.md`](docs/README.md).
 
@@ -107,4 +109,6 @@ README является паспортом гостя и не заменяет �
 - [`docs/automation-tools.md`](docs/automation-tools.md) — OpenTofu, Ansible, Packer, Git и Python;
 - [`docs/system-services.md`](docs/system-services.md) — системные службы и команды;
 - [`docs/data-and-access.md`](docs/data-and-access.md) — постоянные данные, временные секреты и подключения;
-- [`docs/decisions.md`](docs/decisions.md) — решения, специфичные для 910.
+- [`docs/decisions.md`](docs/decisions.md) — решения, специфичные для 910;
+- [`docs/infra-web.md`](docs/infra-web.md) — новая веб-панель управления;
+- [`docs/self-maintenance.md`](docs/self-maintenance.md) — самообновление, резервирование и восстановление.
