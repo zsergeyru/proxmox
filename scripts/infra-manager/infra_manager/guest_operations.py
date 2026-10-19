@@ -232,16 +232,20 @@ def _run_deploy(
                 cancel_runtime_activation()
             return result
 
-        # Итоговый статус прямого deploy (включая самообновление) печатает
-        # доверенный оператор PVE после завершения задачи. Задание Semaphore
-        # по-прежнему печатает общий итог здесь, но всегда без секретов.
-        if (
-            os.environ.get("INFRA_MANAGER_OPERATOR_FINAL_STATUS") == "1"
-            and (
-                not self_update
-                or os.environ.get("INFRA_MANAGER_OPERATOR_STATUS_VERSION") == "2"
+        # В самообновлении новый runtime ещё не активирован, а списки
+        # Semaphore ещё не синхронизированы: готовность проверит
+        # внешняя служба только после выхода этого процесса.
+        if self_update:
+            console.info(
+                "Настройка управляющего гостя завершена; "
+                "активация и синхронизация Semaphore назначены "
+                "после выхода текущего задания"
             )
-        ):
+            return 0
+
+        # Обычный deploy печатает итоговый статус из доверенного PVE-оператора
+        # либо из Semaphore без раскрытия секретов.
+        if os.environ.get("INFRA_MANAGER_OPERATOR_FINAL_STATUS") == "1":
             return 0
 
         client = PveClient.from_opentofu_env()
