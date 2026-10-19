@@ -13,7 +13,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts/infra-manager"))
-from infra_manager import status
+from infra_manager import status, common, guest_operations
 
 base = (
     ROOT / "infrastructure/guests/910-infra-manager/rootfs"
@@ -55,6 +55,35 @@ def main() -> None:
             assert status._standalone_runtime() is False
             versions.write_text("RUNTIME_MODE=standalone\n", encoding="utf-8")
             assert status._standalone_runtime() is True
+
+    # Новый marker общий для LXC и runtime; SQLite Semaphore не нужен.
+    with patch.dict("os.environ", {"INFRA_RUNTIME_MODE": "standalone"}):
+        with tempfile.TemporaryDirectory() as directory:
+            test_root = Path(directory)
+            with (
+                patch.object(common, "HOST_OPERATIONS_STATE_DIR", test_root / "host"),
+                patch.object(common, "RUNTIME_OPERATIONS_STATE_DIR", test_root / "runtime"),
+            ):
+                assert common._default_runtime_activation_marker() == (
+                    test_root / "runtime/runtime-activation-pending"
+                )
+                (test_root / "host").mkdir()
+                assert common._default_runtime_activation_marker() == (
+                    test_root / "host/runtime-activation-pending"
+                )
+
+    # Sync/repair пользуются существующим исполнителем, а не API Semaphore.
+    with (
+        patch.dict("os.environ", {"INFRA_RUNTIME_MODE": "standalone"}),
+        patch.object(guest_operations, "console") as console,
+        patch.object(guest_operations, "install_openbao_host_support") as install,
+        patch.object(guest_operations, "repair_openbao_on_host") as repair,
+    ):
+        guest_operations._infra_manager_sync(ROOT, object())
+        guest_operations._infra_manager_repair("pve", ROOT, object())
+        install.assert_called_once()
+        repair.assert_called_once_with("pve")
+        assert console.ok.call_count == 2
 
     activate = (ROOT / "scripts/infra-manager/commands/activate-runtime.sh").read_text()
     assert "RUNTIME_MODE=standalone" in activate
