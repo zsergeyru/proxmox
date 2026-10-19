@@ -40,6 +40,7 @@ def test_project_rules() -> None:
 
 def test_unverified_disk_is_never_modified() -> None:
     with (
+        patch.object(module, "readiness_lock", return_value=lambda: None),
         patch.object(module, "reconcile_config", return_value=(
             {"destinations": [], "host": "pve"}, {"devices": [
                 {"id": "backup_ssd", "role": "backup", "serial": None, "by_id": None},
@@ -98,6 +99,7 @@ def test_config_is_idempotent_and_keeps_observed_uuid() -> None:
 
 def test_safe_after_missing_nas() -> None:
     with (
+        patch.object(module, "readiness_lock", return_value=lambda: None),
         patch.object(module, "reconcile_config", return_value=({}, {})),
         patch.object(module, "prepare_ssd"),
         patch.object(module, "prepare_nas", side_effect=RuntimeError("Нет подключения NAS")),
