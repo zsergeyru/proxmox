@@ -196,6 +196,27 @@ def sqlite_snapshot(target: Path) -> None:
     target.chmod(0o600)
 
 
+def check_openbao_credentials(config: dict[str, Any]) -> None:
+    """Не объявлять готовность без удостоверенной TLS-связи и AppRole."""
+
+    if not isinstance(config, dict):
+        raise BackupError("Не описан источник снимка OpenBao")
+    role_path = Path(config["approle_file"])
+    ca_path = Path(config["ca_file"])
+    _regular_file(role_path, secret=True)
+    _regular_file(ca_path)
+    if not str(role_path).startswith(str(ROOT / "pve-only") + "/"):
+        raise BackupError("AppRole OpenBao должен храниться только в PVE-only")
+    role = json.loads(role_path.read_text(encoding="utf-8"))
+    if not isinstance(role, dict) or not all(
+        isinstance(role.get(k), str) and role[k] for k in ("role_id", "secret_id")
+    ):
+        raise BackupError("Нужен отдельный AppRole только для снимка Raft")
+    address = config.get("address")
+    if not isinstance(address, str) or not address.startswith("https://"):
+        raise BackupError("OpenBao обязан использовать проверяемый HTTPS")
+
+
 def openbao_snapshot(target: Path, config: dict[str, Any]) -> None:
     """Получить штатный Raft-снимок с краткоживущим AppRole PVE-only.
 
@@ -299,6 +320,7 @@ def backup(config: dict[str, Any], *, execute: bool = False) -> None:
     password_file = Path(config["password_file"])
     _regular_file(password_file, secret=True)
     targets = check_destinations(config["destinations"])
+    check_openbao_credentials(config["openbao"])
     if shutil.which("restic") is None:
         raise BackupError("На PVE не установлен restic")
     for target in targets:
@@ -332,6 +354,9 @@ def backup(config: dict[str, Any], *, execute: bool = False) -> None:
                 "--exclude", str(SEMAPHORE_DB) + "-wal",
                 "--exclude", str(SEMAPHORE_DB) + "-shm",
                 "--exclude", str(STATE / "semaphore/*.sqlite*"),
+                "--exclude", str(STATE / "opentofu/provider-mirror"),
+                "--exclude", str(STATE / "opentofu/.terraform"),
+                "--exclude", str(STATE / "opentofu/*.tfplan"),
             ]
             for target in targets:
                 restic_command(
