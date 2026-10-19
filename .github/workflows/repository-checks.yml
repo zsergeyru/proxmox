@@ -78,6 +78,9 @@ jobs:
       - name: Compile Python tooling
         run: python -m compileall -q scripts
 
+      - name: Check common physical storage schema
+        run: python scripts/tests/test-storage-catalog.py
+
       - name: Check physical host descriptions
         run: python scripts/tests/test-physical-hosts.py
 
