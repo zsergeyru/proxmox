@@ -331,6 +331,12 @@ def install_backup_host_support(node: str, repo_root: Path) -> None:
         OPERATOR_HOST_COMMAND.with_name("infra_manager_backup.py"),
         "0644",
     )
+    _install_remote_file(
+        node,
+        source / "infra-manager-backup.py",
+        OPERATOR_HOST_COMMAND.with_name("infra-manager-backup"),
+        "0755",
+    )
     for name in ("infra-manager-backup.service", "infra-manager-backup.timer"):
         _install_remote_file(
             node, source / name, Path("/etc/systemd/system") / name, "0644",
