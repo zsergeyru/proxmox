@@ -674,9 +674,18 @@ def test_guest_storage_sent_to_pve() -> None:
         guest = Path(tmp) / "infrastructure/guests/340-photo-archive"
         guest.mkdir(parents=True)
         (guest / "provision.yaml").write_text(
-            "pve_storage: " + json.dumps(storage_config()) + "\n",
+            "pve_storage: " + json.dumps({"mounts": storage_config()["mounts"]}) + "\n",
             encoding="utf-8",
         )
+        root = Path(tmp)
+        schema = ROOT / "infrastructure/schemas/physical-storage.schema.yaml"
+        target_schema = root / "infrastructure/schemas/physical-storage.schema.yaml"
+        target_schema.parent.mkdir(parents=True)
+        target_schema.write_bytes(schema.read_bytes())
+        manifest = ROOT / "infrastructure/hosts/pve/storage.yaml"
+        target_manifest = root / "infrastructure/hosts/pve/storage.yaml"
+        target_manifest.parent.mkdir(parents=True)
+        target_manifest.write_bytes(manifest.read_bytes())
         remote = []
         with (
             patch.object(pve_host, "_install_remote_file") as install,
