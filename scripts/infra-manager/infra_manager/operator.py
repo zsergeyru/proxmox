@@ -236,17 +236,18 @@ def operator_guest_status(
         show_secrets=show_secrets,
         allow_pending_activation=allow_pending_activation,
     )
-    if result == 0:
-        manager = find_guest_by_role(PATHS.repo_root, SETTINGS.infra_manager_role)
-        if vmid == manager.vmid:
-            try:
-                print("\nРезервирование")
-                print(read_backup_host_status(_pve_node()))
-            except (InfraManagerError, OSError):
-                console.warning(
-                    "Резервирование PVE пока не проверено; "
-                    "настройка будет продолжена автоматически"
-                )
+    manager = find_guest_by_role(PATHS.repo_root, SETTINGS.infra_manager_role)
+    if vmid == manager.vmid:
+        # Результат резервирования независим от других проверок 910.
+        # Плохой статус Docker/OpenBao не должен скрывать состояние копий.
+        try:
+            print("\nРезервирование")
+            print(read_backup_host_status(_pve_node()))
+        except (InfraManagerError, OSError):
+            console.warning(
+                "Резервирование PVE не подтверждено: "
+                "доступен только минимальный PVE-only отчёт"
+            )
     return result
 
 
