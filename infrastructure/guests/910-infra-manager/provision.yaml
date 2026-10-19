@@ -98,6 +98,17 @@ docker:
         - /var/lib/infra-manager/bootstrap-repo:/var/lib/infra-manager/bootstrap-repo:ro
         - /run/infra-manager/secrets:/run/infra-manager/secrets:ro
 
+    web:
+      container_name: infra-web
+      image: infra-web:preview1
+      enabled: false
+      profile: preview
+      bind: 127.0.0.1
+      port: 3104
+      state: read-only-preview
+      operations_mount: /mnt/persistent-state/operations
+      requires_authorization_before_publication: true
+
     openbao:
       container_name: openbao
       image: ghcr.io/openbao/openbao:2.7.0
