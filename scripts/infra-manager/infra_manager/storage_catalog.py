@@ -172,7 +172,7 @@ def require_declared_identifiers(storage: PhysicalStorage, *, omv: bool = False)
             raise InfraManagerError(
                 f"{storage.manifest}: отсутствует UUID/GUID тома {name}"
             )
-        if omv and volume["kind"] != "lvm_thin" and volume["omv_reference"] is None:
+        if omv and volume["kind"] != "lvm_thin" and volume.get("omv_reference") is None:
             raise InfraManagerError(
                 f"{storage.manifest}: отсутствует идентификатор OMV тома {name}"
             )
