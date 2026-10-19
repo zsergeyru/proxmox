@@ -23,6 +23,23 @@
     group: root
     mode: "0644"
 
+- name: Проверить постоянное подключение 910 до создания хранилища операций
+  ansible.builtin.command:
+    argv:
+      - findmnt
+      - --mountpoint
+      - /mnt/persistent-state
+      - --noheadings
+  changed_when: false
+
+- name: Создать закрытое постоянное хранилище операций
+  ansible.builtin.file:
+    path: "{{ provision.paths.operations_state }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
 - name: Установить служебный код infra-manager
   ansible.builtin.copy:
     remote_src: true
