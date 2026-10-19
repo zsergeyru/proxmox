@@ -27,6 +27,7 @@ import yaml
 
 DEFAULT_CONFIG = Path("/etc/infra-manager/backup/backup.yaml")
 LAST_SUCCESS = Path("/var/lib/infra-manager/backup/last-success.json")
+RESTORE_APPROVED = Path("/etc/infra-manager/backup/restore-tested")
 RAFT_HELPER = Path("/usr/local/lib/infra-manager/backup/openbao-raft-guest.py")
 STATE = Path("/mnt/bindmounts/infra-manager/state")
 ROOT = Path("/mnt/bindmounts/infra-manager")
@@ -392,6 +393,46 @@ def save_result(config: dict[str, Any], targets: list[Path]) -> None:
         temporary.unlink(missing_ok=True)
 
 
+def retention(config: dict[str, Any], repos: list[Path], password: Path) -> None:
+    """Удалять старые точки только после вручную проверенного восстановления.
+
+    Время хранения задаётся политикой Git. Первая успешная копия и экспорт
+    ключа сами по себе не разрешают необратимое удаление старых точек.
+    """
+
+    if not RESTORE_APPROVED.is_file():
+        return
+    _regular_file(RESTORE_APPROVED, secret=True)
+    params = config.get("retention", {})
+    if not isinstance(params, dict):
+        raise BackupError("Нет политики хранения копий")
+    fast = params.get("fast_ssd", {})
+    nas = params.get("nas_backup", {})
+    if (
+        not isinstance(fast.get("keep_last"), int)
+        or fast["keep_last"] < 2
+        or not isinstance(nas.get("keep_daily"), int)
+        or nas["keep_daily"] < 7
+        or not isinstance(nas.get("keep_weekly"), int)
+        or nas["keep_weekly"] < 4
+    ):
+        raise BackupError("Недостаточный срок хранения по политике")
+    rules = (
+        ["--keep-last", str(fast["keep_last"])],
+        [
+            "--keep-daily", str(nas["keep_daily"]),
+            "--keep-weekly", str(nas["keep_weekly"]),
+        ],
+    )
+    for repo, rule in zip(repos, rules, strict=True):
+        for tag in ("infra-core", "haos"):
+            restic_command(
+                repo, password,
+                ["forget", "--tag", tag, "--group-by", "tags",
+                 *rule, "--prune"],
+            )
+
+
 def backup(config: dict[str, Any], *, execute: bool = False) -> None:
     """Проверить все требования до начала записи в зашифрованные репозитории."""
 
@@ -448,6 +489,7 @@ def backup(config: dict[str, Any], *, execute: bool = False) -> None:
                 restic_command(target, password_file, ["check", "--read-data-subset=1%"])
         backup_vm100(config, targets, password_file)
         save_result(config, targets)
+        retention(config, targets, password_file)
     print("[ОК] Две шифрованные копии PVE, 910 и HAOS VM 100 записаны и проверены")
 
 
