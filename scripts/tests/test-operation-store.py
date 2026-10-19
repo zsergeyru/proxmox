@@ -115,6 +115,23 @@ def check_activation_phases(root: Path) -> None:
     )
 
 
+def check_reboot_does_not_replay(root: Path) -> None:
+    store = OperationStore(root, require_mount=False)
+    record, created = store.reserve("deploy", 109, "abc")
+    assert created
+    store.start(record["id"])
+    store.transition(record["id"], "activating")
+    affected = store.reconcile_interrupted()
+    assert affected == [record["id"]]
+    assert store.get(record["id"])["phase"] == "needs-recovery"
+    assert store.get(record["id"])["result"] is None
+    fails(
+        lambda: store.reserve("deploy", 109, "abc"),
+        "После перезагрузки нельзя удалять отметку проверки и начинать заново",
+    )
+    assert store.reconcile_interrupted() == [record["id"]]
+
+
 def check_failure_and_duplicates(root: Path) -> None:
     store = OperationStore(root, require_mount=False)
     calls = []
@@ -210,6 +227,7 @@ def main() -> None:
         base = Path(temporary)
         check_persistence_and_idempotency(base / "a")
         check_activation_phases(base / "activation")
+        check_reboot_does_not_replay(base / "reboot")
         check_failure_and_duplicates(base / "b")
         check_process_lock(base / "c")
         check_safety(base / "d")
