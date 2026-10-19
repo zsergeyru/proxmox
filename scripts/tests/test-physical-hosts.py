@@ -84,6 +84,16 @@ def check_disk_identity() -> None:
         else:
             raise AssertionError("Повторяющийся серийный номер принят")
 
+        pinned = yaml.safe_load(storage_path.read_text(encoding="utf-8"))
+        pinned["devices"][1]["by_id"] = "/dev/disk/by-id/ata-unchecked"
+        write(host_data, pinned)
+        try:
+            load_physical_host(root, "nas")
+        except InfraManagerError:
+            pass
+        else:
+            raise AssertionError("Непроверенный by-id прошёл к исполнителю NAS")
+
         invalid = yaml.safe_load(storage_path.read_text(encoding="utf-8"))
         invalid["host"] = "pve"
         write(host_data, invalid)
