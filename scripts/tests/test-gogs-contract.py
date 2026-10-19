@@ -144,6 +144,9 @@ def test_gogs_compose_and_manifest() -> None:
     assert gogs["image"].startswith("docker.io/gogs/gogs@sha256:")
     assert len(gogs["image"].split("@sha256:")[1]) == 64
     assert gogs["storage"]["require_import_before_start"] is True
+    access = yaml.safe_load((ROOT / "infrastructure/security/access.yaml").read_text(encoding="utf-8"))
+    targets = next(rule["targets"] for rule in access["rules"] if rule["id"] == "infra-manager-linux-guests")
+    assert "guest:310" in targets
     assert gogs["network"]["ssh_public"] is False
     assert gogs["network"]["public_url"] == "https://git.zsergey.ru/"
 

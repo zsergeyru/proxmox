@@ -68,7 +68,8 @@ rules:
     service: ssh
     resource: guest
     targets:
-      # Действующая OTP-цель infra-manager — только guest:410.
+      # Управляемые OTP-цели Infra Manager.
+      - guest:310
       - guest:410
     access:
       - connect-root

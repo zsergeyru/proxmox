@@ -42,8 +42,9 @@ def read_config(path: Path) -> configparser.ConfigParser:
     regular(path)
     parser = configparser.ConfigParser(interpolation=None, strict=False)
     try:
-        with path.open(encoding="utf-8") as stream:
-            parser.read_file(stream)
+        # В app.ini Gogs допустимы RUN_MODE и RUN_USER до первой секции.
+        # configparser без служебного заголовка такой INI отвергает.
+        parser.read_string("[__global__]\n" + path.read_text(encoding="utf-8"))
     except (UnicodeError, configparser.Error, OSError) as exc:
         raise DataError("Не удалось прочитать постоянный app.ini") from exc
     if parser.get("database", "TYPE", fallback="").lower().strip() != "sqlite3":
