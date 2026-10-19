@@ -12,6 +12,7 @@ import fcntl
 import io
 import json
 import os
+import secrets
 import sqlite3
 import stat
 import subprocess
@@ -210,31 +211,92 @@ def stream_backup() -> None:
                 raise ExportError("Не удалось собрать согласованный архив PVE")
 
 
+def repositories_state() -> dict[str, str]:
+    """Проверить существующие хранилища, не трогая их содержимое."""
+    result = {}
+    for name, (mount, _fs) in ALLOWED_MOUNTS.items():
+        repo = mount / ("infra-core" if name == "fast-ssd" else "pve-infra-core")
+        if repo.is_symlink():
+            raise ExportError("Символьная ссылка вместо хранилища")
+        if not repo.exists():
+            result[name] = "missing"
+        elif repo.is_dir() and not any(repo.iterdir()):
+            result[name] = "missing"
+        elif repo.is_dir() and (repo / "config").is_file():
+            result[name] = "existing"
+        else:
+            raise ExportError("В целевом каталоге есть неизвестные данные")
+    return result
+
+
+def password_bytes() -> bytes:
+    """Выдать или создать один корневой ключ только после подтверждения носителей."""
+    directory = Path("/etc/infra-manager/backup")
+    if directory.is_symlink() or (directory.exists() and not directory.is_dir()):
+        raise ExportError("Небезопасный каталог ключа резервирования")
+    directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+    directory.chmod(0o700)
+    password = directory / "restic-password"
+    if not password.exists() and not password.is_symlink():
+        try:
+            descriptor = os.open(
+                password, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600
+            )
+        except FileExistsError:
+            pass
+        else:
+            with os.fdopen(descriptor, "wb") as output:
+                output.write((secrets.token_urlsafe(48) + "\\n").encode())
+                output.flush()
+                os.fsync(output.fileno())
+    if (password.is_symlink() or not password.is_file()
+            or password.stat().st_mode & 0o077
+            or not 32 <= password.stat().st_size <= 256):
+        raise ExportError("Не подтверждён защищённый ключ restic")
+    return password.read_bytes()
+
+
+def stream_vm100() -> None:
+    """Без промежуточного файла PVE передать штатный снимок VM 100."""
+    check = subprocess.run(
+        ["qm", "status", "100"], capture_output=True,
+        text=True, check=False, timeout=30,
+    )
+    if check.returncode:
+        raise ExportError("Гость VM 100 недоступен")
+    backup = subprocess.run(
+        ["vzdump", "100", "--mode", "snapshot", "--compress", "zstd",
+         "--stdout", "1"],
+        stdout=sys.stdout.buffer,
+        stderr=subprocess.DEVNULL,
+        check=False, timeout=7200,
+    )
+    if backup.returncode:
+        raise ExportError("Потоковый снимок VM 100 не завершился")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("command", choices=("check", "export", "password"))
+    parser.add_argument("command", choices=("check", "export", "password", "repositories", "vm100"))
     args = parser.parse_args()
     if os.geteuid() != 0:
         parser.error("Нужны полномочия PVE-only root")
     try:
+        expected = json.load(sys.stdin)
+        if not isinstance(expected, dict):
+            raise ExportError("Неверное описание носителей")
+        check_destinations(expected)
+        check_sources()
         if args.command == "password":
-            password = Path("/etc/infra-manager/backup/restic-password")
-            if (password.is_symlink() or not password.is_file()
-                    or password.stat().st_mode & 0o077
-                    or not 32 <= password.stat().st_size <= 256):
-                raise ExportError("Не подтверждён защищённый ключ restic")
-            with password.open("rb") as secret:
-                sys.stdout.buffer.write(secret.read(256))
+            sys.stdout.buffer.write(password_bytes())
+        elif args.command == "check":
+            print("[ОК] Источники и физические носители подтверждены")
+        elif args.command == "repositories":
+            print(json.dumps(repositories_state()))
+        elif args.command == "vm100":
+            stream_vm100()
         else:
-            expected = json.load(sys.stdin)
-            if not isinstance(expected, dict):
-                raise ExportError("Неверное описание носителей")
-            check_destinations(expected)
-            if args.command == "check":
-                check_sources()
-                print("[ОК] Источники и физические носители подтверждены")
-            else:
-                stream_backup()
+            stream_backup()
         return 0
     except (ExportError, OSError, ValueError, KeyError, sqlite3.Error) as exc:
         # Во время двоичного экспорта stdout зарезервирован исключительно для tar.
