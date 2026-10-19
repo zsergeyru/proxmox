@@ -222,7 +222,7 @@ def repositories_state() -> dict[str, str]:
             result[name] = "missing"
         elif repo.is_dir() and not any(repo.iterdir()):
             result[name] = "missing"
-        elif repo.is_dir() and (repo / "config").is_file():
+        elif repo.is_dir() and not (repo / "config").is_symlink() and (repo / "config").is_file():
             result[name] = "existing"
         else:
             raise ExportError("В целевом каталоге есть неизвестные данные")
