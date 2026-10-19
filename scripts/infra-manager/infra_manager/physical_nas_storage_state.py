@@ -14,15 +14,13 @@ from pathlib import Path
 
 from .common import InfraManagerError
 from .physical_hosts import PhysicalHost
+from .physical_host_state import checked_record_path
 from .settings import PATHS
-
-_STATE_ROOT = PATHS.data_dir / "locks" / "physical-hosts"
-
 
 def storage_state_path(host: PhysicalHost) -> Path:
     """Хранить идентификаторы отдельно от одноразовой отметки SSH."""
 
-    return _STATE_ROOT / f"{host.name}-storage.json"
+    return checked_record_path(host.name, storage=True, data_root=PATHS.data_dir)
 
 
 def apply_saved_storage(host: PhysicalHost) -> PhysicalHost:

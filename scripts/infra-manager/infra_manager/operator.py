@@ -28,6 +28,7 @@ from .guest_catalog import find_guest_by_role, guest_identity
 from .guest_deploy import project_branch_for_checkout, project_revision
 from .guest_operations import list_local_guests, run_local_guest_status
 from .operation_lock import project_checkout_lock
+from .physical_host_state import checked_record_path
 from .pve import PveClient
 from .pve_host import (
     preflight_recovery_contour,
@@ -351,7 +352,7 @@ def operator_physical_bootstrap_state(name: str) -> int:
         raise InfraManagerError(
             "Укажите проверенные адрес и SSH-отпечаток NAS в host.yaml до первого входа"
         )
-    path = PATHS.data_dir / "locks" / "physical-hosts" / f"{name}.json"
+    path = checked_record_path(name, data_root=PATHS.data_dir)
     if not path.exists():
         return 20
     try:
