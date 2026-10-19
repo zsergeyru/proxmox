@@ -13,12 +13,13 @@
 | Файл | Для чего открывать |
 |---|---|
 | [`openbao.md`](openbao.md) | полностью развернуть OpenBao: Raft, TLS, KV, два SSH CA, AppRole, SSH OTP, запуск, проверка и восстановление |
-| [`semaphore.md`](semaphore.md) | развернуть Semaphore: база, первый запуск, admin, проект, репозиторий, переменные, задания, API и восстановление |
+| [`semaphore.md`](semaphore.md) | описание существующего Semaphore для переходного обслуживания; **в целевой архитектуре он удаляется** |
 | [`infra-runtime.md`](infra-runtime.md) | собрать и запустить контейнер `infra-runtime`, понять его содержимое, подключения и безопасное самообновление |
 | [`automation-tools.md`](automation-tools.md) | понять и проверить OpenTofu, Ansible, Packer, Git и Python внутри рабочей среды |
 | [`portal.md`](portal.md) | существующий локальный Homepage 910; сохраняется до испытанного перехода на infra-web |
 | [`infra-web.md`](infra-web.md) | новая отдельная веб-панель: функции, защита, задания, журналы, этапы создания и проверки |
 | [`self-maintenance.md`](self-maintenance.md) | самостоятельное обновление 910, systemd-активация, откат, резервирование и восстановление через 990 |
+| [`activation-contract.md`](activation-contract.md) | подтверждение результатов по идентификатору, блокировки и проверки без Semaphore |
 | [`system-services.md`](system-services.md) | установить и проверить systemd-службы и служебные команды 910 |
 | [`data-and-access.md`](data-and-access.md) | создать и проверить каталоги состояния, подключения PVE, временные секреты и права файлов |
 | [`decisions.md`](decisions.md) | понять причины решений, относящихся именно к реализации 910 |
@@ -30,12 +31,12 @@
 1. [`data-and-access.md`](data-and-access.md) — убедиться, что PVE подключил `access/` и `state/`, а нужные каталоги существуют.
 2. [`infra-runtime.md`](infra-runtime.md) — установить Docker-файлы из `rootfs`, записать версии, собрать `infra-runtime` и запустить контейнеры.
 3. [`openbao.md`](openbao.md) — проверить OpenBao, выполнить первичную инициализацию либо разблокировать существующий Raft.
-4. [`semaphore.md`](semaphore.md) — подготовить серверные переменные Semaphore, запустить его и синхронизировать проект.
+4. **При обслуживании нынешней версии** использовать [`semaphore.md`](semaphore.md) для настройки действующего Semaphore. **При развёртывании целевой версии** он не устанавливается: задачи, история и проверка готовности определяются [`infra-web.md`](infra-web.md) и [`activation-contract.md`](activation-contract.md).
 5. [`system-services.md`](system-services.md) — установить целевые systemd-службы и служебные команды 910.
 6. [`automation-tools.md`](automation-tools.md) — проверить OpenTofu, Ansible, Packer, Git и Python.
 7. [`portal.md`](portal.md) — проверить существующий Homepage; при реализации новой схемы следовать [`infra-web.md`](infra-web.md) и заменить портал 910 только после приёмки.
 8. С физического PVE выполнить `infra-manager status` и устранить все ошибки до передачи 910 в эксплуатацию.
-9. Для развития самообновления, резервирования и независимого аварийного восстановления использовать [`self-maintenance.md`](self-maintenance.md); проектируемые функции не считать уже реализованными.
+9. Для развития самообновления, резервирования и независимого аварийного восстановления использовать [`self-maintenance.md`](self-maintenance.md) и [`activation-contract.md`](activation-contract.md); проектируемые функции не считать уже реализованными.
 
 Штатно роль Ansible `infra_manager` приводит службы и инструменты 910 к требуемому состоянию. При первоначальном развёртывании и восстановлении внешняя оркестрация затем инициализирует OpenBao и только после этого выполняет внутреннюю полную проверку; операторский итог подтверждается командой `infra-manager status` на PVE. При обычном самообновлении 910 итоговую проверку выполняет отложенная активация новой среды. Документация нужна для понимания этих шагов, проверки результата и ручного восстановления при неисправности.
 
@@ -46,7 +47,7 @@
 | Источник | Что в нём находится |
 |---|---|
 | [`../guest.yaml`](../guest.yaml) | параметры LXC 910 в Proxmox |
-| [`../provision.yaml`](../provision.yaml) | версии, пакеты, пути, контейнеры, постоянные данные и перечень объектов Semaphore |
+| [`../provision.yaml`](../provision.yaml) | действующие версии, пакеты, пути, контейнеры, постоянные данные и пока ещё объекты Semaphore; после перехода — только компоненты целевой архитектуры |
 | [`../status.yaml`](../status.yaml) | проверки итогового состояния 910 |
 | [`../rootfs/`](../rootfs/) | воспроизводимые файлы, которые должны оказаться по соответствующим путям внутри 910 |
 | [`../../../../automation/ansible/roles/infra_manager/`](../../../../automation/ansible/roles/infra_manager/) | фактический порядок настройки 910 |
@@ -61,7 +62,7 @@
 После полной реализации машинные файлы и локальные спецификации должны описывать одно и то же требуемое состояние. Точное исполняемое значение берётся из машинного файла. Основные примеры:
 
 - версия OpenBao — `provision.yaml:docker.services.openbao.image`;
-- версии Semaphore, OpenTofu и Packer — `provision.yaml:docker.services.runtime`;
+- действующие версии Semaphore, OpenTofu и Packer — `provision.yaml:docker.services.runtime`; в целевой версии Semaphore исключается;
 - состав контейнеров и подключения — `rootfs/opt/infra-manager/compose/docker-compose.yml`;
 - конфигурация OpenBao — `rootfs/opt/infra-manager/compose/openbao/openbao.hcl`;
 - systemd-службы — `rootfs/etc/systemd/system/`;
