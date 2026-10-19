@@ -190,3 +190,79 @@ def require_declared_identifiers(storage: PhysicalStorage, *, omv: bool = False)
             raise InfraManagerError(
                 f"{storage.manifest}: отсутствует идентификатор OMV тома {name}"
             )
+
+
+def render_pve_guest_storage(
+    storage: PhysicalStorage, config: Any,
+) -> dict[str, Any]:
+    """Собрать описание для проверенного исполнителя PVE из общего каталога.
+
+    Гость задаёт только подкаталоги и подключения; размеры томов и
+    принадлежность к LVM берутся исключительно из storage.yaml хоста.
+    Программа на PVE продолжает независимо проверять LVM, ext4 и mount.
+    """
+
+    if storage.host != "pve":
+        raise InfraManagerError("Для гостя требуется хранилище именно PVE")
+    if not isinstance(config, dict) or set(config) != {"mounts"}:
+        raise InfraManagerError(
+            "Гость должен задавать только pve_storage.mounts; "
+            "физические тома объявляются в hosts/pve/storage.yaml"
+        )
+    mounts = config["mounts"]
+    if not isinstance(mounts, list) or not mounts:
+        raise InfraManagerError("Нет подключений постоянного хранилища гостя")
+
+    volume_by_id = {volume["id"]: volume for volume in storage.volumes}
+    path_by_id = {mount["volume"]: mount["path"] for mount in storage.mounts}
+    selected: list[dict[str, Any]] = []
+    used: set[str] = set()
+    groups: set[tuple[str, str]] = set()
+
+    for mount in mounts:
+        if not isinstance(mount, dict):
+            raise InfraManagerError("Некорректная запись подключения гостя")
+        name = mount.get("volume")
+        if not isinstance(name, str) or name not in volume_by_id:
+            raise InfraManagerError(
+                f"Гость ссылается на неизвестный физический том: {name!r}"
+            )
+        if name in used:
+            continue
+        used.add(name)
+        volume = volume_by_id[name]
+        if volume["kind"] != "lvm_thin":
+            raise InfraManagerError(f"Том {name} не является LVM-thin")
+        if volume["filesystem"] != "ext4":
+            raise InfraManagerError(f"Том {name}: поддерживается только ext4")
+        # UUID существующего LV проверяется живым PVE. Нельзя молча
+        # игнорировать якобы закреплённый UUID, не сверяя его с носителем.
+        if volume["filesystem_uuid"] is not None:
+            raise InfraManagerError(
+                f"Том {name}: закреплённый UUID требует проверки исполнителем PVE"
+            )
+        point = path_by_id[name]
+        if (
+            not isinstance(point, str)
+            or not point.startswith("/mnt/bindmounts/")
+        ):
+            raise InfraManagerError(
+                f"Том {name}: недопустимая точка подключения на PVE"
+            )
+        groups.add((volume["volume_group"], volume["thin_pool"]))
+        selected.append({
+            "name": name,
+            "size_gb": volume["size_gb"],
+            "mountpoint": point,
+        })
+
+    if groups != {("pve", "data")}:
+        raise InfraManagerError(
+            "Автоматическая подготовка разрешена только в pve/data"
+        )
+    return {
+        "volume_group": "pve",
+        "thin_pool": "data",
+        "volumes": selected,
+        "mounts": mounts,
+    }
