@@ -316,6 +316,9 @@ def _default_runtime_activation_marker() -> Path:
 
 
 RUNTIME_ACTIVATION_MARKER = _default_runtime_activation_marker()
+RUNTIME_ACTIVATION_RESULT = RUNTIME_ACTIVATION_MARKER.with_name(
+    ".infra-manager-runtime-activation-result"
+)
 
 
 def require_runtime_activation_idle() -> None:
@@ -330,6 +333,8 @@ def require_runtime_activation_idle() -> None:
 def reserve_runtime_activation() -> None:
     """Зарезервировать окно активации и записать PID текущего задания."""
     RUNTIME_ACTIVATION_MARKER.parent.mkdir(parents=True, exist_ok=True)
+    # Прошлый результат не должен признаваться результатом нового развёртывания.
+    RUNTIME_ACTIVATION_RESULT.unlink(missing_ok=True)
     try:
         descriptor = os.open(
             RUNTIME_ACTIVATION_MARKER,

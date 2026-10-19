@@ -818,9 +818,9 @@ def validate_semaphore_snapshot(
                 details.append("есть гости, отсутствующие в проекте: " + ", ".join(obsolete))
             suffix = "; " + "; ".join(details) if details else ""
             manager = find_guest_by_role(PATHS.repo_root, SETTINGS.infra_manager_role)
-            console.warning(
+            raise InfraManagerError(
                 f"В задании Semaphore '{spec.name}' устарел список гостей{suffix}. "
-                f"Обновите списки командой: infra-manager sync {manager.vmid}"
+                f"Необходимо синхронизировать Semaphore: infra-manager sync {manager.vmid}"
             )
 
 

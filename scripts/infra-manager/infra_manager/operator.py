@@ -20,6 +20,8 @@ from urllib.parse import urlparse
 
 from .common import (
     InfraManagerError,
+    RUNTIME_ACTIVATION_MARKER,
+    RUNTIME_ACTIVATION_RESULT,
     console,
     require_runtime_activation_idle,
     run,
@@ -237,6 +239,48 @@ def operator_guest_status(
     )
 
 
+def _await_runtime_activation(timeout_seconds: int = 1080) -> None:
+    """Дождаться отложенного запуска и подтверждённой синхронизации Semaphore.
+
+    Исполняется на 910 после выхода задания из старого infra-runtime.
+    Не перезапускает контейнер самостоятельно и не читает закрытый журнал.
+    """
+
+    marker = RUNTIME_ACTIVATION_MARKER
+    if not marker.is_file():
+        raise InfraManagerError(
+            "Не обнаружена ожидаемая активация 910; проверьте "
+            "/var/log/infra-manager/runtime-activation.log"
+        )
+    deploy_ref = marker.read_text(encoding="utf-8").strip()
+    if not re.fullmatch(r"(?:runtime|host):[0-9]+", deploy_ref):
+        raise InfraManagerError("Некорректная отметка отложенной активации 910")
+    deadline = time.monotonic() + timeout_seconds
+    console.info("Ожидание активации infra-runtime и синхронизации Semaphore")
+    while marker.exists():
+        if time.monotonic() >= deadline:
+            raise InfraManagerError(
+                "Активация 910 не завершилась; проверьте "
+                "/var/log/infra-manager/runtime-activation.log"
+            )
+        time.sleep(1)
+
+    expected = f"ok {deploy_ref}"
+    try:
+        outcome = RUNTIME_ACTIVATION_RESULT.read_text(encoding="utf-8").strip()
+    except OSError as exc:
+        raise InfraManagerError(
+            "Нет подтверждения отложенной активации 910; проверьте "
+            "/var/log/infra-manager/runtime-activation.log"
+        ) from exc
+    if outcome != expected:
+        raise InfraManagerError(
+            "Отложенная активация или синхронизация Semaphore завершилась ошибкой; "
+            "проверьте /var/log/infra-manager/runtime-activation.log"
+        )
+    console.ok("Новая управляющая среда активирована; Semaphore синхронизирован")
+
+
 def operator_guest_task(
     operation: str,
     vmid: int,
@@ -310,20 +354,11 @@ def _operator_guest_task(
     if operation == "deploy":
         identity = guest_identity(PATHS.repo_root, vmid)
         if identity.role == SETTINGS.infra_manager_role:
-            # Самообновление уже завершило Ansible и сняло блокировку задания.
-            # Ожидающая активация не должна подавлять ЕДИНЫЙ итоговый статус
-            # доверенного оператора PVE; остальные вызовы статусa блокируются.
-            result = operator_guest_status(
-                vmid,
-                show_secrets=show_secrets,
-                allow_pending_activation=True,
-            )
-            if result == 0:
-                console.info(
-                    "Отложенная активация infra-runtime продолжится "
-                    "после завершения команды"
-                )
-            return result
+            # После выхода задания из старого Docker новая служба
+            # активируется, синхронизирует Semaphore и записывает результат.
+            # До этого момента запрещено печатать «полностью готов».
+            _await_runtime_activation()
+            return operator_guest_status(vmid, show_secrets=show_secrets)
 
     return operator_guest_status(
         vmid,

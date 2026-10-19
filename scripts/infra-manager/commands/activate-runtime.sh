@@ -11,6 +11,8 @@ COMPOSE_DIR="/opt/infra-manager/compose"
 LOG_DIR="/var/log/infra-manager"
 LOG_FILE="$LOG_DIR/runtime-activation.log"
 ACTIVATION_MARKER="/mnt/persistent-state/semaphore/.infra-manager-runtime-activation-pending"
+ACTIVATION_RESULT="/mnt/persistent-state/semaphore/.infra-manager-runtime-activation-result"
+deploy_ref=""
 BRANCH="${INFRA_PROJECT_BRANCH:-main}"
 PVE_NODE="${INFRA_PVE_NODE:-}"
 
@@ -43,6 +45,22 @@ finish_activation() {
         printf '[ВРЕМЯ] Отложенная активация infra-runtime: %s\n' "$duration"
     else
         printf '[ПРЕРВАНО] Отложенная активация infra-runtime: %s (код %s)\n' "$duration" "$result"
+    fi
+
+    # Сначала атомарно фиксируем результат; лишь затем снимаем запрет
+    # новых операций. Так внешний оператор не примет незавершённое
+    # обновление за успешное.
+    local state="failed"
+    if ((result == 0)); then
+        state="ok"
+    fi
+    local temp_result="${ACTIVATION_RESULT}.tmp.$"
+    if printf '%s %s\n' "$state" "$deploy_ref" > "$temp_result"; then
+        chmod 0600 "$temp_result"
+        mv -f "$temp_result" "$ACTIVATION_RESULT"
+    else
+        printf 'ОШИБКА: Не удалось записать результат активации\n' >&2
+        rm -f "$temp_result"
     fi
     rm -f "$ACTIVATION_MARKER"
 }
