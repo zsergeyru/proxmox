@@ -7,9 +7,8 @@ job: infra-core
 schedule: "03:30"
 password_file: /etc/infra-manager/backup/restic-password
 openbao:
-  address: "https://192.168.9.10:8202"
-  ca_file: /mnt/bindmounts/infra-manager/pve-only/openbao-tls/ca.crt
   approle_file: /mnt/bindmounts/infra-manager/pve-only/openbao/backup-access.json
+  identity_file: /etc/infra-manager/openbao-host.json
 destinations:
   - id: fast-ssd
     mountpoint: /mnt/pve/backup-fast
@@ -19,10 +18,17 @@ destinations:
     repository: infra-core
   - id: nas-backup
     mountpoint: /mnt/pve/nas-backup
-    filesystem: zfs
+    filesystem: nfs4
     uuid: null
+    # Сервер и путь NFS необходимо подтвердить на NAS отдельно.
     source: null
     repository: pve-infra-core
+guests:
+  # Резервная копия самой VM 100 отдельно от состояния 910.
+  - vmid: 100
+    schedule: daily
+    mode: snapshot
+    compression: zstd
 retention:
   fast_ssd:
     keep_last: 2
