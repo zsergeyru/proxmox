@@ -10,6 +10,7 @@ from pathlib import Path
 from .common import CommandError, InfraManagerError, console, log_level, require_command, run
 from .guest_catalog import find_guest_by_role, guest_management_address, load_manifest
 from .settings import PATHS, SETTINGS
+from .storage_catalog import load_physical_storage, render_pve_guest_storage
 
 
 def _required_file(path: Path, label: str) -> None:
@@ -710,7 +711,7 @@ def ensure_guest_storage(
     kind: str,
     guest_dir: Path,
 ) -> None:
-    """Создать постоянные тома только для гостей с описанием pve_storage.
+    """Подготовить постоянные тома по общему storage.yaml физического PVE.
 
     Сценарий выполняется root на PVE через существующий SSH-контур.
     Приложение гостя не получает доступа к управлению дисками.
@@ -723,6 +724,13 @@ def ensure_guest_storage(
         raise InfraManagerError(
             f"Гость {vmid}: pve_storage поддерживается только для LXC"
         )
+    repository = guest_dir.parents[2]
+    # Единый источник размеров и путей — файл физического PVE. Для 910
+    # эта ветка не вызывается: его постоянные pve-only/access/state
+    # первично готовит 990, независимо от 910 и NAS.
+    resolved = render_pve_guest_storage(
+        load_physical_storage(repository, "pve"), config,
+    )
     source = (
         guest_dir.parents[2]
         / "scripts" / "infra-manager" / "host" / "guest-storage.py"
@@ -736,7 +744,7 @@ def ensure_guest_storage(
             node,
             str(GUEST_STORAGE_HOST_COMMAND),
             str(vmid),
-            input_text=json.dumps(config, ensure_ascii=False),
+            input_text=json.dumps(resolved, ensure_ascii=False),
         )
     except CommandError as exc:
         # У PVE-only сценария нет секретов в выводе; передаём точную причину.
