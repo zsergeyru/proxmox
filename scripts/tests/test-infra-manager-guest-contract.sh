@@ -427,11 +427,14 @@ for package, constraint in runtime.get("python_packages", {}).items():
 
 compose = yaml.safe_load(compose_path.read_text(encoding="utf-8"))
 compose_services = compose.get("services", {})
-if set(compose_services) != {"runtime", "openbao"}:
+if set(compose_services) != {"runtime", "openbao", "web"}:
     raise SystemExit(
-        "docker-compose.yml: ожидаются services runtime и openbao: "
+        "docker-compose.yml: ожидаются runtime, openbao и web-preview: "
         f"{sorted(compose_services)}"
     )
+preview = compose_services["web"]
+if preview.get("profiles") != ["preview"] or preview.get("read_only") is not True:
+    raise SystemExit("Нельзя автоматически включать незащищённую веб-панель")
 if compose_services["runtime"].get("build", {}).get("args", {}).get("PACKER_IMAGE") != "${PACKER_IMAGE}":
     raise SystemExit("Compose должен передавать закреплённый образ Packer из provision.yaml")
 if compose_services["runtime"].get("container_name") != runtime.get("container_name"):
