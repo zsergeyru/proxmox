@@ -62,6 +62,14 @@ def load_physical_host(repo_root: Path, name: str) -> PhysicalHost:
     storage = load_physical_storage(repo_root, name)
     roles = [entry["role"] for entry in storage.devices]
     if name == "nas":
+        # Исполнитель сейчас независимо выбирает /dev/disk/by-id по серийному
+        # номеру с NAS. Заданное в Git значение by_id пока не проверяется
+        # им на оборудовании; запрещаем делать вид, что оно проверено.
+        if any(entry["by_id"] is not None for entry in storage.devices):
+            raise InfraManagerError(
+                f"{storage.manifest}: закрепление by_id будет поддержано "
+                "только после проверки его исполнителем NAS; пока укажите null"
+            )
         for role in ("shared", "data", "backup"):
             if roles.count(role) != 1:
                 raise InfraManagerError(
