@@ -204,12 +204,15 @@ def execute(*, run: bool = False) -> None:
     with tempfile.TemporaryDirectory(prefix="infra-backup-", dir="/run") as path:
         directory = Path(path)
         directory.chmod(0o700)
-        key = _credentials(node, directory, verified, create=run)
         state = json.loads(_remote(
             node, "repositories", json.dumps(verified).encode()
         ).stdout)
         if not isinstance(state, dict) or set(state) != set(DESTINATIONS):
             raise InfraManagerError("PVE не подтвердил состояние двух restic-хранилищ")
+        # Не создавать новый пароль, когда хотя бы один архив уже существует:
+        # такое действие сделало бы прежние архивы недоступными.
+        create_password = run and all(value == "missing" for value in state.values())
+        key = _credentials(node, directory, verified, create=create_password)
         # Сначала сверить все уже созданные копии и только потом
         # разрешить инициализацию действительно пустых каталогов.
         for destination in DESTINATIONS:
