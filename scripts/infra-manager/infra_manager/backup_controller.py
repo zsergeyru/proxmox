@@ -7,6 +7,7 @@ restic и запись через SFTP выполняются исключите
 from __future__ import annotations
 
 import argparse
+from datetime import UTC, datetime
 import json
 import os
 import shlex
@@ -20,6 +21,7 @@ import yaml
 
 from .common import InfraManagerError
 from .pve_host import _ssh_command
+from .operation_store import OperationStore, _atomic_json
 from .settings import PATHS
 
 POLICY = PATHS.repo_root / "infrastructure/hosts/pve/backup.yaml"
@@ -187,9 +189,22 @@ def execute(*, run: bool = False) -> None:
         for destination in DESTINATIONS:
             _stream_snapshot(node, verified, key, destination)
             _restic(node, destination, key, ["check", "--read-data-subset=1%"])
-        # VM 100 пока не создаётся здесь: не выдавать ложный статус полной копии.
-        print("[ОК] Защищённые копии состояния 910/PVE проверены; "
-              "VM 100 и испытание восстановления требуют отдельной приёмки")
+        # Учитывать лишь защищённое ядро. Не создавать фиктивный полный отчёт:
+        # VM 100 и испытание восстановления остаются отдельными заданиями.
+        store = OperationStore()
+        _atomic_json(
+            store.settings / "backup-last-core.json",
+            {
+                "schema_version": 1,
+                "created_utc": datetime.now(UTC).isoformat(),
+                "destinations": list(DESTINATIONS),
+                "verified": "restic-check-read-data-subset-1-percent",
+                "includes_vm100": False,
+                "restore_tested": False,
+            },
+        )
+        print("[ОК] Защищённые копии состояния управляющего контура записаны; "
+              "VM 100 и испытание восстановления ожидают отдельной приёмки")
 
 
 def main(argv: list[str] | None = None) -> int:
