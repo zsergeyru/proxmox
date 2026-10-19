@@ -550,12 +550,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="VMID гостя или имя физического сервера",
     )
 
-    operation_parser = subparsers.add_parser(
-        "operations",
-        help="постоянные задания 910: run, show, list",
-    )
-    operation_parser.add_argument("arguments", nargs=argparse.REMAINDER)
-
     subparsers.add_parser(
         "recover",
         help="аварийное восстановление выполняется оболочкой на PVE",
@@ -574,10 +568,6 @@ def main(argv: list[str] | None = None) -> int:
         _require_root()
         show_secrets = bool(args.trusted_pve)
 
-        if args.command == "operations":
-            from .operation_runner import main as operation_main
-
-            return operation_main(args.arguments)
         if args.command == "guests":
             return list_local_guests(PATHS.repo_root)
         if args.command == "hosts":
