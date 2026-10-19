@@ -9,6 +9,15 @@ devices:
     capacity_gb: 512
     serial: null
     by_id: null
+  # Физический SSD для быстрых копий. Модель, номер и содержимое
+  # ещё не проверены. Том и подключение намеренно НЕ объявлены:
+  # первоначальная подготовка/форматирование отсюда запрещены.
+  - id: backup_ssd
+    role: backup
+    model: unconfirmed
+    capacity_gb: 240
+    serial: null
+    by_id: null
 volumes:
   - id: infra_state
     kind: lvm_thin
