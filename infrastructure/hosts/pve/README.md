@@ -55,7 +55,7 @@ VM `320` соответствует временному каталогу [`../.
 - [`network.md`](network.md) — фактическая сеть хоста и сетевой мост;
 - [`storage.md`](storage.md) — хранилища, LVM и точки монтирования;
 - [`backup.md`](backup.md) — текущее хранилище резервных копий и открытые вопросы;
-- общая целевая архитектура сети находится в [`../../../docs/400-network.md410-network-layout.md`](../../../docs/400-network.md410-network-layout.md).
+- общая целевая архитектура сети находится в [`../../../docs/400-network/410-network-layout.md`](../../../docs/400-network.md410-network-layout.md).
 
 ## Принцип
 
