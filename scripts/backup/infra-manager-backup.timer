@@ -1,0 +1,12 @@
+[Unit]
+Description=Scheduled encrypted PVE and infra-manager backups
+
+[Timer]
+OnCalendar=*-*-* 03,09,15,21:30:00
+RandomizedDelaySec=20m
+AccuracySec=5m
+Persistent=true
+Unit=infra-manager-backup.service
+
+[Install]
+WantedBy=timers.target
