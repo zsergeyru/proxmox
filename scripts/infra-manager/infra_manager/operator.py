@@ -238,7 +238,7 @@ def operator_guest_status(
     )
     manager = find_guest_by_role(PATHS.repo_root, SETTINGS.infra_manager_role)
     if vmid == manager.vmid:
-        # Результат резервирования независим от других проверок 910.
+        # Результат резервирования независим от других проверок управляющего гостя.
         # Плохой статус Docker/OpenBao не должен скрывать состояние копий.
         try:
             print("\nРезервирование")
