@@ -1,6 +1,6 @@
 """Постоянный учёт инфраструктурных операций вне Docker и Semaphore.
 
-Запись выполняется только в подтверждённый каталог состояния LXC 910.
+Запись выполняется только в подтверждённый каталог состояния управляющего LXC.
 Незавершённые задания не возобновляются автоматически после отказа.
 """
 
@@ -42,7 +42,7 @@ def _mounted(path: Path) -> bool:
                 if len(fields) > 4 and fields[4] == target:
                     return True
     except OSError as exc:
-        raise InfraManagerError("Невозможно проверить постоянное подключение 910") from exc
+        raise InfraManagerError("Невозможно проверить постоянное подключение управляющего гостя") from exc
     return False
 
 
@@ -163,7 +163,7 @@ class OperationStore:
                 "запись в rootfs запрещена"
             )
         if not self.root.parent.is_dir() or self.root.parent.is_symlink():
-            raise InfraManagerError("Отсутствует постоянный каталог состояния 910")
+            raise InfraManagerError("Отсутствует постоянный каталог состояния управляющего гостя")
         for path in (self.root, self.active, self.history, self.logs, self.settings):
             _directory(path)
 
