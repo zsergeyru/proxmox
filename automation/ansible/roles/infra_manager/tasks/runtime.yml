@@ -60,6 +60,15 @@
     group: root
     mode: "0700"
 
+- name: Опубликовать проверенный Git known_hosts вне данных Semaphore
+  ansible.builtin.copy:
+    remote_src: true
+    src: "{{ provision.access_materialization.github.known_hosts }}"
+    dest: "{{ provision.paths.configuration }}/github_known_hosts"
+    owner: root
+    group: root
+    mode: "0644"
+
 - name: Установить служебный код infra-manager
   ansible.builtin.copy:
     remote_src: true
