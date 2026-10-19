@@ -137,6 +137,7 @@ def test_invalid_definitions(repo: Path) -> None:
     invalid(lambda d: d.update({"password": "secret"}))
     invalid(lambda d: d["policies"].update({"existing_data": "erase"}))
     invalid(lambda d: d["devices"][1].update({"by_id": "/dev/sda"}))
+    invalid(lambda d: d["devices"][1].update({"by_id": "/dev/disk/by-id/.."}))
     invalid(lambda d: d["devices"][1].update({"serial": "SSD1"}))
     invalid(lambda d: d["devices"][1].update({"by_id": d["devices"][2]["by_id"]}))
     invalid(lambda d: d["devices"][1].update({"id": "data"}))
@@ -145,6 +146,10 @@ def test_invalid_definitions(repo: Path) -> None:
     invalid(lambda d: d["volumes"][0].update({"device": "system"}))
     invalid(lambda d: d["volumes"][0].update({"filesystem_uuid": "not-uuid"}))
     invalid(lambda d: d["volumes"][1].update({"pool": "nas-backup"}))
+    invalid(lambda d: d["volumes"][1].update({"pool_guid": "2222222"}))
+    invalid(lambda d: d["volumes"][1].update({
+        "omv_reference": d["volumes"][2]["omv_reference"],
+    }))
     invalid(lambda d: d["volumes"][2].update({"device": "data"}))
     invalid(lambda d: d["mounts"][0].update({"volume": "missing"}))
     invalid(lambda d: d["mounts"][0].update({"path": "/"}))
@@ -152,6 +157,10 @@ def test_invalid_definitions(repo: Path) -> None:
     invalid(lambda d: d["mounts"][0].update({"path": "/nas-data/subdir"}))
     invalid(lambda d: d["mounts"][0].update({"path": "/nas-data"}))
     invalid(lambda d: d["mounts"].pop())
+
+    pve = pve_example()
+    pve["volumes"][1]["filesystem_uuid"] = pve["volumes"][0]["filesystem_uuid"]
+    refuses(lambda: validate_storage(repo, "pve", pve))
 
     # Неизвестный серийный номер допустим при планировании, но не для записи.
     unconfirmed = copy.deepcopy(original)
