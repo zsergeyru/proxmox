@@ -18,6 +18,10 @@
     - (provision_phase | default('full')) in ['full', 'bootstrap']
     - provision.docker.services.runtime.mode | default('semaphore') == 'semaphore'
 
+- name: Подготовить общий Git-доступ и описание OpenTofu
+  ansible.builtin.import_tasks: runtime_prerequisites.yml
+  when: (provision_phase | default('full')) in ['full', 'bootstrap']
+
 - name: Установить и запустить управляющую среду
   ansible.builtin.import_tasks: runtime.yml
   when: (provision_phase | default('full')) in ['full', 'bootstrap']
