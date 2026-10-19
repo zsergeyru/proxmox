@@ -46,13 +46,13 @@ def test_wrong_device_and_same_device() -> None:
         targets = [
             dict(id="fast-ssd", mountpoint=str(p1), filesystem="ext4",
                  uuid="UUID1", source=None, repository="infra-core"),
-            dict(id="nas-backup", mountpoint=str(p2), filesystem="zfs",
+            dict(id="nas-backup", mountpoint=str(p2), filesystem="nfs4",
                  uuid=None, source="nas-backup/pve", repository="infra-core"),
         ]
         def mounted(where):
             if where == p1:
                 return dict(target=str(p1), source="/dev/sdb1", fstype="ext4", uuid="UUID1")
-            return dict(target=str(p2), source="nas-backup/pve", fstype="zfs", uuid="")
+            return dict(target=str(p2), source="nas-backup/pve", fstype="nfs4", uuid="")
         with patch.object(backup, "_mounted_device", side_effect=mounted):
             assert backup.check_destinations(targets) == [p1 / "infra-core", p2 / "infra-core"]
             wrong = [dict(entry) for entry in targets]
@@ -63,11 +63,11 @@ def test_wrong_device_and_same_device() -> None:
             refuses(lambda: backup.check_destinations(wrong), "Источник")
             wrong = [dict(entry) for entry in targets]
             wrong[1]["filesystem"] = "ntfs"
-            refuses(lambda: backup.check_destinations(wrong), "только ext4 или zfs")
+            refuses(lambda: backup.check_destinations(wrong), "ожидается файловая система")
             wrong = [dict(entry) for entry in targets]
             wrong[1]["source"] = "/dev/sdb1"
             # Оба пути указывают на один и тот же реальный источник;
-            # второй файловой системой остаётся zfs.
+            # второй файловой системой остаётся nfs4.
             def same_device(where):
                 item = mounted(where)
                 if where == p2:
