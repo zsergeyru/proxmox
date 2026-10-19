@@ -1,0 +1,12 @@
+[Unit]
+Description=Автоматическая проверка готовности резервирования Proxmox
+
+[Timer]
+OnBootSec=5min
+OnUnitInactiveSec=1h
+RandomizedDelaySec=5min
+Persistent=true
+Unit=infra-manager-backup-reconcile.service
+
+[Install]
+WantedBy=timers.target
