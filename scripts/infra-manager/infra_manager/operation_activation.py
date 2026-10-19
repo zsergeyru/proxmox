@@ -16,14 +16,22 @@ from .operation_store import OperationStore
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="infra-manager activation-internal")
-    parser.add_argument("action", choices=("verifying", "finish"))
-    parser.add_argument("operation_id")
+    parser.add_argument("action", choices=("verifying", "finish", "reconcile"))
+    parser.add_argument("operation_id", nargs="?")
     parser.add_argument("exit_code", type=int, nargs="?")
     args = parser.parse_args(argv)
     try:
         if os.geteuid() != 0:
             raise InfraManagerError("Подтверждение активации требует полномочий системной службы")
         store = OperationStore()
+        if args.action == "reconcile":
+            if args.operation_id is not None or args.exit_code is not None:
+                raise InfraManagerError("Проверка прерванных заданий не принимает параметры")
+            for operation_id in store.reconcile_interrupted():
+                print(f"[ПРОВЕРИТЬ] Прерванное задание: {operation_id}", flush=True)
+            return 0
+        if args.operation_id is None:
+            raise InfraManagerError("Не указан идентификатор операции")
         record = store.get(args.operation_id)
         if record.get("kind") != "deploy":
             raise InfraManagerError("Идентификатор не относится к обновлению гостя")
