@@ -246,7 +246,7 @@ def password_bytes() -> bytes:
             pass
         else:
             with os.fdopen(descriptor, "wb") as output:
-                output.write((secrets.token_urlsafe(48) + "\\n").encode())
+                output.write((secrets.token_urlsafe(48) + "\n").encode())
                 output.flush()
                 os.fsync(output.fileno())
     if (password.is_symlink() or not password.is_file()
@@ -277,7 +277,7 @@ def stream_vm100() -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("command", choices=("check", "export", "password", "repositories", "vm100"))
+    parser.add_argument("command", choices=("check", "export", "password", "password-existing", "repositories", "vm100"))
     args = parser.parse_args()
     if os.geteuid() != 0:
         parser.error("Нужны полномочия PVE-only root")
@@ -288,6 +288,11 @@ def main() -> int:
         check_destinations(expected)
         check_sources()
         if args.command == "password":
+            sys.stdout.buffer.write(password_bytes())
+        elif args.command == "password-existing":
+            existing = Path("/etc/infra-manager/backup/restic-password")
+            if not existing.is_file() or existing.is_symlink():
+                raise ExportError("Ключ резервирования ещё не создан")
             sys.stdout.buffer.write(password_bytes())
         elif args.command == "check":
             print("[ОК] Источники и физические носители подтверждены")
