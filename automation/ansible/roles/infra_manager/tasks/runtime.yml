@@ -101,6 +101,31 @@
     enabled: true
     daemon_reload: "{{ operation_reconcile_unit.changed }}"
 
+- name: Установить системную службу резервирования
+  ansible.builtin.copy:
+    src: "{{ guest_root }}/rootfs/etc/systemd/system/infra-manager-backup.service"
+    dest: /etc/systemd/system/infra-manager-backup.service
+    owner: root
+    group: root
+    mode: "0644"
+  register: managed_backup_service
+
+- name: Установить расписание резервирования
+  ansible.builtin.copy:
+    src: "{{ guest_root }}/rootfs/etc/systemd/system/infra-manager-backup.timer"
+    dest: /etc/systemd/system/infra-manager-backup.timer
+    owner: root
+    group: root
+    mode: "0644"
+  register: managed_backup_timer
+
+- name: Включить резервирование из управляющего гостя
+  ansible.builtin.systemd_service:
+    name: infra-manager-backup.timer
+    enabled: true
+    state: started
+    daemon_reload: "{{ managed_backup_service.changed or managed_backup_timer.changed }}"
+
 - name: Установить команды управления
   ansible.builtin.copy:
     remote_src: true
