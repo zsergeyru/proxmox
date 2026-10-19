@@ -76,4 +76,3 @@
   ansible.builtin.file:
     path: /run/infra-manager/secrets/semaphore-runner.env
     state: absent
-
