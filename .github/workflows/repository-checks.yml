@@ -83,6 +83,8 @@ jobs:
 
       - name: Check physical host descriptions
         run: python scripts/tests/test-physical-hosts.py
+      - name: Check persistent physical-host state migration
+        run: python scripts/tests/test-physical-host-state.py
 
       - name: Check physical storage and operator commands
         run: python scripts/tests/test-physical-storage.py
