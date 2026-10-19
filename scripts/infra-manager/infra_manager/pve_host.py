@@ -307,63 +307,44 @@ def install_recovery_host_support(node: str, repo_root: Path) -> None:
     console.detail("Recovery helper установлен на PVE")
 
 
-def install_backup_host_support(node: str, repo_root: Path) -> None:
-    """Установить PVE-only код копирования без включения расписания.
+def read_backup_host_status(node: str) -> str:
+    """Получить безопасный отчёт PVE-only, не выдавая закрытое состояние управляющего гостя."""
 
-    Локальная backup.yaml никогда не перезаписывается версией из Git.
-    Пока не проверены диски и ключи, таймер остаётся выключенным.
+    result = _ssh(
+        node,
+        "python3",
+        "/usr/local/lib/infra-manager/backup/backup-status.py",
+        capture=True,
+    )
+    line = (result.stdout or "").strip()
+    if not line or len(line) > 1200:
+        raise InfraManagerError("PVE не вернул состояние резервирования")
+    return line
+
+
+def install_backup_host_support(node: str, repo_root: Path) -> None:
+    """Установить только минимальную PVE-only проверку состояния копий.
+
+    Настройкой носителей, выполнением и расписанием резервирования
+    управляет управляющий гость. Никаких apt, форматирования, монтирования, systemd-таймеров
+    или резервировщиков на PVE эта функция не добавляет.
     """
 
-    source = repo_root / "scripts" / "backup"
-    target = Path("/usr/local/lib/infra-manager/backup")
-    for name in (
-        "backup-pve.py",
-        "backup-device.py",
-        "backup-mount.py",
-        "backup-setup.py",
-        "backup-restore.py",
-        "openbao-raft-guest.py",
-    ):
-        _install_remote_file(node, source / name, target / name, "0700")
     _install_remote_file(
         node,
-        repo_root / "scripts/infra-manager/host/infra_manager_backup.py",
-        OPERATOR_HOST_COMMAND.with_name("infra_manager_backup.py"),
-        "0644",
+        repo_root / "scripts" / "infra-manager" / "host" / "backup-status.py",
+        Path("/usr/local/lib/infra-manager/backup/backup-status.py"),
+        "0700",
     )
-    _install_remote_file(
-        node,
-        source / "infra-manager-backup.py",
-        OPERATOR_HOST_COMMAND.with_name("infra-manager-backup"),
-        "0755",
+    console.detail(
+        "PVE-only состояние резервирования доступно; "
+        "установка дополнительных пакетов и автоматическая подготовка носителей не выполняются"
     )
-    for name in ("infra-manager-backup.service", "infra-manager-backup.timer"):
-        _install_remote_file(
-            node, source / name, Path("/etc/systemd/system") / name, "0644",
-        )
-    _install_remote_file(
-        node,
-        repo_root / "infrastructure/hosts/pve/backup.yaml",
-        Path("/usr/local/share/infra-manager/backup.yaml.default"),
-        "0600",
-    )
-    _ssh(
-        node, "sh", "-c",
-        "set -eu; "
-        "install -d -m 0700 /etc/infra-manager/backup; "
-        "if [ ! -e /etc/infra-manager/backup/backup.yaml ]; then "
-        "install -m 0600 /usr/local/share/infra-manager/backup.yaml.default "
-        "/etc/infra-manager/backup/backup.yaml; "
-        "fi; "
-        "systemctl daemon-reload",
-    )
-    console.detail("Программы резервирования PVE установлены; расписание не включено")
 
 
 def install_operator_host_support(node: str, repo_root: Path) -> None:
-    """Установить на PVE тонкую операторскую оболочку и защиту копий."""
+    """Установить на PVE тонкую операторскую оболочку."""
 
-    install_backup_host_support(node, repo_root)
     host_root = repo_root / "scripts" / "infra-manager" / "host"
     # Сначала вспомогательная функция запроса пароля, затем основной вход.
     _install_remote_file(

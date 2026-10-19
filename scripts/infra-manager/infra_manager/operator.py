@@ -32,6 +32,7 @@ from .physical_host_state import checked_record_path
 from .pve import PveClient
 from .pve_host import (
     preflight_recovery_contour,
+    read_backup_host_status,
     repair_openbao_on_host,
 )
 from .settings import PATHS, SETTINGS
@@ -229,12 +230,25 @@ def operator_guest_status(
 ) -> int:
     """Показать единый статус выбранного гостя."""
 
-    return run_local_guest_status(
+    result = run_local_guest_status(
         PATHS.repo_root,
         vmid,
         show_secrets=show_secrets,
         allow_pending_activation=allow_pending_activation,
     )
+    manager = find_guest_by_role(PATHS.repo_root, SETTINGS.infra_manager_role)
+    if vmid == manager.vmid:
+        # Результат резервирования независим от других проверок управляющего гостя.
+        # Плохой статус Docker/OpenBao не должен скрывать состояние копий.
+        try:
+            print("\nРезервирование")
+            print(read_backup_host_status(_pve_node()))
+        except (InfraManagerError, OSError):
+            console.warning(
+                "Резервирование PVE не подтверждено: "
+                "доступен только минимальный PVE-only отчёт"
+            )
+    return result
 
 
 def operator_guest_task(

@@ -171,9 +171,6 @@ def main() -> int:
     arguments = sys.argv[1:] or ["--help"]
     if arguments == ["recover"]:
         return recover()
-    if arguments and arguments[0] == "backup":
-        from infra_manager_backup import dispatch_backup
-        return dispatch_backup(arguments[1:], OperatorError)
     return proxy_to_manager(arguments)
 
 
