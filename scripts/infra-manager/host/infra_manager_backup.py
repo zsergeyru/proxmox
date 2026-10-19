@@ -20,6 +20,7 @@ SCRIPTS = {
     "status": ("backup-setup.py", "status"),
     "enable": ("backup-setup.py", "enable"),
     "disable": ("backup-setup.py", "disable"),
+    "approve-restore": ("backup-setup.py", "approve-restore"),
     "export-key": ("backup-setup.py", "export-key"),
     "run": ("backup-pve.py", "--run"),
 }
