@@ -108,6 +108,39 @@ def start_manager(vmid: int) -> None:
     )
 
 
+def restore_manager_python_dependency(vmid: int) -> None:
+    """Исправить отсутствие системной библиотеки до запуска оператора гостя.
+
+    Разрешено только для проверенного управляющего LXC при команде deploy.
+    Не выполняет восстановление, не меняет постоянное состояние и не
+    запускает код из интернета. Пакет устанавливается штатным APT Debian.
+    """
+
+    command = [
+        "pct", "exec", str(vmid), "--", "python3", "-c", "import jsonschema",
+    ]
+    result = run(command, check=False, capture=True)
+    if result.returncode == 0:
+        return
+    if "ModuleNotFoundError: No module named 'jsonschema'" not in (result.stderr or ""):
+        raise OperatorError(
+            "Не удалось проверить системный Python управляющего гостя; "
+            "неизвестная ошибка, автоматическая установка запрещена"
+        )
+    print("[ИНФО] Восстановление системного пакета python3-jsonschema в управляющем госте")
+    run(["pct", "exec", str(vmid), "--", "apt-get", "update"])
+    run([
+        "pct", "exec", str(vmid), "--", "env",
+        "DEBIAN_FRONTEND=noninteractive", "apt-get", "install",
+        "-y", "python3-jsonschema",
+    ])
+    result = run(command, check=False, capture=True)
+    if result.returncode != 0:
+        raise OperatorError(
+            "Пакет python3-jsonschema установлен, но импорт всё ещё не работает"
+        )
+
+
 def proxy_to_manager(arguments: list[str]) -> int:
     """Передать штатную команду внутрь проверенного управляющего LXC.
 
@@ -140,6 +173,9 @@ def proxy_to_manager(arguments: list[str]) -> int:
         ]
         result = run(argv, check=False, capture=capture_output, input_text=input_text)
         return result if capture_output else result.returncode
+
+    if arguments == ["deploy", str(vmid)]:
+        restore_manager_python_dependency(vmid)
 
     if arguments == ["deploy", "nas"]:
         # Вспомогательный модуль устанавливается рядом с PVE-оболочкой.
