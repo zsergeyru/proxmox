@@ -64,13 +64,12 @@ def test_unexpected_python_error_does_not_install():
         commands.append(argv)
         return reply(1, "ImportError: unexpected Python failure")
 
-    with patch.object(manager, "run", side_effect=run):
-        try:
-            manager.restore_manager_python_dependency(910)
-        except manager.OperatorError:
-            pass
-        else:
-            raise AssertionError("Непроверенная ошибка Python принята")
+    try:
+        deps.restore_manager_python_dependency(910, run=run, error_type=manager.OperatorError)
+    except manager.OperatorError:
+        pass
+    else:
+        raise AssertionError("Непроверенная ошибка Python принята")
     assert len(commands) == 1
 
 
