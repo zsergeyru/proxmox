@@ -95,9 +95,11 @@ def _source_node() -> str:
     return node
 
 
-def _credentials(node: str, directory: Path) -> Path:
-    """Получить отдельный ключ из защищённого PVE-only через SSH в /run."""
-    secret = _remote(node, "password").stdout
+def _credentials(node: str, directory: Path, verified: dict[str, str],
+                 *, create: bool) -> Path:
+    """Получить ключ по доверенному SSH только после проверки двух носителей."""
+    action = "password" if create else "password-existing"
+    secret = _remote(node, action, json.dumps(verified).encode()).stdout
     if not 32 <= len(secret) <= 256 or b"\x00" in secret:
         raise InfraManagerError("Не получен безопасный пароль резервирования")
     name = directory / "restic-password"
@@ -141,11 +143,12 @@ def _restic(node: str, destination: str, key: Path, args: list[str],
 
 
 def _stream_snapshot(node: str, verified: dict[str, str],
-                     key: Path, destination: str) -> None:
-    """Однопроходная передача: PVE snapshot → SSH → restic stdin в 910."""
+                     key: Path, destination: str, *, vm100: bool = False) -> None:
+    """Передать последовательный полный поток PVE или VM 100 в restic 910."""
     payload = json.dumps(verified, separators=(",", ":")).encode()
     export = subprocess.Popen(
-        _ssh_command(node, ("python3", HOST_HELPER, "export")),
+        _ssh_command(node, ("python3", HOST_HELPER,
+                            "vm100" if vm100 else "export")),
         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
     )
     try:
@@ -156,8 +159,10 @@ def _stream_snapshot(node: str, verified: dict[str, str],
         try:
             _restic(
                 node, destination, key,
-                ["backup", "--stdin", "--stdin-filename", "infra-core.tar",
-                 "--tag", "infra-core", "--tag", "pve"],
+                ["backup", "--stdin", "--stdin-filename",
+                 "haos-100.vma.zst" if vm100 else "infra-core.tar",
+                 "--tag", "haos" if vm100 else "infra-core",
+                 "--tag", "vm-100" if vm100 else "pve"],
                 source=export.stdout,
             )
         finally:
@@ -170,6 +175,23 @@ def _stream_snapshot(node: str, verified: dict[str, str],
             export.wait()
 
 
+def _vm100_due(store: OperationStore) -> bool:
+    """Ежедневная копия HAOS не дублируется при каждом запуске таймера."""
+    saved = store.settings / "backup-vm100.json"
+    if saved.is_symlink() or not saved.is_file():
+        return True
+    try:
+        record = json.loads(saved.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return True
+    return not (
+        isinstance(record, dict)
+        and record.get("date") == datetime.now(UTC).date().isoformat()
+        and record.get("destinations") == list(DESTINATIONS)
+        and record.get("verified") is True
+    )
+
+
 def execute(*, run: bool = False) -> None:
     """Без ключа или двух подтверждённых носителей не производить запись."""
     _description, verified = policy()
@@ -180,31 +202,62 @@ def execute(*, run: bool = False) -> None:
     with tempfile.TemporaryDirectory(prefix="infra-backup-", dir="/run") as path:
         directory = Path(path)
         directory.chmod(0o700)
-        key = _credentials(node, directory)
+        key = _credentials(node, directory, verified, create=run)
+        state = json.loads(_remote(
+            node, "repositories", json.dumps(verified).encode()
+        ).stdout)
+        if not isinstance(state, dict) or set(state) != set(DESTINATIONS):
+            raise InfraManagerError("PVE не подтвердил состояние двух restic-хранилищ")
+        # Сначала сверить все уже созданные копии и только потом
+        # разрешить инициализацию действительно пустых каталогов.
         for destination in DESTINATIONS:
-            _restic(node, destination, key, ["snapshots", "--json"])
+            if state[destination] == "existing":
+                _restic(node, destination, key, ["snapshots", "--json"])
+            elif state[destination] != "missing":
+                raise InfraManagerError("На носителе неизвестное состояние хранилища")
         if not run:
-            print("[ОК] Подключения, ключ и обе существующие копии restic доступны")
+            if any(value != "existing" for value in state.values()):
+                raise InfraManagerError("Хранилища restic будут созданы только при запуске резервирования")
+            print("[ОК] Подключения, ключ и оба хранилища restic подтверждены")
             return
+        for destination in DESTINATIONS:
+            if state[destination] == "missing":
+                _restic(node, destination, key, ["init"])
+            _restic(node, destination, key, ["snapshots", "--json"])
         for destination in DESTINATIONS:
             _stream_snapshot(node, verified, key, destination)
             _restic(node, destination, key, ["check", "--read-data-subset=1%"])
-        # Учитывать лишь защищённое ядро. Не создавать фиктивный полный отчёт:
-        # VM 100 и испытание восстановления остаются отдельными заданиями.
         store = OperationStore()
+        created = datetime.now(UTC)
         _atomic_json(
             store.settings / "backup-last-core.json",
             {
                 "schema_version": 1,
-                "created_utc": datetime.now(UTC).isoformat(),
+                "created_utc": created.isoformat(),
                 "destinations": list(DESTINATIONS),
                 "verified": "restic-check-read-data-subset-1-percent",
                 "includes_vm100": False,
                 "restore_tested": False,
             },
         )
-        print("[ОК] Защищённые копии состояния управляющего контура записаны; "
-              "VM 100 и испытание восстановления ожидают отдельной приёмки")
+        if _vm100_due(store):
+            for destination in DESTINATIONS:
+                _stream_snapshot(node, verified, key, destination, vm100=True)
+                _restic(node, destination, key, ["check", "--read-data-subset=1%"])
+            _atomic_json(store.settings / "backup-vm100.json", {
+                "date": datetime.now(UTC).date().isoformat(),
+                "destinations": list(DESTINATIONS),
+                "verified": True,
+            })
+        _atomic_json(store.settings / "backup-last-full.json", {
+            "schema_version": 1,
+            "created_utc": created.isoformat(),
+            "destinations": list(DESTINATIONS),
+            "includes_vm100": True,
+            "restore_tested": False,
+        })
+        print("[ОК] Состояние PVE/910 и ежедневный снимок VM 100 сохранены "
+              "в обоих хранилищах; пробное восстановление ещё не подтверждено")
 
 
 def main(argv: list[str] | None = None) -> int:
