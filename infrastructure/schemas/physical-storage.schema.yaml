@@ -115,7 +115,7 @@ $defs:
   ext4:
     type: object
     additionalProperties: false
-    required: [id, kind, device, filesystem_uuid, omv_reference]
+    required: [id, kind, device, filesystem_uuid]
     properties:
       id:
         $ref: '#/$defs/identifier'
@@ -130,7 +130,7 @@ $defs:
   zfsPool:
     type: object
     additionalProperties: false
-    required: [id, kind, device, pool, pool_guid, omv_reference]
+    required: [id, kind, device, pool, pool_guid]
     properties:
       id:
         $ref: '#/$defs/identifier'
