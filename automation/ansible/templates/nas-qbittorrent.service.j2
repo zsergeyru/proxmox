@@ -1,0 +1,19 @@
+[Unit]
+Description=qBittorrent физического NAS после проверки HDD
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+RequiresMountsFor={{ nas_shared_mount }}
+ConditionPathIsMountPoint={{ nas_shared_mount }}
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# Не запускать на системном SSD, если HDD не подключён либо UUID изменился.
+ExecStartPre=/usr/bin/findmnt --mountpoint {{ nas_shared_mount }} --source UUID={{ nas_shared_uuid }}
+ExecStart=/usr/bin/docker compose -f /etc/nas-apps/qbittorrent/compose.yml up -d --no-recreate
+ExecStop=/usr/bin/docker compose -f /etc/nas-apps/qbittorrent/compose.yml down
+TimeoutStartSec=180
+
+[Install]
+WantedBy=multi-user.target

@@ -78,6 +78,31 @@ jobs:
       - name: Compile Python tooling
         run: python -m compileall -q scripts
 
+      - name: Check physical host descriptions
+        run: python scripts/tests/test-physical-hosts.py
+
+      - name: Check physical storage and operator commands
+        run: python scripts/tests/test-physical-storage.py
+
+      - name: Check safe NAS storage plan
+        run: python scripts/tests/test-physical-storage-plan.py
+
+      - name: Check confirmed NAS storage preparation
+        run: python scripts/tests/test-physical-storage-prepare.py
+
+      - name: Check first NAS SSH access
+        run: python scripts/tests/test-physical-bootstrap.py
+
+      - name: Check Debian, OMV and NAS volume guards
+        run: python scripts/tests/test-physical-nas-system.py
+
+      - name: Check NAS SMB and ZFS safety
+        run: python scripts/tests/test-physical-nas-services.py
+
+      - name: Check common users, NAS rights and Authelia groups
+        run: python scripts/tests/test-physical-nas-users.py
+
+
       - name: Run infra-manager Python foundation checks
         run: python scripts/tests/test-infra-manager-python.py
 

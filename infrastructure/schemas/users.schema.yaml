@@ -1,0 +1,32 @@
+$schema: https://json-schema.org/draft/2020-12/schema
+title: Общий каталог первоначальных пользователей проекта
+type: object
+additionalProperties: false
+required: [schema_version, groups, users]
+properties:
+  schema_version:
+    const: 1
+  groups:
+    type: array
+    minItems: 1
+    uniqueItems: true
+    items:
+      type: string
+      pattern: '^[a-z][a-z0-9_-]{1,31}$'
+  users:
+    type: array
+    items:
+      type: object
+      additionalProperties: false
+      required: [name, groups]
+      properties:
+        name:
+          type: string
+          pattern: '^[a-z][a-z0-9_-]{1,31}$'
+        groups:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items:
+            type: string
+            pattern: '^[a-z][a-z0-9_-]{1,31}$'

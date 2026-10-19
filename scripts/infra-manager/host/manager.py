@@ -19,18 +19,15 @@ from pathlib import Path
 HOST_CONFIG = Path("/etc/infra-manager/openbao-host.json")
 RECOVERY_COMMAND = Path("/usr/local/sbin/infra-manager-recovery")
 GUEST_COMMAND = "/usr/local/sbin/infra-manager"
-
-
 class OperatorError(RuntimeError):
     """Ожидаемая ошибка запуска операторской команды непосредственно на PVE."""
     pass
-
-
 def run(
     argv: list[str],
     *,
     check: bool = True,
     capture: bool = False,
+    input_text: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Выполнить команду PVE и остановиться при неподтверждённом результате."""
     try:
@@ -38,6 +35,7 @@ def run(
             argv,
             text=True,
             capture_output=capture,
+            input=input_text,
             check=False,
         )
     except OSError as exc:
@@ -47,8 +45,6 @@ def run(
             f"Операция не завершена (код {result.returncode}). Проверьте состояние управляющего гостя; при необходимости выполните infra-manager repair."
         )
     return result
-
-
 def manager_identity() -> tuple[int, str]:
     """Прочитать VMID и имя управляющего гостя из установленной конфигурации PVE."""
     try:
@@ -126,8 +122,11 @@ def proxy_to_manager(arguments: list[str]) -> int:
             "или infra-manager recover"
         )
 
-    return run(
-        [
+    def forward(command: list[str], *, input_text: str | None = None,
+                capture_output: bool = False):
+        """Передать команду и, только для начального доступа, закрытый ввод."""
+
+        argv = [
             "pct",
             "exec",
             str(vmid),
@@ -137,12 +136,24 @@ def proxy_to_manager(arguments: list[str]) -> int:
             f"INFRA_MANAGER_COLOR={color_mode()}",
             GUEST_COMMAND,
             "--trusted-pve",
-            *arguments,
-        ],
-        check=False,
-    ).returncode
+            *command,
+        ]
+        result = run(argv, check=False, capture=capture_output, input_text=input_text)
+        return result if capture_output else result.returncode
 
+    if arguments == ["deploy", "nas"]:
+        # Вспомогательный модуль устанавливается рядом с PVE-оболочкой.
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from infra_manager_nas_bootstrap import initial_nas_access
 
+        bootstrap_result = initial_nas_access("nas", forward, OperatorError)
+        if bootstrap_result != 0:
+            return bootstrap_result
+        from infra_manager_nas_storage import confirm_nas_storage
+        storage_result = confirm_nas_storage("nas", forward, OperatorError)
+        if storage_result != 0:
+            return storage_result
+    return forward(arguments)
 def color_mode() -> str:
     """Определить, можно ли сохранить цветной вывод при передаче команды."""
     mode = os.environ.get("INFRA_MANAGER_COLOR", "auto")

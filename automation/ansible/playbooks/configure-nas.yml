@@ -1,0 +1,161 @@
+---
+- name: Настроить базовые компоненты физического NAS
+  hosts: nas
+  gather_facts: true
+  become: false
+  tasks:
+    - name: Проверить Debian 13
+      ansible.builtin.assert:
+        that:
+          - ansible_facts['distribution'] == 'Debian'
+          - ansible_facts['distribution_major_version'] == '13'
+          - ansible_facts['architecture'] == 'x86_64'
+        fail_msg: Установить Debian 13 необходимо вручную
+
+    - name: Проверить установленную OpenMediaVault
+      ansible.builtin.command:
+        argv: [dpkg-query, -W, '-f=${Version}', openmediavault]
+      changed_when: false
+      register: nas_omv_version
+
+    - name: Требовать OpenMediaVault 8
+      ansible.builtin.assert:
+        that:
+          - (nas_omv_version.stdout | regex_replace('^[0-9]+:', '')).startswith('8.')
+        fail_msg: Установить OpenMediaVault 8 необходимо вручную
+
+    - name: Установить средства диагностики, не изменяя разметку
+      ansible.builtin.apt:
+        name:
+          - smartmontools
+          - gdisk
+          - e2fsprogs
+          - util-linux
+          - udev
+          - jq
+          - ca-certificates
+          - curl
+          - python3
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Включить службу наблюдения за SMART
+      ansible.builtin.systemd_service:
+        name: smartmontools.service
+        enabled: true
+        state: started
+
+    - name: Подтвердить доступность конфигурационной базы OMV
+      ansible.builtin.command:
+        argv:
+          - omv-confdbadm
+          - read
+          - conf.system.filesystem.mountpoint
+      changed_when: false
+      register: nas_mounts
+
+    - name: Проверить структуру ответа OMV
+      ansible.builtin.assert:
+        that:
+          - (nas_mounts.stdout | from_json) is sequence
+        fail_msg: Не удалось прочитать зарегистрированные тома OpenMediaVault
+
+    - name: Установить зависимости установки пакетов OMV
+      ansible.builtin.apt:
+        name:
+          - python3-debian
+          - xz-utils
+          - gnupg
+        state: present
+
+    - name: Проверить наличие OMV-Extras
+      ansible.builtin.command:
+        argv: [dpkg-query, -W, '-f=${Status}', openmediavault-omvextrasorg]
+      register: nas_omv_extras
+      changed_when: false
+      failed_when: false
+
+    - name: Получить пакет OMV-Extras для восьмой версии
+      ansible.builtin.get_url:
+        url: https://github.com/OpenMediaVault-Plugin-Developers/packages/raw/master/openmediavault-omvextrasorg_latest_all8.deb
+        dest: /var/cache/apt/archives/omv-extras8.deb
+        mode: "0644"
+        timeout: 40
+      when: nas_omv_extras.stdout is not search('install ok installed')
+
+    - name: Установить OMV-Extras штатным пакетным менеджером
+      ansible.builtin.apt:
+        deb: /var/cache/apt/archives/omv-extras8.deb
+        state: present
+      when: nas_omv_extras.stdout is not search('install ok installed')
+
+    - name: Обновить перечень пакетов после установки OMV-Extras
+      ansible.builtin.apt:
+        update_cache: true
+      when: nas_omv_extras.stdout is not search('install ok installed')
+
+    - name: Установить расширения OMV для ZFS и Docker
+      ansible.builtin.apt:
+        name:
+          - openmediavault-zfs
+          - openmediavault-compose
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Проверить наличие модуля ZFS после установки расширения
+      ansible.builtin.command:
+        argv: [modinfo, zfs]
+      register: nas_zfs_module
+      changed_when: false
+      failed_when: false
+
+    - name: Подтвердить готовность ZFS без замены ядра
+      ansible.builtin.assert:
+        that:
+          - nas_zfs_module.rc == 0
+        fail_msg: >-
+          Пакет ZFS установлен, но модуль не доступен в действующем ядре.
+          Нельзя автоматически менять ядро или перезагружать NAS.
+          Проверьте совместимость ядра отдельным действием.
+
+    - name: Установить Docker через источник пакетов, управляемый OMV-Extras
+      ansible.builtin.apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-compose-plugin
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Запустить Docker с автоматическим запуском после загрузки NAS
+      ansible.builtin.systemd_service:
+        name: docker.service
+        enabled: true
+        state: started
+
+    - name: Проверить поддержку Docker Compose
+      ansible.builtin.command:
+        argv: [docker, compose, version]
+      changed_when: false
+
+    - name: Проверить доступность инструментов ZFS
+      ansible.builtin.command:
+        argv: [zpool, --version]
+      changed_when: false
+
+    - name: Проверить доступность Docker
+      ansible.builtin.command:
+        argv: [docker, --version]
+      changed_when: false
+
+    - name: Установить одноразовый исполнитель подготовки пустых HDD
+      ansible.builtin.copy:
+        src: ../files/nas-storage-prepare.py
+        dest: /usr/local/sbin/nas-storage-prepare
+        owner: root
+        group: root
+        mode: "0700"
