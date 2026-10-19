@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import fcntl
 from datetime import UTC, datetime
 import json
 import os
@@ -276,7 +277,17 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if os.geteuid() != 0:
             raise InfraManagerError("Нужны полномочия системной службы управляющего гостя")
-        execute(run=args.run)
+        store = OperationStore()
+        lock = store.settings / "backup.lock"
+        descriptor = os.open(lock, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+        try:
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError as exc:
+                raise InfraManagerError("Резервирование уже выполняется") from exc
+            execute(run=args.run)
+        finally:
+            os.close(descriptor)
         return 0
     except (InfraManagerError, OSError, ValueError, yaml.YAMLError) as exc:
         print(f"[ОЖИДАНИЕ] Резервирование: {exc}", file=sys.stderr)
