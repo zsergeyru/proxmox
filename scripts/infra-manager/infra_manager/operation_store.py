@@ -293,12 +293,31 @@ class OperationStore:
             _append_event(self.logs / f"{operation_id}.jsonl", operation_id, "running")
             return record
 
+    def transition(self, operation_id: str, phase: str) -> dict:
+        """Записать этап самообновления с проверкой предыдущего этапа."""
+        allowed = {"activating": {"running"}, "verifying": {"activating"}}
+        if phase not in allowed:
+            raise InfraManagerError("Запрошен недопустимый этап активации")
+        with self._registry():
+            record = self.get(operation_id)
+            active_path = self._active_path(record["target"])
+            if _read(active_path).get("id") != operation_id:
+                raise InfraManagerError("Нельзя изменить этап чужой операции")
+            if record["phase"] == phase:
+                return record
+            if record["phase"] not in allowed[phase]:
+                raise InfraManagerError("Нарушен порядок этапов активации")
+            record["phase"] = phase
+            _atomic_json(self._history_path(operation_id), record)
+            _append_event(self.logs / f"{operation_id}.jsonl", operation_id, phase)
+            return record
+
     def finish(self, operation_id: str, *, exit_code: int) -> dict:
         """Записать конечный результат до снятия постоянной блокировки."""
         with self._registry():
             record = self.get(operation_id)
             active_path = self._active_path(record["target"])
-            if _read(active_path).get("id") != operation_id or record["phase"] != "running":
+            if _read(active_path).get("id") != operation_id or record["phase"] not in {"running", "activating", "verifying"}:
                 raise InfraManagerError("Итог не принадлежит действующей операции")
             successful = exit_code == 0
             phase = "completed" if successful else "failed"
