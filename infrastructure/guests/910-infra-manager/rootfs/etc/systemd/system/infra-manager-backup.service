@@ -1,0 +1,19 @@
+[Unit]
+Description=Infra Manager verified encrypted backup
+Wants=network-online.target
+After=network-online.target
+AssertPathIsMountPoint=/mnt/persistent-state
+
+[Service]
+Type=oneshot
+Environment=PYTHONPATH=/usr/local/lib/infra-manager
+ExecStart=/usr/bin/python3 -m infra_manager.backup_controller --run
+User=root
+Group=root
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/run /mnt/persistent-state/operations
+TimeoutStartSec=4h
