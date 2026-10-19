@@ -10,9 +10,9 @@
 
 ### Подготовленный независимый образ
 
-В программной ветке `feature/910-operation-store` появился новый
+В программной ветке `feature/910-operation-store` предусмотрены
 `runtime-next/Dockerfile` и отдельный
-`docker-compose-standalone.yml`. Они не используют Semaphore в составе
+`docker-compose-standalone.yml`. Исправлена подстановка закреплённых версий при сборке и выбор этого Compose-файла при режиме `RUNTIME_MODE=standalone`. Они не используют Semaphore в составе
 нового контейнера: требуемые программы — Ansible, OpenTofu, Packer и Python.
 Системная активация поддерживает режим `RUNTIME_MODE=standalone` и
 проверяет инструменты без API `:3000`. Однако текущая машинная настройка
