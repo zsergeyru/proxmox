@@ -297,8 +297,8 @@ console = Console()
 
 HOST_SEMAPHORE_STATE_DIR = Path("/mnt/persistent-state/semaphore")
 RUNTIME_SEMAPHORE_STATE_DIR = Path("/var/lib/semaphore")
-HOST_OPERATIONS_STATE_DIR = Path("/mnt/persistent-state/operations")
-RUNTIME_OPERATIONS_STATE_DIR = Path("/var/lib/infra-manager/operations")
+HOST_OPERATIONS_STATE_DIR = Path("/mnt/persistent-state/operations/activation")
+RUNTIME_OPERATIONS_STATE_DIR = Path("/run/infra-manager/activation")
 
 
 def _runtime_activation_scope() -> str:
