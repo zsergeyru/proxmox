@@ -65,7 +65,7 @@ def build_apps(routes: object, policy: dict) -> dict:
         # У Gogs внутренний IPv4 вводится на закрытой странице; проверка
         # допустимого адреса уже выполнена общим проверяющим маршрутов.
         if (not isinstance(route.get("upstream"), str)
-                or (spec.get("service") != "gogs" and route.get("upstream") != spec.get("upstream")):
+                or (spec.get("service") != "gogs" and route.get("upstream") != spec.get("upstream"))):
             raise CatalogueError("Адрес приложения не совпадает с описанием")
         if route.get("access") not in {"protected", "private", "app_auth", "git_https"}:
             raise CatalogueError("Доступ к приложению не подтверждён")
