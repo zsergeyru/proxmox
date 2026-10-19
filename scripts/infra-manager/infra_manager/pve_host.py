@@ -725,9 +725,9 @@ def ensure_guest_storage(
             f"Гость {vmid}: pve_storage поддерживается только для LXC"
         )
     repository = guest_dir.parents[2]
-    # Единый источник размеров и путей — файл физического PVE. Для 910
-    # эта ветка не вызывается: его постоянные pve-only/access/state
-    # первично готовит 990, независимо от 910 и NAS.
+    # Единый источник размеров и путей — описание физического PVE.
+    # Постоянные pve-only/access/state управляющего гостя готовит
+    # независимый первоначальный установщик, до запуска этого кода.
     resolved = render_pve_guest_storage(
         load_physical_storage(repository, "pve"), config,
     )
