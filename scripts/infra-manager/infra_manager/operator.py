@@ -108,7 +108,11 @@ def _refresh_project_checkout() -> None:
 
     repo_root = PATHS.repo_root
     git_dir = repo_root / ".git"
-    known_hosts = PATHS.semaphore_dir / "known_hosts"
+    known_hosts = (
+        PATHS.config_dir / "github_known_hosts"
+        if _standalone_runtime()
+        else PATHS.semaphore_dir / "known_hosts"
+    )
     for path, label in (
         (git_dir, "Git-репозиторий проекта"),
         (PATHS.github_key, "GitHub Deploy Key"),
@@ -170,6 +174,15 @@ def _refresh_project_checkout() -> None:
         f"Рабочая копия проекта обновлена: {branch} "
         f"({project_revision(repo_root)})"
     )
+
+
+def _standalone_runtime() -> bool:
+    """Определить версию исполнения по установленным версиям 910."""
+    if VERSIONS_FILE.is_symlink() or not VERSIONS_FILE.is_file():
+        return False
+    return "RUNTIME_MODE=standalone" in VERSIONS_FILE.read_text(
+        encoding="utf-8"
+    ).splitlines()
 
 
 def _prepare_runtime_snapshot(operation: str, vmid: int | str, *, physical: bool = False) -> str:
@@ -359,6 +372,7 @@ def _operator_guest_task(
             "-e",
             f"NO_COLOR={os.environ.get('NO_COLOR', '')}",
             *(["-e", f"INFRA_OPERATION_ID={operation_id}"] if operation_id else []),
+            *(["-e", "INFRA_RUNTIME_MODE=standalone"] if _standalone_runtime() else []),
             RUNTIME_CONTAINER,
             "sh",
             "-eu",
