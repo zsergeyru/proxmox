@@ -126,7 +126,12 @@ def validate_storage(
         if name not in volume_by_id:
             raise InfraManagerError(f"{path}: подключение неизвестного тома {name}")
         if mount["path"] is not None:
-            paths.append(mount["path"])
+            mount_path = mount["path"]
+            if any(part in {".", ".."} for part in Path(mount_path).parts):
+                raise InfraManagerError(
+                    f"{path}: относительные элементы точки подключения запрещены"
+                )
+            paths.append(mount_path)
     for index, left in enumerate(paths):
         if any(
             left.startswith(right + "/") or right.startswith(left + "/")
