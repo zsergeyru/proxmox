@@ -161,7 +161,7 @@ def _generic_status(
 
 
 def _standalone_runtime() -> bool:
-    """Определить независимую рабочую среду из доверенного запуска 910."""
+    """Определить независимую рабочую среду из доверенного запуска управляющего гостя."""
     return os.environ.get("INFRA_RUNTIME_MODE") == "standalone"
 
 
