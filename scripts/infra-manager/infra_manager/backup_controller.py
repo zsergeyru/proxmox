@@ -66,14 +66,21 @@ def policy() -> tuple[dict, dict[str, str]]:
 
 def _remote(node: str, action: str, payload: bytes = b"") -> subprocess.CompletedProcess[bytes]:
     """Ограниченный вызов PVE helper без произвольного удалённого shell."""
-    result = subprocess.run(
+    # Двоичный ответ (в том числе ключ в /run) не проходит через
+    # текстовый CommandRunner, который предназначен для обычных заданий.
+    process = subprocess.Popen(
         _ssh_command(node, ("python3", HOST_HELPER, action)),
-        input=payload, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-        check=False, timeout=90,
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
     )
-    if result.returncode:
+    try:
+        output, _ = process.communicate(payload, timeout=90)
+    except subprocess.TimeoutExpired as exc:
+        process.kill()
+        process.communicate()
+        raise InfraManagerError("PVE helper превысил время ответа") from exc
+    if process.returncode:
         raise InfraManagerError(f"PVE не подтвердил действие резервирования: {action}")
-    return result
+    return subprocess.CompletedProcess(process.args, process.returncode, output)
 
 
 def _source_node() -> str:
@@ -115,11 +122,17 @@ def _restic(node: str, destination: str, key: Path, args: list[str],
         "-r", backend, *args,
     ]
     env = dict(os.environ, RESTIC_PASSWORD_FILE=str(key))
-    result = subprocess.run(
+    process = subprocess.Popen(
         cmd, stdin=source, stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL, env=env, check=False, timeout=7200,
+        stderr=subprocess.DEVNULL, env=env,
     )
-    if result.returncode:
+    try:
+        code = process.wait(timeout=7200)
+    except subprocess.TimeoutExpired as exc:
+        process.kill()
+        process.wait()
+        raise InfraManagerError("Операция restic превысила время выполнения") from exc
+    if code:
         raise InfraManagerError(
             f"Проверка или запись restic в {destination} завершилась с ошибкой"
         )
