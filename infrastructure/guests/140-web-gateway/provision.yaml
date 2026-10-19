@@ -32,14 +32,9 @@ docker:
 
 # Общий том состояний уже используется гостем 340.
 # Не форматировать существующий том и не затрагивать чужие каталоги.
-# Подготовка производится штатным механизмом pve_storage на PVE.
+# Физические тома описаны в infrastructure/hosts/pve/storage.yaml.
+# Здесь указаны только каталоги и подключения этого гостя.
 pve_storage:
-  volume_group: pve
-  thin_pool: data
-  volumes:
-    - name: infra_state
-      size_gb: 40
-      mountpoint: /mnt/bindmounts/infra-state
   mounts:
     - slot: mp0
       volume: infra_state
