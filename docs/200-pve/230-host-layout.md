@@ -52,6 +52,9 @@
 │   ├── ssh-access.json
 │   ├── kv-access.json
 │   └── operator-access.json
+├── openbao-tls/
+│   ├── ca.key
+│   └── ca.crt
 └── recovery/
     └── github_proxmox_repo_ed25519
 ```
@@ -62,6 +65,8 @@
 | `/mnt/bindmounts/infra-manager/pve-only/openbao/ssh-access.json` | служебные RoleID/SecretID для операций SSH-подписи OpenBao |
 | `/mnt/bindmounts/infra-manager/pve-only/openbao/kv-access.json` | служебные RoleID/SecretID для чтения KV и узкого обновления Semaphore token |
 | `/mnt/bindmounts/infra-manager/pve-only/openbao/operator-access.json` | логин и текущий пароль человека для ограниченного входа в OpenBao UI |
+| `/mnt/bindmounts/infra-manager/pve-only/openbao-tls/ca.key` | закрытый ключ удостоверяющего центра TLS OpenBao; остаётся только на PVE |
+| `/mnt/bindmounts/infra-manager/pve-only/openbao-tls/ca.crt` | сертификат удостоверяющего центра TLS OpenBao |
 | `/mnt/bindmounts/infra-manager/pve-only/recovery/github_proxmox_repo_ed25519` | аварийная PVE-only копия read-only GitHub Deploy Key для восстановления проекта до запуска 910/OpenBao |
 
 Весь каталог `pve-only/` остаётся только на PVE и в 910 не монтируется.
@@ -82,6 +87,9 @@
 | `/mnt/bindmounts/infra-manager/access/pve-host/root_ed25519.pub` | `/mnt/pve-access/pve-host/root_ed25519.pub` | производный открытый ключ той же SSH-идентичности |
 | `/mnt/bindmounts/infra-manager/access/pve-host/known_hosts` | `/mnt/pve-access/pve-host/known_hosts` | доверенный ключ SSH-сервера PVE |
 | `/mnt/bindmounts/infra-manager/access/ca/pve-root-ca.crt` | `/mnt/pve-access/ca/pve-root-ca.crt` | копия корневого сертификата PVE |
+| `/mnt/bindmounts/infra-manager/access/openbao-tls/ca.crt` | `/mnt/pve-access/openbao-tls/ca.crt` | доверенный сертификат TLS OpenBao |
+| `/mnt/bindmounts/infra-manager/access/openbao-tls/server.crt` | `/mnt/pve-access/openbao-tls/server.crt` | сертификат службы TLS OpenBao |
+| `/mnt/bindmounts/infra-manager/access/openbao-tls/server.key` | `/mnt/pve-access/openbao-tls/server.key` | закрытый ключ службы TLS OpenBao; доступ только необходимой службе |
 
 ## 4. Изменяемое состояние 910
 
@@ -95,10 +103,12 @@
 
 | Полный путь на PVE | Путь после подключения в 910 | Назначение |
 |---|---|---|
-| `/mnt/bindmounts/infra-manager/state/semaphore/` | `/mnt/persistent-state/semaphore/` | база и служебные данные Semaphore |
+| `/mnt/bindmounts/infra-manager/state/semaphore/` | `/mnt/persistent-state/semaphore/` | временно сохраняемая база прежнего Semaphore до проверенной замены |
 | `/mnt/bindmounts/infra-manager/state/opentofu/` | `/mnt/persistent-state/opentofu/` | постоянные данные и состояние OpenTofu |
 | `/mnt/bindmounts/infra-manager/state/locks/` | `/mnt/persistent-state/locks/` | общие координационные lock-файлы PVE CLI и `infra-runtime` |
 | `/mnt/bindmounts/infra-manager/state/openbao/` | `/mnt/persistent-state/openbao/` | постоянные Raft-данные OpenBao |
+| `/mnt/bindmounts/infra-manager/state/physical-hosts/` | `/mnt/persistent-state/physical-hosts/` | подтверждённые идентификаторы дисков и SSH-доверие физических узлов |
+| `/mnt/bindmounts/infra-manager/state/operations/` | `/mnt/persistent-state/operations/` | целевое постоянное состояние операций, их результатов и активации, независимо от Docker |
 
 ## 5. Связи каталогов внутри 910
 
@@ -138,9 +148,11 @@ mp1: /mnt/bindmounts/infra-manager/state,mp=/mnt/persistent-state
 | `pve-only/` | `0700` | `0:0` |
 | `pve-only/openbao/` | `0700` | `0:0` |
 | `pve-only/recovery/` | `0700` | `0:0` |
+| `pve-only/openbao-tls/` | `0700` | `0:0` |
 | `access/` | `0755` | `0:0` |
 | `access/pve-host/` | `0700` | `101001:100000` |
 | `access/ca/` | `0755` | `100000:100000` |
+| `access/openbao-tls/` | `0755` | `100000:100000` |
 | `state/` | `0700` | `100000:100000` |
 
 Основные файлы доступа имеют следующие режимы:
@@ -152,6 +164,7 @@ mp1: /mnt/bindmounts/infra-manager/state,mp=/mnt/persistent-state
 | `pve-only/openbao/kv-access.json` | `0600` | `0:0` |
 | `pve-only/openbao/operator-access.json` | `0600` | `0:0` |
 | `pve-only/recovery/github_proxmox_repo_ed25519` | `0600` | `0:0` |
+| `pve-only/openbao-tls/ca.key` | `0600` | `0:0` |
 | `access/pve-host/root_ed25519` | `0600` | `101001:100000` |
 | `access/pve-host/root_ed25519.pub` | `0644` | `101001:100000` |
 | `access/pve-host/known_hosts` | `0644` | `101001:100000` |
@@ -189,16 +202,16 @@ mp1: /mnt/bindmounts/infra-manager/state,mp=/mnt/persistent-state
 
 ```text
 guests
-update
 status [VMID]
 deploy VMID
 sync VMID
 repair [VMID]
-test VMID
 recover
 ```
 
-Для всех команд кроме `recover` оболочка только читает VMID управляющего LXC из `/etc/infra-manager/openbao-host.json`, проверяет проектную метку объекта и передаёт аргументы через `pct exec` операторскому слою внутри 910. Перед прямым `deploy` оператор автоматически синхронизирует существующую Git-копию внутри 910 и создаёт снимок для текущего запуска. Для `deploy/sync/repair/test` общий `guest-operation.py` выполняется через `docker exec` в `infra-runtime`; Semaphore API в этом маршруте не участвует. OpenTofu и Ansible на PVE и в системе 910 не устанавливаются повторно — они остаются внутри `infra-runtime`.
+В перечне приведены команды, предусмотренные текущим операторским обработчиком. Команды `update` и `test` не входят в его пользовательский набор до отдельной реализации. Целевая панель `infra-web` должна обращаться к тем же операциям, а не вводить второй исполнитель.
+
+Для всех команд кроме `recover` оболочка только читает VMID управляющего LXC из `/etc/infra-manager/openbao-host.json`, проверяет проектную метку объекта и передаёт аргументы через `pct exec` операторскому слою внутри 910. Перед прямым `deploy` оператор автоматически синхронизирует существующую Git-копию внутри 910 и создаёт снимок для текущего запуска. Для `deploy/sync/repair` общий `guest-operation.py` выполняется через `docker exec` в `infra-runtime`; Semaphore API в этом маршруте не участвует. OpenTofu и Ansible на PVE и в системе 910 не устанавливаются повторно — они остаются внутри `infra-runtime`.
 
 `repair` без VMID может запустить остановленный управляющий LXC перед передачей команды внутрь него. `recover` выполняется отдельно PVE-only recovery helper и поэтому не зависит от состояния 910.
 
@@ -251,7 +264,7 @@ debian13-template.ref
 
 Сам хостовый сценарий может создавать краткоживущие временные файлы на PVE под `/run/`; их имена не являются частью постоянного контракта.
 
-Внутри LXC 910 рабочие секреты OpenBao материализуются в:
+В действующей переходной реализации внутри LXC 910 рабочие секреты OpenBao материализуются в:
 
 ```text
 /run/infra-manager/secrets/
@@ -286,6 +299,7 @@ debian13-template.ref
 - [`200-overview.md`](200-overview.md) — общая роль PVE-хоста.
 - [`210-host-bootstrap.md`](210-host-bootstrap.md) — первоначальный контур.
 - [`220-host-configuration.md`](220-host-configuration.md) — обязательные свойства постоянного состояния.
+- [`../100-architecture/130-management-contour.md`](../100-architecture/130-management-contour.md) — контракт взаимодействия управляющих контуров.
 - [`290-decisions.md`](290-decisions.md) — причины разделения областей состояния.
 - [`../700-security/710-pve-access.md`](../700-security/710-pve-access.md) — назначение данных административного доступа.
 - [`../800-operations/830-recovery.md`](../800-operations/830-recovery.md) — восстановление и резервное копирование.
