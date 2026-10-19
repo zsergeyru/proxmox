@@ -49,6 +49,21 @@
     group: root
     mode: preserve
 
+- name: Установить службу проверки прерванных операций
+  ansible.builtin.copy:
+    src: "{{ guest_root }}/rootfs/etc/systemd/system/infra-manager-operation-reconcile.service"
+    dest: /etc/systemd/system/infra-manager-operation-reconcile.service
+    owner: root
+    group: root
+    mode: "0644"
+  register: operation_reconcile_unit
+
+- name: Включить проверку прерванных операций при загрузке
+  ansible.builtin.systemd_service:
+    name: infra-manager-operation-reconcile.service
+    enabled: true
+    daemon_reload: "{{ operation_reconcile_unit.changed }}"
+
 - name: Установить команды управления
   ansible.builtin.copy:
     remote_src: true
