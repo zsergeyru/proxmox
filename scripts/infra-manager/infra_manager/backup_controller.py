@@ -7,6 +7,7 @@ restic и запись через SFTP выполняются исключите
 from __future__ import annotations
 
 import argparse
+import hashlib
 from datetime import UTC, datetime
 import json
 import os
@@ -175,7 +176,7 @@ def _stream_snapshot(node: str, verified: dict[str, str],
             export.wait()
 
 
-def _vm100_due(store: OperationStore) -> bool:
+def _vm100_due(store: OperationStore, identity: str) -> bool:
     """Ежедневная копия HAOS не дублируется при каждом запуске таймера."""
     saved = store.settings / "backup-vm100.json"
     if saved.is_symlink() or not saved.is_file():
@@ -188,6 +189,7 @@ def _vm100_due(store: OperationStore) -> bool:
         isinstance(record, dict)
         and record.get("date") == datetime.now(UTC).date().isoformat()
         and record.get("destinations") == list(DESTINATIONS)
+        and record.get("media_fingerprint") == identity
         and record.get("verified") is True
     )
 
@@ -240,13 +242,17 @@ def execute(*, run: bool = False) -> None:
                 "restore_tested": False,
             },
         )
-        if _vm100_due(store):
+        identity = hashlib.sha256(
+            json.dumps(verified, sort_keys=True).encode()
+        ).hexdigest()
+        if _vm100_due(store, identity):
             for destination in DESTINATIONS:
                 _stream_snapshot(node, verified, key, destination, vm100=True)
                 _restic(node, destination, key, ["check", "--read-data-subset=1%"])
             _atomic_json(store.settings / "backup-vm100.json", {
                 "date": datetime.now(UTC).date().isoformat(),
                 "destinations": list(DESTINATIONS),
+                "media_fingerprint": identity,
                 "verified": True,
             })
         _atomic_json(store.settings / "backup-last-full.json", {
