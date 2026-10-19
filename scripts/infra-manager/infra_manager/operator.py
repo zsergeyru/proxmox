@@ -354,6 +354,11 @@ def operator_physical_bootstrap_state(name: str) -> int:
         )
     path = checked_record_path(name, data_root=PATHS.data_dir)
     if not path.exists():
+        if checked_record_path(name, storage=True, data_root=PATHS.data_dir).exists():
+            raise InfraManagerError(
+                "Назначения дисков NAS есть, но отметка SSH-доверия утрачена. "
+                "Необходима проверка восстановления доверия"
+            )
         return 20
     try:
         record = json.loads(path.read_text(encoding="utf-8"))

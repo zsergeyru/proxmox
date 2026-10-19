@@ -37,6 +37,11 @@ def is_bootstrapped(host: PhysicalHost) -> bool:
 
     path = marker_path(host.name)
     if not path.exists():
+        if checked_record_path(host.name, storage=True, data_root=PATHS.data_dir).exists():
+            raise InfraManagerError(
+                "Назначения дисков сохранились, но отметка SSH-доверия исчезла. "
+                "Автоматический повтор начального входа запрещён"
+            )
         return False
     try:
         marker = json.loads(path.read_text(encoding="utf-8"))
