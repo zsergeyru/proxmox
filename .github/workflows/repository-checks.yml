@@ -502,6 +502,11 @@ jobs:
           python3 scripts/tests/test-openbao-live.py
           rm -f "$compat_config"
 
+      - name: Build infra-web preview image
+        run: |
+          docker build -t infra-web:ci "$INFRA_MANAGER_DIR/rootfs/opt/infra-manager/compose/web"
+          docker run --rm --entrypoint python3 infra-web:ci -m py_compile /opt/infra-web/app.py
+
       - name: Build infra-runtime image
         run: |
           docker build \
