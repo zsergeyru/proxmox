@@ -30,7 +30,7 @@ def checked_record_path(
     previous = old_dir / filename
     current = new_dir / filename
     if new_dir.is_symlink():
-        # На самой ОС 910 это ожидаемая ссылка на bind mount PVE.
+        # На управляющем госте это ожидаемая ссылка на bind mount PVE.
         # В infra-runtime тот же каталог подключён Docker напрямую.
         expected = Path("/mnt/persistent-state/physical-hosts")
         if not expected.is_dir() or new_dir.resolve() != expected.resolve():
@@ -42,7 +42,7 @@ def checked_record_path(
     if not new_dir.is_dir():
         raise InfraManagerError(
             "Отсутствует постоянный каталог physical-hosts; "
-            "сначала выполните deploy 910 и проверьте подключение состояния"
+            "сначала обновите управляющий гость и проверьте подключение состояния"
         )
     if current.is_symlink() or previous.is_symlink():
         raise InfraManagerError("Подмена файла подтверждений символьной ссылкой запрещена")
@@ -50,7 +50,7 @@ def checked_record_path(
         if not current.is_file():
             raise InfraManagerError(
                 f"Старая запись {filename} ещё не перенесена. "
-                "Обновите 910 штатным deploy; повторное первоначальное доверие запрещено"
+                "Обновите управляющий гость штатным deploy; повторное первоначальное доверие запрещено"
             )
         try:
             if previous.read_bytes() != current.read_bytes():
