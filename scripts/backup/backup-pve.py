@@ -17,17 +17,15 @@ import os
 from pathlib import Path
 import shutil
 import sqlite3
-import stat
 import subprocess
 import tempfile
 from typing import Any
-from urllib.request import Request, urlopen
-import ssl
 
 import yaml
 
 
 DEFAULT_CONFIG = Path("/etc/infra-manager/backup/backup.yaml")
+RAFT_HELPER = Path("/usr/local/lib/infra-manager/backup/openbao-raft-guest.py")
 STATE = Path("/mnt/bindmounts/infra-manager/state")
 ROOT = Path("/mnt/bindmounts/infra-manager")
 SEMAPHORE_DB = STATE / "semaphore/semaphore.sqlite"
@@ -114,8 +112,11 @@ def check_destinations(targets: list[dict[str, Any]]) -> list[Path]:
         mount = Path(entry["mountpoint"])
         if not mount.is_absolute() or mount == Path("/") or mount.is_symlink():
             raise BackupError("Назначение должно быть абсолютной точкой подключения")
-        if entry.get("filesystem") not in {"ext4", "zfs"}:
-            raise BackupError(f"Для {entry['id']} разрешены только ext4 или zfs")
+        required_type = "ext4" if entry["id"] == "fast-ssd" else "nfs4"
+        if entry.get("filesystem") != required_type:
+            raise BackupError(
+                f"Для {entry['id']} ожидается файловая система {required_type}"
+            )
         uuid = entry.get("uuid")
         source = entry.get("source")
         if not uuid and not source:
@@ -196,101 +197,75 @@ def sqlite_snapshot(target: Path) -> None:
     target.chmod(0o600)
 
 
-def check_openbao_credentials(config: dict[str, Any]) -> None:
-    """Не объявлять готовность без удостоверенной TLS-связи и AppRole."""
+def check_openbao_credentials(config: dict[str, Any]) -> dict[str, str]:
+    """Проверить PVE-only учётные данные и принадлежность управляющего LXC."""
 
     if not isinstance(config, dict):
         raise BackupError("Не описан источник снимка OpenBao")
     role_path = Path(config["approle_file"])
-    ca_path = Path(config["ca_file"])
+    identity_path = Path(config["identity_file"])
     _regular_file(role_path, secret=True)
-    _regular_file(ca_path)
-    if not str(role_path).startswith(str(ROOT / "pve-only") + "/"):
+    _regular_file(identity_path)
+    if not role_path.is_relative_to(ROOT / "pve-only"):
         raise BackupError("AppRole OpenBao должен храниться только в PVE-only")
-    role = json.loads(role_path.read_text(encoding="utf-8"))
-    if not isinstance(role, dict) or not all(
-        isinstance(role.get(k), str) and role[k] for k in ("role_id", "secret_id")
-    ):
+    try:
+        role = json.loads(role_path.read_text(encoding="utf-8"))
+        identity = json.loads(identity_path.read_text(encoding="utf-8"))
+    except ValueError as exc:
+        raise BackupError("Неверные данные доступа OpenBao") from exc
+    if not isinstance(role, dict) or set(role) != {"role_id", "secret_id"}:
         raise BackupError("Нужен отдельный AppRole только для снимка Raft")
-    address = config.get("address")
-    if not isinstance(address, str) or not address.startswith("https://"):
-        raise BackupError("OpenBao обязан использовать проверяемый HTTPS")
+    if not all(isinstance(v, str) and v for v in role.values()):
+        raise BackupError("AppRole для снимка Raft неполон")
+    if (
+        not isinstance(identity, dict)
+        or not isinstance(identity.get("vmid"), int)
+        or identity["vmid"] <= 0
+        or identity.get("name") != "infra-manager"
+    ):
+        raise BackupError("Управляющий LXC не подтверждён в PVE")
+    vmid = identity["vmid"]
+    info = subprocess.run(
+        ["pct", "config", str(vmid)], capture_output=True, text=True, check=False,
+    )
+    required = (
+        "hostname: infra-manager",
+        "unprivileged: 1",
+        "owner=proxmox-project",
+        "role=infra-manager",
+    )
+    if info.returncode or any(value not in info.stdout for value in required):
+        raise BackupError("Управляющий LXC не совпадает с доверенным описанием")
+    return role
 
 
 def openbao_snapshot(target: Path, config: dict[str, Any]) -> None:
-    """Получить штатный Raft-снимок с краткоживущим AppRole PVE-only.
+    """Передать согласованный Raft-снимок из 910 на PVE без передачи unseal key."""
 
-    Для него требуется отдельная политика только read к
-    sys/storage/raft/snapshot. Долгоживущий корневой токен не используется.
-    """
-
-    role_path = Path(config["approle_file"])
-    ca_path = Path(config["ca_file"])
-    _regular_file(role_path, secret=True)
-    _regular_file(ca_path)
-    if not str(role_path).startswith(str(ROOT / "pve-only") + "/"):
-        raise BackupError("Данные доступа OpenBao должны храниться в PVE-only")
-    try:
-        role = json.loads(role_path.read_text(encoding="utf-8"))
-    except ValueError as exc:
-        raise BackupError("Некорректные служебные данные OpenBao") from exc
-    if not isinstance(role, dict) or not all(
-        isinstance(role.get(k), str) and role[k] for k in ("role_id", "secret_id")
-    ):
-        raise BackupError("Нужен специальный AppRole для копирования Raft")
-    address = config.get("address")
-    if not isinstance(address, str) or not address.startswith("https://"):
-        raise BackupError("OpenBao обязан использовать проверяемый HTTPS")
-    address = address.rstrip("/")
-    context = ssl.create_default_context(cafile=str(ca_path))
-    payload = json.dumps({
-        "role_id": role["role_id"], "secret_id": role["secret_id"],
-    }).encode()
-    try:
-        request = Request(
-            address + "/v1/auth/approle/login", data=payload,
-            headers={"Content-Type": "application/json"}, method="POST",
+    role = check_openbao_credentials(config)
+    identity = json.loads(Path(config["identity_file"]).read_text(encoding="utf-8"))
+    _regular_file(RAFT_HELPER)
+    code = RAFT_HELPER.read_text(encoding="utf-8")
+    argv = [
+        "pct", "exec", str(identity["vmid"]), "--",
+        "python3", "-c", code,
+    ]
+    if target.exists() or target.is_symlink():
+        raise BackupError("Временный файл снимка Raft уже существует")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with target.open("xb") as output:
+        outcome = subprocess.run(
+            argv,
+            input=json.dumps(role), text=True, stdout=output,
+            stderr=subprocess.PIPE, timeout=240, check=False,
         )
-        with urlopen(request, context=context, timeout=30) as response:
-            reply = json.load(response)
-        token = reply["auth"]["client_token"]
-        if not isinstance(token, str) or not token:
-            raise ValueError("empty token")
-    except (OSError, ValueError, KeyError, TypeError) as exc:
-        raise BackupError("Не удалось получить краткоживущий доступ к снимку Raft") from exc
-
-    try:
-        request = Request(
-            address + "/v1/sys/storage/raft/snapshot",
-            headers={"X-Vault-Token": token}, method="GET",
-        )
-        try:
-            with urlopen(request, context=context, timeout=300) as response:
-                with target.open("xb") as output:
-                    size = 0
-                    while chunk := response.read(1024 * 1024):
-                        size += len(chunk)
-                        if size > 2 * 1024 * 1024 * 1024:
-                            raise BackupError("Снимок Raft превышает предел 2 ГБ")
-                        output.write(chunk)
-            if size < 256:
-                raise BackupError("OpenBao вернул пустой снимок Raft")
-            target.chmod(0o600)
-        except OSError as exc:
-            raise BackupError("Не удалось получить согласованный снимок Raft") from exc
-    finally:
-        # Не печатать токен даже при неуспехе запроса; короткий TTL обязателен.
-        try:
-            revoke = Request(
-                address + "/v1/auth/token/revoke-self", data=b"{}",
-                headers={"X-Vault-Token": token, "Content-Type": "application/json"},
-                method="POST",
-            )
-            with urlopen(revoke, context=context, timeout=15):
-                pass
-        except OSError:
-            # Если policy не допускает revoke-self, короткий TTL ограничит время.
-            pass
+    if outcome.returncode:
+        target.unlink(missing_ok=True)
+        raise BackupError("Не удалось получить согласованный снимок OpenBao Raft")
+    if target.stat().st_size < 256 or target.stat().st_size > 2 * 1024**3:
+        target.unlink(missing_ok=True)
+        raise BackupError("Размер снимка OpenBao Raft недопустим")
+    target.chmod(0o600)
 
 
 def restic_command(repo: Path, password_file: Path, argv: list[str]) -> None:
@@ -354,6 +329,8 @@ def backup(config: dict[str, Any], *, execute: bool = False) -> None:
                 "--exclude", str(SEMAPHORE_DB) + "-wal",
                 "--exclude", str(SEMAPHORE_DB) + "-shm",
                 "--exclude", str(STATE / "semaphore/*.sqlite*"),
+                "--exclude", str(STATE / "semaphore/*.sqlite*-wal"),
+                "--exclude", str(STATE / "semaphore/*.sqlite*-shm"),
                 "--exclude", str(STATE / "opentofu/provider-mirror"),
                 "--exclude", str(STATE / "opentofu/.terraform"),
                 "--exclude", str(STATE / "opentofu/*.tfplan"),
