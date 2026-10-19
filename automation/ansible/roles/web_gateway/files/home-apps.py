@@ -16,6 +16,7 @@ NAMES = {
     "immich": ("Фотографии", "Immich", "📷"),
     "home-assistant": ("Умный дом", "Home Assistant", "🏠"),
     "open-webui": ("ИИ-помощник", "Open WebUI", "🤖"),
+    "gogs": ("Репозитории Git", "Gogs", "📦"),
 }
 INTERNAL = frozenset({"homarr", "authelia", "portal"})
 DOMAIN = re.compile(r"[a-z0-9-]+(?:\.[a-z0-9-]+)*\.zsergey\.ru\Z")
@@ -61,9 +62,12 @@ def build_apps(routes: object, policy: dict) -> dict:
             continue
         if domain == "check.zsergey.ru":
             continue
-        if route.get("upstream") != spec.get("upstream") or not isinstance(route.get("upstream"), str):
+        # У Gogs внутренний IPv4 вводится на закрытой странице; проверка
+        # допустимого адреса уже выполнена общим проверяющим маршрутов.
+        if (not isinstance(route.get("upstream"), str)
+                or (spec.get("service") != "gogs" and route.get("upstream") != spec.get("upstream"))):
             raise CatalogueError("Адрес приложения не совпадает с описанием")
-        if route.get("access") not in {"protected", "private", "app_auth"}:
+        if route.get("access") not in {"protected", "private", "app_auth", "git_https"}:
             raise CatalogueError("Доступ к приложению не подтверждён")
         service = spec["service"]
         name, subtitle, emoji = NAMES.get(service, (route.get("name", service.replace("-", " ").title()), domain, "🔗"))

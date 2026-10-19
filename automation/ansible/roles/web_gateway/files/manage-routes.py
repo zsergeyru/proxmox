@@ -25,7 +25,8 @@ CONFIG = Path("/etc/web-gateway/caddy")
 POLICY = CONFIG / "routes-policy.json"
 TEMPLATE = CONFIG / "sites.generated.caddy.j2"
 CONTAINER = "web-gateway-caddy"
-ALLOWED_ACCESS = frozenset({"protected", "private", "app_auth"})
+ALLOWED_ACCESS = frozenset({"protected", "private", "app_auth", "git_https"})
+GOGS_DOMAIN = "git.zsergey.ru"
 
 
 def _refresh_apps(state: Path, config: Path) -> None:
@@ -123,7 +124,15 @@ def _validate_routes(routes: object, policy: dict) -> list[dict]:
         else:
             if row.get("service") != baseline.get("service"):
                 raise RuntimeError("Нельзя менять назначение домена из Git")
-            if row.get("upstream") is not None and row["upstream"] != baseline.get("upstream"):
+            is_gogs = domain == GOGS_DOMAIN and baseline.get("service") == "gogs"
+            if is_gogs:
+                # Единственный служебный маршрут с внутренним адресом,
+                # задаваемым на закрытой странице после установки Gogs.
+                if mode != "git_https":
+                    raise RuntimeError("Gogs должен использовать собственный вход Git HTTPS")
+                if row.get("upstream") is not None and not _private_upstream(row["upstream"], policy):
+                    raise RuntimeError("Gogs должен указывать только на внутренний IPv4")
+            elif row.get("upstream") is not None and row["upstream"] != baseline.get("upstream"):
                 raise RuntimeError("Адрес приложения должен определяться только в Git")
             if domain in public:
                 if not row["enabled"] or mode != "public":
@@ -132,9 +141,14 @@ def _validate_routes(routes: object, policy: dict) -> list[dict]:
                 raise RuntimeError("Открытый доступ для этого домена запрещён")
             if mode == "app_auth" and (domain != "photos.zsergey.ru" or baseline.get("service") != "immich"):
                 raise RuntimeError("Самостоятельный вход разрешён только для Immich")
+            if mode == "git_https" and not is_gogs:
+                raise RuntimeError("Git HTTPS без Authelia разрешён только Gogs")
             if row["enabled"]:
-                expected = baseline.get("upstream")
-                if not isinstance(expected, str) or not re.fullmatch(r"http://[a-z0-9.-]+:[0-9]{2,5}", expected):
+                expected = row.get("upstream") if is_gogs else baseline.get("upstream")
+                if is_gogs:
+                    if not _private_upstream(expected, policy):
+                        raise RuntimeError("Укажите внутренний адрес Gogs до включения")
+                elif not isinstance(expected, str) or not re.fullmatch(r"http://[a-z0-9.-]+:[0-9]{2,5}", expected):
                     raise RuntimeError("Нет заранее утверждённого адреса приложения")
                 if mode == "app_auth" and not policy.get("allow_immich_activation", False):
                     raise RuntimeError("Immich сначала должен пройти отдельную проверку входа")
@@ -202,7 +216,13 @@ def apply_route(state: Path, config: Path, action: str, domain: str, *,
                 if upstream is not None: selected["upstream"] = upstream
                 if name is not None: selected["name"] = name
             elif upstream is not None or name is not None:
-                raise ValueError("Назначения из Git нельзя менять")
+                # Для Gogs домен и служба закреплены в Git, но адрес
+                # ещё не известен; он устанавливается через эту форму.
+                if (domain == GOGS_DOMAIN and selected.get("service") == "gogs"
+                        and upstream is not None and name is None):
+                    selected["upstream"] = upstream
+                else:
+                    raise ValueError("Назначения из Git нельзя менять")
         rows = _validate_routes(rows, policy)
         candidate = _render(rows, policy, template)
         yaml_bytes = yaml.safe_dump(rows, allow_unicode=True, sort_keys=False).encode()

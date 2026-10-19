@@ -77,6 +77,20 @@ def check() -> None:
     assert "rewrite * /portal-home.html" in routes
     assert "rewrite * /portal-admin.html" in routes
     assert "http://homarr:7575" not in routes
+    # Git HTTPS проксируется непосредственно на Gogs; новый домен
+    # без заданного адреса не открывается автоматически.
+    gogs = next(route for route in web["caddy"]["routes"]
+                if route["domain"] == "git.zsergey.ru")
+    assert gogs["service"] == "gogs" and gogs["access"] == "git_https"
+    assert gogs["upstream"] is None and gogs["enabled"] is False
+    assert "git.zsergey.ru {" not in routes
+    active_gogs = dict(gogs, upstream="http://192.168.1.55:3000", enabled=True)
+    git_sites = environment.get_template("sites.generated.caddy.j2").render(
+        provision=provision, web_gateway_routes=[active_gogs])
+    assert "git.zsergey.ru {" in git_sites
+    assert "reverse_proxy http://192.168.1.55:3000" in git_sites
+    assert "header_up -X-WEBAUTH-USER" in git_sites
+    assert "forward_auth" not in git_sites
     assert "script-src 'self'" in routes
     auth=environment.get_template("authelia-configuration.yml.j2").render(**context)
     access=yaml.safe_load(auth.split("\nidentity_providers:",1)[0])["access_control"]["rules"]
@@ -99,6 +113,7 @@ def check() -> None:
         "web-gateway-portal.service","admin-api.py","initialize-totp.py",
     ))
     assert "home-apps.py" in sync
+    assert "git_https" in tasks and "git_https" in sync
     assert "infra_state" in provision["pve_storage"]["volumes"][0]["name"]
     files={r["path"] for r in status["checks"] if r["type"]=="file"}
     assert "/etc/web-gateway/portal/portal-home.html" in files
