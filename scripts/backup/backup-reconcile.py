@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import argparse
+import fcntl
 from datetime import datetime, timezone
 import importlib.util
 import json
@@ -24,6 +25,8 @@ DESIRED = Path("/usr/local/share/infra-manager/backup.yaml.default")
 DEVICES = Path("/usr/local/share/infra-manager/storage-pve.yaml.default")
 CURRENT = Path("/etc/infra-manager/backup/backup.yaml")
 REPORT = Path("/var/lib/infra-manager/backup/reconcile.json")
+BACKUP_GATE = Path("/mnt/bindmounts/infra-manager/state/locks/backup-gate.lock")
+ACTIVATION = Path("/mnt/bindmounts/infra-manager/state/semaphore/.infra-manager-runtime-activation-pending")
 
 
 def module(filename: str, name: str):
@@ -163,7 +166,34 @@ def prepare_nas(config: dict[str, Any]) -> None:
     mount.configure_nas(source)
 
 
-def ready(config: dict[str, Any]) -> None:
+def readiness_lock():
+    """Запретить получение root token и изменение дисков параллельно deploy."""
+
+    if BACKUP_GATE.is_symlink() or not BACKUP_GATE.is_file():
+        raise RuntimeError("Ожидание запуска общего контура блокировок 910")
+    fd = os.open(BACKUP_GATE, os.O_RDONLY | os.O_NOFOLLOW)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError as exc:
+        os.close(fd)
+        raise RuntimeError("Идёт развёртывание; резервирование будет повторено") from exc
+    if ACTIVATION.exists():
+        os.close(fd)
+        raise RuntimeError("Активация 910 ещё не завершена")
+
+    released = False
+
+    def release() -> None:
+        nonlocal released
+        if not released:
+            released = True
+            fcntl.flock(fd, fcntl.LOCK_UN)
+            os.close(fd)
+
+    return release
+
+
+def ready(config: dict[str, Any], *, release_lock) -> None:
     """Создать и включить резервирование только после всех проверок."""
 
     core = module("backup-pve.py", "infra_backup_core")
@@ -185,6 +215,9 @@ def ready(config: dict[str, Any]) -> None:
                 "в backup.yaml для третьего проверенного носителя"
             )
         setup.export_key(Path(key_dest))
+    # Полное копирование само берёт исключительную блокировку. Перед ним
+    # отпустить блокировку согласования, чтобы не заблокировать себя.
+    release_lock()
     if not core.LAST_SUCCESS.is_file():
         core.backup(config, execute=True)
     setup.enable()
@@ -229,19 +262,24 @@ def status() -> None:
 
 
 def reconcile() -> None:
-    """Идемпотентная процедура: сбой носителя не делает 910 неработоспособным."""
+    """Отложенное согласование не вмешивается в работающий deploy 910."""
 
-    config, storage = reconcile_config()
+    release = None
     try:
+        release = readiness_lock()
+        config, storage = reconcile_config()
         prepare_ssd(config, storage)
         prepare_nas(config)
         # mount-операции меняют локальные обнаруженные UUID.
         config = load_yaml(CURRENT)
-        ready(config)
+        ready(config, release_lock=release)
     except (RuntimeError, OSError, ValueError, KeyError) as exc:
         save_report("pending", str(exc))
         print(f"[ПРЕДУПРЕЖДЕНИЕ] Резервирование ожидает подготовки: {exc}")
         return
+    finally:
+        if release is not None:
+            release()
     save_report("ready", "Оба хранилища подтверждены, копирование включено")
     print("[ОК] Резервирование PVE, 910 и VM 100 подключено к расписанию")
 
