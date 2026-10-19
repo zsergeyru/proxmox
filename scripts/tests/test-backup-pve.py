@@ -97,6 +97,7 @@ def test_plan_does_not_take_snapshot() -> None:
         with (
             patch.object(backup, "check_source"),
             patch.object(backup, "check_destinations", return_value=[first, second]),
+            patch.object(backup, "check_openbao_credentials"),
             patch.object(backup.shutil, "which", return_value="/usr/bin/restic"),
             patch.object(backup, "restic_command", side_effect=lambda *a: calls.append(a)),
             patch.object(backup, "sqlite_snapshot") as sqlite_copy,
@@ -126,6 +127,7 @@ def test_no_partial_success_if_snapshot_fails() -> None:
         with (
             patch.object(backup, "check_source"),
             patch.object(backup, "check_destinations", return_value=targets),
+            patch.object(backup, "check_openbao_credentials"),
             patch.object(backup.shutil, "which", return_value="/usr/bin/restic"),
             patch.object(backup, "restic_command", side_effect=lambda *a: calls.append(a)),
             patch.object(backup, "operation_guard", return_value=contextlib.nullcontext()),
