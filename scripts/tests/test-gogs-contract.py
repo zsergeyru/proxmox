@@ -94,7 +94,7 @@ def test_data_protection() -> None:
             helper.configure(data, "git.zsergey.ru", "https://git.zsergey.ru/", 2222)
         assert saved == (data / "gogs/conf/app.ini").read_text(encoding="utf-8")
         settings = configparser.ConfigParser(interpolation=None)
-        settings.read_string(saved)
+        settings.read_string("[__global__]\n" + saved)
         assert settings["server"]["DOMAIN"] == "git.zsergey.ru"
         assert settings["server"]["EXTERNAL_URL"] == "https://git.zsergey.ru/"
         assert settings["server"]["START_SSH_SERVER"] == "true"
