@@ -154,6 +154,41 @@ def test():
                 rejects(lambda: manager.apply_route(state, config, "delete", "home.zsergey.ru"))
                 manager.apply_route(state, config, "delete", "printer.zsergey.ru")
                 assert "printer.zsergey.ru" not in {r["domain"] for r in yaml.safe_load(routes.read_text())}
+
+            # Gogs объявлен в Git, но адрес задаётся позднее, на постоянном томе.
+            gogs = {"domain": "git.zsergey.ru", "service": "gogs",
+                    "upstream": None, "enabled": False, "access": "git_https"}
+            policy["web_gateway"]["caddy"]["routes"].append(gogs)
+            (config / "routes-policy.json").write_text(json.dumps(policy), encoding="utf-8")
+            saved = yaml.safe_load(routes.read_text())
+            saved.append(gogs.copy())
+            routes.write_text(yaml.safe_dump(saved), encoding="utf-8")
+            assert manager._validate_routes(saved, policy) == saved
+            with (
+                patch.object(manager.subprocess, "run", return_value=SimpleNamespace(returncode=0)),
+                patch.object(manager, "_refresh_apps"),
+            ):
+                rejects(lambda: manager.change_route(state, config, "git.zsergey.ru", True, "git_https"))
+                manager.apply_route(state, config, "update", "git.zsergey.ru",
+                                    enabled=True, access="git_https",
+                                    upstream="http://192.168.1.55:3000")
+                saved = yaml.safe_load(routes.read_text())
+                current = next(row for row in saved if row["domain"] == "git.zsergey.ru")
+                assert current["enabled"] and current["upstream"] == "http://192.168.1.55:3000"
+                assert "git.zsergey.ru {" in active.read_text()
+                assert "forward_auth" not in active.read_text().split("git.zsergey.ru {", 1)[1]
+                rejects(lambda: manager.change_route(state, config, "git.zsergey.ru", True, "protected"))
+                rejects(lambda: manager.apply_route(state, config, "update", "git.zsergey.ru",
+                    enabled=True, access="git_https", upstream="http://8.8.8.8:3000"))
+                rejects(lambda: manager.change_route(state, config, "ai.zsergey.ru", True, "git_https"))
+                saved = yaml.safe_load(routes.read_text())
+                apps_spec = importlib.util.spec_from_file_location(
+                    "home_apps_gogs", FILES / "home-apps.py")
+                assert apps_spec and apps_spec.loader
+                app_module = importlib.util.module_from_spec(apps_spec)
+                apps_spec.loader.exec_module(app_module)
+                assert any(app["url"] == "https://git.zsergey.ru"
+                           for app in app_module.build_apps(saved, policy)["apps"])
         with patch.object(manager.os.path, "ismount", return_value=False):
             rejects(lambda: manager.change_route(state, config, "ai.zsergey.ru", False, "protected"))
     print("140: изменение маршрута откатывается при ошибке Caddy")
