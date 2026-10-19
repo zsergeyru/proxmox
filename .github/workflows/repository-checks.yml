@@ -211,6 +211,9 @@ jobs:
 
       - name: Check disk and recovery backup preparations
         run: python scripts/tests/test-backup-pve-setup.py
+
+      - name: Enforce root project rules and unified operator interface
+        run: python scripts/tests/test-project-interface.py
       - name: Check Immich login safety in web gateway
         run: python scripts/tests/test-web-gateway-immich.py
 
