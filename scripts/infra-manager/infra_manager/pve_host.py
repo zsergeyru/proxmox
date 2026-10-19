@@ -308,10 +308,10 @@ def install_recovery_host_support(node: str, repo_root: Path) -> None:
 
 
 def install_backup_host_support(node: str, repo_root: Path) -> None:
-    """Установить PVE-only код копирования без включения расписания.
+    """Подключить резервирование к обычному deploy без отдельной команды.
 
-    Локальная backup.yaml никогда не перезаписывается версией из Git.
-    Пока не проверены диски и ключи, таймер остаётся выключенным.
+    Устанавливает код и безопасное часовое согласование. Отсутствие или
+    неподтверждённость носителей не влияет на рабочий контур 910.
     """
 
     source = repo_root / "scripts" / "backup"
@@ -323,21 +323,15 @@ def install_backup_host_support(node: str, repo_root: Path) -> None:
         "backup-setup.py",
         "backup-restore.py",
         "openbao-raft-guest.py",
+        "backup-reconcile.py",
     ):
         _install_remote_file(node, source / name, target / name, "0700")
-    _install_remote_file(
-        node,
-        repo_root / "scripts/infra-manager/host/infra_manager_backup.py",
-        OPERATOR_HOST_COMMAND.with_name("infra_manager_backup.py"),
-        "0644",
-    )
-    _install_remote_file(
-        node,
-        source / "infra-manager-backup.py",
-        OPERATOR_HOST_COMMAND.with_name("infra-manager-backup"),
-        "0755",
-    )
-    for name in ("infra-manager-backup.service", "infra-manager-backup.timer"):
+    for name in (
+        "infra-manager-backup.service",
+        "infra-manager-backup.timer",
+        "infra-manager-backup-reconcile.service",
+        "infra-manager-backup-reconcile.timer",
+    ):
         _install_remote_file(
             node, source / name, Path("/etc/systemd/system") / name, "0644",
         )
@@ -347,23 +341,37 @@ def install_backup_host_support(node: str, repo_root: Path) -> None:
         Path("/usr/local/share/infra-manager/backup.yaml.default"),
         "0600",
     )
+    _install_remote_file(
+        node,
+        repo_root / "infrastructure/hosts/pve/storage.yaml",
+        Path("/usr/local/share/infra-manager/storage-pve.yaml.default"),
+        "0600",
+    )
+    # Установить системные зависимости автоматически, а не давать владельцу
+    # дополнительные команды apt. Используются пакеты самого Debian PVE.
     _ssh(
         node, "sh", "-c",
         "set -eu; "
         "install -d -m 0700 /etc/infra-manager/backup; "
-        "if [ ! -e /etc/infra-manager/backup/backup.yaml ]; then "
-        "install -m 0600 /usr/local/share/infra-manager/backup.yaml.default "
-        "/etc/infra-manager/backup/backup.yaml; "
+        "if ! python3 -c 'import yaml' >/dev/null 2>&1 "
+        "|| ! command -v restic >/dev/null 2>&1 "
+        "|| ! command -v partprobe >/dev/null 2>&1 "
+        "|| ! command -v mount.nfs4 >/dev/null 2>&1; then "
+        "apt-get update >/dev/null && "
+        "DEBIAN_FRONTEND=noninteractive apt-get install -y "
+        "python3-yaml restic parted nfs-common >/dev/null; "
         "fi; "
-        "systemctl daemon-reload",
+        "systemctl daemon-reload; "
+        "systemctl enable --now infra-manager-backup-reconcile.timer >/dev/null; "
+        "python3 /usr/local/lib/infra-manager/backup/backup-reconcile.py",
     )
-    console.detail("Программы резервирования PVE установлены; расписание не включено")
+    console.detail("Резервирование включено в развёртывание; проверка носителей выполнена")
+
 
 
 def install_operator_host_support(node: str, repo_root: Path) -> None:
-    """Установить на PVE тонкую операторскую оболочку и защиту копий."""
+    """Установить на PVE тонкую операторскую оболочку."""
 
-    install_backup_host_support(node, repo_root)
     host_root = repo_root / "scripts" / "infra-manager" / "host"
     # Сначала вспомогательная функция запроса пароля, затем основной вход.
     _install_remote_file(
