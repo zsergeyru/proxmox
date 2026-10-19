@@ -29,8 +29,21 @@ def checked_record_path(
     new_dir = root / "physical-hosts"
     previous = old_dir / filename
     current = new_dir / filename
-    if new_dir.is_symlink() or old_dir.is_symlink():
-        raise InfraManagerError("Каталог подтверждений физических машин не должен быть ссылкой")
+    if new_dir.is_symlink():
+        # На самой ОС 910 это ожидаемая ссылка на bind mount PVE.
+        # В infra-runtime тот же каталог подключён Docker напрямую.
+        expected = Path("/mnt/persistent-state/physical-hosts")
+        if not expected.is_dir() or new_dir.resolve() != expected.resolve():
+            raise InfraManagerError(
+                "Каталог подтверждений указывает не на постоянное состояние PVE"
+            )
+    if old_dir.is_symlink():
+        raise InfraManagerError("Неожиданная ссылка вместо прежних подтверждений")
+    if not new_dir.is_dir():
+        raise InfraManagerError(
+            "Отсутствует постоянный каталог physical-hosts; "
+            "сначала выполните deploy 910 и проверьте подключение состояния"
+        )
     if current.is_symlink() or previous.is_symlink():
         raise InfraManagerError("Подмена файла подтверждений символьной ссылкой запрещена")
     if previous.exists():
