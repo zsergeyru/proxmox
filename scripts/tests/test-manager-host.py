@@ -286,42 +286,49 @@ def test_operator_guest_task_secret_policy() -> None:
         "Операция deploy для гостя 410 не завершена (код 7). Выполните infra-manager status 410, устраните указанную выше причину и повторите операцию."
     )
 
-    with (
-        patch.object(
-            operator,
-            "_prepare_runtime_snapshot",
-            return_value="/tmp/infra-manager-direct-test-910",
-        ),
-        patch.object(
-            operator,
-            "run",
-            return_value=SimpleNamespace(returncode=0),
-        ),
-        patch.object(
-            operator,
-            "guest_identity",
-            return_value=SimpleNamespace(
-                vmid=910,
-                name="infra-manager",
-                role=operator.SETTINGS.infra_manager_role,
-            ),
-        ) as identity,
-        patch.object(
-            operator, "operator_guest_status", return_value=0
-        ) as status,
-        patch.object(operator, "console") as console,
-    ):
-        assert operator.operator_guest_task(
-            "deploy",
-            910,
-            show_secrets=True,
-        ) == 0
+    # Самообновление не должно возвращать успех до проверки systemd.
+    from infra_manager.operation_store import OperationStore
 
-    identity.assert_called_once_with(operator.PATHS.repo_root, 910)
-    status.assert_not_called()
-    info = console.info.call_args.args[0]
-    assert "синхронизирует Semaphore" in info
-    assert "runtime-activation.log" in info
+    with tempfile.TemporaryDirectory() as directory:
+        store = OperationStore(Path(directory) / "operations", require_mount=False)
+        with (
+            patch("infra_manager.operation_store.OperationStore", return_value=store),
+            patch.object(operator, "project_revision", return_value="abc123"),
+            patch.object(
+                operator,
+                "_prepare_runtime_snapshot",
+                return_value="/tmp/infra-manager-direct-test-910",
+            ),
+            patch.object(
+                operator,
+                "run",
+                return_value=SimpleNamespace(returncode=0),
+            ),
+            patch.object(
+                operator,
+                "guest_identity",
+                return_value=SimpleNamespace(
+                    vmid=910,
+                    name="infra-manager",
+                    role=operator.SETTINGS.infra_manager_role,
+                ),
+            ) as identity,
+            patch.object(
+                operator, "operator_guest_status", return_value=0
+            ) as status,
+            patch.object(operator, "console") as console,
+        ):
+            assert operator.operator_guest_task(
+                "deploy",
+                910,
+                show_secrets=True,
+            ) == 2
+
+        assert identity.call_count >= 1
+        status.assert_not_called()
+        assert store.list_recent()[0]["phase"] == "activating"
+        assert store.list_recent()[0]["result"] is None
+        assert "Активация продолжается отдельно" in str(console.info.call_args.args[0])
 
 
 def test_internal_project_refresh_uses_existing_checkout() -> None:
