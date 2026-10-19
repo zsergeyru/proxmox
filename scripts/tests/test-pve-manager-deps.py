@@ -13,6 +13,8 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "scripts/infra-manager/host"))
+import infra_manager_python_deps as deps
 SOURCE = ROOT / "scripts/infra-manager/host/manager.py"
 spec = importlib.util.spec_from_file_location("test_pve_operator_deps_module", SOURCE)
 assert spec is not None and spec.loader is not None
@@ -32,8 +34,7 @@ def test_already_installed():
         commands.append(argv)
         return reply()
 
-    with patch.object(manager, "run", side_effect=run):
-        manager.restore_manager_python_dependency(910)
+    deps.restore_manager_python_dependency(910, run=run, error_type=manager.OperatorError)
     assert commands == [
         ["pct", "exec", "910", "--", "python3", "-c", "import jsonschema"]
     ]
@@ -47,8 +48,7 @@ def test_missing_package_installed_automatically():
             return reply(1, "ModuleNotFoundError: No module named 'jsonschema'")
         return reply()
 
-    with patch.object(manager, "run", side_effect=run):
-        manager.restore_manager_python_dependency(910)
+    deps.restore_manager_python_dependency(910, run=run, error_type=manager.OperatorError)
     assert len(commands) == 4
     assert commands[1][0] == ["pct", "exec", "910", "--", "apt-get", "update"]
     assert commands[2][0] == [
@@ -79,7 +79,7 @@ def test_preflight_only_for_verified_manager_deploy():
         patch.object(manager, "manager_identity", return_value=(910, "infra-manager")),
         patch.object(manager, "verify_manager"),
         patch.object(manager, "guest_running", return_value=True),
-        patch.object(manager, "restore_manager_python_dependency") as bootstrap,
+        patch.object(deps, "restore_manager_python_dependency") as bootstrap,
         patch.object(manager, "run", return_value=reply()) as invoke,
     ):
         assert manager.proxy_to_manager(["status", "910"]) == 0
@@ -87,7 +87,7 @@ def test_preflight_only_for_verified_manager_deploy():
         assert manager.proxy_to_manager(["deploy", "410"]) == 0
         bootstrap.assert_not_called()
         assert manager.proxy_to_manager(["deploy", "910"]) == 0
-        bootstrap.assert_called_once_with(910)
+        bootstrap.assert_called_once_with(910, run=manager.run, error_type=manager.OperatorError)
         assert any("pct" in call.args[0] for call in invoke.call_args_list)
 
 
