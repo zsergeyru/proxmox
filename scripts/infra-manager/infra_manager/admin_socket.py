@@ -79,7 +79,7 @@ def _dispatch_storage(request: dict) -> dict:
     if set(request) != required:
         raise InfraManagerError("Недопустимые поля запроса SSD")
     owner = find_guest_by_role(PATHS.repo_root, SETTINGS.infra_manager_role)
-    if (type(request["vmid"]) is not int or request["vmid"] != owner.vmid
+    if (type(request["vmid"]) is not int or request["vmid"] not in (0, owner.vmid)
             or not isinstance(request["request_id"], str)
             or not REQUEST_ID.fullmatch(request["request_id"])):
         raise InfraManagerError("SSD может управлять только подтверждённый 910")
