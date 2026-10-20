@@ -66,6 +66,7 @@ def main() -> None:
             + git(repo, "rev-parse", "HEAD:" + fast.WEB.rstrip("/")) + "\n"
             "RUNTIME_MODE=standalone\n", encoding="utf-8",
         )
+        (base / "state").mkdir()
         store = OperationStore(base / "state" / "operations", require_mount=False)
 
         # На CI выполняем те же IO, но не требуем root-UID на файловой системе runner.
