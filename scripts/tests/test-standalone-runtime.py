@@ -114,7 +114,7 @@ def main() -> None:
 
     # При частичном self-update не оставлять OpenBao запечатанным,
     # если следующая задача Ansible закончится ошибкой.
-    role_start = runtime_role.index("- name: Перезапустить OpenBao")
+    role_start = runtime_role.index("- name: Подтвердить запуск OpenBao без принудительного пересоздания")
     role_unseal = runtime_role.index(
         "- name: Сразу разблокировать OpenBao после обновления контейнера 910"
     )

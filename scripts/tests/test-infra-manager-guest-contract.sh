@@ -578,23 +578,27 @@ apt_install = install.get("ansible.builtin.apt", {})
 if apt_install.get("cache_valid_time", 0) < 3600 or not apt_install.get("update_cache"):
     raise SystemExit("Повторное применение Ansible не должно принудительно обновлять APT")
 
-runtime_restart = named(runtime, "Перезапустить OpenBao после изменения конфигурации")
-runtime_reuse = named(runtime, "Подтвердить запуск OpenBao без повторного создания")
+runtime_restart = named(runtime, "Пересоздать OpenBao при изменении его TLS-материалов")
+runtime_reuse = named(runtime, "Подтвердить запуск OpenBao без принудительного пересоздания")
 bootstrap_openbao = named(bootstrap, "Запустить только OpenBao для восстановления центра доступа")
 runtime_restart_args = runtime_restart["ansible.builtin.command"]["argv"]
 runtime_reuse_args = runtime_reuse["ansible.builtin.command"]["argv"]
 bootstrap_args = bootstrap_openbao["ansible.builtin.command"]["argv"]
 if "--force-recreate" not in runtime_restart_args or "--force-recreate" in runtime_reuse_args:
-    raise SystemExit("Принудительное пересоздание OpenBao допустимо только при изменениях")
-conditions = ("infra_compose_files.changed", "infra_compose_versions.changed", "openbao_tls_files.results")
-restart_when = runtime_restart.get("when", "")
-reuse_when = runtime_reuse.get("when", "")
-if not all(token in restart_when and token in reuse_when for token in conditions):
-    raise SystemExit("Обновление OpenBao должно учитывать изменения файлов, версий и TLS")
-if not reuse_when.strip().startswith("not ("):
-    raise SystemExit("Повторный запуск без пересоздания должен иметь обратное условие")
+    raise SystemExit("OpenBao нельзя принудительно пересоздавать при правке web или Git SHA")
+if "openbao_tls_files.results" not in runtime_restart.get("when", ""):
+    raise SystemExit("Обновление OpenBao обязано учитывать смену сертификатов")
+if "infra_compose_versions.changed" in runtime_restart.get("when", ""):
+    raise SystemExit("Новый Git SHA не должен вызывать перезапуск OpenBao")
 if "--force-recreate" not in bootstrap_args:
     raise SystemExit("Первый запуск OpenBao при recovery должен сохранять принудительное создание")
+selective_runtime = named(runtime, "Собрать infra-runtime только при изменении исходников")
+selective_web = named(runtime, "Собрать infra-web только при изменении исходников")
+if selective_runtime.get("when") != "infra_build_runtime" or selective_web.get("when") != "infra_build_web":
+    raise SystemExit("Docker-образы должны собираться раздельно только при изменении")
+download = named(runtime, "Проверить доступ к источникам сборки управляющей среды")
+if download.get("when") != "infra_build_runtime":
+    raise SystemExit("Сетевая проверка OpenTofu/Packer не нужна без пересборки runtime")
 
 portal = named(runtime, "Включить службу действий локального портала")
 portal_service = portal["ansible.builtin.systemd_service"]

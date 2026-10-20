@@ -179,12 +179,8 @@ docker compose \
     --env-file "$COMPOSE_DIR/.versions.env" \
     -f "$COMPOSE_FILE" up -d --no-build --remove-orphans
 
-# Пересоздать только веб-панель из собранного образа; проверка readiness
-# ниже сравнит встроенный в него Git SHA с текущим release. Не затрагивать
-# OpenBao и уже исполняющий задания infra-runtime.
-docker compose \
-    --env-file "$COMPOSE_DIR/.versions.env" \
-    -f "$COMPOSE_FILE" up -d --no-build --no-deps --force-recreate web
+# Compose пересоздаёт web лишь при изменении образа либо его окружения.
+# Второй force-recreate был лишним и сбрасывал активные веб-сессии.
 
 /usr/local/sbin/infra-manager-openbao-startup-unseal "$PVE_NODE"
 

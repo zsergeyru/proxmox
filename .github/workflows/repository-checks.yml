@@ -145,6 +145,9 @@ jobs:
       - name: Check staged runtime without Semaphore
         run: python scripts/tests/test-standalone-runtime.py
 
+      - name: Check selective 910 Docker rebuild decisions
+        run: python scripts/tests/test-selective-runtime-build.py
+
       - name: Check infra-web readonly preview
         run: python scripts/tests/test-infra-web.py
 

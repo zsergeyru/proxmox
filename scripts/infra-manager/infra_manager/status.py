@@ -436,26 +436,31 @@ def _check_infra_web() -> None:
     """
     import re
 
-    release = read_env_file(
+    expected_versions = read_env_file(
         Path("/opt/infra-manager/compose/.versions.env")
-    ).get("INFRA_GIT_REVISION", "")
+    )
+    release = expected_versions.get("INFRA_GIT_REVISION", "")
     if not re.fullmatch(r"[0-9a-f]{40}", release):
-        raise InfraManagerError(
-            "Не зафиксирована Git-версия Docker-образов 910"
-        )
-    for container, variable in (
-        ("infra-web", "INFRA_WEB_BUILD_REVISION"),
-        ("infra-runtime", "INFRA_RUNTIME_BUILD_REVISION"),
+        raise InfraManagerError("Не зафиксирована Git-версия 910")
+    for container, variable, expected_key in (
+        ("infra-web", "INFRA_WEB_BUILD_REVISION", "INFRA_WEB_CONTENT_REVISION"),
+        ("infra-runtime", "INFRA_RUNTIME_BUILD_REVISION", "INFRA_RUNTIME_CONTENT_REVISION"),
     ):
+        expected = expected_versions.get(expected_key, "")
+        if not re.fullmatch(r"[0-9a-f]{40}", expected):
+            raise InfraManagerError(
+                f"{container}: нет отпечатка исходного кода {expected_key}"
+            )
         revision = command_runner.run(
             ["docker", "exec", container, "python3", "-c",
              "import os; print(os.environ.get(" + repr(variable) + ", ''))"],
             capture=True, check=False,
         )
-        if revision.returncode or revision.stdout.strip() != release:
+        if revision.returncode or revision.stdout.strip() != expected:
             raise InfraManagerError(
-                f"{container}: исполняемый Docker-образ не соответствует Git "
-                f"{release[:12]}; проверьте сборку и активацию 910"
+                f"{container}: запущенный образ не соответствует исходникам "
+                f"{expected[:12]} версии Git {release[:12]}; "
+                "проверьте сборку и активацию 910"
             )
     for container in ("infra-web",):
         result = command_runner.run(
