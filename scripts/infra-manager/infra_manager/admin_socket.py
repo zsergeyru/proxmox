@@ -11,6 +11,7 @@ import os
 import re
 import socketserver
 import stat
+from datetime import datetime
 from pathlib import Path
 
 import yaml
@@ -126,6 +127,177 @@ def _dispatch_history(request: dict) -> dict:
     return {"accepted": True, "operations": operations}
 
 
+
+# Показываем оператору только строки стандартного формата, а не сырые журналы.
+# Даже строки известных уровней отбрасываются, если похожи на секреты.
+SAFE_LOG = re.compile(r"^(?:\[(?:ИНФО|ОК|ОШИБКА|ВРЕМЯ|ПРЕРВАНО|ПРЕДУПРЕЖДЕНИЕ)\]|ОШИБКА:)\s*")
+PRIVATE_LOG = re.compile(
+    r"(?i)(?:password|passwd|passphrase|token|secret|credential|authorization|cookie|"
+    r"private.?key|api.?key|парол|токен|секрет|ключ|bearer|-----BEGIN|"
+    r"[A-Za-z0-9_+/=-]{72,})"
+)
+ACTIVATION_LOG = Path("/var/log/infra-manager/runtime-activation.log")
+MAX_LOG_FILE = 131072
+MAX_LOG_ENTRIES = 50
+
+
+def _read_log_tail(path: Path, limit: int = MAX_LOG_FILE) -> str:
+    """Прочитать только конец обычного файла; symlink и специальные файлы запрещены."""
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    try:
+        meta = os.fstat(fd)
+        if not stat.S_ISREG(meta.st_mode):
+            raise InfraManagerError("Журнал не является обычным файлом")
+        os.lseek(fd, max(0, meta.st_size - limit), os.SEEK_SET)
+        return os.read(fd, limit).decode("utf-8", errors="replace")
+    finally:
+        os.close(fd)
+
+
+def _filter_log(lines: list[str]) -> list[str]:
+    """Не публиковать неизвестные строки, управляющие символы и вероятные секреты."""
+    result = []
+    for line in lines:
+        line = line.strip()
+        if not SAFE_LOG.match(line) or PRIVATE_LOG.search(line):
+            continue
+        if any(ord(c) < 32 or ord(c) == 127 for c in line):
+            continue
+        result.append(line[:240])
+    return result[-MAX_LOG_ENTRIES:]
+
+
+def _operation_journal(operation_id: str) -> list[str]:
+    """Только заранее известный systemd unit конкретного UUID, без shell."""
+    try:
+        outcome = run(
+            ["timeout", "3s", "journalctl", "--no-pager", "--quiet",
+             "--output=cat", "--lines=50",
+             "--unit", f"infra-operation-{operation_id}.service"],
+            capture_output=True, check=False,
+        )
+        if outcome.returncode:
+            return []
+        return _filter_log(outcome.stdout[:MAX_LOG_FILE].splitlines())
+    except OSError:
+        return []
+
+
+def _activation_journal(operation_id: str) -> list[str]:
+    """Не смешивать соседние обновления 910 в общем журнале активации."""
+    try:
+        content = _read_log_tail(ACTIVATION_LOG)
+    except OSError:
+        return []
+    marker = f"[ИНФО] Операция активации: {operation_id}"
+    position = content.rfind(marker)
+    if position < 0:
+        return []
+    lines = content[position:].splitlines()
+    # Следующий запуск открывает новую секцию; чужие операции не читаем.
+    stop = next(
+        (i for i, line in enumerate(lines[1:], 1)
+         if line.startswith("[ИНФО] Операция активации: ")
+         or ("Активация infra-runtime, ветка" in line)),
+        len(lines),
+    )
+    return _filter_log(lines[:stop])
+
+
+def _operation_detail(request: dict) -> dict:
+    """Отдать ограниченную временную шкалу и безопасный диагностический вывод."""
+    if (not isinstance(request, dict)
+            or set(request) != {"kind", "vmid", "request_id", "operation_id"}
+            or request.get("kind") != "operation-detail"
+            or type(request.get("vmid")) is not int or request["vmid"] != 0
+            or not isinstance(request.get("request_id"), str)
+            or not REQUEST_ID.fullmatch(request["request_id"])
+            or not isinstance(request.get("operation_id"), str)
+            or not REQUEST_ID.fullmatch(request["operation_id"])):
+        raise InfraManagerError("Недопустимый запрос диагностики")
+    operation_id = request["operation_id"]
+    store = OperationStore()
+    record = store.get(operation_id)
+    if record.get("id") != operation_id:
+        raise InfraManagerError("История не соответствует идентификатору")
+    fields = ("id", "kind", "target", "phase", "created_at", "started_at",
+              "finished_at", "result", "exit_code", "activation_required")
+    safe_record = {key: record.get(key) for key in fields}
+    safe_record["id"] = operation_id
+    if safe_record["kind"] not in ACTIONS:
+        safe_record["kind"] = "неизвестно"
+    if safe_record["phase"] not in {
+        "queued", "running", "activating", "verifying", "completed",
+        "failed", "rolled-back", "needs-recovery",
+    }:
+        safe_record["phase"] = "неизвестно"
+    if type(safe_record["target"]) is not int or not 0 < safe_record["target"] < 1000000:
+        safe_record["target"] = 0
+    if safe_record["result"] not in {None, "ok", "failed", "rolled-back"}:
+        safe_record["result"] = None
+    if type(safe_record["exit_code"]) is not int or not 0 <= safe_record["exit_code"] <= 255:
+        safe_record["exit_code"] = None
+    for key in ("created_at", "started_at", "finished_at"):
+        value = safe_record[key]
+        if not isinstance(value, str) or len(value) > 40:
+            safe_record[key] = None
+        else:
+            try:
+                datetime.fromisoformat(value)
+            except ValueError:
+                safe_record[key] = None
+    safe_record["activation_required"] = safe_record["activation_required"] is True
+    events = []
+    try:
+        lines = _read_log_tail(store.logs / f"{operation_id}.jsonl", 65536).splitlines()
+    except OSError:
+        lines = []
+    for line in lines[-64:]:
+        try:
+            event = json.loads(line)
+        except (ValueError, TypeError):
+            continue
+        if (not isinstance(event, dict) or event.get("id") != operation_id
+                or not isinstance(event.get("at"), str)
+                or not isinstance(event.get("phase"), str)):
+            continue
+        try:
+            datetime.fromisoformat(event["at"])
+        except ValueError:
+            continue
+        if event["phase"] not in {
+            "queued", "running", "activating", "verifying",
+            "completed", "failed", "rolled-back", "needs-recovery",
+        }:
+            continue
+        events.append({"at": event["at"][:40], "phase": event["phase"]})
+    logs = _operation_journal(operation_id)
+    if safe_record["target"] == 910 and safe_record["activation_required"] is True:
+        logs.extend(_activation_journal(operation_id))
+    last_error = next(
+        (message for message in reversed(logs)
+         if message.startswith(("[ОШИБКА]", "ОШИБКА:", "[ПРЕРВАНО]"))),
+        None,
+    )
+    if safe_record["phase"] in {"failed", "needs-recovery", "rolled-back"}:
+        diagnostic = last_error or (
+            "Задание завершилось без подтверждения готовности. "
+            "Полный закрытый журнал доступен администратору в 910."
+        )
+    elif safe_record["phase"] in {"queued", "running", "activating", "verifying"}:
+        diagnostic = "Выполнение ещё не завершено."
+    else:
+        diagnostic = "Выполнение подтверждено." if safe_record["phase"] == "completed" else ""
+    return {
+        "accepted": True,
+        "operation": safe_record,
+        "events": events[-20:],
+        "logs": logs[-MAX_LOG_ENTRIES:],
+        "diagnostic": diagnostic,
+    }
+
+
+
 def dispatch(request: dict) -> dict:
     """Запустить только фиксированную системную задачу с неизменяемым UUID."""
     if isinstance(request, dict) and request.get("kind") in (
@@ -134,6 +306,8 @@ def dispatch(request: dict) -> dict:
         return _dispatch_storage(request)
     if isinstance(request, dict) and request.get("kind") == "history":
         return _dispatch_history(request)
+    if isinstance(request, dict) and request.get("kind") == "operation-detail":
+        return _operation_detail(request)
     if not isinstance(request, dict) or set(request) != {"kind", "vmid", "request_id"}:
         raise InfraManagerError("Неверный формат запроса")
     kind, vmid, operation_id = (
