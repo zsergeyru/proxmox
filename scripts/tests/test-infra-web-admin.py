@@ -144,8 +144,11 @@ def main():
             csrf = admin.sessions[token]["csrf"]
             status, _, _ = request(server, "POST", "/action", {"vmid": "109", "kind": "status", "csrf": csrf}, cookie=cookie, origin=False)
             assert status == 403, "Подмена источника недопустима"
-            status, _, body = request(server, "POST", "/action", {"vmid": "109", "kind": "status", "csrf": csrf}, cookie=cookie)
-            assert status == 202 and "Задание принято" in body
+            status, headers, body = request(server, "POST", "/action", {"vmid": "109", "kind": "status", "csrf": csrf}, cookie=cookie)
+            assert status == 303 and body == ""
+            assert headers["Location"] == "/operations?id=" + "a" * 32 or (
+                status == 303 and headers["Location"].startswith("/operations?id=")
+            )
             # Диагностика: авторизация, строгий UUID, экранирование журнала,
             # API для обновления без перезагрузки страницы.
             operation_id = "a" * 32
