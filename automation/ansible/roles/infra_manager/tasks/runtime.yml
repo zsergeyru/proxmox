@@ -12,6 +12,7 @@
       PACKER_VERSION={{ provision.docker.services.runtime.tools.packer }}
       PACKER_IMAGE={{ provision.docker.services.runtime.tools.packer_image }}
       OPENBAO_VERSION={{ provision.docker.services.openbao.image.split(':')[-1] }}
+      INFRA_WEB_PUBLIC_HOST={{ provision.docker.services.web.address }}:{{ provision.docker.services.web.port }}
   register: infra_compose_versions
 
 - name: Установить целевое описание проверок без Semaphore
@@ -19,6 +20,67 @@
     remote_src: true
     src: "{{ provision.paths.bootstrap_repository }}/infrastructure/guests/{{ guest }}/infra-manager-status-standalone.yaml"
     dest: "{{ provision.paths.configuration }}/status.yaml"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Подготовить закрытый каталог HTTPS панели 910
+  ansible.builtin.file:
+    path: /etc/infra-manager/web/tls
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"
+
+- name: Проверить наличие пары ключа и сертификата панели
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - /etc/infra-manager/web/tls/server.key
+    - /etc/infra-manager/web/tls/server.crt
+  register: infra_web_tls
+
+- name: Остановить настройку при неполной паре HTTPS
+  ansible.builtin.assert:
+    that:
+      - infra_web_tls.results[0].stat.exists == infra_web_tls.results[1].stat.exists
+      - not infra_web_tls.results[0].stat.islnk | default(false)
+      - not infra_web_tls.results[1].stat.islnk | default(false)
+    fail_msg: "Необходимо проверить ключ и сертификат infra-web, нельзя заменять один из них"
+
+- name: Создать собственный HTTPS-ключ панели при первоначальном запуске
+  ansible.builtin.command:
+    argv:
+      - openssl
+      - req
+      - -x509
+      - -nodes
+      - -newkey
+      - rsa:3072
+      - -keyout
+      - /etc/infra-manager/web/tls/server.key
+      - -out
+      - /etc/infra-manager/web/tls/server.crt
+      - -days
+      - "365"
+      - -subj
+      - "/CN={{ provision.docker.services.web.address }}"
+      - -addext
+      - "subjectAltName=IP:{{ provision.docker.services.web.address }}"
+  when: not infra_web_tls.results[0].stat.exists
+  changed_when: true
+  no_log: true
+
+- name: Защитить секретный HTTPS-ключ панели
+  ansible.builtin.file:
+    path: /etc/infra-manager/web/tls/server.key
+    owner: root
+    group: root
+    mode: "0640"
+
+- name: Зафиксировать публичный сертификат панели
+  ansible.builtin.file:
+    path: /etc/infra-manager/web/tls/server.crt
     owner: root
     group: root
     mode: "0644"
