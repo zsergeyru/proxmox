@@ -397,14 +397,13 @@ def ensure_originals_writable(originals: Path) -> None:
     Сами файлы и их содержимое не изменяются.
     """
     if shutil.which("setfacl") is None:
-        # На чистом PVE пакет acl может отсутствовать. Устанавливаем его
-        # штатным deploy только при необходимости изменить права оригиналов.
-        if shutil.which("apt-get") is None:
-            raise StorageError("На PVE недоступны setfacl и apt-get")
-        command("apt-get", "update")
-        command("apt-get", "install", "-y", "--no-install-recommends", "acl")
-        if shutil.which("setfacl") is None:
-            raise StorageError("Пакет acl установлен, но команда setfacl недоступна")
+        # На PVE запрещены автоматические установки пакетов. Если ACL нужен
+        # существующим фотографиям, сообщаем проблему и не меняем данные.
+        raise StorageError(
+            "На PVE отсутствует setfacl для сохранения прав фотоархива. "
+            "Автоматическая установка acl запрещена; требуется отдельно "
+            "согласовать безопасный способ изменения прав."
+        )
     for directory, _subdirs, _files in os.walk(originals, followlinks=False):
         command(
             "setfacl", "-m", "u:100000:rwx,d:u:100000:rwx", directory,
