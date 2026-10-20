@@ -6,7 +6,7 @@ ENV INFRA_WEB_BUILD_GIT_REVISION=${INFRA_GIT_REVISION}
 ENV INFRA_WEB_BUILD_REVISION=${INFRA_WEB_CONTENT_REVISION}
 
 WORKDIR /opt/infra-web
-COPY --chmod=0444 app.py admin.py diagnostics.js /opt/infra-web/
+COPY --chmod=0444 app.py admin.py diagnostics.js ui.js ui.css /opt/infra-web/
 
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1

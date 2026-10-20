@@ -66,6 +66,11 @@ def main():
             # Политика ответа с HTML-формой не должна делать Origin: null.
             status, headers, body = request(server, "GET", "/")
             assert status == 200 and 'action="/login"' in body
+            css_status, css_headers, css_body = request(server, "GET", "/ui.css")
+            assert css_status == 200 and "text/css" in css_headers["Content-Type"]
+            assert ".sidebar" in css_body and ".guest-grid" in css_body
+            js_status, _, _ = request(server, "GET", "/ui.js")
+            assert js_status == 401, "UI JavaScript не отдаётся без входа"
             assert "Версии компонентов" in body
             assert "infra-web (образ)" in body
             assert "не определена" in body
@@ -126,8 +131,8 @@ def main():
             # Закрытая история не должна ломать успешный вход OpenBao.
             with patch.object(admin, "_operation_history", side_effect=PermissionError("private state")):
                 status, headers, body = request(server, "POST", "/login", {"username": "operator", "password": "secret"})
-                assert status == 200 and "secret" not in body
-                assert "История операций временно недоступна" in body
+                assert status == 303 and body == ""
+                assert headers["Location"] == "/", "После входа нужен PRG-редирект"
                 cookie = headers["Set-Cookie"].split(";", 1)[0]
                 status, _, body = request(server, "GET", "/api/operations", cookie=cookie)
                 assert status == 503 and "unavailable" in body
@@ -136,6 +141,11 @@ def main():
             assert all(flag in headers["Set-Cookie"] for flag in ("Secure", "HttpOnly", "SameSite=Strict"))
             assert headers["Strict-Transport-Security"].startswith("max-age=")
             assert headers["Referrer-Policy"] == "same-origin"
+            script_status, script_headers, script_body = request(server, "GET", "/ui.js", cookie=cookie)
+            assert script_status == 200
+            assert script_headers["Content-Type"].startswith("text/javascript")
+            assert "Intl.DateTimeFormat" in script_body and "Europe/Moscow" in script_body
+            assert "'self'" in headers["Content-Security-Policy"]
             status, _, body = request(server, "GET", "/api/operations", cookie=cookie)
             assert status == 200 and body.lstrip().startswith("[")
             status, _, _ = request(server, "POST", "/action", {"vmid": "109", "kind": "status"}, cookie=cookie)
@@ -198,7 +208,7 @@ def main():
             status, _, body = request(server, "GET", "/storage", cookie=cookie)
             assert status == 200 and "19386J473508" in body
             assert 'type="hidden" name="serial"' in body
-            assert '<button type="submit">Да, подготовить SSD</button>' in body
+            assert '<button class="danger" type="submit">Да, подготовить SSD</button>' in body
             assert 'name="serial" autocomplete="off"' not in body
             status, _, _ = request(server, "POST", "/storage-confirm", {
                 "csrf": csrf, "plan_id": "a" * 64, "serial": "19386J473508",
@@ -228,8 +238,12 @@ def main():
                 assert status == 200
                 assert 'http-equiv="refresh"' in body
                 assert "Можно закрыть браузер" in body
-            status, _, _ = request(server, "POST", "/logout", {"csrf": csrf}, cookie=cookie)
-            assert status == 200
+            status, logout_headers, body = request(server, "POST", "/logout", {"csrf": csrf}, cookie=cookie)
+            assert status == 303 and body == ""
+            assert logout_headers["Location"] == "/"
+            assert "Max-Age=0" in logout_headers["Set-Cookie"]
+            status, _, body = request(server, "GET", "/", cookie=cookie)
+            assert status == 200 and 'action="/login"' in body
             status, _, _ = request(server, "GET", "/api/operations", cookie=cookie)
             assert status == 401, "Сессия должна уничтожаться при выходе"
     finally:
