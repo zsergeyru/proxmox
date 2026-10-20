@@ -91,6 +91,20 @@ docker:
       scheme: https
       auth: openbao-userpass
       state: authenticated
+      portal:
+        name: infra-web
+        description: Управление инфраструктурой
+        icon: mdi-server-security
+        scheme: https
+        port: 8443
+        targets:
+          - local
+        operator:
+          username: operator
+          password:
+            source: pve_json
+            path: /mnt/bindmounts/infra-manager/pve-only/openbao/operator-access.json
+            key: password
       operations_mount: /mnt/persistent-state/operations
       requires_authorization_before_publication: true
 
