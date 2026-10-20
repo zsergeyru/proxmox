@@ -27,6 +27,7 @@ PHASES = {
     "verifying": "Проверка",
     "completed": "Успешно",
     "failed": "Ошибка",
+    "rolled-back": "Откат",
     "needs-recovery": "Нужна проверка",
 }
 
