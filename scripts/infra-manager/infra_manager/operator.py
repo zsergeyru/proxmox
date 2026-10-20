@@ -361,6 +361,7 @@ def operator_guest_task(
     operation_id = None
     prepared_snapshot = None
     fast_plan = None
+    fast_recovery_required = False
     if operation == "deploy":
         identity = guest_identity(PATHS.repo_root, vmid)
         if identity.role == SETTINGS.infra_manager_role:
@@ -403,18 +404,24 @@ def operator_guest_task(
     try:
         if fast_plan is not None and fast_plan.mode == "fast":
             from .operation_lock import guest_operation_lock
-            from .self_update_fast import apply as apply_fast_update
+            from .self_update_fast import FastRollbackUnconfirmed, apply as apply_fast_update
             assert store is not None and operation_id is not None
-            with guest_operation_lock(vmid, "deploy"):
-                apply_fast_update(
-                    fast_plan,
-                    lambda: operator_guest_status(
-                        vmid, show_secrets=show_secrets,
-                    ) == 0,
-                    repo=PATHS.repo_root,
-                    store=store,
-                )
-                store.finish(operation_id, exit_code=0)
+            try:
+                with guest_operation_lock(vmid, "deploy"):
+                    apply_fast_update(
+                        fast_plan,
+                        lambda: operator_guest_status(
+                            vmid, show_secrets=show_secrets,
+                        ) == 0,
+                        repo=PATHS.repo_root,
+                        store=store,
+                    )
+                    store.finish(operation_id, exit_code=0)
+            except FastRollbackUnconfirmed:
+                # Оставить active/910.json для ручной проверки; не разблокировать
+                # следующее изменение, когда rollback не подтверждён.
+                fast_recovery_required = True
+                raise
             console.result(
                 f"Быстрое обновление 910 подтверждено: {operation_id}; "
                 "полный Ansible и infra-runtime не запускались"
@@ -494,7 +501,8 @@ def operator_guest_task(
     finally:
         if store is not None and operation_id is not None:
             current = store.get(operation_id)
-            if current["phase"] == "running" and not activation_handed_off:
+            if (current["phase"] == "running" and not activation_handed_off
+                    and not fast_recovery_required):
                 store.finish(operation_id, exit_code=1)
         console.timing(
             f"Команда {operation} гостя {vmid}",
