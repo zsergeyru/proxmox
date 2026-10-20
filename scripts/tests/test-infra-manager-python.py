@@ -151,6 +151,58 @@ def check_cli_and_commands() -> None:
             fail(f"python -m infra_manager {' '.join(args)} не вывел строку использования")
 
 
+def check_safe_ansible_failure_detail() -> None:
+    """Определять класс сбоя Ansible, не показывая секретные msg/пути."""
+    task = "TASK [infra_manager : Прочитать единое описание резервирования]\\n"
+    cases = (
+        (
+            "Could not locate file in lookup: /secret/PRIVATE-TOKEN",
+            "ANSIBLE_FILE_LOOKUP",
+        ),
+        (
+            "Permission denied while reading PRIVATE-TOKEN",
+            "ANSIBLE_EACCES",
+        ),
+        (
+            "The task includes an option with an undefined variable: PRIVATE-TOKEN is undefined",
+            "ANSIBLE_UNDEFINED",
+        ),
+        (
+            "No such file or directory: PRIVATE-TOKEN",
+            "ANSIBLE_ENOENT",
+        ),
+        (
+            "yaml.parser.ParserError PRIVATE-TOKEN",
+            "ANSIBLE_YAML",
+        ),
+        (
+            "UNREACHABLE! PRIVATE-TOKEN",
+            "ANSIBLE_UNREACHABLE",
+        ),
+    )
+    for failure, expected in cases:
+        text = common._ansible_failure_summary(
+            task + "fatal: [guest]: FAILED! => " + failure
+        )
+        if expected not in text or "Прочитать единое описание" not in text:
+            fail(f"Безопасная причина Ansible {expected} не отображена")
+        if "PRIVATE-TOKEN" in text or "/secret/" in text:
+            fail(f"Диагностика Ansible {expected} раскрыла необработанный вывод")
+
+    unknown = common._ansible_failure_summary(
+        task + "fatal: [guest]: FAILED! => PRIVATE-TOKEN"
+    )
+    if "не распознана" not in unknown or "PRIVATE-TOKEN" in unknown:
+        fail("Неизвестную ошибку Ansible нельзя публиковать без фильтрации")
+
+    earlier = common._ansible_failure_summary(
+        "TASK [Earlier]\\nPermission denied\\n"
+        + task + "fatal: [guest]: FAILED! => Could not locate file in lookup"
+    )
+    if "ANSIBLE_FILE_LOOKUP" not in earlier or "ANSIBLE_EACCES" in earlier:
+        fail("Диагностика должна учитывать ошибку последнего задания")
+
+
 def check_safe_system_error_diagnostics() -> None:
     """Показывать исходную причину, не выводя секретные пути и сообщения ОС."""
     err = io.StringIO()
@@ -672,6 +724,7 @@ def main_test() -> None:
     check_shared_configuration_readers()
     check_http_error_messages_hide_secret_bodies()
     check_log_levels()
+    check_safe_ansible_failure_detail()
     check_safe_system_error_diagnostics()
     check_duration_output()
     check_runtime_activation_guard()
