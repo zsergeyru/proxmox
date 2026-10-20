@@ -86,7 +86,7 @@ def _directory(client: PveClient, node: str) -> dict | None:
 
 def _mount_existing_unit(node: str, directory: dict) -> None:
     """Запустить уже созданный Proxmox mount-unit, не устанавливая службу."""
-    unit = r"mnt-pve-backup\\x2dfast.mount"
+    unit = r"mnt-pve-backup\x2dfast.mount"
     unit_file = directory.get("unitfile")
     if (not isinstance(unit_file, str)
             or unit_file != f"/etc/systemd/system/{unit}"):
