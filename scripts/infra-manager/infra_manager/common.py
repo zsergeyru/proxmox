@@ -334,6 +334,12 @@ console = Console()
 
 HOST_OPERATIONS_STATE_DIR = Path("/mnt/persistent-state/operations/activation")
 RUNTIME_OPERATIONS_STATE_DIR = Path("/run/infra-manager/activation")
+# Первое обновление работающего 910: старый runtime ещё не имеет нового bind mount.
+# У него уже подключён state/locks. Это только канал передачи между runtime и systemd,
+# без базы, контейнера или API Semaphore.
+HOST_TRANSITION_LOCK_DIR = Path("/mnt/persistent-state/locks")
+RUNTIME_TRANSITION_LOCK_DIR = Path("/var/lib/infra-manager/locks")
+ACTIVATION_MARKER_NAME = "runtime-activation-pending"
 
 
 def _runtime_activation_scope() -> str:
@@ -342,21 +348,41 @@ def _runtime_activation_scope() -> str:
 
 
 def _default_runtime_activation_marker() -> Path:
-    """Единственная постоянная отметка активации, общая с systemd."""
-    root = (
-        HOST_OPERATIONS_STATE_DIR
-        if _runtime_activation_scope() == "host"
-        else RUNTIME_OPERATIONS_STATE_DIR
-    )
-    return root / "runtime-activation-pending"
+    """Найти общий маркер, доступный уже запущенному поколению runtime."""
+    if _runtime_activation_scope() == "host":
+        root = HOST_OPERATIONS_STATE_DIR
+    elif RUNTIME_OPERATIONS_STATE_DIR.is_mount():
+        root = RUNTIME_OPERATIONS_STATE_DIR
+    elif RUNTIME_TRANSITION_LOCK_DIR.is_mount():
+        # Первый переход: системная служба прочтёт маркер из того же state/locks.
+        root = RUNTIME_TRANSITION_LOCK_DIR
+    else:
+        # Ничего не создавать в rootfs: reserve_runtime_activation явно откажет.
+        root = RUNTIME_OPERATIONS_STATE_DIR
+    return root / ACTIVATION_MARKER_NAME
 
 
 RUNTIME_ACTIVATION_MARKER = _default_runtime_activation_marker()
 
 
+def _activation_markers() -> tuple[Path, ...]:
+    """Проверить оба маршрута на время первого перехода между поколениями."""
+    if _runtime_activation_scope() == "host":
+        return (
+            HOST_OPERATIONS_STATE_DIR / ACTIVATION_MARKER_NAME,
+            HOST_TRANSITION_LOCK_DIR / ACTIVATION_MARKER_NAME,
+        )
+    return (
+        RUNTIME_OPERATIONS_STATE_DIR / ACTIVATION_MARKER_NAME,
+        RUNTIME_TRANSITION_LOCK_DIR / ACTIVATION_MARKER_NAME,
+    )
+
+
 def require_runtime_activation_idle() -> None:
     """Не запускать новое задание во время замены infra-runtime."""
-    if RUNTIME_ACTIVATION_MARKER.exists():
+    if RUNTIME_ACTIVATION_MARKER.exists() or any(
+        marker.exists() for marker in _activation_markers()
+    ):
         raise InfraManagerError(
             "Идёт активация новой управляющей среды infra-manager; "
             "дождитесь её завершения и повторите задание"
@@ -364,8 +390,23 @@ def require_runtime_activation_idle() -> None:
 
 
 def reserve_runtime_activation() -> None:
-    """Зарезервировать окно активации и записать PID текущего задания."""
-    RUNTIME_ACTIVATION_MARKER.parent.mkdir(parents=True, exist_ok=True)
+    """Зарезервировать окно активации только на подтверждённом общем диске."""
+    if (
+        _runtime_activation_scope() == "runtime"
+        and RUNTIME_ACTIVATION_MARKER.parent
+        in {RUNTIME_OPERATIONS_STATE_DIR, RUNTIME_TRANSITION_LOCK_DIR}
+        and not RUNTIME_ACTIVATION_MARKER.parent.is_mount()
+    ):
+        raise InfraManagerError(
+            "Нет общего подключения state/operations или state/locks в infra-runtime; "
+            "маркер в локальном rootfs создавать запрещено"
+        )
+    if not RUNTIME_ACTIVATION_MARKER.parent.is_dir():
+        raise InfraManagerError(
+            "Каталог для общей активации infra-runtime отсутствует; "
+            "проверьте bind mount state/locks или state/operations"
+        )
+    require_runtime_activation_idle()
     try:
         descriptor = os.open(
             RUNTIME_ACTIVATION_MARKER,
