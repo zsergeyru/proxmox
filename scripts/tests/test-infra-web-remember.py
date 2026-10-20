@@ -116,7 +116,7 @@ def main():
                         session_cookie = admin.COOKIE + "=" + token
                         admin.sessions.clear()
                         status, _, page = call(server, "/", cookie=session_cookie)
-                        assert status == 200 and "Панель" not in page or status == 200
+                        assert status == 200 and 'class="nav"' in page
                         csrf = admin._session(session_cookie)[1]["csrf"]
                         status, headers, _ = call(server, "/logout", cookie=session_cookie, fields={"csrf": csrf})
                         assert status == 303
