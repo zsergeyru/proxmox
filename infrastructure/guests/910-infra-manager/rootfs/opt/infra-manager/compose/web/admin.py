@@ -840,12 +840,12 @@ def _time_html(value: object) -> str:
     if not isinstance(value, str) or not value:
         return "—"
     if re.fullmatch(
-        r"\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d(?::\\d\\d)?"
-        r"(?:\\.\\d+)?(?:Z|[+-]\\d\\d:\\d\\d)", value,
+        r"\d{4}-\d\d-\d\dT\d\d:\d\d(?::\d\d)?"
+        r"(?:\.\d+)?(?:Z|[+-]\d\d:\d\d)", value,
     ):
         safe = html.escape(value, quote=True)
         return f'<time class="time" data-local-time datetime="{safe}">{safe}</time>'
-    if re.fullmatch(r"\\d{4}-\\d\\d-\\d\\d", value):
+    if re.fullmatch(r"\d{4}-\d\d-\d\d", value):
         year, month, day = value.split("-")
         return f'<time datetime="{value}">{day}.{month}.{year}</time>'
     return '<span title="Время сервера; часовой пояс неизвестен">' + _text(value) + '</span>'
