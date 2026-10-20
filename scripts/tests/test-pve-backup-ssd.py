@@ -88,12 +88,14 @@ def test_exact_confirmation_and_recheck():
                     super().run_task(*args, **kwargs)
                     mounted[0] = mounted[1]
             client = Client()
+            for response in ("", "нет", "Нет", "y", "19386J473508", "WRONG"):
+                assert ssd.reconcile_backup_ssd(
+                    client, "pve", interactive=True,
+                    confirmation=lambda *_: response,
+                ) is None
+                assert not client.tasks
             assert ssd.reconcile_backup_ssd(
-                client, "pve", interactive=True, confirmation=lambda *_: "WRONG"
-            ) is None
-            assert not client.tasks
-            assert ssd.reconcile_backup_ssd(
-                client, "pve", interactive=True, confirmation=lambda *_: "19386J473508"
+                client, "pve", interactive=True, confirmation=lambda *_: " ДА "
             ) == "12345678-1234-1234-1234-1234567890ab"
             assert len(client.tasks) == 1
             args, kwargs = client.tasks[0]
@@ -124,7 +126,7 @@ def test_changed_device_rejected_before_write():
         ):
             client = FakeClient()
             refuses(lambda: ssd.reconcile_backup_ssd(
-                client, "pve", interactive=True, confirmation=lambda *_: "19386J473508"
+                client, "pve", interactive=True, confirmation=lambda *_: "да"
             ), "Подмена SSD после подтверждения должна остановить разметку")
             assert not client.tasks
             assert not path.exists()
