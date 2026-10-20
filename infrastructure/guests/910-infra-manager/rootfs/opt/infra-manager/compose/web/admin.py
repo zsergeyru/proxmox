@@ -286,33 +286,80 @@ def _guest_rows(records: list[dict]) -> str:
     return "".join(rows) or '<tr><td colspan="6">Гостей нет</td></tr>'
 
 
-def _guests_page() -> bytes:
+def _guest_card(guest: dict) -> str:
+    vmid = guest.get("vmid")
+    if type(vmid) is not int or not 1 <= vmid <= 999999:
+        return ""
+    name = str(guest.get("name") or f"Гость {vmid}")
+    role = str(guest.get("role") or "Без роли")
+    address = str(guest.get("address") or "Адрес не указан")
+    kind = "VM" if guest.get("type") == "vm" else "LXC" if guest.get("type") == "lxc" else "Тип неизвестен"
+    state = guest.get("state")
+    return (
+        '<a class="card-link guest-card" data-filter-item data-state="' + _text(state) +
+        '" data-search="' + html.escape(f"{vmid} {name} {role} {address} {kind}", quote=True) +
+        '" href="/guests?vmid=' + str(vmid) + '">'
+        '<div class="guest-card-top"><span class="vmid">#' + str(vmid) + " · " + kind +
+        '</span>' + _chip(state, category="guest") + '</div>'
+        '<div class="card-heading">' + _text(name) + '</div>'
+        '<div class="muted">' + _text(role) + '</div>'
+        '<div class="card-footer"><span class="address">' + _text(address) +
+        '</span><strong>Открыть →</strong></div></a>'
+    )
+
+
+def _guests_page(csrf: str = "") -> bytes:
     try:
         data = _guest_catalog("guests")
         guests = data["guests"]
-        warning = (
-            "" if data.get("pve_available") is True
-            else "<p>Нет связи с PVE: состояния не подтверждены. "
-                 "Описание гостей из Git остаётся доступным.</p>"
-        )
-        content = (
-            '<p><a href="/">← Задания</a></p>'
-            '<h2>Гости Proxmox</h2>'
-            '<p>Список сформирован из guest.yaml/provision.yaml проекта. '
-            'Состояния PVE проверяются отдельно.</p>' + warning
-            + '<p>Гостей в каталоге: ' + str(len(guests))
-            + ' · <a href="/guests">Обновить состояния</a></p>'
-            '<table><thead><tr><th>VMID</th><th>Имя</th><th>Роль</th>'
-            '<th>Тип</th><th>IP</th><th>Состояние</th></tr></thead><tbody>'
-            + _guest_rows(guests) + '</tbody></table>'
-        )
+        available = data.get("pve_available") is True
     except (OSError, ValueError, TimeoutError):
-        content = (
-            '<p><a href="/">← Задания</a></p><h2>Гости Proxmox</h2>'
-            '<p>Каталог временно недоступен. Проверьте системный посредник '
-            'и повторите запрос.</p><p><a href="/guests">Повторить</a></p>'
+        return _layout(
+            '<div class="notice" data-tone="warning" role="status">'
+            'Каталог гостей временно недоступен. Проверьте посредник и повторите запрос.'
+            '</div><a class="btn secondary" href="/guests">Повторить</a>',
+            page="guests", csrf=csrf,
         )
-    return _layout(content)
+    visible = [g for g in guests if isinstance(g, dict) and type(g.get("vmid")) is int]
+    online = sum(g.get("state") == "running" for g in visible)
+    attention = sum(g.get("state") in {"conflict", "absent", "stopped", "paused"} for g in visible)
+    items = "".join(_guest_card(guest) for guest in visible)
+    note = (
+        '<div class="notice" data-tone="warning" role="status">'
+        'Нет связи с PVE: статусы не подтверждены. Каталог из Git доступен.</div>'
+        if not available else ""
+    )
+    stats = "".join(
+        '<div class="stat" data-tone="' + tone + '"><div class="stat-label">' + label +
+        '</div><div class="stat-value">' + str(num) + '</div>'
+        '<div class="stat-detail">' + hint + '</div></div>'
+        for label, num, hint, tone in (
+            ("В каталоге", len(visible), "VM и LXC из Git", ""),
+            ("Работают", online if available else "—", "По данным PVE", "success"),
+            ("Требуют внимания", attention if available else "—", "Остановлены или конфликт", "warning" if attention else ""),
+        )
+    )
+    return _layout(
+        '<p class="page-intro">Выбери гостя, чтобы проверить его состояние, '
+        'посмотреть историю или выполнить разрешённое действие.</p>'
+        + note + '<div class="grid cols-3">' + stats + '</div>'
+        '<section class="panel"><div class="section-head"><h2>Каталог гостей</h2>'
+        '<a class="btn secondary" href="/guests">↻ Обновить</a></div>'
+        '<div class="toolbar"><input type="search" placeholder="Поиск: имя, IP, VMID…" '
+        'aria-label="Поиск гостя" data-search-for="guests">'
+        '<select aria-label="Фильтр состояния" data-state-for="guests">'
+        '<option value="all">Все гости</option>'
+        '<option value="running">Работают</option>'
+        '<option value="stopped">Остановлены</option>'
+        '<option value="conflict">Конфликт VMID</option>'
+        '<option value="unavailable">Не проверены</option>'
+        '</select><span class="muted" data-count-for="guests">'
+        + str(len(visible)) + ' из ' + str(len(visible)) + '</span></div>'
+        '<div class="guest-grid" data-filter-list="guests">' + items + '</div>'
+        '<p class="empty" data-empty-for="guests" hidden>Нет подходящих гостей.</p>'
+        '</section>',
+        page="guests", csrf=csrf,
+    )
 
 
 def _guest_page(vmid: int, csrf: str) -> bytes:
@@ -320,9 +367,11 @@ def _guest_page(vmid: int, csrf: str) -> bytes:
         data = _guest_catalog("guest-detail", vmid)
     except (OSError, ValueError, TimeoutError):
         return _layout(
-            '<p><a href="/guests">← Все гости</a></p>'
-            '<h2>Гость ' + str(vmid) + '</h2>'
-            '<p>Пока нельзя прочитать карточку. Попробуйте обновить страницу.</p>'
+            '<div class="breadcrumbs"><a href="/guests">Гости</a> / ' + str(vmid) + '</div>'
+            '<div class="notice" data-tone="warning">Карточка временно недоступна. '
+            'Попробуй обновить страницу.</div>'
+            '<a class="btn secondary" href="/guests?vmid=' + str(vmid) + '">Повторить</a>',
+            page="guests", csrf=csrf,
         )
     guest = data["guest"]
     actions = guest.get("actions", [])
@@ -330,10 +379,9 @@ def _guest_page(vmid: int, csrf: str) -> bytes:
         actions = []
     token = html.escape(csrf, quote=True)
     commands = []
-    for kind in GUEST_ACTION_LABELS:
+    for kind, label in GUEST_ACTION_LABELS.items():
         if kind not in actions:
             continue
-        label = GUEST_ACTION_LABELS[kind]
         if kind == "status":
             commands.append(
                 '<form method="POST" action="/action">'
@@ -347,56 +395,66 @@ def _guest_page(vmid: int, csrf: str) -> bytes:
                 '<form method="GET" action="/guests/confirm">'
                 f'<input type="hidden" name="vmid" value="{vmid}">'
                 f'<input type="hidden" name="kind" value="{kind}">'
-                f'<button type="submit">{html.escape(label)}</button></form>'
+                f'<button class="secondary" type="submit">{_text(label)}</button></form>'
             )
     history = []
-    for row in data["operations"]:
-        identifier = row.get("id")
+    for item in data["operations"]:
+        identifier = item.get("id")
         if not isinstance(identifier, str) or not REQ_ID.fullmatch(identifier):
             continue
-        phase = PHASES.get(row.get("phase"), "Неизвестно")
+        phase = item.get("phase")
         history.append(
-            '<tr><td><a href="/operations?id=' + identifier + '">'
-            + identifier[:8] + '</a></td><td>'
-            + html.escape(str(row.get("kind", ""))) + '</td><td>'
-            + html.escape(phase) + '</td><td>'
-            + html.escape(str(row.get("created_at", ""))) + '</td></tr>'
+            '<tr><td><a class="cell-title" href="/operations?id=' + identifier + '">'
+            + _text(OPERATION_NAMES.get(item.get("kind"), item.get("kind", "Действие"))) +
+            '</a><span class="cell-sub code">' + identifier[:8] + '</span></td>'
+            '<td>' + _chip(phase) + '</td><td>' + _time_html(item.get("created_at")) +
+            '</td></tr>'
         )
-    notice = (
-        "<p>Не удалось прочитать историю операций, но карточка доступна.</p>"
-        if data.get("history_available") is False else ""
-    )
-    state = GUEST_STATES.get(guest.get("state"), "Неизвестно")
+    state = guest.get("state")
     if data.get("pve_available") is False:
-        state += " — PVE недоступен; состояние не проверено"
-    fields = (
+        state = "unavailable"
+    detail = (
         ("Имя", guest.get("name") or "—"),
         ("Роль", guest.get("role") or "—"),
-        ("Тип", "VM" if guest.get("type") == "vm" else
-         "LXC" if guest.get("type") == "lxc" else "—"),
+        ("Тип", "VM" if guest.get("type") == "vm" else "LXC"
+         if guest.get("type") == "lxc" else "—"),
         ("Адрес управления", guest.get("address") or "—"),
-        ("Состояние PVE", state),
+        ("Состояние PVE", GUEST_STATES.get(state, "Неизвестно")),
     )
-    detail = "".join(
-        '<dt>' + html.escape(label) + '</dt><dd>'
-        + html.escape(str(value)) + '</dd>' for label, value in fields
+    details_html = "".join(
+        "<dt>" + _text(title) + "</dt><dd>" + _text(value) + "</dd>"
+        for title, value in detail
+    )
+    history_notice = (
+        '<div class="notice" data-tone="warning">История операций пока недоступна.</div>'
+        if data.get("history_available") is False else ""
+    )
+    warning = (
+        '<div class="notice" data-tone="warning">Самообновление 910 доступно '
+        'только через PVE CLI.</div>' if vmid == 910 else ""
     )
     return _layout(
-        '<p><a href="/guests">← Все гости</a></p>'
-        '<h2>Гость ' + str(vmid) + '</h2>'
-        '<dl class="guest-meta">' + detail + '</dl>'
-        '<h3>Разрешённые действия</h3>'
+        '<div class="breadcrumbs"><a href="/guests">Все гости</a> / ' + str(vmid) + '</div>'
+        '<div class="panel"><div class="section-head"><div>'
+        '<span class="item-label">Гость #' + str(vmid) + '</span>'
+        '<h2>' + _text(guest.get("name") or f"Гость {vmid}") + '</h2>'
+        '</div>' + _chip(state, category="guest") + '</div>'
+        '<dl class="guest-meta">' + details_html + '</dl></div>'
+        + warning +
+        '<section class="panel"><h3>Действия</h3>'
+        '<p class="muted">Сначала выбери действие. Перед изменением конфигурации '
+        'появится подтверждение, после запуска откроется журнал.</p>'
         '<div class="guest-actions">' + "".join(commands) + '</div>'
-        + ('<p>Нет разрешённых действий для этого гостя.</p>'
-           if not commands else '')
-        + ('<p>Самообновление 910 выполняется через PVE CLI.</p>'
-           if vmid == 910 else '')
-        + '<h3>Последние задания</h3>' + notice
-        + '<table><tr><th>ID</th><th>Действие</th>'
-        '<th>Состояние</th><th>Создано UTC</th></tr>'
-        + ("".join(history) or '<tr><td colspan="4">Истории пока нет</td></tr>')
-        + '</table><p><a href="/guests?vmid=' + str(vmid)
-        + '">Обновить карточку</a></p>'
+        + ('' if commands else '<p>Разрешённых действий для этого гостя нет.</p>')
+        + '</section>'
+        '<section class="panel"><div class="section-head"><h3>Последние задания</h3>'
+        '<a href="/guests?vmid=' + str(vmid) + '">↻ Обновить</a></div>'
+        + history_notice +
+        '<div class="table-wrap"><table><thead><tr><th>Операция</th>'
+        '<th>Состояние</th><th>Начато</th></tr></thead><tbody>'
+        + ("".join(history) or '<tr><td colspan="3" class="empty">Истории пока нет</td></tr>')
+        + '</tbody></table></div></section>',
+        page="guests", csrf=csrf,
     )
 
 
