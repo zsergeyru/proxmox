@@ -534,7 +534,7 @@ def _build_deployment_context(
         guest_dir=guest_dir,
         private_key=private_key,
         playbook=playbook,
-        known_hosts=Path("/var/lib/semaphore/guest-known-hosts"),
+        known_hosts=PATHS.opentofu_dir / "guest-known-hosts",
         plan_file=workspace.state_dir / f"{vmid}.tfplan",
     )
     return DeploymentContext(
