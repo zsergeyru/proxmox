@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parents[2]
 MODULE_ROOT = ROOT / "scripts" / "infra-manager"
 sys.path.insert(0, str(MODULE_ROOT))
 
-from infra_manager.cli import main
+from infra_manager.cli import build_parser, main
 import infra_manager.common as common
 from infra_manager.common import (
     CommandError,
