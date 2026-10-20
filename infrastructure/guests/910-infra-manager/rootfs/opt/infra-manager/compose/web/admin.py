@@ -445,7 +445,7 @@ def _backup_request(kind: str) -> dict:
         "kind": kind, "vmid": 0, "request_id": secrets.token_hex(16),
     }).encode() + b"\n"
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
-        connection.settimeout(14)
+        connection.settimeout(22)
         connection.connect(SOCKET)
         connection.sendall(payload)
         with connection.makefile("rb") as stream:
