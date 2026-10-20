@@ -73,12 +73,14 @@ def reconcile_backup_nas(client: PveClient, node: str) -> bool:
             actual.get("type") != "nfs",
             actual.get("server") != server,
             actual.get("export") != export,
+            actual.get("options") not in ("vers=4.2", "vers=4", "vers=4.1"),
         )):
             raise InfraManagerError("NAS storage уже занят другой конфигурацией")
     else:
         client.request_data("POST", "/storage", form={
             "type": "nfs", "storage": STORAGE_ID, "server": server,
             "export": export, "content": "backup", "nodes": node,
+            "options": "vers=4.2",
         })
     if not _mount_verified(node, server, export):
         raise InfraManagerError("NAS NFSv4 не смонтирован; резервирование ожидает доступности")
