@@ -201,6 +201,36 @@ def require_declared_identifiers(storage: PhysicalStorage, *, omv: bool = False)
             )
 
 
+def render_pve_host_volumes(storage: PhysicalStorage) -> dict[str, Any]:
+    """Сформировать проверенный перечень ВСЕХ общих LVM PVE для deploy 910.
+
+    Физический backup_ssd к этому перечню не относится: для него нужен
+    отдельный план и подтверждение первого форматирования.
+    """
+    if storage.host != "pve":
+        raise InfraManagerError("Нужен storage.yaml именно физического PVE")
+    mounts = {item["volume"]: item["path"] for item in storage.mounts}
+    result = []
+    for volume in storage.volumes:
+        if volume["kind"] != "lvm_thin":
+            continue
+        if (volume["volume_group"], volume["thin_pool"]) != ("pve", "data"):
+            raise InfraManagerError("Общие LVM PVE допускаются только в pve/data")
+        if volume["filesystem"] != "ext4" or volume["filesystem_uuid"] is not None:
+            raise InfraManagerError("LVM-том требует ext4 без непроверенного фиксированного UUID")
+        point = mounts.get(volume["id"])
+        if not isinstance(point, str) or not point.startswith("/mnt/bindmounts/"):
+            raise InfraManagerError("Том PVE без допустимого пути подключения")
+        result.append({
+            "name": volume["id"],
+            "size_gb": volume["size_gb"],
+            "mountpoint": point,
+        })
+    if not result:
+        raise InfraManagerError("В storage.yaml нет общих томов PVE")
+    return {"volume_group": "pve", "thin_pool": "data", "volumes": result}
+
+
 def render_pve_guest_storage(
     storage: PhysicalStorage, config: Any,
 ) -> dict[str, Any]:
