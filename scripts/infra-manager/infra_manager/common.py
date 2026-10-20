@@ -347,13 +347,28 @@ def _runtime_activation_scope() -> str:
     return "host" if HOST_OPERATIONS_STATE_DIR.is_dir() else "runtime"
 
 
+def _activation_bind_mounted(path: Path) -> bool:
+    """Проверить Docker bind mount по mountinfo, включая монтирования одной ФС."""
+    try:
+        with open("/proc/self/mountinfo", encoding="utf-8") as stream:
+            for line in stream:
+                fields = line.split(" - ", 1)[0].split()
+                if len(fields) > 4 and fields[4] == str(path):
+                    return True
+    except OSError as exc:
+        raise InfraManagerError(
+            "Невозможно проверить общее подключение каталога активации"
+        ) from exc
+    return False
+
+
 def _default_runtime_activation_marker() -> Path:
     """Найти общий маркер, доступный уже запущенному поколению runtime."""
     if _runtime_activation_scope() == "host":
         root = HOST_OPERATIONS_STATE_DIR
-    elif RUNTIME_OPERATIONS_STATE_DIR.is_mount():
+    elif _activation_bind_mounted(RUNTIME_OPERATIONS_STATE_DIR):
         root = RUNTIME_OPERATIONS_STATE_DIR
-    elif RUNTIME_TRANSITION_LOCK_DIR.is_mount():
+    elif _activation_bind_mounted(RUNTIME_TRANSITION_LOCK_DIR):
         # Первый переход: системная служба прочтёт маркер из того же state/locks.
         root = RUNTIME_TRANSITION_LOCK_DIR
     else:
@@ -395,7 +410,7 @@ def reserve_runtime_activation() -> None:
         _runtime_activation_scope() == "runtime"
         and RUNTIME_ACTIVATION_MARKER.parent
         in {RUNTIME_OPERATIONS_STATE_DIR, RUNTIME_TRANSITION_LOCK_DIR}
-        and not RUNTIME_ACTIVATION_MARKER.parent.is_mount()
+        and not _activation_bind_mounted(RUNTIME_ACTIVATION_MARKER.parent)
     ):
         raise InfraManagerError(
             "Нет общего подключения state/operations или state/locks в infra-runtime; "
