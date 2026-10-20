@@ -102,6 +102,14 @@ def main():
                 "csrf": csrf, "plan_id": "a" * 64, "serial": "19386J473508",
             }, cookie=cookie)
             assert status == 200 and "Подготовка SSD запущена" in body
+            with patch.object(
+                admin, "_send_storage",
+                return_value={"accepted": True, "storage": {"state": "running"}},
+            ):
+                status, _, body = request(server, "GET", "/storage", cookie=cookie)
+                assert status == 200
+                assert 'http-equiv="refresh"' in body
+                assert "Можно закрыть браузер" in body
             status, _, _ = request(server, "POST", "/logout", {"csrf": csrf}, cookie=cookie)
             assert status == 200
             status, _, _ = request(server, "GET", "/api/operations", cookie=cookie)
