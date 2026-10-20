@@ -3,7 +3,7 @@ guest_vmid: 910
 
 portal:
   local:
-    enabled: true
+    enabled: false
     title: Управление инфраструктурой
     trusted_ca: /etc/infra-manager/openbao/tls/ca.crt
 
