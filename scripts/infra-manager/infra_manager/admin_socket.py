@@ -98,12 +98,42 @@ def _dispatch_storage(request: dict) -> dict:
     }
 
 
+
+def _dispatch_history(request: dict) -> dict:
+    """Отдавать через закрытый сокет только публичные поля истории заданий."""
+    if (
+        not isinstance(request, dict)
+        or set(request) != {"kind", "vmid", "request_id"}
+        or request["kind"] != "history"
+        or type(request["vmid"]) is not int
+        or request["vmid"] != 0
+        or not isinstance(request["request_id"], str)
+        or not REQUEST_ID.fullmatch(request["request_id"])
+    ):
+        raise InfraManagerError("Недопустимый запрос истории")
+    operations = []
+    for record in OperationStore().list_recent(limit=40):
+        identifier = record.get("id", "")
+        if not isinstance(identifier, str) or not REQUEST_ID.fullmatch(identifier):
+            continue
+        operations.append({
+            "id": identifier,
+            "kind": str(record.get("kind", ""))[:32],
+            "target": record["target"] if type(record.get("target")) is int else 0,
+            "phase": str(record.get("phase", ""))[:32],
+            "created_at": str(record.get("created_at", ""))[:80],
+        })
+    return {"accepted": True, "operations": operations}
+
+
 def dispatch(request: dict) -> dict:
     """Запустить только фиксированную системную задачу с неизменяемым UUID."""
     if isinstance(request, dict) and request.get("kind") in (
         "storage-plan", "storage-confirm",
     ):
         return _dispatch_storage(request)
+    if isinstance(request, dict) and request.get("kind") == "history":
+        return _dispatch_history(request)
     if not isinstance(request, dict) or set(request) != {"kind", "vmid", "request_id"}:
         raise InfraManagerError("Неверный формат запроса")
     kind, vmid, operation_id = (

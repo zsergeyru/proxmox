@@ -52,6 +52,7 @@ def main():
             patch.object(admin, "WEB_HOST", f"{host}:{port}"),
             patch.object(admin, "_authenticate", side_effect=lambda name, pwd: name == "operator" and pwd == "secret"),
             patch.object(admin, "_send_action", side_effect=lambda kind, vmid, rid: {"id": rid, "state": "queued", "accepted": True}),
+            patch.object(admin, "_operation_history", return_value=[]),
             patch.object(admin, "_send_storage", side_effect=lambda kind, **kwargs:
                 {"accepted": True, "storage": {
                     "state": "needs-confirmation",
@@ -115,9 +116,16 @@ def main():
             assert status == 403, "Чужой Host не должен разрешать вход"
             status, _, _ = request(server, "POST", "/login", {"username": "operator", "password": "wrong"})
             assert status == 401, "Неверный пароль не должен приниматься"
-            status, headers, body = request(server, "POST", "/login", {"username": "operator", "password": "secret"})
-            assert status == 200 and "secret" not in body
-            cookie = headers["Set-Cookie"].split(";", 1)[0]
+            # Закрытая история не должна ломать успешный вход OpenBao.
+            with patch.object(admin, "_operation_history", side_effect=PermissionError("private state")):
+                status, headers, body = request(server, "POST", "/login", {"username": "operator", "password": "secret"})
+                assert status == 200 and "secret" not in body
+                assert "История операций временно недоступна" in body
+                cookie = headers["Set-Cookie"].split(";", 1)[0]
+                status, _, body = request(server, "GET", "/api/operations", cookie=cookie)
+                assert status == 503 and "unavailable" in body
+                status, _, body = request(server, "GET", "/", cookie=cookie)
+                assert status == 200 and "История операций временно недоступна" in body
             assert all(flag in headers["Set-Cookie"] for flag in ("Secure", "HttpOnly", "SameSite=Strict"))
             assert headers["Strict-Transport-Security"].startswith("max-age=")
             assert headers["Referrer-Policy"] == "same-origin"

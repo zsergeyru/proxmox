@@ -147,6 +147,7 @@
     owner: root
     group: root
     mode: preserve
+  register: infra_manager_python_files
 
 - name: Установить службу проверки прерванных операций
   ansible.builtin.copy:
@@ -190,7 +191,7 @@
   ansible.builtin.systemd_service:
     name: infra-manager-portal-gateway.service
     enabled: true
-    state: "{{ 'restarted' if portal_gateway_unit.changed else 'started' }}"
+    state: "{{ 'restarted' if (portal_gateway_unit.changed or infra_manager_python_files.changed) else 'started' }}"
     daemon_reload: "{{ portal_gateway_unit.changed }}"
 
 - name: Сделать команду состояния доступной через pct exec

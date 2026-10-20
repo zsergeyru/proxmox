@@ -70,7 +70,8 @@ def verify() -> None:
     assert web_compose["user"] == "1001:0"
     assert "ALL" in web_compose["cap_drop"]
     assert "no-new-privileges:true" in web_compose["security_opt"]
-    assert "/mnt/persistent-state/operations:/srv/operations:ro" in web_compose["volumes"]
+    assert "/mnt/persistent-state/operations:/srv/operations:ro" not in web_compose["volumes"]
+    assert "operations_mount" not in web
     assert "/etc/infra-manager/web/tls:/etc/infra-manager/web/tls:ro" in web_compose["volumes"]
     assert "/run/infra-web:/run/infra-web:ro" in web_compose["volumes"]
     assert not any("docker.sock" in x or "pve-only" in x for x in web_compose["volumes"])

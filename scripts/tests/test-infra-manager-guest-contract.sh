@@ -598,8 +598,8 @@ if "--force-recreate" not in bootstrap_args:
 
 portal = named(runtime, "Включить службу действий локального портала")
 portal_service = portal["ansible.builtin.systemd_service"]
-if portal_service.get("state") != "{{ 'restarted' if portal_gateway_unit.changed else 'started' }}":
-    raise SystemExit("Портал не должен безусловно перезапускаться при Ansible")
+if portal_service.get("state") != "{{ 'restarted' if (portal_gateway_unit.changed or infra_manager_python_files.changed) else 'started' }}":
+    raise SystemExit("Портал обязан перезапускаться при изменении кода посредника, но не безусловно")
 if portal_service.get("daemon_reload") != "{{ portal_gateway_unit.changed }}":
     raise SystemExit("systemd портала должен перечитывать службу только при изменении")
 unseal = named(runtime, "Включить разблокировку OpenBao при запуске infra-manager")

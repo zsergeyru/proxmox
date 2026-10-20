@@ -68,6 +68,29 @@ def main():
             assert rejected(lambda: admin_socket.dispatch({"kind": "shell", "vmid": 109, "request_id": operation_id}))
             assert rejected(lambda: admin_socket.dispatch({"kind": "status", "vmid": 109, "request_id": "../passwd"}))
             assert rejected(lambda: admin_socket.dispatch({"kind": "status", "vmid": 109, "request_id": operation_id, "cmd": "sh"}))
+        # Закрытая история: только ограниченные поля, никаких токенов и журналов.
+        history_id = uuid.uuid4().hex
+        record = {
+            "id": history_id, "kind": "deploy", "target": 910,
+            "phase": "completed", "created_at": "2026-10-20T10:00:00Z",
+            "token": "never-leak", "log": "logs/secret.jsonl",
+        }
+        with patch.object(
+            admin_socket, "OperationStore",
+            return_value=SimpleNamespace(list_recent=lambda limit: [record] if limit == 40 else []),
+        ):
+            request = {"kind": "history", "vmid": 0, "request_id": uuid.uuid4().hex}
+            result = admin_socket.dispatch(request)
+            assert result["accepted"] is True
+            assert result["operations"] == [{
+                "id": history_id, "kind": "deploy", "target": 910,
+                "phase": "completed", "created_at": "2026-10-20T10:00:00Z",
+            }]
+            assert "never-leak" not in json.dumps(result)
+            assert "secret.jsonl" not in json.dumps(result)
+            assert rejected(lambda: admin_socket.dispatch(dict(request, vmid=109)))
+            assert rejected(lambda: admin_socket.dispatch(dict(request, path="/etc/passwd")))
+            assert rejected(lambda: admin_socket.dispatch(dict(request, request_id="../etc")))
         # Физический SSD: только два типизированных действия, без shell.
         with (
             patch.object(admin_socket, "authorize_action") as authorize,
