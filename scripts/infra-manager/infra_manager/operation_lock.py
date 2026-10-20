@@ -41,8 +41,7 @@ def _lock_root() -> Path:
     может совпасть с изменяющей инфраструктурной операцией.
     """
 
-    explicit = os.environ.get("INFRA_MANAGER_LOCK_DIR", "").strip()
-    root = Path(explicit) if explicit else PATHS.data_dir / "locks"
+    root = PATHS.data_dir / "locks"
     # В LXC 910 Ansible создаёт ссылку именно на persistent-state/locks.
     # В Docker тот же каталог подключён напрямую через bind mount.
     # Разрешаем только известную ссылку, не произвольное перенаправление.
