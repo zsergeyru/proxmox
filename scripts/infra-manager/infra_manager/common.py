@@ -295,43 +295,23 @@ class Console:
 console = Console()
 
 
-HOST_SEMAPHORE_STATE_DIR = Path("/mnt/persistent-state/semaphore")
-RUNTIME_SEMAPHORE_STATE_DIR = Path("/var/lib/semaphore")
 HOST_OPERATIONS_STATE_DIR = Path("/mnt/persistent-state/operations/activation")
 RUNTIME_OPERATIONS_STATE_DIR = Path("/run/infra-manager/activation")
 
 
 def _runtime_activation_scope() -> str:
-    """Вернуть пространство PID текущего исполнителя."""
-
-    return "host" if HOST_SEMAPHORE_STATE_DIR.is_dir() else "runtime"
-
-
-def _standalone_activation() -> bool:
-    """Прочитать объявленный режим без зависимости от Docker/Semaphore."""
-    if os.environ.get("INFRA_RUNTIME_MODE") == "standalone":
-        return True
-    versions = Path("/opt/infra-manager/compose/.versions.env")
-    if versions.is_file() and not versions.is_symlink():
-        return "RUNTIME_MODE=standalone" in versions.read_text(encoding="utf-8").splitlines()
-    return False
+    """Отличить управляющую службу от процесса в рабочем контейнере."""
+    return "host" if HOST_OPERATIONS_STATE_DIR.is_dir() else "runtime"
 
 
 def _default_runtime_activation_marker() -> Path:
-    """Выбрать общий маркер управляющего гостя и рабочего контейнера."""
-    if _standalone_activation():
-        root = (
-            HOST_OPERATIONS_STATE_DIR
-            if HOST_OPERATIONS_STATE_DIR.is_dir()
-            else RUNTIME_OPERATIONS_STATE_DIR
-        )
-        return root / "runtime-activation-pending"
-
-    if _runtime_activation_scope() == "host":
-        root = HOST_SEMAPHORE_STATE_DIR
-    else:
-        root = RUNTIME_SEMAPHORE_STATE_DIR
-    return root / ".infra-manager-runtime-activation-pending"
+    """Единственная постоянная отметка активации, общая с systemd."""
+    root = (
+        HOST_OPERATIONS_STATE_DIR
+        if _runtime_activation_scope() == "host"
+        else RUNTIME_OPERATIONS_STATE_DIR
+    )
+    return root / "runtime-activation-pending"
 
 
 RUNTIME_ACTIVATION_MARKER = _default_runtime_activation_marker()
