@@ -404,7 +404,7 @@ def test_internal_project_refresh_uses_existing_checkout() -> None:
     ]
     environment = calls[0][1]["env"]
     assert str(github_key) in environment["GIT_SSH_COMMAND"]
-    assert str(known_hosts) in environment["GIT_SSH_COMMAND"]
+    assert str(config_dir / "github_known_hosts") in environment["GIT_SSH_COMMAND"]
 
 
 def test_runtime_snapshot_refresh_policy() -> None:
