@@ -4,6 +4,7 @@ ARG PACKER_IMAGE=hashicorp/packer:1.15.4@sha256:8be72877859e00e13124b26373f0505b
 FROM ${PACKER_IMAGE} AS packer_source
 
 FROM python:3.12.12-slim-bookworm
+LABEL org.proxmox.runtime.generation="standalone-v1"
 
 ARG OPENTOFU_VERSION=1.12.6
 ENV DEBIAN_FRONTEND=noninteractive
