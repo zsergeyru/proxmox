@@ -361,9 +361,8 @@ grep -Fq '"INFRA_PVE_NODE={{ infra_pve_node }}"' "$ANSIBLE_PLAYBOOK" \
 if grep -Fq -- '--on-active=30s' "$ANSIBLE_PLAYBOOK"; then
     die "Фиксированная задержка 30 секунд не должна управлять активацией runtime"
 fi
-branch_env_count="$(grep -Fc 'INFRA_PROJECT_BRANCH: "{{ infra_project_branch' "$ANSIBLE_RUNTIME" || true)"
-[[ "$branch_env_count" -ge 1 ]] \
-    || die "Выбранная ветка должна передаваться настройке управляющего контура"
+grep -Fq '"INFRA_PROJECT_BRANCH={{ infra_project_branch' "$ANSIBLE_PLAYBOOK" \
+    || die "Ветка проекта должна передаваться независимой службе активации"
 grep -Fq 'f"INFRA_PROJECT_BRANCH={self.project_branch}"' "$BOOTSTRAP_INFRA" \
     || die "Финальная bootstrap-проверка 910 должна использовать выбранную ветку"
 python3 - "$BOOTSTRAP_HOST" <<'PY'
