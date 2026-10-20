@@ -57,7 +57,7 @@ def main():
         with (
             patch.object(admin_socket, "authorize_action"),
             patch.object(admin_socket, "OperationStore", return_value=store),
-            patch.object(admin_socket.subprocess, "run", return_value=SimpleNamespace(returncode=0)) as run,
+            patch.object(admin_socket, "run", return_value=SimpleNamespace(returncode=0)) as run,
         ):
             operation_id = uuid.uuid4().hex
             accepted = admin_socket.dispatch({"kind": "status", "vmid": 109, "request_id": operation_id})
