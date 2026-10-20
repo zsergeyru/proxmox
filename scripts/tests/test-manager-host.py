@@ -433,6 +433,35 @@ def test_self_update_fast_activation_before_poll() -> None:
         assert store.list_recent()[0]["phase"] == "completed"
 
 
+def test_self_update_stores_refreshed_git_revision() -> None:
+    """UUID операции должен относиться к снимку нового Git, а не старой HEAD."""
+    from infra_manager.operation_store import OperationStore
+
+    with tempfile.TemporaryDirectory() as directory:
+        store = OperationStore(Path(directory) / "operations", require_mount=False)
+        git = {"revision": "old-revision"}
+        def snapshot(_operation: str, _vmid: int) -> str:
+            git["revision"] = "new-revision"
+            return "/tmp/new-revision-910"
+
+        with (
+            patch("infra_manager.operation_store.OperationStore", return_value=store),
+            patch.object(operator, "project_revision", side_effect=lambda _root: git["revision"]),
+            patch.object(operator, "_prepare_runtime_snapshot", side_effect=snapshot) as prep,
+            patch.object(operator, "_operator_guest_task", return_value=0) as worker,
+            patch.object(operator, "guest_identity", return_value=SimpleNamespace(
+                vmid=910, name="infra-manager",
+                role=operator.SETTINGS.infra_manager_role,
+            )),
+            patch.object(operator, "_wait_for_runtime_activation", return_value=None),
+            patch.object(operator, "console"),
+        ):
+            assert operator.operator_guest_task("deploy", 910, show_secrets=False) == 2
+        prep.assert_called_once_with("deploy", 910)
+        assert worker.call_args.kwargs["prepared_snapshot"] == "/tmp/new-revision-910"
+        assert store.list_recent()[0]["revision"] == "new-revision"
+
+
 def test_self_update_failed_activation_does_not_show_success() -> None:
     """Ошибку переключения нельзя считать успешным deploy."""
     from infra_manager.operation_store import OperationStore
@@ -855,6 +884,7 @@ def main() -> None:
     test_operator_guest_task_secret_policy()
     test_self_update_waits_and_renders_final_status()
     test_self_update_fast_activation_before_poll()
+    test_self_update_stores_refreshed_git_revision()
     test_self_update_failed_activation_does_not_show_success()
     test_self_update_interrupt_does_not_cancel_systemd()
     test_activation_poll_states_and_timeout()
