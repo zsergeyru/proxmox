@@ -461,6 +461,7 @@ Sync SSH Access
 ```text
 PVE: infra-manager deploy 910
 → LXC 910: обновить Git и сделать снимок
+→ в отдельном Python-процессе из обновлённой Git-копии проверить SSD/NAS и при необходимости запросить подтверждение в SSH
 → (целевой этап) проверить ВСЕ общие PVE-тома из storage.yaml
 → infra-runtime: Ansible и подготовка новых контейнеров
 → systemd внутри 910: безопасно переключить Docker
