@@ -41,6 +41,13 @@ ACTIVATE_RUNTIME = Path("/usr/local/sbin/infra-manager-activate-runtime")
 COMPOSE_FILE = PATHS.compose_dir / "docker-compose.yml"
 VERSIONS_FILE = PATHS.compose_dir / ".versions.env"
 RUNTIME_CONTAINER = "infra-runtime"
+# systemd может ждать старое задание до 15 минут; PVE ждёт только
+# постоянную запись операции, а не сам процесс в заменяемом Docker.
+ACTIVATION_WAIT_SECONDS = 25 * 60
+ACTIVATION_POLL_SECONDS = 2
+ACTIVATION_TERMINAL_PHASES = frozenset({
+    "completed", "failed", "rolled-back", "needs-recovery",
+})
 RUNTIME_PROJECT_ROOT = str(PATHS.repo_root)
 RUNTIME_GUEST_OPERATION = (
     PATHS.repo_root / "scripts" / "infra-manager" / "jobs" / "guest-operation.py"
@@ -282,6 +289,40 @@ def operator_guest_status(
     return result
 
 
+def _wait_for_runtime_activation(
+    store: object,
+    operation_id: str,
+    *,
+    timeout_seconds: int = ACTIVATION_WAIT_SECONDS,
+) -> dict | None:
+    """Дождаться проверенного systemd-результата по постоянному ID операции.
+
+    Не ждём Docker-процесс через PVE: systemd обязан иметь возможность
+    остановить старый infra-runtime после выхода выполнявшегося в нём
+    Ansible. Здесь лишь читаем состояние, независимое от Docker.
+    """
+    deadline = time.monotonic() + timeout_seconds
+    last_phase: str | None = None
+    while True:
+        record = store.get(operation_id)
+        phase = record.get("phase")
+        if phase in ACTIVATION_TERMINAL_PHASES:
+            return record
+        if phase != last_phase:
+            details = {
+                "queued": "ожидание запуска задания",
+                "running": "ожидание передачи задания systemd",
+                "activating": "переключение управляющей среды",
+                "verifying": "проверка нового infra-runtime, infra-web и OpenBao",
+            }.get(phase, "ожидание подтверждения")
+            console.info(f"Активация 910: {details}")
+            last_phase = phase
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return None
+        time.sleep(min(ACTIVATION_POLL_SECONDS, remaining))
+
+
 def operator_guest_task(
     operation: str,
     vmid: int,
@@ -293,6 +334,7 @@ def operator_guest_task(
     completed = False
     interrupted = False
     deferred = False
+    activation_handed_off = False
     store = None
     operation_id = None
     if operation == "deploy":
@@ -314,26 +356,65 @@ def operator_guest_task(
             task_options["operation_id"] = operation_id
         result = _operator_guest_task(operation, vmid, **task_options)
         if store is not None and operation_id is not None:
+            # Успешный выход Ansible означает передачу активации systemd,
+            # а НЕ готовность гостя. Если оператор прервут во время
+            # ожидания, нельзя помечать фоновую активацию как неуспешную.
+            activation_handed_off = result == 0
             current = store.get(operation_id)
-            if result != 0 and current["phase"] == "running":
-                store.finish(operation_id, exit_code=result)
-            elif result == 0 and current["phase"] == "running":
-                # Настройка завершилась, но отдельная systemd-служба ещё
-                # обязана проверить работоспособность нового поколения.
-                store.transition(operation_id, "activating")
-                console.info(
-                    f"Активация продолжается отдельно: {operation_id}; "
-                    "результат ещё не подтверждён"
+            if result != 0:
+                if current["phase"] == "running":
+                    store.finish(operation_id, exit_code=result)
+                return result
+
+            if current["phase"] == "running":
+                # Системная служба также умеет переходить из running к
+                # verifying. Учитываем её возможное опережение оператора.
+                try:
+                    store.transition(operation_id, "activating")
+                except InfraManagerError:
+                    if store.get(operation_id)["phase"] not in (
+                        "activating", "verifying", "completed",
+                        "failed", "rolled-back", "needs-recovery",
+                    ):
+                        raise
+
+            console.info(
+                f"Ожидание окончательной проверки активации 910: {operation_id}"
+            )
+            current = _wait_for_runtime_activation(store, operation_id)
+            if current is None:
+                deferred = True
+                console.warning(
+                    f"Активация 910 ещё не подтверждена: {operation_id}. "
+                    "Проверьте результат по идентификатору в "
+                    "/mnt/persistent-state/operations/history; "
+                    "не запускайте повторный deploy до выяснения состояния."
                 )
-                deferred = True
                 return 2
-            current = store.get(operation_id)
-            if current["phase"] in {"activating", "verifying"}:
-                console.info(f"Результат ещё ожидается: {operation_id}")
-                deferred = True
-                return 2
-            completed = current["phase"] == "completed" and current["result"] == "ok"
-            return 0 if completed else 1
+
+            phase = current["phase"]
+            if phase != "completed" or current.get("result") != "ok":
+                console.error(
+                    f"Активация 910 завершилась без подтверждения готовности: "
+                    f"{operation_id}; этап {phase}; код {current.get('exit_code')}. "
+                    "Проверьте журнал внутри 910: "
+                    "/var/log/infra-manager/runtime-activation.log. "
+                    "Не повторяйте deploy без проверки состояния."
+                )
+                return 1
+
+            console.result(f"Активация 910 подтверждена systemd: {operation_id}")
+            # Результат already completed, но shell trap службы может ещё
+            # удалять последний маркер. Полная проверка статуса допустима
+            # только после подтверждённого успешного результата именно
+            # этого задания, независимо от короткой гонки удаления маркера.
+            status_result = operator_guest_status(
+                vmid,
+                show_secrets=show_secrets,
+                allow_pending_activation=True,
+            )
+            completed = status_result == 0
+            return status_result
         completed = result == 0
         return result
     except KeyboardInterrupt:
@@ -342,7 +423,7 @@ def operator_guest_task(
     finally:
         if store is not None and operation_id is not None:
             current = store.get(operation_id)
-            if current["phase"] == "running":
+            if current["phase"] == "running" and not activation_handed_off:
                 store.finish(operation_id, exit_code=1)
         console.timing(
             f"Команда {operation} гостя {vmid}",
@@ -402,10 +483,9 @@ def _operator_guest_task(
             # Нельзя сообщать «полностью готов» до внешней
             # systemd-активации и проверки новой среды.
             console.info(
-                "Настройка завершена. После выхода текущего задания "
-                "служба активирует infra-runtime и infra-web, "
-                "проверит готовность; результат — в "
-                "/var/log/infra-manager/runtime-activation.log"
+                "Настройка завершена. Systemd активирует infra-runtime "
+                "и infra-web, затем оператор дождётся проверки готовности. "
+                "Журнал: /var/log/infra-manager/runtime-activation.log"
             )
             return 0
 
