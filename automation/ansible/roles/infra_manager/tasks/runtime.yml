@@ -1,4 +1,22 @@
 ---
+- name: Зафиксировать Git-версию для сборки Docker-образов 910
+  ansible.builtin.command:
+    argv:
+      - git
+      - -C
+      - "{{ provision.paths.bootstrap_repository }}"
+      - rev-parse
+      - --verify
+      - HEAD
+  register: infra_release_git
+  changed_when: false
+
+- name: Проверить Git-версию перед сборкой
+  ansible.builtin.assert:
+    that:
+      - "infra_release_git.stdout is match('^[0-9a-f]{40}$')"
+    fail_msg: "Не удалось получить точную Git-версию для сборки управляющей среды"
+
 - name: Записать версии управляющих средств
   ansible.builtin.copy:
     dest: "{{ provision.paths.compose }}/.versions.env"
@@ -8,6 +26,8 @@
     content: |
       RUNTIME_VERSION={{ provision.docker.services.runtime.image.split(':')[-1] }}
       RUNTIME_MODE=standalone
+      INFRA_GIT_REVISION={{ infra_release_git.stdout }}
+      ANSIBLE_VERSION={{ provision.docker.services.runtime.tools.ansible }}
       OPENTOFU_VERSION={{ provision.docker.services.runtime.tools.opentofu }}
       PACKER_VERSION={{ provision.docker.services.runtime.tools.packer }}
       PACKER_IMAGE={{ provision.docker.services.runtime.tools.packer_image }}
@@ -227,6 +247,7 @@
       - build
       - --pull
       - runtime
+      - web
   changed_when: true
 
 

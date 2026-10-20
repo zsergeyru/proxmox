@@ -40,6 +40,11 @@ RUN python3 -m pip install --no-cache-dir \
        --shell /usr/sbin/nologin infra-runtime \
     && install -d -o 1001 -g 0 -m 0700 /home/infra-runtime
 
+# Git SHA фиксируется в последнем лёгком слое: смена коммита не должна
+# запускать заново сборку Python, OpenTofu и Packer.
+ARG INFRA_GIT_REVISION=unknown
+ENV INFRA_RUNTIME_BUILD_REVISION=${INFRA_GIT_REVISION}
+
 USER 1001:0
 WORKDIR /var/lib/infra-manager/bootstrap-repo
 CMD ["sleep", "infinity"]

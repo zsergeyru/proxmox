@@ -177,7 +177,14 @@ fi
 COMPOSE_FILE="$COMPOSE_DIR/docker-compose-standalone.yml"
 docker compose \
     --env-file "$COMPOSE_DIR/.versions.env" \
-    -f "$COMPOSE_FILE" up -d --remove-orphans
+    -f "$COMPOSE_FILE" up -d --no-build --remove-orphans
+
+# Пересоздать только веб-панель из собранного образа; проверка readiness
+# ниже сравнит встроенный в него Git SHA с текущим release. Не затрагивать
+# OpenBao и уже исполняющий задания infra-runtime.
+docker compose \
+    --env-file "$COMPOSE_DIR/.versions.env" \
+    -f "$COMPOSE_FILE" up -d --no-build --no-deps --force-recreate web
 
 /usr/local/sbin/infra-manager-openbao-startup-unseal "$PVE_NODE"
 

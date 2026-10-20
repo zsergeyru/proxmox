@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import http.client
+import os
 import importlib.util
 import sys
 import threading
@@ -64,6 +65,31 @@ def main():
             # Политика ответа с HTML-формой не должна делать Origin: null.
             status, headers, body = request(server, "GET", "/")
             assert status == 200 and 'action="/login"' in body
+            assert "Версии компонентов" in body
+            assert "infra-web (образ)" in body
+            assert "не определена" in body
+            # Этот раздел публичен, поэтому отдаём только версии и SHA,
+            # никогда данные окружения или пароль OpenBao.
+            with patch.dict(os.environ, {
+                "INFRA_WEB_BUILD_REVISION": "a" * 40,
+                "INFRA_GIT_REVISION": "a" * 40,
+                "INFRA_RUNTIME_VERSION": "v1",
+                "INFRA_OPENBAO_VERSION": "2.7.0",
+                "INFRA_OPENTOFU_VERSION": "1.12.6",
+                "INFRA_ANSIBLE_VERSION": "2.19.4",
+                "INFRA_PACKER_VERSION": "1.15.4",
+                "OPENBAO_ROOT_TOKEN": "secret-never-in-public-html",
+            }):
+                st, _, login_html = request(server, "GET", "/")
+                assert st == 200
+                for fragment in ("Git aaaaaaaaaaaa", "v1",
+                                 "2.7.0", "1.12.6", "2.19.4", "1.15.4"):
+                    assert fragment in login_html, fragment
+                assert "secret-never-in-public-html" not in login_html
+                assert "Внимание: версия веб-панели" not in login_html
+                with patch.dict(os.environ, {"INFRA_GIT_REVISION": "b" * 40}):
+                    st, _, outdated = request(server, "GET", "/")
+                    assert st == 200 and "Внимание: версия веб-панели" in outdated
             assert headers["Referrer-Policy"] == "same-origin"
             assert headers["Cache-Control"] == "no-store"
             assert headers["X-Content-Type-Options"] == "nosniff"
