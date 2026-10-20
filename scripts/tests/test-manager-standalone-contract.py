@@ -101,6 +101,33 @@ def verify() -> None:
         "docker-compose.yml", "infra-manager-status",
     ):
         assert item in runtime_tasks, item
+    # Раньше Ansible собирал только infra-runtime: infra-web оставался
+    # старым Docker-образом и продолжал отвечать Referrer-Policy: no-referrer.
+    task_definitions = yaml.safe_load(runtime_tasks)
+    builds = [task for task in task_definitions
+              if task.get("name") == "Собрать управляющую среду"]
+    assert len(builds) == 1
+    build_args = builds[0]["ansible.builtin.command"]["argv"]
+    assert build_args[-2:] == ["runtime", "web"]
+    assert "--pull" in build_args
+    assert "INFRA_GIT_REVISION={{ infra_release_git.stdout }}" in runtime_tasks
+    assert "ANSIBLE_VERSION=" in runtime_tasks
+    for filename in ("docker-compose.yml", "docker-compose-standalone.yml"):
+        desc = read_yaml(COMPOSE / filename)["services"]
+        assert desc["web"]["build"]["args"]["INFRA_GIT_REVISION"] == "${INFRA_GIT_REVISION:-unknown}"
+        assert desc["runtime"]["build"]["args"]["INFRA_GIT_REVISION"] == "${INFRA_GIT_REVISION:-unknown}"
+        assert desc["web"]["environment"]["INFRA_RUNTIME_VERSION"] == "${RUNTIME_VERSION}"
+        assert desc["web"]["environment"]["INFRA_OPENBAO_VERSION"] == "${OPENBAO_VERSION}"
+    web_image = (COMPOSE / "web/Dockerfile").read_text(encoding="utf-8")
+    assert "ENV INFRA_WEB_BUILD_REVISION=${INFRA_GIT_REVISION}" in web_image
+    assert "ENV INFRA_RUNTIME_BUILD_REVISION=${INFRA_GIT_REVISION}" in image
+    activation = (ROOT / "scripts/infra-manager/commands/activate-runtime.sh").read_text(encoding="utf-8")
+    assert "up -d --no-build --no-deps --force-recreate web" in activation
+    assert "up -d --no-build --remove-orphans" in activation
+    status_code = (ROOT / "scripts/infra-manager/infra_manager/status.py").read_text(encoding="utf-8")
+    assert "INFRA_WEB_BUILD_REVISION" in status_code
+    assert "INFRA_RUNTIME_BUILD_REVISION" in status_code
+    assert "revision.stdout.strip() != release" in status_code
     assert "provision.paths.semaphore_persistent_data" not in runtime_tasks
     assert "SEMAPHORE_VERSION" not in runtime_tasks
     assert "semaphore-project" not in runtime_tasks
