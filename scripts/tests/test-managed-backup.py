@@ -53,10 +53,18 @@ def check_policy() -> None:
             raw, approved = backup_controller.policy()
             assert raw["host"] == "pve"
             assert approved == {"fast-ssd": "ABC-123", "nas-backup": "//nas/share"}
+            # Отсутствие одного носителя допускается. Независимая вторая
+            # копия должна отмечаться в статусе, а не выключать первую.
             path.write_text(yaml.safe_dump(config(uuid=None)), encoding="utf-8")
-            fails(backup_controller.policy, "Без SSD запуск должен блокироваться")
+            with patch("infra_manager.pve_backup_ssd._read_state", return_value=None):
+                _, single = backup_controller.policy()
+            assert single == {"nas-backup": "//nas/share"}
             path.write_text(yaml.safe_dump(config(nas=None)), encoding="utf-8")
-            fails(backup_controller.policy, "Без NAS запуск должен блокироваться")
+            _, single = backup_controller.policy()
+            assert single == {"fast-ssd": "ABC-123"}
+            path.write_text(yaml.safe_dump(config(uuid=None, nas=None)), encoding="utf-8")
+            with patch("infra_manager.pve_backup_ssd._read_state", return_value=None):
+                fails(backup_controller.policy, "Без обоих носителей запись запрещена")
             changed = config()
             changed["destinations"][0]["mountpoint"] = "/"
             path.write_text(yaml.safe_dump(changed), encoding="utf-8")
@@ -68,11 +76,15 @@ def check_policy() -> None:
 
 
 def check_host_denies_untrusted() -> None:
-    fails(lambda: host.check_destinations({"fast-ssd": "fake"}),
-          "Необходимо подтверждение обоих устройств")
+    fails(lambda: host.check_destinations({}), "Пустой список носителей запрещён")
+    fails(lambda: host.check_destinations({"unknown": "bad"}), "Неизвестное назначение запрещено")
     with patch.object(host, "_mounted") as mounted:
-        host.check_destinations({"fast-ssd": "disk-A", "nas-backup": "nas-B"})
+        host.check_destinations({"fast-ssd": "disk-A"})
+        assert mounted.call_count == 1
+        host.check_destinations({"nas-backup": "nas-B"})
         assert mounted.call_count == 2
+        host.check_destinations({"fast-ssd": "disk-A", "nas-backup": "nas-B"})
+        assert mounted.call_count == 4
     fails(lambda: host.check_destinations(
         {"fast-ssd": "same", "nas-backup": "same"}),
         "SSD и NAS не должны совпадать")
