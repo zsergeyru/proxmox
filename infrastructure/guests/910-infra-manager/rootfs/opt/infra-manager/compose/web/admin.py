@@ -515,7 +515,8 @@ def _guest_confirmation(vmid: int, kind: str, csrf: str) -> bytes:
         f'<input type="hidden" name="csrf" value="{token}">'
         f'<input type="hidden" name="vmid" value="{vmid}">'
         f'<input type="hidden" name="kind" value="{kind}">'
-        '<button type="submit">Да, выполнить</button></form>'
+        '<button type="submit">Да, выполнить</button></form>',
+        page="guests", csrf=csrf,
     )
 
 
@@ -706,7 +707,8 @@ def _backup_confirm_page(csrf: str) -> bytes:
         'одна копия с предупреждением о второй.</p>'
         '<form method="POST" action="/infrastructure/run">'
         f'<input type="hidden" name="csrf" value="{token}">'
-        '<button type="submit">Да, начать резервирование</button></form>'
+        '<button type="submit">Да, начать резервирование</button></form>',
+        page="infrastructure", csrf=csrf,
     )
 
 
@@ -778,9 +780,11 @@ def _storage_page(csrf: str, notice: str = "") -> bytes:
     try:
         record = _send_storage("storage-plan").get("storage", {})
     except (ValueError, OSError, TimeoutError):
-        return _layout(content + "<p>Сейчас не удалось проверить SSD. Диск не изменён.</p>")
+        return _layout(content + "<p>Сейчас не удалось проверить SSD. Диск не изменён.</p>",
+                       page="storage", csrf=csrf)
     if not isinstance(record, dict):
-        return _layout(content + "<p>Неизвестное состояние SSD.</p>")
+        return _layout(content + "<p>Неизвестное состояние SSD.</p>",
+                       page="storage", csrf=csrf)
     state = record.get("state")
     if state == "running":
         content += (
@@ -823,7 +827,8 @@ def _storage_page(csrf: str, notice: str = "") -> bytes:
             + html.escape(str(record.get("reason", "нужна проверка устройства")))
             + ". Никаких изменений на диске нет.</p>"
         )
-    return _layout(content, auto_refresh=state == "running")
+    return _layout('<section class="panel">' + content + '</section>',
+                   auto_refresh=state == "running", page="storage", csrf=csrf)
 
 
 def _text(value: object) -> str:
@@ -1098,7 +1103,8 @@ def _login() -> bytes:
         '<label>Пароль <input type="password" name="password" '
         'autocomplete="current-password" required></label>'
         '<button>Войти</button></form>'
-        + _public_versions()
+        + _public_versions(),
+        page="login", authenticated=False,
     )
 
 
@@ -1126,7 +1132,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Strict-Transport-Security", "max-age=3600")
         self.send_header(
             "Content-Security-Policy",
-            "default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; connect-src 'self'; form-action 'self'; base-uri 'none'",
+            "default-src 'none'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; form-action 'self'; base-uri 'none'",
         )
         if cookie is not None:
             self.send_header("Set-Cookie", cookie)
@@ -1165,7 +1171,26 @@ class Handler(BaseHTTPRequestHandler):
                 content_type="text/plain; charset=utf-8",
             )
             return
+        if path == "/ui.css":
+            try:
+                style = Path(__file__).with_name("ui.css").read_bytes()
+            except OSError:
+                self._reply(HTTPStatus.SERVICE_UNAVAILABLE, b"styles unavailable\n")
+                return
+            self._reply(HTTPStatus.OK, style, content_type="text/css; charset=utf-8")
+            return
         session = self._authorized()
+        if path == "/ui.js":
+            if not session:
+                self._reply(HTTPStatus.UNAUTHORIZED, b"login required\n")
+                return
+            try:
+                script = Path(__file__).with_name("ui.js").read_bytes()
+            except OSError:
+                self._reply(HTTPStatus.SERVICE_UNAVAILABLE, b"interface unavailable\n")
+                return
+            self._reply(HTTPStatus.OK, script, content_type="text/javascript; charset=utf-8")
+            return
         if path == "/" or path == "/login":
             self._reply(
                 HTTPStatus.OK,
@@ -1178,7 +1203,7 @@ class Handler(BaseHTTPRequestHandler):
             query = parse_qs(urlsplit(self.path).query, keep_blank_values=True)
             if path in {"/guests", "/api/guests"} and not query:
                 if path == "/guests":
-                    self._reply(HTTPStatus.OK, _guests_page())
+                    self._reply(HTTPStatus.OK, _guests_page(session[1]["csrf"]))
                 else:
                     try:
                         data = _guest_catalog("guests")
@@ -1267,7 +1292,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._reply(HTTPStatus.BAD_REQUEST, b"invalid operation id\\n")
                 return
             if path == "/operations":
-                self._reply(HTTPStatus.OK, _operation_page(operation_id))
+                self._reply(HTTPStatus.OK, _operation_page(operation_id, session[1]["csrf"]))
                 return
             try:
                 detail = _operation_detail(operation_id)
