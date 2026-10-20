@@ -102,33 +102,45 @@ def verify() -> None:
         "docker-compose.yml", "infra-manager-status",
     ):
         assert item in runtime_tasks, item
-    # Раньше Ansible собирал только infra-runtime: infra-web оставался
-    # старым Docker-образом и продолжал отвечать Referrer-Policy: no-referrer.
+    # Образы собираются только при изменении их исходников, а не при
+    # каждом новом коммите проекта. Отсутствующий образ пересобирается.
     task_definitions = yaml.safe_load(runtime_tasks)
-    builds = [task for task in task_definitions
-              if task.get("name") == "Собрать управляющую среду"]
-    assert len(builds) == 1
-    build_args = builds[0]["ansible.builtin.command"]["argv"]
-    assert build_args[-2:] == ["runtime", "web"]
-    assert "--pull" in build_args
+    runtime_build = next(task for task in task_definitions
+                         if task.get("name") == "Собрать infra-runtime только при изменении исходников")
+    web_build = next(task for task in task_definitions
+                     if task.get("name") == "Собрать infra-web только при изменении исходников")
+    assert runtime_build["when"] == "infra_build_runtime"
+    assert web_build["when"] == "infra_build_web"
+    assert runtime_build["ansible.builtin.command"]["argv"][-1] == "runtime"
+    assert web_build["ansible.builtin.command"]["argv"][-1] == "web"
+    assert "--pull" in runtime_build["ansible.builtin.command"]["argv"]
+    assert "--pull" not in web_build["ansible.builtin.command"]["argv"]
     assert "INFRA_GIT_REVISION={{ infra_release_git.stdout }}" in runtime_tasks
+    assert "INFRA_WEB_CONTENT_REVISION={{ infra_web_content_revision }}" in runtime_tasks
+    assert "INFRA_RUNTIME_CONTENT_REVISION={{ infra_runtime_content_revision }}" in runtime_tasks
+    assert "INFRA_OPENBAO_CONFIG_REVISION={{ infra_openbao_config_revision }}" in runtime_tasks
     assert "ANSIBLE_VERSION=" in runtime_tasks
     for filename in ("docker-compose.yml", "docker-compose-standalone.yml"):
         desc = read_yaml(COMPOSE / filename)["services"]
         assert desc["web"]["build"]["args"]["INFRA_GIT_REVISION"] == "${INFRA_GIT_REVISION:-unknown}"
         assert desc["runtime"]["build"]["args"]["INFRA_GIT_REVISION"] == "${INFRA_GIT_REVISION:-unknown}"
+        assert desc["web"]["build"]["args"]["INFRA_WEB_CONTENT_REVISION"] == "${INFRA_WEB_CONTENT_REVISION:-unknown}"
+        assert desc["runtime"]["build"]["args"]["INFRA_RUNTIME_CONTENT_REVISION"] == "${INFRA_RUNTIME_CONTENT_REVISION:-unknown}"
+        assert desc["openbao"]["environment"]["INFRA_OPENBAO_CONFIG_REVISION"] == "${INFRA_OPENBAO_CONFIG_REVISION:-unknown}"
         assert desc["web"]["environment"]["INFRA_RUNTIME_VERSION"] == "${RUNTIME_VERSION}"
         assert desc["web"]["environment"]["INFRA_OPENBAO_VERSION"] == "${OPENBAO_VERSION}"
     web_image = (COMPOSE / "web/Dockerfile").read_text(encoding="utf-8")
-    assert "ENV INFRA_WEB_BUILD_REVISION=${INFRA_GIT_REVISION}" in web_image
-    assert "ENV INFRA_RUNTIME_BUILD_REVISION=${INFRA_GIT_REVISION}" in image
+    assert "ENV INFRA_WEB_BUILD_GIT_REVISION=${INFRA_GIT_REVISION}" in web_image
+    assert "ENV INFRA_WEB_BUILD_REVISION=${INFRA_WEB_CONTENT_REVISION}" in web_image
+    assert "ENV INFRA_RUNTIME_BUILD_GIT_REVISION=${INFRA_GIT_REVISION}" in image
+    assert "ENV INFRA_RUNTIME_BUILD_REVISION=${INFRA_RUNTIME_CONTENT_REVISION}" in image
     activation = (ROOT / "scripts/infra-manager/commands/activate-runtime.sh").read_text(encoding="utf-8")
-    assert "up -d --no-build --no-deps --force-recreate web" in activation
+    assert "up -d --no-build --no-deps --force-recreate web" not in activation
     assert "up -d --no-build --remove-orphans" in activation
     status_code = (ROOT / "scripts/infra-manager/infra_manager/status.py").read_text(encoding="utf-8")
     assert "INFRA_WEB_BUILD_REVISION" in status_code
     assert "INFRA_RUNTIME_BUILD_REVISION" in status_code
-    assert "revision.stdout.strip() != release" in status_code
+    assert "revision.stdout.strip() != expected" in status_code
     assert "provision.paths.semaphore_persistent_data" not in runtime_tasks
     assert "SEMAPHORE_VERSION" not in runtime_tasks
     assert "semaphore-project" not in runtime_tasks
