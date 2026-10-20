@@ -73,6 +73,8 @@ def main():
             # никогда данные окружения или пароль OpenBao.
             with patch.dict(os.environ, {
                 "INFRA_WEB_BUILD_REVISION": "a" * 40,
+                "INFRA_WEB_BUILD_GIT_REVISION": "a" * 40,
+                "INFRA_WEB_CONTENT_REVISION": "a" * 40,
                 "INFRA_GIT_REVISION": "a" * 40,
                 "INFRA_RUNTIME_VERSION": "v1",
                 "INFRA_OPENBAO_VERSION": "2.7.0",
@@ -88,7 +90,12 @@ def main():
                     assert fragment in login_html, fragment
                 assert "secret-never-in-public-html" not in login_html
                 assert "Внимание: версия веб-панели" not in login_html
+                # Коммит проекта изменился без изменения web: ложного предупреждения нет.
                 with patch.dict(os.environ, {"INFRA_GIT_REVISION": "b" * 40}):
+                    st, _, current = request(server, "GET", "/")
+                    assert st == 200 and "Внимание: версия веб-панели" not in current
+                # Изменился именно код web, но контейнер не обновлён.
+                with patch.dict(os.environ, {"INFRA_WEB_CONTENT_REVISION": "b" * 40}):
                     st, _, outdated = request(server, "GET", "/")
                     assert st == 200 and "Внимание: версия веб-панели" in outdated
             assert headers["Referrer-Policy"] == "same-origin"
