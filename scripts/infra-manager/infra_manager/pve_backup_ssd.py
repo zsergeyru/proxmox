@@ -57,6 +57,49 @@ def _eligible(item: dict, min_bytes: int) -> Disk | None:
     return Disk(path, serial, model.strip(), size)
 
 
+def _empty_block_device(node: str, disk: Disk) -> None:
+    """Перепроверить PVE блочное устройство до любого изменения GPT.
+
+    Чтение только штатными lsblk/wipefs. Даже если PVE API считает диск
+    свободным, любой раздел, сигнатура, mount или ошибка проверки — запрет.
+    """
+    result = run(
+        _ssh_command(node, (
+            "lsblk", "--json", "--bytes", "--paths",
+            "--output", "PATH,TYPE,SIZE,FSTYPE,MOUNTPOINTS,RO",
+            disk.devpath,
+        )),
+        capture_output=True, check=False,
+    )
+    if result.returncode:
+        raise InfraManagerError("Не удалось проверить состав разделов SSD на PVE")
+    try:
+        devices = json.loads(result.stdout)["blockdevices"]
+    except (ValueError, KeyError, TypeError) as exc:
+        raise InfraManagerError("Неизвестный ответ lsblk для SSD") from exc
+    if not isinstance(devices, list) or len(devices) != 1:
+        raise InfraManagerError("SSD не является единственным блочным устройством")
+    item = devices[0]
+    if (item.get("path") != disk.devpath or item.get("type") != "disk"
+            or item.get("size") != disk.size or item.get("ro") not in (0, False)
+            or item.get("fstype") not in (None, "")
+            or item.get("mountpoints") not in (None, [], [None])
+            or item.get("children")):
+        raise InfraManagerError(
+            "На физическом SSD есть разделы, сигнатуры или использование; "
+            "изменение разметки запрещено"
+        )
+    signatures = run(
+        _ssh_command(node, ("wipefs", "--no-act", disk.devpath)),
+        capture_output=True, check=False,
+    )
+    if signatures.returncode or signatures.stdout.strip():
+        raise InfraManagerError(
+            "SSD имеет сигнатуры либо их невозможно проверить; "
+            "первичное форматирование запрещено"
+        )
+
+
 def _mount_info(node: str) -> tuple[str, str]:
     """Проверить фактический UUID и тип, не доверяя имени каталога."""
     result = run(
@@ -195,6 +238,9 @@ def reconcile_backup_ssd(client: PveClient, node: str, *, interactive: bool = Fa
         f"серийный номер {disk.serial}; GPT + ext4, {MOUNT}. "
         "Создание уничтожит прежние данные на выбранном диске."
     )
+    # Даже план предлагается только после независимой проверки разделов:
+    # used=None от PVE API сам по себе не гарантирует пустой диск.
+    _empty_block_device(node, disk)
     if not interactive:
         console.warning("Первичная разметка SSD требует подтверждения через доверенную CLI PVE")
         return None
@@ -209,6 +255,7 @@ def reconcile_backup_ssd(client: PveClient, node: str, *, interactive: bool = Fa
                       if (d := _eligible(item, min_bytes))]
     if candidates_now != [disk] or _directory(client, node) is not None:
         raise InfraManagerError("Состояние дисков изменилось после подтверждения; запись запрещена")
+    _empty_block_device(node, disk)
     client.run_task(
         "POST", f"/nodes/{node}/disks/directory", node=node,
         form={"device": disk.devpath, "name": NAME, "filesystem": "ext4", "add_storage": 0},
