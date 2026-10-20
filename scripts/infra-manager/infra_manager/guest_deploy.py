@@ -891,7 +891,7 @@ def _run_deploy_guest(
                 f"Штатный deploy {context.name} остановлен: {exc} "
                 "Проверьте причину и состояние: infra-manager status "
                 f"{context.vmid}. После исправления повторите deploy. "
-                "Команда recover нужна только при подтверждённой "
+                "Команда infra-manager recover нужна только при подтверждённой "
                 "невозможности штатно восстановить управляющий контур."
             ) from exc
         console.result(
