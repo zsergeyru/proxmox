@@ -66,6 +66,11 @@ def main():
             # Политика ответа с HTML-формой не должна делать Origin: null.
             status, headers, body = request(server, "GET", "/")
             assert status == 200 and 'action="/login"' in body
+            css_status, css_headers, css_body = request(server, "GET", "/ui.css")
+            assert css_status == 200 and "text/css" in css_headers["Content-Type"]
+            assert ".sidebar" in css_body and ".guest-grid" in css_body
+            js_status, _, _ = request(server, "GET", "/ui.js")
+            assert js_status == 401, "UI JavaScript не отдаётся без входа"
             assert "Версии компонентов" in body
             assert "infra-web (образ)" in body
             assert "не определена" in body
@@ -136,6 +141,11 @@ def main():
             assert all(flag in headers["Set-Cookie"] for flag in ("Secure", "HttpOnly", "SameSite=Strict"))
             assert headers["Strict-Transport-Security"].startswith("max-age=")
             assert headers["Referrer-Policy"] == "same-origin"
+            script_status, script_headers, script_body = request(server, "GET", "/ui.js", cookie=cookie)
+            assert script_status == 200
+            assert script_headers["Content-Type"].startswith("text/javascript")
+            assert "Intl.DateTimeFormat" in script_body and "Europe/Moscow" in script_body
+            assert "'self'" in headers["Content-Security-Policy"]
             status, _, body = request(server, "GET", "/api/operations", cookie=cookie)
             assert status == 200 and body.lstrip().startswith("[")
             status, _, _ = request(server, "POST", "/action", {"vmid": "109", "kind": "status"}, cookie=cookie)
