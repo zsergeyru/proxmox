@@ -29,7 +29,6 @@ from .guest_deploy import project_branch_for_checkout, project_revision
 from .guest_operations import list_local_guests, run_local_guest_status
 from .operation_lock import _backup_gate, project_checkout_lock
 from .physical_host_state import checked_record_path
-from .physical_host_connection import resolve_connection_values
 from .pve import PveClient
 from .pve_host import (
     preflight_recovery_contour,
@@ -523,6 +522,7 @@ def _operator_guest_task(
 def operator_physical_connection_state(name: str) -> int:
     """Сообщить оператору PVE, требуется ли первичный ввод адреса NAS."""
 
+    from .physical_host_connection import resolve_connection_values
     import yaml
 
     if name != "nas":
@@ -551,6 +551,7 @@ def operator_physical_connection_state(name: str) -> int:
 def operator_physical_bootstrap_state(name: str) -> int:
     """Запросить пароль только до первого подтверждённого SSH-сертификата."""
 
+    from .physical_host_connection import resolve_connection_values
     import yaml
 
     if name != "nas":
