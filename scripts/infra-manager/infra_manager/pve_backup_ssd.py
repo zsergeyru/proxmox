@@ -266,7 +266,10 @@ def _job_lock():
             raise InfraManagerError("Отсутствует безопасный каталог задания SSD")
         fd = os.open(lock, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
         try:
-            fcntl.flock(fd, fcntl.LOCK_EX)
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError as exc:
+                raise InfraManagerError("Подготовка SSD уже выполняется") from exc
             yield
         finally:
             fcntl.flock(fd, fcntl.LOCK_UN)
