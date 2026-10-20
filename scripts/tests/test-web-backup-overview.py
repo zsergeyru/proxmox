@@ -157,7 +157,7 @@ def main():
                   patch.object(backup_controller, "policy", return_value=({}, {"fast-ssd": "A"})),
                   patch.object(admin_socket, "run", side_effect=[
                       SimpleNamespace(returncode=3, stdout=""),
-                      SimpleNamespace(returncode=0, stdout="LoadState=loaded\\n"),
+                      SimpleNamespace(returncode=0, stdout="LoadState=loaded\n"),
                       SimpleNamespace(returncode=0, stdout=""),
                   ]) as systemctl):
                 accepted = admin_socket.dispatch({
@@ -193,7 +193,7 @@ def main():
                   patch.object(backup_controller, "policy", return_value=({}, {"fast-ssd": "A"})),
                   patch.object(admin_socket, "run", side_effect=[
                       SimpleNamespace(returncode=3, stdout=""),
-                      SimpleNamespace(returncode=0, stdout="LoadState=not-found\\n"),
+                      SimpleNamespace(returncode=0, stdout="LoadState=not-found\n"),
                   ])):
                 absent = admin_socket.dispatch({
                     "kind": "backup-run", "vmid": 0, "request_id": uuid.uuid4().hex,
