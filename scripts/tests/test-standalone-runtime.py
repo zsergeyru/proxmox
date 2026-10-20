@@ -93,6 +93,9 @@ def main() -> None:
     assert 'ACTIVATION_MARKER="$TRANSITION_MARKER"' in activate
     assert 'MARKER_VERIFIED=1' in activate
     assert "/var/lib/semaphore" not in activate
+    deploy_paths = (ROOT / "scripts/infra-manager/infra_manager/guest_deploy_infrastructure.py").read_text()
+    assert 'known_hosts=PATHS.opentofu_dir / "guest-known-hosts"' in deploy_paths
+    assert "/var/lib/semaphore/guest-known-hosts" not in deploy_paths
     print("[ОК] Рабочий infra-runtime не зависит от Semaphore")
 
 
