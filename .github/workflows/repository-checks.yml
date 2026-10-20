@@ -156,6 +156,7 @@ jobs:
       - name: Check authenticated infra-web and restricted system socket
         run: |
           python scripts/tests/test-infra-web-admin.py
+          python scripts/tests/test-infra-web-remember.py
           python scripts/tests/test-infra-web-ux.py
           node --check infrastructure/guests/910-infra-manager/rootfs/opt/infra-manager/compose/web/ui.js
           node scripts/tests/test-infra-web-timezone.js
