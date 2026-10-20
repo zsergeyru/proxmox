@@ -20,6 +20,7 @@ from .physical_host_bootstrap import bootstrap_physical_host
 from .physical_storage import read_disk_inspection, verify_expected_disks
 from .physical_storage_plan import propose_storage, format_storage_plan
 from .physical_nas_storage_state import apply_saved_storage
+from .physical_host_connection import apply_saved_connection, save_verified_connection
 from .physical_nas_storage_prepare import prepare_blank_disks
 from .physical_nas_system import read_nas_system, require_omv8
 from .physical_nas_ansible import (
@@ -30,7 +31,7 @@ from .physical_nas_volumes import verify_nas_volumes
 from .common import run
 
 
-SUPPORTED_HOST_OPERATIONS = frozenset({"hosts", "status", "inspect", "storage-plan", "storage-prepare", "deploy", "repair", "bootstrap"})
+SUPPORTED_HOST_OPERATIONS = frozenset({"hosts", "status", "inspect", "storage-plan", "storage-prepare", "deploy", "repair", "bootstrap", "connection-setup"})
 
 
 def require_host_access(repo_root: Path, host_name: str) -> None:
@@ -80,9 +81,25 @@ def run_physical_host_operation(repo_root: Path, operation: str, name: str) -> i
         raise InfraManagerError(f"Недопустимая операция физического сервера: {operation}")
     if operation == "hosts":
         return list_hosts(repo_root)
-    host = apply_saved_storage(load_physical_host(repo_root, name))
+    host = apply_saved_storage(apply_saved_connection(load_physical_host(repo_root, name)))
     require_host_access(repo_root, name)
     console.info(f"Физический сервер: {host.name}")
+    if operation == "connection-setup":
+        payload = sys.stdin.readline(2048)
+        if not payload or len(payload) > 2047 or not payload.endswith("\n"):
+            raise InfraManagerError("Не получен адрес и SSH-отпечаток NAS")
+        try:
+            params = json.loads(payload)
+        except json.JSONDecodeError as exc:
+            raise InfraManagerError("Некорректные параметры SSH-подключения") from exc
+        if not isinstance(params, dict) or set(params) != {"address", "fingerprint"}:
+            raise InfraManagerError("Параметры SSH-подключения NAS неполны")
+        if not isinstance(params["address"], str) or not isinstance(params["fingerprint"], str):
+            raise InfraManagerError("IP-адрес и SSH-отпечаток NAS должны быть строками")
+        save_verified_connection(host, params["address"], params["fingerprint"])
+        console.result("SSH-ключ NAS проверен, адрес сохранён в состоянии 910")
+        return 0
+
     if host.address is None:
         raise InfraManagerError(
             f"{host.directory / 'host.yaml'}: укажите подтверждённый сетевой адрес NAS; "
