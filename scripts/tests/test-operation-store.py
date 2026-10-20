@@ -119,6 +119,26 @@ def check_activation_phases(root: Path) -> None:
     )
 
 
+def check_compatible_rollback(root: Path) -> None:
+    store = OperationStore(root, require_mount=False)
+    request, _ = store.reserve("deploy", 109, "abcd", activation_required=True)
+    store.start(request["id"])
+    fails(
+        lambda: store.rollback_confirmed(request["id"]),
+        "Нельзя считать запуск откатом до независимой активации",
+    )
+    store.transition(request["id"], "activating")
+    result = store.rollback_confirmed(request["id"])
+    check(result["phase"] == "rolled-back", "Не сохранён итог возврата")
+    check(result["result"] == "rolled-back", "Откат не может означать успех")
+    fails(
+        lambda: store.finish(request["id"], exit_code=0),
+        "Нельзя заменить откат успешным обновлением",
+    )
+    check(not (store.active / "109.json").exists(), "После возврата осталась блокировка")
+    assert store.reserve("deploy", 109, "new", activation_required=True)[1]
+
+
 def check_reboot_does_not_replay(root: Path) -> None:
     store = OperationStore(root, require_mount=False)
     record, created = store.reserve("deploy", 109, "abc")
@@ -231,6 +251,7 @@ def main() -> None:
         base = Path(temporary)
         check_persistence_and_idempotency(base / "a")
         check_activation_phases(base / "activation")
+        check_compatible_rollback(base / "rollback")
         check_reboot_does_not_replay(base / "reboot")
         check_failure_and_duplicates(base / "b")
         check_process_lock(base / "c")
