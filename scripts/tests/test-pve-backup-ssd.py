@@ -197,6 +197,7 @@ def test_web_confirmation_starts_background_and_survives_browser():
                     job_id, "a" * 64, "19386J473508",
                 ) == 0
             assert applied.call_count == 1
+            assert applied.call_args.kwargs["confirmation"]("ignored") == "да"
             assert json.loads(path.read_text())["state"] == "completed"
             refuses(lambda: ssd.apply_approved_backup_ssd(
                 job_id, "a" * 64, "19386J473508",
