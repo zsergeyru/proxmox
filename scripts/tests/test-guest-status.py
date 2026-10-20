@@ -455,8 +455,8 @@ def check_rendered_status() -> None:
             "192.168.9.10",
             (
                 "https://192.168.9.10:8443/",
-                "Semaphore",
-                "semaphore-password",
+                "infra-web",
+                "openbao-password",
                 "OpenBao",
                 "openbao-password",
             ),
