@@ -647,7 +647,8 @@ def _backup_overview_page(csrf: str, notice: str = "") -> bytes:
     summary = BACKUP_OVERALL.get(backup.get("overall"), "Неизвестное состояние копий")
     token = html.escape(csrf, quote=True)
     start_link = (
-        '<p><a href="/infrastructure/confirm">Запустить копирование вручную</a></p>'
+        '<p><a class="btn" href="/infrastructure/confirm">'
+        'Запустить резервирование вручную →</a></p>'
         if configured else '<p>Запуск копирования недоступен: нет настроенных носителей.</p>'
     )
     return _layout(
@@ -689,8 +690,8 @@ def _backup_overview_page(csrf: str, notice: str = "") -> bytes:
         + e(service_state) + '</div></div>'
         '<div class="stat"><div class="stat-label">Расписание</div><div class="stat-value" style="font-size:19px">'
         + e(backup.get("schedule_declared")) + '</div></div></div>'
-        '<p>Следующий запуск (время сервера): ' + e(timer.get("next")) + '. '
-        'Предыдущий запуск (время сервера): ' + e(timer.get("last"))
+        '<p>Следующий запуск (время сервера): ' + _systemd_time_html(timer.get("next")) + '. '
+        'Предыдущий запуск (время сервера): ' + _systemd_time_html(timer.get("last"))
         + '. Результат systemd: ' + e(timer.get("last_result")) + '.</p>'
         + start_link
         + '<p><a class="btn secondary" href="/infrastructure">↻ Обновить состояние</a> '
@@ -859,6 +860,31 @@ def _time_html(value: object) -> str:
         year, month, day = value.split("-")
         return f'<time datetime="{value}">{day}.{month}.{year}</time>'
     return '<span title="Время сервера; часовой пояс неизвестен">' + _text(value) + '</span>'
+
+
+
+def _systemd_time_html(value: object) -> str:
+    """Сделать systemd wall-clock удобочитаемым, не угадывая UTC offset.
+
+    Например, "Tue 2026-10-20 21:30:00 MSK" -> "20.10.2026 · 21:30 MSK".
+    Для таких строк смещение не известно, поэтому браузер их не сдвигает.
+    """
+    if not isinstance(value, str) or not value or value == "n/a":
+        return "—"
+    found = re.fullmatch(
+        r"(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+"
+        r"(\d{4})-(\d{2})-(\d{2})\s+"
+        r"(\d{2}):(\d{2}):\d{2}\s+([A-Z][A-Z0-9+-]{1,9})",
+        value,
+    )
+    if found:
+        year, month, day, hours, minutes, zone = found.groups()
+        return (
+            '<span title="' + html.escape(value, quote=True) + ' · время сервера">'
+            + f"{day}.{month}.{year} · {hours}:{minutes} {zone}</span>"
+        )
+    return '<span title="Время сервера; смещение не подтверждено">' + _text(value) + '</span>'
+
 
 
 def _chip(value: str, *, category: str = "operation") -> str:
