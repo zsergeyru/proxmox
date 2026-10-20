@@ -18,6 +18,9 @@ fi
 BRANCH="${INFRA_PROJECT_BRANCH:-main}"
 PVE_NODE="${INFRA_PVE_NODE:-}"
 OPERATION_ID=""
+ROLLBACK_IMAGE=""
+ROLLED_BACK=0
+COMPOSE_FILE="$COMPOSE_DIR/docker-compose.yml"
 
 # Вывод Docker и служб может содержать конфиденциальные детали.
 # Старый журнал также закрываем от других пользователей до перенаправления.
@@ -49,10 +52,31 @@ finish_activation() {
     else
         printf '[ПРЕРВАНО] Отложенная активация infra-runtime: %s (код %s)\n' "$duration" "$result"
     fi
+    if [[ "$result" -ne 0 && -n "$ROLLBACK_IMAGE" ]]; then
+        printf '[ИНФО] Попытка вернуть совместимый runtime после неуспешной активации\n'
+        version="$(sed -n 's/^RUNTIME_VERSION=//p' "$COMPOSE_DIR/.versions.env" | head -1)"
+        if [[ "$version" =~ ^[a-zA-Z0-9_.-]+$ ]] \
+            && docker image tag "$ROLLBACK_IMAGE" "infra-runtime:$version" \
+            && docker compose --env-file "$COMPOSE_DIR/.versions.env" \
+                -f "$COMPOSE_FILE" up -d --no-build --force-recreate runtime \
+            && docker exec infra-runtime tofu version >/dev/null 2>&1 \
+            && docker exec infra-runtime ansible --version >/dev/null 2>&1 \
+            && docker exec infra-runtime packer version >/dev/null 2>&1; then
+            ROLLED_BACK=1
+            printf '[ОК] Прежний совместимый runtime проверен; обновление не принято\n'
+        else
+            printf '[ОШИБКА] Автоматический возврат не подтверждён; требуется PVE CLI\n'
+        fi
+    fi
+
     if [[ -n "$OPERATION_ID" ]]; then
         # Успешный итог фиксируется вне Docker до снятия маркера.
+        action=(finish "$OPERATION_ID" "$result")
+        if [[ "$ROLLED_BACK" == "1" ]]; then
+            action=(rolled-back "$OPERATION_ID")
+        fi
         if ! PYTHONPATH=/usr/local/lib/infra-manager \
-            python3 -m infra_manager.operation_activation finish "$OPERATION_ID" "$result"; then
+            python3 -m infra_manager.operation_activation "${action[@]}"; then
             printf 'ОШИБКА: Итог активации не сохранён; маркер остаётся для восстановления\\n' >&2
             exit 1
         fi
@@ -97,6 +121,19 @@ if [[ -f "$ACTIVATION_MARKER" ]]; then
         exit 1
     fi
     printf '[ОК] Задание обновления infra-manager завершено; начинаю активацию\n'
+fi
+
+# Сохранить идентификатор предыдущего поколения до замены образа.
+# Первое переключение с Semaphore заведомо несовместимо: автоматического
+# возврата к нему не предпринимаем, доступна прямая команда PVE.
+if [[ -n "$OPERATION_ID" ]] && docker inspect infra-runtime >/dev/null 2>&1; then
+    previous_id="$(docker inspect -f '{{.Image}}' infra-runtime)"
+    previous_generation="$(docker image inspect \
+        -f '{{index .Config.Labels "org.proxmox.runtime.generation"}}' \
+        "$previous_id" 2>/dev/null || true)"
+    if [[ "$previous_generation" == "standalone-v1" ]]; then
+        ROLLBACK_IMAGE="$previous_id"
+    fi
 fi
 
 if [[ -z "$PVE_NODE" ]]; then
