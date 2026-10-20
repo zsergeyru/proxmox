@@ -24,7 +24,23 @@ def _lock_root() -> Path:
 
     explicit = os.environ.get("INFRA_MANAGER_LOCK_DIR", "").strip()
     root = Path(explicit) if explicit else PATHS.data_dir / "locks"
-    if root.is_symlink() or not root.is_dir() or not os.access(root, os.W_OK):
+    # В LXC 910 Ansible создаёт ссылку именно на persistent-state/locks.
+    # В Docker тот же каталог подключён напрямую через bind mount.
+    # Разрешаем только известную ссылку, не произвольное перенаправление.
+    if root.is_symlink():
+        trusted = Path("/mnt/persistent-state/locks")
+        try:
+            resolved = root.resolve(strict=True)
+            expected = trusted.resolve(strict=True)
+        except OSError as exc:
+            raise InfraManagerError(
+                "Общий каталог state/locks недоступен"
+            ) from exc
+        if resolved != expected:
+            raise InfraManagerError(
+                "Каталог state/locks перенаправлен вне постоянного состояния"
+            )
+    if not root.is_dir() or not os.access(root, os.W_OK):
         raise InfraManagerError(
             "Общий каталог блокировок state/locks не подключён или недоступен; "
             "изменяющая операция остановлена без использования Semaphore"
