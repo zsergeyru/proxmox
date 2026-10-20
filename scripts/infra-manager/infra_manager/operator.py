@@ -348,6 +348,11 @@ def operator_guest_task(
             # поэтому только после неё резервируем UUID операции.
             require_runtime_activation_idle()
             prepared_snapshot = _prepare_runtime_snapshot(operation, vmid)
+            # Физический SSD: безопасная сверка/разовое подтверждение через
+            # штатный Proxmox API до запуска Docker-задания. Недоступный SSD
+            # не должен останавливать самообновление управляющего контура.
+            from .pve_backup_ssd import deploy_backup_ssd_preflight
+            deploy_backup_ssd_preflight()
             store = OperationStore()
             # Согласовать создание active/910.json с эксклюзивной
             # блокировкой резервирования PVE. После отпускания shared
