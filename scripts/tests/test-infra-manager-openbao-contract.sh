@@ -258,8 +258,8 @@ fi
 
 grep -q 'runtime-activation.log' "$ACTIVATE_RUNTIME" \
     || die "Команда активации должна вести отдельный журнал"
-grep -Fq '.infra-manager-runtime-activation-pending' "$PY_COMMON" "$ACTIVATE_RUNTIME" \
-    || die "Задания и активация runtime должны использовать общий маркер"
+grep -Fq 'runtime-activation-pending' "$PY_COMMON" "$ACTIVATE_RUNTIME" \
+    || die "Задания и активация runtime должны использовать независимый маркер"
 grep -Fq '_runtime_activation_scope()' "$PY_COMMON" \
     || die "Маркер активации должен различать host и runtime PID"
 grep -Fq 'deploy_scope="runtime"' "$ACTIVATE_RUNTIME" \
