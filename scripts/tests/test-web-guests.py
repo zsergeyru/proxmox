@@ -23,7 +23,7 @@ sys.path.insert(0, str(WEB))
 
 from infra_manager import admin_socket
 from infra_manager.common import InfraManagerError
-from infra_manager.guest_catalog import deployable_guests
+from infra_manager.guest_catalog import deployable_guests, load_manifest
 from infra_manager.operation_store import OperationStore
 
 spec = importlib.util.spec_from_file_location("infra_web_guest_catalog_test", WEB / "admin.py")
@@ -51,8 +51,10 @@ def main():
     assert guests and any(guest.vmid == 910 for guest in guests)
     selected = next(guest for guest in guests if guest.vmid != 910)
     pve_data = []
+    profiles = load_manifest(ROOT / "infrastructure/guests/defaults.yaml")["profiles"]
     for guest in guests:
-        typ = "qemu" if guest.source.get("profile") in {"vm", "qemu"} else "lxc"
+        guest_type = profiles[guest.source["profile"]]["type"]
+        typ = "qemu" if guest_type == "vm" else "lxc"
         # Достаточно реально объявленных гостей, без угадывания состояния других.
         if guest.vmid == selected.vmid:
             pve_data.append({
