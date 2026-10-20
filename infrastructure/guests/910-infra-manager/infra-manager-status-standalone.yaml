@@ -12,8 +12,8 @@ layout:
 checks:
   - type: runtime
     message: "Docker и infra-runtime работают"
-  - type: portal
-    message: "Homepage и его действия работают"
+  - type: infra_web
+    message: "HTTPS, вход и защищённый посредник работают"
   - type: openbao
     message: "OpenBao запущен"
   - type: runtime_tools
