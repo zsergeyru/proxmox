@@ -54,7 +54,7 @@ def test_empty_disk_only_and_no_auto_wipe():
         assert ssd._eligible(dict(disk(), **change), 200 * 10**9) is None
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / "disk.json"
-        with patch.object(ssd, "_state_path", return_value=path), patch.object(
+        with patch.object(ssd, "_empty_block_device"), patch.object(ssd, "_state_path", return_value=path), patch.object(
             ssd, "load_physical_storage",
             return_value=SimpleNamespace(devices=[{
                 "id": "backup_ssd", "role": "backup", "capacity_gb": 240,
@@ -73,6 +73,7 @@ def test_exact_confirmation_and_recheck():
         path = Path(tmp) / "disk.json"
         mounted = [None, {"path": ssd.MOUNT, "type": "ext4"}]
         with (
+            patch.object(ssd, "_empty_block_device"),
             patch.object(ssd, "_state_path", return_value=path),
             patch.object(ssd, "load_physical_storage", return_value=SimpleNamespace(
                 devices=[{"id": "backup_ssd", "role": "backup", "capacity_gb": 240}]
@@ -128,8 +129,39 @@ def test_changed_device_rejected_before_write():
             assert not path.exists()
 
 
+def test_readonly_disk_refuses_partitions_and_signatures():
+    candidate = ssd.Disk("/dev/sda", "19386J473508", "WD Green", 240057409536)
+    valid = {
+        "blockdevices": [{
+            "path": "/dev/sda", "type": "disk",
+            "size": candidate.size, "ro": False,
+            "fstype": None, "mountpoints": [None],
+        }]
+    }
+    def checked(result):
+        with (
+            patch.object(ssd, "_ssh_command", side_effect=lambda _, args: list(args)),
+            patch.object(ssd, "run", side_effect=result),
+        ):
+            return lambda: ssd._empty_block_device("pve", candidate)
+    def fake(*args, **kwargs):
+        if args[0] == "lsblk":
+            return SimpleNamespace(returncode=0, stdout=json.dumps(valid))
+        return SimpleNamespace(returncode=0, stdout="")
+    checked(fake)()
+    valid["blockdevices"][0]["children"] = [{"path": "/dev/sda1"}]
+    refuses(checked(fake), "Диск с разделами не является пустым")
+    valid["blockdevices"][0].pop("children")
+    def signature(*args, **kwargs):
+        if args[0] == "lsblk":
+            return SimpleNamespace(returncode=0, stdout=json.dumps(valid))
+        return SimpleNamespace(returncode=0, stdout="ext4 0x123")
+    refuses(checked(signature), "Подозрительная сигнатура wipefs блокирует mkfs")
+
+
 if __name__ == "__main__":
     test_empty_disk_only_and_no_auto_wipe()
     test_exact_confirmation_and_recheck()
     test_changed_device_rejected_before_write()
+    test_readonly_disk_refuses_partitions_and_signatures()
     print("[ОК] SSD создаётся только через Proxmox API после точного подтверждения")
