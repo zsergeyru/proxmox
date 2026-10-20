@@ -101,7 +101,7 @@ def main():
             status, _, body = request(server, "POST", "/storage-confirm", {
                 "csrf": csrf, "plan_id": "a" * 64, "serial": "19386J473508",
             }, cookie=cookie)
-            assert status == 200 and "Разрешение сохранено" in body
+            assert status == 200 and "Подготовка SSD запущена" in body
             status, _, _ = request(server, "POST", "/logout", {"csrf": csrf}, cookie=cookie)
             assert status == 200
             status, _, _ = request(server, "GET", "/api/operations", cookie=cookie)
