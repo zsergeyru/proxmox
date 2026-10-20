@@ -64,7 +64,7 @@ def require_host_access(repo_root: Path, host_name: str) -> None:
 def list_hosts(repo_root: Path) -> int:
     """Показать перечень физических машин и готовность настроек связи."""
 
-    hosts = list_physical_hosts(repo_root)
+    hosts = tuple(apply_saved_connection(host) for host in list_physical_hosts(repo_root))
     if not hosts:
         console.warning("Машинные описания физических серверов отсутствуют")
         return 0
