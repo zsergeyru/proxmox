@@ -676,6 +676,7 @@ def check_operation_lock() -> None:
             pass
 
 
+        (lock_dir / "locks").mkdir()
         with patch.object(
             operation_lock,
             "PATHS",
@@ -714,7 +715,6 @@ def check_operation_lock() -> None:
         if missing.exists():
             fail("При отсутствии общего диска нельзя создавать lock-dir")
 
-        (lock_dir / "locks").mkdir()
         with patch.object(
             operation_lock, "PATHS", SimpleNamespace(data_dir=lock_dir),
         ):
