@@ -5,6 +5,8 @@ FROM ${PACKER_IMAGE} AS packer_source
 
 FROM python:3.12.12-slim-bookworm
 LABEL org.proxmox.runtime.generation="standalone-v1"
+ARG INFRA_GIT_REVISION=unknown
+ENV INFRA_RUNTIME_BUILD_REVISION=${INFRA_GIT_REVISION}
 
 ARG OPENTOFU_VERSION=1.12.6
 ENV DEBIAN_FRONTEND=noninteractive
