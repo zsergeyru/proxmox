@@ -60,11 +60,14 @@ def check_operator_contracts() -> None:
             ),
         },
         910: {
-            "Semaphore": (
-                "admin",
-                "guest_file",
-                "/run/infra-manager/secrets/initial-admin-password",
-                None,
+            "infra-web": (
+                "operator",
+                "pve_json",
+                (
+                    "/mnt/bindmounts/infra-manager/pve-only/"
+                    "openbao/operator-access.json"
+                ),
+                "password",
             ),
             "OpenBao": (
                 "operator",
