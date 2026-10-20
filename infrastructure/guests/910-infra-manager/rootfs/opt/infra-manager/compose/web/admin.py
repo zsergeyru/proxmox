@@ -719,32 +719,118 @@ def _storage_page(csrf: str, notice: str = "") -> bytes:
     return _layout(content, auto_refresh=state == "running")
 
 
-def _layout(inner: str, *, auto_refresh: bool = False) -> bytes:
-    return ("""<!doctype html><html lang="ru"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-""" + ('<meta http-equiv="refresh" content="5;url=/storage">' if auto_refresh else '') + """
-<title>infra-manager</title><style>
-:root{color-scheme:dark}body{font-family:system-ui;background:#0c1525;
-color:#eaf0f7;max-width:1050px;margin:3rem auto;padding:0 1rem}
-main{background:#142237;padding:1.5rem;border-radius:12px}
-table{width:100%;border-collapse:collapse}td,th{padding:.55rem;
-border-bottom:1px solid #345;text-align:left}input,select,button{
-padding:.55rem;margin:.25rem;border-radius:6px}
-a{color:#9bded8}code{color:#96d1f1}
-.versions{margin-top:2rem;border-top:1px solid #345;padding-top:1rem;
-font-size:.85rem;color:#bdcbd9}.versions dl{display:grid;grid-template-columns:
-minmax(180px,1fr) 1fr;gap:.4rem .7rem}.versions dt{color:#a9bcce}
-.versions dd{margin:0}.versions p{color:#a9bcce}
-.guest-meta{display:grid;grid-template-columns:minmax(150px,1fr) 2fr;
-gap:.4rem 1rem}.guest-meta dt{color:#a9bcce}.guest-meta dd{margin:0}
-.guest-actions{display:flex;gap:.7rem;flex-wrap:wrap}
-.guest-actions form{margin:0}
-.diagnostic-log{background:#061222;padding:1rem;border-radius:8px;
-overflow:auto;max-height:55vh;white-space:pre-wrap;overflow-wrap:anywhere;
-min-height:8rem;border:1px solid #345}
-#op-diagnostic{color:#e7cf9e}
-</style></head><body><h1>Управление инфраструктурой</h1>
-<main>""" + inner + "</main></body></html>").encode()
+def _text(value: object) -> str:
+    return html.escape(str(value) if value is not None else "—")
+
+
+def _time_html(value: object) -> str:
+    """ISO с зоной отдаётся браузеру; без зоны не подменять часовой пояс."""
+    if not isinstance(value, str) or not value:
+        return "—"
+    if re.fullmatch(
+        r"\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d(?::\\d\\d)?"
+        r"(?:\\.\\d+)?(?:Z|[+-]\\d\\d:\\d\\d)", value,
+    ):
+        safe = html.escape(value, quote=True)
+        return f'<time class="time" data-local-time datetime="{safe}">{safe}</time>'
+    if re.fullmatch(r"\\d{4}-\\d\\d-\\d\\d", value):
+        year, month, day = value.split("-")
+        return f'<time datetime="{value}">{day}.{month}.{year}</time>'
+    return '<span title="Время сервера; часовой пояс неизвестен">' + _text(value) + '</span>'
+
+
+def _chip(value: str, *, category: str = "operation") -> str:
+    if category == "guest":
+        tone = {
+            "running": "success", "stopped": "warning", "paused": "warning",
+            "conflict": "danger", "absent": "danger", "unavailable": "warning",
+        }.get(value, "")
+        label = GUEST_STATES.get(value, "Не проверено")
+    else:
+        tone = {
+            "completed": "success", "failed": "danger",
+            "needs-recovery": "danger", "rolled-back": "warning",
+            "running": "info", "activating": "info", "verifying": "info",
+            "queued": "warning",
+        }.get(value, "")
+        label = PHASES.get(value, "Неизвестно")
+    return '<span class="chip" data-tone="' + tone + '">' + _text(label) + '</span>'
+
+
+def _section(title: str, body: str, *, extra: str = "") -> str:
+    return '<section class="panel"><div class="section-head"><h3>' + _text(title) + (
+        '<span>' + extra + '</span>' if extra else ""
+    ) + '</div>' + body + '</section>'
+
+
+def _layout(
+    inner: str, *, auto_refresh: bool = False,
+    csrf: str | None = None, page: str = "overview",
+    authenticated: bool = True,
+) -> bytes:
+    """Один шаблон для всех страниц, без CDN, фреймворков и inline-JavaScript."""
+    title = {
+        "overview": "Обзор", "guests": "Гости",
+        "operations": "Задания", "infrastructure": "Хранилища и бэкапы",
+        "storage": "Подготовка SSD", "login": "Вход",
+    }.get(page, "Инфраструктура")
+    nav = (
+        ("overview", "/", "⌂", "Обзор"),
+        ("guests", "/guests", "▦", "Гости"),
+        ("operations", "/#recent-operations", "◷", "Задания"),
+        ("infrastructure", "/infrastructure", "▤", "Хранилища и бэкапы"),
+        ("storage", "/storage", "◈", "Подготовка SSD"),
+    )
+    links = "".join(
+        '<a href="' + href + '"' + (' aria-current="page"' if section == page else "") +
+        '><span class="nav-symbol" aria-hidden="true">' + icon +
+        '</span>' + name + '</a>'
+        for section, href, icon, name in nav
+    )
+    logout = (
+        '<form class="logout-form" method="POST" action="/logout">'
+        '<input type="hidden" name="csrf" value="' + html.escape(csrf, quote=True) + '">'
+        '<button type="submit">↪ Выйти из панели</button></form>'
+        if csrf else '<a href="/">На главную</a>'
+    )
+    auto = '<meta http-equiv="refresh" content="5;url=/storage">' if auto_refresh else ""
+    head = (
+        '<!doctype html><html lang="ru"><head><meta charset="utf-8">'
+        '<meta name="viewport" content="width=device-width, initial-scale=1">'
+        '<meta name="theme-color" content="#111b2b">' + auto
+        + '<title>infra-manager · ' + _text(title) + '</title>'
+        '<link rel="stylesheet" href="/ui.css"></head><body>'
+        '<a class="skip-link" href="#content">К основному содержимому</a>'
+    )
+    if not authenticated:
+        return (head + '<div class="login-page"><div class="login-panel">'
+                '<div class="brand"><span class="brand-mark">⌘</span>'
+                '<span class="brand-label">infra-manager'
+                '<span class="brand-small">Управление инфраструктурой</span></span></div>'
+                + inner + '</div></div></body></html>').encode()
+    return (
+        head + '<div class="shell"><aside class="sidebar">'
+        '<a class="brand" href="/"><span class="brand-mark">⌘</span>'
+        '<span class="brand-label">infra-manager'
+        '<span class="brand-small">Панель Proxmox · 910</span></span></a>'
+        '<nav class="nav" aria-label="Основные разделы">'
+        '<span class="nav-label">Рабочая область</span>' + links + '</nav>'
+        '<div class="sidebar-foot"><strong>Часовой пояс</strong>'
+        '<label for="timezone-select">Время на страницах</label>'
+        '<select id="timezone-select" aria-label="Часовой пояс">'
+        '<option value="local">Моё время (браузер)</option>'
+        '<option value="Europe/Moscow">Москва</option>'
+        '<option value="UTC">UTC</option></select>'
+        '<small class="tz-label" id="timezone-label">Время браузера</small>'
+        + logout + '</div></aside>'
+        '<div class="workspace"><header class="topbar">'
+        '<div><div class="topbar-kicker">Инфраструктура / ' + _text(title) +
+        '</div><h1 class="topbar-title">' + _text(title) + '</h1></div>'
+        '<div class="topbar-actions"><a class="btn secondary" href="/">Обзор</a>'
+        '<a class="btn secondary" href="/guests">Все гости</a></div></header>'
+        '<main id="content">' + inner + '</main></div></div>'
+        '<script src="/ui.js" defer></script></body></html>'
+    ).encode()
 
 
 def _dashboard(csrf: str, notice: str = "") -> bytes:
