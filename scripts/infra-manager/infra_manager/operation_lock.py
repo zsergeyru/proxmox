@@ -14,6 +14,25 @@ from .common import InfraManagerError
 from .settings import PATHS
 
 
+TRUSTED_STATE_LOCKS = Path("/mnt/persistent-state/locks")
+DEFAULT_RUNTIME_LOCKS = Path("/var/lib/infra-manager/locks")
+
+
+def _is_mount(path: Path) -> bool:
+    """Проверить bind mount даже для двух каталогов одной файловой системы."""
+    try:
+        with open("/proc/self/mountinfo", encoding="utf-8") as entries:
+            return any(
+                len(fields) > 4 and fields[4] == str(path)
+                for line in entries
+                if (fields := line.split(" - ", 1)[0].split())
+            )
+    except OSError as exc:
+        raise InfraManagerError(
+            "Не удалось подтвердить постоянное подключение каталога блокировок"
+        ) from exc
+
+
 def _lock_root() -> Path:
     """Использовать только общий state/locks, никогда не данные Semaphore.
 
@@ -28,18 +47,21 @@ def _lock_root() -> Path:
     # В Docker тот же каталог подключён напрямую через bind mount.
     # Разрешаем только известную ссылку, не произвольное перенаправление.
     if root.is_symlink():
-        trusted = Path("/mnt/persistent-state/locks")
         try:
             resolved = root.resolve(strict=True)
-            expected = trusted.resolve(strict=True)
+            expected = TRUSTED_STATE_LOCKS.resolve(strict=True)
         except OSError as exc:
             raise InfraManagerError(
                 "Общий каталог state/locks недоступен"
             ) from exc
-        if resolved != expected:
+        if resolved != expected or not _is_mount(TRUSTED_STATE_LOCKS.parent):
             raise InfraManagerError(
-                "Каталог state/locks перенаправлен вне постоянного состояния"
+                "Каталог state/locks не связан с подтверждённым persistent-state"
             )
+    elif root == DEFAULT_RUNTIME_LOCKS and not _is_mount(root):
+        raise InfraManagerError(
+            "Docker bind mount state/locks отсутствует; операция остановлена"
+        )
     if not root.is_dir() or not os.access(root, os.W_OK):
         raise InfraManagerError(
             "Общий каталог блокировок state/locks не подключён или недоступен; "
