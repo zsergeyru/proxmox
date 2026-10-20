@@ -223,6 +223,30 @@ def _operation_detail(request: dict) -> dict:
     fields = ("id", "kind", "target", "phase", "created_at", "started_at",
               "finished_at", "result", "exit_code", "activation_required")
     safe_record = {key: record.get(key) for key in fields}
+    safe_record["id"] = operation_id
+    if safe_record["kind"] not in ACTIONS:
+        safe_record["kind"] = "неизвестно"
+    if safe_record["phase"] not in {
+        "queued", "running", "activating", "verifying", "completed",
+        "failed", "rolled-back", "needs-recovery",
+    }:
+        safe_record["phase"] = "неизвестно"
+    if type(safe_record["target"]) is not int or not 0 < safe_record["target"] < 1000000:
+        safe_record["target"] = 0
+    if safe_record["result"] not in {None, "ok", "failed", "rolled-back"}:
+        safe_record["result"] = None
+    if type(safe_record["exit_code"]) is not int or not 0 <= safe_record["exit_code"] <= 255:
+        safe_record["exit_code"] = None
+    for key in ("created_at", "started_at", "finished_at"):
+        value = safe_record[key]
+        if not isinstance(value, str) or len(value) > 40:
+            safe_record[key] = None
+        else:
+            try:
+                datetime.fromisoformat(value)
+            except ValueError:
+                safe_record[key] = None
+    safe_record["activation_required"] = safe_record["activation_required"] is True
     events = []
     try:
         lines = _read_log_tail(store.logs / f"{operation_id}.jsonl", 65536).splitlines()
@@ -250,17 +274,26 @@ def _operation_detail(request: dict) -> dict:
     logs = _operation_journal(operation_id)
     if safe_record["target"] == 910 and safe_record["activation_required"] is True:
         logs.extend(_activation_journal(operation_id))
+    last_error = next(
+        (message for message in reversed(logs)
+         if message.startswith(("[ОШИБКА]", "ОШИБКА:", "[ПРЕРВАНО]"))),
+        None,
+    )
+    if safe_record["phase"] in {"failed", "needs-recovery", "rolled-back"}:
+        diagnostic = last_error or (
+            "Задание завершилось без подтверждения готовности. "
+            "Полный закрытый журнал доступен администратору в 910."
+        )
+    elif safe_record["phase"] in {"queued", "running", "activating", "verifying"}:
+        diagnostic = "Выполнение ещё не завершено."
+    else:
+        diagnostic = "Выполнение подтверждено." if safe_record["phase"] == "completed" else ""
     return {
         "accepted": True,
         "operation": safe_record,
         "events": events[-20:],
         "logs": logs[-MAX_LOG_ENTRIES:],
-        "diagnostic": (
-            "Операция завершилась ошибкой. Проверьте последние безопасные строки журнала."
-            if safe_record["phase"] in {"failed", "needs-recovery"}
-            else "Выполнение ещё не завершено." if safe_record["phase"] in
-            {"queued", "running", "activating", "verifying"} else ""
-        ),
+        "diagnostic": diagnostic,
     }
 
 
