@@ -115,19 +115,10 @@ def main() -> None:
         and "host:pve" in rule.get("targets", [])
         for rule in rules_for(data, "guest:410")
     )
-    for target in (
-        "opentofu-plan",
-        "deploy-managed-guest",
-        "verify-managed-guest",
-    ):
-        require_rule(
-            data,
-            subject="guest:410",
-            service="semaphore",
-            resource="infrastructure-task",
-            target=target,
-            permission="execute",
-        )
+    assert not any(
+        rule.get("service") == "semaphore"
+        for rule in data["rules"]
+    ), "Устаревший Semaphore не должен выдавать машинные права"
     assert not any(
         rule.get("service") == "ssh"
         and rule.get("resource") == "guest"
