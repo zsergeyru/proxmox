@@ -186,12 +186,19 @@ def _storage_page(csrf: str, notice: str = "") -> bytes:
     if not isinstance(record, dict):
         return _layout(content + "<p>Неизвестное состояние SSD.</p>")
     state = record.get("state")
-    if state == "configured":
+    if state == "running":
+        content += (
+            "<p>Подготовка SSD выполняется самостоятельно.</p>"
+            "<p>Можно закрыть браузер; операция продолжится.</p>"
+            '<p><a href="/storage">Обновить состояние</a></p>'
+        )
+    elif state == "configured":
         content += (
             "<p>SSD подготовлен и находится под контролем infra-manager.</p>"
             "<p>Точка подключения: " + html.escape(str(record.get("mountpoint"))) + "</p>"
             "<p>UUID: " + html.escape(str(record.get("uuid"))) + "</p>"
             "<p>При повторном deploy диск не форматируется.</p>"
+            "<p>Подготовка завершена успешно.</p>"
         )
     elif state == "needs-confirmation":
         content += (
@@ -209,10 +216,10 @@ def _storage_page(csrf: str, notice: str = "") -> bytes:
             + html.escape(str(record.get("plan_id")), quote=True) + '">'
             '<label>Для согласия введи полный серийный номер '
             '<input name="serial" autocomplete="off" required></label>'
-            '<button type="submit">Подтвердить план для следующего deploy 910</button>'
+            '<button type="submit">Подтвердить и подготовить SSD</button>'
             '</form>'
-            '<p>Подтверждение само по себе не выполняет форматирование. '
-            'Оно действует один час и используется один раз при deploy 910.</p>'
+            '<p>После подтверждения система сама выполнит подготовку. '
+            'Можно закрыть браузер и позднее проверить результат здесь.</p>'
         )
     else:
         content += (
@@ -425,7 +432,7 @@ class Handler(BaseHTTPRequestHandler):
                 ))
                 return
             self._reply(HTTPStatus.OK, _storage_page(
-                session["csrf"], "Разрешение сохранено. Запустите deploy 910 с PVE в течение часа.",
+                session["csrf"], "Подготовка SSD запущена. Можешь закрыть браузер — работа продолжится.",
             ))
             return
         if path != "/action":
