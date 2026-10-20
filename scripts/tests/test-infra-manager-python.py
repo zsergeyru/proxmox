@@ -399,7 +399,7 @@ def check_first_runtime_transition_without_semaphore() -> None:
             patch.object(common, "HOST_TRANSITION_LOCK_DIR", host_locks),
             patch.object(common, "RUNTIME_TRANSITION_LOCK_DIR", runtime_locks),
             patch.object(common, "RUNTIME_ACTIVATION_MARKER", runtime_locks / marker_name),
-            patch.object(Path, "is_mount", lambda self: self == runtime_locks),
+            patch.object(common, "_activation_bind_mounted", lambda path: path == runtime_locks),
         ):
             if common._default_runtime_activation_marker() != runtime_locks / marker_name:
                 fail("Старый runtime должен передавать активацию через существующий bind mount locks")
@@ -425,7 +425,7 @@ def check_first_runtime_transition_without_semaphore() -> None:
             patch.object(common, "RUNTIME_OPERATIONS_STATE_DIR", runtime_operations),
             patch.object(common, "RUNTIME_TRANSITION_LOCK_DIR", runtime_locks),
             patch.object(common, "RUNTIME_ACTIVATION_MARKER", runtime_operations / marker_name),
-            patch.object(Path, "is_mount", lambda self: False),
+            patch.object(common, "_activation_bind_mounted", lambda path: False),
         ):
             try:
                 common.reserve_runtime_activation()
