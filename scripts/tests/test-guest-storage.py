@@ -717,6 +717,48 @@ def test_guest_storage_sent_to_pve() -> None:
         assert json.loads(remote[0][1]["input_text"]) == storage_config()
 
 
+def test_host_thin_pool_headroom_uses_physical_usage() -> None:
+    """Текущий PVE: 64,12%/2,53%, виртуальная ёмкость VM > pool.
+
+    Создание Gogs 30 ГиБ допустимо при наличии физического запаса.
+    При полном заполнении нового тома должно остаться минимум 10% пула.
+    """
+    pool_bytes = int(395.86 * 1024**3)
+    gogs = [{"name": "gogs_data", "size_gb": 30}]
+
+    def check(data: str, metadata: str, volumes: list[dict]) -> None:
+        metrics = f"{pool_bytes} {data} {metadata}"
+        with patch.object(
+            storage, "command",
+            return_value=SimpleNamespace(returncode=0, stdout=metrics),
+        ) as command:
+            storage.check_thin_pool_headroom(volumes)
+        command.assert_called_once()
+        assert command.call_args.args[0] == "lvs"
+        # Никогда не складывать виртуальные размеры уже существующих VM/LV.
+        assert "lv_name,lv_size,pool_lv" not in str(command.call_args)
+
+    def rejected(data: str, metadata: str, volumes: list[dict]) -> None:
+        metrics = f"{pool_bytes} {data} {metadata}"
+        with patch.object(
+            storage, "command",
+            return_value=SimpleNamespace(returncode=0, stdout=metrics),
+        ):
+            try:
+                storage.check_thin_pool_headroom(volumes)
+            except storage.StorageError:
+                return
+        raise AssertionError("Создание LV должно остановиться до lvcreate")
+
+    check("64.12", "2.53", gogs)
+    rejected("64.12", "2.53", [{"name": "large", "size_gb": 110}])
+    rejected("85.0", "2.53", gogs)
+    rejected("90.0", "2.53", gogs)
+    rejected("64.12", "90.0", gogs)
+    rejected("NaN", "2.53", gogs)
+    rejected("64.12", "2.53", [{"name": "empty", "size_gb": 0}])
+
+
 def test_all_host_volumes_safe_reconcile() -> None:
     """План deploy 910 охватывает все тома, PVE ничего не устанавливает."""
     physical = load_physical_storage(ROOT, "pve")
@@ -808,6 +850,7 @@ if __name__ == "__main__":
     test_bootstrap_guest_independent_of_shared_storage()
     test_no_storage_on_other_guests()
     test_guest_storage_sent_to_pve()
+    test_host_thin_pool_headroom_uses_physical_usage()
     test_all_host_volumes_safe_reconcile()
     test_all_host_volumes_over_ssh_without_installation()
     print("OK: Guest storage contract")
