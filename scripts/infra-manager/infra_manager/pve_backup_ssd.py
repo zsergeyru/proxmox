@@ -233,5 +233,3 @@ def deploy_backup_ssd_preflight() -> None:
         reconcile_backup_ssd(PveClient(), _pve_node(), interactive=can_ask)
     except (InfraManagerError, EOFError) as exc:
         console.warning(f"Резервный SSD: {exc}. Основной deploy 910 продолжится")
-
-
