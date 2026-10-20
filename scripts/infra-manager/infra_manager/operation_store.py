@@ -22,7 +22,7 @@ from .common import InfraManagerError
 DEFAULT_ROOT = Path("/mnt/persistent-state/operations")
 MOUNT_ROOT = Path("/mnt/persistent-state")
 KINDS = frozenset({"deploy", "sync", "repair", "status"})
-TERMINAL = frozenset({"completed", "failed"})
+TERMINAL = frozenset({"completed", "failed", "rolled-back"})
 ID_PATTERN = re.compile(r"^[0-9a-f]{32}$")
 MAX_RECORD_BYTES = 65536
 
@@ -346,6 +346,27 @@ class OperationStore:
             record["phase"] = phase
             _atomic_json(self._history_path(operation_id), record)
             _append_event(self.logs / f"{operation_id}.jsonl", operation_id, phase)
+            return record
+
+    def rollback_confirmed(self, operation_id: str) -> dict:
+        """Подтвердить возврат совместимого образа, не объявляя обновление успешным."""
+        with self._registry():
+            record = self.get(operation_id)
+            active_path = self._active_path(record["target"])
+            if (record.get("activation_required") is not True
+                    or record["phase"] not in {"activating", "verifying"}
+                    or _read(active_path).get("id") != operation_id):
+                raise InfraManagerError("Нельзя подтвердить несогласованный откат")
+            record.update(
+                phase="rolled-back",
+                result="rolled-back",
+                exit_code=1,
+                finished_at=_now(),
+            )
+            _atomic_json(self._history_path(operation_id), record)
+            _append_event(self.logs / f"{operation_id}.jsonl", operation_id, "rolled-back")
+            active_path.unlink()
+            _sync_dir(self.active)
             return record
 
     def finish(self, operation_id: str, *, exit_code: int) -> dict:
