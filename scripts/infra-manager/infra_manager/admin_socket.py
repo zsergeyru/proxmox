@@ -133,7 +133,8 @@ def _dispatch_history(request: dict) -> dict:
 SAFE_LOG = re.compile(r"^(?:\[(?:ИНФО|ОК|ОШИБКА|ВРЕМЯ|ПРЕРВАНО|ПРЕДУПРЕЖДЕНИЕ)\]|ОШИБКА:)\s*")
 PRIVATE_LOG = re.compile(
     r"(?i)(?:password|passwd|passphrase|token|secret|credential|authorization|cookie|"
-    r"private.?key|api.?key|-----BEGIN|[A-Za-z0-9_+/=-]{72,})"
+    r"private.?key|api.?key|парол|токен|секрет|ключ|bearer|-----BEGIN|"
+    r"[A-Za-z0-9_+/=-]{72,})"
 )
 ACTIVATION_LOG = Path("/var/log/infra-manager/runtime-activation.log")
 MAX_LOG_FILE = 131072
