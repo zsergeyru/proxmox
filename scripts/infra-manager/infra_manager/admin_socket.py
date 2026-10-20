@@ -448,6 +448,49 @@ def _dispatch_guests(request: dict) -> dict:
 
 
 
+
+def _dispatch_backup(request: dict) -> dict:
+    """Строго типизированный read-only status или запуск уже имеющейся systemd-службы."""
+    if (not isinstance(request, dict)
+            or set(request) != {"kind", "vmid", "request_id"}
+            or request.get("kind") not in {"backup-overview", "backup-run"}
+            or type(request.get("vmid")) is not int or request["vmid"] != 0
+            or not isinstance(request.get("request_id"), str)
+            or not REQUEST_ID.fullmatch(request["request_id"])):
+        raise InfraManagerError("Некорректный запрос резервирования")
+    owner = find_guest_by_role(PATHS.repo_root, SETTINGS.infra_manager_role)
+    kind = request["kind"]
+    authorize_action("status" if kind == "backup-overview" else "repair", owner.vmid)
+    if kind == "backup-overview":
+        from .backup_overview import snapshot
+        return {"accepted": True, "overview": snapshot()}
+    # Никаких путей/аргументов из браузера: проверяет тот же controller,
+    # который используется штатным timer. Секреты остаются внутри 910.
+    from .backup_controller import policy
+    _description, confirmed = policy()
+    if not confirmed:
+        raise InfraManagerError("Нет подтверждённых мест для резервирования")
+    busy = run(
+        ["timeout", "3s", "systemctl", "is-active", "--quiet",
+         "infra-manager-backup.service"],
+        capture_output=True, check=False,
+    )
+    if busy.returncode == 0:
+        raise InfraManagerError("Резервирование уже выполняется")
+    started = run(
+        ["timeout", "5s", "systemctl", "start", "--no-block",
+         "infra-manager-backup.service"],
+        capture_output=True, check=False,
+    )
+    if started.returncode:
+        raise InfraManagerError("systemd не принял запуск резервирования")
+    return {
+        "accepted": True,
+        "message": "systemd принял запрос, итог проверяется отдельно",
+    }
+
+
+
 def dispatch(request: dict) -> dict:
     """Запустить только фиксированную системную задачу с неизменяемым UUID."""
     if isinstance(request, dict) and request.get("kind") in (
@@ -460,6 +503,8 @@ def dispatch(request: dict) -> dict:
         return _operation_detail(request)
     if isinstance(request, dict) and request.get("kind") in {"guests", "guest-detail"}:
         return _dispatch_guests(request)
+    if isinstance(request, dict) and request.get("kind") in {"backup-overview", "backup-run"}:
+        return _dispatch_backup(request)
     if not isinstance(request, dict) or set(request) != {"kind", "vmid", "request_id"}:
         raise InfraManagerError("Неверный формат запроса")
     kind, vmid, operation_id = (
