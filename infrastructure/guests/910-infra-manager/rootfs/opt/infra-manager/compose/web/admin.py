@@ -325,8 +325,10 @@ def _public_versions() -> str:
     Версия infra-web берётся из образа, остальные — из декларации deploy.
     Они не выдаются за результаты проверки запущенных контейнеров.
     """
-    built = os.environ.get("INFRA_WEB_BUILD_REVISION", "")
+    built = os.environ.get("INFRA_WEB_BUILD_GIT_REVISION", "")
     target = os.environ.get("INFRA_GIT_REVISION", "")
+    built_content = os.environ.get("INFRA_WEB_BUILD_REVISION", "")
+    target_content = os.environ.get("INFRA_WEB_CONTENT_REVISION", "")
 
     def git_revision(value: str) -> str:
         return value[:12] if re.fullmatch(r"[0-9a-f]{40}", value) else "не определена"
@@ -347,9 +349,9 @@ def _public_versions() -> str:
     warning = (
         "<p><strong>Внимание: версия веб-панели отличается от целевой. "
         "Проверьте завершение deploy 910.</strong></p>"
-        if re.fullmatch(r"[0-9a-f]{40}", built)
-        and re.fullmatch(r"[0-9a-f]{40}", target)
-        and built != target else ""
+        if re.fullmatch(r"[0-9a-f]{40}", built_content)
+        and re.fullmatch(r"[0-9a-f]{40}", target_content)
+        and built_content != target_content else ""
     )
     items = "".join(
         "<dt>" + html.escape(label) + "</dt><dd>" + html.escape(value) + "</dd>"
