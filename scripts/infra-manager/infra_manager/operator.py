@@ -27,7 +27,7 @@ from .common import (
 from .guest_catalog import find_guest_by_role, guest_identity
 from .guest_deploy import project_branch_for_checkout, project_revision
 from .guest_operations import list_local_guests, run_local_guest_status
-from .operation_lock import project_checkout_lock
+from .operation_lock import _backup_gate, project_checkout_lock
 from .physical_host_state import checked_record_path
 from .pve import PveClient
 from .pve_host import (
@@ -349,12 +349,17 @@ def operator_guest_task(
             require_runtime_activation_idle()
             prepared_snapshot = _prepare_runtime_snapshot(operation, vmid)
             store = OperationStore()
-            record, _ = store.reserve(
-                "deploy", vmid, project_revision(PATHS.repo_root),
-                activation_required=True,
-            )
-            operation_id = record["id"]
-            store.start(operation_id)
+            # Согласовать создание active/910.json с эксклюзивной
+            # блокировкой резервирования PVE. После отпускания shared
+            # gate активная запись остаётся и запрещает старт backup
+            # на всём протяжении независимой systemd-активации.
+            with _backup_gate():
+                record, _ = store.reserve(
+                    "deploy", vmid, project_revision(PATHS.repo_root),
+                    activation_required=True,
+                )
+                operation_id = record["id"]
+                store.start(operation_id)
             console.info(f"Операция самообновления: {operation_id}")
     try:
         task_options = {"show_secrets": show_secrets}
