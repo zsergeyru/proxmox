@@ -65,6 +65,5 @@ services:
       - no-new-privileges:true
     pids_limit: 64
     volumes:
-      - /mnt/persistent-state/operations:/srv/operations:ro
       - /etc/infra-manager/web/tls:/etc/infra-manager/web/tls:ro
       - /run/infra-web:/run/infra-web:ro
