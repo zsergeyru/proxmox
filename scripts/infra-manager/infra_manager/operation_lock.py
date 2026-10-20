@@ -14,26 +14,22 @@ from .common import InfraManagerError
 from .settings import PATHS
 
 
-HOST_SEMAPHORE_DIR = Path("/mnt/persistent-state/semaphore")
-RUNTIME_SEMAPHORE_DIR = Path("/var/lib/semaphore")
-
-
 def _lock_root() -> Path:
-    """Выбрать общий каталог блокировок с безопасным первым переходом."""
+    """Использовать только общий state/locks, никогда не данные Semaphore.
+
+    При потере bind mount новый локальный каталог создавать нельзя:
+    разные исполнители иначе получат независимые блокировки и резервирование
+    может совпасть с изменяющей инфраструктурной операцией.
+    """
 
     explicit = os.environ.get("INFRA_MANAGER_LOCK_DIR", "").strip()
-    if explicit:
-        return Path(explicit)
-
-    canonical = PATHS.data_dir / "locks"
-    if canonical.is_dir() and os.access(canonical, os.W_OK):
-        return canonical
-
-    for semaphore_dir in (HOST_SEMAPHORE_DIR, RUNTIME_SEMAPHORE_DIR):
-        if semaphore_dir.is_dir() and os.access(semaphore_dir, os.W_OK):
-            return semaphore_dir / ".infra-manager-operation-locks"
-
-    return canonical
+    root = Path(explicit) if explicit else PATHS.data_dir / "locks"
+    if root.is_symlink() or not root.is_dir() or not os.access(root, os.W_OK):
+        raise InfraManagerError(
+            "Общий каталог блокировок state/locks не подключён или недоступен; "
+            "изменяющая операция остановлена без использования Semaphore"
+        )
+    return root
 
 
 def _lock_path(vmid: int, lock_dir: Path | None = None) -> Path:
