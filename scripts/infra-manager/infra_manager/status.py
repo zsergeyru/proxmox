@@ -429,7 +429,34 @@ def _check_portal() -> None:
 
 
 def _check_infra_web() -> None:
-    """Подтвердить HTTPS, доступность посредника и запрет истории без входа."""
+    """Подтвердить HTTPS, CSRF-доступ и версии реально запущенных образов.
+
+    Одного ответа /api/operations:401 недостаточно: старый infra-web может
+    работать после обновления Git. Проверяем встроенные в Docker-образы SHA.
+    """
+    import re
+
+    release = read_env_file(
+        Path("/opt/infra-manager/compose/.versions.env")
+    ).get("INFRA_GIT_REVISION", "")
+    if not re.fullmatch(r"[0-9a-f]{40}", release):
+        raise InfraManagerError(
+            "Не зафиксирована Git-версия Docker-образов 910"
+        )
+    for container, variable in (
+        ("infra-web", "INFRA_WEB_BUILD_REVISION"),
+        ("infra-runtime", "INFRA_RUNTIME_BUILD_REVISION"),
+    ):
+        revision = command_runner.run(
+            ["docker", "exec", container, "python3", "-c",
+             "import os; print(os.environ.get(" + repr(variable) + ", ''))"],
+            capture=True, check=False,
+        )
+        if revision.returncode or revision.stdout.strip() != release:
+            raise InfraManagerError(
+                f"{container}: исполняемый Docker-образ не соответствует Git "
+                f"{release[:12]}; проверьте сборку и активацию 910"
+            )
     for container in ("infra-web",):
         result = command_runner.run(
             ["docker", "inspect", "-f", "{{.State.Running}}", container],
