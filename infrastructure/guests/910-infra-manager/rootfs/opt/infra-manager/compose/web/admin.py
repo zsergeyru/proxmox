@@ -22,7 +22,7 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlsplit
 
-from app import _history, PHASES
+from app import PHASES
 
 WEB_HOST = os.environ.get("INFRA_WEB_PUBLIC_HOST", "192.168.9.10:8443")
 CERT = os.environ.get("INFRA_WEB_CERT", "/etc/infra-manager/web/tls/server.crt")
@@ -113,6 +113,32 @@ def _allow_attempt(ip: str) -> bool:
         timestamps.append(now)
         attempts[ip] = timestamps
         return True
+
+
+
+def _operation_history() -> list[dict]:
+    """Получить разрешённые поля истории от системного посредника, не читая state."""
+    request = {
+        "kind": "history", "vmid": 0, "request_id": secrets.token_hex(16),
+    }
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
+        connection.settimeout(10)
+        connection.connect(SOCKET)
+        connection.sendall(json.dumps(request).encode() + b"\n")
+        with connection.makefile("rb") as stream:
+            raw = stream.readline(65537)
+    if len(raw) > 65536 or not raw.endswith(b"\n"):
+        raise ValueError("Посредник не вернул ограниченную историю")
+    response = json.loads(raw)
+    if (
+        not isinstance(response, dict)
+        or response.get("accepted") is not True
+        or not isinstance(response.get("operations"), list)
+        or len(response["operations"]) > 40
+        or any(not isinstance(item, dict) for item in response["operations"])
+    ):
+        raise ValueError("Посредник отклонил запрос истории")
+    return response["operations"]
 
 
 def _send_action(kind: str, vmid: int, request_id: str) -> dict:
@@ -251,7 +277,13 @@ minmax(180px,1fr) 1fr;gap:.4rem .7rem}.versions dt{color:#a9bcce}
 
 
 def _dashboard(csrf: str, notice: str = "") -> bytes:
-    records = _history()
+    try:
+        records = _operation_history()
+    except (OSError, ValueError, TimeoutError):
+        records = []
+        notice = (notice + " " if notice else "") + (
+            "История операций временно недоступна; проверьте системный посредник."
+        )
     rows = []
     for record in records:
         operation_id = str(record.get("id", ""))
@@ -419,7 +451,15 @@ class Handler(BaseHTTPRequestHandler):
             if not session:
                 self._reply(HTTPStatus.UNAUTHORIZED, b"login required\n")
                 return
-            data = json.dumps(_history(), ensure_ascii=False).encode()
+            try:
+                history = _operation_history()
+            except (OSError, ValueError, TimeoutError):
+                self._reply(
+                    HTTPStatus.SERVICE_UNAVAILABLE, b"operation history unavailable\n",
+                    content_type="text/plain; charset=utf-8",
+                )
+                return
+            data = json.dumps(history, ensure_ascii=False).encode()
             self._reply(
                 HTTPStatus.OK, data, content_type="application/json; charset=utf-8"
             )
