@@ -563,9 +563,10 @@ def _backup_overview_page(csrf: str, notice: str = "") -> bytes:
         data = _backup_request("backup-overview")["overview"]
     except (ValueError, OSError, TimeoutError):
         return _layout(
-            '<p><a href="/">← Главная</a></p><h2>Хранилища и резервирование</h2>'
-            '<p>Системный посредник или описание хранилищ временно недоступны.</p>'
-            '<p><a href="/infrastructure">Повторить проверку</a></p>'
+            '<div class="notice" data-tone="warning">Системный посредник или '
+            'описание хранилищ временно недоступны.</div>'
+            '<a class="btn secondary" href="/infrastructure">Повторить проверку</a>',
+            csrf=csrf, page="infrastructure",
         )
     volumes = data.get("storage", {}).get("volumes", [])
     nas = data.get("nas", {}).get("volumes", [])
@@ -619,7 +620,7 @@ def _backup_overview_page(csrf: str, notice: str = "") -> bytes:
         backup_rows.append(
             "<tr><td>" + e(label) + "</td><td>"
             + e(BACKUP_STATE.get(record.get("state"), "Не проверено")) + "</td><td>"
-            + e(record.get("created_utc")) + "</td><td>"
+            + _time_html(record.get("created_utc")) + "</td><td>"
             + e(", ".join(record.get("destinations", [])) or "—") + "</td><td>"
             + e("Выборочная проверка данных restic: 1%" if record.get("check")
                 == "restic_subset_1_percent" else
@@ -644,41 +645,51 @@ def _backup_overview_page(csrf: str, notice: str = "") -> bytes:
         if configured else '<p>Запуск копирования недоступен: нет настроенных носителей.</p>'
     )
     return _layout(
-        '<p><a href="/">← Главная</a> · <a href="/guests">Гости</a> · '
-        '<a href="/storage">Подготовка SSD</a></p>'
-        '<h2>Хранилища и резервирование</h2>'
-        '<p><strong>' + e(summary) + '</strong></p>'
+        '<p class="page-intro">Состояние резервирования, доступность хранилищ '
+        'и история подтверждённых проверок в одном месте.</p>'
+        '<div class="notice" data-tone="' + (
+            "success" if backup.get("overall") == "two_recorded_copies"
+            else "warning"
+        ) + '" role="status"><strong>' + e(summary) + '</strong></div>'
         + ('<p>' + e(notice) + '</p>' if notice else '')
         + '<p>Проверенные ранее записи не подтверждают, что SSD/NAS сейчас подключены '
         'или что восстановление испытано. Даже активное PVE storage не '
         'является проверкой идентичности физического носителя.</p>'
-        '<h3>Общие тома PVE — из storage.yaml</h3>'
-        '<table><tr><th>Том</th><th>Тип</th><th>Размер</th><th>Подключение</th><th>Проверка</th></tr>'
-        + volume_table(volumes, include_size=True) + '</table>'
-        '<h3>Тома NAS — из storage.yaml</h3>'
-        '<table><tr><th>Том</th><th>Тип</th><th>Подключение</th><th>Проверка</th></tr>'
-        + volume_table(nas) + '</table>'
-        '<h3>Места для резервных копий — из backup.yaml</h3>'
-        '<table><tr><th>Назначение</th><th>Путь</th><th>Настройка</th><th>Носитель</th></tr>'
-        + "".join(dest_rows) + '</table>'
+        '<section class="panel"><h3>Общие тома PVE</h3>'
+        '<p class="muted">По описанию storage.yaml</p>'
+        '<div class="table-wrap"><table><tr><th>Том</th><th>Тип</th><th>Размер</th><th>Подключение</th><th>Проверка</th></tr>'
+        + volume_table(volumes, include_size=True) + '</table></div></section>'
+        '<section class="panel"><h3>Тома NAS</h3>'
+        '<p class="muted">Объявлены в Git; NAS не опрашивается напрямую</p>'
+        '<div class="table-wrap"><table><tr><th>Том</th><th>Тип</th><th>Подключение</th><th>Проверка</th></tr>'
+        + volume_table(nas) + '</table></div></section>'
+        '<section class="panel"><h3>Места для резервных копий</h3>'
+        '<p class="muted">По backup.yaml; активность PVE не означает проверку диска</p>'
+        '<div class="table-wrap"><table><tr><th>Назначение</th><th>Путь</th><th>Настройка</th><th>Носитель</th></tr>'
+        + "".join(dest_rows) + '</table></div></section>'
         '<p>SSD: ' + e(data.get("ssd", {}).get("state")) + '. '
         'Физические подключения необходимо независимо проверить перед восстановлением.</p>'
-        '<h3>Последние сохранённые результаты</h3>'
-        '<table><tr><th>Что</th><th>Состояние</th><th>Время UTC</th><th>Носители</th><th>Контроль</th></tr>'
-        + "".join(backup_rows) + '</table>'
+        '<section class="panel"><h3>Последние сохранённые результаты</h3>'
+        '<div class="table-wrap"><table><tr><th>Что</th><th>Состояние</th><th>Дата и время</th><th>Носители</th><th>Контроль</th></tr>'
+        + "".join(backup_rows) + '</table></div></section>'
         '<p><strong>Восстановление: '
         + ("Отмечено как испытанное" if restored else "Не подтверждено")
         + '</strong>. Проверка 1% данных restic не является испытанием восстановления.</p>'
-        '<h3>Расписание</h3>'
-        '<p>Из backup.yaml: ' + e(backup.get("schedule_declared")) + ' (часы сервера). '
-        'Таймер systemd: ' + e(timer_state) + '. '
-        'Служба: ' + e(service_state) + '.</p>'
-        '<p>Следующий запуск: ' + e(timer.get("next")) + '. '
-        'Предыдущий запуск: ' + e(timer.get("last"))
-        + '. Последний результат systemd: ' + e(timer.get("last_result"))
-        + '.</p>'
+        '<section class="panel"><h3>Расписание и ручной запуск</h3>'
+        '<div class="grid cols-3">'
+        '<div class="stat"><div class="stat-label">Таймер</div><div class="stat-value" style="font-size:19px">'
+        + e(timer_state) + '</div></div>'
+        '<div class="stat"><div class="stat-label">Служба</div><div class="stat-value" style="font-size:19px">'
+        + e(service_state) + '</div></div>'
+        '<div class="stat"><div class="stat-label">Расписание</div><div class="stat-value" style="font-size:19px">'
+        + e(backup.get("schedule_declared")) + '</div></div></div>'
+        '<p>Следующий запуск (время сервера): ' + e(timer.get("next")) + '. '
+        'Предыдущий запуск (время сервера): ' + e(timer.get("last"))
+        + '. Результат systemd: ' + e(timer.get("last_result")) + '.</p>'
         + start_link
-        + '<p><a href="/infrastructure">Обновить состояние</a></p>'
+        + '<p><a class="btn secondary" href="/infrastructure">↻ Обновить состояние</a> '
+        '<a class="btn secondary" href="/storage">Подготовка SSD</a></p></section>',
+        csrf=csrf, page="infrastructure",
     )
 
 
