@@ -98,6 +98,10 @@ def check_backup_blocks_runtime_activation() -> None:
         gate.write_text("", encoding="utf-8")
         for marker in markers:
             marker.parent.mkdir(parents=True, exist_ok=True)
+        def try_snapshot() -> None:
+            with host._consistent_window():
+                pass
+
         with (
             patch.object(host, "INDEPENDENT_ACTIVATION", markers[0]),
             patch.object(host, "TRANSITION_ACTIVATION", markers[1]),
@@ -111,7 +115,7 @@ def check_backup_blocks_runtime_activation() -> None:
             for marker in markers:
                 marker.write_text("test", encoding="utf-8")
                 fails(host._assert_no_runtime_activation, "Нельзя копировать при активной операции")
-                fails(lambda: next(iter(host._consistent_window())), "Повторная проверка под backup-gate обязательна")
+                fails(try_snapshot, "Повторная проверка под backup-gate обязательна")
                 marker.unlink()
                 marker.symlink_to(gate)
                 fails(host._assert_no_runtime_activation, "Нельзя обходить проверку символьной ссылкой")
