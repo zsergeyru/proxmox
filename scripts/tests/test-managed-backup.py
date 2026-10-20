@@ -7,6 +7,7 @@ import importlib.util
 import json
 import sys
 import tempfile
+from types import SimpleNamespace
 from pathlib import Path
 from unittest.mock import patch
 
@@ -152,11 +153,57 @@ def check_run_does_not_claim_success() -> None:
     assert "PVE" in text and "restic" in text
 
 
+def check_one_ssd_target_runs_full_backup() -> None:
+    """При отсутствии NAS получаем проверенный архив PVE и VM 100 только на SSD."""
+    with tempfile.TemporaryDirectory() as root:
+        work = Path(root) / "state"
+        work.mkdir()
+        original_tmp = tempfile.TemporaryDirectory
+        calls = []
+        def remote(_node, action, _payload=b""):
+            calls.append(("remote", action))
+            if action == "repositories":
+                return SimpleNamespace(stdout=b'{"fast-ssd":"missing"}')
+            if action == "password":
+                return SimpleNamespace(stdout=b"K" * 48 + b"\n")
+            if action == "check":
+                return SimpleNamespace(stdout=b"[OK]")
+            raise AssertionError("Unexpected remote action")
+        with (
+            patch.object(backup_controller, "policy",
+                         return_value=(config(nas=None), {"fast-ssd": "A-UUID"})),
+            patch.object(backup_controller, "_source_node", return_value="pve"),
+            patch.object(backup_controller.shutil, "which", return_value="/usr/bin/restic"),
+            patch.object(backup_controller, "_remote", side_effect=remote),
+            patch.object(backup_controller, "OperationStore",
+                         return_value=SimpleNamespace(settings=work)),
+            patch.object(backup_controller, "_restic",
+                         side_effect=lambda _, dst, __, args, **kw: calls.append((dst, args[0]))),
+            patch.object(backup_controller, "_stream_snapshot",
+                         side_effect=lambda _, __, ___, dst, **kw:
+                         calls.append((dst, "vm100" if kw.get("vm100") else "core"))),
+            patch.object(backup_controller, "_vm100_due", return_value=True),
+            patch.object(backup_controller.tempfile, "TemporaryDirectory",
+                         side_effect=lambda *a, **kw: original_tmp()),
+            patch("infra_manager.pve.PveClient"),
+            patch("infra_manager.pve_backup_ssd.reconcile_backup_ssd",
+                  return_value="A-UUID"),
+        ):
+            backup_controller.execute(run=True)
+        assert not any(item[0] == "nas-backup" for item in calls)
+        assert ("fast-ssd", "core") in calls
+        assert ("fast-ssd", "vm100") in calls
+        record = json.loads((work / "backup-last-full.json").read_text())
+        assert record["destinations"] == ["fast-ssd"]
+        assert record["includes_vm100"] is True
+
+
 def main():
     check_policy()
     check_host_denies_untrusted()
     check_backup_blocks_runtime_activation()
     check_run_does_not_claim_success()
+    check_one_ssd_target_runs_full_backup()
     print("[ОК] Резервированием управляет 910; неподтверждённые SSD/NAS не изменяются")
 
 
