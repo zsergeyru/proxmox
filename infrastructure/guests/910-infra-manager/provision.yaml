@@ -45,25 +45,9 @@ docker:
     runtime:
       container_name: infra-runtime
       image: infra-runtime:v1
-      base_image: semaphoreui/semaphore:v2.18.30
       restart: unless-stopped
       network_mode: host
-      database: sqlite
-      data_path: /var/lib/infra-manager/semaphore
-
-      portal:
-        name: Semaphore
-        description: Задачи и автоматизация
-        icon: mdi-server-#38bdf8
-        scheme: http
-        port: 3000
-        targets:
-          - local
-        operator:
-          username: admin
-          password:
-            source: guest_file
-            path: /run/infra-manager/secrets/initial-admin-password
+      mode: standalone
 
       system_packages:
         - ca-certificates
@@ -77,7 +61,7 @@ docker:
         - py3-pip
 
       tools:
-        ansible: bundled-with-semaphore
+        ansible: "2.19.4"
         opentofu: "1.12.6"
         packer: "1.15.4"
         packer_image: "hashicorp/packer:1.15.4@sha256:8be72877859e00e13124b26373f0505b2a2597c5393ecbea900be28b4be58186"
@@ -90,7 +74,7 @@ docker:
         paramiko: ">=3.5,<5"
 
       mounts:
-        - /mnt/persistent-state/semaphore:/var/lib/semaphore
+        - /mnt/persistent-state/operations/activation:/run/infra-manager/activation
         - /etc/infra-manager/ca:/etc/infra-manager/ca:ro
         - /mnt/pve-access/pve-host:/mnt/pve-access/pve-host:ro
         - /mnt/persistent-state/opentofu:/var/lib/infra-manager/opentofu
@@ -146,8 +130,6 @@ paths:
   openbao_tls: /etc/infra-manager/openbao/tls
   pve_host_identity: /mnt/pve-access/pve-host
   data: /var/lib/infra-manager
-  semaphore_data: /var/lib/infra-manager/semaphore
-  semaphore_persistent_data: /mnt/persistent-state/semaphore
   operations_state: /mnt/persistent-state/operations
   opentofu_data: /var/lib/infra-manager/opentofu
   opentofu_provider_mirror: /var/lib/infra-manager/opentofu/provider-mirror
@@ -175,28 +157,6 @@ access_materialization:
   openbao_tls:
     source: /mnt/pve-access/openbao-tls
     target: /etc/infra-manager/openbao/tls
-
-semaphore:
-  project: Proxmox Infrastructure
-  repository: proxmox
-
-  views:
-    - { title: Guests, position: 1 }
-    - { title: Infrastructure, position: 2 }
-    - { title: Security, position: 3 }
-
-  objects:
-    - GitHub project read-only
-    - OpenTofu PVE
-    - Infra Manager
-    - OpenTofu Plan
-    - Build Template 9000
-    - Set Log Level
-    - Deploy Guest
-    - Status Guest
-    - Repair Guest
-    - Sync Guest
-    - Sync SSH Access
 
 persistence:
   target_layout:
@@ -230,12 +190,10 @@ persistence:
       contains:
         - openbao-raft
         - opentofu-state
-        - semaphore-data
         - operation-locks
         - operation-records
         - physical-host-identities
       bindings:
-        - { source: /mnt/persistent-state/semaphore, target: /var/lib/infra-manager/semaphore, owner: "1001", group: "0", mode: "0770" }
         - { source: /mnt/persistent-state/opentofu, target: /var/lib/infra-manager/opentofu, owner: "1001", group: "0", mode: "0750" }
         - { source: /mnt/persistent-state/locks, target: /var/lib/infra-manager/locks, owner: "1001", group: "0", mode: "0770" }
         - { source: /mnt/persistent-state/physical-hosts, target: /var/lib/infra-manager/physical-hosts, owner: "1001", group: "0", mode: "0700" }
@@ -253,7 +211,6 @@ persistence:
     - /mnt/persistent-state/operations
     - /var/lib/infra-manager/physical-hosts
     - /mnt/pve-access/pve-host
-    - /var/lib/infra-manager/semaphore
     - /var/lib/infra-manager/opentofu/state
     - /var/lib/persistent/openbao
 
