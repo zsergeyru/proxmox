@@ -1360,9 +1360,11 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError:
                 self._reply(HTTPStatus.SERVICE_UNAVAILABLE, b"session limit\n")
                 return
+            # Post/Redirect/Get: при F5 браузер не отправит пароль повторно.
             self._reply(
-                HTTPStatus.OK, _dashboard(session["csrf"]),
+                HTTPStatus.SEE_OTHER, b"",
                 cookie=f"{COOKIE}={token}; HttpOnly; Secure; SameSite=Strict; Path=/",
+                location="/",
             )
             return
         auth = self._authorized()
@@ -1376,9 +1378,11 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/logout":
             with guard:
                 sessions.pop(token, None)
+            # Тот же PRG после выхода; защищённую форму нельзя повторить F5.
             self._reply(
-                HTTPStatus.OK, _login(),
+                HTTPStatus.SEE_OTHER, b"",
                 cookie=f"{COOKIE}=; Max-Age=0; HttpOnly; Secure; SameSite=Strict; Path=/",
+                location="/",
             )
             return
         if path == "/infrastructure/run":
