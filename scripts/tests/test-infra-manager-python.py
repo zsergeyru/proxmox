@@ -271,27 +271,27 @@ def check_duration_output() -> None:
 def check_runtime_activation_guard() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
-        host_state = root / "host-semaphore"
-        runtime_state = root / "runtime-semaphore"
+        host_state = root / "host-operations"
+        runtime_state = root / "runtime-operations"
         host_state.mkdir()
         runtime_state.mkdir()
 
-        original_host_state = common.HOST_SEMAPHORE_STATE_DIR
-        original_runtime_state = common.RUNTIME_SEMAPHORE_STATE_DIR
+        original_host_state = common.HOST_OPERATIONS_STATE_DIR
+        original_runtime_state = common.RUNTIME_OPERATIONS_STATE_DIR
         try:
-            common.HOST_SEMAPHORE_STATE_DIR = host_state
-            common.RUNTIME_SEMAPHORE_STATE_DIR = runtime_state
-            expected = host_state / ".infra-manager-runtime-activation-pending"
+            common.HOST_OPERATIONS_STATE_DIR = host_state
+            common.RUNTIME_OPERATIONS_STATE_DIR = runtime_state
+            expected = host_state / "runtime-activation-pending"
             if common._default_runtime_activation_marker() != expected:
-                fail("На 910 marker активации должен использовать persistent-state")
+                fail("На управляющем госте активация должна использовать постоянное состояние")
 
-            common.HOST_SEMAPHORE_STATE_DIR = root / "missing-host-state"
-            expected = runtime_state / ".infra-manager-runtime-activation-pending"
+            common.HOST_OPERATIONS_STATE_DIR = root / "missing-host-state"
+            expected = runtime_state / "runtime-activation-pending"
             if common._default_runtime_activation_marker() != expected:
-                fail("В infra-runtime marker активации должен использовать /var/lib/semaphore")
+                fail("В контейнере активация должна использовать общий раздел операций")
         finally:
-            common.HOST_SEMAPHORE_STATE_DIR = original_host_state
-            common.RUNTIME_SEMAPHORE_STATE_DIR = original_runtime_state
+            common.HOST_OPERATIONS_STATE_DIR = original_host_state
+            common.RUNTIME_OPERATIONS_STATE_DIR = original_runtime_state
 
         marker = Path(tmp) / "runtime-activation-pending"
         original = common.RUNTIME_ACTIVATION_MARKER
