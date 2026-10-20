@@ -229,7 +229,7 @@ def deploy_backup_ssd_preflight() -> None:
     """Ограниченная стадия 910, не блокирующая исправный управляющий контур."""
     from .operator import _pve_node
     try:
-        can_ask = sys.stdin.isatty()
+        can_ask = sys.stdin.isatty() or os.environ.get("INFRA_MANAGER_INTERACTIVE") == "1"
         reconcile_backup_ssd(PveClient(), _pve_node(), interactive=can_ask)
     except (InfraManagerError, EOFError) as exc:
         console.warning(f"Резервный SSD: {exc}. Основной deploy 910 продолжится")
