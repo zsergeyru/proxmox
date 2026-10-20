@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import contextlib
+import errno
 import io
 import os
 import subprocess
@@ -148,6 +149,57 @@ def check_cli_and_commands() -> None:
             )
         if "usage: infra-manager" not in direct.stdout:
             fail(f"python -m infra_manager {' '.join(args)} не вывел строку использования")
+
+
+def check_safe_system_error_diagnostics() -> None:
+    """Показывать исходную причину, не выводя секретные пути и сообщения ОС."""
+    err = io.StringIO()
+    output = Console(out=io.StringIO(), err=err)
+    failure = FileNotFoundError(
+        errno.ENOENT,
+        "PRIVATE-SECRET in strerror",
+        "/mnt/pve-access/pve-only/PRIVATE-SECRET-file",
+    )
+    output.failure(failure)
+    printed = err.getvalue()
+    if "Не удалось обратиться" not in printed:
+        fail("Сначала требуется понятное сообщение об ошибке")
+    if "[ДИАГНОСТИКА] FileNotFoundError (ENOENT)" not in printed:
+        fail("Сразу после ошибки требуется системный тип и код")
+    if "PRIVATE-SECRET" in printed or "/mnt/pve-access/" in printed:
+        fail("Системная диагностика не должна раскрывать пути или stderr")
+
+    err = io.StringIO()
+    Console(out=io.StringIO(), err=err).failure(
+        PermissionError(errno.EACCES, "PRIVATE-SECRET", "/usr/bin/docker")
+    )
+    printed = err.getvalue()
+    if "PermissionError (EACCES)" not in printed or "программа: docker" not in printed:
+        fail("Диагностика должна называть только известную программу и код доступа")
+    if "PRIVATE-SECRET" in printed or "/usr/bin/docker" in printed:
+        fail("Нельзя печатать необработанные данные исключения")
+
+    err = io.StringIO()
+    Console(out=io.StringIO(), err=err).failure(
+        CommandError(
+            ["docker", "exec", "--token", "PRIVATE-SECRET"],
+            24,
+            "PRIVATE-SECRET from command stderr",
+        )
+    )
+    printed = err.getvalue()
+    if "CommandError: программа docker; код возврата 24" not in printed:
+        fail("Отказ внешней команды должен называть безопасную программу и код")
+    if "PRIVATE-SECRET" in printed or "--token" in printed:
+        fail("Командная диагностика не должна показывать argv и stderr")
+
+    err = io.StringIO()
+    with patch.dict(os.environ, {"INFRA_LOG_LEVEL": "quiet"}):
+        Console(out=io.StringIO(), err=err).failure(
+            FileNotFoundError(errno.ENOENT, "hidden", "/private/key")
+        )
+    if "[ДИАГНОСТИКА]" not in err.getvalue():
+        fail("Даже quiet не должен скрывать техническую причину ошибки")
 
 
 def check_log_levels() -> None:
@@ -563,6 +615,7 @@ def main_test() -> None:
     check_shared_configuration_readers()
     check_http_error_messages_hide_secret_bodies()
     check_log_levels()
+    check_safe_system_error_diagnostics()
     check_duration_output()
     check_runtime_activation_guard()
     check_path_overrides()

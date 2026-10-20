@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import errno
 import os
 import re
 import shlex
@@ -66,6 +67,29 @@ def _ansible_failure_summary(output: str | None) -> str:
             details.append(description)
             break
     return " ".join(details)
+
+
+_SAFE_EXECUTABLES = frozenset({
+    "docker", "git", "ssh", "python3", "sh", "bash", "pct",
+    "tofu", "packer", "ansible-playbook", "systemd-run", "findmnt",
+})
+
+
+def _os_error_diagnostic(exc: OSError) -> str:
+    """Безопасная причина системного отказа без произвольных путей и секретов."""
+    code = errno.errorcode.get(exc.errno, "UNKNOWN")
+    explanation = {
+        "ENOENT": "файл или программа не найдены",
+        "EACCES": "нет разрешения на доступ",
+        "EPERM": "операция запрещена системой",
+        "ENOTDIR": "часть пути не является каталогом",
+        "EROFS": "файловая система доступна только для чтения",
+        "ENOSPC": "недостаточно свободного места",
+        "EMFILE": "достигнут лимит открытых файлов процесса",
+    }.get(code, "системная ошибка при обращении к файлу или запуске программы")
+    target = Path(exc.filename).name if isinstance(exc.filename, str) else ""
+    program = f"; программа: {target}" if target in _SAFE_EXECUTABLES else ""
+    return f"{type(exc).__name__} ({code}): {explanation}{program}"
 
 
 def read_env_file(path: Path) -> dict[str, str]:
@@ -264,6 +288,14 @@ class Console:
             flush=True,
         )
 
+    def diagnostic(self, message: str) -> None:
+        """Показать только очищенную техническую причину, даже в quiet."""
+        print(
+            f"[ДИАГНОСТИКА] {message}",
+            file=self.err,
+            flush=True,
+        )
+
     def failure(self, exc: Exception, *, vmid: int | None = None) -> None:
         """Показать причину и действие без аргументов команды и сырого stderr."""
         if isinstance(exc, CommandError):
@@ -286,8 +318,13 @@ class Console:
             if vmid is not None:
                 message = message.replace("<VMID>", str(vmid))
             self.error(f"{message} Код ошибки: {exc.returncode}.")
+            safe_tool = tool if tool in _SAFE_EXECUTABLES else "неизвестная команда"
+            self.diagnostic(
+                f"CommandError: программа {safe_tool}; код возврата {exc.returncode}"
+            )
         elif isinstance(exc, OSError):
             self.error("Не удалось обратиться к файлу или запустить программу. Проверьте наличие необходимых файлов, программ и права доступа; затем повторите операцию.")
+            self.diagnostic(_os_error_diagnostic(exc))
         else:
             self.error(str(exc))
 
