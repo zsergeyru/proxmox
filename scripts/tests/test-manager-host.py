@@ -339,6 +339,7 @@ def test_operator_guest_task_secret_policy() -> None:
             patch.object(
                 operator, "operator_guest_status", return_value=0
             ) as status,
+            patch.object(operator, "_wait_for_runtime_activation", return_value=None) as wait,
             patch.object(operator, "console") as console,
         ):
             assert operator.operator_guest_task(
@@ -349,9 +350,144 @@ def test_operator_guest_task_secret_policy() -> None:
 
         assert identity.call_count >= 1
         status.assert_not_called()
+        wait.assert_called_once()
         assert store.list_recent()[0]["phase"] == "activating"
         assert store.list_recent()[0]["result"] is None
-        assert "Активация продолжается отдельно" in str(console.info.call_args.args[0])
+        assert "не подтверждена" in console.warning.call_args.args[0]
+
+
+def test_self_update_waits_and_renders_final_status() -> None:
+    """Успех выдаётся только по подтверждённой записи systemd и полной проверке."""
+    from infra_manager.operation_store import OperationStore
+
+    with tempfile.TemporaryDirectory() as directory:
+        store = OperationStore(Path(directory) / "operations", require_mount=False)
+
+        def finish_activation(_store: OperationStore, operation_id: str) -> dict:
+            assert _store is store
+            store.transition(operation_id, "verifying")
+            store.finish(operation_id, exit_code=0)
+            return store.get(operation_id)
+
+        with (
+            patch("infra_manager.operation_store.OperationStore", return_value=store),
+            patch.object(operator, "project_revision", return_value="abc123"),
+            patch.object(operator, "_operator_guest_task", return_value=0),
+            patch.object(operator, "guest_identity", return_value=SimpleNamespace(
+                vmid=910, name="infra-manager",
+                role=operator.SETTINGS.infra_manager_role,
+            )),
+            patch.object(operator, "_wait_for_runtime_activation",
+                         side_effect=finish_activation) as wait,
+            patch.object(operator, "operator_guest_status", return_value=0) as status,
+            patch.object(operator, "console") as console,
+        ):
+            assert operator.operator_guest_task("deploy", 910, show_secrets=True) == 0
+        wait.assert_called_once()
+        status.assert_called_once_with(
+            910, show_secrets=True, allow_pending_activation=True
+        )
+        console.result.assert_called_once()
+        record = store.list_recent()[0]
+        assert record["phase"] == "completed" and record["result"] == "ok"
+        assert console.timing.call_args.kwargs["failed"] is False
+
+
+def test_self_update_failed_activation_does_not_show_success() -> None:
+    """Ошибку переключения нельзя считать успешным deploy."""
+    from infra_manager.operation_store import OperationStore
+
+    with tempfile.TemporaryDirectory() as directory:
+        store = OperationStore(Path(directory) / "operations", require_mount=False)
+
+        def fail_activation(_store: OperationStore, operation_id: str) -> dict:
+            store.finish(operation_id, exit_code=17)
+            return store.get(operation_id)
+
+        with (
+            patch("infra_manager.operation_store.OperationStore", return_value=store),
+            patch.object(operator, "project_revision", return_value="abc123"),
+            patch.object(operator, "_operator_guest_task", return_value=0),
+            patch.object(operator, "guest_identity", return_value=SimpleNamespace(
+                vmid=910, name="infra-manager",
+                role=operator.SETTINGS.infra_manager_role,
+            )),
+            patch.object(operator, "_wait_for_runtime_activation",
+                         side_effect=fail_activation),
+            patch.object(operator, "operator_guest_status") as status,
+            patch.object(operator, "console") as console,
+        ):
+            assert operator.operator_guest_task("deploy", 910, show_secrets=False) == 1
+        status.assert_not_called()
+        assert "код 17" in console.error.call_args.args[0]
+        assert store.list_recent()[0]["phase"] == "failed"
+        assert console.timing.call_args.kwargs["failed"] is True
+
+
+def test_self_update_interrupt_does_not_cancel_systemd() -> None:
+    """Ctrl+C во время ожидания не превращает рабочую активацию в failed."""
+    from infra_manager.operation_store import OperationStore
+
+    with tempfile.TemporaryDirectory() as directory:
+        store = OperationStore(Path(directory) / "operations", require_mount=False)
+        with (
+            patch("infra_manager.operation_store.OperationStore", return_value=store),
+            patch.object(operator, "project_revision", return_value="abc123"),
+            patch.object(operator, "_operator_guest_task", return_value=0),
+            patch.object(operator, "guest_identity", return_value=SimpleNamespace(
+                vmid=910, name="infra-manager",
+                role=operator.SETTINGS.infra_manager_role,
+            )),
+            patch.object(operator, "_wait_for_runtime_activation",
+                         side_effect=KeyboardInterrupt),
+            patch.object(operator, "operator_guest_status") as status,
+            patch.object(operator, "console"),
+        ):
+            try:
+                operator.operator_guest_task("deploy", 910, show_secrets=False)
+            except KeyboardInterrupt:
+                pass
+            else:
+                raise AssertionError("Ctrl+C должен прервать только ожидание")
+        status.assert_not_called()
+        assert store.list_recent()[0]["phase"] == "activating"
+        assert store.list_recent()[0]["result"] is None
+
+
+def test_activation_poll_states_and_timeout() -> None:
+    """Дождаться финального состояния; при тайм-ауте не заявлять об успехе."""
+    from infra_manager.operation_store import OperationStore
+
+    with tempfile.TemporaryDirectory() as directory:
+        store = OperationStore(Path(directory) / "operations", require_mount=False)
+        request, _ = store.reserve("deploy", 910, "abc", activation_required=True)
+        store.start(request["id"])
+        clock = [0.0]
+
+        def advance(seconds: float) -> None:
+            clock[0] += seconds
+
+        with (
+            patch.object(operator.time, "monotonic", side_effect=lambda: clock[0]),
+            patch.object(operator.time, "sleep", side_effect=advance),
+            patch.object(operator, "console") as console,
+        ):
+            assert operator._wait_for_runtime_activation(
+                store, request["id"], timeout_seconds=5
+            ) is None
+        assert 5 <= clock[0] <= 6
+        assert console.info.call_count == 1
+        assert store.get(request["id"])["phase"] == "running"
+
+        store.transition(request["id"], "activating")
+        store.transition(request["id"], "verifying")
+        store.finish(request["id"], exit_code=0)
+        with patch.object(operator.time, "sleep") as sleep:
+            completed = operator._wait_for_runtime_activation(
+                store, request["id"], timeout_seconds=0
+            )
+        sleep.assert_not_called()
+        assert completed["phase"] == "completed"
 
 
 def test_internal_project_refresh_uses_existing_checkout() -> None:
@@ -675,6 +811,10 @@ def main() -> None:
     test_host_recover_uses_only_recovery_helper()
     test_host_wrapper_is_minimal()
     test_operator_guest_task_secret_policy()
+    test_self_update_waits_and_renders_final_status()
+    test_self_update_failed_activation_does_not_show_success()
+    test_self_update_interrupt_does_not_cancel_systemd()
+    test_activation_poll_states_and_timeout()
     test_operator_guest_operation_timing()
     test_operator_interrupt()
     test_internal_project_refresh_uses_existing_checkout()
