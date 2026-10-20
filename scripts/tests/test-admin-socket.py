@@ -143,7 +143,10 @@ def main():
             assert rejected(lambda: admin_socket.dispatch(dict(query, vmid=910)))
             assert rejected(lambda: admin_socket.dispatch(dict(query, request_id="not-a-uuid")))
             assert rejected(lambda: admin_socket.dispatch(dict(query, operation_id=uuid.uuid4().hex)))
-        assert admin_socket._filter_log(["[ОК] Безопасная строка", "[ИНФО] secret=bad"]) == [
+        assert admin_socket._filter_log([
+            "[ОК] Безопасная строка", "[ИНФО] secret=bad",
+            "[ОШИБКА] пароль=hunter2", "[ИНФО] секрет=hidden",
+        ]) == [
             "[ОК] Безопасная строка",
         ]
         secret_file = root / "sensitive"
