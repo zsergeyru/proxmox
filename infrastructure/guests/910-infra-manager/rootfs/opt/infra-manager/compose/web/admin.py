@@ -242,6 +242,10 @@ table{width:100%;border-collapse:collapse}td,th{padding:.55rem;
 border-bottom:1px solid #345;text-align:left}input,select,button{
 padding:.55rem;margin:.25rem;border-radius:6px}
 a{color:#9bded8}code{color:#96d1f1}
+.versions{margin-top:2rem;border-top:1px solid #345;padding-top:1rem;
+font-size:.85rem;color:#bdcbd9}.versions dl{display:grid;grid-template-columns:
+minmax(180px,1fr) 1fr;gap:.4rem .7rem}.versions dt{color:#a9bcce}
+.versions dd{margin:0}.versions p{color:#a9bcce}
 </style></head><body><h1>Управление инфраструктурой</h1>
 <main>""" + inner + "</main></body></html>").encode()
 
@@ -283,6 +287,51 @@ def _dashboard(csrf: str, notice: str = "") -> bytes:
     return _layout(form)
 
 
+def _public_versions() -> str:
+    """Публичные версии без токенов, паролей и доступа к Docker socket.
+
+    Версия infra-web берётся из образа, остальные — из декларации deploy.
+    Они не выдаются за результаты проверки запущенных контейнеров.
+    """
+    built = os.environ.get("INFRA_WEB_BUILD_REVISION", "")
+    target = os.environ.get("INFRA_GIT_REVISION", "")
+
+    def git_revision(value: str) -> str:
+        return value[:12] if re.fullmatch(r"[0-9a-f]{40}", value) else "не определена"
+
+    def version(name: str) -> str:
+        value = os.environ.get(name, "")
+        return value[:80] if re.fullmatch(r"[a-zA-Z0-9._+-]{1,80}", value) else "не определена"
+
+    rows = [
+        ("infra-web (образ)", f"v1, Git {git_revision(built)}"),
+        ("infra-runtime (конфигурация)", version("INFRA_RUNTIME_VERSION")),
+        ("OpenBao (конфигурация)", version("INFRA_OPENBAO_VERSION")),
+        ("OpenTofu (конфигурация)", version("INFRA_OPENTOFU_VERSION")),
+        ("Ansible (конфигурация)", version("INFRA_ANSIBLE_VERSION")),
+        ("Packer (конфигурация)", version("INFRA_PACKER_VERSION")),
+        ("Git (целевая версия)", git_revision(target)),
+    ]
+    warning = (
+        "<p><strong>Внимание: версия веб-панели отличается от целевой. "
+        "Проверьте завершение deploy 910.</strong></p>"
+        if re.fullmatch(r"[0-9a-f]{40}", built)
+        and re.fullmatch(r"[0-9a-f]{40}", target)
+        and built != target else ""
+    )
+    items = "".join(
+        "<dt>" + html.escape(label) + "</dt><dd>" + html.escape(value) + "</dd>"
+        for label, value in rows
+    )
+    return (
+        '<section class="versions" aria-label="Версии компонентов">'
+        "<h3>Версии компонентов</h3>" + warning
+        + "<dl>" + items + "</dl>"
+        "<p>Кроме infra-web, указаны версии из конфигурации развёртывания, "
+        "а не результаты онлайн-проверки контейнеров.</p></section>"
+    )
+
+
 def _login() -> bytes:
     return _layout(
         "<h2>Вход через OpenBao</h2>"
@@ -291,6 +340,7 @@ def _login() -> bytes:
         '<label>Пароль <input type="password" name="password" '
         'autocomplete="current-password" required></label>'
         '<button>Войти</button></form>'
+        + _public_versions()
     )
 
 
