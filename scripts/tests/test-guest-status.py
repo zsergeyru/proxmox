@@ -454,7 +454,7 @@ def check_rendered_status() -> None:
             "lxc",
             "192.168.9.10",
             (
-                "http://192.168.9.10:3001/",
+                "https://192.168.9.10:8443/",
                 "Semaphore",
                 "semaphore-password",
                 "OpenBao",
