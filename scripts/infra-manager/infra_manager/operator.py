@@ -565,11 +565,11 @@ def operator_physical_bootstrap_state(name: str) -> int:
         address = connection["address"]
     except (OSError, yaml.YAMLError, KeyError, TypeError) as exc:
         raise InfraManagerError("Не удалось проверить адрес и SSH-ключ NAS") from exc
+    address, fingerprint = resolve_connection_values(name, address, fingerprint)
     if not isinstance(address, str) or not address or not isinstance(fingerprint, str) or not fingerprint:
         raise InfraManagerError(
-            "Укажите проверенные адрес и SSH-отпечаток NAS в host.yaml до первого входа"
+            "Сначала подтвердите адрес и SSH-отпечаток NAS в терминале PVE"
         )
-    address, fingerprint = resolve_connection_values(name, address, fingerprint)
     path = checked_record_path(name, data_root=PATHS.data_dir)
     if not path.exists():
         if checked_record_path(name, storage=True, data_root=PATHS.data_dir).exists():
