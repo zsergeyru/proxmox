@@ -199,7 +199,7 @@ def _operation_page(operation_id: str, csrf: str | None = None) -> bytes:
         _text(started) + '"' +
         (' data-duration-end="' + _text(finished) + '"' if finished else '') +
         '>—</strong>' if isinstance(started, str) and
-        re.fullmatch(r"\\d{4}-\\d\\d-\\d\\dT[^ ]+", started) else
+        re.fullmatch(r"\d{4}-\d\d-\d\dT[^ ]+", started) else
         '<strong id="op-duration">—</strong>'
     )
     body = (
