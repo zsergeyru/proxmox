@@ -102,6 +102,18 @@ def main() -> None:
     assert "lookup('file', provision.paths.bootstrap_repository" not in runtime_role
     assert (ROOT / "infrastructure/hosts/pve/backup.yaml").is_file()
 
+    # При частичном self-update не оставлять OpenBao запечатанным,
+    # если следующая задача Ansible закончится ошибкой.
+    role_start = runtime_role.index("- name: Перезапустить OpenBao")
+    role_unseal = runtime_role.index(
+        "- name: Сразу разблокировать OpenBao после обновления контейнера 910"
+    )
+    role_backup = runtime_role.index("- name: Прочитать единое описание резервирования")
+    assert role_start < role_unseal < role_backup
+    assert "infra-manager-openbao-startup-unseal" in runtime_role
+    assert "when: infra_self_update | default(false) | bool" in runtime_role
+
+
     deploy_paths = (ROOT / "scripts/infra-manager/infra_manager/guest_deploy_infrastructure.py").read_text()
     assert 'known_hosts=PATHS.opentofu_dir / "guest-known-hosts"' in deploy_paths
     assert "/var/lib/semaphore/guest-known-hosts" not in deploy_paths
