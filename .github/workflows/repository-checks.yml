@@ -147,6 +147,8 @@ jobs:
 
       - name: Check selective 910 Docker rebuild decisions
         run: python scripts/tests/test-selective-runtime-build.py
+      - name: Check fast 910 self-update and rollback
+        run: python scripts/tests/test-fast-self-update.py
 
       - name: Check infra-web readonly preview
         run: python scripts/tests/test-infra-web.py

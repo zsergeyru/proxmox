@@ -239,8 +239,12 @@ def _prepare_runtime_snapshot(
     if operation in {"deploy", "sync", "bootstrap", "storage-plan", "storage-prepare"}:
         # Снимок и новая проверка дисков обязаны происходить при одном checkout.
         with project_checkout_lock(exclusive=True):
+            phase_started = time.monotonic()
             _refresh_project_checkout()
+            console.timing("Git fetch/checkout", time.monotonic() - phase_started)
+            phase_started = time.monotonic()
             copy_snapshot()
+            console.timing("Снимок проекта для deploy", time.monotonic() - phase_started)
             if preflight_storage:
                 # Новая точка входа находится в обновлённом Git, а не в
                 # /usr/local/lib/infra-manager текущего процесса. Запуск
@@ -251,7 +255,10 @@ def _prepare_runtime_snapshot(
                         "В обновлённой Git-версии нет доверенной проверки SSD/NAS"
                     )
                 console.info("Проверка SSD/NAS кодом обновлённой Git-версии")
+                phase_started = time.monotonic()
                 run([sys.executable, str(entrypoint)], stream_output=True)
+                console.timing("Предварительная проверка SSD/NAS",
+                               time.monotonic() - phase_started)
     else:
         with project_checkout_lock(exclusive=False):
             copy_snapshot()
@@ -360,6 +367,8 @@ def operator_guest_task(
     store = None
     operation_id = None
     prepared_snapshot = None
+    fast_plan = None
+    fast_recovery_required = False
     if operation == "deploy":
         identity = guest_identity(PATHS.repo_root, vmid)
         if identity.role == SETTINGS.infra_manager_role:
@@ -372,9 +381,21 @@ def operator_guest_task(
             prepared_snapshot = _prepare_runtime_snapshot(
                 operation, vmid, preflight_storage=True,
             )
-            # Проверки SSD/NAS завершились из нового Git до резервирования
-            # операции. Дальнейший deploy работает с тем же снимком в runtime.
+            # Предыдущая успешная активация оставляет подтверждённый
+            # манифест файлов. Любое неожиданное изменение -> полный Ansible.
+            from .self_update_fast import plan as select_fast_plan
             store = OperationStore()
+            fast_plan = select_fast_plan(PATHS.repo_root, store=store)
+            if fast_plan.mode == "fast":
+                summary = (
+                    f"web={len(fast_plan.web)}, "
+                    f"системный Python={len(fast_plan.python)}"
+                )
+                console.info(f"Быстрый путь deploy 910: {summary}")
+            else:
+                console.info(
+                    "Полный безопасный Ansible: " + fast_plan.reason
+                )
             # Согласовать создание active/910.json с эксклюзивной
             # блокировкой резервирования PVE. После отпускания shared
             # gate активная запись остаётся и запрещает старт backup
@@ -382,12 +403,44 @@ def operator_guest_task(
             with _backup_gate():
                 record, _ = store.reserve(
                     "deploy", vmid, project_revision(PATHS.repo_root),
-                    activation_required=True,
+                    activation_required=fast_plan is None or fast_plan.mode != "fast",
                 )
                 operation_id = record["id"]
                 store.start(operation_id)
             console.info(f"Операция самообновления: {operation_id}")
     try:
+        if fast_plan is not None and fast_plan.mode == "fast":
+            from .operation_lock import guest_operation_lock
+            from .guest_operations import _run_status
+            from .self_update_fast import FastRollbackUnconfirmed, apply as apply_fast_update
+            assert store is not None and operation_id is not None
+            try:
+                with guest_operation_lock(vmid, "deploy"):
+                    apply_fast_update(
+                        fast_plan,
+                        # apply() держит эксклюзивный project.lock: нельзя
+                        # заходить повторно в run_local_guest_status(),
+                        # который пытается получить ещё одну shared-блокировку.
+                        lambda: _run_status(
+                            PveClient(), PATHS.repo_root,
+                            guest_identity(PATHS.repo_root, vmid),
+                            show_secrets=show_secrets,
+                        ) == 0,
+                        repo=PATHS.repo_root,
+                        store=store,
+                    )
+                    store.finish(operation_id, exit_code=0)
+            except FastRollbackUnconfirmed:
+                # Оставить active/910.json для ручной проверки; не разблокировать
+                # следующее изменение, когда rollback не подтверждён.
+                fast_recovery_required = True
+                raise
+            console.result(
+                f"Быстрое обновление 910 подтверждено: {operation_id}; "
+                "полный Ansible и infra-runtime не запускались"
+            )
+            completed = True
+            return 0
         task_options = {"show_secrets": show_secrets}
         if operation_id is not None:
             task_options["operation_id"] = operation_id
@@ -459,9 +512,23 @@ def operator_guest_task(
         interrupted = True
         raise
     finally:
+        # Полный deploy удаляет снимок в RUNTIME_DIRECT_SCRIPT. При fast
+        # путь в infra-runtime не вызывается, поэтому очищаем его здесь.
+        if fast_plan is not None and fast_plan.mode == "fast" and prepared_snapshot:
+            if re.fullmatch(r"/tmp/infra-manager-direct-[0-9]+-910", prepared_snapshot):
+                cleaned = run(
+                    ["docker", "exec", "--user", "0", RUNTIME_CONTAINER,
+                     "rm", "-rf", "--", prepared_snapshot],
+                    capture_output=True, check=False,
+                )
+                if cleaned.returncode:
+                    console.warning("Не удалось убрать временный снимок быстрого deploy")
+            else:
+                console.warning("Неизвестный путь снимка infra-runtime; очистка запрещена")
         if store is not None and operation_id is not None:
             current = store.get(operation_id)
-            if current["phase"] == "running" and not activation_handed_off:
+            if (current["phase"] == "running" and not activation_handed_off
+                    and not fast_recovery_required):
                 store.finish(operation_id, exit_code=1)
         console.timing(
             f"Команда {operation} гостя {vmid}",

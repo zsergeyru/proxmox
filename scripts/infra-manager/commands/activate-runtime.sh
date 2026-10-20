@@ -201,6 +201,9 @@ if grep -qx 'RUNTIME_MODE=standalone' "$COMPOSE_DIR/.versions.env"; then
             fi
             INFRA_PROJECT_BRANCH="$BRANCH" \
                 /usr/local/sbin/infra-manager-status --full --quiet
+            # Запись контрольных сумм разрешена только после полной проверки.
+            PYTHONPATH=/usr/local/lib/infra-manager \
+                python3 -m infra_manager.self_update_fast attest
             printf '[ОК] Независимый infra-runtime и OpenBao проверены без Semaphore\\n'
             exit 0
         fi
