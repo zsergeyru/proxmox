@@ -27,6 +27,7 @@ STATE_DIR = Path("/etc/infra-manager/guest-storage")
 HOOK_SOURCE = Path("/var/lib/vz/snippets/infra-manager-guest-storage.py")
 HOOK_ID = "local:snippets/infra-manager-guest-storage.py"
 PENDING_TAG = "infra_manager_pending"
+STORAGE_LOCKS_DIR = Path("/mnt/bindmounts/infra-manager/state/locks")
 
 
 def command(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -552,7 +553,7 @@ def reconcile_host_volumes(config: object) -> None:
     """Сверить общие LVM без установки файлов/пакетов на PVE."""
     volumes = validate_host_reconcile(config)
     # Защитить от гонки с guest deploy. Не блокируем backup-only операции.
-    lock_path = Path("/mnt/bindmounts/infra-manager/state/locks")
+    lock_path = STORAGE_LOCKS_DIR
     if not lock_path.is_dir() or lock_path.is_symlink():
         raise StorageError("Отсутствует защищённый каталог блокировок PVE")
     with (lock_path / "physical-storage.lock").open("a+") as lock:
