@@ -105,7 +105,6 @@ docker:
             source: pve_json
             path: /mnt/bindmounts/infra-manager/pve-only/openbao/operator-access.json
             key: password
-      operations_mount: /mnt/persistent-state/operations
       requires_authorization_before_publication: true
 
     openbao:
