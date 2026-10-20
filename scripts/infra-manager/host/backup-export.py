@@ -32,8 +32,9 @@ PVE_IDENTITY = Path("/etc/infra-manager/openbao-host.json")
 ROLE = ROOT / "pve-only/openbao/backup-access.json"
 RAFT_HELPER = Path("/usr/local/lib/infra-manager/backup/openbao-raft-guest.py")
 BACKUP_GATE = STATE / "locks/backup-gate.lock"
-ACTIVATION = STATE / "semaphore/.infra-manager-runtime-activation-pending"
 INDEPENDENT_ACTIVATION = STATE / "operations/activation/runtime-activation-pending"
+TRANSITION_ACTIVATION = STATE / "locks/runtime-activation-pending"
+ACTIVE_910_OPERATION = STATE / "operations/active/910.json"
 SOURCES = (
     Path("/etc/pve"),
     Path("/etc/network/interfaces"),
@@ -94,6 +95,24 @@ def check_destinations(expected: dict[str, str]) -> None:
         raise ExportError("Оба архива не должны находиться на одном носителе")
 
 
+def _assert_no_runtime_activation() -> None:
+    """Блокировать копию при работе systemd даже после выхода Ansible.
+
+    Активная запись UUID сохраняется на всём протяжении самообновления,
+    а два маркера покрывают первое переключение со старого Docker.
+    Проверка повторяется *под* backup-gate, чтобы закрыть гонку preflight.
+    """
+    for path in (
+        INDEPENDENT_ACTIVATION,
+        TRANSITION_ACTIVATION,
+        ACTIVE_910_OPERATION,
+    ):
+        if path.is_symlink() or path.exists():
+            raise ExportError(
+                "Самообновление infra-manager ещё выполняется или требует проверки"
+            )
+
+
 def check_sources() -> int:
     if not Path("/etc/pve").is_mount():
         raise ExportError("PVE /etc/pve не подключён")
@@ -109,9 +128,7 @@ def check_sources() -> int:
     ):
         if path.is_symlink() or not path.is_file() or path.stat().st_size == 0:
             raise ExportError("Неполное PVE-only состояние для резервирования")
-    if any(marker.exists() or marker.is_symlink()
-           for marker in (ACTIVATION, INDEPENDENT_ACTIVATION)):
-        raise ExportError("Самообновление infra-manager ещё выполняется")
+    _assert_no_runtime_activation()
     role = _read_json(ROLE)
     if set(role) != {"role_id", "secret_id"} or not all(
         isinstance(item, str) and item for item in role.values()
@@ -144,6 +161,9 @@ def _consistent_window():
             fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as exc:
             raise ExportError("Выполняются изменения инфраструктуры") from exc
+        # Проверить именно после успешного захвата эксклюзивного flock:
+        # между preflight и этой точкой могла начаться новая активация.
+        _assert_no_runtime_activation()
         yield
     finally:
         os.close(handle)
