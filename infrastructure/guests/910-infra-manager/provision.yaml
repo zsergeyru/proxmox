@@ -85,12 +85,14 @@ docker:
 
     web:
       container_name: infra-web
-      image: infra-web:preview1
-      enabled: false
-      profile: preview
-      bind: 127.0.0.1
-      port: 3104
-      state: read-only-preview
+      image: infra-web:v1
+      enabled: true
+      bind: 0.0.0.0
+      address: 192.168.9.10
+      port: 8443
+      scheme: https
+      auth: openbao-userpass
+      state: authenticated
       operations_mount: /mnt/persistent-state/operations
       requires_authorization_before_publication: true
 
