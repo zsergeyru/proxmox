@@ -298,6 +298,8 @@ class Handler(BaseHTTPRequestHandler):
             if not _authenticate(form.get("username", ""), form.get("password", "")):
                 self._reply(HTTPStatus.UNAUTHORIZED, _login())
                 return
+            with guard:
+                attempts.pop(ip, None)
             try:
                 token, session = _new_session()
             except ValueError:
