@@ -781,9 +781,11 @@ def _send_storage(kind: str, *, plan_id: str = "", serial: str = "") -> dict:
 def _storage_page(csrf: str, notice: str = "") -> bytes:
     """Административное подтверждение сохраняет лишь однократный допуск."""
     token = html.escape(csrf, quote=True)
-    content = '<p><a href="/">← Задания</a></p><h2>SSD быстрых копий</h2>'
+    content = ('<p class="page-intro">Проверь диск и его состояние перед '
+               'любой подготовкой. Эта операция не нужна для обычного '
+               'просмотра резервных копий.</p>')
     if notice:
-        content += '<p>' + html.escape(notice) + '</p>'
+        content += '<div class="notice" role="status">' + html.escape(notice) + '</div>'
     try:
         record = _send_storage("storage-plan").get("storage", {})
     except (ValueError, OSError, TimeoutError):
@@ -810,8 +812,9 @@ def _storage_page(csrf: str, notice: str = "") -> bytes:
     elif state == "needs-confirmation":
         content += (
             "<p>Подготовка диска ожидает отдельного подтверждения.</p>"
-            "<p><strong>ВНИМАНИЕ: создание GPT/ext4 уничтожит прежние данные "
-            "выбранного устройства. Перед операцией параметры будут проверены снова.</strong></p>"
+            '<div class="notice" data-tone="danger" role="alert"><strong>'
+            'ВНИМАНИЕ: создание GPT/ext4 уничтожит прежние данные выбранного устройства. '
+            'Перед операцией параметры будут проверены снова.</strong></div>'
             "<p>Модель: " + html.escape(str(record.get("model"))) + "</p>"
             "<p>Путь: " + html.escape(str(record.get("devpath"))) + "</p>"
             "<p>Объём (байт): " + html.escape(str(record.get("size_bytes"))) + "</p>"
@@ -823,7 +826,7 @@ def _storage_page(csrf: str, notice: str = "") -> bytes:
             + html.escape(str(record.get("plan_id")), quote=True) + '">'
             '<input type="hidden" name="serial" value="'
             + html.escape(str(record.get("serial")), quote=True) + '">'
-            '<button type="submit">Да, подготовить SSD</button>'
+            '<button class="danger" type="submit">Да, подготовить SSD</button>'
             '</form>'
             '<p>После подтверждения система сама выполнит подготовку. '
             'Можно закрыть браузер и позднее проверить результат здесь.</p>'
