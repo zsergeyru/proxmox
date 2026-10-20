@@ -1130,9 +1130,6 @@ class RecoveryStateHarness(BootstrapHost):
         self.host_state_opentofu_file = (
             self.host_state_dir / "opentofu" / "state" / "proxmox.tfstate"
         )
-        self.host_state_semaphore_db = (
-            self.host_state_dir / "semaphore" / "semaphore.sqlite"
-        )
         self.messages: list[str] = []
 
     def ok(self, message: str) -> None:
@@ -1151,7 +1148,6 @@ def _prepare_complete_recovery_state(host: RecoveryStateHarness) -> None:
         host.host_recovery_dir,
         host.host_state_openbao_raft_dir,
         host.host_state_opentofu_file.parent,
-        host.host_state_semaphore_db.parent,
     ):
         directory.mkdir(parents=True, exist_ok=True)
     for path in (
@@ -1161,7 +1157,6 @@ def _prepare_complete_recovery_state(host: RecoveryStateHarness) -> None:
         host.host_openbao_kv_access,
         host.host_state_openbao_raft_dir / "raft.db",
         host.host_state_opentofu_file,
-        host.host_state_semaphore_db,
     ):
         path.write_text("test\n", encoding="utf-8")
 
