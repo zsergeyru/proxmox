@@ -253,6 +253,47 @@
     enabled: true
     daemon_reload: "{{ openbao_startup_unit.changed }}"
 
+- name: Проверить наличие образа infra-runtime с нужным отпечатком
+  ansible.builtin.command:
+    argv:
+      - docker
+      - image
+      - inspect
+      - "{{ provision.docker.services.runtime.image }}"
+  register: infra_runtime_image_inspect
+  changed_when: false
+  failed_when: false
+
+- name: Проверить наличие образа infra-web с нужным отпечатком
+  ansible.builtin.command:
+    argv:
+      - docker
+      - image
+      - inspect
+      - "{{ provision.docker.services.web.image }}"
+  register: infra_web_image_inspect
+  changed_when: false
+  failed_when: false
+
+- name: Выбрать только отсутствующие или устаревшие Docker-образы
+  ansible.builtin.set_fact:
+    infra_build_runtime: >-
+      {{ infra_runtime_image_inspect.rc != 0 or
+         ('INFRA_RUNTIME_BUILD_REVISION=' ~ infra_runtime_content_revision)
+         not in (((infra_runtime_image_inspect.stdout | default('[]', true)
+           | from_json | first | default({})).get('Config', {})).get('Env', [])) }}
+    infra_build_web: >-
+      {{ infra_web_image_inspect.rc != 0 or
+         ('INFRA_WEB_BUILD_REVISION=' ~ infra_web_content_revision)
+         not in (((infra_web_image_inspect.stdout | default('[]', true)
+           | from_json | first | default({})).get('Config', {})).get('Env', [])) }}
+
+- name: Показать план выборочной сборки
+  ansible.builtin.debug:
+    msg: >-
+      Docker: infra-runtime {{ 'пересборка' if infra_build_runtime else 'без изменений' }};
+      infra-web {{ 'пересборка' if infra_build_web else 'без изменений' }}.
+
 - name: Проверить доступ к источникам сборки управляющей среды
   ansible.builtin.command:
     argv:
@@ -267,13 +308,16 @@
   register: infra_runtime_download_check
   changed_when: false
   failed_when: false
+  when: infra_build_runtime
 
 - name: Сообщить причину недоступности источников сборки
   ansible.builtin.fail:
     msg: "{{ infra_runtime_download_check.stdout | default('Проверка сетевых источников не запустилась: проверьте Python и curl в госте.', true) | trim }}"
-  when: infra_runtime_download_check.rc != 0
+  when:
+    - infra_build_runtime
+    - infra_runtime_download_check.rc != 0
 
-- name: Собрать управляющую среду
+- name: Собрать infra-runtime только при изменении исходников
   ansible.builtin.command:
     argv:
       - docker
@@ -285,12 +329,51 @@
       - build
       - --pull
       - runtime
-      - web
+  register: infra_runtime_build_result
   changed_when: true
+  when: infra_build_runtime
+
+- name: Собрать infra-web только при изменении исходников
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - --env-file
+      - "{{ provision.paths.compose }}/.versions.env"
+      - -f
+      - "{{ provision.paths.compose }}/docker-compose.yml"
+      - build
+      - web
+  register: infra_web_build_result
+  changed_when: true
+  when: infra_build_web
+
+- name: Сообщить затраты на пересборку Docker
+  ansible.builtin.debug:
+    msg: >-
+      infra-runtime: {{ infra_runtime_build_result.delta | default('сборка не нужна') }};
+      infra-web: {{ infra_web_build_result.delta | default('сборка не нужна') }}.
 
 
 
-- name: Перезапустить OpenBao после изменения конфигурации
+# Смена SHA проекта или web не пересоздаёт OpenBao.
+# Compose отслеживает изменение образа и отпечатка своей конфигурации.
+- name: Подтвердить запуск OpenBao без принудительного пересоздания
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - --env-file
+      - "{{ provision.paths.compose }}/.versions.env"
+      - -f
+      - "{{ provision.paths.compose }}/docker-compose.yml"
+      - up
+      - -d
+      - openbao
+  changed_when: false
+  when: (openbao_tls_files.results | selectattr('changed') | list | length > 0) == 0
+
+- name: Пересоздать OpenBao при изменении его TLS-материалов
   ansible.builtin.command:
     argv:
       - docker
@@ -304,30 +387,7 @@
       - --force-recreate
       - openbao
   changed_when: true
-  when: >-
-    infra_compose_files.changed
-    or infra_compose_versions.changed
-    or (openbao_tls_files.results | selectattr('changed') | list | length > 0)
-
-- name: Подтвердить запуск OpenBao без повторного создания
-  ansible.builtin.command:
-    argv:
-      - docker
-      - compose
-      - --env-file
-      - "{{ provision.paths.compose }}/.versions.env"
-      - -f
-      - "{{ provision.paths.compose }}/docker-compose.yml"
-      - up
-      - -d
-      - openbao
-  changed_when: true
-  when: >-
-    not (
-      infra_compose_files.changed
-      or infra_compose_versions.changed
-      or (openbao_tls_files.results | selectattr('changed') | list | length > 0)
-    )
+  when: (openbao_tls_files.results | selectattr('changed') | list | length > 0) > 0
 
 # Смена образа OpenBao может запечатать существующий Raft. Если позднее
 # Ansible упадёт (например, на backup.yaml), SSH CA должен оставаться готов.
