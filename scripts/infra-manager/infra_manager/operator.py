@@ -245,7 +245,7 @@ def _prepare_runtime_snapshot(
                 # Новая точка входа находится в обновлённом Git, а не в
                 # /usr/local/lib/infra-manager текущего процесса. Запуск
                 # отдельного Python исключает повторное использование sys.modules.
-                entrypoint = repo_root / "scripts/infra-manager/jobs/storage-preflight.py"
+                entrypoint = PATHS.repo_root / "scripts/infra-manager/jobs/storage-preflight.py"
                 if entrypoint.is_symlink() or not entrypoint.is_file():
                     raise InfraManagerError(
                         "В обновлённой Git-версии нет доверенной проверки SSD/NAS"
