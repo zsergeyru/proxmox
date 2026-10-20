@@ -141,6 +141,80 @@ def _operation_history() -> list[dict]:
     return response["operations"]
 
 
+
+def _operation_detail(operation_id: str) -> dict:
+    """Запросить диагностику ровно одного UUID через закрытый системный посредник."""
+    if not REQ_ID.fullmatch(operation_id):
+        raise ValueError("Некорректный идентификатор задания")
+    payload = json.dumps({
+        "kind": "operation-detail", "vmid": 0,
+        "request_id": secrets.token_hex(16), "operation_id": operation_id,
+    }).encode() + b"\\n"
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
+        connection.settimeout(10)
+        connection.connect(SOCKET)
+        connection.sendall(payload)
+        with connection.makefile("rb") as stream:
+            raw = stream.readline(65537)
+    if len(raw) > 65536 or not raw.endswith(b"\\n"):
+        raise ValueError("Посредник не вернул ограниченную диагностику")
+    result = json.loads(raw)
+    if (not isinstance(result, dict)
+            or result.get("accepted") is not True
+            or not isinstance(result.get("operation"), dict)
+            or result["operation"].get("id") != operation_id
+            or not isinstance(result.get("events"), list)
+            or len(result["events"]) > 20
+            or not isinstance(result.get("logs"), list)
+            or len(result["logs"]) > 50):
+        raise ValueError("Некорректный ответ диагностики")
+    return result
+
+
+def _operation_page(operation_id: str) -> bytes:
+    """Показать текущий снимок и оставить обновление отдельному HTTPS-запросу."""
+    try:
+        result = _operation_detail(operation_id)
+    except (OSError, ValueError, TimeoutError):
+        result = {"operation": {"phase": "недоступно"}, "events": [], "logs": [],
+                  "diagnostic": "Системный посредник недоступен. Повторяем проверку автоматически."}
+    record = result["operation"]
+    events = result["events"]
+    def clean(value: object) -> str:
+        return html.escape(str(value) if value is not None else "—")
+    phases = "".join(
+        "<li>" + clean(event.get("at", "")) + " — "
+        + clean(PHASES.get(event.get("phase"), "Неизвестно"))
+        + "</li>" for event in events if isinstance(event, dict)
+    ) or "<li>Этапы ещё не записаны</li>"
+    logs = "\\n".join(str(item) for item in result["logs"] if isinstance(item, str))
+    body = (
+        '<p><a href="/">← Ко всем заданиям</a></p>'
+        '<h2>Диагностика задания</h2>'
+        '<p>Идентификатор: <code>' + operation_id + '</code></p>'
+        '<section id="operation-view" data-operation-id="' + operation_id + '">'
+        '<p>Операция: <strong id="op-kind">' + clean(record.get("kind")) + '</strong>'
+        ' · Гость: <strong id="op-target">' + clean(record.get("target")) + '</strong></p>'
+        '<p>Состояние: <strong id="op-phase">'
+        + clean(PHASES.get(record.get("phase"), record.get("phase"))) + '</strong></p>'
+        '<p>Начало: <span id="op-start">' + clean(record.get("started_at") or record.get("created_at")) + '</span>'
+        ' · Завершение: <span id="op-finish">' + clean(record.get("finished_at")) + '</span>'
+        ' · Код: <span id="op-exit">' + clean(record.get("exit_code")) + '</span></p>'
+        '<p id="op-diagnostic">' + clean(result.get("diagnostic", "")) + '</p>'
+        '<h3>Этапы выполнения</h3>'
+        '<p>Продолжительность каждого этапа обновляется при поступлении новых событий.</p>'
+        '<ol id="op-timeline">' + phases + '</ol>'
+        '<h3>Журнал задания (без секретов)</h3>'
+        '<p>Доступны только безопасные служебные сообщения. Полный журнал остаётся внутри 910.</p>'
+        '<pre id="op-log" class="diagnostic-log">' + html.escape(logs) + '</pre>'
+        '<p id="op-refresh">Обновление каждые 4 секунды.</p>'
+        '</section>'
+        '<script src="/diagnostics.js" defer></script>'
+    )
+    return _layout(body)
+
+
+
 def _send_action(kind: str, vmid: int, request_id: str) -> dict:
     if kind not in {"status", "sync", "repair", "deploy"} or (
         not isinstance(vmid, int) or not 1 <= vmid <= 999999
@@ -272,11 +346,15 @@ a{color:#9bded8}code{color:#96d1f1}
 font-size:.85rem;color:#bdcbd9}.versions dl{display:grid;grid-template-columns:
 minmax(180px,1fr) 1fr;gap:.4rem .7rem}.versions dt{color:#a9bcce}
 .versions dd{margin:0}.versions p{color:#a9bcce}
+.diagnostic-log{background:#061222;padding:1rem;border-radius:8px;
+overflow:auto;max-height:55vh;white-space:pre-wrap;overflow-wrap:anywhere;
+min-height:8rem;border:1px solid #345}
+#op-diagnostic{color:#e7cf9e}
 </style></head><body><h1>Управление инфраструктурой</h1>
 <main>""" + inner + "</main></body></html>").encode()
 
 
-def _dashboard(csrf: str, notice: str = "") -> bytes:
+def _dashboard(csrf: str, notice: str = "", focus_operation: str = "") -> bytes:
     try:
         records = _operation_history()
     except (OSError, ValueError, TimeoutError):
@@ -293,13 +371,18 @@ def _dashboard(csrf: str, notice: str = "") -> bytes:
                   str(record.get("kind", "")),
                   PHASES.get(record.get("phase"), "Неизвестно"),
                   str(record.get("created_at", "")))
-        rows.append("<tr>" + "".join(
-            "<td>" + html.escape(value) + "</td>" for value in values
-        ) + "</tr>")
+        cells = ["<td><a href=\"/operations?id=" + operation_id + "\">"
+                 + html.escape(values[0]) + "</a></td>"]
+        cells.extend("<td>" + html.escape(value) + "</td>" for value in values[1:])
+        rows.append("<tr>" + "".join(cells) + "</tr>")
     table = "".join(rows) or '<tr><td colspan="5">Заданий пока нет</td></tr>'
     token = html.escape(csrf, quote=True)
     form = (
-        f'<p>{html.escape(notice)}</p><form method="POST" action="/action">'
+        f'<p>{html.escape(notice)}</p>'
+        + ('<p><a href="/operations?id=' + focus_operation
+           + '">Открыть журнал принятого задания</a></p>'
+           if REQ_ID.fullmatch(focus_operation) else '')
+        + '<form method="POST" action="/action">'
         f'<input type="hidden" name="csrf" value="{token}">'
         '<label>Гость (VMID) <input name="vmid" type="number" min="1" required></label>'
         '<label>Действие <select name="kind">'
@@ -401,7 +484,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Strict-Transport-Security", "max-age=3600")
         self.send_header(
             "Content-Security-Policy",
-            "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'",
+            "default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; connect-src 'self'; form-action 'self'; base-uri 'none'",
         )
         if cookie is not None:
             self.send_header("Set-Cookie", cookie)
@@ -449,6 +532,31 @@ class Handler(BaseHTTPRequestHandler):
                 self._reply(HTTPStatus.UNAUTHORIZED, b"login required\n")
                 return
             self._reply(HTTPStatus.OK, _storage_page(session[1]["csrf"]))
+        elif path == "/diagnostics.js":
+            if not session:
+                self._reply(HTTPStatus.UNAUTHORIZED, b"login required\\n")
+                return
+            script = (__import__("pathlib").Path(__file__).with_name("diagnostics.js")).read_bytes()
+            self._reply(HTTPStatus.OK, script, content_type="text/javascript; charset=utf-8")
+        elif path in {"/operations", "/api/operation"}:
+            if not session:
+                self._reply(HTTPStatus.UNAUTHORIZED, b"login required\\n")
+                return
+            values = parse_qs(urlsplit(self.path).query)
+            operation_id = values.get("id", [""])[0]
+            if set(values) != {"id"} or len(values["id"]) != 1 or not REQ_ID.fullmatch(operation_id):
+                self._reply(HTTPStatus.BAD_REQUEST, b"invalid operation id\\n")
+                return
+            if path == "/operations":
+                self._reply(HTTPStatus.OK, _operation_page(operation_id))
+                return
+            try:
+                detail = _operation_detail(operation_id)
+            except (OSError, ValueError, TimeoutError):
+                self._reply(HTTPStatus.SERVICE_UNAVAILABLE, b"diagnostics unavailable\\n")
+                return
+            content = json.dumps(detail, ensure_ascii=False).encode()
+            self._reply(HTTPStatus.OK, content, content_type="application/json; charset=utf-8")
         elif path == "/api/operations":
             if not session:
                 self._reply(HTTPStatus.UNAUTHORIZED, b"login required\n")
@@ -545,7 +653,8 @@ class Handler(BaseHTTPRequestHandler):
             return
         self._reply(
             HTTPStatus.ACCEPTED,
-            _dashboard(session["csrf"], "Задание принято: " + result["id"]),
+            _dashboard(session["csrf"], "Задание принято: " + result["id"],
+                       focus_operation=result["id"]),
         )
 
 
