@@ -231,6 +231,25 @@
 
 
 
+- name: Собрать актуальный образ infra-web из файлов обновлённого Git
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - --env-file
+      - "{{ provision.paths.compose }}/.versions.env"
+      - -f
+      - "{{ provision.paths.compose }}/docker-compose.yml"
+      - build
+      - --pull
+      - web
+  # Статический тег infra-web:v1 не обновляется через docker compose up:
+  # только явная сборка переносит изменённый admin.py в образ.
+  # На этой фазе работающий web ещё не перезапускается: переключение
+  # выполняет независимая systemd-активация по завершении deploy.
+  changed_when: true
+
+
 - name: Перезапустить OpenBao после изменения конфигурации
   ansible.builtin.command:
     argv:

@@ -179,6 +179,23 @@ docker compose \
     --env-file "$COMPOSE_DIR/.versions.env" \
     -f "$COMPOSE_FILE" up -d --remove-orphans
 
+# Compose может оставить работающий web со старым image ID при неизменном
+# теге infra-web:v1. Проверяем фактический ID собранного Ansible образа,
+# а не только HTTPS-ответ старой панели.
+expected_web_image="$(docker image inspect -f '{{.Id}}' infra-web:v1)"
+running_web_image="$(docker inspect -f '{{.Image}}' infra-web)"
+if [[ -z "$expected_web_image" || "$running_web_image" != "$expected_web_image" ]]; then
+    printf '[ИНФО] infra-web использует старый образ; переключение на собранную версию\n'
+    docker compose \
+        --env-file "$COMPOSE_DIR/.versions.env" \
+        -f "$COMPOSE_FILE" up -d --no-build --no-deps --force-recreate web
+fi
+if [[ "$(docker inspect -f '{{.Image}}' infra-web)" != "$expected_web_image" ]]; then
+    printf 'ОШИБКА: Новый образ infra-web не активирован\n' >&2
+    exit 1
+fi
+printf '[ОК] Запущенный infra-web соответствует собранному Docker-образу\n'
+
 /usr/local/sbin/infra-manager-openbao-startup-unseal "$PVE_NODE"
 
 if grep -qx 'RUNTIME_MODE=standalone' "$COMPOSE_DIR/.versions.env"; then

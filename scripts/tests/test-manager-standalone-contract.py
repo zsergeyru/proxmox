@@ -104,6 +104,37 @@ def verify() -> None:
     assert "provision.paths.semaphore_persistent_data" not in runtime_tasks
     assert "SEMAPHORE_VERSION" not in runtime_tasks
     assert "semaphore-project" not in runtime_tasks
+    # Раньше Ansible копировал admin.py, но собирал только runtime:
+    # статический тег infra-web:v1 продолжал ссылаться на старый образ.
+    runtime_task_list = yaml.safe_load(runtime_tasks)
+    assert isinstance(runtime_task_list, list)
+    def named_task(label: str) -> dict:
+        found = [task for task in runtime_task_list if task.get("name") == label]
+        assert len(found) == 1, label
+        return found[0]
+    web_build = named_task("Собрать актуальный образ infra-web из файлов обновлённого Git")
+    argv = web_build["ansible.builtin.command"]["argv"]
+    assert argv[-3:] == ["build", "--pull", "web"], argv
+    assert "docker-compose.yml" in " ".join(argv)
+    assert "when" not in web_build, "Образ web нужен при каждом self-deploy"
+    assert runtime_task_list.index(web_build) > runtime_task_list.index(
+        named_task("Собрать управляющую среду")
+    )
+    assert runtime_task_list.index(web_build) < runtime_task_list.index(
+        named_task("Перезапустить OpenBao после изменения конфигурации")
+    )
+    activation_script = (
+        ROOT / "scripts/infra-manager/commands/activate-runtime.sh"
+    ).read_text(encoding="utf-8")
+    assert 'docker image inspect -f' in activation_script
+    assert 'docker inspect -f' in activation_script
+    assert '--no-build --no-deps --force-recreate web' in activation_script
+    assert "Новый образ infra-web не активирован" in activation_script
+    status_script = (
+        ROOT / "scripts/infra-manager/infra_manager/status.py"
+    ).read_text(encoding="utf-8")
+    assert '"infra-web:v1"' in status_script
+    assert "infra-web запущен не из актуального" in status_script
     verify_tasks = (ANSIBLE / "verify.yml").read_text(encoding="utf-8")
     assert "docker, exec, infra-runtime, ansible, --version" in verify_tasks
     assert "semaphore-project" not in verify_tasks

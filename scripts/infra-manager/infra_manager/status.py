@@ -438,6 +438,24 @@ def _check_infra_web() -> None:
         if result.returncode or result.stdout.strip() != "true":
             raise InfraManagerError("Административная панель infra-web не запущена")
 
+    # Доступность /health не подтверждает обновление кода: прежний web
+    # продолжал отвечать 200, когда Ansible не пересобирал infra-web:v1.
+    built = command_runner.run(
+        ["docker", "image", "inspect", "-f", "{{.Id}}", "infra-web:v1"],
+        capture=True, check=False,
+    )
+    active = command_runner.run(
+        ["docker", "inspect", "-f", "{{.Image}}", "infra-web"],
+        capture=True, check=False,
+    )
+    if (built.returncode or active.returncode
+            or not built.stdout.strip()
+            or built.stdout.strip() != active.stdout.strip()):
+        raise InfraManagerError(
+            "infra-web запущен не из актуального локального Docker-образа; "
+            "проверьте активацию deploy 910"
+        )
+
     gateway = command_runner.run(
         ["systemctl", "is-active", "--quiet",
          "infra-manager-portal-gateway.service"],
