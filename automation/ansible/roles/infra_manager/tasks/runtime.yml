@@ -285,9 +285,12 @@
   changed_when: true
   when: not (infra_self_update | default(false) | bool)
 
+# lookup('file') выполняется на Ansible-контроллере (в infra-runtime),
+# а provision.paths.bootstrap_repository относится к целевому LXC.
+# Читать нужно из неизменяемого снимка проекта, с которым запущен playbook.
 - name: Прочитать единое описание резервирования
   ansible.builtin.set_fact:
-    infra_backup_policy: "{{ lookup('file', provision.paths.bootstrap_repository ~ '/infrastructure/hosts/pve/backup.yaml') | from_yaml }}"
+    infra_backup_policy: "{{ lookup('file', project_root ~ '/infrastructure/hosts/pve/backup.yaml') | from_yaml }}"
 
 - name: Проверить расписание резервирования из backup.yaml
   ansible.builtin.assert:
