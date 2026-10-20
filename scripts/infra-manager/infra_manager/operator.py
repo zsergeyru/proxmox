@@ -337,11 +337,17 @@ def operator_guest_task(
     activation_handed_off = False
     store = None
     operation_id = None
+    prepared_snapshot = None
     if operation == "deploy":
         identity = guest_identity(PATHS.repo_root, vmid)
         if identity.role == SETTINGS.infra_manager_role:
             from .operation_store import OperationStore
 
+            # История обязана указывать фактически развернутую ревизию.
+            # Подготовка снимка обновляет Git под общей блокировкой,
+            # поэтому только после неё резервируем UUID операции.
+            require_runtime_activation_idle()
+            prepared_snapshot = _prepare_runtime_snapshot(operation, vmid)
             store = OperationStore()
             record, _ = store.reserve(
                 "deploy", vmid, project_revision(PATHS.repo_root),
@@ -354,6 +360,7 @@ def operator_guest_task(
         task_options = {"show_secrets": show_secrets}
         if operation_id is not None:
             task_options["operation_id"] = operation_id
+            task_options["prepared_snapshot"] = prepared_snapshot
         result = _operator_guest_task(operation, vmid, **task_options)
         if store is not None and operation_id is not None:
             # Успешный выход Ansible означает передачу активации systemd,
@@ -439,11 +446,16 @@ def _operator_guest_task(
     *,
     show_secrets: bool,
     operation_id: str | None = None,
+    prepared_snapshot: str | None = None,
 ) -> int:
     """Выполнить штатную операцию напрямую внутри infra-runtime."""
 
     require_runtime_activation_idle()
-    snapshot = _prepare_runtime_snapshot(operation, vmid)
+    snapshot = (
+        prepared_snapshot
+        if prepared_snapshot is not None
+        else _prepare_runtime_snapshot(operation, vmid)
+    )
     console.info(f"Шаг: запуск {operation} для гостя {vmid} в infra-runtime")
     result = run(
         [
