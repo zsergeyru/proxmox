@@ -67,12 +67,11 @@ grep -Fq 'name: ssh.socket' "$LINUX_BASE_SSH_TRUST" \
     || die "Debian 13 должен отключать socket-активацию SSH"
 grep -Fq 'name: ssh.service' "$LINUX_BASE_SSH_TRUST" \
     || die "Debian 13 должен использовать обычную службу SSH"
-grep -Fq 'not (infra_self_update | default(false) | bool)' "$ROOT/automation/ansible/roles/infra_manager/tasks/verify.yml" \
-    || die "Самообновление управляющего гостя не должно менять Semaphore внутри текущего задания"
-grep -Fq "provision.docker.services.runtime.mode | default('semaphore') == 'semaphore'" "$ROOT/automation/ansible/roles/infra_manager/tasks/verify.yml" \
-    || die "Независимый режим не должен требовать Semaphore"
-grep -Fq 'semaphore-project' "$ACTIVATE_RUNTIME" \
-    || die "Самообновление 910 должно откладывать синхронизацию Semaphore до активации новой среды"
+grep -Fq 'docker, exec, infra-runtime, ansible, --version' "$ROOT/automation/ansible/roles/infra_manager/tasks/verify.yml" \
+    || die "После установки требуется проверить Ansible независимого исполнителя"
+if grep -Fq 'semaphore-project' "$ACTIVATE_RUNTIME"; then
+    die "Самообновление не должно обращаться к устаревшему Semaphore"
+fi
 grep -Fq 'infra-manager-status --full --quiet' "$ACTIVATE_RUNTIME" \
     || die "Самообновление 910 должно выполнять полную status-проверку после активации новой среды"
 grep -Fq 'Назначить активацию новой управляющей среды после настройки infra-manager' "$ANSIBLE_PLAYBOOK" \
