@@ -333,9 +333,10 @@ def _guest_card(guest: dict) -> str:
     address = str(guest.get("address") or "Адрес не указан")
     kind = "VM" if guest.get("type") == "vm" else "LXC" if guest.get("type") == "lxc" else "Тип неизвестен"
     state = guest.get("state")
+    group = "attention" if state in {"stopped", "paused", "absent", "conflict"} else "other"
     return (
         '<a class="card-link guest-card" data-filter-item data-state="' + _text(state) +
-        '" data-search="' + html.escape(f"{vmid} {name} {role} {address} {kind}", quote=True) +
+        '" data-group="' + group + '" data-search="' + html.escape(f"{vmid} {name} {role} {address} {kind}", quote=True) +
         '" href="/guests?vmid=' + str(vmid) + '">'
         '<div class="guest-card-top"><span class="vmid">#' + str(vmid) + " · " + kind +
         '</span>' + _chip(state, category="guest") + '</div>'
@@ -388,8 +389,7 @@ def _guests_page(csrf: str = "") -> bytes:
         '<select aria-label="Фильтр состояния" data-state-for="guests">'
         '<option value="all">Все гости</option>'
         '<option value="running">Работают</option>'
-        '<option value="stopped">Остановлены</option>'
-        '<option value="conflict">Конфликт VMID</option>'
+        '<option value="attention">Требуют внимания</option>'
         '<option value="unavailable">Не проверены</option>'
         '</select><span class="muted" data-count-for="guests">'
         + str(len(visible)) + ' из ' + str(len(visible)) + '</span></div>'
@@ -1009,8 +1009,14 @@ def _dashboard(csrf: str, notice: str = "") -> bytes:
         phase = record.get("phase")
         label = OPERATION_NAMES.get(kind, "Операция")
         created = _time_html(record.get("created_at"))
+        group = (
+            "active" if phase in {"queued", "running", "activating", "verifying"}
+            else "attention" if phase in {"failed", "needs-recovery"}
+            else "other"
+        )
         rows.append(
-            '<tr data-filter-item data-state="' + _text(phase) + '"'
+            '<tr data-filter-item data-state="' + _text(phase) +
+            '" data-group="' + group + '"'
             ' data-search="' + _text(f"{identifier} {vmid} {label} {PHASES.get(phase, '')}") + '">'
             '<td><a class="cell-title" href="/operations?id=' + identifier +
             '">' + _text(label) + '</a><span class="cell-sub code">' +
@@ -1023,10 +1029,9 @@ def _dashboard(csrf: str, notice: str = "") -> bytes:
         'placeholder="Найти по VMID или действию…" data-search-for="operations">'
         '<select aria-label="Статус заданий" data-state-for="operations">'
         '<option value="all">Все состояния</option>'
-        '<option value="running">Выполняется</option>'
+        '<option value="active">Выполняются</option>'
         '<option value="completed">Успешные</option>'
-        '<option value="failed">Ошибки</option>'
-        '<option value="needs-recovery">Требуют проверки</option>'
+        '<option value="attention">Требуют внимания</option>'
         '</select><span class="muted" data-count-for="operations">'
         + str(len(rows)) + ' из ' + str(len(rows)) + '</span></div>'
         '<div class="table-wrap"><table>'
