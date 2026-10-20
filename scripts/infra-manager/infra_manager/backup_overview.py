@@ -177,6 +177,29 @@ def snapshot() -> dict:
     else:
         ssd_error = False
 
+    # Только read-only проверка Proxmox. PVE active не доказывает, что
+    # сейчас смонтирован именно подтверждённый UUID/экспорт restic.
+    pve_storages: dict[str, dict] = {}
+    pve_api_available = False
+    try:
+        from .operator import _pve_node
+        from .pve import PveClient
+        node = _pve_node()
+        response = PveClient().data(f"/nodes/{node}/storage", timeout=8)
+        if not isinstance(response, list):
+            raise InfraManagerError("PVE вернул некорректные storage")
+        for item in response:
+            if not isinstance(item, dict):
+                continue
+            identity = item.get("storage")
+            if identity in DESTINATIONS:
+                if identity in pve_storages:
+                    raise InfraManagerError("PVE вернул дубликат хранилища")
+                pve_storages[identity] = item
+        pve_api_available = True
+    except (InfraManagerError, OSError, ValueError, TypeError):
+        pve_storages = {}
+
     targets: list[dict] = []
     for entry in declared:
         name = entry["id"]
@@ -188,10 +211,19 @@ def snapshot() -> dict:
             entry.get("uuid") or entry.get("source")
             or (name == "fast-ssd" and saved)
         )
+        observed = pve_storages.get(name)
+        pve_state = (
+            "not_checked" if not pve_api_available else
+            "not_registered" if observed is None else
+            "reported_active" if observed.get("active") in (1, True) else
+            "reported_inactive" if observed.get("active") in (0, False) else
+            "unknown"
+        )
         targets.append({
             "id": name, "mountpoint": mount, "filesystem": fs,
             "configured": configured,
-            # Только декларация/подтверждённое состояние; mount надо проверять отдельно.
+            "pve_state": pve_state,
+            # PVE active не равнозначно проверенному физическому mount/UUID.
             "mount_check": "not_checked",
         })
 
@@ -235,6 +267,7 @@ def snapshot() -> dict:
         "storage": {"host": "pve", "volumes": volumes},
         "nas": {"host": "nas", "volumes": nas_volumes, "observed": False},
         "destinations": targets,
+        "pve_api_available": pve_api_available,
         "ssd": {
             "state": "unknown" if ssd_error else
                 "running" if job and job.get("state") in {"queued", "running"} else
