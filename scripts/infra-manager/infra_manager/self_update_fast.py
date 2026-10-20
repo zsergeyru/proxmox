@@ -251,6 +251,9 @@ def apply(selected: Plan, verify: Callable[[], bool], *,
             if python_changed:
                 _command(["systemctl", "restart", "infra-manager-portal-gateway.service"],
                          "Перезапуск системного посредника")
+                _command(["systemctl", "is-active", "--quiet",
+                          "infra-manager-portal-gateway.service"],
+                         "Проверка системного посредника")
             if web_changed:
                 _compose("build", "web", build=True)
                 _compose("up", "-d", "--no-deps", "--no-build", "web")
