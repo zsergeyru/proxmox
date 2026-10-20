@@ -118,7 +118,12 @@ def _refresh_project_checkout() -> None:
             raise InfraManagerError(f"Не найден {label}: {path}")
 
     branch = SETTINGS.project_branch().strip()
-    if not branch or any(character.isspace() for character in branch):
+    if (
+        not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,127}", branch)
+        or ".." in branch
+        or "//" in branch
+        or branch.endswith(("/", "."))
+    ):
         raise InfraManagerError("Некорректная Git-ветка проекта")
 
     ssh_command = shlex.join(
