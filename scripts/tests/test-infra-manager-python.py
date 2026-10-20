@@ -381,6 +381,63 @@ def check_runtime_activation_guard() -> None:
             marker.unlink(missing_ok=True)
 
 
+def check_first_runtime_transition_without_semaphore() -> None:
+    """Первый deploy использует общий state/locks, а не отсутствующий mount operations."""
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        host_operations = root / "host-operations"
+        runtime_operations = root / "runtime-operations"
+        host_locks = root / "host-locks"
+        runtime_locks = root / "runtime-locks"
+        runtime_locks.mkdir()
+        host_locks.mkdir()
+        marker_name = "runtime-activation-pending"
+
+        with (
+            patch.object(common, "HOST_OPERATIONS_STATE_DIR", host_operations),
+            patch.object(common, "RUNTIME_OPERATIONS_STATE_DIR", runtime_operations),
+            patch.object(common, "HOST_TRANSITION_LOCK_DIR", host_locks),
+            patch.object(common, "RUNTIME_TRANSITION_LOCK_DIR", runtime_locks),
+            patch.object(common, "RUNTIME_ACTIVATION_MARKER", runtime_locks / marker_name),
+            patch.object(Path, "is_mount", lambda self: self == runtime_locks),
+        ):
+            if common._default_runtime_activation_marker() != runtime_locks / marker_name:
+                fail("Старый runtime должен передавать активацию через существующий bind mount locks")
+            common.reserve_runtime_activation()
+            if not (runtime_locks / marker_name).is_file():
+                fail("Первый deploy не создал постоянную запись в общем state/locks")
+            common.cancel_runtime_activation()
+            if (runtime_locks / marker_name).exists():
+                fail("Отмена первого deploy не удалила переходный маркер")
+
+            host_operations.mkdir()
+            (host_locks / marker_name).write_text("runtime:42\n", encoding="utf-8")
+            try:
+                common.require_runtime_activation_idle()
+            except InfraManagerError:
+                pass
+            else:
+                fail("Новый host-оператор не заметил активацию в старом state/locks")
+
+        # Не допускается создание пустой директории в rootfs вместо общего mount.
+        with (
+            patch.object(common, "HOST_OPERATIONS_STATE_DIR", host_operations / "missing"),
+            patch.object(common, "RUNTIME_OPERATIONS_STATE_DIR", runtime_operations),
+            patch.object(common, "RUNTIME_TRANSITION_LOCK_DIR", runtime_locks),
+            patch.object(common, "RUNTIME_ACTIVATION_MARKER", runtime_operations / marker_name),
+            patch.object(Path, "is_mount", lambda self: False),
+        ):
+            try:
+                common.reserve_runtime_activation()
+            except InfraManagerError as exc:
+                if "общего подключения" not in str(exc):
+                    fail("Отсутствующее монтирование должно давать понятную причину отказа")
+            else:
+                fail("Запись маркера в rootfs запрещена")
+            if runtime_operations.exists():
+                fail("Отказ не должен создавать локальную замену bind mount")
+
+
 def check_path_overrides() -> None:
     old_config = os.environ.get("INFRA_MANAGER_CONFIG_DIR")
     old_data = os.environ.get("INFRA_MANAGER_DATA_DIR")
@@ -618,6 +675,7 @@ def main_test() -> None:
     check_safe_system_error_diagnostics()
     check_duration_output()
     check_runtime_activation_guard()
+    check_first_runtime_transition_without_semaphore()
     check_path_overrides()
     check_command_runner_contract()
     check_pve_helpers()
