@@ -7,6 +7,8 @@
 
 from __future__ import annotations
 
+import base64
+import fcntl
 import json
 import os
 import re
@@ -494,6 +496,78 @@ def configure_lxc(
             )
 
 
+def validate_host_reconcile(config: object) -> list[dict]:
+    """Проверить полномочия одноразовой сверки всех объявленных LVM-томов.
+
+    Нет пути для произвольного раздела/физического диска: только pve/data
+    и триплет name/size/mountpoint, уже выверенный в 910 по storage.yaml.
+    """
+    if not isinstance(config, dict) or set(config) != {"volume_group", "thin_pool", "volumes"}:
+        raise StorageError("Неверный состав плана сверки томов PVE")
+    if (config["volume_group"], config["thin_pool"]) != ("pve", "data"):
+        raise StorageError("Разрешён только подтверждённый пул pve/data")
+    volumes = config["volumes"]
+    if not isinstance(volumes, list) or not volumes:
+        raise StorageError("Нет объявленных общих томов для сверки")
+    names, points = set(), set()
+    for volume in volumes:
+        if not isinstance(volume, dict) or set(volume) != {"name", "size_gb", "mountpoint"}:
+            raise StorageError("Неверная запись общего тома")
+        name, size, point = (volume["name"], volume["size_gb"], volume["mountpoint"])
+        if not isinstance(name, str) or not re.fullmatch(r"[a-z][a-z0-9_]{1,63}", name):
+            raise StorageError("Недопустимое имя LVM-тома")
+        if type(size) is not int or not 1 <= size <= 10000:
+            raise StorageError("Недопустимый размер общего тома")
+        if not isinstance(point, str) or not re.fullmatch(r"/mnt/bindmounts/[a-z][a-z0-9-]+", point):
+            raise StorageError("Недопустимый путь общего тома")
+        if name in names or point in points:
+            raise StorageError("Общий том или путь указан дважды")
+        names.add(name)
+        points.add(point)
+    return volumes
+
+
+def check_thin_pool_headroom() -> None:
+    """Не создавать тонкие тома поверх переполненного физического пула."""
+    result = command(
+        "lvs", "--noheadings", "--units", "b", "--nosuffix",
+        "-o", "lv_size,data_percent,metadata_percent", "pve/data",
+    ).stdout.strip().split()
+    if len(result) != 3:
+        raise StorageError("Не удалось проверить физическую ёмкость pve/data")
+    try:
+        from decimal import Decimal
+        size, used, metadata = (Decimal(value.replace(",", ".")) for value in result)
+    except Exception as exc:
+        raise StorageError("Некорректные метрики LVM thin-pool") from exc
+    if (size <= 0 or not 0 <= used < 90 or not 0 <= metadata < 90
+            or size * (100 - used) / 100 < 10 * 1024**3):
+        raise StorageError(
+            "LVM thin-pool pve/data переполнен или имеет недостаточный "
+            "запас физического места; создание новых томов остановлено"
+        )
+
+
+def reconcile_host_volumes(config: object) -> None:
+    """Сверить общие LVM без установки файлов/пакетов на PVE."""
+    volumes = validate_host_reconcile(config)
+    # Защитить от гонки с guest deploy. Не блокируем backup-only операции.
+    lock_path = Path("/mnt/bindmounts/infra-manager/state/locks")
+    if not lock_path.is_dir() or lock_path.is_symlink():
+        raise StorageError("Отсутствует защищённый каталог блокировок PVE")
+    with (lock_path / "physical-storage.lock").open("a+") as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        # Проверять до изменения хотя бы одного тома; переполнение блокирует
+        # только создание отсутствующего LV, уже существующие переподключаем.
+        names = set(command("lvs", "--noheadings", "-o", "lv_name", "pve").stdout.split())
+        if any(volume["name"] not in names for volume in volumes):
+            check_thin_pool_headroom()
+        for volume in volumes:
+            device, uuid = ensure_volume("pve", "data", volume)
+            ensure_host_mount(device, uuid, volume)
+        print("[ОК] Общие LVM-тома PVE сверены; существующие данные сохранены")
+
+
 def main() -> int:
     """Подготовить постоянные тома по проверенному описанию гостя.
 
@@ -501,6 +575,15 @@ def main() -> int:
     переиспользует существующие тома; частично выполненная настройка
     требует повторной проверки состояния, а не удаления данных.
     """
+    if len(sys.argv) == 3 and sys.argv[1] == "--host-reconcile":
+        try:
+            payload = base64.b64decode(sys.argv[2], validate=True)
+            plan = json.loads(payload)
+        except (ValueError, TypeError) as exc:
+            raise StorageError("Невозможно прочитать план сверки PVE") from exc
+        reconcile_host_volumes(plan)
+        return 0
+
     vmid = int(sys.argv[1])
     config = json.load(sys.stdin)
     vg, pool, volumes, mounts = validate(vmid, config)
