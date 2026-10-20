@@ -44,7 +44,7 @@ def main():
         guest = SimpleNamespace(vmid=109, role="managed-guest")
         store = OperationStore(root / "operations", require_mount=False)
         with (
-            patch.object(admin_socket.PATHS, "repo_root", root),
+            patch.object(admin_socket, "PATHS", SimpleNamespace(repo_root=root)),
             patch.object(admin_socket, "operation_guests", return_value=[guest]),
             patch.object(admin_socket, "find_guest_by_role", return_value=SimpleNamespace(vmid=910)),
         ):
