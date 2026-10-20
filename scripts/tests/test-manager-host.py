@@ -92,7 +92,7 @@ def test_host_explicit_branch_propagation() -> None:
     for invalid in ("feature/other branch", "feature/../../main", "one//two", "-shell"):
         with patch.dict(host.os.environ, {"INFRA_PROJECT_BRANCH": invalid}):
             try:
-                host.selected_project_branch()
+                host.forwarded_git_ref()
             except host.OperatorError:
                 pass
             else:
