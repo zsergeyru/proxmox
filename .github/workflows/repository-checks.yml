@@ -176,6 +176,9 @@ jobs:
 
       - name: Verify confirmed Proxmox backup SSD preparation
         run: python scripts/tests/test-pve-backup-ssd.py
+
+      - name: Verify native Proxmox NAS backup connection
+        run: python scripts/tests/test-pve-backup-nas.py
       - name: Check Web Gateway configuration templates
         run: python scripts/tests/test-web-gateway.py
 
