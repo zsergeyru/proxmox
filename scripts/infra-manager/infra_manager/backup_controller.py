@@ -201,12 +201,40 @@ def _vm100_due(store: OperationStore, identity: str) -> bool:
 
 
 def execute(*, run: bool = False) -> None:
-    """Создать архив на каждом доступном проверенном носителе; не на PVE-root."""
-    _description, verified = policy()
+    """Резервировать на всех фактически доступных и проверенных носителях.
+
+    Ни одна ошибка SSD/NAS не направляет архив на корневую файловую систему
+    PVE и не отменяет попытку использовать второе независимое назначение.
+    """
+    _description, declared = policy()
     if shutil.which("restic") is None:
         raise InfraManagerError("restic не установлен внутри управляющего гостя")
     node = _source_node()
-    _remote(node, "check", json.dumps(verified).encode())
+    verified: dict[str, str] = {}
+    problems: dict[str, str] = {}
+    if "fast-ssd" in declared:
+        from .pve import PveClient
+        from .pve_backup_ssd import reconcile_backup_ssd
+        try:
+            uuid = reconcile_backup_ssd(PveClient(), node, interactive=False)
+            if uuid != declared["fast-ssd"]:
+                raise InfraManagerError("Идентичность SSD не совпадает с подтверждённой")
+        except InfraManagerError as exc:
+            problems["fast-ssd"] = str(exc)
+    for name, identity in declared.items():
+        if name in problems:
+            continue
+        try:
+            _remote(node, "check", json.dumps({name: identity}).encode())
+        except InfraManagerError as exc:
+            problems[name] = str(exc)
+        else:
+            verified[name] = identity
+    if not verified:
+        raise InfraManagerError(
+            "Нет доступного и проверенного места резервирования: "
+            + "; ".join(f"{name}: {reason}" for name, reason in problems.items())
+        )
     with tempfile.TemporaryDirectory(prefix="infra-backup-", dir="/run") as path:
         directory = Path(path)
         directory.chmod(0o700)
@@ -215,66 +243,95 @@ def execute(*, run: bool = False) -> None:
         ).stdout)
         if not isinstance(state, dict) or set(state) != set(verified):
             raise InfraManagerError("PVE не подтвердил состояние выбранных restic-хранилищ")
-        # Не создавать новый пароль, когда хотя бы один архив уже существует:
-        # такое действие сделало бы прежние архивы недоступными.
+        # Запрещено перегенерировать пароль поверх существующего архива.
         create_password = run and all(value == "missing" for value in state.values())
         key = _credentials(node, directory, verified, create=create_password)
-        # Сначала сверить все уже созданные копии и только потом
-        # разрешить инициализацию действительно пустых каталогов.
-        for destination in verified:
-            if state[destination] == "existing":
-                _restic(node, destination, key, ["snapshots", "--json"])
-            elif state[destination] != "missing":
-                raise InfraManagerError("На носителе неизвестное состояние хранилища")
+        for name in verified:
+            if state[name] == "existing":
+                _restic(node, name, key, ["snapshots", "--json"])
+            elif state[name] != "missing":
+                raise InfraManagerError("На носителе обнаружены неизвестные данные restic")
         if not run:
             if any(value != "existing" for value in state.values()):
-                raise InfraManagerError("Хранилища restic будут созданы только при запуске резервирования")
-            print("[ОК] Подключения, ключ и оба хранилища restic подтверждены")
+                raise InfraManagerError("Создание restic-хранилища возможно только при резервировании")
+            print("[ОК] Подтверждённые хранилища restic доступны")
+            if len(verified) != len(DESTINATIONS):
+                print("[ПРЕДУПРЕЖДЕНИЕ] Второе независимое назначение недоступно")
             return
-        for destination in DESTINATIONS:
-            if state[destination] == "missing":
-                _restic(node, destination, key, ["init"])
-            _restic(node, destination, key, ["snapshots", "--json"])
-        for destination in DESTINATIONS:
-            _stream_snapshot(node, verified, key, destination)
-            _restic(node, destination, key, ["check", "--read-data-subset=1%"])
+        for name in verified:
+            if state[name] == "missing":
+                try:
+                    _restic(node, name, key, ["init"])
+                except InfraManagerError as exc:
+                    problems[name] = str(exc)
+        core_saved: dict[str, str] = {}
+        for name, identity in verified.items():
+            if name in problems:
+                continue
+            try:
+                _restic(node, name, key, ["snapshots", "--json"])
+                _stream_snapshot(node, {name: identity}, key, name)
+                _restic(node, name, key, ["check", "--read-data-subset=1%"])
+                core_saved[name] = identity
+            except InfraManagerError as exc:
+                problems[name] = str(exc)
+        if not core_saved:
+            raise InfraManagerError(
+                "Все задания архивирования PVE завершились ошибками: "
+                + "; ".join(problems.values())
+            )
         store = OperationStore()
         created = datetime.now(UTC)
-        _atomic_json(
-            store.settings / "backup-last-core.json",
-            {
-                "schema_version": 1,
-                "created_utc": created.isoformat(),
-                "destinations": list(verified),
-                "verified": "restic-check-read-data-subset-1-percent",
-                "includes_vm100": False,
-                "restore_tested": False,
-            },
-        )
-        identity = hashlib.sha256(
-            json.dumps(verified, sort_keys=True).encode()
-        ).hexdigest()
-        if _vm100_due(store, identity):
-            for destination in DESTINATIONS:
-                _stream_snapshot(node, verified, key, destination, vm100=True)
-                _restic(node, destination, key, ["check", "--read-data-subset=1%"])
-            _atomic_json(store.settings / "backup-vm100.json", {
-                "date": datetime.now(UTC).date().isoformat(),
-                "destinations": list(DESTINATIONS),
-                "media_fingerprint": identity,
-                "verified": True,
-            })
-        _atomic_json(store.settings / "backup-last-full.json", {
+        _atomic_json(store.settings / "backup-last-core.json", {
             "schema_version": 1,
             "created_utc": created.isoformat(),
-            "destinations": list(DESTINATIONS),
-            "includes_vm100": True,
+            "destinations": list(core_saved),
+            "verified": "restic-check-read-data-subset-1-percent",
+            "includes_vm100": False,
             "restore_tested": False,
         })
-        if len(verified) < len(DESTINATIONS):
+        # Суточная копия VM 100 требуется при изменении состава носителей
+        # или старении последней успешной проверенной копии.
+        identity = hashlib.sha256(
+            json.dumps(core_saved, sort_keys=True).encode()
+        ).hexdigest()
+        vm_saved = dict(core_saved)
+        if _vm100_due(store, identity):
+            vm_saved = {}
+            for name, value in core_saved.items():
+                try:
+                    _stream_snapshot(node, {name: value}, key, name, vm100=True)
+                    _restic(node, name, key, ["check", "--read-data-subset=1%"])
+                    vm_saved[name] = value
+                except InfraManagerError as exc:
+                    problems[name] = str(exc)
+            if vm_saved:
+                verified_hash = hashlib.sha256(
+                    json.dumps(vm_saved, sort_keys=True).encode()
+                ).hexdigest()
+                _atomic_json(store.settings / "backup-vm100.json", {
+                    "date": datetime.now(UTC).date().isoformat(),
+                    "destinations": list(vm_saved),
+                    "media_fingerprint": verified_hash,
+                    "verified": True,
+                })
+        if vm_saved:
+            _atomic_json(store.settings / "backup-last-full.json", {
+                "schema_version": 1,
+                "created_utc": created.isoformat(),
+                "destinations": list(vm_saved),
+                "includes_vm100": True,
+                "restore_tested": False,
+            })
+        if len(vm_saved) < len(DESTINATIONS):
             print("[ПРЕДУПРЕЖДЕНИЕ] Вторая независимая копия отсутствует")
-        print("[ОК] Состояние PVE/управляющего гостя и актуальный снимок VM 100 "
-              "сохранены на проверенных носителях; восстановление не испытано")
+        if problems:
+            raise InfraManagerError(
+                "Некоторые назначения резервирования недоступны: "
+                + "; ".join(f"{name}: {reason}" for name, reason in problems.items())
+            )
+        print("[ОК] Архивы PVE/910 и актуальная копия VM 100 "
+              "сохранены на подтверждённых носителях; восстановление не испытано")
 
 
 def main(argv: list[str] | None = None) -> int:
