@@ -10,11 +10,7 @@ set -Eeuo pipefail
 COMPOSE_DIR="/opt/infra-manager/compose"
 LOG_DIR="/var/log/infra-manager"
 LOG_FILE="$LOG_DIR/runtime-activation.log"
-ACTIVATION_MARKER="/mnt/persistent-state/semaphore/.infra-manager-runtime-activation-pending"
-if [[ -f "$COMPOSE_DIR/.versions.env" ]] \
-    && grep -qx 'RUNTIME_MODE=standalone' "$COMPOSE_DIR/.versions.env"; then
-    ACTIVATION_MARKER="/mnt/persistent-state/operations/activation/runtime-activation-pending"
-fi
+ACTIVATION_MARKER="/mnt/persistent-state/operations/activation/runtime-activation-pending"
 BRANCH="${INFRA_PROJECT_BRANCH:-main}"
 PVE_NODE="${INFRA_PVE_NODE:-}"
 OPERATION_ID=""
@@ -142,9 +138,11 @@ if [[ -z "$PVE_NODE" ]]; then
 fi
 
 COMPOSE_FILE="$COMPOSE_DIR/docker-compose.yml"
-if grep -qx 'RUNTIME_MODE=standalone' "$COMPOSE_DIR/.versions.env"; then
-    COMPOSE_FILE="$COMPOSE_DIR/docker-compose-standalone.yml"
+if ! grep -qx 'RUNTIME_MODE=standalone' "$COMPOSE_DIR/.versions.env"; then
+    printf 'ОШИБКА: Старый режим запуска больше не поддерживается\\n' >&2
+    exit 1
 fi
+COMPOSE_FILE="$COMPOSE_DIR/docker-compose-standalone.yml"
 docker compose \
     --env-file "$COMPOSE_DIR/.versions.env" \
     -f "$COMPOSE_FILE" up -d --remove-orphans
@@ -171,21 +169,5 @@ if grep -qx 'RUNTIME_MODE=standalone' "$COMPOSE_DIR/.versions.env"; then
     exit 1
 fi
 
-for _ in $(seq 1 60); do
-    if curl -fsS http://127.0.0.1:3000/api/ping >/dev/null 2>&1; then
-        PYTHONPATH=/usr/local/lib/infra-manager         INFRA_PROJECT_BRANCH="$BRANCH"             python3 -m infra_manager semaphore-project
-
-
-        if [[ -n "$OPERATION_ID" ]]; then
-            PYTHONPATH=/usr/local/lib/infra-manager \
-                python3 -m infra_manager.operation_activation verifying "$OPERATION_ID"
-        fi
-        INFRA_PROJECT_BRANCH="$BRANCH"             /usr/local/sbin/infra-manager-status --full --quiet
-        printf '[ОК] infra-runtime активирован, OpenBao разблокирован, Semaphore синхронизирован и проверен\n'
-        exit 0
-    fi
-    sleep 2
-done
-
-printf 'ОШИБКА: Semaphore не запустился после активации infra-runtime\n' >&2
+printf 'ОШИБКА: Постоянная среда обязана использовать RUNTIME_MODE=standalone\\n' >&2
 exit 1
