@@ -180,6 +180,20 @@ def check_safe_system_error_diagnostics() -> None:
         fail("Нельзя печатать необработанные данные исключения")
 
     err = io.StringIO()
+    Console(out=io.StringIO(), err=err).failure(
+        CommandError(
+            ["docker", "exec", "--token", "PRIVATE-SECRET"],
+            24,
+            "PRIVATE-SECRET from command stderr",
+        )
+    )
+    printed = err.getvalue()
+    if "CommandError: программа docker; код возврата 24" not in printed:
+        fail("Отказ внешней команды должен называть безопасную программу и код")
+    if "PRIVATE-SECRET" in printed or "--token" in printed:
+        fail("Командная диагностика не должна показывать argv и stderr")
+
+    err = io.StringIO()
     with patch.dict(os.environ, {"INFRA_LOG_LEVEL": "quiet"}):
         Console(out=io.StringIO(), err=err).failure(
             FileNotFoundError(errno.ENOENT, "hidden", "/private/key")
