@@ -42,7 +42,7 @@ STATUS_FILE = PATHS.status_file
 PROJECT_REPO = SETTINGS.project_repo
 
 STATUS_CHECK_TYPES = frozenset(
-    {"runtime", "portal", "openbao", "semaphore", "runtime_tools", "pve_access"}
+    {"runtime", "portal", "infra_web", "openbao", "semaphore", "runtime_tools", "pve_access"}
 )
 STATUS_DATA_SOURCE_TYPES = frozenset(
     {"primary_ipv4", "project_branch", "git_revision", "file"}
@@ -426,6 +426,41 @@ def _check_portal() -> None:
     )
     if gateway.returncode:
         raise InfraManagerError("Шлюз действий Homepage не отвечает")
+
+
+def _check_infra_web() -> None:
+    """Подтвердить HTTPS, доступность посредника и запрет истории без входа."""
+    for container in ("infra-web",):
+        result = command_runner.run(
+            ["docker", "inspect", "-f", "{{.State.Running}}", container],
+            capture=True, check=False,
+        )
+        if result.returncode or result.stdout.strip() != "true":
+            raise InfraManagerError("Административная панель infra-web не запущена")
+
+    gateway = command_runner.run(
+        ["systemctl", "is-active", "--quiet",
+         "infra-manager-portal-gateway.service"],
+        quiet=True, check=False,
+    )
+    if gateway.returncode:
+        raise InfraManagerError("Системный посредник управления не запущен")
+    sock = Path("/run/infra-web/operations.sock")
+    if sock.is_symlink() or not sock.is_socket():
+        raise InfraManagerError("Закрытый канал действий infra-web не создан")
+    address = _primary_ipv4()
+    ca = Path("/etc/infra-manager/web/tls/server.crt")
+    required_file(ca)
+    response = command_runner.run(
+        ["curl", "-sS", "--connect-timeout", "5", "--max-time", "10",
+         "--cacert", str(ca), "-o", "/dev/null", "-w", "%{http_code}",
+         f"https://{address}:8443/api/operations"],
+        capture=True, check=False,
+    )
+    if response.returncode or response.stdout.strip() != "401":
+        raise InfraManagerError(
+            "HTTPS не подтверждён или история открыта без авторизации"
+        )
 
 
 def _check_openbao_tls() -> None:
@@ -927,6 +962,8 @@ def _run_status_checks(
             _check_runtime_bundle()
         elif check_type == "portal":
             _check_portal()
+        elif check_type == "infra_web":
+            _check_infra_web()
         elif check_type == "openbao":
             _check_openbao(full=full)
         elif check_type == "semaphore":
