@@ -131,8 +131,8 @@ def main():
             # Закрытая история не должна ломать успешный вход OpenBao.
             with patch.object(admin, "_operation_history", side_effect=PermissionError("private state")):
                 status, headers, body = request(server, "POST", "/login", {"username": "operator", "password": "secret"})
-                assert status == 200 and "secret" not in body
-                assert "История операций временно недоступна" in body
+                assert status == 303 and body == ""
+                assert headers["Location"] == "/", "После входа нужен PRG-редирект"
                 cookie = headers["Set-Cookie"].split(";", 1)[0]
                 status, _, body = request(server, "GET", "/api/operations", cookie=cookie)
                 assert status == 503 and "unavailable" in body
@@ -238,8 +238,12 @@ def main():
                 assert status == 200
                 assert 'http-equiv="refresh"' in body
                 assert "Можно закрыть браузер" in body
-            status, _, _ = request(server, "POST", "/logout", {"csrf": csrf}, cookie=cookie)
-            assert status == 200
+            status, logout_headers, body = request(server, "POST", "/logout", {"csrf": csrf}, cookie=cookie)
+            assert status == 303 and body == ""
+            assert logout_headers["Location"] == "/"
+            assert "Max-Age=0" in logout_headers["Set-Cookie"]
+            status, _, body = request(server, "GET", "/", cookie=cookie)
+            assert status == 200 and 'action="/login"' in body
             status, _, _ = request(server, "GET", "/api/operations", cookie=cookie)
             assert status == 401, "Сессия должна уничтожаться при выходе"
     finally:
