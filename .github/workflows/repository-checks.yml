@@ -313,14 +313,12 @@ jobs:
           # shared globals declared in 00-common.sh are consumed across files.
           shellcheck -S warning -e SC2034 "${files[@]}"
 
-      - name: Run infra-manager guest contract
-        run: bash scripts/tests/test-infra-manager-guest-contract.sh
+      - name: Run infra-manager standalone and recovery contract
+        run: python scripts/tests/test-manager-standalone-contract.py
 
       - name: Run infra-manager OpenBao contract
         run: bash scripts/tests/test-infra-manager-openbao-contract.sh
 
-      - name: Run infra-manager tooling contract
-        run: bash scripts/tests/test-infra-manager-tooling-contract.sh
 
       - name: Run infra-manager SSH contract
         run: bash scripts/tests/test-infra-manager-ssh-contract.sh
