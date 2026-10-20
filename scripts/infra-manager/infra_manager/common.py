@@ -52,7 +52,12 @@ _ANSIBLE_SAFE_ERRORS: tuple[tuple[str, str], ...] = (
 
 
 def _ansible_failure_summary(output: str | None) -> str:
-    """Получить название неудачного задания и известную безопасную причину."""
+    """Показать этап и классифицированную причину, но не сырой fatal/msg.
+
+    Вывод Ansible способен содержать секреты в полях args/msg/stdout.
+    Поэтому извлекаем только название задания и заранее заданные пояснения
+    к известным типам ошибок. Сырые пути и тексты исключений не печатаем.
+    """
     if not output:
         return ""
     details: list[str] = []
@@ -62,10 +67,66 @@ def _ansible_failure_summary(output: str | None) -> str:
         task = tasks[-1].strip()
         if "{{" not in task and "}}" not in task:
             details.append(f"Последнее задание Ansible: {task}.")
-    for fingerprint, description in _ANSIBLE_SAFE_ERRORS:
-        if fingerprint in output:
-            details.append(description)
+
+    # Учитываем только последний шаг, чтобы старые предупреждения не
+    # выдавались за причину окончательного отказа.
+    final_task = output.rfind("TASK [")
+    failure = (output[final_task:] if final_task >= 0 else output).lower()
+    lookup_missing = (
+        "could not locate file in lookup" in failure
+        or (
+            ("lookup('file'" in failure or "lookup plugin 'file'" in failure)
+            and ("not found" in failure or "no such file" in failure)
+        )
+    )
+    classified = (
+        (
+            lookup_missing,
+            "[ANSIBLE_FILE_LOOKUP] Файл для lookup('file') не найден на "
+            "контроллере Ansible. Проверьте путь относительно снимка Git, "
+            "а не путь внутри настраиваемого LXC.",
+        ),
+        (
+            "permission denied" in failure or "errno 13" in failure,
+            "[ANSIBLE_EACCES] Доступ к файлу или ресурсу запрещён. "
+            "Проверьте владельца и права в соответствующем задании.",
+        ),
+        (
+            "is undefined" in failure or "undefined variable" in failure,
+            "[ANSIBLE_UNDEFINED] В задании не определена обязательная "
+            "переменная. Проверьте vars, provision.yaml и параметры playbook.",
+        ),
+        (
+            "no such file or directory" in failure or "errno 2" in failure,
+            "[ANSIBLE_ENOENT] Не найден необходимый файл или каталог. "
+            "Проверьте наличие источника и место выполнения задания.",
+        ),
+        (
+            "yaml.parser.parsererror" in failure
+            or "yaml.scanner.scannererror" in failure,
+            "[ANSIBLE_YAML] Ошибка синтаксиса YAML. Проверьте файл "
+            "конфигурации, используемый последним заданием.",
+        ),
+        (
+            "unreachable!" in failure,
+            "[ANSIBLE_UNREACHABLE] Управляемый узел недоступен через "
+            "подтверждённый SSH-доступ.",
+        ),
+    )
+    for matched, description in classified:
+        if matched:
+            details.append(f"Причина: {description}")
             break
+    else:
+        for fingerprint, description in _ANSIBLE_SAFE_ERRORS:
+            if fingerprint.lower() in failure:
+                details.append(f"Причина: {description}")
+                break
+        else:
+            details.append(
+                "Причина не распознана безопасным фильтром Ansible; "
+                "необработанный вывод скрыт, так как может содержать секреты."
+            )
     return " ".join(details)
 
 
