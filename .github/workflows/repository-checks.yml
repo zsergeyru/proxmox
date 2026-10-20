@@ -390,8 +390,10 @@ jobs:
           services = data.get("services", {})
           if set(services) != {"runtime", "openbao", "web"}:
               raise SystemExit(f"Unexpected services: {sorted(services)}")
-          if services["web"].get("profiles") != ["preview"] or services["web"].get("read_only") is not True:
-              raise SystemExit("infra-web preview must stay disabled and read-only")
+          if services["web"].get("container_name") != "infra-web" or services["web"].get("read_only") is not True:
+              raise SystemExit("Authenticated infra-web must use protected readonly container")
+          if "profiles" in services["web"]:
+              raise SystemExit("Protected administrative infra-web must start in default Compose")
           if services["runtime"].get("image") != "infra-runtime:${RUNTIME_VERSION}":
               raise SystemExit("infra-runtime image must use pinned runtime version variable")
           if services["runtime"].get("container_name") != "infra-runtime":
