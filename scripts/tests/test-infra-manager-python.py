@@ -153,7 +153,7 @@ def check_cli_and_commands() -> None:
 
 def check_safe_ansible_failure_detail() -> None:
     """Определять класс сбоя Ansible, не показывая секретные msg/пути."""
-    task = "TASK [infra_manager : Прочитать единое описание резервирования]\\n"
+    task = "TASK [infra_manager : Прочитать единое описание резервирования]\n"
     cases = (
         (
             "Could not locate file in lookup: /secret/PRIVATE-TOKEN",
@@ -196,7 +196,7 @@ def check_safe_ansible_failure_detail() -> None:
         fail("Неизвестную ошибку Ansible нельзя публиковать без фильтрации")
 
     earlier = common._ansible_failure_summary(
-        "TASK [Earlier]\\nPermission denied\\n"
+        "TASK [Earlier]\nPermission denied\n"
         + task + "fatal: [guest]: FAILED! => Could not locate file in lookup"
     )
     if "ANSIBLE_FILE_LOOKUP" not in earlier or "ANSIBLE_EACCES" in earlier:
