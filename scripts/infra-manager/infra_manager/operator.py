@@ -352,7 +352,9 @@ def operator_guest_task(
             # штатный Proxmox API до запуска Docker-задания. Недоступный SSD
             # не должен останавливать самообновление управляющего контура.
             from .pve_backup_ssd import deploy_backup_ssd_preflight
+            from .pve_backup_nas import deploy_backup_nas_preflight
             deploy_backup_ssd_preflight()
+            deploy_backup_nas_preflight()
             store = OperationStore()
             # Согласовать создание active/910.json с эксклюзивной
             # блокировкой резервирования PVE. После отпускания shared
