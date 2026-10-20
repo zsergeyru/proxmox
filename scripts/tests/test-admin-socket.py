@@ -91,6 +91,70 @@ def main():
             assert rejected(lambda: admin_socket.dispatch(dict(request, vmid=109)))
             assert rejected(lambda: admin_socket.dispatch(dict(request, path="/etc/passwd")))
             assert rejected(lambda: admin_socket.dispatch(dict(request, request_id="../etc")))
+        # Диагностика ограничена собственным UUID, типизированными полями
+        # и безопасными сообщениями systemd/активации. Секреты не публиковать.
+        diagnostics_store = OperationStore(root / "diagnostics", require_mount=False)
+        task, _ = diagnostics_store.reserve("deploy", 910, "abc", activation_required=True)
+        diagnostics_store.start(task["id"])
+        diagnostics_store.transition(task["id"], "activating")
+        diagnostics_store.transition(task["id"], "verifying")
+        diagnostics_store.finish(task["id"], exit_code=9)
+        activation_log = root / "runtime-activation.log"
+        activation_log.write_text(
+            "[ИНФО] Операция активации: " + task["id"] + "\\n"
+            "[ОК] Запущена новая версия\\n"
+            "[ОШИБКА] Проверка готовности не пройдена\\n"
+            "[ИНФО] Операция активации: " + uuid.uuid4().hex + "\\n"
+            "[ОК] Чужая операция\\n",
+            encoding="utf-8",
+        )
+        mock_journal = SimpleNamespace(returncode=0, stdout=(
+            "[ИНФО] Шаг: получение Git\\n"
+            "[ОШИБКА] Permission denied\\n"
+            "[ИНФО] password=hunter2\\n"
+            "[ИНФО] token=abcdef\\n"
+            "SECRET_TEXT_WITHOUT_ALLOWED_PREFIX\\n"
+        ))
+        with (
+            patch.object(admin_socket, "OperationStore", return_value=diagnostics_store),
+            patch.object(admin_socket, "ACTIVATION_LOG", activation_log),
+            patch.object(admin_socket.subprocess, "run", return_value=mock_journal) as journal,
+        ):
+            query = {
+                "kind": "operation-detail", "vmid": 0,
+                "request_id": uuid.uuid4().hex, "operation_id": task["id"],
+            }
+            result = admin_socket.dispatch(query)
+            assert result["accepted"] is True and result["operation"]["id"] == task["id"]
+            assert result["operation"]["exit_code"] == 9
+            assert result["operation"]["phase"] == "failed"
+            assert [x["phase"] for x in result["events"]] == [
+                "queued", "running", "activating", "verifying", "failed",
+            ]
+            assert "Permission denied" in result["diagnostic"] or "Проверка готовности" in result["diagnostic"]
+            visible = json.dumps(result, ensure_ascii=False)
+            assert "hunter2" not in visible and "abcdef" not in visible
+            assert "SECRET_TEXT" not in visible and "Чужая операция" not in visible
+            assert "Запущена новая версия" in visible
+            assert journal.call_args.args[0][0] == "journalctl"
+            assert journal.call_args.args[0][-1] == f"infra-operation-{task['id']}.service"
+            assert rejected(lambda: admin_socket.dispatch(dict(query, operation_id="../passwd")))
+            assert rejected(lambda: admin_socket.dispatch(dict(query, path="/etc/passwd")))
+            assert rejected(lambda: admin_socket.dispatch(dict(query, vmid=910)))
+            assert rejected(lambda: admin_socket.dispatch(dict(query, request_id="not-a-uuid")))
+            assert rejected(lambda: admin_socket.dispatch(dict(query, operation_id=uuid.uuid4().hex)))
+        assert admin_socket._filter_log(["[ОК] Безопасная строка", "[ИНФО] secret=bad"]) == [
+            "[ОК] Безопасная строка",
+        ]
+        secret_file = root / "sensitive"
+        secret_file.write_text("[ОК] Секреты не должны читаться", encoding="utf-8")
+        alias = root / "alias"
+        alias.symlink_to(secret_file)
+        try:
+            admin_socket._read_log_tail(alias)
+            raise AssertionError("Символьная ссылка была прочитана")
+        except OSError:
+            pass
         # Физический SSD: только два типизированных действия, без shell.
         with (
             patch.object(admin_socket, "authorize_action") as authorize,
