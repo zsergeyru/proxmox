@@ -6,14 +6,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import fcntl
 import hashlib
 import json
+import uuid
 import os
 from pathlib import Path
 import re
-import sys
 import tempfile
-import time
 
 from .common import InfraManagerError, console, run
 from .pve import PveClient
@@ -186,12 +186,30 @@ def _save_state(path: Path, record: dict) -> None:
         Path(name).unlink(missing_ok=True)
 
 
-APPROVAL_NAME = "pve-backup-ssd-approval.json"
-APPROVAL_TTL = 3600
+JOB_NAME = "pve-backup-ssd-job.json"
+JOB_LOCK = "pve-backup-ssd-job.lock"
 
 
-def _approval_path() -> Path:
-    return _state_path().with_name(APPROVAL_NAME)
+def _job_path() -> Path:
+    return _state_path().with_name(JOB_NAME)
+
+
+def _read_job() -> dict | None:
+    path = _job_path()
+    if path.is_symlink():
+        raise InfraManagerError("Недоверенная ссылка вместо состояния задания SSD")
+    if not path.is_file():
+        return None
+    try:
+        record = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise InfraManagerError("Не удаётся прочитать состояние подготовки SSD") from exc
+    if (not isinstance(record, dict)
+            or record.get("state") not in ("queued", "running", "completed", "failed")
+            or not isinstance(record.get("id"), str)
+            or not re.fullmatch(r"[0-9a-f]{32}", record["id"])):
+        raise InfraManagerError("Повреждена запись подготовки SSD")
+    return record
 
 
 def _plan(disk: Disk) -> dict:
@@ -236,53 +254,112 @@ def inspect_backup_ssd(client: PveClient, node: str) -> dict:
     return {"state": "needs-confirmation", **_plan(disk)}
 
 
+def _job_lock():
+    """Блокировка одного фонового задания на постоянном диске 910."""
+    from contextlib import contextmanager
+
+    @contextmanager
+    def locked():
+        root = _job_path().parent
+        lock = root / JOB_LOCK
+        if root.is_symlink() or not root.is_dir() or lock.is_symlink():
+            raise InfraManagerError("Отсутствует безопасный каталог задания SSD")
+        fd = os.open(lock, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX)
+            yield
+        finally:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+            os.close(fd)
+
+    return locked()
+
+
+def storage_status(client: PveClient, node: str) -> dict:
+    """Состояние одной фоновой операции и текущего SSD для infra-web."""
+    job = _read_job()
+    if job and job["state"] in ("queued", "running"):
+        return {"state": "running", "job_id": job["id"], "job_state": job["state"]}
+    current = inspect_backup_ssd(client, node)
+    if job and job["state"] == "failed":
+        return {"state": "blocked", "reason": job.get("error", "Ошибка подготовки SSD")}
+    if job and job["state"] == "completed" and current["state"] == "configured":
+        current["job_state"] = "completed"
+    return current
+
+
 def approve_backup_ssd(client: PveClient, node: str, *,
-                       plan_id: str, serial: str) -> None:
-    """Веб-подтверждение: только запись одноразового разрешения, без mkfs."""
+                       plan_id: str, serial: str) -> str:
+    """Один клик: подтвердить план и запустить независимую systemd-задачу в 910."""
     if not isinstance(plan_id, str) or not re.fullmatch(r"[0-9a-f]{64}", plan_id):
         raise InfraManagerError("Некорректный номер плана SSD")
     if not isinstance(serial, str) or not SERIAL_PATTERN.fullmatch(serial):
         raise InfraManagerError("Некорректный номер физического диска")
-    current = inspect_backup_ssd(client, node)
-    if (current.get("state") != "needs-confirmation"
-            or current["plan_id"] != plan_id
-            or current["serial"] != serial):
-        raise InfraManagerError("Устройство изменилось; старое разрешение не действует")
-    _save_state(_approval_path(), {
-        "schema_version": 1,
-        "plan_id": plan_id,
-        "serial": serial,
-        "expires": int(time.time()) + APPROVAL_TTL,
-    })
+    with _job_lock():
+        old = _read_job()
+        if old and old["state"] in ("queued", "running"):
+            raise InfraManagerError("Подготовка SSD уже выполняется")
+        current = inspect_backup_ssd(client, node)
+        if (current.get("state") != "needs-confirmation"
+                or current["plan_id"] != plan_id
+                or current["serial"] != serial):
+            raise InfraManagerError("Диск или его состояние изменились; обновите план")
+        job_id = uuid.uuid4().hex
+        _save_state(_job_path(), {
+            "id": job_id, "state": "queued", "plan_id": plan_id, "serial": serial,
+        })
+        cmd = [
+            "systemd-run", "--collect", "--unit=infra-ssd-prepare-" + job_id,
+            "--setenv=PYTHONPATH=/usr/local/lib/infra-manager",
+            "/usr/bin/python3", "-m", "infra_manager.pve_backup_ssd",
+            "apply", job_id, plan_id, serial,
+        ]
+        outcome = run(cmd, capture_output=True, check=False)
+        if outcome.returncode:
+            _save_state(_job_path(), {
+                "id": job_id, "state": "failed",
+                "error": "Не удалось запустить системное задание подготовки SSD",
+            })
+            raise InfraManagerError("Не удалось запустить подготовку SSD через systemd")
+        return job_id
 
 
-def _consume_approval(disk: Disk) -> bool:
-    """Одноразовый допуск после ПОВТОРНОЙ проверки устройства и wipefs.
-
-    При неизвестном содержимом не удаляем разрешение, но не делаем запись.
-    До вызова PVE API подтверждение удаляется; повторный deploy не может
-    безоговорочно выполнить вторую разметку после обрыва соединения.
-    """
-    path = _approval_path()
-    if path.is_symlink():
-        raise InfraManagerError("Недоверенная ссылка вместо разрешения SSD")
-    if not path.exists():
-        return False
-    try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
-        raise InfraManagerError("Повреждена запись разрешения SSD") from exc
-    expected = {
-        "schema_version": 1, "plan_id": _plan(disk)["plan_id"],
-        "serial": disk.serial,
-    }
-    if not isinstance(value, dict) or any(value.get(k) != v for k,v in expected.items()):
-        raise InfraManagerError("Разрешение относится к другому физическому SSD")
-    expiry = value.get("expires")
-    if type(expiry) is not int or not int(time.time()) < expiry <= time.time() + APPROVAL_TTL:
-        raise InfraManagerError("Срок действия разрешения на разметку SSD истёк")
-    path.unlink()
-    return True
+def apply_approved_backup_ssd(job_id: str, plan_id: str, serial: str) -> int:
+    """Запущено systemd внутри 910, независимо от открытого браузера."""
+    with _job_lock():
+        job = _read_job()
+        if (not job or job["state"] != "queued" or job["id"] != job_id
+                or job.get("plan_id") != plan_id or job.get("serial") != serial):
+            raise InfraManagerError("Задание SSD не соответствует согласованному плану")
+        _save_state(_job_path(), {
+            "id": job_id, "state": "running", "plan_id": plan_id, "serial": serial,
+        })
+        try:
+            from .operator import _pve_node
+            node = _pve_node()
+            client = PveClient()
+            current = inspect_backup_ssd(client, node)
+            if (current.get("state") != "needs-confirmation"
+                    or current["plan_id"] != plan_id
+                    or current["serial"] != serial):
+                raise InfraManagerError("Перед разметкой устройство изменилось")
+            # reconcile ещё раз проверяет физический диск и повторно вызывает
+            # lsblk/wipefs непосредственно перед PVE API.
+            disk_uuid = reconcile_backup_ssd(
+                client, node, interactive=True, confirmation=lambda _: serial,
+            )
+            if not disk_uuid:
+                raise InfraManagerError("PVE не подтвердил подготовку SSD")
+        except (InfraManagerError, OSError, ValueError) as exc:
+            _save_state(_job_path(), {
+                "id": job_id, "state": "failed",
+                "error": str(exc)[:500],
+            })
+            raise
+        _save_state(_job_path(), {
+            "id": job_id, "state": "completed", "uuid": disk_uuid,
+        })
+        return 0
 
 
 def reconcile_backup_ssd(client: PveClient, node: str, *, interactive: bool = False,
@@ -342,31 +419,21 @@ def reconcile_backup_ssd(client: PveClient, node: str, *, interactive: bool = Fa
     # Даже план предлагается только после независимой проверки разделов:
     # used=None от PVE API сам по себе не гарантирует пустой диск.
     _empty_block_device(node, disk)
-    approved = False
-    if interactive:
-        answer = (confirmation or input)(
-            "Для разрешения первичной разметки введите серийный номер SSD полностью: "
-        ).strip()
-        approved = answer == disk.serial
-    if not approved and not _approval_path().exists():
-        console.warning(
-            "Первичная разметка SSD ожидает подтверждения через infra-web "
-            "или доверенную CLI PVE"
-        )
+    if not interactive:
+        console.warning("Первичная разметка SSD ожидает подтверждения в infra-web")
         return None
-    if not approved and _approval_path().is_symlink():
-        raise InfraManagerError("Недоверенная ссылка вместо разрешения SSD")
+    answer = (confirmation or input)(
+        "Для разметки введите полный серийный номер SSD: "
+    ).strip()
+    if answer != disk.serial:
+        console.warning("Подготовка SSD пропущена: подтверждение не совпало")
+        return None
     # Повторная проверка непосредственно до операции: запрет TOCTOU и замены.
     candidates_now = [d for item in _inventory(client, node)
                       if (d := _eligible(item, min_bytes))]
     if candidates_now != [disk] or _directory(client, node) is not None:
         raise InfraManagerError("Состояние дисков изменилось после подтверждения; запись запрещена")
     _empty_block_device(node, disk)
-    if not approved:
-        approved = _consume_approval(disk)
-    if not approved:
-        console.warning("Подготовка SSD пропущена: подтверждение не совпало")
-        return None
     client.run_task(
         "POST", f"/nodes/{node}/disks/directory", node=node,
         form={"device": disk.devpath, "name": NAME, "filesystem": "ext4", "add_storage": 0},
@@ -387,7 +454,19 @@ def deploy_backup_ssd_preflight() -> None:
     """Ограниченная стадия 910, не блокирующая исправный управляющий контур."""
     from .operator import _pve_node
     try:
-        can_ask = sys.stdin.isatty() or os.environ.get("INFRA_MANAGER_INTERACTIVE") == "1"
-        reconcile_backup_ssd(PveClient(), _pve_node(), interactive=can_ask)
+        # deploy проверяет диск без диалогов; разметка запускается в infra-web.
+        reconcile_backup_ssd(PveClient(), _pve_node(), interactive=False)
     except (InfraManagerError, EOFError) as exc:
         console.warning(f"Резервный SSD: {exc}. Основной deploy 910 продолжится")
+
+
+if __name__ == "__main__":
+    import sys
+
+    try:
+        if len(sys.argv) != 5 or sys.argv[1] != "apply":
+            raise InfraManagerError("Разрешена только подтверждённая подготовка SSD")
+        raise SystemExit(apply_approved_backup_ssd(*sys.argv[2:]))
+    except (InfraManagerError, OSError, ValueError) as exc:
+        print(f"[ОШИБКА] Подготовка SSD: {exc}", file=sys.stderr)
+        raise SystemExit(1) from None
