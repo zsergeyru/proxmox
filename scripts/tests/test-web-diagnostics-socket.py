@@ -33,8 +33,8 @@ def main() -> None:
         record, _ = store.reserve("status", 109, "test-git-revision")
         store.start(record["id"])
         journal = SimpleNamespace(returncode=0, stdout=(
-            "[ИНФО] Выполняется проверка\\n[ОК] Проверка завершена\\n"
-            "[ИНФО] password=not-for-browser\\n"
+            "[ИНФО] Выполняется проверка\n[ОК] Проверка завершена\n"
+            "[ИНФО] password=not-for-browser\n"
         ))
         socket_path = base / "operations.sock"
         with (
@@ -68,7 +68,7 @@ def main() -> None:
                     connection.sendall((
                         '{"kind":"operation-detail","operation_id":"'
                         + record["id"] + '","request_id":"'
-                        + "a" * 32 + '","vmid":0,"path":"/etc/shadow"}\\n'
+                        + "a" * 32 + '","vmid":0,"path":"/etc/shadow"}\n'
                     ).encode())
                     answer = connection.makefile("rb").readline()
                     assert b'"accepted": false' in answer
