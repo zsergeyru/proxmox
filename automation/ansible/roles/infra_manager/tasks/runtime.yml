@@ -159,6 +159,14 @@
     group: root
     mode: "0700"
 
+- name: Создать защищённый каталог длительных сеансов веб-панели
+  ansible.builtin.file:
+    path: /mnt/persistent-state/web-sessions
+    state: directory
+    owner: "1001"
+    group: "0"
+    mode: "0700"
+
 - name: Создать ограниченный каталог передачи активации исполнителю
   ansible.builtin.file:
     path: "{{ provision.paths.operations_state }}/activation"
