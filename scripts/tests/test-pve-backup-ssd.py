@@ -145,7 +145,7 @@ def test_readonly_disk_refuses_partitions_and_signatures():
         ):
             ssd._empty_block_device("pve", candidate)
     def fake(*args, **kwargs):
-        if args[0] == "lsblk":
+        if args[0][0] == "lsblk":
             return SimpleNamespace(returncode=0, stdout=json.dumps(valid))
         return SimpleNamespace(returncode=0, stdout="")
     checked(fake)
@@ -153,7 +153,7 @@ def test_readonly_disk_refuses_partitions_and_signatures():
     refuses(lambda: checked(fake), "Диск с разделами не является пустым")
     valid["blockdevices"][0].pop("children")
     def signature(*args, **kwargs):
-        if args[0] == "lsblk":
+        if args[0][0] == "lsblk":
             return SimpleNamespace(returncode=0, stdout=json.dumps(valid))
         return SimpleNamespace(returncode=0, stdout="ext4 0x123")
     refuses(lambda: checked(signature), "Подозрительная сигнатура wipefs блокирует mkfs")
