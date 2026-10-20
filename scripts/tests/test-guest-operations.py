@@ -722,6 +722,45 @@ def check_operation_lock() -> None:
                 if not (lock_dir / "locks/410.lock").is_file():
                     fail("Должен использоваться только постоянный каталог locks")
 
+        # Внутри LXC используется безопасный symlink на общий state,
+        # а в runtime — bind mount. Нельзя отвергать штатный symlink.
+        persistent = lock_dir / "persistent/locks"
+        persistent.mkdir(parents=True)
+        lxc_dir = lock_dir / "lxc"
+        lxc_dir.mkdir()
+        lxc_link = lxc_dir / "locks"
+        lxc_link.symlink_to(persistent, target_is_directory=True)
+        with (
+            patch.object(operation_lock, "PATHS", SimpleNamespace(data_dir=lxc_dir)),
+            patch.object(operation_lock, "TRUSTED_STATE_LOCKS", persistent),
+            patch.object(operation_lock, "_is_mount", return_value=True),
+        ):
+            with operation_lock.guest_operation_lock(410, "deploy"):
+                if not (persistent / "410.lock").exists():
+                    fail("Штатная ссылка LXC не использует общие блокировки")
+        with (
+            patch.object(operation_lock, "PATHS", SimpleNamespace(data_dir=lxc_dir)),
+            patch.object(operation_lock, "TRUSTED_STATE_LOCKS", persistent),
+            patch.object(operation_lock, "_is_mount", return_value=False),
+        ):
+            try:
+                with operation_lock.guest_operation_lock(410, "deploy"):
+                    fail("Ссылка на неподключённое состояние недопустима")
+            except InfraManagerError:
+                pass
+        lxc_link.unlink()
+        lxc_link.symlink_to(lock_dir, target_is_directory=True)
+        with (
+            patch.object(operation_lock, "PATHS", SimpleNamespace(data_dir=lxc_dir)),
+            patch.object(operation_lock, "TRUSTED_STATE_LOCKS", persistent),
+            patch.object(operation_lock, "_is_mount", return_value=True),
+        ):
+            try:
+                with operation_lock.guest_operation_lock(410, "deploy"):
+                    fail("Подмена доверенной ссылки недопустима")
+            except InfraManagerError:
+                pass
+
 
 def check_semaphore_secret_policy() -> None:
     entrypoint = (
