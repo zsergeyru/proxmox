@@ -355,7 +355,7 @@ min-height:8rem;border:1px solid #345}
 <main>""" + inner + "</main></body></html>").encode()
 
 
-def _dashboard(csrf: str, notice: str = "", focus_operation: str = "") -> bytes:
+def _dashboard(csrf: str, notice: str = "") -> bytes:
     try:
         records = _operation_history()
     except (OSError, ValueError, TimeoutError):
@@ -380,9 +380,6 @@ def _dashboard(csrf: str, notice: str = "", focus_operation: str = "") -> bytes:
     token = html.escape(csrf, quote=True)
     form = (
         f'<p>{html.escape(notice)}</p>'
-        + ('<p><a href="/operations?id=' + focus_operation
-           + '">Открыть журнал принятого задания</a></p>'
-           if REQ_ID.fullmatch(focus_operation) else '')
         + '<form method="POST" action="/action">'
         f'<input type="hidden" name="csrf" value="{token}">'
         '<label>Гость (VMID) <input name="vmid" type="number" min="1" required></label>'
@@ -472,6 +469,7 @@ class Handler(BaseHTTPRequestHandler):
     def _reply(
         self, status: HTTPStatus, body: bytes, *,
         content_type: str = "text/html; charset=utf-8", cookie: str | None = None,
+        location: str | None = None,
     ) -> None:
         self.send_response(status)
         self.send_header("Content-Type", content_type)
@@ -489,6 +487,8 @@ class Handler(BaseHTTPRequestHandler):
         )
         if cookie is not None:
             self.send_header("Set-Cookie", cookie)
+        if location is not None:
+            self.send_header("Location", location)
         self.end_headers()
         self.wfile.write(body)
 
@@ -656,10 +656,10 @@ class Handler(BaseHTTPRequestHandler):
                 HTTPStatus.BAD_REQUEST, _dashboard(session["csrf"], "Задание не принято")
             )
             return
+        # Post/Redirect/Get: обновление страницы больше не повторяет POST.
         self._reply(
-            HTTPStatus.ACCEPTED,
-            _dashboard(session["csrf"], "Задание принято: " + result["id"],
-                       focus_operation=result["id"]),
+            HTTPStatus.SEE_OTHER, b"",
+            location="/operations?id=" + result["id"],
         )
 
 
