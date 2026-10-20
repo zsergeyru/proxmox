@@ -48,8 +48,14 @@ def _homepage_url(identity) -> str:
 
     portal = local_portal_definition(PATHS.repo_root, identity)
     if not isinstance(portal, dict):
+        # У управляющего гостя Homepage заменён защищённой панелью.
+        from .portal import portal_definitions
+
+        for entry in portal_definitions(PATHS.repo_root, identity):
+            if entry["name"] == "infra-web" and entry["scheme"] == "https":
+                return entry["url"]
         raise InfraManagerError(
-            f"Для гостя {identity.vmid} не настроен локальный Homepage"
+            f"Для гостя {identity.vmid} не настроен локальный портал"
         )
     url = portal.get("url")
     if not isinstance(url, str) or not url.startswith("http://"):
