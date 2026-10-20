@@ -148,6 +148,11 @@ jobs:
       - name: Check infra-web readonly preview
         run: python scripts/tests/test-infra-web.py
 
+      - name: Check authenticated infra-web and restricted system socket
+        run: |
+          python scripts/tests/test-infra-web-admin.py
+          python scripts/tests/test-admin-socket.py
+
       - name: Check managed backup and standalone runtime transition
         run: python scripts/tests/test-manager-backup-transition.py
 
@@ -514,7 +519,7 @@ jobs:
       - name: Build infra-web preview image
         run: |
           docker build -t infra-web:ci "$INFRA_MANAGER_DIR/rootfs/opt/infra-manager/compose/web"
-          docker run --rm --entrypoint python3 infra-web:ci -m py_compile /opt/infra-web/app.py
+          docker run --rm --entrypoint python3 infra-web:ci -m py_compile /opt/infra-web/app.py /opt/infra-web/admin.py
 
       - name: Build independent infra-runtime without Semaphore
         run: |
