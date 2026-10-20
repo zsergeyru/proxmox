@@ -174,9 +174,10 @@ class PveClient:
         endpoint: str,
         *,
         query: dict[str, str | int] | None = None,
+        timeout: int = 120,
     ) -> Any:
         """Получить ответ PVE API без изменения объекта."""
-        return self._request("GET", endpoint, query=query)
+        return self._request("GET", endpoint, query=query, timeout=timeout)
 
     def post(
         self,
@@ -217,10 +218,11 @@ class PveClient:
         endpoint: str,
         *,
         query: dict[str, str | int] | None = None,
+        timeout: int = 120,
     ) -> Any:
         """Получить проверенное поле data из ответа GET."""
         return self._data_from_payload(
-            self.get(endpoint, query=query),
+            self.get(endpoint, query=query, timeout=timeout),
             f"PVE API GET {endpoint}",
         )
 
