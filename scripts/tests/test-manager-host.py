@@ -345,10 +345,15 @@ def test_internal_project_refresh_uses_existing_checkout() -> None:
         known_hosts = semaphore_dir / "known_hosts"
         known_hosts.write_text("github.test key\n", encoding="utf-8")
 
+        config_dir = Path(tmp) / "config"
+        config_dir.mkdir()
+        (config_dir / "github_known_hosts").write_text(
+            known_hosts.read_text(encoding="utf-8"), encoding="utf-8"
+        )
         paths = SimpleNamespace(
             repo_root=root,
             github_key=github_key,
-            semaphore_dir=semaphore_dir,
+            config_dir=config_dir,
         )
         calls: list[tuple[list[str], dict[str, object]]] = []
 
