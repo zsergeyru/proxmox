@@ -382,12 +382,23 @@ class PortalActionServer(ThreadingHTTPServer):
 
 
 def run_portal_gateway(bind: str, port: int) -> int:
-    """Запустить HTTP-сервер и закрыть его при остановке процесса."""
-    server = PortalActionServer((bind, port), PortalActionHandler)
+    """Один системный посредник: старый локальный HTTP и закрытый Unix-сокет."""
+    import threading
+
+    from .admin_socket import AdminSocketServer
+
+    if bind not in {"127.0.0.1", "::1"}:
+        raise InfraManagerError("Управление через HTTP доступно только локально")
+    socket_server = AdminSocketServer()
+    thread = threading.Thread(target=socket_server.serve_forever, daemon=True)
+    thread.start()
     try:
-        server.serve_forever()
+        with PortalActionServer((bind, port), PortalActionHandler) as server:
+            server.serve_forever()
     except KeyboardInterrupt:
         pass
     finally:
-        server.server_close()
+        socket_server.shutdown()
+        socket_server.server_close()
+        thread.join(timeout=5)
     return 0
