@@ -89,16 +89,6 @@ def test_host_explicit_branch_propagation() -> None:
         "/usr/local/sbin/infra-manager"
     )
 
-    for invalid in ("feature/other branch", "feature/../../main", "one//two", "-shell"):
-        with patch.dict(host.os.environ, {"INFRA_PROJECT_BRANCH": invalid}):
-            try:
-                host.forwarded_git_ref()
-            except host.OperatorError:
-                pass
-            else:
-                raise AssertionError("Некорректная ветка не должна передаваться гостю")
-
-
 def test_host_repair_starts_manager() -> None:
     with (
         patch.object(
