@@ -45,7 +45,7 @@ def policy() -> tuple[dict, dict[str, str]]:
         raise InfraManagerError("Неверный контур резервирования")
     destinations = raw.get("destinations")
     if not isinstance(destinations, list) or len(destinations) != 2:
-        raise InfraManagerError("Нужны SSD и NAS для защищённых копий")
+        raise InfraManagerError("backup.yaml должен описывать SSD и NAS")
     verified = {}
     for dest in destinations:
         if not isinstance(dest, dict):
@@ -58,13 +58,19 @@ def policy() -> tuple[dict, dict[str, str]]:
                 dest.get("repository")) != (path, filesystem, repository):
             raise InfraManagerError("Изменение защищённого назначения запрещено")
         identity = dest.get("uuid") or dest.get("source")
-        if not isinstance(identity, str) or not identity:
-            raise InfraManagerError(
-                "Носители не подтверждены в backup.yaml; ожидание настройки SSD/NAS"
-            )
-        verified[name] = identity
-    if set(verified) != set(DESTINATIONS):
-        raise InfraManagerError("Нет одного из независимых носителей")
+        if name == "fast-ssd" and not identity:
+            # Идентичность физического диска не закрепляется в Git навечно.
+            # Принятая через штатный PVE API запись хранится в постоянном
+            # состоянии 910 и сверяется с реальным PVE перед каждой копией.
+            from .pve_backup_ssd import _read_state, _state_path
+            saved = _read_state(_state_path())
+            identity = saved["uuid"] if saved else None
+        if isinstance(identity, str) and identity:
+            verified[name] = identity
+    if not verified:
+        raise InfraManagerError(
+            "Нет подтверждённого SSD или NAS; резервирование ожидает настройки"
+        )
     return raw, verified
 
 
@@ -189,14 +195,13 @@ def _vm100_due(store: OperationStore, identity: str) -> bool:
     return not (
         isinstance(record, dict)
         and record.get("date") == datetime.now(UTC).date().isoformat()
-        and record.get("destinations") == list(DESTINATIONS)
         and record.get("media_fingerprint") == identity
         and record.get("verified") is True
     )
 
 
 def execute(*, run: bool = False) -> None:
-    """Без ключа или двух подтверждённых носителей не производить запись."""
+    """Создать архив на каждом доступном проверенном носителе; не на PVE-root."""
     _description, verified = policy()
     if shutil.which("restic") is None:
         raise InfraManagerError("restic не установлен внутри управляющего гостя")
@@ -208,15 +213,15 @@ def execute(*, run: bool = False) -> None:
         state = json.loads(_remote(
             node, "repositories", json.dumps(verified).encode()
         ).stdout)
-        if not isinstance(state, dict) or set(state) != set(DESTINATIONS):
-            raise InfraManagerError("PVE не подтвердил состояние двух restic-хранилищ")
+        if not isinstance(state, dict) or set(state) != set(verified):
+            raise InfraManagerError("PVE не подтвердил состояние выбранных restic-хранилищ")
         # Не создавать новый пароль, когда хотя бы один архив уже существует:
         # такое действие сделало бы прежние архивы недоступными.
         create_password = run and all(value == "missing" for value in state.values())
         key = _credentials(node, directory, verified, create=create_password)
         # Сначала сверить все уже созданные копии и только потом
         # разрешить инициализацию действительно пустых каталогов.
-        for destination in DESTINATIONS:
+        for destination in verified:
             if state[destination] == "existing":
                 _restic(node, destination, key, ["snapshots", "--json"])
             elif state[destination] != "missing":
@@ -240,7 +245,7 @@ def execute(*, run: bool = False) -> None:
             {
                 "schema_version": 1,
                 "created_utc": created.isoformat(),
-                "destinations": list(DESTINATIONS),
+                "destinations": list(verified),
                 "verified": "restic-check-read-data-subset-1-percent",
                 "includes_vm100": False,
                 "restore_tested": False,
@@ -266,8 +271,10 @@ def execute(*, run: bool = False) -> None:
             "includes_vm100": True,
             "restore_tested": False,
         })
-        print("[ОК] Состояние PVE/управляющего гостя и ежедневный снимок VM 100 сохранены "
-              "в обоих хранилищах; пробное восстановление ещё не подтверждено")
+        if len(verified) < len(DESTINATIONS):
+            print("[ПРЕДУПРЕЖДЕНИЕ] Вторая независимая копия отсутствует")
+        print("[ОК] Состояние PVE/управляющего гостя и актуальный снимок VM 100 "
+              "сохранены на проверенных носителях; восстановление не испытано")
 
 
 def main(argv: list[str] | None = None) -> int:
