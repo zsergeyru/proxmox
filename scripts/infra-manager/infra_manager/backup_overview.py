@@ -21,6 +21,8 @@ DESTINATIONS = {
     "fast-ssd": ("/mnt/pve/backup-fast", "ext4", "infra-core"),
     "nas-backup": ("/mnt/pve/nas-backup", "nfs4", "pve-infra-core"),
 }
+# Идентификатор PVE storage отличается от ID назначения restic для SSD.
+PVE_STORAGE_IDS = {"backup-fast": "fast-ssd", "nas-backup": "nas-backup"}
 RECORD_NAMES = {
     "core": "backup-last-core.json",
     "full": "backup-last-full.json",
@@ -192,10 +194,11 @@ def snapshot() -> dict:
             if not isinstance(item, dict):
                 continue
             identity = item.get("storage")
-            if identity in DESTINATIONS:
-                if identity in pve_storages:
+            if isinstance(identity, str) and identity in PVE_STORAGE_IDS:
+                destination = PVE_STORAGE_IDS[identity]
+                if destination in pve_storages:
                     raise InfraManagerError("PVE вернул дубликат хранилища")
-                pve_storages[identity] = item
+                pve_storages[destination] = item
         pve_api_available = True
     except (InfraManagerError, OSError, ValueError, TypeError):
         pve_storages = {}
