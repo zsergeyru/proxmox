@@ -146,6 +146,51 @@ def main():
             assert status == 403, "Подмена источника недопустима"
             status, _, body = request(server, "POST", "/action", {"vmid": "109", "kind": "status", "csrf": csrf}, cookie=cookie)
             assert status == 202 and "Задание принято" in body
+            # Диагностика: авторизация, строгий UUID, экранирование журнала,
+            # API для обновления без перезагрузки страницы.
+            operation_id = "a" * 32
+            safe_detail = {
+                "accepted": True,
+                "operation": {
+                    "id": operation_id, "kind": "deploy", "target": 109,
+                    "phase": "running", "created_at": "2026-10-20T18:00:00+00:00",
+                    "started_at": "2026-10-20T18:01:00+00:00",
+                    "finished_at": None, "exit_code": None,
+                },
+                "events": [{"at": "2026-10-20T18:00:00+00:00", "phase": "queued"},
+                           {"at": "2026-10-20T18:01:00+00:00", "phase": "running"}],
+                "logs": ["[ОК] <script> & проверка", "[ИНФО] Подключено"],
+                "diagnostic": "Выполнение ещё не завершено.",
+            }
+            status, _, _ = request(server, "GET", "/operations?id=" + operation_id)
+            assert status == 401
+            status, _, _ = request(server, "GET", "/api/operation?id=" + operation_id)
+            assert status == 401
+            status, _, _ = request(server, "GET", "/diagnostics.js")
+            assert status == 401
+            status, _, _ = request(server, "GET", "/operations?id=../etc/passwd", cookie=cookie)
+            assert status == 400
+            status, _, _ = request(server, "GET", "/api/operation?id=" + operation_id + "&path=/etc", cookie=cookie)
+            assert status == 400
+            with patch.object(admin, "_operation_detail", return_value=safe_detail) as fetch_detail:
+                status, _, page = request(server, "GET", "/operations?id=" + operation_id, cookie=cookie)
+                assert status == 200 and "Диагностика задания" in page
+                assert 'data-operation-id="' + operation_id + '"' in page
+                assert "&lt;script&gt; &amp; проверка" in page
+                assert "<script> &" not in page
+                assert 'src="/diagnostics.js"' in page
+                status, headers, body = request(server, "GET", "/api/operation?id=" + operation_id, cookie=cookie)
+                assert status == 200 and headers["Content-Type"].startswith("application/json")
+                assert '"phase": "running"' in body
+                assert headers["Cache-Control"] == "no-store"
+                fetch_detail.assert_called_with(operation_id)
+                status, _, script = request(server, "GET", "/diagnostics.js", cookie=cookie)
+                assert status == 200 and "setInterval(update, 4000)" in script
+            with patch.object(admin, "_operation_detail", side_effect=OSError("systemd down")):
+                status, _, page = request(server, "GET", "/operations?id=" + operation_id, cookie=cookie)
+                assert status == 200 and "недоступен" in page
+                status, _, _ = request(server, "GET", "/api/operation?id=" + operation_id, cookie=cookie)
+                assert status == 503
             status, _, _ = request(server, "GET", "/storage")
             assert status == 401, "План SSD запрещён без входа"
             status, _, body = request(server, "GET", "/storage", cookie=cookie)
