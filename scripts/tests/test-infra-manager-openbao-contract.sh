@@ -59,7 +59,6 @@ ANSIBLE_RUNTIME_PARTS=(
     persistence.yml
     pve_access.yml
     repository.yml
-    semaphore.yml
     runtime_prerequisites.yml
     runtime.yml
     openbao.yml
