@@ -101,10 +101,10 @@ def main():
         diagnostics_store.finish(task["id"], exit_code=9)
         activation_log = root / "runtime-activation.log"
         activation_log.write_text(
-            "[ИНФО] Операция активации: " + task["id"] + "\\n"
+            "[ИНФО] Операция активации: " + task["id"] + "\n"
             "[ОК] Запущена новая версия\\n"
             "[ОШИБКА] Проверка готовности не пройдена\\n"
-            "[ИНФО] Операция активации: " + uuid.uuid4().hex + "\\n"
+            "[ИНФО] Операция активации: " + uuid.uuid4().hex + "\n"
             "[ОК] Чужая операция\\n",
             encoding="utf-8",
         )
