@@ -43,7 +43,7 @@ PY_RECOVERY="$ROOT/scripts/infra-manager/infra_manager/recovery.py"
 PY_OPERATOR="$ROOT/scripts/infra-manager/infra_manager/operator.py"
 RECOVERY_HOST="$ROOT/scripts/infra-manager/host/recovery.py"
 PVE_OPERATOR="$ROOT/scripts/infra-manager/host/manager.py"
-DOCKERFILE="$ROOT/infrastructure/guests/910-infra-manager/rootfs/opt/infra-manager/compose/runtime/Dockerfile"
+DOCKERFILE="$ROOT/infrastructure/guests/910-infra-manager/rootfs/opt/infra-manager/compose/runtime-next/Dockerfile"
 REQ="$ROOT/infrastructure/guests/910-infra-manager/rootfs/opt/infra-manager/compose/runtime/requirements.txt"
 PLAN="$ROOT/scripts/infra-manager/jobs/opentofu-plan.py"
 PY_PVE_HOST="$ROOT/scripts/infra-manager/infra_manager/pve_host.py"
@@ -275,10 +275,10 @@ if set(services) != {"runtime", "openbao", "web"}:
         f"{sorted(services)}"
     )
 web = services["web"]
-if web.get("enabled") is not False or web.get("profile") != "preview":
-    raise SystemExit("Предварительный просмотр infra-web нельзя запускать по умолчанию")
-if web.get("bind") != "127.0.0.1" or web.get("port") != 3104:
-    raise SystemExit("infra-web preview должен быть доступен только на loopback")
+if web.get("enabled") is not True or web.get("auth") != "openbao-userpass":
+    raise SystemExit("infra-web должен использовать собственную авторизацию OpenBao")
+if web.get("scheme") != "https" or web.get("port") != 8443:
+    raise SystemExit("Административный доступ разрешён только по HTTPS")
 runtime = services["runtime"]
 openbao = services["openbao"]
 runtime_mounts = set(runtime.get("mounts", []))
@@ -292,8 +292,8 @@ if runtime.get("container_name") != "infra-runtime":
     raise SystemExit("provision.yaml: container_name должен быть infra-runtime")
 if runtime.get("image") != "infra-runtime:v1":
     raise SystemExit("provision.yaml: image должен быть infra-runtime:v1")
-if runtime.get("base_image") != "semaphoreui/semaphore:v2.18.30":
-    raise SystemExit("infra-runtime должен использовать Semaphore v2.18.30 как base image")
+if runtime.get("mode") != "standalone" or "base_image" in runtime:
+    raise SystemExit("Основной infra-runtime не должен использовать Semaphore")
 if runtime.get("network_mode") != "host":
     raise SystemExit("infra-runtime должен использовать network_mode=host для Packer HTTP")
 if openbao.get("container_name") != "openbao":
@@ -344,7 +344,7 @@ if state.get("mode") != "rw" or state.get("guest_path") != "/mnt/persistent-stat
 required_state = {
     "openbao-raft",
     "opentofu-state",
-    "semaphore-data",
+    "operation-records",
     "operation-locks",
 }
 state_contains = set(state.get("contains", []))
@@ -362,7 +362,6 @@ binding_pairs = {(item.get("source"), item.get("target")) for item in bindings}
 if ("/mnt/persistent-state/ansible", "/etc/infra-manager/ansible") in binding_pairs:
     raise SystemExit("Постоянный Ansible guest key не должен иметь привязку")
 required_bindings = {
-    ("/mnt/persistent-state/semaphore", "/var/lib/infra-manager/semaphore"),
     ("/mnt/persistent-state/opentofu", "/var/lib/infra-manager/opentofu"),
     ("/mnt/persistent-state/locks", "/var/lib/infra-manager/locks"),
     ("/mnt/persistent-state/openbao", "/var/lib/persistent/openbao"),
@@ -382,8 +381,6 @@ if provision["access_materialization"]["pve"]["staging_credential"] != "/run/inf
 if provision["access_materialization"]["github"]["staging_credential"] != "/run/infra-manager/bootstrap-secrets/github_proxmox_repo_ed25519":
     raise SystemExit("Bootstrap Git credential должен быть только временным")
 
-if 'semaphore_version: str = "v2.18.30"' not in settings_text:
-    raise SystemExit("Версия Semaphore в settings.py расходится с provision.yaml")
 if 'runtime_version: str = "v1"' not in settings_text:
     raise SystemExit("Версия infra-runtime в settings.py расходится с provision.yaml")
 if 'Path("/run/infra-manager/secrets")' not in settings_text:
@@ -434,18 +431,18 @@ if set(compose_services) != {"runtime", "openbao", "web"}:
         f"{sorted(compose_services)}"
     )
 preview = compose_services["web"]
-if preview.get("profiles") != ["preview"] or preview.get("read_only") is not True:
-    raise SystemExit("Нельзя автоматически включать незащищённую веб-панель")
+if "profiles" in preview or preview.get("read_only") is not True:
+    raise SystemExit("Административная панель должна быть защищена и включена")
+if "/etc/infra-manager/web/tls:/etc/infra-manager/web/tls:ro" not in preview.get("volumes", []):
+    raise SystemExit("Нет собственного HTTPS-ключа панели")
 if compose_services["runtime"].get("build", {}).get("args", {}).get("PACKER_IMAGE") != "${PACKER_IMAGE}":
     raise SystemExit("Compose должен передавать закреплённый образ Packer из provision.yaml")
 if compose_services["runtime"].get("container_name") != runtime.get("container_name"):
     raise SystemExit("container_name infra-runtime расходится с provision.yaml")
 if compose_services["runtime"].get("network_mode") != "host":
     raise SystemExit("infra-runtime Compose должен использовать network_mode=host")
-if compose_services["runtime"].get("env_file") != [
-    "/run/infra-manager/secrets/semaphore-server.env"
-]:
-    raise SystemExit("Semaphore должен получать рабочие секреты из временной области")
+if "env_file" in compose_services["runtime"]:
+    raise SystemExit("В runtime не должно быть переменных Semaphore")
 runtime_volumes = set(compose_services["runtime"].get("volumes", []))
 if "/run/infra-manager/secrets:/run/infra-manager/secrets:ro" not in runtime_volumes:
     raise SystemExit("infra-runtime должен видеть материализованные секреты только для чтения")
@@ -473,21 +470,14 @@ if not required_openbao_volumes.issubset(set(compose_openbao.get("volumes", []))
     raise SystemExit("Compose не содержит обязательные тома OpenBao")
 
 required_runtime_fragments = (
-    "provision.access_materialization.pve.ca_source",
-    "provision.access_materialization.pve.runtime_credential",
-    "provision.paths.semaphore_persistent_data",
-    "provision.paths.opentofu_persistent_state_dir",
-    "provision.persistence.target_layout.state.bindings",
+    "RUNTIME_MODE=standalone",
+    "provision.paths.operations_state",
     "OPENBAO_VERSION",
-    "openbao_seal_status",
-    "openbao_unsealed_status",
-    "infra_pve_node",
     "infra-manager-openbao-startup-unseal.service",
-    "/usr/local/sbin/infra-manager-openbao-unseal",
-    "render-opentofu-input.py",
-    "--exclude-vmid",
+    "infra-manager-operation-reconcile.service",
+    "infra-manager-backup.timer",
+    "infra-manager-portal-gateway.service",
     "docker-compose.yml",
-    "semaphore-project",
     "infra-manager-status",
 )
 for fragment in required_runtime_fragments:
