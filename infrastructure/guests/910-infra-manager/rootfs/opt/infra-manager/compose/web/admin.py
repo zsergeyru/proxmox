@@ -172,48 +172,86 @@ def _operation_detail(operation_id: str) -> dict:
     return result
 
 
-def _operation_page(operation_id: str) -> bytes:
-    """Показать текущий снимок и оставить обновление отдельному HTTPS-запросу."""
+def _operation_page(operation_id: str, csrf: str | None = None) -> bytes:
+    """Страница задания с читаемым временем и простым журналом."""
     try:
         result = _operation_detail(operation_id)
     except (OSError, ValueError, TimeoutError):
-        result = {"operation": {"phase": "недоступно"}, "events": [], "logs": [],
-                  "diagnostic": "Системный посредник недоступен. Повторяем проверку автоматически."}
+        result = {
+            "operation": {"phase": "unavailable"}, "events": [], "logs": [],
+            "diagnostic": "Системный посредник недоступен. Повторяем проверку автоматически.",
+        }
     record = result["operation"]
     events = result["events"]
-    def clean(value: object) -> str:
-        return html.escape(str(value) if value is not None else "—")
-    phases = "".join(
-        "<li>" + clean(event.get("at", "")) + " — "
-        + clean(PHASES.get(event.get("phase"), "Неизвестно"))
-        + "</li>" for event in events if isinstance(event, dict)
-    ) or "<li>Этапы ещё не записаны</li>"
-    logs = "\n".join(str(item) for item in result["logs"] if isinstance(item, str))
+    stages = "".join(
+        '<li><div class="timeline-name">' +
+        _text(PHASES.get(event.get("phase"), "Неизвестно")) +
+        '</div><div class="timeline-detail">' + _time_html(event.get("at")) +
+        '</div></li>' for event in events if isinstance(event, dict)
+    ) or '<li>Этапы ещё не записаны</li>'
+    logs = "\\n".join(str(line) for line in result["logs"] if isinstance(line, str))
+    phase = record.get("phase")
+    running = phase in {"queued", "running", "activating", "verifying"}
+    started = record.get("started_at") or record.get("created_at")
+    finished = record.get("finished_at")
+    duration = (
+        '<strong id="op-duration" data-duration-start="' +
+        _text(started) + '"' +
+        (' data-duration-end="' + _text(finished) + '"' if finished else '') +
+        '>—</strong>' if isinstance(started, str) and
+        re.fullmatch(r"\\d{4}-\\d\\d-\\d\\dT[^ ]+", started) else
+        '<strong id="op-duration">—</strong>'
+    )
     body = (
-        '<p><a href="/">← Ко всем заданиям</a></p>'
-        '<h2>Диагностика задания</h2>'
-        '<p>Идентификатор: <code>' + operation_id + '</code></p>'
+        '<div class="breadcrumbs"><a href="/#recent-operations">Задания</a> / '
+        + operation_id[:8] + '</div>'
         '<section id="operation-view" data-operation-id="' + operation_id + '">'
-        '<p>Операция: <strong id="op-kind">' + clean(record.get("kind")) + '</strong>'
-        ' · Гость: <strong id="op-target">' + clean(record.get("target")) + '</strong></p>'
-        '<p>Состояние: <strong id="op-phase">'
-        + clean(PHASES.get(record.get("phase"), record.get("phase"))) + '</strong></p>'
-        '<p>Начало: <span id="op-start">' + clean(record.get("started_at") or record.get("created_at")) + '</span>'
-        ' · Завершение: <span id="op-finish">' + clean(record.get("finished_at")) + '</span>'
-        ' · Код: <span id="op-exit">' + clean(record.get("exit_code")) + '</span></p>'
-        '<p id="op-diagnostic">' + clean(result.get("diagnostic", "")) + '</p>'
-        '<h3>Этапы выполнения</h3>'
-        '<p>Продолжительность каждого этапа обновляется при поступлении новых событий.</p>'
-        '<ol id="op-timeline">' + phases + '</ol>'
-        '<h3>Журнал задания (без секретов)</h3>'
-        '<p>Доступны только безопасные служебные сообщения. Полный журнал остаётся внутри 910.</p>'
-        '<pre id="op-log" class="diagnostic-log">' + html.escape(logs) + '</pre>'
-        '<p id="op-refresh">Обновление каждые 4 секунды.</p>'
-        '</section>'
+        '<div class="panel"><div class="section-head"><div>'
+        '<span class="item-label">Задание ' + operation_id[:8] + '</span>'
+        '<h2>Диагностика задания</h2>'
+        '</div><span id="op-phase">' + _chip(phase) + '</span></div>'
+        '<p class="page-intro">Следи за выполнением или открой эту страницу позже: '
+        'операция продолжается независимо от браузера.</p>'
+        '<div class="grid cols-3">'
+        '<div class="stat"><div class="stat-label">Действие</div><div class="stat-value" '
+        'style="font-size:20px" id="op-kind">' +
+        _text(OPERATION_NAMES.get(record.get("kind"), record.get("kind"))) + '</div>'
+        '</div><div class="stat"><div class="stat-label">Гость</div><div class="stat-value" '
+        'style="font-size:20px" id="op-target">' + _text(record.get("target")) +
+        '</div></div><div class="stat"><div class="stat-label">Длительность</div>'
+        '<div class="stat-value" style="font-size:20px">' + duration + '</div></div></div>'
+        '<div class="details-row"><span>Начало: <strong id="op-start">' +
+        _time_html(started) + '</strong></span><span>Завершение: '
+        '<strong id="op-finish">' + _time_html(finished) + '</strong></span>'
+        '<span>Код: <strong id="op-exit">' + _text(record.get("exit_code")) +
+        '</strong></span></div>'
+        '<div id="op-diagnostic" class="notice" role="status">' +
+        _text(result.get("diagnostic", "")) + '</div>'
+        '<p class="muted code">ID: ' + operation_id + '</p></div>'
+        '<div class="grid cols-2">'
+        '<section class="panel"><div class="section-head"><h3>Этапы выполнения</h3></div>'
+        '<ol id="op-timeline" class="timeline">' + stages + '</ol></section>'
+        '<section class="panel"><div class="section-head"><h3>Управление просмотром</h3>'
+        '</div><p class="muted">Данные обновляются каждые 4 секунды. '
+        'Здесь нельзя случайно перезапустить задание.</p>'
+        '<div class="actions"><a class="btn secondary" href="/#recent-operations">'
+        'Все задания</a><button class="secondary" type="button" id="op-copy">'
+        'Скопировать ID</button></div>'
+        '<p class="muted" id="op-refresh">' +
+        ("Выполняется · автообновление включено" if running else
+         "Задание завершено · журнал доступен") + '</p></section></div>'
+        '<section class="panel"><div class="section-head"><h3>Журнал задания</h3>'
+        '<button class="secondary" type="button" id="op-copy-log">Копировать</button></div>'
+        '<p class="muted">Показаны безопасные служебные сообщения. '
+        'Полный технический вывод остаётся внутри 910.</p>'
+        '<label for="op-log-search">Поиск в видимых строках</label>'
+        '<input id="op-log-search" type="search" placeholder="Поиск ошибки, шага…" '
+        'aria-label="Поиск в журнале">'
+        '<pre id="op-log" class="diagnostic-log">' + html.escape(logs) +
+        '</pre></section></section>'
         '<script src="/diagnostics.js" defer></script>'
     )
-    return _layout(body)
-
+    return _layout(body, page="operations", csrf=csrf)
 
 
 
