@@ -318,6 +318,10 @@ class Console:
             if vmid is not None:
                 message = message.replace("<VMID>", str(vmid))
             self.error(f"{message} Код ошибки: {exc.returncode}.")
+            safe_tool = tool if tool in _SAFE_EXECUTABLES else "неизвестная команда"
+            self.diagnostic(
+                f"CommandError: программа {safe_tool}; код возврата {exc.returncode}"
+            )
         elif isinstance(exc, OSError):
             self.error("Не удалось обратиться к файлу или запустить программу. Проверьте наличие необходимых файлов, программ и права доступа; затем повторите операцию.")
             self.diagnostic(_os_error_diagnostic(exc))
