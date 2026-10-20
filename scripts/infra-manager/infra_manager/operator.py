@@ -404,14 +404,20 @@ def operator_guest_task(
     try:
         if fast_plan is not None and fast_plan.mode == "fast":
             from .operation_lock import guest_operation_lock
+            from .guest_operations import _run_status
             from .self_update_fast import FastRollbackUnconfirmed, apply as apply_fast_update
             assert store is not None and operation_id is not None
             try:
                 with guest_operation_lock(vmid, "deploy"):
                     apply_fast_update(
                         fast_plan,
-                        lambda: operator_guest_status(
-                            vmid, show_secrets=show_secrets,
+                        # apply() держит эксклюзивный project.lock: нельзя
+                        # заходить повторно в run_local_guest_status(),
+                        # который пытается получить ещё одну shared-блокировку.
+                        lambda: _run_status(
+                            PveClient(), PATHS.repo_root,
+                            guest_identity(PATHS.repo_root, vmid),
+                            show_secrets=show_secrets,
                         ) == 0,
                         repo=PATHS.repo_root,
                         store=store,
