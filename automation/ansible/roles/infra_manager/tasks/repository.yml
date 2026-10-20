@@ -51,12 +51,3 @@
     group: root
     mode: preserve
   register: infra_compose_files
-
-- name: Зафиксировать ключ GitHub для Semaphore
-  ansible.builtin.copy:
-    remote_src: true
-    src: "{{ provision.access_materialization.github.known_hosts }}"
-    dest: "{{ provision.paths.semaphore_persistent_data }}/known_hosts"
-    owner: "1001"
-    group: "0"
-    mode: "0644"
