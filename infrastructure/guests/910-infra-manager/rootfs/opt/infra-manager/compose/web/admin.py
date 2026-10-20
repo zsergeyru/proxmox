@@ -504,21 +504,26 @@ def _guest_confirmation(vmid: int, kind: str, csrf: str) -> bytes:
     if kind not in guest.get("actions", []):
         raise ValueError("Операция запрещена для выбранного гостя")
     token = html.escape(csrf, quote=True)
+    label = GUEST_ACTION_LABELS[kind]
     return _layout(
-        '<p><a href="/guests?vmid=' + str(vmid) + '">← Отмена</a></p>'
+        '<div class="breadcrumbs"><a href="/guests?vmid=' + str(vmid) +
+        '">Гость #' + str(vmid) + '</a> / Подтверждение</div>'
+        '<section class="panel"><span class="item-label">Подтверждение операции</span>'
         '<h2>Подтвердите действие</h2>'
-        '<p>Гость: ' + str(vmid) + ' — <strong>'
-        + html.escape(str(guest.get("name", ""))) + '</strong></p>'
-        '<p>Операция: <strong>' + html.escape(GUEST_ACTION_LABELS[kind])
-        + '</strong>. Команда изменит состояние инфраструктуры.</p>'
-        '<form method="POST" action="/action">'
+        '<p>Гость: <strong>' + _text(guest.get("name")) +
+        '</strong> · VMID ' + str(vmid) + '</p>'
+        '<div class="notice" data-tone="warning">'
+        'Операция «' + _text(label) + '» изменит состояние инфраструктуры. '
+        'После запуска откроется страница задания с ходом выполнения.</div>'
+        '<div class="actions"><form method="POST" action="/action">'
         f'<input type="hidden" name="csrf" value="{token}">'
         f'<input type="hidden" name="vmid" value="{vmid}">'
         f'<input type="hidden" name="kind" value="{kind}">'
-        '<button type="submit">Да, выполнить</button></form>',
+        '<button type="submit">Да, выполнить</button></form>'
+        '<a class="btn secondary" href="/guests?vmid=' + str(vmid) +
+        '">Отмена</a></div></section>',
         page="guests", csrf=csrf,
     )
-
 
 
 
@@ -697,17 +702,19 @@ def _backup_overview_page(csrf: str, notice: str = "") -> bytes:
 def _backup_confirm_page(csrf: str) -> bytes:
     token = html.escape(csrf, quote=True)
     return _layout(
-        '<p><a href="/infrastructure">← Отмена</a></p>'
-        '<h2>Запустить резервирование</h2>'
+        '<div class="breadcrumbs"><a href="/infrastructure">Хранилища</a> / Подтверждение</div>'
+        '<section class="panel"><h2>Запустить резервирование</h2>'
         '<p>Штатная служба infra-manager-backup.service проверит носители, '
         'выполнит зашифрованную запись и проверку данных restic. '
-        'Задание может выполняться длительное время. '
-        'Оно не запускает восстановление и не форматирует диски.</p>'
-        '<p>Если доступен только один проверенный носитель, будет создана '
-        'одна копия с предупреждением о второй.</p>'
-        '<form method="POST" action="/infrastructure/run">'
+        'Операция может выполняться длительное время.</p>'
+        '<div class="notice" data-tone="warning">Если доступен только один '
+        'проверенный носитель, будет создана одна копия. '
+        'Восстановление и форматирование здесь не выполняются.</div>'
+        '<div class="actions"><form method="POST" action="/infrastructure/run">'
         f'<input type="hidden" name="csrf" value="{token}">'
-        '<button type="submit">Да, начать резервирование</button></form>',
+        '<button type="submit">Да, начать резервирование</button></form>'
+        '<a class="btn secondary" href="/infrastructure">Отмена</a>'
+        '</div></section>',
         page="infrastructure", csrf=csrf,
     )
 
