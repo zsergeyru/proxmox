@@ -1254,6 +1254,10 @@ def check_pve_host_support_before_signing() -> None:
             assert repo_root == ROOT
             calls.append("recovery-support")
 
+        def record_unseal(node: str) -> None:
+            assert node == "pve"
+            calls.append("openbao-unseal")
+
         def sign_client(node: str, public_key: str) -> str:
             assert node == "pve"
             assert public_key.startswith("ssh-ed25519 ")
@@ -1304,10 +1308,7 @@ def check_pve_host_support_before_signing() -> None:
             patch.object(
                 guest_deploy_module,
                 "trigger_openbao_unseal",
-                side_effect=lambda node: (
-                    calls.append("openbao-unseal") if node == "pve"
-                    else (_ for _ in ()).throw(AssertionError("wrong PVE node"))
-                ),
+                side_effect=record_unseal,
             ),
             patch.object(
                 guest_deploy_module,
