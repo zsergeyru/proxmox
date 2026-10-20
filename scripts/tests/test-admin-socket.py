@@ -102,18 +102,18 @@ def main():
         activation_log = root / "runtime-activation.log"
         activation_log.write_text(
             "[ИНФО] Операция активации: " + task["id"] + "\n"
-            "[ОК] Запущена новая версия\\n"
-            "[ОШИБКА] Проверка готовности не пройдена\\n"
+            "[ОК] Запущена новая версия\n"
+            "[ОШИБКА] Проверка готовности не пройдена\n"
             "[ИНФО] Операция активации: " + uuid.uuid4().hex + "\n"
-            "[ОК] Чужая операция\\n",
+            "[ОК] Чужая операция\n",
             encoding="utf-8",
         )
         mock_journal = SimpleNamespace(returncode=0, stdout=(
-            "[ИНФО] Шаг: получение Git\\n"
-            "[ОШИБКА] Permission denied\\n"
-            "[ИНФО] password=hunter2\\n"
-            "[ИНФО] token=abcdef\\n"
-            "SECRET_TEXT_WITHOUT_ALLOWED_PREFIX\\n"
+            "[ИНФО] Шаг: получение Git\n"
+            "[ОШИБКА] Permission denied\n"
+            "[ИНФО] password=hunter2\n"
+            "[ИНФО] token=abcdef\n"
+            "SECRET_TEXT_WITHOUT_ALLOWED_PREFIX\n"
         ))
         with (
             patch.object(admin_socket, "OperationStore", return_value=diagnostics_store),
