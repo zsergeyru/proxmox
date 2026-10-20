@@ -25,6 +25,13 @@ def main() -> None:
     )
     assert "20.10.2026" in admin._time_html("2026-10-20")
     assert "data-local-time" not in admin._time_html("Tue 2026-10-20 21:30:00 MSK")
+    assert "20.10.2026 · 21:30 MSK" in admin._systemd_time_html(
+        "Tue 2026-10-20 21:30:00 MSK"
+    )
+    assert "data-local-time" not in admin._systemd_time_html(
+        "Tue 2026-10-20 21:30:00 MSK"
+    )
+    assert "&lt;script&gt;" in admin._systemd_time_html("<script>")
     assert "&lt;script&gt;" in admin._time_html("<script>")
     assert admin._time_html(None) == "—"
 
