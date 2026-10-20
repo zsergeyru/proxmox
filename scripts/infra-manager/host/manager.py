@@ -142,6 +142,11 @@ def proxy_to_manager(arguments: list[str]) -> int:
     if arguments == ["deploy", "nas"]:
         # Вспомогательный модуль устанавливается рядом с PVE-оболочкой.
         sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from infra_manager_nas_connection import initial_nas_connection
+        connection_result = initial_nas_connection("nas", forward, OperatorError)
+        if connection_result != 0:
+            return connection_result
+
         from infra_manager_nas_bootstrap import initial_nas_access
 
         bootstrap_result = initial_nas_access("nas", forward, OperatorError)

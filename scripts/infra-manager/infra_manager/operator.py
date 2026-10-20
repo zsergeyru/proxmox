@@ -225,7 +225,7 @@ def _prepare_runtime_snapshot(operation: str, vmid: int | str, *, physical: bool
             ]
         )
 
-    if operation in {"deploy", "sync", "bootstrap", "storage-plan", "storage-prepare"}:
+    if operation in {"deploy", "sync", "bootstrap", "connection-setup", "storage-plan", "storage-prepare"}:
         # Sync берёт свежие машинные описания из Git перед формированием каталога.
         with project_checkout_lock(exclusive=True):
             _refresh_project_checkout()
@@ -519,9 +519,39 @@ def _operator_guest_task(
     )
 
 
+def operator_physical_connection_state(name: str) -> int:
+    """Сообщить оператору PVE, требуется ли первичный ввод адреса NAS."""
+
+    from .physical_host_connection import resolve_connection_values
+    import yaml
+
+    if name != "nas":
+        raise InfraManagerError("Интерактивное SSH-подключение поддерживается только для NAS")
+    manifest = PATHS.repo_root / "infrastructure" / "hosts" / name / "host.yaml"
+    try:
+        document = yaml.safe_load(manifest.read_text(encoding="utf-8"))
+        connection = document["connection"]
+        address, fingerprint = resolve_connection_values(
+            name, connection["address"], connection["ssh_host_fingerprint"]
+        )
+    except (OSError, yaml.YAMLError, KeyError, TypeError) as exc:
+        raise InfraManagerError("Не удалось проверить конфигурацию NAS") from exc
+    if isinstance(address, str) and address and isinstance(fingerprint, str) and fingerprint:
+        return 0
+    if checked_record_path(name, data_root=PATHS.data_dir).exists() or (
+        checked_record_path(name, storage=True, data_root=PATHS.data_dir).exists()
+    ):
+        raise InfraManagerError(
+            "Есть сохранённое SSH-доверие или HDD NAS, но адрес/ключ не определены. "
+            "Необходимо проверить ранее подтверждённый сервер"
+        )
+    return 21
+
+
 def operator_physical_bootstrap_state(name: str) -> int:
     """Запросить пароль только до первого подтверждённого SSH-сертификата."""
 
+    from .physical_host_connection import resolve_connection_values
     import yaml
 
     if name != "nas":
@@ -536,9 +566,10 @@ def operator_physical_bootstrap_state(name: str) -> int:
         address = connection["address"]
     except (OSError, yaml.YAMLError, KeyError, TypeError) as exc:
         raise InfraManagerError("Не удалось проверить адрес и SSH-ключ NAS") from exc
+    address, fingerprint = resolve_connection_values(name, address, fingerprint)
     if not isinstance(address, str) or not address or not isinstance(fingerprint, str) or not fingerprint:
         raise InfraManagerError(
-            "Укажите проверенные адрес и SSH-отпечаток NAS в host.yaml до первого входа"
+            "Сначала подтвердите адрес и SSH-отпечаток NAS в терминале PVE"
         )
     path = checked_record_path(name, data_root=PATHS.data_dir)
     if not path.exists():
@@ -683,6 +714,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     preparer = subparsers.add_parser("storage-prepare", help=argparse.SUPPRESS)
     preparer.add_argument("name")
+    connection_state = subparsers.add_parser("connection-state", help=argparse.SUPPRESS)
+    connection_state.add_argument("name")
+    connection_setup = subparsers.add_parser("connection-setup", help=argparse.SUPPRESS)
+    connection_setup.add_argument("name")
     state = subparsers.add_parser("bootstrap-state", help=argparse.SUPPRESS)
     state.add_argument("name")
     bootstrap = subparsers.add_parser("bootstrap", help=argparse.SUPPRESS)
@@ -750,6 +785,15 @@ def main(argv: list[str] | None = None) -> int:
             return list_local_guests(PATHS.repo_root)
         if args.command == "hosts":
             return operator_physical_task("hosts", "all")
+        if args.command in {"connection-setup", "connection-state"}:
+            if not show_secrets:
+                raise InfraManagerError("Установка SSH-доверия NAS доступна только с PVE")
+            if args.command == "connection-state":
+                return operator_physical_connection_state(args.name)
+            payload = sys.stdin.readline(2048)
+            if not payload or len(payload) > 2047 or not payload.endswith("\n"):
+                raise InfraManagerError("Не получены параметры SSH-подключения NAS")
+            return operator_physical_task("connection-setup", args.name, input_text=payload)
         if args.command in {"bootstrap", "bootstrap-state"}:
             if not show_secrets:
                 raise InfraManagerError("Начальное доверие доступно только из терминала PVE")
