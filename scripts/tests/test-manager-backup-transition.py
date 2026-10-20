@@ -42,7 +42,8 @@ def main() -> None:
     assert "semaphoreui/semaphore:" not in source
     assert "ansible" in source and "tofu" in source and "packer" in source
     active = (guest / "rootfs/opt/infra-manager/compose/docker-compose.yml").read_text()
-    assert "SEMAPHORE_VERSION" in active, "Переход нельзя делать до замены административной панели"
+    assert "SEMAPHORE_VERSION" not in active, "Нельзя возвращать старый образ Semaphore"
+    assert "runtime-next/Dockerfile" in active, "Исполнитель должен использовать независимый образ"
     print("[ОК] Расписание в 910, защита носителей и отдельный образ без Semaphore")
 
 
