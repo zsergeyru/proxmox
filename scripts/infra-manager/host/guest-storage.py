@@ -528,7 +528,7 @@ def validate_host_reconcile(config: object) -> list[dict]:
     return volumes
 
 
-def check_thin_pool_headroom() -> None:
+def check_thin_pool_headroom(missing: list[dict]) -> None:
     """Не создавать тонкие тома поверх переполненного физического пула."""
     result = command(
         "lvs", "--noheadings", "--units", "b", "--nosuffix",
@@ -547,6 +547,31 @@ def check_thin_pool_headroom() -> None:
             "LVM thin-pool pve/data переполнен или имеет недостаточный "
             "запас физического места; создание новых томов остановлено"
         )
+    # Учитываем ВСЕ thin LV, включая VM 100 и остальные гости. Проверка
+    # только data_percent недостаточна: виртуальный объём может превысить NVMe.
+    listing = command(
+        "lvs", "--noheadings", "--units", "b", "--nosuffix",
+        "--separator", ":", "-o", "lv_name,lv_size,pool_lv", "pve",
+    ).stdout
+    allocated = Decimal(0)
+    for row in listing.splitlines():
+        parts = [field.strip() for field in row.split(":")]
+        if len(parts) != 3:
+            raise StorageError("Непредвиденное описание существующих LVM-томов")
+        _name, capacity, parent = parts
+        if parent == "data":
+            try:
+                allocated += Decimal(capacity.replace(",", "."))
+            except Exception as exc:
+                raise StorageError("Неизвестный размер thin-тома в pve/data") from exc
+    requested = sum(Decimal(v["size_gb"]) * 1024**3 for v in missing)
+    if allocated + requested > size * Decimal("0.90"):
+        raise StorageError(
+            "Недостаточно гарантируемой ёмкости pve/data для всех "
+            "объявленных томов и существующих VM: безопасный лимит 90% "
+            "от размера thin-pool. Размеры в storage.yaml или NVMe "
+            "нужно согласовать; автоматическое overprovision запрещено"
+        )
 
 
 def reconcile_host_volumes(config: object) -> None:
@@ -561,8 +586,9 @@ def reconcile_host_volumes(config: object) -> None:
         # Проверять до изменения хотя бы одного тома; переполнение блокирует
         # только создание отсутствующего LV, уже существующие переподключаем.
         names = set(command("lvs", "--noheadings", "-o", "lv_name", "pve").stdout.split())
-        if any(volume["name"] not in names for volume in volumes):
-            check_thin_pool_headroom()
+        missing = [volume for volume in volumes if volume["name"] not in names]
+        if missing:
+            check_thin_pool_headroom(missing)
         for volume in volumes:
             device, uuid = ensure_volume("pve", "data", volume)
             ensure_host_mount(device, uuid, volume)
