@@ -67,7 +67,7 @@ def _inventory(repo: Path) -> tuple[str, dict[str, str]]:
             mode, kind, digest = header.split(" ")
         except ValueError as exc:
             raise InfraManagerError("Повреждён Git tree") from exc
-        if (kind != "blob" or not SHA.fullmatch(digest) or not name
+        if (kind not in {"blob", "commit"} or not SHA.fullmatch(digest) or not name
                 or "\n" in name or name in files):
             raise InfraManagerError("Некорректный Git tree")
         files[name] = mode + ":" + digest
