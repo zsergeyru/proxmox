@@ -698,61 +698,29 @@ def check_operation_lock() -> None:
                     pass
 
 
-        fallback_host = lock_dir / "host-semaphore"
-        fallback_runtime = lock_dir / "runtime-semaphore"
-        fallback_host.mkdir()
-        fallback_runtime.mkdir()
-        with (
-            patch.object(
-                operation_lock,
-                "PATHS",
-                SimpleNamespace(data_dir=lock_dir / "missing-data"),
-            ),
-            patch.object(
-                operation_lock,
-                "HOST_SEMAPHORE_DIR",
-                fallback_host,
-            ),
-            patch.object(
-                operation_lock,
-                "RUNTIME_SEMAPHORE_DIR",
-                fallback_runtime,
-            ),
+        # Semaphore больше не является запасным локальным хранилищем
+        # блокировок: отсутствие общей state/locks должно останавливать
+        # изменяющую операцию, не создавая каталог в rootfs.
+        missing = lock_dir / "missing-data"
+        with patch.object(
+            operation_lock, "PATHS", SimpleNamespace(data_dir=missing),
+        ):
+            try:
+                with operation_lock.guest_operation_lock(410, "deploy"):
+                    fail("Отсутствующие общие блокировки не должны обходиться")
+            except InfraManagerError as exc:
+                if "state/locks" not in str(exc):
+                    fail("Нужна понятная диагностика отсутствия state/locks")
+        if missing.exists():
+            fail("При отсутствии общего диска нельзя создавать lock-dir")
+
+        (lock_dir / "locks").mkdir()
+        with patch.object(
+            operation_lock, "PATHS", SimpleNamespace(data_dir=lock_dir),
         ):
             with operation_lock.guest_operation_lock(410, "deploy"):
-                expected = (
-                    fallback_host
-                    / ".infra-manager-operation-locks"
-                    / "410.lock"
-                )
-                if not expected.exists():
-                    fail("Host rollout должен использовать общий Semaphore state")
-
-        with (
-            patch.object(
-                operation_lock,
-                "PATHS",
-                SimpleNamespace(data_dir=lock_dir / "missing-data"),
-            ),
-            patch.object(
-                operation_lock,
-                "HOST_SEMAPHORE_DIR",
-                lock_dir / "missing-host-semaphore",
-            ),
-            patch.object(
-                operation_lock,
-                "RUNTIME_SEMAPHORE_DIR",
-                fallback_runtime,
-            ),
-        ):
-            with operation_lock.guest_operation_lock(420, "deploy"):
-                expected = (
-                    fallback_runtime
-                    / ".infra-manager-operation-locks"
-                    / "420.lock"
-                )
-                if not expected.exists():
-                    fail("Runtime rollout должен использовать общий Semaphore state")
+                if not (lock_dir / "locks/410.lock").is_file():
+                    fail("Должен использоваться только постоянный каталог locks")
 
 
 def check_semaphore_secret_policy() -> None:
@@ -781,6 +749,7 @@ def main() -> None:
     check_deploy_operation()
     check_status_during_self_update()
     check_dispatch()
+    check_operation_lock()
     check_semaphore_secret_policy()
     print("[ОК] Стандартные операции над гостями проверены")
 
