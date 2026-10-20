@@ -108,11 +108,7 @@ def _refresh_project_checkout() -> None:
 
     repo_root = PATHS.repo_root
     git_dir = repo_root / ".git"
-    known_hosts = (
-        PATHS.config_dir / "github_known_hosts"
-        if _standalone_runtime()
-        else PATHS.semaphore_dir / "known_hosts"
-    )
+    known_hosts = PATHS.config_dir / "github_known_hosts"
     for path, label in (
         (git_dir, "Git-репозиторий проекта"),
         (PATHS.github_key, "GitHub Deploy Key"),
@@ -396,13 +392,12 @@ def _operator_guest_task(
     if operation == "deploy":
         identity = guest_identity(PATHS.repo_root, vmid)
         if identity.role == SETTINGS.infra_manager_role:
-            # Текущий infra-runtime ещё старый, а Semaphore может не
-            # содержать новых гостей. Нельзя сообщать «полностью готов»
-            # до внешней активации и синхронизации.
+            # Нельзя сообщать «полностью готов» до внешней
+            # systemd-активации и проверки новой среды.
             console.info(
                 "Настройка завершена. После выхода текущего задания "
-                "служба активирует infra-runtime, синхронизирует Semaphore "
-                "и проверит готовность; результат — в "
+                "служба активирует infra-runtime и infra-web, "
+                "проверит готовность; результат — в "
                 "/var/log/infra-manager/runtime-activation.log"
             )
             return 0
