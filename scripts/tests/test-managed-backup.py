@@ -78,6 +78,10 @@ def check_host_denies_untrusted() -> None:
         "SSD и NAS не должны совпадать")
     text = exporter.read_text(encoding="utf-8")
     assert "subprocess.run" in text and '"pct", "exec"' in text
+    assert "semaphore-legacy.sqlite" not in text
+    assert "_optional_sqlite" not in text
+    assert 'TRANSITION_ACTIVATION = STATE / "locks/runtime-activation-pending"' in text
+    assert 'ACTIVE_910_OPERATION = STATE / "operations/active/910.json"' in text
     assert '"/run"' in text
     for forbidden in ("apt-get", "mkfs.", "parted ", "systemctl enable",
                       '"restic", "backup"'):
