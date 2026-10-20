@@ -360,6 +360,7 @@ def operator_guest_task(
     store = None
     operation_id = None
     prepared_snapshot = None
+    fast_plan = None
     if operation == "deploy":
         identity = guest_identity(PATHS.repo_root, vmid)
         if identity.role == SETTINGS.infra_manager_role:
@@ -372,9 +373,21 @@ def operator_guest_task(
             prepared_snapshot = _prepare_runtime_snapshot(
                 operation, vmid, preflight_storage=True,
             )
-            # Проверки SSD/NAS завершились из нового Git до резервирования
-            # операции. Дальнейший deploy работает с тем же снимком в runtime.
+            # Предыдущая успешная активация оставляет подтверждённый
+            # манифест файлов. Любое неожиданное изменение -> полный Ansible.
+            from .self_update_fast import plan as select_fast_plan
             store = OperationStore()
+            fast_plan = select_fast_plan(PATHS.repo_root, store=store)
+            if fast_plan.mode == "fast":
+                summary = (
+                    f"web={len(fast_plan.web)}, "
+                    f"системный Python={len(fast_plan.python)}"
+                )
+                console.info(f"Быстрый путь deploy 910: {summary}")
+            else:
+                console.info(
+                    "Полный безопасный Ansible: " + fast_plan.reason
+                )
             # Согласовать создание active/910.json с эксклюзивной
             # блокировкой резервирования PVE. После отпускания shared
             # gate активная запись остаётся и запрещает старт backup
@@ -382,12 +395,32 @@ def operator_guest_task(
             with _backup_gate():
                 record, _ = store.reserve(
                     "deploy", vmid, project_revision(PATHS.repo_root),
-                    activation_required=True,
+                    activation_required=fast_plan is None or fast_plan.mode != "fast",
                 )
                 operation_id = record["id"]
                 store.start(operation_id)
             console.info(f"Операция самообновления: {operation_id}")
     try:
+        if fast_plan is not None and fast_plan.mode == "fast":
+            from .operation_lock import guest_operation_lock
+            from .self_update_fast import apply as apply_fast_update
+            assert store is not None and operation_id is not None
+            with guest_operation_lock(vmid, "deploy"):
+                apply_fast_update(
+                    fast_plan,
+                    lambda: operator_guest_status(
+                        vmid, show_secrets=show_secrets,
+                    ) == 0,
+                    repo=PATHS.repo_root,
+                    store=store,
+                )
+                store.finish(operation_id, exit_code=0)
+            console.result(
+                f"Быстрое обновление 910 подтверждено: {operation_id}; "
+                "полный Ansible и infra-runtime не запускались"
+            )
+            completed = True
+            return 0
         task_options = {"show_secrets": show_secrets}
         if operation_id is not None:
             task_options["operation_id"] = operation_id
