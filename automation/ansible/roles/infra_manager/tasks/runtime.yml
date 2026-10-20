@@ -270,6 +270,17 @@
       or (openbao_tls_files.results | selectattr('changed') | list | length > 0)
     )
 
+# Смена образа OpenBao может запечатать существующий Raft. Если позднее
+# Ansible упадёт (например, на backup.yaml), SSH CA должен оставаться готов.
+# Используется только PVE-only существующий ключ; повторного sys/init нет.
+- name: Сразу разблокировать OpenBao после обновления контейнера 910
+  ansible.builtin.command:
+    argv:
+      - /usr/local/sbin/infra-manager-openbao-startup-unseal
+      - "{{ infra_pve_node }}"
+  changed_when: false
+  when: infra_self_update | default(false) | bool
+
 - name: Запустить управляющую среду
   ansible.builtin.command:
     argv:
