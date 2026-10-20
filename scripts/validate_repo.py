@@ -90,7 +90,6 @@ ACCESS_MATRIX = {
     ("ssh", "guest"): {"connect-root"},
     ("ssh", "identity"): {"issue"},
     ("github", "repository"): {"read"},
-    ("semaphore", "infrastructure-task"): {"execute"},
     ("openbao", "credential"): {"materialize", "update"},
     ("openbao", "ssh-ca"): {"configure", "sign"},
     ("openbao", "instance"): {"unseal"},
