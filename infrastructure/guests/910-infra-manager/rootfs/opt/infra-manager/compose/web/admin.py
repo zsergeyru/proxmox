@@ -189,7 +189,7 @@ def _operation_page(operation_id: str, csrf: str | None = None) -> bytes:
         '</div><div class="timeline-detail">' + _time_html(event.get("at")) +
         '</div></li>' for event in events if isinstance(event, dict)
     ) or '<li>Этапы ещё не записаны</li>'
-    logs = "\\n".join(str(line) for line in result["logs"] if isinstance(line, str))
+    logs = "\n".join(str(line) for line in result["logs"] if isinstance(line, str))
     phase = record.get("phase")
     running = phase in {"queued", "running", "activating", "verifying"}
     started = record.get("started_at") or record.get("created_at")
