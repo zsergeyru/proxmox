@@ -38,6 +38,7 @@ from .pve_host import (
     apply_host_requirements,
     ensure_guest_storage,
     install_openbao_host_support,
+    trigger_openbao_unseal,
     install_recovery_host_support,
     install_backup_host_support,
     issue_openbao_machine_credentials,
@@ -571,6 +572,11 @@ def _configure_guest_os(
             # Код резервирования устанавливается атомарно
             # до отложенной замены Docker, без запуска таймера или дисков.
             install_backup_host_support(context.node, repo_root)
+            # Если предыдущее самообновление остановилось после рестарта
+            # OpenBao, Raft остаётся запечатанным. Безопасно восстановить
+            # существующий OpenBao до первого запроса SSH-сертификата.
+            console.info("Проверка и разблокировка OpenBao перед SSH-доступом")
+            trigger_openbao_unseal(context.node)
 
     bootstrap_key = bootstrap_private_key
     if (
