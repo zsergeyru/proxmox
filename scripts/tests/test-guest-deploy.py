@@ -1303,6 +1303,14 @@ def check_pve_host_support_before_signing() -> None:
             ),
             patch.object(
                 guest_deploy_module,
+                "trigger_openbao_unseal",
+                side_effect=lambda node: (
+                    calls.append("openbao-unseal") if node == "pve"
+                    else (_ for _ in ()).throw(AssertionError("wrong PVE node"))
+                ),
+            ),
+            patch.object(
+                guest_deploy_module,
                 "sign_ssh_client_key",
                 side_effect=sign_client,
             ),
@@ -1328,10 +1336,11 @@ def check_pve_host_support_before_signing() -> None:
                 self_update=True,
             )
 
-        if calls[:4] != [
+        if calls[:5] != [
             "openbao-support",
             "recovery-support",
             "backup-support",
+            "openbao-unseal",
             "sign-client",
         ]:
             fail(
