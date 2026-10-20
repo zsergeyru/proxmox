@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import base64
 import importlib.util
 import json
 import sys
@@ -21,7 +22,7 @@ spec.loader.exec_module(storage)
 sys.path.insert(0, str(ROOT / "scripts/infra-manager"))
 from infra_manager import pve_host
 from infra_manager.common import InfraManagerError
-from infra_manager.storage_catalog import load_physical_storage, render_pve_guest_storage
+from infra_manager.storage_catalog import load_physical_storage, render_pve_guest_storage, render_pve_host_volumes
 
 
 def storage_config() -> dict:
@@ -716,6 +717,73 @@ def test_guest_storage_sent_to_pve() -> None:
         assert json.loads(remote[0][1]["input_text"]) == storage_config()
 
 
+def test_all_host_volumes_safe_reconcile() -> None:
+    """План deploy 910 охватывает все тома, PVE ничего не устанавливает."""
+    physical = load_physical_storage(ROOT, "pve")
+    plan = render_pve_host_volumes(physical)
+    assert set(item["name"] for item in plan["volumes"]) == {
+        "infra_state", "gogs_data", "photo_archive",
+    }
+    assert all(item["mountpoint"].startswith("/mnt/bindmounts/") for item in plan["volumes"])
+    with tempfile.TemporaryDirectory() as tmp:
+        lockdir = Path(tmp)
+        calls = []
+        def fake_command(*args, **kwargs):
+            calls.append(args)
+            if args[:3] == ("lvs", "--noheadings", "-o"):
+                return SimpleNamespace(returncode=0, stdout="infra_state gogs_data photo_archive")
+            return SimpleNamespace(returncode=0, stdout="")
+        with (
+            patch.object(storage, "STORAGE_LOCKS_DIR", lockdir),
+            patch.object(storage, "command", side_effect=fake_command),
+            patch.object(storage, "ensure_volume", side_effect=lambda _vg, _pool, volume:
+                         (Path("/dev/pve") / volume["name"], "abcde")),
+            patch.object(storage, "ensure_host_mount") as mounted,
+            patch.object(storage, "check_thin_pool_headroom") as headroom,
+        ):
+            storage.reconcile_host_volumes(plan)
+        assert mounted.call_count == 3
+        headroom.assert_not_called()
+        assert not any(args[0] in ("apt-get", "pip", "mkfs.ext4", "lvcreate") for args in calls)
+    bad = dict(plan, volume_group="other")
+    try:
+        storage.validate_host_reconcile(bad)
+    except storage.StorageError:
+        pass
+    else:
+        raise AssertionError("Другая группа томов недопустима")
+    bad = dict(plan, volumes=[dict(plan["volumes"][0], mountpoint="/etc/pve")])
+    try:
+        storage.validate_host_reconcile(bad)
+    except storage.StorageError:
+        pass
+    else:
+        raise AssertionError("Нельзя назначить запись в системный путь")
+
+
+def test_all_host_volumes_over_ssh_without_installation() -> None:
+    """Сверка передаёт исполняемый код на stdin, не оставляя скрипт в PVE."""
+    remote = []
+    with (
+        patch.object(pve_host, "_install_remote_file", side_effect=AssertionError("installation")),
+        patch.object(
+            pve_host, "_ssh_with_input",
+            side_effect=lambda *args, **kwargs: (
+                remote.append((args, kwargs))
+                or SimpleNamespace(stdout="[ОК] Общие LVM-тома PVE сверены")
+            ),
+        ),
+    ):
+        pve_host.ensure_pve_host_storage("pve", ROOT)
+    args, kwargs = remote[0]
+    assert args[:4] == ("pve", "python3", "-", "--host-reconcile")
+    plan = json.loads(base64.b64decode(args[4], validate=True))
+    assert set(v["name"] for v in plan["volumes"]) == {
+        "infra_state", "gogs_data", "photo_archive",
+    }
+    assert "def reconcile_host_volumes" in kwargs["input_text"]
+
+
 if __name__ == "__main__":
     test_contract()
     test_existing_mounts()
@@ -740,4 +808,6 @@ if __name__ == "__main__":
     test_bootstrap_guest_independent_of_shared_storage()
     test_no_storage_on_other_guests()
     test_guest_storage_sent_to_pve()
+    test_all_host_volumes_safe_reconcile()
+    test_all_host_volumes_over_ssh_without_installation()
     print("OK: Guest storage contract")
