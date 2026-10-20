@@ -57,8 +57,6 @@ docker:
         - openssh-client
         - openssl
         - bash
-        - python3
-        - py3-pip
 
       tools:
         ansible: "2.19.4"
