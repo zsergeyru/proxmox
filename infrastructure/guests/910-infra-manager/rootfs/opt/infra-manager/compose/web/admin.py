@@ -227,12 +227,13 @@ def _storage_page(csrf: str, notice: str = "") -> bytes:
             + html.escape(str(record.get("reason", "нужна проверка устройства")))
             + ". Никаких изменений на диске нет.</p>"
         )
-    return _layout(content)
+    return _layout(content, auto_refresh=state == "running")
 
 
-def _layout(inner: str) -> bytes:
+def _layout(inner: str, *, auto_refresh: bool = False) -> bytes:
     return ("""<!doctype html><html lang="ru"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+""" + ('<meta http-equiv="refresh" content="5;url=/storage">' if auto_refresh else '') + """
 <title>infra-manager</title><style>
 :root{color-scheme:dark}body{font-family:system-ui;background:#0c1525;
 color:#eaf0f7;max-width:1050px;margin:3rem auto;padding:0 1rem}
