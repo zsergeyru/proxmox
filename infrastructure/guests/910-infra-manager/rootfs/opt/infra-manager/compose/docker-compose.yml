@@ -7,6 +7,7 @@ services:
       args:
         OPENTOFU_VERSION: ${OPENTOFU_VERSION}
         INFRA_GIT_REVISION: ${INFRA_GIT_REVISION:-unknown}
+        INFRA_RUNTIME_CONTENT_REVISION: ${INFRA_RUNTIME_CONTENT_REVISION:-unknown}
         PACKER_IMAGE: ${PACKER_IMAGE}
     image: infra-runtime:${RUNTIME_VERSION}
     container_name: infra-runtime
@@ -34,6 +35,7 @@ services:
       BAO_ADDR: http://127.0.0.1:8200
       BAO_LOG_LEVEL: info
       BAO_SKIP_DROP_ROOT: "1"
+      INFRA_OPENBAO_CONFIG_REVISION: ${INFRA_OPENBAO_CONFIG_REVISION:-unknown}
       SKIP_CHOWN: "1"
     volumes:
       - /mnt/persistent-state/openbao:/openbao/file
@@ -45,6 +47,7 @@ services:
       context: ./web
       args:
         INFRA_GIT_REVISION: ${INFRA_GIT_REVISION:-unknown}
+        INFRA_WEB_CONTENT_REVISION: ${INFRA_WEB_CONTENT_REVISION:-unknown}
     image: infra-web:v1
     container_name: infra-web
     restart: unless-stopped
@@ -53,6 +56,7 @@ services:
     environment:
       INFRA_WEB_PUBLIC_HOST: ${INFRA_WEB_PUBLIC_HOST}
       INFRA_GIT_REVISION: ${INFRA_GIT_REVISION:-unknown}
+      INFRA_WEB_CONTENT_REVISION: ${INFRA_WEB_CONTENT_REVISION:-unknown}
       INFRA_RUNTIME_VERSION: ${RUNTIME_VERSION}
       INFRA_OPENBAO_VERSION: ${OPENBAO_VERSION}
       INFRA_OPENTOFU_VERSION: ${OPENTOFU_VERSION}
