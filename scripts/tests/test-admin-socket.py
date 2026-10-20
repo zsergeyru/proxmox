@@ -118,7 +118,7 @@ def main():
         with (
             patch.object(admin_socket, "OperationStore", return_value=diagnostics_store),
             patch.object(admin_socket, "ACTIVATION_LOG", activation_log),
-            patch.object(admin_socket.subprocess, "run", return_value=mock_journal) as journal,
+            patch.object(admin_socket, "run", return_value=mock_journal) as journal,
         ):
             query = {
                 "kind": "operation-detail", "vmid": 0,
@@ -136,7 +136,7 @@ def main():
             assert "hunter2" not in visible and "abcdef" not in visible
             assert "SECRET_TEXT" not in visible and "Чужая операция" not in visible
             assert "Запущена новая версия" in visible
-            assert journal.call_args.args[0][0] == "journalctl"
+            assert journal.call_args.args[0][:3] == ["timeout", "3s", "journalctl"]
             assert journal.call_args.args[0][-1] == f"infra-operation-{task['id']}.service"
             assert rejected(lambda: admin_socket.dispatch(dict(query, operation_id="../passwd")))
             assert rejected(lambda: admin_socket.dispatch(dict(query, path="/etc/passwd")))
