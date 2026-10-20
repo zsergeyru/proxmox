@@ -77,7 +77,7 @@
       items.forEach((item) => {
         const text = (item.dataset.search || item.textContent || "").toLocaleLowerCase("ru");
         const show = (!query || text.includes(query))
-          && (state === "all" || item.dataset.state === state);
+          && (state === "all" || item.dataset.state === state || item.dataset.group === state);
         item.hidden = !show;
         if (show) count += 1;
       });
