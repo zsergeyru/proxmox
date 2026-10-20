@@ -170,7 +170,8 @@ def main() -> None:
         invoked = []
         with (
             patch.object(operator, "require_runtime_activation_idle"),
-            patch.object(operator, "_prepare_runtime_snapshot", return_value="/tmp/snapshot"),
+            patch.object(operator, "_prepare_runtime_snapshot", return_value="/tmp/infra-manager-direct-123-910"),
+            patch.object(operator, "run", return_value=SimpleNamespace(returncode=0)),
             patch.object(operator, "guest_identity", return_value=identity),
             patch.object(operator, "_backup_gate", return_value=contextlib.nullcontext()),
             patch.object(operator, "project_revision", return_value="a" * 40),
