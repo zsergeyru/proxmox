@@ -499,12 +499,19 @@ def _backup_overview_page(csrf: str, notice: str = "") -> bytes:
     for item in dests[:2]:
         if item.get("configured") is True:
             configured += 1
+        pve_state = {
+            "not_checked": "Нет связи с PVE",
+            "not_registered": "Не зарегистрировано в PVE",
+            "reported_active": "PVE сообщает: активно",
+            "reported_inactive": "PVE сообщает: неактивно",
+            "unknown": "Неизвестно",
+        }.get(item.get("pve_state"), "Неизвестно")
         dest_rows.append(
             "<tr><td>" + e(item.get("id")) + "</td><td>"
             + e(item.get("mountpoint")) + "</td><td>"
             + ("Объявлен и подтверждён" if item.get("configured") is True
                else "Ожидает настройки") + "</td><td>"
-            "Текущее подключение не проверено</td></tr>"
+            + e(pve_state) + "</td></tr>"
         )
     backup_rows = []
     for key, label in (
@@ -547,7 +554,8 @@ def _backup_overview_page(csrf: str, notice: str = "") -> bytes:
         '<p><strong>' + e(summary) + '</strong></p>'
         + ('<p>' + e(notice) + '</p>' if notice else '')
         + '<p>Проверенные ранее записи не подтверждают, что SSD/NAS сейчас подключены '
-        'или что восстановление испытано.</p>'
+        'или что восстановление испытано. Даже активное PVE storage не '
+        'является проверкой идентичности физического носителя.</p>'
         '<h3>Общие тома PVE — из storage.yaml</h3>'
         '<table><tr><th>Том</th><th>Тип</th><th>Размер</th><th>Подключение</th><th>Проверка</th></tr>'
         + volume_table(volumes, include_size=True) + '</table>'
@@ -570,7 +578,9 @@ def _backup_overview_page(csrf: str, notice: str = "") -> bytes:
         'Таймер systemd: ' + e(timer_state) + '. '
         'Служба: ' + e(service_state) + '.</p>'
         '<p>Следующий запуск: ' + e(timer.get("next")) + '. '
-        'Предыдущий запуск: ' + e(timer.get("last")) + '.</p>'
+        'Предыдущий запуск: ' + e(timer.get("last"))
+        + '. Последний результат systemd: ' + e(timer.get("last_result"))
+        + '.</p>'
         + start_link
         + '<p><a href="/infrastructure">Обновить состояние</a></p>'
     )
