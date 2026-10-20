@@ -146,9 +146,8 @@ def main():
             assert status == 403, "Подмена источника недопустима"
             status, headers, body = request(server, "POST", "/action", {"vmid": "109", "kind": "status", "csrf": csrf}, cookie=cookie)
             assert status == 303 and body == ""
-            assert headers["Location"] == "/operations?id=" + "a" * 32 or (
-                status == 303 and headers["Location"].startswith("/operations?id=")
-            )
+            assert headers["Location"].startswith("/operations?id=")
+            assert len(headers["Location"].split("=", 1)[1]) == 32
             # Диагностика: авторизация, строгий UUID, экранирование журнала,
             # API для обновления без перезагрузки страницы.
             operation_id = "a" * 32
