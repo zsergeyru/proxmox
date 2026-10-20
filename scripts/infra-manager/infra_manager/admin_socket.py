@@ -324,16 +324,18 @@ def _guests_catalog() -> tuple[list[dict], bool]:
     if identities:
         authorize_action("status", identities[0].vmid)
     for kind in ("sync", "repair", "deploy"):
-        candidates = sorted(allowed[kind])
+        candidates = [
+            guest.vmid for guest in identities
+            if guest.vmid in allowed[kind]
+            and not (kind == "deploy" and guest.role == SETTINGS.infra_manager_role)
+        ]
         if not candidates:
+            allowed[kind] = set()
             continue
         try:
-            authorize_action(kind, candidates[-1] if kind == "deploy" and identities
-                             and candidates[-1] != next(
-                                 (g.vmid for g in identities if g.role == SETTINGS.infra_manager_role),
-                                 None) else candidates[0])
+            authorize_action(kind, candidates[0])
         except InfraManagerError:
-            # Некоторые операции заблокированы access.yaml или ролью владельца.
+            # Отсутствующие configure-права не должны скрывать список гостей.
             allowed[kind] = set()
     # PVE недоступен -> состояние "не проверено", не ложное "выключен".
     resources: dict[int, dict] = {}
