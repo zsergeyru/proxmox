@@ -239,8 +239,12 @@ def _prepare_runtime_snapshot(
     if operation in {"deploy", "sync", "bootstrap", "storage-plan", "storage-prepare"}:
         # Снимок и новая проверка дисков обязаны происходить при одном checkout.
         with project_checkout_lock(exclusive=True):
+            phase_started = time.monotonic()
             _refresh_project_checkout()
+            console.timing("Git fetch/checkout", time.monotonic() - phase_started)
+            phase_started = time.monotonic()
             copy_snapshot()
+            console.timing("Снимок проекта для deploy", time.monotonic() - phase_started)
             if preflight_storage:
                 # Новая точка входа находится в обновлённом Git, а не в
                 # /usr/local/lib/infra-manager текущего процесса. Запуск
@@ -251,7 +255,10 @@ def _prepare_runtime_snapshot(
                         "В обновлённой Git-версии нет доверенной проверки SSD/NAS"
                     )
                 console.info("Проверка SSD/NAS кодом обновлённой Git-версии")
+                phase_started = time.monotonic()
                 run([sys.executable, str(entrypoint)], stream_output=True)
+                console.timing("Предварительная проверка SSD/NAS",
+                               time.monotonic() - phase_started)
     else:
         with project_checkout_lock(exclusive=False):
             copy_snapshot()
