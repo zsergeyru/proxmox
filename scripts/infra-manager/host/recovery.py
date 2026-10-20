@@ -43,7 +43,6 @@ OPENBAO_TLS_CA_CERT = OPENBAO_TLS_DIR / "ca.crt"
 
 OPENBAO_RAFT_DIR = STATE_DIR / "openbao" / "raft"
 OPENTOFU_STATE = STATE_DIR / "opentofu" / "state" / "proxmox.tfstate"
-SEMAPHORE_DB = STATE_DIR / "semaphore" / "semaphore.sqlite"
 
 LOCK_PATH = Path("/run/lock/infra-manager-recovery.lock")
 BOOTSTRAP_URL = (
@@ -251,7 +250,6 @@ def verify_recovery_state(*, require_approle: bool = True) -> None:
     required_files = [
         RECOVERY_GITHUB_KEY,
         OPENBAO_UNSEAL_KEY,
-        SEMAPHORE_DB,
     ]
     if require_approle:
         required_files.extend(
