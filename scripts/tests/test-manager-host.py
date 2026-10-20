@@ -66,6 +66,39 @@ def test_host_proxy() -> None:
     ]]
 
 
+def test_host_explicit_branch_propagation() -> None:
+    """На PVE можно явно выбрать ветку, но не внедрить команды через ENV."""
+    calls: list[list[str]] = []
+
+    def fake_run(argv: list[str], **kwargs: object):
+        del kwargs
+        calls.append(argv)
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    with (
+        patch.dict(host.os.environ, {"INFRA_PROJECT_BRANCH": "feature/910-operation-store"}),
+        patch.object(host, "manager_identity", return_value=(920, "infra-manager")),
+        patch.object(host, "verify_manager"),
+        patch.object(host, "guest_running", return_value=True),
+        patch.object(host.socket, "gethostname", return_value="pve.example"),
+        patch.object(host, "run", side_effect=fake_run),
+    ):
+        assert host.proxy_to_manager(["status", "920"]) == 0
+    assert calls and "INFRA_PROJECT_BRANCH=feature/910-operation-store" in calls[0]
+    assert calls[0].index("INFRA_PROJECT_BRANCH=feature/910-operation-store") < calls[0].index(
+        "/usr/local/sbin/infra-manager"
+    )
+
+    for invalid in ("feature/other branch", "feature/../../main", "one//two", "-shell"):
+        with patch.dict(host.os.environ, {"INFRA_PROJECT_BRANCH": invalid}):
+            try:
+                host.selected_project_branch()
+            except host.OperatorError:
+                pass
+            else:
+                raise AssertionError("Некорректная ветка не должна передаваться гостю")
+
+
 def test_host_repair_starts_manager() -> None:
     with (
         patch.object(
@@ -645,6 +678,7 @@ def test_public_command_contract() -> None:
 
 def main() -> None:
     test_host_proxy()
+    test_host_explicit_branch_propagation()
     test_host_repair_starts_manager()
     test_host_refuses_stopped_manager_for_regular_commands()
     test_host_verifies_manager_ownership()
