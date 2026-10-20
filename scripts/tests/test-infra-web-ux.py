@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import importlib.util
+from html.parser import HTMLParser
 import sys
 from pathlib import Path
 from unittest.mock import patch
@@ -15,6 +16,46 @@ spec = importlib.util.spec_from_file_location("infra_web_ui_ux", WEB / "admin.py
 assert spec and spec.loader
 admin = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(admin)
+
+
+class StructureCheck(HTMLParser):
+    """Не допускаем незакрытые блоки, вложенные ссылки/формы и лишний main."""
+
+    VOID = frozenset({"meta", "link", "input", "br", "hr", "img", "source", "wbr"})
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.stack = []
+        self.main_count = 0
+        self.forms = 0
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "main":
+            self.main_count += 1
+        if tag in {"a", "form"} and tag in self.stack:
+            raise AssertionError(f"Вложенный {tag} в HTML")
+        if tag == "form":
+            self.forms += 1
+        if tag not in self.VOID:
+            self.stack.append(tag)
+
+    def handle_endtag(self, tag):
+        if not self.stack or self.stack[-1] != tag:
+            raise AssertionError(
+                f"Неверная структура HTML: закрывается {tag}, ожидался {self.stack[-1] if self.stack else 'пусто'}"
+            )
+        self.stack.pop()
+
+
+def check_markup(page: str, *, authenticated: bool):
+    parser = StructureCheck()
+    parser.feed(page)
+    parser.close()
+    assert not parser.stack, ("Не закрыты HTML-теги", parser.stack)
+    assert parser.main_count == (1 if authenticated else 0), "Неверная рабочая область"
+    if authenticated:
+        assert parser.forms >= 1, "Должна быть доступна защищённая форма выхода"
+
 
 
 def main() -> None:
@@ -117,9 +158,12 @@ def main() -> None:
     assert 'id="timezone-select"' in operation
     assert 'name="csrf" value="csrf-token"' in operation
 
+    for markup in (home, listing, card, confirmation, operation):
+        check_markup(markup, authenticated=True)
     login = admin._login().decode()
     assert 'action="/login"' in login
     assert 'class="login-panel"' in login
+    check_markup(login, authenticated=False)
     assert "Версии компонентов" in login
     assert 'id="timezone-select"' not in login
     css = (WEB / "ui.css").read_text(encoding="utf-8")
