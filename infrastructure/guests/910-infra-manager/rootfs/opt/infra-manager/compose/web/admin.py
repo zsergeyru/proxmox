@@ -650,6 +650,20 @@ BACKUP_OVERALL = {
 }
 
 
+BACKUP_REQUEST_ERRORS = {
+    "permission_denied": "Нет прав для ручного запуска резервирования. Проверьте access.yaml.",
+    "media_not_ready": "SSD и NAS ещё не подтверждены. Откройте «Подготовка SSD» или проверьте NAS.",
+    "already_running": "Резервирование уже идёт. Повторный запуск не требуется.",
+    "systemd_unavailable": "Системная служба резервирования временно недоступна.",
+    "service_missing": "Служба резервирования не установлена. Проверьте развёртывание 910.",
+    "start_failed": "systemd не смог запустить резервирование. Нужен журнал службы 910.",
+}
+
+
+class BackupRequestError(ValueError):
+    """Разрешённый для отображения оператору код отказа, без сырых подробностей."""
+
+
 def _backup_request(kind: str) -> dict:
     """Системный посредник возвращает только безопасные агрегированные поля."""
     if kind not in {"backup-overview", "backup-run"}:
@@ -666,7 +680,12 @@ def _backup_request(kind: str) -> dict:
     if len(raw) > 65536 or not raw.endswith(b"\n"):
         raise ValueError("Посредник не вернул ограниченный ответ резервирования")
     data = json.loads(raw)
-    if not isinstance(data, dict) or data.get("accepted") is not True:
+    if not isinstance(data, dict):
+        raise ValueError("Неизвестный ответ посредника")
+    if data.get("accepted") is not True:
+        code = data.get("code")
+        if kind == "backup-run" and isinstance(code, str) and code in BACKUP_REQUEST_ERRORS:
+            raise BackupRequestError(BACKUP_REQUEST_ERRORS[code])
         raise ValueError("Посредник отклонил запрос резервирования")
     if kind == "backup-overview" and not isinstance(data.get("overview"), dict):
         raise ValueError("Некорректное состояние резервирования")
@@ -755,6 +774,7 @@ def _backup_overview_page(csrf: str, notice: str = "") -> bytes:
         "unknown": "Не удалось проверить",
     }.get(timer.get("service"), "Не удалось проверить")
     restored = backup.get("restore_tested") is True
+    last_failed = timer.get("last_result") in {"exit-code", "timeout", "signal"}
     summary = BACKUP_OVERALL.get(backup.get("overall"), "Неизвестное состояние копий")
     token = html.escape(csrf, quote=True)
     start_link = (
@@ -769,7 +789,13 @@ def _backup_overview_page(csrf: str, notice: str = "") -> bytes:
             "success" if backup.get("overall") == "two_recorded_copies"
             else "warning"
         ) + '" role="status"><strong>' + e(summary) + '</strong></div>'
-        + ('<p>' + e(notice) + '</p>' if notice else '')
+        + ('<div class="notice" data-tone="warning" role="alert">'
+           + e(notice) + '</div>' if notice else '')
+        + ('<div class="notice" data-tone="danger" role="alert">'
+           'Последнее резервирование завершилось ошибкой. '
+           'В терминале PVE посмотрите журнал гостя 910: '
+           '<code>pct exec 910 -- journalctl -u infra-manager-backup.service -n 40 --no-pager</code>. '
+           'Не публикуйте секреты из журнала.</div>' if last_failed else '')
         + '<p>Проверенные ранее записи не подтверждают, что SSD/NAS сейчас подключены '
         'или что восстановление испытано. Даже активное PVE storage не '
         'является проверкой идентичности физического носителя.</p>'
@@ -1544,10 +1570,16 @@ class Handler(BaseHTTPRequestHandler):
                 return
             try:
                 _backup_request("backup-run")
+            except BackupRequestError as exc:
+                self._reply(HTTPStatus.CONFLICT, _backup_overview_page(
+                    session["csrf"], str(exc),
+                ))
+                return
             except (OSError, ValueError, TimeoutError):
-                self._reply(HTTPStatus.BAD_REQUEST, _backup_overview_page(
+                self._reply(HTTPStatus.SERVICE_UNAVAILABLE, _backup_overview_page(
                     session["csrf"],
-                    "Резервирование не принято. Проверьте настройки и состояние службы.",
+                    "Не удалось обратиться к системному посреднику. "
+                    "Проверьте infra-manager status 910.",
                 ))
                 return
             self._reply(HTTPStatus.SEE_OTHER, b"", location="/infrastructure?started=1")
