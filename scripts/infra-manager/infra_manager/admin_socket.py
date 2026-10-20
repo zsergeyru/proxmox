@@ -11,7 +11,6 @@ import os
 import re
 import socketserver
 import stat
-import subprocess
 from datetime import datetime
 from pathlib import Path
 
@@ -170,16 +169,16 @@ def _filter_log(lines: list[str]) -> list[str]:
 def _operation_journal(operation_id: str) -> list[str]:
     """Только заранее известный systemd unit конкретного UUID, без shell."""
     try:
-        outcome = subprocess.run(
-            ["journalctl", "--no-pager", "--quiet", "--output=cat", "--lines=50",
+        outcome = run(
+            ["timeout", "3s", "journalctl", "--no-pager", "--quiet",
+             "--output=cat", "--lines=50",
              "--unit", f"infra-operation-{operation_id}.service"],
-            capture_output=True, text=True, encoding="utf-8",
-            errors="replace", timeout=3, check=False,
+            capture_output=True, check=False,
         )
         if outcome.returncode:
             return []
         return _filter_log(outcome.stdout[:MAX_LOG_FILE].splitlines())
-    except (OSError, subprocess.TimeoutExpired):
+    except OSError:
         return []
 
 
