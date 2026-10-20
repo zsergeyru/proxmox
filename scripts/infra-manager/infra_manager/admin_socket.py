@@ -11,12 +11,11 @@ import os
 import re
 import socketserver
 import stat
-import subprocess
 from pathlib import Path
 
 import yaml
 
-from .common import InfraManagerError
+from .common import InfraManagerError, run
 from .guest_catalog import find_guest_by_role
 from .guest_operations import operation_guests
 from .operation_store import OperationStore
@@ -86,10 +85,7 @@ def dispatch(request: dict) -> dict:
         "/usr/bin/python3", "-m", "infra_manager.operation_runner",
         "run", kind, str(vmid), "--request-id", operation_id,
     ]
-    proc = subprocess.run(
-        command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        timeout=25, check=False,
-    )
+    proc = run(command, check=False, capture_output=True)
     if proc.returncode:
         raise InfraManagerError(
             "Не удалось создать задание systemd; проверьте состояние и идентификатор"
