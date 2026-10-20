@@ -529,7 +529,13 @@ def validate_host_reconcile(config: object) -> list[dict]:
 
 
 def check_thin_pool_headroom(missing: list[dict]) -> None:
-    """Не создавать тонкие тома поверх переполненного физического пула."""
+    """Разрешить создание только при реальном физическом запасе thin-pool.
+
+    LVM-thin допускает виртуальный overprovision: сумма размеров уже
+    созданных VM/LV не определяет свободное физическое место. При создании
+    новых томов консервативно предполагаем, что они могут заполниться
+    целиком, и оставляем минимум 10% пула (или 10 ГиБ) нетронутыми.
+    """
     result = command(
         "lvs", "--noheadings", "--units", "b", "--nosuffix",
         "-o", "lv_size,data_percent,metadata_percent", "pve/data",
@@ -537,40 +543,30 @@ def check_thin_pool_headroom(missing: list[dict]) -> None:
     if len(result) != 3:
         raise StorageError("Не удалось проверить физическую ёмкость pve/data")
     try:
-        from decimal import Decimal
-        size, used, metadata = (Decimal(value.replace(",", ".")) for value in result)
-    except Exception as exc:
-        raise StorageError("Некорректные метрики LVM thin-pool") from exc
-    if (size <= 0 or not 0 <= used < 90 or not 0 <= metadata < 90
-            or size * (100 - used) / 100 < 10 * 1024**3):
-        raise StorageError(
-            "LVM thin-pool pve/data переполнен или имеет недостаточный "
-            "запас физического места; создание новых томов остановлено"
+        from decimal import Decimal, InvalidOperation
+
+        size, used, metadata = (
+            Decimal(value.replace(",", ".")) for value in result
         )
-    # Учитываем ВСЕ thin LV, включая VM 100 и остальные гости. Проверка
-    # только data_percent недостаточна: виртуальный объём может превысить NVMe.
-    listing = command(
-        "lvs", "--noheadings", "--units", "b", "--nosuffix",
-        "--separator", ":", "-o", "lv_name,lv_size,pool_lv", "pve",
-    ).stdout
-    allocated = Decimal(0)
-    for row in listing.splitlines():
-        parts = [field.strip() for field in row.split(":")]
-        if len(parts) != 3:
-            raise StorageError("Непредвиденное описание существующих LVM-томов")
-        _name, capacity, parent = parts
-        if parent == "data":
-            try:
-                allocated += Decimal(capacity.replace(",", "."))
-            except Exception as exc:
-                raise StorageError("Неизвестный размер thin-тома в pve/data") from exc
-    requested = sum(Decimal(v["size_gb"]) * 1024**3 for v in missing)
-    if allocated + requested > size * Decimal("0.90"):
+        if not all(value.is_finite() for value in (size, used, metadata)):
+            raise InvalidOperation
+    except (InvalidOperation, ValueError) as exc:
+        raise StorageError("Некорректные метрики LVM thin-pool") from exc
+
+    if size <= 0 or not 0 <= used < 90 or not 0 <= metadata < 90:
         raise StorageError(
-            "Недостаточно гарантируемой ёмкости pve/data для всех "
-            "объявленных томов и существующих VM: безопасный лимит 90% "
-            "от размера thin-pool. Размеры в storage.yaml или NVMe "
-            "нужно согласовать; автоматическое overprovision запрещено"
+            "LVM thin-pool pve/data переполнен либо близок к переполнению "
+            "(данные или метаданные не менее 90%)"
+        )
+
+    requested = sum(Decimal(volume["size_gb"]) * 1024**3 for volume in missing)
+    available = size * (100 - used) / 100
+    reserve = max(Decimal(10 * 1024**3), size * Decimal("0.10"))
+    if requested <= 0 or available - requested < reserve:
+        raise StorageError(
+            "Недостаточно свободного физического места в pve/data "
+            "для новых томов с резервом минимум 10% или 10 ГиБ. "
+            "Создание остановлено без изменения существующих данных"
         )
 
 
