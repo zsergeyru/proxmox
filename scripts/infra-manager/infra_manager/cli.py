@@ -16,12 +16,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     subparsers = parser.add_subparsers(dest="command")
 
-    semaphore_parser = subparsers.add_parser(
-        "semaphore-project",
-        help="синхронизировать проект Semaphore",
-    )
-    semaphore_parser.set_defaults(handler="semaphore-project")
-
     status_parser = subparsers.add_parser(
         "status",
         help="проверить готовность infra-manager",
@@ -155,11 +149,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.command is None:
             parser.print_help()
             return 0
-
-        if args.handler == "semaphore-project":
-            from .semaphore import configure_project
-
-            return configure_project()
 
         if args.handler == "status":
             from .status import check_status
