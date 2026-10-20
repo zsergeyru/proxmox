@@ -89,6 +89,10 @@ def main() -> None:
     activate = (ROOT / "scripts/infra-manager/commands/activate-runtime.sh").read_text()
     assert "RUNTIME_MODE=standalone" in activate
     assert "python3 -m infra_manager.operation_activation verifying" in activate
+    assert 'TRANSITION_MARKER="/mnt/persistent-state/locks/runtime-activation-pending"' in activate
+    assert 'ACTIVATION_MARKER="$TRANSITION_MARKER"' in activate
+    assert 'MARKER_VERIFIED=1' in activate
+    assert "/var/lib/semaphore" not in activate
     print("[ОК] Рабочий infra-runtime не зависит от Semaphore")
 
 
