@@ -1,10 +1,4 @@
 ---
-- name: Дождаться запуска Semaphore
-  ansible.builtin.wait_for:
-    host: 127.0.0.1
-    port: 3000
-    timeout: 120
-
 - name: Проверить управляющие средства
   ansible.builtin.command:
     argv: "{{ item }}"
@@ -14,17 +8,3 @@
     - [docker, exec, infra-runtime, ansible, --version]
     - [docker, exec, infra-runtime, python3, -c, "import proxmoxer, yaml, jsonschema"]
   changed_when: false
-
-- name: Настроить проект Semaphore
-  ansible.builtin.command:
-    argv:
-      - python3
-      - -m
-      - infra_manager
-      - semaphore-project
-  environment:
-    PYTHONPATH: "{{ provision.paths.python_package }}"
-    INFRA_PROJECT_BRANCH: "{{ infra_project_branch | default(lookup('env', 'INFRA_PROJECT_BRANCH') | default('main', true), true) }}"
-  changed_when: true
-  when: not (infra_self_update | default(false) | bool)
-

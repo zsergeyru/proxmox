@@ -125,6 +125,8 @@ def proxy_to_manager(arguments: list[str]) -> int:
             "env",
             f"INFRA_PVE_NODE={socket.gethostname().split('.')[0]}",
             f"INFRA_MANAGER_COLOR={color_mode()}",
+            *([f"INFRA_PROJECT_BRANCH={os.environ['INFRA_PROJECT_BRANCH']}"]
+              if "INFRA_PROJECT_BRANCH" in os.environ else []),
             GUEST_COMMAND,
             "--trusted-pve",
             *command,

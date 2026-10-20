@@ -136,6 +136,26 @@ jobs:
       - name: Run guest operation checks
         run: python scripts/tests/test-guest-operations.py
 
+      - name: Check protected persistent operation store
+        run: python scripts/tests/test-operation-store.py
+
+      - name: Check manager-owned backup preflight
+        run: python scripts/tests/test-managed-backup.py
+
+      - name: Check staged runtime without Semaphore
+        run: python scripts/tests/test-standalone-runtime.py
+
+      - name: Check infra-web readonly preview
+        run: python scripts/tests/test-infra-web.py
+
+      - name: Check authenticated infra-web and restricted system socket
+        run: |
+          python scripts/tests/test-infra-web-admin.py
+          python scripts/tests/test-admin-socket.py
+
+      - name: Check managed backup and standalone runtime transition
+        run: python scripts/tests/test-manager-backup-transition.py
+
       - name: Check safe Sync does not update software
         run: python scripts/tests/test-safe-sync.py
 
@@ -293,14 +313,12 @@ jobs:
           # shared globals declared in 00-common.sh are consumed across files.
           shellcheck -S warning -e SC2034 "${files[@]}"
 
-      - name: Run infra-manager guest contract
-        run: bash scripts/tests/test-infra-manager-guest-contract.sh
+      - name: Run infra-manager standalone and recovery contract
+        run: python scripts/tests/test-manager-standalone-contract.py
 
       - name: Run infra-manager OpenBao contract
         run: bash scripts/tests/test-infra-manager-openbao-contract.sh
 
-      - name: Run infra-manager tooling contract
-        run: bash scripts/tests/test-infra-manager-tooling-contract.sh
 
       - name: Run infra-manager SSH contract
         run: bash scripts/tests/test-infra-manager-ssh-contract.sh
@@ -370,8 +388,12 @@ jobs:
           path = Path(os.environ["INFRA_MANAGER_DIR"]) / "rootfs/opt/infra-manager/compose/docker-compose.yml"
           data = yaml.safe_load(path.read_text(encoding="utf-8"))
           services = data.get("services", {})
-          if set(services) != {"runtime", "openbao"}:
+          if set(services) != {"runtime", "openbao", "web"}:
               raise SystemExit(f"Unexpected services: {sorted(services)}")
+          if services["web"].get("container_name") != "infra-web" or services["web"].get("read_only") is not True:
+              raise SystemExit("Authenticated infra-web must use protected readonly container")
+          if "profiles" in services["web"]:
+              raise SystemExit("Protected administrative infra-web must start in default Compose")
           if services["runtime"].get("image") != "infra-runtime:${RUNTIME_VERSION}":
               raise SystemExit("infra-runtime image must use pinned runtime version variable")
           if services["runtime"].get("container_name") != "infra-runtime":
@@ -493,6 +515,41 @@ jobs:
 
           python3 scripts/tests/test-openbao-live.py
           rm -f "$compat_config"
+
+      - name: Build infra-web preview image
+        run: |
+          docker build -t infra-web:ci "$INFRA_MANAGER_DIR/rootfs/opt/infra-manager/compose/web"
+          docker run --rm --entrypoint python3 infra-web:ci -m py_compile /opt/infra-web/app.py /opt/infra-web/admin.py
+
+      - name: Build independent infra-runtime without Semaphore
+        run: |
+          docker build \
+            --build-arg OPENTOFU_VERSION=1.12.6 \
+            --build-arg PACKER_IMAGE="$(python3 -c 'import os,yaml; from pathlib import Path; p=Path(os.environ["INFRA_MANAGER_DIR"])/"provision.yaml"; print(yaml.safe_load(p.read_text())["docker"]["services"]["runtime"]["tools"]["packer_image"])')" \
+            -f "$INFRA_MANAGER_DIR/rootfs/opt/infra-manager/compose/runtime-next/Dockerfile" \
+            -t infra-runtime:next \
+            "$INFRA_MANAGER_DIR/rootfs/opt/infra-manager/compose"
+          docker run --rm infra-runtime:next tofu version
+          docker run --rm infra-runtime:next packer version
+          docker run --rm infra-runtime:next ansible --version
+          docker run --rm --entrypoint python3 infra-runtime:next -c 'import proxmoxer, yaml, jsonschema'
+          if docker run --rm --entrypoint sh infra-runtime:next -c 'test -e /etc/semaphore'; then
+            echo 'Next runtime unexpectedly includes Semaphore'
+            exit 1
+          fi
+
+      - name: Build Semaphore-free runtime candidate
+        run: |
+          docker build \
+            -f "$INFRA_MANAGER_DIR/rootfs/opt/infra-manager/compose/runtime-next/Dockerfile" \
+            --build-arg OPENTOFU_VERSION=1.12.6 \
+            --build-arg PACKER_IMAGE="$(python3 -c 'import os,yaml; from pathlib import Path; p=Path(os.environ["INFRA_MANAGER_DIR"])/"provision.yaml"; print(yaml.safe_load(p.read_text())["docker"]["services"]["runtime"]["tools"]["packer_image"])')" \
+            -t infra-runtime:standalone-test \
+            "$INFRA_MANAGER_DIR/rootfs/opt/infra-manager/compose"
+          docker run --rm --entrypoint tofu infra-runtime:standalone-test version
+          docker run --rm --entrypoint ansible infra-runtime:standalone-test --version
+          docker run --rm --entrypoint packer infra-runtime:standalone-test version
+          docker run --rm --entrypoint python3 infra-runtime:standalone-test -c 'import proxmoxer, yaml, jsonschema'
 
       - name: Build infra-runtime image
         run: |

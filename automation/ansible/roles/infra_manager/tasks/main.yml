@@ -12,8 +12,8 @@
   ansible.builtin.import_tasks: bootstrap_openbao.yml
   when: (provision_phase | default('full')) == 'recovery'
 
-- name: Настроить Semaphore
-  ansible.builtin.import_tasks: semaphore.yml
+- name: Подготовить общий Git-доступ и описание OpenTofu
+  ansible.builtin.import_tasks: runtime_prerequisites.yml
   when: (provision_phase | default('full')) in ['full', 'bootstrap']
 
 - name: Установить и запустить управляющую среду

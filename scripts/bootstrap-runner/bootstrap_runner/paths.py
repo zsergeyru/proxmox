@@ -57,9 +57,6 @@ class BootstrapPathsMixin:
         self.host_state_opentofu_file = (
             self.host_state_dir / "opentofu" / "state" / "proxmox.tfstate"
         )
-        self.host_state_semaphore_db = (
-            self.host_state_dir / "semaphore" / "semaphore.sqlite"
-        )
         self.host_root_authorized_keys = Path("/root/.ssh/authorized_keys")
         self.host_ssh_public_key = Path("/etc/ssh/ssh_host_ed25519_key.pub")
         self.host_pve_root_key_comment = "infra-manager-pve-root"

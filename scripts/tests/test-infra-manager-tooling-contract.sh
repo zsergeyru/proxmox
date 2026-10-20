@@ -192,8 +192,15 @@ import sys, yaml
 path = Path(sys.argv[1])
 data = yaml.safe_load(path.read_text(encoding='utf-8'))
 services = data.get('services', {})
-if set(services) != {'runtime', 'openbao'}:
+if set(services) != {'runtime', 'openbao', 'web'}:
     raise SystemExit(f'unexpected services: {sorted(services)}')
+web = services['web']
+if web.get('profiles') != ['preview'] or web.get('network_mode') != 'host':
+    raise SystemExit('infra-web preview must remain outside default Compose deployment')
+if web.get('read_only') is not True:
+    raise SystemExit('infra-web must have a read-only rootfs')
+if '/mnt/persistent-state/operations:/srv/operations:ro' not in web.get('volumes', []):
+    raise SystemExit('infra-web may read only the operations state')
 
 runtime = services['runtime']
 openbao = services['openbao']

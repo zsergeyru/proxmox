@@ -66,6 +66,29 @@ def test_host_proxy() -> None:
     ]]
 
 
+def test_host_explicit_branch_propagation() -> None:
+    """На PVE можно явно выбрать ветку, но не внедрить команды через ENV."""
+    calls: list[list[str]] = []
+
+    def fake_run(argv: list[str], **kwargs: object):
+        del kwargs
+        calls.append(argv)
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    with (
+        patch.dict(host.os.environ, {"INFRA_PROJECT_BRANCH": "feature/910-operation-store"}),
+        patch.object(host, "manager_identity", return_value=(920, "infra-manager")),
+        patch.object(host, "verify_manager"),
+        patch.object(host, "guest_running", return_value=True),
+        patch.object(host.socket, "gethostname", return_value="pve.example"),
+        patch.object(host, "run", side_effect=fake_run),
+    ):
+        assert host.proxy_to_manager(["status", "920"]) == 0
+    assert calls and "INFRA_PROJECT_BRANCH=feature/910-operation-store" in calls[0]
+    assert calls[0].index("INFRA_PROJECT_BRANCH=feature/910-operation-store") < calls[0].index(
+        "/usr/local/sbin/infra-manager"
+    )
+
 def test_host_repair_starts_manager() -> None:
     with (
         patch.object(
@@ -286,42 +309,49 @@ def test_operator_guest_task_secret_policy() -> None:
         "Операция deploy для гостя 410 не завершена (код 7). Выполните infra-manager status 410, устраните указанную выше причину и повторите операцию."
     )
 
-    with (
-        patch.object(
-            operator,
-            "_prepare_runtime_snapshot",
-            return_value="/tmp/infra-manager-direct-test-910",
-        ),
-        patch.object(
-            operator,
-            "run",
-            return_value=SimpleNamespace(returncode=0),
-        ),
-        patch.object(
-            operator,
-            "guest_identity",
-            return_value=SimpleNamespace(
-                vmid=910,
-                name="infra-manager",
-                role=operator.SETTINGS.infra_manager_role,
-            ),
-        ) as identity,
-        patch.object(
-            operator, "operator_guest_status", return_value=0
-        ) as status,
-        patch.object(operator, "console") as console,
-    ):
-        assert operator.operator_guest_task(
-            "deploy",
-            910,
-            show_secrets=True,
-        ) == 0
+    # Самообновление не должно возвращать успех до проверки systemd.
+    from infra_manager.operation_store import OperationStore
 
-    identity.assert_called_once_with(operator.PATHS.repo_root, 910)
-    status.assert_not_called()
-    info = console.info.call_args.args[0]
-    assert "синхронизирует Semaphore" in info
-    assert "runtime-activation.log" in info
+    with tempfile.TemporaryDirectory() as directory:
+        store = OperationStore(Path(directory) / "operations", require_mount=False)
+        with (
+            patch("infra_manager.operation_store.OperationStore", return_value=store),
+            patch.object(operator, "project_revision", return_value="abc123"),
+            patch.object(
+                operator,
+                "_prepare_runtime_snapshot",
+                return_value="/tmp/infra-manager-direct-test-910",
+            ),
+            patch.object(
+                operator,
+                "run",
+                return_value=SimpleNamespace(returncode=0),
+            ),
+            patch.object(
+                operator,
+                "guest_identity",
+                return_value=SimpleNamespace(
+                    vmid=910,
+                    name="infra-manager",
+                    role=operator.SETTINGS.infra_manager_role,
+                ),
+            ) as identity,
+            patch.object(
+                operator, "operator_guest_status", return_value=0
+            ) as status,
+            patch.object(operator, "console") as console,
+        ):
+            assert operator.operator_guest_task(
+                "deploy",
+                910,
+                show_secrets=True,
+            ) == 2
+
+        assert identity.call_count >= 1
+        status.assert_not_called()
+        assert store.list_recent()[0]["phase"] == "activating"
+        assert store.list_recent()[0]["result"] is None
+        assert "Активация продолжается отдельно" in str(console.info.call_args.args[0])
 
 
 def test_internal_project_refresh_uses_existing_checkout() -> None:
@@ -338,10 +368,15 @@ def test_internal_project_refresh_uses_existing_checkout() -> None:
         known_hosts = semaphore_dir / "known_hosts"
         known_hosts.write_text("github.test key\n", encoding="utf-8")
 
+        config_dir = Path(tmp) / "config"
+        config_dir.mkdir()
+        (config_dir / "github_known_hosts").write_text(
+            known_hosts.read_text(encoding="utf-8"), encoding="utf-8"
+        )
         paths = SimpleNamespace(
             repo_root=root,
             github_key=github_key,
-            semaphore_dir=semaphore_dir,
+            config_dir=config_dir,
         )
         calls: list[tuple[list[str], dict[str, object]]] = []
 
@@ -392,7 +427,7 @@ def test_internal_project_refresh_uses_existing_checkout() -> None:
     ]
     environment = calls[0][1]["env"]
     assert str(github_key) in environment["GIT_SSH_COMMAND"]
-    assert str(known_hosts) in environment["GIT_SSH_COMMAND"]
+    assert str(config_dir / "github_known_hosts") in environment["GIT_SSH_COMMAND"]
 
 
 def test_runtime_snapshot_refresh_policy() -> None:
@@ -547,10 +582,10 @@ def test_operator_guest_operation_timing() -> None:
         patch.object(operator.time, "monotonic", side_effect=[10.0, 75.5]),
         patch.object(operator, "console") as output,
     ):
-        assert operator.operator_guest_task("deploy", 910, show_secrets=True) == 0
-    action.assert_called_once_with("deploy", 910, show_secrets=True)
+        assert operator.operator_guest_task("deploy", 410, show_secrets=True) == 0
+    action.assert_called_once_with("deploy", 410, show_secrets=True)
     output.timing.assert_called_once_with(
-        "Команда deploy гостя 910",
+        "Команда deploy гостя 410",
         65.5,
         interrupted=False,
         failed=False,
@@ -633,6 +668,7 @@ def test_public_command_contract() -> None:
 
 def main() -> None:
     test_host_proxy()
+    test_host_explicit_branch_propagation()
     test_host_repair_starts_manager()
     test_host_refuses_stopped_manager_for_regular_commands()
     test_host_verifies_manager_ownership()

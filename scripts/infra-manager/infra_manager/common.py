@@ -295,24 +295,23 @@ class Console:
 console = Console()
 
 
-HOST_SEMAPHORE_STATE_DIR = Path("/mnt/persistent-state/semaphore")
-RUNTIME_SEMAPHORE_STATE_DIR = Path("/var/lib/semaphore")
+HOST_OPERATIONS_STATE_DIR = Path("/mnt/persistent-state/operations/activation")
+RUNTIME_OPERATIONS_STATE_DIR = Path("/run/infra-manager/activation")
 
 
 def _runtime_activation_scope() -> str:
-    """Вернуть пространство PID текущего исполнителя."""
-
-    return "host" if HOST_SEMAPHORE_STATE_DIR.is_dir() else "runtime"
+    """Отличить управляющую службу от процесса в рабочем контейнере."""
+    return "host" if HOST_OPERATIONS_STATE_DIR.is_dir() else "runtime"
 
 
 def _default_runtime_activation_marker() -> Path:
-    """Выбрать один физический marker для управляющего гостя и infra-runtime."""
-
-    if _runtime_activation_scope() == "host":
-        root = HOST_SEMAPHORE_STATE_DIR
-    else:
-        root = RUNTIME_SEMAPHORE_STATE_DIR
-    return root / ".infra-manager-runtime-activation-pending"
+    """Единственная постоянная отметка активации, общая с systemd."""
+    root = (
+        HOST_OPERATIONS_STATE_DIR
+        if _runtime_activation_scope() == "host"
+        else RUNTIME_OPERATIONS_STATE_DIR
+    )
+    return root / "runtime-activation-pending"
 
 
 RUNTIME_ACTIVATION_MARKER = _default_runtime_activation_marker()
@@ -344,7 +343,14 @@ def reserve_runtime_activation() -> None:
 
     try:
         with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
-            stream.write(f"{_runtime_activation_scope()}:{os.getpid()}\n")
+            operation_id = os.environ.get("INFRA_OPERATION_ID", "").strip()
+            if operation_id:
+                import re
+
+                if not re.fullmatch(r"[0-9a-f]{32}", operation_id):
+                    raise InfraManagerError("Некорректный идентификатор самообновления")
+            suffix = f":{operation_id}" if operation_id else ""
+            stream.write(f"{_runtime_activation_scope()}:{os.getpid()}{suffix}\n")
             stream.flush()
             os.fsync(stream.fileno())
     except OSError:

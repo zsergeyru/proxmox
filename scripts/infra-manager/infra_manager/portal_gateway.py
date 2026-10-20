@@ -48,8 +48,14 @@ def _homepage_url(identity) -> str:
 
     portal = local_portal_definition(PATHS.repo_root, identity)
     if not isinstance(portal, dict):
+        # У управляющего гостя Homepage заменён защищённой панелью.
+        from .portal import portal_definitions
+
+        for entry in portal_definitions(PATHS.repo_root, identity):
+            if entry["name"] == "infra-web" and entry["scheme"] == "https":
+                return entry["url"]
         raise InfraManagerError(
-            f"Для гостя {identity.vmid} не настроен локальный Homepage"
+            f"Для гостя {identity.vmid} не настроен локальный портал"
         )
     url = portal.get("url")
     if not isinstance(url, str) or not url.startswith("http://"):
@@ -382,12 +388,23 @@ class PortalActionServer(ThreadingHTTPServer):
 
 
 def run_portal_gateway(bind: str, port: int) -> int:
-    """Запустить HTTP-сервер и закрыть его при остановке процесса."""
-    server = PortalActionServer((bind, port), PortalActionHandler)
+    """Один системный посредник: старый локальный HTTP и закрытый Unix-сокет."""
+    import threading
+
+    from .admin_socket import AdminSocketServer
+
+    if bind not in {"127.0.0.1", "::1"}:
+        raise InfraManagerError("Управление через HTTP доступно только локально")
+    socket_server = AdminSocketServer()
+    thread = threading.Thread(target=socket_server.serve_forever, daemon=True)
+    thread.start()
     try:
-        server.serve_forever()
+        with PortalActionServer((bind, port), PortalActionHandler) as server:
+            server.serve_forever()
     except KeyboardInterrupt:
         pass
     finally:
-        server.server_close()
+        socket_server.shutdown()
+        socket_server.server_close()
+        thread.join(timeout=5)
     return 0

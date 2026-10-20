@@ -160,50 +160,32 @@ def _generic_status(
     return resource
 
 
+def _standalone_runtime() -> bool:
+    """Определить независимую рабочую среду из доверенного запуска управляющего гостя."""
+    return os.environ.get("INFRA_RUNTIME_MODE") == "standalone"
+
+
 def _infra_manager_repair(
     node: str,
     repo_root: Path,
     identity: GuestIdentity,
 ) -> None:
-    """Восстановить служебный OpenBao и синхронизировать Semaphore.
-
-        Это изменяющая операция: сначала обновляется доверенный помощник PVE,
-        затем восстанавливаются доступы OpenBao, после чего синхронизируется
-        Semaphore. Окончательная готовность проверяется отдельным status."""
+    """Восстановить OpenBao через защищённый PVE-only помощник."""
     del identity
-    from .semaphore import sync_project_from_task
-
     console.info("Обновление PVE-only OpenBao helper")
     install_openbao_host_support(node, repo_root)
     console.info("Безопасное восстановление OpenBao")
     repair_openbao_on_host(node)
-    console.info("Синхронизация проекта Semaphore")
-    sync_project_from_task(
-        branch=project_branch_for_checkout(repo_root),
-        repo_root=repo_root,
-    )
-    console.ok(
-        "OpenBao восстановлен, проект Semaphore синхронизирован; "
-        "полная готовность проверяется отдельным Status Guest"
-    )
+    console.ok("OpenBao восстановлен; готовность проверяется отдельным status")
 
 
 def _infra_manager_sync(
     repo_root: Path,
     identity: GuestIdentity,
 ) -> None:
-    """Согласовать Semaphore с выбранной версией проекта без восстановления OpenBao."""
-    del identity
-    from .semaphore import sync_project_from_task
-
-    console.info(
-        "Синхронизация Semaphore из Git-версии текущего задания"
-    )
-    sync_project_from_task(
-        branch=project_branch_for_checkout(repo_root),
-        repo_root=repo_root,
-    )
-    console.ok("Конфигурация Semaphore синхронизирована")
+    """Проверить подготовленную версию без внешнего диспетчера заданий."""
+    del repo_root, identity
+    console.ok("Версия проекта подготовлена общим операторским исполнителем")
 
 
 def _run_deploy(
@@ -238,7 +220,7 @@ def _run_deploy(
         if self_update:
             console.info(
                 "Настройка управляющего гостя завершена; "
-                "активация и синхронизация Semaphore назначены "
+                "активация и проверка независимой среды назначены "
                 "после выхода текущего задания"
             )
             return 0

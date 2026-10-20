@@ -93,17 +93,6 @@ rules:
     access:
       - read
 
-  - id: ai-control-infrastructure-tasks
-    subject: guest:410
-    service: semaphore
-    resource: infrastructure-task
-    targets:
-      - opentofu-plan
-      - deploy-managed-guest
-      - verify-managed-guest
-    access:
-      - execute
-
   # PVE-only механизм обслуживает OpenBao до появления штатных рабочих доступов.
   - id: pve-openbao-unseal
     subject: host:pve
@@ -121,18 +110,8 @@ rules:
     targets:
       - pve-api-infra-manager
       - github-proxmox-read
-      - semaphore-runtime
     access:
       - materialize
-
-  - id: pve-openbao-semaphore-update
-    subject: host:pve
-    service: openbao
-    resource: credential
-    targets:
-      - semaphore-runtime
-    access:
-      - update
 
   - id: pve-openbao-ssh-ca
     subject: host:pve

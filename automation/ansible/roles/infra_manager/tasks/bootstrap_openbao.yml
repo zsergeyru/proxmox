@@ -6,8 +6,8 @@
     group: root
     mode: "0644"
     content: |
-      SEMAPHORE_VERSION={{ provision.docker.services.runtime.base_image.split(':')[-1] }}
       RUNTIME_VERSION={{ provision.docker.services.runtime.image.split(':')[-1] }}
+      RUNTIME_MODE=standalone
       OPENTOFU_VERSION={{ provision.docker.services.runtime.tools.opentofu }}
       PACKER_VERSION={{ provision.docker.services.runtime.tools.packer }}
       PACKER_IMAGE={{ provision.docker.services.runtime.tools.packer_image }}

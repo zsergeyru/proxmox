@@ -60,11 +60,14 @@ def check_operator_contracts() -> None:
             ),
         },
         910: {
-            "Semaphore": (
-                "admin",
-                "guest_file",
-                "/run/infra-manager/secrets/initial-admin-password",
-                None,
+            "infra-web": (
+                "operator",
+                "pve_json",
+                (
+                    "/mnt/bindmounts/infra-manager/pve-only/"
+                    "openbao/operator-access.json"
+                ),
+                "password",
             ),
             "OpenBao": (
                 "operator",
@@ -451,9 +454,9 @@ def check_rendered_status() -> None:
             "lxc",
             "192.168.9.10",
             (
-                "http://192.168.9.10:3001/",
-                "Semaphore",
-                "semaphore-password",
+                "https://192.168.9.10:8443/",
+                "infra-web",
+                "openbao-password",
                 "OpenBao",
                 "openbao-password",
             ),

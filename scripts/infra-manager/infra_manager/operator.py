@@ -108,7 +108,7 @@ def _refresh_project_checkout() -> None:
 
     repo_root = PATHS.repo_root
     git_dir = repo_root / ".git"
-    known_hosts = PATHS.semaphore_dir / "known_hosts"
+    known_hosts = PATHS.config_dir / "github_known_hosts"
     for path, label in (
         (git_dir, "Git-репозиторий проекта"),
         (PATHS.github_key, "GitHub Deploy Key"),
@@ -118,7 +118,12 @@ def _refresh_project_checkout() -> None:
             raise InfraManagerError(f"Не найден {label}: {path}")
 
     branch = SETTINGS.project_branch().strip()
-    if not branch or any(character.isspace() for character in branch):
+    if (
+        not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,127}", branch)
+        or ".." in branch
+        or "//" in branch
+        or branch.endswith(("/", "."))
+    ):
         raise InfraManagerError("Некорректная Git-ветка проекта")
 
     ssh_command = shlex.join(
@@ -170,6 +175,15 @@ def _refresh_project_checkout() -> None:
         f"Рабочая копия проекта обновлена: {branch} "
         f"({project_revision(repo_root)})"
     )
+
+
+def _standalone_runtime() -> bool:
+    """Определить версию исполнения по установленным версиям управляющего гостя."""
+    if VERSIONS_FILE.is_symlink() or not VERSIONS_FILE.is_file():
+        return False
+    return "RUNTIME_MODE=standalone" in VERSIONS_FILE.read_text(
+        encoding="utf-8"
+    ).splitlines()
 
 
 def _prepare_runtime_snapshot(operation: str, vmid: int | str, *, physical: bool = False) -> str:
@@ -238,6 +252,22 @@ def operator_guest_status(
     )
     manager = find_guest_by_role(PATHS.repo_root, SETTINGS.infra_manager_role)
     if vmid == manager.vmid:
+        # Проверяемые копии нового системного исполнителя не следует путать
+        # с прежним PVE-only статусом полной резервной копии.
+        try:
+            from .operation_store import OperationStore
+
+            record = OperationStore().settings / "backup-last-core.json"
+            if record.is_file() and not record.is_symlink():
+                contents = json.loads(record.read_text(encoding="utf-8"))
+                if (contents.get("includes_vm100") is False
+                        and contents.get("restore_tested") is False):
+                    console.warning(
+                        "Состояние управляющего гостя/PVE резервировалось отдельно; "
+                        "копия VM 100 и пробное восстановление не подтверждены"
+                    )
+        except (InfraManagerError, OSError, ValueError, TypeError):
+            pass
         # Результат резервирования независим от других проверок управляющего гостя.
         # Плохой статус Docker/OpenBao не должен скрывать состояние копий.
         try:
@@ -261,23 +291,63 @@ def operator_guest_task(
     started = time.monotonic()
     completed = False
     interrupted = False
+    deferred = False
+    store = None
+    operation_id = None
+    if operation == "deploy":
+        identity = guest_identity(PATHS.repo_root, vmid)
+        if identity.role == SETTINGS.infra_manager_role:
+            from .operation_store import OperationStore
+
+            store = OperationStore()
+            record, _ = store.reserve(
+                "deploy", vmid, project_revision(PATHS.repo_root),
+                activation_required=True,
+            )
+            operation_id = record["id"]
+            store.start(operation_id)
+            console.info(f"Операция самообновления: {operation_id}")
     try:
-        result = _operator_guest_task(
-            operation,
-            vmid,
-            show_secrets=show_secrets,
-        )
+        task_options = {"show_secrets": show_secrets}
+        if operation_id is not None:
+            task_options["operation_id"] = operation_id
+        result = _operator_guest_task(operation, vmid, **task_options)
+        if store is not None and operation_id is not None:
+            current = store.get(operation_id)
+            if result != 0 and current["phase"] == "running":
+                store.finish(operation_id, exit_code=result)
+            elif result == 0 and current["phase"] == "running":
+                # Настройка завершилась, но отдельная systemd-служба ещё
+                # обязана проверить работоспособность нового поколения.
+                store.transition(operation_id, "activating")
+                console.info(
+                    f"Активация продолжается отдельно: {operation_id}; "
+                    "результат ещё не подтверждён"
+                )
+                deferred = True
+                return 2
+            current = store.get(operation_id)
+            if current["phase"] in {"activating", "verifying"}:
+                console.info(f"Результат ещё ожидается: {operation_id}")
+                deferred = True
+                return 2
+            completed = current["phase"] == "completed" and current["result"] == "ok"
+            return 0 if completed else 1
         completed = result == 0
         return result
     except KeyboardInterrupt:
         interrupted = True
         raise
     finally:
+        if store is not None and operation_id is not None:
+            current = store.get(operation_id)
+            if current["phase"] == "running":
+                store.finish(operation_id, exit_code=1)
         console.timing(
             f"Команда {operation} гостя {vmid}",
             time.monotonic() - started,
             interrupted=interrupted,
-            failed=not completed and not interrupted,
+            failed=not completed and not interrupted and not deferred,
         )
 
 
@@ -286,6 +356,7 @@ def _operator_guest_task(
     vmid: int,
     *,
     show_secrets: bool,
+    operation_id: str | None = None,
 ) -> int:
     """Выполнить штатную операцию напрямую внутри infra-runtime."""
 
@@ -301,6 +372,8 @@ def _operator_guest_task(
             f"INFRA_MANAGER_COLOR={'1' if console._color(chr(27)) else '0'}",
             "-e",
             f"NO_COLOR={os.environ.get('NO_COLOR', '')}",
+            *(["-e", f"INFRA_OPERATION_ID={operation_id}"] if operation_id else []),
+            *(["-e", "INFRA_RUNTIME_MODE=standalone"] if _standalone_runtime() else []),
             RUNTIME_CONTAINER,
             "sh",
             "-eu",
@@ -324,13 +397,12 @@ def _operator_guest_task(
     if operation == "deploy":
         identity = guest_identity(PATHS.repo_root, vmid)
         if identity.role == SETTINGS.infra_manager_role:
-            # Текущий infra-runtime ещё старый, а Semaphore может не
-            # содержать новых гостей. Нельзя сообщать «полностью готов»
-            # до внешней активации и синхронизации.
+            # Нельзя сообщать «полностью готов» до внешней
+            # systemd-активации и проверки новой среды.
             console.info(
                 "Настройка завершена. После выхода текущего задания "
-                "служба активирует infra-runtime, синхронизирует Semaphore "
-                "и проверит готовность; результат — в "
+                "служба активирует infra-runtime и infra-web, "
+                "проверит готовность; результат — в "
                 "/var/log/infra-manager/runtime-activation.log"
             )
             return 0

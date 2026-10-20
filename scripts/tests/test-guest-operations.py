@@ -271,26 +271,12 @@ def check_infra_manager_repair_operation() -> None:
             operations,
             "repair_openbao_on_host",
         ) as repair_openbao,
-        patch.object(
-            operations,
-            "project_branch_for_checkout",
-            return_value="feature/guest-portals",
-        ) as project_branch,
-        patch.object(
-            semaphore_module,
-            "sync_project_from_task",
-        ) as sync_project,
     ):
         if operations._run_repair(client, ROOT, identity) != 0:
             fail("Repair Guest infra-manager должен завершаться успешно")
 
     install_host.assert_called_once_with("pve", ROOT)
     repair_openbao.assert_called_once_with("pve")
-    project_branch.assert_called_once_with(ROOT)
-    sync_project.assert_called_once_with(
-        branch="feature/guest-portals",
-        repo_root=ROOT,
-    )
 
 
 def check_sync_operation() -> None:

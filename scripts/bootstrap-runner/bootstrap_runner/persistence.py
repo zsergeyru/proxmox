@@ -220,8 +220,8 @@ class BootstrapPersistenceMixin:
         """Проверить данные восстановления до удаления существующего rootfs.
 
         Требуются ключ разблокировки, копия ключа GitHub, непустое хранилище
-        OpenBao и база Semaphore. При наличии объектов managed необходим
-        сохранённый OpenTofu state. Проверяется наличие файлов, не целостность
+        OpenBao и ключи восстановления. База бывшего Semaphore не требуется.
+        При наличии объектов managed необходим сохранённый OpenTofu state. Проверяется наличие файлов, не целостность
         внутренних баз — проверка не заменяет отдельный резерв и его испытание.
         """
         required_dirs = (
@@ -265,13 +265,6 @@ class BootstrapPersistenceMixin:
             self.fail(
                 "Recovery запрещён: в pool managed есть объекты, "
                 "но постоянный OpenTofu state отсутствует"
-            )
-
-        if not self.host_state_semaphore_db.is_file() or (
-            self.host_state_semaphore_db.stat().st_size == 0
-        ):
-            self.fail(
-                "Recovery запрещён: отсутствует постоянная база Semaphore"
             )
 
         self.ok(f"Аварийное состояние {self.infra_ctid} проверено до восстановления")
@@ -471,4 +464,3 @@ class BootstrapPersistenceMixin:
         self.pct("start", str(self.infra_ctid))
         self.verify_persistent_layout()
         self.ok(f"Постоянные каталоги PVE подключены к {self.infra_ctid}")
-

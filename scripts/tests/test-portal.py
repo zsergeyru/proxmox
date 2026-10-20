@@ -84,12 +84,12 @@ def check_bookmarks() -> None:
 
 def check_service_discovery() -> None:
     infra = portal_services(910, "local")
-    if {next(iter(item)) for item in infra} != {"Semaphore", "OpenBao"}:
-        fail("Homepage 910 должен публиковать Semaphore и OpenBao")
-    if _service(infra, "Semaphore").get("icon") != "mdi-server-#38bdf8":
-        fail("Semaphore должен иметь цветную иконку")
-    if _service(infra, "Semaphore").get("description") != "Задачи и автоматизация":
-        fail("Semaphore должен иметь описание")
+    if {next(iter(item)) for item in infra} != {"infra-web", "OpenBao"}:
+        fail("Управляющий гость должен описывать infra-web и OpenBao")
+    if _service(infra, "infra-web").get("icon") != "mdi-server-security":
+        fail("infra-web должен иметь иконку")
+    if _service(infra, "infra-web").get("description") != "Управление инфраструктурой":
+        fail("infra-web должен иметь описание")
     if _service(infra, "OpenBao").get("icon") != "mdi-lock-#e0f2fe":
         fail("OpenBao должен иметь цветную иконку")
     if _service(infra, "OpenBao").get("description") != "Хранилище секретов":
@@ -144,7 +144,6 @@ def check_local_dashboard_address() -> None:
         109: "http://192.168.1.9:3001/",
         410: "http://192.168.4.10:3001/",
         340: "http://192.168.3.40:3001/",
-        910: "http://192.168.9.10:3001/",
     }
     for vmid, url in expected.items():
         identity = guest_identity(ROOT, vmid)
@@ -154,10 +153,9 @@ def check_local_dashboard_address() -> None:
                 f"Гость {vmid} имеет неверный адрес локальной панели: "
                 f"{dashboard!r}"
             )
-        if vmid == 910 and dashboard.get("trusted_ca") != (
-            "/etc/infra-manager/openbao/tls/ca.crt"
-        ):
-            fail("Homepage 910 должен доверять TLS CA OpenBao")
+
+    if local_portal_definition(ROOT, guest_identity(ROOT, 910)) is not None:
+        fail("У 910 старый Homepage должен быть отключён")
 
     identity = guest_identity(ROOT, 311)
     if local_portal_definition(ROOT, identity) is not None:

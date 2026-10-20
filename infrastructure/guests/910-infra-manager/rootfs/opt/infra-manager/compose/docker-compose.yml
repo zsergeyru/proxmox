@@ -1,23 +1,22 @@
+# Рабочий состав infra-manager без Semaphore. Управление через systemd в LXC.
 services:
   runtime:
     build:
-      context: ./runtime
+      context: .
+      dockerfile: runtime-next/Dockerfile
       args:
-        SEMAPHORE_VERSION: ${SEMAPHORE_VERSION}
         OPENTOFU_VERSION: ${OPENTOFU_VERSION}
         PACKER_IMAGE: ${PACKER_IMAGE}
     image: infra-runtime:${RUNTIME_VERSION}
     container_name: infra-runtime
     restart: unless-stopped
     network_mode: host
-    env_file:
-      - /run/infra-manager/secrets/semaphore-server.env
     volumes:
-      - /mnt/persistent-state/semaphore:/var/lib/semaphore
       - /etc/infra-manager/ca:/etc/infra-manager/ca:ro
       - /mnt/pve-access/pve-host:/mnt/pve-access/pve-host:ro
       - /mnt/persistent-state/opentofu:/var/lib/infra-manager/opentofu
       - /mnt/persistent-state/locks:/var/lib/infra-manager/locks
+      - /mnt/persistent-state/operations/activation:/run/infra-manager/activation
       - /mnt/persistent-state/physical-hosts:/var/lib/infra-manager/physical-hosts
       - /var/lib/infra-manager/bootstrap-repo:/var/lib/infra-manager/bootstrap-repo:ro
       - /run/infra-manager/secrets:/run/infra-manager/secrets:ro
@@ -39,3 +38,24 @@ services:
       - /mnt/persistent-state/openbao:/openbao/file
       - /etc/infra-manager/openbao/tls:/openbao/tls:ro
       - ./openbao/openbao.hcl:/openbao/config/openbao.hcl:ro
+
+  web:
+    build:
+      context: ./web
+    image: infra-web:v1
+    container_name: infra-web
+    restart: unless-stopped
+    network_mode: host
+    user: "1001:0"
+    environment:
+      INFRA_WEB_PUBLIC_HOST: ${INFRA_WEB_PUBLIC_HOST}
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 64
+    volumes:
+      - /mnt/persistent-state/operations:/srv/operations:ro
+      - /etc/infra-manager/web/tls:/etc/infra-manager/web/tls:ro
+      - /run/infra-web:/run/infra-web:ro

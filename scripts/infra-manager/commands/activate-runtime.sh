@@ -10,9 +10,13 @@ set -Eeuo pipefail
 COMPOSE_DIR="/opt/infra-manager/compose"
 LOG_DIR="/var/log/infra-manager"
 LOG_FILE="$LOG_DIR/runtime-activation.log"
-ACTIVATION_MARKER="/mnt/persistent-state/semaphore/.infra-manager-runtime-activation-pending"
+ACTIVATION_MARKER="/mnt/persistent-state/operations/activation/runtime-activation-pending"
 BRANCH="${INFRA_PROJECT_BRANCH:-main}"
 PVE_NODE="${INFRA_PVE_NODE:-}"
+OPERATION_ID=""
+ROLLBACK_IMAGE=""
+ROLLED_BACK=0
+COMPOSE_FILE="$COMPOSE_DIR/docker-compose.yml"
 
 # Вывод Docker и служб может содержать конфиденциальные детали.
 # Старый журнал также закрываем от других пользователей до перенаправления.
@@ -44,6 +48,35 @@ finish_activation() {
     else
         printf '[ПРЕРВАНО] Отложенная активация infra-runtime: %s (код %s)\n' "$duration" "$result"
     fi
+    if [[ "$result" -ne 0 && -n "$ROLLBACK_IMAGE" ]]; then
+        printf '[ИНФО] Попытка вернуть совместимый runtime после неуспешной активации\n'
+        version="$(sed -n 's/^RUNTIME_VERSION=//p' "$COMPOSE_DIR/.versions.env" | head -1)"
+        if [[ "$version" =~ ^[a-zA-Z0-9_.-]+$ ]] \
+            && docker image tag "$ROLLBACK_IMAGE" "infra-runtime:$version" \
+            && docker compose --env-file "$COMPOSE_DIR/.versions.env" \
+                -f "$COMPOSE_FILE" up -d --no-build --force-recreate runtime \
+            && docker exec infra-runtime tofu version >/dev/null 2>&1 \
+            && docker exec infra-runtime ansible --version >/dev/null 2>&1 \
+            && docker exec infra-runtime packer version >/dev/null 2>&1; then
+            ROLLED_BACK=1
+            printf '[ОК] Прежний совместимый runtime проверен; обновление не принято\n'
+        else
+            printf '[ОШИБКА] Автоматический возврат не подтверждён; требуется PVE CLI\n'
+        fi
+    fi
+
+    if [[ -n "$OPERATION_ID" ]]; then
+        # Успешный итог фиксируется вне Docker до снятия маркера.
+        action=(finish "$OPERATION_ID" "$result")
+        if [[ "$ROLLED_BACK" == "1" ]]; then
+            action=(rolled-back "$OPERATION_ID")
+        fi
+        if ! PYTHONPATH=/usr/local/lib/infra-manager \
+            python3 -m infra_manager.operation_activation "${action[@]}"; then
+            printf 'ОШИБКА: Итог активации не сохранён; маркер остаётся для восстановления\\n' >&2
+            exit 1
+        fi
+    fi
     rm -f "$ACTIVATION_MARKER"
 }
 trap finish_activation EXIT
@@ -55,9 +88,10 @@ if [[ -f "$ACTIVATION_MARKER" ]]; then
     deploy_scope="runtime"
     deploy_pid="$deploy_ref"
 
-    if [[ "$deploy_ref" =~ ^(host|runtime):([0-9]+)$ ]]; then
+    if [[ "$deploy_ref" =~ ^(host|runtime):([0-9]+)(:([0-9a-f]{32}))?$ ]]; then
         deploy_scope="${BASH_REMATCH[1]}"
         deploy_pid="${BASH_REMATCH[2]}"
+        OPERATION_ID="${BASH_REMATCH[4]:-}"
     elif [[ ! "$deploy_ref" =~ ^[0-9]+$ ]]; then
         printf 'ОШИБКА: Некорректный PID в маркере активации: %s\n' "$ACTIVATION_MARKER" >&2
         exit 1
@@ -85,26 +119,55 @@ if [[ -f "$ACTIVATION_MARKER" ]]; then
     printf '[ОК] Задание обновления infra-manager завершено; начинаю активацию\n'
 fi
 
+# Сохранить идентификатор предыдущего поколения до замены образа.
+# Первое переключение с Semaphore заведомо несовместимо: автоматического
+# возврата к нему не предпринимаем, доступна прямая команда PVE.
+if [[ -n "$OPERATION_ID" ]] && docker inspect infra-runtime >/dev/null 2>&1; then
+    previous_id="$(docker inspect -f '{{.Image}}' infra-runtime)"
+    previous_generation="$(docker image inspect \
+        -f '{{index .Config.Labels "org.proxmox.runtime.generation"}}' \
+        "$previous_id" 2>/dev/null || true)"
+    if [[ "$previous_generation" == "standalone-v1" ]]; then
+        ROLLBACK_IMAGE="$previous_id"
+    fi
+fi
+
 if [[ -z "$PVE_NODE" ]]; then
     printf 'ОШИБКА: Не задан INFRA_PVE_NODE для разблокировки OpenBao\n' >&2
     exit 1
 fi
 
-docker compose     --env-file "$COMPOSE_DIR/.versions.env"     -f "$COMPOSE_DIR/docker-compose.yml"     up -d --remove-orphans
+COMPOSE_FILE="$COMPOSE_DIR/docker-compose.yml"
+if ! grep -qx 'RUNTIME_MODE=standalone' "$COMPOSE_DIR/.versions.env"; then
+    printf 'ОШИБКА: Старый режим запуска больше не поддерживается\\n' >&2
+    exit 1
+fi
+COMPOSE_FILE="$COMPOSE_DIR/docker-compose-standalone.yml"
+docker compose \
+    --env-file "$COMPOSE_DIR/.versions.env" \
+    -f "$COMPOSE_FILE" up -d --remove-orphans
 
 /usr/local/sbin/infra-manager-openbao-startup-unseal "$PVE_NODE"
 
-for _ in $(seq 1 60); do
-    if curl -fsS http://127.0.0.1:3000/api/ping >/dev/null 2>&1; then
-        PYTHONPATH=/usr/local/lib/infra-manager         INFRA_PROJECT_BRANCH="$BRANCH"             python3 -m infra_manager semaphore-project
+if grep -qx 'RUNTIME_MODE=standalone' "$COMPOSE_DIR/.versions.env"; then
+    for _ in $(seq 1 60); do
+        if docker exec infra-runtime tofu version >/dev/null 2>&1 \
+            && docker exec infra-runtime ansible --version >/dev/null 2>&1 \
+            && docker exec infra-runtime packer version >/dev/null 2>&1; then
+            if [[ -n "$OPERATION_ID" ]]; then
+                PYTHONPATH=/usr/local/lib/infra-manager \
+                    python3 -m infra_manager.operation_activation verifying "$OPERATION_ID"
+            fi
+            INFRA_PROJECT_BRANCH="$BRANCH" \
+                /usr/local/sbin/infra-manager-status --full --quiet
+            printf '[ОК] Независимый infra-runtime и OpenBao проверены без Semaphore\\n'
+            exit 0
+        fi
+        sleep 2
+    done
+    printf 'ОШИБКА: Независимый infra-runtime не прошёл проверку готовности\\n' >&2
+    exit 1
+fi
 
-
-        INFRA_PROJECT_BRANCH="$BRANCH"             /usr/local/sbin/infra-manager-status --full --quiet
-        printf '[ОК] infra-runtime активирован, OpenBao разблокирован, Semaphore синхронизирован и проверен\n'
-        exit 0
-    fi
-    sleep 2
-done
-
-printf 'ОШИБКА: Semaphore не запустился после активации infra-runtime\n' >&2
+printf 'ОШИБКА: Постоянная среда обязана использовать RUNTIME_MODE=standalone\\n' >&2
 exit 1

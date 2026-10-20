@@ -15,6 +15,7 @@
 ```text
 docker.service
 infra-manager-openbao-startup-unseal.service
+infra-manager-operation-reconcile.service
 ```
 
 Для самообновления `infra-runtime` допускается временная systemd-служба:

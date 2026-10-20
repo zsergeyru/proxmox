@@ -6,14 +6,16 @@ Wants=network-online.target
 [Service]
 Type=simple
 Environment=PYTHONPATH=/usr/local/lib/infra-manager
-ExecStart=/usr/bin/python3 -m infra_manager portal-gateway
+ExecStart=/usr/bin/python3 -m infra_manager portal-gateway --bind 127.0.0.1
 Restart=on-failure
 RestartSec=3
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectHome=true
 ProtectSystem=strict
-ReadWritePaths=/var/lib/infra-manager/locks
+RuntimeDirectory=infra-web
+RuntimeDirectoryMode=0770
+ReadWritePaths=/var/lib/infra-manager/locks /mnt/persistent-state/operations /run/infra-web
 RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
 
 [Install]

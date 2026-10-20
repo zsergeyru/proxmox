@@ -81,13 +81,52 @@ def _vm100_status(now: datetime) -> str:
     return f"[ИНФО] Копия VM 100: {stamp.isoformat()}"
 
 
+MANAGED_BACKUP = Path(
+    "/mnt/bindmounts/infra-manager/state/operations/settings/backup-last-full.json"
+)
+
+
+def _managed_status(now: datetime) -> str | None:
+    """Показывать подтверждённые управляющего гостя записи отдельно от старого PVE-режима."""
+    record = _read_record(MANAGED_BACKUP)
+    if record is None:
+        return None
+    try:
+        stamp = datetime.fromisoformat(record["created_utc"])
+        if stamp.tzinfo is None:
+            raise ValueError("Нет UTC")
+        if (record["schema_version"] != 1
+                or record["destinations"] != ["fast-ssd", "nas-backup"]
+                or record["includes_vm100"] is not True):
+            raise ValueError("Неполный состав")
+        age = (now - stamp).total_seconds() / 3600
+        if age < -0.5:
+            raise ValueError("Время из будущего")
+    except (KeyError, ValueError, TypeError, OverflowError):
+        return "[ПРЕДУПРЕЖДЕНИЕ] Запись управляющего гостя о полной копии повреждена"
+    if age > MAX_CORE_AGE_HOURS:
+        return f"[ПРЕДУПРЕЖДЕНИЕ] Последняя управляемая копия устарела: {age:.1f} ч"
+    if not FAST_MOUNT.is_mount() or not NAS_MOUNT.is_mount():
+        return "[ПРЕДУПРЕЖДЕНИЕ] Управляемые архивы созданы, но SSD или NAS сейчас не подключён"
+    return (
+        f"[ИНФО] Последняя управляемая копия PVE/управляющего гостя/VM 100: "
+        f"{stamp.astimezone(timezone.utc):%Y-%m-%d %H:%M} UTC; "
+        "оба хранилища проверялись, восстановление отдельно не испытано"
+    )
+
+
 def report(now: datetime | None = None) -> str:
     """Отразить наблюдаемое состояние, а не обещание нового расписания."""
     current = now or datetime.now(timezone.utc)
+    managed = _managed_status(current)
     lines = [
         "Резервирование (только чтение, PVE-only):",
-        _core_status(current),
-        _vm100_status(current),
+        managed if managed is not None else _core_status(current),
+        (
+            "[ИНФО] VM 100 включена в последнюю управляемую копию"
+            if managed is not None and managed.startswith("[ИНФО]")
+            else _vm100_status(current)
+        ),
         (
             "[ИНФО] Ключ восстановления экспортирован ранее"
             if KEY_EXPORTED.is_file() and not KEY_EXPORTED.is_symlink()
