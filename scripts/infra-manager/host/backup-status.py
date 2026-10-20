@@ -96,7 +96,10 @@ def _managed_status(now: datetime) -> str | None:
         if stamp.tzinfo is None:
             raise ValueError("Нет UTC")
         if (record["schema_version"] != 1
-                or record["destinations"] != ["fast-ssd", "nas-backup"]
+                or not isinstance(record["destinations"], list)
+                or not set(record["destinations"]) <= {"fast-ssd", "nas-backup"}
+                or len(set(record["destinations"])) != len(record["destinations"])
+                or not record["destinations"]
                 or record["includes_vm100"] is not True):
             raise ValueError("Неполный состав")
         age = (now - stamp).total_seconds() / 3600
@@ -106,12 +109,18 @@ def _managed_status(now: datetime) -> str | None:
         return "[ПРЕДУПРЕЖДЕНИЕ] Запись управляющего гостя о полной копии повреждена"
     if age > MAX_CORE_AGE_HOURS:
         return f"[ПРЕДУПРЕЖДЕНИЕ] Последняя управляемая копия устарела: {age:.1f} ч"
-    if not FAST_MOUNT.is_mount() or not NAS_MOUNT.is_mount():
-        return "[ПРЕДУПРЕЖДЕНИЕ] Управляемые архивы созданы, но SSD или NAS сейчас не подключён"
+    mounts = {"fast-ssd": FAST_MOUNT, "nas-backup": NAS_MOUNT}
+    if any(not mounts[name].is_mount() for name in record["destinations"]):
+        return "[ПРЕДУПРЕЖДЕНИЕ] Архив создан, но один из использованных носителей сейчас отключён"
+    stamp_str = f"{stamp.astimezone(timezone.utc):%Y-%m-%d %H:%M} UTC"
+    if len(record["destinations"]) == 1:
+        return (
+            f"[ПРЕДУПРЕЖДЕНИЕ] Последняя управляемая копия: {stamp_str}; "
+            "вторая независимая копия отсутствует, восстановление не испытано"
+        )
     return (
         f"[ИНФО] Последняя управляемая копия PVE/управляющего гостя/VM 100: "
-        f"{stamp.astimezone(timezone.utc):%Y-%m-%d %H:%M} UTC; "
-        "оба хранилища проверялись, восстановление отдельно не испытано"
+        f"{stamp_str}; оба хранилища проверялись, восстановление не испытано"
     )
 
 
@@ -124,7 +133,7 @@ def report(now: datetime | None = None) -> str:
         managed if managed is not None else _core_status(current),
         (
             "[ИНФО] VM 100 включена в последнюю управляемую копию"
-            if managed is not None and managed.startswith("[ИНФО]")
+            if managed is not None and ("Последняя управляемая копия" in managed)
             else _vm100_status(current)
         ),
         (

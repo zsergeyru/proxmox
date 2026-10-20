@@ -68,6 +68,32 @@ def main():
             assert rejected(lambda: admin_socket.dispatch({"kind": "shell", "vmid": 109, "request_id": operation_id}))
             assert rejected(lambda: admin_socket.dispatch({"kind": "status", "vmid": 109, "request_id": "../passwd"}))
             assert rejected(lambda: admin_socket.dispatch({"kind": "status", "vmid": 109, "request_id": operation_id, "cmd": "sh"}))
+        # Физический SSD: только два типизированных действия, без shell.
+        with (
+            patch.object(admin_socket, "authorize_action") as authorize,
+            patch.object(admin_socket, "find_guest_by_role",
+                         return_value=SimpleNamespace(vmid=920)),
+            patch("infra_manager.operator._pve_node", return_value="pve"),
+            patch("infra_manager.pve.PveClient"),
+            patch("infra_manager.pve_backup_ssd.storage_status",
+                  return_value={"state": "needs-confirmation"}) as inspect,
+            patch("infra_manager.pve_backup_ssd.approve_backup_ssd") as approve,
+        ):
+            request = {"kind": "storage-plan", "vmid": 0, "request_id": uuid.uuid4().hex}
+            record = admin_socket.dispatch(request)
+            assert record["accepted"] and record["storage"]["state"] == "needs-confirmation"
+            inspect.assert_called_once()
+            authorize.assert_called_with("status", 920)
+            request.update({"kind": "storage-confirm",
+                            "plan_id": "a" * 64, "serial": "19386J473508"})
+            record = admin_socket.dispatch(request)
+            assert record["accepted"]
+            approve.assert_called_once()
+            authorize.assert_called_with("repair", 920)
+            assert rejected(lambda: admin_socket.dispatch(dict(request, vmid=901)))
+            assert rejected(lambda: admin_socket.dispatch(dict(request, command="mkfs")))
+            assert rejected(lambda: admin_socket.dispatch(dict(request, request_id="../etc")))
+            assert rejected(lambda: admin_socket.dispatch(dict(request, kind="storage-shell")))
         path = root / "operations.sock"
         server = admin_socket.AdminSocketServer(path)
         thread = threading.Thread(target=server.serve_forever, daemon=True)

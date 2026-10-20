@@ -312,13 +312,21 @@
       - infra_backup_policy.destinations | length == 2
     fail_msg: Неверные параметры backup.yaml
 
-- name: Определить подтверждение носителей без изменения их состояния
+- name: Проверить подтверждённый SSD в постоянном состоянии 910
+  ansible.builtin.stat:
+    path: /mnt/persistent-state/physical-hosts/pve-backup-ssd.json
+    follow: false
+  register: infra_backup_ssd_identity
+
+- name: Определить наличие хотя бы одного кандидата для резервирования
   ansible.builtin.set_fact:
     infra_backup_enabled: >-
       {{
+        (infra_backup_ssd_identity.stat.isreg | default(false))
+        or
         (infra_backup_policy.destinations[0].uuid | default('', true) | length > 0
          or infra_backup_policy.destinations[0].source | default('', true) | length > 0)
-        and
+        or
         (infra_backup_policy.destinations[1].uuid | default('', true) | length > 0
          or infra_backup_policy.destinations[1].source | default('', true) | length > 0)
       }}
@@ -343,7 +351,7 @@
     infra_backup_schedule: "{{ infra_backup_policy.schedule }}"
   register: infra_backup_timer_unit
 
-- name: Включить расписание только при описании обоих подтверждённых носителей
+- name: Включить расписание при наличии хотя бы одного заявленного носителя
   ansible.builtin.systemd_service:
     name: infra-manager-backup.timer
     enabled: "{{ infra_backup_enabled | bool }}"

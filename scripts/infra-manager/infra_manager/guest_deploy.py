@@ -37,6 +37,7 @@ from .opentofu import prepare_workspace
 from .pve_host import (
     apply_host_requirements,
     ensure_guest_storage,
+    ensure_pve_host_storage,
     install_openbao_host_support,
     trigger_openbao_unseal,
     install_recovery_host_support,
@@ -875,6 +876,9 @@ def _run_deploy_guest(
         )
         try:
             _validate_existing_guest_object(context)
+            # Сверка ВСЕХ общих LVM PVE живёт в deploy 910, а не в deploy
+            # первого гостя-потребителя. На PVE никаких пакетов/служб.
+            ensure_pve_host_storage(context.node, repo_root)
             _configure_guest_os(
                 context,
                 provision_phase="full",
@@ -887,7 +891,7 @@ def _run_deploy_guest(
                 f"Штатный deploy {context.name} остановлен: {exc} "
                 "Проверьте причину и состояние: infra-manager status "
                 f"{context.vmid}. После исправления повторите deploy. "
-                "Команда recover нужна только при подтверждённой "
+                "Команда infra-manager recover нужна только при подтверждённой "
                 "невозможности штатно восстановить управляющий контур."
             ) from exc
         console.result(

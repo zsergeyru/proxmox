@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import base64
 import importlib.util
 import json
 import sys
@@ -21,7 +22,7 @@ spec.loader.exec_module(storage)
 sys.path.insert(0, str(ROOT / "scripts/infra-manager"))
 from infra_manager import pve_host
 from infra_manager.common import InfraManagerError
-from infra_manager.storage_catalog import load_physical_storage, render_pve_guest_storage
+from infra_manager.storage_catalog import load_physical_storage, render_pve_guest_storage, render_pve_host_volumes
 
 
 def storage_config() -> dict:
@@ -283,60 +284,27 @@ def test_originals_acl() -> None:
         assert original.read_bytes() == b"existing photo"
         assert original.stat().st_mode == original_mode
         assert str(original) not in {args[-1] for args in calls}
-        # При отсутствии пакета deploy устанавливает acl перед изменением
-        # разрешений; повторная подготовка не запускает apt-get заново.
-        installed = iter([False, True])
-        def available(tool):
-            if tool == "apt-get":
-                return "/usr/bin/apt-get"
-            if tool == "setfacl":
-                return "/usr/bin/setfacl" if next(installed) else None
-            raise AssertionError(tool)
-
-        package_commands: list[tuple[str, ...]] = []
-        with (
-            patch.object(storage.os, "chown"),
-            patch.object(storage.shutil, "which", side_effect=available),
-            patch.object(
-                storage, "command",
-                side_effect=lambda *args, **kwargs: (
-                    package_commands.append(args)
-                    or SimpleNamespace(returncode=0, stdout="")
-                ),
-            ),
-        ):
-            storage.ensure_directories(volumes, [mount])
-        assert package_commands[:2] == [
-            ("apt-get", "update"),
-            ("apt-get", "install", "-y", "--no-install-recommends", "acl"),
-        ]
-        assert [entry[0] for entry in package_commands[2:]] == ["setfacl"] * 3
         assert original.read_bytes() == b"existing photo"
 
 
-def test_acl_install_failure_preserves_photos() -> None:
-    """При недоступности apt развёртывание прекращается без изменения файлов."""
+def test_acl_missing_fails_without_apt() -> None:
+    """На PVE при отсутствии setfacl запрещены любые установки."""
     with tempfile.TemporaryDirectory() as tmp:
         originals = Path(tmp) / "originals"
         originals.mkdir()
         photo = originals / "image.jpg"
         photo.write_bytes(b"original")
-        def fake_command(*args, **_kwargs):
-            assert args == ("apt-get", "update")
-            raise storage.StorageError("apt-get update: источник пакетов недоступен")
         with (
-            patch.object(
-                storage.shutil, "which",
-                side_effect=lambda tool: "/usr/bin/apt-get" if tool == "apt-get" else None,
-            ),
-            patch.object(storage, "command", side_effect=fake_command),
+            patch.object(storage.shutil, "which", return_value=None) as which,
+            patch.object(storage, "command", side_effect=AssertionError("PVE must not run commands")),
         ):
             try:
                 storage.ensure_originals_writable(originals)
             except storage.StorageError as exc:
-                assert "apt-get" in str(exc)
+                assert "Автоматическая установка acl запрещена" in str(exc)
             else:
-                raise AssertionError("Ошибка установки acl должна останавливать deploy")
+                raise AssertionError("Отсутствующий ACL должен остановить подготовку")
+        which.assert_called_once_with("setfacl")
         assert photo.read_bytes() == b"original"
 
 
@@ -749,11 +717,78 @@ def test_guest_storage_sent_to_pve() -> None:
         assert json.loads(remote[0][1]["input_text"]) == storage_config()
 
 
+def test_all_host_volumes_safe_reconcile() -> None:
+    """План deploy 910 охватывает все тома, PVE ничего не устанавливает."""
+    physical = load_physical_storage(ROOT, "pve")
+    plan = render_pve_host_volumes(physical)
+    assert set(item["name"] for item in plan["volumes"]) == {
+        "infra_state", "gogs_data", "photo_archive",
+    }
+    assert all(item["mountpoint"].startswith("/mnt/bindmounts/") for item in plan["volumes"])
+    with tempfile.TemporaryDirectory() as tmp:
+        lockdir = Path(tmp)
+        calls = []
+        def fake_command(*args, **kwargs):
+            calls.append(args)
+            if args[:3] == ("lvs", "--noheadings", "-o"):
+                return SimpleNamespace(returncode=0, stdout="infra_state gogs_data photo_archive")
+            return SimpleNamespace(returncode=0, stdout="")
+        with (
+            patch.object(storage, "STORAGE_LOCKS_DIR", lockdir),
+            patch.object(storage, "command", side_effect=fake_command),
+            patch.object(storage, "ensure_volume", side_effect=lambda _vg, _pool, volume:
+                         (Path("/dev/pve") / volume["name"], "abcde")),
+            patch.object(storage, "ensure_host_mount") as mounted,
+            patch.object(storage, "check_thin_pool_headroom") as headroom,
+        ):
+            storage.reconcile_host_volumes(plan)
+        assert mounted.call_count == 3
+        headroom.assert_not_called()
+        assert not any(args[0] in ("apt-get", "pip", "mkfs.ext4", "lvcreate") for args in calls)
+    bad = dict(plan, volume_group="other")
+    try:
+        storage.validate_host_reconcile(bad)
+    except storage.StorageError:
+        pass
+    else:
+        raise AssertionError("Другая группа томов недопустима")
+    bad = dict(plan, volumes=[dict(plan["volumes"][0], mountpoint="/etc/pve")])
+    try:
+        storage.validate_host_reconcile(bad)
+    except storage.StorageError:
+        pass
+    else:
+        raise AssertionError("Нельзя назначить запись в системный путь")
+
+
+def test_all_host_volumes_over_ssh_without_installation() -> None:
+    """Сверка передаёт исполняемый код на stdin, не оставляя скрипт в PVE."""
+    remote = []
+    with (
+        patch.object(pve_host, "_install_remote_file", side_effect=AssertionError("installation")),
+        patch.object(
+            pve_host, "_ssh_with_input",
+            side_effect=lambda *args, **kwargs: (
+                remote.append((args, kwargs))
+                or SimpleNamespace(stdout="[ОК] Общие LVM-тома PVE сверены")
+            ),
+        ),
+    ):
+        pve_host.ensure_pve_host_storage("pve", ROOT)
+    args, kwargs = remote[0]
+    assert args[:4] == ("pve", "python3", "-", "--host-reconcile")
+    plan = json.loads(base64.b64decode(args[4], validate=True))
+    assert set(v["name"] for v in plan["volumes"]) == {
+        "infra_state", "gogs_data", "photo_archive",
+    }
+    assert "def reconcile_host_volumes" in kwargs["input_text"]
+
+
 if __name__ == "__main__":
     test_contract()
     test_existing_mounts()
     test_originals_acl()
-    test_acl_install_failure_preserves_photos()
+    test_acl_missing_fails_without_apt()
     test_readonly_mount_preserves_originals()
     test_ro_change_protected_guest()
     test_existing_volume_not_formatted()
@@ -773,4 +808,6 @@ if __name__ == "__main__":
     test_bootstrap_guest_independent_of_shared_storage()
     test_no_storage_on_other_guests()
     test_guest_storage_sent_to_pve()
+    test_all_host_volumes_safe_reconcile()
+    test_all_host_volumes_over_ssh_without_installation()
     print("OK: Guest storage contract")

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 
 import shlex
@@ -10,7 +11,7 @@ from pathlib import Path
 from .common import CommandError, InfraManagerError, console, log_level, require_command, run
 from .guest_catalog import find_guest_by_role, guest_management_address, load_manifest
 from .settings import PATHS, SETTINGS
-from .storage_catalog import load_physical_storage, render_pve_guest_storage
+from .storage_catalog import load_physical_storage, render_pve_guest_storage, render_pve_host_volumes
 
 
 def _required_file(path: Path, label: str) -> None:
@@ -753,6 +754,36 @@ def apply_host_requirements(
         return
     if "container-host" in features:
         ensure_container_host(node, vmid)
+
+
+def ensure_pve_host_storage(node: str, repo_root: Path) -> None:
+    """Сверить все логические тома из storage.yaml при deploy 910.
+
+    Выполняемый код потоково передаётся в штатный python3 PVE и НЕ
+    устанавливается на физический хост. Файлы/пакеты/службы не добавляются;
+    только объявленные безопасные LVM/ext4 и существующие mount/fstab.
+    """
+    plan = render_pve_host_volumes(load_physical_storage(repo_root, "pve"))
+    script = repo_root / "scripts/infra-manager/host/guest-storage.py"
+    _required_file(script, "проверенный исполняемый код сверки LVM PVE")
+    encoded = base64.b64encode(
+        json.dumps(plan, separators=(",", ":"), ensure_ascii=False).encode()
+    ).decode("ascii")
+    console.info("Сверка всех общих LVM-томов PVE по storage.yaml")
+    try:
+        result = _ssh_with_input(
+            node, "python3", "-", "--host-reconcile", encoded,
+            input_text=script.read_text(encoding="utf-8"),
+        )
+    except CommandError as exc:
+        detail = (exc.stderr or "").strip()
+        raise InfraManagerError(
+            "Сверка общих хранилищ PVE остановлена: "
+            + (detail or f"код {exc.returncode}")
+        ) from exc
+    if "[ОК]" not in (result.stdout or ""):
+        raise InfraManagerError("PVE не подтвердил завершение сверки общих томов")
+    console.ok("Общие LVM-тома PVE сверены и подключены; данные сохранены")
 
 
 GUEST_STORAGE_HOST_COMMAND = Path("/usr/local/sbin/infra-manager-guest-storage")

@@ -60,8 +60,50 @@ def authorize_action(operation: str, vmid: int) -> None:
         raise InfraManagerError("Нет разрешённого доступа к управлению гостями")
 
 
+def _dispatch_storage(request: dict) -> dict:
+    """Только чтение плана или запись одноразового согласия; никаких mkfs из веба."""
+    if not isinstance(request, dict):
+        raise InfraManagerError("Неверный запрос на подготовку SSD")
+    kind = request.get("kind")
+    if kind not in {"storage-plan", "storage-confirm"}:
+        raise InfraManagerError("Неизвестный запрос SSD")
+    required = (
+        {"kind", "vmid", "request_id"}
+        if kind == "storage-plan"
+        else {"kind", "vmid", "request_id", "plan_id", "serial"}
+    )
+    from .operator import _pve_node
+    from .pve import PveClient
+    from .pve_backup_ssd import storage_status, approve_backup_ssd
+    if set(request) != required:
+        raise InfraManagerError("Недопустимые поля запроса SSD")
+    owner = find_guest_by_role(PATHS.repo_root, SETTINGS.infra_manager_role)
+    if (type(request["vmid"]) is not int or request["vmid"] not in (0, owner.vmid)
+            or not isinstance(request["request_id"], str)
+            or not REQUEST_ID.fullmatch(request["request_id"])):
+        raise InfraManagerError("SSD может управлять только подтверждённый 910")
+    authorize_action("status" if kind == "storage-plan" else "repair", owner.vmid)
+    client = PveClient()
+    node = _pve_node()
+    if kind == "storage-plan":
+        return {"accepted": True, "storage": storage_status(client, node)}
+    job_id = approve_backup_ssd(
+        client, node,
+        plan_id=request["plan_id"], serial=request["serial"],
+    )
+    return {
+        "accepted": True,
+        "job_id": job_id,
+        "message": "Подготовка SSD запущена; результат будет показан в infra-web",
+    }
+
+
 def dispatch(request: dict) -> dict:
     """Запустить только фиксированную системную задачу с неизменяемым UUID."""
+    if isinstance(request, dict) and request.get("kind") in (
+        "storage-plan", "storage-confirm",
+    ):
+        return _dispatch_storage(request)
     if not isinstance(request, dict) or set(request) != {"kind", "vmid", "request_id"}:
         raise InfraManagerError("Неверный формат запроса")
     kind, vmid, operation_id = (

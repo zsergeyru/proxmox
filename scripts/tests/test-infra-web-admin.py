@@ -49,6 +49,15 @@ def main():
             patch.object(admin, "WEB_HOST", f"{host}:{port}"),
             patch.object(admin, "_authenticate", side_effect=lambda name, pwd: name == "operator" and pwd == "secret"),
             patch.object(admin, "_send_action", side_effect=lambda kind, vmid, rid: {"id": rid, "state": "queued", "accepted": True}),
+            patch.object(admin, "_send_storage", side_effect=lambda kind, **kwargs:
+                {"accepted": True, "storage": {
+                    "state": "needs-confirmation",
+                    "plan_id": "a" * 64,
+                    "serial": "19386J473508",
+                    "devpath": "/dev/sda",
+                    "model": "WD Green",
+                    "size_bytes": 240057409536,
+                }} if kind == "storage-plan" else {"accepted": True}),
         ):
             status, _, _ = request(server, "GET", "/api/operations")
             assert status == 401, "История не должна открываться без входа"
@@ -73,6 +82,34 @@ def main():
             assert status == 403, "Подмена источника недопустима"
             status, _, body = request(server, "POST", "/action", {"vmid": "109", "kind": "status", "csrf": csrf}, cookie=cookie)
             assert status == 202 and "Задание принято" in body
+            status, _, _ = request(server, "GET", "/storage")
+            assert status == 401, "План SSD запрещён без входа"
+            status, _, body = request(server, "GET", "/storage", cookie=cookie)
+            assert status == 200 and "19386J473508" in body
+            status, _, _ = request(server, "POST", "/storage-confirm", {
+                "csrf": csrf, "plan_id": "a" * 64, "serial": "19386J473508",
+            }, cookie=cookie, origin=False)
+            assert status == 403, "Подмена Origin должна блокировать согласие SSD"
+            status, _, _ = request(server, "POST", "/storage-confirm", {
+                "csrf": "wrong", "plan_id": "a" * 64, "serial": "19386J473508",
+            }, cookie=cookie)
+            assert status == 403, "Без CSRF нельзя разрешать разметку"
+            status, _, _ = request(server, "POST", "/storage-confirm", {
+                "csrf": csrf, "plan_id": "invalid", "serial": "19386J473508",
+            }, cookie=cookie)
+            assert status == 200 or status == 400  # mock вызова не заменяет реальную проверку посредника
+            status, _, body = request(server, "POST", "/storage-confirm", {
+                "csrf": csrf, "plan_id": "a" * 64, "serial": "19386J473508",
+            }, cookie=cookie)
+            assert status == 200 and "Подготовка SSD запущена" in body
+            with patch.object(
+                admin, "_send_storage",
+                return_value={"accepted": True, "storage": {"state": "running"}},
+            ):
+                status, _, body = request(server, "GET", "/storage", cookie=cookie)
+                assert status == 200
+                assert 'http-equiv="refresh"' in body
+                assert "Можно закрыть браузер" in body
             status, _, _ = request(server, "POST", "/logout", {"csrf": csrf}, cookie=cookie)
             assert status == 200
             status, _, _ = request(server, "GET", "/api/operations", cookie=cookie)

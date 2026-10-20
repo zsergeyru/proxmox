@@ -143,9 +143,97 @@ def _send_action(kind: str, vmid: int, request_id: str) -> dict:
     return result
 
 
-def _layout(inner: str) -> bytes:
+def _send_storage(kind: str, *, plan_id: str = "", serial: str = "") -> dict:
+    """Два разрешённых запроса к корневому посреднику, не прямой PVE API."""
+    if kind not in {"storage-plan", "storage-confirm"}:
+        raise ValueError("Недопустимый тип операции над диском")
+    fields = {"kind": kind, "vmid": 0, "request_id": secrets.token_hex(16)}
+    if kind == "storage-confirm":
+        if not re.fullmatch(r"[0-9a-f]{64}", plan_id) or not re.fullmatch(
+            r"[A-Za-z0-9._-]{6,128}", serial,
+        ):
+            raise ValueError("Неверные параметры подтверждения")
+        fields.update({"plan_id": plan_id, "serial": serial})
+    payload = json.dumps(fields).encode() + b"\n"
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
+        connection.settimeout(15)
+        connection.connect(SOCKET)
+        connection.sendall(payload)
+        output = bytearray()
+        while not output.endswith(b"\n") and len(output) <= 2048:
+            part = connection.recv(2049 - len(output))
+            if not part:
+                break
+            output.extend(part)
+    if len(output) > 2048 or not output.endswith(b"\n"):
+        raise ValueError("Посредник не подтвердил план SSD")
+    result = json.loads(output)
+    if not isinstance(result, dict) or result.get("accepted") is not True:
+        raise ValueError("Проверка диска или разрешения отклонена")
+    return result
+
+
+def _storage_page(csrf: str, notice: str = "") -> bytes:
+    """Административное подтверждение сохраняет лишь однократный допуск."""
+    token = html.escape(csrf, quote=True)
+    content = '<p><a href="/">← Задания</a></p><h2>SSD быстрых копий</h2>'
+    if notice:
+        content += '<p>' + html.escape(notice) + '</p>'
+    try:
+        record = _send_storage("storage-plan").get("storage", {})
+    except (ValueError, OSError, TimeoutError):
+        return _layout(content + "<p>Сейчас не удалось проверить SSD. Диск не изменён.</p>")
+    if not isinstance(record, dict):
+        return _layout(content + "<p>Неизвестное состояние SSD.</p>")
+    state = record.get("state")
+    if state == "running":
+        content += (
+            "<p>Подготовка SSD выполняется самостоятельно.</p>"
+            "<p>Можно закрыть браузер; операция продолжится.</p>"
+            '<p><a href="/storage">Обновить состояние</a></p>'
+        )
+    elif state == "configured":
+        content += (
+            "<p>SSD подготовлен и находится под контролем infra-manager.</p>"
+            "<p>Точка подключения: " + html.escape(str(record.get("mountpoint"))) + "</p>"
+            "<p>UUID: " + html.escape(str(record.get("uuid"))) + "</p>"
+            "<p>При повторном deploy диск не форматируется.</p>"
+            "<p>Подготовка завершена успешно.</p>"
+        )
+    elif state == "needs-confirmation":
+        content += (
+            "<p>Подготовка диска ожидает отдельного подтверждения.</p>"
+            "<p><strong>ВНИМАНИЕ: создание GPT/ext4 уничтожит прежние данные "
+            "выбранного устройства. Перед операцией параметры будут проверены снова.</strong></p>"
+            "<p>Модель: " + html.escape(str(record.get("model"))) + "</p>"
+            "<p>Путь: " + html.escape(str(record.get("devpath"))) + "</p>"
+            "<p>Объём (байт): " + html.escape(str(record.get("size_bytes"))) + "</p>"
+            "<p>Серийный номер: " + html.escape(str(record.get("serial"))) + "</p>"
+            "<p>Раздел: GPT + ext4; mount: /mnt/pve/backup-fast</p>"
+            '<form method="POST" action="/storage-confirm">'
+            f'<input type="hidden" name="csrf" value="{token}">'
+            '<input type="hidden" name="plan_id" value="'
+            + html.escape(str(record.get("plan_id")), quote=True) + '">'
+            '<label>Для согласия введи полный серийный номер '
+            '<input name="serial" autocomplete="off" required></label>'
+            '<button type="submit">Подтвердить и подготовить SSD</button>'
+            '</form>'
+            '<p>После подтверждения система сама выполнит подготовку. '
+            'Можно закрыть браузер и позднее проверить результат здесь.</p>'
+        )
+    else:
+        content += (
+            "<p>Подготовка заблокирована: "
+            + html.escape(str(record.get("reason", "нужна проверка устройства")))
+            + ". Никаких изменений на диске нет.</p>"
+        )
+    return _layout(content, auto_refresh=state == "running")
+
+
+def _layout(inner: str, *, auto_refresh: bool = False) -> bytes:
     return ("""<!doctype html><html lang="ru"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+""" + ('<meta http-equiv="refresh" content="5;url=/storage">' if auto_refresh else '') + """
 <title>infra-manager</title><style>
 :root{color-scheme:dark}body{font-family:system-ui;background:#0c1525;
 color:#eaf0f7;max-width:1050px;margin:3rem auto;padding:0 1rem}
@@ -184,6 +272,7 @@ def _dashboard(csrf: str, notice: str = "") -> bytes:
         '<option value="repair">Исправить</option>'
         '<option value="deploy">Развернуть</option>'
         '</select></label><button type="submit">Выполнить</button></form>'
+        '<p><a href="/storage">Проверить и подготовить резервный SSD</a></p>'
         '<p>Изменяйте только известные гости. Система повторно проверяет права '
         'и записывает результат задания независимо от браузера.</p>'
         '<table><tr><th>ID</th><th>VMID</th><th>Действие</th>'
@@ -269,6 +358,11 @@ class Handler(BaseHTTPRequestHandler):
                 HTTPStatus.OK,
                 _dashboard(session[1]["csrf"]) if session else _login(),
             )
+        elif path == "/storage":
+            if not session:
+                self._reply(HTTPStatus.UNAUTHORIZED, b"login required\n")
+                return
+            self._reply(HTTPStatus.OK, _storage_page(session[1]["csrf"]))
         elif path == "/api/operations":
             if not session:
                 self._reply(HTTPStatus.UNAUTHORIZED, b"login required\n")
@@ -325,6 +419,22 @@ class Handler(BaseHTTPRequestHandler):
                 HTTPStatus.OK, _login(),
                 cookie=f"{COOKIE}=; Max-Age=0; HttpOnly; Secure; SameSite=Strict; Path=/",
             )
+            return
+        if path == "/storage-confirm":
+            try:
+                if set(form) != {"csrf", "plan_id", "serial"}:
+                    raise ValueError("Неизвестные поля подтверждения")
+                _send_storage(
+                    "storage-confirm", plan_id=form["plan_id"], serial=form["serial"],
+                )
+            except (ValueError, OSError, TimeoutError):
+                self._reply(HTTPStatus.BAD_REQUEST, _storage_page(
+                    session["csrf"], "Разрешение не принято: перепроверьте диск и план",
+                ))
+                return
+            self._reply(HTTPStatus.OK, _storage_page(
+                session["csrf"], "Подготовка SSD запущена. Можешь закрыть браузер — работа продолжится.",
+            ))
             return
         if path != "/action":
             self._reply(HTTPStatus.NOT_FOUND, b"not found\n")

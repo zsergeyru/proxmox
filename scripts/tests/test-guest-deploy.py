@@ -338,6 +338,7 @@ def check_project_branch_after_semaphore_branch_switch() -> None:
 
 
 def check_infra_manager_self_update_path_after_vmid_change() -> None:
+    storage_steps = []
     context = DeploymentContext(
         client=SimpleNamespace(),
         vmid=920,
@@ -407,6 +408,13 @@ def check_infra_manager_self_update_path_after_vmid_change() -> None:
             ),
             patch.object(
                 guest_deploy_module,
+                "ensure_pve_host_storage",
+                side_effect=lambda node, repo: (
+                    storage_steps.append((node, repo))
+                ),
+            ),
+            patch.object(
+                guest_deploy_module,
                 "_configure_guest_os",
                 side_effect=record_configure,
             ),
@@ -428,6 +436,8 @@ def check_infra_manager_self_update_path_after_vmid_change() -> None:
             if guest_deploy_module.run_deploy_guest(root, 920) != 0:
                 fail("Самообновление infra-manager с VMID 920 должно завершаться успешно")
 
+    if storage_steps != [("pve", root)]:
+        fail("Deploy 910 должен сверять все общие тома PVE до Ansible")
     if validated != [920]:
         fail("Самообновление должно проверить существующий объект infra-manager")
     if configured != [
