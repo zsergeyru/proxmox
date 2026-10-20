@@ -34,6 +34,10 @@ PASSIVE = (".github/", "scripts/tests/")
 VERSIONS = PATHS.compose_dir / ".versions.env"
 
 
+class FastRollbackUnconfirmed(InfraManagerError):
+    """Откат не доказан: запретить автоматический повторный deploy."""
+
+
 @dataclass(frozen=True)
 class Plan:
     mode: str
@@ -278,7 +282,7 @@ def apply(selected: Plan, verify: Callable[[], bool], *,
                 except InfraManagerError:
                     failed = True
             if failed:
-                raise InfraManagerError("Откат быстрого deploy НЕ подтверждён; требуется диагностика 910") from None
+                raise FastRollbackUnconfirmed("Откат быстрого deploy НЕ подтверждён; требуется диагностика 910") from None
             raise
 
 
