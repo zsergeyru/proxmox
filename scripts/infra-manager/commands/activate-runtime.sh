@@ -60,11 +60,15 @@ finish_activation() {
             && docker image tag "$ROLLBACK_IMAGE" "infra-runtime:$version" \
             && docker compose --env-file "$COMPOSE_DIR/.versions.env" \
                 -f "$COMPOSE_FILE" up -d --no-build --force-recreate runtime \
+            && [[ "$(docker inspect -f '{{.Image}}' infra-runtime)" == "$ROLLBACK_IMAGE" ]] \
             && docker exec infra-runtime tofu version >/dev/null 2>&1 \
             && docker exec infra-runtime ansible --version >/dev/null 2>&1 \
-            && docker exec infra-runtime packer version >/dev/null 2>&1; then
+            && docker exec infra-runtime packer version >/dev/null 2>&1 \
+            && /usr/local/sbin/infra-manager-openbao-startup-unseal "$PVE_NODE" \
+            && INFRA_PROJECT_BRANCH="$BRANCH" \
+                /usr/local/sbin/infra-manager-status --full --quiet; then
             ROLLED_BACK=1
-            printf '[ОК] Прежний совместимый runtime проверен; обновление не принято\n'
+            printf '[ОК] Прежний совместимый runtime и полный контур проверены; обновление не принято\n'
         else
             printf '[ОШИБКА] Автоматический возврат не подтверждён; требуется PVE CLI\n'
         fi
