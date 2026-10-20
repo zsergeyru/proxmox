@@ -1,4 +1,383 @@
 ---
+- name: Зафиксировать Git-версию для сборки Docker-образов 910
+  ansible.builtin.command:
+    argv:
+      - git
+      - -C
+      - "{{ provision.paths.bootstrap_repository }}"
+      - rev-parse
+      - --verify
+      - HEAD
+  register: infra_release_git
+  changed_when: false
+
+- name: Проверить Git-версию перед сборкой
+  ansible.builtin.assert:
+    that:
+      - infra_release_git.stdout is match('^[0-9a-f]{40}
+  ansible.builtin.copy:
+    dest: "{{ provision.paths.compose }}/.versions.env"
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      RUNTIME_VERSION={{ provision.docker.services.runtime.image.split(':')[-1] }}
+      RUNTIME_MODE=standalone
+      INFRA_GIT_REVISION={{ infra_release_git.stdout }}
+      ANSIBLE_VERSION={{ provision.docker.services.runtime.tools.ansible }}
+      OPENTOFU_VERSION={{ provision.docker.services.runtime.tools.opentofu }}
+      PACKER_VERSION={{ provision.docker.services.runtime.tools.packer }}
+      PACKER_IMAGE={{ provision.docker.services.runtime.tools.packer_image }}
+      OPENBAO_VERSION={{ provision.docker.services.openbao.image.split(':')[-1] }}
+      INFRA_WEB_PUBLIC_HOST={{ provision.docker.services.web.address }}:{{ provision.docker.services.web.port }}
+  register: infra_compose_versions
+
+- name: Установить целевое описание проверок без Semaphore
+  ansible.builtin.copy:
+    remote_src: true
+    src: "{{ provision.paths.bootstrap_repository }}/infrastructure/guests/{{ guest }}/infra-manager-status-standalone.yaml"
+    dest: "{{ provision.paths.configuration }}/status.yaml"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Подготовить закрытый каталог HTTPS панели 910
+  ansible.builtin.file:
+    path: /etc/infra-manager/web/tls
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"
+
+- name: Проверить наличие пары ключа и сертификата панели
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - /etc/infra-manager/web/tls/server.key
+    - /etc/infra-manager/web/tls/server.crt
+  register: infra_web_tls
+
+- name: Остановить настройку при неполной паре HTTPS
+  ansible.builtin.assert:
+    that:
+      - infra_web_tls.results[0].stat.exists == infra_web_tls.results[1].stat.exists
+      - not infra_web_tls.results[0].stat.islnk | default(false)
+      - not infra_web_tls.results[1].stat.islnk | default(false)
+    fail_msg: "Необходимо проверить ключ и сертификат infra-web, нельзя заменять один из них"
+
+- name: Создать собственный HTTPS-ключ панели при первоначальном запуске
+  ansible.builtin.command:
+    argv:
+      - openssl
+      - req
+      - -x509
+      - -nodes
+      - -newkey
+      - rsa:3072
+      - -keyout
+      - /etc/infra-manager/web/tls/server.key
+      - -out
+      - /etc/infra-manager/web/tls/server.crt
+      - -days
+      - "365"
+      - -subj
+      - "/CN={{ provision.docker.services.web.address }}"
+      - -addext
+      - "subjectAltName=IP:{{ provision.docker.services.web.address }}"
+  when: not infra_web_tls.results[0].stat.exists
+  changed_when: true
+  no_log: true
+
+- name: Защитить секретный HTTPS-ключ панели
+  ansible.builtin.file:
+    path: /etc/infra-manager/web/tls/server.key
+    owner: root
+    group: root
+    mode: "0640"
+
+- name: Зафиксировать публичный сертификат панели
+  ansible.builtin.file:
+    path: /etc/infra-manager/web/tls/server.crt
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Проверить постоянное подключение управляющего гостя до создания хранилища операций
+  ansible.builtin.command:
+    argv:
+      - findmnt
+      - --mountpoint
+      - /mnt/persistent-state
+      - --noheadings
+  changed_when: false
+
+- name: Создать закрытое постоянное хранилище операций
+  ansible.builtin.file:
+    path: "{{ provision.paths.operations_state }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Создать ограниченный каталог передачи активации исполнителю
+  ansible.builtin.file:
+    path: "{{ provision.paths.operations_state }}/activation"
+    state: directory
+    owner: root
+    group: "0"
+    mode: "0770"
+
+- name: Опубликовать проверенный Git known_hosts вне данных Semaphore
+  ansible.builtin.copy:
+    remote_src: true
+    src: "{{ provision.access_materialization.github.known_hosts }}"
+    dest: "{{ provision.paths.configuration }}/github_known_hosts"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Установить служебный код infra-manager
+  ansible.builtin.copy:
+    remote_src: true
+    src: "{{ provision.paths.bootstrap_repository }}/scripts/infra-manager/infra_manager/"
+    dest: "{{ provision.paths.python_package }}/infra_manager/"
+    owner: root
+    group: root
+    mode: preserve
+
+- name: Установить службу проверки прерванных операций
+  ansible.builtin.copy:
+    src: "{{ guest_root }}/rootfs/etc/systemd/system/infra-manager-operation-reconcile.service"
+    dest: /etc/systemd/system/infra-manager-operation-reconcile.service
+    owner: root
+    group: root
+    mode: "0644"
+  register: operation_reconcile_unit
+
+- name: Включить проверку прерванных операций при загрузке
+  ansible.builtin.systemd_service:
+    name: infra-manager-operation-reconcile.service
+    enabled: true
+    daemon_reload: "{{ operation_reconcile_unit.changed }}"
+
+- name: Установить команды управления
+  ansible.builtin.copy:
+    remote_src: true
+    src: "{{ provision.paths.bootstrap_repository }}/scripts/infra-manager/commands/{{ item.source }}"
+    dest: "/usr/local/sbin/{{ item.target }}"
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - { source: operator.sh, target: infra-manager }
+    - { source: python-command.sh, target: infra-manager-status }
+    - { source: activate-runtime.sh, target: infra-manager-activate-runtime }
+    - { source: openbao-startup-unseal.sh, target: infra-manager-openbao-startup-unseal }
+
+- name: Установить службу действий локального портала
+  ansible.builtin.copy:
+    src: "{{ guest_root }}/rootfs/etc/systemd/system/infra-manager-portal-gateway.service"
+    dest: /etc/systemd/system/infra-manager-portal-gateway.service
+    owner: root
+    group: root
+    mode: "0644"
+  register: portal_gateway_unit
+
+- name: Включить службу действий локального портала
+  ansible.builtin.systemd_service:
+    name: infra-manager-portal-gateway.service
+    enabled: true
+    state: "{{ 'restarted' if portal_gateway_unit.changed else 'started' }}"
+    daemon_reload: "{{ portal_gateway_unit.changed }}"
+
+- name: Сделать команду состояния доступной через pct exec
+  ansible.builtin.file:
+    src: /usr/local/sbin/infra-manager-status
+    dest: /usr/bin/infra-manager-status
+    state: link
+    force: true
+
+- name: Установить запуск разблокировки OpenBao вместе с infra-manager
+  ansible.builtin.template:
+    src: "{{ guest_root }}/rootfs/etc/systemd/system/infra-manager-openbao-startup-unseal.service.j2"
+    dest: /etc/systemd/system/infra-manager-openbao-startup-unseal.service
+    owner: root
+    group: root
+    mode: "0644"
+  register: openbao_startup_unit
+
+- name: Включить разблокировку OpenBao при запуске infra-manager
+  ansible.builtin.systemd_service:
+    name: infra-manager-openbao-startup-unseal.service
+    enabled: true
+    daemon_reload: "{{ openbao_startup_unit.changed }}"
+
+- name: Проверить доступ к источникам сборки управляющей среды
+  ansible.builtin.command:
+    argv:
+      - python3
+      - "{{ provision.paths.bootstrap_repository }}/scripts/infra-manager/jobs/check-runtime-downloads.py"
+      - --packer-version
+      - "{{ provision.docker.services.runtime.tools.packer }}"
+      - --packer-image
+      - "{{ provision.docker.services.runtime.tools.packer_image }}"
+      - --opentofu-version
+      - "{{ provision.docker.services.runtime.tools.opentofu }}"
+  register: infra_runtime_download_check
+  changed_when: false
+  failed_when: false
+
+- name: Сообщить причину недоступности источников сборки
+  ansible.builtin.fail:
+    msg: "{{ infra_runtime_download_check.stdout | default('Проверка сетевых источников не запустилась: проверьте Python и curl в госте.', true) | trim }}"
+  when: infra_runtime_download_check.rc != 0
+
+- name: Собрать управляющую среду
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - --env-file
+      - "{{ provision.paths.compose }}/.versions.env"
+      - -f
+      - "{{ provision.paths.compose }}/docker-compose.yml"
+      - build
+      - --pull
+      - runtime
+      - web
+  changed_when: true
+
+
+
+- name: Перезапустить OpenBao после изменения конфигурации
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - --env-file
+      - "{{ provision.paths.compose }}/.versions.env"
+      - -f
+      - "{{ provision.paths.compose }}/docker-compose.yml"
+      - up
+      - -d
+      - --force-recreate
+      - openbao
+  changed_when: true
+  when: >-
+    infra_compose_files.changed
+    or infra_compose_versions.changed
+    or (openbao_tls_files.results | selectattr('changed') | list | length > 0)
+
+- name: Подтвердить запуск OpenBao без повторного создания
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - --env-file
+      - "{{ provision.paths.compose }}/.versions.env"
+      - -f
+      - "{{ provision.paths.compose }}/docker-compose.yml"
+      - up
+      - -d
+      - openbao
+  changed_when: true
+  when: >-
+    not (
+      infra_compose_files.changed
+      or infra_compose_versions.changed
+      or (openbao_tls_files.results | selectattr('changed') | list | length > 0)
+    )
+
+# Смена образа OpenBao может запечатать существующий Raft. Если позднее
+# Ansible упадёт (например, на backup.yaml), SSH CA должен оставаться готов.
+# Используется только PVE-only существующий ключ; повторного sys/init нет.
+- name: Сразу разблокировать OpenBao после обновления контейнера 910
+  ansible.builtin.command:
+    argv:
+      - /usr/local/sbin/infra-manager-openbao-startup-unseal
+      - "{{ infra_pve_node }}"
+  changed_when: false
+  when: infra_self_update | default(false) | bool
+
+- name: Запустить управляющую среду
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - --env-file
+      - "{{ provision.paths.compose }}/.versions.env"
+      - -f
+      - "{{ provision.paths.compose }}/docker-compose.yml"
+      - up
+      - -d
+      - --remove-orphans
+  changed_when: true
+  when: not (infra_self_update | default(false) | bool)
+
+# lookup('file') выполняется на Ansible-контроллере (в infra-runtime),
+# а provision.paths.bootstrap_repository относится к целевому LXC.
+# Читать нужно из неизменяемого снимка проекта, с которым запущен playbook.
+- name: Прочитать единое описание резервирования
+  ansible.builtin.set_fact:
+    infra_backup_policy: "{{ lookup('file', project_root ~ '/infrastructure/hosts/pve/backup.yaml') | from_yaml }}"
+
+- name: Проверить расписание резервирования из backup.yaml
+  ansible.builtin.assert:
+    that:
+      - infra_backup_policy.schema_version == 1
+      - infra_backup_policy.job == 'infra-core'
+      - infra_backup_policy.schedule is match('^([01][0-9]|2[0-3])(,([01][0-9]|2[0-3]))*:[0-5][0-9]$')
+      - infra_backup_policy.destinations | length == 2
+    fail_msg: Неверные параметры backup.yaml
+
+- name: Проверить подтверждённый SSD в постоянном состоянии 910
+  ansible.builtin.stat:
+    path: /mnt/persistent-state/physical-hosts/pve-backup-ssd.json
+    follow: false
+  register: infra_backup_ssd_identity
+
+- name: Определить наличие хотя бы одного кандидата для резервирования
+  ansible.builtin.set_fact:
+    infra_backup_enabled: >-
+      {{
+        (infra_backup_ssd_identity.stat.isreg | default(false))
+        or
+        (infra_backup_policy.destinations[0].uuid | default('', true) | length > 0
+         or infra_backup_policy.destinations[0].source | default('', true) | length > 0)
+        or
+        (infra_backup_policy.destinations[1].uuid | default('', true) | length > 0
+         or infra_backup_policy.destinations[1].source | default('', true) | length > 0)
+      }}
+
+- name: Установить системную службу резервирования управляющего гостя
+  ansible.builtin.copy:
+    src: "{{ guest_root }}/rootfs/etc/systemd/system/infra-manager-backup.service"
+    dest: /etc/systemd/system/infra-manager-backup.service
+    owner: root
+    group: root
+    mode: "0644"
+  register: infra_backup_service_unit
+
+- name: Установить расписание из backup.yaml в systemd управляющего гостя
+  ansible.builtin.template:
+    src: "{{ guest_root }}/rootfs/etc/systemd/system/infra-manager-backup.timer.j2"
+    dest: /etc/systemd/system/infra-manager-backup.timer
+    owner: root
+    group: root
+    mode: "0644"
+  vars:
+    infra_backup_schedule: "{{ infra_backup_policy.schedule }}"
+  register: infra_backup_timer_unit
+
+- name: Включить расписание при наличии хотя бы одного заявленного носителя
+  ansible.builtin.systemd_service:
+    name: infra-manager-backup.timer
+    enabled: "{{ infra_backup_enabled | bool }}"
+    state: "{{ 'started' if infra_backup_enabled | bool else 'stopped' }}"
+    daemon_reload: true
+)
+    fail_msg: "Не удалось получить точную Git-версию для сборки управляющей среды"
+
 - name: Записать версии управляющих средств
   ansible.builtin.copy:
     dest: "{{ provision.paths.compose }}/.versions.env"
