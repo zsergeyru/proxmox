@@ -260,7 +260,7 @@ def apply(selected: Plan, verify: Callable[[], bool], *,
             if not verify():
                 raise InfraManagerError("Выборочное обновление не прошло status 910")
             attest(repo, store=state)
-        except (InfraManagerError, OSError, ValueError, UnicodeError):
+        except (InfraManagerError, OSError, ValueError, UnicodeError, KeyboardInterrupt):
             console.warning("Быстрый deploy не принят: возврат файлов и контейнера")
             failed = False
             for destination, old_data in reversed(backups):
