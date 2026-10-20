@@ -40,14 +40,15 @@ services:
       - ./openbao/openbao.hcl:/openbao/config/openbao.hcl:ro
 
   web:
-    profiles:
-      - preview
     build:
       context: ./web
-    image: infra-web:preview1
+    image: infra-web:v1
     container_name: infra-web
     restart: unless-stopped
     network_mode: host
+    user: "1001:0"
+    environment:
+      INFRA_WEB_PUBLIC_HOST: ${INFRA_WEB_PUBLIC_HOST}
     read_only: true
     cap_drop:
       - ALL
@@ -56,3 +57,5 @@ services:
     pids_limit: 64
     volumes:
       - /mnt/persistent-state/operations:/srv/operations:ro
+      - /etc/infra-manager/web/tls:/etc/infra-manager/web/tls:ro
+      - /run/infra-web:/run/infra-web:ro
