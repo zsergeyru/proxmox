@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 # Отложенно активировать рабочую среду infra-manager внутри управляющего гостя.
-# Перезапускает состав Docker, проверяет OpenBao и Semaphore. Журнал
+# Перезапускает состав Docker, проверяет OpenBao и runtime без Semaphore. Журнал
 # записывается в /var/log/infra-manager/runtime-activation.log.
 # При неуспехе часть контейнеров уже может быть перезапущена: автоматического
 # отката нет, повторение допустимо после проверки состояния служб.
@@ -107,8 +107,6 @@ if [[ -L "$ACTIVATION_MARKER" || ! -f "$ACTIVATION_MARKER" ]]; then
     printf 'ОШИБКА: Маркер активации не является обычным файлом\n' >&2
     exit 1
 fi
-MARKER_VERIFIED=1
-
 if [[ -f "$ACTIVATION_MARKER" ]]; then
     read -r deploy_ref < "$ACTIVATION_MARKER" || true
     deploy_scope="runtime"
@@ -123,6 +121,8 @@ if [[ -f "$ACTIVATION_MARKER" ]]; then
         exit 1
     fi
 
+    # Только проверенный формат допускает автоматическую очистку маркера.
+    MARKER_VERIFIED=1
     printf '[ИНФО] Ожидание завершения самообновления infra-manager, %s PID %s\n' "$deploy_scope" "$deploy_pid"
     deploy_finished=0
     for _ in $(seq 1 900); do
@@ -139,6 +139,8 @@ if [[ -f "$ACTIVATION_MARKER" ]]; then
     done
 
     if [[ "$deploy_finished" != "1" ]]; then
+        # Старое задание может продолжаться: не открываем окно повторного deploy.
+        MARKER_VERIFIED=0
         printf 'ОШИБКА: Самообновление infra-manager не завершилось за 15 минут\n' >&2
         exit 1
     fi
