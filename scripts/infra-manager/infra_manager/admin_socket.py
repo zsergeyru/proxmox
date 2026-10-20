@@ -131,7 +131,7 @@ def _dispatch_history(request: dict) -> dict:
 
 # Показываем оператору только строки стандартного формата, а не сырые журналы.
 # Даже строки известных уровней отбрасываются, если похожи на секреты.
-SAFE_LOG = re.compile(r"^(?:\\[(?:ИНФО|ОК|ОШИБКА|ВРЕМЯ|ПРЕРВАНО|ПРЕДУПРЕЖДЕНИЕ)\\]|ОШИБКА:)\\s*")
+SAFE_LOG = re.compile(r"^(?:\[(?:ИНФО|ОК|ОШИБКА|ВРЕМЯ|ПРЕРВАНО|ПРЕДУПРЕЖДЕНИЕ)\]|ОШИБКА:)\s*")
 PRIVATE_LOG = re.compile(
     r"(?i)(?:password|passwd|passphrase|token|secret|credential|authorization|cookie|"
     r"private.?key|api.?key|-----BEGIN|[A-Za-z0-9_+/=-]{72,})"
