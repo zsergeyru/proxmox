@@ -20,11 +20,13 @@ admin = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(admin)
 
 
-def request(server, method, path, data=None, *, origin=True, cookie=None):
+def request(server, method, path, data=None, *, origin=True, cookie=None, host_override=None, fetch_site=None):
     host, port = server.server_address
-    headers = {"Host": f"{host}:{port}"}
+    headers = {"Host": host_override or f"{host}:{port}"}
     if origin:
-        headers["Origin"] = f"https://{host}:{port}"
+        headers["Origin"] = f"https://{host}:{port}" if origin is True else origin
+    if fetch_site:
+        headers["Sec-Fetch-Site"] = fetch_site
     if cookie:
         headers["Cookie"] = cookie
     if data is not None:
@@ -59,12 +61,32 @@ def main():
                     "size_bytes": 240057409536,
                 }} if kind == "storage-plan" else {"accepted": True}),
         ):
+            # Политика ответа с HTML-формой не должна делать Origin: null.
+            status, headers, body = request(server, "GET", "/")
+            assert status == 200 and 'action="/login"' in body
+            assert headers["Referrer-Policy"] == "same-origin"
+            assert headers["Cache-Control"] == "no-store"
+            assert headers["X-Content-Type-Options"] == "nosniff"
+            assert headers["X-Frame-Options"] == "DENY"
+            assert "form-action 'self'" in headers["Content-Security-Policy"]
             status, _, _ = request(server, "GET", "/api/operations")
             assert status == 401, "История не должна открываться без входа"
             status, _, _ = request(server, "POST", "/action", {"vmid": "109", "kind": "status"})
             assert status == 401, "Нельзя запускать действие без авторизации"
             status, _, _ = request(server, "POST", "/login", {"username": "operator", "password": "secret"}, origin=False)
             assert status == 403, "POST без Origin должен быть отклонён"
+            status, _, _ = request(server, "POST", "/login", {
+                "username": "operator", "password": "secret",
+            }, origin="null", fetch_site="same-origin")
+            assert status == 403, "Origin: null не должен обходить проверку CSRF"
+            status, _, _ = request(server, "POST", "/login", {
+                "username": "operator", "password": "secret",
+            }, origin="https://untrusted.example")
+            assert status == 403, "Чужой Origin не должен разрешать вход"
+            status, _, _ = request(server, "POST", "/login", {
+                "username": "operator", "password": "secret",
+            }, host_override="untrusted.example:8443")
+            assert status == 403, "Чужой Host не должен разрешать вход"
             status, _, _ = request(server, "POST", "/login", {"username": "operator", "password": "wrong"})
             assert status == 401, "Неверный пароль не должен приниматься"
             status, headers, body = request(server, "POST", "/login", {"username": "operator", "password": "secret"})
@@ -72,6 +94,7 @@ def main():
             cookie = headers["Set-Cookie"].split(";", 1)[0]
             assert all(flag in headers["Set-Cookie"] for flag in ("Secure", "HttpOnly", "SameSite=Strict"))
             assert headers["Strict-Transport-Security"].startswith("max-age=")
+            assert headers["Referrer-Policy"] == "same-origin"
             status, _, body = request(server, "GET", "/api/operations", cookie=cookie)
             assert status == 200 and body.lstrip().startswith("[")
             status, _, _ = request(server, "POST", "/action", {"vmid": "109", "kind": "status"}, cookie=cookie)
@@ -93,6 +116,10 @@ def main():
                 "csrf": csrf, "plan_id": "a" * 64, "serial": "19386J473508",
             }, cookie=cookie, origin=False)
             assert status == 403, "Подмена Origin должна блокировать согласие SSD"
+            status, _, _ = request(server, "POST", "/storage-confirm", {
+                "csrf": csrf, "plan_id": "a" * 64, "serial": "19386J473508",
+            }, cookie=cookie, origin="null", fetch_site="same-origin")
+            assert status == 403, "Origin: null не разрешает форматирование SSD"
             status, _, _ = request(server, "POST", "/storage-confirm", {
                 "csrf": "wrong", "plan_id": "a" * 64, "serial": "19386J473508",
             }, cookie=cookie)
