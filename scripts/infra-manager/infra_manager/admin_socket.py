@@ -67,9 +67,12 @@ def dispatch(request: dict) -> dict:
     kind, vmid, operation_id = (
         request["kind"], request["vmid"], request["request_id"]
     )
-    authorize_action(kind, vmid)
+    if (kind not in ACTIONS or not isinstance(vmid, int)
+            or isinstance(vmid, bool) or vmid < 1):
+        raise InfraManagerError("Недопустимое действие или VMID")
     if not isinstance(operation_id, str) or not REQUEST_ID.fullmatch(operation_id):
         raise InfraManagerError("Некорректный идентификатор запроса")
+    authorize_action(kind, vmid)
     store = OperationStore()
     existing_path = store.history / f"{operation_id}.json"
     if existing_path.exists() or existing_path.is_symlink():
