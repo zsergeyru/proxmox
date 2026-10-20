@@ -83,14 +83,15 @@ def _mounted(mount: Path, expected_fstype: str, expected_source: str) -> None:
 
 
 def check_destinations(expected: dict[str, str]) -> None:
-    if set(expected) != set(ALLOWED_MOUNTS):
-        raise ExportError("Неожиданные назначения резервирования")
-    for name, (mount, fstype) in ALLOWED_MOUNTS.items():
-        value = expected.get(name)
+    if not expected or set(expected) - set(ALLOWED_MOUNTS):
+        raise ExportError("Неожиданные или отсутствующие назначения резервирования")
+    for name, value in expected.items():
+        mount, fstype = ALLOWED_MOUNTS[name]
         if not isinstance(value, str) or not value or len(value) > 255:
             raise ExportError("Нет подтверждённого источника или UUID")
         _mounted(mount, fstype, value)
-    if expected["fast-ssd"] == expected["nas-backup"]:
+    if (len(expected) == 2
+            and expected["fast-ssd"] == expected["nas-backup"]):
         raise ExportError("Оба архива не должны находиться на одном носителе")
 
 
@@ -213,10 +214,11 @@ def stream_backup() -> None:
                 raise ExportError("Не удалось собрать согласованный архив PVE")
 
 
-def repositories_state() -> dict[str, str]:
-    """Проверить существующие хранилища, не трогая их содержимое."""
+def repositories_state(expected: dict[str, str]) -> dict[str, str]:
+    """Проверить только подтверждённые назначения, не трогая другие."""
     result = {}
-    for name, (mount, _fs) in ALLOWED_MOUNTS.items():
+    for name in expected:
+        mount, _fs = ALLOWED_MOUNTS[name]
         repo = mount / ("infra-core" if name == "fast-ssd" else "pve-infra-core")
         if repo.is_symlink():
             raise ExportError("Символьная ссылка вместо хранилища")
@@ -299,7 +301,7 @@ def main() -> int:
         elif args.command == "check":
             print("[ОК] Источники и физические носители подтверждены")
         elif args.command == "repositories":
-            print(json.dumps(repositories_state()))
+            print(json.dumps(repositories_state(expected)))
         elif args.command == "vm100":
             stream_vm100()
         else:
