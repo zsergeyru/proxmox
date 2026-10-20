@@ -84,6 +84,21 @@ def _directory(client: PveClient, node: str) -> dict | None:
     return found[0] if found else None
 
 
+def _mount_existing_unit(node: str, directory: dict) -> None:
+    """Запустить уже созданный Proxmox mount-unit, не устанавливая службу."""
+    unit = r"mnt-pve-backup\\x2dfast.mount"
+    unit_file = directory.get("unitfile")
+    if (not isinstance(unit_file, str)
+            or unit_file != f"/etc/systemd/system/{unit}"):
+        raise InfraManagerError(
+            "Не подтверждён штатный Proxmox mount-unit backup-fast"
+        )
+    result = run(_ssh_command(node, ("systemctl", "start", unit)),
+                 capture_output=True, check=False)
+    if result.returncode:
+        raise InfraManagerError("Не удалось восстановить штатное монтирование SSD")
+
+
 def _state_path() -> Path:
     return Path("/mnt/persistent-state/physical-hosts") / STATE_NAME
 
@@ -147,7 +162,13 @@ def reconcile_backup_ssd(client: PveClient, node: str, *, interactive: bool = Fa
         # не подтверждает SSD, даже если PVE API показывает storage.
         if directory is None:
             raise InfraManagerError("Запомненный SSD не подключён в Proxmox")
-        uuid, _ = _mount_info(node)
+        try:
+            uuid, _ = _mount_info(node)
+        except InfraManagerError:
+            # После перезагрузки systemd mount-unit может быть остановлен.
+            # Разрешено запустить только уже зарегистрированную единицу PVE.
+            _mount_existing_unit(node, directory)
+            uuid, _ = _mount_info(node)
         if uuid != existing["uuid"]:
             raise InfraManagerError("UUID SSD изменился; требуется подтверждение замены")
         matches = [i for i in inventory if i.get("serial") == existing["serial"]
