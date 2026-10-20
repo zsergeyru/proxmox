@@ -393,6 +393,44 @@ def test_self_update_waits_and_renders_final_status() -> None:
         assert console.timing.call_args.kwargs["failed"] is False
 
 
+def test_self_update_fast_activation_before_poll() -> None:
+    """Мгновенно завершившаяся systemd-служба не должна быть пропущена."""
+    from infra_manager.operation_store import OperationStore
+
+    with tempfile.TemporaryDirectory() as directory:
+        store = OperationStore(Path(directory) / "operations", require_mount=False)
+
+        def finish_before_return(
+            _operation: str, _vmid: int, **_kwargs: object
+        ) -> int:
+            operation_id = store.list_recent()[0]["id"]
+            store.transition(operation_id, "activating")
+            store.transition(operation_id, "verifying")
+            store.finish(operation_id, exit_code=0)
+            return 0
+
+        with (
+            patch("infra_manager.operation_store.OperationStore", return_value=store),
+            patch.object(operator, "project_revision", return_value="abc123"),
+            patch.object(operator, "_operator_guest_task",
+                         side_effect=finish_before_return),
+            patch.object(operator, "guest_identity", return_value=SimpleNamespace(
+                vmid=910, name="infra-manager",
+                role=operator.SETTINGS.infra_manager_role,
+            )),
+            patch.object(operator, "_wait_for_runtime_activation",
+                         wraps=operator._wait_for_runtime_activation) as wait,
+            patch.object(operator, "operator_guest_status", return_value=0) as status,
+            patch.object(operator, "console"),
+        ):
+            assert operator.operator_guest_task("deploy", 910, show_secrets=False) == 0
+        wait.assert_called_once()
+        status.assert_called_once_with(
+            910, show_secrets=False, allow_pending_activation=True
+        )
+        assert store.list_recent()[0]["phase"] == "completed"
+
+
 def test_self_update_failed_activation_does_not_show_success() -> None:
     """Ошибку переключения нельзя считать успешным deploy."""
     from infra_manager.operation_store import OperationStore
@@ -812,6 +850,7 @@ def main() -> None:
     test_host_wrapper_is_minimal()
     test_operator_guest_task_secret_policy()
     test_self_update_waits_and_renders_final_status()
+    test_self_update_fast_activation_before_poll()
     test_self_update_failed_activation_does_not_show_success()
     test_self_update_interrupt_does_not_cancel_systemd()
     test_activation_poll_states_and_timeout()
