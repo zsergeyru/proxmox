@@ -226,7 +226,7 @@ def _prepare_runtime_snapshot(operation: str, vmid: int | str, *, physical: bool
             ]
         )
 
-    if operation in {"deploy", "sync", "bootstrap", "storage-plan", "storage-prepare"}:
+    if operation in {"deploy", "sync", "bootstrap", "connection-setup", "storage-plan", "storage-prepare"}:
         # Sync берёт свежие машинные описания из Git перед формированием каталога.
         with project_checkout_lock(exclusive=True):
             _refresh_project_checkout()
