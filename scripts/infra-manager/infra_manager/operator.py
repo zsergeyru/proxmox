@@ -512,6 +512,19 @@ def operator_guest_task(
         interrupted = True
         raise
     finally:
+        # Полный deploy удаляет снимок в RUNTIME_DIRECT_SCRIPT. При fast
+        # путь в infra-runtime не вызывается, поэтому очищаем его здесь.
+        if fast_plan is not None and fast_plan.mode == "fast" and prepared_snapshot:
+            if re.fullmatch(r"/tmp/infra-manager-direct-[0-9]+-910", prepared_snapshot):
+                cleaned = run(
+                    ["docker", "exec", "--user", "0", RUNTIME_CONTAINER,
+                     "rm", "-rf", "--", prepared_snapshot],
+                    capture_output=True, check=False,
+                )
+                if cleaned.returncode:
+                    console.warning("Не удалось убрать временный снимок быстрого deploy")
+            else:
+                console.warning("Неизвестный путь снимка infra-runtime; очистка запрещена")
         if store is not None and operation_id is not None:
             current = store.get(operation_id)
             if (current["phase"] == "running" and not activation_handed_off
