@@ -63,10 +63,11 @@ def test_declaration_and_native_create():
             assert client.created == [("POST", "/storage", {
                 "type": "nfs", "storage": "nas-backup", "server": "192.168.9.20",
                 "export": "/exports/pve", "content": "backup", "nodes": "pve",
+                "options": "vers=4.2",
             })]
             verified.assert_called_once_with("pve", "192.168.9.20", "/exports/pve")
             good = {"type": "nfs", "server": "192.168.9.20",
-                    "export": "/exports/pve"}
+                    "export": "/exports/pve", "options": "vers=4.2"}
             client = Client(existing=good)
             assert nas.reconcile_backup_nas(client, "pve")
             assert not client.created
