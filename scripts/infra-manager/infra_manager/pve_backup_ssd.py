@@ -423,7 +423,10 @@ def reconcile_backup_ssd(client: PveClient, node: str, *, interactive: bool = Fa
     # used=None от PVE API сам по себе не гарантирует пустой диск.
     _empty_block_device(node, disk)
     if not interactive:
-        console.warning("Первичная разметка SSD ожидает подтверждения в infra-web")
+        console.warning(
+            "Первичная разметка SSD ожидает подтверждения в infra-web "
+            "или интерактивном SSH при deploy 910"
+        )
         return None
     answer = (confirmation or input)(
         "Для разметки введите полный серийный номер SSD: "
@@ -454,11 +457,30 @@ def reconcile_backup_ssd(client: PveClient, node: str, *, interactive: bool = Fa
 
 
 def deploy_backup_ssd_preflight() -> None:
-    """Ограниченная стадия 910, не блокирующая исправный управляющий контур."""
+    """CLI на физическом PVE подтверждает SSD сразу, веб — независимо.
+
+    PVE-оболочка передаёт INFRA_MANAGER_INTERACTIVE=1 только если исходная
+    команда deploy 910 запущена в терминале. В неинтерактивной автоматизации
+    disk preflight исключительно читает состояние и ничего не форматирует.
+    """
     from .operator import _pve_node
+
     try:
-        # deploy проверяет диск без диалогов; разметка запускается в infra-web.
-        reconcile_backup_ssd(PveClient(), _pve_node(), interactive=False)
+        node = _pve_node()
+        interactive = os.environ.get("INFRA_MANAGER_INTERACTIVE") == "1"
+        if interactive:
+            # Не конкурировать с фоновым заданием подготовки из infra-web.
+            with _job_lock():
+                job = _read_job()
+                if job and job["state"] in ("queued", "running"):
+                    console.warning(
+                        "SSD уже подготавливается через infra-web; "
+                        "повторная разметка пропущена"
+                    )
+                    return
+                reconcile_backup_ssd(PveClient(), node, interactive=True)
+        else:
+            reconcile_backup_ssd(PveClient(), node, interactive=False)
     except (InfraManagerError, EOFError) as exc:
         console.warning(f"Резервный SSD: {exc}. Основной deploy 910 продолжится")
 
