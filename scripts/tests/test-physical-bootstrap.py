@@ -84,7 +84,10 @@ def test_operator_state() -> None:
         )
         paths = SimpleNamespace(repo_root=root, data_dir=root / "state")
         (paths.data_dir / "physical-hosts").mkdir(parents=True)
-        with patch.object(operator, "PATHS", paths):
+        with (
+            patch.object(operator, "PATHS", paths),
+            patch.object(connection, "PATHS", paths),
+        ):
             assert operator.operator_physical_bootstrap_state("nas") == 20
             marker = paths.data_dir / "physical-hosts/nas.json"
             marker.write_text(
