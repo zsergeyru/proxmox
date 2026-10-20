@@ -424,6 +424,186 @@ def _guest_confirmation(vmid: int, kind: str, csrf: str) -> bytes:
 
 
 
+
+BACKUP_STATE = {
+    "verified": "Есть запись об успешной проверке", "stale": "Копия устарела",
+    "missing": "Нет подтверждённой записи", "invalid": "Запись повреждена",
+}
+BACKUP_OVERALL = {
+    "no_confirmed_backup": "Нет подтверждённой копии PVE/910",
+    "stale": "Последняя копия PVE/910 устарела",
+    "single_copy": "Вторая независимая копия отсутствует",
+    "two_recorded_copies": "Записаны две копии; текущая доступность носителей не проверена",
+}
+
+
+def _backup_request(kind: str) -> dict:
+    """Системный посредник возвращает только безопасные агрегированные поля."""
+    if kind not in {"backup-overview", "backup-run"}:
+        raise ValueError("Неизвестное действие резервирования")
+    payload = json.dumps({
+        "kind": kind, "vmid": 0, "request_id": secrets.token_hex(16),
+    }).encode() + b"\n"
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
+        connection.settimeout(22)
+        connection.connect(SOCKET)
+        connection.sendall(payload)
+        with connection.makefile("rb") as stream:
+            raw = stream.readline(65537)
+    if len(raw) > 65536 or not raw.endswith(b"\n"):
+        raise ValueError("Посредник не вернул ограниченный ответ резервирования")
+    data = json.loads(raw)
+    if not isinstance(data, dict) or data.get("accepted") is not True:
+        raise ValueError("Посредник отклонил запрос резервирования")
+    if kind == "backup-overview" and not isinstance(data.get("overview"), dict):
+        raise ValueError("Некорректное состояние резервирования")
+    return data
+
+
+def _backup_overview_page(csrf: str, notice: str = "") -> bytes:
+    def e(value: object) -> str:
+        return html.escape(str(value) if value is not None else "—")
+    try:
+        data = _backup_request("backup-overview")["overview"]
+    except (ValueError, OSError, TimeoutError):
+        return _layout(
+            '<p><a href="/">← Главная</a></p><h2>Хранилища и резервирование</h2>'
+            '<p>Системный посредник или описание хранилищ временно недоступны.</p>'
+            '<p><a href="/infrastructure">Повторить проверку</a></p>'
+        )
+    volumes = data.get("storage", {}).get("volumes", [])
+    nas = data.get("nas", {}).get("volumes", [])
+    dests = data.get("destinations", [])
+    backup = data.get("backup", {})
+    records = backup.get("records", {})
+    timer = backup.get("timer", {})
+
+    def volume_table(items: list[dict], include_size: bool = False) -> str:
+        rows = []
+        for item in items[:20]:
+            values = [
+                item.get("id"), item.get("kind"),
+                (str(item.get("size_gb")) + " GB") if include_size
+                and item.get("size_gb") is not None else None,
+                item.get("mountpoint") or "Не указан",
+                "Не проверено на физической машине",
+            ]
+            if not include_size:
+                values.pop(2)
+            rows.append("<tr>" + "".join("<td>" + e(x) + "</td>" for x in values) + "</tr>")
+        cells = 5 if include_size else 4
+        return "".join(rows) or '<tr><td colspan="' + str(cells) + '">Томов нет</td></tr>'
+
+    dest_rows = []
+    configured = 0
+    for item in dests[:2]:
+        if item.get("configured") is True:
+            configured += 1
+        pve_state = {
+            "not_checked": "Нет связи с PVE",
+            "not_registered": "Не зарегистрировано в PVE",
+            "reported_active": "PVE сообщает: активно",
+            "reported_inactive": "PVE сообщает: неактивно",
+            "unknown": "Неизвестно",
+        }.get(item.get("pve_state"), "Неизвестно")
+        dest_rows.append(
+            "<tr><td>" + e(item.get("id")) + "</td><td>"
+            + e(item.get("mountpoint")) + "</td><td>"
+            + ("Объявлен и подтверждён" if item.get("configured") is True
+               else "Ожидает настройки") + "</td><td>"
+            + e(pve_state) + "</td></tr>"
+        )
+    backup_rows = []
+    for key, label in (
+        ("core", "PVE и состояние 910"),
+        ("full", "PVE / 910 / VM 100"),
+        ("vm100", "VM 100 (отдельная запись)"),
+    ):
+        record = records.get(key, {})
+        backup_rows.append(
+            "<tr><td>" + e(label) + "</td><td>"
+            + e(BACKUP_STATE.get(record.get("state"), "Не проверено")) + "</td><td>"
+            + e(record.get("created_utc")) + "</td><td>"
+            + e(", ".join(record.get("destinations", [])) or "—") + "</td><td>"
+            + e("Выборочная проверка данных restic: 1%" if record.get("check")
+                == "restic_subset_1_percent" else
+                "Проверено при создании" if record.get("check") == "backup_checked"
+                else "Не подтверждено") + "</td></tr>"
+        )
+
+    timer_state = {
+        "active": "Работает", "inactive": "Выключен",
+        "failed": "Ошибка", "unknown": "Не удалось проверить",
+    }.get(timer.get("state"), "Не удалось проверить")
+    service_state = {
+        "active": "Выполняется", "activating": "Запускается",
+        "inactive": "Не выполняется", "failed": "Ошибка",
+        "unknown": "Не удалось проверить",
+    }.get(timer.get("service"), "Не удалось проверить")
+    restored = backup.get("restore_tested") is True
+    summary = BACKUP_OVERALL.get(backup.get("overall"), "Неизвестное состояние копий")
+    token = html.escape(csrf, quote=True)
+    start_link = (
+        '<p><a href="/infrastructure/confirm">Запустить копирование вручную</a></p>'
+        if configured else '<p>Запуск копирования недоступен: нет настроенных носителей.</p>'
+    )
+    return _layout(
+        '<p><a href="/">← Главная</a> · <a href="/guests">Гости</a> · '
+        '<a href="/storage">Подготовка SSD</a></p>'
+        '<h2>Хранилища и резервирование</h2>'
+        '<p><strong>' + e(summary) + '</strong></p>'
+        + ('<p>' + e(notice) + '</p>' if notice else '')
+        + '<p>Проверенные ранее записи не подтверждают, что SSD/NAS сейчас подключены '
+        'или что восстановление испытано. Даже активное PVE storage не '
+        'является проверкой идентичности физического носителя.</p>'
+        '<h3>Общие тома PVE — из storage.yaml</h3>'
+        '<table><tr><th>Том</th><th>Тип</th><th>Размер</th><th>Подключение</th><th>Проверка</th></tr>'
+        + volume_table(volumes, include_size=True) + '</table>'
+        '<h3>Тома NAS — из storage.yaml</h3>'
+        '<table><tr><th>Том</th><th>Тип</th><th>Подключение</th><th>Проверка</th></tr>'
+        + volume_table(nas) + '</table>'
+        '<h3>Места для резервных копий — из backup.yaml</h3>'
+        '<table><tr><th>Назначение</th><th>Путь</th><th>Настройка</th><th>Носитель</th></tr>'
+        + "".join(dest_rows) + '</table>'
+        '<p>SSD: ' + e(data.get("ssd", {}).get("state")) + '. '
+        'Физические подключения необходимо независимо проверить перед восстановлением.</p>'
+        '<h3>Последние сохранённые результаты</h3>'
+        '<table><tr><th>Что</th><th>Состояние</th><th>Время UTC</th><th>Носители</th><th>Контроль</th></tr>'
+        + "".join(backup_rows) + '</table>'
+        '<p><strong>Восстановление: '
+        + ("Отмечено как испытанное" if restored else "Не подтверждено")
+        + '</strong>. Проверка 1% данных restic не является испытанием восстановления.</p>'
+        '<h3>Расписание</h3>'
+        '<p>Из backup.yaml: ' + e(backup.get("schedule_declared")) + ' (часы сервера). '
+        'Таймер systemd: ' + e(timer_state) + '. '
+        'Служба: ' + e(service_state) + '.</p>'
+        '<p>Следующий запуск: ' + e(timer.get("next")) + '. '
+        'Предыдущий запуск: ' + e(timer.get("last"))
+        + '. Последний результат systemd: ' + e(timer.get("last_result"))
+        + '.</p>'
+        + start_link
+        + '<p><a href="/infrastructure">Обновить состояние</a></p>'
+    )
+
+
+def _backup_confirm_page(csrf: str) -> bytes:
+    token = html.escape(csrf, quote=True)
+    return _layout(
+        '<p><a href="/infrastructure">← Отмена</a></p>'
+        '<h2>Запустить резервирование</h2>'
+        '<p>Штатная служба infra-manager-backup.service проверит носители, '
+        'выполнит зашифрованную запись и проверку данных restic. '
+        'Задание может выполняться длительное время. '
+        'Оно не запускает восстановление и не форматирует диски.</p>'
+        '<p>Если доступен только один проверенный носитель, будет создана '
+        'одна копия с предупреждением о второй.</p>'
+        '<form method="POST" action="/infrastructure/run">'
+        f'<input type="hidden" name="csrf" value="{token}">'
+        '<button type="submit">Да, начать резервирование</button></form>'
+    )
+
+
+
 def _send_action(kind: str, vmid: int, request_id: str) -> dict:
     if kind not in {"status", "sync", "repair", "deploy"} or (
         not isinstance(vmid, int) or not 1 <= vmid <= 999999
@@ -602,7 +782,8 @@ def _dashboard(csrf: str, notice: str = "") -> bytes:
         '<option value="deploy">Развернуть</option>'
         '</select></label><button type="submit">Выполнить</button></form>'
         '<p><a href="/guests">Управление гостями</a> · '
-        '<a href="/storage">Проверить и подготовить резервный SSD</a></p>'
+        '<a href="/infrastructure">Хранилища и бэкапы</a> · '
+        '<a href="/storage">Подготовить резервный SSD</a></p>'
         '<p>Изменяйте только известные гости. Система повторно проверяет права '
         'и записывает результат задания независимо от браузера.</p>'
         '<table><tr><th>ID</th><th>VMID</th><th>Действие</th>'
@@ -784,6 +965,34 @@ class Handler(BaseHTTPRequestHandler):
                 self._reply(HTTPStatus.BAD_REQUEST, b"invalid guest or action\n")
             except (OSError, TimeoutError):
                 self._reply(HTTPStatus.SERVICE_UNAVAILABLE, b"guest unavailable\n")
+        elif path in {"/infrastructure", "/infrastructure/confirm", "/api/infrastructure"}:
+            if not session:
+                self._reply(HTTPStatus.UNAUTHORIZED, b"login required\n")
+                return
+            query = parse_qs(urlsplit(self.path).query, keep_blank_values=True)
+            if (query and not (
+                    path == "/infrastructure" and set(query) == {"started"}
+                    and query["started"] == ["1"])):
+                self._reply(HTTPStatus.BAD_REQUEST, b"invalid query\n")
+                return
+            if path == "/infrastructure/confirm":
+                self._reply(HTTPStatus.OK, _backup_confirm_page(session[1]["csrf"]))
+                return
+            if path == "/infrastructure":
+                notice = ("Запрос отправлен службе systemd; "
+                          "результат ещё не подтверждён."
+                          if query else "")
+                self._reply(HTTPStatus.OK, _backup_overview_page(
+                    session[1]["csrf"], notice,
+                ))
+                return
+            try:
+                overview = _backup_request("backup-overview")
+            except (OSError, ValueError, TimeoutError):
+                self._reply(HTTPStatus.SERVICE_UNAVAILABLE, b"backup overview unavailable\n")
+                return
+            self._reply(HTTPStatus.OK, json.dumps(overview["overview"], ensure_ascii=False).encode(),
+                        content_type="application/json; charset=utf-8")
         elif path == "/storage":
             if not session:
                 self._reply(HTTPStatus.UNAUTHORIZED, b"login required\n")
@@ -882,6 +1091,20 @@ class Handler(BaseHTTPRequestHandler):
                 HTTPStatus.OK, _login(),
                 cookie=f"{COOKIE}=; Max-Age=0; HttpOnly; Secure; SameSite=Strict; Path=/",
             )
+            return
+        if path == "/infrastructure/run":
+            if set(form) != {"csrf"}:
+                self._reply(HTTPStatus.BAD_REQUEST, b"invalid backup form\n")
+                return
+            try:
+                _backup_request("backup-run")
+            except (OSError, ValueError, TimeoutError):
+                self._reply(HTTPStatus.BAD_REQUEST, _backup_overview_page(
+                    session["csrf"],
+                    "Резервирование не принято. Проверьте настройки и состояние службы.",
+                ))
+                return
+            self._reply(HTTPStatus.SEE_OTHER, b"", location="/infrastructure?started=1")
             return
         if path == "/storage-confirm":
             try:
