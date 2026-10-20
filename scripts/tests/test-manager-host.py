@@ -66,6 +66,39 @@ def test_host_proxy() -> None:
     ]]
 
 
+def test_host_passes_interactive_flag_only_from_pve_terminal() -> None:
+    """Маркер разрешён только для deploy управляющего 910 с TTY на PVE."""
+    forwarded = []
+
+    def fake_run(argv, **kwargs):
+        forwarded.append(argv)
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    with (
+        patch.object(host, "manager_identity", return_value=(920, "infra-manager")),
+        patch.object(host, "verify_manager"),
+        patch.object(host, "guest_running", return_value=True),
+        patch.object(host.socket, "gethostname", return_value="pve.example"),
+        patch.object(host, "run", side_effect=fake_run),
+        patch.dict(sys.modules, {
+            "infra_manager_python_deps": SimpleNamespace(
+                restore_manager_python_dependency=lambda *args, **kwargs: None
+            ),
+        }),
+    ):
+        with patch.object(host.sys, "stdin", SimpleNamespace(isatty=lambda: True)):
+            assert host.proxy_to_manager(["deploy", "920"]) == 0
+            assert "INFRA_MANAGER_INTERACTIVE=1" in forwarded[-1]
+
+        with patch.object(host.sys, "stdin", SimpleNamespace(isatty=lambda: False)):
+            assert host.proxy_to_manager(["deploy", "920"]) == 0
+            assert "INFRA_MANAGER_INTERACTIVE=1" not in forwarded[-1]
+
+        with patch.object(host.sys, "stdin", SimpleNamespace(isatty=lambda: True)):
+            assert host.proxy_to_manager(["status", "920"]) == 0
+            assert "INFRA_MANAGER_INTERACTIVE=1" not in forwarded[-1]
+
+
 def test_host_explicit_branch_propagation() -> None:
     """На PVE можно явно выбрать ветку, но не внедрить команды через ENV."""
     calls: list[list[str]] = []
@@ -881,6 +914,7 @@ def test_public_command_contract() -> None:
 
 def main() -> None:
     test_host_proxy()
+    test_host_passes_interactive_flag_only_from_pve_terminal()
     test_host_explicit_branch_propagation()
     test_host_repair_starts_manager()
     test_host_refuses_stopped_manager_for_regular_commands()

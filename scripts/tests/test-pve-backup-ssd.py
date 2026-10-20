@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+from contextlib import nullcontext
 import sys
 import tempfile
 from pathlib import Path
@@ -204,10 +205,48 @@ def test_web_confirmation_starts_background_and_survives_browser():
                 assert ssd.storage_status(client, "pve")["state"] == "configured"
 
 
+def test_ssh_preflight_confirmation_and_unattended_mode():
+    """SSH с терминалом подтверждает SSD, автоматизация не форматирует."""
+    client = FakeClient()
+    with (
+        patch("infra_manager.operator._pve_node", return_value="pve"),
+        patch.object(ssd, "PveClient", return_value=client),
+        patch.object(ssd, "_job_lock", side_effect=nullcontext),
+        patch.object(ssd, "_read_job", return_value=None),
+        patch.object(ssd, "reconcile_backup_ssd") as prepare,
+    ):
+        with patch.dict(ssd.os.environ, {"INFRA_MANAGER_INTERACTIVE": "1"}):
+            ssd.deploy_backup_ssd_preflight()
+        prepare.assert_called_once_with(client, "pve", interactive=True)
+
+        prepare.reset_mock()
+        with patch.dict(ssd.os.environ, {"INFRA_MANAGER_INTERACTIVE": "0"}):
+            ssd.deploy_backup_ssd_preflight()
+        prepare.assert_called_once_with(client, "pve", interactive=False)
+
+        prepare.reset_mock()
+        with (
+            patch.dict(ssd.os.environ, {"INFRA_MANAGER_INTERACTIVE": "1"}),
+            patch.object(ssd, "_read_job", return_value={"state": "running"}),
+        ):
+            ssd.deploy_backup_ssd_preflight()
+        prepare.assert_not_called()
+
+        prepare.reset_mock()
+        with (
+            patch.dict(ssd.os.environ, {"INFRA_MANAGER_INTERACTIVE": "1"}),
+            patch.object(ssd, "_read_job", return_value=None),
+            patch.object(ssd, "_job_lock", side_effect=ssd.InfraManagerError("busy")),
+        ):
+            ssd.deploy_backup_ssd_preflight()
+        prepare.assert_not_called()
+
+
 if __name__ == "__main__":
     test_empty_disk_only_and_no_auto_wipe()
     test_exact_confirmation_and_recheck()
     test_changed_device_rejected_before_write()
     test_readonly_disk_refuses_partitions_and_signatures()
     test_web_confirmation_starts_background_and_survives_browser()
+    test_ssh_preflight_confirmation_and_unattended_mode()
     print("[ОК] SSD создаётся только через Proxmox API после точного подтверждения")
