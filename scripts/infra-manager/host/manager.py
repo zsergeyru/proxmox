@@ -100,7 +100,7 @@ def start_manager(vmid: int) -> None:
     raise OperatorError(
         f"LXC {vmid} не запустился; используйте infra-manager recover"
     )
-def selected_project_branch() -> list[str]:
+def forwarded_git_ref() -> list[str]:
     """Передать явно выбранную доверенным root ветку без подмены аргументов."""
     branch = os.environ.get("INFRA_PROJECT_BRANCH")
     if branch is None:
@@ -141,7 +141,7 @@ def proxy_to_manager(arguments: list[str]) -> int:
             "env",
             f"INFRA_PVE_NODE={socket.gethostname().split('.')[0]}",
             f"INFRA_MANAGER_COLOR={color_mode()}",
-            *selected_project_branch(),
+            *forwarded_git_ref(),
             GUEST_COMMAND,
             "--trusted-pve",
             *command,
