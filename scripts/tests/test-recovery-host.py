@@ -51,9 +51,6 @@ def configure_paths(module, root: Path) -> None:
     module.OPENTOFU_STATE = (
         module.STATE_DIR / "opentofu" / "state" / "proxmox.tfstate"
     )
-    module.SEMAPHORE_DB = (
-        module.STATE_DIR / "semaphore" / "semaphore.sqlite"
-    )
     module.LOCK_PATH = root / "recovery.lock"
 
 
@@ -73,7 +70,6 @@ def prepare_complete_state(module) -> None:
     )
     write(module.OPENBAO_RAFT_DIR / "raft.db")
     write(module.OPENTOFU_STATE, "{}\n")
-    write(module.SEMAPHORE_DB)
 
 
 def test_prepare_git_recovery() -> None:
@@ -112,6 +108,8 @@ def test_verify_recovery_state() -> None:
         configure_paths(module, Path(tmp))
         prepare_complete_state(module)
         with patch.object(module, "managed_guests_exist", return_value=False):
+            # Новый 910 обязан восстанавливаться без старой SQLite Semaphore.
+            assert not (module.STATE_DIR / "semaphore").exists()
             module.verify_recovery_state()
 
             module.OPENBAO_UNSEAL_KEY.unlink()
