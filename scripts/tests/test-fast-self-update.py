@@ -153,6 +153,41 @@ def main() -> None:
                 "INFRA_GIT_REVISION=", "INFRA_GIT_REVISION=not-valid-"
             ))
             assert fast.plan(repo, store=store, versions=versions).mode == "full"
+    # Проверить, что штатная команда deploy 910 обходит полный Ansible
+    # только при положительном плане и сохраняет результат OperationStore.
+    from infra_manager import operator
+    from infra_manager import operation_lock
+    from infra_manager import operation_store
+    from infra_manager import guest_operations
+    import contextlib
+    with tempfile.TemporaryDirectory() as folder:
+        root = Path(folder)
+        (root / "persistent").mkdir()
+        store = OperationStore(root / "persistent" / "operations", require_mount=False)
+        fast_plan = fast.Plan("fast", "a" * 40, (), ("scripts/infra-manager/infra_manager/pve.py",))
+        identity = SimpleNamespace(role=operator.SETTINGS.infra_manager_role)
+        original_operator_task = operator._operator_guest_task
+        invoked = []
+        with (
+            patch.object(operator, "require_runtime_activation_idle"),
+            patch.object(operator, "_prepare_runtime_snapshot", return_value="/tmp/snapshot"),
+            patch.object(operator, "guest_identity", return_value=identity),
+            patch.object(operator, "_backup_gate", return_value=contextlib.nullcontext()),
+            patch.object(operator, "project_revision", return_value="a" * 40),
+            patch.object(fast, "plan", return_value=fast_plan),
+            patch.object(operation_store, "OperationStore", return_value=store),
+            patch.object(operation_lock, "guest_operation_lock", return_value=contextlib.nullcontext()),
+            patch.object(operator, "PveClient", return_value=object()),
+            patch.object(guest_operations, "_run_status", return_value=0),
+            patch.object(fast, "apply", side_effect=lambda *args, **kwargs: invoked.append("fast")),
+            patch.object(operator, "_operator_guest_task", side_effect=lambda *args, **kwargs: invoked.append("full")) as full,
+        ):
+            assert operator.operator_guest_task("deploy", 910, show_secrets=False) == 0
+            assert invoked == ["fast"] and full.call_count == 0
+        history = store.list_recent()
+        assert len(history) == 1 and history[0]["phase"] == "completed"
+        assert history[0]["activation_required"] is False
+
     print("[ОК] Быстрый deploy: Git baseline, Python/web, откат, критические изменения")
 
 
