@@ -16,7 +16,7 @@ from .operation_store import OperationStore
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="infra-manager activation-internal")
-    parser.add_argument("action", choices=("verifying", "finish", "reconcile"))
+    parser.add_argument("action", choices=("verifying", "finish", "reconcile", "rolled-back"))
     parser.add_argument("operation_id", nargs="?")
     parser.add_argument("exit_code", type=int, nargs="?")
     args = parser.parse_args(argv)
@@ -42,6 +42,10 @@ def main(argv: list[str] | None = None) -> int:
                 store.transition(args.operation_id, "activating")
             if store.get(args.operation_id)["phase"] == "activating":
                 store.transition(args.operation_id, "verifying")
+        elif args.action == "rolled-back":
+            if args.exit_code is not None:
+                raise InfraManagerError("Подтверждённый откат не принимает код")
+            store.rollback_confirmed(args.operation_id)
         else:
             if args.exit_code is None or not 0 <= args.exit_code <= 255:
                 raise InfraManagerError("Некорректный код завершения активации")
