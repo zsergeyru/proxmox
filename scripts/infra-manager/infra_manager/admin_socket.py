@@ -17,9 +17,12 @@ from pathlib import Path
 import yaml
 
 from .common import InfraManagerError, run
-from .guest_catalog import find_guest_by_role
+from .guest_catalog import (
+    deployable_guests, find_guest_by_role, guest_management_address, load_manifest,
+)
 from .guest_operations import operation_guests
 from .operation_store import OperationStore
+from .pve import PveClient
 from .settings import PATHS, SETTINGS
 
 SOCKET_PATH = Path("/run/infra-web/operations.sock")
@@ -298,6 +301,153 @@ def _operation_detail(request: dict) -> dict:
 
 
 
+
+# Гостевые страницы не хранят свой каталог. Данные берутся из существующих
+# guest.yaml/defaults.yaml, разрешения — из общего access.yaml.
+MAX_GUESTS = 100
+GUEST_ACTIONS = ("status", "sync", "repair", "deploy")
+
+
+def _guests_catalog() -> tuple[list[dict], bool]:
+    """Снимок каталога и ONE PVE API request на все VM/LXC, без N+1 запросов."""
+    identities = sorted(deployable_guests(PATHS.repo_root), key=lambda guest: guest.vmid)
+    if len(identities) > MAX_GUESTS:
+        raise InfraManagerError("Количество гостей превышает безопасный предел")
+    defaults = load_manifest(PATHS.repo_root / "infrastructure/guests/defaults.yaml")
+    profiles = defaults.get("profiles", {})
+    allowed = {
+        kind: {item.vmid for item in operation_guests(PATHS.repo_root, kind)}
+        for kind in GUEST_ACTIONS
+    }
+    # Проверки access.yaml делают те же функции, которые ограничивают действия.
+    # Если отсутствует доступ на чтение, не публикуем список.
+    if identities:
+        authorize_action("status", identities[0].vmid)
+    for kind in ("sync", "repair", "deploy"):
+        candidates = [
+            guest.vmid for guest in identities
+            if guest.vmid in allowed[kind]
+            and not (kind == "deploy" and guest.role == SETTINGS.infra_manager_role)
+        ]
+        if not candidates:
+            allowed[kind] = set()
+            continue
+        try:
+            authorize_action(kind, candidates[0])
+        except InfraManagerError:
+            # Отсутствующие configure-права не должны скрывать список гостей.
+            allowed[kind] = set()
+    # PVE недоступен -> состояние "не проверено", не ложное "выключен".
+    resources: dict[int, dict] = {}
+    pve_available = False
+    try:
+        response = PveClient().data(
+            "/cluster/resources", query={"type": "vm"}, timeout=8,
+        )
+        if not isinstance(response, list):
+            raise InfraManagerError("PVE вернул неверный список объектов")
+        for item in response:
+            if not isinstance(item, dict) or type(item.get("vmid")) is not int:
+                continue
+            vmid = item["vmid"]
+            if vmid in resources:
+                raise InfraManagerError("PVE вернул дубликат VMID")
+            resources[vmid] = item
+        pve_available = True
+    except (InfraManagerError, OSError, TypeError, ValueError):
+        resources = {}
+    guests = []
+    for identity in identities:
+        profile = identity.source.get("profile")
+        profile_data = profiles.get(profile, {}) if isinstance(profiles, dict) else {}
+        guest_type = profile_data.get("type") if isinstance(profile_data, dict) else None
+        if guest_type not in {"lxc", "vm"}:
+            guest_type = "unknown"
+        try:
+            address = guest_management_address(PATHS.repo_root, identity)
+        except InfraManagerError:
+            address = None
+        if not isinstance(address, str) or len(address) > 45:
+            address = None
+        resource = resources.get(identity.vmid)
+        if not pve_available:
+            state = "unavailable"
+        elif resource is None:
+            state = "absent"
+        elif guest_type == "unknown":
+            state = "unknown"
+        elif (resource.get("name") != identity.name
+              or resource.get("type") != ("qemu" if guest_type == "vm" else guest_type)):
+            state = "conflict"
+        elif resource.get("status") in {"running", "stopped", "paused"}:
+            state = resource["status"]
+        else:
+            state = "unknown"
+        actions = [
+            kind for kind in GUEST_ACTIONS
+            if identity.vmid in allowed[kind]
+            and not (kind == "deploy" and identity.role == SETTINGS.infra_manager_role)
+        ]
+        guests.append({
+            "vmid": identity.vmid,
+            "name": identity.name[:80],
+            "role": (identity.role or "")[:80],
+            "type": guest_type,
+            "address": address,
+            "state": state,
+            "actions": actions,
+        })
+    return guests, pve_available
+
+
+def _dispatch_guests(request: dict) -> dict:
+    """Обзор либо карточка только известного VMID."""
+    if (not isinstance(request, dict)
+            or set(request) != {"kind", "vmid", "request_id"}
+            or request.get("kind") not in {"guests", "guest-detail"}
+            or type(request.get("vmid")) is not int
+            or not isinstance(request.get("request_id"), str)
+            or not REQUEST_ID.fullmatch(request["request_id"])):
+        raise InfraManagerError("Некорректный запрос каталога гостей")
+    if request["kind"] == "guests":
+        if request["vmid"] != 0:
+            raise InfraManagerError("Список гостей не принимает VMID")
+    elif not 1 <= request["vmid"] <= 999999:
+        raise InfraManagerError("Некорректный VMID гостя")
+    guests, pve_available = _guests_catalog()
+    if request["kind"] == "guests":
+        return {"accepted": True, "guests": guests, "pve_available": pve_available}
+    guest = next((row for row in guests if row["vmid"] == request["vmid"]), None)
+    if guest is None:
+        raise InfraManagerError("Гость отсутствует в каталоге проекта")
+    try:
+        records = OperationStore().list_recent(limit=100)
+        history_available = True
+    except (InfraManagerError, OSError):
+        records = []
+        history_available = False
+    operations = []
+    for record in records:
+        if type(record.get("target")) is not int or record["target"] != guest["vmid"]:
+            continue
+        operation_id = record.get("id", "")
+        if not isinstance(operation_id, str) or not REQUEST_ID.fullmatch(operation_id):
+            continue
+        operations.append({
+            "id": operation_id,
+            "kind": str(record.get("kind", ""))[:32],
+            "phase": str(record.get("phase", ""))[:32],
+            "created_at": str(record.get("created_at", ""))[:40],
+        })
+        if len(operations) >= 20:
+            break
+    return {
+        "accepted": True, "guest": guest, "operations": operations,
+        "history_available": history_available, "pve_available": pve_available,
+    }
+
+
+
 def dispatch(request: dict) -> dict:
     """Запустить только фиксированную системную задачу с неизменяемым UUID."""
     if isinstance(request, dict) and request.get("kind") in (
@@ -308,6 +458,8 @@ def dispatch(request: dict) -> dict:
         return _dispatch_history(request)
     if isinstance(request, dict) and request.get("kind") == "operation-detail":
         return _operation_detail(request)
+    if isinstance(request, dict) and request.get("kind") in {"guests", "guest-detail"}:
+        return _dispatch_guests(request)
     if not isinstance(request, dict) or set(request) != {"kind", "vmid", "request_id"}:
         raise InfraManagerError("Неверный формат запроса")
     kind, vmid, operation_id = (

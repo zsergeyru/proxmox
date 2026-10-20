@@ -216,6 +216,214 @@ def _operation_page(operation_id: str) -> bytes:
 
 
 
+
+GUEST_STATES = {
+    "running": "Работает", "stopped": "Остановлен",
+    "paused": "Приостановлен", "absent": "Не найден в PVE",
+    "conflict": "Конфликт VMID", "unavailable": "PVE недоступен",
+    "unknown": "Неизвестно",
+}
+GUEST_ACTION_LABELS = {
+    "status": "Проверить", "sync": "Синхронизировать",
+    "repair": "Исправить", "deploy": "Развернуть",
+}
+
+
+def _guest_catalog(kind: str, vmid: int = 0) -> dict:
+    """Читать каталог и состояние PVE только через закрытый системный сокет."""
+    if kind not in {"guests", "guest-detail"} or (
+        kind == "guests" and vmid != 0
+    ) or (kind == "guest-detail" and not 1 <= vmid <= 999999):
+        raise ValueError("Некорректный запрос гостя")
+    payload = json.dumps({
+        "kind": kind, "vmid": vmid, "request_id": secrets.token_hex(16),
+    }).encode() + b"\n"
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
+        connection.settimeout(12)
+        connection.connect(SOCKET)
+        connection.sendall(payload)
+        with connection.makefile("rb") as stream:
+            raw = stream.readline(65537)
+    if len(raw) > 65536 or not raw.endswith(b"\n"):
+        raise ValueError("Нет ограниченного ответа каталога")
+    data = json.loads(raw)
+    if not isinstance(data, dict) or data.get("accepted") is not True:
+        raise ValueError("Посредник не вернул каталог")
+    if kind == "guests":
+        guests = data.get("guests")
+        if (not isinstance(guests, list) or len(guests) > 100
+                or any(not isinstance(row, dict) for row in guests)):
+            raise ValueError("Некорректный список гостей")
+    else:
+        guest = data.get("guest")
+        operations = data.get("operations")
+        if (not isinstance(guest, dict) or guest.get("vmid") != vmid
+                or not isinstance(operations, list) or len(operations) > 20
+                or any(not isinstance(row, dict) for row in operations)):
+            raise ValueError("Некорректная карточка гостя")
+    return data
+
+
+def _guest_rows(records: list[dict]) -> str:
+    rows = []
+    for guest in records:
+        vmid = guest.get("vmid")
+        if type(vmid) is not int or not 1 <= vmid <= 999999:
+            continue
+        state = GUEST_STATES.get(guest.get("state"), "Неизвестно")
+        cells = [
+            '<a href="/guests?vmid=' + str(vmid) + '">' + str(vmid) + '</a>',
+            str(guest.get("name") or "—"),
+            str(guest.get("role") or "—"),
+            "VM" if guest.get("type") == "vm" else
+            "LXC" if guest.get("type") == "lxc" else "—",
+            str(guest.get("address") or "—"), state,
+        ]
+        rows.append("<tr>" + "".join(
+            "<td>" + (cell if i == 0 else html.escape(cell)) + "</td>"
+            for i, cell in enumerate(cells)
+        ) + "</tr>")
+    return "".join(rows) or '<tr><td colspan="6">Гостей нет</td></tr>'
+
+
+def _guests_page() -> bytes:
+    try:
+        data = _guest_catalog("guests")
+        guests = data["guests"]
+        warning = (
+            "" if data.get("pve_available") is True
+            else "<p>Нет связи с PVE: состояния не подтверждены. "
+                 "Описание гостей из Git остаётся доступным.</p>"
+        )
+        content = (
+            '<p><a href="/">← Задания</a></p>'
+            '<h2>Гости Proxmox</h2>'
+            '<p>Список сформирован из guest.yaml/provision.yaml проекта. '
+            'Состояния PVE проверяются отдельно.</p>' + warning
+            + '<p>Гостей в каталоге: ' + str(len(guests))
+            + ' · <a href="/guests">Обновить состояния</a></p>'
+            '<table><thead><tr><th>VMID</th><th>Имя</th><th>Роль</th>'
+            '<th>Тип</th><th>IP</th><th>Состояние</th></tr></thead><tbody>'
+            + _guest_rows(guests) + '</tbody></table>'
+        )
+    except (OSError, ValueError, TimeoutError):
+        content = (
+            '<p><a href="/">← Задания</a></p><h2>Гости Proxmox</h2>'
+            '<p>Каталог временно недоступен. Проверьте системный посредник '
+            'и повторите запрос.</p><p><a href="/guests">Повторить</a></p>'
+        )
+    return _layout(content)
+
+
+def _guest_page(vmid: int, csrf: str) -> bytes:
+    try:
+        data = _guest_catalog("guest-detail", vmid)
+    except (OSError, ValueError, TimeoutError):
+        return _layout(
+            '<p><a href="/guests">← Все гости</a></p>'
+            '<h2>Гость ' + str(vmid) + '</h2>'
+            '<p>Пока нельзя прочитать карточку. Попробуйте обновить страницу.</p>'
+        )
+    guest = data["guest"]
+    actions = guest.get("actions", [])
+    if not isinstance(actions, list):
+        actions = []
+    token = html.escape(csrf, quote=True)
+    commands = []
+    for kind in GUEST_ACTION_LABELS:
+        if kind not in actions:
+            continue
+        label = GUEST_ACTION_LABELS[kind]
+        if kind == "status":
+            commands.append(
+                '<form method="POST" action="/action">'
+                f'<input type="hidden" name="csrf" value="{token}">'
+                f'<input type="hidden" name="vmid" value="{vmid}">'
+                '<input type="hidden" name="kind" value="status">'
+                '<button type="submit">Проверить состояние</button></form>'
+            )
+        else:
+            commands.append(
+                '<form method="GET" action="/guests/confirm">'
+                f'<input type="hidden" name="vmid" value="{vmid}">'
+                f'<input type="hidden" name="kind" value="{kind}">'
+                f'<button type="submit">{html.escape(label)}</button></form>'
+            )
+    history = []
+    for row in data["operations"]:
+        identifier = row.get("id")
+        if not isinstance(identifier, str) or not REQ_ID.fullmatch(identifier):
+            continue
+        phase = PHASES.get(row.get("phase"), "Неизвестно")
+        history.append(
+            '<tr><td><a href="/operations?id=' + identifier + '">'
+            + identifier[:8] + '</a></td><td>'
+            + html.escape(str(row.get("kind", ""))) + '</td><td>'
+            + html.escape(phase) + '</td><td>'
+            + html.escape(str(row.get("created_at", ""))) + '</td></tr>'
+        )
+    notice = (
+        "<p>Не удалось прочитать историю операций, но карточка доступна.</p>"
+        if data.get("history_available") is False else ""
+    )
+    state = GUEST_STATES.get(guest.get("state"), "Неизвестно")
+    if data.get("pve_available") is False:
+        state += " — PVE недоступен; состояние не проверено"
+    fields = (
+        ("Имя", guest.get("name") or "—"),
+        ("Роль", guest.get("role") or "—"),
+        ("Тип", "VM" if guest.get("type") == "vm" else
+         "LXC" if guest.get("type") == "lxc" else "—"),
+        ("Адрес управления", guest.get("address") or "—"),
+        ("Состояние PVE", state),
+    )
+    detail = "".join(
+        '<dt>' + html.escape(label) + '</dt><dd>'
+        + html.escape(str(value)) + '</dd>' for label, value in fields
+    )
+    return _layout(
+        '<p><a href="/guests">← Все гости</a></p>'
+        '<h2>Гость ' + str(vmid) + '</h2>'
+        '<dl class="guest-meta">' + detail + '</dl>'
+        '<h3>Разрешённые действия</h3>'
+        '<div class="guest-actions">' + "".join(commands) + '</div>'
+        + ('<p>Нет разрешённых действий для этого гостя.</p>'
+           if not commands else '')
+        + ('<p>Самообновление 910 выполняется через PVE CLI.</p>'
+           if vmid == 910 else '')
+        + '<h3>Последние задания</h3>' + notice
+        + '<table><tr><th>ID</th><th>Действие</th>'
+        '<th>Состояние</th><th>Создано UTC</th></tr>'
+        + ("".join(history) or '<tr><td colspan="4">Истории пока нет</td></tr>')
+        + '</table><p><a href="/guests?vmid=' + str(vmid)
+        + '">Обновить карточку</a></p>'
+    )
+
+
+def _guest_confirmation(vmid: int, kind: str, csrf: str) -> bytes:
+    if kind not in {"sync", "repair", "deploy"}:
+        raise ValueError("Для этого действия подтверждение не требуется")
+    data = _guest_catalog("guest-detail", vmid)
+    guest = data["guest"]
+    if kind not in guest.get("actions", []):
+        raise ValueError("Операция запрещена для выбранного гостя")
+    token = html.escape(csrf, quote=True)
+    return _layout(
+        '<p><a href="/guests?vmid=' + str(vmid) + '">← Отмена</a></p>'
+        '<h2>Подтвердите действие</h2>'
+        '<p>Гость: ' + str(vmid) + ' — <strong>'
+        + html.escape(str(guest.get("name", ""))) + '</strong></p>'
+        '<p>Операция: <strong>' + html.escape(GUEST_ACTION_LABELS[kind])
+        + '</strong>. Команда изменит состояние инфраструктуры.</p>'
+        '<form method="POST" action="/action">'
+        f'<input type="hidden" name="csrf" value="{token}">'
+        f'<input type="hidden" name="vmid" value="{vmid}">'
+        f'<input type="hidden" name="kind" value="{kind}">'
+        '<button type="submit">Да, выполнить</button></form>'
+    )
+
+
+
 def _send_action(kind: str, vmid: int, request_id: str) -> dict:
     if kind not in {"status", "sync", "repair", "deploy"} or (
         not isinstance(vmid, int) or not 1 <= vmid <= 999999
@@ -347,6 +555,10 @@ a{color:#9bded8}code{color:#96d1f1}
 font-size:.85rem;color:#bdcbd9}.versions dl{display:grid;grid-template-columns:
 minmax(180px,1fr) 1fr;gap:.4rem .7rem}.versions dt{color:#a9bcce}
 .versions dd{margin:0}.versions p{color:#a9bcce}
+.guest-meta{display:grid;grid-template-columns:minmax(150px,1fr) 2fr;
+gap:.4rem 1rem}.guest-meta dt{color:#a9bcce}.guest-meta dd{margin:0}
+.guest-actions{display:flex;gap:.7rem;flex-wrap:wrap}
+.guest-actions form{margin:0}
 .diagnostic-log{background:#061222;padding:1rem;border-radius:8px;
 overflow:auto;max-height:55vh;white-space:pre-wrap;overflow-wrap:anywhere;
 min-height:8rem;border:1px solid #345}
@@ -389,7 +601,8 @@ def _dashboard(csrf: str, notice: str = "") -> bytes:
         '<option value="repair">Исправить</option>'
         '<option value="deploy">Развернуть</option>'
         '</select></label><button type="submit">Выполнить</button></form>'
-        '<p><a href="/storage">Проверить и подготовить резервный SSD</a></p>'
+        '<p><a href="/guests">Управление гостями</a> · '
+        '<a href="/storage">Проверить и подготовить резервный SSD</a></p>'
         '<p>Изменяйте только известные гости. Система повторно проверяет права '
         'и записывает результат задания независимо от браузера.</p>'
         '<table><tr><th>ID</th><th>VMID</th><th>Действие</th>'
@@ -528,6 +741,49 @@ class Handler(BaseHTTPRequestHandler):
                 HTTPStatus.OK,
                 _dashboard(session[1]["csrf"]) if session else _login(),
             )
+        elif path in {"/guests", "/guests/confirm", "/api/guests", "/api/guest"}:
+            if not session:
+                self._reply(HTTPStatus.UNAUTHORIZED, b"login required\n")
+                return
+            query = parse_qs(urlsplit(self.path).query, keep_blank_values=True)
+            if path in {"/guests", "/api/guests"} and not query:
+                if path == "/guests":
+                    self._reply(HTTPStatus.OK, _guests_page())
+                else:
+                    try:
+                        data = _guest_catalog("guests")
+                    except (ValueError, OSError, TimeoutError):
+                        self._reply(HTTPStatus.SERVICE_UNAVAILABLE, b"catalog unavailable\n")
+                        return
+                    self._reply(HTTPStatus.OK, json.dumps(data, ensure_ascii=False).encode(),
+                                content_type="application/json; charset=utf-8")
+                return
+            required = {"vmid", "kind"} if path == "/guests/confirm" else {"vmid"}
+            if set(query) != required or any(len(values) != 1 for values in query.values()):
+                self._reply(HTTPStatus.BAD_REQUEST, b"invalid query\n")
+                return
+            try:
+                raw = query["vmid"][0]
+                if not raw.isascii() or not raw.isdecimal() or len(raw) > 6:
+                    raise ValueError("VMID must be numeric")
+                vmid = int(raw)
+                if not 1 <= vmid <= 999999:
+                    raise ValueError("VMID out of range")
+                if path == "/guests/confirm":
+                    page = _guest_confirmation(vmid, query["kind"][0], session[1]["csrf"])
+                    self._reply(HTTPStatus.OK, page)
+                elif path == "/api/guest":
+                    data = _guest_catalog("guest-detail", vmid)
+                    self._reply(HTTPStatus.OK, json.dumps(data, ensure_ascii=False).encode(),
+                                content_type="application/json; charset=utf-8")
+                elif path == "/guests":
+                    self._reply(HTTPStatus.OK, _guest_page(vmid, session[1]["csrf"]))
+                else:
+                    self._reply(HTTPStatus.BAD_REQUEST, b"invalid query\n")
+            except ValueError:
+                self._reply(HTTPStatus.BAD_REQUEST, b"invalid guest or action\n")
+            except (OSError, TimeoutError):
+                self._reply(HTTPStatus.SERVICE_UNAVAILABLE, b"guest unavailable\n")
         elif path == "/storage":
             if not session:
                 self._reply(HTTPStatus.UNAUTHORIZED, b"login required\n")

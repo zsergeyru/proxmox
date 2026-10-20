@@ -156,6 +156,7 @@ jobs:
           python scripts/tests/test-infra-web-admin.py
           python scripts/tests/test-admin-socket.py
           python scripts/tests/test-web-diagnostics-socket.py
+          python scripts/tests/test-web-guests.py
           node --check infrastructure/guests/910-infra-manager/rootfs/opt/infra-manager/compose/web/diagnostics.js
 
       - name: Check managed backup and standalone runtime transition
