@@ -84,6 +84,40 @@ def check_host_denies_untrusted() -> None:
         assert forbidden not in text, forbidden
 
 
+def check_backup_blocks_runtime_activation() -> None:
+    """Любой маркер и активный UUID должны блокировать снимок PVE."""
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        markers = (
+            root / "operations/activation/runtime-activation-pending",
+            root / "locks/runtime-activation-pending",
+            root / "operations/active/910.json",
+        )
+        gate = root / "locks/backup-gate.lock"
+        gate.parent.mkdir(parents=True)
+        gate.write_text("", encoding="utf-8")
+        for marker in markers:
+            marker.parent.mkdir(parents=True, exist_ok=True)
+        with (
+            patch.object(host, "INDEPENDENT_ACTIVATION", markers[0]),
+            patch.object(host, "TRANSITION_ACTIVATION", markers[1]),
+            patch.object(host, "ACTIVE_910_OPERATION", markers[2]),
+            patch.object(host, "BACKUP_GATE", gate),
+        ):
+            # Снимок разрешён только при отсутствии всех трёх признаков.
+            host._assert_no_runtime_activation()
+            with host._consistent_window():
+                pass
+            for marker in markers:
+                marker.write_text("test", encoding="utf-8")
+                fails(host._assert_no_runtime_activation, "Нельзя копировать при активной операции")
+                fails(lambda: next(iter(host._consistent_window())), "Повторная проверка под backup-gate обязательна")
+                marker.unlink()
+                marker.symlink_to(gate)
+                fails(host._assert_no_runtime_activation, "Нельзя обходить проверку символьной ссылкой")
+                marker.unlink()
+
+
 def check_run_does_not_claim_success() -> None:
     expected = config()
     with (
@@ -101,6 +135,7 @@ def check_run_does_not_claim_success() -> None:
 def main():
     check_policy()
     check_host_denies_untrusted()
+    check_backup_blocks_runtime_activation()
     check_run_does_not_claim_success()
     print("[ОК] Резервированием управляет 910; неподтверждённые SSD/NAS не изменяются")
 
