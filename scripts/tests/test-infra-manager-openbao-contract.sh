@@ -188,8 +188,6 @@ grep -RFq '"pve/api/infra-manager"' "$OPENBAO_HOST_PACKAGE" \
     || die "KV должен содержать отдельный PVE API credential"
 grep -RFq '"git/github/proxmox-read"' "$OPENBAO_HOST_PACKAGE" \
     || die "KV должен содержать отдельный Git credential"
-grep -RFq '"services/semaphore"' "$OPENBAO_HOST_PACKAGE" \
-    || die "KV должен содержать сервисные credentials Semaphore"
 grep -RFq 'infra-manager-kv-read' "$OPENBAO_HOST_PACKAGE" \
     || die "KV должен иметь отдельную ограниченную read-policy"
 grep -Fq '/run/infra-manager/secrets' "$OPENBAO_HOST" \
@@ -216,8 +214,6 @@ grep -Fq 'ExecStart=/usr/local/sbin/infra-manager-openbao-startup-unseal {{ infr
     || die "Служба 910 должна запускать одноразовую разблокировку после старта"
 grep -Fq 'WantedBy=multi-user.target' "$OPENBAO_STARTUP_SERVICE" \
     || die "Служба разблокировки должна запускаться вместе с 910"
-grep -Fq 'name="Sync SSH Access"' "$PY_SEMAPHORE" \
-    || die "Semaphore должен иметь задание Sync SSH Access"
 grep -Fq 'sync_ssh_access(REPO_ROOT)' "$SSH_ACCESS_JOB" \
     || die "Задание должно синхронизировать OpenBao OTP"
 grep -Fq 'sync_openbao_otp_contract(node, _otp_sources(repo_root))' "$PY_OPENBAO" \
@@ -242,33 +238,15 @@ grep -q 'install_openbao_host_support' "$PY_OPENBAO" \
     || die "Задание OpenBao должно устанавливать хостовый сценарий"
 grep -q 'repair_openbao_on_host' "$PY_OPENBAO" \
     || die "Задание OpenBao должно идемпотентно готовить или восстанавливать OpenBao через PVE"
-if grep -q 'infra-manager@pve' "$ANSIBLE_PLAYBOOK" "$ANSIBLE_LINUX_BASE" "$ANSIBLE_GUEST_LAYOUT" "$ANSIBLE_DOCKER" "$ANSIBLE_RUNTIME" "$PY_SEMAPHORE" "$PY_STATUS" "$PY_PVE"; then
+if grep -q 'infra-manager@pve' "$ANSIBLE_PLAYBOOK" "$ANSIBLE_LINUX_BASE" "$ANSIBLE_GUEST_LAYOUT" "$ANSIBLE_DOCKER" "$ANSIBLE_RUNTIME" "$PY_STATUS" "$PY_PVE"; then
     die "Старая PVE-идентичность не должна присутствовать в чистой схеме"
 fi
-if grep -q 'InfraManagedGuest' "$ANSIBLE_PLAYBOOK" "$ANSIBLE_LINUX_BASE" "$ANSIBLE_GUEST_LAYOUT" "$ANSIBLE_DOCKER" "$ANSIBLE_RUNTIME" "$PY_SEMAPHORE" "$PY_STATUS" "$PY_PVE"; then
+if grep -q 'InfraManagedGuest' "$ANSIBLE_PLAYBOOK" "$ANSIBLE_LINUX_BASE" "$ANSIBLE_GUEST_LAYOUT" "$ANSIBLE_DOCKER" "$ANSIBLE_RUNTIME" "$PY_STATUS" "$PY_PVE"; then
     die "Старая собственная роль PVE не должна присутствовать в чистой схеме"
 fi
-if grep -q 'PVE API automation\|Ansible managed guests' "$PY_SEMAPHORE"; then
-    die "Неиспользуемые Semaphore credentials не должны создаваться"
-fi
 
-grep -q 'SEMAPHORE_DB_DIALECT=sqlite' "$ANSIBLE_RUNTIME" \
-    || die "Semaphore должен использовать SQLite в первой версии"
-grep -q 'SEMAPHORE_DB_HOST=/var/lib/semaphore/semaphore.sqlite' "$ANSIBLE_RUNTIME" \
-    || die "Не зафиксирован постоянный путь SQLite"
-grep -q 'SEMAPHORE_USE_REMOTE_RUNNER' "$ANSIBLE_RUNTIME" \
-    || die "Ansible должен удалять старую настройку remote Runner"
-grep -q 'SEMAPHORE_RUNNER_REGISTRATION_TOKEN' "$ANSIBLE_RUNTIME" \
-    || die "Ansible должен удалять старый registration token Runner"
-grep -q 'provision.paths.semaphore_persistent_data' "$ANSIBLE_RUNTIME" \
-    || die "Ansible должен обслуживать физический каталог постоянного хранилища Semaphore"
 grep -q 'provision.paths.opentofu_persistent_state_dir' "$ANSIBLE_RUNTIME" \
-    || die "Ansible должен заранее создавать физический каталог OpenTofu state"
-if grep -q 'recurse: true' "$ANSIBLE_RUNTIME" && grep -q 'provision.paths.semaphore_data' "$ANSIBLE_RUNTIME"; then
-    die "Ansible не должен применять recurse к символической ссылке Semaphore"
-fi
-grep -q '"1001"' "$ANSIBLE_RUNTIME" \
-    || die "Хранилище Semaphore должно использовать uid 1001"
+    || die "Необходимо сохранять постоянное состояние OpenTofu"
 grep -q 'packer, version' "$ANSIBLE_RUNTIME" \
     || die "Packer должен проверяться внутри infra-runtime"
 if grep -Fq 'register: ansible_private_key' "$ANSIBLE_RUNTIME"; then
@@ -356,12 +334,6 @@ targets = {
         'dest: "{{ provision.access_materialization.github.private_key }}"',
         "dest: /run/infra-manager/secrets/github_proxmox_repo_ed25519",
     ),
-    "/run/infra-manager/secrets/semaphore-server.env": (
-        "dest: /run/infra-manager/secrets/semaphore-server.env",
-    ),
-    "/run/infra-manager/secrets/initial-admin-password": (
-        "dest: /run/infra-manager/secrets/initial-admin-password",
-    ),
 }
 for target, markers in targets.items():
     starts = [text.find(marker) for marker in markers]
@@ -391,7 +363,7 @@ if grep -Fq -- '--on-active=30s' "$ANSIBLE_PLAYBOOK"; then
 fi
 branch_env_count="$(grep -Fc 'INFRA_PROJECT_BRANCH: "{{ infra_project_branch' "$ANSIBLE_RUNTIME" || true)"
 [[ "$branch_env_count" -ge 1 ]] \
-    || die "Выбранная ветка должна передаваться настройке Semaphore"
+    || die "Выбранная ветка должна передаваться настройке управляющего контура"
 grep -Fq 'f"INFRA_PROJECT_BRANCH={self.project_branch}"' "$BOOTSTRAP_INFRA" \
     || die "Финальная bootstrap-проверка 910 должна использовать выбранную ветку"
 python3 - "$BOOTSTRAP_HOST" <<'PY'
