@@ -200,6 +200,7 @@ def _prepare_runtime_snapshot(operation: str, vmid: int | str, *, physical: bool
             raise InfraManagerError(
                 f"Не найдена точка входа операций: {entrypoint}"
             )
+        console.info("Шаг: подготовка снимка проекта в infra-runtime")
         run(
             [
                 "docker",
@@ -362,6 +363,7 @@ def _operator_guest_task(
 
     require_runtime_activation_idle()
     snapshot = _prepare_runtime_snapshot(operation, vmid)
+    console.info(f"Шаг: запуск {operation} для гостя {vmid} в infra-runtime")
     result = run(
         [
             "docker",
