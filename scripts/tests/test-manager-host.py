@@ -316,6 +316,7 @@ def test_operator_guest_task_secret_policy() -> None:
         store = OperationStore(Path(directory) / "operations", require_mount=False)
         with (
             patch("infra_manager.operation_store.OperationStore", return_value=store),
+            patch.object(operator, "_backup_gate", side_effect=contextlib.nullcontext),
             patch.object(operator, "project_revision", return_value="abc123"),
             patch.object(
                 operator,
@@ -371,6 +372,7 @@ def test_self_update_waits_and_renders_final_status() -> None:
 
         with (
             patch("infra_manager.operation_store.OperationStore", return_value=store),
+            patch.object(operator, "_backup_gate", side_effect=contextlib.nullcontext),
             patch.object(operator, "project_revision", return_value="abc123"),
             patch.object(operator, "_prepare_runtime_snapshot", return_value="/tmp/ready-910"),
             patch.object(operator, "_operator_guest_task", return_value=0),
@@ -412,6 +414,7 @@ def test_self_update_fast_activation_before_poll() -> None:
 
         with (
             patch("infra_manager.operation_store.OperationStore", return_value=store),
+            patch.object(operator, "_backup_gate", side_effect=contextlib.nullcontext),
             patch.object(operator, "project_revision", return_value="abc123"),
             patch.object(operator, "_prepare_runtime_snapshot", return_value="/tmp/ready-910"),
             patch.object(operator, "_operator_guest_task",
@@ -446,6 +449,7 @@ def test_self_update_stores_refreshed_git_revision() -> None:
 
         with (
             patch("infra_manager.operation_store.OperationStore", return_value=store),
+            patch.object(operator, "_backup_gate", side_effect=contextlib.nullcontext),
             patch.object(operator, "project_revision", side_effect=lambda _root: git["revision"]),
             patch.object(operator, "_prepare_runtime_snapshot", side_effect=snapshot) as prep,
             patch.object(operator, "_operator_guest_task", return_value=0) as worker,
@@ -475,6 +479,7 @@ def test_self_update_failed_activation_does_not_show_success() -> None:
 
         with (
             patch("infra_manager.operation_store.OperationStore", return_value=store),
+            patch.object(operator, "_backup_gate", side_effect=contextlib.nullcontext),
             patch.object(operator, "project_revision", return_value="abc123"),
             patch.object(operator, "_prepare_runtime_snapshot", return_value="/tmp/ready-910"),
             patch.object(operator, "_operator_guest_task", return_value=0),
@@ -502,6 +507,7 @@ def test_self_update_interrupt_does_not_cancel_systemd() -> None:
         store = OperationStore(Path(directory) / "operations", require_mount=False)
         with (
             patch("infra_manager.operation_store.OperationStore", return_value=store),
+            patch.object(operator, "_backup_gate", side_effect=contextlib.nullcontext),
             patch.object(operator, "project_revision", return_value="abc123"),
             patch.object(operator, "_prepare_runtime_snapshot", return_value="/tmp/ready-910"),
             patch.object(operator, "_operator_guest_task", return_value=0),
