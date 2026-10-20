@@ -9,6 +9,7 @@ from __future__ import annotations
 import html
 import json
 import os
+from pathlib import Path
 import re
 import secrets
 import socket
@@ -149,14 +150,14 @@ def _operation_detail(operation_id: str) -> dict:
     payload = json.dumps({
         "kind": "operation-detail", "vmid": 0,
         "request_id": secrets.token_hex(16), "operation_id": operation_id,
-    }).encode() + b"\\n"
+    }).encode() + b"\n"
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
         connection.settimeout(10)
         connection.connect(SOCKET)
         connection.sendall(payload)
         with connection.makefile("rb") as stream:
             raw = stream.readline(65537)
-    if len(raw) > 65536 or not raw.endswith(b"\\n"):
+    if len(raw) > 65536 or not raw.endswith(b"\n"):
         raise ValueError("Посредник не вернул ограниченную диагностику")
     result = json.loads(raw)
     if (not isinstance(result, dict)
@@ -187,7 +188,7 @@ def _operation_page(operation_id: str) -> bytes:
         + clean(PHASES.get(event.get("phase"), "Неизвестно"))
         + "</li>" for event in events if isinstance(event, dict)
     ) or "<li>Этапы ещё не записаны</li>"
-    logs = "\\n".join(str(item) for item in result["logs"] if isinstance(item, str))
+    logs = "\n".join(str(item) for item in result["logs"] if isinstance(item, str))
     body = (
         '<p><a href="/">← Ко всем заданиям</a></p>'
         '<h2>Диагностика задания</h2>'
@@ -536,7 +537,11 @@ class Handler(BaseHTTPRequestHandler):
             if not session:
                 self._reply(HTTPStatus.UNAUTHORIZED, b"login required\\n")
                 return
-            script = (__import__("pathlib").Path(__file__).with_name("diagnostics.js")).read_bytes()
+            try:
+                script = Path(__file__).with_name("diagnostics.js").read_bytes()
+            except OSError:
+                self._reply(HTTPStatus.SERVICE_UNAVAILABLE, b"diagnostics unavailable\n")
+                return
             self._reply(HTTPStatus.OK, script, content_type="text/javascript; charset=utf-8")
         elif path in {"/operations", "/api/operation"}:
             if not session:
