@@ -11,6 +11,11 @@ COMPOSE_DIR="/opt/infra-manager/compose"
 LOG_DIR="/var/log/infra-manager"
 LOG_FILE="$LOG_DIR/runtime-activation.log"
 ACTIVATION_MARKER="/mnt/persistent-state/operations/activation/runtime-activation-pending"
+# До первого переключения старый Docker ещё не видит новый mount operations.
+# Маркер в существующем state/locks позволяет завершить работу старого runtime
+# без Semaphore и без пересоздания его во время выполняющегося задания.
+TRANSITION_MARKER="/mnt/persistent-state/locks/runtime-activation-pending"
+MARKER_VERIFIED=0
 BRANCH="${INFRA_PROJECT_BRANCH:-main}"
 PVE_NODE="${INFRA_PVE_NODE:-}"
 OPERATION_ID=""
@@ -77,11 +82,32 @@ finish_activation() {
             exit 1
         fi
     fi
-    rm -f "$ACTIVATION_MARKER"
+    if [[ "$MARKER_VERIFIED" == "1" ]]; then
+        rm -f "$ACTIVATION_MARKER"
+    fi
 }
 trap finish_activation EXIT
 
 printf '\n[%s] Активация infra-runtime, ветка %s\n' "$(date -Is)" "$BRANCH"
+
+# Выбираем именно маркер реально выполнявшегося задания. Не удаляем его,
+# если обнаружены два конкурирующих запроса или небезопасный тип файла.
+if [[ -e "$ACTIVATION_MARKER" || -L "$ACTIVATION_MARKER" ]]; then
+    if [[ -e "$TRANSITION_MARKER" || -L "$TRANSITION_MARKER" ]]; then
+        printf 'ОШИБКА: Найдены два маркера активации 910; требуется проверка операций\n' >&2
+        exit 1
+    fi
+elif [[ -e "$TRANSITION_MARKER" || -L "$TRANSITION_MARKER" ]]; then
+    ACTIVATION_MARKER="$TRANSITION_MARKER"
+else
+    printf 'ОШИБКА: Не найден общий маркер активации; переключение runtime отменено\n' >&2
+    exit 1
+fi
+if [[ -L "$ACTIVATION_MARKER" || ! -f "$ACTIVATION_MARKER" ]]; then
+    printf 'ОШИБКА: Маркер активации не является обычным файлом\n' >&2
+    exit 1
+fi
+MARKER_VERIFIED=1
 
 if [[ -f "$ACTIVATION_MARKER" ]]; then
     read -r deploy_ref < "$ACTIVATION_MARKER" || true
