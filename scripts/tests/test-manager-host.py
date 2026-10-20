@@ -476,7 +476,8 @@ def test_self_update_stores_refreshed_git_revision() -> None:
     with tempfile.TemporaryDirectory() as directory:
         store = OperationStore(Path(directory) / "operations", require_mount=False)
         git = {"revision": "old-revision"}
-        def snapshot(_operation: str, _vmid: int) -> str:
+        def snapshot(_operation: str, _vmid: int, *, preflight_storage: bool = False) -> str:
+            assert preflight_storage is True
             git["revision"] = "new-revision"
             return "/tmp/new-revision-910"
 
@@ -494,7 +495,7 @@ def test_self_update_stores_refreshed_git_revision() -> None:
             patch.object(operator, "console"),
         ):
             assert operator.operator_guest_task("deploy", 910, show_secrets=False) == 2
-        prep.assert_called_once_with("deploy", 910)
+        prep.assert_called_once_with("deploy", 910, preflight_storage=True)
         assert worker.call_args.kwargs["prepared_snapshot"] == "/tmp/new-revision-910"
         assert store.list_recent()[0]["revision"] == "new-revision"
 
@@ -742,6 +743,68 @@ def test_runtime_snapshot_refresh_policy() -> None:
     refresh.assert_called_once_with()
 
 
+def test_storage_preflight_from_new_git_before_deploy() -> None:
+    """Один checkout: Git → runtime snapshot → НОВЫЙ Python → запуск deploy.
+
+    Проверка не вызывается внутри старого импортированного operator.py.
+    Новый источник исполняется отдельным процессом с обычным stdin для SSH.
+    """
+    from infra_manager.common import InfraManagerError
+
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary)
+        entrypoint = root / "scripts/infra-manager/jobs/storage-preflight.py"
+        entrypoint.parent.mkdir(parents=True)
+        events = []
+
+        def refresh() -> None:
+            events.append("git")
+            entrypoint.write_text("print('fresh')\\n", encoding="utf-8")
+
+        def fake_run(argv, **kwargs):
+            if argv[0] == "docker":
+                events.append("snapshot")
+            else:
+                assert argv == [sys.executable, str(entrypoint)]
+                assert kwargs.get("stream_output") is True
+                assert "input_text" not in kwargs, "Нельзя скрывать SSH-ввод от ребёнка"
+                events.append("new-process")
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        with (
+            patch.object(operator, "PATHS", SimpleNamespace(repo_root=root)),
+            patch.object(operator, "RUNTIME_GUEST_OPERATION",
+                         SimpleNamespace(is_file=lambda: True)),
+            patch.object(operator, "project_checkout_lock",
+                         return_value=contextlib.nullcontext()) as lock,
+            patch.object(operator, "_refresh_project_checkout", side_effect=refresh),
+            patch.object(operator, "run", side_effect=fake_run),
+            patch.object(operator.os, "getpid", return_value=555),
+        ):
+            assert operator._prepare_runtime_snapshot(
+                "deploy", 910, preflight_storage=True,
+            ) == "/tmp/infra-manager-direct-555-910"
+        assert events == ["git", "snapshot", "new-process"]
+        lock.assert_called_once_with(exclusive=True)
+
+        entrypoint.unlink()
+        with (
+            patch.object(operator, "PATHS", SimpleNamespace(repo_root=root)),
+            patch.object(operator, "RUNTIME_GUEST_OPERATION",
+                         SimpleNamespace(is_file=lambda: True)),
+            patch.object(operator, "project_checkout_lock",
+                         return_value=contextlib.nullcontext()),
+            patch.object(operator, "_refresh_project_checkout"),
+            patch.object(operator, "run", return_value=SimpleNamespace(returncode=0)),
+        ):
+            try:
+                operator._prepare_runtime_snapshot("deploy", 910, preflight_storage=True)
+            except InfraManagerError:
+                pass
+            else:
+                raise AssertionError("Нельзя переходить на старый preflight при отсутствии нового")
+
+
 def test_operator_status_secret_policy() -> None:
     # «infra-manager status» и «status 910» используют единый экран гостя.
     # Секреты разрешены только при доверенном вызове с физического PVE.
@@ -932,6 +995,7 @@ def main() -> None:
     test_operator_interrupt()
     test_internal_project_refresh_uses_existing_checkout()
     test_runtime_snapshot_refresh_policy()
+    test_storage_preflight_from_new_git_before_deploy()
     test_operator_status_secret_policy()
     test_operator_prefers_explicit_pve_node()
     test_operator_repair_runs_inside_manager()
