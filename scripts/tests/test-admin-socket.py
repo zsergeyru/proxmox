@@ -75,7 +75,7 @@ def main():
                          return_value=SimpleNamespace(vmid=920)),
             patch("infra_manager.operator._pve_node", return_value="pve"),
             patch("infra_manager.pve.PveClient"),
-            patch("infra_manager.pve_backup_ssd.inspect_backup_ssd",
+            patch("infra_manager.pve_backup_ssd.storage_status",
                   return_value={"state": "needs-confirmation"}) as inspect,
             patch("infra_manager.pve_backup_ssd.approve_backup_ssd") as approve,
         ):
