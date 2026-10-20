@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Контракт нового образа infra-runtime без включения опасного переключения."""
+"""Проверка рабочего образа infra-runtime без Semaphore."""
 
 from __future__ import annotations
 
@@ -35,7 +35,8 @@ def main() -> None:
     assert new["build"]["dockerfile"] == "runtime-next/Dockerfile"
     assert "env_file" not in new
     assert not any("semaphore" in volume.lower() for volume in new["volumes"])
-    assert next_compose["services"]["web"]["profiles"] == ["preview"]
+    assert "profiles" not in next_compose["services"]["web"]
+    assert next_compose["services"]["web"]["image"] == "infra-web:v1"
     assert next_compose["services"]["web"]["read_only"] is True
     assert next_compose["services"]["openbao"] == current["services"]["openbao"]
 
@@ -44,7 +45,7 @@ def main() -> None:
     )
     checks = {entry["type"] for entry in active_yaml["checks"]}
     assert "semaphore" not in checks
-    assert {"runtime", "openbao", "runtime_tools", "pve_access"} <= checks
+    assert {"runtime", "infra_web", "openbao", "runtime_tools", "pve_access"} <= checks
 
     with tempfile.TemporaryDirectory() as temp:
         compose = Path(temp)
@@ -88,7 +89,7 @@ def main() -> None:
     activate = (ROOT / "scripts/infra-manager/commands/activate-runtime.sh").read_text()
     assert "RUNTIME_MODE=standalone" in activate
     assert "python3 -m infra_manager.operation_activation verifying" in activate
-    print("[ОК] Следующий infra-runtime не зависит от Semaphore; активный runtime не заменён")
+    print("[ОК] Рабочий infra-runtime не зависит от Semaphore")
 
 
 if __name__ == "__main__":
