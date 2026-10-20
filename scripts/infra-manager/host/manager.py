@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import socket
 import subprocess
 import sys
@@ -99,6 +100,21 @@ def start_manager(vmid: int) -> None:
     raise OperatorError(
         f"LXC {vmid} не запустился; используйте infra-manager recover"
     )
+def selected_project_branch() -> list[str]:
+    """Передать явно выбранную доверенным root ветку без подмены аргументов."""
+    branch = os.environ.get("INFRA_PROJECT_BRANCH")
+    if branch is None:
+        return []
+    if (
+        not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,127}", branch)
+        or ".." in branch
+        or "//" in branch
+        or branch.endswith(("/", "."))
+    ):
+        raise OperatorError("Некорректное имя Git-ветки INFRA_PROJECT_BRANCH")
+    return [f"INFRA_PROJECT_BRANCH={branch}"]
+
+
 def proxy_to_manager(arguments: list[str]) -> int:
     """Передать штатную команду внутрь проверенного управляющего LXC.
 
@@ -125,6 +141,7 @@ def proxy_to_manager(arguments: list[str]) -> int:
             "env",
             f"INFRA_PVE_NODE={socket.gethostname().split('.')[0]}",
             f"INFRA_MANAGER_COLOR={color_mode()}",
+            *selected_project_branch(),
             GUEST_COMMAND,
             "--trusted-pve",
             *command,
