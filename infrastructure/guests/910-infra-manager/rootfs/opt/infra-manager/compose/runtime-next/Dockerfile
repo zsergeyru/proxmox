@@ -43,7 +43,9 @@ RUN python3 -m pip install --no-cache-dir \
 # Git SHA фиксируется в последнем лёгком слое: смена коммита не должна
 # запускать заново сборку Python, OpenTofu и Packer.
 ARG INFRA_GIT_REVISION=unknown
-ENV INFRA_RUNTIME_BUILD_REVISION=${INFRA_GIT_REVISION}
+ARG INFRA_RUNTIME_CONTENT_REVISION=unknown
+ENV INFRA_RUNTIME_BUILD_GIT_REVISION=${INFRA_GIT_REVISION}
+ENV INFRA_RUNTIME_BUILD_REVISION=${INFRA_RUNTIME_CONTENT_REVISION}
 
 USER 1001:0
 WORKDIR /var/lib/infra-manager/bootstrap-repo
