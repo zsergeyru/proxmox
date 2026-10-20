@@ -93,6 +93,15 @@ def main() -> None:
     assert 'ACTIVATION_MARKER="$TRANSITION_MARKER"' in activate
     assert 'MARKER_VERIFIED=1' in activate
     assert "/var/lib/semaphore" not in activate
+    # backup.yaml находится в копии проекта на Ansible-контроллере, а не
+    # по абсолютному пути целевого LXC 910.
+    runtime_role = (
+        ROOT / "automation/ansible/roles/infra_manager/tasks/runtime.yml"
+    ).read_text(encoding="utf-8")
+    assert "lookup('file', project_root ~ '/infrastructure/hosts/pve/backup.yaml')" in runtime_role
+    assert "lookup('file', provision.paths.bootstrap_repository" not in runtime_role
+    assert (ROOT / "infrastructure/hosts/pve/backup.yaml").is_file()
+
     deploy_paths = (ROOT / "scripts/infra-manager/infra_manager/guest_deploy_infrastructure.py").read_text()
     assert 'known_hosts=PATHS.opentofu_dir / "guest-known-hosts"' in deploy_paths
     assert "/var/lib/semaphore/guest-known-hosts" not in deploy_paths
