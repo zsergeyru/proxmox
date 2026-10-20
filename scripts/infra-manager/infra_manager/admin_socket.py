@@ -74,7 +74,7 @@ def _dispatch_storage(request: dict) -> dict:
     )
     from .operator import _pve_node
     from .pve import PveClient
-    from .pve_backup_ssd import inspect_backup_ssd, approve_backup_ssd
+    from .pve_backup_ssd import storage_status, approve_backup_ssd
     from .guest_catalog import find_guest_by_role
     if set(request) != required:
         raise InfraManagerError("Недопустимые поля запроса SSD")
@@ -87,14 +87,15 @@ def _dispatch_storage(request: dict) -> dict:
     client = PveClient()
     node = _pve_node()
     if kind == "storage-plan":
-        return {"accepted": True, "storage": inspect_backup_ssd(client, node)}
-    approve_backup_ssd(
+        return {"accepted": True, "storage": storage_status(client, node)}
+    job_id = approve_backup_ssd(
         client, node,
         plan_id=request["plan_id"], serial=request["serial"],
     )
     return {
         "accepted": True,
-        "message": "Разрешение сохранено для следующего deploy 910; диск не изменён",
+        "job_id": job_id,
+        "message": "Подготовка SSD запущена; результат будет показан в infra-web",
     }
 
 
