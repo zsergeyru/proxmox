@@ -84,7 +84,7 @@ def main():
             assert len(first["storage"]["volumes"]) == 3
             assert len(first["nas"]["volumes"]) == 3
             assert all(x["mount_check"] == "not_checked" for x in first["storage"]["volumes"])
-            assert first["destinations"][0]["pve_state"] == "reported_active"
+            assert first["destinations"][0]["pve_state"] == "reported_active", (first["destinations"], first["pve_api_available"], pve_client.call_count)
             assert first["destinations"][1]["pve_state"] == "reported_inactive"
             assert not any(x["configured"] for x in first["destinations"])
             assert pve_client.call_count == 1
