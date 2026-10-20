@@ -13,7 +13,6 @@ import io
 import json
 import os
 import secrets
-import sqlite3
 import stat
 import subprocess
 import sys
@@ -182,20 +181,6 @@ def _snapshot_openbao(vmid: int, target: Path) -> None:
         raise ExportError("Согласованный снимок OpenBao Raft не получен")
 
 
-def _optional_sqlite(target: Path) -> bool:
-    """При переходе сохранить SQLite только если старая база ещё существует."""
-    source = STATE / "semaphore/semaphore.sqlite"
-    if source.is_symlink() or not source.is_file():
-        return False
-    uri = f"file:{source}?mode=ro"
-    with sqlite3.connect(uri, uri=True) as db:
-        with sqlite3.connect(target) as copy:
-            db.backup(copy)
-            if copy.execute("PRAGMA integrity_check").fetchone() != ("ok",):
-                raise ExportError("Переходная база Semaphore повреждена")
-    return True
-
-
 def stream_backup() -> None:
     vmid = check_sources()
     with _consistent_window():
@@ -203,12 +188,10 @@ def stream_backup() -> None:
             stage = Path(tmp)
             stage.chmod(0o700)
             _snapshot_openbao(vmid, stage / "openbao-raft.snap")
-            legacy = _optional_sqlite(stage / "semaphore-legacy.sqlite")
             manifest = {
                 "schema_version": 1,
                 "vmid": vmid,
                 "raft_snapshot": True,
-                "legacy_sqlite": legacy,
             }
             (stage / "manifest.json").write_text(
                 json.dumps(manifest) + "\n", encoding="utf-8",
@@ -218,15 +201,12 @@ def stream_backup() -> None:
                 "tar", "--create", "--file", "-",
                 "--warning=no-file-changed",
                 "--exclude=mnt/bindmounts/infra-manager/state/openbao",
-                "--exclude=mnt/bindmounts/infra-manager/state/semaphore",
                 "--exclude=mnt/bindmounts/infra-manager/state/opentofu/provider-mirror",
                 "--exclude=mnt/bindmounts/infra-manager/state/opentofu/.terraform",
                 "-C", "/",
                 *[str(path).lstrip("/") for path in SOURCES],
                 "-C", str(stage), "manifest.json", "openbao-raft.snap",
             ]
-            if legacy:
-                command.append("semaphore-legacy.sqlite")
             run = subprocess.run(command, stdout=sys.stdout.buffer,
                                  stderr=subprocess.DEVNULL, check=False)
             if run.returncode:
