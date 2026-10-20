@@ -86,20 +86,20 @@ def test_confirmation():
             )
         return 0
 
-    with (
-        patch("infra_manager_nas_storage.sys.stdin",
-              SimpleNamespace(isatty=lambda: True)),
-        patch("builtins.input", return_value="ОТМЕНА"),
-    ):
-        refuses(lambda: confirm_nas_storage("nas", forward, RuntimeError), RuntimeError)
-    assert all(command[0][0] != "storage-prepare" for command in responses)
+    for response in ("", "нет", "ОТМЕНА", "y", "ПОДГОТОВИТЬ " + plan.fingerprint[-12:]):
+        with (
+            patch("infra_manager_nas_storage.sys.stdin",
+                  SimpleNamespace(isatty=lambda: True)),
+            patch("builtins.input", return_value=response),
+        ):
+            refuses(lambda: confirm_nas_storage("nas", forward, RuntimeError), RuntimeError)
+        assert all(command[0][0] != "storage-prepare" for command in responses)
 
     responses.clear()
-    confirmation = "ПОДГОТОВИТЬ " + plan.fingerprint[-12:]
     with (
         patch("infra_manager_nas_storage.sys.stdin",
               SimpleNamespace(isatty=lambda: True)),
-        patch("builtins.input", return_value=confirmation),
+        patch("builtins.input", return_value=" ДА "),
     ):
         assert confirm_nas_storage("nas", forward, RuntimeError) == 0
     assert responses[-1][0] == ["storage-prepare", "nas"]
