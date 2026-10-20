@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import contextlib
 import os
 import shutil
 import subprocess
@@ -159,7 +160,6 @@ def main() -> None:
     from infra_manager import operation_lock
     from infra_manager import operation_store
     from infra_manager import guest_operations
-    import contextlib
     with tempfile.TemporaryDirectory() as folder:
         root = Path(folder)
         (root / "persistent").mkdir()
