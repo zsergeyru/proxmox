@@ -93,6 +93,16 @@ def main() -> None:
     assert 'ACTIVATION_MARKER="$TRANSITION_MARKER"' in activate
     assert 'MARKER_VERIFIED=1' in activate
     assert "/var/lib/semaphore" not in activate
+    # При откате нельзя подтверждать успех по одному факту запуска CLI.
+    rollback = activate.split(
+        'if [[ "$result" -ne 0 && -n "$ROLLBACK_IMAGE" ]]; then', 1
+    )[1].split('if [[ -n "$OPERATION_ID" ]]; then', 1)[0]
+    assert """docker inspect -f '{{.Image}}' infra-runtime""" in rollback
+    assert '== "$ROLLBACK_IMAGE"' in rollback
+    assert "infra-manager-openbao-startup-unseal" in rollback
+    assert "infra-manager-status --full --quiet" in rollback
+    assert rollback.index("infra-manager-status --full --quiet") < rollback.index("ROLLED_BACK=1")
+
     # backup.yaml находится в копии проекта на Ansible-контроллере, а не
     # по абсолютному пути целевого LXC 910.
     runtime_role = (
