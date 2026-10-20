@@ -349,7 +349,7 @@ def apply_approved_backup_ssd(job_id: str, plan_id: str, serial: str) -> int:
             # reconcile ещё раз проверяет физический диск и повторно вызывает
             # lsblk/wipefs непосредственно перед PVE API.
             disk_uuid = reconcile_backup_ssd(
-                client, node, interactive=True, confirmation=lambda _: serial,
+                client, node, interactive=True, confirmation=lambda _: "да",
             )
             if not disk_uuid:
                 raise InfraManagerError("PVE не подтвердил подготовку SSD")
@@ -429,10 +429,10 @@ def reconcile_backup_ssd(client: PveClient, node: str, *, interactive: bool = Fa
         )
         return None
     answer = (confirmation or input)(
-        "Для разметки введите полный серийный номер SSD: "
-    ).strip()
-    if answer != disk.serial:
-        console.warning("Подготовка SSD пропущена: подтверждение не совпало")
+        "Разметить указанный SSD с удалением данных? [да/нет]: "
+    ).strip().casefold()
+    if answer != "да":
+        console.warning("Подготовка SSD отменена: требуется явное «да»")
         return None
     # Повторная проверка непосредственно до операции: запрет TOCTOU и замены.
     candidates_now = [d for item in _inventory(client, node)

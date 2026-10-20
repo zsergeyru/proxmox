@@ -54,9 +54,8 @@ def confirm_nas_storage(name: str, forward, error_type: type[Exception]) -> int:
         "\nВНИМАНИЕ: подготовка УНИЧТОЖИТ любые нераспознанные данные на "
         "перечисленных трёх HDD. Системный SSD не изменяется."
     )
-    phrase = "ПОДГОТОВИТЬ " + fingerprint[-12:]
-    answer = input(f"Для подготовки указанных HDD введите точно «{phrase}»: ").strip()
-    if answer != phrase:
-        raise error_type("Подготовка отменена: диски не изменены")
+    answer = input("Подготовить указанные HDD с удалением данных? [да/нет]: ").strip().casefold()
+    if answer != "да":
+        raise error_type("Подготовка отменена: требуется явное «да», диски не изменены")
     payload = json.dumps({"fingerprint": fingerprint}) + "\n"
     return forward(["storage-prepare", name], input_text=payload)

@@ -86,6 +86,9 @@ def main():
             assert status == 401, "План SSD запрещён без входа"
             status, _, body = request(server, "GET", "/storage", cookie=cookie)
             assert status == 200 and "19386J473508" in body
+            assert 'type="hidden" name="serial"' in body
+            assert '<button type="submit">Да, подготовить SSD</button>' in body
+            assert 'name="serial" autocomplete="off"' not in body
             status, _, _ = request(server, "POST", "/storage-confirm", {
                 "csrf": csrf, "plan_id": "a" * 64, "serial": "19386J473508",
             }, cookie=cookie, origin=False)
