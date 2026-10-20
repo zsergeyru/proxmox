@@ -878,9 +878,11 @@ def _run_deploy_guest(
             )
         except InfraManagerError as exc:
             raise InfraManagerError(
-                f"Штатный deploy {context.name} невозможен: {exc}. "
-                "Постоянный SSH-ключ не используется; для полного "
-                "восстановления запустите на PVE: infra-manager recover"
+                f"Штатный deploy {context.name} остановлен: {exc} "
+                "Проверьте причину и состояние: infra-manager status "
+                f"{context.vmid}. После исправления повторите deploy. "
+                "Команда recover нужна только при подтверждённой "
+                "невозможности штатно восстановить управляющий контур."
             ) from exc
         console.result(
             f"{context.vmid} {context.name} обновлён через Ansible; "
