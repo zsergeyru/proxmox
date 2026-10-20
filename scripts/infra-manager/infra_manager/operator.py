@@ -193,8 +193,16 @@ def _standalone_runtime() -> bool:
     ).splitlines()
 
 
-def _prepare_runtime_snapshot(operation: str, vmid: int | str, *, physical: bool = False) -> str:
-    """Подготовить неизменяемый на время операции снимок проекта в runtime."""
+def _prepare_runtime_snapshot(
+    operation: str, vmid: int | str, *,
+    physical: bool = False,
+    preflight_storage: bool = False,
+) -> str:
+    """Подготовить снимок Git и, для deploy 910, проверить носители новым кодом.
+
+    Проверка и создание копии идут под одной блокировкой checkout: старый
+    импортированный operator.py не исполняет новую дисковую логику сам.
+    """
 
     snapshot = f"/tmp/infra-manager-direct-{os.getpid()}-{vmid}"
 
@@ -225,11 +233,25 @@ def _prepare_runtime_snapshot(operation: str, vmid: int | str, *, physical: bool
             ]
         )
 
+    if preflight_storage and (operation != "deploy" or physical or not isinstance(vmid, int)):
+        raise InfraManagerError("SSD/NAS preflight разрешён только при deploy управляющего гостя")
+
     if operation in {"deploy", "sync", "bootstrap", "storage-plan", "storage-prepare"}:
-        # Sync берёт свежие машинные описания из Git перед формированием каталога.
+        # Снимок и новая проверка дисков обязаны происходить при одном checkout.
         with project_checkout_lock(exclusive=True):
             _refresh_project_checkout()
             copy_snapshot()
+            if preflight_storage:
+                # Новая точка входа находится в обновлённом Git, а не в
+                # /usr/local/lib/infra-manager текущего процесса. Запуск
+                # отдельного Python исключает повторное использование sys.modules.
+                entrypoint = repo_root / "scripts/infra-manager/jobs/storage-preflight.py"
+                if entrypoint.is_symlink() or not entrypoint.is_file():
+                    raise InfraManagerError(
+                        "В обновлённой Git-версии нет доверенной проверки SSD/NAS"
+                    )
+                console.info("Проверка SSD/NAS кодом обновлённой Git-версии")
+                run([sys.executable, str(entrypoint)], stream_output=True)
     else:
         with project_checkout_lock(exclusive=False):
             copy_snapshot()
@@ -347,14 +369,11 @@ def operator_guest_task(
             # Подготовка снимка обновляет Git под общей блокировкой,
             # поэтому только после неё резервируем UUID операции.
             require_runtime_activation_idle()
-            prepared_snapshot = _prepare_runtime_snapshot(operation, vmid)
-            # Физический SSD: безопасная сверка/разовое подтверждение через
-            # штатный Proxmox API до запуска Docker-задания. Недоступный SSD
-            # не должен останавливать самообновление управляющего контура.
-            from .pve_backup_ssd import deploy_backup_ssd_preflight
-            from .pve_backup_nas import deploy_backup_nas_preflight
-            deploy_backup_ssd_preflight()
-            deploy_backup_nas_preflight()
+            prepared_snapshot = _prepare_runtime_snapshot(
+                operation, vmid, preflight_storage=True,
+            )
+            # Проверки SSD/NAS завершились из нового Git до резервирования
+            # операции. Дальнейший deploy работает с тем же снимком в runtime.
             store = OperationStore()
             # Согласовать создание active/910.json с эксклюзивной
             # блокировкой резервирования PVE. После отпускания shared
