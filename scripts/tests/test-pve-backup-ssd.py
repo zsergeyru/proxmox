@@ -143,20 +143,20 @@ def test_readonly_disk_refuses_partitions_and_signatures():
             patch.object(ssd, "_ssh_command", side_effect=lambda _, args: list(args)),
             patch.object(ssd, "run", side_effect=result),
         ):
-            return lambda: ssd._empty_block_device("pve", candidate)
+            ssd._empty_block_device("pve", candidate)
     def fake(*args, **kwargs):
         if args[0] == "lsblk":
             return SimpleNamespace(returncode=0, stdout=json.dumps(valid))
         return SimpleNamespace(returncode=0, stdout="")
-    checked(fake)()
+    checked(fake)
     valid["blockdevices"][0]["children"] = [{"path": "/dev/sda1"}]
-    refuses(checked(fake), "Диск с разделами не является пустым")
+    refuses(lambda: checked(fake), "Диск с разделами не является пустым")
     valid["blockdevices"][0].pop("children")
     def signature(*args, **kwargs):
         if args[0] == "lsblk":
             return SimpleNamespace(returncode=0, stdout=json.dumps(valid))
         return SimpleNamespace(returncode=0, stdout="ext4 0x123")
-    refuses(checked(signature), "Подозрительная сигнатура wipefs блокирует mkfs")
+    refuses(lambda: checked(signature), "Подозрительная сигнатура wipefs блокирует mkfs")
 
 
 def test_web_confirmation_starts_background_and_survives_browser():
