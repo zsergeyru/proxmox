@@ -116,11 +116,11 @@ def _baseline(store: OperationStore) -> dict:
 
 
 def attest(repo: Path = PATHS.repo_root, *, store: OperationStore | None = None,
-           versions: Path = VERSIONS) -> None:
+           versions: Path | None = None) -> None:
     if os.geteuid() != 0:
         raise InfraManagerError("Только root может подтвердить установленную версию")
     rev, files = _inventory(repo)
-    if read_env_file(versions).get("INFRA_GIT_REVISION") != rev:
+    if read_env_file(versions or VERSIONS).get("INFRA_GIT_REVISION") != rev:
         raise InfraManagerError("Git и установленный release не совпадают")
     data = (json.dumps({"schema": 1, "revision": rev, "files": files},
                        sort_keys=True) + "\n").encode()
@@ -130,11 +130,11 @@ def attest(repo: Path = PATHS.repo_root, *, store: OperationStore | None = None,
 
 
 def plan(repo: Path = PATHS.repo_root, *, store: OperationStore | None = None,
-         versions: Path = VERSIONS) -> Plan:
+         versions: Path | None = None) -> Plan:
     rev, new = _inventory(repo)
     try:
         old = _baseline(store or OperationStore())
-        if read_env_file(versions).get("INFRA_GIT_REVISION") != old["revision"]:
+        if read_env_file(versions or VERSIONS).get("INFRA_GIT_REVISION") != old["revision"]:
             return Plan("full", rev, reason="Текущая версия не подтверждена")
     except (InfraManagerError, ValueError, OSError, TypeError):
         return Plan("full", rev, reason="Нет безопасной базовой версии")
