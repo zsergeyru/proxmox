@@ -372,6 +372,7 @@ def test_self_update_waits_and_renders_final_status() -> None:
         with (
             patch("infra_manager.operation_store.OperationStore", return_value=store),
             patch.object(operator, "project_revision", return_value="abc123"),
+            patch.object(operator, "_prepare_runtime_snapshot", return_value="/tmp/ready-910"),
             patch.object(operator, "_operator_guest_task", return_value=0),
             patch.object(operator, "guest_identity", return_value=SimpleNamespace(
                 vmid=910, name="infra-manager",
@@ -412,6 +413,7 @@ def test_self_update_fast_activation_before_poll() -> None:
         with (
             patch("infra_manager.operation_store.OperationStore", return_value=store),
             patch.object(operator, "project_revision", return_value="abc123"),
+            patch.object(operator, "_prepare_runtime_snapshot", return_value="/tmp/ready-910"),
             patch.object(operator, "_operator_guest_task",
                          side_effect=finish_before_return),
             patch.object(operator, "guest_identity", return_value=SimpleNamespace(
@@ -445,6 +447,7 @@ def test_self_update_failed_activation_does_not_show_success() -> None:
         with (
             patch("infra_manager.operation_store.OperationStore", return_value=store),
             patch.object(operator, "project_revision", return_value="abc123"),
+            patch.object(operator, "_prepare_runtime_snapshot", return_value="/tmp/ready-910"),
             patch.object(operator, "_operator_guest_task", return_value=0),
             patch.object(operator, "guest_identity", return_value=SimpleNamespace(
                 vmid=910, name="infra-manager",
@@ -471,6 +474,7 @@ def test_self_update_interrupt_does_not_cancel_systemd() -> None:
         with (
             patch("infra_manager.operation_store.OperationStore", return_value=store),
             patch.object(operator, "project_revision", return_value="abc123"),
+            patch.object(operator, "_prepare_runtime_snapshot", return_value="/tmp/ready-910"),
             patch.object(operator, "_operator_guest_task", return_value=0),
             patch.object(operator, "guest_identity", return_value=SimpleNamespace(
                 vmid=910, name="infra-manager",
