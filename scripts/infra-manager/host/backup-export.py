@@ -305,7 +305,7 @@ def main() -> int:
         else:
             stream_backup()
         return 0
-    except (ExportError, OSError, ValueError, KeyError, sqlite3.Error) as exc:
+    except (ExportError, OSError, ValueError, KeyError) as exc:
         # Во время двоичного экспорта stdout зарезервирован исключительно для tar.
         print(f"[ОШИБКА] Архив не выдан: {exc}", file=sys.stderr)
         return 1
