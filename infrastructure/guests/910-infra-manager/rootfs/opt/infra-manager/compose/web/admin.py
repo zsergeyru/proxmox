@@ -833,7 +833,14 @@ def _layout(
     ).encode()
 
 
+OPERATION_NAMES = {
+    "deploy": "Развёртывание", "status": "Проверка",
+    "sync": "Синхронизация", "repair": "Исправление",
+}
+
+
 def _dashboard(csrf: str, notice: str = "") -> bytes:
+    """Обзор и недавние задания без опасной формы произвольного deploy."""
     try:
         records = _operation_history()
     except (OSError, ValueError, TimeoutError):
@@ -841,43 +848,92 @@ def _dashboard(csrf: str, notice: str = "") -> bytes:
         notice = (notice + " " if notice else "") + (
             "История операций временно недоступна; проверьте системный посредник."
         )
-    rows = []
-    for record in records:
-        operation_id = str(record.get("id", ""))
-        if not REQ_ID.fullmatch(operation_id):
-            continue
-        values = (operation_id[:8], str(record.get("target", "")),
-                  str(record.get("kind", "")),
-                  PHASES.get(record.get("phase"), "Неизвестно"),
-                  str(record.get("created_at", "")))
-        cells = ["<td><a href=\"/operations?id=" + operation_id + "\">"
-                 + html.escape(values[0]) + "</a></td>"]
-        cells.extend("<td>" + html.escape(value) + "</td>" for value in values[1:])
-        rows.append("<tr>" + "".join(cells) + "</tr>")
-    table = "".join(rows) or '<tr><td colspan="5">Заданий пока нет</td></tr>'
-    token = html.escape(csrf, quote=True)
-    form = (
-        f'<p>{html.escape(notice)}</p>'
-        + '<form method="POST" action="/action">'
-        f'<input type="hidden" name="csrf" value="{token}">'
-        '<label>Гость (VMID) <input name="vmid" type="number" min="1" required></label>'
-        '<label>Действие <select name="kind">'
-        '<option value="status">Проверить</option>'
-        '<option value="sync">Синхронизировать</option>'
-        '<option value="repair">Исправить</option>'
-        '<option value="deploy">Развернуть</option>'
-        '</select></label><button type="submit">Выполнить</button></form>'
-        '<p><a href="/guests">Управление гостями</a> · '
-        '<a href="/infrastructure">Хранилища и бэкапы</a> · '
-        '<a href="/storage">Подготовить резервный SSD</a></p>'
-        '<p>Изменяйте только известные гости. Система повторно проверяет права '
-        'и записывает результат задания независимо от браузера.</p>'
-        '<table><tr><th>ID</th><th>VMID</th><th>Действие</th>'
-        '<th>Состояние</th><th>Время UTC</th></tr>' + table + '</table>'
-        f'<form method="POST" action="/logout"><input type="hidden" '
-        f'name="csrf" value="{token}"><button>Выйти</button></form>'
+    visible = [
+        item for item in records
+        if isinstance(item, dict)
+        and isinstance(item.get("id"), str)
+        and REQ_ID.fullmatch(item["id"])
+    ]
+    phases = [item.get("phase") for item in visible]
+    active = sum(phase in {"queued", "running", "activating", "verifying"} for phase in phases)
+    failed = sum(phase in {"failed", "needs-recovery"} for phase in phases)
+    successful = phases.count("completed")
+    alerts = (
+        '<div class="notice" data-tone="warning" role="status">' + _text(notice) + '</div>'
+        if notice else ""
     )
-    return _layout(form)
+    stats = "".join(
+        '<div class="stat" data-tone="' + tone + '">'
+        '<div class="stat-label">' + title + '</div>'
+        '<div class="stat-value">' + str(number) + '</div>'
+        '<div class="stat-detail">Среди последних ' + str(len(visible)) + ' заданий</div></div>'
+        for title, number, tone in (
+            ("Всего записей", len(visible), ""),
+            ("Выполняются", active, "info"),
+            ("Успешно", successful, "success"),
+            ("Нужны внимание", failed, "danger" if failed else ""),
+        )
+    )
+    shortcuts = "".join(
+        '<a class="card-link" href="' + url + '">'
+        '<span class="item-label">' + category + '</span>'
+        '<div class="card-heading">' + label + ' →</div>'
+        '<div class="muted">' + description + '</div></a>'
+        for url, category, label, description in (
+            ("/guests", "Управление", "Гости", "Состояния VM/LXC, проверка и обновление"),
+            ("/infrastructure", "Хранение", "Резервные копии", "SSD, NAS и последние результаты"),
+            ("/storage", "Обслуживание", "Подготовка SSD", "Просмотр и подтверждение диска"),
+        )
+    )
+    rows = []
+    for record in visible[:40]:
+        identifier = record["id"]
+        vmid = record.get("target")
+        guest = (
+            '<a href="/guests?vmid=' + str(vmid) + '">Гость ' + str(vmid) + '</a>'
+            if type(vmid) is int and 1 <= vmid <= 999999 else "—"
+        )
+        kind = record.get("kind")
+        phase = record.get("phase")
+        label = OPERATION_NAMES.get(kind, "Операция")
+        created = _time_html(record.get("created_at"))
+        rows.append(
+            '<tr data-filter-item data-state="' + _text(phase) + '"'
+            ' data-search="' + _text(f"{identifier} {vmid} {label} {PHASES.get(phase, '')}") + '">'
+            '<td><a class="cell-title" href="/operations?id=' + identifier +
+            '">' + _text(label) + '</a><span class="cell-sub code">' +
+            identifier[:8] + '</span></td>'
+            '<td>' + guest + '</td><td>' + _chip(phase) + '</td>'
+            '<td>' + created + '</td></tr>'
+        )
+    history = (
+        '<div class="toolbar"><input type="search" aria-label="Поиск заданий" '
+        'placeholder="Найти по VMID или действию…" data-search-for="operations">'
+        '<select aria-label="Статус заданий" data-state-for="operations">'
+        '<option value="all">Все состояния</option>'
+        '<option value="running">Выполняется</option>'
+        '<option value="completed">Успешные</option>'
+        '<option value="failed">Ошибки</option>'
+        '<option value="needs-recovery">Требуют проверки</option>'
+        '</select><span class="muted" data-count-for="operations">'
+        + str(len(rows)) + ' из ' + str(len(rows)) + '</span></div>'
+        '<div class="table-wrap"><table>'
+        '<thead><tr><th>Задание</th><th>Гость</th><th>Состояние</th><th>Начато</th></tr></thead>'
+        '<tbody data-filter-list="operations">' + "".join(rows) + '</tbody></table></div>'
+        '<p class="empty" data-empty-for="operations" hidden>Ничего не найдено. Измени фильтр.</p>'
+        if rows else '<p class="empty">Заданий пока нет. Открой нужного гостя для проверки или развёртывания.</p>'
+    )
+    return _layout(
+        '<p class="page-intro">Всё важное под рукой: что выполняется, где возникла ошибка '
+        'и что требует действия. Управление гостями — в их карточках.</p>'
+        + alerts + '<div class="grid cols-4">' + stats + '</div>'
+        '<div class="section-head"><h2>Быстрый переход</h2></div>'
+        '<div class="grid cols-3">' + shortcuts + '</div>'
+        '<section class="panel" id="recent-operations">'
+        '<div class="section-head"><h2>Последние задания</h2>'
+        '<span class="muted">Новые сверху</span></div>' + history + '</section>',
+        csrf=csrf, page="overview",
+    )
 
 
 def _public_versions() -> str:
