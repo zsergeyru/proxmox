@@ -75,7 +75,6 @@ def _dispatch_storage(request: dict) -> dict:
     from .operator import _pve_node
     from .pve import PveClient
     from .pve_backup_ssd import storage_status, approve_backup_ssd
-    from .guest_catalog import find_guest_by_role
     if set(request) != required:
         raise InfraManagerError("Недопустимые поля запроса SSD")
     owner = find_guest_by_role(PATHS.repo_root, SETTINGS.infra_manager_role)
