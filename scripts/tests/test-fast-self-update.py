@@ -17,6 +17,7 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts/infra-manager"))
 from infra_manager import self_update_fast as fast
+from infra_manager.common import InfraManagerError
 from infra_manager.operation_store import OperationStore
 
 
@@ -138,7 +139,7 @@ def main() -> None:
                 try:
                     fast.apply(selected, lambda: False, repo=repo, store=store)
                     raise AssertionError("Неуспешная проверка должна отклонить быстрый deploy")
-                except Exception as exc:
+                except InfraManagerError as exc:
                     assert "status 910" in str(exc)
             assert (web_dest / "admin.py").read_bytes() == previous
             assert versions.read_bytes() == previous_env
