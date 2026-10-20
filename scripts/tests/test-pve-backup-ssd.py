@@ -159,9 +159,55 @@ def test_readonly_disk_refuses_partitions_and_signatures():
     refuses(checked(signature), "Подозрительная сигнатура wipefs блокирует mkfs")
 
 
+def test_web_confirmation_starts_background_and_survives_browser():
+    """Подтверждение запускает systemd сразу, второй deploy не нужен."""
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "ssd-job.json"
+        client = FakeClient()
+        current = {
+            "state": "needs-confirmation", "plan_id": "a" * 64,
+            "serial": "19386J473508",
+        }
+        with (
+            patch.object(ssd, "_job_path", return_value=path),
+            patch.object(ssd, "inspect_backup_ssd", return_value=current),
+            patch.object(ssd, "run", return_value=SimpleNamespace(returncode=0)) as launch,
+        ):
+            job_id = ssd.approve_backup_ssd(
+                client, "pve", plan_id="a" * 64, serial="19386J473508",
+            )
+            assert len(job_id) == 32
+            assert ssd.storage_status(client, "pve")["state"] == "running"
+            assert launch.call_count == 1
+            assert "systemd-run" in launch.call_args.args[0]
+            assert client.tasks == [], "Никакой mkfs внутри HTTP подтверждения"
+            refuses(lambda: ssd.approve_backup_ssd(
+                client, "pve", plan_id="a" * 64, serial="19386J473508",
+            ), "Повторное подтверждение во время операции запрещено")
+            with (
+                patch("infra_manager.operator._pve_node", return_value="pve"),
+                patch.object(ssd, "PveClient", return_value=client),
+                patch.object(ssd, "reconcile_backup_ssd",
+                             return_value="12345678-1234-1234-1234-1234567890ab") as applied,
+            ):
+                assert ssd.apply_approved_backup_ssd(
+                    job_id, "a" * 64, "19386J473508",
+                ) == 0
+            assert applied.call_count == 1
+            assert json.loads(path.read_text())["state"] == "completed"
+            refuses(lambda: ssd.apply_approved_backup_ssd(
+                job_id, "a" * 64, "19386J473508",
+            ), "Нельзя повторно применять завершённое задание")
+            with patch.object(ssd, "inspect_backup_ssd", return_value={
+                "state": "configured", "uuid": "12345678-1234-1234-1234-1234567890ab",
+            }):
+                assert ssd.storage_status(client, "pve")["state"] == "configured"
+
+
 if __name__ == "__main__":
     test_empty_disk_only_and_no_auto_wipe()
     test_exact_confirmation_and_recheck()
     test_changed_device_rejected_before_write()
     test_readonly_disk_refuses_partitions_and_signatures()
+    test_web_confirmation_starts_background_and_survives_browser()
     print("[ОК] SSD создаётся только через Proxmox API после точного подтверждения")
