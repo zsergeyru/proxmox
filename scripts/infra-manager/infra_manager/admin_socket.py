@@ -341,7 +341,9 @@ def _guests_catalog() -> tuple[list[dict], bool]:
     resources: dict[int, dict] = {}
     pve_available = False
     try:
-        response = PveClient().data("/cluster/resources", query={"type": "vm"})
+        response = PveClient().data(
+            "/cluster/resources", query={"type": "vm"}, timeout=8,
+        )
         if not isinstance(response, list):
             raise InfraManagerError("PVE вернул неверный список объектов")
         for item in response:
@@ -372,6 +374,8 @@ def _guests_catalog() -> tuple[list[dict], bool]:
             state = "unavailable"
         elif resource is None:
             state = "absent"
+        elif guest_type == "unknown":
+            state = "unknown"
         elif (resource.get("name") != identity.name
               or resource.get("type") != ("qemu" if guest_type == "vm" else guest_type)):
             state = "conflict"
