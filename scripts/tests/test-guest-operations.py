@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import contextlib
 import copy
+import os
+import runpy
 import stat
 import sys
 import tempfile
@@ -762,6 +764,43 @@ def check_operation_lock() -> None:
                 pass
 
 
+def check_guest_operation_working_directory() -> None:
+    """Оператор запускает OpenTofu из доступного снимка, а не Docker WORKDIR."""
+    entrypoint = ROOT / "scripts" / "infra-manager" / "jobs" / "guest-operation.py"
+    main_fn = runpy.run_path(str(entrypoint))["main"]
+    calls: list[tuple[Path, Path, str, int]] = []
+
+    def fake_operation(repo_root: Path, operation: str, vmid: int, **_kwargs: object) -> int:
+        calls.append((Path.cwd(), repo_root, operation, vmid))
+        return 0
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        previous = Path.cwd()
+        try:
+            os.chdir(temp_dir)
+            with (
+                patch.object(sys, "argv", ["guest-operation.py", "deploy", "310"]),
+                patch.dict(
+                    main_fn.__globals__,
+                    {
+                        "prepare_operation_environment": lambda: None,
+                        "run_guest_operation": fake_operation,
+                    },
+                ),
+            ):
+                code = main_fn()
+        finally:
+            os.chdir(previous)
+
+    if code != 0:
+        fail("Операция гостя не прошла проверку рабочего каталога")
+    if calls != [(ROOT, ROOT, "deploy", 310)]:
+        fail(
+            "Штатная операция должна переходить в снимок проекта "
+            f"до запуска OpenTofu, получено {calls!r}"
+        )
+
+
 def check_semaphore_secret_policy() -> None:
     entrypoint = (
         ROOT / "scripts" / "infra-manager" / "jobs" / "guest-operation.py"
@@ -789,6 +828,7 @@ def main() -> None:
     check_status_during_self_update()
     check_dispatch()
     check_operation_lock()
+    check_guest_operation_working_directory()
     check_semaphore_secret_policy()
     print("[ОК] Стандартные операции над гостями проверены")
 
