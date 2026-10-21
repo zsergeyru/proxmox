@@ -805,6 +805,12 @@ def _backup_overview_page(csrf: str, notice: str = "") -> bytes:
         }.get(state, "Не проверено")
         tone = "success" if state == "verified" else "warning"
         places = backup_places(record)
+        errors = record.get("last_errors", {})
+        error_text = "; ".join(
+            label + ": " + errors[identifier]
+            for identifier, label in (("fast-ssd", "SSD"), ("nas-backup", "NAS"))
+            if isinstance(errors, dict) and isinstance(errors.get(identifier), str)
+        )
         return (
             '<article class="backup-copy" data-backup-copy="' + key + '" data-tone="' + tone + '">'
             '<h3>' + e(title) + '</h3>'
@@ -813,7 +819,10 @@ def _backup_overview_page(csrf: str, notice: str = "") -> bytes:
             '<div class="backup-copy-meta">Последняя копия: '
             '<strong data-backup-copy-date>' + _time_html(record.get("created_utc")) + '</strong>'
             '</div><div class="backup-copy-meta">Хранение: '
-            '<strong data-backup-copy-places>' + e(places or "—") + '</strong></div></article>'
+            '<strong data-backup-copy-places>' + e(places or "—") + '</strong></div>'
+            '<p class="muted" data-backup-copy-error'
+            + ('' if error_text else ' hidden')
+            + '>Ошибка последней попытки: ' + e(error_text) + '</p></article>'
         )
 
     core = records.get("core", {})
