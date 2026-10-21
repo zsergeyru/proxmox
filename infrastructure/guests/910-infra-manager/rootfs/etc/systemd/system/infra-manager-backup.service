@@ -7,6 +7,9 @@ AssertPathIsMountPoint=/mnt/persistent-state
 [Service]
 Type=oneshot
 Environment=PYTHONPATH=/usr/local/lib/infra-manager
+Environment=RESTIC_CACHE_DIR=/var/cache/infra-manager-restic
+CacheDirectory=infra-manager-restic
+CacheDirectoryMode=0700
 ExecStart=/usr/bin/python3 -m infra_manager.backup_controller --run
 User=root
 Group=root
