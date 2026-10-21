@@ -160,7 +160,10 @@ photo_archive:
       enabled: false
       image: ghcr.io/timasoft/immich-analyze:main
 
+# Для универсального резервирования постоянного тома: перед LVM snapshot
+# остановить всех работающих LXC-потребителей и сразу возобновить их.
 persistence:
+  backup_consistency: offline_lxc
   backup_required:
     - /mnt/persistent-state/postgres
     - /srv/photo-archive-media
