@@ -780,6 +780,22 @@ def _backup_overview_page(csrf: str, notice: str = "") -> bytes:
     restored = backup.get("restore_tested") is True
     last_failed = timer.get("last_result") in {"exit-code", "timeout", "signal"}
     summary = BACKUP_OVERALL.get(backup.get("overall"), "Неизвестное состояние копий")
+    def backup_places(record: dict) -> str:
+        dates = record.get("destination_dates")
+        status = record.get("destination_status")
+        if isinstance(dates, dict) and isinstance(status, dict):
+            labels = {"fast-ssd": "SSD", "nas-backup": "NAS"}
+            return " · ".join(
+                labels[name] + ": " + (
+                    str(dates[name]) if status.get(name) == "verified" else
+                    "устарела (" + str(dates[name]) + ")" if name in dates else
+                    "копии нет"
+                )
+                for name in ("fast-ssd", "nas-backup")
+            )
+        destinations = record.get("destinations")
+        return ", ".join(destinations) if isinstance(destinations, list) else ""
+
     def card(key: str, title: str, description: str) -> str:
         record = records.get(key, {})
         state = record.get("state")
@@ -788,8 +804,7 @@ def _backup_overview_page(csrf: str, notice: str = "") -> bytes:
             "missing": "Копии пока нет", "invalid": "Нет подтверждения",
         }.get(state, "Не проверено")
         tone = "success" if state == "verified" else "warning"
-        destinations = record.get("destinations")
-        places = ", ".join(destinations) if isinstance(destinations, list) else ""
+        places = backup_places(record)
         return (
             '<article class="backup-copy" data-backup-copy="' + key + '" data-tone="' + tone + '">'
             '<h3>' + e(title) + '</h3>'
@@ -942,7 +957,9 @@ def _backup_confirm_page(csrf: str) -> bytes:
         '<section class="panel"><h2>Запустить резервирование</h2>'
         '<p>Штатная служба infra-manager-backup.service проверит носители, '
         'выполнит зашифрованную запись и проверку данных restic. '
-        'Операция может выполняться длительное время.</p>'
+        'Операция может выполняться длительное время. '
+        'Включённые постоянные LVM-тома также резервируются, когда '
+        'наступило их ежедневное расписание.</p>'
         '<div class="notice" data-tone="warning">Если доступен только один '
         'проверенный носитель, будет создана одна копия. '
         'Восстановление и форматирование здесь не выполняются.</div>'
