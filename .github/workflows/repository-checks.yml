@@ -165,6 +165,7 @@ jobs:
           python scripts/tests/test-web-guests.py
           python scripts/tests/test-web-backup-overview.py
           node --check infrastructure/guests/910-infra-manager/rootfs/opt/infra-manager/compose/web/diagnostics.js
+          node --check infrastructure/guests/910-infra-manager/rootfs/opt/infra-manager/compose/web/backup-refresh.js
 
       - name: Check managed backup and standalone runtime transition
         run: python scripts/tests/test-manager-backup-transition.py
