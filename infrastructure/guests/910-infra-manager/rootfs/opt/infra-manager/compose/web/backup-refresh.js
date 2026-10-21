@@ -1,6 +1,6 @@
 "use strict";
 
-/* Только пользовательское read-only обновление. Никакого фонового опроса. */
+/* Read-only состояние. Автоопрос только при активном резервировании (4 с). */
 (() => {
   const buttons = [...document.querySelectorAll("[data-backup-refresh]")];
   if (!buttons.length) return;
@@ -35,6 +35,34 @@
     unknown: "Неизвестно"
   };
   const knownFailure = new Set(["exit-code", "timeout", "signal"]);
+  const POLL_MS = 4000;
+  const autoLabel = el("backup-live-poll");
+  let watching = autoLabel?.dataset.watch === "true";
+  let pendingTimer = null;
+  let busy = false;
+  const cancelNext = () => {
+    if (pendingTimer !== null) {
+      clearTimeout(pendingTimer);
+      pendingTimer = null;
+    }
+  };
+  const setWatching = (enabled) => {
+    watching = enabled;
+    if (!watching) cancelNext();
+    if (autoLabel) {
+      autoLabel.dataset.watch = watching ? "true" : "false";
+      autoLabel.textContent = watching
+        ? "Автообновление каждые 4 секунды · до завершения копирования"
+        : "Автообновление отключено · резервирование не выполняется";
+    }
+  };
+  const scheduleNext = () => {
+    if (!watching || pendingTimer !== null || document.visibilityState === "hidden") return;
+    pendingTimer = setTimeout(() => {
+      pendingTimer = null;
+      return refresh();
+    }, POLL_MS);
+  };
   const displayTime = (node, raw) => {
     if (!node) return;
     node.replaceChildren();
@@ -88,13 +116,20 @@
     }
   };
   const refresh = async () => {
+    // Перекрывающиеся ручные/автоматические обращения недопустимы.
+    if (busy) return;
+    busy = true;
+    cancelNext();
     buttons.forEach((button) => {button.disabled = true; button.setAttribute("aria-busy", "true");});
     updateText("backup-refreshed", "Проверяю состояние 910…");
     try {
       const response = await fetch("/api/infrastructure", {
         method: "GET", credentials: "same-origin", cache: "no-store"
       });
-      if (response.status === 401) throw new Error("Сеанс истёк. Войди в панель снова.");
+      if (response.status === 401) {
+        setWatching(false);
+        throw new Error("Сеанс истёк. Войди в панель снова.");
+      }
       if (!response.ok) throw new Error("Сервис временно недоступен. Попробуй позже.");
       const data = await response.json();
       if (!data || !data.backup || !data.backup.timer ||
@@ -104,6 +139,7 @@
       const backup = data.backup;
       const timer = backup.timer;
       const running = timer.service === "active" || timer.service === "activating";
+      setWatching(running);
       el("backup-running").hidden = !running;
       const failure = knownFailure.has(timer.last_result);
       el("backup-failure").hidden = !failure;
@@ -125,13 +161,23 @@
       updateDestinations(data.destinations);
       const moment = new Intl.DateTimeFormat("ru-RU", {hour: "2-digit", minute: "2-digit", second: "2-digit"}).format(new Date());
       updateText("backup-refreshed", "Проверено в " + moment +
-        (running ? " · резервирование выполняется; обнови ещё раз позже" :
-          " · обновление только вручную"));
+        (running ? " · резервирование выполняется" :
+          " · завершено; обновление остановлено"));
     } catch (error) {
       updateText("backup-refreshed", error instanceof Error ? error.message : "Не удалось обновить");
     } finally {
       buttons.forEach((button) => {button.disabled = false; button.removeAttribute("aria-busy");});
+      busy = false;
+      scheduleNext();
     }
   };
   buttons.forEach((button) => button.addEventListener("click", refresh));
+  // Если открыли страницу во время копирования или после POST /run,
+  // polling начнётся без нажатия. В обычном простое дополнительных запросов нет.
+  setWatching(watching);
+  scheduleNext();
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") cancelNext();
+    else if (watching) void refresh();
+  });
 })();

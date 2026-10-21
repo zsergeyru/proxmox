@@ -289,6 +289,21 @@ def main():
                     assert 'data-backup-destination="fast-ssd"' in body
                     assert 'id="backup-running"' in body
                     assert 'id="backup-failure"' in body
+                    assert 'id="backup-live-poll" data-watch="false"' in body
+                    assert "Автообновление каждые 4 секунды" in body
+                    started_status, _, started_html = send(
+                        http, "/infrastructure?started=1", cookie=cookie,
+                    )
+                    assert started_status == 200
+                    assert 'id="backup-live-poll" data-watch="true"' in started_html
+                    injected["backup"]["timer"]["service"] = "activating"
+                    active_status, _, active_html = send(
+                        http, "/infrastructure", cookie=cookie,
+                    )
+                    assert active_status == 200
+                    assert 'id="backup-live-poll" data-watch="true"' in active_html
+                    assert "Состояние обновляется автоматически" in active_html
+                    injected["backup"]["timer"]["service"] = "inactive"
                     assert body.count('data-backup-refresh') == 2
                     assert 'src="/backup-refresh.js"' in body
                     assert '<meta http-equiv="refresh"' not in body
