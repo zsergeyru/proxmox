@@ -742,9 +742,9 @@ def _backup_overview_page(csrf: str, notice: str = "") -> bytes:
         dest_rows.append(
             '<tr data-backup-destination="' + e(item.get("id")) + '"><td>' + e(item.get("id")) + "</td><td>"
             + e(item.get("mountpoint")) + "</td><td>"
-            + ("Объявлен и подтверждён" if item.get("configured") is True
-               else "Ожидает настройки") + "</td><td>"
-            + e(pve_state) + "</td></tr>"
+            + '<span data-backup-configured>' + ("Объявлен и подтверждён" if item.get("configured") is True
+               else "Ожидает настройки") + '</span></td><td>'
+            + '<span data-backup-pve-state>' + e(pve_state) + '</span></td></tr>'
         )
     backup_rows = []
     for key, label in (
