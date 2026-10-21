@@ -105,6 +105,53 @@ def _backup_record(name: str, raw: dict | None, state: str, now: datetime) -> di
     return result
 
 
+# Никаких сырых журналов из PVE/OpenBao в HTTP API. Распознаём только
+# известные формулировки собственного backup_controller.
+CHECK_FAILURES = {
+    "PVE: не подготовлен unseal OpenBao":
+        "На PVE отсутствует обязательный unseal OpenBao",
+    "PVE: не подготовлен аварийный GitHub-ключ":
+        "На PVE отсутствует аварийный GitHub-ключ для восстановления",
+    "PVE: не подготовлен AppRole снимка OpenBao":
+        "На PVE не подготовлен AppRole для снимка OpenBao",
+    "PVE: не подготовлен помощник Raft-снимка":
+        "На PVE отсутствует помощник снимка OpenBao Raft",
+    "PVE: не подтверждена идентичность гостя 910":
+        "На PVE отсутствует описание управляющего гостя 910",
+    "PVE: не хватает обязательного PVE-only компонента резервирования":
+        "Не хватает обязательного PVE-only компонента резервирования",
+    "PVE отверг проверку источников или носителей резервирования":
+        "PVE отверг проверку носителя или обязательных данных",
+    "PVE не подтвердил действие резервирования: check":
+        "PVE отверг проверку носителя или обязательных PVE-only данных",
+}
+
+
+def _backup_failure_hint() -> str | None:
+    """Только закрытая классификация последних записей собственного systemd unit."""
+    try:
+        command = run(
+            ["timeout", "3s", "journalctl", "-u", "infra-manager-backup.service",
+             "--no-pager", "--output=cat", "--lines=30"],
+            capture_output=True, check=False,
+        )
+        if command.returncode or len(command.stdout) > 16000:
+            return None
+        lines = command.stdout.splitlines()
+        for entry in reversed(lines):
+            if not entry.startswith("[ОЖИДАНИЕ] Резервирование: "):
+                continue
+            for needle, message in CHECK_FAILURES.items():
+                if needle in entry:
+                    return message
+            if "Нет доступного и проверенного места резервирования" in entry:
+                return "Резервирование не выполнено: PVE не подтвердил носитель или источники"
+            return "Служба отклонила резервирование; откройте журнал для уточнения"
+    except (OSError, ValueError, TypeError):
+        pass
+    return None
+
+
 def _timer() -> dict:
     """Состояние реального systemd timer/service, а не одна декларация YAML."""
     result = {"state": "unknown", "service": "unknown", "next": None, "last": None}
@@ -141,6 +188,10 @@ def _timer() -> dict:
                 result["service"] = fields["ActiveState"]
             if fields.get("Result") in {"success", "exit-code", "timeout", "signal"}:
                 result["last_result"] = fields["Result"]
+                if fields["Result"] in {"exit-code", "timeout", "signal"}:
+                    hint = _backup_failure_hint()
+                    if hint:
+                        result["failure_hint"] = hint
     except OSError:
         pass
     return result
