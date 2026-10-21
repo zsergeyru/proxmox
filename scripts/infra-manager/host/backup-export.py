@@ -386,6 +386,20 @@ def volume_repositories(expected: dict[str, str], volume: dict) -> dict[str, str
     return result
 
 
+def prepare_volume_repositories(expected: dict[str, str], volume: dict) -> None:
+    """Создать только родительский каталог volumes на подтверждённом носителе."""
+    name, _root, _device, _consumers = _volume_contract(volume)
+    for destination in expected:
+        mount, _fs = ALLOWED_MOUNTS[destination]
+        base = mount / "volumes"
+        target = base / name
+        if base.is_symlink() or target.is_symlink():
+            raise ExportError("Недоверенный путь для Restic")
+        base.mkdir(mode=0o700, exist_ok=True)
+        if not base.is_dir():
+            raise ExportError("Не удалось подготовить каталог Restic")
+
+
 def stream_volume(volume: dict) -> None:
     """Согласовать все LXC; снять тонкий snapshot; возобновить LXC до чтения."""
     import secrets
@@ -458,26 +472,29 @@ def stream_volume(volume: dict) -> None:
                 if result.returncode:
                     raise ExportError("Поток резервируемого тома оборвался")
             finally:
+                cleanup_error = None
                 if mounted:
                     unmount = subprocess.run(
                         ["umount", str(target)], stdout=subprocess.DEVNULL,
                         stderr=subprocess.DEVNULL, check=False, timeout=90,
                     )
                     if unmount.returncode:
-                        raise ExportError("Не удалось отключить временный снимок")
-                if created:
+                        cleanup_error = "Не удалось отключить временный снимок"
+                if created and cleanup_error is None:
                     removed = subprocess.run(
                         ["lvremove", "--yes", "--force", str(snapshot)],
                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                         check=False, timeout=120,
                     )
                     if removed.returncode:
-                        raise ExportError("Не удалось удалить временный LVM snapshot")
+                        cleanup_error = "Не удалось удалить временный LVM snapshot"
+                if cleanup_error:
+                    raise ExportError(cleanup_error)
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("command", choices=("check", "export", "password", "password-existing", "repositories", "vm100", "volume-repositories", "volume"))
+    parser.add_argument("command", choices=("check", "export", "password", "password-existing", "repositories", "vm100", "volume-repositories", "volume-prepare", "volume"))
     args = parser.parse_args()
     if os.geteuid() != 0:
         parser.error("Нужны полномочия PVE-only root")
@@ -486,7 +503,7 @@ def main() -> int:
         if not isinstance(expected, dict):
             raise ExportError("Неверное описание носителей")
         volume = None
-        if args.command in ("volume-repositories", "volume"):
+        if args.command in ("volume-repositories", "volume-prepare", "volume"):
             if set(expected) != {"destinations", "volume"}:
                 raise ExportError("Неверное описание задания тома")
             volume = expected["volume"]
@@ -508,6 +525,8 @@ def main() -> int:
             stream_vm100()
         elif args.command == "volume-repositories":
             print(json.dumps(volume_repositories(expected, volume)))
+        elif args.command == "volume-prepare":
+            prepare_volume_repositories(expected, volume)
         elif args.command == "volume":
             stream_volume(volume)
         else:
