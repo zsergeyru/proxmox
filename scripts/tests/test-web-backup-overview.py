@@ -84,6 +84,31 @@ def main():
         backup_overview, "run",
         return_value=SimpleNamespace(
             returncode=0,
+            stdout="[ОЖИДАНИЕ] Резервирование: Некоторые назначения "
+                   "резервирования недоступны: fast-ssd: "
+                   "Проверка или запись restic в fast-ssd завершилась с ошибкой\n",
+        ),
+    ):
+        assert "ошибка restic" in backup_overview._backup_failure_hint()
+    for stage, expected in (
+        ("создание репозитория", "не создал репозиторий"),
+        ("проверка доступа к репозиторию", "не смог открыть репозиторий"),
+        ("запись архива", "не смог записать архив"),
+        ("проверка целостности архива", "не смог завершить проверку"),
+    ):
+        with patch.object(
+            backup_overview, "run",
+            return_value=SimpleNamespace(
+                returncode=0,
+                stdout="[ОЖИДАНИЕ] Резервирование: fast-ssd: "
+                       "restic: " + stage + " на fast-ssd завершилась ошибкой\n",
+            ),
+        ):
+            assert expected in backup_overview._backup_failure_hint()
+    with patch.object(
+        backup_overview, "run",
+        return_value=SimpleNamespace(
+            returncode=0,
             stdout="[ОЖИДАНИЕ] Резервирование: password=very-secret\n",
         ),
     ):
@@ -258,7 +283,21 @@ def main():
                     assert "Вторая независимая копия отсутствует" in body
                     assert "Не хватает обязательного PVE-only компонента" in body
                     assert "Последнее резервирование не выполнено" in body
+                    assert 'id="backup-refreshed"' in body
+                    assert 'id="backup-service-state"' in body
+                    assert 'data-backup-record="core"' in body
+                    assert 'data-backup-destination="fast-ssd"' in body
+                    assert 'id="backup-running"' in body
+                    assert 'id="backup-failure"' in body
+                    assert body.count('data-backup-refresh') == 2
+                    assert 'src="/backup-refresh.js"' in body
+                    assert '<meta http-equiv="refresh"' not in body
                     assert "не является испытанием восстановления" in body
+                    assert send(http, "/backup-refresh.js")[0] == 401
+                    js_status, _, js = send(http, "/backup-refresh.js", cookie=cookie)
+                    assert js_status == 200
+                    assert 'fetch("/api/infrastructure"' in js
+                    assert 'setInterval(' not in js
                     status, _, data = send(http, "/api/infrastructure", cookie=cookie)
                     assert status == 200
                     assert json.loads(data)["backup"]["overall"] == "single_copy"

@@ -64,6 +64,9 @@ details.panel>summary:hover{background:rgba(96,198,196,.055)}
 .btn.secondary:hover,button.secondary:hover{background:var(--hover)}
 .btn.danger,button.danger{background:#6f303e;color:#fff0f1;border-color:#9e4455}
 .btn.danger:hover,button.danger:hover{background:#874052}
+button:disabled{cursor:wait;opacity:.64}
+.backup-controls{padding:10px 0;align-items:center}
+.backup-controls #backup-refreshed{font-size:13px}
 .actions{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
 .actions form,.guest-actions form{margin:0}
 label{display:block;color:var(--soft);font-size:13px;font-weight:600;margin-bottom:7px}
