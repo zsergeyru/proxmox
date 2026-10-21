@@ -93,6 +93,16 @@
       displayTime(card.querySelector("[data-backup-copy-date]"), record.created_utc);
       const places = card.querySelector("[data-backup-copy-places]");
       if (places) places.textContent = placesLabel(record);
+      const problem = card.querySelector("[data-backup-copy-error]");
+      if (problem) {
+        const errors = record.last_errors && typeof record.last_errors === "object"
+          ? record.last_errors : {};
+        const label = [["fast-ssd", "SSD"], ["nas-backup", "NAS"]]
+          .filter(([target]) => typeof errors[target] === "string" && errors[target])
+          .map(([target, name]) => name + ": " + errors[target]).join("; ");
+        problem.hidden = !label;
+        problem.textContent = label ? "Ошибка последней попытки: " + label : "";
+      }
     }
   };
   const updateDestinations = (destinations) => {
