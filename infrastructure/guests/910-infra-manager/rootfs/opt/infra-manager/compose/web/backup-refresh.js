@@ -19,7 +19,7 @@
     inactive: "Ожидает запуска", failed: "Ошибка", unknown: "Не удалось проверить"
   };
   const recordStates = {
-    verified: "Есть запись об успешной проверке", stale: "Копия устарела",
+    verified: "Есть запись об успешной проверке", partial: "Подтверждён один носитель", stale: "Копия устарела",
     missing: "Нет подтверждённой записи", invalid: "Запись повреждена"
   };
   const pveStates = {
@@ -76,7 +76,7 @@
       card.dataset.tone = state === "verified" ? "success" : "warning";
       const label = card.querySelector("[data-backup-copy-state]");
       if (label) label.textContent = ({
-        verified: "Копия создана", stale: "Копия устарела",
+        verified: "Копия создана", partial: "Есть только часть копий", stale: "Копия устарела",
         missing: "Копии пока нет", invalid: "Нет подтверждения"
       })[state] || "Не проверено";
       displayTime(card.querySelector("[data-backup-copy-date]"), record.created_utc);
@@ -105,6 +105,9 @@
     const full = records.full || {};
     const running = timer.service === "active" || timer.service === "activating";
     const failed = knownFailure.has(timer.last_result);
+    const volumes = Array.isArray(backup.volume_jobs) ? backup.volume_jobs : [];
+    const protectedVolumes = volumes.filter((job) =>
+      ["verified", "partial"].includes(records[job.record_key]?.state)).length;
     const complete = [core, vm100, full].every((x) => x.state === "verified");
     const heading = running ? "Резервирование выполняется" :
       failed ? "Последний запуск завершился с ошибкой" :
@@ -115,7 +118,9 @@
     const summary = el("backup-summary");
     if (summary) summary.dataset.tone = running ? "info" : failed ? "danger" :
       complete ? "success" : "warning";
-    updateText("backup-summary-text", heading);
+    updateText("backup-summary-text", heading +
+      (volumes.length ? " · Тома: " + protectedVolumes + "/" + volumes.length +
+       " имеют актуальную копию" : ""));
     displayTime(el("backup-last-success"), core.created_utc);
     const coreTargets = Array.isArray(core.destinations) ? core.destinations : [];
     const nasConfigured = data.destinations.some((x) => x.id === "nas-backup" && x.configured === true);
