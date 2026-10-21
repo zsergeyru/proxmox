@@ -56,7 +56,9 @@ def load_jobs(repo_root: Path, backup: dict) -> list[dict]:
         if (volume["kind"] != "lvm_thin" or volume["volume_group"] != "pve"
                 or volume["thin_pool"] != "data" or volume["filesystem"] != "ext4"
                 or not isinstance(mountpoint, str)
-                or mountpoint != "/mnt/bindmounts/" + name.replace("_", "-")):
+                or not mountpoint.startswith("/mnt/bindmounts/")
+                or ".." in Path(mountpoint).parts
+                or "//" in mountpoint or str(Path(mountpoint)) != mountpoint):
             raise InfraManagerError("Том не соответствует безопасному контракту PVE LVM")
         jobs.append({"id": name, "mountpoint": mountpoint, "consumers": []})
 
