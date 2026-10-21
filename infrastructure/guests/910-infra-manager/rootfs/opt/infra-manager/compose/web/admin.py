@@ -740,7 +740,7 @@ def _backup_overview_page(csrf: str, notice: str = "") -> bytes:
             "unknown": "Неизвестно",
         }.get(item.get("pve_state"), "Неизвестно")
         dest_rows.append(
-            "<tr><td>" + e(item.get("id")) + "</td><td>"
+            '<tr data-backup-destination="' + e(item.get("id")) + '"><td>' + e(item.get("id")) + "</td><td>"
             + e(item.get("mountpoint")) + "</td><td>"
             + ("Объявлен и подтверждён" if item.get("configured") is True
                else "Ожидает настройки") + "</td><td>"
