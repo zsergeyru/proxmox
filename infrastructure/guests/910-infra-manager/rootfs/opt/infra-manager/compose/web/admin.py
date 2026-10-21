@@ -774,7 +774,7 @@ def _backup_overview_page(csrf: str, notice: str = "") -> bytes:
     }.get(timer.get("state"), "Не удалось проверить")
     service_state = {
         "active": "Выполняется", "activating": "Запускается",
-        "inactive": "Не выполняется", "failed": "Ошибка",
+        "inactive": "Ожидает запуска", "failed": "Ошибка",
         "unknown": "Не удалось проверить",
     }.get(timer.get("service"), "Не удалось проверить")
     restored = backup.get("restore_tested") is True
