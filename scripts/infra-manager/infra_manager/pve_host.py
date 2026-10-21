@@ -431,6 +431,15 @@ def trigger_openbao_unseal(node: str) -> None:
     _ssh(node, str(OPENBAO_HOST_COMMAND))
 
 
+def ensure_backup_raft_access(node: str) -> None:
+    """Разово подготовить ограниченный AppRole снимка Raft на PVE.
+
+    Существующие данные не ротируются: сама PVE-only команда проверяет
+    файл и не выдаёт его содержимое через SSH/stdout.
+    """
+    _ssh(node, str(OPENBAO_HOST_COMMAND), "--configure-backup-access")
+
+
 def repair_openbao_on_host(node: str) -> None:
     """Безопасно восстановить OpenBao, включая одноузловой Raft quorum."""
 
