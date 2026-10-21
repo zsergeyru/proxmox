@@ -291,6 +291,9 @@ def main():
                     assert 'id="backup-technical-details"' in body
                     assert 'data-backup-copy="core"' in body
                     assert 'data-backup-copy="vm100"' in body
+                    assert 'data-backup-copy="volume_infra_state"' in body
+                    assert 'data-backup-copy="volume_gogs_data"' in body
+                    assert "40 ГиБ" in body and "30 ГиБ" in body
                     assert "Автообновление каждые 4 секунды" in body
                     assert 'id="backup-failure"' in body
                     assert body.count('data-backup-refresh') == 1

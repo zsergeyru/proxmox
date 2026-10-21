@@ -16,6 +16,7 @@ from .guest_catalog import load_manifest
 from .operation_store import OperationStore, _read
 from .settings import PATHS
 from .storage_catalog import load_physical_storage
+from .volume_backup import load_jobs
 
 DESTINATIONS = {
     "fast-ssd": ("/mnt/pve/backup-fast", "ext4", "infra-core"),
@@ -237,6 +238,54 @@ def _timer() -> dict:
     return result
 
 
+
+def _volume_record(store: OperationStore, name: str, now: datetime) -> dict:
+    """Показать историю по назначению; не выдавать вчерашнюю копию за свежую."""
+    from .operation_store import _read
+    empty = {
+        "state": "missing", "created_utc": None, "destinations": [],
+        "check": "not_confirmed", "restore_tested": False,
+        "destination_status": {name: "missing" for name in DESTINATIONS},
+        "destination_dates": {},
+    }
+    file = store.settings / ("backup-volume-" + name + ".json")
+    if not file.exists() and not file.is_symlink():
+        return empty
+    try:
+        record = _read(file)
+        if record.get("schema_version") != 1 or record.get("volume_id") != name:
+            raise ValueError("Неверная запись тома")
+        dates = record["destination_dates"]
+        if (not isinstance(dates, dict)
+                or set(dates) - set(DESTINATIONS)
+                or not all(isinstance(x, str) for x in dates.values())):
+            raise ValueError("Неизвестные назначения тома")
+        today = now.date()
+        status = {}
+        for target in DESTINATIONS:
+            if target not in dates:
+                status[target] = "missing"
+            else:
+                old = date.fromisoformat(dates[target])
+                age = (today - old).days
+                if not 0 <= age <= 36500:
+                    raise ValueError("Некорректная дата")
+                status[target] = "verified" if age <= 1 else "stale"
+        good = [x for x in dates if status[x] == "verified"]
+        state = ("verified" if len(good) == len(DESTINATIONS) else
+                 "partial" if good else
+                 "stale" if dates else "missing")
+        return {
+            "state": state, "created_utc": record.get("created_utc"),
+            "destinations": sorted(good), "destination_status": status,
+            "destination_dates": dates,
+            "check": "restic_subset_1_percent" if good else "not_confirmed",
+            "restore_tested": record.get("restore_tested") is True,
+        }
+    except (InfraManagerError, OSError, ValueError, TypeError, KeyError):
+        return {**empty, "state": "invalid"}
+
+
 def snapshot() -> dict:
     """Один ограниченный срез для уже авторизованной веб-панели."""
     repo = PATHS.repo_root
@@ -346,6 +395,9 @@ def snapshot() -> dict:
         name: _backup_record(name, *_record(store, name), now)
         for name in RECORD_NAMES
     }
+    volume_jobs = load_jobs(repo, policy)
+    for job in volume_jobs:
+        backups["volume_" + job["id"]] = _volume_record(store, job["id"], now)
     core = backups["core"]
     copies = len(core["destinations"])
     if core["state"] in {"missing", "invalid"}:
@@ -371,6 +423,11 @@ def snapshot() -> dict:
         "backup": {
             "schedule_declared": policy["schedule"],
             "timer": _timer(),
+            "volume_jobs": [
+                {"id": item["id"], "size_gb": storage.volume(item["id"])["size_gb"],
+                 "record_key": "volume_" + item["id"], "schedule": "daily"}
+                for item in volume_jobs
+            ],
             "records": backups,
             "overall": overall,
             "independent_recorded_copies": copies,

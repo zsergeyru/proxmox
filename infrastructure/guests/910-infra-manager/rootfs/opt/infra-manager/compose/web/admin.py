@@ -780,16 +780,31 @@ def _backup_overview_page(csrf: str, notice: str = "") -> bytes:
     restored = backup.get("restore_tested") is True
     last_failed = timer.get("last_result") in {"exit-code", "timeout", "signal"}
     summary = BACKUP_OVERALL.get(backup.get("overall"), "Неизвестное состояние копий")
+    def backup_places(record: dict) -> str:
+        dates = record.get("destination_dates")
+        status = record.get("destination_status")
+        if isinstance(dates, dict) and isinstance(status, dict):
+            labels = {"fast-ssd": "SSD", "nas-backup": "NAS"}
+            return " · ".join(
+                labels[name] + ": " + (
+                    str(dates[name]) if status.get(name) == "verified" else
+                    "устарела (" + str(dates[name]) + ")" if name in dates else
+                    "копии нет"
+                )
+                for name in ("fast-ssd", "nas-backup")
+            )
+        destinations = record.get("destinations")
+        return ", ".join(destinations) if isinstance(destinations, list) else ""
+
     def card(key: str, title: str, description: str) -> str:
         record = records.get(key, {})
         state = record.get("state")
         label = {
-            "verified": "Копия создана", "stale": "Копия устарела",
+            "verified": "Копия создана", "partial": "Есть только часть копий", "stale": "Копия устарела",
             "missing": "Копии пока нет", "invalid": "Нет подтверждения",
         }.get(state, "Не проверено")
         tone = "success" if state == "verified" else "warning"
-        destinations = record.get("destinations")
-        places = ", ".join(destinations) if isinstance(destinations, list) else ""
+        places = backup_places(record)
         return (
             '<article class="backup-copy" data-backup-copy="' + key + '" data-tone="' + tone + '">'
             '<h3>' + e(title) + '</h3>'
@@ -808,6 +823,12 @@ def _backup_overview_page(csrf: str, notice: str = "") -> bytes:
     complete = all(
         item.get("state") == "verified" for item in (core, vm100, full)
     )
+    volume_jobs = backup.get("volume_jobs", [])
+    volume_protected = sum(
+        records.get(job.get("record_key"), {}).get("state") in {"verified", "partial"}
+        for job in volume_jobs if isinstance(job, dict)
+    )
+    volumes_incomplete = volume_protected < len(volume_jobs)
     if running:
         headline = "Резервирование выполняется"
         headline_tone = "info"
@@ -815,8 +836,9 @@ def _backup_overview_page(csrf: str, notice: str = "") -> bytes:
         headline = "Последний запуск завершился с ошибкой"
         headline_tone = "danger"
     elif complete:
-        headline = "Копии PVE/910 и Home Assistant созданы"
-        headline_tone = "success"
+        headline = ("Копии PVE/910 и Home Assistant созданы"
+                    + ("; не все постоянные тома защищены" if volumes_incomplete else ""))
+        headline_tone = "warning" if volumes_incomplete else "success"
     elif core.get("state") == "verified":
         headline = "Копия PVE/910 создана; Home Assistant ещё не подтверждён"
         headline_tone = "warning"
@@ -874,6 +896,19 @@ def _backup_overview_page(csrf: str, notice: str = "") -> bytes:
         '<div class="backup-copy-grid">'
         + card("core", "PVE и infra-manager 910", "Настройки и защищённое состояние PVE/910. Проверка Restic: 1% данных.")
         + card("vm100", "Home Assistant · VM 100", "Дата копии VM 100 (точное время не записывается отдельно).")
+        + "".join(
+            card(
+                job["record_key"],
+                job["id"] + " · " + str(job["size_gb"]) + " ГиБ",
+                "Постоянный LVM-том · ежедневно · согласованный снимок. "
+                "SSD и NAS проверяются отдельно.",
+            )
+            for job in backup.get("volume_jobs", [])
+            if isinstance(job, dict) and
+            isinstance(job.get("record_key"), str) and
+            isinstance(job.get("id"), str) and
+            type(job.get("size_gb")) is int
+        )
         + '</div>'
         '<p class="backup-warning">Восстановление: <strong id="backup-restore-state">'
         + ("Испытано" if restored else "Ещё не проверено")
@@ -929,7 +964,9 @@ def _backup_confirm_page(csrf: str) -> bytes:
         '<section class="panel"><h2>Запустить резервирование</h2>'
         '<p>Штатная служба infra-manager-backup.service проверит носители, '
         'выполнит зашифрованную запись и проверку данных restic. '
-        'Операция может выполняться длительное время.</p>'
+        'Операция может выполняться длительное время. '
+        'Включённые постоянные LVM-тома также резервируются, когда '
+        'наступило их ежедневное расписание.</p>'
         '<div class="notice" data-tone="warning">Если доступен только один '
         'проверенный носитель, будет создана одна копия. '
         'Восстановление и форматирование здесь не выполняются.</div>'

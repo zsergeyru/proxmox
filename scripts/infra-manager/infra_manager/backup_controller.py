@@ -25,6 +25,7 @@ from .common import InfraManagerError
 from .pve_host import _ssh_command
 from .operation_store import OperationStore, _atomic_json
 from .settings import PATHS
+from .volume_backup import load_jobs, due as volume_due
 
 POLICY = PATHS.repo_root / "infrastructure/hosts/pve/backup.yaml"
 HOST_HELPER = "/usr/local/lib/infra-manager/backup/backup-export.py"
@@ -71,6 +72,8 @@ def policy() -> tuple[dict, dict[str, str]]:
         raise InfraManagerError(
             "Нет подтверждённого SSD или NAS; резервирование ожидает настройки"
         )
+    # Проверить новое объявление заранее, чтобы неизвестный том не запускался.
+    load_jobs(PATHS.repo_root, raw)
     return raw, verified
 
 
@@ -210,10 +213,11 @@ def _export_cause(stderr: bytes, returncode: int) -> str:
 
 
 def _restic(node: str, destination: str, key: Path, args: list[str],
-            *, source=None) -> None:
+            *, source=None, volume_id: str | None = None) -> None:
     """Запустить restic в 910; в журнал вывести только код и безопасную категорию."""
     mountpoint, _filesystem, repository = DESTINATIONS[destination]
-    backend = f"sftp:root@{node}:{mountpoint}/{repository}"
+    path = f"volumes/{volume_id}" if volume_id is not None else repository
+    backend = f"sftp:root@{node}:{mountpoint}/{path}"
     ssh_args = [
         "-i", str(PATHS.pve_host_private_key),
         "-o", f"UserKnownHostsFile={PATHS.pve_host_known_hosts}",
@@ -301,6 +305,126 @@ def _stream_snapshot(node: str, verified: dict[str, str],
                 export.wait()
 
 
+
+def _stream_volume(node: str, verified: dict[str, str], key: Path,
+                   destination: str, volume: dict) -> None:
+    """Передать только подтверждённый том: LXC возобновляются до записи Restic."""
+    payload = json.dumps(
+        {"destinations": {destination: verified[destination]}, "volume": volume},
+        separators=(",", ":"),
+    ).encode()
+    with tempfile.TemporaryFile(mode="w+b") as diagnostics:
+        export = subprocess.Popen(
+            _ssh_command(node, ("python3", HOST_HELPER, "volume")),
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=diagnostics,
+        )
+        try:
+            assert export.stdin is not None
+            try:
+                export.stdin.write(payload)
+                export.stdin.close()
+            except (BrokenPipeError, OSError) as exc:
+                raise InfraManagerError(
+                    "PVE преждевременно закрыл поток задания тома"
+                ) from exc
+            assert export.stdout is not None
+            failure = None
+            try:
+                try:
+                    _restic(
+                        node, destination, key,
+                        ["backup", "--stdin", "--stdin-filename",
+                         volume["id"] + ".tar", "--tag",
+                         "volume:" + volume["id"]],
+                        source=export.stdout, volume_id=volume["id"],
+                    )
+                except InfraManagerError as exc:
+                    failure = exc
+            finally:
+                export.stdout.close()
+            try:
+                code = export.wait(timeout=2500)
+            except subprocess.TimeoutExpired as exc:
+                raise InfraManagerError("PVE превысил время выдачи снимка тома") from exc
+            if code:
+                if failure is not None:
+                    raise failure
+                raise InfraManagerError(
+                    "PVE не смог подготовить согласованный снимок тома "
+                    "(проверить доступность LXC, LVM и тонкий пул)"
+                )
+            if failure is not None:
+                raise failure
+        finally:
+            if export.poll() is None:
+                export.kill()
+                export.wait()
+
+
+def _backup_volumes(node: str, verified: dict[str, str], key: Path,
+                    store: OperationStore, jobs: list[dict]) -> dict[str, str]:
+    """Независимые суточные задания; фиксировать успех каждого носителя."""
+    issues = {}
+    for volume in jobs:
+        name = volume["id"]
+        targets = list(verified)
+        if not targets or not volume_due(store, name, targets):
+            continue
+        try:
+            raw_state = _remote(node, "volume-repositories", json.dumps({
+                "destinations": verified, "volume": volume,
+            }, separators=(",", ":")).encode()).stdout
+            state = json.loads(raw_state)
+            if not isinstance(state, dict) or set(state) != set(verified):
+                raise InfraManagerError("PVE не подтвердил репозитории тома")
+        except (InfraManagerError, ValueError) as exc:
+            issues[name] = str(exc)
+            continue
+        from .operation_store import _read
+        record_path = store.settings / ("backup-volume-" + name + ".json")
+        try:
+            prior = _read(record_path)
+            history = prior.get("destination_dates", {})
+            history = {k: v for k, v in history.items()
+                       if k in DESTINATIONS and isinstance(v, str)}
+        except (InfraManagerError, OSError, ValueError, AttributeError):
+            history = {}
+        failures = {}
+        for target in targets:
+            try:
+                if state[target] not in {"missing", "existing"}:
+                    raise InfraManagerError("Вместо Restic-репозитория неизвестные данные")
+                if state[target] == "missing":
+                    _remote(node, "volume-prepare", json.dumps({
+                        "destinations": {target: verified[target]}, "volume": volume,
+                    }, separators=(",", ":")).encode())
+                    _restic(node, target, key, ["init"], volume_id=name)
+                _restic(node, target, key, ["snapshots", "--json"], volume_id=name)
+                _stream_volume(node, verified, key, target, volume)
+                _restic(node, target, key, ["check", "--read-data-subset=1%"],
+                        volume_id=name)
+                history[target] = datetime.now(UTC).date().isoformat()
+            except InfraManagerError as exc:
+                failures[target] = str(exc)
+        stamp = datetime.now(UTC).isoformat()
+        _atomic_json(record_path, {
+            "schema_version": 1, "volume_id": name,
+            "created_utc": stamp if any(
+                x == datetime.now(UTC).date().isoformat() for x in history.values()
+            ) else None,
+            "destination_dates": history,
+            "destinations": sorted(history),
+            "failed_destinations": sorted(failures),
+            "verified": "restic-check-read-data-subset-1-percent",
+            "restore_tested": False,
+        })
+        print(f"[ИНФО] Том {name}: успешные назначения "
+              + (", ".join(sorted(set(history) - set(failures))) or "нет"))
+        if failures:
+            issues[name] = "Не все назначения завершены: " + ", ".join(sorted(failures))
+    return issues
+
+
 def _vm100_due(store: OperationStore, identity: str) -> bool:
     """Ежедневная копия HAOS не дублируется при каждом запуске таймера."""
     saved = store.settings / "backup-vm100.json"
@@ -324,7 +448,8 @@ def execute(*, run: bool = False) -> None:
     Ни одна ошибка SSD/NAS не направляет архив на корневую файловую систему
     PVE и не отменяет попытку использовать второе независимое назначение.
     """
-    _description, declared = policy()
+    description, declared = policy()
+    volume_jobs = load_jobs(PATHS.repo_root, description)
     if shutil.which("restic") is None:
         raise InfraManagerError("restic не установлен внутри управляющего гостя")
     node = _source_node()
@@ -394,6 +519,13 @@ def execute(*, run: bool = False) -> None:
             except InfraManagerError as exc:
                 problems[name] = str(exc)
         if not core_saved:
+            # Независимые данные не теряем из-за сбоя Raft/PVE-config.
+            if run and volume_jobs:
+                volume_problems = _backup_volumes(
+                    node, verified, key, OperationStore(), volume_jobs,
+                )
+                problems.update({"volume:" + name: reason
+                                 for name, reason in volume_problems.items()})
             raise InfraManagerError(
                 "Все задания архивирования PVE завершились ошибками: "
                 + "; ".join(problems.values())
@@ -441,6 +573,10 @@ def execute(*, run: bool = False) -> None:
                 "includes_vm100": True,
                 "restore_tested": False,
             })
+        if run and volume_jobs:
+            volume_problems = _backup_volumes(node, verified, key, store, volume_jobs)
+            problems.update({"volume:" + name: reason
+                             for name, reason in volume_problems.items()})
         if len(vm_saved) < len(DESTINATIONS):
             print("[ПРЕДУПРЕЖДЕНИЕ] Вторая независимая копия отсутствует")
         if problems:

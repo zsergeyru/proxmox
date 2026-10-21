@@ -285,9 +285,238 @@ def stream_vm100() -> None:
         raise ExportError("Потоковый снимок VM 100 не завершился")
 
 
+
+# Резервирование LVM-томов: только объекты pve/data, известные по каталогу.
+# Все источники дополнительно сверяются с фактическим PVE, а не выбираются
+# из произвольного пути, присланного по SSH.
+def _volume_contract(value: object) -> tuple[str, Path, Path, set[int]]:
+    import re
+    if not isinstance(value, dict) or set(value) != {"id", "mountpoint", "consumers"}:
+        raise ExportError("Неверное описание тома резервирования")
+    name = value["id"]
+    if not isinstance(name, str) or not re.fullmatch(r"[a-z][a-z0-9_]{0,47}", name):
+        raise ExportError("Недопустимое имя тома")
+    mountpoint = value["mountpoint"]
+    if (not isinstance(mountpoint, str)
+            or not mountpoint.startswith("/mnt/bindmounts/")
+            or ".." in Path(mountpoint).parts
+            or "//" in mountpoint
+            or str(Path(mountpoint)) != mountpoint):
+        raise ExportError("Недопустимый путь тома резервирования")
+    path = Path(mountpoint)
+    if path.is_symlink() or not path.is_mount():
+        raise ExportError("Том не подтверждён по точке подключения")
+    device = Path("/dev/pve") / name
+    if not device.exists() or not device.is_block_device():
+        raise ExportError("Рабочий LVM-том не найден")
+    check = subprocess.run(
+        ["lvs", "--noheadings", "-o", "pool_lv", str(device)],
+        text=True, capture_output=True, check=False, timeout=20,
+    )
+    if check.returncode or check.stdout.strip() != "data":
+        raise ExportError("Том не принадлежит pve/data")
+    actual = subprocess.run(
+        ["findmnt", "-rn", "-o", "SOURCE,FSTYPE", "--mountpoint", str(path)],
+        text=True, capture_output=True, check=False, timeout=20,
+    )
+    parts = actual.stdout.strip().split()
+    if (actual.returncode or len(parts) != 2 or parts[1] != "ext4"
+            or os.path.realpath(parts[0]) != os.path.realpath(device)):
+        raise ExportError("Источник файловой системы не соответствует LVM")
+    consumers = value["consumers"]
+    if (not isinstance(consumers, list) or len(consumers) > 64
+            or any(type(x) is not int or not 100 <= x <= 9999 for x in consumers)
+            or len(consumers) != len(set(consumers))):
+        raise ExportError("Некорректный перечень гостей тома")
+    return name, path, device, set(consumers)
+
+
+def _consumers_on_host(root: Path, declared: set[int]) -> list[int]:
+    import re
+    listed = subprocess.run(
+        ["pct", "list"], text=True, capture_output=True, check=False, timeout=20,
+    )
+    if listed.returncode:
+        raise ExportError("Не удалось получить перечень LXC")
+    actual = []
+    for line in listed.stdout.splitlines():
+        match = re.match(r"^\s*(\d+)\s", line)
+        if not match:
+            continue
+        vmid = int(match.group(1))
+        config = subprocess.run(
+            ["pct", "config", str(vmid)], text=True,
+            capture_output=True, check=False, timeout=20,
+        )
+        if config.returncode:
+            raise ExportError("Не удалось проверить подключения LXC")
+        for mount in re.findall(r"^mp\d+:\s*(/[^,\n]+)", config.stdout, re.M):
+            if mount == str(root) or mount.startswith(str(root) + "/"):
+                if vmid not in declared:
+                    raise ExportError("Неизвестный потребитель резервируемого тома")
+                actual.append(vmid)
+                break
+    return sorted(actual)
+
+
+def _thin_pool_ready() -> None:
+    result = subprocess.run(
+        ["lvs", "--noheadings", "--nosuffix", "-o",
+         "data_percent,metadata_percent", "--separator", ",", "pve/data"],
+        text=True, capture_output=True, check=False, timeout=20,
+    )
+    if result.returncode:
+        raise ExportError("Не удалось проверить свободное место LVM")
+    try:
+        used, meta = (float(x.strip()) for x in result.stdout.strip().split(","))
+    except (ValueError, TypeError) as exc:
+        raise ExportError("Нет достоверных данных о LVM thin-pool") from exc
+    if not (0 <= used < 85 and 0 <= meta < 85):
+        raise ExportError("LVM thin-pool близок к заполнению, снимок запрещён")
+
+
+def volume_repositories(expected: dict[str, str], volume: dict) -> dict[str, str]:
+    name, _root, _device, _declared = _volume_contract(volume)
+    result = {}
+    for destination in expected:
+        mount, _fs = ALLOWED_MOUNTS[destination]
+        base = mount / "volumes"
+        target = base / name
+        if base.is_symlink() or target.is_symlink():
+            raise ExportError("Ссылка в пути Restic запрещена")
+        if not target.exists() or (target.is_dir() and not any(target.iterdir())):
+            result[destination] = "missing"
+        elif target.is_dir() and (target / "config").is_file() and not (target / "config").is_symlink():
+            result[destination] = "existing"
+        else:
+            raise ExportError("Неизвестные данные вместо репозитория тома")
+    return result
+
+
+def prepare_volume_repositories(expected: dict[str, str], volume: dict) -> None:
+    """Создать только родительский каталог volumes на подтверждённом носителе."""
+    name, _root, _device, _consumers = _volume_contract(volume)
+    for destination in expected:
+        mount, _fs = ALLOWED_MOUNTS[destination]
+        base = mount / "volumes"
+        target = base / name
+        if base.is_symlink() or target.is_symlink():
+            raise ExportError("Недоверенный путь для Restic")
+        base.mkdir(mode=0o700, exist_ok=True)
+        if not base.is_dir():
+            raise ExportError("Не удалось подготовить каталог Restic")
+
+
+def stream_volume(volume: dict) -> None:
+    """Согласовать все LXC; снять тонкий snapshot; возобновить LXC до чтения."""
+    import secrets
+    name, root, device, declared = _volume_contract(volume)
+    _thin_pool_ready()
+    consumers = _consumers_on_host(root, declared)
+    with _consistent_window():
+        with tempfile.TemporaryDirectory(prefix="infra-volume-", dir="/run") as tmp:
+            stage = Path(tmp)
+            stage.chmod(0o700)
+            target = stage / "data"
+            target.mkdir(mode=0o700)
+            snapshot = Path("/dev/pve") / ("imbackup_" + name + "_" + secrets.token_hex(5))
+            created = False
+            mounted = False
+            stopped: list[int] = []
+            try:
+                try:
+                    for vmid in consumers:
+                        status = subprocess.run(
+                            ["pct", "status", str(vmid)], text=True,
+                            capture_output=True, check=False, timeout=20,
+                        )
+                        if status.returncode:
+                            raise ExportError("Не удалось проверить состояние гостя")
+                        if status.stdout.strip() == "status: running":
+                            # Даже при ошибке shutdown гость может уже остановиться.
+                            stopped.append(vmid)
+                            result = subprocess.run(
+                                ["pct", "shutdown", str(vmid), "--timeout", "40"],
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                check=False, timeout=60,
+                            )
+                            if result.returncode:
+                                raise ExportError("Не удалось согласованно остановить гостя")
+                        elif status.stdout.strip() != "status: stopped":
+                            raise ExportError("Неизвестное состояние LXC")
+                    _thin_pool_ready()
+                    result = subprocess.run(
+                        ["lvcreate", "--snapshot", "--name", snapshot.name, str(device)],
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                        check=False, timeout=60,
+                    )
+                    if result.returncode:
+                        raise ExportError("Создание временного LVM snapshot не удалось")
+                    created = True
+                finally:
+                    failed = False
+                    for vmid in reversed(stopped):
+                        try:
+                            state = subprocess.run(
+                                ["pct", "status", str(vmid)], text=True,
+                                capture_output=True, check=False, timeout=20,
+                            )
+                            if state.returncode or state.stdout.strip() not in (
+                                "status: running", "status: stopped",
+                            ):
+                                failed = True
+                                continue
+                            if state.stdout.strip() == "status: running":
+                                continue
+                            resumed = subprocess.run(
+                                ["pct", "start", str(vmid)], stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL, check=False, timeout=90,
+                            )
+                            failed = failed or resumed.returncode != 0
+                        except subprocess.TimeoutExpired:
+                            failed = True
+                    if failed:
+                        raise ExportError("После снимка не удалось восстановить работу LXC")
+                result = subprocess.run(
+                    ["mount", "-t", "ext4", "-o", "ro,noload", str(snapshot), str(target)],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    check=False, timeout=40,
+                )
+                if result.returncode:
+                    raise ExportError("Снимок тома не удалось подключить только для чтения")
+                mounted = True
+                result = subprocess.run(
+                    ["tar", "--create", "--file", "-", "--numeric-owner",
+                     "--xattrs", "--acls", "--one-file-system", "-C", str(target), "."],
+                    stdout=sys.stdout.buffer, stderr=subprocess.DEVNULL,
+                    check=False, timeout=7200,
+                )
+                if result.returncode:
+                    raise ExportError("Поток резервируемого тома оборвался")
+            finally:
+                cleanup_error = None
+                if mounted:
+                    unmount = subprocess.run(
+                        ["umount", str(target)], stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL, check=False, timeout=90,
+                    )
+                    if unmount.returncode:
+                        cleanup_error = "Не удалось отключить временный снимок"
+                if created and cleanup_error is None:
+                    removed = subprocess.run(
+                        ["lvremove", "--yes", "--force", str(snapshot)],
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                        check=False, timeout=120,
+                    )
+                    if removed.returncode:
+                        cleanup_error = "Не удалось удалить временный LVM snapshot"
+                if cleanup_error:
+                    raise ExportError(cleanup_error)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("command", choices=("check", "export", "password", "password-existing", "repositories", "vm100"))
+    parser.add_argument("command", choices=("check", "export", "password", "password-existing", "repositories", "vm100", "volume-repositories", "volume-prepare", "volume"))
     args = parser.parse_args()
     if os.geteuid() != 0:
         parser.error("Нужны полномочия PVE-only root")
@@ -295,8 +524,17 @@ def main() -> int:
         expected = json.load(sys.stdin)
         if not isinstance(expected, dict):
             raise ExportError("Неверное описание носителей")
+        volume = None
+        if args.command in ("volume-repositories", "volume-prepare", "volume"):
+            if set(expected) != {"destinations", "volume"}:
+                raise ExportError("Неверное описание задания тома")
+            volume = expected["volume"]
+            expected = expected["destinations"]
         check_destinations(expected)
-        check_sources()
+        # Томам не требуется доступ к OpenBao/Raft: повреждение ключей
+        # аварийного комплекта не должно блокировать независимые данные 310.
+        if args.command not in ("volume-repositories", "volume-prepare", "volume"):
+            check_sources()
         if args.command == "password":
             sys.stdout.buffer.write(password_bytes())
         elif args.command == "password-existing":
@@ -310,6 +548,12 @@ def main() -> int:
             print(json.dumps(repositories_state(expected)))
         elif args.command == "vm100":
             stream_vm100()
+        elif args.command == "volume-repositories":
+            print(json.dumps(volume_repositories(expected, volume)))
+        elif args.command == "volume-prepare":
+            prepare_volume_repositories(expected, volume)
+        elif args.command == "volume":
+            stream_volume(volume)
         else:
             stream_backup()
         return 0

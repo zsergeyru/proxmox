@@ -211,7 +211,10 @@ web_gateway:
     # Ключи создаются однократно, затем восстанавливаются только с mp0.
     local_directory: /var/lib/web-gateway/secrets
 
+# Для универсального резервирования постоянного тома: перед LVM snapshot
+# остановить всех работающих LXC-потребителей и сразу возобновить их.
 persistence:
+  backup_consistency: offline_lxc
   backup_required:
     # Один каталог содержит все уникальные данные на подключении mp0:
     # SQLite Authelia, 2FA, сертификаты и изменения из административной панели.

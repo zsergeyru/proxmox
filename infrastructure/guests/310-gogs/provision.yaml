@@ -68,7 +68,10 @@ gogs:
     allow_registration: false
     allow_reverse_proxy_authentication: false
 
+# Для универсального резервирования постоянного тома: перед LVM snapshot
+# остановить всех работающих LXC-потребителей и сразу возобновить их.
 persistence:
+  backup_consistency: offline_lxc
   backup_required:
     - /var/lib/gogs
   reproducible:
