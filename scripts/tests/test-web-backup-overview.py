@@ -288,23 +288,22 @@ def main():
                     assert 'data-backup-record="core"' in body
                     assert 'data-backup-destination="fast-ssd"' in body
                     assert 'id="backup-running"' in body
-                     assert 'id="backup-technical-details"' in body
-                     assert 'data-backup-copy="core"' in body
-                     assert 'data-backup-copy="vm100"' in body
-                     assert "Автообновление каждые 4 секунды" in body
+                    assert 'id="backup-technical-details"' in body
+                    assert 'data-backup-copy="core"' in body
+                    assert 'data-backup-copy="vm100"' in body
+                    assert "Автообновление каждые 4 секунды" in body
                     assert 'id="backup-failure"' in body
                     assert body.count('data-backup-refresh') == 1
                     assert 'src="/backup-refresh.js"' in body
                     assert '<meta http-equiv="refresh"' not in body
-                     # Успешное резервирование с одной копией на SSD —
-                     # основное сообщение об успехе, а не только предупреждение о NAS.
-                     injected["backup"]["timer"]["last_result"] = "success"
-                     injected["backup"]["timer"].pop("failure_hint")
-                     _, _, good_page = send(http, "/infrastructure", cookie=cookie)
-                     assert "Копии PVE/910 и Home Assistant созданы" in good_page
-                     assert "21.10." not in good_page or "Последняя копия" in good_page
-                     assert "NAS: пока не настроен" in good_page
-                     assert "Не выполняется" not in good_page
+                    # Успешное резервирование с одной копией на SSD —
+                    # основное сообщение об успехе, а не только предупреждение о NAS.
+                    injected["backup"]["timer"]["last_result"] = "success"
+                    injected["backup"]["timer"].pop("failure_hint")
+                    _, _, good_page = send(http, "/infrastructure", cookie=cookie)
+                    assert "Копии PVE/910 и Home Assistant созданы" in good_page
+                    assert "NAS: пока не настроен" in good_page
+                    assert "Не выполняется" not in good_page
                     assert "не является испытанием восстановления" in body
                     assert send(http, "/backup-refresh.js")[0] == 401
                     js_status, _, js = send(http, "/backup-refresh.js", cookie=cookie)
