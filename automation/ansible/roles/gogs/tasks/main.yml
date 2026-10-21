@@ -8,6 +8,8 @@
       - provision.gogs.paths.data == provision.gogs.storage.required_mount
       - provision.gogs.image is match('^docker.io/gogs/gogs@sha256:[a-f0-9]{64}$')
       - provision.gogs.network.ssh_public == false
+      - provision.gogs.network.ssh_port | int == 2222
+      - provision.gogs.network.ssh_container_port | int == 22
       - provision.gogs.network.public_url == 'https://git.zsergey.ru/'
       - provision.gogs.access.allow_reverse_proxy_authentication == false
     fail_msg: "310: некорректное описание Gogs"
@@ -22,7 +24,8 @@
   # Отсутствующее подключение нельзя заменять каталогом на системном диске.
 
 # Общая подготовка pve_storage назначает корню каталога UID root гостя.
-# Gogs edge работает от UID/GID 1000, поэтому до запуска возвращаем права.
+# Исходный Docker Gogs использует пользователя git с UID/GID 1000.
+# Перед запуском возвращаем владельцу доступ к корню тома.
 - name: Открыть владельцу Gogs доступ к корню подключённого тома
   ansible.builtin.file:
     path: "{{ provision.gogs.paths.data }}"
