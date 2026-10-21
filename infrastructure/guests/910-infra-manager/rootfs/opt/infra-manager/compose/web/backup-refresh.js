@@ -60,7 +60,7 @@
     if (!watching || pendingTimer !== null || document.visibilityState === "hidden") return;
     pendingTimer = setTimeout(() => {
       pendingTimer = null;
-      void refresh();
+      return refresh();
     }, POLL_MS);
   };
   const displayTime = (node, raw) => {
