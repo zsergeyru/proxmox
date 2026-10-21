@@ -70,8 +70,10 @@ def _atomic(path: Path, content: bytes) -> None:
 def _command(args: list[str]) -> None:
     result = subprocess.run(args, capture_output=True, check=False, timeout=30)
     if result.returncode:
-        # Вывод Caddy может содержать внутренние адреса; не показываем его через API.
-        raise RuntimeError("Caddy отклонил настройки или не ответил: " + args[3])
+        # Не раскрывать stderr Caddy через API: он может содержать
+        # внутренние адреса и данные конфигурации. Показываем лишь этап.
+        stage = args[4] if len(args) > 4 and args[4] in {"validate", "reload"} else "command"
+        raise RuntimeError("Caddy отклонил настройки на этапе " + stage)
 
 
 DOMAIN = re.compile(r"(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+zsergey\.ru\Z")
@@ -240,8 +242,11 @@ def apply_route(state: Path, config: Path, action: str, domain: str, *,
             _atomic(proposed_main, base.replace(
                 "import sites.generated.caddy", "import .candidate-routes.caddy"
             ).encode())
+            # Временный .candidate-Caddyfile не распознаётся Caddy
+            # автоматически как Caddyfile: без --adapter он читается как JSON.
             _command(["docker", "exec", CONTAINER, "caddy", "validate",
-                      "--config", "/etc/caddy/.candidate-Caddyfile"])
+                      "--config", "/etc/caddy/.candidate-Caddyfile",
+                      "--adapter", "caddyfile"])
             if yaml_bytes == original_stored and candidate == original_generated:
                 return
             try:

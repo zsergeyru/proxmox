@@ -78,8 +78,29 @@ def test():
                 manager.change_route(state, config, "ai.zsergey.ru", True, "private")
                 assert refresh.call_count == 1
                 assert run.call_count == 2
-                assert run.call_args_list[0].args[0][4] == "validate"
+                validate_command = run.call_args_list[0].args[0]
+                assert validate_command[4] == "validate"
+                assert validate_command[5:] == [
+                    "--config", "/etc/caddy/.candidate-Caddyfile",
+                    "--adapter", "caddyfile",
+                ], "Временный Caddyfile должен проверяться с явным адаптером"
                 assert run.call_args_list[1].args[0][4] == "reload"
+            # При отказе Caddy наружу выходит только этап, но не stderr.
+            with patch.object(
+                manager.subprocess, "run",
+                return_value=SimpleNamespace(returncode=1, stderr=b"token=private"),
+            ):
+                try:
+                    manager._command([
+                        "docker", "exec", manager.CONTAINER, "caddy",
+                        "validate", "--config", "/etc/caddy/.candidate-Caddyfile",
+                        "--adapter", "caddyfile",
+                    ])
+                except RuntimeError as exc:
+                    assert "validate" in str(exc)
+                    assert "private" not in str(exc)
+                else:
+                    raise AssertionError("Ошибка Caddy должна быть обнаружена")
             updated = yaml.safe_load(routes.read_text())
             assert next(row for row in updated if row["domain"] == "ai.zsergey.ru")["enabled"]
             assert "ai.zsergey.ru" in active.read_text()
