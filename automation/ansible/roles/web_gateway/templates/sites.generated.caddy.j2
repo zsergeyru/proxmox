@@ -10,7 +10,7 @@
     # На вложенных адресах (например /user/sign-in) браузер запрашивает
     # /user/assets/* вместо /assets/*. Исправляем только файлы входной
     # сборки SPA, не перенаправляя Git API, репозитории и прочие пути.
-    @gogs_nested_spa_assets path_regexp gogs_nested_spa_assets ^/(?:[^/]+/)+assets/(index-[a-zA-Z0-9_-]+\\.(?:js|css))$
+    @gogs_nested_spa_assets path_regexp gogs_nested_spa_assets ^/(?:[^/]+/)+assets/(index-[a-zA-Z0-9_-]+\.(?:js|css))$
     rewrite @gogs_nested_spa_assets /assets/{re.gogs_nested_spa_assets.1}
     # Gogs обрабатывает Basic/токен Git HTTP сам. Не допускать
     # подмены пользователя заголовком от внешнего клиента.
