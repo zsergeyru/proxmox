@@ -33,6 +33,19 @@ destinations:
     # Сервер и путь NFS необходимо подтвердить на NAS отдельно.
     source: null
     repository: pve-infra-core
+# Универсальное резервирование существующих PVE LVM-томов.
+# Характеристики и пути брать только из storage.yaml. Согласованность
+# приложений объявлена у потребителей в provision.yaml.
+volume_backups:
+  schema_version: 1
+  defaults:
+    enabled: true
+    schedule: daily
+    destinations: [fast-ssd, nas-backup]
+    method: lvm_snapshot
+  volumes:
+    - id: infra_state
+    - id: gogs_data
 guests:
   # Резервная копия самой VM 100 отдельно от состояния 910.
   - vmid: 100
