@@ -792,10 +792,12 @@ def _backup_overview_page(csrf: str, notice: str = "") -> bytes:
         + ('<div class="notice" data-tone="warning" role="alert">'
            + e(notice) + '</div>' if notice else '')
         + ('<div class="notice" data-tone="danger" role="alert">'
-           'Последнее резервирование завершилось ошибкой. '
-           'В терминале PVE посмотрите журнал гостя 910: '
+           '<strong>Последнее резервирование не выполнено.</strong> '
+           + e(timer.get("failure_hint") or
+               "Системная служба завершилась с ошибкой; подробности в журнале.") +
+           '<p>Журнал на PVE: '
            '<code>pct exec 910 -- journalctl -u infra-manager-backup.service -n 40 --no-pager</code>. '
-           'Не публикуйте секреты из журнала.</div>' if last_failed else '')
+           'Не публикуйте секреты из журнала.</p></div>' if last_failed else '')
         + '<p>Проверенные ранее записи не подтверждают, что SSD/NAS сейчас подключены '
         'или что восстановление испытано. Даже активное PVE storage не '
         'является проверкой идентичности физического носителя.</p>'
