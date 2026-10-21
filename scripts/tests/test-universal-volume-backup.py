@@ -84,7 +84,8 @@ def test_host_guards() -> None:
         if cmd[:2] == ["pct", "list"]:
             return SimpleNamespace(returncode=0, stdout="VMID Status Name\n310 running gogs\n410 running ai\n")
         if cmd[:2] == ["pct", "config"]:
-            path = "/mnt/bindmounts/gogs-data/310-gogs"
+            path = ("/mnt/bindmounts/gogs-data/310-gogs" if cmd[2] == "310"
+                    else "/mnt/bindmounts/other/410")
             return SimpleNamespace(
                 returncode=0, stdout=f"mp0: {path},mp=/var/lib/gogs\n"
             )
