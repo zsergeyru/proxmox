@@ -253,6 +253,47 @@ def check_safe_system_error_diagnostics() -> None:
     if "[ДИАГНОСТИКА]" not in err.getvalue():
         fail("Даже quiet не должен скрывать техническую причину ошибки")
 
+    # OpenTofu должен назвать точный этап, не раскрывая ни stderr,
+    # ни абсолютные пути, ни возможные секреты в выводе провайдера.
+    cases = (
+        (
+            ["tofu", "-chdir=/private/PASS-MARKER", "init", "-no-color"],
+            "Error: Permission denied: /private/PASS-MARKER",
+            "этап init",
+            "Отказано в доступе",
+        ),
+        (
+            ["tofu", "-chdir=/private/PASS-MARKER", "state", "pull"],
+            "Error: Error acquiring the state lock: PASS-MARKER",
+            "этап state pull",
+            "блокировку состояния",
+        ),
+        (
+            ["tofu", "-chdir=/private/PASS-MARKER", "plan"],
+            "Error: PASS-MARKER",
+            "этап plan",
+            "Причина не распознана",
+        ),
+        (
+            ["tofu", "-chdir=/private/PASS-MARKER", "apply"],
+            "Error: backend configuration changed: PASS-MARKER",
+            "этап apply",
+            "согласования конфигурации backend",
+        ),
+    )
+    for argv, stderr, stage, reason in cases:
+        stream = io.StringIO()
+        Console(out=io.StringIO(), err=stream).failure(
+            CommandError(argv, 1, stderr)
+        )
+        printed = stream.getvalue()
+        if stage not in printed or reason not in printed:
+            fail(f"OpenTofu: не показана безопасная диагностика: {stage}")
+        if "PASS-MARKER" in printed or "/private/" in printed:
+            fail("Диагностика OpenTofu раскрыла необработанный вывод или путь")
+        if "программа tofu" not in printed or "код возврата 1" not in printed:
+            fail("OpenTofu: потеряна техническая информация об отказе")
+
 
 def check_log_levels() -> None:
     old_level = os.environ.get("INFRA_LOG_LEVEL")
