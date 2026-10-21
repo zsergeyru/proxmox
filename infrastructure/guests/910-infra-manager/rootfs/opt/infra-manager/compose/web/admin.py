@@ -823,6 +823,12 @@ def _backup_overview_page(csrf: str, notice: str = "") -> bytes:
     complete = all(
         item.get("state") == "verified" for item in (core, vm100, full)
     )
+    volume_jobs = backup.get("volume_jobs", [])
+    volume_protected = sum(
+        records.get(job.get("record_key"), {}).get("state") in {"verified", "partial"}
+        for job in volume_jobs if isinstance(job, dict)
+    )
+    volumes_incomplete = volume_protected < len(volume_jobs)
     if running:
         headline = "Резервирование выполняется"
         headline_tone = "info"
@@ -830,8 +836,9 @@ def _backup_overview_page(csrf: str, notice: str = "") -> bytes:
         headline = "Последний запуск завершился с ошибкой"
         headline_tone = "danger"
     elif complete:
-        headline = "Копии PVE/910 и Home Assistant созданы"
-        headline_tone = "success"
+        headline = ("Копии PVE/910 и Home Assistant созданы"
+                    + ("; не все постоянные тома защищены" if volumes_incomplete else ""))
+        headline_tone = "warning" if volumes_incomplete else "success"
     elif core.get("state") == "verified":
         headline = "Копия PVE/910 создана; Home Assistant ещё не подтверждён"
         headline_tone = "warning"
