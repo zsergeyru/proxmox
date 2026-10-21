@@ -65,6 +65,11 @@ def main() -> int:
         parser.error("нужно выбрать гостя или передать VMID")
 
     try:
+        # Docker-образ может запускаться с WORKDIR в root-owned Git checkout,
+        # недоступном UID 1001. OpenTofu проверяет текущий каталог до -chdir
+        # и тогда падает с "Failed to get current working directory".
+        # Снимок проекта заранее передан этому пользователю (0700).
+        os.chdir(REPO_ROOT)
         prepare_operation_environment()
         return run_guest_operation(
             REPO_ROOT,
