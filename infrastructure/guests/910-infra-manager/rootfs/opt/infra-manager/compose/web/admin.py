@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import html
 import json
 import os
@@ -13,6 +14,7 @@ from pathlib import Path
 import re
 import secrets
 import socket
+import stat
 import ssl
 import threading
 import time
@@ -32,6 +34,8 @@ SOCKET = os.environ.get("INFRA_WEB_SOCKET", "/run/infra-web/operations.sock")
 OPENBAO = "http://127.0.0.1:8200"
 COOKIE = "infra_session"
 SESSION_TTL = 3600
+REMEMBER_TTL = 30 * 24 * 3600
+SESSION_DIR = Path("/var/lib/infra-web/sessions")
 SESSION_LIMIT = 60
 MAX_BODY = 8192
 REQ_ID = re.compile(r"^[0-9a-f]{32}$")
@@ -71,6 +75,102 @@ def _authenticate(username: str, password: str) -> bool:
         return False
 
 
+def _session_directory() -> Path:
+    """Отдельный приватный том: никаких сессий в cookie, Git или Docker layer."""
+    folder = SESSION_DIR
+    info = folder.lstat()
+    if (not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid()
+            or stat.S_IMODE(info.st_mode) != 0o700):
+        raise ValueError("Постоянное хранилище сеансов недоверенное")
+    return folder
+
+
+def _session_path(token: str) -> Path:
+    """Имя файла — только SHA-256 случайного cookie, не сам bearer token."""
+    if not re.fullmatch(r"[A-Za-z0-9_-]{32,128}", token):
+        raise ValueError("Недопустимый идентификатор сессии")
+    return _session_directory() / (hashlib.sha256(token.encode("ascii")).hexdigest() + ".json")
+
+
+def _stored_session(token: str) -> dict | None:
+    try:
+        path = _session_path(token)
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+        try:
+            info = os.fstat(fd)
+            if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid()
+                    or stat.S_IMODE(info.st_mode) != 0o600 or info.st_size > 512):
+                return None
+            raw = os.read(fd, 513)
+        finally:
+            os.close(fd)
+        if len(raw) > 512:
+            return None
+        data = json.loads(raw)
+        if (not isinstance(data, dict) or set(data) != {"version", "csrf", "expires"}
+                or data["version"] != 1
+                or not isinstance(data["csrf"], str)
+                or not re.fullmatch(r"[A-Za-z0-9_-]{32,128}", data["csrf"])
+                or type(data["expires"]) is not int):
+            return None
+        if data["expires"] <= int(time.time()):
+            path.unlink(missing_ok=True)
+            return None
+        # Сервер хранит только CSRF/expiry; OpenBao-token не сохраняется.
+        return {"csrf": data["csrf"], "expires": data["expires"], "remember": True}
+    except (OSError, ValueError, TypeError, UnicodeError, json.JSONDecodeError):
+        return None
+
+
+def _write_persistent_session(token: str, session: dict) -> None:
+    path = _session_path(token)
+    folder = path.parent
+    # Ограничение числа долгих сеансов и уборка протухших файлов.
+    records = list(folder.iterdir())
+    if len(records) >= SESSION_LIMIT:
+        for entry in records:
+            if re.fullmatch(r"[0-9a-f]{64}\.json", entry.name):
+                try:
+                    fd = os.open(entry, os.O_RDONLY | os.O_NOFOLLOW)
+                    try:
+                        info = os.fstat(fd)
+                        if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid()
+                                or info.st_size > 512):
+                            continue
+                        record = json.loads(os.read(fd, 513))
+                    finally:
+                        os.close(fd)
+                    if type(record.get("expires")) is int and record["expires"] <= int(time.time()):
+                        entry.unlink(missing_ok=True)
+                except (OSError, ValueError, TypeError):
+                    continue
+        if len(list(folder.iterdir())) >= SESSION_LIMIT:
+            raise ValueError("Превышен предел запомненных устройств")
+    record = {"version": 1, "csrf": session["csrf"], "expires": session["expires"]}
+    payload = json.dumps(record, separators=(",", ":")).encode()
+    temporary = folder / ("." + secrets.token_hex(16) + ".tmp")
+    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    try:
+        with os.fdopen(fd, "wb") as target:
+            target.write(payload)
+            target.flush()
+            os.fsync(target.fileno())
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _revoke_session(token: str, session: dict) -> None:
+    with guard:
+        sessions.pop(token, None)
+    if session.get("remember") is True:
+        try:
+            _session_path(token).unlink(missing_ok=True)
+        except (OSError, ValueError):
+            # Сбой отзыва нельзя замаскировать успешным выходом.
+            raise ValueError("Не удалось отозвать долгую сессию")
+
+
 def _session(cookie: str | None) -> tuple[str, dict] | None:
     if not cookie or len(cookie) > 1024:
         return None
@@ -82,25 +182,36 @@ def _session(cookie: str | None) -> tuple[str, dict] | None:
     if COOKIE not in parsed:
         return None
     token = parsed[COOKIE].value
+    if not re.fullmatch(r"[A-Za-z0-9_-]{32,128}", token):
+        return None
     with guard:
         session = sessions.get(token)
         if session and session["expires"] > time.monotonic():
             return token, session
         sessions.pop(token, None)
-    return None
+    saved = _stored_session(token)
+    return (token, saved) if saved else None
 
 
-def _new_session() -> tuple[str, dict]:
-    now = time.monotonic()
+def _new_session(*, remember: bool = False) -> tuple[str, dict]:
     token = secrets.token_urlsafe(32)
-    session = {"csrf": secrets.token_urlsafe(32), "expires": now + SESSION_TTL}
-    with guard:
-        for key, value in tuple(sessions.items()):
-            if value["expires"] <= now:
-                sessions.pop(key, None)
-        if len(sessions) >= SESSION_LIMIT:
-            raise ValueError("Превышен предел числа активных входов")
-        sessions[token] = session
+    session = {"csrf": secrets.token_urlsafe(32)}
+    if remember:
+        session.update(expires=int(time.time()) + REMEMBER_TTL, remember=True)
+        try:
+            _write_persistent_session(token, session)
+        except (OSError, ValueError):
+            raise ValueError("Не удалось сохранить длительный вход") from None
+    else:
+        session.update(expires=time.monotonic() + SESSION_TTL, remember=False)
+        with guard:
+            now = time.monotonic()
+            for key, value in tuple(sessions.items()):
+                if value["expires"] <= now:
+                    sessions.pop(key, None)
+            if len(sessions) >= SESSION_LIMIT:
+                raise ValueError("Превышен предел числа активных входов")
+            sessions[token] = session
     return token, session
 
 
@@ -539,6 +650,20 @@ BACKUP_OVERALL = {
 }
 
 
+BACKUP_REQUEST_ERRORS = {
+    "permission_denied": "Нет прав для ручного запуска резервирования. Проверьте access.yaml.",
+    "media_not_ready": "SSD и NAS ещё не подтверждены. Откройте «Подготовка SSD» или проверьте NAS.",
+    "already_running": "Резервирование уже идёт. Повторный запуск не требуется.",
+    "systemd_unavailable": "Системная служба резервирования временно недоступна.",
+    "service_missing": "Служба резервирования не установлена. Проверьте развёртывание 910.",
+    "start_failed": "systemd не смог запустить резервирование. Нужен журнал службы 910.",
+}
+
+
+class BackupRequestError(ValueError):
+    """Разрешённый для отображения оператору код отказа, без сырых подробностей."""
+
+
 def _backup_request(kind: str) -> dict:
     """Системный посредник возвращает только безопасные агрегированные поля."""
     if kind not in {"backup-overview", "backup-run"}:
@@ -555,7 +680,12 @@ def _backup_request(kind: str) -> dict:
     if len(raw) > 65536 or not raw.endswith(b"\n"):
         raise ValueError("Посредник не вернул ограниченный ответ резервирования")
     data = json.loads(raw)
-    if not isinstance(data, dict) or data.get("accepted") is not True:
+    if not isinstance(data, dict):
+        raise ValueError("Неизвестный ответ посредника")
+    if data.get("accepted") is not True:
+        code = data.get("code")
+        if kind == "backup-run" and isinstance(code, str) and code in BACKUP_REQUEST_ERRORS:
+            raise BackupRequestError(BACKUP_REQUEST_ERRORS[code])
         raise ValueError("Посредник отклонил запрос резервирования")
     if kind == "backup-overview" and not isinstance(data.get("overview"), dict):
         raise ValueError("Некорректное состояние резервирования")
@@ -644,6 +774,7 @@ def _backup_overview_page(csrf: str, notice: str = "") -> bytes:
         "unknown": "Не удалось проверить",
     }.get(timer.get("service"), "Не удалось проверить")
     restored = backup.get("restore_tested") is True
+    last_failed = timer.get("last_result") in {"exit-code", "timeout", "signal"}
     summary = BACKUP_OVERALL.get(backup.get("overall"), "Неизвестное состояние копий")
     token = html.escape(csrf, quote=True)
     start_link = (
@@ -658,7 +789,15 @@ def _backup_overview_page(csrf: str, notice: str = "") -> bytes:
             "success" if backup.get("overall") == "two_recorded_copies"
             else "warning"
         ) + '" role="status"><strong>' + e(summary) + '</strong></div>'
-        + ('<p>' + e(notice) + '</p>' if notice else '')
+        + ('<div class="notice" data-tone="warning" role="alert">'
+           + e(notice) + '</div>' if notice else '')
+        + ('<div class="notice" data-tone="danger" role="alert">'
+           '<strong>Последнее резервирование не выполнено.</strong> '
+           + e(timer.get("failure_hint") or
+               "Системная служба завершилась с ошибкой; подробности в журнале.") +
+           '<p>Журнал на PVE: '
+           '<code>pct exec 910 -- journalctl -u infra-manager-backup.service -n 40 --no-pager</code>. '
+           'Не публикуйте секреты из журнала.</p></div>' if last_failed else '')
         + '<p>Проверенные ранее записи не подтверждают, что SSD/NAS сейчас подключены '
         'или что восстановление испытано. Даже активное PVE storage не '
         'является проверкой идентичности физического носителя.</p>'
@@ -1143,6 +1282,10 @@ def _login() -> bytes:
         '<label>Логин <input name="username" autocomplete="username" required></label>'
         '<label>Пароль <input type="password" name="password" '
         'autocomplete="current-password" required></label>'
+        '<label class="remember-option"><input type="checkbox" name="remember" value="30d">'
+        'Запомнить вход на 30 дней на этом устройстве</label>'
+        '<p class="muted">На общем компьютере не включай запоминание. '
+        'Выход из панели сразу отзывает этот вход.</p>'
         '<button>Войти</button></form>'
         + _public_versions(),
         page="login", authenticated=False,
@@ -1372,6 +1515,14 @@ class Handler(BaseHTTPRequestHandler):
             self._reply(HTTPStatus.BAD_REQUEST, b"invalid form\n")
             return
         if path == "/login":
+            if set(form) not in ({"username", "password"},
+                                  {"username", "password", "remember"}):
+                self._reply(HTTPStatus.BAD_REQUEST, b"invalid login form\n")
+                return
+            if "remember" in form and form["remember"] != "30d":
+                self._reply(HTTPStatus.BAD_REQUEST, b"invalid remember option\n")
+                return
+            remember = form.get("remember") == "30d"
             ip = self.client_address[0]
             if not _allow_attempt(ip):
                 self._reply(HTTPStatus.TOO_MANY_REQUESTS, b"attempt limit\n")
@@ -1382,14 +1533,15 @@ class Handler(BaseHTTPRequestHandler):
             with guard:
                 attempts.pop(ip, None)
             try:
-                token, session = _new_session()
+                token, session = _new_session(remember=remember)
             except ValueError:
                 self._reply(HTTPStatus.SERVICE_UNAVAILABLE, b"session limit\n")
                 return
             # Post/Redirect/Get: при F5 браузер не отправит пароль повторно.
             self._reply(
                 HTTPStatus.SEE_OTHER, b"",
-                cookie=f"{COOKIE}={token}; HttpOnly; Secure; SameSite=Strict; Path=/",
+                cookie=(f"{COOKIE}={token}; HttpOnly; Secure; SameSite=Strict; Path=/"
+                        + (f"; Max-Age={REMEMBER_TTL}" if remember else "")),
                 location="/",
             )
             return
@@ -1402,8 +1554,11 @@ class Handler(BaseHTTPRequestHandler):
             self._reply(HTTPStatus.FORBIDDEN, b"csrf rejected\n")
             return
         if path == "/logout":
-            with guard:
-                sessions.pop(token, None)
+            try:
+                _revoke_session(token, session)
+            except ValueError:
+                self._reply(HTTPStatus.SERVICE_UNAVAILABLE, b"logout temporarily unavailable\n")
+                return
             # Тот же PRG после выхода; защищённую форму нельзя повторить F5.
             self._reply(
                 HTTPStatus.SEE_OTHER, b"",
@@ -1417,10 +1572,16 @@ class Handler(BaseHTTPRequestHandler):
                 return
             try:
                 _backup_request("backup-run")
+            except BackupRequestError as exc:
+                self._reply(HTTPStatus.CONFLICT, _backup_overview_page(
+                    session["csrf"], str(exc),
+                ))
+                return
             except (OSError, ValueError, TimeoutError):
-                self._reply(HTTPStatus.BAD_REQUEST, _backup_overview_page(
+                self._reply(HTTPStatus.SERVICE_UNAVAILABLE, _backup_overview_page(
                     session["csrf"],
-                    "Резервирование не принято. Проверьте настройки и состояние службы.",
+                    "Не удалось обратиться к системному посреднику. "
+                    "Проверьте infra-manager status 910.",
                 ))
                 return
             self._reply(HTTPStatus.SEE_OTHER, b"", location="/infrastructure?started=1")

@@ -449,8 +449,23 @@ def _dispatch_guests(request: dict) -> dict:
 
 
 
+BACKUP_REFUSALS = {
+    "permission_denied": "Нет разрешения на запуск резервирования для гостя 910",
+    "media_not_ready": "SSD или NAS не подтверждены для резервирования. Проверьте подготовку SSD и настройки NAS",
+    "already_running": "Резервирование уже выполняется. Дождитесь завершения текущего задания",
+    "systemd_unavailable": "Не удалось проверить системную службу резервирования",
+    "service_missing": "Служба infra-manager-backup.service отсутствует или недоступна. Требуется проверка deploy 910",
+    "start_failed": "systemd отказал в запуске резервирования. Проверьте журнал службы на госте 910",
+}
+
+
+def _backup_refusal(code: str) -> dict:
+    """Только известные безопасные причины, без stderr и секретов из PVE."""
+    return {"accepted": False, "code": code, "message": BACKUP_REFUSALS[code]}
+
+
 def _dispatch_backup(request: dict) -> dict:
-    """Строго типизированный read-only status или запуск уже имеющейся systemd-службы."""
+    """Чтение статуса и явный запуск утверждённого systemd unit."""
     if (not isinstance(request, dict)
             or set(request) != {"kind", "vmid", "request_id"}
             or request.get("kind") not in {"backup-overview", "backup-run"}
@@ -460,33 +475,64 @@ def _dispatch_backup(request: dict) -> dict:
         raise InfraManagerError("Некорректный запрос резервирования")
     owner = find_guest_by_role(PATHS.repo_root, SETTINGS.infra_manager_role)
     kind = request["kind"]
-    authorize_action("status" if kind == "backup-overview" else "repair", owner.vmid)
     if kind == "backup-overview":
+        authorize_action("status", owner.vmid)
         from .backup_overview import snapshot
         return {"accepted": True, "overview": snapshot()}
-    # Никаких путей/аргументов из браузера: проверяет тот же controller,
-    # который используется штатным timer. Секреты остаются внутри 910.
+    try:
+        authorize_action("repair", owner.vmid)
+    except InfraManagerError:
+        return _backup_refusal("permission_denied")
     from .backup_controller import policy
-    _description, confirmed = policy()
+    try:
+        _description, confirmed = policy()
+    except (InfraManagerError, OSError, ValueError):
+        return _backup_refusal("media_not_ready")
     if not confirmed:
-        raise InfraManagerError("Нет подтверждённых мест для резервирования")
-    busy = run(
-        ["timeout", "3s", "systemctl", "is-active", "--quiet",
-         "infra-manager-backup.service"],
-        capture_output=True, check=False,
-    )
+        return _backup_refusal("media_not_ready")
+    try:
+        busy = run(
+            ["timeout", "3s", "systemctl", "is-active", "--quiet",
+             "infra-manager-backup.service"],
+            capture_output=True, check=False,
+        )
+    except OSError:
+        return _backup_refusal("systemd_unavailable")
     if busy.returncode == 0:
-        raise InfraManagerError("Резервирование уже выполняется")
-    started = run(
-        ["timeout", "5s", "systemctl", "start", "--no-block",
-         "infra-manager-backup.service"],
-        capture_output=True, check=False,
-    )
+        return _backup_refusal("already_running")
+    if busy.returncode not in {3, 4}:
+        return _backup_refusal("systemd_unavailable")
+    # systemctl is-active 3 также возвращает для отсутствующего unit.
+    # Проверяем unit до запуска, чтобы избежать ложного "запрос принят".
+    try:
+        loaded = run(
+            ["timeout", "3s", "systemctl", "show",
+             "infra-manager-backup.service", "--property=LoadState"],
+            capture_output=True, check=False,
+        )
+    except OSError:
+        return _backup_refusal("systemd_unavailable")
+    if loaded.returncode != 0:
+        return _backup_refusal("systemd_unavailable")
+    state = dict(
+        item.split("=", 1) for item in loaded.stdout.splitlines()
+        if item.startswith("LoadState=") and len(item) <= 80
+    ).get("LoadState")
+    if state != "loaded":
+        return _backup_refusal("service_missing")
+    try:
+        started = run(
+            ["timeout", "5s", "systemctl", "start", "--no-block",
+             "infra-manager-backup.service"],
+            capture_output=True, check=False,
+        )
+    except OSError:
+        return _backup_refusal("systemd_unavailable")
     if started.returncode:
-        raise InfraManagerError("systemd не принял запуск резервирования")
+        return _backup_refusal("start_failed")
     return {
         "accepted": True,
-        "message": "systemd принял запрос, итог проверяется отдельно",
+        "message": "systemd принял запуск. Успех копирования пока не подтверждён",
     }
 
 

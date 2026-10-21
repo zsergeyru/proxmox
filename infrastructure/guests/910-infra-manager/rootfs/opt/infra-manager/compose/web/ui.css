@@ -70,6 +70,9 @@ label{display:block;color:var(--soft);font-size:13px;font-weight:600;margin-bott
 input:not([type="hidden"]),select{max-width:100%;min-height:43px;border-radius:10px;border:1px solid #4b6079;background:#111e30;color:var(--text);padding:9px 12px}
 input:focus,select:focus{border-color:var(--accent)}
 label input,label select{display:block;width:100%;margin-top:7px}
+.remember-option{display:flex;align-items:center;gap:11px;cursor:pointer;color:var(--text);font-size:13px;margin:15px 0 9px}
+.remember-option input[type="checkbox"]{display:inline-block;flex:0 0 18px;width:18px;height:18px;min-height:18px;margin:0;accent-color:var(--accent)}
+.remember-option:focus-within{color:var(--accent)}
 .field-row{display:grid;grid-template-columns:1fr 1fr auto;align-items:end;gap:12px}
 .toolbar{display:flex;justify-content:space-between;align-items:center;gap:12px;margin:0 0 15px;flex-wrap:wrap}.toolbar input{min-width:min(100%,280px)}
 .table-wrap{overflow-x:auto;border:1px solid var(--border);border-radius:12px}

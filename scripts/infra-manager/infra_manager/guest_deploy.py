@@ -40,6 +40,7 @@ from .pve_host import (
     ensure_pve_host_storage,
     install_openbao_host_support,
     trigger_openbao_unseal,
+    ensure_backup_raft_access,
     install_recovery_host_support,
     install_backup_host_support,
     issue_openbao_machine_credentials,
@@ -578,6 +579,10 @@ def _configure_guest_os(
             # существующий OpenBao до первого запроса SSH-сертификата.
             console.info("Проверка и разблокировка OpenBao перед SSH-доступом")
             trigger_openbao_unseal(context.node)
+            # Автоматически и без ротации существующего secret_id обеспечить
+            # PVE-only AppRole для штатного резервирования 910.
+            console.info("Проверка AppRole снимка OpenBao для резервирования")
+            ensure_backup_raft_access(context.node)
 
     bootstrap_key = bootstrap_private_key
     if (

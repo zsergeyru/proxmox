@@ -121,13 +121,16 @@ def check_sources() -> int:
     for path in SOURCES:
         if path.is_symlink() or not path.exists():
             raise ExportError("Отсутствует обязательный источник резервирования")
-    for path in (
-        ROOT / "pve-only/openbao/unseal.key",
-        ROOT / "pve-only/recovery/github_proxmox_repo_ed25519",
-        ROLE, RAFT_HELPER, PVE_IDENTITY,
+    for label, path in (
+        ("unseal OpenBao", ROOT / "pve-only/openbao/unseal.key"),
+        ("аварийный GitHub-ключ", ROOT / "pve-only/recovery/github_proxmox_repo_ed25519"),
+        ("AppRole снимка OpenBao", ROLE),
+        ("помощник Raft-снимка", RAFT_HELPER),
+        ("идентичность PVE-гостя 910", PVE_IDENTITY),
     ):
         if path.is_symlink() or not path.is_file() or path.stat().st_size == 0:
-            raise ExportError("Неполное PVE-only состояние для резервирования")
+            # Только статическая метка компонента: не раскрывать значения и пути.
+            raise ExportError(f"Не подготовлен PVE-only компонент: {label}")
     _assert_no_runtime_activation()
     role = _read_json(ROLE)
     if set(role) != {"role_id", "secret_id"} or not all(

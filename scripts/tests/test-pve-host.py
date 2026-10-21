@@ -202,6 +202,13 @@ def test_openbao_host_support() -> None:
             "pve",
             "/usr/local/sbin/infra-manager-openbao-unseal",
         )
+    with patch.object(module, "_ssh") as mocked:
+        module.ensure_backup_raft_access("pve")
+        mocked.assert_called_once_with(
+            "pve",
+            "/usr/local/sbin/infra-manager-openbao-unseal",
+            "--configure-backup-access",
+        )
 
 
     with patch.object(module, "_ssh") as mocked:

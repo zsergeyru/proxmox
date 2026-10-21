@@ -74,21 +74,48 @@ def policy() -> tuple[dict, dict[str, str]]:
     return raw, verified
 
 
+PVE_CHECK_ERRORS = {
+    "unseal OpenBao": "PVE: не подготовлен unseal OpenBao",
+    "аварийный GitHub-ключ": "PVE: не подготовлен аварийный GitHub-ключ",
+    "AppRole снимка OpenBao": "PVE: не подготовлен AppRole снимка OpenBao",
+    "помощник Raft-снимка": "PVE: не подготовлен помощник Raft-снимка",
+    "идентичность PVE-гостя 910": "PVE: не подтверждена идентичность гостя 910",
+}
+
+
+def _pve_check_error(stderr: bytes) -> str:
+    """Разрешать в журнал только статические описания. Сырой stderr не показывать."""
+    if len(stderr) > 512:
+        return "PVE отверг проверку источников резервирования"
+    message = stderr.decode("utf-8", errors="replace").strip()
+    prefix = "[ОШИБКА] Архив не выдан: Не подготовлен PVE-only компонент: "
+    if message.startswith(prefix):
+        return PVE_CHECK_ERRORS.get(
+            message[len(prefix):], "PVE отверг проверку PVE-only состояния"
+        )
+    if message == "[ОШИБКА] Архив не выдан: Неполное PVE-only состояние для резервирования":
+        return "PVE: не хватает обязательного PVE-only компонента резервирования"
+    return "PVE отверг проверку источников или носителей резервирования"
+
+
 def _remote(node: str, action: str, payload: bytes = b"") -> subprocess.CompletedProcess[bytes]:
     """Ограниченный вызов PVE helper без произвольного удалённого shell."""
     # Двоичный ответ (в том числе ключ в /run) не проходит через
     # текстовый CommandRunner, который предназначен для обычных заданий.
     process = subprocess.Popen(
         _ssh_command(node, ("python3", HOST_HELPER, action)),
-        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE if action == "check" else subprocess.DEVNULL,
     )
     try:
-        output, _ = process.communicate(payload, timeout=90)
+        output, stderr = process.communicate(payload, timeout=90)
     except subprocess.TimeoutExpired as exc:
         process.kill()
         process.communicate()
         raise InfraManagerError("PVE helper превысил время ответа") from exc
     if process.returncode:
+        if action == "check":
+            raise InfraManagerError(_pve_check_error(stderr or b""))
         raise InfraManagerError(f"PVE не подтвердил действие резервирования: {action}")
     return subprocess.CompletedProcess(process.args, process.returncode, output)
 

@@ -198,9 +198,70 @@ def check_one_ssd_target_runs_full_backup() -> None:
         assert record["includes_vm100"] is True
 
 
+
+def check_pve_safe_failure_messages() -> None:
+    """Каждый отсутствующий PVE-only компонент называется без секретных данных."""
+    required = (
+        "unseal OpenBao", "аварийный GitHub-ключ",
+        "AppRole снимка OpenBao", "помощник Raft-снимка",
+        "идентичность PVE-гостя 910",
+    )
+    for label in required:
+        secret = ("[ОШИБКА] Архив не выдан: Не подготовлен PVE-only компонент: "
+                  + label + "\n").encode()
+        assert backup_controller._pve_check_error(secret) == (
+            backup_controller.PVE_CHECK_ERRORS[label]
+        )
+    assert "secret-password" not in backup_controller._pve_check_error(
+        b"[ERROR] secret-password"
+    )
+    assert "secret-password" not in backup_controller._pve_check_error(
+        b"[ERROR] secret-password" * 1000
+    )
+    assert "не хватает обязательного" in backup_controller._pve_check_error(
+        "[ОШИБКА] Архив не выдан: Неполное PVE-only состояние для резервирования".encode()
+    )
+
+    with tempfile.TemporaryDirectory() as temp:
+        root = Path(temp)
+        state = root / "state"
+        state.mkdir()
+        keys = root / "pve-only"
+        files = (
+            ("unseal OpenBao", keys / "openbao/unseal.key"),
+            ("аварийный GitHub-ключ", keys / "recovery/github_proxmox_repo_ed25519"),
+            ("AppRole снимка OpenBao", keys / "openbao/backup-access.json"),
+            ("помощник Raft-снимка", root / "helper.py"),
+            ("идентичность PVE-гостя 910", root / "identity.json"),
+        )
+        for _, path in files:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("safe-test", encoding="utf-8")
+        with (
+            patch.object(host, "ROOT", root),
+            patch.object(host, "STATE", state),
+            patch.object(host, "ROLE", files[2][1]),
+            patch.object(host, "RAFT_HELPER", files[3][1]),
+            patch.object(host, "PVE_IDENTITY", files[4][1]),
+            patch.object(host, "SOURCES", ()),
+            patch.object(Path, "is_mount", return_value=True),
+        ):
+            for label, path in files:
+                path.unlink()
+                try:
+                    host.check_sources()
+                except host.ExportError as exc:
+                    assert str(exc) == "Не подготовлен PVE-only компонент: " + label
+                    assert str(path) not in str(exc)
+                else:
+                    raise AssertionError(f"Missing {label} was accepted")
+                path.write_text("safe-test", encoding="utf-8")
+
+
 def main():
     check_policy()
     check_host_denies_untrusted()
+    check_pve_safe_failure_messages()
     check_backup_blocks_runtime_activation()
     check_run_does_not_claim_success()
     check_one_ssd_target_runs_full_backup()

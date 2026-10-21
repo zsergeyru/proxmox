@@ -71,3 +71,5 @@ services:
     volumes:
       - /etc/infra-manager/web/tls:/etc/infra-manager/web/tls:ro
       - /run/infra-web:/run/infra-web:ro
+      # Только отзывные маркеры сессий; отдельно от OpenBao и операций.
+      - /mnt/persistent-state/web-sessions:/var/lib/infra-web/sessions:rw

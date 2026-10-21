@@ -60,6 +60,34 @@ def saves(store, core=None, full=None, vm100=None):
 
 
 def main():
+    # Видимый в интерфейсе результат предыдущего systemd-задания должен
+    # классифицироваться, но не передавать сырые/секретные строки journalctl.
+    with patch.object(
+        backup_overview, "run",
+        return_value=SimpleNamespace(
+            returncode=0,
+            stdout="[ОЖИДАНИЕ] Резервирование: Нет доступного места: "
+                   "fast-ssd: PVE не подтвердил действие резервирования: check\n",
+        ),
+    ):
+        assert "PVE отверг проверку" in backup_overview._backup_failure_hint()
+    with patch.object(
+        backup_overview, "run",
+        return_value=SimpleNamespace(
+            returncode=0,
+            stdout="[ОЖИДАНИЕ] Резервирование: "
+                   "PVE: не подготовлен AppRole снимка OpenBao\n",
+        ),
+    ):
+        assert "AppRole" in backup_overview._backup_failure_hint()
+    with patch.object(
+        backup_overview, "run",
+        return_value=SimpleNamespace(
+            returncode=0,
+            stdout="[ОЖИДАНИЕ] Резервирование: password=very-secret\n",
+        ),
+    ):
+        assert "very-secret" not in backup_overview._backup_failure_hint()
     with tempfile.TemporaryDirectory() as directory:
         store = OperationStore(Path(directory) / "operations", require_mount=False)
         pve = SimpleNamespace(data=lambda *args, **kwargs: [
@@ -157,13 +185,14 @@ def main():
                   patch.object(backup_controller, "policy", return_value=({}, {"fast-ssd": "A"})),
                   patch.object(admin_socket, "run", side_effect=[
                       SimpleNamespace(returncode=3, stdout=""),
+                      SimpleNamespace(returncode=0, stdout="LoadState=loaded\n"),
                       SimpleNamespace(returncode=0, stdout=""),
                   ]) as systemctl):
                 accepted = admin_socket.dispatch({
                     "kind": "backup-run", "vmid": 0, "request_id": uuid.uuid4().hex,
                 })
                 assert accepted["accepted"] is True
-                assert systemctl.call_count == 2
+                assert systemctl.call_count == 3
                 assert systemctl.call_args.args[0] == [
                     "timeout", "5s", "systemctl", "start", "--no-block",
                     "infra-manager-backup.service",
@@ -172,18 +201,41 @@ def main():
                   patch.object(admin_socket, "authorize_action"),
                   patch.object(backup_controller, "policy", return_value=({}, {"fast-ssd": "A"})),
                   patch.object(admin_socket, "run", return_value=SimpleNamespace(returncode=0))):
-                try:
-                    admin_socket.dispatch({
-                        "kind": "backup-run", "vmid": 0, "request_id": uuid.uuid4().hex,
-                    })
-                    raise AssertionError("Повторный запуск активного бэкапа запрещён")
-                except InfraManagerError:
-                    pass
+                repeated = admin_socket.dispatch({
+                    "kind": "backup-run", "vmid": 0, "request_id": uuid.uuid4().hex,
+                })
+                assert repeated["accepted"] is False
+                assert repeated["code"] == "already_running"
+            with (patch.object(admin_socket, "find_guest_by_role", return_value=client),
+                  patch.object(admin_socket, "authorize_action"),
+                  patch.object(backup_controller, "policy", side_effect=InfraManagerError("secret-value")),
+                  patch.object(admin_socket, "run") as no_command):
+                denied = admin_socket.dispatch({
+                    "kind": "backup-run", "vmid": 0, "request_id": uuid.uuid4().hex,
+                })
+                assert denied["code"] == "media_not_ready"
+                assert "secret-value" not in json.dumps(denied)
+                no_command.assert_not_called()
+            with (patch.object(admin_socket, "find_guest_by_role", return_value=client),
+                  patch.object(admin_socket, "authorize_action"),
+                  patch.object(backup_controller, "policy", return_value=({}, {"fast-ssd": "A"})),
+                  patch.object(admin_socket, "run", side_effect=[
+                      SimpleNamespace(returncode=3, stdout=""),
+                      SimpleNamespace(returncode=0, stdout="LoadState=not-found\n"),
+                  ])):
+                absent = admin_socket.dispatch({
+                    "kind": "backup-run", "vmid": 0, "request_id": uuid.uuid4().hex,
+                })
+                assert absent["code"] == "service_missing"
 
             # Динамический HTML экранируется; ни одна страница не доступна без входа.
             injected = json.loads(json.dumps(single))
             injected["storage"]["volumes"][0]["id"] = "<script>alert(1)</script>"
             injected["backup"]["records"]["core"]["destinations"] = ["fast-ssd"]
+            injected["backup"]["timer"]["last_result"] = "exit-code"
+            injected["backup"]["timer"]["failure_hint"] = (
+                "Не хватает обязательного PVE-only компонента резервирования"
+            )
             http = admin.ThreadingHTTPServer(("127.0.0.1", 0), admin.Handler)
             thread = threading.Thread(target=http.serve_forever, daemon=True)
             thread.start()
@@ -204,6 +256,8 @@ def main():
                     assert status == 200 and "&lt;script&gt;" in body
                     assert "<script>alert(1)</script>" not in body
                     assert "Вторая независимая копия отсутствует" in body
+                    assert "Не хватает обязательного PVE-only компонента" in body
+                    assert "Последнее резервирование не выполнено" in body
                     assert "не является испытанием восстановления" in body
                     status, _, data = send(http, "/api/infrastructure", cookie=cookie)
                     assert status == 200
@@ -222,6 +276,22 @@ def main():
                     )
                     assert status == 303 and content == ""
                     assert headers["Location"] == "/infrastructure?started=1"
+                    with patch.object(
+                        admin, "_backup_request",
+                        side_effect=lambda kind: (
+                            {"accepted": True, "overview": injected}
+                            if kind == "backup-overview"
+                            else (_ for _ in ()).throw(
+                                admin.BackupRequestError(admin.BACKUP_REQUEST_ERRORS["media_not_ready"])
+                            )
+                        ),
+                    ):
+                        rejected, _, page = send(
+                            http, "/infrastructure/run", cookie=cookie,
+                            post={"csrf": session["csrf"]},
+                        )
+                        assert rejected == 409
+                        assert "SSD и NAS ещё не подтверждены" in page
                     assert send(http, "/infrastructure/run", cookie=cookie,
                                 post={"csrf": session["csrf"], "shell": "yes"})[0] == 400
                     admin.sessions.pop(sid)
