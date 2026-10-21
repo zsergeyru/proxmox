@@ -338,9 +338,39 @@ def check_restic_and_export_failures() -> None:
     assert "CacheDirectoryMode=0700" in service
 
 
+
+def check_vm100_stdout_avoids_unapproved_local_storage() -> None:
+    """Потоковый vzdump не должен зависеть от backup-content у local."""
+    import io
+
+    commands = []
+
+    def fake_run(cmd, **kwargs):
+        commands.append(cmd)
+        assert kwargs.get("check") is False
+        if cmd[0] == "vzdump":
+            assert cmd[1] == "100"
+            assert cmd[cmd.index("--stdout") + 1] == "1"
+            assert cmd[cmd.index("--dumpdir") + 1] == "/run"
+            assert "--storage" not in cmd
+            assert kwargs["stdout"] is output.buffer
+        return SimpleNamespace(returncode=0)
+
+    output = SimpleNamespace(buffer=io.BytesIO())
+    with (
+        patch.object(host.subprocess, "run", side_effect=fake_run),
+        patch.object(host.sys, "stdout", output),
+    ):
+        host.stream_vm100()
+    assert len(commands) == 2
+    assert commands[0] == ["qm", "status", "100"]
+    assert commands[1][0] == "vzdump"
+
+
 def main():
     check_policy()
     check_restic_and_export_failures()
+    check_vm100_stdout_avoids_unapproved_local_storage()
     check_host_denies_untrusted()
     check_pve_safe_failure_messages()
     check_backup_blocks_runtime_activation()

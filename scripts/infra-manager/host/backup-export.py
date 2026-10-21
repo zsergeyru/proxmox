@@ -273,7 +273,10 @@ def stream_vm100() -> None:
         raise ExportError("Гость VM 100 недоступен")
     backup = subprocess.run(
         ["vzdump", "100", "--mode", "snapshot", "--compress", "zstd",
-         "--stdout", "1"],
+         # При --stdout Proxmox всё равно может требовать backup-content
+         # для storage=local. Явный dumpdir отменяет выбор storage=local.
+         # Содержимое архива по-прежнему идёт только в stdout, без файла на PVE.
+         "--dumpdir", "/run", "--stdout", "1"],
         stdout=sys.stdout.buffer,
         stderr=subprocess.DEVNULL,
         check=False, timeout=7200,
