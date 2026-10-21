@@ -699,77 +699,17 @@ def _backup_overview_page(csrf: str, notice: str = "") -> bytes:
         data = _backup_request("backup-overview")["overview"]
     except (ValueError, OSError, TimeoutError):
         return _layout(
-        '<div class="toolbar backup-controls">'
-        '<div><strong>Состояние резервных копий</strong>'
-        '<div class="muted">Автообновление каждые 4 секунды, пока страница открыта.</div></div>'
-        '<div class="actions"><span class="muted" id="backup-refreshed" role="status" aria-live="polite">'
-        'Получаю актуальное состояние…</span>'
-        '<button type="button" class="btn secondary" data-backup-refresh>↻ Обновить</button></div></div>'
-        '<section id="backup-summary" class="backup-lead" data-tone="' + headline_tone + '">'
-        '<h2 id="backup-summary-text" aria-live="polite">' + e(headline) + '</h2>'
-        '<p>Последняя подтверждённая копия PVE/910: '
-        '<strong id="backup-last-success">' + _time_html(core.get("created_utc")) + '</strong>.</p>'
-        '<p class="backup-media" id="backup-media-summary">' + e(media_text) + '</p></section>'
-        '<div id="backup-running" class="notice" data-tone="info" role="status"'
-        + ('' if running else ' hidden') + '>'
-        '<strong>Копирование идёт.</strong> Результат появится автоматически после завершения.</div>'
-        + ('<div class="notice" data-tone="warning" role="alert">' + e(notice) + '</div>'
-           if notice else '')
-        + '<div id="backup-failure" class="notice" data-tone="danger" role="alert"'
-        + ('' if last_failed else ' hidden') + '>'
-        '<strong>Последнее резервирование не выполнено.</strong> '
-        '<span id="backup-failure-text">'
-        + e(timer.get("failure_hint") or "Подробности доступны в журнале службы 910.")
-        + '</span><p>Ранее созданные копии могут оставаться доступными.</p></div>'
-        '<div class="backup-copy-grid">'
-        + card("core", "PVE и infra-manager 910", "Настройки и защищённое состояние PVE/910. Проверка Restic: 1% данных.")
-        + card("vm100", "Home Assistant · VM 100", "Дата копии VM 100 (точное время не записывается отдельно).")
-        + '</div>'
-        '<p class="backup-warning">Восстановление: <strong id="backup-restore-state">'
-        + ("Испытано" if restored else "Ещё не проверено")
-        + '</strong>. Проверка 1% данных restic не является испытанием восстановления.</p>'
-        '<section class="panel backup-schedule">'
-        '<div class="section-head"><h3>Автоматическое резервирование</h3>'
-        '<span class="chip" data-tone="' + (
-            "success" if timer.get("state") == "active" else "warning"
-        ) + '" id="backup-plan-state">' + e(plan_state) + '</span></div>'
-        '<p>Следующий запуск: <strong id="backup-next-run">'
-        + _systemd_time_html(timer.get("next")) + '</strong></p>'
-        '<div class="actions">' + start_link
-        + '<a class="btn secondary" href="/storage">Подготовка SSD</a></div></section>'
-        '<details class="panel" id="backup-technical-details"><summary>Технические подробности</summary>'
-        '<div class="details-content">'
-        '<p>Факт записи подтверждён сохранёнными результатами Restic. Текущая доступность носителя '
-        'и возможность восстановления отдельно не проверены.</p>'
-        '<h3>Хранилища</h3><div class="table-wrap"><table>'
-        '<tr><th>Назначение</th><th>Путь</th><th>Настройка</th><th>Носитель</th></tr>'
-        + "".join(dest_rows) + '</table></div>'
-        '<p>SSD: <strong id="backup-ssd-state">' + e(data.get("ssd", {}).get("state")) + '</strong>.</p>'
-        '<h3>Последние записи</h3><div class="table-wrap"><table>'
-        '<tr><th>Что</th><th>Состояние</th><th>Дата и время</th><th>Носители</th><th>Проверка</th></tr>'
-        + "".join(backup_rows) + '</table></div>'
-        '<h3>Таймер и служба</h3>'
-        '<p>Таймер: <strong id="backup-timer-state">' + e(timer_state)
-        + '</strong>. Служба: <strong id="backup-service-state">' + e(service_state)
-        + '</strong>. Расписание: <strong id="backup-schedule">'
-        + e(backup.get("schedule_declared")) + '</strong>.</p>'
-        '<p>Последний запуск: <span id="backup-last-run">'
-        + _systemd_time_html(timer.get("last")) + '</span>. Результат systemd: '
-        '<span id="backup-last-result">' + e(timer.get("last_result")) + '</span>.</p>'
-        '<p>Журнал: <code>pct exec 910 -- journalctl -u '
-        'infra-manager-backup.service -n 40 --no-pager</code></p>'
-        '<details><summary>Общие тома PVE</summary>'
-        '<div class="table-wrap"><table>'
-        '<tr><th>Том</th><th>Тип</th><th>Размер</th><th>Подключение</th><th>Проверка</th></tr>'
-        + volume_table(volumes, include_size=True) + '</table></div></details>'
-        '<details><summary>Тома NAS</summary><p>Объявлены в Git; NAS не опрашивается напрямую.</p>'
-        '<div class="table-wrap"><table>'
-        '<tr><th>Том</th><th>Тип</th><th>Подключение</th><th>Проверка</th></tr>'
-        + volume_table(nas) + '</table></div></details>'
-        '</div></details>'
-        '<script src="/backup-refresh.js" defer></script>',
-        csrf=csrf, page="infrastructure",
-    )
+            '<div class="notice" data-tone="warning">Системный посредник или '
+            'описание хранилищ временно недоступны.</div>'
+            '<a class="btn secondary" href="/infrastructure">Повторить проверку</a>',
+            csrf=csrf, page="infrastructure",
+        )
+    volumes = data.get("storage", {}).get("volumes", [])
+    nas = data.get("nas", {}).get("volumes", [])
+    dests = data.get("destinations", [])
+    backup = data.get("backup", {})
+    records = backup.get("records", {})
+    timer = backup.get("timer", {})
 
     def volume_table(items: list[dict], include_size: bool = False) -> str:
         rows = []
@@ -840,7 +780,6 @@ def _backup_overview_page(csrf: str, notice: str = "") -> bytes:
     restored = backup.get("restore_tested") is True
     last_failed = timer.get("last_result") in {"exit-code", "timeout", "signal"}
     summary = BACKUP_OVERALL.get(backup.get("overall"), "Неизвестное состояние копий")
-
     def card(key: str, title: str, description: str) -> str:
         record = records.get(key, {})
         state = record.get("state")
@@ -910,74 +849,74 @@ def _backup_overview_page(csrf: str, notice: str = "") -> bytes:
         if configured else '<p>Запуск копирования недоступен: нет настроенных носителей.</p>'
     )
     return _layout(
-        '<p class="page-intro">Состояние резервирования, доступность хранилищ '
-        'и история подтверждённых проверок в одном месте.</p>'
         '<div class="toolbar backup-controls">'
-        '<button type="button" class="btn secondary" data-backup-refresh>'
-        '↻ Обновить состояние</button>'
-        '<span class="muted" id="backup-refreshed" role="status" aria-live="polite">'
-        'Обновление вручную · данные на момент открытия страницы</span></div>'
+        '<div><strong>Состояние резервных копий</strong>'
+        '<div class="muted">Автообновление каждые 4 секунды, пока страница открыта.</div></div>'
+        '<div class="actions"><span class="muted" id="backup-refreshed" role="status" aria-live="polite">'
+        'Получаю актуальное состояние…</span>'
+        '<button type="button" class="btn secondary" data-backup-refresh>↻ Обновить</button></div></div>'
+        '<section id="backup-summary" class="backup-lead" data-tone="' + headline_tone + '">'
+        '<h2 id="backup-summary-text" aria-live="polite">' + e(headline) + '</h2>'
+        '<p>Последняя подтверждённая копия PVE/910: '
+        '<strong id="backup-last-success">' + _time_html(core.get("created_utc")) + '</strong>.</p>'
+        '<p class="backup-media" id="backup-media-summary">' + e(media_text) + '</p></section>'
         '<div id="backup-running" class="notice" data-tone="info" role="status"'
-        + ('' if timer.get("service") in {"active", "activating"} else ' hidden') + '>'
-        '<strong>Резервирование выполняется.</strong> '
-        'Нажми «Обновить состояние», чтобы увидеть результат. '
-        'Автоматического обновления нет.</div>'
-        '<div id="backup-summary" class="notice" data-tone="' + (
-            "success" if backup.get("overall") == "two_recorded_copies"
-            else "warning"
-        ) + '" role="status"><strong id="backup-summary-text">' + e(summary) + '</strong></div>'
-        + ('<div class="notice" data-tone="warning" role="alert">'
-           + e(notice) + '</div>' if notice else '')
-        + ('<div id="backup-failure" class="notice" data-tone="danger" role="alert"' +
-           ('' if last_failed else ' hidden') + '>'
-           '<strong>Последнее резервирование не выполнено.</strong> '
-           '<span id="backup-failure-text">' +
-           e(timer.get("failure_hint") or
-               "Системная служба завершилась с ошибкой; подробности в журнале.") +
-           '</span><p>Журнал на PVE: '
-           '<code>pct exec 910 -- journalctl -u infra-manager-backup.service -n 40 --no-pager</code>. '
-           'Не публикуйте секреты из журнала.</p></div>')
-        + '<p>Проверенные ранее записи не подтверждают, что SSD/NAS сейчас подключены '
-        'или что восстановление испытано. Даже активное PVE storage не '
-        'является проверкой идентичности физического носителя.</p>'
-        '<details class="panel"><summary>Общие тома PVE · технические детали</summary>'
-        '<div class="details-content"><p class="muted">По описанию storage.yaml</p>'
-        '<div class="table-wrap"><table><tr><th>Том</th><th>Тип</th><th>Размер</th><th>Подключение</th><th>Проверка</th></tr>'
-        + volume_table(volumes, include_size=True) + '</table></div></div></details>'
-        '<details class="panel"><summary>Тома NAS · технические детали</summary>'
-        '<div class="details-content"><p class="muted">Объявлены в Git; NAS не опрашивается напрямую</p>'
-        '<div class="table-wrap"><table><tr><th>Том</th><th>Тип</th><th>Подключение</th><th>Проверка</th></tr>'
-        + volume_table(nas) + '</table></div></div></details>'
-        '<section class="panel"><h3>Места для резервных копий</h3>'
-        '<p class="muted">По backup.yaml; активность PVE не означает проверку диска</p>'
-        '<div class="table-wrap"><table><tr><th>Назначение</th><th>Путь</th><th>Настройка</th><th>Носитель</th></tr>'
-        + "".join(dest_rows) + '</table></div></section>'
-        '<p>SSD: <strong id="backup-ssd-state">' + e(data.get("ssd", {}).get("state")) + '</strong>. '
-        'Физические подключения необходимо независимо проверить перед восстановлением.</p>'
-        '<section class="panel"><h3>Последние сохранённые результаты</h3>'
-        '<div class="table-wrap"><table><tr><th>Что</th><th>Состояние</th><th>Дата и время</th><th>Носители</th><th>Контроль</th></tr>'
-        + "".join(backup_rows) + '</table></div></section>'
-        '<p><strong>Восстановление: <span id="backup-restore-state">'
-        + ("Отмечено как испытанное" if restored else "Не подтверждено")
-        + '</span></strong>. Проверка 1% данных restic не является испытанием восстановления.</p>'
-        '<section class="panel"><h3>Расписание и ручной запуск</h3>'
-        '<div class="grid cols-3">'
-        '<div class="stat"><div class="stat-label">Таймер</div><div class="stat-value" style="font-size:19px">'
-        + '<span id="backup-timer-state">' + e(timer_state) + '</span></div></div>'
-        '<div class="stat"><div class="stat-label">Служба</div><div class="stat-value" style="font-size:19px">'
-        + '<span id="backup-service-state">' + e(service_state) + '</span></div></div>'
-        '<div class="stat"><div class="stat-label">Расписание</div><div class="stat-value" style="font-size:19px">'
-        + '<span id="backup-schedule">' + e(backup.get("schedule_declared")) + '</span></div></div></div>'
-        '<p>Следующий запуск (время сервера): <span id="backup-next-run">' +
-        _systemd_time_html(timer.get("next")) + '</span>. '
-        'Предыдущий запуск (время сервера): <span id="backup-last-run">' +
-        _systemd_time_html(timer.get("last")) +
-        '</span>. Результат systemd: <strong id="backup-last-result">' +
-        e(timer.get("last_result")) + '</strong>.</p>'
-        + start_link
-        + '<p><button type="button" class="btn secondary" data-backup-refresh>'
-        '↻ Обновить состояние</button> '
-        '<a class="btn secondary" href="/storage">Подготовка SSD</a></p></section>'
+        + ('' if running else ' hidden') + '>'
+        '<strong>Копирование идёт.</strong> Результат появится автоматически после завершения.</div>'
+        + ('<div class="notice" data-tone="warning" role="alert">' + e(notice) + '</div>'
+           if notice else '')
+        + '<div id="backup-failure" class="notice" data-tone="danger" role="alert"'
+        + ('' if last_failed else ' hidden') + '>'
+        '<strong>Последнее резервирование не выполнено.</strong> '
+        '<span id="backup-failure-text">'
+        + e(timer.get("failure_hint") or "Подробности доступны в журнале службы 910.")
+        + '</span><p>Ранее созданные копии могут оставаться доступными.</p></div>'
+        '<div class="backup-copy-grid">'
+        + card("core", "PVE и infra-manager 910", "Настройки и защищённое состояние PVE/910. Проверка Restic: 1% данных.")
+        + card("vm100", "Home Assistant · VM 100", "Дата копии VM 100 (точное время не записывается отдельно).")
+        + '</div>'
+        '<p class="backup-warning">Восстановление: <strong id="backup-restore-state">'
+        + ("Испытано" if restored else "Ещё не проверено")
+        + '</strong>. Проверка 1% данных restic не является испытанием восстановления.</p>'
+        '<section class="panel backup-schedule">'
+        '<div class="section-head"><h3>Автоматическое резервирование</h3>'
+        '<span class="chip" data-tone="' + (
+            "success" if timer.get("state") == "active" else "warning"
+        ) + '" id="backup-plan-state">' + e(plan_state) + '</span></div>'
+        '<p>Следующий запуск: <strong id="backup-next-run">'
+        + _systemd_time_html(timer.get("next")) + '</strong></p>'
+        '<div class="actions">' + start_link
+        + '<a class="btn secondary" href="/storage">Подготовка SSD</a></div></section>'
+        '<details class="panel" id="backup-technical-details"><summary>Технические подробности</summary>'
+        '<div class="details-content">'
+        '<p>Факт записи подтверждён сохранёнными результатами Restic. Текущая доступность носителя '
+        'и возможность восстановления отдельно не проверены.</p>'
+        '<h3>Хранилища</h3><div class="table-wrap"><table>'
+        '<tr><th>Назначение</th><th>Путь</th><th>Настройка</th><th>Носитель</th></tr>'
+        + "".join(dest_rows) + '</table></div>'
+        '<p>SSD: <strong id="backup-ssd-state">' + e(data.get("ssd", {}).get("state")) + '</strong>.</p>'
+        '<h3>Последние записи</h3><div class="table-wrap"><table>'
+        '<tr><th>Что</th><th>Состояние</th><th>Дата и время</th><th>Носители</th><th>Проверка</th></tr>'
+        + "".join(backup_rows) + '</table></div>'
+        '<h3>Таймер и служба</h3>'
+        '<p>Таймер: <strong id="backup-timer-state">' + e(timer_state)
+        + '</strong>. Служба: <strong id="backup-service-state">' + e(service_state)
+        + '</strong>. Расписание: <strong id="backup-schedule">'
+        + e(backup.get("schedule_declared")) + '</strong>.</p>'
+        '<p>Последний запуск: <span id="backup-last-run">'
+        + _systemd_time_html(timer.get("last")) + '</span>. Результат systemd: '
+        '<span id="backup-last-result">' + e(timer.get("last_result")) + '</span>.</p>'
+        '<p>Журнал: <code>pct exec 910 -- journalctl -u '
+        'infra-manager-backup.service -n 40 --no-pager</code></p>'
+        '<details><summary>Общие тома PVE</summary>'
+        '<div class="table-wrap"><table>'
+        '<tr><th>Том</th><th>Тип</th><th>Размер</th><th>Подключение</th><th>Проверка</th></tr>'
+        + volume_table(volumes, include_size=True) + '</table></div></details>'
+        '<details><summary>Тома NAS</summary><p>Объявлены в Git; NAS не опрашивается напрямую.</p>'
+        '<div class="table-wrap"><table>'
+        '<tr><th>Том</th><th>Тип</th><th>Подключение</th><th>Проверка</th></tr>'
+        + volume_table(nas) + '</table></div></details>'
+        '</div></details>'
         '<script src="/backup-refresh.js" defer></script>',
         csrf=csrf, page="infrastructure",
     )
