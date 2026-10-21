@@ -450,10 +450,10 @@ def _save_private_tofu_init_log(
 
         detail = detail[-32768:]
         payload = (
-            "Этап: tofu init\\n"
-            f"Код возврата: {exc.returncode}\\n"
-            "--- Закрытый вывод OpenTofu (не публиковать без проверки) ---\\n"
-            f"{detail}\\n"
+            "Этап: tofu init\n"
+            f"Код возврата: {exc.returncode}\n"
+            "--- Закрытый вывод OpenTofu (не публиковать без проверки) ---\n"
+            f"{detail}\n"
         ).encode("utf-8", errors="replace")
 
         destination = directory / f"tofu-init-{uuid.uuid4().hex}.log"
