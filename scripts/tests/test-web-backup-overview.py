@@ -113,6 +113,17 @@ def main():
         ),
     ):
         assert "very-secret" not in backup_overview._backup_failure_hint()
+    with patch.object(
+        backup_overview, "run",
+        return_value=SimpleNamespace(
+            returncode=0,
+            stdout="[ОЖИДАНИЕ] Резервирование: Некоторые назначения "
+                   "резервирования недоступны: volume:gogs_data: "
+                   "fast-ssd: Том gogs_data: экспорт PVE завершился с ошибкой "
+                   "(код 1; причина: LVM не создал временный snapshot)\n",
+        ),
+    ):
+        assert "LVM не создал временный снимок" in backup_overview._backup_failure_hint()
     with tempfile.TemporaryDirectory() as directory:
         store = OperationStore(Path(directory) / "operations", require_mount=False)
         pve = SimpleNamespace(data=lambda *args, **kwargs: [
@@ -257,6 +268,9 @@ def main():
             injected = json.loads(json.dumps(single))
             injected["storage"]["volumes"][0]["id"] = "<script>alert(1)</script>"
             injected["backup"]["records"]["core"]["destinations"] = ["fast-ssd"]
+            injected["backup"]["records"]["volume_gogs_data"]["last_errors"] = {
+                "fast-ssd": "LVM не создал временный snapshot"
+            }
             injected["backup"]["timer"]["last_result"] = "exit-code"
             injected["backup"]["timer"]["failure_hint"] = (
                 "Не хватает обязательного PVE-only компонента резервирования"
@@ -293,6 +307,8 @@ def main():
                     assert 'data-backup-copy="vm100"' in body
                     assert 'data-backup-copy="volume_infra_state"' in body
                     assert 'data-backup-copy="volume_gogs_data"' in body
+                    assert 'data-backup-copy-error' in body
+                    assert "Ошибка последней попытки: SSD: LVM не создал временный snapshot" in body
                     assert "40 ГиБ" in body and "30 ГиБ" in body
                     assert "Автообновление каждые 4 секунды" in body
                     assert 'id="backup-failure"' in body
