@@ -249,6 +249,66 @@ def format_duration(seconds: float) -> str:
     return f"{minutes:02d}:{seconds:02d}"
 
 
+
+def _tofu_failure_summary(
+    argv: Sequence[str], output: str | None,
+) -> tuple[str, str]:
+    """Назвать этап и безопасную причину отказа OpenTofu.
+
+    Вывод tofu не доверен: в нём могут оказаться значения переменных,
+    токены и пути. Отображаются только фиксированные сообщения, а не
+    произвольные строки stdout/stderr.
+    """
+    stage = "неизвестный этап"
+    for index, arg in enumerate(argv):
+        if arg in {"init", "plan", "apply", "show", "validate", "state"}:
+            stage = arg
+            if arg == "state" and index + 1 < len(argv):
+                if argv[index + 1] in {"pull", "list", "show"}:
+                    stage += " " + argv[index + 1]
+            break
+
+    detail = (output or "").casefold()
+    if "permission denied" in detail or "operation not permitted" in detail:
+        reason = "Отказано в доступе к рабочим файлам, провайдеру или состоянию OpenTofu."
+    elif (
+        "error acquiring the state lock" in detail
+        or "state lock" in detail
+        or "lock info" in detail
+    ):
+        reason = "Не удалось получить блокировку состояния OpenTofu; проверьте параллельные задания."
+    elif (
+        "backend initialization required" in detail
+        or "backend configuration changed" in detail
+    ):
+        reason = "Рабочая копия требует согласования конфигурации backend; автоматическая миграция состояния запрещена."
+    elif (
+        "failed to install provider" in detail
+        or "failed to query available provider packages" in detail
+        or "failed to load plugin schemas" in detail
+    ):
+        reason = "Не удалось подготовить или запустить провайдер Proxmox."
+    elif (
+        "certificate signed by unknown authority" in detail
+        or "x509:" in detail
+        or "tls handshake" in detail
+    ):
+        reason = "Не подтверждён TLS-сертификат или защищённое подключение."
+    elif (
+        "connection refused" in detail
+        or "connection timed out" in detail
+        or "no such host" in detail
+    ):
+        reason = "Не удалось подключиться к необходимой службе; проверьте сеть и доступность PVE."
+    elif "no space left on device" in detail:
+        reason = "Недостаточно свободного места в рабочем или постоянном хранилище."
+    elif "no such file or directory" in detail:
+        reason = "Не найден требуемый файл или каталог OpenTofu."
+    else:
+        reason = "Причина не распознана; требуется закрытая диагностика вывода OpenTofu."
+    return stage, reason
+
+
 @dataclass(frozen=True)
 class Console:
     """Единый формат сообщений, совместимый с текущими shell-скриптами."""
@@ -366,22 +426,28 @@ class Console:
             # локальное задание: нельзя считать его сетевой ошибкой.
             if tool == "ansible-playbook":
                 message = "Настройка гостя не завершена. " + _ansible_failure_summary(exc.stderr) + " Проверьте состояние: infra-manager status <VMID>."
+            elif tool in {"tofu", "terraform"}:
+                stage, reason = _tofu_failure_summary(exc.argv, exc.stderr)
+                message = f"Ошибка OpenTofu на этапе {stage}. {reason}"
+
             elif "unreachable" in detail or "connection refused" in detail or "connection timed out" in detail:
                 message = "Не удалось подключиться к узлу или службе. Проверьте, что нужный узел запущен и доступен по сети; затем повторите операцию."
             elif tool == "git":
                 message = "Не удалось обновить проект. Проверьте доступ к Git-серверу, ключ доступа и наличие выбранной ветки; затем повторите операцию."
             elif tool == "docker":
                 message = "Не удалось выполнить операцию Docker. Проверьте службу Docker и состояние контейнеров; затем повторите операцию."
-            elif tool in {"tofu", "terraform"}:
-                message = "Не удалось применить описание инфраструктуры. Проверьте доступ к PVE и параметры выбранного гостя; затем повторите операцию."
             else:
                 message = "Операция не завершена. Проверьте состояние: infra-manager status <VMID>. Передайте администратору название операции и код ошибки."
             if vmid is not None:
                 message = message.replace("<VMID>", str(vmid))
             self.error(f"{message} Код ошибки: {exc.returncode}.")
             safe_tool = tool if tool in _SAFE_EXECUTABLES else "неизвестная команда"
+            stage_note = (
+                f"; этап {_tofu_failure_summary(exc.argv, exc.stderr)[0]}"
+                if tool in {"tofu", "terraform"} else ""
+            )
             self.diagnostic(
-                f"CommandError: программа {safe_tool}; код возврата {exc.returncode}"
+                f"CommandError: программа {safe_tool}{stage_note}; код возврата {exc.returncode}"
             )
         elif isinstance(exc, OSError):
             self.error("Не удалось обратиться к файлу или запустить программу. Проверьте наличие необходимых файлов, программ и права доступа; затем повторите операцию.")
