@@ -390,6 +390,9 @@ def _backup_volumes(node: str, verified: dict[str, str], key: Path,
                 if state[target] not in {"missing", "existing"}:
                     raise InfraManagerError("Вместо Restic-репозитория неизвестные данные")
                 if state[target] == "missing":
+                    _remote(node, "volume-prepare", json.dumps({
+                        "destinations": {target: verified[target]}, "volume": volume,
+                    }, separators=(",", ":")).encode())
                     _restic(node, target, key, ["init"], volume_id=name)
                 _restic(node, target, key, ["snapshots", "--json"], volume_id=name)
                 _stream_volume(node, verified, key, target, volume)
