@@ -784,7 +784,7 @@ def _backup_overview_page(csrf: str, notice: str = "") -> bytes:
         record = records.get(key, {})
         state = record.get("state")
         label = {
-            "verified": "Копия создана", "stale": "Копия устарела",
+            "verified": "Копия создана", "partial": "Есть только часть копий", "stale": "Копия устарела",
             "missing": "Копии пока нет", "invalid": "Нет подтверждения",
         }.get(state, "Не проверено")
         tone = "success" if state == "verified" else "warning"
@@ -874,6 +874,19 @@ def _backup_overview_page(csrf: str, notice: str = "") -> bytes:
         '<div class="backup-copy-grid">'
         + card("core", "PVE и infra-manager 910", "Настройки и защищённое состояние PVE/910. Проверка Restic: 1% данных.")
         + card("vm100", "Home Assistant · VM 100", "Дата копии VM 100 (точное время не записывается отдельно).")
+        + "".join(
+            card(
+                job["record_key"],
+                job["id"] + " · " + str(job["size_gb"]) + " ГиБ",
+                "Постоянный LVM-том · ежедневно · согласованный снимок. "
+                "SSD и NAS проверяются отдельно.",
+            )
+            for job in backup.get("volume_jobs", [])
+            if isinstance(job, dict) and
+            isinstance(job.get("record_key"), str) and
+            isinstance(job.get("id"), str) and
+            type(job.get("size_gb")) is int
+        )
         + '</div>'
         '<p class="backup-warning">Восстановление: <strong id="backup-restore-state">'
         + ("Испытано" if restored else "Ещё не проверено")
