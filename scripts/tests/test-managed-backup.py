@@ -258,8 +258,89 @@ def check_pve_safe_failure_messages() -> None:
                 path.write_text("safe-test", encoding="utf-8")
 
 
+
+def check_restic_and_export_failures() -> None:
+    """Различать ошибки источника и хранилища без публикации секретов."""
+    import io
+
+    class ResticFailure:
+        def __init__(self, diagnostics):
+            diagnostics.write(b"no space left on device; TOKEN=private-secret")
+
+        def wait(self, timeout=None):
+            return 1
+
+    with (
+        patch.object(backup_controller.subprocess, "Popen",
+                     side_effect=lambda _cmd, **kw: ResticFailure(kw["stderr"])),
+        patch.object(backup_controller, "PATHS",
+                     SimpleNamespace(pve_host_private_key=Path("/key"),
+                                     pve_host_known_hosts=Path("/known"))),
+    ):
+        try:
+            backup_controller._restic("pve", "fast-ssd", Path("/password"), ["backup"])
+        except InfraManagerError as exc:
+            message = str(exc)
+            assert "код 1" in message and "закончилось место" in message
+            assert "private-secret" not in message
+        else:
+            raise AssertionError("Restic failed without an exception")
+
+    class Export:
+        def __init__(self, code, diagnostics, error):
+            self.stdin = io.BytesIO()
+            self.stdout = io.BytesIO(b"archive")
+            diagnostics.write(error)
+            self.returncode = None
+            self.code = code
+
+        def wait(self, timeout=None):
+            self.returncode = self.code
+            return self.code
+
+        def poll(self):
+            return self.returncode
+
+        def kill(self):
+            self.returncode = -9
+
+    def scenario(code, stderr, restic_error=None):
+        def popen(_cmd, **kwargs):
+            return Export(code, kwargs["stderr"], stderr)
+        with (
+            patch.object(backup_controller.subprocess, "Popen", side_effect=popen),
+            patch.object(backup_controller, "_ssh_command", return_value=["ssh"]),
+            patch.object(backup_controller, "_restic", side_effect=restic_error),
+        ):
+            try:
+                backup_controller._stream_snapshot(
+                    "pve", {"fast-ssd": "UUID"}, Path("/key"), "fast-ssd")
+            except InfraManagerError as exc:
+                return str(exc)
+            return None
+
+    marker = "[ОШИБКА] Архив не выдан: Не удалось собрать согласованный архив PVE\n".encode()
+    msg = scenario(1, marker + b"secret=private", InfraManagerError("restic failed"))
+    assert "TAR-архив" in msg and "private" not in msg
+    msg = scenario(255, b"bad transport private-secret")
+    assert "SSH-соединение" in msg and "private" not in msg
+    msg = scenario(-13, b"broken pipe private-secret", InfraManagerError("restic failed"))
+    assert msg == "restic failed"
+    msg = scenario(0, b"", InfraManagerError("restic failed"))
+    assert msg == "restic failed"
+    assert scenario(0, b"") is None
+    assert "unknown-password" not in backup_controller._restic_cause(
+        b"unknown-password from stderr")
+    service = (ROOT / "infrastructure/guests/910-infra-manager/rootfs/etc/systemd/system/"
+               "infra-manager-backup.service").read_text()
+    assert "CacheDirectory=infra-manager-restic" in service
+    assert "RESTIC_CACHE_DIR=/var/cache/infra-manager-restic" in service
+    assert "CacheDirectoryMode=0700" in service
+
+
 def main():
     check_policy()
+    check_restic_and_export_failures()
     check_host_denies_untrusted()
     check_pve_safe_failure_messages()
     check_backup_blocks_runtime_activation()

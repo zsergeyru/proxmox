@@ -152,9 +152,66 @@ RESTIC_STAGES = {
 }
 
 
+def _diagnostic_tail(stream, limit: int = 16384) -> bytes:
+    """Прочитать хвост временного stderr, не публикуя его содержимое."""
+    stream.seek(0, os.SEEK_END)
+    stream.seek(max(0, stream.tell() - limit))
+    return stream.read(limit)
+
+
+def _restic_cause(stderr: bytes) -> str:
+    """Выводить только фиксированные причины, а не секреты из stderr."""
+    value = stderr.decode("utf-8", errors="replace").lower()
+    if "no space left on device" in value:
+        return "на носителе закончилось место"
+    if "read-only file system" in value:
+        return "файловая система доступна только для чтения"
+    if "cache" in value and ("denied" in value or "permission" in value):
+        return "недоступен кеш restic"
+    if "permission denied" in value or "access denied" in value:
+        return "нет прав на файл или каталог"
+    if "wrong password" in value or "password is incorrect" in value:
+        return "не подходит пароль существующего хранилища"
+    if "repository is already locked" in value or "unable to create lock" in value:
+        return "хранилище заблокировано другой операцией"
+    if ("connection reset" in value or "connection refused" in value
+            or "broken pipe" in value or "ssh: " in value
+            or "sftp: " in value or "unexpected eof" in value):
+        return "ошибка SSH/SFTP-соединения"
+    if "unable to read" in value or "failed to read" in value:
+        return "не удалось прочитать входные данные"
+    return "неопределённая ошибка restic (требуется дополнительная проверка)"
+
+
+EXPORT_FAILURES = {
+    "Согласованный снимок OpenBao Raft не получен": "PVE не смог создать снимок OpenBao Raft",
+    "Не удалось собрать согласованный архив PVE": "PVE не смог собрать TAR-архив",
+    "Потоковый снимок VM 100 не завершился": "PVE не смог завершить снимок VM 100",
+    "Гость VM 100 недоступен": "VM 100 недоступна на PVE",
+    "Выполняются изменения инфраструктуры": "PVE заблокировал снимок во время изменений",
+    "Самообновление infra-manager ещё выполняется или требует проверки":
+        "PVE заблокировал снимок во время самообновления 910",
+    "Отсутствует обязательный источник резервирования":
+        "на PVE отсутствует обязательный источник архива",
+}
+
+
+def _export_cause(stderr: bytes, returncode: int) -> str:
+    """Распознавать только сообщения PVE helper, игнорируя произвольный SSH stderr."""
+    prefix = "[ОШИБКА] Архив не выдан: "
+    for line in stderr.decode("utf-8", errors="replace").splitlines():
+        if line.startswith(prefix):
+            known = EXPORT_FAILURES.get(line[len(prefix):])
+            if known:
+                return known
+    if returncode == 255:
+        return "SSH-соединение с PVE прервано"
+    return "PVE не подтвердил полный поток снимка"
+
+
 def _restic(node: str, destination: str, key: Path, args: list[str],
             *, source=None) -> None:
-    """Запустить restic в управляющего гостя через подтверждённый root SSH/SFTP к PVE."""
+    """Запустить restic в 910; в журнал вывести только код и безопасную категорию."""
     mountpoint, _filesystem, repository = DESTINATIONS[destination]
     backend = f"sftp:root@{node}:{mountpoint}/{repository}"
     ssh_args = [
@@ -169,55 +226,79 @@ def _restic(node: str, destination: str, key: Path, args: list[str],
         "-r", backend, *args,
     ]
     env = dict(os.environ, RESTIC_PASSWORD_FILE=str(key))
-    process = subprocess.Popen(
-        cmd, stdin=source, stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL, env=env,
-    )
-    try:
-        code = process.wait(timeout=7200)
-    except subprocess.TimeoutExpired as exc:
-        process.kill()
-        process.wait()
-        raise InfraManagerError("Операция restic превысила время выполнения") from exc
-    if code:
-        # Только известный этап, без stderr restic с возможными секретами.
-        stage = RESTIC_STAGES.get(args[0] if args else "", "операция restic")
-        raise InfraManagerError(
-            f"restic: {stage} на {destination} завершилась ошибкой"
+    # Временный файл предотвращает deadlock при большом stderr.
+    # Сырой stderr не уходит в systemd-журнал, файл закрывается при выходе.
+    with tempfile.TemporaryFile(mode="w+b") as diagnostics:
+        process = subprocess.Popen(
+            cmd, stdin=source, stdout=subprocess.DEVNULL,
+            stderr=diagnostics, env=env,
         )
+        try:
+            code = process.wait(timeout=7200)
+        except subprocess.TimeoutExpired as exc:
+            process.kill()
+            process.wait()
+            raise InfraManagerError("Операция restic превысила время выполнения") from exc
+        if code:
+            stage = RESTIC_STAGES.get(args[0] if args else "", "операция restic")
+            cause = _restic_cause(_diagnostic_tail(diagnostics))
+            raise InfraManagerError(
+                f"restic: {stage} на {destination} завершилась ошибкой "
+                f"(код {code}; причина: {cause})"
+            )
 
 
 def _stream_snapshot(node: str, verified: dict[str, str],
                      key: Path, destination: str, *, vm100: bool = False) -> None:
-    """Передать последовательный полный поток PVE или VM 100 в restic управляющего гостя."""
+    """Проверить коды Restic и источника: нельзя считать оборванный поток успехом."""
     payload = json.dumps(verified, separators=(",", ":")).encode()
-    export = subprocess.Popen(
-        _ssh_command(node, ("python3", HOST_HELPER,
-                            "vm100" if vm100 else "export")),
-        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-    )
-    try:
-        assert export.stdin is not None
-        export.stdin.write(payload)
-        export.stdin.close()
-        assert export.stdout is not None
+    with tempfile.TemporaryFile(mode="w+b") as diagnostics:
+        export = subprocess.Popen(
+            _ssh_command(node, ("python3", HOST_HELPER,
+                                "vm100" if vm100 else "export")),
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=diagnostics,
+        )
         try:
-            _restic(
-                node, destination, key,
-                ["backup", "--stdin", "--stdin-filename",
-                 "haos-100.vma.zst" if vm100 else "infra-core.tar",
-                 "--tag", "haos" if vm100 else "infra-core",
-                 "--tag", "vm-100" if vm100 else "pve"],
-                source=export.stdout,
-            )
+            assert export.stdin is not None
+            try:
+                export.stdin.write(payload)
+                export.stdin.close()
+            except BrokenPipeError as exc:
+                raise InfraManagerError("PVE преждевременно закрыл поток снимка") from exc
+            assert export.stdout is not None
+            restic_failure = None
+            try:
+                try:
+                    _restic(
+                        node, destination, key,
+                        ["backup", "--stdin", "--stdin-filename",
+                         "haos-100.vma.zst" if vm100 else "infra-core.tar",
+                         "--tag", "haos" if vm100 else "infra-core",
+                         "--tag", "vm-100" if vm100 else "pve"],
+                        source=export.stdout,
+                    )
+                except InfraManagerError as exc:
+                    restic_failure = exc
+            finally:
+                export.stdout.close()
+            try:
+                export_code = export.wait(timeout=2500)
+            except subprocess.TimeoutExpired as exc:
+                raise InfraManagerError("PVE превысил время выдачи потока снимка") from exc
+            if export_code:
+                # SIGPIPE после отказа Restic — следствие, не первопричина.
+                if restic_failure is not None and export_code in (-13, 141):
+                    raise restic_failure
+                cause = _export_cause(_diagnostic_tail(diagnostics), export_code)
+                raise InfraManagerError(
+                    f"Экспорт PVE завершился с ошибкой (код {export_code}; причина: {cause})"
+                ) from restic_failure
+            if restic_failure is not None:
+                raise restic_failure
         finally:
-            export.stdout.close()
-        if export.wait(timeout=2500) != 0:
-            raise InfraManagerError("PVE не подтвердил полный поток согласованного снимка")
-    finally:
-        if export.poll() is None:
-            export.kill()
-            export.wait()
+            if export.poll() is None:
+                export.kill()
+                export.wait()
 
 
 def _vm100_due(store: OperationStore, identity: str) -> bool:
