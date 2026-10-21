@@ -1322,6 +1322,11 @@ def check_pve_host_support_before_signing() -> None:
             ),
             patch.object(
                 guest_deploy_module,
+                "ensure_backup_raft_access",
+                side_effect=lambda node: calls.append("backup-approle"),
+            ),
+            patch.object(
+                guest_deploy_module,
                 "sign_ssh_client_key",
                 side_effect=sign_client,
             ),
@@ -1347,11 +1352,12 @@ def check_pve_host_support_before_signing() -> None:
                 self_update=True,
             )
 
-        if calls[:5] != [
+        if calls[:6] != [
             "openbao-support",
             "recovery-support",
             "backup-support",
             "openbao-unseal",
+            "backup-approle",
             "sign-client",
         ]:
             fail(
