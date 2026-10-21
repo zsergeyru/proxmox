@@ -165,6 +165,44 @@ CHECK_FAILURES = {
 }
 
 
+# Категории ошибок снимка тома распознаются по фиксированным описаниям.
+# Не передавать пользователю произвольный текст journalctl или stderr.
+VOLUME_FAILURE_HINTS = {
+    "LVM не создал временный snapshot": "PVE: LVM не создал временный снимок тома",
+    "Не удалось подключить LVM snapshot только для чтения":
+        "PVE: временный снимок тома не удалось смонтировать",
+    "PVE прервал TAR-поток тома": "PVE: передача данных тома прервана",
+    "Не удалось размонтировать временный LVM snapshot":
+        "PVE: не удалось отключить временный снимок; нужна проверка LVM",
+    "Не удалось удалить временный LVM snapshot":
+        "PVE: не удалось удалить временный снимок; нужна проверка LVM",
+    "Не удалось остановить LXC перед снимком":
+        "PVE: не удалось согласованно остановить контейнер",
+    "Не удалось возобновить LXC после снимка":
+        "PVE: не удалось перезапустить контейнер после снимка",
+    "Недостаточно безопасного резерва в LVM thin-pool":
+        "Недостаточно места в LVM thin-pool для безопасного снимка",
+    "LVM snapshot заблокирован изменением инфраструктуры":
+        "Создание снимка заблокировано другой операцией",
+    "LVM snapshot заблокирован незавершённым обновлением 910":
+        "Создание снимка заблокировано обновлением 910",
+    "Обнаружен неописанный LXC-потребитель тома":
+        "У тома обнаружен неподтверждённый потребитель",
+    "PVE не смог подготовить или прочитать снимок тома":
+        "PVE не завершил экспорт снимка тома",
+    "PVE отказал в создании снимка тома":
+        "PVE отклонил операцию снимка тома",
+    "PVE не завершил передачу данных тома":
+        "PVE не завершил передачу данных тома",
+    "PVE не подтвердил действие резервирования: volume-repositories":
+        "PVE отклонил проверку репозитория тома",
+    "PVE не подтвердил действие резервирования: volume-prepare":
+        "PVE отклонил подготовку репозитория тома",
+    "PVE преждевременно закрыл поток задания тома":
+        "PVE преждевременно закрыл соединение резервирования тома",
+}
+
+
 def _backup_failure_hint() -> str | None:
     """Только закрытая классификация последних записей собственного systemd unit."""
     try:
@@ -179,6 +217,9 @@ def _backup_failure_hint() -> str | None:
         for entry in reversed(lines):
             if not entry.startswith("[ОЖИДАНИЕ] Резервирование: "):
                 continue
+            for needle, message in VOLUME_FAILURE_HINTS.items():
+                if needle in entry:
+                    return message
             for needle, message in BACKUP_CAUSES.items():
                 if needle in entry:
                     return message
@@ -187,6 +228,8 @@ def _backup_failure_hint() -> str | None:
                     return message
             if "Нет доступного и проверенного места резервирования" in entry:
                 return "Резервирование не выполнено: PVE не подтвердил носитель или источники"
+            if "volume:infra_state:" in entry or "volume:gogs_data:" in entry:
+                return "Задание LVM-томов завершилось ошибкой; см. причину в журнале 910"
             return "Служба отклонила резервирование; откройте журнал для уточнения"
     except (OSError, ValueError, TypeError):
         pass
@@ -246,7 +289,7 @@ def _volume_record(store: OperationStore, name: str, now: datetime) -> dict:
         "state": "missing", "created_utc": None, "destinations": [],
         "check": "not_confirmed", "restore_tested": False,
         "destination_status": {name: "missing" for name in DESTINATIONS},
-        "destination_dates": {},
+        "destination_dates": {}, "last_errors": {},
     }
     file = store.settings / ("backup-volume-" + name + ".json")
     if not file.exists() and not file.is_symlink():
@@ -260,6 +303,12 @@ def _volume_record(store: OperationStore, name: str, now: datetime) -> dict:
                 or set(dates) - set(DESTINATIONS)
                 or not all(isinstance(x, str) for x in dates.values())):
             raise ValueError("Неизвестные назначения тома")
+        failures = record.get("last_errors", {})
+        if (not isinstance(failures, dict)
+                or set(failures) - set(DESTINATIONS)
+                or any(not isinstance(reason, str) or len(reason) > 400
+                       for reason in failures.values())):
+            raise ValueError("Некорректное описание последней ошибки тома")
         today = now.date()
         status = {}
         for target in DESTINATIONS:
@@ -278,7 +327,7 @@ def _volume_record(store: OperationStore, name: str, now: datetime) -> dict:
         return {
             "state": state, "created_utc": record.get("created_utc"),
             "destinations": sorted(good), "destination_status": status,
-            "destination_dates": dates,
+            "destination_dates": dates, "last_errors": failures,
             "check": "restic_subset_1_percent" if good else "not_confirmed",
             "restore_tested": record.get("restore_tested") is True,
         }

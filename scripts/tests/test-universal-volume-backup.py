@@ -219,11 +219,56 @@ def test_records_and_restic() -> None:
         )["state"] == "verified"
 
 
+def test_failure_diagnostics() -> None:
+    # Не раскрывать произвольные строки/секреты из SSH stderr.
+    stderr = (
+        "[ОШИБКА] Архив не выдан: Создание временного LVM snapshot не удалось\n"
+    ).encode()
+    assert backup_controller._volume_export_cause(stderr, 1) == (
+        "LVM не создал временный snapshot"
+    )
+    assert "very-secret" not in backup_controller._volume_export_cause(
+        b"[ERROR] very-secret\n", 1
+    )
+    with tempfile.TemporaryDirectory() as tmp:
+        store = SimpleNamespace(settings=Path(tmp))
+        job = {"id": "gogs_data", "mountpoint": "/mnt/bindmounts/gogs-data",
+               "consumers": [310]}
+        def remote(_node, action, _data=b""):
+            if action == "volume-repositories":
+                return SimpleNamespace(stdout=b'{"fast-ssd":"existing"}')
+            raise AssertionError(action)
+        with (
+            patch.object(backup_controller, "_remote", side_effect=remote),
+            patch.object(backup_controller, "_restic"),
+            patch.object(backup_controller, "_stream_volume",
+                         side_effect=InfraManagerError(
+                             "Том gogs_data: экспорт PVE завершился с ошибкой "
+                             "(код 1; причина: LVM не создал временный snapshot)"
+                         )),
+            patch.object(backup_controller, "volume_due", return_value=True),
+        ):
+            failed = backup_controller._backup_volumes(
+                "pve", {"fast-ssd": "UUID"}, Path(tmp) / "key", store, [job]
+            )
+        assert "LVM не создал временный snapshot" in failed["gogs_data"]
+        record = json.loads(
+            (store.settings / "backup-volume-gogs_data.json").read_text()
+        )
+        assert "LVM не создал временный snapshot" in (
+            record["last_errors"]["fast-ssd"]
+        )
+        shown = backup_overview._volume_record(store, "gogs_data", datetime.now(UTC))
+        assert shown["last_errors"] == record["last_errors"]
+        assert shown["state"] == "missing"
+
+
 def main() -> None:
     test_manifest()
     test_host_guards()
     test_snapshot_cleanup()
     test_records_and_restic()
+    test_failure_diagnostics()
     print("[ОК] Универсальные тома, согласование LXC, Restic и веб-статус")
 
 

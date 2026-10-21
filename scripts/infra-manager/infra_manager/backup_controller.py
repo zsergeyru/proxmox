@@ -306,6 +306,56 @@ def _stream_snapshot(node: str, verified: dict[str, str],
 
 
 
+# Никогда не публикуем произвольный stderr PVE: только заранее известные
+# названия этапов. Сообщения из PVE-helper могут содержать закрытые пути.
+VOLUME_EXPORT_FAILURES = {
+    "Не удалось проверить состояние гостя": "Не удалось проверить состояние LXC",
+    "Не удалось согласованно остановить гостя": "Не удалось остановить LXC перед снимком",
+    "После снимка не удалось восстановить работу LXC": "Не удалось возобновить LXC после снимка",
+    "Создание временного LVM snapshot не удалось": "LVM не создал временный snapshot",
+    "Снимок тома не удалось подключить только для чтения":
+        "Не удалось подключить LVM snapshot только для чтения",
+    "Поток резервируемого тома оборвался": "PVE прервал TAR-поток тома",
+    "Не удалось отключить временный снимок":
+        "Не удалось размонтировать временный LVM snapshot",
+    "Не удалось удалить временный LVM snapshot":
+        "Не удалось удалить временный LVM snapshot",
+    "Неизвестный потребитель резервируемого тома":
+        "Обнаружен неописанный LXC-потребитель тома",
+    "Не удалось получить перечень LXC": "PVE не смог получить список LXC",
+    "Не удалось проверить подключения LXC":
+        "PVE не смог проверить подключения LXC",
+    "Том не подтверждён по точке подключения":
+        "Точка подключения рабочего тома не подтверждена",
+    "Рабочий LVM-том не найден": "Не найден рабочий LVM-том",
+    "Том не принадлежит pve/data": "Том находится вне pve/data",
+    "Источник файловой системы не соответствует LVM":
+        "Реальный источник тома отличается от описанного",
+    "LVM thin-pool близок к заполнению, снимок запрещён":
+        "Недостаточно безопасного резерва в LVM thin-pool",
+    "Нет достоверных данных о LVM thin-pool":
+        "Не удалось определить заполнение LVM thin-pool",
+    "Выполняются изменения инфраструктуры":
+        "LVM snapshot заблокирован изменением инфраструктуры",
+    "Самообновление infra-manager ещё выполняется или требует проверки":
+        "LVM snapshot заблокирован незавершённым обновлением 910",
+    "Нет общей блокировки изменений":
+        "На PVE отсутствует общая блокировка изменений",
+}
+
+
+def _volume_export_cause(stderr: bytes, returncode: int) -> str:
+    prefix = "[ОШИБКА] Архив не выдан: "
+    for line in stderr.decode("utf-8", errors="replace").splitlines():
+        if line.startswith(prefix):
+            return VOLUME_EXPORT_FAILURES.get(
+                line[len(prefix):], "PVE отказал в создании снимка тома"
+            )
+    if returncode == 255:
+        return "SSH-соединение с PVE прервано"
+    return "PVE не завершил передачу данных тома"
+
+
 def _stream_volume(node: str, verified: dict[str, str], key: Path,
                    destination: str, volume: dict) -> None:
     """Передать только подтверждённый том: LXC возобновляются до записи Restic."""
@@ -347,11 +397,10 @@ def _stream_volume(node: str, verified: dict[str, str], key: Path,
             except subprocess.TimeoutExpired as exc:
                 raise InfraManagerError("PVE превысил время выдачи снимка тома") from exc
             if code:
-                if failure is not None:
-                    raise failure
+                cause = _volume_export_cause(_diagnostic_tail(diagnostics), code)
                 raise InfraManagerError(
-                    "PVE не смог подготовить согласованный снимок тома "
-                    "(проверить доступность LXC, LVM и тонкий пул)"
+                    f"Том {volume['id']}: экспорт PVE завершился с ошибкой "
+                    f"(код {code}; причина: {cause})"
                 )
             if failure is not None:
                 raise failure
@@ -415,13 +464,19 @@ def _backup_volumes(node: str, verified: dict[str, str], key: Path,
             "destination_dates": history,
             "destinations": sorted(history),
             "failed_destinations": sorted(failures),
+            "last_errors": {target: reason[:400]
+                            for target, reason in sorted(failures.items())},
             "verified": "restic-check-read-data-subset-1-percent",
             "restore_tested": False,
         })
         print(f"[ИНФО] Том {name}: успешные назначения "
               + (", ".join(sorted(set(history) - set(failures))) or "нет"))
         if failures:
-            issues[name] = "Не все назначения завершены: " + ", ".join(sorted(failures))
+            # Все ошибки преобразованы исполнителями в безопасные категории;
+            # показываем конкретный этап без сырого stderr или секретов.
+            issues[name] = "; ".join(
+                target + ": " + reason for target, reason in sorted(failures.items())
+            )
     return issues
 
 
