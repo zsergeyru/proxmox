@@ -69,6 +69,17 @@
         record.check === "backup_checked" ? "Проверено при создании" : "Не подтверждено";
     }
   };
+  const placesLabel = (record) => {
+    const dates = record?.destination_dates;
+    const statuses = record?.destination_status;
+    if (!dates || !statuses) {
+      return Array.isArray(record?.destinations) ? record.destinations.join(", ") || "—" : "—";
+    }
+    return [["fast-ssd", "SSD"], ["nas-backup", "NAS"]].map(([id, label]) =>
+      label + ": " + (statuses[id] === "verified" ? dates[id] :
+        dates[id] ? "устарела (" + dates[id] + ")" : "копии нет")
+    ).join(" · ");
+  };
   const updateCards = (records) => {
     for (const card of document.querySelectorAll("[data-backup-copy]")) {
       const record = records?.[card.dataset.backupCopy] || {};
@@ -81,8 +92,7 @@
       })[state] || "Не проверено";
       displayTime(card.querySelector("[data-backup-copy-date]"), record.created_utc);
       const places = card.querySelector("[data-backup-copy-places]");
-      if (places) places.textContent = Array.isArray(record.destinations)
-        ? record.destinations.join(", ") || "—" : "—";
+      if (places) places.textContent = placesLabel(record);
     }
   };
   const updateDestinations = (destinations) => {
