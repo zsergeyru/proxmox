@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import json
+import os
+import stat
 import sys
 import tempfile
 from pathlib import Path
@@ -1472,6 +1474,110 @@ def check_opentofu_provider_mirror() -> None:
             fail("tofu init не использует локальное зеркало провайдера")
 
 
+def check_private_tofu_init_failure_logging() -> None:
+    """Только ошибка init создаёт закрытый лог; stdout не содержит секретов."""
+    from infra_manager.common import CommandError
+
+    with tempfile.TemporaryDirectory() as tmp:
+        state_root = Path(tmp) / "opentofu-state"
+        state_root.mkdir()
+        source_dir = Path(tmp) / "project"
+        source_dir.mkdir()
+        env = {"TF_VAR_pve_api_token": "tester@pam!api=SECRET-TOKEN-123456"}
+        sensitive = "SECRET-TOKEN-123456"
+        captured = []
+        failure = CommandError(
+            ["tofu", f"-chdir={source_dir}", "init"],
+            1,
+            f"Error: Permission denied at {source_dir}/.terraform; token={sensitive}",
+        )
+
+        with (
+            patch.object(opentofu_module, "STATE_DIR", state_root),
+            patch.object(
+                opentofu_module, "_opentofu_state_is_mounted", return_value=True
+            ),
+            patch.object(
+                opentofu_module, "_prepare_proxmox_provider_mirror",
+                return_value=Path("/dev/null"),
+            ),
+            patch.object(opentofu_module, "run", side_effect=failure),
+            patch.object(
+                opentofu_module.console, "diagnostic", side_effect=captured.append
+            ),
+        ):
+            try:
+                opentofu_module._init(source_dir, env)
+            except CommandError as exc:
+                if exc is not failure:
+                    fail("Ошибка tofu init должна передаваться без подмены")
+            else:
+                fail("Ошибка tofu init была проглочена")
+
+        logs = list((state_root / "diagnostics").glob("tofu-init-*.log"))
+        if len(logs) != 1:
+            fail("Каждый отказ tofu init должен создать ровно один закрытый лог")
+        directory = logs[0].parent
+        if stat.S_IMODE(directory.stat().st_mode) != 0o700:
+            fail("Каталог диагностики OpenTofu должен иметь права 0700")
+        if stat.S_IMODE(logs[0].stat().st_mode) != 0o600:
+            fail("Диагностический файл OpenTofu должен иметь права 0600")
+        private_text = logs[0].read_text(encoding="utf-8")
+        if "Permission denied" not in private_text or "Код возврата: 1" not in private_text:
+            fail("Лог должен сохранять исходную причину и код отказа")
+        if sensitive in private_text or "tester@pam!api=" in private_text:
+            fail("Из лога нужно скрывать PVE API-токен")
+        public_text = "\n".join(captured)
+        if sensitive in public_text or "Permission denied" in public_text:
+            fail("В терминале должен быть только путь к закрытому журналу")
+        if str(logs[0]) not in public_text:
+            fail("Оператор должен увидеть местоположение закрытого журнала")
+
+        # При неподтверждённом bind mount нельзя создавать лог на rootfs.
+        with (
+            patch.object(opentofu_module, "STATE_DIR", state_root),
+            patch.object(
+                opentofu_module, "_opentofu_state_is_mounted", return_value=False
+            ),
+        ):
+            if opentofu_module._save_private_tofu_init_log(failure, env) is not None:
+                fail("Недоступный постоянный том запрещает запись диагностики")
+        if len(list(directory.glob("*.log"))) != 1:
+            fail("При отсутствии bind mount появились лишние файлы")
+
+        # Не использовать каталог с групповым/мировым доступом.
+        directory.chmod(0o755)
+        try:
+            with (
+                patch.object(opentofu_module, "STATE_DIR", state_root),
+                patch.object(
+                    opentofu_module, "_opentofu_state_is_mounted", return_value=True
+                ),
+            ):
+                if opentofu_module._save_private_tofu_init_log(failure, env) is not None:
+                    fail("Небезопасные права каталога должны блокировать запись")
+        finally:
+            directory.chmod(0o700)
+
+        # Символическая ссылка на каталог диагностики также запрещена.
+        for log in directory.iterdir():
+            log.unlink()
+        directory.rmdir()
+        outside = Path(tmp) / "outside"
+        outside.mkdir()
+        directory.symlink_to(outside, target_is_directory=True)
+        with (
+            patch.object(opentofu_module, "STATE_DIR", state_root),
+            patch.object(
+                opentofu_module, "_opentofu_state_is_mounted", return_value=True
+            ),
+        ):
+            if opentofu_module._save_private_tofu_init_log(failure, env) is not None:
+                fail("Симлинк каталога диагностики запрещён")
+        if list(outside.iterdir()):
+            fail("Журнал OpenTofu записан через недоверенный симлинк")
+
+
 def check_deploy_provision_phase_selection() -> None:
     """Все этапы должны вызывать Ansible с прежними настройками доступа."""
     cases = (
@@ -1681,6 +1787,7 @@ def main_test() -> None:
     check_opentofu_state_status()
     check_missing_guest_recreation_safety()
     check_opentofu_provider_mirror()
+    check_private_tofu_init_failure_logging()
     check_project_branch_after_semaphore_branch_switch()
     check_infra_manager_self_update_path_after_vmid_change()
     check_infra_manager_self_update_points_to_recovery()
