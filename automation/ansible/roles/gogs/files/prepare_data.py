@@ -189,10 +189,12 @@ def configure(data: Path, domain: str, url: str, ssh_port: int) -> None:
             "PROTOCOL": "http",
             "HTTP_PORT": "3000",
             "DISABLE_SSH": "false",
-            "START_SSH_SERVER": "true",
+            # Исходный Docker Gogs запускает отдельный OpenSSH (порт 22).
+            # Встроенный SSH не включать: порт 2222 публикуется Docker Compose.
+            "START_SSH_SERVER": "false",
             "SSH_PORT": str(ssh_port),
             "SSH_DOMAIN": "192.168.3.10",
-            "SSH_LISTEN_PORT": str(ssh_port),
+            "SSH_LISTEN_PORT": "22",
         },
         "auth": {
             "REQUIRE_SIGNIN_VIEW": "true",
