@@ -692,7 +692,7 @@ def _backup_request(kind: str) -> dict:
     return data
 
 
-def _backup_overview_page(csrf: str, notice: str = "") -> bytes:
+def _backup_overview_page(csrf: str, notice: str = "", *, just_started: bool = False) -> bytes:
     def e(value: object) -> str:
         return html.escape(str(value) if value is not None else "—")
     try:
@@ -793,12 +793,16 @@ def _backup_overview_page(csrf: str, notice: str = "") -> bytes:
         '<button type="button" class="btn secondary" data-backup-refresh>'
         '↻ Обновить состояние</button>'
         '<span class="muted" id="backup-refreshed" role="status" aria-live="polite">'
-        'Обновление вручную · данные на момент открытия страницы</span></div>'
+        'Данные на момент открытия страницы</span>'
+        '<span class="muted" id="backup-live-poll" data-watch="' +
+        ('true' if just_started or timer.get("service") in {"active", "activating"}
+         else 'false') +
+        '">Автообновление каждые 4 секунды во время резервирования</span></div>'
         '<div id="backup-running" class="notice" data-tone="info" role="status"'
         + ('' if timer.get("service") in {"active", "activating"} else ' hidden') + '>'
         '<strong>Резервирование выполняется.</strong> '
-        'Нажми «Обновить состояние», чтобы увидеть результат. '
-        'Автоматического обновления нет.</div>'
+        'Состояние обновляется автоматически каждые 4 секунды, '
+        'пока копирование не завершится.</div>'
         '<div id="backup-summary" class="notice" data-tone="' + (
             "success" if backup.get("overall") == "two_recorded_copies"
             else "warning"
@@ -1462,7 +1466,7 @@ class Handler(BaseHTTPRequestHandler):
                           "результат ещё не подтверждён."
                           if query else "")
                 self._reply(HTTPStatus.OK, _backup_overview_page(
-                    session[1]["csrf"], notice,
+                    session[1]["csrf"], notice, just_started=bool(query),
                 ))
                 return
             try:
