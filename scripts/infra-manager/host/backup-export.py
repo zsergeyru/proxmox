@@ -516,7 +516,10 @@ def main() -> int:
             volume = expected["volume"]
             expected = expected["destinations"]
         check_destinations(expected)
-        check_sources()
+        # Томам не требуется доступ к OpenBao/Raft: повреждение ключей
+        # аварийного комплекта не должно блокировать независимые данные 310.
+        if args.command not in ("volume-repositories", "volume-prepare", "volume"):
+            check_sources()
         if args.command == "password":
             sys.stdout.buffer.write(password_bytes())
         elif args.command == "password-existing":
