@@ -67,6 +67,34 @@ details.panel>summary:hover{background:rgba(96,198,196,.055)}
 button:disabled{cursor:wait;opacity:.64}
 .backup-controls{padding:10px 0;align-items:center}
 .backup-controls #backup-refreshed{font-size:13px}
+
+.backup-lead{padding:24px 26px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);margin:0 0 18px}
+.backup-lead h2{font-size:clamp(21px,2vw,28px);margin:0 0 12px;letter-spacing:-.03em}
+.backup-lead p{margin:5px 0;color:var(--soft)}
+.backup-lead p strong{color:var(--text)}
+.backup-lead[data-tone="success"]{border-left:4px solid var(--success)}
+.backup-lead[data-tone="warning"]{border-left:4px solid var(--warning)}
+.backup-lead[data-tone="danger"]{border-left:4px solid var(--danger)}
+.backup-lead[data-tone="info"]{border-left:4px solid var(--accent)}
+.backup-lead .backup-media{margin-top:14px;font-size:13px}
+.backup-copy-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin:0 0 14px}
+.backup-copy{padding:19px 22px;background:var(--surface);border:1px solid var(--border);border-radius:15px}
+.backup-copy h3{margin:0 0 8px}
+.backup-copy-state{font-size:20px;font-weight:760;margin:2px 0 9px}
+.backup-copy[data-tone="success"] .backup-copy-state{color:var(--success)}
+.backup-copy[data-tone="warning"] .backup-copy-state{color:var(--warning)}
+.backup-copy .muted{font-size:13px;min-height:36px;margin:5px 0 12px}
+.backup-copy-meta{display:flex;flex-wrap:wrap;justify-content:space-between;gap:6px 16px;border-top:1px solid var(--border);padding-top:8px;margin-top:8px;color:var(--soft);font-size:13px}
+.backup-copy-meta strong{color:var(--text);font-weight:650}
+.backup-warning{color:var(--soft);font-size:13px;margin:0 0 24px}
+.backup-schedule .section-head{margin:0 0 8px}
+.backup-schedule .actions{margin-top:16px}
+.backup-schedule .actions p{margin:0}
+#backup-technical-details .details-content>h3{margin-top:24px}
+#backup-technical-details .details-content>details{margin-top:15px}
+#backup-technical-details .details-content>details summary{cursor:pointer;color:var(--accent)}
+@media(max-width:760px){.backup-copy-grid{grid-template-columns:1fr}.backup-controls{align-items:flex-start}.backup-lead{padding:19px}.backup-copy{padding:17px}}
+
 .actions{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
 .actions form,.guest-actions form{margin:0}
 label{display:block;color:var(--soft);font-size:13px;font-weight:600;margin-bottom:7px}
