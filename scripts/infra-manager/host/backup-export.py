@@ -433,6 +433,8 @@ def stream_volume(volume: dict) -> None:
                         if status.returncode:
                             raise ExportError("Не удалось проверить состояние гостя")
                         if status.stdout.strip() == "status: running":
+                            # Даже при ошибке shutdown гость может уже остановиться.
+                            stopped.append(vmid)
                             result = subprocess.run(
                                 ["pct", "shutdown", str(vmid), "--timeout", "40"],
                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
@@ -440,7 +442,6 @@ def stream_volume(volume: dict) -> None:
                             )
                             if result.returncode:
                                 raise ExportError("Не удалось согласованно остановить гостя")
-                            stopped.append(vmid)
                         elif status.stdout.strip() != "status: stopped":
                             raise ExportError("Неизвестное состояние LXC")
                     _thin_pool_ready()
@@ -455,11 +456,25 @@ def stream_volume(volume: dict) -> None:
                 finally:
                     failed = False
                     for vmid in reversed(stopped):
-                        resumed = subprocess.run(
-                            ["pct", "start", str(vmid)], stdout=subprocess.DEVNULL,
-                            stderr=subprocess.DEVNULL, check=False, timeout=90,
-                        )
-                        failed = failed or resumed.returncode != 0
+                        try:
+                            state = subprocess.run(
+                                ["pct", "status", str(vmid)], text=True,
+                                capture_output=True, check=False, timeout=20,
+                            )
+                            if state.returncode or state.stdout.strip() not in (
+                                "status: running", "status: stopped",
+                            ):
+                                failed = True
+                                continue
+                            if state.stdout.strip() == "status: running":
+                                continue
+                            resumed = subprocess.run(
+                                ["pct", "start", str(vmid)], stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL, check=False, timeout=90,
+                            )
+                            failed = failed or resumed.returncode != 0
+                        except subprocess.TimeoutExpired:
+                            failed = True
                     if failed:
                         raise ExportError("После снимка не удалось восстановить работу LXC")
                 result = subprocess.run(
