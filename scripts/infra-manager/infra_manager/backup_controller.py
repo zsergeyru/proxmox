@@ -514,6 +514,13 @@ def execute(*, run: bool = False) -> None:
             except InfraManagerError as exc:
                 problems[name] = str(exc)
         if not core_saved:
+            # Независимые данные не теряем из-за сбоя Raft/PVE-config.
+            if run and volume_jobs:
+                volume_problems = _backup_volumes(
+                    node, verified, key, OperationStore(), volume_jobs,
+                )
+                problems.update({"volume:" + name: reason
+                                 for name, reason in volume_problems.items()})
             raise InfraManagerError(
                 "Все задания архивирования PVE завершились ошибками: "
                 + "; ".join(problems.values())
