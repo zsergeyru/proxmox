@@ -12,15 +12,17 @@ import json
 import os
 import platform
 import re
+import stat
 import sys
 import tempfile
+import uuid
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .common import InfraManagerError, console, require_command, run
+from .common import CommandError, InfraManagerError, console, require_command, run
 from .guest_catalog import find_guest_by_role
 from .pve import PveClient
 from .settings import PATHS, SETTINGS
@@ -397,25 +399,111 @@ def _prepare_proxmox_provider_mirror(opentofu_dir: Path) -> Path:
     return PROVIDER_MIRROR_DIR
 
 
+def _opentofu_state_is_mounted() -> bool:
+    """Не сохранять секретосодержащую диагностику в случайный rootfs."""
+    try:
+        with Path("/proc/self/mountinfo").open(encoding="utf-8") as stream:
+            return any(
+                len(fields) > 4 and fields[4] == str(STATE_DIR)
+                for line in stream
+                for fields in [line.split(" - ", 1)[0].split()]
+            )
+    except OSError:
+        return False
+
+
+def _save_private_tofu_init_log(
+    exc: CommandError,
+    env: dict[str, str],
+) -> Path | None:
+    """Зафиксировать исходную ошибку tofu только в закрытом каталоге 910.
+
+    Никогда не подменять исходную ошибку сбоем записи журнала и никогда
+    не помещать stderr во внешний вывод. Вне подтверждённого bind mount
+    файл не создаётся. Права: каталог 0700, новый файл 0600.
+    """
+    if not _opentofu_state_is_mounted():
+        return None
+    directory = STATE_DIR / "diagnostics"
+    try:
+        if directory.is_symlink():
+            return None
+        directory.mkdir(mode=0o700, exist_ok=True)
+        info = directory.lstat()
+        if (
+            not stat.S_ISDIR(info.st_mode)
+            or info.st_uid != os.geteuid()
+            or stat.S_IMODE(info.st_mode) & 0o077
+        ):
+            return None
+
+        detail = exc.stderr or "(OpenTofu не предоставил stderr)"
+        # Сохраняем исходный текст причины, но скрываем известный PVE
+        # API-токен; другие возможные секреты защищены правами на файл.
+        token = env.get("TF_VAR_pve_api_token", "")
+        secrets = [token]
+        if "=" in token:
+            secrets.append(token.split("=", 1)[1])
+        for secret in secrets:
+            if len(secret) >= 8:
+                detail = detail.replace(secret, "[СКРЫТО]")
+
+        detail = detail[-32768:]
+        payload = (
+            "Этап: tofu init\\n"
+            f"Код возврата: {exc.returncode}\\n"
+            "--- Закрытый вывод OpenTofu (не публиковать без проверки) ---\\n"
+            f"{detail}\\n"
+        ).encode("utf-8", errors="replace")
+
+        destination = directory / f"tofu-init-{uuid.uuid4().hex}.log"
+        fd = os.open(
+            destination,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+            0o600,
+        )
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(payload)
+            stream.flush()
+            os.fsync(stream.fileno())
+        return destination
+    except OSError:
+        return None
+
+
 def _init(opentofu_dir: Path, env: dict[str, str]) -> None:
     """Инициализировать OpenTofu с закреплённым провайдером и состоянием.
 
     Файл блокировки не обновляется автоматически, пакет провайдера
     проверяется по хешу до использования."""
     mirror = _prepare_proxmox_provider_mirror(opentofu_dir)
-    run(
-        [
-            "tofu",
-            f"-chdir={opentofu_dir}",
-            "init",
-            "-input=false",
-            "-no-color",
-            "-lockfile=readonly",
-            f"-plugin-dir={mirror}",
-            f"-backend-config=path={STATE_FILE}",
-        ],
-        env=env,
-    )
+    try:
+        run(
+            [
+                "tofu",
+                f"-chdir={opentofu_dir}",
+                "init",
+                "-input=false",
+                "-no-color",
+                "-lockfile=readonly",
+                f"-plugin-dir={mirror}",
+                f"-backend-config=path={STATE_FILE}",
+            ],
+            env=env,
+        )
+    except CommandError as exc:
+        diagnostic = _save_private_tofu_init_log(exc, env)
+        if diagnostic is None:
+            console.diagnostic(
+                "Закрытый журнал tofu init не записан; "
+                "проверьте постоянное подключение и права infra-runtime."
+            )
+        else:
+            console.diagnostic(
+                f"Закрытый журнал tofu init: {diagnostic}. "
+                "Может содержать секреты — не публикуйте целиком."
+            )
+        raise
 
 
 def run_plan(repo_root: Path) -> int:
