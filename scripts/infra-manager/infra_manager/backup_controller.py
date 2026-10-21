@@ -320,8 +320,13 @@ def _stream_volume(node: str, verified: dict[str, str], key: Path,
         )
         try:
             assert export.stdin is not None
-            export.stdin.write(payload)
-            export.stdin.close()
+            try:
+                export.stdin.write(payload)
+                export.stdin.close()
+            except (BrokenPipeError, OSError) as exc:
+                raise InfraManagerError(
+                    "PVE преждевременно закрыл поток задания тома"
+                ) from exc
             assert export.stdout is not None
             failure = None
             try:
