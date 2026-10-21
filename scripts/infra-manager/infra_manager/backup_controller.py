@@ -464,6 +464,8 @@ def _backup_volumes(node: str, verified: dict[str, str], key: Path,
             "destination_dates": history,
             "destinations": sorted(history),
             "failed_destinations": sorted(failures),
+            "last_errors": {target: reason[:400]
+                            for target, reason in sorted(failures.items())},
             "verified": "restic-check-read-data-subset-1-percent",
             "restore_tested": False,
         })
