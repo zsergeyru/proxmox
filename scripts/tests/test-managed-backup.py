@@ -209,7 +209,9 @@ def check_pve_safe_failure_messages() -> None:
     for label in required:
         secret = ("[ОШИБКА] Архив не выдан: Не подготовлен PVE-only компонент: "
                   + label + "\n").encode()
-        assert label in backup_controller._pve_check_error(secret)
+        assert backup_controller._pve_check_error(secret) == (
+            backup_controller.PVE_CHECK_ERRORS[label]
+        )
     assert "secret-password" not in backup_controller._pve_check_error(
         b"[ERROR] secret-password"
     )
