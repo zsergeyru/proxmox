@@ -103,10 +103,18 @@ def test_snapshot_cleanup() -> None:
     def make_temp(*_args, **_kwargs):
         return original_temp()
     calls = []
+    state = {"running": True}
     def run(command, **_kwargs):
         calls.append(command)
         if command[:2] == ["pct", "status"]:
-            return SimpleNamespace(returncode=0, stdout="status: running\n")
+            return SimpleNamespace(
+                returncode=0,
+                stdout="status: running\n" if state["running"] else "status: stopped\n",
+            )
+        if command[:2] == ["pct", "shutdown"]:
+            state["running"] = False
+        if command[:2] == ["pct", "start"]:
+            state["running"] = True
         return SimpleNamespace(returncode=0, stdout="")
     volume = {
         "id": "gogs_data", "mountpoint": "/mnt/bindmounts/gogs-data",
@@ -134,12 +142,18 @@ def test_snapshot_cleanup() -> None:
     assert next(i for i, x in enumerate(calls) if x[:2] == ["pct", "start"]) < actions.index("tar")
 
     failure_calls = []
+    failure_state = {"running": True}
     def failed(command, **_kwargs):
         failure_calls.append(command)
         code = 1 if command[0] == "lvcreate" else 0
+        if command[:2] == ["pct", "shutdown"]:
+            failure_state["running"] = False
+        if command[:2] == ["pct", "start"]:
+            failure_state["running"] = True
         return SimpleNamespace(
             returncode=code,
-            stdout="status: running\n" if command[:2] == ["pct", "status"] else "",
+            stdout=("status: running\n" if failure_state["running"]
+                    else "status: stopped\n") if command[:2] == ["pct", "status"] else "",
         )
     with (
         patch.object(host, "_volume_contract", return_value=(
