@@ -66,6 +66,10 @@ chown -R 1001:0 "$1"
 """.strip()
 RUNTIME_DIRECT_SCRIPT = """
 trap 'rm -rf "$1"' EXIT INT TERM
+# Docker WORKDIR указывает на закрытый root-owned Git checkout.
+# Пользователь 1001 выполняет гостевую операцию из доступного ему снимка:
+# иначе tofu init может завершиться ошибкой getwd: permission denied.
+cd "$1"
 # Итоговый статус любого гостя печатает оператор PVE, а не Docker/Semaphore.
 # В обычном задании Semaphore единый итог остаётся внутри задания без секретов.
 if [ "$2" = "deploy" ]; then
