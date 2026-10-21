@@ -289,7 +289,7 @@ def _volume_record(store: OperationStore, name: str, now: datetime) -> dict:
         "state": "missing", "created_utc": None, "destinations": [],
         "check": "not_confirmed", "restore_tested": False,
         "destination_status": {name: "missing" for name in DESTINATIONS},
-        "destination_dates": {},
+        "destination_dates": {}, "last_errors": {},
     }
     file = store.settings / ("backup-volume-" + name + ".json")
     if not file.exists() and not file.is_symlink():
@@ -303,6 +303,12 @@ def _volume_record(store: OperationStore, name: str, now: datetime) -> dict:
                 or set(dates) - set(DESTINATIONS)
                 or not all(isinstance(x, str) for x in dates.values())):
             raise ValueError("Неизвестные назначения тома")
+        failures = record.get("last_errors", {})
+        if (not isinstance(failures, dict)
+                or set(failures) - set(DESTINATIONS)
+                or any(not isinstance(reason, str) or len(reason) > 400
+                       for reason in failures.values())):
+            raise ValueError("Некорректное описание последней ошибки тома")
         today = now.date()
         status = {}
         for target in DESTINATIONS:
@@ -321,7 +327,7 @@ def _volume_record(store: OperationStore, name: str, now: datetime) -> dict:
         return {
             "state": state, "created_utc": record.get("created_utc"),
             "destinations": sorted(good), "destination_status": status,
-            "destination_dates": dates,
+            "destination_dates": dates, "last_errors": failures,
             "check": "restic_subset_1_percent" if good else "not_confirmed",
             "restore_tested": record.get("restore_tested") is True,
         }
