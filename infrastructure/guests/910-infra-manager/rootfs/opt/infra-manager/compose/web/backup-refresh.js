@@ -119,15 +119,17 @@
     const protectedVolumes = volumes.filter((job) =>
       ["verified", "partial"].includes(records[job.record_key]?.state)).length;
     const complete = [core, vm100, full].every((x) => x.state === "verified");
+    const volumesIncomplete = protectedVolumes < volumes.length;
     const heading = running ? "Резервирование выполняется" :
       failed ? "Последний запуск завершился с ошибкой" :
-      complete ? "Копии PVE/910 и Home Assistant созданы" :
+      complete ? ("Копии PVE/910 и Home Assistant созданы" +
+        (volumesIncomplete ? "; не все постоянные тома защищены" : "")) :
       core.state === "verified" ? "Копия PVE/910 создана; Home Assistant ещё не подтверждён" :
       core.state === "stale" ? "Резервную копию PVE/910 нужно обновить" :
       "Подтверждённых резервных копий пока нет";
     const summary = el("backup-summary");
     if (summary) summary.dataset.tone = running ? "info" : failed ? "danger" :
-      complete ? "success" : "warning";
+      complete && !volumesIncomplete ? "success" : "warning";
     updateText("backup-summary-text", heading +
       (volumes.length ? " · Тома: " + protectedVolumes + "/" + volumes.length +
        " имеют актуальную копию" : ""));
