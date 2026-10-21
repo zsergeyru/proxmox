@@ -60,6 +60,34 @@ def saves(store, core=None, full=None, vm100=None):
 
 
 def main():
+    # Видимый в интерфейсе результат предыдущего systemd-задания должен
+    # классифицироваться, но не передавать сырые/секретные строки journalctl.
+    with patch.object(
+        backup_overview, "run",
+        return_value=SimpleNamespace(
+            returncode=0,
+            stdout="[ОЖИДАНИЕ] Резервирование: Нет доступного места: "
+                   "fast-ssd: PVE не подтвердил действие резервирования: check\n",
+        ),
+    ):
+        assert "PVE отверг проверку" in backup_overview._backup_failure_hint()
+    with patch.object(
+        backup_overview, "run",
+        return_value=SimpleNamespace(
+            returncode=0,
+            stdout="[ОЖИДАНИЕ] Резервирование: "
+                   "PVE: не подготовлен AppRole снимка OpenBao\n",
+        ),
+    ):
+        assert "AppRole" in backup_overview._backup_failure_hint()
+    with patch.object(
+        backup_overview, "run",
+        return_value=SimpleNamespace(
+            returncode=0,
+            stdout="[ОЖИДАНИЕ] Резервирование: password=very-secret\n",
+        ),
+    ):
+        assert "very-secret" not in backup_overview._backup_failure_hint()
     with tempfile.TemporaryDirectory() as directory:
         store = OperationStore(Path(directory) / "operations", require_mount=False)
         pve = SimpleNamespace(data=lambda *args, **kwargs: [
@@ -204,6 +232,10 @@ def main():
             injected = json.loads(json.dumps(single))
             injected["storage"]["volumes"][0]["id"] = "<script>alert(1)</script>"
             injected["backup"]["records"]["core"]["destinations"] = ["fast-ssd"]
+            injected["backup"]["timer"]["last_result"] = "exit-code"
+            injected["backup"]["timer"]["failure_hint"] = (
+                "Не хватает обязательного PVE-only компонента резервирования"
+            )
             http = admin.ThreadingHTTPServer(("127.0.0.1", 0), admin.Handler)
             thread = threading.Thread(target=http.serve_forever, daemon=True)
             thread.start()
@@ -224,6 +256,8 @@ def main():
                     assert status == 200 and "&lt;script&gt;" in body
                     assert "<script>alert(1)</script>" not in body
                     assert "Вторая независимая копия отсутствует" in body
+                    assert "Не хватает обязательного PVE-only компонента" in body
+                    assert "Последнее резервирование не выполнено" in body
                     assert "не является испытанием восстановления" in body
                     status, _, data = send(http, "/api/infrastructure", cookie=cookie)
                     assert status == 200
