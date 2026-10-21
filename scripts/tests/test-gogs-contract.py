@@ -97,8 +97,8 @@ def test_data_protection() -> None:
         settings.read_string("[__global__]\n" + saved)
         assert settings["server"]["DOMAIN"] == "git.zsergey.ru"
         assert settings["server"]["EXTERNAL_URL"] == "https://git.zsergey.ru/"
-        assert settings["server"]["START_SSH_SERVER"] == "true"
-        assert settings["server"]["SSH_LISTEN_PORT"] == "2222"
+        assert settings["server"]["START_SSH_SERVER"] == "false"
+        assert settings["server"]["SSH_LISTEN_PORT"] == "22"
         assert settings["server"]["SSH_DOMAIN"] == "192.168.3.10"
         assert settings["auth"]["REQUIRE_SIGNIN_VIEW"] == "true"
         assert settings["auth"]["DISABLE_REGISTRATION"] == "true"
@@ -145,13 +145,18 @@ def test_gogs_compose_and_manifest() -> None:
             "read_only": False,
         }
     ]
-    assert gogs["image"].startswith("docker.io/gogs/gogs@sha256:")
+    assert gogs["image"] == (
+        "docker.io/gogs/gogs@sha256:"
+        "593818f84e4f6233560706173fd5cdf8ba903065b9619c91bcbb796c3dc73e41"
+    )
     assert len(gogs["image"].split("@sha256:")[1]) == 64
     assert gogs["storage"]["require_import_before_start"] is True
     access = yaml.safe_load((ROOT / "infrastructure/security/access.yaml").read_text(encoding="utf-8"))
     targets = next(rule["targets"] for rule in access["rules"] if rule["id"] == "infra-manager-linux-guests")
     assert "guest:310" in targets
     assert gogs["network"]["ssh_public"] is False
+    assert gogs["network"]["ssh_port"] == 2222
+    assert gogs["network"]["ssh_container_port"] == 22
     assert gogs["network"]["public_url"] == "https://git.zsergey.ru/"
 
     env = Environment(
@@ -165,7 +170,7 @@ def test_gogs_compose_and_manifest() -> None:
     assert service["image"] == gogs["image"]
     assert service["ports"] == [
         "192.168.3.10:3000:3000",
-        "192.168.3.10:2222:2222",
+        "192.168.3.10:2222:22",
     ]
     assert service["volumes"] == ["/var/lib/gogs:/data"]
     assert service["security_opt"] == ["no-new-privileges:true"]

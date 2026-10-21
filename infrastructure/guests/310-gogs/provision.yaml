@@ -35,10 +35,9 @@ pve_storage:
       read_only: false
 
 gogs:
-  # Официальная сборка edge ветки 0.15, закреплённая по digest.
-  # Не заменять на изменяемый тег edge и не менять версию при deploy.
-  # Перед первым запуском требуется перенос и проверка копии данных Windows.
-  image: "docker.io/gogs/gogs@sha256:375be66dccefaa72a95afb8c0840f7ddf4d1c30e9b08991c68a9e1012f488259"
+  # Исходный образ Docker Desktop (Windows, amd64, сборка 2026-05-19).
+  # Не заменять на другую сборку edge без проверки копии SQLite и Git.
+  image: "docker.io/gogs/gogs@sha256:593818f84e4f6233560706173fd5cdf8ba903065b9619c91bcbb796c3dc73e41"
   source_version: "0.15.0+dev"
   container_name: gogs
   paths:
@@ -55,6 +54,9 @@ gogs:
     domain: git.zsergey.ru
     http_port: 3000
     ssh_port: 2222
+    # В исходном Docker-образе используется OpenSSH в контейнере на 22,
+    # в домашней сети остаётся прежний внешний порт 2222.
+    ssh_container_port: 22
     ssh_public: false
   storage:
     required_mount: /var/lib/gogs
