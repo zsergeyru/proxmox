@@ -144,6 +144,14 @@ def _credentials(node: str, directory: Path, verified: dict[str, str],
     return name
 
 
+RESTIC_STAGES = {
+    "init": "создание репозитория",
+    "snapshots": "проверка доступа к репозиторию",
+    "backup": "запись архива",
+    "check": "проверка целостности архива",
+}
+
+
 def _restic(node: str, destination: str, key: Path, args: list[str],
             *, source=None) -> None:
     """Запустить restic в управляющего гостя через подтверждённый root SSH/SFTP к PVE."""
@@ -172,8 +180,10 @@ def _restic(node: str, destination: str, key: Path, args: list[str],
         process.wait()
         raise InfraManagerError("Операция restic превысила время выполнения") from exc
     if code:
+        # Только известный этап, без stderr restic с возможными секретами.
+        stage = RESTIC_STAGES.get(args[0] if args else "", "операция restic")
         raise InfraManagerError(
-            f"Проверка или запись restic в {destination} завершилась с ошибкой"
+            f"restic: {stage} на {destination} завершилась ошибкой"
         )
 
 
