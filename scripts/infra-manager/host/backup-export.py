@@ -296,8 +296,15 @@ def _volume_contract(value: object) -> tuple[str, Path, Path, set[int]]:
     name = value["id"]
     if not isinstance(name, str) or not re.fullmatch(r"[a-z][a-z0-9_]{0,47}", name):
         raise ExportError("Недопустимое имя тома")
-    path = Path("/mnt/bindmounts") / name.replace("_", "-")
-    if value["mountpoint"] != str(path) or path.is_symlink() or not path.is_mount():
+    mountpoint = value["mountpoint"]
+    if (not isinstance(mountpoint, str)
+            or not mountpoint.startswith("/mnt/bindmounts/")
+            or ".." in Path(mountpoint).parts
+            or "//" in mountpoint
+            or str(Path(mountpoint)) != mountpoint):
+        raise ExportError("Недопустимый путь тома резервирования")
+    path = Path(mountpoint)
+    if path.is_symlink() or not path.is_mount():
         raise ExportError("Том не подтверждён по точке подключения")
     device = Path("/dev/pve") / name
     if not device.exists() or not device.is_block_device():
