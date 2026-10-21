@@ -142,6 +142,9 @@ jobs:
       - name: Check manager-owned backup preflight
         run: python scripts/tests/test-managed-backup.py
 
+      - name: Check universal persistent-volume backups
+        run: python scripts/tests/test-universal-volume-backup.py
+
       - name: Check staged runtime without Semaphore
         run: python scripts/tests/test-standalone-runtime.py
 
