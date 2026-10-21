@@ -1502,7 +1502,8 @@ def check_private_tofu_init_failure_logging() -> None:
             ),
             patch.object(opentofu_module, "run", side_effect=failure),
             patch.object(
-                opentofu_module.console, "diagnostic", side_effect=captured.append
+                opentofu_module, "console",
+                SimpleNamespace(diagnostic=captured.append),
             ),
         ):
             try:
