@@ -115,6 +115,11 @@ def test_snapshot_cleanup() -> None:
             state["running"] = False
         if command[:2] == ["pct", "start"]:
             state["running"] = True
+        if command[:2] == ["lvs", "--noheadings"]:
+            return SimpleNamespace(returncode=0, stdout="gogs_data Vwi-a-tz--")
+        if command[:2] == ["findmnt", "-rn"]:
+            snap = next(x[5] for x in calls if x[0] == "mount")
+            return SimpleNamespace(returncode=0, stdout=f"{snap} ro,relatime\n")
         return SimpleNamespace(returncode=0, stdout="")
     volume = {
         "id": "gogs_data", "mountpoint": "/mnt/bindmounts/gogs-data",
@@ -136,6 +141,12 @@ def test_snapshot_cleanup() -> None:
         assert item in actions
     assert actions.index("lvcreate") < actions.index("mount") < actions.index("tar")
     assert actions.index("tar") < actions.index("umount") < actions.index("lvremove")
+    mount_command = next(x for x in calls if x[0] == "mount")
+    assert mount_command[1:5] == ["-t", "ext4", "-o", "ro"]
+    assert "noload" not in mount_command
+    assert any(x[:5] == ["lvs", "--noheadings", "-o", "origin,lv_attr", mount_command[5]]
+               for x in calls)
+    assert any(x[:2] == ["findmnt", "-rn"] for x in calls)
     assert calls.index(["pct", "shutdown", "310", "--timeout", "40"]) < next(
         i for i, x in enumerate(calls) if x[0] == "lvcreate"
     )
@@ -168,6 +179,60 @@ def test_snapshot_cleanup() -> None:
         refused(lambda: host.stream_volume(volume))
     assert any(x[:2] == ["pct", "start"] for x in failure_calls)
     assert not any(x[0] == "tar" for x in failure_calls)
+
+
+def test_snapshot_readonly_guard_and_mount_error() -> None:
+    # На origin никакие mount/patch операции не допускаются. Проверка
+    # LVM обязана убедиться, что snapshot отдельный и writable для replay.
+    for output in ("infra_state Vwi-a-tz--", "gogs_data Vri-a-tz--", "", "gogs_data"):
+        with patch.object(
+            host.subprocess, "run",
+            return_value=SimpleNamespace(returncode=0, stdout=output),
+        ):
+            refused(lambda: host._verify_writable_thin_snapshot(
+                Path("/dev/pve/imbackup_gogs_data_demo"), "gogs_data",
+            ))
+    assert host._snapshot_mount_reason(
+        b"mount: fsconfig() failed: Structure needs cleaning."
+    ) == "ext4 требует восстановления журнала или orphan-файлов"
+    assert "SECRET" not in host._snapshot_mount_reason(b"SECRET-token from path")
+
+    volume = {"id": "gogs_data", "mountpoint": "/mnt/bindmounts/gogs-data",
+              "consumers": [310]}
+    done = []
+    state = {"running": True}
+    original = tempfile.TemporaryDirectory
+    def mount_fails(cmd, **_kwargs):
+        done.append(cmd)
+        if cmd[:2] == ["pct", "status"]:
+            return SimpleNamespace(returncode=0,
+                                   stdout=("status: running\n" if state["running"]
+                                           else "status: stopped\n"))
+        if cmd[:2] == ["pct", "shutdown"]:
+            state["running"] = False
+        if cmd[:2] == ["pct", "start"]:
+            state["running"] = True
+        if cmd[:2] == ["lvs", "--noheadings"]:
+            return SimpleNamespace(returncode=0, stdout="gogs_data Vwi-a-tz--")
+        if cmd[0] == "mount":
+            return SimpleNamespace(returncode=32,
+                                   stderr=b"fsconfig() failed: Structure needs cleaning.")
+        return SimpleNamespace(returncode=0, stdout="")
+    with (
+        patch.object(host, "_volume_contract", return_value=(
+            "gogs_data", Path(volume["mountpoint"]), Path("/dev/pve/gogs_data"), {310},
+        )),
+        patch.object(host, "_thin_pool_ready"),
+        patch.object(host, "_consumers_on_host", return_value=[310]),
+        patch.object(host, "_consistent_window", return_value=contextlib.nullcontext()),
+        patch.object(host.tempfile, "TemporaryDirectory",
+                     side_effect=lambda *_a, **_kw: original()),
+        patch.object(host.subprocess, "run", side_effect=mount_fails),
+    ):
+        refused(lambda: host.stream_volume(volume))
+    assert state["running"]
+    assert any(x[0] == "lvremove" for x in done)
+    assert not any(x[0] == "tar" for x in done)
 
 
 def test_records_and_restic() -> None:
@@ -267,6 +332,7 @@ def main() -> None:
     test_manifest()
     test_host_guards()
     test_snapshot_cleanup()
+    test_snapshot_readonly_guard_and_mount_error()
     test_records_and_restic()
     test_failure_diagnostics()
     print("[ОК] Универсальные тома, согласование LXC, Restic и веб-статус")
