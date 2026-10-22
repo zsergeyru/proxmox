@@ -407,6 +407,38 @@ def prepare_volume_repositories(expected: dict[str, str], volume: dict) -> None:
             raise ExportError("Не удалось подготовить каталог Restic")
 
 
+def _verify_writable_thin_snapshot(snapshot: Path, source_name: str) -> None:
+    """Доказать, что журнал ext4 будет меняться лишь на временном thin snapshot."""
+    result = subprocess.run(
+        ["lvs", "--noheadings", "-o", "origin,lv_attr", str(snapshot)],
+        capture_output=True, text=True, check=False, timeout=20,
+    )
+    if result.returncode:
+        raise ExportError("Не удалось подтвердить временный LVM snapshot")
+    parts = result.stdout.strip().split()
+    if (len(parts) != 2 or parts[0] != source_name
+            or not parts[1].startswith("Vw")):
+        raise ExportError("Временный LVM snapshot не подтверждён как доступный для записи")
+
+
+def _snapshot_mount_reason(stderr: bytes) -> str:
+    """Только закрытая классификация ошибок mount, без путей из stderr."""
+    message = stderr.decode("utf-8", errors="replace").lower()
+    if "no space left on device" in message:
+        return "нет места для журнала ext4 в LVM snapshot"
+    if "structure needs cleaning" in message or "orphan" in message:
+        return "ext4 требует восстановления журнала или orphan-файлов"
+    if "already mounted" in message or "mount point is busy" in message:
+        return "временная точка подключения занята"
+    if "permission denied" in message or "operation not permitted" in message:
+        return "PVE отклонил монтирование снимка"
+    if "can't read superblock" in message or "bad superblock" in message:
+        return "не удаётся прочитать суперблок ext4"
+    if "wrong fs type" in message or "unknown filesystem type" in message:
+        return "несовместимый тип файловой системы снимка"
+    return "неопределённая ошибка монтирования снимка"
+
+
 def stream_volume(volume: dict) -> None:
     """Согласовать все LXC; снять тонкий snapshot; возобновить LXC до чтения."""
     import secrets
@@ -477,14 +509,35 @@ def stream_volume(volume: dict) -> None:
                             failed = True
                     if failed:
                         raise ExportError("После снимка не удалось восстановить работу LXC")
+                # Исходный том по-прежнему смонтирован RW. LVM-snapshot
+                # отдельный writable thin LV, поэтому допускается replay
+                # журнала ext4 *внутри временной копии* (ни одного изменения
+                # на origin). ro,noload отвергает orphan_present/needs_recovery.
+                # ПЕРЕД mount строго сверяем origin и RW snapshot через LVM.
+                _verify_writable_thin_snapshot(snapshot, name)
                 result = subprocess.run(
-                    ["mount", "-t", "ext4", "-o", "ro,noload", str(snapshot), str(target)],
-                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    ["mount", "-t", "ext4", "-o", "ro", str(snapshot), str(target)],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
                     check=False, timeout=40,
                 )
                 if result.returncode:
-                    raise ExportError("Снимок тома не удалось подключить только для чтения")
+                    raise ExportError(
+                        "Снимок тома не удалось подключить только для чтения: "
+                        + _snapshot_mount_reason(result.stderr or b"")
+                    )
                 mounted = True
+                # Даже после replay журнал должен остаться только в snapshot;
+                # рабочий том не монтируем и не изменяем.
+                result = subprocess.run(
+                    ["findmnt", "-rn", "-o", "SOURCE,OPTIONS",
+                     "--mountpoint", str(target)],
+                    text=True, capture_output=True, check=False, timeout=20,
+                )
+                actual = result.stdout.strip().split(None, 1)
+                if (result.returncode or len(actual) != 2
+                        or os.path.realpath(actual[0]) != os.path.realpath(snapshot)
+                        or "ro" not in actual[1].split(",")):
+                    raise ExportError("Временный снимок не подтверждён в режиме read-only")
                 result = subprocess.run(
                     ["tar", "--create", "--file", "-", "--numeric-owner",
                      "--xattrs", "--acls", "--one-file-system", "-C", str(target), "."],
