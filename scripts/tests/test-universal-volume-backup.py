@@ -103,7 +103,7 @@ def test_snapshot_cleanup() -> None:
     def make_temp(*_args, **_kwargs):
         return original_temp()
     calls = []
-    state = {"running": True}
+    state = {"running": True, "activated": False}
     def run(command, **_kwargs):
         calls.append(command)
         if command[:2] == ["pct", "status"]:
@@ -116,7 +116,13 @@ def test_snapshot_cleanup() -> None:
         if command[:2] == ["pct", "start"]:
             state["running"] = True
         if command[:2] == ["lvs", "--noheadings"]:
-            return SimpleNamespace(returncode=0, stdout="gogs_data Vwi-a-tz--")
+            return SimpleNamespace(
+                returncode=0,
+                stdout=("gogs_data Vwi-a-tz-k" if state["activated"]
+                        else "gogs_data Vwi---tz-k"),
+            )
+        if command[0] == "lvchange":
+            state["activated"] = True
         if command[:2] == ["findmnt", "-rn"]:
             snap = next(x[5] for x in calls if x[0] == "mount")
             return SimpleNamespace(returncode=0, stdout=f"{snap} ro,relatime\n")
@@ -134,12 +140,16 @@ def test_snapshot_cleanup() -> None:
         patch.object(host, "_consistent_window", return_value=contextlib.nullcontext()),
         patch.object(host.tempfile, "TemporaryDirectory", side_effect=make_temp),
         patch.object(host.subprocess, "run", side_effect=run),
+        patch.object(Path, "is_block_device", return_value=True),
     ):
         host.stream_volume(volume)
     actions = [x[0] for x in calls]
     for item in ("lvcreate", "mount", "tar", "umount", "lvremove"):
         assert item in actions
-    assert actions.index("lvcreate") < actions.index("mount") < actions.index("tar")
+    assert actions.index("lvcreate") < actions.index("lvchange") < actions.index("mount") < actions.index("tar")
+    activation = next(x for x in calls if x[0] == "lvchange")
+    assert activation[:3] == ["lvchange", "-ay", "-K"]
+    assert activation[3].startswith("/dev/pve/imbackup_gogs_data_")
     assert actions.index("tar") < actions.index("umount") < actions.index("lvremove")
     mount_command = next(x for x in calls if x[0] == "mount")
     assert mount_command[1:5] == ["-t", "ext4", "-o", "ro"]
@@ -200,7 +210,7 @@ def test_snapshot_readonly_guard_and_mount_error() -> None:
     volume = {"id": "gogs_data", "mountpoint": "/mnt/bindmounts/gogs-data",
               "consumers": [310]}
     done = []
-    state = {"running": True}
+    state = {"running": True, "activated": False}
     original = tempfile.TemporaryDirectory
     def mount_fails(cmd, **_kwargs):
         done.append(cmd)
@@ -213,7 +223,11 @@ def test_snapshot_readonly_guard_and_mount_error() -> None:
         if cmd[:2] == ["pct", "start"]:
             state["running"] = True
         if cmd[:2] == ["lvs", "--noheadings"]:
-            return SimpleNamespace(returncode=0, stdout="gogs_data Vwi-a-tz--")
+            return SimpleNamespace(returncode=0,
+                                   stdout=("gogs_data Vwi-a-tz-k" if state["activated"]
+                                           else "gogs_data Vwi---tz-k"))
+        if cmd[0] == "lvchange":
+            state["activated"] = True
         if cmd[0] == "mount":
             return SimpleNamespace(returncode=32,
                                    stderr=b"fsconfig() failed: Structure needs cleaning.")
@@ -228,11 +242,53 @@ def test_snapshot_readonly_guard_and_mount_error() -> None:
         patch.object(host.tempfile, "TemporaryDirectory",
                      side_effect=lambda *_a, **_kw: original()),
         patch.object(host.subprocess, "run", side_effect=mount_fails),
+        patch.object(Path, "is_block_device", return_value=True),
     ):
         refused(lambda: host.stream_volume(volume))
     assert state["running"]
     assert any(x[0] == "lvremove" for x in done)
     assert not any(x[0] == "tar" for x in done)
+
+    # Ошибка активации не должна пробовать mount или оставлять LVM-снимок.
+    done.clear()
+    state.update(running=True, activated=False)
+    def activation_fails(cmd, **kwargs):
+        if cmd[0] == "lvchange":
+            done.append(cmd)
+            return SimpleNamespace(returncode=5)
+        return mount_fails(cmd, **kwargs)
+    with (
+        patch.object(host, "_volume_contract", return_value=(
+            "gogs_data", Path(volume["mountpoint"]), Path("/dev/pve/gogs_data"), {310},
+        )),
+        patch.object(host, "_thin_pool_ready"),
+        patch.object(host, "_consumers_on_host", return_value=[310]),
+        patch.object(host, "_consistent_window", return_value=contextlib.nullcontext()),
+        patch.object(host.tempfile, "TemporaryDirectory",
+                     side_effect=lambda *_a, **_kw: original()),
+        patch.object(host.subprocess, "run", side_effect=activation_fails),
+    ):
+        refused(lambda: host.stream_volume(volume))
+    assert state["running"]
+    assert any(x[0] == "lvremove" for x in done)
+    assert not any(x[0] in ("mount", "tar") for x in done)
+
+    # LVM вернул успех, но устройство так и не появилось: прервать безопасно.
+    for present in (False,):
+        calls = []
+        def active(cmd, **_kwargs):
+            calls.append(cmd)
+            if cmd[:2] == ["lvs", "--noheadings"]:
+                return SimpleNamespace(returncode=0, stdout="gogs_data Vwi-a-tz-k")
+            return SimpleNamespace(returncode=0, stdout="")
+        with (
+            patch.object(host.subprocess, "run", side_effect=active),
+            patch.object(Path, "is_block_device", return_value=present),
+        ):
+            refused(lambda: host._activate_thin_snapshot(
+                Path("/dev/pve/imbackup_gogs_data_demo"), "gogs_data",
+            ))
+        assert any(x[0] == "lvchange" for x in calls)
 
 
 def test_records_and_restic() -> None:

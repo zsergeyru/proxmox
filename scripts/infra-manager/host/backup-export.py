@@ -407,8 +407,10 @@ def prepare_volume_repositories(expected: dict[str, str], volume: dict) -> None:
             raise ExportError("Не удалось подготовить каталог Restic")
 
 
-def _verify_writable_thin_snapshot(snapshot: Path, source_name: str) -> None:
-    """Доказать, что журнал ext4 будет меняться лишь на временном thin snapshot."""
+def _verify_writable_thin_snapshot(
+    snapshot: Path, source_name: str, *, require_active: bool = False,
+) -> None:
+    """Проверить происхождение и состояние отдельного writable thin snapshot."""
     result = subprocess.run(
         ["lvs", "--noheadings", "-o", "origin,lv_attr", str(snapshot)],
         capture_output=True, text=True, check=False, timeout=20,
@@ -419,6 +421,23 @@ def _verify_writable_thin_snapshot(snapshot: Path, source_name: str) -> None:
     if (len(parts) != 2 or parts[0] != source_name
             or not parts[1].startswith("Vw")):
         raise ExportError("Временный LVM snapshot не подтверждён как доступный для записи")
+    if require_active and (len(parts[1]) < 5 or parts[1][4] != "a"):
+        raise ExportError("Временный LVM snapshot не активирован")
+
+
+def _activate_thin_snapshot(snapshot: Path, source_name: str) -> None:
+    """LVM-thin snapshots имеют activation-skip (k); активировать только свой LV."""
+    _verify_writable_thin_snapshot(snapshot, source_name)
+    result = subprocess.run(
+        ["lvchange", "-ay", "-K", str(snapshot)],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        check=False, timeout=60,
+    )
+    if result.returncode:
+        raise ExportError("LVM не смог активировать временный thin snapshot")
+    _verify_writable_thin_snapshot(snapshot, source_name, require_active=True)
+    if not snapshot.is_block_device():
+        raise ExportError("Блочное устройство временного LVM snapshot не появилось")
 
 
 def _snapshot_mount_reason(stderr: bytes) -> str:
@@ -513,8 +532,9 @@ def stream_volume(volume: dict) -> None:
                 # отдельный writable thin LV, поэтому допускается replay
                 # журнала ext4 *внутри временной копии* (ни одного изменения
                 # на origin). ro,noload отвергает orphan_present/needs_recovery.
-                # ПЕРЕД mount строго сверяем origin и RW snapshot через LVM.
-                _verify_writable_thin_snapshot(snapshot, name)
+                # ПЕРЕД mount сверяем origin, активируем ТОЛЬКО свой snapshot
+                # с activation-skip (k) и проверяем блочное устройство.
+                _activate_thin_snapshot(snapshot, name)
                 result = subprocess.run(
                     ["mount", "-t", "ext4", "-o", "ro", str(snapshot), str(target)],
                     stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,

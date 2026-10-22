@@ -169,6 +169,12 @@ CHECK_FAILURES = {
 # Не передавать пользователю произвольный текст journalctl или stderr.
 VOLUME_FAILURE_HINTS = {
     "LVM не создал временный snapshot": "PVE: LVM не создал временный снимок тома",
+    "Не удалось активировать LVM thin snapshot (lvchange -ay -K)":
+        "PVE: не удалось активировать временный LVM thin snapshot",
+    "Временный LVM thin snapshot остаётся неактивным":
+        "PVE: временный LVM thin snapshot остался неактивным",
+    "Не появилось блочное устройство временного LVM thin snapshot":
+        "PVE: не появилось блочное устройство временного LVM snapshot",
     "Не удалось подключить LVM snapshot только для чтения":
         "PVE: временный снимок тома не удалось смонтировать",
     "PVE не подтвердил writable thin snapshot выбранного тома":
