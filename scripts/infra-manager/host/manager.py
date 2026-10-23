@@ -139,16 +139,21 @@ def proxy_to_manager(arguments: list[str]) -> int:
     if arguments == ["deploy", str(vmid)]:
         from infra_manager_python_deps import restore_manager_python_dependency
         restore_manager_python_dependency(vmid, run=run, error_type=OperatorError)
-    if arguments == ["deploy", "nas"]:
-        # Вспомогательный модуль устанавливается рядом с PVE-оболочкой.
+    if (
+        len(arguments) == 2
+        and arguments[0] == "deploy"
+        and re.fullmatch(r"[a-z][a-z0-9-]*", arguments[1])
+    ):
+        # Физическая цель определяется по имени, без знания конкретного NAS.
+        name_of_host = arguments[1]
         sys.path.insert(0, str(Path(__file__).resolve().parent))
-        from infra_manager_nas_bootstrap import initial_nas_access
+        from infra_manager_nas_bootstrap import initial_host_access
 
-        bootstrap_result = initial_nas_access("nas", forward, OperatorError)
-        if bootstrap_result != 0:
-            return bootstrap_result
+        trust_result = initial_host_access(name_of_host, forward, OperatorError)
+        if trust_result != 0:
+            return trust_result
         from infra_manager_nas_storage import confirm_nas_storage
-        storage_result = confirm_nas_storage("nas", forward, OperatorError)
+        storage_result = confirm_nas_storage(name_of_host, forward, OperatorError)
         if storage_result != 0:
             return storage_result
     return forward(arguments)
