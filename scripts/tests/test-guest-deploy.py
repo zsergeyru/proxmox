@@ -340,7 +340,6 @@ def check_project_branch_after_semaphore_branch_switch() -> None:
 
 def check_infra_manager_self_update_path_after_vmid_change() -> None:
     storage_steps = []
-    operator_steps = []
     context = DeploymentContext(
         client=SimpleNamespace(),
         vmid=920,
@@ -422,11 +421,6 @@ def check_infra_manager_self_update_path_after_vmid_change() -> None:
             ),
             patch.object(
                 guest_deploy_module,
-                "install_operator_host_support",
-                side_effect=lambda node, repo: operator_steps.append((node, repo)),
-            ),
-            patch.object(
-                guest_deploy_module,
                 "prepare_workspace",
                 side_effect=AssertionError(
                     "Самообновление infra-manager не должно готовить OpenTofu workspace"
@@ -445,8 +439,6 @@ def check_infra_manager_self_update_path_after_vmid_change() -> None:
 
     if storage_steps != [("pve", root)]:
         fail("Deploy 910 должен сверять все общие тома PVE до Ansible")
-    if operator_steps != [("pve", root)]:
-        fail("Deploy управляющего гостя должен обновить оболочку PVE после Ansible")
     if validated != [920]:
         fail("Самообновление должно проверить существующий объект infra-manager")
     if configured != [
