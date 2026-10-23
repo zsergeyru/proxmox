@@ -1,4 +1,4 @@
-"""Первоначальное доверие физического NAS по паролю существующего sudo-пользователя.
+"""Первоначальное SSH-доверие физического сервера по паролю существующего пользователя.
 
 Пароль используется только в памяти для одного SSH-подключения.
 Временных пользователей, постоянных ключей и файлов с паролем нет.
@@ -142,17 +142,20 @@ def _install_client_ca(
         'trap \'rm -f "$ca_tmp" "$config_tmp"\' EXIT',
         f"printf '%s\\n' {ca} > \"$ca_tmp\" || exit 44",
         'chmod 0644 "$ca_tmp" || exit 45',
-        "printf '%s\\n' 'TrustedUserCAKeys /etc/ssh/trusted-user-ca-keys.pem' 'PermitRootLogin prohibit-password' > \"$config_tmp\" || exit 46",
+        # OMV может задавать PermitRootLogin в управляемом sshd_config.
+        # Не перезаписывать его: достаточно разрешить сертификатный вход,
+        # а фактический вход root проверяется отдельным SSH-сеансом OpenBao.
+        "printf '%s\\n' 'TrustedUserCAKeys /etc/ssh/trusted-user-ca-keys.pem' > \"$config_tmp\" || exit 46",
         'chmod 0644 "$config_tmp" || exit 47',
         'mv -f "$ca_tmp" /etc/ssh/trusted-user-ca-keys.pem || exit 48',
         'mv -f "$config_tmp" /etc/ssh/sshd_config.d/40-infra-manager-user-ca.conf || exit 49',
         "/usr/sbin/sshd -t || exit 50",
         "sshd_effective=$(/usr/sbin/sshd -T -C user=root,host=localhost,addr=127.0.0.1) || exit 51",
         'printf "%s\\n" "$sshd_effective" | grep -Fxq "trustedusercakeys /etc/ssh/trusted-user-ca-keys.pem" || exit 52',
-        'printf "%s\\n" "$sshd_effective" | grep -Eq "^permitrootlogin (prohibit-password|without-password)$" || exit 53',
+        'printf "%s\\n" "$sshd_effective" | grep -Eq "^permitrootlogin (yes|prohibit-password|without-password)$" || exit 53',
         "systemctl reload ssh.service || exit 54",
     ])
-    with tempfile.TemporaryDirectory(prefix="nas-password-ssh-") as temp:
+    with tempfile.TemporaryDirectory(prefix="physical-password-ssh-") as temp:
         known_hosts = _scan_verified_key(host, Path(temp))
         ssh = paramiko.SSHClient()
         ssh.load_host_keys(str(known_hosts))
@@ -188,7 +191,7 @@ def _install_client_ca(
                 50: "Ошибка проверки sshd -t; проверьте настройки SSH",
                 51: "Не удалось прочитать действующую конфигурацию sshd -T",
                 52: "sshd не применил TrustedUserCAKeys из 40-infra-manager-user-ca.conf",
-                53: "Действующий PermitRootLogin не равен prohibit-password",
+                53: "Действующий PermitRootLogin запрещает вход root по SSH-сертификату",
                 54: "Не удалось перечитать службу ssh.service",
             }
             if code != 0:
@@ -203,7 +206,7 @@ def _install_client_ca(
                 )
         except (paramiko.SSHException, OSError) as exc:
             raise InfraManagerError(
-                "Не удалось войти по паролю в NAS или подтвердить SSH-ключ"
+                f"Не удалось войти по паролю в {host.name} или подтвердить SSH-ключ"
             ) from exc
         finally:
             ssh.close()
@@ -225,7 +228,7 @@ def bootstrap_physical_host(
     username = credentials.get("username") if isinstance(credentials, dict) else None
     password = credentials.get("password") if isinstance(credentials, dict) else None
     if not isinstance(username, str) or not _USER.fullmatch(username):
-        raise InfraManagerError("Некорректное имя администратора NAS")
+        raise InfraManagerError("Некорректное имя пользователя физического сервера")
     if not isinstance(password, str) or not password or "\n" in password or "\r" in password:
         raise InfraManagerError("Пустой или некорректный пароль для первого подключения")
     try:
@@ -242,7 +245,7 @@ def bootstrap_physical_host(
     if host.ssh_host_fingerprint is None:
         host = discover_first_host_key(host)
         console.info(
-            f"Первый SSH-ключ NAS принят автоматически: {host.ssh_host_fingerprint}. "
+            f"Первый SSH-ключ {host.name} принят автоматически: {host.ssh_host_fingerprint}. "
             "После успешного входа он будет закреплён для следующих подключений"
         )
     _install_client_ca(host, username, password, public_ca)
@@ -252,7 +255,7 @@ def bootstrap_physical_host(
         verified, _reason = session.verify_connection()
         if not verified:
             raise InfraManagerError(
-                "Доверие к OpenBao настроено, но NAS не подтвердил "
+                f"Доверие к OpenBao настроено, но {host.name} не подтвердил "
                 "вход по сертификату root. Проверьте PermitRootLogin "
                 "и настройки SSH; повторная установка ОС не требуется."
             )
