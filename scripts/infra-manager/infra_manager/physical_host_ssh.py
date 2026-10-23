@@ -1,7 +1,7 @@
 """Доверенный административный SSH к физическому серверу.
 
-Сравнивает ключ сервера с заранее подтверждённым отпечатком. Получение
-ключа из сети само по себе никогда не считается подтверждением доверия.
+При первом развёртывании автоматически запоминает полученный SSH-ключ.
+При последующих подключениях сверяет его с сохранённым отпечатком.
 """
 
 from __future__ import annotations
@@ -9,6 +9,7 @@ from __future__ import annotations
 import re
 import shlex
 import tempfile
+from dataclasses import replace
 from pathlib import Path
 
 from .common import InfraManagerError, run
@@ -17,6 +18,44 @@ from .pve_host import sign_ssh_client_key
 
 
 _FINGERPRINT = re.compile(r"^SHA256:[A-Za-z0-9+/]{43}$")
+
+
+def discover_first_host_key(host: PhysicalHost) -> PhysicalHost:
+    """При первом подключении выбрать единственный SSH-ключ Ed25519 NAS.
+
+    Запись доверия производится только после успешной проверки OpenBao.
+    """
+
+    if not host.address or host.ssh_host_fingerprint is not None:
+        raise InfraManagerError("Первый поиск SSH-ключа допустим только без закреплённого ключа")
+    response = run(
+        ["ssh-keyscan", "-T", "10", "-p", str(host.port),
+         "-t", "ed25519", host.address],
+        check=False, capture_output=True,
+    )
+    if response.returncode != 0:
+        raise InfraManagerError("NAS не ответил на первоначальный запрос SSH-ключа")
+    keys = set()
+    for line in response.stdout.splitlines():
+        parts = line.split()
+        if len(parts) >= 3 and parts[1] == "ssh-ed25519":
+            keys.add(parts[2])
+    if len(keys) != 1:
+        raise InfraManagerError("Не удалось получить единственный SSH Ed25519 ключ NAS")
+    with tempfile.TemporaryDirectory(prefix="nas-initial-key-") as directory:
+        candidate = Path(directory) / "host.pub"
+        candidate.write_text(f"ssh-ed25519 {next(iter(keys))}\n", encoding="utf-8")
+        result = run(
+            ["ssh-keygen", "-E", "sha256", "-lf", str(candidate)],
+            capture_output=True, check=False,
+        )
+    fingerprints = [
+        value for value in result.stdout.split()
+        if _FINGERPRINT.fullmatch(value)
+    ]
+    if result.returncode != 0 or len(fingerprints) != 1:
+        raise InfraManagerError("Не удалось вычислить отпечаток SSH-ключа NAS")
+    return replace(host, ssh_host_fingerprint=fingerprints[0])
 
 
 def _scan_verified_key(host: PhysicalHost, directory: Path) -> Path:
