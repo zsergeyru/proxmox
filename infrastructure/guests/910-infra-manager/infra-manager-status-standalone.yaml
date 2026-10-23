@@ -20,6 +20,8 @@ checks:
     message: "OpenTofu, Ansible и Packer готовы"
   - type: pve_access
     message: "Доступ к PVE подтверждён"
+  - type: ssh_host_renewal
+    message: "Плановое продление SSH-сертификатов включено"
 
 data:
   address:
