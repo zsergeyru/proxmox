@@ -195,6 +195,45 @@ def test_status_uses_real_systemd_timer() -> None:
         refuse(status._check_ssh_host_renewal)
 
 
+def test_scheduler_skips_missing_and_stopped_pve_guests() -> None:
+    """Автообновление не считает отсутствующих гостей неисправными."""
+
+    guests = [
+        SimpleNamespace(vmid=310, name="gogs", address="192.0.2.15", source={}),
+        SimpleNamespace(vmid=410, name="ai-control", address="192.0.2.16", source={}),
+        SimpleNamespace(vmid=420, name="ai-services", address="192.0.2.17", source={}),
+    ]
+    resources = [
+        {"vmid": 310, "name": "gogs", "node": "pve", "status": "running"},
+        {"vmid": 410, "name": "ai-control", "node": "pve", "status": "stopped"},
+    ]
+    invoked = []
+    with (
+        patch("pathlib.Path.is_mount", return_value=True),
+        patch.object(renew, "load_manifest", return_value={"defaults": {"node": "pve"}}),
+        patch.object(renew, "deployable_guests", return_value=guests),
+        patch.object(renew, "PveClient", return_value=SimpleNamespace(
+            data=lambda *args, **kwargs: resources,
+        )),
+        patch.object(renew, "_renew_one", side_effect=lambda *args: invoked.append(args) or "продлён"),
+    ):
+        assert renew.run_scheduled() == 0
+    assert invoked == [(310, "gogs", "192.0.2.15", "pve")]
+    resources[0]["name"] = "other"
+    invoked.clear()
+    with (
+        patch("pathlib.Path.is_mount", return_value=True),
+        patch.object(renew, "load_manifest", return_value={"defaults": {"node": "pve"}}),
+        patch.object(renew, "deployable_guests", return_value=guests),
+        patch.object(renew, "PveClient", return_value=SimpleNamespace(
+            data=lambda *args, **kwargs: resources,
+        )),
+        patch.object(renew, "_renew_one", side_effect=lambda *args: invoked.append(args) or "продлён"),
+    ):
+        assert renew.run_scheduled() == 1
+    assert not invoked
+
+
 def main() -> None:
     test_persistent_pin()
     test_remote_rollover_script()
@@ -202,6 +241,7 @@ def main() -> None:
     test_expired_recovers_only_with_saved_key()
     test_changed_key_rejected()
     test_status_uses_real_systemd_timer()
+    test_scheduler_skips_missing_and_stopped_pve_guests()
     print("[ОК] Плановое продление SSH Host CA и безопасное восстановление проверены")
 
 
