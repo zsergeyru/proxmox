@@ -297,10 +297,13 @@ def register_omv(role: str, filesystem: str, source: str, path: str) -> str:
         raise StorageError(
             f"В OMV уже зарегистрирован другой том {role}; замена запрещена"
         )
-    uid = str(uuid.uuid4())
+    # OMV: произвольный UUID означает уже существующий объект,
+    # а специальный OMV_CONFIGOBJECT_NEW_UUID создаётся самим confdbadm.
+    # Не передаём uuid: Object() использует именно этот служебный UUID
+    # и автоматически назначает постоянный UUID при первом db.set().
     if filesystem == "ext4":
         entry = {
-            "uuid": uid, "fsname": source, "dir": path, "type": "ext4",
+            "fsname": source, "dir": path, "type": "ext4",
             "opts": "defaults,nofail,user_xattr,acl",
             "freq": 0, "passno": 2, "hidden": False,
         }
@@ -315,7 +318,21 @@ def register_omv(role: str, filesystem: str, source: str, path: str) -> str:
         "omv-confdbadm", "update", "conf.system.filesystem.mountpoint",
         json.dumps(entry, ensure_ascii=False),
     )
-    return uid
+    # UUID для нового объекта присваивается OMV, а не нашим кодом.
+    created = [
+        record for record in omv_records()
+        if record.get("dir") == path or record.get("fsname") == source
+    ]
+    if (
+        len(created) != 1
+        or created[0].get("dir") != path
+        or created[0].get("fsname") != source
+        or created[0].get("type") != filesystem
+        or not isinstance(created[0].get("uuid"), str)
+        or not re.fullmatch(r"[a-fA-F0-9-]{36}", created[0]["uuid"])
+    ):
+        raise StorageError("OMV не подтвердила регистрацию нового тома")
+    return created[0]["uuid"]
 
 
 def verify_mount(path: str, filesystem: str, source: str) -> None:
