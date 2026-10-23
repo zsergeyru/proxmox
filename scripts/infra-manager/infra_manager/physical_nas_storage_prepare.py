@@ -25,6 +25,30 @@ from .physical_storage_plan import StoragePlan, propose_storage
 
 RESULT_PREFIX = "NAS_STORAGE_RESULT="
 
+def _safe_storage_failure(stderr: str) -> str:
+    """Вывести только известные операции и коды, без содержимого stdout."""
+
+    allowed = {
+        "omv-confdbadm", "omv-salt", "mount", "findmnt", "zpool",
+        "sgdisk", "mkfs.ext4", "blkid", "udevadm", "lsblk", "wipefs",
+    }
+    for line in stderr.splitlines():
+        match = re.fullmatch(
+            r"ОШИБКА: Не выполнилась команда ([a-z0-9.]{1,32}) "
+            r"\\(код ([0-9]{1,3})\\)", line.strip()
+        )
+        if match and match.group(1) in allowed:
+            return (
+                f"Команда {match.group(1)} завершилась с кодом "
+                f"{match.group(2)}"
+            )
+    if "Журнал не соответствует" in stderr or "Подтверждение не совпадает" in stderr:
+        return "Исходный журнал HDD не соответствует проверенным дискам"
+    if "Пул " in stderr and " не принадлежит " in stderr:
+        return "Один из существующих ZFS-пулов использует другой диск"
+    return "Удалённый исполнитель завершился с ошибкой (подробности скрыты для защиты данных)"
+
+
 
 def read_pending_recovery(host: PhysicalHost, session: PhysicalHostSshSession,
                           plan: StoragePlan) -> dict[str, object] | None:
@@ -218,8 +242,10 @@ def prepare_blank_disks(repo_root: Path, host: PhysicalHost,
     )
     if result.returncode:
         raise InfraManagerError(
-            "Подготовка HDD на NAS остановлена. Если началась запись, "
-            "проверьте журнал /etc/nas-apps/storage-preparation.json. "
+            "Подготовка HDD на NAS остановлена: "
+            + _safe_storage_failure(result.stderr or "")
+            + ". Если началась запись, проверьте журнал "
+            "/etc/nas-apps/storage-preparation.json. "
             "Повторное форматирование автоматически запрещено"
         )
     outputs = [
@@ -238,4 +264,8 @@ def prepare_blank_disks(repo_root: Path, host: PhysicalHost,
     system = read_nas_system(session)
     verify_nas_volumes(finished, system, session)
     save_storage_identity(finished, list(finished.devices), finished.volumes)
-    console.result("HDD подготовлены, зарегистрированы в OMV и сохранены по UUID/GUID")
+    console.result(
+        ("Ранее созданные HDD проверены и зарегистрированы в OMV "
+         "без повторного форматирования" if pending is not None else
+         "HDD подготовлены, зарегистрированы в OMV и сохранены по UUID/GUID")
+    )
