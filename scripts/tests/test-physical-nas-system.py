@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import sys
+import yaml
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -73,12 +74,33 @@ def test_unconfirmed_volumes() -> None:
         remote.assert_not_called()
 
 
+def test_nas_apt_diagnostic_guard() -> None:
+    """Ошибка обновления APT должна быть отличима от форматирования HDD."""
+
+    path = ROOT / "automation/ansible/playbooks/configure-nas.yml"
+    document = yaml.safe_load(path.read_text(encoding="utf-8"))
+    assert isinstance(document, list) and len(document) == 1
+    tasks = document[0]["tasks"]
+    package_step = next(item for item in tasks if item.get("name") ==
+        "Установить средства диагностики, не изменяя разметку")
+    install = package_step["block"][0]["ansible.builtin.apt"]
+    assert install["state"] == "present"
+    assert install["update_cache"] is False
+    assert any("getent" in str(entry) for entry in package_step["rescue"])
+    assert "На HDD ничего не форматировалось" in str(package_step["rescue"])
+    ansible = (ROOT / "scripts/infra-manager/infra_manager/physical_nas_ansible.py"
+              ).read_text(encoding="utf-8")
+    assert '"ANSIBLE_LOG_PATH": "/dev/null"' in ansible
+    assert '"ANSIBLE_SSH_TRANSFER_METHOD": "piped"' in ansible
+
+
 def main() -> int:
     """Запустить проверки без настоящего сервера."""
 
     test_system()
     test_paths()
     test_unconfirmed_volumes()
+    test_nas_apt_diagnostic_guard()
     print("[ОК] Безопасные проверки OMV и подключений пройдены")
     return 0
 
