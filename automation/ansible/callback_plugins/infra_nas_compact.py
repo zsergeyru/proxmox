@@ -138,6 +138,36 @@ class CallbackModule(CallbackBase):
                     self._display.display("[РЕПОЗИТОРИЙ] " + host)
                 for reason in self._apt_reasons(apt_output):
                     self._display.display("[ПРИЧИНА] " + reason)
+        elif task == "Проверить DNS основного репозитория OMV после ошибки APT":
+            rc = data.get("rc")
+            if isinstance(rc, int):
+                self._display.display(
+                    "[ПРОВЕРКА] DNS packages.openmediavault.org: "
+                    + ("работает" if rc == 0 else "не удалось разрешить имя")
+                )
+        elif task == "Проверить HTTPS-ответ основного репозитория OMV после ошибки APT":
+            # Только фиксированные числовые значения curl: stdout может быть
+            # недоверенным и никогда не должен выводиться без фильтрации.
+            code = str(data.get("stdout", "")).strip()
+            if re.fullmatch(r"[1-5][0-9]{2}", code):
+                self._display.display(
+                    f"[ПРОВЕРКА] HTTPS-запрос к OMV: HTTP {code} "
+                    "(независимая проверка, не ответ APT)"
+                )
+            elif code == "000":
+                self._display.display(
+                    "[ПРОВЕРКА] HTTPS-запрос к OMV: HTTP-ответ не получен"
+                )
+            rc = data.get("rc")
+            curl_reasons = {
+                6: "не удалось разрешить DNS-имя",
+                7: "не удалось подключиться к серверу",
+                28: "время ожидания соединения истекло",
+                35: "ошибка TLS-соединения",
+                60: "сертификат TLS не прошёл проверку",
+            }
+            if isinstance(rc, int) and rc in curl_reasons:
+                self._display.display("[ПРИЧИНА] Проверка HTTPS: " + curl_reasons[rc])
         elif data.get("changed"):
             self._display.display("[ОК] " + task)
 
