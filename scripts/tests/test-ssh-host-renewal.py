@@ -182,15 +182,15 @@ def test_status_uses_real_systemd_timer() -> None:
         commands.append(args)
         return SimpleNamespace(returncode=0)
 
-    with patch.object(status.command_runner, "run", side_effect=enabled):
+    with patch.object(status, "command_runner", SimpleNamespace(run=enabled)):
         status._check_ssh_host_renewal()
     assert commands == [
         ["systemctl", "is-enabled", "--quiet", "infra-manager-ssh-host-renewal.timer"],
         ["systemctl", "is-active", "--quiet", "infra-manager-ssh-host-renewal.timer"],
     ]
     with patch.object(
-        status.command_runner, "run",
-        return_value=SimpleNamespace(returncode=3),
+        status, "command_runner",
+        SimpleNamespace(run=lambda *args, **kwargs: SimpleNamespace(returncode=3)),
     ):
         refuse(status._check_ssh_host_renewal)
 
