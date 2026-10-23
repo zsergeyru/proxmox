@@ -24,6 +24,7 @@ class StorageAssignment:
     size: int
     action: str
     path_for_display: str
+    inspection: DiskInspection | None = None
 
 
 @dataclass(frozen=True)
@@ -108,7 +109,7 @@ def propose_storage(
             action = "create-ext4" if role == "shared" else "create-zfs"
         entries.append(StorageAssignment(
             role, disk.serial, disk.model,
-            disk.capacity_bytes, action, disk.path,
+            disk.capacity_bytes, action, disk.path, disk,
         ))
     present = {entry.role for entry in entries}
     if present != {"system", "shared", "data", "backup"}:
@@ -122,6 +123,25 @@ def propose_storage(
         json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
     return StoragePlan(tuple(entries), fingerprint)
+
+
+def observed_disk_condition(assignment: StorageAssignment) -> str:
+    """Описать фактическое состояние диска из lsblk, а не только планируемое действие."""
+
+    disk = assignment.inspection
+    if disk is None:
+        return "Детали текущей разметки не получены"
+    if disk.contains_existing_layout:
+        layout = "обнаружена существующая разметка или файловая система"
+    else:
+        layout = "разметка, разделы и файловые системы не обнаружены"
+    return (
+        f"Устройство сейчас {disk.path}; {layout}; "
+        f"таблица разделов: {disk.partition_table or 'нет'}; "
+        f"ФС самого диска: {disk.filesystem or 'нет'}; "
+        f"разделов: {len(disk.partitions)}; "
+        f"подключения: {', '.join(disk.mountpoints) if disk.mountpoints else 'нет'}"
+    )
 
 
 def format_storage_plan(plan: StoragePlan) -> str:
@@ -145,6 +165,10 @@ def format_storage_plan(plan: StoragePlan) -> str:
             f"({entry.size // 10**9} ГБ), номер {entry.serial}, "
             f"{actions[entry.action]}"
         )
+        lines.append("    Сейчас: " + observed_disk_condition(entry))
+        if entry.inspection is not None:
+            for partition in entry.inspection.partitions:
+                lines.append("    Раздел: " + partition)
     lines.append(f"Контрольный отпечаток плана: {plan.fingerprint}")
     lines.append(
         "Это только просмотр. Подготовка дисков не выполнялась."
