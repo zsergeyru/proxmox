@@ -95,6 +95,9 @@ jobs:
       - name: Check confirmed NAS storage preparation
         run: python scripts/tests/test-physical-storage-prepare.py
 
+      - name: Check automatic SSH Host CA renewal and recovery
+        run: python scripts/tests/test-ssh-host-renewal.py
+
       - name: Check first NAS SSH access
         run: python scripts/tests/test-physical-bootstrap.py
 
