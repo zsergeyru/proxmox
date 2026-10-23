@@ -446,6 +446,52 @@ def test_omv_new_mount_is_created_by_omv() -> None:
         command.assert_not_called()
 
 
+
+def test_omv_new_zfs_mount_is_created_without_preassigned_uuid() -> None:
+    """Восстановление двух готовых ZFS-пулов не должно упасть из-за uid."""
+
+    script = _load_remote()
+    assigned_uuid = "bbbbbbbb-cccc-4ddd-8eee-ffffffffffff"
+    record = {
+        "uuid": assigned_uuid, "fsname": "nas-data",
+        "dir": "/nas-data", "type": "zfs",
+    }
+    calls = []
+    reads = iter(([], [record]))
+
+    def read_records():
+        return next(reads)
+
+    def fake_execute(*argv):
+        calls.append(argv)
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    with (
+        patch.object(script, "omv_records", side_effect=read_records),
+        patch.object(script, "execute", side_effect=fake_execute),
+    ):
+        actual = script.register_omv("data", "zfs", "nas-data", "/nas-data")
+    assert actual == assigned_uuid
+    assert len(calls) == 1
+    assert calls[0][:3] == (
+        "omv-confdbadm", "update", "conf.system.filesystem.mountpoint"
+    )
+    payload = json.loads(calls[0][3])
+    assert "uuid" not in payload
+    assert payload["fsname"] == "nas-data"
+    assert payload["dir"] == "/nas-data"
+    assert payload["type"] == "zfs"
+
+    # Успешная повторная регистрация той же ФС не должна её пересоздавать.
+    with (
+        patch.object(script, "omv_records", return_value=[record]),
+        patch.object(script, "execute") as execute,
+    ):
+        assert script.register_omv("data", "zfs", "nas-data", "/nas-data") == assigned_uuid
+        execute.assert_not_called()
+
+
+
 def test_recover_existing_hdds_never_reformats() -> None:
     """Ранее созданные ext4 и ZFS проверяются, но не форматируются заново."""
 
