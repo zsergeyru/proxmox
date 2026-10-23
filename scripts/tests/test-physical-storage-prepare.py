@@ -114,9 +114,8 @@ def test_existing_shared_confirmation() -> None:
         DiskInspection("/dev/sda", "SPCC", "SYSTEM-TEST", 120_000_000_000, True, True),
         DiskInspection("/dev/sdb", "ST1000DM003", "SHARED-TEST", 1_000_000_000_000, False, True),
         DiskInspection("/dev/sdc", "ST4000VX016", "ZFS-A", 4_000_000_000_000, False, False),
-        DiskInspection("/dev/sdd", "ST4000VX016", "ZFS-B", 4_000_000_000, False, False),
+        DiskInspection("/dev/sdd", "ST4000VX016", "ZFS-B", 4_000_000_000_000, False, False),
     )
-    disks = (*disks[:3], replace(disks[3], capacity_bytes=4_000_000_000_000))
     plan = propose_storage(host.devices, disks)
     assert [item.action for item in plan.assignments] == [
         "preserve", "preserve", "create-zfs", "create-zfs",
@@ -135,7 +134,7 @@ def test_existing_shared_confirmation() -> None:
         if capture_output:
             return SimpleNamespace(
                 returncode=0, stderr="",
-                stdout="Plan\\nNAS_STORAGE_PLAN_JSON=" + json.dumps(output) + "\\n",
+                stdout="Plan\nNAS_STORAGE_PLAN_JSON=" + json.dumps(output) + "\n",
             )
         return 0
 
@@ -145,7 +144,7 @@ def test_existing_shared_confirmation() -> None:
         patch("builtins.input", return_value="да"),
     ):
         assert confirm_nas_storage("nas", forward, RuntimeError) == 0
-    shown = "\\n".join(str(call.args[0]) for call in printed.call_args_list)
+    shown = "\n".join(str(call.args[0]) for call in printed.call_args_list)
     assert "SHARED-TEST" in shown
     assert "НЕ ФОРМАТИРУЕТСЯ" in shown
     assert "ZFS-A" in shown and "ZFS-B" in shown
@@ -262,7 +261,7 @@ def test_preserved_shared_verification() -> None:
 
     def fake_execute(*args, **_kwargs):
         if args[0] == "blkid":
-            return SimpleNamespace(returncode=0, stdout=uid + "\\n")
+            return SimpleNamespace(returncode=0, stdout=uid + "\n")
         if args[0] == "findmnt":
             return SimpleNamespace(returncode=0, stdout=json.dumps(mounted))
         raise AssertionError("Существующий HDD проверяется только чтением")
