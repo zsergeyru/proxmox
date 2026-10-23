@@ -38,7 +38,7 @@ _INSTALL = r"""
 import json
 import os
 import pathlib
-import subprocess
+import subprocess as sp
 import sys
 import tempfile
 
@@ -51,11 +51,11 @@ if current != pub or len(current) != 2 or current[0] != "ssh-ed25519":
     raise SystemExit("SSH host key изменился во время продления")
 
 def check(*command):
-    return subprocess.run(command, capture_output=True, text=True, timeout=20).returncode == 0
+    return sp.run(command, capture_output=True, text=True, timeout=20).returncode == 0
 
 if not check("/usr/sbin/sshd", "-t"):
     raise SystemExit("Действующая конфигурация sshd не проходит sshd -t")
-effective = subprocess.run(
+effective = sp.run(
     ["/usr/sbin/sshd", "-T"], capture_output=True, text=True, timeout=20,
 )
 if effective.returncode or (
@@ -72,7 +72,7 @@ try:
         stream.flush()
         os.fsync(stream.fileno())
     os.chmod(name, 0o644)
-    inspected = subprocess.run(
+    inspected = sp.run(
         ["ssh-keygen", "-L", "-f", name],
         capture_output=True, text=True, timeout=20,
     )
@@ -95,7 +95,7 @@ try:
             old = None
         else:
             path.unlink(missing_ok=True)
-        subprocess.run(["systemctl", "reload", "ssh.service"], capture_output=True, timeout=20)
+        sp.run(["systemctl", "reload", "ssh.service"], capture_output=True, timeout=20)
         raise SystemExit("Не удалось применить сертификат: прежний восстановлен")
 finally:
     if name is not None:
