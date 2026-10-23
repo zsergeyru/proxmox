@@ -39,22 +39,39 @@ def confirm_nas_storage(name: str, forward, error_type: type[Exception]) -> int:
         raise error_type("План HDD не содержит все четыре диска")
     if not plan.get("requires_creation"):
         return 0
-    if [item.get("action") for item in items if isinstance(item, dict)] != [
-        "preserve", "create-ext4", "create-zfs", "create-zfs"
-    ]:
+    if not all(isinstance(item, dict) for item in items):
+        raise error_type("План HDD содержит некорректное описание диска")
+    if [item.get("role") for item in items] != ["system", "shared", "data", "backup"]:
+        raise error_type("План HDD содержит неполное или неоднозначное назначение ролей")
+    actions = [item.get("action") for item in items]
+    if actions not in (
+        ["preserve", "create-ext4", "create-zfs", "create-zfs"],
+        ["preserve", "preserve", "create-zfs", "create-zfs"],
+    ):
         raise error_type(
-            "Обнаружены ранее настроенные HDD или неполный состав. "
-            "Автоматическое форматирование смешанного набора запрещено"
+            "План HDD не поддерживается автоматической подготовкой. "
+            "Разрешено создать два новых ZFS-диска, сохранив ранее настроенный ext4, "
+            "либо подготовить три пустых HDD"
         )
+    to_create = items[1:] if actions[1] == "create-ext4" else items[2:]
+    serials = [item.get("serial") for item in items]
+    if any(
+        not isinstance(serial, str) or not re.fullmatch(r"[A-Za-z0-9._:-]{1,128}", serial)
+        for serial in serials
+    ) or len(set(serials)) != 4:
+        raise error_type("Не удалось однозначно определить серийные номера накопителей")
     if not sys.stdin.isatty():
         raise error_type(
             "Для подтверждения форматирования HDD требуется интерактивный терминал PVE"
         )
-    print(
-        "\nВНИМАНИЕ: подготовка УНИЧТОЖИТ любые нераспознанные данные на "
-        "перечисленных трёх HDD. Системный SSD не изменяется."
-    )
-    answer = input("Подготовить указанные HDD с удалением данных? [да/нет]: ").strip().casefold()
+    print("\nВНИМАНИЕ: будут подготовлены только следующие диски:")
+    for item in to_create:
+        print(f"  {item['role']}: {item['serial']} ({item['action']})")
+    if actions[1] == "preserve":
+        print(f"Существующий HDD 1 ТБ ({items[1]['serial']}) НЕ ФОРМАТИРУЕТСЯ.")
+        print("Перед записью на новые диски NAS проверит его ext4, UUID, OMV и подключение.")
+    print("Форматирование уничтожит данные на перечисленных новых дисках.")
+    answer = input("Подготовить ТОЛЬКО указанные новые HDD? [да/нет]: ").strip().casefold()
     if answer != "да":
         raise error_type("Подготовка отменена: требуется явное «да», диски не изменены")
     payload = json.dumps({"fingerprint": fingerprint}) + "\n"
