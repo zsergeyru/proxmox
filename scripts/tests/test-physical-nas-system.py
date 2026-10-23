@@ -96,12 +96,19 @@ def test_nas_apt_diagnostic_guard() -> None:
     assert '"ANSIBLE_STDOUT_CALLBACK": "infra_nas_compact"' in ansible
     assert '"ANSIBLE_CALLBACK_PLUGINS": str(' in ansible
     assert '"ansible_python_interpreter": "/usr/bin/python3"' in ansible
+    packages = next(item for item in tasks if item.get("name") ==
+        "Проверить недостающие пакеты ZFS и Docker")
+    assert packages["register"] == "nas_required_packages"
+    assert "docker-compose-plugin" in packages["ansible.builtin.command"]["argv"]
+    assert packages["ansible.builtin.command"]["argv"][2].endswith(r"\n")
     after_extras = next(item for item in tasks if item.get("name") ==
         "Обновить перечень пакетов после установки OMV-Extras")
     command = after_extras["ansible.builtin.command"]["argv"]
     assert command == ["apt-get", "-o", "APT::Update::Error-Mode=any", "update"]
     assert after_extras["failed_when"] is False
     assert after_extras["register"] == "nas_apt_refresh"
+    assert "nas_required_packages.stdout_lines" in after_extras["when"]
+    assert "!= 6" in after_extras["when"]
     fail = next(item for item in tasks if item.get("name") ==
         "Прервать настройку из-за ошибки обновления APT")
     assert "nas_apt_refresh.rc" in str(fail["when"])
