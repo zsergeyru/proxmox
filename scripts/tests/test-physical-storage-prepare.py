@@ -446,6 +446,51 @@ def test_omv_new_mount_is_created_by_omv() -> None:
         command.assert_not_called()
 
 
+
+def test_omv_new_zfs_mount_is_created_without_caller_uuid() -> None:
+    """Новый ZFS-пул регистрируется через OMV и при повторе не дублируется."""
+
+    script = _load_remote()
+    assigned_uuid = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+    entry = {
+        "uuid": assigned_uuid, "fsname": "nas-data",
+        "dir": "/nas-data", "type": "zfs",
+    }
+    commands = []
+    reads = 0
+
+    def read_records():
+        nonlocal reads
+        reads += 1
+        return [] if reads == 1 else [entry]
+
+    def run_command(*argv):
+        commands.append(argv)
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    with (
+        patch.object(script, "omv_records", side_effect=read_records),
+        patch.object(script, "execute", side_effect=run_command),
+    ):
+        assert script.register_omv("data", "zfs", "nas-data", "/nas-data") == assigned_uuid
+    assert len(commands) == 1
+    payload = json.loads(commands[0][3])
+    assert commands[0][:3] == (
+        "omv-confdbadm", "update", "conf.system.filesystem.mountpoint"
+    )
+    assert "uuid" not in payload
+    assert payload["fsname"] == "nas-data"
+    assert payload["dir"] == "/nas-data"
+    assert payload["type"] == "zfs"
+
+    with (
+        patch.object(script, "omv_records", return_value=[entry]),
+        patch.object(script, "execute") as command,
+    ):
+        assert script.register_omv("data", "zfs", "nas-data", "/nas-data") == assigned_uuid
+        command.assert_not_called()
+
+
 def test_recover_existing_hdds_never_reformats() -> None:
     """Ранее созданные ext4 и ZFS проверяются, но не форматируются заново."""
 
@@ -613,6 +658,7 @@ def main():
     test_preserved_shared_verification()
     test_apply_preserves_shared()
     test_omv_new_mount_is_created_by_omv()
+    test_omv_new_zfs_mount_is_created_without_caller_uuid()
     test_recover_existing_hdds_never_reformats()
     test_pending_recovery_is_auto_dispatched_without_format_prompt()
     print("[ОК] Подтверждение и подготовка HDD проверены на искусственных данных")
