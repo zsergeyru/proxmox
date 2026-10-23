@@ -309,7 +309,7 @@ def register_omv(role: str, filesystem: str, source: str, path: str) -> str:
         }
     else:
         entry = {
-            "uuid": uid, "fsname": source, "dir": path, "type": "zfs",
+            "fsname": source, "dir": path, "type": "zfs",
             "opts": "rw,relatime,xattr,noacl,casesensitive",
             "freq": 0, "passno": 0, "hidden": True,
             "usagewarnthreshold": 0, "comment": "",
