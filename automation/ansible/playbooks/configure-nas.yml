@@ -112,10 +112,32 @@
         state: present
       when: nas_omv_extras.stdout is not search('install ok installed')
 
+    # Модуль apt скрывает истинную причину ошибочного update-cache после
+    # пяти повторов. apt-get даёт stdout/stderr для безопасной классификации.
+    # Error-Mode=any запрещает считать частично недоступные репозитории успехом.
     - name: Обновить перечень пакетов после установки OMV-Extras
-      ansible.builtin.apt:
-        update_cache: true
+      ansible.builtin.command:
+        argv:
+          - apt-get
+          - -o
+          - APT::Update::Error-Mode=any
+          - update
+      register: nas_apt_refresh
+      changed_when: nas_apt_refresh.rc == 0
+      failed_when: false
       when: nas_omv_extras.stdout is not search('install ok installed')
+
+    - name: Прервать настройку из-за ошибки обновления APT
+      ansible.builtin.fail:
+        msg: >-
+          Не удалось обновить индексы пакетов после установки OMV-Extras
+          (код APT {{ nas_apt_refresh.rc }}).
+          Проверьте вывод диагностики выше; изменение разметки дисков
+          не начиналось. После исправления репозиториев повторите
+          infra-manager deploy nas.
+      when:
+        - nas_apt_refresh is not skipped
+        - nas_apt_refresh.rc | default(0) != 0
 
     - name: Установить расширения OMV для ZFS и Docker
       ansible.builtin.apt:
@@ -123,8 +145,7 @@
           - openmediavault-zfs
           - openmediavault-compose
         state: present
-        update_cache: true
-        cache_valid_time: 3600
+        update_cache: false
 
     - name: Проверить наличие модуля ZFS после установки расширения
       ansible.builtin.command:
@@ -150,8 +171,7 @@
           - containerd.io
           - docker-compose-plugin
         state: present
-        update_cache: true
-        cache_valid_time: 3600
+        update_cache: false
 
     - name: Запустить Docker с автоматическим запуском после загрузки NAS
       ansible.builtin.systemd_service:
