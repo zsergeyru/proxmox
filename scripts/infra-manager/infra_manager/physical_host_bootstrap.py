@@ -92,6 +92,32 @@ def _save_bootstrapped(host: PhysicalHost) -> None:
         Path(name).unlink(missing_ok=True)
 
 
+def confirm_redeploy_host_key(host: PhysicalHost, expected_fingerprint: str) -> bool:
+    """После явного согласия оператора закрепить текущий ключ физического узла.
+
+    Доверие не меняется, если полученный ключ не совпадает с показанным оператору.
+    Запись HDD не изменяется: идентичность накопителей проверяется отдельно.
+    """
+
+    previous = resolve_saved_host(host)
+    if not marker_path(host.name).is_file():
+        raise InfraManagerError("Первое SSH-доверие ещё не установлено")
+    if not isinstance(expected_fingerprint, str) or not _FINGERPRINT.fullmatch(expected_fingerprint):
+        raise InfraManagerError("Некорректный отпечаток подтверждённого ключа")
+    current = discover_first_host_key(replace(previous, ssh_host_fingerprint=None))
+    if current.ssh_host_fingerprint != expected_fingerprint:
+        raise InfraManagerError("SSH-ключ изменился после подтверждения; повторите развёртывание")
+    changed = previous.ssh_host_fingerprint != expected_fingerprint
+    if changed:
+        if host.ssh_host_fingerprint is not None:
+            raise InfraManagerError(
+                "В host.yaml зафиксирован другой SSH-отпечаток; "
+                "сначала обновите машинное описание"
+            )
+        _save_bootstrapped(current)
+    return changed
+
+
 def _install_client_ca(
     host: PhysicalHost, username: str, password: str, public_ca: str
 ) -> None:
