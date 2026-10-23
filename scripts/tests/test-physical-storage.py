@@ -32,7 +32,7 @@ def fixture() -> dict[str, object]:
                 "fstype": None, "uuid": None, "pttype": "gpt",
                 "mountpoints": [None],
                 "children": [
-                    {"type": "part", "mountpoints": ["/"], "fstype": "ext4"}
+                    {"type": "part", "path": "/dev/sda1", "mountpoints": ["/"], "fstype": "ext4"}
                 ],
             },
             {
@@ -71,7 +71,7 @@ def test_existing_partition() -> None:
 
     data = fixture()
     data["blockdevices"][1]["children"] = [
-        {"type": "part", "mountpoints": [None], "fstype": None}
+        {"type": "part", "path": "/dev/sdb1", "mountpoints": [None], "fstype": None}
     ]
     disks = read_disk_inspection(json.dumps(data))
     assert disks[1].contains_existing_layout
