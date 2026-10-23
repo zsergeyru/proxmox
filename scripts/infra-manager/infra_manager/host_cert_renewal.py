@@ -163,8 +163,9 @@ def _save_pin(vmid: int, name: str, address: str, pub: str) -> None:
         Path(temp_name).unlink(missing_ok=True)
 
 
-def _remaining(raw: str) -> timedelta:
-    """Прочитать срок из стандартного вывода ssh-keygen -L."""
+def _remaining(raw: str, *, hostname: str | None = None,
+               address: str | None = None) -> timedelta:
+    """Проверить назначение и срок из стандартного вывода ssh-keygen -L."""
 
     with tempfile.TemporaryDirectory(prefix="host-cert-read-") as directory:
         path = Path(directory) / "cert.pub"
@@ -172,6 +173,18 @@ def _remaining(raw: str) -> timedelta:
         result = run(["ssh-keygen", "-L", "-f", str(path)], capture_output=True, check=False)
     if result.returncode != 0 or "host certificate" not in result.stdout:
         raise InfraManagerError("Сервер вернул некорректный SSH host certificate")
+    if hostname is not None or address is not None:
+        for principal in (hostname, address):
+            if (
+                not isinstance(principal, str) or not principal
+                or not re.search(
+                    r"(?m)^\\s+" + re.escape(principal) + r"\\s*$",
+                    result.stdout,
+                )
+            ):
+                raise InfraManagerError(
+                    "Новый SSH host certificate не содержит ожидаемого имени/IP"
+                )
     match = VALID_TO.search(result.stdout)
     if not match:
         raise InfraManagerError("Нельзя определить окончание SSH host certificate")
@@ -226,7 +239,7 @@ def _renew_one(vmid: int, name: str, address: str, node: str) -> str:
             node, key, vmid=vmid, hostname=name, address=address,
         )
         # Проверить новое содержимое и срок до первой записи на госте.
-        if _remaining(certificate) <= RENEW_BEFORE:
+        if _remaining(certificate, hostname=name, address=address) <= RENEW_BEFORE:
             raise InfraManagerError("OpenBao выдал сертификат с недостаточным сроком")
         with GuestSshSession(
             node, address, pinned_host_key=key if restored else None
