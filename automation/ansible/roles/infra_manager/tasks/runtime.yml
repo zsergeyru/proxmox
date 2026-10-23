@@ -194,6 +194,39 @@
     mode: preserve
   register: infra_manager_python_files
 
+- name: Создать постоянный каталог доверенных ключей для продления SSH
+  ansible.builtin.file:
+    path: /mnt/persistent-state/ssh-host-renewal
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Установить службу продления SSH-сертификатов гостей
+  ansible.builtin.copy:
+    src: "{{ guest_root }}/rootfs/etc/systemd/system/infra-manager-ssh-host-renewal.service"
+    dest: /etc/systemd/system/infra-manager-ssh-host-renewal.service
+    owner: root
+    group: root
+    mode: "0644"
+  register: infra_ssh_renewal_service
+
+- name: Установить расписание продления SSH-сертификатов
+  ansible.builtin.copy:
+    src: "{{ guest_root }}/rootfs/etc/systemd/system/infra-manager-ssh-host-renewal.timer"
+    dest: /etc/systemd/system/infra-manager-ssh-host-renewal.timer
+    owner: root
+    group: root
+    mode: "0644"
+  register: infra_ssh_renewal_timer
+
+- name: Включить плановую проверку SSH-сертификатов
+  ansible.builtin.systemd_service:
+    name: infra-manager-ssh-host-renewal.timer
+    enabled: true
+    state: started
+    daemon_reload: "{{ infra_ssh_renewal_service.changed or infra_ssh_renewal_timer.changed }}"
+
 - name: Установить службу проверки прерванных операций
   ansible.builtin.copy:
     src: "{{ guest_root }}/rootfs/etc/systemd/system/infra-manager-operation-reconcile.service"
