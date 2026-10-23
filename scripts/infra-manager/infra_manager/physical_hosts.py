@@ -25,6 +25,7 @@ class PhysicalHost:
     port: int
     user: str
     ssh_host_fingerprint: str | None
+    driver: str
     devices: tuple[dict[str, object], ...]
     directory: Path
     volumes: dict[str, dict[str, object]] | None = None
@@ -60,8 +61,9 @@ def load_physical_host(repo_root: Path, name: str) -> PhysicalHost:
     # Диски и тома принадлежат только storage.yaml; host.yaml описывает
     # систему и связь с ней. Не поддерживать конкурирующий источник данных.
     storage = load_physical_storage(repo_root, name)
+    driver = data["management"]["driver"]
     roles = [entry["role"] for entry in storage.devices]
-    if name == "nas":
+    if driver == "omv8":
         # Исполнитель сейчас независимо выбирает /dev/disk/by-id по серийному
         # номеру с NAS. Заданное в Git значение by_id пока не проверяется
         # им на оборудовании; запрещаем делать вид, что оно проверено.
@@ -104,12 +106,12 @@ def load_physical_host(repo_root: Path, name: str) -> PhysicalHost:
                 "pool_guid": entry["pool_guid"],
                 "omv_reference": entry.get("omv_reference"),
             })
-        elif name == "nas":
+        elif driver == "omv8":
             raise InfraManagerError(
                 f"{storage.manifest}: LVM не используется для томов NAS"
             )
         volumes[name_of_volume] = volume
-    if name == "nas":
+    if driver == "omv8":
         expected = {"shared": "ext4", "data": "zfs_pool", "backup": "zfs_pool"}
         kinds = {entry["id"]: entry["kind"] for entry in storage.volumes}
         if kinds != expected:
@@ -135,6 +137,7 @@ def load_physical_host(repo_root: Path, name: str) -> PhysicalHost:
         port=conn["port"],
         user=conn["user"],
         ssh_host_fingerprint=conn["ssh_host_fingerprint"],
+        driver=driver,
         devices=devices,
         directory=directory,
         volumes=volumes,
