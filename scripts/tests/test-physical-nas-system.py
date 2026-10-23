@@ -7,7 +7,7 @@ import importlib.util
 import sys
 import yaml
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -114,8 +114,23 @@ def test_nas_compact_callback_hides_untrusted_output() -> None:
     source = ROOT / "automation/ansible/callback_plugins/infra_nas_compact.py"
     spec = importlib.util.spec_from_file_location("infra_nas_compact", source)
     assert spec and spec.loader
+    # Этот контрактный тест работает и без системного Ansible: CI запускает
+    # его раньше сборки runtime-контейнера с реальным ansible-core.
+    fake_ansible = ModuleType("ansible")
+    fake_plugins = ModuleType("ansible.plugins")
+    fake_callback = ModuleType("ansible.plugins.callback")
+    fake_callback.CallbackBase = type("CallbackBase", (), {
+        "__init__": lambda self: setattr(
+            self, "_display", SimpleNamespace(display=lambda message: None)
+        ),
+    })
     plugin = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(plugin)
+    with patch.dict(sys.modules, {
+        "ansible": fake_ansible,
+        "ansible.plugins": fake_plugins,
+        "ansible.plugins.callback": fake_callback,
+    }):
+        spec.loader.exec_module(plugin)
     callback = plugin.CallbackModule()
     output = []
     callback._display = SimpleNamespace(display=output.append)
