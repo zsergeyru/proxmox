@@ -23,7 +23,7 @@ from infra_manager.physical_nas_storage_state import (
     apply_saved_storage, save_storage_identity,
 )
 from infra_manager.physical_storage import DiskInspection
-from infra_manager.physical_storage_plan import propose_storage
+from infra_manager.physical_storage_plan import propose_storage, observed_disk_condition
 from infra_manager_nas_storage import confirm_nas_storage
 
 
@@ -69,7 +69,8 @@ def test_confirmation():
     output = {
         "fingerprint": plan.fingerprint, "requires_creation": True,
         "items": [
-            {"role": item.role, "serial": item.serial, "action": item.action}
+            {"role": item.role, "serial": item.serial, "action": item.action,
+             "current_state": observed_disk_condition(item)}
             for item in plan.assignments
         ],
     }
@@ -123,7 +124,8 @@ def test_existing_shared_confirmation() -> None:
     output = {
         "fingerprint": plan.fingerprint, "requires_creation": True,
         "items": [
-            {"role": item.role, "serial": item.serial, "action": item.action}
+            {"role": item.role, "serial": item.serial, "action": item.action,
+             "current_state": observed_disk_condition(item)}
             for item in plan.assignments
         ],
     }
@@ -148,8 +150,39 @@ def test_existing_shared_confirmation() -> None:
     assert "SHARED-TEST" in shown
     assert "НЕ ФОРМАТИРУЕТСЯ" in shown
     assert "ZFS-A" in shown and "ZFS-B" in shown
+    assert "/dev/sdc" in shown and "разделов: 0" in shown
     assert calls[-1][0] == ["storage-prepare", "nas"]
     assert json.loads(calls[-1][1]) == {"fingerprint": plan.fingerprint}
+
+
+def test_missing_disk_state_blocks_approval() -> None:
+    """Нельзя подтверждать диск, если не выведено его текущее состояние."""
+
+    _host, plan = sample_plan()
+    output = {
+        "fingerprint": plan.fingerprint,
+        "requires_creation": True,
+        "items": [
+            {"role": item.role, "serial": item.serial, "action": item.action}
+            for item in plan.assignments
+        ],
+    }
+    calls = []
+
+    def forward(command, *, capture_output=False, input_text=None):
+        calls.append(command)
+        if capture_output:
+            return SimpleNamespace(returncode=0, stderr="",
+                stdout="NAS_STORAGE_PLAN_JSON=" + json.dumps(output) + "\n")
+        return 0
+
+    with (
+        patch("infra_manager_nas_storage.sys.stdin",
+              SimpleNamespace(isatty=lambda: True)),
+        patch("builtins.input", side_effect=AssertionError("Нельзя просить подтверждение")),
+    ):
+        refuses(lambda: confirm_nas_storage("nas", forward, RuntimeError), RuntimeError)
+    assert ["storage-prepare", "nas"] not in calls
 
 
 def test_storage_state():
@@ -376,6 +409,7 @@ def main():
 
     test_confirmation()
     test_existing_shared_confirmation()
+    test_missing_disk_state_blocks_approval()
     test_storage_state()
     test_remote_preflight()
     test_mixed_preflight_only_checks_blank_zfs_disks()
