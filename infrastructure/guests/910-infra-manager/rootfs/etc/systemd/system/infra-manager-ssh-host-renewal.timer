@@ -1,0 +1,11 @@
+[Unit]
+Description=Ежедневная проверка SSH Host CA сертификатов Infra Manager
+
+[Timer]
+OnCalendar=*-*-* 02:37:00
+Persistent=true
+RandomizedDelaySec=15min
+Unit=infra-manager-ssh-host-renewal.service
+
+[Install]
+WantedBy=timers.target
