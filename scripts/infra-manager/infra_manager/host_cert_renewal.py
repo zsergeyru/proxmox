@@ -21,6 +21,7 @@ from .common import InfraManagerError, run
 from .guest_catalog import deployable_guests, load_manifest
 from .guest_ssh import GuestSshSession
 from .operation_lock import guest_operation_lock
+from .pve import PveClient
 from .pve_host import sign_ssh_host_key
 from .settings import PATHS
 
@@ -257,7 +258,7 @@ def _renew_one(vmid: int, name: str, address: str, node: str) -> str:
 
 
 def run_scheduled() -> int:
-    """Проверить все объявленные Linux-гости, продолжить после отказа одного."""
+    """Обходить только подтверждённые работающие VM/LXC из PVE API."""
 
     if not STATE.parent.is_mount():
         raise InfraManagerError(
@@ -267,16 +268,39 @@ def run_scheduled() -> int:
     node_default = defaults.get("defaults", {}).get("node")
     if not isinstance(node_default, str) or not node_default:
         raise InfraManagerError("Не указан PVE node в defaults.yaml")
+    # Нельзя принимать IP из Git за доказательство существования объекта:
+    # PVE-only signer перепроверит его непосредственно перед выпуском,
+    # а сам обход пропускает отсутствующие и выключенные гости.
+    resources = PveClient().data("/cluster/resources", query={"type": "vm"})
+    if not isinstance(resources, list):
+        raise InfraManagerError("PVE вернул некорректный перечень VM/LXC")
+    by_vmid: dict[int, dict[str, object]] = {}
+    for item in resources:
+        if not isinstance(item, dict):
+            raise InfraManagerError("PVE вернул некорректный объект VM/LXC")
+        vmid = item.get("vmid")
+        if not isinstance(vmid, int) or vmid <= 0 or vmid in by_vmid:
+            raise InfraManagerError("PVE вернул дублированный или неверный VMID")
+        by_vmid[vmid] = item
+
     errors = 0
     for identity in deployable_guests(PATHS.repo_root):
+        resource = by_vmid.get(identity.vmid)
+        if resource is None or resource.get("status") != "running":
+            print(f"[ИНФО] VMID {identity.vmid} {identity.name}: не запущен, пропущен")
+            continue
         try:
             address = identity.address
             if not address:
                 print(f"[ИНФО] VMID {identity.vmid}: отсутствует management IP; пропущен")
                 continue
             node = identity.source.get("node", node_default)
-            if not isinstance(node, str) or not node:
-                raise InfraManagerError("Не указан PVE node")
+            if (
+                not isinstance(node, str) or not node
+                or resource.get("node") != node
+                or resource.get("name") != identity.name
+            ):
+                raise InfraManagerError("Идентичность VMID/имени/PVE node отличается от Git")
             result = _renew_one(identity.vmid, identity.name, address, node)
             print(f"[ОК] VMID {identity.vmid} {identity.name}: {result}")
         except (InfraManagerError, OSError, ValueError) as exc:
