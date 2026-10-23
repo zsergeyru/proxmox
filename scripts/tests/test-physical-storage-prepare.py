@@ -554,6 +554,14 @@ def test_pending_recovery_is_auto_dispatched_without_format_prompt() -> None:
         return_value=SimpleNamespace(returncode=0, stdout=json.dumps(journal)),
     ):
         assert read_pending_recovery(host, mock_session, current_plan) == journal
+    completed_host = replace(host, volumes={
+        "shared": {"filesystem_uuid": "62efe809-f358-4c75-a465-63fc7c617104"},
+        "data": {"pool_guid": "123456789"},
+        "backup": {"pool_guid": "987654321"},
+    })
+    with patch("infra_manager.physical_nas_storage_prepare.run") as remote:
+        assert read_pending_recovery(completed_host, mock_session, current_plan) is None
+        remote.assert_not_called()
     wrong = dict(journal)
     wrong["fingerprint"] = "0" * 64
     with patch(
