@@ -150,6 +150,50 @@
           | list | length
         ) != 6
 
+    # Диагностика запускается только после ошибки APT, не меняет
+    # конфигурацию репозиториев и не принимает недоверенные зеркала.
+    # HTTPS-запрос является дополнительной проверкой доступности,
+    # а не точным воспроизведением APT (схема источника может отличаться).
+    - name: Проверить DNS основного репозитория OMV после ошибки APT
+      ansible.builtin.command:
+        argv:
+          - getent
+          - ahostsv4
+          - packages.openmediavault.org
+      register: nas_apt_omv_dns
+      failed_when: false
+      changed_when: false
+      when:
+        - nas_apt_refresh is not skipped
+        - nas_apt_refresh.rc | default(0) != 0
+
+    - name: Проверить HTTPS-ответ основного репозитория OMV после ошибки APT
+      ansible.builtin.command:
+        argv:
+          - curl
+          - --location
+          - --silent
+          - --show-error
+          - --output
+          - /dev/null
+          - --write-out
+          - '%{http_code}'
+          - --max-time
+          - '15'
+          - --connect-timeout
+          - '5'
+          - --proto
+          - =https
+          - --proto-redir
+          - =https
+          - https://packages.openmediavault.org/public/dists/synchrony/InRelease
+      register: nas_apt_omv_https
+      failed_when: false
+      changed_when: false
+      when:
+        - nas_apt_refresh is not skipped
+        - nas_apt_refresh.rc | default(0) != 0
+
     - name: Прервать настройку из-за ошибки обновления APT
       ansible.builtin.fail:
         msg: >-
