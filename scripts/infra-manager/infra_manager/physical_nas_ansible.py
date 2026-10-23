@@ -33,7 +33,10 @@ def run_nas_playbook(
     environment.update({
         "ANSIBLE_HOST_KEY_CHECKING": "True",
         "ANSIBLE_RETRY_FILES_ENABLED": "False",
-        "ANSIBLE_LOG_PATH": "",
+        # Пустой ANSIBLE_LOG_PATH ошибочно трактуется как путь к Git-снимку.
+        "ANSIBLE_LOG_PATH": "/dev/null",
+        # NAS допускает SSH-поток, даже если подсистема sftp/scp отсутствует.
+        "ANSIBLE_SSH_TRANSFER_METHOD": "piped",
     })
     options = {
         "ansible_host": target.address,
