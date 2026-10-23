@@ -622,10 +622,13 @@ def operator_physical_bootstrap_state(name: str) -> int:
         address = connection["address"]
     except (OSError, yaml.YAMLError, KeyError, TypeError) as exc:
         raise InfraManagerError("Не удалось проверить адрес и SSH-ключ NAS") from exc
-    if not isinstance(address, str) or not address or not isinstance(fingerprint, str) or not fingerprint:
-        raise InfraManagerError(
-            "Укажите проверенные адрес и SSH-отпечаток NAS в host.yaml до первого входа"
-        )
+    if not isinstance(address, str) or not address:
+        raise InfraManagerError("Укажите адрес NAS в host.yaml до первого входа")
+    if fingerprint is not None and (
+        not isinstance(fingerprint, str)
+        or not re.fullmatch(r"SHA256:[A-Za-z0-9+/]{43}", fingerprint)
+    ):
+        raise InfraManagerError("Некорректный SSH-отпечаток в host.yaml")
     path = checked_record_path(name, data_root=PATHS.data_dir)
     if not path.exists():
         if checked_record_path(name, storage=True, data_root=PATHS.data_dir).exists():
@@ -642,7 +645,9 @@ def operator_physical_bootstrap_state(name: str) -> int:
         not isinstance(record, dict)
         or record.get("name") != name
         or record.get("address") != address
-        or record.get("fingerprint") != fingerprint
+        or not isinstance(record.get("fingerprint"), str)
+        or not re.fullmatch(r"SHA256:[A-Za-z0-9+/]{43}", record["fingerprint"])
+        or (fingerprint is not None and record["fingerprint"] != fingerprint)
     ):
         raise InfraManagerError(
             "Данные NAS изменились; повторный пароль автоматически запрашивать нельзя"
