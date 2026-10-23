@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import sys
 import yaml
 from pathlib import Path
@@ -92,6 +93,73 @@ def test_nas_apt_diagnostic_guard() -> None:
               ).read_text(encoding="utf-8")
     assert '"ANSIBLE_LOG_PATH": "/dev/null"' in ansible
     assert '"ANSIBLE_SSH_TRANSFER_METHOD": "piped"' in ansible
+    assert '"ANSIBLE_STDOUT_CALLBACK": "infra_nas_compact"' in ansible
+    assert '"ANSIBLE_CALLBACK_PLUGINS": str(' in ansible
+    assert '"ansible_python_interpreter": "/usr/bin/python3"' in ansible
+    after_extras = next(item for item in tasks if item.get("name") ==
+        "Обновить перечень пакетов после установки OMV-Extras")
+    command = after_extras["ansible.builtin.command"]["argv"]
+    assert command == ["apt-get", "-o", "APT::Update::Error-Mode=any", "update"]
+    assert after_extras["failed_when"] is False
+    assert after_extras["register"] == "nas_apt_refresh"
+    fail = next(item for item in tasks if item.get("name") ==
+        "Прервать настройку из-за ошибки обновления APT")
+    assert "nas_apt_refresh.rc" in str(fail["when"])
+    assert "не начиналось" in fail["ansible.builtin.fail"]["msg"]
+
+
+def test_nas_compact_callback_hides_untrusted_output() -> None:
+    """Показывать причину APT, а не пароль/URL из сырых stdout/stderr."""
+
+    source = ROOT / "automation/ansible/callback_plugins/infra_nas_compact.py"
+    spec = importlib.util.spec_from_file_location("infra_nas_compact", source)
+    assert spec and spec.loader
+    plugin = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(plugin)
+    callback = plugin.CallbackModule()
+    output = []
+    callback._display = SimpleNamespace(display=output.append)
+
+    task = SimpleNamespace(
+        no_log=False,
+        get_name=lambda: "Обновить перечень пакетов после установки OMV-Extras",
+    )
+    callback.v2_runner_on_ok(SimpleNamespace(
+        _task=task, _result={
+            "rc": 100,
+            "stdout": ("Err: https://alice:SECRET@example.org/path?token=SENSITIVE "
+                       "Temporary failure resolving 'example.org'"),
+            "stderr": "GPG error: NO_PUBKEY 1234abcd",
+        },
+    ))
+    report = "\n".join(output)
+    assert "APT update: код возврата 100" in report
+    assert "DNS" in report
+    assert "GPG" in report
+    assert "SECRET" not in report and "SENSITIVE" not in report
+    assert "https://" not in report
+
+    output.clear()
+    callback.v2_runner_on_failed(SimpleNamespace(
+        _task=SimpleNamespace(
+            no_log=False,
+            get_name=lambda: "Прервать настройку из-за ошибки обновления APT",
+        ),
+        _result={"msg": "Authorization: SECRET_TOKEN in apt update"},
+    ))
+    assert "SECRET_TOKEN" not in "\n".join(output)
+    assert "Прервать настройку из-за ошибки обновления APT" in "\n".join(output)
+
+    output.clear()
+    callback.v2_runner_on_failed(SimpleNamespace(
+        _task=SimpleNamespace(
+            no_log=True,
+            get_name=lambda: "Установить секрет",
+        ),
+        _result={"msg": "private-password-value"},
+    ))
+    assert "private-password-value" not in "\n".join(output)
+    assert "скрыты" in "\n".join(output)
 
 
 def main() -> int:
@@ -101,6 +169,7 @@ def main() -> int:
     test_paths()
     test_unconfirmed_volumes()
     test_nas_apt_diagnostic_guard()
+    test_nas_compact_callback_hides_untrusted_output()
     print("[ОК] Безопасные проверки OMV и подключений пройдены")
     return 0
 
