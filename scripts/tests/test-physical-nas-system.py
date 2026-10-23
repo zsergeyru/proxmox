@@ -328,6 +328,16 @@ def test_nas_compact_callback_hides_untrusted_output() -> None:
     assert "SECRET_KERNEL_DATA" not in "\n".join(output)
 
     output.clear()
+    callback.v2_runner_on_ok(SimpleNamespace(
+        _task=SimpleNamespace(
+            no_log=False,
+            get_name=lambda: "Подтвердить загрузку ZFS в работающее ядро",
+        ),
+        _result={"changed": False},
+    ))
+    assert "ZFS загружен для работающего ядра NAS" in "\n".join(output)
+
+    output.clear()
     callback.v2_runner_on_failed(SimpleNamespace(
         _task=SimpleNamespace(
             no_log=False,
