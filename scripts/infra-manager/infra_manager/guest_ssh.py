@@ -11,6 +11,7 @@ OpenBao и доверяет серверу только через опубли�
 
 from __future__ import annotations
 
+import re
 import shlex
 import tempfile
 from pathlib import Path
@@ -34,6 +35,7 @@ class GuestSshSession:
         execute: Callable = run,
         bootstrap_key: Path | None = None,
         bootstrap_known_hosts: Path | None = None,
+        pinned_host_key: str | None = None,
     ) -> None:
         """Выбрать сертификатный либо явно разрешённый начальный режим.
 
@@ -48,6 +50,7 @@ class GuestSshSession:
         self.execute = execute
         self.bootstrap_key = bootstrap_key
         self.bootstrap_known_hosts = bootstrap_known_hosts
+        self.pinned_host_key = pinned_host_key
         self._temporary: tempfile.TemporaryDirectory[str] | None = None
         self.private_key: Path | None = None
         self.certificate: Path | None = None
@@ -56,6 +59,8 @@ class GuestSshSession:
     def __enter__(self) -> GuestSshSession:
         """Подготовить доверие и удостоверение, не меняя файлов гостя."""
         if self.bootstrap_key is not None:
+            if self.pinned_host_key is not None:
+                raise InfraManagerError("Нельзя совместить начальный и восстановительный SSH-доступ")
             if not self.bootstrap_key.is_file():
                 raise InfraManagerError("Отсутствует одноразовый начальный SSH-ключ")
             if (
@@ -99,9 +104,17 @@ class GuestSshSession:
             self.execute(["ssh-keygen", "-L", "-f", str(self.certificate)], capture_output=True)
 
             self.known_hosts = temporary / "known_hosts"
-            self.known_hosts.write_text(
-                f"@cert-authority {self.address} {ca}\n", encoding="utf-8"
-            )
+            if self.pinned_host_key is None:
+                host_line = f"@cert-authority {self.address} {ca}\n"
+            else:
+                parts = self.pinned_host_key.strip().split()
+                if (
+                    len(parts) != 2 or parts[0] != "ssh-ed25519"
+                    or not re.fullmatch(r"[A-Za-z0-9+/]+={0,2}", parts[1])
+                ):
+                    raise InfraManagerError("Некорректный ранее закреплённый ключ SSH-сервера")
+                host_line = f"{self.address} {parts[0]} {parts[1]}\n"
+            self.known_hosts.write_text(host_line, encoding="utf-8")
             self.known_hosts.chmod(0o600)
             return self
         except BaseException:
@@ -129,7 +142,12 @@ class GuestSshSession:
         ]
         if self.certificate is not None:
             # После перехода на CA не допускаем доверие к обычному host key.
-            options += ["-o", "HostKeyAlgorithms=ssh-ed25519-cert-v01@openssh.com"]
+            options += [
+                "-o", "HostKeyAlgorithms=" + (
+                    "ssh-ed25519" if self.pinned_host_key is not None
+                    else "ssh-ed25519-cert-v01@openssh.com"
+                ),
+            ]
             options += ["-o", f"CertificateFile={self.certificate}"]
         return options
 
