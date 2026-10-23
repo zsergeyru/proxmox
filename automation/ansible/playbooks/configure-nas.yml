@@ -117,7 +117,7 @@
         argv:
           - dpkg-query
           - -W
-          - '-f=${binary:Package} ${Status}\\n'
+          - '-f=${binary:Package} ${Status}\n'
           - openmediavault-zfs
           - openmediavault-compose
           - docker-ce
