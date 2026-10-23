@@ -115,6 +115,31 @@ def test_operator_state() -> None:
             expect_refusal(lambda: operator.operator_physical_bootstrap_state("nas"))
 
 
+def test_another_physical_host_name() -> None:
+    """Общий SSH-контур не должен содержать знания об имени nas."""
+
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        host_dir = root / "infrastructure/hosts/backup-node"
+        host_dir.mkdir(parents=True)
+        host_dir.joinpath("host.yaml").write_text(
+            "connection:\n  address: 192.0.2.88\n"
+            "  ssh_host_fingerprint: null\n", encoding="utf-8",
+        )
+        storage_dir = root / "state/physical-hosts"
+        storage_dir.mkdir(parents=True)
+        paths = SimpleNamespace(repo_root=root, data_dir=root / "state")
+        with patch.object(operator, "PATHS", paths):
+            assert operator.operator_physical_bootstrap_state("backup-node") == 20
+            (storage_dir / "backup-node.json").write_text(
+                json.dumps({
+                    "name": "backup-node", "address": "192.0.2.88",
+                    "fingerprint": "SHA256:" + "D" * 43,
+                }), encoding="utf-8",
+            )
+            assert operator.operator_physical_bootstrap_state("backup-node") == 0
+
+
 def test_automatic_initial_key() -> None:
     """Первый SSH-ключ принимается автоматически, но не два разных ключа."""
 
@@ -264,6 +289,7 @@ def main() -> int:
 
     test_marker()
     test_operator_state()
+    test_another_physical_host_name()
     test_automatic_initial_key()
     test_repeat_trust_requires_exact_scanned_key()
     test_pve_password_transport()
