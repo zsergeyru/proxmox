@@ -142,7 +142,7 @@ def test_nas_compact_callback_hides_untrusted_output() -> None:
     callback.v2_runner_on_ok(SimpleNamespace(
         _task=task, _result={
             "rc": 100,
-            "stdout": ("Err: https://alice:SECRET@example.org/path?token=SENSITIVE "
+            "stdout": ("Err:1 https://alice:SECRET@example.org/path?token=SENSITIVE "
                        "Temporary failure resolving 'example.org'"),
             "stderr": "GPG error: NO_PUBKEY 1234abcd",
         },
