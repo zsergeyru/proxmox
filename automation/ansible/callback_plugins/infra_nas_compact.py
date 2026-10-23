@@ -56,6 +56,20 @@ class CallbackModule(CallbackBase):
             (r"could not get lock|unable to acquire.*lock",
              "пакетный менеджер занят другим процессом"),
             (r"no space left on device", "недостаточно места на системном диске"),
+            (r"conflicting values set for option signed-by",
+             "конфликт Signed-By: для одного источника APT указаны разные ключи"),
+            (r"malformed entry|type .* is not known on line",
+             "ошибка синтаксиса файла источников APT"),
+            (r"clearsigned file isn't valid|invalid signature",
+             "источник APT вернул некорректную подпись"),
+            (r"repository .*changed its|release file changed",
+             "репозиторий изменил сведения Release"),
+            (r"unable to locate package|has no installation candidate",
+             "пакет не найден в настроенных источниках APT"),
+            (r"failed to fetch|some index files failed",
+             "не удалось загрузить один или несколько индексов пакетов"),
+            (r"could not open lock file|permission denied",
+             "недостаточно прав для работы пакетного менеджера"),
         ]
         text = str(output or "").lower()[:50000]
         descriptions = [
@@ -148,13 +162,31 @@ class CallbackModule(CallbackBase):
         output = " ".join(
             str(data.get(field, "")) for field in ("msg", "stderr", "stdout")
         )
-        for reason in self._apt_reasons(output) if "apt" in task.casefold() else []:
-            self._display.display("[ПРИЧИНА] " + reason)
-        if "apt" not in task.casefold():
-            self._display.display(
-                "[ПРИЧИНА] См. предыдущее название шага и статус NAS; "
-                "сырой вывод Ansible скрыт из-за возможных секретов"
+        action = str(getattr(result._task, "action", ""))
+        is_apt = action in ("apt", "ansible.builtin.apt") or "apt" in task.casefold()
+        if is_apt:
+            for host in self._apt_hosts(output):
+                self._display.display("[РЕПОЗИТОРИЙ] " + host)
+            for reason in self._apt_reasons(output):
+                self._display.display("[ПРИЧИНА] " + reason)
+        else:
+            lower = output.lower()
+            known_errors = (
+                ("permission denied", "Недостаточно прав на целевом сервере"),
+                ("no such file or directory", "Не найден обязательный файл или каталог"),
+                ("network is unreachable", "Сетевой маршрут недоступен"),
+                ("connection timed out", "Тайм-аут при обращении к серверу"),
+                ("no space left on device", "На системном разделе закончилось место"),
             )
+            for key, description in known_errors:
+                if key in lower:
+                    self._display.display("[ПРИЧИНА] " + description)
+                    break
+            else:
+                self._display.display(
+                    "[ПРИЧИНА] Ошибка не распознана безопасным фильтром; "
+                    "сырой stdout/stderr скрыт, так как может содержать секреты"
+                )
 
     def v2_runner_on_unreachable(self, result):
         self._display.display(
