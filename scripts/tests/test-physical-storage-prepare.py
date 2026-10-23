@@ -242,6 +242,99 @@ def test_remote_preflight():
         refuses(lambda: script.preflight(items[:2]), script.StorageError)
 
 
+def test_preserved_shared_verification() -> None:
+    """Не считать HDD 1 ТБ сохранённым без его UUID, OMV и реального mount."""
+
+    script = _load_remote()
+    uid = "12345678-1234-1234-1234-123456789abc"
+    ref = "abcdefab-abcd-abcd-abcd-abcdefabcdef"
+    path = "/srv/dev-disk-by-uuid-" + uid
+    disk = {
+        "serial": "SHARED-TEST", "path": "/dev/sdb", "type": "disk",
+        "mountpoints": [None],
+        "children": [{"path": "/dev/sdb1", "type": "part",
+                      "fstype": "ext4", "uuid": uid}],
+    }
+    records = [{"uuid": ref, "dir": path, "fsname": "/dev/sdb1", "type": "ext4"}]
+    mounted = {"filesystems": [
+        {"target": path, "source": "/dev/sdb1", "fstype": "ext4", "uuid": uid},
+    ]}
+
+    def fake_execute(*args, **_kwargs):
+        if args[0] == "blkid":
+            return SimpleNamespace(returncode=0, stdout=uid + "\\n")
+        if args[0] == "findmnt":
+            return SimpleNamespace(returncode=0, stdout=json.dumps(mounted))
+        raise AssertionError("Существующий HDD проверяется только чтением")
+
+    with (
+        patch.object(script, "disk_list", return_value=[disk]),
+        patch.object(script, "stable_device", return_value="/dev/disk/by-id/shared"),
+        patch.object(script, "omv_records", return_value=records),
+        patch.object(script, "execute", side_effect=fake_execute),
+    ):
+        assert script.inspect_preserved_shared("SHARED-TEST", "/dev/disk/by-id/shared") == {
+            "filesystem_uuid": uid, "mountpoint": path, "omv_reference": ref,
+        }
+        mounted["filesystems"][0]["uuid"] = "wrong"
+        refuses(lambda: script.inspect_preserved_shared(
+            "SHARED-TEST", "/dev/disk/by-id/shared"
+        ), script.StorageError)
+        mounted["filesystems"][0]["uuid"] = uid
+        records[0]["type"] = "ntfs"
+        refuses(lambda: script.inspect_preserved_shared(
+            "SHARED-TEST", "/dev/disk/by-id/shared"
+        ), script.StorageError)
+
+
+def test_apply_preserves_shared() -> None:
+    """При смешанном плане не запускать mkfs, sgdisk или mount на HDD 1 ТБ."""
+
+    script = _load_remote()
+    items = [
+        {"role": "shared", "serial": "SHARED-TEST", "action": "preserve"},
+        {"role": "data", "serial": "ZFS-A", "action": "create-zfs"},
+        {"role": "backup", "serial": "ZFS-B", "action": "create-zfs"},
+    ]
+    saved = {
+        "filesystem_uuid": "12345678-1234-1234-1234-123456789abc",
+        "mountpoint": "/srv/dev-disk-by-uuid-12345678-1234-1234-1234-123456789abc",
+        "omv_reference": "abcdefab-abcd-abcd-abcd-abcdefabcdef",
+    }
+    commands = []
+    registered = []
+
+    def fake_execute(*args, **_kwargs):
+        commands.append(args)
+        return SimpleNamespace(returncode=0, stdout="")
+
+    def fake_register(role, *_args):
+        registered.append(role)
+        return "ffffffff-ffff-ffff-ffff-ffffffffffff"
+
+    with tempfile.TemporaryDirectory() as directory:
+        with (
+            patch.object(script, "JOURNAL", Path(directory) / "storage-preparation.json"),
+            patch.object(script, "preflight", return_value={
+                "shared": "/dev/disk/by-id/shared",
+                "data": "/dev/disk/by-id/data",
+                "backup": "/dev/disk/by-id/backup",
+            }),
+            patch.object(script, "inspect_preserved_shared", return_value=saved) as inspect,
+            patch.object(script, "save_journal"),
+            patch.object(script, "execute", side_effect=fake_execute),
+            patch.object(script, "register_omv", side_effect=fake_register),
+            patch.object(script, "verify_mount"),
+            patch.object(script, "pool_guid", return_value="12345"),
+        ):
+            result = script.apply(items, "f" * 64)
+    inspect.assert_called_once_with("SHARED-TEST", "/dev/disk/by-id/shared")
+    assert result["volumes"]["shared"] == saved
+    assert registered == ["data", "backup"]
+    assert sum(args[:2] == ("zpool", "create") for args in commands) == 2
+    assert not any(args[0] in {"sgdisk", "mkfs.ext4", "mount"} for args in commands)
+
+
 def main():
     """Проверить все контракты без обращения к реальным HDD."""
 
@@ -249,6 +342,8 @@ def main():
     test_existing_shared_confirmation()
     test_storage_state()
     test_remote_preflight()
+    test_preserved_shared_verification()
+    test_apply_preserves_shared()
     print("[ОК] Подтверждение и подготовка HDD проверены на искусственных данных")
     return 0
 
