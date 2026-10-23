@@ -256,14 +256,138 @@
       changed_when: false
       failed_when: false
 
-    - name: Подтвердить готовность ZFS без замены ядра
+    # OpenZFS из backports устанавливает DKMS-источники, но может
+    # остаться в состоянии "added", если заголовков работающего ядра нет.
+    # Подготовка выполняется только при отсутствии уже собранного модуля.
+    # Важно: не устанавливать новое ядро, не делать autoremove/reboot.
+    - name: Проверить безопасное имя работающего ядра для ZFS
       ansible.builtin.assert:
         that:
-          - nas_zfs_module.rc == 0
+          - ansible_facts['kernel'] is match('^[0-9][a-zA-Z0-9.+_-]{0,79}    - name: Установить Docker через источник пакетов, управляемый OMV-Extras
+      ansible.builtin.apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-compose-plugin
+        state: present
+        update_cache: false
+
+    - name: Запустить Docker с автоматическим запуском после загрузки NAS
+      ansible.builtin.systemd_service:
+        name: docker.service
+        enabled: true
+        state: started
+
+    - name: Проверить поддержку Docker Compose
+      ansible.builtin.command:
+        argv: [docker, compose, version]
+      changed_when: false
+
+    - name: Проверить доступность инструментов ZFS
+      ansible.builtin.command:
+        argv: [zpool, --version]
+      changed_when: false
+
+    - name: Проверить доступность Docker
+      ansible.builtin.command:
+        argv: [docker, --version]
+      changed_when: false
+
+    - name: Установить одноразовый исполнитель подготовки пустых HDD
+      ansible.builtin.copy:
+        src: ../files/nas-storage-prepare.py
+        dest: /usr/local/sbin/nas-storage-prepare
+        owner: root
+        group: root
+        mode: "0700"
+)
         fail_msg: >-
-          Пакет ZFS установлен, но модуль не доступен в действующем ядре.
-          Нельзя автоматически менять ядро или перезагружать NAS.
-          Проверьте совместимость ядра отдельным действием.
+          Невозможно безопасно определить имя работающего ядра NAS.
+          Автоматическая установка заголовков остановлена.
+      when: nas_zfs_module.rc != 0
+
+    - name: Проверить заголовки работающего ядра для DKMS
+      ansible.builtin.stat:
+        path: "/lib/modules/{{ ansible_facts['kernel'] }}/build"
+        follow: true
+      register: nas_zfs_kernel_headers
+      when: nas_zfs_module.rc != 0
+
+    - name: Установить заголовки текущего ядра и DKMS без удаления пакетов
+      ansible.builtin.apt:
+        name:
+          - "linux-headers-{{ ansible_facts['kernel'] }}"
+          - dkms
+        state: present
+        update_cache: false
+        fail_on_autoremove: true
+        force_apt_get: true
+      when:
+        - nas_zfs_module.rc != 0
+        - not (nas_zfs_kernel_headers.stat.isdir | default(false))
+
+    - name: Проверить ZFS после установки заголовков
+      ansible.builtin.command:
+        argv: [modinfo, -F, filename, zfs]
+      register: nas_zfs_module_after_headers
+      changed_when: false
+      failed_when: false
+      when: nas_zfs_module.rc != 0
+
+    - name: Собрать ZFS для работающего ядра через DKMS
+      ansible.builtin.command:
+        argv:
+          - dkms
+          - autoinstall
+          - -k
+          - "{{ ansible_facts['kernel'] }}"
+      register: nas_zfs_dkms_build
+      changed_when: nas_zfs_dkms_build.rc == 0
+      failed_when: false
+      when:
+        - nas_zfs_module.rc != 0
+        - nas_zfs_module_after_headers.rc != 0
+
+    - name: Проверить модуль ZFS после DKMS
+      ansible.builtin.command:
+        argv: [modinfo, -F, filename, zfs]
+      register: nas_zfs_ready
+      changed_when: false
+      failed_when: false
+
+    - name: Подтвердить готовность ZFS после сборки DKMS
+      ansible.builtin.assert:
+        that:
+          - nas_zfs_ready.rc == 0
+          - nas_zfs_dkms_build is skipped or nas_zfs_dkms_build.rc == 0
+        fail_msg: >-
+          Модуль ZFS отсутствует для работающего ядра {{ ansible_facts['kernel'] }}
+          даже после установки его заголовков и попытки сборки DKMS.
+          Установка нового ядра и перезагрузка не выполнялись.
+          Проверьте совместимость zfs-dkms с текущим ядром и журнал DKMS.
+
+    - name: Загрузить проверенный модуль ZFS в работающее ядро
+      ansible.builtin.command:
+        argv: [modprobe, zfs]
+      register: nas_zfs_modprobe
+      changed_when: false
+      failed_when: false
+
+    - name: Проверить загрузку ZFS в ядро
+      ansible.builtin.stat:
+        path: /sys/module/zfs
+      register: nas_zfs_loaded
+
+    - name: Подтвердить загрузку ZFS в работающее ядро
+      ansible.builtin.assert:
+        that:
+          - nas_zfs_modprobe.rc == 0
+          - nas_zfs_loaded.stat.isdir | default(false)
+        fail_msg: >-
+          Модуль ZFS найден, но не загрузился в работающее ядро.
+          Система не перезагружалась, ядро не менялось,
+          подготовка и форматирование HDD не выполнялись.
 
     - name: Установить Docker через источник пакетов, управляемый OMV-Extras
       ansible.builtin.apt:
