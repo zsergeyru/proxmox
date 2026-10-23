@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import socket
 import subprocess
 import sys
@@ -140,11 +139,7 @@ def proxy_to_manager(arguments: list[str]) -> int:
     if arguments == ["deploy", str(vmid)]:
         from infra_manager_python_deps import restore_manager_python_dependency
         restore_manager_python_dependency(vmid, run=run, error_type=OperatorError)
-    if (
-        len(arguments) == 2
-        and arguments[0] == "deploy"
-        and re.fullmatch(r"[a-z][a-z0-9-]*", arguments[1])
-    ):
+    if len(arguments) == 2 and arguments[0] == "deploy" and not arguments[1].isdecimal():
         # Физическая цель определяется по имени, без знания конкретного NAS.
         name_of_host = arguments[1]
         sys.path.insert(0, str(Path(__file__).resolve().parent))
