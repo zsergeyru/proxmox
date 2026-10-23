@@ -37,7 +37,8 @@ def apply_saved_storage(host: PhysicalHost) -> PhysicalHost:
         not isinstance(data, dict)
         or data.get("name") != host.name
         or data.get("address") != host.address
-        or data.get("fingerprint") != host.ssh_host_fingerprint
+        # SSH-доверие хранится отдельно. Его изменение после явного
+        # подтверждения не меняет идентичность дисков и томов.
         or not isinstance(data.get("devices"), list)
         or not isinstance(data.get("volumes"), dict)
     ):
