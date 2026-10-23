@@ -175,6 +175,41 @@ class CallbackModule(CallbackBase):
             }
             if isinstance(rc, int) and rc in curl_reasons:
                 self._display.display("[ПРИЧИНА] Проверка HTTPS: " + curl_reasons[rc])
+        elif task == "Собрать ZFS для работающего ядра через DKMS":
+            rc = data.get("rc")
+            if isinstance(rc, int) and rc != 0:
+                self._display.display(f"[ОШИБКА] Сборка DKMS завершилась с кодом {rc}")
+                reason = (
+                    str(data.get("stdout", "")) + "\n"
+                    + str(data.get("stderr", ""))
+                ).lower()
+                causes = (
+                    ("missing kernel headers", "Не найдены заголовки ядра"),
+                    ("kernel headers", "Проблема с заголовками ядра"),
+                    ("bad return status for module build",
+                     "Компилятор не смог собрать модуль для этого ядра"),
+                    ("error!  bad return status",
+                     "Компилятор не смог собрать модуль для этого ядра"),
+                    ("gcc: command not found", "Не установлен компилятор GCC"),
+                    ("no space left on device", "Недостаточно места на системном SSD"),
+                )
+                for hint, description in causes:
+                    if hint in reason:
+                        self._display.display("[ПРИЧИНА] " + description)
+                        break
+                else:
+                    self._display.display(
+                        "[ПРИЧИНА] DKMS не собрал ZFS: проверьте совместимость "
+                        "версий ядра, ZFS и заголовков"
+                    )
+        elif task == "Загрузить проверенный модуль ZFS в работающее ядро":
+            rc = data.get("rc")
+            if isinstance(rc, int) and rc != 0:
+                self._display.display(f"[ОШИБКА] Загрузка модуля ZFS: код {rc}")
+                self._display.display(
+                    "[ПРИЧИНА] modprobe zfs не смог загрузить модуль "
+                    "(возможны несовместимость ядра или запрет Secure Boot)"
+                )
         elif data.get("changed"):
             self._display.display("[ОК] " + task)
 
@@ -199,6 +234,21 @@ class CallbackModule(CallbackBase):
         output = " ".join(
             str(data.get(field, "")) for field in ("msg", "stderr", "stdout")
         )
+        if task in {
+            "Подтвердить готовность ZFS после сборки DKMS",
+            "Подтвердить загрузку ZFS в работающее ядро",
+            "Проверить безопасное имя работающего ядра для ZFS",
+        }:
+            descriptions = {
+                "Подтвердить готовность ZFS после сборки DKMS":
+                    "ZFS не собран для работающего ядра. Проверьте заголовки, DKMS и совместимость; ядро не менялось.",
+                "Подтвердить загрузку ZFS в работающее ядро":
+                    "Модуль ZFS не загрузился; работа с дисками не начиналась.",
+                "Проверить безопасное имя работающего ядра для ZFS":
+                    "Не удалось безопасно определить работающую версию ядра.",
+            }
+            self._display.display("[ПРИЧИНА] " + descriptions[task])
+            return
         action = str(getattr(result._task, "action", ""))
         is_apt = action in ("apt", "ansible.builtin.apt") or "apt" in task.casefold()
         if is_apt:
