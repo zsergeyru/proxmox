@@ -205,6 +205,80 @@ def test_repeat_trust_requires_exact_scanned_key() -> None:
                 ))
 
 
+def test_initial_root_without_sudo() -> None:
+    """При root-входе sudo не нужен; диагностика отмечает неудачный этап."""
+
+    machine = replace(
+        load_physical_host(ROOT, "nas"),
+        address="192.0.2.22", ssh_host_fingerprint="SHA256:" + "B" * 43,
+    )
+    commands = []
+    writes = []
+    exit_code = [0]
+
+    class FakeChannel:
+        def shutdown_write(self):
+            pass
+
+        def recv_exit_status(self):
+            return exit_code[0]
+
+    class FakeStdin:
+        channel = FakeChannel()
+
+        def write(self, value):
+            writes.append(value)
+
+        def flush(self):
+            pass
+
+    class FakeSSH:
+        def load_host_keys(self, _path):
+            pass
+
+        def set_missing_host_key_policy(self, _policy):
+            pass
+
+        def connect(self, **_kwargs):
+            pass
+
+        def exec_command(self, command, **_kwargs):
+            commands.append(command)
+            return FakeStdin(), SimpleNamespace(channel=FakeChannel()), None
+
+        def close(self):
+            pass
+
+    fake_paramiko = SimpleNamespace(
+        SSHClient=FakeSSH, RejectPolicy=lambda: None,
+        SSHException=type("SSHException", (Exception,), {}),
+    )
+    with (
+        patch.dict(sys.modules, {"paramiko": fake_paramiko}),
+        patch.object(bootstrap, "_scan_verified_key", return_value=Path("/tmp/known_hosts")),
+    ):
+        bootstrap._install_client_ca(machine, "root", "test-password", "ssh-ed25519 AAAA")
+        assert len(commands) == 1
+        assert commands[0].startswith("sh -c ")
+        assert "sudo -S" not in commands[0]
+        assert "test-password" not in commands[0]
+        assert not writes
+
+        commands.clear()
+        bootstrap._install_client_ca(machine, "alice", "test-password", "ssh-ed25519 AAAA")
+        assert commands[0].startswith("sudo -S -p '' sh -c ")
+        assert writes == ["test-password\\n"]
+
+        exit_code[0] = 50
+        try:
+            bootstrap._install_client_ca(machine, "root", "test-password", "ssh-ed25519 AAAA")
+        except InfraManagerError as exc:
+            assert "sshd -t" in str(exc)
+            assert "test-password" not in str(exc)
+        else:
+            raise AssertionError("Ошибка настройки sshd должна содержать этап")
+
+
 def test_pve_password_transport() -> None:
     """Пароль не должен попадать в аргументы дочерних команд."""
 
@@ -292,6 +366,7 @@ def main() -> int:
     test_another_physical_host_name()
     test_automatic_initial_key()
     test_repeat_trust_requires_exact_scanned_key()
+    test_initial_root_without_sudo()
     test_pve_password_transport()
     print("[ОК] Первый SSH-доступ NAS проверен на испытательных данных")
     return 0
