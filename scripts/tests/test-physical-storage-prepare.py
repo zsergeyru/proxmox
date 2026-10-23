@@ -241,6 +241,43 @@ def test_remote_preflight():
         refuses(lambda: script.preflight(items[:2]), script.StorageError)
 
 
+def test_mixed_preflight_only_checks_blank_zfs_disks() -> None:
+    """При подготовке смешанного набора shared не проходит через clean_disk."""
+
+    script = _load_remote()
+    items = [
+        {"role": "shared", "serial": "SHARED-TEST", "action": "preserve"},
+        {"role": "data", "serial": "ZFS-A", "action": "create-zfs"},
+        {"role": "backup", "serial": "ZFS-B", "action": "create-zfs"},
+    ]
+    disks = [
+        {"path": "/dev/sda", "type": "disk", "serial": "SYSTEM-TEST",
+         "mountpoints": [None], "children": [
+             {"type": "part", "mountpoints": ["/"], "children": []}]},
+        {"path": "/dev/sdb", "type": "disk", "serial": "SHARED-TEST",
+         "model": "ST1000DM003", "size": 1_000_000_000_000,
+         "mountpoints": [None], "children": [
+             {"type": "part", "fstype": "ext4", "mountpoints": ["/srv/shared"]}]},
+        {"path": "/dev/sdc", "type": "disk", "serial": "ZFS-A",
+         "model": "ST4000VX016", "size": 4_000_000_000_000, "mountpoints": [None]},
+        {"path": "/dev/sdd", "type": "disk", "serial": "ZFS-B",
+         "model": "ST4000VX016", "size": 4_000_000_000_000, "mountpoints": [None]},
+    ]
+    with (
+        patch.object(script, "disk_list", return_value=disks),
+        patch.object(script, "stable_device", side_effect=lambda _path, serial: "/dev/disk/by-id/" + serial),
+        patch.object(script, "clean_disk") as clean,
+        patch.object(script, "execute", return_value=SimpleNamespace(returncode=1, stdout="")),
+    ):
+        selected = script.preflight(items)
+        assert set(selected) == {"shared", "data", "backup"}
+        assert clean.call_count == 2
+        cleaned = [call.args[0]["serial"] for call in clean.call_args_list]
+        assert cleaned == ["ZFS-A", "ZFS-B"]
+        disks[1]["children"] = []
+        refuses(lambda: script.preflight(items), script.StorageError)
+
+
 def test_preserved_shared_verification() -> None:
     """Не считать HDD 1 ТБ сохранённым без его UUID, OMV и реального mount."""
 
@@ -341,6 +378,7 @@ def main():
     test_existing_shared_confirmation()
     test_storage_state()
     test_remote_preflight()
+    test_mixed_preflight_only_checks_blank_zfs_disks()
     test_preserved_shared_verification()
     test_apply_preserves_shared()
     print("[ОК] Подтверждение и подготовка HDD проверены на искусственных данных")
