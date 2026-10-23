@@ -172,12 +172,36 @@ def test_changed_key_rejected() -> None:
     assert not calls
 
 
+def test_status_uses_real_systemd_timer() -> None:
+    """Статус 910 не считает один установленный файл включённым расписанием."""
+
+    from infra_manager import status
+    commands = []
+
+    def enabled(args, **kwargs):
+        commands.append(args)
+        return SimpleNamespace(returncode=0)
+
+    with patch.object(status.command_runner, "run", side_effect=enabled):
+        status._check_ssh_host_renewal()
+    assert commands == [
+        ["systemctl", "is-enabled", "--quiet", "infra-manager-ssh-host-renewal.timer"],
+        ["systemctl", "is-active", "--quiet", "infra-manager-ssh-host-renewal.timer"],
+    ]
+    with patch.object(
+        status.command_runner, "run",
+        return_value=SimpleNamespace(returncode=3),
+    ):
+        refuse(status._check_ssh_host_renewal)
+
+
 def main() -> None:
     test_persistent_pin()
     test_remote_rollover_script()
     test_valid_certificate_skips_renewal()
     test_expired_recovers_only_with_saved_key()
     test_changed_key_rejected()
+    test_status_uses_real_systemd_timer()
     print("[ОК] Плановое продление SSH Host CA и безопасное восстановление проверены")
 
 
