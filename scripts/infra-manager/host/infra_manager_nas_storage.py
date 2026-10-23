@@ -66,7 +66,19 @@ def confirm_nas_storage(name: str, forward, error_type: type[Exception]) -> int:
         )
     print("\nВНИМАНИЕ: будут подготовлены только следующие диски:")
     for item in to_create:
+        state = item.get("current_state")
+        if (
+            not isinstance(state, str)
+            or not state.startswith("Устройство сейчас /dev/")
+            or len(state) > 900
+            or any(char in state for char in "\r\n\x1b")
+        ):
+            raise error_type(
+                "NAS не сообщил безопасные сведения о текущей разметке HDD; "
+                "подтверждение форматирования запрещено"
+            )
         print(f"  {item['role']}: {item['serial']} ({item['action']})")
+        print(f"    {state}")
     if actions[1] == "preserve":
         print(f"Существующий HDD 1 ТБ ({items[1]['serial']}) НЕ ФОРМАТИРУЕТСЯ.")
         print("Перед записью на новые диски NAS проверит его ext4, UUID, OMV и подключение.")
