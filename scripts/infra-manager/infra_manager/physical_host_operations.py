@@ -111,8 +111,13 @@ def run_physical_host_operation(repo_root: Path, operation: str, name: str) -> i
         console.result("SSH-ключ обновлён после подтверждения" if changed else
                        "SSH-ключ физического сервера подтверждён")
         return 0
+    if host.driver != "omv8" and operation != "bootstrap":
+        raise InfraManagerError(
+            f"Не реализован обработчик {host.driver!r} для физического сервера "
+            f"{host.name}; SSH-доверие работает независимо от типа сервера"
+        )
     host = apply_saved_storage(host)
-    console.info(f"Физический сервер: {host.name}")
+    console.info(f"Физический сервер: {host.name} (обработчик {host.driver})")
     if host.address is None:
         raise InfraManagerError(
             f"{host.directory / 'host.yaml'}: укажите сетевой адрес физического сервера; "
