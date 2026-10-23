@@ -11,10 +11,13 @@ import os
 import re
 import shlex
 import tempfile
+from dataclasses import replace
 from pathlib import Path
 
-from .common import InfraManagerError
-from .physical_host_ssh import PhysicalHostSshSession, _scan_verified_key
+from .common import InfraManagerError, console
+from .physical_host_ssh import (
+    PhysicalHostSshSession, _scan_verified_key, discover_first_host_key, _FINGERPRINT,
+)
 from .physical_hosts import PhysicalHost
 from .physical_host_state import checked_record_path
 from .settings import PATHS
@@ -32,8 +35,8 @@ def marker_path(name: str) -> Path:
     return checked_record_path(name, data_root=PATHS.data_dir)
 
 
-def is_bootstrapped(host: PhysicalHost) -> bool:
-    """Запретить автоматический возврат к паролю после успешного перехода."""
+def resolve_saved_host(host: PhysicalHost) -> PhysicalHost:
+    """Использовать закреплённый SSH-ключ, не повторять первое доверие."""
 
     path = marker_path(host.name)
     if not path.exists():
@@ -42,18 +45,30 @@ def is_bootstrapped(host: PhysicalHost) -> bool:
                 "Назначения дисков сохранились, но отметка SSH-доверия исчезла. "
                 "Автоматический повтор начального входа запрещён"
             )
-        return False
+        return host
     try:
         marker = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise InfraManagerError("Отметка SSH-доверия NAS повреждена; повторный пароль запрещён") from exc
     if not isinstance(marker, dict) or marker.get("name") != host.name:
         raise InfraManagerError("Отметка SSH-доверия NAS не соответствует узлу")
-    if marker.get("fingerprint") != host.ssh_host_fingerprint or marker.get("address") != host.address:
+    fingerprint = marker.get("fingerprint")
+    if not isinstance(fingerprint, str) or not _FINGERPRINT.fullmatch(fingerprint):
+        raise InfraManagerError("В отметке SSH-доверия NAS отсутствует корректный отпечаток")
+    if marker.get("address") != host.address:
+        raise InfraManagerError("Адрес NAS изменился; повторный вход по паролю запрещён")
+    if host.ssh_host_fingerprint not in (None, fingerprint):
         raise InfraManagerError(
-            "Идентичность NAS изменилась; автоматический повтор начального входа запрещён"
+            "Отпечаток NAS в host.yaml отличается от сохранённого SSH-ключа"
         )
-    return True
+    return replace(host, ssh_host_fingerprint=fingerprint)
+
+
+def is_bootstrapped(host: PhysicalHost) -> bool:
+    """Не запрашивать пароль после успешного первого SSH-подключения."""
+
+    resolve_saved_host(host)
+    return marker_path(host.name).exists()
 
 
 def _save_bootstrapped(host: PhysicalHost) -> None:
@@ -173,6 +188,12 @@ def bootstrap_physical_host(
         or not re.fullmatch(r"[A-Za-z0-9+/]+={0,2}", parts[1])
     ):
         raise InfraManagerError("Некорректный открытый ключ клиентского CA OpenBao")
+    if host.ssh_host_fingerprint is None:
+        host = discover_first_host_key(host)
+        console.info(
+            f"Первый SSH-ключ NAS принят автоматически: {host.ssh_host_fingerprint}. "
+            "После успешного входа он будет закреплён для следующих подключений"
+        )
     _install_client_ca(host, username, password, public_ca)
     # Второе независимое SSH-подключение обязательно: пароль уже не
     # используется, сервер и сертификат проверяются в штатном режиме.
