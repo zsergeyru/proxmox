@@ -44,6 +44,31 @@ def test_persistent_pin() -> None:
             refuse(lambda: renew._saved_pin(-1, "gogs", "192.0.2.15"))
 
 
+def test_new_cert_principals_checked() -> None:
+    """Не ставить сертификат с чужим principal даже при корректном TTL."""
+
+    deadline = (datetime.now() + timedelta(days=29)).strftime("%Y-%m-%dT%H:%M:%S")
+    record = (
+        "ssh_host.pub:\\n"
+        "        Type: ssh-ed25519-cert-v01@openssh.com host certificate\\n"
+        "        Principals:\\n"
+        "                gogs\\n"
+        "                192.0.2.15\\n"
+        "        Critical Options: (none)\\n"
+        f"        Valid: from 2026-10-01T10:00:00 to {deadline}\\n"
+    )
+    with patch.object(renew, "run", return_value=SimpleNamespace(
+        returncode=0, stdout=record,
+    )):
+        assert renew._remaining("CERT", hostname="gogs", address="192.0.2.15") > timedelta(days=14)
+        refuse(lambda: renew._remaining(
+            "CERT", hostname="other", address="192.0.2.15"
+        ))
+        refuse(lambda: renew._remaining(
+            "CERT", hostname="gogs", address="192.0.2.16"
+        ))
+
+
 def test_remote_rollover_script() -> None:
     """Резервная копия и откат находятся в проверенном удалённом скрипте."""
 
@@ -236,6 +261,7 @@ def test_scheduler_skips_missing_and_stopped_pve_guests() -> None:
 
 def main() -> None:
     test_persistent_pin()
+    test_new_cert_principals_checked()
     test_remote_rollover_script()
     test_valid_certificate_skips_renewal()
     test_expired_recovers_only_with_saved_key()
