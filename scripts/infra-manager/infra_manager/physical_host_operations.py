@@ -16,7 +16,11 @@ from .guest_catalog import find_guest_by_role
 from .settings import SETTINGS
 from .physical_hosts import list_physical_hosts, load_physical_host
 from .physical_host_ssh import PhysicalHostSshSession
-from .physical_host_bootstrap import bootstrap_physical_host, resolve_saved_host
+from .physical_host_bootstrap import (
+    bootstrap_physical_host, resolve_saved_host, confirm_redeploy_host_key,
+)
+from .physical_host_ssh import discover_first_host_key
+from dataclasses import replace
 from .physical_storage import read_disk_inspection, verify_expected_disks
 from .physical_storage_plan import propose_storage, format_storage_plan
 from .physical_nas_storage_state import apply_saved_storage
@@ -30,7 +34,7 @@ from .physical_nas_volumes import verify_nas_volumes
 from .common import run
 
 
-SUPPORTED_HOST_OPERATIONS = frozenset({"hosts", "status", "inspect", "storage-plan", "storage-prepare", "deploy", "repair", "bootstrap"})
+SUPPORTED_HOST_OPERATIONS = frozenset({"hosts", "status", "inspect", "storage-plan", "storage-prepare", "deploy", "repair", "bootstrap", "ssh-trust-plan", "ssh-trust-confirm"})
 
 
 def require_host_access(repo_root: Path, host_name: str) -> None:
@@ -80,18 +84,44 @@ def run_physical_host_operation(repo_root: Path, operation: str, name: str) -> i
         raise InfraManagerError(f"Недопустимая операция физического сервера: {operation}")
     if operation == "hosts":
         return list_hosts(repo_root)
-    host = apply_saved_storage(resolve_saved_host(load_physical_host(repo_root, name)))
+    host = resolve_saved_host(load_physical_host(repo_root, name))
     require_host_access(repo_root, name)
+    if operation in {"ssh-trust-plan", "ssh-trust-confirm"}:
+        if not host.address or not host.ssh_host_fingerprint:
+            raise InfraManagerError("Сначала требуется первоначальное SSH-доверие")
+        if operation == "ssh-trust-plan":
+            current = discover_first_host_key(replace(host, ssh_host_fingerprint=None))
+            print("PHYSICAL_SSH_TRUST_JSON=" + json.dumps({
+                "name": host.name, "address": host.address,
+                "previous": host.ssh_host_fingerprint,
+                "current": current.ssh_host_fingerprint,
+                "changed": host.ssh_host_fingerprint != current.ssh_host_fingerprint,
+            }, ensure_ascii=False, separators=(",", ":")))
+            return 0
+        payload = sys.stdin.readline(2048)
+        if not payload or len(payload) > 2047 or not payload.endswith("\n"):
+            raise InfraManagerError("Не получено подтверждение SSH-ключа")
+        try:
+            approved = json.loads(payload)
+        except json.JSONDecodeError as exc:
+            raise InfraManagerError("Некорректное подтверждение SSH-ключа") from exc
+        if not isinstance(approved, dict) or set(approved) != {"fingerprint"}:
+            raise InfraManagerError("Некорректная форма подтверждения SSH-ключа")
+        changed = confirm_redeploy_host_key(host, approved["fingerprint"])
+        console.result("SSH-ключ обновлён после подтверждения" if changed else
+                       "SSH-ключ физического сервера подтверждён")
+        return 0
+    host = apply_saved_storage(host)
     console.info(f"Физический сервер: {host.name}")
     if host.address is None:
         raise InfraManagerError(
-            f"{host.directory / 'host.yaml'}: укажите подтверждённый сетевой адрес NAS; "
+            f"{host.directory / 'host.yaml'}: укажите сетевой адрес физического сервера; "
             "автоматический поиск соседних машин запрещён"
         )
     if host.ssh_host_fingerprint is None and operation != "bootstrap":
         raise InfraManagerError(
-            "Первое SSH-доверие NAS ещё не установлено. "
-            "Запустите интерактивно infra-manager deploy nas на PVE"
+            f"Первое SSH-доверие {host.name} ещё не установлено. "
+            f"Запустите интерактивно infra-manager deploy {host.name} на PVE"
         )
 
     if operation == "bootstrap":
