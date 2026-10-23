@@ -35,7 +35,7 @@ def _safe_storage_failure(stderr: str) -> str:
     for line in stderr.splitlines():
         match = re.fullmatch(
             r"ОШИБКА: Не выполнилась команда ([a-z0-9.]{1,32}) "
-            r"\\(код ([0-9]{1,3})\\)", line.strip()
+            r"\(код ([0-9]{1,3})\)", line.strip()
         )
         if match and match.group(1) in allowed:
             return (
