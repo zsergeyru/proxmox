@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -10,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts" / "infra-manager"))
 
 from infra_manager.common import InfraManagerError
-from infra_manager.physical_storage import DiskInspection
+from infra_manager.physical_storage import DiskInspection, read_disk_inspection
 from infra_manager.physical_storage_plan import propose_storage, format_storage_plan
 from infra_manager.operator import build_parser
 
@@ -43,9 +44,54 @@ def refuses(callback):
     raise AssertionError("Небезопасный план принят")
 
 
+def test_observed_disk_layout() -> None:
+    """Показать реальную GPT/ext4 на 1 ТБ и отсутствие разметки на новых HDD."""
+
+    devices, _ = sample()
+    raw = {
+        "blockdevices": [
+            {
+                "path": "/dev/sda", "type": "disk", "model": "SPCC",
+                "serial": "SSD", "size": 120 * 10**9, "pttype": "gpt",
+                "mountpoints": [None], "children": [{
+                    "path": "/dev/sda1", "type": "part", "fstype": "ext4",
+                    "mountpoints": ["/"],
+                }],
+            },
+            {
+                "path": "/dev/sdb", "type": "disk", "model": "ST1000DM003",
+                "serial": "SHARED", "size": 1000 * 10**9, "pttype": "gpt",
+                "mountpoints": [None], "children": [{
+                    "path": "/dev/sdb1", "type": "part", "fstype": "ext4",
+                    "uuid": "abcd-1234", "mountpoints": ["/srv/shared"],
+                }],
+            },
+            *[
+                {
+                    "path": path, "type": "disk", "model": "ST4000VX016",
+                    "serial": serial, "size": 4000 * 10**9,
+                    "pttype": None, "fstype": None,
+                    "mountpoints": [None], "children": [],
+                }
+                for path, serial in (
+                    ("/dev/sdc", "ZFS-A"), ("/dev/sdd", "ZFS-B")
+                )
+            ],
+        ],
+    }
+    disks = read_disk_inspection(json.dumps(raw))
+    plan = propose_storage(devices, disks)
+    displayed = format_storage_plan(plan)
+    assert "таблица разделов: gpt" in displayed
+    assert "/dev/sdb1: ФС ext4, UUID abcd-1234, подключён: /srv/shared" in displayed
+    assert "Устройство сейчас /dev/sdc; разметка, разделы и файловые системы не обнаружены" in displayed
+    assert "Устройство сейчас /dev/sdd; разметка, разделы и файловые системы не обнаружены" in displayed
+
+
 def main():
     """Проверить привязку ролей к номерам и защиту действующих разделов."""
 
+    test_observed_disk_layout()
     devices, disks = sample()
     plan = propose_storage(devices, disks)
     assert len(plan.assignments) == 4
