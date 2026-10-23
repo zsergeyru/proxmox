@@ -23,7 +23,7 @@ def check_contract() -> None:
     hosts = list_physical_hosts(ROOT)
     assert "nas" in {host.name for host in hosts}
     nas = load_physical_host(ROOT, "nas")
-    assert nas.address is None
+    assert nas.address == "192.168.1.12"
     assert nas.ssh_host_fingerprint is None
     assert [item["role"] for item in nas.devices] == [
         "system", "shared", "data", "backup"
