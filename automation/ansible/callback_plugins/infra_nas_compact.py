@@ -72,7 +72,7 @@ class CallbackModule(CallbackBase):
 
         found: list[str] = []
         # urlsplit.hostname отбрасывает username, password, порт, query и path.
-        for match in re.findall(r"https?://[^\\s<>]+", str(output or "")[:50000]):
+        for match in re.findall(r"https?://[^\s<>]+", str(output or "")[:50000]):
             try:
                 host = urlsplit(match.rstrip("',;.)")).hostname
             except ValueError:
