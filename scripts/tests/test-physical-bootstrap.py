@@ -15,6 +15,7 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts" / "infra-manager"))
 from infra_manager import operator, physical_host_bootstrap as bootstrap
+from infra_manager.physical_host_ssh import discover_first_host_key
 from infra_manager.common import InfraManagerError
 from infra_manager.physical_hosts import load_physical_host
 
@@ -53,6 +54,8 @@ def test_marker() -> None:
             assert not bootstrap.is_bootstrapped(machine)
             bootstrap._save_bootstrapped(machine)
             assert bootstrap.is_bootstrapped(machine)
+            recovered = bootstrap.resolve_saved_host(replace(machine, ssh_host_fingerprint=None))
+            assert recovered.ssh_host_fingerprint == machine.ssh_host_fingerprint
             expect_refusal(lambda: bootstrap.is_bootstrapped(
                 replace(machine, address="192.0.2.23")
             ))
@@ -77,7 +80,7 @@ def test_operator_state() -> None:
         target.mkdir(parents=True)
         target.joinpath("host.yaml").write_text(
             "connection:\n  address: 192.0.2.22\n"
-            "  ssh_host_fingerprint: SHA256:" + "B" * 43 + "\n",
+            "  ssh_host_fingerprint: null\n",
             encoding="utf-8",
         )
         paths = SimpleNamespace(repo_root=root, data_dir=root / "state")
@@ -91,6 +94,17 @@ def test_operator_state() -> None:
                 encoding="utf-8",
             )
             assert operator.operator_physical_bootstrap_state("nas") == 0
+            target.joinpath("host.yaml").write_text(
+                "connection:\n  address: 192.0.2.22\n"
+                "  ssh_host_fingerprint: SHA256:" + "A" * 43 + "\n",
+                encoding="utf-8",
+            )
+            expect_refusal(lambda: operator.operator_physical_bootstrap_state("nas"))
+            target.joinpath("host.yaml").write_text(
+                "connection:\n  address: 192.0.2.22\n"
+                "  ssh_host_fingerprint: null\n",
+                encoding="utf-8",
+            )
             marker.write_text('{"name":"nas","address":"192.0.2.23"}')
             expect_refusal(lambda: operator.operator_physical_bootstrap_state("nas"))
             marker.unlink()
@@ -99,6 +113,37 @@ def test_operator_state() -> None:
                 encoding="utf-8",
             )
             expect_refusal(lambda: operator.operator_physical_bootstrap_state("nas"))
+
+
+def test_automatic_initial_key() -> None:
+    """Первый SSH-ключ принимается автоматически, но не два разных ключа."""
+
+    machine = replace(
+        load_physical_host(ROOT, "nas"),
+        address="192.0.2.22", ssh_host_fingerprint=None,
+    )
+    responses = ["192.0.2.22 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAA\n"]
+
+    def fake_run(argv: list[str], **_kwargs: object) -> SimpleNamespace:
+        if argv[0] == "ssh-keyscan":
+            assert argv[-1] == machine.address
+            return SimpleNamespace(returncode=0, stdout=responses[0])
+        if argv[0] == "ssh-keygen":
+            return SimpleNamespace(
+                returncode=0,
+                stdout="256 SHA256:" + "C" * 43 + " NAS (ED25519)\n",
+            )
+        raise AssertionError("Посторонняя программа при принятии ключа")
+
+    with patch("infra_manager.physical_host_ssh.run", side_effect=fake_run):
+        trusted = discover_first_host_key(machine)
+        assert trusted.ssh_host_fingerprint == "SHA256:" + "C" * 43
+        expect_refusal(lambda: discover_first_host_key(trusted))
+        responses[0] = (
+            "192.0.2.22 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAA\n"
+            "192.0.2.22 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBBBB\n"
+        )
+        expect_refusal(lambda: discover_first_host_key(machine))
 
 
 def test_pve_password_transport() -> None:
@@ -141,6 +186,7 @@ def main() -> int:
 
     test_marker()
     test_operator_state()
+    test_automatic_initial_key()
     test_pve_password_transport()
     print("[ОК] Первый SSH-доступ NAS проверен на испытательных данных")
     return 0
