@@ -173,12 +173,54 @@ def test_pve_password_transport() -> None:
     assert all("TEST-NOT-REAL-SECRET" not in str(command) for command, _ in calls)
 
     calls.clear()
-    with patch.object(password_prompt.getpass, "getpass") as prompt:
-        def already_done(command: list[str], *, input_text: str | None = None) -> int:
-            calls.append((command, input_text))
-            return 0
-        assert password_prompt.initial_nas_access("nas", already_done, host.OperatorError) == 0
-        prompt.assert_not_called()
+    plan = {
+        "name": "nas", "address": "192.0.2.22",
+        "previous": "SHA256:" + "B" * 43,
+        "current": "SHA256:" + "B" * 43,
+        "changed": False,
+    }
+
+    def repeat_deploy(command: list[str], *, input_text: str | None = None,
+                      capture_output: bool = False):
+        calls.append((command, input_text))
+        if command == ["ssh-trust-plan", "nas"]:
+            assert capture_output
+            return SimpleNamespace(
+                returncode=0,
+                stdout="PHYSICAL_SSH_TRUST_JSON=" + json.dumps(plan) + "\n",
+                stderr="",
+            )
+        return 0
+
+    with (
+        patch.object(password_prompt.sys, "stdin", SimpleNamespace(isatty=lambda: True)),
+        patch("builtins.input", return_value="да"),
+        patch.object(password_prompt.getpass, "getpass") as password,
+    ):
+        assert password_prompt.initial_nas_access("nas", repeat_deploy, host.OperatorError) == 0
+        password.assert_not_called()
+    assert calls == [
+        (["bootstrap-state", "nas"], None),
+        (["ssh-trust-plan", "nas"], None),
+        (["ssh-trust-confirm", "nas"], json.dumps({"fingerprint": plan["current"]}) + "\n"),
+    ]
+    calls.clear()
+    plan["changed"] = True
+    plan["current"] = "SHA256:" + "C" * 43
+    with (
+        patch.object(password_prompt.sys, "stdin", SimpleNamespace(isatty=lambda: True)),
+        patch("builtins.input", return_value="нет"),
+    ):
+        expect_refusal(
+            lambda: password_prompt.initial_nas_access("nas", repeat_deploy, host.OperatorError)
+        )
+    assert all(command != ["ssh-trust-confirm", "nas"] for command, _ in calls)
+    calls.clear()
+    with patch.object(password_prompt.sys, "stdin", SimpleNamespace(isatty=lambda: False)):
+        expect_refusal(
+            lambda: password_prompt.initial_nas_access("nas", repeat_deploy, host.OperatorError)
+        )
+    assert all(command != ["ssh-trust-confirm", "nas"] for command, _ in calls)
 
 
 def main() -> int:
