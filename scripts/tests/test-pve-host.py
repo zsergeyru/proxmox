@@ -582,15 +582,14 @@ def test_pve_ssh_commands_share_trust_settings() -> None:
 
 
 def test_self_update_refreshes_pve_operator() -> None:
-    """Изменённый запрос доверия должен попасть на PVE при deploy 910."""
+    """Ansible 910 обновляет оболочку PVE; guest_deploy не дублирует установщик."""
 
+    tasks = (ROOT / "automation/ansible/roles/infra_manager/tasks/recovery.yml"
+             ).read_text(encoding="utf-8")
+    assert "operator-wrapper-install" in tasks
     guest_deploy = importlib.import_module("infra_manager.guest_deploy")
     source = inspect.getsource(guest_deploy._run_deploy_guest)
-    updated = source.split("if self_update:", 1)[1].split("return 0", 1)[0]
-    assert "install_operator_host_support(context.node, repo_root)" in updated
-    assert updated.index("_configure_guest_os(") < updated.index(
-        "install_operator_host_support(context.node, repo_root)"
-    )
+    assert "install_operator_host_support" not in source
 
 
 def main() -> None:
