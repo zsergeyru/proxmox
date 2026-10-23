@@ -18,6 +18,53 @@ class DiskInspection:
     capacity_bytes: int
     is_system: bool
     contains_existing_layout: bool
+    partition_table: str | None = None
+    filesystem: str | None = None
+    mountpoints: tuple[str, ...] = ()
+    partitions: tuple[str, ...] = ()
+
+
+def _mount_locations(device: dict[str, object]) -> tuple[str, ...]:
+    """Показать только определённые lsblk точки подключения."""
+
+    mounts = device.get("mountpoints")
+    if mounts is None:
+        return ()
+    if not isinstance(mounts, list) or any(
+        point is not None and not isinstance(point, str) for point in mounts
+    ):
+        raise InfraManagerError("lsblk вернул некорректные точки подключения")
+    return tuple(point for point in mounts if isinstance(point, str) and point)
+
+
+def _partitions(device: dict[str, object]) -> tuple[str, ...]:
+    """Вывести существующие разделы и ФС с UUID без изменения диска."""
+
+    result: list[str] = []
+    children = device.get("children") or []
+    if not isinstance(children, list):
+        raise InfraManagerError("lsblk вернул некорректное дерево разделов")
+    for child in children:
+        if not isinstance(child, dict):
+            raise InfraManagerError("lsblk вернул некорректный раздел")
+        path = child.get("path")
+        fs = child.get("fstype")
+        uid = child.get("uuid")
+        if not isinstance(path, str) or not path.startswith("/dev/"):
+            raise InfraManagerError("Не определён путь существующего раздела")
+        if fs is not None and not isinstance(fs, str):
+            raise InfraManagerError("Некорректный тип файловой системы lsblk")
+        if uid is not None and not isinstance(uid, str):
+            raise InfraManagerError("Некорректный UUID lsblk")
+        description = f"{path}: ФС {fs or 'нет'}"
+        if uid:
+            description += f", UUID {uid}"
+        mounted = _mount_locations(child)
+        if mounted:
+            description += ", подключён: " + ", ".join(mounted)
+        result.append(description)
+        result.extend(_partitions(child))
+    return tuple(result)
 
 
 def _contains_root(device: dict[str, object]) -> bool:
@@ -74,6 +121,11 @@ def read_disk_inspection(raw_json: str) -> tuple[DiskInspection, ...]:
         serial = item.get("serial")
         if serial is not None and not isinstance(serial, str):
             raise InfraManagerError("lsblk вернул некорректный серийный номер")
+        table, fs = item.get("pttype"), item.get("fstype")
+        if (table is not None and not isinstance(table, str)) or (
+            fs is not None and not isinstance(fs, str)
+        ):
+            raise InfraManagerError("lsblk вернул некорректный тип разметки")
         disks.append(DiskInspection(
             path=path,
             model=model.strip(),
@@ -81,6 +133,10 @@ def read_disk_inspection(raw_json: str) -> tuple[DiskInspection, ...]:
             capacity_bytes=size,
             is_system=_contains_root(item),
             contains_existing_layout=_has_layout(item),
+            partition_table=table,
+            filesystem=fs,
+            mountpoints=_mount_locations(item),
+            partitions=_partitions(item),
         ))
     if not disks or not any(disk.is_system for disk in disks):
         raise InfraManagerError(
