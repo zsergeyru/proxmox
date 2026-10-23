@@ -404,6 +404,195 @@ def test_apply_preserves_shared() -> None:
     assert not any(args[0] in {"sgdisk", "mkfs.ext4", "mount"} for args in commands)
 
 
+def test_omv_new_mount_is_created_by_omv() -> None:
+    """OMV 8 присваивает UUID новой записи сам, а не принимает наш UUID."""
+
+    script = _load_remote()
+    u = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+    entry = {"uuid": u, "fsname": "/dev/disk/by-uuid/" + u,
+             "dir": "/srv/dev-disk-by-uuid-" + u, "type": "ext4"}
+    commands = []
+    calls = 0
+
+    def read_records():
+        nonlocal calls
+        calls += 1
+        return [] if calls == 1 else [entry]
+
+    def update(*args):
+        commands.append(args)
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    with (
+        patch.object(script, "omv_records", side_effect=read_records),
+        patch.object(script, "execute", side_effect=update),
+    ):
+        assigned = script.register_omv("shared", "ext4",
+                                      entry["fsname"], entry["dir"])
+    assert assigned == u
+    assert commands[0][:3] == (
+        "omv-confdbadm", "update", "conf.system.filesystem.mountpoint"
+    )
+    payload = json.loads(commands[0][3])
+    assert "uuid" not in payload
+    assert payload["fsname"] == entry["fsname"]
+    # Для существующего однозначного тома операция должна быть только чтением.
+    with (
+        patch.object(script, "omv_records", return_value=[entry]),
+        patch.object(script, "execute") as command,
+    ):
+        assert script.register_omv("shared", "ext4",
+                                  entry["fsname"], entry["dir"]) == u
+        command.assert_not_called()
+
+
+def test_recover_existing_hdds_never_reformats() -> None:
+    """Ранее созданные ext4 и ZFS проверяются, но не форматируются заново."""
+
+    script = _load_remote()
+    old_items = [
+        {"role": "shared", "serial": "SHARED-TEST", "action": "create-ext4"},
+        {"role": "data", "serial": "ZFS-A", "action": "create-zfs"},
+        {"role": "backup", "serial": "ZFS-B", "action": "create-zfs"},
+    ]
+    disks = [
+        {"type": "disk", "path": "/dev/sda", "serial": "SYSTEM-TEST",
+         "children": [{"mountpoints": ["/"]}]},
+        {"type": "disk", "path": "/dev/sdb", "serial": "SHARED-TEST",
+         "model": "ST1000DM003", "size": 1000000000000, "pttype": "gpt",
+         "children": [{"type": "part", "fstype": "ext4",
+                       "uuid": "62efe809-f358-4c75-a465-63fc7c617104"}]},
+        {"type": "disk", "path": "/dev/sdc", "serial": "ZFS-A",
+         "model": "ST4000VX016", "size": 4000000000000, "pttype": "gpt",
+         "children": [{"type": "part", "fstype": "zfs_member"},
+                      {"type": "part", "fstype": None}]},
+        {"type": "disk", "path": "/dev/sdd", "serial": "ZFS-B",
+         "model": "ST4000VX016", "size": 4000000000000, "pttype": "gpt",
+         "children": [{"type": "part", "fstype": "zfs_member"},
+                      {"type": "part", "fstype": None}]},
+    ]
+    commands = []
+    def fake_execute(*args, **kwargs):
+        commands.append(args)
+        if args[:3] == ("blkid", "-s", "UUID"):
+            return SimpleNamespace(returncode=0, stdout="62efe809-f358-4c75-a465-63fc7c617104\n")
+        if args[:3] == ("blkid", "-s", "LABEL"):
+            return SimpleNamespace(returncode=0, stdout="nas-shared\n")
+        if args[0] == "zpool" and args[1] == "status":
+            role = args[-1].removeprefix("nas-")
+            serial = "ZFS-A" if role == "data" else "ZFS-B"
+            return SimpleNamespace(returncode=0,
+                stdout=f"  pool: {args[-1]}\n state: ONLINE\n"
+                       f"    /dev/disk/by-id/ata_{serial}-part1 ONLINE 0 0 0\n")
+        if args[0] == "findmnt" and args[1] == "--mountpoint":
+            return SimpleNamespace(returncode=1, stdout="")
+        return SimpleNamespace(returncode=0, stdout="")
+
+    with tempfile.TemporaryDirectory() as folder:
+        journal = Path(folder) / "storage-preparation.json"
+        journal.write_text(json.dumps({
+            "fingerprint": "f" * 64, "state": "started", "items": old_items,
+        }))
+        for serial in ("SHARED-TEST", "ZFS-A", "ZFS-B"):
+            Path(folder, serial + "-part1").touch()
+
+        with (
+            patch.object(script, "JOURNAL", journal),
+            patch.object(script, "disk_list", return_value=disks),
+            patch.object(script, "stable_device",
+                         side_effect=lambda _path, serial: str(Path(folder, serial))),
+            patch.object(script, "execute", side_effect=fake_execute),
+            patch.object(script, "register_omv",
+                         return_value="aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"),
+            patch.object(script, "pool_guid", return_value="12345"),
+            patch.object(script, "verify_mount") as verify,
+        ):
+            result = script.recover_from_journal(old_items, "f" * 64)
+            assert result["volumes"]["shared"]["filesystem_uuid"] == (
+                "62efe809-f358-4c75-a465-63fc7c617104"
+            )
+            assert len(result["volumes"]) == 3
+            assert (Path(folder) / "storage-preparation-result.json").exists()
+            assert journal.exists()
+            assert not any(args[0] in {
+                "sgdisk", "mkfs.ext4", "wipefs", "zpool-create"
+            } for args in commands)
+            assert not any(args[:2] == ("zpool", "create") for args in commands)
+            verify.assert_any_call("/nas-data", "zfs", "nas-data")
+            verify.assert_any_call("/nas-backup", "zfs", "nas-backup")
+            # Отчёт/исходный журнал остаются на месте; повтор безопасен.
+            script.recover_from_journal(old_items, "f" * 64)
+            wrong = [dict(item) for item in old_items]
+            wrong[-1]["serial"] = "ANOTHER"
+            refuses(lambda: script.recover_from_journal(
+                wrong, "f" * 64), script.StorageError)
+            assert not any(args[:2] == ("zpool", "create") for args in commands)
+
+
+def test_pending_recovery_is_auto_dispatched_without_format_prompt() -> None:
+    """После исходного подтверждения достаточно нового deploy nas без записи."""
+
+    host, first_plan = sample_plan()
+    all_existing = (
+        DiskInspection("/dev/sda", "SPCC", "SYSTEM-TEST", 120_000_000_000, True, True),
+        DiskInspection("/dev/sdb", "ST1000DM003", "SHARED-TEST", 1_000_000_000_000, False, True),
+        DiskInspection("/dev/sdc", "ST4000VX016", "ZFS-A", 4_000_000_000_000, False, True),
+        DiskInspection("/dev/sdd", "ST4000VX016", "ZFS-B", 4_000_000_000_000, False, True),
+    )
+    current_plan = propose_storage(host.devices, all_existing)
+    journal = {
+        "fingerprint": first_plan.fingerprint, "state": "started",
+        "items": [
+            {"role": item.role, "serial": item.serial, "action": item.action}
+            for item in first_plan.assignments if item.role != "system"
+        ],
+    }
+    from infra_manager.physical_nas_storage_prepare import read_pending_recovery
+    mock_session = SimpleNamespace(command=lambda text: ("ssh", text))
+    with patch(
+        "infra_manager.physical_nas_storage_prepare.run",
+        return_value=SimpleNamespace(returncode=0, stdout=json.dumps(journal)),
+    ):
+        assert read_pending_recovery(host, mock_session, current_plan) == journal
+    wrong = dict(journal)
+    wrong["fingerprint"] = "0" * 64
+    with patch(
+        "infra_manager.physical_nas_storage_prepare.run",
+        return_value=SimpleNamespace(returncode=0, stdout=json.dumps(wrong)),
+    ):
+        refuses(lambda: read_pending_recovery(host, mock_session, current_plan),
+                InfraManagerError)
+
+    response = {
+        "fingerprint": current_plan.fingerprint, "requires_creation": False,
+        "recovery_fingerprint": first_plan.fingerprint,
+        "items": [
+            {"role": a.role, "serial": a.serial, "action": a.action,
+             "current_state": observed_disk_condition(a)}
+            for a in current_plan.assignments
+        ],
+    }
+    calls = []
+    def forward(cmd, *, capture_output=False, input_text=None):
+        calls.append((cmd, input_text))
+        if capture_output:
+            return SimpleNamespace(
+                returncode=0, stdout="NAS_STORAGE_PLAN_JSON=" + json.dumps(response),
+            )
+        return 0
+
+    with (
+        patch("infra_manager_nas_storage.sys.stdin",
+              SimpleNamespace(isatty=lambda: False)),
+        patch("builtins.input", side_effect=AssertionError("Нельзя снова спрашивать о форматировании")),
+    ):
+        assert confirm_nas_storage("nas", forward, RuntimeError) == 0
+    assert calls[-1][0] == ["storage-prepare", "nas"]
+    assert json.loads(calls[-1][1]) == {
+        "fingerprint": first_plan.fingerprint
+    }
+
+
 def main():
     """Проверить все контракты без обращения к реальным HDD."""
 
@@ -415,6 +604,9 @@ def main():
     test_mixed_preflight_only_checks_blank_zfs_disks()
     test_preserved_shared_verification()
     test_apply_preserves_shared()
+    test_omv_new_mount_is_created_by_omv()
+    test_recover_existing_hdds_never_reformats()
+    test_pending_recovery_is_auto_dispatched_without_format_prompt()
     print("[ОК] Подтверждение и подготовка HDD проверены на искусственных данных")
     return 0
 
