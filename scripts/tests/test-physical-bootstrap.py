@@ -262,6 +262,9 @@ def test_initial_root_without_sudo() -> None:
         assert commands[0].startswith("sh -c ")
         assert "sudo -S" not in commands[0]
         assert "test-password" not in commands[0]
+        assert "TrustedUserCAKeys" in commands[0]
+        assert "PermitRootLogin prohibit-password" not in commands[0]
+        assert "yes|prohibit-password|without-password" in commands[0]
         assert not writes
 
         commands.clear()
