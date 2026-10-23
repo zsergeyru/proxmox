@@ -267,7 +267,7 @@ def test_initial_root_without_sudo() -> None:
         commands.clear()
         bootstrap._install_client_ca(machine, "alice", "test-password", "ssh-ed25519 AAAA")
         assert commands[0].startswith("sudo -S -p '' sh -c ")
-        assert writes == ["test-password\\n"]
+        assert writes == ["test-password\n"]
 
         exit_code[0] = 50
         try:
