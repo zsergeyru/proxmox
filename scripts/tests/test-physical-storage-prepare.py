@@ -106,6 +106,53 @@ def test_confirmation():
     assert json.loads(responses[-1][1]) == {"fingerprint": plan.fingerprint}
 
 
+def test_existing_shared_confirmation() -> None:
+    """План с существующим ext4 сохраняет HDD 1 ТБ и предлагает только ZFS."""
+
+    host, _ = sample_plan()
+    disks = (
+        DiskInspection("/dev/sda", "SPCC", "SYSTEM-TEST", 120_000_000_000, True, True),
+        DiskInspection("/dev/sdb", "ST1000DM003", "SHARED-TEST", 1_000_000_000_000, False, True),
+        DiskInspection("/dev/sdc", "ST4000VX016", "ZFS-A", 4_000_000_000_000, False, False),
+        DiskInspection("/dev/sdd", "ST4000VX016", "ZFS-B", 4_000_000_000, False, False),
+    )
+    disks = (*disks[:3], replace(disks[3], capacity_bytes=4_000_000_000_000))
+    plan = propose_storage(host.devices, disks)
+    assert [item.action for item in plan.assignments] == [
+        "preserve", "preserve", "create-zfs", "create-zfs",
+    ]
+    output = {
+        "fingerprint": plan.fingerprint, "requires_creation": True,
+        "items": [
+            {"role": item.role, "serial": item.serial, "action": item.action}
+            for item in plan.assignments
+        ],
+    }
+    calls = []
+
+    def forward(command, *, capture_output=False, input_text=None):
+        calls.append((command, input_text))
+        if capture_output:
+            return SimpleNamespace(
+                returncode=0, stderr="",
+                stdout="Plan\\nNAS_STORAGE_PLAN_JSON=" + json.dumps(output) + "\\n",
+            )
+        return 0
+
+    with (
+        patch("infra_manager_nas_storage.sys.stdin", SimpleNamespace(isatty=lambda: True)),
+        patch("builtins.print") as printed,
+        patch("builtins.input", return_value="да"),
+    ):
+        assert confirm_nas_storage("nas", forward, RuntimeError) == 0
+    shown = "\\n".join(str(call.args[0]) for call in printed.call_args_list)
+    assert "SHARED-TEST" in shown
+    assert "НЕ ФОРМАТИРУЕТСЯ" in shown
+    assert "ZFS-A" in shown and "ZFS-B" in shown
+    assert calls[-1][0] == ["storage-prepare", "nas"]
+    assert json.loads(calls[-1][1]) == {"fingerprint": plan.fingerprint}
+
+
 def test_storage_state():
     """Состояние сохраняется однократно и отказывает при смене идентичности."""
 
@@ -199,6 +246,7 @@ def main():
     """Проверить все контракты без обращения к реальным HDD."""
 
     test_confirmation()
+    test_existing_shared_confirmation()
     test_storage_state()
     test_remote_preflight()
     print("[ОК] Подтверждение и подготовка HDD проверены на искусственных данных")
