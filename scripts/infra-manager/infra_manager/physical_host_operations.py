@@ -24,7 +24,7 @@ from dataclasses import replace
 from .physical_storage import read_disk_inspection, verify_expected_disks
 from .physical_storage_plan import propose_storage, format_storage_plan, observed_disk_condition
 from .physical_nas_storage_state import apply_saved_storage
-from .physical_nas_storage_prepare import prepare_blank_disks
+from .physical_nas_storage_prepare import prepare_blank_disks, read_pending_recovery
 from .physical_nas_system import read_nas_system, require_omv8
 from .physical_nas_ansible import (
     configure_nas, configure_nas_apps, configure_nas_backups, configure_nas_smb,
@@ -213,11 +213,22 @@ def run_physical_host_operation(repo_root: Path, operation: str, name: str) -> i
                         f"Диск {item.serial}: wipefs и blkid не обнаружили сигнатур "
                         "(перед записью проверка повторится)"
                     )
+                pending = read_pending_recovery(host, session, plan)
                 console.info(format_storage_plan(plan))
+                if pending is not None:
+                    console.warning(
+                        "Обнаружен журнал ранее подтверждённой подготовки HDD. "
+                        "Три файловые системы уже существуют; "
+                        "будет выполнена только проверка и регистрация OMV "
+                        "без форматирования"
+                    )
                 print(
                     "NAS_STORAGE_PLAN_JSON=" + json.dumps({
                         "fingerprint": plan.fingerprint,
                         "requires_creation": plan.requires_creation,
+                        "recovery_fingerprint": (
+                            pending["fingerprint"] if pending is not None else None
+                        ),
                         "items": [
                             {"role": item.role, "serial": item.serial,
                              "action": item.action,
