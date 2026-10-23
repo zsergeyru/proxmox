@@ -135,22 +135,22 @@ def _install_client_ca(
     ca = shlex.quote(public_ca)
     script = "\n".join([
         "set -eu",
-        "install -d -m 0755 /etc/ssh/sshd_config.d",
+        "install -d -m 0755 /etc/ssh/sshd_config.d || exit 41",
         "umask 077",
-        'ca_tmp=$(mktemp /etc/ssh/.infra-client-ca.XXXXXX)',
-        'config_tmp=$(mktemp /etc/ssh/sshd_config.d/.infra-client-ca.XXXXXX)',
+        'ca_tmp=$(mktemp /etc/ssh/.infra-client-ca.XXXXXX) || exit 42',
+        'config_tmp=$(mktemp /etc/ssh/sshd_config.d/.infra-client-ca.XXXXXX) || exit 43',
         'trap \'rm -f "$ca_tmp" "$config_tmp"\' EXIT',
-        f"printf '%s\\n' {ca} > \"$ca_tmp\"",
-        'chmod 0644 "$ca_tmp"',
-        "printf '%s\n' 'TrustedUserCAKeys /etc/ssh/trusted-user-ca-keys.pem' 'PermitRootLogin prohibit-password' > \"$config_tmp\"",
-        'chmod 0644 "$config_tmp"',
-        'mv -f "$ca_tmp" /etc/ssh/trusted-user-ca-keys.pem',
-        'mv -f "$config_tmp" /etc/ssh/sshd_config.d/40-infra-manager-user-ca.conf',
-        "/usr/sbin/sshd -t",
-        "sshd_effective=$(/usr/sbin/sshd -T -C user=root,host=localhost,addr=127.0.0.1)",
-        'printf "%s\\n" "$sshd_effective" | grep -Fxq "trustedusercakeys /etc/ssh/trusted-user-ca-keys.pem"',
-        'printf "%s\\n" "$sshd_effective" | grep -Eq "^permitrootlogin (prohibit-password|without-password)$"',
-        "systemctl reload ssh.service",
+        f"printf '%s\\n' {ca} > \"$ca_tmp\" || exit 44",
+        'chmod 0644 "$ca_tmp" || exit 45',
+        "printf '%s\\n' 'TrustedUserCAKeys /etc/ssh/trusted-user-ca-keys.pem' 'PermitRootLogin prohibit-password' > \"$config_tmp\" || exit 46",
+        'chmod 0644 "$config_tmp" || exit 47',
+        'mv -f "$ca_tmp" /etc/ssh/trusted-user-ca-keys.pem || exit 48',
+        'mv -f "$config_tmp" /etc/ssh/sshd_config.d/40-infra-manager-user-ca.conf || exit 49',
+        "/usr/sbin/sshd -t || exit 50",
+        "sshd_effective=$(/usr/sbin/sshd -T -C user=root,host=localhost,addr=127.0.0.1) || exit 51",
+        'printf "%s\\n" "$sshd_effective" | grep -Fxq "trustedusercakeys /etc/ssh/trusted-user-ca-keys.pem" || exit 52',
+        'printf "%s\\n" "$sshd_effective" | grep -Eq "^permitrootlogin (prohibit-password|without-password)$" || exit 53',
+        "systemctl reload ssh.service || exit 54",
     ])
     with tempfile.TemporaryDirectory(prefix="nas-password-ssh-") as temp:
         known_hosts = _scan_verified_key(host, Path(temp))
@@ -163,18 +163,43 @@ def _install_client_ca(
                 password=password, look_for_keys=False, allow_agent=False,
                 timeout=10, auth_timeout=15, banner_timeout=15,
             )
-            command = "sudo -S -p '' sh -c " + shlex.quote(script)
-            stdin, stdout, stderr = ssh.exec_command(command, timeout=30)
-            stdin.write(password + "\n")
-            stdin.flush()
-            stdin.channel.shutdown_write()
+            # Для root sudo не нужен и на минимальной Debian/OMV может отсутствовать.
+            # Для непривилегированного пользователя используем имеющиеся sudo-права.
+            root_login = username == "root"
+            command = ("sh -c " if root_login else "sudo -S -p '' sh -c ") + shlex.quote(script)
+            stdin, stdout, _stderr = ssh.exec_command(command, timeout=30)
+            if not root_login:
+                stdin.write(password + "\n")
+                stdin.flush()
+                stdin.channel.shutdown_write()
             code = stdout.channel.recv_exit_status()
-            # Вывод sudo не публикуем: ошибочный вывод может содержать
-            # служебные сведения системы или пароль.
+            # Никогда не печатать stderr удалённого процесса: он может
+            # содержать служебные сведения или пароль. Этап узнаём по коду.
+            failures = {
+                41: "Не удалось создать каталог настройки sshd",
+                42: "Не удалось создать временный файл ключа CA",
+                43: "Не удалось создать временный файл настроек sshd",
+                44: "Не удалось записать открытый ключ CA",
+                45: "Не удалось установить права на файл ключа CA",
+                46: "Не удалось сформировать конфигурацию sshd",
+                47: "Не удалось установить права на файл конфигурации",
+                48: "Не удалось сохранить открытый ключ CA",
+                49: "Не удалось установить конфигурацию sshd",
+                50: "Ошибка проверки sshd -t; проверьте настройки SSH",
+                51: "Не удалось прочитать действующую конфигурацию sshd -T",
+                52: "sshd не применил TrustedUserCAKeys из 40-infra-manager-user-ca.conf",
+                53: "Действующий PermitRootLogin не равен prohibit-password",
+                54: "Не удалось перечитать службу ssh.service",
+            }
             if code != 0:
+                if code == 1 and not root_login:
+                    raise InfraManagerError(
+                        "Не удалось выполнить настройку через sudo. "
+                        "Проверьте права пользователя и пароль sudo"
+                    )
+                reason = failures.get(code, "Неизвестная ошибка удалённой настройки SSH")
                 raise InfraManagerError(
-                    "NAS отказал в настройке доверия SSH. Проверьте sudo, "
-                    "службу ssh.service и права существующего пользователя."
+                    f"{host.name}: {reason} (код этапа {code})"
                 )
         except (paramiko.SSHException, OSError) as exc:
             raise InfraManagerError(
