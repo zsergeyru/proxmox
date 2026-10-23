@@ -224,18 +224,18 @@ def test_scheduler_skips_missing_and_stopped_pve_guests() -> None:
     """Автообновление не считает отсутствующих гостей неисправными."""
 
     guests = [
-        SimpleNamespace(vmid=310, name="gogs", address="192.0.2.15", source={}),
-        SimpleNamespace(vmid=410, name="ai-control", address="192.0.2.16", source={}),
-        SimpleNamespace(vmid=420, name="ai-services", address="192.0.2.17", source={}),
+        SimpleNamespace(vmid=310, name="gogs", address="192.0.2.15", source={"profile": "debian-lxc-docker"}),
+        SimpleNamespace(vmid=410, name="ai-control", address="192.0.2.16", source={"profile": "debian-vm"}),
+        SimpleNamespace(vmid=420, name="ai-services", address="192.0.2.17", source={"profile": "debian-vm"}),
     ]
     resources = [
-        {"vmid": 310, "name": "gogs", "node": "pve", "status": "running"},
-        {"vmid": 410, "name": "ai-control", "node": "pve", "status": "stopped"},
+        {"vmid": 310, "name": "gogs", "node": "pve", "type": "lxc", "status": "running"},
+        {"vmid": 410, "name": "ai-control", "node": "pve", "type": "qemu", "status": "stopped"},
     ]
     invoked = []
     with (
         patch("pathlib.Path.is_mount", return_value=True),
-        patch.object(renew, "load_manifest", return_value={"defaults": {"node": "pve"}}),
+        patch.object(renew, "load_manifest", return_value={"defaults": {"node": "pve"}, "profiles": {"debian-lxc-docker": {"type": "lxc"}, "debian-vm": {"type": "vm"}}}),
         patch.object(renew, "deployable_guests", return_value=guests),
         patch.object(renew, "PveClient", return_value=SimpleNamespace(
             data=lambda *args, **kwargs: resources,
@@ -248,7 +248,7 @@ def test_scheduler_skips_missing_and_stopped_pve_guests() -> None:
     invoked.clear()
     with (
         patch("pathlib.Path.is_mount", return_value=True),
-        patch.object(renew, "load_manifest", return_value={"defaults": {"node": "pve"}}),
+        patch.object(renew, "load_manifest", return_value={"defaults": {"node": "pve"}, "profiles": {"debian-lxc-docker": {"type": "lxc"}, "debian-vm": {"type": "vm"}}}),
         patch.object(renew, "deployable_guests", return_value=guests),
         patch.object(renew, "PveClient", return_value=SimpleNamespace(
             data=lambda *args, **kwargs: resources,
