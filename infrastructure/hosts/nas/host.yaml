@@ -6,7 +6,7 @@ system:
   distribution: debian
   version: "13"
 connection:
-  address: null
+  address: 192.168.1.12
   port: 22
   user: root
   ssh_host_fingerprint: null
