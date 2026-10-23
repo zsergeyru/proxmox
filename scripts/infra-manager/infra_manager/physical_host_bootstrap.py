@@ -143,8 +143,8 @@ def _install_client_ca(
         f"printf '%s\\n' {ca} > \"$ca_tmp\" || exit 44",
         'chmod 0644 "$ca_tmp" || exit 45',
         # OMV может задавать PermitRootLogin в управляемом sshd_config.
-        # Не перезаписывать его: достаточно разрешить сертификатный вход,
-        # а фактический вход root проверяется отдельным SSH-сеансом OpenBao.
+        # Не перезаписывать и не угадывать Match-политику по 127.0.0.1:
+        # фактический вход root проверяется отдельным SSH-сеансом OpenBao.
         "printf '%s\\n' 'TrustedUserCAKeys /etc/ssh/trusted-user-ca-keys.pem' > \"$config_tmp\" || exit 46",
         'chmod 0644 "$config_tmp" || exit 47',
         'mv -f "$ca_tmp" /etc/ssh/trusted-user-ca-keys.pem || exit 48',
@@ -152,7 +152,6 @@ def _install_client_ca(
         "/usr/sbin/sshd -t || exit 50",
         "sshd_effective=$(/usr/sbin/sshd -T -C user=root,host=localhost,addr=127.0.0.1) || exit 51",
         'printf "%s\\n" "$sshd_effective" | grep -Fxq "trustedusercakeys /etc/ssh/trusted-user-ca-keys.pem" || exit 52',
-        'printf "%s\\n" "$sshd_effective" | grep -Eq "^permitrootlogin (yes|prohibit-password|without-password)$" || exit 53',
         "systemctl reload ssh.service || exit 54",
     ])
     with tempfile.TemporaryDirectory(prefix="physical-password-ssh-") as temp:
@@ -191,7 +190,6 @@ def _install_client_ca(
                 50: "Ошибка проверки sshd -t; проверьте настройки SSH",
                 51: "Не удалось прочитать действующую конфигурацию sshd -T",
                 52: "sshd не применил TrustedUserCAKeys из 40-infra-manager-user-ca.conf",
-                53: "Действующий PermitRootLogin запрещает вход root по SSH-сертификату",
                 54: "Не удалось перечитать службу ssh.service",
             }
             if code != 0:
