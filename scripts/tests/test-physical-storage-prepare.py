@@ -445,8 +445,6 @@ def test_omv_new_mount_is_created_by_omv() -> None:
                                   entry["fsname"], entry["dir"]) == u
         command.assert_not_called()
 
-
-
 def test_omv_new_zfs_mount_is_created_without_preassigned_uuid() -> None:
     """Восстановление двух готовых ZFS-пулов не должно упасть из-за uid."""
 
@@ -489,7 +487,6 @@ def test_omv_new_zfs_mount_is_created_without_preassigned_uuid() -> None:
     ):
         assert script.register_omv("data", "zfs", "nas-data", "/nas-data") == assigned_uuid
         execute.assert_not_called()
-
 
 
 def test_recover_existing_hdds_never_reformats() -> None:
