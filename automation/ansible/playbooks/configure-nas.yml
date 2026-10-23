@@ -146,7 +146,11 @@
         or
         (
           nas_required_packages.stdout_lines
-          | select('search', ' install ok installed
+          | select('search', ' install ok installed$')
+          | list | length
+        ) != 6
+
+    - name: Прервать настройку из-за ошибки обновления APT
       ansible.builtin.fail:
         msg: >-
           Не удалось обновить индексы пакетов после установки OMV-Extras
