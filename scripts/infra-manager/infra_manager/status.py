@@ -42,7 +42,7 @@ STATUS_FILE = PATHS.status_file
 PROJECT_REPO = SETTINGS.project_repo
 
 STATUS_CHECK_TYPES = frozenset(
-    {"runtime", "portal", "infra_web", "openbao", "semaphore", "runtime_tools", "pve_access"}
+    {"runtime", "portal", "infra_web", "openbao", "semaphore", "runtime_tools", "pve_access", "ssh_host_renewal"}
 )
 STATUS_DATA_SOURCE_TYPES = frozenset(
     {"primary_ipv4", "project_branch", "git_revision", "file"}
@@ -980,6 +980,22 @@ def _check_pve(*, full: bool) -> None:
         check_access(quiet=True)
 
 
+def _check_ssh_host_renewal() -> None:
+    """Проверить включённый планировщик без ложной гарантии успешной подписи."""
+
+    unit = "infra-manager-ssh-host-renewal.timer"
+    for args in (
+        ["systemctl", "is-enabled", "--quiet", unit],
+        ["systemctl", "is-active", "--quiet", unit],
+    ):
+        result = command_runner.run(args, capture=True, check=False)
+        if result.returncode:
+            raise InfraManagerError(
+                "Автоматическое продление SSH-сертификатов выключено. "
+                "Выполните штатный infra-manager deploy 910"
+            )
+
+
 def _run_status_checks(
     definition: StatusDefinition,
     *,
@@ -1006,6 +1022,8 @@ def _run_status_checks(
             _check_runtime_tools()
         elif check_type == "pve_access":
             _check_pve(full=full)
+        elif check_type == "ssh_host_renewal":
+            _check_ssh_host_renewal()
         else:
             raise InfraManagerError(
                 f"Неизвестный тип проверки состояния: {check_type}"
