@@ -202,6 +202,8 @@ class CallbackModule(CallbackBase):
                         "[ПРИЧИНА] DKMS не собрал ZFS: проверьте совместимость "
                         "версий ядра, ZFS и заголовков"
                     )
+        elif task == "Подтвердить загрузку ZFS в работающее ядро":
+            self._display.display("[ОК] ZFS загружен для работающего ядра NAS")
         elif task == "Загрузить проверенный модуль ZFS в работающее ядро":
             rc = data.get("rc")
             if isinstance(rc, int) and rc != 0:
