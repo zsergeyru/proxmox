@@ -146,6 +146,40 @@ def test_automatic_initial_key() -> None:
         expect_refusal(lambda: discover_first_host_key(machine))
 
 
+def test_repeat_trust_requires_exact_scanned_key() -> None:
+    """Записать новый ключ только после явного согласия и повторной проверки."""
+
+    machine = replace(
+        load_physical_host(ROOT, "nas"),
+        address="192.0.2.22", ssh_host_fingerprint="SHA256:" + "B" * 43,
+    )
+    replacement = "SHA256:" + "C" * 43
+    with tempfile.TemporaryDirectory() as directory:
+        (Path(directory) / "physical-hosts").mkdir()
+        with patch.object(bootstrap, "PATHS", SimpleNamespace(data_dir=Path(directory))):
+            bootstrap._save_bootstrapped(machine)
+            with patch.object(
+                bootstrap, "discover_first_host_key",
+                return_value=replace(machine, ssh_host_fingerprint=replacement),
+            ):
+                expect_refusal(lambda: bootstrap.confirm_redeploy_host_key(
+                    machine, "SHA256:" + "D" * 43,
+                ))
+                assert bootstrap.resolve_saved_host(
+                    replace(machine, ssh_host_fingerprint=None)
+                ).ssh_host_fingerprint == machine.ssh_host_fingerprint
+                changed = bootstrap.confirm_redeploy_host_key(
+                    replace(machine, ssh_host_fingerprint=None), replacement,
+                )
+                assert changed
+                assert bootstrap.resolve_saved_host(
+                    replace(machine, ssh_host_fingerprint=None)
+                ).ssh_host_fingerprint == replacement
+                expect_refusal(lambda: bootstrap.confirm_redeploy_host_key(
+                    machine, replacement,
+                ))
+
+
 def test_pve_password_transport() -> None:
     """Пароль не должен попадать в аргументы дочерних команд."""
 
@@ -229,6 +263,7 @@ def main() -> int:
     test_marker()
     test_operator_state()
     test_automatic_initial_key()
+    test_repeat_trust_requires_exact_scanned_key()
     test_pve_password_transport()
     print("[ОК] Первый SSH-доступ NAS проверен на испытательных данных")
     return 0
