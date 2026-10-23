@@ -281,6 +281,9 @@ def run_scheduled() -> int:
     node_default = defaults.get("defaults", {}).get("node")
     if not isinstance(node_default, str) or not node_default:
         raise InfraManagerError("Не указан PVE node в defaults.yaml")
+    profiles = defaults.get("profiles")
+    if not isinstance(profiles, dict):
+        raise InfraManagerError("Не указан профильный состав VM/LXC")
     # Нельзя принимать IP из Git за доказательство существования объекта:
     # PVE-only signer перепроверит его непосредственно перед выпуском,
     # а сам обход пропускает отсутствующие и выключенные гости.
@@ -308,12 +311,17 @@ def run_scheduled() -> int:
                 print(f"[ИНФО] VMID {identity.vmid}: отсутствует management IP; пропущен")
                 continue
             node = identity.source.get("node", node_default)
+            profile = profiles.get(identity.source.get("profile"))
+            kind = profile.get("type") if isinstance(profile, dict) else None
+            expected_type = {"vm": "qemu", "lxc": "lxc"}.get(kind)
             if (
                 not isinstance(node, str) or not node
+                or expected_type is None
                 or resource.get("node") != node
                 or resource.get("name") != identity.name
+                or resource.get("type") != expected_type
             ):
-                raise InfraManagerError("Идентичность VMID/имени/PVE node отличается от Git")
+                raise InfraManagerError("Идентичность VMID/имени/типа/PVE node отличается от Git")
             result = _renew_one(identity.vmid, identity.name, address, node)
             print(f"[ОК] VMID {identity.vmid} {identity.name}: {result}")
         except (InfraManagerError, OSError, ValueError) as exc:
