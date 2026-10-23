@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import importlib.util
 import sys
+import tempfile
 import yaml
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -128,6 +129,24 @@ def test_nas_apt_diagnostic_guard() -> None:
     assert https["failed_when"] is False and https["changed_when"] is False
     assert "nas_apt_refresh.rc" in str(dns["when"])
     assert "nas_apt_refresh.rc" in str(https["when"])
+    recovery = next(item for item in tasks if item.get("name") ==
+        "Восстановить официальный список зеркал OMV при подтверждённом HTTP 503")
+    assert recovery["ansible.builtin.script"]["cmd"].endswith(
+        "nas-omv-mirror-recover.py apply"
+    )
+    assert "503" in str(recovery["when"])
+    assert "packages.openmediavault.org" in str(recovery["when"])
+    retry = next(item for item in tasks if item.get("name") ==
+        "Повторить обновление APT через проверенные зеркала OMV")
+    assert retry["register"] == "nas_apt_mirror_refresh"
+    assert retry["failed_when"] is False
+    rollback = next(item for item in tasks if item.get("name") ==
+        "Откатить изменения OMV при повторной ошибке обновления APT")
+    assert rollback["ansible.builtin.script"]["cmd"].endswith(
+        "nas-omv-mirror-recover.py rollback"
+    )
+    assert "nas_apt_mirror_refresh.rc" in str(rollback["when"])
+    assert "nas_apt_mirror_refresh" in str(fail["when"])
 
 
 def test_nas_compact_callback_hides_untrusted_output() -> None:
@@ -236,6 +255,83 @@ def test_nas_compact_callback_hides_untrusted_output() -> None:
     assert "скрыты" in "\n".join(output)
 
 
+def test_omv_repository_fallback_guard_and_rollback() -> None:
+    """Сохранять подписи и конфигурацию OMV, блокировать нестандартные источники."""
+
+    source_file = ROOT / "automation/ansible/files/nas-omv-mirror-recover.py"
+    spec = importlib.util.spec_from_file_location("nas_omv_mirror_recovery", source_file)
+    assert spec and spec.loader
+    script = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(script)
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        source = root / "apt/sources.list.d/openmediavault.list"
+        mirrors = root / "apt/mirrors/openmediavault.txt"
+        state = root / "state/omv-backup.json"
+        keyring = root / "apt/keyrings/openmediavault.gpg"
+        source.parent.mkdir(parents=True)
+        keyring.parent.mkdir(parents=True)
+        keyring.write_bytes(b"STUB KEY FILE")
+        original = (
+            "# Managed by OMV\n"
+            "deb [signed-by=/usr/share/keyrings/openmediavault-archive-keyring.gpg] "
+            "http://packages.openmediavault.org/public/ synchrony main\n"
+        )
+        source.write_text(original, encoding="utf-8")
+        with (
+            patch.object(script, "SOURCE", source),
+            patch.object(script, "MIRRORS", mirrors),
+            patch.object(script, "STATE", state),
+            patch.object(script, "KEYRING", keyring),
+        ):
+            script._apply()
+            assert script.MIRROR_SOURCE in source.read_text(encoding="utf-8")
+            assert "openmediavault.github.io/packages/" in mirrors.read_text()
+            assert "signed-by=" in source.read_text()
+            assert state.is_file() and state.stat().st_mode & 0o777 == 0o600
+            script._apply()  # безопасный повтор
+            assert state.is_file()
+            # Любое постороннее изменение файлов блокирует автоматический откат.
+            mirrors.write_text("https://malicious.example.invalid/\n")
+            try:
+                script._rollback()
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("Нельзя откатывать изменённый посторонним файл")
+            mirrors.write_text(script.MIRROR_CONTENT, encoding="utf-8")
+            script._rollback()
+            assert source.read_text() == original
+            assert not mirrors.exists() and not state.exists()
+            # Нестандартные адреса, неподписанные репозитории и сторонние
+            # источники категорически нельзя заменять автоматически.
+            for unexpected in (
+                "deb [trusted=yes] https://repo.example.invalid synchrony main\n",
+                "deb https://openmediavault.github.io/packages/ synchrony main\n",
+                "deb [signed-by=/tmp/other.gpg] "
+                "https://packages.openmediavault.org/public synchrony main\n",
+                original + "deb https://example.invalid trixie main\n",
+            ):
+                source.write_text(unexpected, encoding="utf-8")
+                try:
+                    script._apply()
+                except ValueError:
+                    pass
+                else:
+                    raise AssertionError("Нестандартный источник APT был заменён")
+                assert source.read_text() == unexpected
+                assert not state.exists()
+            source.write_text(original)
+            keyring.unlink()
+            try:
+                script._apply()
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("Нельзя переключать зеркало без штатного ключа")
+            assert source.read_text() == original
+
+
 def main() -> int:
     """Запустить проверки без настоящего сервера."""
 
@@ -244,6 +340,7 @@ def main() -> int:
     test_unconfirmed_volumes()
     test_nas_apt_diagnostic_guard()
     test_nas_compact_callback_hides_untrusted_output()
+    test_omv_repository_fallback_guard_and_rollback()
     print("[ОК] Безопасные проверки OMV и подключений пройдены")
     return 0
 
