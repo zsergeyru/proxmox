@@ -194,6 +194,40 @@
         - nas_apt_refresh is not skipped
         - nas_apt_refresh.rc | default(0) != 0
 
+    - name: Восстановить официальный список зеркал OMV при подтверждённом HTTP 503
+      ansible.builtin.script:
+        cmd: ../files/nas-omv-mirror-recover.py apply
+        executable: /usr/bin/python3
+      register: nas_apt_mirror_recovery
+      changed_when: nas_apt_mirror_recovery.rc == 0
+      when:
+        - nas_apt_refresh is not skipped
+        - nas_apt_refresh.rc | default(0) != 0
+        - (nas_apt_omv_https.stdout | default('') | trim) == '503'
+        - "'packages.openmediavault.org' in (nas_apt_refresh.stdout | default('')) or 'packages.openmediavault.org' in (nas_apt_refresh.stderr | default(''))"
+
+    - name: Повторить обновление APT через проверенные зеркала OMV
+      ansible.builtin.command:
+        argv:
+          - apt-get
+          - -o
+          - APT::Update::Error-Mode=any
+          - update
+      register: nas_apt_mirror_refresh
+      changed_when: nas_apt_mirror_refresh.rc == 0
+      failed_when: false
+      when:
+        - nas_apt_mirror_recovery is not skipped
+        - nas_apt_mirror_recovery.rc | default(1) == 0
+
+    - name: Откатить изменения OMV при повторной ошибке обновления APT
+      ansible.builtin.script:
+        cmd: ../files/nas-omv-mirror-recover.py rollback
+        executable: /usr/bin/python3
+      when:
+        - nas_apt_mirror_refresh is not skipped
+        - nas_apt_mirror_refresh.rc | default(0) != 0
+
     - name: Прервать настройку из-за ошибки обновления APT
       ansible.builtin.fail:
         msg: >-
@@ -205,6 +239,7 @@
       when:
         - nas_apt_refresh is not skipped
         - nas_apt_refresh.rc | default(0) != 0
+        - nas_apt_mirror_refresh is skipped or nas_apt_mirror_refresh.rc | default(0) != 0
 
     - name: Установить расширения OMV для ZFS и Docker
       ansible.builtin.apt:
