@@ -37,10 +37,20 @@ def run_nas_playbook(
         "ANSIBLE_LOG_PATH": "/dev/null",
         # NAS допускает SSH-поток, даже если подсистема sftp/scp отсутствует.
         "ANSIBLE_SSH_TRANSFER_METHOD": "piped",
+        "ANSIBLE_STDOUT_CALLBACK": "infra_nas_compact",
+        "ANSIBLE_CALLBACK_PLUGINS": str(
+            repo_root / "automation" / "ansible" / "callback_plugins"
+        ),
+        "ANSIBLE_DISPLAY_SKIPPED_HOSTS": "False",
+        "ANSIBLE_DEPRECATION_WARNINGS": "False",
+        "ANSIBLE_NOCOLOR": "1",
     })
     options = {
         "ansible_host": target.address,
         "ansible_ssh_common_args": ssh_args,
+        # Debian 13/OMV использует системный python3, автоматическое
+        # обнаружение 3.13 только засоряло вывод повторным предупреждением.
+        "ansible_python_interpreter": "/usr/bin/python3",
         **(variables or {}),
     }
     args = [
