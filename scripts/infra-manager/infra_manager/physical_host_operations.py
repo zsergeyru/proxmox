@@ -16,7 +16,7 @@ from .guest_catalog import find_guest_by_role
 from .settings import SETTINGS
 from .physical_hosts import list_physical_hosts, load_physical_host
 from .physical_host_ssh import PhysicalHostSshSession
-from .physical_host_bootstrap import bootstrap_physical_host
+from .physical_host_bootstrap import bootstrap_physical_host, resolve_saved_host
 from .physical_storage import read_disk_inspection, verify_expected_disks
 from .physical_storage_plan import propose_storage, format_storage_plan
 from .physical_nas_storage_state import apply_saved_storage
@@ -80,7 +80,7 @@ def run_physical_host_operation(repo_root: Path, operation: str, name: str) -> i
         raise InfraManagerError(f"Недопустимая операция физического сервера: {operation}")
     if operation == "hosts":
         return list_hosts(repo_root)
-    host = apply_saved_storage(load_physical_host(repo_root, name))
+    host = apply_saved_storage(resolve_saved_host(load_physical_host(repo_root, name)))
     require_host_access(repo_root, name)
     console.info(f"Физический сервер: {host.name}")
     if host.address is None:
@@ -88,10 +88,10 @@ def run_physical_host_operation(repo_root: Path, operation: str, name: str) -> i
             f"{host.directory / 'host.yaml'}: укажите подтверждённый сетевой адрес NAS; "
             "автоматический поиск соседних машин запрещён"
         )
-    if host.ssh_host_fingerprint is None:
+    if host.ssh_host_fingerprint is None and operation != "bootstrap":
         raise InfraManagerError(
-            f"{host.directory / 'host.yaml'}: не указан подтверждённый SSH-отпечаток "
-            "физического сервера; нельзя доверять найденному ключу автоматически"
+            "Первое SSH-доверие NAS ещё не установлено. "
+            "Запустите интерактивно infra-manager deploy nas на PVE"
         )
 
     if operation == "bootstrap":
