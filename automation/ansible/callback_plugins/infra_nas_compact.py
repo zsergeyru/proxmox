@@ -127,7 +127,10 @@ class CallbackModule(CallbackBase):
             return
         # apt-get update намеренно завершается "ok" с ненулевым rc:
         # нужно успеть показать безопасную классификацию перед fail-задачей.
-        if task == "Обновить перечень пакетов после установки OMV-Extras":
+        if task in (
+            "Обновить перечень пакетов после установки OMV-Extras",
+            "Повторить обновление APT через проверенные зеркала OMV",
+        ):
             rc = data.get("rc")
             if isinstance(rc, int) and rc != 0:
                 self._display.display(f"[ОШИБКА] APT update: код возврата {rc}")
@@ -138,6 +141,10 @@ class CallbackModule(CallbackBase):
                     self._display.display("[РЕПОЗИТОРИЙ] " + host)
                 for reason in self._apt_reasons(apt_output):
                     self._display.display("[ПРИЧИНА] " + reason)
+            elif task == "Повторить обновление APT через проверенные зеркала OMV":
+                self._display.display(
+                    "[ОК] Индексы APT обновлены через официальный список зеркал OMV"
+                )
         elif task == "Проверить DNS основного репозитория OMV после ошибки APT":
             rc = data.get("rc")
             if isinstance(rc, int):
