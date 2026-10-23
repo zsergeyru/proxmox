@@ -329,8 +329,8 @@ def test_pve_password_transport() -> None:
         return 0
 
     with (
-        patch.object(password_prompt.sys, "stdin", SimpleNamespace(isatty=lambda: True)),
-        patch("builtins.input", return_value="да"),
+        patch.object(password_prompt.sys, "stdin", SimpleNamespace(isatty=lambda: False)),
+        patch("builtins.input", side_effect=AssertionError("Совпадающий ключ не требует ответа")),
         patch.object(password_prompt.getpass, "getpass") as password,
     ):
         assert password_prompt.initial_nas_access("nas", repeat_deploy, host.OperatorError) == 0
@@ -338,11 +338,21 @@ def test_pve_password_transport() -> None:
     assert calls == [
         (["bootstrap-state", "nas"], None),
         (["ssh-trust-plan", "nas"], None),
-        (["ssh-trust-confirm", "nas"], json.dumps({"fingerprint": plan["current"]}) + "\n"),
     ]
     calls.clear()
     plan["changed"] = True
     plan["current"] = "SHA256:" + "C" * 43
+    with (
+        patch.object(password_prompt.sys, "stdin", SimpleNamespace(isatty=lambda: True)),
+        patch("builtins.input", return_value="да"),
+    ):
+        assert password_prompt.initial_nas_access("nas", repeat_deploy, host.OperatorError) == 0
+    assert calls == [
+        (["bootstrap-state", "nas"], None),
+        (["ssh-trust-plan", "nas"], None),
+        (["ssh-trust-confirm", "nas"], json.dumps({"fingerprint": plan["current"]}) + "\n"),
+    ]
+    calls.clear()
     with (
         patch.object(password_prompt.sys, "stdin", SimpleNamespace(isatty=lambda: True)),
         patch("builtins.input", return_value="нет"),
