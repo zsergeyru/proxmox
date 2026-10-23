@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import re
 from dataclasses import replace
 from pathlib import Path
@@ -23,6 +24,84 @@ from .physical_storage import read_disk_inspection
 from .physical_storage_plan import StoragePlan, propose_storage
 
 RESULT_PREFIX = "NAS_STORAGE_RESULT="
+
+
+def read_pending_recovery(host: PhysicalHost, session: PhysicalHostSshSession,
+                          plan: StoragePlan) -> dict[str, object] | None:
+    """Проверить журнал старого подтверждения без доверия к текущим /dev/sdX."""
+
+    command = (
+        "if test -L /etc/nas-apps/storage-preparation.json; then exit 70; "
+        "elif test -f /etc/nas-apps/storage-preparation.json; then "
+        "cat /etc/nas-apps/storage-preparation.json; fi"
+    )
+    result = run(session.command(command), capture_output=True, check=False)
+    if result.returncode:
+        raise InfraManagerError("Невозможно безопасно прочитать журнал подготовки NAS")
+    if not result.stdout.strip():
+        return None
+    try:
+        record = json.loads(result.stdout)
+    except (ValueError, TypeError) as exc:
+        raise InfraManagerError("Журнал подготовки HDD повреждён") from exc
+    if (
+        not isinstance(record, dict)
+        or set(record) != {"fingerprint", "items", "state"}
+        or record.get("state") != "started"
+        or not isinstance(record.get("fingerprint"), str)
+        or not re.fullmatch(r"[0-9a-f]{64}", record["fingerprint"])
+    ):
+        raise InfraManagerError("Незавершённый журнал NAS имеет неизвестный формат")
+    original = record.get("items")
+    if not isinstance(original, list) or len(original) != 3:
+        raise InfraManagerError("Журнал NAS содержит неполный список HDD")
+    expected_actions = {
+        "shared": "create-ext4",
+        "data": "create-zfs",
+        "backup": "create-zfs",
+    }
+    current = {item.role: item for item in plan.assignments}
+    if set(current) != {"system", "shared", "data", "backup"}:
+        raise InfraManagerError("Невозможно сверить текущий состав дисков NAS")
+    previous = {item.get("role"): item for item in original
+                if isinstance(item, dict)}
+    if set(previous) != set(expected_actions) or len(previous) != 3:
+        raise InfraManagerError("Журнал NAS содержит неоднозначные назначения HDD")
+    for role, original_item in previous.items():
+        if (
+            not isinstance(original_item, dict)
+            or set(original_item) != {"role", "serial", "action"}
+            or original_item["action"] != expected_actions[role]
+            or original_item["serial"] != current[role].serial
+            or current[role].action != "preserve"
+        ):
+            raise InfraManagerError(
+                "Диски не совпадают с подтверждённой попыткой подготовки. "
+                "Никакие операции над HDD не выполнялись"
+            )
+    if current["system"].action != "preserve":
+        raise InfraManagerError("Системный SSD NAS не подтверждён")
+    # План образуется из старых действий, фактических моделей, размеров и
+    # серийных номеров, а не из уже изменившейся разметки после форматирования.
+    former = []
+    for role in ("system", "shared", "data", "backup"):
+        item = current[role]
+        former.append({
+            "role": role,
+            "serial": item.serial,
+            "model": item.model,
+            "size": item.size,
+            "action": "preserve" if role == "system" else expected_actions[role],
+        })
+    actual_fingerprint = hashlib.sha256(
+        json.dumps(former, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    if actual_fingerprint != record["fingerprint"]:
+        raise InfraManagerError(
+            "Журнал HDD не соответствует исходному подтверждённому плану"
+        )
+    return record
+
 
 
 def read_storage_plan(host: PhysicalHost, session: PhysicalHostSshSession) -> StoragePlan:
@@ -93,32 +172,47 @@ def prepare_blank_disks(repo_root: Path, host: PhysicalHost,
     if not re.fullmatch(r"[a-f0-9]{64}", confirmed):
         raise InfraManagerError("Подтверждение подготовки NAS имеет неверный формат")
     plan = read_storage_plan(host, session)
-    if plan.fingerprint != confirmed:
-        raise InfraManagerError(
-            "Состав дисков или назначение изменились после просмотра плана. "
-            "Подготовка отменена; получите новый план"
+    pending = read_pending_recovery(host, session, plan)
+    if pending is not None:
+        if confirmed != pending["fingerprint"]:
+            raise InfraManagerError("Отпечаток не совпадает с исходным журналом HDD")
+        console.info(
+            "Продолжение незавершённой подготовки NAS: только регистрация "
+            "существующих томов OMV, БЕЗ форматирования"
         )
-    actions = [item.action for item in plan.assignments]
-    if actions not in (
-        ["preserve", "create-ext4", "create-zfs", "create-zfs"],
-        ["preserve", "preserve", "create-zfs", "create-zfs"],
-    ):
-        raise InfraManagerError(
-            "Для автоматической подготовки требуются два пустых ZFS HDD. "
-            "Диск shared может быть пустым либо существующим ext4; "
-            "его сохранность обязательно подтвердит NAS до первой записи"
-        )
+    else:
+        if plan.fingerprint != confirmed:
+            raise InfraManagerError(
+                "Состав дисков или назначение изменились после просмотра плана. "
+                "Подготовка отменена; получите новый план"
+            )
+        actions = [item.action for item in plan.assignments]
+        if actions not in (
+            ["preserve", "create-ext4", "create-zfs", "create-zfs"],
+            ["preserve", "preserve", "create-zfs", "create-zfs"],
+        ):
+            raise InfraManagerError(
+                "Для автоматической подготовки требуются два пустых ZFS HDD. "
+                "Диск shared может быть пустым либо существующим ext4; "
+                "его сохранность обязательно подтвердит NAS до первой записи"
+            )
     console.info("Установка необходимых средств подготовки HDD и OMV")
     configure_nas(repo_root, session)
     payload = {
         "fingerprint": confirmed,
-        "items": [
-            {"role": item.role, "serial": item.serial, "action": item.action}
-            for item in plan.assignments if item.role != "system"
-        ],
+        "items": (
+            pending["items"] if pending is not None
+            else [
+                {"role": item.role, "serial": item.serial, "action": item.action}
+                for item in plan.assignments if item.role != "system"
+            ]
+        ),
     }
     result = run(
-        session.command("python3 /usr/local/sbin/nas-storage-prepare"),
+        session.command(
+            "python3 /usr/local/sbin/nas-storage-prepare"
+            + (" recover" if pending is not None else "")
+        ),
         input_text=json.dumps(payload, ensure_ascii=False) + "\n",
         check=False, capture_output=True,
     )
