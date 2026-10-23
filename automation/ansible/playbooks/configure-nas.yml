@@ -263,45 +263,7 @@
     - name: Проверить безопасное имя работающего ядра для ZFS
       ansible.builtin.assert:
         that:
-          - ansible_facts['kernel'] is match('^[0-9][a-zA-Z0-9.+_-]{0,79}    - name: Установить Docker через источник пакетов, управляемый OMV-Extras
-      ansible.builtin.apt:
-        name:
-          - docker-ce
-          - docker-ce-cli
-          - containerd.io
-          - docker-compose-plugin
-        state: present
-        update_cache: false
-
-    - name: Запустить Docker с автоматическим запуском после загрузки NAS
-      ansible.builtin.systemd_service:
-        name: docker.service
-        enabled: true
-        state: started
-
-    - name: Проверить поддержку Docker Compose
-      ansible.builtin.command:
-        argv: [docker, compose, version]
-      changed_when: false
-
-    - name: Проверить доступность инструментов ZFS
-      ansible.builtin.command:
-        argv: [zpool, --version]
-      changed_when: false
-
-    - name: Проверить доступность Docker
-      ansible.builtin.command:
-        argv: [docker, --version]
-      changed_when: false
-
-    - name: Установить одноразовый исполнитель подготовки пустых HDD
-      ansible.builtin.copy:
-        src: ../files/nas-storage-prepare.py
-        dest: /usr/local/sbin/nas-storage-prepare
-        owner: root
-        group: root
-        mode: "0700"
-)
+          - ansible_facts['kernel'] is match('^[0-9][a-zA-Z0-9.+_-]{0,79}$')
         fail_msg: >-
           Невозможно безопасно определить имя работающего ядра NAS.
           Автоматическая установка заголовков остановлена.
