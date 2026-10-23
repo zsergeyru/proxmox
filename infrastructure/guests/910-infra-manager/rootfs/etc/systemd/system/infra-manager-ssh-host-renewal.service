@@ -1,0 +1,19 @@
+[Unit]
+Description=Infra Manager: безопасное продление SSH Host CA сертификатов Linux-гостей
+Wants=network-online.target
+After=network-online.target infra-manager-openbao-startup-unseal.service
+AssertPathIsMountPoint=/mnt/persistent-state
+
+[Service]
+Type=oneshot
+Environment=PYTHONPATH=/usr/local/lib/infra-manager
+ExecStart=/usr/bin/python3 -m infra_manager.host_cert_renewal
+User=root
+Group=root
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/mnt/persistent-state/ssh-host-renewal
+TimeoutStartSec=45min
