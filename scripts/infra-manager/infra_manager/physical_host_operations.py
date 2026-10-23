@@ -22,7 +22,7 @@ from .physical_host_bootstrap import (
 from .physical_host_ssh import discover_first_host_key
 from dataclasses import replace
 from .physical_storage import read_disk_inspection, verify_expected_disks
-from .physical_storage_plan import propose_storage, format_storage_plan
+from .physical_storage_plan import propose_storage, format_storage_plan, observed_disk_condition
 from .physical_nas_storage_state import apply_saved_storage
 from .physical_nas_storage_prepare import prepare_blank_disks
 from .physical_nas_system import read_nas_system, require_omv8
@@ -209,6 +209,10 @@ def run_physical_host_operation(repo_root: Path, operation: str, name: str) -> i
                             "Не удалось подтвердить отсутствие сигнатур на HDD: "
                             + item.serial
                         )
+                    console.ok(
+                        f"Диск {item.serial}: wipefs и blkid не обнаружили сигнатур "
+                        "(перед записью проверка повторится)"
+                    )
                 console.info(format_storage_plan(plan))
                 print(
                     "NAS_STORAGE_PLAN_JSON=" + json.dumps({
@@ -216,7 +220,8 @@ def run_physical_host_operation(repo_root: Path, operation: str, name: str) -> i
                         "requires_creation": plan.requires_creation,
                         "items": [
                             {"role": item.role, "serial": item.serial,
-                             "action": item.action}
+                             "action": item.action,
+                             "current_state": observed_disk_condition(item)}
                             for item in plan.assignments
                         ],
                     }, ensure_ascii=False, separators=(",", ":"))
