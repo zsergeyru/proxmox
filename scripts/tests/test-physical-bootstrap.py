@@ -30,12 +30,12 @@ host = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(host)
 
 
-def expect_refusal(callback) -> None:
+def expect_refusal(callback, error_type=InfraManagerError) -> None:
     """Проверить ожидаемый безопасный отказ."""
 
     try:
         callback()
-    except InfraManagerError:
+    except error_type:
         return
     raise AssertionError("Ожидался отказ начального доступа")
 
@@ -246,13 +246,15 @@ def test_pve_password_transport() -> None:
         patch("builtins.input", return_value="нет"),
     ):
         expect_refusal(
-            lambda: password_prompt.initial_nas_access("nas", repeat_deploy, host.OperatorError)
+            lambda: password_prompt.initial_nas_access("nas", repeat_deploy, host.OperatorError),
+            host.OperatorError,
         )
     assert all(command != ["ssh-trust-confirm", "nas"] for command, _ in calls)
     calls.clear()
     with patch.object(password_prompt.sys, "stdin", SimpleNamespace(isatty=lambda: False)):
         expect_refusal(
-            lambda: password_prompt.initial_nas_access("nas", repeat_deploy, host.OperatorError)
+            lambda: password_prompt.initial_nas_access("nas", repeat_deploy, host.OperatorError),
+            host.OperatorError,
         )
     assert all(command != ["ssh-trust-confirm", "nas"] for command, _ in calls)
 
