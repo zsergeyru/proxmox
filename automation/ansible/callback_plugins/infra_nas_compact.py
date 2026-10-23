@@ -8,6 +8,7 @@ APT диагностируется только классификацией т�
 from __future__ import annotations
 
 import re
+from urllib.parse import urlsplit
 
 from ansible.plugins.callback import CallbackBase
 
@@ -65,6 +66,28 @@ class CallbackModule(CallbackBase):
             "APT вернул ошибку; причина не распознана автоматической диагностикой"
         ]
 
+    @staticmethod
+    def _apt_hosts(output: str) -> list[str]:
+        """Показывать только DNS-имена репозиториев, без userinfo/путей/токенов."""
+
+        found: list[str] = []
+        # urlsplit.hostname отбрасывает username, password, порт, query и path.
+        for match in re.findall(r"https?://[^\\s<>]+", str(output or "")[:50000]):
+            try:
+                host = urlsplit(match.rstrip("',;.)")).hostname
+            except ValueError:
+                continue
+            if (
+                isinstance(host, str)
+                and re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9.-]{0,252}", host)
+                and host not in found
+            ):
+                found.append(host)
+            if len(found) >= 4:
+                break
+        return found
+
+
     def __init__(self):
         super().__init__()
         self._task_name = ""
@@ -91,9 +114,12 @@ class CallbackModule(CallbackBase):
             rc = data.get("rc")
             if isinstance(rc, int) and rc != 0:
                 self._display.display(f"[ОШИБКА] APT update: код возврата {rc}")
-                for reason in self._apt_reasons(
+                apt_output = (
                     str(data.get("stdout", "")) + "\n" + str(data.get("stderr", ""))
-                ):
+                )
+                for host in self._apt_hosts(apt_output):
+                    self._display.display("[РЕПОЗИТОРИЙ] " + host)
+                for reason in self._apt_reasons(apt_output):
                     self._display.display("[ПРИЧИНА] " + reason)
         elif data.get("changed"):
             self._display.display("[ОК] " + task)
