@@ -12,7 +12,7 @@ BOOTSTRAP_REQUIRED = 20
 
 
 def initial_host_access(name: str, forward, error_type: type[Exception]) -> int:
-    """Первый вход без сверки ключа, повторный — только после ответа «да»."""
+    """Совпадающий ключ принимать без вопросов, изменившийся — только по «да»."""
 
     state = forward(["bootstrap-state", name])
     if state == 0:
@@ -37,14 +37,24 @@ def initial_host_access(name: str, forward, error_type: type[Exception]) -> int:
             r"SHA256:[A-Za-z0-9+/]{43}", fingerprint
         ):
             raise error_type("Некорректный отпечаток SSH-ключа сервера")
+        previous = plan.get("previous")
+        if not isinstance(previous, str) or not re.fullmatch(
+            r"SHA256:[A-Za-z0-9+/]{43}", previous
+        ):
+            raise error_type("Отсутствует закреплённый отпечаток SSH-ключа")
+        if plan.get("changed") is not (previous != fingerprint):
+            raise error_type("Некорректное сравнение SSH-ключа физического сервера")
+        if previous == fingerprint:
+            print(f"[ОК] {name}: SSH-ключ совпадает с ранее подтверждённым")
+            return 0
         if not sys.stdin.isatty():
             raise error_type(
-                f"Для повторного deploy {name} требуется ответ «да» в терминале PVE"
+                f"SSH-ключ {name} изменился; для нового доверия нужен "
+                "ответ «да» в терминале PVE"
             )
-        print(f"Повторное развёртывание сервера {name} ({plan.get('address')})")
-        print(f"Текущий SSH-ключ: {fingerprint}")
-        if plan.get("changed"):
-            print(f"ВНИМАНИЕ: ранее сохранён другой ключ: {plan.get('previous')}")
+        print(f"ВНИМАНИЕ: SSH-ключ сервера {name} ({plan.get('address')}) изменился!")
+        print(f"Ранее подтверждённый: {previous}")
+        print(f"Новый SSH-ключ:       {fingerprint}")
         answer = input("Подтвердить SSH-ключ этого сервера? [да/нет]: ").strip().casefold()
         if answer != "да":
             raise error_type("SSH-ключ не подтверждён; развёртывание остановлено")
