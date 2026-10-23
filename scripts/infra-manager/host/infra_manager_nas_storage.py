@@ -37,13 +37,32 @@ def confirm_nas_storage(name: str, forward, error_type: type[Exception]) -> int:
         raise error_type("Контрольный отпечаток дисков имеет неверный формат")
     if not isinstance(items, list) or len(items) != 4:
         raise error_type("План HDD не содержит все четыре диска")
-    if not plan.get("requires_creation"):
-        return 0
     if not all(isinstance(item, dict) for item in items):
         raise error_type("План HDD содержит некорректное описание диска")
     if [item.get("role") for item in items] != ["system", "shared", "data", "backup"]:
         raise error_type("План HDD содержит неполное или неоднозначное назначение ролей")
     actions = [item.get("action") for item in items]
+    recovery_fingerprint = plan.get("recovery_fingerprint")
+    if recovery_fingerprint is not None:
+        if (
+            not isinstance(recovery_fingerprint, str)
+            or not re.fullmatch(r"[0-9a-f]{64}", recovery_fingerprint)
+            or plan.get("requires_creation")
+            or actions != ["preserve"] * 4
+        ):
+            raise error_type(
+                "Журнал восстановления NAS не соответствует текущим дискам. "
+                "Никакое форматирование не разрешено"
+            )
+        print(
+            "Незавершённая ранее подтверждённая подготовка NAS: "
+            "проверка существующих UUID/GUID и регистрация OMV "
+            "БЕЗ повторного форматирования"
+        )
+        payload = json.dumps({"fingerprint": recovery_fingerprint}) + "\n"
+        return forward(["storage-prepare", name], input_text=payload)
+    if not plan.get("requires_creation"):
+        return 0
     if actions not in (
         ["preserve", "create-ext4", "create-zfs", "create-zfs"],
         ["preserve", "preserve", "create-zfs", "create-zfs"],
