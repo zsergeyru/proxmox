@@ -241,8 +241,9 @@ def _renew_one(vmid: int, name: str, address: str, node: str) -> str:
             )
             if result.returncode:
                 raise InfraManagerError(
-                    "Не удалось атомарно установить новый SSH host certificate: "
-                    + (result.stderr or "отказ sshd").strip()[:260]
+                    "SSH host certificate не установлен (код операции "
+                    f"{result.returncode}). Проверьте sshd и журнал гостя; "
+                    "автоматический повтор не меняет SSH-ключ"
                 )
         # Не принимать сообщение об успехе, пока не работает обычное SSH Host CA.
         with GuestSshSession(node, address) as session:
