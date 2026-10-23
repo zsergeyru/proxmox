@@ -113,6 +113,21 @@ def test_nas_apt_diagnostic_guard() -> None:
         "Прервать настройку из-за ошибки обновления APT")
     assert "nas_apt_refresh.rc" in str(fail["when"])
     assert "не начиналось" in fail["ansible.builtin.fail"]["msg"]
+    dns = next(item for item in tasks if item.get("name") ==
+        "Проверить DNS основного репозитория OMV после ошибки APT")
+    assert dns["ansible.builtin.command"]["argv"] == [
+        "getent", "ahostsv4", "packages.openmediavault.org"
+    ]
+    assert dns["failed_when"] is False and dns["changed_when"] is False
+    https = next(item for item in tasks if item.get("name") ==
+        "Проверить HTTPS-ответ основного репозитория OMV после ошибки APT")
+    curl = https["ansible.builtin.command"]["argv"]
+    assert curl[0] == "curl"
+    assert "--max-time" in curl and "--connect-timeout" in curl
+    assert curl[-1] == "https://packages.openmediavault.org/public/dists/synchrony/InRelease"
+    assert https["failed_when"] is False and https["changed_when"] is False
+    assert "nas_apt_refresh.rc" in str(dns["when"])
+    assert "nas_apt_refresh.rc" in str(https["when"])
 
 
 def test_nas_compact_callback_hides_untrusted_output() -> None:
@@ -162,6 +177,41 @@ def test_nas_compact_callback_hides_untrusted_output() -> None:
     assert "alice" not in report
     assert "SECRET" not in report and "SENSITIVE" not in report
     assert "https://" not in report
+
+    output.clear()
+    callback.v2_runner_on_ok(SimpleNamespace(
+        _task=SimpleNamespace(
+            no_log=False,
+            get_name=lambda: "Проверить DNS основного репозитория OMV после ошибки APT",
+        ),
+        _result={"rc": 2, "stdout": "SECRET_DNS_DETAILS"},
+    ))
+    assert "не удалось разрешить имя" in "\n".join(output)
+    assert "SECRET_DNS_DETAILS" not in "\n".join(output)
+
+    output.clear()
+    callback.v2_runner_on_ok(SimpleNamespace(
+        _task=SimpleNamespace(
+            no_log=False,
+            get_name=lambda: "Проверить HTTPS-ответ основного репозитория OMV после ошибки APT",
+        ),
+        _result={"rc": 0, "stdout": "403", "stderr": "SECRET_HEADER"},
+    ))
+    assert "HTTP 403" in "\n".join(output)
+    assert "независимая проверка" in "\n".join(output)
+    assert "SECRET_HEADER" not in "\n".join(output)
+
+    output.clear()
+    callback.v2_runner_on_ok(SimpleNamespace(
+        _task=SimpleNamespace(
+            no_log=False,
+            get_name=lambda: "Проверить HTTPS-ответ основного репозитория OMV после ошибки APT",
+        ),
+        _result={"rc": 60, "stdout": "000", "stderr": "Authorization: SECRET_HEADER"},
+    ))
+    assert "HTTP-ответ не получен" in "\n".join(output)
+    assert "сертификат TLS" in "\n".join(output)
+    assert "SECRET_HEADER" not in "\n".join(output)
 
     output.clear()
     callback.v2_runner_on_failed(SimpleNamespace(
