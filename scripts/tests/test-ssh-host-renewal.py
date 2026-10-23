@@ -49,13 +49,13 @@ def test_new_cert_principals_checked() -> None:
 
     deadline = (datetime.now() + timedelta(days=29)).strftime("%Y-%m-%dT%H:%M:%S")
     record = (
-        "ssh_host.pub:\\n"
-        "        Type: ssh-ed25519-cert-v01@openssh.com host certificate\\n"
-        "        Principals:\\n"
-        "                gogs\\n"
-        "                192.0.2.15\\n"
-        "        Critical Options: (none)\\n"
-        f"        Valid: from 2026-10-01T10:00:00 to {deadline}\\n"
+        "ssh_host.pub:\n"
+        "        Type: ssh-ed25519-cert-v01@openssh.com host certificate\n"
+        "        Principals:\n"
+        "                gogs\n"
+        "                192.0.2.15\n"
+        "        Critical Options: (none)\n"
+        f"        Valid: from 2026-10-01T10:00:00 to {deadline}\n"
     )
     with patch.object(renew, "run", return_value=SimpleNamespace(
         returncode=0, stdout=record,
