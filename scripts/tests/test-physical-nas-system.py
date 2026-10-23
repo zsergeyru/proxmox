@@ -151,6 +151,8 @@ def test_nas_compact_callback_hides_untrusted_output() -> None:
     assert "APT update: код возврата 100" in report
     assert "DNS" in report
     assert "GPG" in report
+    assert "[РЕПОЗИТОРИЙ] example.org" in report
+    assert "alice" not in report
     assert "SECRET" not in report and "SENSITIVE" not in report
     assert "https://" not in report
 
