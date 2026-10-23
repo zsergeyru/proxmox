@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Однократная подготовка совершенно пустых HDD физического NAS.
+"""Подготовка новых HDD с сохранением уже подключённого ext4 физического NAS.
 
 Опасные операции разрешены только после подтверждения PVE и повторной
 проверки модели, номера, объёма, сигнатур и привязки /dev/disk/by-id.
@@ -103,13 +103,16 @@ def preflight(items: list[dict[str, object]]) -> dict[str, str]:
         raise StorageError("Не определён единственный системный SSD")
     matched: dict[str, str] = {}
     taken: set[str] = set()
-    if len(items) != 3 or {item.get("role") for item in items} != set(ROLES):
-        raise StorageError("Первоначальная подготовка требует три новых HDD")
+    if not isinstance(items, list) or len(items) != 3 or not all(
+        isinstance(item, dict) for item in items
+    ) or {item.get("role") for item in items} != set(ROLES):
+        raise StorageError("Для подготовки нужны ровно три объявленные роли HDD")
     for item in items:
         role = item["role"]
         action, expected_model, expected_gb = ROLES[role]
         serial = item.get("serial")
-        if item.get("action") != action or not isinstance(serial, str):
+        requested = item.get("action")
+        if (requested != action and not (role == "shared" and requested == "preserve")) or not isinstance(serial, str):
             raise StorageError(f"Операция для {role} не соответствует плану")
         match = [disk for disk in disks if disk.get("serial") == serial]
         if len(match) != 1:
@@ -125,7 +128,11 @@ def preflight(items: list[dict[str, object]]) -> dict[str, str]:
         device = stable_device(str(disk["path"]), serial)
         if device in taken:
             raise StorageError("Один HDD назначен двум ролям")
-        clean_disk(disk, device)
+        if requested == "preserve":
+            if not disk.get("children") and not disk.get("fstype"):
+                raise StorageError("Сохраняемый HDD shared не содержит файловую систему")
+        else:
+            clean_disk(disk, device)
         matched[role] = device
         taken.add(device)
     pools = execute("zpool", "list", "-H", "-o", "name", allowed=(0, 1))
@@ -147,6 +154,82 @@ def preflight(items: list[dict[str, object]]) -> dict[str, str]:
                 "нельзя скрывать существующие данные монтированием ZFS"
             )
     return matched
+
+
+def inspect_preserved_shared(serial: str, device: str) -> dict[str, str]:
+    """Только чтение: подтвердить существующий ext4, его устройство, OMV и mount.
+
+    Любая неоднозначность запрещает создание двух ZFS-пулов. Раздел shared
+    не форматируется, не переподключается и не заменяется.
+    """
+
+    disks = [disk for disk in disk_list() if disk.get("serial") == serial]
+    if len(disks) != 1 or has_root(disks[0]):
+        raise StorageError("Существующий HDD shared не идентифицирован однозначно")
+    disk = disks[0]
+    if stable_device(str(disk.get("path")), serial) != device:
+        raise StorageError("У HDD shared изменился постоянный путь")
+    children = disk.get("children") or []
+    if children:
+        if len(children) != 1 or children[0].get("type") != "part" or children[0].get("children"):
+            raise StorageError("HDD shared содержит неоднозначный набор разделов")
+        fs = children[0]
+    else:
+        fs = disk
+    uid = fs.get("uuid")
+    source = fs.get("path")
+    if (
+        fs.get("fstype") != "ext4"
+        or not isinstance(uid, str)
+        or not re.fullmatch(r"[a-fA-F0-9-]{16,40}", uid)
+        or not isinstance(source, str)
+        or not source.startswith("/dev/")
+    ):
+        raise StorageError("Существующий HDD shared не является однозначным томом ext4")
+    # Само наличие раздела не доказывает, что именно этот раздел смонтирован.
+    found = execute("blkid", "-s", "UUID", "-o", "value", source).stdout.strip()
+    if found != uid:
+        raise StorageError("UUID существующего ext4 не совпадает с проверенным разделом")
+    mountpoint = "/srv/dev-disk-by-uuid-" + uid
+    records = [
+        entry for entry in omv_records()
+        if entry.get("dir") == mountpoint
+    ]
+    if len(records) != 1 or records[0].get("type") != "ext4":
+        raise StorageError(
+            "Существующий HDD shared не зарегистрирован как ext4 в OMV; "
+            "диски не изменены"
+        )
+    record = records[0]
+    ref = record.get("uuid")
+    fsname = record.get("fsname")
+    if (
+        not isinstance(ref, str)
+        or not re.fullmatch(r"[a-fA-F0-9-]{36}", ref)
+        or not isinstance(fsname, str)
+        or os.path.realpath(fsname) != os.path.realpath(source)
+    ):
+        raise StorageError("Запись ext4 в OMV не соответствует устройству HDD shared")
+    response = execute(
+        "findmnt", "--json", "--mountpoint", mountpoint,
+        "--output", "TARGET,SOURCE,FSTYPE,UUID",
+    )
+    try:
+        fs_mounts = json.loads(response.stdout).get("filesystems")
+    except (ValueError, AttributeError) as exc:
+        raise StorageError("Не удалось прочитать точку подключения ext4") from exc
+    if not isinstance(fs_mounts, list) or len(fs_mounts) != 1:
+        raise StorageError("Диск shared не имеет отдельного подключения ext4")
+    mounted = fs_mounts[0]
+    if (
+        mounted.get("target") != mountpoint
+        or mounted.get("fstype") != "ext4"
+        or mounted.get("uuid") != uid
+        or not isinstance(mounted.get("source"), str)
+        or os.path.realpath(mounted["source"]) != os.path.realpath(source)
+    ):
+        raise StorageError("Том shared подключён не с ожидаемого HDD/UUID")
+    return {"mountpoint": mountpoint, "filesystem_uuid": uid, "omv_reference": ref}
 
 
 def save_journal(data: dict[str, object]) -> None:
@@ -255,7 +338,7 @@ def verify_mount(path: str, filesystem: str, source: str) -> None:
 
 
 def apply(items: list[dict[str, object]], fingerprint: str) -> dict[str, object]:
-    """Подготовить три абсолютно пустых HDD после отдельного подтверждения PVE."""
+    """Сохранять действующий ext4 и создавать только подтверждённые пустые диски."""
 
     if not re.fullmatch(r"[0-9a-f]{64}", fingerprint):
         raise StorageError("Не передан проверенный отпечаток плана")
@@ -265,41 +348,58 @@ def apply(items: list[dict[str, object]], fingerprint: str) -> dict[str, object]
             "Без проверки прошлого запуска повтор не допускается."
         )
     paths = preflight(items)
+    shared_item = next(item for item in items if item["role"] == "shared")
+    preserve_shared = shared_item["action"] == "preserve"
+    # Обязательно проверить существующий ext4 ДО любой записи и создания журнала.
+    existing_shared = (
+        inspect_preserved_shared(shared_item["serial"], paths["shared"])
+        if preserve_shared else None
+    )
     save_journal({"fingerprint": fingerprint, "items": items,
                   "state": "started"})
     # После создания журнала никогда не повторять опасную операцию автоматически.
-    byid = paths["shared"]
-    execute("sgdisk", "--new=1:1MiB:0", "--typecode=1:8300",
-            "--change-name=1:nas-shared", byid)
-    execute("udevadm", "settle")
-    part = byid + "-part1"
-    if not Path(part).exists():
-        raise StorageError("Не найден раздел подготовленного HDD 1 ТБ")
-    execute("mkfs.ext4", "-L", "nas-shared", part)
-    ext_uuid = filesystem_uuid(part)
+    if existing_shared is None:
+        byid = paths["shared"]
+        execute("sgdisk", "--new=1:1MiB:0", "--typecode=1:8300",
+                "--change-name=1:nas-shared", byid)
+        execute("udevadm", "settle")
+        part = byid + "-part1"
+        if not Path(part).exists():
+            raise StorageError("Не найден раздел подготовленного HDD 1 ТБ")
+        execute("mkfs.ext4", "-L", "nas-shared", part)
+        ext_uuid = filesystem_uuid(part)
+        shared_path = "/srv/dev-disk-by-uuid-" + ext_uuid
+        shared_source = "/dev/disk/by-uuid/" + ext_uuid
+        existing = Path(shared_path)
+        if existing.is_symlink() or (
+            existing.exists() and (
+                not existing.is_dir() or any(existing.iterdir())
+            )
+        ):
+            raise StorageError(
+                "На системном диске уже есть данные по пути будущего тома ext4"
+            )
+    else:
+        ext_uuid = existing_shared["filesystem_uuid"]
+        shared_path = existing_shared["mountpoint"]
+        shared_source = "/dev/disk/by-uuid/" + ext_uuid
     for role, name in (("data", "nas-data"), ("backup", "nas-backup")):
         execute("zpool", "create", "-o", "ashift=12",
                 "-O", "compression=lz4", "-O", "atime=off",
                 "-m", "/" + name, name, paths[role])
 
-    shared_path = "/srv/dev-disk-by-uuid-" + ext_uuid
-    shared_source = "/dev/disk/by-uuid/" + ext_uuid
-    existing = Path(shared_path)
-    if existing.is_symlink() or (
-        existing.exists() and (
-            not existing.is_dir() or any(existing.iterdir())
-        )
-    ):
-        raise StorageError(
-            "На системном диске уже есть данные по пути будущего тома ext4"
-        )
     refs: dict[str, str] = {}
-    refs["shared"] = register_omv("shared", "ext4", shared_source, shared_path)
+    refs["shared"] = (
+        existing_shared["omv_reference"] if existing_shared is not None
+        else register_omv("shared", "ext4", shared_source, shared_path)
+    )
     for role, name in (("data", "nas-data"), ("backup", "nas-backup")):
         refs[role] = register_omv(role, "zfs", name, "/" + name)
     execute("omv-salt", "deploy", "run", "fstab")
     # fstab в разных сборках OMV может не выполнить само монтирование ext4.
-    if execute("findmnt", "--mountpoint", shared_path, allowed=(0, 1)).returncode:
+    if not preserve_shared and execute(
+        "findmnt", "--mountpoint", shared_path, allowed=(0, 1)
+    ).returncode:
         execute("mount", shared_path)
     verify_mount(shared_path, "ext4", ext_uuid)
     verify_mount("/nas-data", "zfs", "nas-data")
