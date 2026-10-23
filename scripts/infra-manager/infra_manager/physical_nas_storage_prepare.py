@@ -54,6 +54,22 @@ def read_pending_recovery(host: PhysicalHost, session: PhysicalHostSshSession,
                           plan: StoragePlan) -> dict[str, object] | None:
     """Проверить журнал старого подтверждения без доверия к текущим /dev/sdX."""
 
+    # После успешной независимой проверки 910 сохраняет UUID/GUID в
+    # persistent-state. Сам аварийный журнал NAS не удаляется, но больше
+    # не служит причиной для повторной операции при штатном deploy.
+    volumes = host.volumes or {}
+    if all(
+        isinstance(volumes.get(role), dict)
+        and isinstance(volumes[role].get(field), str)
+        and volumes[role][field]
+        for role, field in (
+            ("shared", "filesystem_uuid"),
+            ("data", "pool_guid"),
+            ("backup", "pool_guid"),
+        )
+    ):
+        return None
+
     command = (
         "if test -L /etc/nas-apps/storage-preparation.json; then exit 70; "
         "elif test -f /etc/nas-apps/storage-preparation.json; then "
