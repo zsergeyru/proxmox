@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import importlib
+import inspect
 import json
 import sys
 import tempfile
@@ -580,9 +581,22 @@ def test_pve_ssh_commands_share_trust_settings() -> None:
     }
 
 
+def test_self_update_refreshes_pve_operator() -> None:
+    """Изменённый запрос доверия должен попасть на PVE при deploy 910."""
+
+    guest_deploy = importlib.import_module("infra_manager.guest_deploy")
+    source = inspect.getsource(guest_deploy._run_deploy_guest)
+    updated = source.split("if self_update:", 1)[1].split("return 0", 1)[0]
+    assert "install_operator_host_support(context.node, repo_root)" in updated
+    assert updated.index("_configure_guest_os(") < updated.index(
+        "install_operator_host_support(context.node, repo_root)"
+    )
+
+
 def main() -> None:
     test_feature_parser()
     test_pve_ssh_commands_share_trust_settings()
+    test_self_update_refreshes_pve_operator()
     test_container_host_reconcile()
     test_container_host_noop()
     test_openbao_host_support()
