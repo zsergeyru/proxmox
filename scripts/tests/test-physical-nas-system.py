@@ -149,6 +149,75 @@ def test_nas_apt_diagnostic_guard() -> None:
     assert "nas_apt_mirror_refresh" in str(fail["when"])
 
 
+def test_zfs_dkms_stays_on_running_kernel_and_precedes_disk_changes() -> None:
+    """При отсутствии модуля ставятся точные заголовки без смены ядра."""
+
+    path = ROOT / "automation/ansible/playbooks/configure-nas.yml"
+    tasks = yaml.safe_load(path.read_text(encoding="utf-8"))[0]["tasks"]
+    def step(name: str):
+        result = next(task for task in tasks if task.get("name") == name)
+        return result, tasks.index(result)
+
+    initial, first = step("Проверить наличие модуля ZFS после установки расширения")
+    validate, _ = step("Проверить безопасное имя работающего ядра для ZFS")
+    headers, header_index = step("Проверить заголовки работающего ядра для DKMS")
+    apt, apt_index = step("Установить заголовки текущего ядра и DKMS без удаления пакетов")
+    after_headers, _ = step("Проверить ZFS после установки заголовков")
+    dkms, dkms_index = step("Собрать ZFS для работающего ядра через DKMS")
+    ready, ready_index = step("Проверить модуль ZFS после DKMS")
+    confirm, confirm_index = step("Подтвердить готовность ZFS после сборки DKMS")
+    load, load_index = step("Загрузить проверенный модуль ZFS в работающее ядро")
+    sys_module, sys_index = step("Проверить загрузку ZFS в ядро")
+    loaded, loaded_index = step("Подтвердить загрузку ZFS в работающее ядро")
+    docker, docker_index = step("Установить Docker через источник пакетов, управляемый OMV-Extras")
+    storage, storage_index = step("Установить одноразовый исполнитель подготовки пустых HDD")
+    assert first < header_index < apt_index < dkms_index < ready_index
+    assert ready_index < confirm_index < load_index < sys_index < loaded_index
+    assert loaded_index < docker_index < storage_index
+
+    assert initial["ansible.builtin.command"]["argv"] == ["modinfo", "zfs"]
+    assert "ansible_facts['kernel']" in str(validate["ansible.builtin.assert"]["that"])
+    assert validate["when"] == "nas_zfs_module.rc != 0"
+    assert headers["ansible.builtin.stat"]["follow"] is True
+    assert "/lib/modules/{{ ansible_facts['kernel'] }}/build" == headers["ansible.builtin.stat"]["path"]
+    assert headers["when"] == "nas_zfs_module.rc != 0"
+
+    apt_package = apt["ansible.builtin.apt"]
+    assert apt_package["name"] == [
+        "linux-headers-{{ ansible_facts['kernel'] }}", "dkms"
+    ]
+    assert apt_package["state"] == "present"
+    assert apt_package["fail_on_autoremove"] is True
+    assert apt_package["force_apt_get"] is True
+    assert apt_package["update_cache"] is False
+    assert "nas_zfs_module.rc != 0" in apt["when"]
+    assert "nas_zfs_kernel_headers.stat.isdir" in str(apt["when"])
+    assert after_headers["failed_when"] is False
+    assert "nas_zfs_module.rc != 0" in str(after_headers["when"])
+
+    assert dkms["ansible.builtin.command"]["argv"] == [
+        "dkms", "autoinstall", "-k", "{{ ansible_facts['kernel'] }}"
+    ]
+    assert dkms["failed_when"] is False
+    assert "nas_zfs_module_after_headers.rc != 0" in dkms["when"]
+    assert ready["ansible.builtin.command"]["argv"] == [
+        "modinfo", "-F", "filename", "zfs"
+    ]
+    assert ready["failed_when"] is False
+    assert "nas_zfs_ready.rc == 0" in confirm["ansible.builtin.assert"]["that"]
+    assert "nas_zfs_dkms_build" in str(confirm["ansible.builtin.assert"]["that"])
+    assert load["ansible.builtin.command"]["argv"] == ["modprobe", "zfs"]
+    assert load["failed_when"] is False
+    assert sys_module["ansible.builtin.stat"]["path"] == "/sys/module/zfs"
+    assert "nas_zfs_modprobe.rc == 0" in loaded["ansible.builtin.assert"]["that"]
+    assert "nas_zfs_loaded.stat.isdir" in str(loaded["ansible.builtin.assert"]["that"])
+
+    body = str(tasks)
+    assert "reboot" not in body.lower()
+    assert "autoremove" not in body.lower() or "fail_on_autoremove" in body
+    assert "linux-image-" not in str(apt_package["name"])
+
+
 def test_nas_compact_callback_hides_untrusted_output() -> None:
     """Показывать причину APT, а не пароль/URL из сырых stdout/stderr."""
 
@@ -231,6 +300,43 @@ def test_nas_compact_callback_hides_untrusted_output() -> None:
     assert "HTTP-ответ не получен" in "\n".join(output)
     assert "сертификат TLS" in "\n".join(output)
     assert "SECRET_HEADER" not in "\n".join(output)
+
+    output.clear()
+    callback.v2_runner_on_ok(SimpleNamespace(
+        _task=SimpleNamespace(
+            no_log=False,
+            get_name=lambda: "Собрать ZFS для работающего ядра через DKMS",
+        ),
+        _result={
+            "rc": 10, "stdout": "Bad return status for module build",
+            "stderr": "SECRET_COMPILATION_PATH",
+        },
+    ))
+    assert "кодом 10" in "\n".join(output)
+    assert "Компилятор" in "\n".join(output)
+    assert "SECRET_COMPILATION_PATH" not in "\n".join(output)
+
+    output.clear()
+    callback.v2_runner_on_ok(SimpleNamespace(
+        _task=SimpleNamespace(
+            no_log=False,
+            get_name=lambda: "Загрузить проверенный модуль ZFS в работающее ядро",
+        ),
+        _result={"rc": 1, "stderr": "SECRET_KERNEL_DATA"},
+    ))
+    assert "modprobe zfs" in "\n".join(output)
+    assert "SECRET_KERNEL_DATA" not in "\n".join(output)
+
+    output.clear()
+    callback.v2_runner_on_failed(SimpleNamespace(
+        _task=SimpleNamespace(
+            no_log=False,
+            get_name=lambda: "Подтвердить готовность ZFS после сборки DKMS",
+        ),
+        _result={"msg": "SECRET_OTHER_DATA"},
+    ))
+    assert "ZFS не собран" in "\n".join(output)
+    assert "SECRET_OTHER_DATA" not in "\n".join(output)
 
     output.clear()
     callback.v2_runner_on_failed(SimpleNamespace(
@@ -339,6 +445,7 @@ def main() -> int:
     test_paths()
     test_unconfirmed_volumes()
     test_nas_apt_diagnostic_guard()
+    test_zfs_dkms_stays_on_running_kernel_and_precedes_disk_changes()
     test_nas_compact_callback_hides_untrusted_output()
     test_omv_repository_fallback_guard_and_rollback()
     print("[ОК] Безопасные проверки OMV и подключений пройдены")
