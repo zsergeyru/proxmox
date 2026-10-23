@@ -15,5 +15,5 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectHome=true
 ProtectSystem=strict
-ReadWritePaths=/mnt/persistent-state/ssh-host-renewal
+ReadWritePaths=/mnt/persistent-state/ssh-host-renewal /mnt/persistent-state/locks
 TimeoutStartSec=45min
