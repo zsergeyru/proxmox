@@ -73,9 +73,9 @@ class CallbackModule(CallbackBase):
         found: list[str] = []
         # urlsplit.hostname отбрасывает username, password, порт, query и path.
         for line in str(output or "").splitlines():
-            if not re.match(r"^\\s*(?:Err:\\d+|E:|W:|Failed to fetch)", line):
+            if not re.match(r"^\s*(?:Err:\d+|E:|W:|Failed to fetch)", line):
                 continue
-            for match in re.findall(r"https?://[^\\s<>]+", line):
+            for match in re.findall(r"https?://[^\s<>]+", line):
                 try:
                     host = urlsplit(match.rstrip("',;.)")).hostname
                 except ValueError:
@@ -88,7 +88,6 @@ class CallbackModule(CallbackBase):
                     found.append(host)
                 if len(found) >= 4:
                     return found
-        return found
         return found
 
 
