@@ -1,4 +1,4 @@
-"""Подготовка трёх новых HDD после точного подтверждения на PVE.
+"""Подготовка новых HDD с сохранением существующего ext4 после подтверждения.
 
 Все изменения выполняет проверенная программа на NAS. Управляющий гость
 ещё раз проверяет план, затем независимо проверяет созданные UUID/GUID и
@@ -98,12 +98,15 @@ def prepare_blank_disks(repo_root: Path, host: PhysicalHost,
             "Состав дисков или назначение изменились после просмотра плана. "
             "Подготовка отменена; получите новый план"
         )
-    if [item.action for item in plan.assignments] != [
-        "preserve", "create-ext4", "create-zfs", "create-zfs"
-    ]:
+    actions = [item.action for item in plan.assignments]
+    if actions not in (
+        ["preserve", "create-ext4", "create-zfs", "create-zfs"],
+        ["preserve", "preserve", "create-zfs", "create-zfs"],
+    ):
         raise InfraManagerError(
-            "Автоматическая подготовка разрешена только когда все три HDD "
-            "пусты. Существующие тома не форматируются и не заменяются"
+            "Для автоматической подготовки требуются два пустых ZFS HDD. "
+            "Диск shared может быть пустым либо существующим ext4; "
+            "его сохранность обязательно подтвердит NAS до первой записи"
         )
     console.info("Установка необходимых средств подготовки HDD и OMV")
     configure_nas(repo_root, session)
