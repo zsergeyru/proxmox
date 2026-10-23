@@ -178,7 +178,7 @@ def _remaining(raw: str, *, hostname: str | None = None,
             if (
                 not isinstance(principal, str) or not principal
                 or not re.search(
-                    r"(?m)^\\s+" + re.escape(principal) + r"\\s*$",
+                    r"(?m)^\s+" + re.escape(principal) + r"\s*$",
                     result.stdout,
                 )
             ):
