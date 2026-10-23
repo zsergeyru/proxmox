@@ -610,20 +610,20 @@ def operator_physical_bootstrap_state(name: str) -> int:
 
     import yaml
 
-    if name != "nas":
-        raise InfraManagerError("Начальный доступ пока поддерживается только для NAS")
+    if not re.fullmatch(r"[a-z][a-z0-9-]*", name):
+        raise InfraManagerError("Некорректное имя физического сервера")
     manifest = PATHS.repo_root / "infrastructure" / "hosts" / name / "host.yaml"
     if not manifest.is_file():
-        raise InfraManagerError("Машинное описание NAS отсутствует")
+        raise InfraManagerError("Машинное описание физического сервера отсутствует")
     try:
         document = yaml.safe_load(manifest.read_text(encoding="utf-8"))
         connection = document["connection"]
         fingerprint = connection["ssh_host_fingerprint"]
         address = connection["address"]
     except (OSError, yaml.YAMLError, KeyError, TypeError) as exc:
-        raise InfraManagerError("Не удалось проверить адрес и SSH-ключ NAS") from exc
+        raise InfraManagerError("Не удалось прочитать адрес и SSH-ключ сервера") from exc
     if not isinstance(address, str) or not address:
-        raise InfraManagerError("Укажите адрес NAS в host.yaml до первого входа")
+        raise InfraManagerError("Укажите адрес физического сервера в host.yaml до первого входа")
     if fingerprint is not None and (
         not isinstance(fingerprint, str)
         or not re.fullmatch(r"SHA256:[A-Za-z0-9+/]{43}", fingerprint)
@@ -633,14 +633,14 @@ def operator_physical_bootstrap_state(name: str) -> int:
     if not path.exists():
         if checked_record_path(name, storage=True, data_root=PATHS.data_dir).exists():
             raise InfraManagerError(
-                "Назначения дисков NAS есть, но отметка SSH-доверия утрачена. "
+                "Назначения дисков сохранены, но отметка SSH-доверия утрачена. "
                 "Необходима проверка восстановления доверия"
             )
         return 20
     try:
         record = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
-        raise InfraManagerError("Повреждена отметка SSH-доверия NAS") from exc
+        raise InfraManagerError("Повреждена отметка SSH-доверия физического сервера") from exc
     if (
         not isinstance(record, dict)
         or record.get("name") != name
@@ -650,7 +650,7 @@ def operator_physical_bootstrap_state(name: str) -> int:
         or (fingerprint is not None and record["fingerprint"] != fingerprint)
     ):
         raise InfraManagerError(
-            "Данные NAS изменились; повторный пароль автоматически запрашивать нельзя"
+            "Данные физического сервера изменились; повторный пароль запрещён"
         )
     return 0
 
@@ -778,6 +778,9 @@ def build_parser() -> argparse.ArgumentParser:
     state.add_argument("name")
     bootstrap = subparsers.add_parser("bootstrap", help=argparse.SUPPRESS)
     bootstrap.add_argument("name")
+    for command in ("ssh-trust-plan", "ssh-trust-confirm"):
+        trust = subparsers.add_parser(command, help=argparse.SUPPRESS)
+        trust.add_argument("name")
     plan_parser = subparsers.add_parser(
         "storage-plan",
         help="предложить назначение дисков NAS без изменений",
@@ -848,8 +851,17 @@ def main(argv: list[str] | None = None) -> int:
                 return operator_physical_bootstrap_state(args.name)
             payload = sys.stdin.readline(16385)
             if not payload or len(payload) > 16384 or not payload.endswith("\n"):
-                raise InfraManagerError("Некорректный ввод учётных данных NAS")
+                raise InfraManagerError("Некорректный ввод учётных данных сервера")
             return operator_physical_task("bootstrap", args.name, input_text=payload)
+        if args.command in {"ssh-trust-plan", "ssh-trust-confirm"}:
+            if not show_secrets:
+                raise InfraManagerError("Подтверждение SSH-доверия разрешено только с PVE")
+            if args.command == "ssh-trust-plan":
+                return operator_physical_task("ssh-trust-plan", args.name)
+            payload = sys.stdin.readline(2048)
+            if not payload or len(payload) > 2047 or not payload.endswith("\n"):
+                raise InfraManagerError("Не получено подтверждение SSH-ключа")
+            return operator_physical_task("ssh-trust-confirm", args.name, input_text=payload)
         if args.command == "storage-prepare":
             if not show_secrets:
                 raise InfraManagerError("Подготовка дисков разрешена только с доверенного PVE")
