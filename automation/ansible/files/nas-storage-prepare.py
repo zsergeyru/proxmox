@@ -444,6 +444,144 @@ def apply(items: list[dict[str, object]], fingerprint: str) -> dict[str, object]
     return result
 
 
+def recover_from_journal(items: list[dict[str, object]],
+                         fingerprint: str) -> dict[str, object]:
+    """Продолжить только регистрацию ранее созданных томов, БЕЗ форматирования."""
+    if not re.fullmatch(r"[0-9a-f]{64}", fingerprint):
+        raise StorageError("Неверный отпечаток первого плана HDD")
+    if JOURNAL.is_symlink() or not JOURNAL.is_file():
+        raise StorageError("Нет обычного файла журнала первой подготовки")
+    try:
+        previous = json.loads(JOURNAL.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise StorageError("Нельзя прочитать журнал первоначальной подготовки") from exc
+    if (not isinstance(previous, dict)
+            or set(previous) != {"fingerprint", "items", "state"}
+            or previous["state"] != "started"
+            or previous["fingerprint"] != fingerprint
+            or previous["items"] != items
+            or not isinstance(items, list)
+            or len(items) != 3):
+        raise StorageError("Подтверждение не совпадает с журналом первой подготовки")
+    roles = {item.get("role") for item in items if isinstance(item, dict)}
+    if roles != set(ROLES):
+        raise StorageError("Журнал содержит неверный набор ролей HDD")
+    for item in items:
+        if (not isinstance(item, dict)
+                or set(item) != {"role", "serial", "action"}
+                or not isinstance(item["serial"], str)
+                or item["action"] != ROLES[item["role"]][0]):
+            raise StorageError("Журнал не содержит ожидаемое создание трёх HDD")
+
+    disks = disk_list()
+    if sum(has_root(d) for d in disks) != 1:
+        raise StorageError("Не определён единственный системный SSD")
+    found = {}
+    for item in items:
+        role = item["role"]
+        matches = [d for d in disks if d.get("serial") == item["serial"]]
+        if len(matches) != 1 or has_root(matches[0]):
+            raise StorageError("Не совпали физические HDD первоначального плана")
+        disk = matches[0]
+        _action, model, capacity = ROLES[role]
+        if (not isinstance(disk.get("model"), str)
+                or model.lower() not in disk["model"].lower()
+                or not isinstance(disk.get("size"), int)
+                or abs(disk["size"] / 1e9 - capacity) > capacity * .05
+                or disk.get("pttype") != "gpt"):
+            raise StorageError("Изменились модель, ёмкость или разметка HDD")
+        by_id = stable_device(str(disk.get("path")), item["serial"])
+        found[role] = (disk, by_id, item["serial"])
+    if len({part[1] for part in found.values()}) != 3:
+        raise StorageError("Неоднозначное соответствие HDD и ролей")
+
+    shared, shared_id, _shared_serial = found["shared"]
+    partitions = shared.get("children") or []
+    if (len(partitions) != 1
+            or partitions[0].get("type") != "part"
+            or partitions[0].get("fstype") != "ext4"
+            or partitions[0].get("children")):
+        raise StorageError("Исходный HDD shared не содержит ровно один ext4-раздел")
+    partition = shared_id + "-part1"
+    ext_uuid = partitions[0].get("uuid")
+    if (not Path(partition).exists()
+            or not isinstance(ext_uuid, str)
+            or not re.fullmatch(r"[0-9a-fA-F-]{36}", ext_uuid)
+            or execute("blkid", "-s", "UUID", "-o", "value", partition).stdout.strip() != ext_uuid
+            or execute("blkid", "-s", "LABEL", "-o", "value", partition).stdout.strip() != "nas-shared"):
+        raise StorageError("Не совпали UUID, метка или раздел HDD shared")
+
+    shared_path = "/srv/dev-disk-by-uuid-" + ext_uuid
+    shared_source = "/dev/disk/by-uuid/" + ext_uuid
+    target = Path(shared_path)
+    if target.is_symlink():
+        raise StorageError("Точка подключения shared является символической ссылкой")
+    if target.exists() and (not target.is_dir() or any(target.iterdir())):
+        verify_mount(shared_path, "ext4", ext_uuid)
+    pool_info = {}
+    for role in ("data", "backup"):
+        disk, _stable, serial = found[role]
+        parts = disk.get("children") or []
+        if (len(parts) != 2
+                or sum(part.get("fstype") == "zfs_member" for part in parts) != 1):
+            raise StorageError(f"Неверные разделы существующего ZFS-диска {role}")
+        pool = "nas-" + role
+        status = execute("zpool", "status", "-P", pool).stdout
+        if (f"pool: {pool}" not in status
+                or not re.search(r"(?m)^\s*state: ONLINE\s*$", status)):
+            raise StorageError(f"Пул {pool} отсутствует или не ONLINE")
+        leaves = [
+            line.split()[0] for line in status.splitlines()
+            if re.match(r"^\s+/dev/\S+\s+ONLINE(?:\s|$)", line)
+        ]
+        if len(leaves) != 1 or serial not in leaves[0]:
+            raise StorageError(f"Пул {pool} не принадлежит подтверждённому HDD")
+        verify_mount("/" + pool, "zfs", pool)
+        pool_info[role] = {"pool": pool, "mountpoint": "/" + pool,
+                           "pool_guid": pool_guid(pool)}
+
+    # ЗДЕСЬ НЕ БЫВАЕТ sgdisk/mkfs/zpool create; только штатные настройки OMV.
+    refs = {
+        "shared": register_omv("shared", "ext4", shared_source, shared_path),
+        "data": register_omv("data", "zfs", "nas-data", "/nas-data"),
+        "backup": register_omv("backup", "zfs", "nas-backup", "/nas-backup"),
+    }
+    execute("omv-salt", "deploy", "run", "fstab")
+    if execute("findmnt", "--mountpoint", shared_path,
+               allowed=(0, 1)).returncode:
+        execute("mount", shared_path)
+    verify_mount(shared_path, "ext4", ext_uuid)
+    verify_mount("/nas-data", "zfs", "nas-data")
+    verify_mount("/nas-backup", "zfs", "nas-backup")
+    result = {
+        "fingerprint": fingerprint,
+        "serials": {item["role"]: item["serial"] for item in items},
+        "volumes": {
+            "shared": {"mountpoint": shared_path,
+                       "filesystem_uuid": ext_uuid,
+                       "omv_reference": refs["shared"]},
+            "data": {**pool_info["data"], "omv_reference": refs["data"]},
+            "backup": {**pool_info["backup"], "omv_reference": refs["backup"]},
+        },
+    }
+    complete = JOURNAL.with_name("storage-preparation-result.json")
+    if complete.is_symlink():
+        raise StorageError("Итоговый отчёт является символической ссылкой")
+    if complete.exists():
+        try:
+            old_result = json.loads(complete.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            raise StorageError("Нельзя прочитать прежний итоговый отчёт") from exc
+        if old_result != result:
+            raise StorageError("Повторное состояние не совпадает с итоговым отчётом")
+    else:
+        with complete.open("x", encoding="utf-8") as stream:
+            json.dump(result, stream, ensure_ascii=False, sort_keys=True)
+            stream.flush()
+            os.fsync(stream.fileno())
+    return result
+
+
 def main() -> int:
     """Проверить формат доверенного задания и возвратить только результат."""
 
@@ -451,7 +589,12 @@ def main() -> int:
         payload = json.load(sys.stdin)
         if not isinstance(payload, dict) or set(payload) != {"items", "fingerprint"}:
             raise StorageError("Некорректная форма подтверждённого задания")
-        result = apply(payload["items"], payload["fingerprint"])
+        if sys.argv[1:] == ["recover"]:
+            result = recover_from_journal(payload["items"], payload["fingerprint"])
+        elif len(sys.argv) == 1:
+            result = apply(payload["items"], payload["fingerprint"])
+        else:
+            raise StorageError("Неизвестный режим подготовки HDD")
         print(MARKER + json.dumps(result, sort_keys=True))
     except (OSError, ValueError, StorageError, subprocess.SubprocessError) as exc:
         print(f"ОШИБКА: {exc}", file=sys.stderr)
