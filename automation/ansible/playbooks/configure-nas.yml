@@ -24,21 +24,43 @@
           - (nas_omv_version.stdout | regex_replace('^[0-9]+:', '')).startswith('8.')
         fail_msg: Установить OpenMediaVault 8 необходимо вручную
 
+    # Уже установленные пакеты не должны зависеть от обновления индекса APT.
+    # При первой установке источники пакетов всё равно должны работать.
     - name: Установить средства диагностики, не изменяя разметку
-      ansible.builtin.apt:
-        name:
-          - smartmontools
-          - gdisk
-          - e2fsprogs
-          - util-linux
-          - udev
-          - jq
-          - ca-certificates
-          - curl
-          - python3
-        state: present
-        update_cache: true
-        cache_valid_time: 3600
+      block:
+        - name: Проверить и при необходимости установить диагностические программы
+          ansible.builtin.apt:
+            name:
+              - smartmontools
+              - gdisk
+              - e2fsprogs
+              - util-linux
+              - udev
+              - jq
+              - ca-certificates
+              - curl
+              - python3
+            state: present
+            update_cache: false
+      rescue:
+        - name: Проверить DNS на NAS после ошибки APT
+          ansible.builtin.command:
+            argv: [getent, ahostsv4, deb.debian.org]
+          register: nas_apt_dns
+          failed_when: false
+          changed_when: false
+
+        - name: Объяснить отказ APT до любых операций над HDD
+          ansible.builtin.fail:
+            msg: >-
+              Не удалось установить средства диагностики NAS из APT.
+              {{
+                'NAS не разрешает имя deb.debian.org: проверьте DNS, шлюз и доступ в интернет.'
+                if nas_apt_dns.rc != 0
+                else 'DNS Debian работает, но пакетный менеджер отказал: проверьте доступность репозиториев Debian/OMV и правильность настроенных APT-источников.'
+              }}
+              На HDD ничего не форматировалось. После восстановления доступа
+              к пакетам повторите infra-manager deploy nas.
 
     - name: Включить службу наблюдения за SMART
       ansible.builtin.systemd_service:
