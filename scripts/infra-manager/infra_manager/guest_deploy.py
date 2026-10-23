@@ -39,6 +39,7 @@ from .pve_host import (
     ensure_guest_storage,
     ensure_pve_host_storage,
     install_openbao_host_support,
+    install_operator_host_support,
     trigger_openbao_unseal,
     ensure_backup_raft_access,
     install_recovery_host_support,
@@ -891,6 +892,10 @@ def _run_deploy_guest(
                 project_branch=project_branch,
                 allow_legacy_bootstrap=False,
             )
+            # Обновить уже существующую оболочку PVE в рамках того же deploy 910.
+            # Иначе старый скрипт PVE продолжит задавать вопросы о неизменном
+            # SSH-ключе, хотя runtime 910 уже использует новый Git-код.
+            install_operator_host_support(context.node, repo_root)
         except InfraManagerError as exc:
             raise InfraManagerError(
                 f"Штатный deploy {context.name} остановлен: {exc} "
