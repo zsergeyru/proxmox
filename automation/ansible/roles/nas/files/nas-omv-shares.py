@@ -260,11 +260,17 @@ def apply(shared: str, data: str, shared_mount: str, data_mount: str,
     _, missing_smb = plan_shares(
         shared, data, folders, smb, folders_plan, access,
     )
+    known_uuids = {str(item.get("uuid")) for item in smb}
     for item in missing_smb:
+        # An existing managed share must be UPDATED by its genuine OMV UUID.
+        # New shares omit UUID and receive one from the OMV database.
+        is_existing = str(item["uuid"]) in known_uuids
+        payload = item if is_existing else {
+            k: v for k, v in item.items() if k != "uuid"
+        }
         command(
             "omv-confdbadm", "update", "conf.service.smb.share",
-            json.dumps({k: v for k, v in item.items() if k != "uuid"},
-                       ensure_ascii=False),
+            json.dumps(payload, ensure_ascii=False),
         )
     if missing_folders or missing_smb or not enabled_before:
         command("omv-salt", "deploy", "run", "samba")
