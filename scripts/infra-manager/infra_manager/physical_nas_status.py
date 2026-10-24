@@ -17,7 +17,7 @@ def verify_nas_services(
     *, disks: Iterable[DiskInspection] = (),
     volumes: Iterable[VerifiedVolume] = (),
 ) -> None:
-    """Проверить готовность ZFS, Samba, Docker и расписания копирования."""
+    """Проверить диски и службы; запуск сервера не доказывает наличие копий."""
 
     for disk in disks:
         report = run(
@@ -67,7 +67,7 @@ def verify_nas_services(
         "docker.service",
         "smbd.service",
         "nas-qbittorrent.service",
-        "nas-zfs-backup.timer",
+        "nas-urbackup.service",
     ):
         result = run(
             session.command("systemctl is-active " + name),
@@ -86,6 +86,24 @@ def verify_nas_services(
     if container.returncode or container.stdout.strip() != "true":
         raise InfraManagerError("Контейнер qBittorrent не работает")
 
+    server = run(
+        session.command("docker inspect --format '{{.State.Running}}' nas-urbackup"),
+        check=False, capture_output=True,
+    )
+    if server.returncode or server.stdout.strip() != "true":
+        raise InfraManagerError("UrBackup Server на NAS не работает")
+    console.ok("UrBackup Server: контейнер запущен")
+
+    safety = run(
+        session.command("/usr/local/sbin/nas-urbackup-safe status"),
+        check=False, capture_output=True,
+    )
+    if safety.returncode:
+        raise InfraManagerError("UrBackup: диски или настройка администратора не подтверждены")
+    console.ok("UrBackup: GUID резервного ZFS и доступ подтверждены")
+    console.warning("История резервных копий UrBackup и пробное восстановление "
+                    "не подтверждаются одним только запуском сервера")
+
     for pool in ("nas-data", "nas-backup"):
         result = run(
             session.command("zpool list -H -o health " + pool),
@@ -95,23 +113,5 @@ def verify_nas_services(
             raise InfraManagerError(f"Пул ZFS {pool} не в состоянии ONLINE")
         console.ok(f"Пул {pool}: ONLINE")
 
-    snapshots = run(
-        session.command(
-            "zfs list -H -t snapshot -o name -r nas-backup/replica"
-        ),
-        check=False, capture_output=True,
-    )
-    if snapshots.returncode:
-        console.warning(
-            "Резервная копия ещё не обнаружена: проверьте первый запуск "
-            "nas-zfs-backup.timer"
-        )
-    else:
-        lines = [
-            item for item in snapshots.stdout.splitlines()
-            if item.startswith("nas-backup/replica@infra-")
-        ]
-        if not lines:
-            console.warning("Пока нет снимков ZFS, переданных в nas-backup")
-        else:
-            console.ok(f"Сохранены снимки на резервном пуле: {len(lines)}")
+    # Старые ZFS-снимки больше не являются критерием готовности UrBackup.
+    # Подробный статус файловых копий будет основан на API/истории сервера.
