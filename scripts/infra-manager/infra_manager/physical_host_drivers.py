@@ -10,9 +10,8 @@ from .common import InfraManagerError
 from .physical_hosts import PhysicalHost
 
 
-def run_host_driver(repo_root: Path, operation: str, host: PhysicalHost) -> int:
-    """Select a driver by the validated host.yaml management.driver identifier."""
-    driver = host.driver
+def _load_driver(repo_root: Path, driver: str):
+    """Load audited code from a driver name, not an arbitrary YAML file path."""
     if not isinstance(driver, str) or not re.fullmatch(r"[a-z][a-z0-9-]*", driver):
         raise InfraManagerError("Некорректный идентификатор драйвера")
     path = repo_root / "scripts" / "infra-manager" / "drivers" / f"{driver}.py"
@@ -25,6 +24,21 @@ def run_host_driver(repo_root: Path, operation: str, host: PhysicalHost) -> int:
         raise InfraManagerError("Не удалось прочитать драйвер физического сервера")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    return module
+
+
+def validate_driver_storage(repo_root: Path, driver: str, storage: object) -> None:
+    """Ask the selected driver to verify its own disk-role constraints."""
+    module = _load_driver(repo_root, driver)
+    validator = getattr(module, "validate_storage", None)
+    if not callable(validator):
+        raise InfraManagerError("У драйвера нет обязательной проверки хранилища")
+    validator(storage)
+
+
+def run_host_driver(repo_root: Path, operation: str, host: PhysicalHost) -> int:
+    """Execute a physical-host operation in the validated driver module."""
+    module = _load_driver(repo_root, host.driver)
     executor = getattr(module, "execute", None)
     if not callable(executor):
         raise InfraManagerError("Драйвер не предоставил операцию execute")
