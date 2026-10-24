@@ -5,32 +5,42 @@ schema_version: 2
 host: nas
 checks:
   - type: systemd
+    component: base
     unit: docker.service
     message: Docker работает
   - type: systemd
+    component: smb
     unit: smbd.service
     message: Samba работает
   - type: systemd
+    component: urbackup_server
     unit: nas-urbackup.service
     message: UrBackup Server запущен
   - type: systemd
+    component: urbackup_client
     unit: nas-urbackup-client.service
     message: UrBackup Client запущен
   - type: systemd
+    component: urbackup_client
     unit: nas-urbackup-local.timer
     message: Планировщик копий NAS запущен
   - type: docker
+    component: urbackup_server
     container: nas-urbackup
     message: "UrBackup Server: контейнер запущен"
   - type: docker
+    component: urbackup_client
     container: nas-urbackup-client
     message: "UrBackup Client: контейнер запущен"
   - type: docker
+    component: apps
     container: nas-qbittorrent
     message: "qBittorrent: контейнер запущен"
   - type: tcp
+    component: apps
     port: 8080
     message: "qBittorrent: веб-интерфейс доступен"
   - type: file
+    component: urbackup_server
     path: /etc/nas-apps/urbackup/initialized
     message: Администратор UrBackup инициализирован
