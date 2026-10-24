@@ -110,34 +110,30 @@ jobs:
       - name: Check NAS UrBackup policy, ZFS guards and deployment
         run: python scripts/tests/test-nas-urbackup.py
 
-      - name: Smoke-test UrBackup Linux LAN backend variants in isolated Docker
+      - name: Smoke-test actual UrBackup client LAN configuration in Docker
         run: |
           set -euo pipefail
           docker pull uroni/urbackup-client:2.5.31
-          docker run --rm --entrypoint /bin/sh uroni/urbackup-client:2.5.31 \
-            -c 'test -x /usr/local/sbin/urbackupclientbackend && command -v urbackupclientctl && cat /etc/default/urbackupclient'
-          for variant in noargs config; do
-            name="nas-client-ci-${variant}"
-            args=()
-            if [ "$variant" = config ]; then args=(--config /etc/default/urbackupclient); fi
-            docker run -d --name "$name" \
-              --entrypoint /usr/local/sbin/urbackupclientbackend \
-              uroni/urbackup-client:2.5.31 "${args[@]}"
-            ok=0
-            for _ in $(seq 1 12); do
-              if docker exec "$name" urbackupclientctl status >/dev/null 2>&1; then
-                if [ "$(docker inspect -f '{{.State.Running}}' "$name")" = true ]; then
-                  ok=1
-                  break
-                fi
-              fi
-              sleep 2
-            done
-            echo "LAN backend variant=$variant ready=$ok"
-            docker logs --tail 15 "$name" 2>&1 || true
-            docker rm -f "$name" >/dev/null 2>&1 || true
-            if [ "$ok" = 1 ]; then exit 0; fi
+          config="$PWD/automation/ansible/templates/nas-urbackup-client.defaults.j2"
+          grep -Fx INTERNET_ONLY=false "$config"
+          data="$(mktemp -d)"
+          mkdir -p "$data/client-data" "$data/client-config"
+          trap 'docker rm -f nas-client-ci-smoke >/dev/null 2>&1 || true; rm -rf "$data"' EXIT
+          docker run -d --name nas-client-ci-smoke \
+            --hostname nas-local \
+            -v "$config:/etc/default/urbackupclient:ro" \
+            -v "$data/client-data:/usr/local/var/urbackup" \
+            -v "$data/client-config:/usr/local/etc/urbackup" \
+            --entrypoint /usr/local/sbin/urbackupclientbackend \
+            uroni/urbackup-client:2.5.31 --config /etc/default/urbackupclient
+          for _ in $(seq 1 20); do
+            if docker exec nas-client-ci-smoke urbackupclientctl status >/dev/null 2>&1; then
+              docker inspect -f '{{.State.Running}}' nas-client-ci-smoke | grep -Fx true
+              exit 0
+            fi
+            sleep 2
           done
+          docker logs --tail 30 nas-client-ci-smoke 2>&1
           exit 1
 
       - name: Check common users, NAS rights and Authelia groups
