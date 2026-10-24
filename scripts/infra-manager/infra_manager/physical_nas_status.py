@@ -16,7 +16,7 @@ from .physical_nas_volumes import VerifiedVolume
 from .common import InfraManagerError, console, run
 from .physical_host_ssh import PhysicalHostSshSession
 from .guest_status import load_declared_checks, _run_declared_check, _service_fields
-from .guest_deploy import project_branch_for_checkout, project_revision
+from .guest_deploy import project_branch_for_checkout, project_revision as current_project_revision
 
 
 def verify_nas_services(
@@ -151,7 +151,7 @@ def show_nas_status(
 
     print("\nПроект")
     print(f"  {'Ветка:':<12}{project_branch_for_checkout(repo_root)}")
-    print(f"  {'Версия:':<12}{project_revision or globals()['project_revision'](repo_root)}")
+    print(f"  {'Версия:':<12}{project_revision or current_project_revision(repo_root)}")
     for name in ("openmediavault", "qbittorrent", "urbackup"):
         spec = services[name]
         url = (
