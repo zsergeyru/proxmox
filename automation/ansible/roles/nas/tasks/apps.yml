@@ -5,6 +5,7 @@
       - nas_shared_mount is match('^/srv/[A-Za-z0-9_./-]+$')
       - nas_shared_uuid | length > 4
       - nas_qbit_image is match('^lscr.io/linuxserver/qbittorrent:[A-Za-z0-9_.-]+$')
+      - nas_provision.services.qbittorrent.runtime.downloads_directory in nas_provision.services.qbittorrent.runtime.directories
     fail_msg: Нельзя запускать приложения без подтверждённого тома и образа
 
 - name: Повторно сверить точку подключения и UUID ext4
@@ -50,10 +51,7 @@
     owner: nas-qbittorrent
     group: nas-qbittorrent
     mode: "0770"
-  loop:
-    - downloads
-    - downloads/incomplete
-    - downloads/complete
+  loop: "{{ nas_provision.services.qbittorrent.runtime.directories }}"
 
 - name: Создать каталог настроек приложения на SSD
   ansible.builtin.file:
