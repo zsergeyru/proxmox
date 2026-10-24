@@ -23,9 +23,10 @@ properties:
   local_client:
     type: object
     additionalProperties: false
-    required: [enabled, name, source_volume, target_volume, schedule, exclude_volumes]
+    required: [enabled, image, name, source_volume, target_volume, schedule, exclude_volumes]
     properties:
       enabled: {const: true}
+      image: {const: 'uroni/urbackup-client:2.5.31'}
       name: {const: nas-local}
       source_volume: {const: data}
       target_volume: {const: backup}

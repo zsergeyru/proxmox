@@ -1,0 +1,42 @@
+# Client is a permanent LAN service. Override upstream internet-mode
+# entrypoint: it requires a secret auth key and auto-adds /backup. This NAS
+# must only expose a verified ZFS snapshot during a scheduled backup.
+name: nas-urbackup-client
+
+services:
+  client:
+    image: "{{ nas_urbackup_client_image }}"
+    container_name: nas-urbackup-client
+    hostname: "{{ nas_urbackup_client_name }}"
+    entrypoint: ["/usr/local/sbin/urbackupclientbackend"]
+    command: []
+    environment:
+      TZ: "{{ nas_urbackup_timezone }}"
+    volumes:
+      - type: bind
+        source: /var/lib/nas-apps/urbackup/client/data
+        target: /usr/local/var/urbackup
+        bind:
+          create_host_path: false
+      - type: bind
+        source: /var/lib/nas-apps/urbackup/client/config
+        target: /usr/local/etc/urbackup
+        bind:
+          create_host_path: false
+      - type: bind
+        source: /run/nas-urbackup-source
+        target: /backup-source
+        read_only: true
+        bind:
+          create_host_path: false
+          propagation: rslave
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - urbackup-lan
+    restart: "no"
+
+networks:
+  urbackup-lan:
+    external: true
+    name: nas-urbackup-lan

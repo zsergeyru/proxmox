@@ -140,6 +140,9 @@ def configure_nas_urbackup_local(
         "nas_data_mountpoint": data_mountpoint,
         "nas_backup_mountpoint": backup_mountpoint,
         "nas_urbackup_schedule": policy["local_client"]["schedule"],
+        "nas_urbackup_client_image": policy["local_client"]["image"],
+        "nas_urbackup_client_name": policy["local_client"]["name"],
+        "nas_urbackup_timezone": policy["server"]["timezone"],
     })
 
 
