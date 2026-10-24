@@ -18,7 +18,7 @@ def module(file: str, alias: str):
     """Загрузить локальный сценарий без установки на NAS."""
 
     spec = importlib.util.spec_from_file_location(
-        alias, ROOT / "automation/ansible/files" / file
+        alias, ROOT / "automation/ansible/roles/nas/files" / file
     )
     if spec is None or spec.loader is None:
         raise AssertionError(f"Не найден сценарий: {file}")
@@ -202,7 +202,7 @@ def test_no_forced_rollback() -> None:
     """Сценарий не имеет способов автоматического отката и удаления ZFS."""
 
     source = (
-        ROOT / "automation/ansible/files/nas-zfs-backup.py"
+        ROOT / "automation/ansible/roles/nas/files/nas-zfs-backup.py"
     ).read_text(encoding="utf-8")
     for forbidden in ('"destroy"', '"-F"', '"rollback"', '"wipefs"'):
         assert forbidden not in source, forbidden
@@ -252,7 +252,7 @@ def test_qbittorrent_deploy_prepares_image_safely() -> None:
     """Не скачивать контейнер до проверки HDD, а при отказе читать журнал."""
 
     playbook = (
-        ROOT / "automation/ansible/playbooks/configure-nas-apps.yml"
+        ROOT / "automation/ansible/roles/nas/tasks/apps.yml"
     ).read_text(encoding="utf-8")
     assert playbook.index("Повторно сверить точку подключения и UUID ext4") < (
         playbook.index("Загрузить образ qBittorrent при отсутствии")
@@ -266,7 +266,7 @@ def test_qbittorrent_deploy_prepares_image_safely() -> None:
     assert "failed_when: false" in playbook
     assert "wipefs" not in playbook and "mkfs" not in playbook
     unit = (
-        ROOT / "automation/ansible/templates/nas-qbittorrent.service.j2"
+        ROOT / "automation/ansible/roles/nas/templates/nas-qbittorrent.service.j2"
     ).read_text(encoding="utf-8")
     assert "ExecStartPre=/usr/bin/findmnt" in unit
     assert "ConditionPathIsMountPoint=" in unit
@@ -275,7 +275,7 @@ def test_qbittorrent_deploy_prepares_image_safely() -> None:
 def test_samba_service_automation() -> None:
     """Samba запускается штатной OMV конфигурацией, без правки smb.conf."""
 
-    file = ROOT / "automation/ansible/playbooks/configure-nas-smb.yml"
+    file = ROOT / "automation/ansible/roles/nas/tasks/smb.yml"
     content = file.read_text(encoding="utf-8")
     assert content.index("Зарегистрировать папки и ресурсы через базу OMV") < (
         content.index("Включить автозапуск и запустить Samba")
