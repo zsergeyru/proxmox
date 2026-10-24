@@ -1,9 +1,0 @@
----
-# Compatibility entrypoint; deploy nas uses deploy-nas.yml and the nas role.
-- name: Установить сервер UrBackup только на подтверждённом NAS
-  hosts: nas
-  gather_facts: false
-  become: false
-  roles:
-    - role: nas
-      tasks_from: urbackup_server
