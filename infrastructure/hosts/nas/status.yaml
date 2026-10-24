@@ -20,10 +20,6 @@ checks:
     component: urbackup_client
     unit: nas-urbackup-client.service
     message: UrBackup Client запущен
-  - type: systemd
-    component: urbackup_client
-    unit: nas-urbackup-local.timer
-    message: Планировщик копий NAS запущен
   - type: docker
     component: urbackup_server
     container: nas-urbackup
