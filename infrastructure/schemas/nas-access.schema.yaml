@@ -9,15 +9,29 @@ properties:
   shares:
     type: object
     additionalProperties: false
-    required: [shared, movies, music, data]
+    minProperties: 1
+    maxProperties: 16
+    patternProperties:
+      '^[a-z][a-z0-9-]{0,30}
+$defs:
+  permissions:
+    type: object
+    additionalProperties: false
+    required: [read_groups, write_groups]
     properties:
-      shared:
-        $ref: '#/$defs/permissions'
-      movies:
-        $ref: '#/$defs/permissions'
-      music:
-        $ref: '#/$defs/permissions'
-      data:
+      read_groups:
+        type: array
+        uniqueItems: true
+        items:
+          type: string
+          pattern: '^[a-z][a-z0-9_-]{1,31}$'
+      write_groups:
+        type: array
+        uniqueItems: true
+        items:
+          type: string
+          pattern: '^[a-z][a-z0-9_-]{1,31}$'
+:
         $ref: '#/$defs/permissions'
 $defs:
   permissions:
