@@ -60,6 +60,32 @@
       register: nas_smb_register
       changed_when: "'Созданы новые записи' in nas_smb_register.stdout"
 
+    # OMV владеет smb.conf через omv-salt. Непосредственно гарантируем лишь
+    # состояние службы: на новой установке smbd может оставаться остановленным.
+    - name: Проверить итоговую конфигурацию Samba
+      ansible.builtin.command:
+        argv: [samba-tool, testparm, --suppress-prompt]
+      changed_when: false
+
+    - name: Обеспечить запуск Samba после применения OMV
+      block:
+        - name: Включить автозапуск и запустить Samba
+          ansible.builtin.systemd_service:
+            name: smbd.service
+            enabled: true
+            state: started
+      rescue:
+        - name: Прочитать журнал отказа Samba
+          ansible.builtin.command:
+            argv: [journalctl, --unit=smbd.service, --no-pager, --lines=100, --output=cat]
+          register: nas_smb_error_journal
+          changed_when: false
+          failed_when: false
+
+        - name: Прервать настройку при ошибке службы Samba
+          ansible.builtin.fail:
+            msg: Samba не запущена после применения OMV; диагноз выведен без раскрытия журнала
+
     - name: Проверить запущенную службу Samba
       ansible.builtin.command:
         argv: [systemctl, is-active, smbd.service]
