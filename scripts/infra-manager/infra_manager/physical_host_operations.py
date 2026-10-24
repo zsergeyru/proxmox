@@ -27,6 +27,7 @@ from .physical_nas_storage_state import apply_saved_storage
 from .physical_nas_storage_prepare import prepare_blank_disks, read_pending_recovery
 from .physical_nas_system import read_nas_system, require_omv8
 from .physical_nas_ansible import load_nas_provision, run_nas_phase
+from .physical_nas_users import require_nas_users_configured
 from .physical_nas_backup_policy import load_nas_backup_policy, verify_nas_backup_volumes
 from .physical_nas_status import verify_nas_services, show_nas_status
 from .physical_nas_volumes import verify_nas_volumes
@@ -262,6 +263,8 @@ def run_physical_host_operation(repo_root: Path, operation: str, name: str) -> i
                 run_nas_phase(
                     repo_root, session, "services", provision=provision,
                     policy=policy,
+                    access=(require_nas_users_configured(repo_root)
+                            if "smb" in provision["deployment"]["components"] else None),
                     verified_volumes={volume.role: volume for volume in verified},
                     host_volumes=host.volumes,
                 )
