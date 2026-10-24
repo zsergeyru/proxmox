@@ -152,6 +152,13 @@ def proxy_to_manager(arguments: list[str]) -> int:
         storage_result = confirm_nas_storage(name_of_host, forward, OperatorError)
         if storage_result != 0:
             return storage_result
+        if name_of_host == "nas":
+            from infra_manager_nas_bootstrap import prompt_nas_smb_password
+            secret_result = prompt_nas_smb_password(
+                name_of_host, forward, OperatorError,
+            )
+            if secret_result != 0:
+                return secret_result
     return forward(arguments)
 def color_mode() -> str:
     """Определить, можно ли сохранить цветной вывод при передаче команды."""
