@@ -43,6 +43,12 @@ def test_provision_and_fail_closed_phases() -> None:
     with tempfile.TemporaryDirectory() as td:
         home = Path(td) / "infrastructure/hosts/nas"
         home.mkdir(parents=True)
+        schema_dir = Path(td) / "infrastructure/schemas"
+        schema_dir.mkdir(parents=True)
+        (schema_dir / "physical-nas-provision.schema.yaml").write_text(
+            (ROOT / "infrastructure/schemas/physical-nas-provision.schema.yaml").read_text(),
+            encoding="utf-8",
+        )
         def check_modified(fn):
             doc = copy.deepcopy(p)
             fn(doc)
