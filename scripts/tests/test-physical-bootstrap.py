@@ -21,6 +21,7 @@ from infra_manager.physical_hosts import load_physical_host
 
 sys.path.insert(0, str(ROOT / "scripts/infra-manager/host"))
 import infra_manager_nas_bootstrap as password_prompt
+import infra_manager_host_credentials
 
 host_path = ROOT / "scripts/infra-manager/host/manager.py"
 spec = importlib.util.spec_from_file_location("nas_host_manager", host_path)
@@ -371,51 +372,59 @@ def test_pve_password_transport() -> None:
     assert all(command != ["ssh-trust-confirm", "nas"] for command, _ in calls)
 
 
-def test_pve_smb_password_prompt() -> None:
-    """PVE asks without echo and forwards the secret only via stdin."""
+def test_generic_host_credential_prompt() -> None:
+    """PVE asks according to a host declaration and sends only stdin secrets."""
+    import infra_manager_host_credentials as credential_prompt
     calls = []
+    plan = {"host": "nas", "credentials": [{
+        "id": "smb", "prompt": "Пароль доступа: ",
+        "min_length": 4, "max_length": 128,
+    }]}
 
-    def forward(argv, *, input_text=None):
+    def forward(argv, *, input_text=None, capture_output=False):
         calls.append((argv, input_text))
+        if capture_output:
+            return SimpleNamespace(
+                returncode=0, stderr="",
+                stdout="PHYSICAL_CREDENTIAL_PLAN_JSON=" + json.dumps(plan) + "\n",
+            )
         return 0
 
     with (
-        patch.object(password_prompt.sys, "stdin", SimpleNamespace(isatty=lambda: True)),
-        patch.object(password_prompt.getpass, "getpass", return_value="test-credential") as getpass,
+        patch.object(credential_prompt.sys, "stdin", SimpleNamespace(isatty=lambda: True)),
+        patch.object(credential_prompt.getpass, "getpass",
+                     return_value="test-password"),
     ):
-        assert password_prompt.prompt_nas_smb_password("nas", forward, host.OperatorError) == 0
-        getpass.assert_called_once()
-    assert len(calls) == 1
-    assert calls[0][0] == ["smb-password-set", "nas"]
-    assert json.loads(calls[0][1]) == {"password": "test-credential"}
-    assert "test-credential" not in repr(calls[0][0])
-    calls.clear()
-    with patch.object(password_prompt.sys, "stdin", SimpleNamespace(isatty=lambda: False)):
-        expect_refusal(
-            lambda: password_prompt.prompt_nas_smb_password("nas", forward, host.OperatorError),
-            host.OperatorError,
-        )
-    assert not calls
-    with (
-        patch.object(password_prompt.sys, "stdin", SimpleNamespace(isatty=lambda: True)),
-        patch.object(password_prompt.getpass, "getpass", return_value="bad\npassword"),
-    ):
-        expect_refusal(
-            lambda: password_prompt.prompt_nas_smb_password("nas", forward, host.OperatorError),
-            host.OperatorError,
-        )
-    assert not calls
-
-    with patch("infra_manager.physical_nas_users.store_nas_smb_secret") as store:
-        assert operator.operator_nas_smb_password_set(
-            "nas", json.dumps({"password": "test-credential"}) + "\n",
+        assert credential_prompt.prompt_physical_credentials(
+            "nas", forward, host.OperatorError,
         ) == 0
-    store.assert_called_once_with("test-credential")
+    assert calls[0][0] == ["credential-plan", "nas"]
+    assert calls[1][0] == ["credential-set", "nas"]
+    assert json.loads(calls[1][1]) == {"id": "smb", "password": "test-password"}
+    assert "test-password" not in repr(calls[1][0])
+
+    calls.clear()
+    with patch.object(credential_prompt.sys, "stdin", SimpleNamespace(isatty=lambda: False)):
+        expect_refusal(
+            lambda: credential_prompt.prompt_physical_credentials(
+                "nas", forward, host.OperatorError,
+            ), host.OperatorError,
+        )
+    assert len(calls) == 1
+
+    with (
+        patch.object(operator, "PATHS", SimpleNamespace(repo_root=ROOT)),
+        patch("infra_manager.physical_hosts.load_physical_host"),
+        patch("infra_manager.physical_host_credentials.save_operator_secret") as store,
+    ):
+        assert operator.operator_physical_credential_set(
+            "nas", json.dumps({"id": "smb", "password": "test-password"}) + "\n",
+        ) == 0
+    store.assert_called_once_with(ROOT, "nas", "smb", "test-password")
     expect_refusal(
-        lambda: operator.operator_nas_smb_password_set("other", '{"password":"test"}\n'),
-    )
-    expect_refusal(
-        lambda: operator.operator_nas_smb_password_set("nas", '{"password":"test","other":1}\n'),
+        lambda: operator.operator_physical_credential_set(
+            "nas", '{"id":"smb","password":"test","other":1}' + "\n",
+        ),
     )
 
 
@@ -429,7 +438,7 @@ def main() -> int:
     test_repeat_trust_requires_exact_scanned_key()
     test_initial_root_without_sudo()
     test_pve_password_transport()
-    test_pve_smb_password_prompt()
+    test_generic_host_credential_prompt()
     print("[ОК] Первый SSH-доступ NAS проверен на испытательных данных")
     return 0
 

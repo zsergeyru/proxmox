@@ -209,27 +209,10 @@ def show_nas_status(
         for label, value in fields:
             print(f"  {label + ':':<{width}}{value}")
 
-    # The list of accounts and share paths comes from the common user catalog
-    # and declarative NAS manifests, not an extra hardcoded status list.
-    if "smb" in enabled:
-        from .physical_nas_users import (
-            require_nas_users_configured, require_nas_smb_secret,
-        )
-        smb_access = require_nas_users_configured(repo_root)
-        names = ", ".join(account["name"] for account in smb_access["users"])
-        shared_names = [share["name"] for share in provision["shares"]]
-        password = "скрыт (доступен в status nas на PVE)"
-        if show_secrets:
-            try:
-                password = require_nas_smb_secret(smb_access)
-            except InfraManagerError:
-                password = "не задан или недоступен на 910"
-        print("\nSamba (SMB)")
-        print(f"  {'Логины:':<15}{names}")
-        print(f"  {'Пароль:':<15}{password}")
-        print(f"  {'Права:':<15}чтение и запись")
-        for share_name in shared_names:
-            print(f"  {'Папка:':<15}\\\\{address}\\{share_name}")
+    from .physical_host_credentials import operator_status_sections
+    operator_status_sections(
+        repo_root, session.host.name, address, show_secrets=show_secrets,
+    )
 
     print("\n" + separator)
     print("  NAS готов")

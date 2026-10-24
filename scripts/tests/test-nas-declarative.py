@@ -153,11 +153,14 @@ def test_role_and_no_application_specific_deploy_in_python() -> None:
         tasks = yaml.safe_load((prefix / "roles/nas/tasks" / name).read_text())
         assert isinstance(tasks, list) and len(tasks) > 4, name
     control = (
-        ROOT / "scripts/infra-manager/infra_manager/physical_host_operations.py"
+        ROOT / "scripts/infra-manager/drivers/omv8.py"
     ).read_text()
     assert "run_nas_phase(" in control
     assert "configure_nas_urbackup(" not in control
     assert "configure_nas_smb(" not in control
+    core = (ROOT / "scripts/infra-manager/infra_manager/physical_host_operations.py").read_text()
+    assert "run_nas_phase" not in core
+    assert "physical_nas" not in core
     assert control.index('run_nas_phase(\n                    repo_root, session, "base"') < (
         control.index("verified = verify_nas_volumes(")
     )
@@ -220,7 +223,7 @@ def test_nas_smb_password_only_in_trusted_status() -> None:
     with (
         patch("infra_manager.physical_nas_status.project_branch_for_checkout", return_value="main"),
         patch("infra_manager.physical_nas_status.current_project_revision", return_value="test"),
-        patch("infra_manager.physical_nas_users.require_nas_smb_secret",
+        patch("infra_manager.physical_host_credentials.read_operator_secret",
               return_value="unit-test-secret") as read_secret,
     ):
         output = io.StringIO()
@@ -243,9 +246,30 @@ def test_nas_smb_password_only_in_trusted_status() -> None:
         read_secret.assert_called_once()
 
 
+def test_generic_physical_host_boundary() -> None:
+    """Nothing in the physical-host controller depends on specific services."""
+    core = ROOT / "scripts/infra-manager/infra_manager"
+    for name in (
+        "operator.py", "physical_hosts.py", "physical_host_operations.py",
+        "physical_host_credentials.py",
+    ):
+        content = (core / name).read_text(encoding="utf-8").lower()
+        for forbidden in ("smb-password-set", "physical_nas_", "run_nas_phase", "omv8"):
+            assert forbidden not in content, (name, forbidden)
+    thin_host = (ROOT / "scripts/infra-manager/host/manager.py").read_text()
+    assert "prompt_nas_smb_password" not in thin_host
+    assert "prompt_physical_credentials" not in thin_host
+    assert "prepare_physical_host" in thin_host
+    assert (ROOT / "scripts/infra-manager/drivers/omv8.py").is_file()
+    manifest = yaml.safe_load((ROOT / "infrastructure/hosts/nas/operator.yaml").read_text())
+    assert manifest["credentials"][0]["id"] == "smb"
+    assert manifest["credentials"][0]["status"]["title"] == "Samba (SMB)"
+
+
 if __name__ == "__main__":
     test_provision_and_fail_closed_phases()
     test_role_and_no_application_specific_deploy_in_python()
     test_shared_status_parser_and_secret_control()
     test_nas_smb_password_only_in_trusted_status()
+    test_generic_physical_host_boundary()
     print("[ОК] NAS declarative deploy/status/credentials")
