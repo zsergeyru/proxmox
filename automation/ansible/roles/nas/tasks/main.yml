@@ -10,7 +10,18 @@
       - nas_provision.deployment.components | unique | length == nas_provision.deployment.components | length
       - "'urbackup_client' not in nas_provision.deployment.components or 'urbackup_server' in nas_provision.deployment.components"
       - "'urbackup_client' not in nas_provision.deployment.components or nas_provision.deployment.components.index('urbackup_server') < nas_provision.deployment.components.index('urbackup_client')"
-      - nas_provision.services.qbittorrent.image is match('^lscr.io/linuxserver/qbittorrent:[A-Za-z0-9_.-]+$')
+      - "'apps' not in nas_provision.deployment.components or ((nas_provision.services.get('qbittorrent', {}).get('image', '')) is match('^lscr[.]io/linuxserver/qbittorrent:[A-Za-z0-9_.-]+
+    fail_msg: Некорректный или неподдерживаемый декларативный план NAS
+
+- name: Применить базовые пакеты и зависимости NAS
+  ansible.builtin.include_tasks: base.yml
+  when: nas_deploy_phase == 'base'
+
+- name: Применить заявленные компоненты NAS после подтверждения томов
+  ansible.builtin.include_tasks: "{{ item }}.yml"
+  loop: "{{ nas_provision.deployment.components }}"
+  when: nas_deploy_phase == 'services'
+))"
     fail_msg: Некорректный или неподдерживаемый декларативный план NAS
 
 - name: Применить базовые пакеты и зависимости NAS
