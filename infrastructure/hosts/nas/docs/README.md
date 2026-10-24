@@ -4,6 +4,7 @@
 
 - [storage.md](storage.md) — диски, файловые системы, каталоги и граница управления.
 - [services.md](services.md) — общие папки, торренты и настройка через Infra Manager.
+- [backup.md](backup.md) — локальная спецификация UrBackup: сервер, собственные копии NAS, приём PVE/Windows и восстановление.
 - [users.md](users.md) — пользователи NAS, группы и разрешения SMB.
 - [operations.md](operations.md) — подготовка, проверки, обслуживание и восстановление.
 - [decisions.md](decisions.md) — причины выбора архитектуры.
