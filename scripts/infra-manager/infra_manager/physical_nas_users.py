@@ -59,7 +59,8 @@ def load_nas_users(repo_root: Path) -> dict[str, object]:
         raise InfraManagerError("Не найден или повреждён NAS access.yaml") from exc
     validate_nas_access(repo_root, rights, catalog)
     return {
-        "schema_version": 1,
+        "schema_version": rights["schema_version"],
+        "mode": rights["mode"],
         "users": catalog["users"],
         "groups": catalog["groups"],
         "shares": rights["shares"],
