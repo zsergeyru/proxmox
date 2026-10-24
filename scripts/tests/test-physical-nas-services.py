@@ -82,7 +82,7 @@ def test_omv_shared_folders_use_real_database_uuids() -> None:
 
     folders: list[dict[str, object]] = []
     resources: list[dict[str, object]] = []
-    settings: dict[str, object] = {"enable": False}
+    settings: dict[str, object] = {"enable": False, "shares": {"share": []}}
     updates: list[tuple[str, dict[str, object]]] = []
     salt_deploys: list[int] = []
 
@@ -94,6 +94,8 @@ def test_omv_shared_folders_use_real_database_uuids() -> None:
             return ""
         operation, model = args[1:3]
         if operation == "read":
+            if model == "conf.service.smb":
+                settings["shares"] = {"share": list(resources)}
             data = {
                 "conf.system.sharedfolder": folders,
                 "conf.service.smb.share": resources,
@@ -118,6 +120,8 @@ def test_omv_shared_folders_use_real_database_uuids() -> None:
             })
         else:
             assert model == "conf.service.smb"
+            resources[:] = list(payload.get("shares", {}).get("share", []))
+            settings.clear()
             settings.update(payload)
         return ""
 
