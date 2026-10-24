@@ -1,0 +1,9 @@
+---
+# Values are derived from declarations, never repeated in Python scripts.
+nas_qbit_image: "{{ nas_provision.services.qbittorrent.image }}"
+nas_urbackup_image: "{{ nas_backup_policy.server.image }}"
+nas_urbackup_timezone: "{{ nas_backup_policy.server.timezone }}"
+nas_urbackup_recovery_schedule: "{{ nas_backup_policy.retention.server_state_schedule }}"
+nas_urbackup_schedule: "{{ nas_backup_policy.local_client.schedule }}"
+nas_urbackup_client_image: "{{ nas_backup_policy.local_client.image }}"
+nas_urbackup_client_name: "{{ nas_backup_policy.local_client.name }}"
