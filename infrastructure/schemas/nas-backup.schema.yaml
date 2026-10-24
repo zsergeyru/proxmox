@@ -36,7 +36,7 @@ properties:
   retention:
     type: object
     additionalProperties: false
-    required: [keep_daily, keep_weekly, max_parallel_jobs]
+    required: [keep_daily, keep_weekly, max_parallel_jobs, server_state_schedule]
     properties:
       keep_daily: {type: integer, minimum: 7, maximum: 365}
       keep_weekly: {type: integer, minimum: 4, maximum: 104}
