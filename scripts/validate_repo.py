@@ -783,6 +783,8 @@ def _validate_physical_hosts() -> None:
     from infra_manager.common import InfraManagerError
     from infra_manager.guest_catalog import guests_by_provision_section
     from infra_manager.physical_hosts import list_physical_hosts
+    from infra_manager.physical_nas_ansible import load_nas_provision
+    from infra_manager.guest_status import load_declared_checks
     from infra_manager.physical_nas_users import load_nas_users
     from infra_manager.user_catalog import load_user_catalog
 
@@ -790,6 +792,11 @@ def _validate_physical_hosts() -> None:
         catalog = load_user_catalog(ROOT)
         list_physical_hosts(ROOT)
         load_nas_users(ROOT)
+        load_nas_provision(ROOT)
+        load_declared_checks(
+            ROOT / "infrastructure/hosts/nas/status.yaml",
+            identity_field="host", identity_value="nas",
+        )
         gateways = guests_by_provision_section(ROOT, "web_gateway")
         if len(gateways) != 1:
             raise InfraManagerError("Ожидается ровно один гость с веб-шлюзом")
@@ -803,7 +810,7 @@ def _validate_physical_hosts() -> None:
                 "согласуйте оба механизма перед изменением общего списка"
             )
     except (InfraManagerError, OSError, ValueError, KeyError, TypeError) as exc:
-        fail(f"infrastructure/users.yaml или hosts/nas/access.yaml: {exc}")
+        fail(f"infrastructure/users.yaml или hosts/nas/*.yaml: {exc}")
 
 
 def _warn_unused_profiles(state: ValidationState) -> None:
