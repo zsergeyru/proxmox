@@ -220,65 +220,85 @@ def test_docker_and_deploy_contract():
 
 
 
-def test_client_installer_sources_and_silent_arguments():
-    """Оба официальных источника и неполная загрузка блокируются до sh."""
-    path = ROOT / "automation/ansible/playbooks/configure-nas-urbackup-client.yml"
-    play = yaml.safe_load(path.read_text(encoding="utf-8"))[0]
-    tasks = play["tasks"]
-    by_name = {task["name"]: task for task in tasks}
-    primary = by_name["Скачать фиксированный UrBackup Client 2.5.31 с основного сайта"]
-    mirror = by_name["Скачать UrBackup Client 2.5.31 с официального архивного зеркала"]
-    main_url = primary["ansible.builtin.get_url"]
-    mirror_url = mirror["ansible.builtin.get_url"]
-    assert main_url["url"] == (
-        "https://hndl.urbackup.org/Client/2.5.31/"
-        "UrBackup%20Client%20Linux%202.5.31.sh"
-    )
-    assert mirror_url["url"] == (
-        "https://wwwold.urbackup.org/downloads/Client/2.5.31/"
-        "UrBackup%20Client%20Linux%202.5.31.sh"
-    )
-    for item in (primary, mirror):
-        args = item["ansible.builtin.get_url"]
-        assert args["timeout"] >= 60
-        assert args["force"] is True
-        assert args.get("validate_certs", True) is True
-        assert args["mode"] == "0600"
-    assert primary.get("failed_when") is False
-    assert mirror.get("when")
-    check = by_name["Запретить выполнение неполного или подменённого файла установщика"]
-    assert "27296346" in str(check["ansible.builtin.assert"]["that"])
-    runner = by_name["Установить Linux-клиент без интерактивных вопросов"]
-    assert runner["ansible.builtin.command"]["argv"][-2:] == ["--", "silent"]
-    assert runner.get("no_log") is True
+def test_permanent_docker_client_contract():
+    """Ни скачивания хостового клиента, ни проброса физических дисков."""
+    folder = ROOT / "automation/ansible"
+    play = yaml.safe_load(
+        (folder / "playbooks/configure-nas-urbackup-client.yml").read_text()
+    )[0]
+    steps = play["tasks"]
+    descriptions = " ".join(task["name"] for task in steps)
+    assert "Скачать" not in descriptions
+    assert "установщик" not in descriptions.lower()
+    assert all("ansible.builtin.get_url" not in task for task in steps)
+    assert "nas-urbackup-client.service" in str(steps)
+    assert "urbackupclientbackend.service" in str(steps)  # disable legacy only
+    server_compose = (folder / "templates/nas-urbackup.compose.yml.j2").read_text()
+    client_compose = (
+        folder / "templates/nas-urbackup-client.compose.yml.j2"
+    ).read_text()
+    assert "nas-urbackup-lan" in server_compose
+    assert "nas-urbackup-lan" in client_compose
+    assert "external: true" in client_compose
+    assert "uroni/urbackup-client" not in server_compose
+    assert 'entrypoint: ["/usr/local/sbin/urbackupclientbackend"]' in client_compose
+    assert "URBACKUP_CLIENT_AUTHKEY" not in client_compose
+    assert "URBACKUP_BACKUP_VOLUMES" not in client_compose
+    assert "no-new-privileges:true" in client_compose
+    assert "propagation: rslave" in client_compose
+    assert "read_only: true" in client_compose
+    assert "/run/nas-urbackup-source" in client_compose
+    assert "/nas-backup" not in client_compose
+    assert "/nas-data" not in client_compose
+    assert "/dev/" not in client_compose
+    assert "ports:" not in client_compose
+    assert "create_host_path: false" in client_compose
+    mount = module("nas-urbackup-client-mount.py", "nas_mount_policy_test")
+    assert mount.STAGING.as_posix() == "/run/nas-urbackup-source"
+    source = (
+        folder / "files/nas-urbackup-client-mount.py"
+    ).read_text(encoding="utf-8")
+    assert "mount" in source and "--make-rshared" in source
+    assert "--bind" in source
+    snapshot_script = (folder / "files/nas-urbackup-snapshot.py").read_text()
+    assert 'MOUNT = STAGING / "current"' in snapshot_script
+    assert 'GUEST_SOURCE = "/backup-source/current"' in snapshot_script
+    assert '("docker", "exec", "nas-urbackup-client", "urbackupclientctl")' in snapshot_script
+    assert '"/usr/local/bin/urbackupclientctl"' not in snapshot_script
+    assert "os.path.ismount(str(MOUNT))" in snapshot_script
+    assert 'run(MOUNT_GUARD, "check")' in snapshot_script
+    client_unit = (
+        folder / "templates/nas-urbackup-client.service.j2"
+    ).read_text()
+    assert "RequiresMountsFor=" in client_unit
+    assert "nas-urbackup-safe preflight" in client_unit
+    assert "nas-urbackup-client-mount check" in client_unit
+    assert "nas-urbackup.service" in client_unit
+    assert "BindsTo=nas-urbackup.service" in client_unit
+    assert "nas-urbackup-client.service" in (
+        folder / "templates/nas-urbackup-local.service.j2"
+    ).read_text()
+    status = (
+        ROOT / "scripts/infra-manager/infra_manager/physical_nas_status.py"
+    ).read_text()
+    assert 'nas-urbackup-client.service' in status
+    assert 'docker inspect --format' in status
+    assert 'nas-urbackup-client' in status
 
 
-def test_safe_download_diagnostics():
-    """Категоризация не выводит произвольные адреса, ключи и ошибки целиком."""
-    from types import ModuleType
-    import sys as system
-    callback_file = ROOT / "automation/ansible/callback_plugins/infra_nas_compact.py"
-    module_name = "nas_urbackup_client_callback_test"
-    fake_ansible = ModuleType("ansible")
-    fake_plugins = ModuleType("ansible.plugins")
-    fake_callback = ModuleType("ansible.plugins.callback")
-    fake_callback.CallbackBase = object
-    spec = importlib.util.spec_from_file_location(module_name, callback_file)
-    assert spec and spec.loader
-    mod = importlib.util.module_from_spec(spec)
-    with patch.dict(system.modules, {
-        "ansible": fake_ansible,
-        "ansible.plugins": fake_plugins,
-        "ansible.plugins.callback": fake_callback,
-    }):
-        spec.loader.exec_module(mod)
-    f = mod.CallbackModule._urbackup_download_reasons
-    assert "DNS" in f("urlopen error [Errno -3] Temporary failure in name resolution")[0]
-    assert "TLS" in f("CERTIFICATE_VERIFY_FAILED")[0]
-    assert "HTTP 404" in f("HTTP Error 404")[0]
-    assert "время" in f("Read timed out")[0]
-    secret = "token=b8f9fff-secret-value"
-    assert secret not in " ".join(f(secret))
+def test_mount_propagation_requires_verified_state():
+    mount = module("nas-urbackup-client-mount.py", "nas_mount_policy_again")
+    with tempfile.TemporaryDirectory() as td:
+        source = Path(td) / "staging"
+        source.mkdir()
+        with patch.object(mount, "STAGING", source), patch.object(
+            mount.os.path, "ismount", return_value=False
+        ), patch.object(mount, "run", return_value=""):
+            refuses(mount.check, mount.MountError)
+
+    assert "uroni/urbackup-client:2.5.31" == load_nas_backup_policy(
+        ROOT
+    )["local_client"]["image"]
 
 
 def main() -> int:
@@ -288,8 +308,8 @@ def main() -> int:
     test_scripts_have_no_destructive_fallback()
     test_plain_state_archive_verification()
     test_docker_and_deploy_contract()
-    test_client_installer_sources_and_silent_arguments()
-    test_safe_download_diagnostics()
+    test_permanent_docker_client_contract()
+    test_mount_propagation_requires_verified_state()
     print("[ОК] NAS UrBackup: политика, GUID, безопасность и новые задания")
     return 0
 
