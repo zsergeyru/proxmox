@@ -240,6 +240,13 @@ def test_permanent_docker_client_contract():
     assert "nas-urbackup-lan" in server_compose
     assert "nas-urbackup-lan" in client_compose
     assert "external: true" in client_compose
+    assert 'command: ["--config", "/etc/default/urbackupclient"]' in client_compose
+    assert "source: /etc/nas-apps/urbackup/client-defaults" in client_compose
+    client_defaults = (
+        folder / "templates/nas-urbackup-client.defaults.j2"
+    ).read_text()
+    assert "INTERNET_ONLY=false" in client_defaults
+    assert "RESTORE=disabled" in client_defaults
     assert "name: nas-urbackup-client" in client_compose
     assert "uroni/urbackup-client" not in server_compose
     assert 'entrypoint: ["/usr/local/sbin/urbackupclientbackend"]' in client_compose
