@@ -157,12 +157,14 @@ def read_storage_plan(host: PhysicalHost, session: PhysicalHostSshSession) -> St
 
 
 def _check_result(host: PhysicalHost, plan: StoragePlan,
-                  response: object) -> PhysicalHost:
-    """Принимать только подтверждённые номера и полное описание новых томов."""
+                  response: object, *,
+                  expected_fingerprint: str | None = None) -> PhysicalHost:
+    """Проверить результат по исходному подтверждению, а не новому плану preserve."""
 
     if not isinstance(response, dict):
         raise InfraManagerError("NAS не вернул идентификаторы подготовленных HDD")
-    if response.get("fingerprint") != plan.fingerprint:
+    fingerprint = plan.fingerprint if expected_fingerprint is None else expected_fingerprint
+    if response.get("fingerprint") != fingerprint:
         raise InfraManagerError("NAS вернул другой контрольный отпечаток подготовки")
     serials = response.get("serials")
     volumes = response.get("volumes")
@@ -275,7 +277,9 @@ def prepare_blank_disks(repo_root: Path, host: PhysicalHost,
         record = json.loads(outputs[0])
     except json.JSONDecodeError as exc:
         raise InfraManagerError("Некорректный отчёт о созданных томах") from exc
-    finished = _check_result(host, plan, record)
+    # В режиме recover NAS возвращает исходный отпечаток из сохранённого
+    # журнала создания, а текущий plan.fingerprint уже отражает preserve.
+    finished = _check_result(host, plan, record, expected_fingerprint=confirmed)
     # Независимая проверка и регистрация каждого тома уже после установки.
     system = read_nas_system(session)
     verify_nas_volumes(finished, system, session)
