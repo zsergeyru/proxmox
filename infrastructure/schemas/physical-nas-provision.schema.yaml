@@ -34,6 +34,31 @@ properties:
     additionalProperties:
       $ref: '#/$defs/service'
     required: [openmediavault]
+    properties:
+      openmediavault:
+        allOf:
+          - $ref: '#/$defs/service'
+          - type: object
+            required: [address]
+            properties:
+              component: {const: base}
+              address: {const: auto_omv}
+      qbittorrent:
+        allOf:
+          - $ref: '#/$defs/service'
+          - type: object
+            required: [url, image]
+            properties:
+              component: {const: apps}
+              url: {const: 'http://{address}:8080/'}
+      urbackup:
+        allOf:
+          - $ref: '#/$defs/service'
+          - type: object
+            required: [url]
+            properties:
+              component: {const: urbackup_server}
+              url: {const: 'http://127.0.0.1:55414/'}
   shares:
     type: array
     minItems: 1
