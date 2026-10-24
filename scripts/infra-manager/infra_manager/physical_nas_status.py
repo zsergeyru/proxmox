@@ -68,6 +68,8 @@ def verify_nas_services(
         "smbd.service",
         "nas-qbittorrent.service",
         "nas-urbackup.service",
+        "urbackupclientbackend.service",
+        "nas-urbackup-local.timer",
     ):
         result = run(
             session.command("systemctl is-active " + name),
@@ -101,6 +103,14 @@ def verify_nas_services(
     if safety.returncode:
         raise InfraManagerError("UrBackup: диски или настройка администратора не подтверждены")
     console.ok("UrBackup: GUID резервного ZFS и доступ подтверждены")
+    recent = run(
+        session.command("systemctl show -p Result --value nas-urbackup-local.service"),
+        check=False, capture_output=True,
+    )
+    if recent.returncode or recent.stdout.strip() != "success":
+        console.warning("Локальное файловое резервирование NAS ещё не подтверждено")
+    else:
+        console.ok("Последнее локальное задание NAS: systemd сообщает успех")
     console.warning("История резервных копий UrBackup и пробное восстановление "
                     "не подтверждаются одним только запуском сервера")
 
