@@ -7,7 +7,7 @@
       - nas_provision.host == 'nas'
       - nas_provision.deployment.phases == ['base', 'services']
       - nas_provision.deployment.components == ['urbackup_server', 'urbackup_client', 'apps', 'smb']
-      - nas_provision.services.qbittorrent.image is match('^lscr.io/linuxserver/qbittorrent:[A-Za-z0-9_.-]+$')
+      - "'apps' not in nas_provision.deployment.components or ((nas_provision.services.get('qbittorrent', {}).get('image', '')) is match('^lscr[.]io/linuxserver/qbittorrent:[A-Za-z0-9_.-]+$'))"
     fail_msg: Некорректный или неподдерживаемый декларативный план NAS
 
 - name: Применить базовые пакеты и зависимости NAS

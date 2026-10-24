@@ -1,9 +1,0 @@
-[Unit]
-Description=Daily consistent NAS backup to UrBackup
-[Timer]
-OnCalendar=*-*-* {{ nas_urbackup_schedule }}:00
-Persistent=true
-RandomizedDelaySec=0
-Unit=nas-urbackup-local.service
-[Install]
-WantedBy=timers.target

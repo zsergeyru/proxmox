@@ -7,50 +7,49 @@ from __future__ import annotations
 
 import json
 import os
-import re
 from pathlib import Path
 
 import yaml
+from jsonschema import Draft202012Validator
 
 from .common import InfraManagerError, console, run
 from .physical_host_ssh import PhysicalHostSshSession
 
 
 def load_nas_provision(repo_root: Path) -> dict:
-    path = repo_root / "infrastructure" / "hosts" / "nas" / "provision.yaml"
+    """Validate intent; only allow role task files known in the repository."""
+    folder = repo_root / "infrastructure"
+    path = folder / "hosts" / "nas" / "provision.yaml"
+    schema_path = folder / "schemas" / "physical-nas-provision.schema.yaml"
     try:
         raw = yaml.safe_load(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, yaml.YAMLError) as exc:
-        raise InfraManagerError("Не удалось прочитать декларативное описание NAS") from exc
-    if not isinstance(raw, dict) or set(raw) != {
-        "schema_version", "host", "system", "deployment", "services"
-    }:
-        raise InfraManagerError("Неподдерживаемый формат provision.yaml физического NAS")
-    if raw["schema_version"] != 1 or raw["host"] != "nas":
-        raise InfraManagerError("Не совпадает физический сервер provision.yaml")
-    plan = raw.get("deployment")
-    if not isinstance(plan, dict) or set(plan) != {"phases", "components"}:
-        raise InfraManagerError("Не определены безопасные этапы NAS")
-    if plan["phases"] != ["base", "services"] or plan["components"] != [
-        "urbackup_server", "urbackup_client", "apps", "smb"
-    ]:
-        raise InfraManagerError("Неизвестные компоненты или порядок развёртывания NAS")
-    services = raw.get("services")
-    if not isinstance(services, dict) or set(services) != {
-        "openmediavault", "qbittorrent", "urbackup"
-    }:
-        raise InfraManagerError("Неизвестный список сервисов в provision.yaml NAS")
-    qbit = services["qbittorrent"]
-    if not isinstance(qbit, dict) or not re.fullmatch(
-        r"lscr\.io/linuxserver/qbittorrent:[A-Za-z0-9_.-]+",
-        str(qbit.get("image", "")),
+        schema = yaml.safe_load(schema_path.read_text(encoding="utf-8"))
+        Draft202012Validator.check_schema(schema)
+    except (OSError, UnicodeError, yaml.YAMLError, ValueError) as exc:
+        raise InfraManagerError("Не удалось прочитать декларативную схему NAS") from exc
+    errors = list(Draft202012Validator(schema).iter_errors(raw))
+    if errors:
+        raise InfraManagerError(
+            "Ошибка provision.yaml NAS: "
+            + ".".join(str(v) for v in errors[0].absolute_path)
+            + " (значение не соответствует схеме)"
+        )
+    components = raw["deployment"]["components"]
+    order = set(components)
+    if "urbackup_client" in order and (
+        "urbackup_server" not in order
+        or components.index("urbackup_server") > components.index("urbackup_client")
     ):
-        raise InfraManagerError("Некорректный образ qBittorrent")
-    if qbit.get("url") != "http://{address}:8080/":
-        raise InfraManagerError("Адрес qBittorrent не соответствует опубликованному порту")
-    urbackup = services["urbackup"]
-    if not isinstance(urbackup, dict) or urbackup.get("url") != "http://127.0.0.1:55414/":
-        raise InfraManagerError("Описание UrBackup не соответствует защищённому bind localhost")
+        raise InfraManagerError("UrBackup Client требует ранее объявленный Server")
+    services = raw["services"]
+    if ("apps" in order and (
+        "qbittorrent" not in services or not services["qbittorrent"].get("image")
+    )) or ("urbackup_server" in order and "urbackup" not in services):
+        raise InfraManagerError("Для выбранного компонента NAS отсутствует описание приложения")
+    names = [item["name"] for item in raw["shares"]]
+    targets = [(item["volume"], item["directory"]) for item in raw["shares"]]
+    if len(names) != len(set(names)) or len(targets) != len(set(targets)):
+        raise InfraManagerError("Общие папки NAS дублируют имя или физический путь")
     return raw
 
 

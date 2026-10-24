@@ -1,9 +1,0 @@
-# Local-only UrBackup Client backend inside dedicated Docker network.
-# Upstream image defaults to INTERNET_ONLY=true; LAN discovery needs false.
-LOGFILE="/var/log/urbackupclient.log"
-LOGLEVEL=warn
-LOG_ROTATE_FILESIZE=20971520
-LOG_ROTATE_NUM=10
-DAEMON_TMPDIR="/tmp"
-RESTORE=disabled
-INTERNET_ONLY=false

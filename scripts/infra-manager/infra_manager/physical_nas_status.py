@@ -8,6 +8,9 @@ from __future__ import annotations
 
 import json
 import shlex
+
+import yaml
+from jsonschema import Draft202012Validator
 from pathlib import Path
 from typing import Iterable
 
@@ -16,7 +19,32 @@ from .physical_nas_volumes import VerifiedVolume
 from .common import InfraManagerError, console, run
 from .physical_host_ssh import PhysicalHostSshSession
 from .guest_status import load_declared_checks, _run_declared_check, _service_fields
+from .physical_nas_ansible import load_nas_provision
 from .guest_deploy import project_branch_for_checkout, project_revision as current_project_revision
+
+
+def load_nas_status(repo_root: Path, host_name: str,
+                    provision: dict) -> tuple[dict, ...]:
+    """Validate physical checks, then use the guest's common executor."""
+    location = repo_root / "infrastructure" / "hosts" / host_name / "status.yaml"
+    schema_path = repo_root / "infrastructure/schemas/physical-nas-status.schema.yaml"
+    try:
+        raw = yaml.safe_load(location.read_text(encoding="utf-8"))
+        schema = yaml.safe_load(schema_path.read_text(encoding="utf-8"))
+        Draft202012Validator.check_schema(schema)
+    except (OSError, UnicodeError, yaml.YAMLError, ValueError) as exc:
+        raise InfraManagerError("Не удалось прочитать схему состояния NAS") from exc
+    errors = list(Draft202012Validator(schema).iter_errors(raw))
+    if errors:
+        raise InfraManagerError(
+            "Небезопасное или некорректное объявление проверки NAS: "
+            + ".".join(str(x) for x in errors[0].absolute_path)
+        )
+    checks = load_declared_checks(
+        location, identity_field="host", identity_value=host_name,
+    )
+    active = set(provision["deployment"]["components"]) | {"base"}
+    return tuple(c for c in checks if c["component"] in active)
 
 
 def verify_nas_services(
@@ -71,10 +99,7 @@ def verify_nas_services(
             console.ok(f"Том {volume.role}: занято {percentage}%")
 
 
-    path = repo_root / "infrastructure" / "hosts" / host_name / "status.yaml"
-    checks = load_declared_checks(
-        path, identity_field="host", identity_value=host_name,
-    )
+    checks = load_nas_status(repo_root, host_name, load_nas_provision(repo_root))
 
     def execute(_node: str, _address: str, argv: list[str], *,
                 capture_output: bool = True):
@@ -146,14 +171,16 @@ def show_nas_status(
     print(separator)
     print("\nСистема")
     print(f"  {'Тип:':<12}Физический сервер")
-    print(f"  {'ОС:':<12}Debian 13 / OpenMediaVault 8")
+    print(f"  {'ОС:':<12}{provision['system']['distribution']} {provision['system']['version']} / OpenMediaVault {provision['system']['application_version']}")
     print(f"  {'Адрес:':<12}{address}")
 
     print("\nПроект")
     print(f"  {'Ветка:':<12}{project_branch_for_checkout(repo_root)}")
     print(f"  {'Версия:':<12}{project_revision or current_project_revision(repo_root)}")
-    for name in ("openmediavault", "qbittorrent", "urbackup"):
-        spec = services[name]
+    enabled = set(provision["deployment"]["components"]) | {"base"}
+    for name, spec in services.items():
+        if spec["component"] not in enabled:
+            continue
         url = (
             _omv_url(session, address)
             if spec.get("address") == "auto_omv"

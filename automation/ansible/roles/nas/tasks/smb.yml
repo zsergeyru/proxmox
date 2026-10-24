@@ -19,18 +19,14 @@
     argv: [findmnt, --mountpoint, "{{ nas_data_mountpoint }}", --types, zfs]
   changed_when: false
 
-- name: Создать общие каталоги без удаления существующих файлов
+- name: Создать объявленные общие каталоги без удаления файлов
   ansible.builtin.file:
-    path: "{{ item.root }}/{{ item.directory }}"
+    path: "{{ (nas_shared_mount if item.volume == 'shared' else nas_data_mountpoint) ~ '/' ~ item.directory }}"
     state: directory
     owner: root
     group: users
     mode: "0770"
-  loop:
-    - {root: "{{ nas_shared_mount }}", directory: shared}
-    - {root: "{{ nas_shared_mount }}", directory: movies}
-    - {root: "{{ nas_shared_mount }}", directory: music}
-    - {root: "{{ nas_data_mountpoint }}", directory: data}
+  loop: "{{ nas_provision.shares }}"
 
 - name: Установить штатный обработчик базы OMV
   ansible.builtin.copy:
@@ -44,6 +40,8 @@
   ansible.builtin.command:
     argv:
       - /usr/local/sbin/nas-omv-shares
+      - --shares-json
+      - "{{ nas_provision.shares | to_json }}"
       - --shared-ref
       - "{{ nas_shared_ref }}"
       - --data-ref

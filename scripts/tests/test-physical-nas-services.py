@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import yaml
 import sys
 import tempfile
 from pathlib import Path
@@ -28,6 +29,9 @@ def module(file: str, alias: str):
 
 
 shares = module("nas-omv-shares.py", "nas_omv_shares_test")
+DECLARED_SHARES = yaml.safe_load(
+    (ROOT / "infrastructure/hosts/nas/provision.yaml").read_text()
+)["shares"]
 backup = module("nas-zfs-backup.py", "nas_zfs_backup_test")
 
 
@@ -44,7 +48,11 @@ def refusal(callback, error_type: type[Exception]) -> None:
 def test_shares() -> None:
     """Не выдавать гостевой доступ и не переиспользовать чужую папку."""
 
-    folders, smb = shares.plan_shares("shared-ref", "data-ref", [], [])
+    assert len(shares.validated_folders(DECLARED_SHARES)) == 4
+    refusal(lambda: shares.validated_folders([{"name": "../etc", "volume": "data", "directory": "etc"}]), shares.ShareError)
+    refusal(lambda: shares.validated_folders([{"name": "x", "volume": "unknown", "directory": "x"}]), shares.ShareError)
+    refusal(lambda: shares.validated_folders([{"name": "x", "volume": "data", "directory": "x"}] * 2), shares.ShareError)
+    folders, smb = shares.plan_shares("shared-ref", "data-ref", [], [], shares.validated_folders(DECLARED_SHARES))
     assert len(folders) == 4 and len(smb) == 4
     assert {folder["name"] for folder in folders} == {
         "shared", "movies", "music", "data"
@@ -58,7 +66,7 @@ def test_shares() -> None:
         "reldirpath": "shared/",
     }]
     refusal(
-        lambda: shares.plan_shares("shared-ref", "data-ref", existing, []),
+        lambda: shares.plan_shares("shared-ref", "data-ref", existing, [], shares.validated_folders(DECLARED_SHARES)),
         shares.ShareError,
     )
     correct = [{
@@ -71,7 +79,7 @@ def test_shares() -> None:
         "uuid": "smb-uuid", "sharedfolderref": "existing-uuid", "guest": "allow"
     }]
     refusal(
-        lambda: shares.plan_shares("shared-ref", "data-ref", correct, guests),
+        lambda: shares.plan_shares("shared-ref", "data-ref", correct, guests, shares.validated_folders(DECLARED_SHARES)),
         shares.ShareError,
     )
 
@@ -131,7 +139,7 @@ def test_omv_shared_folders_use_real_database_uuids() -> None:
         patch.object(shares.Path, "is_dir", return_value=True),
         patch.object(shares.Path, "is_symlink", return_value=False),
     ):
-        shares.apply("shared-ref", "data-ref", "/mnt/shared", "/mnt/data")
+        shares.apply("shared-ref", "data-ref", "/mnt/shared", "/mnt/data", DECLARED_SHARES)
         assert len(folders) == 4 and len(resources) == 4
         assert len(salt_deploys) == 1
         assert settings["enable"] is True
@@ -142,17 +150,17 @@ def test_omv_shared_folders_use_real_database_uuids() -> None:
             entry["uuid"] for entry in folders
         }
         writes = len(updates)
-        shares.apply("shared-ref", "data-ref", "/mnt/shared", "/mnt/data")
+        shares.apply("shared-ref", "data-ref", "/mnt/shared", "/mnt/data", DECLARED_SHARES)
         assert len(updates) == writes
         assert len(salt_deploys) == 1
         # Частично записанное состояние при повторе не создаёт чужие записи.
         resources.pop()
-        shares.apply("shared-ref", "data-ref", "/mnt/shared", "/mnt/data")
+        shares.apply("shared-ref", "data-ref", "/mnt/shared", "/mnt/data", DECLARED_SHARES)
         assert len(resources) == 4
         assert len(salt_deploys) == 2
         # Включение Samba не стирает уже зарегистрированные SMB-ресурсы.
         settings["enable"] = False
-        shares.apply("shared-ref", "data-ref", "/mnt/shared", "/mnt/data")
+        shares.apply("shared-ref", "data-ref", "/mnt/shared", "/mnt/data", DECLARED_SHARES)
         assert len(resources) == 4
         assert len(salt_deploys) == 3
 

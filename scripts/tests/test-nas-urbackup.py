@@ -140,7 +140,7 @@ def test_live_guard_is_read_only():
 def test_scripts_have_no_destructive_fallback():
     for file in ("nas-urbackup-safe.py", "nas-urbackup-snapshot.py",
                  "nas-urbackup-recovery.py"):
-        text = (ROOT / "automation/ansible/files" / file).read_text(encoding="utf-8")
+        text = (ROOT / "automation/ansible/roles/nas/files" / file).read_text(encoding="utf-8")
         for unsafe in ("mkfs", "wipefs", "zpool create", "zpool destroy", "zfs rollback",
                        "docker volume prune"):
             assert unsafe not in text, (file, unsafe)
@@ -287,8 +287,12 @@ def test_permanent_docker_client_contract():
     ).read_text()
     status = yaml.safe_load((ROOT / "infrastructure/hosts/nas/status.yaml").read_text())
     assert status["host"] == "nas"
-    assert {"type": "docker", "container": "nas-urbackup-client",
-            "message": "UrBackup Client: контейнер запущен"} in status["checks"]
+    assert any(
+        item.get("type") == "docker"
+        and item.get("component") == "urbackup_client"
+        and item.get("container") == "nas-urbackup-client"
+        for item in status["checks"]
+    )
     assert any(x.get("unit") == "nas-urbackup-client.service"
                for x in status["checks"])
     physical_status = (ROOT / "scripts/infra-manager/infra_manager/physical_nas_status.py").read_text()

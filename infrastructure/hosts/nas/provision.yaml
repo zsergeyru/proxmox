@@ -14,6 +14,7 @@ deployment:
   components: [urbackup_server, urbackup_client, apps, smb]
 services:
   openmediavault:
+    component: base
     title: OpenMediaVault
     # OMV was installed manually; detect its actual published URL instead
     # of assuming a working HTTP/HTTPS port or resetting its password.
@@ -21,12 +22,14 @@ services:
     operator:
       username: admin
   qbittorrent:
+    component: apps
     title: qBittorrent
     image: lscr.io/linuxserver/qbittorrent:5.2.4_v2.0.15-ls479
     url: "http://{address}:8080/"
     operator:
       username: admin
   urbackup:
+    component: urbackup_server
     title: UrBackup Server
     # Admin port is intentionally bound to NAS loopback only.
     url: "http://127.0.0.1:55414/"
@@ -36,3 +39,11 @@ services:
       password:
         source: host_file
         path: /etc/nas-apps/urbackup/admin-password
+
+# OMV shared folders are reconciled against this description, not a Python list.
+# Their physical identities and mount points are still verified using storage.yaml.
+shares:
+  - {name: shared, volume: shared, directory: shared}
+  - {name: movies, volume: shared, directory: movies}
+  - {name: music, volume: shared, directory: music}
+  - {name: data, volume: data, directory: data}
