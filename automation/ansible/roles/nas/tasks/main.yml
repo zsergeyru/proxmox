@@ -6,9 +6,18 @@
       - nas_provision.schema_version == 1
       - nas_provision.host == 'nas'
       - nas_provision.deployment.phases == ['base', 'services']
-      - nas_provision.deployment.components == ['urbackup_server', 'urbackup_client', 'apps', 'smb']
+      - nas_provision.deployment.components | difference(['urbackup_server', 'urbackup_client', 'apps', 'smb']) | length == 0
+      - nas_provision.deployment.components | unique | length == nas_provision.deployment.components | length
+      - nas_provision.deployment.dependencies.urbackup_client == ['urbackup_server']
       - "'apps' not in nas_provision.deployment.components or ((nas_provision.services.get('qbittorrent', {}).get('image', '')) is match('^lscr[.]io/linuxserver/qbittorrent:[A-Za-z0-9_.-]+$'))"
     fail_msg: Некорректный или неподдерживаемый декларативный план NAS
+
+- name: Проверить порядок объявленных зависимостей
+  ansible.builtin.assert:
+    that:
+      - "item.0.key not in nas_provision.deployment.components or (item.1 in nas_provision.deployment.components and nas_provision.deployment.components.index(item.1) < nas_provision.deployment.components.index(item.0.key))"
+    fail_msg: Компонент NAS включён раньше обязательной зависимости
+  loop: "{{ nas_provision.deployment.dependencies | dict2items | subelements('value') }}"
 
 - name: Применить базовые пакеты и зависимости NAS
   ansible.builtin.include_tasks: base.yml
