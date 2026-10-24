@@ -133,15 +133,58 @@ def backup() -> None:
         # Он не объявляется успешным и не удаляется слепо.
 
 
+
+def verify_encrypted_bundle() -> None:
+    """Проверка ciphertext/HMAC и пробное чтение без записи в рабочие данные."""
+    d = destination()
+    if not KEY.is_file() or KEY.is_symlink() or KEY.stat().st_mode & 0o077:
+        raise RecoveryError("Нет закрытого ключа восстановления")
+    key = KEY.read_text(encoding="utf-8").strip()
+    archives = sorted(d.glob("state-*.enc"), reverse=True)
+    if not archives:
+        raise RecoveryError("Нет зашифрованных комплектов состояния")
+    encrypted = archives[0]
+    reference = encrypted.with_suffix(".hmac")
+    if not reference.is_file() or reference.is_symlink():
+        raise RecoveryError("Отсутствует HMAC последнего комплекта")
+    mac = hmac.new(key.encode("utf-8"), digestmod=hashlib.sha256)
+    with encrypted.open("rb") as inp:
+        for block in iter(lambda: inp.read(1024 * 1024), b""):
+            mac.update(block)
+    expected = reference.read_text(encoding="ascii").strip()
+    if not hmac.compare_digest(mac.hexdigest(), expected):
+        raise RecoveryError("HMAC не совпадает: комплект повреждён или подменён")
+    env = os.environ.copy()
+    env["NAS_URBACKUP_RECOVERY_KEY"] = key
+    decrypt = subprocess.Popen(
+        ["openssl", "enc", "-d", "-aes-256-cbc", "-pbkdf2", "-iter", "300000",
+         "-pass", "env:NAS_URBACKUP_RECOVERY_KEY", "-in", str(encrypted)],
+        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=env
+    )
+    assert decrypt.stdout is not None
+    listing = subprocess.run(["tar", "-tf", "-"], stdin=decrypt.stdout,
+                             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                             timeout=180, text=True, check=False)
+    decrypt.stdout.close()
+    decipher_rc = decrypt.wait(timeout=180)
+    if listing.returncode or decipher_rc:
+        raise RecoveryError("Нельзя расшифровать и прочитать комплект")
+    if "var/lib/nas-apps/urbackup/server/" not in listing.stdout:
+        raise RecoveryError("В комплекте отсутствует база сервера")
+    print("Последний комплект UrBackup: HMAC, расшифровка и структура проверены")
+
+
 def main() -> int:
     try:
         if len(sys.argv) != 2:
-            raise RecoveryError("Ожидается команда key или backup")
+            raise RecoveryError("Ожидается команда key, backup или verify")
         if sys.argv[1] == "key":
             ensure_key()
             print("Ключ состояния создан или подтверждён; нужен независимый экспорт")
         elif sys.argv[1] == "backup":
             backup()
+        elif sys.argv[1] == "verify":
+            verify_encrypted_bundle()
         else:
             raise RecoveryError("Неизвестное действие")
         return 0
