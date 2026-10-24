@@ -12,7 +12,7 @@ properties:
     required: [source, path]
     properties:
       source: {const: controller_file}
-      path: {const: /mnt/persistent-state/physical-hosts/nas-smb-password}
+      path: {const: /var/lib/infra-manager/physical-hosts/nas-smb-password}
   shares:
     type: object
     additionalProperties: false
