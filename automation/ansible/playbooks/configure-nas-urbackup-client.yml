@@ -1,9 +1,0 @@
----
-# Compatibility entrypoint; deploy nas uses deploy-nas.yml and the nas role.
-- name: Настроить постоянный Docker-клиент UrBackup без установки в Debian
-  hosts: nas
-  gather_facts: false
-  become: false
-  roles:
-    - role: nas
-      tasks_from: urbackup_client
