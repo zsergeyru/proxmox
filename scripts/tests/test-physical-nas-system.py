@@ -81,7 +81,7 @@ def test_nas_apt_diagnostic_guard() -> None:
 
     path = ROOT / "automation/ansible/roles/nas/tasks/base.yml"
     document = yaml.safe_load(path.read_text(encoding="utf-8"))
-    assert isinstance(document, list) and len(document) == 1
+    assert isinstance(document, list) and len(document) > 10
     tasks = document
     package_step = next(item for item in tasks if item.get("name") ==
         "Установить средства диагностики, не изменяя разметку")
