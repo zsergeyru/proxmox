@@ -272,12 +272,29 @@ def test_qbittorrent_deploy_prepares_image_safely() -> None:
     assert "ConditionPathIsMountPoint=" in unit
 
 
+def test_samba_service_automation() -> None:
+    """Samba запускается штатной OMV конфигурацией, без правки smb.conf."""
+
+    file = ROOT / "automation/ansible/playbooks/configure-nas-smb.yml"
+    content = file.read_text(encoding="utf-8")
+    assert content.index("Зарегистрировать папки и ресурсы через базу OMV") < (
+        content.index("Включить автозапуск и запустить Samba")
+    )
+    assert "state: started" in content
+    assert "enabled: true" in content
+    assert "samba-tool, testparm, --suppress-prompt" in content
+    assert "Прочитать журнал отказа Samba" in content
+    assert "Прервать настройку при ошибке службы Samba" in content
+    assert "/etc/samba/smb.conf" not in content
+
+
 def main() -> int:
     """Проверить работу без реальных файлов пользователей."""
 
     test_shares()
     test_omv_shared_folders_use_real_database_uuids()
     test_omv_cli_failure_never_exposes_stderr()
+    test_samba_service_automation()
     test_backup_identifiers()
     test_no_forced_rollback()
     test_qbittorrent_failure_diagnostics()
