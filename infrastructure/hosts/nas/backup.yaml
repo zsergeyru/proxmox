@@ -1,0 +1,28 @@
+# Требуемое резервирование физического NAS; это не описание реальных дисков.
+# Физическая идентичность и точки монтирования — только storage.yaml.
+schema_version: 1
+host: nas
+engine: urbackup
+server:
+  image: uroni/urbackup-server:2.5.x
+  name: nas-urbackup
+  admin_user: admin
+  timezone: Europe/Moscow
+  web_bind: "127.0.0.1"
+  web_port: 55414
+  data_subdir: urbackup/backups
+  recovery_subdir: urbackup/recovery
+local_client:
+  enabled: true
+  name: nas-local
+  source_volume: data
+  target_volume: backup
+  schedule: "03:30"
+  exclude_volumes: [shared, backup]
+retention:
+  keep_daily: 7
+  keep_weekly: 4
+  max_parallel_jobs: 1
+migration:
+  # Старые копии не удаляются из deploy независимо от их наличия.
+  preserve_legacy: true
