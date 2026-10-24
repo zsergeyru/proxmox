@@ -1,7 +1,7 @@
 [Unit]
 Description=Consistent NAS ZFS snapshot to local UrBackup Server
-Requires=nas-urbackup.service
-After=nas-urbackup.service
+Requires=nas-urbackup.service nas-urbackup-client.service
+After=nas-urbackup.service nas-urbackup-client.service
 RequiresMountsFor={{ nas_data_mountpoint }} {{ nas_backup_mountpoint }}
 
 [Service]
